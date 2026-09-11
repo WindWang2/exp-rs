@@ -15,7 +15,16 @@ qt_add_library(sicnu_experiment STATIC
   run_bridge.cpp
   run_recorder.h
   run_bridge.h
+  evidence.cpp
+  evidence.h
+  experiment_matrix.cpp
+  experiment_matrix.h
+  metric_path.h
+  promotion.cpp
+  promotion.h
   replay_readiness.cpp
+  replay_deviation.cpp
+  replay_deviation.h
   replay_readiness.h
   comparison_ext.cpp
   comparison_ext.h

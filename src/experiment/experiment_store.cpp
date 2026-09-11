@@ -173,6 +173,19 @@ bool ExperimentStore::open( const QString &dbPath, QString *errorOut )
              "PRIMARY KEY(from_kind, from_id, edge_kind, to_kind, to_id))",
              errorOut ) ||
          !m_impl->exec(
+             "CREATE TABLE IF NOT EXISTS model_promotions("
+             "promotion_id TEXT PRIMARY KEY, run_id TEXT NOT NULL,"
+             "model_id TEXT NOT NULL DEFAULT '', model_digest TEXT NOT NULL DEFAULT '',"
+             "dataset_version_id TEXT NOT NULL DEFAULT '', verdict TEXT NOT NULL,"
+             "decision TEXT NOT NULL DEFAULT 'pending', decided_by TEXT NOT NULL DEFAULT '',"
+             "decided_at_ms INTEGER NOT NULL DEFAULT 0,"
+             "created_ms INTEGER NOT NULL, json TEXT NOT NULL)",
+             errorOut ) ||
+         !m_impl->exec(
+             "CREATE INDEX IF NOT EXISTS idx_promotions_model"
+             " ON model_promotions(model_id, created_ms)",
+             errorOut ) ||
+         !m_impl->exec(
              "CREATE INDEX IF NOT EXISTS idx_exp_lineage_from"
              " ON experiment_lineage(from_kind, from_id)",
              errorOut ) ||
@@ -899,6 +912,109 @@ QVector<ExperimentStore::LineageEdge> ExperimentStore::incomingEdges( const QStr
                                  "SELECT from_kind, from_id, edge_kind, to_kind, to_id"
                                  " FROM experiment_lineage WHERE to_kind=? AND to_id=? LIMIT ?" ),
                              kind, id, qBound<qint64>( qint64( 1 ), limit, qint64( 10000 ) ) );
+}
+
+sicnu::data::Result<void> ExperimentStore::savePromotionRecord( const PromotionRecord &record )
+{
+    using ResultT = sicnu::data::Result<void>;
+    if ( !m_impl )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
+                                           QStringLiteral( "store is not open" ) ) );
+    QMutexLocker lock( &m_impl->mutex );
+    if ( isReadOnly() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_read_only" ),
+                                            QStringLiteral( "store is read-only" ) ) );
+    if ( record.promotionId.isEmpty() || record.runId.isEmpty() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.promotion_invalid" ),
+                                            QStringLiteral( "promotion record requires promotion_id + run_id" ) ) );
+
+    // Conflict rule: same promotion id with DIFFERENT evidence is a refusal —
+    // silently rewriting promotion evidence would corrupt the approval trail.
+    {
+        Stmt existing( m_impl->db, QStringLiteral(
+            "SELECT json FROM model_promotions WHERE promotion_id=?" ) );
+        if ( existing )
+        {
+            existing.bind( 1, record.promotionId );
+            if ( existing.stepRow() )
+            {
+                const auto parsed = PromotionRecord::fromJson(
+                    QJsonDocument::fromJson( existing.text( 0 ).toUtf8() ).object() );
+                if ( !parsed || !( parsed.value() == record ) )
+                    return ResultT::failure( storeDiag(
+                        QStringLiteral( "experiment.promotion_conflict" ),
+                        QStringLiteral( "promotion %1 already exists with different content" )
+                            .arg( record.promotionId ) ) );
+            }
+        }
+    }
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    Stmt insert( m_impl->db, QStringLiteral(
+        "INSERT OR REPLACE INTO model_promotions(promotion_id, run_id, model_id,"
+        " model_digest, dataset_version_id, verdict, decision, decided_by,"
+        " decided_at_ms, created_ms, json) VALUES(?,?,?,?,?,?,?,?,?,?,?)" ) );
+    if ( !insert )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                            insert.error( m_impl->db ) ) );
+    insert.bind( 1, record.promotionId );
+    insert.bind( 2, record.runId );
+    insert.bind( 3, record.modelId );
+    insert.bind( 4, record.modelDigest );
+    insert.bind( 5, record.datasetVersionId );
+    insert.bind( 6, record.verdict );
+    insert.bind( 7, record.decision );
+    insert.bind( 8, record.decidedBy );
+    insert.bind( 9, record.decidedAtUtc.isValid() ? record.decidedAtUtc.toMSecsSinceEpoch() : 0 );
+    insert.bind( 10, record.createdAtUtc.isValid() ? record.createdAtUtc.toMSecsSinceEpoch() : nowMs );
+    insert.bind( 11, QString::fromUtf8( QJsonDocument( record.toJson() ).toJson() ) );
+    if ( !insert.step() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            insert.error( m_impl->db ) ) );
+    return ResultT::success();
+}
+
+std::optional<PromotionRecord> ExperimentStore::promotionById( const QString &promotionId ) const
+{
+    if ( !m_impl )
+        return std::nullopt;
+    QMutexLocker lock( &m_impl->mutex );
+    Stmt stmt( m_impl->db, QStringLiteral(
+        "SELECT json FROM model_promotions WHERE promotion_id=?" ) );
+    if ( !stmt )
+        return std::nullopt;
+    stmt.bind( 1, promotionId );
+    if ( !stmt.stepRow() )
+        return std::nullopt;
+    const auto parsed = PromotionRecord::fromJson(
+        QJsonDocument::fromJson( stmt.text( 0 ).toUtf8() ).object() );
+    if ( !parsed )
+        return std::nullopt;
+    return parsed.value();
+}
+
+QVector<PromotionRecord> ExperimentStore::promotionsForModel( const QString &modelId,
+                                                              qint64 limit ) const
+{
+    QVector<PromotionRecord> records;
+    if ( !m_impl )
+        return records;
+    QMutexLocker lock( &m_impl->mutex );
+    Stmt stmt( m_impl->db, QStringLiteral(
+        "SELECT json FROM model_promotions WHERE model_id=?"
+        " ORDER BY created_ms, promotion_id LIMIT ?" ) );
+    if ( !stmt )
+        return records;
+    stmt.bind( 1, modelId );
+    stmt.bind( 2, qBound<qint64>( qint64( 1 ), limit, qint64( 10000 ) ) );
+    while ( stmt.stepRow() )
+    {
+        const auto record = PromotionRecord::fromJson(
+            QJsonDocument::fromJson( stmt.text( 0 ).toUtf8() ).object() );
+        if ( record.has_value() )
+            records.append( record.value() );
+    }
+    return records;
 }
 
 } // namespace sicnu::experiment

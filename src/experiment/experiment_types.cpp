@@ -3,6 +3,9 @@
 
 #include "../data/execution_fingerprint.h" // canonical JSON + SHA-256 reuse
 
+#include <algorithm>
+#include <cmath>
+
 #include <QCryptographicHash>
 #include <QDate>
 #include <QHashIterator>
@@ -569,6 +572,50 @@ RunComparison RunComparison::compare( const ExperimentRun &a, const ExperimentRu
          environmentDiffers ? QStringLiteral( "environment snapshot differs" )
                             : QStringLiteral( "identical" ) );
 
+    // M6 diagnostics: artifact identity (digest sets) and runtime (wall
+    // time). Artifacts differing under identical identity pins mean the
+    // outputs themselves must be diffed before numbers are trusted.
+    auto digestSet = []( const ExperimentRun &run ) {
+        QStringList digests;
+        for ( const ExperimentRun::Artifact &artifact : run.artifacts() )
+        {
+            if ( !artifact.digest.isEmpty() )
+                digests.append( artifact.digest );
+        }
+        std::sort( digests.begin(), digests.end() );
+        return digests;
+    };
+    const bool artifactsMissing = a.artifacts().isEmpty() || b.artifacts().isEmpty();
+    const bool artifactsDiffer = digestSet( a ) != digestSet( b );
+    QString artifactDetail = QStringLiteral( "identical" );
+    if ( artifactsMissing )
+        artifactDetail = QStringLiteral( "artifact evidence missing on one side" );
+    else if ( artifactsDiffer )
+        artifactDetail = QStringLiteral( "output digest sets differ" );
+    add( QStringLiteral( "artifacts" ), artifactsDiffer, artifactDetail );
+
+    const auto wallMs = []( const ExperimentRun &run ) {
+        if ( !run.startedAtUtc().isValid() || !run.finishedAtUtc().isValid() )
+            return qint64( -1 );
+        return run.startedAtUtc().msecsTo( run.finishedAtUtc() );
+    };
+    const qint64 aMs = wallMs( a );
+    const qint64 bMs = wallMs( b );
+    const bool runtimeMissing = aMs < 0 || bMs < 0;
+    // Wall time "differs" only beyond max(1s, 1% of the slower run) — small
+    // scheduler jitter is not a scientific difference.
+    const bool runtimeDiffers =
+        runtimeMissing ||
+        ( std::llabs( aMs - bMs ) > qMax<qint64>( 1000, qMax<qint64>( aMs, bMs ) / 100 ) );
+    QString runtimeDetail = QStringLiteral( "identical" );
+    if ( runtimeMissing )
+        runtimeDetail = QStringLiteral( "timing evidence missing on one side" );
+    else if ( runtimeDiffers )
+        runtimeDetail = QStringLiteral( "wall time differs beyond 1%: %1 ms vs %2 ms" )
+                            .arg( aMs )
+                            .arg( bMs );
+    add( QStringLiteral( "runtime" ), runtimeDiffers, runtimeDetail );
+
     if ( datasetDiffers || splitDiffers || modelDiffers )
         comparison.verdict = Verdict::NotComparable;
     else if ( algorithmDiffers || configDiffers || seedDiffers || environmentDiffers )
@@ -637,6 +684,59 @@ QJsonObject RunComparison::metricDiff( const ExperimentRun &a, const ExperimentR
         diff.insert( it.key(), entry );
     }
     return diff;
+}
+
+// --- Promotion evidence ------------------------------------------------------------
+
+QJsonObject PromotionRecord::toJson() const
+{
+    QJsonObject json;
+    json.insert( QStringLiteral( "promotion_id" ), promotionId );
+    json.insert( QStringLiteral( "run_id" ), runId );
+    json.insert( QStringLiteral( "model_id" ), modelId );
+    json.insert( QStringLiteral( "model_digest" ), modelDigest );
+    json.insert( QStringLiteral( "dataset_version_id" ), datasetVersionId );
+    json.insert( QStringLiteral( "verdict" ), verdict );
+    json.insert( QStringLiteral( "decision" ), decision );
+    json.insert( QStringLiteral( "decided_by" ), decidedBy );
+    if ( decidedAtUtc.isValid() )
+        json.insert( QStringLiteral( "decided_at_utc" ),
+                     decidedAtUtc.toString( Qt::ISODateWithMs ) );
+    if ( !criteriaJson.isEmpty() )
+    {
+        json.insert( QStringLiteral( "criteria" ),
+                     QJsonDocument::fromJson( criteriaJson.toUtf8() ).object() );
+    }
+    if ( createdAtUtc.isValid() )
+        json.insert( QStringLiteral( "created_at_utc" ),
+                     createdAtUtc.toString( Qt::ISODateWithMs ) );
+    return json;
+}
+
+Result<PromotionRecord> PromotionRecord::fromJson( const QJsonObject &json )
+{
+    PromotionRecord record;
+    record.promotionId = json.value( QStringLiteral( "promotion_id" ) ).toString();
+    record.runId = json.value( QStringLiteral( "run_id" ) ).toString();
+    record.modelId = json.value( QStringLiteral( "model_id" ) ).toString();
+    record.modelDigest = json.value( QStringLiteral( "model_digest" ) ).toString();
+    record.datasetVersionId = json.value( QStringLiteral( "dataset_version_id" ) ).toString();
+    record.verdict = json.value( QStringLiteral( "verdict" ) ).toString();
+    record.decision = json.value( QStringLiteral( "decision" ) ).toString( QStringLiteral( "pending" ) );
+    record.decidedBy = json.value( QStringLiteral( "decided_by" ) ).toString();
+    record.decidedAtUtc = QDateTime::fromString(
+        json.value( QStringLiteral( "decided_at_utc" ) ).toString(), Qt::ISODateWithMs );
+    const QJsonObject criteria = json.value( QStringLiteral( "criteria" ) ).toObject();
+    if ( !criteria.isEmpty() )
+        record.criteriaJson = QString::fromUtf8( QJsonDocument( criteria ).toJson() );
+    record.createdAtUtc = QDateTime::fromString(
+        json.value( QStringLiteral( "created_at_utc" ) ).toString(), Qt::ISODateWithMs );
+    if ( record.promotionId.isEmpty() || record.runId.isEmpty() )
+        return Result<PromotionRecord>::failure(
+            Diagnostic{ QStringLiteral( "experiment.promotion_invalid" ),
+                        QStringLiteral( "promotion record requires promotion_id + run_id" ),
+                        DiagnosticSeverity::Error } );
+    return Result<PromotionRecord>::success( record );
 }
 
 } // namespace sicnu::experiment

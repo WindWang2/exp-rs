@@ -87,6 +87,15 @@ class ExperimentStore
     /// Whole-table edge scan (graph assembly input; bounded by @p limit).
     QVector<LineageEdge> allLineageEdges( qint64 limit = 100000 ) const;
 
+    // --- model promotion evidence (M8; evidence only, no registry) -----------
+    /// Persists one promotion evidence record. Re-saving the same promotion
+    /// id with different content is a conflict (`experiment.promotion_conflict`).
+    sicnu::data::Result<void> savePromotionRecord( const PromotionRecord &record );
+    std::optional<PromotionRecord> promotionById( const QString &promotionId ) const;
+    /// Promotion evidence for one model catalog id (ascending creation order).
+    QVector<PromotionRecord> promotionsForModel( const QString &modelId,
+                                                 qint64 limit = 100 ) const;
+
   private:
     /// The real upsert path; `upsertRun()` wraps it with the unified-trace
     /// record (Verification Platform 8.0). No behavior change.

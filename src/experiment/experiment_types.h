@@ -301,4 +301,34 @@ struct RunComparison
     QJsonObject metricDiff( const ExperimentRun &a, const ExperimentRun &b ) const;
 };
 
+// --- Promotion evidence -----------------------------------------------------------
+//
+// Model-promotion evidence (goal M8): the experiment-result → model-candidate
+// seam. The platform owns NO model registry — this is citable evaluation
+// evidence keyed by the model catalog's existing ids; a catalog integrates by
+// READING these records through the store API, never by this store writing
+// into the catalog.
+
+struct PromotionRecord
+{
+    QString promotionId;
+    QString runId;             ///< the evidence run (must be Completed)
+    QString modelId;           ///< catalog id ("" = candidate has no catalog entry)
+    QString modelDigest;       ///< content digest the evidence was produced with
+    QString datasetVersionId;  ///< the dataset the evidence run evaluated
+    /// Evidence verdict from the evaluated criteria: "eligible"/"ineligible".
+    QString verdict;
+    /// Human/agent approval metadata: "pending"/"approved"/"rejected".
+    QString decision = QStringLiteral( "pending" );
+    QString decidedBy;
+    QDateTime decidedAtUtc;
+    QString criteriaJson;      ///< evaluated criteria + per-criterion results
+    QDateTime createdAtUtc;
+
+    QJsonObject toJson() const;
+    static Result<PromotionRecord> fromJson( const QJsonObject &json );
+
+    friend bool operator==( const PromotionRecord &, const PromotionRecord & ) = default;
+};
+
 } // namespace sicnu::experiment
