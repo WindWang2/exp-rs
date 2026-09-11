@@ -35,6 +35,7 @@ set(SICNU_GEOSPATIAL_SOURCES
     products/product_registry.cpp
     doctor/data_doctor.cpp
     multidim/multidim_view.cpp
+    multidim/multidim_cube.cpp
 )
 
 qt_add_library(sicnu_geospatial STATIC ${SICNU_GEOSPATIAL_SOURCES})
