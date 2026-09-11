@@ -9,6 +9,7 @@
 #include "chart_registry.h"
 #include "composition.h"
 #include "design_tokens.h"
+#include "quality.h"
 #include "registry.h"
 #include "solution_registry.h"
 #include "style_compiler.h"
@@ -384,6 +385,46 @@ class ComposeTool final : public SpatialTool
       out["compiled"] = true;
       out["layout_name"] = spec["layout_name"].asString();
       out["quality"] = report;
+      // Platform 8.0: compose identity. The structural digest pins WHAT was
+      // composed (rendering-free SHA-256 over the resolved geometry) and the
+      // provenance block names the declared template/components so Harness
+      // confirmation and workbench listings can identify the composition
+      // without a new metadata vocabulary.
+      out["structural_digest"] = structuralDigest( spec );
+      out["provenance"] = [ &spec ] {
+        Json::Value provenance( Json::objectValue );
+        if ( spec.isMember( "template" ) && spec["template"].isString() )
+          provenance["template"] = spec["template"];
+        Json::Value components( Json::arrayValue );
+        for ( int c = 0; c < mapspec::kCollectionCount; ++c )
+        {
+          const char *collection = mapspec::kCollections[c];
+          if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+            continue;
+          for ( const auto &item : spec[collection] )
+          {
+            if ( !item.isObject() || !item.isMember( "source_component" ) )
+              continue;
+            const Json::Value &ref = item["source_component"];
+            const std::string componentId =
+              ref.isString() ? ref.asString()
+                             : ref.isObject() && ref.isMember( "id" ) && ref["id"].isString()
+                                   ? ref["id"].asString()
+                                   : std::string();
+            if ( componentId.empty() )
+              continue;
+            Json::Value entry( Json::objectValue );
+            entry["id"] = componentId;
+            if ( ref.isObject() && ref.isMember( "variant" ) && ref["variant"].isString() )
+              entry["variant"] = ref["variant"];
+            components.append( entry );
+          }
+        }
+        provenance["components"] = components;
+        return provenance;
+      }();
+      if ( spec.isMember( "output" ) && spec["output"].isObject() )
+        out["declared_output"] = spec["output"];
       return SpatialToolResult::ok( out );
     }
 };

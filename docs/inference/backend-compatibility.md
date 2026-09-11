@@ -70,3 +70,19 @@ mismatch), **DeviceUnavailable** (unaddressable or over-budget device),
 **OutputInvalid** (forward ran but output failed validation). The stable
 error-code projection lives in `errorCodeForInferenceFailure`
 (+`DeviceUnavailable` 3006, +`RuntimeProviderFailed` 3007).
+
+## Platform 8.0 additions
+
+- The onnxruntime column is EXECUTED for real when the build embeds the ORT
+  SDK (both official `include/` and distro `include/onnxruntime/` layouts are
+  discovered): named multi-input, rank-3..6 N-D transport, dynamic shapes,
+  multi-head selection, in-forward cancellation (`RunOptions::SetTerminate`)
+  and CUDA EP binding to the resolved `cuda:N` — the CUDA lane stays
+  capability-gated on hosts without a GPU (typed refusal, never a claim).
+- Python worker handshake may declare `capabilities` (max_rank, multi_input,
+  input/output dtypes); declared values replace the defaults. A worker that
+  dies mid-exchange gets ONE respawn + replay per session; exhaustion is a
+  typed `ProviderCrash`.
+- Device placement gained the `LeastLoaded` policy knob and a
+  `deviceReport()` pressure snapshot — placement only, admission unchanged.
+- See [platform-8](platform-8.md) for the full 8.0 surface.

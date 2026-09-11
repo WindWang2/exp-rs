@@ -182,6 +182,7 @@ TEST_CASE( "Bounded transient auto-retry resurrects the task in place", "[ep7][r
         REQUIRE( flakyRuns.load() == 2 );          // first attempt failed, retry succeeded
         REQUIRE( info.autoRetryAttempts == 1 );    // exactly one bounded retry consumed
         REQUIRE( info.logBuffer.join( QString() ).contains( QStringLiteral( "auto-retry 1/2" ) ) );
+        INFO( "EP8DBG log=" << info.logBuffer.join( QStringLiteral( " || " ) ).toStdString() );
     }
 
     SECTION( "a permanent operator error never auto-retries" )

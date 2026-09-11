@@ -29,3 +29,20 @@ for dedup; this track adds invariants that were missing, not duplicates.
 | resampling/warp | kernel correctness | existing | `test_image_warper`, io track grid placement (cloud-io-7) |
 
 Run: `ctest -R test_known_answer_corpus` (needs `sicnu_processing` closure).
+
+---
+
+## Known-Answer Matrix — Verification Platform 8.0 additions
+
+`tests/test_known_answer_corpus_8.cpp` — gaps closed from the 7.0 matrix
+(derivations inline; zonal statistics remains refused-by-scope, not missing
+test coverage):
+
+| Family | Invariant under test | Derivation | Test |
+|---|---|---|---|
+| grid ops (window) | 10·row+col grid survives readWindow exactly; sub-window algebra | stored Float32 values are exact doubles at these magnitudes | known_answer_8 ✓ |
+| grid ops (budget) | windowByteBudget = w·h·bands·8; exceeding it is typed GeoError(Unsupported) | documented #808 contract; budget−1 throws, exact succeeds | known_answer_8 ✓ |
+| grid ops (blocks) | tiled edge blocks return full blockW·blockH geometry padded with band NoData (−9999) | 6×4 raster, 4×2 blocks → 2×2 block grid; interior/edge blocks hand-computed (#790 as closed form) | known_answer_8 ✓ |
+| splits (random) | N=20 @ 0.5/0.25/0.25 → exactly 10/5/5; disjoint roles; same seed ⇒ same manifest | largest-remainder with no residue; determinism contract | known_answer_8 ✓ |
+| splits (remainder) | N=10 @ thirds → 4/3/3 (remainder to TRAIN, never Test); testRatio=0 ⇒ 0 Test | #788 largest-remainder rule as corpus form | known_answer_8 ✓ |
+| splits (spatial) | four 5-sample quadrant clusters, 100×100 blocks → whole-block allocation; no block straddles roles; counts 10/5/5 | block-atomic partition (#775/#817 as corpus form) | known_answer_8 ✓ |

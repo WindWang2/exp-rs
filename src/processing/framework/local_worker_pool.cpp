@@ -38,6 +38,22 @@ std::string diagnosticsSuffix( const WorkerDiagnosticsRing &diagnostics )
     return tail.isEmpty() ? std::string()
                           : " [worker stderr: " + tail.toStdString() + "]";
 }
+
+/// 8.0 WP-C hang window (default 0 = off): when enabled, a worker that
+/// produces NO frames (progress, ack, result or heartbeat) for this long
+/// while a job runs is treated as hung and escalated. Off by default so a
+/// legitimately silent long operator is never killed without opt-in.
+std::chrono::milliseconds hangDetectionTimeout()
+{
+    static const std::chrono::milliseconds timeout = [] {
+        const QString raw = qEnvironmentVariable( "SICNU_WORKER_HANG_TIMEOUT_MS" );
+        bool ok = false;
+        const qint64 ms = raw.toLongLong( &ok );
+        return ( ok && ms > 0 ) ? std::chrono::milliseconds( ms )
+                                : std::chrono::milliseconds( 0 );
+    }();
+    return timeout;
+}
 } // namespace
 
 LocalWorkerPool::~LocalWorkerPool()
@@ -124,8 +140,9 @@ void LocalWorkerPool::teardownWorker( std::unique_ptr<Worker> worker )
         worker->process->waitForFinished( 1000 );
         if ( worker->process->state() == QProcess::Running )
         {
-            worker->process->kill();
-            worker->process->waitForFinished( 1000 );
+            // 8.0 WP-C: group/job-wide kill ladder (covers operator-spawned
+            // helper processes a plain QProcess::kill would orphan).
+            worker->guard.terminateTree( *worker->process );
         }
     }
     worker->process.reset();
@@ -198,6 +215,9 @@ std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::spawnWorker()
         { QStringLiteral( "--protocol" ),
           QString::fromLatin1( sicnu::runtime::worker::kWorkerProtocolVersion ) } );
     worker->process->setProcessChannelMode( QProcess::SeparateChannels );
+    // 8.0 WP-C: bind the worker to OS-level containment BEFORE spawn (POSIX:
+    // new session / process group; Windows arms the Job Object after start).
+    worker->guard.attach( *worker->process );
     const auto spawnAt = std::chrono::steady_clock::now();
     worker->process->start( QIODevice::ReadWrite );
     if ( !worker->process->waitForStarted( 5000 ) )
@@ -205,6 +225,7 @@ std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::spawnWorker()
         worker->process.reset();
         return nullptr; // cannot spawn: caller reports / retries lazily
     }
+    worker->guard.armAfterStart( *worker->process );
     // Spawn-time health check: the first frame must be a ready/v1 handshake.
     // "caps" (7.0) is recorded for routing/diagnostics; its absence is fine.
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds( 30 );
@@ -233,7 +254,8 @@ std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::spawnWorker()
     for ( const auto &cap : { sicnu::runtime::worker::kWorkerCapProgress,
                               sicnu::runtime::worker::kWorkerCapCancelAck,
                               sicnu::runtime::worker::kWorkerCapStructuredErrors,
-                              sicnu::runtime::worker::kWorkerCapOutputIdentity } )
+                              sicnu::runtime::worker::kWorkerCapOutputIdentity,
+                              sicnu::runtime::worker::kWorkerCapHeartbeat } )
     {
         if ( sicnu::runtime::worker::frameHasCapability( frame, cap ) )
             worker->capabilities << QString::fromLatin1( cap );
@@ -261,8 +283,7 @@ void LocalWorkerPool::retireWorker( std::unique_ptr<Worker> worker )
             worker->process->waitForFinished( 3000 );
             if ( worker->process->state() == QProcess::Running )
             {
-                worker->process->kill();
-                worker->process->waitForFinished( 3000 );
+                worker->guard.terminateTree( *worker->process );
             }
         }
         worker->process.reset();
@@ -316,6 +337,11 @@ LocalWorkerPool::Outcome LocalWorkerPool::runOnWorker(
 
     bool cancelRequested = false;
     std::chrono::steady_clock::time_point cancelDeadline{};
+    // 8.0 WP-C liveness tracking: any frame (including heartbeats) proves the
+    // worker process is alive; silence beyond the hang window (when enabled)
+    // escalates the whole tree.
+    const auto hangWindow = hangDetectionTimeout();
+    auto lastFrameAt = std::chrono::steady_clock::now();
     while ( true )
     {
         if ( isCancelled && isCancelled() && !cancelRequested )
@@ -327,15 +353,11 @@ LocalWorkerPool::Outcome LocalWorkerPool::runOnWorker(
         if ( cancelRequested && std::chrono::steady_clock::now() >= cancelDeadline )
         {
             // Escalation ladder (see local_worker_host): full grace first,
-            // then terminate → kill. The ack/diagnostics of a cooperatively
-            // exiting worker stay readable this way.
-            worker.process->terminate();
-            worker.process->waitForFinished( 1000 );
-            if ( worker.process->state() == QProcess::Running )
-            {
-                worker.process->kill();
-                worker.process->waitForFinished( 3000 );
-            }
+            // then the group/job-wide terminate → kill ladder. The ack/
+            // diagnostics of a cooperatively exiting worker stay readable
+            // this way; operator-spawned helper processes die with the tree
+            // (8.0 WP-C containment).
+            worker.guard.terminateTree( *worker.process );
             worker.diagnostics.drain( *worker.process );
             *errorMessage = "worker cancelled";
             return Outcome::Cancelled;
@@ -350,7 +372,21 @@ LocalWorkerPool::Outcome LocalWorkerPool::runOnWorker(
         {
             const std::string diagnostics = diagnosticsSuffix( worker.diagnostics );
             if ( softTimedOut )
+            {
+                if ( hangWindow.count() > 0 && !cancelRequested
+                     && std::chrono::steady_clock::now() - lastFrameAt > hangWindow )
+                {
+                    // Hung: alive-but-silent beyond the configured window.
+                    // Tree-wide kill — a hung operator cannot read a cancel
+                    // frame, and its helper processes must not survive.
+                    worker.guard.terminateTree( *worker.process );
+                    worker.diagnostics.drain( *worker.process );
+                    *errorMessage = "worker timeout: no frames within the hang window"
+                                    + diagnosticsSuffix( worker.diagnostics );
+                    return Outcome::TimedOut;
+                }
                 continue; // re-check cancellation, keep waiting
+            }
             if ( !badFrame.empty() )
             {
                 // A malformed frame desynchronizes the stream: the worker is
@@ -372,10 +408,18 @@ LocalWorkerPool::Outcome LocalWorkerPool::runOnWorker(
             return Outcome::TimedOut;
         }
         const std::string op = frame["op"].asString();
+        lastFrameAt = std::chrono::steady_clock::now(); // any frame = alive
         if ( op == "progress" )
         {
             if ( onProgress )
                 onProgress( frame["value"].asDouble(), frame["message"].asString() );
+            continue;
+        }
+        if ( op == "heartbeat" )
+        {
+            // 8.0 WP-C liveness frame: resets the hang window above; legacy
+            // hosts never see it (unknown-op rule), capable hosts just keep
+            // waiting.
             continue;
         }
         if ( op == "ack" )

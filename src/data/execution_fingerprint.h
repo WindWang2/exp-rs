@@ -20,6 +20,7 @@
 #pragma once
 
 #include "asset_types.h"
+#include "artifact_object_pool.h"
 #include "derivation_record.h"
 
 #include <QHash>
@@ -101,6 +102,17 @@ struct TaggedDerivationInput
   /// When set, @a assetId/@a revision identify the producer edge, not a file.
   QString producerFingerprint;
 
+  /// Remote origin identity (8.0 WP-F): the confirmed STRONG ETag of a
+  /// remote http(s) input (see geospatial/remote/remote_identity_resolver.h).
+  /// Empty for every other input class. When set, the token is the input's
+  /// entire identity — @a assetId stays empty (no local registration exists)
+  /// and @a revision stays initial (the token carries the revision
+  /// sensitivity: a server-side change yields a different strong ETag, hence
+  /// a different fingerprint and a guaranteed cache miss). Additive optional
+  /// field: inputs without it serialize exactly as before, so no existing
+  /// fingerprint is invalidated.
+  QString remoteIdentity;
+
   bool operator==( const TaggedDerivationInput & ) const = default;
 };
 
@@ -127,6 +139,22 @@ ExecutionFingerprint makeExecutionFingerprintV2( const QString &algorithmId,
                                                  const QString &algorithmVersion,
                                                  const QJsonObject &parameters,
                                                  const QVector<TaggedDerivationInput> &inputs );
+
+/// Implementation identity of an OPERATOR IMPLEMENTATION (8.0 WP-E): SHA-256
+/// over the canonical identity string
+///   @p identityText + "|contract=" + kExecutionFingerprintContractVersion
+///                + "|platform=" + kExecutionFingerprintPlatformVersion
+/// Two builds that agree on this identity implement the same observable
+/// behavior for the operator's schema. Two consumers share the recipe:
+///   - TaskCenter mixes it into execution fingerprints (cache identity);
+///   - WorkflowRunCoordinator stamps it into a step's completion record and
+///     compares it at resume — a changed identity re-executes the step
+///     (fail-closed), so an operator change between run and resume can never
+///     silently mix implementations inside one pipeline result.
+/// Callers pass their own implementation surface as @p identityText (the
+/// operator's schema JSON text; the resume stamp additionally mixes the
+/// determinism grade into it).
+ExecutionFingerprint makeImplementationIdentity( const std::string &identityText );
 
 /// Convenience: build a fingerprint directly from a DerivationRecord (carries
 /// algorithmId/version/parameters/inputs).
@@ -227,6 +255,12 @@ public:
   /// these as protected: a cached artifact is what a future identical
   /// execution reuses.
   QStringList cachedArtifacts() const;
+
+  /// Verified pool object by content digest (8.0 WP-E moved-output support).
+  /// nullopt when the persistent tier is disabled/unavailable or no verified
+  /// object carries the digest. The resume path re-hydrates a moved output
+  /// from this object only after the bytes re-prove their digest.
+  std::optional<PoolObject> pooledObjectByDigest( const QString &digestHex );
 
   /// Number of cached executions (diagnostics / tests).
   int pathSize() const;

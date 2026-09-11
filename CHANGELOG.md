@@ -68,8 +68,133 @@ All notable changes to the `exp-rs` project will be documented in this file.
   asserting what they claim.
 - `tests/helper_external_process.cpp` gains `<sys/wait.h>` (master did not
   compile the test helper on Linux/glibc).
+### Execution Plane / Worker Runtime / Admission / Cache & Recovery 8.0
+- **Admission scaling (cliff removed)**: TaskCenter admission now maintains
+  incremental active-set counters through a single status-transition seam and
+  orders launch candidates in an indexed ready heap (lazy serial
+  invalidation, bounded per-pass scan, FIFO rotation for gate-held
+  candidates) instead of rescanning and re-sorting the whole task map on
+  every submit/transition; placeholder substitution and dispatch-fingerprint
+  verification run once at staging. JobEngine's queue became priority
+  buckets + an exclusive FIFO (pick O(log P) instead of full-deque scans).
+  The 10k short-job drain drops from the recorded 83.3 s Debug baseline to
+  seconds on this host, with launch order, never-starve and exclusive
+  drain-then-alone semantics preserved.
+- **Dynamic resource availability**: every resource-limit setter re-runs
+  admission, so raised limits admit held work immediately (gates only ever
+  delay launches).
+- **Worker containment & liveness**: workers are bound to OS-level tree
+  containment — POSIX session/process group with group-wide
+  SIGTERM->SIGKILL ladders (a SIGTERM-immune helper is reaped; e2e tested),
+  Windows kill-on-close Job Object assigned right after start. Workers emit
+  optional heartbeat frames (15 s while a job runs, wire-compatible); hosts
+  may enable a hang window (`SICNU_WORKER_HANG_TIMEOUT_MS`, default off).
+- **Retry evidence**: the transient-failure classifier is a documented
+  public seam; retry attempt/class and budget exhaustion are recorded in the
+  task log and the unified trace.
+- **Resume identity 3.0**: completed steps stamp their operator's
+  implementation identity (schema + determinism grade + contract + platform)
+  into the checkpoint (additive optional field); resume re-executes when the
+  current identity differs or cannot be proven (fail-closed). A moved output
+  whose checkpoint records a content digest is re-hydrated from the
+  content-addressed pool only after the restored bytes re-prove the digest.
+- **Remote identity in the execution fingerprint**: remote http(s) inputs
+  resolve through a strong-ETag-only identity resolver (bounded session
+  cache, TTL, no network under any lock — warmed before the scheduler lock),
+  installed by TaskCenter unless a host wired its own; the token rides the
+  canonical fingerprint as an additive optional field. Weak/inconclusive
+  verdicts stay uncacheable.
+- **Observability**: bounded trace events for admitted/held/retry/cancel/
+  terminal/cache and resume served/rehydrated/operator_changed transitions
+  (one relaxed atomic load when tracing is off).
 
-## [Unreleased] - 2026-09-08
+### Intelligent Cartography, MapSpec & Template Platform 8.0
+- **Raster NoData wired into the QGIS renderer (closes the 7.0 known
+  limitation)**: `style:apply` pushes `raster.nodata` into the renderer —
+  the declared `value` becomes a provider user-nodata range on the declared
+  band, `transparent: false` shades nodata pixels through
+  `QgsRasterRenderer::setNodataColor` (new optional `color`, default
+  black); re-apply is idempotent; `buildRasterRenderer` carries the shading
+  so the knowledge path and the live path agree.
+- **Locator connector graphics**: `inset_maps[].locator.connector` compiles
+  to a QGIS-native polyline (`QgsLayoutItemPolyline`, new LayoutService
+  `line`/`polyline` item type) from the inset frame edge to the referenced
+  frame's projected extent anchor; deterministic geometry; validated shape.
+- **MapSpec v5 (strict superset)**: envelope `output` delivery declaration
+  (`formats: png|pdf`, `dpi` 72..1200, optional `dir`) validated and
+  surfaced through `cartography:compose` / Harness `confirmMapOutput`
+  (compilation never auto-exports); per-item `binding` shape validation
+  (string mode/layer/field/expression, bounded inline data, square ≤24×24
+  matrices); `upgradeMapSpec` stamps v≤4 documents to 5.
+- **Page-aware solver evidence**: `keep_with`/`avoid_overlap` refuse pins
+  that would push a companion past its own page bottom with a
+  `page_overflow` reason carried into `unsatisfied`/`violated`/decisions
+  (violation reasons now preserve the permanent-failure cause) instead of
+  silently writing off-page geometry.
+- **Typography 2.0 additions**: declared `font.break_policy`
+  (`none | halfwidth` — deterministic line-final CJK closing-punctuation
+  compression) and `font.line_height` (leading override), consumed by the
+  wrap-aware overflow rule; defaults reproduce 7.0 output exactly.
+- **NoData legend QA**: new `MAP_NODATA_LEGEND` preflight rule (legend
+  referencing a style that declares `raster.nodata` must mention NoData)
+  with a converging repair stamping `legend.nodata` from the style; the
+  compiler renders the entry as a QGIS-backed swatch composite.
+- **Compose identity**: `cartography:compose` returns the rendering-free
+  `structural_digest` plus `provenance` (declared template + component
+  references) and the declared output block; Harness `confirmMapOutput`
+  carries them so final-map confirmation identifies what was composed.
+- **Chart labels**: bar/histogram/grouped-bar category labels elide
+  deterministically (matching the table/series paths).
+- **Visual evidence**: the `[visual][determinism]`/`[visual][golden]` PNG
+  layers are verified end-to-end on Linux (real `QgsLayoutExporter`
+  renders; golden references generate and compare in tolerance); docs
+  drift fixed (`mapspec-reference` current-version header, NoData wiring
+  claims, limitations).
+
+### Model Runtime & Multimodal EO Inference Platform 8.0 (goal series, ADR 0143)
+- **Real ONNX Runtime lane (WP-A)**: the 7.0 ORT provider is compiled and
+  executed for the first time (ORT 1.20.1, CPU EP). Real execution fixed
+  three latent defects: a dangling `Ort::TypeInfo` shape view in `warmup()`
+  (read freed memory), the removed `AppendExecutionProvider_CUDA(int)`
+  overload, and the removed `const T*` `CreateTensor` overload; cv::Mat
+  head selection now requests exactly the named output. CMake discovers
+  both official SDK layouts. 11 test cases (2168 assertions) run named
+  N-D multi-input inference, multi-head rank-3/4 selection, dynamic shapes,
+  int64/double/uint8 transport, warmup, health/memory accounting and
+  in-forward cancellation (~25 ms latency); CUDA stays capability-gated.
+- **Grid/CRS authority (WP-C)**: multimodal co-registration now includes
+  semantic CRS equality — identical geotransform numbers under different
+  CRS are refused. `alignment: "reference"` refuses CRS-less feeds. The
+  runtime never warps; caller pre-alignment is recorded via feed
+  `prepared_from` provenance.
+- **Temporal sequence lane (WP-D)**: `temporal_collapse: "sequence"`
+  (layout NCTHW) feeds the explicit rank-5 time axis; `temporal_dynamic`
+  lets the feed define T; feed timestamps are validated strictly
+  increasing; per-frame quality masks follow NoData semantics across the
+  whole window. `rs:infer` gains `named_inputs[]` (paths, bands,
+  timestamps, quality masks, prepared_from) and local STAC collection
+  expansion; remote STAC refuses instead of silently fetching.
+- **Device planner 2.0 (WP-B)**: `DevicePlacementPolicy` (LowestFitting |
+  LeastLoaded) placement knob plus `deviceReport()` per-device pressure
+  snapshot; admission and the bounded pressure valve unchanged.
+- **Pre/post completion (WP-E)**: `postprocess.class_mapping` remaps model
+  classes to product classes in labels products (injective, non-negative,
+  arity-checked; palette keyed by product ids).
+- **Provider resilience (WP-F)**: python worker handshake capability
+  negotiation (max_rank/multi_input/dtypes replace defaults); ONE
+  respawn + replay per session after a mid-exchange worker death
+  (live-but-stuck workers are never restarted — a request is never replayed
+  into a live worker and there are never two delivered responses); exhausted
+  restart budget is a typed ProviderCrash.
+- **Provenance sidecars (WP-G)**: every published raster inference product
+  carries `<output>.prov.json` (model identity/digest, backend/device,
+  per-input grid+CRS verdicts, execution counters, band semantics)
+  published through the governed staged-rename path; sidecar failure
+  removes the product.
+- **Performance evidence (WP-H)**: ORT cold/warm session acquire 21.9/1.2 ms,
+  named N-D forwards ≈ 23k/s, in-forward cancel latency 24.9 ms
+  (`benchmarks/model-runtime-4.json`, schema `model-runtime-bench-ort/1`).
+>>>>>>> master
 
 ### Cartography Knowledge, Template & Recipe Platform 6.0 (goal series, ADR 0135)
 - **Declarative correctness fixes**: single-item `fit_content` no longer

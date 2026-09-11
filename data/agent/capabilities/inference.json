@@ -2,7 +2,7 @@
   {
     "id": "rs:infer",
     "family": "inference",
-    "modality": ["optical", "sar", "multimodal"],
+    "modality": ["optical", "sar", "multimodal", "temporal"],
     "intents": ["inference", "ship"],
     "model_compatibility": { "families": ["segmentation", "detection", "change_detection"] },
     "resource": { "cost_class": "heavy", "large_raster_safe": true },
@@ -13,7 +13,9 @@
     },
     "limitations": [
       "Model input contracts (band roles, dtype, temporal length) must match the dataset",
-      "Tiled inference can produce seam artifacts; check the model tiling policy"
+      "Tiled inference can produce seam artifacts; check the model tiling policy",
+      "Multi-input/temporal models run through named_inputs[] feeds (paths, ISO 8601 timestamps strictly increasing, quality masks); misaligned or cross-CRS feeds are refused, never warped",
+      "Temporal inputs declare temporal_collapse channels or sequence (layout NCTHW, optional temporal_dynamic)"
     ]
   },
   {

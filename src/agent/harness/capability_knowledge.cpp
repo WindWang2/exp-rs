@@ -23,6 +23,8 @@ namespace {
 
 const char *const kModalities[] = {
   "optical", "sar", "thermal", "dem", "vector", "tabular", "multimodal",
+  // Platform 8.0: temporal model inputs (time-series / STAC series feeds).
+  "temporal",
 };
 const char *const kBandRoles[] = {
   "blue", "green", "red", "red_edge", "nir", "swir", "swir1", "swir2", "pan",

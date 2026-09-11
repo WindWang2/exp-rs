@@ -1,0 +1,360 @@
+{
+ "schema": "exp.verification.ladder.v1",
+ "started_utc": "2026-09-10T20:06:26.138727+00:00",
+ "build_dir": "/home/kevin/projects/rs-studio/exp-rs-verification-platform-8/build-clang",
+ "host": {
+  "platform": "linux",
+  "cpus": 16
+ },
+ "lanes": {
+  "L0": {
+   "title": "compile-guards",
+   "items": [
+    {
+     "lane": "L0",
+     "label": "header_probes",
+     "name": "sicnu_header_probes",
+     "kind": "target",
+     "timeout_s": 1200.0,
+     "status": "passed",
+     "detail": ""
+    }
+   ],
+   "status": "passed"
+  },
+  "L1": {
+   "title": "unit-core",
+   "items": [
+    {
+     "lane": "L1",
+     "label": "trace_contract",
+     "name": "test_trace_contract",
+     "kind": "test",
+     "timeout_s": 240.0,
+     "status": "passed",
+     "elapsed_s": 0.2,
+     "detail": ""
+    },
+    {
+     "lane": "L1",
+     "label": "fault_registry",
+     "name": "test_fault_registry",
+     "kind": "test",
+     "timeout_s": 240.0,
+     "status": "passed",
+     "elapsed_s": 0.2,
+     "detail": ""
+    },
+    {
+     "lane": "L1",
+     "label": "diagnostic_report",
+     "name": "test_diagnostic_report",
+     "kind": "test",
+     "timeout_s": 120.0,
+     "status": "passed",
+     "elapsed_s": 0.2,
+     "detail": ""
+    },
+    {
+     "lane": "L1",
+     "label": "trace_chain_8",
+     "name": "test_trace_chain_8",
+     "kind": "test",
+     "timeout_s": 600.0,
+     "status": "passed",
+     "elapsed_s": 0.2,
+     "detail": ""
+    }
+   ],
+   "status": "passed"
+  },
+  "L2": {
+   "title": "contract-known",
+   "items": [
+    {
+     "lane": "L2",
+     "label": "fuzz_io",
+     "name": "test_contract_fuzz_io",
+     "kind": "test",
+     "timeout_s": 360.0,
+     "status": "passed",
+     "elapsed_s": 0.2,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "fuzz_lang",
+     "name": "test_contract_fuzz_lang",
+     "kind": "test",
+     "timeout_s": 360.0,
+     "status": "passed",
+     "elapsed_s": 0.0,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "fuzz_data",
+     "name": "test_contract_fuzz_data",
+     "kind": "test",
+     "timeout_s": 360.0,
+     "status": "passed",
+     "elapsed_s": 0.2,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "known_answer_corpus",
+     "name": "test_known_answer_corpus",
+     "kind": "test",
+     "timeout_s": 360.0,
+     "status": "passed",
+     "elapsed_s": 0.2,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "portability_contract",
+     "name": "test_portability_contract",
+     "kind": "test",
+     "timeout_s": 360.0,
+     "status": "passed",
+     "elapsed_s": 0.0,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "fuzz_ipc",
+     "name": "test_contract_fuzz_ipc",
+     "kind": "test",
+     "timeout_s": 360.0,
+     "status": "passed",
+     "elapsed_s": 0.0,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "known_answer_corpus_8",
+     "name": "test_known_answer_corpus_8",
+     "kind": "test",
+     "timeout_s": 360.0,
+     "status": "passed",
+     "elapsed_s": 0.0,
+     "detail": ""
+    }
+   ],
+   "status": "passed"
+  },
+  "L3": {
+   "title": "integration-io",
+   "items": [
+    {
+     "lane": "L3",
+     "label": "io_uri",
+     "name": "test_io_uri",
+     "kind": "test",
+     "timeout_s": 360.0,
+     "status": "passed",
+     "elapsed_s": 0.0,
+     "detail": ""
+    },
+    {
+     "lane": "L3",
+     "label": "io_paths",
+     "name": "test_io_paths",
+     "kind": "test",
+     "timeout_s": 360.0,
+     "status": "passed",
+     "elapsed_s": 0.0,
+     "detail": ""
+    },
+    {
+     "lane": "L3",
+     "label": "io_range_cache",
+     "name": "test_io_range_cache",
+     "kind": "test",
+     "timeout_s": 600.0,
+     "status": "timeout",
+     "elapsed_s": 600.1,
+     "detail": "exceeded 600s budget"
+    },
+    {
+     "lane": "L3",
+     "label": "io_remote_range",
+     "name": "test_io_remote_range",
+     "kind": "test",
+     "timeout_s": 600.0,
+     "status": "timeout",
+     "elapsed_s": 600.1,
+     "detail": "exceeded 600s budget"
+    },
+    {
+     "lane": "L3",
+     "label": "io_remote_validator",
+     "name": "test_io_remote_validator",
+     "kind": "test",
+     "timeout_s": 360.0,
+     "status": "timeout",
+     "elapsed_s": 360.1,
+     "detail": "exceeded 360s budget"
+    },
+    {
+     "lane": "L3",
+     "label": "io_atomic_failures",
+     "name": "test_io_atomic_failures",
+     "kind": "test",
+     "timeout_s": 600.0,
+     "status": "passed",
+     "elapsed_s": 0.4,
+     "detail": ""
+    },
+    {
+     "lane": "L3",
+     "label": "io_raster_contract",
+     "name": "test_io_raster_contract",
+     "kind": "test",
+     "timeout_s": 600.0,
+     "status": "passed",
+     "elapsed_s": 0.2,
+     "detail": ""
+    },
+    {
+     "lane": "L3",
+     "label": "io_grid_descriptor",
+     "name": "test_io_grid_descriptor",
+     "kind": "test",
+     "timeout_s": 360.0,
+     "status": "passed",
+     "elapsed_s": 0.1,
+     "detail": ""
+    },
+    {
+     "lane": "L3",
+     "label": "io_stac",
+     "name": "test_io_stac",
+     "kind": "test",
+     "timeout_s": 360.0,
+     "status": "passed",
+     "elapsed_s": 0.1,
+     "detail": ""
+    }
+   ],
+   "status": "attention"
+  },
+  "L4": {
+   "title": "portability",
+   "items": [
+    {
+     "lane": "L4",
+     "label": "fault_matrix",
+     "name": "test_fault_matrix",
+     "kind": "test",
+     "timeout_s": 600.0,
+     "status": "passed",
+     "elapsed_s": 0.8,
+     "detail": ""
+    },
+    {
+     "lane": "L4",
+     "label": "exprs_ipc",
+     "name": "test_exprs_ipc",
+     "kind": "test",
+     "timeout_s": 600.0,
+     "status": "passed",
+     "elapsed_s": 0.8,
+     "detail": ""
+    },
+    {
+     "lane": "L4",
+     "label": "fuzz_ops",
+     "name": "test_contract_fuzz_ops",
+     "kind": "test",
+     "timeout_s": 600.0,
+     "status": "passed",
+     "elapsed_s": 0.8,
+     "detail": ""
+    }
+   ],
+   "status": "passed"
+  },
+  "L5": {
+   "title": "stress-lifecycle",
+   "items": [
+    {
+     "lane": "L5",
+     "label": "concurrency_stress",
+     "name": "test_concurrency_stress",
+     "kind": "test",
+     "timeout_s": 1200.0,
+     "status": "passed",
+     "elapsed_s": 8.7,
+     "detail": ""
+    },
+    {
+     "lane": "L5",
+     "label": "fault_injection_posix",
+     "name": "test_fault_injection",
+     "kind": "test",
+     "timeout_s": 600.0,
+     "status": "passed",
+     "elapsed_s": 1.2,
+     "detail": ""
+    },
+    {
+     "lane": "L5",
+     "label": "worker_host",
+     "name": "test_worker_host",
+     "kind": "test",
+     "timeout_s": 1200.0,
+     "status": "passed",
+     "elapsed_s": 7.8,
+     "detail": ""
+    }
+   ],
+   "status": "passed"
+  },
+  "L6": {
+   "title": "visual-optional",
+   "items": [
+    {
+     "lane": "L6",
+     "label": "mapspec_visual",
+     "name": "test_mapspec",
+     "kind": "test",
+     "timeout_s": 1200.0,
+     "status": "failed",
+     "elapsed_s": 69.0,
+     "detail": "Randomness seeded to: 203675028\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\ntest_mapspec is a Catch2 v3.7.1 host application.\nRun with -? for options\n\n-------------------------------------------------------------------------------\nOpt-in golden comparison against a reference directory\n-------------------------------------------------------------------------------\n/home/kevin/projects/rs-studio/exp-rs-verification-platform-8/tests/test_cartography_visual.cpp:291\n...............................................................................\n\n/home/kevin/projects/rs-studio/exp-rs-verification-platform-8/tests/test_cartography_visual.cpp:298: warning:\n  golden comparison disabled (set SICNU_CARTOGRAPHY_GOLDEN_DIR)\n\n-------------------------------------------------------------------------------\nRecipe gate degradation propagates per branch, not globally (#784)\n-------------------------------------------------------------------------------\n/home/kevin/projects/rs-studio/exp-rs-verification-platform-8/tests/test_platform6.cpp:565\n...............................................................................\n\n/home/kevin/projects/rs-studio/exp-rs-verification-platform-8/tests/test_platform6.cpp:611: FAILED:\n  REQUIRE( plan.isObject() )\nwith expansion:\n  false\n\n===============================================================================\ntest cases:  152 |  151 passed | 1 failed\nassertions: 2104 | 2103 passed | 1 failed\n\n\n"
+    }
+   ],
+   "status": "attention"
+  },
+  "L7": {
+   "title": "benchmarks",
+   "items": [
+    {
+     "lane": "L7",
+     "label": "quality7",
+     "name": "benchmark_quality7",
+     "kind": "bench",
+     "timeout_s": 1200.0,
+     "status": "passed",
+     "elapsed_s": 38.2,
+     "detail": ""
+    },
+    {
+     "lane": "L7",
+     "label": "scale8",
+     "name": "benchmark_scale8",
+     "kind": "bench",
+     "timeout_s": 3600.0,
+     "status": "timeout",
+     "elapsed_s": 3600.1,
+     "detail": "exceeded 3600s budget"
+    }
+   ],
+   "status": "attention"
+  }
+ },
+ "finished_utc": "2026-09-10T21:34:36.889530+00:00",
+ "overall": "attention"
+}
