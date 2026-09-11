@@ -10,16 +10,27 @@ namespace sicnu::operators::runtime {
 DeviceInventory DeviceInventory::fromHardware( const ModelHardwareCapabilities &hw )
 {
   DeviceInventory inventory;
-  // Per-device capacity: the enforced budget applies to EACH addressable
-  // device (documented 7.0 semantics — real per-card enumeration arrives
-  // with a provider that can actually query it; env overrides keep tests
-  // and constrained deployments deterministic).
+  // Platform 7.0 base semantics: capacity = the enforced env budget per
+  // device, unknown when unset. Platform 9.0: when the NVML probe reported
+  // real per-card data, capacity becomes the honest MINIMUM of the driver
+  // total and the budget (a budget can only TIGHTEN real hardware), the
+  // driver product name replaces the generic "cuda:<i>" and the reported
+  // free VRAM rides along (-1 unknown).
   for ( int i = 0; i < hw.cudaDeviceCount; ++i )
   {
     DeviceInfo info;
     info.index = i;
     info.name = "cuda:" + std::to_string( i );
     info.vramCapacityMb = hw.vramBudgetMb;
+    const std::size_t idx = static_cast<std::size_t>( i );
+    if ( idx < hw.deviceTotalVramMb.size() && hw.deviceTotalVramMb[idx] > 0 )
+      info.vramCapacityMb =
+        info.vramCapacityMb > 0 ? std::min( info.vramCapacityMb, hw.deviceTotalVramMb[idx] )
+                                : hw.deviceTotalVramMb[idx];
+    if ( idx < hw.deviceNames.size() && !hw.deviceNames[idx].empty() )
+      info.name = hw.deviceNames[idx];
+    if ( idx < hw.deviceFreeVramMb.size() )
+      info.freeVramMb = hw.deviceFreeVramMb[idx];
     inventory.m_devices.push_back( info );
   }
   return inventory;

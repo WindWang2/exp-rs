@@ -24,6 +24,32 @@ struct ModelArtifactContract
 };
 
 /**
+ * Preprocessing contract — manifest v2 `preprocess` section. Executed by the
+ * tile inference engine between the GDAL window read and the model blob.
+ * Declared BEFORE ModelInputContract: since 9.0 an input entry may carry its
+ * own preprocessing override of the same type (per-feed normalization).
+ */
+struct ModelPreprocessContract
+{
+  std::string normalize;   ///< "none" (default) | "linear" (x*scale) | "mean_std" ((x-mean)/std*scale)
+  std::vector<double> mean;   ///< Per-channel means (mean_std)
+  std::vector<double> stdv;   ///< Per-channel standard deviations (mean_std)
+  double scale = 1.0;         ///< Multiplicative scale applied last (linear & mean_std)
+  std::string resize;         ///< "none" (default) | "to_input" (resize each tile to input.width/height)
+  std::string interpolation;  ///< "bilinear" (default) | "nearest"
+  std::string nodataPolicy;   ///< "zero" (default): non-finite input pixels become 0 before the model
+  // --- Platform 7.0 additions (all optional; absent = disabled)
+  /// Clamp range applied AFTER normalize/scale (NaN = unset). Values outside
+  /// are clamped in; never dropped silently. min < max required when both set.
+  double clampMin = std::numeric_limits<double>::quiet_NaN();
+  double clampMax = std::numeric_limits<double>::quiet_NaN();
+  /// Symmetric zero-pad in px applied to each fed tile AFTER clamp (0 = off).
+  /// The engine crops the pad back out of the OUTPUT window, so output
+  /// geometry stays input geometry (no stitching drift).
+  int pad = 0;
+};
+
+/**
  * Model input contract — manifest v2 `input` section (object form) and, since
  * v3, one entry of the `inputs` array. The legacy string form
  * ("input": "raster") only fills ModelInfo::inputType.
@@ -64,6 +90,17 @@ struct ModelInputContract
   /// "refuse" (default; typed refusal) | "zero" (explicit zero-fill reported
   /// as a warning in the result payload). Never a silent guess.
   std::string missingTimestep;
+  // --- Platform 9.0 per-feed preprocessing (M3) ------------------------------
+  /// Optional PER-INPUT preprocessing override (manifest `inputs[].preprocess`,
+  /// same closed vocabulary as the global `preprocess` section). When absent
+  /// (preprocessDeclared=false) the input is preprocessed with the model's
+  /// GLOBAL contract exactly as before — historical manifests run bit-identically.
+  /// A multimodal feed graph usually needs per-sensor normalization (optical
+  /// reflectance vs SAR backscatter vs DEM elevations): one global contract
+  /// cannot express that. The EFFECTIVE contract is recorded per feed in the
+  /// provenance sidecar.
+  bool preprocessDeclared = false;
+  ModelPreprocessContract preprocess;
 
   /// Vocabulary + range validation (empty string = ok).
   std::string validate() const;
@@ -105,28 +142,18 @@ struct ModelProviderContract
   long maxBodyMb = 256;     ///< Response size guard (0 = provider default)
 };
 
-/**
- * Preprocessing contract — manifest v2 `preprocess` section. Executed by the
- * tile inference engine between the GDAL window read and the model blob.
- */
-struct ModelPreprocessContract
+/// One auxiliary package file (Platform 9.0 M7, manifest `package.aux_files[]`).
+/// Inference models rarely travel as a bare weight file: preprocessing
+/// configs, class ontologies, label maps and tokenizer vocabularies ride
+/// along. An aux file that silently changes invalidates reproducibility, so
+/// each file declares its sha256 and the catalog ENFORCES it at resolve time
+/// (a mismatched aux file is a readiness failure, not a warning).
+struct ModelAuxFileContract
 {
-  std::string normalize;   ///< "none" (default) | "linear" (x*scale) | "mean_std" ((x-mean)/std*scale)
-  std::vector<double> mean;   ///< Per-channel means (mean_std)
-  std::vector<double> stdv;   ///< Per-channel standard deviations (mean_std)
-  double scale = 1.0;         ///< Multiplicative scale applied last (linear & mean_std)
-  std::string resize;         ///< "none" (default) | "to_input" (resize each tile to input.width/height)
-  std::string interpolation;  ///< "bilinear" (default) | "nearest"
-  std::string nodataPolicy;   ///< "zero" (default): non-finite input pixels become 0 before the model
-  // --- Platform 7.0 additions (all optional; absent = disabled)
-  /// Clamp range applied AFTER normalize/scale (NaN = unset). Values outside
-  /// are clamped in; never dropped silently. min < max required when both set.
-  double clampMin = std::numeric_limits<double>::quiet_NaN();
-  double clampMax = std::numeric_limits<double>::quiet_NaN();
-  /// Symmetric zero-pad in px applied to each fed tile AFTER clamp (0 = off).
-  /// The engine crops the pad back out of the OUTPUT window, so output
-  /// geometry stays input geometry (no stitching drift).
-  int pad = 0;
+  std::string path;      ///< File path, relative to the manifest (like artifact.path)
+  std::string role;      ///< Free-form role token: "class_ontology" | "preprocess_config" | ...
+  std::string checksum;  ///< "sha256:<hex>" or bare hex (algorithm inferred)
+  unsigned long long sizeBytes = 0; ///< Declared size; 0 = unchecked
 };
 
 /**
@@ -146,6 +173,10 @@ struct ModelTilingContract
   /// behavior exactly; larger values never change model semantics — they only
   /// widen the skip set (the OOM ladder stays untouched).
   double minValidCoverage = 0.0;
+  /// Platform 9.0 (M5) output blending across overlapping tiles:
+  /// "none" (default, hard-edge stitch) | "feather" (cosine-weighted overlap
+  /// averaging; requires halo > 0). Raster engines only.
+  std::string blend;
 };
 
 /**
@@ -311,6 +342,17 @@ struct ModelInfo {
   ModelOutputContract output;
   ModelPostprocessContract postprocess;
   ModelRuntimeContract runtime;
+  // --- Platform 9.0 (M7): package identity -----------------------------------
+  /// Declared `package.aux_files[]` entries. Empty = not declared (historical
+  /// single-artifact manifests behave identically). When declared, EVERY entry
+  /// is digest-verified at catalog resolve; a mismatch is a typed readiness
+  /// failure — the package never half-loads.
+  std::vector<ModelAuxFileContract> auxFiles;
+  bool auxFilesDeclared = false;
+  /// Package digest: sha256 over the weights content digest plus every
+  /// declared (role, digest) pair — the identity anchor for the WHOLE package.
+  /// Empty when no aux files are declared (then contentDigest alone anchors).
+  std::string packageDigest;
 
   // Real availability state computed at load time (catalog-static half: the
   // runtime layer adds UnsupportedRuntime/IncompatibleHardware on top).

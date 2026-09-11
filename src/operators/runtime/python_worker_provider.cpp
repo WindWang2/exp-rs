@@ -12,6 +12,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <QStringList>
 #include <QThread>
 
 #include <atomic>
@@ -31,13 +32,14 @@ class PythonWorkerSession final : public IModelRuntime
   public:
     PythonWorkerSession( std::string interpreter, std::string workerScript,
                          std::string workingDir, std::string artifact, std::string digest,
-                         int timeoutMs )
+                         int timeoutMs, int resolvedCudaIndex = -1 )
         : m_interpreter( std::move( interpreter ) )
         , m_workerScript( std::move( workerScript ) )
         , m_workingDir( std::move( workingDir ) )
         , m_artifact( std::move( artifact ) )
         , m_digest( std::move( digest ) )
         , m_timeoutMs( timeoutMs > 0 ? timeoutMs : 30000 )
+        , m_resolvedCudaIndex( resolvedCudaIndex )
     {
     }
 
@@ -55,6 +57,17 @@ class PythonWorkerSession final : public IModelRuntime
       m_process = std::make_unique<QProcess>();
       if ( !m_workingDir.empty() )
         m_process->setWorkingDirectory( QString::fromStdString( m_workingDir ) );
+      // Platform 9.0 (M1): the worker sees EXACTLY the device the registry's
+      // resolution picked — CUDA_VISIBLE_DEVICES renumbers it to 0 inside the
+      // process, so a worker that asks ORT for cuda:0 cannot land on another
+      // card. CPU-resolved sessions leave the environment untouched.
+      if ( m_resolvedCudaIndex >= 0 )
+      {
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert( QStringLiteral( "CUDA_VISIBLE_DEVICES" ),
+                    QString::number( m_resolvedCudaIndex ) );
+        m_process->setProcessEnvironment( env );
+      }
       m_process->setProgram( QString::fromStdString( m_interpreter ) );
       m_process->setArguments( { QString::fromStdString( m_workerScript ) } );
       m_process->start();
@@ -270,6 +283,23 @@ class PythonWorkerSession final : public IModelRuntime
       return estimate;
     }
 
+    ProviderRuntimeDetails providerDetails() const override
+    {
+      // Platform 9.0 (M1): the worker may declare its execution providers and
+      // runtime version in the handshake capabilities block; when it does not,
+      // the resolved device still tells the truth about what was requested.
+      ProviderRuntimeDetails details;
+      const QStringList providers =
+        m_negotiated.value( QStringLiteral( "providers" ) ).toVariant().toStringList();
+      if ( !providers.isEmpty() )
+        details.executionProvider = providers.join( QStringLiteral( "," ) ).toStdString();
+      else if ( m_resolvedCudaIndex >= 0 )
+        details.executionProvider = "CUDAExecutionProvider";
+      details.runtimeVersion =
+        m_negotiated.value( QStringLiteral( "runtime_version" ) ).toString().toStdString();
+      return details;
+    }
+
   private:
     /// Reads ONE newline-terminated JSON document. False on timeout or worker
     /// exit (the response document is then meaningless).
@@ -333,6 +363,7 @@ class PythonWorkerSession final : public IModelRuntime
     std::string m_artifact;
     std::string m_digest;
     int m_timeoutMs = 30000;
+    int m_resolvedCudaIndex = -1; // Platform 9.0: -1 = cpu / no device pinning
     bool m_loaded = false;
     std::mutex m_inferMutex; // one request/response exchange at a time
     std::unique_ptr<QProcess> m_process;
@@ -360,7 +391,8 @@ ModelRuntimePtr makePythonWorkerRuntime( const ModelInfo &model,
   auto session = std::make_shared<PythonWorkerSession>(
     interpreter, script.toStdString(),
     QFileInfo( script ).absolutePath().toStdString(), model.resolvedArtifactPath,
-    model.contentDigest, model.runtime.provider.timeoutMs );
+    model.contentDigest, model.runtime.provider.timeoutMs,
+    model.runtime.gpu ? model.runtime.resolvedCudaIndex : -1 );
   if ( !session->startWorker( errorMessage ) )
     return nullptr;
   return session;

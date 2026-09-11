@@ -508,6 +508,20 @@ class OnnxRuntimeSession final : public IModelRuntime
       return estimate;
     }
 
+    ProviderRuntimeDetails providerDetails() const override
+    {
+      // Platform 9.0 execution identity. The EP verdict is honest at the
+      // strength ORT allows: AppendExecutionProvider_CUDA succeeded at load
+      // (the CUDA provider library registered), so kernels the CUDA EP owns
+      // ran on it; ops without a CUDA kernel execute on the CPU EP inside
+      // the same session — ORT never reports per-op placement, so no claim
+      // of total GPU residency is made here.
+      ProviderRuntimeDetails details;
+      details.executionProvider = m_useCuda ? "CUDAExecutionProvider" : "CPUExecutionProvider";
+      details.runtimeVersion = OrtGetApiBase()->GetVersionString();
+      return details;
+    }
+
   private:
     /// cv::Mat fast path with the historical rank-4 float32 output contract.
     std::vector<cv::Mat> inferMatMulti( const std::vector<NamedBlob> &namedBlobs )

@@ -80,10 +80,36 @@ void appendJsonArray( Json::Value &out, const char *key, const std::vector<std::
   out[key] = arr;
 }
 
+/// Shared preprocess-section parser: the manifest's global `preprocess`
+/// object AND, since 9.0, the per-input `preprocess` override inside
+/// `inputs[]` entries (identical closed vocabulary by construction).
+ModelPreprocessContract parsePreprocessContract( const QJsonObject &preObj )
+{
+  ModelPreprocessContract pre;
+  pre.normalize = preObj.value( QStringLiteral( "normalize" ) ).toString().toStdString();
+  pre.mean = parseDoubleArray( preObj, QStringLiteral( "mean" ) );
+  pre.stdv = parseDoubleArray( preObj, QStringLiteral( "std" ) );
+  const double scale = preObj.value( QStringLiteral( "scale" ) ).toDouble( 1.0 );
+  pre.scale = scale > 0.0 ? scale : 1.0;
+  pre.resize = preObj.value( QStringLiteral( "resize" ) ).toString().toStdString();
+  pre.interpolation = preObj.value( QStringLiteral( "interpolation" ) ).toString().toStdString();
+  pre.nodataPolicy = preObj.value( QStringLiteral( "nodata_policy" ) ).toString().toStdString();
+  const QJsonValue clampMinVal = preObj.value( QStringLiteral( "clamp_min" ) );
+  if ( clampMinVal.isDouble() )
+    pre.clampMin = clampMinVal.toDouble();
+  const QJsonValue clampMaxVal = preObj.value( QStringLiteral( "clamp_max" ) );
+  if ( clampMaxVal.isDouble() )
+    pre.clampMax = clampMaxVal.toDouble();
+  const int padPx = preObj.value( QStringLiteral( "pad" ) ).toInt( 0 );
+  pre.pad = padPx > 0 ? padPx : 0;
+  return pre;
+}
+
 /// Parses one input object: the manifest v2 `input` section or, since v3,
 /// one entry of the `inputs` array. Same keys for both: name, data_type,
 /// dtype, layout, band_roles, width, height, temporal_length, temporal_collapse
-/// and, since Platform 7.0, modality / alignment / missing_timestep.
+/// and, since Platform 7.0, modality / alignment / missing_timestep; since
+/// 9.0, the optional per-input `preprocess` override.
 ModelInputContract parseModelInputContract( const QJsonObject &inputObj )
 {
   ModelInputContract input;
@@ -107,6 +133,15 @@ ModelInputContract parseModelInputContract( const QJsonObject &inputObj )
   input.modality = inputObj.value( QStringLiteral( "modality" ) ).toString().toStdString();
   input.alignment = inputObj.value( QStringLiteral( "alignment" ) ).toString().toStdString();
   input.missingTimestep = inputObj.value( QStringLiteral( "missing_timestep" ) ).toString().toStdString();
+  // Platform 9.0 per-feed preprocessing override. Only an OBJECT declaration
+  // counts (a wrong-typed key is left to the closed-vocabulary report — it
+  // must not silently disable the global contract).
+  if ( inputObj.value( QStringLiteral( "preprocess" ) ).isObject() )
+  {
+    input.preprocessDeclared = true;
+    input.preprocess = parsePreprocessContract(
+      inputObj.value( QStringLiteral( "preprocess" ) ).toObject() );
+  }
   return input;
 }
 
@@ -318,24 +353,7 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   }
 
   // --- Manifest v2: preprocess ----------------------------------------------
-  const QJsonObject preObj = obj.value( QStringLiteral( "preprocess" ) ).toObject();
-  info.preprocess.normalize = preObj.value( QStringLiteral( "normalize" ) ).toString().toStdString();
-  info.preprocess.mean = parseDoubleArray( preObj, QStringLiteral( "mean" ) );
-  info.preprocess.stdv = parseDoubleArray( preObj, QStringLiteral( "std" ) );
-  const double scale = preObj.value( QStringLiteral( "scale" ) ).toDouble( 1.0 );
-  info.preprocess.scale = scale > 0.0 ? scale : 1.0;
-  info.preprocess.resize = preObj.value( QStringLiteral( "resize" ) ).toString().toStdString();
-  info.preprocess.interpolation = preObj.value( QStringLiteral( "interpolation" ) ).toString().toStdString();
-  info.preprocess.nodataPolicy = preObj.value( QStringLiteral( "nodata_policy" ) ).toString().toStdString();
-  // Platform 7.0: clamp window + symmetric tile pad.
-  const QJsonValue clampMinVal = preObj.value( QStringLiteral( "clamp_min" ) );
-  if ( clampMinVal.isDouble() )
-    info.preprocess.clampMin = clampMinVal.toDouble();
-  const QJsonValue clampMaxVal = preObj.value( QStringLiteral( "clamp_max" ) );
-  if ( clampMaxVal.isDouble() )
-    info.preprocess.clampMax = clampMaxVal.toDouble();
-  const int padPx = preObj.value( QStringLiteral( "pad" ) ).toInt( 0 );
-  info.preprocess.pad = padPx > 0 ? padPx : 0;
+  info.preprocess = parsePreprocessContract( obj.value( QStringLiteral( "preprocess" ) ).toObject() );
 
   // --- Manifest v2: tiling ---------------------------------------------------
   const QJsonObject tilingObj = obj.value( QStringLiteral( "tiling" ) ).toObject();
@@ -353,6 +371,8 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   const QJsonValue coverageVal = tilingObj.value( QStringLiteral( "min_valid_coverage" ) );
   if ( coverageVal.isDouble() )
     info.tiling.minValidCoverage = coverageVal.toDouble();
+  // Platform 9.0 (M5): tile output blending vocabulary.
+  info.tiling.blend = tilingObj.value( QStringLiteral( "blend" ) ).toString().toStdString();
 
   // --- Manifest v2: postprocess ----------------------------------------------
   const QJsonObject postObj = obj.value( QStringLiteral( "postprocess" ) ).toObject();
@@ -418,6 +438,47 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
       info.readinessReason += "; " + reason;
   };
 
+  // --- Platform 9.0 (M7): package identity -------------------------------------
+  // `package.aux_files[]`: auxiliary files (class ontology, preprocess config,
+  // label maps) that travel WITH the weights and are digest-bound like them.
+  const QJsonObject packageObj = obj.value( QStringLiteral( "package" ) ).toObject();
+  if ( obj.contains( QStringLiteral( "package" ) ) )
+  {
+    info.auxFilesDeclared = true;
+    const QJsonValue auxVal = packageObj.value( QStringLiteral( "aux_files" ) );
+    if ( auxVal.isArray() )
+    {
+      for ( const auto &entry : auxVal.toArray() )
+      {
+        if ( !entry.isObject() )
+        {
+          markInvalid( "package.aux_files entry is not an object" );
+          continue;
+        }
+        const QJsonObject auxObj = entry.toObject();
+        ModelAuxFileContract aux;
+        aux.path = auxObj.value( QStringLiteral( "path" ) ).toString().toStdString();
+        aux.role = auxObj.value( QStringLiteral( "role" ) ).toString().toStdString();
+        aux.checksum = auxObj.value( QStringLiteral( "checksum" ) ).toString().toStdString();
+        const QJsonValue auxSize = auxObj.value( QStringLiteral( "size_bytes" ) );
+        if ( auxSize.isDouble() && auxSize.toDouble() >= 0.0 )
+          aux.sizeBytes = static_cast<unsigned long long>( auxSize.toDouble() );
+        if ( aux.path.empty() )
+          markInvalid( "package.aux_files entry declares no path" );
+        if ( aux.role.empty() )
+          markInvalid( "package.aux_files entry '" + aux.path + "' declares no role" );
+        if ( !aux.checksum.empty() && !isSha256Hex( normalizedChecksum( aux.checksum ).toStdString() ) )
+          markInvalid( "package.aux_files entry '" + aux.path
+                         + "' declares a checksum that is not a valid SHA-256 hex digest" );
+        info.auxFiles.push_back( std::move( aux ) );
+      }
+    }
+    else if ( !auxVal.isUndefined() && !auxVal.isNull() )
+    {
+      markInvalid( "package.aux_files must be an array" );
+    }
+  }
+
   // Platform 4.0 manifest_version: declared values must be 1..4 and must agree
   // with the manifest's actual shape — a declared version is a contract claim,
   // and a wrong claim means the author expects different parsing semantics
@@ -470,6 +531,7 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
                           "postprocess", "runtime", "domain", "sensors", "band_roles", "modalities",
                           "polarizations", "temporal_length", "radiometric_state", "resolution_range",
                           "cpu_fallback", "estimated_ram_mb", "estimated_vram_mb", "supports_tiling",
+                          "package",
                           // legacy freeform version string superseded by
                           // model_version (historically ignored; kept legal)
                           "version",
@@ -484,7 +546,7 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
       collectUnknownKeys( inputVal.toObject(),
                           { "name", "data_type", "dtype", "layout", "band_roles", "width", "height",
                             "temporal_length", "temporal_collapse", "temporal_dynamic", "modality",
-                            "alignment", "missing_timestep" },
+                            "alignment", "missing_timestep", "preprocess" },
                           "input.", &unknown );
     if ( inputsVal.isArray() )
     {
@@ -492,11 +554,23 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
       for ( const auto &entry : inputsVal.toArray() )
       {
         if ( entry.isObject() )
-          collectUnknownKeys( entry.toObject(),
+        {
+          const QJsonObject entryObj = entry.toObject();
+          collectUnknownKeys( entryObj,
                               { "name", "data_type", "dtype", "layout", "band_roles", "width",
                                 "height", "temporal_length", "temporal_collapse", "temporal_dynamic",
-                                "modality", "alignment", "missing_timestep" },
+                                "modality", "alignment", "missing_timestep", "preprocess" },
                               "inputs[" + std::to_string( index ) + "].", &unknown );
+          // Platform 9.0 (M3): the per-input preprocess override is itself a
+          // closed vocabulary — a typo inside the override must fail the
+          // manifest exactly like a typo in the global section.
+          if ( entryObj.value( QStringLiteral( "preprocess" ) ).isObject() )
+            collectUnknownKeys(
+              entryObj.value( QStringLiteral( "preprocess" ) ).toObject(),
+              { "normalize", "mean", "std", "scale", "resize", "interpolation",
+                "nodata_policy", "clamp_min", "clamp_max", "pad" },
+              "inputs[" + std::to_string( index ) + "].preprocess.", &unknown );
+        }
         ++index;
       }
     }
@@ -526,13 +600,13 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
         }
       }
     }
-    collectUnknownKeys( preObj,
+    collectUnknownKeys( obj.value( QStringLiteral( "preprocess" ) ).toObject(),
                         { "normalize", "mean", "std", "scale", "resize", "interpolation",
                           "nodata_policy", "clamp_min", "clamp_max", "pad" },
                         "preprocess.", &unknown );
     collectUnknownKeys( tilingObj,
                         { "supported", "tile_size", "overlap", "halo", "batch_size",
-                          "min_valid_coverage" },
+                          "min_valid_coverage", "blend" },
                         "tiling.", &unknown );
     collectUnknownKeys( postObj, { "nms", "mask_threshold", "polygonize", "simplify",
                                     "class_mapping" },
@@ -548,6 +622,27 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
                           "runtime.provider.", &unknown );
     collectUnknownKeys( obj.value( QStringLiteral( "artifact" ) ).toObject(),
                         { "path", "checksum", "size_bytes" }, "artifact.", &unknown );
+    // Platform 9.0 (M7): the package section and its aux_files entries are a
+    // closed vocabulary too — a typo'd key must fail the manifest, never sit
+    // silently unverified.
+    if ( obj.contains( QStringLiteral( "package" ) ) )
+    {
+      collectUnknownKeys( packageObj, { "aux_files" }, "package.", &unknown );
+      const QJsonValue auxVal = packageObj.value( QStringLiteral( "aux_files" ) );
+      if ( auxVal.isArray() )
+      {
+        int auxIndex = 0;
+        for ( const auto &entry : auxVal.toArray() )
+        {
+          if ( entry.isObject() )
+            collectUnknownKeys( entry.toObject(),
+                                { "path", "role", "checksum", "size_bytes" },
+                                "package.aux_files[" + std::to_string( auxIndex ) + "].",
+                                &unknown );
+          ++auxIndex;
+        }
+      }
+    }
     if ( obj.contains( QStringLiteral( "domain" ) ) )
       collectUnknownKeys( domainObj,
                           { "sensors", "modalities", "polarizations", "temporal_length",
@@ -605,6 +700,9 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     markInvalid( "tiling.min_valid_coverage must be a number in [0, 1]" );
   if ( info.tiling.minValidCoverage < 0.0 || info.tiling.minValidCoverage > 1.0 )
     markInvalid( "tiling.min_valid_coverage must be in [0, 1]" );
+  if ( !info.tiling.blend.empty() && info.tiling.blend != "none" && info.tiling.blend != "feather" )
+    markInvalid( "tiling.blend '" + info.tiling.blend
+                   + "' is unsupported (supported: none, feather)" );
   if ( !runtimeObj.contains( QStringLiteral( "provider" ) ) )
   {
     // no provider section: nothing to check
@@ -838,6 +936,20 @@ std::string ModelInputContract::validate() const
   if ( temporalDynamic && temporalCollapse != "sequence" )
     return "temporal_dynamic requires temporal_collapse 'sequence' (the channel fold has "
              "a manifest-fixed T by definition)";
+  // Platform 9.0 per-input preprocess override: same closed vocabulary and
+  // sanity rules as the global section — an override that would be refused
+  // as a global contract must not become legal by hiding inside an input.
+  if ( preprocessDeclared )
+  {
+    if ( !preprocess.normalize.empty() && preprocess.normalize != "none"
+         && preprocess.normalize != "linear" && preprocess.normalize != "mean_std" )
+      return "inputs[].preprocess.normalize '" + preprocess.normalize
+               + "' is unsupported (supported: none, linear, mean_std)";
+    if ( preprocess.normalize == "mean_std" && preprocess.mean.empty() && preprocess.stdv.empty() )
+      return "inputs[].preprocess.normalize is mean_std but neither mean nor std is declared";
+    if ( preprocess.resize == "to_input" && width <= 0 && height <= 0 )
+      return "inputs[].preprocess.resize 'to_input' requires a fixed input width/height";
+  }
   return {};
 }
 
@@ -896,6 +1008,29 @@ Json::Value ModelInfo::toJson() const
     out["manifest_version"] = manifestVersion;
   if ( !contentDigest.empty() )
     out["content_digest"] = contentDigest;
+  // Platform 9.0 (M7): package identity projection (additive).
+  if ( auxFilesDeclared )
+  {
+    Json::Value package( Json::objectValue );
+    Json::Value auxFilesJson( Json::arrayValue );
+    for ( const ModelAuxFileContract &aux : auxFiles )
+    {
+      Json::Value auxJson( Json::objectValue );
+      auxJson["path"] = aux.path;
+      auxJson["role"] = aux.role;
+      if ( !aux.checksum.empty() )
+        auxJson["checksum"] = aux.checksum;
+      if ( aux.sizeBytes > 0 )
+        auxJson["size_bytes"] = static_cast<Json::UInt64>( aux.sizeBytes );
+      auxFilesJson.append( auxJson );
+    }
+    if ( !auxFilesJson.empty() )
+      package["aux_files"] = auxFilesJson;
+    if ( !packageDigest.empty() )
+      package["digest"] = packageDigest;
+    if ( !package.empty() )
+      out["package"] = package;
+  }
   out["task"] = task;
   out["input"] = inputType;
   out["output"] = outputType;
@@ -1285,6 +1420,52 @@ bool ModelCatalog::verifyArtifactLocked( ModelInfo &info ) const
     mVerified.push_back( VerifiedArtifact{ resolved, sizeBytes, mtimeMs, actual } );
   }
   info.contentDigest = actual;
+
+  // Platform 9.0 (M7): auxiliary package files are digest-bound like the
+  // weights — an ontology or preprocess config that silently changed would
+  // invalidate reproducibility. Verified at resolve time regardless of
+  // whether the WEIGHTS declare a checksum; a mismatched or missing aux file
+  // fails readiness (the package never half-loads).
+  if ( info.auxFilesDeclared && !info.auxFiles.empty() )
+  {
+    const QDir manifestDir =
+      QFileInfo( QString::fromStdString( info.sourceManifest ) ).absoluteDir();
+    std::string composite = actual; // the weights digest anchors the package digest
+    for ( const ModelAuxFileContract &aux : info.auxFiles )
+    {
+      QString auxPath = QString::fromStdString( aux.path );
+      if ( !auxPath.isEmpty() && QDir::isRelativePath( auxPath ) )
+        auxPath = manifestDir.filePath( auxPath );
+      const QFileInfo auxInfo( auxPath );
+      if ( !auxInfo.exists() || !auxInfo.isFile() )
+        return fail( ModelReadiness::MissingArtifact,
+                     "auxiliary file ('" + aux.role + "') not found: " + aux.path );
+      if ( aux.sizeBytes > 0
+           && static_cast<unsigned long long>( auxInfo.size() ) != aux.sizeBytes )
+        return fail( ModelReadiness::ChecksumMismatch,
+                     "auxiliary file '" + aux.path + "' size mismatch: manifest declares "
+                       + std::to_string( aux.sizeBytes ) + " bytes, file has "
+                       + std::to_string( static_cast<unsigned long long>( auxInfo.size() ) ) );
+      const std::string auxDigest = artifactSha256Hex( auxPath.toStdString() );
+      if ( auxDigest.empty() )
+        return fail( ModelReadiness::ChecksumMismatch,
+                     "auxiliary file '" + aux.path + "' is unreadable while computing its digest" );
+      if ( !aux.checksum.empty() )
+      {
+        const QString auxExpected = normalizedChecksum( aux.checksum );
+        if ( QString::fromStdString( auxDigest ) != auxExpected )
+          return fail( ModelReadiness::ChecksumMismatch,
+                       "auxiliary file '" + aux.path + "' checksum mismatch: expected "
+                         + auxExpected.toStdString() + ", computed " + auxDigest );
+      }
+      composite += "|" + aux.role + ":" + auxDigest;
+    }
+    info.packageDigest = QString::fromUtf8(
+                           QCryptographicHash::hash(
+                             QByteArray::fromStdString( composite ), QCryptographicHash::Sha256 )
+                           .toHex() )
+                           .toStdString();
+  }
 
   if ( info.artifact.checksum.empty() )
     return true; // digest recorded for identity; no declared digest to enforce

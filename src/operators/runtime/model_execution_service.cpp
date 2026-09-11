@@ -251,6 +251,7 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
   options.tta = request.tta;
   options.batchSizeOverride = std::max( 0, request.batchSizeOverride );
   options.outputMode = request.outputMode;
+  options.blend = request.blend; // Platform 9.0 (M5)
 
   ModelExecutionResult result;
   result.identityTag = model.identityTag();
@@ -299,6 +300,18 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
   payload["tileSize"] = result.rasterStats.tileSize;
   payload["tiles"] = result.rasterStats.tilesProcessed;
   payload["tilesSkippedNoData"] = result.rasterStats.tilesSkippedNoData;
+  // Platform 9.0 (M8) execution identity in the payload: EP + backend
+  // version, honest-and-possibly-absent, mirroring the provenance sidecar.
+  {
+    const ProviderRuntimeDetails details = session->providerDetails();
+    Json::Value provider( Json::objectValue );
+    if ( !details.executionProvider.empty() )
+      provider["execution_provider"] = details.executionProvider;
+    if ( !details.runtimeVersion.empty() )
+      provider["runtime_version"] = details.runtimeVersion;
+    if ( !provider.empty() )
+      payload["provider"] = provider;
+  }
   if ( result.rasterStats.batchReductions > 0 )
     payload["batchReductions"] = result.rasterStats.batchReductions;
   // Platform 8.0 grid provenance: what was verified about each fed input
@@ -326,6 +339,11 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
       input["height"] = grid.height;
       if ( grid.frames > 1 )
         input["frames"] = grid.frames;
+      // Platform 9.0 (M3): effective preprocess + fingerprint mirror the sidecar.
+      if ( !grid.preprocessNote.empty() )
+        input["preprocess"] = grid.preprocessNote;
+      if ( grid.fingerprint.isObject() )
+        input["fingerprint"] = grid.fingerprint;
       inputs.append( input );
     }
     payload["inputs"] = inputs;

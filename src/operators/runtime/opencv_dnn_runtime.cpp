@@ -234,4 +234,12 @@ SessionMemoryEstimate OpenCvDnnRuntime::memoryEstimate() const
   return estimate;
 }
 
+ProviderRuntimeDetails OpenCvDnnRuntime::providerDetails() const
+{
+  ProviderRuntimeDetails details;
+  details.executionProvider = m_deviceName == "cuda" ? "cuda" : "cpu";
+  details.runtimeVersion = CV_VERSION;
+  return details;
+}
+
 } // namespace sicnu::operators::runtime

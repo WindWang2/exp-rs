@@ -44,12 +44,15 @@ namespace sicnu::operators::runtime {
 
 /**
  * Host capabilities relevant to model execution. Detection combines
- * cv::dnn's backend/target enumeration with explicit environment overrides
- * for testability:
- *   SICNU_MODEL_GPU=0|1        force cudaAvailable
+ * cv::dnn's backend enumeration, a REAL NVML driver probe (Platform 9.0)
+ * and explicit environment overrides for testability:
+ *   SICNU_MODEL_GPU=0|1        force cudaAvailable AND cudaRuntimeAvailable
  *   SICNU_MODEL_VRAM_MB=N      force the VRAM budget
  *   SICNU_MODEL_CUDA_DEVICES=N force cudaDeviceCount (multi-GPU hosts; the
  *                              opencv_dnn backend can only address index 0)
+ *   SICNU_MODEL_VRAM_FREE_MB=a,b,c  force per-device free VRAM (test seam;
+ *                              MiB, csv by index)
+ *   SICNU_MODEL_NO_NVML=1      disable the NVML probe (deterministic tests)
  */
 struct ModelHardwareCapabilities
 {
@@ -57,6 +60,19 @@ struct ModelHardwareCapabilities
   bool openclAvailable = false;
   int vramBudgetMb = 0; ///< 0 = unknown / not enforced
   int cudaDeviceCount = 0; ///< addressable CUDA devices (0 = none; >=1 with CUDA)
+
+  // --- Platform 9.0: real driver truth (NVML probe, see nvml_inventory) ----
+  /// A real CUDA driver + device exists on this host — the gate DIRECT-CUDA
+  /// runtimes (onnxruntime) resolve against. Historical @p cudaAvailable
+  /// keeps its meaning: the cv::dnn CUDA backend (opencv_dnn runtime path).
+  /// A host can have a real driver without an OpenCV-CUDA build and vice
+  /// versa; env overrides (SICNU_MODEL_GPU) force BOTH for test determinism.
+  bool cudaRuntimeAvailable = false;
+  /// Per-device inventory from the driver (parallel arrays, index-ordered;
+  /// unknown entries stay ""/0/-1 — never fabricated).
+  std::vector<std::string> deviceNames; ///< "" = unknown
+  std::vector<int> deviceTotalVramMb;   ///< 0 = unknown
+  std::vector<int> deviceFreeVramMb;    ///< -1 = unknown
 
   static ModelHardwareCapabilities detect();
 };
@@ -184,7 +200,10 @@ enum class InferenceFailureKind
   IncompatibleSchema,   ///< manifest/graph contract the runtime cannot honor
   DeviceUnavailable,    ///< requested/selected device missing or unaddressable
   ProviderCrash,        ///< external provider died / connection lost
-  OutputInvalid         ///< forward ran but its output failed validation
+  OutputInvalid,        ///< forward ran but its output failed validation
+  // --- Platform 9.0 taxonomy completion (append-only)
+  Timeout               ///< provider exceeded its time budget (a LIVE but
+                        ///< unresponsive provider — distinct from a crash)
 };
 InferenceFailureKind classifyInferenceError( const std::string &message );
 
@@ -209,6 +228,15 @@ struct SessionMemoryEstimate
 {
   int weightsMb = 0;    ///< serialized weight bytes on disk, rounded up
   int workingSetMb = 0; ///< estimated peak per-forward working set (0 = unknown)
+};
+
+/// Platform 9.0 execution identity: WHAT actually executes this session.
+/// Both fields are honest-and-possibly-empty ("unknown" is allowed, a claim
+/// that did not happen is not). Consumed by result payloads and provenance.
+struct ProviderRuntimeDetails
+{
+  std::string executionProvider; ///< "CUDAExecutionProvider" / "CPUExecutionProvider" / ...
+  std::string runtimeVersion;    ///< backend library version (e.g. ORT version string)
 };
 
 /**
@@ -340,7 +368,10 @@ class IModelRuntime
 
     /// Memory estimate (0 = unknown). Never throws.
     virtual SessionMemoryEstimate memoryEstimate() const { return {}; }
-};
+
+    /// Platform 9.0 execution identity (see ProviderRuntimeDetails). Never throws.
+    virtual ProviderRuntimeDetails providerDetails() const { return {}; }
+  };
 
 using ModelRuntimePtr = std::shared_ptr<IModelRuntime>;
 

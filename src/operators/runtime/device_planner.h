@@ -25,12 +25,17 @@ namespace sicnu::operators::runtime {
 
 struct ModelHardwareCapabilities; // model_runtime.h (avoid the include cycle)
 
-/// Static description of one CUDA device (Platform 7.0).
+/// Description of one CUDA device (Platform 7.0, real data Platform 9.0).
 struct DeviceInfo
 {
   int index = 0;
-  std::string name;      ///< honest when unknown: "cuda:<index>"
-  int vramCapacityMb = 0; ///< 0 = unknown / unenforced (reservations still tracked)
+  std::string name;      ///< honest when unknown: "cuda:<index>"; the REAL
+                         ///< product name when the driver reports one
+  int vramCapacityMb = 0; ///< 0 = unknown / unenforced (reservations still
+                          ///< tracked). Platform 9.0: the honest MINIMUM of
+                          ///< the driver-reported total and the env budget.
+  int freeVramMb = -1;    ///< Platform 9.0 driver-reported free VRAM;
+                          ///< -1 = unknown (never fabricated)
 };
 
 /// Device inventory derived from detected capabilities + env overrides.
@@ -38,8 +43,10 @@ struct DeviceInfo
 class DeviceInventory
 {
   public:
-    /// Builds the inventory for a host: cudaDeviceCount entries, per-device
-    /// capacity = the enforced VRAM budget (0 when unset).
+    /// Builds the inventory for a host: cudaDeviceCount entries. Platform
+    /// 7.0 semantics when no driver data exists (capacity = env budget).
+    /// Platform 9.0: per-device capacity = min(driver total, env budget)
+    /// over the known values, free = driver free (-1 unknown).
     static DeviceInventory fromHardware( const ModelHardwareCapabilities &hw );
 
     const std::vector<DeviceInfo> &cudaDevices() const { return m_devices; }

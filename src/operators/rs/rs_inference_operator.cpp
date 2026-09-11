@@ -210,6 +210,14 @@ Json::Value RsInferenceOperator::schema() const
     props["tta"] = makeEnumParam( "tta", "Test-time augmentation (flip averaging)",
                                   { "none", "hflip", "hvflip" }, "none" );
     props["batchCap"] = makeIntegerParam( "batchCap", "Hard cap on tiles per forward pass (0 = manifest/budget default)", 0 );
+    // Execution device token: "" | auto | cpu | cuda | cuda:N (#872 — the
+    // parameter is parsed by run() and echoed in outputs, so it MUST be
+    // declared here; strict schema validation rejects valid requests
+    // otherwise).
+    props["device"] = makeStringParam( "device", "Execution device (\"\" = manifest runtime.device; auto | cpu | cuda | cuda:N)", "" );
+    // Platform 9.0 tile blending (overrides the manifest tiling.blend).
+    props["blend"] = makeEnumParam( "blend", "Tile output blending across the halo overlap",
+                                    { "unset", "none", "feather" }, "unset" );
     // Platform 8.0 multimodal / temporal feeds: one object per manifest input
     // contract. When declared, `input` is not used (the primary feed is the
     // grid authority).
@@ -502,6 +510,15 @@ Json::Value RsInferenceOperator::run( const Json::Value &params, RSOperatorConte
     else if ( tta == "hvflip" )
       request.tta = runtime::TtaMode::HVFlip;
     request.batchSizeOverride = std::max( 0, getInt( params, "batchCap", 0 ) );
+    // Platform 9.0 (M5): tile output blending (Unset = follow the manifest).
+    {
+      const std::string blend =
+        getEnum( params, "blend", { "unset", "none", "feather" }, "unset" );
+      if ( blend == "feather" )
+        request.blend = runtime::TileBlend::Feather;
+      else if ( blend == "none" )
+        request.blend = runtime::TileBlend::None;
+    }
 
     const runtime::ModelExecutionResult result =
       runtime::runModelInference( request, context );
