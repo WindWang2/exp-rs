@@ -38,6 +38,12 @@ TaskPanelHost::TaskPanelHost( QWidget *parent )
   m_form->setSizePolicy( QSizePolicy::Preferred, QSizePolicy::Expanding );
   root->addWidget( m_form, /*stretch=*/1 );
 
+  // Workbench 9.0 M6: production enum resolution — x-ui-enum-source
+  // parameters resolve against canvas layers, DataManager assets and the
+  // ModelCatalog instead of degrading to free text.
+  m_enumProvider = new WorkbenchEnumProvider( this );
+  m_form->setEnumProvider( m_enumProvider );
+
   m_estimate = new QLabel( this );
   m_estimate->setObjectName( QStringLiteral( "rsTaskPanelEstimate" ) );
   m_estimate->setWordWrap( true );
@@ -124,11 +130,13 @@ void TaskPanelHost::showTool( const QString &title, const QString &helpSummary,
 
 void TaskPanelHost::setRasterLayerChoices( const QStringList &ids, const QStringList &names )
 {
+  m_enumProvider->setRasterLayers( ids, names );
   m_form->setRasterLayerChoices( ids, names );
 }
 
 void TaskPanelHost::setVectorLayerChoices( const QStringList &ids, const QStringList &names )
 {
+  m_enumProvider->setVectorLayers( ids, names );
   m_form->setVectorLayerChoices( ids, names );
 }
 

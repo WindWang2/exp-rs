@@ -6491,6 +6491,68 @@ target_compile_definitions(test_scan_pool PRIVATE
 )
 sicnu_discover_tests(test_scan_pool)
 
+# ── Workbench 9.0 M7: bounded catalog pagination ───────────────────────────
+add_executable(test_catalog_pagination
+  test_catalog_pagination.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/data_manager_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/asset_catalog_index.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/preview/asset_preview_service.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/temporal_analysis_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+)
+target_link_libraries(test_catalog_pagination PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_jobs
+  sicnu_operators
+  Sicnu::qgis_display
+  Sicnu::Geospatial
+  GDAL::GDAL
+)
+target_include_directories(test_catalog_pagination PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_catalog_pagination PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_catalog_pagination)
+
+# ── Workbench 9.0 M6: production schema enum provider ──────────────────────
+add_executable(test_workbench_enum_provider
+  test_workbench_enum_provider.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/workbench_enum_provider.cpp
+)
+target_link_libraries(test_workbench_enum_provider PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  sicnu_data
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_workbench_enum_provider PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_workbench_enum_provider PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_workbench_enum_provider)
+
 # ── Workbench 9.0 M1: explicit workbench state model ───────────────────────
 add_executable(test_workbench_state_model
   test_workbench_state_model.cpp

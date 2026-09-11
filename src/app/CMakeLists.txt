@@ -110,6 +110,7 @@ add_executable(sicnu_geo_rs
     main_window_misc.cpp
     main_window_processing.cpp
     shell/schema_form_builder.cpp
+    shell/workbench_enum_provider.cpp
     shell/task_panel_host.cpp
     shell/workflow_session_controller.cpp
     shell/ribbon_controller.cpp

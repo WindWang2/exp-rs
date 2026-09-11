@@ -8,6 +8,7 @@
 #pragma once
 
 #include "schema_form_builder.h"
+#include "workbench_enum_provider.h"
 
 #include <QWidget>
 #include <QStringList>
@@ -38,6 +39,11 @@ class TaskPanelHost : public QWidget
     void setVectorLayerChoices( const QStringList &ids, const QStringList &names );
     void setAssetChoices( const QStringList &ids, const QStringList &names );
     void setModelChoices( const QStringList &names );
+
+    /// Workbench 9.0 M6: the production enum provider installed on the form.
+    /// Layer choice pushes update it too, so the push and enum-source
+    /// channels can never disagree.
+    WorkbenchEnumProvider *enumProvider() const { return m_enumProvider; }
     void setHints( const QStringList &hints );
     void setRunning( bool running );
     void setSuccess( const QString &message );
@@ -77,7 +83,8 @@ class TaskPanelHost : public QWidget
 
     QLabel *m_title = nullptr;
     QLabel *m_help = nullptr;
-    SchemaFormBuilder *m_form = nullptr;
+    WorkbenchEnumProvider *m_enumProvider = nullptr;
+  SchemaFormBuilder *m_form = nullptr;
     QLabel *m_estimate = nullptr;
     QProgressBar *m_progress = nullptr;
     QLabel *m_hint = nullptr;
