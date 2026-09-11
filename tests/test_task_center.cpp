@@ -1605,3 +1605,35 @@ TEST_CASE("TaskCenter - instantly-completing jobs always map to their task (#799
     }
     engine.waitUntilIdleForTests();
 }
+
+TEST_CASE( "TaskCenter - In-flight cancellation during dispatch does not self-deadlock (#851)",
+           "[processing][task_center][concurrency][issue851]" )
+{
+    auto &tc = sicnu::TaskCenter::instance();
+    auto &engine = sicnu::jobs::JobEngine::instance();
+    engine.shutdownForTests();
+    engine.clearExecutors();
+    engine.setMaxWorkers( 2 );
+
+    for ( int i = 0; i < 20; ++i )
+    {
+        sicnu::jobs::JobRequest req;
+        req.algorithmId = "callable:test_cancel_deadlock";
+        long taskId = tc.submitJob(
+            req,
+            []( const sicnu::jobs::JobRequest &, sicnu::operators::RSOperatorContext & ) {
+                std::this_thread::sleep_for( std::chrono::milliseconds( 2 ) );
+                return Json::Value( Json::objectValue );
+            } );
+        REQUIRE( taskId > 0 );
+
+        // Immediately trigger task cancellation to race with in-flight launch dispatch
+        tc.cancelTask( taskId );
+
+        waitForTerminalStatus( tc, taskId, 200, 5 );
+        auto info = tc.getTaskInfo( taskId );
+        REQUIRE( sicnu::isTerminalStatus( info.status ) );
+    }
+    engine.waitUntilIdleForTests();
+}
+

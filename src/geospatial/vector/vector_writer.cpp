@@ -199,6 +199,7 @@ VectorWriter::VectorWriter( VectorWriter &&other ) noexcept
   , mLayer( std::exchange( other.mLayer, nullptr ) )
   , mTargetPath( std::move( other.mTargetPath ) )
   , mStagedPath( std::move( other.mStagedPath ) )
+  , mTransactionActive( std::exchange( other.mTransactionActive, false ) )
   , mFinalized( other.mFinalized )
 {
   other.mFinalized = true;
@@ -214,6 +215,7 @@ VectorWriter &VectorWriter::operator=( VectorWriter &&other ) noexcept
     mLayer = std::exchange( other.mLayer, nullptr );
     mTargetPath = std::move( other.mTargetPath );
     mStagedPath = std::move( other.mStagedPath );
+    mTransactionActive = std::exchange( other.mTransactionActive, false );
     mFinalized = std::exchange( other.mFinalized, true );
   }
   return *this;
@@ -327,6 +329,7 @@ void VectorWriter::cancel()
     atomic_fs::discardStaged( mStagedPath );
     mStagedPath.clear();
   }
+  mTransactionActive = false;
   mFinalized = true;
 }
 

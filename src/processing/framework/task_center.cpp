@@ -1260,7 +1260,7 @@ void TaskCenter::onJobRecord( const sicnu::jobs::JobRecord &record )
                 tag = tag.substr( 5 );
             bool ok = false;
             long parsedId = QString::fromStdString( tag ).toLong( &ok );
-            if ( ok && m_tasks.contains( parsedId ) )
+            if ( ok && m_tasks.contains( parsedId ) && !isTerminalStatus( m_tasks[parsedId].status ) )
             {
                 taskId = parsedId;
                 m_taskByJobId[record.id] = taskId;
@@ -1625,7 +1625,8 @@ void TaskCenter::processNextQueuedTasks()
     QList<long> resourceBlockedIds;
     QList<long> dagRegressedIds;
 
-    while ( m_active.total < globalMax && !m_readyHeap.empty() && scanned < scanBudget )
+    const unsigned int effectiveMax = globalMax + ( sicnu::jobs::JobEngine::isWorkerThread() ? 1u : 0u );
+    while ( m_active.total < effectiveMax && !m_readyHeap.empty() && scanned < scanBudget )
     {
         ReadyEntry entry = m_readyHeap.top();
         m_readyHeap.pop();
@@ -2004,6 +2005,7 @@ void TaskCenter::flushPendingLaunches()
             if ( !m_tasks.contains( launch.taskId ) || isTerminalStatus( m_tasks[launch.taskId].status ) )
                 continue; // canceled between staging and dispatch — never submit
             m_taskByJobId[jobId] = launch.taskId;
+            m_tasks[launch.taskId].jobId = jobId;
         }
 
         std::string submittedId;
@@ -2021,28 +2023,44 @@ void TaskCenter::flushPendingLaunches()
             {
                 QMutexLocker rollback( &m_mutex );
                 m_taskByJobId.remove( jobId );
+                if ( m_tasks.contains( launch.taskId ) )
+                    m_tasks[launch.taskId].jobId.clear();
             }
             markTaskFailed( launch.taskId, QStringLiteral( "Task Center could not submit the job" ) );
             continue;
         }
 
         bool mapped = false;
+        std::string jobToCancel;
         {
             QMutexLocker reLock( &m_mutex );
-            if ( m_tasks.contains( launch.taskId ) && !isTerminalStatus( m_tasks[launch.taskId].status ) )
+            if ( m_tasks.contains( launch.taskId ) )
             {
-                m_tasks[launch.taskId].jobId = submittedId;
-                mapped = true;
+                if ( m_tasks[launch.taskId].status == TaskStatus::Canceled )
+                {
+                    // Canceled while submit was in-flight: drop the pre-registration —
+                    // the task is terminal, so the job's terminal record would
+                    // otherwise leave an orphan mapping behind (review L P3).
+                    // JobEngine::cancel is deferred outside m_mutex to prevent
+                    // self-deadlock when JobEngine::cancel invokes onJobRecord (Issue #851).
+                    m_taskByJobId.remove( submittedId );
+                    jobToCancel = submittedId;
+                }
+                else
+                {
+                    m_tasks[launch.taskId].jobId = submittedId;
+                    mapped = true;
+                }
             }
             else
             {
-                // Canceled while submit was in-flight: cancel the newly
-                // submitted job immediately, and drop the pre-registration —
-                // the task is terminal, so the job's terminal record would
-                // otherwise leave an orphan mapping behind (review L P3).
-                sicnu::jobs::JobEngine::instance().cancel( submittedId );
                 m_taskByJobId.remove( submittedId );
+                jobToCancel = submittedId;
             }
+        }
+        if ( !jobToCancel.empty() )
+        {
+            sicnu::jobs::JobEngine::instance().cancel( jobToCancel );
         }
         if ( mapped )
         {
@@ -3062,6 +3080,9 @@ AlgorithmTaskInfo TaskCenter::waitForTask( long taskId,
                                             std::chrono::milliseconds timeout,
                                             std::chrono::milliseconds pollInterval ) const
 {
+    if ( sicnu::jobs::JobEngine::isWorkerThread() )
+        return AlgorithmTaskInfo{};
+
     using clock = std::chrono::steady_clock;
     const auto deadline = clock::now() + timeout;
 
@@ -3097,6 +3118,9 @@ PipelineExecutionInfo TaskCenter::waitForPipeline( long pipelineId,
                                                     std::chrono::milliseconds timeout,
                                                     std::chrono::milliseconds pollInterval ) const
 {
+    if ( sicnu::jobs::JobEngine::isWorkerThread() )
+        return PipelineExecutionInfo{};
+
     using clock = std::chrono::steady_clock;
     const auto deadline = clock::now() + timeout;
 

@@ -59,7 +59,10 @@ bool fillDepressions( const float *dem, float *filled, int width, int height, fl
             const size_t i = static_cast<size_t>( y ) * width + x;
             filled[i] = dem[i];
             if ( dem[i] == nodata || std::isnan( dem[i] ) )
+            {
+                done[i] = 1;
                 continue;
+            }
             // The drain boundary is the raster perimeter AND every valid
             // cell adjacent (8-neighbourhood, matching the flood/routing
             // step set) to a NoData cell (#848): reprojected/clipped DEMs

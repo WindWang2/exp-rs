@@ -217,7 +217,8 @@ TEST_CASE( "Adversarial: DEM flow accumulation endorheic basin enclosed by NoDat
     std::vector<float> acc( W * H, 0.0f );
 
     REQUIRE( TerrainFlow::fillDepressions( dem.data(), filled.data(), W, H, kNodata ) );
-    REQUIRE( TerrainFlow::flowDirections( filled.data(), dir.data(), W, H, kNodata ) );
+    CHECK( filled[2 * W + 2] == Approx( 8.0f ) );
+    REQUIRE( TerrainFlow::flowDirections( dem.data(), dir.data(), W, H, kNodata ) );
     REQUIRE( TerrainFlow::flowAccumulation( dir.data(), acc.data(), W, H ) );
 
     // Center cell (2, 2) is a fill flat: #848 (Scientific Algorithms 9.0)

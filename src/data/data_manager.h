@@ -84,18 +84,14 @@ class DataManager : public QObject
     explicit DataManager( QObject *parent = nullptr );
     ~DataManager() override;
 
-    /// THREAD AFFINITY CONTRACT (#703): the DataManager has no internal
-    /// locking. EVERY access — mutations AND the const readers below
-    /// (asset()/assets()/findByPath()/provenance()/derivedFrom()/
-    /// derivedOutputsOf()/leaseCount()/leases()/...) — must run on the
-    /// manager's owning thread (the affinity the mutators already enforce by
-    /// returning `data.wrong_thread` diagnostics). An off-affinity reader is
-    /// not merely a style issue: it races the mutators' QVector
-    /// insert/reallocation and can read a torn snapshot. The one sanctioned
-    /// cross-thread entry point is AssetLease::release(), which neutralizes
-    /// its control block atomically and defers the catalog bookkeeping to the
-    /// manager's thread. Callers on other threads marshal access onto the
-    /// affinity thread (see the workflow runtime's queued-commit pattern).
+    /// THREAD AFFINITY CONTRACT (#703 / #852): Mutations run strictly on the
+    /// manager's owning thread. Const readers (asset()/assets()/findByPath()/
+    /// provenance()/derivedFrom()/derivedOutputsOf()/temporalCollection()/...)
+    /// acquire an immutable copy-on-write CatalogSnapshot published atomically on
+    /// mutations, ensuring background worker threads (such as JobEngine workers
+    /// running temporal operators) read a consistent snapshot without torn reads.
+    /// The cross-thread entry point AssetLease::release() neutralizes its control
+    /// block atomically and defers catalog bookkeeping to the manager's thread.
 
     RegisterResult registerSource( const RegisterRequest &request );
     Result<AssetId> restoreSource( const RestoreRequest &request );

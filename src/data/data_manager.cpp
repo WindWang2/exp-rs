@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <atomic>
 #include <functional>
+#include <memory>
+#include <mutex>
 #include <utility>
 
 #include <QCryptographicHash>
@@ -188,9 +190,37 @@ struct DataManager::Impl
     AssetId input;
   };
 
+  struct CatalogSnapshot
+  {
+    QVector<AssetRecord> records;
+    QVector<TemporalCollectionRecord_> temporalCollections;
+    quint64 generation = 0;
+  };
+
+  mutable std::mutex snapshotMutex;
+  std::shared_ptr<const CatalogSnapshot> currentSnapshot;
+
+  void publishSnapshot()
+  {
+    catalogGeneration++;
+    auto snap = std::make_shared<CatalogSnapshot>();
+    snap->records = records;
+    snap->temporalCollections = temporalCollections;
+    snap->generation = catalogGeneration;
+    std::lock_guard<std::mutex> lock( snapshotMutex );
+    currentSnapshot = std::move( snap );
+  }
+
+  std::shared_ptr<const CatalogSnapshot> getSnapshot() const
+  {
+    std::lock_guard<std::mutex> lock( snapshotMutex );
+    return currentSnapshot;
+  }
+
   explicit Impl( std::unique_ptr<internal::SourceProviderRegistry> sourceProviders )
     : providers( std::move( sourceProviders ) )
   {
+    publishSnapshot();
   }
 
   std::unique_ptr<internal::SourceProviderRegistry> providers;
@@ -203,7 +233,7 @@ struct DataManager::Impl
   /// created by createVirtualRaster; the `.vrt` files inside are disposable
   /// build artifacts (the recipes are the identity).
   std::unique_ptr<QTemporaryDir> vrtScratchDir;
-  quint64 catalogGeneration = 1;
+  quint64 catalogGeneration = 0;
   quint64 nextLeaseToken = 1;
 
   QVector<AssetRecord>::iterator findRecord( AssetId id )
@@ -504,7 +534,7 @@ RegisterResult DataManager::registerSource( const RegisterRequest &request )
                            record.snapshot.acquisitionTime(),
                            record.snapshot.parentCollectionId() };
     record.snapshot = std::move( updated );
-    m_impl->catalogGeneration++;
+    m_impl->publishSnapshot();
 
     emit assetChanged( existingId );
     watchAssetSource( record.snapshot.source().canonicalSource );
@@ -526,7 +556,7 @@ RegisterResult DataManager::registerSource( const RegisterRequest &request )
                           source.structure,
                           request.acquisitionTime };
   m_impl->records.push_back( Impl::AssetRecord{ sourceKey, std::move( snapshot ) } );
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
 
   emit assetAdded( id );
   watchAssetSource( normalizedDescriptor.canonicalSource );
@@ -596,7 +626,7 @@ Result<AssetId> DataManager::restoreSource( const RestoreRequest &request )
                           request.acquisitionTime };
   m_impl->records.push_back(
     Impl::AssetRecord{ sourceKey, std::move( snapshot ) } );
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
   emit assetAdded( request.id );
   watchAssetSource( normalizedDescriptor.canonicalSource );
   return Result<AssetId>::success( request.id, resolved.diagnostics() );
@@ -683,7 +713,7 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
                          current.parentCollectionId() };
   recordIt->sourceKey = newSourceKey;
   recordIt->snapshot = std::move( updated );
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
   unwatchAssetSource( current.source().canonicalSource );
   watchAssetSource( recordIt->snapshot.source().canonicalSource );
 
@@ -746,8 +776,13 @@ Result<RelocateResult> DataManager::relocate( const RelocateRequest &request )
 std::optional<AssetSnapshot> DataManager::asset( AssetId id ) const
 {
   checkReaderAffinity( this );
-  const auto it = m_impl->findRecord( id );
-  if ( it == m_impl->records.end() )
+  const auto snap = m_impl->getSnapshot();
+  if ( !snap )
+    return std::nullopt;
+  const auto it = std::find_if(
+    snap->records.begin(), snap->records.end(),
+    [&]( const Impl::AssetRecord &record ) { return record.snapshot.id() == id; } );
+  if ( it == snap->records.end() )
     return std::nullopt;
   return it->snapshot;
 }
@@ -755,9 +790,12 @@ std::optional<AssetSnapshot> DataManager::asset( AssetId id ) const
 QVector<AssetSnapshot> DataManager::assets( const AssetQuery &query ) const
 {
   checkReaderAffinity( this );
+  const auto snap = m_impl->getSnapshot();
+  if ( !snap )
+    return {};
   QVector<AssetSnapshot> snapshots;
-  snapshots.reserve( m_impl->records.size() );
-  for ( const Impl::AssetRecord &record : m_impl->records )
+  snapshots.reserve( snap->records.size() );
+  for ( const Impl::AssetRecord &record : snap->records )
   {
     if ( query.kind && record.snapshot.kind() != *query.kind )
       continue;
@@ -777,6 +815,10 @@ std::optional<AssetSnapshot> DataManager::findByPath( const QString &path ) cons
   if ( path.trimmed().isEmpty() )
     return std::nullopt;
 
+  const auto snap = m_impl->getSnapshot();
+  if ( !snap )
+    return std::nullopt;
+
   const QStringList queryAliases = virtualPathAliases( path );
   const bool queryVirtual = isVirtualOrRemotePath( path );
 
@@ -785,7 +827,7 @@ std::optional<AssetSnapshot> DataManager::findByPath( const QString &path ) cons
   // prepends cwd or a drive letter). Remote/VSI identity is string+alias only.
   const QString absolute = queryVirtual ? QString() : fi.absoluteFilePath();
   const QString canonicalPath = queryVirtual ? QString() : fi.canonicalFilePath();
-  for ( const Impl::AssetRecord &record : m_impl->records )
+  for ( const Impl::AssetRecord &record : snap->records )
   {
     const QString &stored = record.snapshot.source().canonicalSource;
     const QStringList storedAliases = virtualPathAliases( stored );
@@ -824,14 +866,20 @@ std::optional<AssetSnapshot> DataManager::findByPath( const QString &path ) cons
 quint64 DataManager::catalogGeneration() const
 {
   checkReaderAffinity( this );
-  return m_impl->catalogGeneration;
+  const auto snap = m_impl->getSnapshot();
+  return snap ? snap->generation : m_impl->catalogGeneration;
 }
 
 std::optional<DerivationRecord> DataManager::provenance( AssetId id ) const
 {
   checkReaderAffinity( this );
-  const auto it = m_impl->findRecord( id );
-  if ( it == m_impl->records.end() )
+  const auto snap = m_impl->getSnapshot();
+  if ( !snap )
+    return std::nullopt;
+  const auto it = std::find_if(
+    snap->records.begin(), snap->records.end(),
+    [&]( const Impl::AssetRecord &record ) { return record.snapshot.id() == id; } );
+  if ( it == snap->records.end() )
     return std::nullopt;
   return it->derivation;
 }
@@ -840,8 +888,13 @@ QVector<AssetId> DataManager::derivedFrom( AssetId id ) const
 {
   checkReaderAffinity( this );
   QVector<AssetId> result;
-  const auto it = m_impl->findRecord( id );
-  if ( it == m_impl->records.end() || !it->derivation )
+  const auto snap = m_impl->getSnapshot();
+  if ( !snap )
+    return result;
+  const auto it = std::find_if(
+    snap->records.begin(), snap->records.end(),
+    [&]( const Impl::AssetRecord &record ) { return record.snapshot.id() == id; } );
+  if ( it == snap->records.end() || !it->derivation )
     return result;
   for ( const DerivationInput &input : it->derivation->inputs )
     result.append( input.assetId );
@@ -852,7 +905,10 @@ QVector<AssetId> DataManager::derivedOutputsOf( AssetId id ) const
 {
   checkReaderAffinity( this );
   QVector<AssetId> result;
-  for ( const auto &record : m_impl->records )
+  const auto snap = m_impl->getSnapshot();
+  if ( !snap )
+    return result;
+  for ( const auto &record : snap->records )
   {
     if ( !record.derivation )
       continue;
@@ -872,8 +928,11 @@ QVector<AssetId> DataManager::derivedOutputsOfCollection( CollectionId id ) cons
 {
   checkReaderAffinity( this );
   QVector<AssetId> result;
+  const auto snap = m_impl->getSnapshot();
+  if ( !snap )
+    return result;
   const auto colAssetId = AssetId::fromString( id.toString() );
-  for ( const auto &record : m_impl->records )
+  for ( const auto &record : snap->records )
   {
     if ( !record.derivation )
       continue;
@@ -920,6 +979,7 @@ Result<void> DataManager::attachDerivationRecord( AssetId id,
   // already emitted assetAdded for the fresh asset.
   const bool replaced = it->derivation.has_value();
   it->derivation = stamped;
+  m_impl->publishSnapshot();
   if ( replaced )
     emit assetChanged( id );
   return Result<void>::success();
@@ -977,7 +1037,7 @@ Result<AssetLease> DataManager::acquire( const AssetRef &asset, const AssetUse &
   control->manager = this;
   control->active.store( true, std::memory_order_release );
   m_impl->leases.push_back( Impl::LeaseRecord{ control } );
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
 
   return Result<AssetLease>::success( AssetLease{ std::move( control ) } );
 }
@@ -1029,7 +1089,7 @@ Result<void> DataManager::commitEdit( AssetId id )
   ( *leaseIt ).control->active = false;
   ( *leaseIt ).control->manager.clear();
   m_impl->leases.erase( leaseIt );
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
 
   emit assetChanged( id );
   return Result<void>::success();
@@ -1063,7 +1123,7 @@ Result<void> DataManager::notifyExternalContentChange( AssetId id )
                                       recordIt->snapshot.acquisitionTime(),
                                       recordIt->snapshot.parentCollectionId() };
 
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
   emit assetChanged( id );
   return Result<void>::success();
 }
@@ -1100,7 +1160,7 @@ Result<void> DataManager::rollbackEdit( AssetId id )
   ( *leaseIt ).control->active = false;
   ( *leaseIt ).control->manager.clear();
   m_impl->leases.erase( leaseIt );
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
 
   return Result<void>::success();
 }
@@ -1219,7 +1279,7 @@ Result<void> DataManager::addStrongDependency( AssetId dependent, AssetId input 
   // The edge changes the catalog's dependency state: any UnloadPlan captured
   // before this point is stale (its strongDependents impact is out of date),
   // exactly as with any other catalog mutation.
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
   return Result<void>::success();
 }
 
@@ -1475,7 +1535,7 @@ Result<AssetId> DataManager::restoreVirtualRaster(
   Impl::AssetRecord record{ sourceKey, std::move( snapshot ) };
   record.virtualRecipe = request.recipe;
   m_impl->records.push_back( std::move( record ) );
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
   emit assetAdded( request.id );
 
   restoreVirtualRasterEdges( request, diagnostics );
@@ -1623,7 +1683,7 @@ Result<void> DataManager::unload( const UnloadPlan &confirmedPlan )
       m_impl->records.erase( dependentIt );
       pruneChildFromCollections( dependentId );
       pruneDependencyEdgesOf( dependentId );
-      m_impl->catalogGeneration++;
+      m_impl->publishSnapshot();
       emit assetRemoved( dependentId );
     }
   }
@@ -1664,7 +1724,7 @@ Result<void> DataManager::unload( const UnloadPlan &confirmedPlan )
   unwatchAssetSource( unloadedSourcePath );
   pruneChildFromCollections( confirmedPlan.assetId() );
   pruneDependencyEdgesOf( confirmedPlan.assetId() );
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
 
   emit assetRemoved( confirmedPlan.assetId() );
   return Result<void>::success();
@@ -1764,7 +1824,7 @@ ReapResult DataManager::reap( const ReapRequest &request )
   unwatchAssetSource( sourcePath );
   pruneChildFromCollections( request.id );
   pruneDependencyEdgesOf( request.id );
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
   result.unloaded = true;
 
   // Physical deletion is gated by DeletableSource. A temporary asset the Data
@@ -1834,7 +1894,7 @@ Result<void> DataManager::promote( AssetId id )
                           current.acquisitionTime(),
                           current.parentCollectionId() };
   recordIt->snapshot = std::move( promoted );
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
 
   emit assetChanged( id );
   return Result<void>::success();
@@ -1927,7 +1987,7 @@ LeaseOutcome DataManager::releaseLease( const LeaseRef &lease )
   ( *it ).control->active = false;
   ( *it ).control->manager.clear();
   m_impl->leases.erase( it );
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
   return LeaseOutcome::Released;
 }
 
@@ -2065,7 +2125,7 @@ DataManager::restoreCollection( CollectionId id, const CollectionCreateRequest &
   record.displayName = request.displayName;
   record.metadata = request.metadata;
   m_impl->collections.push_back( std::move( record ) );
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
   emit collectionAdded( id );
   return CollectionCreateResult{ id, {} };
 }
@@ -2158,7 +2218,7 @@ DataManager::restoreTemporalCollection( CollectionId id, quint64 revision,
   record.descriptor = request.descriptor;
   record.revision = revision > 0 ? revision : 1;
   m_impl->temporalCollections.push_back( std::move( record ) );
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
   emit temporalCollectionAdded( id );
   return TemporalCollectionCreateResult{ id, false, {} };
 }
@@ -2166,8 +2226,13 @@ DataManager::restoreTemporalCollection( CollectionId id, quint64 revision,
 std::optional<TemporalCollectionRecord> DataManager::temporalCollection( CollectionId id ) const
 {
   checkReaderAffinity( this );
-  const auto it = m_impl->findTemporalCollection( id );
-  if ( it == m_impl->temporalCollections.end() )
+  const auto snap = m_impl->getSnapshot();
+  if ( !snap )
+    return std::nullopt;
+  const auto it = std::find_if(
+    snap->temporalCollections.begin(), snap->temporalCollections.end(),
+    [&]( const Impl::TemporalCollectionRecord_ &c ) { return c.id == id; } );
+  if ( it == snap->temporalCollections.end() )
     return std::nullopt;
   TemporalCollectionRecord snapshot;
   snapshot.id = it->id;
@@ -2182,9 +2247,12 @@ std::optional<TemporalCollectionRecord> DataManager::temporalCollection( Collect
 QVector<TemporalCollectionRecord> DataManager::temporalCollections() const
 {
   checkReaderAffinity( this );
+  const auto snap = m_impl->getSnapshot();
+  if ( !snap )
+    return {};
   QVector<TemporalCollectionRecord> snapshots;
-  snapshots.reserve( m_impl->temporalCollections.size() );
-  for ( const Impl::TemporalCollectionRecord_ &c : m_impl->temporalCollections )
+  snapshots.reserve( snap->temporalCollections.size() );
+  for ( const Impl::TemporalCollectionRecord_ &c : snap->temporalCollections )
   {
     TemporalCollectionRecord snapshot;
     snapshot.id = c.id;
@@ -2224,6 +2292,7 @@ DataManager::updateTemporalCollection( CollectionId id, const TemporalCollection
   it->descriptor = request.descriptor;
   it->revision += 1;
   it->updatedAtUtc = QDateTime::currentDateTimeUtc();
+  m_impl->publishSnapshot();
 
   TemporalCollectionRecord snapshot;
   snapshot.id = it->id;
@@ -2251,7 +2320,7 @@ Result<void> DataManager::removeTemporalCollection( CollectionId id )
                   DiagnosticSeverity::Error } );
   }
   m_impl->temporalCollections.erase( it );
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
   emit temporalCollectionRemoved( id );
   return Result<void>::success( {} );
 }
@@ -2300,7 +2369,7 @@ Result<void> DataManager::addChildToCollection( CollectionId collectionId,
 
   collectionIt->childAssetIds.append( childAssetId );
   assetIt->snapshot.m_parentCollectionId = collectionId;
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
   return Result<void>::success();
 }
 
@@ -2388,7 +2457,7 @@ Result<void> DataManager::unloadCollection( CollectionId id, bool cascade )
       m_impl->records.erase( childIt );
       pruneChildFromCollections( childId );
       pruneDependencyEdgesOf( childId );
-      m_impl->catalogGeneration++;
+      m_impl->publishSnapshot();
       emit assetRemoved( childId );
     }
   }
@@ -2408,7 +2477,7 @@ Result<void> DataManager::unloadCollection( CollectionId id, bool cascade )
   {
     m_impl->collections.erase( freshCollectionIt );
   }
-  m_impl->catalogGeneration++;
+  m_impl->publishSnapshot();
   emit collectionRemoved( id );
   return Result<void>::success();
 }

@@ -243,6 +243,8 @@ std::vector<std::string> RecipeCatalog::validateRecipeMetadata( const Json::Valu
     for ( const Json::Value &step : recipe.get( "steps", Json::Value( Json::arrayValue ) ) )
     {
       const std::string stepId = step.get( "id", "" ).asString();
+      const Json::Value &stepInputs = step.get( "inputs", Json::Value() );
+      const bool hasExplicitInputs = stepInputs.isArray() && !stepInputs.empty();
       for ( const std::string &key : step.get( "params", Json::Value() ).getMemberNames() )
       {
         const Json::Value &value = step["params"][ key ];
@@ -251,7 +253,7 @@ std::vector<std::string> RecipeCatalog::validateRecipeMetadata( const Json::Valu
         const std::string name = value.asString().substr( 9 );
         if ( declaredOutputs.count( name ) || emitted.count( name ) )
           continue;
-        if ( loweredKey( key ) != "output" )
+        if ( loweredKey( key ) != "output" && !hasExplicitInputs )
           problems.push_back( id + ": step '" + stepId + "' consumes intermediate '" + name +
                               "' before any step produces it (auto-wiring convention)" );
         else
@@ -667,7 +669,8 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
       continue;
     const Json::Value &binding = paramBindings.get( gateKey, Json::Value() );
     const bool open = binding.isBool() ? binding.asBool()
-                                       : ( binding.isString() && !binding.asString().empty() );
+                                       : ( binding.isNumeric() ? ( binding.asDouble() != 0.0 )
+                                       : ( binding.isString() && !binding.asString().empty() ) );
     paramGateOpen[gateKey] = open;
   }
   const int stepCount = static_cast<int>( stepTemplates.size() );
@@ -733,15 +736,30 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
     ++pass;
     for ( StepGateState &state : states )
     {
-      if ( state.usesSkipped || !state.hasSkipped )
+      if ( state.dropped )
         continue;
-      const bool upstreamDegraded =
+      const bool upstreamDropped =
         std::any_of( state.upstream.begin(), state.upstream.end(),
-                     [ &states ]( int j ) { return states[j].dropped || states[j].usesSkipped; } );
-      if ( !state.ownGateOpen || upstreamDegraded )
+                     [ &states ]( int j ) { return states[j].dropped; } );
+      const bool upstreamDegraded = upstreamDropped ||
+        std::any_of( state.upstream.begin(), state.upstream.end(),
+                     [ &states ]( int j ) { return states[j].usesSkipped; } );
+
+      if ( state.hasSkipped )
       {
-        state.usesSkipped = true;
-        changed = true;
+        if ( !state.usesSkipped && ( !state.ownGateOpen || upstreamDegraded ) )
+        {
+          state.usesSkipped = true;
+          changed = true;
+        }
+      }
+      else
+      {
+        if ( !state.ownGateOpen || upstreamDropped )
+        {
+          state.dropped = true;
+          changed = true;
+        }
       }
     }
   }

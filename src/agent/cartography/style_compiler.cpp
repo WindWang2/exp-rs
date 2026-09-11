@@ -553,10 +553,16 @@ bool applyVectorBlock( QgsVectorLayer *vector, const Json::Value &vectorBlock,
         {
           if ( !rule.isObject() || !rule.isMember( "expression" ) || !rule["expression"].isString() )
             continue;
-          Json::Value entry( Json::objectValue );
-          entry["color"] = rule.get( "color", Json::Value() );
-          entry["symbol"] = rule.get( "symbol", Json::Value() );
-          QgsSymbol *symbol = buildSymbol( entry, defaultColor, geometry );
+          const bool hasSubrules = rule.isMember( "rules" ) && rule["rules"].isArray() && !rule["rules"].empty();
+          const bool hasExplicitSymbol = rule.isMember( "color" ) || rule.isMember( "symbol" );
+          QgsSymbol *symbol = nullptr;
+          if ( !hasSubrules || hasExplicitSymbol )
+          {
+            Json::Value entry( Json::objectValue );
+            entry["color"] = rule.get( "color", Json::Value() );
+            entry["symbol"] = rule.get( "symbol", Json::Value() );
+            symbol = buildSymbol( entry, defaultColor, geometry );
+          }
           const QString label = rule.isMember( "label" ) && rule["label"].isString()
                                   ? QString::fromStdString( rule["label"].asString() )
                                   : QString();

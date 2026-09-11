@@ -210,6 +210,7 @@ Json::Value RsInferenceOperator::schema() const
     props["tta"] = makeEnumParam( "tta", "Test-time augmentation (flip averaging)",
                                   { "none", "hflip", "hvflip" }, "none" );
     props["batchCap"] = makeIntegerParam( "batchCap", "Hard cap on tiles per forward pass (0 = manifest/budget default)", 0 );
+    props["device"] = makeStringParam( "device", "Execution device (cpu/cuda)", "" );
     // Platform 8.0 multimodal / temporal feeds: one object per manifest input
     // contract. When declared, `input` is not used (the primary feed is the
     // grid authority).

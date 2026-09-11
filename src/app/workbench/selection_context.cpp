@@ -464,7 +464,7 @@ SelectionContextSnapshot SelectionContext::computeSnapshot() const
                 return true; // doomed and still alive
             if ( !d.guard && d.raw == layer )
             {
-                if ( QgsProject::instance() && QgsProject::instance()->mapLayer( layer->id() ) == layer )
+                if ( QgsProject::instance() && QgsProject::instance()->mapLayers().values().contains( layer ) )
                     continue; // valid new layer reusing the address
                 return true; // destroyed — the pointer must never resurface
             }
