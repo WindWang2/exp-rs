@@ -488,6 +488,7 @@ qt_add_executable(test_mapspec
   test_platform6_knowledge.cpp
   test_knowledge_drift.cpp
   test_platform7.cpp
+  test_platform8.cpp
 )
 target_compile_definitions(test_mapspec PRIVATE
   SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
@@ -1539,6 +1540,54 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     )
     sicnu_discover_tests(test_multimodal_inference)
 
+    # Model Runtime 8.0: CRS-aware grid authority + provenance, temporal
+    # sequence lane (dynamic T, timestamps, quality masks), placement policy
+    # and the Labels class remap. Fake providers + synthetic rasters — runs
+    # in every OpenCV-enabled build.
+    add_executable(test_model_runtime_8 test_model_runtime_8.cpp)
+    target_link_libraries(test_model_runtime_8 PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_model_runtime_8)
+    target_include_directories(test_model_runtime_8 PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_model_runtime_8)
+
+    # Model Runtime 8.0 WP-A: the REAL ONNX Runtime lane. Built only when the
+    # ORT provider is actually compiled in — hosts without the dependency skip
+    # the target entirely (honest capability gate, never a fake pass).
+    if(SICNU_WITH_ONNX_RUNTIME AND ONNXRUNTIME_INCLUDE_DIR AND ONNXRUNTIME_LIBRARY)
+        add_executable(test_onnxruntime_provider test_onnxruntime_provider.cpp)
+        target_include_directories(test_onnxruntime_provider PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+        # The CUDA-EP presence probe calls the ORT C++ API directly.
+        target_link_libraries(test_onnxruntime_provider PRIVATE ${ONNXRUNTIME_LIBRARY})
+        target_link_libraries(test_onnxruntime_provider PRIVATE
+            Catch2::Catch2WithMain
+            Qt6::Core
+            qgis_core
+            sicnu_processing
+            sicnu_task_center
+            sicnu_operators
+            ${OpenCV_LIBS}
+        )
+        sicnu_link_jsoncpp(test_onnxruntime_provider)
+        target_include_directories(test_onnxruntime_provider PRIVATE
+            ${CMAKE_SOURCE_DIR}/src
+            ${CMAKE_SOURCE_DIR}/tests
+            ${CMAKE_BINARY_DIR}
+        )
+        sicnu_discover_tests(test_onnxruntime_provider)
+    endif()
+
     # Platform 7.0 external provider contracts (same registry seam).
     add_executable(test_provider_python test_provider_python.cpp)
     target_link_libraries(test_provider_python PRIVATE
@@ -1620,6 +1669,14 @@ endif()
 # Platform 4.0: model runtime benchmark (env-gated: SICNU_MODEL_BENCH=1)
 if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     add_executable(test_model_runtime_bench test_model_runtime_bench.cpp)
+    # The env-gated benchmark gains an ORT-lane section when the provider is
+    # compiled in (the same macro the provider body uses).
+    if(SICNU_WITH_ONNX_RUNTIME AND ONNXRUNTIME_INCLUDE_DIR AND ONNXRUNTIME_LIBRARY)
+        target_compile_definitions(test_model_runtime_bench PRIVATE SICNU_WITH_ONNX_RUNTIME=1)
+        target_include_directories(test_model_runtime_bench PRIVATE ${ONNXRUNTIME_INCLUDE_DIR})
+        # OrtGetVersionString() for the bench header.
+        target_link_libraries(test_model_runtime_bench PRIVATE ${ONNXRUNTIME_LIBRARY})
+    endif()
     target_link_libraries(test_model_runtime_bench PRIVATE
         Catch2::Catch2WithMain
         Qt6::Core
@@ -7357,6 +7414,174 @@ target_link_libraries(test_contract_fuzz_agent PRIVATE
   sicnu_task_center
 )
 target_include_directories(test_contract_fuzz_agent PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/processing
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# =============================================================================
+# Verification Platform 8.0 — appended at end of file on purpose (same
+# convention as the 7.0 block above: this file is shared across tracks).
+# =============================================================================
+
+# Cross-platform/GDAL compile contract (task A): gdal_compat.h capability
+# coherence + behavioral pin of the version-selected VSI code. Light lane
+# (Catch2 + Sicnu::Geospatial only).
+sicnu_add_io_test(test_portability_contract)
+
+# Header self-containment probes (task A, failure class F1 / PR #833): every
+# nominated first-party leaf header must compile as the FIRST include of a
+# cold translation unit. OBJECT libraries = compile-only (nothing to link,
+# no runtime test); the L0 lane of scripts/verification_ladder.py builds the
+# aggregate target so a missing-include regression fails before any heavy
+# target compiles.
+function(sicnu_add_header_probes)
+  set(_probe_objs "")
+  foreach(header IN LISTS ARGN)
+    string(REGEX REPLACE "[/\\.-]" "_" probe "header_probe_${header}")
+    set(_probe_src "${CMAKE_CURRENT_BINARY_DIR}/generated/${probe}.cpp")
+    file(WRITE "${_probe_src}"
+"// generated by tests/CMakeLists.txt — header self-containment probe\n"
+"#include \"${header}\"\n"
+"int main() { return 0; }\n")
+    add_library(${probe} OBJECT "${_probe_src}")
+    target_include_directories(${probe} PRIVATE
+      ${CMAKE_SOURCE_DIR}/src
+      ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(${probe} PRIVATE Sicnu::Geospatial)
+    list(APPEND _probe_objs $<TARGET_OBJECTS:${probe}>)
+  endforeach()
+  add_custom_target(sicnu_header_probes DEPENDS ${_probe_objs})
+endfunction()
+sicnu_add_header_probes(
+  runtime/observability/trace_id.h
+  runtime/observability/trace.h
+  runtime/observability/fault_point.h
+  runtime/observability/fault_registry.h
+  runtime/observability/diagnostic_report.h
+  runtime/observability/execution_telemetry.h
+  geospatial/util/gdal_compat.h
+  geospatial/util/resource_uri.h
+  support/bounded_fuzz.h
+)
+
+# Trace chain (task F) + store fault contracts (task E), Verification
+# Platform 8.0: OutputCommitter/DatasetStore/ExperimentStore trace records +
+# truthful injected-commit-failure contracts. Heavy closure (committer pulls
+# the Data Manager; workflow pulls TaskCenter) — same shape as test_fault_matrix.
+sicnu_add_test(test_trace_chain_8 TIMEOUT 300)
+target_link_libraries(test_trace_chain_8 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_data
+  Sicnu::dataset
+  sicnu_experiment
+  sicnu_runtime
+)
+target_include_directories(test_trace_chain_8 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/stubs
+  ${CMAKE_BINARY_DIR}
+)
+
+# Known-answer corpus expansion (task C), Verification Platform 8.0: grid
+# window/block algebra + dataset split largest-remainder and block-atomicity
+# invariants. Light lane (Catch2 + Sicnu::Geospatial + Sicnu::dataset).
+add_executable(test_known_answer_corpus_8
+  test_known_answer_corpus_8.cpp
+)
+target_link_libraries(test_known_answer_corpus_8 PRIVATE
+  Catch2::Catch2WithMain
+  Sicnu::Geospatial
+  Sicnu::dataset
+  Qt6::Core
+)
+target_include_directories(test_known_answer_corpus_8 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_known_answer_corpus_8 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_known_answer_corpus_8 TIMEOUT 180)
+
+# Bounded contract fuzz (task D), Verification Platform 8.0: worker protocol
+# frames + plugin manifests + split configs. Light closure — worker_protocol
+# is header-only (sicnu_runtime include), plugin_manifest.cpp compiles in
+# Qt-free, splits come from Sicnu::dataset.
+add_executable(test_contract_fuzz_ipc
+  test_contract_fuzz_ipc.cpp
+  ${CMAKE_SOURCE_DIR}/src/sdk/exprs/plugin_manifest.cpp
+  ${CMAKE_SOURCE_DIR}/src/sdk/exprs/plugin_permissions.cpp
+)
+target_link_libraries(test_contract_fuzz_ipc PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::dataset
+)
+target_include_directories(test_contract_fuzz_ipc PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/sdk
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_contract_fuzz_ipc PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(test_contract_fuzz_ipc SYSTEM PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(test_contract_fuzz_ipc PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(test_contract_fuzz_ipc PRIVATE jsoncpp)
+endif()
+sicnu_discover_tests(test_contract_fuzz_ipc TIMEOUT 180)
+
+# Bounded contract fuzz (task D), Verification Platform 8.0: operator schema
+# builders + parameter projection + model manifest validation. Heavy closure
+# (ModelCatalog) — full-tree lane, same shape as test_contract_fuzz_agent.
+sicnu_add_test(test_contract_fuzz_ops TIMEOUT 300)
+target_link_libraries(test_contract_fuzz_ops PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_data
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow
+  sicnu_processing
+  sicnu_task_center
+)
+target_include_directories(test_contract_fuzz_ops PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/processing
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# Scale benchmarks (task G), Verification Platform 8.0: JobEngine 1k/10k/100k
+# scheduling, DatasetStore 100k metadata, RasterReader window reads, trace
+# file-sink overhead. Evidence artifact via `benchmark_scale8 --out <json>`.
+add_executable(benchmark_scale8
+  benchmark_scale8.cpp
+)
+target_link_libraries(benchmark_scale8 PRIVATE
+  Qt6::Core
+  GDAL::GDAL
+  sicnu_jobs
+  sicnu_operators_core
+  sicnu_geospatial
+  Sicnu::dataset
+  sicnu_runtime
+)
+if(TARGET jsoncpp)
+  target_link_libraries(benchmark_scale8 PRIVATE jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+  target_include_directories(benchmark_scale8 SYSTEM PRIVATE ${JSONCPP_INCLUDE_DIRS})
+  target_link_libraries(benchmark_scale8 PRIVATE ${JSONCPP_LIBRARIES})
+else()
+  target_link_libraries(benchmark_scale8 PRIVATE jsoncpp)
+endif()
+target_include_directories(benchmark_scale8 PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/processing
   ${CMAKE_CURRENT_SOURCE_DIR}

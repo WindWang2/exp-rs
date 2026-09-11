@@ -219,6 +219,9 @@ target_link_libraries(sicnu_operators
     PRIVATE
         ${JSONCPP_LIBRARIES}
         Sicnu::data
+        # Fault-point probes (Verification Platform 8.0) resolve in the
+        # Qt-free leaf sicnu_runtime.
+        sicnu_runtime
 )
 
 # Platform 7.0: HTTP inference provider (Qt6::Network). When the module is

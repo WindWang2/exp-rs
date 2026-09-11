@@ -410,6 +410,35 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
           false, id, nullptr ) );
     }
 
+  // --- Platform 8.0: NoData legend coverage ---------------------------------
+  // A legend referencing a style that declares raster.nodata must carry a
+  // nodata mention (legend.nodata declaration), otherwise the rendered
+  // legend hides the declared NoData class from the reader.
+  if ( spec.isMember( "legends" ) && spec["legends"].isArray() )
+    for ( const auto &legend : spec["legends"] )
+    {
+      if ( !legend.isObject() || !legend.isMember( "id" ) || !legend.isMember( "style_ref" ) ||
+           !legend["style_ref"].isString() )
+        continue;
+      // Declared AND well-formed counts as covered; a malformed (non-object)
+      // declaration compiles nothing, so the rule must keep firing.
+      if ( legend.isMember( "nodata" ) && legend["nodata"].isObject() )
+        continue;
+      const Json::Value style = StyleRegistry::instance().find(
+        QString::fromStdString( legend["style_ref"].asString() ) );
+      if ( style.isNull() || !style.isObject() )
+        continue; // unknown style refs are MAP_STYLE_REF_UNKNOWN's business
+      if ( !( style.isMember( "raster" ) && style["raster"].isObject() &&
+              style["raster"].isMember( "nodata" ) && style["raster"]["nodata"].isObject() ) )
+        continue;
+      issues.push_back( issue(
+        "MAP_NODATA_LEGEND", "warning",
+        legend["id"].asString() + ": referenced style '" + legend["style_ref"].asString() +
+          "' declares raster.nodata but the legend does not — the NoData class is "
+          "invisible to the reader",
+        true, legend["id"].asString(), "declare_nodata" ) );
+    }
+
   // --- per-item geometry, style, text and bindings --------------------------
   for ( int c = 0; c < mapspec::kCollectionCount; ++c )
   {
@@ -484,6 +513,14 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
         if ( item.isMember( "font" ) && item["font"].isObject() &&
              item["font"].isMember( "size_pt" ) && item["font"]["size_pt"].isNumeric() )
           fitRequest.fontPt = item["font"]["size_pt"].asDouble();
+        // Platform 8.0: declared line-end composition + line height ride on
+        // the font block; the same model measures the item and the repair.
+        if ( item.isMember( "font" ) && item["font"].isObject() &&
+             item["font"].isMember( "break_policy" ) && item["font"]["break_policy"].isString() )
+          fitRequest.breakPolicy = item["font"]["break_policy"].asString();
+        if ( item.isMember( "font" ) && item["font"].isObject() &&
+             item["font"].isMember( "line_height" ) && item["font"]["line_height"].isNumeric() )
+          fitRequest.lineHeightFactor = item["font"]["line_height"].asDouble();
         fitRequest.policy = "overflow_report";
         const TextFitReport fit = fitTextIntoBox( fitRequest );
         if ( !fit.fits )
@@ -1122,6 +1159,30 @@ int repairMapSpec( Json::Value &spec, const Json::Value &report )
       if ( repairTextOverflow( *found.item, pageW, pageH, found.collection ) )
         ++applied;
     }
+    else if ( code == "MAP_NODATA_LEGEND" )
+    {
+      // Platform 8.0: stamp legend.nodata from the referenced style's
+      // declaration (converging: the re-preflight sees the declaration and
+      // the rule passes).
+      const std::string id = item.get( "item_id", "" ).asString();
+      ItemRef found = findItemMutable( spec, id );
+      if ( !found.item || !found.item->isMember( "style_ref" ) ||
+           !( *found.item )["style_ref"].isString() )
+        continue;
+      const Json::Value style = StyleRegistry::instance().find(
+        QString::fromStdString( ( *found.item )["style_ref"].asString() ) );
+      std::string label = "NoData";
+      if ( style.isObject() && style.isMember( "raster" ) && style["raster"].isObject() &&
+           style["raster"].isMember( "nodata" ) && style["raster"]["nodata"].isObject() &&
+           style["raster"]["nodata"].isMember( "label" ) &&
+           style["raster"]["nodata"]["label"].isString() &&
+           !style["raster"]["nodata"]["label"].asString().empty() )
+        label = style["raster"]["nodata"]["label"].asString();
+      Json::Value nodata( Json::objectValue );
+      nodata["label"] = label;
+      ( *found.item )["nodata"] = nodata;
+      ++applied;
+    }
     else if ( code == "MAP_LAYER_UNREFERENCED" )
     {
       const std::string id = item.get( "item_id", "" ).asString();
@@ -1432,6 +1493,9 @@ Json::Value preflightRuleCatalog()
       "Declarative layer is referenced by no map frame or inset." },
     { "MAP_LEGEND_MISMATCH", "warning", false,
       "Explicit legend classes do not all appear in the referenced style's classes." },
+    { "MAP_NODATA_LEGEND", "warning", true,
+      "A legend referencing a style that declares raster.nodata carries no nodata "
+      "mention; repair stamps legend.nodata from the style." },
     { "MAP_TEXT_WRAP_OVERFLOW", "warning", true,
       "Wrap-aware text layout (CJK kinsoku included) does not fit the item rect." },
     { "MAP_CONTRAST_LOW", "warning", false,

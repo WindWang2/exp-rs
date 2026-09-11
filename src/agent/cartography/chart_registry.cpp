@@ -628,7 +628,9 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
       {
         painter.setPen( textColor );
         painter.drawText( QRectF( plotRect.left() + g * groupWidth, plotRect.bottom() + 4, groupWidth, 18 ),
-                          Qt::AlignCenter, label );
+                          Qt::AlignCenter,
+                          painter.fontMetrics().elidedText( label, Qt::ElideMiddle,
+                                                            groupWidth - 2 ) );
       }
     }
     // Compact series legend across the top.
@@ -777,7 +779,9 @@ bool renderInlineChart( const Json::Value &chart, QPainter &painter, const QSize
       {
         painter.setPen( textColor );
         painter.drawText( QRectF( plotRect.left() + i * barWidth, plotRect.bottom() + 4, barWidth, 18 ),
-                          Qt::AlignCenter, points[i].first );
+                          Qt::AlignCenter,
+                          painter.fontMetrics().elidedText( points[i].first, Qt::ElideMiddle,
+                                                            barWidth - 2 ) );
       }
     }
   }

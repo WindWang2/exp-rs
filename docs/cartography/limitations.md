@@ -12,10 +12,15 @@ honest QGIS/toolchain boundaries.
 
 - **Locator insets are real now**: `inset_maps[].locator.target` compiles to
   the QGIS map-overview extent indicator (outline/region/frame styles) with
-  an optional caption. *Remaining nuance:* connector lines from the inset to
-  the main map are not drawn; nested locators (an inset targeting another
-  inset) validate and compile — nesting depth is author-declared and not
-  capped by exp-rs, so absurd chains render as absurd chains.
+  an optional caption. *Platform 8.0:* a declared `locator.connector`
+  compiles to a QGIS-native polyline (`QgsLayoutItemPolyline` via
+  LayoutService) from the inset frame edge to the referenced frame's
+  projected extent anchor — the classic locator relationship line; geometry
+  is a pure function of the declared page rects/extents (with extents
+  unresolved the anchor is the frame center). Nested locators (an inset
+  targeting another inset) validate and compile — nesting depth is
+  author-declared and not capped by exp-rs, so absurd chains render as
+  absurd chains.
 - **Atlas is usable**: coverage layer, filter, sort, filename expression,
   margin fraction and page numbering compile to `QgsLayoutAtlas` (see
   atlas-guide.md). *Remaining nuance:* per-feature **symbology overrides**
@@ -34,11 +39,15 @@ honest QGIS/toolchain boundaries.
 
 ## Text
 
-- **Single-line text model in preflight**: the overflow estimator treats
-  item text as one line (newlines start new lines; no word-wrap
-  simulation). Multi-line labels render via QGIS with its own wrapping —
-  the estimator checks the widest line only. Table-style charts estimate
-  row heights with a leading factor and can auto-grow (`MAP_CHART_OVERFLOW`).
+- **Deterministic width model, not font metrics**: the preflight model
+  measures codepoints in fixed width classes (CJK one em, other 0.55 em,
+  spaces 0.35 em) — deliberately font-free and platform-independent. Since
+  7.0 the model includes word wrap, CJK kinsoku, line budgets and truncation
+  policies (`MAP_TEXT_WRAP_OVERFLOW`); since 8.0 a declared
+  `font.break_policy` (`none | halfwidth`) compresses line-final fullwidth
+  closing punctuation and `font.line_height` overrides the leading used by
+  the wrap check. Actual glyph shapes/widths still vary by platform — the
+  estimator is the declared contract, not a raster oracle.
 - **Platform font variance**: token fallbacks register Qt substitutions,
   but glyph shapes/widths vary by platform. Text-overflow preflight uses a
   platform-independent estimator, and golden pixel comparison is opt-in
@@ -67,7 +76,17 @@ honest QGIS/toolchain boundaries.
 - **StyleSpec is knowledge, not a renderer**: it compiles to QGIS renderer
   primitives (style-spec-reference.md). QGIS-native symbology remains the
   authority; editing a renderer by hand after `style:apply` is not tracked
-  back into the StyleSpec (one-way compilation).
+  back into the StyleSpec (one-way compilation). *Platform 8.0:* the apply
+  path pushes `raster.nodata` into the QGIS renderer — the declared `value`
+  becomes a provider user-nodata range on the declared band and
+  `transparent: false` shades nodata pixels through
+  `QgsRasterRenderer::setNodataColor` — closing the 7.0 validated-only gap.
+- **NoData legend entries are composites**: `QgsLayoutItemLegend` cannot
+  host custom nodes declaratively, so `legend.nodata` compiles as a swatch
+  composite (QGIS shape rectangle + label) pinned inside the declared
+  legend rect bottom — the same furniture class as charts/colorbars. The
+  declared rect reserves the space; `MAP_NODATA_LEGEND` keeps declaration
+  and rendering honest.
 - **Conditional `style_ref` application**: layer `style_ref` fields resolve
   through the style tooling; unresolved style ids are reported (advisory),
   never fatal to the compile.
@@ -75,7 +94,8 @@ honest QGIS/toolchain boundaries.
 ## Deferred (Platform 5.0)
 
 - Per-glyph text measurement, word-wrap-aware overflow (single-line
-  estimator + row heuristics remain).
+  estimator + row heuristics remain). *7.0 shipped the wrap-aware engine;
+  per-glyph font metrics remain deferred by design.*
 - Interactive swipe/paired representations — synchronized before/after
   frames on static output.
 - Chart dual-axis and per-point annotations — evaluated, deferred until a

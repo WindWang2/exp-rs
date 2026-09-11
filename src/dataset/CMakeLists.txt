@@ -60,6 +60,10 @@ target_link_libraries(sicnu_dataset
     Sicnu::data
   PRIVATE
     SQLite::SQLite3
+    # Unified trace + fault registry (Verification Platform 8.0): the store
+    # commit seams emit exp.trace.v1 records and probe SICNU_FAULT_POINT.
+    # PRIVATE keeps the science-core layer guards (no GUI/network) intact.
+    sicnu_runtime
 )
 
 # The dataset layer must stay free of GUI and network dependencies, mirroring
