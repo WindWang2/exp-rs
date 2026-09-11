@@ -22,6 +22,7 @@
 
 #include "geospatial/gdal_guard.h"
 #include "geospatial/remote/http_fetch.h"
+#include "geospatial/remote/range_cache_disk.h"
 #include "geospatial/remote/remote_source_validator.h"
 #include "geospatial/util/gdal_compat.h"
 #include "geospatial/util/resource_uri.h"
@@ -147,6 +148,7 @@ class CacheStore
     std::atomic<std::uint64_t> revalidations{ 0 };
     std::atomic<std::uint64_t> dedupHits{ 0 };
     std::atomic<std::uint64_t> maxInFlightBytes{ 0 };
+    std::atomic<std::uint64_t> diskHits{ 0 };
 
     // ── 9.0 global fetch admission ─────────────────────────────────────────
     // Bounds the bytes concurrently in flight across all ranged GETs. The
@@ -361,6 +363,78 @@ class CacheStore
         blockIndex += 1;
       }
       evictUnderBudget();
+    }
+
+    /// 9.0 M3 — disk layer: the content-identity basis of a resource, or ""
+    /// when the layer is disabled or the identity is unprovable (fail-closed:
+    /// unprovable identity is never disk-cached).
+    std::string diskBasis( const std::shared_ptr<ResourceEntry> &entry )
+    {
+      if ( !RangeDiskBlockStore::enabled() )
+        return std::string();
+      const RemoteSourceIdentity identity = snapshotIdentity( entry );
+      return RangeDiskBlockStore::identityBasis( entry->requestUrl, identity.validator.hasStrongEtag(),
+                                                 identity.validator.etag, identity.hasSize,
+                                                 identity.sizeBytes, identity.validator.lastModified );
+    }
+
+    /// Fills missing blocks of [firstBlock,lastBlock] from the checksummed
+    /// disk layer into the memory store (generation-checked per block).
+    /// Disk reads happen OUTSIDE the store lock; only the per-block insert
+    /// takes it (short). Returns true when at least one block landed.
+    bool loadBlocksFromDisk( const std::shared_ptr<ResourceEntry> &entry, std::uint64_t firstBlock,
+                             std::uint64_t lastBlock, std::uint64_t expectedGeneration,
+                             std::uint64_t blockSize, std::uint64_t fetchConfigGeneration,
+                             std::uint64_t maxCacheBytes )
+    {
+      const std::string basis = diskBasis( entry );
+      if ( basis.empty() )
+        return false;
+      std::vector<std::uint64_t> missing;
+      {
+        std::lock_guard<std::mutex> lock( mMutex );
+        if ( entry->generation != expectedGeneration )
+          return false;
+        for ( std::uint64_t b = firstBlock; b <= lastBlock; ++b )
+          if ( entry->blocks.find( b ) == entry->blocks.end() )
+            missing.push_back( b );
+      }
+      bool loaded = false;
+      for ( const std::uint64_t blockIndex : missing )
+      {
+        std::vector<unsigned char> data;
+        if ( !RangeDiskBlockStore::readBlock( basis, blockIndex, data ) )
+          continue;
+        {
+          std::lock_guard<std::mutex> lock( mMutex );
+          if ( fetchConfigGeneration != configGeneration || entry->generation != expectedGeneration )
+            return loaded; // config/generation moved: stop feeding stale blocks
+          insertOne( entry, blockIndex, data.data(), data.size() );
+          evictUnderBudget();
+        }
+        loaded = true;
+      }
+      return loaded;
+    }
+
+    /// Publishes a fetched run to the disk layer, block by block (called
+    /// AFTER the memory insert — the run bytes stay alive in the caller).
+    void putRunToDisk( const std::shared_ptr<ResourceEntry> &entry, std::uint64_t runStart,
+                       const std::vector<unsigned char> &bytes, std::uint64_t blockSize )
+    {
+      const std::string basis = diskBasis( entry );
+      if ( basis.empty() )
+        return;
+      std::uint64_t offsetInRun = 0;
+      std::uint64_t blockIndex = runStart / blockSize;
+      while ( offsetInRun < bytes.size() )
+      {
+        const std::size_t chunk = static_cast<std::size_t>(
+          std::min<std::uint64_t>( blockSize, bytes.size() - offsetInRun ) );
+        RangeDiskBlockStore::putBlock( basis, blockIndex, bytes.data() + offsetInRun, chunk );
+        offsetInRun += chunk;
+        blockIndex += 1;
+      }
     }
 
     // ── entry-field access under the store lock (P1 remediation) ──
@@ -846,6 +920,18 @@ class RangeCacheHandle final : public VSIVirtualHandle
       }
       cache.misses.fetch_add( 1 );
 
+      // 9.0 M3: memory miss — try the checksummed disk layer before any
+      // network work. Disk blocks are content-identity keyed; a hit fills
+      // the memory blocks and serves without an origin request.
+      if ( cache.loadBlocksFromDisk( mEntry, firstBlock, lastBlock, mGeneration, blockSize,
+                                     fetchConfigGeneration, config.maxCacheBytes )
+           && cache.tryServe( mEntry, position, length, destination, mGeneration, blockSize ) )
+      {
+        cache.hits.fetch_add( 1 );
+        cache.diskHits.fetch_add( 1 );
+        return length;
+      }
+
       // The resource fetch mutex dedups concurrent readers: the waiter
       // re-checks the cache once the fetching thread finished.
       std::lock_guard<std::mutex> fetchLock( mEntry->fetchMutex );
@@ -904,6 +990,10 @@ class RangeCacheHandle final : public VSIVirtualHandle
 
       cache.insertBytes( mEntry, fetchStart, bytes, blockSize, fetchConfigGeneration,
                          config.maxCacheBytes );
+      // 9.0 M3 write-through: publish the fetched run to the disk layer
+      // (atomically, checksummed). A no-op when the layer is disabled or the
+      // identity is unprovable.
+      cache.putRunToDisk( mEntry, fetchStart, bytes, blockSize );
       if ( cache.tryServe( mEntry, position, length, destination, mGeneration, blockSize ) )
         return length;
       // The insert may not fully cover the request near EOF or when the
@@ -1135,6 +1225,8 @@ Json::Value RangeCacheConfig::toJson() const
   json["connect_timeout_seconds"] = connectTimeoutSeconds;
   json["max_retries"] = maxRetries;
   json["max_concurrent_fetch_bytes"] = static_cast<Json::UInt64>( maxConcurrentFetchBytes );
+  json["disk_directory"] = diskDirectory;
+  json["disk_max_bytes"] = static_cast<Json::UInt64>( diskMaxBytes );
   return json;
 }
 
@@ -1168,6 +1260,8 @@ void RemoteRangeCache::install( const RangeCacheConfig &config )
     if ( !g_store )
       g_store = std::make_unique<CacheStore>();
     g_store->updateConfig( config ); // blockSize change drops entries
+    // 9.0 M3: the disk layer follows the config (empty directory = off).
+    RangeDiskBlockStore::configure( config.diskDirectory, config.diskMaxBytes );
     if ( !s_handlerInstalled )
     {
       // Register exactly once per install cycle: re-registering while
@@ -1196,12 +1290,14 @@ void RemoteRangeCache::uninstall()
   cachedHandler() = nullptr;
   g_store->dropAll();
   s_handlerInstalled = false;
+  RangeDiskBlockStore::clear();
 #else
   // GDAL < 3.9 has no RemoveHandler: the prefix cannot be deregistered, so
   // uninstall only drops the bytes and KEEPS the handler installed/registered
   // (reporting installed()==false while /vsirangecache/ still resolves, or
   // re-registering a fresh handler per cycle, would leak and lie).
   g_store->dropAll();
+  RangeDiskBlockStore::clear();
 #endif
 }
 
@@ -1250,7 +1346,18 @@ Json::Value RemoteRangeCache::telemetryJson()
   Json::Value json = telemetry.toJson();
   json["cached_bytes"] = static_cast<Json::UInt64>( g_store->cachedBytes() );
   json["in_flight_fetch_bytes"] = static_cast<Json::UInt64>( g_store->inFlightBytes() );
+  json["disk_hits"] = static_cast<Json::UInt64>( g_store->diskHits.load() );
+  json["disk"] = RangeDiskBlockStore::stats().toJson();
+  json["disk"]["enabled"] = RangeDiskBlockStore::enabled();
   json["config"] = g_store->config.toJson();
+  return json;
+}
+
+Json::Value RemoteRangeCache::diskCacheStatsJson()
+{
+  RangeDiskCacheStats stats = RangeDiskBlockStore::stats();
+  Json::Value json = stats.toJson();
+  json["enabled"] = RangeDiskBlockStore::enabled();
   return json;
 }
 

@@ -775,3 +775,193 @@ TEST_CASE( "the global in-flight fetch bound holds across concurrent resources",
   CHECK( peak <= config.maxConcurrentFetchBytes );
   CHECK( telemetry["read_amplification"].isNumeric() );
 }
+
+// ---------------------------------------------------------------------------
+// 9.0 M3 — hierarchical cache: the optional disk block layer under the
+// memory cache. Blocks are content-identity keyed, checksummed, atomically
+// published and LRU/byte-capped. A resource with NO provable identity is
+// never disk-cached (fail-closed).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "the disk layer serves memory-cold reads without origin refetch",
+           "[io][remote][range_cache][fabric9][disk]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "disk" );
+  const std::string diskDir = dir + "/blocks";
+  const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
+  HttpRangeServer server( payload );
+  server.setEtag( "\"disk-identity-1\"" ); // strong ETag ⇒ provable disk identity
+
+  RangeCacheConfig config;
+  config.blockSize = 64 * 1024;
+  config.maxCacheBytes = 4ull * 1024 * 1024;
+  config.stalePolicy = RangeCacheStalePolicy::TrustForever; // isolate the disk path
+  config.diskDirectory = diskDir;
+  config.diskMaxBytes = 16ull * 1024 * 1024;
+  InstalledCache guard( config );
+
+  std::vector<double> expected;
+  {
+    RasterReader local( RasterReader::open( dir + "/scene.tif" ) );
+    expected = local.readWindow( { 1 }, { 0, 0, 256, 256 } );
+    REQUIRE( expected.size() == 256ull * 256 );
+  }
+
+  // Cold pass: fetch fills memory AND publishes disk blocks.
+  {
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    CHECK( reader.readWindow( { 1 }, { 0, 0, 256, 256 } ) == expected );
+  }
+  const Json::Value statsAfterFill = RemoteRangeCache::diskCacheStatsJson();
+  CHECK( statsAfterFill["enabled"].asBool() );
+  CHECK( statsAfterFill["puts"].asUInt64() > 0 );
+
+  // Cold pass origin cost: the fetch + per-open metadata probes.
+  const std::uint64_t fetchedAfterFill = RemoteRangeCache::telemetryJson()["bytes_fetched"].asUInt64();
+  const std::uint64_t diskHitsBefore = RemoteRangeCache::diskCacheStatsJson()["hits"].asUInt64();
+
+  // Evict EVERYTHING from memory: disk becomes the only warm layer.
+  RemoteRangeCache::clearEntries();
+
+  {
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    const std::vector<double> got = reader.readWindow( { 1 }, { 0, 0, 256, 256 } );
+    REQUIRE( got.size() == expected.size() );
+    CHECK( got == expected );
+  }
+  const Json::Value statsAfterDisk = RemoteRangeCache::diskCacheStatsJson();
+  CHECK( statsAfterDisk["hits"].asUInt64() > diskHitsBefore );
+
+  // Origin cost unchanged beyond per-open metadata: the window bytes came
+  // from the disk layer, not a refetch.
+  const std::uint64_t fetchedAfterDiskRead = RemoteRangeCache::telemetryJson()["bytes_fetched"].asUInt64();
+  CHECK( fetchedAfterDiskRead < fetchedAfterFill + 256ull * 1024 );
+}
+
+TEST_CASE( "corrupt disk blocks are refused and re-fetched, never served",
+           "[io][remote][range_cache][fabric9][disk][corruption]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "disk_corrupt" );
+  const std::string diskDir = dir + "/blocks";
+  const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
+  HttpRangeServer server( payload );
+  server.setEtag( "\"disk-corrupt-1\"" );
+
+  RangeCacheConfig config;
+  config.blockSize = 64 * 1024;
+  config.maxCacheBytes = 4ull * 1024 * 1024;
+  config.stalePolicy = RangeCacheStalePolicy::TrustForever;
+  config.diskDirectory = diskDir;
+  config.diskMaxBytes = 16ull * 1024 * 1024;
+  InstalledCache guard( config );
+
+  std::vector<double> expected;
+  {
+    RasterReader local( RasterReader::open( dir + "/scene.tif" ) );
+    expected = local.readWindow( { 1 }, { 0, 0, 128, 128 } );
+    REQUIRE( expected.size() == 128ull * 128 );
+  }
+  {
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    CHECK( reader.readWindow( { 1 }, { 0, 0, 128, 128 } ) == expected );
+  }
+
+  // Flip bytes in ONE block file — a torn/broken block on disk.
+  const std::filesystem::path blocks( diskDir );
+  std::filesystem::path victim;
+  for ( const auto &entry : std::filesystem::directory_iterator( blocks ) )
+  {
+    if ( entry.path().extension() == ".blk" )
+    {
+      victim = entry.path();
+      break;
+    }
+  }
+  REQUIRE( !victim.empty() );
+  {
+    std::ofstream out( victim, std::ios::binary | std::ios::in );
+    out.seekp( 60 ); // inside the data region (4+8+8+32 header)
+    out << "\xDE\xAD\xBE\xEF";
+  }
+  const std::uint64_t corruptBefore = RemoteRangeCache::diskCacheStatsJson()["corrupt"].asUInt64();
+
+  RemoteRangeCache::clearEntries(); // cold memory
+  {
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    const std::vector<double> got = reader.readWindow( { 1 }, { 0, 0, 128, 128 } );
+    REQUIRE( got.size() == expected.size() );
+    CHECK( got == expected ); // corrupt block was a miss: refetch served truth
+  }
+  CHECK( RemoteRangeCache::diskCacheStatsJson()["corrupt"].asUInt64() > corruptBefore );
+}
+
+TEST_CASE( "resources without provable identity are never disk-cached",
+           "[io][remote][range_cache][fabric9][disk][fail-closed]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "disk_failclosed" );
+  const std::string diskDir = dir + "/blocks";
+  const std::vector<unsigned char> payload = buildSmallTiff( dir + "/small.tif" );
+  HttpRangeServer server( payload ); // NO ETag, NO Last-Modified: unprovable
+
+  RangeCacheConfig config;
+  config.blockSize = 64 * 1024;
+  config.stalePolicy = RangeCacheStalePolicy::TrustForever;
+  config.diskDirectory = diskDir;
+  config.diskMaxBytes = 16ull * 1024 * 1024;
+  InstalledCache guard( config );
+
+  {
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    REQUIRE( reader.isOpen() );
+    RasterWindow full;
+    full.width = 256;
+    full.height = 256;
+    CHECK( reader.readWindow( { 1 }, full ).size() == 256ull * 256 );
+  }
+  const Json::Value stats = RemoteRangeCache::diskCacheStatsJson();
+  CHECK( stats["puts"].asUInt64() == 0 ); // unprovable identity ⇒ never masquerades as cacheable
+}
+
+TEST_CASE( "the disk layer byte cap evicts LRU blocks without breaking reads",
+           "[io][remote][range_cache][fabric9][disk][eviction]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "disk_evict" );
+  const std::string diskDir = dir + "/blocks";
+  const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
+  HttpRangeServer server( payload );
+  server.setEtag( "\"disk-evict-1\"" );
+
+  RangeCacheConfig config;
+  config.blockSize = 64 * 1024;
+  config.maxCacheBytes = 4ull * 1024 * 1024;
+  config.stalePolicy = RangeCacheStalePolicy::TrustForever;
+  config.diskDirectory = diskDir;
+  // Two windows' worth of blocks blow the cap ⇒ eviction must fire.
+  config.diskMaxBytes = 128ull * 1024;
+  InstalledCache guard( config );
+
+  std::vector<double> expectedTop;
+  std::vector<double> expectedFar;
+  {
+    RasterReader local( RasterReader::open( dir + "/scene.tif" ) );
+    expectedTop = local.readWindow( { 1 }, { 0, 0, 256, 256 } );
+    expectedFar = local.readWindow( { 1 }, { 512, 512, 256, 256 } );
+  }
+  {
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    CHECK( reader.readWindow( { 1 }, { 0, 0, 256, 256 } ) == expectedTop );
+    CHECK( reader.readWindow( { 1 }, { 512, 512, 256, 256 } ) == expectedFar );
+  }
+  CHECK( RemoteRangeCache::diskCacheStatsJson()["evictions"].asUInt64() > 0 );
+
+  // Post-eviction reads stay byte-correct (evicted blocks re-fetch).
+  {
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    CHECK( reader.readWindow( { 1 }, { 0, 0, 256, 256 } ) == expectedTop );
+    CHECK( reader.readWindow( { 1 }, { 512, 512, 256, 256 } ) == expectedFar );
+  }
+}

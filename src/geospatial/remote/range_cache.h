@@ -79,6 +79,12 @@ struct RangeCacheConfig
     /// admitted only when nothing else is in flight (no starvation). 0 =
     /// unlimited.
     std::uint64_t maxConcurrentFetchBytes = 64ull * 1024 * 1024;
+    /// 9.0 M3 — optional disk block layer under the memory cache:
+    /// checksummed, content-identity keyed (a resource with no provable
+    /// identity is never disk-cached), LRU/byte-capped, atomically published.
+    /// An empty directory disables the layer.
+    std::string diskDirectory;
+    std::uint64_t diskMaxBytes = 1024ull * 1024 * 1024;
 
     Json::Value toJson() const;
 };
@@ -128,6 +134,9 @@ class RemoteRangeCache
 
     static Json::Value telemetryJson();
     static RangeCacheConfig currentConfig();
+
+    /// 9.0 M3: stats of the optional disk block layer (zeros when disabled).
+    static Json::Value diskCacheStatsJson();
 
     /// Maps a caller URL to the cached spelling ("/vsirangecache/<url>").
     static std::string cachedPath( const std::string &url );
