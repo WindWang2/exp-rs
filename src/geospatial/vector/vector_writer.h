@@ -68,6 +68,20 @@ class VectorWriter
     /// null; unknown fields → GeoError). geometryWkt: "" for geometryless.
     void writeFeature( const Json::Value &attributes, const std::string &geometryWkt = std::string() );
 
+    /// One input feature for the batch write (9.0 M6).
+    struct FeatureInput
+    {
+        Json::Value attributes;
+        std::string geometryWkt;
+    };
+
+    /// Appends a batch of features in order (same contract per feature as
+    /// writeFeature). A failure aborts the batch with the feature INDEX in
+    /// the error details — features before it stay written (the transaction
+    /// batching on transactional drivers keeps them buffered; cancel()
+    /// discards the whole staging set either way).
+    void writeFeatures( const std::vector<FeatureInput> &features );
+
     /// Flush → fsync → validate → dataset-group publish. Closed afterwards.
     void finalize();
 

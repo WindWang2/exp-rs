@@ -404,3 +404,94 @@ TEST_CASE( "registry: certified profiles are actually exercised by this suite", 
     }
   }
 }
+
+// ---------------------------------------------------------------------------
+// 9.0 M6 — FlatGeobuf round-trip: the certification upgrade runs through the
+// streaming read contract WITH filters (attribute projection + bbox), the
+// coverage the profile note said was pending. Runtime driver-gated: a GDAL
+// build without FlatGeobuf SKIPS honestly and the profile stays honest.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "matrix: GeoPackage → FlatGeobuf → GeoPackage preserves fidelity"
+           " through filtered streaming reads",
+           "[io][roundtrip][vector][fabric9][flatgeobuf]" )
+{
+  const sicnu::geo::FormatRegistry &registry = sicnu::geo::FormatRegistry::instance();
+  const sicnu::geo::FormatProfile *fgb = registry.find( "FlatGeobuf" );
+  REQUIRE( fgb );
+  if ( !registry.driverAvailable( *fgb ) )
+  {
+    WARN( "FlatGeobuf driver not available in this GDAL build — round-trip skipped (profile stays honest)" );
+    return;
+  }
+
+  const std::string dir = scratch( "fgb9" );
+  const std::string gpkg1 = ( fs::path( dir ) / "a.gpkg" ).string();
+  const std::string fgbPath = ( fs::path( dir ) / "b.fgb" ).string();
+  const std::string gpkg2 = ( fs::path( dir ) / "c.gpkg" ).string();
+
+  sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
+    gpkg1, "sites", "Point",
+    { { "label", "String", 64 }, { "score", "Real" }, { "zone", "Integer64" } },
+    sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+  for ( int i = 0; i < 30; ++i )
+  {
+    Json::Value attrs( Json::objectValue );
+    attrs["label"] = "site-" + std::to_string( i );
+    attrs["score"] = i * 2.25;
+    attrs["zone"] = static_cast<Json::Int64>( i % 3 );
+    const double x = 100.0 + i * 0.1;
+    const double y = 20.0 + i * 0.05;
+    writer.writeFeature( attrs, "POINT (" + std::to_string( x ) + " " + std::to_string( y ) + ")" );
+  }
+  writer.finalize();
+
+  sicnu::geo::vectorConvert( gpkg1, fgbPath, "FlatGeobuf", "sites", "", "", {} );
+  sicnu::geo::vectorConvert( fgbPath, gpkg2, "GPKG", "sites", "", "", {} );
+
+  sicnu::geo::VectorReader origin = sicnu::geo::VectorReader::open( gpkg1 );
+  sicnu::geo::VectorReader restored = sicnu::geo::VectorReader::open( gpkg2 );
+  CHECK( restored.layerInfo().featureCount == origin.layerInfo().featureCount );
+  CHECK( restored.layerInfo().crs.authid == "EPSG:4326" );
+
+  // Filtered streaming equivalence: the same attribute projection + bbox
+  // filter over both sides must stream identical features.
+  const std::string projectedFields[] = { "label", "zone" };
+  origin.setAttributeProjection( { projectedFields[0], projectedFields[1] } );
+  restored.setAttributeProjection( { projectedFields[0], projectedFields[1] } );
+  origin.setSpatialFilter( { 100.0, 20.0, 101.5, 20.75 } ); // first ~15 features
+  restored.setSpatialFilter( { 100.0, 20.0, 101.5, 20.75 } );
+
+  // FlatGeobuf orders filtered iteration through its spatial index — the
+  // streaming contract bounds memory, not cross-format feature order. So
+  // the fidelity comparison is over the COLLECTED, label-sorted streams.
+  std::vector<sicnu::geo::VectorFeature> originAll;
+  std::vector<sicnu::geo::VectorFeature> restoredAll;
+  std::vector<sicnu::geo::VectorFeature> originBatch;
+  std::vector<sicnu::geo::VectorFeature> restoredBatch;
+  while ( origin.nextBatch( originBatch, 7 ) || !originBatch.empty() )
+  {
+    REQUIRE( restored.nextBatch( restoredBatch, 7 ) );
+    REQUIRE( restoredBatch.size() == originBatch.size() );
+    for ( std::size_t i = 0; i < originBatch.size(); ++i )
+      CHECK_FALSE( originBatch[i].attributes.isMember( "score" ) ); // projection honored on both sides
+    for ( const sicnu::geo::VectorFeature &feature : restoredBatch )
+      CHECK_FALSE( feature.attributes.isMember( "score" ) );
+    originAll.insert( originAll.end(), originBatch.begin(), originBatch.end() );
+    restoredAll.insert( restoredAll.end(), restoredBatch.begin(), restoredBatch.end() );
+    originBatch.clear();
+    restoredBatch.clear();
+  }
+  // i = 0..15 lie inside the inclusive bbox (x = 100 + i*0.1 <= 101.5,
+  // y = 20 + i*0.05 <= 20.75) — 16 features on both sides.
+  REQUIRE( originAll.size() == 16 );
+  REQUIRE( restoredAll.size() == 16 );
+  const auto byLabel = []( const sicnu::geo::VectorFeature &f ) { return f.attributes["label"].asString(); };
+  std::sort( originAll.begin(), originAll.end(), [ & ]( const auto &a, const auto &b ) { return byLabel( a ) < byLabel( b ); } );
+  std::sort( restoredAll.begin(), restoredAll.end(), [ & ]( const auto &a, const auto &b ) { return byLabel( a ) < byLabel( b ); } );
+  for ( std::size_t i = 0; i < originAll.size(); ++i )
+  {
+    CHECK( restoredAll[i].attributes["label"].asString() == originAll[i].attributes["label"].asString() );
+    CHECK( restoredAll[i].attributes["zone"].asInt64() == originAll[i].attributes["zone"].asInt64() );
+  }
+}

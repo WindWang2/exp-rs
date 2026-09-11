@@ -320,6 +320,26 @@ void VectorWriter::writeFeature( const Json::Value &attributes, const std::strin
   OGR_F_Destroy( feature );
 }
 
+void VectorWriter::writeFeatures( const std::vector<FeatureInput> &features )
+{
+  for ( std::size_t i = 0; i < features.size(); ++i )
+  {
+    try
+    {
+      writeFeature( features[i].attributes, features[i].geometryWkt );
+    }
+    catch ( GeoError &error )
+    {
+      Json::Value details = error.details();
+      if ( details.isNull() || !details.isObject() )
+        details = Json::Value( Json::objectValue );
+      details["feature_index"] = static_cast<Json::UInt64>( i );
+      details["batch_size"] = static_cast<Json::UInt64>( features.size() );
+      throw GeoError( error.code(), error.what(), details );
+    }
+  }
+}
+
 void VectorWriter::cancel()
 {
   if ( mHandle )

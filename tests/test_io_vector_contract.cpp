@@ -354,3 +354,118 @@ TEST_CASE( "finalize after a failed commit discards output without crashing (iss
   writer.finalize();
   CHECK_THROWS_AS( writer.finalize(), sicnu::geo::GeoError );
 }
+
+// ---------------------------------------------------------------------------
+// 9.0 M6 — extent (no full-table surprise), driver-evaluated field
+// statistics, and the batch write API.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "extent reports the declared envelope without forcing a scan",
+           "[io][vector][contract][fabric9]" )
+{
+  const std::string target = ( fs::path( scratchDir( "extent9" ) ) / "sites.gpkg" ).string();
+  sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
+    target, "sites", "Point", { { "value", "Real" } }, sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+  for ( int i = 0; i < 10; ++i )
+  {
+    Json::Value attrs( Json::objectValue );
+    attrs["value"] = i * 1.5;
+    writer.writeFeature( attrs, "POINT (" + std::to_string( 100 + i ) + " " + std::to_string( 20 + i ) + ")" );
+  }
+  writer.finalize();
+
+  sicnu::geo::VectorReader reader = sicnu::geo::VectorReader::open( target );
+  const sicnu::geo::VectorExtent extent = reader.extent();
+  REQUIRE( extent.valid );
+  CHECK( extent.minX == Approx( 100.0 ) );
+  CHECK( extent.minY == Approx( 20.0 ) );
+  CHECK( extent.maxX == Approx( 109.0 ) );
+  CHECK( extent.maxY == Approx( 29.0 ) );
+}
+
+TEST_CASE( "field statistics are driver-evaluated aggregates with null honesty",
+           "[io][vector][contract][fabric9]" )
+{
+  const std::string target = ( fs::path( scratchDir( "stats9" ) ) / "sites.gpkg" ).string();
+  sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
+    target, "sites", "Point",
+    { { "score", "Real" }, { "zone", "Integer64" }, { "label", "String", 16 } },
+    sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+  for ( int i = 0; i < 10; ++i )
+  {
+    Json::Value attrs( Json::objectValue );
+    attrs["score"] = static_cast<double>( i + 1 ); // 1..10, mean 5.5, sum 55
+    attrs["zone"] = static_cast<Json::Int64>( i % 2 );
+    if ( i < 9 )
+      attrs["label"] = "s" + std::to_string( i );
+    writer.writeFeature( attrs, "POINT (1 2)" );
+  }
+  writer.finalize();
+
+  sicnu::geo::VectorReader reader = sicnu::geo::VectorReader::open( target );
+  const sicnu::geo::VectorFieldStatistics stats = reader.fieldStatistics( "score" );
+  CHECK( stats.nonNullCount == 10 );
+  REQUIRE( stats.hasMin );
+  CHECK( stats.minValue == Approx( 1.0 ) );
+  REQUIRE( stats.hasMax );
+  CHECK( stats.maxValue == Approx( 10.0 ) );
+  REQUIRE( stats.hasSum );
+  CHECK( stats.sum == Approx( 55.0 ) );
+  REQUIRE( stats.hasMean );
+  CHECK( stats.mean == Approx( 5.5 ) );
+
+  // WHERE-filtered aggregates are driver-evaluated as declared.
+  const sicnu::geo::VectorFieldStatistics filtered = reader.fieldStatistics( "score", "zone = 0" );
+  CHECK( filtered.nonNullCount == 5 );
+  CHECK( filtered.sum == Approx( 25.0 ) );
+
+  // String fields are a typed error, never a silent cast.
+  CHECK_THROWS_AS( reader.fieldStatistics( "label" ), sicnu::geo::GeoError );
+  // Unknown fields too.
+  CHECK_THROWS_AS( reader.fieldStatistics( "nope" ), sicnu::geo::GeoError );
+}
+
+TEST_CASE( "batch write appends in order and names the failing index",
+           "[io][vector][contract][fabric9]" )
+{
+  const std::string target = ( fs::path( scratchDir( "batch9" ) ) / "batch.gpkg" ).string();
+  sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
+    target, "pts", "Point", { { "label", "String", 16 } }, sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+
+  std::vector<sicnu::geo::VectorWriter::FeatureInput> batch;
+  for ( int i = 0; i < 100; ++i )
+  {
+    sicnu::geo::VectorWriter::FeatureInput feature;
+    feature.attributes["label"] = "b" + std::to_string( i );
+    feature.geometryWkt = "POINT (10 20)";
+    batch.push_back( std::move( feature ) );
+  }
+  writer.writeFeatures( batch );
+  writer.finalize();
+
+  sicnu::geo::VectorReader reader = sicnu::geo::VectorReader::open( target );
+  CHECK( reader.layerInfo().featureCount == 100 );
+
+  // A bad feature reports its index in the batch.
+  sicnu::geo::VectorWriter writer2 = sicnu::geo::VectorWriter::create(
+    ( fs::path( scratchDir( "batch9" ) ) / "bad.gpkg" ).string(), "pts", "Point",
+    { { "label", "String", 16 } }, sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+  std::vector<sicnu::geo::VectorWriter::FeatureInput> badBatch( 3 );
+  badBatch[0].attributes["label"] = "ok";
+  badBatch[0].geometryWkt = "POINT (0 0)";
+  badBatch[1].attributes["label"] = "ok";
+  badBatch[1].geometryWkt = "POINT (1 1)";
+  badBatch[2].attributes["unknown"] = "boom"; // rejected by the schema
+  badBatch[2].geometryWkt = "POINT (2 2)";
+  try
+  {
+    writer2.writeFeatures( badBatch );
+    FAIL( "expected batch failure" );
+  }
+  catch ( const sicnu::geo::GeoError &error )
+  {
+    CHECK( error.details()["feature_index"].asUInt64() == 2 );
+    CHECK( error.details()["batch_size"].asUInt64() == 3 );
+  }
+  writer2.cancel();
+}

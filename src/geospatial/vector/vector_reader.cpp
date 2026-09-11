@@ -33,6 +33,20 @@ namespace
 GDALDatasetH datasetOf( void *handle ) { return static_cast<GDALDatasetH>( handle ); }
 OGRLayerH layerOf( void *handle ) { return static_cast<OGRLayerH>( handle ); }
 
+/// SQL identifier quoting (embedded quotes doubled) — field and layer names
+/// in aggregate SQL must never break out of the identifier.
+std::string quoteSqlIdentifier( const std::string &name )
+{
+  std::string out = "\"";
+  for ( const char c : name )
+  {
+    out += c;
+    if ( c == '"' )
+      out += '"';
+  }
+  return out + "\"";
+}
+
 } // namespace
 
 VectorReader VectorReader::open( const std::string &path, const std::string &layerSelector )
@@ -293,6 +307,148 @@ std::int64_t VectorReader::exactFeatureCount()
   // bForce=TRUE: may scan; that is the documented point of this call.
   const GIntBig count = OGR_L_GetFeatureCount( layerOf( mLayer ), 1 );
   return count < 0 ? -1 : count;
+}
+
+Json::Value VectorExtent::toJson() const
+{
+  Json::Value json;
+  json["valid"] = valid;
+  json["exact"] = exact;
+  if ( valid )
+  {
+    json["min_x"] = minX;
+    json["min_y"] = minY;
+    json["max_x"] = maxX;
+    json["max_y"] = maxY;
+  }
+  return json;
+}
+
+Json::Value VectorFieldStatistics::toJson() const
+{
+  Json::Value json;
+  json["field"] = field;
+  json["non_null_count"] = static_cast<Json::Int64>( nonNullCount );
+  json["has_min"] = hasMin;
+  if ( hasMin )
+    json["min"] = minValue;
+  json["has_max"] = hasMax;
+  if ( hasMax )
+    json["max"] = maxValue;
+  json["has_sum"] = hasSum;
+  if ( hasSum )
+    json["sum"] = sum;
+  json["has_mean"] = hasMean;
+  if ( hasMean )
+    json["mean"] = mean;
+  return json;
+}
+
+VectorExtent VectorReader::extent( bool allowScan ) const
+{
+  VectorExtent out;
+  if ( !mLayer )
+    throw GeoError( ErrorCode::InvalidArgument, "extent: reader is closed" );
+  OGREnvelope envelope;
+  envelope.MinX = envelope.MinY = envelope.MaxX = envelope.MaxY = 0.0;
+  QuietCplErrors quiet;
+  // bForce per the declared contract: without it, a driver without a cheap
+  // extent simply reports one — the caller decides whether a scan is bought.
+  if ( OGR_L_GetExtent( layerOf( mLayer ), &envelope, allowScan ? 1 : 0 ) == OGRERR_NONE )
+  {
+    out.valid = true;
+    out.exact = true; // a returned envelope is geometry-derived, not a guess
+    out.minX = envelope.MinX;
+    out.minY = envelope.MinY;
+    out.maxX = envelope.MaxX;
+    out.maxY = envelope.MaxY;
+    return out;
+  }
+  // Fall back to the metadata envelope the open captured (a declared
+  // envelope; honest about its provenance).
+  const VectorLayerInfo &info = mLayerInfo;
+  if ( info.hasExtent )
+  {
+    out.valid = true;
+    out.exact = info.extentExact;
+    out.minX = info.minX;
+    out.minY = info.minY;
+    out.maxX = info.maxX;
+    out.maxY = info.maxY;
+  }
+  return out;
+}
+
+VectorFieldStatistics VectorReader::fieldStatistics( const std::string &fieldName,
+                                                     const std::string &whereClause ) const
+{
+  if ( !mHandle || !mLayer )
+    throw GeoError( ErrorCode::InvalidArgument, "fieldStatistics: reader is closed" );
+
+  // Numeric-only contract, checked against the captured schema.
+  bool numeric = false;
+  for ( const FieldInfo &field : mLayerInfo.fields )
+  {
+    if ( field.name == fieldName )
+    {
+      numeric = field.typeName != "String" && field.typeName != "Date"
+                && field.typeName != "Time" && field.typeName != "DateTime"
+                && field.typeName != "Binary";
+      if ( !numeric )
+      {
+        Json::Value details;
+        details["field"] = fieldName;
+        details["type"] = field.typeName;
+        throw GeoError( ErrorCode::Unsupported, "fieldStatistics: field is not numeric", details );
+      }
+      break;
+    }
+  }
+  ( void )numeric; // an unknown field below also errors (through SQL failure — checked explicitly next)
+  bool known = false;
+  for ( const FieldInfo &field : mLayerInfo.fields )
+    known = known || field.name == fieldName;
+  if ( !known )
+  {
+    Json::Value details;
+    details["field"] = fieldName;
+    throw GeoError( ErrorCode::InvalidArgument, "fieldStatistics: unknown field", details );
+  }
+
+  // Quoted identifiers; the WHERE clause is caller-supplied OGR SQL,
+  // evaluated by the driver as declared in the contract.
+  const std::string quote = quoteSqlIdentifier( fieldName );
+  std::string sql = "SELECT COUNT(" + quote + "), MIN(" + quote + "), MAX(" + quote
+                    + "), SUM(" + quote + "), AVG(" + quote + ") FROM "
+                    + quoteSqlIdentifier( mLayerInfo.name );
+  if ( !whereClause.empty() )
+    sql += " WHERE " + whereClause;
+
+  QuietCplErrors quiet;
+  OGRLayerH result = GDALDatasetExecuteSQL( datasetOf( mHandle ), sql.c_str(), nullptr, nullptr );
+  if ( !result )
+  {
+    const char *lastError = CPLGetLastErrorMsg();
+    Json::Value details;
+    if ( lastError && *lastError )
+      details["gdal_error"] = lastError;
+    throw GeoError( ErrorCode::InvalidArgument, "fieldStatistics: aggregate evaluation failed", details );
+  }
+  VectorFieldStatistics stats;
+  stats.field = fieldName;
+  OGRFeatureH row = OGR_L_GetNextFeature( result );
+  if ( row != nullptr )
+  {
+    const auto isNull = [ row ]( int index ) { return OGR_F_IsFieldSetAndNotNull( row, index ) == 0; };
+    stats.nonNullCount = static_cast<std::int64_t>( OGR_F_GetFieldAsInteger64( row, 0 ) );
+    if ( !isNull( 1 ) ) { stats.hasMin = true; stats.minValue = OGR_F_GetFieldAsDouble( row, 1 ); }
+    if ( !isNull( 2 ) ) { stats.hasMax = true; stats.maxValue = OGR_F_GetFieldAsDouble( row, 2 ); }
+    if ( !isNull( 3 ) ) { stats.hasSum = true; stats.sum = OGR_F_GetFieldAsDouble( row, 3 ); }
+    if ( !isNull( 4 ) ) { stats.hasMean = true; stats.mean = OGR_F_GetFieldAsDouble( row, 4 ); }
+    OGR_F_Destroy( row );
+  }
+  GDALDatasetReleaseResultSet( datasetOf( mHandle ), result );
+  return stats;
 }
 
 } // namespace sicnu::geo
