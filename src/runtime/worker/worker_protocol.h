@@ -46,6 +46,7 @@ inline const char *kWorkerCapProgress = "progress";               ///< worker em
 inline const char *kWorkerCapCancelAck = "cancelAck";             ///< worker acks cancel requests
 inline const char *kWorkerCapStructuredErrors = "structuredErrors"; ///< error frames carry "code"
 inline const char *kWorkerCapOutputIdentity = "outputIdentity";   ///< result frames carry "outputs"
+inline const char *kWorkerCapHeartbeat = "heartbeat";             ///< worker emits liveness frames (8.0)
 
 /// Frames are SINGLE LINE (newline-delimited transport): every writer must
 /// emit compact JSON.
@@ -111,6 +112,20 @@ inline std::string makeAckFrame( const std::string &jobId, const std::string &ki
     frame["op"] = "ack";
     frame["jobId"] = jobId;
     frame["kind"] = kind;
+    return compactFrame( frame );
+}
+
+/// Worker → host liveness frame (8.0, optional op): emitted periodically by
+/// a heartbeat-capable worker WHILE a job runs, so a host can distinguish
+/// "alive, operator silent" from "process hung/dead" even when the operator
+/// never reports progress. Hosts that do not know "heartbeat" ignore it (the
+/// extension rule above); the frame carries no payload and never fails a run.
+inline std::string makeHeartbeatFrame( const std::string &jobId )
+{
+    Json::Value frame;
+    frame["v"] = 1;
+    frame["op"] = "heartbeat";
+    frame["jobId"] = jobId;
     return compactFrame( frame );
 }
 
