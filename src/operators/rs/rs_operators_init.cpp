@@ -39,6 +39,10 @@
 #include "rs_spectral_detection_operators.h"
 #include "rs_sar_dualpol_operator.h"
 #include "rs_sar_terrain_masks_operator.h"
+#include "rs_sar_geocode_operator.h"
+#include "rs_rasterize_operator.h"
+#include "rs_sar_temporal_stats_operator.h"
+#include "rs_zonal_stats_operator.h"
 #include "rs_temporal_monitor_operator.h"
 #include "rs_terrain_flow_operator.h"
 #include "rs_grid_operators.h"
@@ -146,6 +150,10 @@ REGISTER_RS_OPERATOR(RsMatchedFilterOperator, "rs:matched_filter")
 REGISTER_RS_OPERATOR(RsAceOperator, "rs:ace")
 REGISTER_RS_OPERATOR(RsSarDualPolOperator, "rs:sar_dualpol_features")
 REGISTER_RS_OPERATOR(RsSarTerrainMasksOperator, "rs:sar_terrain_masks")
+REGISTER_RS_OPERATOR(RsSarGeocodeOperator, "rs:sar_geocode")
+REGISTER_RS_OPERATOR(RsRasterizeOperator, "rs:rasterize")
+REGISTER_RS_OPERATOR(RsSarTemporalStatsOperator, "rs:sar_temporal_stats")
+REGISTER_RS_OPERATOR(RsZonalStatsOperator, "rs:zonal_stats")
 REGISTER_RS_OPERATOR(RsTemporalMonitorOperator, "rs:temporal_monitor")
 REGISTER_RS_OPERATOR(RsTerrainFlowOperator, "rs:terrain_flow")
 REGISTER_RS_OPERATOR(RsResampleOperator, "rs:resample")
@@ -285,6 +293,10 @@ void initBuiltinRsOperators() {
   add( "rs:ace", [] { return std::make_unique<RsAceOperator>(); } );
   add( "rs:sar_dualpol_features", [] { return std::make_unique<RsSarDualPolOperator>(); } );
   add( "rs:sar_terrain_masks", [] { return std::make_unique<RsSarTerrainMasksOperator>(); } );
+  add( "rs:sar_geocode", [] { return std::make_unique<RsSarGeocodeOperator>(); } );
+  add( "rs:rasterize", [] { return std::make_unique<RsRasterizeOperator>(); } );
+  add( "rs:sar_temporal_stats", [] { return std::make_unique<RsSarTemporalStatsOperator>(); } );
+  add( "rs:zonal_stats", [] { return std::make_unique<RsZonalStatsOperator>(); } );
   add( "rs:temporal_monitor", [] { return std::make_unique<RsTemporalMonitorOperator>(); } );
   add( "rs:terrain_flow", [] { return std::make_unique<RsTerrainFlowOperator>(); } );
   add( "rs:resample", [] { return std::make_unique<RsResampleOperator>(); } );

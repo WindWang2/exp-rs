@@ -1,0 +1,13 @@
+{
+  "gpu" : false,
+  "id" : "rs:zonal_stats",
+  "input" : "raster",
+  "output" : "",
+  "tags" : 
+  [
+    "raster-vector",
+    "zonal",
+    "statistics"
+  ],
+  "task" : "raster-vector"
+}
