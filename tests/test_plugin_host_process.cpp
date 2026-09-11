@@ -956,3 +956,45 @@ TEST_CASE( "model framework gate refuses frameworks outside the declared access 
 
     REQUIRE( registry.unload( kPluginId ) );
 }
+
+TEST_CASE( "ui.invoke validates events host-side before the worker (E6010)",
+           "[hostprocess][uischema][p12]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    exprs::PluginDiagnosticLog uiLog;
+    // A VALID event travels to the worker and answers (fixture echo).
+    Json::Value event( Json::objectValue );
+    event["contributionId"] = "dock.status";
+    event["controlId"] = "ping";
+    event["eventType"] = "clicked";
+    auto ok = stack.runtime->invokeUi( kPluginId, event, 10000, uiLog );
+    REQUIRE( ok["ok"].asBool() );
+
+    // An UNKNOWN event type is refused host-side, typed E6010, and the
+    // channel/worker stay perfectly healthy afterwards.
+    event["eventType"] = "teleport";
+    auto refused = stack.runtime->invokeUi( kPluginId, event, 10000, uiLog );
+    REQUIRE_FALSE( refused["ok"].asBool() );
+    REQUIRE( refused["code"].asString() == "E6010" );
+    REQUIRE( refused["error"].asString().find( "teleport" ) != std::string::npos );
+
+    // An oversized value is refused too.
+    event["eventType"] = "custom";
+    event["value"] = std::string( 8192, 'v' );
+    auto oversized = stack.runtime->invokeUi( kPluginId, event, 10000, uiLog );
+    REQUIRE_FALSE( oversized["ok"].asBool() );
+    REQUIRE( oversized["code"].asString() == "E6010" );
+
+    // The worker survived the refusals and still answers a valid event.
+    Json::Value recovery( Json::objectValue );
+    recovery["contributionId"] = "dock.status";
+    recovery["controlId"] = "ping";
+    recovery["eventType"] = "clicked";
+    auto after = stack.runtime->invokeUi( kPluginId, recovery, 10000, uiLog );
+    REQUIRE( after["ok"].asBool() );
+
+    REQUIRE( registry.unload( kPluginId ) );
+}

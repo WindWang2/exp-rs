@@ -53,6 +53,7 @@ const CodeEntry kCodeTable[] = {
     { PluginDiagnosticCode::QuotaExceeded, "E6007" },
     { PluginDiagnosticCode::IpcUnsupportedMethod, "E6008" },
     { PluginDiagnosticCode::RequestCancelled, "E6009" },
+    { PluginDiagnosticCode::UiEventInvalid, "E6010" },
 };
 } // namespace
 

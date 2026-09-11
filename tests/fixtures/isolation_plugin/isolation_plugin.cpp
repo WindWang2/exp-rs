@@ -589,6 +589,8 @@ public:
         statusLabel["id"] = "status";
         statusLabel["type"] = "label";
         statusLabel["label"] = "idle";
+        statusLabel["description"] = "Latest ping state";
+        statusLabel["accessibilityLabel"] = "Fixture status indicator";
         dockControls.append( statusLabel );
         Json::Value ping( Json::objectValue );
         ping["id"] = "ping";

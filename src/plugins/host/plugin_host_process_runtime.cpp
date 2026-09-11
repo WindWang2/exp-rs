@@ -10,6 +10,7 @@
 #include "exprs/plugin_capabilities.h"
 #include "exprs/plugin_loader.h"
 #include "exprs/plugin_registry.h"
+#include "exprs/plugin_ui_schema.h"
 
 #include <cstring>
 #include <filesystem>
@@ -466,6 +467,24 @@ Json::Value PluginHostProcessRuntime::invokeUi( const std::string &pluginId,
             result["ok"] = false;
             result["code"] = "E5005";
             result["error"] = "manifest access declares ui:false; ui.invoke refused (E5005)";
+            return result;
+        }
+    }
+    // Host-side event validation (9.0): bounded ids, known event type and a
+    // capped value are enforced BEFORE the worker round-trip. The channel is
+    // untouched by this refusal (E6010), unlike a protocol-level E6002.
+    {
+        const exprs::PluginUiEventParseResult eventCheck = exprs::validateUiEvent( event );
+        if ( !eventCheck.ok() )
+        {
+            std::string detail;
+            for ( const std::string &error : eventCheck.errors )
+                detail += ( detail.empty() ? "" : "; " ) + error;
+            result["ok"] = false;
+            result["code"] = "E6010";
+            result["error"] = "ui event failed host-side validation: " + detail;
+            log.add( PluginDiagnosticCode::UiEventInvalid, PluginDiagnosticSeverity::Warning,
+                     result["error"].asString(), pluginId );
             return result;
         }
     }

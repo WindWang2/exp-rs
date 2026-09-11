@@ -84,6 +84,10 @@ enum class PluginDiagnosticCode
     IpcUnsupportedMethod = 6008,
     /// Request was cancelled before completion (cooperative or kill ladder).
     RequestCancelled = 6009,
+    /// A host-rendered ui event failed host-side validation (plugin-platform
+    /// 9.0). The channel is NOT torn down — the refusal happened before any
+    /// frame was written.
+    UiEventInvalid = 6010,
 };
 
 enum class PluginDiagnosticSeverity

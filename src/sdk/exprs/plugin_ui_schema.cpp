@@ -95,6 +95,22 @@ bool validateControl( const Json::Value &control, const PluginUiSchemaLimits &li
         fail( errors, path, "helpId must be a bounded string" );
         return false;
     }
+    // Plugin-platform 9.0: optional accessibility metadata (additive,
+    // validated, capped). The renderer may surface it; the schema contract
+    // only guarantees it is a bounded string.
+    const Json::Value description = control.get( "description", Json::Value() );
+    if ( !description.isNull() && !boundedString( description, limits.maxStringLength ) )
+    {
+        fail( errors, path, "description must be a bounded string" );
+        return false;
+    }
+    const Json::Value accessibilityLabel = control.get( "accessibilityLabel", Json::Value() );
+    if ( !accessibilityLabel.isNull()
+         && !boundedString( accessibilityLabel, limits.maxStringLength ) )
+    {
+        fail( errors, path, "accessibilityLabel must be a bounded string" );
+        return false;
+    }
 
     if ( typeString == "group" )
     {
@@ -425,6 +441,62 @@ PluginUiSchemaParseResult validatePluginUiSchema( const Json::Value &schema,
         return result;
     }
     result.normalized = schema; // bounded deep copy through jsoncpp value copy
+    return result;
+}
+
+PluginUiEventParseResult validateUiEvent( const Json::Value &event,
+                                          const PluginUiSchemaLimits &limits )
+{
+    PluginUiEventParseResult result;
+    if ( !event.isObject() )
+    {
+        fail( result.errors, "event", "must be an object" );
+        return result;
+    }
+    // The vocabulary is the HOST renderer's actual event vocabulary
+    // (plugin_ui_schema_host.cpp emits "clicked"/"changed"/"command") plus
+    // documented headroom for additive evolution ("submit", "custom").
+    static const char *kEventTypes[] = { "clicked", "changed", "command", "submit", "custom" };
+    const Json::Value contributionId = event.get( "contributionId", Json::Value() );
+    if ( !boundedString( contributionId, limits.maxStringLength )
+         || !validId( contributionId.asString() ) )
+    {
+        fail( result.errors, "event.contributionId", "must be a non-empty bounded identifier" );
+    }
+    const Json::Value controlId = event.get( "controlId", Json::Value() );
+    if ( !boundedString( controlId, limits.maxStringLength ) || !validId( controlId.asString() ) )
+    {
+        fail( result.errors, "event.controlId", "must be a non-empty bounded identifier" );
+    }
+    const Json::Value eventType = event.get( "eventType", Json::Value() );
+    if ( !boundedString( eventType, limits.maxStringLength ) )
+    {
+        fail( result.errors, "event.eventType", "must be a bounded string" );
+    }
+    else
+    {
+        bool known = false;
+        for ( const char *candidate : kEventTypes )
+            if ( eventType.asString() == candidate )
+                known = true;
+        if ( !known )
+            fail( result.errors, "event.eventType",
+                  "unknown event type '" + eventType.asString() + "'" );
+    }
+    const Json::Value &value = event[ "value" ];
+    if ( !value.isNull() )
+    {
+        // The serialized size is the true transport cost; cap it.
+        Json::StreamWriterBuilder builder;
+        builder["indentation"] = "";
+        const std::string serialized = Json::writeString( builder, value );
+        if ( serialized.size() > limits.maxEventValueBytes )
+        {
+            fail( result.errors, "event.value",
+                  "serialized value exceeds the event cap ("
+                      + std::to_string( limits.maxEventValueBytes ) + " bytes)" );
+        }
+    }
     return result;
 }
 
