@@ -35,7 +35,10 @@ TEST_CASE( "Tool catalog export stays within the context budget", "[agent][catal
     // to fit the platform scope; discovery stays progressive — agents search
     // and shortlist (compact layer below) before injecting any full schema,
     // so the whole-catalog export is a listing envelope, not the common path.
-    const size_t budgetBytes = 160 * 1024;
+    // Scientific Processing 8.0: four more operators (rs:sar_geocode,
+    // rs:sar_temporal_stats, rs:rasterize, rs:zonal_stats) pushed the full
+    // envelope past 160 KiB (measured 167 KiB) — raised to 176 KiB.
+    const size_t budgetBytes = 176 * 1024;
     REQUIRE( full.size() < budgetBytes );
 
     // Compact discovery layer (id/name/group/purpose only) must be meaningfully

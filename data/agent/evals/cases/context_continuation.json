@@ -1,0 +1,77 @@
+{
+  "cases": [
+    {
+      "case_id": "context/understand-feeds-context-then-stales",
+      "category": "context_continuation",
+      "description": "A inspected dataset lands in typed context; rewriting the file marks the context stale",
+      "fixture": {
+        "kind": "raster", "width": 8, "height": 8,
+        "bands": ["red", "nir"], "nodata": -9999.0
+      },
+      "steps": [
+        {"tool": "spatial:understand", "input": {"asset": "$fixture"},
+         "expect": {"success": true, "asserts": [
+           {"path": "cached", "equals": false}]}},
+        {"tool": "harness:context", "input": {},
+         "expect": {"success": true, "asserts": [
+           {"path": "context.asset_contexts", "exists": true}]}},
+        {"tool": "spatial:understand", "input": {"asset": "$fixture"},
+         "expect": {"success": true, "asserts": [
+           {"path": "cached", "equals": true}]}}
+      ]
+    },
+    {
+      "case_id": "context/revision-short-circuit",
+      "category": "context_continuation",
+      "description": "Context with the current revision answers unchanged without the full document",
+      "steps": [
+        {"tool": "harness:context", "input": {},
+         "expect": {"success": true, "asserts": [
+           {"path": "unchanged", "equals": false},
+           {"path": "revision", "exists": true}]}},
+        {"tool": "harness:context", "input": {"if_revision": "$previous.revision"},
+         "expect": {"success": true, "asserts": [
+           {"path": "unchanged", "equals": true}]}},
+        {"tool": "harness:context", "input": {"if_revision": "ffffffffffff"},
+         "expect": {"success": true, "asserts": [
+           {"path": "unchanged", "equals": false}]}}
+      ]
+    },
+    {
+      "case_id": "context/decision-ledger-lifecycle",
+      "category": "context_continuation",
+      "description": "Decisions record, surface in context, resolve, and stay bounded",
+      "steps": [
+        {"tool": "harness:decision_record",
+         "input": {"action": "record", "kind": "ambiguity", "subject": "water vs flood",
+                    "note": "goal text matched both; chose water extraction"},
+         "expect": {"success": true, "asserts": [
+           {"path": "decision_id", "exists": true}]}},
+        {"tool": "harness:decision_record",
+         "input": {"action": "resolve", "decision_id": "$previous.decision_id", "chosen": "water"},
+         "expect": {"success": true, "asserts": [
+           {"path": "resolved", "equals": true}]}},
+        {"tool": "harness:decision_record", "input": {"action": "list"},
+         "expect": {"success": true, "asserts": [
+           {"path": "decisions", "exists": true}]}}
+      ]
+    },
+    {
+      "case_id": "context/understanding-cache-revision-aware",
+      "category": "context_continuation",
+      "description": "A stats request bypasses the cache and a plain request answers from it",
+      "fixture": {
+        "kind": "raster", "width": 8, "height": 8,
+        "bands": ["red"], "nodata": -9999.0
+      },
+      "steps": [
+        {"tool": "spatial:understand", "input": {"asset": "$fixture"},
+         "expect": {"success": true, "asserts": [{"path": "cached", "equals": false}]}},
+        {"tool": "spatial:understand", "input": {"asset": "$fixture", "stats": true},
+         "expect": {"success": true, "asserts": [{"path": "cached", "equals": false}]}},
+        {"tool": "spatial:understand", "input": {"asset": "$fixture"},
+         "expect": {"success": true, "asserts": [{"path": "cached", "equals": true}]}}
+      ]
+    }
+  ]
+}

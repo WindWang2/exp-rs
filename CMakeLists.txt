@@ -321,11 +321,14 @@ option(SICNU_WITH_ONNX_RUNTIME "Enable the ONNX Runtime inference provider" OFF)
 
 # ONNX Runtime discovery (only meaningful with SICNU_WITH_ONNX_RUNTIME=ON):
 # provide ONNXRUNTIME_ROOT_DIR pointing at the installation, or rely on
-# standard prefix search for onnxruntime/onnxruntime_cxx_api.h.
+# standard prefix search. Both official layouts are accepted: the prebuilt
+# release SDK ships include/onnxruntime_cxx_api.h, while distro/conda
+# installs often use include/onnxruntime/onnxruntime_cxx_api.h.
 if(SICNU_WITH_ONNX_RUNTIME)
-    find_path(ONNXRUNTIME_INCLUDE_DIR onnxruntime/onnxruntime_cxx_api.h
+    find_path(ONNXRUNTIME_INCLUDE_DIR NAMES onnxruntime/onnxruntime_cxx_api.h
+                                          onnxruntime_cxx_api.h
               HINTS "${ONNXRUNTIME_ROOT_DIR}" ENV ONNXRUNTIME_ROOT_DIR
-              PATH_SUFFIXES include)
+              PATH_SUFFIXES include/onnxruntime include)
     find_library(ONNXRUNTIME_LIBRARY NAMES onnxruntime onnxruntime_shared
                  HINTS "${ONNXRUNTIME_ROOT_DIR}" ENV ONNXRUNTIME_ROOT_DIR
                  PATH_SUFFIXES lib lib64)
@@ -707,6 +710,9 @@ add_subdirectory(src/operators)
 # Must follow src/operators: the adapters link the sicnu_operators target.
 add_subdirectory(src/help/adapters)
 add_subdirectory(src/workflow)
+# Workflow → experiment auto-recording adapter (goal 8.0). Must follow
+# src/workflow: the adapter links the sicnu_workflow target.
+add_subdirectory(src/experiment/bridge)
 add_subdirectory(src/jobs)
 add_subdirectory(src/python/isolated)
 add_subdirectory(src/python/sdk)

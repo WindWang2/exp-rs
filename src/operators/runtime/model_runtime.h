@@ -132,6 +132,31 @@ bool resolveDevice( const RequestedDevice &request,
                     const std::vector<int> &freeVramMbByIndex,
                     ResolvedDevice *out, std::string *why = nullptr );
 
+// --- Platform 8.0 WP-B: placement policy + pressure observability ------------
+
+/// Deterministic multi-GPU placement policy (WP-B). It is a PLACEMENT knob —
+/// how `auto` chooses among FITTING devices; it never admits a device that
+/// does not fit and never queues/retries (the registry's bounded pressure
+/// valve is unchanged).
+enum class DevicePlacementPolicy
+{
+  LowestFitting, ///< 7.0 default: lowest addressable index whose free VRAM fits
+  LeastLoaded    ///< among fitting devices, the one with the MOST free VRAM
+                 ///< (ties resolve to the lowest index). Spreads concurrent
+                 ///< sessions across cards instead of stacking them on cuda:0.
+};
+
+/// Policy-aware resolution. Auto under @p LeastLoaded scans every fitting
+/// device and picks the largest free VRAM; every other request kind behaves
+/// exactly like the 7.0 contract. Equal inputs always yield equal outputs.
+bool resolveDevice( const RequestedDevice &request,
+                    const ModelHardwareCapabilities &hw,
+                    bool modelWantsGpu, int estimatedVramMb,
+                    int maxAddressableCudaIndex, bool allowCpuFallback,
+                    const std::vector<int> &freeVramMbByIndex,
+                    DevicePlacementPolicy policy,
+                    ResolvedDevice *out, std::string *why = nullptr );
+
 /// Backend capabilities the registry needs beyond the factory itself
 /// (Platform 4.0). Defaults describe the historical built-in provider.
 struct ProviderTraits
@@ -414,6 +439,18 @@ class ModelRuntimeRegistry
     /// authority behind device resolution (placement seam, not a scheduler).
     VramLedger &vramLedger() { return m_ledger; }
 
+    // --- Platform 8.0 WP-B: policy + pressure observability ------------------
+    /// Placement policy applied to every `auto` acquisition (default
+    /// LowestFitting = the 7.0 semantics). Explicit cpu/cuda:N requests are
+    /// policy-independent.
+    void setPlacementPolicy( DevicePlacementPolicy policy );
+    DevicePlacementPolicy placementPolicy() const;
+
+    /// Per-device pressure snapshot (capacity/reserved/holders per GPU plus
+    /// the active policy). No sub-allocation exists, so utilization IS the
+    /// honest fragmentation view: freeMb = capacity − reserved.
+    std::vector<VramLedger::DeviceState> deviceReport() const;
+
   private:
     ModelRuntimeRegistry();
 
@@ -450,6 +487,7 @@ class ModelRuntimeRegistry
     std::unordered_map<std::string, ProviderEntry> m_providers;
     std::optional<ModelHardwareCapabilities> m_hardwareOverride;
     VramLedger m_ledger;
+    DevicePlacementPolicy m_placementPolicy = DevicePlacementPolicy::LowestFitting;
     std::size_t m_maxSessions = 2;
     std::size_t m_totalLoaded = 0;
     std::uint64_t m_useCounter = 0;

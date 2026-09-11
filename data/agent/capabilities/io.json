@@ -80,5 +80,16 @@
     "id": "io:doctor",
     "family": "io",
     "side_effects": false
+  },
+  {
+    "id": "io:build_overviews",
+    "family": "io",
+    "extends": "family:io"
+  },
+  {
+    "id": "io:vector_convert",
+    "family": "io",
+    "extends": "family:io",
+    "verification": { "expected_kind": "vector", "checks": ["existence", "opens", "feature_count"] }
   }
 ]

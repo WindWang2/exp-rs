@@ -9,6 +9,7 @@
 #include "geospatial/raster/raster_reader.h"
 
 #include "geospatial/gdal_guard.h"
+#include "geospatial/util/gdal_compat.h"
 
 #include <gdal.h>
 #include <gdal_priv.h>
@@ -44,7 +45,7 @@ GDALDataType requireRealDataType( GDALRasterBandH band, int bandIndex )
     // 64-bit integers are NOT claimed exact: doubles represent integers
     // exactly only up to 2^53, so a silent conversion would be a fidelity
     // lie for full-range Int64/UInt64 rasters.
-#if GDAL_VERSION_NUM >= GDAL_COMPUTE_VERSION( 3, 5, 0 )
+#if SICNU_GDAL_INT64_DATATYPES
     case GDT_UInt64:
     case GDT_Int64:
 #endif

@@ -11,6 +11,11 @@
 
 #include <QUuid>
 
+#include "runtime/observability/fault_point.h"
+#include "runtime/observability/trace.h"
+
+#include <chrono>
+
 namespace sicnu::experiment
 {
 
@@ -399,6 +404,30 @@ std::optional<ExperimentRun> loadRunLocked( sqlite3 *db, const QString &runId )
 
 sicnu::data::Result<void> ExperimentStore::upsertRun( const ExperimentRun &run )
 {
+    // Unified-trace adapter (Verification Platform 8.0): the Experiment link
+    // of the chain — one record per persisted run transition (the recorder's
+    // Created → Running → terminal lifecycle lands here). Disabled path =
+    // one relaxed atomic load.
+    if ( sicnu::runtime::observability::trace::Trace::enabled() )
+    {
+        const auto started = std::chrono::steady_clock::now();
+        const auto result = upsertRunImpl( run );
+        sicnu::runtime::observability::trace::TraceEvent trace;
+        trace.event = "experiment_upsert";
+        trace.phase = "end";
+        trace.run = run.runId().toStdString();
+        trace.artifact = run.experimentId().toStdString();
+        trace.durationUs = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - started ).count();
+        trace.status = result ? "ok" : "error";
+        sicnu::runtime::observability::trace::Trace::publish( trace );
+        return result;
+    }
+    return upsertRunImpl( run );
+}
+
+sicnu::data::Result<void> ExperimentStore::upsertRunImpl( const ExperimentRun &run )
+{
     using ResultT = sicnu::data::Result<void>;
     if ( !m_impl )
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
@@ -500,9 +529,24 @@ sicnu::data::Result<void> ExperimentStore::upsertRun( const ExperimentRun &run )
                                                     .arg( run.experimentId() ) ) );
         }
     }
-    if ( !m_impl->commit( nullptr ) )
+    if ( SICNU_FAULT_POINT( "experiment_store.commit" ) )
+    {
+        // Injected commit failure (Verification Platform 8.0 fault matrix,
+        // test-only arming): take exactly the real commit-failure branch and
+        // roll the transaction back so the store stays consistent.
+        m_impl->rollback();
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
                                             QStringLiteral( "commit failed" ) ) );
+    }
+    if ( !m_impl->commit( nullptr ) )
+    {
+        // A failed COMMIT can leave the transaction active (e.g. SQLITE_BUSY):
+        // roll back explicitly so the shared connection never leaks its write
+        // lock (same convention as the dataset store, #774).
+        m_impl->rollback();
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            QStringLiteral( "commit failed" ) ) );
+    }
     return ResultT::success();
 }
 
@@ -586,6 +630,48 @@ qint64 ExperimentStore::runCount() const
     if ( count && count.stepRow() )
         return count.i64( 0 );
     return 0;
+}
+
+QStringList ExperimentStore::runIdsByExecutionRef( const QString &executionRef,
+                                                   qint64 limit ) const
+{
+    // The execution ref lives inside the run JSON (no dedicated column), so
+    // this is a bounded paged scan, not an index lookup: it exists for
+    // restart-time reconciliation, not per-event hot paths. Callers that
+    // track executions live should keep their own ref→runId map (the bridge
+    // does) and treat this as the cold-path fallback.
+    QStringList ids;
+    if ( !m_impl || executionRef.isEmpty() )
+        return ids;
+    limit = qBound<qint64>( qint64( 1 ), limit, kMaxPageSize );
+    QMutexLocker lock( &m_impl->mutex );
+    constexpr qint64 kPage = 200;
+    qint64 offset = 0;
+    while ( qint64( ids.size() ) < limit )
+    {
+        Stmt stmt( m_impl->db, QStringLiteral(
+            "SELECT run_id, json FROM experiment_runs ORDER BY created_ms, run_id"
+            " LIMIT ? OFFSET ?" ) );
+        if ( !stmt )
+            break;
+        stmt.bind( 1, kPage );
+        stmt.bind( 2, offset );
+        bool pageEmpty = true;
+        const QString needle = QStringLiteral( "\"execution_ref\":\"%1\"" ).arg( executionRef );
+        while ( stmt.stepRow() )
+        {
+            pageEmpty = false;
+            const QString json = stmt.text( 1 );
+            // The JSON serializer emits no spaces between members; matching
+            // the exact member token avoids accidental substring collisions.
+            if ( json.contains( needle ) )
+                ids.append( stmt.text( 0 ) );
+        }
+        if ( pageEmpty )
+            break;
+        offset += kPage;
+    }
+    return ids;
 }
 
 // --- metric records ---------------------------------------------------------------

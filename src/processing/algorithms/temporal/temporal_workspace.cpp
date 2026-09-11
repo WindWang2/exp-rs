@@ -5,11 +5,13 @@
 #include "data/derivation_record.h"
 #include "data/artifact_store.h"
 #include "data/execution_identity_resolver.h"
+#include "data/execution_fingerprint.h"
 #include "data/providers/gdal_raster_source_provider.h"
 
 #include <qgsdatasourceresolver.h>
 
 #include <QFileInfo>
+#include <QThread>
 #include <QUuid>
 
 #include <functional>
@@ -493,10 +495,10 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
     const auto snapshot = dataManager->findByPath( lookupPath );
     if ( !snapshot )
     {
-      // Data Fabric 8.0: an unregistered remote input may still carry a
-      // provable identity through the installed execution identity resolver
-      // (geospatial remote identity — fail-closed, strong-ETag only). A
-      // token becomes the input's content identity; "" keeps the
+      // Data Fabric 8.0 / Execution Plane 8.0: an unregistered remote input
+      // may still carry a provable identity through the installed execution
+      // identity resolver (geospatial remote identity — fail-closed, strong-ETag
+      // only). A token becomes the input's content identity; "" keeps the
       // conservative uncacheable verdict below.
       if ( kind != QgsDataSourceKind::LocalFile && sicnu::data::executionIdentityResolver() )
       {
@@ -504,7 +506,9 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
         if ( !token.isEmpty() )
         {
           sicnu::data::TaggedDerivationInput input;
+          input.revision = sicnu::data::AssetRevision::initial();
           input.lazyContentDigest = token;
+          input.remoteIdentity = token;
           input.toPort = QStringLiteral( "input" );
           input.valueDomain = QStringLiteral( "remote_identity" );
           out->append( input );
@@ -542,14 +546,16 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
     const auto snapshot = dataManager->findByPath( lookupPath );
     if ( !snapshot )
     {
-      // Same remote-identity bridge as generic inputs (Data Fabric 8.0).
+      // Same remote-identity bridge as generic inputs (Data Fabric 8.0 / Execution Plane 8.0).
       if ( !localScene && sicnu::data::executionIdentityResolver() )
       {
         const QString token = ( *sicnu::data::executionIdentityResolver() )( lookupPath );
         if ( !token.isEmpty() )
         {
           sicnu::data::TaggedDerivationInput input;
+          input.revision = sicnu::data::AssetRevision::initial();
           input.lazyContentDigest = token;
+          input.remoteIdentity = token;
           input.toPort = QStringLiteral( "scene" );
           input.valueDomain = QStringLiteral( "remote_identity" );
           out->append( input );
@@ -576,6 +582,84 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
     return false;
   }
   return true;
+}
+
+void warmExecutionIdentityCache( sicnu::data::DataManager *dataManager,
+                                 const QVariantMap &params )
+{
+  // Network I/O must never run under the scheduler mutex (review P1): the
+  // collector consults the resolver under TaskCenter::m_mutex, so this
+  // pre-pass runs on the submitting thread BEFORE that lock and performs the
+  // (potentially slow) probes lock-free. The consult under the mutex then
+  // hits the resolver's recent session entry (TTL) — pure bookkeeping.
+  if ( !sicnu::data::ExecutionResultCache::instance().isEnabled() )
+    return;
+  if ( !dataManager )
+    return;
+  if ( !sicnu::data::executionIdentityResolver() )
+    return;
+  if ( QThread::currentThread() != dataManager->thread() )
+    return; // same affinity contract as submission-time fingerprinting
+
+  const QString collectionParam = params.value( QStringLiteral( "collection" ) ).toString();
+  QStringList scenePaths;
+  const QVariant scenesValue = params.value( QStringLiteral( "scenes" ) );
+  const std::function<void( const QVariant & )> collectScene =
+    [&]( const QVariant &entry ) {
+      if ( entry.userType() == QMetaType::QString )
+        scenePaths.append( entry.toString() );
+      else if ( entry.userType() == QMetaType::QVariantMap )
+        scenePaths.append( entry.toMap().value( QStringLiteral( "path" ) ).toString() );
+      else if ( entry.userType() == QMetaType::QVariantList )
+      {
+        for ( const QVariant &item : entry.toList() )
+          collectScene( item );
+      }
+    };
+  if ( scenesValue.userType() == QMetaType::QVariantList )
+  {
+    for ( const QVariant &item : scenesValue.toList() )
+      collectScene( item );
+  }
+  scenePaths.removeAll( QString() );
+
+  QStringList candidates;
+  {
+    QVariantMap scanned = params;
+    scanned.remove( QStringLiteral( "scenes" ) );
+    if ( !collectionParam.isEmpty() )
+      scanned.remove( QStringLiteral( "collection" ) );
+    collectIdentityPathCandidates( scanned, QStringList(), candidates );
+  }
+
+  QStringList toWarm = scenePaths;
+  for ( QString path : candidates )
+  {
+    if ( !collectionParam.isEmpty() && path.trimmed() == collectionParam.trimmed() )
+      continue;
+    if ( scenePaths.contains( path ) )
+      continue;
+    toWarm.append( path );
+  }
+
+  for ( const QString &path : toWarm )
+  {
+    if ( path.trimmed().isEmpty() )
+      continue;
+    const QgsDataSourceKind kind = QgsDataSourceResolver::classify( path );
+    if ( kind == QgsDataSourceKind::LocalFile )
+      continue; // local identity never consults the resolver
+    QString lookupPath = path.trimmed();
+    if ( QgsDataSourceResolver::requiresLocalExistenceCheck( lookupPath ) )
+    {
+      const QString canonical = QFileInfo( lookupPath ).canonicalFilePath();
+      if ( !canonical.isEmpty() )
+        lookupPath = canonical;
+    }
+    if ( dataManager->findByPath( lookupPath ) || dataManager->findByPath( path.trimmed() ) )
+      continue; // catalog-resolved: the collector never consults the resolver
+    ( *sicnu::data::executionIdentityResolver() )( path.trimmed() ); // probe lock-free
+  }
 }
 
 } // namespace sicnu::temporal

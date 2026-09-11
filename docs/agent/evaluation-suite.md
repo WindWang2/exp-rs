@@ -77,3 +77,23 @@ noted):
 
 Regression pins kept: NDVI & change full execution, FAIL-never-success,
 anti-hallucination, token budgets, capability drift, recipe de-duplication.
+
+---
+
+## Harness 8.0: Externalized Evaluation Corpus (2026-09)
+
+`data/agent/evals/cases/*.json` is a versioned, data-driven corpus executed
+deterministically by `tests/test_harness_eval_corpus.cpp` (Tier A: the tool
+contract surface; engine-execution scenarios stay in `test_harness_evals.cpp`).
+See `data/agent/evals/README.md` for the schema. Key properties:
+
+- **Closed categories**: `normal_workflow`, `missing_data`, `ambiguity`,
+  `invalid_science`, `impossible_task`, `multimodal`,
+  `context_continuation`, `anti_hallucination`, `map_confirmation`, `budget`.
+- **Deterministic**: runtime-generated fixtures (fixed pixel formulas, ≤ 32²),
+  typed error-code assertions, no prose matching, no timing.
+- **Schema-guarded**: unique case ids, live tool ids, bounded expansion
+  (`foreach`, ≤ 400 cases), closed vocabularies — the corpus itself cannot
+  drift.
+- Seeded with 63 expanded cases over 10 category files; the corpus is designed
+  to grow by adding data, not code.

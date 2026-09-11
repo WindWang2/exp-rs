@@ -157,7 +157,14 @@ VoidResult ExperimentRunRecorder::markSucceeded( const QString &runId,
     run.setStatus( RunStatus::Completed );
     run.setFinishedAtUtc( QDateTime::currentDateTimeUtc() );
     run.artifacts() = artifacts;
-    run.setMetrics( RunEnvironment::redactSecretKeys( metrics ) );
+    // MERGE (not replace): lifecycle evidence recorded earlier on the same
+    // record (interrupt_note from a resumed execution, extra evidence)
+    // survives success; the completion document overwrites only its own keys.
+    QJsonObject merged = run.metrics();
+    const QJsonObject additions = RunEnvironment::redactSecretKeys( metrics );
+    for ( auto it = additions.begin(); it != additions.end(); ++it )
+        merged.insert( it.key(), it.value() );
+    run.setMetrics( merged );
     auto written = m_store->upsertRun( run );
     if ( !written )
         return VoidResult::failure( written.diagnostics() );
@@ -205,6 +212,53 @@ VoidResult ExperimentRunRecorder::markCancelled( const QString &runId, const QSt
     QJsonObject metrics = run.metrics();
     metrics.insert( QStringLiteral( "cancel_reason" ), reason );
     run.setMetrics( RunEnvironment::redactSecretKeys( metrics ) );
+    auto written = m_store->upsertRun( run );
+    if ( !written )
+        return VoidResult::failure( written.diagnostics() );
+    return VoidResult::success();
+}
+
+VoidResult ExperimentRunRecorder::markInterrupted( const QString &runId, const QString &note )
+{
+    auto loaded = loadRun( runId );
+    if ( !loaded )
+        return VoidResult::failure( loaded.diagnostics() );
+    ExperimentRun run = loaded.value();
+    if ( run.status() == RunStatus::Interrupted )
+    {
+        // Idempotent re-delivery: merge the newest note, never a transition
+        // (Interrupted → Interrupted is not a state change).
+        if ( note.isEmpty() )
+            return VoidResult::success();
+        QJsonObject metrics = run.metrics();
+        metrics.insert( QStringLiteral( "interrupt_note" ), note );
+        run.setMetrics( RunEnvironment::redactSecretKeys( metrics ) );
+        auto written = m_store->upsertRun( run );
+        if ( !written )
+            return VoidResult::failure( written.diagnostics() );
+        return VoidResult::success();
+    }
+    // The store validates the transition (only a Running run may become
+    // Interrupted; a Created run was never live, so it cannot be interrupted).
+    run.setStatus( RunStatus::Interrupted );
+    QJsonObject metrics = run.metrics();
+    metrics.insert( QStringLiteral( "interrupt_note" ), note );
+    run.setMetrics( RunEnvironment::redactSecretKeys( metrics ) );
+    auto written = m_store->upsertRun( run );
+    if ( !written )
+        return VoidResult::failure( written.diagnostics() );
+    return VoidResult::success();
+}
+
+VoidResult ExperimentRunRecorder::markResumed( const QString &runId )
+{
+    auto loaded = loadRun( runId );
+    if ( !loaded )
+        return VoidResult::failure( loaded.diagnostics() );
+    ExperimentRun run = loaded.value();
+    if ( run.status() == RunStatus::Running )
+        return VoidResult::success(); // idempotent re-delivery
+    run.setStatus( RunStatus::Running );
     auto written = m_store->upsertRun( run );
     if ( !written )
         return VoidResult::failure( written.diagnostics() );

@@ -54,6 +54,9 @@ struct SelectionContextSnapshot
     QStringList selectedAssetIds;        ///< Data Manager catalog selection
     QStringList selectedResultIds;       ///< governance Results selection
     int layerCount = 0;                  ///< total layers on the active view
+    /// Workbench 8.0: true while any non-terminal TaskCenter task exists
+    /// (injected predicate — the pure layer never touches TaskCenter).
+    bool hasInFlightTask = false;
 
     bool hasLayerSelection() const { return activeLayer || !selectedLayers.isEmpty(); }
     bool hasGovernanceSelection() const
@@ -84,6 +87,8 @@ struct ContextFacts
     bool editing = false;     ///< an edit session is open
     bool hasGovernanceResult = false;
     bool hasGovernanceAsset = false;
+    bool hasBrokenLayer = false;
+    bool hasInFlightTask = false; ///< a TaskCenter task is queued/running
 };
 ContextFacts prerequisiteFacts( const SelectionContextSnapshot &s );
 
@@ -106,6 +111,20 @@ bool resultSelected( const SelectionContextSnapshot &s );
 bool assetSelected( const SelectionContextSnapshot &s );
 /// Human-readable reason a command is unavailable (palette / tooltips).
 QString unavailabilityReason( const SelectionContextSnapshot &s, const QString &commandId );
+
+/// Workbench 8.0: deterministic "what should I do next" projection — a
+/// stable command id (empty when nothing applies) plus human text. Priority
+/// order: active edit session → selected raster → selected editable vector
+/// → temporal data → in-flight task → empty workspace. Only registered
+/// shell commands are suggested; broken-layer and governance-selection
+/// facts stay in ContextFacts (no relocate/open commands exist in the
+/// registry yet). Pure; fully unit-testable.
+struct NextAction
+{
+    QString commandId; ///< registry command id ("run.processing"); empty = none
+    QString text;      ///< user-facing suggestion (中文)
+};
+NextAction suggestedNextAction( const SelectionContextSnapshot &s );
 } // namespace ContextRules
 
 /**
@@ -136,6 +155,12 @@ class SelectionContext : public QObject
     using SarPredicate = std::function<bool( QgsMapLayer * )>;
     void setSarPredicate( SarPredicate predicate );
 
+    /// Workbench 8.0: inject "is a TaskCenter task in flight" — the shell
+    /// binds this to TaskCenter::allTasks() so the pure layer stays free of
+    /// processing types. No predicate = false (headless default).
+    using InFlightPredicate = std::function<bool()>;
+    void setInFlightTaskPredicate( InFlightPredicate predicate );
+
     /// Last computed projection (recomputed lazily on first query).
     SelectionContextSnapshot snapshot() const;
 
@@ -159,6 +184,7 @@ class SelectionContext : public QObject
     QPointer<QgsMapCanvas> m_canvas;
     QPointer<QgsLayerTreeView> m_layerTree;
     SarPredicate m_sarPredicate;
+    InFlightPredicate m_inFlightPredicate;
     mutable SelectionContextSnapshot m_cached;
     /// #778: liveness mirror of the cached layer pointers — a null entry means
     /// the layer object died without (or before) a removal signal, and the

@@ -1,0 +1,365 @@
+{
+  "cases": [
+    {
+      "case_id": "normal/ndvi-preflight-ok",
+      "category": "normal_workflow",
+      "description": "NDVI preflight passes on a red+nir surface-reflectance scene",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "nodata": -9999.0,
+        "metadata": {
+          "SICNU_RADIOMETRIC_STATE": "surface_reflectance"
+        }
+      },
+      "steps": [
+        {
+          "tool": "spatial:understand",
+          "input": {
+            "asset": "$fixture"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "dataset_understanding.modality",
+                "equals": "optical"
+              }
+            ]
+          }
+        },
+        {
+          "tool": "harness:preflight",
+          "input": {
+            "intent": "ndvi",
+            "inputs": [
+              {
+                "name": "primary",
+                "ref": "$fixture"
+              }
+            ]
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "preflight.verdict",
+                "equals": "ok"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "foreach": {
+        "var": "INDEX",
+        "values": [
+          "evi",
+          "ndwi",
+          "nbr"
+        ]
+      },
+      "case_id": "normal/index-$INDEX-preflight-ok",
+      "category": "normal_workflow",
+      "description": "$INDEX preflight passes on a scene carrying all needed roles",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "blue",
+          "green",
+          "red",
+          "nir",
+          "swir"
+        ],
+        "nodata": -9999.0,
+        "metadata": {
+          "SICNU_RADIOMETRIC_STATE": "surface_reflectance"
+        }
+      },
+      "steps": [
+        {
+          "tool": "harness:preflight",
+          "input": {
+            "intent": "$INDEX",
+            "inputs": [
+              {
+                "name": "primary",
+                "ref": "$fixture"
+              }
+            ]
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "preflight.verdict",
+                "equals": "ok"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "normal/change-preflight-ok",
+      "category": "normal_workflow",
+      "description": "Optical change preflight passes on a matched same-grid pair",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "nodata": -9999.0,
+        "metadata": {
+          "SICNU_RADIOMETRIC_STATE": "surface_reflectance"
+        }
+      },
+      "steps": [
+        {
+          "tool": "harness:preflight",
+          "input": {
+            "intent": "change",
+            "inputs": [
+              {
+                "name": "before",
+                "ref": "$fixture"
+              },
+              {
+                "name": "after",
+                "ref": "$fixture"
+              }
+            ]
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "preflight.verdict",
+                "equals": "ok"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "normal/terrain-preflight-ok",
+      "category": "normal_workflow",
+      "description": "Terrain preflight passes on a DEM-role raster",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "dem"
+        ],
+        "nodata": -9999.0
+      },
+      "steps": [
+        {
+          "tool": "spatial:understand",
+          "input": {
+            "asset": "$fixture"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "dataset_understanding.modality",
+                "equals": "dem"
+              }
+            ]
+          }
+        },
+        {
+          "tool": "harness:preflight",
+          "input": {
+            "intent": "terrain",
+            "inputs": [
+              {
+                "name": "primary",
+                "ref": "$fixture"
+              }
+            ]
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "preflight.verdict",
+                "equals": "ok"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "normal/recipe-instantiate-ndvi",
+      "category": "normal_workflow",
+      "description": "NDVI recipe instantiates to a structurally valid plan",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "nodata": -9999.0
+      },
+      "steps": [
+        {
+          "tool": "harness:instantiate_recipe",
+          "input": {
+            "recipe_id": "harness.optical_ndvi",
+            "bindings": {
+              "slots": {
+                "primary": "$fixture"
+              }
+            }
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "plan.kind",
+                "equals": "execution_plan"
+              },
+              {
+                "path": "plan.steps",
+                "exists": true
+              }
+            ]
+          }
+        },
+        {
+          "tool": "harness:plan",
+          "input": {
+            "plan": "$previous.plan"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "compilable",
+                "equals": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "normal/plan-fingerprint-stable",
+      "category": "normal_workflow",
+      "description": "Plan summary carries a deterministic fingerprint",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "nodata": -9999.0
+      },
+      "steps": [
+        {
+          "tool": "harness:instantiate_recipe",
+          "input": {
+            "recipe_id": "harness.optical_ndvi",
+            "bindings": {
+              "slots": {
+                "primary": "$fixture"
+              }
+            }
+          },
+          "expect": {
+            "success": true
+          }
+        },
+        {
+          "tool": "harness:plan",
+          "input": {
+            "plan": "$previous.plan"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "plan.plan_fingerprint",
+                "exists": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "normal/qa-mask-preflight-ok",
+      "category": "normal_workflow",
+      "description": "QA intent preflight on a scene with a QA band",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir",
+          "qa"
+        ],
+        "nodata": -9999.0
+      },
+      "steps": [
+        {
+          "tool": "spatial:understand",
+          "input": {
+            "asset": "$fixture"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "dataset_understanding.quality_masks",
+                "exists": true
+              }
+            ]
+          }
+        },
+        {
+          "tool": "harness:preflight",
+          "input": {
+            "intent": "qa",
+            "inputs": [
+              {
+                "name": "primary",
+                "ref": "$fixture"
+              }
+            ]
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "preflight.verdict",
+                "equals": "ok"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -27,6 +27,8 @@ constexpr const char *kInspectData = "dataProvider.inspect";
 constexpr const char *kOpenData = "dataProvider.open";
 constexpr const char *kLoadModel = "modelRuntime.load";
 constexpr const char *kInferModel = "modelRuntime.infer";
+constexpr const char *kDescribeUi = "ui.describe";   ///< protocol 1.1
+constexpr const char *kInvokeUi = "ui.invoke";       ///< protocol 1.1
 
 /// Handshake event (worker -> launcher).
 constexpr const char *kWorkerHello = "worker.hello";
@@ -58,6 +60,12 @@ constexpr int kExitLoadFailed = 3;
 /// modelRuntime.load params: { "framework", "request": PluginModelRequestV1 }
 /// modelRuntime.infer params: { "framework", "input": PluginTensorV1,
 ///                              "outputTensorName" }
+/// ui.describe params: {} — result: { "schema": <validated schema json> }
+///   (E6008 = the plugin exports no declarative UI provider; that is a
+///    normal "no UI" answer, not a failure.)
+/// ui.invoke params: { "event": { "contributionId", "controlId",
+///                                "eventType", "value" } }
+///   result: the provider's bounded response ({ "state": {...} } optional).
 /// plugin.shutdown params: {} — the worker runs PluginV1::shutdown and
 /// exits with kExitOk after replying.
 

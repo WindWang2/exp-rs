@@ -144,6 +144,23 @@ int runExportHelpDocs( const QString &dirPath )
 
 int runHelpProjections( const QStringList &arguments )
 {
+    // Only engage when a help-projection option is actually present: the
+    // parser below is exclusive (unknown options exit the process), so
+    // running it for unrelated commands swallowed every --json flag of the
+    // CLI 3.0 subcommands.
+    bool mentionsHelpOption = false;
+    for ( const QString &argument : arguments )
+    {
+        if ( argument.startsWith( "--help" ) || argument.startsWith( "--operator-help" )
+             || argument.startsWith( "--list-topics" ) || argument.startsWith( "--export-help-docs" ) )
+        {
+            mentionsHelpOption = true;
+            break;
+        }
+    }
+    if ( !mentionsHelpOption )
+        return -1; // no help option set — caller continues
+
     QCommandLineParser parser;
     parser.setApplicationDescription( QStringLiteral(
         "Unified Help 6.0 CLI projections (same metadata as the GUI)." ) );

@@ -200,6 +200,9 @@ Json::Value StepPlan::toJson() const
   root["outputSizeBytes"] = static_cast<Json::Int64>( outputSizeBytes );
   root["outputMtimeMs"] = static_cast<Json::Int64>( outputMtimeMs );
   root["outputDigest"] = outputDigest;
+  // Optional (8.0): omitted when empty so legacy readers see no change.
+  if ( !operatorImplStamp.empty() )
+    root["operatorImplStamp"] = operatorImplStamp;
   root["errorMessage"] = errorMessage;
   root["startTime"] = startTime;
   root["endTime"] = endTime;
@@ -271,6 +274,8 @@ StepPlan StepPlan::fromJson( const Json::Value &json, std::string *error )
     plan.outputMtimeMs = json["outputMtimeMs"].asInt64();
   if ( json.isMember( "outputDigest" ) && json["outputDigest"].isString() )
     plan.outputDigest = json["outputDigest"].asString();
+  if ( json.isMember( "operatorImplStamp" ) && json["operatorImplStamp"].isString() )
+    plan.operatorImplStamp = json["operatorImplStamp"].asString(); // optional (8.0)
   if ( json.isMember( "errorMessage" ) && json["errorMessage"].isString() )
     plan.errorMessage = json["errorMessage"].asString();
   if ( json.isMember( "startTime" ) && json["startTime"].isString() )

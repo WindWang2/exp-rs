@@ -515,6 +515,18 @@ Json::Value PluginManifest::toJson() const
     json["version"] = version;
     json["api_version"] = apiVersion;
     json["abi_version"] = abiVersion;
+    // Structured declarations round-trip too: the discovery index, the
+    // record snapshot and the host-process worker's load params all travel
+    // through toJson(), and losing them silently disabled the capability
+    // surfaces they carry (access/quotas, isolation 5.0+).
+    if ( !access.isNull() )
+        json["access"] = access;
+    if ( !quotas.isNull() )
+        json["quotas"] = quotas;
+    if ( !conformance.isNull() )
+        json["conformance"] = conformance;
+    if ( !package.isNull() )
+        json["package"] = package;
     if ( !description.empty() )
         json["description"] = description;
     if ( !vendor.empty() )
@@ -531,6 +543,11 @@ Json::Value PluginManifest::toJson() const
     if ( !entrypoint.empty() )
         json["entrypoint"] = entrypoint;
     json["entrypoint_kind"] = entrypointKindName( entrypointKind );
+    // Round-trip the hosting strategy: the discovery index and the
+    // host-process worker's load params serialize through this method; a
+    // dropped "runtime" silently demoted host-process plugins to
+    // in-process on every cache hit (the fixture crash-in-CLI bug class).
+    json["runtime"] = pluginRuntimeKindName( runtime );
     if ( entrypointKind == PluginEntrypointKind::Python )
         json["python"] = python.toJson();
     Json::Value caps( Json::arrayValue );
@@ -640,6 +657,10 @@ bool PluginManifest::fromJson( const Json::Value &json, PluginManifest &out,
         out.access = json["access"];
     if ( json.isMember( "quotas" ) )
         out.quotas = json["quotas"];
+    if ( json.isMember( "conformance" ) && json["conformance"].isObject() )
+        out.conformance = json["conformance"];
+    if ( json.isMember( "package" ) && json["package"].isObject() )
+        out.package = json["package"];
     out.permissions = parsePermissions( json["permissions"], out.warnings );
     for ( const Json::Value &dependency : json["dependencies"] )
     {

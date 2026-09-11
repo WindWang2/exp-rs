@@ -145,6 +145,11 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_spectral_detection_operators.cpp
     rs/rs_sar_dualpol_operator.cpp
     rs/rs_sar_terrain_masks_operator.cpp
+    rs/rs_sar_geocode_operator.cpp
+    rs/rs_raster_vector.cpp
+    rs/rs_rasterize_operator.cpp
+    rs/rs_sar_temporal_stats_operator.cpp
+    rs/rs_zonal_stats_operator.cpp
     rs/rs_temporal_monitor_operator.cpp
     rs/rs_terrain_flow_operator.cpp
     rs/rs_grid_operators.cpp
@@ -219,6 +224,9 @@ target_link_libraries(sicnu_operators
     PRIVATE
         ${JSONCPP_LIBRARIES}
         Sicnu::data
+        # Fault-point probes (Verification Platform 8.0) resolve in the
+        # Qt-free leaf sicnu_runtime.
+        sicnu_runtime
 )
 
 # Platform 7.0: HTTP inference provider (Qt6::Network). When the module is

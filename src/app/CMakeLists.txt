@@ -204,6 +204,12 @@ add_executable(sicnu_geo_rs
     panels/data_manager_panel.cpp
     panels/workspace_browser_panel.cpp
     panels/workspace_browser_panel.h
+    panels/asset_catalog_index.cpp
+    panels/asset_catalog_index.h
+
+    # Professional Workbench 8.0: bounded async catalog previews (package E)
+    preview/asset_preview_service.cpp
+    preview/asset_preview_service.h
 
     # QgisApp facade
     qgis_app_facade.cpp
@@ -342,6 +348,7 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     Sicnu::help_gui
     Sicnu::dataset
     Sicnu::experiment
+    Sicnu::Geospatial
     sicnu_core
     sicnu_processing
     sicnu_operators

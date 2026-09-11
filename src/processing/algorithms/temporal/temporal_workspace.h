@@ -135,4 +135,17 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
                                          QMap<QString, qint64> *inputSizes = nullptr,
                                          QMap<QString, qint64> *inputMsecs = nullptr );
 
+/// Pre-warms the remote-identity session cache for every remote candidate in
+/// @p params that the catalog cannot resolve (8.0 WP-F review fix). MUST be
+/// called BEFORE TaskCenter takes its mutex on the submitting thread: the
+/// resolver probe is network I/O (seconds-scale timeout) and must never run
+/// under the scheduler lock — this call performs it lock-free, so the later
+/// collector consult under the mutex resolves from the warm session cache
+/// (no network under any lock). No-op when the execution cache is disabled,
+/// no catalog is wired, or no identity resolver is installed. Catalog access
+/// requires the catalog's owning thread (same affinity the submission-time
+/// fingerprint relies on); otherwise the call degrades to a no-op.
+void warmExecutionIdentityCache( sicnu::data::DataManager *dataManager,
+                                 const QVariantMap &params );
+
 } // namespace sicnu::temporal

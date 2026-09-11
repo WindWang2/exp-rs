@@ -1,0 +1,231 @@
+{
+  "cases": [
+    {
+      "case_id": "impossible/classify-without-training-blocked",
+      "category": "impossible_task",
+      "description": "Supervised classification without training samples is blocked before execution",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "nodata": -9999.0
+      },
+      "steps": [
+        {
+          "tool": "harness:preflight",
+          "input": {
+            "intent": "classify",
+            "inputs": [
+              {
+                "name": "primary",
+                "ref": "$fixture"
+              }
+            ]
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "preflight.verdict",
+                "equals": "blocked"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "impossible/inference-unknown-model-blocked",
+      "category": "impossible_task",
+      "description": "Inference preflight naming a model that is not registered is blocked with MODEL_NOT_READY",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "green",
+          "blue"
+        ],
+        "nodata": -9999.0
+      },
+      "steps": [
+        {
+          "tool": "harness:preflight",
+          "input": {
+            "intent": "inference",
+            "inputs": [
+              {
+                "name": "primary",
+                "ref": "$fixture"
+              },
+              {
+                "name": "model",
+                "ref": "no-such-model-anywhere"
+              }
+            ]
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "preflight.verdict",
+                "equals": "blocked"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "impossible/sar-flood-on-optical-blocked",
+      "category": "impossible_task",
+      "description": "SAR flood mapping asked for on optical-only data is blocked",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "green",
+          "nir"
+        ],
+        "nodata": -9999.0
+      },
+      "steps": [
+        {
+          "tool": "harness:preflight",
+          "input": {
+            "intent": "sar_flood",
+            "inputs": [
+              {
+                "name": "primary",
+                "ref": "$fixture"
+              }
+            ]
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "preflight.verdict",
+                "equals": "blocked"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "impossible/plan-with-unknown-operator-not-compilable",
+      "category": "impossible_task",
+      "description": "A plan naming a nonexistent operator is structurally valid JSON but refuses to compile",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "nodata": -9999.0
+      },
+      "steps": [
+        {
+          "tool": "harness:plan",
+          "input": {
+            "plan": {
+              "schema_version": "2.0",
+              "kind": "execution_plan",
+              "plan_id": "plan-hallucinated",
+              "intent": "ndvi",
+              "inputs": [
+                {
+                  "name": "primary",
+                  "ref": "$fixture"
+                }
+              ],
+              "steps": [
+                {
+                  "id": "s1",
+                  "operator_id": "rs:magic_ndvi_super",
+                  "params": {}
+                }
+              ],
+              "outputs": [
+                {
+                  "name": "out",
+                  "from_step": "s1",
+                  "port": "output",
+                  "kind": "raster"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "compilable",
+                "equals": false
+              },
+              {
+                "path": "issues",
+                "exists": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "impossible/phenology-too-few-scenes",
+      "category": "impossible_task",
+      "description": "Phenology preflight with a 2-scene temporal fact set is blocked",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "nodata": -9999.0
+      },
+      "steps": [
+        {
+          "tool": "harness:preflight",
+          "input": {
+            "intent": "phenology",
+            "inputs": [
+              {
+                "name": "collection",
+                "ref": "$fixture",
+                "temporal_facts": {
+                  "scene_count": 2,
+                  "dates": [
+                    "2026-01-01",
+                    "2026-02-01"
+                  ],
+                  "max_gap_days": 31
+                }
+              }
+            ]
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "preflight.verdict",
+                "equals": "blocked"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -50,6 +50,9 @@ inline constexpr const char *kPolarizationMismatch = "POLARIZATION_MISMATCH";
 inline constexpr const char *kCalibrationMismatch = "CALIBRATION_MISMATCH";
 inline constexpr const char *kTrainingInvalid = "TRAINING_INVALID";
 inline constexpr const char *kNotSupported = "NOT_SUPPORTED";
+/// Harness 8.0: a declared pin (dataset/model/split identity) does not match
+/// the resolved entity — the plan binds inputs that are not the pinned ones.
+inline constexpr const char *kIdentityMismatch = "IDENTITY_MISMATCH";
 } // namespace error_codes
 
 /// Retry policy class for an error code.

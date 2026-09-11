@@ -824,6 +824,32 @@ QVariantMap experimentCompare( const QVariantMap &args )
     QJsonObject data = comparison.toJson();
     data.insert( QStringLiteral( "metric_diff" ), comparison.metricDiff( a.value(), b.value() ) );
 
+    // Experiment identity + tags (goal 8.0 §F): baseline/treatment grouping
+    // context. Comparing runs from DIFFERENT experiments is legal (same pins)
+    // but must be visible, not hidden.
+    {
+        QJsonObject experimentContext;
+        const std::pair<const char *, const sicnu::experiment::ExperimentRun *> sides[] = {
+            { "a", &a.value() }, { "b", &b.value() } };
+        for ( const auto &[side, runPtr] : sides )
+        {
+            const auto &run = *runPtr;
+            const auto experiment = store->experimentById( run.experimentId() );
+            QJsonObject entry;
+            entry.insert( QStringLiteral( "experiment_id" ), run.experimentId() );
+            if ( experiment )
+            {
+                entry.insert( QStringLiteral( "name" ), experiment->name() );
+                QJsonArray tags;
+                for ( const QString &tag : experiment->tags() )
+                    tags.append( tag );
+                entry.insert( QStringLiteral( "tags" ), tags );
+            }
+            experimentContext.insert( side, entry );
+        }
+        data.insert( QStringLiteral( "experiment_context" ), experimentContext );
+    }
+
     // Protocol compatibility from the stored metric records (when both runs
     // were evaluated); class-schema compatibility when the dataset pins
     // resolve against dataset_db.

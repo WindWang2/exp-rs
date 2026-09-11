@@ -92,6 +92,19 @@ class ExperimentRunRecorder
     /// Truthful cancellation. The reason is stored under "cancel_reason".
     Result<void> markCancelled( const QString &runId, const QString &reason );
 
+    /// Truthful interruption (crash / startup recovery / lost execution).
+    /// NON-terminal by contract: a resumed execution re-enters Running via
+    /// markResumed on the SAME run id. The note is stored under
+    /// "interrupt_note". Re-delivering Interrupted for an already-interrupted
+    /// run is an idempotent success (queued event sources may repeat).
+    Result<void> markInterrupted( const QString &runId, const QString &note );
+
+    /// Interrupted → Running: a resumed execution continues the SAME record
+    /// (the workflow layer swaps resumed submissions back under the original
+    /// execution ref). Typed failures: run_not_found / bad_transition when
+    /// the run is not Interrupted.
+    Result<void> markResumed( const QString &runId );
+
     /// Records the evaluation protocol + metrics for a run (MetricRecord).
     Result<void> recordMetrics( const QString &runId, const EvaluationProtocol &protocol,
                                 const QJsonObject &metrics );

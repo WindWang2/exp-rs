@@ -14,6 +14,9 @@ determinism grade, environment, artifacts, metrics.
 CLI: `sicnu_geo_rs_cli experiment create|list|inspect|run|compare`,
 `sicnu_geo_rs_cli reproduce export|validate|inspect`.
 
+Since Platform 8.0, tracked workflow runs can be auto-recorded into this
+store truthfully — see [auto-recording.md](auto-recording.md) (ADR 0143).
+
 ## Platform 7.0 additions
 
 - **Run recorder** (`run_recorder.h`): the authoritative TaskCenter/Workflow

@@ -128,6 +128,8 @@ ContextFacts prerequisiteFacts( const SelectionContextSnapshot &s )
     facts.editing = editingActive( s );
     facts.hasGovernanceResult = resultSelected( s );
     facts.hasGovernanceAsset = assetSelected( s );
+    facts.hasBrokenLayer = s.hasBroken;
+    facts.hasInFlightTask = s.hasInFlightTask;
     return facts;
 }
 
@@ -232,6 +234,52 @@ QString unavailabilityReason( const SelectionContextSnapshot &s, const QString &
         return QObject::tr( "需要选中数据资产" );
     }
     return QString();
+}
+
+NextAction suggestedNextAction( const SelectionContextSnapshot &s )
+{
+    // Deterministic priority: the most time-sensitive state wins. Only
+    // registered registry commands are suggested (a suggestion that cannot
+    // execute would be noise).
+    NextAction action;
+
+    if ( editingActive( s ) )
+    {
+        action.commandId = QStringLiteral( "layer.saveEdits" );
+        action.text = QObject::tr( "编辑会话进行中 — 可保存或放弃编辑" );
+        return action;
+    }
+    if ( rasterSelected( s ) )
+    {
+        action.commandId = QStringLiteral( "rs.spectralIndex" );
+        action.text = QObject::tr( "已选中栅格 — 可运行光谱指数等处理工具" );
+        return action;
+    }
+    if ( vectorSelected( s ) && editingAvailable( s ) )
+    {
+        action.commandId = QStringLiteral( "layer.toggleEditing" );
+        action.text = QObject::tr( "已选中矢量图层 — 可开始编辑" );
+        return action;
+    }
+    if ( s.hasTemporal )
+    {
+        action.commandId = QStringLiteral( "workbench.temporal" );
+        action.text = QObject::tr( "检测到时相数据 — 可进入时相工作台" );
+        return action;
+    }
+    if ( s.hasInFlightTask )
+    {
+        action.commandId = QStringLiteral( "workbench.processingHistory" );
+        action.text = QObject::tr( "有任务正在执行 — 可在处理历史中查看进度与产物" );
+        return action;
+    }
+    if ( s.layerCount == 0 && !s.hasGovernanceSelection() )
+    {
+        action.commandId = QStringLiteral( "project.importLayer" );
+        action.text = QObject::tr( "工作区为空 — 导入或打开数据开始工作" );
+        return action;
+    }
+    return action;
 }
 
 } // namespace ContextRules
@@ -341,6 +389,12 @@ void SelectionContext::notifyGovernanceSelection( const QStringList &entityIds )
 void SelectionContext::setSarPredicate( SarPredicate predicate )
 {
     m_sarPredicate = std::move( predicate );
+    scheduleRefresh();
+}
+
+void SelectionContext::setInFlightTaskPredicate( InFlightPredicate predicate )
+{
+    m_inFlightPredicate = std::move( predicate );
     scheduleRefresh();
 }
 
@@ -496,6 +550,8 @@ SelectionContextSnapshot SelectionContext::computeSnapshot() const
 
     snap.selectedAssetIds = m_selectedAssetIds;
     snap.selectedResultIds = m_selectedResultIds;
+    // Workbench 8.0: injected in-flight fact (shell binds TaskCenter).
+    snap.hasInFlightTask = m_inFlightPredicate && m_inFlightPredicate();
     return snap;
 }
 

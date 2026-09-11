@@ -14,6 +14,7 @@
 #include "plugin_model_runtime_bridge.h"
 #include "plugin_operator_adapter.h"
 #include "plugin_ui_host.h"
+#include "plugin_ui_schema_host.h"
 
 #include "agent/tool_catalog/agent_tool_catalog.h"
 #include "operators/framework/rs_operator_registry.h"
@@ -43,6 +44,20 @@ Json::Value PluginRuntimeHost::hostProcessSnapshot() const
     if ( !mHostProcessRuntime )
         return Json::Value();
     return mHostProcessRuntime->diagnosticsSnapshot();
+}
+
+Json::Value PluginRuntimeHost::describePluginUiSchema( const std::string &pluginId )
+{
+    Json::Value result( Json::objectValue );
+    result["ok"] = false;
+    result["error"] = "host-process runtime is not installed (E6006)";
+    std::lock_guard<std::mutex> lock( mMutex );
+    if ( mHostProcessRuntime )
+    {
+        exprs::PluginDiagnosticLog log;
+        result = mHostProcessRuntime->describeUiSchema( pluginId, log );
+    }
+    return result;
 }
 
 void PluginRuntimeHost::bootstrap( const exprs::PluginRegistryOptions &options )
@@ -102,49 +117,60 @@ void PluginRuntimeHost::installManifestContributionsFor( const std::string &plug
 void PluginRuntimeHost::installPluginOperator( const std::string &pluginId,
                                                const exprs::ManifestOperator &op )
 {
-    if ( mOperators.count( op.id ) )
+    auto existing = mOperators.find( op.id );
+    if ( existing != mOperators.end() && existing->second.pluginId != pluginId )
         return; // first registration wins; duplicates are diagnosed at load
 
-    OperatorEntry entry;
-    entry.pluginId = pluginId;
-    entry.manifest = op;
-    entry.isExternalTool = op.hasExternalTool;
-    if ( op.hasExternalTool )
+    const bool created = existing == mOperators.end();
+    if ( created )
     {
-        const exprs::PluginRecord *record = exprs::PluginRegistry::instance().record( pluginId );
-        const std::string pluginDir = record ? record->directory : std::string();
-        entry.factory = [op, opId = op.id, pluginDir]() -> std::unique_ptr<sicnu::operators::RSOperator> {
-            return std::make_unique<ExternalToolOperator>( opId, op, pluginDir );
-        };
-    }
-    mOperators[op.id] = entry;
+        OperatorEntry entry;
+        entry.pluginId = pluginId;
+        entry.manifest = op;
+        entry.isExternalTool = op.hasExternalTool;
+        if ( op.hasExternalTool )
+        {
+            const exprs::PluginRecord *record =
+                exprs::PluginRegistry::instance().record( pluginId );
+            const std::string pluginDir = record ? record->directory : std::string();
+            entry.factory =
+                [op, opId = op.id, pluginDir]() -> std::unique_ptr<sicnu::operators::RSOperator> {
+                return std::make_unique<ExternalToolOperator>( opId, op, pluginDir );
+            };
+        }
+        mOperators[op.id] = entry;
 
-    // Lazy RSOperatorRegistry factory: registry consumers (JobEngine direct
-    // path) instantiate without touching AtomicAlgorithmRegistry. The direct
-    // path bypasses the adapter, so the wrapper acquires the execution lease
-    // at CREATE time and holds it for the operator instance's lifetime
-    // (created → run → destroyed), keeping the drain honest for #747.
-    if ( entry.factory )
-    {
-        auto factory = entry.factory;
-        sicnu::operators::RSOperatorRegistry::instance().registerOperator(
-            op.id,
-            [pluginId, factory]() -> std::unique_ptr<sicnu::operators::RSOperator> {
-                auto lease = PluginExecutionBarrier::instance().acquire( pluginId );
-                if ( !lease )
-                    return nullptr; // plugin unloading/unloaded: clean refusal
-                auto inner = factory();
-                if ( !inner )
-                    return nullptr;
-                return std::make_unique<LeaseHoldingOperator>( std::move( inner ),
-                                                               std::move( lease ) );
-            } );
+        // Lazy RSOperatorRegistry factory (JobEngine direct path): only on
+        // entry creation — a reload lands here with the live proxy or
+        // external-tool factory already in place and must not re-wrap it.
+        // The wrapper acquires the execution lease at CREATE time and holds
+        // it for the operator instance's lifetime (created -> run ->
+        // destroyed), keeping the drain honest for #747.
+        auto factory = mOperators[op.id].factory;
+        if ( factory )
+        {
+            sicnu::operators::RSOperatorRegistry::instance().registerOperator(
+                op.id,
+                [pluginId, factory]() -> std::unique_ptr<sicnu::operators::RSOperator> {
+                    auto lease = PluginExecutionBarrier::instance().acquire( pluginId );
+                    if ( !lease )
+                        return nullptr; // plugin unloading/unloaded: clean refusal
+                    auto inner = factory();
+                    if ( !inner )
+                        return nullptr;
+                    return std::make_unique<LeaseHoldingOperator>( std::move( inner ),
+                                                                   std::move( lease ) );
+                } );
+        }
     }
 
     // Lazy AtomicAlgorithmRegistry adapter: descriptor from manifest, binary
     // loaded on first execute. The factory is resolved through the host at
     // call time: binary plugins register their factory via the sink during
-    // load, which happens after this adapter was installed.
+    // load, which happens after this adapter was installed. Re-registered on
+    // EVERY call (registerAdapter replaces by id): unload revokes the
+    // adapter, and a reload after unload must restore it (#755 round-trip;
+    // baseline regressed this for host-process proxies).
     std::function<bool()> ensureLoaded = [pluginId]() {
         return exprs::PluginRegistry::instance().ensureLoaded( pluginId );
     };
@@ -237,6 +263,10 @@ void PluginRuntimeHost::revokePluginContributions( const std::string &pluginId )
     // after the execution barrier drained. Order matters — UI contributions
     // first (widgets/actions created by the plugin are destroyed here while
     // its code can still service destructors and vtables), then registries.
+    // Plugin-platform 8.0: the declarative schema rendering is host-owned,
+    // but its events travel to the plugin — detach it before the worker
+    // goes away, same lifecycle position as the in-process UI release.
+    PluginUiSchemaRenderer::instance()->releasePluginUi( QString::fromStdString( pluginId ) );
     PluginUiHost::instance()->releasePluginUi( QString::fromStdString( pluginId ) );
 
     std::lock_guard<std::mutex> lock( mMutex );
