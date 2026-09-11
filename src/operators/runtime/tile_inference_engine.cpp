@@ -1351,6 +1351,19 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
         // whole window prediction, so resizing/cropping paths must not run).
         const bool blendThisHead = accumulator && !resizeToInput
                                      && outW == fedW && outH == fedH;
+        // Platform 9.0 (M5): blending REQUIRES grid-preserving heads. A
+        // strided/resized head would bypass the accumulator and write its
+        // tiles directly — mixing two write paths over the same pixels. A
+        // typed refusal, never silent mixing (edge tiles make the fed sizes
+        // vary per tile, hence the per-tile verdict).
+        if ( accumulator && !blendThisHead )
+          throw RSOperatorError(
+            ErrorCode::InvalidParameter,
+            "tiling.blend=feather requires grid-preserving heads: head '" + headName
+              + "' produced " + std::to_string( outW ) + "x" + std::to_string( outH )
+              + " against a " + std::to_string( fedW ) + "x" + std::to_string( fedH )
+              + " fed window (strided export or preprocess.resize=to_input) — drop "
+                "the blend contract or use a grid-preserving export" );
         // Stitched (core-size) planes of this tile for the uncertainty pass.
         std::vector<cv::Mat> headPlanes;
         if ( isUncertaintyHead && !uncertainty.empty() )
