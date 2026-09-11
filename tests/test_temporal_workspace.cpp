@@ -5,6 +5,9 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <atomic>
+#include <thread>
+
 #include <QCoreApplication>
 #include <QDomDocument>
 #include <QFile>
@@ -1135,3 +1138,55 @@ TEST_CASE( "Multimodal observations and STAC cloud cover round-trip cleanly (#72
     REQUIRE( col.sceneCount() == 2 );
     CHECK( col.scenes().first().cloudCoverPercent == Catch::Approx( 12.5 ) );
 }
+
+TEST_CASE( "DataManager - Cross-thread concurrent read/write does not race or crash (#852)",
+           "[data][data_manager][concurrency][issue852]" )
+{
+    ensureApp();
+    sicnu::data::DataManager dm;
+    sicnu::temporal::setWorkspaceCatalog( &dm );
+
+    // Register initial source so findByPath has valid targets
+    sicnu::data::SourceDescriptor initialSource;
+    initialSource.providerKey = QStringLiteral( "gdal" );
+    initialSource.canonicalSource = QStringLiteral( "/tmp/base_scene.tif" );
+    auto regRes = dm.registerSource( sicnu::data::RegisterRequest{ initialSource } );
+    REQUIRE( !regRes.assetId.isNull() );
+
+    std::atomic<bool> stop{ false };
+    std::atomic<int> readCount{ 0 };
+    std::atomic<int> matchCount{ 0 };
+
+    // Worker thread: continuously query findByPath from background thread
+    std::thread readerThread( [&]() {
+        while ( !stop.load( std::memory_order_relaxed ) )
+        {
+            auto snap = dm.findByPath( QStringLiteral( "/tmp/base_scene.tif" ) );
+            if ( snap.has_value() )
+                matchCount.fetch_add( 1, std::memory_order_relaxed );
+            readCount.fetch_add( 1, std::memory_order_relaxed );
+            std::this_thread::yield();
+        }
+    } );
+
+    // Main thread: concurrently register and unload assets causing buffer reallocations
+    for ( int i = 0; i < 300; ++i )
+    {
+        sicnu::data::SourceDescriptor src;
+        src.providerKey = QStringLiteral( "gdal" );
+        src.canonicalSource = QStringLiteral( "/tmp/churn_%1.tif" ).arg( i );
+        auto r = dm.registerSource( sicnu::data::RegisterRequest{ src } );
+        if ( !r.assetId.isNull() && i % 3 == 0 )
+        {
+            dm.unload( dm.planUnload( r.assetId ) );
+        }
+    }
+
+    stop.store( true, std::memory_order_relaxed );
+    readerThread.join();
+
+    REQUIRE( readCount.load() > 0 );
+    REQUIRE( matchCount.load() > 0 );
+    sicnu::temporal::setWorkspaceCatalog( nullptr );
+}
+

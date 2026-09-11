@@ -230,7 +230,8 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
     if (!dst.isOpen()) {
         throw RSOperatorError(ErrorCode::GdalError, "Cannot create output raster");
     }
-    dst.setNoDataValue(std::numeric_limits<float>::quiet_NaN());
+    dst.setBandNoDataValue(1, std::numeric_limits<float>::quiet_NaN());
+    dst.setBandNoDataValue(2, 255.0);
 
     const bool ok = sicnu::sar::terrainFlattenRaster(src, band, demDs, options, nodata,
                                                      dst, 256, polarizations, sensor);

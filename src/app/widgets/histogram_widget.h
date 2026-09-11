@@ -125,6 +125,7 @@ private:
     double yToDisplay( int y, const QRect &chartRect ) const;
 
     QPointer<QgsRasterLayer> m_rasterLayer;
+    QString m_rasterLayerId;
     int m_band = 1;
     int m_redBand = 1;
     int m_greenBand = 2;

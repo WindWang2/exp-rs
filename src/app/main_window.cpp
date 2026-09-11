@@ -309,7 +309,7 @@ QgisDesktopWindow::~QgisDesktopWindow()
     // and QObject children (canvas) are destroyed — prevents double-delete of
     // QgsMapTool objects parented to the canvas (exit SIGSEGV).
     if (m_mapCanvas) {
-        m_mapCanvas->stopRendering();
+        m_mapCanvas->stopRenderingAndSettle();
         if (QgsMapTool *tool = m_mapCanvas->mapTool())
             m_mapCanvas->unsetMapTool(tool);
         m_mapCanvas->setLayers({});
@@ -371,12 +371,12 @@ void QgisDesktopWindow::setupMapCanvas()
     m_canvasEmptyState = new sicnu::RsEmptyStateWidget(
         QStringLiteral("app_icon"),
         tr("RS Studio 遥感影像处理与分析工作台"),
-        tr("支持多源遥感卫星影像（光学/高光谱/SAR/DEM）的高性能渲染、波段运算、正射校正与智能解译。\n点击下方按钮或按 Ctrl+O 打开遥感数据开始工作。"),
-        tr("打开遥感数据 (Ctrl+O)"),
+        tr("支持多源遥感卫星影像（光学/高光谱/SAR/DEM）的高性能渲染、波段运算、正射校正与智能解译。\n点击下方按钮导入数据，或按 Ctrl+O 打开已有工程。"),
+        tr("导入遥感数据..."),
         m_canvasStack);
     m_canvasEmptyState->setIconSize(QSize(64, 64));
     connect(m_canvasEmptyState, &sicnu::RsEmptyStateWidget::actionClicked, this, [this]() {
-        addRasterLayer();
+        importLayer();
     });
     m_canvasStack->addWidget(m_canvasEmptyState); // Index 0: Welcome
 

@@ -37,6 +37,9 @@ void QgisDesktopWindow::newProject()
         return;
     }
 
+    if ( m_mapCanvas )
+        m_mapCanvas->stopRenderingAndSettle();
+
     const auto cleared =
         m_projectContext->clearProject( *QgsProject::instance() );
     if ( !cleared )
@@ -94,6 +97,9 @@ void QgisDesktopWindow::openProject()
                 tr( "The project Data Context is unavailable." ) );
             return;
         }
+
+        if ( m_mapCanvas )
+            m_mapCanvas->stopRenderingAndSettle();
 
         const auto cleared =
             m_projectContext->clearProject( *QgsProject::instance() );

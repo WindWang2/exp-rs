@@ -442,9 +442,9 @@ sicnu::data::Result<void> SplitConfig::validate() const
     {
         return Result::failure( splitError( QStringLiteral( "train/val/test ratios must sum to 1" ) ) );
     }
-    if ( method == SplitMethod::SpatialBlock &&
+    if ( ( method == SplitMethod::SpatialBlock || method == SplitMethod::SpatialKFold ) &&
          ( blockSizeX <= 0.0 || blockSizeY <= 0.0 ) )
-        return Result::failure( splitError( QStringLiteral( "spatial_block requires block sizes" ) ) );
+        return Result::failure( splitError( QStringLiteral( "spatial block methods require positive block sizes" ) ) );
     if ( method == SplitMethod::SpatialBuffer && bufferDistance <= 0.0 )
         return Result::failure( splitError( QStringLiteral( "spatial_buffer requires a buffer distance" ) ) );
     if ( method == SplitMethod::LeaveOneRegionOut && regionKey.isEmpty() )

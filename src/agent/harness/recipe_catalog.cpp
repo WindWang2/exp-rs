@@ -318,6 +318,8 @@ std::vector<std::string> RecipeCatalog::validateRecipeMetadata( const Json::Valu
     for ( const Json::Value &step : recipe.get( "steps", Json::Value( Json::arrayValue ) ) )
     {
       const std::string stepId = step.get( "id", "" ).asString();
+      const Json::Value &stepInputs = step.get( "inputs", Json::Value() );
+      const bool hasExplicitInputs = stepInputs.isArray() && !stepInputs.empty();
       for ( const std::string &key : step.get( "params", Json::Value() ).getMemberNames() )
       {
         const Json::Value &value = step["params"][ key ];
@@ -326,7 +328,7 @@ std::vector<std::string> RecipeCatalog::validateRecipeMetadata( const Json::Valu
         const std::string name = value.asString().substr( 9 );
         if ( declaredOutputs.count( name ) || emitted.count( name ) )
           continue;
-        if ( loweredKey( key ) != "output" )
+        if ( loweredKey( key ) != "output" && !hasExplicitInputs )
           problems.push_back( id + ": step '" + stepId + "' consumes intermediate '" + name +
                               "' before any step produces it (auto-wiring convention)" );
         else

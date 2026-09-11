@@ -722,5 +722,49 @@
       "提取波段",
       "extract bands"
     ]
+  },
+  {
+    "id": "command.workbench.processingHistory",
+    "purpose": "查看跨任务中心/工作流的统一处理历史与状态追踪。",
+    "prerequisites": [],
+    "related": [],
+    "keywords": [
+      "处理历史",
+      "任务历史",
+      "processing history"
+    ]
+  },
+  {
+    "id": "command.workbench.temporal",
+    "purpose": "浏览时序集合、筛选日期并预览时相影像。",
+    "prerequisites": [],
+    "related": [],
+    "keywords": [
+      "时序工作台",
+      "时序集合",
+      "temporal workbench"
+    ]
+  },
+  {
+    "id": "command.workbench.datasetExperiment",
+    "purpose": "浏览数据集版本、样本、运行与指标对比。",
+    "prerequisites": [],
+    "related": [],
+    "keywords": [
+      "数据集",
+      "实验",
+      "dataset experiment"
+    ]
+  },
+  {
+    "id": "command.workbench.model",
+    "purpose": "查看模型目录、就绪状态并提交测试推理。",
+    "prerequisites": [],
+    "related": [],
+    "keywords": [
+      "模型工作台",
+      "模型目录",
+      "model bench"
+    ]
   }
 ]
