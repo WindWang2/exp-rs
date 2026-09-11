@@ -9,12 +9,14 @@
 
 #include "data/asset_types.h"
 #include "data/collection_types.h"
+#include "asset_catalog_index.h"
 
 class QTreeWidget;
 class QTreeWidgetItem;
 class QTextBrowser;
 class QSplitter;
 class QLabel;
+class QLineEdit;
 class QStackedWidget;
 
 namespace sicnu
@@ -28,6 +30,11 @@ class DataManager;
 class AssetSnapshot;
 }
 
+namespace sicnu::app
+{
+class AssetPreviewService;
+}
+
 namespace sicnu
 {
 
@@ -37,7 +44,11 @@ namespace sicnu
  * Top: tree of Data Assets and Collections (multi-select for batch actions).
  *   Name cell: status color bar + kind icon/prefix + display name
  *   (no separate kind/status columns).
- * Bottom: metadata inspector for the current selection.
+ * Bottom: metadata inspector for the current selection, with a lazy bounded
+ * preview (Professional Workbench 8.0, package E): raster thumbnails /
+ * vector previews render through AssetPreviewService on the bounded scan
+ * pool — the GUI never blocks on GDAL reads, a selection change supersedes
+ * an in-flight preview, and panel teardown drops pending results.
  * Shell wires display / unload / promote signals.
  */
 class DataManagerPanel : public QDockWidget
@@ -72,6 +83,12 @@ class DataManagerPanel : public QDockWidget
 
     void refresh();
 
+    /// Workbench 8.0: standalone-asset render cap (truthful truncation past
+    /// it). Hosts may lower it for constrained displays; never silently —
+    /// the sentinel row always names the exact totals.
+    void setStandaloneRowCap( int maxRows );
+    static constexpr int kDefaultStandaloneRowCap = 20000;
+
   signals:
     void importRequested();
     void displayRequested( sicnu::data::AssetId id );
@@ -92,6 +109,11 @@ class DataManagerPanel : public QDockWidget
     /// import) used to trigger N FULL tree rebuilds on the GUI thread; a
     /// 250 ms trailing timer collapses the burst into one rebuild.
     void scheduleCoalescedRefresh();
+    /// Workbench 8.0: collection children populate on first expand (lazy
+    /// detail loading — huge temporal collections stay bounded).
+    void onItemExpanded( QTreeWidgetItem *item );
+    /// Workbench 8.0: filter box text changed (coalesced, incremental).
+    void onFilterChanged();
 
   private:
     sicnu::data::AssetId assetForItem( QTreeWidgetItem *item ) const;
@@ -102,11 +124,22 @@ class DataManagerPanel : public QDockWidget
     bool isRelocatable( sicnu::data::AssetId id ) const;
 
     void addAssetRow( QTreeWidgetItem *parent, const sicnu::data::AssetSnapshot &snapshot );
+    /// Workbench 8.0: renders one catalog index entry as a tree row (the
+    /// light path used by refresh; full snapshots stay a lazy query).
+    void addIndexRow( QTreeWidgetItem *parent, const sicnu::AssetCatalogEntry &entry );
+    /// Workbench 8.0: truthful truncation row (non-selectable, totals named).
+    void addSentinelRow( QTreeWidgetItem *parent, const QString &text );
+    /// Workbench 8.0: populates one collection row's children from the index
+    /// (filter-aware, capped, called by refresh when small or on expand).
+    void populateCollectionChildren( QTreeWidgetItem *collectionItem,
+                                     const sicnu::data::CollectionSnapshot &collection );
     void showAssetDetails( const sicnu::data::AssetSnapshot &snapshot );
     void showCollectionDetails( const sicnu::data::CollectionSnapshot &collection );
     void showMultiSelectionDetails( const QList<sicnu::data::AssetId> &ids );
     void clearDetails( const QString &message = QString() );
     void applyHelpTips();
+    /// Workbench 8.0: lazy bounded preview for local raster/vector assets.
+    void requestDetailPreview( const sicnu::data::AssetSnapshot &snapshot );
 
     sicnu::data::DataManager *m_dataManager = nullptr; // not owned
     QTimer *m_refreshCoalesceTimer = nullptr; // not owned (child of this)
@@ -115,7 +148,15 @@ class DataManagerPanel : public QDockWidget
     RsEmptyStateWidget *m_emptyState = nullptr;
     QTextBrowser *m_detailView = nullptr;
     QLabel *m_detailTitle = nullptr;
+    QLabel *m_previewLabel = nullptr; // bounded async preview (may stay hidden)
+    sicnu::app::AssetPreviewService *m_previewService = nullptr; // owned (child)
     QSplitter *m_splitter = nullptr;
+    // Workbench 8.0: large-metadata support (filter + light catalog index).
+    QLineEdit *m_filterEdit = nullptr;
+    QTimer *m_filterDebounce = nullptr; // filter coalescing (child of this)
+    sicnu::AssetCatalogIndex m_catalogIndex;
+    bool m_indexBuilt = false; ///< first refresh builds the index once
+    int m_standaloneRowCap = kDefaultStandaloneRowCap;
 };
 
 } // namespace sicnu

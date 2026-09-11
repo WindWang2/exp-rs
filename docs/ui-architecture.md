@@ -407,3 +407,107 @@ Ctrl+Shift+H/T/E/M; D is taken by map.measureDistance). The registry owns the sh
 `test_workbench_shutdown_policy`, `test_provenance_section`,
 `test_processing_history_model`, `test_temporal_scene_model` — see
 `.planning/professional-workbench-7/TEST_MATRIX.md`.
+
+# Part IV — Professional Workbench 8.0
+
+## 21. SchemaForm 4.0 (goal §B — schema-driven form contract)
+
+`SchemaFormBuilder` (`src/app/shell/schema_form_builder.cpp`) stays the single
+schema→form seam. 4.0 additions are schema-driven only — no per-operator
+logic anywhere:
+
+- **Nested objects**: a property with `type:"object"` AND `properties` (and
+  nesting depth < `kMaxObjectDepth` = 4) renders as a recursive sub-group;
+  `values()` nests under the key; `validate()` honors the nested `required`
+  list. A non-required group whose fields are all empty counts as absent
+  (optional group). Deeper objects degrade to the 3.0 JSON text editor.
+- **Object arrays**: `type:"array"` whose `items` declare an object schema
+  render as repeatable item editors (添加/移除; `minItems` seeds rows and
+  gates removal, `maxItems` gates the add button). Import via `setValues` is
+  bounded by `kMaxObjectArrayItems` = 256 with a visible honest-truncation
+  hint naming both totals. Validation issues carry positional dotted paths
+  (`points.0.lat`).
+- **Dynamic enum sources**: `x-ui-enum-source` resolves through an injected
+  `SchemaEnumProvider` (the shell binds authoritative services; the form
+  never invents choices). `refreshChoices()` re-queries the provider with the
+  current `values()` snapshot, so long-lived forms go stale never. A missing
+  provider / unknown / empty source degrades to editable free text with a
+  visible tooltip hint — never a silent dead list.
+- **Async value checks**: `x-ui-check: "path_exists"` (string or array) runs
+  on the bounded `RsScanPool`, debounced 350 ms after edits and forced by
+  `runAsyncChecksNow()` after programmatic `setValues`. Results are
+  generation-gated widget marks (failures append a 路径不存在 tooltip hint);
+  a newer rebuild/edit supersedes older results, and a destroyed form drops
+  them (QPointer + queued invoke). Checks never block Run — they inform.
+- **Accessibility**: every editor at every nesting level carries
+  `accessibleName` (schema label) and `accessibleDescription` (canonical
+  tooltip), labels keep `setBuddy`, and conditional visibility toggles the
+  row label together with the editor.
+
+Scalar arrays (comma/semicolon/newline line edits) behave exactly as 3.0 —
+backward compatibility is pinned by `test_schema_form_builder_v2`.
+
+## 22. AssetPreviewService (goal §E — lazy previews)
+
+`src/app/preview/asset_preview_service.{h,cpp}` is the single owner of
+catalog-scale previews:
+
+- Jobs run on the bounded `RsScanPool` (the #797 two-worker UI-scan pool).
+  Never `QThreadPool::globalInstance()`, never the GUI thread.
+- Raster pixels flow through `sicnu::geo::RasterReader::readWindowResampled`
+  with `OverviewPolicy::Nearest` — the seam the geospatial contract documents
+  for preview surfaces. RGB from bands 1-3 (grayscale otherwise), per-band
+  min/max stretch excluding NoData/NaN, NoData → black, flat data → gray.
+- Vector previews render through `QgsMapRendererCustomPainterJob` (QGIS stays
+  the only render engine), on the worker thread with a thread-local layer.
+  Layers above `kMaxVectorFeatures` (200k) refuse with `Unsupported` naming
+  the count — an honest refusal instead of an unbounded render.
+- `requestPreview(request, receiver, callback)` delivers at most once on the
+  service's thread. A newer request for the same receiver supersedes older
+  ones; canceled tokens and dead receivers drop silently. No UAF after
+  teardown (QPointer + hadReceiver guard + queued invoke).
+- Cache is LRU bounded by entries (64) and bytes (32 MiB), keyed by
+  kind|path|size|mtime|target size — replaced files invalidate naturally.
+- The Data Manager detail pane consumes the service lazily on selection;
+  remote maps / virtual rasters / missing sources honestly show no preview.
+
+## 23. Data Manager catalog scaling (goal §D — large metadata UI)
+
+`src/app/panels/asset_catalog_index.{h,cpp}` + the reworked
+`DataManagerPanel::refresh`:
+
+- `AssetCatalogIndex` is a light, incrementally-maintained projection of the
+  catalog (one entry per asset: id/name/source/kind/state/persistence/
+  parent). DataManager stays the only catalog authority; the index is a
+  disposable projection healed by `rebuild()` and maintained from the
+  per-asset signals. Refresh no longer re-fetches every full snapshot.
+- Incremental **filter box** (`dataManagerFilter`): case-insensitive
+  substring over display name / source / id, coalesced 250 ms, single
+  filter+group pass per refresh (O(assets) light comparisons).
+- **Lazy collection children**: collections above `kLazyChildThreshold` (50)
+  children defer population to first expand (`kLazyPopulateRole`); smaller
+  collections render eagerly so the default-expanded layout is unchanged.
+- **Bounded truthful rendering**: standalone assets (and per-collection
+  children) render up to `m_standaloneRowCap` (default 20 000, host-lowerable
+  via `setStandaloneRowCap`); past the cap a non-selectable sentinel row
+  names the exact totals — truncation is never silent.
+- Selection preservation and the panel's test API (`rowText`,
+  `selectedAssetId`, …) are unchanged; `test_data_manager_panel` stays the
+  parity suite.
+
+## 24. Context facts + suggested next action (goal §C)
+
+`SelectionContextSnapshot` gains `hasInFlightTask` (injected predicate — the
+shell binds TaskCenter; the pure layer never touches processing types) and
+`ContextFacts` exposes `hasBrokenLayer` + `hasInFlightTask`.
+`ContextRules::suggestedNextAction` is a deterministic projection (broken →
+editing → raster → vector-editable → temporal → in-flight → empty
+workspace) returning a **registered** command id plus human text; the
+palette/tests pin that a suggestion can always execute.
+
+## Contracts under test (8.0)
+
+`test_schema_form_4`, `test_asset_preview_service`,
+`test_asset_catalog_index` (index + panel + 200k-record scale evidence),
+`test_context_facts_8` — see
+`.planning/professional-workbench-8/TEST_MATRIX.md`.

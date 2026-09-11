@@ -5191,6 +5191,7 @@ qt_add_executable(test_workflow_session_controller
   ${CMAKE_SOURCE_DIR}/src/app/shell/workflow_session_controller.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/task_panel_host.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_result_summary.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_port_item.cpp
@@ -5557,6 +5558,9 @@ sicnu_discover_tests(test_workspace_project_v3)
 add_executable(test_data_manager_panel
   test_data_manager_panel.cpp
   ${CMAKE_SOURCE_DIR}/src/app/panels/data_manager_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/asset_catalog_index.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/preview/asset_preview_service.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
@@ -5571,6 +5575,7 @@ target_link_libraries(test_data_manager_panel PRIVATE
   Qt6::Gui
   Qt6::Widgets
   Qt6::Test
+  Qt6::Concurrent
   qgis_core
   qgis_gui
   sicnu_processing
@@ -5579,6 +5584,8 @@ target_link_libraries(test_data_manager_panel PRIVATE
   sicnu_jobs
   sicnu_operators
   Sicnu::qgis_display
+  Sicnu::Geospatial
+  GDAL::GDAL
 )
 target_include_directories(test_data_manager_panel PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -6052,6 +6059,7 @@ sicnu_discover_tests(test_crs_selector)
 add_executable(test_schema_form_builder_v2
   test_schema_form_builder_v2.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
 )
 target_link_libraries(test_schema_form_builder_v2 PRIVATE
@@ -6075,6 +6083,131 @@ target_include_directories(test_schema_form_builder_v2 PRIVATE
 sicnu_link_jsoncpp(test_schema_form_builder_v2)
 set_target_properties(test_schema_form_builder_v2 PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_schema_form_builder_v2)
+
+# SchemaForm 4.0 (Professional Workbench 8.0): nested objects, object arrays,
+# dynamic enum sources, async checks, a11y.
+add_executable(test_schema_form_4
+  test_schema_form_4.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+)
+target_link_libraries(test_schema_form_4 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Concurrent
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_operators
+  sicnu_data
+  GDAL::GDAL
+  Sicnu::help
+)
+target_include_directories(test_schema_form_4 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_schema_form_4)
+set_target_properties(test_schema_form_4 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_schema_form_4)
+
+# AssetPreviewService (Professional Workbench 8.0, package E): bounded async
+# raster/vector previews with cache + cancellation semantics.
+add_executable(test_asset_preview_service
+  test_asset_preview_service.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/preview/asset_preview_service.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+)
+target_link_libraries(test_asset_preview_service PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Concurrent
+  qgis_core
+  qgis_gui
+  Sicnu::Geospatial
+  GDAL::GDAL
+)
+target_include_directories(test_asset_preview_service PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_asset_preview_service PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_asset_preview_service)
+
+# Context facts + suggested next action (Professional Workbench 8.0, package C)
+add_executable(test_context_facts_8
+  test_context_facts_8.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_context_facts_8 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_context_facts_8 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_context_facts_8 PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_context_facts_8)
+
+# Asset catalog index + panel scaling contract (Professional Workbench 8.0,
+# package D): filter, bounded truthful rendering, lazy collection children.
+add_executable(test_asset_catalog_index
+  test_asset_catalog_index.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/asset_catalog_index.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/data_manager_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/temporal_analysis_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/preview/asset_preview_service.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+)
+target_link_libraries(test_asset_catalog_index PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_jobs
+  sicnu_operators
+  sicnu_workflow
+  Sicnu::qgis_display
+  Sicnu::Geospatial
+  GDAL::GDAL
+)
+target_include_directories(test_asset_catalog_index PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_asset_catalog_index)
+set_target_properties(test_asset_catalog_index PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_asset_catalog_index)
 
 # Shared RsResultSummary widget (UX 4.0 Milestone E)
 add_executable(test_rs_result_summary
@@ -6428,6 +6561,7 @@ qt_add_executable(test_workflow_pipeline_ui
   ${CMAKE_SOURCE_DIR}/src/app/shell/workflow_session_controller.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/task_panel_host.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_result_summary.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/crs_selector.cpp
 )
