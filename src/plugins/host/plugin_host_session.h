@@ -130,6 +130,17 @@ public:
     /// hello maxConcurrentRequests) — diagnostic surface.
     int effectiveConcurrency() const;
     unsigned generation() const { return mGeneration; }
+    /// True when the worker advertised protocol 1.2 "directionalFrameCaps"
+    /// in its hello features (the host then applies per-direction caps after
+    /// plugin.load; a 1.1 worker keeps exact 1.1 shared-cap semantics).
+    bool peerSupportsDirectionalFrameCaps() const { return mPeerDirectionalCaps; }
+    /// Applies the host-side per-direction frame caps derived from the
+    /// effective quota (send = maxRequestBytes, recv = maxResponseBytes).
+    /// MUST run only after plugin.load succeeded — the plugin.load frame
+    /// itself carried the bounds to the worker, so capping the channel
+    /// earlier could strand a large manifest below the worker's knowledge.
+    /// No-op when the peer did not advertise the 1.2 feature.
+    void applyQuotaFrameCaps();
 
     /// Graceful shutdown request + bounded wait, then kill ladder. Always
     /// ends with the process dead.
@@ -165,6 +176,7 @@ private:
     int mInFlight = 0;
     bool mPoisoned = false;
     int mWorkerMaxConcurrent = 1;   ///< from worker.hello (protocol 1.1)
+    bool mPeerDirectionalCaps = false;  ///< hello features, protocol 1.2
 
     // OS process plumbing (platform handles owned here).
     void *mProcessHandle = nullptr;   ///< Windows: HANDLE; POSIX: pid as void*

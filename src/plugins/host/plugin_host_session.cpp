@@ -436,11 +436,39 @@ bool PluginHostProcessSession::awaitHandshake( PluginDiagnosticLog &diagnostics 
     // omits the field → 1, i.e. serialized dispatch; the host gate still
     // protects the host, the worker just serves slower).
     const int workerConcurrent = mHello.get( "maxConcurrentRequests", 1 ).asInt();
+    // Protocol 1.2: optional feature advertisement. A 1.1 worker omits the
+    // array entirely; unknown feature names are ignored (additive axis).
+    bool directionalCaps = false;
+    for ( const Json::Value &feature : mHello[ "features" ] )
+    {
+        if ( feature.isString() && feature.asString() == "directionalFrameCaps" )
+            directionalCaps = true;
+    }
     {
         std::lock_guard<std::mutex> stateLock( mStateMutex );
         mWorkerMaxConcurrent = workerConcurrent > 0 ? workerConcurrent : 1;
+        mPeerDirectionalCaps = directionalCaps;
     }
     return true;
+}
+
+void PluginHostProcessSession::applyQuotaFrameCaps()
+{
+    bool directional = false;
+    {
+        std::lock_guard<std::mutex> stateLock( mStateMutex );
+        directional = mPeerDirectionalCaps;
+    }
+    if ( !directional || !mChannel )
+        return;
+    const uint32_t sendCap = static_cast<uint32_t>(
+        std::min<long long>( std::max<long long>( mOptions.quota.maxRequestBytes, 0 ),
+                             0xFFFFFFFFll ) );
+    const uint32_t recvCap = static_cast<uint32_t>(
+        std::min<long long>( std::max<long long>( mOptions.quota.maxResponseBytes, 0 ),
+                             0xFFFFFFFFll ) );
+    if ( sendCap > 0 || recvCap > 0 )
+        mChannel->setDirectionalFrameCaps( sendCap, recvCap );
 }
 
 bool PluginHostProcessSession::isAlive() const

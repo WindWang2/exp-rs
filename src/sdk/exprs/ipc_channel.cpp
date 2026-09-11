@@ -10,11 +10,14 @@ namespace exprs {
 
 namespace {
 
-IpcChannel::Outcome::Status statusForCode( const std::string &code )
+/// Monotonic ceiling: never raises @p atomic above its current value.
+void lowerAtomicCap( std::atomic<uint32_t> &atomic, uint32_t maxFrameBytes )
 {
-    if ( code == "E6003" || code == "E6002" )
-        return IpcChannel::Outcome::Status::ProtocolError;
-    return IpcChannel::Outcome::Status::ChannelClosed;
+    uint32_t current = atomic.load();
+    while ( maxFrameBytes < current
+            && !atomic.compare_exchange_weak( current, maxFrameBytes ) )
+    {
+    }
 }
 
 } // namespace
@@ -26,7 +29,8 @@ IpcChannel::IpcChannel( std::unique_ptr<IIpcStream> stream )
 
 IpcChannel::IpcChannel( std::unique_ptr<IIpcStream> stream, Options options )
     : mStream( std::move( stream ) ), mOptions( options ),
-      mMaxFrameBytes( options.frameLimits.maxFrameBytes )
+      mMaxSendFrameBytes( options.frameLimits.maxFrameBytes ),
+      mMaxRecvFrameBytes( options.frameLimits.maxFrameBytes )
 {
     mReader = std::thread( [this] { readerLoop(); } );
 }
@@ -51,7 +55,10 @@ std::string IpcChannel::Outcome::statusCode() const
     case Status::ChannelClosed:
         return "E6005";
     case Status::ProtocolError:
-        return "E6002";
+        // Typed protocol failures: the frame-cap violation (E6003) is
+        // distinct from a malformed envelope (E6002); report the real code
+        // instead of collapsing both into E6002.
+        return error.code == "E6003" ? "E6003" : "E6002";
     }
     return "E6002";
 }
@@ -100,11 +107,18 @@ void IpcChannel::setPeerProtocol( int major, int minor )
 
 void IpcChannel::lowerFrameCap( uint32_t maxFrameBytes )
 {
-    uint32_t current = mMaxFrameBytes.load();
-    while ( maxFrameBytes < current
-            && !mMaxFrameBytes.compare_exchange_weak( current, maxFrameBytes ) )
-    {
-    }
+    lowerAtomicCap( mMaxSendFrameBytes, maxFrameBytes );
+    lowerAtomicCap( mMaxRecvFrameBytes, maxFrameBytes );
+}
+
+void IpcChannel::setDirectionalFrameCaps( uint32_t maxSendBytes, uint32_t maxRecvBytes )
+{
+    // 0 means "no bound for this direction" (a cap of 0 would block every
+    // frame, which no negotiation ever asks for).
+    if ( maxSendBytes > 0 )
+        lowerAtomicCap( mMaxSendFrameBytes, maxSendBytes );
+    if ( maxRecvBytes > 0 )
+        lowerAtomicCap( mMaxRecvFrameBytes, maxRecvBytes );
 }
 
 bool IpcChannel::sendEnvelope( const Ipc::Envelope &envelope, std::string &error )
@@ -117,7 +131,7 @@ bool IpcChannel::sendEnvelope( const Ipc::Envelope &envelope, std::string &error
     const Json::Value json = Ipc::encodeEnvelope( envelope );
     std::lock_guard<std::mutex> lock( mWriteMutex );
     IpcFrameLimits limits;
-    limits.maxFrameBytes = mMaxFrameBytes.load();
+    limits.maxFrameBytes = mMaxSendFrameBytes.load();
     if ( !IpcFrame::writeJson( *mStream, json, limits, error ) )
     {
         // A write failure means the peer is gone or the frame is too large
@@ -491,7 +505,7 @@ void IpcChannel::readerLoop()
         std::string payload;
         std::string error;
         IpcFrameLimits limits;
-        limits.maxFrameBytes = mMaxFrameBytes.load();
+        limits.maxFrameBytes = mMaxRecvFrameBytes.load();
         const IpcFrame::ReadStatus status =
             IpcFrame::read( *mStream, payload, limits, 200, error );
         if ( status == IpcFrame::ReadStatus::Timeout )

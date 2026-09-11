@@ -32,6 +32,8 @@ PluginQuota PluginQuota::fromEnvironment()
         envLongLong( "SICNU_PLUGIN_QUOTA_DEADLINE_MS", quota.requestDeadlineMs ) );
     quota.maxResponseBytes = static_cast<long>(
         envLongLong( "SICNU_PLUGIN_QUOTA_RESPONSE_BYTES", quota.maxResponseBytes ) );
+    quota.maxRequestBytes = static_cast<long>(
+        envLongLong( "SICNU_PLUGIN_QUOTA_REQUEST_BYTES", quota.maxRequestBytes ) );
     quota.workerMemoryBytes =
         envLongLong( "SICNU_PLUGIN_QUOTA_MEMORY_BYTES", quota.workerMemoryBytes );
     quota.workerCpuRatePercent = static_cast<int>(
@@ -78,6 +80,11 @@ void PluginQuota::parseManifest( const Json::Value &quotas, std::vector<std::str
         readLong( "maxResponseBytes", responseBytes, 1024, 1024LL * 1024LL * 1024LL );
         maxResponseBytes = static_cast<long>( responseBytes );
     }
+    {
+        long long requestBytes = static_cast<long long>( maxRequestBytes );
+        readLong( "maxRequestBytes", requestBytes, 1024, 1024LL * 1024LL * 1024LL );
+        maxRequestBytes = static_cast<long>( requestBytes );
+    }
     readLong( "workerMemoryBytes", workerMemoryBytes, 0, 1LL << 62 );
     readInt( "workerCpuRatePercent", workerCpuRatePercent, 0, 100 );
     readInt( "maxChildProcesses", maxChildProcesses, 0, 256 );
@@ -94,6 +101,7 @@ void PluginQuota::clampTo( const PluginQuota &ceilings )
     maxRequestConcurrency = std::min( maxRequestConcurrency, ceilings.maxRequestConcurrency );
     requestDeadlineMs = std::min( requestDeadlineMs, ceilings.requestDeadlineMs );
     maxResponseBytes = std::min( maxResponseBytes, ceilings.maxResponseBytes );
+    maxRequestBytes = std::min( maxRequestBytes, ceilings.maxRequestBytes );
     if ( workerMemoryBytes > 0 && ceilings.workerMemoryBytes > 0 )
         workerMemoryBytes = std::min( workerMemoryBytes, ceilings.workerMemoryBytes );
     else if ( ceilings.workerMemoryBytes > 0 )
@@ -113,6 +121,7 @@ Json::Value PluginQuota::toJson() const
     json["maxRequestConcurrency"] = maxRequestConcurrency;
     json["requestDeadlineMs"] = requestDeadlineMs;
     json["maxResponseBytes"] = static_cast<Json::Int64>( maxResponseBytes );
+    json["maxRequestBytes"] = static_cast<Json::Int64>( maxRequestBytes );
     json["workerMemoryBytes"] = static_cast<Json::Int64>( workerMemoryBytes );
     json["workerCpuRatePercent"] = workerCpuRatePercent;
     json["maxChildProcesses"] = maxChildProcesses;

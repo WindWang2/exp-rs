@@ -349,3 +349,227 @@ TEST_CASE( "a protocol-corrupting peer closes the channel with E6002", "[ipc][ch
     REQUIRE( second.status == IpcChannel::Outcome::Status::ChannelClosed );
     host.close();
 }
+
+// -- protocol 1.2: per-direction frame caps ----------------------------------
+
+namespace {
+
+/// Writes one raw frame with the given payload directly on a stream,
+/// bypassing channel caps (simulates a peer's write side).
+bool writeRawFrame( IIpcStream &stream, const std::string &payload, std::string &error )
+{
+    const uint32_t length = static_cast<uint32_t>( payload.size() );
+    const char prefix[ 4 ] = {
+        static_cast<char>( length & 0xFF ), static_cast<char>( ( length >> 8 ) & 0xFF ),
+        static_cast<char>( ( length >> 16 ) & 0xFF ), static_cast<char>( ( length >> 24 ) & 0xFF )
+    };
+    return stream.writeAll( prefix, 4, error ) && stream.writeAll( payload.data(), payload.size(), error );
+}
+
+} // namespace
+
+TEST_CASE( "directional frame caps are independent per direction", "[ipc][channel][p12]" )
+{
+    std::unique_ptr<IIpcStream> a;
+    std::unique_ptr<IIpcStream> b;
+    makeIpcMemoryPipePair( a, b );
+
+    IpcChannel host( std::move( a ) );
+    // Protocol 1.2 negotiation shape: a small response bound (host recv) and
+    // a generous request bound (host send). The 1.1 defect was that the
+    // small response bound ALSO capped the send direction.
+    host.setDirectionalFrameCaps( 0, 4096 );
+
+    REQUIRE( host.sendFrameCap() > 4096 );      // send untouched by recv bound
+    REQUIRE( host.recvFrameCap() == 4096 );
+    REQUIRE( host.frameCap() == 4096 );         // min() diagnostics view
+
+    // A frame the host SENDS may exceed its own recv bound without a local
+    // E6003 (the worker side owns enforcement of that direction).
+    Json::Value big( Json::objectValue );
+    big["blob"] = std::string( 8192, 'q' );
+    REQUIRE( host.sendEvent( "big.event", big ) );
+    host.close();
+}
+
+TEST_CASE( "the send cap refuses oversized local frames (E6003)", "[ipc][channel][p12]" )
+{
+    std::unique_ptr<IIpcStream> a;
+    std::unique_ptr<IIpcStream> b;
+    makeIpcMemoryPipePair( a, b );
+
+    IpcChannel host( std::move( a ) );
+    host.setDirectionalFrameCaps( 4096, 0 );
+    REQUIRE( host.sendFrameCap() == 4096 );
+    REQUIRE( host.recvFrameCap() > 4096 );
+
+    // A send above the local cap fails typed and ends the channel (the
+    // untrusted-writer contract, same as the shared cap).
+    Json::Value big( Json::objectValue );
+    big["blob"] = std::string( 8192, 'w' );
+    REQUIRE_FALSE( host.sendEvent( "big.event", big ) );
+    REQUIRE( host.protocolFailure().find( "E6003" ) != std::string::npos );
+    host.close();
+}
+
+TEST_CASE( "the recv cap refuses oversized peer frames (E6003)", "[ipc][channel][p12]" )
+{
+    std::unique_ptr<IIpcStream> hostSide;
+    std::unique_ptr<IIpcStream> workerSide;
+    makeIpcMemoryPipePair( hostSide, workerSide );
+
+    IpcChannel host( std::move( hostSide ) );
+    host.setDirectionalFrameCaps( 0, 1024 );
+
+    // The peer writes an oversized frame straight on the raw stream.
+    std::string error;
+    const std::string payload = std::string( 2048, 'z' );
+    REQUIRE( writeRawFrame( *workerSide, payload, error ) );
+
+    // The reader tears the channel down with the typed violation.
+    auto outcome = host.request( "work", {}, 2000 );
+    REQUIRE( outcome.status == IpcChannel::Outcome::Status::ProtocolError );
+    REQUIRE( outcome.statusCode() == "E6003" );
+    REQUIRE( host.protocolFailure().find( "E6003" ) != std::string::npos );
+    host.close();
+}
+
+TEST_CASE( "lowerFrameCap keeps the shared 1.1 semantics on both directions",
+           "[ipc][channel][p12]" )
+{
+    std::unique_ptr<IIpcStream> a;
+    std::unique_ptr<IIpcStream> b;
+    makeIpcMemoryPipePair( a, b );
+
+    IpcChannel host( std::move( a ) );
+    host.lowerFrameCap( 2048 );
+    REQUIRE( host.sendFrameCap() == 2048 );
+    REQUIRE( host.recvFrameCap() == 2048 );
+    // Monotonicity per direction: a larger directional value is ignored.
+    host.setDirectionalFrameCaps( 4096, 8192 );
+    REQUIRE( host.sendFrameCap() == 2048 );
+    REQUIRE( host.recvFrameCap() == 2048 );
+    host.close();
+}
+
+// -- protocol 1.2: adversarial fuzz on the envelope codec --------------------
+
+TEST_CASE( "seeded fuzz: mutated envelopes never crash and fail typed",
+           "[ipc][envelope][fuzz]" )
+{
+    // Deterministic xorshift; the corpus and seeds are fixed so failures are
+    // reproducible on any lane (no rand()/time dependence).
+    auto next = [state = 0x9E3779B97F4A7C15ull]() mutable {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        return static_cast<uint32_t>( state >> 32 );
+    };
+
+    Ipc::Envelope valid;
+    valid.type = Ipc::MessageType::Request;
+    valid.id = 7;
+    valid.method = "operator.execute";
+    valid.params = objectWith( "operatorId", "fuzz:target" );
+    valid.deadlineMs = 1000;
+    const std::string validJson =
+        Json::writeString( Json::StreamWriterBuilder(), Ipc::encodeEnvelope( valid ) );
+
+    Ipc::Envelope decoded;
+    Json::CharReaderBuilder builder;
+    std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+
+    for ( int iteration = 0; iteration < 4096; ++iteration )
+    {
+        std::string corpus = validJson;
+        const int mutations = 1 + static_cast<int>( next() % 8 );
+        for ( int m = 0; m < mutations && !corpus.empty(); ++m )
+        {
+            switch ( next() % 4 )
+            {
+            case 0: // bit flip
+                corpus[ next() % corpus.size() ] ^= static_cast<char>( 1u << ( next() % 8 ) );
+                break;
+            case 1: // byte overwrite with hostile bytes
+                corpus[ next() % corpus.size() ] =
+                    static_cast<char>( next() % 256 );
+                break;
+            case 2: // truncation
+                corpus.resize( next() % corpus.size() );
+                break;
+            case 3: // duplication (framing/length confusion)
+                if ( corpus.size() < 4096 )
+                    corpus += corpus;
+                break;
+            }
+        }
+        // The codec may accept or reject — but must never throw or crash.
+        Json::Value parsed;
+        std::string parseError;
+        if ( reader->parse( corpus.data(), corpus.data() + corpus.size(), &parsed,
+                            &parseError ) )
+        {
+            std::string error;
+            (void)Ipc::decodeEnvelope( parsed, decoded, error ); // typed result only
+        }
+    }
+    // The unmutated corpus still decodes after the fuzz storm.
+    Json::Value parsed;
+    std::string parseError;
+    REQUIRE( reader->parse( validJson.data(), validJson.data() + validJson.size(), &parsed,
+                            &parseError ) );
+    std::string error;
+    REQUIRE( Ipc::decodeEnvelope( parsed, decoded, error ) );
+    REQUIRE( decoded.method == "operator.execute" );
+}
+
+TEST_CASE( "seeded fuzz: random raw frames never crash the frame reader",
+           "[ipc][frame][fuzz]" )
+{
+    auto next = [state = 0xDEADBEEFCAFEF00Dull]() mutable {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        return static_cast<uint32_t>( state >> 32 );
+    };
+
+    std::unique_ptr<IIpcStream> a;
+    std::unique_ptr<IIpcStream> b;
+    makeIpcMemoryPipePair( a, b );
+
+    for ( int iteration = 0; iteration < 256; ++iteration )
+    {
+        std::string garbage;
+        const size_t size = next() % 128;
+        for ( size_t i = 0; i < size; ++i )
+            garbage.push_back( static_cast<char>( next() % 256 ) );
+        std::string error;
+        (void)writeRawFrame( *a, garbage, error );
+
+        std::string payload;
+        // Bounded read; Ok/TooLarge/Eof/Error are all acceptable outcomes,
+        // a crash or unbounded wait is not (cap of 64 KiB absorbs junk).
+        IpcFrameLimits limits;
+        limits.maxFrameBytes = 64 * 1024;
+        const IpcFrame::ReadStatus status = IpcFrame::read( *b, payload, limits, 20, error );
+        (void)status;
+    }
+}
+
+// -- protocol 1.2: version matrix --------------------------------------------
+
+TEST_CASE( "protocol compatibility matrix (1.2)", "[ipc][envelope][p12]" )
+{
+    std::string reason;
+    // Equal versions and lower peers are compatible; anything newer is not.
+    REQUIRE( Ipc::isProtocolCompatible( 1, 2, 1, 2, reason ) );
+    REQUIRE( Ipc::isProtocolCompatible( 1, 2, 1, 1, reason ) ); // stale worker
+    REQUIRE( Ipc::isProtocolCompatible( 1, 2, 1, 0, reason ) ); // v1.0 worker
+    REQUIRE_FALSE( Ipc::isProtocolCompatible( 1, 1, 1, 2, reason ) ); // 1.1 host vs 1.2 worker
+    REQUIRE( reason.find( "minor" ) != std::string::npos );
+    REQUIRE_FALSE( Ipc::isProtocolCompatible( 1, 2, 2, 0, reason ) );
+    REQUIRE( reason.find( "major" ) != std::string::npos );
+    REQUIRE( hostProtocolVersionMajor() == 1 );
+    REQUIRE( hostProtocolVersionMinor() >= 2 );
+}
+
