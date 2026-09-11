@@ -51,11 +51,13 @@ Branch: `feat/geospatial-data-fabric-9` (worktree from `origin/master` @
 
 ## Verification evidence (local, Release, GCC 16.2.1, -j2)
 
-27 io-family suites green (see PERFORMANCE.md evidence log and TEST_MATRIX);
-highlights: test_io_vector_contract 12 cases/100329 assertions,
-test_io_range_cache 19 cases/116 assertions incl. disk layer,
-test_io_roundtrip_matrix 8 cases/623, test_io_multidim 12/235,
-test_io_catalog_query 7/41, test_io_hints 4/27, test_io_scale9 3/214.
+**Post-merge final regression: 27/27 io-family suites green** against the
+merged tree (origin/master containing the #848-#852 and #853-#882 fixes).
+Highlights: test_io_vector_contract 12 cases/100329 assertions,
+test_io_range_cache 20 cases/122 assertions incl. disk layer + both
+truncation gates, test_io_roundtrip_matrix 8 cases/639, test_io_multidim
+12/235, test_io_stac_client 20/136, test_io_catalog_query 9/50,
+test_io_hints 4/27, test_io_scale9 3/214.
 Regression property proven for the two critical fixes: re-introducing the
 #850 defect makes the new test fail (verified once, then fixed again).
 
