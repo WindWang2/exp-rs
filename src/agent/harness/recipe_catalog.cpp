@@ -15,8 +15,9 @@
 #include <memory>
 
 #include <algorithm>
-#include <cmath>
 #include <cctype>
+#include <charconv>
+#include <cmath>
 #include <map>
 #include <set>
 #include <vector>
@@ -32,6 +33,51 @@ std::string loweredKey( std::string key )
   std::transform( key.begin(), key.end(), key.begin(),
                   []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
   return key;
+}
+
+/// Issue #867 truth semantics for `when_param` gates. A gate is open iff the
+/// binding CARRIES A VALUE:
+///   bool         -> its own value (a flag; explicit false closes),
+///   numeric      -> bound (any number, including 0 — a bound zero threshold
+///                   is a real threshold, not an unbound parameter),
+///   string       -> non-empty,
+///   array/object -> non-empty,
+///   null/absent  -> closed.
+bool paramBindingCarriesValue( const Json::Value &binding )
+{
+  if ( binding.isNull() )
+    return false;
+  if ( binding.isBool() )
+    return binding.asBool();
+  if ( binding.isNumeric() )
+    return true;
+  if ( binding.isString() )
+    return !binding.asString().empty();
+  if ( binding.isArray() || binding.isObject() )
+    return !binding.empty();
+  return false;
+}
+
+/// Issue #867 substitution fidelity: Json::Value::asString() AND the JSON
+/// writer both render doubles in their 17-digit binary expansion ("0.4" ->
+/// "0.40000000000000002"), which leaked into operator params as garbage
+/// thresholds. Floating values use std::to_chars' shortest round-trip form
+/// ("0.4"); other scalars keep their wire spelling.
+std::string bindingToString( const Json::Value &value )
+{
+  if ( value.isString() )
+    return value.asString();
+  if ( value.isDouble() && !value.isIntegral() )
+  {
+    char buffer[64];
+    const std::to_chars_result result =
+      std::to_chars( buffer, buffer + sizeof( buffer ), value.asDouble() );
+    if ( result.ec == std::errc() )
+      return std::string( buffer, result.ptr );
+  }
+  Json::StreamWriterBuilder builder;
+  builder[ "indentation" ] = "";
+  return Json::writeString( builder, value );
 }
 
 } // namespace
@@ -134,6 +180,21 @@ std::vector<std::string> RecipeCatalog::validateRecipeMetadata( const Json::Valu
   if ( !recipe.isObject() )
     return { "recipe must be an object" };
   const std::string id = recipe.get( "recipe_id", "" ).asString();
+
+  // Harness 9.0 (M4): fail-closed schema versioning. A future producer
+  // version must not silently load with semantics this catalog does not
+  // implement; unknown versions are a load problem like any other drift.
+  {
+    const std::string schemaVersion = recipe.get( "schema_version", "1.0" ).asString();
+    static const char *kKnownVersions[] = { "1.0", "1.1", "2.0" };
+    const bool known = std::any_of( std::begin( kKnownVersions ), std::end( kKnownVersions ),
+                                    [ &schemaVersion ]( const char *v ) {
+                                      return schemaVersion == v;
+                                    } );
+    if ( !known )
+      problems.push_back( id + ": unsupported recipe schema_version '" + schemaVersion +
+                          "' (known: 1.0, 1.1, 2.0)" );
+  }
 
   auto checkStringArray = [ &problems, &id ]( const Json::Value &parent, const char *field,
                                               int budget ) {
@@ -363,9 +424,9 @@ std::string substituteToken( const std::string &value, const Json::Value &slotPa
   if ( value.rfind( "$params.", 0 ) == 0 )
   {
     const std::string key = value.substr( 8 );
-    if ( paramBindings.isMember( key ) && paramBindings[key].isString() )
-      return paramBindings[key].asString();
-    return paramBindings.get( key, "" ).asString();
+    if ( paramBindings.isMember( key ) )
+      return bindingToString( paramBindings[key] );
+    return "";
   }
   if ( value.rfind( "$", 0 ) == 0 )
   {
@@ -484,6 +545,11 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
   // "$outputs.<name>" gains an input on the producing step (declared outputs
   // first, then the first step emitting the intermediate). This composes with
   // the gate semantics: degradation propagation now sees real dependencies.
+  // Harness 9.0 (#867): per-edge origin tracking — a producer consumed only
+  // in "params_when_skipped" is a degraded-path dependency, not a normal-path
+  // one, so its degradation must not flip the consumer's healthy normal
+  // template (same branch-independence principle as issue #784).
+  std::map<std::string, std::map<std::string, bool>> edgeRequiredForNormal;
   if ( effective.isMember( "steps" ) && effective["steps"].isArray() )
   {
     Json::Value steps = effective["steps"];
@@ -520,6 +586,7 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
     for ( int i = 0; i < wiringCount; ++i )
     {
       std::set<std::string> upstream;
+      std::set<std::string> normalProducers;
       for ( const char *paramsKey : { "params", "params_when_skipped" } )
       {
         const Json::Value params =
@@ -541,7 +608,11 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
               producer = emitted->second;
           }
           if ( !producer.empty() && producer != steps[i].get( "id", "" ).asString() )
+          {
             upstream.insert( producer );
+            if ( std::string( paramsKey ) == "params" )
+              normalProducers.insert( producer );
+          }
         }
       }
       if ( upstream.empty() )
@@ -549,6 +620,7 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
       Json::Value wiring( Json::arrayValue );
       if ( steps[i].isMember( "inputs" ) && steps[i]["inputs"].isArray() )
         wiring = steps[i]["inputs"];
+      const std::string consumerId = steps[i].get( "id", "" ).asString();
       for ( const std::string &producer : upstream )
       {
         bool already = false;
@@ -560,6 +632,7 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
         Json::Value conn( Json::objectValue );
         conn["step"] = producer;
         wiring.append( conn );
+        edgeRequiredForNormal[consumerId][producer] = normalProducers.count( producer ) > 0;
       }
       steps[i]["inputs"] = wiring;
     }
@@ -665,10 +738,7 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
     const std::string gateKey = step.get( "when_param", "" ).asString();
     if ( gateKey.empty() || paramGateOpen.count( gateKey ) )
       continue;
-    const Json::Value &binding = paramBindings.get( gateKey, Json::Value() );
-    const bool open = binding.isBool() ? binding.asBool()
-                                       : ( binding.isString() && !binding.asString().empty() );
-    paramGateOpen[gateKey] = open;
+    paramGateOpen[gateKey] = paramBindingCarriesValue( paramBindings.get( gateKey, Json::Value() ) );
   }
   const int stepCount = static_cast<int>( stepTemplates.size() );
   struct StepGateState
@@ -678,7 +748,10 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
       bool hasSkipped = false;
       bool usesSkipped = false;
       bool dropped = false;
-      std::vector<int> upstream; ///< indices of steps this one declares as inputs
+      /// Indices of steps this one declares as inputs, with whether the edge
+      /// feeds this step's NORMAL template (explicit wiring or consumption in
+      /// "params") — degraded-path-only edges never force the fallback (#867).
+      std::vector<std::pair<int, bool>> upstream;
   };
   std::vector<StepGateState> states( stepCount );
   std::map<std::string, int> idToIndex;
@@ -715,16 +788,41 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
     const Json::Value &inputs = stepTemplates[i]["inputs"];
     if ( !inputs.isArray() )
       continue;
-    for ( const auto &conn : inputs )
+    for ( const Json::Value &conn : inputs )
     {
       const auto it = idToIndex.find( conn.get( "step", "" ).asString() );
-      if ( it != idToIndex.end() && it->second != i )
-        states[i].upstream.push_back( it->second );
+      if ( it == idToIndex.end() || it->second == i )
+        continue;
+      // Explicit declarations are normal-path dependencies; an auto-wired
+      // degraded-path-only edge recorded false above wins over the default.
+      bool requiredForNormal = true;
+      const auto origins = edgeRequiredForNormal.find( states[i].id );
+      if ( origins != edgeRequiredForNormal.end() )
+      {
+        const auto origin = origins->second.find( conn.get( "step", "" ).asString() );
+        if ( origin != origins->second.end() )
+          requiredForNormal = origin->second;
+      }
+      states[i].upstream.emplace_back( it->second, requiredForNormal );
     }
   }
-  // Degradation is monotone (usesSkipped only ever flips false→true), so the
+  // Degradation is monotone (every flip enters a terminal state), so the
   // propagation fixpoint needs at most stepCount passes — bounded, and the
   // document item cap bounds stepCount itself.
+  //
+  // Harness 9.0 (#867) semantics, on top of the 8.0 contract:
+  //   * own gate closed  -> fallback template when declared, else DROPPED;
+  //   * a DROPPED upstream produces nothing — a normal-path dependency on it
+  //     blocks this step's normal template (fallback, else DROPPED). Letting
+  //     a fallback-less step survive here used to emit orphan steps that
+  //     consumed intermediates no surviving step would ever produce;
+  //   * a SKIPPED upstream still RUNS its fallback and its output exists, so
+  //     it never blocks a fallback-less consumer (the optical_change chain:
+  //     align drops -> difference falls back to raw slots -> threshold keeps
+  //     running on difference's product); only consumers WITH a fallback
+  //     degrade with it (the 8.0 #784 branch-conservatism contract);
+  //   * an edge arising only from "params_when_skipped" is a degraded-path
+  //     dependency and never blocks the healthy normal template.
   bool changed = true;
   int pass = 0;
   while ( changed && pass <= stepCount )
@@ -733,19 +831,35 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
     ++pass;
     for ( StepGateState &state : states )
     {
-      if ( state.usesSkipped || !state.hasSkipped )
-        continue;
-      const bool upstreamDegraded =
-        std::any_of( state.upstream.begin(), state.upstream.end(),
-                     [ &states ]( int j ) { return states[j].dropped || states[j].usesSkipped; } );
-      if ( !state.ownGateOpen || upstreamDegraded )
+      if ( state.dropped || state.usesSkipped )
+        continue; // already terminal
+      bool normalUpstreamDropped = false;
+      bool anyDegradedNormalUpstream = false;
+      for ( const auto &[ upstreamIndex, requiredForNormal ] : state.upstream )
       {
-        state.usesSkipped = true;
-        changed = true;
+        const StepGateState &upstream = states[upstreamIndex];
+        if ( !requiredForNormal )
+          continue;
+        anyDegradedNormalUpstream |= upstream.dropped || upstream.usesSkipped;
+        normalUpstreamDropped |= upstream.dropped;
       }
+      if ( state.ownGateOpen && !normalUpstreamDropped )
+      {
+        if ( !( anyDegradedNormalUpstream && state.hasSkipped ) )
+          continue;
+      }
+      if ( state.hasSkipped )
+        state.usesSkipped = true;
+      else
+        state.dropped = true;
+      changed = true;
     }
   }
 
+  // Harness 9.0: bounded degradation record — WHY each step left its normal
+  // template. Consumed by harness:explain and the agent (an honest plan
+  // states what was dropped/skipped and why); never consulted by the engine.
+  Json::Value degradations( Json::arrayValue );
   Json::Value planSteps( Json::arrayValue );
   std::set<std::string> emittedIds;
   for ( int i = 0; i < stepCount; ++i )
@@ -753,7 +867,22 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
     const Json::Value &step = stepTemplates[i];
     const StepGateState &state = states[i];
     if ( state.dropped )
+    {
+      Json::Value degradation( Json::objectValue );
+      degradation["step"] = state.id;
+      degradation["mode"] = "dropped";
+      degradation["reason"] = state.ownGateOpen ? "upstream_degraded" : "gate_closed";
+      degradations.append( degradation );
       continue; // gate closed and nothing to fall back to — step drops out
+    }
+    if ( state.usesSkipped )
+    {
+      Json::Value degradation( Json::objectValue );
+      degradation["step"] = state.id;
+      degradation["mode"] = "skipped";
+      degradation["reason"] = state.ownGateOpen ? "upstream_degraded" : "gate_closed";
+      degradations.append( degradation );
+    }
     emittedIds.insert( step.get( "id", "" ).asString() );
 
     Json::Value planStep( Json::objectValue );
@@ -797,8 +926,14 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
   plan["plan_id"] = "plan-" + recipeId;
   plan["goal"] = effective.get( "title", recipeId ).asString();
   plan["intent"] = effective.get( "intent", "" ).asString();
+  // Harness 9.0 (M4): the plan records which recipe (and schema version)
+  // produced it — reproducibility bookkeeping alongside the fingerprint.
+  plan["recipe_id"] = recipeId;
+  plan["recipe_version"] = effective.get( "schema_version", "1.0" ).asString();
   plan["inputs"] = planInputs;
   plan["steps"] = planSteps;
+  if ( !degradations.empty() )
+    plan["degradations"] = degradations;
   // Declared outputs whose producing step was gate-dropped must not poison
   // the plan (agent_plan validation rejects from_step references to missing
   // steps). Outputs without from_step always survive.
