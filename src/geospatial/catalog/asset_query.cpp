@@ -272,8 +272,20 @@ AssetQueryPage queryAssets( const std::vector<AssetRecord> &records, const Asset
                           return bKey.empty(); // dated < undated
                         if ( aKey == bKey )
                           return false; // stable: keep input order
-                        const bool aFirst = aKey < bKey;
-                        return descending ? !aFirst : aFirst;
+                        // 9.0 review: compare by PARSED instant — the string
+                        // form keeps fractional seconds ("…00.250Z" sorts
+                        // before "…00Z" lexicographically though it is later).
+                        const InstantParse aInstant = parseIso8601Instant( aKey );
+                        const InstantParse bInstant = parseIso8601Instant( bKey );
+                        if ( aInstant.ok != bInstant.ok )
+                          return bInstant.ok; // dated-parseable < unparseable
+                        if ( aInstant.ok && bInstant.ok && aInstant.epochNanos != bInstant.epochNanos )
+                        {
+                          const bool aFirst = aInstant.epochNanos < bInstant.epochNanos;
+                          return descending ? !aFirst : aFirst;
+                        }
+                        // Both unparseable or equal instants: keep input order.
+                        return false;
                       } );
   }
 
@@ -398,11 +410,14 @@ AssetRecord assetRecordFromStacItem( const StacItem &item, const std::string &re
   record.cloudCover = item.cloudCover;
   if ( item.bbox.size() == 4 || item.bbox.size() == 6 )
   {
+    // STAC bbox is [w,s,e,n] or [w,s,minZ,e,n,maxZ] — the horizontal extent
+    // of a 6-value bbox lives at indices 0/1/3/4, NOT 0/1/2/3.
     record.hasBbox = true;
     record.minX = item.bbox[0];
     record.minY = item.bbox[1];
-    record.maxX = item.bbox[2];
-    record.maxY = item.bbox[3];
+    const std::size_t eastIndex = item.bbox.size() == 6 ? 3 : 2;
+    record.maxX = item.bbox[eastIndex];
+    record.maxY = item.bbox[eastIndex + 1];
   }
   // Roles / media type / collection ride on the assets and links; the item
   // itself declares neither — the primary "data" asset donates them.

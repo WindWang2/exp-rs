@@ -320,7 +320,10 @@ TEST_CASE( "move-assignment keeps the transaction (issue850)",
 TEST_CASE( "cancel after move rolls back explicitly and leaves no staging (issue850)",
            "[io][vector][contract][issue850]" )
 {
-  const std::string target = ( fs::path( scratchDir( "move850" ) ) / "cancelled.gpkg" ).string();
+  // Snapshot the scratch dir BEFORE the run (scratchDir() wipes on every
+  // call, so re-invoking it before counting made the residue check vacuous).
+  const std::string dir = scratchDir( "move850" );
+  const std::string target = ( fs::path( dir ) / "cancelled.gpkg" ).string();
   {
     sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
       target, "cities", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
@@ -330,9 +333,10 @@ TEST_CASE( "cancel after move rolls back explicitly and leaves no staging (issue
   }
   CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( target ) );
 
-  // No staging residue in the scratch directory.
+  // No staging residue beside the (absent) target — count WITHOUT wiping.
   int residue = 0;
-  for ( const auto &entry : fs::directory_iterator( fs::path( scratchDir( "move850" ) ) ) )
+  std::error_code ec;
+  for ( const auto &entry : fs::directory_iterator( fs::path( dir ), ec ) )
   {
     (void)entry;
     ++residue;

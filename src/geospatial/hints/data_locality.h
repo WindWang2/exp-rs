@@ -53,7 +53,11 @@ struct DataLocalityHints
 
     /// Access-cost facts.
     bool seekCostLow = false;           ///< true for tiled/blocked/COG layouts
-    bool cogOptimized = false;          ///< COG driver claims the layout
+    bool cogOptimized = false;          ///< COG driver claims the layout, or a
+                                        ///< tiled GTiff (COG-shaped heuristic —
+                                        ///< the driver claim and the shape guess
+                                        ///< are deliberately not distinguished
+                                        ///< at this API; see data_locality.cpp)
     std::string compression;            ///< declared codec ("" undeclared)
 
     /// Preferred read shape: block size for raster tiles, chunk shape for

@@ -9,6 +9,8 @@ set(SICNU_GEOSPATIAL_SOURCES
     crs/crs_policy.cpp
     crs/grid_descriptor.cpp
     identity/asset_identity.cpp
+    catalog/asset_query.cpp
+    hints/data_locality.cpp
     raster/raster_reader.cpp
     raster/raster_writer.cpp
     vector/vector_reader.cpp

@@ -38,10 +38,12 @@ struct VectorFeature
     std::string geometryWkt;  ///< WKT in (possibly transformed) layer CRS; empty when geometryless
 };
 
-/// 9.0 M6 — declared layer envelope. `exact` reports whether the driver
-/// COMPUTED the extent from geometry (or a declared envelope exists);
-/// metadata-carried envelopes are exact-by-declaration, fast-path failures
-/// are honestly invalid.
+/// 9.0 M6 — declared layer envelope. `exact` means the DRIVER REPORTED an
+/// envelope (computed or driver-cached/declared — e.g. PostGIS estimated
+/// extents and shapefile header bounds are indistinguishable at this API,
+/// so treat `exact` as "driver-backed", not "geometry-scanned here");
+/// metadata-carried envelopes keep their own provenance flag, fast-path
+/// failures are honestly invalid.
 struct VectorExtent
 {
     bool valid = false;
@@ -127,10 +129,14 @@ class VectorReader
     VectorExtent extent( bool allowScan = false ) const;
 
     /// Driver-evaluated MIN/MAX/SUM/AVG/COUNT over one NUMERIC field
-    /// (optionally WHERE-filtered — driver-evaluated OGR SQL). Explicit
-    /// opt-in: aggregates inherently scan the features in the driver, so
-    /// this is a caller decision, never an inspection side effect. String
-    /// fields are a typed error. The current stream position is untouched.
+    /// (optionally WHERE-filtered). Explicit opt-in: aggregates inherently
+    /// scan the features in the driver, so this is a caller decision, never
+    /// an inspection side effect. String fields are a typed error. The
+    /// current stream position is untouched.
+    /// SECURITY NOTE: `whereClause` is CALLER-OWNED raw OGR SQL passed
+    /// VERBATIM to the driver (field/layer identifiers are quoted here; the
+    /// clause itself is not sanitized). Only pass trusted clauses — on
+    /// SQL-capable drivers a non-SELECT clause would be driver-evaluated.
     VectorFieldStatistics fieldStatistics( const std::string &fieldName,
                                            const std::string &whereClause = std::string() ) const;
 

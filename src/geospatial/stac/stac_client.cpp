@@ -285,18 +285,20 @@ std::string resolveLocalReference( const std::string &basePath, const std::strin
     throw GeoError( ErrorCode::InvalidArgument, "StacClient: item provenance path is not absolute" );
   const fs::path merged = baseAbsolute / fs::u8path( reference );
   const fs::path normalized = merged.lexically_normal();
-  // Containment: the normalized path must stay at or below the base.
-  const std::string normalizedText = normalized.string();
-  const std::string baseText = baseAbsolute.string();
-  if ( normalizedText.rfind( baseText, 0 ) != 0
-       || ( normalizedText.size() > baseText.size() && normalizedText[baseText.size()] != '/'
-            && baseText.back() != '/' && baseText != normalizedText ) )
+  // Containment (9.0 review: separator-agnostic — path separators differ on
+  // Windows, so prefix string compare breaks there): the normalized path
+  // must be RELATIVE TO the base with no leading ".." components, else the
+  // reference escaped the item's directory tree.
+  const fs::path relative = normalized.lexically_relative( baseAbsolute );
+  const bool escapes = relative.empty()
+                       || ( relative.begin() != relative.end() && *relative.begin() == fs::path( ".." ) );
+  if ( escapes )
   {
     Json::Value details;
     details["hint"] = "relative asset hrefs must stay within the item's directory tree";
     throw GeoError( ErrorCode::InvalidArgument, "StacClient: asset href escapes the item directory", details );
   }
-  return normalizedText;
+  return normalized.string();
 }
 
 /// 9.0 M4: bounded response cache key — method, URL, canonical compact body
@@ -315,14 +317,19 @@ StacPage StacClient::executeSearch( const std::string &method, const std::string
                                     const Json::Value &body ) const
 {
   // --- bounded response cache (opt-in) -----------------------------------
+  // 9.0 review: the cache mutex NEVER spans the network fetch — lookup under
+  // the lock, fetch outside it, store under the lock again.
   Json::Value document;
   bool servedFromCache = false;
+  std::string cacheKeyText;
+  std::chrono::steady_clock::time_point fetchedAt = std::chrono::steady_clock::now();
+  bool shouldStore = false;
   if ( mOptions.cacheEnabled )
   {
-    const std::string key = cacheKey( method, url, body );
+    cacheKeyText = cacheKey( method, url, body );
     const auto now = std::chrono::steady_clock::now();
     std::lock_guard<std::mutex> lock( mCacheMutex );
-    auto it = mCache.find( key );
+    auto it = mCache.find( cacheKeyText );
     if ( it != mCache.end() )
     {
       const bool expired = mOptions.cacheTtlSeconds > 0
@@ -341,9 +348,15 @@ StacPage StacClient::executeSearch( const std::string &method, const std::string
         servedFromCache = true;
       }
     }
-    if ( !servedFromCache )
+    shouldStore = !servedFromCache;
+  }
+  if ( !servedFromCache )
+  {
+    document = fetchDocument( method, url, body ); // deliberately outside mCacheMutex
+    fetchedAt = std::chrono::steady_clock::now();
+    if ( mOptions.cacheEnabled )
     {
-      document = fetchDocument( method, url, body );
+      std::lock_guard<std::mutex> lock( mCacheMutex );
       mCacheMisses += 1;
       // Store bounded: serialize once for accounting, evict LRU-ish (oldest
       // storedAt) when entry/byte caps overflow.
@@ -352,7 +365,7 @@ StacPage StacClient::executeSearch( const std::string &method, const std::string
       QueryCacheEntry entry;
       entry.document = document;
       entry.bytes = Json::writeString( writerBuilder, document ).size();
-      entry.storedAt = now;
+      entry.storedAt = fetchedAt;
       while ( ( mCache.size() + 1 > mOptions.cacheMaxEntries
                 || mCacheBytes + entry.bytes > mOptions.cacheMaxBytes )
               && !mCache.empty() )
@@ -367,20 +380,16 @@ StacPage StacClient::executeSearch( const std::string &method, const std::string
       }
       if ( mOptions.cacheMaxEntries > 0 && entry.bytes <= mOptions.cacheMaxBytes )
       {
-        mCache[key] = std::move( entry );
-        mCacheBytes += mCache[key].bytes;
+        mCache[cacheKeyText] = std::move( entry );
+        mCacheBytes += mCache[cacheKeyText].bytes;
       }
     }
-  }
-  else
-  {
-    document = fetchDocument( method, url, body );
   }
 
   StacPage page;
   page.selfMethod = method;
   page.selfBody = body;
-  ( void )servedFromCache;
+  ( void )shouldStore;
   if ( !document.isObject() || !document.isMember( "features" ) || !document["features"].isArray() )
   {
     throw GeoError( ErrorCode::InvalidMetadata, "StacClient: search answer carries no features array" );

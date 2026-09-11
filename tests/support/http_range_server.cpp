@@ -469,18 +469,19 @@ void HttpRangeServer::handleConnection( SocketHandle client )
       }
       return;
     }
-    if ( mBehavior == ServerBehavior::ShortRange && !isHead && rangeStart >= 1024 &&
-         bodySize > 8 && mShortRangeArmed.exchange( false ) )
+    if ( mBehavior == ServerBehavior::LongRange && !isHead && rangeStart >= 1024 &&
+         bodySize > 8 && mLongRangeArmed.exchange( false ) )
     {
-      // 9.0 fault: announce the full window (Content-Length = bodySize, a
-      // well-formed 206 with an honest-looking Content-Range) but send only
-      // a few bytes. The recipient sees a COMPLETE-feeling HTTP answer with
-      // a body shorter than the echoed window — the poison the truncation
-      // gate exists for.
+      // 9.0 fault: honest 206 headers for the requested window, but the body
+      // carries window + 1 KiB where the extra bytes are GARBAGE (a broken /
+      // hostile origin's answer). The gate must slice to the echoed window;
+      // anything past it would be cached into blocks that were never
+      // fetched — checksum-valid garbage.
       std::string head = "HTTP/1.1 206 Partial Content\r\n";
       for ( const auto &entry : headers )
         head += entry.first + ": " + entry.second + "\r\n";
-      head += "Content-Length: " + std::to_string( bodySize ) + "\r\n";
+      const std::size_t oversize = bodySize + 1024;
+      head += "Content-Length: " + std::to_string( oversize ) + "\r\n";
       head += "Connection: close\r\n\r\n";
       std::size_t sent = 0;
       while ( sent < head.size() )
@@ -491,7 +492,51 @@ void HttpRangeServer::handleConnection( SocketHandle client )
           break;
         sent += static_cast<std::size_t>( written );
       }
+      sent = 0;
+      while ( sent < bodySize )
+      {
+        const int written = ::send( client, reinterpret_cast<const char *>( body ) + sent,
+                                    static_cast<int>( bodySize - sent ), 0 );
+        if ( written <= 0 )
+          break;
+        sent += static_cast<std::size_t>( written );
+      }
+      static const unsigned char garbage[1024] = { 0xDE };
+      std::size_t garbageSent = 0;
+      while ( garbageSent < sizeof( garbage ) )
+      {
+        const int written = ::send( client, reinterpret_cast<const char *>( garbage + garbageSent ),
+                                    static_cast<int>( sizeof( garbage ) - garbageSent ), 0 );
+        if ( written <= 0 )
+          break;
+        garbageSent += static_cast<std::size_t>( written );
+      }
+      mBytesServed.fetch_add( bodySize + garbageSent );
+      return;
+    }
+    if ( mBehavior == ServerBehavior::ShortRange && !isHead && rangeStart >= 1024 &&
+         bodySize > 8 && mShortRangeArmed.exchange( false ) )
+    {
+      // 9.0 fault: a HONEST short Content-Length (the transfer completes
+      // cleanly — no CURLE_PARTIAL_FILE, no transport error) with a LYING
+      // full-window Content-Range. The answer reaches the cache's echo gate
+      // as a well-formed HTTP message whose body is shorter than the echoed
+      // window — exactly the branch the truncation gate exists for.
+      std::string head = "HTTP/1.1 206 Partial Content\r\n";
+      for ( const auto &entry : headers )
+        head += entry.first + ": " + entry.second + "\r\n";
       const std::size_t bytesSent = std::min<std::size_t>( bodySize, 4 );
+      head += "Content-Length: " + std::to_string( bytesSent ) + "\r\n";
+      head += "Connection: close\r\n\r\n";
+      std::size_t sent = 0;
+      while ( sent < head.size() )
+      {
+        const int written = ::send( client, head.data() + sent,
+                                    static_cast<int>( head.size() - sent ), 0 );
+        if ( written <= 0 )
+          break;
+        sent += static_cast<std::size_t>( written );
+      }
       if ( bytesSent > 0 )
         ::send( client, reinterpret_cast<const char *>( body ),
                 static_cast<int>( bytesSent ), 0 );

@@ -344,11 +344,15 @@ class CacheStore
     /// never enter the store).
     void insertBytes( const std::shared_ptr<ResourceEntry> &entry, std::uint64_t runStart,
                       const std::vector<unsigned char> &bytes, std::uint64_t blockSize,
-                      std::uint64_t fetchConfigGeneration, std::uint64_t maxCacheBytes )
+                      std::uint64_t fetchConfigGeneration, std::uint64_t expectedGeneration,
+                      std::uint64_t maxCacheBytes )
     {
       std::lock_guard<std::mutex> lock( mMutex );
       if ( fetchConfigGeneration != configGeneration )
         return; // the config changed mid-fetch: these bytes cannot be indexed safely
+      if ( entry->generation != expectedGeneration )
+        return; // 9.0 review: the resource was invalidated mid-fetch — these are
+                // OLD-CONTENT bytes and must never enter the fresh generation
       mMaxCacheBytes = maxCacheBytes;
       std::uint64_t offsetInRun = 0;
       std::uint64_t blockIndex = runStart / blockSize;
@@ -420,8 +424,18 @@ class CacheStore
     /// Publishes a fetched run to the disk layer, block by block (called
     /// AFTER the memory insert — the run bytes stay alive in the caller).
     void putRunToDisk( const std::shared_ptr<ResourceEntry> &entry, std::uint64_t runStart,
-                       const std::vector<unsigned char> &bytes, std::uint64_t blockSize )
+                       const std::vector<unsigned char> &bytes, std::uint64_t blockSize,
+                       std::uint64_t expectedGeneration )
     {
+      {
+        // A mid-fetch invalidation refreshed both the generation and the
+        // identity: writing these OLD-CONTENT bytes under the NEW identity
+        // basis would poison the disk layer across restarts (checksum-valid,
+        // silently wrong). Refuse stale write-throughs.
+        std::lock_guard<std::mutex> lock( mMutex );
+        if ( entry->generation != expectedGeneration )
+          return;
+      }
       const std::string basis = diskBasis( entry );
       if ( basis.empty() )
         return;
@@ -669,6 +683,11 @@ std::vector<unsigned char> fetchRange( const std::string &requestUrl, std::uint6
                         "range_cache: origin sent a truncated ranged response",
                         details );
       }
+      // 9.0 review: an over-long body must not leak past the echoed window —
+      // insertBytes indexes whatever it is handed, so bytes beyond the
+      // window would land in block indexes that were never fetched. Slice
+      // to exactly the echoed window.
+      result.body.resize( static_cast<std::size_t>( windowBytes ) );
       return result.body; // verified window (EOF-clamped ends are fine)
     }
     // 206 without a parseable range: treat as an opaque slice — callers
@@ -989,11 +1008,12 @@ class RangeCacheHandle final : public VSIVirtualHandle
         return fallbackRead( destination, position, fetchEnd - position );
 
       cache.insertBytes( mEntry, fetchStart, bytes, blockSize, fetchConfigGeneration,
-                         config.maxCacheBytes );
+                         mGeneration, config.maxCacheBytes );
       // 9.0 M3 write-through: publish the fetched run to the disk layer
       // (atomically, checksummed). A no-op when the layer is disabled or the
-      // identity is unprovable.
-      cache.putRunToDisk( mEntry, fetchStart, bytes, blockSize );
+      // identity is unprovable, or when the resource was invalidated while
+      // the fetch was in flight (stale bytes never land anywhere).
+      cache.putRunToDisk( mEntry, fetchStart, bytes, blockSize, mGeneration );
       if ( cache.tryServe( mEntry, position, length, destination, mGeneration, blockSize ) )
         return length;
       // The insert may not fully cover the request near EOF or when the

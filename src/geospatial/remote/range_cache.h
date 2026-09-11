@@ -76,8 +76,10 @@ struct RangeCacheConfig
     int maxRetries = 1;
     /// 9.0: global cap on bytes concurrently in flight across ALL ranged
     /// GETs (bandwidth back-pressure). A fetch larger than the cap is
-    /// admitted only when nothing else is in flight (no starvation). 0 =
-    /// unlimited.
+    /// admitted only when nothing else is in flight; admission is
+    /// best-effort head-of-line — under sustained small-fetch load an
+    /// over-cap fetch can be starved by barging new arrivals (documented
+    /// caveat, not a guaranteed reservation). 0 = unlimited.
     std::uint64_t maxConcurrentFetchBytes = 64ull * 1024 * 1024;
     /// 9.0 M3 — optional disk block layer under the memory cache:
     /// checksummed, content-identity keyed (a resource with no provable

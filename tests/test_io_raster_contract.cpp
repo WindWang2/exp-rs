@@ -625,6 +625,22 @@ TEST_CASE( "Float64 sentinel matching stays exact; NaN nodata unchanged (issue87
   REQUIRE( mask.size() == 4 );
   CHECK( mask[1] == 0 );
   CHECK( mask[0] == 255 );
+
+  // NaN NoData: masked where NaN, valid elsewhere (the noDataIsNaN branch of
+  // the storage-precision comparison).
+  const std::string nanTarget = ( fs::path( scratchDir( "mask874" ) ) / "f32nan.tif" ).string();
+  sicnu::geo::RasterBandSpec nanSpec;
+  nanSpec.dtype = "Float32";
+  nanSpec.hasNoData = true;
+  nanSpec.noDataIsNaN = true;
+  sicnu::geo::RasterWriter nanWriter = sicnu::geo::RasterWriter::create( nanTarget, 2, 2, { nanSpec }, {} );
+  std::vector<double> nanValues = { 1.0f, std::numeric_limits<double>::quiet_NaN(), 3.0, 4.0 };
+  nanWriter.writeWindow( 1, full, nanValues.data() );
+  nanWriter.finalize();
+  sicnu::geo::RasterReader nanReader = sicnu::geo::RasterReader::open( nanTarget );
+  const std::vector<std::uint8_t> nanMask = nanReader.readMask( full, { 1 } );
+  CHECK( nanMask[1] == 0 );
+  CHECK( nanMask[0] == 255 );
 }
 
 // ---------------------------------------------------------------------------

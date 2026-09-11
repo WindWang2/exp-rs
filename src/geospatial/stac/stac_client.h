@@ -190,7 +190,10 @@ class StacClient
     /// Resolves an asset href to a fetchable form: absolute/remote hrefs pass
     /// through verbatim; relative hrefs resolve against the item's delivery
     /// provenance (rel="self" preferred, else the page URL for remote items;
-    /// the file's absolute directory for parseFromFile items). No provenance
+    /// the file's absolute directory for parseFromFile items). Local
+    /// resolution containment is LEXICAL ('..' chains and absolute refs are
+    /// refused; symlinks inside a trusted local tree are NOT re-canonicalized
+    /// — treat attacker-influenced item trees accordingly). No provenance
     /// is a typed error — never a guess, never a cwd-dependent accident.
     std::string resolveAssetHref( const StacItem &item, const StacAsset &asset ) const;
 

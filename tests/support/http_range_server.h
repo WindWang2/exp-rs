@@ -56,6 +56,12 @@ enum class ServerBehavior
                  ///< few body bytes — a truncated transfer at the HTTP
                  ///< framing level (vs Truncated's connection reset). The
                  ///< cache must refuse to serve/cache such answers.
+  LongRange,     ///< 9.0: the FIRST ranged GET beyond the identity head
+                 ///< window answers well-formed 206 headers for its window
+                 ///< but sends window + 1 KiB, the extra bytes being GARBAGE
+                 ///< (not payload continuation). An over-long body that
+                 ///< slips past the echoed-window gate would poison the
+                 ///< NEXT block(s) with checksum-valid garbage.
 };
 
 class HttpRangeServer
@@ -107,6 +113,8 @@ class HttpRangeServer
     /// ResetRanged — a permanently truncated origin would starve the
     /// /vsicurl/ fallback, which is itself a ranged reader).
     bool shortRangeFired() const { return !mShortRangeArmed.load(); }
+    /// True when the LongRange over-long fault has fired (transient).
+    bool longRangeFired() const { return !mLongRangeArmed.load(); }
 
   private:
     void serveLoop();
@@ -141,6 +149,7 @@ class HttpRangeServer
     /// ResetRanged is transient: armed until the first eligible request.
     std::atomic<bool> mResetArmed{ true };
     std::atomic<bool> mShortRangeArmed{ true };
+    std::atomic<bool> mLongRangeArmed{ true };
     /// 8.0 concurrent-mode handler threads (joined by the destructor —
     /// they touch fixture state, so they must never outlive it).
     std::mutex mHandlerMutex;

@@ -95,7 +95,8 @@ LocalFacts localFacts( const fs::path &path )
 bool hashFilePrefix( const fs::path &path, std::uint64_t budget, std::string &hexOut,
                      std::uintmax_t &hashedOut )
 {
-  std::FILE *file = std::fopen( path.c_str(), "rb" );
+  // .string() first: fs::path::c_str() is wchar_t* on Windows.
+  std::FILE *file = std::fopen( path.string().c_str(), "rb" );
   if ( !file )
     return false;
   Sha256 hash;
@@ -214,7 +215,7 @@ AssetIdentity qualifiedIdentity( const AssetIdentity &container, const std::stri
   if ( !container.provable() || qualifier.empty() )
     return identity; // unprovable container ⇒ unprovable subdataset
   Sha256 basis;
-  basis.update( "subdataset-basis:v1\n", 19 );
+  basis.update( std::string( "subdataset-basis:v1\n" ) );
   basis.update( container.token + "\n" );
   basis.update( "selector=" + sha256Hex( qualifier ) + "\n" );
   identity.token = std::string( "sd1:v1:" ) + toHex( basis.finalize() );

@@ -233,6 +233,24 @@ TEST_CASE( "records adapt from STAC items and round-trip through JSON",
   CHECK_THROWS_AS( AssetRecord::fromJson( broken ), GeoError );
 }
 
+TEST_CASE( "6-value STAC bboxes map the horizontal extent correctly (review)",
+           "[io][catalog][fabric9][adapter][bbox3d]" )
+{
+  // STAC bbox [w, s, minZ, e, n, maxZ] — the horizontal extent lives at
+  // indices 0/1/3/4. The old indexing produced maxX = minZ.
+  const StacItem item = StacItem::parseText( "{"
+    "\"type\": \"Feature\", \"stac_version\": \"1.0.0\", \"id\": \"cube-3d\","
+    "\"properties\": {\"datetime\": \"2026-03-01T00:00:00Z\"},"
+    "\"bbox\": [10.0, 40.0, -50.0, 11.0, 41.0, -40.0],"
+    "\"assets\": {\"image\": {\"href\": \"https://example.test/c.tif\", \"roles\": [\"data\"]}}}" );
+  const AssetRecord record = assetRecordFromStacItem( item, "https://example.test/c.tif" );
+  REQUIRE( record.hasBbox );
+  CHECK( record.minX == Approx( 10.0 ) );
+  CHECK( record.minY == Approx( 40.0 ) );
+  CHECK( record.maxX == Approx( 11.0 ) ); // was -50 (minZ) with the old indexing
+  CHECK( record.maxY == Approx( 41.0 ) ); // was 11 (east) with the old indexing
+}
+
 TEST_CASE( "100k-record queries stay bounded (M9 scale case)",
            "[io][catalog][fabric9][scale]" )
 {
@@ -258,4 +276,37 @@ TEST_CASE( "100k-record queries stay bounded (M9 scale case)",
   // The summary pass materializes nothing beyond the aggregate.
   const AssetQuerySummary summary = summarizeAssets( records, AssetQuery{} );
   CHECK( summary.totalMatches == 100000 );
+}
+
+TEST_CASE( "the hard cap is a typed backstop in count-off mode (review)",
+           "[io][catalog][fabric9][cap]" )
+{
+  std::vector<AssetRecord> records;
+  for ( int i = 0; i < 50; ++i )
+    records.push_back( recordWith( "c-" + std::to_string( i ), "2026-01-01T00:00:00Z" ) );
+
+  AssetQuery query;
+  AssetQueryOptions options;
+  options.limit = 10;
+  options.hardCap = 10;
+  options.countMatches = false; // caller skipped the full count: the cap guards it
+
+  bool threw = false;
+  try
+  {
+    queryAssets( records, query, options );
+  }
+  catch ( const GeoError &error )
+  {
+    threw = true;
+    CHECK( error.code() == sicnu::geo::ErrorCode::ResourceExhausted );
+  }
+  CHECK( threw );
+
+  // With the count enabled, a small page still answers (the cap only
+  // backstops the count-off mode).
+  options.countMatches = true;
+  const AssetQueryPage page = queryAssets( records, query, options );
+  CHECK( page.records.size() == 10 );
+  CHECK( page.totalMatches == 50 );
 }

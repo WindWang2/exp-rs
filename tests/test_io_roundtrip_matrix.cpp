@@ -493,5 +493,13 @@ TEST_CASE( "matrix: GeoPackage → FlatGeobuf → GeoPackage preserves fidelity"
   {
     CHECK( restoredAll[i].attributes["label"].asString() == originAll[i].attributes["label"].asString() );
     CHECK( restoredAll[i].attributes["zone"].asInt64() == originAll[i].attributes["zone"].asInt64() );
+    // Geometry fidelity: the point must survive as the same coordinates.
+    const auto pointXY = []( const std::string &wkt ) {
+      const auto open = wkt.find( '(' );
+      return wkt.substr( open + 1 );
+    };
+    const std::string originXY = pointXY( originAll[i].geometryWkt );
+    const std::string restoredXY = pointXY( restoredAll[i].geometryWkt );
+    CHECK( restoredXY == originXY ); // POINT (x y) text is stable here
   }
 }

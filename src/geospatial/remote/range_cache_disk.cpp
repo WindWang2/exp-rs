@@ -24,6 +24,8 @@
 #include <unistd.h>
 #endif
 
+#include <atomic>
+
 namespace fs = std::filesystem;
 
 namespace sicnu::geo
@@ -42,6 +44,8 @@ struct DiskState
     std::uint64_t maxBytes = 0;
     bool enabled = false;
     RangeDiskCacheStats stats;
+    std::uint64_t approxBytes = 0; // put-accounted bytes; walk only when over cap
+    std::atomic<std::uint64_t> tempCounter{ 0 }; // collision-free temp names
 };
 
 DiskState &disk()
@@ -165,11 +169,16 @@ void evictUnderCap( DiskState &state, std::uint64_t &bytesOnDiskOut )
       const std::u8string u8 = entry.path().filename().u8string();
       return std::string( u8.begin(), u8.end() );
     }();
-    if ( name.size() < 6 || name.substr( name.size() - 4 ) != ".blk" )
+    // 9.0 review: abandoned ".tmp" files (a crash mid-put) are eviction
+    // candidates too — otherwise they leak forever.
+    const bool isBlock = name.size() >= 6 && name.substr( name.size() - 4 ) == ".blk";
+    const bool isTemp = name.size() > 4 && name.substr( name.size() - 4 ) == ".tmp";
+    if ( !isBlock && !isTemp )
       continue;
-    total += entry.file_size( ec );
+    const std::uintmax_t size = entry.file_size( ec );
     if ( ec )
-      continue;
+      continue; // unreadable entry: exclude from accounting, never wrap total
+    total += size;
     entries.emplace_back( entry.last_write_time( ec ).time_since_epoch().count(), entry.path() );
   }
   if ( total <= state.maxBytes )
@@ -247,10 +256,14 @@ void RangeDiskBlockStore::clear()
       const std::u8string u8 = entry.path().filename().u8string();
       return std::string( u8.begin(), u8.end() );
     }();
-    if ( name.size() >= 6 && name.substr( name.size() - 4 ) == ".blk" )
+    // Drop blocks AND abandoned ".tmp" files (a crash mid-put).
+    const bool isBlock = name.size() >= 6 && name.substr( name.size() - 4 ) == ".blk";
+    const bool isTemp = name.size() > 4 && name.substr( name.size() - 4 ) == ".tmp";
+    if ( isBlock || isTemp )
       fs::remove( entry.path(), ec );
   }
   state.stats = RangeDiskCacheStats{};
+  state.approxBytes = 0;
 }
 
 RangeDiskCacheStats RangeDiskBlockStore::stats()
@@ -286,8 +299,13 @@ bool RangeDiskBlockStore::readBlock( const std::string &basis, std::uint64_t blo
     if ( !state.enabled )
       return false;
   }
+  std::string directory;
+  {
+    std::lock_guard<std::mutex> lock( state.mutex );
+    directory = state.directory; // configure() may reassign it concurrently
+  }
   const std::string basisHash = sha256Hex( basis );
-  const std::string path = ( fs::u8path( state.directory ) / blockFileName( basisHash, blockIndex ) ).string();
+  const std::string path = ( fs::u8path( directory ) / blockFileName( basisHash, blockIndex ) ).string();
 
   // Read OUTSIDE every lock: open/read is the slow part and the file layout
   // is immutable once published under its final name.
@@ -335,16 +353,28 @@ void RangeDiskBlockStore::putBlock( const std::string &basis, std::uint64_t bloc
   DiskState &state = disk();
   if ( basis.empty() || size == 0 )
     return;
-  std::lock_guard<std::mutex> lock( state.mutex );
-  if ( !state.enabled )
-    return;
 
-  const std::string basisHash = sha256Hex( basis );
+  // Name allocation + accounting snapshot under the lock only (9.0 review:
+  // the file write/fsync/rename happen OUTSIDE — the old version serialized
+  // every resource's disk publish behind one thread's I/O plus a full
+  // directory walk per put).
+  std::string tempPath;
+  std::string finalPath;
+  {
+    std::lock_guard<std::mutex> lock( state.mutex );
+    if ( !state.enabled )
+      return;
+    const std::string basisHash = sha256Hex( basis );
+    const std::string finalName = blockFileName( basisHash, blockIndex );
+    const fs::path directory = fs::u8path( state.directory );
+    const std::string unique = std::to_string( ::getpid() ) + "." +
+                               std::to_string( state.tempCounter.fetch_add( 1 ) );
+    tempPath = ( directory / ( finalName + "." + unique + ".tmp" ) ).string();
+    finalPath = ( directory / finalName ).string();
+  }
+
+  const std::string basisHash = sha256Hex( basis ); // recomputed: cheap vs. shared state
   const std::vector<unsigned char> serialized = serializeBlock( basisHash, blockIndex, data, size );
-  const std::string finalName = blockFileName( basisHash, blockIndex );
-  const fs::path directory = fs::u8path( state.directory );
-  const std::string tempPath = ( directory / ( finalName + ".tmp" ) ).string();
-  const std::string finalPath = ( directory / finalName ).string();
 
   std::FILE *file = std::fopen( tempPath.c_str(), "wb" );
   if ( !file )
@@ -365,10 +395,25 @@ void RangeDiskBlockStore::putBlock( const std::string &basis, std::uint64_t bloc
     fs::remove( fs::u8path( tempPath ), ec );
     return;
   }
-  state.stats.puts += 1;
-  std::uint64_t bytesOnDisk = 0;
-  evictUnderCap( state, bytesOnDisk );
-  state.stats.bytesStored = bytesOnDisk;
+
+  {
+    std::lock_guard<std::mutex> lock( state.mutex );
+    state.stats.puts += 1;
+    state.approxBytes += serialized.size();
+    // Full directory walk only when the put-accounted estimate says we are
+    // over the cap — amortized instead of per-put.
+    if ( state.approxBytes > state.maxBytes )
+    {
+      std::uint64_t bytesOnDisk = 0;
+      evictUnderCap( state, bytesOnDisk );
+      state.stats.bytesStored = bytesOnDisk;
+      state.approxBytes = bytesOnDisk;
+    }
+    else
+    {
+      state.stats.bytesStored = state.approxBytes;
+    }
+  }
 }
 
 } // namespace sicnu::geo
