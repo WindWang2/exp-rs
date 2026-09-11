@@ -18,7 +18,9 @@
 | explain dumps expose admission and run evidence (M7) | M7 | 可诊断性 | —（新能力） |
 | deep DAG chain (300) | M8 | 规模 | — |
 | cancel storm (60 tasks / 30 cancels) | M8 | I5 | — |
-| 100k logical admission structures（SICNU_EP9_STRESS=1 门控） | M8 | I8/规模 | — |
+| corrupt checkpoint typed refusal | M6 | I7 | —（钉住既有行为） |
+| checkpoint publish fault point（temp→rename 崩溃窗口） | M6 | 崩溃相位恢复 | —（新能力证据） |
+| 100k logical admission structures（SICNU_EP9_STRESS=1 门控，SKIP 如实上报） | M8 | I8/规模 | — |
 
 ## 既有回归（基线必须全绿，修复后复跑）
 
