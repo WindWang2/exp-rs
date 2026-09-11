@@ -34,3 +34,16 @@ load when nothing is armed); arming happens only from test code.
 
 Legend: ✓ = runnable now on Windows/MSVC; [existing] = pre-existing suite;
 POSIX gaps and their disposition are tracked in the platform evidence matrix.
+
+---
+
+## Verification Platform 8.0 additions
+
+| Fault | Seam / injection | Expected (contract) | Test evidence |
+|---|---|---|---|
+| dataset version commit fails | `dataset_store.commit` (NextN) | `commitVersion` returns the real `dataset.store_write_failed` branch, transaction rolled back, version stays staged Draft, trace records error; disarmed retry succeeds | `test_trace_chain_8` (fault: dataset_store.commit) ✓ |
+| experiment run upsert commit fails | `experiment_store.commit` (NextN) | `upsertRun` returns the real `experiment.store_write_failed` branch, rollback, NO run row appears (recorder fails truthfully); disarmed startRun succeeds end-to-end | `test_trace_chain_8` (fault: experiment_store.commit) ✓ |
+| model provider session acquire fails | `model_provider.acquire` (NextN) | typed `RSOperatorError` at the acquire boundary before ANY provider work (forwards == 0), no output, no residue; disarmed run succeeds | `test_model_failure_matrix` (fault8 case) ✓ |
+
+Store/commit probes live in the same `SICNU_FAULT_POINT` regime as 7.0:
+default no-op (one relaxed atomic load), test-only arming, ArmedFault RAII.

@@ -1,0 +1,175 @@
+{
+  "cases": [
+    {
+      "case_id": "ambiguity/water-change-tie",
+      "category": "ambiguity",
+      "description": "Equal evidence for water and change is typed ambiguity",
+      "steps": [
+        {
+          "tool": "harness:resolve_intent",
+          "input": {
+            "goal": "water change"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "status",
+                "equals": "ambiguous"
+              },
+              {
+                "path": "ambiguity.code",
+                "equals": "INTENT_AMBIGUOUS"
+              },
+              {
+                "path": "candidates",
+                "exists": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "ambiguity/ndvi-resolves",
+      "category": "ambiguity",
+      "description": "Clear NDVI evidence resolves deterministically",
+      "steps": [
+        {
+          "tool": "harness:resolve_intent",
+          "input": {
+            "goal": "Compute the NDVI of the active scene"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "status",
+                "equals": "resolved"
+              },
+              {
+                "path": "intent",
+                "equals": "ndvi"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "ambiguity/sar-flood-compound",
+      "category": "ambiguity",
+      "description": "SAR + flood compounds into sar_flood instead of tying",
+      "steps": [
+        {
+          "tool": "harness:resolve_intent",
+          "input": {
+            "goal": "SAR 洪水范围制图"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "status",
+                "equals": "resolved"
+              },
+              {
+                "path": "intent",
+                "equals": "sar_flood"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "ambiguity/no-evidence-unresolved",
+      "category": "ambiguity",
+      "description": "Text without scientific evidence is typed unresolved",
+      "steps": [
+        {
+          "tool": "harness:resolve_intent",
+          "input": {
+            "goal": "hello world"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "status",
+                "equals": "unresolved"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "ambiguity/resolved-carries-solution-paths",
+      "category": "ambiguity",
+      "description": "A resolved intent reports recipe-level solution paths",
+      "steps": [
+        {
+          "tool": "harness:resolve_intent",
+          "input": {
+            "goal": "flood mapping"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "status",
+                "equals": "resolved"
+              },
+              {
+                "path": "solution_paths",
+                "exists": true
+              },
+              {
+                "path": "missing_facts",
+                "exists": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "ambiguity/deterministic-repeat",
+      "category": "ambiguity",
+      "description": "Identical goals resolve identically (no randomness)",
+      "steps": [
+        {
+          "tool": "harness:resolve_intent",
+          "input": {
+            "goal": "water change"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "status",
+                "equals": "ambiguous"
+              }
+            ]
+          }
+        },
+        {
+          "tool": "harness:resolve_intent",
+          "input": {
+            "goal": "water change"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "status",
+                "equals": "ambiguous"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

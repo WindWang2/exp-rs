@@ -88,6 +88,10 @@ class ExperimentStore
     QVector<LineageEdge> allLineageEdges( qint64 limit = 100000 ) const;
 
   private:
+    /// The real upsert path; `upsertRun()` wraps it with the unified-trace
+    /// record (Verification Platform 8.0). No behavior change.
+    sicnu::data::Result<void> upsertRunImpl( const ExperimentRun &run );
+
     struct Impl;
     Impl *m_impl = nullptr;
     QString m_storePath;

@@ -1,0 +1,99 @@
+{
+  "cases": [
+    {
+      "case_id": "map/plan-accepts-map-output-declaration",
+      "category": "map_confirmation",
+      "description": "A plan may declare a map output; structural validation accepts it",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "nodata": -9999.0
+      },
+      "steps": [
+        {
+          "tool": "harness:plan",
+          "input": {
+            "plan": {
+              "schema_version": "2.0",
+              "kind": "execution_plan",
+              "plan_id": "plan-map",
+              "intent": "ndvi",
+              "inputs": [
+                {
+                  "name": "primary",
+                  "ref": "$fixture"
+                }
+              ],
+              "steps": [
+                {
+                  "id": "s1",
+                  "operator_id": "rs:ndvi",
+                  "params": {},
+                  "verification": "raster"
+                }
+              ],
+              "outputs": [
+                {
+                  "name": "ndvi",
+                  "from_step": "s1",
+                  "port": "output",
+                  "kind": "raster"
+                }
+              ],
+              "map_output": {
+                "layout_name": "ndvi_report",
+                "export_path": "$tmp/out.png"
+              }
+            }
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "compilable",
+                "equals": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "map/template-search-flood",
+      "category": "map_confirmation",
+      "description": "Cartography template search is reachable and bounded for map planning",
+      "steps": [
+        {
+          "tool": "cartography:list_templates",
+          "input": {},
+          "expect": {
+            "success": true
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "map/preflight-tool-typed",
+      "category": "map_confirmation",
+      "description": "cartography:preflight on a bare mapspec runs deterministically",
+      "steps": [
+        {
+          "tool": "cartography:preflight",
+          "input": {
+            "mapspec": {
+              "items": []
+            }
+          },
+          "expect": {
+            "success": true
+          }
+        }
+      ]
+    }
+  ]
+}

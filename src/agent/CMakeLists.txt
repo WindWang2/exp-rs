@@ -29,6 +29,7 @@ add_library(sicnu_agent SHARED
   harness/capability_knowledge.cpp
   harness/capability_knowledge.h
   harness/capability_graph.cpp
+  harness/evidence.cpp
   harness/capability_graph.h
   harness/context_ledger.cpp
   harness/context_ledger.h

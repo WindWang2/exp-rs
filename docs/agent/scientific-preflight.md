@@ -91,3 +91,16 @@ mismatches and SAR calibration gaps are declared warnings.
 
 Refs entries accept Harness 7.0 extras: `"model"` (model catalog id),
 `"supervised"` (bool), `"temporal_facts"` ({scene_count, dates[], max_gap_days?}).
+
+---
+
+## Harness 8.0: Assumptions & SAR-Only Optical Intent Refusal (2026-09)
+
+- Preflight documents now carry an **`assumptions`** array: the warning-class
+  issues. Blockers, checks, and honest unknowns are separated so the agent
+  sees exactly which science rests on unverified facts.
+- Optical index intents on **SAR-only inputs** are now a `MODALITY_MISMATCH`
+  blocker. The 7.0 fusion behavior is unchanged (a SAR companion beside an
+  optical input is skipped by the spectral checks with a warning): what is
+  refused is the silent `ok` for an optical index with no optical input at
+  all — that plan could only fail at operator time.

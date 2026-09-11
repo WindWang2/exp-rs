@@ -150,6 +150,26 @@ QString understandingCacheKey( const QString &path, long long revision )
          QString::number( info.lastModified().toMSecsSinceEpoch() );
 }
 
+/// Harness 8.0: bounded typed projection of a DatasetUnderstanding document
+/// for the context ledger (identity + grid + modality + time slots; never
+/// the full band table).
+Json::Value understandingSummary( const Json::Value &understanding )
+{
+  Json::Value summary( Json::objectValue );
+  for ( const char *key : { "source_kind", "modality", "sensor", "product_type", "product_id",
+                            "processing_level", "radiometric_state", "acquisition_time",
+                            "crs", "pixel_size", "extent", "band_count", "feature_count",
+                            "geometry_type" } )
+    if ( understanding.isMember( key ) )
+      summary[key] = understanding[key];
+  summary["band_roles"] = understanding.get( "band_roles", Json::Value( Json::arrayValue ) );
+  if ( understanding.isMember( "nodata" ) )
+    summary["nodata"] = understanding["nodata"];
+  if ( understanding.isMember( "quality_masks" ) )
+    summary["quality_masks"] = understanding["quality_masks"];
+  return summary;
+}
+
 class UnderstandTool final : public SpatialTool
 {
   public:
@@ -266,6 +286,14 @@ class UnderstandTool final : public SpatialTool
       ContextLedger::instance().cacheUnderstanding(
         understandingCacheKey( resolved->path, resolved->revision ), 0, understanding );
 
+      // Harness 8.0 (typed context 2.0): remember the typed facts with the
+      // stat identity they were observed at; harness:context surfaces them
+      // with a stale flag once the file changes underneath.
+      ContextLedger::instance().recordAssetContext(
+        resolved->path, resolved->toJson(),
+        understandingCacheKey( resolved->path, resolved->revision ),
+        understandingSummary( understanding ) );
+
       Json::Value out( Json::objectValue );
       out["dataset_understanding"] = understanding;
       out["cached"] = false;
@@ -353,6 +381,10 @@ class ContextTool final : public SpatialTool
       Json::Value context = state;
       context["plan_bindings"] = ContextLedger::instance().planBindings();
       context["decisions"] = ContextLedger::instance().decisions();
+      // Harness 8.0 (typed context 2.0): per-dataset typed facts with stale
+      // detection and the model contracts/readiness the harness observed.
+      context["asset_contexts"] = ContextLedger::instance().assetContexts();
+      context["model_contracts"] = ContextLedger::instance().modelContracts();
       out["context"] = context;
       return SpatialToolResult::ok( std::move( out ) );
     }
@@ -471,6 +503,12 @@ std::string inferModality( const Json::Value &rasterInspect )
   if ( suggestsOptical( rasterInspect ) )
     return "optical";
   return "unknown";
+}
+
+Json::Value cachedUnderstandingFor( const QString &path, long long revision )
+{
+  return ContextLedger::instance().cachedUnderstanding( understandingCacheKey( path, revision ),
+                                                        0 );
 }
 
 void registerGroundingTools()

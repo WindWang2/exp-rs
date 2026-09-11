@@ -96,3 +96,28 @@ sidecar per the recipe uncertainty-path convention; warning).
 The derived expectations are echoed in `verification.expectations` of the run
 status document. FAIL propagation is unchanged: any FAIL verdict forces
 `status: "failed"`.
+
+---
+
+## Harness 8.0: Evidence Sidecars & Honest Severity (2026-09)
+
+The 7.0 known gap — "no codepath writes these sidecars yet" (adversarial
+review F1) — is closed. Every terminal, completed run now persists evidence
+next to its artifacts via `src/agent/harness/evidence.{h,cpp}`:
+
+| Sidecar | Writer | Content |
+|---|---|---|
+| `<out>.provenance.json` | engine (temp-output path, #698) or harness run-identity writer when absent | plan/run identity, intent, plan fingerprint, cleanup policy — the harness NEVER overwrites an engine sidecar |
+| `<out>.uncertainty.json` | harness, **only from operator-declared facts** | step-attributed facts from closed result keys (`uncertainty`, `uncertaintyOutput`, `uncertainty_band`, `confidence`); a method that produces no uncertainty yields no file — absence is the honest answer |
+| `<out>.verification.json` | harness, after verification | verdict, checks, expectations, quality summary (failed/warning counts), run identity, uncertainty pointer |
+
+All writes are atomic (QSaveFile, same convention as the engine's writer). A
+declared-but-unwritable uncertainty sidecar is an **error-class** check
+(`uncertainty_written`) — declared evidence may never silently disappear. The
+sidecar presence checks for methods that declare nothing remain
+warning-class. The run document reports an `evidence[]` array with the
+sidecar paths.
+
+New checks (Area G): `band_count_matches` (declared `expected_band_count`)
+and the post-verification `appendCheck` semantics (verdict recomputed from
+ALL checks — FAIL-never-success preserved, asserted by the Tier-B suite).

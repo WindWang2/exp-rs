@@ -254,6 +254,11 @@ class DatasetStore
     QPair<qint64, qint64> sampleContentStamp( const DatasetVersionId &versionId ) const;
 
   private:
+    /// The real commit path; `commitVersion()` wraps it with the unified-trace
+    /// record (Verification Platform 8.0). No behavior change.
+    sicnu::data::Result<DatasetVersionRecord> commitVersionImpl(
+        const DatasetVersionId &versionId );
+
     struct Impl;
     Impl *m_impl = nullptr;
     QString m_storePath;
