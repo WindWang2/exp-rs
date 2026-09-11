@@ -27,7 +27,7 @@ using sicnu::processing::readClampedWindow;
 
 
 SlopeAspect slopeAspectAt( const float *dem, int bufferWidth, int x, int y,
-                           double cellSizeMeters, double demUnitScale )
+                           double cellSizeX, double cellSizeY, double demUnitScale )
 {
   SlopeAspect out;
   const int i = y * bufferWidth + x;
@@ -52,9 +52,9 @@ SlopeAspect slopeAspectAt( const float *dem, int bufferWidth, int x, int y,
     }
   }
 
-  // Horn's method: dz/dx, dz/dy over the 3×3 window.
-  const double dzdx = ( ( c + 2.0 * f + k ) - ( a + 2.0 * d + g ) ) / ( 8.0 * cellSizeMeters );
-  const double dzdy = ( ( g + 2.0 * h + k ) - ( a + 2.0 * b + c ) ) / ( 8.0 * cellSizeMeters );
+  // Horn's method: dz/dx, dz/dy over the 3×3 window with anisotropic spacing.
+  const double dzdx = ( ( c + 2.0 * f + k ) - ( a + 2.0 * d + g ) ) / ( 8.0 * cellSizeX );
+  const double dzdy = ( ( g + 2.0 * h + k ) - ( a + 2.0 * b + c ) ) / ( 8.0 * cellSizeY );
 
   const double slope = std::atan( std::sqrt( dzdx * dzdx + dzdy * dzdy ) );
   out.slopeDeg = slope / kDegToRad;
@@ -73,6 +73,12 @@ SlopeAspect slopeAspectAt( const float *dem, int bufferWidth, int x, int y,
     out.aspectDeg = aspect;
   }
   return out;
+}
+
+SlopeAspect slopeAspectAt( const float *dem, int bufferWidth, int x, int y,
+                           double cellSizeMeters, double demUnitScale )
+{
+  return slopeAspectAt( dem, bufferWidth, x, y, cellSizeMeters, cellSizeMeters, demUnitScale );
 }
 
 double localIncidenceAngle( double slopeDeg, double aspectDeg, double incidenceDeg,
@@ -202,7 +208,7 @@ bool terrainFlattenRaster( const GdalDatasetWrapper &sigma0Ds, int band,
             continue;
           }
           const SlopeAspect sa = slopeAspectAt( demTile.data(), tile.bufferWidth, x + halo,
-                                                y + halo, cellMeters, options.demUnitScale );
+                                                y + halo, cellX, cellY, options.demUnitScale );
           if ( !sa.valid )
           {
             // DEM hole: no meaningful incidence or flattening.

@@ -269,6 +269,7 @@ TEST_CASE( "Harness and operator error codes all resolve to diagnostics", "[help
         sicnu::operators::ErrorCode::ComputationError,   sicnu::operators::ErrorCode::Cancelled,
         sicnu::operators::ErrorCode::AlreadyRunning,     sicnu::operators::ErrorCode::NotInitialized,
         sicnu::operators::ErrorCode::ExternalProcessTimeout, sicnu::operators::ErrorCode::ExternalProcessFailed,
+        sicnu::operators::ErrorCode::DeviceUnavailable,     sicnu::operators::ErrorCode::RuntimeProviderFailed,
         sicnu::operators::ErrorCode::Unknown,
     };
     for ( const sicnu::operators::ErrorCode code : operatorCodes ) {

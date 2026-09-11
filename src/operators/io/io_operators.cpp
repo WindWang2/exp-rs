@@ -642,6 +642,7 @@ Json::Value IoInspectOperator::schema() const
   using namespace sicnu::operators::schema;
   Json::Value params;
   params["input"] = makeRasterParam( "input", "Dataset path (raster, vector or multidimensional)" );
+  params["includeStatistics"] = makeBooleanParam( "includeStatistics", "Compute and include statistics", false );
   Json::Value root = makeRootSchema( "Inspect Dataset", description(), params, Json::Value() );
   root["required"] = makeRequired( { "input" } );
   stampDeterminismGrade( root, determinismGrade() );

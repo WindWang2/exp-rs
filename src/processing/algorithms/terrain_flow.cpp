@@ -160,7 +160,7 @@ bool flowAccumulation( const float *dir, float *acc, int width, int height,
 
     const bool maskNodata = filled != nullptr;
     const auto isDirNoData = []( float d ) {
-        if ( std::isnan( d ) )
+        if ( !std::isfinite( d ) || d < static_cast<float>( std::numeric_limits<int>::min() ) || d > static_cast<float>( std::numeric_limits<int>::max() ) )
             return true;
         const int code = static_cast<int>( d );
         if ( static_cast<float>( code ) != d )
@@ -302,7 +302,7 @@ bool watershedLabels( const float *dir, int width, int height,
             // NoData neighbours carry a NaN direction (flowDirections marks
             // them 0/NaN outside the routing graph) — skip before the
             // float→int cast (UB for NaN).
-            if ( !std::isfinite( dir[nIdx] ) )
+            if ( !std::isfinite( dir[nIdx] ) || dir[nIdx] < static_cast<float>( std::numeric_limits<int>::min() ) || dir[nIdx] > static_cast<float>( std::numeric_limits<int>::max() ) )
                 continue;
             const int code = static_cast<int>( dir[nIdx] );
             if ( code != reverseCode( nb.code ) )

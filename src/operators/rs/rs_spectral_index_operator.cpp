@@ -299,8 +299,8 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                         // slip into the probe statistics (review FINDING).
                         if (hasNodataProbe[b] && v == static_cast<float>(nodataProbe[b]))
                             continue;
-                        observedMaxAbs = std::max(observedMaxAbs,
-                                                  static_cast<double>(std::abs(v)));
+                        if (v > 0.0f && std::isfinite(v))
+                            observedMaxAbs = std::max(observedMaxAbs, static_cast<double>(v));
                     }
                 }
             }
@@ -335,46 +335,6 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                         + "; dividing the participating bands by it");
     }
 
-    // Issue #801: Determine scale regime once at the dataset level before entering streamBlocks.
-    // When applyNumericScale is true, makeSource(..., true) divides by numericScale,
-    // bringing the data to unit reflectance [0, 1] (isScaledDataset = false).
-    // When applyNumericScale is false, check if the dataset samples exceed 5.0f (DN scale).
-    bool isScaledDataset = false;
-    if (!applyNumericScale) {
-        float maxVal = 0.0f;
-        const int sampleW = std::min(width, 64);
-        const int sampleH = std::min(height, 64);
-        std::vector<float> sampleBuf(static_cast<size_t>(sampleW) * sampleH);
-        const std::vector<std::pair<int, int>> sampleLocs = {
-            { 0, 0 },
-            { width / 2 - sampleW / 2, height / 2 - sampleH / 2 },
-            { std::max(0, width - sampleW), std::max(0, height - sampleH) },
-            { 0, std::max(0, height - sampleH) },
-            { std::max(0, width - sampleW), 0 }
-        };
-        for (int b : { nirBand, redBand }) {
-            if (b >= 1 && b <= bandCount) {
-                bool hasNodata = false;
-                const double nodataVal = ds.bandNoDataValue(b, &hasNodata);
-                const float nodataF = hasNodata ? static_cast<float>(nodataVal) : std::numeric_limits<float>::quiet_NaN();
-                for (const auto &loc : sampleLocs) {
-                    const int x = std::max(0, std::min(loc.first, width - sampleW));
-                    const int y = std::max(0, std::min(loc.second, height - sampleH));
-                    if (ds.readBandWindow(b, x, y, sampleW, sampleH, sampleBuf.data())) {
-                        for (float v : sampleBuf) {
-                            if (std::isfinite(v) && (!hasNodata || v != nodataF) && v != -9999.0f && v != 65535.0f && v > 0.0f) {
-                                maxVal = std::max(maxVal, v);
-                                if (maxVal > 5.0f) break;
-                            }
-                        }
-                    }
-                    if (maxVal > 5.0f) break;
-                }
-            }
-            if (maxVal > 5.0f) break;
-        }
-        isScaledDataset = (maxVal > 5.0f);
-    }
 
     // Streaming execution (#664, ADR 0124 grade bit-exact): the raster is
     // processed in horizontal row-blocks so only O(blockRows*width) of each

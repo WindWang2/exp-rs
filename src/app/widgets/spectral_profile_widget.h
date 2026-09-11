@@ -109,6 +109,7 @@ private:
 
     QgsPointXY m_point;
     QPointer<QgsRasterLayer> m_rasterLayer;
+    QString m_rasterLayerId;
 
     // Cached GDAL dataset handle — avoids reopening on every click
     GDALDatasetH m_cachedDataset = nullptr;

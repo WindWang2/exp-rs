@@ -58,6 +58,8 @@ struct SlopeAspect
 };
 
 SlopeAspect slopeAspectAt( const float *dem, int bufferWidth, int x, int y,
+                           double cellSizeX, double cellSizeY, double demUnitScale );
+SlopeAspect slopeAspectAt( const float *dem, int bufferWidth, int x, int y,
                            double cellSizeMeters, double demUnitScale );
 
 /// Local incidence angle θi (degrees) from slope/aspect and geometry.

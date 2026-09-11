@@ -1625,7 +1625,8 @@ void TaskCenter::processNextQueuedTasks()
     QList<long> resourceBlockedIds;
     QList<long> dagRegressedIds;
 
-    while ( m_active.total < globalMax && !m_readyHeap.empty() && scanned < scanBudget )
+    const unsigned int effectiveMax = globalMax + ( sicnu::jobs::JobEngine::isWorkerThread() ? 1u : 0u );
+    while ( m_active.total < effectiveMax && !m_readyHeap.empty() && scanned < scanBudget )
     {
         ReadyEntry entry = m_readyHeap.top();
         m_readyHeap.pop();
@@ -3079,6 +3080,9 @@ AlgorithmTaskInfo TaskCenter::waitForTask( long taskId,
                                             std::chrono::milliseconds timeout,
                                             std::chrono::milliseconds pollInterval ) const
 {
+    if ( sicnu::jobs::JobEngine::isWorkerThread() )
+        return AlgorithmTaskInfo{};
+
     using clock = std::chrono::steady_clock;
     const auto deadline = clock::now() + timeout;
 
@@ -3114,6 +3118,9 @@ PipelineExecutionInfo TaskCenter::waitForPipeline( long pipelineId,
                                                     std::chrono::milliseconds timeout,
                                                     std::chrono::milliseconds pollInterval ) const
 {
+    if ( sicnu::jobs::JobEngine::isWorkerThread() )
+        return PipelineExecutionInfo{};
+
     using clock = std::chrono::steady_clock;
     const auto deadline = clock::now() + timeout;
 

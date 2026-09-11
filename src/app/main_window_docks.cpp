@@ -90,7 +90,7 @@ void QgisDesktopWindow::setupDockWidgets()
         tr( "添加图层..." ),
         m_layersStack );
     connect( m_layersEmptyState, &sicnu::RsEmptyStateWidget::actionClicked, this, [this]() {
-        addRasterLayer();
+        importLayer();
     } );
     m_layersStack->addWidget( m_layersEmptyState ); // Index 1: Empty State
     m_layersStack->setCurrentIndex( 1 ); // Initially empty
@@ -393,7 +393,7 @@ void QgisDesktopWindow::setupDataManagerPanel()
     m_dataManagerPanel->raise();
 
     connect( m_dataManagerPanel, &sicnu::DataManagerPanel::importRequested,
-             this, [this]() { addRasterLayer(); } );
+             this, [this]() { importLayer(); } );
 
     connect( m_dataManagerPanel, &sicnu::DataManagerPanel::displayRequested,
              this, [this]( sicnu::data::AssetId assetId ) {
