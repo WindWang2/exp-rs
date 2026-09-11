@@ -48,6 +48,11 @@ public:
         IpcFrameLimits frameLimits;
         /// Slice between cancel-predicate polls while waiting for a response.
         int cancelPollMs = 100;
+        /// Cap on events queued before an event sink is installed (protocol
+        /// 1.1). Overflow drops the NEWEST events and counts them (the
+        /// worker.hello handshake event is always the first queued entry, so
+        /// it can never be evicted by a log flood).
+        size_t maxQueuedEvents = 1024;
     };
 
     explicit IpcChannel( std::unique_ptr<IIpcStream> stream );
@@ -120,6 +125,18 @@ public:
     int peerProtocolMajor() const { return mPeerMajor; }
     int peerProtocolMinor() const { return mPeerMinor; }
 
+    /// Lowers the frame cap (protocol 1.1 downward negotiation, e.g. from a
+    /// peer quota's maxResponseBytes). Monotonic: a larger value is ignored.
+    /// Applied to BOTH directions from the call onward — the peer must have
+    /// been told the negotiated bound (plugin.load "limits.maxFrameBytes")
+    /// BEFORE the next large frame is written, or it sees E6003 and tears the
+    /// channel down; that is the enforcement contract, not a bug.
+    void lowerFrameCap( uint32_t maxFrameBytes );
+    /// Current effective frame cap.
+    uint32_t frameCap() const { return mMaxFrameBytes.load(); }
+    /// Events dropped by the pending-event queue cap (diagnostics).
+    long long droppedEvents() const { return mDroppedEvents.load(); }
+
 private:
     struct Pending
     {
@@ -151,6 +168,10 @@ private:
     std::thread mReader;
     std::atomic<bool> mClosed{ false };
     std::atomic<long long> mNextId{ 1 };
+    /// Effective frame cap; initialized from Options, lowered via
+    /// lowerFrameCap(). Read on the writer and reader paths.
+    std::atomic<uint32_t> mMaxFrameBytes;
+    std::atomic<long long> mDroppedEvents{ 0 };
     int mPeerMajor = -1;
     int mPeerMinor = -1;
 };

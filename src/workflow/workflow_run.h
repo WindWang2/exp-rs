@@ -70,6 +70,17 @@ struct StepPlan {
   long long outputSizeBytes = 0;
   long long outputMtimeMs = 0;
   std::string outputDigest;
+  /// Operator implementation identity (8.0 WP-E): the implementation
+  /// identity hash (schema + determinism grade + fingerprint contract +
+  /// platform version, see makeImplementationIdentity) of the operator that
+  /// PRODUCED this output, recorded at completion. Resume re-computes the
+  /// current operator's identity and re-executes the step when they differ —
+  /// an operator change between run and resume must not silently mix
+  /// implementations inside one pipeline result. Empty on a legacy
+  /// checkpoint: resume serves such a step only when the operator is ALSO
+  /// unresolvable now (the same unknown-implementation state on both sides);
+  /// otherwise it re-executes (fail-closed).
+  std::string operatorImplStamp;
   std::string errorMessage;
   std::string startTime;
   std::string endTime;

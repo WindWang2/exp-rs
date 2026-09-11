@@ -74,6 +74,14 @@ class ArtifactObjectPool
     /// absent, incomplete, or any object fails digest re-verification.
     std::optional<PoolExecution> lookupExecution( const QString &fingerprintHex );
 
+    /// Content-addressed object lookup (8.0 WP-E): returns the object whose
+    /// bytes carry @p digestHex, re-verifying the digest from the stored
+    /// bytes before returning (a corrupt object is never served). Read-only:
+    /// corruption is reported as absence here; self-heal stays a store-time
+    /// concern. nullopt when the pool is disabled, the digest is malformed,
+    /// or no verified object exists.
+    std::optional<PoolObject> objectByDigest( const QString &digestHex );
+
     /// Drops the execution's records and removes objects that no other
     /// execution references. Returns false on metadata errors only.
     bool forgetExecution( const QString &fingerprintHex );

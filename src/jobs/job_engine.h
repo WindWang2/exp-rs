@@ -203,6 +203,12 @@ class JobEngine
     void workerLoop( uint64_t gen );
     void ensureWorkersLocked(); // requires m_mutex
     std::optional<std::string> tryPickJobLocked(); // requires m_mutex
+    /// Adds a queued job id to its priority bucket (or the exclusive FIFO).
+    /// Requires m_mutex. @p req must be the job's immutable request.
+    void enqueueJobLocked( const std::string &jobId, const JobRequest &req );
+    /// Removes a still-queued job id from its bucket / the exclusive FIFO.
+    /// Requires m_mutex. Returns false when the id was not queued.
+    bool dequeueJobLocked( const std::string &jobId, const JobRequest &req );
     void appendLog( JobRecord &rec, JobLogLevel level, const std::string &text );
     void notify( const JobRecord &rec );
     void runOperatorJob( const std::string &jobId );
@@ -217,7 +223,18 @@ class JobEngine
 
     mutable std::mutex m_mutex;
     std::condition_variable m_cv;
-    std::deque<std::string> m_queue;
+    /// Queued jobs, bucketed by request priority (8.0): the pick used to scan
+    /// the whole FIFO deque per pop (exclusive detection + best-priority scan,
+    /// O(q) each, which was quadratic over a deep queue). request.priority and
+    /// request.exclusive are set once at submit and never mutated, so bucket
+    /// keys cannot go stale. Non-exclusive jobs pick from the lowest-priority
+    /// bucket, FIFO within it (same order the linear scan produced). Exclusive
+    /// jobs keep their own FIFO in submission order — the historical
+    /// drain-then-exclusive order among exclusives was submission order, not
+    /// priority order.
+    std::map<int, std::deque<std::string>> m_queueBuckets;
+    std::deque<std::string> m_exclusiveQueue;
+    std::size_t m_queuedCount = 0;
     std::unordered_map<std::string, JobRecord> m_jobs;
     std::unordered_map<std::string, std::shared_ptr<std::atomic<bool>>> m_cancelFlags;
     /// Per-job index of the first log line not yet shipped in a delta notify

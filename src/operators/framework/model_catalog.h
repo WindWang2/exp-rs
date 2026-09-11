@@ -38,7 +38,16 @@ struct ModelInputContract
   int width = 0;           ///< Fixed input width when the graph requires one (0 = dynamic)
   int height = 0;          ///< Fixed input height (0 = dynamic)
   int temporalLength = 0;  ///< Frames per inference for THIS input (0 = single frame)
-  std::string temporalCollapse = "channels"; ///< How T frames collapse: "channels" feeds N,(T·C),H,W
+  std::string temporalCollapse = "channels"; ///< How T frames collapse:
+                                             ///< "channels" folds T·C into the channel
+                                             ///< axis (N,(T·C),H,W); "sequence" feeds an
+                                             ///< explicit time axis (N,T,C,H,W, NCTHW)
+  // --- Platform 8.0 dynamic time axis (WP-D) --------------------------------
+  /// When true (only legal with temporalCollapse "sequence"), T is defined by
+  /// the FEED at run time: every provided frame is fed and the manifest fixes
+  /// no T; missing_timestep never applies (all frames exist by definition).
+  /// False (default): T is the manifest's temporal_length.
+  bool temporalDynamic = false;
   // --- Platform 7.0 multimodal surface (all optional; empty = documented default)
   /// Input modality: "optical" (default) | "sar" | "dem" | "mask" | "aux".
   /// What the tensor semantically carries; lets the execution layer validate
@@ -204,6 +213,12 @@ struct ModelPostprocessContract
   double maskThreshold = -1.0;  ///< Probability→binary mask threshold (<0 = keep probabilities)
   bool polygonize = false;      ///< Chain mask→polygon conversion (gdal:polygonize)
   double simplify = 0.0;        ///< Geometry simplification tolerance (map units)
+  // --- Platform 8.0 WP-E: Labels product class remap ------------------------
+  /// Element i carries the PRODUCT class for MODEL class i (Labels output
+  /// only; absent = identity). Values must be >= 0 and unique — a colliding
+  /// remap would silently merge classes. Mask/confidence semantics stay on
+  /// MODEL classes so the background test never moves under a remap.
+  std::vector<int> classMapping;
 };
 
 /**

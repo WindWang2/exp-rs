@@ -20,6 +20,12 @@ symbology-style.db
 *.aux.xml
 compile_commands.json
 
+# Compiler artifacts must never return to the tree (PR #831 leaked ~5 MB of
+# MSVC .obj/.pdb to the repo root). Wavefront OBJ models, if ever needed,
+# would require an explicit negation here.
+*.obj
+*.pdb
+
 # Screenshots / local images at root (assets live under images/ or docs/)
 /*.png
 
@@ -85,6 +91,8 @@ vendor/
 !.planning/unified-help-diagnostics-6/
 !.planning/cartography-platform-7/
 !.planning/dataset-experiment-7/
+!.planning/plugin-platform-8/
+!.planning/verification-platform-8/
 .zcode/
 
 # IDE / editor / OS artifacts

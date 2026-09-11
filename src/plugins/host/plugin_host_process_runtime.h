@@ -12,6 +12,7 @@
 #pragma once
 
 #include "exprs/plugin_host_runtime.h"
+#include "exprs/plugin_diagnostics.h"
 
 #include "plugin_host_session.h"
 
@@ -57,6 +58,9 @@ public:
         /// plugin.load budget (cold first LoadLibrary of a heavy plugin can
         /// take tens of seconds; never bounded by the execution quota).
         int loadTimeoutMs = 120000;
+        /// Grace between the cancel frame and forced kill (protocol 1.1
+        /// timeout escalation). Bounded tests lower this.
+        int killGraceMs = 3000;
     };
 
     explicit PluginHostProcessRuntime( Options options );
@@ -71,6 +75,15 @@ public:
     /// True when the plugin's worker is currently alive (crash detection
     /// surface for tests and doctor).
     bool isWorkerAlive( const std::string &pluginId ) const;
+
+    /// Declarative UI (protocol 1.1). describeUiSchema fetches and validates
+    /// the plugin's schema (result["ok"], result["schema"] or
+    /// result["error"] with a stable code; E6008 = the plugin offers no
+    /// declarative UI). invokeUi delivers one bounded host-rendered event.
+    Json::Value describeUiSchema( const std::string &pluginId,
+                                  exprs::PluginDiagnosticLog &log );
+    Json::Value invokeUi( const std::string &pluginId, const Json::Value &event, int timeoutMs,
+                          exprs::PluginDiagnosticLog &log );
 
     /// Recovery path used by proxies: apply the restart policy and reload
     /// the plugin into the fresh worker. Returns false when the policy is

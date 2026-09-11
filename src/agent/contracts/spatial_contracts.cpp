@@ -48,6 +48,23 @@ std::string checkEnvelope( const Json::Value &doc, const std::string &expectedKi
 // DatasetUnderstanding
 // ---------------------------------------------------------------------------
 
+namespace {
+
+/// Harness 8.0 (typed context 2.0): band roles that carry quality/mask
+/// semantics rather than spectral content. Roles are the SICNU_BAND_ROLE
+/// vocabulary written by the import/qa operators (e.g. rs:qa_mask).
+bool isMaskRole( const std::string &role )
+{
+  static const char *kMaskRoles[] = { "mask", "qa", "quality", "cloud", "cloud_mask",
+                                      "cloud_and_shadow", "cloud_shadow", "snow", "validity" };
+  for ( const char *maskRole : kMaskRoles )
+    if ( role == maskRole )
+      return true;
+  return false;
+}
+
+} // namespace
+
 Json::Value datasetUnderstandingFromRasterInspect( const Json::Value &rasterInspect )
 {
   Json::Value body( Json::objectValue );
@@ -69,12 +86,62 @@ Json::Value datasetUnderstandingFromRasterInspect( const Json::Value &rasterInsp
   body["band_roles"] = bandRoles;
   body["band_count"] = static_cast<Json::Int>( bandRoles.size() );
 
-  for ( const char *key : { "SICNU_PRODUCT_TYPE", "SICNU_SPACECRAFT", "SICNU_PROCESSING_LEVEL",
-                            "SICNU_RADIOMETRIC_STATE", "SICNU_ACQUISITION_DATE" } )
+  // Harness 8.0 typed context 2.0: each product fact gets its own typed slot.
+  // The 7.0 builder folded all SICNU_* keys into "radiometric_state" — the
+  // last present key won, so a scene with both spacecraft and acquisition
+  // date reported the date as its radiometric state.
+  if ( rasterInspect.isMember( "SICNU_RADIOMETRIC_STATE" ) )
+    body["radiometric_state"] = rasterInspect["SICNU_RADIOMETRIC_STATE"];
+  if ( rasterInspect.isMember( "SICNU_SPACECRAFT" ) )
+    body["sensor"] = rasterInspect["SICNU_SPACECRAFT"];
+  if ( rasterInspect.isMember( "SICNU_PRODUCT_TYPE" ) )
+    body["product_type"] = rasterInspect["SICNU_PRODUCT_TYPE"];
+  if ( rasterInspect.isMember( "SICNU_PRODUCT_ID" ) )
+    body["product_id"] = rasterInspect["SICNU_PRODUCT_ID"];
+  if ( rasterInspect.isMember( "SICNU_PROCESSING_LEVEL" ) )
+    body["processing_level"] = rasterInspect["SICNU_PROCESSING_LEVEL"];
+  if ( rasterInspect.isMember( "SICNU_ACQUISITION_DATE" ) )
+    body["acquisition_time"] = rasterInspect["SICNU_ACQUISITION_DATE"];
+
+  // Bounded passthrough of every dataset-level SICNU_* fact the inspect
+  // reported (orbit/geometry metadata ride here automatically as importers
+  // add them); named slots above stay the dispatch surface.
+  Json::Value productMetadata( Json::objectValue );
+  for ( const std::string &key : rasterInspect.getMemberNames() )
+    if ( key.rfind( "SICNU_", 0 ) == 0 )
+      productMetadata[key] = rasterInspect[key];
+  if ( !productMetadata.empty() )
+    body["product_metadata"] = productMetadata;
+
+  // NoData per band (sparse — only bands that declare a sentinel).
+  Json::Value nodata( Json::arrayValue );
+  Json::Value maskBands( Json::arrayValue );
+  if ( rasterInspect.isMember( "bands" ) && rasterInspect["bands"].isArray() )
   {
-    if ( rasterInspect.isMember( key ) )
-      body["radiometric_state"] = rasterInspect[key];
+    for ( const auto &band : rasterInspect["bands"] )
+    {
+      if ( band.isMember( "nodata" ) )
+      {
+        Json::Value entry( Json::objectValue );
+        entry["band"] = band.get( "index", 0 );
+        entry["nodata"] = band["nodata"];
+        nodata.append( entry );
+      }
+      if ( band.isMember( "role" ) && band["role"].isString() &&
+           isMaskRole( band["role"].asString() ) )
+      {
+        Json::Value entry( Json::objectValue );
+        entry["band"] = band.get( "index", 0 );
+        entry["role"] = band["role"];
+        maskBands.append( entry );
+      }
+    }
   }
+  if ( !nodata.empty() )
+    body["nodata"] = nodata;
+  if ( !maskBands.empty() )
+    body["quality_masks"] = maskBands;
+
   return makeEnvelope( "dataset_understanding", std::move( body ) );
 }
 
@@ -106,6 +173,18 @@ std::vector<std::string> validateDatasetUnderstanding( const Json::Value &doc )
     problems.push_back( "missing string field 'path'" );
   if ( doc.isMember( "band_roles" ) && !doc["band_roles"].isArray() )
     problems.push_back( "'band_roles' must be an array" );
+  // Harness 8.0 typed context 2.0 slots (all optional; shape-checked when
+  // present so downstream consumers can rely on the envelope).
+  if ( doc.isMember( "nodata" ) && !doc["nodata"].isArray() )
+    problems.push_back( "'nodata' must be an array" );
+  if ( doc.isMember( "quality_masks" ) && !doc["quality_masks"].isArray() )
+    problems.push_back( "'quality_masks' must be an array" );
+  if ( doc.isMember( "product_metadata" ) && !doc["product_metadata"].isObject() )
+    problems.push_back( "'product_metadata' must be an object" );
+  for ( const char *key : { "sensor", "product_type", "product_id", "processing_level",
+                            "acquisition_time", "radiometric_state" } )
+    if ( doc.isMember( key ) && !doc[key].isString() )
+      problems.push_back( std::string( "'" ) + key + "' must be a string" );
   return problems;
 }
 

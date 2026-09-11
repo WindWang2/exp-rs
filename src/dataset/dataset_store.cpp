@@ -19,6 +19,10 @@
 
 #include "dataset_fingerprint.h"
 #include "dataset_store_impl.h"
+#include "runtime/observability/fault_point.h"
+#include "runtime/observability/trace.h"
+
+#include <chrono>
 
 #include <QDateTime>
 #include <QJsonDocument>
@@ -619,6 +623,30 @@ sicnu::data::Result<DatasetVersionRecord> DatasetStore::stageVersion(
 sicnu::data::Result<DatasetVersionRecord> DatasetStore::commitVersion(
     const DatasetVersionId &versionId )
 {
+    // Unified-trace adapter (Verification Platform 8.0): the Dataset link of
+    // the chain. One record per commit with the version id as the artifact
+    // identity. Disabled path = one relaxed atomic load.
+    if ( !sicnu::runtime::observability::trace::Trace::enabled() )
+        return commitVersionImpl( versionId );
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = commitVersionImpl( versionId );
+    sicnu::runtime::observability::trace::TraceEvent trace;
+    trace.event = "dataset_commit";
+    trace.phase = "end";
+    trace.artifact = versionId.toString().toStdString();
+    trace.durationUs = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - started ).count();
+    if ( result )
+        trace.status = "ok";
+    else
+        trace.status = "error";
+    sicnu::runtime::observability::trace::Trace::publish( trace );
+    return result;
+}
+
+sicnu::data::Result<DatasetVersionRecord> DatasetStore::commitVersionImpl(
+    const DatasetVersionId &versionId )
+{
     using Result = sicnu::data::Result<DatasetVersionRecord>;
     if ( !m_impl )
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
@@ -710,9 +738,24 @@ sicnu::data::Result<DatasetVersionRecord> DatasetStore::commitVersion(
                                                QStringLiteral( "version left draft state during commit" ) ) );
         }
     }
-    if ( !m_impl->commit( nullptr ) )
+    if ( SICNU_FAULT_POINT( "dataset_store.commit" ) )
+    {
+        // Injected commit failure (Verification Platform 8.0 fault matrix,
+        // test-only arming): take exactly the real commit-failure branch and
+        // roll the transaction back so the store stays consistent.
+        m_impl->rollback();
         return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
                                            QStringLiteral( "commit transaction failed" ) ) );
+    }
+    if ( !m_impl->commit( nullptr ) )
+    {
+        // A failed COMMIT can leave the transaction active (e.g. SQLITE_BUSY):
+        // roll back explicitly so the shared connection never leaks its write
+        // lock (same convention as deleteDataset, #774).
+        m_impl->rollback();
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_write_failed" ),
+                                           QStringLiteral( "commit transaction failed" ) ) );
+    }
 
     auto record = *current;
     record.setStatus( DatasetVersionStatus::Committed );

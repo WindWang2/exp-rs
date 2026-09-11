@@ -38,9 +38,11 @@ struct IpcError
 
 namespace Ipc {
 
-/// Protocol version implemented by this SDK.
+/// Protocol version implemented by this SDK (kept in lockstep with
+/// EXP_RS_HOST_PROTOCOL_VERSION, exprs/host_protocol.h). 1.1 adds the
+/// declarative-UI methods and concurrency surface additively.
 constexpr int kProtocolVersionMajor = 1;
-constexpr int kProtocolVersionMinor = 0;
+constexpr int kProtocolVersionMinor = 1;
 
 enum class MessageType
 {

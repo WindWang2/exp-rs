@@ -127,7 +127,8 @@ class MeteredTool final : public SpatialTool
   private:
     /// Trims `member` (an array) to the largest prefix whose serialized size
     /// fits the budget. Deterministic: halving from the full length.
-    void trimArray( Json::Value &output, const std::string &member, size_t budget ) const
+    void trimArray( Json::Value &output, const std::string &member, size_t budget,
+                    Json::UInt64 originalBytes ) const
     {
       int count = static_cast<int>( output[member].size() );
       while ( count >= 1 )
@@ -139,11 +140,13 @@ class MeteredTool final : public SpatialTool
         candidate[member] = trimmed;
         candidate["truncated"] = true;
         candidate["truncated_field"] = member;
+        candidate["original_bytes"] = originalBytes;
         if ( sicnu::agent::contracts::serializedSize( candidate ) <= budget )
         {
           output[member] = trimmed;
           output["truncated"] = true;
           output["truncated_field"] = member;
+          output["original_bytes"] = originalBytes;
           return;
         }
         count /= 2;
@@ -175,7 +178,7 @@ class MeteredTool final : public SpatialTool
       }
       if ( !largest.empty() )
       {
-        trimArray( output, largest, budget );
+        trimArray( output, largest, budget, originalBytes );
         if ( serializedSize( output ) <= kMaxToolOutputBytes )
           return;
       }

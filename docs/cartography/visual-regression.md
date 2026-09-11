@@ -100,3 +100,24 @@ The 6.0-era local failures split into two distinct causes:
    session (desktop print/print-engine support); Linux CI renders it.
    The rendering-free structural digest above is the always-runnable
    evidence for layout drift; PNG goldens stay opt-in.
+
+## Platform 8.0 — desktop-capable PNG evidence verified on Linux
+
+The `[visual][determinism]` and `[visual][golden]` cases were developed
+against a headless-Windows session whose `QgsLayoutExporter` hard-stopped
+(RCA above). On the Linux desktop toolchain (system QGIS, Qt 6, offscreen
+platform) both layers are **verified end-to-end locally**:
+
+```bash
+QT_QPA_PLATFORM=offscreen ctest -R "Rendering is deterministic|golden comparison"
+# → real QgsLayoutExporter renders, PNG bytes hash identically across runs
+
+QT_QPA_PLATFORM=offscreen SICNU_CARTOGRAPHY_GOLDEN_DIR=/tmp/p8-goldens \
+  ctest -R "Rendering is deterministic|golden comparison"
+# → writes ~10 scene references (classification, cjk-title, dense-legend,
+#   inset-locator, multi-panel, …) and compares within tolerance
+```
+
+Goldens stay out of the repository by design (platform font variance); the
+golden directory remains the opt-in pixel baseline, and the structural
+digest remains the always-runnable layout-drift evidence.

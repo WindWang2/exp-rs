@@ -50,6 +50,8 @@ const CodeInfo *codeInfo( const std::string &code )
     { "CALIBRATION_MISMATCH",    { "validation", RetryClass::None } },
     { "TRAINING_INVALID",        { "validation", RetryClass::None } },
     { "NOT_SUPPORTED",           { "runtime", RetryClass::None } },
+    // Harness 8.0: pinned identity (dataset/model/split) vs resolved entity.
+    { "IDENTITY_MISMATCH",       { "validation", RetryClass::None } },
   };
   static const Entry *kBegin = kEntries;
   static const Entry *kEnd = kEntries + sizeof( kEntries ) / sizeof( kEntries[0] );

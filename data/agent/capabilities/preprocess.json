@@ -1,0 +1,185 @@
+[
+  {
+    "id": "family:preprocess",
+    "kind": "family_default",
+    "family": "preprocess",
+    "modality": ["optical", "sar", "thermal", "dem"],
+    "resource": { "cost_class": "light", "large_raster_safe": true },
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "crs_present", "dimensions", "finite_fraction"]
+    },
+    "limitations": [
+      "Preparation products inherit upstream radiometric uncertainty",
+      "Resampling/registration steps change the pixel grid; downstream grid checks must target the prepared grid"
+    ]
+  },
+  {
+    "id": "rs:atmospheric_correction",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "modality": ["optical"],
+    "radiometric": { "acceptable": ["dn", "toa"], "warn": ["surface_reflectance"] },
+    "limitations": ["Empirical/physically-guided correction; quality depends on scene content"]
+  },
+  {
+    "id": "rs:atmospheric_dos1",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "modality": ["optical"],
+    "radiometric": { "acceptable": ["dn", "toa"] },
+    "limitations": ["Dark-object subtraction assumes the scene contains true dark targets"]
+  },
+  {
+    "id": "rs:atmospheric_dos2",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "modality": ["optical"],
+    "radiometric": { "acceptable": ["dn", "toa"] },
+    "limitations": ["Dark-object subtraction assumes the scene contains true dark targets"]
+  },
+  {
+    "id": "rs:atmospheric_quac",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "modality": ["optical"],
+    "radiometric": { "acceptable": ["dn", "toa"] },
+    "limitations": ["QUAC assumes the scene contains at least one dark, spectrally diverse land cover"]
+  },
+  {
+    "id": "rs:dn_to_radiance",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "modality": ["optical", "thermal"],
+    "radiometric": { "acceptable": ["dn"] },
+    "limitations": ["Requires sensor-specific gain/offset; unit metadata must match the actual product"]
+  },
+  {
+    "id": "rs:radiometric_calibration",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "modality": ["optical", "thermal"],
+    "radiometric": { "acceptable": ["dn"], "warn": ["toa"] },
+    "limitations": ["Gain/offset tables are sensor- and product-specific"]
+  },
+  {
+    "id": "rs:contrast_stretch",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "limitations": [
+      "Display-oriented stretch destroys radiometric linearity — never feed stretched products into index or change science"
+    ]
+  },
+  {
+    "id": "rs:image_enhancement",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "limitations": [
+      "Enhancement is cartographic, not scientific — downstream index/change results on enhanced inputs are not comparable"
+    ]
+  },
+  {
+    "id": "rs:resample",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "resource": { "cost_class": "medium", "large_raster_safe": true },
+    "limitations": [
+      "Categorical rasters must resample with exact-pick kernels; bilinear/cubic invents classes"
+    ]
+  },
+  {
+    "id": "rs:align",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "resource": { "cost_class": "medium", "large_raster_safe": true },
+    "limitations": [
+      "Aligns to the declared reference grid; a wrong reference silently resamples the science away"
+    ]
+  },
+  {
+    "id": "rs:mosaic",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "resource": { "cost_class": "medium", "large_raster_safe": true },
+    "limitations": ["Seamline/feathering choices change downstream statistics near scene edges"]
+  },
+  {
+    "id": "rs:extract_bands",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "limitations": ["Band selection is by index — verify roles against the selection"]
+  },
+  {
+    "id": "rs:apply_mask",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["qa", "preprocess"],
+    "band_roles": { "mask": 1 },
+    "limitations": ["Masked pixels become NoData; coverage fractions drop accordingly"]
+  },
+  {
+    "id": "rs:qa_mask",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["qa"],
+    "modality": ["optical"],
+    "artifacts": { "output": { "kind": "raster", "dtype": "uint8" } },
+    "limitations": ["Bit-decoding is product-specific (QA band layout must match the sensor)"]
+  },
+  {
+    "id": "rs:landsat_import",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "modality": ["optical", "thermal"],
+    "side_effects": true,
+    "limitations": ["Writes derived products beside the source archive"]
+  },
+  {
+    "id": "rs:sentinel2_import",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "modality": ["optical"],
+    "side_effects": true,
+    "limitations": ["Writes derived products beside the source archive"]
+  },
+  {
+    "id": "rs:modis_import",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "modality": ["optical", "thermal"],
+    "side_effects": true,
+    "limitations": ["MODIS sinusoidal products need explicit reprojection intent afterwards"]
+  },
+  {
+    "id": "rs:modis_georeference",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "modality": ["optical", "thermal"],
+    "side_effects": true,
+    "limitations": ["Sinusoidal-to-target CRS step; check the resampling kernel for categorical layers"]
+  },
+  {
+    "id": "gdal:orthorectification",
+    "family": "preprocess",
+    "extends": "family:io",
+    "intents": ["preprocess"],
+    "resource": { "cost_class": "heavy", "large_raster_safe": true },
+    "limitations": ["Requires a DEM and RPC/TIMING geometry; wrong DEM datum shifts the product"]
+  }
+]

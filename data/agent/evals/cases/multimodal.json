@@ -1,0 +1,59 @@
+{
+  "cases": [
+    {
+      "case_id": "multimodal/fusion-instantiation-gates",
+      "category": "multimodal",
+      "description": "Flood recipe with an optical slot only drops the SAR branch and still yields a valid plan",
+      "fixture": {
+        "kind": "raster", "width": 8, "height": 8,
+        "bands": ["green", "nir"], "nodata": -9999.0,
+        "metadata": {"SICNU_RADIOMETRIC_STATE": "surface_reflectance"}
+      },
+      "steps": [
+        {"tool": "harness:instantiate_recipe",
+         "input": {"recipe_id": "harness.optical_flood_ndwi", "bindings": {"slots": {"primary": "$fixture"}}},
+         "expect": {"success": true, "asserts": [
+           {"path": "plan.kind", "equals": "execution_plan"}]}},
+        {"tool": "harness:plan", "input": {"plan": "$previous.plan"},
+         "expect": {"success": true, "asserts": [
+           {"path": "compilable", "equals": true}]}}
+      ]
+    },
+    {
+      "case_id": "multimodal/sar-scene-classified-as-sar",
+      "category": "multimodal",
+      "description": "A VV-polarized Sentinel-1 scene grounds as SAR modality",
+      "fixture": {
+        "kind": "raster", "width": 8, "height": 8,
+        "bands": ["vv"], "nodata": -9999.0,
+        "metadata": {"SICNU_PRODUCT_TYPE": "SENTINEL-1",
+                      "SICNU_SPACECRAFT": "SENTINEL-1",
+                      "SICNU_RADIOMETRIC_STATE": "gamma0"}
+      },
+      "steps": [
+        {"tool": "spatial:understand", "input": {"asset": "$fixture"},
+         "expect": {"success": true, "asserts": [
+           {"path": "dataset_understanding.modality", "equals": "sar"},
+           {"path": "dataset_understanding.sensor", "equals": "SENTINEL-1"},
+           {"path": "dataset_understanding.radiometric_state", "equals": "gamma0"}]}}
+      ]
+    },
+    {
+      "case_id": "multimodal/sar-recipe-instantiates",
+      "category": "multimodal",
+      "description": "A SAR water recipe instantiates against a single VV scene (DEM slot absent, gates drop its steps)",
+      "fixture": {
+        "kind": "raster", "width": 8, "height": 8,
+        "bands": ["vv"], "nodata": -9999.0,
+        "metadata": {"SICNU_PRODUCT_TYPE": "SENTINEL-1",
+                      "SICNU_RADIOMETRIC_STATE": "sigma0"}
+      },
+      "steps": [
+        {"tool": "harness:instantiate_recipe",
+         "input": {"recipe_id": "harness.sar_water", "bindings": {"slots": {"primary": "$fixture"}}},
+         "expect": {"success": true, "asserts": [
+           {"path": "plan.kind", "equals": "execution_plan"}]}}
+      ]
+    }
+  ]
+}

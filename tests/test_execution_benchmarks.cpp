@@ -546,7 +546,7 @@ class BenchMemorySourceProvider final : public sicnu::data::internal::SourceProv
         resolved.canonicalSource = source.canonicalSource;
         resolved.canonicalProviderKey = source.providerKey;
         resolved.structure = AssetStructure{ RasterStructure{} };
-        return Result<internal::ResolvedSource>::success( resolved );
+        return sicnu::data::Result<internal::ResolvedSource>::success( resolved );
     }
 };
 

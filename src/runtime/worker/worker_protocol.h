@@ -46,6 +46,7 @@ inline const char *kWorkerCapProgress = "progress";               ///< worker em
 inline const char *kWorkerCapCancelAck = "cancelAck";             ///< worker acks cancel requests
 inline const char *kWorkerCapStructuredErrors = "structuredErrors"; ///< error frames carry "code"
 inline const char *kWorkerCapOutputIdentity = "outputIdentity";   ///< result frames carry "outputs"
+inline const char *kWorkerCapHeartbeat = "heartbeat";             ///< worker emits liveness frames (8.0)
 
 /// Frames are SINGLE LINE (newline-delimited transport): every writer must
 /// emit compact JSON.
@@ -114,6 +115,20 @@ inline std::string makeAckFrame( const std::string &jobId, const std::string &ki
     return compactFrame( frame );
 }
 
+/// Worker → host liveness frame (8.0, optional op): emitted periodically by
+/// a heartbeat-capable worker WHILE a job runs, so a host can distinguish
+/// "alive, operator silent" from "process hung/dead" even when the operator
+/// never reports progress. Hosts that do not know "heartbeat" ignore it (the
+/// extension rule above); the frame carries no payload and never fails a run.
+inline std::string makeHeartbeatFrame( const std::string &jobId )
+{
+    Json::Value frame;
+    frame["v"] = 1;
+    frame["op"] = "heartbeat";
+    frame["jobId"] = jobId;
+    return compactFrame( frame );
+}
+
 inline std::string makeResultFrame( const std::string &jobId, const Json::Value &payload,
                                     const Json::Value &outputs = Json::Value() )
 {
@@ -151,7 +166,14 @@ inline bool parseFrame( const std::string &line, Json::Value &frame )
     std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
     if ( !reader->parse( line.data(), line.data() + line.size(), &frame, &errors ) )
         return false;
-    return frame.isMember( "v" ) && frame["v"].asInt() == 1 && frame.isMember( "op" );
+    // isIntegral BEFORE asInt: asInt() throws/aborts on non-numeric values
+    // (e.g. {"v":{}} or {"v":"1"}), so a malformed peer frame must not be
+    // able to crash the host or worker at the protocol gate itself.
+    // isObject FIRST: jsoncpp's isMember()/find() throw LogicError on
+    // non-object roots (arrays, strings, numbers) — a malformed peer frame
+    // must not crash the host or worker at the protocol gate itself.
+    return frame.isObject() && frame.isMember( "v" ) && frame["v"].isInt()
+           && frame["v"].asInt() == 1 && frame.isMember( "op" );
 }
 
 /// True when a ready frame advertises @p cap (frame without "caps" = none).

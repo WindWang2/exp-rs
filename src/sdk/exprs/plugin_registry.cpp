@@ -139,6 +139,10 @@ void PluginRegistry::refreshUnlocked()
 
         PluginValidationRequest request;
         request.pluginDir = record.directory;
+        // ${temp}-rooted access declarations resolve against the configured
+        // plugin temp directory; without this the validator failed closed
+        // on every manifest that documented the pattern (baseline gap).
+        request.tempDirectory = mOptions.tempDirectory;
         const bool valid =
             PluginManifestValidator::validate( record.manifest, request, record.diagnostics );
         if ( !valid )

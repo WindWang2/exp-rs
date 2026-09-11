@@ -86,6 +86,31 @@ std::vector<std::string> wrapTextMm( const std::string &text, double maxWidthMm,
 std::vector<std::string> wrapTextMmBudgeted( const std::string &text, double maxWidthMm,
                                              double sizePt, bool *lineBudgetHit );
 
+/// Same wrap under a declared line-end break policy (see isTextBreakPolicy);
+/// an unknown policy resolves to "none".
+std::vector<std::string> wrapTextMmBudgeted( const std::string &text, double maxWidthMm,
+                                             double sizePt, bool *lineBudgetHit,
+                                             const std::string &breakPolicy );
+
+//
+// Platform 8.0 (Typography 2.0): declared CJK line-end composition.
+//
+// A text item may declare `font.break_policy` governing line-FINAL fullwidth
+// closing punctuation (。，」etc. — the U+2026 ellipsis is NOT in the
+// fullwidth class and is never compressed):
+//   "none"      (default) — the full advance counts; exactly the 7.0 model;
+//   "halfwidth" — the line-final fullwidth closing punctuation measures half
+//                 its advance (CJK halfwidth compression): more glyphs fit
+//                 per line and the wrap/fit reports measure the compressed
+//                 line end.
+// Mid-line punctuation always measures full width. The model stays
+// platform-independent (no font database; byte-identical outputs).
+//
+inline constexpr double kHalfwidthEndFactor = 0.5;
+
+/// True when `policy` is a known break policy ("none"|"halfwidth").
+bool isTextBreakPolicy( const std::string &policy );
+
 /// Declared truncation policy for a text item (MapSpec v4 may carry
 /// `text: {policy: ...}`; the default keeps the 6.0 behavior).
 ///   none            — wrap at the declared font; overflow reported, nothing hidden
@@ -105,6 +130,7 @@ struct TextFitRequest
     double lineHeightFactor = kDefaultLineHeightFactor;
     std::string policy = "overflow_report";
     double paddingMm = 0.0;    ///< subtracted from the box on both axes
+    std::string breakPolicy = "none"; ///< Platform 8.0 line-end composition
 };
 
 /// Structured result of one fit evaluation. Every field is deterministic.
@@ -120,6 +146,7 @@ struct TextFitReport
     bool truncated = false;        ///< content dropped (line budget or ellipsis)
     std::string policyApplied;     ///< resolved policy
     std::string fontPolicy;        ///< "declared" | "shrunk"
+    std::string breakPolicyApplied = "none"; ///< resolved line-end composition
     std::vector<std::string> diagnostics; ///< human-readable, bounded
 };
 

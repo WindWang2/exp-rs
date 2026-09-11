@@ -35,6 +35,7 @@ set( EXPRS_SDK_SOURCES
   exprs/ipc_channel.cpp
   exprs/plugin_capabilities.cpp
   exprs/plugin_quotas.cpp
+  exprs/plugin_ui_schema.cpp
   exprs/workflow_schema.cpp
   exprs/workflow_builder.cpp
 )
