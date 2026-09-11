@@ -414,6 +414,8 @@ TEST_CASE( "domainFromDeclaredScale refuses non-finite scales (#873)",
     REQUIRE( std::isfinite( infDomain.divisor ) );
     REQUIRE( infDomain.divisor == 1.0 );
     REQUIRE( infDomain.regime == NumericScaleRegime::UnitReflectance );
+    // A refused declaration must not claim declared-metadata provenance.
+    REQUIRE( infDomain.resolvedBy == QStringLiteral( "default-unit" ) );
 
     // NaN is equally not a declaration (was already safe — pin it).
     const sicnu::processing::contracts::NumericDomainContract nanDomain =

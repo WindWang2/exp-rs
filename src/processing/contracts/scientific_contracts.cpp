@@ -25,13 +25,22 @@ NumericDomainContract domainFromDeclaredScale( double declaredScale )
     // stamped SICNU_NUMERIC_SCALE to say exactly how its stored values map
     // to unit reflectance. Non-finite declarations (NaN/+Inf, #873) are not
     // declarations of magnitude — +Inf divided every pixel down to zero —
-    // so they fall back to the unit domain instead of being honored.
-    contract.divisor =
-        ( std::isfinite( declaredScale ) && declaredScale > 0.0 ) ? declaredScale : 1.0;
+    // so they fall back to the unit domain, and the provenance says so:
+    // consumers must be able to tell an honored declaration from a refused
+    // one.
+    if ( std::isfinite( declaredScale ) && declaredScale > 0.0 )
+    {
+        contract.divisor = declaredScale;
+        contract.resolvedBy = QStringLiteral( "declared-metadata" );
+    }
+    else
+    {
+        contract.divisor = 1.0;
+        contract.resolvedBy = QStringLiteral( "default-unit" );
+    }
     contract.regime = std::abs( contract.divisor - 1.0 ) > 1e-9
                           ? NumericScaleRegime::DnScale
                           : NumericScaleRegime::UnitReflectance;
-    contract.resolvedBy = QStringLiteral( "declared-metadata" );
     return contract;
 }
 
