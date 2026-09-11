@@ -1,0 +1,57 @@
+{
+  "id": "table/accuracy-matrix",
+  "version": 1,
+  "category": "chart",
+  "semantic_roles": [
+    "accuracy.matrix",
+    "accuracy.report"
+  ],
+  "description": "Accuracy matrix table (reference classes against classified counts with producer/user accuracy columns); deterministic 24x24 budget inherited from the table renderer and the binding matrix shape.",
+  "parameters": {},
+  "defaults": {
+    "chart": {
+      "kind": "table",
+      "binding": {
+        "mode": "inline",
+        "data": []
+      },
+      "style": {
+        "label_column": "Reference",
+        "value_column": "Classified / PA / UA (%)"
+      }
+    }
+  },
+  "layout_constraints": {
+    "anchor": "free",
+    "margin_mm": 6,
+    "min_size_mm": [
+      40,
+      30
+    ]
+  },
+  "compatibility": {
+    "requires_map_frame": false,
+    "result_types": [
+      "classification",
+      "land_cover",
+      "accuracy",
+      "change"
+    ]
+  },
+  "data_bindings": [
+    {
+      "name": "rows",
+      "source": "params.accuracy_rows",
+      "required": true,
+      "description": "[{label, value}] rows: one per reference class with classified counts and per-class accuracy percentages."
+    }
+  ],
+  "variants": [
+    {
+      "id": "zebra"
+    },
+    {
+      "id": "plain"
+    }
+  ]
+}
