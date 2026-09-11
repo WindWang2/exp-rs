@@ -7104,6 +7104,9 @@ add_executable(test_m3_stress
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
   ${CMAKE_SOURCE_DIR}/src/app/log_panel.cpp
   ${CMAKE_SOURCE_DIR}/src/app/panels/data_manager_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/asset_catalog_index.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/preview/asset_preview_service.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
