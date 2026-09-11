@@ -27,7 +27,7 @@ bounded recovery — the host process stays up.
   (E6006) instead of loading them in-process — there is never a silent
   downgrade.
 
-## Wire contract (protocol 1.0)
+## Wire contract (protocol 1.1, additive over 1.0)
 
 - Transport: length-prefixed JSON frames (u32 LE + payload, 32 MiB default
   cap) over two inherited OS handles passed in argv — never stdio, so
@@ -46,6 +46,35 @@ bounded recovery — the host process stays up.
 - Structured errors: one taxonomy for both runtimes (E6001–E6009, see
   `exprs/plugin_diagnostics.h`). The Python worker transport surfaces the
   same codes (E6004/E6005/E6006/E6009) from its bridge.
+
+## Concurrency (protocol 1.1, plugin-platform 8.0)
+
+The host keeps up to `maxRequestConcurrency` requests in flight per worker
+(enforced exactly by a FIFO-fair session gate; overflow refuses typed
+E6007 after a bounded wait). The worker dispatches execution requests
+(operator / agent tool / data provider / model runtime) on a bounded pool
+(width negotiated down from the host quota through `plugin.load`
+"limits"; hard-capped at 8); lifecycle requests stay serialized. Per-id
+cancel frames replace the broadcast-only v1 cancel, and a host-side
+cooperative cancel now reaches the plugin's operator context. Timeout
+escalation is precise: a timed-out request is cancelled by id; a worker
+that keeps serving peers is POISONED and killed when its last in-flight
+request drains (sole-request timeouts escalate to the kill ladder
+directly). A hung operator can therefore delay one request, never tear
+down peers. Progress frames are coalesced per request (>= 20 ms window)
+and the pending-event queue on the host is bounded with a drop counter.
+The frame cap negotiates downward from the quota's `maxResponseBytes`.
+
+## Declarative UI (protocol 1.1)
+
+`runtime: "host-process"` plugins may declare UI contributions through
+the declarative schema route: export `EXPRS_createUiSchemaProviderV1`
+(`exprs/plugin_ui_schema.h`), declare a `ui` section and `access.ui =
+true`. The worker validates the schema (fail closed, hard-capped) and
+answers `ui.describe`; `ui.invoke` carries bounded control events and
+returns bounded state patches. The host renders every widget itself —
+see [declarative-ui.md](declarative-ui.md). Raw widget transport does
+not exist and will not be invented.
 
 ## Quotas & enforcement honesty
 
