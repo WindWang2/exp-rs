@@ -60,6 +60,21 @@ Json::Value PluginRuntimeHost::describePluginUiSchema( const std::string &plugin
     return result;
 }
 
+Json::Value PluginRuntimeHost::invokePluginUi( const std::string &pluginId,
+                                               const Json::Value &event, int timeoutMs )
+{
+    Json::Value result( Json::objectValue );
+    result["ok"] = false;
+    result["error"] = "host-process runtime is not installed (E6006)";
+    std::lock_guard<std::mutex> lock( mMutex );
+    if ( mHostProcessRuntime )
+    {
+        exprs::PluginDiagnosticLog log;
+        result = mHostProcessRuntime->invokeUi( pluginId, event, timeoutMs, log );
+    }
+    return result;
+}
+
 void PluginRuntimeHost::bootstrap( const exprs::PluginRegistryOptions &options )
 {
     std::lock_guard<std::mutex> lock( mMutex );

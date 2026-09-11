@@ -93,6 +93,7 @@ void HistogramWidget::setRasterLayer( QgsRasterLayer *layer )
     m_rasterLayerId = layer ? layer->id() : QString();
     m_bandCache.clear();
     m_scanError.clear();
+    setAccessibleName( QString() );
     if ( m_rasterLayer )
     {
         if ( m_rasterLayer->bandCount() >= 3 )
@@ -306,6 +307,8 @@ void HistogramWidget::computeHistograms()
                 if ( !self || !self->isActiveRequest( reqId ) )
                     return;
                 self->m_scanError = err;
+                // M9: screen readers get the failure, not just the pixels.
+                self->setAccessibleName( err );
                 self->update();
             } );
             return;

@@ -72,6 +72,12 @@ public:
     /// plugin is not host-process, not loaded, or offers no UI.
     Json::Value describePluginUiSchema( const std::string &pluginId );
 
+    /// Workbench 9.0 M8: deliver one bounded host-rendered UI event to the
+    /// hosted plugin (the UiInvokeDelegate production path). ok=false with
+    /// "error" when the host-process runtime is absent or the invoke fails.
+    Json::Value invokePluginUi( const std::string &pluginId, const Json::Value &event,
+                                int timeoutMs = 15000 );
+
     /// Current factory for @p operatorId (empty when the plugin has not
     /// registered it yet). The lazy adapter resolves through this so a
     /// binary plugin's factory installed at load time is honoured.

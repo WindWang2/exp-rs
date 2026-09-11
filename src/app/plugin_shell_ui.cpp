@@ -75,6 +75,18 @@ void ExprsPluginShellUi::attachSettingsPage( const QString &pluginId, const QStr
     mSettingsPageTitles[pluginId] = title.isEmpty() ? pluginId : title;
 }
 
+QList<QAction *> ExprsPluginShellUi::menuActionsFor( const QString &pluginId ) const
+{
+    QList<QAction *> actions;
+    if ( auto it = mMenuActions.constFind( pluginId ); it != mMenuActions.constEnd() )
+    {
+        for ( QAction *action : it.value() )
+            if ( action )
+                actions << action;
+    }
+    return actions;
+}
+
 void ExprsPluginShellUi::releaseUi( const QString &pluginId )
 {
     // Contract: every plugin-created object is detached AND deleted here,

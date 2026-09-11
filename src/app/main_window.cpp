@@ -1,6 +1,10 @@
 #include "main_window.h"
 #include "dialogs/dialog_help_catalog.h"
 #include "active_view_host.h"
+#include "plugin_ui_invoke_delegate.h"
+#include "plugins/framework/plugin_ui_schema_host.h"
+#include "workbench/command_registry.h"
+#include <QPointer>
 #include "project_context.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
 #include "map_tools/map_tool_manager.h"
@@ -230,15 +234,32 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
         // delete them while the plugin binary is still mapped.
         m_exprsShellUi = new ExprsPluginShellUi( this, exprsPluginMenu );
         uiHost->setShellSink( m_exprsShellUi );
+        // Workbench 9.0 M8: declarative out-of-process UI (protocol 1.1)
+        // renders through the SAME reverse-ownership sink; events reach the
+        // worker via the production invoke delegate.
+        sicnu::plugins::PluginUiSchemaRenderer::instance()->setShellSink( m_exprsShellUi );
         const auto exprsLoaded = exprs::PluginRegistry::instance().loadAllValidated();
         for ( const std::string &pluginIdStd : exprsLoaded ) {
             const QString pluginId = QString::fromStdString( pluginIdStd );
             const exprs::LoadedPlugin *loaded =
                 exprs::PluginRegistry::instance().loaded( pluginIdStd );
-            if ( !loaded || !loaded->uiContribution )
-                continue;
-            uiHost->attachCollectedUi(
-                pluginId, static_cast<exprs::UiContributionV1 *>( loaded->uiContribution ) );
+            if ( loaded && loaded->uiContribution )
+                uiHost->attachCollectedUi(
+                    pluginId, static_cast<exprs::UiContributionV1 *>( loaded->uiContribution ) );
+
+            // Declarative path: describe → render → attach. ok=false is the
+            // normal "no declarative UI" answer (E6008) — not a failure.
+            const Json::Value described =
+                sicnu::plugins::PluginRuntimeHost::instance().describePluginUiSchema( pluginIdStd );
+            if ( described.get( "ok", false ).asBool() && described.isMember( "schema" ) )
+            {
+                QString renderError;
+                sicnu::plugins::PluginUiSchemaRenderer::instance()->attachPluginSchema(
+                    pluginId, described["schema"],
+                    std::make_unique<sicnu::app::PluginUiInvokeDelegate>( pluginId ),
+                    renderError );
+                registerPluginCommands( pluginId );
+            }
         }
         // Plugin Manager entry point.
         exprsPluginMenu->addSeparator();
@@ -337,6 +358,38 @@ QgisDesktopWindow::~QgisDesktopWindow()
 #endif
     m_activeViewHost.reset();
     m_projectContext.reset();
+}
+
+void QgisDesktopWindow::registerPluginCommands( const QString &pluginId )
+{
+    // Workbench 9.0 M8 (with M2): plugin UI contributions become first-class
+    // registry commands — palette/help/shortcut surfaces see them like every
+    // other command. Availability follows the rendered action, so unloading
+    // (or crashing) a plugin disables its commands instead of leaving dead
+    // menu entries behind.
+    if ( !m_commandRegistry || !m_exprsShellUi )
+        return;
+    const QList<QAction *> actions = m_exprsShellUi->menuActionsFor( pluginId );
+    int index = 0;
+    for ( QAction *action : actions )
+    {
+        sicnu::app::CommandDefinition d;
+        d.id = QStringLiteral( "plugin.%1.%2" ).arg( pluginId, QString::number( index ) );
+        d.title = action->text();
+        d.title.remove( QLatin1Char( '&' ) );
+        d.description = tr( "插件 %1 提供的功能。" ).arg( pluginId );
+        d.category = tr( "插件" );
+        const QPointer<QAction> guard( action );
+        d.availability = [guard]( const sicnu::app::SelectionContextSnapshot & ) {
+            return !guard.isNull();
+        };
+        d.handler = [guard] {
+            if ( guard )
+                guard->trigger();
+        };
+        m_commandRegistry->registerCommand( d );
+        ++index;
+    }
 }
 
 void QgisDesktopWindow::setupUi()

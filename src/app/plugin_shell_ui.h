@@ -42,6 +42,10 @@ public:
     /// True when the plugin currently has a shell-attached dock.
     bool hasDock( const QString &pluginId ) const { return mDocks.contains( pluginId ); }
 
+    /// Workbench 9.0 M8: rendered menu actions of @p pluginId (registry
+    /// command projections trigger these; empty after releasePluginUi).
+    QList<QAction *> menuActionsFor( const QString &pluginId ) const;
+
 private:
     void releaseSettingsPage( const QString &pluginId );
 

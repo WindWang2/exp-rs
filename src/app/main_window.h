@@ -183,6 +183,10 @@ public:
     /// Workbench 9.0 M2: registry workflow.* command handlers forward here.
     sicnu::workflow::gui::PipelineEditorDock *pipelineDock() const { return m_pipelineDock; }
     WorkflowSessionController *sessionController() const { return m_sessionController; }
+    /// Workbench 9.0 M8: one registry command per rendered plugin menu
+    /// contribution (id plugin.<pluginId>.<n>); availability follows the
+    /// rendered action so unload/crash disables the command automatically.
+    void registerPluginCommands( const QString &pluginId );
 
     /** Workbench 7.0 panel surfaces (goal §C/D/E/F); registry commands call these. */
     void showUnifiedProcessingHistory();
