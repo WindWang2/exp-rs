@@ -230,7 +230,14 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
     if (!dst.isOpen()) {
         throw RSOperatorError(ErrorCode::GdalError, "Cannot create output raster");
     }
-    dst.setNoDataValue(std::numeric_limits<float>::quiet_NaN());
+    // Per-band sentinels, matching the kernel's write contract (#854): a
+    // dataset-wide NaN made the Byte validity band undeclarable, so its
+    // 255 no-data pixels read back as valid foreground. Band 1 (gamma0,
+    // Float32) is NaN-sentinel; band 2 (Byte mask: 1 valid / 0
+    // layover-shadow / 255 nodata) declares 255 — the same convention as
+    // rs:sar_terrain_correction.
+    dst.setBandNoDataValue(1, std::numeric_limits<float>::quiet_NaN());
+    dst.setBandNoDataValue(2, 255.0); // kernel mask sentinel
 
     const bool ok = sicnu::sar::terrainFlattenRaster(src, band, demDs, options, nodata,
                                                      dst, 256, polarizations, sensor);

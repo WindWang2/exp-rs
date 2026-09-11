@@ -27,7 +27,8 @@ using sicnu::processing::readClampedWindow;
 
 
 SlopeAspect slopeAspectAt( const float *dem, int bufferWidth, int x, int y,
-                           double cellSizeMeters, double demUnitScale )
+                           double cellSizeXMeters, double cellSizeYMeters,
+                           double demUnitScale )
 {
   SlopeAspect out;
   const int i = y * bufferWidth + x;
@@ -52,9 +53,14 @@ SlopeAspect slopeAspectAt( const float *dem, int bufferWidth, int x, int y,
     }
   }
 
-  // Horn's method: dz/dx, dz/dy over the 3×3 window.
-  const double dzdx = ( ( c + 2.0 * f + k ) - ( a + 2.0 * d + g ) ) / ( 8.0 * cellSizeMeters );
-  const double dzdy = ( ( g + 2.0 * h + k ) - ( a + 2.0 * b + c ) ) / ( 8.0 * cellSizeMeters );
+  // Horn's method: dz/dx, dz/dy over the 3×3 window. Each derivative is
+  // normalized by its OWN axis spacing (#855): averaging cellX/cellY into
+  // one scalar skewed slope and rotated the downslope aspect on the
+  // anisotropic grids that SAR slant/ground-range products routinely have.
+  const double dzdx =
+    ( ( c + 2.0 * f + k ) - ( a + 2.0 * d + g ) ) / ( 8.0 * cellSizeXMeters );
+  const double dzdy =
+    ( ( g + 2.0 * h + k ) - ( a + 2.0 * b + c ) ) / ( 8.0 * cellSizeYMeters );
 
   const double slope = std::atan( std::sqrt( dzdx * dzdx + dzdy * dzdy ) );
   out.slopeDeg = slope / kDegToRad;
@@ -149,7 +155,6 @@ bool terrainFlattenRaster( const GdalDatasetWrapper &sigma0Ds, int band,
       if ( hasGeog && !hasProj )
         return false;
   }
-  const double cellMeters = 0.5 * ( cellX + cellY );
 
   // Map the DEM's declared sentinel to NaN so Horn statistics cannot see it.
   bool demHasNodata = false;
@@ -202,7 +207,8 @@ bool terrainFlattenRaster( const GdalDatasetWrapper &sigma0Ds, int band,
             continue;
           }
           const SlopeAspect sa = slopeAspectAt( demTile.data(), tile.bufferWidth, x + halo,
-                                                y + halo, cellMeters, options.demUnitScale );
+                                                y + halo, cellX, cellY,
+                                                options.demUnitScale );
           if ( !sa.valid )
           {
             // DEM hole: no meaningful incidence or flattening.
