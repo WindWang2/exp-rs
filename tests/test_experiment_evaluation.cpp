@@ -292,7 +292,9 @@ TEST_CASE( "comparison answers comparability before metrics",
     // Identical pins → Comparable.
     auto comparison = RunComparison::compare( a, b );
     CHECK( comparison.verdict == RunComparison::Verdict::Comparable );
-    CHECK( comparison.dimensions.size() == 7 );
+    // 9.0 added the artifacts + runtime diagnostic dimensions to the
+    // identity/config/seed/environment seven.
+    CHECK( comparison.dimensions.size() == 9 );
 
     // Config-only difference → ComparableWithDifferences (the interesting
     // scientific case: same data/split/model, different parameters).
