@@ -8,6 +8,7 @@ set(SICNU_GEOSPATIAL_SOURCES
     metadata/canonical_metadata.cpp
     crs/crs_policy.cpp
     crs/grid_descriptor.cpp
+    identity/asset_identity.cpp
     raster/raster_reader.cpp
     raster/raster_writer.cpp
     vector/vector_reader.cpp
