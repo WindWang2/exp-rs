@@ -1,0 +1,473 @@
+[
+  {
+    "id": "family:cartography",
+    "kind": "family_default",
+    "family": "cartography",
+    "surface": "spatial_tool",
+    "modality": [
+      "vector"
+    ],
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "json",
+      "checks": [
+        "existence"
+      ]
+    },
+    "limitations": [
+      "Cartographic outputs answer the map-design question, not the science question — map QA never substitutes for artifact verification"
+    ]
+  },
+  {
+    "id": "cartography:compose",
+    "family": "cartography",
+    "extends": "family:cartography",
+    "side_effects": true,
+    "artifacts": {
+      "map": {
+        "kind": "json"
+      }
+    },
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "cartography:preflight",
+    "family": "cartography",
+    "extends": "family:cartography",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "cartography:repair",
+    "family": "cartography",
+    "extends": "family:cartography",
+    "side_effects": true,
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "cartography:validate",
+    "family": "cartography",
+    "extends": "family:cartography",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "cartography:lint_catalog",
+    "family": "cartography",
+    "extends": "family:cartography",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "cartography:catalog_index",
+    "family": "cartography",
+    "extends": "family:cartography",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "cartography:list_templates",
+    "family": "cartography",
+    "extends": "family:cartography",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "cartography:get_component",
+    "family": "cartography",
+    "extends": "family:cartography",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "cartography:list_components",
+    "family": "cartography",
+    "extends": "family:cartography",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "cartography:list_rules",
+    "family": "cartography",
+    "extends": "family:cartography",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "cartography:list_token_sets",
+    "family": "cartography",
+    "extends": "family:cartography",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "cartography:get_token_set",
+    "family": "cartography",
+    "extends": "family:cartography",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "cartography:instantiate_template",
+    "family": "cartography",
+    "extends": "family:cartography",
+    "side_effects": true,
+    "artifacts": {
+      "mapspec": {
+        "kind": "json"
+      }
+    },
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "cartography:chart_list",
+    "family": "cartography",
+    "extends": "family:cartography",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "cartography:chart_get",
+    "family": "cartography",
+    "extends": "family:cartography",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "cartography:chart_create",
+    "family": "cartography",
+    "extends": "family:cartography",
+    "side_effects": true,
+    "artifacts": {
+      "chart": {
+        "kind": "json"
+      }
+    },
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "cartography:chart_delete",
+    "family": "cartography",
+    "extends": "family:cartography",
+    "side_effects": true,
+    "limitations": [
+      "Destructive: removes a chart definition; the harness never calls it without an explicit agent request"
+    ],
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "workflow:preflight",
+    "family": "workflow",
+    "surface": "spatial_tool",
+    "side_effects": false,
+    "artifacts": {
+      "preflight": {
+        "kind": "json"
+      }
+    },
+    "limitations": [
+      "Static preflight only — the authoritative execution gate stays behind harness:execute_plan and the workflow engine"
+    ]
+  },
+  {
+    "id": "family:style",
+    "kind": "family_default",
+    "family": "style",
+    "surface": "spatial_tool",
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "json",
+      "checks": [
+        "existence"
+      ]
+    }
+  },
+  {
+    "id": "style:list",
+    "family": "style",
+    "extends": "family:style",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "style:describe",
+    "family": "style",
+    "extends": "family:style",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "style:apply",
+    "family": "style",
+    "extends": "family:style",
+    "side_effects": true,
+    "limitations": [
+      "Mutates layer symbology; rollback rides the existing symbology apply/rollback seam"
+    ],
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "family:template",
+    "kind": "family_default",
+    "family": "template",
+    "surface": "spatial_tool",
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "json",
+      "checks": [
+        "existence"
+      ]
+    }
+  },
+  {
+    "id": "template:search",
+    "family": "template",
+    "extends": "family:template",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "template:describe",
+    "family": "template",
+    "extends": "family:template",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "template:preview",
+    "family": "template",
+    "extends": "family:template",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "template:validate",
+    "family": "template",
+    "extends": "family:template",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "family:solution",
+    "kind": "family_default",
+    "family": "solution",
+    "surface": "spatial_tool",
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "json",
+      "checks": [
+        "existence"
+      ]
+    }
+  },
+  {
+    "id": "solution:search",
+    "family": "solution",
+    "extends": "family:solution",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "solution:describe",
+    "family": "solution",
+    "extends": "family:solution",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "solution:validate",
+    "family": "solution",
+    "extends": "family:solution",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "solution:instantiate",
+    "family": "solution",
+    "extends": "family:solution",
+    "artifacts": {
+      "plan": {
+        "kind": "json"
+      },
+      "mapspec": {
+        "kind": "json"
+      }
+    },
+    "limitations": [
+      "Composes plans and drafts only — execution stays behind harness:execute_plan"
+    ],
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "family:model",
+    "kind": "family_default",
+    "family": "model",
+    "surface": "spatial_tool",
+    "modality": [
+      "optical",
+      "sar",
+      "thermal"
+    ],
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "json",
+      "checks": [
+        "existence"
+      ]
+    },
+    "limitations": [
+      "Model facts derive from the ModelCatalog manifests; readiness reflects the local runtime, not model quality"
+    ]
+  },
+  {
+    "id": "spatial:list_models",
+    "family": "model",
+    "extends": "family:model",
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "spatial:select_model",
+    "family": "model",
+    "extends": "family:model",
+    "artifacts": {
+      "candidates": {
+        "kind": "json"
+      }
+    },
+    "limitations": [
+      "Returns ranked candidates — it never runs inference; the selected id feeds rs:infer via the plan"
+    ],
+    "surface": "spatial_tool"
+  },
+  {
+    "id": "family:dataset",
+    "kind": "family_default",
+    "family": "dataset",
+    "surface": "data_platform_tool",
+    "modality": [
+      "tabular",
+      "vector"
+    ],
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "json",
+      "checks": [
+        "existence"
+      ]
+    },
+    "limitations": [
+      "Dataset-store reads answer identity/split/leakage questions; pixel facts still come from spatial:understand"
+    ]
+  },
+  {
+    "id": "dataset:list",
+    "family": "dataset",
+    "extends": "family:dataset",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "dataset:inspect",
+    "family": "dataset",
+    "extends": "family:dataset",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "dataset:stats",
+    "family": "dataset",
+    "extends": "family:dataset",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "dataset:diff",
+    "family": "dataset",
+    "extends": "family:dataset",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "dataset:validate",
+    "family": "dataset",
+    "extends": "family:dataset",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "dataset:version",
+    "family": "dataset",
+    "extends": "family:dataset",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "dataset:split_inspect",
+    "family": "dataset",
+    "extends": "family:dataset",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "dataset:label_schema",
+    "family": "dataset",
+    "extends": "family:dataset",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "dataset:leakage_audit",
+    "family": "dataset",
+    "extends": "family:dataset",
+    "side_effects": true,
+    "limitations": [
+      "Run mode persists the audit evidence its report cites — the only dataset-surface tool that writes"
+    ],
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "family:experiment",
+    "kind": "family_default",
+    "family": "experiment",
+    "surface": "data_platform_tool",
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "json",
+      "checks": [
+        "existence"
+      ]
+    },
+    "limitations": [
+      "Experiment records are lineage facts; comparing runs requires identical label schemas and metric protocols to be meaningful"
+    ]
+  },
+  {
+    "id": "experiment:list",
+    "family": "experiment",
+    "extends": "family:experiment",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "experiment:inspect",
+    "family": "experiment",
+    "extends": "family:experiment",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "experiment:compare",
+    "family": "experiment",
+    "extends": "family:experiment",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "family:reproducibility",
+    "kind": "family_default",
+    "family": "reproducibility",
+    "surface": "data_platform_tool",
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "json",
+      "checks": [
+        "existence"
+      ]
+    }
+  },
+  {
+    "id": "reproducibility:inspect",
+    "family": "reproducibility",
+    "extends": "family:reproducibility",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "reproducibility:validate",
+    "family": "reproducibility",
+    "extends": "family:reproducibility",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "reproducibility:export",
+    "family": "reproducibility",
+    "extends": "family:reproducibility",
+    "side_effects": true,
+    "artifacts": {
+      "bundle": {
+        "kind": "collection"
+      }
+    },
+    "limitations": [
+      "Writes a reproduction bundle directory; secrets are filtered at the export boundary"
+    ],
+    "surface": "data_platform_tool"
+  }
+]

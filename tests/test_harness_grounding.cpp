@@ -6,9 +6,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 
 #include "agent/harness/entity_resolver.h"
+#include "agent/harness/context_ledger.h"
 #include "agent/harness/grounding_tools.h"
 #include "agent/harness/harness_error.h"
 #include "agent/harness/tool_taxonomy.h"
@@ -227,4 +229,149 @@ TEST_CASE( "harness:context is revision-stamped and refresh-aware", "[harness][c
         CHECK( !third.output["unchanged"].asBool() );
         CHECK( third.output["context"].isObject() );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Harness 8.0 (typed context 2.0): asset contexts with stale detection and
+// model contracts ride the context ledger.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "asset contexts carry typed facts with stale detection", "[harness][context8]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const std::string rasterPath = createTestRaster( dir.filePath( "context_scene.tif" ) );
+    const QString path = QString::fromStdString( rasterPath );
+
+    // (size, mtime) observation key, same convention as grounding_tools.
+    QFileInfo info( path );
+    const QString key = path + QStringLiteral( "|f" ) + QString::number( info.size() ) +
+                        QStringLiteral( "|" ) +
+                        QString::number( info.lastModified().toMSecsSinceEpoch() );
+
+    Json::Value entity( Json::objectValue );
+    entity["asset_entity_id"] = "asset-8001";
+    Json::Value summary( Json::objectValue );
+    summary["modality"] = "optical";
+    summary["band_count"] = 2;
+
+    ContextLedger &ledger = ContextLedger::instance();
+    ledger.recordAssetContext( path, entity, key, summary );
+
+    const Json::Value contexts = ledger.assetContexts();
+    bool found = false;
+    for ( const Json::Value &record : contexts )
+    {
+        if ( record["path"].asString() == rasterPath )
+        {
+            found = true;
+            CHECK( record["stale"].asBool() == false );
+            CHECK( record["summary"]["modality"].asString() == "optical" );
+            CHECK( record["entity"]["asset_entity_id"].asString() == "asset-8001" );
+        }
+    }
+    REQUIRE( found );
+
+    SECTION( "rewriting the file stales the recorded facts" )
+    {
+        QFile file( path );
+        REQUIRE( file.open( QIODevice::Append ) );
+        file.write( "appended-bytes", 14 );
+        file.close();
+
+        for ( const Json::Value &record : ledger.assetContexts() )
+            if ( record["path"].asString() == rasterPath )
+                CHECK( record["stale"].asBool() );
+    }
+
+    SECTION( "deleting the file stales the recorded facts" )
+    {
+        REQUIRE( QFile::remove( path ) );
+        for ( const Json::Value &record : ledger.assetContexts() )
+            if ( record["path"].asString() == rasterPath )
+                CHECK( record["stale"].asBool() );
+    }
+
+    SECTION( "re-recording the same path replaces the record and unstales it" )
+    {
+        summary["band_count"] = 3;
+        ledger.recordAssetContext( path, entity, key, summary );
+        int hits = 0;
+        for ( const Json::Value &record : ledger.assetContexts() )
+        {
+            if ( record["path"].asString() == rasterPath )
+            {
+                ++hits;
+                CHECK( record["summary"]["band_count"].asInt() == 3 );
+                CHECK( record["stale"].asBool() == false );
+            }
+        }
+        CHECK( hits == 1 );
+    }
+}
+
+TEST_CASE( "model contracts are keyed by model id and bounded", "[harness][context8]" )
+{
+    ContextLedger &ledger = ContextLedger::instance();
+    for ( int i = 0; i < 12; ++i )
+    {
+        Json::Value contract( Json::objectValue );
+        contract["readiness"] = i < 10 ? "ready" : "degraded";
+        ledger.recordModelContract( "model-" + std::to_string( i ), contract );
+    }
+    const Json::Value contracts = ledger.modelContracts();
+    REQUIRE( contracts.size() == 8 );
+
+    // Re-recording replaces in place keyed by id.
+    Json::Value updated( Json::objectValue );
+    updated["readiness"] = "ready";
+    ledger.recordModelContract( "model-11", updated );
+    bool found = false;
+    for ( const Json::Value &record : ledger.modelContracts() )
+    {
+        if ( record["model_id"].asString() == "model-11" )
+        {
+            found = true;
+            CHECK( record["readiness"].asString() == "ready" );
+        }
+    }
+    CHECK( found );
+    CHECK( ledger.modelContracts().size() == 8 );
+}
+
+TEST_CASE( "spatial:understand feeds harness:context asset slots", "[harness][context8]" )
+{
+    SpatialToolRegistry::instance().registerBuiltinTools();
+    registerGroundingTools();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const std::string rasterPath = createTestRaster( dir.filePath( "ctx_feed.tif" ) );
+
+    auto understand = SpatialToolRegistry::instance().find( "spatial:understand" );
+    REQUIRE( understand.has_value() );
+    Json::Value input;
+    input["asset"] = rasterPath;
+    REQUIRE( ( *understand )->execute( input ).success );
+
+    auto context = SpatialToolRegistry::instance().find( "harness:context" );
+    REQUIRE( context.has_value() );
+    const SpatialToolResult result = ( *context )->execute( Json::Value() );
+    REQUIRE( result.success );
+    const Json::Value &ctx = result.output["context"];
+    CHECK( ctx.isMember( "asset_contexts" ) );
+    CHECK( ctx.isMember( "model_contracts" ) );
+    bool found = false;
+    for ( const Json::Value &record : ctx["asset_contexts"] )
+    {
+        if ( record["path"].asString() == rasterPath )
+        {
+            found = true;
+            CHECK( record["stale"].asBool() == false );
+            CHECK( record["summary"]["modality"].asString() == "optical" );
+            CHECK( record["summary"]["band_count"].asInt() == 2 );
+            // Typed product slots flow through the summary projection.
+            CHECK( record["summary"].isMember( "band_roles" ) );
+        }
+    }
+    REQUIRE( found );
 }

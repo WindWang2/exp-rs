@@ -90,3 +90,15 @@ Capability knowledge (band roles, modality, SAR/temporal requirements,
 verification contracts) lives in `data/agent/capabilities/`; recipes support
 `presets` (`bindings.preset`) so sensor variants no longer duplicate files —
 e.g. `harness.optical_ndvi` + preset `landsat` replaces the old Landsat twin.
+
+## Harness 8.0 evidence surfaces (2026-09)
+
+| Tool / concept | Use |
+|---|---|
+| `harness:resolve_intent` (2.0) | Also returns `missing_facts` (facts to ground before trusting feasibility), `preparations` (typed safe actions for blockers), and `solution_paths` (recipes that serve the intent). |
+| `harness:explain {run_id, plan?}` | After (or during) a run: data used with resolved identity, why the method applies, what executed, verification verdicts, evidence sidecar paths, assumptions, and open unknowns. |
+| Plan `pins` | Pin dataset identity (and model id) into a plan: if the input silently changes, execution is blocked with `IDENTITY_MISMATCH` instead of running science on foreign data. |
+| Plan `cleanup` / step `role` | Declare intermediate-artifact policy and step roles (`preparation`/`analysis`/`postprocess`/`verification`) — carried into run records and evidence. |
+| Plan fingerprint | Every execute response, binding, and evidence sidecar carries `plan_fingerprint`; identical science → identical fingerprint. Cite it when reproducing a run. |
+| Evidence sidecars | Completed runs leave `<out>.verification.json` and `<out>.provenance.json` (harness run-identity when the engine wrote none) beside each artifact; `<out>.uncertainty.json` exists only where the operator declared uncertainty facts — absence is the honest answer, never fabricate one. |
+| `harness:context` 2.0 | Now also carries `asset_contexts` (typed per-dataset facts with `stale` flags — re-run `spatial:understand` when stale) and `model_contracts` (model readiness observed by the harness). |

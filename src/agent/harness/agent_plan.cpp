@@ -5,8 +5,11 @@
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/framework/algorithm_descriptor.h"
 #include "processing/framework/atomic_algorithm_registry.h"
-#include "operators/framework/rs_operator.h"
-#include "operators/framework/rs_operator_registry.h"
+
+#include <QCryptographicHash>
+#include <QString>
+
+#include <json/writer.h>
 
 #include <algorithm>
 #include <set>
@@ -112,6 +115,30 @@ bool readAgentPlan( const Json::Value &doc, AgentPlan &plan, HarnessError &error
     plan.verification = doc["verification"];
   if ( doc.isMember( "map_output" ) )
     plan.mapOutput = doc["map_output"];
+  // Harness 8.0 (Area E): identity pins + cleanup policy. Shape/vocabulary
+  // is validated structurally below; identity is checked at execute time.
+  if ( doc.isMember( "pins" ) )
+  {
+    // A malformed pins block must not silently disable the identity gate
+    // (adversarial review P1): reject it instead of dropping it.
+    if ( !doc["pins"].isObject() )
+    {
+      error = HarnessError::make( error_codes::kInvalidPlan,
+                                  "pins must be an object" );
+      return false;
+    }
+    plan.pins = doc["pins"];
+  }
+  if ( doc.isMember( "cleanup" ) )
+  {
+    if ( !doc["cleanup"].isString() )
+    {
+      error = HarnessError::make( error_codes::kInvalidPlan,
+                                  "cleanup must be a string (keep_all|keep_outputs)" );
+      return false;
+    }
+    plan.cleanup = doc["cleanup"].asString();
+  }
 
   // v1 steps used "operator_id" too (makeExecutionStep), so both versions
   // read through the same accessors.
@@ -142,6 +169,20 @@ std::vector<AgentPlanIssue> validateAgentPlan( const AgentPlan &plan )
                     : HarnessError::makeWithAction( code, summary, action, details );
     issues.push_back( std::move( issue ) );
   };
+
+  // Harness 8.0 (adversarial review P1): duplicate input slot names make
+  // identity pins ambiguous — a pinned slot must match exactly one input.
+  std::set<std::string> inputNames;
+  for ( const Json::Value &input : plan.inputs )
+  {
+    if ( !input.isObject() )
+      continue;
+    const std::string name = input.get( "name", "" ).asString();
+    if ( !name.empty() && !inputNames.insert( name ).second )
+      addIssue( error_codes::kInvalidPlan,
+                "Duplicate input slot name: " + name + " — pins cannot gate it",
+                "", true, "rename_input" );
+  }
 
   std::set<std::string> ids;
   for ( const Json::Value &step : plan.steps )
@@ -194,6 +235,69 @@ std::vector<AgentPlanIssue> validateAgentPlan( const AgentPlan &plan )
                 "Declared output references unknown step: " + from, from, true,
                 "fix_outputs" );
   }
+
+  // Harness 8.0 (Area E): closed step-role vocabulary (explainability only —
+  // roles never change execution semantics).
+  for ( const Json::Value &step : plan.steps )
+  {
+    const std::string role = step.get( "role", "" ).asString();
+    if ( role.empty() )
+      continue;
+    static const char *const kRoles[] = { "preparation", "analysis", "postprocess",
+                                          "verification" };
+    if ( !std::any_of( std::begin( kRoles ), std::end( kRoles ),
+                       [ &role ]( const char *candidate ) { return role == candidate; } ) )
+      addIssue( error_codes::kInvalidPlan,
+                "step role must be preparation|analysis|postprocess|verification: " + role,
+                stepIdOf( step ), true, "set_role" );
+  }
+
+  // Harness 8.0 (Area E): pins shape + slot membership. Identity against the
+  // resolved dataset is checked at execute time (needs entity resolution).
+  if ( plan.pins.isObject() && plan.pins.isMember( "datasets" ) )
+  {
+    const Json::Value &datasets = plan.pins["datasets"];
+    if ( !datasets.isObject() )
+    {
+      addIssue( error_codes::kInvalidPlan, "pins.datasets must be an object", "", false, "" );
+    }
+    else
+    {
+      for ( const std::string &slot : datasets.getMemberNames() )
+      {
+        const Json::Value &pin = datasets[ slot ];
+        const bool slotDeclared = std::any_of(
+          plan.inputs.begin(), plan.inputs.end(),
+          [ &slot ]( const Json::Value &input ) {
+            return input.isObject() && input.get( "name", "" ).asString() == slot;
+          } );
+        if ( !slotDeclared )
+        {
+          addIssue( error_codes::kInvalidPlan,
+                    "pins.datasets names undeclared input slot: " + slot, "", true,
+                    "fix_pins" );
+          continue;
+        }
+        if ( !pin.isObject() ||
+             !( pin.isMember( "asset_entity_id" ) || pin.isMember( "asset_id" ) ||
+                pin.isMember( "path" ) ) )
+        {
+          addIssue( error_codes::kInvalidPlan,
+                    "pin for slot '" + slot + "' needs asset_entity_id, asset_id, or path",
+                    "", true, "fix_pins" );
+        }
+      }
+    }
+  }
+  if ( plan.pins.isObject() && plan.pins.isMember( "model" ) &&
+       !plan.pins["model"].isString() )
+    addIssue( error_codes::kInvalidPlan, "pins.model must be a string ('<id>' or '<id>@<version>')",
+              "", true, "fix_pins" );
+
+  // Cleanup policy vocabulary.
+  if ( !plan.cleanup.empty() && plan.cleanup != "keep_all" && plan.cleanup != "keep_outputs" )
+    addIssue( error_codes::kInvalidPlan, "cleanup must be keep_all|keep_outputs", "", true,
+              "set_cleanup" );
 
   return issues;
 }
@@ -253,9 +357,63 @@ std::string compilePlanToWorkflowJson( const AgentPlan &plan, HarnessError &erro
   }
   def["steps"] = steps;
 
+  // Harness 8.0 (Area E): run policies ride as workflow metadata. The engine
+  // parser ignores unknown root keys today (verified), so this is additive;
+  // execution-plane consumption is a recorded cross-track follow-up.
+  Json::Value metadata( Json::objectValue );
+  metadata["plan_fingerprint"] = planFingerprint( plan );
+  if ( !plan.intent.empty() )
+    metadata["intent"] = plan.intent;
+  metadata["cleanup"] = plan.cleanup.empty() ? "keep_all" : plan.cleanup;
+  if ( plan.pins.isObject() && !plan.pins.empty() )
+    metadata["pins"] = plan.pins;
+  def["metadata"] = metadata;
+
   Json::StreamWriterBuilder builder;
   builder["indentation"] = "";
   return Json::writeString( builder, def );
+}
+
+std::string planFingerprint( const AgentPlan &plan )
+{
+  // Canonical scientific content only: identity/plan_id/timestamps and
+  // estimates are excluded so identical science yields identical bytes.
+  // Json::Value object members iterate in sorted key order, so the compact
+  // serialization is canonical without extra work.
+  Json::Value content( Json::objectValue );
+  content["intent"] = plan.intent;
+  content["inputs"] = plan.inputs;
+  Json::Value steps( Json::arrayValue );
+  for ( const Json::Value &step : plan.steps )
+  {
+    Json::Value entry( Json::objectValue );
+    entry["id"] = stepIdOf( step );
+    entry["operator_id"] = operatorIdOf( step );
+    entry["params"] = step.get( "params", Json::Value( Json::objectValue ) );
+    entry["inputs"] = step.get( "inputs", Json::Value( Json::arrayValue ) );
+    if ( step.isMember( "verification" ) )
+      entry["verification"] = step["verification"];
+    if ( step.isMember( "role" ) )
+      entry["role"] = step["role"];
+    steps.append( entry );
+  }
+  content["steps"] = steps;
+  content["outputs"] = plan.outputs;
+  content["verification"] = plan.verification;
+  // Identity/policy content (adversarial review P3): two plans that differ
+  // only in their pins or cleanup policy are different commitments.
+  if ( plan.pins.isObject() && !plan.pins.empty() )
+    content["pins"] = plan.pins;
+  if ( !plan.cleanup.empty() && plan.cleanup != "keep_all" )
+    content["cleanup"] = plan.cleanup;
+
+  Json::StreamWriterBuilder builder;
+  builder["indentation"] = "";
+  builder["commentStyle"] = "None";
+  const std::string serialized = Json::writeString( builder, content );
+  const QByteArray digest = QCryptographicHash::hash(
+    QByteArray::fromStdString( serialized ), QCryptographicHash::Sha256 );
+  return QString::fromLatin1( digest.left( 16 ).toHex() ).toStdString();
 }
 
 Json::Value estimatePlanResources( const AgentPlan &plan )
@@ -296,12 +454,16 @@ Json::Value planSummary( const AgentPlan &plan )
     summary["goal"] = plan.goal;
   if ( !plan.intent.empty() )
     summary["intent"] = plan.intent;
+  summary["plan_fingerprint"] = planFingerprint( plan );
+  summary["cleanup"] = plan.cleanup.empty() ? "keep_all" : plan.cleanup;
   Json::Value steps( Json::arrayValue );
   for ( const Json::Value &step : plan.steps )
   {
     Json::Value entry( Json::objectValue );
     entry["id"] = stepIdOf( step );
     entry["operator_id"] = operatorIdOf( step );
+    if ( step.isMember( "role" ) && step["role"].isString() )
+      entry["role"] = step["role"];
     steps.append( entry );
   }
   summary["steps"] = steps;

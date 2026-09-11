@@ -46,6 +46,10 @@ struct VerificationExpectations {
   /// When true, an uncertainty sidecar (<path>.uncertainty.json) is expected
   /// where the plan/recipe declares an uncertainty path (warning-class).
   bool requireUncertainty = false;
+
+  /// Harness 8.0 (Area G): raster band count the output must carry (0 = any).
+  /// Multimodal/classified chains break silently when a producer drops bands.
+  Json::Int expectedBandCount = 0;
 };
 
 struct VerificationCheck {
@@ -67,13 +71,20 @@ struct ArtifactVerification {
 
 /// Verifies one output artifact against the expectations: existence,
 /// openability, CRS presence (and match when pinned), dimensions (raster),
-/// finite-fraction and NoData-fraction on a bounded sample, class-value
-/// domain membership, vector non-emptiness, and provenance sidecar presence.
+/// band count (when pinned), finite-fraction and NoData-fraction on a
+/// bounded sample, class-value domain membership, vector non-emptiness, and
+/// provenance sidecar presence.
 ArtifactVerification verifyArtifact( const std::string &path,
                                      const VerificationExpectations &expectations );
 
 /// Aggregates artifact verdicts: any FAIL → FAIL; any warning →
 /// PASS_WITH_WARNINGS; else PASS.
 Verdict aggregateVerdict( const std::vector<ArtifactVerification> &artifacts );
+
+/// Harness 8.0: appends a post-verification check (evidence-write outcomes)
+/// to an already-verified artifact and recomputes the verdict from ALL
+/// checks — an error-class append flips the verdict to FAIL, keeping
+/// FAIL-never-success semantics intact.
+void appendCheck( ArtifactVerification &artifact, VerificationCheck check );
 
 } // namespace sicnu::agent::harness

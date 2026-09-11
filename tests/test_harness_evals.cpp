@@ -299,6 +299,17 @@ TEST_CASE( "Eval: optical vegetation NDVI full pipeline", "[harness][eval][ndvi]
     CHECK( status["state"].asString() == "Completed" );
     CHECK( status["status"].asString() == "completed" );
     CHECK( status["verification"]["verdict"].asString() == "PASS" );
+    // Harness 8.0 (Area F): a real engine run leaves evidence sidecars next
+    // to its artifact — run-identity provenance and the verification record.
+    REQUIRE( status.isMember( "evidence" ) );
+    REQUIRE( status["evidence"].size() >= 1 );
+    const std::string verificationSidecar =
+      status["evidence"][0]["verification_sidecar"].asString();
+    CHECK_FALSE( verificationSidecar.empty() );
+    CHECK( QFileInfo::exists( QString::fromStdString( verificationSidecar ) ) );
+    CHECK( QFileInfo::exists(
+      QString::fromStdString( status["evidence"][0]["provenance_sidecar"].asString() ) ) );
+    CHECK( status["evidence"][0]["uncertainty_declared"].asBool() == false );
 }
 
 TEST_CASE( "Eval: optical bi-temporal change full pipeline", "[harness][eval][change]" )
