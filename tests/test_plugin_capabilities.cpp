@@ -7,12 +7,25 @@
 
 #include <json/json.h>
 
+#include <filesystem>
+
 using namespace exprs;
+
+namespace {
+/// Root anchors for path-expansion fixtures: absolute on the RUNNING
+/// platform (the expansion logic rejects paths that are not anchored, so
+/// drive-letter strings would fail closed on POSIX).
+std::string anchorPath( const char *leaf )
+{
+    return ( std::filesystem::temp_directory_path() / leaf ).generic_string();
+}
+} // namespace
 
 TEST_CASE( "empty capabilities parse to deny-all defaults", "[plugin][capabilities]" )
 {
     const auto result = parsePluginAccess( Json::Value( Json::objectValue ),
-                                                 "C:/p/my-plugin", "C:/ws", "C:/t" );
+                                           anchorPath( "cap-p/my-plugin" ),
+                                           anchorPath( "cap-ws" ), anchorPath( "cap-t" ) );
     REQUIRE( result.ok() );
     REQUIRE( result.capabilities.fsReadRoots.empty() );
     REQUIRE( result.capabilities.fsWriteRoots.empty() );
@@ -32,7 +45,7 @@ TEST_CASE( "path placeholders expand to canonical roots", "[plugin][capabilities
     Json::Value access( Json::objectValue );
     access["filesystem"] = fs;
     const auto result =
-        parsePluginAccess( access, "C:/p/my-plugin", "C:/ws", "C:/t" );
+        parsePluginAccess( access, anchorPath( "cap-p/my-plugin" ), anchorPath( "cap-ws" ), anchorPath( "cap-t" ) );
     REQUIRE( result.ok() );
     REQUIRE( result.capabilities.fsReadRoots.size() == 2 );
     // Canonical form is lower-cased drive, forward slashes on Windows.
@@ -48,7 +61,7 @@ TEST_CASE( "${workspace} without a configured workspace fails closed", "[plugin]
     fs["read"].append( "${workspace}/inputs" );
     Json::Value access( Json::objectValue );
     access["filesystem"] = fs;
-    const auto result = parsePluginAccess( access, "C:/p/my-plugin", "", "C:/t" );
+    const auto result = parsePluginAccess( access, anchorPath( "cap-p/my-plugin" ), "", anchorPath( "cap-t" ) );
     REQUIRE_FALSE( result.ok() );
     // Fail closed: no grant may materialize from an unresolvable root.
     REQUIRE( result.capabilities.fsReadRoots.empty() );
@@ -82,7 +95,7 @@ TEST_CASE( "capability flags parse with typed errors", "[plugin][capabilities]" 
     caps["ui"] = true;
     caps["destructive"] = false;
 
-    const auto result = parsePluginAccess( caps, "C:/p", "C:/ws", "C:/t" );
+    const auto result = parsePluginAccess( caps, anchorPath( "cap-p" ), anchorPath( "cap-ws" ), anchorPath( "cap-t" ) );
     REQUIRE( result.ok() );
     REQUIRE( result.capabilities.network );
     REQUIRE( result.capabilities.externalProcess );
@@ -99,7 +112,7 @@ TEST_CASE( "wrong-typed capabilities are validation errors", "[plugin][capabilit
     Json::Value caps( Json::objectValue );
     caps["network"] = "yes";
     caps["gpu"] = 3;
-    const auto result = parsePluginAccess( caps, "C:/p", "C:/ws", "C:/t" );
+    const auto result = parsePluginAccess( caps, anchorPath( "cap-p" ), anchorPath( "cap-ws" ), anchorPath( "cap-t" ) );
     REQUIRE_FALSE( result.ok() );
     REQUIRE( result.errors.size() == 2 );
 }
@@ -114,7 +127,7 @@ TEST_CASE( "quota manifest parsing warns on junk and keeps ceilings for clamping
     quotas["maxRequestConcurrency"] = 32;       // above ceiling -> clamped
     quotas["maxResponseBytes"] = Json::Value( Json::Int64( 1024 ) * 1024 * 1024 ); // above ceiling -> clamped
     quotas["requestDeadlineMs"] = 60000;        // legal, below default ceiling
-    quotas["workerMemoryBytes"] = 512LL * 1024LL * 1024LL;
+    quotas["workerMemoryBytes"] = static_cast<Json::Int64>( 512LL * 1024LL * 1024LL );
     quotas["workerCpuRatePercent"] = 50;
     quotas["maxChildProcesses"] = 2;
     quotas["gpuHint"] = "cuda";
@@ -157,4 +170,24 @@ TEST_CASE( "quota environment defaults parse", "[plugin][quotas]" )
     REQUIRE( quota.maxResponseBytes > 0 );
     REQUIRE( quota.workerCpuRatePercent >= 0 );
     REQUIRE( quota.workerCpuRatePercent <= 100 );
+}
+
+TEST_CASE( "pathIsWithinRoot contains and rejects exactly", "[plugin][capabilities]" )
+{
+    namespace fs = std::filesystem;
+    const std::string root = ( fs::temp_directory_path() / "cap-within" ).generic_string();
+    std::string resolved;
+
+    // Direct containment (including the root itself and nested paths).
+    REQUIRE( pathIsWithinRoot( root, root, resolved ) );
+    REQUIRE( pathIsWithinRoot( root + "/nested/output", root, resolved ) );
+    // Traversal that stays inside is fine; escaping is not.
+    REQUIRE( pathIsWithinRoot( root + "/a/../b", root, resolved ) );
+    REQUIRE_FALSE( pathIsWithinRoot( root + "/../escape", root, resolved ) );
+    REQUIRE_FALSE( pathIsWithinRoot( "/tmp", root, resolved ) );
+    // Sibling prefixes must not match ("cap-within-2" shares a prefix).
+    REQUIRE_FALSE( pathIsWithinRoot( root + "-2/output", root, resolved ) );
+    // Empty inputs contain nothing (fail closed).
+    REQUIRE_FALSE( pathIsWithinRoot( "", root, resolved ) );
+    REQUIRE_FALSE( pathIsWithinRoot( root, "", resolved ) );
 }

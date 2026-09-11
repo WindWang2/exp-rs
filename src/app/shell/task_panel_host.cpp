@@ -239,6 +239,9 @@ Json::Value TaskPanelHost::formValues() const
 void TaskPanelHost::setFormValues( const Json::Value &v )
 {
   m_form->setValues( v );
+  // setValues is signal-silent, so the debounced async-check pass never
+  // fires for restored parameters — force one so path checks stay current.
+  m_form->runAsyncChecksNow();
 }
 
 bool TaskPanelHost::loadResultToMap() const

@@ -1,9 +1,11 @@
 #include "data_manager_panel.h"
 #include "widgets/rs_empty_state_widget.h"
+#include "preview/asset_preview_service.h"
 
 #include <QApplication>
 #include <QClipboard>
 #include <QColor>
+#include <QFileInfo>
 #include <QGuiApplication>
 #include <QHeaderView>
 #include <QIcon>
@@ -11,6 +13,7 @@
 #include <QMenu>
 #include <QMessageBox>
 #include <QPainter>
+#include <QPixmap>
 #include <QSize>
 #include <QSplitter>
 #include <QStackedWidget>
@@ -18,10 +21,14 @@
 #include <QStyledItemDelegate>
 #include <QStyleOptionViewItem>
 #include <QJsonDocument>
+#include <QLineEdit>
 #include <QTextBrowser>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QTreeWidgetItemIterator>
+
+#include <QBrush>
+#include <QSet>
 #include <QVBoxLayout>
 
 #include <variant>
@@ -48,6 +55,19 @@ constexpr int kDisplayNameRole = Qt::UserRole + 2;
 constexpr int kKindLabelRole = Qt::UserRole + 3;
 constexpr int kStatusLabelRole = Qt::UserRole + 4;
 constexpr int kStatusColorRole = Qt::UserRole + 5;
+
+// Workbench 8.0 (package D) scale bounds:
+// - Standalone asset rows rendered per refresh when no filter narrows them;
+//   past the cap a truthful truncation sentinel names the exact totals.
+constexpr int kMaxStandaloneRows = 20000;
+// - Collections with more children than this populate on first expand
+//   (lazy detail loading) instead of eagerly per refresh.
+constexpr int kLazyChildThreshold = 50;
+// - Marks the truncation sentinel row (tests rely on the role, never on
+//   display text).
+constexpr int kSentinelRole = Qt::UserRole + 7;
+// - Marks a collection row whose children deferred to first expand.
+constexpr int kLazyPopulateRole = Qt::UserRole + 8;
 // kTemporalCollectionIdRole used to collide with kDisplayNameRole (both
 // UserRole+2, ported from #722): configureNameCell stamps the display name
 // on EVERY row, so every asset row read as a "temporal id" whose UUID parse
@@ -491,7 +511,21 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
 
   m_treeStack = new QStackedWidget( this );
   m_treeStack->setObjectName( QStringLiteral( "dataManagerTreeStack" ) );
-  m_treeStack->addWidget( m_tree ); // Index 0: Tree
+
+  // Workbench 8.0: filter box above the tree (incremental, coalesced).
+  // The container keeps treeStack index 0 = "catalog present" semantics.
+  auto *treePane = new QWidget( this );
+  auto *treePaneLay = new QVBoxLayout( treePane );
+  treePaneLay->setContentsMargins( 0, 0, 0, 0 );
+  treePaneLay->setSpacing( 2 );
+  m_filterEdit = new QLineEdit( treePane );
+  m_filterEdit->setObjectName( QStringLiteral( "dataManagerFilter" ) );
+  m_filterEdit->setPlaceholderText( tr( "按名称 / 路径 / ID 过滤…" ) );
+  m_filterEdit->setClearButtonEnabled( true );
+  m_filterEdit->setAccessibleName( tr( "过滤数据资产" ) );
+  treePaneLay->addWidget( m_filterEdit );
+  treePaneLay->addWidget( m_tree, 1 );
+  m_treeStack->addWidget( treePane ); // Index 0: Tree (+ filter)
 
   m_emptyState = new RsEmptyStateWidget(
       QStringLiteral( "d_t_b_se" ),
@@ -515,6 +549,19 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   m_detailTitle->setStyleSheet( QStringLiteral( "font-weight:600;" ) );
   detailLay->addWidget( m_detailTitle );
 
+  // Workbench 8.0: lazy bounded preview above the metadata text. Hidden
+  // until a raster/vector asset with a readable local source is selected;
+  // renders through AssetPreviewService on the bounded scan pool.
+  m_previewLabel = new QLabel( detailHost );
+  m_previewLabel->setObjectName( QStringLiteral( "dataManagerPreview" ) );
+  m_previewLabel->setAlignment( Qt::AlignCenter );
+  m_previewLabel->setMinimumHeight( 120 );
+  m_previewLabel->setFrameStyle( QFrame::StyledPanel | QFrame::Sunken );
+  m_previewLabel->hide();
+  detailLay->addWidget( m_previewLabel );
+
+  m_previewService = new sicnu::app::AssetPreviewService( this );
+
   m_detailView = new QTextBrowser( detailHost );
   m_detailView->setObjectName( QStringLiteral( "dataManagerDetailView" ) );
   m_detailView->setOpenExternalLinks( false );
@@ -537,21 +584,59 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
            &DataManagerPanel::onContextMenu );
   connect( m_tree, &QTreeWidget::itemSelectionChanged, this,
            &DataManagerPanel::onSelectionChanged );
+  connect( m_tree, &QTreeWidget::itemExpanded, this,
+           &DataManagerPanel::onItemExpanded );
+
+  // Workbench 8.0: filter box — coalesced trailing refresh like #704.
+  m_filterDebounce = new QTimer( this );
+  m_filterDebounce->setSingleShot( true );
+  m_filterDebounce->setInterval( 250 );
+  connect( m_filterDebounce, &QTimer::timeout, this, &DataManagerPanel::refresh );
+  connect( m_filterEdit, &QLineEdit::textChanged, this,
+           [this] { m_filterDebounce->start(); } );
 
   if ( m_dataManager )
   {
+    // Workbench 8.0: the light catalog index mirrors the manager one signal
+    // at a time (cheap incremental maintenance); the coalesced rebuild then
+    // renders from the index instead of re-fetching every full snapshot.
+    connect( m_dataManager, &sicnu::data::DataManager::assetAdded, this,
+             [this]( sicnu::data::AssetId id )
+             {
+               m_catalogIndex.addOrUpdateAsset( id, m_dataManager );
+               scheduleCoalescedRefresh();
+             } );
+    connect( m_dataManager, &sicnu::data::DataManager::assetChanged, this,
+             [this]( sicnu::data::AssetId id )
+             {
+               m_catalogIndex.addOrUpdateAsset( id, m_dataManager );
+               scheduleCoalescedRefresh();
+             } );
+    connect( m_dataManager, &sicnu::data::DataManager::assetRemoved, this,
+             [this]( sicnu::data::AssetId id )
+             {
+               m_catalogIndex.removeAsset( id );
+               scheduleCoalescedRefresh();
+             } );
     // #704: batch imports emit one signal per asset; coalesce to a single
     // trailing rebuild instead of N full tree rebuilds on the GUI thread.
-    connect( m_dataManager, &sicnu::data::DataManager::assetAdded, this,
-             &DataManagerPanel::scheduleCoalescedRefresh );
-    connect( m_dataManager, &sicnu::data::DataManager::assetChanged, this,
-             &DataManagerPanel::scheduleCoalescedRefresh );
-    connect( m_dataManager, &sicnu::data::DataManager::assetRemoved, this,
+    connect( m_dataManager, &sicnu::data::DataManager::assetAboutToUnload, this,
              &DataManagerPanel::scheduleCoalescedRefresh );
     connect( m_dataManager, &sicnu::data::DataManager::collectionAdded, this,
-             &DataManagerPanel::scheduleCoalescedRefresh );
+             [this]( sicnu::data::CollectionId )
+             {
+               // Collection lifecycle events are rare: a full light rebuild
+               // heals any index drift (membership is read from the
+               // authoritative snapshots at render time regardless).
+               m_catalogIndex.rebuild( m_dataManager );
+               scheduleCoalescedRefresh();
+             } );
     connect( m_dataManager, &sicnu::data::DataManager::collectionRemoved, this,
-             &DataManagerPanel::scheduleCoalescedRefresh );
+             [this]( sicnu::data::CollectionId )
+             {
+               m_catalogIndex.rebuild( m_dataManager );
+               scheduleCoalescedRefresh();
+             } );
     connect( m_dataManager, &sicnu::data::DataManager::temporalCollectionAdded, this,
              &DataManagerPanel::scheduleCoalescedRefresh );
     connect( m_dataManager, &sicnu::data::DataManager::temporalCollectionChanged, this,
@@ -582,6 +667,9 @@ void DataManagerPanel::applyHelpTips()
 
 int DataManagerPanel::rowCount() const
 {
+  // Top-level rows INCLUDING the truncation sentinel (when rendered) —
+  // Workbench 8.0 caps standalone rows, so this count is a rendered-row
+  // count, never a catalog total (use the index / sentinel text for those).
   return m_tree->topLevelItemCount();
 }
 
@@ -696,11 +784,107 @@ void DataManagerPanel::addAssetRow( QTreeWidgetItem *parent,
   item->setData( 0, kAssetIdRole, snapshot.id().toString() );
   if ( snapshot.state() == sicnu::data::AssetState::Missing )
   {
+    item->setToolTip(
+      0, tr( "%1\n状态: 源缺失 — 可通过重定位恢复\n%2" )
+           .arg( snapshot.displayName(),
+                 snapshot.source().canonicalSource ) );
+  }
+}
+
+void DataManagerPanel::addIndexRow( QTreeWidgetItem *parent,
+                                    const sicnu::AssetCatalogEntry &entry )
+{
+  // Light-row variant of addAssetRow: same cell layout from the catalog
+  // index (no per-row snapshot copy). The band-count nuance of the kind
+  // label degrades to the plain kind word — tests pin status/persistence
+  // labels, not band counts.
+  auto *item = parent ? new QTreeWidgetItem( parent )
+                      : new QTreeWidgetItem( m_tree );
+  const QString kindLabel = [&]
+  {
+    switch ( entry.kind )
+    {
+      case sicnu::data::AssetKind::Raster:
+        return tr( "栅格" );
+      case sicnu::data::AssetKind::Vector:
+        return tr( "矢量" );
+      case sicnu::data::AssetKind::RemoteMap:
+        return tr( "远程地图" );
+      case sicnu::data::AssetKind::VirtualRaster:
+        return tr( "虚拟栅格" );
+    }
+    return tr( "资产" );
+  }();
+  const QString statusLabel = statusText( entry.state );
+  configureNameCell( item, entry.displayName, kindLabel, kindIcon( entry.kind ),
+                     statusLabel, statusColor( entry.state ), entry.source );
+  item->setText( 1, persistenceText( entry.persistence ) );
+  item->setText( 2, QString::number( referenceCount( entry.id ) ) );
+  item->setData( 0, kAssetIdRole, entry.id.toString() );
+  if ( entry.state == sicnu::data::AssetState::Missing )
+  {
     item->setToolTip( 0,
                       tr( "%1\n状态: 源缺失 — 可通过重定位恢复\n%2" )
-                        .arg( snapshot.displayName(),
-                              snapshot.source().canonicalSource ) );
+                        .arg( entry.displayName, entry.source ) );
   }
+}
+
+void DataManagerPanel::addSentinelRow( QTreeWidgetItem *parent, const QString &text )
+{
+  // Truthful truncation: names the exact totals, never selectable, never
+  // reads as an asset (no asset-id role).
+  auto *item = parent ? new QTreeWidgetItem( parent )
+                      : new QTreeWidgetItem( m_tree );
+  item->setText( 0, text );
+  item->setFlags( Qt::ItemIsEnabled );
+  item->setData( 0, kSentinelRole, true );
+  item->setForeground( 0, QBrush( QColor( 0x8a, 0x8f, 0x98 ) ) );
+}
+
+void DataManagerPanel::populateCollectionChildren(
+  QTreeWidgetItem *collectionItem, const sicnu::data::CollectionSnapshot &collection )
+{
+  if ( !collectionItem )
+    return;
+  if ( collectionItem->childCount() > 0 )
+    return; // already populated
+  const QString filter = m_filterEdit ? m_filterEdit->text() : QString();
+  // Membership from the authoritative collection snapshot (review A2);
+  // per-child text filtering via the shared light-entry rule.
+  int matchedInCollection = 0;
+  int rendered = 0;
+  for ( const sicnu::data::AssetId &childId : collection.childAssetIds )
+  {
+    const int idx = m_catalogIndex.indexOfAsset( childId );
+    const sicnu::AssetCatalogEntry *entry =
+      idx >= 0 ? &m_catalogIndex.entries()[idx] : nullptr;
+    if ( entry && !sicnu::AssetCatalogIndex::matchesFilter( *entry, filter ) )
+      continue;
+    ++matchedInCollection;
+    if ( rendered >= m_standaloneRowCap )
+      continue; // keep counting so the sentinel totals stay truthful
+    if ( entry )
+    {
+      addIndexRow( collectionItem, *entry );
+      ++rendered;
+    }
+    else
+    {
+      // Index lag (e.g. membership changed in the same burst) — fall back
+      // to the full snapshot path so the child never silently vanishes.
+      const std::optional<sicnu::data::AssetSnapshot> snapshot =
+        m_dataManager ? m_dataManager->asset( childId ) : std::nullopt;
+      if ( snapshot.has_value() )
+        addAssetRow( collectionItem, *snapshot );
+      ++rendered;
+    }
+  }
+  if ( matchedInCollection > rendered )
+    addSentinelRow( collectionItem,
+                    tr( "仅显示前 %1 项 / 共 %2 项 — 使用过滤缩小范围" )
+                      .arg( rendered )
+                      .arg( matchedInCollection ) );
+  collectionItem->setData( 0, kLazyPopulateRole, false );
 }
 
 void DataManagerPanel::scheduleCoalescedRefresh()
@@ -711,9 +895,39 @@ void DataManagerPanel::scheduleCoalescedRefresh()
     refresh();
 }
 
+void DataManagerPanel::onItemExpanded( QTreeWidgetItem *item )
+{
+  // Workbench 8.0: deferred collection children populate on first expand.
+  if ( !item || !item->data( 0, kLazyPopulateRole ).toBool() )
+    return;
+  if ( item->childCount() > 0 )
+    return; // populated by the expansion-restore path before the signal
+  const auto collectionId =
+    sicnu::data::CollectionId::fromString( item->data( 0, kCollectionIdRole ).toString() );
+  if ( !collectionId || !m_dataManager )
+    return;
+  const std::optional<sicnu::data::CollectionSnapshot> collection =
+    m_dataManager->collection( *collectionId );
+  if ( collection.has_value() )
+    populateCollectionChildren( item, *collection );
+}
+
 void DataManagerPanel::refresh()
 {
   const QString previouslySelected = selectedAssetId().toString();
+
+  // Workbench 8.0: preserve collection expansion across rebuilds.
+  QSet<QString> expandedCollections;
+  {
+    QTreeWidgetItemIterator it( m_tree );
+    while ( *it )
+    {
+      const QString cid = ( *it )->data( 0, kCollectionIdRole ).toString();
+      if ( !cid.isEmpty() && ( *it )->isExpanded() )
+        expandedCollections.insert( cid );
+      ++it;
+    }
+  }
 
   m_tree->clear();
   if ( !m_dataManager )
@@ -722,31 +936,109 @@ void DataManagerPanel::refresh()
     return;
   }
 
+  // Workbench 8.0: first refresh builds the light catalog index; afterwards
+  // the per-asset signals maintain it incrementally, so rebuilds below
+  // render from the index instead of re-fetching every full snapshot.
+  if ( !m_indexBuilt )
+  {
+    m_catalogIndex.rebuild( m_dataManager );
+    m_indexBuilt = true;
+  }
+
+  // One filter pass over light entries: O(assets) comparisons, no snapshot
+  // copies. Heavy per-asset data stays a lazy DataManager query.
+  const QString filter = m_filterEdit ? m_filterEdit->text() : QString();
+  const QVector<int> filtered = m_catalogIndex.filterIndices( filter );
+  const bool filtering = !filter.trimmed().isEmpty();
+
+  // Collection membership comes from the AUTHORITATIVE collection snapshot
+  // (childAssetIds): DataManager::addChildToCollection emits no per-asset
+  // signal, so the index cannot mirror membership without drifting (A2).
+  // The index still carries membership-agnostic entry data (name/source/
+  // state) for filtering and standalone rendering.
+  QVector<sicnu::data::CollectionSnapshot> collectionSnapshots;
+  QSet<QString> collectionChildIds;
   for ( const sicnu::data::CollectionId &collectionId : m_dataManager->collections() )
   {
     const std::optional<sicnu::data::CollectionSnapshot> collection =
       m_dataManager->collection( collectionId );
     if ( !collection.has_value() )
       continue;
+    collectionSnapshots.append( *collection );
+    for ( const sicnu::data::AssetId &childId : collection->childAssetIds )
+      collectionChildIds.insert( childId.toString() );
+  }
+
+  // Standalone = filtered entries the collections do NOT claim.
+  QVector<int> standalone;
+  for ( const int idx : filtered )
+  {
+    if ( !collectionChildIds.contains( m_catalogIndex.entries()[idx].id.toString() ) )
+      standalone.append( idx );
+  }
+
+  for ( const sicnu::data::CollectionSnapshot &collection : collectionSnapshots )
+  {
+    // Matching children by the SHARED filter rule over light entries.
+    QVector<int> bucket;
+    for ( const sicnu::data::AssetId &childId : collection.childAssetIds )
+    {
+      const int idx = m_catalogIndex.indexOfAsset( childId );
+      if ( idx >= 0
+           && sicnu::AssetCatalogIndex::matchesFilter(
+             m_catalogIndex.entries()[idx], filter ) )
+        bucket.append( idx );
+    }
+    const bool nameMatches =
+      !filtering || collection.displayName.contains( filter.trimmed(), Qt::CaseInsensitive );
+    // With an active filter a collection renders only when it (or a child)
+    // matches — unmatched collections disappear instead of hiding matches.
+    if ( filtering && !nameMatches && bucket.isEmpty() )
+      continue;
 
     auto *collectionItem = new QTreeWidgetItem( m_tree );
     configureNameCell( collectionItem,
-                       collection->displayName,
+                       collection.displayName,
                        tr( "集合" ),
                        appIcon( "d_t_b_se" ),
                        tr( "集合" ),
                        QColor( 0x09, 0x69, 0xda ) ); // blue stripe for collections
-    collectionItem->setText( 2, QString::number( collection->childAssetIds.size() ) );
-    collectionItem->setData( 0, kCollectionIdRole, collection->id.toString() );
+    collectionItem->setText( 2, QString::number( collection.childAssetIds.size() ) );
+    collectionItem->setData( 0, kCollectionIdRole, collection.id.toString() );
 
-    for ( const sicnu::data::AssetId &childId : collection->childAssetIds )
+    // Lazy detail loading: huge collections (temporal scene catalogs with
+    // 100k+ children) populate on first expand; small ones populate now so
+    // the default-expanded layout does not change for normal catalogs.
+    const bool lazy = bucket.size() > kLazyChildThreshold;
+    if ( lazy )
     {
-      const std::optional<sicnu::data::AssetSnapshot> snapshot =
-        m_dataManager->asset( childId );
-      if ( snapshot.has_value() )
-        addAssetRow( collectionItem, *snapshot );
+      // Deferred: the expander shows without children; expanding (by the
+      // user or the expansion restore below) triggers the populate.
+      collectionItem->setChildIndicatorPolicy( QTreeWidgetItem::ShowIndicator );
+      collectionItem->setData( 0, kLazyPopulateRole, true );
+      if ( expandedCollections.contains( collection.id.toString() ) )
+      {
+        populateCollectionChildren( collectionItem, collection );
+        collectionItem->setExpanded( true );
+      }
     }
-    collectionItem->setExpanded( true );
+    else
+    {
+      int rendered = 0;
+      for ( const int idx : bucket )
+      {
+        if ( rendered >= m_standaloneRowCap )
+          break;
+        addIndexRow( collectionItem, m_catalogIndex.entries()[idx] );
+        ++rendered;
+      }
+      if ( bucket.size() > rendered )
+        addSentinelRow( collectionItem,
+                        tr( "仅显示前 %1 项 / 共 %2 项 — 使用过滤缩小范围" )
+                          .arg( rendered )
+                          .arg( bucket.size() ) );
+      collectionItem->setExpanded( true );
+    }
   }
 
   // Temporal Collections: workspace records (first-class catalog entities).
@@ -773,11 +1065,21 @@ void DataManagerPanel::refresh()
     temporalGroup->setExpanded( true );
   }
 
-  for ( const sicnu::data::AssetSnapshot &snapshot : m_dataManager->assets() )
+  // Standalone assets: bounded rendering with truthful truncation.
   {
-    if ( snapshot.parentCollectionId().has_value() )
-      continue;
-    addAssetRow( nullptr, snapshot );
+    int rendered = 0;
+    for ( const int idx : standalone )
+    {
+      if ( rendered >= m_standaloneRowCap )
+        break;
+      addIndexRow( nullptr, m_catalogIndex.entries()[idx] );
+      ++rendered;
+    }
+    if ( standalone.size() > rendered )
+      addSentinelRow( nullptr,
+                      tr( "仅显示前 %1 项 / 共 %2 项资产 — 使用过滤缩小范围" )
+                        .arg( rendered )
+                        .arg( standalone.size() ) );
   }
 
   if ( !previouslySelected.isEmpty() )
@@ -786,12 +1088,19 @@ void DataManagerPanel::refresh()
     if ( restored )
       selectAsset( *restored );
   }
-  const bool hasData = m_dataManager &&
-    ( !m_dataManager->assets().isEmpty() || !m_dataManager->collections().isEmpty() );
+  const bool hasData =
+    m_catalogIndex.totalAssets() > 0 || !m_dataManager->collections().isEmpty()
+    || !m_dataManager->temporalCollections().isEmpty();
   if ( m_treeStack )
     m_treeStack->setCurrentIndex( hasData ? 0 : 1 );
 
   onSelectionChanged();
+}
+
+void DataManagerPanel::setStandaloneRowCap( int maxRows )
+{
+  m_standaloneRowCap = qBound( 1, maxRows, kMaxStandaloneRows );
+  refresh();
 }
 
 void DataManagerPanel::onItemActivated( QTreeWidgetItem *item, int column )
@@ -1166,11 +1475,14 @@ void DataManagerPanel::showAssetDetails( const sicnu::data::AssetSnapshot &snaps
     + formatStructure( snapshot.structure() );
 
   m_detailView->setHtml( wrapHtml( body ) );
+  requestDetailPreview( snapshot );
 }
 
 void DataManagerPanel::showMultiSelectionDetails(
   const QList<sicnu::data::AssetId> &ids )
 {
+  if ( m_previewLabel )
+    m_previewLabel->hide(); // previews are per-asset only (review A11)
   if ( m_detailTitle )
     m_detailTitle->setText( tr( "多选 — %1 项" ).arg( ids.size() ) );
 
@@ -1221,6 +1533,8 @@ void DataManagerPanel::showMultiSelectionDetails(
 void DataManagerPanel::showCollectionDetails(
   const sicnu::data::CollectionSnapshot &collection )
 {
+  if ( m_previewLabel )
+    m_previewLabel->hide(); // previews are per-asset only (review A11)
   if ( m_detailTitle )
     m_detailTitle->setText( tr( "集合元信息 — %1" ).arg( collection.displayName ) );
 
@@ -1278,6 +1592,8 @@ void DataManagerPanel::clearDetails( const QString &message )
 {
   if ( m_detailTitle )
     m_detailTitle->setText( tr( "元信息" ) );
+  if ( m_previewLabel )
+    m_previewLabel->hide();
   if ( m_detailView )
   {
     m_detailView->setHtml( wrapHtml(
@@ -1286,6 +1602,64 @@ void DataManagerPanel::clearDetails( const QString &message )
                             ? tr( "选择数据资产或集合以查看元信息。" )
                             : message ) ) ) );
   }
+}
+
+void DataManagerPanel::requestDetailPreview( const sicnu::data::AssetSnapshot &snapshot )
+{
+  if ( !m_previewLabel || !m_previewService )
+    return;
+
+  const QString source = snapshot.source().canonicalSource;
+  const bool localFile = !source.isEmpty() && !source.contains( QStringLiteral( "://" ) )
+                         && QFileInfo::exists( source );
+  const sicnu::data::AssetKind kind = snapshot.kind();
+  if ( !localFile || ( kind != sicnu::data::AssetKind::Raster
+                       && kind != sicnu::data::AssetKind::Vector ) )
+  {
+    // Honest absence: remote maps, virtual rasters and unreadable sources
+    // have no cheap preview — the pane simply stays hidden.
+    m_previewLabel->hide();
+    return;
+  }
+
+  m_previewLabel->show();
+  m_previewLabel->setText( tr( "预览加载中…" ) );
+  m_previewLabel->setPixmap( QPixmap() );
+  m_previewSource = source;
+
+  sicnu::app::AssetPreviewService::Request request;
+  request.path = source;
+  request.kind = kind == sicnu::data::AssetKind::Raster
+                   ? sicnu::app::AssetPreviewService::Kind::Raster
+                   : sicnu::app::AssetPreviewService::Kind::Vector;
+  request.size = QSize( 280, 200 );
+  m_previewService->requestPreview(
+    request, this, [this]( const sicnu::app::AssetPreviewService::Result &result )
+    {
+      // The service guarantees "latest request wins" for THIS panel, but a
+      // collection/multi-selection detour hides the pane without issuing a
+      // superseding request — verify the result still belongs to what the
+      // pane currently shows (review A11).
+      if ( !m_previewLabel || m_previewLabel->isHidden() )
+        return;
+      if ( result.path != m_previewSource )
+        return;
+      if ( result.status == sicnu::app::PreviewRender::Status::Ready
+           && !result.image.isNull() )
+      {
+        m_previewLabel->setText( QString() );
+        m_previewLabel->setPixmap( QPixmap::fromImage( result.image ) );
+        m_previewLabel->setAccessibleName(
+          tr( "数据资产预览 — %1" ).arg( result.path ) );
+      }
+      else
+      {
+        m_previewLabel->setPixmap( QPixmap() );
+        m_previewLabel->setText( result.error.isEmpty()
+                                   ? tr( "预览不可用" )
+                                   : result.error );
+      }
+    } );
 }
 
 sicnu::data::AssetId DataManagerPanel::assetForItem( QTreeWidgetItem *item ) const

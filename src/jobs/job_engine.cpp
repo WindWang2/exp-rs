@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
 #include <utility>
 
 namespace sicnu::jobs {
@@ -111,10 +112,33 @@ void JobEngine::shutdown()
       }
     }
 
-    while ( !m_queue.empty() )
+    while ( m_queuedCount > 0 )
     {
-      const std::string qId = m_queue.front();
-      m_queue.pop_front();
+      // Drain in (priority, FIFO) order, exclusives last by their submission
+      // FIFO. Order among Cancelled notifications is not contractual — every
+      // consumer dedups terminal transitions.
+      std::string qId;
+      if ( !m_exclusiveQueue.empty() )
+      {
+        qId = m_exclusiveQueue.front();
+        m_exclusiveQueue.pop_front();
+      }
+      else if ( !m_queueBuckets.empty() )
+      {
+        auto bucket = m_queueBuckets.begin();
+        qId = bucket->second.front();
+        bucket->second.pop_front();
+        if ( bucket->second.empty() )
+          m_queueBuckets.erase( bucket );
+      }
+      else
+      {
+        // m_queuedCount desynced from the buckets (cannot happen — every
+        // mutation site is symmetric); stop instead of dereferencing end().
+        m_queuedCount = 0;
+        break;
+      }
+      m_queuedCount -= 1;
       auto it = m_jobs.find( qId );
       if ( it != m_jobs.end() && it->second.state == JobState::Queued )
       {
@@ -263,7 +287,7 @@ std::string JobEngine::submitWithId( JobRequest req, const std::string &requeste
         body.onCancel = std::move( onCancel );
         m_jobBodies.emplace( id, std::move( body ) );
       }
-      m_queue.push_back( id );
+      enqueueJobLocked( id, rec.request );
 
       // #798: a worker-originated submit means a job body is about to wait
       // for this sub-job. Raise transient capacity (bounded) and respawn so a
@@ -304,9 +328,7 @@ bool JobEngine::cancel( const std::string &jobId )
         return false;
       case JobState::Queued:
       {
-        auto qit = std::find( m_queue.begin(), m_queue.end(), jobId );
-        if ( qit != m_queue.end() )
-          m_queue.erase( qit );
+        dequeueJobLocked( jobId, rec.request );
         rec.state = JobState::Cancelled;
         rec.finishedAtMs = nowUnixMs();
         rec.statusMessage = "Cancelled";
@@ -506,7 +528,7 @@ void JobEngine::waitUntilIdleForTests( int timeoutMs )
   std::unique_lock<std::mutex> lock( m_mutex );
   const auto deadline = std::chrono::steady_clock::now()
                         + std::chrono::milliseconds( timeoutMs );
-  while ( !( m_queue.empty() && m_running == 0 ) )
+  while ( !( m_queuedCount == 0 && m_running == 0 ) )
   {
     if ( m_cv.wait_until( lock, deadline ) == std::cv_status::timeout )
     {
@@ -537,7 +559,9 @@ void JobEngine::shutdownForTests()
 
   {
     std::lock_guard<std::mutex> lock( m_mutex );
-    m_queue.clear();
+    m_queueBuckets.clear();
+    m_exclusiveQueue.clear();
+    m_queuedCount = 0;
     m_jobs.clear();
     m_cancelFlags.clear();
     m_jobBodies.clear();
@@ -574,6 +598,41 @@ void JobEngine::ensureWorkersLocked()
   {
     m_workers.emplace_back( [this, gen] { workerLoop( gen ); } );
   }
+}
+
+void JobEngine::enqueueJobLocked( const std::string &jobId, const JobRequest &req )
+{
+  if ( req.exclusive )
+    m_exclusiveQueue.push_back( jobId );
+  else
+    m_queueBuckets[req.priority].push_back( jobId );
+  m_queuedCount += 1;
+}
+
+bool JobEngine::dequeueJobLocked( const std::string &jobId, const JobRequest &req )
+{
+  if ( req.exclusive )
+  {
+    auto it = std::find( m_exclusiveQueue.begin(), m_exclusiveQueue.end(), jobId );
+    if ( it == m_exclusiveQueue.end() )
+      return false;
+    m_exclusiveQueue.erase( it );
+  }
+  else
+  {
+    auto bucket = m_queueBuckets.find( req.priority );
+    if ( bucket == m_queueBuckets.end() )
+      return false;
+    auto &dq = bucket->second;
+    auto it = std::find( dq.begin(), dq.end(), jobId );
+    if ( it == dq.end() )
+      return false;
+    dq.erase( it );
+    if ( dq.empty() )
+      m_queueBuckets.erase( bucket );
+  }
+  m_queuedCount -= 1;
+  return true;
 }
 
 void JobEngine::workerLoop( uint64_t gen )
@@ -617,42 +676,33 @@ std::optional<std::string> JobEngine::tryPickJobLocked()
 {
   // Exclusive policy: drain in-flight work, then run exclusive alone.
   // See class comment on JobEngine.
-  if ( m_queue.empty() || m_exclusiveRunning )
+  if ( m_queuedCount == 0 || m_exclusiveRunning )
     return std::nullopt;
 
-  bool exclusiveQueued = false;
-  for ( const auto &id : m_queue )
-  {
-    auto it = m_jobs.find( id );
-    if ( it != m_jobs.end() && it->second.state == JobState::Queued && it->second.request.exclusive )
-    {
-      exclusiveQueued = true;
-      break;
-    }
-  }
-
-  if ( exclusiveQueued )
+  if ( !m_exclusiveQueue.empty() )
   {
     if ( m_running > 0 )
       return std::nullopt; // drain before exclusive
 
-    for ( auto it = m_queue.begin(); it != m_queue.end(); ++it )
+    // Reviewed P3 hardening: a stale entry (unreachable today — cancel
+    // mutates record+buckets in one critical section) is DROPPED and the
+    // scan continues instead of stalling the exclusive queue behind a
+    // zombie head.
+    while ( !m_exclusiveQueue.empty() )
     {
-      auto jit = m_jobs.find( *it );
+      const std::string id = m_exclusiveQueue.front();
+      m_exclusiveQueue.pop_front();
+      m_queuedCount -= 1;
+      auto jit = m_jobs.find( id );
       if ( jit == m_jobs.end() || jit->second.state != JobState::Queued )
         continue;
-      if ( !jit->second.request.exclusive )
-        continue;
-
-      const std::string id = *it;
-      m_queue.erase( it );
       jit->second.state = JobState::Running;
       jit->second.startedAtMs = nowUnixMs();
       m_running += 1;
       m_exclusiveRunning = true;
       return id;
     }
-    return std::nullopt;
+    // The queue held only stale ids: fall through to the non-exclusive scan.
   }
 
   if ( m_running >= m_maxWorkers + m_transientAllowance )
@@ -662,33 +712,30 @@ std::optional<std::string> JobEngine::tryPickJobLocked()
   // admission count can exceed the worker pool, so several jobs may sit in
   // this queue. Pick the lowest priority value (High first), FIFO within the
   // same priority, instead of blind front-pop — otherwise a late-submitted
-  // High task runs behind everything staged before it.
-  auto bestIt = m_queue.end();
-  int bestPriority = 0;
-  for ( auto it = m_queue.begin(); it != m_queue.end(); ++it )
+  // High task runs behind everything staged before it. The priority buckets
+  // (8.0) make this O(log P) instead of a full-queue scan per pick. Stale
+  // entries are dropped and the scan advances (reviewed P3 hardening).
+  while ( !m_queueBuckets.empty() )
   {
-    auto jit = m_jobs.find( *it );
+    auto bucket = m_queueBuckets.begin();
+    auto &dq = bucket->second;
+    const std::string id = dq.front();
+    dq.pop_front();
+    if ( dq.empty() )
+      m_queueBuckets.erase( bucket );
+    m_queuedCount -= 1;
+
+    auto jit = m_jobs.find( id );
     if ( jit == m_jobs.end() || jit->second.state != JobState::Queued )
       continue;
-    const int prio = jit->second.request.priority;
-    if ( bestIt == m_queue.end() || prio < bestPriority )
-    {
-      bestIt = it;
-      bestPriority = prio;
-    }
+    jit->second.state = JobState::Running;
+    jit->second.startedAtMs = nowUnixMs();
+    m_running += 1;
+    if ( jit->second.request.exclusive )
+      m_exclusiveRunning = true;
+    return id;
   }
-  if ( bestIt == m_queue.end() )
-    return std::nullopt;
-
-  const std::string id = *bestIt;
-  m_queue.erase( bestIt );
-  auto jit = m_jobs.find( id );
-  jit->second.state = JobState::Running;
-  jit->second.startedAtMs = nowUnixMs();
-  m_running += 1;
-  if ( jit->second.request.exclusive )
-    m_exclusiveRunning = true;
-  return id;
+  return std::nullopt;
 }
 
 void JobEngine::appendLog( JobRecord &rec, JobLogLevel level, const std::string &text )

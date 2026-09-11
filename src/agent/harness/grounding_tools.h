@@ -14,4 +14,10 @@ void registerGroundingTools();
 /// roles, wavelengths, and the GDAL driver name — never filenames alone.
 std::string inferModality( const Json::Value &rasterInspect );
 
+/// Harness 8.0: the cached DatasetUnderstanding document for a resolved
+/// dataset (path + revision), or null on a miss. Read-only — callers who
+/// need fresh facts run spatial:understand; explain-only surfaces use this
+/// to stay cheap.
+Json::Value cachedUnderstandingFor( const QString &path, long long revision );
+
 } // namespace sicnu::agent::harness

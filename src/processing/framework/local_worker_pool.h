@@ -27,6 +27,7 @@
 
 #include "local_worker_host.h"
 #include "runtime/observability/execution_telemetry.h"
+#include "worker_process_guard.h"
 #include "worker_process_io.h"
 
 #include <QProcess>
@@ -128,6 +129,11 @@ class LocalWorkerPool
         qint64 handshakeMs = 0;
         QStringList capabilities;
         WorkerDiagnosticsRing diagnostics;
+        // 8.0 WP-C: OS-level tree containment (POSIX process group via
+        // setsid / Windows kill-on-close Job Object). Lifetime = the
+        // worker's: on Windows the job handle closes with the guard, killing
+        // any survivors even if the host dies mid-job.
+        WorkerProcessGuard guard;
     };
 
     enum class Outcome

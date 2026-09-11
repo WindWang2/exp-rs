@@ -53,7 +53,17 @@ namespace sicnu::agent::mapspec {
 //       ledger, a bounded unsat core per unsatisfied hard constraint and the
 //       weighted objective. v4 is a strict superset of v3: every new field
 //       is optional.
-inline constexpr int kMapSpecCurrentVersion = 4;
+//   5 — cartography platform 8.0: output declarations + typed data bindings.
+//       The envelope may carry an `output` block
+//       ({formats?: ["png"|"pdf"], dpi?: 72..1200, dir?: string}) declaring
+//       the delivery surface of the document: it is validated and surfaced
+//       through cartography:compose / harness map confirmation, but
+//       compilation never auto-exports (export stays an explicit governed
+//       action). Per-item `binding` objects gain shape validation (string
+//       mode/layer/field/expression fields, bounded inline data, square
+//       matrices). v5 is a strict superset of v4: every new field is
+//       optional.
+inline constexpr int kMapSpecCurrentVersion = 5;
 
 /// Ordered item collection names of a MapSpec document.
 /// (inline constexpr: Windows DLL builds cannot auto-export extern data

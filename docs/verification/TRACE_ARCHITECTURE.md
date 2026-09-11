@@ -82,3 +82,34 @@ codes stay honest (`recoverability: unknown`), never renamed, never swallowed
   written + dropped == pushed coherence, disabled hot path.
 - `test_diagnostic_report` — envelope fields, verbatim unknown codes,
   escaping, one-line guarantee.
+
+---
+
+## Verification Platform 8.0 — chain completion
+
+The 7.0 adapters covered ExecutionPlane (entry) and JobEngine (operator
+span). 8.0 completes the documented chain with three additive adapters at
+EXISTING broadcast funnels (no second bus, no polling):
+
+| Layer | Funnel | Record |
+|---|---|---|
+| WorkflowRunCoordinator | `notifyRunStateLocked` (the runStateChanged broadcaster) | `run_state` (run=runId, detail=workflowId, duration at terminal states) |
+| TaskCenter | `flushPendingSignals` (THE state-broadcast funnel, outside m_mutex) | `task_status` (task/pipeline/job/op; terminal status + duration + error) |
+| OutputCommitter | `commit()` wrapper around `commitImpl` | `commit` (artifact=AssetId, status ok/error, duration, leading diagnostic code) |
+| DatasetStore | `commitVersion()` wrapper | `dataset_commit` (artifact=versionId) |
+| ExperimentStore | `upsertRun()` wrapper | `experiment_upsert` (run=runId, artifact=experimentId) |
+
+Disabled path is unchanged: one relaxed atomic load per emit site; string
+building only behind `Trace::enabled()`. Contract test:
+`test_trace_chain_8` (ring-sink assertions across committer + stores +
+TaskCenter-through-JobEngine, including a REAL instant task's terminal
+record).
+
+### Status vocabulary (8.0, review remediation)
+
+`status` is a verdict: `ok` | `error` | `cancelled` (final) | `cancelling`
+(in-flight cancellation attempt) | `interrupted` (terminal crash/shutdown
+recovery state). `phase` marks non-verdict progress: `start` (running),
+`pending` (queued/paused/waiting-resource/dispatching), `end` (span close).
+A terminal record always carries a verdict; a pending/start record never
+does.

@@ -29,6 +29,7 @@ add_library(sicnu_agent SHARED
   harness/capability_knowledge.cpp
   harness/capability_knowledge.h
   harness/capability_graph.cpp
+  harness/evidence.cpp
   harness/capability_graph.h
   harness/context_ledger.cpp
   harness/context_ledger.h
@@ -145,6 +146,7 @@ target_link_libraries(sicnu_agent PUBLIC
   sicnu_operators
   Sicnu::dataset
   Sicnu::experiment
+  Sicnu::experiment_bridge
   sicnu_workflow
   Sicnu::help
   Sicnu::help_adapters

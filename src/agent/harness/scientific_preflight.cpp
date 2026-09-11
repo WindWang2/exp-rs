@@ -176,6 +176,14 @@ void bandRatioRules( const std::vector<PreflightInput> &inputs, PreflightOutcome
                      const std::string &indexLabel,
                      const std::vector<std::pair<std::string, BandRequirement>> &requirements )
 {
+  // Harness 8.0: fusion keeps working (a SAR companion beside an optical
+  // input is skipped below), but an optical index intent with ONLY SAR/unknown
+  // inputs can never apply — that must be a blocker, not a silent ok.
+  const bool hasOptical = std::any_of(
+    inputs.begin(), inputs.end(), []( const PreflightInput &input ) {
+      const std::string modality = input.resolved() ? modalityOf( input.understanding ) : "";
+      return input.resolved() && modality != "sar" && modality != "unknown";
+    } );
   for ( const PreflightInput &input : inputs )
   {
     if ( !input.resolved() )
@@ -185,7 +193,21 @@ void bandRatioRules( const std::vector<PreflightInput> &inputs, PreflightOutcome
     // optical inputs only; the SAR branch is gated by the SAR/multimodal
     // packs, so it is skipped here instead of failing on missing bands.
     if ( modalityOf( input.understanding ) == "sar" )
+    {
+      if ( hasOptical )
+        addWarning( outcome, error_codes::kModalityMismatch,
+                    "Input '" + input.name +
+                      "' is SAR and is skipped by the " + indexLabel +
+                      " spectral checks; the SAR branch is validated by the "
+                      "multimodal rules" );
+      else
+        addBlocker( outcome, error_codes::kModalityMismatch,
+                    "Input '" + input.name +
+                      "' is SAR; the " + indexLabel +
+                      " intent needs optical data and no optical input is bound",
+                    "check_dataset", Json::Value() );
       continue;
+    }
     const BandFacts facts = bandFacts( input.understanding );
     for ( const auto &[ roleLabel, requirement ] : requirements )
     {
@@ -852,7 +874,20 @@ void requirePair( PreflightOutcome &outcome, const std::string &intentLabel )
 
 Json::Value PreflightOutcome::toJson( const std::string &subject ) const
 {
-  return sicnu::agent::contracts::makePreflightResult( subject, verdict, issues, checks );
+  // Harness 8.0 (Area D): assumptions are the warning-class issues — facts
+  // the pack could not verify and therefore degraded instead of guessing.
+  // Surfacing them separately keeps blockers, checks, and honest unknowns
+  // apart so the agent sees exactly which science rests on assumptions.
+  Json::Value assumptions( Json::arrayValue );
+  for ( const Json::Value &issue : issues )
+    if ( issue.get( "severity", "" ).asString() == "warning" )
+      assumptions.append( issue );
+
+  Json::Value doc = sicnu::agent::contracts::makePreflightResult( subject, verdict, issues,
+                                                                  checks );
+  if ( !assumptions.empty() )
+    doc["assumptions"] = assumptions;
+  return doc;
 }
 
 bool intentRequiresPair( const std::string &intent )

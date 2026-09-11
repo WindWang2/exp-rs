@@ -16,6 +16,7 @@ set( EXPRS_FRAMEWORK_SOURCES
   plugin_model_runtime_bridge.cpp
   plugin_runtime_host.cpp
   plugin_ui_host.cpp
+  plugin_ui_schema_host.cpp
 )
 
 add_library( sicnu_plugins_framework STATIC ${EXPRS_FRAMEWORK_SOURCES} )

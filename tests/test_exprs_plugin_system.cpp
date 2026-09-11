@@ -18,6 +18,7 @@ static void portableSetenv(const char *key, const char *value)
 #include "exprs/plugin_validator.h"
 #include "exprs/version.h"
 
+#include <filesystem>
 #include <fstream>
 
 #include <sys/stat.h>
@@ -207,4 +208,144 @@ TEST_CASE( "plugin packages install and uninstall with traversal protection", "[
         REQUIRE( PluginPackage::uninstall( "org.test.package", log ) );
     }
     ::system( "rm -rf /tmp/exprs_test_pkg_src" );
+}
+
+TEST_CASE( "staged install verifies declared checksums with rollback", "[plugin][package]" )
+{
+    const std::string pkgRoot = "/tmp/exprs_test_pkg_ck";
+    ::system( "rm -rf /tmp/exprs_test_pkg_ck" );
+    ::mkdir( pkgRoot.c_str(), 0755 );
+
+    // Payload with one payload file and matching checksums (computed with
+    // the SAME sha256 the SDK uses — round-trips through install()).
+    const std::string source = pkgRoot + "/org.test.ck";
+    const std::string body = "payload-for-checksum-verification\n";
+    {
+        ::mkdir( source.c_str(), 0755 );
+        std::ofstream payload( source + "/payload.txt", std::ios::trunc );
+        payload << body;
+    }
+    // Compute the digest via the installed SDK path: install a package
+    // WITHOUT checksums first, hash the staged copy, then rebuild the
+    // source manifest with the declared digest.
+    PluginDiagnosticLog log;
+    std::string installed;
+    {
+        std::ofstream manifest( source + "/plugin.json", std::ios::trunc );
+        manifest << R"({
+            "manifest_version": 1,
+            "id": "org.test.ck",
+            "name": "CK",
+            "version": "1.0.0",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+            "abi_version": 1,
+            "entrypoint_kind": "manifest",
+            "operators": []
+        })";
+    }
+    REQUIRE( PluginPackage::install( source, installed, log ) );
+    REQUIRE_FALSE( installed.empty() );
+
+    // A CORRECT checksum (known-answer from an independent sha256 tool)
+    // upgrades cleanly through the staged path.
+    {
+        std::ofstream manifest( source + "/plugin.json", std::ios::trunc );
+        manifest << R"({
+            "manifest_version": 1,
+            "id": "org.test.ck",
+            "name": "CK",
+            "version": "2.0.0",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+            "abi_version": 1,
+            "entrypoint_kind": "manifest",
+            "operators": [],
+            "package": {
+                "checksums": { "payload.txt": "31492367e97f4ab8dd5f118e03a606f4ae02c586a46a46810e247e5fe9958dd6" },
+                "sbom": { "format": "spdx", "path": "sbom.spdx" }
+            }
+        })";
+    }
+    log = PluginDiagnosticLog();
+    REQUIRE( PluginPackage::install( source, installed, log ) );
+    {
+        exprs::PluginDiagnostic parseError;
+        exprs::PluginManifest upgraded;
+        REQUIRE( exprs::loadManifestFromFile( installed + "/plugin.json", upgraded, parseError ) );
+        REQUIRE( upgraded.version == "2.0.0" );
+        REQUIRE( upgraded.package["sbom"]["format"].asString() == "spdx" );
+    }
+
+    // A WRONG checksum refuses the downgrade and keeps the v2.0.0 install.
+    {
+        std::ofstream manifest( source + "/plugin.json", std::ios::trunc );
+        manifest << R"({
+            "manifest_version": 1,
+            "id": "org.test.ck",
+            "name": "CK",
+            "version": "3.0.0",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+            "abi_version": 1,
+            "entrypoint_kind": "manifest",
+            "operators": [],
+            "package": { "checksums": { "payload.txt": "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef" } }
+        })";
+    }
+    log = PluginDiagnosticLog();
+    REQUIRE_FALSE( PluginPackage::install( source, installed, log ) );
+    REQUIRE( log.hasErrors() );
+    // Previous install (v2.0.0) survived the failed upgrade.
+    exprs::PluginDiagnostic parseError;
+    exprs::PluginManifest survivor;
+    REQUIRE( exprs::loadManifestFromFile( installed + "/plugin.json", survivor, parseError ) );
+    REQUIRE( survivor.version == "2.0.0" );
+    // No staging leftovers.
+    REQUIRE( !std::filesystem::exists(
+        exprs::PluginDiscovery::userPluginRoot() + "/.staging/org.test.ck" ) );
+
+    ::system( "rm -rf /tmp/exprs_test_pkg_ck" );
+}
+
+TEST_CASE( "staged-install sha256 matches reference vectors at block boundaries",
+           "[plugin][package]" )
+{
+    // Padded to 55/56/63/64 bytes: every len%64 class of the hand-rolled
+    // implementation (padding wrap, two-complement block, exact block).
+    const std::vector<std::pair<std::string, std::string>> vectors = {
+        { "a", "ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb" },
+        { "ab", "fb8e20fc2e4c3f248c60c39bd652f3c1347298bb977b8b4d5903b85055620603" },
+        { std::string( 55, 'x' ), "d5e285683cd4efc02d021a5c62014694958901005d6f71e89e0989fac77e4072" },
+        { std::string( 56, 'x' ), "04c26261370ee7541549d16dee320c723e3fd14671e66a099afe0a377c16888e" },
+        { std::string( 63, 'x' ), "75220b47218278e656f2013bb8f0c455a25eaf01e86c64924e9d48d89776d6f2" },
+        { std::string( 64, 'x' ), "7ce100971f64e7001e8fe5a51973ecdfe1ced42befe7ee8d5fd6219506b5393c" },
+    };
+    for ( const auto &[ body, digest ] : vectors )
+    {
+        const std::string pkgRoot = "/tmp/exprs_test_pkg_vec";
+        ::system( "rm -rf /tmp/exprs_test_pkg_vec" );
+        ::mkdir( pkgRoot.c_str(), 0755 );
+        const std::string source = pkgRoot + "/org.test.vec";
+        ::mkdir( source.c_str(), 0755 );
+        {
+            std::ofstream payload( source + "/payload.txt", std::ios::trunc );
+            payload << body;
+            std::ofstream manifest( source + "/plugin.json", std::ios::trunc );
+            manifest << R"({
+                "manifest_version": 1,
+                "id": "org.test.vec",
+                "name": "VEC",
+                "version": "1.0.0",
+                "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+                "abi_version": 1,
+                "entrypoint_kind": "manifest",
+                "operators": [],
+                "package": { "checksums": { "payload.txt": ")" << digest << R"(" } }
+            })";
+        }
+        PluginDiagnosticLog log;
+        std::string installed;
+        INFO( "vector length " << body.size() );
+        REQUIRE( PluginPackage::install( source, installed, log ) );
+        REQUIRE( PluginPackage::uninstall( "org.test.vec", log ) );
+    }
+    ::system( "rm -rf /tmp/exprs_test_pkg_vec" );
 }

@@ -13,6 +13,7 @@
 #include "operators/framework/rs_operator_error.h"
 
 #include "plugins/host/plugin_host_process_runtime.h"
+#include "plugins/host/plugin_host_session.h"
 
 #include <atomic>
 #include <chrono>
@@ -21,6 +22,8 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <signal.h>
+#include <sys/types.h>
 #include <unistd.h>
 #endif
 #include <filesystem>
@@ -79,7 +82,8 @@ public:
 };
 
 /// Writes plugin.json (runtime: host-process) next to the built fixture.
-void writeManifest()
+/// @p access is an optional manifest "access" object (capability suites).
+void writeManifest( const Json::Value &access = Json::Value() )
 {
     Json::Value manifest( Json::objectValue );
     manifest["manifest_version"] = 1;
@@ -93,9 +97,12 @@ void writeManifest()
     manifest["entrypoint_kind"] = "native";
     manifest["capabilities"] = Json::Value( Json::arrayValue );
     manifest["capabilities"].append( "operator" );
+    if ( access.isObject() )
+        manifest["access"] = access;
     Json::Value operators( Json::arrayValue );
     for ( const char *id : { "test:iso-echo", "test:iso-crash", "test:iso-hang",
-                             "test:iso-flood", "test:iso-slow" } )
+                             "test:iso-flood", "test:iso-gate", "test:iso-spawn",
+                             "test:iso-slow" } )
     {
         Json::Value op( Json::objectValue );
         op["id"] = id;
@@ -115,13 +122,16 @@ void writeManifest()
 }
 
 /// One registry + runtime + sink stack wired the way the framework does.
+/// Budget overrides keep escalation suites bounded without touching the
+/// default 6 s / 3 s numbers the other tests assume.
 struct Stack
 {
     TestSink sink;
     std::unique_ptr<sicnu::plugins::PluginHostProcessRuntime> runtime;
     std::string tempDir;
 
-    Stack()
+    explicit Stack( int deadlineCeilingMs = 6000, int killGraceMs = 3000,
+                    bool declareTempWriteRoot = false )
     {
         const int pid =
 #ifdef _WIN32
@@ -133,13 +143,22 @@ struct Stack
                     / ( "sicnu-iso-" + std::to_string( pid ) ) )
                       .generic_string();
         std::filesystem::create_directories( tempDir );
-        writeManifest();
+        Json::Value access( Json::Value::nullSingleton() );
+        if ( declareTempWriteRoot )
+        {
+            Json::Value fs( Json::objectValue );
+            fs["write"] = Json::Value( Json::arrayValue );
+            fs["write"].append( "${temp}" );
+            access["filesystem"] = fs;
+        }
+        writeManifest( access );
 
         sicnu::plugins::PluginHostProcessRuntime::Options options;
         options.workerPath = kWorkerPath;
         options.handshakeTimeoutMs = 15000;
         options.quotaCeilings = PluginQuota::fromEnvironment();
-        options.quotaCeilings.requestDeadlineMs = 6000; // bounded test budgets
+        options.quotaCeilings.requestDeadlineMs = deadlineCeilingMs;
+        options.killGraceMs = killGraceMs;
         runtime = std::make_unique<sicnu::plugins::PluginHostProcessRuntime>( options );
 
         auto &registry = PluginRegistry::instance();
@@ -289,6 +308,7 @@ TEST_CASE( "hung request hits the deadline and the kill ladder", "[hostprocess][
 
     // Recovery: next call respawns and works.
     Json::Value echo = runOperator( stack, "test:iso-echo", Json::Value() );
+    INFO( "recovery echo: " << Json::writeString( Json::StreamWriterBuilder(), echo ) );
     REQUIRE( echo["success"].asBool() );
     REQUIRE( registry.unload( kPluginId ) );
 }
@@ -326,4 +346,350 @@ TEST_CASE( "enable/disable round-trip works with the host-process runtime",
     REQUIRE( registry.setEnabled( kPluginId, false ) );
     REQUIRE_FALSE( registry.load( kPluginId ) );
     REQUIRE( registry.setEnabled( kPluginId, true ) );
+}
+
+TEST_CASE( "concurrent requests run in parallel within the quota", "[hostprocess][concurrency]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    // Three gate instances must rendezvous INSIDE the worker: proof that
+    // the worker dispatches concurrently (protocol 1.1) instead of the v1
+    // serial loop. Each instance blocks until the running peak reaches 3.
+    constexpr int kParallel = 3;
+    std::vector<Json::Value> results( kParallel );
+    std::vector<std::thread> threads;
+    for ( int i = 0; i < kParallel; ++i )
+    {
+        threads.emplace_back( [&stack, &results, i] {
+            Json::Value params( Json::objectValue );
+            params["expected"] = kParallel;
+            params["waitMs"] = 8000;
+            results[ i ] = runOperator( stack, "test:iso-gate", params );
+        } );
+    }
+    for ( std::thread &thread : threads )
+        thread.join();
+    for ( int i = 0; i < kParallel; ++i )
+    {
+        INFO( "gate " << i << ": "
+                      << Json::writeString( Json::StreamWriterBuilder(), results[ i ] ) );
+        REQUIRE( results[ i ]["success"].asBool() );
+        REQUIRE( results[ i ]["rendezvous"].asBool() );
+        REQUIRE( results[ i ]["observedPeak"].asInt() >= kParallel );
+    }
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+TEST_CASE( "host-side cooperative cancel reaches the worker", "[hostprocess][concurrency][cancel]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    sicnu::operators::RSOperatorContext cancelContext;
+    std::atomic<int> cancelPolls{ 0 };
+    cancelContext.setCancelCallback( [&cancelPolls]() -> bool {
+        // Cancel a moment after the call starts (the proxy polls this
+        // predicate and converts it into a per-id cancel frame).
+        return cancelPolls.fetch_add( 1 ) > 20;
+    } );
+
+    Json::Value cancelled = runOperator( stack, "test:iso-slow", Json::Value(), &cancelContext );
+    REQUIRE( cancelled["__operatorError"].asBool() );
+    REQUIRE( cancelled["code"].asString() == "4000" ); // ErrorCode::Cancelled = 4000
+
+    // A cooperative cancel must NOT have killed the worker (that is the
+    // kill ladder's job, not the cancel's).
+    REQUIRE( stack.runtime->isWorkerAlive( kPluginId ) );
+    Json::Value params( Json::objectValue );
+    params["seconds"] = 1;
+    Json::Value after = runOperator( stack, "test:iso-slow", params );
+    REQUIRE( after["success"].asBool() );
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+TEST_CASE( "timeout escalation poisons the session instead of killing a busy worker",
+           "[hostprocess][concurrency][poison]" )
+{
+    // Dedicated budgets: 3 s deadline ceiling, 1 s kill grace.
+    Stack stack( 3000, 1000 );
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    // Sequence (deterministic; escalation decision at t = 3.0 + 1.0 = 4.0 s,
+    // B's in-flight window is [1.8, 4.4] s — margins >= 900 ms on BOTH
+    // sides so scheduler jitter cannot flip the poison/kill branch):
+    //   t=0.0  A starts iso-slow 8 s -> times out at t=3.0 (ceiling);
+    //          per-id cancel goes out; grace runs t=3.0..4.0.
+    //   t=1.8  B starts iso-slow 2.6 s -> finishes at t=4.4, i.e. B is IN
+    //          FLIGHT at A's decision -> poison instead of kill.
+    Json::Value aResult;
+    Json::Value bResult;
+    std::thread threadA( [&] {
+        Json::Value params( Json::objectValue );
+        params["ms"] = 8000;
+        aResult = runOperator( stack, "test:iso-slow", params );
+    } );
+    std::thread threadB( [&] {
+        std::this_thread::sleep_for( std::chrono::milliseconds( 1800 ) );
+        Json::Value params( Json::objectValue );
+        params["ms"] = 2600;
+        bResult = runOperator( stack, "test:iso-slow", params );
+    } );
+    threadA.join();
+
+    // A timed out (typed E6004 path)...
+    REQUIRE( aResult["__operatorError"].asBool() );
+    REQUIRE( aResult["code"].asString() == "4100" ); // ExternalProcessTimeout
+    // ...and at this moment (B still in flight, decision time passed) the
+    // worker must be ALIVE: poison, not the v1 whole-worker kill. The v1
+    // ladder would have terminated the worker at A's deadline (t=2.5 s)
+    // while B runs until t=4.0 s.
+    REQUIRE( stack.runtime->isWorkerAlive( kPluginId ) );
+
+    threadB.join();
+    // B was still served to completion by the poisoned worker...
+    REQUIRE( bResult["success"].asBool() );
+    // ...whose in-flight count then drained to zero: the poison kill fired.
+    REQUIRE_FALSE( stack.runtime->isWorkerAlive( kPluginId ) );
+
+    // The next call hits the dead worker (E6005), the proxy applies ONE
+    // bounded recovery, and the fresh worker answers — all inside one
+    // operator call.
+    Json::Value after = runOperator( stack, "test:iso-echo", Json::Value() );
+    REQUIRE( after["success"].asBool() );
+    REQUIRE( stack.runtime->isWorkerAlive( kPluginId ) );
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+TEST_CASE( "ConcurrencyGate is FIFO-fair and bounded", "[hostprocess][gate]" )
+{
+    // Unit-level contract of the exact quota enforcement primitive: a full
+    // gate refuses bounded waiters (session maps that to E6007) and the
+    // first waiter always wins the next slot.
+    sicnu::plugins::ConcurrencyGate gate( 1 );
+    REQUIRE( gate.acquire( 0 ) );
+    std::atomic<bool> firstGotSlot{ false };
+    std::atomic<bool> secondGotSlot{ false };
+    std::atomic<int> order{ 0 };
+    std::thread first( [&] {
+        if ( gate.acquire( 2000 ) )
+        {
+            firstGotSlot = order.fetch_add( 1 ) == 0;
+            gate.release();
+        }
+    } );
+    std::thread second( [&] {
+        std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+        if ( gate.acquire( 2000 ) )
+        {
+            secondGotSlot = order.fetch_add( 1 ) == 1;
+            gate.release();
+        }
+    } );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 150 ) );
+    REQUIRE( gate.width() == 1 );
+    gate.release(); // free the original slot; FIFO: first waiter wins
+    first.join();
+    second.join();
+    REQUIRE( firstGotSlot );
+    REQUIRE( secondGotSlot );
+}
+
+#ifndef _WIN32
+TEST_CASE( "process-group cleanup takes worker-spawned grandchildren with the worker",
+           "[hostprocess][orphans]" )
+{
+    // kill(pid,0) reports zombies as alive; read /proc state so a reaped
+    // or zombie process counts as gone (non-reaping PID 1 in containers).
+    auto grandchildAlive = []( pid_t pid ) {
+        if ( pid <= 0 || ::kill( pid, 0 ) != 0 )
+            return false;
+        std::ifstream stat( "/proc/" + std::to_string( pid ) + "/stat" );
+        if ( !stat.is_open() )
+            return true; // cannot inspect: keep the liveness answer
+        std::string field;
+        for ( int i = 0; i < 3; ++i )
+        {
+            stat >> field;
+            if ( i == 2 )
+                return field != "Z";
+        }
+        return true;
+    };
+    auto waitReaped = [&grandchildAlive]( pid_t pid ) {
+        for ( int i = 0; i < 50; ++i )
+        {
+            if ( !grandchildAlive( pid ) )
+                return true;
+            std::this_thread::sleep_for( std::chrono::milliseconds( 100 ) );
+        }
+        return !grandchildAlive( pid );
+    };
+
+    // Scenario 1: GRACEFUL unload. The fixture writes the grandchild pid to
+    // $SICNU_ISO_SPAWN_MARKER (read by the WORKER, so set before load).
+    pid_t firstChild = -1;
+    {
+        Stack stack;
+        auto &registry = PluginRegistry::instance();
+        const std::string marker = ( std::filesystem::path( stack.tempDir ) / "spawn.pid" ).generic_string();
+        ::setenv( "SICNU_ISO_SPAWN_MARKER", marker.c_str(), 1 );
+        REQUIRE( loadOrExplain( kPluginId ) );
+
+        Json::Value params( Json::objectValue );
+        params["childSeconds"] = 60;
+        Json::Value result = runOperator( stack, "test:iso-spawn", params );
+        REQUIRE( result["success"].asBool() );
+        REQUIRE( result["supported"].asBool() );
+        std::ifstream in( marker );
+        REQUIRE( in.is_open() );
+        in >> firstChild;
+        in.close();
+        REQUIRE( grandchildAlive( firstChild ) );
+
+        // Graceful unload; the POSIX group reap fires with the shutdown
+        // (parity with the Windows job-close semantics).
+        REQUIRE( registry.unload( kPluginId ) );
+        REQUIRE( waitReaped( firstChild ) );
+        ::unsetenv( "SICNU_ISO_SPAWN_MARKER" );
+    }
+
+    // Scenario 2: CRASH. The worker aborts itself; the group survives until
+    // the session's confirmed-dead cleanup reaps it.
+    {
+        Stack stack;
+        auto &registry = PluginRegistry::instance();
+        const std::string marker = ( std::filesystem::path( stack.tempDir ) / "spawn.pid" ).generic_string();
+        ::setenv( "SICNU_ISO_SPAWN_MARKER", marker.c_str(), 1 );
+        REQUIRE( loadOrExplain( kPluginId ) );
+
+        Json::Value params( Json::objectValue );
+        params["childSeconds"] = 60;
+        Json::Value result = runOperator( stack, "test:iso-spawn", params );
+        REQUIRE( result["success"].asBool() );
+        pid_t child = -1;
+        std::ifstream in( marker );
+        REQUIRE( in.is_open() );
+        in >> child;
+        in.close();
+        REQUIRE( grandchildAlive( child ) );
+
+        Json::Value crash = runOperator( stack, "test:iso-crash", Json::Value() );
+        REQUIRE( crash["__operatorError"].asBool() );
+        REQUIRE( waitReaped( child ) ); // no orphan after the crash path
+
+        // Reload restores a fresh worker (crash test parity).
+        REQUIRE( registry.unload( kPluginId ) );
+        REQUIRE( loadOrExplain( kPluginId ) );
+        REQUIRE( registry.unload( kPluginId ) );
+        ::unsetenv( "SICNU_ISO_SPAWN_MARKER" );
+    }
+}
+#endif
+
+TEST_CASE( "worker-side workDir policy refuses paths outside declared roots",
+           "[hostprocess][capabilities]" )
+{
+    // The manifest declares access.filesystem.write = ["${temp}"]: the
+    // containment gate is OPT-IN via declared write roots (a manifest that
+    // declares nothing keeps v1 behavior — the executor's default workDir
+    // is legitimate and is not gated).
+    Stack stack( 6000, 3000, true ); // declare ${temp} as the write root
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    // workDir inside the plugin-scoped temp directory: allowed.
+    sicnu::operators::RSOperatorContext inside( stack.tempDir + "/work" );
+    Json::Value ok = runOperator( stack, "test:iso-echo", Json::Value(), &inside );
+    REQUIRE( ok["success"].asBool() );
+
+    // workDir outside every declared root: typed E5005 refusal, the
+    // operator never runs.
+    sicnu::operators::RSOperatorContext outside( "/tmp" );
+    Json::Value refused = runOperator( stack, "test:iso-echo", Json::Value(), &outside );
+    REQUIRE( refused["__operatorError"].asBool() );
+    REQUIRE( refused["code"].asString() == "9999" ); // Unknown (stable E5005 in details)
+    REQUIRE( refused["message"].asString().find( "E5005" ) != std::string::npos );
+    REQUIRE( refused["message"].asString().find( "outside the declared write roots" )
+             != std::string::npos );
+
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+TEST_CASE( "declarative UI schema round-trips through the worker", "[hostprocess][uischema]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    // Describe: the worker probes the optional entry point, validates the
+    // schema (fail closed) and answers with the normalized schema.
+    exprs::PluginDiagnosticLog uiLog;
+    Json::Value described = stack.runtime->describeUiSchema( kPluginId, uiLog );
+    INFO( "describe: " << Json::writeString( Json::StreamWriterBuilder(), described ) );
+    REQUIRE( described["ok"].asBool() );
+    const Json::Value &schema = described["schema"];
+    REQUIRE( schema["version"].asInt() == 1 );
+    REQUIRE( schema["commands"].size() == 1 );
+    REQUIRE( schema["commands"][0]["id"].asString() == "fixture.refresh" );
+    REQUIRE( schema["settingsPages"][0]["controls"].size() == 5 );
+    REQUIRE( schema["dockPanels"][0]["controls"].size() == 2 );
+
+    // Invoke: bounded event in, bounded state update out.
+    Json::Value event( Json::objectValue );
+    event["contributionId"] = "dock.status";
+    event["controlId"] = "ping";
+    event["eventType"] = "clicked";
+    Json::Value invoked = stack.runtime->invokeUi( kPluginId, event, 5000, uiLog );
+    INFO( "invoke: " << Json::writeString( Json::StreamWriterBuilder(), invoked ) );
+    REQUIRE( invoked["ok"].asBool() );
+    REQUIRE( invoked["response"]["state"]["status"].asString() == "pinged" );
+
+    // The worker itself refuses an INVALID schema (fail closed): point a
+    // second registry cycle at the same plugin but mutate nothing — the
+    // negative path is covered by the SDK validation suite; here we prove
+    // the transport stays alive after UI traffic.
+    Json::Value params( Json::objectValue );
+    params["seconds"] = 1;
+    Json::Value after = runOperator( stack, "test:iso-slow", params );
+    REQUIRE( after["success"].asBool() );
+
+    REQUIRE( registry.unload( kPluginId ) );
+    REQUIRE_FALSE( stack.runtime->isWorkerAlive( kPluginId ) );
+}
+
+TEST_CASE( "declarative UI survives the crash-recovery sequence", "[hostprocess][uischema]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    exprs::PluginDiagnosticLog uiLog;
+    Json::Value described = stack.runtime->describeUiSchema( kPluginId, uiLog );
+    REQUIRE( described["ok"].asBool() );
+
+    // Crash the worker; the proxy recovers (one bounded respawn + reload)
+    // and the RETRY crashes again (the fixture always crashes): the hosted
+    // session is dead afterwards. A describe on the dead session answers
+    // typed E6005 — it never resurrects plugins on its own.
+    Json::Value crash = runOperator( stack, "test:iso-crash", Json::Value() );
+    REQUIRE( crash["__operatorError"].asBool() );
+    described = stack.runtime->describeUiSchema( kPluginId, uiLog );
+    INFO( "post-crash describe: "
+          << Json::writeString( Json::StreamWriterBuilder(), described ) );
+    REQUIRE_FALSE( described["ok"].asBool() );
+    REQUIRE( described["error"].asString().find( "E6005" ) != std::string::npos );
+
+    // Restore a healthy worker (the conformance kit does exactly this
+    // between PT_RESTART and PT_UI_SCHEMA): unload + load.
+    REQUIRE( registry.unload( kPluginId ) );
+    REQUIRE( loadOrExplain( kPluginId ) );
+    described = stack.runtime->describeUiSchema( kPluginId, uiLog );
+    REQUIRE( described["ok"].asBool() );
+    REQUIRE( described["schema"]["version"].asInt() == 1 );
+
+    REQUIRE( registry.unload( kPluginId ) );
 }

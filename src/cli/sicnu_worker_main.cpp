@@ -27,6 +27,13 @@
 #include <string>
 #include <thread>
 
+#ifdef Q_OS_UNIX
+#include <signal.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+
 #if __has_include(<opencv2/core/utils/logger.hpp>)
 #include <opencv2/core/utils/logger.hpp>
 #define SICNU_WORKER_HAS_OPENCV_LOG 1
@@ -53,11 +60,14 @@ bool writeLine( const std::string &line )
 void emitReady()
 {
     // Capability advertisement (7.0): a legacy host ignores the "caps" member.
+    // "heartbeat" (8.0): liveness frames while a job runs; hosts that do not
+    // know the op ignore it (extension rule), absence changes nothing.
     writeLine( sicnu::runtime::worker::makeReadyFrame( {
         sicnu::runtime::worker::kWorkerCapProgress,
         sicnu::runtime::worker::kWorkerCapCancelAck,
         sicnu::runtime::worker::kWorkerCapStructuredErrors,
         sicnu::runtime::worker::kWorkerCapOutputIdentity,
+        sicnu::runtime::worker::kWorkerCapHeartbeat,
     } ) );
 }
 
@@ -109,6 +119,67 @@ Json::Value collectOutputIdentity( const Json::Value &payload )
         }
     }
     return manifest;
+}
+
+/// Fault-injection hook (Execution Plane 8.0): "__spawn_helper__" spawns a
+/// helper CHILD that ignores SIGTERM AND cooperative cancellation (it
+/// sleeps; SIGTERM is SIG_IGN'd) and records its pid into
+/// params["helperPidFile"]; the JOB then parks ignoring cancellation. The
+/// only mechanism that can reap helper+worker is the group-wide SIGKILL
+/// sweep of worker_process_guard — exactly what the containment test
+/// asserts. POSIX-only: unsupported platforms fail the job typed.
+int runSpawnHelperJob( const Json::Value &params, const std::string &jobId,
+                       const std::atomic<bool> &cancel, std::mutex &stdoutMutex )
+{
+#ifdef Q_OS_UNIX
+    const std::string pidFile = params["helperPidFile"].asString();
+    const pid_t helper = ::fork();
+    if ( helper == 0 )
+    {
+        // Helper child: same process GROUP as the worker (the containment
+        // premise). Ignores SIGTERM and never touches the cancel flag —
+        // only a group SIGKILL can reap it (the property under test).
+        ::signal( SIGTERM, SIG_IGN );
+        FILE *f = pidFile.empty() ? nullptr : std::fopen( pidFile.c_str(), "w" );
+        if ( f )
+        {
+            std::fprintf( f, "%d", static_cast<int>( ::getpid() ) );
+            std::fclose( f );
+        }
+        std::this_thread::sleep_for( std::chrono::seconds( 300 ) );
+        _exit( 0 );
+    }
+    if ( helper < 0 )
+    {
+        std::lock_guard<std::mutex> lock( stdoutMutex );
+        emitFrame( "error", jobId, [] {
+            Json::Value e;
+            e["message"] = "helper fork failed";
+            e["code"] = "operatorError";
+            return e;
+        }() );
+        return 0;
+    }
+    // Park the job IGNORING cancellation (stuck-operator semantics): the
+    // cooperative path must not reap the helper — only the host's escalation
+    // ladder (group-wide SIGTERM ignored → group SIGKILL) can.
+    Q_UNUSED( cancel )
+    std::this_thread::sleep_for( std::chrono::seconds( 300 ) );
+    std::lock_guard<std::mutex> lock( stdoutMutex );
+    emitFrame( "error", jobId, [] {
+        Json::Value e;
+        e["message"] = "cancelled";
+        e["code"] = "cancelled";
+        return e;
+    }() );
+    return 0;
+#else
+    Q_UNUSED( params )
+    Q_UNUSED( jobId )
+    Q_UNUSED( cancel )
+    Q_UNUSED( stdoutMutex )
+    return 1; // unsupported platform: typed operator error via generic path
+#endif
 }
 
 int runHangJob( const std::string &jobId, const std::atomic<bool> &cancel,
@@ -184,6 +255,34 @@ int main( int argc, char **argv )
     // stdout carries frames from two threads (progress/result from the job
     // thread, ack/error from the main loop): serialize whole lines.
     std::mutex stdoutMutex;
+
+    // 8.0 WP-C heartbeat: a bounded watchdog thread emits a liveness frame
+    // every 15s WHILE a job is active, so a host can tell "operator silent
+    // but process alive" from "process hung/dead" without any operator
+    // cooperation. Legacy hosts ignore the unknown op; the frames are one
+    // small line per interval and stop when the job ends (no idle traffic).
+    std::atomic<bool> heartbeatStop{ false };
+    std::thread heartbeatThread( [ &heartbeatStop, &jobActive, &currentJobId, &stdoutMutex ]() {
+        constexpr int kHeartbeatIntervalMs = 15000;
+        int elapsed = 0;
+        while ( !heartbeatStop.load() )
+        {
+            std::this_thread::sleep_for( std::chrono::milliseconds( 50 ) );
+            elapsed += 50;
+            if ( elapsed < kHeartbeatIntervalMs )
+                continue;
+            elapsed = 0;
+            if ( !jobActive.load() )
+                continue;
+            std::lock_guard<std::mutex> lock( stdoutMutex );
+            writeLine( sicnu::runtime::worker::makeHeartbeatFrame( currentJobId ) );
+        }
+    } );
+    auto stopHeartbeat = [ &heartbeatThread, &heartbeatStop ]() {
+        heartbeatStop = true;
+        if ( heartbeatThread.joinable() )
+            heartbeatThread.join();
+    };
     while ( true )
     {
         std::string line;
@@ -193,6 +292,7 @@ int main( int argc, char **argv )
             // then wait for it (the host kills us anyway if we stall).
             cancelFlag = true;
             finishJobThread();
+            stopHeartbeat();
             break;
         }
         Json::Value frame;
@@ -204,6 +304,7 @@ int main( int argc, char **argv )
         {
             cancelFlag = true;
             finishJobThread();
+            stopHeartbeat();
             break;
         }
         if ( op == "cancel" )
@@ -252,7 +353,13 @@ int main( int argc, char **argv )
 
         const std::string algorithmId = frame["algorithmId"].asString();
         const Json::Value params = frame["params"];
-        currentJobId = jobId;
+        {
+            // Reviewed P1 fix: the heartbeat thread reads currentJobId under
+            // stdoutMutex — publish the new job id under the same mutex so
+            // the swap is race-free.
+            std::lock_guard<std::mutex> lock( stdoutMutex );
+            currentJobId = jobId;
+        }
         // Each run starts with a fresh cancel window: a cancelled predecessor
         // must not disarm its successor on a reused worker.
         cancelFlag = false;
@@ -268,6 +375,11 @@ int main( int argc, char **argv )
             if ( algorithmId == "__hang__" )
             {
                 runHangJob( jobId, cancelFlag, stdoutMutex );
+                return;
+            }
+            if ( algorithmId == "__spawn_helper__" )
+            {
+                runSpawnHelperJob( params, jobId, cancelFlag, stdoutMutex );
                 return;
             }
             try

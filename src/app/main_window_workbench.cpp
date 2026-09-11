@@ -125,6 +125,20 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     m_selectionContext = new sicnu::app::SelectionContext( this );
     m_commandRegistry = new sicnu::app::CommandRegistry( this );
 
+    // Workbench 8.0: in-flight fact for ContextFacts / suggestedNextAction.
+    // The predicate reads TaskCenter's authoritative task set on the GUI
+    // thread only (the context recomputes on its own debounce).
+    m_selectionContext->setInFlightTaskPredicate( [] {
+        const QList<sicnu::AlgorithmTaskInfo> tasks =
+            sicnu::TaskCenter::instance().allTasks();
+        for ( const sicnu::AlgorithmTaskInfo &task : tasks )
+        {
+            if ( !sicnu::app::historyTaskTerminal( task.status ) )
+                return true;
+        }
+        return false;
+    } );
+
     // ── Workbenches ───────────────────────────────────────────────────
     m_workbenchHost->registerWorkbench(
         new sicnu::app::MapWorkbench( m_canvasStack, m_workbenchHost ) );

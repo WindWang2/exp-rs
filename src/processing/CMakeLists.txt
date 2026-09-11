@@ -268,6 +268,8 @@ add_library(sicnu_task_center STATIC
     framework/fused_chain.cpp
     framework/local_worker_host.cpp
     framework/worker_process_io.h
+    framework/worker_process_guard.h
+    framework/worker_process_guard.cpp
     framework/local_worker_pool.h
     framework/local_worker_pool.cpp
     framework/worker_execution_route.h
@@ -300,6 +302,11 @@ target_link_libraries(sicnu_task_center PUBLIC
     # Workflow Engine 2.0 wiring (#662): task_center.cpp fingerprints pipeline
     # steps via makeExecutionFingerprintV2 and AssetRevision.
     Sicnu::data
+    # Execution Plane 8.0 WP-F: the TaskCenter constructor installs the
+    # geospatial strong-ETag remote-identity resolver as the DEFAULT for the
+    # execution_identity_resolver seam (host-installed resolvers keep
+    # priority). geospatial is a lower layer (Qt-free + GDAL) — no cycle.
+    Sicnu::Geospatial
     # Phase C fused-chain executor streams tiles via sicnu_runtime's
     # ChunkPipeline (bounded queues, cancel/failure propagation).
     sicnu_runtime

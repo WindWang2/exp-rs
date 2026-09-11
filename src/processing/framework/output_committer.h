@@ -85,6 +85,11 @@ class SICNU_PROCESSING_EXPORT OutputCommitter : public QObject
     void displayRequested( sicnu::data::AssetId id );
 
   private:
+    /// The real commit path; `commit()` wraps it with the unified-trace
+    /// record (Verification Platform 8.0: OutputCommitter link of the
+    /// trace chain). No behavior change.
+    CommitResult commitImpl( const AlgorithmOutputRequest &request );
+
     sicnu::data::DataManager *m_dataManager = nullptr; // not owned
 };
 

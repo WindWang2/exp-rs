@@ -6,6 +6,7 @@
 #include "plugin_host_protocol.h"
 #include "plugin_host_proxies.h"
 
+#include "exprs/ipc_frame.h"
 #include "exprs/plugin_loader.h"
 
 #include <cstring>
@@ -100,9 +101,23 @@ bool PluginHostProcessRuntime::loadPlugin( const PluginRecord &record, HostServi
         entry->quota.clampTo( mOptions.quotaCeilings );
     }
     spawnOptions.quota = entry->quota;
-    spawnOptions.maxRestarts = mOptions.maxRestarts;
-    spawnOptions.restartWindowMs = mOptions.restartWindowMs;
     spawnOptions.handshakeTimeoutMs = mOptions.handshakeTimeoutMs;
+    spawnOptions.killGraceMs = mOptions.killGraceMs;
+
+    // Protocol 1.1 limits negotiation (params travel to the worker with
+    // plugin.load): the frame cap lowers to the quota's maxResponseBytes
+    // when it is below the transport default, and the dispatch width is
+    // the quota's concurrency (the worker clamps to its own capability).
+    {
+        Json::Value limits( Json::objectValue );
+        IpcFrameLimits transport;
+        if ( entry->quota.maxResponseBytes > 0
+             && static_cast<long long>( entry->quota.maxResponseBytes )
+                    < static_cast<long long>( transport.maxFrameBytes ) )
+            limits["maxFrameBytes"] = static_cast<Json::Int64>( entry->quota.maxResponseBytes );
+        limits["maxConcurrentRequests"] = entry->quota.maxRequestConcurrency;
+        params["limits"] = limits;
+    }
 
     auto session = PluginHostProcessSession::spawn( spawnOptions, log );
     if ( !session )
@@ -219,9 +234,8 @@ bool PluginHostProcessRuntime::respawn( const std::string &pluginId,
     spawnOptions.workerPath = mOptions.workerPath;
     spawnOptions.pluginId = pluginId;
     spawnOptions.quota = entry.quota;
-    spawnOptions.maxRestarts = mOptions.maxRestarts;
-    spawnOptions.restartWindowMs = mOptions.restartWindowMs;
     spawnOptions.handshakeTimeoutMs = mOptions.handshakeTimeoutMs;
+    spawnOptions.killGraceMs = mOptions.killGraceMs;
 
     auto session = PluginHostProcessSession::spawn( spawnOptions, log );
     if ( !session )
@@ -275,12 +289,106 @@ Json::Value PluginHostProcessRuntime::diagnosticsSnapshot() const
         Json::Value entryJson( Json::objectValue );
         entryJson["workerAlive"] = entry->session->isAlive();
         entryJson["generation"] = entry->session->generation();
-        entryJson["restarts"] = entry->session->restartCount();
+        entryJson["poisoned"] = entry->session->isPoisoned();
+        entryJson["effectiveConcurrency"] = entry->session->effectiveConcurrency();
         entryJson["quota"] = entry->quota.toJson();
         plugins[ pluginId ] = entryJson;
     }
     snapshot["plugins"] = plugins;
     return snapshot;
+}
+
+Json::Value PluginHostProcessRuntime::describeUiSchema( const std::string &pluginId,
+                                                        PluginDiagnosticLog &log )
+{
+    Json::Value result( Json::objectValue );
+    std::shared_ptr<PluginHostProcessSession> session;
+    {
+        std::lock_guard<std::mutex> lock( mMutex );
+        auto iterator = mSessions.find( pluginId );
+        if ( iterator == mSessions.end() )
+        {
+            result["ok"] = false;
+            result["error"] = "plugin is not hosted (E4003)";
+            return result;
+        }
+        session = iterator->second->session;
+    }
+    if ( !session || !session->isAlive() )
+    {
+        result["ok"] = false;
+        result["error"] = "worker process is not running (E6005)";
+        return result;
+    }
+    IpcChannel::Outcome outcome =
+        session->request( kDescribeUi, Json::Value( Json::objectValue ),
+                          std::max( 10000, mOptions.handshakeTimeoutMs ) );
+    if ( outcome.status == IpcChannel::Outcome::Status::Error
+         && outcome.error.code == "E6008" )
+    {
+        result["ok"] = false;
+        result["error"] = "plugin provides no declarative UI (E6008)";
+        return result;
+    }
+    if ( outcome.status != IpcChannel::Outcome::Status::Ok )
+    {
+        result["ok"] = false;
+        result["error"] = outcome.error.message.empty()
+                              ? "ui.describe failed"
+                              : outcome.error.message;
+        if ( !outcome.error.code.empty() )
+        {
+            result["code"] = outcome.error.code;
+            result["error"] = result["error"].asString() + " (" + outcome.error.code + ")";
+        }
+        log.add( PluginDiagnosticCode::IpcProtocolError, PluginDiagnosticSeverity::Warning,
+                 "ui.describe failed: " + outcome.error.message, pluginId );
+        return result;
+    }
+    result["ok"] = true;
+    result["schema"] = outcome.result["schema"];
+    return result;
+}
+
+Json::Value PluginHostProcessRuntime::invokeUi( const std::string &pluginId,
+                                                const Json::Value &event, int timeoutMs,
+                                                PluginDiagnosticLog &log )
+{
+    Json::Value result( Json::objectValue );
+    std::shared_ptr<PluginHostProcessSession> session;
+    {
+        std::lock_guard<std::mutex> lock( mMutex );
+        auto iterator = mSessions.find( pluginId );
+        if ( iterator == mSessions.end() )
+        {
+            result["ok"] = false;
+            result["error"] = "plugin is not hosted (E4003)";
+            return result;
+        }
+        session = iterator->second->session;
+    }
+    if ( !session || !session->isAlive() )
+    {
+        result["ok"] = false;
+        result["error"] = "worker process is not running (E6005)";
+        return result;
+    }
+    Json::Value params( Json::objectValue );
+    params["event"] = event;
+    IpcChannel::Outcome outcome =
+        session->request( kInvokeUi, params, timeoutMs > 0 ? timeoutMs : 10000 );
+    if ( outcome.status != IpcChannel::Outcome::Status::Ok )
+    {
+        result["ok"] = false;
+        result["error"] = outcome.error.message.empty() ? "ui.invoke failed"
+                                                        : outcome.error.message;
+        if ( !outcome.error.code.empty() )
+            result["code"] = outcome.error.code;
+        return result;
+    }
+    result["ok"] = true;
+    result["response"] = outcome.result["response"];
+    return result;
 }
 
 bool PluginHostProcessRuntime::isWorkerAlive( const std::string &pluginId ) const

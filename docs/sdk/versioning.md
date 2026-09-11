@@ -1,12 +1,27 @@
 # API / ABI Versioning Policy
 
-Three independent axes (declared in `exprs/version.h`):
+Four independent axes (declared in `exprs/version.h` and
+`exprs/host_protocol.h`):
 
 | Axis | Where declared | Gate |
 |---|---|---|
 | Plugin **API** version | `api_version: "3.0"` in the manifest | same MAJOR, plugin MINOR ≤ host MINOR |
 | Plugin **ABI** version | `abi_version: 1` in the manifest | exact equality, checked **before dlopen** |
 | **Manifest** version | `manifest_version: 1` | major must be 1; unknown optional fields ignored |
+| **Host protocol** version | `EXP_RS_HOST_PROTOCOL_VERSION` (worker handshake) | same MAJOR; peer MINOR ≤ local MINOR |
+
+## Host protocol axis (isolation runtime 5.0+, plugin-platform 8.0)
+
+The wire protocol between the host and an out-of-process plugin worker.
+1.0 covered the id-correlated request/response surface with serial worker
+dispatch. **1.1** (plugin-platform 8.0) is strictly additive: multiple
+in-flight requests with the host-side FIFO quota gate, per-id cancel
+routing, downward frame-cap negotiation, `ui.describe`/`ui.invoke` for
+declarative UI, the informational `maxConcurrentRequests` handshake field
+and the `limits` plugin.load section. A 1.0 worker serializes 1.1 host
+traffic safely (id correlation already supports it); a 1.0 host refuses a
+1.1 worker with E6001 — the worker ships from the same SDK build as the
+host, so this refuses mismatched deployments, not valid pairs.
 
 ## What "API minor bump" means
 

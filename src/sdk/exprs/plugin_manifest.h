@@ -216,6 +216,17 @@ struct PluginManifest
                              // capability declarations; expanded+validated
                              // by exprs/plugin_capabilities.h)
     Json::Value quotas;      // raw manifest "quotas" object (exprs/plugin_quotas.h)
+    Json::Value package;     // optional packaging metadata (plugin-platform
+                             // 8.0): { "checksums": { "file": "<sha256 hex>" },
+                             // "sbom": { "path", "format" }, "signature":
+                             // { "algorithm", "value" } }. Checksums are
+                             // verified at install; SBOM/signature are
+                             // carried metadata (integrity, NOT authenticity).
+    Json::Value conformance; // optional conformance-declaration object
+                             // (plugin-platform 8.0): { "cancelTarget",
+                             // "concurrencyTarget", "crashTarget" (operator
+                             // ids), "uiSchema": bool } — drives the
+                             // `plugin test` conformance kit.
     ManifestPythonSection python;
     std::vector<std::string> capabilities;
     std::vector<PluginPermission> permissions;
