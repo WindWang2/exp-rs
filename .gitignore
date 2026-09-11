@@ -85,6 +85,7 @@ vendor/
 !.planning/unified-help-diagnostics-6/
 !.planning/cartography-platform-7/
 !.planning/dataset-experiment-7/
+!.planning/geospatial-data-fabric-8/
 .zcode/
 
 # IDE / editor / OS artifacts
