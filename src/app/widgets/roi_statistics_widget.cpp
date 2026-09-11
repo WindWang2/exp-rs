@@ -174,15 +174,23 @@ void RoiStatisticsWidget::computeStatistics()
     // #797: run the GDAL scan on the dedicated bounded scan pool (never the
     // global pool) and carry a cancellation generation — the worker exits at
     // band boundaries when a newer request supersedes it.
-    const quint64 scanGeneration = sicnu::app::RsScanPool::instance().nextGeneration();
+    const quint64 scanGeneration = sicnu::app::RsScanPool::instance().nextGeneration( this );
     m_scanGeneration = scanGeneration;
     QPointer<RoiStatisticsWidget> self = this;
     sicnu::app::RsScanPool::instance().pool().start([self, source, bandCount, roiWkt, layerExtent, reqId, scanGeneration]() {
         QVector<BandStats> stats(bandCount);
         QString error;
 
-        if (sicnu::app::RsScanPool::instance().isStale(scanGeneration))
+        if (sicnu::app::RsScanPool::instance().isStale(scanGeneration, self.data()) || !self || self->m_requestEpoch != reqId) {
+            QMetaObject::invokeMethod(qApp, [self, reqId]() {
+                if (!self || self->m_requestEpoch != reqId)
+                    return;
+                self->m_computing = false;
+                self->m_refreshBtn->setEnabled(true);
+                self->m_summaryLabel->setText(self->tr("Superseded."));
+            });
             return;
+        }
 
         QgsGeometry roi = roiWkt.isEmpty() ? QgsGeometry() : QgsGeometry::fromWkt(roiWkt);
         const QgsRectangle bbox = roi.isNull() ? layerExtent : roi.boundingBox();
@@ -272,7 +280,7 @@ void RoiStatisticsWidget::computeStatistics()
         for (int b = 0; b < bandCount; ++b) {
             // Cooperative cancellation (#797): a superseded scan abandons the
             // remaining bands promptly instead of monopolising a scan worker.
-            if (sicnu::app::RsScanPool::instance().isStale(scanGeneration) || !self || self->m_requestEpoch != reqId) {
+            if (sicnu::app::RsScanPool::instance().isStale(scanGeneration, self.data()) || !self || self->m_requestEpoch != reqId) {
                 GDALClose(ds);
                 QMetaObject::invokeMethod(qApp, [self, reqId]() {
                     if (!self || self->m_requestEpoch != reqId)

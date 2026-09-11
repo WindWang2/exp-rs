@@ -444,7 +444,8 @@ void Solver::detectCycles()
     }
     else if ( c.itemIds.size() >= 2 )
     {
-      adjacency[c.itemIds[0]].insert( c.itemIds[1] );
+      for ( int i = 1; i < static_cast<int>( c.itemIds.size() ); ++i )
+        adjacency[c.itemIds[0]].insert( c.itemIds[i] );
     }
   }
 
@@ -681,6 +682,22 @@ Apply Solver::computeTargets( const ConstraintRuntime &c, std::vector<TargetWrit
         target.w = leader.w;
       else
         target.h = leader.h;
+      const Json::Value &minSize = c.items[i]->get( "min_size_mm", Json::Value() );
+      const Json::Value &maxSize = c.items[i]->get( "max_size_mm", Json::Value() );
+      if ( minSize.isArray() && minSize.size() == 2 )
+      {
+        if ( kind == "match_width" && minSize[0].isNumeric() )
+          target.w = std::max( target.w, minSize[0].asDouble() );
+        else if ( kind == "match_height" && minSize[1].isNumeric() )
+          target.h = std::max( target.h, minSize[1].asDouble() );
+      }
+      if ( maxSize.isArray() && maxSize.size() == 2 )
+      {
+        if ( kind == "match_width" && maxSize[0].isNumeric() )
+          target.w = std::min( target.w, maxSize[0].asDouble() );
+        else if ( kind == "match_height" && maxSize[1].isNumeric() )
+          target.h = std::min( target.h, maxSize[1].asDouble() );
+      }
       if ( !sameRect( rect, target ) )
         push( c.items[i], target );
     }
@@ -901,7 +918,20 @@ Apply Solver::computeTargets( const ConstraintRuntime &c, std::vector<TargetWrit
     // relative constraint (target + declared content).
     Rect leader;
     if ( !rectOf( c.items[0], leader ) )
-      return Apply::Blocked;
+    {
+      const Json::Value &r = c.items[0]->get( "rect_mm", Json::Value() );
+      if ( r.isArray() && r.size() == 4 && r[0].isNumeric() && r[1].isNumeric() )
+      {
+        leader.x = r[0].asDouble();
+        leader.y = r[1].asDouble();
+        leader.w = r[2].isNumeric() ? r[2].asDouble() : 0.0;
+        leader.h = r[3].isNumeric() ? r[3].asDouble() : 0.0;
+      }
+      else
+      {
+        return Apply::Blocked;
+      }
+    }
     Json::Value content = c.contentMm;
     if ( !content.isArray() || content.size() != 2 || !content[0].isNumeric() ||
          !content[1].isNumeric() )
@@ -1069,6 +1099,7 @@ void Solver::relaxHard()
   }
   mPasses = kMaxRelaxationPasses;
   mConverged = false;
+  restoreRects( mPreSolveRects );
   std::string ids;
   for ( const auto &c : mConstraints )
     if ( !c.isSoft && !c.disabled )

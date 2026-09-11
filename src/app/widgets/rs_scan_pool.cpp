@@ -19,14 +19,22 @@ RsScanPool &RsScanPool::instance()
     return s_pool;
 }
 
-quint64 RsScanPool::nextGeneration()
+quint64 RsScanPool::nextGeneration( const void *owner )
 {
-    return m_activeGeneration.fetch_add( 1, std::memory_order_acq_rel ) + 1;
+    const quint64 gen = m_activeGeneration.fetch_add( 1, std::memory_order_acq_rel ) + 1;
+    if ( owner )
+    {
+        const std::lock_guard<std::mutex> lock( m_canceledMutex );
+        m_ownerActiveGeneration[owner] = gen;
+    }
+    return gen;
 }
 
-void RsScanPool::cancel( quint64 generation )
+void RsScanPool::cancel( quint64 generation, const void *owner )
 {
     const std::lock_guard<std::mutex> lock( m_canceledMutex );
+    if ( owner )
+        m_ownerActiveGeneration.erase( owner );
     // Bound the set: a worker only ever polls its own (recent) token, so
     // entries can be retired wholesale once the set grows large — by then
     // the matching workers finished long ago.
