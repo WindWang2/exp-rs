@@ -1336,6 +1336,8 @@ target_link_libraries(test_mcp_server PRIVATE
   sicnu_task_center
   sicnu_data
   sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
   GDAL::GDAL
 )
 if(TARGET sicnu_operators)
@@ -1927,6 +1929,43 @@ target_link_libraries(test_data_platform_surface PRIVATE Sicnu::experiment Sicnu
 sicnu_add_test(test_platform7_library TIMEOUT 600)
 target_link_libraries(test_platform7_library PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
 set_property(TARGET test_platform7_library PROPERTY RUN_SERIAL TRUE)
+
+# Platform 8.0 MLOps bridge core: execution→experiment lifecycle recording
+# (truthful states, pins, stale reconciliation). Light target; the workflow
+# adapter E2E lives in test_mlops8_e2e.
+sicnu_add_test(test_mlops8_bridge TIMEOUT 300)
+target_link_libraries(test_mlops8_bridge PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+
+# Platform 8.0 scale probe: reconcile/scan boundedness at 20k stored runs
+# (RUN_SERIAL: it pays 20k single-row transactions by design).
+sicnu_add_test(test_mlops8_scale TIMEOUT 900)
+target_link_libraries(test_mlops8_scale PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+set_property(TARGET test_mlops8_scale PROPERTY RUN_SERIAL TRUE)
+
+# Platform 8.0 MLOps E2E: real tracked pipelines auto-recorded into the
+# ExperimentStore through the workflow→experiment adapter.
+add_executable(test_mlops8_e2e test_mlops8_e2e.cpp)
+target_link_libraries(test_mlops8_e2e PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  SQLite::SQLite3
+  sicnu_workflow
+  sicnu_workflow_runtime
+  sicnu_data
+  sicnu_processing
+  sicnu_task_center
+  sicnu_jobs
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_mlops8_e2e PRIVATE jsoncpp)
+endif()
+target_include_directories(test_mlops8_e2e PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_mlops8_e2e TIMEOUT 600)
 
 
 # Phase C fused-chain equivalence (links through sicnu_task_center which

@@ -4,6 +4,35 @@ All notable changes to the `exp-rs` project will be documented in this file.
 
 ## [Unreleased] - 2026-09-11
 
+### Dataset / Experiment / Scientific MLOps 8.0 (goal series, ADR 0143)
+- **Automatic execution→experiment lifecycle wiring**: the 7.0
+  `ExperimentRunRecorder` (previously called by nothing) is now driven by the
+  authoritative `WorkflowRunCoordinator` lifecycle through a two-layer
+  bridge — a workflow-free state machine (`ExperimentRunBridge`,
+  `sicnu_experiment`) plus a thin workflow adapter
+  (`sicnu_experiment_bridge`). Tracked workflow runs record truthfully as
+  Created/Running/Succeeded/Failed/Cancelled/Interrupted; a resumed
+  execution continues the SAME experiment record; terminal events for
+  unknown executions are typed errors, never fabricated history.
+- **Truthful interruption + stale reconciliation**: `markInterrupted` /
+  `markResumed` on the recorder; at recording-enable time recorded
+  non-terminal runs are reconciled against checkpoint evidence (flock-probed
+  live owners are never touched; completed checkpoints without artifact
+  evidence are reported, not closed as success).
+- **MCP opt-in recording**: `run_workflow` accepts `experiment_db`,
+  `experiment_id` (+ name/objective), optional `dataset_db`-verified pins
+  (`dataset_version`, `split_manifest`, `model_id`, `model_digest`, `seed`);
+  absent arguments leave behavior unchanged. Recorded runs are visible
+  through the existing read-only `experiment:`/`reproducibility:` tools and
+  CLI verbs.
+- **Step-level provenance in auto-recorded runs**: per-step summaries
+  (operator, status, error, output path/size/content digest) and the
+  workflow definition snapshot ride the run's evidence document, bounded
+  (≤256 steps).
+- New tests: `test_mlops8_bridge` (lifecycle truth matrix, pins, stale
+  decisions) and `test_mlops8_e2e` (real tracked pipelines recorded
+  end-to-end, cancel/interrupt/resume stories).
+
 ### 🧭 Pi Spatial Scientist Harness 8.0 (goal series, ADR 0144)
 
 - **Typed spatial context 2.0**: `DatasetUnderstanding` keeps every product
@@ -194,6 +223,7 @@ All notable changes to the `exp-rs` project will be documented in this file.
 - **Performance evidence (WP-H)**: ORT cold/warm session acquire 21.9/1.2 ms,
   named N-D forwards ≈ 23k/s, in-forward cancel latency 24.9 ms
   (`benchmarks/model-runtime-4.json`, schema `model-runtime-bench-ort/1`).
+>>>>>>> master
 >>>>>>> master
 
 ### Cartography Knowledge, Template & Recipe Platform 6.0 (goal series, ADR 0135)

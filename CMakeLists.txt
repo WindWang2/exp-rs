@@ -710,6 +710,9 @@ add_subdirectory(src/operators)
 # Must follow src/operators: the adapters link the sicnu_operators target.
 add_subdirectory(src/help/adapters)
 add_subdirectory(src/workflow)
+# Workflow → experiment auto-recording adapter (goal 8.0). Must follow
+# src/workflow: the adapter links the sicnu_workflow target.
+add_subdirectory(src/experiment/bridge)
 add_subdirectory(src/jobs)
 add_subdirectory(src/python/isolated)
 add_subdirectory(src/python/sdk)

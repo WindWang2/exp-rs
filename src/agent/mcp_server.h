@@ -8,6 +8,11 @@
 #include <QCoreApplication>
 
 #include <atomic>
+#include <memory>
+
+namespace sicnu::experiment {
+class WorkflowExperimentMonitor;
+}
 
 #include "processing/framework/task_center.h"
 #include "processing/framework/tool_call_dispatcher.h"
@@ -79,6 +84,10 @@ public:
     ~McpServer();
 
     void start(QCoreApplication *app);
+
+    /// Drains queued experiment-recording lifecycle events (call at shutdown;
+    /// the destructor also does this).
+    void flushExperimentRecording();
 
     /// Injects DataManager asset authority so the dispatcher commits tool-call
     /// outputs transactionally (TICKET-23) and provenance queries resolve.
@@ -182,6 +191,10 @@ private:
     /// id; entries are removed when consumed by notifications/cancelled and
     /// the map is bounded (#644).
     QHash<QString, long> m_cancelledRequestTasks;
+    /// Opt-in auto-recording of tracked workflow runs into the ExperimentStore
+    /// (goal 8.0 §A). Created lazily by run_workflow when experiment recording
+    /// arguments arrive; inert (and null) otherwise.
+    std::unique_ptr<sicnu::experiment::WorkflowExperimentMonitor> m_experimentMonitor;
 };
 
 #endif // MCP_SERVER_H
