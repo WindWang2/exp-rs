@@ -23,8 +23,13 @@ namespace sicnu::plugins {
 class ExternalToolOperator : public sicnu::operators::RSOperator
 {
 public:
+    /// @p spawnAllowed carries the manifest access decision: a manifest that
+    /// DECLARES an access object with externalProcess:false gets operators
+    /// that refuse to spawn with a typed PolicyRefused error (plugin
+    /// platform 9.0). Absent declarations keep the spawn allowed (v1
+    /// manifests never had the field).
     ExternalToolOperator( std::string operatorId, exprs::ManifestOperator declaration,
-                          std::string pluginDir = {} );
+                          std::string pluginDir = {}, bool spawnAllowed = true );
 
     std::string name() const override { return mOperatorId; }
     std::string displayName() const override { return mDeclaration.displayName; }
@@ -52,6 +57,7 @@ private:
     std::string mOperatorId;
     exprs::ManifestOperator mDeclaration;
     std::string mPluginDir;
+    bool mSpawnAllowed = true;
 };
 
 } // namespace sicnu::plugins

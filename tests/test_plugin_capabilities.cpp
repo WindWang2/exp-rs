@@ -8,6 +8,7 @@
 #include <json/json.h>
 
 #include <filesystem>
+#include <map>
 
 using namespace exprs;
 
@@ -170,6 +171,119 @@ TEST_CASE( "quota environment defaults parse", "[plugin][quotas]" )
     REQUIRE( quota.maxResponseBytes > 0 );
     REQUIRE( quota.workerCpuRatePercent >= 0 );
     REQUIRE( quota.workerCpuRatePercent <= 100 );
+}
+
+TEST_CASE( "protocol 1.2 request-bytes quota parses, clamps and round-trips",
+           "[plugin][quotas][p12]" )
+{
+    PluginQuota ceilings = PluginQuota::fromEnvironment();
+    ceilings.maxRequestBytes = 4L * 1024L * 1024L;
+
+    Json::Value quotas( Json::objectValue );
+    quotas["maxRequestBytes"] = Json::Value( Json::Int64( 64 ) * 1024 * 1024 ); // above ceiling
+    PluginQuota quota;
+    std::vector<std::string> warnings;
+    quota.parseManifest( quotas, warnings );
+    REQUIRE( warnings.empty() );
+    quota.clampTo( ceilings );
+    REQUIRE( quota.maxRequestBytes == 4L * 1024L * 1024L );
+
+    // A manifest may lower below the ceiling.
+    Json::Value lower( Json::objectValue );
+    lower["maxRequestBytes"] = Json::Value( Json::Int64( 8192 ) );
+    PluginQuota lowered;
+    std::vector<std::string> noWarnings;
+    lowered.parseManifest( lower, noWarnings );
+    lowered.clampTo( ceilings );
+    REQUIRE( lowered.maxRequestBytes == 8192 );
+
+    // The toJson projection carries the field (round-trip contract).
+    const Json::Value json = quota.toJson();
+    REQUIRE( json["maxRequestBytes"].asInt64() == 4L * 1024L * 1024L );
+
+    // Out-of-range values warn and keep the default.
+    Json::Value junk( Json::objectValue );
+    junk["maxRequestBytes"] = 512; // below the 1024 floor
+    PluginQuota refused;
+    std::vector<std::string> warned;
+    refused.parseManifest( junk, warned );
+    REQUIRE( warned.size() == 1 );
+}
+
+TEST_CASE( "capability enforcement matrix is present and honest", "[plugin][capabilities][p12]" )
+{
+    const auto matrix = exprs::pluginCapabilityEnforcementMatrix();
+    REQUIRE( !matrix.empty() );
+
+    // Stable contract names must be present exactly once per (capability,
+    // runtimeScope) pair.
+    std::map<std::string, int> seen;
+    for ( const auto &entry : matrix )
+        ++seen[ std::string( entry.capability ) + "@" + entry.runtimeScope ];
+    for ( const auto &[ key, count ] : seen )
+    {
+        (void)key;
+        REQUIRE( count == 1 );
+    }
+
+    // Honesty anchors: the refused-by-contract row for network must exist,
+    // and the read-roots row must NOT claim enforcement (declaration +
+    // validation only — reads of native code are not interceptable).
+    bool networkRefused = false;
+    bool inProcessFsHonest = false;
+    for ( const auto &entry : matrix )
+    {
+        if ( std::string( entry.capability ) == "network"
+             && entry.level == exprs::CapabilityEnforcementLevel::RefusedByContract )
+            networkRefused = true;
+        if ( std::string( entry.capability ) == "filesystem.readRoots"
+             && entry.level == exprs::CapabilityEnforcementLevel::AuditOnly )
+            inProcessFsHonest = true;
+    }
+    REQUIRE( networkRefused );
+    REQUIRE( inProcessFsHonest );
+
+    // JSON projection mirrors the table.
+    const Json::Value json = exprs::pluginCapabilityEnforcementMatrixJson();
+    REQUIRE( json.isArray() );
+    REQUIRE( json.size() == matrix.size() );
+}
+
+TEST_CASE( "model framework gate honours explicit declarations only",
+           "[plugin][capabilities][p12]" )
+{
+    Json::Value access( Json::objectValue );
+    Json::Value modelProvider( Json::objectValue );
+    Json::Value frameworks( Json::arrayValue );
+    frameworks.append( "onnx" );
+    modelProvider["frameworks"] = frameworks;
+    access["modelProvider"] = modelProvider;
+
+    REQUIRE( exprs::modelFrameworkAllowed( access, "onnx" ) );
+    REQUIRE_FALSE( exprs::modelFrameworkAllowed( access, "cuda-trt" ) );
+
+    // Declared modelProvider WITHOUT a frameworks list stays unbounded.
+    Json::Value bare( Json::objectValue );
+    bare["modelProvider"] = Json::Value( Json::objectValue );
+    REQUIRE( exprs::modelFrameworkAllowed( bare, "anything" ) );
+
+    // An access object WITHOUT modelProvider never gates (compat).
+    Json::Value other( Json::objectValue );
+    other["network"] = true;
+    REQUIRE( exprs::modelFrameworkAllowed( other, "anything" ) );
+
+    // No access object at all: pre-9.0 behavior (allow).
+    REQUIRE( exprs::modelFrameworkAllowed( Json::Value(), "anything" ) );
+
+    // accessBool is tri-state: declared true/false/absent.
+    Json::Value withUi( Json::objectValue );
+    withUi["ui"] = false;
+    REQUIRE( exprs::accessBool( withUi, "ui" ) == 0 );
+    withUi["ui"] = true;
+    REQUIRE( exprs::accessBool( withUi, "ui" ) == 1 );
+    REQUIRE( exprs::accessBool( Json::Value( Json::objectValue ), "ui" ) == -1 );
+    REQUIRE( exprs::manifestDeclaresAccess( Json::Value( Json::objectValue ) ) );
+    REQUIRE_FALSE( exprs::manifestDeclaresAccess( Json::Value() ) );
 }
 
 TEST_CASE( "pathIsWithinRoot contains and rejects exactly", "[plugin][capabilities]" )

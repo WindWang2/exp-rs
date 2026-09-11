@@ -322,4 +322,143 @@ PluginCapabilityParseResult parsePluginAccess(
     return result;
 }
 
+bool manifestDeclaresAccess( const Json::Value &access )
+{
+    return access.isObject();
+}
+
+int accessBool( const Json::Value &access, const char *key )
+{
+    if ( !access.isObject() )
+        return -1;
+    const Json::Value &value = access[ key ];
+    if ( !value.isBool() )
+        return -1;
+    return value.asBool() ? 1 : 0;
+}
+
+bool modelFrameworkAllowed( const Json::Value &access, const std::string &framework )
+{
+    if ( !manifestDeclaresAccess( access ) )
+        return true;
+    const Json::Value &modelProvider = access[ "modelProvider" ];
+    if ( !modelProvider.isObject() )
+        return true;
+    const Json::Value &frameworks = modelProvider[ "frameworks" ];
+    if ( !frameworks.isArray() )
+        return true; // declared modelProvider without a frameworks list: unbounded
+    for ( const Json::Value &entry : frameworks )
+    {
+        if ( entry.isString() && entry.asString() == framework )
+            return true;
+    }
+    return false;
+}
+
+std::string capabilityEnforcementLevelName( CapabilityEnforcementLevel level )
+{
+    switch ( level )
+    {
+    case CapabilityEnforcementLevel::EnforcedHost:
+        return "enforced-host";
+    case CapabilityEnforcementLevel::EnforcedWorker:
+        return "enforced-worker";
+    case CapabilityEnforcementLevel::EnforcedOs:
+        return "enforced-os";
+    case CapabilityEnforcementLevel::Advisory:
+        return "advisory";
+    case CapabilityEnforcementLevel::AuditOnly:
+        return "audit-only";
+    case CapabilityEnforcementLevel::RefusedByContract:
+        return "refused-by-contract";
+    }
+    return "unknown";
+}
+
+std::vector<CapabilityEnforcementEntry> pluginCapabilityEnforcementMatrix()
+{
+    using L = CapabilityEnforcementLevel;
+    return {
+        // -- filesystem ---------------------------------------------------
+        { "filesystem.readRoots", "all", L::AuditOnly,
+          "declared and validated at load; no gate intercepts plugin reads "
+          "(native code cannot be confined from itself)" },
+        { "filesystem.writeRoots", "host-process", L::EnforcedWorker,
+          "operator workDir handed to plugin code is refused outside every "
+          "declared write root and the plugin temp directory (E5005); opt-in: "
+          "only plugins that DECLARE write roots are gated; NOT an OS sandbox" },
+        { "filesystem.writeRoots", "in-process", L::AuditOnly,
+          "declaration + audit + diagnostics only" },
+        { "network", "all", L::RefusedByContract,
+          "network access of plugin code is never claimed to be intercepted" },
+        { "externalProcess", "host-process", L::EnforcedWorker,
+          "the operator workDir seam is gated as above; quotas bound worker "
+          "children where the OS allows" },
+        { "externalProcess", "in-process", L::EnforcedHost,
+          "manifest external-tool operators refuse to spawn when the manifest "
+          "access object declares externalProcess:false (E5005); native code "
+          "spawning processes directly cannot be intercepted (audit-only)" },
+        { "gpu", "all", L::Advisory,
+          "gpuHint is passed to the model runtime as a preference; never a "
+          "hard assignment" },
+        { "modelProvider.frameworks", "host-process", L::EnforcedHost,
+          "model runtime load is refused for frameworks outside the declared "
+          "list when the manifest declares an access object (E5005)" },
+        { "modelProvider.frameworks", "in-process", L::EnforcedHost,
+          "same host-side registration gate as the host-process runtime" },
+        { "ui", "all", L::EnforcedHost,
+          "declarative/in-process UI is refused (E5005) when the manifest "
+          "access object explicitly declares ui:false" },
+        { "workspace.mutate", "in-process", L::AuditOnly,
+          "declaration + audit; mutation policy is owned by the workspace "
+          "governance layer, not the plugin runtime" },
+        { "project.mutate", "in-process", L::AuditOnly,
+          "declaration + audit only" },
+        { "destructive", "all", L::AuditOnly,
+          "surfaced to users in inspect/doctor; no runtime gate" },
+        // -- quotas (exprs/plugin_quotas.h) --------------------------------
+        { "quotas.maxRequestConcurrency", "host-process", L::EnforcedHost,
+          "FIFO concurrency gate; overflow refuses typed (E6007)" },
+        { "quotas.requestDeadlineMs", "host-process", L::EnforcedHost,
+          "per-request ceiling; timeout escalates through the kill ladder" },
+        { "quotas.maxResponseBytes", "host-process", L::EnforcedWorker,
+          "worker refuses to write larger frames (E6003); protocol 1.2 adds "
+          "the host-side receive cap (defense in depth)" },
+        { "quotas.maxRequestBytes", "host-process", L::EnforcedHost,
+          "protocol 1.2 per-direction cap; the host refuses to send larger "
+          "request frames (E6003)" },
+        { "quotas.workerMemoryBytes", "host-process", L::EnforcedOs,
+          "Windows: job object memory limit (exact); POSIX: pre-exec "
+          "RLIMIT_AS (coarse, address space not RSS, documented)" },
+        { "quotas.workerCpuRatePercent", "host-process", L::EnforcedOs,
+          "Windows: job object CPU rate control; POSIX: advisory only "
+          "(RLIMIT_NPROC-class control does not exist per-process)" },
+        { "quotas.maxChildProcesses", "host-process", L::EnforcedOs,
+          "Windows: job object ActiveProcessLimit (exact); POSIX: advisory "
+          "(documented)" },
+        // -- isolation -----------------------------------------------------
+        { "isolation.processTreeCleanup", "host-process", L::EnforcedOs,
+          "POSIX: setpgid + process-group SIGKILL (+ reaped after self-death); "
+          "Windows: job object kill-on-close" },
+        { "isolation.crashRestart", "host-process", L::EnforcedHost,
+          "bounded restart policy (3 respawns / 60 s); exhaustion refuses "
+          "typed (E6005)" },
+    };
+}
+
+Json::Value pluginCapabilityEnforcementMatrixJson()
+{
+    Json::Value array( Json::arrayValue );
+    for ( const CapabilityEnforcementEntry &entry : pluginCapabilityEnforcementMatrix() )
+    {
+        Json::Value row( Json::objectValue );
+        row["capability"] = entry.capability;
+        row["runtimeScope"] = entry.runtimeScope;
+        row["level"] = capabilityEnforcementLevelName( entry.level );
+        row["note"] = entry.note;
+        array.append( row );
+    }
+    return array;
+}
+
 } // namespace exprs
