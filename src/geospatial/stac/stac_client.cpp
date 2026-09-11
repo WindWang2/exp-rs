@@ -7,6 +7,13 @@
 
 #include "geospatial/stac/stac_client.h"
 
+#include "geospatial/util/sha256.h"
+
+#include <filesystem>
+#include <system_error>
+
+namespace fs = std::filesystem;
+
 #include "geospatial/util/resource_uri.h"
 #include "geospatial/util/time_normalization.h"
 
@@ -127,21 +134,41 @@ std::string resolveReference( const std::string &baseUrl, const std::string &ref
   }
   std::string basePath = base.path;
   const std::size_t lastSlash = basePath.rfind( '/' );
-  std::string directory = lastSlash == std::string::npos ? "" : basePath.substr( 0, lastSlash );
+  std::string directory = lastSlash == std::string::npos ? std::string() : basePath.substr( 0, lastSlash );
+  // Explicit current-directory spellings contribute nothing.
+  while ( path.rfind( "./", 0 ) == 0 )
+    path = path.substr( 2 );
   if ( path == "." )
-    path = std::string();
+    path.clear();
   while ( path.rfind( "../", 0 ) == 0 )
   {
     path = path.substr( 3 );
     const std::size_t up = directory.rfind( '/' );
     directory = up == std::string::npos ? std::string() : directory.substr( 0, up );
   }
+  // RFC 3986 §5.3 merge: a root-absolute reference replaces the base path
+  // outright; otherwise it joins the base directory (never a doubled slash —
+  // a root-relative self link merged against a bare origin used to yield
+  // "host//path" and poison everything resolved from it).
+  std::string mergedPath;
   if ( !path.empty() && path[0] == '/' )
-    directory = std::string();
+  {
+    mergedPath = path;
+  }
+  else
+  {
+    mergedPath = directory;
+    if ( !path.empty() )
+    {
+      if ( !mergedPath.empty() && mergedPath.back() != '/' )
+        mergedPath += '/';
+      mergedPath += path;
+    }
+  }
   std::string resolved = base.scheme + "://" + base.host;
   // userinfo is deliberately DROPPED on relative resolution: resolve only
   // from credential-free bases (display stays redacted either way).
-  resolved += directory + "/" + path + query;
+  resolved += mergedPath + query;
   return resolved;
 }
 
@@ -204,10 +231,9 @@ HttpFetchOptions StacClient::fetchOptions() const
   return options;
 }
 
-StacPage StacClient::executeSearch( const std::string &method, const std::string &url,
-                                    const Json::Value &body ) const
+Json::Value StacClient::fetchDocument( const std::string &method, const std::string &url,
+                                       const Json::Value &body ) const
 {
-  Json::Value document;
   if ( method == "POST" )
   {
     HttpFetchOptions options = fetchOptions();
@@ -215,22 +241,155 @@ StacPage StacClient::executeSearch( const std::string &method, const std::string
     Json::StreamWriterBuilder writerBuilder;
     writerBuilder["indentation"] = "";
     options.postBody = Json::writeString( writerBuilder, body );
-    document = httpFetchJson( url, options );
+    return httpFetchJson( url, options );
+  }
+  return httpFetchJson( url, fetchOptions() );
+}
+
+/// 9.0 M4: stamps delivery provenance onto every parsed item — the item's
+/// rel="self" link when present (resolved against the delivering URL), else
+/// the delivering URL itself. Relative asset hrefs resolve against this; a
+/// page-less parse leaves it empty and resolution fails typed.
+void stampItemProvenance( StacItem &item, const std::string &url )
+{
+  const Json::Value &links = item.raw[ "links" ];
+  if ( links.isArray() )
+  {
+    for ( const Json::Value &link : links )
+    {
+      if ( link.isObject() && link.isMember( "rel" ) && link["rel"].asString() == "self"
+           && link.isMember( "href" ) && link["href"].isString() )
+      {
+        item.sourceHref = resolveReference( url, link["href"].asString() );
+        return;
+      }
+    }
+  }
+  item.sourceHref = url;
+}
+
+/// 9.0 M4: resolves a RELATIVE reference against a LOCAL base path with
+/// lexical normalization and traversal containment — a local STAC item's
+/// relative asset hrefs stay inside the item's directory tree, and any ".."
+/// chain escaping the base directory is refused (never a guess).
+std::string resolveLocalReference( const std::string &basePath, const std::string &reference )
+{
+  const fs::path base = fs::u8path( basePath ).parent_path();
+  if ( reference.empty() )
+    throw GeoError( ErrorCode::InvalidArgument, "StacClient: empty local asset href" );
+  std::error_code ec;
+  fs::path baseAbsolute = fs::weakly_canonical( base, ec );
+  if ( ec )
+    baseAbsolute = fs::absolute( base, ec );
+  if ( ec )
+    throw GeoError( ErrorCode::InvalidArgument, "StacClient: item provenance path is not absolute" );
+  const fs::path merged = baseAbsolute / fs::u8path( reference );
+  const fs::path normalized = merged.lexically_normal();
+  // Containment: the normalized path must stay at or below the base.
+  const std::string normalizedText = normalized.string();
+  const std::string baseText = baseAbsolute.string();
+  if ( normalizedText.rfind( baseText, 0 ) != 0
+       || ( normalizedText.size() > baseText.size() && normalizedText[baseText.size()] != '/'
+            && baseText.back() != '/' && baseText != normalizedText ) )
+  {
+    Json::Value details;
+    details["hint"] = "relative asset hrefs must stay within the item's directory tree";
+    throw GeoError( ErrorCode::InvalidArgument, "StacClient: asset href escapes the item directory", details );
+  }
+  return normalizedText;
+}
+
+/// 9.0 M4: bounded response cache key — method, URL, canonical compact body
+/// (jsoncpp object members are std::map-ordered, so the written form is
+/// canonical for identical queries). The URL stays unredacted IN PROCESS;
+/// nothing here is logged or persisted and no display surface reads it.
+std::string cacheKey( const std::string &method, const std::string &url, const Json::Value &body )
+{
+  Json::StreamWriterBuilder writerBuilder;
+  writerBuilder["indentation"] = "";
+  const std::string bodyText = body.isNull() ? std::string() : Json::writeString( writerBuilder, body );
+  return method + "\n" + url + "\n" + sha256Hex( bodyText );
+}
+
+StacPage StacClient::executeSearch( const std::string &method, const std::string &url,
+                                    const Json::Value &body ) const
+{
+  // --- bounded response cache (opt-in) -----------------------------------
+  Json::Value document;
+  bool servedFromCache = false;
+  if ( mOptions.cacheEnabled )
+  {
+    const std::string key = cacheKey( method, url, body );
+    const auto now = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> lock( mCacheMutex );
+    auto it = mCache.find( key );
+    if ( it != mCache.end() )
+    {
+      const bool expired = mOptions.cacheTtlSeconds > 0
+                             && std::chrono::duration_cast<std::chrono::seconds>( now - it->second.storedAt ).count()
+                                  >= mOptions.cacheTtlSeconds;
+      if ( expired )
+      {
+        mCacheBytes -= it->second.bytes;
+        mCache.erase( it );
+        mCacheEvictions += 1;
+      }
+      else
+      {
+        document = it->second.document;
+        mCacheHits += 1;
+        servedFromCache = true;
+      }
+    }
+    if ( !servedFromCache )
+    {
+      document = fetchDocument( method, url, body );
+      mCacheMisses += 1;
+      // Store bounded: serialize once for accounting, evict LRU-ish (oldest
+      // storedAt) when entry/byte caps overflow.
+      Json::StreamWriterBuilder writerBuilder;
+      writerBuilder["indentation"] = "";
+      QueryCacheEntry entry;
+      entry.document = document;
+      entry.bytes = Json::writeString( writerBuilder, document ).size();
+      entry.storedAt = now;
+      while ( ( mCache.size() + 1 > mOptions.cacheMaxEntries
+                || mCacheBytes + entry.bytes > mOptions.cacheMaxBytes )
+              && !mCache.empty() )
+      {
+        auto oldest = mCache.begin();
+        for ( auto scan = mCache.begin(); scan != mCache.end(); ++scan )
+          if ( scan->second.storedAt < oldest->second.storedAt )
+            oldest = scan;
+        mCacheBytes -= oldest->second.bytes;
+        mCache.erase( oldest );
+        mCacheEvictions += 1;
+      }
+      if ( mOptions.cacheMaxEntries > 0 && entry.bytes <= mOptions.cacheMaxBytes )
+      {
+        mCache[key] = std::move( entry );
+        mCacheBytes += mCache[key].bytes;
+      }
+    }
   }
   else
   {
-    document = httpFetchJson( url, fetchOptions() );
+    document = fetchDocument( method, url, body );
   }
 
   StacPage page;
   page.selfMethod = method;
   page.selfBody = body;
+  ( void )servedFromCache;
   if ( !document.isObject() || !document.isMember( "features" ) || !document["features"].isArray() )
   {
     throw GeoError( ErrorCode::InvalidMetadata, "StacClient: search answer carries no features array" );
   }
   for ( const Json::Value &feature : document["features"] )
+  {
     page.items.push_back( StacItem::parse( feature ) );
+    stampItemProvenance( page.items.back(), url );
+  }
 
   std::string nextMethod;
   std::string nextHref;
@@ -495,6 +654,44 @@ std::string StacClient::displayAssetHref( const StacAsset &asset )
 {
   const ResourceUri uri = ResourceUri::parse( asset.href );
   return uri.display();
+}
+
+std::string StacClient::resolveAssetHref( const StacItem &item, const StacAsset &asset ) const
+{
+  if ( asset.href.empty() )
+    throw GeoError( ErrorCode::InvalidArgument, "StacClient::resolveAssetHref: asset carries no href" );
+  const ResourceUri ref = ResourceUri::parse( asset.href );
+  if ( ref.kind == ResourceKind::RemoteHttp )
+    return asset.href; // already absolute — verbatim (fetches stay raw)
+  if ( item.sourceHref.empty() )
+  {
+    Json::Value details;
+    details["asset"] = asset.title.empty() ? asset.href : asset.title;
+    details["hint"] = "items delivered without provenance cannot resolve relative hrefs";
+    throw GeoError( ErrorCode::InvalidMetadata,
+                    "StacClient::resolveAssetHref: relative href with no item provenance", details );
+  }
+  const ResourceUri base = ResourceUri::parse( item.sourceHref );
+  if ( base.kind == ResourceKind::RemoteHttp )
+    return resolveReference( item.sourceHref, asset.href );
+  // Local provenance (parseFromFile): lexical merge inside the item directory.
+  return resolveLocalReference( item.sourceHref, asset.href );
+}
+
+Json::Value StacClient::cacheStats() const
+{
+  std::lock_guard<std::mutex> lock( mCacheMutex );
+  Json::Value json;
+  json["enabled"] = mOptions.cacheEnabled;
+  json["hits"] = static_cast<Json::UInt64>( mCacheHits );
+  json["misses"] = static_cast<Json::UInt64>( mCacheMisses );
+  json["evictions"] = static_cast<Json::UInt64>( mCacheEvictions );
+  json["entries"] = static_cast<Json::UInt64>( mCache.size() );
+  json["bytes"] = static_cast<Json::UInt64>( mCacheBytes );
+  json["max_entries"] = static_cast<Json::UInt64>( mOptions.cacheMaxEntries );
+  json["max_bytes"] = static_cast<Json::UInt64>( mOptions.cacheMaxBytes );
+  json["ttl_seconds"] = mOptions.cacheTtlSeconds;
+  return json;
 }
 
 namespace

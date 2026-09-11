@@ -34,6 +34,9 @@
 #include <json/json.h>
 
 #include <cstdint>
+#include <chrono>
+#include <map>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -71,6 +74,17 @@ struct StacClientOptions
     std::uintmax_t maxResponseBytes = kDefaultHttpMaxResponseBytes;
     /// Hard bound for searchAll() — a paged crawl must never run away.
     int maxItems = 1000;
+
+    // --- 9.0 M4: bounded client-side response cache (opt-in) --------------
+    /// Caches search/collection item-page ANSWERS in memory, keyed by
+    /// (method, URL, canonical body). Bounded by entries AND bytes; entries
+    /// age out by TTL. Cache keys carry the request URL verbatim IN PROCESS
+    /// ONLY (never logged, never persisted); every display surface stays on
+    /// the redacted forms. Default off — explicit opt-in per client.
+    bool cacheEnabled = false;
+    int cacheTtlSeconds = 300;               ///< 0 disables expiry (entries still bounded)
+    std::size_t cacheMaxEntries = 32;
+    std::uintmax_t cacheMaxBytes = 16ull * 1024 * 1024;
 };
 
 /// One page of search results plus everything needed to continue.
@@ -172,13 +186,41 @@ class StacClient
     /// Redacted display form of an asset href (credential-safe for logs/UI).
     static std::string displayAssetHref( const StacAsset &asset );
 
+    // --- 9.0 M4 ------------------------------------------------------------
+    /// Resolves an asset href to a fetchable form: absolute/remote hrefs pass
+    /// through verbatim; relative hrefs resolve against the item's delivery
+    /// provenance (rel="self" preferred, else the page URL for remote items;
+    /// the file's absolute directory for parseFromFile items). No provenance
+    /// is a typed error — never a guess, never a cwd-dependent accident.
+    std::string resolveAssetHref( const StacItem &item, const StacAsset &asset ) const;
+
+    /// Bounded response cache accounting (hits/misses/evictions/entries/bytes).
+    Json::Value cacheStats() const;
+
   private:
+    Json::Value fetchDocument( const std::string &method, const std::string &url,
+                              const Json::Value &body ) const;
     StacPage executeSearch( const std::string &method, const std::string &url,
                             const Json::Value &body ) const;
     HttpFetchOptions fetchOptions() const;
 
+    struct QueryCacheEntry
+    {
+      Json::Value document;          // the parsed answer document
+      std::uint64_t bytes = 0;       // compact-serialized size (accounting)
+      std::chrono::steady_clock::time_point storedAt;
+    };
+
     std::string mRoot;
     StacClientOptions mOptions;
+
+    // Bounded response cache; mutable — logical constness of search().
+    mutable std::mutex mCacheMutex;
+    mutable std::map<std::string, QueryCacheEntry> mCache;
+    mutable std::uint64_t mCacheBytes = 0;
+    mutable std::uint64_t mCacheHits = 0;
+    mutable std::uint64_t mCacheMisses = 0;
+    mutable std::uint64_t mCacheEvictions = 0;
 };
 
 /// Temporal collection adapter (task C seam): orders items into a series by
