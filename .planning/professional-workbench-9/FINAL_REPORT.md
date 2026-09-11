@@ -111,16 +111,24 @@ fixed-by-later-merge（逐项给出代码证据），#882 **still-valid 残留**
 
 ## 3. 真实测试证据
 
-见 TEST_MATRIX.md 执行记录：28 个套件全部 PASS（含 8 个新增套件、
+见 TEST_MATRIX.md 执行记录：**29 个套件全部 PASS**（含 9 个新增套件、
 20 个 8.0/7.0 回归套件），Release/offscreen/串行。sicnu_geo_rs 应用目标
 链接通过。未运行项：无（矩阵内全部构建并执行）；线上 CI 未等待。
 
+新增套件清单：test_marshal_ui · test_scan_pool(扩展) · test_histogram_widget
+(widget 级扩展) · test_workbench_state_model · test_workbench_enum_provider ·
+test_shortcut_conflicts(两项 M2 gate) · test_catalog_pagination ·
+test_plugin_ui_placement · test_project_lifecycle_stress。
+
 ## 4. Adversarial review
 
-主 Agent 自审两轮（REVIEW_LOG.md Round 0/1）+ 2 个只读 subagent（A：
-architecture/correctness/concurrency/security；B：tests/performance/
-portability/docs-vs-code）。发现与处置逐条见 REVIEW_LOG.md Final 节；
-P0/P1 全部修复，P2 原则上全部修复，P3 修复或逐条记录接受理由。
+主 Agent 自审两轮（Round 0/1）+ 2 个只读 subagent（A：architecture/
+correctness/concurrency/security；B：tests/performance/portability/
+docs-vs-code）。最终计分：**P0 = 0；P1 = 1（B1，已修）；P2 = 9（A1-A4、
+B2-B7，全部修复）；P3 = 6（4 修、2 记录接受）**。修复后完整矩阵重跑
+29/29 全绿。逐条证据与处置见 REVIEW_LOG.md Final 节。两个 reviewer 共同
+确认的 clean areas：线程/marshal 通路、状态模型生命周期、provider 有界性、
+菜单迁移 id 解析、两处 master 修复行为保持、CMake 一致性、无秘钥/路径穿越。
 
 ## 5. Known limitations / follow-ups（诚实清单）
 
@@ -143,3 +151,6 @@ P0/P1 全部修复，P2 原则上全部修复，P3 修复或逐条记录接受�
   registry 投影，绑定值相同）。
 - `x-ui-enum-source` 生产者注解只影响 host 渲染层；算子 schema 未变。
 - GDAL/GCC 修复对行为无影响（类型拼写与 const 正确性）。
+
+---
+**PR**: https://github.com/WindWang2/exp-rs/pull/890 （15 个结构化 commits，base f316dfdbb4）
