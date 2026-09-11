@@ -41,7 +41,7 @@ TaskPanelHost::TaskPanelHost( QWidget *parent )
   // Workbench 9.0 M6: production enum resolution — x-ui-enum-source
   // parameters resolve against canvas layers, DataManager assets and the
   // ModelCatalog instead of degrading to free text.
-  m_enumProvider = new WorkbenchEnumProvider( this );
+  m_enumProvider = new sicnu::app::WorkbenchEnumProvider( this );
   m_form->setEnumProvider( m_enumProvider );
 
   m_estimate = new QLabel( this );

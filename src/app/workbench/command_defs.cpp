@@ -5,6 +5,8 @@
 
 #include "command_registry.h"
 #include "main_window.h"
+#include "workflow/pipeline_editor_dock.h"
+#include "shell/workflow_session_controller.h"
 #include "workbench_host.h"
 
 #include "dialogs/extract_band_dialog.h"

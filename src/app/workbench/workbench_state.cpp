@@ -65,7 +65,7 @@ void WorkbenchStateModel::connectCanvas( QgsMapCanvas *canvas )
     return;
   // The canvas is the single authority for staged layers (the shell draws
   // from the same project the canvas renders) and the active tool.
-  connect( canvas, &QgsMapCanvas::mapToolChanged, this, [this]( QgsMapTool *tool ) {
+  connect( canvas, &QgsMapCanvas::mapToolSet, this, [this]( QgsMapTool *tool ) {
     const QString id = toolModeId( tool );
     if ( m_facts.toolMode != id )
     {
