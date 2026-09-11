@@ -34,4 +34,30 @@ test_workflow_session_controller · test_workflow_pipeline_ui。
 
 ## 执行记录
 
-（每个 milestone 完成时在此追加：命令、目标、结果、时长、并行度）
+### 2026-09-12 — 完整矩阵（Release, ci-fast, offscreen, 串行单进程）
+
+构建：`cmake --preset ci-fast` + `cmake --build build-ci-fast -j4`（Ninja/Make 均可，
+本机 Arch, GCC 16.2.1, GDAL 3.13.3-2, Qt 6, QGIS 内嵌 fork）。
+
+新增套件（全部 PASS）：
+- test_marshal_ui 3/3 (4 asserts)
+- test_scan_pool 8/8 (22; 含 #861 per-owner 回归 4 例)
+- test_histogram_widget 5/5 (25; 含 GDALOpen 失败 marshal)
+- test_workbench_state_model 6/6 (27; 含 SelectionContext broken-layer 集成)
+- test_workbench_enum_provider 4/4 (21; 含 DataManager 真资产 + 200 截断)
+- test_shortcut_conflicts 4/4 (28; 跨文件 union + 谎言 tooltip gate)
+- test_catalog_pagination 3/3 (110; 窗口/翻页/钳制/选择保持)
+- test_project_lifecycle_stress 2/2 (547; 48 轮 clear/import/视图churn/先关窗)
+
+回归保持（全部 PASS，28/28 套件全绿）：
+test_selection_context 13/13 · test_command_registry 9/9 · test_command_palette 4/4 ·
+test_workbench_host 8/8 · test_workbench_shutdown_policy 4/4 · test_schema_form_4 12/12 ·
+test_asset_preview_service 10/10 (1411) · test_asset_catalog_index 8/8 (317) ·
+test_context_facts_8 3/3 · test_data_manager_panel 16/16 · test_rs_empty_state_widget 5/5 ·
+test_ui_task_center_contract 6/6 (174) · test_theme_selector_parity 2/2 ·
+test_processing_history_model 5/5 · test_workflow_session_controller 4/4 ·
+test_workflow_pipeline_ui 16/16 · test_adversarial_m4 5/5 (558) · test_adversarial_m5 4/4 ·
+test_active_view_host_viewport 2/2 · test_qgis_display_manager 21/21 (343)。
+
+not run / not built：无（矩阵内全部目标已构建并执行；app 目标 sicnu_geo_rs 链接通过）。
+线上 CI：未等待（按 CI policy，本地证据为准）。

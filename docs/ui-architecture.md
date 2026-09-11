@@ -527,3 +527,61 @@ would be noise.
 `test_asset_catalog_index` (index + panel + 200k-record scale evidence),
 `test_context_facts_8` — see
 `.planning/professional-workbench-8/TEST_MATRIX.md`.
+
+# Part V — Professional Workbench 9.0
+
+## 25. Workbench state model (M1)
+
+`src/app/workbench/workbench_state.h` defines `WorkbenchStateModel` — a
+projection aggregator, not a second authority. Inputs: the map canvas
+(layers, active tool), `SelectionContext` (broken-layer fact) and an
+injected TaskCenter in-flight predicate (the same seam
+`SelectionContext::setInFlightTaskPredicate` uses). Outputs: coalesced
+`factsChanged` (at most one per event-loop turn), `phaseChanged`,
+`toolModeChanged`. Consumers (empty-state switches, enable/disable rules)
+derive from `WorkbenchRules` pure projections — never from raw layer probes
+scattered at call sites. Contract tests: `test_workbench_state_model`.
+
+## 26. Command & shortcut authority (M2)
+
+CommandRegistry is the single owner of canonical shortcuts. Menu items whose
+command exists in the registry MUST be the registry projection
+(`addCmd(menu, "id")` in `main_window_menus.cpp`); raw `addAction` with a
+`QKeySequence` is reserved for commands the registry does not (yet) declare.
+Two mechanical gates in `test_shortcut_conflicts`:
+(1) the union of QKeySequence claims over all command sources must be
+duplicate-free across files;
+(2) a `setToolTip` statement claiming a parenthesized `(Ctrl+…)` must be
+backed by a binding in the same/adjacent statement or by a `setShortcut`
+statement naming the same modifiers and key token anywhere in the file.
+Workflow commands (`workflow.new/open/save/run/stop`) are registered without
+default shortcuts — canonical Ctrl+N/O/S stay with `project.*`.
+
+## 27. Completion delivery, pagination, enum sources, plugin UI (M0/M6/M7/M8)
+
+- `marshal_ui.h`: worker→UI completion via `ui_callback::marshalTo(receiver, fn)`
+  — queued to the receiver; Qt discards it if the receiver dies. Worker-side
+  request epochs must be `std::atomic` (read from pool threads).
+- Catalog pagination (M7): page size is the standalone row cap; the pager
+  names exact slices and totals; a new filter restarts at page 0;
+  out-of-range pages clamp; selection identity persists across flips
+  (`m_lastSelectedAssetId`).
+- `WorkbenchEnumProvider` (M6): production `x-ui-enum-source` resolution —
+  `layers:raster|vector`, `assets` (DataManager snapshot), `models`
+  (ModelCatalog). Every source caps at 200 with a truthful truncation label;
+  unknown sources stay empty and the form degrades to free text (8.0
+  contract). Model/asset combo kinds with an enum-source resolve live.
+- Plugin declarative UI (M8): the shell installs `ExprsPluginShellUi` as the
+  sink of `PluginUiSchemaRenderer`, describes each loaded host-process
+  plugin's schema, renders host-owned widgets and routes events through
+  `PluginUiInvokeDelegate` → `PluginRuntimeHost::invokePluginUi`. Each
+  rendered menu contribution becomes a registry command
+  (`plugin.<pluginId>.<n>`) whose availability follows the rendered action —
+  unload/crash disables the command.
+
+## Contracts under test (9.0)
+
+`test_workbench_state_model` · `test_shortcut_conflicts` (two M2 gates) ·
+`test_marshal_ui` · `test_scan_pool` (per-owner generations) ·
+`test_histogram_widget` (failure marshal) · `test_workbench_enum_provider` ·
+`test_catalog_pagination` · `test_project_lifecycle_stress`.

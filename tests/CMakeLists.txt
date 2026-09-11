@@ -5395,6 +5395,7 @@ qt_add_executable(test_workflow_session_controller
   test_workflow_session_controller.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/workflow_session_controller.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/task_panel_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/workbench_enum_provider.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_result_summary.cpp
@@ -6557,13 +6558,17 @@ sicnu_discover_tests(test_workbench_enum_provider)
 add_executable(test_workbench_state_model
   test_workbench_state_model.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_state.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
 )
 target_link_libraries(test_workbench_state_model PRIVATE
   Catch2::Catch2
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  Qt6::Test
   qgis_core
+  qgis_gui
 )
 target_include_directories(test_workbench_state_model PRIVATE
   ${CMAKE_SOURCE_DIR}/src
@@ -6884,6 +6889,7 @@ qt_add_executable(test_workflow_pipeline_ui
   ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_editor_dock.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/workflow_session_controller.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/task_panel_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/workbench_enum_provider.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_result_summary.cpp

@@ -17,5 +17,12 @@
 
 | 项 | 构建 | 数据规模 | 指标 | 结果 |
 |---|---|---|---|---|
-| （待 M7：200k catalog 分页 vs 全量） | Release ci-fast | 200k 合成记录 | 分页响应 <50ms/页，RSS 上界 | 待测 |
-| （待 M6：enum provider 上限截断） | Release | 100k datasets 合成 | provider 首屏 ≤N 条，无全量物化 | 待测 |
+| 200k 索引过滤 + 全扫（8.0 契约保持） | Release ci-fast | 200k 合成记录 | 过滤 <2000ms（内部断言）；套件总墙钟 | median 1.17s（3 次取中位，本机） |
+| 分页翻页（M7） | Release ci-fast | 12 资产 / 3 页来回翻 | 套件总墙钟（每页渲染 O(cap)） | median 0.51s（含进程启动） |
+| 工程 churn stress（M0） | Release ci-fast | 48 轮 clear/import/视图/先关窗 | 套件总墙钟 | median 1.25s |
+| enum provider 上限（M6） | Release | >200 选项源 | kMaxChoices=200 截断 + 截断标注 | test_workbench_enum_provider 断言锁定 |
+
+环境：本机 Arch linux（6.18 LTS）、GCC 16.2.1、GDAL 3.13.3-2、独立 worktree、
+无其他重型负载并发。所有数字为 Release（ci-fast）；未与 Debug 混比。
+复杂度注记：分页切片 O(window)；refresh 依赖 8.0 的 coalesced timer +
+AssetCatalogIndex 增量过滤（O(assets) 单遍），未引入新的全量复制或 O(N²) 路径。
