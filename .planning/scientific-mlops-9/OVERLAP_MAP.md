@@ -36,3 +36,15 @@
 - No second model registry (M8 is an evidence seam over the existing
   model catalog interface).
 - No GUI work (8.0's panel already surfaces recorded runs).
+
+## Host-build discovery (baseline `132da5e998`)
+
+`src/geospatial/metadata/canonical_metadata.cpp:1034` does not compile
+unpatched on THIS host (GDAL 3.13.3: `GDALMDArrayRead` takes
+`const size_t* count`, the call passes `const GUInt64*` = `long long` —
+distinct types). master CI presumably runs a GDAL where they coincide. The
+local builds mask this with a manual `CMAKE_CXX_FLAGS=-fpermissive` cache
+flag (GCC downgrades the conversion to a warning). This track therefore
+configures `-DCMAKE_CXX_FLAGS=-fpermissive` to reproduce the host baseline
+and does NOT patch `src/geospatial` (geospatial-data-fabric-9 owns it);
+the proper typed-cast fix is handed to that track via the final report.
