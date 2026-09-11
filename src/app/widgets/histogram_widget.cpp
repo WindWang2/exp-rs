@@ -15,6 +15,7 @@
 #include <QCoreApplication>
 
 #include "rs_scan_pool.h"
+#include "workbench/marshal_ui.h"
 
 #include <gdal.h>
 #include <gdal_priv.h>
@@ -63,6 +64,7 @@ void HistogramWidget::closeDataset()
         std::lock_guard<std::mutex> lock( s_reqMutex );
         s_activeRequests.erase( this );
     }
+    m_scanError.clear();
     // #797: cancel the in-flight scan so the bounded pool stops reading GDAL
     // sources for a widget that is gone (results are dropped by the stale
     // check anyway; this ends the work itself).
@@ -76,6 +78,13 @@ void HistogramWidget::closeDataset()
     m_bandCache.clear();
 }
 
+bool HistogramWidget::isActiveRequest( uint64_t reqId ) const
+{
+    std::lock_guard<std::mutex> lock( s_reqMutex );
+    auto it = s_activeRequests.find( this );
+    return it != s_activeRequests.end() && it->second == reqId;
+}
+
 void HistogramWidget::setRasterLayer( QgsRasterLayer *layer )
 {
     if ( m_rasterLayer.data() == layer )
@@ -83,6 +92,7 @@ void HistogramWidget::setRasterLayer( QgsRasterLayer *layer )
     m_rasterLayer = layer;
     m_rasterLayerId = layer ? layer->id() : QString();
     m_bandCache.clear();
+    m_scanError.clear();
     if ( m_rasterLayer )
     {
         if ( m_rasterLayer->bandCount() >= 3 )
@@ -267,6 +277,8 @@ void HistogramWidget::computeHistograms()
         s_activeRequests[this] = reqId;
     }
 
+    m_scanError.clear();
+
     // #797: run the GDAL scan on the dedicated bounded scan pool (never the
     // global pool) and carry a cancellation generation — the worker exits at
     // band boundaries when a newer request supersedes it.
@@ -283,7 +295,21 @@ void HistogramWidget::computeHistograms()
 
         GDALDatasetH ds = GDALOpen( source.toUtf8().constData(), GA_ReadOnly );
         if ( !ds )
+        {
+            // M0 (#882-era audit): a failed scan must never be silent — the
+            // widget would keep stale/empty data with no explanation. Surface
+            // the CPL error on the GUI thread; dropped if the widget died.
+            const QString err = QStringLiteral( "%1 (%2)" )
+                                    .arg( tr( "Cannot open raster" ),
+                                          QString::fromUtf8( CPLGetLastErrorMsg() ) );
+            sicnu::app::ui_callback::marshalTo( self.data(), [self, reqId, err]() {
+                if ( !self || !self->isActiveRequest( reqId ) )
+                    return;
+                self->m_scanError = err;
+                self->update();
+            } );
             return;
+        }
 
         for ( int bandNum : bandsToFetch )
         {
@@ -371,6 +397,8 @@ void HistogramWidget::computeHistograms()
                 if ( it == s_activeRequests.end() || it->second != reqId )
                     return; // Stale request or canceled
             }
+
+            self->m_scanError.clear();
 
             for ( auto &r : results )
             {
@@ -460,6 +488,13 @@ void HistogramWidget::paintEvent( QPaintEvent * )
         painter.setFont( QFont( "sans-serif", 11 ) );
         painter.drawText( rect(), Qt::AlignCenter,
                           m_rasterLayer ? tr( "No histogram data available" ) : tr( "No raster layer selected" ) );
+        if ( !m_scanError.isEmpty() )
+        {
+            // Scan failure surfaces in the empty state — never silent.
+            painter.setPen( QColor( 224, 96, 96 ) );
+            painter.drawText( QRect( 0, height() / 2 + 16, width(), 24 ),
+                              Qt::AlignHCenter | Qt::AlignTop, m_scanError );
+        }
         return;
     }
 

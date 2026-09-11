@@ -5059,19 +5059,29 @@ target_include_directories(test_hooks_comprehensive PRIVATE
 set_target_properties(test_hooks_comprehensive PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_hooks_comprehensive)
 
-# Histogram Widget tests — tests the data structures, not the widget itself
-# (widget is part of main app executable, not a separate library)
-add_executable(test_histogram_widget test_histogram_widget.cpp)
+# Histogram Widget tests — data structures + widget-level scan behavior
+# (Workbench 9.0 M0: failed GDALOpen must surface an error on the GUI thread)
+add_executable(test_histogram_widget
+  test_histogram_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+)
 target_link_libraries(test_histogram_widget PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  GDAL::GDAL
 )
 target_include_directories(test_histogram_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
+set_target_properties(test_histogram_widget PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_histogram_widget)
 
 # Display stretch core — pure resolve + port apply (no GUI)
@@ -5963,6 +5973,27 @@ target_include_directories(test_project_context_reap PRIVATE
 )
 sicnu_discover_tests(test_project_context_reap)
 
+# ── Workbench 9.0 M0: project clear/switch/exit churn stress (#859 family) ──
+add_executable(test_project_lifecycle_stress
+  test_project_lifecycle_stress.cpp
+)
+target_link_libraries(test_project_lifecycle_stress PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+)
+target_include_directories(test_project_lifecycle_stress PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+# Heavy churn loop — run serially, never parallel with other heavy suites.
+sicnu_discover_tests(test_project_lifecycle_stress)
+
 # Data Manager promote tests - temporary -> ProjectPersistent
 qt_add_executable(test_data_manager_promote
   test_data_manager_promote.cpp
@@ -6459,6 +6490,43 @@ target_compile_definitions(test_scan_pool PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 sicnu_discover_tests(test_scan_pool)
+
+# ── Workbench 9.0 M1: explicit workbench state model ───────────────────────
+add_executable(test_workbench_state_model
+  test_workbench_state_model.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_state.cpp
+)
+target_link_libraries(test_workbench_state_model PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+)
+target_include_directories(test_workbench_state_model PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_workbench_state_model PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_workbench_state_model)
+
+# ── Workbench 9.0 M0: worker→UI completion delivery helper ─────────────────
+add_executable(test_marshal_ui
+  test_marshal_ui.cpp
+)
+target_link_libraries(test_marshal_ui PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_marshal_ui PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_marshal_ui PROPERTIES AUTOMOC ON)
+# AUTOUIC would treat the marshal header as a Qt Designer ui_*.h output.
+set_property(SOURCE test_marshal_ui.cpp PROPERTY SKIP_AUTOUIC ON)
+sicnu_discover_tests(test_marshal_ui)
 
 # Spectral index dialog — role-based band preselection via BandRoleCombo (C5)
 sicnu_add_dialog_test(test_spectral_index_dialog

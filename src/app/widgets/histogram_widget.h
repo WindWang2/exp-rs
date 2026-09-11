@@ -114,6 +114,8 @@ private:
     void drawStats( QPainter &painter, const QRect &statsRect );
     void closeDataset();
     const BandData &activeBandData() const;
+    /// True when @p reqId is still the widget's in-flight scan (GUI-thread only).
+    bool isActiveRequest( uint64_t reqId ) const;
 
     QRect getChartRect() const;
     ActiveHandle hitTestHandle( const QPoint &pos ) const;
@@ -159,4 +161,12 @@ private:
     // dataset/cache is released so the bounded pool stops reading GDAL
     // sources for a widget that is gone).
     quint64 m_scanGeneration = 0;
+
+  public:
+    /// Last scan failure surfaced by the worker (empty = no error). The
+    /// worker marshals this onto the GUI thread; failures are never silent.
+    QString lastError() const { return m_scanError; }
+
+  private:
+    QString m_scanError;
 };
