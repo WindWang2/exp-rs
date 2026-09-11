@@ -1025,7 +1025,10 @@ MultidimMetadata inspectMultidim( const std::string &path, const InspectOptions 
             std::min<std::int64_t>( info.size, static_cast<std::int64_t>( DimensionInfo::kMaxAxisValues ) ) );
           GDALExtendedDataTypeH stringType = GDALExtendedDataTypeCreateString( 0 );
           QuietCplErrors quietAxis;
-          const GUInt64 oneCount = 1;
+          // GDALMDArrayRead takes arrayStartIdx as GUInt64* but count as
+          // size_t*; mixing them up fails to compile on GDAL >= 3.9-era
+          // headers (verified against 3.13.3).
+          const size_t oneCount = 1;
           const GInt64 oneStep = 1;
           GPtrDiff_t oneStride = 1;
           for ( GUInt64 i = 0; i < axisCount && stringType != nullptr; ++i )

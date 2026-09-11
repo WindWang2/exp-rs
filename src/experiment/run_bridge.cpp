@@ -161,7 +161,10 @@ Result<void> ExperimentRunBridge::attachExecutionPins( const QString &executionR
         return VoidResult::success();
     }
 
-    const auto run = m_store->runById( runId );
+    // A local VALUE copy: pins are merged into the copy and published via
+    // upsertRun below. (A top-level const would make operator-> hand out a
+    // const ExperimentRun& — the setters below would not compile.)
+    auto run = m_store->runById( runId );
     if ( !run )
         return failVoid( QStringLiteral( "experiment.run_not_found" ),
                          QStringLiteral( "run %1 is not in the store" ).arg( runId ) );
