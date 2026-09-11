@@ -4,11 +4,13 @@
 #include "../contracts/spatial_contracts.h"
 #include "../mapspec/mapspec.h"
 #include "../mapspec/mapspec_compiler.h"
+#include "../layout_tools/layout_service.h"
 #include "../spatial_tools/spatial_tool.h"
 #include "../workspace_state.h"
 #include "chart_registry.h"
 #include "composition.h"
 #include "design_tokens.h"
+#include "export.h"
 #include "quality.h"
 #include "registry.h"
 #include "solution_registry.h"
@@ -22,11 +24,13 @@
 #include <qgsvectorlayer.h>
 
 #include <algorithm>
+#include <map>
 #include <cmath>
 
 namespace sicnu::agent::cartography {
 
 using namespace sicnu::agent::contracts;
+using sicnu::agent::layout_tools::LayoutService;
 using sicnu::agent::spatial_tools::SpatialTool;
 using sicnu::agent::spatial_tools::SpatialToolRegistry;
 using sicnu::agent::spatial_tools::SpatialToolResult;
@@ -34,6 +38,12 @@ using sicnu::agent::spatial_tools::requireStringField;
 
 using sicnu::agent::cartography::preflightMapSpec;
 using sicnu::agent::cartography::repairMapSpec;
+using sicnu::agent::cartography::repairMapSpecWithLedger;
+using sicnu::agent::cartography::diffTemplates;
+using sicnu::agent::cartography::exportMapLayout;
+using sicnu::agent::cartography::mapExportResultToJson;
+using sicnu::agent::cartography::MapExportRequest;
+using sicnu::agent::cartography::MapExportResult;
 
 // ---------------------------------------------------------------------------
 // Tools
@@ -395,6 +405,11 @@ class ComposeTool final : public SpatialTool
         Json::Value provenance( Json::objectValue );
         if ( spec.isMember( "template" ) && spec["template"].isString() )
           provenance["template"] = spec["template"];
+        // Platform 9.0: structured template lineage (id + version + parents)
+        // stamped by instantiateTemplate rides along when present.
+        if ( spec.isMember( "template_provenance" ) &&
+             spec["template_provenance"].isObject() )
+          provenance["template_provenance"] = spec["template_provenance"];
         Json::Value components( Json::arrayValue );
         for ( int c = 0; c < mapspec::kCollectionCount; ++c )
         {
@@ -541,12 +556,23 @@ class RepairTool final : public SpatialTool
       int totalRepairs = 0;
       int iterations = 0;
       Json::Value quality = preflightMapSpec( spec );
+      Json::Value repairLedger( Json::arrayValue );
       while ( iterations < maxIterations && !quality["passed"].asBool() )
       {
-        const int repairs = repairMapSpec( spec, quality );
+        // Platform 9.0: every pass records what each repairable finding
+        // became (applied / still_reported) — the agent sees WHY the
+        // residual findings survived instead of only a repair count.
+        Json::Value passLedger;
+        const int repairs = repairMapSpecWithLedger( spec, quality, &passLedger );
         if ( repairs == 0 )
           break; // nothing repairable remains — Pi decides how to proceed
         totalRepairs += repairs;
+        for ( const auto &entry : passLedger )
+        {
+          Json::Value record = entry;
+          record["pass"] = iterations + 1;
+          repairLedger.append( record );
+        }
         ++iterations;
         quality = preflightMapSpec( spec );
       }
@@ -555,6 +581,7 @@ class RepairTool final : public SpatialTool
       out["mapspec"] = spec;
       out["repairs_applied"] = totalRepairs;
       out["iterations"] = iterations;
+      out["repair_ledger"] = repairLedger;
       out["quality"] = quality;
       return SpatialToolResult::ok( out );
     }
@@ -1597,6 +1624,335 @@ class LintCatalogTool final : public SpatialTool
     }
 };
 
+// --- Platform 9.0: template semantic diff ---------------------------------------
+
+class DiffTemplatesTool final : public SpatialTool
+{
+  public:
+    std::string name() const override { return "cartography:diff_templates"; }
+    std::string displayName() const override { return "Diff two templates"; }
+    std::string description() const override
+    {
+      return "Bounded semantic diff of two resolved templates: slots by role "
+             "(added/removed/changed), top-level members (added/removed/changed), with "
+             "truncation flagged. Read-only evidence for template reasoning. Input: "
+             "{before, after} (template ids) → {added_slots, removed_slots, changed_slots, "
+             "added_keys, removed_keys, changed_keys, truncated}.";
+    }
+    std::vector<std::string> tags() const override
+    {
+      return { "cartography", "templates", "diff", "catalog" };
+    }
+    Json::Value inputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      Json::Value props( Json::objectValue );
+      props["before"]["type"] = "string";
+      props["after"]["type"] = "string";
+      schema["properties"] = props;
+      Json::Value required( Json::arrayValue );
+      required.append( "before" );
+      required.append( "after" );
+      schema["required"] = required;
+      return schema;
+    }
+    Json::Value outputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      return schema;
+    }
+    SpatialToolResult execute( const Json::Value &input ) override
+    {
+      const QString beforeId = QString::fromStdString( input.get( "before", "" ).asString() );
+      const QString afterId = QString::fromStdString( input.get( "after", "" ).asString() );
+      if ( beforeId.isEmpty() || afterId.isEmpty() )
+        return SpatialToolResult::failure( "before and after must be non-empty template ids",
+                                           "INVALID_PARAMETER", "validation" );
+      const Json::Value before = TemplateRegistry::instance().find( beforeId );
+      if ( before.isNull() )
+        return SpatialToolResult::failure( "template '" + beforeId.toStdString() + "' not found",
+                                           "NOT_FOUND", "validation" );
+      const Json::Value after = TemplateRegistry::instance().find( afterId );
+      if ( after.isNull() )
+        return SpatialToolResult::failure( "template '" + afterId.toStdString() + "' not found",
+                                           "NOT_FOUND", "validation" );
+      Json::Value out = diffTemplates( before, after );
+      out["before"] = beforeId.toStdString();
+      out["after"] = afterId.toStdString();
+      return SpatialToolResult::ok( out );
+    }
+};
+
+// --- Platform 9.0: governed export + bounded explain ---------------------------
+
+class ExportTool final : public SpatialTool
+{
+  public:
+    std::string name() const override { return "cartography:export"; }
+    std::string displayName() const override { return "Export composed map"; }
+    std::string description() const override
+    {
+      return "Governed atomic export of a composed layout (png|pdf|svg, dpi 72..1200). png "
+             "supports page selection on this QGIS build; pdf/svg always export all pages and "
+             "REFUSE a declared page selection. The file is written to a temp file, verified, "
+             "hashed (sha256) and renamed — a failed export leaves no partial file. Font "
+             "substitutions are reported as diagnostics. Input: {layout, format, directory, "
+             "file_name?, dpi?, pages?} → {ok, path, sha256, bytes, diagnostics}.";
+    }
+    std::vector<std::string> tags() const override
+    {
+      return { "cartography", "export", "reproducibility", "mapspec" };
+    }
+    Json::Value inputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      Json::Value props( Json::objectValue );
+      props["layout"]["type"] = "string";
+      props["format"]["type"] = "string";
+      Json::Value formats( Json::arrayValue );
+      formats.append( "png" );
+      formats.append( "pdf" );
+      formats.append( "svg" );
+      props["format"]["enum"] = formats;
+      props["directory"]["type"] = "string";
+      props["file_name"]["type"] = "string";
+      props["dpi"]["type"] = "number";
+      Json::Value pages( Json::objectValue );
+      pages["type"] = "array";
+      Json::Value pageIndex( Json::objectValue );
+      pageIndex["type"] = "integer";
+      pages["items"] = pageIndex;
+      props["pages"] = pages;
+      schema["properties"] = props;
+      Json::Value required( Json::arrayValue );
+      required.append( "layout" );
+      required.append( "format" );
+      required.append( "directory" );
+      schema["required"] = required;
+      return schema;
+    }
+    Json::Value outputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      schema["properties"]["path"] = Json::Value( Json::objectValue );
+      schema["properties"]["sha256"] = Json::Value( Json::objectValue );
+      return schema;
+    }
+    SpatialToolResult execute( const Json::Value &input ) override
+    {
+      const auto requireString = [ & ]( const char *key, std::string *err ) -> std::string {
+        if ( !input.isMember( key ) || !input[key].isString() || input[key].asString().empty() )
+        {
+          if ( err )
+            *err = std::string( "Missing required parameter: " ) + key + " (non-empty string)";
+          return std::string();
+        }
+        return input[key].asString();
+      };
+      std::string err;
+      const std::string layoutName = requireString( "layout", &err );
+      if ( !err.empty() )
+        return SpatialToolResult::failure( err, "INVALID_PARAMETER", "validation" );
+      const std::string format = requireString( "format", &err );
+      if ( !err.empty() )
+        return SpatialToolResult::failure( err, "INVALID_PARAMETER", "validation" );
+      const std::string directory = requireString( "directory", &err );
+      if ( !err.empty() )
+        return SpatialToolResult::failure( err, "INVALID_PARAMETER", "validation" );
+
+      QgsPrintLayout *layout =
+        LayoutService::instance().findLayout( QString::fromStdString( layoutName ) );
+      if ( !layout )
+        return SpatialToolResult::failure( "No layout named '" + layoutName + "'",
+                                           "NOT_FOUND", "validation" );
+
+      MapExportRequest request;
+      request.format = format;
+      request.directory = directory;
+      if ( input.isMember( "file_name" ) && input["file_name"].isString() )
+        request.file_name = input["file_name"].asString();
+      if ( input.isMember( "dpi" ) && input["dpi"].isNumeric() )
+        request.dpi = input["dpi"].asDouble();
+      if ( input.isMember( "pages" ) && input["pages"].isArray() )
+        for ( const auto &page : input["pages"] )
+          if ( page.isIntegral() )
+            request.pages.push_back( page.asInt() );
+
+      const MapExportResult result = exportMapLayout( layout, request );
+      if ( !result.ok )
+        return SpatialToolResult::failure( result.error.toStdString(), "EXPORT_FAILED",
+                                           "runtime" );
+      Json::Value out = mapExportResultToJson( result );
+      out["format"] = format;
+      out["dpi"] = request.dpi;
+      if ( !request.pages.empty() )
+      {
+        Json::Value pagesJson( Json::arrayValue );
+        for ( const int page : request.pages )
+          pagesJson.append( page );
+        out["pages"] = pagesJson;
+      }
+      return SpatialToolResult::ok( out );
+    }
+};
+
+class ExplainTool final : public SpatialTool
+{
+  public:
+    std::string name() const override { return "cartography:explain"; }
+    std::string displayName() const override { return "Explain map geometry/quality"; }
+    std::string description() const override
+    {
+      return "Bounded explanation of WHY a document composes the way it does: for one item_id "
+             "(or one page), the solver decisions and violations that touch it, its unsat "
+             "cores, and its preflight findings. Pure evidence report — nothing is modified. "
+             "Input: {mapspec, item_id?} → {item_id, solver: {decisions, violated, "
+             "unsat_cores}, quality_issues}.";
+    }
+    std::vector<std::string> tags() const override
+    {
+      return { "cartography", "explain", "diagnostics", "mapspec" };
+    }
+    Json::Value inputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      Json::Value props( Json::objectValue );
+      props["mapspec"]["type"] = "object";
+      props["item_id"]["type"] = "string";
+      schema["properties"] = props;
+      Json::Value required( Json::arrayValue );
+      required.append( "mapspec" );
+      schema["required"] = required;
+      return schema;
+    }
+    Json::Value outputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      schema["properties"]["item_id"] = Json::Value( Json::objectValue );
+      schema["properties"]["solver"] = Json::Value( Json::objectValue );
+      return schema;
+    }
+    SpatialToolResult execute( const Json::Value &input ) override
+    {
+      if ( !input.isMember( "mapspec" ) || !input["mapspec"].isObject() )
+        return SpatialToolResult::failure( "Missing required parameter: mapspec (object)",
+                                           "INVALID_PARAMETER", "validation" );
+      const std::string itemId =
+        input.isMember( "item_id" ) && input["item_id"].isString() ? input["item_id"].asString()
+                                                                   : std::string();
+      if ( itemId.empty() )
+        return SpatialToolResult::failure( "item_id is required (explain is item-scoped)",
+                                           "INVALID_PARAMETER", "validation" );
+      // Locate the item first: explaining a ghost is a typed miss, not an
+      // empty report.
+      const Json::Value location = mapspec::findMapSpecItem( input["mapspec"], itemId );
+      if ( location.isNull() )
+        return SpatialToolResult::failure( "item '" + itemId + "' does not exist in the document",
+                                           "NOT_FOUND", "validation" );
+
+      Json::Value spec = input["mapspec"];
+      if ( spec.isObject() && spec.isMember( "condition_context" ) )
+        mapspec::resolveMapSpecConditions( spec, spec["condition_context"], nullptr );
+      const double marginDefault =
+        tokenNumber( resolveTokenSet( spec ), "spacing.margin_mm", 12.0 );
+      const CompositionResult solved = resolveComposition( spec, marginDefault );
+      const Json::Value quality = preflightMapSpec( spec );
+
+      // The solve ran on a local copy: re-derive the reports that mention
+      // the item from the SAME solve so decisions/violated stay consistent.
+      // Constraint identity → declared item ids (the solver synthesizes
+      // `kind#index` for id-less constraints; mirror that here so decision
+      // filtering covers both).
+      std::map<std::string, std::vector<std::string>> constraintItems;
+      if ( spec.isMember( "constraints" ) && spec["constraints"].isArray() )
+      {
+        int declaredIndex = 0;
+        for ( const auto &constraint : spec["constraints"] )
+        {
+          if ( !constraint.isObject() || !constraint.isMember( "kind" ) ||
+               !constraint["kind"].isString() || !constraint.isMember( "items" ) ||
+               !constraint["items"].isArray() )
+            continue;
+          std::string cid =
+            constraint.isMember( "id" ) && constraint["id"].isString() &&
+                !constraint["id"].asString().empty()
+              ? constraint["id"].asString()
+              : constraint["kind"].asString() + "#" + std::to_string( declaredIndex );
+          ++declaredIndex;
+          for ( const auto &reference : constraint["items"] )
+            if ( reference.isString() )
+              constraintItems[cid].push_back( reference.asString() );
+        }
+      }
+      const auto touchesItem = [ & ]( const std::string &cid ) {
+        if ( cid == itemId )
+          return true;
+        const auto it = constraintItems.find( cid );
+        if ( it == constraintItems.end() )
+          return false;
+        for ( const auto &candidate : it->second )
+          if ( candidate == itemId )
+            return true;
+        return false;
+      };
+
+      Json::Value decisions( Json::arrayValue );
+      for ( const auto &decision : solved.decisions )
+      {
+        if ( !touchesItem( decision.cid ) )
+          continue;
+        Json::Value entry( Json::objectValue );
+        entry["cid"] = decision.cid;
+        entry["kind"] = decision.kind;
+        entry["outcome"] = decision.outcome;
+        entry["reason"] = decision.reason;
+        decisions.append( entry );
+      }
+      Json::Value violated( Json::arrayValue );
+      for ( const auto &violation : solved.violated )
+      {
+        if ( !touchesItem( violation.cid ) &&
+             violation.reason.find( itemId ) == std::string::npos )
+          continue;
+        Json::Value entry( Json::objectValue );
+        entry["cid"] = violation.cid;
+        entry["kind"] = violation.kind;
+        entry["reason"] = violation.reason;
+        violated.append( entry );
+      }
+      Json::Value cores( Json::arrayValue );
+      for ( const auto &core : solved.unsatCores )
+      {
+        if ( !core.isObject() || !core.isMember( "constraint" ) )
+          continue;
+        if ( core["constraint"].asString() == itemId )
+          cores.append( core );
+      }
+
+      Json::Value qualityIssues( Json::arrayValue );
+      if ( quality.isObject() && quality.isMember( "issues" ) && quality["issues"].isArray() )
+        for ( const auto &issueEntry : quality["issues"] )
+          if ( issueEntry.isObject() && issueEntry.isMember( "item_id" ) &&
+               issueEntry["item_id"].isString() && issueEntry["item_id"].asString() == itemId )
+            qualityIssues.append( issueEntry );
+
+      Json::Value out( Json::objectValue );
+      out["item_id"] = itemId;
+      Json::Value solver( Json::objectValue );
+      solver["converged"] = solved.converged;
+      solver["passes"] = solved.passes;
+      solver["decisions"] = decisions;
+      solver["violated"] = violated;
+      solver["unsat_cores"] = cores;
+      out["solver"] = solver;
+      out["quality_issues"] = qualityIssues;
+      return SpatialToolResult::ok( out );
+    }
+};
+
 } // namespace
 
 void registerCartographyTools()
@@ -1628,6 +1984,10 @@ void registerCartographyTools()
     registry.registerTool( std::make_shared<DescribeStyleTool>() );
     registry.registerTool( std::make_shared<ApplyStyleTool>() );
     registry.registerTool( std::make_shared<LintCatalogTool>() );
+    registry.registerTool( std::make_shared<DiffTemplatesTool>() );
+    // Platform 9.0: governed export + bounded explain.
+    registry.registerTool( std::make_shared<ExportTool>() );
+    registry.registerTool( std::make_shared<ExplainTool>() );
     return true;
   }();
   Q_UNUSED( registered );
