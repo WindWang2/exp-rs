@@ -280,9 +280,14 @@ QString WorkflowRunCoordinator::checkpointPathFor( const std::string &runId ) co
     return checkpointPathLocked( runId );
 }
 
-void WorkflowRunCoordinator::notifyRunStateLocked( const WorkflowRun &run,
-                                                   qint64 startedMs, qint64 finishedMs )
+void WorkflowRunCoordinator::queueRunStateNotificationLocked( const WorkflowRun &run,
+                                                              qint64 startedMs, qint64 finishedMs )
 {
+    // 9.0 M4: the seq stamp is assigned at enqueue (transition) time so a
+    // consumer can reconcile enqueue order against cross-thread drain
+    // interleaving.
+    const quint64 notifySeq = m_nextNotifySeq++;
+
     qint64 effectiveStart = startedMs;
     if ( effectiveStart <= 0 )
     {
@@ -294,22 +299,18 @@ void WorkflowRunCoordinator::notifyRunStateLocked( const WorkflowRun &run,
         if ( createdAt.isValid() )
             effectiveStart = createdAt.toMSecsSinceEpoch();
     }
-    emit runStateChanged( QString::fromStdString( run.runId() ),
-                          QString::fromStdString( run.workflowId() ),
-                          QString::fromStdString( workflowRunStateToString( run.state() ) ),
-                          effectiveStart, finishedMs );
 
     // Unified-trace adapter (Verification Platform 8.0): the Workflow link of
-    // the chain — the run-state broadcast also emits one exp.trace.v1 record,
-    // reusing the SAME effectiveStart the signal carries. Disabled path = one
-    // relaxed atomic load; the callers hold m_mutex either way, so the
-    // enabled path adds only the same bounded push JobEngine's adapter does.
+    // the chain — one exp.trace.v1 record per run-state transition, reusing
+    // the SAME effectiveStart the signal carries. Runs under m_mutex by
+    // design: Trace::publish is a bounded non-blocking ring push with no
+    // observer callbacks, so it cannot re-enter the coordinator.
     if ( sicnu::runtime::observability::trace::Trace::enabled() )
     {
         sicnu::runtime::observability::trace::TraceEvent trace;
         trace.run = run.runId();
         trace.event = "run_state";
-        trace.detail = run.workflowId();
+        trace.detail = run.workflowId() + "#seq=" + std::to_string( notifySeq );
         switch ( run.state() )
         {
         case WorkflowRunState::Completed:
@@ -336,6 +337,38 @@ void WorkflowRunCoordinator::notifyRunStateLocked( const WorkflowRun &run,
         if ( finishedMs > 0 && effectiveStart > 0 )
             trace.durationUs = ( finishedMs - effectiveStart ) * 1000;
         sicnu::runtime::observability::trace::Trace::publish( trace );
+    }
+
+    RunNotification notification;
+    notification.seq = notifySeq;
+    notification.runId = QString::fromStdString( run.runId() );
+    notification.workflowId = QString::fromStdString( run.workflowId() );
+    notification.state = QString::fromStdString( workflowRunStateToString( run.state() ) );
+    notification.startedMs = effectiveStart;
+    notification.finishedMs = finishedMs;
+    m_pendingRunNotifications.push_back( std::move( notification ) );
+}
+
+void WorkflowRunCoordinator::drainRunNotifications()
+{
+    std::vector<RunNotification> drained;
+    {
+        std::lock_guard<std::mutex> lock( m_mutex );
+        if ( m_pendingRunNotifications.empty() )
+            return;
+        drained.swap( m_pendingRunNotifications );
+    }
+    // Emission happens with NO coordinator lock held (#860): a slot may now
+    // safely re-enter the coordinator (runs(), runForPipeline(),
+    // checkpointPathFor(), even resume) from the same thread. A re-entrant
+    // drain swaps only whatever was queued after our swap — never re-emits
+    // this batch. Cross-thread concurrent drains can interleave, which is
+    // exactly what the per-notification seq order stamp makes detectable.
+    for ( const RunNotification &notification : drained )
+    {
+        emit runStateChanged( notification.runId, notification.workflowId,
+                              notification.state, notification.startedMs,
+                              notification.finishedMs );
     }
 }
 
@@ -398,8 +431,12 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
     {
         std::lock_guard<std::mutex> lock( m_mutex );
         persistRunLocked( *run );
-        notifyRunStateLocked( *run, startedMs, 0 ); // state Running (issue #754)
+        queueRunStateNotificationLocked( *run, startedMs, 0 ); // state Running (issue #754)
     }
+    // Flush the Running broadcast BEFORE dispatch: a pipeline whose first
+    // step fails instantly must never surface Running after its Failed
+    // terminal (observers see transitions in transition order, #860).
+    drainRunNotifications();
 
     // Seed the step plans with the pipeline's task ids so the checkpoint
     // written BEFORE dispatch already maps steps to tasks (crash during
@@ -412,9 +449,10 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
         {
             std::lock_guard<std::mutex> lock( m_mutex );
             persistRunLocked( *run );
-            notifyRunStateLocked( *run, startedMs,
-                                  QDateTime::currentMSecsSinceEpoch() );
+            queueRunStateNotificationLocked( *run, startedMs,
+                                             QDateTime::currentMSecsSinceEpoch() );
         }
+        drainRunNotifications();
         return -1; // the local runLock shared_ptr releases the flock here
     }
 
@@ -491,6 +529,10 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
         if ( allTerminal && !isTerminalRunState( run->state() ) )
             finalizeRunLocked( pipelineId, *run );
     }
+    // The registration block may have folded fast transitions (even a full
+    // finalize) while m_mutex was held — their notifications drain here,
+    // outside the lock, before the pipeline id is handed to the caller.
+    drainRunNotifications();
     return pipelineId;
 }
 
@@ -527,6 +569,9 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     // object under the same lock, so a transition either lands entirely
     // before the swap (visible to its merge) or entirely after (folded into
     // the swapped-in run) — never into a discarded object (#720).
+    // SCOPE NOTE (#860): the brace below bounds the fold's critical section
+    // so the notification drain after it runs strictly outside m_mutex.
+    {
     std::lock_guard<std::mutex> lock( m_mutex );
 
     const auto it = m_runsByPipeline.find( info.pipelineId );
@@ -584,6 +629,12 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
                                                             } );
     if ( allTerminal && !isTerminalRunState( run->state() ) )
         finalizeRunLocked( info.pipelineId, *run ); // exactly once per run
+    }
+    // Lifecycle-safe eventing (#860): the fold's m_mutex scope ENDS above;
+    // every queued notification drains strictly OUTSIDE the lock. (The
+    // in-lock drain variant self-deadlocks the non-recursive mutex — caught
+    // by the #860 re-entrancy regression the day it shipped.)
+    drainRunNotifications();
 }
 
 void WorkflowRunCoordinator::finalizeRunLocked( long pipelineId, WorkflowRun &run )
@@ -614,7 +665,7 @@ void WorkflowRunCoordinator::finalizeRunLocked( long pipelineId, WorkflowRun &ru
         run.transitionTo( WorkflowRunState::Completed );
     }
     persistRunLocked( run );
-    notifyRunStateLocked( run, 0, QDateTime::currentMSecsSinceEpoch() );
+    queueRunStateNotificationLocked( run, 0, QDateTime::currentMSecsSinceEpoch() );
 
     if ( run.state() == WorkflowRunState::Completed )
     {
@@ -672,6 +723,18 @@ WorkflowRunCoordinator::RecoveryReport WorkflowRunCoordinator::recoverAtStartup(
 }
 
 long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error )
+{
+    // resumeRun has many exit paths; the wrapper guarantees every queued
+    // notification drains outside m_mutex no matter which one is taken
+    // (#860). run locks (flock) may still be held at drain time: that is
+    // safe — flock guards cross-process ownership and is never taken by a
+    // signal slot.
+    const long pipelineId = resumeRunImpl( runId, error );
+    drainRunNotifications();
+    return pipelineId;
+}
+
+long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *error )
 {
     {
         std::lock_guard<std::mutex> lock( m_mutex );
@@ -758,7 +821,7 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
     {
         std::lock_guard<std::mutex> lock( m_mutex );
         persistRunLocked( *run );
-        notifyRunStateLocked( *run, 0, QDateTime::currentMSecsSinceEpoch() ); // Interrupted
+        queueRunStateNotificationLocked( *run, 0, QDateTime::currentMSecsSinceEpoch() ); // Interrupted
     }
     if ( run->state() != WorkflowRunState::Interrupted && run->state() != WorkflowRunState::Failed
          && run->state() != WorkflowRunState::Canceled )
@@ -1052,14 +1115,37 @@ long WorkflowRunCoordinator::resumeRun( const std::string &runId, QString *error
                         run->setArtifact( fresh.stepId, fresh.outputLayerPath );
                 }
             }
-            m_pipelineByRunId.erase( it->second->runId() );
+            // Ghost-run closure (#876): the fresh submission already
+            // broadcast Running under THIS temporary runId, so dropping it
+            // silently would strand a non-terminal run forever in every
+            // observer (WorkspaceService's runs index included). The ghost
+            // reaches a terminal state here — Canceled with an explanatory
+            // error — and its terminal notification is queued through the
+            // regular channel before the mapping disappears.
+            const std::string ghostRunId = it->second->runId();
+            std::shared_ptr<WorkflowRun> ghost = it->second;
+            if ( !isTerminalRunState( ghost->state() ) )
+            {
+                ghost->forceSetState( WorkflowRunState::Canceled );
+                ghost->setErrorMessage(
+                    QStringLiteral( "Superseded by resume of run %1 (temporary internal run)" )
+                        .arg( QString::fromStdString( runId ) )
+                        .toStdString() );
+                // Already inside the swap's m_mutex scope: persist + queue
+                // only — the public resumeRun wrapper drains the queue
+                // outside the lock.
+                persistRunLocked( *ghost );
+                queueRunStateNotificationLocked( *ghost, 0,
+                                                 QDateTime::currentMSecsSinceEpoch() );
+            }
+            m_pipelineByRunId.erase( ghostRunId );
             // The fresh submission persisted a checkpoint under ITS runId
             // before the swap; recovery would resurrect it as a ghost
             // Interrupted run duplicating this resume (review P1). Its lock
             // is released with it — the ORIGINAL run's lock (held by this
             // resuming process) remains the ownership handle until finalize.
-            QFile::remove( checkpointPathLocked( it->second->runId() ) );
-            m_locksByRunId.erase( it->second->runId() );
+            QFile::remove( checkpointPathLocked( ghostRunId ) );
+            m_locksByRunId.erase( ghostRunId );
             it->second = run;
             m_pipelineByRunId[run->runId()] = pipelineId;
             persistRunLocked( *run );
@@ -1121,6 +1207,83 @@ std::vector<std::shared_ptr<WorkflowRun>> WorkflowRunCoordinator::runs() const
     out.reserve( m_runsByPipeline.size() );
     for ( const auto &kv : m_runsByPipeline )
         out.push_back( kv.second );
+    return out;
+}
+
+QString WorkflowRunCoordinator::explainRun( long pipelineId ) const
+{
+    // 9.0 M7: run-level evidence dump. Copied under m_mutex, formatted
+    // outside it; the run aggregate's own locking covers its step plans.
+    struct RunEvidence
+    {
+        std::shared_ptr<WorkflowRun> run;
+        bool resuming = false;
+        bool runLockHeld = false;
+    };
+    RunEvidence evidence;
+    {
+        std::lock_guard<std::mutex> lock( m_mutex );
+        const auto it = m_runsByPipeline.find( pipelineId );
+        if ( it == m_runsByPipeline.end() )
+            return QStringLiteral( "WorkflowRunCoordinator: no run tracked for pipeline %1\n" )
+                .arg( pipelineId );
+        evidence.run = it->second;
+        evidence.resuming = m_resuming.count( evidence.run->runId() ) > 0;
+        evidence.runLockHeld = m_locksByRunId.count( evidence.run->runId() ) > 0;
+    }
+
+    QString out;
+    out += QStringLiteral( "WorkflowRunCoordinator run dump\n" );
+    out += QStringLiteral( "  pipelineId: %1\n" ).arg( pipelineId );
+    out += QStringLiteral( "  runId: %1\n" ).arg( QString::fromStdString( evidence.run->runId() ) );
+    out += QStringLiteral( "  workflowId: %1\n" ).arg( QString::fromStdString( evidence.run->workflowId() ) );
+    out += QStringLiteral( "  state: %1\n" )
+               .arg( QString::fromStdString( workflowRunStateToString( evidence.run->state() ) ) );
+    out += QStringLiteral( "  resuming: %1  runLockHeld: %2\n" )
+               .arg( evidence.resuming ? QStringLiteral( "yes" ) : QStringLiteral( "no" ) )
+               .arg( evidence.runLockHeld ? QStringLiteral( "yes" ) : QStringLiteral( "no" ) );
+    const auto plans = evidence.run->stepPlans();
+    out += QStringLiteral( "  steps: %1\n" ).arg( plans.size() );
+    for ( const StepPlan &plan : plans )
+    {
+        out += QStringLiteral( "    step %1: status=%2 taskId=%3 outputDigest=%4\n" )
+                   .arg( QString::fromStdString( plan.stepId ),
+                         QString::fromStdString( plan.status ) )
+                   .arg( plan.taskId )
+                   .arg( plan.outputDigest.empty() ? QStringLiteral( "-" )
+                                                   : QString::fromStdString( plan.outputDigest ).left( 12 ) );
+    }
+    return out;
+}
+
+QString WorkflowRunCoordinator::explainDump() const
+{
+    size_t liveRuns = 0;
+    size_t terminalRuns = 0;
+    size_t locksHeld = 0;
+    size_t pendingNotifications = 0;
+    std::vector<std::string> resumingRunIds;
+    {
+        std::lock_guard<std::mutex> lock( m_mutex );
+        for ( const auto &kv : m_runsByPipeline )
+        {
+            if ( isTerminalRunState( kv.second->state() ) )
+                ++terminalRuns;
+            else
+                ++liveRuns;
+        }
+        locksHeld = m_locksByRunId.size();
+        pendingNotifications = m_pendingRunNotifications.size();
+        resumingRunIds.assign( m_resuming.begin(), m_resuming.end() );
+    }
+    QString out;
+    out += QStringLiteral( "WorkflowRunCoordinator explain dump\n" );
+    out += QStringLiteral( "  runs: %1 live, %2 terminal\n" ).arg( liveRuns ).arg( terminalRuns );
+    out += QStringLiteral( "  runLocks held: %1\n" ).arg( locksHeld );
+    out += QStringLiteral( "  pendingNotifications: %1\n" ).arg( pendingNotifications );
+    out += QStringLiteral( "  resuming: %1\n" ).arg( resumingRunIds.size() );
+    for ( const std::string &id : resumingRunIds )
+        out += QStringLiteral( "    %1\n" ).arg( QString::fromStdString( id ) );
     return out;
 }
 
