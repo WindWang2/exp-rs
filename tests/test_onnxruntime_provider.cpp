@@ -548,6 +548,11 @@ TEST_CASE( "a forced CUDA acquisition on a CUDA-less host fails with a typed loa
   // session-options level EP registration distinguishes "EP not compiled
   // in" (throws) from "EP present" (returns).
   {
+    // Platform 9.0: ORT ≥1.30 uses the default logger inside the CUDA EP
+    // registration path — an Ort::Env must exist FIRST or the append throws
+    // "no DefaultLogger registered" even when the EP is present (a real
+    // 1.30 finding; the provider's load() creates the Env before appending).
+    Ort::Env probeEnv( ORT_LOGGING_LEVEL_ERROR, "exp-rs-cuda-probe" );
     Ort::SessionOptions probe;
     try
     {
