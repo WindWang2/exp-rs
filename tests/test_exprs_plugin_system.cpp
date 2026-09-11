@@ -12,6 +12,7 @@ static void portableSetenv(const char *key, const char *value)
 
 #include "exprs/external_process.h"
 #include "exprs/plugin_discovery.h"
+#include "exprs/plugin_index.h"
 #include "exprs/plugin_package.h"
 #include "exprs/plugin_permissions.h"
 #include "exprs/plugin_registry.h"
@@ -482,4 +483,108 @@ TEST_CASE( "dependency constraints are probed at install time, warnings not bloc
     REQUIRE( exprs::PluginPackage::uninstall( "org.test.depped", log ) );
     REQUIRE( exprs::PluginPackage::uninstall( "org.test.depbase", log ) );
     ::system( "rm -rf /tmp/exprs_test_pkg_dep" );
+}
+
+// -- plugin-platform 9.0: offline plugin index ---------------------------------
+
+TEST_CASE( "offline index scans, filters compatibility and honors pins",
+           "[plugin][index][p12]" )
+{
+    namespace fs = std::filesystem;
+    const std::string root = "/tmp/exprs_test_index";
+    ::system( "rm -rf /tmp/exprs_test_index" );
+    std::error_code ec;
+    fs::create_directories( fs::path( root ) / "good", ec );
+    fs::create_directories( fs::path( root ) / "badapi", ec );
+    fs::create_directories( fs::path( root ) / "badplatform", ec );
+
+    auto writeManifest = []( const std::string &dir, const std::string &api,
+                             const std::string &platformsJson ) {
+        std::ofstream out( dir + "/plugin.json", std::ios::trunc );
+        out << R"({
+            "manifest_version": 1,
+            "id": "org.test.index.)" << dir << R"(",
+            "name": "Index Fixture",
+            "version": "1.2.3",
+            "api_version": ")" << api << R"(",
+            "abi_version": 1,
+            "entrypoint_kind": "manifest",
+            "platforms": )" << platformsJson << R"(,
+            "operators": []
+        })";
+    };
+    // (ids must differ; build per-directory manifests explicitly)
+    {
+        std::ofstream out( root + "/good/plugin.json", std::ios::trunc );
+        out << R"({
+            "manifest_version": 1, "id": "org.test.index.good",
+            "name": "Good", "version": "1.2.3",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(", "abi_version": 1,
+            "entrypoint_kind": "manifest", "operators": []
+        })";
+    }
+    {
+        std::ofstream out( root + "/badapi/plugin.json", std::ios::trunc );
+        out << R"({
+            "manifest_version": 1, "id": "org.test.index.badapi",
+            "name": "BadApi", "version": "1.0.0",
+            "api_version": "9.9", "abi_version": 1,
+            "entrypoint_kind": "manifest", "operators": []
+        })";
+    }
+    {
+        std::ofstream out( root + "/badplatform/plugin.json", std::ios::trunc );
+        out << R"({
+            "manifest_version": 1, "id": "org.test.index.badplatform",
+            "name": "BadPlatform", "version": "1.0.0",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(", "abi_version": 1,
+            "entrypoint_kind": "manifest", "platforms": ["atarist"],
+            "operators": []
+        })";
+    }
+
+    const Json::Value index = exprs::PluginIndex::build( { root }, "2026-09-12T00:00:00Z" );
+    REQUIRE( index["host"]["platform"].isString() );
+    REQUIRE( index["generatedAt"].asString() == "2026-09-12T00:00:00Z" );
+    const Json::Value &plugins = index["plugins"];
+    REQUIRE( plugins.size() == 3 );
+    // Sorted by id, deterministic output.
+    REQUIRE( plugins[0]["id"].asString() < plugins[1]["id"].asString() );
+    REQUIRE( plugins[1]["id"].asString() < plugins[2]["id"].asString() );
+    for ( const Json::Value &plugin : plugins )
+    {
+        if ( plugin["id"].asString() == "org.test.index.good" )
+        {
+            REQUIRE( plugin["compatible"].asBool() );
+            REQUIRE( plugin["reason"].asString().empty() );
+        }
+        else if ( plugin["id"].asString() == "org.test.index.badapi" )
+        {
+            REQUIRE_FALSE( plugin["compatible"].asBool() );
+            REQUIRE( plugin["reason"].asString().find( "api_version" ) != std::string::npos );
+        }
+        else
+        {
+            REQUIRE_FALSE( plugin["compatible"].asBool() );
+            REQUIRE( plugin["reason"].asString().find( "platform" ) != std::string::npos );
+        }
+    }
+
+    // Pins are a pure annotation: pinned matches / upgrade / downgrade.
+    std::map<std::string, std::string> pins;
+    pins["org.test.index.good"] = "1.2.3";   // exact
+    pins["org.test.index.badapi"] = "2.0.0"; // newer than available -> upgrade
+    const Json::Value annotated = exprs::PluginIndex::applyPins( index, pins );
+    for ( const Json::Value &plugin : annotated["plugins"] )
+    {
+        const std::string id = plugin["id"].asString();
+        if ( id == "org.test.index.good" )
+            REQUIRE( plugin["pin"].asString() == "pinned" );
+        else if ( id == "org.test.index.badapi" )
+            REQUIRE( plugin["pin"].asString() == "upgrade" );
+        else
+            REQUIRE( plugin["pin"].asString() == "unpinned" );
+    }
+
+    ::system( "rm -rf /tmp/exprs_test_index" );
 }

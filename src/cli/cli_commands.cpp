@@ -24,7 +24,9 @@
 
 #include "exprs/exit_codes.h"
 #include "exprs/external_process.h"
+#include "exprs/plugin_capabilities.h"
 #include "exprs/plugin_discovery.h"
+#include "exprs/plugin_index.h"
 #include "exprs/plugin_diagnostics.h"
 #include "exprs/plugin_loader.h"
 #include "exprs/plugin_manifest.h"
@@ -733,7 +735,46 @@ int commandPlugin( QStringList args, const CliIO &io )
                               {}, "unknown plugin: " + pluginId );
         }
         Json::Value data = record->toJson();
+        // Plugin-platform 9.0: the machine-readable capability enforcement
+        // matrix rides along so one command answers "what does this plugin
+        // declare and what actually enforces it".
+        data["capabilityEnforcement"] = exprs_ns::pluginCapabilityEnforcementMatrixJson();
         return io.finish( true, "plugin", data, 0 );
+    }
+
+    if ( sub == "index" )
+    {
+        // Plugin-platform 9.0: LOCAL/OFFLINE index over the given (or
+        // default) plugin directories. Manifest-only scan — no dlopen, no
+        // network, no service. `--pins id=version` annotates pin status.
+        std::vector<std::string> directories;
+        std::map<std::string, std::string> pins;
+        for ( const QString &argument : args )
+        {
+            const std::string value = argument.toStdString();
+            if ( value == "--json" )
+                continue;
+            if ( value.rfind( "--pins=", 0 ) == 0 )
+            {
+                // id=version[,id=version...]
+                std::istringstream pairs( value.substr( 7 ) );
+                std::string pair;
+                while ( std::getline( pairs, pair, ',' ) )
+                {
+                    const size_t eq = pair.find( '=' );
+                    if ( eq != std::string::npos && eq > 0 )
+                        pins[ pair.substr( 0, eq ) ] = pair.substr( eq + 1 );
+                }
+                continue;
+            }
+            directories.push_back( value );
+        }
+        if ( directories.empty() )
+            directories = exprs_ns::PluginDiscovery::defaultRoots();
+        Json::Value index = exprs_ns::PluginIndex::build( directories );
+        if ( !pins.empty() )
+            index = exprs_ns::PluginIndex::applyPins( index, pins );
+        return io.finish( true, "plugin", index, 0 );
     }
 
     if ( sub == "test" )
