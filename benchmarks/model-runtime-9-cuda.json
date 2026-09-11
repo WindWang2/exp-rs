@@ -1,0 +1,14 @@
+{
+    "created_utc": "2026-09-11T18:41:43.563Z",
+    "cuda_cold_load_ms": 27.938114,
+    "cuda_forwards_per_sec": 986.7528430816291,
+    "cuda_named_forward_ms_avg": 1.013425,
+    "cuda_warm_load_ms": 7.825315,
+    "execution_provider": "CUDAExecutionProvider",
+    "gpu_name": "NVIDIA GeForce RTX 3080 Laptop GPU",
+    "known_answer_matches_cpu": true,
+    "ort_runtime_version": "1.30.0",
+    "schema": "model-runtime-bench-9-cuda/1",
+    "vram_free_after_mb": 13707,
+    "vram_free_before_mb": 13727
+}
