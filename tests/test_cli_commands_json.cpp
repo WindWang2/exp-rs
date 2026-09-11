@@ -4,10 +4,13 @@
 
 #include <json/json.h>
 
+#include "support/http_range_server.h"
+
 #include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <vector>
 
 #ifndef SICNU_TEST_CLI
 #error "SICNU_TEST_CLI must point at sicnu_geo_rs_cli"
@@ -75,4 +78,65 @@ TEST_CASE( "workflow validate enforces the public schema", "[cli][json]" )
     }
     const auto result = runCli( std::string( "workflow validate " ) + path );
     REQUIRE( result.exitCode == 2 ); // exprs::ExitCode::ValidationFailure
+}
+
+// ---------------------------------------------------------------------------
+// 8.0 — data identity / data cache check (Data Fabric track, pkg I): the CLI
+// projection of the remote-identity contract over a live loopback origin.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "data identity reports a redacted, provable remote identity",
+           "[cli][json][identity][utc8]" )
+{
+    sicnu::geo::testsupport::HttpRangeServer server( std::vector<unsigned char>( 4096, 0x11 ) );
+    server.setEtag( "\"cli-identity-1\"" );
+
+    // A SIGNED URL: the credential-shaped query value must never appear in
+    // the output — this is the redaction contract, made falsifiable.
+    const std::string secret = "srv1signature9f2cSECRETvalue";
+    const std::string signedUrl = server.url() + "?X-Goog-Signature=" + secret;
+    const auto result = runCli( "data identity --json " + signedUrl );
+    REQUIRE( result.exitCode == 0 );
+    const Json::Value envelope = parseEnvelope( result.output );
+    REQUIRE( envelope.get( "ok", false ).asBool() );
+    REQUIRE( envelope.get( "command", "" ).asString() == "data" );
+    const Json::Value &identity = envelope["data"]["identity"];
+    REQUIRE( identity.isObject() );
+    CHECK( identity.get( "state", "" ).asString() == "fresh" );
+    CHECK( envelope["data"]["token_provable"].asBool() );
+    // The query string is stripped from the identity basis — the token stays
+    // provable AND the secret is absent from every output byte.
+    CHECK( result.output.find( secret ) == std::string::npos );
+}
+
+TEST_CASE( "data identity folds offline origins into an honest state",
+           "[cli][json][identity][utc8]" )
+{
+    // Port 1 on loopback: nothing listens there; the probe must answer with
+    // an offline identity, not a crash or a fabricated fresh state.
+    const auto result = runCli( "data identity --json http://127.0.0.1:1/offline.tif" );
+    REQUIRE( result.exitCode == 0 );
+    const Json::Value envelope = parseEnvelope( result.output );
+    REQUIRE( envelope.get( "ok", false ).asBool() );
+    CHECK( envelope["data"]["identity"].get( "state", "" ).asString() == "offline" );
+    CHECK_FALSE( envelope["data"]["token_provable"].asBool() );
+}
+
+TEST_CASE( "data cache reports byte accounting through the range cache",
+           "[cli][json][cache][utc8]" )
+{
+    sicnu::geo::testsupport::HttpRangeServer server( std::vector<unsigned char>( 8192, 0x22 ) );
+    server.setEtag( "\"cli-cache-1\"" );
+
+    const auto result = runCli( "data cache --json " + server.url() + " --bytes 2048" );
+    REQUIRE( result.exitCode == 0 );
+    const Json::Value envelope = parseEnvelope( result.output );
+    REQUIRE( envelope.get( "ok", false ).asBool() );
+    const Json::Value &data = envelope["data"];
+    REQUIRE( data.isObject() );
+    CHECK( data.get( "bytes_read", Json::Value( 0 ) ).asUInt64() == 2048 );
+    // The bytes served came from the origin once (bounded ranged GETs).
+    CHECK( data["telemetry_delta"].get( "bytes_served", Json::Value( 0 ) ).asUInt64() == 2048 );
+    CHECK( data["telemetry_delta"].get( "bytes_fetched", Json::Value( 0 ) ).asUInt64() >= 2048 );
+    CHECK( data["config"].get( "stale_policy", "" ).asString() == "revalidate_on_open" );
 }

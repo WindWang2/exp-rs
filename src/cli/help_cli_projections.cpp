@@ -182,7 +182,18 @@ int runHelpProjections( const QStringList &arguments )
     parser.addOption( helpTopic );
     parser.addOption( listTopics );
     parser.addOption( exportDocs );
-    parser.process( arguments );
+    // parse(), NOT process(): CLI 3.0 subcommands legitimately carry their
+    // own global flags (--json, --quiet, …) that are unknown to this parser.
+    // process() would exit the whole program with "unknown option" before
+    // the subcommand dispatch ever ran; a failed parse just means this is
+    // not a help projection and the caller must continue.
+    if ( !parser.parse( arguments ) )
+        return -1;
+    if ( parser.isSet( QStringLiteral( "help" ) ) )
+    {
+        parser.showHelp( 0 );
+        return 0;
+    }
 
     if ( parser.isSet( listTopics ) )
         return runListTopics();

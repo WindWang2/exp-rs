@@ -42,8 +42,11 @@ using InputIdentityResolver = std::function<QString( const QString &canonicalPat
 /// set once by the host at startup; read from admission/fingerprint paths.
 /// Not thread-mutable on purpose: install before any execution starts.
 InputIdentityResolver *executionIdentityResolver();
-/// Installs @p resolver (nullptr restores the default). Returns the
-/// previously installed resolver (for layered hosts).
+/// Installs @p resolver (an empty resolver restores the default). Returns a
+/// pointer to the installed resolver afterwards (null when @p resolver was
+/// empty). NOTE: the resolver is stored by value — hosts that need to
+/// restore a previous resolver must copy `*executionIdentityResolver()`
+/// BEFORE installing.
 InputIdentityResolver *setExecutionIdentityResolver( InputIdentityResolver resolver );
 
 } // namespace sicnu::data

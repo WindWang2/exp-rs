@@ -327,3 +327,163 @@ TEST_CASE( "missing values are counted against the declared _FillValue",
   CHECK( unwritten.values[0] == Approx( -9999.0 ) );
 }
 
+
+// ---------------------------------------------------------------------------
+// 8.0 — EO cube workflow: string datetime axes, instant selection, bounded
+// window reads (Data Fabric track, pkg E). Driver-gated like the rest.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+/// EO-style cube (time, y, x) whose time axis is an ISO-8601 STRING
+/// coordinate variable — the common "practical EO cube" shape that the
+/// numeric-only capture could not select.
+std::string writeCubeWithStringTime( const std::string &dir, const std::string &name )
+{
+  const std::string path = ( fs::path( dir ) / name ).string();
+  int ncid = -1;
+  // NC_STRING variables need the netCDF-4 (HDF5) container format; a libnetcdf
+  // built without HDF5 support must SKIP the suite, not fail it.
+  const int createStatus = nc_create( path.c_str(), NC_CLOBBER | NC_NETCDF4, &ncid );
+  if ( createStatus != NC_NOERR )
+  {
+    WARN( "netCDF-4 (HDF5) container unavailable (nc_create status " << createStatus << ") — string-axis suite skipped" );
+    return std::string();
+  }
+  REQUIRE( ncid != -1 );
+  int timeId = -1, yId = -1, xId = -1;
+  REQUIRE( nc_def_dim( ncid, "time", 3, &timeId ) == NC_NOERR );
+  REQUIRE( nc_def_dim( ncid, "y", 4, &yId ) == NC_NOERR );
+  REQUIRE( nc_def_dim( ncid, "x", 5, &xId ) == NC_NOERR );
+  int dimIds[3] = { timeId, yId, xId };
+  int varId = -1;
+  REQUIRE( nc_def_var( ncid, "lst", NC_FLOAT, 3, dimIds, &varId ) == NC_NOERR );
+  // String datetime axis: label[i] = base + i days (one label declared in a
+  // non-UTC offset to prove instant-based selection).
+  int timeVarId = -1;
+  REQUIRE( nc_def_var( ncid, "time", NC_STRING, 1, &timeId, &timeVarId ) == NC_NOERR );
+  REQUIRE( nc_enddef( ncid ) == NC_NOERR );
+  const char *labels[3] = {
+    "2026-07-01T00:00:00Z",
+    "2026-07-02T02:00:00+02:00", // same instant as 2026-07-02T00:00:00Z
+    "2026-07-03T00:00:00Z",
+  };
+  for ( std::size_t i = 0; i < 3; ++i )
+  {
+    const std::size_t index[1] = { i };
+    REQUIRE( nc_put_var1_string( ncid, timeVarId, index, &labels[i] ) == NC_NOERR );
+  }
+  float values[3 * 4 * 5];
+  for ( std::size_t i = 0; i < 3 * 4 * 5; ++i )
+    values[i] = static_cast<float>( i );
+  REQUIRE( nc_put_var_float( ncid, varId, values ) == NC_NOERR );
+  REQUIRE( nc_close( ncid ) == NC_NOERR );
+  return path;
+}
+
+} // namespace
+
+TEST_CASE( "string datetime axes are captured and resolve by label or instant",
+           "[io][multidim][string-axis][utc8]" )
+{
+  if ( !netCdfAvailable() )
+  {
+    WARN( "netCDF driver not present — string-axis suite skipped" );
+    return;
+  }
+  const std::string dir = scratch( "string_time" );
+  const std::string path = writeCubeWithStringTime( dir, "eo_cube.nc" );
+  if ( path.empty() )
+    return;
+
+  sicnu::geo::MultidimView view = sicnu::geo::MultidimView::open( path );
+  REQUIRE( view.isOpen() );
+  const sicnu::geo::DimensionInfo *timeAxis = nullptr;
+  for ( const sicnu::geo::DimensionInfo &dim : view.metadata().dimensions )
+    if ( dim.name == "time" )
+      timeAxis = &dim;
+  REQUIRE( timeAxis != nullptr );
+  CHECK( timeAxis->hasStringValues );
+  REQUIRE( timeAxis->stringValues.size() == 3 );
+  CHECK( timeAxis->stringValues[0] == "2026-07-01T00:00:00Z" );
+  // JSON round-trip keeps the string axis (symmetric serialization).
+  const sicnu::geo::MultidimMetadata reparsed =
+    sicnu::geo::MultidimMetadata::fromJson( view.metadata().toJson() );
+  REQUIRE( reparsed.dimensions.size() == view.metadata().dimensions.size() );
+  bool stringAxisRoundTripped = false;
+  for ( const sicnu::geo::DimensionInfo &dim : reparsed.dimensions )
+    if ( dim.name == "time" )
+      stringAxisRoundTripped = dim.hasStringValues && dim.stringValues.size() == 3;
+  CHECK( stringAxisRoundTripped );
+
+  // Exact label match.
+  const sicnu::geo::CoordinateSliceMatch exact =
+    view.resolveCoordinateIndexByString( "time", "2026-07-03T00:00:00Z" );
+  CHECK( exact.exact );
+  CHECK( exact.index == 2 );
+
+  // Mixed-offset label resolves by INSTANT (verbatim match is impossible).
+  const sicnu::geo::CoordinateSliceMatch byInstant =
+    view.resolveCoordinateIndexByString( "time", "2026-07-02T00:00:00Z" );
+  CHECK( byInstant.index == 1 );
+  CHECK( byInstant.distance == Approx( 0.0 ) );
+
+  // Unknown label is a typed miss, never a guess.
+  CHECK_THROWS_AS( view.resolveCoordinateIndexByString( "time", "2030-01-01T00:00:00Z" ),
+                   sicnu::geo::GeoError );
+}
+
+TEST_CASE( "EO cube workflow: instant selection, bounded window, dimension fidelity",
+           "[io][multidim][eo-cube][utc8]" )
+{
+  if ( !netCdfAvailable() )
+  {
+    WARN( "netCDF driver not present — EO cube workflow skipped" );
+    return;
+  }
+  const std::string dir = scratch( "eo_workflow" );
+  const std::string path = writeCubeWithStringTime( dir, "eo_cube.nc" );
+  if ( path.empty() )
+    return;
+
+  sicnu::geo::MultidimView view = sicnu::geo::MultidimView::open( path );
+  REQUIRE( view.isOpen() );
+
+  // 1) Select the acquisition "2026-07-02" through its string instant.
+  const sicnu::geo::CoordinateSliceMatch t1 =
+    view.resolveCoordinateIndexByString( "time", "2026-07-02T00:00:00Z" );
+  REQUIRE( t1.index == 1 );
+
+  // 2) Bounded window read at that instant (rows 1..3, cols 2..5): values
+  //    must match the cube's (time=1, y, x) layout — dimension-order
+  //    fidelity, never a reshuffled band.
+  const std::vector<std::pair<std::string, std::int64_t>> dims = {
+    { "time", t1.index },
+  };
+  sicnu::geo::MultidimGrid window =
+    view.readSliceWindow( "lst", dims, 1, 2, 2, 3, /*maxCells=*/1ull * 1024 );
+  REQUIRE( window.rows == 2 );
+  REQUIRE( window.cols == 3 );
+  const auto expected = [ & ] ( std::int64_t y, std::int64_t x ) {
+    return static_cast<double>( 1 * 4 * 5 + y * 5 + x );
+  };
+  CHECK( window.values[0] == Approx( expected( 1, 2 ) ) );
+  CHECK( window.values[1] == Approx( expected( 1, 3 ) ) );
+  CHECK( window.values[2] == Approx( expected( 1, 4 ) ) );
+  CHECK( window.values[3] == Approx( expected( 2, 2 ) ) );
+  CHECK( window.values[5] == Approx( expected( 2, 4 ) ) );
+
+  // 3) The maxCells bound refuses to materialize oversized grids.
+  sicnu::geo::MultidimGrid rejected;
+  CHECK_THROWS_AS( rejected = view.readSlice( "lst", dims, /*maxCells=*/4 ),
+                   sicnu::geo::GeoError );
+
+  // 4) Full slice at a resolved instant: the whole (y, x) plane arrives in
+  //    time-major order (dimension-order fidelity over the free axes).
+  sicnu::geo::MultidimGrid plane = view.readSlice( "lst", dims );
+  REQUIRE( plane.rows == 4 );
+  REQUIRE( plane.cols == 5 );
+  CHECK( plane.values[0] == Approx( expected( 0, 0 ) ) );
+  CHECK( plane.values[static_cast<std::size_t>( 4 ) * 5 - 1] == Approx( expected( 3, 4 ) ) );
+}

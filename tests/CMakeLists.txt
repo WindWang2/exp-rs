@@ -221,6 +221,12 @@ target_link_libraries(test_io_multidim PRIVATE ${NETCDF_LIBRARY})
 target_link_libraries(test_io_roundtrip_matrix PRIVATE ${NETCDF_LIBRARY})
 sicnu_add_io_test(test_io_products)
 sicnu_add_io_test(test_io_doctor)
+# 8.0: cacheability/reproducibility doctor checks probe remote identities
+# over the shared loopback fixture.
+target_sources(test_io_doctor PRIVATE support/http_range_server.cpp)
+if(WIN32)
+  target_link_libraries(test_io_doctor PRIVATE ws2_32)
+endif()
 sicnu_add_io_test(test_io_atomic_failures)
 sicnu_add_io_test(test_io_fidelity)
 sicnu_add_io_test(test_io_paths)
@@ -255,6 +261,14 @@ sicnu_add_io_test(test_io_stac_client)
 target_sources(test_io_stac_client PRIVATE support/http_stac_server.cpp support/http_range_server.cpp)
 if(WIN32)
   target_link_libraries(test_io_stac_client PRIVATE ws2_32)
+endif()
+
+# 8.0 identity primitives: SHA-256 vectors, ISO-8601 normalization and
+# fail-closed remote identity tokens (shared HTTP fixture).
+sicnu_add_io_test(test_io_identity)
+target_sources(test_io_identity PRIVATE support/http_range_server.cpp)
+if(WIN32)
+  target_link_libraries(test_io_identity PRIVATE ws2_32)
 endif()
 
 # 7.0 modern vector interop audit (field types / null / collections / CRS /
@@ -7398,6 +7412,13 @@ target_link_libraries(test_exprs_workflow_schema PRIVATE sicnu_sdk)
 if(NOT WIN32)
 sicnu_add_test(test_cli_commands_json)
 target_link_libraries(test_cli_commands_json PRIVATE sicnu_sdk sicnu_plugins_framework)
+# 8.0: data identity / data cache check tests drive the CLI against an
+# in-test loopback range server (shared fixture with the io suites).
+target_sources(test_cli_commands_json PRIVATE support/http_range_server.cpp)
+target_include_directories(test_cli_commands_json PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(WIN32)
+  target_link_libraries(test_cli_commands_json PRIVATE ws2_32)
+endif()
 target_compile_definitions(test_cli_commands_json PRIVATE
   SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
 )

@@ -540,6 +540,24 @@ Json::Value DimensionInfo::toJson() const
   json["type"] = type;
   json["direction"] = direction;
   json["unit"] = unit;
+  if ( hasValues )
+  {
+    json["has_values"] = true;
+    json["values_bounded"] = valuesBounded;
+    Json::Value axis( Json::arrayValue );
+    for ( const double value : values )
+      axis.append( value );
+    json["values"] = axis;
+  }
+  if ( hasStringValues )
+  {
+    json["has_string_values"] = true;
+    json["string_values_bounded"] = stringValuesBounded;
+    Json::Value axis( Json::arrayValue );
+    for ( const std::string &value : stringValues )
+      axis.append( value );
+    json["string_values"] = axis;
+  }
   return json;
 }
 
@@ -557,6 +575,13 @@ DimensionInfo DimensionInfo::fromJson( const Json::Value &json )
   {
     for ( const Json::Value &value : json["values"] )
       dim.values.push_back( value.asDouble() );
+  }
+  dim.hasStringValues = json.get( "has_string_values", false ).asBool();
+  dim.stringValuesBounded = json.get( "string_values_bounded", false ).asBool();
+  if ( dim.hasStringValues && json["string_values"].isArray() )
+  {
+    for ( const Json::Value &value : json["string_values"] )
+      dim.stringValues.push_back( value.asString() );
   }
   return dim;
 }
@@ -965,7 +990,8 @@ MultidimMetadata inspectMultidim( const std::string &path, const InspectOptions 
           GDALAttributeRelease( unitAttribute );
         }
         GDALExtendedDataTypeH axisType = GDALMDArrayGetDataType( indexingVariable );
-        const bool numericAxis = GDALExtendedDataTypeGetClass( axisType ) == GEDTC_NUMERIC &&
+        const GDALExtendedDataTypeClass axisClass = GDALExtendedDataTypeGetClass( axisType );
+        const bool numericAxis = axisClass == GEDTC_NUMERIC &&
                                  GDALExtendedDataTypeGetNumericDataType( axisType ) != GDT_Unknown;
         GDALExtendedDataTypeRelease( axisType );
         if ( numericAxis && info.size > 0 )
@@ -988,6 +1014,42 @@ MultidimMetadata inspectMultidim( const std::string &path, const InspectOptions 
             info.values = std::move( axisValues );
           }
           GDALExtendedDataTypeRelease( bufferType );
+        }
+        else if ( axisClass == GEDTC_STRING && info.size > 0 )
+        {
+          // 8.0: string coordinate axes (CF datetime strings, categorical
+          // labels). Read element-by-element with a string buffer type and
+          // copy immediately into std::string storage; each element is
+          // CPL-allocated by the driver and released right after the copy.
+          const GUInt64 axisCount = static_cast<GUInt64>(
+            std::min<std::int64_t>( info.size, static_cast<std::int64_t>( DimensionInfo::kMaxAxisValues ) ) );
+          GDALExtendedDataTypeH stringType = GDALExtendedDataTypeCreateString( 0 );
+          QuietCplErrors quietAxis;
+          const GUInt64 oneCount = 1;
+          const GInt64 oneStep = 1;
+          GPtrDiff_t oneStride = 1;
+          for ( GUInt64 i = 0; i < axisCount && stringType != nullptr; ++i )
+          {
+            char *element = nullptr;
+            if ( GDALMDArrayRead( indexingVariable, &i, &oneCount, &oneStep, &oneStride,
+                                  stringType, &element, &element, sizeof( char * ) ) )
+            {
+              info.stringValues.push_back( element ? element : "" );
+              CPLFree( element );
+            }
+            else
+            {
+              break; // first failed element truncates the axis capture
+            }
+          }
+          if ( stringType != nullptr )
+            GDALExtendedDataTypeRelease( stringType );
+          if ( !info.stringValues.empty() )
+          {
+            info.hasStringValues = true;
+            info.stringValuesBounded =
+              static_cast<std::int64_t>( info.stringValues.size() ) < info.size;
+          }
         }
         GDALMDArrayRelease( indexingVariable );
       }

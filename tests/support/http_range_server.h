@@ -16,6 +16,7 @@
 #include <mutex>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -44,7 +45,12 @@ enum class ServerBehavior
   NoRange,       ///< Range header ignored (always 200 + whole file)
   ServerError,   ///< every request answers 500
   Truncated,     ///< body cut short (connection reset mid-payload)
-  Slow           ///< answers after a delay (timeout probing)
+  Slow,          ///< answers after a delay (timeout probing)
+  ResetRanged    ///< 8.0: the FIRST ranged GET beyond the identity head
+                 ///< window answers its headers then resets the connection
+                 ///< (a transient mid-transfer reset); later requests are
+                 ///< served normally — hostile origins would starve the
+                 ///< fallback path too
 };
 
 class HttpRangeServer
@@ -82,6 +88,17 @@ class HttpRangeServer
     void replacePayload( std::vector<unsigned char> payload, const std::string &etag,
                          const std::string &lastModified );
 
+    // --- 8.0 concurrency fixture -----------------------------------------
+    /// Serves up to @p maxConnections connections CONCURRENTLY (thread per
+    /// connection, hard-bounded at 8; ≤1 keeps the legacy serial serve
+    /// loop). Lets tests exercise concurrent readers of one cached resource.
+    /// Call at construction time, before any request arrives.
+    void setConcurrency( unsigned maxConnections );
+
+    /// True when the transient ResetRanged fault has actually fired (lets
+    /// tests prove the reset path was exercised, not just the fallback).
+    bool resetFired() const { return !mResetArmed.load(); }
+
   private:
     void serveLoop();
     void handleConnection( SocketHandle client );
@@ -102,6 +119,22 @@ class HttpRangeServer
 
     ServerBehavior mBehavior;
     SocketHandle mListener = kInvalidSocket;
+    /// Connections currently owned by the serve loop / handler threads.
+    /// Teardown SHUTDOWNS (never closes — the owning thread closes) every
+    /// one of them: a client that opened a connection but never completed a
+    /// request head (connection-pool preconnects do) must not hold a handler
+    /// in recv() past fixture destruction.
+    std::set<SocketHandle> mInFlight;
+    /// Max live handler threads when concurrency > 1 (0 = serial loop).
+    /// Atomic: serveLoop reads it while a test may still configure it.
+    std::atomic<unsigned> mMaxConnections{ 0 };
+    std::atomic<unsigned> mLiveHandlers{ 0 };
+    /// ResetRanged is transient: armed until the first eligible request.
+    std::atomic<bool> mResetArmed{ true };
+    /// 8.0 concurrent-mode handler threads (joined by the destructor —
+    /// they touch fixture state, so they must never outlive it).
+    std::mutex mHandlerMutex;
+    std::vector<std::thread> mHandlers;
     int mPort = 0;
     std::thread mThread;
     std::atomic<bool> mStop{ false };
@@ -119,5 +152,9 @@ class HttpRangeServer
 /// Windows socket stack needs per-process initialization.
 void initializeSockets();
 void shutdownSocket( SocketHandle socket );
+/// Bounds how long a recv() may wait on @p socket (test fixtures must never
+/// hang on a client that connects and stays silent). Best effort — failures
+/// are ignored; the bounded recv still works without it.
+void boundSocketWait( SocketHandle socket );
 
 } // namespace sicnu::geo::testsupport

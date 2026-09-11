@@ -21,6 +21,7 @@
 #include "data/data_manager.h"
 #include "data/derivation_record.h"
 #include "data/execution_fingerprint.h"
+#include "data/execution_identity_resolver.h"
 #include "processing/algorithms/temporal/temporal_collection.h"
 #include "processing/algorithms/temporal/temporal_stac_adapter.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
@@ -762,6 +763,65 @@ TEST_CASE( "Remote and VSI inputs resolve or fail conservative — never omit (#
     inputs.clear();
     REQUIRE( fingerprintInputsForOperatorParams( &dm, scientific, &inputs, &reason ) );
     REQUIRE( inputs.isEmpty() );
+}
+
+TEST_CASE( "Unregistered remote inputs resolve through the installed identity resolver (8.0)",
+           "[temporal][workspace][fingerprint][remote][identity]" )
+{
+    ensureApp();
+    sicnu::data::DataManager dm;
+
+    // The geospatial bridge contract, faked deterministically: a strong-ETag
+    // resource yields a stable token; everything else yields "" (fail-closed).
+    // Save/restore the global explicitly: setExecutionIdentityResolver does
+    // not return the previous resolver (its header comment notwithstanding —
+    // it returns a pointer to the installed resolver, or null when empty).
+    sicnu::data::InputIdentityResolver saved;
+    if ( auto *current = sicnu::data::executionIdentityResolver() )
+        saved = *current;
+    sicnu::data::setExecutionIdentityResolver(
+        []( const QString &path ) {
+            // Exact match only — "unprovable.tif" must NOT resolve.
+            return path == QStringLiteral( "https://example.com/provable.tif" )
+                       ? QStringLiteral( "ri1:v1:deadbeef" )
+                       : QString();
+        } );
+
+    QVector<sicnu::data::TaggedDerivationInput> inputs;
+    QString reason;
+
+    // 1) A remote input WITHOUT a provable identity stays uncacheable — the
+    //    resolver answered "" and the conservative verdict holds.
+    QVariantMap unknown;
+    unknown.insert( QStringLiteral( "input" ),
+                    QStringLiteral( "https://example.com/unprovable.tif" ) );
+    REQUIRE_FALSE( fingerprintInputsForOperatorParams( &dm, unknown, &inputs, &reason ) );
+    CHECK( reason.contains( QStringLiteral( "unprovable.tif" ) ) );
+
+    // 2) A remote input WITH a provable identity fingerprints through the
+    //    token (no catalog registration, no fabricated asset identity).
+    QVariantMap provable;
+    provable.insert( QStringLiteral( "input" ),
+                     QStringLiteral( "https://example.com/provable.tif" ) );
+    inputs.clear();
+    REQUIRE( fingerprintInputsForOperatorParams( &dm, provable, &inputs, &reason ) );
+    REQUIRE( inputs.size() == 1 );
+    CHECK( inputs.first().lazyContentDigest == QStringLiteral( "ri1:v1:deadbeef" ) );
+    CHECK( inputs.first().valueDomain == QStringLiteral( "remote_identity" ) );
+    CHECK( inputs.first().assetId.isNull() );
+
+    // 3) Scenes take the same bridge.
+    QVariantMap scene;
+    scene.insert( QStringLiteral( "scenes" ),
+                  QVariantList{ QStringLiteral( "https://example.com/provable.tif" ) } );
+    inputs.clear();
+    REQUIRE( fingerprintInputsForOperatorParams( &dm, scene, &inputs, &reason ) );
+    REQUIRE( inputs.size() == 1 );
+    CHECK( inputs.first().toPort == QStringLiteral( "scene" ) );
+    CHECK( inputs.first().lazyContentDigest == QStringLiteral( "ri1:v1:deadbeef" ) );
+
+    // Restore the previous resolver (tests must not leak global state).
+    sicnu::data::setExecutionIdentityResolver( saved );
 }
 
 // ---------------------------------------------------------------------------

@@ -459,10 +459,7 @@ class CacheStore
 std::unique_ptr<CacheStore> g_store;
 std::mutex g_storeLifecycleMutex;
 bool s_handlerInstalled = false;
-// Heap-owned while installed (see install()/uninstall()): RemoveHandler
-// deletes the object, so this pointer must never dangle across uninstall.
-class RangeCacheFilesystemHandler;
-RangeCacheFilesystemHandler *g_handler = nullptr;
+
 
 CacheStore &store()
 {
@@ -921,7 +918,12 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
         }
         else if ( result.outcome == RevalidationOutcome::Unchanged )
         {
-          cache.updateEntrySize( entry, validator.identity().sizeBytes );
+          // Only refresh the size when the revalidation answer actually
+          // carried one: an Unchanged verdict never implies a known size
+          // (a 304 has no entity headers), and writing a fabricated size 0
+          // would collapse every later read to EOF.
+          if ( validator.identity().hasSize )
+            cache.updateEntrySize( entry, validator.identity().sizeBytes );
         }
         // Inconclusive (offline, size-only origins): keep serving — this is
         // the caller's declared trust level, and the revalidation attempt is
@@ -999,6 +1001,21 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
 
 } // namespace
 
+/// Heap-allocated when installed, owned by GDAL from InstallHandler() onward:
+/// VSIFileManager::RemoveHandler() DELETES the registered handler, so this
+/// must never be static storage (a static would be deleted by GDAL and then
+/// destroyed again at process exit — use-after-free + double free) and must
+/// never be deleted here. Re-install cycles lazily allocate a fresh handler.
+/// (Function-local in the accessor below; the pointer lives process-global.)
+namespace
+{
+RangeCacheFilesystemHandler *&cachedHandler()
+{
+  static RangeCacheFilesystemHandler *s_handler = nullptr;
+  return s_handler;
+}
+}
+
 const char *rangeCacheStalePolicyName( RangeCacheStalePolicy policy )
 {
   switch ( policy )
@@ -1052,21 +1069,21 @@ void RemoteRangeCache::install( const RangeCacheConfig &config )
 {
   if ( config.blockSize == 0 || config.maxCacheBytes == 0 )
     throw GeoError( ErrorCode::InvalidArgument, "RemoteRangeCache: blockSize and budget must be positive" );
-  // The handler MUST be heap-allocated: VSIFileManager::RemoveHandler()
-  // (GDAL >= 3.9) DELETES the registered handler, so a static-storage object
-  // would be freed here and then freed AGAIN by its static destructor at
-  // process exit ("double free or corruption"). Ownership transfers to GDAL
-  // on RemoveHandler; until then this module owns the single instance.
   {
     std::lock_guard<std::mutex> lock( g_storeLifecycleMutex );
-    if ( !g_handler )
-      g_handler = new RangeCacheFilesystemHandler();
     if ( !g_store )
       g_store = std::make_unique<CacheStore>();
     g_store->updateConfig( config ); // blockSize change drops entries
-    s_handlerInstalled = true;
+    if ( !s_handlerInstalled )
+    {
+      // Register exactly once per install cycle: re-registering while
+      // installed would hand GDAL a second (or deleted) handler instance.
+      // GDAL owns the handler from here on (RemoveHandler deletes it).
+      cachedHandler() = new RangeCacheFilesystemHandler();
+      VSIFileManager::InstallHandler( kRangeCachePrefix, cachedHandler() );
+      s_handlerInstalled = true;
+    }
   }
-  VSIFileManager::InstallHandler( kRangeCachePrefix, g_handler );
   ensureGdalRegistered();
 }
 
@@ -1079,10 +1096,19 @@ void RemoteRangeCache::uninstall()
   // RemoveHandler deletes the handler object (see install): forget our
   // pointer so a re-install allocates a fresh one.
   VSIFileManager::RemoveHandler( kRangeCachePrefix );
-  g_handler = nullptr;
-#endif
+  // GDAL deleted the handler above — forget the pointer (a later install()
+  // lazily allocates a fresh one; touching the old pointer would be a
+  // use-after-free).
+  cachedHandler() = nullptr;
   g_store->dropAll();
   s_handlerInstalled = false;
+#else
+  // GDAL < 3.9 has no RemoveHandler: the prefix cannot be deregistered, so
+  // uninstall only drops the bytes and KEEPS the handler installed/registered
+  // (reporting installed()==false while /vsirangecache/ still resolves, or
+  // re-registering a fresh handler per cycle, would leak and lie).
+  g_store->dropAll();
+#endif
 }
 
 bool RemoteRangeCache::installed()

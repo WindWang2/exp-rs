@@ -8,6 +8,8 @@
 
 #include "geospatial/multidim/multidim_view.h"
 
+#include "geospatial/util/time_normalization.h"
+
 #include "geospatial/gdal_guard.h"
 
 #include <cpl_conv.h>
@@ -398,6 +400,62 @@ CoordinateSliceMatch MultidimView::resolveCoordinateIndex( const std::string &di
     throw GeoError( ErrorCode::NotFound, "Nearest coordinate beyond the declared tolerance", details );
   }
   return best;
+}
+
+CoordinateSliceMatch MultidimView::resolveCoordinateIndexByString( const std::string &dimensionName,
+                                                                   const std::string &value ) const
+{
+  const DimensionInfo *axis = nullptr;
+  for ( const DimensionInfo &dim : mMetadata.dimensions )
+  {
+    if ( dim.name == dimensionName )
+    {
+      axis = &dim;
+      break;
+    }
+  }
+  if ( axis == nullptr )
+    throw GeoError( ErrorCode::InvalidArgument, "Dimension not found: " + dimensionName );
+  if ( !axis->hasStringValues )
+    throw GeoError( ErrorCode::Unsupported,
+                    "Dimension '" + dimensionName + "' carries no captured string axis" );
+
+  // Exact string match first (verbatim axis label).
+  for ( std::size_t i = 0; i < axis->stringValues.size(); ++i )
+  {
+    if ( axis->stringValues[i] == value )
+    {
+      CoordinateSliceMatch match;
+      match.index = static_cast<std::int64_t>( i );
+      match.resolvedValue = static_cast<double>( i );
+      match.distance = 0.0;
+      match.exact = true;
+      return match;
+    }
+  }
+  // Instant fallback: when the requested value AND every captured axis entry
+  // parse as ISO-8601 instants, an EQUAL instant matches (mixed offsets in
+  // the labels must not break selection). Anything else is a typed miss —
+  // nearest-instant without a declared tolerance would be a guess.
+  const InstantParse requested = parseIso8601Instant( value );
+  if ( requested.ok )
+  {
+    for ( std::size_t i = 0; i < axis->stringValues.size(); ++i )
+    {
+      const InstantParse parsed = parseIso8601Instant( axis->stringValues[i] );
+      if ( parsed.ok && parsed.epochNanos == requested.epochNanos )
+      {
+        CoordinateSliceMatch match;
+        match.index = static_cast<std::int64_t>( i );
+        match.resolvedValue = static_cast<double>( i );
+        match.distance = 0.0;
+        match.exact = true; // exact at instant granularity (offset-normalized)
+        return match;
+      }
+    }
+  }
+  throw GeoError( ErrorCode::NotFound,
+                  "Label not present on string axis '" + dimensionName + "': " + value );
 }
 
 MultidimGrid MultidimView::readSliceByCoordinateValues(

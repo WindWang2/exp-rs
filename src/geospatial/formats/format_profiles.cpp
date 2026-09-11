@@ -213,15 +213,21 @@ std::vector<FormatProfile> buildDeclaredProfiles()
     p.displayName = "GeoParquet";
     p.family = FormatFamily::Vector;
     // The GDAL Parquet driver appears only in builds compiled with Arrow
-    // support — capability queries must degrade truthfully elsewhere.
+    // support — capability queries must degrade truthfully elsewhere. The
+    // 8.0 round-trip certification (fields, nulls, empty-vs-null, polygon +
+    // null geometry, projected CRS, atomic staged publish) is proven by
+    // tests/test_io_vector_interop.cpp on stacks where the driver can
+    // actually create datasets.
     p.driverNames = { "Parquet" };
     p.extensions = { "parquet", "geoparquet" };
-    p.certification = Certification::Accessible;
+    p.certification = Certification::Certified;
     p.supportsRead = true;
-    p.supportsWrite = false;
+    p.supportsWrite = true;
     p.supportsStreaming = true;
-    p.notes = "Read-only Accessible profile: the columnar GeoParquet mapping is "
-              "driver-gated; certification requires a proven round-trip on this stack.";
+    p.notes = "Certified round-trip where the Parquet driver is create-capable "
+              "(verified on the current Linux CI stack); driver-gated elsewhere — capability "
+              "queries answer unavailable, never a claimed fidelity. Layer name "
+              "on read is the file stem (GDAL Parquet convention).";
     profiles.push_back( p );
   }
   {
@@ -524,17 +530,21 @@ Json::Value FormatProfile::toJson( bool driverAvailable ) const
                                                                        : "unsupported";
   if ( !driverAvailable )
     json["certification"] = "unavailable_in_build";
+  // Capability claims answer false when the backing driver is absent —
+  // a declared capability the running GDAL cannot exercise must never be
+  // advertised (the certification downgrade above is not enough on its own).
   json["capabilities"] = [ & ] {
+    const bool live = driverAvailable;
     Json::Value caps;
-    caps["read"] = supportsRead;
-    caps["write"] = supportsWrite;
-    caps["streaming"] = supportsStreaming;
-    caps["remote"] = remoteCapable;
-    caps["crs_preserved"] = preservesCrs;
-    caps["nodata_preserved"] = preservesNoData;
-    caps["scale_offset_preserved"] = preservesScaleOffset;
-    caps["band_metadata_preserved"] = preservesBandMetadata;
-    caps["attributes_preserved"] = preservesAttributes;
+    caps["read"] = live && supportsRead;
+    caps["write"] = live && supportsWrite;
+    caps["streaming"] = live && supportsStreaming;
+    caps["remote"] = live && remoteCapable;
+    caps["crs_preserved"] = live && preservesCrs;
+    caps["nodata_preserved"] = live && preservesNoData;
+    caps["scale_offset_preserved"] = live && preservesScaleOffset;
+    caps["band_metadata_preserved"] = live && preservesBandMetadata;
+    caps["attributes_preserved"] = live && preservesAttributes;
     return caps;
   }();
   json["drivers"] = [ & ] {

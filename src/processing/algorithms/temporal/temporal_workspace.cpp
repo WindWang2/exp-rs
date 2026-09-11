@@ -495,24 +495,28 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
     const auto snapshot = dataManager->findByPath( lookupPath );
     if ( !snapshot )
     {
-        // 8.0 WP-F: a remote input the catalog cannot resolve may still be
-        // identifiable through the installed execution-identity resolver
-        // (confirmed strong ETag — geospatial/remote/remote_identity_resolver).
-        // An empty verdict stays fail-closed (pre-8.0 behavior): unresolved
-        // ⇒ uncacheable, never a guessed identity.
-        QString remoteToken;
-        if ( const auto resolver = sicnu::data::executionIdentityResolver() )
-            remoteToken = ( *resolver )( path );
-        if ( remoteToken.isEmpty() )
-            return fail( QStringLiteral( "unresolved input (%1): %2" )
-                             .arg( QgsDataSourceResolver::kindToString( kind ), path ) );
-        sicnu::data::TaggedDerivationInput input;
-        input.revision = sicnu::data::AssetRevision::initial();
-        input.toPort = QStringLiteral( "input" );
-        input.valueDomain = QStringLiteral( "remote" );
-        input.remoteIdentity = remoteToken;
-        out->append( input );
-        continue;
+      // Data Fabric 8.0 / Execution Plane 8.0: an unregistered remote input
+      // may still carry a provable identity through the installed execution
+      // identity resolver (geospatial remote identity — fail-closed, strong-ETag
+      // only). A token becomes the input's content identity; "" keeps the
+      // conservative uncacheable verdict below.
+      if ( kind != QgsDataSourceKind::LocalFile && sicnu::data::executionIdentityResolver() )
+      {
+        const QString token = ( *sicnu::data::executionIdentityResolver() )( lookupPath );
+        if ( !token.isEmpty() )
+        {
+          sicnu::data::TaggedDerivationInput input;
+          input.revision = sicnu::data::AssetRevision::initial();
+          input.lazyContentDigest = token;
+          input.remoteIdentity = token;
+          input.toPort = QStringLiteral( "input" );
+          input.valueDomain = QStringLiteral( "remote_identity" );
+          out->append( input );
+          continue;
+        }
+      }
+      return fail( QStringLiteral( "unresolved input (%1): %2" )
+                     .arg( QgsDataSourceResolver::kindToString( kind ), path ) );
     }
     sicnu::data::TaggedDerivationInput input;
     input.assetId = snapshot->id();
@@ -524,13 +528,14 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
   }
 
   // 2) Inline scene entries — same rule (local files; a remote scene must be
-  //    registered to be identifiable).
+  //    registered or identity-resolvable to be identifiable).
   for ( QString path : scenePaths )
   {
     if ( path.trimmed().isEmpty() )
       continue;
     QString lookupPath = path.trimmed();
-    if ( QgsDataSourceResolver::requiresLocalExistenceCheck( lookupPath ) )
+    const bool localScene = QgsDataSourceResolver::requiresLocalExistenceCheck( lookupPath );
+    if ( localScene )
     {
       if ( !QFileInfo( lookupPath ).isFile() )
         return fail( QStringLiteral( "unidentifiable scene input (missing file): %1" ).arg( lookupPath ) );
@@ -541,20 +546,23 @@ bool fingerprintInputsForOperatorParams( sicnu::data::DataManager *dataManager,
     const auto snapshot = dataManager->findByPath( lookupPath );
     if ( !snapshot )
     {
-        // 8.0 WP-F: remote scene identity through the installed resolver
-        // (strong ETag only); empty verdict = uncacheable (fail-closed).
-        QString remoteToken;
-        if ( const auto resolver = sicnu::data::executionIdentityResolver() )
-            remoteToken = ( *resolver )( lookupPath );
-        if ( remoteToken.isEmpty() )
-            return fail( QStringLiteral( "unresolved scene input: %1" ).arg( lookupPath ) );
-        sicnu::data::TaggedDerivationInput input;
-        input.revision = sicnu::data::AssetRevision::initial();
-        input.toPort = QStringLiteral( "scene" );
-        input.valueDomain = QStringLiteral( "remote" );
-        input.remoteIdentity = remoteToken;
-        out->append( input );
-        continue;
+      // Same remote-identity bridge as generic inputs (Data Fabric 8.0 / Execution Plane 8.0).
+      if ( !localScene && sicnu::data::executionIdentityResolver() )
+      {
+        const QString token = ( *sicnu::data::executionIdentityResolver() )( lookupPath );
+        if ( !token.isEmpty() )
+        {
+          sicnu::data::TaggedDerivationInput input;
+          input.revision = sicnu::data::AssetRevision::initial();
+          input.lazyContentDigest = token;
+          input.remoteIdentity = token;
+          input.toPort = QStringLiteral( "scene" );
+          input.valueDomain = QStringLiteral( "remote_identity" );
+          out->append( input );
+          continue;
+        }
+      }
+      return fail( QStringLiteral( "unresolved scene input: %1" ).arg( lookupPath ) );
     }
     sicnu::data::TaggedDerivationInput input;
     input.assetId = snapshot->id();

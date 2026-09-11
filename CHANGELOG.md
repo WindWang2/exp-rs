@@ -4,6 +4,71 @@ All notable changes to the `exp-rs` project will be documented in this file.
 
 ## [Unreleased] - 2026-09-11
 
+### Cloud-Native Geospatial Data Fabric 8.0 (goal series)
+
+- **Range-cache handler lifetime fix (P0)**: the `/vsirangecache/` VSI handler
+  was registered from static storage while GDAL's `VSIFileManager::RemoveHandler()`
+  deletes the registered handler — the first uninstall left a deleted object in
+  use (use-after-free during the run, double free at process exit; reproduced
+  with ASan on GDAL 3.13.3). Handlers are now heap-allocated per install cycle
+  and owned by GDAL; re-install never re-registers.
+- **Test-fixture teardown hardening**: `http_range_server`/`http_stac_server`
+  destructors could hang forever when a client connection outlived the last
+  request (Linux does not wake `accept()` on a closed listener). Destructors
+  now wake the accept loop with a loopback connect, accepted sockets carry a
+  bounded receive window, and the in-flight client is shut down on teardown.
+- **Remote identity as a first-class contract (8.0)**: new
+  `remoteIdentityToken()` derives a fail-closed, credential-safe identity
+  token (`ri1:v1:<sha256>`) for remote inputs — non-empty only with a strong
+  ETag; credential-shaped query values are stripped from the basis so
+  re-signed URLs keep a stable identity. A self-contained FIPS 180-4 SHA-256
+  backs the token (`src/geospatial/util/sha256.*`), validated against the
+  known-answer vectors.
+- **Execution-cache identity bridge activated**: the 7.0
+  `execution_identity_resolver` seam (previously contract-only, no collector)
+  is now installed by hosts (app, CLI) with the geospatial-backed resolver;
+  unregistered remote inputs in `fingerprintInputsForOperatorParams` (generic
+  and scene paths) fingerprint through the token instead of failing, and stay
+  uncacheable (fail-closed) when no provable identity exists.
+- **STAC datetime normalization**: Qt-free ISO-8601/RFC 3339 instant parsing
+  (mixed offsets, assumed-UTC flagging for offset-less values, strict
+  refusals); `StacItem` carries normalized UTC forms (wire forms stay
+  verbatim); `buildTemporalSeries` orders by parsed instants with
+  deterministic tie-breaks, and `buildTemporalSeriesDetailed` reports
+  duplicate acquisition instants (kept, never dropped).
+- **Range-cache 8.0 fault evidence**: concurrent-reader dedup byte
+  accounting, adjacent/overlapping window reads, transient mid-range
+  connection resets degrading to the `/vsicurl/` fallback without wrong
+  bytes, changed-content-under-same-URL generation invalidation, and
+  COG overview/window reads with byte accounting. `updateEntrySize` no longer
+  fabricates a zero size when an Unchanged revalidation proves nothing about
+  size.
+- **Multidim string datetime axes**: `DimensionInfo` captures string
+  coordinate axes (CF datetime labels) alongside numeric ones, with symmetric
+  JSON round-trip (7.0 dropped numeric axis values from `toJson` — fixed);
+  `MultidimView::resolveCoordinateIndexByString` selects by exact label or
+  offset-normalized equal instant and refuses everything else; an end-to-end
+  EO-cube workflow (instant selection → bounded window → `maxCells` refusal)
+  is exercised over netCDF-4.
+- **GeoParquet certified round-trip**: the foundation writer produces
+  GeoParquet (driver-gated, create-capability checked); round-trip fidelity
+  for field types, null vs empty, polygons, projected CRS and null geometry
+  is test-certified on GDAL 3.13; the format profile upgrades to Certified
+  with honest capability gating (GDAL `CreateCopy` into Parquet is
+  unavailable in several builds and is no longer assumed).
+- **Data Doctor 3.0 additions**: `cacheability` and `reproducibility`
+  verdicts over the probed remote identity (advice-only), categorical
+  `resampling_risk` for palette/QA/classification bands, and `multidim_axes`
+  posture reporting numeric/string/bounded coordinate-axis coverage.
+- **CLI**: `data identity <url> [--revalidate]` (bounded identity probe with
+  provability verdict) and `data cache check <url> [--bytes N]` (bounded
+  through-the-cache read with cache telemetry delta and config), both
+  projection-only over the geospatial contracts.
+- **Docs**: `docs/io/cloud-credentials.md` documents the provider-neutral,
+  credential-safe boundary (CPL owns credentials; redaction vocabulary; the
+  surfaces that must never carry credentials); `docs/io/certified-formats.md`
+  and `docs/io/stac-interop.md` updated for the 8.0 behavior.
+
 ### Scientific Remote Sensing & Geospatial Algorithms 8.0 (goal series)
 - **Forward Range-Doppler geocoding (`rs:sar_geocode`, package A)**: the 7.0
   backward orbit product is closed into a full geocoding chain — every DEM
@@ -304,7 +369,6 @@ All notable changes to the `exp-rs` project will be documented in this file.
 - **Performance evidence (WP-H)**: ORT cold/warm session acquire 21.9/1.2 ms,
   named N-D forwards ≈ 23k/s, in-forward cancel latency 24.9 ms
   (`benchmarks/model-runtime-4.json`, schema `model-runtime-bench-ort/1`).
->>>>>>> master
 
 ### Cartography Knowledge, Template & Recipe Platform 6.0 (goal series, ADR 0135)
 - **Declarative correctness fixes**: single-item `fit_content` no longer

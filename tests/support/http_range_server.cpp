@@ -7,10 +7,17 @@
 
 #include "http_range_server.h"
 
+#include <algorithm>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstring>
 #include <thread>
+
+// Windows spells the both-directions shutdown "SD_BOTH"; POSIX "SHUT_RDWR".
+#ifndef SD_BOTH
+#define SD_BOTH SHUT_RDWR
+#endif
 
 namespace sicnu::geo::testsupport
 {
@@ -23,6 +30,12 @@ void initializeSockets()
     WSADATA data;
     WSAStartup( MAKEWORD( 2, 2 ), &data );
   } );
+#else
+  // Writing to a socket whose peer already closed raises SIGPIPE and kills
+  // the test process (observed as exit 141 when curl drops the connection
+  // mid-response): the fixture checks send() return values itself — the
+  // signal must not fatal-exit behind its back.
+  std::signal( SIGPIPE, SIG_IGN );
 #endif
 }
 
@@ -34,6 +47,22 @@ void shutdownSocket( SocketHandle socket )
 #else
   if ( socket != kInvalidSocket )
     ::close( socket );
+#endif
+}
+
+void boundSocketWait( SocketHandle socket )
+{
+  if ( socket == kInvalidSocket )
+    return;
+#ifdef _WIN32
+  const DWORD timeoutMs = 2000;
+  ::setsockopt( socket, SOL_SOCKET, SO_RCVTIMEO,
+                reinterpret_cast<const char *>( &timeoutMs ), sizeof( timeoutMs ) );
+#else
+  timeval timeout {};
+  timeout.tv_sec = 2;
+  timeout.tv_usec = 0;
+  ::setsockopt( socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof( timeout ) );
 #endif
 }
 
@@ -63,8 +92,68 @@ HttpRangeServer::~HttpRangeServer()
 {
   mStop.store( true );
   shutdownSocket( mListener );
+  // shutdown() alone does not reliably wake a thread blocked in accept()
+  // (Linux returns ENOTCONN for listening sockets): wake it deterministically
+  // with a loopback connect. The dummy connection drains like any other —
+  // its client end closes immediately, so the server's bounded recv sees EOF.
+  if ( mPort != 0 )
+  {
+    SocketHandle wake = ::socket( AF_INET, SOCK_STREAM, IPPROTO_TCP );
+    if ( wake != kInvalidSocket )
+    {
+      sockaddr_in address {};
+      address.sin_family = AF_INET;
+      address.sin_addr.s_addr = htonl( INADDR_LOOPBACK );
+      address.sin_port = htons( static_cast<uint16_t>( mPort ) );
+      if ( ::connect( wake, reinterpret_cast<sockaddr *>( &address ), sizeof( address ) ) == 0 )
+      {
+        ::shutdown( wake, SD_BOTH );
+        shutdownSocket( wake );
+      }
+      else
+      {
+        shutdownSocket( wake );
+      }
+    }
+  }
+  // Clients held by the serve loop or a handler thread (connected, request
+  // head never completed) must not keep threads blocked past teardown:
+  // SHUTDOWN each in-flight socket. POSIX does not wake a peer thread's
+  // recv() when an fd is CLOSEd elsewhere, and closing here could hit an fd
+  // number another component has already reused — only the owning thread
+  // closes. The bounded receive window covers anything this misses.
+  // (Copy the set and shutdown OUTSIDE the mutex: a finishing handler needs
+  // the same mutex for its erase — never hold it across any blocking call.)
+  {
+    std::set<SocketHandle> inFlight;
+    {
+      std::lock_guard<std::mutex> lock( mHandlerMutex );
+      inFlight = mInFlight;
+    }
+    for ( const SocketHandle client : inFlight )
+      ::shutdown( client, SD_BOTH );
+  }
   if ( mThread.joinable() )
     mThread.join();
+  // Concurrent-mode handlers touch fixture state — join every one of them
+  // before the members they reference start disappearing. Join OUTSIDE the
+  // mutex: a handler's own completion path locks it (mInFlight.erase), so
+  // joining under the lock is a guaranteed self-deadlock.
+  {
+    std::vector<std::thread> toJoin;
+    {
+      std::lock_guard<std::mutex> lock( mHandlerMutex );
+      toJoin = std::move( mHandlers );
+      mHandlers.clear();
+    }
+    for ( std::thread &handler : toJoin )
+      if ( handler.joinable() )
+        handler.join();
+    {
+      std::lock_guard<std::mutex> lock( mHandlerMutex );
+      mInFlight.clear();
+    }
+  }
 }
 
 std::string HttpRangeServer::url() const
@@ -143,9 +232,54 @@ void HttpRangeServer::serveLoop()
         break;
       continue;
     }
+    // A client that connects and stays silent must not pin the server
+    // thread: bound the request-head receive window (see boundSocketWait).
+    boundSocketWait( client );
+    if ( mMaxConnections.load() > 1 && mLiveHandlers.load() < mMaxConnections.load() )
+    {
+      // 8.0 concurrent mode: serve on a bounded side thread so several
+      // readers can be in flight at once (real COG clients read in parallel).
+      mLiveHandlers.fetch_add( 1 );
+      {
+        std::lock_guard<std::mutex> lock( mHandlerMutex );
+        mInFlight.insert( client );
+      }
+      std::thread handler( [this, client] {
+        handleConnection( client );
+        {
+          std::lock_guard<std::mutex> lock( mHandlerMutex );
+          mInFlight.erase( client );
+        }
+        shutdownSocket( client ); // the owning thread closes its own socket
+        mLiveHandlers.fetch_sub( 1 );
+      } );
+      std::lock_guard<std::mutex> lock( mHandlerMutex );
+      // Handles accumulate per connection (tests issue a bounded handful)
+      // and are joined in the destructor.
+      mHandlers.push_back( std::move( handler ) );
+      continue;
+    }
+    {
+      std::lock_guard<std::mutex> lock( mHandlerMutex );
+      mInFlight.insert( client );
+    }
     handleConnection( client );
+    {
+      std::lock_guard<std::mutex> lock( mHandlerMutex );
+      mInFlight.erase( client );
+    }
     shutdownSocket( client );
   }
+  // Serial mode drains its own connection; concurrent mode's detached
+  // handlers own theirs. Both finish in bounded time: recv windows are
+  // bounded and the destructor additionally closes the listener + the
+  // in-flight client, so accepts and recvs cannot block indefinitely.
+}
+
+void HttpRangeServer::setConcurrency( unsigned maxConnections )
+{
+  if ( maxConnections > 1 )
+    mMaxConnections = maxConnections > 8 ? 8 : maxConnections; // bounded by design
 }
 
 void HttpRangeServer::handleConnection( SocketHandle client )
@@ -166,11 +300,16 @@ void HttpRangeServer::handleConnection( SocketHandle client )
   const bool isHead = request.rfind( "HEAD ", 0 ) == 0;
 
   // Only the fixture path is served; auxiliary probes (.aux.xml, .properties,
-  // ...) get a 404 so byte accounting measures the asset itself.
+  // ...) get a 404 so byte accounting measures the asset itself. The query
+  // string does not affect routing (a signed URL carries its credentials in
+  // the query — the object path stays the same).
   {
     const std::size_t sp1 = request.find( ' ' );
     const std::size_t sp2 = request.find( ' ', sp1 == std::string::npos ? 0 : sp1 + 1 );
-    const std::string path = request.substr( sp1 + 1, sp2 == std::string::npos ? std::string::npos : sp2 - sp1 - 1 );
+    std::string path = request.substr( sp1 + 1, sp2 == std::string::npos ? std::string::npos : sp2 - sp1 - 1 );
+    const std::size_t query = path.find( '?' );
+    if ( query != std::string::npos )
+      path = path.substr( 0, query );
     if ( path != "/fixture.tif" )
     {
       std::fprintf( stderr, "[SRV] 404 for path %s\n", path.c_str() );
@@ -289,6 +428,47 @@ void HttpRangeServer::handleConnection( SocketHandle client )
                                "/" + std::to_string( payloadSize );
     body = payloadData + rangeStart;
     bodySize = static_cast<std::size_t>( rangeEnd - rangeStart + 1 );
+    if ( mBehavior == ServerBehavior::ResetRanged && !isHead && rangeStart >= 1024 &&
+         mResetArmed.exchange( false ) )
+    {
+      // Answer the headers, hand over a few body bytes, then kill the
+      // connection hard (SO_LINGER 0 ⇒ RST) — a mid-transfer connection
+      // reset, not a graceful short read. The reset fires ONCE (a transient
+      // fault): a permanently hostile origin would starve the /vsicurl/
+      // fallback too, and the cache's fallback guarantee needs a recoverable
+      // origin. Identity probes fetch the head window (bytes=0-1023) and
+      // HEAD answers never consume the fault (nothing is on the wire to
+      // reset).
+      {
+        std::string head = "HTTP/1.1 206 Partial Content\r\n";
+        for ( const auto &entry : headers )
+          head += entry.first + ": " + entry.second + "\r\n";
+        head += "Content-Length: " + std::to_string( bodySize ) + "\r\n";
+        head += "Connection: close\r\n\r\n";
+        std::size_t sent = 0;
+        while ( sent < head.size() )
+        {
+          const int written = ::send( client, head.data() + sent,
+                                      static_cast<int>( head.size() - sent ), 0 );
+          if ( written <= 0 )
+            break;
+          sent += static_cast<std::size_t>( written );
+        }
+        const std::size_t bytesBeforeReset = std::min<std::size_t>( bodySize, 4 );
+        if ( bytesBeforeReset > 0 )
+          ::send( client, reinterpret_cast<const char *>( body ),
+                  static_cast<int>( bytesBeforeReset ), 0 );
+        mBytesServed.fetch_add( bytesBeforeReset );
+        linger options {};
+        options.l_onoff = 1;
+        options.l_linger = 0;
+        ::setsockopt( client, SOL_SOCKET, SO_LINGER,
+                      reinterpret_cast<const char *>( &options ), sizeof( options ) );
+        // serveLoop's shutdownSocket() now closes through the linger-0
+        // setting — the peer sees a hard reset mid-body.
+      }
+      return;
+    }
     respond( client, 206, "Partial Content", headers, body, bodySize, isHead,
              mBehavior != ServerBehavior::Truncated );
     return;
