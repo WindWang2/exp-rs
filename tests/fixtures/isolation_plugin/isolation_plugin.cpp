@@ -29,6 +29,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -337,11 +338,124 @@ public:
     }
 };
 
+// -- plugin-platform 9.0 (M4/M5): remaining contribution kinds -----------------
+
+/// In-memory data provider (scheme-declared: "isodb://"). discover lists the
+/// fixed store, inspect returns metadata, open materializes a tiny payload
+/// file in the plugin temp directory and hands out the path — the honest
+/// "provider returns a host-consumable reference" contract, no raster bytes
+/// over the channel.
+class IsoStoreProvider : public exprs::IPluginDataProviderV1
+{
+public:
+    explicit IsoStoreProvider( std::string tempDirectory )
+        : mTempDirectory( std::move( tempDirectory ) )
+    {
+    }
+
+    Json::Value discover( const Json::Value &query ) override
+    {
+        Json::Value items( Json::arrayValue );
+        for ( const char *id : { "isodb://grid", "isodb://points" } )
+        {
+            Json::Value item( Json::objectValue );
+            item["uri"] = id;
+            item["kind"] = "table";
+            (void)query;
+            items.append( item );
+        }
+        return items;
+    }
+
+    Json::Value inspect( const std::string &uri ) override
+    {
+        Json::Value metadata( Json::objectValue );
+        metadata["uri"] = uri;
+        metadata["fields"] = 2;
+        metadata["provider"] = "isolation_plugin";
+        return metadata;
+    }
+
+    Json::Value open( const std::string &uri ) override
+    {
+        Json::Value reference( Json::objectValue );
+        reference["kind"] = "table";
+        std::string path = mTempDirectory.empty() ? std::string( "/tmp" ) : mTempDirectory;
+        path += "/iso-store-payload.csv";
+        {
+            std::ofstream out( path, std::ios::trunc );
+            out << "id,value\n1,10\n2,20\n";
+        }
+        reference["path"] = path;
+        reference["metadata"] = inspect( uri );
+        return reference;
+    }
+
+    Json::Value capabilities() const override
+    {
+        Json::Value caps( Json::objectValue );
+        caps["schemes"] = Json::Value( Json::arrayValue );
+        caps["schemes"].append( "isodb://" );
+        caps["maxPageSize"] = 100;
+        return caps;
+    }
+
+private:
+    std::string mTempDirectory;
+};
+
+/// Agent tool (M5): schema-validated echo following the SpatialTool envelope
+/// contract {"success": true, "result": ...}.
+class IsoEchoTool : public exprs::IPluginAgentToolV1
+{
+public:
+    Json::Value execute( const Json::Value &params ) override
+    {
+        Json::Value envelope( Json::objectValue );
+        envelope["success"] = true;
+        Json::Value result( Json::objectValue );
+        result["tool"] = "test:iso-tool";
+        result["echo"] = params;
+        envelope["result"] = result;
+        return envelope;
+    }
+};
+
+/// Model runtime (M5): identity tensor backend with a KNOWN ANSWER — infer
+/// returns the input tensor unchanged (NCHW), so conformance can assert the
+/// exact round trip without any real framework.
+class IsoIdentityRuntime : public exprs::IPluginModelRuntimeV1
+{
+public:
+    std::string backendName() const override { return "iso-identity"; }
+    std::string deviceName() const override { return "cpu"; }
+
+    bool load( const exprs::PluginModelRequestV1 &, std::string & ) override { return true; }
+
+    exprs::PluginInferenceResultV1 infer( const exprs::PluginTensorV1 &input,
+                                          const std::string & ) override
+    {
+        exprs::PluginInferenceResultV1 result;
+        result.success = true;
+        result.output = input;
+        Json::Value diagnostics( Json::objectValue );
+        diagnostics["backend"] = "iso-identity";
+        result.diagnostics = diagnostics;
+        return result;
+    }
+
+    std::vector<std::string> outputTensorNames() const override { return { "output" }; }
+};
+
 class IsolationPlugin : public exprs::PluginV1
 {
 public:
     std::string pluginId() const override { return "org.exprs.test.isolation-plugin"; }
-    bool initialize( exprs::HostServicesV1 & ) override { return true; }
+    bool initialize( exprs::HostServicesV1 &services ) override
+    {
+        mTempDirectory = services.tempDirectory();
+        return true;
+    }
 
     void registerContributions( exprs::ContributionContextV1 &context ) override
     {
@@ -369,10 +483,24 @@ public:
         context.registerOperatorFactory( "test:iso-gate", factory( "test:iso-gate" ) );
         context.registerOperatorFactory( "test:iso-spawn", factory( "test:iso-spawn" ) );
         context.registerOperatorFactory( "test:iso-slow", factory( "test:iso-slow" ) );
+        // Plugin platform 9.0 (M4/M5): every remaining contribution kind so
+        // the conformance kit can drive ALL worker surfaces end-to-end.
+        context.registerDataProvider( "test:iso-store",
+                                      std::make_shared<IsoStoreProvider>( mTempDirectory ) );
+        context.registerAgentTool( "test:iso-tool", std::make_shared<IsoEchoTool>() );
+        context.registerModelRuntime(
+            "iso-identity",
+            []( const exprs::PluginModelRequestV1 &, std::string & )
+                -> exprs::PluginModelRuntimePtrV1 {
+                return std::make_unique<IsoIdentityRuntime>();
+            } );
     }
 
     void shutdown() override { mShutdownCalled = true; }
     bool mShutdownCalled = false;
+
+private:
+    std::string mTempDirectory;
 };
 
 /// Declarative UI provider (protocol 1.1): describes a small schema and

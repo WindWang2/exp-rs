@@ -34,6 +34,8 @@
 #include "exprs/version.h"
 #include "exprs/workflow_schema.h"
 #include "plugins/framework/data_provider_registry.h"
+#include "plugins/framework/plugin_agent_tool_provider.h"
+#include "plugins/framework/plugin_model_runtime_bridge.h"
 #include "plugins/framework/plugin_runtime_host.h"
 
 #include "operators/framework/model_catalog.h"
@@ -748,13 +750,26 @@ int commandPlugin( QStringList args, const CliIO &io )
         const std::string directory = args.takeFirst().toStdString();
 
         Json::Value checks( Json::arrayValue );
+        // Plugin-platform 9.0: every check carries a machine-readable
+        // "status" (pass/fail/skipped) NEXT TO the legacy boolean so
+        // automation can separate not-applicable from green.
         auto addCheck = [&checks]( const char *code, bool ok, const std::string &detail ) {
             Json::Value check( Json::objectValue );
             check["code"] = code;
             check["ok"] = ok;
+            check["status"] = ok ? "pass" : "fail";
             check["detail"] = detail;
             checks.append( check );
             return ok;
+        };
+        auto addSkipped = [&checks]( const char *code, const std::string &detail ) {
+            Json::Value check( Json::objectValue );
+            check["code"] = code;
+            check["ok"] = true;
+            check["status"] = "skipped";
+            check["detail"] = detail;
+            checks.append( check );
+            return true;
         };
 
         exprs_ns::PluginDiagnosticLog diagnostics;
@@ -806,6 +821,13 @@ int commandPlugin( QStringList args, const CliIO &io )
         exprs_ns::PluginRegistryOptions options;
         options.roots = { std::filesystem::path( directory ).parent_path().generic_string() };
         options.policy.allowThirdPartyNative = true;
+        // Deterministic temp scope: the plugin's ${temp} (and the worker-side
+        // containment temp directory) is THIS run's directory, not the whole
+        // system temp — so the PT_PERMISSIONS escape probe escapes it.
+        options.tempDirectory = ( std::filesystem::temp_directory_path()
+                                  / ( "pt9-conformance-" + std::to_string( ::getpid() ) ) )
+                                     .generic_string();
+        std::filesystem::create_directories( options.tempDirectory );
         sicnu::plugins::PluginRuntimeHost::instance().bootstrap( options );
 
         exprs_ns::PluginRegistry &registry = exprs_ns::PluginRegistry::instance();
@@ -972,12 +994,88 @@ int commandPlugin( QStringList args, const CliIO &io )
             }
         };
 
+        // Plugin-platform 9.0: factory-driven bounded run with an EXPLICIT
+        // context. The adapter path creates its own default context (system
+        // temp), which a plugin with narrow declared write roots would rightly
+        // refuse — the probes must not mistake that policy refusal for the
+        // behavior they are probing. workDir = THIS run's temp directory,
+        // which the worker-side containment always allows (services temp).
+        const auto runBounded =
+            [&options]( const std::string &operatorId, const std::string &workDir,
+                        int timeoutMs, bool cancelAfterMs, Json::Value &result ) -> bool {
+            auto factory =
+                sicnu::plugins::PluginRuntimeHost::instance().resolveOperatorFactory( operatorId );
+            if ( !factory )
+            {
+                result["error"] = "no operator factory registered for " + operatorId;
+                return false;
+            }
+            struct BoundedRun
+            {
+                std::mutex mutex;
+                bool finished = false;
+                Json::Value result;
+            };
+            auto state = std::make_shared<BoundedRun>();
+            std::thread runner( [factory, workDir, cancelAfterMs, state] {
+                Json::Value local;
+                const auto cancelDeadline = std::chrono::steady_clock::now()
+                                            + std::chrono::milliseconds( cancelAfterMs ? 300 : 0 );
+                try
+                {
+                    auto instance = factory();
+                    sicnu::operators::RSOperatorContext context( workDir );
+                    context.setCancelCallback( [cancelDeadline, cancelAfterMs]() {
+                        return cancelAfterMs
+                               && std::chrono::steady_clock::now() >= cancelDeadline;
+                    } );
+                    local = instance->run( Json::Value( Json::objectValue ), context );
+                }
+                catch ( const sicnu::operators::RSOperatorError &error )
+                {
+                    local = Json::Value( Json::objectValue );
+                    local["error"] = error.message();
+                    local["code"] = std::to_string( static_cast<int>( error.code() ) );
+                }
+                catch ( const std::exception &exception )
+                {
+                    local = Json::Value( Json::objectValue );
+                    local["error"] = exception.what();
+                }
+                std::lock_guard<std::mutex> lock( state->mutex );
+                state->result = std::move( local );
+                state->finished = true;
+            } );
+            const auto deadline =
+                std::chrono::steady_clock::now() + std::chrono::milliseconds( timeoutMs );
+            for ( ;; )
+            {
+                {
+                    std::lock_guard<std::mutex> lock( state->mutex );
+                    if ( state->finished )
+                    {
+                        result = state->result;
+                        runner.join();
+                        return true;
+                    }
+                }
+                if ( std::chrono::steady_clock::now() >= deadline )
+                {
+                    result = Json::Value( Json::objectValue );
+                    result["error"] = "execution exceeded the conformance budget ("
+                                          + std::to_string( timeoutMs ) + " ms)";
+                    runner.detach();
+                    return false;
+                }
+                std::this_thread::sleep_for( std::chrono::milliseconds( 20 ) );
+            }
+        };
+
         if ( conformance.isMember( "cancelTarget" ) && conformance["cancelTarget"].isString() )
         {
             const std::string target = conformance["cancelTarget"].asString();
             Json::Value result;
-            const bool finished = executeBounded( target, Json::Value( Json::objectValue ),
-                                                  20000, true, result );
+            const bool finished = runBounded( target, options.tempDirectory, 20000, true, result );
             const std::string errorText = result.get( "error", "" ).asString();
             // Typed matching ONLY: the adapter envelope's "cancelled" flag
             // (set from RSOperatorError::code == Cancelled), the exception
@@ -998,7 +1096,7 @@ int commandPlugin( QStringList args, const CliIO &io )
         }
         else
         {
-            addCheck( "PT_CANCEL", true, "skipped (no conformance.cancelTarget declared)" );
+            addSkipped( "PT_CANCEL", "no conformance.cancelTarget declared" );
         }
 
         if ( conformance.isMember( "concurrencyTarget" )
@@ -1041,8 +1139,7 @@ int commandPlugin( QStringList args, const CliIO &io )
         }
         else
         {
-            addCheck( "PT_CONCURRENCY", true,
-                      "skipped (no conformance.concurrencyTarget declared)" );
+            addSkipped( "PT_CONCURRENCY", "no conformance.concurrencyTarget declared" );
         }
 
         if ( conformance.isMember( "crashTarget" ) && conformance["crashTarget"].isString() )
@@ -1073,7 +1170,7 @@ int commandPlugin( QStringList args, const CliIO &io )
         }
         else
         {
-            addCheck( "PT_RESTART", true, "skipped (no conformance.crashTarget declared)" );
+            addSkipped( "PT_RESTART", "no conformance.crashTarget declared" );
         }
 
         const Json::Value &uiSchemaFlag = conformance.get( "uiSchema", Json::Value( false ) );
@@ -1093,7 +1190,246 @@ int commandPlugin( QStringList args, const CliIO &io )
         }
         else
         {
-            addCheck( "PT_UI_SCHEMA", true, "skipped (no declarative UI declared)" );
+            addSkipped( "PT_UI_SCHEMA", "no declarative UI declared" );
+        }
+
+        // ---- plugin-platform 9.0 conformance additions --------------------
+        // PT_PROVIDERS / PT_AGENTTOOL / PT_MODEL drive every remaining
+        // contribution kind through its production proxy/registry path.
+        if ( conformance.isMember( "dataProviderTarget" )
+             && conformance["dataProviderTarget"].isString() )
+        {
+            const std::string target = conformance["dataProviderTarget"].asString();
+            const auto *entry = sicnu::plugins::DataProviderRegistry::instance().find( target );
+            if ( !entry )
+            {
+                addCheck( "PT_PROVIDERS", false,
+                          "declared provider is not registered after load: " + target );
+            }
+            else
+            {
+                // Drive discover → inspect → open on the FIRST declared
+                // scheme; the worker-side scheme gate (protocol 1.2) refuses
+                // undeclared schemes, so the kit uses declared ones only.
+                std::string probeUri = target;
+                for ( const exprs_ns::ManifestDataProvider &declared :
+                      record.manifest.dataProviders )
+                {
+                    if ( declared.id == target && !declared.schemes.empty() )
+                    {
+                        probeUri = declared.schemes.front() + "probe";
+                        break;
+                    }
+                }
+                const Json::Value listed =
+                    entry->provider->discover( Json::Value( Json::objectValue ) );
+                const Json::Value meta = entry->provider->inspect( probeUri );
+                const Json::Value opened = entry->provider->open( probeUri );
+                // The data-provider proxy wraps worker answers in a
+                // {"result": ...} envelope; unwrapped failures are objects.
+                const bool ok = listed["result"].isArray() && meta["result"].isObject()
+                                && opened["result"].isObject();
+                addCheck( "PT_PROVIDERS", ok,
+                          ok ? "provider discover/inspect/open round-trip through the registry"
+                             : "provider surfaces returned malformed envelopes" );
+            }
+        }
+        else
+        {
+            addSkipped( "PT_PROVIDERS", "no conformance.dataProviderTarget declared" );
+        }
+
+        if ( conformance.isMember( "agentToolTarget" )
+             && conformance["agentToolTarget"].isString() )
+        {
+            const std::string target = conformance["agentToolTarget"].asString();
+            if ( !sicnu::plugins::PluginAgentToolProvider::hasExecutor( target ) )
+            {
+                addCheck( "PT_AGENTTOOL", false,
+                          "declared agent tool has no executor after load: " + target );
+            }
+            else
+            {
+                const Json::Value envelope = sicnu::plugins::PluginAgentToolProvider::execute(
+                    target, Json::Value( Json::objectValue ) );
+                const bool ok = envelope.isObject() && envelope["success"].asBool();
+                addCheck( "PT_AGENTTOOL", ok,
+                          ok ? "agent tool executed through the SpatialTool envelope"
+                             : "agent tool execution failed" );
+            }
+        }
+        else
+        {
+            addSkipped( "PT_AGENTTOOL", "no conformance.agentToolTarget declared" );
+        }
+
+        if ( conformance.isMember( "modelFrameworkTarget" )
+             && conformance["modelFrameworkTarget"].isString() )
+        {
+            const std::string target = conformance["modelFrameworkTarget"].asString();
+            auto factory = sicnu::plugins::pluginModelRuntimeFactoryFor( target );
+            if ( !factory )
+            {
+                addCheck( "PT_MODEL", false,
+                          "declared model runtime has no loaded factory: " + target );
+            }
+            else
+            {
+                exprs_ns::PluginModelRequestV1 modelRequest;
+                std::string modelError;
+                auto runtime = factory( modelRequest, modelError );
+                if ( !runtime )
+                {
+                    addCheck( "PT_MODEL", false,
+                              "model runtime factory failed: "
+                                  + ( modelError.empty() ? std::string( "unknown error" )
+                                                         : modelError ) );
+                }
+                else
+                {
+                    // Generic known-shape probe: one 1x1x1x1 tensor must
+                    // produce a successful inference envelope. (Known-answer
+                    // VALUE checks are fixture territory, not kit territory.)
+                    exprs_ns::PluginTensorV1 input;
+                    input.data = { 1.0f };
+                    input.channels = 1;
+                    input.rows = 1;
+                    input.cols = 1;
+                    const auto result = runtime->infer( input, {} );
+                    addCheck( "PT_MODEL", result.success,
+                              result.success
+                                  ? "model runtime constructed and answered inference ("
+                                        + runtime->backendName() + " on " + runtime->deviceName()
+                                        + ")"
+                                  : "inference failed: " + result.error );
+                }
+            }
+        }
+        else
+        {
+            addSkipped( "PT_MODEL", "no conformance.modelFrameworkTarget declared" );
+        }
+
+        // PT_PERMISSIONS: with declared write roots, handing an operator an
+        // out-of-root workDir must be refused typed (E5005 family).
+        if ( conformance.isMember( "permissionProbeTarget" )
+             && conformance["permissionProbeTarget"].isString() )
+        {
+            const bool declaresWriteRoots =
+                record.manifest.access.isObject()
+                && record.manifest.access.get( "filesystem", Json::Value() ).isObject()
+                && record.manifest.access["filesystem"].isMember( "write" )
+                && record.manifest.access["filesystem"]["write"].isArray()
+                && !record.manifest.access["filesystem"]["write"].empty();
+            if ( !declaresWriteRoots )
+            {
+                addSkipped( "PT_PERMISSIONS",
+                            "probe target declared but the manifest declares no write roots" );
+            }
+            else
+            {
+                // Drive the REAL workDir seam: the operator proxy forwards
+                // context.workDir() (not params) to the worker, so the probe
+                // constructs a proxy instance directly and hands it an
+                // out-of-root context.
+                auto factory = sicnu::plugins::PluginRuntimeHost::instance()
+                                   .resolveOperatorFactory(
+                                       conformance["permissionProbeTarget"].asString() );
+                if ( !factory )
+                {
+                    addCheck( "PT_PERMISSIONS", false,
+                              "probe target has no operator factory: "
+                                  + conformance["permissionProbeTarget"].asString() );
+                }
+                else
+                {
+                    const std::string escapeDir =
+                        ( std::filesystem::temp_directory_path() / "pt-permissions-escape" )
+                            .generic_string();
+                    Json::Value result;
+                    const bool finished = runBounded(
+                        conformance["permissionProbeTarget"].asString(), escapeDir, 15000, false,
+                        result );
+                    bool refused = false;
+                    std::string detail = result.get( "error", "" ).asString();
+                    if ( !finished )
+                    {
+                        // Inconclusive, not a refusal: the probe budget blew.
+                        detail = "probe budget exceeded before a verdict";
+                    }
+                    else if ( result.get( "code", "" ).asString() == "4102"
+                              || detail.find( "E5005" ) != std::string::npos )
+                    {
+                        refused = true;
+                    }
+                    addCheck( "PT_PERMISSIONS", refused,
+                              refused
+                                  ? "out-of-root workDir was refused typed by the containment gate"
+                                  : "out-of-root workDir was NOT refused: " + detail );
+                }
+            }
+        }
+        else
+        {
+            addSkipped( "PT_PERMISSIONS", "no conformance.permissionProbeTarget declared" );
+        }
+
+        // PT_QUOTA: with quotas.maxRequestConcurrency = 1 AND a short
+        // requestDeadlineMs, a caller that holds the slot past the second
+        // caller's whole deadline must produce typed quota-consequence
+        // failures (E6007 gate refusal / E6004 deadline ladder / E6005
+        // worker killed by the ladder) — never a silent double success.
+        if ( conformance.isMember( "quotaTarget" ) && conformance["quotaTarget"].isString() )
+        {
+            const Json::Value &declaredConcurrency =
+                record.manifest.quotas.get( "maxRequestConcurrency", Json::Value() );
+            const Json::Value &declaredDeadline =
+                record.manifest.quotas.get( "requestDeadlineMs", Json::Value() );
+            const bool quotaDeclared = declaredConcurrency.isInt()
+                                       && declaredConcurrency.asInt() == 1
+                                       && declaredDeadline.isInt()
+                                       && declaredDeadline.asInt() > 0
+                                       && declaredDeadline.asInt() <= 30000;
+            if ( !quotaDeclared )
+            {
+                addSkipped( "PT_QUOTA",
+                            "quotaTarget requires quotas.maxRequestConcurrency = 1 and a "
+                            "requestDeadlineMs <= 30000 declared" );
+            }
+            else
+            {
+                std::future<Json::Value> first = std::async( std::launch::async, [&] {
+                    Json::Value out;
+                    runBounded( conformance["quotaTarget"].asString(), options.tempDirectory,
+                                30000, false, out );
+                    return out;
+                } );
+                std::future<Json::Value> second = std::async( std::launch::async, [&] {
+                    Json::Value out;
+                    runBounded( conformance["quotaTarget"].asString(), options.tempDirectory,
+                                30000, false, out );
+                    return out;
+                } );
+                const Json::Value firstResult = first.get();
+                const Json::Value secondResult = second.get();
+                auto typedQuotaFailure = []( const Json::Value &outcome ) {
+                    const std::string text = outcome.get( "error", "" ).asString();
+                    return text.find( "E6007" ) != std::string::npos
+                           || text.find( "E6004" ) != std::string::npos
+                           || text.find( "E6005" ) != std::string::npos;
+                };
+                const bool typedOverload =
+                    typedQuotaFailure( firstResult ) || typedQuotaFailure( secondResult );
+                addCheck( "PT_QUOTA", typedOverload,
+                          typedOverload
+                              ? "width-1 quota produced typed quota-consequence failures "
+                                "(E6007/E6004/E6005)"
+                              : "both concurrent calls succeeded with a width-1 quota" );
+            }
+        }
+        else
+        {
+            addSkipped( "PT_QUOTA", "no conformance.quotaTarget declared" );
         }
 
         const bool unloadOk = registry.unload( pluginId );
@@ -1148,6 +1484,41 @@ int commandPlugin( QStringList args, const CliIO &io )
         registry.unload( pluginId );
         registry.setUserDisabledIds( savedDisabled );
 
+        // PT_PROCESS_CLEANUP (9.0): for a host-process plugin, the final
+        // unload must leave evidence that the worker's process group is
+        // fully reaped ("no"). "unknown" is accepted with a warning (EPERM
+        // containers); a live group after unload fails. In-process plugins
+        // skip (there is no worker).
+        if ( record.manifest.runtime == exprs_ns::PluginRuntimeKind::HostProcess )
+        {
+            const Json::Value snapshot =
+                sicnu::plugins::PluginRuntimeHost::instance().hostProcessSnapshot();
+            const Json::Value &retired = snapshot["retiredGroups"][ pluginId ];
+            const std::string state = retired.isString() ? retired.asString() : "unknown";
+            if ( state == "no" )
+            {
+                addCheck( "PT_PROCESS_CLEANUP", true,
+                          "worker process group fully reaped after unload (probe: ESRCH)" );
+            }
+            else if ( state == "unknown" )
+            {
+                // Honest not-decidable: recorded as skipped, never as a
+                // claim that cleanup was verified.
+                addSkipped( "PT_PROCESS_CLEANUP",
+                            "process-group probe could not decide on this platform; "
+                            "cleanup NOT verified" );
+            }
+            else
+            {
+                addCheck( "PT_PROCESS_CLEANUP", false,
+                          "worker process group still has members after unload" );
+            }
+        }
+        else
+        {
+            addSkipped( "PT_PROCESS_CLEANUP", "not a host-process plugin (no worker)" );
+        }
+
         diagnostics.merge( validationLog );
         Json::Value data( Json::objectValue );
         data["directory"] = directory;
@@ -1161,10 +1532,11 @@ int commandPlugin( QStringList args, const CliIO &io )
         {
             if ( check["ok"].asBool() )
             {
-                // Skipped targets are ok=true (they never fail the run) but
-                // are NOT counted as passes — a plugin declaring nothing
-                // must not look like a 13/13 conformance win.
-                if ( check["detail"].asString().rfind( "skipped", 0 ) == 0 )
+                // Status is authoritative in 9.0 (the legacy detail-prefix
+                // heuristic remains as a fallback for hand-built checks).
+                const std::string status = check.get( "status", "pass" ).asString();
+                if ( status == "skipped"
+                     || check["detail"].asString().rfind( "skipped", 0 ) == 0 )
                     ++skipped;
                 else
                     ++passed;
@@ -1176,12 +1548,12 @@ int commandPlugin( QStringList args, const CliIO &io )
         data["summary"] = summary;
         bool allChecksOk =
             valid && loadOk && registrationsOk && revocationOk && roundTripRegistrations;
+        // 9.0 verdict: EVERY failed check fails the run. (Before, declared
+        // 8.0 targets could fail without changing the verdict — a kit that
+        // reports failure but exits 0 is dishonest automation.)
         for ( const Json::Value &check : checks )
-        {
-            const std::string code = check["code"].asString();
-            if ( ( code == "PT_HOST_LAUNCH" || code == "PT_EXECUTE" ) && !check["ok"].asBool() )
+            if ( !check["ok"].asBool() )
                 allChecksOk = false;
-        }
         const bool ok = allChecksOk;
         // Human-mode verdicts: name the failing checks in the error line so
         // a conformance run is diagnosable without parsing JSON.
