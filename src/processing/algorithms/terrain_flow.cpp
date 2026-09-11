@@ -51,9 +51,31 @@ bool fillDepressions( const float *dem, float *filled, int width, int height, fl
             const size_t i = static_cast<size_t>( y ) * width + x;
             filled[i] = dem[i];
             if ( dem[i] == nodata || std::isnan( dem[i] ) )
+            {
+                done[i] = 1;
                 continue;
-            const bool boundary =
+            }
+            bool boundary =
                 x == 0 || y == 0 || x == width - 1 || y == height - 1;
+            if ( !boundary )
+            {
+                for ( const Neighbor &nb : kNeighbors )
+                {
+                    const int nx = x + nb.dx;
+                    const int ny = y + nb.dy;
+                    if ( nx < 0 || ny < 0 || nx >= width || ny >= height )
+                    {
+                        boundary = true;
+                        break;
+                    }
+                    const size_t ni = static_cast<size_t>( ny ) * width + nx;
+                    if ( dem[ni] == nodata || std::isnan( dem[ni] ) )
+                    {
+                        boundary = true;
+                        break;
+                    }
+                }
+            }
             if ( boundary )
             {
                 done[i] = 1;
