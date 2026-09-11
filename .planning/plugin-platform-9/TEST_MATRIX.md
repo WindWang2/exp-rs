@@ -66,6 +66,37 @@ would weaken the crash-ladder regression.
 
 ## Explicitly NOT run on this host
 
+- test_plugin_host / test_python_plugin_host / test_python_plugin_manager:
+  target not built on this lane (embedded Python disabled,
+  SICNU_EMBED_PYTHON=OFF; test_plugin_host links the python-bridged core
+  plugin host). Recorded as NOT BUILT, never as green.
+- Windows job-object enforcement (memory/CPU-rate/ActiveProcessLimit):
+  documented, not locally executable. Code path unchanged from 8.0 except
+  where shared POSIX/Windows code was touched (compiled, not executed).
+- macOS parity lanes: documented, not locally executable.
+- Disk-full packaging behavior: not forced portably; covered indirectly by
+  the unwritable-target test on POSIX (labeled, never claimed green).
+
+## Final regression (2026-09-12, post all milestones, Debug, -j1 tests)
+
+| Suite | Result |
+|---|---|
+| test_exprs_ipc | 96 assertions / 20 cases PASS |
+| test_plugin_capabilities | 91 assertions / 12 cases PASS |
+| test_plugin_ui_schema | 25 assertions / 8 cases PASS |
+| test_plugin_manifest | 83 assertions / 7 cases PASS |
+| test_exprs_plugin_system | 93 assertions / 11 cases PASS |
+| test_exprs_plugin_loader | 26 assertions / 4 cases PASS |
+| test_plugin_host_process | 202 assertions / 20 cases PASS |
+| test_plugins_runtime_host | 48 assertions / 5 cases PASS |
+| test_plugin_execution_barrier | 23 assertions / 6 cases PASS |
+| test_plugin_ui_schema_host | 18 assertions / 2 cases PASS |
+| test_cli_commands_json | 33 assertions / 6 cases PASS |
+| test_plugin_host | NOT BUILT (python lane, see above) |
+
+TOTAL: 738 assertions across 11 green suites + kit end-to-end 19 checks
+(18 pass / 1 skipped) — see PERFORMANCE.md for the run environment.
+
 - Windows job-object enforcement (memory/CPU-rate/ActiveProcessLimit):
   documented, not locally executable. Code path unchanged from 8.0 except
   where shared POSIX/Windows code was touched (compiled, not executed).
