@@ -51,6 +51,9 @@ QVector<SequenceUse> collectSequenceUses( const QString &source )
     // Standard sequences: QKeySequence::New / Open / Save / Quit / Undo / ...
     static const QRegularExpression stdLit(
         QStringLiteral( "QKeySequence::([A-Za-z]+)" ) );
+    // Enum-form bindings (review A4): QKeySequence(Qt::CTRL | Qt::Key_F1).
+    static const QRegularExpression enumLit(
+        QStringLiteral( "Qt::(CTRL|SHIFT|ALT|META)\\s*\\|\\s*Qt::Key_([A-Za-z0-9_]+)" ) );
 
     for ( int i = 0; i < lines.size(); ++i )
     {
@@ -64,6 +67,17 @@ QVector<SequenceUse> collectSequenceUses( const QString &source )
         {
             uses.append( { QStringLiteral( "std:%1" ).arg( m.next().captured( 1 ) ),
                            i + 1 } );
+        }
+        // Enum-form bindings (review A4): previously invisible to every
+        // conflict scan. Normalized "CTRL+F1" spelling so cross-form
+        // duplicates compare equal.
+        m = enumLit.globalMatch( lines.at( i ) );
+        while ( m.hasNext() )
+        {
+            const QString mods = m.captured( 1 );
+            const QString key = m.captured( 2 );
+            const QString word = mods.at( 0 ).toUpper() + mods.mid( 1 ).toLower();
+            uses.append( { QStringLiteral( "%1+%2" ).arg( word, key ).toUpper(), i + 1 } );
         }
     }
     return uses;
@@ -254,39 +268,41 @@ TEST_CASE( "Shortcuts: tooltip shortcut claims are bound in the same statement",
             auto m = tooltipClaim.match( statement );
             if ( !m.hasMatch() )
                 continue;
-            // The binding may sit in an adjacent statement of the same setup
-            // block (setToolTip(...); setShortcut(Qt::CTRL | Qt::Key_F1);) or
-            // anywhere else in the file when the widget is configured once at
-            // construction and re-labelled later. A claim is backed when a
-            // setShortcut statement mentioning the same modifiers and key
-            // token exists in the file.
-            bool bindsInStatement = binding.match( statement ).hasMatch();
+            // A claim is backed when the same modifiers and key token are
+            // bound nearby (adjacent setup statements) or anywhere in the
+            // file via setShortcut (review A4: the backing must MATCH the
+            // claimed tokens — an unrelated QKeySequence next door does not
+            // make a tooltip honest).
+            const QStringList tokens = m.captured( 1 ).split( QLatin1Char( '+' ) );
+            const QString keyToken = tokens.last().trimmed();
+            const QStringList modTokens = tokens.mid( 0, tokens.size() - 1 );
+            const QRegularExpression keyRe(
+                QStringLiteral( "Key_%1\\b" ).arg( keyToken ),
+                QRegularExpression::CaseInsensitiveOption );
+            const auto tokensMatch = [&keyRe, &modTokens]( const QString &stmt ) {
+                if ( !keyRe.match( stmt ).hasMatch() )
+                    return false;
+                return std::all_of( modTokens.cbegin(), modTokens.cend(),
+                                    [&stmt]( const QString &mod ) {
+                    return stmt.contains( mod.trimmed(), Qt::CaseInsensitive );
+                } );
+            };
+            bool bindsInStatement = tokensMatch( statement )
+                                    || binding.match( statement ).hasMatch();
             for ( int w = 1; w <= 2 && !bindsInStatement; ++w )
             {
                 if ( i - w >= 0 )
-                    bindsInStatement = binding.match( statements.at( i - w ) ).hasMatch();
+                    bindsInStatement = tokensMatch( statements.at( i - w ) );
                 if ( !bindsInStatement && i + w < statements.size() )
-                    bindsInStatement = binding.match( statements.at( i + w ) ).hasMatch();
+                    bindsInStatement = tokensMatch( statements.at( i + w ) );
             }
             if ( !bindsInStatement )
             {
-                // Enum-form fallback: 'Ctrl+F1' ↔ setShortcut(Qt::CTRL | Qt::Key_F1).
-                const QStringList tokens = m.captured( 1 ).split( QLatin1Char( '+' ) );
-                const QString keyToken = tokens.last().trimmed();
-                const QStringList modTokens = tokens.mid( 0, tokens.size() - 1 );
-                const QRegularExpression keyRe(
-                    QStringLiteral( "Key_%1\\b" ).arg( keyToken ),
-                    QRegularExpression::CaseInsensitiveOption );
                 for ( const QString &candidate : statements )
                 {
                     if ( !candidate.contains( QLatin1String( "setShortcut" ) ) )
                         continue;
-                    const bool modsOk = std::all_of( modTokens.cbegin(), modTokens.cend(),
-                                                     [&candidate]( const QString &mod ) {
-                        return candidate.contains( mod.trimmed(),
-                                                   Qt::CaseInsensitive );
-                    } );
-                    if ( modsOk && candidate.contains( keyRe ) )
+                    if ( tokensMatch( candidate ) )
                     {
                         bindsInStatement = true;
                         break;

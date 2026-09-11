@@ -6492,6 +6492,30 @@ target_compile_definitions(test_scan_pool PRIVATE
 )
 sicnu_discover_tests(test_scan_pool)
 
+# ── Workbench 9.0 M8: plugin command lifecycle (placement → registry) ──────
+add_executable(test_plugin_ui_placement
+  test_plugin_ui_placement.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/plugin_command_defs.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_plugin_ui_placement PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_plugin_ui_placement PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_plugin_ui_placement PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_plugin_ui_placement)
+
 # ── Workbench 9.0 M7: bounded catalog pagination ───────────────────────────
 add_executable(test_catalog_pagination
   test_catalog_pagination.cpp

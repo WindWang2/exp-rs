@@ -31,7 +31,7 @@ cannot-reproduce / out-of-scope` 分类 + 证据 + 后续动作。
 ## #859 canvas 异步 teardown race（~QgisDesktopWindow / project clear）
 
 - 分类：**fixed-by-later-merge**。
-- 证据：`main_window.cpp:312`、`main_window_project.cpp:41,102` 均改用
+- 证据：`main_window.cpp:334`、`main_window_project.cpp:41,102` 均改用
   `m_mapCanvas->stopRenderingAndSettle()`（阻塞等待渲染 job 结束再清 layer）。
 - 动作：M0 以既有 shutdown policy 测试 + project clear/switch stress 保持验证。
 

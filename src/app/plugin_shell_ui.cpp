@@ -110,6 +110,11 @@ void ExprsPluginShellUi::releaseUi( const QString &pluginId )
     // 3. Settings page: whichever state it is in, the widget must not
     // outlive the plugin library.
     releaseSettingsPage( pluginId );
+
+    // 4. Registry commands projecting this plugin's contributions go with
+    // them (review A3) — no dead palette entries across unload.
+    if ( mCommandReleaseHook )
+        mCommandReleaseHook( pluginId );
 }
 
 void ExprsPluginShellUi::releaseSettingsPage( const QString &pluginId )

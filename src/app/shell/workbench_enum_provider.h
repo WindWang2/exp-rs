@@ -31,13 +31,21 @@ class DataManager;
 namespace sicnu::app
 {
 
+/// Workbench 9.0 M6 (review B2): bind dynamic enum sources at the shell
+/// boundary. Recursively annotates schema properties so x-ui-type model/asset
+/// ports carry an x-ui-enum-source the form resolves through the production
+/// provider; ports already annotated are respected. Returns the annotated
+/// schema (same value, mutated in place and returned for chaining).
+Json::Value applyEnumSourceAnnotations( Json::Value schema );
+
 class WorkbenchEnumProvider : public QObject, public SchemaEnumProvider
 {
     Q_OBJECT
   public:
-    /// Hard per-source resolution cap. 200 covers every real catalog screen
-    /// while keeping a combo populated from a 200k-asset store bounded
-    /// (M7 contract: the UI never materializes the full catalog).
+    /// Hard per-source resolution cap. 200 keeps the RESOLVED list (and the
+    /// rendered combo) bounded for any catalog size; sources without a
+    /// native limit (AssetQuery today) are read as a snapshot and truncated
+    /// here, with label building stopping at the cap.
     static constexpr int kMaxChoices = 200;
 
     explicit WorkbenchEnumProvider( QObject *parent = nullptr );

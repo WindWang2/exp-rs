@@ -9,6 +9,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
+#include <QLineEdit>
+#include <QToolButton>
 #include <QTemporaryDir>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
@@ -171,6 +173,49 @@ TEST_CASE( "Catalog pagination: single-page catalogs render exactly as before",
   CHECK( sentinelRowCount( panel ) == 0 );
 }
 
+TEST_CASE( "Catalog pagination: filter change restarts at page 0 and pager buttons drive windows",
+           "[m7][catalog][pagination]" )
+{
+  ensureQgisApplication();
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  sicnu::data::DataManager manager;
+
+  constexpr int kAssets = 12;
+  for ( int i = 0; i < kAssets; ++i )
+    registerAsset( manager, makeTinyRaster( dir.filePath( QStringLiteral( "mix_%1.tif" ).arg( i ) ) ) );
+
+  sicnu::DataManagerPanel panel( &manager );
+  panel.setStandaloneRowCap( 5 );
+  REQUIRE( panel.standalonePageCount() == 3 );
+
+  // The pager buttons drive the windows (review B7 — the buttons were never
+  // exercised by the first cut of this suite).
+  auto *next = panel.findChild<QToolButton *>( QStringLiteral( "dataManagerPagerNext" ) );
+  auto *prev = panel.findChild<QToolButton *>( QStringLiteral( "dataManagerPagerPrev" ) );
+  REQUIRE( next != nullptr );
+  REQUIRE( prev != nullptr );
+  CHECK( prev->isEnabled() == false ); // page 0
+  next->click();
+  CHECK( panel.standalonePage() == 1 );
+  CHECK( prev->isEnabled() );
+  CHECK( assetRowIds( panel ).size() == 5 );
+  next->click();
+  CHECK( panel.standalonePage() == 2 );
+  CHECK( next->isEnabled() == false ); // last page
+
+  // A new filter restarts at page 0 (the M7 contract in the suite header):
+  // the textChanged handler resets the page synchronously; the explicit
+  // refresh re-renders without waiting on the filter debounce timer.
+  auto *filter = panel.findChild<QLineEdit *>( QStringLiteral( "dataManagerFilter" ) );
+  REQUIRE( filter != nullptr );
+  filter->setText( QStringLiteral( "mix_9" ) );
+  panel.refresh();
+  CHECK( panel.standalonePage() == 0 );
+  CHECK( panel.standalonePageCount() <= 1 );
+  CHECK( assetRowIds( panel ).size() == 1 );
+}
+
 TEST_CASE( "Catalog pagination: selection survives a page flip and return",
            "[m7][catalog][pagination]" )
 {
@@ -191,7 +236,10 @@ TEST_CASE( "Catalog pagination: selection survives a page flip and return",
   // Select the first asset, leave page 0, and come back — the selection is
   // restored by identity (M7 invariant: paging never reorders or loses the
   // user's selection context).
+  CAPTURE( assetRowIds( panel ).join( QStringLiteral( "," ) ).toStdString() );
+  CAPTURE( ids[0].toString().toStdString() );
   panel.selectAsset( ids[0] );
+  CAPTURE( panel.selectedAssetId().toString().toStdString() );
   REQUIRE( panel.selectedAssetId() == ids[0] );
 
   panel.setStandalonePage( 1 );

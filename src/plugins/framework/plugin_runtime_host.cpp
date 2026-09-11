@@ -66,11 +66,16 @@ Json::Value PluginRuntimeHost::invokePluginUi( const std::string &pluginId,
     Json::Value result( Json::objectValue );
     result["ok"] = false;
     result["error"] = "host-process runtime is not installed (E6006)";
-    std::lock_guard<std::mutex> lock( mMutex );
-    if ( mHostProcessRuntime )
+    // Review A1: look the runtime up under the lock, then invoke WITHOUT
+    // holding mMutex — the invoke blocks up to timeoutMs, and a wedged
+    // plugin must not stall the GUI thread's next describe/bootstrap call.
+    mMutex.lock();
+    auto *runtime = mHostProcessRuntime;
+    mMutex.unlock();
+    if ( runtime )
     {
         exprs::PluginDiagnosticLog log;
-        result = mHostProcessRuntime->invokeUi( pluginId, event, timeoutMs, log );
+        result = runtime->invokeUi( pluginId, event, timeoutMs, log );
     }
     return result;
 }

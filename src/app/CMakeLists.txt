@@ -124,6 +124,7 @@ add_executable(sicnu_geo_rs
     workbench/selection_context.cpp
     workbench/workbench_state.cpp
     workbench/command_registry.cpp
+    workbench/plugin_command_defs.cpp
     workbench/command_defs.cpp
     workbench/command_palette.cpp
     workbench/inspector_host.cpp

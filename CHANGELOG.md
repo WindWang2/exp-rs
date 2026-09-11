@@ -6,7 +6,7 @@ All notable changes to the `exp-rs` project will be documented in this file.
 
 ### 🚀 Professional QGIS Remote-Sensing Workbench 9.0 (feat/professional-workbench-9)
 - **Workbench state model (M1)**: `WorkbenchStateModel` — single aggregation point for project phase / tool mode / in-flight task / broken-layer facts with pure `WorkbenchRules` projections; empty-state switches now derive from one signal path.
-- **Command & shortcut authority (M2)**: all 19 registry-backed menu items consume `CommandRegistry` projections (single shortcut owner); workflow.new/open/save/run/stop join the registry; two mechanical gates (cross-source shortcut union; tooltips may not claim unbound shortcuts).
+- **Command & shortcut authority (M2)**: 22 registry-backed menu items consume `CommandRegistry` projections (single shortcut owner; 19 of them were previously double-shortcut-authority); workflow.new/open/save/run/stop join the registry; two mechanical gates (cross-source shortcut union; tooltips may not claim unbound shortcuts).
 - **UI safety burn-down (M0)**: `marshal_ui.h` completion-delivery helper; histogram scan failures surface on the GUI thread; ROI request epoch made atomic; per-owner scan-pool generation regression tests; 48-cycle project clear/import/view-churn stress.
 - **SchemaForm Host 5.0 (M6)**: production `WorkbenchEnumProvider` (layers/assets/models, 200-entry cap with truthful truncation) installed in TaskPanelHost; model/asset ports resolve live instead of rendering empty.
 - **Large catalog UX (M7)**: bounded pagination over the filtered catalog — exact slices and totals, selection identity survives page flips; 200k logical records stay browsable in bounded windows.

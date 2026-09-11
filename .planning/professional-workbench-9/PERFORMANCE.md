@@ -18,7 +18,7 @@
 | 项 | 构建 | 数据规模 | 指标 | 结果 |
 |---|---|---|---|---|
 | 200k 索引过滤 + 全扫（8.0 契约保持） | Release ci-fast | 200k 合成记录 | 过滤 <2000ms（内部断言）；套件总墙钟 | median 1.17s（3 次取中位，本机） |
-| 分页翻页（M7） | Release ci-fast | 12 资产 / 3 页来回翻 | 套件总墙钟（每页渲染 O(cap)） | median 0.51s（含进程启动） |
+| 分页翻页（M7） | Release ci-fast | 12 资产 / 3 页来回翻 | 套件总墙钟。注意：每次翻页 = 一次完整 coalesced refresh（O(catalog 过滤一遍 + 渲染行 ≤ cap)），非增量插入——与 REVIEW_LOG R1-5 一致 | median 0.51s（含进程启动） |
 | 工程 churn stress（M0） | Release ci-fast | 48 轮 clear/import/视图/先关窗 | 套件总墙钟 | median 1.25s |
 | enum provider 上限（M6） | Release | >200 选项源 | kMaxChoices=200 截断 + 截断标注 | test_workbench_enum_provider 断言锁定 |
 

@@ -84,7 +84,7 @@ class TaskPanelHost : public QWidget
     QLabel *m_title = nullptr;
     QLabel *m_help = nullptr;
     sicnu::app::WorkbenchEnumProvider *m_enumProvider = nullptr;
-  SchemaFormBuilder *m_form = nullptr;
+    SchemaFormBuilder *m_form = nullptr;
     QLabel *m_estimate = nullptr;
     QProgressBar *m_progress = nullptr;
     QLabel *m_hint = nullptr;

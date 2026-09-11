@@ -13,6 +13,8 @@
 #include "plugins/framework/plugin_ui_host.h"
 
 #include <QMap>
+#include <functional>
+
 #include <QObject>
 #include <QPointer>
 #include <QString>
@@ -46,6 +48,13 @@ public:
     /// command projections trigger these; empty after releasePluginUi).
     QList<QAction *> menuActionsFor( const QString &pluginId ) const;
 
+    /// Workbench 9.0 M8 (review A3): invoked from releaseUi so the shell can
+    /// drop the plugin.<id>.* registry commands the moment their actions die.
+    void setCommandReleaseHook( std::function<void( const QString & )> hook )
+    {
+        mCommandReleaseHook = std::move( hook );
+    }
+
 private:
     void releaseSettingsPage( const QString &pluginId );
 
@@ -55,4 +64,5 @@ private:
     QMap<QString, std::vector<QAction *>> mMenuActions;
     QMap<QString, QPointer<QWidget>> mSettingsPages;
     QMap<QString, QString> mSettingsPageTitles;
+    std::function<void( const QString & )> mCommandReleaseHook;
 };

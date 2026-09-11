@@ -166,6 +166,9 @@ class DataManagerPanel : public QDockWidget
     int m_standaloneRowCap = kDefaultStandaloneRowCap;
     int m_standalonePage = 0;
     QString m_lastSelectedAssetId;
+    /// True while refresh() rebuilds the tree — selection changes fired by
+    /// the rebuild itself must not overwrite the remembered identity.
+    bool m_inRefresh = false;
     int m_standalonePageCount = 0;
     QWidget *m_pagerRow = nullptr;
     QToolButton *m_prevPageBtn = nullptr;

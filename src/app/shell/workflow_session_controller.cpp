@@ -57,39 +57,6 @@ const StepDef *findStep( const sicnu::workflow::WorkflowDefinition *def, const s
   return nullptr;
 }
 
-/// Workbench 9.0 M6: annotate properties (recursively, schemas nest) so
-/// x-ui-type model/asset ports carry an x-ui-enum-source the form resolves
-/// through the production provider. Already-annotated ports are respected.
-void annotateEnumSources( Json::Value &schema )
-{
-  if ( !schema.isObject() )
-    return;
-  if ( schema.isMember( "properties" ) && schema["properties"].isObject() )
-  {
-    for ( auto &name : schema["properties"].getMemberNames() )
-    {
-      Json::Value &prop = schema["properties"][name];
-      if ( !prop.isObject() )
-        continue;
-      const QString uiType =
-        ( prop.isMember( "x-ui-type" ) && prop["x-ui-type"].isString() )
-            ? QString::fromStdString( prop["x-ui-type"].asString() )
-            : QString();
-      const bool annotated = prop.isMember( "x-ui-enum-source" );
-      if ( !annotated )
-      {
-        if ( uiType == QLatin1String( "model" ) )
-          prop["x-ui-enum-source"] = "models";
-        else if ( uiType == QLatin1String( "asset" ) )
-          prop["x-ui-enum-source"] = "assets";
-      }
-      // Nested object schemas recurse; array items do not resolve enums.
-      if ( prop.isMember( "properties" ) )
-        annotateEnumSources( prop );
-    }
-  }
-}
-
 } // namespace
 
 WorkflowSessionController::WorkflowSessionController( QObject *parent )
@@ -204,7 +171,7 @@ QString WorkflowSessionController::openTool( const QString &definitionId )
       // the WorkbenchEnumProvider (ModelCatalog / DataManager) instead of
       // rendering them as bare text inputs. Layer ports stay on the proven
       // push channel (setRasterLayerChoices / setVectorLayerChoices).
-      annotateEnumSources( schema );
+      schema = sicnu::app::applyEnumSourceAnnotations( schema );
       helpSummary = QString::fromStdString( op->description() );
       if ( title.isEmpty() )
         title = QString::fromStdString( op->displayName() );

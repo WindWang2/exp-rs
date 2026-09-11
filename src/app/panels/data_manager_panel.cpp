@@ -963,10 +963,12 @@ void DataManagerPanel::refresh()
   // Workbench 9.0 M7: remember the selection ACROSS rebuilds even when the
   // selected asset's row falls outside the rendered page — otherwise paging
   // away would silently drop the user's selection context and paging back
-  // would not restore it.
-  if ( !selectedAssetId().isNull() )
+  // would not restore it. The m_inRefresh guard (review round 2) keeps the
+  // rebuild's own transient selection-clear from wiping the memory.
+  if ( !m_inRefresh && !selectedAssetId().isNull() )
     m_lastSelectedAssetId = selectedAssetId().toString();
   const QString previouslySelected = m_lastSelectedAssetId;
+  m_inRefresh = true;
 
   // Workbench 8.0: preserve collection expansion across rebuilds.
   QSet<QString> expandedCollections;
@@ -1171,6 +1173,10 @@ void DataManagerPanel::refresh()
     m_treeStack->setCurrentIndex( hasData ? 0 : 1 );
 
   onSelectionChanged();
+  // Review round 2: the guard covers the trailing onSelectionChanged too —
+  // only USER-driven selection changes (after refresh returned) may update
+  // the remembered identity.
+  m_inRefresh = false;
 }
 
 void DataManagerPanel::setStandaloneRowCap( int maxRows )
@@ -1416,6 +1422,13 @@ void DataManagerPanel::onSelectionChanged()
 {
   const QList<sicnu::data::AssetId> selection = selectedAssetIds();
   emit assetSelectionChanged( selection );
+
+  // Review A5: track the user's intent, including CLEARING the selection —
+  // otherwise a refresh resurrects a deselected asset from the remembered
+  // id. During refresh() the rebuild's own transient empty selection must
+  // NOT wipe the memory (that's what makes flip-back restore work).
+  if ( !m_inRefresh )
+    m_lastSelectedAssetId = selection.size() == 1 ? selection.first().toString() : QString();
 
   if ( !m_dataManager )
   {

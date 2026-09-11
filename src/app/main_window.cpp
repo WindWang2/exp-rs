@@ -4,6 +4,7 @@
 #include "plugin_ui_invoke_delegate.h"
 #include "plugins/framework/plugin_ui_schema_host.h"
 #include "workbench/command_registry.h"
+#include "workbench/plugin_command_defs.h"
 #include <QPointer>
 #include "project_context.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
@@ -233,6 +234,13 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
         // attached and released THROUGH the shell, so unload can detach and
         // delete them while the plugin binary is still mapped.
         m_exprsShellUi = new ExprsPluginShellUi( this, exprsPluginMenu );
+        // Review A3: when a plugin's UI is released, its registry commands
+        // go with it — a reload can re-register cleanly.
+        m_exprsShellUi->setCommandReleaseHook( [this]( const QString &pluginId ) {
+            if ( m_commandRegistry )
+                m_commandRegistry->unregisterCommandsMatching(
+                    QStringLiteral( "plugin.%1." ).arg( pluginId ) );
+        } );
         uiHost->setShellSink( m_exprsShellUi );
         // Workbench 9.0 M8: declarative out-of-process UI (protocol 1.1)
         // renders through the SAME reverse-ownership sink; events reach the
@@ -327,6 +335,11 @@ QgisDesktopWindow::~QgisDesktopWindow()
     disposeChildWindow(m_georefI2M);
     m_georefI2M = nullptr;
 
+    // Review A2: the declarative-UI renderer is a singleton holding a raw
+    // sink pointer into this window — clear it and drop every rendered
+    // plugin surface BEFORE the child widgets (docks/menus) disappear.
+    sicnu::plugins::PluginUiSchemaRenderer::instance()->setShellSink( nullptr );
+
     // Stop map jobs and release the active map tool before unique_ptr members
     // and QObject children (canvas) are destroyed — prevents double-delete of
     // QgsMapTool objects parented to the canvas (exit SIGSEGV).
@@ -369,27 +382,13 @@ void QgisDesktopWindow::registerPluginCommands( const QString &pluginId )
     // menu entries behind.
     if ( !m_commandRegistry || !m_exprsShellUi )
         return;
-    const QList<QAction *> actions = m_exprsShellUi->menuActionsFor( pluginId );
-    int index = 0;
-    for ( QAction *action : actions )
-    {
-        sicnu::app::CommandDefinition d;
-        d.id = QStringLiteral( "plugin.%1.%2" ).arg( pluginId, QString::number( index ) );
-        d.title = action->text();
-        d.title.remove( QLatin1Char( '&' ) );
-        d.description = tr( "插件 %1 提供的功能。" ).arg( pluginId );
-        d.category = tr( "插件" );
-        const QPointer<QAction> guard( action );
-        d.availability = [guard]( const sicnu::app::SelectionContextSnapshot & ) {
-            return !guard.isNull();
-        };
-        d.handler = [guard] {
-            if ( guard )
-                guard->trigger();
-        };
-        m_commandRegistry->registerCommand( d );
-        ++index;
-    }
+    // Re-attach (reload path): drop the previous generation first so
+    // registerCommand's duplicate rejection cannot strand the plugin.
+    m_commandRegistry->unregisterCommandsMatching(
+        QStringLiteral( "plugin.%1." ).arg( pluginId ) );
+    sicnu::app::registerPluginMenuCommands(
+        m_commandRegistry, m_exprsShellUi->menuActionsFor( pluginId ), pluginId,
+        tr( "插件" ) );
 }
 
 void QgisDesktopWindow::setupUi()

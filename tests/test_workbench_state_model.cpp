@@ -11,6 +11,7 @@
 #include <QItemSelectionModel>
 #include <qgsmapcanvas.h>
 #include <qgsmaptoolpan.h>
+#include <qgsmaptoolzoom.h>
 #include <qgsproject.h>
 #include <qgsrasterlayer.h>
 
@@ -108,6 +109,20 @@ TEST_CASE( "WorkbenchStateModel: tool mode tracks the active map tool",
 
   REQUIRE( model.facts().toolMode == QStringLiteral( "pan" ) );
 
+  // Non-pan tool: the mode id becomes the tool's class name — this is the
+  // anti-tautology arm (review B3): deleting the mapToolSet wiring makes
+  // this test fail, because "QgsMapToolZoom" can never appear without it.
+  QgsMapToolZoom zoom( &canvas, /*zoomOut=*/true );
+  int toolChanges = 0;
+  QObject::connect( &model, &WorkbenchStateModel::toolModeChanged,
+                    [&]( const QString & ) { ++toolChanges; } );
+
+  canvas.setMapTool( &zoom );
+  pumpUntil( [this_ = &model] { return this_->facts().toolMode.contains( QStringLiteral( "Zoom" ) ); } );
+  REQUIRE( model.facts().toolMode == QStringLiteral( "QgsMapToolZoom" ) );
+  REQUIRE( toolChanges >= 1 );
+
+  // Back to pan via the actual pan tool instance (class normalized).
   QgsMapToolPan pan( &canvas );
   canvas.setMapTool( &pan );
   pumpUntil( [this_ = &model] { return this_->facts().toolMode == QStringLiteral( "pan" ); } );

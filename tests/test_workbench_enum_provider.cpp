@@ -88,7 +88,10 @@ TEST_CASE( "Provider caps oversized sources with a truthful truncation label",
 
   const auto choices = provider.choicesFor( QStringLiteral( "layers:raster" ), Json::Value() );
   REQUIRE( choices.size() == WorkbenchEnumProvider::kMaxChoices );
-  // The UI never materializes an unbounded list — the last entry says so.
+  // The UI never materializes an unbounded list — the last entry says so AND
+  // carries no selectable value (review B6: the notice is a sentinel, not a
+  // disguised choice).
+  CHECK( choices.last().id.isEmpty() );
   CHECK( choices.last().label.contains( QStringLiteral( "截断" ) ) );
 }
 
@@ -137,6 +140,57 @@ TEST_CASE( "Provider resolves assets from the authoritative DataManager",
     REQUIRE( choices.size() == 1 );
     CHECK( choices[0].id == result.assetId.toString() );
     CHECK( choices[0].label.contains( QStringLiteral( "enum_asset_" ) ) );
+  }
+}
+
+TEST_CASE( "applyEnumSourceAnnotations: shell-boundary schema annotation",
+           "[m6][enum_provider][annotation]" )
+{
+  SECTION( "model/asset ports gain enum sources; others untouched" )
+  {
+    Json::Value schema( Json::objectValue );
+    Json::Value props( Json::objectValue );
+    Json::Value model( Json::objectValue );
+    model["type"] = "string";
+    model["x-ui-type"] = "model";
+    Json::Value asset( Json::objectValue );
+    asset["x-ui-type"] = "asset";
+    asset["x-ui-enum-source"] = "custom"; // already annotated — respected
+    Json::Value raster( Json::objectValue );
+    raster["x-ui-type"] = "raster"; // stays on the push channel
+    props["model"] = model;
+    props["asset"] = asset;
+    props["raster"] = raster;
+    schema["properties"] = props;
+
+    const Json::Value out = sicnu::app::applyEnumSourceAnnotations( schema );
+    CHECK( out["properties"]["model"]["x-ui-enum-source"].asString() == "models" );
+    CHECK( out["properties"]["asset"]["x-ui-enum-source"].asString() == "custom" );
+    CHECK_FALSE( out["properties"]["raster"].isMember( "x-ui-enum-source" ) );
+  }
+
+  SECTION( "nested object schemas recurse" )
+  {
+    Json::Value schema( Json::objectValue );
+    Json::Value group( Json::objectValue );
+    Json::Value inner( Json::objectValue );
+    inner["x-ui-type"] = "model";
+    // properties CONTAIN the named port — the recursion walks this map.
+    group["properties"]["inner"] = inner;
+    Json::Value props( Json::objectValue );
+    props["group"] = group;
+    schema["properties"] = props;
+
+    const Json::Value out = sicnu::app::applyEnumSourceAnnotations( schema );
+    CHECK( out["properties"]["group"]["properties"]["inner"]["x-ui-enum-source"]
+               .asString() == "models" );
+  }
+
+  SECTION( "non-object schemas pass through" )
+  {
+    Json::Value schema( Json::arrayValue );
+    const Json::Value out = sicnu::app::applyEnumSourceAnnotations( schema );
+    CHECK( out.isArray() );
   }
 }
 

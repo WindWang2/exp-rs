@@ -3,22 +3,20 @@
 环境：Release（ci-fast preset）、`QT_QPA_PLATFORM=offscreen`、ctest `-j1`
 （资源纪律）。全部 PASS 以本地运行为准；"not built / not run" 必须显式标注。
 
-## 新增测试（按 milestone）
+## 新增测试（按 milestone — 只列实际存在的目标）
 
-| Milestone | 测试 | 类型 | 锁定的行为 |
+| Milestone | 测试（真实 target） | 类型 | 锁定的行为 |
 |---|---|---|---|
-| M0 | test_scan_pool 补 per-owner 用例 | unit | 不同 owner generation 不互相失效 |
-| M0 | test_workbench_project_stress | stress | project clear→import→clear→exit 循环无 crash/leak（sanitizer 可选档） |
-| M0 | ui_callback helper 单测 | unit | 死亡 widget 丢弃回调；跨线程投递到 widget 线程 |
-| M1 | test_workbench_state_model | unit | project phase/task phase/view/tool 状态转移与 facts 投影 |
-| M2 | test_command_surface_consistency | contract | registry shortcut 唯一；菜单/工具栏 canonical shortcut 全部 registry-owned；文案 Ctrl+X ↔ registry 绑定一致 |
-| M2 | workflow command 注册用例 | unit | workflow.* 进 registry；pipeline dock tooltip 与实际绑定一致 |
-| M3 | test_qgis_display_manager 补 destroy-order 用例 | integration | view remove → bridge delete → canvas 销毁顺序安全 |
-| M4 | test_layer_tree_consistency 补 broken-layer 用例 | integration | broken layer 的 facts/UI 状态一致 |
-| M6 | test_workbench_enum_provider | unit+contract | 每种 enum source 解析；上限截断；坏源降级自由文本；value preservation across refresh |
-| M7 | test_asset_catalog_index 补 200k 分页用例 | scale | 分页读取有界；selection 保持；无 O(N²) |
-| M8 | test_plugin_ui_placement | contract | declarative placement→host wrapper；unload 摘除；crash 后 disable |
-| M9 | 既有 theme parity / a11y 测试扩充 | unit | 新面板 empty/error 态可访问名 |
+| M0 | test_marshal_ui | unit | 死亡 widget 丢弃回调；跨线程投递到 widget 线程；null receiver no-op |
+| M0 | test_scan_pool（扩展，[issue861] 用例） | unit+behavior | per-owner generation 不互相失效；精确 cancel；全局路径不受扰 |
+| M0 | test_histogram_widget（扩展为 widget 级） | widget | GDALOpen 失败 marshal 回 GUI 线程并呈现；空源不启动扫描 |
+| M0 | test_project_lifecycle_stress | stress | 48 轮 clear/import/视图 churn + canvas 先死形状无 crash/泄漏 |
+| M1 | test_workbench_state_model | unit+integration | phase/tool/task/broken facts 投影；rules 纯函数；真实 layer-tree 选择路径 |
+| M2 | test_shortcut_conflicts（扩展） | contract | 跨文件 shortcut union 无重复；tooltip 不得声称未绑定快捷键（枚举形式 binding 亦参与冲突扫描） |
+| M6 | test_workbench_enum_provider | unit+contract | layers/assets/models 解析；200 截断 + 空 id 哨兵；坏源降级自由文本；applyEnumSourceAnnotations（model/asset 注解、已注解尊重、递归） |
+| M7 | test_catalog_pagination | widget+scale | 窗口化渲染 ≤cap；精确页状态；越界钳制；过滤重置第 0 页；pager 按钮驱动窗口；选择跨翻页保持 |
+| M8 | test_plugin_ui_placement | contract | 渲染贡献成为 registry 命令；handler 触发原 action；action 删除 → 命令 disable；release 钩子清理；reload 可重注册 |
+| M8（部分） | plugin declarative render pipeline 本体 | — | 由 plugin-platform 8.0 的 conformance kit 覆盖（非本方向测试面）；本方向只测 shell 命令生命周期 |
 
 ## 回归保持矩阵（必须全绿，8.0 继承）
 
