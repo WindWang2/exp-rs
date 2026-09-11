@@ -16,6 +16,7 @@
 namespace sicnu::data { class DataManager; }
 namespace sicnu::app { class ProjectContext; }
 namespace sicnu::workflow { class WorkflowRun; }
+namespace sicnu::experiment { class WorkflowExperimentMonitor; }
 class PluginHost;
 class SicnuAppInterface;
 
@@ -124,6 +125,33 @@ public:
     PipelineResult resumeRun(const std::string& runId);
 
     /**
+     * \brief Opt-in scientific recording for THIS runner's pipelines
+     * (MLOps 9.0: the 8.0 documented follow-up — CLI pipelines now flow
+     * through WorkflowExperimentMonitor into an ExperimentStore, exactly
+     * like MCP-recorded submissions; nothing records without this).
+     *
+     * The experiment db/experiment are created idempotently on first run.
+     * Identity pins are optional; only non-empty values bind (an
+     * auto-recorded run never fabricates dataset/split/model identity).
+     */
+    struct RecordingOptions {
+        bool enabled = false;
+        std::string experimentDbPath;
+        std::string experimentId;
+        std::string experimentName;   ///< defaults to experimentId when empty
+        std::string objective;
+        std::string datasetDbPath;    ///< optional: enables dataset pin verification
+        std::string datasetVersionId; ///< optional pins below
+        std::string splitManifestId;
+        std::string modelId;
+        std::string modelDigest;
+        unsigned long long seed = 0;
+        bool hasSeed = false;
+    };
+
+    void setRecordingOptions(const RecordingOptions& options);
+
+    /**
      * \brief Validate a pipeline JSON without executing it.
      *
      * @param pipelineJson JSON object to validate.
@@ -134,6 +162,12 @@ public:
                                      std::string* errorMessage = nullptr);
 
 private:
+    /// Lazily creates + enables the experiment monitor (recording opt-in).
+    bool ensureRecordingEnabled();
+    /// Records one submitted pipeline (start transition + pins) through the
+    /// monitor; failures are reported via the log callback, never fatal —
+    /// a recording outage must not change execution semantics.
+    void recordSubmission(long pipelineId);
     void reportProgress(int stepIndex, int totalSteps, double stepProgress,
                         const std::string& message) const;
     void reportLog(const std::string& level, const std::string& message) const;
@@ -169,6 +203,10 @@ private:
     LogCallback m_logCallback;
     sicnu::data::DataManager* m_dataManager = nullptr;
     std::unique_ptr<sicnu::data::DataManager> m_ownedDataManager;
+    RecordingOptions m_recordingOptions;
+    /// Created lazily by ensureRecordingEnabled(); shared_ptr so the
+    /// out-of-line destructor compiles with the type incomplete here.
+    std::shared_ptr<sicnu::experiment::WorkflowExperimentMonitor> m_monitor;
     // Headless plugin stack (ADR 0023, TICKET-14), created lazily on first use.
     // Declaration order is destruction-safety: the PluginHost tears down first,
     // then the interface, then the context that owns the DataManager plugins see.
