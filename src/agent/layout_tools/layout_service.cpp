@@ -12,6 +12,8 @@
 #include <qgslayoutitemmap.h>
 #include <qgslayoutitempage.h>
 #include <qgslayoutitempicture.h>
+#include <qgslayoutitempolygon.h>
+#include <qgslayoutitempolyline.h>
 #include <qgslayoutitemregistry.h>
 #include <qgslayoutitemscalebar.h>
 #include <qgslayoutitemshape.h>
@@ -27,10 +29,12 @@
 #include <qgsreadwritecontext.h>
 #include <qgsrectangle.h>
 #include <qgsscalebarrendererregistry.h>
+#include <qgslinesymbol.h>
 
 #include <QDomDocument>
 #include <QFile>
 #include <QFont>
+#include <QPolygonF>
 #include <QSet>
 
 #include <algorithm>
@@ -278,6 +282,8 @@ QString LayoutService::itemTypeToString( QgsLayoutItem *item )
     }
     case QgsLayoutItemRegistry::LayoutChart:
       return QStringLiteral( "chart" );
+    case QgsLayoutItemRegistry::LayoutPolyline:
+      return QStringLiteral( "line" );
     case QgsLayoutItemRegistry::LayoutPage:
       return QStringLiteral( "page" );
     default:
@@ -470,6 +476,12 @@ QgsLayoutItem *LayoutService::addItem( QgsLayout *layout, const QString &type, c
   {
     item = new QgsLayoutItemShape( layout );
   }
+  else if ( t == QStringLiteral( "line" ) || t == QStringLiteral( "polyline" ) )
+  {
+    // Platform 8.0: first-class connector/relationship graphics — the
+    // QGIS-native polyline primitive (locator connectors, callout legs).
+    item = new QgsLayoutItemPolyline( layout );
+  }
   else if ( t == QStringLiteral( "chart" ) )
   {
     item = QgsLayoutItemChart::create( layout );
@@ -540,6 +552,46 @@ QgsLayoutItem *LayoutService::addItem( QgsLayout *layout, const QString &type, c
     shape->setShapeType( t == QStringLiteral( "ellipse" )   ? QgsLayoutItemShape::Ellipse
                          : t == QStringLiteral( "triangle" ) ? QgsLayoutItemShape::Triangle
                                                              : QgsLayoutItemShape::Rectangle );
+  }
+  else if ( t == QStringLiteral( "line" ) || t == QStringLiteral( "polyline" ) )
+  {
+    // Points arrive in page millimeters (scene coordinates). QgsLayoutNodesItem
+    // stores nodes in item-local coordinates and re-derives its rect through
+    // mapToScene of the CURRENT position — so park the item at the scene
+    // origin, place it at the polygon's bounding box, and hand setNodes the
+    // local nodes. Deterministic page geometry, no position contamination.
+    auto *line = qobject_cast<QgsLayoutItemPolyline *>( item );
+    QPolygonF nodes;
+    if ( props.isMember( "points" ) && props["points"].isArray() )
+    {
+      for ( const auto &point : props["points"] )
+      {
+        if ( point.isArray() && point.size() == 2 && point[0].isNumeric() && point[1].isNumeric() )
+          nodes << QPointF( toMm( point[0], 0.0 ), toMm( point[1], 0.0 ) );
+      }
+    }
+    if ( nodes.size() >= 2 )
+    {
+      const QRectF bounds = nodes.boundingRect();
+      QPolygonF local( nodes );
+      local.translate( -bounds.left(), -bounds.top() );
+      line->attemptSetSceneRect( QRectF( bounds.left(), bounds.top(), bounds.width(), bounds.height() ) );
+      line->setNodes( local );
+    }
+    QVariantMap symbol;
+    symbol[QStringLiteral( "color" )] = QStringLiteral( "#333333" );
+    symbol[QStringLiteral( "width" )] = QStringLiteral( "0.4" );
+    symbol[QStringLiteral( "width_unit" )] = QStringLiteral( "MM" );
+    if ( props.isMember( "color" ) && props["color"].isString() )
+      symbol[QStringLiteral( "color" )] = QString::fromStdString( props["color"].asString() );
+    if ( props.isMember( "width_mm" ) && props["width_mm"].isNumeric() )
+      symbol[QStringLiteral( "width" )] = QString::number( props["width_mm"].asDouble() );
+    if ( props.isMember( "line_style" ) && props["line_style"].isString() &&
+         props["line_style"].asString() == "dash" )
+      symbol[QStringLiteral( "line_style" )] = QStringLiteral( "dash" );
+    line->setSymbol( QgsLineSymbol::createSimple( symbol ).release() );
+    // Marker modes default to NoMarker — connectors are plain lines unless a
+    // caller later configures arrow heads through layout tools.
   }
 
   layout->addLayoutItem( item );

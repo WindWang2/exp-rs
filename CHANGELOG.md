@@ -4,6 +4,49 @@ All notable changes to the `exp-rs` project will be documented in this file.
 
 ## [Unreleased] - 2026-09-11
 
+### Intelligent Cartography, MapSpec & Template Platform 8.0
+- **Raster NoData wired into the QGIS renderer (closes the 7.0 known
+  limitation)**: `style:apply` pushes `raster.nodata` into the renderer —
+  the declared `value` becomes a provider user-nodata range on the declared
+  band, `transparent: false` shades nodata pixels through
+  `QgsRasterRenderer::setNodataColor` (new optional `color`, default
+  black); re-apply is idempotent; `buildRasterRenderer` carries the shading
+  so the knowledge path and the live path agree.
+- **Locator connector graphics**: `inset_maps[].locator.connector` compiles
+  to a QGIS-native polyline (`QgsLayoutItemPolyline`, new LayoutService
+  `line`/`polyline` item type) from the inset frame edge to the referenced
+  frame's projected extent anchor; deterministic geometry; validated shape.
+- **MapSpec v5 (strict superset)**: envelope `output` delivery declaration
+  (`formats: png|pdf`, `dpi` 72..1200, optional `dir`) validated and
+  surfaced through `cartography:compose` / Harness `confirmMapOutput`
+  (compilation never auto-exports); per-item `binding` shape validation
+  (string mode/layer/field/expression, bounded inline data, square ≤24×24
+  matrices); `upgradeMapSpec` stamps v≤4 documents to 5.
+- **Page-aware solver evidence**: `keep_with`/`avoid_overlap` refuse pins
+  that would push a companion past its own page bottom with a
+  `page_overflow` reason carried into `unsatisfied`/`violated`/decisions
+  (violation reasons now preserve the permanent-failure cause) instead of
+  silently writing off-page geometry.
+- **Typography 2.0 additions**: declared `font.break_policy`
+  (`none | halfwidth` — deterministic line-final CJK closing-punctuation
+  compression) and `font.line_height` (leading override), consumed by the
+  wrap-aware overflow rule; defaults reproduce 7.0 output exactly.
+- **NoData legend QA**: new `MAP_NODATA_LEGEND` preflight rule (legend
+  referencing a style that declares `raster.nodata` must mention NoData)
+  with a converging repair stamping `legend.nodata` from the style; the
+  compiler renders the entry as a QGIS-backed swatch composite.
+- **Compose identity**: `cartography:compose` returns the rendering-free
+  `structural_digest` plus `provenance` (declared template + component
+  references) and the declared output block; Harness `confirmMapOutput`
+  carries them so final-map confirmation identifies what was composed.
+- **Chart labels**: bar/histogram/grouped-bar category labels elide
+  deterministically (matching the table/series paths).
+- **Visual evidence**: the `[visual][determinism]`/`[visual][golden]` PNG
+  layers are verified end-to-end on Linux (real `QgsLayoutExporter`
+  renders; golden references generate and compare in tolerance); docs
+  drift fixed (`mapspec-reference` current-version header, NoData wiring
+  claims, limitations).
+
 ### Model Runtime & Multimodal EO Inference Platform 8.0 (goal series, ADR 0143)
 - **Real ONNX Runtime lane (WP-A)**: the 7.0 ORT provider is compiled and
   executed for the first time (ORT 1.20.1, CPU EP). Real execution fixed

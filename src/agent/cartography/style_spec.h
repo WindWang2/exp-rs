@@ -108,7 +108,14 @@ std::vector<std::string> checkStyleApplicability( const Json::Value &styleSpec,
 //   raster.classification.scheme: "categorical" | "sequential" | "diverging"
 //     diverging requires numeric `center` inside the declared class range;
 //     categorical requires discrete classes.
-//   raster.nodata: {value?: number, transparent?: bool, label?: string}
+//   raster.nodata: {value?: number, transparent?: bool, label?: string,
+//                   color?: string}
+//     Platform 8.0 closes the 7.0 known limitation: the apply path pushes
+//     the declaration into the QGIS renderer — `value` becomes a provider
+//     user-nodata range on the declared band, `transparent: false` shades
+//     nodata pixels with `color` (default black) through
+//     QgsRasterRenderer::setNodataColor. `label` is legend/preflight
+//     knowledge, never a renderer input.
 //   uncertainty: {kind: "none"|"band"|"hatch"|"confidence_interval",
 //                 level?: number (0..1), field?: string}
 //
