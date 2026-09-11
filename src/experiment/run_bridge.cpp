@@ -161,7 +161,9 @@ Result<void> ExperimentRunBridge::attachExecutionPins( const QString &executionR
         return VoidResult::success();
     }
 
-    const auto run = m_store->runById( runId );
+    // Not const: the un-started branch below merges identity pins into the
+    // record via setters before upserting it back.
+    auto run = m_store->runById( runId );
     if ( !run )
         return failVoid( QStringLiteral( "experiment.run_not_found" ),
                          QStringLiteral( "run %1 is not in the store" ).arg( runId ) );
