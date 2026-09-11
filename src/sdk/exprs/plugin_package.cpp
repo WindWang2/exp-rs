@@ -332,6 +332,12 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
     if ( !PluginManifestValidator::validate( manifest, request, log ) )
         return false;
 
+    // Plugin-platform 9.0: dependency constraints are probed against the
+    // currently installed set. Unsatisfied constraints WARN (typed
+    // DependencyUnresolved) but do not block the install — install order is
+    // the user's business; the load-time gate enforces resolution.
+    reportDependencyStatus( manifest, log );
+
     if ( !PluginManifestValidator::isValidPluginId( manifest.id ) )
     {
         PluginDiagnostic failure;
@@ -597,6 +603,165 @@ std::vector<std::string> PluginPackage::installedIds()
     }
     std::sort( ids.begin(), ids.end() );
     return ids;
+}
+
+// ---- plugin-platform 9.0: dependency constraints ---------------------------
+
+namespace {
+
+/// Parses "X[.Y[.Z]]" into (major, minor, patch). Unparsable → false.
+bool parseVersion( const std::string &text, unsigned &major, unsigned &minor, unsigned &patch )
+{
+    major = minor = patch = 0;
+    if ( text.empty() )
+        return false;
+    std::istringstream input( text );
+    std::string part;
+    if ( !std::getline( input, part, '.' ) )
+        return false;
+    for ( const char c : part )
+        if ( c < '0' || c > '9' )
+            return false;
+    major = static_cast<unsigned>( std::stoul( part ) );
+    if ( std::getline( input, part, '.' ) )
+    {
+        for ( const char c : part )
+            if ( c < '0' || c > '9' )
+                return false;
+        minor = static_cast<unsigned>( std::stoul( part ) );
+        if ( std::getline( input, part ) )
+        {
+            if ( part.empty() )
+                return false;
+            for ( const char c : part )
+                if ( c < '0' || c > '9' )
+                    return false;
+            patch = static_cast<unsigned>( std::stoul( part ) );
+        }
+    }
+    return true;
+}
+
+bool versionLess( unsigned am, unsigned ai, unsigned ap, unsigned bm, unsigned bi, unsigned bp )
+{
+    if ( am != bm )
+        return am < bm;
+    if ( ai != bi )
+        return ai < bi;
+    return ap < bp;
+}
+
+} // namespace
+
+bool PluginPackage::versionSatisfiesRange( const std::string &version, const std::string &range )
+{
+    unsigned vm = 0, vi = 0, vp = 0;
+    if ( !parseVersion( version, vm, vi, vp ) )
+        return false;
+    if ( range.empty() )
+        return true; // bare id: any version
+
+    std::string op;
+    std::string bound = range;
+    if ( bound.rfind( "^", 0 ) == 0 )
+    {
+        op = "^";
+        bound = bound.substr( 1 );
+    }
+    else if ( bound.rfind( "~", 0 ) == 0 )
+    {
+        op = "~";
+        bound = bound.substr( 1 );
+    }
+    else if ( bound.rfind( ">=", 0 ) == 0 )
+    {
+        op = ">=";
+        bound = bound.substr( 2 );
+    }
+    else if ( bound.rfind( "=", 0 ) == 0 )
+    {
+        op = "=";
+        bound = bound.substr( 1 );
+    }
+
+    unsigned bm = 0, bi = 0, bp = 0;
+    if ( !parseVersion( bound, bm, bi, bp ) )
+        return false; // unparsable range is satisfied by nothing (fail closed)
+
+    if ( op == ">=" )
+        return !versionLess( vm, vi, vp, bm, bi, bp );
+    if ( op == "=" )
+        return vm == bm && vi == bi && vp == bp;
+    if ( op == "^" )
+    {
+        // [bound, next major) — 0.x bounds pin the minor (npm semantics).
+        if ( bm == 0 )
+            return vm == 0 && vi == bi && vp >= bp;
+        return vm == bm && !versionLess( vi, vp, 0, bi, bp, 0 );
+    }
+    if ( op == "~" )
+    {
+        // [bound, next minor)
+        return vm == bm && vi == bi && vp >= bp;
+    }
+    // Bare version: exact.
+    return vm == bm && vi == bi && vp == bp;
+}
+
+int PluginPackage::reportDependencyStatus( const PluginManifest &manifest,
+                                           PluginDiagnosticLog &log )
+{
+    const std::vector<std::string> installed = installedIds();
+    int unsatisfied = 0;
+    for ( const std::string &spec : manifest.dependencies )
+    {
+        std::string depId = spec;
+        std::string depRange;
+        const size_t at = spec.rfind( '@' );
+        if ( at != std::string::npos && at > 0 )
+        {
+            depId = spec.substr( 0, at );
+            depRange = spec.substr( at + 1 );
+        }
+        bool satisfied = false;
+        for ( const std::string &installedId : installed )
+        {
+            if ( installedId != depId )
+                continue;
+            // The installed VERSION comes from its manifest.
+            PluginDiagnostic parseError;
+            PluginManifest installedManifest;
+            if ( loadManifestFromFile( PluginDiscovery::userPluginRoot() + "/" + installedId
+                                           + "/plugin.json",
+                                       installedManifest, parseError ) )
+            {
+                if ( versionSatisfiesRange( installedManifest.version, depRange ) )
+                {
+                    satisfied = true;
+                    break;
+                }
+            }
+        }
+        PluginDiagnostic note;
+        note.pluginId = manifest.id;
+        note.field = "dependencies";
+        if ( satisfied )
+        {
+            note.code = PluginDiagnosticCode::None;
+            note.severity = PluginDiagnosticSeverity::Info;
+            note.message = "dependency satisfied: " + spec;
+        }
+        else
+        {
+            ++unsatisfied;
+            note.code = PluginDiagnosticCode::DependencyUnresolved;
+            note.severity = PluginDiagnosticSeverity::Warning;
+            note.message = "dependency NOT satisfied by any installed plugin: " + spec
+                           + " (install proceeds; the load gate enforces it)";
+        }
+        log.add( note );
+    }
+    return unsatisfied;
 }
 
 } // namespace exprs

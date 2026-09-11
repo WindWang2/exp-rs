@@ -349,3 +349,137 @@ TEST_CASE( "staged-install sha256 matches reference vectors at block boundaries"
     }
     ::system( "rm -rf /tmp/exprs_test_pkg_vec" );
 }
+
+// -- plugin-platform 9.0: packaging 3.0 ---------------------------------------
+
+TEST_CASE( "version ranges match semver boundaries exactly", "[plugin][package][p12]" )
+{
+    // Exact / bare.
+    REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "2.0.0", "2.0.0" ) );
+    REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "2.0.1", "2.0.0" ) );
+    REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "9.9.9", "" ) ); // bare id: any
+
+    // Caret: same major (0.x pins the minor).
+    REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "2.3.9", "^2.0.0" ) );
+    REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "3.0.0", "^2.0.0" ) );
+    REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "0.2.9", "^0.2.0" ) );
+    REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "0.3.0", "^0.2.0" ) );
+
+    // Tilde: same minor.
+    REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "2.3.9", "~2.3.0" ) );
+    REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "2.4.0", "~2.3.0" ) );
+
+    // >= and junk (fail closed).
+    REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "3.0.0", ">=2.0.0" ) );
+    REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "2.0.0", ">=2.0.0" ) );
+    REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "1.9.9", ">=2.0.0" ) );
+    REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "2.0.0", "^banana" ) );
+    REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "banana", "^2.0.0" ) );
+}
+
+TEST_CASE( "interrupted-install staging leftovers are swept before a new install",
+           "[plugin][package][p12]" )
+{
+    namespace fs = std::filesystem;
+    const std::string pkgRoot = "/tmp/exprs_test_pkg_stale";
+    ::system( "rm -rf /tmp/exprs_test_pkg_stale" );
+    const std::string source = pkgRoot + "/org.test.stale";
+    makePluginDir( pkgRoot, "org.test.stale", "stale:echo" );
+
+    // Simulate a crashed install's staging directory (same pid layout) with
+    // garbage content and a 48 h-old timestamp.
+    const std::string stagingDir = exprs::PluginDiscovery::userPluginRoot() + "/.staging/org.test.stale."
+                                   + std::to_string( static_cast<long>( ::getpid() ) );
+    std::error_code ec;
+    fs::create_directories( fs::path( stagingDir ) / "junk", ec );
+    {
+        std::ofstream marker( stagingDir + "/junk/partial.bin", std::ios::trunc );
+        marker << "half-written";
+    }
+    const auto stale = fs::file_time_type::clock::now() - std::chrono::hours( 48 );
+    fs::last_write_time( fs::path( stagingDir ), stale, ec );
+
+    PluginDiagnosticLog log;
+    std::string installed;
+    REQUIRE( exprs::PluginPackage::install( source, installed, log ) );
+    // The new install holds the real payload, not the crashed staging copy.
+    exprs::PluginDiagnostic parseError;
+    exprs::PluginManifest installedManifest;
+    REQUIRE( exprs::loadManifestFromFile( installed + "/plugin.json", installedManifest, parseError ) );
+    REQUIRE( installedManifest.id == "org.test.stale" );
+    REQUIRE( exprs::PluginPackage::uninstall( "org.test.stale", log ) );
+    ::system( "rm -rf /tmp/exprs_test_pkg_stale" );
+}
+
+TEST_CASE( "dependency constraints are probed at install time, warnings not blocks",
+           "[plugin][package][p12]" )
+{
+    const std::string pkgRoot = "/tmp/exprs_test_pkg_dep";
+    ::system( "rm -rf /tmp/exprs_test_pkg_dep" );
+    makePluginDir( pkgRoot, "org.test.depbase", "dep:echo" );
+
+    PluginDiagnosticLog log;
+    std::string installed;
+    // Base plugin (the constraint target) is installed first.
+    REQUIRE( exprs::PluginPackage::install( pkgRoot + "/org.test.depbase", installed, log ) );
+
+    // A dependent package whose constraint matches the installed version.
+    const std::string dependent = pkgRoot + "/org.test.depped";
+    {
+        ::mkdir( dependent.c_str(), 0755 );
+        std::ofstream manifest( dependent + "/plugin.json", std::ios::trunc );
+        manifest << R"({
+            "manifest_version": 1,
+            "id": "org.test.depped",
+            "name": "Dependent",
+            "version": "1.0.0",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+            "abi_version": 1,
+            "entrypoint_kind": "manifest",
+            "operators": [],
+            "dependencies": ["org.test.depbase@^1.0.0"]
+        })";
+    }
+    log = PluginDiagnosticLog();
+    REQUIRE( exprs::PluginPackage::install( dependent, installed, log ) );
+    bool sawSatisfiedInfo = false;
+    for ( const auto &item : log.items() )
+    {
+        if ( item.severity == exprs::PluginDiagnosticSeverity::Info
+             && item.message.find( "dependency satisfied: org.test.depbase@^1.0.0" )
+                    != std::string::npos )
+            sawSatisfiedInfo = true;
+    }
+    REQUIRE( sawSatisfiedInfo );
+
+    // An unsatisfiable constraint installs but records a typed warning.
+    {
+        std::ofstream manifest( dependent + "/plugin.json", std::ios::trunc );
+        manifest << R"({
+            "manifest_version": 1,
+            "id": "org.test.depped",
+            "name": "Dependent",
+            "version": "1.0.1",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+            "abi_version": 1,
+            "entrypoint_kind": "manifest",
+            "operators": [],
+            "dependencies": ["org.test.depbase@^9.0.0"]
+        })";
+    }
+    log = PluginDiagnosticLog();
+    REQUIRE( exprs::PluginPackage::install( dependent, installed, log ) );
+    bool sawTypedWarning = false;
+    for ( const auto &item : log.items() )
+    {
+        if ( item.code == exprs::PluginDiagnosticCode::DependencyUnresolved
+             && item.severity == exprs::PluginDiagnosticSeverity::Warning
+             && item.message.find( "org.test.depbase@^9.0.0" ) != std::string::npos )
+            sawTypedWarning = true;
+    }
+    REQUIRE( sawTypedWarning );
+
+    REQUIRE( exprs::PluginPackage::uninstall( "org.test.depped", log ) );
+    REQUIRE( exprs::PluginPackage::uninstall( "org.test.depbase", log ) );
+    ::system( "rm -rf /tmp/exprs_test_pkg_dep" );
+}
