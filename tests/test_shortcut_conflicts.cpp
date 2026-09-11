@@ -168,3 +168,96 @@ TEST_CASE( "Shortcuts: no duplicate key sequences in any command source",
         REQUIRE( conflicts.isEmpty() );
     }
 }
+
+// ── Workbench 9.0 M2: cross-source shortcut ownership (F1 gate) ────────────
+// The per-file scans above cannot see ACROSS files: Workbench 8.x shipped
+// with main_window_menus.cpp and command_defs.cpp both claiming
+// New/Open/Save/Quit/ZoomIn/ZoomOut/Ctrl+E/… — the registry's canonical
+// binding record was a lie while the menu's raw QAction actually owned the
+// shortcut. The union over all command sources must be duplicate-free too.
+TEST_CASE( "Shortcuts: no key sequence claimed by two different command sources",
+           "[m2][shortcuts][authority]" )
+{
+    static const QStringList commandSources = {
+        QStringLiteral( "src/app/main_window_menus.cpp" ),
+        QStringLiteral( "src/app/workbench/command_defs.cpp" ),
+        QStringLiteral( "src/app/main_window_workbench.cpp" ),
+        QStringLiteral( "src/app/shell/ribbon_controller.cpp" ),
+        QStringLiteral( "src/app/layer_tree_menu.cpp" ),
+    };
+
+    struct Claim
+    {
+        QString source;
+        int line;
+    };
+    QMap<QString, Claim> firstClaim;
+    QStringList conflicts;
+    for ( const QString &relative : commandSources )
+    {
+        const QString source = readSource( relative );
+        REQUIRE_FALSE( source.isEmpty() );
+        const QVector<SequenceUse> uses = collectSequenceUses( source );
+        for ( const SequenceUse &use : uses )
+        {
+            if ( firstClaim.contains( use.sequence ) &&
+                 firstClaim.value( use.sequence ).source != relative )
+            {
+                conflicts << QStringLiteral( "%1 claimed in %2:%3 and %4:%5" )
+                                 .arg( use.sequence )
+                                 .arg( firstClaim.value( use.sequence ).source )
+                                 .arg( firstClaim.value( use.sequence ).line )
+                                 .arg( relative )
+                                 .arg( use.line );
+            }
+            else if ( !firstClaim.contains( use.sequence ) )
+            {
+                firstClaim.insert( use.sequence, { relative, use.line } );
+            }
+        }
+    }
+    INFO( conflicts.join( QStringLiteral( "; " ) ).toStdString() );
+    REQUIRE( conflicts.isEmpty() );
+}
+
+// ── Workbench 9.0 M2: tooltips must not advertise unbound shortcuts ────────
+// #882 residual shape: an action tooltip says "(Ctrl+O)" while the action
+// never gets that binding — the user follows the hint and the *project*
+// shortcut fires instead. Any setToolTip statement claiming a parenthesized
+// "(Ctrl+…)" must bind the same sequence in the same statement.
+TEST_CASE( "Shortcuts: tooltip shortcut claims are bound in the same statement",
+           "[m2][shortcuts][honesty]" )
+{
+    static const QStringList uiSources = {
+        QStringLiteral( "src/app/workflow/pipeline_editor_dock.cpp" ),
+        QStringLiteral( "src/app/shell/ribbon_controller.cpp" ),
+        QStringLiteral( "src/app/main_window_menus.cpp" ),
+        QStringLiteral( "src/app/layer_tree_menu.cpp" ),
+    };
+    static const QRegularExpression tooltipClaim(
+        QStringLiteral( "setToolTip\\([^;]*\\(\\s*(Ctrl\\+[^)\"']+)\\)" ) );
+    static const QRegularExpression binding(
+        QStringLiteral( "QKeySequence\\s*(?:\\(|::)" ) );
+
+    for ( const QString &relative : uiSources )
+    {
+        const QString source = readSource( relative );
+        REQUIRE_FALSE( source.isEmpty() );
+        const QStringList statements = source.split( QLatin1Char( ';' ) );
+        for ( int i = 0; i < statements.size(); ++i )
+        {
+            const QString statement = statements.at( i );
+            if ( !statement.contains( QLatin1String( "setToolTip" ) ) )
+                continue;
+            auto m = tooltipClaim.match( statement );
+            if ( !m.hasMatch() )
+                continue;
+            const bool bindsInStatement = binding.match( statement ).hasMatch();
+            INFO( QStringLiteral( "%1 statement #%2 claims '%3'" )
+                      .arg( relative )
+                      .arg( i )
+                      .arg( m.captured( 1 ).toStdString().c_str() ) );
+            CHECK( bindsInStatement );
+        }
+    }
+}

@@ -112,25 +112,34 @@ void QgisDesktopWindow::setupMenu()
         return m;
     };
 
+    // Workbench 9.0 M2: registry-backed menu items. CommandRegistry is the
+    // single authority for command ids and shortcut ownership — a menu item
+    // whose command exists in the registry MUST be the registry projection,
+    // never a parallel QAction re-claiming the same binding (the duplicate
+    // owner made the registry's canonical-shortcut record a lie and any
+    // second installShortcut an ambiguous-shortcut trap).
+    auto addCmd = [this]( QMenu *menu, const char *commandId ) -> QAction * {
+        QAction *act = m_commandRegistry->action( QString::fromLatin1( commandId ),
+                                                  /*installShortcut=*/true );
+        if ( act )
+            menu->addAction( act );
+        return act;
+    };
+
     // ------------------------------------------------------------------
     // 工程 Project — file I/O, data import, layout, quit
     // ------------------------------------------------------------------
     QMenu *projectMenu = makeMenu( appMenuBar()->addMenu( tr( "工程(&P)" ) ) );
-    tip( projectMenu->addAction( ic( "new_project" ), tr( "新建工程" ),
-                                 QKeySequence::New, this, &QgisDesktopWindow::newProject ),
+    tip( addCmd( projectMenu, "project.new" ),
          tr( "创建空白工程，清除当前图层与视图状态。" ) );
-    tip( projectMenu->addAction( ic( "o_en" ), tr( "打开工程..." ),
-                                 QKeySequence::Open, this, &QgisDesktopWindow::openProject ),
+    tip( addCmd( projectMenu, "project.open" ),
          tr( "打开已保存的工程文件。" ) );
-    tip( projectMenu->addAction( ic( "s_ve" ), tr( "保存工程" ),
-                                 QKeySequence::Save, this, &QgisDesktopWindow::saveProject ),
+    tip( addCmd( projectMenu, "project.save" ),
          tr( "保存当前工程到已有路径。" ) );
-    tip( projectMenu->addAction( ic( "ex_ort" ), tr( "工程另存为..." ),
-                                 this, &QgisDesktopWindow::saveProjectAs ),
+    tip( addCmd( projectMenu, "project.saveAs" ),
          tr( "将工程另存为新文件。" ) );
     projectMenu->addSeparator();
-    tip( projectMenu->addAction( ic( "i_ort" ), tr( "导入图层..." ),
-                                 this, &QgisDesktopWindow::importLayer ),
+    tip( addCmd( projectMenu, "project.importLayer" ),
          tr( "导入栅格或矢量图层到工程。" ) );
     tip( projectMenu->addAction( ic( "i_ort" ), tr( "导入产品..." ),
                                  this, [this]() { openProductImportDialog( QStringLiteral( "auto" ) ); } ),
@@ -142,30 +151,23 @@ void QgisDesktopWindow::setupMenu()
     tip( projectMenu->addAction( ic( "i_ort" ), tr( "导入 Sentinel-2 产品..." ),
                                  this, [this]() { openProductImportDialog( QStringLiteral( "sentinel2" ) ); } ),
          tr( "按产品导入 Sentinel-2 SAFE 产品（含 MTD_MSI*.xml 的 .SAFE 目录）。" ) );
-    tip( projectMenu->addAction( ic( "cloud_sync" ), tr( "浏览 STAC 目录..." ),
-                                 this, &QgisDesktopWindow::browseStacCatalog ),
+    tip( addCmd( projectMenu, "project.stacBrowse" ),
          tr( "浏览 STAC 目录检索遥感数据。" ) );
     projectMenu->addSeparator();
-    tip( projectMenu->addAction( ic( "print_l_yout" ), tr( "新建布局..." ),
-                                 this, &QgisDesktopWindow::newLayout ),
+    tip( addCmd( projectMenu, "project.newLayout" ),
          tr( "创建打印布局 / 出图。" ) );
     tip( projectMenu->addAction( ic( "re_ort" ), tr( "导出实验报告..." ),
                                  this, &QgisDesktopWindow::exportLabReport ),
          tr( "导出课程/实验报告。" ) );
     projectMenu->addSeparator();
-    tip( projectMenu->addAction( stdIc( QStyle::SP_DialogCloseButton ), tr( "退出" ),
-                                 QKeySequence::Quit, this, &QMainWindow::close ),
+    tip( addCmd( projectMenu, "project.exit" ),
          tr( "退出应用程序。" ) );
 
     // ------------------------------------------------------------------
     // 编辑 Edit — feature edit + 数字化 as submenu (no longer top-level)
     // ------------------------------------------------------------------
     QMenu *editMenu = makeMenu( appMenuBar()->addMenu( tr( "编辑(&E)" ) ) );
-    m_toggleEditingAction = editMenu->addAction(
-      ic( "mActionToggleEditing" ), tr( "切换编辑" ),
-      this, &QgisDesktopWindow::toggleEditing );
-    m_toggleEditingAction->setCheckable( true );
-    m_toggleEditingAction->setShortcut( QKeySequence( "Ctrl+E" ) );
+    m_toggleEditingAction = addCmd( editMenu, "layer.toggleEditing" );
     tip( m_toggleEditingAction, tr( "开启/关闭当前矢量图层编辑。" ) );
     m_saveEditsAction = editMenu->addAction(
       ic( "mActionSaveEdits" ), tr( "保存编辑" ),
@@ -273,38 +275,28 @@ void QgisDesktopWindow::setupMenu()
     // 视图 View — navigation, measure, compare
     // ------------------------------------------------------------------
     QMenu *viewMenu = makeMenu( appMenuBar()->addMenu( tr( "视图(&V)" ) ) );
-    tip( viewMenu->addAction( ic( "zoo_in" ), tr( "放大" ),
-                              QKeySequence::ZoomIn, this, &QgisDesktopWindow::zoomIn ),
+    tip( addCmd( viewMenu, "map.zoomIn" ),
          tr( "放大地图视图。" ) );
-    tip( viewMenu->addAction( ic( "zoo_out" ), tr( "缩小" ),
-                              QKeySequence::ZoomOut, this, &QgisDesktopWindow::zoomOut ),
+    tip( addCmd( viewMenu, "map.zoomOut" ),
          tr( "缩小地图视图。" ) );
-    tip( viewMenu->addAction( ic( "full_extent" ), tr( "全图" ),
-                              QKeySequence( "Ctrl+Shift+F" ), this, &QgisDesktopWindow::zoomFullExtent ),
+    tip( addCmd( viewMenu, "map.zoomFull" ),
          tr( "缩放到所有图层范围。" ) );
-    tip( viewMenu->addAction( ic( "l_yer_m_n_ger" ), tr( "缩放到图层" ),
-                              QKeySequence( "Ctrl+L" ), this, &QgisDesktopWindow::zoomToLayer ),
+    tip( addCmd( viewMenu, "layer.zoomTo" ),
          tr( "缩放到当前图层范围。" ) );
     viewMenu->addSeparator();
-    tip( viewMenu->addAction( ic( "p_n" ), tr( "平移" ),
-                              QKeySequence( "H" ), this, &QgisDesktopWindow::panMap ),
+    tip( addCmd( viewMenu, "map.pan" ),
          tr( "平移地图。" ) );
-    tip( viewMenu->addAction( ic( "identify" ), tr( "识别" ),
-                              QKeySequence( "Ctrl+Shift+I" ), this, &QgisDesktopWindow::identifyFeatures ),
+    tip( addCmd( viewMenu, "map.identify" ),
          tr( "点击地图查询要素/像元属性。" ) );
     viewMenu->addSeparator();
-    tip( viewMenu->addAction( ic( "me_sure_dist" ), tr( "测距" ),
-                              QKeySequence( "Ctrl+Shift+D" ), this, &QgisDesktopWindow::measureDistance ),
+    tip( addCmd( viewMenu, "map.measureDistance" ),
          tr( "量测距离。" ) );
-    tip( viewMenu->addAction( ic( "me_sure_are_" ), tr( "测面" ),
-                              QKeySequence( "Ctrl+Shift+A" ), this, &QgisDesktopWindow::measureArea ),
+    tip( addCmd( viewMenu, "map.measureArea" ),
          tr( "量测面积。" ) );
     viewMenu->addSeparator();
-    tip( viewMenu->addAction( ic( "overl_y" ), tr( "图层对比..." ),
-                              QKeySequence( "Ctrl+Shift+C" ), this, &QgisDesktopWindow::openComparisonDialog ),
+    tip( addCmd( viewMenu, "map.compareLayers" ),
          tr( "左右并排对比两个图层。" ) );
-    tip( viewMenu->addAction( ic( "s_lit" ), tr( "卷帘对比" ),
-                              QKeySequence( "Ctrl+Shift+S" ), this, &QgisDesktopWindow::toggleSwipeTool ),
+    tip( addCmd( viewMenu, "map.swipe" ),
          tr( "在地图上拖动分割线对比上下图层。" ) );
     viewMenu->addSeparator();
     // Multi-view shell (Wave D): secondary Display View beside main canvas.
@@ -333,8 +325,7 @@ void QgisDesktopWindow::setupMenu()
     connect( m_dualViewportSyncAction, &QAction::toggled,
              this, &QgisDesktopWindow::toggleDualViewportSync );
     viewMenu->addSeparator();
-    tip( viewMenu->addAction( ic( "refresh_view" ), tr( "刷新" ),
-                              QKeySequence( "F5" ), this, &QgisDesktopWindow::refreshMap ),
+    tip( addCmd( viewMenu, "map.refresh" ),
          tr( "刷新地图渲染。" ) );
 
     // ------------------------------------------------------------------
