@@ -33,7 +33,7 @@ void ensureQgisApplication()
   static int argc = 1;
   static char applicationName[] = "test_catalog_pagination";
   static char *argv[] = { applicationName, nullptr };
-  static auto *application = new QgsApplication( argc, argv, false );
+  static auto *application = new QgsApplication( argc, argv, true );
   ( void ) application;
   QgsApplication::initQgis();
 }
@@ -82,6 +82,16 @@ QVector<QTreeWidgetItem *> assetRowsOf( sicnu::DataManagerPanel &panel )
   return rows;
 }
 
+/// Stable asset ids of the rendered rows — valid across page flips.
+QStringList assetRowIds( sicnu::DataManagerPanel &panel )
+{
+  QStringList ids;
+  const QVector<QTreeWidgetItem *> rows = assetRowsOf( panel );
+  for ( QTreeWidgetItem *row : rows )
+    ids << row->data( 0, Qt::UserRole ).toString(); // kAssetIdRole
+  return ids;
+}
+
 int sentinelRowCount( sicnu::DataManagerPanel &panel )
 {
   QTreeWidget *tree = treeOf( panel );
@@ -111,11 +121,13 @@ TEST_CASE( "Catalog pagination: bounded windows with truthful page state",
   sicnu::DataManagerPanel panel( &manager );
   panel.setStandaloneRowCap( 5 );
 
-  // Page 0: exactly 5 asset rows + the page sentinel.
+  // Page 0: exactly 5 asset rows + the page sentinel. Capture the row ids
+  // (NOT the item pointers — every page flip rebuilds the tree) so the
+  // flip-back comparison below checks window identity, not dangling memory.
   REQUIRE( panel.standalonePage() == 0 );
   REQUIRE( panel.standalonePageCount() == 3 );
-  const QVector<QTreeWidgetItem *> initialRows = assetRowsOf( panel );
-  CHECK( initialRows.size() == 5 );
+  const QStringList initialIds = assetRowIds( panel );
+  CHECK( initialIds.size() == 5 );
   CHECK( sentinelRowCount( panel ) == 1 );
 
   // Flip forward: a different bounded window renders.
@@ -135,10 +147,9 @@ TEST_CASE( "Catalog pagination: bounded windows with truthful page state",
   // Back to page 0: the same first window renders again — paging slices a
   // stable index, it never reorders entries between flips.
   panel.setStandalonePage( 0 );
-  const QVector<QTreeWidgetItem *> page0 = assetRowsOf( panel );
-  REQUIRE( page0.size() == 5 );
-  CHECK( page0[0]->data( 0, Qt::UserRole ).toString() ==
-         initialRows[0]->data( 0, Qt::UserRole ).toString() );
+  const QStringList page0Ids = assetRowIds( panel );
+  REQUIRE( page0Ids.size() == 5 );
+  CHECK( page0Ids == initialIds );
 }
 
 TEST_CASE( "Catalog pagination: single-page catalogs render exactly as before",

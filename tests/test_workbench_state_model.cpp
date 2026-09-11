@@ -5,10 +5,17 @@
 #include <QTimer>
 
 #include <qgsapplication.h>
+#include <qgslayertree.h>
+#include <qgslayertreemodel.h>
+#include <qgslayertreeview.h>
+#include <QItemSelectionModel>
 #include <qgsmapcanvas.h>
 #include <qgsmaptoolpan.h>
+#include <qgsproject.h>
+#include <qgsrasterlayer.h>
 
 #include "app/workbench/workbench_state.h"
+#include "app/workbench/selection_context.h"
 
 using namespace sicnu::app;
 
@@ -131,6 +138,50 @@ TEST_CASE( "WorkbenchStateModel: in-flight predicate feeds taskInFlight",
   pumpUntil( [&] { return model.facts().taskInFlight; } );
   REQUIRE( model.facts().taskInFlight );
   REQUIRE( during.taskInFlight );
+}
+
+TEST_CASE( "WorkbenchStateModel: broken-layer fact follows SelectionContext",
+           "[m1][state][model][broken]" )
+{
+  QgsProject *project = QgsProject::instance();
+  project->clear();
+  QgsMapCanvas canvas;
+  // Declaration order matters: the model must outlive the view.
+  QgsLayerTreeModel treeModel( project->layerTreeRoot() );
+  QgsLayerTreeView tree;
+  tree.setLayerTreeModel( &treeModel );
+  tree.setModel( &treeModel );
+
+  WorkbenchStateModel model( &canvas );
+  sicnu::app::SelectionContext context;
+  context.attachCanvas( &canvas );
+  context.attachLayerTree( &tree );
+  model.attachSelectionContext( &context );
+
+  REQUIRE_FALSE( model.facts().hasBrokenLayer );
+
+  // A broken (missing-source) layer staged on the canvas must surface in the
+  // model facts — the M1 contract that state consumers never re-derive it.
+  // hasBroken is a selection fact (ContextRules contract): stage the layer in
+  // the project/tree and make it current, as a user clicking it would.
+  QgsRasterLayer broken( QStringLiteral( "/nonexistent/rs9/broken_state.tif" ),
+                         QStringLiteral( "broken" ), QStringLiteral( "gdal" ) );
+  project->addMapLayer( &broken, false, false ); // no ownership — stack object
+  project->layerTreeRoot()->addLayer( &broken );
+  canvas.setLayers( { &broken } );
+  canvas.setCurrentLayer( &broken );
+  // Selection is read from the layer tree's selection model — select the
+  // broken layer's node the same way the shell's tree view does.
+  if ( QgsLayerTreeLayer *node = project->layerTreeRoot()->findLayer( broken.id() ) )
+  {
+    const QModelIndex idx = treeModel.node2index( node );
+    tree.selectionModel()->select( idx, QItemSelectionModel::Select | QItemSelectionModel::Rows );
+  }
+  pumpUntil( [this_ = &model] { return this_->facts().layerCount == 1; } );
+  REQUIRE( model.facts().layerCount == 1 );
+  pumpUntil( [&] { return model.facts().hasBrokenLayer; } );
+  REQUIRE( model.facts().hasBrokenLayer );
+  project->clear();
 }
 
 TEST_CASE( "WorkbenchStateModel: null canvas degrades to fact defaults",

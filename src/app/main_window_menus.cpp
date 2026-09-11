@@ -1,6 +1,7 @@
 // main_window_menus.cpp — Menu bar, toolbars, and status bar setup
 // Extracted from main_window.cpp for maintainability
 #include "main_window.h"
+#include "workbench/command_registry.h"
 
 #include "app/help/help_system_controller.h"
 #include "dialogs/dialog_help_catalog.h"
@@ -168,7 +169,7 @@ void QgisDesktopWindow::setupMenu()
     // ------------------------------------------------------------------
     QMenu *editMenu = makeMenu( appMenuBar()->addMenu( tr( "编辑(&E)" ) ) );
     m_toggleEditingAction = addCmd( editMenu, "layer.toggleEditing" );
-    tip( m_toggleEditingAction, tr( "开启/关闭当前矢量图层编辑。" ) );
+        tip( m_toggleEditingAction, tr( "开启/关闭当前矢量图层编辑。" ) );
     m_saveEditsAction = editMenu->addAction(
       ic( "mActionSaveEdits" ), tr( "保存编辑" ),
       this, &QgisDesktopWindow::saveEdits );
@@ -343,11 +344,9 @@ void QgisDesktopWindow::setupMenu()
                                this, &QgisDesktopWindow::newVectorLayer ),
          tr( "创建新的 Shapefile 矢量图层。" ) );
     layerMenu->addSeparator();
-    tip( layerMenu->addAction( ic( "met_d_t_" ), tr( "图层属性..." ),
-                               QKeySequence( "Ctrl+I" ), this, &QgisDesktopWindow::layerProperties ),
+    tip( addCmd( layerMenu, "layer.properties" ),
          tr( "打开当前图层属性。" ) );
-    tip( layerMenu->addAction( ic( "er_se" ), tr( "移除图层" ),
-                               QKeySequence( "Ctrl+Shift+Delete" ), this, &QgisDesktopWindow::removeLayer ),
+    tip( addCmd( layerMenu, "layer.remove" ),
          tr( "从工程中移除当前图层。" ) );
     layerMenu->addSeparator();
     tip( layerMenu->addAction( ic( "define_crs" ), tr( "设置工程 CRS..." ),
@@ -729,7 +728,8 @@ void QgisDesktopWindow::setupToolbars()
 
     if ( m_toggleEditingAction )
     {
-        m_toggleEditingAction->setToolTip( tr( "切换编辑 (Ctrl+E)" ) );
+        // M2: the registry projection already carries the canonical
+        // Ctrl+E binding — do not hand-write the shortcut into the tooltip.
         digitizeToolBar->addAction( m_toggleEditingAction );
     }
     if ( m_saveEditsAction )

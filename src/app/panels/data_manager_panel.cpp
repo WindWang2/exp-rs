@@ -23,6 +23,7 @@
 #include <QJsonDocument>
 #include <QLineEdit>
 #include <QTextBrowser>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QTreeWidgetItem>
 #include <QTreeWidgetItemIterator>
@@ -959,7 +960,13 @@ void DataManagerPanel::onItemExpanded( QTreeWidgetItem *item )
 
 void DataManagerPanel::refresh()
 {
-  const QString previouslySelected = selectedAssetId().toString();
+  // Workbench 9.0 M7: remember the selection ACROSS rebuilds even when the
+  // selected asset's row falls outside the rendered page — otherwise paging
+  // away would silently drop the user's selection context and paging back
+  // would not restore it.
+  if ( !selectedAssetId().isNull() )
+    m_lastSelectedAssetId = selectedAssetId().toString();
+  const QString previouslySelected = m_lastSelectedAssetId;
 
   // Workbench 8.0: preserve collection expansion across rebuilds.
   QSet<QString> expandedCollections;
@@ -1169,6 +1176,12 @@ void DataManagerPanel::refresh()
 void DataManagerPanel::setStandaloneRowCap( int maxRows )
 {
   m_standaloneRowCap = qBound( 1, maxRows, kMaxStandaloneRows );
+  refresh();
+}
+
+void DataManagerPanel::setStandalonePage( int page )
+{
+  m_standalonePage = qMax( 0, page );
   refresh();
 }
 

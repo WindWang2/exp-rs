@@ -15,6 +15,9 @@ class QTreeWidget;
 class QTreeWidgetItem;
 class QTextBrowser;
 class QSplitter;
+QT_BEGIN_NAMESPACE
+class QToolButton;
+QT_END_NAMESPACE
 class QLabel;
 class QLineEdit;
 class QStackedWidget;
@@ -162,11 +165,12 @@ class DataManagerPanel : public QDockWidget
     bool m_indexBuilt = false; ///< first refresh builds the index once
     int m_standaloneRowCap = kDefaultStandaloneRowCap;
     int m_standalonePage = 0;
+    QString m_lastSelectedAssetId;
     int m_standalonePageCount = 0;
     QWidget *m_pagerRow = nullptr;
-    class QToolButton *m_prevPageBtn = nullptr;
-    class QToolButton *m_nextPageBtn = nullptr;
-    class QLabel *m_pageLabel = nullptr;
+    QToolButton *m_prevPageBtn = nullptr;
+    QToolButton *m_nextPageBtn = nullptr;
+    QLabel *m_pageLabel = nullptr;
 };
 
 } // namespace sicnu
