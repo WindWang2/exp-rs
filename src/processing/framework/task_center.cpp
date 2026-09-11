@@ -124,6 +124,91 @@ TaskCenter& TaskCenter::instance()
     return s_instance;
 }
 
+QString TaskCenter::explainDump() const
+{
+    // 9.0 M7: everything a stuck-run investigation needs, copied under the
+    // lock and formatted outside it. Bounded: fixed fields + one line per
+    // distinct status — never per-task lines (task maps can hold 100k+).
+    struct Snapshot
+    {
+        bool shuttingDown = false;
+        unsigned long long admissionPass = 0;
+        ActiveCounters active;
+        unsigned int globalLimit = 0;
+        unsigned int readyHeapSize = 0;
+        int pendingLaunches = 0;
+        int pendingSignals = 0;
+        int pendingOwnedCancels = 0;
+        QMap<TaskStatus, int> statusCounts;
+        QMap<ProviderResourceProfile, unsigned int> activeByProfile;
+    };
+    Snapshot snap;
+    {
+        QMutexLocker locker( &m_mutex );
+        snap.shuttingDown = m_isShuttingDown.load();
+        snap.admissionPass = m_admissionPass;
+        snap.active = m_active;
+        snap.globalLimit = m_globalConcurrencyLimit > 0
+                               ? m_globalConcurrencyLimit
+                               : defaultLimitForProfile( ProviderResourceProfile::InProcessThread );
+        snap.readyHeapSize = static_cast<int>( m_readyHeap.size() );
+        snap.pendingLaunches = m_pendingLaunches.size();
+        snap.pendingSignals = m_pendingTaskAdded.size() + m_pendingTaskUpdated.size()
+                              + m_pendingLogs.size();
+        snap.pendingOwnedCancels = m_pendingOwnedCancels.size();
+        snap.activeByProfile = m_active.byProfile;
+        for ( auto it = m_tasks.constBegin(); it != m_tasks.constEnd(); ++it )
+            snap.statusCounts[it->status] += 1;
+    }
+
+    auto statusName = []( TaskStatus s ) -> const char * {
+        switch ( s )
+        {
+        case TaskStatus::Queued: return "Queued";
+        case TaskStatus::Running: return "Running";
+        case TaskStatus::Paused: return "Paused";
+        case TaskStatus::Completed: return "Completed";
+        case TaskStatus::Failed: return "Failed";
+        case TaskStatus::Canceled: return "Canceled";
+        case TaskStatus::WaitingResource: return "WaitingResource";
+        case TaskStatus::Dispatching: return "Dispatching";
+        case TaskStatus::Cancelling: return "Cancelling";
+        }
+        return "?";
+    };
+
+    QString out;
+    out += QStringLiteral( "TaskCenter explain dump\n" );
+    out += QStringLiteral( "  shuttingDown: %1\n" ).arg( snap.shuttingDown ? QStringLiteral( "yes" ) : QStringLiteral( "no" ) );
+    out += QStringLiteral( "  admissionPass: %1 (scan budget floor %2)\n" )
+               .arg( snap.admissionPass )
+               .arg( kAdmissionScanFloor );
+    out += QStringLiteral( "  active: total=%1/%2 ramMb=%3 isolated=%4 ioHeavy=%5\n" )
+               .arg( snap.active.total )
+               .arg( snap.globalLimit )
+               .arg( snap.active.ramMb )
+               .arg( snap.active.isolated )
+               .arg( snap.active.ioHeavy );
+    out += QStringLiteral( "  transientChildren: %1/%2 (worker-originated allowance, #862)\n" )
+               .arg( snap.active.transientChildren )
+               .arg( kMaxTransientChildren );
+    for ( auto it = snap.activeByProfile.constBegin(); it != snap.activeByProfile.constEnd(); ++it )
+        out += QStringLiteral( "  active[%1]: %2 (limit %3)\n" )
+                   .arg( int( it.key() ) )
+                   .arg( it.value() )
+                   .arg( limitForProfileLocked( it.key() ) );
+    out += QStringLiteral( "  queues: readyHeap=%1 pendingLaunches=%2 pendingSignals=%3 pendingOwnedCancels=%4\n" )
+               .arg( snap.readyHeapSize )
+               .arg( snap.pendingLaunches )
+               .arg( snap.pendingSignals )
+               .arg( snap.pendingOwnedCancels );
+    for ( auto it = snap.statusCounts.constBegin(); it != snap.statusCounts.constEnd(); ++it )
+        out += QStringLiteral( "  tasks[%1]: %2\n" ).arg( statusName( it.key() ) ).arg( it.value() );
+    if ( snap.active.total >= snap.globalLimit && snap.active.total > 0 )
+        out += QStringLiteral( "  NOTE: global slots saturated — only worker-originated transient children may launch.\n" );
+    return out;
+}
+
 void TaskCenter::shutdown()
 {
     m_isShuttingDown.store( true );
@@ -157,6 +242,7 @@ void TaskCenter::shutdown()
             auto &info = m_tasks[id];
             const bool wasCancelling = ( info.status == TaskStatus::Cancelling );
             setTaskStatusLocked( info, TaskStatus::Canceled );
+            info.cancelReason = sicnu::TaskCancelReason::Shutdown;
             info.errorMessage = wasCancelling ? QStringLiteral( "Canceled during shutdown" )
                                               : QStringLiteral( "Canceled: application is shutting down" );
             info.endTime = QDateTime::currentDateTimeUtc();
@@ -205,8 +291,10 @@ void TaskCenter::cancelAllForShutdown()
     // Queued/WaitingResource/Dispatching tasks finalize synchronously;
     // dispatched ones go Cancelling and resolve via the terminal record
     // (or the finalization pass in shutdown() after the engine joined).
+    // 9.0 M3: the Shutdown reason rides the whole cascade so teardown never
+    // reads as a user cancel in observability or downstream policy.
     for ( long id : nonTerminal )
-        cancelTask( id );
+        cancelTask( id, TaskCancelReason::Shutdown );
 }
 
 TaskCenter::~TaskCenter()
@@ -700,6 +788,8 @@ TaskAdmissionSnapshot TaskCenter::admissionSnapshot( const QString &algorithmId,
     snap.candidateMb = resourceEstimateOverrideMb > 0
                          ? resourceEstimateOverrideMb
                          : m_resourceBudget.resolve( algorithmId.toStdString() ).ramMb;
+    snap.transientActive = m_active.transientChildren;
+    snap.transientCap = kMaxTransientChildren;
 
     if ( snap.runningCount >= snap.globalLimit )
     {
@@ -825,14 +915,20 @@ void TaskCenter::flushPendingSignals()
         QList<AlgorithmTaskInfo> added;
         QList<AlgorithmTaskInfo> updated;
         QList<PendingLog> logs;
+        bool havePayloads = false;
         {
             QMutexLocker locker( &m_mutex );
-            if ( m_pendingTaskAdded.isEmpty() && m_pendingTaskUpdated.isEmpty() && m_pendingLogs.isEmpty() )
-                return;
-            added.swap( m_pendingTaskAdded );
-            updated.swap( m_pendingTaskUpdated );
-            logs.swap( m_pendingLogs );
+            havePayloads = !m_pendingTaskAdded.isEmpty() || !m_pendingTaskUpdated.isEmpty()
+                           || !m_pendingLogs.isEmpty() || !m_pendingOwnedCancels.isEmpty();
+            if ( havePayloads )
+            {
+                added.swap( m_pendingTaskAdded );
+                updated.swap( m_pendingTaskUpdated );
+                logs.swap( m_pendingLogs );
+            }
         }
+        if ( !havePayloads )
+            return;
         for ( const auto &info : added )
         {
             traceTaskSnapshot( info );
@@ -845,6 +941,56 @@ void TaskCenter::flushPendingSignals()
         }
         for ( const auto &log : logs )
             emit taskLogAdded( log.taskId, log.message );
+        // 9.0 M1: staged terminal-cancels for orphaned owned children
+        // (invariant I9) — processed between signal batches so slots observe
+        // a converging lifecycle. A canceled child that owned grandchildren
+        // stages them (setTaskStatusLocked terminal hook); this loop keeps
+        // going until the staging list is empty.
+        flushOwnedCancels();
+    }
+}
+
+void TaskCenter::flushOwnedCancels()
+{
+    // Called from flushPendingSignals WITHOUT m_mutex held. Each staged
+    // owned child (and its DAG descendants, exactly like cancelTask's target
+    // collection) gets the standard cascade-cancel path: terminal Canceled
+    // for queued work, Cancelling + lock-free engine cancel for dispatched
+    // work, completion callbacks fired. Children staged recursively by the
+    // setTaskStatusLocked terminal hook are picked up by the loop below.
+    for ( ;; )
+    {
+        QList<long> ownedCancels;
+        std::vector<std::pair<std::string, long>> jobCancelTargets;
+        QList<QPointer<QgsTask>> handlesToCancel;
+        QList<long> cascadeCanceledIds;
+        {
+            QMutexLocker locker( &m_mutex );
+            ownedCancels.swap( m_pendingOwnedCancels );
+            if ( ownedCancels.isEmpty() )
+                return;
+            QList<long> targets;
+            for ( long childId : ownedCancels )
+            {
+                if ( !targets.contains( childId ) )
+                    targets.append( childId );
+                const QList<long> descendants = collectTransitiveDescendantsLocked( childId );
+                for ( long descendantId : descendants )
+                    if ( !targets.contains( descendantId ) )
+                        targets.append( descendantId );
+            }
+            cascadeCancelTargetsLocked( targets, /*userRootId=*/-1,
+                                        QStringLiteral( "cancellation" ),
+                                        /*cleanupScratchOutputs=*/false,
+                                        cascadeCanceledIds, jobCancelTargets,
+                                        handlesToCancel, TaskCancelReason::StructuredJoin );
+        }
+        dispatchPendingCancels( handlesToCancel, jobCancelTargets,
+                                QStringLiteral(
+                                    "Canceled: owning task reached a terminal state first (structured join)" ),
+                                TaskCancelReason::StructuredJoin );
+        for ( long id : cascadeCanceledIds )
+            fireTaskCompletionCallbacks( id );
     }
 }
 
@@ -854,6 +1000,10 @@ QList<long> TaskCenter::collectTransitiveDescendantsLocked( long rootTaskId ) co
     // with a small map, instead of the previous iterate-until-no-change scan
     // whose worst case was quadratic in live tasks - all while holding
     // m_mutex on every failure/cancel path.
+    // 9.0 M1: the frontier walks BOTH edge families — DAG data-dependency
+    // edges (parentTaskIds) and structured-ownership edges (m_ownedChildren)
+    // — so cancelling a running owner cancels its submitted children
+    // immediately, not only after the owner's executor unwinds to terminal.
     QHash<long, QVector<long>> childrenOf;
     for ( auto it = m_tasks.begin(); it != m_tasks.end(); ++it )
     {
@@ -862,6 +1012,8 @@ QList<long> TaskCenter::collectTransitiveDescendantsLocked( long rootTaskId ) co
         for ( long parentId : it.value().parentTaskIds )
             childrenOf[parentId].append( it.key() );
     }
+    for ( auto it = m_ownedChildren.constBegin(); it != m_ownedChildren.constEnd(); ++it )
+        childrenOf[it.key()].append( it.value() );
 
     QList<long> descendants;
     QSet<long> visited;
@@ -1083,6 +1235,23 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
         info.resourceEstimateOverrideMb = resourceEstimateOverrideMb;
         info.source = source;
 
+        // 9.0 M0/M1 structured hierarchy stamp (immutable after creation):
+        // a submission from a JobEngine worker thread gets the bounded
+        // transient admission allowance (#862), and — when the worker is
+        // running a tracked task — an explicit ownership edge for join and
+        // cancellation propagation.
+        info.workerOriginated = sicnu::jobs::JobEngine::isWorkerThread();
+        if ( info.workerOriginated )
+        {
+            const std::string &ownerJobId = sicnu::jobs::JobEngine::currentJobId();
+            if ( !ownerJobId.empty() )
+            {
+                const auto ownerIt = m_taskByJobId.constFind( ownerJobId );
+                if ( ownerIt != m_taskByJobId.constEnd() )
+                    info.ownerTaskId = ownerIt.value();
+            }
+        }
+
         auto adapter = sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter( algorithmId.toStdString() );
         if ( adapter )
             info.algorithmName = QString::fromStdString( adapter->descriptor().displayName );
@@ -1102,6 +1271,8 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
                                  .arg( static_cast<int>( priority ) ) );
 
         m_tasks[id] = info;
+        if ( m_tasks[id].ownerTaskId > 0 )
+            m_ownedChildren.insert( m_tasks[id].ownerTaskId, id );
         // 8.0 WP-A: derived admission state for the new task (children index,
         // incomplete-parent counts, ready-heap / manual-queue registration).
         registerParentLinksLocked( m_tasks[id] );
@@ -1205,6 +1376,7 @@ long TaskCenter::submitJobImpl( const sicnu::jobs::JobRequest &request,
             // Shutdown slipped between enqueue and arming: no launch will
             // ever happen. Finalize inline so callers/waiters resolve.
             setTaskStatusLocked( *it, TaskStatus::Canceled );
+            it->cancelReason = sicnu::TaskCancelReason::Shutdown;
             it->errorMessage = QStringLiteral( "Canceled: application is shutting down" );
             it->endTime = QDateTime::currentDateTimeUtc();
             queueTaskUpdatedLocked( taskId );
@@ -1428,6 +1600,18 @@ void TaskCenter::setTaskStatusLocked( AlgorithmTaskInfo &task, TaskStatus newSta
         // untouched: same-status writes are true no-ops.
         return;
     }
+    // 9.0 M3 (invariant I2): terminal states are absorbing — a finished task
+    // can never return to a non-terminal status. Every sanctioned transition
+    // path already refuses terminal tasks upstream (exactly-once callbacks
+    // depend on it); this seam-level guard is defense in depth so a future
+    // caller cannot resurrect a task without failing loudly in debug builds.
+    if ( isTerminalStatus( task.status ) && !isTerminalStatus( newStatus ) )
+    {
+        traceTaskEvent( "status", "terminal_monotonicity_violation", task.taskId,
+                        task.algorithmId );
+        Q_ASSERT( !"terminal task status must never transition to a non-terminal status" );
+        return;
+    }
     const bool wasActive = isActiveStatus( task.status );
     const bool wasReadyLike = task.status == TaskStatus::Queued
                               || task.status == TaskStatus::WaitingResource;
@@ -1443,6 +1627,8 @@ void TaskCenter::setTaskStatusLocked( AlgorithmTaskInfo &task, TaskStatus newSta
         m_active.ramMb -= taskEstimateMbLocked( task );
         if ( task.isolatedRoute )
             --m_active.isolated;
+        if ( task.workerOriginated )
+            --m_active.transientChildren;
         const AdmissionDims dims = admissionDimsLocked( task );
         m_active.usage2.tempDiskMb -= dims.tempDiskMb;
         m_active.usage2.vramMb -= dims.vramMb;
@@ -1458,6 +1644,8 @@ void TaskCenter::setTaskStatusLocked( AlgorithmTaskInfo &task, TaskStatus newSta
         m_active.ramMb += taskEstimateMbLocked( task );
         if ( task.isolatedRoute )
             ++m_active.isolated;
+        if ( task.workerOriginated )
+            ++m_active.transientChildren;
         const AdmissionDims dims = admissionDimsLocked( task );
         m_active.usage2.tempDiskMb += dims.tempDiskMb;
         m_active.usage2.vramMb += dims.vramMb;
@@ -1466,6 +1654,32 @@ void TaskCenter::setTaskStatusLocked( AlgorithmTaskInfo &task, TaskStatus newSta
         ++m_active.byProfile[task.resourceProfile];
     }
     task.status = newStatus;
+
+    // 9.0 M5: actual-usage observation — one relaxed RSS sample on every
+    // terminal transition, into the bounded trace ring (off by default =
+    // one atomic load). Estimates gate admission; this records what the
+    // process actually held at completion for estimate-vs-actual review.
+    if ( isTerminalStatus( newStatus ) )
+    {
+        traceTaskEvent( "resource", "observed_rss_mb", task.taskId, task.algorithmId,
+                        QString::number( m_resourceMonitor.currentRssMb() ) );
+    }
+
+    // 9.0 M1 join rule (I9): an owner reaching a TERMINAL state orphans its
+    // still-non-terminal owned children — stage them for the lock-free
+    // cancel flush (flushOwnedCancels). Staging only; no engine calls here.
+    if ( isTerminalStatus( newStatus ) )
+    {
+        const auto ownedRange = m_ownedChildren.equal_range( task.taskId );
+        for ( auto childIt = ownedRange.first; childIt != ownedRange.second; ++childIt )
+        {
+            const auto childTaskIt = m_tasks.constFind( childIt.value() );
+            if ( childTaskIt == m_tasks.constEnd() )
+                continue;
+            if ( !isTerminalStatus( childTaskIt->status ) )
+                m_pendingOwnedCancels.append( childIt.value() );
+        }
+    }
 
     // Leaving a queued-like status also retires the task's heap entries and
     // its legacy manual-queue registration.
@@ -1625,7 +1839,13 @@ void TaskCenter::processNextQueuedTasks()
     QList<long> resourceBlockedIds;
     QList<long> dagRegressedIds;
 
-    while ( m_active.total < globalMax && !m_readyHeap.empty() && scanned < scanBudget )
+    // 9.0 M0 (#862): the globalMax gate moved INSIDE the pop loop — a
+    // worker-originated candidate (its submitter occupies a worker slot that
+    // cannot free until the child runs) must be examinable even when
+    // globalMax is saturated, mirroring JobEngine's #798 transient worker
+    // allowance at the layer below. The bypass is bounded by
+    // kMaxTransientChildren concurrent active transient children.
+    while ( !m_readyHeap.empty() && scanned < scanBudget )
     {
         ReadyEntry entry = m_readyHeap.top();
         m_readyHeap.pop();
@@ -1655,22 +1875,45 @@ void TaskCenter::processNextQueuedTasks()
             continue;
         }
 
+        // Global slot gate (#862): normal candidates stop launching at
+        // globalMax. The pass does NOT break here: a deeper worker-originated
+        // candidate may still launch (it bypasses this gate — its blocked
+        // parent can never free its slot unless the child runs), while every
+        // non-bypassed candidate behind the held head is blocked for this
+        // pass too and simply requeues (strict priority order preserved).
+        const bool transientChild =
+            task.workerOriginated && m_active.transientChildren < kMaxTransientChildren;
+        if ( !transientChild && m_active.total >= globalMax )
+        {
+            globalHoldReason = QStringLiteral( "Global worker slots exhausted." );
+            resourceBlockedIds.append( entry.taskId );
+            requeue.push_back( entry );
+            ++scanned;
+            continue;
+        }
+
         // ADR 0063: hold all launches when the process RSS is at/above the
-        // watermark. Memory pressure is global, so stop examining (remaining
-        // candidates cannot run either). The popped candidate re-queues
-        // unchanged (fresh stays fresh: strict priority order), and when
-        // nothing is running a bounded timer re-arms the pass.
-        if ( m_resourceMonitor.memoryPressureHigh() )
+        // watermark. Memory pressure is global, so non-transient candidates
+        // are held (requeue, keep scanning: only a deeper transient child may
+        // still launch past this hold). When nothing is running a bounded
+        // timer re-arms the pass.
+        // 9.0 M0 (#862): a transient child bypasses the hold — refusing it
+        // would strand its blocked parent forever (the parent's slot frees
+        // only when the child completes), trading a bounded 8-task overcommit
+        // for guaranteed progress. Same direction as the never-starve rule
+        // below and JobEngine's #798 worker allowance.
+        if ( m_resourceMonitor.memoryPressureHigh() && !transientChild )
         {
             globalHoldReason = QStringLiteral( "Waiting for memory: process RSS at/above the watermark." );
             resourceBlockedIds.append( entry.taskId );
             requeue.push_back( entry );
-            break;
+            ++scanned;
+            continue;
         }
 
         const ProviderResourceProfile profile = task.resourceProfile;
         const unsigned int profileMax = limitForProfileLocked( profile );
-        if ( m_active.byProfile.value( profile, 0u ) >= profileMax )
+        if ( !transientChild && m_active.byProfile.value( profile, 0u ) >= profileMax )
         {
             entry.epoch = passEpoch;
             requeue.push_back( entry );
@@ -1688,7 +1931,7 @@ void TaskCenter::processNextQueuedTasks()
         // break the fail-closed contract).
         const bool isolateRoute =
             !task.jobExecutor && processing::shouldRunIsolated( task.algorithmId );
-        if ( isolateRoute
+        if ( !transientChild && isolateRoute
              && m_active.isolated >= static_cast<unsigned int>( std::max( 1, processing::isolatedJobLimit() ) ) )
         {
             entry.epoch = passEpoch;
@@ -1704,8 +1947,11 @@ void TaskCenter::processNextQueuedTasks()
         // missing estimate must not permanently block all work). A budget of
         // 0 disables this gate (legacy behavior). `continue` (not break): a
         // later, lighter eligible task may still fit within the budget.
+        // 9.0 M0 (#862): transient children bypass for the same liveness
+        // reason (bounded by kMaxTransientChildren).
         const unsigned int candidateMb = taskEstimateMbLocked( task );
-        if ( m_active.total > 0 && !m_resourceBudget.canLaunch( m_active.ramMb, candidateMb ) )
+        if ( !transientChild && m_active.total > 0
+             && !m_resourceBudget.canLaunch( m_active.ramMb, candidateMb ) )
         {
             entry.epoch = passEpoch;
             requeue.push_back( entry );
@@ -1720,7 +1966,7 @@ void TaskCenter::processNextQueuedTasks()
         // nothing is running, a declared estimate never blocks the only
         // candidate).
         const AdmissionDims candidateDims = admissionDimsLocked( task );
-        if ( m_active.total > 0
+        if ( !transientChild && m_active.total > 0
              && ( candidateDims.tempDiskMb > 0 || candidateDims.vramMb > 0 ) )
         {
             sicnu::ResourceRequest candidateRequest;
@@ -1739,7 +1985,8 @@ void TaskCenter::processNextQueuedTasks()
 
         // Execution Plane 7.0: io-heavy concurrency gate (descriptor-declared
         // ioHeavy kernels; 0 = off). Delays only, like the isolated-slot gate.
-        if ( candidateDims.ioHeavy && m_ioHeavyLimit > 0 && m_active.ioHeavy >= m_ioHeavyLimit )
+        if ( !transientChild && candidateDims.ioHeavy && m_ioHeavyLimit > 0
+             && m_active.ioHeavy >= m_ioHeavyLimit )
         {
             entry.epoch = passEpoch;
             requeue.push_back( entry );
@@ -1768,6 +2015,8 @@ void TaskCenter::processNextQueuedTasks()
         // counter at the leave transition (blocking every later routed task).
         task.isolatedRoute = isolateRoute;
         setTaskStatusLocked( task, TaskStatus::Dispatching );
+        if ( task.workerOriginated )
+            traceTaskEvent( "admission", "transient_child", entry.taskId, task.algorithmId );
         task.logBuffer.append(
           QString( QStringLiteral( "[%1] Dispatching to JobEngine (profile=%2)." ) )
             .arg( QDateTime::currentDateTimeUtc().toString( QStringLiteral( "hh:mm:ss" ) ) )
@@ -2236,7 +2485,8 @@ void TaskCenter::cascadeCancelTargetsLocked( const QList<long> &targets, long us
                                              const QString &upstreamCause, bool cleanupScratchOutputs,
                                              QList<long> &cascadeCanceledIds,
                                              std::vector<std::pair<std::string, long>> &jobCancelTargets,
-                                             QList<QPointer<QgsTask>> &handlesToCancel )
+                                             QList<QPointer<QgsTask>> &handlesToCancel,
+                                             TaskCancelReason reason )
 {
     for ( long targetId : targets )
     {
@@ -2248,6 +2498,10 @@ void TaskCenter::cascadeCancelTargetsLocked( const QList<long> &targets, long us
             handlesToCancel.append( info.taskHandle );
 
         const bool isUserRoot = ( targetId == userRootId );
+        // 9.0 M3: every target carries the CALLER's typed reason (User /
+        // Shutdown / StructuredJoin) — the root must not be hardcoded to
+        // User or a shutdown teardown would mislabel its roots.
+        info.cancelReason = reason;
         if ( !info.jobId.empty() )
         {
             // Dispatched work: the worker observes the cancel flag and the
@@ -2298,7 +2552,8 @@ void TaskCenter::cascadeCancelTargetsLocked( const QList<long> &targets, long us
 
 void TaskCenter::dispatchPendingCancels( const QList<QPointer<QgsTask>> &handlesToCancel,
                                          const std::vector<std::pair<std::string, long>> &jobCancelTargets,
-                                         const QString &strandedReason )
+                                         const QString &strandedReason,
+                                         TaskCancelReason reason )
 {
     // Attached QgsTask objects are owned by the main thread and cancel() has
     // no thread-safety guarantee; marshal the call onto the handle's own
@@ -2327,6 +2582,8 @@ void TaskCenter::dispatchPendingCancels( const QList<QPointer<QgsTask>> &handles
             {
                 auto &info = m_tasks[targetId];
                 setTaskStatusLocked( info, TaskStatus::Canceled );
+                if ( info.cancelReason == TaskCancelReason::None )
+                    info.cancelReason = reason;
                 info.errorMessage = strandedReason;
                 info.endTime = QDateTime::currentDateTimeUtc();
                 info.logBuffer.append( strandedReason );
@@ -2341,6 +2598,19 @@ void TaskCenter::dispatchPendingCancels( const QList<QPointer<QgsTask>> &handles
             fireTaskCompletionCallbacks( targetId );
         }
     }
+}
+
+const char *taskCancelReasonName( TaskCancelReason reason )
+{
+    switch ( reason )
+    {
+    case TaskCancelReason::User: return "user";
+    case TaskCancelReason::Upstream: return "upstream";
+    case TaskCancelReason::Shutdown: return "shutdown";
+    case TaskCancelReason::StructuredJoin: return "structured_join";
+    case TaskCancelReason::None: break;
+    }
+    return "none";
 }
 
 bool isTransientExecutionError( const QString &error )
@@ -2499,7 +2769,7 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
         fireTaskCompletionCallbacks( id );
 }
 
-void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
+void TaskCenter::markTaskCanceled( long taskId, const QString &reason, TaskCancelReason cancelReason )
 {
     QList<long> cascadeCanceledIds;
     std::vector<std::pair<std::string, long>> jobCancelTargets;
@@ -2522,7 +2792,15 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
         m_taskChainedEdges.remove( taskId );
         m_taskRegisteredInputStats.remove( taskId );
         setTaskStatusLocked( m_tasks[taskId], TaskStatus::Canceled );
-        traceTaskEvent( "cancel", "ok", taskId, m_tasks[taskId].algorithmId, reason.left( 120 ) );
+        traceTaskEvent( "cancel", taskCancelReasonName( cancelReason ), taskId,
+                        m_tasks[taskId].algorithmId, reason.left( 120 ) );
+        // 9.0 M3: the terminal record often arrives AFTER the cascade already
+        // stamped the typed reason (User/Upstream/StructuredJoin) at request
+        // time — the engine's generic Cancelled record must not overwrite it
+        // with the listener-path default. Only an unstamped task takes the
+        // caller's reason.
+        if ( m_tasks[taskId].cancelReason == TaskCancelReason::None )
+            m_tasks[taskId].cancelReason = cancelReason;
         m_tasks[taskId].errorMessage = reason;
         m_tasks[taskId].endTime = QDateTime::currentDateTimeUtc();
         m_tasks[taskId].logBuffer.append( QString( QStringLiteral( "[%1] %2" ) )
@@ -2549,7 +2827,7 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason )
         fireTaskCompletionCallbacks( id );
 }
 
-bool TaskCenter::cancelTask( long taskId )
+bool TaskCenter::cancelTask( long taskId, TaskCancelReason reason )
 {
     std::vector<std::pair<std::string, long>> jobCancelTargets;
     QList<long> cascadeCanceledIds;
@@ -2566,7 +2844,7 @@ bool TaskCenter::cancelTask( long taskId )
         targets.append( collectTransitiveDescendantsLocked( taskId ) );
 
         cascadeCancelTargetsLocked( targets, taskId, QStringLiteral( "cancellation" ), true,
-                                    cascadeCanceledIds, jobCancelTargets, handlesToCancel );
+                                    cascadeCanceledIds, jobCancelTargets, handlesToCancel, reason );
 
         processNextQueuedTasks();
     }
@@ -2574,7 +2852,8 @@ bool TaskCenter::cancelTask( long taskId )
     flushPendingSignals();
 
     dispatchPendingCancels( handlesToCancel, jobCancelTargets,
-                            QStringLiteral( "Job no longer known to the engine; task canceled." ) );
+                            QStringLiteral( "Job no longer known to the engine; task canceled." ),
+                            reason );
 
     for ( long id : cascadeCanceledIds )
         fireTaskCompletionCallbacks( id );
@@ -2582,7 +2861,7 @@ bool TaskCenter::cancelTask( long taskId )
     return true;
 }
 
-bool TaskCenter::cancelPipeline( long pipelineId )
+bool TaskCenter::cancelPipeline( long pipelineId, TaskCancelReason reason )
 {
     if ( pipelineId < 0 )
         return false;
@@ -2594,7 +2873,7 @@ bool TaskCenter::cancelPipeline( long pipelineId )
     bool canceledAny = false;
     for ( long taskId : pipeInfo.stepToTaskId.values() )
     {
-        if ( cancelTask( taskId ) )
+        if ( cancelTask( taskId, reason ) )
             canceledAny = true;
     }
     return canceledAny;
@@ -2795,6 +3074,12 @@ void TaskCenter::clearCompletedTasks()
             // incoming children-index edges BEFORE the map entry is gone.
             for ( long parentId : m_tasks[id].parentTaskIds )
                 m_children.remove( parentId, id );
+            // 9.0 M1: drop both directions of the ownership index for the
+            // pruned task (outgoing owner edges and incoming child edges).
+            m_ownedChildren.remove( id );
+            const QList<long> ownedKeys = m_ownedChildren.keys( id );
+            for ( long childId : ownedKeys )
+                m_ownedChildren.remove( id, childId );
             forgetDerivedTaskStateLocked( id );
             m_tasks.remove( id );
         }
@@ -3079,6 +3364,23 @@ AlgorithmTaskInfo TaskCenter::waitForTask( long taskId,
                                             std::chrono::milliseconds timeout,
                                             std::chrono::milliseconds pollInterval ) const
 {
+    // 9.0 M0 (#862): a worker thread must never park on the task center's
+    // wait condition — it occupies a pool slot while waiting, which (with
+    // globalMax saturated by such parents) deadlocked child admission. The
+    // contract mirrors JobEngine::waitForJob (#798): worker threads get an
+    // immediate truthful snapshot and must use completion callbacks
+    // (addTaskCompletionCallback) instead. Returning the CURRENT snapshot
+    // (never a fabricated empty/terminal record) keeps timeout and
+    // not-found semantics distinguishable for a caller that ignores the
+    // guidance.
+    if ( sicnu::jobs::JobEngine::isWorkerThread() )
+    {
+        traceTaskEvent( "wait", "refused_worker_thread", taskId, QString() );
+        QMutexLocker locker( &m_mutex );
+        const auto it = m_tasks.constFind( taskId );
+        return it != m_tasks.constEnd() ? *it : AlgorithmTaskInfo{};
+    }
+
     using clock = std::chrono::steady_clock;
     const auto deadline = clock::now() + timeout;
 
@@ -3114,6 +3416,15 @@ PipelineExecutionInfo TaskCenter::waitForPipeline( long pipelineId,
                                                     std::chrono::milliseconds timeout,
                                                     std::chrono::milliseconds pollInterval ) const
 {
+    // 9.0 M0 (#862): same worker-thread contract as waitForTask above.
+    if ( sicnu::jobs::JobEngine::isWorkerThread() )
+    {
+        traceTaskEvent( "wait", "refused_worker_thread", pipelineId, QString() );
+        QMutexLocker locker( &m_mutex );
+        const auto it = m_pipelines.constFind( pipelineId );
+        return it != m_pipelines.constEnd() ? *it : PipelineExecutionInfo{};
+    }
+
     using clock = std::chrono::steady_clock;
     const auto deadline = clock::now() + timeout;
 
