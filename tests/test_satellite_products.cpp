@@ -914,3 +914,79 @@ TEST_CASE("rs:spectral_index EVI/SAVI honour SICNU_NUMERIC_SCALE (#680)",
     // Sanity: the guard actually changed something (unscaled EVI differs).
     REQUIRE(std::abs(unscaledEvi - expectedEvi) > 0.1);
 }
+
+TEST_CASE("rs:spectral_index EVI honour params.scale=0.0001 on DN rasters (#933)",
+          "[operators][spectral][landsat][scale]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    auto writeStack = [&](const QString &path, const std::vector<float> &fills,
+                          const char *numericScale) {
+        ensureGdalInit();
+        constexpr int W = 4, H = 4;
+        QString err;
+        std::vector<std::vector<float>> bands;
+        for (float f : fills)
+            bands.emplace_back(static_cast<size_t>(W * H), f);
+        std::array<double, 6> gt = {500000, 30, 0, 4500000, 0, -30};
+        REQUIRE(writeGdalOutput(path, W, H, bands, gt,
+                                QStringLiteral("EPSG:32648"), &err));
+        GDALDatasetH ds = GDALOpen(path.toUtf8().constData(), GA_Update);
+        REQUIRE(ds != nullptr);
+        const char *roles[] = {"blue", "green", "red", "nir"};
+        for (int b = 1; b <= 4; ++b)
+            GDALSetMetadataItem(GDALGetRasterBand(ds, b), "SICNU_BAND_ROLE", roles[b - 1], nullptr);
+        if (numericScale)
+            GDALSetMetadataItem(ds, "SICNU_NUMERIC_SCALE", numericScale, nullptr);
+        GDALClose(ds);
+    };
+
+    const QString dnPath = tmp.path() + QStringLiteral("/dn_unlabeled.tif");
+    const QString unitPath = tmp.path() + QStringLiteral("/unit_refl.tif");
+    const QString stampedUnitPath = tmp.path() + QStringLiteral("/dn_wrong_stamp.tif");
+    writeStack(dnPath, {1000.f, 1500.f, 2000.f, 4000.f}, nullptr);
+    writeStack(unitPath, {0.1f, 0.15f, 0.2f, 0.4f}, nullptr);
+    writeStack(stampedUnitPath, {1000.f, 1500.f, 2000.f, 4000.f}, "1");
+
+    auto op = RSOperatorRegistry::instance().create("rs:spectral_index");
+    REQUIRE(op != nullptr);
+    REQUIRE(op->schema()["properties"].isMember("scale"));
+    RSOperatorContext ctx;
+
+    const double expectedEvi = 2.5 * 0.2 / 1.85;
+    const double unscaledEvi = 2.5 * 2000.0 / (4000.0 + 6 * 2000.0 - 7.5 * 1000.0 + 1.0);
+    REQUIRE(std::abs(unscaledEvi - expectedEvi) > 0.1);
+
+    auto runEvi = [&](const QString &input, const QString &output, bool withScale) {
+        Json::Value params(Json::objectValue);
+        params["input"] = input.toStdString();
+        params["output"] = output.toStdString();
+        params["index"] = "EVI";
+        if (withScale)
+            params["scale"] = 0.0001;
+        op->execute(params, ctx);
+        GdalDatasetWrapper ds;
+        REQUIRE(ds.open(output));
+        std::vector<float> pixels(16);
+        REQUIRE(ds.readBandData(1, pixels.data(), 4, 4));
+        return pixels;
+    };
+
+    const QString unitOut = tmp.path() + QStringLiteral("/evi_unit.tif");
+    const auto unitPixels = runEvi(unitPath, unitOut, false);
+    for (float v : unitPixels)
+        REQUIRE_THAT(v, Catch::Matchers::WithinAbs(expectedEvi, 1e-4));
+
+    const QString dnOut = tmp.path() + QStringLiteral("/evi_dn_scale.tif");
+    const auto dnPixels = runEvi(dnPath, dnOut, true);
+    for (size_t i = 0; i < dnPixels.size(); ++i)
+        REQUIRE_THAT(dnPixels[i], Catch::Matchers::WithinAbs(unitPixels[i], 1e-4));
+
+    // Explicit scale wins over a contradictory unit stamp.
+    const QString overrideOut = tmp.path() + QStringLiteral("/evi_override.tif");
+    const auto overridePixels = runEvi(stampedUnitPath, overrideOut, true);
+    for (float v : overridePixels)
+        REQUIRE_THAT(v, Catch::Matchers::WithinAbs(expectedEvi, 1e-4));
+}

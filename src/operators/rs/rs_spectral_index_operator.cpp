@@ -65,6 +65,11 @@ Json::Value RsSpectralIndexOperator::schema() const {
     props["swir2"] = makeIntegerParam("swir2", "1-based SWIR2 band number (optional; when omitted, resolved from the input's product band roles)", 6);
     props["rededge"] = makeIntegerParam("rededge", "1-based RedEdge band number (optional; when omitted, resolved from the input's product band roles)", 5);
     props["postfire"] = makeRasterParam("postfire", "Optional post-fire raster path for dNBR computation", false);
+    // Optional: multiplicative (stored * scale = unit reflectance). No default
+    // so an omitted key stays omitted — 0 is not a valid scale.
+    props["scale"] = makeNumberParam("scale",
+        "multiplicative scale that maps stored pixels to unit reflectance, e.g. 0.0001 for Landsat Collection 2 DN");
+    props["scale"].removeMember("default");
 
     Json::Value outputs(Json::objectValue);
     outputs["output"] = makeRasterParam("output", "Output raster path");
@@ -112,9 +117,12 @@ Json::Value RsSpectralIndexOperator::metadata() const {
                                "product metadata (semantic band roles) instead of the positional default.");
     meta["limitations"].append("EVI and SAVI constants assume unit reflectance [0,1]. When the input "
                                "carries SICNU_NUMERIC_SCALE (stamped by rs:landsat_import / "
-                               "rs:sentinel2_import for verbatim DN-scale Level-2 stacks), the "
-                               "participating bands are divided by it for the computation; ratio "
-                               "indices are scale-invariant and inputs are never rescaled on disk.");
+                               "rs:sentinel2_import for verbatim DN-scale Level-2 stacks), or when "
+                               "params.scale is a finite multiplicative scale (e.g. 0.0001 for "
+                               "Landsat Collection 2 DN), the participating bands are mapped to "
+                               "unit reflectance for the computation; an explicit scale param wins "
+                               "over the metadata stamp. Ratio indices are scale-invariant and "
+                               "inputs are never rescaled on disk.");
     meta["limitations"].append("MSAVI, EVI2 and BAI are unit-reflectance-anchored like EVI/SAVI; without "
                                "declared scale metadata they fall back to the same documented magnitude "
                                "heuristic (grid-and-radiometric-policy §2), which can misfire on all-dark "
@@ -215,6 +223,24 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                 hasDeclaredScale = true;
             }
         }
+    }
+    // Recipe/user override: `scale` is multiplicative (stored * scale = unit
+    // reflectance), e.g. Landsat C2 0.0001. domainFromDeclaredScale and
+    // SICNU_NUMERIC_SCALE use a divisor (stored / divisor). Convert here.
+    // Values > 1 are already divisors (the metadata convention). Explicit
+    // param wins over the stamp when both are present.
+    if (params.isMember("scale")) {
+        if (!params["scale"].isNumeric()) {
+            throw RSOperatorError(ErrorCode::TypeMismatch,
+                                  "Parameter 'scale' must be a number");
+        }
+        const double v = params["scale"].asDouble();
+        if (!std::isfinite(v) || v <= 0.0) {
+            throw RSOperatorError(ErrorCode::InvalidParameter,
+                                  "Parameter 'scale' must be a finite number > 0");
+        }
+        declaredScale = (v <= 1.0) ? (1.0 / v) : v;
+        hasDeclaredScale = true;
     }
     if (!indexNeedsScale) {
         numericDomain = sicnu::processing::contracts::defaultUnitDomain();

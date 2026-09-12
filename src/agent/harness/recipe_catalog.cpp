@@ -498,8 +498,34 @@ Json::Value RecipeCatalog::instantiateRecipe( const std::string &recipeId,
   // tune the PRIMARY path only — params_when_skipped templates are
   // override-immune by design (a degraded branch documents its own fixed
   // fallback). The effective document copy keeps the catalog entry untouched.
+  //
+  // Alias ids such as harness.optical_evi_landsat resolve to the canonical
+  // document without a preset unless bindings.preset is set. When the caller
+  // omitted preset, infer it from a matching "_<presetName>" suffix so the
+  // Landsat twins actually apply scale: 0.0001. Explicit bindings.preset wins.
   Json::Value effective = recipe;
-  const std::string presetName = bindings.get( "preset", "" ).asString();
+  std::string presetName = bindings.get( "preset", "" ).asString();
+  if ( presetName.empty() && mAliases.isMember( recipeId ) )
+  {
+    const Json::Value &presets = recipe.get( "presets", Json::Value() );
+    if ( presets.isObject() )
+    {
+      std::string inferred;
+      for ( const std::string &name : presets.getMemberNames() )
+      {
+        if ( name.empty() )
+          continue;
+        const std::string suffix = "_" + name;
+        if ( recipeId.size() >= suffix.size() &&
+             recipeId.compare( recipeId.size() - suffix.size(), suffix.size(), suffix ) == 0 &&
+             name.size() > inferred.size() )
+        {
+          inferred = name;
+        }
+      }
+      presetName = inferred;
+    }
+  }
   if ( !presetName.empty() )
   {
     const Json::Value &preset = recipe.get( "presets", Json::Value() ).get( presetName,

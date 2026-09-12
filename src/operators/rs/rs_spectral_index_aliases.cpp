@@ -75,6 +75,9 @@ Json::Value RsEviOperator::schema() const {
     props["nir"] = makeIntegerParam("nir", "1-based NIR band number (optional; auto-resolved from band roles)", 4);
     props["red"] = makeIntegerParam("red", "1-based Red band number (optional; auto-resolved from band roles)", 3);
     props["blue"] = makeIntegerParam("blue", "1-based Blue band number (optional; auto-resolved from band roles)", 1);
+    props["scale"] = makeNumberParam("scale",
+        "multiplicative scale that maps stored pixels to unit reflectance, e.g. 0.0001 for Landsat Collection 2 DN");
+    props["scale"].removeMember("default");
 
     Json::Value outputs(Json::objectValue);
     outputs["output"] = makeRasterParam("output", "Output raster path");
@@ -175,6 +178,9 @@ Json::Value RsSaviOperator::schema() const {
     props["output"] = makeOutputParam("output", "Output SAVI raster", "tif");
     props["nir"] = makeIntegerParam("nir", "1-based NIR band number (optional; auto-resolved from band roles)", 4);
     props["red"] = makeIntegerParam("red", "1-based Red band number (optional; auto-resolved from band roles)", 3);
+    props["scale"] = makeNumberParam("scale",
+        "multiplicative scale that maps stored pixels to unit reflectance, e.g. 0.0001 for Landsat Collection 2 DN");
+    props["scale"].removeMember("default");
 
     Json::Value outputs(Json::objectValue);
     outputs["output"] = makeRasterParam("output", "Output raster path");
