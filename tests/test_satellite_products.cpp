@@ -990,3 +990,63 @@ TEST_CASE("rs:spectral_index EVI honour params.scale=0.0001 on DN rasters (#933)
     for (float v : overridePixels)
         REQUIRE_THAT(v, Catch::Matchers::WithinAbs(expectedEvi, 1e-4));
 }
+
+TEST_CASE("rs:spectral_index EVI params.scale>1 stays multiplicative (#945)",
+          "[operators][spectral][scale]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    ensureGdalInit();
+    constexpr int W = 4, H = 4;
+    // Unit-reflectance scene stored as half the physical values; scale=2
+    // must multiply (÷0.5 as divisor), not treat 2 as a divisor (#945).
+    const QString halfPath = tmp.path() + QStringLiteral("/half_unit.tif");
+    {
+        QString err;
+        std::vector<std::vector<float>> bands = {
+            std::vector<float>(static_cast<size_t>(W * H), 0.05f),  // blue
+            std::vector<float>(static_cast<size_t>(W * H), 0.075f), // green
+            std::vector<float>(static_cast<size_t>(W * H), 0.1f),   // red
+            std::vector<float>(static_cast<size_t>(W * H), 0.2f),   // nir
+        };
+        std::array<double, 6> gt = {500000, 30, 0, 4500000, 0, -30};
+        REQUIRE(writeGdalOutput(halfPath, W, H, bands, gt,
+                                QStringLiteral("EPSG:32648"), &err));
+        GDALDatasetH ds = GDALOpen(halfPath.toUtf8().constData(), GA_Update);
+        REQUIRE(ds != nullptr);
+        const char *roles[] = {"blue", "green", "red", "nir"};
+        for (int b = 1; b <= 4; ++b)
+            GDALSetMetadataItem(GDALGetRasterBand(ds, b), "SICNU_BAND_ROLE", roles[b - 1], nullptr);
+        GDALClose(ds);
+    }
+
+    auto op = RSOperatorRegistry::instance().create("rs:spectral_index");
+    REQUIRE(op != nullptr);
+    RSOperatorContext ctx;
+    const double expectedEvi = 2.5 * 0.2 / 1.85; // after ×2 → unit 0.1/0.2/...
+
+    Json::Value params(Json::objectValue);
+    params["input"] = halfPath.toStdString();
+    params["output"] = (tmp.path() + QStringLiteral("/evi_scale2.tif")).toStdString();
+    params["index"] = "EVI";
+    params["scale"] = 2.0;
+    op->execute(params, ctx);
+
+    GdalDatasetWrapper ds;
+    REQUIRE(ds.open(QString::fromStdString(params["output"].asString())));
+    std::vector<float> pixels(16);
+    REQUIRE(ds.readBandData(1, pixels.data(), W, H));
+    for (float v : pixels)
+        REQUIRE_THAT(v, Catch::Matchers::WithinAbs(expectedEvi, 1e-4));
+
+    // Contrapositive: the old magnitude heuristic would have used divisor 2
+    // (stored/2), yielding a different EVI — guard that we did not regress.
+    const double wrongAsDivisorEvi =
+        2.5 * (0.2 / 2.0)
+        / ((0.2 / 2.0) + 6.0 * (0.1 / 2.0) - 7.5 * (0.05 / 2.0) + 1.0);
+    REQUIRE(std::abs(wrongAsDivisorEvi - expectedEvi) > 0.05);
+    for (float v : pixels)
+        REQUIRE(std::abs(static_cast<double>(v) - wrongAsDivisorEvi) > 0.05);
+}

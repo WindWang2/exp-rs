@@ -224,11 +224,12 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
             }
         }
     }
-    // Recipe/user override: `scale` is multiplicative (stored * scale = unit
-    // reflectance), e.g. Landsat C2 0.0001. domainFromDeclaredScale and
-    // SICNU_NUMERIC_SCALE use a divisor (stored / divisor). Convert here.
-    // Values > 1 are already divisors (the metadata convention). Explicit
-    // param wins over the stamp when both are present.
+    // Recipe/user override: `scale` is ALWAYS multiplicative for finite > 0
+    // (stored * scale = unit reflectance), e.g. Landsat C2 0.0001 or scale=2
+    // for ×2. domainFromDeclaredScale and SICNU_NUMERIC_SCALE use a divisor
+    // (stored / divisor) — convert here with divisor = 1/v. Do NOT infer
+    // convention from magnitude (scale>1 is still multiplicative, #945).
+    // Explicit param wins over the stamp when both are present.
     if (params.isMember("scale")) {
         if (!params["scale"].isNumeric()) {
             throw RSOperatorError(ErrorCode::TypeMismatch,
@@ -239,7 +240,7 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
             throw RSOperatorError(ErrorCode::InvalidParameter,
                                   "Parameter 'scale' must be a finite number > 0");
         }
-        declaredScale = (v <= 1.0) ? (1.0 / v) : v;
+        declaredScale = 1.0 / v;
         hasDeclaredScale = true;
     }
     if (!indexNeedsScale) {
