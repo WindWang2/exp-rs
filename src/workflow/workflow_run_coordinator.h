@@ -86,11 +86,26 @@ class WorkflowRunCoordinator : public QObject {
     /// All runs tracked by this process (live + terminal).
     std::vector<std::shared_ptr<WorkflowRun>> runs() const;
 
+    /// 9.0 M7: run-level diagnostic dump — run state, per-step plan statuses,
+    /// pipeline mapping, ownership lock and resuming flag — so a stuck or
+    /// ghost-suspect run is explainable from evidence (pairs with
+    /// TaskCenter::explainDump for the scheduling side).
+    QString explainRun( long pipelineId ) const;
+    /// Diagnostic dump covering coordinator-level queues and maps.
+    QString explainDump() const;
+
     /// Checkpoint directory override (tests); empty restores the default
     /// (~/.rs_studio/checkpoints, see WorkflowCheckpointManager).
     void setCheckpointDirectory( const QString &directory );
     QString checkpointDirectory() const;
 
+  private:
+    /// resumeRun body (#860 review A-F7): every exit path queues
+    /// notifications under m_mutex; the public wrapper drains them outside
+    /// the lock. Private so no caller can bypass the drain.
+    long resumeRunImpl( const std::string &runId, QString *error );
+
+  public:
     /// Emitted on tracked-run lifecycle transitions — Running when a tracked
     /// pipeline starts, the real terminal state (Completed/Failed/Canceled)
     /// at finalize, and Interrupted when crash recovery reconciles the run.
@@ -98,12 +113,9 @@ class WorkflowRunCoordinator : public QObject {
     /// entries carry truthful started/finished ms (issue #754).
     /// Governance (WorkspaceService::recordRun) subscribes so the runs index
     /// reflects what actually happened instead of fabricating states.
-    /// Delivery is a Qt signal (lifetime-managed, queueable) because the
-    /// coordinator may emit with its internal mutex held: receivers must not
-    /// call back into the coordinator synchronously.
-    /// Mirrored after every persisted run-state transition (issue #754):
-    /// terminal/Interrupted transitions carry truthful started/finished ms.
-    /// One emission per tracked-run state transition.
+    /// Lifecycle-safe eventing 9.0 (#860): emitted ONLY from
+    /// drainRunNotifications, never under m_mutex — a slot may safely call
+    /// back into the coordinator synchronously from any thread.
     //  (Fresh-build repair: churn on master had declared this signal three
     //  times across three signals: sections — moc emitted one body per
     //  declaration and the translation unit failed with C2084.)
@@ -120,12 +132,23 @@ class WorkflowRunCoordinator : public QObject {
     WorkflowRunCoordinator( const WorkflowRunCoordinator & ) = delete;
     WorkflowRunCoordinator &operator=( const WorkflowRunCoordinator & ) = delete;
 
-    /// Emits runStateChanged for @p run's current state. Requires m_mutex
-    /// held (reads the run; emission is the last thing before unlocking).
+    /// Queues a runStateChanged notification for @p run's current state.
+    /// Requires m_mutex held. NOTHING is emitted here: state mutation and
+    /// observer notification are strictly separated (#860) — the old
+    /// emit-under-lock let a same-thread observer slot that queried any
+    /// coordinator method self-deadlock on the non-recursive m_mutex, and
+    /// exposed every transition to lock-order inversion. The queued payload
+    /// is drained lock-free by drainRunNotifications().
     /// Falls back to the run's creation stamp when @a startedMs <= 0
-    /// (issue #754). Callers queue across threads (queued connection in
-    /// ProjectContext).
-    void notifyRunStateLocked( const WorkflowRun &run, qint64 startedMs, qint64 finishedMs );
+    /// (issue #754).
+    void queueRunStateNotificationLocked( const WorkflowRun &run,
+                                          qint64 startedMs, qint64 finishedMs );
+    /// Emits every queued runStateChanged OUTSIDE m_mutex, in FIFO order.
+    /// Reentrancy-safe: the queue is swapped out under the lock first, so a
+    /// slot that synchronously re-enters the coordinator (and drains again)
+    /// can only ever swap an empty queue. Returns without emitting anything
+    /// when the queue is empty (one locked size check).
+    void drainRunNotifications();
     void persistRunLocked( WorkflowRun &run );
     /// Terminal roll-up + ArtifactGC + checkpoint retention. Called with
     /// m_mutex held when the last step of a tracked run went terminal.
@@ -135,7 +158,13 @@ class WorkflowRunCoordinator : public QObject {
     QString checkpointPathLocked( const std::string &runId ) const;
     QString checkpointPathFor( const std::string &runId ) const;
 
-    mutable std::recursive_mutex m_mutex;
+    mutable std::mutex m_mutex;
+    // LOCK ORDER (9.0 review A-F8): flock(run lock) → m_mutex →
+    // TaskCenter::instance()'s internal m_mutex (taken via
+    // getPipelineInfo/getTaskInfo inside the fold and resume-swap blocks).
+    // NEVER the reverse: TaskCenter must not call the coordinator while
+    // holding its own mutex. TaskCenter signals reach onTaskUpdated via
+    // DirectConnection only from TaskCenter's LOCK-FREE flush paths.
     WorkflowCheckpointManager m_checkpoints;
     QString m_checkpointDir; // empty → defaultCheckpointDirectory()
     std::map<long, std::shared_ptr<WorkflowRun>> m_runsByPipeline;
@@ -145,6 +174,25 @@ class WorkflowRunCoordinator : public QObject {
     /// released at finalize / resume swap / submission failure.
     std::map<std::string, std::shared_ptr<WorkflowRunLock>> m_locksByRunId;
     bool m_connected = false;
+
+    /// --- Lifecycle-Safe Eventing 9.0 (#860, M0/M4) -------------------------
+    /// Queued run-state notifications: filled under m_mutex by
+    /// queueRunStateNotificationLocked, drained outside it by
+    /// drainRunNotifications(). @a seq is a process-wide monotonic order
+    /// stamp assigned at enqueue time so observers (and traces) can detect
+    /// the cross-thread drain interleaving where a later-queued event from
+    /// another thread is emitted first.
+    struct RunNotification
+    {
+      quint64 seq = 0;
+      QString runId;
+      QString workflowId;
+      QString state;
+      qint64 startedMs = 0;
+      qint64 finishedMs = 0;
+    };
+    std::vector<RunNotification> m_pendingRunNotifications;
+    quint64 m_nextNotifySeq = 1;
 };
 
 } // namespace workflow

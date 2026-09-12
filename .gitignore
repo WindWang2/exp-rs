@@ -96,7 +96,7 @@ vendor/
 !.planning/scientific-algorithms-9/
 !.planning/plugin-platform-8/
 !.planning/verification-platform-8/
-
+!.planning/execution-concurrency-lifecycle-9/
 !.planning/cartography-platform-9/
 !.planning/professional-workbench-9/
 !.planning/plugin-platform-9/
