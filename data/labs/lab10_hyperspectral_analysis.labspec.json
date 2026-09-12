@@ -20,38 +20,57 @@
     {
       "heading": "高光谱数据与混合像元问题",
       "body": "高光谱传感器以窄波段（本实验 10 通道 VNIR，450–900 nm，FWHM 25 nm）采样连续反射光谱。空间分辨率有限时，一个像元常覆盖多种地物——像元光谱近似为端元光谱的线性组合：x = Σ f_i·e_i + n，f_i 为丰度（物理上应有 f_i ≥ 0、Σf_i = 1）。'有哪些端元、各占多少丰度'正是本实验的四个环节要回答的问题。",
-      "formulas": ["x = Σ f_i · e_i + n，f_i ≥ 0，Σ f_i = 1"],
-      "refs": ["Boardman, 1993（MNF/PPI 联合流程的来源）"]
+      "formulas": [
+        "x = Σ f_i · e_i + n，f_i ≥ 0，Σ f_i = 1"
+      ],
+      "refs": [
+        "Boardman, 1993（MNF/PPI 联合流程的来源）"
+      ]
     },
     {
       "heading": "MNF：噪声白化的主成分",
       "body": "PCA 最大化总方差，但高光谱各波段噪声不同，方差最大的方向未必是信噪比最高的方向。MNF 先用噪声协方差做白化，再在白化空间做 PCA，得到按 SNR 递减排序的分量。 前 1–3 个分量承载地物信息（本实验数据有效维数约为端元数−1=2 加噪声维），后面的分量以噪声为主。MNF 在经典流程（ENVI）里既是降维工具也是 PPI 的前置去噪步骤。",
-      "formulas": ["MNF: Σ_noise^{-1/2}·Σ_signal·Σ_noise^{-T/2} 的特征分解"],
-      "refs": ["Green et al., 1988（MNF 原始文献）"]
+      "formulas": [
+        "MNF: Σ_noise^{-1/2}·Σ_signal·Σ_noise^{-T/2} 的特征分解"
+      ],
+      "refs": [
+        "Green et al., 1988（MNF 原始文献）"
+      ]
     },
     {
       "heading": "PPI：随机投影下的极值像元",
       "body": "像元光谱可视为高维空间的点云，混合像元位于纯端元连线/凸包内部，纯端元位于凸包顶点。PPI 生成大量随机单位向量（本实验 1000 个），把点云投影到每个向量上，统计落入极值端的次数——顶点像元被反复选中。平台实现为流式三遍扫描，RNG 固定 mt19937(42)，结果可复现；输出为 JSON（endmembers/indices/ppiCounts），不含栅格。注意：平台暂无 MNF→PPI 的管道内直连与本实验的反射率空间约定（见诚实范围），本实验在反射率空间直接提取端元。",
-      "formulas": ["score(p) = Σ_k 1[ p·u_k ∈ extremes(投影) ]，u_k 为随机向量"],
+      "formulas": [
+        "score(p) = Σ_k 1[ p·u_k ∈ extremes(投影) ]，u_k 为随机向量"
+      ],
       "refs": []
     },
     {
       "heading": "SAM 与 SID：两种光谱匹配度量",
       "body": "SAM 把像元谱与参考谱的夹角作为相似度：θ = arccos(⟨x,e⟩/(‖x‖‖e‖))。它对整体幅度增益不敏感（照度差异），对形状敏感。SID 把光谱当作概率分布，用 KL 散度的对称化（信息散度）度量差异，对分布形状差异更敏感，但对量化噪声与低反射端更敏感。本实验同一组库谱分别跑 SAM 与 SID，比较纯区精度的差异并解释原因。",
-      "formulas": ["SAM: θ = arccos( x·e / (‖x‖‖e‖) )", "SID: D(x‖e) = Σ p_i log(p_i/q_i) + Σ q_i log(q_i/p_i)"],
-      "refs": ["Chang, 2000（SID 原始文献）；平台 ADR 0076"]
+      "formulas": [
+        "SAM: θ = arccos( x·e / (‖x‖‖e‖) )",
+        "SID: D(x‖e) = Σ p_i log(p_i/q_i) + Σ q_i log(q_i/p_i)"
+      ],
+      "refs": [
+        "Chang, 2000（SID 原始文献）；平台 ADR 0076"
+      ]
     },
     {
       "heading": "线性解混与约束最小二乘",
       "body": "已知端元矩阵 E，解超定方程 x = E·f 的最小二乘，再施加物性约束：负丰度截断为 0、总和对一归一化（平台实现为 LS + clip[0,1] + unit-sum renorm）。重构误差 ‖x − E·f‖ 是解混质量的直接检验：误差大说明端元集合不完备或混合模型非线性。过渡带的丰度渐变是否被还原，是理解'混合像元'最直观的证据。",
-      "formulas": ["f̂ = argmin ‖x − E f‖²，s.t. f ≥ 0，Σf = 1"],
-      "refs": ["平台 ADR 0077；Heinz & Chang, 2001（FCLS）"]
+      "formulas": [
+        "f̂ = argmin ‖x − E f‖²，s.t. f ≥ 0，Σf = 1"
+      ],
+      "refs": [
+        "平台 ADR 0077；Heinz & Chang, 2001（FCLS）"
+      ]
     }
   ],
   "data": {
     "spec_ref": "data/labs/data-specs/lab10_hyperspectral_analysis.json",
     "offline": true,
-    "description": "128×128、10 波段 VNIR 合成场景（水体/植被/裸土三端元 + 线性混合过渡带，σ=0.004 噪声，1/255 量化）；光谱真值库 data/labs/spectral-library/lab10_sicnu_library.json（sicnu-spectral-library v1 格式，平台原生可读）。规格由 D1 离线生成；本地验证用 scripts/gen_lab_fixtures.py hyperspectral"
+    "description": "128×128、10 波段 VNIR 合成场景（水体/植被/裸土三端元 + 线性混合过渡带，σ=0.004（约一个量化步长）噪声，1/255 量化）；光谱真值库 data/labs/spectral-library/lab10_sicnu_library.json（sicnu-spectral-library v1 格式，平台原生可读）。规格由 D1 离线生成；本地验证用 scripts/gen_lab_fixtures.py hyperspectral"
   },
   "pipeline": {
     "ref": "data/labs/pipelines/lab10_hyperspectral_analysis.pipeline.json",
@@ -59,48 +78,181 @@
     "description": "五步：MNF → PPI（JSON 结果）→ SAM 分类 → SID 分类 → 线性解混"
   },
   "operators": [
-    { "operator_id": "rs:mnf", "role": "噪声白化主成分降维（SNR 有序分量）", "params_digest": { "numComponents": 4 } },
-    { "operator_id": "rs:endmember_extraction", "role": "PPI 端元提取（流式三遍，确定性 RNG），输出 JSON 与库谱对照", "params_digest": { "nEndmembers": 3, "projections": 1000 } },
-    { "operator_id": "rs:sam_classify", "role": "光谱匹配分类，metric=sam 与 metric=sid 各跑一次", "params_digest": { "metric": "sam | sid", "refs": "光谱库三条谱内联" } },
-    { "operator_id": "rs:spectral_unmixing", "role": "约束最小二乘线性解混：逐端元丰度 + 重构误差", "params_digest": { "endmembers": "光谱库三条谱内联", "errorOut": "重构误差栅格" } }
+    {
+      "operator_id": "rs:mnf",
+      "role": "噪声白化主成分降维（SNR 有序分量）",
+      "params_digest": {
+        "numComponents": 4
+      }
+    },
+    {
+      "operator_id": "rs:endmember_extraction",
+      "role": "PPI 端元提取（流式三遍，确定性 RNG），输出 JSON 与库谱对照",
+      "params_digest": {
+        "nEndmembers": 3,
+        "projections": 1000
+      }
+    },
+    {
+      "operator_id": "rs:sam_classify",
+      "role": "光谱匹配分类，metric=sam 与 metric=sid 各跑一次",
+      "params_digest": {
+        "metric": "sam | sid",
+        "refs": "光谱库三条谱内联"
+      }
+    },
+    {
+      "operator_id": "rs:spectral_unmixing",
+      "role": "约束最小二乘线性解混：逐端元丰度 + 重构误差",
+      "params_digest": {
+        "endmembers": "光谱库三条谱内联",
+        "errorOut": "重构误差栅格"
+      }
+    }
   ],
   "steps": [
-    { "id": "s1", "title": "认识数据", "detail": "查看 10 波段影像的逐波段波长（WAVELENGTH 元数据）；在光谱曲线工具中点选水体/植被/裸土各一个纯像元，对照光谱库理解三条特征谱：水体 NIR 深吸收、植被红边（700→750nm 陡升）、裸土单调上升。", "headless_note": "非算子步骤；库文件 data/labs/spectral-library/lab10_sicnu_library.json" },
-    { "id": "s2", "title": "MNF 降维", "detail": "numComponents=4 运行 MNF。观察：分量 1 强对比三类地物（高 SNR），分量 4 近乎噪声。理解'有效维数'为什么 ≈ 端元数−1。", "operator_id": "rs:mnf", "headless_note": "pipeline 步骤 mnf" },
-    { "id": "s3", "title": "PPI 端元提取", "detail": "nEndmembers=3、projections=1000 运行 PPI。结果为 JSON：把三条 endmembers 与光谱库逐条对照（判分按 SAM 角 ≤ 5°），确认凸包顶点≈纯端元；理解 ppiCounts 的极值计数含义。", "operator_id": "rs:endmember_extraction", "headless_note": "pipeline 步骤 ppi（结果 JSON 在运行输出中）" },
-    { "id": "s4", "title": "SAM 与 SID 匹配分类", "detail": "用库谱作 refs 分别以 metric=sam 与 metric=sid 分类。比较纯区精度（判分：SAM ≥ 95%，SID ≥ 90%）并解释 SID 对量化噪声更敏感的原因；angleOut 栅格可查每个像元的最小匹配角。", "operator_id": "rs:sam_classify", "headless_note": "pipeline 步骤 sam / sid" },
-    { "id": "s5", "title": "线性解混", "detail": "用库谱作 endmembers 解混，输出 3 个丰度波段 + 重构误差。读图：纯区自家丰度 ≥ 0.9；两条过渡带的丰度渐变被还原（水体丰度从 1 连续降到 0）；meanError ≤ 0.02 说明三端元模型完备。", "operator_id": "rs:spectral_unmixing", "headless_note": "pipeline 步骤 unmix" },
-    { "id": "s6", "title": "综合判读", "detail": "把环节串成完整流程图：数据 → MNF（看结构）→ PPI（找端元）→ SAM/SID（逐像元归类）→ 解混（定量占比）。讨论：若场景存在第 4 种未入库材料，解混重构误差会在哪里升高？", "headless_note": "无需算子，属于结果解读" }
+    {
+      "id": "s1",
+      "title": "认识数据",
+      "detail": "查看 10 波段影像的逐波段波长（WAVELENGTH 元数据）；在光谱曲线工具中点选水体/植被/裸土各一个纯像元，对照光谱库理解三条特征谱：水体 NIR 深吸收、植被红边（700→750nm 陡升）、裸土单调上升。",
+      "headless_note": "非算子步骤；库文件 data/labs/spectral-library/lab10_sicnu_library.json"
+    },
+    {
+      "id": "s2",
+      "title": "MNF 降维",
+      "detail": "numComponents=4 运行 MNF。观察：分量 1 强对比三类地物（高 SNR），分量 4 近乎噪声。理解'有效维数'为什么 ≈ 端元数−1。",
+      "operator_id": "rs:mnf",
+      "headless_note": "pipeline 步骤 mnf"
+    },
+    {
+      "id": "s3",
+      "title": "PPI 端元提取",
+      "detail": "nEndmembers=3、projections=1000 运行 PPI。结果为 JSON：把三条 endmembers 与光谱库逐条对照（判分按 SAM 角 ≤ 5°），确认凸包顶点≈纯端元；理解 ppiCounts 的极值计数含义。",
+      "operator_id": "rs:endmember_extraction",
+      "headless_note": "pipeline 步骤 ppi（结果 JSON 在运行输出中）"
+    },
+    {
+      "id": "s4",
+      "title": "SAM 与 SID 匹配分类",
+      "detail": "用库谱作 refs 分别以 metric=sam 与 metric=sid 分类。比较纯区精度（判分：SAM ≥ 95%，SID ≥ 90%）并解释 SID 对量化噪声更敏感的原因；angleOut 栅格可查每个像元的最小匹配角。",
+      "operator_id": "rs:sam_classify",
+      "headless_note": "pipeline 步骤 sam / sid"
+    },
+    {
+      "id": "s5",
+      "title": "线性解混",
+      "detail": "用库谱作 endmembers 解混，输出 3 个丰度波段 + 重构误差。读图：纯区自家丰度 ≥ 0.9；两条过渡带的丰度渐变被还原（水体丰度从 1 连续降到 0）；meanError ≤ 0.02 说明三端元模型完备。",
+      "operator_id": "rs:spectral_unmixing",
+      "headless_note": "pipeline 步骤 unmix"
+    },
+    {
+      "id": "s6",
+      "title": "综合判读",
+      "detail": "把环节串成完整流程图：数据 → MNF（看结构）→ PPI（找端元）→ SAM/SID（逐像元归类）→ 解混（定量占比）。讨论：若场景存在第 4 种未入库材料，解混重构误差会在哪里升高？",
+      "headless_note": "无需算子，属于结果解读"
+    }
   ],
   "grading_ref": {
     "intent_ref": "data/labs/grading/lab10_hyperspectral_analysis.intent.json",
     "grader_owner": "D4"
   },
   "expected_results": [
-    { "claim": "MNF 4 分量按 SNR 有序：分量 1 类间分离度 > 分量 4", "artifact": "data/labs/_tmp/out/lab10/mnf_components.tif", "tolerance_note": "见判分意图 H1" },
-    { "claim": "PPI 3 条端元谱与库谱 SAM 角 ≤ 5°，indices 互异", "artifact": "rs:endmember_extraction JSON 结果", "tolerance_note": "见判分意图 H2" },
-    { "claim": "SAM 纯区精度 ≥ 95%，SID ≥ 90%", "artifact": "data/labs/_tmp/out/lab10/sam_labels.tif", "tolerance_note": "见判分意图 H3/H4" },
-    { "claim": "解混纯区自家丰度 ≥ 0.9、丰度和≈1（|sum−1|≤0.05）、过渡带渐变还原、meanError ≤ 0.02", "artifact": "data/labs/_tmp/out/lab10/abundances.tif", "tolerance_note": "见判分意图 H5" },
-    { "claim": "管道内联 refs/endmembers 与光谱库逐值一致（零漂移）", "artifact": "data/labs/pipelines/lab10_hyperspectral_analysis.pipeline.json", "tolerance_note": "见判分意图 H6" }
+    {
+      "claim": "MNF 4 分量按 SNR 有序：分量 1 类间分离度 > 分量 4",
+      "artifact": "data/labs/_tmp/out/lab10/mnf_components.tif",
+      "tolerance_note": "见判分意图 H1"
+    },
+    {
+      "claim": "PPI 3 条端元谱与库谱对照：SAM 角均值 ≤ 10°、单条最大 ≤ 20°，indices 互异",
+      "artifact": "rs:endmember_extraction JSON 结果",
+      "tolerance_note": "见判分意图 H2"
+    },
+    {
+      "claim": "SAM 纯区精度 ≥ 95%，SID ≥ 90%",
+      "artifact": "data/labs/_tmp/out/lab10/sam_labels.tif",
+      "tolerance_note": "见判分意图 H3/H4"
+    },
+    {
+      "claim": "解混纯区自家丰度 ≥ 0.9、丰度和≈1（|sum−1|≤0.05）、过渡带渐变还原、meanError ≤ 0.02",
+      "artifact": "data/labs/_tmp/out/lab10/abundances.tif",
+      "tolerance_note": "见判分意图 H5"
+    },
+    {
+      "claim": "管道内联 refs/endmembers 与光谱库逐值一致（零漂移）",
+      "artifact": "data/labs/pipelines/lab10_hyperspectral_analysis.pipeline.json",
+      "tolerance_note": "见判分意图 H6"
+    }
   ],
   "questions": [
-    { "prompt": "为什么 MNF 分量 1 上三类地物对比强烈而分量 4 近乎噪声？'有效维数'和端元数是什么关系？", "hint": "SNR 排序 vs 方差排序；3 端元混合的仿射维数" },
-    { "prompt": "PPI 为什么依赖'纯像元存在'假设？如果场景里某端元只有混合像元（亚像元目标），PPI 会输出什么？", "hint": "凸包顶点 vs 凸包内部；算子元数据里的 limitations 原文" },
-    { "prompt": "同一组库谱，SAM 精度 ≥ 95% 而 SID 只有 ≥ 90%——从'幅度增益不敏感'与'概率分布敏感'两个角度解释这个差距。", "hint": "1/255 量化在小反射率端（水体 NIR 0.001）对分布形状的影响" },
-    { "prompt": "解混结果若出现负丰度或丰度和偏离 1，物理含义是什么？平台的 clip+renorm 处理在哪类像元上最失真？", "hint": "端元集合不完备 / 非线性混合 / 阴影" },
-    { "prompt": "平台的 PPI 输出是 JSON 而不是栅格，且 rs:sam_classify 只接受内联 refs 数组——这给'管道内自动串联'带来什么困难？你会怎么设计 API？", "hint": "对照 ISSUES.md 中的算子缺口记录；思考 libraryPath 与 step→step 数组传递" }
+    {
+      "prompt": "为什么 MNF 分量 1 上三类地物对比强烈而分量 4 近乎噪声？'有效维数'和端元数是什么关系？",
+      "hint": "SNR 排序 vs 方差排序；3 端元混合的仿射维数"
+    },
+    {
+      "prompt": "PPI 为什么依赖'纯像元存在'假设？如果场景里某端元只有混合像元（亚像元目标），PPI 会输出什么？",
+      "hint": "凸包顶点 vs 凸包内部；算子元数据里的 limitations 原文"
+    },
+    {
+      "prompt": "同一组库谱，SAM 精度 ≥ 95% 而 SID 只有 ≥ 90%——从'幅度增益不敏感'与'概率分布敏感'两个角度解释这个差距。",
+      "hint": "1/255 量化在小反射率端（水体 NIR 0.001）对分布形状的影响"
+    },
+    {
+      "prompt": "解混结果若出现负丰度或丰度和偏离 1，物理含义是什么？平台的 clip+renorm 处理在哪类像元上最失真？",
+      "hint": "端元集合不完备 / 非线性混合 / 阴影"
+    },
+    {
+      "prompt": "平台的 PPI 输出是 JSON 而不是栅格，且 rs:sam_classify 只接受内联 refs 数组——这给'管道内自动串联'带来什么困难？你会怎么设计 API？",
+      "hint": "对照 ISSUES.md 中的算子缺口记录；思考 libraryPath 与 step→step 数组传递"
+    }
   ],
   "glossary": [
-    { "term": "端元", "en": "endmember", "definition": "混合像元分解中的'纯地物光谱'；线性混合模型的基向量" },
-    { "term": "丰度", "en": "abundance / fraction", "definition": "像元内各端元的面积/含量占比，物理约束 f_i ≥ 0 且 Σf_i = 1" },
-    { "term": "光谱角", "en": "SAM, spectral angle mapper", "definition": "两条光谱在高维空间的夹角，对整体幅度增益不敏感的匹配度量" },
-    { "term": "光谱信息散度", "en": "SID, spectral information divergence", "definition": "把光谱归一化为概率分布后度量的 KL 散度对称量，对分布形状差异敏感" },
-    { "term": "最小噪声分数", "en": "MNF, minimum noise fraction", "definition": "先噪声白化再做 PCA 的变换，分量按信噪比递减排序" }
+    {
+      "term": "端元",
+      "en": "endmember",
+      "definition": "混合像元分解中的'纯地物光谱'；线性混合模型的基向量"
+    },
+    {
+      "term": "丰度",
+      "en": "abundance / fraction",
+      "definition": "像元内各端元的面积/含量占比，物理约束 f_i ≥ 0 且 Σf_i = 1"
+    },
+    {
+      "term": "光谱角",
+      "en": "SAM, spectral angle mapper",
+      "definition": "两条光谱在高维空间的夹角，对整体幅度增益不敏感的匹配度量"
+    },
+    {
+      "term": "光谱信息散度",
+      "en": "SID, spectral information divergence",
+      "definition": "把光谱归一化为概率分布后度量的 KL 散度对称量，对分布形状差异敏感"
+    },
+    {
+      "term": "最小噪声分数",
+      "en": "MNF, minimum noise fraction",
+      "definition": "先噪声白化再做 PCA 的变换，分量按信噪比递减排序"
+    },
+    {
+      "term": "像元纯度指数",
+      "en": "PPI, pixel purity index",
+      "definition": "随机单位向量投影下统计像元落入极值端次数的端元提取方法，凸包顶点像元得分最高"
+    }
   ],
   "dependencies": [
-    { "kind": "data", "ref": "data/labs/data-specs/lab10_hyperspectral_analysis.json", "note": "D1 按规格离线生成；本地验证用临时合成数据" },
-    { "kind": "track", "ref": "D4", "note": "判分器由 D4 实现，本实验只交付判分意图" },
-    { "kind": "schema", "ref": "data/labs/spectral-library/lab10_sicnu_library.json", "note": "光谱库 sicnu-spectral-library v1（平台 ADR 0081 原生格式）；D1 数据生成必须以它为真值源" }
+    {
+      "kind": "data",
+      "ref": "data/labs/data-specs/lab10_hyperspectral_analysis.json",
+      "note": "D1 按规格离线生成；本地验证用临时合成数据"
+    },
+    {
+      "kind": "track",
+      "ref": "D4",
+      "note": "判分器由 D4 实现，本实验只交付判分意图"
+    },
+    {
+      "kind": "schema",
+      "ref": "data/labs/spectral-library/lab10_sicnu_library.json",
+      "note": "光谱库 sicnu-spectral-library v1（平台 ADR 0081 原生格式）；D1 数据生成必须以它为真值源"
+    }
   ],
   "notes": [
     "可执行子集（诚实范围）：平台无 MNF 反投影（inverse MNF）算子，因此在 MNF 空间提取的端元无法变回反射率空间再做 SAM/SID——本实验统一在反射率空间跑 PPI/SAM/SID/解混，MNF 仅作降维与噪声结构观察。把'MNF 空间 PPI + 反投影'记为算子缺口（ISSUES.md）。",

@@ -9,7 +9,10 @@
   "scene_count": 2,
   "epochs": {
     "count": 2,
-    "dates": ["2025-03-01", "2025-04-15"],
+    "dates": [
+      "2025-03-01",
+      "2025-04-15"
+    ],
     "pairing_precondition": "同极化（VV/VV）且严格配准（同一网格）—— rs:sar_change 的硬前置条件"
   },
   "grid": {
@@ -22,10 +25,14 @@
   "per_scene_product": {
     "format": "GeoTIFF",
     "dtype": "float32",
-    "value_convention": "单波段传感器 DN：sigma0_true = (DN / A)^2，A = 100（校准常数随元数据交付）",
+    "value_convention": "单波段传感器 DN：sigma0_true = (DN² − noise) / A²，A = 100，noise = 0（校准常数随元数据交付；平台公式 sar_calibration.cpp）",
     "no_data": 0,
     "bands": [
-      { "role": "vv", "index": 1, "description": "单极化 VV 强度（linear power 域 DN）" }
+      {
+        "role": "vv",
+        "index": 1,
+        "description": "单极化 VV 强度（linear power 域 DN）"
+      }
     ],
     "metadata": {
       "SICNU_MODALITY": "sar",
@@ -37,25 +44,45 @@
     "speckle_budget": "4 视强度相干斑（等效视数 ENL ≈ 4），多视处理可放宽但须声明"
   },
   "scene_content": {
-    "description": "四类地物 σ0 先验 + 4 视相干斑正演：水体 -22 dB、森林 -16 dB、农田 -12 dB、裸土 -14 dB；后时相森林内植入 40×40 采伐亮斑（-8 dB，模拟双次散射增强的采伐迹地）",
-    "landcover_sigma0_db": { "water": -22, "forest": -16, "cropland": -12, "background_soil": -14, "clearcut_patch": -8 },
-    "change_patch": { "zone": "forest", "rect_px": [20, 20, 60, 60], "area_px": 1600 }
+    "description": "三类地物 σ0 先验 + 4 视相干斑正演：水体 -22 dB、森林 -16 dB、农田 -12 dB；后时相森林内植入 40×40 采伐亮斑（-8 dB，模拟双次散射增强的采伐迹地）。合成场景无独立裸土类别",
+    "landcover_sigma0_db": {
+      "water": -22,
+      "forest": -16,
+      "cropland": -12,
+      "clearcut_patch": -8
+    },
+    "change_patch": {
+      "zone": "forest",
+      "rect_px": [
+        20,
+        20,
+        60,
+        60
+      ],
+      "area_px": 1600
+    }
   },
   "aux_products": [
     {
       "name": "dem",
       "purpose": "rs:sar_terrain_correction 教学演示（#785 视角几何）：缓丘陵 100–800 m，与影像同网格",
-      "format": "GeoTIFF", "dtype": "float32", "grid": "与影像完全一致"
+      "format": "GeoTIFF",
+      "dtype": "float32",
+      "grid": "与影像完全一致"
     },
     {
       "name": "stack_demo",
       "purpose": "#803 教学演示：双波段 DN 栈（band1=前时相 DN，band2=后时相 DN 且左上角 20×20 置 0 并声明 NoData=0），验证滤波器逐波段 NoData 处理",
-      "format": "GeoTIFF", "dtype": "float32", "bands": 2
+      "format": "GeoTIFF",
+      "dtype": "float32",
+      "bands": 2
     },
     {
       "name": "change_groundtruth",
       "purpose": "判分辅助：变化真值码图（1=植入变化区，0=未变），供 D4 判分器统计检出率/虚警率",
-      "format": "GeoTIFF", "dtype": "byte", "grid": "与影像完全一致"
+      "format": "GeoTIFF",
+      "dtype": "byte",
+      "grid": "与影像完全一致"
     }
   ],
   "acceptance_criteria": [

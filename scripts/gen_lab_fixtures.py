@@ -95,16 +95,13 @@ def write_gtiff(path, bands_data, dates=None, band_roles=None, dtype=gdal.GDT_Fl
 
 
 def make_zone_masks():
-    """Class-code plane: 1 forest, 2 cropland, 3 water, 4 disturbance, 5 soil."""
-    codes = [[5] * WIDTH for _ in range(HEIGHT)]
+    """Class-code plane: 1 forest, 2 cropland, 3 water, 4 disturbance.
+    No separate bare-soil class: every pixel belongs to one of the four."""
+    codes = [[3] * WIDTH for _ in range(HEIGHT)]
     for y in range(HEIGHT):
         for x in range(WIDTH):
-            if x < 25:
-                codes[y][x] = 3            # water strip (west)
-            elif y < 100:
-                codes[y][x] = 1            # evergreen forest (north)
-            else:
-                codes[y][x] = 2            # cropland (south block)
+            if x >= 25:
+                codes[y][x] = 1 if y < 100 else 2
     for y in range(130, 194):
         for x in range(60, 108):
             codes[y][x] = 4                # disturbance patch inside cropland
@@ -137,10 +134,8 @@ def gen_sar(out_dir, seed):
                     s0 = 0.0063   # -22 dB
                 elif c == 1:      # forest: volume scattering
                     s0 = 0.0251   # -16 dB
-                elif c == 2:      # cropland
+                else:             # cropland (code 2)
                     s0 = 0.0631   # -12 dB
-                else:             # background soil
-                    s0 = 0.0398   # -14 dB
                 if with_change and c == 1 and 20 <= x < 60 and 20 <= y < 60:
                     s0 = 0.1585   # -8 dB clear-cut debris (bright change patch)
                 field[y][x] = s0
@@ -337,12 +332,9 @@ def gen_temporal(out_dir, seed):
                     else:
                         ndvi = 0.12 + rng.normal() * 0.02
                     nir_p = 0.42
-                elif c == 2:    # cropland
+                else:           # cropland (code 2)
                     ndvi = cropland_ndvi(doy) + rng.normal() * 0.025
                     nir_p = 0.42
-                else:           # background soil
-                    ndvi = 0.12 + rng.normal() * 0.02
-                    nir_p = 0.25
                 n = quantize8(nir_p + rng.normal() * 0.01)
                 r = quantize8(n * (1.0 - ndvi) / (1.0 + ndvi))
                 g = quantize8((n + r) / 2.0)

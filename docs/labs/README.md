@@ -61,8 +61,9 @@
 ## 实验列表（能力扩展：D3 轨道新增）
 
 实验 8–11 把平台时序 / SAR / 高光谱 / 制图能力引入课堂。每个实验除 GUI 步骤外，
-还提供 **headless 可复现管道**（`data/labs/pipelines/*.pipeline.json`），通过
-`sicnu_geo_rs_cli --pipeline` 离屏运行；数据规格（供 D1 生成教学数据）与判分意图
+还提供 **headless 可复现数据链管道**（`data/labs/pipelines/*.pipeline.json`），通过
+`sicnu_geo_rs_cli --pipeline` 离屏运行（实验11 的排版/导出走 `cartography:*` 代理工具，
+见该实验的诚实范围）；数据规格（供 D1 生成教学数据）与判分意图
 （判分器由 D4 实现）分别在 `data/labs/data-specs/` 与 `data/labs/grading/`。
 
 ### 实验8：NDVI 时序分析——趋势、物候与异常检测

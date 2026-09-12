@@ -14,26 +14,41 @@
       "artifact": "data/labs/_tmp/out/lab11/ndvi_composite_mean.tif",
       "claim": "年内均值合成：全幅有效；常绿林区均值 ∈ [0.65, 0.85]，水体区 ∈ [-0.20, 0.00]，扰动地块均值介于林地与裸土之间（受采伐拉低）",
       "tolerance": {
-        "forest_mean": [0.65, 0.85],
-        "water_mean": [-0.20, 0.00],
+        "forest_mean": [
+          0.65,
+          0.85
+        ],
+        "water_mean": [
+          -0.2,
+          0.0
+        ],
         "valid_fraction": ">= 0.99"
       }
     },
     {
       "id": "K2_thematic_mask",
       "artifact": "data/labs/_tmp/out/lab11/thematic_mask.tif",
-      "claim": "专题掩膜 UInt8 值域 {0,1}；植被害元占比 ∈ [25%, 55%（先验：林地+农田+过渡 ≈ 全幅一半量级）；网格与源影像一致",
+      "claim": "专题掩膜 UInt8 值域 {0,1}；Otsu 把年内均值直方图在『水体/低值』与『有植被覆盖』之间切开：掩膜=1（有植被覆盖）占比 ∈ [80%, 95%]（先验：森林 35% + 农田 50% + 扰动地块部分）；网格与源影像一致。这是制图分级选择的教学点：二值方案回答『哪里有植被覆盖』，不区分森林/农田——如需类别图要另选分级方案并在图例注明",
       "tolerance": {
-        "values": [0, 1],
-        "vegetable_fraction": [0.25, 0.55]
+        "values": [
+          0,
+          1
+        ],
+        "vegetated_fraction": [
+          0.8,
+          0.95
+        ]
       }
     },
     {
       "id": "K3_otsu_threshold_sanity",
       "artifact": "rs:threshold_raster 步骤统计（thresholdUsed/maskedPixels/totalPixels）",
-      "claim": "Otsu 阈值 ∈ [-0.05, 0.5]（合成 NDVI 双峰之间），maskedPixels/totalPixels 与掩膜值域占比一致",
+      "claim": "Otsu 阈值落在水体负值与植被均值之间的谷部（先验 ≈ -0.1..0.2；容差 [-0.3, 0.3]），maskedPixels/totalPixels 与掩膜值域占比一致",
       "tolerance": {
-        "threshold_used": [-0.05, 0.5],
+        "threshold_used": [
+          -0.3,
+          0.3
+        ],
         "masked_ratio_consistent": true
       }
     },
@@ -51,7 +66,12 @@
       "artifact": "data/labs/_tmp/out/lab11/map/ 下的 PNG（cartography:export 或等价 headless 导出）",
       "claim": "导出 PNG 存在且页面为 A4 横向（297×210 mm @ 200 dpi ±5% 像素尺寸）；文件非空",
       "tolerance": {
-        "pixel_size_at_200dpi": [2330, 2342, 1652, 1660],
+        "pixel_size_at_200dpi": [
+          2330,
+          2342,
+          1652,
+          1660
+        ],
         "file_size_bytes": ">= 10000"
       },
       "teaching_note": "导出走 cartography:export（显式受治理动作）；v5 output 块只声明、编译不自动导出"

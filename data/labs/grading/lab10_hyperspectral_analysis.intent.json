@@ -23,10 +23,11 @@
     {
       "id": "H2_ppi_endmembers",
       "artifact": "rs:endmember_extraction 步骤 JSON 结果（endmembers/indices/ppiCounts）",
-      "claim": "PPI 提取 3 条端元谱；每条与光谱库中某一条的 SAM 光谱角 ≤ 5°；三条 indices 互异（来自不同像元）",
+      "claim": "PPI 提取 3 条端元谱；与光谱库最近条目的 SAM 光谱角：三条均值 ≤ 10°，单条最大 ≤ 20°（低反射率水体端元 norm≈0.066，σ≈0.004 的噪声即引起 ~4-10° 角度抖动，PPI 选取的极值像元还可能偏向噪声外扬方向）；三条 indices 互异（来自不同像元）",
       "tolerance": {
         "endmember_count": 3,
-        "sam_angle_to_library_deg": "<= 5.0",
+        "sam_angle_mean_deg": "<= 10.0",
+        "sam_angle_max_deg": "<= 20.0",
         "indices_distinct": true
       }
     },
@@ -34,13 +35,17 @@
       "id": "H3_sam_pure_zone_accuracy",
       "artifact": "data/labs/_tmp/out/lab10/sam_labels.tif",
       "claim": "SAM 分类：三个纯区内正确标签像元占比 ≥ 95%（1→0, 2→1, 3→2）；角度栅格与标签栅格同网格",
-      "tolerance": { "pure_zone_accuracy": ">= 0.95" }
+      "tolerance": {
+        "pure_zone_accuracy": ">= 0.95"
+      }
     },
     {
       "id": "H4_sid_pure_zone_accuracy",
       "artifact": "data/labs/_tmp/out/lab10/sid_labels.tif",
       "claim": "SID 分类：三个纯区内正确标签像元占比 ≥ 90%（SID 对量化噪声更敏感，容差低于 SAM）",
-      "tolerance": { "pure_zone_accuracy": ">= 0.90" }
+      "tolerance": {
+        "pure_zone_accuracy": ">= 0.90"
+      }
     },
     {
       "id": "H5_unmixing_abundances",
@@ -49,7 +54,10 @@
       "tolerance": {
         "pure_zone_own_abundance": ">= 0.9",
         "abundance_sum_abs_deviation": "<= 0.05",
-        "mixed_zone_water_abundance": [0.1, 0.9],
+        "mixed_zone_water_abundance": [
+          0.1,
+          0.9
+        ],
         "mean_reconstruction_error": "<= 0.02"
       }
     },
@@ -57,7 +65,9 @@
       "id": "H6_zero_drift_refs",
       "artifact": "data/labs/pipelines/lab10_hyperspectral_analysis.pipeline.json",
       "claim": "管道内联 refs/endmembers 与光谱库三条 spectrum 逐值一致（防止库改了管道没改的教学事故）",
-      "tolerance": { "exact_match": true }
+      "tolerance": {
+        "exact_match": true
+      }
     }
   ],
   "pass_policy": "H1–H6 全部通过判满分；H2 失败先排查噪声/量化是否偏离数据规格，再怀疑算子"

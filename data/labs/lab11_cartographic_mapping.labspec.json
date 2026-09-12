@@ -20,8 +20,13 @@
     {
       "heading": "从分析结果到专题图层",
       "body": "分析产物（时序、掩膜、丰度）要成为地图，需要一次'制图抽象'：选一个主题变量（本实验：年内 NDVI 均值 = 全年平均光合能力），再把它离散化为读者可理解的类别（本实验：Otsu 阈值把均值的直方图切成植被/非植被两类）。注意方向性：分析时阈值是'假设'，制图时阈值是'表达选择'——同一份数据允许多种分级方案，但图上必须注明分级方法。",
-      "formulas": ["年内均值：x̄ = (1/N)·Σ x_t", "Otsu：σ_B²(t) = ω_0(t)ω_1(t)[μ_0(t) − μ_1(t)]² 取最大"],
-      "refs": ["Otsu, 1979（自动阈值）"]
+      "formulas": [
+        "年内均值：x̄ = (1/N)·Σ x_t",
+        "Otsu：σ_B²(t) = ω_0(t)ω_1(t)[μ_0(t) − μ_1(t)]² 取最大"
+      ],
+      "refs": [
+        "Otsu, 1979（自动阈值）"
+      ]
     },
     {
       "heading": "专题图合规五要素",
@@ -33,7 +38,9 @@
       "heading": "MapSpec：把排版写成文档",
       "body": "MapSpec 是版本化的声明式制图文档（当前 spec_version 5；文档模型含 map_frames/legends/scale_bars/north_arrows/titles/labels/source_notes/constraints/output 等集合，每项带稳定 id 与可选 semantic_role，几何用页面毫米 rect_mm）。MapSpecCompiler 把它翻译成 QGIS 打印布局并渲染。声明式排版的好处：地图可评审、可 diff、可复现——改文字不改几何，改几何不动数据。",
       "formulas": [],
-      "refs": ["平台 ADR 0127/0131/0133"]
+      "refs": [
+        "平台 ADR 0127/0131/0133"
+      ]
     },
     {
       "heading": "交付治理：声明 vs 导出",
@@ -53,48 +60,161 @@
     "description": "三步：NDVI 时序栈 → 年内均值合成 → Otsu 阈值专题掩膜；排版出图由 MapSpec + cartography:compose/export 完成"
   },
   "operators": [
-    { "operator_id": "rs:temporal_index_series", "role": "逐期 NDVI（与实验8 相同参数，保证可复现）", "params_digest": { "index": "NDVI", "bands": { "red": 3, "nir": 4 } } },
-    { "operator_id": "rs:temporal_composite", "role": "年内均值合成（一图概括全年）", "params_digest": { "method": "mean", "period": "all", "band_role": "ndvi" } },
-    { "operator_id": "rs:threshold_raster", "role": "Otsu 自动阈值 → 植被/非植被专题掩膜（UInt8）", "params_digest": { "thresholdMethod": "otsu" } }
+    {
+      "operator_id": "rs:temporal_index_series",
+      "role": "逐期 NDVI（与实验8 相同参数，保证可复现）",
+      "params_digest": {
+        "index": "NDVI",
+        "bands": {
+          "red": 3,
+          "nir": 4
+        }
+      }
+    },
+    {
+      "operator_id": "rs:temporal_composite",
+      "role": "年内均值合成（一图概括全年）",
+      "params_digest": {
+        "method": "mean",
+        "period": "all",
+        "band_role": "ndvi"
+      }
+    },
+    {
+      "operator_id": "rs:threshold_raster",
+      "role": "Otsu 自动阈值 → 植被/非植被专题掩膜（UInt8）",
+      "params_digest": {
+        "thresholdMethod": "otsu"
+      }
+    }
   ],
   "steps": [
-    { "id": "s1", "title": "专题变量设计", "detail": "明确地图要回答的问题：'2024 年实验区植被长势的空间分布'。选定专题变量 = 年内 NDVI 均值；分级方案 = Otsu 二值（植被/非植被）。讨论其他方案（固定阈值 0.45、四级分级）的取舍。", "headless_note": "设计决策，写入实验报告" },
-    { "id": "s2", "title": "生产专题栅格", "detail": "运行三步管道：NDVI 时序栈 → 年内均值合成 → Otsu 阈值掩膜。检查合成图均值分布与掩膜值域 {0,1}，记录 Otsu 阈值与植被占比。", "operator_id": "rs:temporal_composite", "headless_note": "pipeline 全部三步（ndvi/composite/thematic）" },
-    { "id": "s3", "title": "声明式排版", "detail": "阅读 MapSpec 文档（data/labs/mapspecs/lab11_thematic_map.mapspec.json）：识别合规五要素分别对应哪个集合；把 frame 的 layers 改成你加载专题栅格后的实际图层名；运行 validate 与 preflight 确认零缺失。", "headless_note": "cartography:validate / cartography:preflight（MCP/代理工具）" },
-    { "id": "s4", "title": "编译与导出", "detail": "cartography:compose 把 MapSpec 编译为打印布局（QGIS 渲染引擎），检查排版的自动布局结果；cartography:export 显式导出 PNG（200 dpi，A4 横向）。对照 v5 语义：output 块只是声明，编译不自动导出。", "headless_note": "scripts/export_lab_map_mcp.py（GUI 二进制 --mcp 模式）或 GUI 内操作" },
-    { "id": "s5", "title": "读图与互评", "detail": "用合规五要素清单互查出图：标题是否点明主题与时间、图例是否可读、比例尺在 EPSG:4326 下如何换算、来源注记是否含坐标系与数据基准。", "headless_note": "人工步骤" }
+    {
+      "id": "s1",
+      "title": "专题变量设计",
+      "detail": "明确地图要回答的问题：'2024 年实验区植被长势的空间分布'。选定专题变量 = 年内 NDVI 均值；分级方案 = Otsu 二值（植被/非植被）。讨论其他方案（固定阈值 0.45、四级分级）的取舍。",
+      "headless_note": "设计决策，写入实验报告"
+    },
+    {
+      "id": "s2",
+      "title": "生产专题栅格",
+      "detail": "运行三步管道：NDVI 时序栈 → 年内均值合成 → Otsu 阈值掩膜。检查合成图均值分布与掩膜值域 {0,1}，记录 Otsu 阈值与植被占比。",
+      "operator_id": "rs:temporal_composite",
+      "headless_note": "pipeline 全部三步（ndvi/composite/thematic）"
+    },
+    {
+      "id": "s3",
+      "title": "声明式排版",
+      "detail": "阅读 MapSpec 文档（data/labs/mapspecs/lab11_thematic_map.mapspec.json）：识别合规五要素分别对应哪个集合；把 frame 的 layers 改成你加载专题栅格后的实际图层名；运行 validate 与 preflight 确认零缺失。",
+      "headless_note": "cartography:validate / cartography:preflight（MCP/代理工具）"
+    },
+    {
+      "id": "s4",
+      "title": "编译与导出",
+      "detail": "cartography:compose 把 MapSpec 编译为打印布局（QGIS 渲染引擎），检查排版的自动布局结果；cartography:export 显式导出 PNG（200 dpi，A4 横向）。对照 v5 语义：output 块只是声明，编译不自动导出。",
+      "headless_note": "scripts/export_lab_map_mcp.py（GUI 二进制 --mcp 模式）或 GUI 内操作"
+    },
+    {
+      "id": "s5",
+      "title": "读图与互评",
+      "detail": "用合规五要素清单互查出图：标题是否点明主题与时间、图例是否可读、比例尺在 EPSG:4326 下如何换算、来源注记是否含坐标系与数据基准。",
+      "headless_note": "人工步骤"
+    }
   ],
   "grading_ref": {
     "intent_ref": "data/labs/grading/lab11_cartographic_mapping.intent.json",
     "grader_owner": "D4"
   },
   "expected_results": [
-    { "claim": "合成 NDVI：林地 0.65–0.85、水体 -0.20–0.00、扰动地块被采伐拉低", "artifact": "data/labs/_tmp/out/lab11/ndvi_composite_mean.tif", "tolerance_note": "见判分意图 K1" },
-    { "claim": "专题掩膜 UInt8 {0,1}，植被占比 ∈ [25%, 55%]（先验约一半量级）", "artifact": "data/labs/_tmp/out/lab11/thematic_mask.tif", "tolerance_note": "见判分意图 K2" },
-    { "claim": "Otsu 阈值 ∈ [-0.05, 0.5] 且 masked 比例自洽", "artifact": "rs:threshold_raster 步骤统计", "tolerance_note": "见判分意图 K3" },
-    { "claim": "MapSpec 通过 validate（零问题）与 preflight（五要素零缺失）", "artifact": "data/labs/mapspecs/lab11_thematic_map.mapspec.json", "tolerance_note": "见判分意图 K4" },
-    { "claim": "导出 PNG 为 A4 横向 @200dpi，非空", "artifact": "data/labs/_tmp/out/lab11/map/", "tolerance_note": "见判分意图 K5" }
+    {
+      "claim": "合成 NDVI：林地 0.65–0.85、水体 -0.20–0.00、扰动地块被采伐拉低",
+      "artifact": "data/labs/_tmp/out/lab11/ndvi_composite_mean.tif",
+      "tolerance_note": "见判分意图 K1"
+    },
+    {
+      "claim": "专题掩膜 UInt8 {0,1}，有植被覆盖占比 ∈ [80%, 95%]（Otsu 分开水体/低值与植被覆盖）",
+      "artifact": "data/labs/_tmp/out/lab11/thematic_mask.tif",
+      "tolerance_note": "见判分意图 K2"
+    },
+    {
+      "claim": "Otsu 阈值 ∈ [-0.05, 0.5] 且 masked 比例自洽",
+      "artifact": "rs:threshold_raster 步骤统计",
+      "tolerance_note": "见判分意图 K3"
+    },
+    {
+      "claim": "MapSpec 通过 validate（零问题）与 preflight（五要素零缺失）",
+      "artifact": "data/labs/mapspecs/lab11_thematic_map.mapspec.json",
+      "tolerance_note": "见判分意图 K4"
+    },
+    {
+      "claim": "导出 PNG 为 A4 横向 @200dpi，非空",
+      "artifact": "data/labs/_tmp/out/lab11/map/",
+      "tolerance_note": "见判分意图 K5"
+    }
   ],
   "questions": [
-    { "prompt": "同一份年内均值 NDVI，固定阈值 0.45 与 Otsu 自动阈值会给出什么不同的'植被'范围？哪种更可复现？哪种更可跨区比较？", "hint": "数据驱动 vs 先验驱动；跨区比较时 Otsu 阈值会随直方图漂移" },
-    { "prompt": "EPSG:4326 经纬度网格下比例尺怎么画？为什么高纬度地区'1 厘米 = X 公里'的注记会失真？", "hint": "度不是等长单位；子午线与纬线收敛" },
-    { "prompt": "MapSpec 里删掉 source_notes 集合，preflight 会报什么？为什么'数据从哪来'是合规要素而不是可选项？", "hint": "MAP_MISSING_SOURCE_NOTE；可追溯性" },
-    { "prompt": "v5 为什么规定'output 块只声明、编译不自动导出'？把'生成'与'交付'分开能防住什么事故？", "hint": "未过 preflight 的图被批量导出 / 交付物不可审计" },
-    { "prompt": "把 map_frames[].layers 改成一个不存在的图层名，编译/导出在哪一步失败？这类'引用完整性'为什么要在校验而非渲染时发现？", "hint": "fail-fast；错误定位成本" }
+    {
+      "prompt": "同一份年内均值 NDVI，固定阈值 0.45 与 Otsu 自动阈值会给出什么不同的'植被'范围？哪种更可复现？哪种更可跨区比较？",
+      "hint": "数据驱动 vs 先验驱动；跨区比较时 Otsu 阈值会随直方图漂移"
+    },
+    {
+      "prompt": "EPSG:4326 经纬度网格下比例尺怎么画？为什么高纬度地区'1 厘米 = X 公里'的注记会失真？",
+      "hint": "度不是等长单位；子午线与纬线收敛"
+    },
+    {
+      "prompt": "MapSpec 里删掉 source_notes 集合，preflight 会报什么？为什么'数据从哪来'是合规要素而不是可选项？",
+      "hint": "MAP_MISSING_SOURCE_NOTE；可追溯性"
+    },
+    {
+      "prompt": "v5 为什么规定'output 块只声明、编译不自动导出'？把'生成'与'交付'分开能防住什么事故？",
+      "hint": "未过 preflight 的图被批量导出 / 交付物不可审计"
+    },
+    {
+      "prompt": "把 map_frames[].layers 改成一个不存在的图层名，编译/导出在哪一步失败？这类'引用完整性'为什么要在校验而非渲染时发现？",
+      "hint": "fail-fast；错误定位成本"
+    }
   ],
   "glossary": [
-    { "term": "专题图", "en": "thematic map", "definition": "以单一主题变量（如植被长势等级）为主体的地图产品，与普通影像图相对" },
-    { "term": "合成", "en": "composite", "definition": "把多期观测压缩为单幅代表值（均值/最优像元/中位数）的制图预处理" },
-    { "term": "MapSpec", "en": "MapSpec", "definition": "平台版本化声明式制图文档（当前 spec_version 5），由 MapSpecCompiler 翻译为 QGIS 打印布局" },
-    { "term": "合规五要素", "en": "cartographic compliance set", "definition": "标题、图例、比例尺、指北针、来源注记；平台 preflight 以 MAP_MISSING_* 规则逐条检查" }
+    {
+      "term": "专题图",
+      "en": "thematic map",
+      "definition": "以单一主题变量（如植被长势等级）为主体的地图产品，与普通影像图相对"
+    },
+    {
+      "term": "合成",
+      "en": "composite",
+      "definition": "把多期观测压缩为单幅代表值（均值/最优像元/中位数）的制图预处理"
+    },
+    {
+      "term": "MapSpec",
+      "en": "MapSpec",
+      "definition": "平台版本化声明式制图文档（当前 spec_version 5），由 MapSpecCompiler 翻译为 QGIS 打印布局"
+    },
+    {
+      "term": "合规五要素",
+      "en": "cartographic compliance set",
+      "definition": "标题、图例、比例尺、指北针、来源注记；平台 preflight 以 MAP_MISSING_* 规则逐条检查"
+    }
   ],
   "dependencies": [
-    { "kind": "track", "ref": "D10", "note": "平台级 visual-cartography / test_mapspec 当前为红（READINESS.md:38），由 D10 修绿；本实验判分断言自包含（K4/K5 针对本实验自己的文档与导出），不依赖该全局用例" },
-    { "kind": "track", "ref": "D4", "note": "判分器由 D4 实现，本实验只交付判分意图" },
-    { "kind": "data", "ref": "data/labs/data-specs/lab8_temporal_analysis.json", "note": "复用实验8 的 12 期影像数据" }
+    {
+      "kind": "track",
+      "ref": "D10",
+      "note": "平台级 visual-cartography / test_mapspec 当前为红（READINESS.md:38），由 D10 修绿；本实验判分断言自包含（K4/K5 针对本实验自己的文档与导出），不依赖该全局用例"
+    },
+    {
+      "kind": "track",
+      "ref": "D4",
+      "note": "判分器由 D4 实现，本实验只交付判分意图"
+    },
+    {
+      "kind": "data",
+      "ref": "data/labs/data-specs/lab8_temporal_analysis.json",
+      "note": "复用实验8 的 12 期影像数据"
+    }
   ],
   "notes": [
     "可执行子集（诚实范围）：制图 compose/preflight/validate/export 不在 sicnu_geo_rs_cli 管道算子面内——它们是代理工具（GUI 二进制 --mcp 模式或 GUI），因此本实验的 headless 证据由两层构成：数据链用 runner 管道，排版导出用 lab 链测试（MapSpecCompiler 离屏编译 + 导出）与 MCP 导出脚本。'把 compose/export 做成 rs: 管道算子'记入 ISSUES.md。",
-    "实验文档称'MapSpec 3.0'沿用平台品牌名；文档模型当前 envelope 为 spec_version 5（v3 为知识平台 5.0 版本），以 mapspec.h 版本史为准。"
+    "平台历史文档/课程大纲沿用「MapSpec 3.0」品牌名；文档模型当前 envelope 为 spec_version 5（v3 为知识平台 5.0 版本），以 mapspec.h 版本史为准。"
   ]
 }

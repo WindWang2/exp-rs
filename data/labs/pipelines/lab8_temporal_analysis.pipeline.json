@@ -13,18 +13,54 @@
       "operator": "rs:temporal_summary",
       "params": {
         "scenes": [
-          { "path": "data/labs/_tmp/temporal/scene_2024-01-15.tif", "time": "2024-01-15" },
-          { "path": "data/labs/_tmp/temporal/scene_2024-02-15.tif", "time": "2024-02-15" },
-          { "path": "data/labs/_tmp/temporal/scene_2024-03-15.tif", "time": "2024-03-15" },
-          { "path": "data/labs/_tmp/temporal/scene_2024-04-15.tif", "time": "2024-04-15" },
-          { "path": "data/labs/_tmp/temporal/scene_2024-05-15.tif", "time": "2024-05-15" },
-          { "path": "data/labs/_tmp/temporal/scene_2024-06-15.tif", "time": "2024-06-15" },
-          { "path": "data/labs/_tmp/temporal/scene_2024-07-15.tif", "time": "2024-07-15" },
-          { "path": "data/labs/_tmp/temporal/scene_2024-08-15.tif", "time": "2024-08-15" },
-          { "path": "data/labs/_tmp/temporal/scene_2024-09-15.tif", "time": "2024-09-15" },
-          { "path": "data/labs/_tmp/temporal/scene_2024-10-15.tif", "time": "2024-10-15" },
-          { "path": "data/labs/_tmp/temporal/scene_2024-11-15.tif", "time": "2024-11-15" },
-          { "path": "data/labs/_tmp/temporal/scene_2024-12-15.tif", "time": "2024-12-15" }
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-01-15.tif",
+            "time": "2024-01-15"
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-02-15.tif",
+            "time": "2024-02-15"
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-03-15.tif",
+            "time": "2024-03-15"
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-04-15.tif",
+            "time": "2024-04-15"
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-05-15.tif",
+            "time": "2024-05-15"
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-06-15.tif",
+            "time": "2024-06-15"
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-07-15.tif",
+            "time": "2024-07-15"
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-08-15.tif",
+            "time": "2024-08-15"
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-09-15.tif",
+            "time": "2024-09-15"
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-10-15.tif",
+            "time": "2024-10-15"
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-11-15.tif",
+            "time": "2024-11-15"
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-12-15.tif",
+            "time": "2024-12-15"
+          }
         ],
         "band_role": "nir",
         "include_median": true,
@@ -38,18 +74,102 @@
       "operator": "rs:temporal_index_series",
       "params": {
         "scenes": [
-          { "path": "data/labs/_tmp/temporal/scene_2024-01-15.tif", "time": "2024-01-15", "bands": { "red": 3, "nir": 4 } },
-          { "path": "data/labs/_tmp/temporal/scene_2024-02-15.tif", "time": "2024-02-15", "bands": { "red": 3, "nir": 4 } },
-          { "path": "data/labs/_tmp/temporal/scene_2024-03-15.tif", "time": "2024-03-15", "bands": { "red": 3, "nir": 4 } },
-          { "path": "data/labs/_tmp/temporal/scene_2024-04-15.tif", "time": "2024-04-15", "bands": { "red": 3, "nir": 4 } },
-          { "path": "data/labs/_tmp/temporal/scene_2024-05-15.tif", "time": "2024-05-15", "bands": { "red": 3, "nir": 4 } },
-          { "path": "data/labs/_tmp/temporal/scene_2024-06-15.tif", "time": "2024-06-15", "bands": { "red": 3, "nir": 4 } },
-          { "path": "data/labs/_tmp/temporal/scene_2024-07-15.tif", "time": "2024-07-15", "bands": { "red": 3, "nir": 4 } },
-          { "path": "data/labs/_tmp/temporal/scene_2024-08-15.tif", "time": "2024-08-15", "bands": { "red": 3, "nir": 4 } },
-          { "path": "data/labs/_tmp/temporal/scene_2024-09-15.tif", "time": "2024-09-15", "bands": { "red": 3, "nir": 4 } },
-          { "path": "data/labs/_tmp/temporal/scene_2024-10-15.tif", "time": "2024-10-15", "bands": { "red": 3, "nir": 4 } },
-          { "path": "data/labs/_tmp/temporal/scene_2024-11-15.tif", "time": "2024-11-15", "bands": { "red": 3, "nir": 4 } },
-          { "path": "data/labs/_tmp/temporal/scene_2024-12-15.tif", "time": "2024-12-15", "bands": { "red": 3, "nir": 4 } }
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-01-15.tif",
+            "time": "2024-01-15",
+            "bands": {
+              "red": 3,
+              "nir": 4
+            }
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-02-15.tif",
+            "time": "2024-02-15",
+            "bands": {
+              "red": 3,
+              "nir": 4
+            }
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-03-15.tif",
+            "time": "2024-03-15",
+            "bands": {
+              "red": 3,
+              "nir": 4
+            }
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-04-15.tif",
+            "time": "2024-04-15",
+            "bands": {
+              "red": 3,
+              "nir": 4
+            }
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-05-15.tif",
+            "time": "2024-05-15",
+            "bands": {
+              "red": 3,
+              "nir": 4
+            }
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-06-15.tif",
+            "time": "2024-06-15",
+            "bands": {
+              "red": 3,
+              "nir": 4
+            }
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-07-15.tif",
+            "time": "2024-07-15",
+            "bands": {
+              "red": 3,
+              "nir": 4
+            }
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-08-15.tif",
+            "time": "2024-08-15",
+            "bands": {
+              "red": 3,
+              "nir": 4
+            }
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-09-15.tif",
+            "time": "2024-09-15",
+            "bands": {
+              "red": 3,
+              "nir": 4
+            }
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-10-15.tif",
+            "time": "2024-10-15",
+            "bands": {
+              "red": 3,
+              "nir": 4
+            }
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-11-15.tif",
+            "time": "2024-11-15",
+            "bands": {
+              "red": 3,
+              "nir": 4
+            }
+          },
+          {
+            "path": "data/labs/_tmp/temporal/scene_2024-12-15.tif",
+            "time": "2024-12-15",
+            "bands": {
+              "red": 3,
+              "nir": 4
+            }
+          }
         ],
         "index": "NDVI",
         "output": "data/labs/_tmp/out/lab8/ndvi_series.tif"
@@ -62,18 +182,90 @@
       "operator": "rs:temporal_trend",
       "params": {
         "scenes": [
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-01-15", "bands": { "ndvi": 1 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-02-15", "bands": { "ndvi": 2 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-03-15", "bands": { "ndvi": 3 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-04-15", "bands": { "ndvi": 4 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-05-15", "bands": { "ndvi": 5 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-06-15", "bands": { "ndvi": 6 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-07-15", "bands": { "ndvi": 7 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-08-15", "bands": { "ndvi": 8 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-09-15", "bands": { "ndvi": 9 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-10-15", "bands": { "ndvi": 10 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-11-15", "bands": { "ndvi": 11 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-12-15", "bands": { "ndvi": 12 } }
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-01-15",
+            "bands": {
+              "ndvi": 1
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-02-15",
+            "bands": {
+              "ndvi": 2
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-03-15",
+            "bands": {
+              "ndvi": 3
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-04-15",
+            "bands": {
+              "ndvi": 4
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-05-15",
+            "bands": {
+              "ndvi": 5
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-06-15",
+            "bands": {
+              "ndvi": 6
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-07-15",
+            "bands": {
+              "ndvi": 7
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-08-15",
+            "bands": {
+              "ndvi": 8
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-09-15",
+            "bands": {
+              "ndvi": 9
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-10-15",
+            "bands": {
+              "ndvi": 10
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-11-15",
+            "bands": {
+              "ndvi": 11
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-12-15",
+            "bands": {
+              "ndvi": 12
+            }
+          }
         ],
         "band_role": "ndvi",
         "output": "data/labs/_tmp/out/lab8/ndvi_trend.tif"
@@ -86,18 +278,90 @@
       "operator": "rs:temporal_phenology",
       "params": {
         "scenes": [
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-01-15", "bands": { "ndvi": 1 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-02-15", "bands": { "ndvi": 2 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-03-15", "bands": { "ndvi": 3 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-04-15", "bands": { "ndvi": 4 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-05-15", "bands": { "ndvi": 5 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-06-15", "bands": { "ndvi": 6 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-07-15", "bands": { "ndvi": 7 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-08-15", "bands": { "ndvi": 8 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-09-15", "bands": { "ndvi": 9 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-10-15", "bands": { "ndvi": 10 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-11-15", "bands": { "ndvi": 11 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-12-15", "bands": { "ndvi": 12 } }
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-01-15",
+            "bands": {
+              "ndvi": 1
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-02-15",
+            "bands": {
+              "ndvi": 2
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-03-15",
+            "bands": {
+              "ndvi": 3
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-04-15",
+            "bands": {
+              "ndvi": 4
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-05-15",
+            "bands": {
+              "ndvi": 5
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-06-15",
+            "bands": {
+              "ndvi": 6
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-07-15",
+            "bands": {
+              "ndvi": 7
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-08-15",
+            "bands": {
+              "ndvi": 8
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-09-15",
+            "bands": {
+              "ndvi": 9
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-10-15",
+            "bands": {
+              "ndvi": 10
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-11-15",
+            "bands": {
+              "ndvi": 11
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-12-15",
+            "bands": {
+              "ndvi": 12
+            }
+          }
         ],
         "band_role": "ndvi",
         "crossingFraction": 0.2,
@@ -111,23 +375,95 @@
       "operator": "rs:temporal_anomaly",
       "params": {
         "scenes": [
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-01-15", "bands": { "ndvi": 1 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-02-15", "bands": { "ndvi": 2 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-03-15", "bands": { "ndvi": 3 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-04-15", "bands": { "ndvi": 4 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-05-15", "bands": { "ndvi": 5 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-06-15", "bands": { "ndvi": 6 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-07-15", "bands": { "ndvi": 7 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-08-15", "bands": { "ndvi": 8 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-09-15", "bands": { "ndvi": 9 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-10-15", "bands": { "ndvi": 10 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-11-15", "bands": { "ndvi": 11 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-12-15", "bands": { "ndvi": 12 } }
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-01-15",
+            "bands": {
+              "ndvi": 1
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-02-15",
+            "bands": {
+              "ndvi": 2
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-03-15",
+            "bands": {
+              "ndvi": 3
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-04-15",
+            "bands": {
+              "ndvi": 4
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-05-15",
+            "bands": {
+              "ndvi": 5
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-06-15",
+            "bands": {
+              "ndvi": 6
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-07-15",
+            "bands": {
+              "ndvi": 7
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-08-15",
+            "bands": {
+              "ndvi": 8
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-09-15",
+            "bands": {
+              "ndvi": 9
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-10-15",
+            "bands": {
+              "ndvi": 10
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-11-15",
+            "bands": {
+              "ndvi": 11
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-12-15",
+            "bands": {
+              "ndvi": 12
+            }
+          }
         ],
         "band_role": "ndvi",
         "method": "zscore",
         "target_time": "2024-10-15",
-        "baseline_start": "2024-01-01",
+        "baseline_start": "2024-03-01",
         "baseline_end": "2024-08-31",
         "output": "data/labs/_tmp/out/lab8/anomaly_2024-10-15.tif"
       }
@@ -139,23 +475,95 @@
       "operator": "rs:temporal_anomaly",
       "params": {
         "scenes": [
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-01-15", "bands": { "ndvi": 1 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-02-15", "bands": { "ndvi": 2 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-03-15", "bands": { "ndvi": 3 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-04-15", "bands": { "ndvi": 4 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-05-15", "bands": { "ndvi": 5 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-06-15", "bands": { "ndvi": 6 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-07-15", "bands": { "ndvi": 7 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-08-15", "bands": { "ndvi": 8 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-09-15", "bands": { "ndvi": 9 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-10-15", "bands": { "ndvi": 10 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-11-15", "bands": { "ndvi": 11 } },
-          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-12-15", "bands": { "ndvi": 12 } }
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-01-15",
+            "bands": {
+              "ndvi": 1
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-02-15",
+            "bands": {
+              "ndvi": 2
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-03-15",
+            "bands": {
+              "ndvi": 3
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-04-15",
+            "bands": {
+              "ndvi": 4
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-05-15",
+            "bands": {
+              "ndvi": 5
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-06-15",
+            "bands": {
+              "ndvi": 6
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-07-15",
+            "bands": {
+              "ndvi": 7
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-08-15",
+            "bands": {
+              "ndvi": 8
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-09-15",
+            "bands": {
+              "ndvi": 9
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-10-15",
+            "bands": {
+              "ndvi": 10
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-11-15",
+            "bands": {
+              "ndvi": 11
+            }
+          },
+          {
+            "path": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+            "time": "2024-12-15",
+            "bands": {
+              "ndvi": 12
+            }
+          }
         ],
         "band_role": "ndvi",
         "method": "zscore",
         "target_time": "2024-08-15",
-        "baseline_start": "2024-01-01",
+        "baseline_start": "2024-03-01",
         "baseline_end": "2024-08-31",
         "output": "data/labs/_tmp/out/lab8/anomaly_2024-08-15_control.tif"
       }

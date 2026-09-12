@@ -1,7 +1,7 @@
 # 实验11：制图出图——专题数据生产与合规地图排版
 
 > 平台能力：`rs:temporal_composite` / `rs:threshold_raster`（headless 管道）+
-> MapSpec 声明式排版 + `cartography:compose` / `cartography:export`（代理工具，GUI 二进制 `--mcp` 模式）
+> MapSpec 声明式排版 + `cartography:validate` / `cartography:preflight` / `cartography:compose` / `cartography:export`（代理工具，GUI 二进制 `--mcp` 模式）
 
 ## 实验目的
 
@@ -56,7 +56,7 @@ QT_QPA_PLATFORM=offscreen build/sicnu_geo_rs_cli \
   --pipeline data/labs/pipelines/lab11_cartographic_mapping.pipeline.json
 ```
 
-三步：`ndvi`（12 期 NDVI 栈）→ `composite`（年内均值）→ `thematic`（Otsu 掩膜）。检查合成图统计与掩膜值域 {0,1}，记录 Otsu 阈值与植被占比。
+三步：`ndvi`（12 期 NDVI 栈）→ `composite`（年内均值）→ `thematic`（Otsu 掩膜）。检查合成图统计与掩膜值域 {0,1}，记录 Otsu 阈值与有植被覆盖占比；理解二值分级在这里的语义是『覆盖/非覆盖』而非『长势好坏』。
 
 ### 11.3 声明式排版（MapSpec）
 
@@ -85,7 +85,7 @@ QT_QPA_PLATFORM=offscreen python3 scripts/export_lab_map_mcp.py \
 | 产物 | 预期 | 判分容差 |
 |------|------|----------|
 | `ndvi_composite_mean.tif` | 林地 0.65–0.85、水体 −0.20–0.00、扰动地块被采伐拉低 | 意图 K1 |
-| `thematic_mask.tif` | UInt8 {0,1}，植被占比 25%–55% | 意图 K2 |
+| `thematic_mask.tif` | UInt8 {0,1}，有植被覆盖占比 80%–95%（Otsu 分开『水体/低值』与『植被覆盖』） | 意图 K2 |
 | 阈值统计 | Otsu 阈值 ∈ [−0.05, 0.5] 且 masked 比例自洽 | 意图 K3 |
 | MapSpec 文档 | validate 零问题、preflight 五要素零缺失 | 意图 K4 |
 | 导出 PNG | A4 横向 @200 dpi，非空 | 意图 K5 |
@@ -113,6 +113,6 @@ QT_QPA_PLATFORM=offscreen python3 scripts/export_lab_map_mcp.py \
 
 - 制图 compose/preflight/validate/export **不在** `sicnu_geo_rs_cli` 管道算子面内——它们是代理工具（GUI 二进制 `--mcp` 模式或 GUI）。本实验 headless 证据由两层构成：数据链用 runner 管道；排版导出用实验链测试（MapSpecCompiler 离屏编译 + 导出）与 MCP 导出脚本。「把 compose/export 做成 rs: 管道算子」记入 ISSUES.md；
 - 平台级 `test_mapspec` 当前为红（`docs/verification/READINESS.md:38`，**由 D10 负责修绿**）：本实验判分断言自包含（K4/K5 针对本实验自己的文档与导出），不依赖该全局用例；
-- 文档中「MapSpec 3.0」沿用平台品牌名；文档模型当前 envelope 为 spec_version 5，以 `src/agent/mapspec/mapspec.h` 版本史为准。
+- 平台历史文档/课程大纲沿用「MapSpec 3.0」品牌名；文档模型当前 envelope 为 spec_version 5，以 `src/agent/mapspec/mapspec.h` 版本史为准。
 
 完整算子缺口清单见仓库 `ISSUES.md`。

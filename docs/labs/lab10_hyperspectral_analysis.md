@@ -40,7 +40,7 @@ SAM 把像元谱与参考谱的夹角作为相似度：**θ = arccos(⟨x,e⟩/(
 | 影像 | 128×128、10 波段 VNIR 合成场景（450–900 nm，FWHM 25 nm，float32，1/255 量化） |
 | 地物 | 水体（NIR 深吸收）/ 植被（700→750nm 红边陡升）/ 裸土（单调上升）三端元 |
 | 布局 | 左 1/3 水体、中段植被、右 1/3 裸土；两条 8 像元宽线性丰度渐变过渡带 |
-| 噪声 | 每波段独立高斯噪声 σ = 0.004（约半个量化步长） |
+| 噪声 | 每波段独立高斯噪声 σ = 0.004（约一个 1/255 量化步长） |
 | 光谱库 | `data/labs/spectral-library/lab10_sicnu_library.json`（sicnu-spectral-library v1，平台原生格式，**真值源**） |
 | 数据规格 | `data/labs/data-specs/lab10_hyperspectral_analysis.json`（离线生成，无需联网） |
 | 本地临时数据 | `python3 scripts/gen_lab_fixtures.py hyperspectral --out data/labs/_tmp`（gitignored） |
@@ -59,11 +59,11 @@ SAM 把像元谱与参考谱的夹角作为相似度：**θ = arccos(⟨x,e⟩/(
 
 ### 10.3 PPI 端元提取（`rs:endmember_extraction`）
 
-`nEndmembers=3`、`projections=1000`。结果为 JSON：把三条 endmembers 与光谱库逐条对照（判分按 SAM 角 ≤ 5°），确认凸包顶点 ≈ 纯端元；理解 ppiCounts 的极值计数含义。
+`nEndmembers=3`、`projections=1000`。结果为 JSON：把三条 endmembers 与光谱库逐条对照（判分按 SAM 角均值 ≤ 10°、单条最大 ≤ 20°），确认凸包顶点 ≈ 纯端元；理解 ppiCounts 的极值计数含义。
 
 ### 10.4 SAM 与 SID 匹配分类（`rs:sam_classify`）
 
-用库谱作 `refs` 分别以 `metric=sam` 与 `metric=sid` 分类。比较纯区精度（判分：SAM ≥ 95%，SID ≥ 90%）并解释 SID 对量化噪声更敏感的原因；`angleOut` 栅格可查每个像元的最小匹配角。
+用库谱作 `refs` 分别以 `metric=sam` 与 `metric=sid` 分类。比较纯区精度（判分：SAM ≥ 95%，SID ≥ 90%）并解释 SID 对量化噪声更敏感的原因；`angleOut` 栅格可查每个像元的最小匹配角（注意：栅格单位为弧度，判分与文档中的角度容差为度）。
 
 ### 10.5 线性解混（`rs:spectral_unmixing`）
 
@@ -93,7 +93,7 @@ QT_QPA_PLATFORM=offscreen build/sicnu_geo_rs_cli \
 | 产物 | 预期 | 判分容差 |
 |------|------|----------|
 | `mnf_components.tif` | 4 分量按 SNR 有序：分量 1 类间分离度 > 分量 4 | 意图 H1 |
-| PPI JSON | 3 条端元谱与库谱 SAM 角 ≤ 5°，indices 互异 | 意图 H2 |
+| PPI JSON | 3 条端元谱与库谱对照：SAM 角均值 ≤ 10°、单条最大 ≤ 20°（低反射率水体端元的角度噪声占主导），indices 互异 | 意图 H2 |
 | `sam_labels.tif` | 纯区精度 ≥ 95% | 意图 H3 |
 | `sid_labels.tif` | 纯区精度 ≥ 90% | 意图 H4 |
 | `abundances.tif` | 纯区自家丰度 ≥ 0.9、丰度和 ≈ 1、过渡带渐变还原、meanError ≤ 0.02 | 意图 H5 |
@@ -118,6 +118,7 @@ QT_QPA_PLATFORM=offscreen build/sicnu_geo_rs_cli \
 | 光谱角 | SAM | 两条光谱在高维空间的夹角，对幅度增益不敏感的匹配度量 |
 | 光谱信息散度 | SID | 把光谱归一化为概率分布后度量的 KL 散度对称量，对形状敏感 |
 | 最小噪声分数 | MNF | 先噪声白化再做 PCA 的变换，分量按信噪比递减排序 |
+| 像元纯度指数 | PPI | 随机单位向量投影下统计像元落入极值端次数的端元提取方法，凸包顶点像元得分最高 |
 
 ## 诚实范围（可执行子集）
 

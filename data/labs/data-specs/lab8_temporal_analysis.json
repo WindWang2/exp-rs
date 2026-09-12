@@ -11,9 +11,18 @@
     "count": 12,
     "cadence": "monthly",
     "dates": [
-      "2024-01-15", "2024-02-15", "2024-03-15", "2024-04-15",
-      "2024-05-15", "2024-06-15", "2024-07-15", "2024-08-15",
-      "2024-09-15", "2024-10-15", "2024-11-15", "2024-12-15"
+      "2024-01-15",
+      "2024-02-15",
+      "2024-03-15",
+      "2024-04-15",
+      "2024-05-15",
+      "2024-06-15",
+      "2024-07-15",
+      "2024-08-15",
+      "2024-09-15",
+      "2024-10-15",
+      "2024-11-15",
+      "2024-12-15"
     ],
     "cap_compliance": "12 期 ≤ 上限 12（track Autonomy default 5）"
   },
@@ -29,11 +38,22 @@
     "format": "GeoTIFF",
     "dtype": "float32",
     "bit_scaling": "反射率量化到 1/255 步长（8-bit-scaled float32，符合上限声明）",
-    "value_range": [0.0, 1.0],
+    "value_range": [
+      0.0,
+      1.0
+    ],
     "no_data": null,
     "bands": [
-      { "role": "red", "index": 3, "description": "红光波段地表反射率（Landsat-8/9 OLI B4 位置约定）" },
-      { "role": "nir", "index": 4, "description": "近红外波段地表反射率（OLI B5 位置约定）" }
+      {
+        "role": "red",
+        "index": 3,
+        "description": "红光波段地表反射率（Landsat-8/9 OLI B4 位置约定）"
+      },
+      {
+        "role": "nir",
+        "index": 4,
+        "description": "近红外波段地表反射率（OLI B5 位置约定）"
+      }
     ],
     "band_position_note": "red=3 / nir=4 与 data/samples/landsat_sample.tif 波段约定一致；管道通过 bands:{\"red\":3,\"nir\":4} 显式声明，不依赖位置",
     "metadata": {
@@ -44,17 +64,46 @@
   "scene_content": {
     "description": "四类地物分区的正演合成：由目标 NDVI 反推 red/nir 反射率对（nir 固定先验，red=nir·(1−NDVI)/(1+NDVI)），叠加高斯噪声后量化",
     "landcover_zones": [
-      { "class": "evergreen_forest", "label_zh": "常绿林地", "ndvi_prior": 0.75, "nir_prior": 0.45, "noise_sd_ndvi": 0.02 },
-      { "class": "cropland", "label_zh": "农田", "ndvi_shape": "正弦季节曲线，基线 0.15，峰值 0.80，峰值日期 DOY 200", "nir_prior": 0.42, "noise_sd_ndvi": 0.025 },
-      { "class": "water", "label_zh": "水体", "ndvi_prior": -0.10, "nir_prior": 0.03, "noise_sd_ndvi": 0.02 },
-      { "class": "disturbance_patch", "label_zh": "扰动地块（农田内，模拟秋季采伐）", "behaviour": "2024-01 至 2024-08 与农田同曲线；2024-09 起回落到裸土 NDVI≈0.12", "nir_prior": 0.42 }
+      {
+        "class": "evergreen_forest",
+        "label_zh": "常绿林地",
+        "ndvi_prior": 0.75,
+        "nir_prior": 0.45,
+        "noise_sd_ndvi": 0.02
+      },
+      {
+        "class": "cropland",
+        "label_zh": "农田",
+        "ndvi_shape": "正弦季节曲线，基线 0.15，峰值 0.80，峰值日期 DOY 200",
+        "nir_prior": 0.42,
+        "noise_sd_ndvi": 0.025
+      },
+      {
+        "class": "water",
+        "label_zh": "水体",
+        "ndvi_prior": -0.1,
+        "nir_prior": 0.03,
+        "noise_sd_ndvi": 0.02
+      },
+      {
+        "class": "disturbance_patch",
+        "label_zh": "扰动地块（农田内，模拟秋季采伐）",
+        "behaviour": "2024-01 至 2024-08 与农田同曲线；2024-09 起回落到裸土 NDVI≈0.12",
+        "nir_prior": 0.42
+      }
     ],
-    "area_fractions": { "evergreen_forest": 0.35, "cropland": 0.40, "water": 0.10, "disturbance_patch": 0.05, "background_soil": 0.10 }
+    "area_fractions": {
+      "evergreen_forest": 0.35,
+      "cropland_incl_disturbance_patch": 0.55,
+      "disturbance_patch_within_cropland": 0.05,
+      "water": 0.1,
+      "note": "裸土不是本合成场景的独立类别（gen_lab_fixtures.py 分区码仅 1/2/3/4）"
+    }
   },
   "aux_products": [
     {
       "name": "zones",
-      "purpose": "判分辅助：分区真值码图（1=常绿林, 2=农田, 3=水体, 4=扰动地块, 5=裸土），供 D4 判分器做分区统计；不进入学生操作链",
+      "purpose": "判分辅助：分区真值码图（1=常绿林, 2=农田, 3=水体, 4=扰动地块），供 D4 判分器做分区统计；不进入学生操作链",
       "format": "GeoTIFF",
       "dtype": "byte",
       "grid": "与影像完全一致"
