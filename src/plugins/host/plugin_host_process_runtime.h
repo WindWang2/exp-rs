@@ -98,6 +98,12 @@ private:
 
     Options mOptions;
     mutable std::mutex mMutex;
+    /// Restart-policy counters get their OWN mutex: respawn() applies the
+    /// policy under it, then runs the slow per-entry work (spawn + reload)
+    /// WITHOUT holding mMutex — a 120 s plugin.load budget must never stall
+    /// load/unload/describe of the OTHER hosted entries. Leaf mutex: never
+    /// held while acquiring mMutex or entry.mutex.
+    mutable std::mutex mRestartMutex;
     int mRestartCount = 0;                     ///< restart policy counter
     bool mRestartWindowArmed = false;
     std::chrono::steady_clock::time_point mFirstRestart;
