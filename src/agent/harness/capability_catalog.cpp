@@ -91,12 +91,13 @@ std::string lowered( std::string text )
   return text;
 }
 
-/// Canonical jsoncpp rendering — the same formatter AlgorithmMetaStore uses,
-/// so byte comparisons in tests are stable across platforms.
+/// Compact jsoncpp rendering — the same serialization the token-budget
+/// evaluators (tests/test_harness_evals.cpp) measure, so the enforced bound
+/// is the documented one.
 std::string renderJson( const Json::Value &value )
 {
   Json::StreamWriterBuilder builder;
-  builder[ "indentation" ] = "  ";
+  builder[ "indentation" ] = "";
   return Json::writeString( builder, value );
 }
 
@@ -475,7 +476,10 @@ Json::Value deriveCapabilityBlock( const sicnu::processing::AlgorithmDescriptor 
     authoredCrs.isMember( "requires_projected" ) && authoredCrs[ "requires_projected" ].isBool()
       ? authoredCrs[ "requires_projected" ].asBool()
       : false;
-  crs[ "requires_shared_grid" ] = sharedGrid;
+  const bool authoredGrid = authoredCrs.isMember( "requires_shared_grid" ) &&
+                            authoredCrs[ "requires_shared_grid" ].isBool() &&
+                            authoredCrs[ "requires_shared_grid" ].asBool();
+  crs[ "requires_shared_grid" ] = sharedGrid || authoredGrid;
   block[ "crs" ] = crs;
 
   // determinism: ADR 0124 grade + kernel facts from the descriptor.
@@ -778,17 +782,23 @@ Json::Value CapabilityCatalog::manifestPage( const std::string &family, int page
     return pageValue;
   };
 
-  // Trim the tail entries until the page fits the hard 64 KiB budget.
+  // Trim the tail entries until the page fits the hard 64 KiB budget. The
+  // truncation marker is part of the measured document (review P2).
   int lastIndex = std::min( page * pageSize, total );
   int firstIndex = ( page - 1 ) * pageSize;
   if ( lastIndex < firstIndex )
     lastIndex = firstIndex;
   Json::Value pageValue = rendered( firstIndex, lastIndex );
+  bool trimmed = lastIndex < std::min( page * pageSize, total );
   while ( renderJson( pageValue ).size() > kManifestBudgetBytes && lastIndex > firstIndex )
   {
     --lastIndex;
     pageValue = rendered( firstIndex, lastIndex );
+    pageValue[ "truncated" ] = true;
+    trimmed = true;
   }
+  if ( trimmed )
+    pageValue[ "truncated" ] = true;
   return pageValue;
 }
 
@@ -831,10 +841,23 @@ Json::Value CapabilityCatalog::errorCatalog() const
   Json::Value catalog = rendered( byCode, skipped );
   while ( renderJson( catalog ).size() > kErrorCatalogBudgetBytes && !byCode.empty() )
   {
-    // Deterministic degradation: drop the highest code (largest operator
-    // lists go last) until the catalog fits, with an explicit marker.
-    skipped.insert( byCode.rbegin()->first );
+    // Deterministic degradation: drop the code with the largest operator
+    // list (ties break lexicographically) until the catalog fits. The
+    // dropped codes and marker stay inside the measured document.
+    std::string victim;
+    for ( const auto &[ code, operators ] : byCode )
+    {
+      if ( skipped.count( code ) )
+        continue;
+      if ( victim.empty() || operators.size() > byCode[ victim ].size() )
+        victim = code;
+    }
+    skipped.insert( victim );
     catalog = rendered( byCode, skipped );
+    Json::Value dropped( Json::arrayValue );
+    for ( const auto &code : skipped )
+      dropped.append( code );
+    catalog[ "dropped_codes" ] = dropped;
     catalog[ "truncated" ] = true;
   }
   return catalog;
@@ -874,21 +897,15 @@ std::vector<std::string> CapabilityCatalog::validateEntry( const Json::Value &si
   if ( !std::any_of( capabilityFamilies().begin(), capabilityFamilies().end(),
                      [ &family ]( const std::string &candidate ) { return candidate == family; } ) )
     problems.push_back( "capability: unknown family '" + family + "'" );
-  if ( !canonicalFamily( id, block[ "operator_group" ].isString()
-                                   ? block[ "operator_group" ].asString()
-                                   : std::string() )
-            .empty() )
-  {
-    // The authored family must agree with the canonical map — pages and the
-    // query API route by family, so a disagreeing sidecar would silently
-    // land in two families.
-    const std::string canonical = canonicalFamily(
-      id, block[ "operator_group" ].isString() ? block[ "operator_group" ].asString()
-                                               : std::string() );
-    if ( canonical != family )
-      problems.push_back( "capability: family '" + family + "' disagrees with canonical map ('" +
-                          canonical + "')" );
-  }
+  // The authored family must agree with the canonical map — pages and the
+  // query API route by family, so a disagreeing sidecar would silently land
+  // in two families.
+  const std::string canonical = canonicalFamily(
+    id, block[ "operator_group" ].isString() ? block[ "operator_group" ].asString()
+                                             : std::string() );
+  if ( canonical != family )
+    problems.push_back( "capability: family '" + family + "' disagrees with canonical map ('" +
+                        canonical + "')" );
 
   // io
   const Json::Value &io = block[ "io" ];

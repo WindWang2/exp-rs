@@ -54,7 +54,14 @@ bool factsMatch( const Value &when, const Value &facts, std::string *missingKey 
     }
     else if ( wanted.isString() )
     {
-      if ( !actual.isString() || actual.asString() != wanted.asString() )
+      // Bool facts match their wire words so {aligned: true} satisfies the
+      // "true" gate without a string-typed facts document.
+      const bool boolMatch = actual.isBool() &&
+        ( ( actual.asBool() && wanted.asString() == "true" ) ||
+          ( !actual.asBool() && wanted.asString() == "false" ) );
+      const bool stringMatch =
+        actual.isString() && actual.asString() == wanted.asString();
+      if ( !boolMatch && !stringMatch )
       {
         if ( missingKey )
           *missingKey = key;
@@ -338,6 +345,12 @@ Json::Value chainFrom( const std::string &operatorId )
 
   Value document( Json::objectValue );
   document[ "id" ] = operatorId;
+  if ( !catalog.hasEntry( operatorId ) )
+  {
+    document[ "error" ] = "UNKNOWN_OPERATOR";
+    document[ "message" ] = "目标算子不在能力目录中: " + operatorId;
+    return document;
+  }
   Value upstream( Json::arrayValue );
   Value downstream( Json::arrayValue );
   for ( const Value &edge : relations.chains() )
@@ -376,6 +389,14 @@ Json::Value composeChain( const std::string &targetId, const Value &facts )
 
   Value document( Json::objectValue );
   document[ "target" ] = targetId;
+  // Fail-closed: a broken graph must surface as a typed error, never as a
+  // silently-empty "successful" plan.
+  if ( !relations.loadProblems().empty() )
+  {
+    document[ "error" ] = "RELATIONS_LOAD_FAILED";
+    document[ "message" ] = relations.loadProblems().front();
+    return document;
+  }
   if ( !catalog.hasEntry( targetId ) )
   {
     document[ "error" ] = "UNKNOWN_OPERATOR";
@@ -387,10 +408,25 @@ Json::Value composeChain( const std::string &targetId, const Value &facts )
   std::map<std::string, std::string> steps;
   steps[ targetId ] = "目标算子";
   Value skipped( Json::arrayValue );
+  // The fixpoint loop rescans all edges every pass; record each edge decision
+  // exactly once (review P0: duplicates on the flagship NDVI path).
+  std::set<std::pair<std::string, std::string>> recordedSkips;
+  auto recordSkip = [ & ]( const std::string &from, const std::string &to,
+                           const std::string &reason ) {
+    if ( recordedSkips.insert( { from, to } ).second )
+    {
+      Value row( Json::objectValue );
+      row[ "from" ] = from;
+      row[ "to" ] = to;
+      row[ "reason" ] = reason;
+      skipped.append( row );
+    }
+  };
 
   // Fact-gated upstream closure: an edge participates when its `when` gate
-  // is satisfied by the facts (edges without a gate never fire — authored
-  // edges are always explicit about the condition they serve).
+  // is satisfied by the facts. An empty gate means "hard prerequisite —
+  // always fires"; a gate key missing from the facts never matches
+  // (deterministic, conservative).
   bool changed = true;
   while ( changed )
   {
@@ -404,11 +440,7 @@ Json::Value composeChain( const std::string &targetId, const Value &facts )
       std::string missingKey;
       if ( !factsMatch( edge[ "when" ], facts, &missingKey ) )
       {
-        Value row( Json::objectValue );
-        row[ "from" ] = from;
-        row[ "to" ] = to;
-        row[ "reason" ] = "条件未满足: " + missingKey;
-        skipped.append( row );
+        recordSkip( from, to, "条件未满足: " + missingKey );
         continue;
       }
       bool conflict = false;
@@ -416,11 +448,7 @@ Json::Value composeChain( const std::string &targetId, const Value &facts )
       {
         if ( relations.exclusiveWith( from, id ) )
         {
-          Value row( Json::objectValue );
-          row[ "from" ] = from;
-          row[ "to" ] = to;
-          row[ "reason" ] = "与已选算子互斥: " + id;
-          skipped.append( row );
+          recordSkip( from, to, "与已选算子互斥: " + id );
           conflict = true;
           break;
         }
