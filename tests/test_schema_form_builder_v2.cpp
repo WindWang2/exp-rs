@@ -22,6 +22,7 @@
 
 #include "operators/rs/rs_pca_operator.h"
 #include "operators/rs/rs_band_tools_operators.h"
+#include "operators/rs/rs_spectral_index_operator.h"
 #include "shell/schema_form_builder.h"
 #include "widgets/crs_selector.h"
 
@@ -78,10 +79,19 @@ TEST_CASE( "Schema defaults drive the generated form (rs:pca)", "[ux4][schema-fo
     REQUIRE_FALSE( form.hasErrors() );
 
     // values() round-trips the collected parameters as a JSON object.
+    // Optional numerics stay ABSENT until the user edits them or setValues
+    // supplies the key — operators treat isMember as an explicit override
+    // (numComponents 0 = "all bands" is the kernel default, not a form fill).
     const Json::Value collected = form.values();
     REQUIRE( collected["input"].asString() == "/tmp/in.tif" );
     REQUIRE( collected["output"].asString() == "/tmp/out.tif" );
-    REQUIRE( collected["numComponents"].asInt() == components->value() );
+    REQUIRE_FALSE( collected.isMember( "numComponents" ) );
+    REQUIRE( components->value() == 0 );
+
+    Json::Value withComponents = collected;
+    withComponents["numComponents"] = 3;
+    form.setValues( withComponents );
+    REQUIRE( form.values()["numComponents"].asInt() == 3 );
 }
 
 TEST_CASE( "rs:band_ratio schema generates mode-aware editors", "[ux4][schema-form]" )
@@ -388,4 +398,84 @@ TEST_CASE( "SchemaFormBuilder 3.0: setValues refreshes x-ui-visible-when state",
     Json::Value collected = form.values();
     CHECK( collected.isMember( "threshold" ) );
     CHECK( collected["threshold"].asDouble() == Catch::Approx( 0.5 ) );
+}
+
+TEST_CASE( "Optional numeric defaults stay absent until edited",
+           "[ux4][schema-form][issue-927]" )
+{
+    testApp();
+    Json::Value schema;
+    schema["type"] = "object";
+    schema["required"].append( "input" );
+    schema["required"].append( "count" );
+    Json::Value props;
+    Json::Value input;
+    input["type"] = "string";
+    input["x-ui-type"] = "raster";
+    props["input"] = input;
+    Json::Value count;
+    count["type"] = "integer";
+    count["default"] = 2;
+    count["minimum"] = 1;
+    count["maximum"] = 10;
+    props["count"] = count;
+    Json::Value cellSize;
+    cellSize["type"] = "number";
+    cellSize["default"] = 30;
+    props["cellSize"] = cellSize;
+    Json::Value nir;
+    nir["type"] = "integer";
+    nir["default"] = 4;
+    props["nir"] = nir;
+    schema["properties"] = props;
+
+    SchemaFormBuilder form;
+    form.rebuild( schema );
+
+    Json::Value untouched = form.values();
+    REQUIRE( untouched.isMember( "count" ) );
+    REQUIRE( untouched["count"].asInt() == 2 );
+    REQUIRE_FALSE( untouched.isMember( "cellSize" ) );
+    REQUIRE_FALSE( untouched.isMember( "nir" ) );
+
+    const QList<QSpinBox *> spins = form.findChildren<QSpinBox *>();
+    REQUIRE( spins.size() >= 2 );
+    QSpinBox *nirSpin = nullptr;
+    for ( QSpinBox *spin : spins )
+    {
+        if ( spin->value() == 4 )
+            nirSpin = spin;
+    }
+    REQUIRE( nirSpin != nullptr );
+    nirSpin->setValue( 8 );
+    Json::Value edited = form.values();
+    REQUIRE( edited.isMember( "nir" ) );
+    REQUIRE( edited["nir"].asInt() == 8 );
+    REQUIRE_FALSE( edited.isMember( "cellSize" ) );
+
+    Json::Value explicitValues;
+    explicitValues["input"] = "/tmp/in.tif";
+    explicitValues["cellSize"] = 15.0;
+    form.setValues( explicitValues );
+    Json::Value afterSet = form.values();
+    REQUIRE( afterSet["cellSize"].asDouble() == Catch::Approx( 15.0 ) );
+    REQUIRE( afterSet.isMember( "nir" ) );
+}
+
+TEST_CASE( "rs:spectral_index omits untouched band-role integers",
+           "[ux4][schema-form][issue-927]" )
+{
+    testApp();
+    sicnu::operators::rs::RsSpectralIndexOperator op;
+    SchemaFormBuilder form;
+    form.rebuild( op.schema() );
+
+    const Json::Value collected = form.values();
+    REQUIRE( collected.isMember( "index" ) );
+    REQUIRE_FALSE( collected.isMember( "nir" ) );
+    REQUIRE_FALSE( collected.isMember( "red" ) );
+    REQUIRE_FALSE( collected.isMember( "green" ) );
+    REQUIRE_FALSE( collected.isMember( "blue" ) );
+    REQUIRE_FALSE( collected.isMember( "swir" ) );
+    REQUIRE_FALSE( collected.isMember( "rededge" ) );
 }

@@ -222,6 +222,11 @@ class SchemaFormBuilder : public QWidget
       /// excluded from values()/validate() while the condition does not hold.
       Json::Value visibleWhen;
       bool condHidden = false; ///< last computed visibility (see visibleWhen)
+      /// True once the user edits this editor or setValues() supplies the key.
+      /// Optional integer/number fields stay ABSENT from values() until then
+      /// so operators that treat isMember() as "user overrode auto-resolve"
+      /// (band roles, geotransform cellSize, lookAzimuthDeg) still see omit.
+      bool userTouched = false;
       // SchemaForm 4.0:
       QVector<Field> children; ///< Object: nested schema fields
       QString enumSource;      ///< x-ui-enum-source (dynamic combo)
