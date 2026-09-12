@@ -141,3 +141,6 @@ __pycache__/
 *.governance.db-*
 *.governance.db.wal
 *.governance.db.shm
+
+# D7 offline bundle output
+dist/
