@@ -227,6 +227,88 @@ def gen_sar(out_dir, seed):
     print(f"wrote {p}")
 
 
+HSI_WIDTH, HSI_HEIGHT = 128, 128
+
+# Zone layout by column: pure blocks with linear-mixture transition strips.
+# x < 40 water | [40,48) mix | [48,84) vegetation | [84,92) mix | x >= 92 soil
+def hsi_zone_abundances(x):
+    """Return (water_f, veg_f, soil_f, zone_code) for column x."""
+    if x < 40:
+        return 1.0, 0.0, 0.0, 1
+    if x < 48:
+        a = (x - 40) / 8.0          # water -> vegetation ramp
+        return 1.0 - a, a, 0.0, 4
+    if x < 84:
+        return 0.0, 1.0, 0.0, 2
+    if x < 92:
+        a = (x - 84) / 8.0          # vegetation -> soil ramp
+        return 0.0, 1.0 - a, a, 4
+    return 0.0, 0.0, 1.0, 3
+
+
+def gen_hyperspectral(out_dir, library_path, seed):
+    """10-band VNIR scene built from the committed spectral library (single
+    source of truth): pure blocks + linear transition mixtures + noise,
+    quantized to 1/255 reflectance steps."""
+    import json as _json
+    with open(library_path, "r", encoding="utf-8") as fh:
+        lib = _json.load(fh)
+    spectra = {e["material"]: e["spectrum"] for e in lib["entries"]}
+    wavelengths = lib["wavelengths"]
+    nb = lib["bandCount"]
+    rng = Rng(seed)
+    d = os.path.join(out_dir, "hyperspectral")
+    os.makedirs(d, exist_ok=True)
+
+    planes = [[[0.0] * HSI_WIDTH for _ in range(HSI_HEIGHT)] for _ in range(nb)]
+    zones = [[0] * HSI_WIDTH for _ in range(HSI_HEIGHT)]
+    for y in range(HSI_HEIGHT):
+        for x in range(HSI_WIDTH):
+            fw, fv, fs, code = hsi_zone_abundances(x)
+            zones[y][x] = code
+            for b in range(nb):
+                v = (fw * spectra["water"][b]
+                     + fv * spectra["vegetation"][b]
+                     + fs * spectra["bare_soil"][b])
+                v = quantize8(v + rng.normal() * 0.004)
+                planes[b][y][x] = v
+
+    p = os.path.join(d, "hsi_scene.tif")
+    drv = gdal.GetDriverByName("GTiff")
+    ds = drv.Create(p, HSI_WIDTH, HSI_HEIGHT, nb, gdal.GDT_Float32,
+                    options=["COMPRESS=DEFLATE"])
+    ds.SetGeoTransform((ORIGIN_X, PIXEL, 0.0, ORIGIN_Y, 0.0, -PIXEL * 2))
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(4326)
+    ds.SetProjection(srs.ExportToWkt())
+    ds.SetMetadataItem("SICNU_MODALITY", "hyperspectral")
+    for b in range(nb):
+        band = ds.GetRasterBand(b + 1)
+        band.WriteArray(np.asarray(planes[b], dtype=np.float32))
+        band.SetMetadataItem("WAVELENGTH", f"{wavelengths[b]:.1f}")
+        band.SetMetadataItem("WAVELENGTH_UNIT", "nm")
+    ds.FlushCache()
+    ds = None
+    print(f"wrote {p}")
+
+    p = os.path.join(d, "hsi_zones.tif")
+    write_gtiff_size(p, zones, HSI_WIDTH, HSI_HEIGHT)
+    print(f"wrote {p}")
+
+
+def write_gtiff_size(path, plane, width, height):
+    """Single-band byte raster helper for grading-aux products."""
+    drv = gdal.GetDriverByName("GTiff")
+    ds = drv.Create(path, width, height, 1, gdal.GDT_Byte)
+    ds.SetGeoTransform((ORIGIN_X, PIXEL, 0.0, ORIGIN_Y, 0.0, -PIXEL * 2))
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(4326)
+    ds.SetProjection(srs.ExportToWkt())
+    ds.GetRasterBand(1).WriteArray(np.asarray(plane, dtype=np.uint8))
+    ds.FlushCache()
+    ds = None
+
+
 def gen_temporal(out_dir, seed):
     rng = Rng(seed)
     os.makedirs(out_dir, exist_ok=True)
@@ -295,6 +377,11 @@ def main():
         gen_temporal(norm, args.seed)
     elif args.lab == "sar":
         gen_sar(norm, args.seed)
+    elif args.lab == "hyperspectral":
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        lib = os.path.join(repo, "data", "labs", "spectral-library",
+                           "lab10_sicnu_library.json")
+        gen_hyperspectral(norm, lib, args.seed)
     else:
         sys.exit(f"lab '{args.lab}' generator lands with its authoring phase")
 
