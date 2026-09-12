@@ -137,7 +137,7 @@ std::string writeConstantTif( const QDir &dir, const std::string &name, int widt
 
 } // namespace
 
-TEST_CASE( "reference corpus scores exactly its declared score", "[lab_grading][corpus]" )
+TEST_CASE( "lab_grading.reference corpus scores exactly its declared score", "[lab_grading][corpus]" )
 {
     const Json::Value corpus = readJson( std::string( fixturesDir() ) + "/reference_corpus.json" );
     REQUIRE( corpus["references"].size() == 6 );
@@ -154,7 +154,7 @@ TEST_CASE( "reference corpus scores exactly its declared score", "[lab_grading][
     }
 }
 
-TEST_CASE( "wrong-answer corpus is discriminated below its declared bands", "[lab_grading][corpus]" )
+TEST_CASE( "lab_grading.wrong-answer corpus is discriminated below its declared bands", "[lab_grading][corpus]" )
 {
     const Json::Value corpus = readJson( std::string( fixturesDir() ) + "/wrong_answer_corpus.json" );
     REQUIRE( corpus["wrong_answers"].size() >= 19 );
@@ -181,7 +181,7 @@ TEST_CASE( "wrong-answer corpus is discriminated below its declared bands", "[la
     }
 }
 
-TEST_CASE( "grading is deterministic: identical digest and body", "[lab_grading][determinism]" )
+TEST_CASE( "lab_grading.grading is deterministic: identical digest and body", "[lab_grading][determinism]" )
 {
     const auto artifact = fixturePath( "planck_temperature_reference.tif" );
     const auto first = grade( "planck_temperature", artifact );
@@ -200,7 +200,7 @@ TEST_CASE( "grading is deterministic: identical digest and body", "[lab_grading]
     CHECK( doc["report"] == first.toBodyJson() );
 }
 
-TEST_CASE( "every deduction carries evidence and every assertion has a record", "[lab_grading][evidence]" )
+TEST_CASE( "lab_grading.every deduction carries evidence and every assertion has a record", "[lab_grading][evidence]" )
 {
     const Json::Value corpus = readJson( std::string( fixturesDir() ) + "/wrong_answer_corpus.json" );
     for ( const auto &entry : corpus["wrong_answers"] )
@@ -222,7 +222,7 @@ TEST_CASE( "every deduction carries evidence and every assertion has a record", 
     }
 }
 
-TEST_CASE( "2048x2048 artifact grades inside a 1 MiB windowed budget", "[lab_grading][memory]" )
+TEST_CASE( "lab_grading.2048x2048 artifact grades inside a 1 MiB windowed budget", "[lab_grading][memory]" )
 {
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
@@ -268,7 +268,7 @@ TEST_CASE( "2048x2048 artifact grades inside a 1 MiB windowed budget", "[lab_gra
     CHECK( result.summary["tiles"].asInt64() > 1 );
 }
 
-TEST_CASE( "byte budget below a single pixel is a typed unverifiable error", "[lab_grading][memory]" )
+TEST_CASE( "lab_grading.byte budget below a single pixel is a typed unverifiable error", "[lab_grading][memory]" )
 {
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
@@ -280,7 +280,7 @@ TEST_CASE( "byte budget below a single pixel is a typed unverifiable error", "[l
     CHECK( !result.error.isEmpty() );
 }
 
-TEST_CASE( "rules validation failures are usage errors", "[lab_grading][rules]" )
+TEST_CASE( "lab_grading.rules validation failures are usage errors", "[lab_grading][rules]" )
 {
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
@@ -326,7 +326,7 @@ TEST_CASE( "rules validation failures are usage errors", "[lab_grading][rules]" 
     }
 }
 
-TEST_CASE( "unknown lab and missing artifact map to the usage class", "[lab_grading][cli_contract]" )
+TEST_CASE( "lab_grading.unknown lab and missing artifact map to the usage class", "[lab_grading][cli_contract]" )
 {
     auto result = grade( "no_such_lab", fixturePath( "ndvi_basics_reference.tif" ) );
     CHECK( !result.graded );
@@ -338,7 +338,7 @@ TEST_CASE( "unknown lab and missing artifact map to the usage class", "[lab_grad
     CHECK( result.errorClass == "usage" );
 }
 
-TEST_CASE( "corrupt artifact maps to the unverifiable class", "[lab_grading][cli_contract]" )
+TEST_CASE( "lab_grading.corrupt artifact maps to the unverifiable class", "[lab_grading][cli_contract]" )
 {
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
@@ -354,7 +354,7 @@ TEST_CASE( "corrupt artifact maps to the unverifiable class", "[lab_grading][cli
     CHECK( result.errorClass == "artifact" );
 }
 
-TEST_CASE( "monotone histogram shapes grade a ramp correctly", "[lab_grading][kernels]" )
+TEST_CASE( "lab_grading.monotone histogram shapes grade a ramp correctly", "[lab_grading][kernels]" )
 {
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
@@ -432,7 +432,7 @@ TEST_CASE( "monotone histogram shapes grade a ramp correctly", "[lab_grading][ke
     CHECK( hasDeduction( bimodal, "hist" ) );
 }
 
-TEST_CASE( "classification kernels accept inline truth grids", "[lab_grading][kernels]" )
+TEST_CASE( "lab_grading.classification kernels accept inline truth grids", "[lab_grading][kernels]" )
 {
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
@@ -440,11 +440,14 @@ TEST_CASE( "classification kernels accept inline truth grids", "[lab_grading][ke
     // 4x4 truth: 8 px class 1, 8 px class 2; artifact: one class-2 pixel
     // predicted as class 1 — confusion [[8,0],[1,7]], OA = 15/16 = 0.9375,
     // kappa = 0.875 exactly.
+    sicnu::geo::ensureGdalRegistered();
     const std::string classified = [&dir]()
     {
         const std::string path = dir.filePath( "classes.tif" ).toStdString();
         GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+        REQUIRE( driver );
         GDALDatasetH ds = GDALCreate( driver, path.c_str(), 4, 4, 1, GDT_Byte, nullptr );
+        REQUIRE( ds );
         double gt[6] = { 100.0, 0.001, 0.0, 40.0, 0.0, -0.001 };
         GDALSetGeoTransform( ds, gt );
         OGRSpatialReferenceH srs = OSRNewSpatialReference( nullptr );
@@ -498,12 +501,14 @@ TEST_CASE( "classification kernels accept inline truth grids", "[lab_grading][ke
     const auto rulesPath = writeRules( QDir( dir.path() ), "inline_truth", rules );
 
     const auto result = gradeFile( rulesPath, classified );
+    INFO( "score=" << result.score << " error=" << result.error.toStdString()
+          << " errorClass=" << result.errorClass.toStdString() );
     REQUIRE( result.graded );
-    INFO( "score=" << result.score << " error=" << result.error.toStdString() );
     CHECK( result.verdict == "pass" );
     CHECK( result.score == 100.0 );
 
     // tighten the kappa floor above the observed value -> graded fail
+    rules["lab_id"] = "inline_truth_strict";   // file stem must match lab_id
     rules["assertions"][0]["params"]["kappa_min"] = 0.99;
     const auto strictPath = writeRules( QDir( dir.path() ), "inline_truth_strict", rules );
     const auto strict = gradeFile( strictPath, classified );
@@ -513,7 +518,7 @@ TEST_CASE( "classification kernels accept inline truth grids", "[lab_grading][ke
     CHECK( hasDeduction( strict, "acc" ) );
 }
 
-TEST_CASE( "existing binary verify path still works alongside teaching mode", "[lab_grading][binary_path]" )
+TEST_CASE( "lab_grading.existing binary verify path still works alongside teaching mode", "[lab_grading][binary_path]" )
 {
     sicnu::geo::ensureGdalRegistered();
     const OutputVerifier verifier;
