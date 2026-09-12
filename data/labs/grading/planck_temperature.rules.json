@@ -1,0 +1,43 @@
+{
+  "schema_version": "sicnu.lab.rules/1",
+  "lab_id": "planck_temperature",
+  "title": "Radiometric transfer — Planck inversion to brightness temperature",
+  "artifact": { "kind": "raster" },
+  "passing_score": 60,
+  "assertions": [
+    {
+      "id": "grid.compatible",
+      "kind": "crs_grid",
+      "weight": 10,
+      "severity": "blocking",
+      "params": { "epsg": 4326, "width": 128, "height": 128, "band_count": 1,
+                  "pixel_size_x": 0.001, "pixel_size_y": 0.001, "pixel_size_tolerance": 1e-9 },
+      "derivation": "Lab grid contract: 128x128 at 0.001 deg."
+    },
+    {
+      "id": "stats.temperature_mean_sigma",
+      "kind": "mean_sigma",
+      "weight": 45,
+      "severity": "normal",
+      "params": { "band": 1, "mean": 300.0, "mean_tolerance": 0.005,
+                  "sigma_min": 1.40921356, "sigma_max": 1.41921356, "sigma_tolerance": 0.0 },
+      "derivation": "KNOWN_ANSWER_MATRIX radiometric family: T=K2/ln(K1/L+1) round-trips the scene T=300+2*sin(2*pi*col/128). Over full periods the sine sums to zero (mean exactly 300 K) and the population sigma of A*sin is A/sqrt(2)=sqrt(2)=1.41421356. Float32 storage perturbs the mean by <1e-4. Catches Celsius submissions (mean 26.85) and DN-path inversions."
+    },
+    {
+      "id": "range.temperature",
+      "kind": "range",
+      "weight": 20,
+      "severity": "normal",
+      "params": { "band": 1, "min": 297.9, "max": 302.1, "max_violation_ratio": 0.0 },
+      "derivation": "Scene extrema are 298 K and 302 K; 0.1 K slack covers Float32 rounding only."
+    },
+    {
+      "id": "mask.nodata_ratio",
+      "kind": "nodata_ratio",
+      "weight": 25,
+      "severity": "blocking",
+      "params": { "min_ratio": 0.0, "max_ratio": 0.02 },
+      "derivation": "All scene inputs are valid; a correct product has (nearly) no NoData pixels."
+    }
+  ]
+}

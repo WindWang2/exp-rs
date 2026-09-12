@@ -1,0 +1,51 @@
+{
+  "schema_version": "sicnu.lab.rules/1",
+  "lab_id": "change_detect",
+  "title": "Change detection — changed-area interval against the known scene",
+  "artifact": { "kind": "raster" },
+  "passing_score": 60,
+  "assertions": [
+    {
+      "id": "grid.compatible",
+      "kind": "crs_grid",
+      "weight": 10,
+      "severity": "blocking",
+      "params": { "epsg": 4326, "width": 128, "height": 128, "band_count": 1,
+                  "pixel_size_x": 0.001, "pixel_size_y": 0.001, "pixel_size_tolerance": 1e-9 },
+      "derivation": "Lab grid contract: 128x128 Byte change mask at 0.001 deg."
+    },
+    {
+      "id": "area.changed_interval",
+      "kind": "change_area_interval",
+      "weight": 40,
+      "severity": "blocking",
+      "params": { "band": 1, "value": 1, "min_px": 3072, "max_px": 3072 },
+      "derivation": "KNOWN_ANSWER_MATRIX change family with the documented INCLUSIVE threshold: the scene changes on rows16..31 x cols0..63 (1024 px) plus rows64..95 x cols32..95 (2048 px) = exactly 3072. Catches over- and under-detection and inverted masks."
+    },
+    {
+      "id": "range.binary",
+      "kind": "range",
+      "weight": 15,
+      "severity": "normal",
+      "params": { "band": 1, "min": 0.0, "max": 1.0, "max_violation_ratio": 0.0 },
+      "derivation": "A change mask is binary; any other stored value is a legend error."
+    },
+    {
+      "id": "mask.nodata_ratio",
+      "kind": "nodata_ratio",
+      "weight": 20,
+      "severity": "blocking",
+      "params": { "min_ratio": 0.002, "max_ratio": 0.02 },
+      "derivation": "The scene declares 64/16384=0.39% invalid inputs; the correct product masks them. Ratio 0 = forgot to mask; ratio > 0.02 = masked usable data."
+    },
+    {
+      "id": "hist.binary_bimodal",
+      "kind": "histogram_shape",
+      "weight": 15,
+      "severity": "normal",
+      "params": { "band": 1, "bins": 64, "min": -0.5, "max": 1.5, "shape": "bimodal",
+                  "min_mode_fraction": 0.05, "min_separation": 0.5 },
+      "derivation": "A correct mask has exactly two populated states (0 and 1); smeared or ternary legends fail."
+    }
+  ]
+}
