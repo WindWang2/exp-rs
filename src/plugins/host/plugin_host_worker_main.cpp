@@ -1104,8 +1104,22 @@ int main( int argc, char **argv )
             // in-flight executions so plugin code is never unloaded under a
             // running thread. A wedged operator delays only its own worker
             // exit; the launcher's kill ladder is the backstop.
-            if ( poolStarted )
-                pool.drain( kShutdownDrainTimeoutMs );
+            const bool drained = poolStarted ? pool.drain( kShutdownDrainTimeoutMs ) : true;
+            if ( !drained )
+            {
+                // A wedged operator thread was DETACHED (cannot be joined):
+                // its stack may reference main()'s locals (channel, sink,
+                // manifest, policy). Answer the launcher, then exit right
+                // here — never delete plugin code (dlclose under a live
+                // thread is UAF) and never return through main()'s locals.
+                Json::Value result( Json::objectValue );
+                result["shutdown"] = true;
+                result["drained"] = false;
+                std::string sendError;
+                channel.sendResponse( request.id, result, sendError );
+                channel.close();
+                ::_exit( kExitOk );
+            }
             if ( uiProvider )
             {
                 delete uiProvider;   // plugin code is still mapped here
@@ -1301,17 +1315,19 @@ int main( int argc, char **argv )
     // Channel closed (launcher died or crashed): still honour the plugin's
     // shutdown contract inside the worker, then let the process exit.
     const bool drained = poolStarted ? pool.drain( kShutdownDrainTimeoutMs ) : true;
+    if ( !drained )
+    {
+        // A wedged operator thread was DETACHED (cannot be joined): its
+        // stack may reference main()'s locals — and the detached ui.invoke
+        // path may still be INSIDE uiProvider, so it must not be deleted
+        // either. Never return through them — exit the process right here
+        // (the launcher already saw EOF).
+        ::_exit( kExitOk );
+    }
     if ( uiProvider )
     {
         delete uiProvider;
         uiProvider = nullptr;
-    }
-    if ( !drained )
-    {
-        // A wedged operator thread was DETACHED (cannot be joined): its
-        // stack may reference main()'s locals. Never return through them —
-        // exit the process right here (the launcher already saw EOF).
-        ::_exit( kExitOk );
     }
     if ( instanceValid )
     {

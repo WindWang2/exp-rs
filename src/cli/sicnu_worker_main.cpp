@@ -4,6 +4,13 @@
 // the host down — that is the entire point (FAILURE_MATRIX: SIGKILL worker,
 // worker disconnect, GPU OOM inside the worker).
 //
+// No execution-identity resolver here (Data Fabric 8.0, D2 "worker" host):
+// the seam is process-global and every consumer (temporal-workspace
+// fingerprinting, TaskCenter admission) runs in the HOST process that owns
+// this worker's pool — the worker receives already-admitted concrete params
+// over the handshake. A worker-side install would be inert and would only
+// widen this binary's dependency surface.
+//
 // Built-in test hooks (used by the fault-injection suite):
 //   "__hang__"  — loops until cancelled (simulates an unresponsive operator)
 #include "operators/framework/rs_operator.h"

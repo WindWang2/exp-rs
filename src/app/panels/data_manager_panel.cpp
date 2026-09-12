@@ -191,29 +191,21 @@ QString kindText( sicnu::data::AssetKind kind )
 }
 
 /// Detailed type label used as a name prefix (e.g. 多波段栅格 / 单波段栅格).
+/// Falls back to the shared plain kind word (kindText) when the snapshot
+/// carries no raster structure to refine the label with.
 QString kindPrefix( const sicnu::data::AssetSnapshot &snapshot )
 {
-  switch ( snapshot.kind() )
+  if ( snapshot.kind() == sicnu::data::AssetKind::Raster )
   {
-    case sicnu::data::AssetKind::Raster:
+    if ( const auto *raster =
+           std::get_if<sicnu::data::RasterStructure>( &snapshot.structure() ) )
     {
-      if ( const auto *raster =
-             std::get_if<sicnu::data::RasterStructure>( &snapshot.structure() ) )
-      {
-        if ( raster->bandCount <= 1 )
-          return QObject::tr( "单波段栅格" );
-        return QObject::tr( "多波段栅格" );
-      }
-      return QObject::tr( "栅格" );
+      if ( raster->bandCount <= 1 )
+        return QObject::tr( "单波段栅格" );
+      return QObject::tr( "多波段栅格" );
     }
-    case sicnu::data::AssetKind::Vector:
-      return QObject::tr( "矢量" );
-    case sicnu::data::AssetKind::RemoteMap:
-      return QObject::tr( "远程地图" );
-    case sicnu::data::AssetKind::VirtualRaster:
-      return QObject::tr( "虚拟栅格" );
   }
-  return QObject::tr( "未知" );
+  return kindText( snapshot.kind() );
 }
 
 void configureNameCell( QTreeWidgetItem *item,
@@ -811,30 +803,42 @@ void DataManagerPanel::requestPromote( sicnu::data::AssetId id )
     emit promoteRequested( id );
 }
 
-void DataManagerPanel::addAssetRow( QTreeWidgetItem *parent,
-                                    const sicnu::data::AssetSnapshot &snapshot )
+void DataManagerPanel::createRow( QTreeWidgetItem *parent,
+                                  const QString &displayName,
+                                  const QString &kindLabel,
+                                  sicnu::data::AssetKind kind,
+                                  sicnu::data::AssetState state,
+                                  const QString &source,
+                                  sicnu::data::PersistencePolicy persistence,
+                                  const sicnu::data::AssetId &id )
 {
   auto *item = parent ? new QTreeWidgetItem( parent )
                       : new QTreeWidgetItem( m_tree );
-  const QString kindLabel = kindPrefix( snapshot );
-  const QString statusLabel = statusText( snapshot.state() );
-  configureNameCell( item,
-                     snapshot.displayName(),
-                     kindLabel,
-                     kindIcon( snapshot.kind() ),
-                     statusLabel,
-                     statusColor( snapshot.state() ),
-                     snapshot.source().canonicalSource );
-  item->setText( 1, persistenceText( snapshot.persistence() ) );
-  item->setText( 2, QString::number( referenceCount( snapshot.id() ) ) );
-  item->setData( 0, kAssetIdRole, snapshot.id().toString() );
-  if ( snapshot.state() == sicnu::data::AssetState::Missing )
+  const QString statusLabel = statusText( state );
+  configureNameCell( item, displayName, kindLabel, kindIcon( kind ),
+                     statusLabel, statusColor( state ), source );
+  item->setText( 1, persistenceText( persistence ) );
+  item->setText( 2, QString::number( referenceCount( id ) ) );
+  item->setData( 0, kAssetIdRole, id.toString() );
+  if ( state == sicnu::data::AssetState::Missing )
   {
     item->setToolTip(
       0, tr( "%1\n状态: 源缺失 — 可通过重定位恢复\n%2" )
-           .arg( snapshot.displayName(),
-                 snapshot.source().canonicalSource ) );
+           .arg( displayName, source ) );
   }
+}
+
+void DataManagerPanel::addAssetRow( QTreeWidgetItem *parent,
+                                    const sicnu::data::AssetSnapshot &snapshot )
+{
+  createRow( parent,
+             snapshot.displayName(),
+             kindPrefix( snapshot ),
+             snapshot.kind(),
+             snapshot.state(),
+             snapshot.source().canonicalSource,
+             snapshot.persistence(),
+             snapshot.id() );
 }
 
 void DataManagerPanel::addIndexRow( QTreeWidgetItem *parent,
@@ -844,35 +848,20 @@ void DataManagerPanel::addIndexRow( QTreeWidgetItem *parent,
   // index (no per-row snapshot copy). The band-count nuance of the kind
   // label degrades to the plain kind word — tests pin status/persistence
   // labels, not band counts.
-  auto *item = parent ? new QTreeWidgetItem( parent )
-                      : new QTreeWidgetItem( m_tree );
   const QString kindLabel = [&]
   {
     switch ( entry.kind )
     {
       case sicnu::data::AssetKind::Raster:
-        return tr( "栅格" );
       case sicnu::data::AssetKind::Vector:
-        return tr( "矢量" );
       case sicnu::data::AssetKind::RemoteMap:
-        return tr( "远程地图" );
       case sicnu::data::AssetKind::VirtualRaster:
-        return tr( "虚拟栅格" );
+        return kindText( entry.kind );
     }
     return tr( "资产" );
   }();
-  const QString statusLabel = statusText( entry.state );
-  configureNameCell( item, entry.displayName, kindLabel, kindIcon( entry.kind ),
-                     statusLabel, statusColor( entry.state ), entry.source );
-  item->setText( 1, persistenceText( entry.persistence ) );
-  item->setText( 2, QString::number( referenceCount( entry.id ) ) );
-  item->setData( 0, kAssetIdRole, entry.id.toString() );
-  if ( entry.state == sicnu::data::AssetState::Missing )
-  {
-    item->setToolTip( 0,
-                      tr( "%1\n状态: 源缺失 — 可通过重定位恢复\n%2" )
-                        .arg( entry.displayName, entry.source ) );
-  }
+  createRow( parent, entry.displayName, kindLabel, entry.kind, entry.state,
+             entry.source, entry.persistence, entry.id );
 }
 
 void DataManagerPanel::addSentinelRow( QTreeWidgetItem *parent, const QString &text )

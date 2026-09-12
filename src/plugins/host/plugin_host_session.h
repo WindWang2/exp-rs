@@ -191,6 +191,12 @@ private:
     bool spawnWorkerProcess( exprs::PluginDiagnosticLog &diagnostics );
     bool awaitHandshake( exprs::PluginDiagnosticLog &diagnostics );
     void killProcess( const char *reason );
+    /// Shared Channel-EOF handler for request/requestRaw: probes the process
+    /// (waitpid / WaitForSingleObject 0) and, when death is confirmed,
+    /// releases the OS handles under the SAME exchange-winner discipline
+    /// killProcess documents (exactly one closer — concurrent requesters can
+    /// never double-close a recycled handle). True when death was confirmed.
+    bool confirmProcessDeath();
     /// Shared timeout escalation: per-id cancel frame, bounded grace, then
     /// either direct kill (sole in-flight request) or poison (peers still
     /// in flight; the worker dies when the last request drains).
