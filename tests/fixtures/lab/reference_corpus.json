@@ -1,0 +1,12 @@
+{
+  "schema_version": "sicnu.lab.corpus/1",
+  "description": "Reference corpus: canonical correct products. The grader MUST return the declared score. Bands are derived from the closed forms in the rules files, never tuned.",
+  "references": [
+    { "lab_id": "ndvi_basics", "fixture": "ndvi_basics_reference.tif", "expected_score": 100 },
+    { "lab_id": "ndvi_bandpair", "fixture": "ndvi_bandpair_reference.tif", "expected_score": 100 },
+    { "lab_id": "terrain_slope", "fixture": "terrain_slope_reference.tif", "expected_score": 100 },
+    { "lab_id": "planck_temperature", "fixture": "planck_temperature_reference.tif", "expected_score": 100 },
+    { "lab_id": "landcover_classify", "fixture": "landcover_reference.tif", "expected_score": 100 },
+    { "lab_id": "change_detect", "fixture": "change_detect_reference.tif", "expected_score": 100 }
+  ]
+}

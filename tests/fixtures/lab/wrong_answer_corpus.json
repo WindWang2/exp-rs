@@ -1,0 +1,250 @@
+{
+  "schema_version": "sicnu.lab.corpus/1",
+  "description": "Wrong-answer corpus: deliberately wrong submissions with derived expected score bands. pass_line=60; every band lies strictly below it. expected_failures lists the assertion ids that must fire (superset checks keep the grader honest about WHY a submission fails). Regenerate fixtures with generate_fixtures.py.",
+  "wrong_answers": [
+    {
+      "lab_id": "ndvi_basics",
+      "fixture": "ndvi_basics_wrong_stretch.tif",
+      "error_class": "wrong stretch (x100+50 display scaling)",
+      "expected_score_band": [
+        5,
+        40
+      ],
+      "expected_failures": [
+        "range.ndvi",
+        "stats.ndvi_mean_sigma",
+        "hist.bimodal"
+      ]
+    },
+    {
+      "lab_id": "ndvi_basics",
+      "fixture": "ndvi_basics_wrong_all_nodata.tif",
+      "error_class": "masked everything",
+      "expected_score_band": [
+        5,
+        40
+      ],
+      "expected_failures": [
+        "range.ndvi",
+        "stats.ndvi_mean_sigma",
+        "hist.bimodal",
+        "mask.nodata_ratio"
+      ]
+    },
+    {
+      "lab_id": "ndvi_basics",
+      "fixture": "ndvi_basics_wrong_unmasked.tif",
+      "error_class": "forgot to mask (invalid inputs as 0.0)",
+      "expected_score_band": [
+        45,
+        59
+      ],
+      "expected_failures": [
+        "mask.nodata_ratio"
+      ]
+    },
+    {
+      "lab_id": "ndvi_basics",
+      "fixture": "ndvi_basics_wrong_swapped_bands.tif",
+      "error_class": "wrong band pair (NIR/Red swapped)",
+      "expected_score_band": [
+        45,
+        59
+      ],
+      "expected_failures": [
+        "stats.ndvi_mean_sigma"
+      ]
+    },
+    {
+      "lab_id": "ndvi_bandpair",
+      "fixture": "ndvi_bandpair_wrong_swapped.tif",
+      "error_class": "wrong band order in the stack",
+      "expected_score_band": [
+        45,
+        59
+      ],
+      "expected_failures": [
+        "stats.index_mean_sigma",
+        "calib.gain_invariance"
+      ]
+    },
+    {
+      "lab_id": "ndvi_bandpair",
+      "fixture": "ndvi_bandpair_wrong_gain_mismatch.tif",
+      "error_class": "per-band gain mismatch breaks ratio gain invariance",
+      "expected_score_band": [
+        45,
+        59
+      ],
+      "expected_failures": [
+        "calib.gain_invariance"
+      ]
+    },
+    {
+      "lab_id": "terrain_slope",
+      "fixture": "terrain_slope_wrong_degrees.tif",
+      "error_class": "degrees instead of radians",
+      "expected_score_band": [
+        5,
+        40
+      ],
+      "expected_failures": [
+        "stats.slope_mean_sigma",
+        "range.slope_band"
+      ]
+    },
+    {
+      "lab_id": "terrain_slope",
+      "fixture": "terrain_slope_wrong_axis.tif",
+      "error_class": "gradient along the wrong axis (flat plane)",
+      "expected_score_band": [
+        5,
+        40
+      ],
+      "expected_failures": [
+        "stats.slope_mean_sigma",
+        "range.slope_band"
+      ]
+    },
+    {
+      "lab_id": "terrain_slope",
+      "fixture": "terrain_slope_wrong_filled_border.tif",
+      "error_class": "border filled instead of NoData",
+      "expected_score_band": [
+        45,
+        59
+      ],
+      "expected_failures": [
+        "mask.border_nodata"
+      ]
+    },
+    {
+      "lab_id": "planck_temperature",
+      "fixture": "planck_temperature_wrong_celsius.tif",
+      "error_class": "Celsius submitted, Kelvin graded",
+      "expected_score_band": [
+        15,
+        45
+      ],
+      "expected_failures": [
+        "stats.temperature_mean_sigma",
+        "range.temperature"
+      ]
+    },
+    {
+      "lab_id": "planck_temperature",
+      "fixture": "planck_temperature_wrong_dn_inverted.tif",
+      "error_class": "inverted from uncalibrated (x100) radiance",
+      "expected_score_band": [
+        15,
+        45
+      ],
+      "expected_failures": [
+        "stats.temperature_mean_sigma",
+        "range.temperature"
+      ]
+    },
+    {
+      "lab_id": "planck_temperature",
+      "fixture": "planck_temperature_wrong_gain.tif",
+      "error_class": "x1.05 scale slip",
+      "expected_score_band": [
+        15,
+        45
+      ],
+      "expected_failures": [
+        "stats.temperature_mean_sigma",
+        "range.temperature"
+      ]
+    },
+    {
+      "lab_id": "landcover_classify",
+      "fixture": "landcover_wrong_all_veg.tif",
+      "error_class": "majority-class collapse",
+      "expected_score_band": [
+        10,
+        45
+      ],
+      "expected_failures": [
+        "acc.oa_kappa_floor",
+        "acc.class_proportions"
+      ]
+    },
+    {
+      "lab_id": "landcover_classify",
+      "fixture": "landcover_wrong_shifted_labels.tif",
+      "error_class": "legend shifted by one",
+      "expected_score_band": [
+        30,
+        55
+      ],
+      "expected_failures": [
+        "acc.oa_kappa_floor"
+      ]
+    },
+    {
+      "lab_id": "landcover_classify",
+      "fixture": "landcover_wrong_unmasked.tif",
+      "error_class": "forgot to mask unclassifiable pixels",
+      "expected_score_band": [
+        45,
+        59
+      ],
+      "expected_failures": [
+        "mask.nodata_ratio"
+      ],
+      "note": "filled truth-NoData pixels are excluded from the confusion matrix; composition unchanged"
+    },
+    {
+      "lab_id": "change_detect",
+      "fixture": "change_detect_wrong_over_detect.tif",
+      "error_class": "threshold too low (extra 32x32 block flagged)",
+      "expected_score_band": [
+        45,
+        59
+      ],
+      "expected_failures": [
+        "area.changed_interval"
+      ]
+    },
+    {
+      "lab_id": "change_detect",
+      "fixture": "change_detect_wrong_under_detect.tif",
+      "error_class": "threshold too high (first block missed)",
+      "expected_score_band": [
+        45,
+        59
+      ],
+      "expected_failures": [
+        "area.changed_interval"
+      ]
+    },
+    {
+      "lab_id": "change_detect",
+      "fixture": "change_detect_wrong_all_nodata.tif",
+      "error_class": "everything NoData",
+      "expected_score_band": [
+        10,
+        40
+      ],
+      "expected_failures": [
+        "area.changed_interval",
+        "range.binary",
+        "mask.nodata_ratio",
+        "hist.binary_bimodal"
+      ]
+    },
+    {
+      "lab_id": "change_detect",
+      "fixture": "change_detect_wrong_inverted.tif",
+      "error_class": "inverted mask (sign error)",
+      "expected_score_band": [
+        45,
+        59
+      ],
+      "expected_failures": [
+        "area.changed_interval"
+      ]
+    }
+  ]
+}
