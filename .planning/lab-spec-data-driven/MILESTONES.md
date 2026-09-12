@@ -9,4 +9,4 @@
 | M4 | `gen_lab_docs.py` zero-diff regeneration of `docs/labs/` | done — 3980de6cf6; `--check` ok (12 docs) |
 | M5 | `test_labspec` + behavioural widget tests green offscreen; no workbench/app regression | done — test_labspec 5 cases / 91 assertions ✓，test_guided_workflow_widget 5 / 60 ✓，ctest 汇总 10/10 ✓，workbench 4 套件 23 cases ✓（详见 EVIDENCE.md） |
 | M6 | Adversarial review P0=P1=0 | done — round1: 1×P0+3×P1+8×P2 全部处置（REVIEW_LOG.md），round2 自审通过 |
-| M7 | PR created (not merged), URL reported | in progress |
+| M7 | PR created (not merged), URL reported | done — https://github.com/WindWang2/exp-rs/pull/949（不合并，不等 checks；worktree 保留至 merge） |

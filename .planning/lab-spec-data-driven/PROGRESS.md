@@ -37,3 +37,23 @@
 | zsh `--include=*.h` glob 报错 / `echo ===` | 2 | 引号包裹；不用裸 === |
 | FetchContent 克隆 pybind11 SSL 失败 | 3 (cmake 内部重试) | FETCHCONTENT_SOURCE_DIR_* 指向本地 |
 | Edit 工具要求先 Read（CMakeLists 用 sed 看过但未 Read） | 1 | Read 目标区段后重编辑 |
+| master@27b9aa0a63 `auto*`←unique_ptr 编译失败（#913 引入） | 1 | 分支内 `.get()` 修复 55426a0797（DECISIONS #7） |
+| `Qt.AlignCenter` Python-brain 手误 | 1 | `Qt::AlignCenter` d51cc162 |
+| test_labspec `auto*`←shared_ptr；裸测试目标缺 src/app include 路径 | 各1 | `auto`；include 目录补 src/app |
+| gui_job_adapter.h→task_center.h→qgstaskmanager.h 拖 qgis 头进裸测试 | 1 | PIMPL（aa66079 + df179ad） |
+| `pkill -f 'build_and_log'` 自匹配杀掉自己的 shell | 1 | 换用更精确的进程选择，重跑命令 |
+| `ctest -R test_labspec` 得 "No tests were found"（注册名是 Catch2 用例名） | 1 | 用用例名正则跑 ctest + direct 二进制运行，双证据 |
+| `.git/info/exclude` 的 `.planning/` 使否定规则失效 | 1 | `git add -f` 指定 .md（先例一致） |
+
+## 2026-09-13 会话 1（收尾）
+
+- 测试门全绿：test_labspec 5 cases/91 assertions ✓；test_guided_workflow_widget 5/60 ✓；
+  ctest 汇总 10/10 ✓；workbench 4 套件 23 cases ✓；sicnu_geo_rs 链接成功。
+- 基础破损处理：master@27b9aa0a63 的 #913 引入 `auto*`←unique_ptr（任何编译器都病构），
+  分支内最小修复 `55426a0797`（.get()），commit message 注明上游修复后可丢弃。
+- 构建事故记录：整轮全量构建两次被编译错误打断（上述 base 破损 + `Qt.AlignCenter`
+  Python-brain 手误 `d51cc162`），均为小修后 -j1 续跑；负载 24.45>1.5×16 时按硬约束
+  从 -j2 降为 -j1。
+- rebase：fetch 后分支已含 origin/master 尖端（27b9aa0a63），无需实际重放。
+- push 成功（guardrail 未拦截，无需重试）；PR：https://github.com/WindWang2/exp-rs/pull/949
+- 会话结束状态：未合并、未等 checks；worktree 保留至 merge 后移除。
