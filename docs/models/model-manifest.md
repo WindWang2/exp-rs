@@ -55,7 +55,12 @@ digest. Declaring `artifact.checksum` additionally *enforces* the digest
   `scale` (linear/mean_std only), `resize` (`none` | `to_input`), `interpolation`
   (`bilinear` | `nearest`), `nodata_policy` (`zero` only).
 - `tiling`: `supported`, `tile_size`, `overlap`, `halo` (≤ tile_size/2),
-  `batch_size` (1–64).
+  `batch_size` (1–64), `blend` (9.0: `none` | `feather` — cosine-weighted
+  averaging of overlapping tile windows; requires `halo` > 0).
+- per-input `preprocess` override (9.0): any `inputs[]` entry may declare a
+  `preprocess` object with the same vocabulary as the global section; that
+  feed is then normalized with ITS contract (e.g. optical mean_std vs SAR
+  linear). Feeds without the override use the global preprocess unchanged.
 - `output`: `type`, `tensor_names`, `classes`, `uncertainty`
   (`none` | `entropy` | `margin`), `format` (see below), `detection` (see below).
 - `postprocess`: `mask_threshold` (probability binarization), `nms`,
@@ -64,6 +69,12 @@ digest. Declaring `artifact.checksum` additionally *enforces* the digest
   `labels` products).
 - `runtime`: `gpu`, `cpu_fallback`, `estimated_ram_mb`, `estimated_vram_mb`,
   `supports_tiling`, `device` (`cpu` | `cuda` | `cuda:N` | `auto`).
+- `package` (9.0): `aux_files[]` — `{path, role, checksum, size_bytes}` for
+  every file that travels with the weights (class ontology, preprocess
+  config). Each entry is digest-verified at resolve time; a mismatch is a
+  typed readiness failure. The package digest extends the session identity
+  (changed aux bytes never reuse a stale session) and is recorded in the
+  provenance sidecar as `package_digest`.
 
 ## `output.format` — raster-task products
 

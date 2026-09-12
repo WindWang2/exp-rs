@@ -1,31 +1,31 @@
 {
-    "cancel_latency_ms": 0.699531,
-    "cold_load_ms": 410.142075,
-    "date": "2026-09-11T03:23:47",
+    "cancel_latency_ms": 15.870281,
+    "cold_load_ms": 398.11628,
+    "date": "2026-09-12T02:41:43",
     "hardware": {
         "cuda": false
     },
     "peak_rss_mb": 0,
-    "pixels_per_sec": 7253478.131362761,
+    "pixels_per_sec": 5578558.60706279,
     "platform7_multi_input": {
-        "run_ms": 35.90921,
+        "run_ms": 46.127062,
         "schema": "model-runtime-bench-7/1",
         "tiles": 64,
-        "tiles_per_sec": 1782.2725701846405
+        "tiles_per_sec": 1387.4718489549582
     },
     "platform8_ort": {
-        "cold_load_ms": 21.934165,
-        "in_forward_cancel_latency_ms": 24.875185,
-        "named_forward_ms_avg": 0.04334746875,
-        "named_forwards_per_sec": 23069.397794998124,
-        "ort_runtime_version": "1.20.1",
+        "cold_load_ms": 35.254354,
+        "in_forward_cancel_latency_ms": 1.533648,
+        "named_forward_ms_avg": 0.047572390625,
+        "named_forwards_per_sec": 21020.595914187357,
+        "ort_runtime_version": "1.30.0",
         "schema": "model-runtime-bench-ort/1",
-        "warm_load_ms": 1.238217
+        "warm_load_ms": 20.503632
     },
-    "run_ms": 36.140455,
+    "run_ms": 46.99135,
     "schema": "model-runtime-bench/1",
     "tile_size": 64,
     "tiles": 64,
-    "tiles_per_sec": 1770.8686844147367,
-    "warm_load_ms": 0.189828
+    "tiles_per_sec": 1361.9527849274389,
+    "warm_load_ms": 15.830961
 }

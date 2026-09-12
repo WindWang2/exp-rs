@@ -56,6 +56,7 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
         runtime/model_runtime.cpp
         runtime/tensor_blob.cpp
         runtime/device_planner.cpp
+        runtime/nvml_inventory.cpp
         runtime/provider_wire.cpp
         runtime/python_worker_provider.cpp
         runtime/http_provider.cpp
@@ -65,6 +66,7 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
         runtime/detection_postprocess.cpp
         runtime/detection_tile_engine.cpp
         runtime/model_execution_service.cpp
+        runtime/provenance_verify.cpp
     )
     message(STATUS "OpenCV operators enabled (imgproc found)")
 else()

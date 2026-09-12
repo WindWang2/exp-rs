@@ -14,6 +14,55 @@ All notable changes to the `exp-rs` project will be documented in this file.
 - **Master build repair**: GDAL 3.13.3 `count`-parameter type compat in canonical metadata; experiment run bridge const-qualification (GCC 16).
 ## [Unreleased] - 2026-09-12
 
+### AI Model Runtime & Multimodal EO Inference 9.0 (goal series)
+
+- **Real device truth (NVML)**: hardware detection probes the actual NVIDIA
+  driver (dlopen, optional) for device names, total and free VRAM per card,
+  refreshed on every acquire. Direct-CUDA runtimes (onnxruntime) resolve
+  against the real-driver gate; opencv-dnn keeps its cv::dnn-backend gate.
+  Admission free-VRAM is the honest minimum of ledger-reserved and
+  driver-reported free. `SICNU_MODEL_*` env overrides remain the test seams.
+- **CUDA EP executed for real**: a resolved CUDA device attempts the CUDA
+  execution provider; failures are typed `DeviceUnavailable` (never a silent
+  CPU demotion). Sessions expose `providerDetails()` (execution provider +
+  backend version) into payloads and provenance sidecars. Python worker
+  sessions pin `CUDA_VISIBLE_DEVICES` to the resolved device and may declare
+  providers/runtime version in the handshake.
+- **Timeout taxonomy**: a live-but-unresponsive provider (`timed out`) is a
+  new append-only `Timeout` failure kind (`ExternalProcessTimeout`), distinct
+  from `ProviderCrash`.
+- **Per-feed preprocessing**: `inputs[].preprocess` overrides the global
+  contract per feed (closed vocabulary, arity validated per feed); the
+  effective contract is recorded per feed in payload + sidecar.
+- **Feed identity fingerprints**: deterministic structure + bounded content
+  digest per feed (honest `file-too-large` marker beyond the bound).
+- **Feather tile blending**: `tiling.blend: "feather"` / rs:infer `blend`
+  averages overlapping tile windows (cosine ramp across the halo) in a
+  bounded sliding-row accumulator; probabilities blend before the derived
+  collapse; NaN predictions skip; halo and grid-preserving geometry required
+  (typed refusals otherwise); multi-input refuses feather in 9.0.
+- **Per-class product metadata**: Labels/Mask products tally per-product-class
+  pixels during the final streaming pass; payload + sidecar carry
+  `class_pixel_counts` (and class names).
+- **Package identity**: `package.aux_files[]` digest-bound at resolve time
+  (missing/size/checksum mismatch → typed readiness failures); the package
+  digest extends the session cache key.
+- **Consumer-side provenance verification**: `verifyProductProvenance()`
+  returns typed verdicts (MissingSidecar / Malformed / UnsupportedSchema /
+  ModelMismatch / GridMismatch / StaleProduct) — the 8.0 crash window is now
+  consumer-detectable.
+- **Contract truth pinned (#872)**: rs:infer schema declares `device` and
+  `blend`; a mechanical regression pins "every parsed parameter is declared
+  in the schema" for all model operators.
+- **Real CUDA evidence**: capability-gated ORT suites and a gated benchmark
+  record real CUDAExecutionProvider execution (RTX 3080 Laptop) with
+  CPU↔GPU bit-exact known answers; CPU-only hosts keep the honest
+  typed-refusal path (marked, never claimed).
+- **Cross-track build unblocks (minimal)**: GDAL 3.13 `GDALMDArrayRead`
+  count-parameter compat in `canonical_metadata.cpp` (the geospatial
+  track's file; mirrors its own 3.13 pattern) and a `const auto` fix in
+  `run_bridge.cpp` (mlops track's file; the fetched copy is mutated by
+  design).
 ### Scientific MLOps / Reproducibility 9.0 (goal series)
 
 - **Split-boundary correctness (M0, fixes #875)**: total split-config

@@ -210,7 +210,14 @@ Json::Value RsInferenceOperator::schema() const
     props["tta"] = makeEnumParam( "tta", "Test-time augmentation (flip averaging)",
                                   { "none", "hflip", "hvflip" }, "none" );
     props["batchCap"] = makeIntegerParam( "batchCap", "Hard cap on tiles per forward pass (0 = manifest/budget default)", 0 );
-    props["device"] = makeStringParam( "device", "Execution device (cpu/cuda)", "" );
+    // Execution device token: "" | auto | cpu | cuda | cuda:N (#872 — the
+    // parameter is parsed by run() and echoed in outputs, so it MUST be
+    // declared here; strict schema validation rejects valid requests
+    // otherwise).
+    props["device"] = makeStringParam( "device", "Execution device (\"\" = manifest runtime.device; auto | cpu | cuda | cuda:N)", "" );
+    // Platform 9.0 tile blending (overrides the manifest tiling.blend).
+    props["blend"] = makeEnumParam( "blend", "Tile output blending across the halo overlap",
+                                    { "unset", "none", "feather" }, "unset" );
     // Platform 8.0 multimodal / temporal feeds: one object per manifest input
     // contract. When declared, `input` is not used (the primary feed is the
     // grid authority).
@@ -220,10 +227,12 @@ Json::Value RsInferenceOperator::schema() const
       named["type"] = "array";
       named["description"] =
         "Named multi-input/temporal feeds for multi-input models (one object per "
-        "manifest input): {name, paths[], bands[], timestamps[], quality_masks[], "
-        "prepared_from[]}. paths are time-ordered frames; timestamps are ISO 8601 "
-        "(strictly increasing); quality_masks mark invalid pixels per frame; "
-        "prepared_from records pre-aligned source paths (provenance only).";
+        "manifest input): {name, paths[] or stac_collection (+stac_asset), "
+        "bands[], timestamps[], quality_masks[], prepared_from[]}. paths are "
+        "time-ordered frames (a local STAC collection document expands to them); "
+        "timestamps are ISO 8601 (strictly increasing); quality_masks mark "
+        "invalid pixels per frame; prepared_from records pre-aligned source "
+        "paths (provenance only).";
       Json::Value namedItems( Json::objectValue );
       namedItems["type"] = "object";
       named["items"] = namedItems;
@@ -503,6 +512,15 @@ Json::Value RsInferenceOperator::run( const Json::Value &params, RSOperatorConte
     else if ( tta == "hvflip" )
       request.tta = runtime::TtaMode::HVFlip;
     request.batchSizeOverride = std::max( 0, getInt( params, "batchCap", 0 ) );
+    // Platform 9.0 (M5): tile output blending (Unset = follow the manifest).
+    {
+      const std::string blend =
+        getEnum( params, "blend", { "unset", "none", "feather" }, "unset" );
+      if ( blend == "feather" )
+        request.blend = runtime::TileBlend::Feather;
+      else if ( blend == "none" )
+        request.blend = runtime::TileBlend::None;
+    }
 
     const runtime::ModelExecutionResult result =
       runtime::runModelInference( request, context );

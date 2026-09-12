@@ -1,6 +1,7 @@
 // src/operators/runtime/tile_inference_engine.cpp
 #include "operators/runtime/tile_inference_engine.h"
 
+#include "operators/framework/artifact_digest.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
 
@@ -198,6 +199,9 @@ Json::Value buildProvenanceDocument( const ModelInfo &model, const ModelRuntimeP
   modelJson["identity_tag"] = model.identityTag();
   if ( !model.contentDigest.empty() )
     modelJson["content_digest"] = model.contentDigest;
+  // Platform 9.0 (M7/M8): the whole-package digest when the model ships one.
+  if ( !model.packageDigest.empty() )
+    modelJson["package_digest"] = model.packageDigest;
   modelJson["framework"] = model.framework;
   if ( !model.sourceManifest.empty() )
     modelJson["source_manifest"] = model.sourceManifest;
@@ -210,6 +214,14 @@ Json::Value buildProvenanceDocument( const ModelInfo &model, const ModelRuntimeP
   {
     execution["backend"] = runtime->backendName();
     execution["device"] = runtime->deviceName();
+    // Platform 9.0 (M8) execution identity: the execution provider that was
+    // engaged and the backend library version — reproducibility can name the
+    // exact software that ran, honestly ("" stays absent).
+    const ProviderRuntimeDetails details = runtime->providerDetails();
+    if ( !details.executionProvider.empty() )
+      execution["execution_provider"] = details.executionProvider;
+    if ( !details.runtimeVersion.empty() )
+      execution["runtime_version"] = details.runtimeVersion;
   }
   execution["tile_size"] = stats.tileSize;
   execution["halo"] = stats.halo;
@@ -221,6 +233,10 @@ Json::Value buildProvenanceDocument( const ModelInfo &model, const ModelRuntimeP
     execution["batch_reductions"] = stats.batchReductions;
   if ( !outputModeNote.empty() )
     execution["output_mode"] = outputModeNote;
+  // Platform 9.0 (M5/B5): the resolved blend method is part of the output
+  // identity — a blended and a hard-stitched product are different products.
+  if ( model.tiling.blend == "feather" )
+    execution["blend"] = "feather";
   prov["execution"] = execution;
 
   Json::Value inputs( Json::arrayValue );
@@ -243,6 +259,13 @@ Json::Value buildProvenanceDocument( const ModelInfo &model, const ModelRuntimeP
     input["height"] = grid.height;
     if ( grid.frames > 1 )
       input["frames"] = grid.frames;
+    // Platform 9.0 (M3): effective preprocess + identity fingerprint — the
+    // reproduction record states what preprocessed this feed and what the
+    // fed raster was fingerprinted as.
+    if ( !grid.preprocessNote.empty() )
+      input["preprocess"] = grid.preprocessNote;
+    if ( grid.fingerprint.isObject() )
+      input["fingerprint"] = grid.fingerprint;
     inputs.append( input );
   }
   prov["inputs"] = inputs;
@@ -256,6 +279,22 @@ Json::Value buildProvenanceDocument( const ModelInfo &model, const ModelRuntimeP
     heads.append( channels );
   if ( !stats.headChannels.empty() )
     output["head_channels"] = heads;
+  // Platform 9.0 (M6): per-product-class pixel metadata for Labels/Mask.
+  if ( !stats.classPixelCounts.empty() )
+  {
+    Json::Value counts( Json::arrayValue );
+    for ( long long pixels : stats.classPixelCounts )
+      counts.append( static_cast<Json::Int64>( pixels ) );
+    output["class_pixel_counts"] = counts;
+    // Names index the counts only when no remap reorders the product domain.
+    if ( !model.output.classes.empty() && model.postprocess.classMapping.empty() )
+    {
+      Json::Value names( Json::arrayValue );
+      for ( const std::string &cls : model.output.classes )
+        names.append( cls );
+      output["classes"] = names;
+    }
+  }
   prov["output"] = output;
 
   prov["created_utc"] =
@@ -384,6 +423,346 @@ bool TileInferenceEngine::batchIsAllNoData( const std::vector<int> &validPixelCo
   return true;
 }
 
+Json::Value TileInferenceEngine::feedFingerprint( const std::string &path,
+                                                  const std::vector<int> &bands,
+                                                  std::int64_t contentMaxBytes )
+{
+  GdalDatasetWrapper ds;
+  if ( !ds.open( QString::fromStdString( path ) ) )
+    throw RSOperatorError( ErrorCode::GdalError, "failed to open input raster: " + path );
+
+  Json::Value fp( Json::objectValue );
+  fp["path"] = path;
+  fp["width"] = ds.width();
+  fp["height"] = ds.height();
+  fp["band_count"] = ds.bandCount();
+  Json::Value dtypes( Json::arrayValue );
+  for ( int b = 1; b <= ds.bandCount(); ++b )
+    dtypes.append( GDALGetDataTypeName(
+      static_cast<GDALDataType>( ds.bandDataType( b ) ) ) );
+  fp["band_dtypes"] = dtypes;
+  const std::array<double, 6> gt = ds.geoTransform();
+  Json::Value gtJson( Json::arrayValue );
+  for ( int i = 0; i < 6; ++i )
+    gtJson.append( gt[static_cast<std::size_t>( i )] );
+  fp["geotransform"] = gtJson;
+  const QString projection = ds.projection();
+  if ( !projection.trimmed().isEmpty() )
+    fp["crs"] = crsDisplayName( projection );
+  Json::Value selected( Json::arrayValue );
+  for ( int band : bands )
+    selected.append( band );
+  fp["selected_bands"] = selected;
+
+  // Content identity: a real digest when the file fits the bound; an honest
+  // size+mtime marker when it does not (never a digest-shaped lie).
+  const QFileInfo info( QString::fromStdString( path ) );
+  const qint64 bytes = info.size();
+  Json::Value content( Json::objectValue );
+  content["bytes"] = static_cast<Json::Int64>( bytes );
+  if ( bytes >= 0 && bytes <= contentMaxBytes )
+  {
+    content["sha256"] = sicnu::operators::artifactSha256Hex( path );
+  }
+  else
+  {
+    content["reason"] = "file-too-large";
+    content["mtime_utc"] =
+      info.lastModified().toUTC().toString( Qt::ISODateWithMs ).toStdString();
+  }
+  fp["content"] = content;
+  return fp;
+}
+
+// --- Platform 9.0 (M5): feather-weighted tile blending -----------------------
+
+/// Cosine-feather weight for one output pixel of a tile window: 1.0 inside
+/// the core, ramping from 1 (core edge) to 0 (window edge) across the halo
+/// with a cosine profile. @p distance is how far the pixel lies beyond the
+/// core edge in px; @p halo is the ramp width (<=0 → everything is core).
+float featherWeight( int distance, int halo )
+{
+  if ( distance <= 0 )
+    return 1.0f;
+  if ( distance >= halo )
+    return 0.0f;
+  // Cosine taper: 1 at the core edge, 0 at the window edge — the overlap
+  // contribution fades smoothly with distance from the tile's core.
+  const double r = static_cast<double>( distance ) / static_cast<double>( halo );
+  constexpr double kPi = 3.14159265358979323846;
+  return static_cast<float>( 0.5 * ( 1.0 + std::cos( kPi * r ) ) );
+}
+
+/**
+ * Feather-weighted tile accumulator (Platform 9.0 M5). The historical stitch
+ * crops every tile's halo and writes hard core edges — visible seams where
+ * neighboring tiles disagree. With blending, the tile's FULL window
+ * prediction (core + halo, i.e. exactly what the model saw) contributes a
+ * weighted average: weight 1 in the core, cosine ramp across the halo.
+ * Final pixel = Σ(w·v)/Σw over every tile that saw it (NaN predictions are
+ * skipped — weight 0 — and a pixel no tile predicted stays NoData).
+ *
+ * Memory is bounded by a sliding row window of (tile + 2·halo) rows: rows are
+ * final once every tile whose halo could reach them has been added, and tiles
+ * arrive in row-major order, so rows leave the window monotonically. The
+ * accumulator never holds the whole raster.
+ */
+class FeatherAccumulator
+{
+  public:
+    FeatherAccumulator( int rasterW, int rasterH, int slotCount, int tileSize, int halo,
+                        RasterOutputMode mode, float maskThreshold,
+                        const std::vector<int> &classMapping, float writeNoData )
+        : m_rasterW( rasterW ), m_rasterH( rasterH ), m_slots( std::max( 1, slotCount ) ),
+          m_span( std::clamp( tileSize + 2 * std::max( 0, halo ), 1, rasterH ) ),
+          m_mode( mode ), m_maskThreshold( maskThreshold ), m_classMapping( classMapping ),
+          m_writeNoData( writeNoData )
+    {
+      resetWindow( 0 );
+    }
+
+    int windowTop() const { return m_top; }
+
+    /// Adds one full-window plane (fed-size, core+halo) for one slot. The
+    /// window must already cover the tile's affected rows — the engine calls
+    /// flushThrough( tile.y - halo ) BEFORE adding, per tile, in row-major
+    /// order (rows below tile.y - halo can receive no further contributions).
+    /// Platform 9.0 (A4): records the tile's OWN core validity verdict. Cores
+    /// are disjoint, so a marked pixel is NoData even where a neighbor's halo
+    /// predicted a finite value — blending refines valid pixels only.
+    void addInvalidMask( const cv::Mat &invalidMask, const CoreTile &core, int halo )
+    {
+      for ( int row = 0; row < core.h; ++row )
+      {
+        const uchar *maskRow = invalidMask.ptr<uchar>( row );
+        for ( int col = 0; col < core.w; ++col )
+        {
+          if ( !maskRow[col] )
+            continue;
+          const int y = core.y + row;
+          const int x = core.x + col;
+          if ( y < m_top || y >= m_top + m_span || x < 0 || x >= m_rasterW )
+            continue;
+          m_invalid.ptr<float>( y - m_top )[x] += 1.0f;
+        }
+      }
+    }
+
+    void add( int slot, const cv::Mat &windowPlane, const CoreTile &core, int halo,
+              int windowW, int windowH )
+    {
+      CV_Assert( slot >= 0 && slot < m_slots );
+      // The window prediction may overhang the raster; clip to it.
+      const int x0 = std::max( 0, core.x - halo );
+      const int y0 = std::max( 0, core.y - halo );
+      const int x1 = std::min( m_rasterW, core.x + core.w + halo );
+      const int y1 = std::min( m_rasterH, core.y + core.h + halo );
+      if ( x0 >= x1 || y0 >= y1 )
+        return;
+      cv::Mat sum = m_sum[static_cast<std::size_t>( slot )];
+      for ( int y = y0; y < y1; ++y )
+      {
+        const int wy = y - ( core.y - halo ); // window-plane row
+        if ( wy < 0 || wy >= windowH )
+          continue;
+        const float *srcRow = windowPlane.ptr<float>( wy );
+        float *sumRow = sum.ptr<float>( y - m_top );
+        float *weightRow = m_weight.ptr<float>( y - m_top );
+        for ( int x = x0; x < x1; ++x )
+        {
+          const int wx = x - ( core.x - halo );
+          if ( wx < 0 || wx >= windowW )
+            continue;
+          const float v = srcRow[wx];
+          if ( !std::isfinite( v ) )
+            continue; // nodata prediction: weight 0, never poisons the average
+          // Weight: distance from the CORE rect (per axis), cosine ramp.
+          const int dx = std::max( { core.x - x, x - ( core.x + core.w - 1 ), 0 } );
+          const int dy = std::max( { core.y - y, y - ( core.y + core.h - 1 ), 0 } );
+          const float w = featherWeight( dx, halo ) * featherWeight( dy, halo );
+          sumRow[x] += v * w;
+          weightRow[x] += w;
+        }
+      }
+    }
+
+    /// Finalizes rows [m_top, rowExclusive) through the writer.
+    void flushThrough( int rowExclusive, GdalStreamingOutput &writer )
+    {
+      const int last = std::min( rowExclusive, m_rasterH );
+      if ( last <= m_top )
+        return;
+      finalizeRows( m_top, last, writer );
+      // Clear the finalized rows' accumulators (they are reusable window rows).
+      const int cleared = std::min( last - m_top, m_span );
+      for ( int s = 0; s < m_slots; ++s )
+        m_sum[static_cast<std::size_t>( s )]
+         ( cv::Range( 0, cleared ), cv::Range::all() ) = 0.0f;
+      m_weight( cv::Range( 0, cleared ), cv::Range::all() ) = 0.0f;
+      m_invalid( cv::Range( 0, cleared ), cv::Range::all() ) = 0.0f;
+      m_top = last;
+    }
+
+    /// Finalizes everything remaining (end of run).
+    void finish( GdalStreamingOutput &writer ) { flushThrough( m_rasterH, writer ); }
+
+  private:
+    void resetWindow( int top )
+    {
+      m_top = top;
+      m_sum.assign( static_cast<std::size_t>( m_slots ),
+                    cv::Mat::zeros( m_span, m_rasterW, CV_32FC1 ) );
+      m_weight = cv::Mat::zeros( m_span, m_rasterW, CV_32FC1 );
+      m_invalid = cv::Mat::zeros( m_span, m_rasterW, CV_32FC1 );
+    }
+
+    /// Writes rows [from, to): Probability mode writes every slot as its own
+    /// band; derived modes collapse the class slots into ONE band (argmax /
+    /// threshold), the class blend happening BEFORE the collapse.
+    void finalizeRows( int from, int to, GdalStreamingOutput &writer )
+    {
+      const int rows = to - from;
+      const GdalBlockStream::Tile writeTile{ 0, from, m_rasterW, rows, 0, m_rasterW, rows, 0, 1 };
+      if ( m_mode == RasterOutputMode::Probability )
+      {
+        cv::Mat out( rows, m_rasterW, CV_32FC1 );
+        for ( int s = 0; s < m_slots; ++s )
+        {
+          for ( int r = 0; r < rows; ++r )
+          {
+            const float *sumRow = m_sum[static_cast<std::size_t>( s )].ptr<float>( r );
+            const float *weightRow = m_weight.ptr<float>( r );
+            const float *invalidRow = m_invalid.ptr<float>( r );
+            float *outRow = out.ptr<float>( r );
+            for ( int x = 0; x < m_rasterW; ++x )
+              outRow[x] = ( weightRow[x] > 0.0f && invalidRow[x] <= 0.0f )
+                            ? sumRow[x] / weightRow[x] : m_writeNoData;
+          }
+          if ( !writer.writeTile( s + 1, writeTile, out.ptr<float>() ) )
+            throw RSOperatorError( ErrorCode::FileNotWritable,
+                                   "failed to write blended output rows" );
+        }
+        return;
+      }
+      // Derived modes: the class slots are [0, m_classCount); slot
+      // m_classCount (when present) is the blended uncertainty band.
+      const int classes = m_classCount > 0 ? m_classCount : m_slots;
+      const bool hasUncertainty = m_slots > classes;
+      cv::Mat derived( rows, m_rasterW, CV_32FC1 );
+      for ( int r = 0; r < rows; ++r )
+      {
+        const float *weightRow = m_weight.ptr<float>( r );
+        const float *invalidRow = m_invalid.ptr<float>( r );
+        float *outRow = derived.ptr<float>( r );
+        for ( int x = 0; x < m_rasterW; ++x )
+        {
+          if ( weightRow[x] <= 0.0f || invalidRow[x] > 0.0f )
+          {
+            outRow[x] = m_writeNoData;
+            continue;
+          }
+          int best = 0;
+          float bestv = -std::numeric_limits<float>::infinity();
+          bool invalid = false;
+          for ( int c = 0; c < classes; ++c )
+          {
+            const float v = m_sum[static_cast<std::size_t>( c )].ptr<float>( r )[x]
+                            / weightRow[x];
+            if ( !std::isfinite( v ) )
+            {
+              invalid = true;
+              break;
+            }
+            if ( v > bestv )
+            {
+              bestv = v;
+              best = c;
+            }
+          }
+          if ( invalid )
+          {
+            outRow[x] = m_writeNoData;
+            continue;
+          }
+          switch ( m_mode )
+          {
+            case RasterOutputMode::Labels:
+            {
+              const int productClass = ( static_cast<std::size_t>( best ) < m_classMapping.size() )
+                                         ? m_classMapping[static_cast<std::size_t>( best )]
+                                         : best;
+              outRow[x] = static_cast<float>( productClass );
+              if ( m_classTally && productClass >= 0
+                   && static_cast<std::size_t>( productClass ) < m_classTally->size() )
+                ( *m_classTally )[static_cast<std::size_t>( productClass )]++;
+              break;
+            }
+            case RasterOutputMode::Mask:
+            {
+              const float maskValue = ( classes == 1 )
+                                        ? ( bestv >= m_maskThreshold ? 1.0f : 0.0f )
+                                        : ( best != 0 ? 1.0f : 0.0f );
+              outRow[x] = maskValue;
+              if ( m_classTally && static_cast<std::size_t>( maskValue ) < m_classTally->size() )
+                ( *m_classTally )[static_cast<std::size_t>( maskValue )]++;
+              break;
+            }
+            case RasterOutputMode::Confidence:
+              outRow[x] = bestv;
+              break;
+            default:
+              outRow[x] = m_writeNoData;
+              break;
+          }
+        }
+      }
+      GdalBlockStream::Tile bandTile = writeTile;
+      if ( !writer.writeTile( 1, bandTile, derived.ptr<float>() ) )
+        throw RSOperatorError( ErrorCode::FileNotWritable,
+                               "failed to write blended output rows" );
+      if ( hasUncertainty )
+      {
+        cv::Mat unc( rows, m_rasterW, CV_32FC1 );
+        for ( int r = 0; r < rows; ++r )
+        {
+          const float *sumRow = m_sum[static_cast<std::size_t>( classes )].ptr<float>( r );
+          const float *weightRow = m_weight.ptr<float>( r );
+          const float *invalidRow = m_invalid.ptr<float>( r );
+          float *outRow = unc.ptr<float>( r );
+          for ( int x = 0; x < m_rasterW; ++x )
+            outRow[x] = ( weightRow[x] > 0.0f && invalidRow[x] <= 0.0f )
+                          ? sumRow[x] / weightRow[x] : m_writeNoData;
+        }
+        if ( !writer.writeTile( 2, bandTile, unc.ptr<float>() ) )
+          throw RSOperatorError( ErrorCode::FileNotWritable,
+                                 "failed to write blended uncertainty rows" );
+      }
+    }
+
+    int m_rasterW;
+    int m_rasterH;
+    int m_slots;
+    int m_span;      // window height in rows (tile + 2·halo, clamped to raster)
+    int m_top = 0;   // first raster row held by the window
+    std::vector<cv::Mat> m_sum;
+    cv::Mat m_weight;
+    cv::Mat m_invalid; // core-invalid marks (Platform 9.0: NoData wins)
+    RasterOutputMode m_mode;
+    float m_maskThreshold = 0.5f;
+    std::vector<int> m_classMapping;
+    float m_writeNoData = std::numeric_limits<float>::quiet_NaN();
+    int m_classCount = 0; // derived modes: how many of the slots are head-0 classes
+    std::vector<long long> *m_classTally = nullptr; // Platform 9.0 (M6), optional
+
+  public:
+    /// Declared by the engine after construction: how many of the slots are
+    /// CLASS planes of head 0 (derived modes), enabling the blended collapse.
+    void setClassCount( int classes ) { m_classCount = classes; }
+    /// Platform 9.0 (M6): shared per-product-class tally (engine-owned,
+    /// lives for the whole run).
+    void setClassTally( std::vector<long long> *tally ) { m_classTally = tally; }
+};
+
 TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
                                              const std::vector<int> &bands,
                                              const std::string &outputPath,
@@ -400,6 +779,17 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
 {
   if ( !m_runtime )
     throw RSOperatorError( ErrorCode::ComputationError, "tile inference engine has no runtime session" );
+
+  // Platform 9.0 (M3): a per-input preprocess override on a SINGLE-input
+  // manifest is refused — run() executes the GLOBAL contract; silently
+  // ignoring an override would feed the model un-normalized pixels (the
+  // #646 failure class: a declared knob that does nothing).
+  if ( !m_model.inputs.empty() && m_model.inputs[0].preprocessDeclared )
+    throw RSOperatorError(
+      ErrorCode::InvalidParameter,
+      "inputs[0].preprocess override is only executed by the multi-input "
+        "engine (named_inputs); a single-input model must declare its "
+        "preprocessing in the global preprocess section" );
 
   // Platform 7.0 preprocess additions are executed by the multimodal engine;
   // the single-input engine refuses them loudly instead of running identity.
@@ -560,6 +950,21 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   const int modelH = resizeToInput ? m_model.input.height : 0;
   const int interp = pre.interpolation == "nearest" ? cv::INTER_NEAREST : cv::INTER_LINEAR;
 
+  // Platform 9.0 (M5): tile output blending. options.blend (Unset) defers to
+  // the manifest's tiling.blend (default none = the historical hard-edge
+  // stitch). Feather blending requires a halo — the whole point is averaging
+  // the overlap zone — and the grid-preserving head geometry (per head below);
+  // anything else is a typed refusal, never a silently ignored knob.
+  TileBlend blend = options.blend;
+  if ( blend == TileBlend::Unset )
+    blend = m_model.tiling.blend == "feather" ? TileBlend::Feather : TileBlend::None;
+  if ( blend == TileBlend::Feather && halo <= 0 )
+    throw RSOperatorError(
+      ErrorCode::InvalidParameter,
+      "tiling.blend=feather requires a halo (tiling.halo or tiling.overlap) — "
+        "overlapping windows are what gets averaged; refusing instead of "
+        "blending nothing" );
+
   // Core tile grid over the raster extent.
   std::vector<CoreTile> core;
   for ( int y = 0; y < rasterH; y += tileSize )
@@ -620,6 +1025,9 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   std::vector<CoreTile> deferredNoData;
 
   std::unique_ptr<GdalStreamingOutput> writer;
+  // Platform 9.0 (M5): the feather-blending accumulator (created with the
+  // writer; owns all output writing while active).
+  std::unique_ptr<FeatherAccumulator> accumulator;
   // Staging path for the atomic publish (assigned when the writer is created;
   // empty until then — the publish step runs only on full success).
   QString stagePath;
@@ -644,8 +1052,24 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   // partially invalid tiles.
   auto flushDeferredNoData = [ & ]( int currentTileIndex )
   {
+    // Platform 9.0 (M5): under feather blending the accumulator owns every
+    // written pixel; an all-nodata tile contributes nothing and its pixels
+    // end as NoData wherever no neighbor covered them (finish() normalizes).
     if ( !writer || deferredNoData.empty() )
       return;
+    if ( blend == TileBlend::Feather )
+    {
+      // Platform 9.0 (A4): under blending a deferred all-nodata tile must
+      // still declare its cores invalid, or neighbor halos would inpaint
+      // them with predictions (the stitched path writes NoData directly).
+      for ( const CoreTile &dt : deferredNoData )
+      {
+        cv::Mat allInvalid( dt.h, dt.w, CV_8UC1, cv::Scalar( 1 ) );
+        accumulator->addInvalidMask( allInvalid, dt, halo );
+      }
+      deferredNoData.clear();
+      return;
+    }
     for ( const CoreTile &dt : deferredNoData )
     {
       // NoData fill uses the WRITER's sentinel (NaN for float stacks, 255/65535
@@ -867,6 +1291,47 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       stats.headChannels = headChannelList;
       if ( uncertaintyHeadIndex >= 0 )
         stats.headChannels[static_cast<std::size_t>( uncertaintyHeadIndex )] += 1;
+      // Platform 9.0 (M6): per-class product metadata for Labels/Mask.
+      if ( mode == RasterOutputMode::Labels || mode == RasterOutputMode::Mask )
+      {
+        // Labels: PRODUCT classes after the remap; Mask: the {0,1} domain.
+        int productClasses = 2;
+        if ( mode == RasterOutputMode::Labels )
+          productClasses = m_model.postprocess.classMapping.empty()
+            ? static_cast<int>( m_model.output.classes.size() )
+            : 1 + *std::max_element( m_model.postprocess.classMapping.begin(),
+                                     m_model.postprocess.classMapping.end() );
+        stats.classPixelCounts.assign(
+          static_cast<std::size_t>( std::max( 1, productClasses ) ), 0 );
+      }
+      // Platform 9.0 (M5): with feather blending the accumulator owns ALL
+      // output writing — one slot per Probability band, or the head-0 class
+      // slots (+ optional blended uncertainty slot) for derived modes.
+      if ( blend == TileBlend::Feather )
+      {
+        // The blended Mask collapse must threshold EXACTLY like the stitched
+        // path: an undeclared mask_threshold means 0.5, never the raw -1
+        // sentinel (which would write all-ones masks).
+        const float blendedMaskThreshold =
+          m_model.postprocess.maskThreshold >= 0.0
+            ? static_cast<float>( m_model.postprocess.maskThreshold ) : 0.5f;
+        if ( mode == RasterOutputMode::Probability )
+          accumulator = std::make_unique<FeatherAccumulator>(
+            rasterW, rasterH, writerBands, tileSize, halo, mode,
+            blendedMaskThreshold,
+            m_model.postprocess.classMapping, writeNoData );
+        else
+        {
+          const int head0Classes = headChannelList.empty() ? 0 : headChannelList.front();
+          const int slotCount = head0Classes + ( uncertaintyHeadIndex >= 0 ? 1 : 0 );
+          accumulator = std::make_unique<FeatherAccumulator>(
+            rasterW, rasterH, std::max( 1, slotCount ), tileSize, halo, mode,
+            blendedMaskThreshold,
+            m_model.postprocess.classMapping, writeNoData );
+          accumulator->setClassCount( head0Classes );
+          accumulator->setClassTally( &stats.classPixelCounts );
+        }
+      }
       // Record the head layout so downstream consumers can split the stack.
       {
         QString layout;
@@ -944,6 +1409,33 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
         const CoreTile &bt = batchCores[bi];
         const int fedW = batchFedSize[bi].first;
         const int fedH = batchFedSize[bi].second;
+        // Platform 9.0 (M5): rows strictly above this tile's window top can
+        // receive no further contributions (row-major tiles) — finalize them.
+        if ( accumulator )
+        {
+          accumulator->flushThrough( std::max( 0, bt.y - halo ), *writer );
+          // The tile's OWN core validity verdict (NoData wins over neighbor
+          // halo predictions — Platform 9.0 A4 remediation).
+          accumulator->addInvalidMask( batchMasks[bi], bt, halo );
+        }
+        // Whether this tile's head output maps 1:1 back onto the FED window
+        // (the geometry feather blending needs: the accumulator averages the
+        // whole window prediction, so resizing/cropping paths must not run).
+        const bool blendThisHead = accumulator && !resizeToInput
+                                     && outW == fedW && outH == fedH;
+        // Platform 9.0 (M5): blending REQUIRES grid-preserving heads. A
+        // strided/resized head would bypass the accumulator and write its
+        // tiles directly — mixing two write paths over the same pixels. A
+        // typed refusal, never silent mixing (edge tiles make the fed sizes
+        // vary per tile, hence the per-tile verdict).
+        if ( accumulator && !blendThisHead )
+          throw RSOperatorError(
+            ErrorCode::InvalidParameter,
+            "tiling.blend=feather requires grid-preserving heads: head '" + headName
+              + "' produced " + std::to_string( outW ) + "x" + std::to_string( outH )
+              + " against a " + std::to_string( fedW ) + "x" + std::to_string( fedH )
+              + " fed window (strided export or preprocess.resize=to_input) — drop "
+                "the blend contract or use a grid-preserving export" );
         // Stitched (core-size) planes of this tile for the uncertainty pass.
         std::vector<cv::Mat> headPlanes;
         if ( isUncertaintyHead && !uncertainty.empty() )
@@ -958,35 +1450,42 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
           // core pixels are [halo, halo+core) so overlapping windows never
           // shift or duplicate output. Models that change the spatial dims
           // (strided heads): resample back to the core size.
-          if ( outW == fedW && outH == fedH )
+          // Platform 9.0 (M5): under feather blending the FULL window
+          // prediction (core + halo — exactly what the model saw) is what the
+          // accumulator averages, so the crop/resize mapping is skipped and
+          // the plane stays fed-size.
+          if ( !blendThisHead )
           {
-            if ( resizeToInput )
+            if ( outW == fedW && outH == fedH )
             {
-              // The window was resampled to the fixed model input before the
-              // forward pass; scale the core rect accordingly.
-              const double sxF = static_cast<double>( outW ) / std::max( 1, bt.w + 2 * halo );
-              const double syF = static_cast<double>( outH ) / std::max( 1, bt.h + 2 * halo );
-              int cx = static_cast<int>( std::lround( halo * sxF ) );
-              int cy = static_cast<int>( std::lround( halo * syF ) );
-              int cw = std::max( 1, static_cast<int>( std::lround( bt.w * sxF ) ) );
-              int ch = std::max( 1, static_cast<int>( std::lround( bt.h * syF ) ) );
-              cx = std::clamp( cx, 0, std::max( 0, outW - 1 ) );
-              cy = std::clamp( cy, 0, std::max( 0, outH - 1 ) );
-              cw = std::min( cw, outW - cx );
-              ch = std::min( ch, outH - cy );
-              plane = plane( cv::Range( cy, cy + ch ), cv::Range( cx, cx + cw ) ).clone();
-              if ( plane.cols != bt.w || plane.rows != bt.h )
-                cv::resize( plane, plane, cv::Size( bt.w, bt.h ), 0, 0, interp );
+              if ( resizeToInput )
+              {
+                // The window was resampled to the fixed model input before the
+                // forward pass; scale the core rect accordingly.
+                const double sxF = static_cast<double>( outW ) / std::max( 1, bt.w + 2 * halo );
+                const double syF = static_cast<double>( outH ) / std::max( 1, bt.h + 2 * halo );
+                int cx = static_cast<int>( std::lround( halo * sxF ) );
+                int cy = static_cast<int>( std::lround( halo * syF ) );
+                int cw = std::max( 1, static_cast<int>( std::lround( bt.w * sxF ) ) );
+                int ch = std::max( 1, static_cast<int>( std::lround( bt.h * syF ) ) );
+                cx = std::clamp( cx, 0, std::max( 0, outW - 1 ) );
+                cy = std::clamp( cy, 0, std::max( 0, outH - 1 ) );
+                cw = std::min( cw, outW - cx );
+                ch = std::min( ch, outH - cy );
+                plane = plane( cv::Range( cy, cy + ch ), cv::Range( cx, cx + cw ) ).clone();
+                if ( plane.cols != bt.w || plane.rows != bt.h )
+                  cv::resize( plane, plane, cv::Size( bt.w, bt.h ), 0, 0, interp );
+              }
+              else if ( halo > 0 && outW == fedW && outH == fedH )
+              {
+                // Grid-preserving with halo: crop the halo border away.
+                plane = plane( cv::Range( halo, halo + bt.h ), cv::Range( halo, halo + bt.w ) ).clone();
+              }
             }
-            else if ( halo > 0 && outW == fedW && outH == fedH )
+            else if ( outW != bt.w || outH != bt.h )
             {
-              // Grid-preserving with halo: crop the halo border away.
-              plane = plane( cv::Range( halo, halo + bt.h ), cv::Range( halo, halo + bt.w ) ).clone();
+              cv::resize( plane, plane, cv::Size( bt.w, bt.h ), 0, 0, interp );
             }
-          }
-          else if ( outW != bt.w || outH != bt.h )
-          {
-            cv::resize( plane, plane, cv::Size( bt.w, bt.h ), 0, 0, interp );
           }
           // Uncertainty statistics need the PRE-threshold class planes:
           // entropy/margin over binarized {0,1} planes would be meaningless.
@@ -1001,37 +1500,45 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
             plane = thresholded;
           }
           // Restore nodata on core pixels whose every input band was invalid.
+          // Under blending the plane is the FED window: the core sits halo px in.
           const cv::Mat &tileMask = batchMasks[bi];
           for ( int row = 0; row < bt.h; ++row )
           {
             const uchar *maskRow = tileMask.ptr<uchar>( row );
-            float *outRow = plane.ptr<float>( row );
+            float *outRow = plane.ptr<float>( row + ( blendThisHead ? halo : 0 ) );
             for ( int col = 0; col < bt.w; ++col )
             {
               if ( maskRow[col] )
-                outRow[col] = std::numeric_limits<float>::quiet_NaN();
+                outRow[col + ( blendThisHead ? halo : 0 )] =
+                  std::numeric_limits<float>::quiet_NaN();
             }
           }
           if ( mode == RasterOutputMode::Probability )
           {
-            const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
-                                                   currentTileIndex, totalTiles };
-            if ( !writer->writeTile( bandOffset + c + 1, writeTile, plane.ptr<float>() ) )
-              throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write output tile at ("
-                                     + std::to_string( bt.x ) + ", " + std::to_string( bt.y ) + ")" );
+            if ( blendThisHead )
+            {
+              accumulator->add( bandOffset + c, plane, bt, halo, fedW, fedH );
+            }
+            else
+            {
+              const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
+                                                     currentTileIndex, totalTiles };
+              if ( !writer->writeTile( bandOffset + c + 1, writeTile, plane.ptr<float>() ) )
+                throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write output tile at ("
+                                       + std::to_string( bt.x ) + ", " + std::to_string( bt.y ) + ")" );
+            }
           }
           else if ( h == 0 )
           {
             // Derived modes keep the class planes in memory; ONE derived band
-            // is written after the channel loop below.
+            // is written after the channel loop below. Under blending these
+            // are the WINDOW planes — the accumulator collapses AFTER blending
+            // (blend probabilities, then argmax — never blend labels).
             derivedPlanes[bi].push_back( std::move( plane ) );
           }
         }
         if ( mode != RasterOutputMode::Probability && h == 0 )
         {
-          // Argmax/threshold derivation (Platform 4.0): collapse the class
-          // planes of head 0 into one band. Invalid (NaN-restored) pixels
-          // stay at the writer's NoData sentinel.
           const std::vector<cv::Mat> &planes = derivedPlanes[bi];
           const int channels = static_cast<int>( planes.size() );
           // Platform 8.0 WP-E: the Labels remap must cover every model class
@@ -1046,6 +1553,17 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
                 + std::to_string( m_model.postprocess.classMapping.size() )
                 + " entries but head '" + headNames[h] + "' produces "
                 + std::to_string( channels ) + " class planes" );
+          // Platform 9.0 (M5): blending hands the class planes to the
+          // accumulator; the argmax/threshold collapse happens at row
+          // finalization on the BLENDED probabilities.
+          if ( blendThisHead )
+          {
+            for ( int c = 0; c < channels; ++c )
+              accumulator->add( c, planes[static_cast<std::size_t>( c )], bt, halo, fedW, fedH );
+            derivedPlanes[bi].clear();
+          }
+          else
+          {
           cv::Mat derived( bt.h, bt.w, CV_32FC1, cv::Scalar( writeNoData ) );
           const float maskThr = m_model.postprocess.maskThreshold >= 0.0
                                   ? static_cast<float>( m_model.postprocess.maskThreshold )
@@ -1077,14 +1595,22 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
               switch ( mode )
               {
                 case RasterOutputMode::Labels:
+                {
                   // Platform 8.0 WP-E: declared product-class remap (model
                   // class → product class). Guarded below so an arity
                   // mismatch refuses loudly instead of indexing OOB.
-                  outRow[col] = static_cast<float>(
+                  const int productClass =
                     m_model.postprocess.classMapping.empty()
                       ? best
-                      : m_model.postprocess.classMapping[static_cast<std::size_t>( best )] );
+                      : m_model.postprocess.classMapping[static_cast<std::size_t>( best )];
+                  outRow[col] = static_cast<float>( productClass );
+                  // Platform 9.0 (M6): per-product-class pixel tally.
+                  if ( productClass >= 0
+                       && static_cast<std::size_t>( productClass )
+                            < stats.classPixelCounts.size() )
+                    stats.classPixelCounts[static_cast<std::size_t>( productClass )]++;
                   break;
+                }
                 case RasterOutputMode::Confidence:
                   outRow[col] = bestv;
                   break;
@@ -1103,14 +1629,25 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
             throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write output tile at ("
                                      + std::to_string( bt.x ) + ", " + std::to_string( bt.y ) + ")" );
           derivedPlanes[bi].clear();
+          }
         }
         if ( isUncertaintyHead && uncertaintyBandOffset >= 0 )
         {
+          // Platform 9.0 (M5): uncertainty is computed per pixel over this
+          // tile's planes — window-size planes under blending, so the band
+          // blends exactly like every other output band.
           cv::Mat unc = headUncertainty( headPlanes, uncertainty );
-          const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
-                                                 currentTileIndex, totalTiles };
-          if ( !writer->writeTile( uncertaintyBandOffset + 1, writeTile, unc.ptr<float>() ) )
-            throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write uncertainty tile" );
+          if ( blendThisHead )
+          {
+            accumulator->add( uncertaintyBandOffset, unc, bt, halo, fedW, fedH );
+          }
+          else
+          {
+            const GdalBlockStream::Tile writeTile{ bt.x, bt.y, bt.w, bt.h, 0, bt.w, bt.h,
+                                                   currentTileIndex, totalTiles };
+            if ( !writer->writeTile( uncertaintyBandOffset + 1, writeTile, unc.ptr<float>() ) )
+              throw RSOperatorError( ErrorCode::FileNotWritable, "failed to write uncertainty tile" );
+          }
         }
         // Tiles are counted once (on the first head); heads share one tile.
         if ( h == 0 )
@@ -1353,6 +1890,8 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   }
 
   QString writeError;
+  if ( accumulator )
+    accumulator->finish( *writer ); // Platform 9.0 (M5): blended rows finalize here
   if ( !writer || !writer->closeWithError( &writeError ) )
   {
     if ( writer )
@@ -1475,6 +2014,20 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     throw RSOperatorError( ErrorCode::ComputationError, "tile inference engine has no runtime session" );
   if ( feeds.empty() )
     throw RSOperatorError( ErrorCode::InvalidParameter, "multi-input inference needs at least one feed" );
+  // Platform 9.0 (M5): feather blending is implemented for the single-input
+  // engine; the multi-input path refuses loudly instead of silently ignoring
+  // the knob (the #646 failure class).
+  {
+    const TileBlend resolvedBlend =
+      options.blend == TileBlend::Unset
+        ? ( m_model.tiling.blend == "feather" ? TileBlend::Feather : TileBlend::None )
+        : options.blend;
+    if ( resolvedBlend == TileBlend::Feather )
+      throw RSOperatorError(
+        ErrorCode::InvalidParameter,
+        "tiling.blend=feather is not implemented for the multi-input engine yet — "
+          "drop the blend contract or run a single-input model" );
+  }
 
   // Head resolution: identical contract to run() (manifest tensor_names vs
   // the graph's own outputs; advisory when the runtime cannot enumerate).
@@ -1544,6 +2097,10 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                                + "...)" );
   }
 
+  // Platform 9.0 (M3): each feed resolves its EFFECTIVE preprocessing — the
+  // per-input override when the manifest declares one, else the global
+  // contract. The shared `pre`/`meanStd`/`hasClamp` locals below remain the
+  // SINGLE-INPUT path; runMultiInput never reads them for a feed.
   const ModelPreprocessContract &pre = m_model.preprocess;
   const bool meanStd = pre.normalize == "mean_std";
   const bool hasClamp = !std::isnan( pre.clampMin ) || !std::isnan( pre.clampMax );
@@ -1562,6 +2119,8 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     std::vector<bool> hasSentinel;
     std::vector<float> window; // reused per-tile buffer
     std::vector<float> qualityWindow; // reused per-tile mask buffer (WP-D)
+    // Platform 9.0 (M3): the feed's resolved preprocessing contract.
+    ModelPreprocessContract preprocess;
   };
   std::vector<FeedReader> readers( feeds.size() );
 
@@ -1588,6 +2147,12 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     FeedReader &reader = readers[f];
     reader.contract = &m_model.inputs[feedContract[f]];
     const ModelInputContract &contract = *reader.contract;
+
+    // Platform 9.0 (M3): effective preprocessing for THIS feed — the per-input
+    // override when declared, else the global contract (identical values for
+    // override-free manifests; historical behavior preserved bit-for-bit).
+    reader.preprocess = contract.preprocessDeclared ? contract.preprocess : m_model.preprocess;
+    const ModelPreprocessContract &feedPre = reader.preprocess;
 
     // Platform 8.0 alignment provenance: preparedFrom must parallel the fed
     // paths (or be absent) — a partial list would record wrong origins.
@@ -1774,14 +2339,21 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                                "feed '" + feeds[f].name + "': manifest declares "
                                  + std::to_string( contract.bandRoles.size() ) + " band roles but "
                                  + std::to_string( bandList.size() ) + " bands are fed" );
-      if ( meanStd && !pre.mean.empty() && pre.mean.size() != bandList.size() )
+      // Platform 9.0 (M3): mean/std arity is checked against THIS feed's
+      // EFFECTIVE preprocess and ITS fed channel count — a per-input override
+      // with its own channel count validates alone, never against another
+      // feed's band count.
+      const bool feedMeanStd = feedPre.normalize == "mean_std";
+      if ( feedMeanStd && !feedPre.mean.empty() && feedPre.mean.size() != bandList.size() )
         throw RSOperatorError( ErrorCode::InvalidParameter,
-                               "preprocess.mean declares " + std::to_string( pre.mean.size() )
+                               "feed '" + feeds[f].name + "': preprocess.mean declares "
+                                 + std::to_string( feedPre.mean.size() )
                                  + " channels but " + std::to_string( bandList.size() )
                                  + " bands are fed" );
-      if ( meanStd && !pre.stdv.empty() && pre.stdv.size() != bandList.size() )
+      if ( feedMeanStd && !feedPre.stdv.empty() && feedPre.stdv.size() != bandList.size() )
         throw RSOperatorError( ErrorCode::InvalidParameter,
-                               "preprocess.std declares " + std::to_string( pre.stdv.size() )
+                               "feed '" + feeds[f].name + "': preprocess.std declares "
+                                 + std::to_string( feedPre.stdv.size() )
                                  + " channels but " + std::to_string( bandList.size() )
                                  + " bands are fed" );
     }
@@ -1883,6 +2455,20 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
     grid.width = rasterW;
     grid.height = rasterH;
     grid.frames = static_cast<int>( feeds[f].paths.size() );
+    // Platform 9.0 (M3): the effective preprocess summary — WHAT normalized
+    // this feed and with which parameters (compact, deterministic).
+    {
+      std::string note = feedPre.normalize.empty() ? "none" : feedPre.normalize;
+      if ( feedPre.scale != 1.0 )
+        note += "×" + std::to_string( feedPre.scale );
+      if ( feedPre.pad > 0 )
+        note += "+pad" + std::to_string( feedPre.pad );
+      grid.preprocessNote = note;
+    }
+    // Platform 9.0 (M3): identity fingerprint (structure + bounded content).
+    if ( options.computeFeedFingerprints )
+      grid.fingerprint = feedFingerprint( firstPath, bandList,
+                                          options.fingerprintContentMaxBytes );
     stats.inputGrids.push_back( std::move( grid ) );
   }
 
@@ -1938,9 +2524,14 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   int skipped = 0;
 
   // Preprocess one RAW window in place: sentinel→NaN, non-finite→0,
-  // normalize, clamp. Channel-aware exactly like the single-input engine.
+  // normalize, clamp. Channel-aware exactly like the single-input engine;
+  // Platform 9.0 (M3): the contract is the FEED's effective preprocess, so a
+  // per-input override (e.g. SAR vs optical normalization) applies per feed.
   auto preprocessWindow = [&]( FeedReader &reader, std::vector<float> &buffer, int winW,
                                int winH ) {
+    const ModelPreprocessContract &pre = reader.preprocess;
+    const bool meanStd = pre.normalize == "mean_std";
+    const bool hasClamp = !std::isnan( pre.clampMin ) || !std::isnan( pre.clampMax );
     const std::size_t bandCount = reader.bands.size();
     const std::size_t totalFloats = static_cast<std::size_t>( winH ) * winW * bandCount;
     for ( std::size_t i = 0; i < totalFloats; ++i )
