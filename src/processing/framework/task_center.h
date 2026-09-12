@@ -562,6 +562,16 @@ private:
     /// Descriptor-backed admission dimensions for @a task (cached; a
     /// descriptor failure yields all-zero dims = no gating).
     AdmissionDims admissionDimsLocked( const AlgorithmTaskInfo &task ) const;
+    /// Per-algorithm cached RAM estimate for paths with NO per-task id
+    /// (admissionSnapshot's candidate, resolveEstimateMb): the registry-backed
+    /// resolver parses descriptor JSON, so without this cache every admission
+    /// snapshot re-parsed it under m_mutex. Same assumption as the per-task
+    /// caches above — an algorithm's estimate is immutable unless the resolver
+    /// is replaced (cleared there and in shutdownForTests).
+    mutable QMap<std::string, unsigned int> m_resolveMbCache;
+    /// Cache-backed TaskResourceBudget::resolve for @p algorithmId.
+    /// m_mutex held.
+    unsigned int estimateMbForAlgorithmLocked( const std::string &algorithmId ) const;
 
     // --- 8.0 WP-A: incremental admission bookkeeping --------------------------
     // The admission pass used to rescan the WHOLE task map (active counters,

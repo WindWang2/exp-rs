@@ -158,7 +158,7 @@ bool PluginHostProcessRuntime::loadPlugin( const PluginRecord &record, HostServi
     entry->pluginId = pluginId;
 
     IpcChannel::Outcome outcome =
-        session->requestRaw( kLoadPlugin, params, mOptions.loadTimeoutMs );
+        session->requestControlRaw( kLoadPlugin, params, mOptions.loadTimeoutMs );
     if ( outcome.status != IpcChannel::Outcome::Status::Ok )
     {
         log.add( PluginDiagnosticCode::LibraryLoadFailed, PluginDiagnosticSeverity::Error,
@@ -240,14 +240,14 @@ bool PluginHostProcessRuntime::loadPlugin( const PluginRecord &record, HostServi
 bool PluginHostProcessRuntime::respawn( const std::string &pluginId,
                                         PluginHostSessionEntry &entry, PluginDiagnosticLog &log )
 {
-    // Serializes concurrent recovery attempts; the proxy-side armed flag
-    // already collapsed the stampede.
-    std::lock_guard<std::mutex> lock( mMutex );
-
-    // Restart policy: at most maxRestarts respawns inside a rolling
-    // window; afterwards recovery refuses (typed E6005 at the caller)
-    // until an unload/reload cycle resets the counter.
+    // Restart policy is GLOBAL (one budget shared by every hosted plugin):
+    // apply it under the dedicated counters mutex so the check-and-increment
+    // stays atomic across concurrent respawns WITHOUT holding mMutex across
+    // the slow work below (spawn handshake + plugin.load may legitimately
+    // run up to loadTimeoutMs; that must never stall load/unload/describe
+    // of the OTHER entries).
     {
+        std::lock_guard<std::mutex> restartLock( mRestartMutex );
         const auto now = std::chrono::steady_clock::now();
         if ( mRestartWindowArmed
              && std::chrono::duration_cast<std::chrono::milliseconds>( now
@@ -277,6 +277,16 @@ bool PluginHostProcessRuntime::respawn( const std::string &pluginId,
         ++mRestartCount;
     }
 
+    // Per-entry serialization: the spawn/reload/publish sequence below is
+    // exclusive against itself per plugin, so a slow respawn stalls only
+    // ITS OWN entry. Proxies call respawn OUTSIDE entry.mutex (a
+    // non-recursive double-lock would throw), readers snapshot entry.session
+    // ONLY under entry.mutex, and mMutex is NOT held here — so taking
+    // entry.mutex creates no lock-order inversion. spawn() touches only the
+    // fresh session's own pipes/job/process, so concurrent respawns of
+    // DISTINCT entries are safe.
+    std::lock_guard<std::mutex> entryLock( entry.mutex );
+
     PluginHostProcessSession::SpawnOptions spawnOptions;
     spawnOptions.workerPath = mOptions.workerPath;
     spawnOptions.pluginId = pluginId;
@@ -288,11 +298,13 @@ bool PluginHostProcessRuntime::respawn( const std::string &pluginId,
     if ( !session )
         return false;
     // The fresh worker negotiated ITS OWN features; rebuild the limits for
-    // this peer before sending the cached plugin.load params.
+    // this peer before sending the cached plugin.load params. Only this
+    // entry's respawn mutates entry.loadParams (the proxy-side armed flag
+    // keeps one respawn per entry), and it is published under entry.mutex.
     applyLimitsForPeer( entry.quota, session->peerSupportsDirectionalFrameCaps(),
                         entry.loadParams );
     IpcChannel::Outcome outcome =
-        session->requestRaw( kLoadPlugin, entry.loadParams, mOptions.loadTimeoutMs );
+        session->requestControlRaw( kLoadPlugin, entry.loadParams, mOptions.loadTimeoutMs );
     if ( outcome.status != IpcChannel::Outcome::Status::Ok )
     {
         log.add( PluginDiagnosticCode::HostProcessCrashed, PluginDiagnosticSeverity::Error,
@@ -304,13 +316,9 @@ bool PluginHostProcessRuntime::respawn( const std::string &pluginId,
     // The bounds traveled TO the fresh worker with plugin.load; cap the
     // host's own channel per direction only now (see loadPlugin).
     session->applyQuotaFrameCaps();
-    // Publish under entry.mutex: proxies call respawn OUTSIDE that lock
-    // (a non-recursive double-lock would throw), so taking it here is
-    // safe and gives readers a happens-before edge.
-    {
-        std::lock_guard<std::mutex> entryLock( entry.mutex );
-        entry.session = session;
-    }
+    // Publish under the SAME entry.mutex held above: readers get a
+    // happens-before edge on the swapped-in session.
+    entry.session = session;
     log.add( PluginDiagnosticCode::HostProcessCrashed, PluginDiagnosticSeverity::Info,
              "worker respawned and the plugin was reloaded (restart policy applied)", pluginId );
     return true;
@@ -355,6 +363,9 @@ Json::Value PluginHostProcessRuntime::diagnosticsSnapshot() const
     snapshot["protocolVersion"] = EXP_RS_HOST_PROTOCOL_VERSION;
     snapshot["workerPath"] = mOptions.workerPath;
     snapshot["restartPolicy"] = [this] {
+        // The counters move under mRestartMutex (respawn no longer holds
+        // mMutex while respawning); read them under their own mutex.
+        std::lock_guard<std::mutex> restartLock( mRestartMutex );
         Json::Value policy( Json::objectValue );
         policy["maxRestarts"] = mOptions.maxRestarts;
         policy["windowMs"] = static_cast<Json::Int64>( mOptions.restartWindowMs );

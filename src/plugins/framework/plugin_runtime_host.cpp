@@ -53,11 +53,18 @@ Json::Value PluginRuntimeHost::describePluginUiSchema( const std::string &plugin
     Json::Value result( Json::objectValue );
     result["ok"] = false;
     result["error"] = "host-process runtime is not installed (E6006)";
-    std::lock_guard<std::mutex> lock( mMutex );
-    if ( mHostProcessRuntime )
+    // Review A1: look the runtime up under the lock, then describe WITHOUT
+    // holding mMutex — the describe blocks on a worker IPC round-trip, and
+    // a wedged plugin must not stall the GUI thread's next invoke/bootstrap
+    // call. The raw pointer is safe: the unique_ptr is only ever ASSIGNED
+    // in bootstrap (never reset), so it cannot dangle.
+    mMutex.lock();
+    auto *runtime = mHostProcessRuntime;
+    mMutex.unlock();
+    if ( runtime )
     {
         exprs::PluginDiagnosticLog log;
-        result = mHostProcessRuntime->describeUiSchema( pluginId, log );
+        result = runtime->describeUiSchema( pluginId, log );
     }
     return result;
 }
