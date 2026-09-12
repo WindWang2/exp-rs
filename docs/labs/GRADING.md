@@ -88,6 +88,22 @@ scores: references score 100, every deliberately wrong product declares a score
 band strictly below the 60-point pass line plus the assertion ids that must
 fire. `ctest -R lab_grading` asserts the whole corpus contract.
 
+## Known limits (by design)
+
+- **Statistics, not pixel diffs**: assertions grade the distribution of the
+  answer (ranges, moments, histogram shape, class agreement, area intervals,
+  calibration identity), not the geographic position of each pixel. A change
+  mask with the right area in the wrong place, or an NDVI scene with its
+  biomes spatially swapped, still scores 100 — labs that care about placement
+  need a position-sensitive kernel (future work, ADR 0146 alternative
+  "pixel-diff grading" was rejected as brittle).
+- **Unlabelled truth+prediction pairs** (both outside the legend) count as
+  agreement in OA and as their own marginal column; exclude such values via
+  `nodata_class` / declared NoData instead of relying on that column.
+- **NoData matching** compares stored values against the declared sentinel at
+  storage precision; declare sentinels that are representable in the band
+  dtype (−9999, 0, 255 all are).
+
 ## Extending
 
 - New lab: copy a rules file, keep the weight-sum and derivation discipline,

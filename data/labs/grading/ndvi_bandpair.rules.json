@@ -30,7 +30,7 @@
       "severity": "blocking",
       "params": { "index": "ndvi", "bands": [1, 2], "mean": 0.248626374, "mean_tolerance": 0.001,
                   "sigma_min": 0.35, "sigma_max": 0.38, "sigma_tolerance": 0.0 },
-      "derivation": "Closed form over the four quadrants (DN with scale 1e-4): index values -1/7 (water 480/640), 5/7 (veg 7200/1200), -1/13 (soil 2400/2800), 1/2 (sparse veg 4500/1500). mu=(-1/7+5/7-1/13+1/2)/4=0.248626374; population sigma=0.367173148. DNs up to 7200 are exact in Float32. Catches swapped band order (mean flips sign)."
+      "derivation": "Closed form over the four quadrants (DN with scale 1e-4): index values -1/7 (water 480/640), 5/7 (veg 7200/1200), -1/13 (soil 2400/2800), 1/2 (sparse veg 4500/1500). mu=(-1/7+5/7-1/13+1/2)/4=181/728=0.248626374; population sigma=0.367174723. DNs up to 7200 are exact in Float32. Catches swapped band order (mean flips sign)."
     },
     {
       "id": "range.index",

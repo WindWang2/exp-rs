@@ -690,6 +690,8 @@ bool parseRulesImpl( const QString &path, LabRuleSet *rules, QString *error )
           p.fail( "index vocabulary: only \"ndvi\" is defined" );
         if ( bands.size() != 2 )
           p.fail( "index requires bands:[nirBand, redBand]" );
+        if ( p.has( params, "bins" ) )
+          p.fail( "index mode does not support bins (use a band + histogram_shape)" );
       }
       double minValue = 0.0, maxValue = 0.0;
       if ( a.kind == QLatin1String( "range" ) )
@@ -957,8 +959,10 @@ struct AssertionState
     }
 };
 
-/// Resolves which artifact bands an assertion reads (1-based).
-std::vector<int> assertionBands( const LabAssertion &a, int bandCount, bool *needsAllBands )
+/// Resolves which artifact bands an assertion reads (1-based).  Declared
+/// out-of-range bands are kept so the kernel reports "artifact lacks band N"
+/// instead of silently substituting other bands.
+std::vector<int> assertionBands( const LabAssertion &a, bool *needsAllBands )
 {
     std::vector<int> bands;
     const Json::Value &params = a.params;
@@ -975,11 +979,6 @@ std::vector<int> assertionBands( const LabAssertion &a, int bandCount, bool *nee
     else if ( params.isMember( "band" ) )
     {
         bands.push_back( params["band"].asInt() );
-    }
-    for ( int b : bands )
-    {
-        if ( b > bandCount )
-            *needsAllBands = true; // out-of-range band: graded as a failure
     }
     return bands;
 }
@@ -1062,7 +1061,7 @@ void ContentWalk::collectNeeds()
             continue;
         Need need;
         need.assertion = &a;
-        need.bands = assertionBands( a, bandCount, &need.allBands );
+        need.bands = assertionBands( a, &need.allBands );
         if ( need.allBands )
         {
             for ( int b = 1; b <= bandCount; ++b )
@@ -1261,9 +1260,12 @@ void ContentWalk::feedTile( const sicnu::geo::TileSlice &slice, const std::vecto
             continue;
         }
 
-        // range / mean_sigma: single-band values or derived ndvi-index values
-        if ( need.assertion->kind == QLatin1String( "range" )
-             || need.assertion->kind == QLatin1String( "mean_sigma" ) )
+        // range / mean_sigma / histogram_shape: single-band values or
+        // derived ndvi-index values
+        const bool valueKind = need.assertion->kind == QLatin1String( "range" )
+                               || need.assertion->kind == QLatin1String( "mean_sigma" )
+                               || need.assertion->kind == QLatin1String( "histogram_shape" );
+        if ( valueKind )
         {
             if ( outOfRange )
                 continue;
@@ -1398,6 +1400,22 @@ Json::Value bandAvailabilityObserved( int band, const RasterMetadata &meta )
     return o;
 }
 
+/// First declared band that the artifact does not have (0 when none).
+int firstMissingBand( const Json::Value &params, const RasterMetadata &meta )
+{
+    if ( params.isMember( "bands" ) )
+    {
+        for ( const auto &item : params["bands"] )
+        {
+            if ( item.asInt() > meta.bandCount )
+                return item.asInt();
+        }
+    }
+    if ( params.isMember( "band" ) && params["band"].asInt() > meta.bandCount )
+        return params["band"].asInt();
+    return 0;
+}
+
 FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
                                 const RasterMetadata &meta )
 {
@@ -1458,8 +1476,24 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
             return makeOutcome( false, bandAvailabilityObserved( band, meta ),
                                 Json::Value(), QStringLiteral( "Artifact lacks band %1" ).arg( band ) );
         if ( st.valid == 0 )
-            return makeOutcome( false, Json::Value(), Json::Value(),
+        {
+            // Structured vacuous evidence (an evidence-less deduction is a P0)
+            Json::Value observed;
+            observed["valid"] = 0;
+            observed["total_pixels"] = st.totalPixels;
+            Json::Value expected;
+            if ( a.kind == QLatin1String( "range" ) )
+            {
+                expected["min"] = params["min"].asDouble();
+                expected["max"] = params["max"].asDouble();
+            }
+            else if ( params.isMember( "mean" ) )
+            {
+                expected["mean"] = params["mean"].asDouble();
+            }
+            return makeOutcome( false, observed, expected,
                                 QStringLiteral( "No valid pixels to evaluate" ) );
+        }
 
         if ( a.kind == QLatin1String( "range" ) )
         {
@@ -1482,13 +1516,11 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
                 message = QStringLiteral( "%1 of %2 valid pixels fall outside [%3, %4]" )
                             .arg( st.rangeViolations ).arg( st.valid )
                             .arg( params["min"].asDouble() ).arg( params["max"].asDouble() );
-            else if ( st.valid == 0 )
-                message = QStringLiteral( "Vacuously passed: no valid pixels" );
             return makeOutcome( pass, observed, expected, message );
         }
 
         // mean_sigma
-        const double sigma = std::sqrt( st.m2 / static_cast<double>( st.valid ) );
+        const double sigma = std::sqrt( std::max( 0.0, st.m2 ) / static_cast<double>( st.valid ) );
         Json::Value observed;
         observed["mean"] = st.mean;
         observed["sigma"] = sigma;
@@ -1546,8 +1578,16 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
                                     QStringLiteral( "Artifact lacks band %1" ).arg( b ) );
         }
         if ( st.pairTotal == 0 )
-            return makeOutcome( false, Json::Value(), Json::Value(),
+        {
+            Json::Value observed;
+            observed["pair_total"] = 0;
+            observed["pair_violations"] = 0;
+            observed["undefined_index_pixels"] = st.pairSkipped;
+            Json::Value expected;
+            expected["tolerance"] = params["tolerance"].asDouble();
+            return makeOutcome( false, observed, expected,
                                 QStringLiteral( "No comparable pixel pairs" ) );
+        }
         const double ratio = static_cast<double>( st.pairViolations )
                              / static_cast<double>( st.pairTotal );
         Json::Value observed;
@@ -1602,6 +1642,10 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
 
     if ( a.kind == QLatin1String( "nodata_ratio" ) )
     {
+        const int missing = firstMissingBand( params, meta );
+        if ( missing > 0 )
+            return makeOutcome( false, bandAvailabilityObserved( missing, meta ), Json::Value(),
+                                QStringLiteral( "Artifact lacks band %1" ).arg( missing ) );
         Json::Value observed;
         observed["nodata_pixels"] = st.nodataPixels;
         observed["total_pixels"] = st.totalPixels;
@@ -1635,9 +1679,20 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
 
     if ( a.kind == QLatin1String( "histogram_shape" ) )
     {
+        const int missing = firstMissingBand( params, meta );
+        if ( missing > 0 )
+            return makeOutcome( false, bandAvailabilityObserved( missing, meta ), Json::Value(),
+                                QStringLiteral( "Artifact lacks band %1" ).arg( missing ) );
         if ( st.valid == 0 )
-            return makeOutcome( false, Json::Value(), Json::Value(),
+        {
+            Json::Value observed;
+            observed["valid"] = 0;
+            observed["bins"] = params["bins"].asInt();
+            Json::Value expected;
+            expected["shape"] = params["shape"].asString();
+            return makeOutcome( false, observed, expected,
                                 QStringLiteral( "No valid pixels to histogram" ) );
+        }
         const int bins = params["bins"].asInt();
         const double lo = params["min"].asDouble();
         const double hi = params["max"].asDouble();
@@ -1755,7 +1810,11 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
         QString message;
         double delta = 0.0;
         bool pass = st.totalPixels > 0;
-        if ( pass && st.valueCount < expected["min_px"].asInt64() )
+        if ( !pass )
+        {
+            message = QStringLiteral( "No valid pixels to evaluate" );
+        }
+        else if ( st.valueCount < expected["min_px"].asInt64() )
         {
             pass = false;
             delta = static_cast<double>( st.valueCount - expected["min_px"].asInt64() );
@@ -1763,7 +1822,7 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
                         .arg( st.valueCount ).arg( expected["min_px"].asInt64() )
                         .arg( expected["max_px"].asInt64() );
         }
-        else if ( pass && st.valueCount > expected["max_px"].asInt64() )
+        else if ( st.valueCount > expected["max_px"].asInt64() )
         {
             pass = false;
             delta = static_cast<double>( st.valueCount - expected["max_px"].asInt64() );
@@ -1804,17 +1863,26 @@ FinalOutcome finalizeClassification( const LabAssertion &a, const AssertionState
             expected["oa_min"] = params["oa_min"].asDouble();
         QString message;
         bool pass = total > 0;
-        if ( pass && params.isMember( "oa_min" ) && oa < params["oa_min"].asDouble() )
+        double delta = 0.0;
+        if ( !pass )
+        {
+            message = QStringLiteral( "No comparable truth/prediction pixels" );
+        }
+        else if ( params.isMember( "oa_min" ) && oa < params["oa_min"].asDouble() )
+        {
+            pass = false;
+            delta = oa - params["oa_min"].asDouble();
             message = QStringLiteral( "Overall accuracy %1 below floor %2" )
                         .arg( oa ).arg( params["oa_min"].asDouble() );
-        if ( total <= 0 )
-            message = QStringLiteral( "No comparable truth/prediction pixels" );
+        }
         else if ( kappa < params["kappa_min"].asDouble() )
+        {
+            pass = false;
+            delta = kappa - params["kappa_min"].asDouble();
             message = QStringLiteral( "Kappa %1 below floor %2" )
                         .arg( kappa ).arg( params["kappa_min"].asDouble() );
-        pass = total > 0 && kappa >= params["kappa_min"].asDouble()
-               && ( !params.isMember( "oa_min" ) || oa >= params["oa_min"].asDouble() );
-        return makeOutcome( pass, observed, expected, message, total > 0, kappa - params["kappa_min"].asDouble() );
+        }
+        return makeOutcome( pass, observed, expected, message, !pass, delta );
     }
 
     // confusion_marginals
@@ -2209,9 +2277,9 @@ LabGradeResult OutputVerifier::gradeForTeaching( const QString &labIdOrRulesPath
         }
     }
 
-    score = std::max( 0.0, score );
     if ( capped )
         score = std::min( score, rules.passingScore - 1.0 );
+    score = std::max( 0.0, score );
     result.score = round12( score );
     result.cappedByBlocking = capped;
     result.verdict = ( !capped && result.score >= rules.passingScore ) ? QStringLiteral( "pass" )
@@ -2265,6 +2333,19 @@ LabGradeResult OutputVerifier::gradeForTeaching( const QString &labIdOrRulesPath
 }
 
 Json::Value OutputVerifier::LabDeduction::toJson() const
+{
+  Json::Value json;
+  json["assertion_id"] = assertionId.toStdString();
+  json["kind"] = kind.toStdString();
+  json["severity"] = severity.toStdString();
+  json["weight"] = lab_grading::round12( weight );
+  json["observed"] = observed;
+  json["expected"] = expected;
+  json["delta"] = std::isnan( delta ) ? Json::Value( Json::nullValue )
+                                      : Json::Value( lab_grading::round12( delta ) );
+  json["message"] = message.toStdString();
+  return json;
+}
 
 Json::Value OutputVerifier::LabEvidence::toJson() const
 {

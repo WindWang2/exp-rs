@@ -437,8 +437,9 @@ TEST_CASE( "classification kernels accept inline truth grids", "[lab_grading][ke
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
 
-    // 4x4 truth: 8 px class 1, 8 px class 2; artifact: 7 correct class-1
-    // pixels, one pixel shifted to class 2 (OA 14/16 = 0.875).
+    // 4x4 truth: 8 px class 1, 8 px class 2; artifact: one class-2 pixel
+    // predicted as class 1 — confusion [[8,0],[1,7]], OA = 15/16 = 0.9375,
+    // kappa = 0.875 exactly.
     const std::string classified = [&dir]()
     {
         const std::string path = dir.filePath( "classes.tif" ).toStdString();
