@@ -230,12 +230,17 @@ Json::Value RsSarTerrainCorrectionOperator::run(const Json::Value& params,
     if (!dst.isOpen()) {
         throw RSOperatorError(ErrorCode::GdalError, "Cannot create output raster");
     }
+    // Per-band sentinels with the GTiff tag-ordering rule (#854): GeoTIFF
+    // serializes ONE GDAL_NODATA tag per dataset (last write wins for every
+    // band on re-open), so every NaN band is declared FIRST and the
+    // Byte-valued mask's 255 LAST — otherwise the mask's no-data pixels read
+    // back as valid foreground data.
     dst.setBandNoDataValue(1, std::numeric_limits<float>::quiet_NaN());
-    if (maskBand > 0) {
-        dst.setBandNoDataValue(maskBand, 255.0); // kernel mask sentinel
-    }
     if (incidenceBand > 0) {
         dst.setBandNoDataValue(incidenceBand, std::numeric_limits<float>::quiet_NaN());
+    }
+    if (maskBand > 0) {
+        dst.setBandNoDataValue(maskBand, 255.0); // kernel mask sentinel
     }
 
     const bool ok = sicnu::sar::terrainFlattenRaster(src, band, demDs, options, nodata,

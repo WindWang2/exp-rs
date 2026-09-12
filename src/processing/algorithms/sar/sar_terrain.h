@@ -49,7 +49,10 @@ struct TerrainCorrectionOptions
 
 /// Slope (degrees) and aspect (degrees, downslope azimuth, 0..360) per pixel
 /// from one DEM tile (Horn's 3×3 method, edge-replicated borders). Pure and
-/// unit-testable: `slopeAspectAt` exposes the single-pixel formula.
+/// unit-testable: `slopeAspectAt` exposes the single-pixel formula. The two
+/// axes are normalized separately (@p cellSizeXMeters for dz/dx,
+/// @p cellSizeYMeters for dz/dy — #855): SAR products are routinely
+/// anisotropic, and an averaged spacing skewed slope and rotated aspect.
 struct SlopeAspect
 {
   double slopeDeg = 0.0;
@@ -58,9 +61,8 @@ struct SlopeAspect
 };
 
 SlopeAspect slopeAspectAt( const float *dem, int bufferWidth, int x, int y,
-                           double cellSizeX, double cellSizeY, double demUnitScale );
-SlopeAspect slopeAspectAt( const float *dem, int bufferWidth, int x, int y,
-                           double cellSizeMeters, double demUnitScale );
+                           double cellSizeXMeters, double cellSizeYMeters,
+                           double demUnitScale );
 
 /// Local incidence angle θi (degrees) from slope/aspect and geometry.
 /// @a fromAzimuthDeg is the azimuth the illumination comes FROM — for radar
@@ -76,10 +78,16 @@ double localIncidenceAngle( double slopeDeg, double aspectDeg, double incidenceD
 bool isLayoverOrShadow( double incidenceLocalDeg, double cosThetaMax );
 
 /// Streaming terrain correction: sigma0 (linear) + DEM → gamma0. The output
-/// band layout is: band 1 = gamma0; band 2 = Byte validity mask (1 = valid,
+/// band layout is: band 1 = gamma0; band 2 = validity mask (1 = valid,
 /// 0 = layover/shadow, 255 = nodata) when applyShadowMask; then one Float32
 /// band with the local incidence angle in degrees when writeIncidenceBand
 /// (so the incidence band is the LAST band, 3 or 2 depending on the mask).
+/// Dtype note: the streaming output creates all bands as Float32, so the
+/// validity mask is a Float32 band CARRYING byte values (0/1/255) — written
+/// through the typed raw-tile seam and declared NoData 255 by the operator
+/// (#854; the mask sentinel is also the GTiff-serialized dataset tag, so
+/// operators must declare every NaN band FIRST and the mask's 255 LAST of
+/// all bands — the last declaration wins the dataset tag).
 /// DEM and data must share the exact grid (checked here; blocking error).
 /// Returns false on I/O failure or grid mismatch (caller abandons output).
 bool terrainFlattenRaster( const GdalDatasetWrapper &sigma0Ds, int band,
