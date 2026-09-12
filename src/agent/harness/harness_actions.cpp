@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <utility>
 
 namespace sicnu::agent::harness {
 
@@ -79,6 +80,63 @@ bool harnessActionKnown( const std::string &key )
   const auto &table = harnessActionTable();
   return std::any_of( table.begin(), table.end(),
                       [ &key ]( const HarnessActionSpec &spec ) { return spec.key == key; } );
+}
+
+std::string normalizeLabRole( const std::string &role )
+{
+  if ( role == "teacher" || role == "admin" )
+    return role;
+  return "student";
+}
+
+bool isStudentRole( const std::string &role )
+{
+  return normalizeLabRole( role ) == "student";
+}
+
+bool actionProducesArtifact( const std::string &key )
+{
+  // Explicitly artifact-producing keys, sorted. resume_run drives a run to
+  // its completed (artifact-delivering) terminal state.
+  static const char *const kArtifactKeys[] = { "resume_run" };
+  for ( const char *candidate : kArtifactKeys )
+    if ( key == candidate )
+      return true;
+
+  // Anything that resolves to the plan executor is artifact-producing by
+  // construction, present or future — the classification cannot drift behind
+  // new table rows.
+  const auto &table = harnessActionTable();
+  const auto it = std::find_if( table.begin(), table.end(),
+                                [ &key ]( const HarnessActionSpec &spec ) { return spec.key == key; } );
+  return it != table.end() && it->tool == "harness:execute_plan";
+}
+
+bool teachingGateBlocks( const TeachingContext &context, const std::string &key )
+{
+  return context.intentDomain == "lab" && isStudentRole( context.role ) &&
+         actionProducesArtifact( key );
+}
+
+Json::Value resolvedSuggestedActionForRole( const std::string &key, Json::Value arguments,
+                                            const TeachingContext &context )
+{
+  if ( teachingGateBlocks( context, key ) )
+  {
+    // Structural withholding: the resolution carries no tool and no
+    // workbench command, so no dispatcher can execute it. The typed code
+    // (TEACHING_REFUSAL) is what Pi reads — this is a contract refusal, not
+    // a prose apology.
+    Json::Value doc( Json::objectValue );
+    doc["action"] = key;
+    doc["arguments"] = arguments.isObject() ? std::move( arguments ) : Json::Value( Json::objectValue );
+    doc["resolved"] = false;
+    doc["withheld"] = true;
+    doc["withheld_by"] = "teaching_constraint";
+    doc["reason_code"] = "TEACHING_REFUSAL";
+    return doc;
+  }
+  return resolvedSuggestedAction( key, std::move( arguments ) );
 }
 
 Json::Value resolvedSuggestedAction( const std::string &key, Json::Value arguments )
