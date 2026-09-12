@@ -48,10 +48,10 @@ class ContextLedger {
     /// ((path, revision) or (path, size, mtime) — see grounding_tools).
     /// A later call with the same key is a hit. Bounded to 32 entries,
     /// oldest-first eviction.
-    void cacheUnderstanding( const QString &key, long long reserved,
+    void cacheUnderstanding( const QString &key,
                              const Json::Value &understanding );
     /// Returns the cached document when the key matches, else null.
-    Json::Value cachedUnderstanding( const QString &key, long long reserved ) const;
+    Json::Value cachedUnderstanding( const QString &key ) const;
 
     /// Harness 8.0 (typed context 2.0): records the latest observed typed
     /// context for one dataset — identity (entity ids), revision, and the

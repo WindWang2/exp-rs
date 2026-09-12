@@ -125,7 +125,7 @@ Json::Value ContextLedger::decisions() const
   return unresolved;
 }
 
-void ContextLedger::cacheUnderstanding( const QString &keyToken, long long,
+void ContextLedger::cacheUnderstanding( const QString &keyToken,
                                         const Json::Value &understanding )
 {
   QMutexLocker locker( &mMutex );
@@ -147,7 +147,7 @@ void ContextLedger::cacheUnderstanding( const QString &keyToken, long long,
   }
 }
 
-Json::Value ContextLedger::cachedUnderstanding( const QString &keyToken, long long ) const
+Json::Value ContextLedger::cachedUnderstanding( const QString &keyToken ) const
 {
   QMutexLocker locker( &mMutex );
   const std::string key = keyToken.toStdString();
