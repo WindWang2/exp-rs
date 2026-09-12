@@ -74,7 +74,6 @@ class ProcessingHistoryPanel : public QgsDockWidget
     void resumeSelected();
 
   private:
-    void buildRowActions();
     HistoryEntry *selectedEntry();
     void updateActionStates();
 
