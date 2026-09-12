@@ -293,7 +293,10 @@ install(TARGETS sicnu_operators
 # Python bindings via pybind11 (optional, requires Python dev + pybind11)
 # ---------------------------------------------------------------------------
 set(SICNU_BUILD_PYTHON_BINDINGS FALSE)
-if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
+# SICNU_LAB_PROFILE (D10): the pybind11 FetchContent fallback is a network
+# dependency teaching machines cannot satisfy — bindings stay off there.
+if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND
+   AND NOT SICNU_LAB_SKIP_PYTHON_BINDINGS)
     find_package(Python COMPONENTS Development QUIET)
     if(Python_Development_FOUND)
         find_package(pybind11 QUIET)
