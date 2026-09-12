@@ -7507,6 +7507,13 @@ sicnu_add_test(test_capability_drift)
 sicnu_link_jsoncpp(test_capability_drift)
 
 
+# Harness 9.0 contract floors: suggested-action resolution (#881) and recipe
+# gate truth/degradation semantics (#867), cross-checked against the live
+# tool registry and the authoritative workbench command definitions.
+sicnu_add_test(test_harness9_contracts)
+sicnu_link_jsoncpp(test_harness9_contracts)
+
+
 # Last TEST_INCLUDE_FILES entry: stamp PYTHONHOME / LD_LIBRARY_PATH / QT_IM_MODULE
 # onto every test after Catch PRE_TEST discovery has registered them (#730).
 sicnu_register_test_env_applier()

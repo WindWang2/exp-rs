@@ -78,6 +78,71 @@ All notable changes to the `exp-rs` project will be documented in this file.
 
 ## [Unreleased] - 2026-09-11
 
+### Spatial Scientist Harness 9.0 (goal series)
+
+- **Closed suggested-action vocabulary (#881, P1)**: every blocker/warning
+  action the harness emits now resolves through `harness_actions` to a
+  registered SpatialTool id and/or a registered workbench command
+  (`{action, arguments, kind, tool?, workbench_command?, resolved}`); the
+  historical `check_dataset`/`select_model`/… pseudo-actions are mapped, not
+  renamed, and unknown keys ship `resolved: false` (visible drift, never
+  silent invention). A mechanical floor test cross-checks the table against
+  the live tool registry and the authoritative workbench command source.
+- **Recipe gate truth + substitution fidelity (#867, P1)**: `when_param`
+  gates now have total truth semantics (numeric bindings are VALUES — a
+  bound `0` threshold opens the manual-thresholding branch instead of
+  silently degrading to statistical; bool semantics unchanged), and
+  `$params.X` substitution renders numerics through the JSON writer
+  (shortest round-trip) instead of leaking `0.40000000000000002`-style
+  binary expansions into operator parameters.
+- **Transitive degradation with per-edge precision (#867)**: a fallback-less
+  step on a dropped/skipped dependency is now DROPPED (it used to survive as
+  an orphan consuming an intermediate nobody produced); a dependency that
+  exists only in `params_when_skipped` never flips a healthy normal
+  template. Instantiation emits a bounded `degradations` record
+  (`{step, mode, reason}`) consumed by explain.
+- **MapSpec condition semantics (#866, #877)**: `has(x)` is a first-class
+  operand (`has(x) == false` evaluates instead of erroring exactly when x is
+  absent), and NaN is unordered in comparisons (`==` false, `!=` true,
+  orderings false) instead of comparing equal to everything.
+- **Recipe schema versioning (M4)**: fail-closed validation of recipe
+  `schema_version` (1.0/1.1/2.0); instantiated plans record
+  `recipe_id`/`recipe_version` alongside the fingerprint.
+- **Preflight 9.0 (M3)**: three-tier grading (blocker / warning=assumption /
+  advice) — pure improvements (co-pol preference, model resolution windows)
+  are advice and never flip verdicts; the preflight answer carries a safe
+  **preparation table** (only deterministic data transforms:
+  reproject/align/normalize/calibrate).
+- **Typed intent documents (M2)**: `typedIntentDocument(intent)` — required
+  facts (with why), optional facts with degradation class, expected products,
+  and quality expectations derived from capability knowledge — surfaced by
+  `harness:preflight` and `harness:resolve_intent`.
+- **Typed context 3.0 (M1)**: per-slot `fact_status`
+  (`known`/`assumed`/`unknown`) on DatasetUnderstanding; modality is stamped
+  `assumed` (heuristic inference), metadata-declared facts `known`.
+- **Bounded run diagnosis (M5)**: new `harness:diagnose_run` reads
+  authoritative run state + persisted verification sidecars and emits
+  structured repair proposals `{kind, summary, risk, rationale, action}`
+  with an explicit per-run diagnose budget and typed `stop` conditions; it
+  never executes repairs (Pi remains the only loop).
+- **Evidence-aware retention (M6)**: bounded run summaries (verified
+  artifacts, failed attempts, assumption load) with a token meter
+  (12 entries / 8192 approx tokens, oldest-first eviction) recorded on the
+  evidence path and surfaced by `harness:context`.
+- **Explainability 2.0 (M7)**: `harness:explain` adds degradations, resource
+  decisions (estimates + cleanup), failure explanation (error + failed
+  steps), and reproducibility anchors (run id, plan fingerprint,
+  verification sidecars).
+- **Eval corpus 9.0 (M9)**: six new closed categories — `invalid_input`,
+  `modality_mismatch`, `recovery`, `long_plan`, `cartography`,
+  `prompt_injection` (+ `typed_contract` for the new M1/M2/M3 surfaces);
+  prompt-injection cases pin that hostile metadata stays opaque data and
+  never changes deterministic control flow.
+- **Baseline portability repairs (needed to build on Linux/GCC; pre-existing
+  master defects)**: `GDALMDArrayRead` count argument must be `size_t`
+  (LP64), and `RunExecutionBridge` must mutate a local run copy instead of a
+  const one.
+
 ### Cloud-Native Geospatial Data Fabric 8.0 (goal series)
 
 - **Range-cache handler lifetime fix (P0)**: the `/vsirangecache/` VSI handler

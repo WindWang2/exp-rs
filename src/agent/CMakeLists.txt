@@ -35,6 +35,10 @@ add_library(sicnu_agent SHARED
   harness/context_ledger.h
   harness/harness_error.cpp
   harness/harness_error.h
+  harness/harness_actions.cpp
+  harness/harness_actions.h
+  harness/run_loop.cpp
+  harness/run_loop.h
   harness/tool_taxonomy.cpp
   harness/tool_taxonomy.h
   harness/tool_manifest.cpp

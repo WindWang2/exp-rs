@@ -388,8 +388,19 @@ bool compareValues( const Json::Value &lhs, const std::string &op, const Json::V
   {
     const double a = lhs.asDouble();
     const double b = rhs.asDouble();
+    // Issue #877: NaN is unordered — without this guard the fallthrough
+    // `a < b ? -1 : (a > b ? 1 : 0)` classified NaN as EQUAL to everything,
+    // so `value == 0` passed for NaN values and gated content rendered on
+    // corrupt data. IEEE 754 semantics: == stays false, != stays true, and
+    // every ordering comparison is false.
     if ( std::isnan( a ) || std::isnan( b ) )
-      return ( op == "!=" );
+    {
+      if ( op == "!=" )
+        return true;
+      if ( op == "==" )
+        return false;
+      return false;
+    }
     ordering = a < b ? -1 : ( a > b ? 1 : 0 );
   }
   else if ( strings )
@@ -428,6 +439,10 @@ Json::Value operandValue( const ConditionAst &node, const Json::Value &context, 
     return Json::Value( node.text );
   if ( node.op == ConditionAst::Op::Bool )
     return Json::Value( node.boolValue );
+  // Issue #866: has(x) is a first-class operand. Without this branch the Has
+  // node fell through to path resolution, so `has(x) == false` errored with
+  // "unknown context path" exactly when x was absent — the one case the
+  // guard exists for. It evaluates to a boolean presence fact instead.
   if ( node.op == ConditionAst::Op::Has )
     return Json::Value( resolvePath( context, node.text ) != nullptr );
   const Json::Value *resolved = resolvePath( context, node.text );

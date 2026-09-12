@@ -63,7 +63,12 @@ A file under `cases/` holds `{"cases": [...]}`. One case:
 
 `normal_workflow`, `missing_data`, `ambiguity`, `invalid_science`,
 `impossible_task`, `multimodal`, `context_continuation`,
-`anti_hallucination`, `map_confirmation`, `budget`.
+`anti_hallucination`, `map_confirmation`, `budget`,
+`invalid_input`, `modality_mismatch`, `recovery`, `long_plan`,
+`cartography`, `prompt_injection`, `typed_contract`.
+
+(Harness 9.0 added the last seven categories; the runner's array in
+`tests/test_harness_eval_corpus.cpp` remains the enforced closed list.)
 
 Transient-failure scenarios need the real engine's bounded resume loop and
 stay in the engine suites; reproduction/dataset-store interactions live with

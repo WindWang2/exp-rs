@@ -1,0 +1,56 @@
+{
+  "cases": [
+    {
+      "case_id": "cartography/template-catalog-searchable",
+      "category": "cartography",
+      "description": "The template catalog answers a search with bounded, structured entries",
+      "steps": [
+        {"tool": "cartography:list_templates", "input": {},
+         "expect": {"success": true, "response_bytes_le": 20000, "asserts": [
+           {"path": "items", "exists": true}]}}
+      ]
+    },
+    {
+      "case_id": "cartography/preflight-typed-mapspec",
+      "category": "cartography",
+      "description": "A structural MapSpec preflights deterministically without a canvas",
+      "steps": [
+        {"tool": "cartography:preflight", "input": {"mapspec": {"items": []}},
+         "expect": {"success": true}}
+      ]
+    },
+    {
+      "case_id": "cartography/component-catalog-consultable",
+      "category": "cartography",
+      "description": "The component catalog lists entries for map composition planning",
+      "steps": [
+        {"tool": "cartography:list_components", "input": {},
+         "expect": {"success": true}}
+      ]
+    },
+    {
+      "case_id": "cartography/plan-carries-map-output-declaration",
+      "category": "cartography",
+      "description": "A plan declaring a map output still compiles through the single workflow seam",
+      "fixture": {
+        "kind": "raster", "width": 8, "height": 8,
+        "bands": ["red", "nir"], "nodata": -9999.0
+      },
+      "steps": [
+        {"tool": "harness:plan", "input": {"plan": {
+          "schema_version": "2.0", "kind": "execution_plan", "plan_id": "plan-map9",
+          "intent": "ndvi",
+          "inputs": [{"name": "primary", "ref": "$fixture"}],
+          "steps": [
+            {"id": "index", "operator_id": "rs:spectral_index",
+             "params": {"input": "$primary.path", "index": "NDVI", "output": "$outputs.ndvi"},
+             "verification": "raster"}
+          ],
+          "outputs": [{"name": "ndvi", "from_step": "index", "kind": "raster"}],
+          "map_output": {"layout_name": "ndvi_overview", "export_path": "$tmp/ndvi_overview.pdf"}
+        }}, "expect": {"success": true, "asserts": [
+          {"path": "compilable", "equals": true}]}}
+      ]
+    }
+  ]
+}
