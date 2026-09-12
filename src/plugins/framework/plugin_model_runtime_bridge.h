@@ -27,4 +27,9 @@ void storePluginModelRuntimeFactory( const std::string &framework, const std::st
                                      exprs::PluginModelRuntimeFactoryV1 factory );
 void clearPluginModelRuntimeFactory( const std::string &framework );
 
+/// Read-only accessor for the stored factory (conformance kit, diagnostics).
+/// Returns an empty factory when the framework is unknown; never constructs
+/// a runtime and never loads a plugin.
+exprs::PluginModelRuntimeFactoryV1 pluginModelRuntimeFactoryFor( const std::string &framework );
+
 } // namespace sicnu::plugins

@@ -28,7 +28,22 @@ bounded recovery — the host process stays up.
   (E6006) instead of loading them in-process — there is never a silent
   downgrade.
 
-## Wire contract (protocol 1.1, additive over 1.0)
+## Wire contract (protocol 1.2, additive over 1.0/1.1)
+
+Plugin-platform 9.0 additions:
+- `worker.hello` carries `"features"` (string array). Current feature:
+  `"directionalFrameCaps"`. A 1.1 worker omits the array and keeps exact
+  1.1 semantics; unknown feature names are ignored (additive axis).
+- `plugin.load` `"limits"` gains `maxRequestBytes` and `maxResponseBytes`
+  (per-direction frame caps). `maxFrameBytes` remains the shared fallback
+  for 1.1 peers. The split fixes the 1.1 defect where a small
+  `maxResponseBytes` quota ALSO capped host→worker request frames. The
+  host applies its per-direction caps only after `plugin.load` carried the
+  bounds to the worker, and only for peers advertising the feature.
+- `ui.invoke` events are validated HOST-SIDE before the worker round-trip
+  (bounded ids, event-type whitelist `clicked|changed|command|submit|
+  custom`, serialized-value cap). Refusals are typed E6010 and never tear
+  the channel down.
 
 - Transport: length-prefixed JSON frames (u32 LE + payload, 32 MiB default
   cap) over two inherited OS handles passed in argv — never stdio, so

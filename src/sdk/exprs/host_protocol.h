@@ -17,6 +17,13 @@
  *         informational "maxConcurrentRequests" field; plugin.load params
  *         gain "limits" {"maxFrameBytes"} (downward frame-cap negotiation);
  *         ui.describe / ui.invoke methods for declarative UI contributions.
+ *   1.2 - additive (plugin-platform 9.0): worker.hello gains "features"
+ *         (string array, capability advertisement — a 1.1 peer omits it and
+ *         keeps 1.1 semantics); plugin.load "limits" gains
+ *         "maxRequestBytes" / "maxResponseBytes" (per-direction frame caps;
+ *         "maxFrameBytes" remains the shared fallback for 1.1 peers). The
+ *         1.1 defect where a small maxResponseBytes quota also capped
+ *         host->worker request frames is fixed by the split.
  *
  * Declared as macros like the rest of exprs/version.h so the installed SDK
  * headers carry the value the binary was built with.
@@ -24,7 +31,7 @@
 #pragma once
 
 #define EXP_RS_HOST_PROTOCOL_VERSION_MAJOR 1
-#define EXP_RS_HOST_PROTOCOL_VERSION_MINOR 1
+#define EXP_RS_HOST_PROTOCOL_VERSION_MINOR 2
 
 #define EXP_RS_STRINGIFY_HOST_( x ) #x
 #define EXP_RS_STRINGIFY_HOST( x ) EXP_RS_STRINGIFY_HOST_( x )

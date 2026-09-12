@@ -65,3 +65,19 @@ context authority stay with `SelectionContext` / the workbench seams —
 `contextActions` are declared and delivered to the host, whose shell
 surfaces decide placement (shell integration is the workbench track's
 seam; the protocol contract above is stable).
+
+## Host-side event validation (plugin-platform 9.0)
+
+Every `ui.invoke` event is validated BEFORE it travels to the plugin:
+bounded `contributionId`/`controlId` identifiers, an event-type whitelist
+matching the host renderer's actual vocabulary (`clicked`, `changed`,
+`command`; `submit` and `custom` are documented additive headroom), and a
+serialized-value cap (`maxEventValueBytes`, 4096 by default). Refusals are
+typed E6010 and never touch the channel — the rendered surface stays
+healthy.
+
+## Accessibility metadata
+
+Controls accept optional `description` and `accessibilityLabel` bounded
+strings. They are validated like every other field and preserved in the
+normalized schema; renderers may surface them for assistive technology.
