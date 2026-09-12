@@ -1,0 +1,62 @@
+{
+  "schema": "sicnu.grading-intent.v1",
+  "lab_id": "sar_processing",
+  "grader_owner": "D4（本文件只声明断言意图，不实现判分器）",
+  "pipeline_ref": "data/labs/pipelines/lab9_sar_processing.pipeline.json",
+  "aux_products": {
+    "change_groundtruth": "data/labs/_tmp/sar/change_groundtruth.tif（1=植入变化 40×40=1600 px）",
+    "water_zone": "x ∈ [0,25) 列（水体条带，判 ENL/均值保持）",
+    "determinism_note": "本地验证固定 seed=42（scripts/gen_lab_fixtures.py sar）；容差按该实现校准"
+  },
+  "assertions": [
+    {
+      "id": "S1_calibration",
+      "artifact": "data/labs/_tmp/out/lab9/sigma0_before.tif",
+      "claim": "定标反演正确：水体区 σ0 均值 ∈ [0.005, 0.008]（先验 -22 dB），森林区 ∈ [0.020, 0.032]（先验 -16 dB），全图无负值",
+      "tolerance": { "water_mean": [0.005, 0.008], "forest_mean": [0.020, 0.032], "min_value": 0.0 }
+    },
+    {
+      "id": "S2_despeckle_enl",
+      "artifact": "data/labs/_tmp/out/lab9/sigma0_before_lee5.tif",
+      "claim": "Lee 5×5 在均匀区（水体）提升等效视数一倍以上且辐射无偏：ENL(filtered) ≥ 1.5 × ENL(raw)；均值保持 |Δmean|/mean ≤ 10%",
+      "tolerance": {
+        "enl_gain_ratio": ">= 1.5",
+        "water_mean_relative_change": "<= 0.10",
+        "reference_enl_raw_water": [3.0, 5.5]
+      }
+    },
+    {
+      "id": "S3_change_detection",
+      "artifact": "data/labs/_tmp/out/lab9/change_otsu.tif",
+      "claim": "变化掩膜（UInt8，值域 {0,1}）：植入变化区检出率 ≥ 65%；区外虚警率 ≤ 2%；算子统计 changedPercent ∈ [1%, 6%]（先验 1600/65536 ≈ 2.4%）",
+      "tolerance": {
+        "detection_rate_in_patch": ">= 0.65",
+        "false_alarm_rate_outside": "<= 0.02",
+        "changed_percent_reported": [1.0, 6.0]
+      }
+    },
+    {
+      "id": "S4_speckle_allbands_nodata",
+      "artifact": "data/labs/_tmp/out/lab9/stack_lee_allbands.tif",
+      "claim": "#803 教学验证：全波段滤波（band=0）输出 2 波段；band2 的左上 20×20 NoData 区在输出中保持 NoData（NaN），band1 全幅有效；洞外像元不受污染（band2 有效像元数 = 65536 − 400）",
+      "tolerance": {
+        "band_count": 2,
+        "band2_valid_pixels": 65136,
+        "band1_valid_pixels": 65536,
+        "hole_is_nodata": true
+      }
+    },
+    {
+      "id": "S5_terrain_correction_geometry",
+      "artifact": "data/labs/_tmp/out/lab9/gamma0_before.tif",
+      "claim": "#785 教学验证：输出含 gamma0 主波段与有效性掩膜波段（flagIncidence=true 时另有本地入射角波段）；缓丘陵区有效像元占比 ≥ 98%；平地（水体条带）gamma0 与 σ0 同量级（比值 ∈ [0.5, 2.0]）",
+      "tolerance": {
+        "min_band_count": 2,
+        "valid_fraction": ">= 0.98",
+        "water_gamma0_over_sigma0": [0.5, 2.0]
+      },
+      "teaching_note": "look azimuth 由 headingDeg ± lookDirection 推得（190° 右视 → 280°）；平台明确 UI 不得自动填额外观测几何——此为 #785 修复的核心语义"
+    }
+  ],
+  "pass_policy": "S1–S5 全部通过判满分；S4/S5 是已修缺陷（#803/#785）的回归性教学断言，失败必须修复后才能通过"
+}

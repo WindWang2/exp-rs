@@ -1,0 +1,76 @@
+{
+  "schema": "sicnu.lab-data-spec.v1",
+  "lab_id": "sar_processing",
+  "title": "实验9 数据需求：SAR 相干斑抑制与变化检测",
+  "owner_track": "D1（数据生成）；D3 仅声明需求",
+  "offline": true,
+  "network_required": false,
+  "notes": "全部由 D1 离线合成或由真实存档产品裁切（无需下载服务）；D3 本地验证用 scripts/gen_lab_fixtures.py sar 在 data/labs/_tmp/ 生成等价临时数据（gitignored，不入库）。",
+  "scene_count": 2,
+  "epochs": {
+    "count": 2,
+    "dates": ["2025-03-01", "2025-04-15"],
+    "pairing_precondition": "同极化（VV/VV）且严格配准（同一网格）—— rs:sar_change 的硬前置条件"
+  },
+  "grid": {
+    "width": 256,
+    "height": 256,
+    "crs": "EPSG:4326",
+    "pixel_size_deg": 0.001,
+    "origin_hint": "左上角 (102.5, 30.5)；两景与 DEM 网格必须完全一致"
+  },
+  "per_scene_product": {
+    "format": "GeoTIFF",
+    "dtype": "float32",
+    "value_convention": "单波段传感器 DN：sigma0_true = (DN / A)^2，A = 100（校准常数随元数据交付）",
+    "no_data": 0,
+    "bands": [
+      { "role": "vv", "index": 1, "description": "单极化 VV 强度（linear power 域 DN）" }
+    ],
+    "metadata": {
+      "SICNU_MODALITY": "sar",
+      "SICNU_POLARIZATIONS": "VV",
+      "SICNU_BAND_ROLE": "vv",
+      "calibration_constant": "A = 100（写入侧车 JSON 或数据集元数据 SICNU_CALIBRATION_A）",
+      "acquisition_geometry": "入射角 35°，航向角 190°，右视（供 rs:sar_terrain_correction 教学演示）"
+    },
+    "speckle_budget": "4 视强度相干斑（等效视数 ENL ≈ 4），多视处理可放宽但须声明"
+  },
+  "scene_content": {
+    "description": "四类地物 σ0 先验 + 4 视相干斑正演：水体 -22 dB、森林 -16 dB、农田 -12 dB、裸土 -14 dB；后时相森林内植入 40×40 采伐亮斑（-8 dB，模拟双次散射增强的采伐迹地）",
+    "landcover_sigma0_db": { "water": -22, "forest": -16, "cropland": -12, "background_soil": -14, "clearcut_patch": -8 },
+    "change_patch": { "zone": "forest", "rect_px": [20, 20, 60, 60], "area_px": 1600 }
+  },
+  "aux_products": [
+    {
+      "name": "dem",
+      "purpose": "rs:sar_terrain_correction 教学演示（#785 视角几何）：缓丘陵 100–800 m，与影像同网格",
+      "format": "GeoTIFF", "dtype": "float32", "grid": "与影像完全一致"
+    },
+    {
+      "name": "stack_demo",
+      "purpose": "#803 教学演示：双波段 DN 栈（band1=前时相 DN，band2=后时相 DN 且左上角 20×20 置 0 并声明 NoData=0），验证滤波器逐波段 NoData 处理",
+      "format": "GeoTIFF", "dtype": "float32", "bands": 2
+    },
+    {
+      "name": "change_groundtruth",
+      "purpose": "判分辅助：变化真值码图（1=植入变化区，0=未变），供 D4 判分器统计检出率/虚警率",
+      "format": "GeoTIFF", "dtype": "byte", "grid": "与影像完全一致"
+    }
+  ],
+  "acceptance_criteria": [
+    "两景与 DEM 网格（尺寸/CRS/geotransform）完全一致（配准前置条件）",
+    "两景极化一致（VV/VV）；DN 均为正数（linear power 域）",
+    "水体区校正后 σ0 均值 ∈ [0.005, 0.008]；森林区 ∈ [0.020, 0.032]",
+    "均匀区（水体）等效视数 ENL = mean²/var ∈ [3.0, 5.5]",
+    "后时相植入变化区内 DN 显著高于周边森林（Δσ0 ≥ 6 dB）",
+    "栈演示产品 band2 的 20×20 左上角全为 NoData 值 0，band1 无该洞"
+  ],
+  "consumer_chain": [
+    "rs:sar_calibrate",
+    "rs:sar_speckle",
+    "rs:sar_change",
+    "rs:sar_speckle（band=0 全波段，#803 演示）",
+    "rs:sar_terrain_correction（#785 演示）"
+  ]
+}
