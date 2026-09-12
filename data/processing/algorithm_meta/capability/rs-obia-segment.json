@@ -33,8 +33,8 @@
     [
       {
         "code" : "INVALID_PARAMETER",
-        "remedy" : "\u8c03\u6574 shape/compactness \u6743\u91cd",
-        "when" : "\u5149\u8c31/\u5f62\u72b6\u6743\u91cd\u914d\u7f6e\u5931\u8861"
+        "remedy" : "\u6309 engine \u8c03\u6574\uff1asimple \u5f15\u64ce\u7528 smoothKernel/quantizeBins/minRegionSize\uff0cotb MeanShift \u7528 spatialRadius/rangeRadius/threshold",
+        "when" : "\u5206\u5272\u5f15\u64ce\u53c2\u6570\u914d\u7f6e\u5931\u8861"
       }
     ],
     "family" : "obia",
@@ -144,19 +144,19 @@
     "operator_group" : "obia",
     "prerequisites" : [],
     "schema_version" : 2,
-    "summary" : "OBIA \u591a\u5c3a\u5ea6\u5206\u5272\uff1a\u9762\u5411\u5bf9\u8c61\u5206\u6790\u7684\u4e13\u7528\u5206\u5272\u7b97\u5b50\uff0c\u8f93\u51fa\u5bf9\u8c61\u8fb9\u754c\u4e0e\u5c42\u7ea7\u5173\u7cfb\u3002",
+    "summary" : "OBIA \u591a\u5c3a\u5ea6\u5206\u5272\uff1a\u9762\u5411\u5bf9\u8c61\u5206\u6790\u7684\u4e13\u7528\u5206\u5272\u7b97\u5b50\uff0c\u8f93\u51fa\u5bf9\u8c61\u6807\u7b7e\u6805\u683c\uff08\u5bf9\u8c61\u5c42\u7ea7\u7531 rs:obia_hierarchy \u6784\u5efa\uff09\u3002",
     "teaching_use" : 
     {
       "concepts" : 
       [
         "\u591a\u5c3a\u5ea6\u5206\u5272",
-        "\u5bf9\u8c61\u5c42\u7ea7"
+        "\u5bf9\u8c61\u6807\u7b7e\u6805\u683c"
       ],
       "courses" : 
       [
         "\u9762\u5411\u5bf9\u8c61\u9065\u611f"
       ],
-      "exercise" : "\u751f\u6210\u4e24\u7ea7\uff08\u7530\u5757/\u5730\u5757\uff09\u5bf9\u8c61\u5c42\u7ea7\u5e76\u5bfc\u51fa\u5bf9\u8c61\u8fb9\u754c\u3002"
+      "exercise" : "\u751f\u6210\u7530\u5757\u5c3a\u5ea6\u7684\u5bf9\u8c61\u5206\u5272\u7ed3\u679c\u5e76\u53e0\u52a0\u8fb9\u754c\u53ef\u89c6\u5316\u3002"
     }
   },
   "description" : "Segment imagery into objects (teaching segmenter or OTB MeanShift).",

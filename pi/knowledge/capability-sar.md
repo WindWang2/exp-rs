@@ -6,7 +6,7 @@
 
 ## rs:sar_backscatter
 
-SAR 后向散射系数计算：从 SLC/GRD 复数据或定标数据生成 sigma0/gamma0 后向散射系数栅格。
+SAR 后向散射状态转换：在已定标强度数据上于 sigma0/gamma0/beta0 辐射状态及线性功率/dB 之间转换；不支持 DN 或 SLC 复数据。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：sar
@@ -45,10 +45,11 @@ SAR 辐射定标：把 SAR L1 数据的 DN 转换为定标后向散射系数（s
 
 ## rs:sar_change
 
-SAR 双时相变化检测：比较两景配准 SAR 影像的后向散射差异，探测地表变化（洪涝、倒伏、形变前兆等）。
+SAR 双时相变化检测：比较两景配准 SAR 影像的后向散射幅度差异，探测地表变化（洪涝、倒伏、滑坡引起的幅度变化等；不含 InSAR 相位）。
 
 - 确定性：容差级（并行执行与串行结果在 1e-6 相对容差内一致）
 - 模态：sar
+- 网格要求：输入必须位于同一网格（先用 rs:align 对齐）
 - 输入：inputA（raster）、inputB（raster）
 - 输出：changedPercent（numeric）、changedPixels（integer）、evaluatedPixels（integer）、magnitudeDomain（string）、output（raster）、thresholdUsed（numeric）
 - 参数：bandA（integer）、bandB（integer）、cleanup（enum）、cleanupIterations（integer）、inputDomain（enum）、minAreaPixels（integer）、output（string）、percentile（numeric）、polarizations（string）、sensor（string）、statisticalK（numeric）、threshold（numeric）、thresholdMethod（enum）
@@ -204,7 +205,7 @@ SAR 地形辐射平坦化（Gamma Flat / terrain flattening）：以实际散射
 
 ## rs:sar_terrain_masks
 
-SAR 地形掩膜生成：基于 DEM 与雷达几何标记叠掩、阴影与透视收缩区域，供后续分析剔除不可靠像元。
+SAR 地形掩膜生成：基于 DEM 与雷达几何把像元标记为叠掩/阴影/Normal（不区分透视收缩），供后续分析剔除不可靠像元。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：sar
@@ -217,7 +218,7 @@ SAR 地形掩膜生成：基于 DEM 与雷达几何标记叠掩、阴影与透�
 - 适用场景：山区 SAR 数据质量评估、时序 SAR 像元可靠性筛选
 - 失败模式：
   - `DATASET_NOT_FOUND` — 缺少 DEM 或入射角信息。处置：提供 DEM 与轨道入射角参数
-- 教学概念：雷达阴影、叠掩、透视收缩
+- 教学概念：雷达阴影、叠掩、几何畸变
 - 适用课程：微波遥感
 - 典型练习：生成山区雷达阴影掩膜并统计不可信像元比例。
 

@@ -32,9 +32,9 @@
     "failure_modes" : 
     [
       {
-        "code" : "BAND_ROLE_UNRESOLVED",
+        "code" : "INVALID_PARAMETER",
         "remedy" : "\u91cd\u91c7\u6837\u7aef\u5143\u5149\u8c31\u5230\u5f71\u50cf\u6ce2\u6bb5\u8bbe\u7f6e",
-        "when" : "\u7aef\u5143\u5149\u8c31\u6ce2\u6bb5\u6570\u4e0e\u5f71\u50cf\u4e0d\u4e00\u81f4"
+        "when" : "\u7aef\u5143\u5149\u8c31\u6ce2\u6bb5\u6570\u4e0e\u5f71\u50cf\u6ce2\u6bb5\u6570\u4e0d\u4e00\u81f4"
       }
     ],
     "family" : "classification",

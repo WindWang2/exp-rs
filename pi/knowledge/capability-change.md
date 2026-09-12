@@ -30,6 +30,7 @@ CVA 角度变体：在变化强度之外输出变化方向角，区分变化类�
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
+- 网格要求：输入必须位于同一网格（先用 rs:align 对齐）
 - 输入：after（raster）、before（raster）
 - 输出：height（integer）、method（string）、mode（string）、output（raster）、width（integer）
 - 参数：afterBand1（integer）、afterBand2（integer）、beforeBand1（integer）、beforeBand2（integer）、mode（enum）、output（string）
@@ -90,6 +91,7 @@ IR-MAD 迭代加权 MAD：在 MAD 基础上迭代降权不变像元，收敛出�
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
+- 网格要求：输入必须位于同一网格（先用 rs:align 对齐）
 - 输入：after（raster）、before（raster）
 - 输出：mean（numeric）、method（string）、output（raster）、stddev（numeric）
 - 参数：convThreshold（numeric）、maxIterations（integer）、output（string）
@@ -108,6 +110,7 @@ IR-MAD 迭代加权 MAD：在 MAD 基础上迭代降权不变像元，收敛出�
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical、sar
+- 网格要求：输入必须位于同一网格（先用 rs:align 对齐）
 - 输入：after（raster）、before（raster）
 - 输出：mean（numeric）、method（string）、output（raster）、stddev（numeric）
 - 参数：afterBand（integer）、band（integer）、beforeBand（integer）、epsilon（numeric）、output（string）
@@ -187,6 +190,7 @@ MAD 变化检测（多元变化检测）：对两期多波段做典型相关变�
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
+- 网格要求：输入必须位于同一网格（先用 rs:align 对齐）
 - 输入：after（raster）、before（raster）
 - 输出：mean（numeric）、method（string）、output（raster）、stddev（numeric）
 - 参数：output（string）

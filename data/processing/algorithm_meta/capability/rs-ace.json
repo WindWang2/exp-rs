@@ -31,9 +31,9 @@
     "failure_modes" : 
     [
       {
-        "code" : "BAND_ROLE_UNRESOLVED",
+        "code" : "INVALID_PARAMETER",
         "remedy" : "\u91cd\u91c7\u6837\u76ee\u6807\u5149\u8c31\u5230\u5f71\u50cf\u6ce2\u6bb5",
-        "when" : "\u76ee\u6807\u5149\u8c31\u4e0e\u5f71\u50cf\u6ce2\u6bb5\u4e0d\u5339\u914d"
+        "when" : "\u76ee\u6807\u5149\u8c31\u4e0e\u5f71\u50cf\u6ce2\u6bb5\u6570\u4e0d\u5339\u914d"
       }
     ],
     "family" : "hyperspectral",

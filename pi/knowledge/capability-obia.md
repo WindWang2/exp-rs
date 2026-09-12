@@ -80,7 +80,7 @@
 
 ## rs:obia_segment
 
-OBIA 多尺度分割：面向对象分析的专用分割算子，输出对象边界与层级关系。
+OBIA 多尺度分割：面向对象分析的专用分割算子，输出对象标签栅格（对象层级由 rs:obia_hierarchy 构建）。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical、sar
@@ -90,29 +90,30 @@ OBIA 多尺度分割：面向对象分析的专用分割算子，输出对象边
 - 适用地物：城市、农田、林地
 - 适用场景：对象层级构建、OBIA 分类底图
 - 失败模式：
-  - `INVALID_PARAMETER` — 光谱/形状权重配置失衡。处置：调整 shape/compactness 权重
-- 教学概念：多尺度分割、对象层级
+  - `INVALID_PARAMETER` — 分割引擎参数配置失衡。处置：按 engine 调整：simple 引擎用 smoothKernel/quantizeBins/minRegionSize，otb MeanShift 用 spatialRadius/rangeRadius/threshold
+- 教学概念：多尺度分割、对象标签栅格
 - 适用课程：面向对象遥感
-- 典型练习：生成两级（田块/地块）对象层级并导出对象边界。
+- 典型练习：生成田块尺度的对象分割结果并叠加边界可视化。
 - 可接下游：rs:obia_features
 
 ## rs:segment
 
-通用影像分割入口：按 method 选择多尺度分割/分水岭等算法，把影像切分为同质对象，是面向对象分析的第一步。
+深度学习分割模型推理（薄适配器）：加载平台模型库中的分割模型执行推理，输出类别/对象栅格；经典多尺度分割请用 rs:obia_segment。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical、sar
 - 输入：input（raster）
 - 输出：backend（string）、device（string）、height（integer）、model（string）、outBands（integer）、output（raster）、tileSize（integer）、tiles（integer）、width（integer）
 - 参数：bands（integer）、batchCap（integer）、device（string）、format（enum）、model（string）、output（string）、tta（enum）
+- 前置条件：需要平台模型库中的已注册分割模型。
 - 适用地物：城市、农田、森林
-- 适用场景：面向对象分类前处理、田块/建筑对象提取
+- 适用场景：业务化地物要素提取、面向对象分析的对象底图生产
 - 失败模式：
-  - `INVALID_PARAMETER` — 尺度/紧致度参数与影像分辨率不匹配。处置：按对象目标大小调整 scale 参数
-  - `INSUFFICIENT_MEMORY` — 大影像分割内存超限。处置：分幅处理或降低分辨率
-- 教学概念：图像分割、对象同质性、多尺度分割
-- 适用课程：遥感数字图像处理、面向对象遥感
-- 典型练习：对高分辨率影像执行多尺度分割并按田块边界评价分割质量。
+  - `MODEL_NOT_READY` — 模型未注册或权重缺失。处置：在模型库注册分割模型并确认权重路径
+  - `MODEL_INCOMPATIBLE` — 输入波段/尺寸/归一化与模型规格不符。处置：按模型清单准备输入
+- 教学概念：深度学习推理、分割模型、模型输入规格
+- 适用课程：深度学习与遥感应用
+- 典型练习：用建筑提取分割模型对城区影像推理并叠加矢量边界核查。
 
 ## rs:segment_stats
 

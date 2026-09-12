@@ -18,7 +18,7 @@
     "crs" : 
     {
       "requires_projected" : false,
-      "requires_shared_grid" : false
+      "requires_shared_grid" : true
     },
     "determinism" : 
     {

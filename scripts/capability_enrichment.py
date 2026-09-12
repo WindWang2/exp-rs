@@ -33,7 +33,7 @@ CLOSED_CODES = {
     "TRAINING_INVALID",
 }
 
-def E(summary, land_cover, scenes, concepts, courses, exercise, failures=(), prereqs=(), notes=""):
+def E(summary, land_cover, scenes, concepts, courses, exercise, failures=(), prereqs=(), notes="", grid=False, limitations_extra=()):
     return {
         "summary": summary,
         "applicability": {"land_cover": land_cover, "scenes": scenes, **({"notes": notes} if notes else {})},
@@ -42,20 +42,22 @@ def E(summary, land_cover, scenes, concepts, courses, exercise, failures=(), pre
             {"code": code, "when": when, "remedy": remedy} for code, when, remedy in failures
         ],
         "prerequisites_extra": list(prereqs),
+        "grid": grid,
+        "limitations_extra": list(limitations_extra),
     }
 
 # --- 光学 optical -----------------------------------------------------------
 OPTICAL = {
 "rs:atmospheric_correction": E(
-    "基于辐射传输模型的大气校正，把大气顶层（TOA）反射率转换为地表反射率，是多光谱定量分析的标准前置步骤。",
+    "通用经验大气校正入口（facade）：按 method 组合 DN→辐亮度→地表反射率的经验校正链（DOS1/DOS2/QUAC），不含辐射传输模型反演。",
     ["植被","水体","城市","土壤"],
     ["地表反射率反演","植被指数计算前的定量预处理","多时相影像辐射一致性归一化"],
-    ["大气散射","辐射传输模型","地表反射率"],
+    ["经验大气校正","暗像元法","地表反射率"],
     ["遥感数字图像处理","定量遥感基础"],
     "对 L1C 级 Sentinel-2 影像执行大气校正，比较校正前后 NDVI 数值分布的变化。",
     [
         ("INVALID_RADIOMETRY","输入是未定标的 DN 或辐亮度数据","先用 rs:radiometric_calibration 或传感器导入算子得到 TOA 反射率再校正"),
-        ("NOT_SUPPORTED","无法识别传感器光谱响应，无法选择大气模型","改用经验方法 rs:atmospheric_dos1 / rs:atmospheric_dos2 或 rs:atmospheric_quac"),
+        ("INVALID_PARAMETER","method 取值与所选经验方法不符","method 从 dn_to_radiance/dos1/dos2/quac 中选择；需要辐射传输反演时须外接专用工具"),
     ],
 ),
 "rs:atmospheric_dos1": E(
@@ -335,7 +337,7 @@ SPECTRAL = {
     [("INVALID_PARAMETER","波段序号越界或重复","检查 bands 列表都在 1..N 且无重复")],
 ),
 "rs:pca": E(
-    "主成分分析（PCA/K-L 变换）：把相关波段压缩为按方差排序的独立主成分，用于降维、去相关与信息浓缩。",
+    "主成分分析（PCA/K-L 变换）：把相关波段压缩为按方差排序的互不相关主成分，用于降维、去相关与信息浓缩。",
     ["任意地物"],
     ["多波段数据压缩","分类前特征降维","变化检测（PC 差异法）的输入"],
     ["主成分分析","K-L 变换","降维"],
@@ -348,7 +350,7 @@ SPECTRAL = {
 # --- 雷达 SAR ---------------------------------------------------------------
 SAR = {
 "rs:sar_backscatter": E(
-    "SAR 后向散射系数计算：从 SLC/GRD 复数据或定标数据生成 sigma0/gamma0 后向散射系数栅格。",
+    "SAR 后向散射状态转换：在已定标强度数据上于 sigma0/gamma0/beta0 辐射状态及线性功率/dB 之间转换；不支持 DN 或 SLC 复数据。",
     ["任意地物（SAR）"],
     ["SAR 定量分析入口","土壤水分与作物监测的输入"],
     ["后向散射","sigma0","gamma0"],
@@ -369,7 +371,7 @@ SAR = {
     [("CALIBRATION_MISMATCH","定标参数（LUT）缺失或与产品不匹配","使用官方 LUT 或确认产品类型参数正确")],
 ),
 "rs:sar_change": E(
-    "SAR 双时相变化检测：比较两景配准 SAR 影像的后向散射差异，探测地表变化（洪涝、倒伏、形变前兆等）。",
+    "SAR 双时相变化检测：比较两景配准 SAR 影像的后向散射幅度差异，探测地表变化（洪涝、倒伏、滑坡引起的幅度变化等；不含 InSAR 相位）。",
     ["水体","农田","建成区（SAR）"],
     ["洪涝范围快速制图","农作物倒伏监测"],
     ["SAR 变化检测","后向散射差异"],
@@ -380,6 +382,7 @@ SAR = {
         ("TIME_ORDER_INVALID","before/after 时相顺序颠倒","确认 before 早于 after"),
     ],
     prereqs=["两期 SAR 影像须同极化、同网格；建议先 rs:sar_speckle 滤波。"],
+    grid=True
 ),
 "rs:sar_dualpol_features": E(
     "双极化特征提取：从 VV/VH 双通道计算比值、极化分解量等特征，服务作物分类与地表类型识别。",
@@ -452,10 +455,10 @@ SAR = {
     prereqs=["需要 DEM；在定标（rs:sar_calibrate）之后执行。"],
 ),
 "rs:sar_terrain_masks": E(
-    "SAR 地形掩膜生成：基于 DEM 与雷达几何标记叠掩、阴影与透视收缩区域，供后续分析剔除不可靠像元。",
+    "SAR 地形掩膜生成：基于 DEM 与雷达几何把像元标记为叠掩/阴影/Normal（不区分透视收缩），供后续分析剔除不可靠像元。",
     ["山地（SAR）"],
     ["山区 SAR 数据质量评估","时序 SAR 像元可靠性筛选"],
-    ["雷达阴影","叠掩","透视收缩"],
+    ["雷达阴影","叠掩","几何畸变"],
     ["微波遥感"],
     "生成山区雷达阴影掩膜并统计不可信像元比例。",
     [("DATASET_NOT_FOUND","缺少 DEM 或入射角信息","提供 DEM 与轨道入射角参数")],
@@ -506,10 +509,10 @@ TERRAIN = {
 # --- 时序 temporal ----------------------------------------------------------
 TEMPORAL = {
 "rs:temporal_composite": E(
-    "时序合成：把多期影像按最大值/均值/中值等合成一景，压制云与噪声，是时序生产的常用起点。",
+    "时序合成：把多期影像按最优像元（质量分）/均值/中值合成一景，压制云与噪声。默认 quality_band=0 时各期得分相同，按目标日期就近选取；需要经典 MVC 时把指数波段显式设为 quality_band。",
     ["植被","水体","任意地物"],
     ["月度/季度无云底图生产","NDVI 时序预处理"],
-    ["影像合成","最大值合成（MVC）","中值合成"],
+    ["影像合成","最优像元合成","中值合成"],
     ["遥感数字图像处理"],
     "把 12 期月度 NDVI 合成为年度最大值图并对比云污染情况。",
     [
@@ -528,7 +531,7 @@ TEMPORAL = {
     [("DATASET_NOT_FOUND","时序集合中引用的影像缺失","检查时序集合清单与文件路径")],
 ),
 "rs:temporal_gap_fill": E(
-    "时序插值补洞：对含缺失（云/阴影）的时序按时间维度插值（线性/样条/邻近），恢复连续时序。",
+    "时序插值补洞：对含缺失（云/阴影）的时序按时间维度插值（线性/最近邻），恢复连续时序。",
     ["植被","农田"],
     ["去云后的 NDVI 时序修复","物候分析前的时间连续化"],
     ["时间插值","缺失值"],
@@ -552,19 +555,19 @@ TEMPORAL = {
     "时序分解：把时序拆为趋势/季节/残差分量（STL 思想），支撑长期趋势与季节动态分离（容差级算子）。",
     ["植被","水体","农田"],
     ["长期趋势与季节动态分离","城郊扩张的时序证据分析"],
-    ["STL 分解","季节分量","趋势分量"],
+    ["季节-趋势分解（Whittaker+气候态）","季节分量","趋势分量"],
     ["遥感应用分析","时间统计"],
     "分解 5 年月度 NDVI 时序并解读趋势项的城市绿地变化。",
     [("NOT_SUPPORTED","时序长度不足以估计季节分量","至少需要两个完整周期的观测")],
 ),
 "rs:temporal_trend": E(
-    "逐像元时序趋势拟合：以线性回归等估计斜率并检验显著性，输出变化速率图。",
+    "逐像元时序趋势拟合：普通最小二乘估计斜率/截距并输出 R²/RMSE 佐证拟合质量；显著性检验请用 rs:temporal_sen_trend。",
     ["植被","城市","水体"],
     ["绿化/退化趋势制图","围填海等长期变化速率估计"],
-    ["最小二乘趋势","变化速率","显著性"],
+    ["最小二乘趋势","变化速率","拟合优度"],
     ["遥感应用分析"],
-    "计算 20 年生长季 NDVI 趋势斜率并按显著性过滤制图。",
-    [("NOT_SUPPORTED","有效观测期数过少","每个像元至少需要 3 个以上有效观测")],
+    "计算 20 年生长季 NDVI 趋势斜率，用 R² 过滤拟合可信区域；需要显著性检验时改用 rs:temporal_sen_trend。",
+    [("NOT_SUPPORTED","有效观测期数过少","每个像元至少需要 2 期有效观测，建议 ≥3 期以获得稳定 R²/RMSE")],
 ),
 "rs:temporal_sen_trend": E(
     "Theil-Sen 稳健趋势 + Mann-Kendall 检验：对含噪声时序估计稳健斜率并做显著性检验，抗离群值优于普通最小二乘。",
@@ -607,7 +610,7 @@ TEMPORAL = {
     ],
 ),
 "rs:temporal_anomaly": E(
-    "时序异常检测：以历史均值/分位数区间为基线，标记显著偏离当期的异常像元。",
+    "时序异常检测：以历史均值基线计算 z-score 或差值，标记显著偏离当期的异常像元。",
     ["植被","水体","农田"],
     ["病虫害/旱情异常提示","水体异常扩张告警"],
     ["Z 分数","基线偏离","时序异常"],
@@ -619,10 +622,10 @@ TEMPORAL = {
     ],
 ),
 "rs:temporal_breakpoints": E(
-    "时序断点检测：BFAST/滚动均值等检测时序结构性突变点（扰动、撂荒、洪泛），定位变化发生时间。",
+    "时序断点检测：逐像元分段线性趋势拟合检测结构性突变点（扰动、撂荒、洪泛），定位变化发生时间。",
     ["森林","农田","水体"],
     ["森林扰动年份制图","土地利用转型检测"],
-    ["结构断点","BFAST","突变检测"],
+    ["分段线性回归","结构断点","突变检测"],
     ["遥感应用分析"],
     "检测 2000–2024 NDVI 时序的断点年份并与采伐记录核对。",
     [("NOT_SUPPORTED","时序过短无法建立稳定历史段","建议 3 年以上周期观测")],
@@ -682,7 +685,7 @@ CLASSIFICATION = {
     ["光谱角","端元光谱"],
     ["高光谱遥感"],
     "以实验室光谱为端元对影像做 SAM 分类并对比真实矿物分布。",
-    [("BAND_ROLE_UNRESOLVED","端元光谱波段数与影像不一致","重采样端元光谱到影像波段设置")],
+    [("INVALID_PARAMETER","端元光谱波段数与影像波段数不一致","重采样端元光谱到影像波段设置")],
 ),
 "rs:feature_stack": E(
     "特征堆叠：把多个波段/指数/纹理图层按像元对齐堆叠为多特征影像，是分类前的标准组织步骤。",
@@ -704,7 +707,7 @@ CLASSIFICATION = {
     [("INVALID_PARAMETER","统计范围参数非法或含 nodata 未剔除","检查归一化区间并在统计中排除 nodata")],
 ),
 "rs:feature_select": E(
-    "特征筛选：按重要性/相关性挑选对分类最有贡献的特征子集，降低维度并抑制冗余（容差级算子）。",
+    "特征筛选：按重要性/相关性挑选对分类最有贡献的特征子集，降低维度并抑制冗余。",
     ["任意地物"],
     ["高维特征集精简","分类精度优化实验"],
     ["特征重要性","相关性过滤"],
@@ -800,6 +803,7 @@ CHANGE = {
         ("GRID_MISMATCH","两期影像网格不一致","先 rs:align 对齐"),
         ("INVALID_PARAMETER","出现零值/负值导致对数无定义","先保证输入为正值（定标后数据）"),
     ],
+    grid=True
 ),
 "rs:change_cva": E(
     "变化向量分析（CVA）：在多波段空间计算两期变化向量的模长，全面刻画多波段变化强度。",
@@ -822,6 +826,7 @@ CHANGE = {
     ["遥感数字图像处理"],
     "用 CVA 角度把变化区分为绿化与退化两类。",
     [("INVALID_PARAMETER","两期波段数不一致","保证相同波段集与顺序")],
+    grid=True
 ),
 "rs:change_mad": E(
     "MAD 变化检测（多元变化检测）：对两期多波段做典型相关变换后取方差不变分量，自动突出真实变化。",
@@ -843,6 +848,7 @@ CHANGE = {
     ["统计方法","遥感数字图像处理"],
     "运行 IR-MAD 得到变化概率图并与固定阈值法对比。",
     [("NOT_SUPPORTED","迭代不收敛（数据方差结构病态）","检查输入波段相关性或减少波段数")],
+    grid=True
 ),
 "rs:change_sam": E(
     "光谱角变化检测：以两期光谱向量的夹角度量光谱形态变化，对亮度差异不敏感。",
@@ -852,6 +858,7 @@ CHANGE = {
     ["高光谱遥感"],
     "用 SAM 角度区分两期高光谱影像的光谱形态变化与亮度变化。",
     [("INVALID_PARAMETER","两期波段配置不一致","统一波段集后重试")],
+    grid=True
 ),
 "rs:change_normalized_difference": E(
     "归一化差值变化检测：(a-b)/(a+b) 形式压制公共乘性因子，兼顾差值与比值的优点。",
@@ -880,25 +887,26 @@ CHANGE = {
 # --- 面向对象 obia ----------------------------------------------------------
 OBIA = {
 "rs:segment": E(
-    "通用影像分割入口：按 method 选择多尺度分割/分水岭等算法，把影像切分为同质对象，是面向对象分析的第一步。",
+    "深度学习分割模型推理（薄适配器）：加载平台模型库中的分割模型执行推理，输出类别/对象栅格；经典多尺度分割请用 rs:obia_segment。",
     ["城市","农田","森林"],
-    ["面向对象分类前处理","田块/建筑对象提取"],
-    ["图像分割","对象同质性","多尺度分割"],
-    ["遥感数字图像处理","面向对象遥感"],
-    "对高分辨率影像执行多尺度分割并按田块边界评价分割质量。",
+    ["业务化地物要素提取","面向对象分析的对象底图生产"],
+    ["深度学习推理","分割模型","模型输入规格"],
+    ["深度学习与遥感应用"],
+    "用建筑提取分割模型对城区影像推理并叠加矢量边界核查。",
     [
-        ("INVALID_PARAMETER","尺度/紧致度参数与影像分辨率不匹配","按对象目标大小调整 scale 参数"),
-        ("INSUFFICIENT_MEMORY","大影像分割内存超限","分幅处理或降低分辨率"),
+        ("MODEL_NOT_READY","模型未注册或权重缺失","在模型库注册分割模型并确认权重路径"),
+        ("MODEL_INCOMPATIBLE","输入波段/尺寸/归一化与模型规格不符","按模型清单准备输入"),
     ],
+    prereqs=["需要平台模型库中的已注册分割模型。"],
 ),
 "rs:obia_segment": E(
-    "OBIA 多尺度分割：面向对象分析的专用分割算子，输出对象边界与层级关系。",
+    "OBIA 多尺度分割：面向对象分析的专用分割算子，输出对象标签栅格（对象层级由 rs:obia_hierarchy 构建）。",
     ["城市","农田","林地"],
     ["对象层级构建","OBIA 分类底图"],
-    ["多尺度分割","对象层级"],
+    ["多尺度分割","对象标签栅格"],
     ["面向对象遥感"],
-    "生成两级（田块/地块）对象层级并导出对象边界。",
-    [("INVALID_PARAMETER","光谱/形状权重配置失衡","调整 shape/compactness 权重")],
+    "生成田块尺度的对象分割结果并叠加边界可视化。",
+    [("INVALID_PARAMETER","分割引擎参数配置失衡","按 engine 调整：simple 引擎用 smoothKernel/quantizeBins/minRegionSize，otb MeanShift 用 spatialRadius/rangeRadius/threshold")],
 ),
 "rs:obia_features": E(
     "对象特征计算：为分割对象统计光谱均值、形状指数、纹理等特征，形成对象级特征表。",
@@ -961,7 +969,7 @@ HYPER = {
     ["ACE","目标检测","白化"],
     ["高光谱遥感"],
     "以标布光谱为目标运行 ACE 并评估 ROC 检测性能。",
-    [("BAND_ROLE_UNRESOLVED","目标光谱与影像波段不匹配","重采样目标光谱到影像波段")],
+    [("INVALID_PARAMETER","目标光谱与影像波段数不匹配","重采样目标光谱到影像波段")],
 ),
 "rs:matched_filter": E(
     "匹配滤波目标检测：以目标光谱与背景协方差构造最优滤波器，最大化目标-背景对比。",
@@ -982,7 +990,7 @@ HYPER = {
     [("INSUFFICIENT_MEMORY","大场景全局协方差计算内存超限","使用局部 RX 或分幅处理")],
 ),
 "rs:endmember_extraction": E(
-    "端元提取：从影像自动抽取纯净地物光谱（N-FINDR/VCA 类算法），是光谱解混的前置步骤。",
+    "端元提取：用 PPI（像元纯度指数）从影像中抽取数据云角点处的纯净地物光谱，是光谱解混的前置步骤。",
     ["矿物","植被","土壤"],
     ["端元光谱库构建","解混前的端元估计"],
     ["端元","纯像元","单形"],
@@ -1058,16 +1066,18 @@ RASTER_SPATIAL = {
     notes="类别图必须用最近邻，避免类别值被插值污染。",
 ),
 "rs:mosaic": E(
-    "影像镶嵌：把多幅相邻影像拼接为一幅，支持羽化与接缝线处理，输出大区域底图。",
+    "影像镶嵌：把多幅相邻影像拼接为一幅，重叠区按输入顺序合并，无羽化/接缝线处理；输出大区域底图。",
     ["任意地物"],
     ["区域底图生产","分幅成果拼接"],
-    ["镶嵌","接缝线","羽化"],
+    ["镶嵌","重叠区合并"],
     ["遥感数字图像处理"],
     "把 4 景相邻 Sentinel-2 镶嵌为全市底图并检查接缝色差。",
     [
         ("CRS_MISMATCH","输入影像坐标系不一致","先统一重投影再镶嵌"),
         ("GRID_MISMATCH","输入分辨率不一致","先 rs:resample 统一分辨率"),
     ],
+    limitations_extra=["仅处理各输入的第 1 波段；多波段数据需先按波段拆分或改用支持多波段的流程。",
+                       "要求所有输入 CRS 一致。"],
 ),
 "rs:morphology": E(
     "形态学运算：腐蚀/膨胀/开闭运算处理二值或灰度栅格，常用于掩膜修整与对象形状整形。",
@@ -1267,6 +1277,16 @@ def apply(check: bool) -> int:
             if extra not in merged:
                 merged.append(extra)
         cap["prerequisites"] = merged
+        merged_limits = list(cap.get("limitations", []))
+        for extra in entry.get("limitations_extra", []):
+            if extra not in merged_limits:
+                merged_limits.append(extra)
+        cap["limitations"] = merged_limits
+        if entry.get("grid"):
+            # Authored grid requirement (review P1): the operator metadata
+            # demands co-registration but its contract under-declares it.
+            # deriveCapabilityBlock ORs the authored flag with the derived one.
+            cap.setdefault("crs", {})["requires_shared_grid"] = True
         enriched += 1
         if not check:
             path.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -1384,8 +1404,14 @@ CHAINS = [
      "why": "L1 产品定量使用前需大气校正"},
 ]
 
+_SPECTRAL_INDEX_FACADE = [
+    "rs:ndvi", "rs:evi", "rs:savi", "rs:ndwi", "rs:mndwi", "rs:ndbi",
+]
+
 EXCLUSIVE = (
     _pairs(_ATMOS_CORRECTORS)
+    + [[ "rs:spectral_index", op ] for op in _SPECTRAL_INDEX_FACADE]
+    + [[ "rs:image_enhancement", "rs:contrast_stretch" ]]
     + _pairs(_FUSION_METHODS)
     + [[ "rs:image_fusion", m ] for m in _FUSION_METHODS]
     + _pairs(_CHANGE_METHODS)

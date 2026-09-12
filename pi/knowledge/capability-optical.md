@@ -28,7 +28,7 @@
 
 ## rs:atmospheric_correction
 
-基于辐射传输模型的大气校正，把大气顶层（TOA）反射率转换为地表反射率，是多光谱定量分析的标准前置步骤。
+通用经验大气校正入口（facade）：按 method 组合 DN→辐亮度→地表反射率的经验校正链（DOS1/DOS2/QUAC），不含辐射传输模型反演。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
@@ -40,8 +40,8 @@
 - 适用场景：地表反射率反演、植被指数计算前的定量预处理、多时相影像辐射一致性归一化
 - 失败模式：
   - `INVALID_RADIOMETRY` — 输入是未定标的 DN 或辐亮度数据。处置：先用 rs:radiometric_calibration 或传感器导入算子得到 TOA 反射率再校正
-  - `NOT_SUPPORTED` — 无法识别传感器光谱响应，无法选择大气模型。处置：改用经验方法 rs:atmospheric_dos1 / rs:atmospheric_dos2 或 rs:atmospheric_quac
-- 教学概念：大气散射、辐射传输模型、地表反射率
+  - `INVALID_PARAMETER` — method 取值与所选经验方法不符。处置：method 从 dn_to_radiance/dos1/dos2/quac 中选择；需要辐射传输反演时须外接专用工具
+- 教学概念：经验大气校正、暗像元法、地表反射率
 - 适用课程：遥感数字图像处理、定量遥感基础
 - 典型练习：对 L1C 级 Sentinel-2 影像执行大气校正，比较校正前后 NDVI 数值分布的变化。
 - 可接上游：rs:sentinel2_import、rs:landsat_import

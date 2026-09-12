@@ -129,18 +129,19 @@
 
 ## rs:mosaic
 
-影像镶嵌：把多幅相邻影像拼接为一幅，支持羽化与接缝线处理，输出大区域底图。
+影像镶嵌：把多幅相邻影像拼接为一幅，重叠区按输入顺序合并，无羽化/接缝线处理；输出大区域底图。
 
 - 确定性：逐位一致（bit_exact）
 - 模态：optical、sar、thermal、dem
 - 输出：height（integer）、inputCount（integer）、output（raster）、width（integer）
 - 参数：inputs（string）、output（string）
+- 局限：仅处理各输入的第 1 波段；多波段数据需先按波段拆分或改用支持多波段的流程。；要求所有输入 CRS 一致。
 - 适用地物：任意地物
 - 适用场景：区域底图生产、分幅成果拼接
 - 失败模式：
   - `CRS_MISMATCH` — 输入影像坐标系不一致。处置：先统一重投影再镶嵌
   - `GRID_MISMATCH` — 输入分辨率不一致。处置：先 rs:resample 统一分辨率
-- 教学概念：镶嵌、接缝线、羽化
+- 教学概念：镶嵌、重叠区合并
 - 适用课程：遥感数字图像处理
 - 典型练习：把 4 景相邻 Sentinel-2 镶嵌为全市底图并检查接缝色差。
 
