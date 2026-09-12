@@ -114,12 +114,14 @@ public:
                                         const exprs::IpcChannel::CancelPredicate &cancelPredicate = {},
                                         const exprs::IpcChannel::ProgressSink &progressSink = {} );
 
-    /// Unclamped, UNGATED variant for INTERNAL control requests
-    /// (plugin.load during spawn/recovery, plugin.shutdown): the request
-    /// deadline quota and the concurrency gate must not bound these — a
-    /// cold first LoadLibrary legitimately exceeds the quota, and lifecycle
-    /// traffic must never wait behind data-plane slots.
-    exprs::IpcChannel::Outcome requestRaw(
+    /// Internal CONTROL-PLANE request path (plugin.load during
+    /// spawn/recovery, plugin.shutdown). Contract: it deliberately BYPASSES
+    /// the per-request gates user requests go through — the request-deadline
+    /// quota clamp and the concurrency gate do not apply. Lifecycle traffic
+    /// must never wait behind data-plane slots, and a cold first LoadLibrary
+    /// legitimately exceeds the user-request quota. Never use it for
+    /// data-plane traffic.
+    exprs::IpcChannel::Outcome requestControlRaw(
         const std::string &method, const Json::Value &params, int deadlineMs,
         const exprs::IpcChannel::CancelPredicate &cancelPredicate = {},
         const exprs::IpcChannel::ProgressSink &progressSink = {} );
@@ -191,7 +193,7 @@ private:
     bool spawnWorkerProcess( exprs::PluginDiagnosticLog &diagnostics );
     bool awaitHandshake( exprs::PluginDiagnosticLog &diagnostics );
     void killProcess( const char *reason );
-    /// Shared Channel-EOF handler for request/requestRaw: probes the process
+    /// Shared Channel-EOF handler for request/requestControlRaw: probes the process
     /// (waitpid / WaitForSingleObject 0) and, when death is confirmed,
     /// releases the OS handles under the SAME exchange-winner discipline
     /// killProcess documents (exactly one closer — concurrent requesters can
@@ -201,6 +203,11 @@ private:
     /// either direct kill (sole in-flight request) or poison (peers still
     /// in flight; the worker dies when the last request drains).
     void escalateTimeout( long long requestId );
+
+    /// Typed ChannelClosed outcome for a request on a dead/never-spawned
+    /// worker (E6005, retryable) — one definition so every request path
+    /// reports the identical failure.
+    static exprs::IpcChannel::Outcome channelClosedOutcome();
 
     SpawnOptions mOptions;
     Json::Value mHello;
