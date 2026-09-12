@@ -18,6 +18,7 @@
 #include "rs_pipeline_runner.h"
 #include "cli_project_ops.h"
 #include "cli_dataset_commands.h"
+#include "cli_lab_commands.h"
 
 #include <chrono>
 #include <future>
@@ -2120,7 +2121,9 @@ bool isCliCommand( const QString &firstArg )
                                            "models",    "catalog", "project",  "data",
                                            "data-providers",
                                            // Foundation 5.0/7.0 dataset-experiment surface.
-                                           "dataset", "experiment", "reproduce" };
+                                           "dataset", "experiment", "reproduce",
+                                           // D4 teaching auto-grader (ADR 0146).
+                                           "lab" };
     return kCommands.contains( firstArg );
 }
 
@@ -2156,6 +2159,8 @@ int dispatchCliCommand( const QStringList &arguments, const CliIO &io )
         return commandExperiment( std::move( args ), io );
     if ( command == "reproduce" )
         return commandReproduce( std::move( args ), io );
+    if ( command == "lab" )
+        return commandLab( std::move( args ), io );
     if ( command == "catalog" )
     {
         // catalog export <dir> — the legacy --export-catalog surface.
