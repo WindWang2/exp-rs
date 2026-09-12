@@ -1029,13 +1029,13 @@ MultidimMetadata inspectMultidim( const std::string &path, const InspectOptions 
           // index is GUInt64); on LP64 hosts GUInt64 is unsigned long long,
           // which does not match — mirror the axisCountSize pattern above
           // (build fix on GDAL 3.13 headers).
-          const std::size_t oneCount = 1;
+          const std::size_t oneCountSize = 1;
           const GInt64 oneStep = 1;
           GPtrDiff_t oneStride = 1;
           for ( GUInt64 i = 0; i < axisCount && stringType != nullptr; ++i )
           {
             char *element = nullptr;
-            if ( GDALMDArrayRead( indexingVariable, &i, &oneCount, &oneStep, &oneStride,
+            if ( GDALMDArrayRead( indexingVariable, &i, &oneCountSize, &oneStep, &oneStride,
                                   stringType, &element, &element, sizeof( char * ) ) )
             {
               info.stringValues.push_back( element ? element : "" );

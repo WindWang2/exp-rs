@@ -96,6 +96,7 @@ vendor/
 !.planning/scientific-algorithms-9/
 !.planning/plugin-platform-8/
 !.planning/verification-platform-8/
+!.planning/unified-contract-verification-9/
 !.planning/model-runtime-multimodal-9/
 !.planning/scientific-mlops-9/
 !.planning/execution-concurrency-lifecycle-9/

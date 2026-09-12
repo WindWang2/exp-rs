@@ -1,0 +1,139 @@
+{
+ "schema": "exp.verification.ladder.v1",
+ "started_utc": "2026-09-12T00:25:41.081467+00:00",
+ "build_dir": "/home/kevin/projects/rs-studio/wt-contract-verification-9/build",
+ "host": {
+  "platform": "linux",
+  "cpus": 16
+ },
+ "lanes": {
+  "L2": {
+   "title": "contract-known",
+   "items": [
+    {
+     "lane": "L2",
+     "label": "fuzz_io",
+     "name": "test_contract_fuzz_io",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "passed",
+     "elapsed_s": 0.1,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "fuzz_lang",
+     "name": "test_contract_fuzz_lang",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "passed",
+     "elapsed_s": 0.0,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "fuzz_data",
+     "name": "test_contract_fuzz_data",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "passed",
+     "elapsed_s": 0.1,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "known_answer_corpus",
+     "name": "test_known_answer_corpus",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "passed",
+     "elapsed_s": 0.1,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "portability_contract",
+     "name": "test_portability_contract",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "passed",
+     "elapsed_s": 0.0,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "fuzz_ipc",
+     "name": "test_contract_fuzz_ipc",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "passed",
+     "elapsed_s": 0.0,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "known_answer_corpus_8",
+     "name": "test_known_answer_corpus_8",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "passed",
+     "elapsed_s": 0.0,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "contract_platform_9",
+     "name": "test_contract_platform_9",
+     "kind": "test",
+     "timeout_s": 300.0,
+     "status": "passed",
+     "elapsed_s": 6.5,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "contract_projection_9",
+     "name": "test_contract_projection_9",
+     "kind": "test",
+     "timeout_s": 300.0,
+     "status": "passed",
+     "elapsed_s": 4.1,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "command_contract_9",
+     "name": "test_command_contract_9",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "passed",
+     "elapsed_s": 1.3,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "diagnostics_contract_9",
+     "name": "test_diagnostics_contract_9",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "passed",
+     "elapsed_s": 0.1,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "capability_contract_9",
+     "name": "test_capability_contract_9",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "passed",
+     "elapsed_s": 0.3,
+     "detail": ""
+    }
+   ],
+   "status": "passed"
+  }
+ },
+ "finished_utc": "2026-09-12T00:25:53.827926+00:00",
+ "overall": "passed"
+}

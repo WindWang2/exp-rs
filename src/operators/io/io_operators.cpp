@@ -143,8 +143,9 @@ Json::Value IoTranslateOperator::schema() const
   params["resampling"] = makeEnumParam( "resampling", "Resampling for shrunk reads",
                                         { "near", "bilinear", "cubic", "cubicspline", "lanczos", "average", "mode" },
                                         "near" );
-  Json::Value root = makeRootSchema( "Translate Raster", description(), params,
-                                     Json::Value( makeOutputParam( "output", "Converted raster", "tif" ) ) );
+  Json::Value outputs;
+  outputs["output"] = makeOutputParam( "output", "Converted raster", "tif" );
+  Json::Value root = makeRootSchema( "Translate Raster", description(), params, outputs );
   root["required"] = makeRequired( { "input", "output" } );
   stampDeterminismGrade( root, determinismGrade() );
   return root;
@@ -210,8 +211,9 @@ Json::Value IoWarpOperator::schema() const
   params["bounds"] = makeStringParam( "bounds", "Target extent [minX,minY,maxX,maxY] in target CRS" );
   params["targetAlignedPixels"] = makeBooleanParam( "targetAlignedPixels", "Align target grid (-tap)", false );
   params["creationOptions"] = makeStringParam( "creationOptions", "Driver creation options" );
-  Json::Value root = makeRootSchema( "Warp Raster", description(), params,
-                                     Json::Value( makeOutputParam( "output", "Warped raster", "tif" ) ) );
+  Json::Value outputs;
+  outputs["output"] = makeOutputParam( "output", "Warped raster", "tif" );
+  Json::Value root = makeRootSchema( "Warp Raster", description(), params, outputs );
   root["required"] = makeRequired( { "input", "output", "targetCrs" } );
   stampDeterminismGrade( root, determinismGrade() );
   return root;
@@ -277,8 +279,9 @@ Json::Value IoReprojectOperator::schema() const
                                                               "(the only sanctioned fallback)" );
   params["resampling"] = makeEnumParam( "resampling", "Resampling method",
                                         { "near", "bilinear", "cubic", "cubicspline", "lanczos" }, "near" );
-  Json::Value root = makeRootSchema( "Reproject Raster", description(), params,
-                                     Json::Value( makeOutputParam( "output", "Reprojected raster", "tif" ) ) );
+  Json::Value outputs;
+  outputs["output"] = makeOutputParam( "output", "Reprojected raster", "tif" );
+  Json::Value root = makeRootSchema( "Reproject Raster", description(), params, outputs );
   root["required"] = makeRequired( { "input", "output", "targetCrs" } );
   stampDeterminismGrade( root, determinismGrade() );
   return root;
@@ -335,8 +338,9 @@ Json::Value IoClipOperator::schema() const
   params["bounds"] = makeStringParam( "bounds", "Clip extent [minX,minY,maxX,maxY] — mandatory" );
   params["srcCrsOverride"] = makeStringParam( "srcCrsOverride", "Declare the source CRS when the file carries none" );
   params["creationOptions"] = makeStringParam( "creationOptions", "Driver creation options" );
-  Json::Value root = makeRootSchema( "Clip Raster", description(), params,
-                                     Json::Value( makeOutputParam( "output", "Clipped raster", "tif" ) ) );
+  Json::Value outputs;
+  outputs["output"] = makeOutputParam( "output", "Clipped raster", "tif" );
+  Json::Value root = makeRootSchema( "Clip Raster", description(), params, outputs );
   root["required"] = makeRequired( { "input", "output", "bounds" } );
   stampDeterminismGrade( root, determinismGrade() );
   return root;
@@ -409,8 +413,9 @@ Json::Value IoConvertFormatOperator::schema() const
   params["output"] = makeOutputParam( "output", "Output dataset path" );
   params["driver"] = makeStringParam( "driver", "Output GDAL driver short name (GTiff/GPKG/GeoJSON/...)", "GTiff" );
   params["creationOptions"] = makeStringParam( "creationOptions", "Driver creation options" );
-  Json::Value root = makeRootSchema( "Convert Format", description(), params,
-                                     Json::Value( makeOutputParam( "output", "Converted dataset", "" ) ) );
+  Json::Value outputs;
+  outputs["output"] = makeOutputParam( "output", "Converted dataset", "" );
+  Json::Value root = makeRootSchema( "Convert Format", description(), params, outputs );
   root["required"] = makeRequired( { "input", "output" } );
   stampDeterminismGrade( root, determinismGrade() );
   return root;
@@ -529,8 +534,9 @@ Json::Value IoMakeCogOperator::schema() const
                                       "continuous_float", "sar" },
                                     "lossless_scientific" );
   params["creationOptions"] = makeStringParam( "creationOptions", "Extra COG creation options" );
-  Json::Value root = makeRootSchema( "Make COG", description(), params,
-                                     Json::Value( makeOutputParam( "output", "Cloud Optimized GeoTIFF", "tif" ) ) );
+  Json::Value outputs;
+  outputs["output"] = makeOutputParam( "output", "Cloud Optimized GeoTIFF", "tif" );
+  Json::Value root = makeRootSchema( "Make COG", description(), params, outputs );
   root["required"] = makeRequired( { "input", "output" } );
   stampDeterminismGrade( root, determinismGrade() );
   return root;
@@ -593,8 +599,9 @@ Json::Value IoVectorConvertOperator::schema() const
   params["targetCrs"] = makeStringParam( "targetCrs", "Reproject features to this declared CRS" );
   params["where"] = makeStringParam( "where", "Attribute filter (OGR SQL WHERE)" );
   params["clipBounds"] = makeStringParam( "clipBounds", "Clip box [minX,minY,maxX,maxY] in layer CRS" );
-  Json::Value root = makeRootSchema( "Convert Vector", description(), params,
-                                     Json::Value( makeOutputParam( "output", "Converted vector", "" ) ) );
+  Json::Value outputs;
+  outputs["output"] = makeOutputParam( "output", "Converted vector", "" );
+  Json::Value root = makeRootSchema( "Convert Vector", description(), params, outputs );
   root["required"] = makeRequired( { "input", "output" } );
   stampDeterminismGrade( root, determinismGrade() );
   return root;

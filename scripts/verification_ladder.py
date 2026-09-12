@@ -87,6 +87,15 @@ LANES: dict[str, dict] = {
             ("portability_contract", "test_portability_contract", "test", 180),
             ("fuzz_ipc", "test_contract_fuzz_ipc", "test", 180),
             ("known_answer_corpus_8", "test_known_answer_corpus_8", "test", 180),
+            # Contract Platform 9.0 (unified contract projection guards):
+            # implementation↔schema equality, command/help/action reference
+            # graph, diagnostics census, capability floors, and the
+            # mutation-proven scanners + snapshot freshness.
+            ("contract_platform_9", "test_contract_platform_9", "test", 300),
+            ("contract_projection_9", "test_contract_projection_9", "test", 300),
+            ("command_contract_9", "test_command_contract_9", "test", 180),
+            ("diagnostics_contract_9", "test_diagnostics_contract_9", "test", 180),
+            ("capability_contract_9", "test_capability_contract_9", "test", 180),
         ],
     },
     "L3": {
@@ -122,6 +131,19 @@ LANES: dict[str, dict] = {
             ("worker_host", "test_worker_host", "test", 600),
         ],
     },
+    "LS": {
+        "title": "sanitizer",
+        "description": "ASan-instrumented core suites in a separate sanitizer "
+                       "build tree (pass --asan-build-dir; without one the "
+                       "lane reports not-built — it is never silently green)",
+        "optional": True,
+        "items": [
+            ("asan_trace_contract", "test_trace_contract", "asan-test", 300),
+            ("asan_contract_projection_9", "test_contract_projection_9",
+             "asan-test", 600),
+            ("asan_fault_registry", "test_fault_registry", "asan-test", 300),
+        ],
+    },
     "L6": {
         "title": "visual-optional",
         "description": "offscreen visual suites (skippable without loss of honor)",
@@ -136,6 +158,7 @@ LANES: dict[str, dict] = {
         "items": [
             ("quality7", "benchmark_quality7", "bench", 600),
             ("scale8", "benchmark_scale8", "bench", 1800),
+            ("contract9", "benchmark_contract9", "bench", 300),
         ],
     },
     "L8": {
@@ -146,7 +169,7 @@ LANES: dict[str, dict] = {
     },
 }
 
-LANE_ORDER = ["L0", "L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8"]
+LANE_ORDER = ["L0", "L1", "L2", "L3", "L4", "L5", "LS", "L6", "L7", "L8"]
 
 
 def find_binary(build_dir: Path, name: str) -> Path | None:
@@ -291,6 +314,10 @@ def main() -> int:
                         help="multiply every item timeout (slow hosts)")
     parser.add_argument("--bench-out-dir", default=None,
                         help="where benchmark JSON lands (default <build-dir>/benchmarks)")
+    parser.add_argument("--asan-build-dir", default=os.environ.get("SICNU_ASAN_BUILD_DIR"),
+                        help="separate ASan-instrumented build tree for the LS lane "
+                             "(env SICNU_ASAN_BUILD_DIR); without it LS items are "
+                             "reported not-built")
     parser.add_argument("--strict", action="store_true",
                         help="non-passing ANY item (incl. skipped/not-built) fails the run")
     args = parser.parse_args()
@@ -371,6 +398,25 @@ def main() -> int:
             if kind == "target":
                 status, detail = build_target(build_dir, name, args.build_jobs)
                 item.update(status=status, detail=detail[-2000:] if detail else "")
+            elif kind == "asan-test":
+                asan_dir = Path(args.asan_build_dir).resolve() if args.asan_build_dir else None
+                binary = find_binary(asan_dir, name) if asan_dir else None
+                if binary is None:
+                    item.update(
+                        status="not-built",
+                        detail="no ASan build tree provided "
+                               "(pass --asan-build-dir or set SICNU_ASAN_BUILD_DIR)"
+                               if asan_dir is None else
+                               f"{name} not compiled in {asan_dir}",
+                    )
+                else:
+                    asan_env = dict(env)
+                    asan_env.setdefault("ASAN_OPTIONS",
+                                        "detect_leaks=1:abort_on_error=0")
+                    status, detail, elapsed = run_executable(binary, asan_env,
+                                                             timeout)
+                    item.update(status=status, elapsed_s=round(elapsed, 1),
+                                detail=detail[-2000:] if detail else "")
             elif kind in ("test", "bench"):
                 binary = find_binary(build_dir, name)
                 if binary is None:
