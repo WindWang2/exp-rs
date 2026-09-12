@@ -12,7 +12,7 @@ this document in sync when you add descriptors.
 > here). The machine index and `cartography:list_templates` operate on
 > the *resolved* descriptors, so children match their base's tasks.
 
-Shipped: **56 templates**, **57 components** (with variants), 2 token sets.
+Shipped: **56 templates**, **58 components** (with variants), 2 token sets.
 
 ## Design token sets
 
@@ -144,6 +144,7 @@ Shipped: **56 templates**, **57 components** (with variants), 2 token sets.
 | `chart/sparkline` | chart.trend | — | Axes-free compact trend line with a dashed baseline; the series-extraction companion for report blocks. |
 | `chart/summary-table` | chart.statistics | — | Summary table with an n/mean and sum/min-max header block above the rows. |
 | `chart/table` | chart.statistics | `zebra`, `plain` | Two-column label/value table (class areas, counts, metrics); deterministic 64-row cap with an overflow row. |
+| `table/accuracy-matrix` | accuracy.matrix, accuracy.report | `zebra`, `plain` | Accuracy matrix table (reference vs classified counts with PA/UA columns) for classification accuracy products. |
 | `chart/topn-table` | chart.statistics | `top-5`, `top-10` | Top-N table: rows sorted by value descending, capped at style.top_n (default 10) with a rank column. |
 
 ## Agent workflow

@@ -1440,7 +1440,15 @@ void SchemaFormBuilder::refreshEnumSources()
   {
     for ( const Field &f : fields )
     {
-      if ( f.kind == FieldKind::Enum && !f.enumSource.isEmpty() && f.combo )
+      // Workbench 9.0 M6: provider-resolved combos cover the dedicated
+      // model/asset editor kinds too — a model/asset port annotated with
+      // x-ui-enum-source resolves live (ModelCatalog / DataManager) instead
+      // of rendering as an empty push-list combo. Kinds without an
+      // enum-source keep the push channel unchanged.
+      const bool providerKind = f.kind == FieldKind::Enum
+                                || f.kind == FieldKind::ModelCombo
+                                || f.kind == FieldKind::AssetCombo;
+      if ( providerKind && !f.enumSource.isEmpty() && f.combo )
         enumPaths.append( f.path );
       collect( f.children );
       for ( int i = 0; i < f.arrayItems.size(); ++i )

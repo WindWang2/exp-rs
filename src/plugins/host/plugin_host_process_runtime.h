@@ -102,6 +102,8 @@ private:
     bool mRestartWindowArmed = false;
     std::chrono::steady_clock::time_point mFirstRestart;
     std::map<std::string, PluginHostSessionEntryPtr> mSessions;
+    /// Post-unload process-group probe results (M3 evidence trail).
+    std::map<std::string, std::string> mRetiredGroups;
 };
 
 /// Builds the default worker path next to the current executable

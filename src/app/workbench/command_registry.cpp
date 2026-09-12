@@ -65,6 +65,26 @@ QStringList CommandRegistry::commandIds() const
     return m_commands.keys();
 }
 
+int CommandRegistry::unregisterCommandsMatching( const QString &prefix )
+{
+    QStringList doomed;
+    for ( auto it = m_commands.constBegin(); it != m_commands.constEnd(); ++it )
+    {
+        if ( it.key().startsWith( prefix ) )
+            doomed.append( it.key() );
+    }
+    for ( const QString &id : doomed )
+    {
+        if ( QAction *act = m_actions.take( id ) )
+            act->deleteLater();
+        m_shortcutOwners.remove( id );
+        m_commands.remove( id );
+    }
+    if ( !doomed.isEmpty() )
+        refreshAll();
+    return doomed.size();
+}
+
 QAction *CommandRegistry::action( const QString &id, bool installShortcut )
 {
     if ( !m_commands.contains( id ) )

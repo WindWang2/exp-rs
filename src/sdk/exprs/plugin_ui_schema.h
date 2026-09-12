@@ -52,6 +52,7 @@ struct PluginUiSchemaLimits
     size_t maxComboOptions = 32;
     size_t maxStringLength = 256;     ///< labels, titles, ids, option strings
     size_t maxGroupDepth = 4;
+    size_t maxEventValueBytes = 4096; ///< serialized "value" of one ui event (9.0)
 };
 
 struct PluginUiSchemaParseResult
@@ -61,6 +62,27 @@ struct PluginUiSchemaParseResult
     std::vector<std::string> errors;   ///< fatal: the schema is refused whole
     bool ok() const { return errors.empty(); }
 };
+
+/// Result of host-side ui-event validation (9.0).
+struct PluginUiEventParseResult
+{
+    std::vector<std::string> errors;   ///< fatal: the event is refused
+    bool ok() const { return errors.empty(); }
+};
+
+/// Validates ONE host-rendered event before it travels to the plugin
+/// (plugin-platform 9.0). Event shape:
+///   { "contributionId", "controlId", "eventType", "value"? }
+///   - contributionId / controlId: bounded valid identifiers
+///   - eventType: "clicked" | "changed" | "command" (the host renderer's
+///     vocabulary) | "submit" | "custom" (documented additive headroom)
+///   - value: optional; any JSON within maxEventValueBytes (serialized)
+/// The describe-side schema was already hard-capped in 8.0; this closes the
+/// invoke-side hole where plugin-controlled event JSON traveled to the
+/// plugin unchecked.
+PluginUiEventParseResult validateUiEvent( const Json::Value &event,
+                                          const PluginUiSchemaLimits &limits =
+                                              PluginUiSchemaLimits() );
 
 /// Validates @p schema against the v1 contract and @p limits. Returns a
 /// result whose normalized value is only meaningful when ok().

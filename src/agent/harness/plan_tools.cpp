@@ -569,6 +569,43 @@ class ExplainTool final : public SpatialTool
         explanation["plan_fingerprint"] = binding.get( "plan_fingerprint", "" );
       }
 
+      // Harness 9.0 (M7): explainability 2.0 — degradations, resource
+      // decisions, failure explanation, and reproducibility anchors, all
+      // read-only projections of authoritative records.
+      if ( plan && plan->raw.isObject() && plan->raw["degradations"].isArray() )
+        explanation["degradations"] = plan->raw["degradations"];
+      if ( plan && plan->raw.isObject() && plan->raw["estimates"].isObject() )
+      {
+        Json::Value resources( Json::objectValue );
+        resources["estimates"] = plan->raw["estimates"];
+        resources["cleanup"] = plan->cleanup.empty() ? "keep_all" : plan->cleanup;
+        explanation["resource_decisions"] = resources;
+      }
+      if ( run->state() == sicnu::workflow::WorkflowRunState::Failed )
+      {
+        Json::Value failure( Json::objectValue );
+        failure["error"] = run->errorMessage();
+        Json::Value failedSteps( Json::arrayValue );
+        for ( const auto &step : run->stepPlans() )
+          if ( !step.errorMessage.empty() )
+            failedSteps.append( step.stepId );
+        failure["failed_steps"] = failedSteps;
+        explanation["failure"] = failure;
+      }
+      {
+        Json::Value reproducibility( Json::objectValue );
+        reproducibility["run_id"] = runId;
+        if ( explanation.isMember( "plan_fingerprint" ) )
+          reproducibility["plan_fingerprint"] = explanation["plan_fingerprint"];
+        Json::Value sidecars( Json::arrayValue );
+        for ( const Json::Value &evidenceEntry :
+              doc.get( "evidence", Json::Value( Json::arrayValue ) ) )
+          if ( evidenceEntry.isObject() && evidenceEntry.isMember( "verification_sidecar" ) )
+            sidecars.append( evidenceEntry["verification_sidecar"] );
+        reproducibility["verification_sidecars"] = sidecars;
+        explanation["reproducibility"] = reproducibility;
+      }
+
       Json::Value out( Json::objectValue );
       out["explanation"] = explanation;
       return SpatialToolResult::ok( std::move( out ) );
@@ -628,6 +665,9 @@ class PreflightTool final : public SpatialTool
       const PreflightOutcome outcome = preflightIntent( intent, input["inputs"] );
       Json::Value out( Json::objectValue );
       out["preflight"] = outcome.toJson( intent );
+      // Harness 9.0 (M2): the typed intent contract beside the verdict so
+      // the agent sees what facts to ground and what quality to expect.
+      out["intent_document"] = typedIntentDocument( intent );
       Json::Value summaries( Json::arrayValue );
       // preflightIntent re-resolves internally; re-run resolution here only to
       // echo typed errors per slot without re-inspecting.
@@ -1304,6 +1344,36 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
         run->runId(), plan ? plan->planId : "", plan ? plan->goal : "",
         plan ? plan->intent : "", verdictToStringWire( overall ),
         plan ? planFingerprint( *plan ) : "" );
+      // Harness 9.0 (M6): evidence-aware run summary — the bounded continuity
+      // record (verified artifacts, failed attempts, assumption load) for
+      // long conversations. Written only on the persisting path.
+      {
+        Json::Value summary( Json::objectValue );
+        summary["plan_id"] = plan ? plan->planId : "";
+        summary["intent"] = plan ? plan->intent : "";
+        summary["goal"] = plan ? plan->goal : "";
+        summary["verdict"] = verdictToStringWire( overall );
+        Json::Value verified( Json::arrayValue );
+        for ( const ArtifactVerification &v : verifications )
+        {
+          Json::Value entry( Json::objectValue );
+          entry["path"] = v.path;
+          entry["verdict"] = verdictToStringWire( v.verdict );
+          verified.append( entry );
+        }
+        summary["artifacts"] = verified;
+        int assumptionCount = 0;
+        for ( const ArtifactVerification &v : verifications )
+          for ( const VerificationCheck &check : v.checks )
+            if ( !check.passed && check.severity == "warning" )
+              ++assumptionCount;
+        summary["assumption_count"] = assumptionCount;
+        summary["cleanup"] = plan && !plan->cleanup.empty() ? plan->cleanup : "keep_all";
+        const std::string serialized =
+          Json::writeString( Json::StreamWriterBuilder(), summary );
+        ContextLedger::instance().recordRunSummary( run->runId(), summary,
+                                                    static_cast<int>( serialized.size() / 4 ) );
+      }
       if ( overall != Verdict::Fail && plan && plan->mapOutput.isObject() )
         doc["map_confirmation"] = confirmMapOutput( *plan, doc["steps"] );
     }
@@ -1315,9 +1385,34 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
     doc["verification"] = verificationDoc;
     doc["status"] = "failed";
     doc["error"] = run->errorMessage();
+    // Harness 9.0 (M5): point the agent at the bounded diagnosis surface.
+    doc["next"] = "harness:diagnose_run {run_id} — structured failures + repair proposals";
     ContextLedger::instance().recordPlanBinding(
       run->runId(), plan ? plan->planId : "", plan ? plan->goal : "",
       plan ? plan->intent : "", "FAIL" );
+    // Harness 9.0 (M6): failed runs also enter the bounded continuity record.
+    {
+      Json::Value summary( Json::objectValue );
+      summary["plan_id"] = plan ? plan->planId : "";
+      summary["intent"] = plan ? plan->intent : "";
+      summary["goal"] = plan ? plan->goal : "";
+      summary["verdict"] = "FAIL";
+      // Bounded: a pathological engine error chain must not be able to evict
+      // the whole continuity record on its own.
+      std::string runError = run->errorMessage();
+      if ( runError.size() > 2048 )
+        runError = runError.substr( 0, 2048 );
+      summary["error"] = runError;
+      Json::Value failedSteps( Json::arrayValue );
+      for ( const auto &step : run->stepPlans() )
+        if ( !step.errorMessage.empty() )
+          failedSteps.append( step.stepId );
+      summary["failed_attempts"] = failedSteps;
+      const std::string serialized =
+        Json::writeString( Json::StreamWriterBuilder(), summary );
+      ContextLedger::instance().recordRunSummary( run->runId(), summary,
+                                                  static_cast<int>( serialized.size() / 4 ) );
+    }
   }
   else
   {

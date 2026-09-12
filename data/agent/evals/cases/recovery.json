@@ -1,0 +1,70 @@
+{
+  "cases": [
+    {
+      "case_id": "recovery/blocked-preflight-then-corrected-input-passes",
+      "category": "recovery",
+      "description": "A blocked preflight (unresolvable input) recovers by binding the real fixture",
+      "fixture": {
+        "kind": "raster", "width": 8, "height": 8,
+        "bands": ["red", "nir"], "nodata": -9999.0,
+        "metadata": {"SICNU_RADIOMETRIC_STATE": "surface_reflectance"}
+      },
+      "steps": [
+        {"tool": "harness:preflight",
+         "input": {"intent": "ndvi", "inputs": [{"name": "primary", "ref": "$tmp/not_yet.tif"}]},
+         "expect": {"success": true, "asserts": [
+           {"path": "preflight.verdict", "equals": "blocked"},
+           {"path": "preflight.issues[0].suggested_action.resolved", "equals": true}]}},
+        {"tool": "harness:preflight",
+         "input": {"intent": "ndvi", "inputs": [{"name": "primary", "ref": "$fixture"}]},
+         "expect": {"success": true, "asserts": [
+           {"path": "preflight.verdict", "equals": "ok"}]}}
+      ]
+    },
+    {
+      "case_id": "recovery/band-missing-blocker-suggests-band-inspection",
+      "category": "recovery",
+      "description": "A missing-band blocker carries the resolvable band inspection action",
+      "fixture": {
+        "kind": "raster", "width": 8, "height": 8,
+        "bands": ["red"], "nodata": -9999.0
+      },
+      "steps": [
+        {"tool": "harness:preflight",
+         "input": {"intent": "ndvi", "inputs": [{"name": "primary", "ref": "$fixture"}]},
+         "expect": {"success": true, "asserts": [
+           {"path": "preflight.verdict", "equals": "blocked"},
+           {"path": "preflight.issues[0].suggested_action.action", "equals": "inspect_bands"},
+           {"path": "preflight.issues[0].suggested_action.tool", "equals": "spatial:raster_inspect"}]}}
+      ]
+    },
+    {
+      "case_id": "recovery/plan-issue-suggestions-stay-resolvable",
+      "category": "recovery",
+      "description": "Repair advisory issues carry suggested actions that resolve to real surfaces",
+      "steps": [
+        {"tool": "harness:repair_plan", "input": {"plan": {
+          "schema_version": "2.0", "kind": "execution_plan", "plan_id": "plan-recover",
+          "intent": "", "inputs": [],
+          "steps": [
+            {"id": "magic", "operator_id": "rs:teleport_band", "params": {}}
+          ],
+          "outputs": []
+        }}, "expect": {"success": true, "asserts": [
+          {"path": "compilable", "equals": false},
+          {"path": "issues[0].suggested_actions[0].resolved", "equals": true}]}}
+      ]
+    },
+    {
+      "case_id": "recovery/failed-run-explains-then-typed",
+      "category": "recovery",
+      "description": "Diagnosing a nonexistent run is a typed failure, not a silent ok",
+      "steps": [
+        {"tool": "harness:run_status", "input": {"run_id": "run-never-started"},
+         "expect": {"success": false, "error_code": "WORKFLOW_NOT_FOUND"}},
+        {"tool": "harness:explain", "input": {"run_id": "run-never-started"},
+         "expect": {"success": false, "error_code": "WORKFLOW_NOT_FOUND"}}
+      ]
+    }
+  ]
+}

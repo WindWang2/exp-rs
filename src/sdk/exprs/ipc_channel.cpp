@@ -10,11 +10,14 @@ namespace exprs {
 
 namespace {
 
-IpcChannel::Outcome::Status statusForCode( const std::string &code )
+/// Monotonic ceiling: never raises @p atomic above its current value.
+void lowerAtomicCap( std::atomic<uint32_t> &atomic, uint32_t maxFrameBytes )
 {
-    if ( code == "E6003" || code == "E6002" )
-        return IpcChannel::Outcome::Status::ProtocolError;
-    return IpcChannel::Outcome::Status::ChannelClosed;
+    uint32_t current = atomic.load();
+    while ( maxFrameBytes < current
+            && !atomic.compare_exchange_weak( current, maxFrameBytes ) )
+    {
+    }
 }
 
 } // namespace
@@ -26,7 +29,8 @@ IpcChannel::IpcChannel( std::unique_ptr<IIpcStream> stream )
 
 IpcChannel::IpcChannel( std::unique_ptr<IIpcStream> stream, Options options )
     : mStream( std::move( stream ) ), mOptions( options ),
-      mMaxFrameBytes( options.frameLimits.maxFrameBytes )
+      mMaxSendFrameBytes( options.frameLimits.maxFrameBytes ),
+      mMaxRecvFrameBytes( options.frameLimits.maxFrameBytes )
 {
     mReader = std::thread( [this] { readerLoop(); } );
 }
@@ -51,7 +55,10 @@ std::string IpcChannel::Outcome::statusCode() const
     case Status::ChannelClosed:
         return "E6005";
     case Status::ProtocolError:
-        return "E6002";
+        // Typed protocol failures: the frame-cap violation (E6003) is
+        // distinct from a malformed envelope (E6002); report the real code
+        // instead of collapsing both into E6002.
+        return error.code == "E6003" ? "E6003" : "E6002";
     }
     return "E6002";
 }
@@ -100,34 +107,52 @@ void IpcChannel::setPeerProtocol( int major, int minor )
 
 void IpcChannel::lowerFrameCap( uint32_t maxFrameBytes )
 {
-    uint32_t current = mMaxFrameBytes.load();
-    while ( maxFrameBytes < current
-            && !mMaxFrameBytes.compare_exchange_weak( current, maxFrameBytes ) )
-    {
-    }
+    lowerAtomicCap( mMaxSendFrameBytes, maxFrameBytes );
+    lowerAtomicCap( mMaxRecvFrameBytes, maxFrameBytes );
 }
 
-bool IpcChannel::sendEnvelope( const Ipc::Envelope &envelope, std::string &error )
+void IpcChannel::setDirectionalFrameCaps( uint32_t maxSendBytes, uint32_t maxRecvBytes )
+{
+    // 0 means "leave this direction unchanged" (it still carries whatever
+    // bound it already had — the shared default or a previously lowered
+    // cap). A literal cap of 0 would block every frame, which no
+    // negotiation ever asks for.
+    if ( maxSendBytes > 0 )
+        lowerAtomicCap( mMaxSendFrameBytes, maxSendBytes );
+    if ( maxRecvBytes > 0 )
+        lowerAtomicCap( mMaxRecvFrameBytes, maxRecvBytes );
+}
+
+bool IpcChannel::sendEnvelope( const Ipc::Envelope &envelope, std::string &error,
+                               std::string *failureCode )
 {
     if ( mClosed )
     {
         error = "channel closed";
+        if ( failureCode )
+            *failureCode = "E6005";
         return false;
     }
     const Json::Value json = Ipc::encodeEnvelope( envelope );
     std::lock_guard<std::mutex> lock( mWriteMutex );
     IpcFrameLimits limits;
-    limits.maxFrameBytes = mMaxFrameBytes.load();
+    limits.maxFrameBytes = mMaxSendFrameBytes.load();
     if ( !IpcFrame::writeJson( *mStream, json, limits, error ) )
     {
         // A write failure means the peer is gone or the frame is too large
-        // for the cap: both end the channel.
+        // for the cap: both end the channel. The typed code comes from the
+        // frame writer (E6003 for a cap violation) so a caller that refused
+        // to SEND an oversized frame reports E6003, not the generic E6002.
+        if ( failureCode )
+            *failureCode = error.find( "E6003" ) != std::string::npos ? "E6003" : "E6005";
         std::lock_guard<std::mutex> stateLock( mMutex );
         if ( mProtocolFailure.empty() )
             mProtocolFailure = error;
         closeLocked();
         return false;
     }
+    if ( failureCode )
+        *failureCode = "";
     return true;
 }
 
@@ -160,12 +185,13 @@ IpcChannel::Outcome IpcChannel::request( const std::string &method, const Json::
     envelope.deadlineMs = deadlineMs;
 
     std::string writeError;
-    if ( !sendEnvelope( envelope, writeError ) )
+    std::string writeCode;
+    if ( !sendEnvelope( envelope, writeError, &writeCode ) )
     {
         std::lock_guard<std::mutex> lock( mMutex );
         mPending.erase( id );
         outcome.status = Outcome::Status::ProtocolError;
-        outcome.error.code = "E6002";
+        outcome.error.code = writeCode == "E6003" ? "E6003" : "E6002";
         outcome.error.message = writeError;
         return outcome;
     }
@@ -491,7 +517,7 @@ void IpcChannel::readerLoop()
         std::string payload;
         std::string error;
         IpcFrameLimits limits;
-        limits.maxFrameBytes = mMaxFrameBytes.load();
+        limits.maxFrameBytes = mMaxRecvFrameBytes.load();
         const IpcFrame::ReadStatus status =
             IpcFrame::read( *mStream, payload, limits, 200, error );
         if ( status == IpcFrame::ReadStatus::Timeout )

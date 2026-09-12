@@ -12,9 +12,11 @@
 #include <QMutexLocker>
 
 #include <json/reader.h>
+#include <json/writer.h>
 
 #include <algorithm>
 #include <cctype>
+#include <map>
 #include <set>
 #include <sstream>
 #include <vector>
@@ -1449,6 +1451,131 @@ Json::Value buildCatalogIndex()
   return out;
 }
 
+Json::Value diffTemplates( const Json::Value &before, const Json::Value &after )
+{
+  // Bounded output contract: at most 200 delta entries across all lists;
+  // further deltas collapse into the `truncated` flag.
+  int budget = 200;
+
+  const auto stringValue = []( const Json::Value &value, size_t maxLength ) {
+    std::string text = Json::writeString( Json::StreamWriterBuilder(), value );
+    if ( text.size() > maxLength )
+    {
+      text.resize( maxLength );
+      text += "...";
+    }
+    return text;
+  };
+
+  Json::Value out( Json::objectValue );
+
+  // --- slots by role ---------------------------------------------------------
+  const auto slotsOf = []( const Json::Value &descriptor ) {
+    std::map<std::string, Json::Value> roles;
+    if ( descriptor.isObject() )
+      for ( const char *key : { "slots", "required_slots" } )
+        if ( descriptor.isMember( key ) && descriptor[key].isArray() )
+          for ( const auto &slot : descriptor[key] )
+            if ( slot.isObject() && slot.isMember( "role" ) && slot["role"].isString() )
+              roles[slot["role"].asString()] = slot;
+    return roles;
+  };
+  const auto beforeSlots = slotsOf( before );
+  const auto afterSlots = slotsOf( after );
+
+  Json::Value added( Json::arrayValue );
+  Json::Value removed( Json::arrayValue );
+  Json::Value changed( Json::arrayValue );
+  for ( const auto &entry : afterSlots )
+  {
+    if ( budget <= 0 )
+      break;
+    const auto it = beforeSlots.find( entry.first );
+    if ( it == beforeSlots.end() )
+    {
+      added.append( entry.first );
+      --budget;
+    }
+    else if ( it->second != entry.second )
+    {
+      Json::Value delta( Json::objectValue );
+      delta["role"] = entry.first;
+      delta["before"] = stringValue( it->second, 300 );
+      delta["after"] = stringValue( entry.second, 300 );
+      changed.append( delta );
+      --budget;
+    }
+  }
+  for ( const auto &entry : beforeSlots )
+  {
+    if ( budget <= 0 )
+      break;
+    if ( afterSlots.count( entry.first ) == 0 )
+    {
+      removed.append( entry.first );
+      --budget;
+    }
+  }
+  out["added_slots"] = added;
+  out["removed_slots"] = removed;
+  out["changed_slots"] = changed;
+
+  // --- top-level members ------------------------------------------------------
+  Json::Value addedKeys( Json::arrayValue );
+  Json::Value removedKeys( Json::arrayValue );
+  Json::Value changedKeys( Json::arrayValue );
+  if ( before.isObject() && after.isObject() )
+  {
+    for ( const auto &key : after.getMemberNames() )
+    {
+      if ( budget <= 0 )
+        break;
+      if ( key == std::string( "id" ) || key == std::string( "inheritance" ) )
+        continue; // identity/provenance, not semantics
+      if ( key == std::string( "slots" ) || key == std::string( "required_slots" ) )
+        continue; // covered above
+      if ( !before.isMember( key ) )
+      {
+        Json::Value delta( Json::objectValue );
+        delta["path"] = key;
+        delta["after"] = stringValue( after[key], 300 );
+        addedKeys.append( delta );
+        --budget;
+      }
+      else if ( before[key] != after[key] )
+      {
+        Json::Value delta( Json::objectValue );
+        delta["path"] = key;
+        delta["before"] = stringValue( before[key], 300 );
+        delta["after"] = stringValue( after[key], 300 );
+        changedKeys.append( delta );
+        --budget;
+      }
+    }
+    for ( const auto &key : before.getMemberNames() )
+    {
+      if ( budget <= 0 )
+        break;
+      if ( key == std::string( "id" ) || key == std::string( "inheritance" ) ||
+           key == std::string( "slots" ) || key == std::string( "required_slots" ) )
+        continue;
+      if ( !after.isMember( key ) )
+      {
+        Json::Value delta( Json::objectValue );
+        delta["path"] = key;
+        delta["before"] = stringValue( before[key], 300 );
+        removedKeys.append( delta );
+        --budget;
+      }
+    }
+  }
+  out["added_keys"] = addedKeys;
+  out["removed_keys"] = removedKeys;
+  out["changed_keys"] = changedKeys;
+  out["truncated"] = budget <= 0;
+  return out;
+}
+
 Json::Value TemplateRegistry::instantiateTemplate( const QString &id, const Json::Value &params,
                                                    QString *error ) const
 {
@@ -1466,6 +1593,18 @@ Json::Value TemplateRegistry::instantiateTemplate( const QString &id, const Json
       : id.toStdString();
   Json::Value spec = mapspec::makeMapSpec( layoutName, tmpl.get( "page", Json::Value( Json::objectValue ) ) );
   spec["template"] = id.toStdString();
+  // Platform 9.0: structured provenance — the instantiated draft records
+  // WHICH resolved template produced it (id + declared version + linearized
+  // parents), so a downstream preflight/compose report can name the exact
+  // catalog lineage. `template` stays a plain id string for compatibility.
+  Json::Value provenance( Json::objectValue );
+  provenance["id"] = id.toStdString();
+  if ( tmpl.isMember( "version" ) )
+    provenance["version"] = tmpl["version"];
+  if ( tmpl.isMember( "inheritance" ) && tmpl["inheritance"].isObject() &&
+       tmpl["inheritance"].isMember( "parents" ) )
+    provenance["parents"] = tmpl["inheritance"]["parents"];
+  spec["template_provenance"] = provenance;
   // Template style (token set + medium) travels into the draft.
   if ( tmpl.isMember( "style" ) && tmpl["style"].isObject() )
     spec["style"] = tmpl["style"];

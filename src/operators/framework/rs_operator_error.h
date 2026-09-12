@@ -55,6 +55,9 @@ enum class ErrorCode : int {
     NotInitialized,
     ExternalProcessTimeout = 4100,  ///< external process exceeded its budget (append-only)
     ExternalProcessFailed = 4101,   ///< external process failed (append-only)
+    PolicyRefused = 4102,           ///< capability/policy refusal (plugin platform 9.0,
+                                    ///< append-only): the capability declaration refuses
+                                    ///< this operation; nothing ran
 
     Unknown = 9999
 };

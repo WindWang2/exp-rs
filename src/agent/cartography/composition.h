@@ -87,6 +87,12 @@ inline constexpr int kMaxCoreSimulations = 32;
 /// ledger signals a modeling error and is capped with an explicit note).
 inline constexpr int kMaxDecisions = 256;
 
+/// Platform 9.0: per-pass convergence trace. Each pass records the applied
+/// constraint identities (capped — a pass writing more than this many
+/// constraints is reported as truncated); the whole trace is bounded by the
+/// existing 24-pass budget.
+inline constexpr int kMaxTraceAppliedPerPass = 32;
+
 /// One recorded solver decision (application, rejection, disablement).
 struct CompositionDecision
 {
@@ -105,6 +111,27 @@ struct CompositionViolation
     std::string cid;
     std::string kind;
     std::string reason;
+};
+
+/// Platform 9.0 oscillation attribution: a constraint still writing at the
+/// pass budget is part of a contradictory cycle (its writes flip geometry
+/// back and forth). Reported with the identity of the fighters, never
+/// silently absorbed — the layout itself is rolled back to the pre-solve
+/// snapshot (the #864 contract).
+struct CompositionOscillation
+{
+    std::string cid;
+    std::string kind;
+};
+
+/// Platform 9.0 convergence trace: one entry per hard-phase pass in which
+/// at least one constraint wrote.
+struct CompositionTraceEntry
+{
+    int pass = 0;                        ///< 1-based pass number
+    int moves = 0;                       ///< constraints that wrote this pass
+    std::vector<std::string> applied;    ///< those constraints' cids
+    bool truncated = false;              ///< applied list hit the cap
 };
 
 struct CompositionResult
@@ -156,6 +183,16 @@ struct CompositionResult
     /// desc, index asc") — the answer to "why THIS layout".
     std::string fixpointPolicy;
 
+    // --- Platform 9.0 solver-evidence surface (additive) --------------------
+
+    /// Constraints still writing when the hard-phase pass budget was
+    /// exhausted (the contradictory cycle behind a non-converged layout).
+    /// Empty when converged. Layout is rolled back regardless (#864).
+    std::vector<CompositionOscillation> oscillations;
+    /// Per-pass hard-phase trace (moves + which constraints wrote), bounded
+    /// by the pass budget and the per-pass cap.
+    std::vector<CompositionTraceEntry> trace;
+
     Json::Value toJson() const;
 };
 
@@ -164,5 +201,17 @@ struct CompositionResult
 /// anchor (or stack gap) does not declare its own margin (callers pass the
 /// resolved token set's spacing.margin_mm).
 CompositionResult resolveComposition( Json::Value &spec, double marginDefaultMm );
+
+/// Platform 9.0 scoped re-solve: identical pipeline, restricted to the
+/// constraints that touch at least one of `focusItemIds` (anchors and size
+/// clamps apply to focus items only). Available for bounded repair loops so
+/// a later pass cannot pay the full-document solve cost (the shipped repair
+/// tool keeps the single full solve per its 6.0 convergence contract); for
+/// a focus set
+/// whose constraints reference only focus items, the focus-set geometry
+/// equals the full solve's geometry on that set (same canonical ordering,
+/// same fixpoint policy).
+CompositionResult resolveCompositionScoped( Json::Value &spec, double marginDefaultMm,
+                                            const std::vector<std::string> &focusItemIds );
 
 } // namespace sicnu::agent::cartography

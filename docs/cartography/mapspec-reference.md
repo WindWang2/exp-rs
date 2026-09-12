@@ -190,3 +190,92 @@ a `qgis_type` marker (documented divergence).
   that would push a companion past its own page bottom with a
   `page_overflow` reason (carried in unsatisfied, violated and the decisions
   ledger) instead of silently writing off-page geometry.
+
+## Platform 9.0 additions
+
+### New constraint kind: `page_break`
+
+```jsonc
+{ "id": "pb1", "kind": "page_break", "items": ["table-1"] }
+```
+
+Moves the single declared item to the next declared page (`page: n` →
+`n + 1`). Validation requires the target page to exist in `pages[]`; the
+solver applies it in the first relaxation pass and stamps
+`page_break_applied_by` so re-solving a resolved document never re-breaks
+it. It reports through the decisions ledger and violations; like every
+permanent refusal it never enters the bounded unsat cores. This is the one
+documented solver write outside `rect_mm` — page index plus the provenance
+stamp.
+
+### Text-driven sizing (`fit_content.text_ref`)
+
+```jsonc
+{ "id": "fit1", "kind": "fit_content", "items": ["title-2"], "text_ref": "label-1" }
+```
+
+`fit_content` may derive its content box from a referenced text item at
+solve time under the deterministic typography model (width = widest wrap
+line, height = lines × pt × leading). The wrap width is the item's declared
+rect width, else its `max_size_mm` width, else single-line. Exactly one of
+`content_mm` / `text_ref` may be declared; `text_ref` must resolve.
+
+### Master furniture (`pages[].furniture`)
+
+```jsonc
+"pages": [ { "width_mm": 297, "height_mm": 210, "role": "map",
+             "furniture": ["title-1", "source-1"] } ]
+```
+
+Each referenced item is materialized as a clone (`<id>-p<page>`,
+provenance `master_of: <id>`, declared `page`) before validation, so clones
+flow through the same compile/solve/page-placement paths as hand-declared
+furniture. Clones keep the master's rect (same relative position per page).
+References must resolve and must not repeat within a page (≤32 entries).
+
+### Atlas-driven text (`expression`)
+
+Titles and labels may declare `expression` (a QGIS expression string). It
+compiles to native `[% … %]` label markup evaluated at render time against
+the layout expression context (atlas feature included). An unparseable
+expression is a compile failure, never silently static text; `expression`
+beats `text` when both are declared.
+
+### Cross-page references (`continuation`)
+
+```jsonc
+{ "id": "table-1", "page": 1, "continuation": { "label": "continued on" } }
+```
+
+An item past page 0 with a `continuation` block compiles a small caption
+(`<id>-continuation`) under its rect naming the DISPLAY page number
+(1-based). Resolved after the solver runs, so solver-applied page breaks
+participate.
+
+### Declared chart overlays (`overlay_on`)
+
+A chart or colorbar that intentionally covers a map frame declares it:
+
+```jsonc
+{ "id": "chart-1", "overlay_on": "map-1", "rect_mm": [215, 130, 70, 44], … }
+```
+
+`overlay_on` accepts one frame id or an array of frame ids (validated to
+resolve). Coverage declared this way is intentional and `MAP_CHART_OVER_MAP`
+stays silent; undeclared coverage is flagged, and repair prefers moving the
+chart, stamping `overlay_on` only when no free slot exists.
+
+### Solver evidence surfaces
+
+`cartography:compose` / `resolveComposition` now also report
+`oscillations` (the constraints still writing when the pass budget was
+exhausted — the contradictory cycle behind a non-converged layout; the
+layout itself rolls back to its pre-solve snapshot) and `trace` (the
+bounded per-pass record of which constraints wrote). `fit_content` and
+`page_break` behave under the same bounded-pass budgets as before.
+
+### Governed export and explanation
+
+`cartography:export` (atomic, sha256-digested, page-selectable for png) and
+`cartography:explain` (bounded per-item solver + preflight evidence) join
+the typed tool surface; see `cartography_tools` descriptions for contracts.

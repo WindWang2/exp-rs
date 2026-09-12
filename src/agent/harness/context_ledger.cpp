@@ -5,6 +5,8 @@
 #include <QFileInfo>
 #include <QMutexLocker>
 
+#include <algorithm>
+
 namespace sicnu::agent::harness {
 
 namespace {
@@ -272,6 +274,61 @@ Json::Value ContextLedger::modelContracts() const
 {
   QMutexLocker locker( &mMutex );
   return mModelContracts;
+}
+
+void ContextLedger::recordRunSummary( const std::string &runId, const Json::Value &summary,
+                                      int approxTokens )
+{
+  if ( runId.empty() || !summary.isObject() )
+    return;
+  const int cost = std::max( 1, approxTokens );
+  QMutexLocker locker( &mMutex );
+  for ( Json::ArrayIndex i = 0; i < mRunSummaries.size(); ++i )
+  {
+    if ( mRunSummaries[i].get( "run_id", "" ).asString() == runId )
+    {
+      mRunSummaryTokens -= mRunSummaries[i].get( "approx_tokens", 1 ).asInt();
+      mRunSummaries.removeIndex( i, nullptr );
+      break;
+    }
+  }
+  Json::Value record = summary;
+  record["run_id"] = runId;
+  record["approx_tokens"] = cost;
+  record["recorded_at"] = nowIso().toStdString();
+  mRunSummaries.append( record );
+  mRunSummaryTokens += cost;
+  // Evict oldest-first until BOTH bounds hold (count and token budget).
+  while ( mRunSummaries.size() > 1 &&
+          ( static_cast<int>( mRunSummaries.size() ) > kMaxRunSummaries ||
+            mRunSummaryTokens > kRunSummaryTokenBudget ) )
+  {
+    mRunSummaryTokens -= mRunSummaries[0].get( "approx_tokens", 1 ).asInt();
+    mRunSummaries.removeIndex( 0, nullptr );
+  }
+  if ( static_cast<int>( mRunSummaries.size() ) > kMaxRunSummaries )
+  {
+    // Degenerate single-oversized-summary case: keep the newest entry even
+    // when it alone exceeds the budget — the bound is never allowed to drop
+    // the only summary (callers bound their summaries; this is a backstop).
+  }
+}
+
+Json::Value ContextLedger::runSummaries() const
+{
+  QMutexLocker locker( &mMutex );
+  // Newest first: the most recent evidence is what a continuing conversation
+  // needs first.
+  Json::Value out( Json::arrayValue );
+  for ( int i = static_cast<int>( mRunSummaries.size() ) - 1; i >= 0; --i )
+    out.append( mRunSummaries[static_cast<Json::ArrayIndex>( i )] );
+  return out;
+}
+
+int ContextLedger::runSummaryTokens() const
+{
+  QMutexLocker locker( &mMutex );
+  return mRunSummaryTokens;
 }
 
 } // namespace sicnu::agent::harness
