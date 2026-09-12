@@ -13,6 +13,7 @@
 #include "scientific_preflight.h"
 #include "spatial_tools/spatial_tool.h"
 #include "operators/framework/model_catalog.h"
+#include "processing/framework/execution_id.h"
 #include "workflow/workflow_run.h"
 #include "workflow/workflow_run_coordinator.h"
 
@@ -1177,7 +1178,9 @@ Json::Value runResultDocument( const std::shared_ptr<sicnu::workflow::WorkflowRu
     if ( !step.errorMessage.empty() )
       entry["error"] = step.errorMessage;
     if ( step.taskId > 0 )
-      entry["execution_id"] = "task-" + std::to_string( step.taskId );
+      entry["execution_id"] = sicnu::processing::ExecutionId::fromTaskId( step.taskId )
+                                  .toWire()
+                                  .toStdString();
     steps.append( entry );
   }
   doc["steps"] = steps;
