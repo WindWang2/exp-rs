@@ -19,7 +19,9 @@
 #include <gdal.h>
 #include <ogr_spatialref.h>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <random>
 #include <string>
 #include <vector>
@@ -832,4 +834,152 @@ TEST_CASE( "rs:sar_geocode NoData and counters: DEM gaps, source gaps, typed ref
         RSOperatorContext c;
         REQUIRE_THROWS_AS( op->run( p, c ), RSOperatorError );
     }
+}
+
+// ---------------------------------------------------------------------------
+// Source-window budget fallback (Scientific Algorithms 9.0, M2): a tile whose
+// in-image source span exceeds the operator's materialization budget falls
+// through to the bounded per-pixel 2x2 read path. 8.0 shipped that path
+// bounded-but-untested; this case drives it structurally — a scene large
+// enough that the tile's source window cannot fit the budget — and keeps the
+// round-trip analytic (bilinear on a linear field is exact on BOTH paths).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "rs:sar_geocode over-budget source window falls back to per-pixel reads and stays exact",
+           "[sar][geocoding][operator][fallback]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const OrbitSegment orbit = makeCircularOrbit();
+
+    // Scene geometry: 2600x2600 at 30 m sampling. The DEM straddles the
+    // swath so a single output tile's in-image source window (~2090 x
+    // ~2090 floats) exceeds the operator's 4 Mi-float materialization
+    // budget and cannot be materialized — the per-pixel 2x2 fallback is
+    // the only sampling path. The slant-range boundary is strongly
+    // nonlinear (gamma ~ sqrt(rho^2 - altitude^2)), so the far corner of
+    // the DEM legitimately falls OUTSIDE the scene and must read back as
+    // honest NoData.
+    constexpr int kBigW = 2600;
+    constexpr int kBigH = 2600;
+    constexpr size_t kWindowBudget = 4u * 1024u * 1024u; // mirror of the operator constant
+
+    // rows-per-degree of longitude at PRF 100 (analytic mapping
+    // d(rowF)/d(lonDeg) = (pi/180)/omega * PRF).
+    const double rowsPerDeg = ( M_PI / 180.0 ) / kOmega * kPrf;
+    constexpr int kDemW = 40;
+    constexpr int kDemH = 40;
+    const double lonStartDeg = kSceneCenterLonDeg + 5.0 / rowsPerDeg;
+    const double dLonDeg = 2089.0 / ( rowsPerDeg * ( kDemW - 1 ) );
+    // Latitude span from 5 columns inside the swath to ~2089 columns
+    // (flat-earth triangle: rho(gamma) = sqrt(R^2+A^2-2RA cos gamma)).
+    auto latForCol = []( double colF ) {
+        const double rho = kRangeStart + colF * kSampleSpacing;
+        const double cosGamma = ( kR * kR + kA * kA - rho * rho ) / ( 2.0 * kR * kA );
+        return std::acos( std::clamp( cosGamma, -1.0, 1.0 ) ) * 180.0 / M_PI;
+    };
+    const double latStartDeg = latForCol( 5.0 );
+    const double latEndDeg = latForCol( 2089.0 );
+    const double dLatDeg = ( latEndDeg - latStartDeg ) / ( kDemH - 1 );
+
+    std::vector<float> sar( static_cast<size_t>( kBigW ) * kBigH );
+    for ( int r = 0; r < kBigH; ++r )
+        for ( int c = 0; c < kBigW; ++c )
+            sar[static_cast<size_t>( r ) * kBigW + c] = static_cast<float>( 100 + 3 * r + 2 * c );
+    const QString sarPath = tmp.filePath( "sar_big.tif" );
+    REQUIRE( writeSarScene( sarPath, sar, kBigW, kBigH, 1, true, orbit ) );
+
+    // The DEM sits entirely SOUTH of the equatorial ground track (the
+    // sensor rides the equator), spanning the same |latitude| range: rows
+    // run southward (north-up gt[5] < 0) away from the nadir latitude, so
+    // slant range grows with row.
+    std::vector<float> dem( static_cast<size_t>( kDemW ) * kDemH, 0.0f );
+    double gt[6] = { lonStartDeg - 0.5 * dLonDeg, dLonDeg, 0.0,
+                     -latStartDeg + 0.5 * dLatDeg, 0.0, -dLatDeg };
+    const QString demPath = tmp.filePath( "dem_big.tif" );
+    REQUIRE( writeDem( demPath, dem, kDemW, kDemH, gt, epsg4326Wkt(), true ) );
+
+    // Analytic fix against THIS scene's bounds (analyticFix() pins inImage
+    // to the 8x8 constants of the small fixture).
+    auto fixFor = [&]( int y, int x ) {
+        // North-up grid: row-center latitude DECREASES with y (gt[5] < 0),
+        // starting at -latStartDeg (south of the track).
+        AnalyticFix f = analyticFix( -latStartDeg - y * dLatDeg,
+                                     lonStartDeg + x * dLonDeg );
+        f.inImage = f.rowF >= 0.0 && f.rowF <= kBigH - 1 && f.colF >= 0.0
+                    && f.colF <= kBigW - 1;
+        return f;
+    };
+
+    // Structural precondition: the single tile's in-image source window
+    // exceeds the budget, so the run below exercises the fallback path,
+    // not a materialized window.
+    double minRow = 1e100, maxRow = -1e100, minCol = 1e100, maxCol = -1e100;
+    std::uint64_t inImageCount = 0;
+    for ( int y = 0; y < kDemH; ++y )
+        for ( int x = 0; x < kDemW; ++x )
+        {
+            const AnalyticFix fix = fixFor( y, x );
+            if ( !fix.inImage )
+                continue;
+            ++inImageCount;
+            minRow = std::min( minRow, fix.rowF );
+            maxRow = std::max( maxRow, fix.rowF );
+            minCol = std::min( minCol, fix.colF );
+            maxCol = std::max( maxCol, fix.colF );
+        }
+    REQUIRE( inImageCount > 0 );
+    const size_t winW = static_cast<size_t>( std::ceil( maxCol ) )
+                        - static_cast<size_t>( std::floor( minCol ) ) + 3;
+    const size_t winH = static_cast<size_t>( std::ceil( maxRow ) )
+                        - static_cast<size_t>( std::floor( minRow ) ) + 3;
+    INFO( "window " << winW << "x" << winH << " floats vs budget " << kWindowBudget );
+    REQUIRE( winW * winH > kWindowBudget );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:sar_geocode" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["input"] = sarPath.toStdString();
+    params["dem"] = demPath.toStdString();
+    params["output"] = tmp.filePath( "geocoded_big.tif" ).toStdString();
+    RSOperatorContext ctx;
+    Json::Value result;
+    REQUIRE_NOTHROW( result = op->run( params, ctx ) );
+
+    REQUIRE( result["sampledPixels"].asUInt64() == inImageCount );
+    // The operator reports how many cells were sampled through the
+    // per-pixel fallback; over-budget means EVERY in-image cell took it —
+    // this pins the coverage structurally instead of trusting the
+    // test-side budget mirror below.
+    REQUIRE( result["perPixelFallbackPixels"].asUInt64() == inImageCount );
+    REQUIRE( result["unresolvedGeometryPixels"].asUInt64() == 0ULL );
+
+    // Bilinear on a linear field is exact through the 2x2 fallback too:
+    // every in-image pixel equals the analytic field value; out-of-image
+    // pixels are honest NaN radiometry with valid geometry.
+    const auto backscatter = readBand( tmp.filePath( "geocoded_big.tif" ), 1 );
+    const auto gamma0 = readBand( tmp.filePath( "geocoded_big.tif" ), 2 );
+    const auto incidence = readBand( tmp.filePath( "geocoded_big.tif" ), 3 );
+    REQUIRE( backscatter.size() == static_cast<size_t>( kDemW ) * kDemH );
+    for ( int y = 0; y < kDemH; ++y )
+        for ( int x = 0; x < kDemW; ++x )
+        {
+            const size_t idx = static_cast<size_t>( y ) * kDemW + x;
+            const AnalyticFix fix = fixFor( y, x );
+            if ( !fix.inImage )
+            {
+                REQUIRE( std::isnan( backscatter[idx] ) );
+                REQUIRE( std::isnan( gamma0[idx] ) );
+                REQUIRE( std::isfinite( incidence[idx] ) );
+                continue;
+            }
+            const float expected =
+                static_cast<float>( 100 + 3 * fix.rowF + 2 * fix.colF );
+            INFO( "cell (" << x << "," << y << ") rowF=" << fix.rowF
+                  << " colF=" << fix.colF );
+            REQUIRE( backscatter[idx] == Approx( expected ).epsilon( 1e-4 ).margin( 1e-1 ) );
+            REQUIRE( gamma0[idx] == Approx( backscatter[idx] ).margin( 1e-3 ) );
+            REQUIRE( incidence[idx] == Approx( fix.incidenceDeg ).margin( 1e-3 ) );
+        }
 }

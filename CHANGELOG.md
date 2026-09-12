@@ -53,6 +53,51 @@ All notable changes to the `exp-rs` project will be documented in this file.
   paged access, concurrent readers under a writer, corruption refusal, and
   injected commit-fault rollback/recovery.
 
+### Scientific Algorithms 9.0 (goal series) — scientific defect remediation
+
+- **Hydrology — priority-flood NoData-boundary seeding (#848)**:
+  `TerrainFlow::fillDepressions` seeds the flood on the rectangular rim AND
+  every valid cell adjacent (8-neighbourhood) to NoData. Rim-only seeding left
+  rasters with NoData borders (reprojected/clipped DEMs) with an empty queue —
+  the flood returned success having filled nothing and every interior
+  depression survived into the D8 graph. NoData-adjacent valid cells are
+  drainage-boundary cells: they seed at their own elevation and are never
+  raised.
+- **Hydrology — UB-free D8 direction decoding (#853)**: float→int casts on
+  direction buffers are gated to finite values in [0, 128] first; GDAL Float32
+  sentinels (±3.4e38) were out-of-int-range UB ([conv.fpint]). UBSan
+  old-vs-new evidence in `.planning/scientific-algorithms-9/`.
+- **SAR — per-axis Horn spacing (#855)**: `slopeAspectAt` normalizes dz/dx and
+  dz/dy by their own axis spacings instead of an averaged scalar; on 2:1
+  anisotropic grids the averaged spacing skewed slope and rotated the
+  downslope aspect by ~19°, distorting gamma0 RTC. Closed-form known-answer
+  tests at kernel and operator level.
+- **SAR — per-band NoData on the flatten output (#854)**:
+  `rs:sar_terrain_flatten` declares band 1 NaN and the Byte-valued validity
+  mask 255 (the `rs:sar_terrain_correction` convention); the dataset-wide NaN
+  made the mask's 255 no-data pixels read back as valid foreground. GTiff
+  serializes one GDAL_NODATA tag, so the mask sentinel is written last and is
+  the persisted declaration (documented).
+- **Spectral — positive-only scale probing (#856)**: the numeric-domain probe
+  observes positive finite samples only; an undeclared negative sentinel used
+  to fold to a huge positive under `abs` and falsely flip unit-reflectance
+  scenes into DN scale, collapsing EVI/SAVI/MSAVI to ~0. The write-only
+  re-probe block with hardcoded sentinel guesses (`-9999`/`65535`) is removed.
+- **Contracts — finite declared scales (#873)**: `domainFromDeclaredScale`
+  honors a declaration verbatim only when `isfinite(s) && s > 0`; +Inf used to
+  pass and divide every pixel by zero.
+- **New test corpus**: `test_scientific_defects_9` (old-code-fails regressions
+  for all six defects, incl. E2E closed-form EVI and anisotropic gamma0),
+  `test_semantic_drift_9` (mechanical semantics-contract anchors), and the
+  first coverage of the `rs:sar_geocode` over-budget source-window fallback
+  (bounded-but-untested since 8.0; analytic round-trip on a 2600×2600 scene).
+- **Baseline build fixes (out-of-ownership, disclosed)**: `GDALMDArrayRead`
+  count-argument type (`size_t`, not `GUInt64`) for GDAL 3.13 headers, and a
+  const-correctness fix in `experiment/run_bridge.cpp` (clang 22 rejects the
+  const local the setters mutate). No behavior change in either.
+
+## [Unreleased] - 2026-09-11
+
 ### Cloud-Native Geospatial Data Fabric 8.0 (goal series)
 
 - **Range-cache handler lifetime fix (P0)**: the `/vsirangecache/` VSI handler

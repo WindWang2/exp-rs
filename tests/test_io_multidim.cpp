@@ -487,3 +487,106 @@ TEST_CASE( "EO cube workflow: instant selection, bounded window, dimension fidel
   CHECK( plane.values[0] == Approx( expected( 0, 0 ) ) );
   CHECK( plane.values[static_cast<std::size_t>( 4 ) * 5 - 1] == Approx( expected( 3, 4 ) ) );
 }
+
+// ---------------------------------------------------------------------------
+// 9.0 M5 — logical cube descriptors: per-axis instants (CF-relative numeric
+// units and string datetime labels), lazy metadata-only construction, and
+// exact JSON round-trip symmetry.
+// ---------------------------------------------------------------------------
+
+#include "geospatial/multidim/multidim_cube.h"
+
+TEST_CASE( "cube descriptors resolve CF-relative numeric time axes",
+           "[io][multidim][cube][fabric9]" )
+{
+  if ( !netCdfAvailable() )
+  {
+    WARN( "netCDF driver unavailable — cube suite skipped" );
+    return;
+  }
+  const std::string dir = scratch( "cube9" );
+  const std::string path = writeCube( dir, "numeric.nc" );
+
+  sicnu::geo::MultidimView view = sicnu::geo::MultidimView::open( path );
+  const sicnu::geo::MultidimCubeDescriptor cube = sicnu::geo::describeCube( view, "sst" );
+  REQUIRE( cube.variable == "sst" );
+  REQUIRE( cube.dimensionNames.size() == 3 );
+  CHECK( cube.dimensionNames[0] == "time" );
+
+  const sicnu::geo::MultidimCubeAxis &time = cube.axes[0];
+  REQUIRE( time.hasNumericValues );
+  CHECK( time.numericValues.size() == 2 );
+  // "hours since 2026-01-01 00:00:00": 101 h and 202.5 h resolve to UTC.
+  REQUIRE( time.instantsResolved );
+  REQUIRE( time.instantsUtc.size() == 2 );
+  CHECK( time.instantsUtc[0] == "2026-01-05T05:00:00Z" );
+  CHECK( time.instantsUtc[1] == "2026-01-09T10:30:00Z" );
+
+  // The y/x axes carry no coordinate values: sizes only, no instants claim.
+  CHECK_FALSE( cube.axes[1].instantsResolved );
+  CHECK_FALSE( cube.axes[2].instantsResolved );
+
+  // JSON symmetry: descriptor → JSON → descriptor → identical JSON.
+  const Json::Value json = cube.toJson();
+  const sicnu::geo::MultidimCubeDescriptor roundTrip =
+    sicnu::geo::MultidimCubeDescriptor::fromJson( json );
+  CHECK( roundTrip.toJson() == json );
+}
+
+TEST_CASE( "cube descriptors resolve string datetime axes to normalized instants",
+           "[io][multidim][cube][fabric9]" )
+{
+  if ( !netCdfAvailable() )
+  {
+    WARN( "netCDF driver unavailable — cube suite skipped" );
+    return;
+  }
+  const std::string dir = scratch( "cube9" );
+  const std::string path = writeCubeWithStringTime( dir, "strings.nc" );
+  if ( path.empty() )
+  {
+    WARN( "netCDF-4 container unavailable — string-axis cube suite skipped" );
+    return;
+  }
+
+  sicnu::geo::MultidimView view = sicnu::geo::MultidimView::open( path );
+  const sicnu::geo::MultidimCubeDescriptor cube = sicnu::geo::describeCube( view, "lst" );
+  const sicnu::geo::MultidimCubeAxis &time = cube.axes[0];
+  REQUIRE( time.hasStringLabels );
+  CHECK( time.stringLabels.size() == 3 );
+  REQUIRE( time.instantsResolved );
+  REQUIRE( time.instantsUtc.size() == 3 );
+  // Mixed offsets normalize: "+02:00" becomes Z; verbatim labels stay put.
+  CHECK( time.instantsUtc[0] == "2026-07-01T00:00:00Z" );
+  CHECK( time.instantsUtc[1] == "2026-07-02T00:00:00Z" );
+  CHECK( time.stringLabels[1] == "2026-07-02T02:00:00+02:00" );
+}
+
+TEST_CASE( "cube descriptor JSON violations are typed errors",
+           "[io][multidim][cube][fabric9]" )
+{
+  Json::Value broken( Json::objectValue );
+  broken["variable"] = "sst";
+  // no dimensions at all
+  CHECK_THROWS_AS( sicnu::geo::MultidimCubeDescriptor::fromJson( broken ), sicnu::geo::GeoError );
+
+  broken["dimension_names"] = Json::Value( Json::arrayValue );
+  broken["dimension_names"].append( "time" );
+  broken["axes"] = Json::Value( Json::arrayValue ); // ragged: 1 dim, 0 axes
+  CHECK_THROWS_AS( sicnu::geo::MultidimCubeDescriptor::fromJson( broken ), sicnu::geo::GeoError );
+
+  // Axis name mismatch against dimension order.
+  Json::Value axis( Json::objectValue );
+  axis["name"] = "y";
+  axis["size"] = 3;
+  broken["axes"].append( axis );
+  CHECK_THROWS_AS( sicnu::geo::MultidimCubeDescriptor::fromJson( broken ), sicnu::geo::GeoError );
+
+  // Unknown variables are typed too.
+  if ( netCdfAvailable() )
+  {
+    const std::string dir = scratch( "cube9" );
+    sicnu::geo::MultidimView view = sicnu::geo::MultidimView::open( writeCube( dir, "unknown.nc" ) );
+    CHECK_THROWS_AS( sicnu::geo::describeCube( view, "nope" ), sicnu::geo::GeoError );
+  }
+}

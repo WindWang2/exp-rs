@@ -360,3 +360,62 @@ TEST_CASE( "a successful re-conversion replaces the target and consumes backups"
   }
   CHECK( tifCount == 2 );
 }
+
+// ---------------------------------------------------------------------------
+// 9.0 M0 — crash-between-phases: a failure at the MAIN-file publish phase
+// (sidecars already swapped) must roll the already-published sidecars back
+// to the previous good group. POSIX cannot inject a rename failure onto an
+// existing regular file, so the main target is a non-empty directory —
+// rename(2) fails there (EISDIR) and the group must come back intact.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "main-phase publish failure rolls published sidecars back to the"
+           " previous good group",
+           "[io][atomic][group][fabric9]" )
+{
+  const std::string dir = scratch( "main_phase_rollback" );
+  const fs::path target = fs::path( dir ) / "blocker"; // will stay a directory
+  fs::create_directories( target / "occupant" );
+
+  // Previous good sidecar next to the target main.
+  const std::string sidecarTarget = ( target.string() ) + ".dbf";
+  {
+    std::ofstream out( sidecarTarget );
+    out << "old_sidecar";
+  }
+  // Staged group: sidecar replaces cleanly, then the MAIN swap fails.
+  const std::string stagedMain = ( fs::path( dir ) / "staged.shp" ).string();
+  const std::string stagedSidecar = ( fs::path( dir ) / "staged.dbf" ).string();
+  {
+    std::ofstream out( stagedMain );
+    out << "never_lands";
+  }
+  {
+    std::ofstream out( stagedSidecar );
+    out << "new_sidecar";
+  }
+
+  bool failed = false;
+  try
+  {
+    sicnu::geo::atomic_fs::publishStagedGroup( stagedMain, target.string() );
+    FAIL( "expected main-phase publish failure" );
+  }
+  catch ( const sicnu::geo::GeoError & )
+  {
+    failed = true;
+  }
+  CHECK( failed );
+
+  // The sidecar that had already swapped in must be rolled back to its
+  // previous content; the main slot never became a file; no backup residue.
+  std::ifstream sidecarIn( sidecarTarget );
+  std::string sidecarContent;
+  sidecarIn >> sidecarContent;
+  CHECK( sidecarContent == "old_sidecar" );
+  CHECK( fs::is_directory( target ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( target.string() ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( stagedSidecar ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( sidecarTarget + ".bak" ) );
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( target.string() + ".bak" ) );
+}

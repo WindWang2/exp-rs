@@ -68,6 +68,39 @@ Policy:
 4. **Stored pixels are never rewritten** by index computation: normalization
    for a kernel happens on the block read, outputs are in the index's native
    range, and input metadata stays untouched.
+5. **A declared scale must be finite (9.0, #873).** `domainFromDeclaredScale`
+   honors the declaration verbatim only when `isfinite(s) && s > 0`; NaN and
+   ±Inf fall back to the unit domain — a `+Inf` scale would divide every
+   pixel by infinity, i.e. by zero.
+6. **Scale probing observes positive magnitudes only (9.0, #856).** The
+   decimated whole-raster probe feeding `domainFromMaxAbsSample` considers
+   only positive finite samples: reflectance and DN domains are non-negative,
+   so a finite negative value is an undeclared sentinel or noise — never
+   scale evidence (under `abs` a negative sentinel folds to a huge positive
+   magnitude and falsely flipped unit-reflectance scenes into DN scale,
+   collapsing the additive-constant indices). Inventing sentinel constants
+   inside operators is review-rejected; sentinel resolution lives in
+   `src/processing/algorithms/nodata_utils.h` (declared metadata only). The
+   removed re-probing block in `rs_spectral_index_operator.cpp` is the
+   canonical regression. Enforced by `tests/test_scientific_defects_9.cpp`
+   and `tests/test_semantic_drift_9.cpp`.
+
+## 2a. Pixel geometry for gradient kernels (9.0)
+
+1. **Each spatial derivative is normalized by its own axis spacing (#855).**
+   Slope/aspect/RTC-facet kernels take `cellSizeX` and `cellSizeY` (or read
+   them from the geotransform) and divide dz/dx by `8·cellX`, dz/dy by
+   `8·cellY` (Horn). Averaging the two spacings into one scalar is a
+   review-rejected pattern: SAR slant/ground-range products are routinely
+   anisotropic, and averaged spacing skewed slope and rotated the downslope
+   aspect by tens of degrees on 2:1 grids. `terrain_analysis` has taken
+   per-axis spacings since Foundation 5.0; `sar_terrain` joined that contract
+   in 9.0. Enforced by the analytic tilted-plane cases in
+   `tests/test_scientific_defects_9.cpp` and the drift guard.
+2. **Angular-unit DEMs are refused for metric gradients.** Geographic DEMs
+   make Horn denominators ~10⁴× too small (every facet reads as a cliff);
+   the SAR terrain kernels detect `GEOGCS`/`GEODCRS`-without-`PROJCS` WKT
+   and refuse instead of computing garbage.
 
 ## 3. Band roles
 

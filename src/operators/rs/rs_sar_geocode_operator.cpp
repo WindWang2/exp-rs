@@ -278,6 +278,10 @@ Json::Value RsSarGeocodeOperator::run( const Json::Value &params, RSOperatorCont
     std::uint64_t unresolved = 0;
     std::uint64_t outsideImage = 0;
     std::uint64_t sourceNoData = 0;
+    // In-image cells whose radiometry came from the bounded per-pixel 2x2
+    // path (over-budget source windows that are never materialized).
+    // Reported so callers can see when the slow path carried the run.
+    std::uint64_t perPixelFallback = 0;
 
     const int totalTiles = demStream.tileCount();
     int tileIndex = 0;
@@ -491,6 +495,8 @@ Json::Value RsSarGeocodeOperator::run( const Json::Value &params, RSOperatorCont
                 if ( !( r >= 0.0 && r <= kMaxRow && c >= 0.0 && c <= kMaxCol ) )
                     continue;
                 float v = kNaN;
+                if ( !windowReady )
+                    ++perPixelFallback;
                 if ( sampleAt( r, c, &v ) )
                 {
                     backscatter[idx] = v;
@@ -583,6 +589,7 @@ Json::Value RsSarGeocodeOperator::run( const Json::Value &params, RSOperatorCont
     result["bands"] = kProductCount;
     result["bandOrder"] = "backscatter,gamma0,incidence,local_incidence,layover_shadow";
     result["sampledPixels"] = Json::Value::UInt64( sampled );
+    result["perPixelFallbackPixels"] = Json::Value::UInt64( perPixelFallback );
     result["demNoDataPixels"] = Json::Value::UInt64( demNoData );
     result["unresolvedGeometryPixels"] = Json::Value::UInt64( unresolved );
     result["outsideImagePixels"] = Json::Value::UInt64( outsideImage );
