@@ -177,8 +177,12 @@ int cmdGenMeta( const QString &root )
   const QString dir = capabilityDir( root );
   QDir().mkpath( dir );
 
+  // Validate every derived document BEFORE writing anything so a validation
+  // failure cannot leave regenerated sidecars next to stale relations.
   int written = 0;
   Json::Value sharedGrid( Json::arrayValue );
+  std::vector<std::pair<const AlgorithmDescriptor *, Json::Value>> documents;
+  documents.reserve( rsDescriptors.size() );
   for ( const AlgorithmDescriptor *desc : rsDescriptors )
   {
     const std::string fileName = sicnu::processing::AlgorithmMetaStore::idToFileName( desc->id );
@@ -190,16 +194,22 @@ int cmdGenMeta( const QString &root )
     Json::Value doc = v1Overlay( *desc, existing );
     doc[ "capability" ] = deriveCapabilityBlock( *desc, authored );
 
-    for ( const Json::Value &row : doc[ "capability" ][ "io" ][ "inputs" ] )
-    {
-      if ( row.isObject() && row[ "grid_relation" ].isString() &&
-           row[ "grid_relation" ].asString() == "same-grid" )
-      {
-        sharedGrid.append( desc->id );
-        break;
-      }
-    }
+    // The final crs block = derived same-grid contracts OR authored grid
+    // requirements, so the relations list stays consistent with the sidecars.
+    if ( doc[ "capability" ][ "crs" ][ "requires_shared_grid" ].asBool() )
+      sharedGrid.append( desc->id );
 
+    for ( const std::string &problem : CapabilityCatalog::validateEntry( doc ) )
+    {
+      std::cerr << "gen-meta: " << desc->id << ": " << problem << "\n";
+      return 1;
+    }
+    documents.emplace_back( desc, std::move( doc ) );
+  }
+
+  for ( const auto &[ desc, doc ] : documents )
+  {
+    const std::string fileName = AlgorithmMetaStore::idToFileName( desc->id );
     if ( !writeTextFile( dir + QString::fromStdString( "/" + fileName ),
                          renderJson( doc ) + "\n" ) )
     {
