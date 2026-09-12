@@ -3,13 +3,16 @@
  ***************************************************************************/
 #include "rs_sar_change_operator.h"
 
+#include "data/raster_grid_compat.h"
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/nodata_utils.h"
+#include "processing/algorithms/sar/sar_metadata.h"
 #include "processing/algorithms/sar/sar_ratio.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_grid_compat.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
 #include "rs_change_streaming.h"
 
@@ -53,7 +56,11 @@ Json::Value RsSarChangeOperator::schema() const {
     props["output"] = makeOutputParam("output", "Output binary change mask raster (UInt8)", "tif");
     props["bandA"] = makeIntegerParam("bandA", "1-based band on inputA", 1);
     props["bandB"] = makeIntegerParam("bandB", "1-based band on inputB", 1);
-    props["inputDomain"] = makeEnumParam("inputDomain", "Numeric domain of both inputs", s_domains, "linear_power");
+    props["inputDomain"] = makeEnumParam("inputDomain",
+                                        "Numeric domain of both inputs. Explicit inputDomain=db "
+                                        "wins over declared SICNU_SAR_DOMAIN; a declared dB domain "
+                                        "with the default linear_power refuses rather than nested-logging",
+                                        s_domains, "linear_power");
     props["thresholdMethod"] = makeEnumParam("thresholdMethod", "Threshold strategy", s_threshold_methods, "otsu");
     props["threshold"] = makeNumberParam("threshold", "Manual threshold in dB (thresholdMethod=manual): pixels with dB change >= threshold are changed", 0.0);
     props["percentile"] = makeNumberParam("percentile", "Percentile for thresholdMethod=percentile (0-100)", 90.0);
@@ -93,7 +100,11 @@ Json::Value RsSarChangeOperator::metadata() const {
                                  "statistical adapt the threshold to the data.");
     meta["limitations"].append("Incoherent change only — no coherent/interferometric "
                                "phase analysis.");
-    meta["limitations"].append("Scenes must be co-registered; no hidden resampling is applied.");
+    meta["limitations"].append("Scenes must share CRS, pixel size, origin and extent; "
+                               "no hidden resampling is applied.");
+    meta["limitations"].append("If either input declares SICNU_SAR_DOMAIN=db and "
+                               "inputDomain is left at linear_power, the operator refuses "
+                               "(pass inputDomain=db to convert, or convert first).");
     meta["facadeOf"] = "change_detection";
     Json::Value contract(Json::objectValue);
     contract["modality"] = "sar";
@@ -159,8 +170,22 @@ Json::Value RsSarChangeOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "bandB out of range: " + std::to_string(bandB));
     }
+
+    // Shared pixel-grid preflight (CRS, resolution, origin alignment, extent)
+    // before any pixel comparison. Two unreferenced rasters are not spatially
+    // comparable and pass as compatible; the dimension check below remains the
+    // fallback for them.
+    const sicnu::data::GridCompatReport gridReport =
+        sicnu::data::compareGrids(sicnu::processing::gridFromDataset(srcA),
+                                  sicnu::processing::gridFromDataset(srcB));
+    for (const sicnu::data::GridCompatIssue& issue : gridReport.issues) {
+        if (issue.blocking) {
+            throw RSOperatorError(ErrorCode::InvalidInputData, issue.message.toStdString());
+        }
+        context.logWarning(issue.message.toStdString());
+    }
     if (srcA.width() != srcB.width() || srcA.height() != srcB.height()) {
-        throw RSOperatorError(ErrorCode::InvalidParameter,
+        throw RSOperatorError(ErrorCode::InvalidInputData,
                               "Input dimensions do not match: inputA is " +
                                   std::to_string(srcA.width()) + "x" +
                                   std::to_string(srcA.height()) + ", inputB is " +
@@ -169,13 +194,27 @@ Json::Value RsSarChangeOperator::run(const Json::Value& params,
                                   " (co-registered scenes required)");
     }
 
+    // Domain resolution: explicit inputDomain > declared SICNU_SAR_DOMAIN >
+    // linear. A declared dB domain with the default linear_power inputDomain
+    // is a typed refusal (do not silently nested-log).
+    sicnu::sar::RatioParams ratioParams;
+    ratioParams.output = sicnu::sar::RatioOutput::LogDifference;
+    const QString declaredA = sicnu::sar::readDomain(srcA);
+    const QString declaredB = sicnu::sar::readDomain(srcB);
+    if (inputDomainStr == "db") {
+        ratioParams.inputIsDb = true;
+    } else if (declaredA == QLatin1String("db") || declaredB == QLatin1String("db")) {
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "input declares SICNU_SAR_DOMAIN=db; convert with "
+                              "rs:sar_backscatter (or rs:sar_calibrate) first, or "
+                              "pass inputDomain=db");
+    } else {
+        ratioParams.inputIsDb = false;
+    }
+
     // Declared sentinels on the analysis bands (NaN when undeclared).
     const float nodataA = sicnu::rs::bandNoDataSentinel(srcA, bandA);
     const float nodataB = sicnu::rs::bandNoDataSentinel(srcB, bandB);
-
-    sicnu::sar::RatioParams ratioParams;
-    ratioParams.output = sicnu::sar::RatioOutput::LogDifference;
-    ratioParams.inputIsDb = inputDomainStr == "db";
 
     GdalStreamingOutput mag(QString::fromStdString(tempMagPath), srcA.width(), srcA.height(),
                             1, GDT_Float32, srcA.geoTransform(), srcA.projection());

@@ -49,7 +49,10 @@ Json::Value RsSarTerrainFlattenOperator::schema() const {
     Json::Value props(Json::objectValue);
     props["input"] = makeRasterParam("input", "Input sigma0 raster (linear power)");
     props["input"]["x-rs-contract"] = makeSarInputContract();
-    props["output"] = makeOutputParam("output", "Output terrain-flattened gamma0 raster (Float32)", "tif");
+    props["output"] = makeOutputParam("output",
+                                     "Output 2-band raster: gamma0 (band 1) + validity mask "
+                                     "(band 2, 1/0/255)",
+                                     "tif");
     props["band"] = makeIntegerParam("band", "1-based input band", 1);
     props["dem"] = makeRasterParam("dem", "Co-registered DEM covering the exact same grid (radar geometry)");
     props["dem"]["x-rs-contract"] = makeDemInputContract();
@@ -62,8 +65,14 @@ Json::Value RsSarTerrainFlattenOperator::schema() const {
     props["sensor"] = makeStringParam("sensor", "Sensor/instrument id recorded on the output", "");
 
     Json::Value outputs(Json::objectValue);
-    outputs["output"] = makeRasterParam("output", "Terrain-flattened gamma0 raster path");
-    outputs["calibration"] = makeStringParam("calibration", "Calibration state of the output (gamma0)");
+    outputs["output"] = makeRasterParam("output", "Two-band terrain-flattened raster path (gamma0 + validity mask)");
+    outputs["calibration"] = makeStringParam("calibration", "Calibration state of band 1 (gamma0)");
+    outputs["bands"] = makeIntegerParam("bands", "Number of output bands (always 2: gamma0 + validity mask)", 2);
+    outputs["maskBand"] = makeIntegerParam("maskBand", "1-based validity mask band", 2);
+    outputs["layout"] = makeStringParam("layout",
+                                        "Band layout: band 1 = gamma0 (Float32); band 2 = validity mask "
+                                        "(1 valid / 0 layover-shadow / 255 nodata)",
+                                        "band 1: gamma0 (Float32); band 2: validity mask (1=valid, 0=layover/shadow, 255=nodata)");
     outputs["incidenceDeg"] = makeNumberParam("incidenceDeg", "Scene incidence angle used (degrees)");
     outputs["headingDeg"] = makeNumberParam("headingDeg", "Platform heading used (degrees)");
     outputs["lookAzimuthDeg"] = makeNumberParam("lookAzimuthDeg", "Effective antenna look azimuth used (degrees clockwise from north)");
@@ -84,20 +93,27 @@ Json::Value RsSarTerrainFlattenOperator::metadata() const {
     meta["tags"].append("radiometry");
     meta["purpose"] = "Radiometric terrain flattening: sigma0 to gamma0 "
                       "(sigma0·cosθ0/cosθi) using a co-registered DEM in radar "
-                      "geometry, writing a single-band gamma0 SAR product.";
+                      "geometry, writing a two-band product (band 1 = gamma0, "
+                      "band 2 = validity mask 1/0/255).";
     meta["prerequisites"].append("sigma0 raster (linear power) and a DEM on the exact "
                                  "same grid (radar geometry for GRD products), plus the "
                                  "scene incidence angle and the antenna look azimuth "
                                  "(headingDeg + lookDirection, or an explicit "
                                  "lookAzimuthDeg).");
-    meta["workflowHints"].append("For the full product with the layover/shadow validity "
-                                 "mask and the local incidence angle band use "
-                                 "rs:sar_terrain_correction.");
+    meta["workflowHints"].append("Output band 1 is terrain-flattened gamma0; band 2 is the "
+                                 "layover/shadow validity mask (1 valid / 0 layover-shadow / "
+                                 "255 nodata).");
+    meta["workflowHints"].append("rs:sar_terrain_correction is the 3-band product "
+                                 "(gamma0 + validity mask + local incidence). Use it when "
+                                 "the incidence band is required.");
     meta["limitations"].append("Plane-fit RTC model, NOT range-Doppler terrain correction.");
     meta["limitations"].append("The DEM must be co-registered with the input in radar "
                                "geometry; no resampling is performed.");
     meta["limitations"].append("Facets with a local incidence angle >= 85° are masked as "
                                "layover/shadow.");
+    meta["limitations"].append("Always writes two bands (gamma0 + validity mask). "
+                               "rs:sar_terrain_correction is the 3-band product "
+                               "(gamma0 + mask + local incidence).");
     Json::Value contract(Json::objectValue);
     contract["modality"] = "sar";
     // Second input contract: the DEM port (co-registered elevation raster).
@@ -262,6 +278,9 @@ Json::Value RsSarTerrainFlattenOperator::run(const Json::Value& params,
     Json::Value result(Json::objectValue);
     result["output"] = outputPath;
     result["calibration"] = "gamma0";
+    result["bands"] = 2;
+    result["maskBand"] = 2;
+    result["layout"] = "band 1: gamma0 (Float32); band 2: validity mask (1=valid, 0=layover/shadow, 255=nodata)";
     result["incidenceDeg"] = incidenceDeg;
     result["headingDeg"] = headingDeg;
     result["lookAzimuthDeg"] = lookAzimuthDeg;

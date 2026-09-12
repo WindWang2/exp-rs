@@ -10,9 +10,11 @@ namespace sicnu::operators::rs {
 /**
  * Pair metric between two co-registered SAR scenes: linear power ratio A/B,
  * log-ratio 10·log10(A/B) (dB) or the absolute log-difference |ΔdB| (dB
- * magnitude of change). Inputs may be linear power or dB (declared domain is
- * converted before the ratio, so the output domain is independent of the
- * input domain). Streams tile-by-tile; O(tile) memory.
+ * magnitude of change). Domain resolution is explicit inputDomain >
+ * declared SICNU_SAR_DOMAIN > linear; a declared dB domain with the default
+ * linear_power inputDomain is refused (pass inputDomain=db to convert).
+ * Grids must share CRS, pixel size, origin and extent. Streams tile-by-tile;
+ * O(tile) memory.
  */
 class RsSarRatioOperator : public RSOperator
 {

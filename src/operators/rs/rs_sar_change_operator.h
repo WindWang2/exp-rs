@@ -13,7 +13,10 @@ namespace sicnu::operators::rs {
  * derives a binary change mask from it via a manual / Otsu / percentile /
  * statistical threshold with optional morphological cleanup and minimum
  * mapping unit filtering (stage 2, the shared change-streaming mask
- * machinery behind rs:threshold_raster). Statistical thresholds adapt to
+ * machinery behind rs:threshold_raster). Grids must share CRS, pixel size,
+ * origin and extent. Domain resolution is explicit inputDomain > declared
+ * SICNU_SAR_DOMAIN > linear; a declared dB domain with the default
+ * linear_power inputDomain is refused. Statistical thresholds adapt to
  * the data, hence the tolerance determinism grade.
  */
 class RsSarChangeOperator : public RSOperator
