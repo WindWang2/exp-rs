@@ -20,6 +20,7 @@
 set( EXPRS_SDK_SOURCES
   exprs/path_policy.cpp
   exprs/plugin_diagnostics.cpp
+  exprs/plugin_index.cpp
   exprs/plugin_manifest.cpp
   exprs/plugin_permissions.cpp
   exprs/plugin_validator.cpp

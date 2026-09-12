@@ -38,6 +38,21 @@ public:
 
     /// Lists plugin ids currently installed in the user root.
     static std::vector<std::string> installedIds();
+
+    /// Resolves the manifest's dependency constraints against the CURRENTLY
+    /// INSTALLED plugins (plugin-platform 9.0). Ranges: "^X.Y.Z" (same
+    /// major), "~X.Y.Z" (same minor), ">=X.Y.Z", "=X.Y.Z", "X.Y.Z" (exact)
+    /// and a bare plugin id (any version). Satisfied constraints record an
+    /// info diagnostic; unsatisfied ones record a typed DependencyUnresolved
+    /// WARNING — install still proceeds (install order is the user's
+    /// business; the load-time gate remains the enforcement point).
+    /// Returns the number of unsatisfied constraints.
+    static int reportDependencyStatus( const PluginManifest &manifest,
+                                       PluginDiagnosticLog &log );
+
+    /// True when @p version satisfies @p range ("", "^X.Y.Z", "~X.Y.Z",
+    /// ">=X.Y.Z", "=X.Y.Z", "X.Y.Z"). Exposed for known-answer tests.
+    static bool versionSatisfiesRange( const std::string &version, const std::string &range );
 };
 
 } // namespace exprs

@@ -236,3 +236,80 @@ TEST_CASE( "group nesting validates within the depth budget", "[plugin][uischema
     page["controls"].append( leaf );
     REQUIRE( validatePluginUiSchema( schemaWithPage( page ) ).ok() );
 }
+
+// -- plugin-platform 9.0: accessibility metadata + host-side event validation --
+
+TEST_CASE( "accessibility metadata is validated and preserved", "[plugin][uischema][p12]" )
+{
+    Json::Value schema( Json::objectValue );
+    schema["version"] = 1;
+    Json::Value pages( Json::arrayValue );
+    Json::Value page( Json::objectValue );
+    page["id"] = "page.a11y";
+    page["title"] = "Accessibility";
+    Json::Value controls( Json::arrayValue );
+    Json::Value button( Json::objectValue );
+    button["id"] = "apply";
+    button["type"] = "button";
+    button["label"] = "Apply";
+    button["description"] = "Applies the current settings";
+    button["accessibilityLabel"] = "Apply settings button";
+    controls.append( button );
+    page["controls"] = controls;
+    pages.append( page );
+    schema["settingsPages"] = pages;
+
+    const auto result = validatePluginUiSchema( schema );
+    REQUIRE( result.ok() );
+    REQUIRE( result.normalized["settingsPages"][0]["controls"][0]["accessibilityLabel"].asString()
+             == "Apply settings button" );
+
+    // Oversized metadata is refused (same cap as every other string).
+    // jsoncpp values are value types: mutate through the TREE, not the
+    // local copy, or the mutation is invisible to the validated schema.
+    schema["settingsPages"][0]["controls"][0]["description"] = std::string( 512, 'x' );
+    const auto refused = validatePluginUiSchema( schema );
+    REQUIRE_FALSE( refused.ok() );
+}
+
+TEST_CASE( "ui events are validated host-side before the worker round-trip",
+           "[plugin][uischema][p12]" )
+{
+    PluginUiSchemaLimits limits;
+
+    // A well-formed event passes.
+    Json::Value event( Json::objectValue );
+    event["contributionId"] = "page.main";
+    event["controlId"] = "apply";
+    event["eventType"] = "clicked";
+    event["value"] = true;
+    auto result = validateUiEvent( event, limits );
+    REQUIRE( result.ok() );
+
+    // Non-object: refused.
+    REQUIRE_FALSE( validateUiEvent( Json::Value( Json::arrayValue ), limits ).ok() );
+
+    // Oversized identifier: refused.
+    event["contributionId"] = std::string( 512, 'a' );
+    REQUIRE_FALSE( validateUiEvent( event, limits ).ok() );
+    event["contributionId"] = "page.main";
+
+    // Unknown event type: refused (the host cannot render/dispatch it).
+    event["eventType"] = "teleport";
+    auto unknown = validateUiEvent( event, limits );
+    REQUIRE_FALSE( unknown.ok() );
+    REQUIRE( unknown.errors.front().find( "teleport" ) != std::string::npos );
+
+    // Oversized serialized value: refused.
+    event["eventType"] = "custom";
+    event["value"] = std::string( 8192, 'v' );
+    REQUIRE_FALSE( validateUiEvent( event, limits ).ok() );
+
+    // Value within the cap: passes.
+    event["value"] = std::string( 1024, 'v' );
+    REQUIRE( validateUiEvent( event, limits ).ok() );
+
+    // Identifier character whitelist applies to events too.
+    event["controlId"] = "bad id with spaces";
+    REQUIRE_FALSE( validateUiEvent( event, limits ).ok() );
+}

@@ -465,6 +465,8 @@ std::vector<std::string> CapabilityKnowledge::validateEntry( const Json::Value &
     "evi", "savi", "ndre", "ndwi", "mndwi", "ndsi", "nbr", "dnbr", "ndbi", "bsi",
     "water", "flood", "sar_water", "sar_flood", "sar", "ship",
     "temporal", "terrain", "accuracy", "qa", "preprocess", "inference",
+    // Harness 9.0 (M2): zonal raster statistics over vector zones.
+    "zonal",
   };
   checkStringArray( entry.get( "intents", Json::Value() ), "intents" );
   for ( const Json::Value &candidate : entry.get( "intents", Json::Value( Json::arrayValue ) ) )

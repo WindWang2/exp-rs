@@ -7,6 +7,8 @@
 
 #include <cstdlib>
 
+#include "exprs/plugin_capabilities.h"
+
 #include "data_provider_registry.h"
 #include "external_tool_operator.h"
 #include "plugin_agent_tool_provider.h"
@@ -150,12 +152,19 @@ void PluginRuntimeHost::installPluginOperator( const std::string &pluginId,
         entry.isExternalTool = op.hasExternalTool;
         if ( op.hasExternalTool )
         {
-            const exprs::PluginRecord *record =
-                exprs::PluginRegistry::instance().record( pluginId );
-            const std::string pluginDir = record ? record->directory : std::string();
+            // Copies under the registry lock (no raw record pointer held).
+            const std::string pluginDir =
+                exprs::PluginRegistry::instance().pluginDirectoryFor( pluginId );
+            const Json::Value access =
+                exprs::PluginRegistry::instance().accessDeclarationFor( pluginId );
+            // Capability gate (9.0): explicit access.externalProcess:false
+            // produces operators that refuse to spawn (typed PolicyRefused).
+            const bool spawnAllowed =
+                exprs::accessBool( access, "externalProcess" ) != 0;
             entry.factory =
-                [op, opId = op.id, pluginDir]() -> std::unique_ptr<sicnu::operators::RSOperator> {
-                return std::make_unique<ExternalToolOperator>( opId, op, pluginDir );
+                [op, opId = op.id, pluginDir, spawnAllowed]() -> std::unique_ptr<sicnu::operators::RSOperator> {
+                return std::make_unique<ExternalToolOperator>( opId, op, pluginDir,
+                                                               spawnAllowed );
             };
         }
         mOperators[op.id] = entry;
@@ -235,6 +244,13 @@ void PluginRuntimeHost::installPluginModelRuntimes( const exprs::PluginRecord &r
 {
     for ( const exprs::ManifestModelRuntime &runtime : record.manifest.modelRuntimes )
     {
+        // Capability gate (9.0): a manifest that declares an access object
+        // with a modelProvider.frameworks list may only serve listed
+        // frameworks. Refused entries are simply NOT installed — the
+        // declared-but-not-registered diagnostic (loader/conformance)
+        // surfaces the gap, never a silent usable surface.
+        if ( !exprs::modelFrameworkAllowed( record.manifest.access, runtime.framework ) )
+            continue;
         if ( mModelRuntimeFactories.count( runtime.framework ) )
             continue;
         // Reserve the framework key; the executable factory arrives through
@@ -488,6 +504,18 @@ bool PluginRuntimeHost::registerModelRuntime(
     const std::string &pluginId, const std::string &framework,
     exprs::PluginModelRuntimeFactoryV1 factory )
 {
+    // Capability gate (9.0): a binary-registered runtime for a framework the
+    // manifest's access object does not list is refused at the sink — the
+    // registration "failure" path is the established honest signal.
+    // LOCK ORDER: the registry lookup (and its copy) happens BEFORE mMutex —
+    // the load path holds the registry lock while entering this sink, so
+    // taking mMutex first would risk an AB-BA inversion.
+    {
+        const Json::Value access =
+            exprs::PluginRegistry::instance().accessDeclarationFor( pluginId );
+        if ( !exprs::modelFrameworkAllowed( access, framework ) )
+            return false;
+    }
     std::lock_guard<std::mutex> lock( mMutex );
     storePluginModelRuntimeFactory( framework, pluginId, factory );
     mModelRuntimeFactories[framework] = std::move( factory );

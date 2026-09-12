@@ -1,0 +1,78 @@
+{
+  "cases": [
+    {
+      "case_id": "modality_mismatch/sar-only-optical-index-blocked",
+      "category": "modality_mismatch",
+      "description": "An NDVI intent against a SAR-only scene is blocked, never silently attempted",
+      "fixture": {
+        "kind": "raster", "width": 8, "height": 8,
+        "bands": ["vv", "vh"], "nodata": -9999.0,
+        "metadata": {"SICNU_PRODUCT_TYPE": "SENTINEL-1", "SICNU_RADIOMETRIC_STATE": "sigma0"}
+      },
+      "steps": [
+        {"tool": "spatial:understand", "input": {"asset": "$fixture"},
+         "expect": {"success": true, "asserts": [
+           {"path": "dataset_understanding.modality", "equals": "sar"}]}},
+        {"tool": "harness:preflight",
+         "input": {"intent": "ndvi", "inputs": [{"name": "primary", "ref": "$fixture"}]},
+         "expect": {"success": true, "asserts": [
+           {"path": "preflight.verdict", "equals": "blocked"}]}}
+      ]
+    },
+    {
+      "case_id": "modality-mismatch/sar-intent-on-optical-blocked",
+      "category": "modality_mismatch",
+      "description": "A SAR single-scene intent against an optical scene is blocked",
+      "fixture": {
+        "kind": "raster", "width": 8, "height": 8,
+        "bands": ["red", "nir"], "nodata": -9999.0
+      },
+      "steps": [
+        {"tool": "spatial:understand", "input": {"asset": "$fixture"},
+         "expect": {"success": true, "asserts": [
+           {"path": "dataset_understanding.modality", "equals": "optical"}]}},
+        {"tool": "harness:preflight",
+         "input": {"intent": "sar", "inputs": [{"name": "primary", "ref": "$fixture"}]},
+         "expect": {"success": true, "asserts": [
+           {"path": "preflight.verdict", "equals": "blocked"}]}}
+      ]
+    },
+    {
+      "case_id": "modality-mismatch/unresolved-branch-blocks-fused-intent",
+      "category": "modality_mismatch",
+      "description": "A fused intent with an unresolvable SAR branch is blocked by the shared pack",
+      "fixture": {
+        "kind": "raster", "width": 8, "height": 8,
+        "bands": ["green", "nir"], "nodata": -9999.0,
+        "metadata": {"SICNU_RADIOMETRIC_STATE": "surface_reflectance"}
+      },
+      "steps": [
+        {"tool": "harness:preflight",
+         "input": {"intent": "flood", "inputs": [
+           {"name": "optical", "ref": "$fixture"},
+           {"name": "sar", "ref": "$tmp/missing_sar.tif"}]},
+         "expect": {"success": true, "asserts": [
+           {"path": "preflight.verdict", "equals": "blocked"}]}}
+      ]
+    },
+    {
+      "case_id": "modality-mismatch/unknown-modality-warns-never-fabricates",
+      "category": "modality_mismatch",
+      "description": "An unknown-modality scene on a SAR intent stays ok with surfaced assumptions",
+      "fixture": {
+        "kind": "raster", "width": 8, "height": 8,
+        "bands": ["band"], "nodata": -9999.0
+      },
+      "steps": [
+        {"tool": "spatial:understand", "input": {"asset": "$fixture"},
+         "expect": {"success": true, "asserts": [
+           {"path": "dataset_understanding.modality", "equals": "unknown"}]}},
+        {"tool": "harness:preflight",
+         "input": {"intent": "sar", "inputs": [{"name": "primary", "ref": "$fixture"}]},
+         "expect": {"success": true, "asserts": [
+           {"path": "preflight.verdict", "equals": "ok"},
+           {"path": "preflight.assumptions", "exists": true}]}}
+      ]
+    }
+  ]
+}

@@ -12,6 +12,7 @@ static void portableSetenv(const char *key, const char *value)
 
 #include "exprs/external_process.h"
 #include "exprs/plugin_discovery.h"
+#include "exprs/plugin_index.h"
 #include "exprs/plugin_package.h"
 #include "exprs/plugin_permissions.h"
 #include "exprs/plugin_registry.h"
@@ -348,4 +349,249 @@ TEST_CASE( "staged-install sha256 matches reference vectors at block boundaries"
         REQUIRE( PluginPackage::uninstall( "org.test.vec", log ) );
     }
     ::system( "rm -rf /tmp/exprs_test_pkg_vec" );
+}
+
+// -- plugin-platform 9.0: packaging 3.0 ---------------------------------------
+
+TEST_CASE( "version ranges match semver boundaries exactly", "[plugin][package][p12]" )
+{
+    // Exact / bare.
+    REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "2.0.0", "2.0.0" ) );
+    REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "2.0.1", "2.0.0" ) );
+    REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "9.9.9", "" ) ); // bare id: any
+
+    // Caret: same major (0.x pins the minor, 0.0.x pins the patch — npm).
+    REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "2.3.9", "^2.0.0" ) );
+    REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "3.0.0", "^2.0.0" ) );
+    REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "0.2.9", "^0.2.0" ) );
+    REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "0.3.0", "^0.2.0" ) );
+    REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "0.0.3", "^0.0.3" ) );
+    REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "0.0.4", "^0.0.3" ) );
+
+    // Tilde: same minor.
+    REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "2.3.9", "~2.3.0" ) );
+    REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "2.4.0", "~2.3.0" ) );
+
+    // >= and junk (fail closed).
+    REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "3.0.0", ">=2.0.0" ) );
+    REQUIRE( exprs::PluginPackage::versionSatisfiesRange( "2.0.0", ">=2.0.0" ) );
+    REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "1.9.9", ">=2.0.0" ) );
+    REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "2.0.0", "^banana" ) );
+    REQUIRE_FALSE( exprs::PluginPackage::versionSatisfiesRange( "banana", "^2.0.0" ) );
+}
+
+TEST_CASE( "interrupted-install staging leftovers are swept before a new install",
+           "[plugin][package][p12]" )
+{
+    namespace fs = std::filesystem;
+    const std::string pkgRoot = "/tmp/exprs_test_pkg_stale";
+    ::system( "rm -rf /tmp/exprs_test_pkg_stale" );
+    const std::string source = pkgRoot + "/org.test.stale";
+    makePluginDir( pkgRoot, "org.test.stale", "stale:echo" );
+
+    // Simulate a crashed install's staging directory of a DEAD process
+    // (pid+1: the install path only unconditionally removes the CURRENT
+    // pid's directory, so this leftover can only disappear through the
+    // 24 h sweep — the behavior under test).
+    const std::string stagingDir =
+        exprs::PluginDiscovery::userPluginRoot() + "/.staging/org.test.stale."
+        + std::to_string( static_cast<long>( ::getpid() ) + 1 );
+    std::error_code ec;
+    fs::create_directories( fs::path( stagingDir ) / "junk", ec );
+    {
+        std::ofstream marker( stagingDir + "/junk/partial.bin", std::ios::trunc );
+        marker << "half-written";
+    }
+    const auto stale = fs::file_time_type::clock::now() - std::chrono::hours( 48 );
+    fs::last_write_time( fs::path( stagingDir ), stale, ec );
+
+    PluginDiagnosticLog log;
+    std::string installed;
+    REQUIRE( exprs::PluginPackage::install( source, installed, log ) );
+    // The sweep must have REMOVED the dead process's leftover.
+    REQUIRE_FALSE( fs::exists( fs::path( stagingDir ) ) );
+    // The new install holds the real payload, not the crashed staging copy.
+    exprs::PluginDiagnostic parseError;
+    exprs::PluginManifest installedManifest;
+    REQUIRE( exprs::loadManifestFromFile( installed + "/plugin.json", installedManifest, parseError ) );
+    REQUIRE( installedManifest.id == "org.test.stale" );
+    REQUIRE( exprs::PluginPackage::uninstall( "org.test.stale", log ) );
+    ::system( "rm -rf /tmp/exprs_test_pkg_stale" );
+}
+
+TEST_CASE( "dependency constraints are probed at install time, warnings not blocks",
+           "[plugin][package][p12]" )
+{
+    const std::string pkgRoot = "/tmp/exprs_test_pkg_dep";
+    ::system( "rm -rf /tmp/exprs_test_pkg_dep" );
+    makePluginDir( pkgRoot, "org.test.depbase", "dep:echo" );
+
+    PluginDiagnosticLog log;
+    std::string installed;
+    // Base plugin (the constraint target) is installed first.
+    REQUIRE( exprs::PluginPackage::install( pkgRoot + "/org.test.depbase", installed, log ) );
+
+    // A dependent package whose constraint matches the installed version.
+    const std::string dependent = pkgRoot + "/org.test.depped";
+    {
+        ::mkdir( dependent.c_str(), 0755 );
+        std::ofstream manifest( dependent + "/plugin.json", std::ios::trunc );
+        manifest << R"({
+            "manifest_version": 1,
+            "id": "org.test.depped",
+            "name": "Dependent",
+            "version": "1.0.0",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+            "abi_version": 1,
+            "entrypoint_kind": "manifest",
+            "operators": [],
+            "dependencies": ["org.test.depbase@^1.0.0"]
+        })";
+    }
+    log = PluginDiagnosticLog();
+    REQUIRE( exprs::PluginPackage::install( dependent, installed, log ) );
+    bool sawSatisfiedInfo = false;
+    for ( const auto &item : log.items() )
+    {
+        if ( item.severity == exprs::PluginDiagnosticSeverity::Info
+             && item.message.find( "dependency satisfied: org.test.depbase@^1.0.0" )
+                    != std::string::npos )
+            sawSatisfiedInfo = true;
+    }
+    REQUIRE( sawSatisfiedInfo );
+
+    // An unsatisfiable constraint installs but records a typed warning.
+    {
+        std::ofstream manifest( dependent + "/plugin.json", std::ios::trunc );
+        manifest << R"({
+            "manifest_version": 1,
+            "id": "org.test.depped",
+            "name": "Dependent",
+            "version": "1.0.1",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+            "abi_version": 1,
+            "entrypoint_kind": "manifest",
+            "operators": [],
+            "dependencies": ["org.test.depbase@^9.0.0"]
+        })";
+    }
+    log = PluginDiagnosticLog();
+    REQUIRE( exprs::PluginPackage::install( dependent, installed, log ) );
+    bool sawTypedWarning = false;
+    for ( const auto &item : log.items() )
+    {
+        if ( item.code == exprs::PluginDiagnosticCode::DependencyUnresolved
+             && item.severity == exprs::PluginDiagnosticSeverity::Warning
+             && item.message.find( "org.test.depbase@^9.0.0" ) != std::string::npos )
+            sawTypedWarning = true;
+    }
+    REQUIRE( sawTypedWarning );
+
+    REQUIRE( exprs::PluginPackage::uninstall( "org.test.depped", log ) );
+    REQUIRE( exprs::PluginPackage::uninstall( "org.test.depbase", log ) );
+    ::system( "rm -rf /tmp/exprs_test_pkg_dep" );
+}
+
+// -- plugin-platform 9.0: offline plugin index ---------------------------------
+
+TEST_CASE( "offline index scans, filters compatibility and honors pins",
+           "[plugin][index][p12]" )
+{
+    namespace fs = std::filesystem;
+    const std::string root = "/tmp/exprs_test_index";
+    ::system( "rm -rf /tmp/exprs_test_index" );
+    std::error_code ec;
+    fs::create_directories( fs::path( root ) / "good", ec );
+    fs::create_directories( fs::path( root ) / "badapi", ec );
+    fs::create_directories( fs::path( root ) / "badplatform", ec );
+
+    auto writeManifest = []( const std::string &dir, const std::string &api,
+                             const std::string &platformsJson ) {
+        std::ofstream out( dir + "/plugin.json", std::ios::trunc );
+        out << R"({
+            "manifest_version": 1,
+            "id": "org.test.index.)" << dir << R"(",
+            "name": "Index Fixture",
+            "version": "1.2.3",
+            "api_version": ")" << api << R"(",
+            "abi_version": 1,
+            "entrypoint_kind": "manifest",
+            "platforms": )" << platformsJson << R"(,
+            "operators": []
+        })";
+    };
+    // (ids must differ; build per-directory manifests explicitly)
+    {
+        std::ofstream out( root + "/good/plugin.json", std::ios::trunc );
+        out << R"({
+            "manifest_version": 1, "id": "org.test.index.good",
+            "name": "Good", "version": "1.2.3",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(", "abi_version": 1,
+            "entrypoint_kind": "manifest", "operators": []
+        })";
+    }
+    {
+        std::ofstream out( root + "/badapi/plugin.json", std::ios::trunc );
+        out << R"({
+            "manifest_version": 1, "id": "org.test.index.badapi",
+            "name": "BadApi", "version": "1.0.0",
+            "api_version": "9.9", "abi_version": 1,
+            "entrypoint_kind": "manifest", "operators": []
+        })";
+    }
+    {
+        std::ofstream out( root + "/badplatform/plugin.json", std::ios::trunc );
+        out << R"({
+            "manifest_version": 1, "id": "org.test.index.badplatform",
+            "name": "BadPlatform", "version": "1.0.0",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(", "abi_version": 1,
+            "entrypoint_kind": "manifest", "platforms": ["atarist"],
+            "operators": []
+        })";
+    }
+
+    const Json::Value index = exprs::PluginIndex::build( { root }, "2026-09-12T00:00:00Z" );
+    REQUIRE( index["host"]["platform"].isString() );
+    REQUIRE( index["generatedAt"].asString() == "2026-09-12T00:00:00Z" );
+    const Json::Value &plugins = index["plugins"];
+    REQUIRE( plugins.size() == 3 );
+    // Sorted by id, deterministic output.
+    REQUIRE( plugins[0]["id"].asString() < plugins[1]["id"].asString() );
+    REQUIRE( plugins[1]["id"].asString() < plugins[2]["id"].asString() );
+    for ( const Json::Value &plugin : plugins )
+    {
+        if ( plugin["id"].asString() == "org.test.index.good" )
+        {
+            REQUIRE( plugin["compatible"].asBool() );
+            REQUIRE( plugin["reason"].asString().empty() );
+        }
+        else if ( plugin["id"].asString() == "org.test.index.badapi" )
+        {
+            REQUIRE_FALSE( plugin["compatible"].asBool() );
+            REQUIRE( plugin["reason"].asString().find( "api_version" ) != std::string::npos );
+        }
+        else
+        {
+            REQUIRE_FALSE( plugin["compatible"].asBool() );
+            REQUIRE( plugin["reason"].asString().find( "platform" ) != std::string::npos );
+        }
+    }
+
+    // Pins are a pure annotation: pinned matches / upgrade / downgrade.
+    std::map<std::string, std::string> pins;
+    pins["org.test.index.good"] = "1.2.3";   // exact
+    pins["org.test.index.badapi"] = "2.0.0"; // newer than available -> upgrade
+    const Json::Value annotated = exprs::PluginIndex::applyPins( index, pins );
+    for ( const Json::Value &plugin : annotated["plugins"] )
+    {
+        const std::string id = plugin["id"].asString();
+        if ( id == "org.test.index.good" )
+            REQUIRE( plugin["pin"].asString() == "pinned" );
+        else if ( id == "org.test.index.badapi" )
+            REQUIRE( plugin["pin"].asString() == "upgrade" );
+        else
+            REQUIRE( plugin["pin"].asString() == "unpinned" );
+    }
+
+    ::system( "rm -rf /tmp/exprs_test_index" );
 }

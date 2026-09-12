@@ -7,7 +7,10 @@
 #include "plugin_host_proxies.h"
 
 #include "exprs/ipc_frame.h"
+#include "exprs/plugin_capabilities.h"
 #include "exprs/plugin_loader.h"
+#include "exprs/plugin_registry.h"
+#include "exprs/plugin_ui_schema.h"
 
 #include <cstring>
 #include <filesystem>
@@ -55,6 +58,41 @@ PluginHostProcessRuntime::PluginHostProcessRuntime( Options options )
     if ( mOptions.workerPath.empty() )
         mOptions.workerPath = defaultPluginHostWorkerPath();
 }
+
+namespace {
+
+/// Builds/refreshes the plugin.load "limits" object for ONE peer
+/// (plugin-platform 9.0 peer-awareness, see loadPlugin). Reused by respawn
+/// so a fresh worker always negotiates against ITS OWN advertised features.
+void applyLimitsForPeer( const exprs::PluginQuota &quota, bool peerDirectional,
+                         Json::Value &params )
+{
+    Json::Value limits( Json::objectValue );
+    exprs::IpcFrameLimits transport;
+    const long long requestBytes = quota.maxRequestBytes > 0
+                                       ? quota.maxRequestBytes
+                                       : static_cast<long long>( transport.maxFrameBytes );
+    const long long responseBytes = quota.maxResponseBytes > 0
+                                        ? quota.maxResponseBytes
+                                        : static_cast<long long>( transport.maxFrameBytes );
+    if ( peerDirectional )
+    {
+        if ( requestBytes > 0 && requestBytes < static_cast<long long>( transport.maxFrameBytes ) )
+            limits["maxRequestBytes"] = static_cast<Json::Int64>( requestBytes );
+        if ( responseBytes > 0 && responseBytes < static_cast<long long>( transport.maxFrameBytes ) )
+            limits["maxResponseBytes"] = static_cast<Json::Int64>( responseBytes );
+    }
+    else
+    {
+        const long long sharedFallback = std::min( requestBytes, responseBytes );
+        if ( sharedFallback > 0 && sharedFallback < static_cast<long long>( transport.maxFrameBytes ) )
+            limits["maxFrameBytes"] = static_cast<Json::Int64>( sharedFallback );
+    }
+    limits["maxConcurrentRequests"] = quota.maxRequestConcurrency;
+    params["limits"] = limits;
+}
+
+} // namespace
 
 bool PluginHostProcessRuntime::loadParamsFor( const PluginRecord &record,
                                               HostServicesV1 &services, Json::Value &params,
@@ -104,21 +142,6 @@ bool PluginHostProcessRuntime::loadPlugin( const PluginRecord &record, HostServi
     spawnOptions.handshakeTimeoutMs = mOptions.handshakeTimeoutMs;
     spawnOptions.killGraceMs = mOptions.killGraceMs;
 
-    // Protocol 1.1 limits negotiation (params travel to the worker with
-    // plugin.load): the frame cap lowers to the quota's maxResponseBytes
-    // when it is below the transport default, and the dispatch width is
-    // the quota's concurrency (the worker clamps to its own capability).
-    {
-        Json::Value limits( Json::objectValue );
-        IpcFrameLimits transport;
-        if ( entry->quota.maxResponseBytes > 0
-             && static_cast<long long>( entry->quota.maxResponseBytes )
-                    < static_cast<long long>( transport.maxFrameBytes ) )
-            limits["maxFrameBytes"] = static_cast<Json::Int64>( entry->quota.maxResponseBytes );
-        limits["maxConcurrentRequests"] = entry->quota.maxRequestConcurrency;
-        params["limits"] = limits;
-    }
-
     auto session = PluginHostProcessSession::spawn( spawnOptions, log );
     if ( !session )
     {
@@ -126,6 +149,8 @@ bool PluginHostProcessRuntime::loadPlugin( const PluginRecord &record, HostServi
                  "could not launch the host-process worker", pluginId );
         return false;
     }
+
+    applyLimitsForPeer( entry->quota, session->peerSupportsDirectionalFrameCaps(), params );
     entry->session = session;
     entry->loadParams = params;
     entry->entrypointPath = record.directory + "/" + record.manifest.entrypoint;
@@ -143,6 +168,10 @@ bool PluginHostProcessRuntime::loadPlugin( const PluginRecord &record, HostServi
     }
 
     // Register PROXY contributions from the worker's registration report.
+    // The bounds traveled TO the worker with plugin.load; only now may the
+    // host cap its own channel per direction (a cap applied earlier could
+    // have stranded a large plugin.load frame below the worker's knowledge).
+    session->applyQuotaFrameCaps();
     const Json::Value &registered = outcome.result["registered"];
     bool registrationsOk = true;
     for ( const Json::Value &operatorId : registered["operators"] )
@@ -162,6 +191,24 @@ bool PluginHostProcessRuntime::loadPlugin( const PluginRecord &record, HostServi
     }
     for ( const Json::Value &framework : registered["modelRuntimes"] )
     {
+        // Capability gate (9.0): the worker reports frameworks the plugin
+        // REGISTERED; the host refuses (typed E5005) any framework the
+        // manifest's declared access model does not list — load fails, the
+        // worker is torn down (the registry's load path revokes the
+        // registrations made so far), nothing stays half-registered.
+        // accessDeclarationFor COPIES under the registry lock: a raw
+        // record pointer would dangle across a concurrent refresh.
+        const Json::Value access =
+            exprs::PluginRegistry::instance().accessDeclarationFor( pluginId );
+        if ( !exprs::modelFrameworkAllowed( access, framework.asString() ) )
+        {
+            log.add( PluginDiagnosticCode::PermissionDenied, PluginDiagnosticSeverity::Error,
+                     "model framework '" + framework.asString()
+                         + "' is outside the declared access model (E5005)",
+                     pluginId );
+            session->shutdown( 5000, log );
+            return false;
+        }
         auto factory = [entry, frameworkName = framework.asString()](
                            const PluginModelRequestV1 &request,
                            std::string &error ) -> PluginModelRuntimePtrV1 {
@@ -240,6 +287,10 @@ bool PluginHostProcessRuntime::respawn( const std::string &pluginId,
     auto session = PluginHostProcessSession::spawn( spawnOptions, log );
     if ( !session )
         return false;
+    // The fresh worker negotiated ITS OWN features; rebuild the limits for
+    // this peer before sending the cached plugin.load params.
+    applyLimitsForPeer( entry.quota, session->peerSupportsDirectionalFrameCaps(),
+                        entry.loadParams );
     IpcChannel::Outcome outcome =
         session->requestRaw( kLoadPlugin, entry.loadParams, mOptions.loadTimeoutMs );
     if ( outcome.status != IpcChannel::Outcome::Status::Ok )
@@ -250,6 +301,9 @@ bool PluginHostProcessRuntime::respawn( const std::string &pluginId,
         session->shutdown( 5000, log );
         return false;
     }
+    // The bounds traveled TO the fresh worker with plugin.load; cap the
+    // host's own channel per direction only now (see loadPlugin).
+    session->applyQuotaFrameCaps();
     // Publish under entry.mutex: proxies call respawn OUTSIDE that lock
     // (a non-recursive double-lock would throw), so taking it here is
     // safe and gives readers a happens-before edge.
@@ -274,7 +328,21 @@ bool PluginHostProcessRuntime::unloadPlugin( const std::string &pluginId,
         session = iterator->second->session;
         mSessions.erase( iterator );
     }
-    return session->shutdown( 10000, log );
+    const bool shutdownOk = session->shutdown( 10000, log );
+    // M3 evidence trail: keep the post-shutdown process-group probe result
+    // ("no" = group fully reaped, "unknown" = probe could not decide) so
+    // doctor/debug-bundle can show cleanup evidence AFTER the session is
+    // gone. Recorded for both shutdown outcomes — a forced kill must still
+    // prove (or honestly decline to claim) group cleanup.
+    {
+        std::lock_guard<std::mutex> lock( mMutex );
+        // Bounded evidence trail (support surface, not a ledger): the most
+        // recent 64 retirements; the oldest entries are dropped.
+        if ( mRetiredGroups.size() >= 64 )
+            mRetiredGroups.erase( mRetiredGroups.begin() );
+        mRetiredGroups[ pluginId ] = session->processGroupState();
+    }
+    return shutdownOk;
 }
 
 Json::Value PluginHostProcessRuntime::diagnosticsSnapshot() const
@@ -283,6 +351,14 @@ Json::Value PluginHostProcessRuntime::diagnosticsSnapshot() const
     Json::Value snapshot( Json::objectValue );
     snapshot["protocolVersion"] = EXP_RS_HOST_PROTOCOL_VERSION;
     snapshot["workerPath"] = mOptions.workerPath;
+    snapshot["restartPolicy"] = [this] {
+        Json::Value policy( Json::objectValue );
+        policy["maxRestarts"] = mOptions.maxRestarts;
+        policy["windowMs"] = static_cast<Json::Int64>( mOptions.restartWindowMs );
+        policy["restartCount"] = mRestartCount;
+        policy["windowArmed"] = mRestartWindowArmed;
+        return policy;
+    }();
     Json::Value plugins( Json::objectValue );
     for ( const auto &[ pluginId, entry ] : mSessions )
     {
@@ -291,10 +367,25 @@ Json::Value PluginHostProcessRuntime::diagnosticsSnapshot() const
         entryJson["generation"] = entry->session->generation();
         entryJson["poisoned"] = entry->session->isPoisoned();
         entryJson["effectiveConcurrency"] = entry->session->effectiveConcurrency();
+        // M10: worker identity + event-drop counter for doctor surfaces.
+        entryJson["workerPid"] = static_cast<Json::Int64>( entry->session->workerPid() );
+        entryJson["droppedEvents"] =
+            static_cast<Json::Int64>( entry->session->droppedEvents() );
+        // M2 observability: in-flight / peak / gate waiters / typed failure.
+        entryJson["inFlight"] = entry->session->inFlight();
+        entryJson["peakInFlight"] = entry->session->peakInFlight();
+        entryJson["gateWaiters"] = entry->session->gateWaiters();
+        entryJson["lastFailure"] = entry->session->lastFailure();
+        // M3 orphan detection: honest group state ("yes"/"no"/"unknown").
+        entryJson["processGroupState"] = entry->session->processGroupState();
         entryJson["quota"] = entry->quota.toJson();
         plugins[ pluginId ] = entryJson;
     }
     snapshot["plugins"] = plugins;
+    Json::Value retired( Json::objectValue );
+    for ( const auto &[ pluginId, state ] : mRetiredGroups )
+        retired[ pluginId ] = state;
+    snapshot["retiredGroups"] = retired;
     return snapshot;
 }
 
@@ -313,6 +404,23 @@ Json::Value PluginHostProcessRuntime::describeUiSchema( const std::string &plugi
             return result;
         }
         session = iterator->second->session;
+    }
+    // Capability gate (9.0): a manifest whose access object explicitly
+    // declares ui:false gets a typed policy refusal, never a rendered
+    // surface. Undeclared keeps every pre-9.0 behavior.
+    {
+        const Json::Value access =
+            exprs::PluginRegistry::instance().accessDeclarationFor( pluginId );
+        if ( exprs::accessBool( access, "ui" ) == 0 )
+        {
+            result["ok"] = false;
+            result["code"] = "E5005";
+            result["error"] =
+                "manifest access declares ui:false; declarative UI refused (E5005)";
+            log.add( PluginDiagnosticCode::PermissionDenied, PluginDiagnosticSeverity::Warning,
+                     result["error"].asString(), pluginId );
+            return result;
+        }
     }
     if ( !session || !session->isAlive() )
     {
@@ -372,6 +480,37 @@ Json::Value PluginHostProcessRuntime::invokeUi( const std::string &pluginId,
         result["ok"] = false;
         result["error"] = "worker process is not running (E6005)";
         return result;
+    }
+    // Same capability gate as describeUiSchema (9.0): ui:false refuses
+    // event delivery too — a refused surface cannot be invoked either.
+    {
+        const Json::Value access =
+            exprs::PluginRegistry::instance().accessDeclarationFor( pluginId );
+        if ( exprs::accessBool( access, "ui" ) == 0 )
+        {
+            result["ok"] = false;
+            result["code"] = "E5005";
+            result["error"] = "manifest access declares ui:false; ui.invoke refused (E5005)";
+            return result;
+        }
+    }
+    // Host-side event validation (9.0): bounded ids, known event type and a
+    // capped value are enforced BEFORE the worker round-trip. The channel is
+    // untouched by this refusal (E6010), unlike a protocol-level E6002.
+    {
+        const exprs::PluginUiEventParseResult eventCheck = exprs::validateUiEvent( event );
+        if ( !eventCheck.ok() )
+        {
+            std::string detail;
+            for ( const std::string &error : eventCheck.errors )
+                detail += ( detail.empty() ? "" : "; " ) + error;
+            result["ok"] = false;
+            result["code"] = "E6010";
+            result["error"] = "ui event failed host-side validation: " + detail;
+            log.add( PluginDiagnosticCode::UiEventInvalid, PluginDiagnosticSeverity::Warning,
+                     result["error"].asString(), pluginId );
+            return result;
+        }
     }
     Json::Value params( Json::objectValue );
     params["event"] = event;

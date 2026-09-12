@@ -156,6 +156,14 @@ void clearPluginModelRuntimeFactory( const std::string &framework )
     storedFactories().erase( framework );
 }
 
+exprs::PluginModelRuntimeFactoryV1 pluginModelRuntimeFactoryFor( const std::string &framework )
+{
+    std::lock_guard<std::mutex> lock( factoryMutex() );
+    auto iterator = storedFactories().find( framework );
+    return iterator != storedFactories().end() ? iterator->second.factory
+                                               : exprs::PluginModelRuntimeFactoryV1();
+}
+
 #if defined( SICNU_HAS_OPENCV )
 bool registerPluginModelRuntime( const std::string &framework, const std::string &pluginId )
 {
