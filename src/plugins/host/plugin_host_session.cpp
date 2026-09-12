@@ -811,10 +811,12 @@ IpcChannel::Outcome PluginHostProcessSession::request(
     // Drain-check first: a poisoned worker whose peers have finished must
     // die before anything else is sent (the next request then fails E6005
     // and the proxy's restart policy brings a fresh worker).
+    // Always take mStateMutex for the mPoisoned / mInFlight check — the flag
+    // is a plain bool written under that mutex from escalateTimeout on a peer
+    // thread; a lock-free peek is a data race (issue #942 / leftover of #932).
     // killProcess waits (WaitForSingleObject / waitpid) and joins the
-    // channel reader — never while holding mStateMutex (issue #932).
+    // channel reader — never while holding mStateMutex.
     bool killDrainedPoison = false;
-    if ( mPoisoned )
     {
         std::lock_guard<std::mutex> stateLock( mStateMutex );
         if ( mInFlight == 0 && mPoisoned )

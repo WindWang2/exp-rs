@@ -133,7 +133,11 @@ public:
     /// True when a timed-out request was abandoned while peers kept the
     /// worker alive (protocol 1.1); the worker is killed when in-flight
     /// drains to zero.
-    bool isPoisoned() const { return mPoisoned; }
+    bool isPoisoned() const
+    {
+        std::lock_guard<std::mutex> stateLock( mStateMutex );
+        return mPoisoned;
+    }
     /// Effective concurrent-request width: min(quota gate slots, worker
     /// hello maxConcurrentRequests) — diagnostic surface.
     int effectiveConcurrency() const;
