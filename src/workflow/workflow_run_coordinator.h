@@ -103,6 +103,10 @@ class WorkflowRunCoordinator : public QObject {
     /// dropping m_mutex (one-shot). Used to bound concurrent runForPipeline /
     /// resumeRun of a different run against a delayed checkpoint write.
     void setCheckpointIoDelayForTests( int milliseconds );
+    /// Test-only: the next resumeRunImpl sleeps this many milliseconds BEFORE
+    /// loadCheckpoint (one-shot), still with no m_mutex held. Bounds concurrent
+    /// runs()/runForPipeline of a different run against a delayed resume load.
+    void setCheckpointLoadDelayForTests( int milliseconds );
 
   private:
     /// resumeRun body (#860 review A-F7): every exit path queues
@@ -228,6 +232,7 @@ class WorkflowRunCoordinator : public QObject {
     std::map<std::string, quint64> m_latestPersistSeq;
     std::mutex m_checkpointIoMutex;
     std::atomic<int> m_checkpointIoDelayMs{ 0 };
+    std::atomic<int> m_checkpointLoadDelayMs{ 0 };
 };
 
 } // namespace workflow

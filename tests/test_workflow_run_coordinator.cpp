@@ -1032,3 +1032,53 @@ TEST_CASE( "delayed checkpoint save does not block runForPipeline of another run
     REQUIRE( queryMs < 100 );
     persistThread.join();
 }
+
+TEST_CASE( "delayed checkpoint load does not block runs() of another run (#944)",
+           "[workflow][coordinator][lock][944]" )
+{
+    CoordinatorFixture fx;
+    struct DelayGuard
+    {
+        WorkflowRunCoordinator &coordinator;
+        ~DelayGuard() { coordinator.setCheckpointLoadDelayForTests( 0 ); }
+    } delayGuard{ fx.coordinator };
+
+    const std::string prefix = "coord_lock_load";
+    registerTwoStepExecutors( prefix );
+
+    WorkflowRun run;
+    run.setDefinition( twoStepDefinition( prefix ) );
+    REQUIRE( run.setRunId( prefix + "_run" ) );
+    run.setStepPlans( { makePlan( "first", "Pending", {}, Json::Value(), prefix + ":first" ),
+                        makePlan( "second", "Pending", {}, Json::Value(), prefix + ":second" ) } );
+    saveInterruptedCheckpoint( fx, run );
+
+    fx.coordinator.setCheckpointLoadDelayForTests( 400 );
+
+    std::atomic_bool started{ false };
+    std::atomic_bool resumeDone{ false };
+    QString resumeErr;
+    long pipelineId = -1;
+    std::thread resumeThread( [&] {
+        started.store( true );
+        pipelineId = fx.coordinator.resumeRun( prefix + "_run", &resumeErr );
+        resumeDone.store( true );
+    } );
+    for ( int attempt = 0; attempt < 100 && !started.load(); ++attempt )
+        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    REQUIRE( started.load() );
+    // Resume sleeps 400ms BEFORE loadCheckpoint with no m_mutex held.
+    std::this_thread::sleep_for( std::chrono::milliseconds( 80 ) );
+    const auto t0 = std::chrono::steady_clock::now();
+    (void)fx.coordinator.runs();
+    (void)fx.coordinator.runForPipeline( -1 );
+    (void)fx.coordinator.explainDump();
+    const auto queryMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - t0 )
+                             .count();
+    REQUIRE( queryMs < 100 );
+    resumeThread.join();
+    REQUIRE( resumeDone.load() );
+    INFO( resumeErr.toStdString() );
+    REQUIRE( pipelineId > 0 );
+}

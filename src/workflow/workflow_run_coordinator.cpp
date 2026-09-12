@@ -262,6 +262,11 @@ void WorkflowRunCoordinator::setCheckpointIoDelayForTests( int milliseconds )
     m_checkpointIoDelayMs.store( milliseconds < 0 ? 0 : milliseconds );
 }
 
+void WorkflowRunCoordinator::setCheckpointLoadDelayForTests( int milliseconds )
+{
+    m_checkpointLoadDelayMs.store( milliseconds < 0 ? 0 : milliseconds );
+}
+
 QString WorkflowRunCoordinator::checkpointDirectory() const
 {
     std::lock_guard<std::mutex> lock( m_mutex );
@@ -852,25 +857,35 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
             return -1;
         }
     }
-    {
-        std::lock_guard<std::mutex> lock( m_mutex );
-        m_locksByRunId[runId] = runLock;
-    }
-
+    // File read + JSON parse must NOT hold m_mutex (issue #944 / leftover of
+    // #931). Path was taken from the caller; install the lock map entry only
+    // after a successful load, and refuse if that runId is already tracked.
     QString loadErr;
-    std::shared_ptr<WorkflowRun> run;
+    // One-shot test delay so a concurrent runs()/runForPipeline of another
+    // run can prove it is not waiting on this resume's FS (#944).
     {
-        std::lock_guard<std::mutex> lock( m_mutex );
-        run = m_checkpoints.loadCheckpoint( path, &loadErr );
+        const int delayMs = m_checkpointLoadDelayMs.exchange( 0 );
+        if ( delayMs > 0 )
+            std::this_thread::sleep_for( std::chrono::milliseconds( delayMs ) );
     }
+    std::shared_ptr<WorkflowRun> run = m_checkpoints.loadCheckpoint( path, &loadErr );
     if ( !run )
     {
-        std::lock_guard<std::mutex> lock( m_mutex );
-        m_locksByRunId.erase( runId ); // releases the run lock
         if ( error )
             *error = QStringLiteral( "Checkpoint rejected for run %1: %2" )
                        .arg( QString::fromStdString( runId ), loadErr );
         return -1;
+    }
+    {
+        std::lock_guard<std::mutex> lock( m_mutex );
+        if ( m_pipelineByRunId.count( runId ) > 0 )
+        {
+            if ( error )
+                *error = QStringLiteral( "Run %1 is already tracked" )
+                           .arg( QString::fromStdString( runId ) );
+            return -1;
+        }
+        m_locksByRunId[runId] = runLock;
     }
 
     // We hold the run lock: an active state means the previous owner is gone
