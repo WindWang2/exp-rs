@@ -60,7 +60,7 @@ void GuidedWorkflowWidget::setupUi()
 
     // Title
     auto *titleLabel = new QLabel(tr("<b>引导式实验</b>"), this);
-    titleLabel->setAlignment(Qt.AlignCenter);
+    titleLabel->setAlignment(Qt::AlignCenter);
     mainLayout->addWidget(titleLabel);
 
     // Splitter: workflow list on left, step details on right
