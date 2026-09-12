@@ -2,6 +2,9 @@
 #include "guided_workflow_widget.h"
 #include "main_window.h"
 
+#include "jobs/job_types.h"
+#include "processing/framework/runtime_paths.h"
+
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -10,10 +13,41 @@
 #include <QTextBrowser>
 #include <QGroupBox>
 #include <QSplitter>
+#include <QDir>
+#include <QFileInfo>
+#include <QMessageBox>
+
+namespace {
+
+/// Render one LabSpec as the widget's display model.
+Workflow toWorkflow( const lab::LabSpec &spec )
+{
+    Workflow wf;
+    wf.id = spec.id;
+    wf.title = QStringLiteral( "%1 · %2" ).arg( spec.id.section( QLatin1Char( '_' ), 0, 0 ), spec.titleZh );
+    wf.description = spec.objective;
+    for ( const auto &step : spec.steps )
+    {
+        WorkflowStep s;
+        s.title = step.titleZh.isEmpty() ? step.title : step.titleZh;
+        s.titleZh = step.titleZh;
+        s.description = step.descriptionZh;
+        s.teachingNote = step.teachingNote;
+        s.completionHint = step.completionHint;
+        s.operatorId = step.operatorId;
+        s.params = step.params;
+        s.action = step.action;
+        wf.steps << s;
+    }
+    return wf;
+}
+
+} // namespace
 
 GuidedWorkflowWidget::GuidedWorkflowWidget(QgisDesktopWindow *mainWindow, QWidget *parent)
     : QWidget(parent)
     , m_mainWindow(mainWindow)
+    , m_jobHandle(this)
 {
     setupUi();
     loadWorkflows();
@@ -25,8 +59,8 @@ void GuidedWorkflowWidget::setupUi()
     mainLayout->setContentsMargins(4, 4, 4, 4);
 
     // Title
-    auto *titleLabel = new QLabel(tr("<b>引导式工作流</b>"), this);
-    titleLabel->setAlignment(Qt::AlignCenter);
+    auto *titleLabel = new QLabel(tr("<b>引导式实验</b>"), this);
+    titleLabel->setAlignment(Qt.AlignCenter);
     mainLayout->addWidget(titleLabel);
 
     // Splitter: workflow list on left, step details on right
@@ -38,14 +72,14 @@ void GuidedWorkflowWidget::setupUi()
     auto *leftLayout = new QVBoxLayout(leftWidget);
     leftLayout->setContentsMargins(0, 0, 0, 0);
 
-    leftLayout->addWidget(new QLabel(tr("选择工作流："), this));
+    leftLayout->addWidget(new QLabel(tr("选择实验："), this));
     m_workflowList = new QListWidget(this);
-    m_workflowList->setToolTip(tr("选择一个引导式工作流。" ));
+    m_workflowList->setToolTip(tr("选择一个引导式实验。" ));
     connect(m_workflowList, &QListWidget::currentRowChanged, this, &GuidedWorkflowWidget::onWorkflowSelected);
     leftLayout->addWidget(m_workflowList);
 
-    m_startButton = new QPushButton(tr("开始工作流"), this);
-    m_startButton->setToolTip(tr("开始所选工作流。" ));
+    m_startButton = new QPushButton(tr("开始实验"), this);
+    m_startButton->setToolTip(tr("开始所选实验。" ));
     m_startButton->setEnabled(false);
     connect(m_startButton, &QPushButton::clicked, this, &GuidedWorkflowWidget::onStartWorkflow);
     leftLayout->addWidget(m_startButton);
@@ -73,7 +107,7 @@ void GuidedWorkflowWidget::setupUi()
     navLayout->addWidget(m_prevButton);
 
     m_runButton = new QPushButton(tr("执行此步"), this);
-    m_runButton->setToolTip(tr("执行当前步骤的操作。" ));
+    m_runButton->setToolTip(tr("执行当前步骤绑定的算子或界面操作。" ));
     m_runButton->setEnabled(false);
     m_runButton->setProperty("primary", true);
     connect(m_runButton, &QPushButton::clicked, this, &GuidedWorkflowWidget::onRunStepAction);
@@ -96,17 +130,13 @@ void GuidedWorkflowWidget::setupUi()
 
 void GuidedWorkflowWidget::loadWorkflows()
 {
+    // Single source of truth: data/labs/*.lab.json. Load failures stay
+    // visible as a typed error entry — never replaced by built-in content.
+    m_loadResult = lab::loadLabSpecsFromDir( lab::defaultLabDirectory() );
+
     m_workflows.clear();
-    m_workflows << createSpectralAnalysisWorkflow()
-                << createImageEnhancementWorkflow()
-                << createClassificationWorkflow()
-                << createChangeDetectionWorkflow()
-                << createTerrainAnalysisWorkflow()
-                << createAtmosphericCorrectionWorkflow()
-                << createImageFusionWorkflow()
-                << createPCAWorkflow()
-                << createMosaicWorkflow()
-                << createObiaWorkflow();
+    for ( const auto &spec : m_loadResult.labs )
+        m_workflows << toWorkflow( spec );
 
     populateWorkflowList();
 }
@@ -114,31 +144,62 @@ void GuidedWorkflowWidget::loadWorkflows()
 void GuidedWorkflowWidget::populateWorkflowList()
 {
     m_workflowList->clear();
-    for (const auto &wf : m_workflows) {
-        m_workflowList->addItem(wf.title);
+
+    const int errorCount = m_loadResult.errors.size();
+    if ( errorCount > 0 )
+    {
+        // Typed error entry pinned to the top: selecting it shows the reasons.
+        m_workflowList->addItem( tr( "⚠ 实验规格加载失败（%1 项）" ).arg( errorCount ) );
+        QListWidgetItem *errorItem = m_workflowList->item( 0 );
+        errorItem->setToolTip( m_loadResult.errors.first().toString() );
     }
+
+    for ( const auto &wf : m_workflows )
+        m_workflowList->addItem( wf.title );
+
+    if ( errorCount > 0 )
+        m_workflowList->setCurrentRow( 0 );
 }
+
+/// Rows [0 .. errorCount-1] are the error entry; labs follow.
+static int labIndexOfRow( int row, int errorCount ) { return row - errorCount; }
 
 void GuidedWorkflowWidget::onWorkflowSelected(int index)
 {
-    if (index < 0 || index >= m_workflows.size()) return;
+    const int errorCount = m_loadResult.errors.size();
+    if ( errorCount > 0 && index == 0 )
+    {
+        m_startButton->setEnabled(false);
+        m_stepLabel->setText( tr( "<b>实验规格加载失败</b>" ) );
+        QString errorHtml = tr( "<p>以下 LabSpec 文件无法加载，请修复后重启或重新打开本面板：</p><ul>" );
+        for ( const auto &error : m_loadResult.errors )
+            errorHtml += QStringLiteral( "<li><code>%1</code></li>" ).arg( error.toString().toHtmlEscaped() );
+        errorHtml += QLatin1String( "</ul>" );
+        m_stepBrowser->setHtml( errorHtml );
+        return;
+    }
 
-    m_currentWorkflowIndex = index;
+    const int labIndex = labIndexOfRow( index, errorCount );
+    if ( labIndex < 0 || labIndex >= m_workflows.size() ) return;
+
+    m_currentWorkflowIndex = labIndex;
     m_startButton->setEnabled(true);
 
     // Show workflow description
-    const auto &wf = m_workflows[index];
+    const auto &wf = m_workflows[labIndex];
     m_stepLabel->setText(QString("<b>%1</b>").arg(wf.title));
 
     QString stepsHtml;
-    for (int i = 0; i < wf.steps.size(); i++) {
+    for (int i = 0; i < wf.steps.size(); i++)
         stepsHtml += QString("<li>%1</li>").arg(wf.steps[i].title);
-    }
 
     m_stepBrowser->setHtml(
-        QString("<p>%1</p><p><b>Steps:</b></p><ol>%2</ol>"
-                "<p>Click <b>Start Workflow</b> to begin.</p>")
-        .arg(wf.description, stepsHtml)
+        QString("<p>%1</p><p><b>%2</b></p><ol>%3</ol>"
+                "<p>%4</p>")
+        .arg(wf.description,
+             tr("步骤"),
+             stepsHtml,
+             tr("点击 <b>开始实验</b> 以开始。"))
     );
 }
 
@@ -170,10 +231,10 @@ void GuidedWorkflowWidget::onNextStep()
         m_workflowActive = false;
         m_runButton->setEnabled(false);
         m_nextButton->setEnabled(false);
-        m_stepLabel->setText(tr("<b>Workflow Complete!</b>"));
+        m_stepLabel->setText(tr("<b>实验完成！</b>"));
         m_stepBrowser->setHtml(
-            tr("<p>Congratulations! You have completed the <b>%1</b> workflow.</p>"
-               "<p>You can now try other workflows or experiment with different parameters.</p>")
+            tr("<p>恭喜！你已完成 <b>%1</b> 实验。</p>"
+               "<p>可以继续尝试其他实验，或调整参数进行更多探索。</p>")
             .arg(wf.title)
         );
         emit workflowCompleted(wf.id);
@@ -190,15 +251,87 @@ void GuidedWorkflowWidget::onPreviousStep()
 
 void GuidedWorkflowWidget::onRunStepAction()
 {
-    if (!m_workflowActive) return;
+    if (!m_workflowActive || m_currentWorkflowIndex < 0) return;
 
     const auto &wf = m_workflows[m_currentWorkflowIndex];
     const auto &step = wf.steps[m_currentStepIndex];
 
-    if (!step.actionId.isEmpty() && m_mainWindow) {
-        // Trigger the action
-        QMetaObject::invokeMethod(m_mainWindow, step.actionId.toUtf8().constData());
+    if (step.hasOperator())
+    {
+        runOperatorStep(step);
+        return;
     }
+
+    if (!step.action.isEmpty() && m_mainWindow)
+    {
+        // UI-verb step: invoke the named slot on the main window.
+        if ( !QMetaObject::invokeMethod( m_mainWindow, step.action.toUtf8().constData() ) )
+            showRunMessage( tr( "主窗口上不存在操作 “%1”，实验规格可能已过期。" ).arg( step.action ), true );
+        return;
+    }
+}
+
+void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
+{
+    if ( m_jobHandle.isRunning() )
+        return;
+
+    // Resolve relative data/ and outputs/ references against the runtime root
+    // so the operator sees the same absolute paths a headless caller produces.
+    const QString labId = m_workflows[m_currentWorkflowIndex].id;
+    const Json::Value params = lab::resolveLabParamPaths(
+        step.params, labId,
+        []( const QString &relative, lab::PathRole )
+        { return sicnu::processing::resolveRuntimeDataPath( relative ); } );
+
+    // Make sure the per-lab outputs directory exists before running.
+    for ( const auto &key : params.getMemberNames() )
+    {
+        const Json::Value &value = params[ key ];
+        if ( value.isString() && QString::fromStdString( value.asString() ).contains( QStringLiteral( "/output/labs/" ) ) )
+        {
+            const QString outputDir = QFileInfo( QString::fromStdString( value.asString() ) ).absolutePath();
+            if ( !QDir().mkpath( outputDir ) )
+            {
+                showRunMessage( tr( "无法创建输出目录：%1" ).arg( outputDir ), true );
+                return;
+            }
+        }
+    }
+
+    sicnu::jobs::JobRequest req;
+    req.algorithmId = step.operatorId.toStdString();
+    req.params = params;
+    req.title = m_workflows[m_currentWorkflowIndex].title.toStdString();
+    req.source = "guided_lab";
+
+    const QString stepTitle = step.title;
+    m_runButton->setEnabled(false);
+    m_runButton->setText( tr( "运行中…" ) );
+
+    m_jobHandle.submitJob(
+        req,
+        [this, stepTitle]( const QString &outputPath, const Json::Value & )
+        {
+            m_runButton->setText( tr( "执行此步" ) );
+            m_runButton->setEnabled( true );
+            showRunMessage( tr( "“%1” 完成。输出：%2" ).arg( stepTitle, outputPath ), false );
+        },
+        [this, stepTitle]( const QString &error, bool canceled )
+        {
+            m_runButton->setText( tr( "执行此步" ) );
+            m_runButton->setEnabled( true );
+            if ( canceled )
+                showRunMessage( tr( "“%1” 已取消。" ).arg( stepTitle ), true );
+            else
+                showRunMessage( tr( "“%1” 失败：%2" ).arg( stepTitle, error ), true );
+        } );
+}
+
+void GuidedWorkflowWidget::showRunMessage( const QString &message, bool isError )
+{
+    const QString color = isError ? QStringLiteral( "#b00" ) : QStringLiteral( "#060" );
+    m_stepBrowser->append( QStringLiteral( "<p style=\"color:%1;\"><b>%2</b></p>" ).arg( color, message.toHtmlEscaped() ) );
 }
 
 void GuidedWorkflowWidget::showStep(int index)
@@ -209,26 +342,36 @@ void GuidedWorkflowWidget::showStep(int index)
     const auto &step = wf.steps[index];
 
     m_stepLabel->setText(
-        tr("<b>Step %1/%2: %3</b>")
+        tr("<b>步骤 %1/%2：%3</b>")
         .arg(index + 1)
         .arg(wf.steps.size())
         .arg(step.title)
     );
 
+    QString binding;
+    if ( step.hasOperator() )
+        binding = tr( "<p><b>%1</b> <code>%2</code></p>" ).arg( tr( "绑定算子：" ), step.operatorId.toHtmlEscaped() );
+    else if ( !step.action.isEmpty() )
+        binding = tr( "<p><b>%1</b> <code>%2</code></p>" ).arg( tr( "界面操作：" ), step.action.toHtmlEscaped() );
+
+    QString hintHtml;
+    if ( !step.teachingNote.isEmpty() )
+        hintHtml += tr( "<p><b>%1</b> %2</p>" ).arg( tr( "原理：" ), step.teachingNote );
+    if ( !step.completionHint.isEmpty() )
+        hintHtml += tr( "<p><b>%1</b> %2</p>" ).arg( tr( "完成标志：" ), step.completionHint );
+
     m_stepBrowser->setHtml(
-        QString("<p><b>Task:</b> %1</p>"
-                "<p>%2</p>"
+        QString("<p><b>%1</b> %2</p>"
+                "%3"
                 "<hr>"
-                "<p><b>Hint:</b> %3</p>")
-        .arg(step.title)
-        .arg(step.instructions)
-        .arg(step.completionHint)
+                "%4")
+        .arg(tr("任务："), step.description, binding, hintHtml)
     );
 
     // Update navigation buttons
     m_prevButton->setEnabled(index > 0);
     m_nextButton->setEnabled(true);
-    m_runButton->setEnabled(!step.actionId.isEmpty());
+    m_runButton->setEnabled(!step.isManual());
 }
 
 void GuidedWorkflowWidget::updateStepDisplay()
@@ -236,575 +379,4 @@ void GuidedWorkflowWidget::updateStepDisplay()
     if (m_workflowActive && m_currentWorkflowIndex >= 0) {
         showStep(m_currentStepIndex);
     }
-}
-
-// ============================================================================
-// Built-in Workflows
-// ============================================================================
-
-Workflow GuidedWorkflowWidget::createSpectralAnalysisWorkflow()
-{
-    Workflow wf;
-    wf.id = "spectral_analysis";
-    wf.title = tr("Spectral Analysis (光谱分析)");
-    wf.description = tr("Learn to analyze spectral characteristics of different land cover types "
-                        "using vegetation indices and band math.");
-
-    // Step 1: Load data
-    WorkflowStep step1;
-    step1.title = tr("Load Sample Data");
-    step1.description = tr("Load the sample Landsat image");
-    step1.instructions = tr("<p>First, load the sample multi-band Landsat image:</p>"
-                           "<ol>"
-                           "<li>Go to <b>File > Add Raster Layer...</b></li>"
-                           "<li>Navigate to the <code>data/samples/</code> directory</li>"
-                           "<li>Select <code>landsat_sample.tif</code></li>"
-                           "<li>Click <b>Open</b></li>"
-                           "</ol>"
-                           "<p>This is a 7-band Landsat-like image with vegetation, water, urban, and bare soil areas.</p>");
-    step1.actionId = "addRasterLayer";
-    step1.completionHint = tr("The image should appear in the map canvas and layer panel.");
-    wf.steps << step1;
-
-    // Step 2: View spectral profile
-    WorkflowStep step2;
-    step2.title = tr("Examine Spectral Profiles");
-    step2.description = tr("Click on different land cover types to see their spectral signatures");
-    step2.instructions = tr("<p>Use the Identify tool to examine spectral characteristics:</p>"
-                           "<ol>"
-                           "<li>Go to <b>View > Identify</b> (or press Ctrl+Shift+I)</li>"
-                           "<li>Click on different areas of the image:</li>"
-                           "<ul>"
-                           "<li><b>Dark area</b> (bottom) — Water</li>"
-                           "<li><b>Green area</b> (middle) — Vegetation</li>"
-                           "<li><b>Bright area</b> (top-left) — Urban</li>"
-                           "<li><b>Brown area</b> (right) — Bare soil</li>"
-                           "</ul>"
-                           "<li>Observe the spectral profile in the Identify Results panel</li>"
-                           "</ol>"
-                           "<p>Note how vegetation has high NIR (band 5) reflectance!</p>");
-    step2.actionId = "identifyFeatures";
-    step2.completionHint = tr("You should see different spectral curves for different land cover types.");
-    wf.steps << step2;
-
-    // Step 3: Calculate NDVI
-    WorkflowStep step3;
-    step3.title = tr("Calculate NDVI");
-    step3.description = tr("Compute the Normalized Difference Vegetation Index");
-    step3.instructions = tr("<p>NDVI highlights vegetation:</p>"
-                           "<ol>"
-                           "<li>Go to <b>Raster > Vegetation Index...</b></li>"
-                           "<li>Select <b>NDVI</b> from the dropdown</li>"
-                           "<li>Set Red band = <b>Band 4</b></li>"
-                           "<li>Set NIR band = <b>Band 5</b></li>"
-                           "<li>Set output file (e.g., <code>ndvi_result.tif</code>)</li>"
-                           "<li>Click <b>Run</b></li>"
-                           "</ol>"
-                           "<p>NDVI = (NIR - Red) / (NIR + Red). Values range from -1 to 1.</p>");
-    step3.actionId = "openSpectralIndexDialog";
-    step3.completionHint = tr("NDVI values: Vegetation > 0.3, Water < 0, Bare soil ≈ 0.");
-    wf.steps << step3;
-
-    // Step 4: Custom band math
-    WorkflowStep step4;
-    step4.title = tr("Custom Band Ratio");
-    step4.description = tr("Use Band Math to create a custom spectral index");
-    step4.instructions = tr("<p>Try a band ratio (NIR/Red):</p>"
-                           "<ol>"
-                           "<li>Go to <b>Raster > Band Math...</b></li>"
-                           "<li>Enter expression: <code>b5 / b4</code></li>"
-                           "<li>Set output file (e.g., <code>band_ratio.tif</code>)</li>"
-                           "<li>Click <b>Run</b></li>"
-                           "</ol>"
-                           "<p>Band ratios can enhance differences between land cover types.</p>");
-    step4.actionId = "openBandMathDialog";
-    step4.completionHint = tr("The ratio image should show vegetation areas with high values.");
-    wf.steps << step4;
-
-    // Step 5: Compare results
-    WorkflowStep step5;
-    step5.title = tr("Compare Results");
-    step5.description = tr("Use the comparison tool to view results side-by-side");
-    step5.instructions = tr("<p>Compare the original image with NDVI:</p>"
-                           "<ol>"
-                           "<li>Go to <b>View > Compare Layers...</b></li>"
-                           "<li>Select the original image as left layer</li>"
-                           "<li>Select NDVI result as right layer</li>"
-                           "<li>Use <b>Split Screen</b> mode to compare</li>"
-                           "<li>Try <b>Flicker</b> mode to see differences</li>"
-                           "</ol>"
-                           "<p>Can you identify which areas have the most vegetation?</p>");
-    step5.actionId = "openComparisonDialog";
-    step5.completionHint = tr("High NDVI values correspond to green vegetation areas.");
-    wf.steps << step5;
-
-    return wf;
-}
-
-Workflow GuidedWorkflowWidget::createImageEnhancementWorkflow()
-{
-    Workflow wf;
-    wf.id = "image_enhancement";
-    wf.title = tr("Image Enhancement (影像增强)");
-    wf.description = tr("Learn contrast enhancement and spatial filtering techniques.");
-
-    // Step 1: Load data
-    WorkflowStep step1;
-    step1.title = tr("Load Sample Data");
-    step1.instructions = tr("<p>Load the sample Landsat image: <code>data/samples/landsat_sample.tif</code></p>");
-    step1.actionId = "addRasterLayer";
-    step1.completionHint = tr("Image loaded in map canvas.");
-    wf.steps << step1;
-
-    // Step 2: Contrast stretch
-    WorkflowStep step2;
-    step2.title = tr("Contrast Stretch");
-    step2.instructions = tr("<p>Enhance image contrast:</p>"
-                           "<ol>"
-                           "<li>Go to <b>Raster > Enhancement > Contrast Stretch...</b></li>"
-                           "<li>Try different methods:</li>"
-                           "<ul>"
-                           "<li><b>Linear Stretch</b> — Simple min-max mapping</li>"
-                           "<li><b>Percent Clip</b> — Remove 2% outliers</li>"
-                           "<li><b>StdDev Stretch</b> — Mean ± 2σ</li>"
-                           "<li><b>Histogram Equalization</b> — Uniform distribution</li>"
-                           "</ul>"
-                           "<li>Compare the results</li>"
-                           "</ol>");
-    step2.actionId = "openContrastStretchDialog";
-    step2.completionHint = tr("Enhanced images show more detail.");
-    wf.steps << step2;
-
-    // Step 3: Spatial filtering
-    WorkflowStep step3;
-    step3.title = tr("Spatial Filtering");
-    step3.instructions = tr("<p>Apply spatial filters:</p>"
-                           "<ol>"
-                           "<li>Go to <b>Raster > Enhancement > Spatial Filter...</b></li>"
-                           "<li>Try different filters:</li>"
-                           "<ul>"
-                           "<li><b>Mean 3×3</b> — Smooth noise</li>"
-                           "<li><b>Median 3×3</b> — Remove salt-and-pepper noise</li>"
-                           "<li><b>Sobel</b> — Detect edges</li>"
-                           "<li><b>Laplacian</b> — Enhance edges</li>"
-                           "</ul>"
-                           "</ol>");
-    step3.actionId = "openSpatialFilterDialog";
-    step3.completionHint = tr("Edge detection highlights boundaries between land cover types.");
-    wf.steps << step3;
-
-    return wf;
-}
-
-Workflow GuidedWorkflowWidget::createClassificationWorkflow()
-{
-    Workflow wf;
-    wf.id = "classification";
-    wf.title = tr("Image Classification (影像分类)");
-    wf.description = tr("Learn supervised and unsupervised classification methods.");
-
-    // Step 1: Load data
-    WorkflowStep step1;
-    step1.title = tr("Load Data");
-    step1.instructions = tr("<p>Load both the image and training samples:</p>"
-                           "<ol>"
-                           "<li>File > Add Raster Layer... → <code>landsat_sample.tif</code></li>"
-                           "<li>File > Add Vector Layer... → <code>training_samples.shp</code></li>"
-                           "</ol>");
-    step1.actionId = "addRasterLayer";
-    step1.completionHint = tr("Both layers visible in map canvas.");
-    wf.steps << step1;
-
-    // Step 2: Supervised classification
-    WorkflowStep step2;
-    step2.title = tr("Supervised Classification");
-    step2.instructions = tr("<p>Classify the image using training samples:</p>"
-                           "<ol>"
-                           "<li>Go to <b>Raster > Classification...</b></li>"
-                           "<li>Select <code>landsat_sample.tif</code> as input</li>"
-                           "<li>Select <code>training_samples.shp</code> as training data</li>"
-                           "<li>Choose <b>NormalBayes</b> classifier</li>"
-                           "<li>Set output file</li>"
-                           "<li>Click <b>Run</b></li>"
-                           "</ol>");
-    step2.actionId = "openClassificationWindow";
-    step2.completionHint = tr("Classified image shows different land cover classes.");
-    wf.steps << step2;
-
-    // Step 3: Accuracy assessment
-    WorkflowStep step3;
-    step3.title = tr("Accuracy Assessment");
-    step3.instructions = tr("<p>Evaluate classification accuracy:</p>"
-                           "<ol>"
-                           "<li>In the Classification window, click <b>Accuracy Assessment</b></li>"
-                           "<li>View the confusion matrix</li>"
-                           "<li>Note Overall Accuracy and Kappa coefficient</li>"
-                           "<li>Export results to CSV</li>"
-                           "</ol>");
-    step3.actionId = "";
-    step3.completionHint = tr("Overall accuracy > 80% is good for this simple example.");
-    wf.steps << step3;
-
-    return wf;
-}
-
-Workflow GuidedWorkflowWidget::createChangeDetectionWorkflow()
-{
-    Workflow wf;
-    wf.id = "change_detection";
-    wf.title = tr("Change Detection (变化检测)");
-    wf.description = tr("Detect changes between two time periods.");
-
-    // Step 1: Load data
-    WorkflowStep step1;
-    step1.title = tr("Load Before/After Images");
-    step1.instructions = tr("<p>Load both time period images:</p>"
-                           "<ol>"
-                           "<li>File > Add Raster Layer... → <code>change_before.tif</code></li>"
-                           "<li>File > Add Raster Layer... → <code>change_after.tif</code></li>"
-                           "</ol>");
-    step1.actionId = "addRasterLayer";
-    step1.completionHint = tr("Both images loaded.");
-    wf.steps << step1;
-
-    // Step 2: Visual comparison
-    WorkflowStep step2;
-    step2.title = tr("Visual Comparison");
-    step2.instructions = tr("<p>Compare images visually:</p>"
-                           "<ol>"
-                           "<li>Go to <b>View > Compare Layers...</b></li>"
-                           "<li>Use <b>Flicker</b> mode to spot changes</li>"
-                           "<li>Use <b>Split Screen</b> to compare side-by-side</li>"
-                           "</ol>");
-    step2.actionId = "openComparisonDialog";
-    step2.completionHint = tr("You should see a dark patch in the 'after' image.");
-    wf.steps << step2;
-
-    // Step 3: Change detection
-    WorkflowStep step3;
-    step3.title = tr("Run Change Detection");
-    step3.instructions = tr("<p>Compute change automatically:</p>"
-                           "<ol>"
-                           "<li>Go to <b>Raster > Change Detection...</b></li>"
-                           "<li>Select <b>Normalized Difference</b> method</li>"
-                           "<li>Set 'Before' image</li>"
-                           "<li>Set 'After' image</li>"
-                           "<li>Set output file</li>"
-                           "<li>Click <b>Run</b></li>"
-                           "</ol>");
-    step3.actionId = "openChangeDetectionDialog";
-    step3.completionHint = tr("Change map highlights areas of change.");
-    wf.steps << step3;
-
-    return wf;
-}
-
-Workflow GuidedWorkflowWidget::createTerrainAnalysisWorkflow()
-{
-    Workflow wf;
-    wf.id = "terrain_analysis";
-    wf.title = tr("Terrain Analysis (地形分析)");
-    wf.description = tr("Analyze terrain characteristics from DEM data.");
-
-    // Step 1: Load DEM
-    WorkflowStep step1;
-    step1.title = tr("Load DEM");
-    step1.instructions = tr("<p>Load the sample DEM:</p>"
-                           "<ol>"
-                           "<li>File > Add Raster Layer... → <code>dem_sample.tif</code></li>"
-                           "</ol>");
-    step1.actionId = "addRasterLayer";
-    step1.completionHint = tr("DEM loaded with elevation values.");
-    wf.steps << step1;
-
-    // Step 2: Hillshade
-    WorkflowStep step2;
-    step2.title = tr("Generate Hillshade");
-    step2.instructions = tr("<p>Create a hillshade for 3D visualization:</p>"
-                           "<ol>"
-                           "<li>Go to <b>Raster > Terrain Analysis > Slope/Aspect/Hillshade...</b></li>"
-                           "<li>Check <b>Hillshade</b></li>"
-                           "<li>Set azimuth = 315°, elevation = 45°</li>"
-                           "<li>Set output file</li>"
-                           "<li>Click <b>Run</b></li>"
-                           "</ol>");
-    step2.actionId = "openTerrainDialog";
-    step2.completionHint = tr("Hillshade creates a 3D-like appearance.");
-    wf.steps << step2;
-
-    // Step 3: Slope
-    WorkflowStep step3;
-    step3.title = tr("Calculate Slope");
-    step3.instructions = tr("<p>Compute slope from DEM:</p>"
-                           "<ol>"
-                           "<li>Go to <b>Raster > Terrain Analysis</b></li>"
-                           "<li>Check <b>Slope</b></li>"
-                           "<li>Set output file</li>"
-                           "<li>Click <b>Run</b></li>"
-                           "</ol>"
-                           "<p>Slope values range from 0° (flat) to 90° (vertical).</p>");
-    step3.actionId = "openTerrainDialog";
-    step3.completionHint = tr("Steep slopes appear bright in the slope image.");
-    wf.steps << step3;
-
-    return wf;
-}
-
-Workflow GuidedWorkflowWidget::createAtmosphericCorrectionWorkflow()
-{
-    Workflow wf;
-    wf.id = "atmospheric_correction";
-    wf.title = tr("Atmospheric Correction (大气校正)");
-    wf.description = tr("Remove atmospheric effects from satellite imagery using DOS methods.");
-
-    // Step 1: Load data
-    WorkflowStep step1;
-    step1.title = tr("Load Satellite Image");
-    step1.instructions = tr("<p>Load the sample Landsat image:</p>"
-                           "<ol>"
-                           "<li>File > Add Raster Layer... → <code>landsat_sample.tif</code></li>"
-                           "</ol>"
-                           "<p>Atmospheric correction converts DN values to surface reflectance.</p>");
-    step1.actionId = "addRasterLayer";
-    step1.completionHint = tr("Image loaded with DN values.");
-    wf.steps << step1;
-
-    // Step 2: DOS1 correction
-    WorkflowStep step2;
-    step2.title = tr("DOS1 Atmospheric Correction");
-    step2.instructions = tr("<p>Apply Dark Object Subtraction (DOS1):</p>"
-                           "<ol>"
-                           "<li>Go to <b>Raster > Atmospheric Correction...</b></li>"
-                           "<li>Select method: <b>DOS1</b></li>"
-                           "<li>Set gain and bias for each band (or use defaults)</li>"
-                           "<li>Set output file (e.g., <code>dos1_corrected.tif</code>)</li>"
-                           "<li>Click <b>Run</b></li>"
-                           "</ol>"
-                           "<p>DOS1 assumes the darkest pixel in the scene has zero reflectance.</p>");
-    step2.actionId = "openAtmosphericCorrectionDialog";
-    step2.completionHint = tr("Corrected values represent surface reflectance (0-1).");
-    wf.steps << step2;
-
-    // Step 3: Compare results
-    WorkflowStep step3;
-    step3.title = tr("Compare Before/After");
-    step3.instructions = tr("<p>Compare original and corrected images:</p>"
-                           "<ol>"
-                           "<li>Go to <b>View > Compare Layers...</b></li>"
-                           "<li>Use <b>Split Screen</b> to compare</li>"
-                           "<li>Notice how atmospheric haze is reduced</li>"
-                           "</ol>"
-                           "<p>Surface reflectance is more suitable for quantitative analysis.</p>");
-    step3.actionId = "openComparisonDialog";
-    step3.completionHint = tr("Corrected image shows clearer surface features.");
-    wf.steps << step3;
-
-    return wf;
-}
-
-Workflow GuidedWorkflowWidget::createImageFusionWorkflow()
-{
-    Workflow wf;
-    wf.id = "image_fusion";
-    wf.title = tr("Image Fusion (影像融合)");
-    wf.description = tr("Combine high-resolution panchromatic with multispectral imagery.");
-
-    // Step 1: Explain the concept
-    WorkflowStep step1;
-    step1.title = tr("Understanding Fusion");
-    step1.instructions = tr("<p>Image fusion combines:</p>"
-                           "<ul>"
-                           "<li><b>Panchromatic</b>: High spatial resolution, single band</li>"
-                           "<li><b>Multispectral</b>: Lower resolution, multiple bands</li>"
-                           "</ul>"
-                           "<p>Result: High resolution multispectral image</p>"
-                           "<p>For this demo, we'll use the sample Landsat image as both inputs.</p>");
-    step1.actionId = "";
-    step1.completionHint = tr("Understanding the concept of image fusion.");
-    wf.steps << step1;
-
-    // Step 2: Load data
-    WorkflowStep step2;
-    step2.title = tr("Load Data");
-    step2.instructions = tr("<p>Load the sample image:</p>"
-                           "<ol>"
-                           "<li>File > Add Raster Layer... → <code>landsat_sample.tif</code></li>"
-                           "</ol>"
-                           "<p>In practice, you would load separate panchromatic and multispectral images.</p>");
-    step2.actionId = "addRasterLayer";
-    step2.completionHint = tr("Image loaded.");
-    wf.steps << step2;
-
-    // Step 3: Brovey fusion
-    WorkflowStep step3;
-    step3.title = tr("Brovey Fusion");
-    step3.instructions = tr("<p>Apply Brovey fusion:</p>"
-                           "<ol>"
-                           "<li>Go to <b>Raster > Image Fusion...</b></li>"
-                           "<li>Select method: <b>Brovey</b></li>"
-                           "<li>Set high-resolution and multispectral inputs</li>"
-                           "<li>Set output file</li>"
-                           "<li>Click <b>Run</b></li>"
-                           "</ol>"
-                           "<p>Brovey: R_fused = R_ms * Pan / (R_ms + G_ms + B_ms)</p>");
-    step3.actionId = "openFusionDialog";
-    step3.completionHint = tr("Fused image has higher spatial detail.");
-    wf.steps << step3;
-
-    // Step 4: IHS fusion
-    WorkflowStep step4;
-    step4.title = tr("IHS Fusion");
-    step4.instructions = tr("<p>Apply IHS fusion:</p>"
-                           "<ol>"
-                           "<li>Go to <b>Raster > Image Fusion...</b></li>"
-                           "<li>Select method: <b>IHS</b></li>"
-                           "<li>Set inputs and output</li>"
-                           "<li>Click <b>Run</b></li>"
-                           "</ol>"
-                           "<p>IHS: Convert RGB→IHS, replace I with Pan, convert back.</p>");
-    step4.actionId = "openFusionDialog";
-    step4.completionHint = tr("IHS fusion preserves spectral characteristics well.");
-    wf.steps << step4;
-
-    return wf;
-}
-
-Workflow GuidedWorkflowWidget::createPCAWorkflow()
-{
-    Workflow wf;
-    wf.id = "pca_analysis";
-    wf.title = tr("PCA Analysis (主成分分析)");
-    wf.description = tr("Dimensionality reduction using Principal Component Analysis.");
-
-    // Step 1: Load data
-    WorkflowStep step1;
-    step1.title = tr("Load Multi-band Image");
-    step1.instructions = tr("<p>Load the sample Landsat image:</p>"
-                           "<ol>"
-                           "<li>File > Add Raster Layer... → <code>landsat_sample.tif</code></li>"
-                           "</ol>"
-                           "<p>PCA reduces the number of bands while preserving most information.</p>");
-    step1.actionId = "addRasterLayer";
-    step1.completionHint = tr("7-band image loaded.");
-    wf.steps << step1;
-
-    // Step 2: Run PCA
-    WorkflowStep step2;
-    step2.title = tr("Run PCA");
-    step2.instructions = tr("<p>Perform PCA:</p>"
-                           "<ol>"
-                           "<li>Go to <b>Raster > Enhancement > PCA...</b></li>"
-                           "<li>Set number of components: <b>3</b></li>"
-                           "<li>Set output file (e.g., <code>pca_result.tif</code>)</li>"
-                           "<li>Click <b>Run</b></li>"
-                           "</ol>"
-                           "<p>PC1 contains the most variance, PC2 the second most, etc.</p>");
-    step2.actionId = "openPcaDialog";
-    step2.completionHint = tr("PCA result has 3 bands instead of 7.");
-    wf.steps << step2;
-
-    // Step 3: Analyze results
-    WorkflowStep step3;
-    step3.title = tr("Analyze PCA Results");
-    step3.instructions = tr("<p>Analyze the PCA output:</p>"
-                           "<ol>"
-                           "<li>View the PCA result image</li>"
-                           "<li>PC1: Contains ~80% of variance (brightness)</li>"
-                           "<li>PC2: Contains ~15% of variance (vegetation vs soil)</li>"
-                           "<li>PC3: Contains ~5% of variance (noise or subtle features)</li>"
-                           "</ol>"
-                           "<p>PCA is useful for data compression and noise reduction.</p>");
-    step3.actionId = "";
-    step3.completionHint = tr("PC1 shows the main patterns in the data.");
-    wf.steps << step3;
-
-    return wf;
-}
-
-Workflow GuidedWorkflowWidget::createMosaicWorkflow()
-{
-    Workflow wf;
-    wf.id = "mosaic";
-    wf.title = tr("Image Mosaic (影像镶嵌)");
-    wf.description = tr("Combine multiple images into a single mosaic.");
-
-    // Step 1: Explain concept
-    WorkflowStep step1;
-    step1.title = tr("Understanding Mosaic");
-    step1.instructions = tr("<p>Image mosaic combines multiple images:</p>"
-                           "<ul>"
-                           "<li>Adjacent scenes from same sensor</li>"
-                           "<li>Different times of same area</li>"
-                           "<li>Creates seamless coverage</li>"
-                           "</ul>"
-                           "<p>Key considerations: CRS alignment, color balancing, seamline.</p>");
-    step1.actionId = "";
-    step1.completionHint = tr("Understanding mosaic concepts.");
-    wf.steps << step1;
-
-    // Step 2: Open mosaic dialog
-    WorkflowStep step2;
-    step2.title = tr("Open Mosaic Tool");
-    step2.instructions = tr("<p>Open the mosaic dialog:</p>"
-                           "<ol>"
-                           "<li>Go to <b>Raster > Mosaic...</b></li>"
-                           "<li>Add input images</li>"
-                           "<li>Set output file</li>"
-                           "<li>Click <b>Run</b></li>"
-                           "</ol>"
-                           "<p>Note: All input images must have the same CRS.</p>");
-    step2.actionId = "openMosaicDialog";
-    step2.completionHint = tr("Mosaic created from input images.");
-    wf.steps << step2;
-
-    return wf;
-}
-
-Workflow GuidedWorkflowWidget::createObiaWorkflow()
-{
-    Workflow wf;
-    wf.id = "obia_classification";
-    wf.title = tr( "Object-Based Classification (OBIA)" );
-    wf.description = tr( "Segment the image into objects, label segments, and classify by spectral shape features." );
-
-    WorkflowStep step1;
-    step1.title = tr( "Load Sample Data" );
-    step1.instructions = tr( "<p>Load bundled lab datasets from <code>data/samples/</code>:</p>"
-                              "<ol>"
-                              "<li>Go to <b>Help &gt; Load Sample Data</b></li>"
-                              "<li>Confirm <code>landsat_sample.tif</code> appears on the map</li>"
-                              "</ol>" );
-    step1.actionId = "loadSampleData";
-    step1.completionHint = tr( "Sample raster layers are visible in the layer tree." );
-    wf.steps << step1;
-
-    WorkflowStep step2;
-    step2.title = tr( "Open OBIA Window" );
-    step2.instructions = tr( "<p>Launch the object-based classification workspace:</p>"
-                              "<ol>"
-                              "<li>Go to <b>Raster &gt; Classification &gt; Object-based Classification (OBIA)...</b></li>"
-                              "<li>Click <b>Load Raster</b> and select <code>landsat_sample.tif</code></li>"
-                              "</ol>" );
-    step2.actionId = "openObiaWindow";
-    step2.completionHint = tr( "OBIA window is open with the raster loaded." );
-    wf.steps << step2;
-
-    WorkflowStep step3;
-    step3.title = tr( "Segment and Classify" );
-    step3.instructions = tr( "<p>Run the OBIA pipeline in the OBIA window:</p>"
-                              "<ol>"
-                              "<li>Adjust segmentation parameters if needed, then click <b>Segment</b> (or hierarchical segment)</li>"
-                              "<li>Click objects on the map and assign classes, or use <b>Import ROI</b></li>"
-                              "<li>Choose a classifier and click <b>Classify</b></li>"
-                              "<li>Review <b>精度评价</b> (training OA / Kappa / confusion matrix)</li>"
-                              "<li>Click <b>加载到主图</b> to place the result on the main canvas</li>"
-                              "<li>Optional: <b>Export</b> polygons from the class raster</li>"
-                              "</ol>"
-                              "<p>When OTB is installed, MeanShift is preferred; otherwise a built-in segmenter is used. "
-                              "Pipeline JSON labs: <code>data/pipelines/obia_*.json</code> / workflow id <code>lab.obia</code>.</p>" );
-    step3.actionId = "";
-    step3.completionHint = tr( "Class map produced; accuracy reviewed; result available on main map." );
-    wf.steps << step3;
-
-    return wf;
 }

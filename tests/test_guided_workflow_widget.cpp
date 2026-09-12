@@ -1,116 +1,230 @@
-// test_guided_workflow_widget.cpp — GuidedWorkflowWidget tests
+// test_guided_workflow_widget.cpp — GuidedWorkflowWidget behavioural tests
+//
+// The widget renders whatever lab::loadLabSpecsFromDir returns; these tests
+// pin the data layer it consumes (the widget itself only adds Qt chrome on
+// top): real labs load, step counts are real, invalid specs are refused with
+// typed errors, and param path resolution follows the documented contract.
 #include <catch2/catch_test_macros.hpp>
 
 #include <app/widgets/guided_workflow_widget.h>
+#include <app/widgets/lab_spec_loader.h>
 
-TEST_CASE("WorkflowStep structure", "[widget][workflow]")
+#include <QDir>
+#include <QFile>
+#include <QJsonArray>
+#include <QTemporaryDir>
+#include <QTextStream>
+
+using namespace lab;
+
+namespace {
+
+/// Writes `content` into <dir>/<name> and returns the full path.
+QString writeFile( const QDir &dir, const QString &name, const QString &content )
 {
-    SECTION("Default construction")
-    {
-        WorkflowStep step;
-        REQUIRE(step.title.isEmpty());
-        REQUIRE(step.description.isEmpty());
-        REQUIRE(step.instructions.isEmpty());
-        REQUIRE(step.actionId.isEmpty());
-        REQUIRE(step.completionHint.isEmpty());
-    }
+    const QString path = dir.filePath( name );
+    QFile file( path );
+    REQUIRE( file.open( QIODevice::WriteOnly | QIODevice::Text ) );
+    file.write( content.toUtf8() );
+    return path;
+}
 
-    SECTION("Set fields")
-    {
-        WorkflowStep step;
-        step.title = "Step 1";
-        step.description = "Load data";
-        step.instructions = "<p>Load a raster file</p>";
-        step.actionId = "addRasterLayer";
-        step.completionHint = "Layer appears in layer tree";
+/// A minimal valid lab body; `overrides` patches the JSON before writing.
+QString validLabJson( const QString &id = QStringLiteral( "lab99_probe_lab" ) )
+{
+    return QStringLiteral( R"( {
+      "spec_version": 1,
+      "id": "%1",
+      "title": "Probe Lab",
+      "title_zh": "探测实验",
+      "objective": "Probe the loader.",
+      "steps": [
+        { "title": "Manual", "title_zh": "手动", "description_zh": "什么也不做。" },
+        { "title": "Compute", "title_zh": "计算", "description_zh": "算一下。",
+          "operator_id": "rs:spectral_index",
+          "params": { "input": "data/samples/landsat_sample.tif", "output": "outputs/ndvi.tif", "index": "NDVI" } },
+        { "title": "Open", "title_zh": "打开", "description_zh": "打开图层。",
+          "action": "addRasterLayer" }
+      ]
+    } )" ).arg( id );
+}
 
-        REQUIRE(step.title == "Step 1");
-        REQUIRE(step.description == "Load data");
-        REQUIRE(step.actionId == "addRasterLayer");
+LabLoadResult loadDir( const QTemporaryDir &dir )
+{
+    return loadLabSpecsFromDir( dir.path() );
+}
+
+} // namespace
+
+TEST_CASE( "WorkflowStep models operator-bound steps", "[widget][workflow]" )
+{
+    SECTION( "Manual / action / operator classification" )
+    {
+        WorkflowStep manual;
+        REQUIRE( manual.isManual() );
+        REQUIRE( !manual.hasOperator() );
+
+        WorkflowStep uiVerb;
+        uiVerb.action = QStringLiteral( "addRasterLayer" );
+        REQUIRE( uiVerb.isManual() == false );
+        REQUIRE( !uiVerb.hasOperator() );
+
+        WorkflowStep op;
+        op.operatorId = QStringLiteral( "rs:spectral_index" );
+        op.params = Json::Value( Json::objectValue );
+        REQUIRE( op.hasOperator() );
     }
 }
 
-TEST_CASE("Workflow structure", "[widget][workflow]")
+TEST_CASE( "Valid LabSpecs load from a directory", "[widget][workflow][labspec]" )
 {
-    SECTION("Default construction")
-    {
-        Workflow wf;
-        REQUIRE(wf.id.isEmpty());
-        REQUIRE(wf.title.isEmpty());
-        REQUIRE(wf.description.isEmpty());
-        REQUIRE(wf.steps.isEmpty());
-    }
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QDir qdir( dir.path() );
+    writeFile( qdir, QStringLiteral( "lab99_probe_lab.lab.json" ), validLabJson() );
 
-    SECTION("Workflow with steps")
-    {
-        Workflow wf;
-        wf.id = "spectral_analysis";
-        wf.title = "Spectral Analysis";
-        wf.description = "Learn spectral indices";
+    const LabLoadResult result = loadDir( dir );
+    REQUIRE( result.ok() );
+    REQUIRE( result.labs.size() == 1 );
 
-        WorkflowStep step1;
-        step1.title = "Load Image";
-        step1.actionId = "addRasterLayer";
-
-        WorkflowStep step2;
-        step2.title = "Compute NDVI";
-        step2.actionId = "openSpectralIndexDialog";
-
-        wf.steps << step1 << step2;
-
-        REQUIRE(wf.steps.size() == 2);
-        REQUIRE(wf.steps[0].title == "Load Image");
-        REQUIRE(wf.steps[1].title == "Compute NDVI");
-    }
+    const LabSpec &spec = result.labs.first();
+    REQUIRE( spec.id == QStringLiteral( "lab99_probe_lab" ) );
+    REQUIRE( spec.titleZh == QStringLiteral( "探测实验" ) );
+    REQUIRE( spec.stepCount() == 3 );
+    REQUIRE( spec.steps[0].isManual() );
+    REQUIRE( spec.steps[1].operatorId == QStringLiteral( "rs:spectral_index" ) );
+    REQUIRE( spec.steps[1].params[ "index" ].asString() == "NDVI" );
+    REQUIRE( spec.steps[2].action == QStringLiteral( "addRasterLayer" ) );
 }
 
-TEST_CASE("GuidedWorkflowWidget workflow data", "[widget][workflow]")
+TEST_CASE( "Invalid LabSpecs are refused with typed errors", "[widget][workflow][labspec]" )
 {
-    SECTION("WorkflowStep fields are accessible")
-    {
-        WorkflowStep step;
-        step.title = "Test Step";
-        step.description = "Test Description";
-        step.instructions = "<b>Bold</b> instructions";
-        step.actionId = "testAction";
-        step.completionHint = "Done when X";
+    struct Case { QString name; QString json; QString reasonPart; };
+    const QList<Case> cases = {
+        { QStringLiteral( "unknown_key" ),
+          validLabJson().replace( QStringLiteral( "\"objective\":" ),
+                                  QStringLiteral( "\"objectivex\": null, \"objective\":" ) ),
+          QStringLiteral( "unknown top-level key" ) },
+        { QStringLiteral( "bad_json" ), QStringLiteral( "{ not json }" ), QStringLiteral( "invalid JSON" ) },
+        { QStringLiteral( "empty_steps" ),
+          QStringLiteral( R"( { "spec_version": 1, "id": "lab99_probe_lab", "title": "t",
+                              "title_zh": "t", "objective": "o", "steps": [] } )" ),
+          QStringLiteral( "steps must be a non-empty array" ) },
+    };
 
-        REQUIRE(step.title == "Test Step");
-        REQUIRE(step.description == "Test Description");
-        REQUIRE(step.instructions.contains("Bold"));
-        REQUIRE(step.actionId == "testAction");
-        REQUIRE(step.completionHint == "Done when X");
-    }
-
-    SECTION("Workflow can hold multiple steps")
+    for ( const auto &testCase : cases )
     {
-        Workflow wf;
-        for (int i = 0; i < 10; i++) {
-            WorkflowStep step;
-            step.title = QString("Step %1").arg(i + 1);
-            wf.steps.append(step);
+        SECTION( testCase.name.toStdString() )
+        {
+            QTemporaryDir dir;
+            REQUIRE( dir.isValid() );
+            writeFile( QDir( dir.path() ), QStringLiteral( "lab99_probe_lab.lab.json" ), testCase.json );
+            const LabLoadResult result = loadDir( dir );
+            REQUIRE( !result.ok() );
+            REQUIRE( result.labs.isEmpty() );
+            REQUIRE( result.errors.first().reason.contains( testCase.reasonPart ) );
         }
-        REQUIRE(wf.steps.size() == 10);
-        REQUIRE(wf.steps.last().title == "Step 10");
+    }
+
+    SECTION( "operator_id and action are mutually exclusive" )
+    {
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        writeFile( QDir( dir.path() ), QStringLiteral( "lab99_probe_lab.lab.json" ),
+                   validLabJson().replace( QStringLiteral( "\"action\": \"addRasterLayer\"" ),
+                                           QStringLiteral( "\"operator_id\": \"rs:pca\", \"action\": \"addRasterLayer\"" ) ) );
+        const LabLoadResult result = loadDir( dir );
+        REQUIRE( !result.ok() );
+        REQUIRE( result.errors.first().reason.contains( QStringLiteral( "mutually exclusive" ) ) );
+    }
+
+    SECTION( "params without operator_id is rejected" )
+    {
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        writeFile( QDir( dir.path() ), QStringLiteral( "lab99_probe_lab.lab.json" ),
+                   validLabJson().replace( QStringLiteral( "\"action\": \"addRasterLayer\"" ),
+                                           QStringLiteral( "\"action\": \"addRasterLayer\", \"params\": {}" ) ) );
+        const LabLoadResult result = loadDir( dir );
+        REQUIRE( !result.ok() );
+        REQUIRE( result.errors.first().reason.contains( QStringLiteral( "params requires operator_id" ) ) );
+    }
+
+    SECTION( "file stem must match the id" )
+    {
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        writeFile( QDir( dir.path() ), QStringLiteral( "lab98_wrong_name.lab.json" ), validLabJson() );
+        const LabLoadResult result = loadDir( dir );
+        REQUIRE( !result.ok() );
+        REQUIRE( result.errors.first().reason.contains( QStringLiteral( "does not match id" ) ) );
+    }
+
+    SECTION( "duplicate ids across files are rejected" )
+    {
+        QTemporaryDir dir;
+        REQUIRE( dir.isValid() );
+        const QDir qdir( dir.path() );
+        writeFile( qdir, QStringLiteral( "lab99_probe_lab.lab.json" ), validLabJson() );
+        writeFile( qdir, QStringLiteral( "lab99_probe_lab_copy.lab.json" ),
+                   validLabJson( QStringLiteral( "lab99_probe_lab_copy" ) )
+                       .replace( QStringLiteral( "\"id\": \"lab99_probe_lab_copy\"" ),
+                                 QStringLiteral( "\"id\": \"lab99_probe_lab\"" ) ) );
+        const LabLoadResult result = loadDir( dir );
+        REQUIRE( !result.ok() );
+        REQUIRE( result.labs.size() == 1 );
+        REQUIRE( result.errors.first().reason.contains( QStringLiteral( "duplicate lab id" ) ) );
+    }
+
+    SECTION( "missing directory is a typed error" )
+    {
+        const LabLoadResult result = loadLabSpecsFromDir( QStringLiteral( "/nonexistent/labs/dir" ) );
+        REQUIRE( !result.ok() );
+        REQUIRE( result.errors.first().reason.contains( QStringLiteral( "does not exist" ) ) );
     }
 }
 
-TEST_CASE("Workflow signal types", "[widget][workflow]")
+TEST_CASE( "Lab param paths resolve through the injected resolver", "[widget][workflow][labspec]" )
 {
-    SECTION("Workflow IDs can be compared")
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    writeFile( QDir( dir.path() ), QStringLiteral( "lab99_probe_lab.lab.json" ), validLabJson() );
+    const LabSpec spec = loadDir( dir ).labs.first();
+    const Json::Value params = spec.steps[1].params;
+
+    QString capturedInput;
+    QString capturedOutput;
+    const Json::Value resolved = resolveLabParamPaths(
+        params, spec.id,
+        [&]( const QString &relative, PathRole role )
+        {
+            if ( role == PathRole::Input )
+            {
+                capturedInput = relative;
+                return QStringLiteral( "/runtime/root/%1" ).arg( relative );
+            }
+            capturedOutput = relative;
+            return QStringLiteral( "/runtime/%1" ).arg( relative );
+        } );
+
+    REQUIRE( capturedInput == QStringLiteral( "data/samples/landsat_sample.tif" ) );
+    REQUIRE( resolved[ "input" ].asString() == "/runtime/root/data/samples/landsat_sample.tif" );
+    REQUIRE( capturedOutput == QStringLiteral( "output/labs/lab99_probe_lab/ndvi.tif" ) );
+    REQUIRE( resolved[ "output" ].asString() == "/runtime/output/labs/lab99_probe_lab/ndvi.tif" );
+    // Non-path values pass through untouched.
+    REQUIRE( resolved[ "index" ].asString() == "NDVI" );
+}
+
+TEST_CASE( "Shipped labs load through the same path the widget uses", "[widget][workflow][labspec]" )
+{
+    const LabLoadResult result = loadLabSpecsFromDir( defaultLabDirectory() );
+    if ( result.errors.size() == 1 && result.errors.first().reason.contains( QStringLiteral( "does not exist" ) ) )
     {
-        Workflow wf1;
-        wf1.id = "workflow_a";
-
-        Workflow wf2;
-        wf2.id = "workflow_b";
-
-        REQUIRE(wf1.id != wf2.id);
+        // Running outside a source checkout (e.g. installed package without
+        // SICNU_DATA_DIR): nothing to verify here — skip.
+        return;
     }
-
-    SECTION("Empty workflow has no steps")
-    {
-        Workflow wf;
-        REQUIRE(wf.steps.isEmpty());
-    }
+    INFO( errorStrings( result ).join( QStringLiteral( "; " ) ).toStdString() );
+    REQUIRE( result.ok() );
+    REQUIRE( result.labs.size() >= 10 );
 }
