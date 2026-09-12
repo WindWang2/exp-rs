@@ -17,12 +17,17 @@
 
 #include <json/json.h>
 
+#include <filesystem>
+#include <fstream>
 #include <sstream>
+
+#include <system_error>
 #include <string>
 #include <vector>
 
 using namespace sicnu::geo;
 using sicnu::geo::testsupport::HttpStacServer;
+using sicnu::geo::testsupport::StacRoute;
 using Catch::Matchers::ContainsSubstring;
 
 namespace
@@ -510,4 +515,164 @@ TEST_CASE( "range-only items do not claim normalization from the derived instant
   // fields were NOT rewritten, so datetimeNormalized stays false.
   CHECK( parsedItem.datetimeUtc == "2026-01-01T00:00:00Z" );
   CHECK_FALSE( parsedItem.datetimeNormalized );
+}
+
+// ---------------------------------------------------------------------------
+// 9.0 M4 — relative asset hrefs resolve against item provenance (rel="self"
+// preferred, else the delivering page URL); local items (parseFromFile)
+// resolve lexically with directory containment; unprovenanced items fail
+// typed instead of guessing.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "relative asset hrefs resolve against item provenance",
+           "[io][stac][client][fabric9][href]" )
+{
+  HttpStacServer server;
+  const std::string itemWithRelativeAssets = "{"
+    "\"type\": \"Feature\","
+    "\"stac_version\": \"1.0.0\","
+    "\"id\": \"relative-one\","
+    "\"properties\": { \"datetime\": \"2026-01-05T10:00:00Z\" },"
+    "\"bbox\": [10, 40, 11, 41],"
+    "\"links\": [ {\"rel\": \"self\", \"href\": \"/collections/scenes/items/relative-one\"} ],"
+    "\"assets\": {"
+    "  \"image\": {\"href\": \"./images/relative-one.tif\", \"type\": \"image/tiff\", \"roles\": [\"data\"]},"
+    "  \"up\": {\"href\": \"../shared/overview.jpg\"}"
+    "}"
+  "}";
+  StacRoute route;
+  route.body = "{\"type\": \"FeatureCollection\", \"features\": [" + itemWithRelativeAssets + "]}";
+  server.setRoute( "/search", route );
+  StacClient client( server.url() );
+
+  StacSearchQuery query;
+  const StacPage page = client.search( query );
+  REQUIRE( page.items.size() == 1 );
+  const StacItem &item = page.items[0];
+  CHECK( item.sourceHref == server.url() + "/collections/scenes/items/relative-one" );
+
+  const StacAsset &image = item.assets.at( "image" );
+  CHECK( client.resolveAssetHref( item, image ) == server.url() + "/collections/scenes/items/images/relative-one.tif" );
+  const StacAsset &up = item.assets.at( "up" );
+  CHECK( client.resolveAssetHref( item, up ) == server.url() + "/collections/scenes/shared/overview.jpg" );
+
+  // Absolute hrefs pass through verbatim.
+  StacAsset absolute;
+  absolute.href = "https://data.example.com/x.tif";
+  CHECK( client.resolveAssetHref( item, absolute ) == "https://data.example.com/x.tif" );
+}
+
+TEST_CASE( "local items resolve relative hrefs lexically with containment",
+           "[io][stac][client][fabric9][href][local]" )
+{
+  const std::string dir = ( std::filesystem::temp_directory_path()
+                            / "sicnu_io_stac9_local" ).string();
+  std::error_code ec;
+  std::filesystem::remove_all( dir, ec );
+  std::filesystem::create_directories( dir + "/items" );
+  const std::string itemPath = dir + "/items/one.json";
+  {
+    std::ofstream out( itemPath, std::ios::binary );
+    out << "{"
+        << "\"type\": \"Feature\","
+        << "\"stac_version\": \"1.0.0\","
+        << "\"id\": \"local-one\","
+        << "\"properties\": { \"datetime\": \"2026-01-05T10:00:00Z\" },"
+        << "\"assets\": {"
+        << "  \"image\": {\"href\": \"./scene.tif\", \"roles\": [\"data\"]}"
+        << "}}";
+  }
+  StacItem item = StacItem::parseFromFile( itemPath );
+  CHECK( !item.sourceHref.empty() );
+
+  StacClient client( "https://stac.example.com" ); // root unused for local resolution
+  StacAsset image = item.assets.at( "image" );
+  const std::string resolved = client.resolveAssetHref( item, image );
+  CHECK( resolved == dir + "/items/scene.tif" );
+
+  // A relative href escaping the item directory is refused — never a guess.
+  StacAsset escape;
+  escape.href = "../../outside.tif";
+  CHECK_THROWS_AS( client.resolveAssetHref( item, escape ), sicnu::geo::GeoError );
+
+  // An item delivered without provenance cannot resolve relative hrefs.
+  StacItem unprovenanced = StacItem::parseText( "{"
+    "\"type\": \"Feature\", \"stac_version\": \"1.0.0\", \"id\": \"x\","
+    "\"properties\": { \"datetime\": \"2026-01-05T10:00:00Z\" },"
+    "\"assets\": {\"a\": {\"href\": \"./x.tif\"}}}" );
+  CHECK( unprovenanced.sourceHref.empty() );
+  StacAsset rel = unprovenanced.assets.at( "a" );
+  CHECK_THROWS_AS( client.resolveAssetHref( unprovenanced, rel ), sicnu::geo::GeoError );
+}
+
+// ---------------------------------------------------------------------------
+// 9.0 M4 — bounded client-side response cache: opt-in, request-count proven
+// via the fixture's request log, entry-capped.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "the query cache serves repeat searches without origin requests",
+           "[io][stac][client][fabric9][cache]" )
+{
+  HttpStacServer server;
+  StacRoute route;
+  route.body = "{\"type\": \"FeatureCollection\", \"features\": ["
+             + renderItem( "cached-one", "2026-02-01T00:00:00Z", "5", "[10,40,11,41]" ) + "]}";
+  server.setRoute( "/search", route );
+
+  StacClientOptions options;
+  options.cacheEnabled = true;
+  options.cacheMaxEntries = 4;
+  StacClient client( server.url(), options );
+
+  StacSearchQuery query;
+  query.collections = { "scenes" };
+
+  const StacPage first = client.search( query );
+  REQUIRE( first.items.size() == 1 );
+  CHECK( first.items[0].id == "cached-one" );
+  const std::size_t requestsAfterFirst = server.requests().size();
+  CHECK( requestsAfterFirst == 1 );
+
+  const StacPage second = client.search( query );
+  REQUIRE( second.items.size() == 1 );
+  CHECK( second.items[0].id == "cached-one" );
+  CHECK( server.requests().size() == requestsAfterFirst ); // no second origin hit
+
+  Json::Value stats = client.cacheStats();
+  CHECK( stats["hits"].asUInt64() == 1 );
+  CHECK( stats["misses"].asUInt64() == 1 );
+  CHECK( stats["entries"].asUInt64() == 1 );
+
+  // A different query is a real miss (different canonical key).
+  StacSearchQuery other;
+  other.collections = { "other" };
+  client.search( other );
+  stats = client.cacheStats();
+  CHECK( stats["misses"].asUInt64() == 2 );
+}
+
+TEST_CASE( "the query cache evicts under the entry cap and stays correct",
+           "[io][stac][client][fabric9][cache]" )
+{
+  HttpStacServer server;
+  StacClientOptions options;
+  options.cacheEnabled = true;
+  options.cacheMaxEntries = 1; // every new query evicts the previous one
+  StacClient client( server.url(), options );
+
+  for ( const std::string &collection : { "a", "b", "a" } )
+  {
+    StacRoute route;
+    route.body = "{\"type\": \"FeatureCollection\", \"features\": []}";
+    server.setRoute( "/search?collections=" + collection, route );
+    StacSearchQuery query;
+    query.collections = { collection };
+    const StacPage page = client.search( query );
+    CHECK( page.items.empty() );
+  }
+  const Json::Value stats = client.cacheStats();
+  CHECK( stats["entries"].asUInt64() <= 1 );
+  CHECK( stats["evictions"].asUInt64() >= 1 );
+  // The final "a" search re-fetched honestly (its entry had been evicted).
+  CHECK( server.requests().size() == 3 );
 }
