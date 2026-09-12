@@ -15,6 +15,7 @@
 #include "geospatial/raster/raster_writer.h"
 #include "geospatial/convert/raster_convert.h"
 #include "support/http_range_server.h"
+#include "support/offline_probe.h"
 
 #include <cpl_conv.h>
 #include <cpl_vsi.h>
@@ -34,6 +35,10 @@
 
 using namespace sicnu::geo;
 using sicnu::geo::testsupport::HttpRangeServer;
+
+// ADR 0146: never die by timeout when the loopback transport is missing —
+// report `sicnu-skip: <reason>` + exit 77 instead.
+SICNU_OFFLINE_GUARD()
 using sicnu::geo::testsupport::ServerBehavior;
 
 namespace
@@ -1024,4 +1029,15 @@ TEST_CASE( "over-long ranged bodies are sliced to the echoed window",
   // into.
   const std::vector<double> next = reader.readWindow( { 1 }, { 0, 384, 128, 128 } );
   CHECK( next == nextExpected );
+}
+
+// Regression guard (D10 default #7): the loopback proxy exemption is what
+// keeps /vsicurl/ fixture reads away from machine-room proxies; if the
+// hygiene pass regresses, this fails in seconds instead of hanging a lab
+// host. Wall-clock bound: trivially < 1 s.
+TEST_CASE( "offline guard keeps loopback exempt from proxies",
+           "[io][offline-guard]" )
+{
+  sicnu::testsupport::offline::ensureLoopbackProxyHygiene();
+  CHECK( sicnu::testsupport::offline::loopbackProxyExempted() );
 }
