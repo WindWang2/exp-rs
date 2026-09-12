@@ -14,6 +14,9 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_context.h"
 
+#include <json/json.h>
+
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -39,6 +42,14 @@ struct GridProvenance
   int width = 0;
   int height = 0;
   int frames = 1;            ///< temporal frames fed under this grid identity
+  // --- Platform 9.0 (M3) ------------------------------------------------------
+  /// The EFFECTIVE preprocessing contract applied to this feed (per-input
+  /// override when declared, else the global contract): normalize/scale/pad
+  /// summary for payload + sidecar. Empty string = nothing recorded.
+  std::string preprocessNote;
+  /// Deterministic identity fingerprint of the fed raster (structure always;
+  /// content digest when the file fits the size bound). Null when disabled.
+  Json::Value fingerprint;
 };
 
 /// Geometry + counters describing one engine run (also feeds estimates).
@@ -61,6 +72,11 @@ struct TileInferenceStats
   /// engine actually verified about each feed's grid before inference.
   /// Truthful — fields stay empty when the raster does not declare them.
   std::vector<GridProvenance> inputGrids;
+  /// Platform 9.0 (M6): per-class pixel counts of Labels/Mask products
+  /// (PRODUCT classes, after the remap), index = product class id. Empty
+  /// for probability/confidence products. Computed during the final
+  /// streaming pass — O(classes) memory, never a second raster read.
+  std::vector<long long> classPixelCounts;
 };
 
 /// Raster-task output mode (Platform 4.0, manifest `output.format`).
@@ -82,6 +98,18 @@ enum class TtaMode
   HVFlip,  ///< average logits with horizontal + vertical flips
 };
 
+/// Tile output blend mode (Platform 9.0 M5). Unset defers to the manifest's
+/// `tiling.blend` (itself defaulting to None = the historical hard-edge
+/// stitch). Feather averages overlapping tile windows with a cosine weight
+/// ramp across the halo — seams between disagreeing tiles fade instead of
+/// stepping. Detection vectors never blend (NMS owns overlap).
+enum class TileBlend
+{
+  Unset,   ///< follow the manifest contract
+  None,    ///< hard-edge stitch (historical default)
+  Feather, ///< cosine-weighted overlap blending
+};
+
 struct TileInferenceRunOptions
 {
   TtaMode tta = TtaMode::None;
@@ -90,6 +118,17 @@ struct TileInferenceRunOptions
   int batchSizeOverride = 0;
   /// Derived-output selection; Probability = historical manifest behavior.
   RasterOutputMode outputMode = RasterOutputMode::Probability;
+  /// Tile output blending (see TileBlend).
+  TileBlend blend = TileBlend::Unset;
+  // --- Platform 9.0 (M3) ------------------------------------------------------
+  /// Compute a per-feed identity fingerprint (structure + bounded content
+  /// digest) into GridProvenance. On by default — the provenance value is the
+  /// point; disable only for pathological many-feed loops.
+  bool computeFeedFingerprints = true;
+  /// Content digest size bound per feed (bytes). Files above it record
+  /// size+mtime with reason "file-too-large" instead of a digest — the
+  /// fingerprint stays honest about what it verified, and cost stays bounded.
+  std::int64_t fingerprintContentMaxBytes = 256LL * 1024 * 1024;
 };
 
 /// One named raster feed for multimodal / temporal models (Platform 7.0).
@@ -250,6 +289,20 @@ class TileInferenceEngine
     /// zero valid (finite in all bands) core pixels — the forward pass can be
     /// skipped and NoData written directly (#705).
     static bool batchIsAllNoData( const std::vector<int> &validPixelCounts );
+
+    // --- Platform 9.0 (M3): feed identity fingerprint ------------------------
+    /**
+     * Deterministic identity document for one fed raster:
+     *   { width, height, band_count, band_dtypes[], geotransform[6],
+     *     crs (display), selected_bands[], content {...} }
+     * `content` is { "sha256", "bytes" } when the file fits
+     * @p contentMaxBytes, else { "bytes", "mtime_utc", "reason":
+     * "file-too-large" } — the fingerprint states EXACTLY what it verified
+     * and never implies byte identity it did not check.
+     * Throws RSOperatorError when the raster cannot be opened.
+     */
+    static Json::Value feedFingerprint( const std::string &path, const std::vector<int> &bands,
+                                        std::int64_t contentMaxBytes );
 
   private:
     /// Resolved GDAL type of the manifest's input.dtype (-1 = undeclared);

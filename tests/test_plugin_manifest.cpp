@@ -9,6 +9,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <functional>
 
 using namespace exprs;
 
@@ -92,6 +93,193 @@ TEST_CASE( "manifest v1 round trip", "[plugin][manifest]" )
     REQUIRE( restored.id == manifest.id );
     REQUIRE( restored.operators.size() == manifest.operators.size() );
     REQUIRE( restored.operators[0].id == "demo:stats" );
+}
+
+TEST_CASE( "exhaustive manifest round trip: every declared field survives",
+           "[plugin][manifest][p12]" )
+{
+    // Mechanical 9.0 audit: a manifest with EVERY field populated must
+    // survive toJson -> fromJson -> toJson with a byte-identical second
+    // projection. (8.0 found three fields silently dropped by toJson; this
+    // test exists so a fourth cannot land unnoticed.)
+    std::string json = R"({
+        "manifest_version": 1,
+        "id": "org.example.full",
+        "name": "Full",
+        "version": "9.1.2",
+        "api_version": PLACEHOLDER,
+        "abi_version": 1,
+        "description": "every field",
+        "vendor": "Example GmbH",
+        "license": "MIT",
+        "platforms": ["linux", "windows"],
+        "entrypoint": "libfull.so",
+        "entrypoint_kind": "native",
+        "runtime": "host-process",
+        "capabilities": ["operator", "data_provider", "model_runtime", "agent_tool", "ui"],
+        "permissions": ["filesystem_read", "filesystem_write", "network"],
+        "dependencies": ["org.other@^1.0"],
+        "python": { "module": "full", "package": "full_pkg" },
+        "access": {
+            "filesystem": { "read": ["${workspace}/inputs"], "write": ["${temp}"] },
+            "network": true,
+            "externalProcess": false,
+            "gpu": { "hint": "cuda" },
+            "workspace": { "mutate": false },
+            "project": { "mutate": false },
+            "modelProvider": { "frameworks": ["onnx"] },
+            "ui": true,
+            "destructive": false
+        },
+        "quotas": {
+            "maxRequestConcurrency": 2,
+            "requestDeadlineMs": 60000,
+            "maxResponseBytes": 1048576,
+            "maxRequestBytes": 1048576,
+            "workerMemoryBytes": 536870912,
+            "workerCpuRatePercent": 50,
+            "maxChildProcesses": 2,
+            "gpuHint": "cuda"
+        },
+        "package": {
+            "checksums": { "libfull.so": "deadbeef" },
+            "sbom": { "path": "sbom.json", "format": "cyclonedx" },
+            "signature": { "algorithm": "ed25519", "value": "cafe" }
+        },
+        "conformance": {
+            "cancelTarget": "full:cancel",
+            "concurrencyTarget": "full:gate",
+            "crashTarget": "full:crash",
+            "uiSchema": true,
+            "dataProviderTarget": "full:store",
+            "agentToolTarget": "full:tool",
+            "modelFrameworkTarget": "onnx"
+        },
+        "operators": [{
+            "id": "full:stats",
+            "display_name": "Full Stats",
+            "group": "full",
+            "description": "operator with everything",
+            "memory_policy": "streaming",
+            "determinism_grade": "tolerance",
+            "supports_cancel": true,
+            "schema": { "type": "object" },
+            "metadata": { "agent": true },
+            "inputs": [{ "name": "values", "type": "json", "required": true,
+                         "description": "in", "default": [1, 2],
+                         "min": 0.0, "max": 9.0, "file_format": "tif" }],
+            "outputs": [{ "name": "out", "type": "raster", "required": false }]
+        }, {
+            "id": "full:tool-run",
+            "display_name": "External Tool",
+            "group": "full",
+            "description": "pure-manifest external tool",
+            "external": {
+                "argv": ["${plugin_dir}/tools/run.sh", "--in", "${input}"],
+                "environment": { "FULL_MODE": "1" },
+                "inherit_environment": false,
+                "working_directory": "workdir",
+                "timeout_seconds": 120,
+                "stdout_limit_bytes": 1024,
+                "stderr_limit_bytes": 1024
+            }
+        }],
+        "data_providers": [{
+            "id": "full:store",
+            "display_name": "Full Store",
+            "description": "store",
+            "schemes": ["isodb://"],
+            "capabilities": { "maxPageSize": 100 }
+        }],
+        "model_runtimes": [{
+            "framework": "onnx",
+            "display_name": "ONNX Full",
+            "description": "runtime",
+            "gpu": true
+        }],
+        "agent_tools": [{
+            "id": "full:tool",
+            "display_name": "Full Tool",
+            "category": "demo",
+            "description": "tool",
+            "input_schema": { "type": "object" },
+            "output_schema": { "type": "object" }
+        }],
+        "ui": { "dock": true, "menu_actions": true, "settings_page": true,
+                "dock_title": "Full", "settings_page_title": "Full Settings" },
+        "cartography": { "layout_items": true, "layout_item_ids": ["full:item"] }
+    })";
+    json = replaceApi( json );
+
+    PluginManifest manifest = parseOk( json );
+    REQUIRE( manifest.runtime == PluginRuntimeKind::HostProcess );
+    REQUIRE( manifest.operators.size() == 2 );
+    REQUIRE( manifest.operators[1].hasExternalTool );
+    REQUIRE( manifest.dataProviders.size() == 1 );
+    REQUIRE( manifest.modelRuntimes.size() == 1 );
+    REQUIRE( manifest.agentTools.size() == 1 );
+    REQUIRE( manifest.hasUi );
+    REQUIRE( manifest.hasCartography );
+    REQUIRE( manifest.python.module == "full" );
+    REQUIRE_FALSE( manifest.access.isNull() );
+    REQUIRE_FALSE( manifest.quotas.isNull() );
+    REQUIRE_FALSE( manifest.package.isNull() );
+    REQUIRE_FALSE( manifest.conformance.isNull() );
+
+    const Json::Value first = manifest.toJson();
+    PluginManifest restored;
+    PluginDiagnostic error;
+    REQUIRE( PluginManifest::fromJson( first, restored, error ) );
+    const Json::Value second = restored.toJson();
+
+    // Idempotence: re-projecting a parsed manifest must be stable.
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "";
+    REQUIRE( Json::writeString( builder, first ) == Json::writeString( builder, second ) );
+
+    // COMPLETENESS (the actual regression class): every leaf path present in
+    // the ORIGINAL hand-written document must also exist in `first`. A
+    // toJson() that drops a field makes first lack it — the idempotence
+    // check above cannot see that, this walk can. (jsoncpp object members
+    // are key-sorted, so equal documents also serialize identically.)
+    std::function<void( const Json::Value &, const Json::Value &, const std::string & )>
+        requirePathsSurvive = [&]( const Json::Value &original, const Json::Value &projected,
+                                   const std::string &path ) {
+            if ( original.isObject() )
+            {
+                REQUIRE( projected.isObject() );
+                for ( const std::string &key : original.getMemberNames() )
+                {
+                    const std::string childPath = path + "/" + key;
+                    INFO( "manifest path dropped by toJson(): " << childPath );
+                    REQUIRE( projected.isMember( key ) );
+                    requirePathsSurvive( original[ key ], projected[ key ], childPath );
+                }
+            }
+            else if ( original.isArray() )
+            {
+                REQUIRE( projected.isArray() );
+                REQUIRE( projected.size() == original.size() );
+                for ( Json::ArrayIndex i = 0; i < original.size(); ++i )
+                    requirePathsSurvive( original[ i ], projected[ i ],
+                                         path + "[" + std::to_string( i ) + "]" );
+            }
+            // Leaves: existence already asserted by the parent walk.
+        };
+    {
+        Json::Value originalDocument;
+        Json::Reader reader;
+        REQUIRE( reader.parse( json, originalDocument, false ) );
+        requirePathsSurvive( originalDocument, first, "" );
+    }
+
+    // Spot anchors (fail with a message a human can act on):
+    REQUIRE( restored.conformance["dataProviderTarget"].asString() == "full:store" );
+    REQUIRE( restored.package["checksums"]["libfull.so"].asString() == "deadbeef" );
+    REQUIRE( restored.quotas["maxRequestBytes"].asInt64() == 1048576 );
+    REQUIRE( restored.access["externalProcess"].asBool() == false );
+    REQUIRE( restored.operators[1].external.argv.size() == 3 );
+    REQUIRE( restored.dataProviders[0].schemes == std::vector<std::string>{ "isodb://" } );
 }
 
 TEST_CASE( "manifest load from file reports structured errors", "[plugin][manifest]" )

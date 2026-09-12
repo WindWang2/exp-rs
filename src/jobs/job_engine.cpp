@@ -33,12 +33,18 @@ bool isTerminalState( JobState state )
 /// submit() calls raise transient pool capacity so a body that blocks on a
 /// sub-job can never starve the sub-job's pick.
 thread_local bool t_isWorkerThread = false;
+thread_local std::string t_currentJobId;
 
 } // namespace
 
 bool JobEngine::isWorkerThread()
 {
   return t_isWorkerThread;
+}
+
+const std::string &JobEngine::currentJobId()
+{
+  return t_currentJobId;
 }
 
 JobEngine &JobEngine::instance()
@@ -667,7 +673,13 @@ void JobEngine::workerLoop( uint64_t gen )
       }
     }
 
+    // M1 structured hierarchy: expose the executing job id to nested
+    // submissions (TaskCenter resolves the owner task edge through it).
+    // runOperatorJob catches all executor exceptions internally, so the
+    // clearing below always runs on the normal worker path.
+    t_currentJobId = jobId;
     runOperatorJob( jobId );
+    t_currentJobId.clear();
     m_cv.notify_all();
   }
 }

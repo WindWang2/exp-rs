@@ -277,6 +277,7 @@ VoidResult ExperimentRunRecorder::recordMetrics( const QString &runId,
     record.runId = runId;
     record.protocol = protocol;
     record.metrics = RunEnvironment::redactSecretKeys( metrics );
+    record.metricsSchemaVersion = kMetricsSchemaVersion;
     auto written = m_store->saveMetricRecord( record );
     if ( !written )
         return VoidResult::failure( written.diagnostics() );

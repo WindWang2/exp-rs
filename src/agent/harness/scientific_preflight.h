@@ -75,4 +75,12 @@ bool intentRequiresPair( const std::string &intent );
 /// and the C++ rules cannot silently diverge.
 Json::Value intentRequirements( const std::string &intent );
 
+/// Harness 9.0 (M2): the full typed intent document. Extends
+/// intentRequirements() with what Pi needs to plan honestly BEFORE touching
+/// data: required facts (typed, with the why), optional facts with their
+/// degradation class, expected product shapes, and the quality expectations
+/// the serving capabilities declare (union over capability knowledge). Null
+/// for unknown intents. Purely declarative — reads no datasets.
+Json::Value typedIntentDocument( const std::string &intent );
+
 } // namespace sicnu::agent::harness

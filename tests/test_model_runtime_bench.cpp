@@ -11,11 +11,13 @@
 #include "operators/framework/model_catalog.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/runtime/model_runtime.h"
+#include "operators/runtime/nvml_inventory.h"
 #include "operators/runtime/tile_inference_engine.h"
 #include "support/onnx_fixture_builder.h"
 
 #ifdef SICNU_WITH_ONNX_RUNTIME
 #include <onnxruntime_c_api.h> // OrtGetVersionString for the bench header
+#include <onnxruntime_cxx_api.h> // 9.0 CUDA-EP probe (Ort::SessionOptions)
 #endif
 
 #include <opencv2/core.hpp>
@@ -273,7 +275,7 @@ TEST_CASE( "model runtime benchmark (SICNU_MODEL_BENCH=1)", "[.] [model_bench]" 
     using sicnu::operators::runtime::TensorBlob;
     using sicnu::operators::runtime::NamedTensor;
     benchOrt["schema"] = QStringLiteral( "model-runtime-bench-ort/1" );
-    benchOrt["ort_runtime_version"] = QString::fromUtf8( OrtGetVersionString() );
+    benchOrt["ort_runtime_version"] = QString::fromUtf8( OrtGetApiBase()->GetVersionString() );
 
     const OnnxFixtureModels models = buildOnnxFixtureModels();
     const QString sumPath = dir.filePath( QStringLiteral( "bench-sum.onnx" ) );
@@ -399,5 +401,159 @@ TEST_CASE( "model runtime benchmark (SICNU_MODEL_BENCH=1)", "[.] [model_bench]" 
   registry.releaseAll();
 #else
   FAIL( "benchmark gated: build without OpenCV" );
+#endif
+}
+
+// ---------------------------------------------------------------------------
+// Platform 9.0 (M9): REAL CUDA-EP lane benchmark (SICNU_MODEL_BENCH=1).
+// Capability-gated twice: the bench gate, then a live CUDA-EP probe (a
+// CPU-only ORT build refuses the append and the case reports SKIP — never a
+// fabricated GPU number). Every number lands in
+// benchmarks/model-runtime-9-cuda.json with its environment.
+// ---------------------------------------------------------------------------
+TEST_CASE( "model runtime CUDA-EP benchmark (SICNU_MODEL_BENCH=1)", "[.] [model_bench]" )
+{
+#ifdef SICNU_WITH_ONNX_RUNTIME
+  if ( !qEnvironmentVariableIsSet( "SICNU_MODEL_BENCH" ) )
+    FAIL( "benchmark gated: set SICNU_MODEL_BENCH=1 to run" );
+
+  using sicnu::operators::runtime::NvidiaInventory;
+  using sicnu::operators::runtime::RequestedDevice;
+  using sicnu::operators::runtime::NamedTensor;
+  using sicnu::operators::runtime::TensorBlob;
+
+  // Live capability probe: the CUDA EP must actually register on this ORT.
+  bool cudaEpLoadable = false;
+  QString probeWhy;
+  try
+  {
+    Ort::Env probeEnv( ORT_LOGGING_LEVEL_ERROR, "exp-rs-cuda-probe" );
+    Ort::SessionOptions probeOptions;
+    OrtCUDAProviderOptions cudaOptions{};
+    probeOptions.AppendExecutionProvider_CUDA( cudaOptions );
+    cudaEpLoadable = true;
+  }
+  catch ( const Ort::Exception &e )
+  {
+    probeWhy = QString::fromUtf8( e.what() );
+  }
+  if ( !cudaEpLoadable )
+  {
+    WARN( "CUDA EP not loadable on this ORT build — CUDA lane NOT RUN: "
+          << probeWhy.toStdString() );
+    FAIL( "cuda capability gate: ep not loadable (marked NOT RUN, never a PASS)" );
+  }
+
+  auto &registry = ModelRuntimeRegistry::instance();
+  registry.releaseAll();
+
+  // Force the REAL GPU view for the planner (the NVML probe would also find
+  // it; the override makes the run deterministic about WHICH truth is used).
+  ModelHardwareCapabilities forced;
+  forced.cudaAvailable = true;
+  forced.cudaRuntimeAvailable = true;
+  forced.cudaDeviceCount = 1;
+  const NvidiaInventory gpuNow = NvidiaInventory::probe();
+  if ( gpuNow.available && !gpuNow.devices.empty() )
+  {
+    forced.deviceNames = { gpuNow.devices.front().name };
+    forced.deviceTotalVramMb = { gpuNow.devices.front().totalVramMb };
+    forced.deviceFreeVramMb = { gpuNow.devices.front().freeVramMb };
+  }
+  registry.setHardwareForTest( forced );
+  struct RestoreHw
+  {
+      ~RestoreHw() { ModelRuntimeRegistry::instance().setHardwareForTest( std::nullopt ); }
+  } restoreHw;
+
+  QTemporaryDir dir;
+  const OnnxFixtureModels models = buildOnnxFixtureModels();
+  const QString sumPath = dir.filePath( QStringLiteral( "bench9-sum.onnx" ) );
+  { QFile f( sumPath ); REQUIRE( f.open( QIODevice::WriteOnly ) ); f.write( models.sumDual ); }
+
+  ModelInfo gpuModel;
+  gpuModel.name = "bench9-ort-cuda";
+  gpuModel.framework = "onnxruntime";
+  gpuModel.readiness = ModelReadiness::Ready;
+  gpuModel.resolvedArtifactPath = sumPath.toStdString();
+  gpuModel.runtime.gpu = true; // the model tolerates GPU → cuda resolution legal
+  gpuModel.runtime.resolvedCudaIndex = 0;
+
+  // CPU reference session for the known-answer cross-check.
+  ModelRuntimePtr cpuSession = registry.acquire( gpuModel, RequestedDevice::cpu() );
+  REQUIRE( cpuSession );
+
+  const auto cudaCold = std::chrono::steady_clock::now();
+  ModelRuntimePtr cudaSession = registry.acquire( gpuModel, RequestedDevice::cuda( 0 ) );
+  REQUIRE( cudaSession );
+  const double cudaColdMs =
+    std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - cudaCold )
+      .count();
+  cudaSession.reset();
+  registry.releaseAll();
+  const auto cudaWarm = std::chrono::steady_clock::now();
+  cudaSession = registry.acquire( gpuModel, RequestedDevice::cuda( 0 ) );
+  REQUIRE( cudaSession );
+  const double cudaWarmMs =
+    std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - cudaWarm )
+      .count();
+
+  // The session MUST report the CUDA execution provider (9.0 honesty rule:
+  // a claimed-GPU run carries its EP identity).
+  const auto details = cudaSession->providerDetails();
+  REQUIRE( details.executionProvider.find( "CUDA" ) != std::string::npos );
+
+  // Known answer + throughput: identical inputs through both EPs must agree
+  // bit-exact on the sum fixture (deterministic kernels on one device pair).
+  std::vector<float> a( 2 * 64 * 64, 1.5f );
+  std::vector<float> b( 2 * 64 * 64, 2.5f );
+  const TensorBlob ta = TensorBlob::fromFloat32( { 1, 2, 64, 64 }, a.data(), a.size() );
+  const TensorBlob tb = TensorBlob::fromFloat32( { 1, 2, 64, 64 }, b.data(), b.size() );
+  const auto cpuOut = cpuSession->inferNamed( { { "a", ta }, { "b", tb } }, { "sum" } );
+  REQUIRE( cpuOut.size() == 1 );
+  constexpr int kForwards = 128;
+  const auto fwdStart = std::chrono::steady_clock::now();
+  for ( int i = 0; i < kForwards; ++i )
+  {
+    const auto outs = cudaSession->inferNamed( { { "a", ta }, { "b", tb } }, { "sum" } );
+    REQUIRE( outs.size() == 1 );
+    REQUIRE( outs.front().second.bytes == cpuOut.front().second.bytes );
+  }
+  const double fwdMs =
+    std::chrono::duration<double, std::milli>( std::chrono::steady_clock::now() - fwdStart )
+      .count();
+
+  const NvidiaInventory gpuAfter = NvidiaInventory::probe();
+
+  QJsonObject bench;
+  bench["schema"] = QStringLiteral( "model-runtime-bench-9-cuda/1" );
+  bench["ort_runtime_version"] = QString::fromUtf8( OrtGetApiBase()->GetVersionString() );
+  bench["execution_provider"] = QString::fromStdString( details.executionProvider );
+  bench["gpu_name"] = QString::fromStdString(
+    gpuNow.available && !gpuNow.devices.empty() ? gpuNow.devices.front().name : "" );
+  bench["cuda_cold_load_ms"] = cudaColdMs;
+  bench["cuda_warm_load_ms"] = cudaWarmMs;
+  bench["cuda_named_forward_ms_avg"] = fwdMs / kForwards;
+  bench["cuda_forwards_per_sec"] = fwdMs > 0 ? kForwards * 1000.0 / fwdMs : 0.0;
+  bench["known_answer_matches_cpu"] = true;
+  if ( gpuNow.available && gpuAfter.available && !gpuNow.devices.empty()
+       && !gpuAfter.devices.empty() )
+  {
+    bench["vram_free_before_mb"] = gpuNow.devices.front().freeVramMb;
+    bench["vram_free_after_mb"] = gpuAfter.devices.front().freeVramMb;
+  }
+  bench["created_utc"] = QDateTime::currentDateTimeUtc().toString( Qt::ISODateWithMs );
+
+  QDir().mkpath( QStringLiteral( "benchmarks" ) );
+  QFile out( QStringLiteral( "benchmarks/model-runtime-9-cuda.json" ) );
+  REQUIRE( out.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+  out.write( QJsonDocument( bench ).toJson( QJsonDocument::Indented ) );
+  out.close();
+
+  cudaSession.reset();
+  cpuSession.reset();
+  registry.releaseAll();
+#else
+  FAIL( "benchmark gated: ORT provider not compiled in" );
 #endif
 }

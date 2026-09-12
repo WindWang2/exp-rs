@@ -168,6 +168,28 @@ const PluginRecord *PluginRegistry::record( const std::string &pluginId ) const
     return nullptr;
 }
 
+Json::Value PluginRegistry::accessDeclarationFor( const std::string &pluginId ) const
+{
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+    for ( const PluginRecord &candidate : mRecords )
+    {
+        if ( candidate.id() == pluginId )
+            return candidate.manifest.access; // deep copy under the lock
+    }
+    return Json::Value();
+}
+
+std::string PluginRegistry::pluginDirectoryFor( const std::string &pluginId ) const
+{
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+    for ( const PluginRecord &candidate : mRecords )
+    {
+        if ( candidate.id() == pluginId )
+            return candidate.directory;
+    }
+    return {};
+}
+
 PluginRecord *PluginRegistry::record( const std::string &pluginId )
 {
     std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );

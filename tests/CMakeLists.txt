@@ -506,6 +506,7 @@ qt_add_executable(test_mapspec
   test_knowledge_drift.cpp
   test_platform7.cpp
   test_platform8.cpp
+  test_platform9.cpp
 )
 target_compile_definitions(test_mapspec PRIVATE
   SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
@@ -1696,6 +1697,28 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
     )
     sicnu_discover_tests(test_model_runtime_8)
 
+    # Model Runtime 9.0: contract truth (schema ⊇ parsed params, #872 class),
+    # real device inventory, per-feed preprocessing, temporal chunking,
+    # feather blending, packaging identity, consumer-side provenance.
+    # Fake providers + synthetic rasters — runs in every OpenCV-enabled build.
+    add_executable(test_model_runtime_9 test_model_runtime_9.cpp)
+    target_link_libraries(test_model_runtime_9 PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_model_runtime_9)
+    target_include_directories(test_model_runtime_9 PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_model_runtime_9)
+
     # Model Runtime 8.0 WP-A: the REAL ONNX Runtime lane. Built only when the
     # ORT provider is actually compiled in — hosts without the dependency skip
     # the target entirely (honest capability gate, never a fake pass).
@@ -2031,6 +2054,53 @@ target_link_libraries(test_sample_label_annotation PRIVATE Sicnu::dataset SQLite
 sicnu_add_test(test_split_leakage TIMEOUT 120)
 target_link_libraries(test_split_leakage PRIVATE Sicnu::dataset SQLite::SQLite3)
 
+# MLOps 9.0 split-boundary validation: #875 regression, total config
+# validation (NaN/Inf/negative/overflow), degenerate-fold refusals,
+# spatiotemporal_block, bounded generation summaries.
+sicnu_add_test(test_mlops9_split TIMEOUT 120)
+target_link_libraries(test_mlops9_split PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# MLOps 9.0 dataset version DAG: parent validation, ancestor walks with
+# corruption detection, derive/fork; sample temporal-validity governance.
+sicnu_add_test(test_mlops9_version_dag TIMEOUT 120)
+target_link_libraries(test_mlops9_version_dag PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# MLOps 9.0 evidence/matrix/replay/promotion over a real ExperimentStore.
+sicnu_add_test(test_mlops9_evidence TIMEOUT 300)
+target_link_libraries(test_mlops9_evidence PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+
+# MLOps 9.0 scale & durability: 100k-run metadata stress, concurrent
+# readers/writer, corruption refusal, injected commit-fault recovery.
+# RUN_SERIAL: pays 100k single-row transactions by design.
+# RUN_SERIAL TRUE is forwarded through sicnu_discover_tests as a real ctest
+# test property (a target-level RUN_SERIAL would be a no-op for discovered
+# tests — review round 1).
+sicnu_add_test(test_mlops9_scale TIMEOUT 900 RUN_SERIAL TRUE)
+target_link_libraries(test_mlops9_scale PRIVATE
+  Sicnu::experiment Sicnu::dataset SQLite::SQLite3 sicnu_runtime)
+
+# MLOps 9.0 CLI auto-recording E2E: real sicnu_geo_rs_cli subprocess with
+# --experiment-record; POSIX spawn (popen) like test_cli_commands_json.
+if(NOT WIN32)
+add_executable(test_mlops9_cli_record test_mlops9_cli_record.cpp)
+target_link_libraries(test_mlops9_cli_record PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::experiment
+  Sicnu::dataset
+  GDAL::GDAL
+  SQLite::SQLite3
+)
+target_include_directories(test_mlops9_cli_record PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_mlops9_cli_record PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+sicnu_discover_tests(test_mlops9_cli_record TIMEOUT 300)
+endif()
+
 # Foundation 5.0 experiment/run identity, metrics, comparison, lineage and
 # reproduction bundle (ADR 0137/0138, goal §23-§31/§51).
 sicnu_add_test(test_experiment_evaluation TIMEOUT 180)
@@ -2144,6 +2214,13 @@ sicnu_add_test(test_execution_plane_8 TIMEOUT 1200 RUN_SERIAL TRUE)
 target_compile_definitions(test_execution_plane_8 PRIVATE
     SICNU_WORKER_EXE="$<TARGET_FILE:sicnu_worker>"
 )
+
+# Execution / Concurrency / Lifecycle 9.0 — structured hierarchy, transient
+# child admission (#862), lifecycle-safe eventing (#860), ghost-run closure
+# (#876). RUN_SERIAL: heavy concurrency cases must not share CPU/RSS with
+# other heavy suites (no cross-case singleton sharing — each Catch2 case is
+# its own process via catch_discover_tests).
+sicnu_add_test(test_execution_plane_9 TIMEOUT 2400 RUN_SERIAL TRUE)
 
 # Phase I persistent workspace catalog.
 sicnu_add_test(test_workspace_catalog TIMEOUT 300)
@@ -5101,19 +5178,29 @@ target_include_directories(test_hooks_comprehensive PRIVATE
 set_target_properties(test_hooks_comprehensive PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_hooks_comprehensive)
 
-# Histogram Widget tests — tests the data structures, not the widget itself
-# (widget is part of main app executable, not a separate library)
-add_executable(test_histogram_widget test_histogram_widget.cpp)
+# Histogram Widget tests — data structures + widget-level scan behavior
+# (Workbench 9.0 M0: failed GDALOpen must surface an error on the GUI thread)
+add_executable(test_histogram_widget
+  test_histogram_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/histogram_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+)
 target_link_libraries(test_histogram_widget PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  GDAL::GDAL
 )
 target_include_directories(test_histogram_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
+set_target_properties(test_histogram_widget PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_histogram_widget)
 
 # Display stretch core — pure resolve + port apply (no GUI)
@@ -5427,6 +5514,7 @@ qt_add_executable(test_workflow_session_controller
   test_workflow_session_controller.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/workflow_session_controller.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/task_panel_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/workbench_enum_provider.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_result_summary.cpp
@@ -6005,6 +6093,27 @@ target_include_directories(test_project_context_reap PRIVATE
 )
 sicnu_discover_tests(test_project_context_reap)
 
+# ── Workbench 9.0 M0: project clear/switch/exit churn stress (#859 family) ──
+add_executable(test_project_lifecycle_stress
+  test_project_lifecycle_stress.cpp
+)
+target_link_libraries(test_project_lifecycle_stress PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  Sicnu::qgis_display
+)
+target_include_directories(test_project_lifecycle_stress PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+# Heavy churn loop — run serially, never parallel with other heavy suites.
+sicnu_discover_tests(test_project_lifecycle_stress)
+
 # Data Manager promote tests - temporary -> ProjectPersistent
 qt_add_executable(test_data_manager_promote
   test_data_manager_promote.cpp
@@ -6502,6 +6611,133 @@ target_compile_definitions(test_scan_pool PRIVATE
 )
 sicnu_discover_tests(test_scan_pool)
 
+# ── Workbench 9.0 M8: plugin command lifecycle (placement → registry) ──────
+add_executable(test_plugin_ui_placement
+  test_plugin_ui_placement.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/plugin_command_defs.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_plugin_ui_placement PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_plugin_ui_placement PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_plugin_ui_placement PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_plugin_ui_placement)
+
+# ── Workbench 9.0 M7: bounded catalog pagination ───────────────────────────
+add_executable(test_catalog_pagination
+  test_catalog_pagination.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/data_manager_panel.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/panels/asset_catalog_index.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/preview/asset_preview_service.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_empty_state_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_help_catalog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/dialog_utils.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/temporal_analysis_dialog.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/dialogs/raster_processing_dialog_base.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/gui_job_adapter.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/processing_job_adapter.cpp
+)
+target_link_libraries(test_catalog_pagination PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_jobs
+  sicnu_operators
+  Sicnu::qgis_display
+  Sicnu::Geospatial
+  GDAL::GDAL
+)
+target_include_directories(test_catalog_pagination PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_catalog_pagination PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_catalog_pagination)
+
+# ── Workbench 9.0 M6: production schema enum provider ──────────────────────
+add_executable(test_workbench_enum_provider
+  test_workbench_enum_provider.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/workbench_enum_provider.cpp
+)
+target_link_libraries(test_workbench_enum_provider PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  sicnu_data
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_workbench_enum_provider PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_workbench_enum_provider PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_workbench_enum_provider)
+
+# ── Workbench 9.0 M1: explicit workbench state model ───────────────────────
+add_executable(test_workbench_state_model
+  test_workbench_state_model.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_state.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_workbench_state_model PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_workbench_state_model PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_workbench_state_model PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_workbench_state_model)
+
+# ── Workbench 9.0 M0: worker→UI completion delivery helper ─────────────────
+add_executable(test_marshal_ui
+  test_marshal_ui.cpp
+)
+target_link_libraries(test_marshal_ui PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_include_directories(test_marshal_ui PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_marshal_ui PROPERTIES AUTOMOC ON)
+# AUTOUIC would treat the marshal header as a Qt Designer ui_*.h output.
+set_property(SOURCE test_marshal_ui.cpp PROPERTY SKIP_AUTOUIC ON)
+sicnu_discover_tests(test_marshal_ui)
+
 # Spectral index dialog — role-based band preselection via BandRoleCombo (C5)
 sicnu_add_dialog_test(test_spectral_index_dialog
   ${CMAKE_SOURCE_DIR}/src/app/dialogs/spectral_index_dialog.cpp
@@ -6796,6 +7032,7 @@ qt_add_executable(test_workflow_pipeline_ui
   ${CMAKE_SOURCE_DIR}/src/app/workflow/pipeline_editor_dock.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/workflow_session_controller.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/task_panel_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/workbench_enum_provider.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/schema_form_builder.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_result_summary.cpp
@@ -7554,6 +7791,11 @@ target_include_directories(benchmark_contract9 PRIVATE
 target_compile_definitions(benchmark_contract9 PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
+# Harness 9.0 contract floors: suggested-action resolution (#881) and recipe
+# gate truth/degradation semantics (#867), cross-checked against the live
+# tool registry and the authoritative workbench command definitions.
+sicnu_add_test(test_harness9_contracts)
+sicnu_link_jsoncpp(test_harness9_contracts)
 
 
 # Last TEST_INCLUDE_FILES entry: stamp PYTHONHOME / LD_LIBRARY_PATH / QT_IM_MODULE

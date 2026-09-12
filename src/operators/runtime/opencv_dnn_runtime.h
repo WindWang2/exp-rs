@@ -77,6 +77,7 @@ class OpenCvDnnRuntime final : public IModelRuntime
 
     SessionHealth health() const override;
     SessionMemoryEstimate memoryEstimate() const override;
+    ProviderRuntimeDetails providerDetails() const override;
 
   private:
     std::string m_artifactPath;

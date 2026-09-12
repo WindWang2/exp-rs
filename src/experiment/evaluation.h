@@ -206,6 +206,11 @@ class EvaluationProtocol
     QString m_aggregation = QStringLiteral( "macro" );
 };
 
+/// Layout version of persisted metric documents (goal M4). Bump on a
+/// breaking layout change; readers refuse foreign versions rather than
+/// reinterpreting old records silently.
+inline constexpr qint64 kMetricsSchemaVersion = 1;
+
 /// One persisted metric record = protocol + metrics document + identity.
 struct MetricRecord
 {
@@ -213,6 +218,9 @@ struct MetricRecord
     EvaluationProtocol protocol;
     QJsonObject metrics;   ///< typed metric documents (confusion_matrix, regression, …)
     QString metricsHash;   ///< content hash binding the record
+    /// Layout version of the metrics documents (M4); 1 = pre-versioning
+    /// records, which read back unchanged.
+    qint64 metricsSchemaVersion = 1;
 
     QJsonObject toJson() const;
     static Result<MetricRecord> fromJson( const QJsonObject &json );

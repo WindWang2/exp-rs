@@ -2,7 +2,190 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Workbench 9.0] - 2026-09-12
+
+### 🚀 Professional QGIS Remote-Sensing Workbench 9.0 (feat/professional-workbench-9)
+- **Workbench state model (M1)**: `WorkbenchStateModel` — single aggregation point for project phase / tool mode / in-flight task / broken-layer facts with pure `WorkbenchRules` projections; empty-state switches now derive from one signal path.
+- **Command & shortcut authority (M2)**: 22 registry-backed menu items consume `CommandRegistry` projections (single shortcut owner; 19 of them were previously double-shortcut-authority); workflow.new/open/save/run/stop join the registry; two mechanical gates (cross-source shortcut union; tooltips may not claim unbound shortcuts).
+- **UI safety burn-down (M0)**: `marshal_ui.h` completion-delivery helper; histogram scan failures surface on the GUI thread; ROI request epoch made atomic; per-owner scan-pool generation regression tests; 48-cycle project clear/import/view-churn stress.
+- **SchemaForm Host 5.0 (M6)**: production `WorkbenchEnumProvider` (layers/assets/models, 200-entry cap with truthful truncation) installed in TaskPanelHost; model/asset ports resolve live instead of rendering empty.
+- **Large catalog UX (M7)**: bounded pagination over the filtered catalog — exact slices and totals, selection identity survives page flips; 200k logical records stay browsable in bounded windows.
+- **Plugin declarative UI placement (M8)**: shell-side integration of protocol 1.1 — describe → host-render → attach through the reverse-ownership sink, production invoke delegate, and one registry command per rendered menu contribution (auto-disabled on unload/crash).
+- **Master build repair**: GDAL 3.13.3 `count`-parameter type compat in canonical metadata; experiment run bridge const-qualification (GCC 16).
 ## [Unreleased] - 2026-09-12
+
+### AI Model Runtime & Multimodal EO Inference 9.0 (goal series)
+
+- **Real device truth (NVML)**: hardware detection probes the actual NVIDIA
+  driver (dlopen, optional) for device names, total and free VRAM per card,
+  refreshed on every acquire. Direct-CUDA runtimes (onnxruntime) resolve
+  against the real-driver gate; opencv-dnn keeps its cv::dnn-backend gate.
+  Admission free-VRAM is the honest minimum of ledger-reserved and
+  driver-reported free. `SICNU_MODEL_*` env overrides remain the test seams.
+- **CUDA EP executed for real**: a resolved CUDA device attempts the CUDA
+  execution provider; failures are typed `DeviceUnavailable` (never a silent
+  CPU demotion). Sessions expose `providerDetails()` (execution provider +
+  backend version) into payloads and provenance sidecars. Python worker
+  sessions pin `CUDA_VISIBLE_DEVICES` to the resolved device and may declare
+  providers/runtime version in the handshake.
+- **Timeout taxonomy**: a live-but-unresponsive provider (`timed out`) is a
+  new append-only `Timeout` failure kind (`ExternalProcessTimeout`), distinct
+  from `ProviderCrash`.
+- **Per-feed preprocessing**: `inputs[].preprocess` overrides the global
+  contract per feed (closed vocabulary, arity validated per feed); the
+  effective contract is recorded per feed in payload + sidecar.
+- **Feed identity fingerprints**: deterministic structure + bounded content
+  digest per feed (honest `file-too-large` marker beyond the bound).
+- **Feather tile blending**: `tiling.blend: "feather"` / rs:infer `blend`
+  averages overlapping tile windows (cosine ramp across the halo) in a
+  bounded sliding-row accumulator; probabilities blend before the derived
+  collapse; NaN predictions skip; halo and grid-preserving geometry required
+  (typed refusals otherwise); multi-input refuses feather in 9.0.
+- **Per-class product metadata**: Labels/Mask products tally per-product-class
+  pixels during the final streaming pass; payload + sidecar carry
+  `class_pixel_counts` (and class names).
+- **Package identity**: `package.aux_files[]` digest-bound at resolve time
+  (missing/size/checksum mismatch → typed readiness failures); the package
+  digest extends the session cache key.
+- **Consumer-side provenance verification**: `verifyProductProvenance()`
+  returns typed verdicts (MissingSidecar / Malformed / UnsupportedSchema /
+  ModelMismatch / GridMismatch / StaleProduct) — the 8.0 crash window is now
+  consumer-detectable.
+- **Contract truth pinned (#872)**: rs:infer schema declares `device` and
+  `blend`; a mechanical regression pins "every parsed parameter is declared
+  in the schema" for all model operators.
+- **Real CUDA evidence**: capability-gated ORT suites and a gated benchmark
+  record real CUDAExecutionProvider execution (RTX 3080 Laptop) with
+  CPU↔GPU bit-exact known answers; CPU-only hosts keep the honest
+  typed-refusal path (marked, never claimed).
+- **Cross-track build unblocks (minimal)**: GDAL 3.13 `GDALMDArrayRead`
+  count-parameter compat in `canonical_metadata.cpp` (the geospatial
+  track's file; mirrors its own 3.13 pattern) and a `const auto` fix in
+  `run_bridge.cpp` (mlops track's file; the fetched copy is mutated by
+  design).
+### Scientific MLOps / Reproducibility 9.0 (goal series)
+
+- **Split-boundary correctness (M0, fixes #875)**: total split-config
+  validation — finite-positive block sizes for every spatial grid method
+  (the old guard missed `spatial_k_fold`, and NaN slipped every `<= 0`
+  check), finite non-negative ratios for all methods, guarded spatial
+  grid-index arithmetic (no float→int UB for tiny block sizes), degenerate
+  fold refusals (fewer samples/groups/blocks than folds; single-key
+  leave-one-out), and a new `spatiotemporal_block` method whose atomic
+  unit is the (grid cell × time window) pair. Split manifests now embed a
+  bounded generation summary (role/fold counts + per-role class
+  distribution, capped with an explicit truncation flag); the manifest
+  fingerprint excludes the derived summary.
+- **Dataset version lineage DAG (M1)**: parent links are validated at
+  write time (dangling/cross-dataset/cyclic lineages are typed refusals);
+  `versionAncestors` is total (dangling legacy links surface as typed
+  failures, never silently truncated chains); `versionChildren` inverts
+  the link; `createDerivedVersion` forks committed content into a fresh
+  draft.
+- **Sample temporal validity (M2)**: optional label validity windows with
+  round-trip persistence and validation (empty windows and observations
+  outside the window are refused); window-less samples are unchanged.
+- **CLI pipeline auto-recording (M3, the 8.0 follow-up)**: opt-in
+  `--experiment-record` (+ experiment metadata and `--pin-*` identity
+  flags) records CLI pipelines and resumes into an ExperimentStore through
+  the same workflow monitor as MCP submissions; identity pins bind at
+  start; terminal outcomes are recorded truthfully (failures stay
+  failures); resuming an unrecorded execution records nothing.
+- **Scientific evidence (M4)**: schema-versioned evidence projection with
+  typed completeness verdicts (missing dimensions are named, never
+  filled); metric records carry a layout schema version.
+- **Experiment matrix (M5)**: bounded sweep descriptors (typed refusal
+  above 1000 cells), deterministic content-hash cell ids, an explicit
+  cell↔run ledger over store lineage edges, honest aggregation
+  (missing/failed cells reported), pareto selection restricted to cells
+  that recorded every objective metric.
+- **Comparison diagnostics (M6)**: `RunComparison` adds artifacts
+  (digest-set diff) and runtime (wall-time beyond max(1 s, 1 %))
+  dimensions with explicit missing-evidence details.
+- **Replay deviation reporting (M7)**: original-vs-replay verdicts
+  (identical/equivalent/deviated/incomplete) with environment drift and
+  pin deviations; metric deltas only within comparable identity.
+- **Model promotion seam (M8)**: promotion EVIDENCE records (criteria
+  results, benchmark-set membership, append-only approval trail with a
+  conflict rule) keyed by existing model-catalog ids — no new registry.
+- **Scale & durability evidence (M9)**: 100k-run store stress with bounded
+  paged access, concurrent readers under a writer, corruption refusal, and
+  injected commit-fault rollback/recovery.
+### Intelligent Cartography / MapSpec / Template Platform 9.0
+
+- **Solver 9.0 evidence surfaces**: the bounded composition solver now
+  attributes non-convergence (oscillation) — the constraints still writing
+  when the 24-pass budget was exhausted are named in `oscillations` and a
+  human-readable note; the layout rolls back to its pre-solve snapshot (the
+  #864 contract). A bounded per-pass `trace` records which constraints wrote
+  in each pass. Permanently-failed constraints are recorded in the decisions
+  ledger exactly once across unsat-core restore sweeps.
+- **Text-driven sizing**: `fit_content` accepts `text_ref` — content is
+  derived at solve time from a referenced text item under the deterministic
+  typography model (wrap width = declared rect or max_size width; height =
+  lines × pt × leading). `content_mm` and `text_ref` are mutually exclusive
+  and validated.
+- **Scoped re-solve**: `resolveCompositionScoped` restricts the bounded
+  pipeline to constraints/anchors/clamps touching a focus set (anchor
+  authority stays global), keeping repair loops cheap on large documents.
+- **Multi-page 9.0**: `page_break` constraint kind (validated target page,
+  solver-applied, idempotent); `pages[].furniture` master furniture
+  materialized as provenance-stamped clones (`<id>-p<n>`, `master_of`)
+  through the standard compile path; atlas-driven `expression` on titles and
+  labels compiles to QGIS-native `[% … %]` markup (unparseable expressions
+  are compile failures); `continuation` blocks compile cross-page reference
+  captions with resolved display page numbers.
+- **Thematic 9.0**: raster `scale_ranges` scale-dependent visibility (same
+  scale semantics as the vector `scaledenominator`); `bivariate` symbology
+  is declaration-gated — valid only with an explicit semantic contract, two
+  distinct axes, and per-axis fields/classes.
+- **Charts/tables 9.0**: `MAP_CHART_OVER_MAP` preflight rule + repair
+  (opaque chart/colorbar pictures may not silently cover map frames);
+  `dual_axis` declarations are honestly reported as unsupported by the
+  single-axis renderers (`MAP_DUAL_AXIS_UNSUPPORTED`); numeric formatting
+  pinned locale-independent.
+- **QA 9.0**: `repairMapSpecWithLedger` attributes outcomes per finding
+  (applied / still_reported) via one post-repair preflight; the
+  `cartography:repair` tool surfaces the per-pass ledger; map frames may
+  declare `crs` and satisfy the report CRS obligation.
+- **Export 9.0**: `cartography:export` — governed atomic export (temp file,
+  exporter-result verification, SHA-256 over the written bytes, rename);
+  png supports declared page selection, pdf/svg honestly refuse page
+  selection on this QGIS build; font substitutions reported as diagnostics.
+- **Tools 9.0**: `cartography:explain` (bounded per-item solver + preflight
+  evidence) and `cartography:diff_templates` (bounded semantic template
+  diff) join the typed tool surface; compose provenance carries structured
+  template lineage (`template_provenance`).
+- **Component catalog**: new `table--accuracy-matrix` component; catalog
+  index regenerated.
+### Plugin SDK / Isolated Extension Ecosystem 9.0 (feat/plugin-platform-9)
+- **Protocol 1.2** (additive): per-direction frame caps
+  (`limits.maxRequestBytes` / `maxResponseBytes`; fixes the 1.1 defect where
+  a small response quota also capped host->worker request frames),
+  `worker.hello` feature negotiation, quota `maxRequestBytes`, and honest
+  E6003 reporting from `statusCode()`. Seeded fuzz suites over the
+  frame/envelope codecs.
+- **Capability enforcement**: model-framework gate, declarative-UI gate
+  (ui:false refuses describe/invoke), external-tool spawn gate
+  (PolicyRefused 4102), worker-side provider scheme gate, and the
+  machine-readable capability enforcement matrix surfaced by
+  `plugin inspect` and the debug bundle.
+- **Concurrency/process observability**: gate waiters, peak in-flight,
+  typed last failure, restart-policy state and an honest post-unload
+  process-group probe (retiredGroups) in the runtime snapshot; rendezvous
+  stress suite (7 callers x 3 rounds of colliding fates, bounded waits).
+- **Declarative UI 2.0**: host-side ui.invoke validation (bounded ids,
+  renderer-vocabulary whitelist, value cap) with typed E6010 refusals that
+  never touch the channel; optional capped accessibility metadata.
+- **Packaging 3.0**: install-time dependency-constraint probe (semver-ish
+  ranges, typed warnings, load-time enforcement unchanged).
+- **Offline plugin index**: `plugin index` — manifest-only local scan with
+  api/abi/platform compatibility filtering and pure-function pin
+  annotation; no network, no service.
+- **Conformance kit 3.0**: pass/fail/skipped status per check, new
+  PT_PROVIDERS / PT_AGENTTOOL / PT_MODEL / PT_PERMISSIONS / PT_QUOTA /
+  PT_PROCESS_CLEANUP, strict verdict (any failed check fails the run).
+- **Diagnostics**: `plugin debug-bundle` with recursive secret redaction.
 
 ### Scientific Algorithms 9.0 (goal series) — scientific defect remediation
 
@@ -48,6 +231,71 @@ All notable changes to the `exp-rs` project will be documented in this file.
   const local the setters mutate). No behavior change in either.
 
 ## [Unreleased] - 2026-09-11
+
+### Spatial Scientist Harness 9.0 (goal series)
+
+- **Closed suggested-action vocabulary (#881, P1)**: every blocker/warning
+  action the harness emits now resolves through `harness_actions` to a
+  registered SpatialTool id and/or a registered workbench command
+  (`{action, arguments, kind, tool?, workbench_command?, resolved}`); the
+  historical `check_dataset`/`select_model`/… pseudo-actions are mapped, not
+  renamed, and unknown keys ship `resolved: false` (visible drift, never
+  silent invention). A mechanical floor test cross-checks the table against
+  the live tool registry and the authoritative workbench command source.
+- **Recipe gate truth + substitution fidelity (#867, P1)**: `when_param`
+  gates now have total truth semantics (numeric bindings are VALUES — a
+  bound `0` threshold opens the manual-thresholding branch instead of
+  silently degrading to statistical; bool semantics unchanged), and
+  `$params.X` substitution renders numerics through the JSON writer
+  (shortest round-trip) instead of leaking `0.40000000000000002`-style
+  binary expansions into operator parameters.
+- **Transitive degradation with per-edge precision (#867)**: a fallback-less
+  step on a dropped/skipped dependency is now DROPPED (it used to survive as
+  an orphan consuming an intermediate nobody produced); a dependency that
+  exists only in `params_when_skipped` never flips a healthy normal
+  template. Instantiation emits a bounded `degradations` record
+  (`{step, mode, reason}`) consumed by explain.
+- **MapSpec condition semantics (#866, #877)**: `has(x)` is a first-class
+  operand (`has(x) == false` evaluates instead of erroring exactly when x is
+  absent), and NaN is unordered in comparisons (`==` false, `!=` true,
+  orderings false) instead of comparing equal to everything.
+- **Recipe schema versioning (M4)**: fail-closed validation of recipe
+  `schema_version` (1.0/1.1/2.0); instantiated plans record
+  `recipe_id`/`recipe_version` alongside the fingerprint.
+- **Preflight 9.0 (M3)**: three-tier grading (blocker / warning=assumption /
+  advice) — pure improvements (co-pol preference, model resolution windows)
+  are advice and never flip verdicts; the preflight answer carries a safe
+  **preparation table** (only deterministic data transforms:
+  reproject/align/normalize/calibrate).
+- **Typed intent documents (M2)**: `typedIntentDocument(intent)` — required
+  facts (with why), optional facts with degradation class, expected products,
+  and quality expectations derived from capability knowledge — surfaced by
+  `harness:preflight` and `harness:resolve_intent`.
+- **Typed context 3.0 (M1)**: per-slot `fact_status`
+  (`known`/`assumed`/`unknown`) on DatasetUnderstanding; modality is stamped
+  `assumed` (heuristic inference), metadata-declared facts `known`.
+- **Bounded run diagnosis (M5)**: new `harness:diagnose_run` reads
+  authoritative run state + persisted verification sidecars and emits
+  structured repair proposals `{kind, summary, risk, rationale, action}`
+  with an explicit per-run diagnose budget and typed `stop` conditions; it
+  never executes repairs (Pi remains the only loop).
+- **Evidence-aware retention (M6)**: bounded run summaries (verified
+  artifacts, failed attempts, assumption load) with a token meter
+  (12 entries / 8192 approx tokens, oldest-first eviction) recorded on the
+  evidence path and surfaced by `harness:context`.
+- **Explainability 2.0 (M7)**: `harness:explain` adds degradations, resource
+  decisions (estimates + cleanup), failure explanation (error + failed
+  steps), and reproducibility anchors (run id, plan fingerprint,
+  verification sidecars).
+- **Eval corpus 9.0 (M9)**: six new closed categories — `invalid_input`,
+  `modality_mismatch`, `recovery`, `long_plan`, `cartography`,
+  `prompt_injection` (+ `typed_contract` for the new M1/M2/M3 surfaces);
+  prompt-injection cases pin that hostile metadata stays opaque data and
+  never changes deterministic control flow.
+- **Baseline portability repairs (needed to build on Linux/GCC; pre-existing
+  master defects)**: `GDALMDArrayRead` count argument must be `size_t`
+  (LP64), and `RunExecutionBridge` must mutate a local run copy instead of a
+  const one.
 
 ### Cloud-Native Geospatial Data Fabric 8.0 (goal series)
 

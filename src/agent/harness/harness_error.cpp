@@ -1,6 +1,8 @@
 // src/agent/harness/harness_error.cpp
 #include "harness_error.h"
 
+#include "harness_actions.h"
+
 #include <utility>
 
 namespace sicnu::agent::harness {
@@ -100,10 +102,10 @@ bool isKnownErrorCode( const std::string &code )
 
 Json::Value suggestedAction( const std::string &action, Json::Value arguments )
 {
-  Json::Value a( Json::objectValue );
-  a["action"] = action;
-  a["arguments"] = arguments.isNull() ? Json::Value( Json::objectValue ) : std::move( arguments );
-  return a;
+  // Harness 9.0 (#881): every suggested action resolves through the closed
+  // action vocabulary — the returned document carries the registered tool
+  // id and/or workbench command a dispatcher can actually invoke.
+  return resolvedSuggestedAction( action, std::move( arguments ) );
 }
 
 Json::Value HarnessError::toJson() const

@@ -4,6 +4,7 @@
 #include "operators/framework/artifact_digest.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/runtime/http_provider.h"
+#include "operators/runtime/nvml_inventory.h"
 #include "operators/runtime/opencv_dnn_runtime.h"
 #include "operators/runtime/onnxruntime_provider.h"
 #include "operators/runtime/python_worker_provider.h"
@@ -50,10 +51,20 @@ std::vector<DigestMemoEntry> &digestMemo()
 /// Content digest for session identity. Catalog models always carry one;
 /// ad-hoc file references get it computed here (memoized per file state).
 /// Returns "" when the artifact is not locally readable.
+/// Content digest for session identity. Catalog models always carry one;
+/// ad-hoc file references get it computed here (memoized per file state).
+/// Returns "" when the artifact is not locally readable. Platform 9.0 (M7):
+/// a model with a digest-bound package (aux files) keys its session on the
+/// PACKAGE digest — changed ontology/config bytes never reuse a session
+/// loaded for the previous package, exactly like changed weights.
 std::string contentDigestFor( const ModelInfo &model )
 {
   if ( !model.contentDigest.empty() )
-    return model.contentDigest;
+  {
+    if ( model.packageDigest.empty() )
+      return model.contentDigest;
+    return model.contentDigest + "|pkg:" + model.packageDigest;
+  }
   if ( model.resolvedArtifactPath.empty() )
     return std::string();
 
@@ -185,17 +196,47 @@ ModelHardwareCapabilities ModelHardwareCapabilities::detect()
     // Enumeration is best-effort; absence of a backend is not an error.
   }
   // cv::dnn exposes no device enumeration: an OpenCV CUDA build addresses
-  // exactly one device through this backend. Multi-GPU hosts declare a
-  // larger count via env for runtimes that can address them (onnxruntime).
+  // exactly one device through this backend. Direct-CUDA runtimes get their
+  // REAL device truth from the NVML probe below.
   caps.cudaDeviceCount = caps.cudaAvailable ? 1 : 0;
 
-  // Explicit overrides (tests and constrained deployments).
+  // Platform 9.0 real driver probe: NVML reports actual devices, names,
+  // total AND free VRAM (fresh per call — the acquire path intentionally
+  // re-detects so admission sees live pressure). Failure degrades honestly.
+  const NvidiaInventory nvidia = NvidiaInventory::probe();
+  if ( nvidia.available && !nvidia.devices.empty() )
+  {
+    caps.cudaRuntimeAvailable = true;
+    caps.cudaDeviceCount = std::max( caps.cudaDeviceCount,
+                                     static_cast<int>( nvidia.devices.size() ) );
+    caps.deviceNames.resize( nvidia.devices.size() );
+    caps.deviceTotalVramMb.resize( nvidia.devices.size(), 0 );
+    caps.deviceFreeVramMb.resize( nvidia.devices.size(), -1 );
+    for ( const NvidiaDeviceInfo &device : nvidia.devices )
+    {
+      if ( device.index < 0
+           || device.index >= static_cast<int>( nvidia.devices.size() ) )
+        continue;
+      caps.deviceNames[static_cast<std::size_t>( device.index )] = device.name;
+      caps.deviceTotalVramMb[static_cast<std::size_t>( device.index )] = device.totalVramMb;
+      caps.deviceFreeVramMb[static_cast<std::size_t>( device.index )] = device.freeVramMb;
+    }
+  }
+
+  // Explicit overrides (tests and constrained deployments). SICNU_MODEL_GPU
+  // forces BOTH cuda gates — it simulates (or hides) a GPU host as a whole.
   const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
   const QString gpu = env.value( QStringLiteral( "SICNU_MODEL_GPU" ) );
   if ( gpu == QStringLiteral( "1" ) || gpu.compare( QStringLiteral( "true" ), Qt::CaseInsensitive ) == 0 )
+  {
     caps.cudaAvailable = true;
+    caps.cudaRuntimeAvailable = true;
+  }
   else if ( gpu == QStringLiteral( "0" ) || gpu.compare( QStringLiteral( "false" ), Qt::CaseInsensitive ) == 0 )
+  {
     caps.cudaAvailable = false;
+    caps.cudaRuntimeAvailable = false;
+  }
   bool vramOk = false;
   const int vramMb = env.value( QStringLiteral( "SICNU_MODEL_VRAM_MB" ) ).toInt( &vramOk );
   if ( vramOk && vramMb > 0 )
@@ -203,10 +244,40 @@ ModelHardwareCapabilities ModelHardwareCapabilities::detect()
   bool devicesOk = false;
   const int devices = env.value( QStringLiteral( "SICNU_MODEL_CUDA_DEVICES" ) ).toInt( &devicesOk );
   if ( devicesOk && devices >= 0 )
+  {
+    // Keep the per-device inventory entries that survive the resize — a
+    // shrunken list drops tail devices, a grown list extends with unknowns.
+    const std::size_t newSize = static_cast<std::size_t>( devices );
+    caps.deviceNames.resize( newSize );
+    caps.deviceTotalVramMb.resize( newSize, 0 );
+    caps.deviceFreeVramMb.resize( newSize, -1 );
     caps.cudaDeviceCount = devices;
+  }
+  const QString freeCsv = env.value( QStringLiteral( "SICNU_MODEL_VRAM_FREE_MB" ) );
+  if ( !freeCsv.isEmpty() )
+  {
+    const QStringList parts = freeCsv.split( ',' );
+    caps.deviceFreeVramMb.resize( parts.size(), -1 );
+    caps.deviceNames.resize( parts.size() );
+    caps.deviceTotalVramMb.resize( parts.size(), 0 );
+    for ( int i = 0; i < parts.size() && i < caps.deviceFreeVramMb.size(); ++i )
+    {
+      bool ok = false;
+      const int freeMb = parts[i].trimmed().toInt( &ok );
+      caps.deviceFreeVramMb[static_cast<std::size_t>( i )] = ok && freeMb >= 0 ? freeMb : -1;
+    }
+    caps.cudaDeviceCount =
+      std::max( caps.cudaDeviceCount, static_cast<int>( parts.size() ) );
+  }
+
+  // Consistency: an OpenCV-CUDA claim implies at least one device; a real
+  // driver implies at least one device; with NEITHER cuda path there is
+  // nothing addressable — even if a stale override said otherwise.
   if ( caps.cudaAvailable && caps.cudaDeviceCount < 1 )
     caps.cudaDeviceCount = 1;
-  else if ( !caps.cudaAvailable )
+  if ( caps.cudaRuntimeAvailable && caps.cudaDeviceCount < 1 )
+    caps.cudaDeviceCount = 1;
+  if ( !caps.cudaAvailable && !caps.cudaRuntimeAvailable )
     caps.cudaDeviceCount = 0;
 
   return caps;
@@ -428,17 +499,31 @@ InferenceFailureKind classifyInferenceError( const std::string &message )
        || contains( "cuda_error_out_of_memory" ) || contains( "cudamalloc" )
        || contains( "alloc failed" ) || contains( "allocation failure" ) )
     return InferenceFailureKind::OutOfMemory;
+  // Platform 9.0 taxonomy: a provider that hit its time budget is a Timeout
+  // (LIVE but unresponsive), classified before the crash patterns — "timed
+  // out or exited" messages describe the timeout, the exit note is a side
+  // observation. Deterministic: order matters, never both.
+  if ( contains( "timed out" ) || contains( "timed-out" ) || contains( "time budget exceeded" ) )
+    return InferenceFailureKind::Timeout;
   // Platform 7.0 taxonomy: external-provider death beats shape/corrupt checks
   // — a worker that died mid-run must not read as a model or tensor problem.
   if ( contains( "worker exited" ) || contains( "worker crashed" ) || contains( "provider crashed" )
        || contains( "terminated unexpectedly" ) || contains( "connection refused" )
        || contains( "connection reset" ) || contains( "broken pipe" )
-       || contains( "timed out" ) || contains( "no response from provider" )
+       || contains( "no response from provider" )
        || contains( "provider error" ) )
     return InferenceFailureKind::ProviderCrash;
   if ( contains( "not addressable" ) || contains( "device unavailable" )
        || contains( "cuda is unavailable" ) || contains( "cannot honor device" )
-       || contains( "device request" ) )
+       || contains( "device request" )
+       // Platform 9.0 CUDA-stack realities (real-GPU-lane evidence):
+       // the provider library could not register, or the GPU stack is
+       // incomplete at run time (cuDNN absent), or the driver/hardware
+       // raised a non-OOM CUDA error. All are device-availability
+       // failures — never misclassified as model or tensor problems.
+       || contains( "cudaexecutionprovider" ) || contains( "cudnn is unavailable" )
+       || contains( "cuda_error" ) || contains( "cuda failure" )
+       || contains( "no cuda-capable device" ) )
     return InferenceFailureKind::DeviceUnavailable;
   if ( contains( "schema" ) || contains( "contract" ) || contains( "manifest" )
        || contains( "not part of" ) || contains( "does not declare" )
@@ -480,6 +565,8 @@ ErrorCode errorCodeForInferenceFailure( InferenceFailureKind kind )
       return ErrorCode::DeviceUnavailable;
     case InferenceFailureKind::ProviderCrash:
       return ErrorCode::RuntimeProviderFailed;
+    case InferenceFailureKind::Timeout:
+      return ErrorCode::ExternalProcessTimeout;
     case InferenceFailureKind::Unknown:
       break;
   }
@@ -504,17 +591,27 @@ ModelReadiness evaluateRuntimeReadiness( const ModelInfo &model,
   // same deterministic resolution acquire uses, so readiness and execution
   // can never disagree about device feasibility. Legacy manifests (no token)
   // keep the historical gpu && !cpu_fallback check.
+  //
+  // Platform 9.0: DIRECT-CUDA runtimes (onnxruntime — the only provider with
+  // a multi-device maxAddressableCudaIndex) resolve against the REAL driver
+  // probe (hw.cudaRuntimeAvailable), not the OpenCV-CUDA backend claim; the
+  // same effective view acquire uses. Readiness and execution stay one truth.
+  ModelHardwareCapabilities effectiveHw = hw;
+  if ( const auto traits = ModelRuntimeRegistry::instance().providerTraits( model.framework );
+       traits && traits->maxAddressableCudaIndex > 0 && hw.cudaRuntimeAvailable )
+    effectiveHw.cudaAvailable = true;
+
   if ( model.runtime.device.empty() )
   {
     if ( model.runtime.gpu && !model.runtime.cpuFallback )
     {
-      if ( !hw.cudaAvailable )
+      if ( !effectiveHw.cudaAvailable )
         return fail( ModelReadiness::IncompatibleHardware,
                      "model requires GPU execution but CUDA is unavailable and CPU fallback is disabled" );
-      if ( hw.vramBudgetMb > 0 && model.runtime.estimatedVramMb > hw.vramBudgetMb )
+      if ( effectiveHw.vramBudgetMb > 0 && model.runtime.estimatedVramMb > effectiveHw.vramBudgetMb )
         return fail( ModelReadiness::IncompatibleHardware,
                      "model requires " + std::to_string( model.runtime.estimatedVramMb )
-                       + " MiB VRAM but the host budget is " + std::to_string( hw.vramBudgetMb ) + " MiB" );
+                       + " MiB VRAM but the host budget is " + std::to_string( effectiveHw.vramBudgetMb ) + " MiB" );
     }
     return ModelReadiness::Ready;
   }
@@ -529,7 +626,7 @@ ModelReadiness evaluateRuntimeReadiness( const ModelInfo &model,
     maxCudaIndex = traits->maxAddressableCudaIndex;
   ResolvedDevice resolved;
   std::string why;
-  if ( !resolveDevice( request, hw, model.runtime.gpu, model.runtime.estimatedVramMb,
+  if ( !resolveDevice( request, effectiveHw, model.runtime.gpu, model.runtime.estimatedVramMb,
                        maxCudaIndex, model.runtime.cpuFallback, &resolved, &why ) )
     return fail( ModelReadiness::IncompatibleHardware,
                  "device '" + model.runtime.device + "' cannot execute this model: " + why );
@@ -648,6 +745,15 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     traits = provider->second.traits;
   }
 
+  // Platform 9.0: DIRECT-CUDA runtimes (traits.maxAddressableCudaIndex > 0 —
+  // the onnxruntime provider) resolve against the REAL driver probe
+  // (cudaRuntimeAvailable); the opencv_dnn backend keeps the historical
+  // cv::dnn-backend gate. One effective view feeds resolution, the pressure
+  // valve AND the factory so readiness, acquire and the session agree.
+  ModelHardwareCapabilities effectiveHw = hw;
+  if ( traits.maxAddressableCudaIndex > 0 && hw.cudaRuntimeAvailable )
+    effectiveHw.cudaAvailable = true;
+
   // Platform 4.0 device resolution (deterministic pure function), Platform
   // 7.0 ledger-aware: the planner's per-device free VRAM feeds the choice so
   // auto picks the lowest FITTING index and explicit cuda:N must fit its card.
@@ -655,7 +761,7 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   std::string deviceWhy;
   const int maxIndex = std::min( hw.cudaDeviceCount - 1, traits.maxAddressableCudaIndex );
   const auto buildFreeList = [ & ]() {
-    const DeviceInventory inventory = DeviceInventory::fromHardware( hw );
+    const DeviceInventory inventory = DeviceInventory::fromHardware( effectiveHw );
     std::vector<int> freeMbByIndex;
     if ( maxIndex >= 0 )
     {
@@ -668,13 +774,26 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
         // would read 0, silently demoting every GPU request to cpu.
         if ( info && info->vramCapacityMb > 0 )
           m_ledger.setCapacity( i, info->vramCapacityMb );
-        freeMbByIndex[static_cast<std::size_t>( i )] =
+        // Platform 9.0: the free verdict is the HONEST minimum of what the
+        // ledger still reserves for sessions and what the driver reports as
+        // physically free (other processes on the card count). Either source
+        // alone is used as-is; both unknown stays -1 (unenforced, -1 ignored).
+        const int ledgerFree =
           info && info->vramCapacityMb > 0 ? m_ledger.freeMb( i ) : -1;
+        const int realFree = info ? info->freeVramMb : -1;
+        int freeMb = -1;
+        if ( ledgerFree >= 0 && realFree >= 0 )
+          freeMb = std::min( ledgerFree, realFree );
+        else if ( ledgerFree >= 0 )
+          freeMb = ledgerFree;
+        else
+          freeMb = realFree;
+        freeMbByIndex[static_cast<std::size_t>( i )] = freeMb;
       }
     }
     return freeMbByIndex;
   };
-  if ( !resolveDevice( request, hw, model.runtime.gpu, model.runtime.estimatedVramMb,
+  if ( !resolveDevice( request, effectiveHw, model.runtime.gpu, model.runtime.estimatedVramMb,
                        traits.maxAddressableCudaIndex, model.runtime.cpuFallback,
                        buildFreeList(), m_placementPolicy, &device, &deviceWhy ) )
   {
@@ -686,7 +805,7 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
     // reach this refusal through auto (they demote), so eviction only serves
     // runs that demand GPU.
     bool recovered = false;
-    if ( model.runtime.gpu && hw.cudaAvailable && maxIndex >= 0
+    if ( model.runtime.gpu && effectiveHw.cudaAvailable && maxIndex >= 0
          && request.kind != RequestedDevice::Kind::Cpu )
     {
       // Explicit cuda:N evicts ONLY that device; auto sweeps every
@@ -698,7 +817,7 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
         for ( int i = 0; i <= maxIndex; ++i )
           evictDeviceLocked( i );
       }
-      recovered = resolveDevice( request, hw, model.runtime.gpu, model.runtime.estimatedVramMb,
+      recovered = resolveDevice( request, effectiveHw, model.runtime.gpu, model.runtime.estimatedVramMb,
                                  traits.maxAddressableCudaIndex, model.runtime.cpuFallback,
                                  buildFreeList(), m_placementPolicy, &device, &deviceWhy );
     }
@@ -767,7 +886,7 @@ ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, const Req
   ModelRuntimePtr session;
   try
   {
-    session = factory( effective, hw, &error );
+    session = factory( effective, effectiveHw, &error );
   }
   catch ( ... )
   {

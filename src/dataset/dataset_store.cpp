@@ -29,6 +29,7 @@
 #include <QJsonObject>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QSet>
 
 #include <sqlite3.h>
 
@@ -523,6 +524,52 @@ sicnu::data::Result<DatasetVersionRecord> DatasetStore::createDraftVersion(
             return Result::failure( storeDiag( QStringLiteral( "dataset.conflict" ),
                                                QStringLiteral( "version %1 already exists" ).arg( versionId ) ) );
     }
+    if ( hasParent )
+    {
+        // M1 lineage contract: a dangling or cross-dataset parent link would
+        // fork the DAG silently. The parent must exist inside THIS dataset,
+        // and its own ancestry must terminate within the depth bound — a
+        // loop in a corrupt store is refused at write time, never discovered
+        // at query time.
+        QString parentDatasetId;
+        {
+            Stmt parent( m_impl->db, QStringLiteral(
+                "SELECT dataset_id FROM dataset_versions WHERE id=?" ) );
+            if ( !parent )
+                return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                                   parent.error( m_impl->db ) ) );
+            parent.bind( 1, parentId );
+            if ( !parent.stepRow() )
+                return Result::failure( storeDiag(
+                    QStringLiteral( "dataset.parent_not_found" ),
+                    QStringLiteral( "parent version %1 does not exist" ).arg( parentId ) ) );
+            parentDatasetId = parent.text( 0 );
+        }
+        if ( parentDatasetId != datasetId )
+            return Result::failure( storeDiag(
+                QStringLiteral( "dataset.parent_dataset_mismatch" ),
+                QStringLiteral( "parent version %1 belongs to dataset %2, not %3" )
+                    .arg( parentId, parentDatasetId, datasetId ) ) );
+        QString cursor = parentId;
+        QSet<QString> visited;
+        while ( !cursor.isEmpty() )
+        {
+            if ( visited.contains( cursor ) || visited.size() > kMaxVersionLineageDepth )
+                return Result::failure( storeDiag(
+                    QStringLiteral( "dataset.version_cycle" ),
+                    QStringLiteral( "parent lineage of %1 loops or exceeds %2 versions" )
+                        .arg( parentId )
+                        .arg( kMaxVersionLineageDepth ) ) );
+            visited.insert( cursor );
+            Stmt up( m_impl->db, QStringLiteral(
+                "SELECT parent_version_id FROM dataset_versions WHERE id=?" ) );
+            if ( !up )
+                return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                                   up.error( m_impl->db ) ) );
+            up.bind( 1, cursor );
+            cursor = up.stepRow() ? up.text( 0 ) : QString();
+        }
+    }
 
     DatasetVersionRecord record;
     record.setVersionId( versionId );
@@ -880,6 +927,111 @@ QVector<DatasetVersionRecord> DatasetStore::staleStagedDrafts() const
             records.append( std::move( *record ) );
     }
     return records;
+}
+
+QVector<DatasetVersionRecord> DatasetStore::versionChildren( const DatasetVersionId &versionId,
+                                                             qint64 limit ) const
+{
+    QVector<DatasetVersionRecord> records;
+    if ( !m_impl )
+        return records;
+    QMutexLocker lock( &m_impl->mutex );
+    Stmt stmt( m_impl->db, QStringLiteral(
+        "SELECT " DATASET_VERSION_COLS " FROM dataset_versions WHERE parent_version_id=?"
+        " ORDER BY created_ms, id LIMIT ?" ) );
+    if ( !stmt )
+        return records;
+    stmt.bind( 1, versionId.toString() );
+    stmt.bind( 2, limit );
+    while ( stmt.stepRow() )
+    {
+        if ( auto record = recordFromRow( stmt ) )
+            records.append( std::move( *record ) );
+    }
+    return records;
+}
+
+sicnu::data::Result<QVector<DatasetVersionRecord>> DatasetStore::versionAncestors(
+    const DatasetVersionId &versionId, qint64 maxDepth ) const
+{
+    using Result = sicnu::data::Result<QVector<DatasetVersionRecord>>;
+    if ( !m_impl )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.store_closed" ),
+                                           QStringLiteral( "store is not open" ) ) );
+    if ( maxDepth < 1 )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.version_depth_invalid" ),
+                                           QStringLiteral( "maxDepth must be >= 1" ) ) );
+    QMutexLocker lock( &m_impl->mutex );
+    QVector<DatasetVersionRecord> chain;
+    QSet<QString> visited;
+    QString cursor = versionId.toString();
+    while ( !cursor.isEmpty() )
+    {
+        if ( visited.contains( cursor ) || visited.size() > maxDepth )
+            return Result::failure( storeDiag(
+                QStringLiteral( "dataset.version_cycle" ),
+                QStringLiteral( "lineage of %1 loops or exceeds %2 versions" )
+                    .arg( versionId.toString() )
+                    .arg( maxDepth ) ) );
+        visited.insert( cursor );
+        Stmt stmt( m_impl->db, QStringLiteral(
+            "SELECT " DATASET_VERSION_COLS " FROM dataset_versions WHERE id=?" ) );
+        if ( !stmt )
+            return Result::failure( storeDiag( QStringLiteral( "dataset.store_query_failed" ),
+                                               stmt.error( m_impl->db ) ) );
+        stmt.bind( 1, cursor );
+        if ( !stmt.stepRow() )
+            return Result::failure( storeDiag(
+                QStringLiteral( "dataset.parent_not_found" ),
+                chain.isEmpty()
+                    ? QStringLiteral( "version %1 does not exist" ).arg( cursor )
+                    : QStringLiteral( "ancestor %1 does not exist (dangling parent link)" )
+                          .arg( cursor ) ) );
+        const auto record = recordFromRow( stmt );
+        if ( !record )
+            return Result::failure( storeDiag(
+                QStringLiteral( "dataset.version_row_corrupt" ),
+                QStringLiteral( "version row %1 is corrupt" ).arg( cursor ) ) );
+        cursor = record->parentVersionId();
+        chain.append( std::move( *record ) );
+    }
+    return Result::success( chain );
+}
+
+sicnu::data::Result<DatasetVersionRecord> DatasetStore::createDerivedVersion(
+    const DatasetVersionId &parentId, const QString &note )
+{
+    using Result = sicnu::data::Result<DatasetVersionRecord>;
+    // The parent is read first without the write lock: committed (and
+    // deprecated) manifests are immutable, so nothing can change between
+    // the read and the createDraftVersion transaction below.
+    const auto parent = versionById( parentId );
+    if ( !parent )
+        return Result::failure( storeDiag( QStringLiteral( "dataset.not_found" ),
+                                           QStringLiteral( "version %1 does not exist" )
+                                               .arg( parentId.toString() ) ) );
+    if ( parent->isMutable() )
+        return Result::failure( storeDiag(
+            QStringLiteral( "dataset.derive_requires_committed" ),
+            QStringLiteral( "version %1 is still a draft; commit it before deriving" )
+                .arg( parentId.toString() ) ) );
+
+    const auto parsed = DatasetManifest::fromJson( textToJson( parent->manifestJson() ) );
+    if ( !parsed )
+        return Result::failure( storeDiag(
+            QStringLiteral( "dataset.version_row_corrupt" ),
+            QStringLiteral( "manifest of %1 does not parse: %2" )
+                .arg( parentId.toString(),
+                      parsed.diagnostics().isEmpty()
+                          ? QStringLiteral( "unknown error" )
+                          : parsed.diagnostics().first().message ) ) );
+
+    DatasetManifest derived = parsed.value();
+    derived.setVersionId( DatasetVersionId::generate().toString() );
+    derived.setParentVersionId( parent->versionId() );
+    derived.setFingerprint( QString() ); // stamped by the usual commit path
+    derived.setCreatedAtUtc( QDateTime::currentDateTimeUtc() ); // fresh birth, not inherited
+    return createDraftVersion( derived, note );
 }
 
 // --- lineage -----------------------------------------------------------------

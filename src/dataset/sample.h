@@ -227,6 +227,16 @@ class SampleRecord
     /// Primary observation time (empty for time-invariant samples).
     const QDateTime &timeUtc() const { return m_timeUtc; }
     void setTimeUtc( const QDateTime &time ) { m_timeUtc = time; }
+    /// Label validity window (9.0): the period over which the label is
+    /// scientifically valid (e.g. land cover of a specific season). Invalid
+    /// (= empty) bounds mean unbounded on that side; a set window must be
+    /// non-empty (from <= until) and observation times inside it.
+    /// Scope: storage + validation only — split engines do not consult the
+    /// window (threading validity into split-time refusal is future work).
+    const QDateTime &validFromUtc() const { return m_validFromUtc; }
+    void setValidFromUtc( const QDateTime &time ) { m_validFromUtc = time; }
+    const QDateTime &validUntilUtc() const { return m_validUntilUtc; }
+    void setValidUntilUtc( const QDateTime &time ) { m_validUntilUtc = time; }
     /// CRS of the payload geometry (authority string or WKT); empty = none.
     const QString &crs() const { return m_crs; }
     void setCrs( const QString &crs ) { m_crs = crs; }
@@ -255,6 +265,8 @@ class SampleRecord
     QString m_groupId;
     double m_weight = 1.0;
     QDateTime m_timeUtc;
+    QDateTime m_validFromUtc;
+    QDateTime m_validUntilUtc;
     QString m_crs;
     double m_quality = -1.0;
     QVector<SourceAssetRef> m_sourceAssets;
