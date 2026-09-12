@@ -325,6 +325,9 @@ bool PluginHostProcessRuntime::unloadPlugin( const std::string &pluginId,
         auto iterator = mSessions.find( pluginId );
         if ( iterator == mSessions.end() )
             return true; // nothing hosted (failed load) — nothing to tear down
+        // respawn() publishes entry->session under entry.mutex; read it under
+        // the SAME mutex (a concurrent shared_ptr copy vs store is UB).
+        std::lock_guard<std::mutex> entryLock( iterator->second->mutex );
         session = iterator->second->session;
         mSessions.erase( iterator );
     }
@@ -362,22 +365,29 @@ Json::Value PluginHostProcessRuntime::diagnosticsSnapshot() const
     Json::Value plugins( Json::objectValue );
     for ( const auto &[ pluginId, entry ] : mSessions )
     {
+        // Snapshot the session under entry.mutex: respawn() swaps it in
+        // place under that mutex (a concurrent shared_ptr read/write would
+        // be UB), then all probes run on the local copy.
+        std::shared_ptr<PluginHostProcessSession> session;
+        {
+            std::lock_guard<std::mutex> entryLock( entry->mutex );
+            session = entry->session;
+        }
         Json::Value entryJson( Json::objectValue );
-        entryJson["workerAlive"] = entry->session->isAlive();
-        entryJson["generation"] = entry->session->generation();
-        entryJson["poisoned"] = entry->session->isPoisoned();
-        entryJson["effectiveConcurrency"] = entry->session->effectiveConcurrency();
+        entryJson["workerAlive"] = session->isAlive();
+        entryJson["generation"] = session->generation();
+        entryJson["poisoned"] = session->isPoisoned();
+        entryJson["effectiveConcurrency"] = session->effectiveConcurrency();
         // M10: worker identity + event-drop counter for doctor surfaces.
-        entryJson["workerPid"] = static_cast<Json::Int64>( entry->session->workerPid() );
-        entryJson["droppedEvents"] =
-            static_cast<Json::Int64>( entry->session->droppedEvents() );
+        entryJson["workerPid"] = static_cast<Json::Int64>( session->workerPid() );
+        entryJson["droppedEvents"] = static_cast<Json::Int64>( session->droppedEvents() );
         // M2 observability: in-flight / peak / gate waiters / typed failure.
-        entryJson["inFlight"] = entry->session->inFlight();
-        entryJson["peakInFlight"] = entry->session->peakInFlight();
-        entryJson["gateWaiters"] = entry->session->gateWaiters();
-        entryJson["lastFailure"] = entry->session->lastFailure();
+        entryJson["inFlight"] = session->inFlight();
+        entryJson["peakInFlight"] = session->peakInFlight();
+        entryJson["gateWaiters"] = session->gateWaiters();
+        entryJson["lastFailure"] = session->lastFailure();
         // M3 orphan detection: honest group state ("yes"/"no"/"unknown").
-        entryJson["processGroupState"] = entry->session->processGroupState();
+        entryJson["processGroupState"] = session->processGroupState();
         entryJson["quota"] = entry->quota.toJson();
         plugins[ pluginId ] = entryJson;
     }
@@ -403,6 +413,8 @@ Json::Value PluginHostProcessRuntime::describeUiSchema( const std::string &plugi
             result["error"] = "plugin is not hosted (E4003)";
             return result;
         }
+        // Snapshot under entry.mutex (respawn() swaps the session there).
+        std::lock_guard<std::mutex> entryLock( iterator->second->mutex );
         session = iterator->second->session;
     }
     // Capability gate (9.0): a manifest whose access object explicitly
@@ -473,6 +485,8 @@ Json::Value PluginHostProcessRuntime::invokeUi( const std::string &pluginId,
             result["error"] = "plugin is not hosted (E4003)";
             return result;
         }
+        // Snapshot under entry.mutex (respawn() swaps the session there).
+        std::lock_guard<std::mutex> entryLock( iterator->second->mutex );
         session = iterator->second->session;
     }
     if ( !session || !session->isAlive() )
@@ -534,5 +548,10 @@ bool PluginHostProcessRuntime::isWorkerAlive( const std::string &pluginId ) cons
 {
     std::lock_guard<std::mutex> lock( mMutex );
     auto iterator = mSessions.find( pluginId );
-    return iterator != mSessions.end() && iterator->second->session->isAlive();
+    if ( iterator == mSessions.end() )
+        return false;
+    // Snapshot under entry.mutex (respawn() swaps the session there).
+    std::lock_guard<std::mutex> entryLock( iterator->second->mutex );
+    const auto &session = iterator->second->session;
+    return session && session->isAlive();
 }
