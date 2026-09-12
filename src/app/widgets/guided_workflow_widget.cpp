@@ -4,6 +4,7 @@
 
 #include "jobs/job_types.h"
 #include "processing/framework/runtime_paths.h"
+#include "shell/gui_job_adapter.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -47,11 +48,13 @@ Workflow toWorkflow( const lab::LabSpec &spec )
 GuidedWorkflowWidget::GuidedWorkflowWidget(QgisDesktopWindow *mainWindow, QWidget *parent)
     : QWidget(parent)
     , m_mainWindow(mainWindow)
-    , m_jobHandle(this)
+    , m_jobHandle(std::make_unique<sicnu::app::GuiJobHandle>(this))
 {
     setupUi();
     loadWorkflows();
 }
+
+GuidedWorkflowWidget::~GuidedWorkflowWidget() = default;
 
 void GuidedWorkflowWidget::setupUi()
 {
