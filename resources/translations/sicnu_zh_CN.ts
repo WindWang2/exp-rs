@@ -169,7 +169,7 @@
     <name>AtmosphericDialog</name>
     <message>
         <source>Atmospheric Correction</source>
-        <translation>Atmospheric Correction (大气校正)</translation>
+        <translation>大气校正</translation>
     </message>
     <message>
         <source>Input Data</source>
@@ -217,7 +217,7 @@
     </message>
     <message>
         <source>Radiometric calibration gain.</source>
-        <translation>辐射定标增益 gain。</translation>
+        <translation>辐射定标增益（gain）。</translation>
     </message>
     <message>
         <source>Gain</source>
@@ -225,7 +225,7 @@
     </message>
     <message>
         <source>Radiometric calibration bias.</source>
-        <translation>辐射定标偏置 bias。</translation>
+        <translation>辐射定标偏置（bias）。</translation>
     </message>
     <message>
         <source>Bias</source>
@@ -233,11 +233,11 @@
     </message>
     <message>
         <source>Airmass</source>
-        <translation>气团 Airmass</translation>
+        <translation>大气光学质量</translation>
     </message>
     <message>
         <source>Airmass (DOS2 only), usually ≥ 1.</source>
-        <translation>气团（仅 DOS2），通常≥1。</translation>
+        <translation>大气光学质量（仅 DOS2），通常 ≥ 1。</translation>
     </message>
     <message>
         <source>Band %1</source>
@@ -284,7 +284,7 @@
     </message>
     <message>
         <source>Select the raster layers for the band math operation.</source>
-        <translation>选择待参与波段数学运算的栅格图层。</translation>
+        <translation>选择待参与波段运算的栅格图层。</translation>
     </message>
     <message>
         <source>Input Raster</source>
@@ -644,7 +644,7 @@
     <name>ChangeDetectionDialog</name>
     <message>
         <source>Change Detection</source>
-        <translation>Change Detection (变化检测)</translation>
+        <translation>变化检测</translation>
     </message>
     <message>
         <source>Two-Date Input Data</source>
@@ -1036,7 +1036,7 @@
     <message>
         <source>• Photoshop Levels: interactively adjust shadows, highlights and the gamma midtone
 </source>
-        <translation>• Photoshop 色阶：交互调节阴影、高光与 Gamma 中音
+        <translation>• Photoshop 色阶：交互调节阴影、高光与 Gamma 中间调
 </translation>
     </message>
     <message>
@@ -1384,7 +1384,7 @@
     </message>
     <message>
         <source>Image Fusion</source>
-        <translation>Image Fusion (影像融合)</translation>
+        <translation>影像融合</translation>
     </message>
 </context>
 <context>
@@ -1447,7 +1447,7 @@
     </message>
     <message>
         <source>Spectral Analysis</source>
-        <translation>Spectral Analysis (光谱分析)</translation>
+        <translation>光谱分析</translation>
     </message>
     <message>
         <source>Learn to analyze spectral characteristics of different land cover types using vegetation indices and band math.</source>
@@ -1535,7 +1535,7 @@
     </message>
     <message>
         <source>Image Enhancement</source>
-        <translation>Image Enhancement (影像增强)</translation>
+        <translation>影像增强</translation>
     </message>
     <message>
         <source>Learn contrast enhancement and spatial filtering techniques.</source>
@@ -1575,7 +1575,7 @@
     </message>
     <message>
         <source>Image Classification</source>
-        <translation>Image Classification (影像分类)</translation>
+        <translation>影像分类</translation>
     </message>
     <message>
         <source>Learn supervised and unsupervised classification methods.</source>
@@ -1619,7 +1619,7 @@
     </message>
     <message>
         <source>Change Detection</source>
-        <translation>Change Detection (变化检测)</translation>
+        <translation>变化检测</translation>
     </message>
     <message>
         <source>Detect changes between two time periods.</source>
@@ -1663,7 +1663,7 @@
     </message>
     <message>
         <source>Terrain Analysis</source>
-        <translation>Terrain Analysis (地形分析)</translation>
+        <translation>地形分析</translation>
     </message>
     <message>
         <source>Analyze terrain characteristics from DEM data.</source>
@@ -1707,7 +1707,7 @@
     </message>
     <message>
         <source>Atmospheric Correction</source>
-        <translation>Atmospheric Correction (大气校正)</translation>
+        <translation>大气校正</translation>
     </message>
     <message>
         <source>Remove atmospheric effects from satellite imagery using DOS methods.</source>
@@ -1751,7 +1751,7 @@
     </message>
     <message>
         <source>Image Fusion</source>
-        <translation>Image Fusion (影像融合)</translation>
+        <translation>影像融合</translation>
     </message>
     <message>
         <source>Combine high-resolution panchromatic with multispectral imagery.</source>
@@ -1803,7 +1803,7 @@
     </message>
     <message>
         <source>PCA Analysis</source>
-        <translation>PCA Analysis (主成分分析)</translation>
+        <translation>主成分分析</translation>
     </message>
     <message>
         <source>Dimensionality reduction using Principal Component Analysis.</source>
@@ -1847,7 +1847,7 @@
     </message>
     <message>
         <source>Image Mosaic</source>
-        <translation>Image Mosaic (影像镶嵌)</translation>
+        <translation>影像镶嵌</translation>
     </message>
     <message>
         <source>Combine multiple images into a single mosaic.</source>
@@ -2356,7 +2356,7 @@
     </message>
     <message>
         <source>Gamma (midtones): 1.0 is linear; &lt;1 brightens, &gt;1 darkens.</source>
-        <translation>Gamma（中音）：1.0 为线性；&lt;1 提亮，&gt;1 压暗。</translation>
+        <translation>Gamma（中间调）：1.0 为线性；&lt;1 提亮，&gt;1 压暗。</translation>
     </message>
     <message>
         <source>Highlights (maximum): pixels above this map to white.</source>
@@ -2368,7 +2368,7 @@
     </message>
     <message>
         <source>Gamma (midtones):</source>
-        <translation>Gamma (中音):</translation>
+        <translation>Gamma（中间调）：</translation>
     </message>
     <message>
         <source>Highlights (Max):</source>
@@ -2446,7 +2446,7 @@
     <name>ImageEnhancementPanel</name>
     <message>
         <source>Image Enhancement</source>
-        <translation>Image Enhancement (影像增强)</translation>
+        <translation>影像增强</translation>
     </message>
     <message>
         <source>Enhancement Type</source>
@@ -2843,7 +2843,7 @@
     </message>
     <message>
         <source>Image Mosaic</source>
-        <translation>Image Mosaic (影像镶嵌)</translation>
+        <translation>影像镶嵌</translation>
     </message>
 </context>
 <context>
@@ -2974,7 +2974,7 @@
     </message>
     <message>
         <source>Orthorectification</source>
-        <translation>正射纠正</translation>
+        <translation>正射校正</translation>
     </message>
 </context>
 <context>
@@ -3185,7 +3185,7 @@
     </message>
     <message>
         <source>Post-Classification Comparison</source>
-        <translation>后分类比较</translation>
+        <translation>分类后比较</translation>
     </message>
 </context>
 <context>
@@ -3693,7 +3693,7 @@
     </message>
     <message>
         <source>Change Detection</source>
-        <translation>Change Detection (变化检测)</translation>
+        <translation>变化检测</translation>
     </message>
     <message>
         <source>Terrain</source>
@@ -4637,7 +4637,7 @@
     </message>
     <message>
         <source>Band Math...</source>
-        <translation>波段数学...</translation>
+        <translation>波段运算...</translation>
     </message>
     <message>
         <source>Expression-driven multiband math.</source>
@@ -4733,11 +4733,11 @@
     </message>
     <message>
         <source>Orthorectification...</source>
-        <translation>正射纠正...</translation>
+        <translation>正射校正...</translation>
     </message>
     <message>
         <source>RPC / GCP geometric correction to map coordinates.</source>
-        <translation>RPC / GCP 几何纠正到地图坐标。</translation>
+        <translation>RPC / GCP 几何校正到地图坐标。</translation>
     </message>
     <message>
         <source>Terrain Analysis...</source>
@@ -4745,7 +4745,7 @@
     </message>
     <message>
         <source>DEM products such as slope / aspect / hillshade.</source>
-        <translation>坡度 / 坡向 / 山影等 DEM 产品。</translation>
+        <translation>坡度 / 坡向 / 山体阴影等 DEM 产品。</translation>
     </message>
     <message>
         <source>Image Fusion...</source>
@@ -5901,7 +5901,7 @@ Click the button below to import data, or press Ctrl+O to open an existing proje
     </message>
     <message>
         <source>Image Enhancement</source>
-        <translation>Image Enhancement (影像增强)</translation>
+        <translation>影像增强</translation>
     </message>
     <message>
         <source>Combined Enhancement Panel...</source>
@@ -5941,7 +5941,7 @@ Click the button below to import data, or press Ctrl+O to open an existing proje
     </message>
     <message>
         <source>Band Math...</source>
-        <translation>波段数学...</translation>
+        <translation>波段运算...</translation>
     </message>
     <message>
         <source>Expression math, e.g. (b1-b2)/(b1+b2).</source>
@@ -6005,7 +6005,7 @@ Click the button below to import data, or press Ctrl+O to open an existing proje
     </message>
     <message>
         <source>&amp;Remote Sensing</source>
-        <translation>遥感(&amp;S)</translation>
+        <translation>遥感(&amp;G)</translation>
     </message>
     <message>
         <source>Products and Preprocessing</source>
@@ -6053,7 +6053,7 @@ Click the button below to import data, or press Ctrl+O to open an existing proje
     </message>
     <message>
         <source>Orthorectification (RPC/GCP)...</source>
-        <translation>正射纠正 (RPC/GCP)...</translation>
+        <translation>正射校正 (RPC/GCP)...</translation>
     </message>
     <message>
         <source>Terrain correction based on RPC/GCPs and an optional DEM.</source>
@@ -6073,7 +6073,7 @@ Click the button below to import data, or press Ctrl+O to open an existing proje
     </message>
     <message>
         <source>Spectral Analysis</source>
-        <translation>Spectral Analysis (光谱分析)</translation>
+        <translation>光谱分析</translation>
     </message>
     <message>
         <source>Spectral Library Matching...</source>
@@ -6097,11 +6097,11 @@ Click the button below to import data, or press Ctrl+O to open an existing proje
     </message>
     <message>
         <source>Differencing / normalized difference / change mask / post-classification comparison.</source>
-        <translation>差值 / 归一化差值 / 变化掩膜 / 后分类比较。</translation>
+        <translation>差值 / 归一化差值 / 变化掩膜 / 分类后比较。</translation>
     </message>
     <message>
         <source>Post-Classification Comparison...</source>
-        <translation>后分类比较...</translation>
+        <translation>分类后比较...</translation>
     </message>
     <message>
         <source>Two-date classification comparison: per-class transition matrix, gains/losses and a change-type map.</source>
@@ -6683,7 +6683,7 @@ Expected data/samples/ at the project root.</source>
     </message>
     <message>
         <source>Atmospheric Correction</source>
-        <translation>Atmospheric Correction (大气校正)</translation>
+        <translation>大气校正</translation>
     </message>
     <message>
         <source>Radiometric Calibration</source>
@@ -6695,7 +6695,7 @@ Expected data/samples/ at the project root.</source>
     </message>
     <message>
         <source>Orthorectification</source>
-        <translation>正射纠正</translation>
+        <translation>正射校正</translation>
     </message>
     <message>
         <source>QA Mask</source>
@@ -6707,7 +6707,7 @@ Expected data/samples/ at the project root.</source>
     </message>
     <message>
         <source>Post-Classification Comparison</source>
-        <translation>后分类比较</translation>
+        <translation>分类后比较</translation>
     </message>
     <message>
         <source>ROI Mean Spectrum</source>
@@ -6749,11 +6749,11 @@ Expected data/samples/ at the project root.</source>
     </message>
     <message>
         <source>Terrain Analysis</source>
-        <translation>Terrain Analysis (地形分析)</translation>
+        <translation>地形分析</translation>
     </message>
     <message>
         <source>Image Fusion</source>
-        <translation>Image Fusion (影像融合)</translation>
+        <translation>影像融合</translation>
     </message>
     <message>
         <source>Mosaic</source>
@@ -8009,7 +8009,7 @@ ROI 数：%2 · 像元：%3 · 有像元类别：%4</translation>
     </message>
     <message>
         <source>Loaded source image: %1 (%2×%3, %4 bands)</source>
-        <translation>已加载源影像: %1 (%2×%3, %4 bands)</translation>
+        <translation>已加载源影像：%1（%2×%3，%4 个波段）</translation>
     </message>
     <message>
         <source>Cancelling classification...</source>
@@ -8129,7 +8129,7 @@ ROI 数：%2 · 像元：%3 · 有像元类别：%4</translation>
     </message>
     <message>
         <source>Open the source raster first</source>
-        <translation>请先 Open source raster…</translation>
+        <translation>请先打开源栅格…</translation>
     </message>
     <message>
         <source>CV requires ≥ 25 pixels</source>
@@ -8685,7 +8685,7 @@ Loading refused; retry with a matching model and meta.json.</source>
     </message>
     <message>
         <source>No source image (to be corrected / Warp) open yet. File → Open source raster...</source>
-        <translation>尚未打开源影像（待纠正 / Warp）。File → Open source raster…</translation>
+        <translation>尚未打开源影像（待纠正 / Warp）。请通过 文件 → 打开源栅格… 打开。</translation>
     </message>
     <message>
         <source>Source (Warp): %1</source>
@@ -9025,7 +9025,7 @@ Path: %2</source>
     </message>
     <message>
         <source> ⚠ Source and reference are about %1 km apart — turn off Sync zoom, confirm both CRS match, then resample.</source>
-        <translation> ⚠ 源/参相距约 %1 km，请关闭 Sync zoom 并确认两侧 CRS 一致后重采。</translation>
+        <translation> ⚠ 源影像与参考影像相距约 %1 km——请关闭同步缩放，确认两侧 CRS 一致后重新采样。</translation>
     </message>
     <message>
         <source>Added GCP #%1: source (%2, %3) → target (%4, %5)%6</source>
@@ -11990,7 +11990,7 @@ Beware that this option will be applied on all vertices of the edited geometries
     </message>
     <message>
         <source>Atmospheric Correction</source>
-        <translation>Atmospheric Correction (大气校正)</translation>
+        <translation>大气校正</translation>
     </message>
     <message>
         <source>Atmospheric / Radiometric Correction</source>
@@ -11998,7 +11998,7 @@ Beware that this option will be applied on all vertices of the edited geometries
     </message>
     <message>
         <source>Image Fusion</source>
-        <translation>Image Fusion (影像融合)</translation>
+        <translation>影像融合</translation>
     </message>
     <message>
         <source>Panchromatic + multispectral fusion</source>
@@ -12122,7 +12122,7 @@ Beware that this option will be applied on all vertices of the edited geometries
     </message>
     <message>
         <source>Change Detection</source>
-        <translation>Change Detection (变化检测)</translation>
+        <translation>变化检测</translation>
     </message>
     <message>
         <source>Two-Date Change</source>
@@ -12675,7 +12675,7 @@ Beware that this option will be applied on all vertices of the edited geometries
     </message>
     <message>
         <source>/path/to/classified.tif (prompt if empty)</source>
-        <translation>/path/to/classified.tif (留空则提示)</translation>
+        <translation>/path/to/classified.tif（留空则提示）</translation>
     </message>
     <message>
         <source>Cross-Validation</source>
@@ -12858,7 +12858,7 @@ Beware that this option will be applied on all vertices of the edited geometries
     </message>
     <message>
         <source>%1 (%2×%3, %4 bands)</source>
-        <translation>%1 (%2×%3, %4波段)</translation>
+        <translation>%1（%2×%3，%4 个波段）</translation>
     </message>
     <message>
         <source>No image loaded</source>
@@ -13062,7 +13062,7 @@ Beware that this option will be applied on all vertices of the edited geometries
     </message>
     <message>
         <source>Starts the background multi-threaded resampling engine to produce the corrected raster</source>
-        <translation>启动后台多线程重采样变换引擎，生成几何纠正后栅格</translation>
+        <translation>启动后台多线程重采样变换引擎，生成几何校正后的栅格</translation>
     </message>
     <message>
         <source>Start Correction</source>
@@ -13086,7 +13086,7 @@ Beware that this option will be applied on all vertices of the edited geometries
     </message>
     <message>
         <source>%1 (%2×%3, %4 bands)</source>
-        <translation>%1 (%2×%3, %4波段)</translation>
+        <translation>%1（%2×%3，%4 个波段）</translation>
     </message>
     <message>
         <source>No image loaded</source>
@@ -13094,11 +13094,11 @@ Beware that this option will be applied on all vertices of the edited geometries
     </message>
     <message>
         <source>%1 GCPs (%2 enabled)</source>
-        <translation>%1 个 GCP (启用 %2 点)</translation>
+        <translation>%1 个 GCP（启用 %2 个）</translation>
     </message>
     <message>
         <source>0 GCPs (0 enabled)</source>
-        <translation>0 个 GCP (启用 0)</translation>
+        <translation>0 个 GCP（启用 0 个）</translation>
     </message>
     <message>
         <source>%1 (needs ≥ %2 points)</source>
@@ -13238,7 +13238,7 @@ Beware that this option will be applied on all vertices of the edited geometries
     </message>
     <message>
         <source>Linear</source>
-        <translation>Linear (线性)</translation>
+        <translation>线性</translation>
     </message>
     <message>
         <source>Helmert</source>
@@ -13258,15 +13258,15 @@ Beware that this option will be applied on all vertices of the edited geometries
     </message>
     <message>
         <source>Thin Plate Spline</source>
-        <translation>Thin Plate Spline (薄板样条)</translation>
+        <translation>薄板样条</translation>
     </message>
     <message>
         <source>Projective</source>
-        <translation>Projective (透视)</translation>
+        <translation>透视</translation>
     </message>
     <message>
         <source>RPC Physical (RFM)</source>
-        <translation>RPC Physical (RFM 物理模型)</translation>
+        <translation>RPC 物理模型（RFM）</translation>
     </message>
     <message>
         <source>• Linear (≥ 2 points): translation + scale; common for the same scene / nearly collinear cases
@@ -13664,7 +13664,7 @@ Beware that this option will be applied on all vertices of the edited geometries
     </message>
     <message>
         <source>DEM (RPC mode)</source>
-        <translation>DEM (RPC 模式)</translation>
+        <translation>DEM（RPC 模式）</translation>
     </message>
     <message>
         <source>An optional DEM improves RPC projection heights; the Z offset is a metric correction relative to the DEM.</source>
@@ -13672,7 +13672,7 @@ Beware that this option will be applied on all vertices of the edited geometries
     </message>
     <message>
         <source>/path/to/dem.tif (optional)</source>
-        <translation>/path/to/dem.tif (可选)</translation>
+        <translation>/path/to/dem.tif（可选）</translation>
     </message>
     <message>
         <source>DEM path (optional), used for RPC height-related projection.</source>
@@ -14576,75 +14576,75 @@ A new task will be created with the same parameters.</source>
     </message>
     <message>
         <source>Feature Tree</source>
-        <translation>Feature Tree (特征树选择)</translation>
+        <translation>特征树</translation>
     </message>
     <message>
         <source>Spectral Features</source>
-        <translation>Spectral Features (光谱特征)</translation>
+        <translation>光谱特征</translation>
     </message>
     <message>
         <source>Band Mean</source>
-        <translation>Band Mean (波段均值)</translation>
+        <translation>波段均值</translation>
     </message>
     <message>
         <source>Band StdDev</source>
-        <translation>Band StdDev (标准差)</translation>
+        <translation>波段标准差</translation>
     </message>
     <message>
         <source>Band Min</source>
-        <translation>Band Min (最小值)</translation>
+        <translation>波段最小值</translation>
     </message>
     <message>
         <source>Band Max</source>
-        <translation>Band Max (最大值)</translation>
+        <translation>波段最大值</translation>
     </message>
     <message>
         <source>Texture Features (GLCM)</source>
-        <translation>Texture Features (GLCM 纹理特征)</translation>
+        <translation>纹理特征（GLCM）</translation>
     </message>
     <message>
         <source>GLCM Contrast</source>
-        <translation>GLCM Contrast (对比度)</translation>
+        <translation>GLCM 对比度</translation>
     </message>
     <message>
         <source>GLCM Correlation</source>
-        <translation>GLCM Correlation (相关性)</translation>
+        <translation>GLCM 相关性</translation>
     </message>
     <message>
         <source>GLCM Energy</source>
-        <translation>GLCM Energy (能量)</translation>
+        <translation>GLCM 能量</translation>
     </message>
     <message>
         <source>GLCM Homogeneity</source>
-        <translation>GLCM Homogeneity (同质性)</translation>
+        <translation>GLCM 同质性</translation>
     </message>
     <message>
         <source>Shape Features</source>
-        <translation>Shape Features (几何与形状特征)</translation>
+        <translation>形状特征</translation>
     </message>
     <message>
         <source>Area (pixel area)</source>
-        <translation>Area (像素面积)</translation>
+        <translation>面积（像元数）</translation>
     </message>
     <message>
         <source>Perimeter</source>
-        <translation>Perimeter (周长)</translation>
+        <translation>周长</translation>
     </message>
     <message>
         <source>Shape Index</source>
-        <translation>Shape Index (形状指数)</translation>
+        <translation>形状指数</translation>
     </message>
     <message>
         <source>Compactness</source>
-        <translation>Compactness (紧凑度)</translation>
+        <translation>紧凑度</translation>
     </message>
     <message>
         <source>Rectangularity</source>
-        <translation>Rectangularity (矩形度)</translation>
+        <translation>矩形度</translation>
     </message>
     <message>
         <source>Aspect Ratio</source>
-        <translation>Aspect Ratio (长宽比)</translation>
+        <translation>长宽比</translation>
     </message>
     <message>
         <source>Error</source>
@@ -15150,15 +15150,15 @@ Object labels already assigned to this class are not cleared automatically and c
     </message>
     <message>
         <source>Bottom-Up Majority Vote (parent decided by child majority)</source>
-        <translation>Bottom-Up Majority Vote (子级多数票投票决定父级)</translation>
+        <translation>自底向上多数投票（由子级多数票决定父级）</translation>
     </message>
     <message>
         <source>Area-Weighted Vote (parent decided by child pixel area)</source>
-        <translation>Area-Weighted Vote (子级像素面积加权投票决定父级)</translation>
+        <translation>面积加权投票（由子级像元面积加权决定父级）</translation>
     </message>
     <message>
         <source>Top-Down Inheritance (parent class inherited directly)</source>
-        <translation>Top-Down Inheritance (父级类别直接向下继承)</translation>
+        <translation>自顶向下继承（父级类别直接向下传递）</translation>
     </message>
     <message>
         <source>Hierarchy Class Consolidator</source>
@@ -15417,15 +15417,15 @@ Object labels already assigned to this class are not cleared automatically and c
     </message>
     <message>
         <source>Area (pixels)</source>
-        <translation>面积（像素）</translation>
+        <translation>面积（像元数）</translation>
     </message>
     <message>
         <source>Perimeter</source>
-        <translation>Perimeter (周长)</translation>
+        <translation>周长</translation>
     </message>
     <message>
         <source>Shape Index</source>
-        <translation>Shape Index (形状指数)</translation>
+        <translation>形状指数</translation>
     </message>
     <message>
         <source>Spectral (per band):</source>
@@ -16570,7 +16570,7 @@ Object labels already assigned to this class are not cleared automatically and c
     </message>
     <message>
         <source>Wavelength (nm)</source>
-        <translation>波长 Wavelength (nm)</translation>
+        <translation>波长（nm）</translation>
     </message>
     <message>
         <source>Band</source>
@@ -17094,7 +17094,7 @@ Object labels already assigned to this class are not cleared automatically and c
     <name>TerrainDialog</name>
     <message>
         <source>Terrain Analysis</source>
-        <translation>Terrain Analysis (地形分析)</translation>
+        <translation>地形分析</translation>
     </message>
     <message>
         <source>Input Data and Analysis Type</source>
@@ -17244,7 +17244,7 @@ Object labels already assigned to this class are not cleared automatically and c
     </message>
     <message>
         <source>Workflow TaskPipeline (up to %1) submitted for execution...</source>
-        <translation>工作流 TaskPipeline (至 %1) 已提交运行…</translation>
+        <translation>工作流 TaskPipeline（至 %1）已提交运行…</translation>
     </message>
     <message>
         <source>Workflow run stopped</source>
@@ -19269,7 +19269,7 @@ Pick a preset template on the right or build a pipeline with the toolbar</source
     </message>
     <message>
         <source>Terrain Analysis</source>
-        <translation>Terrain Analysis (地形分析)</translation>
+        <translation>地形分析</translation>
     </message>
     <message>
         <source>Covers DEM import, slope computation and hillshade terrain rendering.</source>

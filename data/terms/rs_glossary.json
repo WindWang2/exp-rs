@@ -2,2206 +2,3239 @@
   {
     "en": "radiometric calibration",
     "zh": "辐射定标",
-    "alias": ["绝对辐射定标"],
+    "alias": [
+      "绝对辐射定标"
+    ],
     "definition_zh": "将传感器记录的原始量化值（DN）转换为具有物理量纲的辐射亮度或反射率的处理过程。",
     "category": "radiometric",
-    "related": ["digital number", "radiance", "radiometric correction"]
+    "related": [
+      "digital number",
+      "radiance",
+      "radiometric correction"
+    ]
   },
   {
     "en": "radiometric resolution",
     "zh": "辐射分辨率",
     "definition_zh": "传感器量化电磁辐射能量所使用的比特数，决定了影像可区分的灰度级数。",
     "category": "radiometric",
-    "related": ["digital number", "quantization"]
+    "related": [
+      "digital number",
+      "quantization"
+    ]
   },
   {
     "en": "digital number",
     "zh": "像元灰度值",
-    "alias": ["DN", "计数值"],
+    "alias": [
+      "DN",
+      "计数值"
+    ],
     "definition_zh": "传感器输出的未经定标的原始量化数值，本身不具备物理量纲。",
     "category": "radiometric",
-    "related": ["radiometric calibration", "quantization"]
+    "related": [
+      "radiometric calibration",
+      "quantization"
+    ]
   },
   {
     "en": "radiance",
     "zh": "辐射亮度",
     "definition_zh": "单位投影面积、单位立体角上接收的辐射功率，单位 W·m⁻²·sr⁻¹·μm⁻¹。",
     "category": "radiometric",
-    "related": ["irradiance", "radiometric calibration"]
+    "related": [
+      "irradiance",
+      "radiometric calibration"
+    ]
   },
   {
     "en": "irradiance",
     "zh": "辐照度",
     "definition_zh": "单位表面积上接收的辐射功率，单位 W·m⁻²。",
     "category": "radiometric",
-    "related": ["radiance", "solar irradiance"]
+    "related": [
+      "radiance",
+      "solar irradiance"
+    ]
   },
   {
     "en": "solar irradiance",
     "zh": "太阳辐照度",
     "definition_zh": "大气顶界单位面积接收的太阳辐射功率，是被动光学遥感的能量来源。",
     "category": "radiometric",
-    "related": ["irradiance", "passive remote sensing"]
+    "related": [
+      "irradiance",
+      "passive remote sensing"
+    ]
   },
   {
     "en": "reflectance",
     "zh": "反射率",
     "definition_zh": "地表反射辐射通量与入射辐射通量之比，无量纲，取值通常在 0 到 1 之间。",
     "category": "radiometric",
-    "related": ["surface reflectance", "TOA reflectance", "albedo"]
+    "related": [
+      "surface reflectance",
+      "TOA reflectance",
+      "albedo"
+    ]
   },
   {
     "en": "TOA reflectance",
     "zh": "大气顶层反射率",
-    "alias": ["apparent reflectance", "表观反射率"],
+    "alias": [
+      "apparent reflectance",
+      "表观反射率"
+    ],
     "definition_zh": "未经大气校正、直接由辐射亮度与太阳辐照计算得到的反射率。",
     "category": "radiometric",
-    "related": ["surface reflectance", "atmospheric correction"]
+    "related": [
+      "surface reflectance",
+      "atmospheric correction"
+    ]
   },
   {
     "en": "surface reflectance",
     "zh": "地表反射率",
     "definition_zh": "消除大气吸收与散射影响后反映地表真实反射特性的反射率。",
     "category": "radiometric",
-    "related": ["atmospheric correction", "TOA reflectance"]
+    "related": [
+      "atmospheric correction",
+      "TOA reflectance"
+    ]
   },
   {
     "en": "BRDF",
     "zh": "双向反射分布函数",
-    "alias": ["bidirectional reflectance distribution function"],
+    "alias": [
+      "bidirectional reflectance distribution function"
+    ],
     "definition_zh": "描述地表反射亮度随入射方向与观测方向变化的函数，是角度效应的物理基础。",
     "category": "radiometric",
-    "related": ["Lambertian surface", "non-Lambertian surface"]
+    "related": [
+      "Lambertian surface",
+      "non-Lambertian surface"
+    ]
   },
   {
     "en": "albedo",
     "zh": "反照率",
     "definition_zh": "地表对所有方向和全波段入射辐射的综合反射比，是能量平衡研究的关键参数。",
     "category": "radiometric",
-    "related": ["reflectance", "BRDF"]
+    "related": [
+      "reflectance",
+      "BRDF"
+    ]
   },
   {
     "en": "emissivity",
     "zh": "发射率",
     "definition_zh": "地物在相同温度下的热辐射能力与理想黑体发射之比，取值介于 0 与 1 之间。",
     "category": "radiometric",
-    "related": ["blackbody", "brightness temperature"]
+    "related": [
+      "blackbody",
+      "brightness temperature"
+    ]
   },
   {
     "en": "blackbody",
     "zh": "黑体",
     "definition_zh": "能够完全吸收入射辐射、并在同温下发射最大辐射的理想辐射体。",
     "category": "radiometric",
-    "related": ["Planck's law", "emissivity"]
+    "related": [
+      "Planck's law",
+      "emissivity"
+    ]
   },
   {
     "en": "Planck's law",
     "zh": "普朗克定律",
     "definition_zh": "描述黑体辐射光谱分布随温度变化规律的物理定律，是热红外遥感的理论基础。",
     "category": "radiometric",
-    "related": ["blackbody", "Wien's displacement law"]
+    "related": [
+      "blackbody",
+      "Wien's displacement law"
+    ]
   },
   {
     "en": "Wien's displacement law",
     "zh": "维恩位移定律",
     "definition_zh": "黑体辐射峰值波长与绝对温度成反比的定律，解释了常温地物辐射峰值位于热红外波段。",
     "category": "radiometric",
-    "related": ["Planck's law", "thermal radiation"]
+    "related": [
+      "Planck's law",
+      "thermal radiation"
+    ]
   },
   {
     "en": "Stefan–Boltzmann law",
     "zh": "斯特藩–玻尔兹曼定律",
     "definition_zh": "黑体总辐射出射度与绝对温度的四次方成正比的定律。",
     "category": "radiometric",
-    "related": ["Planck's law", "blackbody"]
+    "related": [
+      "Planck's law",
+      "blackbody"
+    ]
   },
   {
     "en": "thermal radiation",
     "zh": "热辐射",
     "definition_zh": "地物因自身温度而发射的电磁辐射，能量主要集中在热红外与微波波段。",
     "category": "radiometric",
-    "related": ["emissivity", "brightness temperature"]
+    "related": [
+      "emissivity",
+      "brightness temperature"
+    ]
   },
   {
     "en": "brightness temperature",
     "zh": "亮度温度",
     "definition_zh": "与传感器接收辐射等价的黑体温度，是热红外影像常用的物理度量。",
     "category": "radiometric",
-    "related": ["thermal radiation", "emissivity"]
+    "related": [
+      "thermal radiation",
+      "emissivity"
+    ]
   },
   {
     "en": "thermal inertia",
     "zh": "热惯量",
     "definition_zh": "地物抵抗温度变化的度量，由热传导率与热容决定，昼夜温差小者热惯量大。",
     "category": "radiometric",
-    "related": ["thermal radiation", "brightness temperature"]
+    "related": [
+      "thermal radiation",
+      "brightness temperature"
+    ]
   },
   {
     "en": "sensor calibration",
     "zh": "传感器定标",
     "definition_zh": "通过实验室、星上设备或场地测量建立传感器计数值与物理量之间关系的过程。",
     "category": "radiometric",
-    "related": ["radiometric calibration", "vicarious calibration"]
+    "related": [
+      "radiometric calibration",
+      "vicarious calibration"
+    ]
   },
   {
     "en": "vicarious calibration",
     "zh": "替代定标",
     "definition_zh": "利用沙漠、水体等稳定地物或地面同步实测对在轨传感器进行的辐射定标。",
     "category": "radiometric",
-    "related": ["sensor calibration", "surface reflectance"]
+    "related": [
+      "sensor calibration",
+      "surface reflectance"
+    ]
   },
   {
     "en": "gain and offset",
     "zh": "增益与偏置",
     "definition_zh": "定标参数，将传感器计数值线性映射为辐射亮度的乘性系数和加性系数。",
     "category": "radiometric",
-    "related": ["radiometric calibration", "digital number"]
+    "related": [
+      "radiometric calibration",
+      "digital number"
+    ]
   },
   {
     "en": "dark object subtraction",
     "zh": "暗目标减除法",
-    "alias": ["DOS"],
+    "alias": [
+      "DOS"
+    ],
     "definition_zh": "假设影像中最暗目标的反射率为零、以其最小值估计程辐射的简易大气校正方法。",
     "category": "radiometric",
-    "related": ["path radiance", "atmospheric correction"]
+    "related": [
+      "path radiance",
+      "atmospheric correction"
+    ]
   },
   {
     "en": "histogram matching",
     "zh": "直方图匹配",
     "definition_zh": "将一幅影像的直方图变换为参考影像直方图形状的辐射处理方法。",
     "category": "radiometric",
-    "related": ["radiometric normalization", "mosaic color balancing"]
+    "related": [
+      "radiometric normalization",
+      "mosaic color balancing"
+    ]
   },
   {
     "en": "radiometric normalization",
     "zh": "辐射归一化",
     "definition_zh": "使多时相影像具有一致辐射基准的处理，常用于变化检测前的相对定标。",
     "category": "radiometric",
-    "related": ["histogram matching", "image differencing"]
+    "related": [
+      "histogram matching",
+      "image differencing"
+    ]
   },
   {
     "en": "Lambertian surface",
     "zh": "朗伯面",
     "definition_zh": "在所有观测方向上反射亮度相同的理想漫反射表面。",
     "category": "radiometric",
-    "related": ["BRDF", "non-Lambertian surface"]
+    "related": [
+      "BRDF",
+      "non-Lambertian surface"
+    ]
   },
   {
     "en": "non-Lambertian surface",
     "zh": "非朗伯面",
     "definition_zh": "反射亮度随观测方向明显变化的表面，如清洁水体、冰雪和光滑叶面。",
     "category": "radiometric",
-    "related": ["BRDF", "sun glint"]
+    "related": [
+      "BRDF",
+      "sun glint"
+    ]
   },
   {
     "en": "radiometric correction",
     "zh": "辐射校正",
     "definition_zh": "消除传感器和大气引入的辐射误差的各类处理的总称，包括定标与大气校正。",
     "category": "radiometric",
-    "related": ["radiometric calibration", "atmospheric correction"]
+    "related": [
+      "radiometric calibration",
+      "atmospheric correction"
+    ]
   },
   {
     "en": "quantization",
     "zh": "量化",
     "definition_zh": "将连续的辐射电信号映射为有限整数灰度级的过程。",
     "category": "radiometric",
-    "related": ["digital number", "radiometric resolution"]
+    "related": [
+      "digital number",
+      "radiometric resolution"
+    ]
   },
   {
     "en": "sensor noise",
     "zh": "传感器噪声",
     "definition_zh": "由探测器热效应和电路等引入的随机信号误差，通常用信噪比来衡量。",
     "category": "radiometric",
-    "related": ["quantization", "SNR"]
+    "related": [
+      "quantization",
+      "SNR"
+    ]
   },
   {
     "en": "atmospheric correction",
     "zh": "大气校正",
     "definition_zh": "消除大气散射与吸收对传感器信号影响、反演地表真实反射率的处理过程。",
     "category": "atmospheric",
-    "related": ["path radiance", "surface reflectance", "aerosol optical thickness"]
+    "related": [
+      "path radiance",
+      "surface reflectance",
+      "aerosol optical thickness"
+    ]
   },
   {
     "en": "atmospheric window",
     "zh": "大气窗口",
     "definition_zh": "大气吸收较弱、电磁辐射能够较好透过的波长区间，遥感通道大多位于其中。",
     "category": "atmospheric",
-    "related": ["atmospheric transmittance", "absorption"]
+    "related": [
+      "atmospheric transmittance",
+      "absorption"
+    ]
   },
   {
     "en": "Rayleigh scattering",
     "zh": "瑞利散射",
     "definition_zh": "由远小于波长的气体分子引起的散射，强度与波长的四次方成反比，蓝光最强。",
     "category": "atmospheric",
-    "related": ["scattering", "Mie scattering"]
+    "related": [
+      "scattering",
+      "Mie scattering"
+    ]
   },
   {
     "en": "Mie scattering",
     "zh": "米氏散射",
     "definition_zh": "由粒径与波长相当的气溶胶粒子引起的散射，对可见光至近红外影响均较大。",
     "category": "atmospheric",
-    "related": ["scattering", "aerosol"]
+    "related": [
+      "scattering",
+      "aerosol"
+    ]
   },
   {
     "en": "non-selective scattering",
     "zh": "非选择性散射",
     "definition_zh": "由远大于波长的粒子（如云雾水滴）引起的、对各波长强度几乎相同的散射。",
     "category": "atmospheric",
-    "related": ["scattering", "Rayleigh scattering"]
+    "related": [
+      "scattering",
+      "Rayleigh scattering"
+    ]
   },
   {
     "en": "scattering",
     "zh": "散射",
     "definition_zh": "大气分子和气溶胶粒子改变电磁辐射传播方向的物理过程。",
     "category": "atmospheric",
-    "related": ["Rayleigh scattering", "Mie scattering", "path radiance"]
+    "related": [
+      "Rayleigh scattering",
+      "Mie scattering",
+      "path radiance"
+    ]
   },
   {
     "en": "absorption",
     "zh": "吸收",
     "definition_zh": "大气气体将辐射能量转化为自身内能的过程，在特定波长形成吸收带。",
     "category": "atmospheric",
-    "related": ["atmospheric window", "water vapor"]
+    "related": [
+      "atmospheric window",
+      "water vapor"
+    ]
   },
   {
     "en": "atmospheric transmittance",
     "zh": "大气透过率",
     "definition_zh": "辐射穿过大气后能量保持的比例，随波长和大气状态变化。",
     "category": "atmospheric",
-    "related": ["atmospheric window", "Beer–Lambert law"]
+    "related": [
+      "atmospheric window",
+      "Beer–Lambert law"
+    ]
   },
   {
     "en": "Beer–Lambert law",
     "zh": "比尔–朗伯定律",
-    "alias": ["Lambert–Beer law"],
+    "alias": [
+      "Lambert–Beer law"
+    ],
     "definition_zh": "描述辐射穿过吸收介质时按指数规律衰减的基本定律。",
     "category": "atmospheric",
-    "related": ["atmospheric transmittance", "radiative transfer equation"]
+    "related": [
+      "atmospheric transmittance",
+      "radiative transfer equation"
+    ]
   },
   {
     "en": "aerosol",
     "zh": "气溶胶",
     "definition_zh": "悬浮在大气中的固态或液态微粒，是光学遥感大气校正的主要对象。",
     "category": "atmospheric",
-    "related": ["aerosol optical thickness", "Mie scattering"]
+    "related": [
+      "aerosol optical thickness",
+      "Mie scattering"
+    ]
   },
   {
     "en": "aerosol optical thickness",
     "zh": "气溶胶光学厚度",
-    "alias": ["AOD", "AOT"],
+    "alias": [
+      "AOD",
+      "AOT"
+    ],
     "definition_zh": "度量气溶胶对辐射消光强弱的柱积分量，是大气校正的关键输入参数。",
     "category": "atmospheric",
-    "related": ["aerosol", "atmospheric correction"]
+    "related": [
+      "aerosol",
+      "atmospheric correction"
+    ]
   },
   {
     "en": "water vapor",
     "zh": "水汽",
     "definition_zh": "大气中的气态水，在近红外与热红外波段形成强吸收带。",
     "category": "atmospheric",
-    "related": ["absorption", "water vapor retrieval"]
+    "related": [
+      "absorption",
+      "water vapor retrieval"
+    ]
   },
   {
     "en": "ozone",
     "zh": "臭氧",
     "definition_zh": "集中在平流层、强烈吸收紫外辐射并在 9.6 μm 附近有吸收带的气体。",
     "category": "atmospheric",
-    "related": ["absorption", "atmospheric window"]
+    "related": [
+      "absorption",
+      "atmospheric window"
+    ]
   },
   {
     "en": "path radiance",
     "zh": "程辐射",
     "definition_zh": "经大气散射进入传感器视场、未与地表发生作用的辐射分量。",
     "category": "atmospheric",
-    "related": ["atmospheric correction", "dark object subtraction"]
+    "related": [
+      "atmospheric correction",
+      "dark object subtraction"
+    ]
   },
   {
     "en": "adjacency effect",
     "zh": "邻近效应",
     "definition_zh": "相邻像元的信号经大气散射串入目标像元、造成影像模糊的辐射效应。",
     "category": "atmospheric",
-    "related": ["scattering", "atmospheric correction"]
+    "related": [
+      "scattering",
+      "atmospheric correction"
+    ]
   },
   {
     "en": "haze",
     "zh": "霾",
     "definition_zh": "气溶胶与水汽在影像上造成的灰雾状辐射干扰，可通过暗目标或波段运算抑制。",
     "category": "atmospheric",
-    "related": ["aerosol", "dark object subtraction"]
+    "related": [
+      "aerosol",
+      "dark object subtraction"
+    ]
   },
   {
     "en": "cirrus detection",
     "zh": "卷云检测",
     "definition_zh": "利用卷云探测波段（如 1.38 μm）识别并标记高卷云污染像元的处理。",
     "category": "atmospheric",
-    "related": ["cloud masking", "non-selective scattering"]
+    "related": [
+      "cloud masking",
+      "non-selective scattering"
+    ]
   },
   {
     "en": "cloud masking",
     "zh": "云掩膜",
     "definition_zh": "利用光谱规则或分类方法识别云及其阴影并将像元标记为无效值的处理。",
     "category": "atmospheric",
-    "related": ["cirrus detection", "QA band"]
+    "related": [
+      "cirrus detection",
+      "QA band"
+    ]
   },
   {
     "en": "QA band",
     "zh": "质量评估波段",
-    "alias": ["QA"],
+    "alias": [
+      "QA"
+    ],
     "definition_zh": "随影像分发的按位编码像元质量信息（云、阴影、水体等）的辅助波段。",
     "category": "atmospheric",
-    "related": ["cloud masking"]
+    "related": [
+      "cloud masking"
+    ]
   },
   {
     "en": "6S model",
     "zh": "6S 辐射传输模型",
-    "alias": ["Second Simulation of a Satellite Signal in the Solar Spectrum"],
+    "alias": [
+      "Second Simulation of a Satellite Signal in the Solar Spectrum"
+    ],
     "definition_zh": "基于辐射传输方程、广泛用于卫星影像大气校正的模拟模型。",
     "category": "atmospheric",
-    "related": ["radiative transfer equation", "atmospheric correction"]
+    "related": [
+      "radiative transfer equation",
+      "atmospheric correction"
+    ]
   },
   {
     "en": "radiative transfer equation",
     "zh": "辐射传输方程",
     "definition_zh": "描述辐射在介质中传播时被吸收、散射和发射规律的数学方程。",
     "category": "atmospheric",
-    "related": ["Beer–Lambert law", "6S model"]
+    "related": [
+      "Beer–Lambert law",
+      "6S model"
+    ]
   },
   {
     "en": "empirical line method",
     "zh": "经验线性法",
     "definition_zh": "利用地面同步实测的明暗目标建立影像值与反射率线性关系的大气校正方法。",
     "category": "atmospheric",
-    "related": ["surface reflectance", "atmospheric correction"]
+    "related": [
+      "surface reflectance",
+      "atmospheric correction"
+    ]
   },
   {
     "en": "water vapor retrieval",
     "zh": "水汽反演",
     "definition_zh": "利用近红外水汽吸收通道与参考通道的比值估计大气柱水汽含量的方法。",
     "category": "atmospheric",
-    "related": ["water vapor", "atmospheric correction"]
+    "related": [
+      "water vapor",
+      "atmospheric correction"
+    ]
   },
   {
     "en": "sun glint",
-    "zh": "太阳耀斑",
+    "zh": "太阳耀光",
     "definition_zh": "水面以镜面方式反射太阳光形成的亮斑，是水体遥感的主要干扰。",
     "category": "atmospheric",
-    "related": ["non-Lambertian surface"]
+    "related": [
+      "non-Lambertian surface"
+    ]
   },
   {
     "en": "sky diffuse irradiance",
     "zh": "天空散射辐照度",
     "definition_zh": "经大气散射从各方向到达地表的那部分太阳辐照度。",
     "category": "atmospheric",
-    "related": ["irradiance", "scattering"]
+    "related": [
+      "irradiance",
+      "scattering"
+    ]
   },
   {
     "en": "atmospheric turbulence",
     "zh": "大气湍流",
     "definition_zh": "引起影像几何抖动与辐射闪烁的随机大气运动。",
     "category": "atmospheric",
-    "related": ["scattering", "geometric distortion"]
+    "related": [
+      "scattering",
+      "geometric distortion"
+    ]
   },
   {
     "en": "geometric correction",
     "zh": "几何校正",
     "definition_zh": "消除影像几何变形并建立像元坐标与地图坐标之间关系的处理过程。",
     "category": "geometric",
-    "related": ["georeferencing", "geometric distortion", "resampling"]
+    "related": [
+      "georeferencing",
+      "geometric distortion",
+      "resampling"
+    ]
   },
   {
     "en": "geometric distortion",
     "zh": "几何畸变",
     "definition_zh": "影像中地物的形状、尺寸和位置相对于真实情况的系统偏差。",
     "category": "geometric",
-    "related": ["geometric correction", "relief displacement"]
+    "related": [
+      "geometric correction",
+      "relief displacement"
+    ]
   },
   {
     "en": "georeferencing",
     "zh": "地理配准",
     "definition_zh": "利用控制点将影像赋予地理坐标并拟合坐标变换模型的过程。",
     "category": "geometric",
-    "related": ["ground control point", "coordinate reference system"]
+    "related": [
+      "ground control point",
+      "coordinate reference system"
+    ]
   },
   {
     "en": "ground control point",
     "zh": "地面控制点",
-    "alias": ["GCP"],
+    "alias": [
+      "GCP"
+    ],
     "definition_zh": "在影像和地图上都能精确识别的同一位置点，用于建立几何校正模型。",
     "category": "geometric",
-    "related": ["georeferencing", "image registration"]
+    "related": [
+      "georeferencing",
+      "image registration"
+    ]
   },
   {
     "en": "image registration",
     "zh": "影像配准",
     "definition_zh": "使两幅影像的同名地物在几何上相互对齐的处理。",
     "category": "geometric",
-    "related": ["co-registration", "ground control point"]
+    "related": [
+      "co-registration",
+      "ground control point"
+    ]
   },
   {
     "en": "co-registration",
     "zh": "相对配准",
     "definition_zh": "多时相或多源影像之间以其中一幅为基准进行的相互配准。",
     "category": "geometric",
-    "related": ["image registration", "change detection"]
+    "related": [
+      "image registration",
+      "change detection"
+    ]
   },
   {
     "en": "orthorectification",
     "zh": "正射校正",
     "definition_zh": "利用数字高程模型和传感器模型消除投影差、生成正射影像的几何处理。",
     "category": "geometric",
-    "related": ["orthophoto", "digital elevation model", "RPC"]
+    "related": [
+      "orthophoto",
+      "digital elevation model",
+      "RPC"
+    ]
   },
   {
     "en": "orthophoto",
     "zh": "正射影像",
     "definition_zh": "消除了投影差和几何变形、可当作平面图使用的影像产品。",
     "category": "geometric",
-    "related": ["orthorectification"]
+    "related": [
+      "orthorectification"
+    ]
   },
   {
     "en": "parallax",
     "zh": "视差",
     "definition_zh": "由于传感器位置不同引起的同名点影像位移，是立体测量高程的基础。",
     "category": "geometric",
-    "related": ["relief displacement", "stereo mapping"]
+    "related": [
+      "relief displacement",
+      "stereo mapping"
+    ]
   },
   {
     "en": "relief displacement",
     "zh": "投影差",
     "definition_zh": "地形起伏引起的像点自像底点向外的径向位移。",
     "category": "geometric",
-    "related": ["parallax", "orthorectification"]
+    "related": [
+      "parallax",
+      "orthorectification"
+    ]
   },
   {
     "en": "stereo mapping",
     "zh": "立体测图",
     "definition_zh": "利用不同视角的两幅影像构成的立体像对提取高程和地物信息的方法。",
     "category": "geometric",
-    "related": ["parallax", "digital elevation model"]
+    "related": [
+      "parallax",
+      "digital elevation model"
+    ]
   },
   {
     "en": "sensor model",
     "zh": "传感器模型",
     "definition_zh": "描述影像坐标与地面坐标之间几何关系的数学模型，包括严格模型和通用模型。",
     "category": "geometric",
-    "related": ["RPC", "orthorectification"]
+    "related": [
+      "RPC",
+      "orthorectification"
+    ]
   },
   {
     "en": "RPC",
     "zh": "有理多项式系数模型",
-    "alias": ["rational polynomial coefficients"],
+    "alias": [
+      "rational polynomial coefficients"
+    ],
     "definition_zh": "用有理多项式近似传感器成像几何的通用传感器模型。",
     "category": "geometric",
-    "related": ["sensor model", "orthorectification"]
+    "related": [
+      "sensor model",
+      "orthorectification"
+    ]
   },
   {
     "en": "map projection",
     "zh": "地图投影",
     "definition_zh": "将椭球面上的位置转换到平面上的数学规则，必然伴随某种变形。",
     "category": "geometric",
-    "related": ["coordinate reference system", "UTM"]
+    "related": [
+      "coordinate reference system",
+      "UTM"
+    ]
   },
   {
     "en": "coordinate reference system",
     "zh": "坐标参考系统",
-    "alias": ["CRS", "spatial reference system"],
+    "alias": [
+      "CRS",
+      "spatial reference system"
+    ],
     "definition_zh": "由大地基准和投影规则共同定义、赋予坐标以确定含义的参考框架。",
     "category": "geometric",
-    "related": ["datum", "map projection"]
+    "related": [
+      "datum",
+      "map projection"
+    ]
   },
   {
     "en": "datum",
     "zh": "大地基准",
     "definition_zh": "定义坐标系统原点、尺度和定向的参考椭球及其定位（如 CGCS2000、WGS 84）。",
     "category": "geometric",
-    "related": ["coordinate reference system"]
+    "related": [
+      "coordinate reference system"
+    ]
   },
   {
     "en": "UTM",
     "zh": "通用横轴墨卡托投影",
-    "alias": ["Universal Transverse Mercator"],
+    "alias": [
+      "Universal Transverse Mercator"
+    ],
     "definition_zh": "按经差 6° 分带、广泛用于地形图和遥感制图的等角横轴圆柱投影。",
     "category": "geometric",
-    "related": ["map projection", "coordinate reference system"]
+    "related": [
+      "map projection",
+      "coordinate reference system"
+    ]
   },
   {
     "en": "resampling",
     "zh": "重采样",
     "definition_zh": "几何变换或投影改变后按新格网重新计算像元值的过程。",
     "category": "geometric",
-    "related": ["nearest-neighbour resampling", "bilinear interpolation", "cubic convolution"]
+    "related": [
+      "nearest-neighbour resampling",
+      "bilinear interpolation",
+      "cubic convolution"
+    ]
   },
   {
     "en": "nearest-neighbour resampling",
     "zh": "最近邻重采样",
     "definition_zh": "取距离最近像元的原始值作为新像元值的重采样方法，不改变原始数值。",
     "category": "geometric",
-    "related": ["resampling", "bilinear interpolation"]
+    "related": [
+      "resampling",
+      "bilinear interpolation"
+    ]
   },
   {
     "en": "bilinear interpolation",
     "zh": "双线性内插",
     "definition_zh": "利用周围四个像元按距离加权平均的重采样方法，结果较为平滑。",
     "category": "geometric",
-    "related": ["resampling", "cubic convolution"]
+    "related": [
+      "resampling",
+      "cubic convolution"
+    ]
   },
   {
     "en": "cubic convolution",
     "zh": "三次卷积内插",
     "definition_zh": "利用周围十六个像元进行高次插值的重采样方法，兼顾平滑与细节。",
     "category": "geometric",
-    "related": ["resampling", "bilinear interpolation"]
+    "related": [
+      "resampling",
+      "bilinear interpolation"
+    ]
   },
   {
     "en": "ground sampling distance",
     "zh": "地面采样距离",
-    "alias": ["GSD"],
+    "alias": [
+      "GSD"
+    ],
     "definition_zh": "影像中相邻像元中心所对应的地面距离。",
     "category": "geometric",
-    "related": ["spatial resolution"]
+    "related": [
+      "spatial resolution"
+    ]
   },
   {
     "en": "spatial resolution",
     "zh": "空间分辨率",
     "definition_zh": "影像能够分辨的最小地面目标的尺度，通常以像元对应的地面大小表示。",
     "category": "geometric",
-    "related": ["ground sampling distance", "mixed pixel"]
+    "related": [
+      "ground sampling distance",
+      "mixed pixel"
+    ]
   },
   {
     "en": "swath width",
     "zh": "幅宽",
     "definition_zh": "传感器一次过境在垂直轨道方向覆盖的地面宽度。",
     "category": "geometric",
-    "related": ["footprint"]
+    "related": [
+      "footprint"
+    ]
   },
   {
     "en": "footprint",
     "zh": "覆盖范围",
     "definition_zh": "单景影像或瞬时视场所对应的地面覆盖区域。",
     "category": "geometric",
-    "related": ["swath width"]
+    "related": [
+      "swath width"
+    ]
   },
   {
     "en": "sun-synchronous orbit",
     "zh": "太阳同步轨道",
     "definition_zh": "卫星每次以几乎相同的当地太阳时经过同一纬度上空的轨道，保证光照条件可比。",
     "category": "geometric",
-    "related": ["temporal resolution", "revisit period"]
+    "related": [
+      "temporal resolution",
+      "revisit period"
+    ]
   },
   {
     "en": "geostationary orbit",
     "zh": "地球静止轨道",
     "definition_zh": "卫星与地面保持相对静止、可连续观测同一区域的轨道，常用于气象观测。",
     "category": "geometric",
-    "related": ["sun-synchronous orbit", "temporal resolution"]
+    "related": [
+      "sun-synchronous orbit",
+      "temporal resolution"
+    ]
   },
   {
     "en": "nadir",
     "zh": "天底点",
     "definition_zh": "传感器正下方的地面点，也指垂直向下的观测方向。",
     "category": "geometric",
-    "related": ["off-nadir viewing", "incidence angle"]
+    "related": [
+      "off-nadir viewing",
+      "incidence angle"
+    ]
   },
   {
     "en": "off-nadir viewing",
     "zh": "侧视成像",
     "definition_zh": "传感器偏离天底方向的观测方式，会引入角度效应与几何变形。",
     "category": "geometric",
-    "related": ["nadir", "BRDF"]
+    "related": [
+      "nadir",
+      "BRDF"
+    ]
   },
   {
     "en": "pushbroom scanner",
     "zh": "推帚式扫描仪",
     "definition_zh": "由线阵探测器一次曝光获取一整条影像线的线扫描传感器。",
     "category": "geometric",
-    "related": ["whiskbroom scanner"]
+    "related": [
+      "whiskbroom scanner"
+    ]
   },
   {
     "en": "whiskbroom scanner",
-    "zh": "摆帚式扫描仪",
+    "zh": "摆扫式扫描仪",
     "definition_zh": "通过摆动反射镜以逐像元方式扫描地面的机械扫描传感器。",
     "category": "geometric",
-    "related": ["pushbroom scanner"]
+    "related": [
+      "pushbroom scanner"
+    ]
   },
   {
     "en": "ephemeris",
     "zh": "星历数据",
     "definition_zh": "描述卫星位置和速度随时间变化的轨道参数数据，是精密定位处理的基础。",
     "category": "geometric",
-    "related": ["sun-synchronous orbit", "sensor model"]
+    "related": [
+      "sun-synchronous orbit",
+      "sensor model"
+    ]
   },
   {
     "en": "spectral resolution",
     "zh": "光谱分辨率",
     "definition_zh": "传感器区分相邻波长间隔的能力，通常用波段宽度表示。",
     "category": "spectral",
-    "related": ["spectral band", "hyperspectral imagery"]
+    "related": [
+      "spectral band",
+      "hyperspectral imagery"
+    ]
   },
   {
     "en": "spectral band",
     "zh": "光谱波段",
     "definition_zh": "传感器在某一波长区间内设置的具体探测通道。",
     "category": "spectral",
-    "related": ["spectral resolution", "multispectral imagery"]
+    "related": [
+      "spectral resolution",
+      "multispectral imagery"
+    ]
   },
   {
     "en": "multispectral imagery",
     "zh": "多光谱影像",
     "definition_zh": "由若干个较宽波段组成的影像，是最常见的光学遥感产品。",
     "category": "spectral",
-    "related": ["panchromatic imagery", "hyperspectral imagery"]
+    "related": [
+      "panchromatic imagery",
+      "hyperspectral imagery"
+    ]
   },
   {
     "en": "panchromatic imagery",
     "zh": "全色影像",
     "definition_zh": "覆盖较宽可见光波长范围的单波段影像，通常空间分辨率更高。",
     "category": "spectral",
-    "related": ["pansharpening", "multispectral imagery"]
+    "related": [
+      "pansharpening",
+      "multispectral imagery"
+    ]
   },
   {
     "en": "pansharpening",
     "zh": "全色锐化",
     "definition_zh": "将全色波段的高空间分辨率细节与多波段的光谱信息融合的处理。",
     "category": "spectral",
-    "related": ["panchromatic imagery", "image fusion"]
+    "related": [
+      "panchromatic imagery",
+      "image fusion"
+    ]
   },
   {
     "en": "image fusion",
     "zh": "影像融合",
     "definition_zh": "将不同传感器或不同模式影像的信息综合到单一影像的技术总称。",
     "category": "spectral",
-    "related": ["pansharpening"]
+    "related": [
+      "pansharpening"
+    ]
   },
   {
     "en": "VNIR",
     "zh": "可见光—近红外波段",
-    "alias": ["visible and near infrared"],
+    "alias": [
+      "visible and near infrared"
+    ],
     "definition_zh": "大约 0.4–1.0 μm 的波长区间，是光学遥感最活跃的波段范围。",
     "category": "spectral",
-    "related": ["NIR", "SWIR"]
+    "related": [
+      "NIR",
+      "SWIR"
+    ]
   },
   {
     "en": "NIR",
     "zh": "近红外波段",
-    "alias": ["near infrared"],
+    "alias": [
+      "near infrared"
+    ],
     "definition_zh": "约 0.7–1.3 μm 的波长区间，健康植被在此波段反射强烈。",
     "category": "spectral",
-    "related": ["VNIR", "NDVI", "red edge"]
+    "related": [
+      "VNIR",
+      "NDVI",
+      "red edge"
+    ]
   },
   {
     "en": "SWIR",
     "zh": "短波红外波段",
-    "alias": ["shortwave infrared"],
+    "alias": [
+      "shortwave infrared"
+    ],
     "definition_zh": "约 1.3–3.0 μm 的波长区间，对雪、矿物和植被水分含量敏感。",
     "category": "spectral",
-    "related": ["VNIR", "NDBI", "NBR"]
+    "related": [
+      "VNIR",
+      "NDBI",
+      "NBR"
+    ]
   },
   {
     "en": "red edge",
     "zh": "红边",
     "definition_zh": "植被反射率在 0.68–0.75 μm 之间陡然上升的现象，是植被活力的敏感指标。",
     "category": "spectral",
-    "related": ["NIR", "red-edge position"]
+    "related": [
+      "NIR",
+      "red-edge position"
+    ]
   },
   {
     "en": "spectral signature",
     "zh": "光谱特征曲线",
     "definition_zh": "地物反射率随波长变化的曲线，是光谱识别与分类的基础。",
     "category": "spectral",
-    "related": ["spectral library", "spectral angle mapper"]
+    "related": [
+      "spectral library",
+      "spectral angle mapper"
+    ]
   },
   {
     "en": "spectral library",
     "zh": "光谱库",
     "definition_zh": "实验室或野外实测的典型地物光谱曲线集合，用于光谱匹配与识别。",
     "category": "spectral",
-    "related": ["spectral signature", "library matching"]
+    "related": [
+      "spectral signature",
+      "library matching"
+    ]
   },
   {
     "en": "spectral index",
     "zh": "光谱指数",
     "definition_zh": "由两个或多个波段的代数运算构成的定量指示指标。",
     "category": "spectral",
-    "related": ["NDVI", "NDWI", "band ratio"]
+    "related": [
+      "NDVI",
+      "NDWI",
+      "band ratio"
+    ]
   },
   {
     "en": "NDVI",
     "zh": "归一化植被指数",
-    "alias": ["normalized difference vegetation index"],
+    "alias": [
+      "normalized difference vegetation index"
+    ],
     "definition_zh": "由（NIR−红光）/（NIR+红光）计算、指示植被活性与覆盖度的最常用指数。",
     "category": "spectral",
-    "related": ["vegetation index", "EVI", "SAVI"]
+    "related": [
+      "vegetation index",
+      "EVI",
+      "SAVI"
+    ]
   },
   {
     "en": "EVI",
     "zh": "增强型植被指数",
-    "alias": ["enhanced vegetation index"],
+    "alias": [
+      "enhanced vegetation index"
+    ],
     "definition_zh": "引入蓝光通道校正大气并减少土壤背景影响、对高生物量区更敏感的植被指数。",
     "category": "spectral",
-    "related": ["NDVI", "vegetation index"]
+    "related": [
+      "NDVI",
+      "vegetation index"
+    ]
   },
   {
     "en": "SAVI",
     "zh": "土壤调节植被指数",
-    "alias": ["soil-adjusted vegetation index"],
+    "alias": [
+      "soil-adjusted vegetation index"
+    ],
     "definition_zh": "引入土壤亮度调节因子、适合稀疏植被区的植被指数。",
     "category": "spectral",
-    "related": ["NDVI", "MSAVI"]
+    "related": [
+      "NDVI",
+      "MSAVI"
+    ]
   },
   {
     "en": "MSAVI",
     "zh": "修正土壤调节植被指数",
-    "alias": ["modified soil-adjusted vegetation index"],
+    "alias": [
+      "modified soil-adjusted vegetation index"
+    ],
     "definition_zh": "让土壤调节因子随实际植被状况自动变化的 SAVI 改进版本。",
     "category": "spectral",
-    "related": ["SAVI", "NDVI"]
+    "related": [
+      "SAVI",
+      "NDVI"
+    ]
   },
   {
     "en": "NDWI",
     "zh": "归一化水体指数",
-    "alias": ["normalized difference water index"],
+    "alias": [
+      "normalized difference water index"
+    ],
     "definition_zh": "利用绿光与近红外（或 NIR 与 SWIR）的反差提取水体信息的指数。",
     "category": "spectral",
-    "related": ["spectral index", "water body extraction"]
+    "related": [
+      "spectral index",
+      "water body extraction"
+    ]
   },
   {
     "en": "NDBI",
     "zh": "归一化建筑指数",
-    "alias": ["normalized difference built-up index"],
+    "alias": [
+      "normalized difference built-up index"
+    ],
     "definition_zh": "利用短波红外与近红外反差提取建成区信息的指数。",
     "category": "spectral",
-    "related": ["spectral index", "urban expansion"]
+    "related": [
+      "spectral index",
+      "urban expansion"
+    ]
   },
   {
     "en": "NBR",
     "zh": "归一化燃烧指数",
-    "alias": ["normalized burn ratio"],
+    "alias": [
+      "normalized burn ratio"
+    ],
     "definition_zh": "利用近红外与短波红外识别过火区并评估燃烧严重程度的指数。",
     "category": "spectral",
-    "related": ["spectral index", "forest disturbance"]
+    "related": [
+      "spectral index",
+      "forest disturbance"
+    ]
   },
   {
     "en": "vegetation index",
     "zh": "植被指数",
     "definition_zh": "由红光、近红外等波段组合反映植被覆盖与活力的指数总称。",
     "category": "spectral",
-    "related": ["NDVI", "EVI", "phenology"]
+    "related": [
+      "NDVI",
+      "EVI",
+      "phenology"
+    ]
   },
   {
     "en": "band ratio",
     "zh": "波段比值",
     "definition_zh": "两个波段逐像元相除以抑制光照差异和地形阴影影响的简单运算。",
     "category": "spectral",
-    "related": ["band math", "spectral index"]
+    "related": [
+      "band math",
+      "spectral index"
+    ]
   },
   {
     "en": "band math",
     "zh": "波段运算",
     "definition_zh": "对多波段影像逐像元执行代数表达式计算的功能。",
     "category": "spectral",
-    "related": ["band ratio", "spectral index"]
+    "related": [
+      "band ratio",
+      "spectral index"
+    ]
   },
   {
     "en": "mixed pixel",
     "zh": "混合像元",
     "definition_zh": "瞬时视场内包含多种地物、光谱信号为其加权混合的像元。",
     "category": "spectral",
-    "related": ["spectral unmixing", "spatial resolution"]
+    "related": [
+      "spectral unmixing",
+      "spatial resolution"
+    ]
   },
   {
     "en": "spectral unmixing",
     "zh": "光谱解混",
     "definition_zh": "将混合像元的光谱分解为端元光谱及其所占丰度的过程。",
     "category": "spectral",
-    "related": ["endmember", "spectral mixture analysis"]
+    "related": [
+      "endmember",
+      "spectral mixture analysis"
+    ]
   },
   {
     "en": "endmember",
     "zh": "端元",
     "definition_zh": "混合像元分解中代表单一纯净地物的特征光谱。",
     "category": "spectral",
-    "related": ["spectral unmixing", "pixel purity index"]
+    "related": [
+      "spectral unmixing",
+      "pixel purity index"
+    ]
   },
   {
     "en": "spectral mixture analysis",
     "zh": "光谱混合分析",
-    "alias": ["SMA"],
+    "alias": [
+      "SMA"
+    ],
     "definition_zh": "基于线性或非线性混合模型求解像元端元丰度的解混分析框架。",
     "category": "spectral",
-    "related": ["spectral unmixing", "endmember"]
+    "related": [
+      "spectral unmixing",
+      "endmember"
+    ]
   },
   {
     "en": "continuum removal",
     "zh": "连续统去除",
     "definition_zh": "以包络线归一化光谱曲线、突出吸收特征的曲线处理方法。",
     "category": "spectral",
-    "related": ["absorption feature", "mineral mapping"]
+    "related": [
+      "absorption feature",
+      "mineral mapping"
+    ]
   },
   {
     "en": "absorption feature",
     "zh": "吸收特征",
     "definition_zh": "光谱曲线上由分子振动等机制形成的谷值特征，可用于矿物与植被诊断。",
     "category": "spectral",
-    "related": ["continuum removal", "mineral mapping"]
+    "related": [
+      "continuum removal",
+      "mineral mapping"
+    ]
   },
   {
     "en": "water body extraction",
     "zh": "水体提取",
     "definition_zh": "利用光谱指数或阈值方法从影像中圈出水面的处理。",
     "category": "spectral",
-    "related": ["NDWI", "threshold segmentation"]
+    "related": [
+      "NDWI",
+      "threshold segmentation"
+    ]
   },
   {
     "en": "hyperspectral imagery",
     "zh": "高光谱影像",
     "definition_zh": "以数十至上百个连续窄波段成像的影像，光谱分辨率远高于多光谱。",
     "category": "hyperspectral",
-    "related": ["imaging spectrometer", "spectral resolution"]
+    "related": [
+      "imaging spectrometer",
+      "spectral resolution"
+    ]
   },
   {
     "en": "imaging spectrometer",
     "zh": "成像光谱仪",
     "definition_zh": "能在连续光谱区间以大量窄波段同时成像的传感器。",
     "category": "hyperspectral",
-    "related": ["hyperspectral imagery"]
+    "related": [
+      "hyperspectral imagery"
+    ]
   },
   {
     "en": "hyperspectral data cube",
     "zh": "高光谱数据立方体",
     "definition_zh": "由两维空间和一维光谱构成的高光谱三维数据组织形式。",
     "category": "hyperspectral",
-    "related": ["hyperspectral imagery"]
+    "related": [
+      "hyperspectral imagery"
+    ]
   },
   {
     "en": "spectral subset",
     "zh": "光谱子集",
     "definition_zh": "从高光谱数据中选取部分波段参与后续处理的操作。",
     "category": "hyperspectral",
-    "related": ["band selection"]
+    "related": [
+      "band selection"
+    ]
   },
   {
     "en": "band selection",
     "zh": "波段选择",
     "definition_zh": "从大量波段中挑选信息量大或诊断性强的波段以降低维数的手段。",
     "category": "hyperspectral",
-    "related": ["dimensionality reduction", "spectral subset"]
+    "related": [
+      "dimensionality reduction",
+      "spectral subset"
+    ]
   },
   {
     "en": "dimensionality reduction",
     "zh": "降维",
     "definition_zh": "用更少的变量表达高维数据主要信息的技术总称。",
     "category": "hyperspectral",
-    "related": ["principal component analysis", "minimum noise fraction"]
+    "related": [
+      "principal component analysis",
+      "minimum noise fraction"
+    ]
   },
   {
     "en": "minimum noise fraction",
     "zh": "最小噪声分数变换",
-    "alias": ["MNF"],
+    "alias": [
+      "MNF"
+    ],
     "definition_zh": "按信噪比由高到低排列成分的正交变换，常用于高光谱降噪与降维。",
     "category": "hyperspectral",
-    "related": ["principal component analysis", "SNR"]
+    "related": [
+      "principal component analysis",
+      "SNR"
+    ]
   },
   {
     "en": "principal component analysis",
     "zh": "主成分分析",
-    "alias": ["PCA"],
+    "alias": [
+      "PCA"
+    ],
     "definition_zh": "将相关波段变换为一组互不相关主成分的统计降维方法。",
     "category": "hyperspectral",
-    "related": ["dimensionality reduction", "minimum noise fraction"]
+    "related": [
+      "dimensionality reduction",
+      "minimum noise fraction"
+    ]
   },
   {
     "en": "pixel purity index",
     "zh": "像元纯度指数",
-    "alias": ["PPI"],
+    "alias": [
+      "PPI"
+    ],
     "definition_zh": "通过随机投影统计光谱极值像元、寻找候选端元的指标。",
     "category": "hyperspectral",
-    "related": ["endmember", "n-D visualization"]
+    "related": [
+      "endmember",
+      "n-D visualization"
+    ]
   },
   {
     "en": "n-D visualization",
     "zh": "n 维可视化",
     "definition_zh": "在多维特征空间中交互旋转散点云、人工识别端元的高光谱分析工具。",
     "category": "hyperspectral",
-    "related": ["pixel purity index", "endmember"]
+    "related": [
+      "pixel purity index",
+      "endmember"
+    ]
   },
   {
     "en": "spectral feature fitting",
     "zh": "光谱特征拟合",
-    "alias": ["SFF"],
+    "alias": [
+      "SFF"
+    ],
     "definition_zh": "用连续统去除后的吸收特征进行最小二乘拟合的矿物匹配方法。",
     "category": "hyperspectral",
-    "related": ["continuum removal", "mineral mapping"]
+    "related": [
+      "continuum removal",
+      "mineral mapping"
+    ]
   },
   {
     "en": "spectral angle mapper",
     "zh": "光谱角制图",
-    "alias": ["SAM"],
+    "alias": [
+      "SAM"
+    ],
     "definition_zh": "以参考光谱与像元光谱之间的夹角度量相似性的匹配分类方法。",
     "category": "hyperspectral",
-    "related": ["spectral signature", "library matching"]
+    "related": [
+      "spectral signature",
+      "library matching"
+    ]
   },
   {
     "en": "spectral derivatives",
     "zh": "光谱导数",
     "definition_zh": "对光谱曲线求微分以突出细微光谱差异并削弱低频背景的处理。",
     "category": "hyperspectral",
-    "related": ["red edge", "spectral smoothing"]
+    "related": [
+      "red edge",
+      "spectral smoothing"
+    ]
   },
   {
     "en": "red-edge position",
     "zh": "红边位置",
     "definition_zh": "红边斜率最大处的波长，随植被叶绿素含量和生理状态移动。",
     "category": "hyperspectral",
-    "related": ["red edge", "crop stress detection"]
+    "related": [
+      "red edge",
+      "crop stress detection"
+    ]
   },
   {
     "en": "mineral mapping",
     "zh": "矿物填图",
     "definition_zh": "利用诊断性吸收特征在高光谱影像上识别并圈定矿物分布的应用。",
     "category": "hyperspectral",
-    "related": ["absorption feature", "spectral feature fitting"]
+    "related": [
+      "absorption feature",
+      "spectral feature fitting"
+    ]
   },
   {
     "en": "SNR",
     "zh": "信噪比",
-    "alias": ["signal-to-noise ratio"],
+    "alias": [
+      "signal-to-noise ratio"
+    ],
     "definition_zh": "有效信号与噪声强度之比，是评价传感器和影像数据质量的基本指标。",
-    "category": "hyperspectral",
-    "related": ["sensor noise", "minimum noise fraction"]
+    "category": "radiometric",
+    "related": [
+      "sensor noise",
+      "minimum noise fraction"
+    ]
   },
   {
     "en": "spectral smoothing",
     "zh": "光谱平滑",
     "definition_zh": "用 Savitzky–Golay 等滤波抑制光谱曲线高频噪声的处理。",
     "category": "hyperspectral",
-    "related": ["spectral derivatives", "sensor noise"]
+    "related": [
+      "spectral derivatives",
+      "sensor noise"
+    ]
   },
   {
     "en": "library matching",
     "zh": "光谱库匹配",
     "definition_zh": "将影像光谱与光谱库曲线逐一比对以识别地物的方法。",
     "category": "hyperspectral",
-    "related": ["spectral library", "spectral angle mapper"]
+    "related": [
+      "spectral library",
+      "spectral angle mapper"
+    ]
   },
   {
     "en": "crop stress detection",
     "zh": "作物胁迫监测",
     "definition_zh": "利用高光谱敏感指标监测作物水分、养分和病害胁迫状态的应用。",
     "category": "hyperspectral",
-    "related": ["red-edge position", "phenology"]
+    "related": [
+      "red-edge position",
+      "phenology"
+    ]
   },
   {
     "en": "synthetic aperture radar",
     "zh": "合成孔径雷达",
-    "alias": ["SAR"],
+    "alias": [
+      "SAR"
+    ],
     "definition_zh": "利用平台运动合成等效长孔径以获得高分辨率微波影像的主动式传感器。",
     "category": "SAR",
-    "related": ["active remote sensing", "microwave remote sensing"]
+    "related": [
+      "active remote sensing",
+      "microwave remote sensing"
+    ]
   },
   {
     "en": "active remote sensing",
     "zh": "主动遥感",
     "definition_zh": "由传感器自身发射电磁波并接收其回波的探测方式，如雷达和激光雷达。",
     "category": "SAR",
-    "related": ["synthetic aperture radar", "passive remote sensing", "LiDAR"]
+    "related": [
+      "synthetic aperture radar",
+      "passive remote sensing",
+      "LiDAR"
+    ]
   },
   {
     "en": "passive remote sensing",
     "zh": "被动遥感",
     "definition_zh": "接收太阳反射辐射或地物自身热辐射的探测方式。",
     "category": "SAR",
-    "related": ["active remote sensing", "solar irradiance"]
+    "related": [
+      "active remote sensing",
+      "solar irradiance"
+    ]
   },
   {
     "en": "microwave remote sensing",
     "zh": "微波遥感",
     "definition_zh": "利用毫米波至米波段电磁波进行的遥感，具有全天时全天候能力。",
     "category": "SAR",
-    "related": ["synthetic aperture radar", "atmospheric window"]
+    "related": [
+      "synthetic aperture radar",
+      "atmospheric window"
+    ]
   },
   {
     "en": "backscatter",
     "zh": "后向散射",
     "definition_zh": "地物将雷达波散射回传感器方向的能量，构成雷达影像亮度。",
     "category": "SAR",
-    "related": ["sigma nought", "radar cross section"]
+    "related": [
+      "sigma nought",
+      "radar cross section"
+    ]
   },
   {
     "en": "radar cross section",
     "zh": "雷达截面积",
-    "alias": ["RCS"],
+    "alias": [
+      "RCS"
+    ],
     "definition_zh": "度量目标向雷达方向散射电磁波能力的物理量。",
     "category": "SAR",
-    "related": ["backscatter", "corner reflector"]
+    "related": [
+      "backscatter",
+      "corner reflector"
+    ]
   },
   {
     "en": "sigma nought",
     "zh": "归一化后向散射系数",
-    "alias": ["sigma0"],
+    "alias": [
+      "sigma0"
+    ],
     "definition_zh": "按单位面积归一化后的雷达后向散射系数 σ⁰。",
     "category": "SAR",
-    "related": ["backscatter", "SAR calibration"]
+    "related": [
+      "backscatter",
+      "SAR calibration"
+    ]
   },
   {
     "en": "speckle",
     "zh": "相干斑点",
     "definition_zh": "相干成像导致的多乘性噪声，使同质区域灰度呈颗粒状起伏。",
     "category": "SAR",
-    "related": ["speckle filtering", "Lee filter"]
+    "related": [
+      "speckle filtering",
+      "Lee filter"
+    ]
   },
   {
     "en": "speckle filtering",
     "zh": "斑点滤波",
     "definition_zh": "在抑制相干斑点的同时尽量保留边缘和纹理的专门滤波处理。",
     "category": "SAR",
-    "related": ["speckle", "Lee filter"]
+    "related": [
+      "speckle",
+      "Lee filter"
+    ]
   },
   {
     "en": "Lee filter",
     "zh": "Lee 滤波",
     "definition_zh": "基于局部均值和方差的自适应斑点滤波器。",
     "category": "SAR",
-    "related": ["speckle filtering"]
+    "related": [
+      "speckle filtering"
+    ]
   },
   {
     "en": "layover",
     "zh": "叠掩",
     "definition_zh": "SAR 对陡坡成像时坡顶回波先于坡底到达、使影像倒置叠压的几何失真。",
     "category": "SAR",
-    "related": ["foreshortening", "radar shadow", "incidence angle"]
+    "related": [
+      "foreshortening",
+      "radar shadow",
+      "incidence angle"
+    ]
   },
   {
     "en": "foreshortening",
-    "zh": "前向压缩",
+    "zh": "透视收缩",
     "definition_zh": "面向雷达的斜坡在 SAR 影像上被压缩变亮、坡度显得更陡的几何变形。",
     "category": "SAR",
-    "related": ["layover", "incidence angle"]
+    "related": [
+      "layover",
+      "incidence angle"
+    ]
   },
   {
     "en": "radar shadow",
     "zh": "雷达阴影",
     "definition_zh": "背向雷达的陡坡区域接收不到回波、在影像上呈暗色的现象。",
     "category": "SAR",
-    "related": ["layover", "incidence angle"]
+    "related": [
+      "layover",
+      "incidence angle"
+    ]
   },
   {
     "en": "slant range",
     "zh": "斜距",
     "definition_zh": "雷达天线到目标的实际距离方向，是 SAR 固有的成像几何。",
     "category": "SAR",
-    "related": ["ground range", "range resolution"]
+    "related": [
+      "ground range",
+      "range resolution"
+    ]
   },
   {
     "en": "ground range",
     "zh": "地距",
     "definition_zh": "将斜距投影到水平地面后的距离表示。",
     "category": "SAR",
-    "related": ["slant range", "geometric correction"]
+    "related": [
+      "slant range",
+      "geometric correction"
+    ]
   },
   {
     "en": "incidence angle",
     "zh": "入射角",
     "definition_zh": "雷达波束与地面法线之间的夹角，影响后向散射强度与几何变形。",
     "category": "SAR",
-    "related": ["layover", "backscatter"]
+    "related": [
+      "layover",
+      "backscatter"
+    ]
   },
   {
     "en": "azimuth resolution",
     "zh": "方位向分辨率",
     "definition_zh": "沿平台飞行方向的影像分辨率。",
     "category": "SAR",
-    "related": ["range resolution", "synthetic aperture radar"]
+    "related": [
+      "range resolution",
+      "synthetic aperture radar"
+    ]
   },
   {
     "en": "range resolution",
     "zh": "距离向分辨率",
     "definition_zh": "沿雷达波束传播方向的影像分辨率，由脉冲带宽决定。",
     "category": "SAR",
-    "related": ["azimuth resolution", "slant range"]
+    "related": [
+      "azimuth resolution",
+      "slant range"
+    ]
   },
   {
     "en": "interferometric SAR",
     "zh": "合成孔径雷达干涉测量",
-    "alias": ["InSAR"],
+    "alias": [
+      "InSAR"
+    ],
     "definition_zh": "利用两幅 SAR 影像的相位差提取高程或地表形变的技术。",
     "category": "SAR",
-    "related": ["interferogram", "deformation measurement"]
+    "related": [
+      "interferogram",
+      "deformation measurement"
+    ]
   },
   {
     "en": "differential InSAR",
     "zh": "差分干涉测量",
-    "alias": ["DInSAR"],
+    "alias": [
+      "DInSAR"
+    ],
     "definition_zh": "借助外部高程或第三景影像消除地形相位、提取地表形变的干涉技术。",
     "category": "SAR",
-    "related": ["interferometric SAR", "deformation measurement"]
+    "related": [
+      "interferometric SAR",
+      "deformation measurement"
+    ]
   },
   {
     "en": "interferogram",
     "zh": "干涉图",
     "definition_zh": "两幅 SAR 影像复共轭相乘得到的相位差图。",
     "category": "SAR",
-    "related": ["interferometric SAR", "phase unwrapping"]
+    "related": [
+      "interferometric SAR",
+      "phase unwrapping"
+    ]
   },
   {
     "en": "interferometric coherence",
     "zh": "干涉相干性",
     "definition_zh": "两次成像相位相似程度的度量，低相干常指示地表变化或失配准。",
     "category": "SAR",
-    "related": ["interferometric SAR", "co-registration"]
+    "related": [
+      "interferometric SAR",
+      "co-registration"
+    ]
   },
   {
     "en": "phase unwrapping",
     "zh": "相位解缠",
     "definition_zh": "将干涉图中缠绕的相位恢复为连续绝对相位的过程。",
     "category": "SAR",
-    "related": ["interferogram", "deformation measurement"]
+    "related": [
+      "interferogram",
+      "deformation measurement"
+    ]
   },
   {
     "en": "deformation measurement",
     "zh": "地表形变测量",
     "definition_zh": "利用 InSAR 技术获取毫米级地表位移的测量应用，如沉降和滑坡监测。",
     "category": "SAR",
-    "related": ["differential InSAR", "LOS displacement"]
+    "related": [
+      "differential InSAR",
+      "LOS displacement"
+    ]
   },
   {
     "en": "LOS displacement",
     "zh": "视线向形变",
-    "alias": ["line-of-sight displacement"],
+    "alias": [
+      "line-of-sight displacement"
+    ],
     "definition_zh": "地表位移沿雷达视线方向投影得到的形变分量。",
     "category": "SAR",
-    "related": ["deformation measurement"]
+    "related": [
+      "deformation measurement"
+    ]
   },
   {
     "en": "polarimetric SAR",
     "zh": "极化合成孔径雷达",
-    "alias": ["PolSAR"],
+    "alias": [
+      "PolSAR"
+    ],
     "definition_zh": "记录多极化散射矩阵、能够分析地物散射机制的 SAR 体制。",
     "category": "SAR",
-    "related": ["polarimetric decomposition", "synthetic aperture radar"]
+    "related": [
+      "polarimetric decomposition",
+      "synthetic aperture radar"
+    ]
   },
   {
     "en": "polarimetric decomposition",
     "zh": "极化分解",
     "definition_zh": "将极化散射矩阵分解为面散射、体散射等机制成分的方法，如 Freeman–Durden 分解。",
     "category": "SAR",
-    "related": ["polarimetric SAR"]
+    "related": [
+      "polarimetric SAR"
+    ]
   },
   {
     "en": "corner reflector",
     "zh": "角反射器",
     "definition_zh": "由三个互相垂直的平面构成、回波极强的人造定标与控制点设备。",
     "category": "SAR",
-    "related": ["radar cross section", "SAR calibration"]
+    "related": [
+      "radar cross section",
+      "SAR calibration"
+    ]
   },
   {
     "en": "bistatic SAR",
     "zh": "双站合成孔径雷达",
     "definition_zh": "发射与接收分置于不同平台上的 SAR 工作构型。",
     "category": "SAR",
-    "related": ["synthetic aperture radar"]
+    "related": [
+      "synthetic aperture radar"
+    ]
   },
   {
     "en": "SAR calibration",
     "zh": "SAR 定标",
     "definition_zh": "建立雷达影像灰度值与后向散射系数之间定量关系的过程。",
     "category": "SAR",
-    "related": ["sigma nought", "corner reflector"]
+    "related": [
+      "sigma nought",
+      "corner reflector"
+    ]
   },
   {
     "en": "digital elevation model",
     "zh": "数字高程模型",
-    "alias": ["DEM"],
+    "alias": [
+      "DEM"
+    ],
     "definition_zh": "以规则格网或点云表达地表高程的数字模型。",
     "category": "terrain",
-    "related": ["digital surface model", "digital terrain model", "slope"]
+    "related": [
+      "digital surface model",
+      "digital terrain model",
+      "slope"
+    ]
   },
   {
     "en": "digital surface model",
     "zh": "数字表面模型",
-    "alias": ["DSM"],
+    "alias": [
+      "DSM"
+    ],
     "definition_zh": "包含植被和建筑物在内、地表以上目标顶面的高程模型。",
     "category": "terrain",
-    "related": ["digital elevation model", "canopy height model"]
+    "related": [
+      "digital elevation model",
+      "canopy height model"
+    ]
   },
   {
     "en": "digital terrain model",
     "zh": "数字地形模型",
-    "alias": ["DTM", "bare-earth DEM"],
+    "alias": [
+      "DTM",
+      "bare-earth DEM"
+    ],
     "definition_zh": "剔除植被和人工目标后的裸地高程模型。",
     "category": "terrain",
-    "related": ["digital elevation model"]
+    "related": [
+      "digital elevation model"
+    ]
   },
   {
     "en": "canopy height model",
     "zh": "冠层高度模型",
-    "alias": ["CHM"],
+    "alias": [
+      "CHM"
+    ],
     "definition_zh": "由数字表面模型减去数字地形模型得到的植被高度分布。",
     "category": "terrain",
-    "related": ["digital surface model", "digital terrain model"]
+    "related": [
+      "digital surface model",
+      "digital terrain model"
+    ]
   },
   {
     "en": "LiDAR",
     "zh": "激光雷达",
-    "alias": ["light detection and ranging", "激光扫描"],
+    "alias": [
+      "light detection and ranging",
+      "激光扫描"
+    ],
     "definition_zh": "通过发射激光并测量回波时间获取高密度三维点云的主动传感器。",
     "category": "terrain",
-    "related": ["active remote sensing", "point cloud"]
+    "related": [
+      "active remote sensing",
+      "point cloud"
+    ]
   },
   {
     "en": "point cloud",
     "zh": "点云",
     "definition_zh": "由大量带有三维坐标的离散点构成的空间数据集。",
     "category": "terrain",
-    "related": ["LiDAR"]
+    "related": [
+      "LiDAR"
+    ]
   },
   {
     "en": "slope",
     "zh": "坡度",
     "definition_zh": "地表单元法线与铅垂方向之间的夹角，是最基本的 DEM 导出量。",
     "category": "terrain",
-    "related": ["aspect", "digital elevation model"]
+    "related": [
+      "aspect",
+      "digital elevation model"
+    ]
   },
   {
     "en": "aspect",
     "zh": "坡向",
     "definition_zh": "地表单元坡面法线在水平面上投影的方位角。",
     "category": "terrain",
-    "related": ["slope", "hillshade"]
+    "related": [
+      "slope",
+      "hillshade"
+    ]
   },
   {
     "en": "hillshade",
     "zh": "山体阴影",
     "definition_zh": "模拟光照条件下计算的坡面明暗灰度，用于增强地形表达。",
     "category": "terrain",
-    "related": ["slope", "aspect", "cartographic visualization"]
+    "related": [
+      "slope",
+      "aspect",
+      "cartographic visualization"
+    ]
   },
   {
     "en": "curvature",
     "zh": "曲率",
     "definition_zh": "描述地表在垂直或水平方向上凹凸形态的二阶导数量。",
     "category": "terrain",
-    "related": ["slope", "landform classification"]
+    "related": [
+      "slope",
+      "landform classification"
+    ]
   },
   {
     "en": "terrain roughness",
     "zh": "地形粗糙度",
     "definition_zh": "一定窗口内地形起伏剧烈程度的度量。",
     "category": "terrain",
-    "related": ["slope", "curvature"]
+    "related": [
+      "slope",
+      "curvature"
+    ]
   },
   {
     "en": "topographic wetness index",
     "zh": "地形湿度指数",
-    "alias": ["TWI"],
+    "alias": [
+      "TWI"
+    ],
     "definition_zh": "由汇流面积与坡度计算的湿度指标，反映潜在土壤水分积累。",
     "category": "terrain",
-    "related": ["flow accumulation", "slope"]
+    "related": [
+      "flow accumulation",
+      "slope"
+    ]
   },
   {
     "en": "flow accumulation",
     "zh": "汇流累积量",
     "definition_zh": "按水流方向模拟汇入每个格网单元的上游单元数。",
     "category": "terrain",
-    "related": ["flow direction", "watershed delineation"]
+    "related": [
+      "flow direction",
+      "watershed delineation"
+    ]
   },
   {
     "en": "flow direction",
     "zh": "水流方向",
     "definition_zh": "由 DEM 按最陡下降法确定每个格网的出水邻向。",
     "category": "terrain",
-    "related": ["flow accumulation", "watershed delineation"]
+    "related": [
+      "flow accumulation",
+      "watershed delineation"
+    ]
   },
   {
     "en": "watershed delineation",
     "zh": "流域划分",
     "definition_zh": "由 DEM 的水流方向和汇流信息圈定流域边界与河网的过程。",
     "category": "terrain",
-    "related": ["flow direction", "flow accumulation", "stream order"]
+    "related": [
+      "flow direction",
+      "flow accumulation",
+      "stream order"
+    ]
   },
   {
     "en": "stream order",
     "zh": "河流分级",
     "definition_zh": "按 Strahler 等规则对河网支流等级的划分。",
     "category": "terrain",
-    "related": ["watershed delineation"]
+    "related": [
+      "watershed delineation"
+    ]
   },
   {
     "en": "viewshed",
     "zh": "可视域",
     "definition_zh": "从观察点出发、由 DEM 判定的可见地表范围。",
     "category": "terrain",
-    "related": ["digital elevation model"]
+    "related": [
+      "digital elevation model"
+    ]
   },
   {
     "en": "cut and fill",
     "zh": "填挖方分析",
     "definition_zh": "比较两期地形面计算工程填挖体积的分析。",
     "category": "terrain",
-    "related": ["digital elevation model", "change detection"]
+    "related": [
+      "digital elevation model",
+      "change detection"
+    ]
   },
   {
     "en": "elevation profile",
     "zh": "高程剖面",
     "definition_zh": "沿指定路线采样得到的地形起伏断面曲线。",
     "category": "terrain",
-    "related": ["digital elevation model"]
+    "related": [
+      "digital elevation model"
+    ]
   },
   {
     "en": "contour line",
     "zh": "等高线",
     "definition_zh": "高程相等的相邻点的连线，是地形图的基本要素。",
     "category": "terrain",
-    "related": ["digital elevation model"]
+    "related": [
+      "digital elevation model"
+    ]
   },
   {
     "en": "TIN",
     "zh": "不规则三角网",
-    "alias": ["triangulated irregular network"],
+    "alias": [
+      "triangulated irregular network"
+    ],
     "definition_zh": "以不规则分布采样点连成三角面片表达地形的数据结构。",
     "category": "terrain",
-    "related": ["digital elevation model"]
+    "related": [
+      "digital elevation model"
+    ]
   },
   {
     "en": "hypsometric curve",
     "zh": "高程面积曲线",
     "definition_zh": "描述流域内高程与面积分配关系的累积曲线。",
     "category": "terrain",
-    "related": ["watershed delineation"]
+    "related": [
+      "watershed delineation"
+    ]
   },
   {
     "en": "landform classification",
     "zh": "地貌分类",
     "definition_zh": "利用坡度、曲率等地形参数自动划分地貌单元的处理。",
     "category": "terrain",
-    "related": ["slope", "curvature"]
+    "related": [
+      "slope",
+      "curvature"
+    ]
   },
   {
     "en": "topographic correction",
     "zh": "地形校正",
     "definition_zh": "消除坡度坡向引起的光照差异、使坡面反射可比的辐射处理。",
     "category": "terrain",
-    "related": ["slope", "aspect", "illumination correction"]
+    "related": [
+      "slope",
+      "aspect",
+      "illumination correction"
+    ]
   },
   {
     "en": "illumination correction",
     "zh": "光照校正",
     "definition_zh": "按太阳与坡面的几何关系调整像元值的地形辐射改正方法。",
     "category": "terrain",
-    "related": ["topographic correction", "hillshade"]
+    "related": [
+      "topographic correction",
+      "hillshade"
+    ]
   },
   {
     "en": "temporal resolution",
     "zh": "时间分辨率",
     "definition_zh": "传感器重复观测同一地区的最小时间间隔。",
     "category": "temporal",
-    "related": ["revisit period", "sun-synchronous orbit"]
+    "related": [
+      "revisit period",
+      "sun-synchronous orbit"
+    ]
   },
   {
     "en": "revisit period",
     "zh": "重访周期",
     "definition_zh": "卫星两次经过同一观测区上空之间的时间。",
     "category": "temporal",
-    "related": ["temporal resolution", "sun-synchronous orbit"]
+    "related": [
+      "temporal resolution",
+      "sun-synchronous orbit"
+    ]
   },
   {
     "en": "time series analysis",
     "zh": "时间序列分析",
     "definition_zh": "对同一地点按时间排列的像元值序列进行趋势与事件分析的方法。",
     "category": "temporal",
-    "related": ["phenology", "change detection"]
+    "related": [
+      "phenology",
+      "change detection"
+    ]
   },
   {
     "en": "phenology",
     "zh": "物候",
     "definition_zh": "植被随季节表现出的萌发、生长和枯黄等周期现象。",
     "category": "temporal",
-    "related": ["vegetation index", "phenological metrics"]
+    "related": [
+      "vegetation index",
+      "phenological metrics"
+    ]
   },
   {
     "en": "phenological metrics",
     "zh": "物候参数",
     "definition_zh": "由植被指数时序提取的季始、峰值、季末等参数。",
     "category": "temporal",
-    "related": ["phenology", "time series smoothing"]
+    "related": [
+      "phenology",
+      "time series smoothing"
+    ]
   },
   {
     "en": "time series smoothing",
     "zh": "时序平滑",
     "definition_zh": "抑制云和噪声影响、重构连续时序曲线的滤波方法。",
     "category": "temporal",
-    "related": ["temporal interpolation", "gap filling"]
+    "related": [
+      "temporal interpolation",
+      "gap filling"
+    ]
   },
   {
     "en": "temporal interpolation",
     "zh": "时间插值",
     "definition_zh": "利用相邻观测估计缺失时刻像元值的方法。",
     "category": "temporal",
-    "related": ["time series smoothing", "gap filling"]
+    "related": [
+      "time series smoothing",
+      "gap filling"
+    ]
   },
   {
     "en": "gap filling",
     "zh": "缺失填补",
     "definition_zh": "对云污染或观测缺失的时空数据进行补全的处理。",
     "category": "temporal",
-    "related": ["cloud masking", "temporal interpolation"]
+    "related": [
+      "cloud masking",
+      "temporal interpolation"
+    ]
   },
   {
     "en": "temporal compositing",
     "zh": "时序合成",
     "definition_zh": "按时间窗口将多景影像合成为一景高质量影像的处理。",
     "category": "temporal",
-    "related": ["maximum value composite", "gap filling"]
+    "related": [
+      "maximum value composite",
+      "gap filling"
+    ]
   },
   {
     "en": "maximum value composite",
     "zh": "最大值合成",
-    "alias": ["MVC"],
+    "alias": [
+      "MVC"
+    ],
     "definition_zh": "取时间窗口内各像元最大值以剔除云污染的合成方法。",
     "category": "temporal",
-    "related": ["temporal compositing", "cloud masking"]
+    "related": [
+      "temporal compositing",
+      "cloud masking"
+    ]
   },
   {
     "en": "CCDC",
     "zh": "连续变化检测与分类",
-    "alias": ["continuous change detection and classification"],
+    "alias": [
+      "continuous change detection and classification"
+    ],
     "definition_zh": "用谐波模型拟合时序并连续检测突变与缓变的方法。",
     "category": "temporal",
-    "related": ["time series analysis", "land cover change"]
+    "related": [
+      "time series analysis",
+      "land cover change"
+    ]
   },
   {
     "en": "LandTrendr",
     "zh": "LandTrendr 时序分割",
     "definition_zh": "基于年际指数序列的分段回归干扰检测算法。",
     "category": "temporal",
-    "related": ["time series analysis", "forest disturbance"]
+    "related": [
+      "time series analysis",
+      "forest disturbance"
+    ]
   },
   {
     "en": "seasonal trend analysis",
     "zh": "季节趋势分析",
     "definition_zh": "分解时序的季节项与趋势项以识别长期变化的分析方法。",
     "category": "temporal",
-    "related": ["time series analysis"]
+    "related": [
+      "time series analysis"
+    ]
   },
   {
     "en": "lag effect",
     "zh": "滞后效应",
     "definition_zh": "植被对气候驱动响应的时间延迟现象。",
     "category": "temporal",
-    "related": ["time series analysis", "phenology"]
+    "related": [
+      "time series analysis",
+      "phenology"
+    ]
   },
   {
     "en": "bitemporal analysis",
     "zh": "双时相分析",
     "definition_zh": "仅利用前后两期影像进行对比分析的简单时间分析模式。",
     "category": "temporal",
-    "related": ["change detection", "image differencing"]
+    "related": [
+      "change detection",
+      "image differencing"
+    ]
   },
   {
     "en": "epoch",
-    "zh": "时段",
-    "definition_zh": "时序分析中按变化事件划分的稳定时间段。",
+    "zh": "时相",
+    "definition_zh": "时序分析中按变化事件或固定间隔划分出的稳定时间单元。",
     "category": "temporal",
-    "related": ["time series analysis", "CCDC"]
+    "related": [
+      "time series analysis",
+      "CCDC"
+    ],
+    "alias": [
+      "时段"
+    ]
   },
   {
     "en": "cloud-free composite",
     "zh": "无云合成影像",
     "definition_zh": "剔除云像元后合成的整景清洁影像。",
     "category": "temporal",
-    "related": ["temporal compositing", "cloud masking"]
+    "related": [
+      "temporal compositing",
+      "cloud masking"
+    ]
   },
   {
     "en": "change detection",
     "zh": "变化检测",
     "definition_zh": "利用多时相影像识别地表状态随时间变化的过程。",
     "category": "change",
-    "related": ["bitemporal analysis", "image differencing", "land cover change"]
+    "related": [
+      "bitemporal analysis",
+      "image differencing",
+      "land cover change"
+    ]
   },
   {
     "en": "land cover change",
     "zh": "土地覆盖变化",
     "definition_zh": "地表覆盖类型（林地、耕地、建成区等）之间的转换。",
     "category": "change",
-    "related": ["change detection", "post-classification comparison"]
+    "related": [
+      "change detection",
+      "post-classification comparison"
+    ]
   },
   {
     "en": "post-classification comparison",
     "zh": "分类后比较",
     "definition_zh": "先分别分类再逐像元比较类别的变化检测方法。",
     "category": "change",
-    "related": ["image classification", "change matrix"]
+    "related": [
+      "image classification",
+      "change matrix"
+    ],
+    "alias": [
+      "后分类比较"
+    ]
   },
   {
     "en": "image differencing",
     "zh": "影像差值法",
-    "definition_zh": "将两期影像逐像元相加以提取变化区域的代数方法。",
+    "definition_zh": "将两期影像逐像元相减以提取变化区域的代数方法。",
     "category": "change",
-    "related": ["change detection", "radiometric normalization"]
+    "related": [
+      "change detection",
+      "radiometric normalization"
+    ]
   },
   {
     "en": "image ratioing",
     "zh": "影像比值法",
     "definition_zh": "将两期影像逐像元相除以抑制共同成分、突出变化的代数方法。",
     "category": "change",
-    "related": ["change detection", "image differencing"]
+    "related": [
+      "change detection",
+      "image differencing"
+    ]
   },
   {
     "en": "change vector analysis",
     "zh": "变化向量分析",
-    "alias": ["CVA"],
+    "alias": [
+      "CVA"
+    ],
     "definition_zh": "以多波段光谱向量的变化幅值和方向刻画变化的检测方法。",
     "category": "change",
-    "related": ["change detection", "image differencing"]
+    "related": [
+      "change detection",
+      "image differencing"
+    ]
   },
   {
     "en": "change matrix",
     "zh": "变化转移矩阵",
-    "definition_zh": "以表格形式统计各覆盖类型之间转移面积的比较方法。",
+    "definition_zh": "以表格形式汇总各覆盖类型之间转移面积的交叉表。",
     "category": "change",
-    "related": ["post-classification comparison", "land cover change"]
+    "related": [
+      "post-classification comparison",
+      "land cover change"
+    ]
   },
   {
     "en": "gain and loss map",
     "zh": "增减图",
     "definition_zh": "按类别展示研究期内增加与减少分布的变化制图产品。",
     "category": "change",
-    "related": ["change matrix"]
+    "related": [
+      "change matrix"
+    ]
   },
   {
     "en": "forest disturbance",
     "zh": "森林扰动",
     "definition_zh": "采伐、火灾和病虫害等导致森林状态突变的事件。",
     "category": "change",
-    "related": ["NBR", "LandTrendr"]
+    "related": [
+      "NBR",
+      "LandTrendr"
+    ]
   },
   {
     "en": "deforestation monitoring",
     "zh": "毁林监测",
     "definition_zh": "利用时序影像持续监测森林转为其他覆盖类型的应用。",
     "category": "change",
-    "related": ["forest disturbance", "land cover change"]
+    "related": [
+      "forest disturbance",
+      "land cover change"
+    ]
   },
   {
     "en": "urban expansion",
     "zh": "城市扩张",
     "definition_zh": "建成区面积随时间增长的空间过程，是变化检测的典型对象。",
     "category": "change",
-    "related": ["NDBI", "post-classification comparison"]
+    "related": [
+      "NDBI",
+      "post-classification comparison"
+    ]
   },
   {
     "en": "disturbance map",
     "zh": "扰动分布图",
     "definition_zh": "标示扰动发生时间、类型和强度的时序变化产品。",
     "category": "change",
-    "related": ["forest disturbance", "CCDC"]
+    "related": [
+      "forest disturbance",
+      "CCDC"
+    ]
   },
   {
     "en": "slow onset change",
     "zh": "缓变",
     "definition_zh": "以渐进趋势表现、无明确突变时刻的土地退化或恢复过程。",
     "category": "change",
-    "related": ["seasonal trend analysis", "CCDC"]
+    "related": [
+      "seasonal trend analysis",
+      "CCDC"
+    ]
   },
   {
     "en": "change magnitude",
     "zh": "变化幅度",
     "definition_zh": "衡量像元光谱或指标变化强弱的量。",
     "category": "change",
-    "related": ["change vector analysis", "image differencing"]
+    "related": [
+      "change vector analysis",
+      "image differencing"
+    ]
   },
   {
     "en": "image classification",
     "zh": "影像分类",
     "definition_zh": "按光谱、纹理等特征将影像像元划归地物类别的过程。",
     "category": "classification",
-    "related": ["supervised classification", "unsupervised classification", "classifier"]
+    "related": [
+      "supervised classification",
+      "unsupervised classification",
+      "classifier"
+    ]
   },
   {
     "en": "supervised classification",
     "zh": "监督分类",
     "definition_zh": "利用已标注训练样本学习决策规则、再对全图分类的方法。",
     "category": "classification",
-    "related": ["training sample", "image classification"]
+    "related": [
+      "training sample",
+      "image classification"
+    ]
   },
   {
     "en": "unsupervised classification",
     "zh": "非监督分类",
     "definition_zh": "不依赖先验样本、按光谱相似性自动聚类的分类方法。",
     "category": "classification",
-    "related": ["K-means", "ISODATA"]
+    "related": [
+      "K-means",
+      "ISODATA"
+    ]
   },
   {
     "en": "training sample",
     "zh": "训练样本",
     "definition_zh": "用于监督分类中学习类别特征的已知类别像元或对象。",
     "category": "classification",
-    "related": ["supervised classification", "validation sample"]
+    "related": [
+      "supervised classification",
+      "validation sample"
+    ]
   },
   {
     "en": "validation sample",
     "zh": "验证样本",
     "definition_zh": "独立于训练样本、用于评价分类精度的已知类别样点。",
     "category": "classification",
-    "related": ["accuracy assessment", "reference data"]
+    "related": [
+      "accuracy assessment",
+      "reference data"
+    ]
   },
   {
     "en": "feature space",
     "zh": "特征空间",
     "definition_zh": "由各特征维度构成的空间，类别表现为其中的点簇。",
     "category": "classification",
-    "related": ["classifier", "class separability"]
+    "related": [
+      "classifier",
+      "class separability"
+    ]
   },
   {
     "en": "feature selection",
     "zh": "特征选择",
     "definition_zh": "从候选特征中挑选对分类最有贡献子集的过程。",
     "category": "classification",
-    "related": ["feature space", "class separability"]
+    "related": [
+      "feature space",
+      "class separability"
+    ]
   },
   {
     "en": "classifier",
     "zh": "分类器",
     "definition_zh": "根据特征把像元或对象划归类别的算法模型。",
     "category": "classification",
-    "related": ["image classification", "feature space"]
+    "related": [
+      "image classification",
+      "feature space"
+    ]
   },
   {
     "en": "maximum likelihood classification",
     "zh": "最大似然分类",
-    "alias": ["MLC"],
+    "alias": [
+      "MLC"
+    ],
     "definition_zh": "假设各类服从多元正态分布、按后验概率最大的经典监督分类法。",
     "category": "classification",
-    "related": ["supervised classification", "classifier"]
+    "related": [
+      "supervised classification",
+      "classifier"
+    ]
   },
   {
     "en": "minimum distance classification",
     "zh": "最小距离分类",
     "definition_zh": "将像元划归距离最近的类别均值向量的简单监督分类法。",
     "category": "classification",
-    "related": ["supervised classification"]
+    "related": [
+      "supervised classification"
+    ]
   },
   {
     "en": "k-nearest neighbours",
     "zh": "K 近邻分类",
-    "alias": ["k-NN"],
+    "alias": [
+      "k-NN"
+    ],
     "definition_zh": "按特征空间中最近的 K 个样本多数类别表决的非参数分类法。",
     "category": "classification",
-    "related": ["classifier", "training sample"]
+    "related": [
+      "classifier",
+      "training sample"
+    ]
   },
   {
     "en": "support vector machine",
     "zh": "支持向量机",
-    "alias": ["SVM"],
+    "alias": [
+      "SVM"
+    ],
     "definition_zh": "寻找最大间隔分离超平面、适合小样本高维数据的分类器。",
     "category": "classification",
-    "related": ["classifier", "feature space"]
+    "related": [
+      "classifier",
+      "feature space"
+    ]
   },
   {
     "en": "random forest",
     "zh": "随机森林",
-    "alias": ["RF"],
+    "alias": [
+      "RF"
+    ],
     "definition_zh": "由多棵决策树投票集成、抗过拟合能力强的分类与回归方法。",
     "category": "classification",
-    "related": ["decision tree", "classifier"]
+    "related": [
+      "decision tree",
+      "classifier"
+    ]
   },
   {
     "en": "decision tree",
     "zh": "决策树",
     "definition_zh": "以一系列阈值判据逐层划分特征空间的树状分类模型。",
     "category": "classification",
-    "related": ["random forest", "classifier"]
+    "related": [
+      "random forest",
+      "classifier"
+    ]
   },
   {
     "en": "neural network classifier",
     "zh": "神经网络分类器",
     "definition_zh": "由多层神经元非线性映射实现类别判别的分类模型。",
     "category": "classification",
-    "related": ["classifier", "semantic segmentation"]
+    "related": [
+      "classifier",
+      "semantic segmentation"
+    ]
   },
   {
     "en": "semantic segmentation",
     "zh": "语义分割",
     "definition_zh": "利用深度网络对每个像元预测类别的影像分类方式。",
     "category": "classification",
-    "related": ["neural network classifier", "image segmentation"]
+    "related": [
+      "neural network classifier",
+      "image segmentation"
+    ]
   },
   {
     "en": "K-means",
     "zh": "K 均值聚类",
     "definition_zh": "迭代地把样本划归 K 个聚类中心并更新中心的聚类算法。",
     "category": "classification",
-    "related": ["unsupervised classification", "ISODATA"]
+    "related": [
+      "unsupervised classification",
+      "ISODATA"
+    ]
   },
   {
     "en": "ISODATA",
     "zh": "迭代自组织数据分析",
-    "alias": ["iterative self-organizing data analysis"],
+    "alias": [
+      "iterative self-organizing data analysis"
+    ],
     "definition_zh": "允许分裂与合并的改进 K 均值非监督聚类算法。",
     "category": "classification",
-    "related": ["K-means", "unsupervised classification"]
+    "related": [
+      "K-means",
+      "unsupervised classification"
+    ]
   },
   {
     "en": "classification scheme",
     "zh": "分类体系",
     "definition_zh": "对研究区类别及其定义和层级的规范约定。",
     "category": "classification",
-    "related": ["image classification", "accuracy assessment"]
+    "related": [
+      "image classification",
+      "accuracy assessment"
+    ]
   },
   {
     "en": "class separability",
     "zh": "类别可分性",
     "definition_zh": "度量不同类别在特征空间中相互区分程度的量。",
     "category": "classification",
-    "related": ["feature space", "feature selection"]
+    "related": [
+      "feature space",
+      "feature selection"
+    ]
   },
   {
     "en": "confusion matrix",
     "zh": "混淆矩阵",
-    "alias": ["error matrix", "误差矩阵"],
+    "alias": [
+      "error matrix",
+      "误差矩阵"
+    ],
     "definition_zh": "以表格比较分类结果与参考类别、统计各类混淆情况的精度评价工具。",
     "category": "classification",
-    "related": ["accuracy assessment", "overall accuracy", "kappa coefficient"]
+    "related": [
+      "accuracy assessment",
+      "overall accuracy",
+      "kappa coefficient"
+    ]
   },
   {
     "en": "overall accuracy",
     "zh": "总体精度",
     "definition_zh": "混淆矩阵中分类正确样本数占总样本数的比例。",
     "category": "classification",
-    "related": ["confusion matrix", "producer's accuracy"]
+    "related": [
+      "confusion matrix",
+      "producer's accuracy"
+    ]
   },
   {
     "en": "kappa coefficient",
     "zh": "Kappa 系数",
     "definition_zh": "扣除偶然一致后评价分类与参考一致程度的精度指标。",
     "category": "classification",
-    "related": ["confusion matrix", "overall accuracy"]
+    "related": [
+      "confusion matrix",
+      "overall accuracy"
+    ]
   },
   {
     "en": "producer's accuracy",
     "zh": "制图精度",
     "definition_zh": "某类参考样本被正确分类的比例，反映漏分误差。",
     "category": "classification",
-    "related": ["confusion matrix", "user's accuracy"]
+    "related": [
+      "confusion matrix",
+      "user's accuracy"
+    ]
   },
   {
     "en": "user's accuracy",
     "zh": "用户精度",
     "definition_zh": "被判为某类的样本中真正的该类比例，反映错分误差。",
     "category": "classification",
-    "related": ["confusion matrix", "producer's accuracy"]
+    "related": [
+      "confusion matrix",
+      "producer's accuracy"
+    ]
   },
   {
     "en": "accuracy assessment",
     "zh": "精度评价",
     "definition_zh": "用独立参考数据定量评价分类或反演结果正确性的过程。",
     "category": "classification",
-    "related": ["confusion matrix", "validation sample"]
+    "related": [
+      "confusion matrix",
+      "validation sample"
+    ]
   },
   {
     "en": "reference data",
     "zh": "参考数据",
     "definition_zh": "用于精度评价的实地调查或高分辨率解译数据。",
     "category": "classification",
-    "related": ["validation sample", "accuracy assessment"]
+    "related": [
+      "validation sample",
+      "accuracy assessment"
+    ]
   },
   {
     "en": "stratified sampling",
     "zh": "分层采样",
     "definition_zh": "按类别或区域分层独立抽取样本、保证各层代表性的采样设计。",
     "category": "classification",
-    "related": ["validation sample", "training sample"]
+    "related": [
+      "validation sample",
+      "training sample"
+    ]
   },
   {
     "en": "majority filter",
     "zh": "多数滤波",
     "definition_zh": "用邻域内出现最多的类别替换中心像元以平滑分类图的后处理。",
     "category": "classification",
-    "related": ["morphological operation", "image classification"]
+    "related": [
+      "morphological operation",
+      "image classification"
+    ]
   },
   {
     "en": "class merging",
     "zh": "类别合并",
     "definition_zh": "将聚类或分类得到的过细类别按语义合并的处理。",
     "category": "classification",
-    "related": ["unsupervised classification", "classification scheme"]
+    "related": [
+      "unsupervised classification",
+      "classification scheme"
+    ]
   },
   {
     "en": "threshold segmentation",
     "zh": "阈值分割",
     "definition_zh": "按像元值与设定阈值的大小关系划分目标与背景的简单分割方法。",
     "category": "classification",
-    "related": ["water body extraction", "image segmentation"]
+    "related": [
+      "water body extraction",
+      "image segmentation"
+    ]
   },
   {
     "en": "generalization capability",
     "zh": "泛化能力",
     "definition_zh": "分类器对未参与训练的新样本保持正确判别的能力。",
     "category": "classification",
-    "related": ["classifier", "training sample"]
+    "related": [
+      "classifier",
+      "training sample"
+    ]
   },
   {
     "en": "object-based image analysis",
     "zh": "面向对象影像分析",
-    "alias": ["OBIA"],
+    "alias": [
+      "OBIA"
+    ],
     "definition_zh": "先分割出同质对象、再基于对象特征分类的分析范式。",
     "category": "OBIA",
-    "related": ["image segmentation", "image object"]
+    "related": [
+      "image segmentation",
+      "image object"
+    ]
   },
   {
     "en": "image segmentation",
     "zh": "影像分割",
     "definition_zh": "把影像划分为内部同质、互不重叠区域的过程。",
     "category": "OBIA",
-    "related": ["object-based image analysis", "multiresolution segmentation"]
+    "related": [
+      "object-based image analysis",
+      "multiresolution segmentation"
+    ]
   },
   {
     "en": "image object",
     "zh": "影像对象",
     "definition_zh": "分割产生的具有光谱、形状和纹理属性的同质区域。",
     "category": "OBIA",
-    "related": ["image segmentation", "object feature"]
+    "related": [
+      "image segmentation",
+      "object feature"
+    ]
   },
   {
     "en": "multiresolution segmentation",
     "zh": "多尺度分割",
     "definition_zh": "以异质性阈值控制、自底向上合并像元生成多尺度对象树的经典算法。",
     "category": "OBIA",
-    "related": ["scale parameter", "spectral heterogeneity"]
+    "related": [
+      "scale parameter",
+      "spectral heterogeneity"
+    ]
   },
   {
     "en": "scale parameter",
     "zh": "尺度参数",
     "definition_zh": "控制分割中止条件、决定对象平均大小的异质性阈值。",
     "category": "OBIA",
-    "related": ["multiresolution segmentation", "segmentation parameter optimization"]
+    "related": [
+      "multiresolution segmentation",
+      "segmentation parameter optimization"
+    ]
   },
   {
     "en": "spectral heterogeneity",
     "zh": "光谱异质性",
     "definition_zh": "对象内各像元光谱差异的度量，是分割合并代价的主要组成。",
     "category": "OBIA",
-    "related": ["multiresolution segmentation", "shape and compactness"]
+    "related": [
+      "multiresolution segmentation",
+      "shape and compactness"
+    ]
   },
   {
     "en": "shape and compactness",
     "zh": "形状与紧致度权重",
     "definition_zh": "分割代价中控制对象边界平滑与形状紧凑程度的权重项。",
     "category": "OBIA",
-    "related": ["multiresolution segmentation", "spectral heterogeneity"]
+    "related": [
+      "multiresolution segmentation",
+      "spectral heterogeneity"
+    ]
   },
   {
     "en": "object feature",
     "zh": "对象特征",
     "definition_zh": "描述影像对象的光谱均值、形状指数和纹理等属性的量。",
     "category": "OBIA",
-    "related": ["image object", "texture feature"]
+    "related": [
+      "image object",
+      "texture feature"
+    ]
   },
   {
     "en": "texture feature",
     "zh": "纹理特征",
     "definition_zh": "描述影像灰度空间排列规律的统计特征。",
     "category": "OBIA",
-    "related": ["GLCM", "object feature"]
+    "related": [
+      "GLCM",
+      "object feature"
+    ]
   },
   {
     "en": "GLCM",
     "zh": "灰度共生矩阵",
-    "alias": ["gray-level co-occurrence matrix"],
+    "alias": [
+      "gray-level co-occurrence matrix"
+    ],
     "definition_zh": "统计特定方向和距离上灰度对共现频率的纹理描述方法。",
     "category": "OBIA",
-    "related": ["texture feature"]
+    "related": [
+      "texture feature"
+    ]
   },
   {
     "en": "contextual feature",
     "zh": "上下文特征",
     "definition_zh": "描述对象与邻域对象之间关系的特征，如相对位置和邻居类别。",
     "category": "OBIA",
-    "related": ["object feature", "rule-based classification"]
+    "related": [
+      "object feature",
+      "rule-based classification"
+    ]
   },
   {
     "en": "rule-based classification",
     "zh": "规则分类",
     "definition_zh": "以专家定义的特征阈值条件组合对对象分类的方法。",
     "category": "OBIA",
-    "related": ["object feature", "contextual feature"]
+    "related": [
+      "object feature",
+      "contextual feature"
+    ]
   },
   {
     "en": "fuzzy classification",
     "zh": "模糊分类",
     "definition_zh": "以隶属度描述像元或对象属于各类别程度的分类方式。",
     "category": "OBIA",
-    "related": ["rule-based classification", "classifier"]
+    "related": [
+      "rule-based classification",
+      "classifier"
+    ]
   },
   {
     "en": "mean-shift segmentation",
     "zh": "均值漂移分割",
     "definition_zh": "在特征空间中沿密度梯度聚类、从而分割影像的算法。",
     "category": "OBIA",
-    "related": ["image segmentation"]
+    "related": [
+      "image segmentation"
+    ]
   },
   {
     "en": "hierarchical segmentation",
     "zh": "分级分割",
     "definition_zh": "在不同尺度参数下生成嵌套对象层次的分割组织方式。",
     "category": "OBIA",
-    "related": ["multiresolution segmentation", "scale parameter"]
+    "related": [
+      "multiresolution segmentation",
+      "scale parameter"
+    ]
   },
   {
     "en": "segmentation parameter optimization",
     "zh": "分割参数优化",
     "definition_zh": "利用评标函数或试错法确定最佳尺度与权重组合的过程。",
     "category": "OBIA",
-    "related": ["scale parameter", "multiresolution segmentation"]
+    "related": [
+      "scale parameter",
+      "multiresolution segmentation"
+    ]
   },
   {
     "en": "object-based change detection",
     "zh": "对象级变化检测",
     "definition_zh": "在分割对象层面比较两期属性以识别变化的方法。",
     "category": "OBIA",
-    "related": ["change detection", "object feature"]
+    "related": [
+      "change detection",
+      "object feature"
+    ]
   },
   {
     "en": "edge detection",
     "zh": "边缘检测",
     "definition_zh": "提取影像灰度突变位置以支持分割或线状目标识别的处理。",
     "category": "OBIA",
-    "related": ["image segmentation", "morphological operation"]
+    "related": [
+      "image segmentation",
+      "morphological operation"
+    ]
   },
   {
     "en": "morphological operation",
     "zh": "形态学运算",
     "definition_zh": "利用结构元素对二值或灰度影像做腐蚀、膨胀等邻域运算。",
     "category": "OBIA",
-    "related": ["edge detection", "majority filter"]
+    "related": [
+      "edge detection",
+      "majority filter"
+    ]
   },
   {
     "en": "cartographic generalization",
     "zh": "制图综合",
     "definition_zh": "随比例尺缩小对地图内容进行选取、化简和概括的处理。",
     "category": "cartography",
-    "related": ["map scale"]
+    "related": [
+      "map scale"
+    ]
   },
   {
     "en": "symbolization",
     "zh": "符号化",
     "definition_zh": "以点线面符号和色彩表达要素属性的可视化过程。",
     "category": "cartography",
-    "related": ["symbology", "cartographic visualization"]
+    "related": [
+      "symbology",
+      "cartographic visualization"
+    ]
   },
   {
     "en": "symbology",
     "zh": "符号系统",
     "definition_zh": "图层渲染所采用的符号、色彩和分级方案的集合。",
     "category": "cartography",
-    "related": ["symbolization", "color ramp"]
+    "related": [
+      "symbolization",
+      "color ramp"
+    ]
   },
   {
     "en": "color composite",
     "zh": "彩色合成",
     "definition_zh": "将三个波段分别赋予红绿蓝以生成彩色影像的显示方式。",
     "category": "cartography",
-    "related": ["true color composite", "false color composite"]
+    "related": [
+      "true color composite",
+      "false color composite"
+    ]
   },
   {
     "en": "true color composite",
     "zh": "真彩色合成",
     "definition_zh": "以红绿蓝波段对应显示、色彩接近人眼所见的合成方式。",
     "category": "cartography",
-    "related": ["color composite"]
+    "related": [
+      "color composite"
+    ]
   },
   {
     "en": "false color composite",
     "zh": "假彩色合成",
     "definition_zh": "以非对应波段（如近红外赋红）合成、突出植被等信息的显示方式。",
     "category": "cartography",
-    "related": ["color composite", "NIR"]
+    "related": [
+      "color composite",
+      "NIR"
+    ]
   },
   {
     "en": "standard false color composite",
     "zh": "标准假彩色合成",
     "definition_zh": "近红外—红—绿分别赋红绿蓝、植被呈红色的经典合成方案。",
     "category": "cartography",
-    "related": ["false color composite"]
+    "related": [
+      "false color composite"
+    ]
   },
   {
     "en": "color ramp",
     "zh": "色带",
     "definition_zh": "按数值梯度排列的系列颜色，用于连续量制图。",
     "category": "cartography",
-    "related": ["symbology", "choropleth map"]
+    "related": [
+      "symbology",
+      "choropleth map"
+    ]
   },
   {
     "en": "choropleth map",
     "zh": "分级统计图",
     "definition_zh": "按统计单元分级设色表达属性数量的专题图型。",
     "category": "cartography",
-    "related": ["color ramp", "thematic map"]
+    "related": [
+      "color ramp",
+      "thematic map"
+    ]
   },
   {
     "en": "thematic map",
     "zh": "专题地图",
     "definition_zh": "突出表达某一主题要素（如土地覆盖）的地图。",
     "category": "cartography",
-    "related": ["choropleth map", "map layout"]
+    "related": [
+      "choropleth map",
+      "map layout"
+    ]
   },
   {
     "en": "map layout",
     "zh": "地图版面",
     "definition_zh": "组织主图、图例、指北针等制图要素的版面设计。",
     "category": "cartography",
-    "related": ["legend", "north arrow", "scale bar"]
+    "related": [
+      "legend",
+      "north arrow",
+      "scale bar"
+    ]
   },
   {
     "en": "legend",
     "zh": "图例",
     "definition_zh": "解释地图符号与颜色含义的制图要素。",
     "category": "cartography",
-    "related": ["map layout", "symbology"]
+    "related": [
+      "map layout",
+      "symbology"
+    ]
   },
   {
     "en": "north arrow",
     "zh": "指北针",
     "definition_zh": "标示图面真北方向的制图要素。",
     "category": "cartography",
-    "related": ["map layout"]
+    "related": [
+      "map layout"
+    ]
   },
   {
     "en": "scale bar",
     "zh": "比例尺条",
     "definition_zh": "以图解方式表示图上距离与实地距离关系的制图要素。",
     "category": "cartography",
-    "related": ["map scale", "map layout"]
+    "related": [
+      "map scale",
+      "map layout"
+    ],
+    "alias": [
+      "比例尺"
+    ]
   },
   {
     "en": "graticule",
     "zh": "经纬网",
     "definition_zh": "按经纬度间隔绘制的坐标网，用于定位参考。",
     "category": "cartography",
-    "related": ["map projection", "map grid"]
+    "related": [
+      "map projection",
+      "map grid"
+    ]
   },
   {
     "en": "map grid",
     "zh": "地图格网",
     "definition_zh": "按投影坐标系统绘制的方格网。",
     "category": "cartography",
-    "related": ["graticule", "coordinate reference system"]
+    "related": [
+      "graticule",
+      "coordinate reference system"
+    ]
   },
   {
     "en": "annotation",
     "zh": "标注",
     "definition_zh": "在地图上手工放置的文字或图形说明。",
     "category": "cartography",
-    "related": ["labeling", "map layout"]
+    "related": [
+      "labeling",
+      "map layout"
+    ]
   },
   {
     "en": "labeling",
     "zh": "注记",
     "definition_zh": "按属性自动生成并避让压盖的要素文字标注。",
     "category": "cartography",
-    "related": ["annotation"]
+    "related": [
+      "annotation"
+    ]
   },
   {
     "en": "map scale",
     "zh": "地图比例尺",
     "definition_zh": "图上距离与实地距离之比，决定地图内容的详细程度。",
     "category": "cartography",
-    "related": ["large-scale map", "small-scale map", "scale bar"]
+    "related": [
+      "large-scale map",
+      "small-scale map",
+      "scale bar"
+    ]
   },
   {
     "en": "large-scale map",
     "zh": "大比例尺地图",
     "definition_zh": "比例尺分母较小、内容详细、覆盖范围较小的地图。",
     "category": "cartography",
-    "related": ["map scale"]
+    "related": [
+      "map scale"
+    ]
   },
   {
     "en": "small-scale map",
     "zh": "小比例尺地图",
     "definition_zh": "比例尺分母较大、内容概括、覆盖范围较大的地图。",
     "category": "cartography",
-    "related": ["map scale", "cartographic generalization"]
+    "related": [
+      "map scale",
+      "cartographic generalization"
+    ]
   },
   {
     "en": "cartographic visualization",
     "zh": "制图可视化",
     "definition_zh": "将数据转换为符合制图规范的图形表达的过程。",
     "category": "cartography",
-    "related": ["symbolization", "hillshade"]
+    "related": [
+      "symbolization",
+      "hillshade"
+    ]
   },
   {
     "en": "color space",
     "zh": "色彩空间",
     "definition_zh": "用一组数值定义颜色的数学系统，如 RGB 与 CMYK。",
     "category": "cartography",
-    "related": ["color composite"]
+    "related": [
+      "color composite"
+    ]
   },
   {
     "en": "mosaic",
     "zh": "影像镶嵌",
     "definition_zh": "将多景相邻影像拼接为覆盖范围更大影像的处理。",
     "category": "cartography",
-    "related": ["seamline", "mosaic feathering", "mosaic color balancing"]
+    "related": [
+      "seamline",
+      "mosaic feathering",
+      "mosaic color balancing"
+    ]
   },
   {
     "en": "seamline",
     "zh": "镶嵌线",
     "definition_zh": "镶嵌时两景影像的拼接边界线，应尽量沿地物自然边界。",
     "category": "cartography",
-    "related": ["mosaic"]
+    "related": [
+      "mosaic"
+    ]
   },
   {
     "en": "mosaic feathering",
     "zh": "镶嵌羽化",
     "definition_zh": "在镶嵌线两侧渐变过渡以消除拼接色差的同化处理。",
     "category": "cartography",
-    "related": ["mosaic", "mosaic color balancing"]
+    "related": [
+      "mosaic",
+      "mosaic color balancing"
+    ]
   },
   {
     "en": "mosaic color balancing",
     "zh": "镶嵌色彩平衡",
     "definition_zh": "使各镶嵌影像色调一致的全局或局部辐射调整。",
     "category": "cartography",
-    "related": ["mosaic", "histogram matching"]
+    "related": [
+      "mosaic",
+      "histogram matching"
+    ]
   },
   {
     "en": "map algebra",
     "zh": "地图代数",
     "definition_zh": "对栅格图层逐像元进行算术与逻辑运算的分析框架。",
     "category": "cartography",
-    "related": ["band math"]
+    "related": [
+      "band math"
+    ]
   },
   {
     "en": "density slicing",
     "zh": "密度分割",
     "definition_zh": "将单波段灰度按阈值分级设色以突出量值分布的制图方法。",
     "category": "cartography",
-    "related": ["color ramp", "choropleth map"]
+    "related": [
+      "color ramp",
+      "choropleth map"
+    ]
   },
   {
     "en": "visual hierarchy",
     "zh": "视觉层次",
     "definition_zh": "通过符号对比引导读图注意主次关系的版面组织原则。",
     "category": "cartography",
-    "related": ["map layout", "cartographic visualization"]
+    "related": [
+      "map layout",
+      "cartographic visualization"
+    ]
   },
   {
     "en": "base map",
     "zh": "底图",
     "definition_zh": "为专题要素提供位置参考的基础地理背景图。",
     "category": "cartography",
-    "related": ["thematic map"]
+    "related": [
+      "thematic map"
+    ]
   },
   {
     "en": "thematic overlay",
     "zh": "专题叠加",
     "definition_zh": "将专题图层叠加于底图之上进行分析或制图的操作。",
     "category": "cartography",
-    "related": ["base map", "thematic map"]
+    "related": [
+      "base map",
+      "thematic map"
+    ]
   },
   {
     "en": "hillshade blending",
     "zh": "山体阴影融合",
     "definition_zh": "将山体阴影以半透明方式叠加于影像或专题图上增强立体感的制图技法。",
     "category": "cartography",
-    "related": ["hillshade", "cartographic visualization"]
+    "related": [
+      "hillshade",
+      "cartographic visualization"
+    ]
   }
 ]
