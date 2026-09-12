@@ -11,6 +11,7 @@
 #include <QString>
 #include <QStringList>
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -98,6 +99,10 @@ class WorkflowRunCoordinator : public QObject {
     /// (~/.rs_studio/checkpoints, see WorkflowCheckpointManager).
     void setCheckpointDirectory( const QString &directory );
     QString checkpointDirectory() const;
+    /// Test-only: the next persistRun sleeps this many milliseconds AFTER
+    /// dropping m_mutex (one-shot). Used to bound concurrent runForPipeline /
+    /// resumeRun of a different run against a delayed checkpoint write.
+    void setCheckpointIoDelayForTests( int milliseconds );
 
   private:
     /// resumeRun body (#860 review A-F7): every exit path queues
@@ -149,9 +154,30 @@ class WorkflowRunCoordinator : public QObject {
     /// can only ever swap an empty queue. Returns without emitting anything
     /// when the queue is empty (one locked size check).
     void drainRunNotifications();
-    void persistRunLocked( WorkflowRun &run );
-    /// Terminal roll-up + ArtifactGC + checkpoint retention. Called with
+    /// Snapshot of a checkpoint write (and optional completed-run GC/archive)
+    /// captured under m_mutex. Disk happens in persistRun with NO coordinator
+    /// mutex held; @a seq is last-writer-wins against later folds of the same
+    /// runId.
+    struct PersistRequest
+    {
+        std::shared_ptr<WorkflowRun> run;
+        QString directory;
+        std::string runId;
+        quint64 seq = 0;
+        bool sweepAndArchive = false;
+    };
+    /// Must be called with m_mutex held. Copies directory + seq; does not
+    /// serialize JSON or touch disk.
+    PersistRequest capturePersistLocked( const std::shared_ptr<WorkflowRun> &run,
+                                         bool sweepAndArchive = false );
+    /// saveCheckpoint (+ optional ArtifactGC / archive) with NO m_mutex.
+    /// Last-writer-wins: a request whose seq is behind the run's latest
+    /// issued seq is dropped unless it is the finalize sweep.
+    void persistRun( PersistRequest request );
+    /// Terminal roll-up (state + notification + lock release). Called with
     /// m_mutex held when the last step of a tracked run went terminal.
+    /// Checkpoint IO, ArtifactGC and archive run AFTER the lock drops via
+    /// persistRun (issue #931).
     void finalizeRunLocked( long pipelineId, WorkflowRun &run );
     /// m_mutex-free directory read for call paths that already hold it.
     QString checkpointDirectoryLocked() const;
@@ -193,6 +219,15 @@ class WorkflowRunCoordinator : public QObject {
     };
     std::vector<RunNotification> m_pendingRunNotifications;
     quint64 m_nextNotifySeq = 1;
+
+    /// --- Checkpoint IO off m_mutex (#931) ---------------------------------
+    /// Issued persist seq per runId; a later fold's capture wins. Checkpoint
+    /// writes themselves serialize on m_checkpointIoMutex so a stale writer
+    /// cannot publish after a newer one.
+    quint64 m_nextPersistSeq = 1;
+    std::map<std::string, quint64> m_latestPersistSeq;
+    std::mutex m_checkpointIoMutex;
+    std::atomic<int> m_checkpointIoDelayMs{ 0 };
 };
 
 } // namespace workflow

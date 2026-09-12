@@ -58,6 +58,31 @@ void traceTaskEvent( const char *event, const char *status, long taskId,
     record.detail = detail.left( 200 ).toStdString();
     trace::Trace::publish( record );
 }
+
+/// Temp-root or `.scratch` outputs collected under m_mutex and unlinked
+/// after the scheduler lock drops (issue #930). Trailing separator so a
+/// sibling like /tmp2/x.tif under a /tmp temp root is never prefix-matched.
+bool isScratchOutputPath( const QString &path )
+{
+    if ( path.isEmpty() )
+        return false;
+    const QString tempRoot = QDir::tempPath();
+    const QString tempPrefix = tempRoot.endsWith( QLatin1Char( '/' ) )
+                                   ? tempRoot
+                                   : tempRoot + QLatin1Char( '/' );
+    return path.startsWith( QStringLiteral( "/tmp/" ) )
+           || path.startsWith( tempPrefix )
+           || path.contains( QStringLiteral( ".scratch" ) );
+}
+
+void unlinkScratchOutputs( const QStringList &paths )
+{
+    for ( const QString &path : paths )
+    {
+        if ( !path.isEmpty() )
+            QFile::remove( path );
+    }
+}
 } // namespace
 
 static QString findOutputPathInParams( const QVariantMap &params )
@@ -996,6 +1021,7 @@ void TaskCenter::flushOwnedCancels()
         std::vector<std::pair<std::string, long>> jobCancelTargets;
         QList<QPointer<QgsTask>> handlesToCancel;
         QList<long> cascadeCanceledIds;
+        QStringList scratchPathsToUnlink;
         {
             QMutexLocker locker( &m_mutex );
             ownedCancels.swap( m_pendingOwnedCancels );
@@ -1015,8 +1041,10 @@ void TaskCenter::flushOwnedCancels()
                                         QStringLiteral( "cancellation" ),
                                         /*cleanupScratchOutputs=*/false,
                                         cascadeCanceledIds, jobCancelTargets,
-                                        handlesToCancel, TaskCancelReason::StructuredJoin );
+                                        handlesToCancel, scratchPathsToUnlink,
+                                        TaskCancelReason::StructuredJoin );
         }
+        unlinkScratchOutputs( scratchPathsToUnlink );
         dispatchPendingCancels( handlesToCancel, jobCancelTargets,
                                 QStringLiteral(
                                     "Canceled: owning task reached a terminal state first (structured join)" ),
@@ -2453,6 +2481,7 @@ void TaskCenter::markTaskCompleted( long taskId,
 {
     QString autoLoadPath;
     bool shouldAutoLoad = false;
+    std::optional<ExecutionStoreRequest> storeRequest;
     {
         QMutexLocker locker( &m_mutex );
         // Terminal is final: a late duplicate record (listener vs catch-up) is a no-op.
@@ -2515,7 +2544,7 @@ void TaskCenter::markTaskCompleted( long taskId,
             {
                 m_tasks[taskId].resultPayload["executionFingerprint"] = fpIt->toHex().toStdString();
             }
-            storeExecutionResultLocked( taskId );
+            storeRequest = takeExecutionStoreRequestLocked( taskId );
         }
 
         updatePipelineForTaskLocked( taskId );
@@ -2525,6 +2554,12 @@ void TaskCenter::markTaskCompleted( long taskId,
         promoteChildrenOfLocked( taskId );
         processNextQueuedTasks();
     }
+
+    // Execution-cache store is filesystem (stat + optional pool copy) and
+    // must not run under m_mutex — same shape as commitSubmissionFingerprint
+    // after prepareSubmissionFingerprintLocked (#930).
+    if ( storeRequest )
+        storeExecutionResult( std::move( *storeRequest ) );
 
     // Phase C: a fused-chain head completes its members with the tail payload
     // (members never dispatch; see submitPipeline). The tail member's declared
@@ -2557,6 +2592,7 @@ void TaskCenter::cascadeCancelTargetsLocked( const QList<long> &targets, long us
                                              QList<long> &cascadeCanceledIds,
                                              std::vector<std::pair<std::string, long>> &jobCancelTargets,
                                              QList<QPointer<QgsTask>> &handlesToCancel,
+                                             QStringList &scratchPathsToUnlink,
                                              TaskCancelReason reason )
 {
     for ( long targetId : targets )
@@ -2596,24 +2632,8 @@ void TaskCenter::cascadeCancelTargetsLocked( const QList<long> &targets, long us
                                      : QStringLiteral( "Canceled due to upstream parent task %1." ).arg( upstreamCause ) );
             cascadeCanceledIds.append( targetId );
 
-            if ( cleanupScratchOutputs && !info.outputLayerPath.isEmpty() && QFile::exists( info.outputLayerPath ) )
-            {
-                // Scratch-only deletion: the system temp root (portable —
-                // QDir::tempPath() resolves %TEMP% on Windows, which a plain
-                // "/tmp/" prefix check always missed) or a .scratch path.
-                // Trailing separator so a sibling like /tmp2/x.tif under a
-                // /tmp temp root is never prefix-matched.
-                const QString tempRoot = QDir::tempPath();
-                const QString tempPrefix = tempRoot.endsWith( QLatin1Char( '/' ) )
-                                               ? tempRoot
-                                               : tempRoot + QLatin1Char( '/' );
-                if ( info.outputLayerPath.startsWith( QStringLiteral( "/tmp/" ) )
-                     || info.outputLayerPath.startsWith( tempPrefix )
-                     || info.outputLayerPath.contains( QStringLiteral( ".scratch" ) ) )
-                {
-                    QFile::remove( info.outputLayerPath );
-                }
-            }
+            if ( cleanupScratchOutputs && isScratchOutputPath( info.outputLayerPath ) )
+                scratchPathsToUnlink.append( info.outputLayerPath );
         }
 
         updatePipelineForTaskLocked( targetId );
@@ -2726,6 +2746,7 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
     QList<long> cascadeCanceledIds;
     std::vector<std::pair<std::string, long>> jobCancelTargets;
     QList<QPointer<QgsTask>> handlesToCancel;
+    QStringList scratchPathsToUnlink;
     // Execution Plane 7.0: set when the task was resurrected by the bounded
     // transient auto-retry. The post-lock section then flushes the staged
     // re-dispatch (a staged launch must NEVER wait for an unrelated terminal
@@ -2823,7 +2844,8 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
 
         const QList<long> descendants = collectTransitiveDescendantsLocked( taskId );
         cascadeCancelTargetsLocked( descendants, -1, QStringLiteral( "failure" ), false,
-                                    cascadeCanceledIds, jobCancelTargets, handlesToCancel );
+                                    cascadeCanceledIds, jobCancelTargets, handlesToCancel,
+                                    scratchPathsToUnlink );
 
         processNextQueuedTasks();
         }
@@ -2833,6 +2855,7 @@ void TaskCenter::markTaskFailed( long taskId, const QString &error )
     if ( autoRetried )
         return; // the re-dispatch is staged + flushed; no terminal bookkeeping
 
+    unlinkScratchOutputs( scratchPathsToUnlink );
     dispatchPendingCancels( handlesToCancel, jobCancelTargets,
                             QStringLiteral( "Job no longer known to the engine; task canceled after upstream failure." ) );
 
@@ -2846,6 +2869,7 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason, TaskCance
     QList<long> cascadeCanceledIds;
     std::vector<std::pair<std::string, long>> jobCancelTargets;
     QList<QPointer<QgsTask>> handlesToCancel;
+    QStringList scratchPathsToUnlink;
     {
         QMutexLocker locker( &m_mutex );
         // Terminal is final: a late duplicate record (listener vs catch-up) is a no-op.
@@ -2884,13 +2908,15 @@ void TaskCenter::markTaskCanceled( long taskId, const QString &reason, TaskCance
 
         const QList<long> descendants = collectTransitiveDescendantsLocked( taskId );
         cascadeCancelTargetsLocked( descendants, -1, QStringLiteral( "cancellation" ), false,
-                                    cascadeCanceledIds, jobCancelTargets, handlesToCancel );
+                                    cascadeCanceledIds, jobCancelTargets, handlesToCancel,
+                                    scratchPathsToUnlink );
 
         processNextQueuedTasks();
     }
     flushPendingLaunches();
     flushPendingSignals();
 
+    unlinkScratchOutputs( scratchPathsToUnlink );
     dispatchPendingCancels( handlesToCancel, jobCancelTargets,
                             QStringLiteral( "Job no longer known to the engine; task canceled." ) );
 
@@ -2904,6 +2930,7 @@ bool TaskCenter::cancelTask( long taskId, TaskCancelReason reason )
     std::vector<std::pair<std::string, long>> jobCancelTargets;
     QList<long> cascadeCanceledIds;
     QList<QPointer<QgsTask>> handlesToCancel;
+    QStringList scratchPathsToUnlink;
     {
         QMutexLocker locker( &m_mutex );
         if ( !m_tasks.contains( taskId ) )
@@ -2916,13 +2943,15 @@ bool TaskCenter::cancelTask( long taskId, TaskCancelReason reason )
         targets.append( collectTransitiveDescendantsLocked( taskId ) );
 
         cascadeCancelTargetsLocked( targets, taskId, QStringLiteral( "cancellation" ), true,
-                                    cascadeCanceledIds, jobCancelTargets, handlesToCancel, reason );
+                                    cascadeCanceledIds, jobCancelTargets, handlesToCancel,
+                                    scratchPathsToUnlink, reason );
 
         processNextQueuedTasks();
     }
     flushPendingLaunches();
     flushPendingSignals();
 
+    unlinkScratchOutputs( scratchPathsToUnlink );
     dispatchPendingCancels( handlesToCancel, jobCancelTargets,
                             QStringLiteral( "Job no longer known to the engine; task canceled." ),
                             reason );
@@ -3586,41 +3615,9 @@ TaskCenter::prepareSubmissionFingerprintLocked( long taskId,
         return std::nullopt;
     const AlgorithmTaskInfo &info = it.value();
 
-    // Only registered RSOperators carry the schema/metadata contract needed
-    // to prove determinism; provider algorithms (gdal:/otb:/qgis:) and
-    // one-shot callables stay uncached.
-    const auto op = sicnu::operators::RSOperatorRegistry::instance().create(
-        info.algorithmId.toStdString() );
-    if ( !op )
-        return std::nullopt;
-
-    // Determinism gate — two equivalent opt-in surfaces:
-    //   1. metadata()["deterministic"] == true (explicit, e.g. temporal ops);
-    //   2. determinismGrade() == "bit-exact" (ADR 0124 / #659 — repeated
-    //      identical runs produce byte-identical outputs, so a cached
-    //      artifact is exactly what a re-run would write).
-    // "tolerance"-grade operators stay uncached: their outputs may legitimately
-    // vary within tolerance, and a served artifact must be trustworthy.
-    const Json::Value meta = op->metadata();
-    const bool deterministicOptIn =
-        ( meta.isMember( "deterministic" ) && meta["deterministic"].asBool() )
-        || op->determinismGrade() == "bit-exact";
-    if ( !deterministicOptIn )
-        return std::nullopt;
-
-    // Implementation/version identity (#726): the operator's schema document
-    // PLUS the explicit execution-cache contract version and the platform
-    // version. A schema change (new params, changed defaults) implies a
-    // behavior change; the contract version additionally invalidates every
-    // entry computed under an older fingerprint SEMANTICS (a behavior fix
-    // that leaves the schema untouched must not serve stale artifacts).
-    // 8.0: the canonical recipe moved into makeImplementationIdentity so the
-    // resume-side operator stamp (WorkflowRunCoordinator) hashes the SAME
-    // identity surface — one recipe, no drift.
-    Json::StreamWriterBuilder schemaWriter;
-    schemaWriter["indentation"] = "";
-    const std::string schemaText = Json::writeString( schemaWriter, op->schema() );
-    const QString versionHash = sicnu::data::makeImplementationIdentity( schemaText ).toHex();
+    // Operator construction, the determinism gate and schema hashing run in
+    // commitSubmissionFingerprint with NO scheduler mutex held (#930). This
+    // snapshot is only the in-memory parameter/chaining picture.
 
     // Statically resolve placeholder references against the DECLARED upstream
     // outputs (#726): the resolved map is what the fingerprint hashes, and the
@@ -3633,7 +3630,6 @@ TaskCenter::prepareSubmissionFingerprintLocked( long taskId,
     pending.taskId = taskId;
     pending.catalog = m_catalog;
     pending.algorithmId = info.algorithmId;
-    pending.implementationHash = versionHash;
     pending.parameterMap = info.parameterMap;
     QString currentParamKey;
     auto resolveRef = [this, taskId, &resolver, &pending, &currentParamKey](
@@ -3675,6 +3671,41 @@ void TaskCenter::commitSubmissionFingerprint( PendingSubmissionFingerprint pendi
     // resolve any input identity).
     if ( !sicnu::data::ExecutionResultCache::instance().isEnabled() )
         return;
+
+    // Operator construct + schema hash OUTSIDE m_mutex (#930): RSOperator
+    // factories may do non-trivial work, and hashing the schema document
+    // must not stall admission/progress/cancel. Unknown or non-deterministic
+    // operators drop here (conservative uncacheable) without re-taking the
+    // scheduler lock.
+    {
+        const auto op = sicnu::operators::RSOperatorRegistry::instance().create(
+            pending.algorithmId.toStdString() );
+        if ( !op )
+            return;
+        // Determinism gate — two equivalent opt-in surfaces:
+        //   1. metadata()["deterministic"] == true (explicit, e.g. temporal ops);
+        //   2. determinismGrade() == "bit-exact" (ADR 0124 / #659 — repeated
+        //      identical runs produce byte-identical outputs, so a cached
+        //      artifact is exactly what a re-run would write).
+        // "tolerance"-grade operators stay uncached: their outputs may
+        // legitimately vary within tolerance, and a served artifact must be
+        // trustworthy.
+        const Json::Value meta = op->metadata();
+        const bool deterministicOptIn =
+            ( meta.isMember( "deterministic" ) && meta["deterministic"].asBool() )
+            || op->determinismGrade() == "bit-exact";
+        if ( !deterministicOptIn )
+            return;
+        // Implementation/version identity (#726): the operator's schema
+        // document PLUS the explicit execution-cache contract version and
+        // the platform version. 8.0: the canonical recipe lives in
+        // makeImplementationIdentity so the resume-side operator stamp
+        // (WorkflowRunCoordinator) hashes the SAME identity surface.
+        Json::StreamWriterBuilder schemaWriter;
+        schemaWriter["indentation"] = "";
+        const std::string schemaText = Json::writeString( schemaWriter, op->schema() );
+        pending.implementationHash = sicnu::data::makeImplementationIdentity( schemaText ).toHex();
+    }
 
     // Review P1 (hard): the input-identity collector is the only stage that
     // can consult the installed execution-identity resolver — a BLOCKING
@@ -4079,44 +4110,60 @@ bool materializeCachedArtifacts( const QList<ServeTransfer> &transfers,
 }
 } // namespace
 
-void TaskCenter::storeExecutionResultLocked( long taskId )
+std::optional<TaskCenter::ExecutionStoreRequest>
+TaskCenter::takeExecutionStoreRequestLocked( long taskId )
 {
     const auto fpIt = m_taskFingerprints.constFind( taskId );
     if ( fpIt == m_taskFingerprints.constEnd() || !fpIt->isValid() )
     {
         m_taskFingerprintParams.remove( taskId );
-        return;
+        return std::nullopt;
     }
-    const sicnu::data::ExecutionFingerprint fp = *fpIt;
+    ExecutionStoreRequest request;
+    request.taskId = taskId;
+    request.fingerprint = *fpIt;
     m_taskFingerprints.erase( fpIt );
     m_taskFingerprintParams.remove( taskId );
-    const QVector<ChainedEdge> edges = m_taskChainedEdges.value( taskId );
+    request.edges = m_taskChainedEdges.value( taskId );
     m_taskChainedEdges.remove( taskId );
     // Registered-input stat bindings captured at submission (issue #749) —
     // read BEFORE the cleanup removes them.
     const QPair<QMap<QString, qint64>, QMap<QString, qint64>> registeredStats =
         m_taskRegisteredInputStats.value( taskId );
     m_taskRegisteredInputStats.remove( taskId );
+    request.registeredInputSizes = registeredStats.first;
+    request.registeredInputMsecs = registeredStats.second;
 
     const auto taskIt = m_tasks.constFind( taskId );
     if ( taskIt == m_tasks.constEnd() )
-        return;
-    const QString declared = taskIt->outputLayerPath;
-    if ( declared.isEmpty() )
+        return std::nullopt;
+    request.declaredOutputPath = taskIt->outputLayerPath;
+    if ( request.declaredOutputPath.isEmpty() )
+        return std::nullopt;
+    request.resultPayload = taskIt->resultPayload;
+    return request;
+}
+
+void TaskCenter::storeExecutionResult( ExecutionStoreRequest request )
+{
+    if ( request.taskId < 0 || !request.fingerprint.isValid()
+         || request.declaredOutputPath.isEmpty() )
         return;
 
     sicnu::data::ExecutionResultCache::CachedExecution execution;
-    execution.declaredOutputPath = declared;
+    execution.declaredOutputPath = request.declaredOutputPath;
 
     QStringList produced;
-    collectProducedPayloadPaths( taskIt->resultPayload, QString(), declared, produced );
-    if ( QFile::exists( declared ) && !produced.contains( declared ) )
-        produced.append( declared );
+    collectProducedPayloadPaths( request.resultPayload, QString(), request.declaredOutputPath,
+                                 produced );
+    if ( QFile::exists( request.declaredOutputPath )
+         && !produced.contains( request.declaredOutputPath ) )
+        produced.append( request.declaredOutputPath );
     execution.producedArtifacts = produced;
 
     // Stat every produced artifact so a lookup can refuse an entry whose
     // files were replaced by a different execution (destination reuse
-    // poisoning, #726).
+    // poisoning, #726). Runs WITHOUT m_mutex (#930).
     for ( const QString &artifact : produced )
     {
         const QFileInfo info( artifact );
@@ -4131,7 +4178,7 @@ void TaskCenter::storeExecutionResultLocked( long taskId )
     // an intermediate rewritten out-of-band must invalidate this entry on the
     // next lookup, or the producer's self-heal would silently mask the
     // poisoning (#726 review).
-    for ( const ChainedEdge &edge : edges )
+    for ( const ChainedEdge &edge : request.edges )
     {
         const QFileInfo info( edge.producerPath );
         if ( !info.isFile() )
@@ -4145,19 +4192,30 @@ void TaskCenter::storeExecutionResultLocked( long taskId )
     // computed, so stat + identity describe one provable state. An
     // out-of-band rewrite of a registered input now invalidates this entry
     // at lookup, exactly like a chained intermediate rewrite always did.
-    for ( auto it = registeredStats.first.constBegin();
-          it != registeredStats.first.constEnd(); ++it )
+    for ( auto it = request.registeredInputSizes.constBegin();
+          it != request.registeredInputSizes.constEnd(); ++it )
     {
         execution.inputSizes.insert( it.key(), it.value() );
     }
-    for ( auto it = registeredStats.second.constBegin();
-          it != registeredStats.second.constEnd(); ++it )
+    for ( auto it = request.registeredInputMsecs.constBegin();
+          it != request.registeredInputMsecs.constEnd(); ++it )
     {
         execution.inputMsecs.insert( it.key(), it.value() );
     }
 
-    execution.resultPayload = QJsonDocument::fromJson( compactJsonBytes( taskIt->resultPayload ) );
-    sicnu::data::ExecutionResultCache::instance().storeExecution( fp, execution );
+    execution.resultPayload = QJsonDocument::fromJson( compactJsonBytes( request.resultPayload ) );
+
+    // Stale-task gate: a concurrent clear/reset may have removed the task
+    // or moved it off Completed since the snapshot was taken. Drop the
+    // store rather than recording a result that no longer describes a
+    // live Completed execution.
+    {
+        QMutexLocker locker( &m_mutex );
+        const auto taskIt = m_tasks.constFind( request.taskId );
+        if ( taskIt == m_tasks.constEnd() || taskIt->status != TaskStatus::Completed )
+            return;
+    }
+    sicnu::data::ExecutionResultCache::instance().storeExecution( request.fingerprint, execution );
 }
 
 bool TaskCenter::serveFromExecutionCache( long taskId, const sicnu::data::ExecutionFingerprint &fp )

@@ -12,23 +12,31 @@
 
 #include <QCoreApplication>
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QObject>
 #include <QTemporaryDir>
+#include <QVariantMap>
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <functional>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
 
+#include <json/json.h>
+
 #include "data/data_manager.h"
+#include "data/execution_fingerprint.h"
 #include "jobs/job_engine.h"
 #include "jobs/job_types.h"
+#include "operators/framework/rs_operator.h"
+#include "operators/framework/rs_operator_registry.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
 #include "processing/framework/task_center.h"
 #include "runtime/observability/fault_registry.h"
@@ -1012,4 +1020,149 @@ TEST_CASE( "checkpoint publish fault point: crash between write and rename leave
     disarmFault( "workflow_checkpoint.publish" );
     // Recovery: the next save publishes normally.
     REQUIRE( false == checkpoints.saveCheckpoint( run, fx.checkpointDir.path() ).isEmpty() );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #930 — TaskCenter m_mutex must not cover operator construct, cache FS, or
+// scratch unlink
+// ─────────────────────────────────────────────────────────────────────────────
+
+class Ep930BitExactOperator final : public sicnu::operators::RSOperator
+{
+  public:
+    std::string name() const override { return "ep930:bit_exact"; }
+    std::string determinismGrade() const override { return "bit-exact"; }
+    Json::Value run( const Json::Value &, sicnu::operators::RSOperatorContext & ) override
+    {
+        return Json::Value( Json::objectValue );
+    }
+};
+
+TEST_CASE( "operator construct during fingerprint does not hold TaskCenter mutex (#930)",
+           "[ep9][taskcenter][lock][930]" )
+{
+    ensureApp9();
+    auto &center = TaskCenter::instance();
+    center.shutdownForTests();
+
+    sicnu::data::DataManager catalog;
+    center.setCatalog( &catalog );
+
+    auto &cache = sicnu::data::ExecutionResultCache::instance();
+    cache.clear();
+    cache.setEnabled( true );
+
+    std::atomic_bool factoryEntered{ false };
+    auto &registry = sicnu::operators::RSOperatorRegistry::instance();
+    registry.registerOperator( "ep930:slow_create", [&factoryEntered]() {
+        factoryEntered.store( true );
+        std::this_thread::sleep_for( std::chrono::milliseconds( 200 ) );
+        return std::make_unique<Ep930BitExactOperator>();
+    } );
+
+    std::atomic<long long> probeNs{ -1 };
+    std::thread probe( [&] {
+        REQUIRE( waitForCondition9( [ &factoryEntered ] { return factoryEntered.load(); },
+                                    400, 1 ) );
+        const auto t0 = std::chrono::steady_clock::now();
+        (void)center.allTasks();
+        probeNs.store( std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           std::chrono::steady_clock::now() - t0 )
+                           .count() );
+    } );
+
+    const long taskId = center.enqueueTask( QStringLiteral( "ep930:slow_create" ), {},
+                                            /*autoLoad=*/false, sicnu::TaskPriority::Normal,
+                                            {}, /*autoDispatch=*/false );
+    probe.join();
+    REQUIRE( taskId > 0 );
+    REQUIRE( factoryEntered.load() );
+    // Pre-fix, RSOperatorRegistry::create ran under m_mutex so allTasks()
+    // waited out the factory sleep (~200ms). After the split it is a brief
+    // map copy.
+    REQUIRE( probeNs.load() < 80LL * 1000 * 1000 );
+
+    registry.unregisterOperator( "ep930:slow_create" );
+    cache.setEnabled( false );
+    cache.clear();
+    center.setCatalog( nullptr );
+    center.shutdownForTests();
+}
+
+TEST_CASE( "cancelTask unlinks scratch outputs and does not leave them behind (#930)",
+           "[ep9][taskcenter][lock][930]" )
+{
+    ensureApp9();
+    auto &center = TaskCenter::instance();
+    center.shutdownForTests();
+
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString scratch = tmp.filePath( QStringLiteral( "queued.scratch.tif" ) );
+    {
+        QFile f( scratch );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        REQUIRE( f.write( "scratch" ) > 0 );
+    }
+    REQUIRE( QFile::exists( scratch ) );
+
+    QVariantMap params;
+    params.insert( QStringLiteral( "output" ), scratch );
+    const long taskId = center.enqueueTask( QStringLiteral( "ep930:scratch" ), params,
+                                            /*autoLoad=*/false, sicnu::TaskPriority::Normal,
+                                            {}, /*autoDispatch=*/false );
+    REQUIRE( taskId > 0 );
+    REQUIRE( center.cancelTask( taskId ) );
+    REQUIRE( center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Canceled );
+    // Unlink happens after m_mutex drops; cancelTask still removes the file
+    // before it returns (same observable contract, lock-free FS).
+    REQUIRE_FALSE( QFile::exists( scratch ) );
+    center.shutdownForTests();
+}
+
+TEST_CASE( "completed execution is stored without holding the scheduler mutex (#930)",
+           "[ep9][taskcenter][lock][930]" )
+{
+    ensureApp9();
+    auto &center = TaskCenter::instance();
+    center.shutdownForTests();
+
+    sicnu::data::DataManager catalog;
+    center.setCatalog( &catalog );
+
+    auto &cache = sicnu::data::ExecutionResultCache::instance();
+    cache.clear();
+    cache.setEnabled( true );
+
+    auto &registry = sicnu::operators::RSOperatorRegistry::instance();
+    registry.registerOperator( "ep930:bit_exact",
+                               []() { return std::make_unique<Ep930BitExactOperator>(); } );
+
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString output = tmp.filePath( QStringLiteral( "produced.tif" ) );
+    {
+        QFile f( output );
+        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        REQUIRE( f.write( "artifact" ) > 0 );
+    }
+
+    QVariantMap params;
+    params.insert( QStringLiteral( "output" ), output );
+    const long taskId = center.enqueueTask( QStringLiteral( "ep930:bit_exact" ), params,
+                                            /*autoLoad=*/false, sicnu::TaskPriority::Normal,
+                                            {}, /*autoDispatch=*/false );
+    REQUIRE( taskId > 0 );
+
+    Json::Value payload( Json::objectValue );
+    payload["output"] = output.toStdString();
+    center.markTaskCompleted( taskId, params, payload );
+    REQUIRE( center.getTaskInfo( taskId ).status == sicnu::TaskStatus::Completed );
+    REQUIRE( cache.pathSize() >= 1 );
+
+    registry.unregisterOperator( "ep930:bit_exact" );
+    cache.setEnabled( false );
+    cache.clear();
+    center.setCatalog( nullptr );
+    center.shutdownForTests();
 }
