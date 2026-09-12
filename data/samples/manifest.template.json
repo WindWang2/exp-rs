@@ -1,0 +1,34 @@
+{
+  "$comment": [
+    "Lab Sample Data Foundry manifest — SCHEMA TEMPLATE (not a generation artifact).",
+    "sicnu_generate_samples writes the real manifest.json next to the generated",
+    "rasters; it is deterministic given (host GDAL build, profile, seed). Placeholders",
+    "below use angle brackets. See docs/adr/0146 and docs/datasets/lab-samples.md."
+  ],
+  "manifest_version": 1,
+  "generator": "sicnu_generate_samples",
+  "generator_version": "1.0.0",
+  "seed": 42,
+  "profile": "lab",
+  "grid": {
+    "width": 256,
+    "height": 256,
+    "pixel_size_m": 30,
+    "origin_easting": 500000,
+    "origin_northing": 4060000,
+    "crs": "EPSG:32648"
+  },
+  "gdal_version": "<GDALVersionInfo(\"--version\") of the generating host>",
+  "products": [
+    "<catalog ids in canonical order, e.g. landsat_sample, dem_sample, ...>"
+  ],
+  "files": [
+    {
+      "name": "<file base name>",
+      "sha256": "<64-char lowercase hex over the file bytes>",
+      "bytes": 0,
+      "product": "<catalog id the file belongs to>"
+    }
+  ],
+  "self_fingerprint": "<sha256 over the manifest JSON (sorted keys, 2-space indent) with this field removed>"
+}

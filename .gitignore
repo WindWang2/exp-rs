@@ -52,6 +52,12 @@ data/*
 # Harness 4.0 scientific recipes are tracked metadata, not local data.
 !data/agent/
 !data/agent/**
+# Lab Sample Data Foundry (D1): generated rasters/vectors stay local-only;
+# the deterministic manifest (and its schema template) are tracked config.
+!data/samples/
+data/samples/*
+!data/samples/manifest.json
+!data/samples/manifest.template.json
 
 # Test golden data always tracked
 !tests/data/

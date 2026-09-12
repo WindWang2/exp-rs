@@ -726,6 +726,10 @@ if(TARGET sicnu_operators)
   add_subdirectory(src/cli)
 endif()
 add_subdirectory(src/app)
+# Lab Sample Data Foundry (D1): standalone deterministic sample-data generator
+# (tools/sicnu_generate_samples). Qt-free — GDAL + jsoncpp only — so it
+# configures unconditionally on every lane; see tools/CMakeLists.txt.
+add_subdirectory(tools)
 
 # SICNU_GEO_RS: Unit tests (Catch2)
 if(ENABLE_TESTS)
