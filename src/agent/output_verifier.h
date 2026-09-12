@@ -112,9 +112,14 @@ class SICNU_AGENT_EXPORT OutputVerifier
     /// Options for the teaching grader.
     struct SICNU_AGENT_EXPORT LabGradeOptions
     {
+        LabGradeOptions()
+          : maxBytes( 64ull * 1024ull * 1024ull )
+        {
+        }
+
         /// Byte budget for windowed reads (#808 contract).  Grading streams
         /// the raster in tiles that never exceed this budget.
-        std::size_t maxBytes = 64ull * 1024ull * 1024ull;
+        std::size_t maxBytes;
         /// Search directory for `<lab_id>.rules.json`.  Empty resolves via
         /// SICNU_LAB_RULES_DIR, then the source/build-tree data/labs/grading.
         QString rulesDir;
@@ -126,11 +131,11 @@ class SICNU_AGENT_EXPORT OutputVerifier
     /// result with verdict "unverifiable" (or usage-level errors reported in
     /// @a error with graded == false).
     LabGradeResult gradeForTeaching( const QString &labIdOrRulesPath, const QString &artifactPath,
-                                     const LabGradeOptions &options = {} ) const;
+                                     const LabGradeOptions &options = LabGradeOptions() ) const;
 
     /// Stable seam for batch callers (D7): identical to gradeForTeaching.
     LabGradeResult gradeArtifact( const QString &labIdOrRulesPath, const QString &artifactPath,
-                                  const LabGradeOptions &options = {} ) const
+                                  const LabGradeOptions &options = LabGradeOptions() ) const
     {
         return gradeForTeaching( labIdOrRulesPath, artifactPath, options );
     }
