@@ -161,7 +161,9 @@ Result<void> ExperimentRunBridge::attachExecutionPins( const QString &executionR
         return VoidResult::success();
     }
 
-    const auto run = m_store->runById( runId );
+    // The pin setters mutate the in-memory record before it is copied into
+    // the store, so the local cannot be const.
+    auto run = m_store->runById( runId );
     if ( !run )
         return failVoid( QStringLiteral( "experiment.run_not_found" ),
                          QStringLiteral( "run %1 is not in the store" ).arg( runId ) );

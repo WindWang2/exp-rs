@@ -8,6 +8,9 @@ set(SICNU_GEOSPATIAL_SOURCES
     metadata/canonical_metadata.cpp
     crs/crs_policy.cpp
     crs/grid_descriptor.cpp
+    identity/asset_identity.cpp
+    catalog/asset_query.cpp
+    hints/data_locality.cpp
     raster/raster_reader.cpp
     raster/raster_writer.cpp
     vector/vector_reader.cpp
@@ -22,6 +25,7 @@ set(SICNU_GEOSPATIAL_SOURCES
     remote/http_fetch.cpp
     remote/remote_source_validator.cpp
     remote/remote_identity_resolver.cpp
+    remote/range_cache_disk.cpp
     remote/range_cache.cpp
     formats/format_profiles.cpp
     cog/cog_presets.cpp
@@ -33,6 +37,7 @@ set(SICNU_GEOSPATIAL_SOURCES
     products/product_registry.cpp
     doctor/data_doctor.cpp
     multidim/multidim_view.cpp
+    multidim/multidim_cube.cpp
 )
 
 qt_add_library(sicnu_geospatial STATIC ${SICNU_GEOSPATIAL_SOURCES})

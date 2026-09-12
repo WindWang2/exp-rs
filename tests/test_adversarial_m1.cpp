@@ -218,13 +218,28 @@ TEST_CASE( "Adversarial: DEM flow accumulation endorheic basin enclosed by NoDat
 
     REQUIRE( TerrainFlow::fillDepressions( dem.data(), filled.data(), W, H, kNodata ) );
     CHECK( filled[2 * W + 2] == Approx( 8.0f ) );
-    REQUIRE( TerrainFlow::flowDirections( dem.data(), dir.data(), W, H, kNodata ) );
+    // D8 routes over the FILLED surface (the terrain_flow.h contract) —
+    // routing over the raw DEM would re-introduce the depression the fill
+    // just removed.
+    REQUIRE( TerrainFlow::flowDirections( filled.data(), dir.data(), W, H, kNodata ) );
     REQUIRE( TerrainFlow::flowAccumulation( dir.data(), acc.data(), W, H ) );
 
-    // Center cell (2, 2) is a sink and must accumulate all 9 cells of the isolated basin
+    // Center cell (2, 2) is a fill flat: #848 (Scientific Algorithms 9.0)
+    // seeds the priority-flood on NoData-adjacent valid cells, so the basin
+    // fills to the spill elevation of its lowest rim cell (8) instead of
+    // silently keeping the raw pit. The filled rim equals the filled centre,
+    // so every interior cell terminates as its own D8 sink; the centre no
+    // longer hoards the basin's accumulation (water spills across the
+    // NoData rim at the seed's own elevation).
     const size_t centerIdx = 2 * W + 2;
+    CHECK( filled[centerIdx] == Approx( 8.0f ) );
     CHECK( dir[centerIdx] == 0.0f );
-    CHECK( acc[centerIdx] == Approx( 9.0f ) );
+    CHECK( acc[centerIdx] == Approx( 1.0f ) );
+    for ( size_t i = 0; i < W * H; ++i )
+    {
+        if ( dem[i] != kNodata )
+            CHECK( acc[i] >= 1.0f );
+    }
 
     // Outer ring must remain NoData throughout
     for ( int y = 0; y < H; ++y )

@@ -115,7 +115,7 @@ TEST_CASE( "Slope and aspect follow Horn's method with documented conventions",
     // Flat DEM: zero slope, aspect undefined (-1).
     const int w = 5;
     std::vector<float> flat( 25, 100.0f );
-    const SlopeAspect flatSa = slopeAspectAt( flat.data(), w, 2, 2, 10.0, 1.0 );
+    const SlopeAspect flatSa = slopeAspectAt( flat.data(), w, 2, 2, 10.0, 10.0, 1.0 );
     REQUIRE( flatSa.slopeDeg < 1e-9 );
     REQUIRE( flatSa.aspectDeg < 0.0 );
 
@@ -125,7 +125,7 @@ TEST_CASE( "Slope and aspect follow Horn's method with documented conventions",
     for ( int y = 0; y < 5; ++y )
         for ( int x = 0; x < 5; ++x )
             ramp[y * 5 + x] = 10.0f * x;
-    const SlopeAspect sa = slopeAspectAt( ramp.data(), w, 2, 2, 10.0, 1.0 );
+    const SlopeAspect sa = slopeAspectAt( ramp.data(), w, 2, 2, 10.0, 10.0, 1.0 );
     REQUIRE( sa.slopeDeg == Approx( 45.0 ).margin( 1e-6 ) );
     REQUIRE( sa.aspectDeg == Approx( 270.0 ).margin( 1e-6 ) );
 
@@ -136,7 +136,7 @@ TEST_CASE( "Slope and aspect follow Horn's method with documented conventions",
     for ( int y = 0; y < 5; ++y )
         for ( int x = 0; x < 5; ++x )
             rampN[y * 5 + x] = 10.0f * y;
-    const SlopeAspect saN = slopeAspectAt( rampN.data(), w, 2, 2, 10.0, 1.0 );
+    const SlopeAspect saN = slopeAspectAt( rampN.data(), w, 2, 2, 10.0, 10.0, 1.0 );
     REQUIRE( saN.slopeDeg == Approx( 45.0 ).margin( 1e-6 ) );
     REQUIRE( saN.aspectDeg == Approx( 0.0 ).margin( 1e-6 ) );
 }
