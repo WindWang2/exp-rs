@@ -58,6 +58,45 @@
 - IHS融合
 - **菜单**: Raster > Image Fusion
 
+## 实验列表（能力扩展：D3 轨道新增）
+
+实验 8–11 把平台时序 / SAR / 高光谱 / 制图能力引入课堂。每个实验除 GUI 步骤外，
+还提供 **headless 可复现管道**（`data/labs/pipelines/*.pipeline.json`），通过
+`sicnu_geo_rs_cli --pipeline` 离屏运行；数据规格（供 D1 生成教学数据）与判分意图
+（判分器由 D4 实现）分别在 `data/labs/data-specs/` 与 `data/labs/grading/`。
+
+### 实验8：NDVI 时序分析——趋势、物候与异常检测
+- NDVI 时序栈（12 期，获取日期元数据硬依赖）
+- 线性趋势（斜率单位 NDVI/天）
+- 物候参数（SOS/POS/EOS/生长季长度，阈值交叉法）
+- 基线 z-score 异常检测（扰动时相 + 扰动前对照）
+- **算子**: `rs:temporal_summary` / `rs:temporal_index_series` / `rs:temporal_trend` / `rs:temporal_phenology` / `rs:temporal_anomaly`
+- **文档**: [lab8_temporal_analysis.md](lab8_temporal_analysis.md)
+
+### 实验9：SAR 相干斑抑制与变化检测
+- DN → σ0 辐射定标（同校准常数配对）
+- Lee 滤波与等效视数（ENL）评价
+- dB 对数比 + Otsu 阈值变化检测（检出率/虚警率）
+- #785 视角几何与 #803 多波段 NoData 两个已修缺陷的回归性教学验证
+- **算子**: `rs:sar_calibrate` / `rs:sar_speckle` / `rs:sar_change` / `rs:sar_terrain_correction`
+- **文档**: [lab9_sar_processing.md](lab9_sar_processing.md)
+
+### 实验10：高光谱分析——MNF、PPI、SAM/SID 与线性解混
+- MNF 降维（SNR 有序分量与有效维数）
+- PPI 端元提取（与光谱库对照）
+- SAM 与 SID 光谱匹配分类（精度对比）
+- 线性解混（丰度 + 重构误差）
+- **算子**: `rs:mnf` / `rs:endmember_extraction` / `rs:sam_classify` / `rs:spectral_unmixing`
+- **文档**: [lab10_hyperspectral_analysis.md](lab10_hyperspectral_analysis.md)
+
+### 实验11：制图出图——专题数据生产与合规地图排版
+- 年内均值合成 + Otsu 专题分级（可复现数据链）
+- MapSpec 声明式排版（spec_version 5）
+- 合规五要素：标题/图例/比例尺/指北针/来源注记（preflight 规则）
+- 交付治理：output 只声明、导出必须显式（cartography:export）
+- **算子/工具**: `rs:temporal_composite` / `rs:threshold_raster` + `cartography:compose` / `cartography:export`
+- **文档**: [lab11_cartographic_mapping.md](lab11_cartographic_mapping.md)
+
 ## 数据说明
 
 ### landsat_sample.tif 波段说明
@@ -80,3 +119,21 @@
 | 裸土 | 随波长增加反射率上升 |
 | 森林 | 类似植被但NIR更高 |
 | 阴影 | 各波段极低反射率 |
+
+## Headless 验证（实验 8–11）
+
+```bash
+# 1) 生成本地临时数据（gitignored，实验环境由 D1 提供等价数据）
+python3 scripts/gen_lab_fixtures.py temporal      --out data/labs/_tmp
+python3 scripts/gen_lab_fixtures.py sar           --out data/labs/_tmp
+python3 scripts/gen_lab_fixtures.py hyperspectral --out data/labs/_tmp
+
+# 2) 运行四条管道（离屏；先构建 sicnu_geo_rs_cli）
+QT_QPA_PLATFORM=offscreen python3 scripts/run_lab_pipelines.py
+
+# 3) 对照判分意图校验产物
+python3 scripts/verify_lab_outputs.py
+```
+
+LabSpec 规格：`data/labs/*.labspec.json`（`data/labs/labspec.schema.json` 校验）；
+实验 11 的排版出图另见 `data/labs/mapspecs/` 与 `scripts/export_lab_map_mcp.py`。
