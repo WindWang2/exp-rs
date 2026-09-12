@@ -199,9 +199,13 @@ VectorWriter::VectorWriter( VectorWriter &&other ) noexcept
   , mLayer( std::exchange( other.mLayer, nullptr ) )
   , mTargetPath( std::move( other.mTargetPath ) )
   , mStagedPath( std::move( other.mStagedPath ) )
-  , mTransactionActive( std::exchange( other.mTransactionActive, false ) )
+  , mTransactionActive( other.mTransactionActive )
   , mFinalized( other.mFinalized )
 {
+  // #850: the open transaction belongs to the GDAL dataset, so it moves WITH
+  // the dataset — dropping the flag here made finalize() skip the commit and
+  // GDALClose silently roll the whole feature stream back.
+  other.mTransactionActive = false;
   other.mFinalized = true;
 }
 
@@ -316,11 +320,44 @@ void VectorWriter::writeFeature( const Json::Value &attributes, const std::strin
   OGR_F_Destroy( feature );
 }
 
+void VectorWriter::writeFeatures( const std::vector<FeatureInput> &features )
+{
+  for ( std::size_t i = 0; i < features.size(); ++i )
+  {
+    try
+    {
+      writeFeature( features[i].attributes, features[i].geometryWkt );
+    }
+    catch ( GeoError &error )
+    {
+      Json::Value details = error.details();
+      if ( details.isNull() || !details.isObject() )
+        details = Json::Value( Json::objectValue );
+      details["feature_index"] = static_cast<Json::UInt64>( i );
+      details["batch_size"] = static_cast<Json::UInt64>( features.size() );
+      throw GeoError( error.code(), error.what(), details );
+    }
+  }
+}
+
 void VectorWriter::cancel()
 {
   if ( mHandle )
   {
-    GDALClose( datasetOf( mHandle ) );
+    GDALDatasetH dataset = datasetOf( mHandle );
+    {
+      // Roll back explicitly and keep the whole teardown quiet: after a
+      // rollback GDAL's deferred bookkeeping (e.g. GPKG feature-count
+      // triggers) legitimately references rolled-back tables — the staged
+      // file is discarded either way, so CPL complaints here are noise.
+      QuietCplErrors quiet;
+      if ( mTransactionActive )
+      {
+        GDALDatasetRollbackTransaction( dataset );
+        mTransactionActive = false;
+      }
+      GDALClose( dataset );
+    }
     mHandle = nullptr;
     mLayer = nullptr;
   }
@@ -341,15 +378,23 @@ void VectorWriter::finalize()
     throw GeoError( ErrorCode::InvalidArgument, "finalize: writer is closed" );
 
   GDALDatasetH dataset = datasetOf( mHandle );
-  if ( mTransactionActive && GDALDatasetCommitTransaction( dataset ) != OGRERR_NONE )
+  if ( mTransactionActive )
   {
-    GDALClose( dataset );
-    mHandle = nullptr;
-    mLayer = nullptr;
-    atomic_fs::discardStaged( mStagedPath );
-    throw GeoError( ErrorCode::WriteFailed, "finalize: transaction commit failed; output discarded" );
+    QuietCplErrors quiet;
+    if ( GDALDatasetCommitTransaction( dataset ) != OGRERR_NONE )
+    {
+      // A failed commit leaves the transaction open — roll back explicitly
+      // instead of trusting GDALClose's implicit behavior.
+      GDALDatasetRollbackTransaction( dataset );
+      mTransactionActive = false;
+      GDALClose( dataset );
+      mHandle = nullptr;
+      mLayer = nullptr;
+      atomic_fs::discardStaged( mStagedPath );
+      throw GeoError( ErrorCode::WriteFailed, "finalize: transaction commit failed; output discarded" );
+    }
+    mTransactionActive = false;
   }
-  mTransactionActive = false;
   if ( GDALFlushCache( dataset ) != CE_None )
   {
     GDALClose( dataset );

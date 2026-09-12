@@ -128,6 +128,22 @@ void fsyncFile( const std::string &path )
 #endif
 }
 
+#ifndef _WIN32
+/// POSIX only: best-effort fsync of the directory containing `path` (the
+/// durability gate for a rename's directory entry). Silent by design — see
+/// the call site in publishStagedFile.
+void fsyncDirectoryQuiet( const std::string &path )
+{
+  const fs::path target = fs::u8path( path );
+  const fs::path directory = target.parent_path().empty() ? fs::path( "." ) : target.parent_path();
+  const int fd = ::open( directory.c_str(), O_RDONLY );
+  if ( fd < 0 )
+    return;
+  ::fsync( fd ); // ignored: EINVAL on filesystems without directory fsync
+  ::close( fd );
+}
+#endif
+
 /// Copies src over dst (creating/overwriting), throwing GeoError on failure.
 /// Used by the cross-device publish fallback (#807); callers fsync + rename
 /// the copy into place so the target update itself stays atomic.
@@ -196,6 +212,13 @@ void publishStagedFile( const std::string &stagedPath, const std::string &target
       throw;
     }
   }
+  // Durability of the RENAME itself: fsync the containing directory so a
+  // crash after publish cannot revert the directory entry. Best-effort and
+  // silent: several legitimate filesystems (some network/FUSE mounts) refuse
+  // directory fsync with EINVAL — failing the publish there would trade a
+  // real capability for a durability nicety. The file-content fsync above is
+  // the correctness gate; this only narrows the crash window for the entry.
+  fsyncDirectoryQuiet( targetPath );
 #endif
 }
 
@@ -273,12 +296,13 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
   auto cleanup = [ & ]( const std::string &failedName ) {
     for ( const std::string &done : published )
       removeFileQuiet( done );
-    // Restore every backed-up member (the previous good group)...
+    // Restore every backed-up member (the previous good group): the MAIN
+    // target first (it is the completeness marker), then the sidecars.
+    // #791 review: a failed restore must NOT drop the backup — that would
+    // destroy the last copy of the previous good main file.
     if ( hadMainTarget && fileExists( mainBackup ) )
     {
       removeFileQuiet( targetMainPath );
-      // #791 review: a failed restore must NOT drop the backup — that
-      // would destroy the last copy of the previous good main file.
       if ( !moveFileQuiet( mainBackup, targetMainPath ) )
         throw GeoError( ErrorCode::IoError,
                         "group publish failed at " + failedName +
@@ -293,12 +317,7 @@ void publishStagedGroup( const std::string &stagedMainPath, const std::string &t
         moveFileQuiet( backup, targetSidecars[i] );
       }
     }
-    if ( hadMainTarget && fileExists( mainBackup ) )
-    {
-      removeFileQuiet( targetMainPath );
-      moveFileQuiet( mainBackup, targetMainPath );
-    }
-    // ...then drop any leftover backup copies.
+    // Drop any leftover backup copies.
     removeFileQuiet( mainBackup );
     for ( std::size_t i = 0; i < targetSidecars.size(); ++i )
       removeFileQuiet( targetSidecars[i] + ".bak" );

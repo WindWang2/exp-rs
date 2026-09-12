@@ -280,6 +280,9 @@ sicnu_add_io_test(test_io_grid_descriptor)
 
 # io:* operator family suite — rides the operator chain (Qt + sicnu_operators).
 sicnu_add_io_test(test_io_operators)
+sicnu_add_io_test(test_io_catalog_query)
+sicnu_add_io_test(test_io_hints)
+sicnu_add_io_test(test_io_scale9)
 target_link_libraries(test_io_operators PRIVATE Qt6::Core sicnu_operators)
 sicnu_link_jsoncpp(test_io_operators)
 
@@ -1268,6 +1271,45 @@ target_include_directories(test_terrain_foundation5 PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_terrain_foundation5)
+
+# Scientific Algorithms 9.0 (M0): regression tests for the verified
+# scientific defects #848/#853/#854/#855/#856/#873 (old-code-fails form).
+add_executable(test_scientific_defects_9 test_scientific_defects_9.cpp)
+target_link_libraries(test_scientific_defects_9 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_scientific_defects_9)
+target_include_directories(test_scientific_defects_9 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_scientific_defects_9)
+
+# Scientific Algorithms 9.0 (M1): mechanical drift guards binding the numeric
+# / raster semantics contracts to anchors in the owned sources.
+add_executable(test_semantic_drift_9 test_semantic_drift_9.cpp)
+target_link_libraries(test_semantic_drift_9 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_semantic_drift_9)
+target_include_directories(test_semantic_drift_9 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_semantic_drift_9 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_semantic_drift_9)
 
 # Raster spatial operators (Foundation 5.0 Milestone G): morphology, labeling,
 # sieve, fill holes, proximity, extrema, focal stats (operator E2E).
