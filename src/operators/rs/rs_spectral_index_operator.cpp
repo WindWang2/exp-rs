@@ -299,8 +299,16 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                         // slip into the probe statistics (review FINDING).
                         if (hasNodataProbe[b] && v == static_cast<float>(nodataProbe[b]))
                             continue;
-                        if (v > 0.0f && std::isfinite(v))
-                            observedMaxAbs = std::max(observedMaxAbs, static_cast<double>(v));
+                        // Scale evidence is POSITIVE magnitudes only (#856):
+                        // reflectance and DN domains are non-negative, so a
+                        // finite negative value is either an undeclared
+                        // sentinel (its magnitude folds positive under abs
+                        // and falsely flips the scene into DN scale) or
+                        // noise — never a reason to divide every pixel by
+                        // the canonical DN divisor.
+                        if (v > 0.0f)
+                            observedMaxAbs = std::max(observedMaxAbs,
+                                                      static_cast<double>(v));
                     }
                 }
             }
@@ -335,12 +343,14 @@ Json::Value runSpectralIndexCore(const std::string& defaultIndex,
                         + "; dividing the participating bands by it");
     }
 
-
     // Streaming execution (#664, ADR 0124 grade bit-exact): the raster is
     // processed in horizontal row-blocks so only O(blockRows*width) of each
     // participating band is resident, instead of full-raster buffers. Every
     // index kernel is strictly element-wise, so block-wise invocation is
-    // bit-identical to a full-raster pass.
+    // bit-identical to a full-raster pass. (The scale regime is already
+    // resolved ONCE above — declared metadata or the bounded probe; a second
+    // sampled re-probe heuristic used to re-derive it here with hardcoded
+    // sentinel guesses and was removed as dead, divergent logic (#856).)
     const int blockRows = std::max(1, std::min(256, height));
     const size_t blockSize = static_cast<size_t>(width) * blockRows;
 

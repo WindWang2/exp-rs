@@ -68,6 +68,21 @@ GDALDatasetH datasetOf( const void *handle )
   return static_cast<GDALDatasetH>( const_cast<void *>( handle ) );
 }
 
+/// #874: NoData matching happens in the band's STORAGE precision. Window
+/// reads widen every pixel to double exactly, but a Float32 band stores
+/// float-quantized values — a declared NoData that is not float-exact
+/// (e.g. -9999.9) never compares equal in double space, silently marking
+/// sentinel pixels valid. Narrowing BOTH sides to the stored type matches
+/// what is actually on disk. NaN sentinel handling is separate and exact.
+bool sentinelMatches( const BandInfo &info, double value )
+{
+  if ( info.noDataIsNaN )
+    return std::isnan( value );
+  if ( info.dtype == "Float32" )
+    return static_cast<float>( value ) == static_cast<float>( info.noDataValue );
+  return value == info.noDataValue;
+}
+
 } // namespace
 
 bool clampWindowToRaster( const RasterMetadata &metadata, RasterWindow &window )
@@ -326,13 +341,13 @@ std::vector<std::uint8_t> RasterReader::readMask( const RasterWindow &window, co
     const std::vector<double> bandValues = readWindow( { effectiveBands[b] }, window );
     for ( std::size_t p = 0; p < pixels; ++p )
     {
-      const double value = bandValues[p];
-      const bool invalid = info->noDataIsNaN
-                               ? std::isnan( value )
-                               : ( value == info->noDataValue ||
-                                   static_cast<float>( value ) == static_cast<float>( info->noDataValue ) ||
-                                   std::abs( value - info->noDataValue ) < 1e-6 );
-      if ( invalid )
+      // Deliberate divergence from the merged master fix (which ORs in an
+      // absolute 1e-6 tolerance for EVERY dtype): an epsilon blind to value
+      // magnitude mis-masks legitimate Float64 values within 1e-6 of the
+      // sentinel, and float-casting large integer sentinels loses precision
+      // past 2^24. Matching in the band's STORAGE precision is exact for
+      // Float64 and correct for Float32 quantization — see sentinelMatches.
+      if ( sentinelMatches( *info, bandValues[p] ) )
         mask[p] = 0;
     }
   }

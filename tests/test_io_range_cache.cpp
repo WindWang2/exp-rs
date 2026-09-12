@@ -24,6 +24,7 @@
 #include <cstdio>
 
 #include <algorithm>
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
@@ -33,6 +34,7 @@
 
 using namespace sicnu::geo;
 using sicnu::geo::testsupport::HttpRangeServer;
+using sicnu::geo::testsupport::ServerBehavior;
 
 namespace
 {
@@ -101,6 +103,85 @@ struct InstalledCache
 };
 
 } // namespace
+
+// ---------------------------------------------------------------------------
+// 9.0 M2 — bounded concurrent fetch: the global in-flight byte cap is a real
+// gate. This case runs FIRST in the binary so the process high-water gauge
+// is this test's own peak: 4 concurrent readers whose ungated fetch runs are
+// 256 KiB each would peak at ~1 MiB without the gate; the 256 KiB cap must
+// hold (asserted as the ABSOLUTE gauge, no delta masking).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "the global in-flight fetch bound holds across concurrent resources",
+           "[io][remote][range_cache][fabric9][admission]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "admission" );
+
+  // Two independent origins; four readers so the UNGATED concurrent sum
+  // (~4 x 256 KiB fetch runs) clearly exceeds the cap.
+  const std::vector<unsigned char> payloadA = buildTiff( dir + "/a.tif" );
+  const std::vector<unsigned char> payloadB = buildTiff( dir + "/b.tif" );
+  HttpRangeServer serverA( payloadA );
+  HttpRangeServer serverB( payloadB );
+  serverA.setConcurrency( 8 );
+  serverB.setConcurrency( 8 );
+
+  RangeCacheConfig config;
+  config.blockSize = 64 * 1024;
+  config.maxCacheBytes = 16ull * 1024 * 1024;
+  // A fetch run is clamped to maxSingleFetchBytes: each in-flight request
+  // is <= 256 KiB, so head-of-line admission stays inside the cap.
+  config.maxSingleFetchBytes = 256ull * 1024;
+  config.maxConcurrentFetchBytes = 256ull * 1024;
+  InstalledCache guard( config );
+
+  std::vector<double> expectedA;
+  std::vector<double> expectedB;
+  {
+    RasterReader localA( RasterReader::open( dir + "/a.tif" ) );
+    expectedA = localA.readWindow( { 1 }, { 0, 0, 256, 256 } );
+    RasterReader localB( RasterReader::open( dir + "/b.tif" ) );
+    expectedB = localB.readWindow( { 1 }, { 0, 0, 256, 256 } );
+  }
+
+  std::atomic<int> okCount{ 0 };
+  {
+    std::vector<std::thread> readers;
+    for ( int t = 0; t < 4; ++t )
+    {
+      readers.emplace_back( [ &, t ] {
+        try
+        {
+          const bool fromA = ( t % 2 ) == 0;
+          RasterReader reader = RasterReader::open(
+            RemoteRangeCache::cachedPath( fromA ? serverA.url() : serverB.url() ) );
+          const std::vector<double> got = reader.readWindow( { 1 }, { 0, 0, 256, 256 } );
+          if ( got == ( fromA ? expectedA : expectedB ) )
+            okCount.fetch_add( 1 );
+        }
+        catch ( ... )
+        {
+        }
+      } );
+    }
+    for ( std::thread &reader : readers )
+      reader.join();
+  }
+  CHECK( okCount.load() == 4 );
+
+  // First-position absolute gauge: this binary has run no other cache
+  // traffic, so the high-water IS this test's peak and must not exceed the
+  // declared bound (deleting the admission gate pushes it to ~1 MiB).
+  const Json::Value telemetry = RemoteRangeCache::telemetryJson();
+  const std::uint64_t peak = telemetry["max_in_flight_fetch_bytes"].asUInt64();
+  INFO( "peak in-flight bytes: " << peak );
+  CHECK( peak <= config.maxConcurrentFetchBytes );
+  // Real amplification evidence: origin bytes were fetched for the misses.
+  CHECK( telemetry["bytes_fetched"].asUInt64() > 0 );
+  CHECK( telemetry["bytes_served"].asUInt64() > 0 );
+  CHECK( telemetry["read_amplification"].asDouble() > 0.0 );
+}
 
 TEST_CASE( "range cache serves window reads with byte-once origin cost",
            "[io][remote][range_cache]" )
@@ -449,6 +530,10 @@ TEST_CASE( "concurrent readers of one resource share the origin fetch",
   // dedup run generous headroom.
   const std::uint64_t windowBlockBytes = 4ull * 64 * 1024; // 256×256 Float32 ≤ 4 blocks
   CHECK( fetchedBytes < windowBlockBytes * 2 );
+  // The byte bound above is the dedup proof; also count the mechanism
+  // directly (waiters that found the concurrent fetch's results cached).
+  INFO( "dedup hits this file so far=" << telemetry["dedup_hits"].asUInt64() );
+  CHECK( telemetry["dedup_hits"].asUInt64() > 0 );
 }
 
 TEST_CASE( "adjacent and overlapping window reads stay byte-correct and pay once",
@@ -654,4 +739,289 @@ TEST_CASE( "COG overview and window reads through the cache stay bounded and cor
   INFO( "fetched=" << fetched << " payload=" << payload.size() );
   CHECK( fetched * 2 < static_cast<std::uint64_t>( payload.size() ) );
   CHECK( fetched > 0 ); // the reads did go through the ranged cache
+}
+
+// ---------------------------------------------------------------------------
+// 9.0 M2 — truncation gate: a well-formed 206 whose body is shorter than its
+// echoed window must never be served or cached. The read degrades to the
+// /vsicurl/ fallback and stays byte-correct.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "truncated 206 bodies are refused — fallback keeps reads byte-correct",
+           "[io][remote][range_cache][fabric9][truncation]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "short_range" );
+  const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
+  HttpRangeServer server( payload, ServerBehavior::ShortRange );
+  server.setEtag( "\"short-range-1\"" );
+
+  // Refusal evidence: the read must degrade to the /vsicurl/ fallback (the
+  // gate threw). Without the gate, the read would be served from the cache
+  // and this counter would not move.
+  const std::uint64_t fallbackBefore = RemoteRangeCache::telemetryJson()["fallback_reads"].asUInt64();
+
+  RangeCacheConfig config;
+  config.blockSize = 64 * 1024;
+  config.stalePolicy = RangeCacheStalePolicy::TrustForever; // isolate the body gate
+  InstalledCache guard( config );
+
+  std::vector<double> expected;
+  {
+    RasterReader local( RasterReader::open( dir + "/scene.tif" ) );
+    expected = local.readWindow( { 1 }, { 0, 0, 256, 256 } );
+    REQUIRE( expected.size() == 256ull * 256 );
+  }
+
+  // Every ranged GET beyond the identity head answers 4 bytes of body —
+  // the cache must throw internally (truncation gate), degrade to the
+  // fallback, and STILL deliver the correct bytes to the reader.
+  RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+  REQUIRE( reader.isOpen() );
+  const std::vector<double> got = reader.readWindow( { 1 }, { 0, 0, 256, 256 } );
+  REQUIRE( got.size() == expected.size() );
+  CHECK( got == expected );
+  REQUIRE( server.shortRangeFired() ); // the fault really fired — no vacuous test
+  // The truncated answer was REFUSED, not served from the cache path.
+  CHECK( RemoteRangeCache::telemetryJson()["fallback_reads"].asUInt64() > fallbackBefore );
+
+  // A second read stays correct too (the truncated body was never cached).
+  const std::vector<double> again = reader.readWindow( { 1 }, { 0, 0, 256, 256 } );
+  CHECK( again == expected );
+}
+
+
+// ---------------------------------------------------------------------------
+// 9.0 M3 — hierarchical cache: the optional disk block layer under the
+// memory cache. Blocks are content-identity keyed, checksummed, atomically
+// published and LRU/byte-capped. A resource with NO provable identity is
+// never disk-cached (fail-closed).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "the disk layer serves memory-cold reads without origin refetch",
+           "[io][remote][range_cache][fabric9][disk]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "disk" );
+  const std::string diskDir = dir + "/blocks";
+  const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
+  HttpRangeServer server( payload );
+  server.setEtag( "\"disk-identity-1\"" ); // strong ETag ⇒ provable disk identity
+
+  RangeCacheConfig config;
+  config.blockSize = 64 * 1024;
+  config.maxCacheBytes = 4ull * 1024 * 1024;
+  config.stalePolicy = RangeCacheStalePolicy::TrustForever; // isolate the disk path
+  config.diskDirectory = diskDir;
+  config.diskMaxBytes = 16ull * 1024 * 1024;
+  InstalledCache guard( config );
+
+  std::vector<double> expected;
+  {
+    RasterReader local( RasterReader::open( dir + "/scene.tif" ) );
+    expected = local.readWindow( { 1 }, { 0, 0, 256, 256 } );
+    REQUIRE( expected.size() == 256ull * 256 );
+  }
+
+  // Cold pass: fetch fills memory AND publishes disk blocks.
+  {
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    CHECK( reader.readWindow( { 1 }, { 0, 0, 256, 256 } ) == expected );
+  }
+  const Json::Value statsAfterFill = RemoteRangeCache::diskCacheStatsJson();
+  CHECK( statsAfterFill["enabled"].asBool() );
+  CHECK( statsAfterFill["puts"].asUInt64() > 0 );
+
+  // Cold pass origin cost: the fetch + per-open metadata probes.
+  const std::uint64_t fetchedAfterFill = RemoteRangeCache::telemetryJson()["bytes_fetched"].asUInt64();
+  const std::uint64_t diskHitsBefore = RemoteRangeCache::diskCacheStatsJson()["hits"].asUInt64();
+
+  // Evict EVERYTHING from memory: disk becomes the only warm layer.
+  RemoteRangeCache::clearEntries();
+
+  {
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    const std::vector<double> got = reader.readWindow( { 1 }, { 0, 0, 256, 256 } );
+    REQUIRE( got.size() == expected.size() );
+    CHECK( got == expected );
+  }
+  const Json::Value statsAfterDisk = RemoteRangeCache::diskCacheStatsJson();
+  CHECK( statsAfterDisk["hits"].asUInt64() > diskHitsBefore );
+
+  // Origin cost unchanged beyond per-open metadata: the window bytes came
+  // from the disk layer, not a refetch.
+  const std::uint64_t fetchedAfterDiskRead = RemoteRangeCache::telemetryJson()["bytes_fetched"].asUInt64();
+  CHECK( fetchedAfterDiskRead < fetchedAfterFill + 256ull * 1024 );
+}
+
+TEST_CASE( "corrupt disk blocks are refused and re-fetched, never served",
+           "[io][remote][range_cache][fabric9][disk][corruption]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "disk_corrupt" );
+  const std::string diskDir = dir + "/blocks";
+  const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
+  HttpRangeServer server( payload );
+  server.setEtag( "\"disk-corrupt-1\"" );
+
+  RangeCacheConfig config;
+  config.blockSize = 64 * 1024;
+  config.maxCacheBytes = 4ull * 1024 * 1024;
+  config.stalePolicy = RangeCacheStalePolicy::TrustForever;
+  config.diskDirectory = diskDir;
+  config.diskMaxBytes = 16ull * 1024 * 1024;
+  InstalledCache guard( config );
+
+  std::vector<double> expected;
+  {
+    RasterReader local( RasterReader::open( dir + "/scene.tif" ) );
+    expected = local.readWindow( { 1 }, { 0, 0, 128, 128 } );
+    REQUIRE( expected.size() == 128ull * 128 );
+  }
+  {
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    CHECK( reader.readWindow( { 1 }, { 0, 0, 128, 128 } ) == expected );
+  }
+
+  // Flip bytes in ONE block file — a torn/broken block on disk.
+  const std::filesystem::path blocks( diskDir );
+  std::filesystem::path victim;
+  for ( const auto &entry : std::filesystem::directory_iterator( blocks ) )
+  {
+    if ( entry.path().extension() == ".blk" )
+    {
+      victim = entry.path();
+      break;
+    }
+  }
+  REQUIRE( !victim.empty() );
+  {
+    std::ofstream out( victim, std::ios::binary | std::ios::in );
+    out.seekp( 60 ); // inside the data region (4+8+8+32 header)
+    out << "\xDE\xAD\xBE\xEF";
+  }
+  const std::uint64_t corruptBefore = RemoteRangeCache::diskCacheStatsJson()["corrupt"].asUInt64();
+
+  RemoteRangeCache::clearEntries(); // cold memory
+  {
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    const std::vector<double> got = reader.readWindow( { 1 }, { 0, 0, 128, 128 } );
+    REQUIRE( got.size() == expected.size() );
+    CHECK( got == expected ); // corrupt block was a miss: refetch served truth
+  }
+  CHECK( RemoteRangeCache::diskCacheStatsJson()["corrupt"].asUInt64() > corruptBefore );
+}
+
+TEST_CASE( "resources without provable identity are never disk-cached",
+           "[io][remote][range_cache][fabric9][disk][fail-closed]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "disk_failclosed" );
+  const std::string diskDir = dir + "/blocks";
+  const std::vector<unsigned char> payload = buildSmallTiff( dir + "/small.tif" );
+  HttpRangeServer server( payload ); // NO ETag, NO Last-Modified: unprovable
+
+  RangeCacheConfig config;
+  config.blockSize = 64 * 1024;
+  config.stalePolicy = RangeCacheStalePolicy::TrustForever;
+  config.diskDirectory = diskDir;
+  config.diskMaxBytes = 16ull * 1024 * 1024;
+  InstalledCache guard( config );
+
+  {
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    REQUIRE( reader.isOpen() );
+    RasterWindow full;
+    full.width = 256;
+    full.height = 256;
+    CHECK( reader.readWindow( { 1 }, full ).size() == 256ull * 256 );
+  }
+  const Json::Value stats = RemoteRangeCache::diskCacheStatsJson();
+  CHECK( stats["puts"].asUInt64() == 0 ); // unprovable identity ⇒ never masquerades as cacheable
+}
+
+TEST_CASE( "the disk layer byte cap evicts LRU blocks without breaking reads",
+           "[io][remote][range_cache][fabric9][disk][eviction]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "disk_evict" );
+  const std::string diskDir = dir + "/blocks";
+  const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
+  HttpRangeServer server( payload );
+  server.setEtag( "\"disk-evict-1\"" );
+
+  RangeCacheConfig config;
+  config.blockSize = 64 * 1024;
+  config.maxCacheBytes = 4ull * 1024 * 1024;
+  config.stalePolicy = RangeCacheStalePolicy::TrustForever;
+  config.diskDirectory = diskDir;
+  // Two windows' worth of blocks blow the cap ⇒ eviction must fire.
+  config.diskMaxBytes = 128ull * 1024;
+  InstalledCache guard( config );
+
+  std::vector<double> expectedTop;
+  std::vector<double> expectedFar;
+  {
+    RasterReader local( RasterReader::open( dir + "/scene.tif" ) );
+    expectedTop = local.readWindow( { 1 }, { 0, 0, 256, 256 } );
+    expectedFar = local.readWindow( { 1 }, { 512, 512, 256, 256 } );
+  }
+  {
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    CHECK( reader.readWindow( { 1 }, { 0, 0, 256, 256 } ) == expectedTop );
+    CHECK( reader.readWindow( { 1 }, { 512, 512, 256, 256 } ) == expectedFar );
+  }
+  CHECK( RemoteRangeCache::diskCacheStatsJson()["evictions"].asUInt64() > 0 );
+
+  // Post-eviction reads stay byte-correct (evicted blocks re-fetch).
+  {
+    RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+    CHECK( reader.readWindow( { 1 }, { 0, 0, 256, 256 } ) == expectedTop );
+    CHECK( reader.readWindow( { 1 }, { 512, 512, 256, 256 } ) == expectedFar );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 9.0 review — over-long 206 bodies: a well-formed answer that sends its
+// window PLUS garbage must never leak past the echoed window into block
+// indexes that were never fetched. The poisoned next block would otherwise
+// be served cache-clean.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "over-long ranged bodies are sliced to the echoed window",
+           "[io][remote][range_cache][fabric9][truncation]" )
+{
+  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  const std::string dir = scratch( "long_range" );
+  const std::vector<unsigned char> payload = buildTiff( dir + "/scene.tif" );
+  HttpRangeServer server( payload, ServerBehavior::LongRange );
+  server.setEtag( "\"long-range-1\"" );
+
+  RangeCacheConfig config;
+  config.blockSize = 1024; // window = block: the fault's extra bytes target the NEXT block
+  config.maxCacheBytes = 4ull * 1024 * 1024;
+  config.stalePolicy = RangeCacheStalePolicy::TrustForever;
+  InstalledCache guard( config );
+
+  // Float32 1024-wide rows: pixel row 256 starts at byte 1 MiB (≥ the head
+  // window, so the fault is eligible), row 384 immediately follows the first
+  // read's byte range — exactly where the over-long body's garbage lands.
+  std::vector<double> firstExpected;
+  std::vector<double> nextExpected;
+  {
+    RasterReader local( RasterReader::open( dir + "/scene.tif" ) );
+    firstExpected = local.readWindow( { 1 }, { 0, 256, 128, 128 } );
+    nextExpected = local.readWindow( { 1 }, { 0, 384, 128, 128 } ); // the bytes the garbage targets
+  }
+
+  RasterReader reader = RasterReader::open( RemoteRangeCache::cachedPath( server.url() ) );
+  const std::vector<double> first = reader.readWindow( { 1 }, { 0, 256, 128, 128 } );
+  REQUIRE( first == firstExpected );
+  REQUIRE( server.longRangeFired() ); // the fault really fired
+
+  // The following bytes must be fetched fresh (correct values), never
+  // served from a checksum-valid garbage block the over-long body leaked
+  // into.
+  const std::vector<double> next = reader.readWindow( { 1 }, { 0, 384, 128, 128 } );
+  CHECK( next == nextExpected );
 }
