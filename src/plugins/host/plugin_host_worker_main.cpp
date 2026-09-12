@@ -468,6 +468,8 @@ public:
     bool load( const std::string &framework, PluginModelRuntimeFactoryV1 factory,
                const Json::Value &requestJson, Json::Value &result, IpcError &error )
     {
+        // Same deliberate serialization as infer(): factory/registration and
+        // inference share one mutex ON PURPOSE (see the contract there).
         std::lock_guard<std::mutex> lock( mMutex );
         if ( mRuntimes.count( framework ) )
         {
@@ -497,6 +499,10 @@ public:
     PluginInferenceResultV1 infer( const std::string &framework, const PluginTensorV1 &input,
                                    const std::string &outputTensorName )
     {
+        // Intentionally serializes all inference: IPluginModelRuntimeV1 has
+        // no documented thread-safety contract; parallel infer into plugin
+        // backends is unsafe until a per-model thread-safety capability is
+        // negotiated. Relax only with an explicit contract + tests.
         std::lock_guard<std::mutex> lock( mMutex );
         auto it = mRuntimes.find( framework );
         if ( it == mRuntimes.end() )
