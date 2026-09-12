@@ -5269,6 +5269,7 @@ target_link_libraries(test_guided_workflow_widget PRIVATE
 )
 target_include_directories(test_guided_workflow_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_guided_workflow_widget)

@@ -87,7 +87,8 @@ TEST_CASE( "Every lab operator_id resolves in the Processing Registry", "[labspe
             if ( !step.hasOperator() )
                 continue;
             INFO( lab.id.toStdString() << " step " << i + 1 << " operator " << step.operatorId.toStdString() );
-            REQUIRE( registry.findAdapter( step.operatorId.toStdString() ) != nullptr );
+            auto adapter = registry.findAdapter( step.operatorId.toStdString() );
+            REQUIRE( adapter != nullptr );
         }
     }
 }
@@ -106,7 +107,7 @@ TEST_CASE( "Every lab step's params match the operator schema", "[labspec][drift
             const auto &step = lab.steps[i];
             if ( !step.hasOperator() )
                 continue;
-            auto *adapter = registry.findAdapter( step.operatorId.toStdString() );
+            auto adapter = registry.findAdapter( step.operatorId.toStdString() );
             REQUIRE( adapter != nullptr );
             const AlgorithmDescriptor desc = adapter->descriptor();
             const auto validationResult = validateParameters( step.params, desc, UnknownParameterPolicy::Error );
