@@ -1,0 +1,53 @@
+{
+  "spec_version": 1,
+  "id": "lab05_terrain_analysis",
+  "title": "Terrain Analysis",
+  "title_zh": "地形分析",
+  "objective": "掌握由 DEM 派生地形因子的方法：生成山体阴影用于三维可视化，计算坡度并理解其与地形起伏的关系。",
+  "prerequisites": [
+    {
+      "path": "data/samples/dem_sample.tif",
+      "note": "数字高程模型（256×256）。"
+    }
+  ],
+  "steps": [
+    {
+      "title": "Load DEM",
+      "title_zh": "加载 DEM",
+      "description_zh": "通过 File > Add Raster Layer... 加载 data/samples/dem_sample.tif，检查高程值范围。",
+      "action": "addRasterLayer",
+      "completion_hint": "DEM 已加载并显示高程拉伸效果。"
+    },
+    {
+      "title": "Generate Hillshade",
+      "title_zh": "生成山体阴影",
+      "description_zh": "执行 rs:terrain_analysis 算子（product=hillshade），以默认光照方位角生成山体阴影，模拟三维地表形态。",
+      "operator_id": "rs:terrain_analysis",
+      "params": {
+        "input": "data/samples/dem_sample.tif",
+        "output": "outputs/lab05_hillshade.tif",
+        "product": "hillshade"
+      },
+      "teaching_note": "山体阴影按设定的太阳方位角与高度角计算每个像元的相对光照，是地形制图与三维可视化叠加的常用底图。",
+      "completion_hint": "阴影影像呈现明显的立体感。"
+    },
+    {
+      "title": "Calculate Slope",
+      "title_zh": "计算坡度",
+      "description_zh": "再次执行 rs:terrain_analysis 算子（product=slope）计算坡度（单位：度）。陡坡区域在坡度影像中呈高值。",
+      "operator_id": "rs:terrain_analysis",
+      "params": {
+        "input": "data/samples/dem_sample.tif",
+        "output": "outputs/lab05_slope.tif",
+        "product": "slope"
+      },
+      "teaching_note": "坡度由 DEM 的最大高程变化率计算，取值 0°（平坦）至 90°（垂直）；坡向（aspect）则给出最陡下降方向的方位。",
+      "completion_hint": "坡度影像中陡坡呈亮色。"
+    }
+  ],
+  "thinking_questions": [
+    "山体阴影中光照方位角的选择会如何影响地形表现？",
+    "坡度计算对 DEM 分辨率和噪声有什么要求？",
+    "除坡度、坡向外，DEM 还能派生哪些地形因子（如 TRI、TPI）？各用于什么场景？"
+  ]
+}

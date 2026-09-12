@@ -53,6 +53,8 @@ data/*
 # for guided workflows, generated docs and (D4/D7) auto-grading.
 !data/labs/
 !data/labs/**
+# Lab step outputs (guided runs resolve outputs/... to output/labs/<labId>/).
+output/
 # Harness 4.0 scientific recipes are tracked metadata, not local data.
 !data/agent/
 !data/agent/**

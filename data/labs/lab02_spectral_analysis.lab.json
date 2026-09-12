@@ -1,0 +1,73 @@
+{
+  "spec_version": 1,
+  "id": "lab02_spectral_analysis",
+  "title": "Spectral Analysis",
+  "title_zh": "光谱指数与波段运算",
+  "objective": "掌握多光谱影像的光谱特征分析方法：用识别工具观察不同地物的光谱曲线，计算 NDVI 植被指数，并用波段运算构建自定义光谱比值。",
+  "prerequisites": [
+    {
+      "path": "data/samples/landsat_sample.tif",
+      "note": "7 波段类 Landsat 样本影像（256×256），含植被、水体、城镇与裸土。"
+    }
+  ],
+  "steps": [
+    {
+      "title": "Load Sample Data",
+      "title_zh": "加载样本数据",
+      "description_zh": "通过 File > Add Raster Layer... 加载 data/samples/landsat_sample.tif，确认影像出现在地图画布与图层面板中。",
+      "action": "addRasterLayer",
+      "completion_hint": "影像已加载并显示在地图画布上。"
+    },
+    {
+      "title": "Examine Spectral Profiles",
+      "title_zh": "观察光谱曲线",
+      "description_zh": "使用识别工具（View > Identify，Ctrl+Shift+I）分别点击影像中的暗色区域（水体）、绿色区域（植被）、亮色区域（城镇）和棕褐色区域（裸土），观察识别结果面板中的光谱曲线。注意植被在近红外波段（第 5 波段）具有高反射率。",
+      "action": "identifyFeatures",
+      "teaching_note": "不同地物因叶绿素吸收红光、叶片海绵组织反射近红外，形成独特的光谱签名——这是遥感地物识别的物理基础。",
+      "completion_hint": "能够看到不同地物类型呈现不同的光谱曲线。"
+    },
+    {
+      "title": "Calculate NDVI",
+      "title_zh": "计算 NDVI 植被指数",
+      "description_zh": "执行 rs:spectral_index 算子计算归一化植被指数：NDVI = (NIR − Red) / (NIR + Red)，取值范围 [-1, 1]。样本影像 Red = 第 4 波段，NIR = 第 5 波段。",
+      "operator_id": "rs:spectral_index",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "output": "outputs/lab02_ndvi.tif",
+        "index": "NDVI",
+        "red": 4,
+        "nir": 5
+      },
+      "teaching_note": "健康植被 NDVI > 0.3，水体 NDVI < 0，裸土接近 0。NDVI 是应用最广泛的植被监测指数。",
+      "completion_hint": "输出栅格中植被区域呈高值，水体呈负值。"
+    },
+    {
+      "title": "Custom Band Ratio",
+      "title_zh": "自定义波段比值",
+      "description_zh": "用 rs:band_math 算子计算近红外/红光比值 b5 / b4，观察比值影像与 NDVI 的异同。",
+      "operator_id": "rs:band_math",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "output": "outputs/lab02_band_ratio.tif",
+        "expression": "b5 / b4"
+      },
+      "teaching_note": "波段比值能抑制地形阴影并放大地物反射率差异，是构建自定义指数的基本手段。",
+      "completion_hint": "比值影像中植被区域呈高值。"
+    },
+    {
+      "title": "Compare Results",
+      "title_zh": "结果对比",
+      "description_zh": "通过 View > Compare Layers... 以卷帘或分屏模式对比原始影像与 NDVI 结果，找出植被覆盖最茂密的区域。",
+      "action": "openComparisonDialog",
+      "completion_hint": "高 NDVI 值与影像中的绿色植被区域一一对应。"
+    }
+  ],
+  "grading_ref": {
+    "pipeline": "data/pipelines/landsat_ndvi.json"
+  },
+  "thinking_questions": [
+    "为什么植被在 NIR 波段反射率高而在 Red 波段反射率低？",
+    "NDVI 与简单波段比值 b5/b4 在抑林地形阴影方面有何差异？",
+    "若影像未做大气校正，NDVI 的计算结果可能受哪些因素影响？"
+  ]
+}

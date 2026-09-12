@@ -93,7 +93,7 @@
         },
         "operator_id": {
           "type": "string",
-          "pattern": "^rs:[a-z0-9_]+$",
+          "pattern": "^(rs|opencv):[a-z0-9_]+$",
           "description": "Processing Registry operator this step launches/executes; must resolve in the registry and params must match the operator schema."
         },
         "params": {
