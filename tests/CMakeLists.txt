@@ -1528,6 +1528,10 @@ sicnu_add_test(test_spatial_tools)
 # by other test cases' reset() calls.
 sicnu_add_test(test_algorithm_meta_drift)
 
+# ExecutionId value type: frozen wire-form contract ("task-<id>") and the
+# engine-jobId rejection semantics.
+sicnu_add_test(test_execution_id)
+
 # Output verification for committed agent outputs
 add_executable(test_output_verifier test_output_verifier.cpp)
 target_link_libraries(test_output_verifier PRIVATE
