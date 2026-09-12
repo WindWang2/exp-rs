@@ -77,6 +77,7 @@ class ContractGraph
     std::vector<ContractNode> m_nodes;
     std::vector<ContractEdge> m_edges;
     std::set<std::pair<std::string, std::string>> m_nodeKeys; // (kind,id)
+    std::set<std::string> m_duplicateKeys; // rejected re-registrations
 };
 
 } // namespace sicnu::contracts

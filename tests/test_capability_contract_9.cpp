@@ -32,6 +32,7 @@
 #include <QJsonObject>
 
 #include <algorithm>
+#include <map>
 #include <filesystem>
 #include <fstream>
 #include <regex>

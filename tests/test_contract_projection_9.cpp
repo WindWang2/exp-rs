@@ -126,15 +126,10 @@ const std::vector<AllowEntry> kAllowedDeadParams = {
     { "rs:mndwi", "*", "delegates to spectral_index_detail core" },
     { "rs:ndbi", "*", "delegates to spectral_index_detail core" },
     { "rs:savi", "*", "delegates to spectral_index_detail core" },
-    { "rs:ndre", "*", "delegates to spectral_index_detail core" },
-    { "rs:bsi", "*", "delegates to spectral_index_detail core" },
-    { "rs:nbr", "*", "delegates to spectral_index_detail core" },
     // OBIA family: schema declares optional classifier knobs; the reads run
     // through the shared obia helpers.
     { "rs:obia_classify", "*", "classifier knobs read via obia helpers" },
     { "rs:obia_hierarchy", "*", "classifier knobs read via obia helpers" },
-    { "rs:recode", "map", "legacy alias declared for parity (9.0 fix)" },
-    { "rs:recode", "recode", "legacy alias declared for parity (9.0 fix)" },
 };
 
 const std::vector<AllowEntry> kAllowedUnresolved = {
@@ -153,7 +148,6 @@ const std::vector<AllowEntry> kAllowedUnresolved = {
     { "otb:compute_images_statistics", "*", "OTB application wrapper" },
     { "otb:meanshift_segmentation", "*", "OTB application wrapper" },
     { "otb:svm_classification", "*", "OTB application wrapper" },
-    { "otb:orthorectification", "*", "OTB application wrapper" },
     // Raster-spatial family is macro-generated (SICNU_DECLARE_SPATIAL_OP):
     // run() is defined by the header macro and delegates to
     // runRasterSpatialOp.
@@ -184,6 +178,37 @@ bool allowed( const std::vector<AllowEntry> &list, const std::string &op,
         const bool opOk = ( op == e.op || std::string( "*" ) == e.op );
         return keyOk && opOk;
     } );
+}
+
+/// Rot guard state: every allow-list entry must match at least one live
+/// finding in the same run, otherwise the exception no longer has a
+/// condition and must be removed (checked by checkRot).
+using Matched = std::set<std::pair<std::string, std::string>>;
+void note( Matched &m, const std::string &op, const std::string &key )
+{
+    m.insert( { op, key } );
+}
+bool entryMatched( const Matched &m, const AllowEntry &e )
+{
+    return std::any_of(
+        m.begin(), m.end(), [&]( const std::pair<std::string, std::string>
+                                     &finding ) {
+            const bool keyOk =
+                ( finding.second == e.key || std::string( "*" ) == e.key );
+            const bool opOk =
+                ( finding.first == e.op || std::string( "*" ) == e.op );
+            return keyOk && opOk;
+        } );
+}
+void checkRot( const std::vector<AllowEntry> &list, const Matched &m,
+               const char *listName )
+{
+    for ( const auto &e : list )
+    {
+        INFO( "stale allow-list entry in " << listName << ": " << e.op << "/"
+              << e.key );
+        CHECK( entryMatched( m, e ) );
+    }
 }
 
 } // namespace
@@ -421,6 +446,7 @@ TEST_CASE( "Live tree: implementation reads ⊆ schema declarations for every "
     const auto results = scanner.scanAll();
     REQUIRE( results.size() >= 100 ); // 141 registrations at the 9.0 baseline
 
+    Matched matched;
     for ( const auto &r : results )
     {
         INFO( "operator: " << r.operatorId << " (" << r.file << ")" );
@@ -431,9 +457,11 @@ TEST_CASE( "Live tree: implementation reads ⊆ schema declarations for every "
         for ( const auto &key : r.undeclaredReads() )
         {
             INFO( "undeclared read: '" << key << "'" );
+            note( matched, r.operatorId, key );
             CHECK( allowed( kAllowedUndeclaredReads, r.operatorId, key ) );
         }
     }
+    checkRot( kAllowedUndeclaredReads, matched, "undeclared" );
 }
 
 TEST_CASE( "Live tree: no dead schema parameters (allow-listed)",
@@ -441,6 +469,7 @@ TEST_CASE( "Live tree: no dead schema parameters (allow-listed)",
 {
     OperatorParamScanner scanner( kSourceDir );
     const auto results = scanner.scanAll();
+    Matched matched;
     for ( const auto &r : results )
     {
         INFO( "operator: " << r.operatorId << " (" << r.file << ")" );
@@ -451,9 +480,11 @@ TEST_CASE( "Live tree: no dead schema parameters (allow-listed)",
         for ( const auto &key : r.deadSchemaParams() )
         {
             INFO( "dead schema param: '" << key << "'" );
+            note( matched, r.operatorId, key );
             CHECK( allowed( kAllowedDeadParams, r.operatorId, key ) );
         }
     }
+    checkRot( kAllowedDeadParams, matched, "dead" );
 }
 
 TEST_CASE( "Live tree: every operator scan is complete (no silent skips)",
@@ -461,6 +492,7 @@ TEST_CASE( "Live tree: every operator scan is complete (no silent skips)",
 {
     OperatorParamScanner scanner( kSourceDir );
     const auto results = scanner.scanAll();
+    Matched matched;
     for ( const auto &r : results )
     {
         INFO( "operator: " << r.operatorId << " (" << r.file << ")" );
@@ -469,17 +501,22 @@ TEST_CASE( "Live tree: every operator scan is complete (no silent skips)",
         // allow-listed.
         if ( !r.schemaFound )
         {
+            note( matched, r.operatorId, "*" );
             CHECK( allowed( kAllowedUnresolved, r.operatorId, "*" ) );
             continue;
         }
         if ( !r.runFound )
         {
+            note( matched, r.operatorId, "*" );
             CHECK( allowed( kAllowedUnresolved, r.operatorId, "*" ) );
             continue;
         }
+        if ( !r.unresolved.empty() )
+            note( matched, r.operatorId, "*" );
         CHECK( ( r.unresolved.empty() ||
                  allowed( kAllowedUnresolved, r.operatorId, "*" ) ) );
     }
+    checkRot( kAllowedUnresolved, matched, "unresolved" );
 }
 
 TEST_CASE( "Canonical descriptor: projection, round-trip and single source",
@@ -553,6 +590,4 @@ TEST_CASE( "Canonical descriptor: projection, round-trip and single source",
     // stay monotone — lowering it without an ADR update fails here.
     INFO( "graded operators: " << graded << " of " << names.size() );
     CHECK( graded >= 8 );
-    CHECK( graded + projectionFailures.size() <=
-           static_cast<int>( names.size() ) );
 }

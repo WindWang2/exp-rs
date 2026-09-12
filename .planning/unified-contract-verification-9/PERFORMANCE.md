@@ -8,8 +8,10 @@
   2 MB with `scan_unresolved` finding) to keep worst case bounded.
 - Graph generation: N = operators (~150+) × params — trivial memory (< 50 MB
   target including jsoncpp overhead).
-- `benchmark_contract9` records: operator count, source bytes scanned,
-  scan+graph+serialize wall time, peak RSS (getrusage), JSON output.
+- `benchmark_contract9` records: per-phase wall time with counts in the
+  detail field (operators, params, nodes/edges, output bytes), plus
+  environment headers (os, cpu_cores, build type). Peak RSS is not
+  recorded (follow-up).
 
 ## Evidence (Release, GCC, linux, 16 cores — exp.bench.contract9.v1)
 

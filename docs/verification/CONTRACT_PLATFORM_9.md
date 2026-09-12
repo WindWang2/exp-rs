@@ -53,10 +53,14 @@ class fail tests instead.
 
 ## Honesty rules
 
-- Unknown/unparseable source constructs produce `scan_unresolved` findings
-  that FAIL the suite — the scanner never silently skips.
-- Allow-lists live in the tests as `{id, key, reason}` records; entries
-  whose condition no longer holds fail the suite (rot guard).
+- Unknown/unparseable source constructs produce unresolved findings that
+  FAIL the suite — the scanner never silently skips. Depth budgets and
+  unreadable/oversized files are loud findings too.
+- Allow-lists live in the tests as `{id, key, reason}` records and are rot
+  guarded: after each census, every entry must have matched a live finding
+  in the same run — an exception whose condition disappeared breaks the
+  suite until it is removed. Entries naming cross-track drift carry an
+  explicit OWNED-BY-#88x marker.
 - The snapshot test failure message contains the exact regeneration
   command; a stale snapshot is never a green.
 

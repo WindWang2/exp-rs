@@ -101,6 +101,7 @@ TEST_CASE( "Contract graph: no duplicate nodes, no dangling references "
     };
     const auto assembled = assembleLive();
     const auto findings = assembled.graph.computeFindings();
+    std::set<std::string> danglingActions;
     for ( const auto &f : findings )
     {
         INFO( "finding: " << f.kind << " " << f.id << " — " << f.detail );
@@ -109,6 +110,14 @@ TEST_CASE( "Contract graph: no duplicate nodes, no dangling references "
             f.id.rfind( "preflight_action:", 0 ) == 0 &&
             kOwnedBy885.count( f.id.substr( 17 ) ) == 1;
         CHECK( known );
+        if ( known )
+            danglingActions.insert( f.id.substr( 17 ) );
+    }
+    // Rot guard: an OWNED-BY-#885 entry with no live finding must go.
+    for ( const auto &id : kOwnedBy885 )
+    {
+        INFO( "stale OWNED-BY-#885 entry: " << id );
+        CHECK( danglingActions.count( id ) == 1 );
     }
 }
 

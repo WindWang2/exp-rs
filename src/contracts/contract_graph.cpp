@@ -36,7 +36,12 @@ void ContractGraph::addNode( ContractNode node )
 {
     const auto key = std::make_pair( node.kind, node.id );
     if ( m_nodeKeys.count( key ) )
-        return; // duplicate detection happens via findings on serialization
+    {
+        // First registration wins (like HelpRegistry), but the rejection is
+        // remembered — computeFindings surfaces it as duplicate_node.
+        m_duplicateKeys.insert( key.first + ":" + key.second );
+        return;
+    }
     m_nodeKeys.insert( key );
     m_nodes.push_back( std::move( node ) );
 }
@@ -56,18 +61,10 @@ std::vector<ContractFinding> ContractGraph::computeFindings() const
 {
     std::vector<ContractFinding> findings;
 
-    // Duplicate nodes: two adds with the same (kind, id) — first add wins
-    // the slot, so scan the raw input for repeated keys kept by callers.
-    std::map<std::string, int> keyCount;
-    for ( const auto &n : m_nodes )
-        ++keyCount[n.kind + ":" + n.id];
-    for ( const auto &[key, count] : keyCount )
-    {
-        if ( count > 1 )
-            findings.push_back(
-                { "duplicate_node", key,
-                  "registered " + std::to_string( count ) + " times" } );
-    }
+    // Duplicate nodes: re-registrations rejected by addNode (first wins).
+    for ( const auto &key : m_duplicateKeys )
+        findings.push_back(
+            { "duplicate_node", key, "registered more than once" } );
 
     // Dangling references: edge endpoints without a node.
     for ( const auto &e : m_edges )
@@ -125,8 +122,10 @@ Json::Value ContractGraph::toJson() const
     auto sortedEdges = m_edges;
     std::sort( sortedEdges.begin(), sortedEdges.end(),
                []( const ContractEdge &a, const ContractEdge &b ) {
-                   return std::tie( a.kind, a.from, a.to ) <
-                          std::tie( b.kind, b.from, b.to );
+                   // origin in the key: duplicate triples must still have a
+                   // stable order for the byte-compare.
+                   return std::tie( a.kind, a.from, a.to, a.origin ) <
+                          std::tie( b.kind, b.from, b.to, b.origin );
                } );
     for ( const auto &e : sortedEdges )
     {
@@ -146,9 +145,16 @@ bool ContractGraph::fromJson( const Json::Value &json, ContractGraph &out,
 {
     out = ContractGraph{};
     if ( !json.isObject() || !json.isMember( "schema" ) ||
+         !json["schema"].isString() ||
          json["schema"].asString() != kSchema )
     {
         error = "not an " + std::string( kSchema ) + " document";
+        return false;
+    }
+    if ( !json.isMember( "nodes" ) || !json["nodes"].isArray() ||
+         !json.isMember( "edges" ) || !json["edges"].isArray() )
+    {
+        error = "graph document needs nodes/edges arrays";
         return false;
     }
     for ( const auto &n : json["nodes"] )

@@ -6,6 +6,7 @@
 #include "text_scan.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -72,11 +73,13 @@ std::string callArgIdentifier( std::string_view body, const char *callName,
 }
 
 /// All `Json::Value [&] NAME` parameter identifiers in a signature (const
-/// and mutable refs both consume/extend the container).
+/// and mutable refs consume/extend the container; by-value copies are
+/// accepted too). Anchored on the argument position so return types
+/// (`Json::Value fn(`) never match.
 std::vector<std::string> jsonValueParams( std::string_view signature )
 {
     static const std::regex re(
-        R"((?:const\s+)?Json::Value\s*&\s*([A-Za-z_]\w*)\b)" );
+        R"([(,]\s*(?:const\s+)?Json::Value\s*(?:&\s*)?([A-Za-z_]\w*)\s*[,)])" );
     const std::string sig( signature );
     std::vector<std::string> names;
     auto it = std::sregex_iterator( sig.begin(), sig.end(), re );
@@ -107,7 +110,8 @@ struct ReadCollector
             }
             // 2. dynamic (non-literal) indexing on a tracked var
             {
-                const std::regex reDyn( "\\b" + var + R"re(\s*\[\s*(?!"))re" );
+                const std::regex reDyn(
+                    "\\b" + var + R"re(\s*\[\s*(?!\s*"))re" );
                 if ( std::regex_search( text, dynamicMatch, reDyn ) )
                     unresolved.push_back( "dynamic key access on '" + var +
                                           "'" );
@@ -126,6 +130,15 @@ struct ReadCollector
                     R"re(\s*,\s*"([^"]+)")re";
                 for ( const auto &key : findMatches( body, whole, reHelper ) )
                     keys.insert( key );
+                // Non-literal key argument: refuse to guess (loud).
+                const std::regex reDynamic(
+                    "\\b(?:" + std::string( kHelperNames ) +
+                    R"re()\s*\(\s*)re" + var +
+                    R"re(\s*,\s*(?!\s*"))re" );
+                if ( std::regex_search( text, dynamicMatch, reDynamic ) )
+                    unresolved.push_back( "dynamic key argument to a params "
+                                          "helper on '" +
+                                          var + "'" );
             }
             // 5. parseBands(var) consumes the "bands" key
             {
@@ -450,7 +463,22 @@ void collectReadsInto( const FileUnit &unit, const GlobalHelpers &global,
     r.unresolved.insert( r.unresolved.end(), reads.unresolved.begin(),
                          reads.unresolved.end() );
     if ( maxDepth <= 0 )
+    {
+        // Loud bound: helpers beyond the budget are not scanned — an
+        // undeclared read hiding there must not pass green silently.
+        for ( const auto &fn : calledFunctions( text ) )
+        {
+            HelperDef probe;
+            if ( resolveHelper( global, unit, fn, probe ) )
+            {
+                r.unresolved.push_back( "helper reachability depth budget "
+                                        "exceeded at '" +
+                                        fn + "'" );
+                break;
+            }
+        }
         return;
+    }
     for ( const auto &fn : calledFunctions( text ) )
     {
         if ( visited.count( fn ) )
@@ -539,7 +567,10 @@ void extractOperator( const FileUnit &unit,
     if ( bodies.run.valid() )
     {
         r.runFound = true;
-        collectReadsInto( unit, global, bodies.run, r, visited, 2, true );
+        // Copy: names visited during schema extraction must not suppress
+        // read collection.
+        std::set<std::string> runVisited{ visited.begin(), visited.end() };
+        collectReadsInto( unit, global, bodies.run, r, runVisited, 2, true );
     }
     else
     {
@@ -669,7 +700,7 @@ std::vector<OperatorScanResult> OperatorParamScanner::scanAll() const
     {
         std::error_code ec;
         const auto size = std::filesystem::file_size( file, ec );
-        if ( ec )
+        if ( ec || size == 0 )
             continue;
         if ( size > m_maxFileBytes )
         {
@@ -681,7 +712,20 @@ std::vector<OperatorScanResult> OperatorParamScanner::scanAll() const
             out.push_back( std::move( r ) );
             continue;
         }
-        units.push_back( indexUnit( readFile( file ), file ) );
+        std::string src = readFile( file );
+        if ( src.empty() )
+        {
+            // Loud bound: an unopenable non-empty file must not silently
+            // drop its operators from the live comparison (mirrors the
+            // oversize handling).
+            OperatorScanResult r;
+            r.file = file;
+            r.operatorId = "<unreadable>";
+            r.unresolved.push_back( "source file could not be read" );
+            out.push_back( std::move( r ) );
+            continue;
+        }
+        units.push_back( indexUnit( src, file ) );
     }
 
     // Cross-file helper table: uniquely-named helpers resolve globally

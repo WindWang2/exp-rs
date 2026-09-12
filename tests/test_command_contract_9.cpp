@@ -237,11 +237,22 @@ TEST_CASE( "Every preflight suggested action resolves (#881 class)",
 {
     const auto report = scanAllRefs();
     REQUIRE( report.preflightActionIds.size() >= 3 );
+    std::set<std::string> dangling;
     for ( const auto &id : report.preflightActionIds )
     {
         INFO( "preflight action: " << id << " at " << report.evidence.at( id ) );
-        CHECK( ( report.registeredIds.count( id ) == 1 ||
-                 allowed( kAllowedDanglingPreflightActions, id ) ) );
+        if ( report.registeredIds.count( id ) != 1 )
+        {
+            dangling.insert( id );
+            CHECK( allowed( kAllowedDanglingPreflightActions, id ) );
+        }
+    }
+    // Rot guard: once #885 fixes an action id it resolves, and its
+    // allow-list entry must be removed (the entry no longer matches).
+    for ( const auto &e : kAllowedDanglingPreflightActions )
+    {
+        INFO( "stale allow-list entry: " << e.id );
+        CHECK( dangling.count( e.id ) == 1 );
     }
 }
 

@@ -148,7 +148,13 @@ int main( int argc, char **argv )
 #endif
         << "\",\n";
     out << "  \"cpu_cores\": " << std::max( 1u, std::thread::hardware_concurrency() ) << ",\n";
-    out << "  \"build\": \"release\",\n";
+    out << "  \"build\": \"" <<
+#if defined( NDEBUG )
+        "release"
+#else
+        "debug"
+#endif
+        "\",\n";
     out << "  \"note\": \"wall-clock evidence only — not a gate; tooling-side cost\",\n";
     out << "  \"measurements\": [\n";
     for ( std::size_t i = 0; i < timings.size(); ++i )

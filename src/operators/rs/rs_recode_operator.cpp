@@ -132,8 +132,19 @@ Json::Value RsRecodeOperator::schema() const {
     // Contract Platform 9.0: the implementation still accepts these legacy
     // spellings of recode_map (params["map"] / params["recode"]); declaring
     // them keeps the schema equal to what run() actually consumes.
-    props["map"] = makeStringParam("map", "Legacy alias of recode_map");
-    props["recode"] = makeStringParam("recode", "Legacy alias of recode_map");
+    {
+        // run() consumes the mapping as a JSON object ({from: to}).
+        const auto mappingParam = []( const char *name ) {
+            using namespace schema;
+            Json::Value p(Json::objectValue);
+            p["name"] = name;
+            p["type"] = "object";
+            p["description"] = std::string( "Legacy alias of recode_map" );
+            return p;
+        };
+        props["map"] = mappingParam( "map" );
+        props["recode"] = mappingParam( "recode" );
+    }
 
     Json::Value outputs(Json::objectValue);
     outputs["output"] = makeRasterParam("output", "Output raster path");

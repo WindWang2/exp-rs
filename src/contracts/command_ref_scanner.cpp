@@ -116,8 +116,9 @@ void CommandRefScanner::scanPreflightActions( std::string_view src,
             args[3].begin, args[3].end - args[3].begin );
         // The action must be a plain string literal.
         static const std::regex reLit( R"re(^\s*"([^"]+)"\s*$)re" );
-        std::cmatch cm;
-        if ( std::regex_match( arg.begin(), arg.end(), cm, reLit ) )
+        const std::string argText( arg );
+        std::smatch cm;
+        if ( std::regex_match( argText, cm, reLit ) )
             addWithEvidence( out.preflightActionIds, out.evidence, cm[1].str(),
                              file, args[3].begin, src );
     }

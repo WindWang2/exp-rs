@@ -245,12 +245,19 @@ AssemblyResult buildLiveGraph( const std::string &sourceRoot )
     // Normalize evidence paths to be relative to the source root so the
     // canonical serialization is host- and invocation-independent.
     auto relativize = [ &sourceRoot ]( std::string path ) {
-        if ( path.rfind( sourceRoot, 0 ) == 0 )
+        if ( path.rfind( sourceRoot, 0 ) == 0 &&
+             ( path.size() == sourceRoot.size() ||
+               path[sourceRoot.size()] == '/' ||
+               path[sourceRoot.size()] == '\\' ) )
         {
             path.erase( 0, sourceRoot.size() );
-            if ( !path.empty() && path.front() == '/' )
+            if ( !path.empty() && ( path.front() == '/' ||
+                                    path.front() == '\\' ) )
                 path.erase( 0, 1 );
         }
+        // Canonical forward slashes: the snapshot must regenerate to the
+        // same bytes on MSVC.
+        std::replace( path.begin(), path.end(), '\\', '/' );
         return path;
     };
     for ( auto &n : g.nodesMutable() )

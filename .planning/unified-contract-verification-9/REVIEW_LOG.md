@@ -42,8 +42,58 @@ strong follow-up; P3 fixed or accepted-with-reason.
 
 ## Reviewer A (architecture / correctness / concurrency / security)
 
-- PENDING
+Verdict: REQUEST-CHANGES (P0:0, P1:3, P2:8, P3:8). Dispositions:
+
+- [P1] duplicate_node finding dead code → FIXED (addNode records rejected
+  re-registrations; findings surface them).
+- [P1] run-side helper depth truncation silent → FIXED (loud unresolved
+  entry when a params-consuming helper is cut by the budget).
+- [P1] kAllowedUnresolved wildcard breadth + missing rot guards → FIXED
+  (rot guards implemented for undeclared/dead/unresolved lists; every
+  entry must match a live finding in the same run).
+- [P2] recode legacy aliases typed string but read as object → FIXED
+  (declared object-typed).
+- [P2] edge comparator not total (origin tie) → FIXED (origin in key).
+- [P2] unreadable operator source silent → FIXED (loud <unreadable>
+  finding, mirroring oversize).
+- [P2] non-literal helper key silent → FIXED (dynamic-key-argument
+  unresolved entry).
+- [P2] helpers taking Json::Value by value skipped → FIXED
+  (argument-anchored signature regex).
+- [P2] shared visited set across schema/run passes → FIXED (run pass uses a
+  copy).
+- [P2] in-file overload shadowing in indexFreeFunctions → ACCEPTED with
+  note (no live instance; documented limitation, loud direction preserved
+  via unresolved elsewhere).
+- [P2] params key-iteration unflagged → ACCEPTED with note (no live
+  instance; follow-up).
+- [P3] cmath/string_view-iterator regex, callArgIdentifier comment
+  sensitivity, relativize separator, fromJson asString throws, enum token
+  find, findMatches re-regex → FIXED where touched (cmatch → std::string,
+  relativize separator check, fromJson validation, findMatches reuse);
+  ACCEPTED: callArgIdentifier (downstream failure is loud), enum token find
+  (single definition, live-tree-anchored).
+- [P3] jsoncpp-version dependence of byte-compare → ACCEPTED; noted in the
+  snapshot header doc.
 
 ## Reviewer B (tests / performance / portability / docs-vs-code)
 
-- PENDING
+Verdict: REQUEST-CHANGES (P0:0, P1:3, P2:4, P3:8). Dispositions:
+
+- [P1] relativize not Windows-safe → FIXED (backslash canonicalization +
+  separator check).
+- [P1] TEST_MATRIX overstated (phantom test_contract_mutation_9, wrong
+  attributions) → FIXED (matrix rewritten to the actual suites).
+- [P1] rot guards claimed but missing → FIXED (see Reviewer A; guards now
+  implemented in projection/command/platform suites).
+- [P2] duplicate-node detection vacuous → FIXED (same as Reviewer A P1).
+- [P2] unreadable source silent → FIXED.
+- [P2] classify() raw strings → FIXED (R"delim(...)" support).
+- [P2] diagnostics mutation test is helper-level → CLAIM REWORDED (test
+  header now says helper-level; live census is the gate).
+- [P3] <map>/<cctype> includes → FIXED. [P3] tautological CHECK → REMOVED.
+  [P3] PERFORMANCE doc vs benchmark fields → FIXED. [P3] benchmark "build"
+  hardcoded → FIXED (NDEBUG-derived). [P3] regex recompilation → FIXED in
+  findMatches. [P3] OWNED-BY-885 list duplicated in two files → ACCEPTED
+  with cross-reference comment (single source would need a shared test
+  header; tracked as follow-up).

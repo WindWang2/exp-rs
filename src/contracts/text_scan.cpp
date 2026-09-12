@@ -3,6 +3,7 @@
  ***************************************************************************/
 #include "text_scan.h"
 
+#include <cctype>
 #include <regex>
 
 namespace sicnu::contracts {
@@ -46,6 +47,39 @@ std::vector<ByteKind> classify( std::string_view src )
                     i += 2;
                     break;
                 }
+                ++i;
+            }
+        }
+        else if ( c == 'R' && n == '"' )
+        {
+            // C++ raw string literal: R"delim( ... )delim" — the content may
+            // contain arbitrary quotes; only the closing )delim" ends it.
+            const size_t rawStart = i;
+            size_t d = i + 2;
+            while ( d < src.size() && src[d] != '(' )
+            {
+                if ( src[d] == '\n' ) // not a raw string after all
+                    break;
+                ++d;
+            }
+            if ( d < src.size() && src[d] == '(' )
+            {
+                const std::string delim(
+                    src.substr( i + 2, d - ( i + 2 ) ) );
+                const std::string closer = ")" + delim + "\"";
+                const size_t close = src.find( closer, d );
+                const size_t end =
+                    ( close == std::string_view::npos )
+                        ? src.size()
+                        : close + closer.size();
+                while ( i < end )
+                    kinds[i++] = ByteKind::InString;
+                (void)rawStart;
+            }
+            else
+            {
+                // R" followed by something else: plain identifier path —
+                // fall through by marking just this byte as code.
                 ++i;
             }
         }
@@ -323,33 +357,17 @@ std::string firstIdentifier( std::string_view src )
     return std::string( src.substr( b, e - b ) );
 }
 
-namespace
-{
-
-std::regex compileWithLiteralSkip( const std::string &regex )
-{
-    return std::regex( regex, std::regex::optimize );
-}
-
-} // namespace
-
 std::vector<std::string> findMatches( std::string_view src, Span span,
                                       const std::string &regexStr, int group )
 {
+    // group must be 1: findMatchesWithPos already extracts capture 1 (all
+    // scanner patterns are single-capture). Compilation and re-search per
+    // match would be O(matches × pattern) for no benefit.
+    (void)regexStr;
+    (void)group;
     std::vector<std::string> out;
     for ( const auto &m : findMatchesWithPos( src, span, regexStr ) )
-    {
-        std::smatch sm;
-        const std::string &candidate = m.whole;
-        // Re-extract requested group from the whole match text.
-        std::regex re( regexStr );
-        if ( std::regex_search( candidate, sm, re ) &&
-             group < static_cast<int>( sm.size() ) )
-            out.push_back( sm[group].str() );
-        else
-            out.push_back( candidate );
-    }
-    (void)compileWithLiteralSkip;
+        out.push_back( m.text );
     return out;
 }
 

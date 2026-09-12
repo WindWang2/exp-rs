@@ -15,8 +15,9 @@
  *      vocabulary category and retry class;
  *   4. preflight raw string codes (addWarning literals) are enumerated —
  *      the stringly-typed emission surface is pinned;
- *   5. mutation: a synthetic catalog missing one code fails the census (the
- *      red direction is proven mechanically).
+ *   5. census red-direction: the factored census query run against a
+ *      catalog with one page removed reports exactly that code (helper-level
+ *      proof; the live-tree census itself is the gate).
  ***************************************************************************/
 #include <catch2/catch_test_macros.hpp>
 
