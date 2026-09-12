@@ -122,8 +122,8 @@ void PluginRuntimeHost::bootstrap( const exprs::PluginRegistryOptions &options )
 void PluginRuntimeHost::installManifestContributions()
 {
     // Caller holds mMutex (bootstrap) — the registries below are independent.
-    // Snapshot ids then copy each record under the registry lock: records()
-    // returns a live vector& that refresh() reallocates (issue #932).
+    // Snapshot ids then copy each record under the registry lock: never hold
+    // a live pointer/reference into mRecords across refresh() (issue #932/#943).
     exprs::PluginRegistry &registry = exprs::PluginRegistry::instance();
     for ( const std::string &pluginId : registry.pluginIds() )
     {

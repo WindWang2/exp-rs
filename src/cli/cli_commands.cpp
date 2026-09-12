@@ -579,8 +579,13 @@ int commandPlugin( QStringList args, const CliIO &io )
     if ( sub == "list" )
     {
         Json::Value plugins( Json::arrayValue );
-        for ( const exprs_ns::PluginRecord &record : registry.records() )
+        // pluginIds + copyRecord: never hold a live records() reference across
+        // a concurrent refresh() (#943 / leftover of #932).
+        for ( const std::string &pluginId : registry.pluginIds() )
         {
+            exprs_ns::PluginRecord record;
+            if ( !registry.copyRecord( pluginId, record ) )
+                continue;
             Json::Value entry( Json::objectValue );
             entry["id"] = record.manifest.id;
             entry["name"] = record.manifest.name;
@@ -653,10 +658,13 @@ int commandPlugin( QStringList args, const CliIO &io )
                               {}, "usage: plugin " + sub.toStdString() + " <plugin-id>" );
         }
         const std::string pluginId = args.takeFirst().toStdString();
-        if ( !registry.record( pluginId ) )
         {
-            return io.finish( false, "plugin", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::MissingDependency ),
-                              {}, "unknown plugin: " + pluginId );
+            exprs_ns::PluginRecord unused;
+            if ( !registry.copyRecord( pluginId, unused ) )
+            {
+                return io.finish( false, "plugin", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::MissingDependency ),
+                                  {}, "unknown plugin: " + pluginId );
+            }
         }
         // Same round-trip contract as the GUI Plugin Manager (ADR 0130):
         // disable unloads (refused with E4005 while executing, persisted
@@ -740,13 +748,13 @@ int commandPlugin( QStringList args, const CliIO &io )
                               {}, "usage: plugin inspect <plugin-id>" );
         }
         const std::string pluginId = args.takeFirst().toStdString();
-        const exprs_ns::PluginRecord *record = registry.record( pluginId );
-        if ( !record )
+        exprs_ns::PluginRecord record;
+        if ( !registry.copyRecord( pluginId, record ) )
         {
             return io.finish( false, "plugin", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::MissingDependency ),
                               {}, "unknown plugin: " + pluginId );
         }
-        Json::Value data = record->toJson();
+        Json::Value data = record.toJson();
         // Plugin-platform 9.0: the machine-readable capability enforcement
         // matrix rides along so one command answers "what does this plugin
         // declare and what actually enforces it".
@@ -768,8 +776,8 @@ int commandPlugin( QStringList args, const CliIO &io )
                               {}, "usage: plugin debug-bundle <plugin-id>" );
         }
         const std::string pluginId = args.takeFirst().toStdString();
-        const exprs_ns::PluginRecord *record = registry.record( pluginId );
-        if ( !record )
+        exprs_ns::PluginRecord record;
+        if ( !registry.copyRecord( pluginId, record ) )
         {
             return io.finish( false, "plugin", {},
                               exprs_ns::exitCodeValue( exprs_ns::ExitCode::MissingDependency ),
@@ -777,10 +785,10 @@ int commandPlugin( QStringList args, const CliIO &io )
         }
         Json::Value bundle( Json::objectValue );
         bundle["pluginId"] = pluginId;
-        bundle["state"] = exprs_ns::pluginStateName( record->state );
-        bundle["manifest"] = exprs_ns::redactSecrets( record->manifest.toJson() );
+        bundle["state"] = exprs_ns::pluginStateName( record.state );
+        bundle["manifest"] = exprs_ns::redactSecrets( record.manifest.toJson() );
         Json::Value capabilities( Json::objectValue );
-        capabilities["access"] = exprs_ns::redactSecrets( record->manifest.access );
+        capabilities["access"] = exprs_ns::redactSecrets( record.manifest.access );
         capabilities["enforcementMatrix"] = exprs_ns::pluginCapabilityEnforcementMatrixJson();
         bundle["capabilities"] = capabilities;
 

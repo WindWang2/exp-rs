@@ -80,13 +80,19 @@ void PluginManagerDialog::refresh()
 
 void PluginManagerDialog::populate()
 {
-    const auto &records = exprs::PluginRegistry::instance().records();
-    mTable->setRowCount( static_cast<int>( records.size() ) );
+    // Snapshot ids then copy each record under the registry lock: a live
+    // vector& / pointer into mRecords dangles across refresh() (#943).
+    exprs::PluginRegistry &registry = exprs::PluginRegistry::instance();
+    const std::vector<std::string> ids = registry.pluginIds();
+    mTable->setRowCount( static_cast<int>( ids.size() ) );
     int validated = 0;
     int problem = 0;
-    for ( int row = 0; row < static_cast<int>( records.size() ); ++row )
+    int row = 0;
+    for ( const std::string &pluginId : ids )
     {
-        const exprs::PluginRecord &record = records[row];
+        exprs::PluginRecord record;
+        if ( !registry.copyRecord( pluginId, record ) )
+            continue;
         auto *idItem = new QTableWidgetItem( QString::fromStdString( record.manifest.id ) );
         idItem->setData( Qt::UserRole, QString::fromStdString( record.manifest.id ) );
         mTable->setItem( row, 0, idItem );
@@ -99,10 +105,12 @@ void PluginManagerDialog::populate()
         else if ( record.state == exprs::PluginState::Broken || record.state == exprs::PluginState::Incompatible
                   || record.state == exprs::PluginState::Failed )
             ++problem;
+        ++row;
     }
+    mTable->setRowCount( row );
     mSummary->setText( tr( "已发现 %1 个插件（可用 %2，异常 %3）。扫描仅读取 plugin.json，"
                            "不会加载插件二进制。" )
-                           .arg( records.size() )
+                           .arg( row )
                            .arg( validated )
                            .arg( problem ) );
 }
@@ -151,11 +159,15 @@ void PluginManagerDialog::applyEnabled( bool enable )
                     pluginId,
                     static_cast<exprs::UiContributionV1 *>( loaded->uiContribution ) );
         }
-        else if ( registry.record( id )
-                  && registry.record( id )->state == exprs::PluginState::Failed )
+        else
         {
-            QMessageBox::warning( this, tr( "插件加载失败" ),
-                                  tr( "启用已保存，但插件加载失败——查看诊断信息。" ) );
+            exprs::PluginRecord snapshot;
+            if ( registry.copyRecord( id, snapshot )
+                 && snapshot.state == exprs::PluginState::Failed )
+            {
+                QMessageBox::warning( this, tr( "插件加载失败" ),
+                                      tr( "启用已保存，但插件加载失败——查看诊断信息。" ) );
+            }
         }
     }
     populate();

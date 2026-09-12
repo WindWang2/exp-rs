@@ -191,6 +191,12 @@ std::string PluginRegistry::pluginDirectoryFor( const std::string &pluginId ) co
     return {};
 }
 
+std::vector<PluginRecord> PluginRegistry::records() const
+{
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+    return mRecords;
+}
+
 bool PluginRegistry::copyRecord( const std::string &pluginId, PluginRecord &out ) const
 {
     std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );

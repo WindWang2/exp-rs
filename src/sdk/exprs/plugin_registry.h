@@ -77,7 +77,11 @@ public:
     /// are untouched (their records keep state Loaded).
     void refresh();
 
-    const std::vector<PluginRecord> &records() const { return mRecords; }
+    /// Snapshot of every record under the registry lock (by value). Prefer
+    /// pluginIds() + copyRecord() for callers that only need a subset — a
+    /// full copy is fine for small registries / one-shot CLI dumps.
+    /// NEVER hold a reference/pointer into mRecords across refresh() (#943).
+    std::vector<PluginRecord> records() const;
     const PluginRecord *record( const std::string &pluginId ) const;
 
     /// Plugin-platform 9.0: COPY accessors. record() hands out a pointer
