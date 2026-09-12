@@ -53,6 +53,15 @@ data/*
 !data/agent/
 !data/agent/**
 
+# D6 unified RS glossary (terminology layer shared by i18n, help and the
+# agent) is tracked config, not local raster data.
+!data/terms/
+!data/terms/**
+
+# Qt translations: sicnu_zh_CN.ts is tracked; the compiled .qm is generated
+# into the build tree by the sicnu_i18n target and never committed.
+resources/translations/*.qm
+
 # Test golden data always tracked
 !tests/data/
 !tests/data/**

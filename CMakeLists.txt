@@ -746,3 +746,35 @@ if(ENABLE_TESTS)
     FetchContent_MakeAvailable(Catch2)
     add_subdirectory(tests)
 endif()
+
+# =============================================================================
+# D6 i18n — zh_CN translation pipeline (sicnu_i18n)
+#
+# tr() source text is English; Simplified Chinese ships as a Qt translation.
+# resources/translations/sicnu_zh_CN.ts is tracked; the compiled .qm lands in
+# the build tree at build time and is never committed. lupdate is an explicit
+# maintenance target (sicnu_i18n_update) so ordinary builds never rewrite a
+# tracked source file.
+# =============================================================================
+find_package(Qt6 REQUIRED COMPONENTS LinguistTools)
+set(SICNU_ZH_CN_TS "${CMAKE_SOURCE_DIR}/resources/translations/sicnu_zh_CN.ts")
+set(SICNU_ZH_CN_QM_DIR "${CMAKE_BINARY_DIR}/resources/translations")
+set(SICNU_ZH_CN_QM "${SICNU_ZH_CN_QM_DIR}/sicnu_zh_CN.qm")
+file(MAKE_DIRECTORY "${SICNU_ZH_CN_QM_DIR}")
+add_custom_command(
+  OUTPUT "${SICNU_ZH_CN_QM}"
+  COMMAND Qt6::lrelease -silent "${SICNU_ZH_CN_TS}" -qm "${SICNU_ZH_CN_QM}"
+  DEPENDS "${SICNU_ZH_CN_TS}"
+  COMMENT "lrelease sicnu_zh_CN.ts -> sicnu_zh_CN.qm (D6 i18n)"
+  VERBATIM
+)
+add_custom_target(sicnu_i18n DEPENDS "${SICNU_ZH_CN_QM}")
+add_custom_target(sicnu_i18n_update
+  COMMAND Qt6::lupdate -no-obsolete -locations none src/app -ts resources/translations/sicnu_zh_CN.ts
+  WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+  COMMENT "lupdate src/app -> resources/translations/sicnu_zh_CN.ts (D6 i18n)"
+  VERBATIM
+)
+if(TARGET sicnu_geo_rs)
+  add_dependencies(sicnu_geo_rs sicnu_i18n)
+endif()
