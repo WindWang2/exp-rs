@@ -1,0 +1,164 @@
+{
+  "id": "lab8_temporal_analysis",
+  "name": "lab8_temporal_analysis",
+  "title": "实验8：NDVI 时序分析（趋势 / 物候 / 异常）",
+  "description": "12 期合成 Red/NIR 影像 → NDVI 时序栈 → 线性趋势 + 物候参数 + 扰动异常检测。headless 运行： QT_QPA_PLATFORM=offscreen build/sicnu_geo_rs_cli --pipeline data/labs/pipelines/lab8_temporal_analysis.pipeline.json （先由 scripts/gen_lab_fixtures.py temporal 生成 data/labs/_tmp/ 临时数据）",
+  "version": "1.0",
+  "host": 0,
+  "steps": [
+    {
+      "id": "summary",
+      "title": "步骤1 数据体检：时序概要统计",
+      "kind": 0,
+      "operator": "rs:temporal_summary",
+      "params": {
+        "scenes": [
+          { "path": "data/labs/_tmp/temporal/scene_2024-01-15.tif", "time": "2024-01-15" },
+          { "path": "data/labs/_tmp/temporal/scene_2024-02-15.tif", "time": "2024-02-15" },
+          { "path": "data/labs/_tmp/temporal/scene_2024-03-15.tif", "time": "2024-03-15" },
+          { "path": "data/labs/_tmp/temporal/scene_2024-04-15.tif", "time": "2024-04-15" },
+          { "path": "data/labs/_tmp/temporal/scene_2024-05-15.tif", "time": "2024-05-15" },
+          { "path": "data/labs/_tmp/temporal/scene_2024-06-15.tif", "time": "2024-06-15" },
+          { "path": "data/labs/_tmp/temporal/scene_2024-07-15.tif", "time": "2024-07-15" },
+          { "path": "data/labs/_tmp/temporal/scene_2024-08-15.tif", "time": "2024-08-15" },
+          { "path": "data/labs/_tmp/temporal/scene_2024-09-15.tif", "time": "2024-09-15" },
+          { "path": "data/labs/_tmp/temporal/scene_2024-10-15.tif", "time": "2024-10-15" },
+          { "path": "data/labs/_tmp/temporal/scene_2024-11-15.tif", "time": "2024-11-15" },
+          { "path": "data/labs/_tmp/temporal/scene_2024-12-15.tif", "time": "2024-12-15" }
+        ],
+        "band_role": "nir",
+        "include_median": true,
+        "output": "data/labs/_tmp/out/lab8/nir_summary.tif"
+      }
+    },
+    {
+      "id": "ndvi",
+      "title": "步骤2 NDVI 时序栈（12 期一栈）",
+      "kind": 0,
+      "operator": "rs:temporal_index_series",
+      "params": {
+        "scenes": [
+          { "path": "data/labs/_tmp/temporal/scene_2024-01-15.tif", "time": "2024-01-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-02-15.tif", "time": "2024-02-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-03-15.tif", "time": "2024-03-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-04-15.tif", "time": "2024-04-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-05-15.tif", "time": "2024-05-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-06-15.tif", "time": "2024-06-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-07-15.tif", "time": "2024-07-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-08-15.tif", "time": "2024-08-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-09-15.tif", "time": "2024-09-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-10-15.tif", "time": "2024-10-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-11-15.tif", "time": "2024-11-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-12-15.tif", "time": "2024-12-15", "bands": { "red": 3, "nir": 4 } }
+        ],
+        "index": "NDVI",
+        "output": "data/labs/_tmp/out/lab8/ndvi_series.tif"
+      }
+    },
+    {
+      "id": "trend",
+      "title": "步骤3 线性趋势：年内 NDVI 变化速率（单位 NDVI/天）",
+      "kind": 0,
+      "operator": "rs:temporal_trend",
+      "params": {
+        "scenes": [
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-01-15", "bands": { "ndvi": 1 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-02-15", "bands": { "ndvi": 2 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-03-15", "bands": { "ndvi": 3 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-04-15", "bands": { "ndvi": 4 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-05-15", "bands": { "ndvi": 5 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-06-15", "bands": { "ndvi": 6 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-07-15", "bands": { "ndvi": 7 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-08-15", "bands": { "ndvi": 8 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-09-15", "bands": { "ndvi": 9 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-10-15", "bands": { "ndvi": 10 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-11-15", "bands": { "ndvi": 11 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-12-15", "bands": { "ndvi": 12 } }
+        ],
+        "band_role": "ndvi",
+        "output": "data/labs/_tmp/out/lab8/ndvi_trend.tif"
+      }
+    },
+    {
+      "id": "phenology",
+      "title": "步骤4 物候参数：SOS / POS / EOS / 生长季长度",
+      "kind": 0,
+      "operator": "rs:temporal_phenology",
+      "params": {
+        "scenes": [
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-01-15", "bands": { "ndvi": 1 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-02-15", "bands": { "ndvi": 2 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-03-15", "bands": { "ndvi": 3 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-04-15", "bands": { "ndvi": 4 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-05-15", "bands": { "ndvi": 5 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-06-15", "bands": { "ndvi": 6 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-07-15", "bands": { "ndvi": 7 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-08-15", "bands": { "ndvi": 8 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-09-15", "bands": { "ndvi": 9 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-10-15", "bands": { "ndvi": 10 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-11-15", "bands": { "ndvi": 11 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-12-15", "bands": { "ndvi": 12 } }
+        ],
+        "band_role": "ndvi",
+        "crossingFraction": 0.2,
+        "output": "data/labs/_tmp/out/lab8/phenology.tif"
+      }
+    },
+    {
+      "id": "anomaly_disturbance",
+      "title": "步骤5 异常检测：扰动后时相（2024-10-15）对基线的 z-score",
+      "kind": 0,
+      "operator": "rs:temporal_anomaly",
+      "params": {
+        "scenes": [
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-01-15", "bands": { "ndvi": 1 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-02-15", "bands": { "ndvi": 2 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-03-15", "bands": { "ndvi": 3 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-04-15", "bands": { "ndvi": 4 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-05-15", "bands": { "ndvi": 5 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-06-15", "bands": { "ndvi": 6 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-07-15", "bands": { "ndvi": 7 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-08-15", "bands": { "ndvi": 8 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-09-15", "bands": { "ndvi": 9 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-10-15", "bands": { "ndvi": 10 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-11-15", "bands": { "ndvi": 11 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-12-15", "bands": { "ndvi": 12 } }
+        ],
+        "band_role": "ndvi",
+        "method": "zscore",
+        "target_time": "2024-10-15",
+        "baseline_start": "2024-01-01",
+        "baseline_end": "2024-08-31",
+        "output": "data/labs/_tmp/out/lab8/anomaly_2024-10-15.tif"
+      }
+    },
+    {
+      "id": "anomaly_control",
+      "title": "步骤6 对照组：扰动前时相（2024-08-15）的 z-score 应接近 0",
+      "kind": 0,
+      "operator": "rs:temporal_anomaly",
+      "params": {
+        "scenes": [
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-01-15", "bands": { "ndvi": 1 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-02-15", "bands": { "ndvi": 2 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-03-15", "bands": { "ndvi": 3 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-04-15", "bands": { "ndvi": 4 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-05-15", "bands": { "ndvi": 5 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-06-15", "bands": { "ndvi": 6 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-07-15", "bands": { "ndvi": 7 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-08-15", "bands": { "ndvi": 8 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-09-15", "bands": { "ndvi": 9 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-10-15", "bands": { "ndvi": 10 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-11-15", "bands": { "ndvi": 11 } },
+          { "path": "data/labs/_tmp/out/lab8/ndvi_series.tif", "time": "2024-12-15", "bands": { "ndvi": 12 } }
+        ],
+        "band_role": "ndvi",
+        "method": "zscore",
+        "target_time": "2024-08-15",
+        "baseline_start": "2024-01-01",
+        "baseline_end": "2024-08-31",
+        "output": "data/labs/_tmp/out/lab8/anomaly_2024-08-15_control.tif"
+      }
+    }
+  ]
+}

@@ -1,0 +1,80 @@
+{
+  "schema": "sicnu.grading-intent.v1",
+  "lab_id": "temporal_analysis",
+  "grader_owner": "D4（本文件只声明断言意图，不实现判分器）",
+  "pipeline_ref": "data/labs/pipelines/lab8_temporal_analysis.pipeline.json",
+  "aux_products": {
+    "zones": "data/labs/_tmp/temporal/zones.tif（码：1=常绿林 2=农田 3=水体 4=扰动地块 5=裸土）。真实教学环境由 D1 按数据规格生成同码图",
+    "determinism_note": "本地验证固定 seed=42（scripts/gen_lab_fixtures.py），下列容差按该实现校准；D1 换真实/再生成数据时按验收标准重校"
+  },
+  "assertions": [
+    {
+      "id": "T1_series_stack",
+      "artifact": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+      "claim": "NDVI 时序栈共 12 个波段，逐波段有效像元比例 ≥ 99%（场景全幅无 NoData）",
+      "tolerance": { "band_count": 12, "valid_fraction_per_band": ">= 0.99" }
+    },
+    {
+      "id": "T2_zone_ndvi_means",
+      "artifact": "data/labs/_tmp/out/lab8/ndvi_series.tif",
+      "claim": "分区 NDVI 与地物先验一致：常绿林全年逐期均值 ∈ [0.65, 0.85]；水体逐期均值 ∈ [-0.20, 0.00]；农田 6–8 月均值 ≥ 0.60 且 12–2 月均值 ≤ 0.30",
+      "tolerance": {
+        "forest_all_epochs": [0.65, 0.85],
+        "water_all_epochs": [-0.20, 0.00],
+        "cropland_jun_to_aug": ">= 0.60",
+        "cropland_dec_to_feb": "<= 0.30"
+      }
+    },
+    {
+      "id": "T3_trend_slope",
+      "artifact": "data/labs/_tmp/out/lab8/ndvi_trend.tif",
+      "claim": "趋势斜率（NDVI/天）：扰动地块均值 ≤ -8e-4（年内显著下降）；常绿林与水体 |均值| ≤ 2e-4（稳定）；拟合优度 r² 扰动地块均值 ≥ 0.5",
+      "tolerance": {
+        "disturbance_mean_slope_per_day": "<= -8e-4",
+        "forest_abs_mean_slope": "<= 2e-4",
+        "water_abs_mean_slope": "<= 2e-4",
+        "disturbance_mean_r2": ">= 0.5"
+      },
+      "teaching_note": "斜率单位是 NDVI/天（rs:temporal_trend 按 acquisition date 的天数差回归），学生常误认为 NDVI/年 —— 判分按天口径"
+    },
+    {
+      "id": "T4_phenology_cropland",
+      "artifact": "data/labs/_tmp/out/lab8/phenology.tif",
+      "claim": "农田分区：SOS ∈ [80, 170] DOY，POS ∈ [170, 230] DOY，EOS ∈ [230, 320] DOY，生长季长度 LOS ∈ [100, 240] 天；常绿林振幅 < 0.1（无季节信号，允许 NoData/退化值）",
+      "tolerance": {
+        "sos_doy": [80, 170],
+        "pos_doy": [170, 230],
+        "eos_doy": [230, 320],
+        "los_days": [100, 240],
+        "forest_amplitude": "< 0.1"
+      },
+      "teaching_note": "月频 12 期只能支撑 ~±15 天的物候精度；容差已按采样密度放宽（原理讲解中的诚实边界）"
+    },
+    {
+      "id": "T5_anomaly_disturbed_date",
+      "artifact": "data/labs/_tmp/out/lab8/anomaly_2024-10-15.tif",
+      "claim": "扰动时相：扰动地块 anomaly 均值 ≤ -2.0（强负异常）；常绿林/水体 |anomaly 均值| ≤ 1.0",
+      "tolerance": {
+        "disturbance_mean_anomaly": "<= -2.0",
+        "forest_abs_mean_anomaly": "<= 1.0",
+        "water_abs_mean_anomaly": "<= 1.0"
+      }
+    },
+    {
+      "id": "T6_anomaly_control_date",
+      "artifact": "data/labs/_tmp/out/lab8/anomaly_2024-08-15_control.tif",
+      "claim": "对照时相（扰动前）：全图 |anomaly 均值| ≤ 1.0，扰动地块 |均值| ≤ 1.0 —— 演示异常检测的假阳性控制",
+      "tolerance": {
+        "disturbance_abs_mean_anomaly": "<= 1.0",
+        "global_abs_mean_anomaly": "<= 1.0"
+      }
+    },
+    {
+      "id": "T7_summary_health",
+      "artifact": "data/labs/_tmp/out/lab8/nir_summary.tif",
+      "claim": "概要统计：count 波段全图 = 12（12 期全部有效参与）",
+      "tolerance": { "count_band_value": 12 }
+    }
+  ],
+  "pass_policy": "T1–T7 全部通过判满分；任一失败给出分区统计与残差定位（D4 实现方式自定）"
+}
