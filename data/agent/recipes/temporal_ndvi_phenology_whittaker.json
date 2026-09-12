@@ -1,0 +1,96 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.temporal_ndvi_phenology_whittaker",
+ "title": "Crop phenology metrics (Whittaker smoothing preset)",
+ "intent": "phenology",
+ "family": "temporal",
+ "modality": "temporal",
+ "sensors": [
+  "sentinel-2",
+  "landsat-8",
+  "landsat-9",
+  "modis"
+ ],
+ "description": "NDVI index series -> smoothing -> phenology metrics -> summary report. The canonical phenology chain. Smoothing preset: Whittaker smoother for noisy series.",
+ "slots": [
+  {
+   "name": "collection",
+   "kind": "collection",
+   "description": "Registered temporal collection (spatial:temporal tools).",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "series",
+   "operator_id": "rs:temporal_index_series",
+   "params": {
+    "collection": "$collection.path",
+    "index": "NDVI",
+    "output": "$outputs.ndvi_series"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "smooth",
+   "operator_id": "rs:temporal_smooth",
+   "params": {
+    "collection": "$collection.path",
+    "band_role": "ndvi",
+    "method": "whittaker",
+    "output": "$outputs.smoothed"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "phenology",
+   "operator_id": "rs:temporal_phenology",
+   "params": {
+    "collection": "$collection.path",
+    "band_role": "ndvi",
+    "output": "$outputs.phenology"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "summary",
+   "operator_id": "rs:temporal_summary",
+   "params": {
+    "collection": "$collection.path",
+    "band_role": "ndvi",
+    "include_median": true,
+    "output": "$outputs.summary",
+    "verification": "report"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "ndvi_series",
+   "from_step": "series",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "phenology",
+   "from_step": "phenology",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "summary",
+   "from_step": "summary",
+   "port": "output",
+   "kind": "report"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "series",
+  "renderer_hint": "singleband_pseudocolor"
+ }
+}

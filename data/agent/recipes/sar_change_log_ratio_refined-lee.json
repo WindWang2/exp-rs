@@ -1,0 +1,124 @@
+{
+ "schema_version": "1.0",
+ "kind": "harness_recipe",
+ "recipe_id": "harness.sar_change_log_ratio_refined-lee",
+ "title": "SAR log-ratio change (refined_lee speckle preset)",
+ "intent": "sar_change",
+ "family": "sar-change",
+ "modality": "sar",
+ "sensors": [
+  "sentinel-1"
+ ],
+ "description": "Calibrate both epochs -> speckle -> log-ratio change -> magnitude threshold. Log-ratio is radiometrically robust for calibrated SAR. Speckle preset: refined_lee.",
+ "slots": [
+  {
+   "name": "before",
+   "kind": "raster",
+   "description": "Co-registered before scene.",
+   "required": true
+  },
+  {
+   "name": "after",
+   "kind": "raster",
+   "description": "Co-registered after scene.",
+   "required": true
+  }
+ ],
+ "steps": [
+  {
+   "id": "calibrate_before",
+   "operator_id": "rs:sar_calibrate",
+   "params": {
+    "input": "$before.path",
+    "output": "$outputs.cal_before"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "calibrate_after",
+   "operator_id": "rs:sar_calibrate",
+   "params": {
+    "input": "$after.path",
+    "output": "$outputs.cal_after"
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "speckle_before",
+   "operator_id": "rs:sar_speckle",
+   "params": {
+    "input": "$outputs.cal_before",
+    "output": "$outputs.flt_before",
+    "method": "refined_lee",
+    "looks": 2
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "speckle_after",
+   "operator_id": "rs:sar_speckle",
+   "params": {
+    "input": "$outputs.cal_after",
+    "output": "$outputs.flt_after",
+    "method": "refined_lee",
+    "looks": 2
+   },
+   "verification": "raster"
+  },
+  {
+   "id": "log_ratio",
+   "operator_id": "rs:change_log_ratio",
+   "params": {
+    "before": "$outputs.flt_before",
+    "after": "$outputs.flt_after",
+    "output": "$outputs.log_ratio"
+   },
+   "verification": "raster",
+   "inputs": [
+    {
+     "step": "speckle_before",
+     "port": "output",
+     "to_port": "before"
+    },
+    {
+     "step": "speckle_after",
+     "port": "output",
+     "to_port": "after"
+    }
+   ]
+  },
+  {
+   "id": "threshold",
+   "operator_id": "rs:threshold_raster",
+   "params": {
+    "input": "$outputs.log_ratio",
+    "output": "$outputs.change_classified",
+    "thresholdMethod": "statistical",
+    "statisticalK": 2.5,
+    "cleanup": "majority"
+   },
+   "verification": "raster"
+  }
+ ],
+ "outputs": [
+  {
+   "name": "log_ratio",
+   "from_step": "log_ratio",
+   "port": "output",
+   "kind": "raster"
+  },
+  {
+   "name": "change_classified",
+   "from_step": "threshold",
+   "port": "output",
+   "kind": "raster"
+  }
+ ],
+ "verification": {
+  "enabled": true
+ },
+ "map_output": {
+  "from_step": "log_ratio",
+  "renderer_hint": "categorized"
+ }
+}
