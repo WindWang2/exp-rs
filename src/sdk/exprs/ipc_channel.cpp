@@ -223,10 +223,20 @@ IpcChannel::Outcome IpcChannel::request( const std::string &method, const Json::
                 mPending.erase( it );
                 break;
             }
-            if ( cancelPredicate && cancelPredicate() )
+            if ( cancelPredicate )
             {
-                cancelled = true;
-                break;
+                // Invoke the predicate with the state lock RELEASED: a
+                // predicate may call back into the channel (close(),
+                // protocolFailure(), nextRequest(), ... all take mMutex),
+                // and the non-recursive mutex would self-deadlock.
+                lock.unlock();
+                const bool stop = cancelPredicate();
+                lock.lock();
+                if ( stop )
+                {
+                    cancelled = true;
+                    break;
+                }
             }
             if ( Clock::now() >= deadline )
             {
@@ -510,6 +520,12 @@ void IpcChannel::handleFrame( const std::string &payload )
 
 void IpcChannel::readerLoop()
 {
+    // Bytes of a frame consumed across reader attempts: on a Timeout the next
+    // read() resumes the SAME frame instead of re-reading mid-payload bytes
+    // as a fresh length prefix (framing desync — spurious E6003 teardown of
+    // a slow-but-valid frame). Every non-Timeout status tears the channel
+    // down or delivers the frame, so this buffer never survives those.
+    std::string partialFrame;
     for ( ;; )
     {
         if ( mClosed )
@@ -519,7 +535,7 @@ void IpcChannel::readerLoop()
         IpcFrameLimits limits;
         limits.maxFrameBytes = mMaxRecvFrameBytes.load();
         const IpcFrame::ReadStatus status =
-            IpcFrame::read( *mStream, payload, limits, 200, error );
+            IpcFrame::read( *mStream, payload, limits, 200, error, &partialFrame );
         if ( status == IpcFrame::ReadStatus::Timeout )
             continue;
         if ( status == IpcFrame::ReadStatus::Eof )

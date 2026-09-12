@@ -290,9 +290,16 @@ bool verifyChecksums( const std::string &stagingDir, const Json::Value &checksum
             return false;
         }
         const std::string declared = declaredValue.asString();
+        // Windows-absolute ("C:/...", "C:\\...") and drive-rooted / UNC
+        // backslash forms ("\\server\\share\\...", "\\dir\\...") defeat the
+        // staging-dir root exactly like "../" does; reject them alongside it
+        // (legit relative package paths never start with '\' and never have
+        // a drive-letter colon as their second character).
+        const bool windowsAbsolute = relativePath.size() >= 2 && relativePath[ 1 ] == ':';
         if ( declared.find( ".." ) != std::string::npos
              || relativePath.find( ".." ) != std::string::npos
-             || relativePath.front() == '/' )
+             || relativePath.front() == '/' || relativePath.front() == '\\'
+             || windowsAbsolute )
         {
             error = "suspicious checksum path: " + relativePath;
             return false;
