@@ -24,7 +24,7 @@ Workflow toWorkflow( const lab::LabSpec &spec )
 {
     Workflow wf;
     wf.id = spec.id;
-    wf.title = QStringLiteral( "%1 · %2" ).arg( spec.id.section( QLatin1Char( '_' ), 0, 0 ), spec.titleZh );
+    wf.title = QObject::tr( "%1 · %2" ).arg( spec.id.section( QLatin1Char( '_' ), 0, 0 ), spec.titleZh );
     wf.description = spec.objective;
     for ( const auto &step : spec.steps )
     {
@@ -187,16 +187,16 @@ void GuidedWorkflowWidget::onWorkflowSelected(int index)
 
     // Show workflow description
     const auto &wf = m_workflows[labIndex];
-    m_stepLabel->setText(QString("<b>%1</b>").arg(wf.title));
+    m_stepLabel->setText(QString("<b>%1</b>").arg(wf.title.toHtmlEscaped()));
 
     QString stepsHtml;
     for (int i = 0; i < wf.steps.size(); i++)
-        stepsHtml += QString("<li>%1</li>").arg(wf.steps[i].title);
+        stepsHtml += QString("<li>%1</li>").arg(wf.steps[i].title.toHtmlEscaped());
 
     m_stepBrowser->setHtml(
         QString("<p>%1</p><p><b>%2</b></p><ol>%3</ol>"
                 "<p>%4</p>")
-        .arg(wf.description,
+        .arg(wf.description.toHtmlEscaped(),
              tr("步骤"),
              stepsHtml,
              tr("点击 <b>开始实验</b> 以开始。"))
@@ -235,7 +235,7 @@ void GuidedWorkflowWidget::onNextStep()
         m_stepBrowser->setHtml(
             tr("<p>恭喜！你已完成 <b>%1</b> 实验。</p>"
                "<p>可以继续尝试其他实验，或调整参数进行更多探索。</p>")
-            .arg(wf.title)
+            .arg(wf.title.toHtmlEscaped())
         );
         emit workflowCompleted(wf.id);
     }
@@ -274,7 +274,10 @@ void GuidedWorkflowWidget::onRunStepAction()
 void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
 {
     if ( m_jobHandle.isRunning() )
+    {
+        showRunMessage( tr( "已有任务正在运行，请等待其完成后再执行下一步。" ), true );
         return;
+    }
 
     // Resolve relative data/ and outputs/ references against the runtime root
     // so the operator sees the same absolute paths a headless caller produces.
@@ -284,20 +287,37 @@ void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
         []( const QString &relative, lab::PathRole )
         { return sicnu::processing::resolveRuntimeDataPath( relative ); } );
 
-    // Make sure the per-lab outputs directory exists before running.
-    for ( const auto &key : params.getMemberNames() )
+    // Create the per-lab outputs directories up front. Walk the whole params
+    // tree so nested references (e.g. arrays such as rs:mosaic inputs) count.
+    std::function<void( const Json::Value & )> ensureOutputDirs = [&]( const Json::Value &node )
     {
-        const Json::Value &value = params[ key ];
-        if ( value.isString() && QString::fromStdString( value.asString() ).contains( QStringLiteral( "/output/labs/" ) ) )
+        if ( node.isString() )
         {
-            const QString outputDir = QFileInfo( QString::fromStdString( value.asString() ) ).absolutePath();
-            if ( !QDir().mkpath( outputDir ) )
+            const QString value = QString::fromStdString( node.asString() );
+            if ( value.contains( QStringLiteral( "/output/labs/" ) ) )
             {
-                showRunMessage( tr( "无法创建输出目录：%1" ).arg( outputDir ), true );
-                return;
+                const QString outputDir = QFileInfo( value ).absolutePath();
+                if ( !QDir().mkpath( outputDir ) )
+                {
+                    showRunMessage( tr( "无法创建输出目录：%1" ).arg( outputDir ), true );
+                    return;
+                }
             }
+            return;
         }
-    }
+        if ( node.isArray() )
+        {
+            for ( const auto &item : node )
+                ensureOutputDirs( item );
+            return;
+        }
+        if ( node.isObject() )
+        {
+            for ( const auto &key : node.getMemberNames() )
+                ensureOutputDirs( node[ key ] );
+        }
+    };
+    ensureOutputDirs( params );
 
     sicnu::jobs::JobRequest req;
     req.algorithmId = step.operatorId.toStdString();
@@ -305,27 +325,49 @@ void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
     req.title = m_workflows[m_currentWorkflowIndex].title.toStdString();
     req.source = "guided_lab";
 
+    // Identify the step this submission belongs to: completion restores the
+    // run button only when the student is still looking at the same step.
+    const QString workflowId = m_workflows[m_currentWorkflowIndex].id;
+    const int stepIndex = m_currentStepIndex;
     const QString stepTitle = step.title;
+
     m_runButton->setEnabled(false);
     m_runButton->setText( tr( "运行中…" ) );
 
-    m_jobHandle.submitJob(
+    auto restoreButton = [this, workflowId, stepIndex]
+    {
+        m_runButton->setText( tr( "执行此步" ) );
+        const bool onSameStep = m_workflowActive
+            && m_currentWorkflowIndex >= 0
+            && m_workflows[m_currentWorkflowIndex].id == workflowId
+            && m_currentStepIndex == stepIndex;
+        m_runButton->setEnabled( onSameStep && !m_jobHandle.isRunning() );
+        if ( onSameStep )
+            updateStepDisplay();
+    };
+
+    const long taskId = m_jobHandle.submitJob(
         req,
-        [this, stepTitle]( const QString &outputPath, const Json::Value & )
+        [this, stepTitle, restoreButton]( const QString &outputPath, const Json::Value & )
         {
-            m_runButton->setText( tr( "执行此步" ) );
-            m_runButton->setEnabled( true );
+            restoreButton();
             showRunMessage( tr( "“%1” 完成。输出：%2" ).arg( stepTitle, outputPath ), false );
         },
-        [this, stepTitle]( const QString &error, bool canceled )
+        [this, stepTitle, restoreButton]( const QString &error, bool canceled )
         {
-            m_runButton->setText( tr( "执行此步" ) );
-            m_runButton->setEnabled( true );
+            restoreButton();
             if ( canceled )
                 showRunMessage( tr( "“%1” 已取消。" ).arg( stepTitle ), true );
             else
                 showRunMessage( tr( "“%1” 失败：%2" ).arg( stepTitle, error ), true );
         } );
+
+    if ( taskId < 0 )
+    {
+        // Submission rejected (e.g. shutdown): no callback will fire.
+        restoreButton();
+        showRunMessage( tr( "任务提交被拒绝，请稍后重试。" ), true );
+    }
 }
 
 void GuidedWorkflowWidget::showRunMessage( const QString &message, bool isError )
@@ -345,7 +387,7 @@ void GuidedWorkflowWidget::showStep(int index)
         tr("<b>步骤 %1/%2：%3</b>")
         .arg(index + 1)
         .arg(wf.steps.size())
-        .arg(step.title)
+        .arg(step.title.toHtmlEscaped())
     );
 
     QString binding;
@@ -356,22 +398,22 @@ void GuidedWorkflowWidget::showStep(int index)
 
     QString hintHtml;
     if ( !step.teachingNote.isEmpty() )
-        hintHtml += tr( "<p><b>%1</b> %2</p>" ).arg( tr( "原理：" ), step.teachingNote );
+        hintHtml += tr( "<p><b>%1</b> %2</p>" ).arg( tr( "原理：" ), step.teachingNote.toHtmlEscaped() );
     if ( !step.completionHint.isEmpty() )
-        hintHtml += tr( "<p><b>%1</b> %2</p>" ).arg( tr( "完成标志：" ), step.completionHint );
+        hintHtml += tr( "<p><b>%1</b> %2</p>" ).arg( tr( "完成标志：" ), step.completionHint.toHtmlEscaped() );
 
     m_stepBrowser->setHtml(
         QString("<p><b>%1</b> %2</p>"
                 "%3"
                 "<hr>"
                 "%4")
-        .arg(tr("任务："), step.description, binding, hintHtml)
+        .arg(tr("任务："), step.description.toHtmlEscaped(), binding, hintHtml)
     );
 
     // Update navigation buttons
     m_prevButton->setEnabled(index > 0);
     m_nextButton->setEnabled(true);
-    m_runButton->setEnabled(!step.isManual());
+    m_runButton->setEnabled(!step.isManual() && !m_jobHandle.isRunning());
 }
 
 void GuidedWorkflowWidget::updateStepDisplay()

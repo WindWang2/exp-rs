@@ -7,7 +7,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QRegularExpression>
-#include <QSet>
+#include <cmath>
 #include <memory>
 #include <algorithm>
 
@@ -66,8 +66,12 @@ LabSpec loadLabSpecFile( const QString &path, LabSpecError *error )
   std::string parseErrors;
   if ( !reader->parse( raw.constData(), raw.constData() + raw.size(), &root, &parseErrors ) )
   {
-    // jsoncpp reports "line N, column M" inside its message; surface it verbatim.
-    return fail( QStringLiteral( "invalid JSON: %1" ).arg( stdToQString( parseErrors ) ) );
+    // jsoncpp reports "line N, column M" inside its message; surface it
+    // verbatim and extract the line for the structured field, best effort.
+    const QRegularExpression linePattern( QStringLiteral( "[Ll]ine\\s+(\\d+)" ) );
+    const auto match = linePattern.match( stdToQString( parseErrors ) );
+    return fail( QStringLiteral( "invalid JSON: %1" ).arg( stdToQString( parseErrors ) ),
+                 match.hasMatch() ? match.captured( 1 ).toInt() : 0 );
   }
 
   if ( !root.isObject() )
@@ -86,10 +90,16 @@ LabSpec loadLabSpecFile( const QString &path, LabSpecError *error )
   }
 
   // --- required scalars ----------------------------------------------------
-  if ( !root.isMember( "spec_version" ) || !root[ "spec_version" ].isInt() )
+  // draft-07 "type: integer" also accepts integral floats like 1.0; mirror it.
+  if ( !root.isMember( "spec_version" ) )
     return fail( QStringLiteral( "spec_version must be an integer" ) );
-  if ( root[ "spec_version" ].asInt() != 1 )
-    return fail( QStringLiteral( "unsupported spec_version %1 (expected 1)" ).arg( root[ "spec_version" ].asInt() ) );
+  const Json::Value &specVersion = root[ "spec_version" ];
+  const bool integral = specVersion.isInt()
+    || ( specVersion.isDouble() && specVersion.asDouble() == std::floor( specVersion.asDouble() ) );
+  if ( !integral )
+    return fail( QStringLiteral( "spec_version must be an integer" ) );
+  if ( specVersion.asInt() != 1 )
+    return fail( QStringLiteral( "unsupported spec_version %1 (expected 1)" ).arg( specVersion.asInt() ) );
 
   static const QRegularExpression idPattern( QStringLiteral( "^lab[0-9]{2}_[a-z][a-z0-9_]*$" ) );
   if ( !isNonEmptyString( root[ "id" ] ) )
@@ -99,7 +109,9 @@ LabSpec loadLabSpecFile( const QString &path, LabSpecError *error )
     return fail( QStringLiteral( "id '%1' does not match ^lab[0-9]{2}_[a-z][a-z0-9_]*$" ).arg( labId ), 0, labId );
 
   // File name must carry the canonical id: data/labs/<id>.lab.json.
-  const QString stem = QFileInfo( path ).completeBaseName(); // strips only ".json"
+  // baseName() strips every extension, so "<id>.lab.json" yields exactly <id>
+  // (ids cannot contain dots by the pattern above).
+  const QString stem = QFileInfo( path ).baseName();
   if ( stem != labId )
     return fail( QStringLiteral( "file stem '%1' does not match id '%2'" ).arg( stem, labId ), 0, labId );
 
@@ -209,7 +221,9 @@ LabSpec loadLabSpecFile( const QString &path, LabSpecError *error )
       return fail( QStringLiteral( "%1: operator_id and action are mutually exclusive" ).arg( where ), 0, labId );
     if ( stepValue.isMember( "params" ) && !hasOperator )
       return fail( QStringLiteral( "%1: params requires operator_id" ).arg( where ), 0, labId );
-    if ( hasOperator && !stepValue[ "params" ].isObject() )
+    // params is optional (schema) but must be an object when present;
+    // an operator step without params behaves as if it were empty.
+    if ( stepValue.isMember( "params" ) && !stepValue[ "params" ].isObject() )
       return fail( QStringLiteral( "%1: params must be an object" ).arg( where ), 0, labId );
     if ( hasOperator )
     {
@@ -254,10 +268,11 @@ LabLoadResult loadLabSpecsFromDir( const QString &dir )
     return result;
   }
 
-  // Deterministic order: file-name sorted *.lab.json only.
+  // Deterministic order: file-name sorted *.lab.json only. Because ids must
+  // equal their file stem, two files in one directory can never collide on id
+  // — duplicates are structurally impossible, no cross-file check needed.
   QStringList files = dirInfo.entryList( QStringList{ QStringLiteral( "*.lab.json" ) }, QDir::Files, QDir::Name );
 
-  QSet<QString> seenIds;
   for ( const QString &fileName : files )
   {
     const QString fullPath = dirInfo.filePath( fileName );
@@ -268,12 +283,6 @@ LabLoadResult loadLabSpecsFromDir( const QString &dir )
       result.errors.append( error );
       continue;
     }
-    if ( seenIds.contains( spec.id ) )
-    {
-      result.errors.append( LabSpecError{ fullPath, spec.id, QStringLiteral( "duplicate lab id" ), 0 } );
-      continue;
-    }
-    seenIds.insert( spec.id );
     result.labs.append( spec );
   }
 

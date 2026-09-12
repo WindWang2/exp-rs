@@ -38,7 +38,7 @@
 | 参数 | 值 |
 |------|-----|
 | `inputs` | `["data/samples/change_before.tif", "data/samples/change_after.tif"]` |
-| `output` | outputs/lab10_mosaic.tif |
+| `output` | `outputs/lab10_mosaic.tif` |
 
 
 ✅ **完成标志**：输出为覆盖两景范围的拼合影像。

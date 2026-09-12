@@ -34,9 +34,9 @@
 
 | 参数 | 值 |
 |------|-----|
-| `input` | data/samples/landsat_sample.tif |
-| `output` | outputs/lab08_dos1.tif |
-| `method` | dos1 |
+| `input` | `data/samples/landsat_sample.tif` |
+| `output` | `outputs/lab08_dos1.tif` |
+| `method` | `dos1` |
 
 
 > **原理**：电磁波穿过大气时被吸收与散射；暗目标减法是最简单的绝对校正方法，无需大气参数即可近似去除程辐射。

@@ -34,8 +34,8 @@
 
 | 参数 | 值 |
 |------|-----|
-| `input` | data/samples/landsat_sample.tif |
-| `output` | outputs/lab09_pca.tif |
+| `input` | `data/samples/landsat_sample.tif` |
+| `output` | `outputs/lab09_pca.tif` |
 | `numComponents` | 3 |
 
 

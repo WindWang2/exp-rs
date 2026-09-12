@@ -73,6 +73,11 @@ def load_labs():
             for p in sorted(LABS_DIR.glob("*.lab.json"), key=lambda p: p.name)]
 
 
+def md_cell(value):
+    """Make a scalar safe for a markdown table cell: escape pipes/newlines."""
+    return str(value).replace("|", "\\|").replace("\n", " ")
+
+
 def step_binding_lines(step):
     """Human description of how the step is bound, as markdown lines."""
     lines = []
@@ -87,7 +92,11 @@ def step_binding_lines(step):
             for key in params:  # document order: authored, deterministic
                 value = params[key]
                 if isinstance(value, (list, dict)):
-                    value = "`" + json.dumps(value, ensure_ascii=False) + "`"
+                    value = "`" + md_cell(json.dumps(value, ensure_ascii=False)) + "`"
+                elif isinstance(value, str):
+                    value = "`" + md_cell(value) + "`"
+                else:
+                    value = md_cell(value)
                 lines.append(f"| `{key}` | {value} |")
             lines.append("")
     elif "action" in step:
@@ -126,7 +135,7 @@ def render_lab(doc):
         out.append("| 数据 | 说明 |")
         out.append("|------|------|")
         for ref in doc["prerequisites"]:
-            out.append(f"| `{ref['path']}` | {ref.get('note', '')} |")
+            out.append(f"| `{ref['path']}` | {md_cell(ref.get('note', ''))} |")
         out.append("")
     out.append("## 实验步骤")
     out.append("")

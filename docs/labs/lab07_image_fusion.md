@@ -36,10 +36,10 @@
 
 | 参数 | 值 |
 |------|-----|
-| `pan` | data/samples/landsat_sample.tif |
-| `ms` | data/samples/landsat_sample.tif |
-| `method` | brovey |
-| `output` | outputs/lab07_brovey.tif |
+| `pan` | `data/samples/landsat_sample.tif` |
+| `ms` | `data/samples/landsat_sample.tif` |
+| `method` | `brovey` |
+| `output` | `outputs/lab07_brovey.tif` |
 
 
 > **原理**：Brovey 通过归一化光谱比值注入全色细节，计算简单但高保真度依赖波段光谱响应与全色波段接近。
@@ -55,10 +55,10 @@
 
 | 参数 | 值 |
 |------|-----|
-| `pan` | data/samples/landsat_sample.tif |
-| `ms` | data/samples/landsat_sample.tif |
-| `method` | ihs |
-| `output` | outputs/lab07_ihs.tif |
+| `pan` | `data/samples/landsat_sample.tif` |
+| `ms` | `data/samples/landsat_sample.tif` |
+| `method` | `ihs` |
+| `output` | `outputs/lab07_ihs.tif` |
 
 
 > **原理**：IHS 融合把空间细节与光谱信息分离——亮度承载细节、色调饱和度承载光谱，因此光谱失真相对可控。

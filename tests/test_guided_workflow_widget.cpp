@@ -160,8 +160,11 @@ TEST_CASE( "Invalid LabSpecs are refused with typed errors", "[widget][workflow]
         REQUIRE( result.errors.first().reason.contains( QStringLiteral( "does not match id" ) ) );
     }
 
-    SECTION( "duplicate ids across files are rejected" )
+    SECTION( "a second file cannot claim another file's id" )
     {
+        // The loader enforces id == file stem, so two files in one directory
+        // can never collide on id; a copy claiming another id is rejected by
+        // the stem check.
         QTemporaryDir dir;
         REQUIRE( dir.isValid() );
         const QDir qdir( dir.path() );
@@ -173,7 +176,7 @@ TEST_CASE( "Invalid LabSpecs are refused with typed errors", "[widget][workflow]
         const LabLoadResult result = loadDir( dir );
         REQUIRE( !result.ok() );
         REQUIRE( result.labs.size() == 1 );
-        REQUIRE( result.errors.first().reason.contains( QStringLiteral( "duplicate lab id" ) ) );
+        REQUIRE( result.errors.first().reason.contains( QStringLiteral( "does not match id" ) ) );
     }
 
     SECTION( "missing directory is a typed error" )

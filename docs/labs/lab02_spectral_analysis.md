@@ -44,9 +44,9 @@
 
 | 参数 | 值 |
 |------|-----|
-| `input` | data/samples/landsat_sample.tif |
-| `output` | outputs/lab02_ndvi.tif |
-| `index` | NDVI |
+| `input` | `data/samples/landsat_sample.tif` |
+| `output` | `outputs/lab02_ndvi.tif` |
+| `index` | `NDVI` |
 | `red` | 4 |
 | `nir` | 5 |
 
@@ -64,9 +64,9 @@
 
 | 参数 | 值 |
 |------|-----|
-| `input` | data/samples/landsat_sample.tif |
-| `output` | outputs/lab02_band_ratio.tif |
-| `expression` | b5 / b4 |
+| `input` | `data/samples/landsat_sample.tif` |
+| `output` | `outputs/lab02_band_ratio.tif` |
+| `expression` | `b5 / b4` |
 
 
 > **原理**：波段比值能抑制地形阴影并放大地物反射率差异，是构建自定义指数的基本手段。

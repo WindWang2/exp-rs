@@ -34,9 +34,9 @@
 
 | 参数 | 值 |
 |------|-----|
-| `input` | data/samples/dem_sample.tif |
-| `output` | outputs/lab05_hillshade.tif |
-| `product` | hillshade |
+| `input` | `data/samples/dem_sample.tif` |
+| `output` | `outputs/lab05_hillshade.tif` |
+| `product` | `hillshade` |
 
 
 > **原理**：山体阴影按设定的太阳方位角与高度角计算每个像元的相对光照，是地形制图与三维可视化叠加的常用底图。
@@ -52,9 +52,9 @@
 
 | 参数 | 值 |
 |------|-----|
-| `input` | data/samples/dem_sample.tif |
-| `output` | outputs/lab05_slope.tif |
-| `product` | slope |
+| `input` | `data/samples/dem_sample.tif` |
+| `output` | `outputs/lab05_slope.tif` |
+| `product` | `slope` |
 
 
 > **原理**：坡度由 DEM 的最大高程变化率计算，取值 0°（平坦）至 90°（垂直）；坡向（aspect）则给出最陡下降方向的方位。

@@ -34,9 +34,9 @@
 
 | 参数 | 值 |
 |------|-----|
-| `input` | data/samples/landsat_sample.tif |
-| `output` | outputs/lab01_percent_clip.tif |
-| `method` | percent_clip |
+| `input` | `data/samples/landsat_sample.tif` |
+| `output` | `outputs/lab01_percent_clip.tif` |
+| `method` | `percent_clip` |
 
 
 > **原理**：传感器量化范围往往未被影像实际灰度范围占满；拉伸把实际灰度范围映射到整个显示范围，从而提升视觉对比度。
@@ -52,8 +52,8 @@
 
 | 参数 | 值 |
 |------|-----|
-| `input` | data/samples/landsat_sample.tif |
-| `output` | outputs/lab01_gaussian.tif |
+| `input` | `data/samples/landsat_sample.tif` |
+| `output` | `outputs/lab01_gaussian.tif` |
 | `kernelSize` | 3 |
 | `sigma` | 1.0 |
 
@@ -71,8 +71,8 @@
 
 | 参数 | 值 |
 |------|-----|
-| `input` | data/samples/landsat_sample.tif |
-| `output` | outputs/lab01_sobel.tif |
+| `input` | `data/samples/landsat_sample.tif` |
+| `output` | `outputs/lab01_sobel.tif` |
 | `kernelSize` | 3 |
 | `dx` | 1 |
 | `dy` | 1 |

@@ -42,9 +42,9 @@
 
 | 参数 | 值 |
 |------|-----|
-| `input` | data/samples/landsat_sample.tif |
-| `output` | outputs/lab11_segments.tif |
-| `engine` | simple |
+| `input` | `data/samples/landsat_sample.tif` |
+| `output` | `outputs/lab11_segments.tif` |
+| `engine` | `simple` |
 
 
 > **原理**：分割把像元聚成同质对象；分割尺度（minRegionSize 等）过大欠分割、过小则退化为逐像元。
@@ -53,16 +53,17 @@
 
 ### 步骤 4：标注与分类（Label and Classify）
 
-在 OBIA 窗口中点击对象赋予类别（或 Import ROI 导入样本），选择分类器后点击 Classify；执行 rs:obia_classify 算子完成对象级分类，并查看训练 OA / Kappa / 混淆矩阵。完成后点击加载到主图，可从类别栅格导出矢量多边形。
+在 OBIA 窗口中点击对象赋予类别（或 Import ROI 导入样本），选择分类器后点击 Classify；也可执行 rs:obia_classify 算子，以训练样本矢量（training_samples.shp）为监督完成对象级分类，并查看训练 OA / Kappa / 混淆矩阵。完成后点击加载到主图，可从类别栅格导出矢量多边形。
 
 - **绑定算子**：`rs:obia_classify`
 - **预置参数**：
 
 | 参数 | 值 |
 |------|-----|
-| `input` | data/samples/landsat_sample.tif |
-| `output` | outputs/lab11_obia_class.tif |
-| `method` | svm |
+| `input` | `data/samples/landsat_sample.tif` |
+| `training` | `data/samples/training_samples.shp` |
+| `output` | `outputs/lab11_obia_class.tif` |
+| `method` | `svm` |
 
 
 > **原理**：对象分类使用光谱均值、形状、纹理等对象特征而非单像元，能抑制椒盐噪声、更好匹配地物边界。

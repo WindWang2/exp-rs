@@ -35,10 +35,10 @@
 
 | 参数 | 值 |
 |------|-----|
-| `input` | data/samples/landsat_sample.tif |
-| `training` | data/samples/training_samples.shp |
-| `output` | outputs/lab03_classification.tif |
-| `method` | svm |
+| `input` | `data/samples/landsat_sample.tif` |
+| `training` | `data/samples/training_samples.shp` |
+| `output` | `outputs/lab03_classification.tif` |
+| `method` | `svm` |
 
 
 > **原理**：监督分类用已知类别的样本训练决策规则，再对全影像逐像元分类；分类器选择与样本质量共同决定分类精度。

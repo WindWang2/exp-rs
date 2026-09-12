@@ -43,10 +43,10 @@
 
 | 参数 | 值 |
 |------|-----|
-| `before` | data/samples/change_before.tif |
-| `after` | data/samples/change_after.tif |
-| `method` | normalized_difference |
-| `output` | outputs/lab04_change.tif |
+| `before` | `data/samples/change_before.tif` |
+| `after` | `data/samples/change_after.tif` |
+| `method` | `normalized_difference` |
+| `output` | `outputs/lab04_change.tif` |
 
 
 > **原理**：归一化差异对光照条件差异更稳健；变化图上高亮区域即为检测到的变化像元。

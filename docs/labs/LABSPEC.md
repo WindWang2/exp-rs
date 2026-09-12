@@ -75,7 +75,7 @@ LabSpec 是实验的声明式规格：一份 JSON 同时驱动**引导式实验�
 |------|------|
 | `title` / `title_zh` / `description_zh` | 必填；`description_zh` 是教学正文 |
 | `operator_id` | 算子绑定：`rs:*` 或 `opencv:*`，必须能在 Processing Registry 解析 |
-| `params` | 算子参数对象；**必须与 `operator_id` 同时出现**，键名/取值受算子 schema 校验 |
+| `params` | 算子参数对象；仅能与 `operator_id` 同时出现（缺省视为空对象），键名/取值受算子 schema 校验 |
 | `action` | UI 动词：主窗口槽名（如 `addRasterLayer`）；与 `operator_id` 互斥 |
 | `teaching_note` | 原理说明（渲染为文档引用块） |
 | `completion_hint` | 完成标志 |
