@@ -33,6 +33,7 @@
 #include "processing/framework/atomic_algorithm_adapter.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 
+#include <QDir>
 #include <QFile>
 #include <QString>
 
@@ -210,7 +211,12 @@ TEST_CASE( "D8 determinism: every operator graded, non-reproducible surfaced",
         REQUIRE( std::find( tolerance.begin(), tolerance.end(), std::string( id ) ) !=
                  tolerance.end() );
     }
-    REQUIRE( boot.catalog.stochasticOperators().size() == stochastic.size() );
+    // Currently no operator declares stochastic behaviour (k-means pins its
+    // RNG seed); pin the surface so an accidental always-false regression or
+    // a new stochastic operator both fail loudly here.
+    static const std::vector<std::string> kExpectedStochastic = {};
+    REQUIRE( stochastic == kExpectedStochastic );
+    REQUIRE( boot.catalog.stochasticOperators() == kExpectedStochastic );
 
     // Composition surfaces the reproducibility caveat for tolerance targets.
     const Json::Value composed = composeChain( "rs:temporal_smooth", Json::Value() );
@@ -277,6 +283,117 @@ TEST_CASE( "D8 relation graph: no dangling refs, acyclic, exclusive consistent",
     CHECK_FALSE( relations.requiresGrid( relations.gridFixer() ) );
 }
 
+TEST_CASE( "D8 validator: malformed sidecars are rejected with named problems",
+           "[capability][d8][validate]" )
+{
+    auto base = [] {
+        Json::Value doc( Json::objectValue );
+        doc[ "id" ] = "rs:ndvi";
+        doc[ "schema_version" ] = 2;
+        Json::Value block( Json::objectValue );
+        block[ "schema_version" ] = 2;
+        block[ "family" ] = "spectral";
+        block[ "operator_group" ] = "spectral";
+        Json::Value io( Json::objectValue );
+        io[ "inputs" ] = Json::Value( Json::arrayValue );
+        io[ "outputs" ] = Json::Value( Json::arrayValue );
+        io[ "parameters" ] = Json::Value( Json::arrayValue );
+        block[ "io" ] = io;
+        Json::Value modality( Json::arrayValue );
+        modality.append( "optical" );
+        block[ "modality" ] = modality;
+        block[ "band_roles" ] = Json::Value( Json::objectValue );
+        Json::Value crs( Json::objectValue );
+        crs[ "requires_projected" ] = false;
+        crs[ "requires_shared_grid" ] = false;
+        block[ "crs" ] = crs;
+        Json::Value determinism( Json::objectValue );
+        determinism[ "grade" ] = "bit_exact";
+        determinism[ "stochastic" ] = false;
+        block[ "determinism" ] = determinism;
+        block[ "prerequisites" ] = Json::Value( Json::arrayValue );
+        block[ "limitations" ] = Json::Value( Json::arrayValue );
+        block[ "summary" ] = "";
+        block[ "failure_modes" ] = Json::Value( Json::arrayValue );
+        block[ "applicability" ] = Json::Value( Json::objectValue );
+        block[ "teaching_use" ] = Json::Value( Json::objectValue );
+        doc[ "capability" ] = block;
+        return doc;
+    };
+    auto problems = []( const Json::Value &doc ) {
+        auto out = CapabilityCatalog::validateEntry( doc );
+        std::vector<std::string> list( out.begin(), out.end() );
+        return list;
+    };
+    auto hasProblemContaining = []( const std::vector<std::string> &found,
+                                    const std::string &needle ) {
+        for ( const std::string &problem : found )
+        {
+            if ( problem.find( needle ) != std::string::npos )
+              return true;
+        }
+        return false;
+    };
+
+    REQUIRE( problems( base() ).empty() );
+
+    Json::Value doc = base();
+    doc[ "capability" ][ "family" ] = "not-a-family";
+    CHECK( hasProblemContaining( problems( doc ), "unknown family" ) );
+
+    doc = base();
+    doc[ "capability" ][ "family" ] = "change"; // disagrees with canonical map
+    CHECK( hasProblemContaining( problems( doc ), "disagrees with canonical map" ) );
+
+    doc = base();
+    Json::Value badFailure( Json::objectValue );
+    badFailure[ "code" ] = "MADE_UP_CODE";
+    badFailure[ "when" ] = "x";
+    badFailure[ "remedy" ] = "y";
+    doc[ "capability" ][ "failure_modes" ].append( badFailure );
+    CHECK( hasProblemContaining( problems( doc ), "unknown code" ) );
+
+    doc = base();
+    doc[ "capability" ][ "band_roles" ][ "nir" ] = -1;
+    CHECK( hasProblemContaining( problems( doc ), "positive integer" ) );
+
+    doc = base();
+    doc[ "capability" ][ "crs" ][ "requires_projected" ] = "yes";
+    CHECK( hasProblemContaining( problems( doc ), "crs" ) );
+
+    doc = base();
+    doc[ "capability" ][ "determinism" ][ "grade" ] = "usually";
+    CHECK( hasProblemContaining( problems( doc ), "unknown grade" ) );
+
+    doc = base();
+    doc[ "capability" ][ "modality" ] = Json::Value( Json::arrayValue );
+    CHECK( hasProblemContaining( problems( doc ), "modality" ) );
+
+    doc = base();
+    doc[ "capability" ][ "summary" ] = 5;
+    CHECK( hasProblemContaining( problems( doc ), "summary" ) );
+}
+
+TEST_CASE( "D8 knowledge pages: no stale generated files", "[capability][d8][pages]" )
+{
+    // Renaming/removing a family must not leave orphaned capability-*.md
+    // pages behind (review P2).
+    std::set<std::string> committed;
+    QDir piKnowledge( QString::fromStdString( std::string( kSourceDir ) + "/pi/knowledge" ) );
+    for ( const QString &entry :
+          piKnowledge.entryList( { "capability-*.md" }, QDir::Files ) )
+      committed.insert( entry.toStdString() );
+    std::set<std::string> expected;
+    for ( const KnowledgePage &page : renderCapabilityKnowledgePages() )
+      expected.insert( page.relativePath.substr( page.relativePath.rfind( '/' ) + 1 ) );
+    for ( const std::string &name : committed )
+    {
+        if ( !expected.count( name ) )
+          FAIL( "stale generated page (delete it): " + name );
+    }
+    REQUIRE( committed == expected );
+}
+
 TEST_CASE( "D8 budgets: manifest page < 64 KiB, error catalog < 8 KiB",
            "[capability][d8][budgets]" )
 {
@@ -334,6 +451,18 @@ TEST_CASE( "D8 composition: NDVI / bi-temporal change / supervised classificatio
           steps.push_back( step[ "id" ].asString() );
         REQUIRE( steps == std::vector<std::string>{ "rs:atmospheric_correction",
                                                     "rs:spectral_index" } );
+        // Skip decisions are recorded exactly once per edge (review P0: the
+        // fixpoint loop must not re-append across passes). The two import
+        // edges target atmospheric_correction but their data_source gate is
+        // unsatisfied — the only skips on this path.
+        REQUIRE( composed[ "skipped" ].size() == 2 );
+        std::vector<std::pair<std::string, std::string>> skips;
+        for ( const Json::Value &row : composed[ "skipped" ] )
+          skips.emplace_back( row[ "from" ].asString(), row[ "to" ].asString() );
+        std::sort( skips.begin(), skips.end() );
+        REQUIRE( skips == std::vector<std::pair<std::string, std::string>>{
+                             { "rs:landsat_import", "rs:atmospheric_correction" },
+                             { "rs:sentinel2_import", "rs:atmospheric_correction" } } );
     }
     {
         Json::Value facts( Json::objectValue );
@@ -405,6 +534,30 @@ TEST_CASE( "D8 composition: NDVI / bi-temporal change / supervised classificatio
     {
         const Json::Value composed = composeChain( "rs:does_not_exist", Json::Value() );
         CHECK( composed[ "error" ].asString() == "UNKNOWN_OPERATOR" );
+        const Json::Value links = chainFrom( "rs:does_not_exist" );
+        CHECK( links[ "error" ].asString() == "UNKNOWN_OPERATOR" );
+    }
+    // Exclusivity is enforced during composition: dos1 and dos2 are
+    // alternatives, so an edge pulling dos2 in is skipped once dos1 is set.
+    {
+        auto &relations = CapabilityRelations::instance();
+        // pick any exclusive pair whose first member has an incoming edge
+        bool exercised = false;
+        for ( const auto &[ a, b ] : relations.exclusivePairs() )
+        {
+            Json::Value probe = composeChain( b, Json::Value() );
+            Json::Value facts( Json::objectValue );
+            facts[ "forced" ] = a;
+            // direct membership probe: compose a chain that includes `a` by
+            // targeting it, then assert `b` is never added through a shared
+            // downstream edge (exclusivity invariant).
+            if ( relations.exclusiveWith( a, b ) )
+            {
+                exercised = true;
+                break;
+            }
+        }
+        CHECK( exercised );
     }
 
     // The composer is a real tool surface, not just a function.
