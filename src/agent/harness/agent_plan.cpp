@@ -1,6 +1,7 @@
 // src/agent/harness/agent_plan.cpp
 #include "agent_plan.h"
 
+#include "intent_vocabulary.h"
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/framework/algorithm_descriptor.h"
@@ -49,16 +50,9 @@ bool isKnownIntent( const std::string &intent )
 {
   if ( intent.empty() )
     return true;
-  // Harness 4.0 vocabulary + Platform 5.0 recipe families.
-  static const char *const kIntents[] = {
-    "ndvi", "change", "sar_change", "classify", "phenology",
-    "evi", "savi", "ndre", "ndwi", "mndwi", "ndsi", "nbr", "dnbr", "ndbi", "bsi",
-    "water", "flood", "sar_water", "sar_flood", "sar", "ship",
-    "temporal", "terrain", "accuracy", "qa", "preprocess", "inference",
-    // Harness 9.0 (M2): zonal raster statistics over vector zones.
-    "zonal",
-  };
-  for ( const char *candidate : kIntents )
+  // Harness 4.0 vocabulary + Platform 5.0 recipe families; declared in
+  // intent_vocabulary.h — the single source every mirror keys off.
+  for ( const char *candidate : kIntentVocabulary )
     if ( intent == candidate )
       return true;
   return false;

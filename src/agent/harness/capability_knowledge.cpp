@@ -1,6 +1,8 @@
 // src/agent/harness/capability_knowledge.cpp
 #include "capability_knowledge.h"
 
+#include "intent_vocabulary.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QDirIterator>
@@ -458,16 +460,11 @@ std::vector<std::string> CapabilityKnowledge::validateEntry( const Json::Value &
         problems.push_back( "'" + field + "' entries must be strings" );
   };
 
-  // intents: closed vocabulary (mirrors isKnownIntent; the drift test pins
-  // the agreement so this local table cannot silently diverge).
-  static const std::set<std::string> kIntents = {
-    "ndvi", "change", "sar_change", "classify", "phenology",
-    "evi", "savi", "ndre", "ndwi", "mndwi", "ndsi", "nbr", "dnbr", "ndbi", "bsi",
-    "water", "flood", "sar_water", "sar_flood", "sar", "ship",
-    "temporal", "terrain", "accuracy", "qa", "preprocess", "inference",
-    // Harness 9.0 (M2): zonal raster statistics over vector zones.
-    "zonal",
-  };
+  // intents: closed vocabulary (built from the shared intent_vocabulary.h —
+  // the same source isKnownIntent() reads; the drift test pins the agreement).
+  static const std::set<std::string> kIntents(
+    kIntentVocabulary,
+    kIntentVocabulary + sizeof( kIntentVocabulary ) / sizeof( kIntentVocabulary[0] ) );
   checkStringArray( entry.get( "intents", Json::Value() ), "intents" );
   for ( const Json::Value &candidate : entry.get( "intents", Json::Value( Json::arrayValue ) ) )
     if ( candidate.isString() && !kIntents.count( candidate.asString() ) )
