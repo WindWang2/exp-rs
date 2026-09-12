@@ -1,7 +1,9 @@
 // lab_run_recorder.cpp — see lab_run_recorder.h.
 #include "lab_run_recorder.h"
 
+#include "checkpoint_evidence.h"
 #include "execution_event_conversion.h"
+#include "lab_report.h"
 
 #include "workflow/workflow_checkpoint.h"
 #include "workflow/workflow_run_coordinator.h"
@@ -108,8 +110,9 @@ bool LabRunRecorder::enable( const QString &experimentDbPath, const QString &exp
         if ( run && !workflow::isTerminalRunState( run->state() ) )
             live.insert( QString::fromStdString( run->runId() ) );
     }
-    const auto decisions =
-        m_bridge->reconcileStale( live, {} /* no checkpoint evidence source here */ );
+    // Same checkpoint-evidence policy as the monitor: provably dead
+    // executions close truthfully; unanswerable ones are reported only.
+    const auto decisions = m_bridge->reconcileStale( live, checkpointEvidenceLookup( m_coordinator ) );
     for ( const auto &decision : decisions )
     {
         qWarning( "lab recording: stale reconciliation %s (%s): %s",
@@ -257,7 +260,7 @@ void LabRunRecorder::onRunStateChanged( const QString &runId, const QString &wor
         }
         QJsonArray redacted;
         for ( const QJsonValue &record : trail )
-            redacted.append( RunEnvironment::redactSecretKeys( record.toObject() ) );
+            redacted.append( deepRedactSecretKeys( record.toObject() ) );
         event.extra.insert( QStringLiteral( "operationTrail" ), redacted );
     }
 

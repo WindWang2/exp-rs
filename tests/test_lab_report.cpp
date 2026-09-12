@@ -50,12 +50,15 @@ namespace
 constexpr const char *kPlantedToken = "SICNU-PLANTED-TOKEN-7f3a";
 constexpr const char *kPlantedPassword = "hunter2-secret";
 
+// Mirrors RSOperationLogger::toJson()'s ACTUAL vocabulary ("operator",
+// "startTime", "endTime" — rs_operation_logger.cpp), so the attribution
+// tests exercise what production feeds the builder, not an idealized shape.
 QJsonObject operationRecord( const QString &operatorName, const QDateTime &started,
                              double durationMs, bool success, QJsonObject params = {},
                              QJsonObject result = {} )
 {
     QJsonObject record;
-    record.insert( QStringLiteral( "operatorName" ), operatorName );
+    record.insert( QStringLiteral( "operator" ), operatorName );
     record.insert( QStringLiteral( "parameters" ), params );
     record.insert( QStringLiteral( "result" ), result );
     record.insert( QStringLiteral( "success" ), success );
@@ -65,9 +68,8 @@ QJsonObject operationRecord( const QString &operatorName, const QDateTime &start
         record.insert( QStringLiteral( "errorMessage" ),
                        QStringLiteral( "operator exploded" ) );
     }
-    record.insert( QStringLiteral( "startTimeIso" ),
-                   started.toString( Qt::ISODateWithMs ) );
-    record.insert( QStringLiteral( "endTimeIso" ),
+    record.insert( QStringLiteral( "startTime" ), started.toString( Qt::ISODateWithMs ) );
+    record.insert( QStringLiteral( "endTime" ),
                    started.addMSecs( static_cast<qint64>( durationMs ) )
                        .toString( Qt::ISODateWithMs ) );
     record.insert( QStringLiteral( "durationMs" ), durationMs );
@@ -716,6 +718,84 @@ struct RecorderFixture
 };
 
 } // namespace
+
+TEST_CASE( "secrets nested in arrays-of-arrays do not survive", "[lab_report][secrets]" )
+{
+    ReportFixture fx;
+    LabReportRequest request = fx.baseRequest();
+
+    // redactSecretKeys recurses objects and one array level; the deep pass
+    // must reach objects behind NESTED arrays under innocuous keys.
+    QJsonObject inner;
+    inner.insert( QStringLiteral( "api_key" ), QString::fromUtf8( kPlantedToken ) );
+    QJsonArray outer;
+    outer.append( QJsonValue( QJsonArray{ inner } ) );
+    QJsonObject params;
+    params.insert( QStringLiteral( "layers" ), outer );
+    request.operationTrail.append(
+        operationRecord( QStringLiteral( "rs:mosaic" ), fx.started.addSecs( 3 ), 40.0, true,
+                         params ) );
+
+    LabReportBuilder builder( fx.experiments, nullptr );
+    const QJsonObject document = builder.build( request ).value();
+    const QString json = QString::fromUtf8( QJsonDocument( document ).toJson() );
+    const QString md = labReportMarkdown( document ).value();
+    const QString html = labReportHtml( document ).value();
+    for ( const QString *rendering : { &json, &md, &html } )
+        CHECK_FALSE( rendering->contains( QString::fromUtf8( kPlantedToken ) ) );
+}
+
+TEST_CASE( "lab_report: a report exported after a restart reads the trail from stored evidence",
+           "[lab_report][recorder][e2e]" )
+{
+    ReportFixture fx;
+    const QDateTime started = QDateTime::currentDateTimeUtc().addSecs( -30 );
+    // A separate experiment whose run carries the trail the recorder would
+    // have persisted inside its workflow evidence. The live-session logger
+    // is empty here — exactly the "export after an app restart" shape.
+    Experiment experiment;
+    experiment.setExperimentId( QStringLiteral( "lab-exp-stored" ) );
+    experiment.setName( QStringLiteral( "stored lab" ) );
+    REQUIRE( fx.experiments.upsertExperiment( experiment ).has_value() );
+    ExperimentRun run;
+    run.setRunId( QStringLiteral( "run-stored" ) );
+    run.setExperimentId( QStringLiteral( "lab-exp-stored" ) );
+    run.setAlgorithmId( QStringLiteral( "rs:classify" ) );
+    run.setStartedAtUtc( started );
+    run.setFinishedAtUtc( started.addSecs( 20 ) );
+    run.setStatus( RunStatus::Running );
+    REQUIRE( fx.experiments.upsertRun( run ).has_value() );
+
+    QJsonObject trailRecord;
+    trailRecord.insert( QStringLiteral( "operator" ), QStringLiteral( "rs:stored" ) );
+    trailRecord.insert( QStringLiteral( "startTime" ),
+                        started.addSecs( 5 ).toString( Qt::ISODateWithMs ) );
+    trailRecord.insert( QStringLiteral( "endTime" ),
+                        started.addSecs( 15 ).toString( Qt::ISODateWithMs ) );
+    trailRecord.insert( QStringLiteral( "success" ), true );
+    QJsonObject evidence;
+    evidence.insert( QStringLiteral( "extra" ),
+                     QJsonObject{ { QStringLiteral( "operationTrail" ),
+                                    QJsonArray{ trailRecord } } } );
+    QJsonObject metrics;
+    metrics.insert( QStringLiteral( "workflow" ), evidence );
+    run.setMetrics( metrics );
+    run.setStatus( RunStatus::Completed );
+    REQUIRE( fx.experiments.upsertRun( run ).has_value() );
+
+    LabReportRequest request = fx.baseRequest();
+    request.labId = QStringLiteral( "lab-exp-stored" ); // operationTrail left EMPTY
+    LabReportBuilder builder( fx.experiments, nullptr );
+    const QJsonObject document = builder.build( request ).value();
+    const QJsonArray steps = document.value( QStringLiteral( "steps" ) ).toArray();
+    REQUIRE( steps.size() == 1 );
+    CHECK( steps.at( 0 ).toObject().value( QStringLiteral( "operator" ) ).toString()
+           == QLatin1String( "rs:stored" ) );
+    CHECK( steps.at( 0 ).toObject().value( QStringLiteral( "attribution" ) )
+               .toObject()
+               .value( QStringLiteral( "runId" ) )
+               .toString() == QLatin1String( "run-stored" ) );
+}
 
 TEST_CASE( "lab_report: recorder auto-registers a tracked pipeline as an experiment run",
            "[lab_report][recorder]" )

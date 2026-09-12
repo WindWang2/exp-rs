@@ -127,6 +127,8 @@ Result<QString> labReportMarkdown( const QJsonObject &document )
               run.value( QStringLiteral( "datasetFingerprint" ) ) },
             { QStringLiteral( "splitManifestId" ),
               run.value( QStringLiteral( "splitManifestId" ) ) },
+            { QStringLiteral( "splitFingerprint" ),
+              run.value( QStringLiteral( "splitFingerprint" ) ) },
             { QStringLiteral( "modelId" ), run.value( QStringLiteral( "modelId" ) ) },
             { QStringLiteral( "seed" ), run.value( QStringLiteral( "seed" ) ) },
         };

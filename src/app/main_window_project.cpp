@@ -389,16 +389,24 @@ void QgisDesktopWindow::exportLabReport()
     sicnu::experiment::ExperimentStore *store =
         recorder && recorder->store() ? recorder->store() : nullptr;
 
-    if ( logger.recordCount() == 0 && ( !store || recorder->recordedExecutionRefs().isEmpty() ) )
+    const bool storeHasRuns =
+        store && store->listRuns( recorder->experimentId(), QString(), QString(), 0, 1 )
+                     .value()
+                     .second
+                     .size() > 0;
+    if ( logger.recordCount() == 0 && !storeHasRuns )
     {
         QMessageBox::information( this, tr( "Export Lab Report" ),
                                   tr( "No operations have been recorded yet." ) );
         return;
     }
     // The report anchors on registered experiment runs (lineage + replay
-    // need a run identity). With auto-recording opted out there is no run to
-    // anchor to — say so instead of exporting an unanchored trail.
-    if ( !store || recorder->recordedExecutionRefs().isEmpty() )
+    // need a run identity). The store — not this session's recorder memory —
+    // decides: runs recorded by a previous session export fine (the trail is
+    // read back from the run evidence). With auto-recording opted out there
+    // is no store to anchor to — say so instead of exporting an unanchored
+    // trail.
+    if ( !store || !storeHasRuns )
     {
         QMessageBox::information(
             this, tr( "Export Lab Report" ),

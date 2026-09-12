@@ -65,7 +65,7 @@ QJsonObject runToJson( const ExperimentRun &run )
     json.insert( QStringLiteral( "algorithmId" ), run.algorithmId() );
     if ( !run.algorithmVersion().isEmpty() )
         json.insert( QStringLiteral( "algorithmVersion" ), run.algorithmVersion() );
-    json.insert( QStringLiteral( "parameters" ), RunEnvironment::redactSecretKeys( run.parameters() ) );
+    json.insert( QStringLiteral( "parameters" ), deepRedactSecretKeys( run.parameters() ) );
     if ( !run.datasetVersionId().isEmpty() )
         json.insert( QStringLiteral( "datasetVersionId" ), run.datasetVersionId() );
     if ( !run.datasetFingerprint().isEmpty() )
@@ -109,12 +109,46 @@ QJsonObject runToJson( const ExperimentRun &run )
     // record time (ADR 0143).
     const QJsonObject workflow = run.metrics().value( QStringLiteral( "workflow" ) ).toObject();
     if ( !workflow.isEmpty() )
-        json.insert( QStringLiteral( "workflow" ), RunEnvironment::redactSecretKeys( workflow ) );
+        json.insert( QStringLiteral( "workflow" ), deepRedactSecretKeys( workflow ) );
 
     return json;
 }
 
 } // namespace
+
+// --- deepRedactSecretKeys -------------------------------------------------------
+
+namespace
+{
+
+QJsonValue deepRedactValue( const QJsonValue &value )
+{
+    if ( value.isObject() )
+        return deepRedactSecretKeys( value.toObject() );
+    if ( value.isArray() )
+    {
+        QJsonArray out;
+        for ( const QJsonValue &item : value.toArray() )
+            out.append( deepRedactValue( item ) );
+        return out;
+    }
+    return value;
+}
+
+} // namespace
+
+QJsonObject deepRedactSecretKeys( const QJsonObject &json )
+{
+    // redactSecretKeys matches this object's keys and recurses its objects
+    // and ONE array level; the walk then re-enters everything that remains —
+    // arrays nested inside arrays — so no object at any depth is left
+    // un-redacted. Both passes are idempotent (masking *** stays ***).
+    const QJsonObject redacted = RunEnvironment::redactSecretKeys( json );
+    QJsonObject out;
+    for ( auto it = redacted.constBegin(); it != redacted.constEnd(); ++it )
+        out.insert( it.key(), deepRedactValue( it.value() ) );
+    return out;
+}
 
 // --- LabGradeEmbedding ---------------------------------------------------------
 
@@ -127,7 +161,8 @@ QJsonObject LabGradeEmbedding::toJson() const
         json.insert( QStringLiteral( "gradingRef" ), gradingRef );
         if ( !gradingRefDetails.isEmpty() )
             json.insert( QStringLiteral( "gradingRefDetails" ), gradingRefDetails );
-        json.insert( QStringLiteral( "inline" ), inlineResult );
+        // The inline copy rides the export boundary: redacted like the rest.
+        json.insert( QStringLiteral( "inline" ), deepRedactSecretKeys( inlineResult ) );
     }
     else
     {
@@ -231,7 +266,8 @@ Result<QJsonObject> LabReportBuilder::build( const LabReportRequest &request ) c
         return Result<QJsonObject>::failure( primary.diagnostics() );
 
     QJsonArray warnings;
-    const QJsonArray steps = buildSteps( request, runs );
+    const QJsonArray trail = collectTrail( request, runs );
+    const QJsonArray steps = buildSteps( trail, runs );
 
     // Statistics: the run's metric record verbatim (protocol + documents),
     // one entry per run in the (already deterministic) run order.
@@ -239,7 +275,7 @@ Result<QJsonObject> LabReportBuilder::build( const LabReportRequest &request ) c
     for ( const ExperimentRun &run : runs )
     {
         if ( const auto record = m_store->metricRecordForRun( run.runId() ) )
-            statistics.append( record->toJson() );
+            statistics.append( deepRedactSecretKeys( record->toJson() ) );
     }
 
     const QJsonArray thumbnails = buildThumbnails( request, warnings );
@@ -324,6 +360,29 @@ Result<QJsonObject> LabReportBuilder::build( const LabReportRequest &request ) c
     return Result<QJsonObject>::success( document );
 }
 
+QJsonArray LabReportBuilder::collectTrail( const LabReportRequest &request,
+                                           const QVector<ExperimentRun> &runs ) const
+{
+    // Live-session trail first; when the export happens without one (app
+    // restarted after the lab ran), the trail recorded INSIDE each run's
+    // evidence is the same truth — read back, never re-derived.
+    if ( !request.operationTrail.isEmpty() )
+        return request.operationTrail;
+    QJsonArray trail;
+    for ( const ExperimentRun &run : runs )
+    {
+        const QJsonObject evidence =
+            run.metrics().value( QStringLiteral( "workflow" ) ).toObject();
+        const QJsonArray recorded = evidence.value( QStringLiteral( "extra" ) )
+                                        .toObject()
+                                        .value( QStringLiteral( "operationTrail" ) )
+                                        .toArray();
+        for ( const QJsonValue &record : recorded )
+            trail.append( record );
+    }
+    return trail;
+}
+
 Result<ExperimentRun> LabReportBuilder::resolvePrimaryRun(
     const LabReportRequest &request, const QVector<ExperimentRun> &runs ) const
 {
@@ -351,7 +410,7 @@ Result<ExperimentRun> LabReportBuilder::resolvePrimaryRun(
     return Result<ExperimentRun>::success( runs.last() );
 }
 
-QJsonArray LabReportBuilder::buildSteps( const LabReportRequest &request,
+QJsonArray LabReportBuilder::buildSteps( const QJsonArray &operationTrail,
                                          const QVector<ExperimentRun> &runs ) const
 {
     // Operator-trail records, redacted, bounded, and joined to runs by the
@@ -361,19 +420,31 @@ QJsonArray LabReportBuilder::buildSteps( const LabReportRequest &request,
     struct IndexedStep
     {
         QJsonObject step;
-        QString startTimeIso;
+        QDateTime startedAt;
         int originalIndex = 0;
     };
     QVector<IndexedStep> indexed;
-    indexed.reserve( request.operationTrail.size() );
+    indexed.reserve( operationTrail.size() );
     int index = 0;
-    for ( const QJsonValue &value : request.operationTrail )
+    for ( const QJsonValue &value : operationTrail )
     {
-        const QJsonObject record = RunEnvironment::redactSecretKeys( value.toObject() );
+        const QJsonObject record = deepRedactSecretKeys( value.toObject() );
+        // The logger's JSON vocabulary is "operator"/"startTime"/"endTime"
+        // (rs_operation_logger.cpp toJson); accept the long-form aliases
+        // too, since OperationRecord spells them differently in the header.
+        const QString operatorName =
+            record.value( QStringLiteral( "operator" ) ).toString().isEmpty()
+                ? record.value( QStringLiteral( "operatorName" ) ).toString()
+                : record.value( QStringLiteral( "operator" ) ).toString();
+        const QString startTime = record.value( QStringLiteral( "startTime" ) ).toString().isEmpty()
+                                      ? record.value( QStringLiteral( "startTimeIso" ) ).toString()
+                                      : record.value( QStringLiteral( "startTime" ) ).toString();
+        const QString endTime = record.value( QStringLiteral( "endTime" ) ).toString().isEmpty()
+                                    ? record.value( QStringLiteral( "endTimeIso" ) ).toString()
+                                    : record.value( QStringLiteral( "endTime" ) ).toString();
         QJsonObject step;
         step.insert( QStringLiteral( "index" ), index );
-        step.insert( QStringLiteral( "operator" ),
-                     record.value( QStringLiteral( "operatorName" ) ).toString() );
+        step.insert( QStringLiteral( "operator" ), operatorName );
         step.insert( QStringLiteral( "params" ),
                      record.value( QStringLiteral( "parameters" ) ) );
         step.insert( QStringLiteral( "result" ), record.value( QStringLiteral( "result" ) ) );
@@ -386,9 +457,7 @@ QJsonArray LabReportBuilder::buildSteps( const LabReportRequest &request,
             record.value( QStringLiteral( "errorMessage" ) ).toString();
         if ( !errorMessage.isEmpty() )
             step.insert( QStringLiteral( "errorMessage" ), errorMessage );
-        const QString startTime = record.value( QStringLiteral( "startTimeIso" ) ).toString();
         step.insert( QStringLiteral( "startedAtIso" ), startTime );
-        const QString endTime = record.value( QStringLiteral( "endTimeIso" ) ).toString();
         step.insert( QStringLiteral( "endedAtIso" ), endTime );
         step.insert( QStringLiteral( "durationMs" ),
                      record.value( QStringLiteral( "durationMs" ) ).toDouble( 0.0 ) );
@@ -440,15 +509,21 @@ QJsonArray LabReportBuilder::buildSteps( const LabReportRequest &request,
         }
         step.insert( QStringLiteral( "attribution" ), attribution );
 
-        indexed.append( IndexedStep{ step, startTime, index } );
+        indexed.append( IndexedStep{ step, started, index } );
         ++index;
     }
 
+    // Chronological by PARSED time (lexicographic ISO compare misorders
+    // "…:00.500Z" vs "…:01Z"), stable on the original record order.
     std::stable_sort( indexed.begin(), indexed.end(),
                       []( const IndexedStep &a, const IndexedStep &b )
                       {
-                          if ( a.startTimeIso != b.startTimeIso )
-                              return a.startTimeIso < b.startTimeIso;
+                          const bool av = a.startedAt.isValid();
+                          const bool bv = b.startedAt.isValid();
+                          if ( av != bv )
+                              return av; // parseable times first, unparsed keep tail order
+                          if ( av && a.startedAt != b.startedAt )
+                              return a.startedAt < b.startedAt;
                           return a.originalIndex < b.originalIndex;
                       } );
 

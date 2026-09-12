@@ -46,6 +46,14 @@ namespace sicnu::experiment
 
 inline constexpr const char *kLabReportSchemaId = "sicnu.labreport.v1";
 
+/// Depth-complete secret pass for export (#789): RunEnvironment::
+/// redactSecretKeys recurses objects and ONE array level, but stops at
+/// arrays nested inside arrays — exactly where a trail parameter can hide a
+/// credential under an innocuous key. This walks the whole structure and
+/// applies the platform's key-matching redaction to EVERY object reached,
+/// at any depth, through any number of array layers.
+QJsonObject deepRedactSecretKeys( const QJsonObject &json );
+
 /// How steps[] were joined to runs[] (declared in the document, never
 /// implied — the join is an attribution, not a recorded fact).
 inline constexpr const char *kLabStepAttributionPolicy = "time-window+operator-name";
@@ -113,6 +121,9 @@ struct LabReportRequest
     QString generatedAtUtc;
     /// Operation-trail snapshot (RSOperationLogger records, Qt JSON array).
     /// Redacted + ordered by the builder; attributed to runs by policy.
+    /// When EMPTY, the builder falls back to the trail recorded in each
+    /// run's stored workflow evidence — so a report exported after an app
+    /// restart is as complete as the live-session one.
     QJsonArray operationTrail;
     QVector<LabReportThumbnail> thumbnails;
     LabGradeEmbedding grade = LabGradeEmbedding::unavailable();
@@ -144,7 +155,9 @@ class LabReportBuilder
   private:
     Result<ExperimentRun> resolvePrimaryRun( const LabReportRequest &request,
                                              const QVector<ExperimentRun> &runs ) const;
-    QJsonArray buildSteps( const LabReportRequest &request,
+    QJsonArray collectTrail( const LabReportRequest &request,
+                             const QVector<ExperimentRun> &runs ) const;
+    QJsonArray buildSteps( const QJsonArray &operationTrail,
                            const QVector<ExperimentRun> &runs ) const;
     QJsonObject buildLineage( const LabReportRequest &request,
                               const ExperimentRun &primaryRun ) const;

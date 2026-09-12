@@ -10,6 +10,8 @@ qt_add_library(sicnu_experiment_bridge STATIC
   workflow_experiment_adapter.h
   execution_event_conversion.cpp
   execution_event_conversion.h
+  checkpoint_evidence.cpp
+  checkpoint_evidence.h
   lab_run_recorder.cpp
   lab_run_recorder.h
   lab_report.cpp
