@@ -64,6 +64,7 @@ target_link_libraries(sicnu_geo_rs_cli PRIVATE
     Sicnu::data
     Sicnu::dataset
     Sicnu::experiment
+    Sicnu::experiment_bridge
     SQLite::SQLite3
     Sicnu::Geospatial
     sicnu_plugins_framework

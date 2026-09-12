@@ -608,6 +608,9 @@ QJsonObject MetricRecord::toJson() const
     json.insert( QStringLiteral( "protocol" ), protocol.toJson() );
     json.insert( QStringLiteral( "metrics" ), metrics );
     json.insert( QStringLiteral( "metrics_hash" ), metricsHash );
+    // M4 metrics schema versioning: readers refuse foreign layouts instead
+    // of silently reinterpreting documents (missing key = v1-before-versioning).
+    json.insert( QStringLiteral( "metrics_schema_version" ), metricsSchemaVersion );
     return json;
 }
 
@@ -623,6 +626,8 @@ Result<MetricRecord> MetricRecord::fromJson( const QJsonObject &json )
     record.protocol = protocol.value();
     record.metrics = json.value( QStringLiteral( "metrics" ) ).toObject();
     record.metricsHash = json.value( QStringLiteral( "metrics_hash" ) ).toString();
+    record.metricsSchemaVersion =
+        json.value( QStringLiteral( "metrics_schema_version" ) ).toInteger( 1 );
     if ( record.runId.isEmpty() )
     {
         return ResultT::failure( Diagnostic{ QStringLiteral( "evaluation.invalid" ),

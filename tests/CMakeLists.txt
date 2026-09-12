@@ -2032,6 +2032,53 @@ target_link_libraries(test_sample_label_annotation PRIVATE Sicnu::dataset SQLite
 sicnu_add_test(test_split_leakage TIMEOUT 120)
 target_link_libraries(test_split_leakage PRIVATE Sicnu::dataset SQLite::SQLite3)
 
+# MLOps 9.0 split-boundary validation: #875 regression, total config
+# validation (NaN/Inf/negative/overflow), degenerate-fold refusals,
+# spatiotemporal_block, bounded generation summaries.
+sicnu_add_test(test_mlops9_split TIMEOUT 120)
+target_link_libraries(test_mlops9_split PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# MLOps 9.0 dataset version DAG: parent validation, ancestor walks with
+# corruption detection, derive/fork; sample temporal-validity governance.
+sicnu_add_test(test_mlops9_version_dag TIMEOUT 120)
+target_link_libraries(test_mlops9_version_dag PRIVATE Sicnu::dataset SQLite::SQLite3)
+
+# MLOps 9.0 evidence/matrix/replay/promotion over a real ExperimentStore.
+sicnu_add_test(test_mlops9_evidence TIMEOUT 300)
+target_link_libraries(test_mlops9_evidence PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+
+# MLOps 9.0 scale & durability: 100k-run metadata stress, concurrent
+# readers/writer, corruption refusal, injected commit-fault recovery.
+# RUN_SERIAL: pays 100k single-row transactions by design.
+# RUN_SERIAL TRUE is forwarded through sicnu_discover_tests as a real ctest
+# test property (a target-level RUN_SERIAL would be a no-op for discovered
+# tests — review round 1).
+sicnu_add_test(test_mlops9_scale TIMEOUT 900 RUN_SERIAL TRUE)
+target_link_libraries(test_mlops9_scale PRIVATE
+  Sicnu::experiment Sicnu::dataset SQLite::SQLite3 sicnu_runtime)
+
+# MLOps 9.0 CLI auto-recording E2E: real sicnu_geo_rs_cli subprocess with
+# --experiment-record; POSIX spawn (popen) like test_cli_commands_json.
+if(NOT WIN32)
+add_executable(test_mlops9_cli_record test_mlops9_cli_record.cpp)
+target_link_libraries(test_mlops9_cli_record PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::experiment
+  Sicnu::dataset
+  GDAL::GDAL
+  SQLite::SQLite3
+)
+target_include_directories(test_mlops9_cli_record PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_mlops9_cli_record PRIVATE
+  SICNU_TEST_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+sicnu_discover_tests(test_mlops9_cli_record TIMEOUT 300)
+endif()
+
 # Foundation 5.0 experiment/run identity, metrics, comparison, lineage and
 # reproduction bundle (ADR 0137/0138, goal §23-§31/§51).
 sicnu_add_test(test_experiment_evaluation TIMEOUT 180)

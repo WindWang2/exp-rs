@@ -37,6 +37,29 @@ bool ratioSumValid( double train, double validation, double test )
     return std::abs( train + validation + test - 1.0 ) <= 1e-9;
 }
 
+/// #875 class: a non-finite parameter must be a validation failure, never
+/// an input to arithmetic (`NaN <= 0.0` is false and would otherwise slip
+/// through every `<= 0` guard into the engines).
+bool finitePositive( double value )
+{
+    return std::isfinite( value ) && value > 0.0;
+}
+
+/// Grid geometry shared by the spatial methods. `qint64(floor(x))` is
+/// undefined behavior for quotients outside the integer range; a tiny (but
+/// validated positive) block size would otherwise reach it. The 2^62 cap
+/// leaves room for the floor and keeps every representable quotient exact.
+constexpr double kMaxBlockIndex = 4611686018427387904.0; // 2^62
+
+bool blockIndexValid( double center, double blockSize, qint64 &index )
+{
+    const double quotient = center / blockSize;
+    if ( !std::isfinite( quotient ) || std::fabs( quotient ) >= kMaxBlockIndex )
+        return false;
+    index = qint64( std::floor( quotient ) );
+    return true;
+}
+
 struct IdOrder
 {
     bool operator()( const SplitInput &a, const SplitInput &b ) const
@@ -260,9 +283,10 @@ QVector<SplitAssignment> walkGroupsInOrder( const QStringList &order,
     }
 
     // Degenerate repair: a non-zero-ratio role that ended up EMPTY steals the
-    // LAST group of the role with the largest overshoot (deterministic, keeps
-    // every group atomic). One giant group still refuses via the caller's
-    // guard when nothing can be donated.
+    // group of the role with the largest overshoot; backward iteration with
+    // a >= tie-break resolves ties to the EARLIEST group (deterministic,
+    // keeps every group atomic). One giant group still refuses via the
+    // caller's guard when nothing can be donated.
     auto roleCount = [&]( SplitRole role ) {
         int n = 0;
         for ( const GroupInfo &info : groups )
@@ -370,6 +394,79 @@ QString groupKeyOf( const SplitInput &input, SplitMethod method )
     }
 }
 
+/// Bounded generation summary (9.0): totals, per-role counts, per-fold
+/// counts (fold methods), and — plain methods only — the per-role class
+/// distribution. Truncation beyond kSplitSummaryMaxClasses distinct codes
+/// per role is explicit, never silent.
+QJsonObject buildSplitSummary( const QVector<SplitAssignment> &assignments,
+                               const QVector<SplitInput> &inputs,
+                               const SplitConfig &config )
+{
+    QHash<QString, QString> classOf;
+    classOf.reserve( inputs.size() );
+    for ( const SplitInput &input : inputs )
+        classOf.insert( input.sampleId, input.classCode );
+
+    int roleCounts[4] = { 0, 0, 0, 0 }; // Train/Validation/Test/Unassigned
+    QMap<int, int> foldCounts;
+    QMap<QString, QMap<QString, int>> classDistribution;
+    bool truncated = false;
+
+    for ( const SplitAssignment &assignment : assignments )
+    {
+        const int role = roleIndex( assignment.role );
+        if ( role >= 0 && role < 4 )
+            ++roleCounts[role];
+        if ( assignment.fold >= 0 )
+            ++foldCounts[assignment.fold];
+        if ( assignment.fold < 0 )
+        {
+            auto &perRole = classDistribution[splitRoleToString( assignment.role )];
+            if ( perRole.size() < kSplitSummaryMaxClasses ||
+                 perRole.contains( classOf.value( assignment.sampleId ) ) )
+            {
+                ++perRole[classOf.value( assignment.sampleId )];
+            }
+            else
+            {
+                truncated = true;
+            }
+        }
+    }
+
+    QJsonObject summary;
+    summary.insert( QStringLiteral( "total" ), assignments.size() );
+    QJsonObject roles;
+    roles.insert( QStringLiteral( "train" ), roleCounts[0] );
+    roles.insert( QStringLiteral( "validation" ), roleCounts[1] );
+    roles.insert( QStringLiteral( "test" ), roleCounts[2] );
+    roles.insert( QStringLiteral( "unassigned" ), roleCounts[3] );
+    summary.insert( QStringLiteral( "roles" ), roles );
+    if ( SplitEngine::methodUsesFolds( config.method ) )
+    {
+        QJsonObject folds;
+        for ( auto it = foldCounts.constBegin(); it != foldCounts.constEnd(); ++it )
+            folds.insert( QString::number( it.key() ), it.value() );
+        summary.insert( QStringLiteral( "folds" ), folds );
+    }
+    if ( !classDistribution.isEmpty() )
+    {
+        QJsonObject distribution;
+        for ( auto roleIt = classDistribution.constBegin();
+              roleIt != classDistribution.constEnd(); ++roleIt )
+        {
+            QJsonObject codes;
+            for ( auto codeIt = roleIt->constBegin(); codeIt != roleIt->constEnd(); ++codeIt )
+                codes.insert( codeIt.key(), codeIt.value() );
+            distribution.insert( roleIt.key(), codes );
+        }
+        summary.insert( QStringLiteral( "class_distribution" ), distribution );
+    }
+    if ( truncated )
+        summary.insert( QStringLiteral( "class_distribution_truncated" ), true );
+    return summary;
+}
+
 } // namespace
 
 QJsonObject SplitConfig::toJson() const
@@ -389,6 +486,8 @@ QJsonObject SplitConfig::toJson() const
     }
     if ( bufferDistance != 0.0 )
         json.insert( QStringLiteral( "buffer_distance" ), bufferDistance );
+    if ( temporalWindowMs != 0 )
+        json.insert( QStringLiteral( "temporal_window_ms" ), temporalWindowMs );
     if ( !regionKey.isEmpty() )
         json.insert( QStringLiteral( "region_key" ), regionKey );
     if ( !extra.isEmpty() )
@@ -422,6 +521,8 @@ sicnu::data::Result<SplitConfig> SplitConfig::fromJson( const QJsonObject &json 
     config.blockSizeX = json.value( QStringLiteral( "block_size_x" ) ).toDouble();
     config.blockSizeY = json.value( QStringLiteral( "block_size_y" ) ).toDouble();
     config.bufferDistance = json.value( QStringLiteral( "buffer_distance" ) ).toDouble();
+    config.temporalWindowMs =
+        json.value( QStringLiteral( "temporal_window_ms" ) ).toInteger();
     config.regionKey = json.value( QStringLiteral( "region_key" ) ).toString();
     config.extra = json.value( QStringLiteral( "extra" ) ).toObject();
     const auto validated = config.validate();
@@ -433,20 +534,52 @@ sicnu::data::Result<SplitConfig> SplitConfig::fromJson( const QJsonObject &json 
 sicnu::data::Result<void> SplitConfig::validate() const
 {
     using Result = sicnu::data::Result<void>;
+    // Ratios are finite-checked for EVERY method (fail-conservative: garbage
+    // in a config is a defect even where a fold method ignores the values).
+    const double ratios[3] = { trainRatio, validationRatio, testRatio };
+    const char *names[3] = { "train", "validation", "test" };
+    for ( int role = 0; role < 3; ++role )
+    {
+        if ( !std::isfinite( ratios[role] ) )
+            return Result::failure( splitError(
+                QStringLiteral( "%1 ratio must be a finite number" ).arg( names[role] ) ) );
+        if ( ratios[role] < 0.0 )
+            return Result::failure( splitError(
+                QStringLiteral( "%1 ratio must be >= 0" ).arg( names[role] ) ) );
+    }
     if ( SplitEngine::methodUsesFolds( method ) )
     {
         if ( foldCount < 2 )
             return Result::failure( splitError( QStringLiteral( "fold count must be >= 2" ) ) );
     }
-    else if ( !ratioSumValid( trainRatio, validationRatio, testRatio ) )
+    else
     {
-        return Result::failure( splitError( QStringLiteral( "train/val/test ratios must sum to 1" ) ) );
+        // Ratio methods drive slot arithmetic: a negative ratio used to pass
+        // the sum check and be silently treated as zero; the sum itself must
+        // still be 1.
+        if ( !ratioSumValid( trainRatio, validationRatio, testRatio ) )
+        {
+            return Result::failure( splitError( QStringLiteral( "train/val/test ratios must sum to 1" ) ) );
+        }
     }
-    if ( ( method == SplitMethod::SpatialBlock || method == SplitMethod::SpatialKFold ) &&
-         ( blockSizeX <= 0.0 || blockSizeY <= 0.0 ) )
-        return Result::failure( splitError( QStringLiteral( "spatial block methods require positive block sizes" ) ) );
-    if ( method == SplitMethod::SpatialBuffer && bufferDistance <= 0.0 )
-        return Result::failure( splitError( QStringLiteral( "spatial_buffer requires a buffer distance" ) ) );
+    // Spatial grid methods (#875): the block size reaches divisor
+    // arithmetic, so it must be finite and strictly positive — zero
+    // produced division by zero + float-to-int UB, NaN passed `<= 0`
+    // checks and poisoned every block index.
+    const bool usesSpatialGrid = method == SplitMethod::SpatialBlock ||
+                                 method == SplitMethod::SpatialKFold ||
+                                 method == SplitMethod::SpatioTemporalBlock;
+    if ( usesSpatialGrid && ( !finitePositive( blockSizeX ) || !finitePositive( blockSizeY ) ) )
+        return Result::failure( splitError(
+            QStringLiteral( "%1 requires finite positive block sizes" )
+                .arg( splitMethodToString( method ) ) ) );
+    if ( method == SplitMethod::SpatialBuffer &&
+         !finitePositive( bufferDistance ) )
+        return Result::failure( splitError(
+            QStringLiteral( "spatial_buffer requires a finite positive buffer distance" ) ) );
+    if ( method == SplitMethod::SpatioTemporalBlock && temporalWindowMs <= 0 )
+        return Result::failure( splitError(
+            QStringLiteral( "spatiotemporal_block requires a positive temporal_window_ms" ) ) );
     if ( method == SplitMethod::LeaveOneRegionOut && regionKey.isEmpty() )
         return Result::failure( splitError( QStringLiteral( "leave_one_region_out requires region_key" ) ) );
     return Result::success();
@@ -522,6 +655,8 @@ QJsonObject SplitManifest::toJson() const
     json.insert( QStringLiteral( "assignments" ), assignmentArray );
     if ( !m_leakageSummary.isEmpty() )
         json.insert( QStringLiteral( "leakage_summary" ), m_leakageSummary );
+    if ( !m_summary.isEmpty() )
+        json.insert( QStringLiteral( "summary" ), m_summary );
     if ( m_createdAtUtc.isValid() )
         json.insert( QStringLiteral( "created_at_utc" ),
                      m_createdAtUtc.toString( Qt::ISODateWithMs ) );
@@ -589,6 +724,7 @@ sicnu::data::Result<SplitManifest> SplitManifest::fromJson( const QJsonObject &j
 
     manifest.m_leakageSummary =
         json.value( QStringLiteral( "leakage_summary" ) ).toObject();
+    manifest.m_summary = json.value( QStringLiteral( "summary" ) ).toObject();
     manifest.m_createdAtUtc = QDateTime::fromString(
         json.value( QStringLiteral( "created_at_utc" ) ).toString(), Qt::ISODateWithMs );
     manifest.m_note = json.value( QStringLiteral( "note" ) ).toString();
@@ -601,10 +737,15 @@ QString splitManifestFingerprint( const SplitManifest &manifest )
     // Content identity only: the logical id and the creation stamp are
     // deliberately excluded, so two runs over the same (config, seed,
     // inputs) share one fingerprint while keeping distinct identities.
+    // The generation summary is excluded as DERIVED content (it is a pure
+    // projection of config+assignments) — recomputing a fingerprint over a
+    // reloaded manifest must yield the same value as at generation time,
+    // including for manifests stored before summaries existed.
     SplitManifest copy = manifest;
     copy.setFingerprint( QString() );
     copy.setManifestId( QString() );
     copy.setCreatedAtUtc( QDateTime() );
+    copy.setSummary( QJsonObject() );
     return makeDatasetFingerprint( copy.toJson() ).toHex();
 }
 
@@ -655,9 +796,13 @@ sicnu::data::Result<SplitManifest> SplitEngine::generate( const SplitConfig &con
 
     try
     {
-        return SplitEngine::methodUsesFolds( config.method )
-                   ? generateFolds( manifest, inputs )
-                   : generatePlain( manifest, inputs );
+        auto result = SplitEngine::methodUsesFolds( config.method )
+                          ? generateFolds( manifest, inputs )
+                          : generatePlain( manifest, inputs );
+        if ( result )
+            result->setSummary(
+                buildSplitSummary( result->assignments(), inputs, config ) );
+        return result;
     }
     catch ( const SplitRoleDegenerate & )
     {
@@ -738,9 +883,15 @@ sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest man
                 // Floor on the signed division keeps the grid injective
                 // across the axes (truncation would merge cells straddling
                 // 0); negative block ids are fine — the key below encodes
-                // them losslessly.
-                const qint64 blockX = qint64( std::floor( centerX / config.blockSizeX ) );
-                const qint64 blockY = qint64( std::floor( centerY / config.blockSizeY ) );
+                // them losslessly. Guarded against non-representable
+                // quotients (#875 class: tiny block size → float-to-int UB).
+                qint64 blockX = 0;
+                qint64 blockY = 0;
+                if ( !blockIndexValid( centerX, config.blockSizeX, blockX ) ||
+                     !blockIndexValid( centerY, config.blockSizeY, blockY ) )
+                    return Result::failure( splitError(
+                        QStringLiteral( "spatial_block grid index out of representable"
+                                        " range (block size too small for the extent)" ) ) );
                 byBlock[QStringLiteral( "%1|%2" ).arg( blockX ).arg( blockY )].append( i );
             }
             QStringList blockKeys = byBlock.keys();
@@ -832,6 +983,51 @@ sicnu::data::Result<SplitManifest> SplitEngine::generatePlain( SplitManifest man
             }
             break;
         }
+        case SplitMethod::SpatioTemporalBlock:
+        {
+            // Joint space×time isolation (9.0): the atomic unit is the
+            // (block cell, time window) pair. A cross-year revisited site
+            // lands in different windows, so same-place-different-year
+            // samples can separate — while same-place-same-period samples
+            // stay atomic, which neither spatial_block nor temporal
+            // achieves alone. Requires valid bounds AND a positive
+            // observation time on every sample.
+            QMap<QString, QVector<int>> byBlockTime;
+            for ( int i = 0; i < inputs.size(); ++i )
+            {
+                const SplitInput &input = inputs.at( i );
+                if ( !input.validBounds )
+                    return Result::failure( splitError(
+                        QStringLiteral( "spatiotemporal_block requires valid bounds on"
+                                        " every sample" ) ) );
+                if ( input.timeMs <= 0 )
+                    return Result::failure( splitError(
+                        QStringLiteral( "spatiotemporal_block requires a positive"
+                                        " observation time on every sample" ) ) );
+                const double centerX = ( input.minX + input.maxX ) / 2.0;
+                const double centerY = ( input.minY + input.maxY ) / 2.0;
+                qint64 blockX = 0;
+                qint64 blockY = 0;
+                if ( !blockIndexValid( centerX, config.blockSizeX, blockX ) ||
+                     !blockIndexValid( centerY, config.blockSizeY, blockY ) )
+                    return Result::failure( splitError(
+                        QStringLiteral( "spatiotemporal_block grid index out of representable"
+                                        " range (block size too small for the extent)" ) ) );
+                // timeMs > 0 and window > 0 (validated), so plain integer
+                // division IS floor division; no negative-time case exists.
+                const qint64 timeIndex = input.timeMs / config.temporalWindowMs;
+                byBlockTime[QStringLiteral( "%1|%2|%3" )
+                                .arg( blockX )
+                                .arg( blockY )
+                                .arg( timeIndex )]
+                    .append( i );
+            }
+            QStringList cellKeys = byBlockTime.keys();
+            random.shuffle( cellKeys );
+            assignments = walkGroupsInOrder( cellKeys, byBlockTime, inputs, config );
+            requireNonEmptyRoles( assignments, config, inputs.size() );
+            break;
+        }
         case SplitMethod::Temporal:
         {
             // Groups ordered by earliest member time; whole groups move
@@ -883,6 +1079,14 @@ sicnu::data::Result<SplitManifest> SplitEngine::generateFolds( SplitManifest man
     {
         case SplitMethod::KFold:
         {
+            // A fold with no samples can never serve as a test set; with
+            // fewer samples than folds some folds would be silently empty.
+            if ( inputs.size() < config.foldCount )
+                return Result::failure( splitError(
+                    QStringLiteral( "k_fold requires at least as many samples (%1)"
+                                    " as folds (%2)" )
+                        .arg( inputs.size() )
+                        .arg( config.foldCount ) ) );
             QVector<int> indices( inputs.size() );
             for ( int i = 0; i < inputs.size(); ++i )
                 indices[i] = i;
@@ -903,6 +1107,12 @@ sicnu::data::Result<SplitManifest> SplitEngine::generateFolds( SplitManifest man
             QMap<QString, QVector<int>> byGroup;
             for ( int i = 0; i < inputs.size(); ++i )
                 byGroup[inputs.at( i ).groupId].append( i );
+            if ( byGroup.size() < config.foldCount )
+                return Result::failure( splitError(
+                    QStringLiteral( "group_k_fold requires at least as many groups (%1)"
+                                    " as folds (%2)" )
+                        .arg( byGroup.size() )
+                        .arg( config.foldCount ) ) );
             QStringList groupNames = byGroup.keys();
             random.shuffle( groupNames );
             int foldCursor = 0;
@@ -932,10 +1142,25 @@ sicnu::data::Result<SplitManifest> SplitEngine::generateFolds( SplitManifest man
                         QStringLiteral( "spatial_k_fold requires valid bounds on every sample" ) ) );
                 const double centerX = ( input.minX + input.maxX ) / 2.0;
                 const double centerY = ( input.minY + input.maxY ) / 2.0;
-                const qint64 blockX = qint64( std::floor( centerX / config.blockSizeX ) );
-                const qint64 blockY = qint64( std::floor( centerY / config.blockSizeY ) );
+                // #875: block sizes are validated finite-positive, but a
+                // valid-looking tiny size can still push the quotient out
+                // of the integer range — refuse instead of invoking the
+                // float-to-int UB that collapsed every sample into fold 0.
+                qint64 blockX = 0;
+                qint64 blockY = 0;
+                if ( !blockIndexValid( centerX, config.blockSizeX, blockX ) ||
+                     !blockIndexValid( centerY, config.blockSizeY, blockY ) )
+                    return Result::failure( splitError(
+                        QStringLiteral( "spatial_k_fold grid index out of representable"
+                                        " range (block size too small for the extent)" ) ) );
                 byBlock[qMakePair( blockX, blockY )].append( i );
             }
+            if ( byBlock.size() < config.foldCount )
+                return Result::failure( splitError(
+                    QStringLiteral( "spatial_k_fold requires at least as many spatial"
+                                    " blocks (%1) as folds (%2)" )
+                        .arg( byBlock.size() )
+                        .arg( config.foldCount ) ) );
             QList<QPair<qint64, qint64>> blocks = byBlock.keys();
             std::sort( blocks.begin(), blocks.end() );
             random.shuffle( blocks );
@@ -972,6 +1197,15 @@ sicnu::data::Result<SplitManifest> SplitEngine::generateFolds( SplitManifest man
                 byKey[key].append( i );
             }
             const QList<QString> keys = byKey.keys();
+            // One fold per distinct key: a single key would leave every
+            // materialized split with an empty train side — a holdout
+            // protocol needs something to hold out FROM.
+            if ( keys.size() < 2 )
+                return Result::failure( splitError(
+                    QStringLiteral( "%1 requires at least two distinct grouping keys"
+                                    " (got %2)" )
+                        .arg( splitMethodToString( config.method ) )
+                        .arg( keys.size() ) ) );
             int fold = 0;
             for ( const QString &key : keys )
             {

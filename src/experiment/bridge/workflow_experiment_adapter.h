@@ -93,6 +93,14 @@ class WorkflowExperimentMonitor : public QObject
     /// execution nobody ever recorded.
     void optInResume( const QString &executionRef );
 
+    /// CLI-shutdown recording path: converts the coordinator's CURRENT run
+    /// aggregate into a lifecycle event and records it. Content-identical to
+    /// what the queued runStateChanged delivery would carry (same snapshot
+    /// code path); terminal/Interrupted states are recorded, transitional
+    /// states are ignored (never recorded as anything). For refs this
+    /// monitor never enabled the bridge refuses — no fabricated history.
+    Result<QString> recordAggregateState( const workflow::WorkflowRun &run );
+
     /// Startup/stale reconciliation: runs recorded as non-terminal whose
     /// execution is neither tracked by this process nor owned by a live
     /// process (flock probe) get closed according to their checkpoint

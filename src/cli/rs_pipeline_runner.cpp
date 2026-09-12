@@ -11,6 +11,8 @@
 #include "processing/framework/json_params_converter.h"
 #include "workflow/workflow_types.h"
 #include "workflow/placeholder_grammar.h"
+#include "workflow/workflow_run.h"
+#include "experiment/bridge/workflow_experiment_adapter.h"
 
 #if defined( SICNU_EMBED_PYTHON ) && SICNU_EMBED_PYTHON
 #include "core/plugin_host.h"
@@ -36,6 +38,7 @@
 #include <QTextStream>
 
 #include <chrono>
+#include <cstdio>
 #include <thread>
 #include <cstdlib>
 #include <csignal>
@@ -444,6 +447,72 @@ bool RsPipelineRunner::ensurePythonPluginsLoaded()
 #endif
 }
 
+/// Drains the monitor's queued terminal transitions before a return path —
+/// the CLI has no long-lived event loop, so shutdown-time flush() is what
+/// makes recording land reliably (a flushed record is the whole point of
+/// auto-recording).
+
+
+namespace {
+/// Bounded drain so the coordinator's run aggregate has folded the terminal
+/// task updates before the monitor flushes (a poll can observe the pipeline
+/// terminal a beat before the aggregate absorbs the last fold — same race
+/// resumeRun handles). 100 × 5 ms keeps the worst case bounded.
+void drainCoordinator( long pipelineId )
+{
+  for ( int drain = 0; drain < 100; ++drain )
+  {
+    const auto aggregate =
+        sicnu::workflow::WorkflowRunCoordinator::instance().runForPipeline( pipelineId );
+    if ( !aggregate )
+      break;
+    const auto plans = aggregate->stepPlans();
+    const bool plansTerminal =
+      !plans.empty() && std::all_of( plans.begin(), plans.end(),
+          []( const sicnu::workflow::StepPlan &p ) {
+            return p.status == "Completed" || p.status == "Failed"
+                   || p.status == "Canceled" || p.status == "Skipped";
+          } );
+    // The run STATE folds separately from the step plans; recording needs
+    // the state (the experiment record follows run state, not task states).
+    if ( plansTerminal && sicnu::workflow::isTerminalRunState( aggregate->state() ) )
+    {
+      break;
+    }
+    QCoreApplication::processEvents();
+    std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+  }
+  QCoreApplication::processEvents();
+}
+} // namespace
+
+/// Terminal recording for CLI shutdown paths: the queued runStateChanged
+/// delivery may still be pending when a headless run returns (no long-lived
+/// event loop), so the terminal outcome is recorded DIRECTLY from the
+/// coordinator's run aggregate — content-identical to what the queued event
+/// would carry (same snapshot code path). flush() drains any duplicate
+/// queued delivery afterwards; the bridge treats repeats idempotently.
+void RsPipelineRunner::flushRecording( long pipelineId )
+{
+  if ( !m_monitor )
+    return;
+  const auto aggregate =
+      sicnu::workflow::WorkflowRunCoordinator::instance().runForPipeline( pipelineId );
+  if ( aggregate )
+  {
+    // Never silent: a refused terminal record (e.g. the fold had not landed
+    // within the drain window) leaves a Running record behind and must be
+    // visible in the operator's log (review round 1).
+    const auto recorded = m_monitor->recordAggregateState( *aggregate );
+    if ( !recorded )
+    {
+      reportLog( "warn", "terminal experiment recording not written: " +
+                             recorded.diagnostics().first().message.toStdString() );
+    }
+  }
+  m_monitor->flush();
+}
+
 RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Value &pipelineJson )
 {
   PipelineResult result;
@@ -487,6 +556,11 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
     return result;
   }
 
+  // MLOps 9.0 auto-recording (opt-in): identity pins bind at start, terminal
+  // transitions ride the coordinator's authoritative lifecycle events.
+  if ( m_recordingOptions.enabled )
+    recordSubmission( pipelineId );
+
   const auto deadline = std::chrono::steady_clock::now() + kPipelineTimeout;
   for ( ;; )
   {
@@ -498,6 +572,8 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
         result.errorMessage = "Pipeline interrupted by signal";
         reportLog( "error", result.errorMessage );
         result.success = false;
+        drainCoordinator( pipelineId );
+        flushRecording( pipelineId );
         return result;
     }
     // Wait for completion, waking every poll interval to emit progress.
@@ -646,6 +722,8 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
                                   ? "Pipeline failed"
                                   : pipeInfo.errorMessage.toStdString();
         result.success = false;
+        drainCoordinator( pipelineId );
+        flushRecording( pipelineId );
         return result;
       }
 
@@ -655,6 +733,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
         registerStepOutputs( pipelineId );
       }
       reportLog( "info", "Pipeline completed successfully: " + def.title );
+      flushRecording( pipelineId );
       return result;
     }
 
@@ -663,6 +742,8 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::runFromJson( const Json::Valu
       sicnu::TaskCenter::instance().cancelPipeline( pipelineId );
       result.errorMessage = "Pipeline timed out waiting for TaskCenter";
       reportLog( "error", result.errorMessage );
+      drainCoordinator( pipelineId );
+      flushRecording( pipelineId );
       return result;
     }
   }
@@ -672,6 +753,65 @@ void RsPipelineRunner::setAssetRegistry( sicnu::data::DataManager *dataManager )
 {
   m_dataManager = dataManager;
 }
+
+void RsPipelineRunner::setRecordingOptions( const RecordingOptions &options )
+{
+  m_recordingOptions = options;
+}
+
+bool RsPipelineRunner::ensureRecordingEnabled()
+{
+  if ( m_monitor )
+    return true;
+  m_monitor = std::make_shared<sicnu::experiment::WorkflowExperimentMonitor>(
+      sicnu::workflow::WorkflowRunCoordinator::instance() );
+  QString error;
+  QString experimentId = QString::fromStdString( m_recordingOptions.experimentId );
+  if ( experimentId.isEmpty() )
+    experimentId = sicnu::experiment::ExperimentId::generate().toString();
+  const QString name = m_recordingOptions.experimentName.empty()
+                           ? experimentId
+                           : QString::fromStdString( m_recordingOptions.experimentName );
+  if ( !m_monitor->enable( QString::fromStdString( m_recordingOptions.experimentDbPath ),
+                           experimentId, name,
+                           QString::fromStdString( m_recordingOptions.objective ),
+                           QString::fromStdString( m_recordingOptions.datasetDbPath ),
+                           &error ) )
+  {
+    reportLog( "error", "experiment recording unavailable: " + error.toStdString() );
+    m_monitor.reset();
+    return false;
+  }
+  return true;
+}
+
+void RsPipelineRunner::recordSubmission( long pipelineId )
+{
+  if ( !ensureRecordingEnabled() )
+    return;
+  const auto run =
+      sicnu::workflow::WorkflowRunCoordinator::instance().runForPipeline( pipelineId );
+  if ( !run )
+  {
+    reportLog( "warn", "experiment recording: no tracked run for pipeline " +
+                           std::to_string( pipelineId ) );
+    return;
+  }
+  sicnu::experiment::RunPins pins;
+  pins.datasetVersionId = QString::fromStdString( m_recordingOptions.datasetVersionId );
+  pins.splitManifestId = QString::fromStdString( m_recordingOptions.splitManifestId );
+  pins.modelId = QString::fromStdString( m_recordingOptions.modelId );
+  pins.modelDigest = QString::fromStdString( m_recordingOptions.modelDigest );
+  pins.seed = m_recordingOptions.seed;
+  pins.hasSeed = m_recordingOptions.hasSeed;
+  const auto recorded = m_monitor->recordSubmission( *run, pins );
+  if ( !recorded )
+  {
+    reportLog( "warn", "experiment recording refused the submission: " +
+                           recorded.diagnostics().first().message.toStdString() );
+  }
+}
+
 
 void RsPipelineRunner::registerOutputAsset( const QString &path, const QString &algorithmId,
                                             const QVariantMap &parameterMap,
@@ -867,6 +1007,13 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
   for ( const QString &note : recovery.errors )
     reportLog( "warn", "recovery: " + note.toStdString() );
 
+  // MLOps 9.0: enable recording BEFORE the resume so an invalid
+  // --experiment-record configuration is reported before any execution work,
+  // and so the store exists (holding zero runs for a refused resume —
+  // nothing fabricated) regardless of the resume outcome.
+  if ( m_recordingOptions.enabled && ensureRecordingEnabled() )
+    m_monitor->optInResume( QString::fromStdString( runId ) );
+
   QString resumeError;
   const long pipelineId = coordinator.resumeRun( runId, &resumeError );
   if ( pipelineId < 0 )
@@ -875,8 +1022,10 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
                           + ( resumeError.isEmpty() ? QStringLiteral( "unknown run" )
                                                     : resumeError ).toStdString();
     reportLog( "error", result.errorMessage );
+    flushRecording( 0 );
     return result;
   }
+
   reportLog( "info", "Resuming tracked run " + runId + " (pipeline "
                      + std::to_string( pipelineId ) + "): completed steps with "
                      + "existing outputs are resolved from the checkpoint, only "
@@ -890,6 +1039,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
       sicnu::TaskCenter::instance().cancelPipeline( pipelineId );
       result.errorMessage = "Resumed run interrupted by signal";
       reportLog( "error", result.errorMessage );
+      flushRecording( pipelineId );
       return result;
     }
     const auto pipeInfo = sicnu::TaskCenter::instance().waitForPipeline( pipelineId,
@@ -981,11 +1131,13 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
           }
           reportLog( "info", "Resumed run completed: " + runId );
         }
+        flushRecording( pipelineId );
         return result;
       }
       // No aggregate (defensive): fall back to the pipeline verdict.
       result.success = pipeInfo.isCompleted;
       result.errorMessage = pipeInfo.errorMessage.toStdString();
+      flushRecording( pipelineId );
       return result;
     }
 
@@ -994,6 +1146,7 @@ RsPipelineRunner::PipelineResult RsPipelineRunner::resumeRun( const std::string 
       sicnu::TaskCenter::instance().cancelPipeline( pipelineId );
       result.errorMessage = "Resumed run timed out waiting for TaskCenter";
       reportLog( "error", result.errorMessage );
+      flushRecording( pipelineId );
       return result;
     }
   }

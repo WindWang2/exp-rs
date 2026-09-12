@@ -103,6 +103,33 @@ class DatasetStore
     /// only reports the truth.
     QVector<DatasetVersionRecord> staleStagedDrafts() const;
 
+    // --- version lineage DAG (9.0 M1) ------------------------------------------
+    /// Depth bound of lineage walks: deeper chains (or loops) are refused as
+    /// `dataset.version_cycle` — a real dataset lineage never approaches this.
+    static constexpr qint64 kMaxVersionLineageDepth = 256;
+
+    /// Children of @p versionId (parent-link inversion; ascending creation
+    /// order, bounded by @p limit).
+    QVector<DatasetVersionRecord> versionChildren( const DatasetVersionId &versionId,
+                                                   qint64 limit = 1000 ) const;
+    /// Ancestor walk child → root: @p versionId first, then its parent, and
+    /// so on. Every link must resolve inside the store — a dangling parent
+    /// (possible in stores written before parent validation existed) is a
+    /// typed `dataset.parent_not_found` failure, never a silently truncated
+    /// chain. Loops or chains deeper than @p maxDepth fail with
+    /// `dataset.version_cycle` (default: the same kMaxVersionLineageDepth
+    /// the write path enforces — a chain that can be written can be read).
+    sicnu::data::Result<QVector<DatasetVersionRecord>> versionAncestors(
+        const DatasetVersionId &versionId,
+        qint64 maxDepth = kMaxVersionLineageDepth ) const;
+    /// Creates a draft derived from an immutable parent (fork/derive, 9.0):
+    /// the parent's canonical manifest becomes the child's starting content
+    /// with identity/parent rewritten and the fingerprint left for the usual
+    /// commit stamping. Refuses when the parent is missing or still mutable
+    /// (deriving from a draft would freeze a moving target).
+    sicnu::data::Result<DatasetVersionRecord> createDerivedVersion(
+        const DatasetVersionId &parentId, const QString &note = QString() );
+
     // --- lineage edges (dataset-side; goal §28) ------------------------------
     /// Adds a directed edge `from → to`. Both endpoints are (kind, id) pairs
     /// with kind one of: asset, dataset, dataset_version, sample, annotation,

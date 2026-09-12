@@ -14,6 +14,54 @@ All notable changes to the `exp-rs` project will be documented in this file.
 - **Master build repair**: GDAL 3.13.3 `count`-parameter type compat in canonical metadata; experiment run bridge const-qualification (GCC 16).
 ## [Unreleased] - 2026-09-12
 
+### Scientific MLOps / Reproducibility 9.0 (goal series)
+
+- **Split-boundary correctness (M0, fixes #875)**: total split-config
+  validation — finite-positive block sizes for every spatial grid method
+  (the old guard missed `spatial_k_fold`, and NaN slipped every `<= 0`
+  check), finite non-negative ratios for all methods, guarded spatial
+  grid-index arithmetic (no float→int UB for tiny block sizes), degenerate
+  fold refusals (fewer samples/groups/blocks than folds; single-key
+  leave-one-out), and a new `spatiotemporal_block` method whose atomic
+  unit is the (grid cell × time window) pair. Split manifests now embed a
+  bounded generation summary (role/fold counts + per-role class
+  distribution, capped with an explicit truncation flag); the manifest
+  fingerprint excludes the derived summary.
+- **Dataset version lineage DAG (M1)**: parent links are validated at
+  write time (dangling/cross-dataset/cyclic lineages are typed refusals);
+  `versionAncestors` is total (dangling legacy links surface as typed
+  failures, never silently truncated chains); `versionChildren` inverts
+  the link; `createDerivedVersion` forks committed content into a fresh
+  draft.
+- **Sample temporal validity (M2)**: optional label validity windows with
+  round-trip persistence and validation (empty windows and observations
+  outside the window are refused); window-less samples are unchanged.
+- **CLI pipeline auto-recording (M3, the 8.0 follow-up)**: opt-in
+  `--experiment-record` (+ experiment metadata and `--pin-*` identity
+  flags) records CLI pipelines and resumes into an ExperimentStore through
+  the same workflow monitor as MCP submissions; identity pins bind at
+  start; terminal outcomes are recorded truthfully (failures stay
+  failures); resuming an unrecorded execution records nothing.
+- **Scientific evidence (M4)**: schema-versioned evidence projection with
+  typed completeness verdicts (missing dimensions are named, never
+  filled); metric records carry a layout schema version.
+- **Experiment matrix (M5)**: bounded sweep descriptors (typed refusal
+  above 1000 cells), deterministic content-hash cell ids, an explicit
+  cell↔run ledger over store lineage edges, honest aggregation
+  (missing/failed cells reported), pareto selection restricted to cells
+  that recorded every objective metric.
+- **Comparison diagnostics (M6)**: `RunComparison` adds artifacts
+  (digest-set diff) and runtime (wall-time beyond max(1 s, 1 %))
+  dimensions with explicit missing-evidence details.
+- **Replay deviation reporting (M7)**: original-vs-replay verdicts
+  (identical/equivalent/deviated/incomplete) with environment drift and
+  pin deviations; metric deltas only within comparable identity.
+- **Model promotion seam (M8)**: promotion EVIDENCE records (criteria
+  results, benchmark-set membership, append-only approval trail with a
+  conflict rule) keyed by existing model-catalog ids — no new registry.
+- **Scale & durability evidence (M9)**: 100k-run store stress with bounded
+  paged access, concurrent readers under a writer, corruption refusal, and
+  injected commit-fault rollback/recovery.
 ### Intelligent Cartography / MapSpec / Template Platform 9.0
 
 - **Solver 9.0 evidence surfaces**: the bounded composition solver now

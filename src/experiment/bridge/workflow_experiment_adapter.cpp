@@ -309,6 +309,38 @@ void WorkflowExperimentMonitor::optInResume( const QString &executionRef )
         m_enabledRefs.insert( executionRef );
 }
 
+Result<QString> WorkflowExperimentMonitor::recordAggregateState(
+    const workflow::WorkflowRun &run )
+{
+    Q_ASSERT( thread() == QThread::currentThread() );
+    if ( !m_bridge )
+    {
+        return Result<QString>::failure( Diagnostic{
+            QStringLiteral( "experiment.bridge_no_target" ),
+            QStringLiteral( "monitor is not enabled" ), DiagnosticSeverity::Error } );
+    }
+    const QString runId = QString::fromStdString( run.runId() );
+    if ( !m_enabledRefs.contains( runId ) )
+    {
+        return Result<QString>::failure( Diagnostic{
+            QStringLiteral( "experiment.bridge_unknown_execution" ),
+            QStringLiteral( "execution %1 was never enabled for recording" ).arg( runId ),
+            DiagnosticSeverity::Error } );
+    }
+    const QString state = QString::fromStdString( workflowRunStateToString( run.state() ) );
+    // Transitional states carry no experiment meaning: ignoring records
+    // nothing and fabricates nothing (same rule as the signal path).
+    if ( !bridgeExecutionStates().contains( state ) )
+    {
+        return Result<QString>::failure( Diagnostic{
+            QStringLiteral( "experiment.bridge_invalid_event" ),
+            QStringLiteral( "state %1 is transitional; nothing recorded" ).arg( state ),
+            DiagnosticSeverity::Error } );
+    }
+    const ExecutionEvent event = workflowRunToExecutionEvent( run, state, 0, 0 );
+    return m_bridge->handleExecutionEvent( event );
+}
+
 QVector<ExperimentRunBridge::StaleDecision> WorkflowExperimentMonitor::reconcileStaleRuns()
 {
     QVector<ExperimentRunBridge::StaleDecision> decisions;
