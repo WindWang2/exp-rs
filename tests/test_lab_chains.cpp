@@ -26,8 +26,12 @@
 #include "agent/mapspec/mapspec_compiler.h"
 
 #include <qgsapplication.h>
+#include <qgslayoutexporter.h>
+#include <qgslayoutmanager.h>
+#include <qgslayoutsize.h>
 #include <qgsprintlayout.h>
 #include <qgsproject.h>
+#include <qgsunittypes.h>
 
 #include <QDir>
 #include <QFile>
@@ -114,7 +118,7 @@ const char *const kGradingIntents[] = {
 
 TEST_CASE( "Lab pipelines reference registered operators only", "[lab_chains][registry]" )
 {
-  sicnu::operators::initBuiltinRsOperators();
+  sicnu::operators::rs::initBuiltinRsOperators();
   auto &registry = sicnu::operators::RSOperatorRegistry::instance();
 
   for ( const char *pipelinePath : kPipelines )
@@ -147,12 +151,12 @@ TEST_CASE( "LabSpecs and their declared artifacts are consistent", "[lab_chains]
     CHECK( spec["data"]["offline"].asBool() );
 
     // Declared artifacts must exist in-tree (zero drift on paths).
-    CHECK( QFile::exists( QString::fromStdString( repoPath(
-      spec["pipeline"]["ref"].asString().c_str() ) ) ) );
-    CHECK( QFile::exists( QString::fromStdString( repoPath(
-      spec["data"]["spec_ref"].asString().c_str() ) ) ) );
-    CHECK( QFile::exists( QString::fromStdString( repoPath(
-      spec["grading_ref"]["intent_ref"].asString().c_str() ) ) ) );
+    CHECK( QFile::exists( QString::fromStdString(
+      repoPath( spec["pipeline"]["ref"].asString().c_str() ) ) ) );
+    CHECK( QFile::exists( QString::fromStdString(
+      repoPath( spec["data"]["spec_ref"].asString().c_str() ) ) ) );
+    CHECK( QFile::exists( QString::fromStdString(
+      repoPath( spec["grading_ref"]["intent_ref"].asString().c_str() ) ) ) );
     CHECK( spec["operators"].size() >= 1 );
     CHECK( spec["questions"].size() >= 2 );
     CHECK( spec["expected_results"].size() >= 1 );
@@ -163,11 +167,11 @@ TEST_CASE( "LabSpecs and their declared artifacts are consistent", "[lab_chains]
 TEST_CASE( "Lab track artifact sets are complete per lab", "[lab_chains][inventory]" )
 {
   for ( const char *path : kPipelines )
-    CHECK( QFile::exists( repoPath( path ) ) );
+    CHECK( QFile::exists( QString::fromStdString( repoPath( path ) ) ) );
   for ( const char *path : kDataSpecs )
-    CHECK( QFile::exists( repoPath( path ) ) );
+    CHECK( QFile::exists( QString::fromStdString( repoPath( path ) ) ) );
   for ( const char *path : kGradingIntents )
-    CHECK( QFile::exists( repoPath( path ) ) );
+    CHECK( QFile::exists( QString::fromStdString( repoPath( path ) ) ) );
 
   // Grading intents are intent-only: the grader is owned by D4.
   for ( const char *path : kGradingIntents )
@@ -215,7 +219,24 @@ TEST_CASE( "Lab11 MapSpec validates and passes compliance preflight",
   QString error;
   QgsPrintLayout *layout = MapSpecCompiler::compile( spec, &error );
   INFO( "compile error: " << error.toStdString() );
-  CHECK( layout != nullptr );
-  if ( layout )
-    QgsProject::instance()->layoutManager()->removeLayout( layout );
+  REQUIRE( layout != nullptr );
+
+  // K5 evidence path: export through the platform exporter (same governed
+  // action cartography:export wraps) into the lab's temp output dir when it
+  // exists (fixture runs); skip silently in bare checkouts.
+  const QString exportDir = QStringLiteral( CMAKE_SOURCE_DIR )
+                            + QStringLiteral( "/data/labs/_tmp/out/lab11/map" );
+  if ( QDir().mkpath( exportDir ) )
+  {
+    QgsLayoutExporter exporter( layout );
+    QgsLayoutExporter::ImageExportSettings settings;
+    settings.dpi = 200.0;
+    const QString png = exportDir + QStringLiteral( "/lab11_thematic_map.png" );
+    const QgsLayoutExporter::ExportResult result = exporter.exportToImage( png, settings );
+    INFO( "png export: " << png.toStdString() );
+    CHECK( result == QgsLayoutExporter::Success );
+    CHECK( QFileInfo::exists( png ) );
+  }
+
+  QgsProject::instance()->layoutManager()->removeLayout( layout );
 }

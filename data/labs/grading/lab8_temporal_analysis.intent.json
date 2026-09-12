@@ -84,12 +84,13 @@
     {
       "id": "T6_anomaly_control_date",
       "artifact": "data/labs/_tmp/out/lab8/anomaly_2024-08-15_control.tif",
-      "claim": "对照时相（2024-08-15，季节峰值）对同一基线：不出现连片负异常——扰动地块 anomaly 均值 ≥ -1.0（预期为正值 z≈+1：峰值日高于基线均值是季节效应，不是异常），全图 anomaly 均值 ≥ -1.0",
+      "claim": "对照时相（2024-08-15，季节峰值）不出现连片负异常（稳健判据）：扰动地块 anomaly 中位数 ≥ -1.0（预期为正值 z≈+0.9：峰值日高于基线均值是季节效应，不是异常）；扰动地块内 z ≤ -2 的像元占比 ≤ 1%，全图 z ≤ -2 占比 ≤ 5%（全图散点是量化平坦像元基线 σ≈0 的伪影——z 在 σ→0 处爆炸，这正是平台对 σ=0 给 NoData、判分用稳健统计的原因）",
       "tolerance": {
-        "disturbance_mean_anomaly": ">= -1.0",
-        "global_mean_anomaly": ">= -1.0",
-        "forest_abs_mean_anomaly": "<= 1.0",
-        "water_abs_mean_anomaly": "<= 1.0"
+        "disturbance_median_anomaly": ">= -1.0",
+        "disturbance_frac_z_le_minus2": "<= 0.01",
+        "global_frac_z_le_minus2": "<= 0.05",
+        "forest_abs_median_anomaly": "<= 1.0",
+        "water_abs_median_anomaly": "<= 1.0"
       }
     },
     {

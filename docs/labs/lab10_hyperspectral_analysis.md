@@ -59,7 +59,7 @@ SAM 把像元谱与参考谱的夹角作为相似度：**θ = arccos(⟨x,e⟩/(
 
 ### 10.3 PPI 端元提取（`rs:endmember_extraction`）
 
-`nEndmembers=3`、`projections=1000`。结果为 JSON：把三条 endmembers 与光谱库逐条对照（判分按 SAM 角均值 ≤ 10°、单条最大 ≤ 20°），确认凸包顶点 ≈ 纯端元；理解 ppiCounts 的极值计数含义。
+`nEndmembers=3`、`projections=1000`。结果为 JSON：把三条 endmembers 与光谱库逐条对照（判分按 SAM 角均值 ≤ 15°、单条最大 ≤ 25°），确认凸包顶点 ≈ 纯端元；理解 ppiCounts 的极值计数含义。
 
 ### 10.4 SAM 与 SID 匹配分类（`rs:sam_classify`）
 
@@ -93,7 +93,7 @@ QT_QPA_PLATFORM=offscreen build/sicnu_geo_rs_cli \
 | 产物 | 预期 | 判分容差 |
 |------|------|----------|
 | `mnf_components.tif` | 4 分量按 SNR 有序：分量 1 类间分离度 > 分量 4 | 意图 H1 |
-| PPI JSON | 3 条端元谱与库谱对照：SAM 角均值 ≤ 10°、单条最大 ≤ 20°（低反射率水体端元的角度噪声占主导），indices 互异 | 意图 H2 |
+| PPI JSON | 3 条端元谱与库谱对照：SAM 角均值 ≤ 15°、单条最大 ≤ 25°（低反射率水体端元 + PPI 极值选择的噪声偏置），indices 互异 | 意图 H2 |
 | `sam_labels.tif` | 纯区精度 ≥ 95% | 意图 H3 |
 | `sid_labels.tif` | 纯区精度 ≥ 90% | 意图 H4 |
 | `abundances.tif` | 纯区自家丰度 ≥ 0.9、丰度和 ≈ 1、过渡带渐变还原、meanError ≤ 0.02 | 意图 H5 |

@@ -18,9 +18,9 @@
   "grid": {
     "width": 256,
     "height": 256,
-    "crs": "EPSG:4326",
-    "pixel_size_deg": 0.001,
-    "origin_hint": "左上角 (102.5, 30.5)；两景与 DEM 网格必须完全一致"
+    "crs": "EPSG:32648 (UTM 48N，投影坐标 —— 地形校正算子拒绝地理坐标系 DEM：度网格下 Horn 坡度分母缩小 ~1e4 倍)",
+    "origin_hint": "左上角 (500000, 3300000)；两景与 DEM 网格必须完全一致",
+    "pixel_size_m": 10.0
   },
   "per_scene_product": {
     "format": "GeoTIFF",

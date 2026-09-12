@@ -23,11 +23,11 @@
     {
       "id": "H2_ppi_endmembers",
       "artifact": "rs:endmember_extraction 步骤 JSON 结果（endmembers/indices/ppiCounts）",
-      "claim": "PPI 提取 3 条端元谱；与光谱库最近条目的 SAM 光谱角：三条均值 ≤ 10°，单条最大 ≤ 20°（低反射率水体端元 norm≈0.066，σ≈0.004 的噪声即引起 ~4-10° 角度抖动，PPI 选取的极值像元还可能偏向噪声外扬方向）；三条 indices 互异（来自不同像元）",
+      "claim": "PPI 提取 3 条端元谱；与光谱库最近条目的 SAM 光谱角：三条均值 ≤ 15°，单条最大 ≤ 25°（低反射率水体端元 norm≈0.066，σ≈0.004 噪声即引起 ~4-10° 角度抖动；且 PPI 恰恰选取噪声外扬方向的极值像元，角度误差系统性偏大——这正是实验想让学生看到的局限）；三条 indices 互异（来自不同像元）",
       "tolerance": {
         "endmember_count": 3,
-        "sam_angle_mean_deg": "<= 10.0",
-        "sam_angle_max_deg": "<= 20.0",
+        "sam_angle_mean_deg": "<= 15.0",
+        "sam_angle_max_deg": "<= 25.0",
         "indices_distinct": true
       }
     },

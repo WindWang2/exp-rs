@@ -27,24 +27,22 @@ PIPELINES = [
 
 
 def newest_checkpoint(before_ts, operator_id):
-    """Newest step resultPayload for operator_id among checkpoints created
-    after before_ts (the checkpoint manager lives in ~/.rs_studio/checkpoints)."""
+    """Newest stepPlans[].resultPayload for operator_id among checkpoint run
+    records (the checkpoint manager lives in ~/.rs_studio/checkpoints/history)."""
     best = None
-    for ckpt in glob.glob(os.path.expanduser("~/.rs_studio/checkpoints/*/*.json")):
+    pattern = os.path.expanduser("~/.rs_studio/checkpoints/**/checkpoint_*.json")
+    for ckpt in glob.glob(pattern, recursive=True):
         if os.path.getmtime(ckpt) < before_ts:
             continue
         try:
             doc = json.load(open(ckpt))
         except (json.JSONDecodeError, OSError):
             continue
-        for step in doc.get("steps", []):
-            plan = step.get("plan", step)
-            payload = plan.get("resultPayload") or step.get("resultPayload")
+        for plan in doc.get("stepPlans", []):
+            payload = plan.get("resultPayload")
             if not payload:
                 continue
-            op = (plan.get("operator") or plan.get("operatorId")
-                  or plan.get("name") or step.get("operator"))
-            if op == operator_id:
+            if plan.get("operatorId") == operator_id:
                 cand = (os.path.getmtime(ckpt), ckpt, payload)
                 if best is None or cand[0] > best[0]:
                     best = cand
@@ -78,7 +76,8 @@ def main():
     env = dict(os.environ, QT_QPA_PLATFORM="offscreen")
     log_dir = ".planning/lab-content-expansion/logs"
     os.makedirs(log_dir, exist_ok=True)
-    os.makedirs("data/labs/_tmp/out", exist_ok=True)
+    for d in ("lab8", "lab9", "lab10", "lab11"):
+        os.makedirs(f"data/labs/_tmp/out/{d}", exist_ok=True)
 
     failed = []
     for name, pipeline in PIPELINES:

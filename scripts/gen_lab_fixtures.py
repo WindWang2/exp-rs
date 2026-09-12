@@ -84,10 +84,10 @@ def write_gtiff(path, bands_data, dates=None, band_roles=None, dtype=gdal.GDT_Fl
     ds.SetProjection(srs.ExportToWkt())
     if dates:
         ds.SetMetadataItem("SICNU_ACQUISITION_DATE", dates)
+    np_dtype = np.float32 if dtype == gdal.GDT_Float32 else np.uint8
     for i, plane in enumerate(bands_data, start=1):
         band = ds.GetRasterBand(i)
-        dtype = np.float32 if dtype == gdal.GDT_Float32 else np.uint8
-        band.WriteArray(np.asarray(plane, dtype=dtype))
+        band.WriteArray(np.asarray(plane, dtype=np_dtype))
         if band_roles and i in band_roles:
             band.SetMetadataItem("SICNU_BAND_ROLE", band_roles[i])
     ds.FlushCache()
@@ -141,6 +141,16 @@ def gen_sar(out_dir, seed):
                 field[y][x] = s0
         return field
 
+    # Projected grid (UTM 48N, 10 m pixels): rs:sar_terrain_correction
+    # rejects geographic DEMs (Horn denominators in degrees are meaningless).
+    SAR_ORIGIN_X, SAR_ORIGIN_Y, SAR_PIXEL = 500000.0, 3300000.0, 10.0
+
+    def sar_grid(ds):
+        ds.SetGeoTransform((SAR_ORIGIN_X, SAR_PIXEL, 0.0, SAR_ORIGIN_Y, 0.0, -SAR_PIXEL))
+        srs = osr.SpatialReference()
+        srs.ImportFromEPSG(32648)
+        ds.SetProjection(srs.ExportToWkt())
+
     def render(path, s0_field):
         band = [[0.0] * WIDTH for _ in range(HEIGHT)]
         for y in range(HEIGHT):
@@ -155,10 +165,7 @@ def gen_sar(out_dir, seed):
                 band[y][x] = round(dn)  # 16-bit-like DN quantization
         drv = gdal.GetDriverByName("GTiff")
         ds = drv.Create(path, WIDTH, HEIGHT, 1, gdal.GDT_Float32)
-        ds.SetGeoTransform((ORIGIN_X, PIXEL, 0.0, ORIGIN_Y, 0.0, -PIXEL))
-        srs = osr.SpatialReference()
-        srs.ImportFromEPSG(4326)
-        ds.SetProjection(srs.ExportToWkt())
+        sar_grid(ds)
         ds.SetMetadataItem("SICNU_MODALITY", "sar")
         ds.SetMetadataItem("SICNU_POLARIZATIONS", "VV")
         b = ds.GetRasterBand(1)
@@ -186,7 +193,12 @@ def gen_sar(out_dir, seed):
                              * math.cos(2 * math.pi * y / 220.0))
             for x in range(WIDTH)] for y in range(HEIGHT)]
     p = os.path.join(d, "dem.tif")
-    write_gtiff(p, [dem])
+    drv = gdal.GetDriverByName("GTiff")
+    ds = drv.Create(p, WIDTH, HEIGHT, 1, gdal.GDT_Float32)
+    sar_grid(ds)
+    ds.GetRasterBand(1).WriteArray(np.asarray(dem, dtype=np.float32))
+    ds.FlushCache()
+    ds = None
     print(f"wrote {p}")
 
     # #803 demo stack: band1 = before DN, band2 = after DN with a NoData hole
@@ -194,10 +206,7 @@ def gen_sar(out_dir, seed):
     p = os.path.join(d, "sar_stack_dn.tif")
     drv = gdal.GetDriverByName("GTiff")
     ds = drv.Create(p, WIDTH, HEIGHT, 2, gdal.GDT_Float32)
-    ds.SetGeoTransform((ORIGIN_X, PIXEL, 0.0, ORIGIN_Y, 0.0, -PIXEL))
-    srs = osr.SpatialReference()
-    srs.ImportFromEPSG(4326)
-    ds.SetProjection(srs.ExportToWkt())
+    sar_grid(ds)
     ds.SetMetadataItem("SICNU_MODALITY", "sar")
     ds.SetMetadataItem("SICNU_POLARIZATIONS", "VV")
     b1 = [[0.0] * WIDTH for _ in range(HEIGHT)]

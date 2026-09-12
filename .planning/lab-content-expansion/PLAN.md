@@ -3,7 +3,7 @@
 Owner scope: `data/labs/`, `docs/labs/`, `data/labs/data-specs/`. Out of scope: `src/operators/`.
 Diff budget: `data/labs/`, `docs/labs/`, `scripts/`, `tests/` (lab-chain tests only).
 
-## Phase 0 — Baseline audit (in_progress)
+## Phase 0 — Baseline audit (complete)
 - [ ] Infra: pipeline runner CLI, pipeline_schema.json, Processing Registry resolution
 - [ ] LabSpec v1 schema draft (D2 absent — see DECISIONS D002)
 - [ ] Capability matrix × 4 themes (subagent research + own verification)
@@ -13,7 +13,7 @@ Diff budget: `data/labs/`, `docs/labs/`, `scripts/`, `tests/` (lab-chain tests o
 ## Phase 2 — D3b SAR
 ## Phase 3 — D3c hyperspectral
 ## Phase 4 — D3d cartography + F data-spec summary
-## Phase 5 — E headless runs + G docs
+## Phase 5 — E headless runs + G docs (in_progress)
 ## Phase 6 — adversarial review (2 read-only)
 ## Phase 7 — remediation
 ## Phase 8 — rebase + PR

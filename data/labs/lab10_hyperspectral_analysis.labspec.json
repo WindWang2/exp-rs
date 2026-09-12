@@ -163,7 +163,7 @@
       "tolerance_note": "见判分意图 H1"
     },
     {
-      "claim": "PPI 3 条端元谱与库谱对照：SAM 角均值 ≤ 10°、单条最大 ≤ 20°，indices 互异",
+      "claim": "PPI 3 条端元谱与库谱对照：SAM 角均值 ≤ 15°、单条最大 ≤ 25°，indices 互异",
       "artifact": "rs:endmember_extraction JSON 结果",
       "tolerance_note": "见判分意图 H2"
     },

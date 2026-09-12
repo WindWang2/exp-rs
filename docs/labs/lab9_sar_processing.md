@@ -97,7 +97,7 @@ QT_QPA_PLATFORM=offscreen build/sicnu_geo_rs_cli \
 | `sigma0_before_lee5.tif` | ENL ≥ 1.5×原始，均值保持 ±10% | 意图 S2 |
 | `change_otsu.tif` | 检出率 ≥ 65%，虚警 ≤ 2%，changedPercent ∈ [1,6]% | 意图 S3 |
 | `stack_lee_allbands.tif` | band2 NoData 洞保持、band1 不被污染（#803） | 意图 S4 |
-| `gamma0_before.tif` | 含 γ0/有效掩膜（+本地入射角），缓丘有效 ≥ 98%（#785） | 意图 S5 |
+| `gamma0_before.tif` | 含 γ0/有效掩膜（+本地入射角），缓丘有效 ≥ 98%；γ0/σ0 比值 ∈ [0.5, 3.5]（DEM 带起伏，高于平地基准 1/cos35°≈1.22） | 意图 S5 |
 
 判分意图全文：`data/labs/grading/lab9_sar_processing.intent.json`（判分器由 D4 实现）。
 
