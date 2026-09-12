@@ -79,6 +79,69 @@ TEST_CASE( "frame caps refuse oversize payloads on both sides", "[ipc][frame]" )
     REQUIRE( error.find( "E6003" ) != std::string::npos );
 }
 
+TEST_CASE( "frame length prefix bytes 128-255 decode without sign extension", "[ipc][frame]" )
+{
+    std::unique_ptr<IIpcStream> a;
+    std::unique_ptr<IIpcStream> b;
+    makeIpcMemoryPipePair( a, b );
+
+    IpcFrameLimits limits;
+    std::string error;
+    Json::Value mid( Json::objectValue );
+    // Compact JSON of this object is in the 128–255 window where byte0 of the
+    // little-endian length has the high bit set (MSVC signed char trap).
+    mid["blob"] = std::string( 180, 'z' );
+    REQUIRE( IpcFrame::writeJson( *a, mid, limits, error ) );
+
+    std::string payload;
+    REQUIRE( IpcFrame::read( *b, payload, limits, 1000, error ) == IpcFrame::ReadStatus::Ok );
+    Json::Value parsed;
+    Json::CharReaderBuilder builder;
+    std::string parseError;
+    std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+    REQUIRE( reader->parse( payload.data(), payload.data() + payload.size(), &parsed, &parseError ) );
+    REQUIRE( parsed["blob"].asString().size() == 180 );
+}
+
+TEST_CASE( "frame read resumes a mid-payload timeout without dropping the length prefix",
+           "[ipc][frame]" )
+{
+    std::unique_ptr<IIpcStream> a;
+    std::unique_ptr<IIpcStream> b;
+    makeIpcMemoryPipePair( a, b );
+
+    Json::StreamWriterBuilder writerBuilder;
+    writerBuilder["indentation"] = "";
+    writerBuilder["commentStyle"] = "None";
+    Json::Value body( Json::objectValue );
+    body["blob"] = std::string( 64, 'q' );
+    const std::string json = Json::writeString( writerBuilder, body );
+    REQUIRE( json.size() > 16 );
+
+    const uint32_t length = static_cast<uint32_t>( json.size() );
+    uint8_t prefix[ 4 ] = {
+        static_cast<uint8_t>( length & 0xFFu ),
+        static_cast<uint8_t>( ( length >> 8 ) & 0xFFu ),
+        static_cast<uint8_t>( ( length >> 16 ) & 0xFFu ),
+        static_cast<uint8_t>( ( length >> 24 ) & 0xFFu )
+    };
+    std::string error;
+    REQUIRE( a->writeAll( reinterpret_cast<const char *>( prefix ), 4, error ) );
+    REQUIRE( a->writeAll( json.data(), 8, error ) );
+
+    std::string pending;
+    std::string payload;
+    IpcFrameLimits limits;
+    REQUIRE( IpcFrame::read( *b, payload, limits, 80, error, &pending )
+             == IpcFrame::ReadStatus::Timeout );
+    REQUIRE( pending.size() == 4 + 8 );
+
+    REQUIRE( a->writeAll( json.data() + 8, json.size() - 8, error ) );
+    REQUIRE( IpcFrame::read( *b, payload, limits, 1000, error, &pending )
+             == IpcFrame::ReadStatus::Ok );
+    REQUIRE( payload == json );
+}
+
 TEST_CASE( "frame reads time out and detect EOF", "[ipc][frame]" )
 {
     std::unique_ptr<IIpcStream> a;
