@@ -140,3 +140,52 @@ TEST_CASE( "data cache reports byte accounting through the range cache",
     CHECK( data["telemetry_delta"].get( "bytes_fetched", Json::Value( 0 ) ).asUInt64() >= 2048 );
     CHECK( data["config"].get( "stale_policy", "" ).asString() == "revalidate_on_open" );
 }
+
+TEST_CASE( "data cache status reports the process-local cache state",
+           "[cli][json][cache][utc8]" )
+{
+    // Read-only contract: status must not install anything, so a fresh CLI
+    // process honestly reports `installed: false` with no telemetry yet and
+    // the effective default configuration.
+    const auto result = runCli( "data cache status --json" );
+    REQUIRE( result.exitCode == 0 );
+    const Json::Value envelope = parseEnvelope( result.output );
+    REQUIRE( envelope.get( "ok", false ).asBool() );
+    REQUIRE( envelope.get( "command", "" ).asString() == "data" );
+    const Json::Value &data = envelope["data"];
+    REQUIRE( data.isObject() );
+    CHECK_FALSE( data.get( "installed", true ).asBool() );
+    CHECK( data["config"].get( "stale_policy", "" ).asString() == "revalidate_on_open" );
+    CHECK( data["config"].get( "block_size", Json::Value( 0 ) ).asUInt64() == 64 * 1024 );
+    CHECK( data["telemetry"].isNull() );
+    CHECK( data["disk"].isObject() );
+    CHECK_FALSE( data["disk"].get( "enabled", true ).asBool() );
+}
+
+TEST_CASE( "data cache clear drops the process-local cache",
+           "[cli][json][cache][utc8]" )
+{
+    const auto result = runCli( "data cache clear --json" );
+    REQUIRE( result.exitCode == 0 );
+    const Json::Value envelope = parseEnvelope( result.output );
+    REQUIRE( envelope.get( "ok", false ).asBool() );
+    const Json::Value &data = envelope["data"];
+    REQUIRE( data.isObject() );
+    CHECK( data.get( "cleared", false ).asBool() );
+    // The disk layer reports post-clear stats (disabled by default: an empty
+    // directory means the process-local clear had nothing to unlink).
+    CHECK( data["disk"].isObject() );
+}
+
+TEST_CASE( "data cache keeps the positional-URL grammar for multi-token forms",
+           "[cli][json][cache][utc8]" )
+{
+    // F7 regression guard: `status`/`clear` are claimed only in the exact
+    // single-argument form; with a further argument present, the first token
+    // stays a positional path (here: an unopenable one) instead of a
+    // subcommand.
+    const auto result = runCli( "data cache status extra.tif --json" );
+    REQUIRE( result.exitCode == 6 ); // exprs::ExitCode::InvalidInput
+    const Json::Value envelope = parseEnvelope( result.output );
+    REQUIRE_FALSE( envelope.get( "ok", true ).asBool() );
+}
