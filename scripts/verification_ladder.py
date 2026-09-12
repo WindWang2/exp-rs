@@ -249,6 +249,14 @@ def governed_env(build_dir: Path) -> dict[str, str]:
     return env
 
 
+# ADR 0146 offline-degradation contract: a transport-dependent test binary
+# that finds its prerequisites unavailable prints `sicnu-skip: <reason-code>`
+# on stdout and exits 77 (GNU "skipped test" convention). The ladder maps
+# that to the distinct `skipped` verdict — never `passed`, never `timeout`.
+SKIP_EXIT_CODE = 77
+SKIP_SENTINEL = "sicnu-skip:"
+
+
 def run_executable(binary: Path, env: dict, timeout: float,
                    extra_args: list[str] | None = None) -> tuple[str, str, float]:
     started = time.monotonic()
@@ -265,6 +273,13 @@ def run_executable(binary: Path, env: dict, timeout: float,
     elapsed = time.monotonic() - started
     if proc.returncode == 0:
         return "passed", "", elapsed
+    if proc.returncode == SKIP_EXIT_CODE or SKIP_SENTINEL in proc.stdout:
+        reason = next(
+            (line.strip() for line in proc.stdout.splitlines()
+             if line.strip().startswith(SKIP_SENTINEL)),
+            None,
+        )
+        return "skipped", reason or "exit-77 without a reason code", elapsed
     tail = (proc.stdout + "\n" + proc.stderr)[-4000:]
     return "failed", tail, elapsed
 
@@ -314,6 +329,10 @@ def main() -> int:
                         help="multiply every item timeout (slow hosts)")
     parser.add_argument("--bench-out-dir", default=None,
                         help="where benchmark JSON lands (default <build-dir>/benchmarks)")
+    parser.add_argument("--bench-tier", choices=("quick", "full"), default="quick",
+                        help="benchmark tier for the L7 lane: quick = smoke tier "
+                             "(--bench-quick, fixed small counts), full = the "
+                             "documented opt-in evidence scales (default: quick)")
     parser.add_argument("--asan-build-dir", default=os.environ.get("SICNU_ASAN_BUILD_DIR"),
                         help="separate ASan-instrumented build tree for the LS lane "
                              "(env SICNU_ASAN_BUILD_DIR); without it LS items are "
@@ -426,6 +445,11 @@ def main() -> int:
                     extra: list[str] = []
                     if kind == "bench":
                         extra = ["--out", str(bench_out / f"{name}.json")]
+                        # D10: routine runs use the smoke tier (--bench-quick,
+                        # fixed small counts, tier-labelled artifact); the
+                        # documented full-scale tier stays opt-in evidence.
+                        if args.bench_tier == "quick":
+                            extra.append("--bench-quick")
                     status, detail, elapsed = run_executable(binary, env, timeout, extra)
                     item.update(status=status, elapsed_s=round(elapsed, 1),
                                 detail=detail[-2000:] if detail else "")
