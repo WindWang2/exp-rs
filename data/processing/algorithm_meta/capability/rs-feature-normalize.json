@@ -1,0 +1,149 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269"
+      ],
+      "scenes" : 
+      [
+        "SVM/KNN \u7b49\u5206\u7c7b\u5668\u7684\u9884\u5904\u7406",
+        "\u591a\u6e90\u7279\u5f81\u91cf\u7eb2\u7edf\u4e00"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "tolerance",
+      "large_raster_safe" : true,
+      "memory_policy" : "multipass_streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u68c0\u67e5\u5f52\u4e00\u5316\u533a\u95f4\u5e76\u5728\u7edf\u8ba1\u4e2d\u6392\u9664 nodata",
+        "when" : "\u7edf\u8ba1\u8303\u56f4\u53c2\u6570\u975e\u6cd5\u6216\u542b nodata \u672a\u5254\u9664"
+      }
+    ],
+    "family" : "classification",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "method",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "array" : true,
+          "data_kind" : "string",
+          "item_type" : "string",
+          "name" : "stats",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "false",
+          "name" : "inverse",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "default" : "zscore",
+          "enum" : 
+          [
+            "zscore",
+            "minmax",
+            "robust"
+          ],
+          "name" : "method",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "NoData-aware: declared NoData sentinels and non-finite pixels are excluded from the fit and left unchanged.",
+      "Constant bands (std<=0 or zero range) are skipped with a warning.",
+      "robust approximates the 0.5/99.5 percentile range from a 512-bin histogram, not exact percentiles."
+    ],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "multimodal",
+      "dem"
+    ],
+    "operator_group" : "features",
+    "prerequisites" : 
+    [
+      "Input raster (feature cube recommended); inverse=true requires a cube whose contract carries normalization stats."
+    ],
+    "schema_version" : 2,
+    "summary" : "\u7279\u5f81\u5f52\u4e00\u5316\uff1a\u6309 min-max \u6216 z-score \u628a\u5404\u7279\u5f81\u7f29\u653e\u5230\u53ef\u6bd4\u91cf\u7eb2\uff0c\u6539\u5584\u8ddd\u79bb\u5ea6\u91cf\u7c7b\u5206\u7c7b\u5668\u7684\u8868\u73b0\uff08\u5bb9\u5dee\u7ea7\u7b97\u5b50\uff09\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5f52\u4e00\u5316",
+        "z-score",
+        "\u91cf\u7eb2"
+      ],
+      "courses" : 
+      [
+        "\u6a21\u5f0f\u8bc6\u522b"
+      ],
+      "exercise" : "\u5bf9\u5806\u53e0\u7279\u5f81\u505a z-score \u5f52\u4e00\u5316\u5e76\u6bd4\u8f83 K-Means \u805a\u7c7b\u7ed3\u679c\u7684\u7a33\u5b9a\u6027\u3002"
+    }
+  },
+  "description" : "Standardize feature cube bands (zscore, minmax or robust) and store the fit statistics inside the cube contract so training and inference share the exact same normalization; supports inverting stored stats.",
+  "display_name" : "Feature Normalization",
+  "id" : "rs:feature_normalize",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "features",
+    "normalization",
+    "standardization",
+    "ml"
+  ]
+}

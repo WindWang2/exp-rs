@@ -1,0 +1,125 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u6c34\u4f53",
+        "\u5efa\u7b51",
+        "\u70e7\u8ff9\u5730"
+      ],
+      "scenes" : 
+      [
+        "\u6591\u5757\u8ba1\u6570\u4e0e\u7f16\u53f7",
+        "\u6d2a\u6c34\u6591\u5757\u8ffd\u8e2a"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u6309\u76ee\u6807\u5f62\u6001\u9009\u62e9 4/8 \u90bb\u57df",
+        "when" : "\u8fde\u901a\u6027\u89c4\u5219\u4e0e\u6570\u636e\u4e0d\u5339\u914d"
+      }
+    ],
+    "family" : "raster_spatial",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "8",
+          "enum" : 
+          [
+            "4",
+            "8"
+          ],
+          "name" : "connectivity",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "thermal",
+      "dem"
+    ],
+    "operator_group" : "raster_spatial",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u8fde\u901a\u7ec4\u4ef6\u6807\u8bb0\uff1a\u5bf9\u4e8c\u503c\u6805\u683c\u6807\u8bb0\u8fde\u901a\u6591\u5757\u5e76\u7f16\u53f7\uff0c\u8f93\u51fa\u6591\u5757 ID \u56fe\u4e0e\u9762\u79ef\u5c5e\u6027\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u8fde\u901a\u6027",
+        "\u6591\u5757\u6807\u8bb0",
+        "\u56db\u90bb\u57df/\u516b\u90bb\u57df"
+      ],
+      "courses" : 
+      [
+        "GIS \u539f\u7406"
+      ],
+      "exercise" : "\u6807\u8bb0\u6d2a\u6c34\u6df9\u6ca1\u6591\u5757\u5e76\u7edf\u8ba1\u9762\u79ef\u5927\u4e8e 1 \u516c\u9877\u7684\u6591\u5757\u6570\u91cf\u3002"
+    }
+  },
+  "description" : "Deterministic connected-component labeling of a 0/1 mask (raster-order compact labels).",
+  "display_name" : "Connected Components",
+  "gpu" : false,
+  "id" : "rs:connected_components",
+  "input" : "raster",
+  "notes" : "Two-pass union-find labeling with raster-order compact labels; output 0 = background/NoData. FullRaster contract.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "raster_spatial"
+  ],
+  "task" : "raster_cleanup"
+}

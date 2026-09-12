@@ -1,0 +1,115 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269"
+      ],
+      "scenes" : 
+      [
+        "\u591a\u6ce2\u6bb5\u6570\u636e\u538b\u7f29",
+        "\u5206\u7c7b\u524d\u7279\u5f81\u964d\u7ef4",
+        "\u53d8\u5316\u68c0\u6d4b\uff08PC \u5dee\u5f02\u6cd5\uff09\u7684\u8f93\u5165"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INSUFFICIENT_MEMORY",
+        "remedy" : "\u6539\u7528\u7a7a\u95f4\u5b50\u533a\u4f30\u8ba1\u7edf\u8ba1\u91cf\uff0c\u6216\u5148\u5206\u5e45\u5904\u7406",
+        "when" : "\u8d85\u5927\u5f71\u50cf\u5168\u91cf\u534f\u65b9\u5dee\u8ba1\u7b97\u5185\u5b58\u8d85\u9650"
+      }
+    ],
+    "family" : "spectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "numComponents",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "0",
+          "name" : "numComponents",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "enhancement",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u4e3b\u6210\u5206\u5206\u6790\uff08PCA/K-L \u53d8\u6362\uff09\uff1a\u628a\u76f8\u5173\u6ce2\u6bb5\u538b\u7f29\u4e3a\u6309\u65b9\u5dee\u6392\u5e8f\u7684\u4e92\u4e0d\u76f8\u5173\u4e3b\u6210\u5206\uff0c\u7528\u4e8e\u964d\u7ef4\u3001\u53bb\u76f8\u5173\u4e0e\u4fe1\u606f\u6d53\u7f29\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u4e3b\u6210\u5206\u5206\u6790",
+        "K-L \u53d8\u6362",
+        "\u964d\u7ef4"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u5bf9 6 \u6ce2\u6bb5\u5f71\u50cf\u505a PCA\uff0c\u7edf\u8ba1\u5404\u4e3b\u6210\u5206\u65b9\u5dee\u8d21\u732e\u5e76\u89e3\u91ca PC1 \u7684\u5730\u7269\u542b\u4e49\u3002"
+    }
+  },
+  "description" : "Compute PCA components of a multi-band raster and write them as a GeoTIFF.",
+  "display_name" : "Principal Component Analysis",
+  "id" : "rs:pca",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "pca",
+    "enhancement",
+    "dimensionality-reduction"
+  ]
+}

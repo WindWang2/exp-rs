@@ -1,0 +1,136 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269"
+      ],
+      "scenes" : 
+      [
+        "Landsat/MODIS \u7b49\u5b58\u6863\u6570\u636e\u7684\u5b9a\u6807\u5165\u53e3",
+        "\u5b9a\u91cf\u9065\u611f\u5904\u7406\u94fe\u7684\u8d77\u70b9"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_RADIOMETRY",
+        "remedy" : "\u5728\u53c2\u6570\u4e2d\u663e\u5f0f\u7ed9\u51fa gain/offset\uff0c\u6216\u6539\u7528 rs:landsat_import \u81ea\u52a8\u89e3\u6790\u5143\u6570\u636e",
+        "when" : "\u7f3a\u5c11\u589e\u76ca/\u504f\u79fb\u53c2\u6570\u6216\u5143\u6570\u636e\u4e0d\u5b8c\u6574"
+      }
+    ],
+    "family" : "optical",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "band",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "method",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0",
+          "name" : "bias",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "1",
+          "name" : "gain",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "metadata_path",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "thermal"
+    ],
+    "operator_group" : "radiometric",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u628a\u4f20\u611f\u5668\u8bb0\u5f55\u7684\u539f\u59cb DN \u503c\u8f6c\u6362\u4e3a\u8f90\u4eae\u5ea6\uff08radiance\uff09\uff0c\u662f\u8f90\u5c04\u5b9a\u6807\u94fe\u7684\u7b2c\u4e00\u6b65\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u8f90\u5c04\u5b9a\u6807",
+        "DN",
+        "\u8f90\u4eae\u5ea6"
+      ],
+      "courses" : 
+      [
+        "\u5b9a\u91cf\u9065\u611f\u57fa\u7840"
+      ],
+      "exercise" : "\u8bfb\u53d6 Landsat 8 MTLP \u53c2\u6570\u6587\u4ef6\uff0c\u628a DN \u5f71\u50cf\u8f6c\u6362\u4e3a\u8f90\u4eae\u5ea6\u5e76\u68c0\u67e5\u6570\u503c\u8303\u56f4\u3002"
+    }
+  },
+  "description" : "Calibrate raw Digital Numbers (DN) to spectral radiance using sensor gain and bias.",
+  "display_name" : "DN to Radiance",
+  "id" : "rs:dn_to_radiance",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "radiometric",
+    "calibration",
+    "radiance"
+  ]
+}

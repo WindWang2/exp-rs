@@ -1,0 +1,165 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u519c\u7530",
+        "\u68ee\u6797"
+      ],
+      "scenes" : 
+      [
+        "\u53d8\u5316\u65b9\u5411\u5224\u8bfb",
+        "\u690d\u88ab\u9000\u5316 vs \u6062\u590d\u533a\u5206"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : true
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u4fdd\u8bc1\u76f8\u540c\u6ce2\u6bb5\u96c6\u4e0e\u987a\u5e8f",
+        "when" : "\u4e24\u671f\u6ce2\u6bb5\u6570\u4e0d\u4e00\u81f4"
+      }
+    ],
+    "family" : "change",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "after",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "before",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "height",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "method",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "mode",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "width",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "afterBand1",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "2",
+          "name" : "afterBand2",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "1",
+          "name" : "beforeBand1",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "2",
+          "name" : "beforeBand2",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "angle",
+          "enum" : 
+          [
+            "angle",
+            "quadrant"
+          ],
+          "name" : "mode",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" : 
+    [
+      "Before and after rasters must be co-registered with identical dimensions."
+    ],
+    "schema_version" : 2,
+    "summary" : "CVA \u89d2\u5ea6\u53d8\u4f53\uff1a\u5728\u53d8\u5316\u5f3a\u5ea6\u4e4b\u5916\u8f93\u51fa\u53d8\u5316\u65b9\u5411\u89d2\uff0c\u533a\u5206\u53d8\u5316\u7c7b\u578b\uff08\u589e/\u51cf\u3001\u7c7b\u578b\u8f6c\u6362\u65b9\u5411\uff09\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u53d8\u5316\u65b9\u5411",
+        "CVA \u89d2\u5ea6"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u7528 CVA \u89d2\u5ea6\u628a\u53d8\u5316\u533a\u5206\u4e3a\u7eff\u5316\u4e0e\u9000\u5316\u4e24\u7c7b\u3002"
+    }
+  },
+  "description" : "Change Vector Analysis 2-band directional angle (radians) and semantic quadrant classification.",
+  "display_name" : "Change Vector Analysis Angle & Quadrant",
+  "id" : "rs:change_cva_angle",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "change-detection",
+    "cva",
+    "directional"
+  ]
+}

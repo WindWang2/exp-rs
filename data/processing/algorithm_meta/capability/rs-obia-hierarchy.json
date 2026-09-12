@@ -1,0 +1,261 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u57ce\u5e02",
+        "\u6d41\u57df"
+      ],
+      "scenes" : 
+      [
+        "\u591a\u5c3a\u5ea6\u5206\u6790",
+        "\u5730\u5757\u2192\u533a\u57df\u805a\u5408\u7edf\u8ba1"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "DATASET_NOT_FOUND",
+        "remedy" : "\u5148\u5b8c\u6210\u591a\u5c3a\u5ea6\u5206\u5272",
+        "when" : "\u5c42\u7ea7\u6570\u636e\u7f3a\u5931"
+      }
+    ],
+    "family" : "obia",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "labelsCoarse",
+          "required" : false
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "labelsFine",
+          "required" : false
+        },
+        {
+          "data_kind" : "vector",
+          "name" : "training",
+          "required" : false
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "coarseSegments",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "fineSegments",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "labeledSegments",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "classColors",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "class_id",
+          "name" : "classField",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "classifyLevel",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "100",
+          "name" : "maxIterations",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "svm",
+          "enum" : 
+          [
+            "svm",
+            "normal_bayes",
+            "random_forest",
+            "kmeans",
+            "mlp"
+          ],
+          "name" : "method",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "3",
+          "name" : "minLabelPixels",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "100",
+          "name" : "minRegionSize",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "16",
+          "name" : "mlpHiddenLayerSize",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "500",
+          "name" : "mlpMaxIter",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "outputClass",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "outputCoarse",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "outputFine",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "outputParents",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "outputUncertainty",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "parents",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "15",
+          "name" : "rangeRadius",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "10",
+          "name" : "rfMaxDepth",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "5",
+          "name" : "rfMinSampleCount",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "100",
+          "name" : "rfNumTrees",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "segmentClasses",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "5",
+          "name" : "spatialRadius",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0.100000",
+          "name" : "threshold",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0.010000",
+          "name" : "watershedThreshold",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar"
+    ],
+    "operator_group" : "obia",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u5bf9\u8c61\u5c42\u7ea7\u7ba1\u7406\uff1a\u6784\u5efa/\u67e5\u8be2\u591a\u5c3a\u5ea6\u5bf9\u8c61\u5c42\u7ea7\uff08\u7236-\u5b50\u5bf9\u8c61\u5173\u7cfb\uff09\uff0c\u652f\u6301\u8de8\u5c3a\u5ea6\u805a\u5408\u5206\u6790\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5bf9\u8c61\u5c42\u7ea7",
+        "\u5c3a\u5ea6"
+      ],
+      "courses" : 
+      [
+        "\u9762\u5411\u5bf9\u8c61\u9065\u611f"
+      ],
+      "exercise" : "\u5728\u4e24\u7ea7\u5bf9\u8c61\u5c42\u7ea7\u4e0a\u805a\u5408\u7530\u5757\u4ea7\u91cf\u5230\u884c\u653f\u533a\u3002"
+    }
+  },
+  "description" : "Build or reuse a two-level object hierarchy; optionally classify a level.",
+  "display_name" : "OBIA Hierarchy (OTB)",
+  "id" : "rs:obia_hierarchy",
+  "input" : "raster",
+  "output" : "",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "obia",
+    "hierarchy",
+    "otb"
+  ]
+}

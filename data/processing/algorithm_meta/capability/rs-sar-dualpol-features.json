@@ -1,0 +1,159 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u519c\u7530",
+        "\u690d\u88ab\uff08SAR\uff09"
+      ],
+      "scenes" : 
+      [
+        "\u96f7\u8fbe\u690d\u88ab\u6307\u6570\u751f\u4ea7",
+        "SAR \u5206\u7c7b\u7279\u5f81\u5de5\u7a0b"
+      ]
+    },
+    "band_roles" : 
+    {
+      "vh" : 1,
+      "vv" : 1
+    },
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "POLARIZATION_MISMATCH",
+        "remedy" : "\u786e\u8ba4\u8f93\u5165\u5305\u542b VV \u4e0e VH \u4e24\u4e2a\u901a\u9053",
+        "when" : "\u6570\u636e\u7f3a\u5c11\u53cc\u6781\u5316\u901a\u9053\u4e4b\u4e00"
+      }
+    ],
+    "family" : "sar",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "string",
+          "name" : "feature",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "auto",
+          "enum" : 
+          [
+            "auto",
+            "linear",
+            "db"
+          ],
+          "name" : "domain",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "rvi",
+          "enum" : 
+          [
+            "ratio",
+            "normalized_difference",
+            "log_ratio",
+            "rvi",
+            "span"
+          ],
+          "name" : "feature",
+          "required" : true,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "2",
+          "name" : "vh_band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "1",
+          "name" : "vv_band",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "rvi is the dual-pol Sentinel-1 approximation 4VH/(VV+VH), NOT the quad-pol RVI (needs a second cross-pol channel this platform does not model).",
+      "Nonpositive linear-power values are outside the SAR domain and yield NaN, never clamped."
+    ],
+    "modality" : 
+    [
+      "sar"
+    ],
+    "operator_group" : "sar",
+    "prerequisites" : 
+    [
+      "Input should be radiometrically calibrated backscatter (rs:sar_calibrate)."
+    ],
+    "schema_version" : 2,
+    "summary" : "\u53cc\u6781\u5316\u7279\u5f81\u63d0\u53d6\uff1a\u4ece VV/VH \u53cc\u901a\u9053\u8ba1\u7b97\u6bd4\u503c\u3001\u6781\u5316\u5206\u89e3\u91cf\u7b49\u7279\u5f81\uff0c\u670d\u52a1\u4f5c\u7269\u5206\u7c7b\u4e0e\u5730\u8868\u7c7b\u578b\u8bc6\u522b\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u6781\u5316\u6bd4",
+        "\u53cc\u6781\u5316\u5206\u89e3"
+      ],
+      "courses" : 
+      [
+        "\u5fae\u6ce2\u9065\u611f"
+      ],
+      "exercise" : "\u8ba1\u7b97 VH/VV \u6bd4\u503c\u56fe\u5e76\u5206\u6790\u5176\u5728\u6c34\u7a3b\u751f\u80b2\u671f\u4e2d\u7684\u53d8\u5316\u3002"
+    }
+  },
+  "description" : "Dual-polarization feature rasters (ratio, normalized difference, log ratio, dual-pol RVI, span) from VV/VH calibrated backscatter.",
+  "display_name" : "SAR Dual-Pol Features",
+  "gpu" : false,
+  "id" : "rs:sar_dualpol_features",
+  "input" : "raster",
+  "notes" : "Tile-streamed element-wise features on linear power; dB inputs are converted before the kernel so the output domain is independent of the input domain; bit-exact grade.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "sar",
+    "dual-pol",
+    "rvi"
+  ],
+  "task" : "sar-feature-engineering"
+}

@@ -1,0 +1,149 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269"
+      ],
+      "scenes" : 
+      [
+        "\u5206\u7c7b\u7279\u5f81\u5de5\u7a0b",
+        "\u591a\u6e90\u6570\u636e\uff08\u5149\u5b66+SAR+DEM\uff09\u878d\u5408\u7ec4\u7ec7"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "multipass_streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "GRID_MISMATCH",
+        "remedy" : "\u5148\u7edf\u4e00\u7f51\u683c\uff08rs:align\uff09\u518d\u5806\u53e0",
+        "when" : "\u53c2\u4e0e\u5806\u53e0\u7684\u56fe\u5c42\u7f51\u683c/\u5c3a\u5bf8\u4e0d\u4e00\u81f4"
+      }
+    ],
+    "family" : "classification",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "reference",
+          "required" : false
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "array" : true,
+          "data_kind" : "string",
+          "item_type" : "string",
+          "name" : "features",
+          "required" : true
+        },
+        {
+          "array" : true,
+          "data_kind" : "string",
+          "item_type" : "string",
+          "name" : "modalities",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "feature_cube",
+          "name" : "feature_id",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "features",
+          "required" : true,
+          "type" : "json"
+        },
+        {
+          "default" : "rs:feature_stack",
+          "name" : "generator",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "No hidden resampling: dimension or CRS mismatches fail the run.",
+      "The cube contract is stored as dataset metadata; oversized contracts spill to a '<file>.features.json' sidecar."
+    ],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "multimodal",
+      "dem"
+    ],
+    "operator_group" : "features",
+    "prerequisites" : 
+    [
+      "All inputs co-registered on a common grid (identical dimensions and CRS); align against the reference with gdal:reproject first. Grid mismatches are errors, not resampled.",
+      "\u6240\u6709\u8f93\u5165\u56fe\u5c42\u987b\u540c\u4e00\u7f51\u683c\u4e0e\u8303\u56f4\uff08ADR 0098\uff09\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "\u7279\u5f81\u5806\u53e0\uff1a\u628a\u591a\u4e2a\u6ce2\u6bb5/\u6307\u6570/\u7eb9\u7406\u56fe\u5c42\u6309\u50cf\u5143\u5bf9\u9f50\u5806\u53e0\u4e3a\u591a\u7279\u5f81\u5f71\u50cf\uff0c\u662f\u5206\u7c7b\u524d\u7684\u6807\u51c6\u7ec4\u7ec7\u6b65\u9aa4\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u7279\u5f81\u5806\u53e0",
+        "\u7279\u5f81\u5de5\u7a0b"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u628a NDVI\u3001NDWI\u3001DEM\u3001VV/VH \u5806\u53e0\u4e3a 5 \u7ef4\u7279\u5f81\u5f71\u50cf\u7528\u4e8e\u571f\u5730\u8986\u76d6\u5206\u7c7b\u3002"
+    }
+  },
+  "description" : "Stack multiple co-registered raster bands into a self-describing multimodal feature cube (optical indices, SAR backscatter/texture, DEM derivatives, temporal metrics) with per-band feature identity metadata for model-input matching.",
+  "display_name" : "Feature Cube Builder",
+  "id" : "rs:feature_stack",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "features",
+    "feature cube",
+    "multimodal",
+    "stack"
+  ]
+}

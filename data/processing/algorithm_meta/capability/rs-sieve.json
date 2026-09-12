@@ -1,0 +1,128 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269"
+      ],
+      "scenes" : 
+      [
+        "\u5206\u7c7b\u56fe\u53bb\u566a",
+        "\u7ec6\u788e\u6591\u5757\u6e05\u7406"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u6309\u6700\u5c0f\u5236\u56fe\u56fe\u6591\u6807\u51c6\u8bbe\u7f6e",
+        "when" : "\u9608\u503c\u50cf\u5143\u6570\u8bbe\u7f6e\u8fc7\u5927\u5bfc\u81f4\u771f\u5b9e\u5c0f\u56fe\u6591\u88ab\u5220"
+      }
+    ],
+    "family" : "raster_spatial",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "8",
+          "enum" : 
+          [
+            "4",
+            "8"
+          ],
+          "name" : "connectivity",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "10",
+          "name" : "min_area_pixels",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "thermal",
+      "dem"
+    ],
+    "operator_group" : "raster_spatial",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u7b5b\u9664\uff08sieve\uff09\uff1a\u79fb\u9664\u5c0f\u4e8e\u6307\u5b9a\u50cf\u5143\u6570\u7684\u5b64\u7acb\u6591\u5757\uff0c\u538b\u5236\u6912\u76d0\u566a\u58f0\uff0c\u4fdd\u6301\u5927\u7c7b\u6591\u5757\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u6591\u5757\u7b5b\u9664",
+        "\u6700\u5c0f\u56fe\u6591"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u5bf9 K-Means \u5206\u7c7b\u7ed3\u679c\u6267\u884c 8 \u50cf\u5143\u7b5b\u9664\u5e76\u5bf9\u6bd4\u6591\u5757\u6570\u53d8\u5316\u3002"
+    }
+  },
+  "description" : "Remove foreground components smaller than a minimum area (pixels).",
+  "display_name" : "Sieve",
+  "gpu" : false,
+  "id" : "rs:sieve",
+  "input" : "raster",
+  "notes" : "Removes foreground components smaller than min_area_pixels; reports removedPixels. FullRaster contract.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "raster_spatial"
+  ],
+  "task" : "raster_cleanup"
+}

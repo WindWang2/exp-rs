@@ -1,0 +1,188 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u690d\u88ab",
+        "\u6c34\u4f53",
+        "\u519c\u7530"
+      ],
+      "scenes" : 
+      [
+        "\u957f\u671f\u8d8b\u52bf\u4e0e\u5b63\u8282\u52a8\u6001\u5206\u79bb",
+        "\u57ce\u90ca\u6269\u5f20\u7684\u65f6\u5e8f\u8bc1\u636e\u5206\u6790"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "cost_class" : "O(tile \u00d7 scenes \u00d7 T)",
+      "grade" : "tolerance",
+      "large_raster_safe" : true,
+      "memory_policy" : "multipass_streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "NOT_SUPPORTED",
+        "remedy" : "\u81f3\u5c11\u9700\u8981\u4e24\u4e2a\u5b8c\u6574\u5468\u671f\u7684\u89c2\u6d4b",
+        "when" : "\u65f6\u5e8f\u957f\u5ea6\u4e0d\u8db3\u4ee5\u4f30\u8ba1\u5b63\u8282\u5206\u91cf"
+      }
+    ],
+    "family" : "temporal",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "components",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "sceneCount",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "true",
+          "name" : "apply_qa_masking",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "default" : "0",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "enum" : 
+          [
+            "blue",
+            "green",
+            "red",
+            "red_edge",
+            "nir",
+            "swir1",
+            "swir2",
+            "vv",
+            "vh"
+          ],
+          "name" : "band_role",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "collection",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "components",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "keep_all",
+          "enum" : 
+          [
+            "keep_all",
+            "reject"
+          ],
+          "name" : "duplicate_policy",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "scenes",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "15",
+          "name" : "seasonal_window_days",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "256",
+          "name" : "tile_size",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "10000",
+          "name" : "trend_lambda",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u65f6\u5e8f\u5206\u89e3\uff1a\u628a\u65f6\u5e8f\u62c6\u4e3a\u8d8b\u52bf/\u5b63\u8282/\u6b8b\u5dee\u5206\u91cf\uff08STL \u601d\u60f3\uff09\uff0c\u652f\u6491\u957f\u671f\u8d8b\u52bf\u4e0e\u5b63\u8282\u52a8\u6001\u5206\u79bb\uff08\u5bb9\u5dee\u7ea7\u7b97\u5b50\uff09\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5b63\u8282-\u8d8b\u52bf\u5206\u89e3\uff08Whittaker+\u6c14\u5019\u6001\uff09",
+        "\u5b63\u8282\u5206\u91cf",
+        "\u8d8b\u52bf\u5206\u91cf"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u5e94\u7528\u5206\u6790",
+        "\u65f6\u95f4\u7edf\u8ba1"
+      ],
+      "exercise" : "\u5206\u89e3 5 \u5e74\u6708\u5ea6 NDVI \u65f6\u5e8f\u5e76\u89e3\u8bfb\u8d8b\u52bf\u9879\u7684\u57ce\u5e02\u7eff\u5730\u53d8\u5316\u3002"
+    }
+  },
+  "description" : "Additive seasonal-trend decomposition of a per-pixel time series: a Whittaker-smoothed trend, a day-of-year climatology seasonal component (circularly smoothed over seasonal_window_days) and a remainder, computed on real acquisition day offsets. Bands are grouped per requested component, one band per scene date.",
+  "display_name" : "Temporal Decomposition",
+  "id" : "rs:temporal_decompose",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "temporal",
+    "decomposition",
+    "seasonal"
+  ]
+}

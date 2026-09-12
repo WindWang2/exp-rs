@@ -1,0 +1,122 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269\uff08\u9ad8\u5149\u8c31\uff09"
+      ],
+      "scenes" : 
+      [
+        "\u9ad8\u5149\u8c31\u2192\u591a\u5149\u8c31\u6a21\u62df",
+        "\u8de8\u4f20\u611f\u5668\u5149\u8c31\u7edf\u4e00"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "NOT_SUPPORTED",
+        "remedy" : "\u9009\u62e9\u5185\u7f6e\u4f20\u611f\u5668\u6a21\u677f\u6216\u63d0\u4f9b\u54cd\u5e94\u51fd\u6570",
+        "when" : "\u7f3a\u5c11\u76ee\u6807\u4f20\u611f\u5668\u54cd\u5e94\u51fd\u6570"
+      }
+    ],
+    "family" : "hyperspectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "sourceWavelengths",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "wavelengths",
+          "required" : true,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Linear interpolation between band centers; target wavelengths outside the source range yield NaN."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : 
+    [
+      "Input bands carry WAVELENGTH metadata (product-stacked) or sourceWavelengths is provided."
+    ],
+    "schema_version" : 2,
+    "summary" : "\u5149\u8c31\u91cd\u91c7\u6837\uff1a\u628a\u9ad8\u5149\u8c31\u6570\u636e\u6309\u4f20\u611f\u5668\u5149\u8c31\u54cd\u5e94\u51fd\u6570\u91cd\u91c7\u6837\u5230\u591a\u5149\u8c31\u6ce2\u6bb5\u8bbe\u7f6e\uff0c\u6216\u7edf\u4e00\u4e0d\u540c\u4f20\u611f\u5668\u7684\u6ce2\u6bb5\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5149\u8c31\u54cd\u5e94\u51fd\u6570",
+        "\u6ce2\u6bb5\u6a21\u62df"
+      ],
+      "courses" : 
+      [
+        "\u9ad8\u5149\u8c31\u9065\u611f"
+      ],
+      "exercise" : "\u628a EO-1 Hyperion \u91cd\u91c7\u6837\u5230 Sentinel-2 \u6ce2\u6bb5\u8bbe\u7f6e\u5e76\u5bf9\u6bd4 NDVI\u3002"
+    }
+  },
+  "description" : "Resample spectra onto a target wavelength grid by linear interpolation.",
+  "display_name" : "Spectral Resampling",
+  "id" : "rs:spectral_resample",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "spectral",
+    "hyperspectral",
+    "resampling"
+  ]
+}

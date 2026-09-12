@@ -1,0 +1,154 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u57ce\u5e02"
+      ],
+      "scenes" : 
+      [
+        "\u6f14\u793a\u6027\u53ef\u89c6\u5316\u4ea7\u54c1",
+        "\u6559\u5b66\u6bd4\u8f83\u4e0d\u540c\u878d\u5408\u65b9\u6cd5\u7684\u5149\u8c31\u5931\u771f"
+      ]
+    },
+    "band_roles" : 
+    {
+      "blue" : 1,
+      "green" : 1,
+      "red" : 1
+    },
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "GRID_MISMATCH",
+        "remedy" : "\u5148\u7528 rs:align \u7edf\u4e00\u7f51\u683c",
+        "when" : "\u8f93\u5165\u7f51\u683c\u4e0d\u4e00\u81f4"
+      }
+    ],
+    "family" : "optical",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "ms",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "pan",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "method",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "2",
+          "name" : "blueIdx",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "1",
+          "name" : "greenIdx",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "msWeights",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "0.500000",
+          "name" : "panWeight",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "redIdx",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "multimodal",
+      "optical"
+    ],
+    "operator_group" : "fusion",
+    "prerequisites" : 
+    [
+      "Pan and MS rasters must be co-registered."
+    ],
+    "schema_version" : 2,
+    "summary" : "IHS \u5168\u8272\u9510\u5316\uff1aRGB\u2192IHS \u53d8\u6362\u540e\u4ee5\u5168\u8272\u66ff\u6362\u4eae\u5ea6\u5206\u91cf\uff0c\u8272\u5f69\u9c9c\u8273\u4f46\u5149\u8c31\u5931\u771f\u8f83\u5927\uff0c\u4ec5\u63a8\u8350\u663e\u793a\u7528\u9014\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "IHS \u5f69\u8272\u53d8\u6362",
+        "\u5168\u8272\u9510\u5316"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u91cf\u5316 IHS \u878d\u5408\u524d\u540e\u5404\u6ce2\u6bb5\u53cd\u5c04\u7387\u7684\u504f\u5dee\uff0c\u8bf4\u660e\u5176\u4e0d\u9002\u5408\u5b9a\u91cf\u5206\u6790\u7684\u539f\u56e0\u3002"
+    }
+  },
+  "description" : "Intensity-Hue-Saturation pan-sharpening fusion.",
+  "display_name" : "Fusion IHS",
+  "id" : "rs:fusion_ihs",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "fusion",
+    "pan-sharpening",
+    "enhancement"
+  ]
+}

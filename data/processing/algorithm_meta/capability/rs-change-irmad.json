@@ -1,0 +1,139 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u57ce\u5e02",
+        "\u68ee\u6797"
+      ],
+      "scenes" : 
+      [
+        "\u9ad8\u7cbe\u5ea6\u53d8\u5316\u68c0\u6d4b",
+        "\u53d8\u5316\u6982\u7387\u5236\u56fe"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : true
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "multipass_streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "NOT_SUPPORTED",
+        "remedy" : "\u68c0\u67e5\u8f93\u5165\u6ce2\u6bb5\u76f8\u5173\u6027\u6216\u51cf\u5c11\u6ce2\u6bb5\u6570",
+        "when" : "\u8fed\u4ee3\u4e0d\u6536\u655b\uff08\u6570\u636e\u65b9\u5dee\u7ed3\u6784\u75c5\u6001\uff09"
+      }
+    ],
+    "family" : "change",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "after",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "before",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "numeric",
+          "name" : "mean",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "method",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "stddev",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "0.000100",
+          "name" : "convThreshold",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "20",
+          "name" : "maxIterations",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" : 
+    [
+      "Before and after rasters must have equal band count and dimensions."
+    ],
+    "schema_version" : 2,
+    "summary" : "IR-MAD \u8fed\u4ee3\u52a0\u6743 MAD\uff1a\u5728 MAD \u57fa\u7840\u4e0a\u8fed\u4ee3\u964d\u6743\u4e0d\u53d8\u50cf\u5143\uff0c\u6536\u655b\u51fa\u66f4\u7eaf\u51c0\u7684\u53d8\u5316\u6982\u7387\u56fe\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "IR-MAD",
+        "\u8fed\u4ee3\u52a0\u6743",
+        "\u53d8\u5316\u6982\u7387"
+      ],
+      "courses" : 
+      [
+        "\u7edf\u8ba1\u65b9\u6cd5",
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u8fd0\u884c IR-MAD \u5f97\u5230\u53d8\u5316\u6982\u7387\u56fe\u5e76\u4e0e\u56fa\u5b9a\u9608\u503c\u6cd5\u5bf9\u6bd4\u3002"
+    }
+  },
+  "description" : "Iteratively Reweighted Multivariate Alteration Detection (IR-MAD) with Chi-Square sample weights.",
+  "display_name" : "Iteratively Reweighted MAD",
+  "id" : "rs:change_irmad",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "change-detection",
+    "irmad",
+    "canonical-correlation"
+  ]
+}

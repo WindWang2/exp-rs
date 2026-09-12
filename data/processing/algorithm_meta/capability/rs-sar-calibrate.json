@@ -1,0 +1,168 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269\uff08SAR\uff09"
+      ],
+      "scenes" : 
+      [
+        "SAR \u5904\u7406\u94fe\u7b2c\u4e00\u6b65",
+        "\u591a\u666f SAR \u6570\u636e\u8f90\u5c04\u7edf\u4e00"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "CALIBRATION_MISMATCH",
+        "remedy" : "\u4f7f\u7528\u5b98\u65b9 LUT \u6216\u786e\u8ba4\u4ea7\u54c1\u7c7b\u578b\u53c2\u6570\u6b63\u786e",
+        "when" : "\u5b9a\u6807\u53c2\u6570\uff08LUT\uff09\u7f3a\u5931\u6216\u4e0e\u4ea7\u54c1\u4e0d\u5339\u914d"
+      }
+    ],
+    "family" : "sar",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "modality" : "sar",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "calibration",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "domain",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "1",
+          "name" : "calibrationA",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "incidenceDeg",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "noiseLinear",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "linear_power",
+          "enum" : 
+          [
+            "linear_power",
+            "db"
+          ],
+          "name" : "outputDomain",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "polarizations",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "sensor",
+          "required" : false,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "LUT-based calibration (per-block/per-pixel annotation LUTs) is not applied; use a constant A or pre-calibrated input."
+    ],
+    "modality" : 
+    [
+      "sar"
+    ],
+    "operator_group" : "sar",
+    "prerequisites" : 
+    [
+      "SAR amplitude/DN raster; the calibration constant A must match the product convention (Sentinel-1 GRD: per-beam constant from the annotation, simplified here to one constant per run)."
+    ],
+    "schema_version" : 2,
+    "summary" : "SAR \u8f90\u5c04\u5b9a\u6807\uff1a\u628a SAR L1 \u6570\u636e\u7684 DN \u8f6c\u6362\u4e3a\u5b9a\u6807\u540e\u5411\u6563\u5c04\u7cfb\u6570\uff08sigma0/gamma0/beta0\uff09\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "SAR \u5b9a\u6807",
+        "\u96f7\u8fbe\u622a\u9762"
+      ],
+      "courses" : 
+      [
+        "\u5fae\u6ce2\u9065\u611f"
+      ],
+      "exercise" : "\u5b9a\u6807\u4e24\u666f\u4e0d\u540c\u65e5\u671f Sentinel-1 \u6570\u636e\u5e76\u6bd4\u8f83\u6c34\u7530\u540e\u5411\u6563\u5c04\u7684\u5b63\u8282\u5dee\u5f02\u3002"
+    }
+  },
+  "description" : "Calibrate SAR digital numbers (DN) to sigma0 backscatter (linear power or dB) with optional noise subtraction.",
+  "display_name" : "SAR Radiometric Calibration",
+  "id" : "rs:sar_calibrate",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "sar",
+    "calibration",
+    "radiometry"
+  ]
+}

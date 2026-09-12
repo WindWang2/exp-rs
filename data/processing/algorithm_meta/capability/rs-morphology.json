@@ -1,0 +1,142 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269"
+      ],
+      "scenes" : 
+      [
+        "\u4e91\u63a9\u819c\u4fee\u8865",
+        "\u5efa\u7b51\u6591\u5757\u6574\u5f62"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u4f7f\u7528\u5927\u4e8e 1 \u7684\u5947\u6570\u7a97\u53e3",
+        "when" : "\u7ed3\u6784\u5143\u5c3a\u5bf8\u975e\u6cd5"
+      }
+    ],
+    "family" : "raster_spatial",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "8",
+          "enum" : 
+          [
+            "4",
+            "8"
+          ],
+          "name" : "connectivity",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "1",
+          "name" : "iterations",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "dilate",
+          "enum" : 
+          [
+            "erode",
+            "dilate",
+            "open",
+            "close"
+          ],
+          "name" : "op",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "thermal",
+      "dem"
+    ],
+    "operator_group" : "raster_spatial",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u5f62\u6001\u5b66\u8fd0\u7b97\uff1a\u8150\u8680/\u81a8\u80c0/\u5f00\u95ed\u8fd0\u7b97\u5904\u7406\u4e8c\u503c\u6216\u7070\u5ea6\u6805\u683c\uff0c\u5e38\u7528\u4e8e\u63a9\u819c\u4fee\u6574\u4e0e\u5bf9\u8c61\u5f62\u72b6\u6574\u5f62\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u8150\u8680",
+        "\u81a8\u80c0",
+        "\u5f00\u95ed\u8fd0\u7b97"
+      ],
+      "courses" : 
+      [
+        "\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u5bf9\u6c34\u4f53\u4e8c\u503c\u56fe\u505a\u5f00\u8fd0\u7b97\u53bb\u9664\u7ec6\u788e\u8bef\u68c0\u6591\u5757\u3002"
+    }
+  },
+  "description" : "Binary morphology over a 0/1 mask: erode, dilate, open, close (4/8-connectivity, iterations).",
+  "display_name" : "Morphology",
+  "gpu" : false,
+  "id" : "rs:morphology",
+  "input" : "raster",
+  "notes" : "Shared primitives/morphology kernel (0/1/255 masks, NoData protected, documented replicate borders). FullRaster contract.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "raster_spatial"
+  ],
+  "task" : "raster_cleanup"
+}

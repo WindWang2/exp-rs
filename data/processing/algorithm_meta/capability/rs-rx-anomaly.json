@@ -1,0 +1,116 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5f02\u5e38\u76ee\u6807"
+      ],
+      "scenes" : 
+      [
+        "\u672a\u77e5\u5f02\u5e38\u76ee\u6807\u641c\u7d22",
+        "\u5b89\u5168\u76d1\u6d4b\u7b5b\u67e5"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "multipass_streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INSUFFICIENT_MEMORY",
+        "remedy" : "\u4f7f\u7528\u5c40\u90e8 RX \u6216\u5206\u5e45\u5904\u7406",
+        "when" : "\u5927\u573a\u666f\u5168\u5c40\u534f\u65b9\u5dee\u8ba1\u7b97\u5185\u5b58\u8d85\u9650"
+      }
+    ],
+    "family" : "hyperspectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "numeric",
+          "name" : "max",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "mean",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Global RX uses the whole scene as background; for local background use a windowed variant."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "RX \u5f02\u5e38\u68c0\u6d4b\uff08Reed-Xiaoli\uff09\uff1a\u4ee5\u80cc\u666f\u7edf\u8ba1\u68c0\u6d4b\u4e0e\u5c40\u90e8\u80cc\u666f\u663e\u8457\u4e0d\u540c\u7684\u5f02\u5e38\u50cf\u5143\uff0c\u65e0\u9700\u5148\u9a8c\u76ee\u6807\u5149\u8c31\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "RX \u7b97\u6cd5",
+        "\u5f02\u5e38\u68c0\u6d4b",
+        "\u9a6c\u6c0f\u8ddd\u79bb"
+      ],
+      "courses" : 
+      [
+        "\u9ad8\u5149\u8c31\u9065\u611f"
+      ],
+      "exercise" : "\u5bf9\u6e2f\u53e3\u9ad8\u5149\u8c31\u5f71\u50cf\u8fd0\u884c RX \u5e76\u5b9a\u4f4d\u5f02\u5e38\u505c\u6cca\u76ee\u6807\u3002"
+    }
+  },
+  "description" : "Reed-Xiaoli anomaly detection (Mahalanobis distance to scene background).",
+  "display_name" : "RX Anomaly Detection",
+  "id" : "rs:rx_anomaly",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "rx",
+    "anomaly",
+    "hyperspectral"
+  ]
+}

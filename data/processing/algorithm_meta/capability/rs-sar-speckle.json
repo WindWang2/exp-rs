@@ -1,0 +1,192 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269\uff08SAR\uff09"
+      ],
+      "scenes" : 
+      [
+        "SAR \u53d8\u5316\u68c0\u6d4b\u4e0e\u5206\u7c7b\u524d\u7684\u5fc5\u8981\u6ee4\u6ce2",
+        "\u56fe\u6591\u8fb9\u754c\u4fdd\u6301\u7684\u5e73\u6ed1\u5904\u7406"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "tolerance",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u7a97\u53e3\u53d6 3\u201311 \u7684\u5947\u6570",
+        "when" : "\u6ee4\u6ce2\u7a97\u53e3\u8fc7\u5c0f\u6216\u8fc7\u5927"
+      }
+    ],
+    "family" : "sar",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "modality" : "sar",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "kernelSize",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "method",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "companionScenes",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "1",
+          "name" : "dampingFactor",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "1",
+          "name" : "deviationK",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "3",
+          "name" : "kernelSize",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "1",
+          "name" : "looks",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "lee",
+          "enum" : 
+          [
+            "lee",
+            "enhanced_lee",
+            "frost",
+            "kuan",
+            "gamma_map",
+            "refined_lee",
+            "multitemporal"
+          ],
+          "name" : "method",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "0.250000",
+          "name" : "noiseVariance",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "polarizations",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "sensor",
+          "required" : false,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "The multitemporal gate rejects companion pixels deviating from the reference by more than k \u00b7 localStd (deviationK); gated-out pixels fall back to the temporal mean of the accepted scenes.",
+      "All filters assume intensity (power) data, not amplitude or dB."
+    ],
+    "modality" : 
+    [
+      "sar"
+    ],
+    "operator_group" : "sar",
+    "prerequisites" : 
+    [
+      "SAR intensity raster; calibrate first (rs:sar_calibrate) so filter statistics operate on physically scaled data."
+    ],
+    "schema_version" : 2,
+    "summary" : "SAR \u6591\u70b9\u566a\u58f0\u6291\u5236\uff1a\u63d0\u4f9b Refine-Lee \u7b49\u81ea\u9002\u5e94\u6ee4\u6ce2\uff0c\u4fdd\u6301\u8fb9\u7f18\u7684\u540c\u65f6\u538b\u5236\u76f8\u5e72\u6591\u70b9\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u76f8\u5e72\u6591\u70b9",
+        "\u81ea\u9002\u5e94\u6ee4\u6ce2",
+        "Refine-Lee"
+      ],
+      "courses" : 
+      [
+        "\u5fae\u6ce2\u9065\u611f"
+      ],
+      "exercise" : "\u6bd4\u8f83 3x3 \u4e0e 7x7 Refine-Lee \u6ee4\u6ce2\u5bf9\u7530\u5757\u8fb9\u7f18\u4fdd\u6301\u7684\u6548\u679c\u3002"
+    }
+  },
+  "description" : "Despeckle a SAR intensity raster with Lee, enhanced Lee, Frost, Kuan, Gamma-MAP, refined Lee or multitemporal filtering.",
+  "display_name" : "SAR Speckle Filter",
+  "id" : "rs:sar_speckle",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "sar",
+    "speckle",
+    "filtering"
+  ]
+}

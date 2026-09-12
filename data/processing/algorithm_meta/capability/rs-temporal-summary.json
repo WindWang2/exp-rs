@@ -1,0 +1,166 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269"
+      ],
+      "scenes" : 
+      [
+        "\u65f6\u5e8f\u6570\u636e\u8d28\u91cf\u4f53\u68c0",
+        "\u53d8\u5316\u68c0\u6d4b\u524d\u7684\u6982\u8981\u7edf\u8ba1"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "cost_class" : "O(tile \u00d7 scenes)",
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "multipass_streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "GRID_MISMATCH",
+        "remedy" : "\u5148\u7edf\u4e00\u7f51\u683c\uff08rs:align\uff09\u518d\u505a\u6458\u8981",
+        "when" : "\u65f6\u5e8f\u5404\u671f\u7f51\u683c\u4e0d\u4e00\u81f4"
+      }
+    ],
+    "family" : "temporal",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "sceneCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "validFraction",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "true",
+          "name" : "apply_qa_masking",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "default" : "0",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "enum" : 
+          [
+            "blue",
+            "green",
+            "red",
+            "red_edge",
+            "nir",
+            "swir1",
+            "swir2"
+          ],
+          "name" : "band_role",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "collection",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "keep_all",
+          "enum" : 
+          [
+            "keep_all",
+            "reject"
+          ],
+          "name" : "duplicate_policy",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "false",
+          "name" : "include_median",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "scenes",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "256",
+          "name" : "tile_size",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u65f6\u5e8f\u6458\u8981\u7edf\u8ba1\uff1a\u5bf9\u65f6\u5e8f\u7acb\u65b9\u4f53\u6309\u50cf\u5143\u8f93\u51fa\u6700\u5c0f/\u6700\u5927/\u5747\u503c/\u65b9\u5dee\u7b49\u6982\u8981\u56fe\u5c42\uff0c\u7528\u4e8e\u5feb\u901f\u4f53\u68c0\u65f6\u5e8f\u6570\u636e\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u65f6\u5e8f\u7edf\u8ba1\u91cf",
+        "\u6570\u636e\u6982\u8981"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u5bf9\u5168\u5e74 NDVI \u65f6\u5e8f\u751f\u6210\u6700\u5c0f\u503c/\u65b9\u5dee\u56fe\u5c42\u5b9a\u4f4d\u4e0d\u7a33\u5b9a\u533a\u57df\u3002"
+    }
+  },
+  "description" : "Per-pixel temporal statistics over a multi-date collection: count, valid_count, mean, min, max, stddev (Welford) and optional exact median. Values follow the shared temporal validity contract (NoData/NaN/QA-cloud masked samples are excluded).",
+  "display_name" : "Temporal Summary",
+  "id" : "rs:temporal_summary",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "temporal",
+    "time-series",
+    "statistics"
+  ]
+}

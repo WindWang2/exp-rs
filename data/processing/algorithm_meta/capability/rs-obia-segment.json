@@ -1,0 +1,173 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u57ce\u5e02",
+        "\u519c\u7530",
+        "\u6797\u5730"
+      ],
+      "scenes" : 
+      [
+        "\u5bf9\u8c61\u5c42\u7ea7\u6784\u5efa",
+        "OBIA \u5206\u7c7b\u5e95\u56fe"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u6309 engine \u8c03\u6574\uff1asimple \u5f15\u64ce\u7528 smoothKernel/quantizeBins/minRegionSize\uff0cotb MeanShift \u7528 spatialRadius/rangeRadius/threshold",
+        "when" : "\u5206\u5272\u5f15\u64ce\u53c2\u6570\u914d\u7f6e\u5931\u8861"
+      }
+    ],
+    "family" : "obia",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "string",
+          "name" : "engine",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "segments",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "bands",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "simple",
+          "enum" : 
+          [
+            "simple",
+            "otb",
+            "auto"
+          ],
+          "name" : "engine",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "100",
+          "name" : "maxIterations",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "50",
+          "name" : "minRegionSize",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "32",
+          "name" : "quantizeBins",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "15",
+          "name" : "rangeRadius",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "5",
+          "name" : "smoothKernel",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "5",
+          "name" : "spatialRadius",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0.100000",
+          "name" : "threshold",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar"
+    ],
+    "operator_group" : "obia",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "OBIA \u591a\u5c3a\u5ea6\u5206\u5272\uff1a\u9762\u5411\u5bf9\u8c61\u5206\u6790\u7684\u4e13\u7528\u5206\u5272\u7b97\u5b50\uff0c\u8f93\u51fa\u5bf9\u8c61\u6807\u7b7e\u6805\u683c\uff08\u5bf9\u8c61\u5c42\u7ea7\u7531 rs:obia_hierarchy \u6784\u5efa\uff09\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u591a\u5c3a\u5ea6\u5206\u5272",
+        "\u5bf9\u8c61\u6807\u7b7e\u6805\u683c"
+      ],
+      "courses" : 
+      [
+        "\u9762\u5411\u5bf9\u8c61\u9065\u611f"
+      ],
+      "exercise" : "\u751f\u6210\u7530\u5757\u5c3a\u5ea6\u7684\u5bf9\u8c61\u5206\u5272\u7ed3\u679c\u5e76\u53e0\u52a0\u8fb9\u754c\u53ef\u89c6\u5316\u3002"
+    }
+  },
+  "description" : "Segment imagery into objects (teaching segmenter or OTB MeanShift).",
+  "display_name" : "OBIA Segmentation",
+  "id" : "rs:obia_segment",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "obia",
+    "segmentation"
+  ]
+}
