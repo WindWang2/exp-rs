@@ -2,6 +2,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "exprs/plugin_discovery.h"
+#include "exprs/plugin_host_runtime.h"
 #include "exprs/plugin_loader.h"
 #include "exprs/plugin_registry.h"
 #include "exprs/plugin_validator.h"
@@ -9,11 +10,14 @@
 
 #include "operators/framework/rs_operator_context.h"
 
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <map>
 #include <memory>
 #include <string>
+#include <thread>
 
 using namespace exprs;
 
@@ -265,5 +269,109 @@ TEST_CASE( "loader re-checks entrypoint containment at load time (issue #756)",
             sawEscape = sawEscape || item.code == PluginDiagnosticCode::EntrypointOutsideRoot;
         REQUIRE( sawEscape );
     }
+    fs::remove_all( root );
+}
+
+TEST_CASE( "registry load drops the lock across host-process spawn (issue #928)",
+           "[plugin][registry][lockdrop]" )
+{
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "exprs_test_lockdrop";
+    fs::remove_all( root );
+    const fs::path slowDir = root / "org.test.slow-load";
+    const fs::path peerDir = root / "org.test.peer-load";
+    fs::create_directories( slowDir );
+    fs::create_directories( peerDir );
+
+#ifdef _WIN32
+    const char *entrypoint = "libslow_plugin.dll";
+#else
+    const char *entrypoint = "libslow_plugin.so";
+#endif
+    {
+        std::ofstream lib( ( slowDir / entrypoint ).string(), std::ios::binary );
+        lib << "dummy";
+        std::ofstream manifest( ( slowDir / "plugin.json" ).string(), std::ios::trunc );
+        manifest << R"({
+            "manifest_version": 1,
+            "id": "org.test.slow-load",
+            "name": "Slow",
+            "version": "1.0.0",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+            "abi_version": )" << pluginAbiVersion() << R"(,
+            "runtime": "host-process",
+            "entrypoint": ")" << entrypoint << R"(",
+            "entrypoint_kind": "native",
+            "capabilities": ["operator"],
+            "operators": [{ "id": "test:slow", "display_name": "Slow", "group": "test" }]
+        })";
+    }
+    {
+        std::ofstream manifest( ( peerDir / "plugin.json" ).string(), std::ios::trunc );
+        manifest << R"({
+            "manifest_version": 1,
+            "id": "org.test.peer-load",
+            "name": "Peer",
+            "version": "1.0.0",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+            "abi_version": 1,
+            "entrypoint_kind": "manifest",
+            "operators": []
+        })";
+    }
+
+    class SlowRuntime : public HostProcessRuntime
+    {
+    public:
+        std::atomic<bool> entered{ false };
+        bool loadPlugin( const PluginRecord &, HostServicesV1 &, PluginContributionSink &,
+                         PluginDiagnosticLog & ) override
+        {
+            entered.store( true );
+            std::this_thread::sleep_for( std::chrono::milliseconds( 400 ) );
+            return true;
+        }
+        bool unloadPlugin( const std::string &, PluginDiagnosticLog & ) override { return true; }
+        Json::Value diagnosticsSnapshot() const override { return Json::Value(); }
+    };
+
+    SlowRuntime runtime;
+    RecordingSink sink;
+    PluginRegistryOptions options;
+    options.roots = { root.generic_string() };
+    options.policy.allowThirdPartyNative = true;
+    PluginRegistry &registry = PluginRegistry::instance();
+    registry.setContributionSink( &sink );
+    registry.setHostProcessRuntime( &runtime );
+    registry.configure( options );
+    registry.setEnabled( "org.test.slow-load", true );
+    registry.setEnabled( "org.test.peer-load", true );
+
+    PluginRecord copied;
+    REQUIRE( registry.copyRecord( "org.test.peer-load", copied ) );
+    REQUIRE( copied.id() == "org.test.peer-load" );
+
+    std::thread loader( [ &registry ] { (void)registry.load( "org.test.slow-load" ); } );
+    const auto waitStart = std::chrono::steady_clock::now();
+    while ( !runtime.entered.load()
+            && std::chrono::steady_clock::now() - waitStart < std::chrono::seconds( 2 ) )
+        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    REQUIRE( runtime.entered.load() );
+
+    // record()/refresh() of a *different* plugin must not wait out the
+    // 400 ms spawn. refresh() rebuilds mRecords (the in-flight load may
+    // then abandon); the bound is the lock-drop proof.
+    const auto t0 = std::chrono::steady_clock::now();
+    REQUIRE( registry.record( "org.test.peer-load" ) != nullptr );
+    registry.refresh();
+    REQUIRE( registry.copyRecord( "org.test.peer-load", copied ) );
+    const auto elapsed = std::chrono::steady_clock::now() - t0;
+    REQUIRE( elapsed < std::chrono::milliseconds( 150 ) );
+    REQUIRE( copied.id() == "org.test.peer-load" );
+
+    loader.join();
+    registry.unloadAll();
+    registry.setHostProcessRuntime( nullptr );
+    registry.setContributionSink( nullptr );
     fs::remove_all( root );
 }

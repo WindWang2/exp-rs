@@ -122,25 +122,30 @@ void PluginRuntimeHost::bootstrap( const exprs::PluginRegistryOptions &options )
 void PluginRuntimeHost::installManifestContributions()
 {
     // Caller holds mMutex (bootstrap) — the registries below are independent.
+    // Snapshot ids then copy each record under the registry lock: records()
+    // returns a live vector& that refresh() reallocates (issue #932).
     exprs::PluginRegistry &registry = exprs::PluginRegistry::instance();
-
-    for ( const exprs::PluginRecord &record : registry.records() )
+    for ( const std::string &pluginId : registry.pluginIds() )
     {
-        if ( record.state != exprs::PluginState::Validated && record.state != exprs::PluginState::Loaded )
+        exprs::PluginRecord snapshot;
+        if ( !registry.copyRecord( pluginId, snapshot ) )
             continue;
-        installManifestContributionsFor( record.id() );
+        if ( snapshot.state != exprs::PluginState::Validated
+             && snapshot.state != exprs::PluginState::Loaded )
+            continue;
+        installManifestContributionsFor( pluginId );
     }
 }
 
 void PluginRuntimeHost::installManifestContributionsFor( const std::string &pluginId )
 {
-    const exprs::PluginRecord *record = exprs::PluginRegistry::instance().record( pluginId );
-    if ( !record )
+    exprs::PluginRecord record;
+    if ( !exprs::PluginRegistry::instance().copyRecord( pluginId, record ) )
         return;
-    for ( const exprs::ManifestOperator &op : record->manifest.operators )
+    for ( const exprs::ManifestOperator &op : record.manifest.operators )
         installPluginOperator( pluginId, op );
-    installPluginAgentTools( *record );
-    installPluginModelRuntimes( *record );
+    installPluginAgentTools( record );
+    installPluginModelRuntimes( record );
 }
 
 void PluginRuntimeHost::installPluginOperator( const std::string &pluginId,
@@ -482,26 +487,26 @@ bool PluginRuntimeHost::registerDataProvider(
     const std::string &pluginId, const std::string &providerId,
     std::shared_ptr<exprs::IPluginDataProviderV1> provider )
 {
-    const exprs::ManifestDataProvider *declaration = nullptr;
-    exprs::ManifestDataProvider fallback;
-    fallback.id = providerId;
-    fallback.displayName = providerId;
+    exprs::ManifestDataProvider info;
+    info.id = providerId;
+    info.displayName = providerId;
+    // LOCK ORDER: copy the record BEFORE mMutex — same inversion registerModelRuntime
+    // documents. copyRecord snapshots under the registry lock; a raw
+    // record() pointer would dangle across a concurrent refresh (#932).
     {
-        std::lock_guard<std::mutex> lock( mMutex );
-        const exprs::PluginRecord *record = exprs::PluginRegistry::instance().record( pluginId );
-        if ( record )
+        exprs::PluginRecord snapshot;
+        if ( exprs::PluginRegistry::instance().copyRecord( pluginId, snapshot ) )
         {
-            for ( const exprs::ManifestDataProvider &candidate : record->manifest.dataProviders )
+            for ( const exprs::ManifestDataProvider &candidate : snapshot.manifest.dataProviders )
             {
                 if ( candidate.id == providerId )
                 {
-                    declaration = &candidate;
+                    info = candidate;
                     break;
                 }
             }
         }
     }
-    const exprs::ManifestDataProvider &info = declaration ? *declaration : fallback;
     std::vector<std::string> schemes = info.schemes;
     return DataProviderRegistry::instance().registerProvider(
         pluginId, providerId, info.displayName, info.description, schemes, std::move( provider ) );

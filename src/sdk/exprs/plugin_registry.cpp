@@ -11,6 +11,7 @@
 #include <fstream>
 #include <mutex>
 #include <sstream>
+#include <utility>
 
 #include "exprs/plugin_validator.h"
 
@@ -190,6 +191,20 @@ std::string PluginRegistry::pluginDirectoryFor( const std::string &pluginId ) co
     return {};
 }
 
+bool PluginRegistry::copyRecord( const std::string &pluginId, PluginRecord &out ) const
+{
+    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+    for ( const PluginRecord &candidate : mRecords )
+    {
+        if ( candidate.id() == pluginId )
+        {
+            out = candidate;
+            return true;
+        }
+    }
+    return false;
+}
+
 PluginRecord *PluginRegistry::record( const std::string &pluginId )
 {
     std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
@@ -294,142 +309,207 @@ void PluginRegistry::applyPolicyAndIndex()
 
 bool PluginRegistry::load( const std::string &pluginId )
 {
-    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-    return loadUnlocked( pluginId );
-}
+    // Lock-drop protocol (issue #928), mirroring unload(): mark Loading,
+    // copy what the runtime needs, drop gRegistryMutex across spawn /
+    // plugin.load / dlopen, re-acquire to publish, then talk to the sink
+    // WITHOUT the registry lock (pluginLoaded takes PluginRuntimeHost::mMutex;
+    // bootstrap holds that mutex then configure() wants gRegistryMutex).
+    enum class Kind
+    {
+        Manifest,
+        HostProcess,
+        InProcess,
+    };
 
-bool PluginRegistry::loadUnlocked( const std::string &pluginId )
-{
-    // Caller holds gRegistryMutex.
-    PluginRecord *entry = record( pluginId );
-    if ( !entry )
+    Kind kind = Kind::Manifest;
+    PluginRecord snapshot;
+    HostProcessRuntime *runtime = nullptr;
+    PluginContributionSink *sink = nullptr;
+    HostServicesV1 *services = nullptr;
+
     {
-        mDiagnostics.add( PluginDiagnosticCode::EntrypointMissing,
-                          PluginDiagnosticSeverity::Error, "unknown plugin", pluginId );
-        return false;
-    }
-    if ( entry->state == PluginState::Loaded )
-        return true;
-    if ( entry->state == PluginState::Loading )
-        return false;
-    if ( !entry->loadable() )
-    {
-        mDiagnostics.add( PluginDiagnosticCode::TrustRejected, PluginDiagnosticSeverity::Error,
-                          "plugin is not loadable in state "
-                              + std::string( pluginStateName( entry->state ) ),
-                          pluginId );
-        return false;
-    }
-    if ( std::find( mDisabledIds.begin(), mDisabledIds.end(), pluginId ) != mDisabledIds.end() )
-    {
-        mDiagnostics.add( PluginDiagnosticCode::PluginDisabled, PluginDiagnosticSeverity::Error,
-                          "plugin is disabled by the user", pluginId );
-        return false;
-    }
-    if ( entry->manifest.entrypointKind == PluginEntrypointKind::Python )
-    {
-        // Python plugins are hosted by the Python worker host (PluginHost /
-        // PythonPluginHost, metadata.txt + classFactory), which owns the
-        // out-of-process pool. The manifest is the discovery/doctor index;
-        // pretending to "load" here would hide the real hosting path.
-        mDiagnostics.add( PluginDiagnosticCode::EntrypointMissing,
-                          PluginDiagnosticSeverity::Warning,
-                          "python plugins are hosted by the Python worker host "
-                          "(PluginHost); registry load is a no-op",
-                          pluginId );
-        entry->state = PluginState::Validated;
-        return false;
-    }
-    if ( entry->manifest.entrypointKind == PluginEntrypointKind::Manifest )
-    {
-        // Manifest-kind plugins: every contribution is pure-manifest
-        // (external tools); nothing to dlopen, so loading is a host-side
-        // bookkeeping op. The host (re)installs the manifest contributions
-        // here — unload revoked them, so a reload must restore them (#755).
-        if ( mSink )
-            mSink->pluginLoaded( pluginId );
-        LoadedPlugin hosted;
-        hosted.pluginId = pluginId;
-        mLoaded.push_back( std::move( hosted ) );
-        entry->state = PluginState::Loaded;
-        return true;
-    }
-    if ( entry->manifest.runtime == PluginRuntimeKind::HostProcess )
-    {
-        // Isolation runtime 5.0: the plugin runs in exprs_plugin_host_worker.
-        if ( !mHostProcessRuntime )
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        PluginRecord *entry = record( pluginId );
+        if ( !entry )
         {
-            mDiagnostics.add( PluginDiagnosticCode::HostProcessUnavailable,
-                              PluginDiagnosticSeverity::Error,
-                              "manifest requests runtime 'host-process' but no "
-                              "host-process runtime is installed in this process",
+            mDiagnostics.add( PluginDiagnosticCode::EntrypointMissing,
+                              PluginDiagnosticSeverity::Error, "unknown plugin", pluginId );
+            return false;
+        }
+        if ( entry->state == PluginState::Loaded )
+            return true;
+        if ( entry->state == PluginState::Loading )
+            return false;
+        if ( !entry->loadable() )
+        {
+            mDiagnostics.add( PluginDiagnosticCode::TrustRejected, PluginDiagnosticSeverity::Error,
+                              "plugin is not loadable in state "
+                                  + std::string( pluginStateName( entry->state ) ),
                               pluginId );
-            entry->state = PluginState::Failed;
             return false;
         }
-        if ( !mSink )
+        if ( std::find( mDisabledIds.begin(), mDisabledIds.end(), pluginId )
+             != mDisabledIds.end() )
         {
-            mDiagnostics.add( PluginDiagnosticCode::RegistrationFailed,
-                              PluginDiagnosticSeverity::Error,
-                              "no contribution sink installed", pluginId );
+            mDiagnostics.add( PluginDiagnosticCode::PluginDisabled,
+                              PluginDiagnosticSeverity::Error, "plugin is disabled by the user",
+                              pluginId );
             return false;
         }
-        entry->state = PluginState::Loading;
-        const bool ok =
-            mHostProcessRuntime->loadPlugin( *entry, *mServices, *mSink, mDiagnostics );
-        if ( ok )
+        if ( entry->manifest.entrypointKind == PluginEntrypointKind::Python )
         {
-            mHostProcessLoaded.push_back( pluginId );
+            // Python plugins are hosted by the Python worker host (PluginHost /
+            // PythonPluginHost, metadata.txt + classFactory), which owns the
+            // out-of-process pool. The manifest is the discovery/doctor index;
+            // pretending to "load" here would hide the real hosting path.
+            mDiagnostics.add( PluginDiagnosticCode::EntrypointMissing,
+                              PluginDiagnosticSeverity::Warning,
+                              "python plugins are hosted by the Python worker host "
+                              "(PluginHost); registry load is a no-op",
+                              pluginId );
+            entry->state = PluginState::Validated;
+            return false;
+        }
+        if ( entry->manifest.entrypointKind == PluginEntrypointKind::Manifest )
+        {
+            // Manifest-kind plugins: every contribution is pure-manifest
+            // (external tools); nothing to dlopen. Publish under the lock,
+            // then pluginLoaded AFTER dropping it (#755 restore + #928).
+            LoadedPlugin hosted;
+            hosted.pluginId = pluginId;
+            mLoaded.push_back( std::move( hosted ) );
             entry->state = PluginState::Loaded;
-            mSink->pluginLoaded( pluginId );
+            sink = mSink;
+        }
+        else if ( entry->manifest.runtime == PluginRuntimeKind::HostProcess )
+        {
+            if ( !mHostProcessRuntime )
+            {
+                mDiagnostics.add( PluginDiagnosticCode::HostProcessUnavailable,
+                                  PluginDiagnosticSeverity::Error,
+                                  "manifest requests runtime 'host-process' but no "
+                                  "host-process runtime is installed in this process",
+                                  pluginId );
+                entry->state = PluginState::Failed;
+                return false;
+            }
+            if ( !mSink )
+            {
+                mDiagnostics.add( PluginDiagnosticCode::RegistrationFailed,
+                                  PluginDiagnosticSeverity::Error,
+                                  "no contribution sink installed", pluginId );
+                return false;
+            }
+            entry->state = PluginState::Loading;
+            snapshot = *entry;
+            runtime = mHostProcessRuntime;
+            sink = mSink;
+            services = mServices.get();
+            kind = Kind::HostProcess;
         }
         else
         {
-            if ( mSink )
-                mSink->revokePlugin( pluginId );
-            entry->state = PluginState::Failed;
+            if ( !mSink )
+            {
+                mDiagnostics.add( PluginDiagnosticCode::RegistrationFailed,
+                                  PluginDiagnosticSeverity::Error,
+                                  "no contribution sink installed", pluginId );
+                return false;
+            }
+            entry->state = PluginState::Loading;
+            snapshot = *entry;
+            sink = mSink;
+            services = mServices.get();
+            kind = Kind::InProcess;
         }
-        return ok;
     }
-    if ( !mSink )
+
+    if ( kind == Kind::Manifest )
     {
-        mDiagnostics.add( PluginDiagnosticCode::RegistrationFailed,
-                          PluginDiagnosticSeverity::Error,
-                          "no contribution sink installed", pluginId );
-        return false;
+        if ( sink )
+            sink->pluginLoaded( pluginId );
+        return true;
     }
-    entry->state = PluginState::Loading;
-    if ( !mLoader )
-        mLoader = std::make_unique<PluginLoader>();
-    const bool ok = mLoader->load( *entry, *mServices, *mSink, mDiagnostics );
-    if ( ok )
-    {
-        mLoaded.push_back( mLoader->take() );
-        entry->state = PluginState::Loaded;
-        // Reopen the execution barrier for the fresh load (a previous unload
-        // closed it) and let the host refresh manifest contributions (#755).
-        mSink->pluginLoaded( pluginId );
-    }
+
+    bool ok = false;
+    LoadedPlugin hosted;
+    PluginDiagnosticLog localLog;
+    PluginLoader localLoader;
+    if ( kind == Kind::HostProcess )
+        ok = runtime->loadPlugin( snapshot, *services, *sink, localLog );
     else
     {
-        // Partial registrations must not outlive the failed load.
-        if ( mSink )
-            mSink->revokePlugin( pluginId );
-        entry->state = PluginState::Failed;
+        ok = localLoader.load( snapshot, *services, *sink, localLog );
+        if ( ok )
+            hosted = localLoader.take();
     }
-    return ok;
+
+    bool publish = false;
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        mDiagnostics.merge( localLog );
+        PluginRecord *entry = record( pluginId );
+        const bool stillLoading = entry && entry->state == PluginState::Loading;
+        if ( stillLoading )
+        {
+            if ( ok )
+            {
+                if ( kind == Kind::HostProcess )
+                    mHostProcessLoaded.push_back( pluginId );
+                else
+                    mLoaded.push_back( std::move( hosted ) );
+                entry->state = PluginState::Loaded;
+                publish = true;
+            }
+            else
+            {
+                entry->state = PluginState::Failed;
+            }
+        }
+    }
+
+    if ( publish )
+    {
+        if ( sink )
+            sink->pluginLoaded( pluginId );
+        // Unload may have won between publish and pluginLoaded: drop any
+        // contributions the host just reinstalled for a plugin that is gone.
+        if ( !isLoaded( pluginId ) && sink )
+            sink->revokePlugin( pluginId );
+        return isLoaded( pluginId );
+    }
+
+    if ( sink )
+        sink->revokePlugin( pluginId );
+    if ( ok )
+    {
+        PluginDiagnosticLog teardownLog;
+        if ( kind == Kind::HostProcess && runtime )
+            runtime->unloadPlugin( pluginId, teardownLog );
+        else if ( kind == Kind::InProcess )
+            localLoader.unload( hosted, teardownLog );
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        mDiagnostics.merge( teardownLog );
+    }
+    return false;
 }
 
 std::vector<std::string> PluginRegistry::loadAllValidated()
 {
-    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-    std::vector<std::string> loadedIds;
-    for ( PluginRecord &entry : mRecords )
+    std::vector<std::string> candidates;
     {
-        if ( entry.state != PluginState::Validated )
-            continue;
-        if ( loadUnlocked( entry.id() ) )
-            loadedIds.push_back( entry.id() );
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        for ( const PluginRecord &entry : mRecords )
+        {
+            if ( entry.state == PluginState::Validated )
+                candidates.push_back( entry.id() );
+        }
+    }
+    std::vector<std::string> loadedIds;
+    for ( const std::string &id : candidates )
+    {
+        if ( load( id ) )
+            loadedIds.push_back( id );
     }
     return loadedIds;
 }
@@ -531,7 +611,16 @@ bool PluginRegistry::unload( const std::string &pluginId, int timeoutMs )
                                           return entry.pluginId == pluginId;
                                       } );
         if ( iterator == mLoaded.end() )
+        {
+            // In-flight load() dropped the lock after marking Loading: abort
+            // so the loader will not publish Loaded on re-acquire (#928).
+            if ( PluginRecord *entry = record( pluginId ) )
+            {
+                if ( entry->state == PluginState::Loading )
+                    entry->state = PluginState::Unloaded;
+            }
             return false;
+        }
         if ( PluginRecord *entry = record( pluginId ) )
             entry->state = PluginState::Quiescing;
     }
@@ -715,10 +804,15 @@ void PluginRegistry::unloadAll()
 
 bool PluginRegistry::ensureLoaded( const std::string &pluginId )
 {
-    std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
-    if ( findLoaded( mLoaded, pluginId ) )
-        return true;
-    return loadUnlocked( pluginId );
+    {
+        std::lock_guard<std::recursive_mutex> lock( gRegistryMutex );
+        if ( findLoaded( mLoaded, pluginId ) )
+            return true;
+        if ( std::find( mHostProcessLoaded.begin(), mHostProcessLoaded.end(), pluginId )
+             != mHostProcessLoaded.end() )
+            return true;
+    }
+    return load( pluginId );
 }
 
 bool PluginRegistry::isLoaded( const std::string &pluginId ) const

@@ -44,6 +44,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace sicnu::processing
 {
@@ -148,11 +149,13 @@ class LocalWorkerPool
     /// Pops one drivable idle worker for @p self (QProcess-affine, lifetime
     /// budget left), or nullptr. m_mutex HELD. Workers to retire (lifetime
     /// exhausted, dead process, or the force-retired oldest idle worker under
-    /// slot pressure) come back via @a teardownOut with their m_alive
-    /// accounting already applied; the CALLER tears them down after releasing
-    /// the mutex — process waits must never happen under m_mutex (P1).
+    /// slot pressure) are appended to @a teardownOut with their m_alive
+    /// accounting already applied; the CALLER tears them ALL down after
+    /// releasing the mutex — process waits must never happen under m_mutex
+    /// (P1). A vector, not a single unique_ptr: two exhausted idle workers
+    /// in one scan must not overwrite each other (#932).
     std::unique_ptr<Worker> takeIdleWorkerLocked( Qt::HANDLE self,
-                                                  std::unique_ptr<Worker> &teardownOut );
+                                                  std::vector<std::unique_ptr<Worker>> &teardownOut );
     /// Spawns + handshakes a worker for the calling thread (worst case ~30s).
     /// NO pool lock held. m_config is read without the mutex: the shared pool
     /// is never restarted while running; direct-use pools must not call

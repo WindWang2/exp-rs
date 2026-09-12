@@ -288,6 +288,39 @@ Json::Value runOperator( Stack &stack, const char *operatorId, const Json::Value
 
 } // namespace
 
+TEST_CASE( "host-process load does not stall record()/refresh of a peer (issue #928)",
+           "[hostprocess][lockdrop]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    std::thread loader( [] { (void)loadOrExplain( kPluginId ); } );
+    bool sawLoading = false;
+    const auto waitStart = std::chrono::steady_clock::now();
+    while ( std::chrono::steady_clock::now() - waitStart < std::chrono::seconds( 5 ) )
+    {
+        PluginRecord snapshot;
+        if ( registry.copyRecord( kPluginId, snapshot )
+             && snapshot.state == PluginState::Loading )
+        {
+            sawLoading = true;
+            break;
+        }
+        if ( registry.isLoaded( kPluginId ) )
+            break;
+        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    }
+    if ( sawLoading )
+    {
+        const auto t0 = std::chrono::steady_clock::now();
+        (void)registry.record( "org.exprs.test.missing-peer" );
+        registry.refresh();
+        REQUIRE( std::chrono::steady_clock::now() - t0 < std::chrono::milliseconds( 250 ) );
+    }
+    loader.join();
+    if ( registry.isLoaded( kPluginId ) )
+        REQUIRE( registry.unload( kPluginId ) );
+}
+
 TEST_CASE( "host-process plugin loads and executes over the worker", "[hostprocess]" )
 {
     Stack stack;

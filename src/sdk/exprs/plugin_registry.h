@@ -13,9 +13,13 @@
  *   ensureLoaded()         the lazy seam host-side factories call on first
  *                          use of a manifest-declared contribution.
  *
- * Thread safety: methods are serialized internally. Host-side registration
- * into application registries happens inside load() under the same lock, so
- * registration callbacks must not re-enter the registry.
+ * Thread safety: public methods serialize record mutation on an internal
+ * mutex. load() marks the record Loading, copies what the runtime needs,
+ * and drops that mutex across spawn / plugin.load / dlopen so a slow plugin
+ * cannot stall record()/refresh() of other plugins. Contribution-sink
+ * callbacks (pluginLoaded/revokePlugin) run WITHOUT the registry mutex;
+ * they must not assume it is held, and must never take a host mutex while a
+ * caller still holds the registry lock (AB-BA with PluginRuntimeHost::bootstrap).
  ***************************************************************************/
 #pragma once
 
@@ -81,9 +85,11 @@ public:
     /// caller's side, so a concurrent refresh (which reallocates the vector)
     /// makes later dereferences a use-after-free. Gates that only need the
     /// access declaration or the install directory must take copies through
-    /// these instead of holding the raw pointer.
+    /// these instead of holding the raw pointer. copyRecord() snapshots the
+    /// whole record under the lock for callers that need operators/tools.
     Json::Value accessDeclarationFor( const std::string &pluginId ) const;
     std::string pluginDirectoryFor( const std::string &pluginId ) const;
+    bool copyRecord( const std::string &pluginId, PluginRecord &out ) const;
     PluginRecord *record( const std::string &pluginId );
     std::vector<std::string> pluginIds() const;
     const PluginDiagnosticLog &diagnostics() const { return mDiagnostics; }
@@ -130,8 +136,6 @@ private:
     void applyPolicyAndIndex();
     /// Scan+validate+policy pass; caller must hold the registry mutex.
     void refreshUnlocked();
-    /// Core load path; caller must hold the registry mutex.
-    bool loadUnlocked( const std::string &pluginId );
     std::string userIndexPath() const;
     void loadUserIndex();
     void saveUserIndex() const;

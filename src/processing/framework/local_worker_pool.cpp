@@ -147,11 +147,11 @@ void LocalWorkerPool::teardownWorker( std::unique_ptr<Worker> worker )
 
 // m_mutex HELD. Pops one drivable (QProcess-affine to @p self, lifetime
 // budget left) idle worker. Lifetime-exhausted owned workers and, under slot
-// pressure, the oldest foreign idle worker are moved to @a teardownOut with
-// their m_alive accounting already applied; the CALLER tears them down after
-// releasing the mutex (P1: process waits must never happen under m_mutex).
+// pressure, the oldest foreign idle worker are appended to @a teardownOut with
+// their m_alive accounting already applied; the CALLER tears them ALL down
+// after releasing the mutex (P1: process waits must never happen under m_mutex).
 std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::takeIdleWorkerLocked(
-    Qt::HANDLE self, std::unique_ptr<Worker> &teardownOut )
+    Qt::HANDLE self, std::vector<std::unique_ptr<Worker>> &teardownOut )
 {
     std::unique_ptr<Worker> ownedHealthy;
     std::deque<std::unique_ptr<Worker>> keep;
@@ -176,7 +176,7 @@ std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::takeIdleWorkerLocked(
             if ( m_alive > 0 )
                 --m_alive;
             m_idleChanged.notify_all();
-            teardownOut = std::move( worker );
+            teardownOut.push_back( std::move( worker ) );
             continue;
         }
         keep.push_back( std::move( worker ) );
@@ -192,7 +192,7 @@ std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::takeIdleWorkerLocked(
         if ( m_alive > 0 )
             --m_alive;
         m_idleChanged.notify_all();
-        teardownOut = std::move( victim );
+        teardownOut.push_back( std::move( victim ) );
     }
     m_idle = std::move( keep );
     return ownedHealthy;
@@ -501,14 +501,14 @@ Json::Value LocalWorkerPool::run( const std::string &algorithmId, const Json::Va
     for ( ;; )
     {
         std::unique_ptr<Worker> worker;
-        std::unique_ptr<Worker> teardown;
+        std::vector<std::unique_ptr<Worker>> teardowns;
         bool reserveSpawn = false;
         bool waitRequired = false;
         {
             std::unique_lock<std::mutex> lock( m_mutex );
             if ( !m_running || m_destroying )
                 throw std::runtime_error( "worker pool: pool is not running" );
-            worker = takeIdleWorkerLocked( self, teardown );
+            worker = takeIdleWorkerLocked( self, teardowns );
             if ( !worker )
             {
                 if ( m_alive < m_config.maxWorkers )
@@ -520,7 +520,7 @@ Json::Value LocalWorkerPool::run( const std::string &algorithmId, const Json::Va
                     ++m_alive;
                     reserveSpawn = true;
                 }
-                else if ( teardown )
+                else if ( !teardowns.empty() )
                 {
                     // The force-retired victim freed a slot: use it.
                     --m_alive;
@@ -534,8 +534,10 @@ Json::Value LocalWorkerPool::run( const std::string &algorithmId, const Json::Va
         }
         // Teardown AFTER unlock: bounded waits on an idle worker (no
         // in-flight job → nothing to lose by the short kill ladder).
-        if ( teardown )
-            teardownWorker( std::move( teardown ) );
+        // Drain every exhausted victim — a single unique_ptr used to drop
+        // the first of two without teardownWorker (#932).
+        for ( auto &victim : teardowns )
+            teardownWorker( std::move( victim ) );
         if ( waitRequired )
         {
             // All slots busy and nothing reclaimable: wait for a release

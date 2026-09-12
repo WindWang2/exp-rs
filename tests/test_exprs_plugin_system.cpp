@@ -12,15 +12,23 @@ static void portableSetenv(const char *key, const char *value)
 
 #include "exprs/external_process.h"
 #include "exprs/plugin_discovery.h"
+#include "exprs/plugin_host_runtime.h"
 #include "exprs/plugin_index.h"
+#include "exprs/plugin_interface.h"
+#include "exprs/plugin_loader.h"
 #include "exprs/plugin_package.h"
 #include "exprs/plugin_permissions.h"
 #include "exprs/plugin_registry.h"
 #include "exprs/plugin_validator.h"
 #include "exprs/version.h"
 
+#include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <memory>
+#include <thread>
 
 #include <sys/stat.h>
 #ifdef _WIN32
@@ -594,4 +602,100 @@ TEST_CASE( "offline index scans, filters compatibility and honors pins",
     }
 
     ::system( "rm -rf /tmp/exprs_test_index" );
+}
+
+TEST_CASE( "registry load drops the lock so a peer record() is not stalled (issue #928)",
+           "[plugin][registry][lockdrop]" )
+{
+    RegistryGuard guard;
+    const std::string root = "/tmp/exprs_test_lockdrop_sys";
+    ::system( ( "rm -rf " + root ).c_str() );
+    ::mkdir( root.c_str(), 0755 );
+    ::mkdir( ( root + "/org.test.slow-sys" ).c_str(), 0755 );
+    makePluginDir( root, "org.test.peer-sys", "peer:echo" );
+    {
+        std::ofstream lib( root + "/org.test.slow-sys/libslow.so", std::ios::binary );
+        lib << "dummy";
+        std::ofstream manifest( root + "/org.test.slow-sys/plugin.json", std::ios::trunc );
+        manifest << R"({
+            "manifest_version": 1,
+            "id": "org.test.slow-sys",
+            "name": "Slow",
+            "version": "1.0.0",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+            "abi_version": 1,
+            "runtime": "host-process",
+            "entrypoint": "libslow.so",
+            "entrypoint_kind": "native",
+            "capabilities": ["operator"],
+            "operators": [{ "id": "test:slow-sys", "display_name": "Slow", "group": "test" }]
+        })";
+    }
+
+    class EmptySink : public PluginContributionSink
+    {
+    public:
+        bool registerOperatorFactory(
+            const std::string &, const std::string &,
+            std::function<std::unique_ptr<sicnu::operators::RSOperator>()> ) override
+        {
+            return true;
+        }
+        bool registerDataProvider( const std::string &, const std::string &,
+                                   std::shared_ptr<IPluginDataProviderV1> ) override
+        {
+            return true;
+        }
+        bool registerModelRuntime( const std::string &, const std::string &,
+                                   PluginModelRuntimeFactoryV1 ) override
+        {
+            return true;
+        }
+        bool registerAgentTool( const std::string &, const std::string &,
+                                std::shared_ptr<IPluginAgentToolV1> ) override
+        {
+            return true;
+        }
+    };
+    class SlowRuntime : public HostProcessRuntime
+    {
+    public:
+        std::atomic<bool> entered{ false };
+        bool loadPlugin( const PluginRecord &, HostServicesV1 &, PluginContributionSink &,
+                         PluginDiagnosticLog & ) override
+        {
+            entered.store( true );
+            std::this_thread::sleep_for( std::chrono::milliseconds( 400 ) );
+            return true;
+        }
+        bool unloadPlugin( const std::string &, PluginDiagnosticLog & ) override { return true; }
+        Json::Value diagnosticsSnapshot() const override { return Json::Value(); }
+    };
+
+    EmptySink sink;
+    SlowRuntime runtime;
+    PluginRegistryOptions options;
+    options.roots = { root };
+    options.policy.allowThirdPartyNative = true;
+    auto &registry = PluginRegistry::instance();
+    registry.setContributionSink( &sink );
+    registry.setHostProcessRuntime( &runtime );
+    registry.configure( options );
+
+    std::thread loader( [ &registry ] { (void)registry.load( "org.test.slow-sys" ); } );
+    const auto waitStart = std::chrono::steady_clock::now();
+    while ( !runtime.entered.load()
+            && std::chrono::steady_clock::now() - waitStart < std::chrono::seconds( 2 ) )
+        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    REQUIRE( runtime.entered.load() );
+
+    const auto t0 = std::chrono::steady_clock::now();
+    REQUIRE( registry.record( "org.test.peer-sys" ) != nullptr );
+    registry.refresh();
+    const auto elapsed = std::chrono::steady_clock::now() - t0;
+    REQUIRE( elapsed < std::chrono::milliseconds( 150 ) );
+
+    loader.join();
+    registry.setHostProcessRuntime( nullptr );
+    ::system( ( "rm -rf " + root ).c_str() );
 }

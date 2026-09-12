@@ -207,6 +207,40 @@ TEST_CASE( "worker pool recycles a worker past its lifetime budget",
     pool.shutdown();
 }
 
+TEST_CASE( "worker pool shuts down every exhausted idle worker in one scan (issue #932)",
+           "[worker_pool][recycle][idle]" )
+{
+    int argc = 1;
+    static char arg0[] = "test_worker_host";
+    char *argv[] = { arg0, nullptr };
+    if ( !QCoreApplication::instance() )
+        new QCoreApplication( argc, argv );
+
+    LocalWorkerPoolConfig config;
+    config.workerProgram = QStringLiteral( SICNU_WORKER_EXE );
+    config.maxWorkers = 2;
+    config.minWarmWorkers = 2;
+    config.maxJobsPerWorker = 64;
+    config.idleRecycleAfter = std::chrono::milliseconds( 20 );
+    LocalWorkerPool pool;
+    REQUIRE( pool.start( config ) );
+    std::this_thread::sleep_for( std::chrono::milliseconds( 80 ) );
+
+    static QTemporaryDir stableDir;
+    const QString input = stableDir.filePath( "idle-two-labels.tif" );
+    writeLabelRaster( input );
+    Json::Value params;
+    params["input"] = input.toStdString();
+    params["output"] = stableDir.filePath( "idle-two-out.tif" ).toStdString();
+    params["recode_map"] = "{\"1\":5,\"2\":4,\"3\":3,\"4\":2,\"5\":1}";
+    REQUIRE( pool.run( "rs:recode", params ).isObject() );
+    // Both warm workers sat past idleRecycleAfter; one scan must retire
+    // both (the unique_ptr overwrite used to destroy the first without
+    // teardownWorker).
+    REQUIRE( pool.health().totalRecycles >= 2 );
+    pool.shutdown();
+}
+
 TEST_CASE( "worker pool reports a typed failure for a broken worker program",
            "[worker_pool][crash]" )
 {

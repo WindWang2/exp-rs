@@ -36,8 +36,10 @@ public:
 
     /// Launches (or reuses) the worker for @p record.manifest.id, performs
     /// the handshake, drives plugin.load and registers proxy contributions
-    /// into @p sink. Called by the registry with its lifecycle lock held —
-    /// implementations must not re-enter the registry.
+    /// into @p sink. Called by the registry WITHOUT its lifecycle lock
+    /// (issue #928): @p record is a snapshot, and implementations may consult
+    /// the registry only through copy accessors. Do not assume a PluginRecord
+    /// pointer remains valid across this call.
     virtual bool loadPlugin( const PluginRecord &record, HostServicesV1 &services,
                              PluginContributionSink &sink, PluginDiagnosticLog &log ) = 0;
 
