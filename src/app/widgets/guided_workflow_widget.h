@@ -12,8 +12,9 @@
 
 #include <json/json.h>
 
+#include <memory>
+
 #include "lab_spec_loader.h"
-#include "shell/gui_job_adapter.h"
 
 class QLabel;
 class QPushButton;
@@ -21,6 +22,8 @@ class QListWidget;
 class QTextBrowser;
 class QVBoxLayout;
 class QgisDesktopWindow;
+
+namespace sicnu::app { class GuiJobHandle; }
 
 /**
  * A single step in a guided workflow. Operator-bound steps carry
@@ -63,6 +66,8 @@ class GuidedWorkflowWidget : public QWidget
 
 public:
     explicit GuidedWorkflowWidget(QgisDesktopWindow *mainWindow, QWidget *parent = nullptr);
+    // Out-of-line: owns the GuiJobHandle via unique_ptr of an incomplete type.
+    ~GuidedWorkflowWidget() override;
 
     // Load available workflows from the LabSpec directory
     void loadWorkflows();
@@ -107,7 +112,7 @@ private:
     // State
     lab::LabLoadResult m_loadResult;
     QList<Workflow> m_workflows;
-    sicnu::app::GuiJobHandle m_jobHandle;
+    std::unique_ptr<sicnu::app::GuiJobHandle> m_jobHandle;
     int m_currentWorkflowIndex = -1;
     int m_currentStepIndex = 0;
     bool m_workflowActive = false;

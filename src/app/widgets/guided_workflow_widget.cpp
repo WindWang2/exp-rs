@@ -273,7 +273,7 @@ void GuidedWorkflowWidget::onRunStepAction()
 
 void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
 {
-    if ( m_jobHandle.isRunning() )
+    if ( m_jobHandle->isRunning() )
     {
         showRunMessage( tr( "已有任务正在运行，请等待其完成后再执行下一步。" ), true );
         return;
@@ -341,12 +341,12 @@ void GuidedWorkflowWidget::runOperatorStep( const WorkflowStep &step )
             && m_currentWorkflowIndex >= 0
             && m_workflows[m_currentWorkflowIndex].id == workflowId
             && m_currentStepIndex == stepIndex;
-        m_runButton->setEnabled( onSameStep && !m_jobHandle.isRunning() );
+        m_runButton->setEnabled( onSameStep && !m_jobHandle->isRunning() );
         if ( onSameStep )
             updateStepDisplay();
     };
 
-    const long taskId = m_jobHandle.submitJob(
+    const long taskId = m_jobHandle->submitJob(
         req,
         [this, stepTitle, restoreButton]( const QString &outputPath, const Json::Value & )
         {
@@ -413,7 +413,7 @@ void GuidedWorkflowWidget::showStep(int index)
     // Update navigation buttons
     m_prevButton->setEnabled(index > 0);
     m_nextButton->setEnabled(true);
-    m_runButton->setEnabled(!step.isManual() && !m_jobHandle.isRunning());
+    m_runButton->setEnabled(!step.isManual() && !m_jobHandle->isRunning());
 }
 
 void GuidedWorkflowWidget::updateStepDisplay()
