@@ -75,6 +75,18 @@ void ExprsPluginShellUi::attachSettingsPage( const QString &pluginId, const QStr
     mSettingsPageTitles[pluginId] = title.isEmpty() ? pluginId : title;
 }
 
+QList<QAction *> ExprsPluginShellUi::menuActionsFor( const QString &pluginId ) const
+{
+    QList<QAction *> actions;
+    if ( auto it = mMenuActions.constFind( pluginId ); it != mMenuActions.constEnd() )
+    {
+        for ( QAction *action : it.value() )
+            if ( action )
+                actions << action;
+    }
+    return actions;
+}
+
 void ExprsPluginShellUi::releaseUi( const QString &pluginId )
 {
     // Contract: every plugin-created object is detached AND deleted here,
@@ -98,6 +110,11 @@ void ExprsPluginShellUi::releaseUi( const QString &pluginId )
     // 3. Settings page: whichever state it is in, the widget must not
     // outlive the plugin library.
     releaseSettingsPage( pluginId );
+
+    // 4. Registry commands projecting this plugin's contributions go with
+    // them (review A3) — no dead palette entries across unload.
+    if ( mCommandReleaseHook )
+        mCommandReleaseHook( pluginId );
 }
 
 void ExprsPluginShellUi::releaseSettingsPage( const QString &pluginId )

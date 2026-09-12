@@ -55,6 +55,7 @@ const std::vector<std::string> kAllIntents = {
   "evi", "savi", "ndre", "ndwi", "mndwi", "ndsi", "nbr", "dnbr", "ndbi", "bsi",
   "water", "flood", "sar_water", "sar_flood", "sar", "ship",
   "temporal", "terrain", "accuracy", "qa", "preprocess", "inference",
+  "zonal",
 };
 
 } // namespace

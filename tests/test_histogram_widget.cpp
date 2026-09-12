@@ -106,3 +106,80 @@ TEST_CASE("Histogram bin range calculation", "[widget][histogram]")
         REQUIRE(binIndex == 255);
     }
 }
+
+// ── Workbench 9.0 M0: widget-level scan behavior ───────────────────────────
+// The scan now runs on the bounded RsScanPool; a failed GDALOpen must be
+// marshaled back onto the GUI thread and surfaced via lastError() — the
+// pre-M0 code returned silently and left the widget showing stale/empty
+// data with no explanation (#882-era audit finding F3).
+
+#include <QApplication>
+#include <QTimer>
+
+#include <qgsrasterlayer.h>
+
+#include "app/widgets/histogram_widget.h"
+#include "app/widgets/rs_scan_pool.h"
+
+namespace
+{
+
+int widget_argc = 1;
+char widget_argv0[] = "test_histogram_widget";
+char *widget_argv[] = { widget_argv0, nullptr };
+
+QApplication *ensureWidgetApp()
+{
+    static QApplication *app = nullptr;
+    if ( !app && !QApplication::instance() )
+        app = new QApplication( widget_argc, widget_argv );
+    return app;
+}
+
+/// Drain the bounded scan pool, then run the queued GUI-thread completions.
+void drainScanCompletions()
+{
+    auto &pool = sicnu::app::RsScanPool::instance();
+    REQUIRE( pool.pool().waitForDone( 30000 ) );
+    // Queued marshal deliveries + widget-deferred deletes.
+    QApplication::processEvents();
+    QApplication::sendPostedEvents( nullptr );
+}
+
+} // namespace
+
+TEST_CASE( "HistogramWidget: a failed GDALOpen surfaces an error, never silence",
+           "[widget][histogram][m0]" )
+{
+    ensureWidgetApp();
+
+    HistogramWidget widget;
+    // A source path GDAL cannot open — the worker must report the failure.
+    QgsRasterLayer brokenLayer( QStringLiteral( "/nonexistent/rs9/histogram_missing.tif" ),
+                                QStringLiteral( "broken" ), QStringLiteral( "gdal" ) );
+    REQUIRE( brokenLayer.source() == QStringLiteral( "/nonexistent/rs9/histogram_missing.tif" ) );
+
+    widget.setRasterLayer( &brokenLayer );
+    drainScanCompletions();
+
+    CHECK_FALSE( widget.lastError().isEmpty() );
+
+    // Switching to no layer clears the error (stale errors must not linger).
+    widget.setRasterLayer( nullptr );
+    CHECK( widget.lastError().isEmpty() );
+}
+
+TEST_CASE( "HistogramWidget: empty-source layer never starts a scan",
+           "[widget][histogram][m0]" )
+{
+    ensureWidgetApp();
+
+    HistogramWidget widget;
+    // Raster layer with an empty source — computeHistograms must bail out
+    // before touching the pool; no error and no crash.
+    QgsRasterLayer emptyLayer( QString(), QStringLiteral( "empty" ) );
+    widget.setRasterLayer( &emptyLayer );
+    drainScanCompletions();
+
+    CHECK( widget.lastError().isEmpty() );
+}

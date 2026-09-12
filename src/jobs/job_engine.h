@@ -124,6 +124,15 @@ class JobEngine
     static bool isWorkerThread();
 
     /**
+     * Structured hierarchy 9.0 (M1): the id of the job this worker thread is
+     * currently executing, or an empty string off-worker / between jobs.
+     * TaskCenter resolves a worker-originated submission's OWNER task through
+     * this id, giving sub-job submissions an explicit parent edge for join
+     * and cancellation propagation (invariant I9).
+     */
+    static const std::string &currentJobId();
+
+    /**
      * Register a prefix executor. algorithmId that starts with \a prefix uses
      * this executor instead of RSOperatorRegistry (unless a per-job executor
      * was supplied). Empty prefix is ignored.

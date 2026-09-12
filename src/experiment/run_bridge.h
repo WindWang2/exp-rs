@@ -90,6 +90,8 @@ struct RunPins
     QJsonObject toJson() const;
     static Result<RunPins> fromJson( const QJsonObject &json );
     bool isEmpty() const;
+
+    friend bool operator==( const RunPins &, const RunPins & ) = default;
 };
 
 /// Evidence about a stored execution checkpoint, used to decide stale

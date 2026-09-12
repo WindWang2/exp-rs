@@ -134,6 +134,11 @@ enum class SplitMethod
     KFold,
     SpatialKFold,
     GroupKFold,
+    /// Joint space×time isolation: grid cell × time window is the atomic
+    /// unit (9.0). Prevents the cross-year same-place autocorrelation that
+    /// SpatialBlock alone leaves inside blocks and Temporal alone leaves
+    /// inside periods.
+    SpatioTemporalBlock,
 };
 
 QString splitMethodToString( SplitMethod method );

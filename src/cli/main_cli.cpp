@@ -117,6 +117,53 @@ int main(int argc, char *argv[])
         "run_id");
     parser.addOption(resumeOption);
 
+    // MLOps 9.0 opt-in scientific recording: pipelines (and resumes) are
+    // recorded into an ExperimentStore through the workflow lifecycle.
+    // Nothing records without --experiment-record.
+    const QCommandLineOption experimentRecordOption(
+        QStringList() << "experiment-record",
+        "Record this run into the experiment store at <db_path> (created when "
+        "missing). Pairs with --experiment-id/--experiment-name/--experiment-"
+        "objective and the --pin-* identity flags.",
+        "db_path");
+    parser.addOption(experimentRecordOption);
+    const QCommandLineOption experimentIdOption(
+        QStringList() << "experiment-id",
+        "Experiment id for --experiment-record (default: an id is generated).",
+        "id");
+    parser.addOption(experimentIdOption);
+    const QCommandLineOption experimentNameOption(
+        QStringList() << "experiment-name", "Experiment display name.", "name");
+    parser.addOption(experimentNameOption);
+    const QCommandLineOption experimentObjectiveOption(
+        QStringList() << "experiment-objective",
+        "Research question this experiment answers.", "text");
+    parser.addOption(experimentObjectiveOption);
+    const QCommandLineOption datasetDbOption(
+        QStringList() << "dataset-db",
+        "Dataset store path: enables verification of --pin-dataset-version.",
+        "db_path");
+    parser.addOption(datasetDbOption);
+    const QCommandLineOption pinDatasetOption(
+        QStringList() << "pin-dataset-version",
+        "Identity pin: dataset version id used by this run.", "id");
+    parser.addOption(pinDatasetOption);
+    const QCommandLineOption pinSplitOption(
+        QStringList() << "pin-split",
+        "Identity pin: split manifest id used by this run.", "id");
+    parser.addOption(pinSplitOption);
+    const QCommandLineOption pinModelOption(
+        QStringList() << "pin-model", "Identity pin: model catalog id.", "id");
+    parser.addOption(pinModelOption);
+    const QCommandLineOption pinModelDigestOption(
+        QStringList() << "pin-model-digest", "Identity pin: model content digest.",
+        "digest");
+    parser.addOption(pinModelDigestOption);
+    const QCommandLineOption pinSeedOption(
+        QStringList() << "pin-seed", "Identity pin: run seed (hex or decimal).",
+        "seed");
+    parser.addOption(pinSeedOption);
+
     const QCommandLineOption noCacheOption(
         QStringList() << "no-execution-cache",
         "Disable the revision-aware execution cache for this run (it is enabled "
@@ -320,6 +367,34 @@ int main(int argc, char *argv[])
             std::cout << "[" << level << "] " << message << "\n";
         };
         RsPipelineRunner runner(progressCb, logCb);
+        if (parser.isSet(experimentRecordOption)) {
+            RsPipelineRunner::RecordingOptions recording;
+            recording.enabled = true;
+            recording.experimentDbPath = parser.value(experimentRecordOption).toStdString();
+            recording.experimentId = parser.value(experimentIdOption).toStdString();
+            recording.experimentName = parser.value(experimentNameOption).toStdString();
+            recording.objective = parser.value(experimentObjectiveOption).toStdString();
+            recording.datasetDbPath = parser.value(datasetDbOption).toStdString();
+            recording.datasetVersionId = parser.value(pinDatasetOption).toStdString();
+            recording.splitManifestId = parser.value(pinSplitOption).toStdString();
+            recording.modelId = parser.value(pinModelOption).toStdString();
+            recording.modelDigest = parser.value(pinModelDigestOption).toStdString();
+            if (parser.isSet(pinSeedOption)) {
+                const QString seedText = parser.value(pinSeedOption);
+                bool ok = false;
+                const quint64 seed = seedText.startsWith(QStringLiteral("0x"))
+                                         ? seedText.toULongLong(&ok, 16)
+                                         : seedText.toULongLong(&ok, 10);
+                if (!ok) {
+                    std::cerr << "Invalid --pin-seed value: "
+                              << seedText.toStdString() << "\n";
+                    return 1;
+                }
+                recording.seed = seed;
+                recording.hasSeed = true;
+            }
+            runner.setRecordingOptions(recording);
+        }
         const auto result = runner.resumeRun(resumeRunId.toStdString());
         if (!result.success) {
             std::cerr << "Resume failed: " << result.errorMessage << "\n";
@@ -354,6 +429,33 @@ int main(int argc, char *argv[])
             std::cerr << "Invalid Python plugin directory: " << error << "\n";
             return 1;
         }
+    }
+    if (parser.isSet(experimentRecordOption)) {
+        RsPipelineRunner::RecordingOptions recording;
+        recording.enabled = true;
+        recording.experimentDbPath = parser.value(experimentRecordOption).toStdString();
+        recording.experimentId = parser.value(experimentIdOption).toStdString();
+        recording.experimentName = parser.value(experimentNameOption).toStdString();
+        recording.objective = parser.value(experimentObjectiveOption).toStdString();
+        recording.datasetDbPath = parser.value(datasetDbOption).toStdString();
+        recording.datasetVersionId = parser.value(pinDatasetOption).toStdString();
+        recording.splitManifestId = parser.value(pinSplitOption).toStdString();
+        recording.modelId = parser.value(pinModelOption).toStdString();
+        recording.modelDigest = parser.value(pinModelDigestOption).toStdString();
+        if (parser.isSet(pinSeedOption)) {
+            const QString seedText = parser.value(pinSeedOption);
+            bool ok = false;
+            const quint64 seed = seedText.startsWith(QStringLiteral("0x"))
+                                     ? seedText.toULongLong(&ok, 16)
+                                     : seedText.toULongLong(&ok, 10);
+            if (!ok) {
+                std::cerr << "Invalid --pin-seed value: " << seedText.toStdString() << "\n";
+                return 1;
+            }
+            recording.seed = seed;
+            recording.hasSeed = true;
+        }
+        runner.setRecordingOptions(recording);
     }
 
     const auto result = runner.runFromFile(pipelinePath.toStdString());

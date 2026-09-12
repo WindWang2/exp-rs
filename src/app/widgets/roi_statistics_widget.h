@@ -5,6 +5,7 @@
 #include <QWidget>
 #include <QVector>
 
+#include <atomic>
 #include <cstdint>
 
 class QTableWidget;
@@ -66,7 +67,9 @@ private:
     // Async compute state (#625): epoch invalidates in-flight results when a
     // newer request starts or the widget is destroyed; m_computing guards
     // double-submit (Refresh is disabled while running).
-    uint64_t m_requestEpoch = 0;
+    // Atomic: pool worker threads read this between band checkpoints while
+    // the GUI thread may start a newer request (M0 audit F4 — data race).
+    std::atomic<uint64_t> m_requestEpoch { 0 };
     // #797: scan-pool generation of the in-flight request (canceled in the
     // destructor so the bounded pool stops reading GDAL sources for a dead
     // widget).

@@ -71,6 +71,22 @@ inline bool isTerminalStatus( TaskStatus status )
     return status == TaskStatus::Completed || status == TaskStatus::Failed || status == TaskStatus::Canceled;
 }
 
+/// 9.0 M3: typed cancellation source. Distinguishes WHY a task reached
+/// Canceled — shutdown teardown must never read as a user cancel, and a
+/// structured-join orphan must be attributable to its owner's exit.
+enum class TaskCancelReason
+{
+    None,
+    User,          ///< cancelTask / cancelPipeline from a caller surface
+    Upstream,      ///< cascade from a failed/canceled DAG parent or owner
+    Shutdown,      ///< application shutdown / engine teardown (#684)
+    StructuredJoin, ///< owner reached a terminal state first (I9)
+    Engine         ///< engine-side terminal Cancelled record with no
+                   ///< TaskCenter request stamp (e.g. pre-armed flag)
+};
+
+const char *taskCancelReasonName( TaskCancelReason reason );
+
 enum class TaskPriority {
     High,
     Normal,
@@ -144,10 +160,31 @@ struct AlgorithmTaskInfo {
     /// (worker_execution_route). Informational + admission accounting: the
     /// isolated-slot gate counts active tasks with this flag.
     bool isolatedRoute = false;
+    /// 9.0 M3: the typed source of the Canceled transition (None until the
+    /// task is canceled). Meaningful only when status == Canceled.
+    TaskCancelReason cancelReason = TaskCancelReason::None;
     /// Execution Plane 7.0: automatic TRANSIENT retries consumed so far
     /// (worker crash/timeout/spawn failure). Bounded by
     /// TaskCenter::maxAutoRetries; operator errors never auto-retry.
     int autoRetryAttempts = 0;
+    /// 9.0 M0/M1 structured hierarchy: true when this task was submitted
+    /// FROM a JobEngine worker thread, i.e. its submitter occupies a worker
+    /// slot that cannot be released until this task (or whatever the
+    /// submitter waits on) finishes. Immutable after creation. Such tasks
+    /// get the bounded transient admission allowance (#862) and, when the
+    /// owner is resolvable, form the ownership edge ownerTaskId→taskId.
+    bool workerOriginated = false;
+    /// 9.0 M0 review A-F3: true when THIS admission actually used the
+    /// transient bypass (set at dispatch staging like isolatedRoute). The
+    /// ActiveCounters.transientChildren budget counts only bypass-admitted
+    /// tasks — a worker-originated task admitted through free normal slots
+    /// must not consume the stranded-child budget.
+    bool transientBypass = false;
+    /// 9.0 M1: the running task whose executor submitted this task
+    /// (resolved via JobEngine::currentJobId at submit time), or -1 for
+    /// root submissions. Orthogonal to parentTaskIds (DAG data-dependency
+    /// edges): ownerTaskId is the structured-concurrency OWNERSHIP edge.
+    long ownerTaskId = -1;
 };
 
 struct PipelineExecutionInfo {
@@ -176,6 +213,9 @@ struct TaskAdmissionSnapshot
     unsigned int budgetMb = 0;     ///< configured RAM budget cap (0 = disabled)
     unsigned int runningCount = 0; ///< active tasks: Running/Cancelling/Dispatching/Paused
     unsigned int globalLimit = 0;
+    /// 9.0 M5: transient-child allowance state at snapshot time.
+    unsigned int transientActive = 0;
+    unsigned int transientCap = 0;
     QString reason;                ///< human-readable hold reason when !wouldAdmit
 };
 
@@ -223,8 +263,8 @@ public:
 
     void attachQgsTask(long taskId, QgsTask* qgsTask);
 
-    bool cancelTask(long taskId);
-    bool cancelPipeline(long pipelineId);
+    bool cancelTask(long taskId, TaskCancelReason reason = TaskCancelReason::User);
+    bool cancelPipeline(long pipelineId, TaskCancelReason reason = TaskCancelReason::User);
     bool pauseTask(long taskId);
     bool resumeTask(long taskId);
     /// Re-run a terminal task. Returns the NEW task id (> 0) on success and 0
@@ -251,13 +291,21 @@ public:
                            const QVariantMap& results = QVariantMap(),
                            const Json::Value& resultPayload = Json::Value());
     void markTaskFailed(long taskId, const QString& error);
-    void markTaskCanceled(long taskId, const QString& reason = QStringLiteral("Task canceled"));
+    void markTaskCanceled(long taskId, const QString& reason = QStringLiteral("Task canceled"),
+                          TaskCancelReason cancelReason = TaskCancelReason::User);
 
     QList<AlgorithmTaskInfo> allTasks() const;
     AlgorithmTaskInfo getTaskInfo(long taskId) const;
     PipelineExecutionInfo getPipelineInfo(long pipelineId) const;
     void clearCompletedTasks();
     void shutdown();
+
+    /// 9.0 M7: bounded, human-readable execution-plane diagnostic dump —
+    /// active-set sums, effective limits, per-status task counts, queue
+    /// depths and the transient-child allowance state. A stuck run is
+    /// diagnosable from this evidence alone (M8 asserts the key fields).
+    /// Pure read: state is copied under m_mutex, formatted outside it.
+    QString explainDump() const;
 
     /// Test-only: run the real shutdown semantics (cancel-all, terminate the
     /// engine) and then RESET both singletons to a clean reusable state.
@@ -371,6 +419,11 @@ private:
     void queueTaskLogLocked( long taskId, const QString &message );
     /// Drain queued signals; never holds m_mutex across emit. Safe if slots re-enter.
     void flushPendingSignals();
+    /// 9.0 M1: drains m_pendingOwnedCancels — terminal-cancel of orphaned
+    /// owned children (invariant I9). Called from flushPendingSignals, so
+    /// every mutation path drains it; re-entrant staging (a canceled child
+    /// owning grandchildren) loops until the staging list is empty.
+    void flushOwnedCancels();
     /// Pop + invoke the completion callbacks registered for a task that just
     /// reached a terminal status. Called WITHOUT m_mutex held; each callback
     /// sees the terminal task snapshot. Exactly-once: registrations are
@@ -393,7 +446,8 @@ private:
                                      const QString &upstreamCause, bool cleanupScratchOutputs,
                                      QList<long> &cascadeCanceledIds,
                                      std::vector<std::pair<std::string, long>> &jobCancelTargets,
-                                     QList<QPointer<QgsTask>> &handlesToCancel );
+                                     QList<QPointer<QgsTask>> &handlesToCancel,
+                                     TaskCancelReason reason = TaskCancelReason::Upstream );
     /// Post-lock half of the cascade: marshals attached QgsTask cancellation
     /// to the handle's own thread, asks JobEngine to cancel dispatched jobs,
     /// and finalizes tasks whose job id the engine no longer knows (they
@@ -401,7 +455,8 @@ private:
     /// m_mutex held.
     void dispatchPendingCancels( const QList<QPointer<QgsTask>> &handlesToCancel,
                                  const std::vector<std::pair<std::string, long>> &jobCancelTargets,
-                                 const QString &strandedReason );
+                                 const QString &strandedReason,
+                                 TaskCancelReason reason = TaskCancelReason::User );
     void updatePipelineForTaskLocked(long taskId);
     long submitJobImpl(const sicnu::jobs::JobRequest& request,
                        JobExecutor executor,
@@ -525,6 +580,10 @@ private:
         unsigned int ramMb = 0;
         unsigned int isolated = 0;
         unsigned int ioHeavy = 0;
+        /// 9.0 M0 (#862): active tasks carrying the worker-originated
+        /// transient allowance. Maintained by setTaskStatusLocked like the
+        /// other sums; bounded by kMaxTransientChildren at admission.
+        unsigned int transientChildren = 0;
         QMap<ProviderResourceProfile, unsigned int> byProfile;
         sicnu::ResourceUsage usage2;
     };
@@ -546,6 +605,20 @@ private:
     /// are user-paced and rare). Registration happens at enqueue; edges of a
     /// pruned parent are dropped with the task.
     QMultiHash<long, long> m_children;
+    /// 9.0 M1: ownership edges (ownerTaskId → child taskId), registered at
+    /// submit when the submission came from a worker running a tracked task.
+    /// Drives the join rule (I9: owner terminal ⇒ owned child terminal) and
+    /// cancellation propagation (cancel owner ⇒ cancel owned, transitively).
+    QMultiHash<long, long> m_ownedChildren;
+    /// Owned children staged for terminal-cancel by setTaskStatusLocked
+    /// (m_mutex held, no engine calls in-lock). Drained by
+    /// flushOwnedCancels() outside the lock (flushPendingSignals calls it).
+    QList<long> m_pendingOwnedCancels;
+    /// 9.0 M0 (#862): bound on concurrently ACTIVE worker-originated tasks.
+    /// Mirrors JobEngine's #798 kMaxTransientWorkers: a worker-originated
+    /// child bypasses the global/profile slot gates (its submitter's slot
+    /// cannot be freed until it runs), so the bypass must be bounded.
+    static constexpr unsigned int kMaxTransientChildren = 8;
     /// Per-task count of parents that are present in the map and NOT
     /// Completed (a missing parent counts as satisfied — the eligibility rule).
     /// A child becomes launch-ready when this reaches 0.

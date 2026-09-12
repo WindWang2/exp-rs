@@ -400,6 +400,12 @@ QJsonObject SampleRecord::toJson() const
     json.insert( QStringLiteral( "weight" ), m_weight );
     if ( m_timeUtc.isValid() )
         json.insert( QStringLiteral( "time_utc" ), m_timeUtc.toString( Qt::ISODateWithMs ) );
+    if ( m_validFromUtc.isValid() )
+        json.insert( QStringLiteral( "valid_from_utc" ),
+                     m_validFromUtc.toString( Qt::ISODateWithMs ) );
+    if ( m_validUntilUtc.isValid() )
+        json.insert( QStringLiteral( "valid_until_utc" ),
+                     m_validUntilUtc.toString( Qt::ISODateWithMs ) );
     if ( !m_crs.isEmpty() )
         json.insert( QStringLiteral( "crs" ), m_crs );
     json.insert( QStringLiteral( "quality" ), m_quality );
@@ -456,6 +462,10 @@ sicnu::data::Result<SampleRecord> SampleRecord::fromJson( const QJsonObject &jso
     sample.m_weight = json.value( QStringLiteral( "weight" ) ).toDouble( 1.0 );
     sample.m_timeUtc = QDateTime::fromString(
         json.value( QStringLiteral( "time_utc" ) ).toString(), Qt::ISODateWithMs );
+    sample.m_validFromUtc = QDateTime::fromString(
+        json.value( QStringLiteral( "valid_from_utc" ) ).toString(), Qt::ISODateWithMs );
+    sample.m_validUntilUtc = QDateTime::fromString(
+        json.value( QStringLiteral( "valid_until_utc" ) ).toString(), Qt::ISODateWithMs );
     sample.m_crs = json.value( QStringLiteral( "crs" ) ).toString();
     sample.m_quality = json.value( QStringLiteral( "quality" ) ).toDouble( -1.0 );
     for ( const QJsonValue &value : json.value( QStringLiteral( "source_assets" ) ).toArray() )
@@ -494,6 +504,15 @@ sicnu::data::Result<void> validateSample( const SampleRecord &sample )
         return fail( QStringLiteral( "sample requires ids" ) );
     if ( !( sample.weight() > 0.0 ) || !std::isfinite( sample.weight() ) )
         return fail( QStringLiteral( "sample weight must be a positive finite number" ) );
+    if ( sample.validFromUtc().isValid() && sample.validUntilUtc().isValid() &&
+         sample.validFromUtc() > sample.validUntilUtc() )
+        return fail( QStringLiteral( "sample validity window is empty (from > until)" ) );
+    if ( sample.timeUtc().isValid() && sample.validFromUtc().isValid() &&
+         sample.timeUtc() < sample.validFromUtc() )
+        return fail( QStringLiteral( "sample observation time precedes its validity window" ) );
+    if ( sample.timeUtc().isValid() && sample.validUntilUtc().isValid() &&
+         sample.timeUtc() > sample.validUntilUtc() )
+        return fail( QStringLiteral( "sample observation time exceeds its validity window" ) );
 
     const bool payloadMatches =
         ( sample.kind() == SampleKind::Point &&

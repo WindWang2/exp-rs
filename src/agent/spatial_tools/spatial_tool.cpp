@@ -23,6 +23,7 @@
 #include "../harness/grounding_tools.h"
 #include "../harness/plan_tools.h"
 #include "../harness/recipe_tools.h"
+#include "../harness/run_loop.h"
 #include "../harness/solution_tools.h"
 #include "../contracts/spatial_contracts.h"
 
@@ -263,6 +264,8 @@ void SpatialToolRegistry::registerBuiltinTools()
   // Harness 7.0 intent->capability graph: deterministic goal classification +
   // feasibility-ranked candidates (typed ambiguity, no guessing).
   harness::registerCapabilityGraphTools();
+  // Harness 9.0 (M5): bounded run diagnosis + structured repair proposals.
+  harness::registerRunLoopTools();
   // Platform 5.0 solution knowledge: solution:search/describe/validate/instantiate.
   harness::registerSolutionTools();
 }

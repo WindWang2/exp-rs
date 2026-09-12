@@ -87,10 +87,11 @@ void ensureParentDirectory( const std::string &path )
 
 ExternalToolOperator::ExternalToolOperator( std::string operatorId,
                                             exprs::ManifestOperator declaration,
-                                            std::string pluginDir )
+                                            std::string pluginDir, bool spawnAllowed )
     : mOperatorId( std::move( operatorId ) )
     , mDeclaration( std::move( declaration ) )
     , mPluginDir( std::move( pluginDir ) )
+    , mSpawnAllowed( spawnAllowed )
 {
 }
 
@@ -137,6 +138,17 @@ Json::Value ExternalToolOperator::run( const Json::Value &params,
                                        sicnu::operators::RSOperatorContext &context )
 {
     context.throwIfCancelled();
+
+    // Capability gate (plugin platform 9.0): the manifest's access object
+    // explicitly declares externalProcess:false — refuse BEFORE anything
+    // spawns. Typed PolicyRefused, not a generic failure.
+    if ( !mSpawnAllowed )
+    {
+        throw sicnu::operators::RSOperatorError(
+            sicnu::operators::ErrorCode::PolicyRefused,
+            "manifest access declares externalProcess:false; operator '" + mOperatorId
+                + "' may not spawn processes [E5005]" );
+    }
 
     if ( !mDeclaration.hasExternalTool )
     {

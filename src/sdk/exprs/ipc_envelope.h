@@ -40,9 +40,10 @@ namespace Ipc {
 
 /// Protocol version implemented by this SDK (kept in lockstep with
 /// EXP_RS_HOST_PROTOCOL_VERSION, exprs/host_protocol.h). 1.1 adds the
-/// declarative-UI methods and concurrency surface additively.
+/// declarative-UI methods and concurrency surface additively; 1.2 adds the
+/// hello "features" advertisement and per-direction frame caps.
 constexpr int kProtocolVersionMajor = 1;
-constexpr int kProtocolVersionMinor = 1;
+constexpr int kProtocolVersionMinor = 2;
 
 enum class MessageType
 {
