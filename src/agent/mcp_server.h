@@ -14,6 +14,7 @@ namespace sicnu::experiment {
 class WorkflowExperimentMonitor;
 }
 
+#include "processing/framework/execution_id.h"
 #include "processing/framework/task_center.h"
 #include "processing/framework/tool_call_dispatcher.h"
 
@@ -173,10 +174,6 @@ private:
     static bool isToolIdAllowed(const QString &toolId, QString *reason = nullptr);
     /// When SICNU_MCP_WORKSPACE is set, reject absolute string params outside that root.
     static bool validateWorkspacePaths(const QVariantMap &parameters, QString *reason = nullptr);
-    /// Parses "task-<id>" into @a taskId. Returns false for malformed ids.
-    static bool parseExecutionId(const QString &executionId, long *taskId);
-    /// Formats a TaskCenter task id as an MCP execution id ("task-<id>").
-    static QString toExecutionId(long taskId);
 
     StdinReader *mReader = nullptr;
     /// TaskCenter sink for rs: operator calls (autoLoad=false; MCP has no canvas).

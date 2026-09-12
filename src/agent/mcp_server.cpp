@@ -1186,16 +1186,13 @@ void McpServer::handleRequest(const QVariantMap &request)
             // notifications/cancelled for this request can cancel the task.
             if ( resultData.contains( QStringLiteral( "execution_id" ) ) )
             {
-                bool tidOk = false;
-                const long tid = resultData.value( QStringLiteral( "execution_id" ) )
-                                     .toString()
-                                     .mid( QStringLiteral( "task-" ).size() )
-                                     .toLong( &tidOk );
-                if ( tidOk && tid > 0 && !id.toString().isEmpty() )
+                const auto executionId = sicnu::processing::ExecutionId::fromWire(
+                    resultData.value( QStringLiteral( "execution_id" ) ).toString() );
+                if ( executionId && !id.toString().isEmpty() )
                 {
                     // JSON-RPC 2.0 request ids may be numbers OR strings —
                     // both must be cancellable (#644). Keep the map bounded.
-                    m_cancelledRequestTasks.insert( id.toString(), tid );
+                    m_cancelledRequestTasks.insert( id.toString(), executionId->taskId() );
                     while ( m_cancelledRequestTasks.size() > 1024 )
                         m_cancelledRequestTasks.erase( m_cancelledRequestTasks.begin() );
                 }
@@ -1688,23 +1685,6 @@ bool McpServer::validateWorkspacePaths(const QVariantMap &parameters, QString *r
     return true;
 }
 
-bool McpServer::parseExecutionId(const QString &executionId, long *taskId)
-{
-    if (!executionId.startsWith(QStringLiteral("task-")))
-        return false;
-    bool ok = false;
-    const long id = executionId.mid(5).toLong(&ok);
-    if (!ok || id <= 0)
-        return false;
-    *taskId = id;
-    return true;
-}
-
-QString McpServer::toExecutionId(long taskId)
-{
-    return QStringLiteral("task-%1").arg(taskId);
-}
-
 QVariantMap McpServer::dispatchToolCall(const QString &toolId, const QVariantMap &parameters, bool isOperatorCall)
 {
     SICNU_LOG_INFO(SicnuLogTags::MCP, QString("Executing tool: %1").arg(toolId));
@@ -1764,7 +1744,7 @@ QVariantMap McpServer::dispatchToolCall(const QString &toolId, const QVariantMap
     }
 
     QVariantMap result;
-    result[QStringLiteral("execution_id")] = toExecutionId(taskId);
+    result[QStringLiteral("execution_id")] = sicnu::processing::ExecutionId::fromTaskId(taskId).toWire();
     result[QStringLiteral("status")] = QStringLiteral("running");
     if (isOperatorCall) {
         result[QStringLiteral("operator_id")] = toolId;
@@ -1823,9 +1803,10 @@ QVariantMap McpServer::handleExecuteAlgorithm(const QString &algorithmId, const 
 
 QVariantMap McpServer::handleGetExecutionStatus(const QString &executionId)
 {
-    long taskId = 0;
-    if (!parseExecutionId(executionId, &taskId))
+    const auto parsedId = sicnu::processing::ExecutionId::fromWire(executionId);
+    if (!parsedId)
         throw std::runtime_error("Execution ID not found: " + executionId.toStdString());
+    const long taskId = parsedId->taskId();
 
     const sicnu::AlgorithmTaskInfo info = sicnu::TaskCenter::instance().getTaskInfo(taskId);
     if (info.taskId != taskId)
@@ -1836,9 +1817,10 @@ QVariantMap McpServer::handleGetExecutionStatus(const QString &executionId)
 
 QVariantMap McpServer::handleCancelExecution(const QString &executionId)
 {
-    long taskId = 0;
-    if (!parseExecutionId(executionId, &taskId))
+    const auto parsedId = sicnu::processing::ExecutionId::fromWire(executionId);
+    if (!parsedId)
         throw std::runtime_error("Execution ID not found: " + executionId.toStdString());
+    const long taskId = parsedId->taskId();
 
     if (!sicnu::TaskCenter::instance().cancelTask(taskId)) {
         // cancelTask returned false: the task is already terminal (or gone).
@@ -2660,7 +2642,7 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
             sicnu::TaskCenter::instance().getTaskInfo(taskIdIt.value());
         QVariantMap step;
         step[QStringLiteral("step_id")] = QString::fromStdString(stepId);
-        step[QStringLiteral("execution_id")] = toExecutionId(taskIdIt.value());
+        step[QStringLiteral("execution_id")] = sicnu::processing::ExecutionId::fromTaskId(taskIdIt.value()).toWire();
         step[QStringLiteral("algorithm_id")] = task.algorithmId;
         step[QStringLiteral("status")] = mcpStatusForTask(task).value(QStringLiteral("status"));
         steps.append(step);
@@ -2703,7 +2685,7 @@ QVariantMap McpServer::handleGetWorkflowStatus(long pipelineId)
         if (taskIdIt != info.stepToTaskId.end()) {
             const sicnu::AlgorithmTaskInfo task =
                 sicnu::TaskCenter::instance().getTaskInfo(taskIdIt.value());
-            step[QStringLiteral("execution_id")] = toExecutionId(taskIdIt.value());
+            step[QStringLiteral("execution_id")] = sicnu::processing::ExecutionId::fromTaskId(taskIdIt.value()).toWire();
             step[QStringLiteral("algorithm_id")] = task.algorithmId;
             const QVariantMap status = mcpStatusForTask(task);
             step[QStringLiteral("status")] = status.value(QStringLiteral("status"));
