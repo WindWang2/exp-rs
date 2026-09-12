@@ -231,3 +231,138 @@ TEST_CASE( "remote identity tokens never carry credentials and survive re-signin
   REQUIRE( !vsiToken.empty() );
   CHECK( vsiToken == plainToken );
 }
+
+// ---------------------------------------------------------------------------
+// 9.0 M1 — unified asset identity: strong local identity, honest strength
+// labelling, fail-closed unprovability, subdataset qualification.
+// ---------------------------------------------------------------------------
+
+#include "geospatial/identity/asset_identity.h"
+
+#include <filesystem>
+
+#include "geospatial/util/atomic_fs.h"
+
+namespace
+{
+
+std::string identityScratchDir( const std::string &name )
+{
+  const std::filesystem::path dir =
+    std::filesystem::temp_directory_path() / "sicnu_io_identity9" / name;
+  std::error_code ec;
+  std::filesystem::remove_all( dir, ec );
+  std::filesystem::create_directories( dir );
+  return dir.string();
+}
+
+void writeIdentityFile( const std::string &path, const std::string &content )
+{
+  std::ofstream out( path, std::ios::binary | std::ios::trunc );
+  out << content;
+}
+
+} // namespace
+
+TEST_CASE( "local identity tokens are stable and content-sensitive",
+           "[io][identity][local][fabric9]" )
+{
+  const std::string dir = identityScratchDir( "local" );
+  const std::string file = ( std::filesystem::path( dir ) / "asset.tif" ).string();
+  writeIdentityFile( file, "IDENTITY-CONTENT-V1" );
+
+  const sicnu::geo::LocalIdentityToken first = sicnu::geo::localIdentityToken( file );
+  REQUIRE( first.provable() );
+  CHECK( first.strength == "content" );
+  CHECK( first.token.rfind( "li1:v1:", 0 ) == 0 );
+  CHECK( first.hashedBytes == 19 ); // whole file fits the default budget
+  CHECK( first.sizeBytes == 19 );
+
+  // Stable across re-derivation.
+  const sicnu::geo::LocalIdentityToken again = sicnu::geo::localIdentityToken( file );
+  CHECK( again.token == first.token );
+
+  // Content change ⇒ different token (invalidation by construction).
+  writeIdentityFile( file, "IDENTITY-CONTENT-V2" );
+  const sicnu::geo::LocalIdentityToken changed = sicnu::geo::localIdentityToken( file );
+  REQUIRE( changed.provable() );
+  CHECK( changed.token != first.token );
+
+  // Metadata-only identity (budget 0) is honestly labelled weaker.
+  sicnu::geo::LocalIdentityOptions metadataOnly;
+  metadataOnly.hashBytes = 0;
+  const sicnu::geo::LocalIdentityToken weak = sicnu::geo::localIdentityToken( file, metadataOnly );
+  REQUIRE( weak.provable() );
+  CHECK( weak.strength == "metadata" );
+  CHECK( weak.hashedBytes == 0 );
+  CHECK( weak.token != first.token );
+
+  // Hash budget is honored: a 1-byte budget differs from the full hash.
+  sicnu::geo::LocalIdentityOptions tiny;
+  tiny.hashBytes = 1;
+  const sicnu::geo::LocalIdentityToken tinyHash = sicnu::geo::localIdentityToken( file, tiny );
+  CHECK( tinyHash.hashedBytes == 1 );
+  CHECK( tinyHash.token != weak.token );
+}
+
+TEST_CASE( "local identity fails closed on unprovable inputs",
+           "[io][identity][local][fabric9]" )
+{
+  const std::string dir = identityScratchDir( "failclosed" );
+  const sicnu::geo::LocalIdentityToken missing =
+    sicnu::geo::localIdentityToken( ( std::filesystem::path( dir ) / "nope.tif" ).string() );
+  CHECK_FALSE( missing.provable() );
+  CHECK( missing.token.empty() );
+  CHECK( missing.strength.empty() );
+
+  const sicnu::geo::LocalIdentityToken empty = sicnu::geo::localIdentityToken( std::string() );
+  CHECK_FALSE( empty.provable() );
+
+  // A directory is not a file: unprovable, never a directory identity.
+  const sicnu::geo::LocalIdentityToken directory = sicnu::geo::localIdentityToken( dir );
+  CHECK_FALSE( directory.provable() );
+}
+
+TEST_CASE( "asset identity dispatches by resource kind and qualifies subdatasets",
+           "[io][identity][asset][fabric9]" )
+{
+  const std::string dir = identityScratchDir( "dispatch" );
+  const std::string file = ( std::filesystem::path( dir ) / "cube.nc" ).string();
+  writeIdentityFile( file, "NETCDF-CONTAINER-BYTES" );
+
+  // Local dispatch shares the local token.
+  const sicnu::geo::AssetIdentity local =
+    sicnu::geo::assetIdentityToken( file, { {}, 0, 0, 0, 0 } );
+  const sicnu::geo::LocalIdentityToken direct = sicnu::geo::localIdentityToken( file );
+  REQUIRE( local.provable() );
+  CHECK( local.token == direct.token );
+  CHECK( local.strength == "content" );
+
+  // Subdataset qualification: same container, different selectors ⇒
+  // different identities; both carry the container's strength.
+  const std::string selA = "NETCDF:\"" + file + "\":band_a";
+  const std::string selB = "NETCDF:\"" + file + "\":band_b";
+  const sicnu::geo::AssetIdentity subA =
+    sicnu::geo::assetIdentityToken( selA, { {}, 0, 0, 0, 0 } );
+  const sicnu::geo::AssetIdentity subB =
+    sicnu::geo::assetIdentityToken( selB, { {}, 0, 0, 0, 0 } );
+  REQUIRE( subA.provable() );
+  REQUIRE( subB.provable() );
+  CHECK( subA.token.rfind( "sd1:v1:", 0 ) == 0 );
+  CHECK( subA.token != subB.token );
+  CHECK( subA.strength == "content" );
+
+  // A mutated container invalidates every derived subdataset identity.
+  writeIdentityFile( file, "NETCDF-CONTAINER-BYTES-EDITED" );
+  const sicnu::geo::AssetIdentity subAAfterEdit =
+    sicnu::geo::assetIdentityToken( selA, { {}, 0, 0, 0, 0 } );
+  CHECK( subAAfterEdit.provable() );
+  CHECK( subAAfterEdit.token != subA.token );
+
+  // Directory-shaped and empty inputs stay unprovable (fail-closed).
+  const sicnu::geo::AssetIdentity directory =
+    sicnu::geo::assetIdentityToken( dir, { {}, 0, 0, 0, 0 } );
+  CHECK_FALSE( directory.provable() );
+  const sicnu::geo::AssetIdentity nothing = sicnu::geo::assetIdentityToken( std::string() );
+  CHECK_FALSE( nothing.provable() );
+}

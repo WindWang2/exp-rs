@@ -22,6 +22,7 @@
 
 #include "geospatial/gdal_guard.h"
 #include "geospatial/remote/http_fetch.h"
+#include "geospatial/remote/range_cache_disk.h"
 #include "geospatial/remote/remote_source_validator.h"
 #include "geospatial/util/gdal_compat.h"
 #include "geospatial/util/resource_uri.h"
@@ -31,6 +32,7 @@
 #include <cpl_vsi_virtual.h>
 
 #include <algorithm>
+#include <condition_variable>
 #include <atomic>
 #include <cstdio>
 #include <cstring>
@@ -144,6 +146,49 @@ class CacheStore
     std::atomic<std::uint64_t> invalidations{ 0 };
     std::atomic<std::uint64_t> fallbackReads{ 0 };
     std::atomic<std::uint64_t> revalidations{ 0 };
+    std::atomic<std::uint64_t> dedupHits{ 0 };
+    std::atomic<std::uint64_t> maxInFlightBytes{ 0 };
+    std::atomic<std::uint64_t> diskHits{ 0 };
+
+    // ── 9.0 global fetch admission ─────────────────────────────────────────
+    // Bounds the bytes concurrently in flight across all ranged GETs. The
+    // gate never holds the store mutex and never holds a resource's
+    // fetchMutex ACROSS the wait of a different resource — a waiter blocks
+    // only until other resources' fetches drain. A request larger than the
+    // cap is admitted when NOTHING else is in flight (head-of-line, no
+    // starvation).
+    void admitFetch( std::uint64_t requestedBytes, std::uint64_t cap )
+    {
+      if ( cap == 0 )
+        return; // unlimited
+      std::unique_lock<std::mutex> lock( mAdmissionMutex );
+      while ( mInFlightBytes > 0 && mInFlightBytes + requestedBytes > cap )
+        mAdmissionCv.wait( lock );
+      mInFlightBytes += requestedBytes;
+      // Track the observed peak against the declared bound.
+      std::uint64_t current = mInFlightBytes;
+      std::uint64_t peak = maxInFlightBytes.load();
+      while ( current > peak && !maxInFlightBytes.compare_exchange_weak( peak, current ) )
+      {
+      }
+    }
+
+    void completeFetch( std::uint64_t admittedBytes, std::uint64_t cap )
+    {
+      if ( cap == 0 )
+        return;
+      {
+        std::lock_guard<std::mutex> lock( mAdmissionMutex );
+        mInFlightBytes -= std::min( admittedBytes, mInFlightBytes );
+      }
+      mAdmissionCv.notify_all();
+    }
+
+    std::uint64_t inFlightBytes()
+    {
+      std::lock_guard<std::mutex> lock( mAdmissionMutex );
+      return mInFlightBytes;
+    }
 
     std::shared_ptr<ResourceEntry> findResource( const std::string &key )
     {
@@ -299,11 +344,15 @@ class CacheStore
     /// never enter the store).
     void insertBytes( const std::shared_ptr<ResourceEntry> &entry, std::uint64_t runStart,
                       const std::vector<unsigned char> &bytes, std::uint64_t blockSize,
-                      std::uint64_t fetchConfigGeneration, std::uint64_t maxCacheBytes )
+                      std::uint64_t fetchConfigGeneration, std::uint64_t expectedGeneration,
+                      std::uint64_t maxCacheBytes )
     {
       std::lock_guard<std::mutex> lock( mMutex );
       if ( fetchConfigGeneration != configGeneration )
         return; // the config changed mid-fetch: these bytes cannot be indexed safely
+      if ( entry->generation != expectedGeneration )
+        return; // 9.0 review: the resource was invalidated mid-fetch — these are
+                // OLD-CONTENT bytes and must never enter the fresh generation
       mMaxCacheBytes = maxCacheBytes;
       std::uint64_t offsetInRun = 0;
       std::uint64_t blockIndex = runStart / blockSize;
@@ -318,6 +367,88 @@ class CacheStore
         blockIndex += 1;
       }
       evictUnderBudget();
+    }
+
+    /// 9.0 M3 — disk layer: the content-identity basis of a resource, or ""
+    /// when the layer is disabled or the identity is unprovable (fail-closed:
+    /// unprovable identity is never disk-cached).
+    std::string diskBasis( const std::shared_ptr<ResourceEntry> &entry )
+    {
+      if ( !RangeDiskBlockStore::enabled() )
+        return std::string();
+      const RemoteSourceIdentity identity = snapshotIdentity( entry );
+      return RangeDiskBlockStore::identityBasis( entry->requestUrl, identity.validator.hasStrongEtag(),
+                                                 identity.validator.etag, identity.hasSize,
+                                                 identity.sizeBytes, identity.validator.lastModified );
+    }
+
+    /// Fills missing blocks of [firstBlock,lastBlock] from the checksummed
+    /// disk layer into the memory store (generation-checked per block).
+    /// Disk reads happen OUTSIDE the store lock; only the per-block insert
+    /// takes it (short). Returns true when at least one block landed.
+    bool loadBlocksFromDisk( const std::shared_ptr<ResourceEntry> &entry, std::uint64_t firstBlock,
+                             std::uint64_t lastBlock, std::uint64_t expectedGeneration,
+                             std::uint64_t blockSize, std::uint64_t fetchConfigGeneration,
+                             std::uint64_t maxCacheBytes )
+    {
+      const std::string basis = diskBasis( entry );
+      if ( basis.empty() )
+        return false;
+      std::vector<std::uint64_t> missing;
+      {
+        std::lock_guard<std::mutex> lock( mMutex );
+        if ( entry->generation != expectedGeneration )
+          return false;
+        for ( std::uint64_t b = firstBlock; b <= lastBlock; ++b )
+          if ( entry->blocks.find( b ) == entry->blocks.end() )
+            missing.push_back( b );
+      }
+      bool loaded = false;
+      for ( const std::uint64_t blockIndex : missing )
+      {
+        std::vector<unsigned char> data;
+        if ( !RangeDiskBlockStore::readBlock( basis, blockIndex, data ) )
+          continue;
+        {
+          std::lock_guard<std::mutex> lock( mMutex );
+          if ( fetchConfigGeneration != configGeneration || entry->generation != expectedGeneration )
+            return loaded; // config/generation moved: stop feeding stale blocks
+          insertOne( entry, blockIndex, data.data(), data.size() );
+          evictUnderBudget();
+        }
+        loaded = true;
+      }
+      return loaded;
+    }
+
+    /// Publishes a fetched run to the disk layer, block by block (called
+    /// AFTER the memory insert — the run bytes stay alive in the caller).
+    void putRunToDisk( const std::shared_ptr<ResourceEntry> &entry, std::uint64_t runStart,
+                       const std::vector<unsigned char> &bytes, std::uint64_t blockSize,
+                       std::uint64_t expectedGeneration )
+    {
+      {
+        // A mid-fetch invalidation refreshed both the generation and the
+        // identity: writing these OLD-CONTENT bytes under the NEW identity
+        // basis would poison the disk layer across restarts (checksum-valid,
+        // silently wrong). Refuse stale write-throughs.
+        std::lock_guard<std::mutex> lock( mMutex );
+        if ( entry->generation != expectedGeneration )
+          return;
+      }
+      const std::string basis = diskBasis( entry );
+      if ( basis.empty() )
+        return;
+      std::uint64_t offsetInRun = 0;
+      std::uint64_t blockIndex = runStart / blockSize;
+      while ( offsetInRun < bytes.size() )
+      {
+        const std::size_t chunk = static_cast<std::size_t>(
+          std::min<std::uint64_t>( blockSize, bytes.size() - offsetInRun ) );
+        RangeDiskBlockStore::putBlock( basis, blockIndex, bytes.data() + offsetInRun, chunk );
+        offsetInRun += chunk;
+        blockIndex += 1;
+      }
     }
 
     // ── entry-field access under the store lock (P1 remediation) ──
@@ -454,7 +585,11 @@ class CacheStore
     std::uint64_t mBytesCached = 0;
     std::uint64_t configGeneration = 1; // bumped on every config update
     std::uint64_t mMaxCacheBytes = 64ull * 1024 * 1024;
-};
+
+    std::mutex mAdmissionMutex;
+    std::condition_variable mAdmissionCv;
+    std::uint64_t mInFlightBytes = 0;
+  };
 
 std::unique_ptr<CacheStore> g_store;
 std::mutex g_storeLifecycleMutex;
@@ -499,10 +634,10 @@ std::vector<unsigned char> fetchRange( const std::string &requestUrl, std::uint6
   const std::string contentRange = result.headerValue( "content-range" );
   if ( result.httpStatus == 206 || !contentRange.empty() )
   {
-    // A 206 must echo the window it actually serves ("bytes S-E/total",
-    // E may clamp at EOF). Anything else — a wrong offset, an unparseable
-    // range — must never enter the cache as if it were [start,end): a
-    // hostile or broken origin would poison every later reader.
+    // A 206 must echo the window it actually serves ("bytes S-E/total").
+    // Anything else — a wrong offset, an unparseable range — must never
+    // enter the cache as if it were [start,end): a hostile or broken origin
+    // would poison every later reader.
     std::uint64_t echoedStart = 0, echoedEnd = 0;
     const std::string expectedPrefix = "bytes ";
     const bool parseable =
@@ -524,14 +659,40 @@ std::vector<unsigned char> fetchRange( const std::string &requestUrl, std::uint6
         }
         return true;
       }();
-    if ( parseable && echoedStart == start && echoedEnd + 1 >= result.body.size() + start &&
-         echoedEnd + 1 <= endExclusive )
+    if ( parseable )
+    {
+      // The echoed window must start exactly where the request started and
+      // never reach past the requested window.
+      if ( echoedStart != start || echoedEnd + 1 > endExclusive )
+        throw GeoError( ErrorCode::Unsupported,
+                        "range_cache: origin echoed a mismatched Content-Range window" );
+      // 9.0 truncation gate: the body must carry the WHOLE echoed window.
+      // The only honest shortfall is EOF — an honest origin echoes the
+      // CLAMPED window ("bytes S-E/total" with E below the requested end),
+      // so the echoed window itself is the completeness yardstick; a short
+      // body against any echoed window is a torn transfer and must never be
+      // served or cached.
+      const std::uint64_t windowBytes = echoedEnd - echoedStart + 1;
+      if ( result.body.size() < windowBytes )
+      {
+        Json::Value details;
+        details["status"] = result.httpStatus;
+        details["echoed_bytes"] = static_cast<Json::UInt64>( windowBytes );
+        details["body_bytes"] = static_cast<Json::UInt64>( result.body.size() );
+        throw GeoError( ErrorCode::NetworkError,
+                        "range_cache: origin sent a truncated ranged response",
+                        details );
+      }
+      // 9.0 review: an over-long body must not leak past the echoed window —
+      // insertBytes indexes whatever it is handed, so bytes beyond the
+      // window would land in block indexes that were never fetched. Slice
+      // to exactly the echoed window.
+      result.body.resize( static_cast<std::size_t>( windowBytes ) );
       return result.body; // verified window (EOF-clamped ends are fine)
-    if ( !parseable )
-      return result.body; // 206 without a parseable range: treat as opaque
-                          // slice — callers verify coverage before serving
-    throw GeoError( ErrorCode::Unsupported,
-                    "range_cache: origin echoed a mismatched Content-Range window" );
+    }
+    // 206 without a parseable range: treat as an opaque slice — callers
+    // verify coverage before serving.
+    return result.body;
   }
   // A range-ignoring origin answers with the object from byte 0 (possibly
   // cut by the byte budget). The answer serves the request only when it
@@ -778,6 +939,18 @@ class RangeCacheHandle final : public VSIVirtualHandle
       }
       cache.misses.fetch_add( 1 );
 
+      // 9.0 M3: memory miss — try the checksummed disk layer before any
+      // network work. Disk blocks are content-identity keyed; a hit fills
+      // the memory blocks and serves without an origin request.
+      if ( cache.loadBlocksFromDisk( mEntry, firstBlock, lastBlock, mGeneration, blockSize,
+                                     fetchConfigGeneration, config.maxCacheBytes )
+           && cache.tryServe( mEntry, position, length, destination, mGeneration, blockSize ) )
+      {
+        cache.hits.fetch_add( 1 );
+        cache.diskHits.fetch_add( 1 );
+        return length;
+      }
+
       // The resource fetch mutex dedups concurrent readers: the waiter
       // re-checks the cache once the fetching thread finished.
       std::lock_guard<std::mutex> fetchLock( mEntry->fetchMutex );
@@ -789,7 +962,10 @@ class RangeCacheHandle final : public VSIVirtualHandle
       }
       if ( cache.tryServe( mEntry, position, length, destination, mGeneration, blockSize ) )
       {
+        // A concurrent fetch of the same missing run just filled this in —
+        // this read is the request-dedup outcome (no second origin request).
         cache.hits.fetch_add( 1 );
+        cache.dedupHits.fetch_add( 1 );
         return length;
       }
 
@@ -802,6 +978,22 @@ class RangeCacheHandle final : public VSIVirtualHandle
       std::vector<unsigned char> bytes;
       try
       {
+        // Global in-flight byte bound (9.0): admit before the ranged GET,
+        // release after — the gate never holds the store lock and waits
+        // only for other resources' fetches to drain.
+        struct InFlightAdmission
+        {
+          CacheStore &cache;
+          std::uint64_t bytes;
+          std::uint64_t cap;
+          InFlightAdmission( CacheStore &c, std::uint64_t b, std::uint64_t cp )
+            : cache( c ), bytes( b ), cap( cp )
+          {
+            cache.admitFetch( bytes, cap );
+          }
+          ~InFlightAdmission() { cache.completeFetch( bytes, cap ); }
+        } admission( cache, fetchEnd - fetchStart, config.maxConcurrentFetchBytes );
+
         bytes = fetchRange( mEntry->requestUrl, fetchStart, fetchEnd, config );
         cache.coalescedFetches.fetch_add( 1 );
         cache.bytesFetched.fetch_add( bytes.size() );
@@ -816,7 +1008,12 @@ class RangeCacheHandle final : public VSIVirtualHandle
         return fallbackRead( destination, position, fetchEnd - position );
 
       cache.insertBytes( mEntry, fetchStart, bytes, blockSize, fetchConfigGeneration,
-                         config.maxCacheBytes );
+                         mGeneration, config.maxCacheBytes );
+      // 9.0 M3 write-through: publish the fetched run to the disk layer
+      // (atomically, checksummed). A no-op when the layer is disabled or the
+      // identity is unprovable, or when the resource was invalidated while
+      // the fetch was in flight (stale bytes never land anywhere).
+      cache.putRunToDisk( mEntry, fetchStart, bytes, blockSize, mGeneration );
       if ( cache.tryServe( mEntry, position, length, destination, mGeneration, blockSize ) )
         return length;
       // The insert may not fully cover the request near EOF or when the
@@ -1047,6 +1244,9 @@ Json::Value RangeCacheConfig::toJson() const
   json["timeout_seconds"] = timeoutSeconds;
   json["connect_timeout_seconds"] = connectTimeoutSeconds;
   json["max_retries"] = maxRetries;
+  json["max_concurrent_fetch_bytes"] = static_cast<Json::UInt64>( maxConcurrentFetchBytes );
+  json["disk_directory"] = diskDirectory;
+  json["disk_max_bytes"] = static_cast<Json::UInt64>( diskMaxBytes );
   return json;
 }
 
@@ -1062,6 +1262,12 @@ Json::Value RangeCacheTelemetry::toJson() const
   json["invalidations"] = static_cast<Json::UInt64>( invalidations );
   json["fallback_reads"] = static_cast<Json::UInt64>( fallbackReads );
   json["revalidations"] = static_cast<Json::UInt64>( revalidations );
+  json["dedup_hits"] = static_cast<Json::UInt64>( dedupHits );
+  json["max_in_flight_fetch_bytes"] = static_cast<Json::UInt64>( maxInFlightFetchBytes );
+  // 9.0 read amplification: origin bytes pulled per byte served. 0 when
+  // nothing was served yet (no denominator — never fabricate a ratio).
+  json["read_amplification"] =
+    bytesServed > 0 ? static_cast<double>( bytesFetched ) / static_cast<double>( bytesServed ) : 0.0;
   return json;
 }
 
@@ -1074,6 +1280,8 @@ void RemoteRangeCache::install( const RangeCacheConfig &config )
     if ( !g_store )
       g_store = std::make_unique<CacheStore>();
     g_store->updateConfig( config ); // blockSize change drops entries
+    // 9.0 M3: the disk layer follows the config (empty directory = off).
+    RangeDiskBlockStore::configure( config.diskDirectory, config.diskMaxBytes );
     if ( !s_handlerInstalled )
     {
       // Register exactly once per install cycle: re-registering while
@@ -1102,12 +1310,14 @@ void RemoteRangeCache::uninstall()
   cachedHandler() = nullptr;
   g_store->dropAll();
   s_handlerInstalled = false;
+  RangeDiskBlockStore::clear();
 #else
   // GDAL < 3.9 has no RemoveHandler: the prefix cannot be deregistered, so
   // uninstall only drops the bytes and KEEPS the handler installed/registered
   // (reporting installed()==false while /vsirangecache/ still resolves, or
   // re-registering a fresh handler per cycle, would leak and lie).
   g_store->dropAll();
+  RangeDiskBlockStore::clear();
 #endif
 }
 
@@ -1151,9 +1361,23 @@ Json::Value RemoteRangeCache::telemetryJson()
   telemetry.invalidations = g_store->invalidations.load();
   telemetry.fallbackReads = g_store->fallbackReads.load();
   telemetry.revalidations = g_store->revalidations.load();
+  telemetry.dedupHits = g_store->dedupHits.load();
+  telemetry.maxInFlightFetchBytes = g_store->maxInFlightBytes.load();
   Json::Value json = telemetry.toJson();
   json["cached_bytes"] = static_cast<Json::UInt64>( g_store->cachedBytes() );
+  json["in_flight_fetch_bytes"] = static_cast<Json::UInt64>( g_store->inFlightBytes() );
+  json["disk_hits"] = static_cast<Json::UInt64>( g_store->diskHits.load() );
+  json["disk"] = RangeDiskBlockStore::stats().toJson();
+  json["disk"]["enabled"] = RangeDiskBlockStore::enabled();
   json["config"] = g_store->config.toJson();
+  return json;
+}
+
+Json::Value RemoteRangeCache::diskCacheStatsJson()
+{
+  RangeDiskCacheStats stats = RangeDiskBlockStore::stats();
+  Json::Value json = stats.toJson();
+  json["enabled"] = RangeDiskBlockStore::enabled();
   return json;
 }
 

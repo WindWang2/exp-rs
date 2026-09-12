@@ -309,6 +309,33 @@ void RasterWriter::writeWindow( int band1Based, const RasterWindow &window, cons
     }
   }
 
+  // Float32 bands: |v| beyond the float range silently narrows to ±inf (GDAL
+  // narrows without error) — a sign-flipped corrupt product. Overflow is a
+  // typed fidelity failure; precision loss WITHIN the float range is the
+  // declared storage choice and is not gated.
+  if ( dtype == GDT_Float32 )
+  {
+    const double float32Max = static_cast<double>( std::numeric_limits<float>::max() );
+    const std::size_t count = static_cast<std::size_t>( window.width ) * window.height;
+    for ( std::size_t i = 0; i < count; ++i )
+    {
+      const double value = values[i];
+      if ( !std::isnan( value ) && ( value > float32Max || value < -float32Max ) )
+      {
+        Json::Value details;
+        details["band"] = band1Based;
+        details["index"] = static_cast<Json::UInt64>( i );
+        details["value"] = value;
+        details["dtype"] = GDALGetDataTypeName( dtype );
+        details["float32_max"] = float32Max;
+        throw GeoError( ErrorCode::FidelityLoss,
+                        "writeWindow: value overflows the band's Float32 range "
+                        "(stored pixels would silently become ±inf)",
+                        details );
+      }
+    }
+  }
+
   const CPLErr error = GDALRasterIO( band, GF_Write, window.xOff, window.yOff, window.width, window.height,
                                      const_cast<double *>( values ), window.width, window.height, GDT_Float64, 0, 0 );
   if ( error != CE_None )

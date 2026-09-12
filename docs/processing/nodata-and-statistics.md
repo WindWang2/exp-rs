@@ -27,6 +27,34 @@
    plausible value. Class/mask rasters use the family's documented encoding
    (e.g. `rs:threshold_raster` writes 1/0 with 255 = NoData; OBIA labels use 0
    = NoData).
+4. **Typed multi-band outputs declare NoData per band (9.0, #854).** A
+   dataset-wide setter cannot express the Byte-valued mask band's integer
+   sentinel next to a Float32 band's NaN: the flatten operator set NaN across
+   a gamma0+validity-mask output, so the mask's declared-by-convention 255
+   pixels read back as valid foreground data. Writers of mask-carrying
+   outputs use `GdalStreamingOutput::setBandNoDataValue` for
+   every band — the two SAR terrain operators are the reference
+   (NaN bands first, mask 255 last). A dataset-wide `setNoDataValue` call in
+   a file that writes a typed mask band is a review-rejected pattern,
+   mechanically guarded by `tests/test_semantic_drift_9.cpp` (with the
+   declaration order pinned by read-back regression cases). Format
+   constraint: GeoTIFF serializes ONE `GDAL_NODATA` tag per dataset (GDAL
+   warns and reuses the last value for every band on re-open), so the mask
+   sentinel 255 is written LAST and is the persisted declaration — order
+   matters; a NaN tag would make the mask's 255 read back as valid.
+   Consequence for the float bands: their NaN NoData is detectable only by
+   VALUE on a re-opened GTiff, never by declaration (the dataset tag
+   re-declares them with the mask's sentinel); consumers must not filter
+   float bands by the declared sentinel.
+5. **Hydrology flood boundary includes NoData adjacency (9.0, #848).**
+   `TerrainFlow::fillDepressions` seeds the priority-flood on the rectangular
+   rim AND every valid cell adjacent (8-neighbourhood) to NoData —
+   reprojected/clipped DEMs carry NoData borders, and rim-only seeding left
+   interior depressions unfilled (the flood returned success having filled
+   nothing). NoData cells remain barriers (never filled, never routed
+   across); water overflowing a NoData edge leaves the known surface at the
+   seed's own elevation. Contract in `terrain_flow.h`; regression in
+   `tests/test_scientific_defects_9.cpp`.
 
 ## 2. Denominators and valid-observation semantics
 

@@ -161,8 +161,8 @@ Result<void> ExperimentRunBridge::attachExecutionPins( const QString &executionR
         return VoidResult::success();
     }
 
-    // Local mutable copy: the un-started path merges pins into the record
-    // before upserting (const auto made the setters ill-formed on GCC).
+    // The pin setters mutate the in-memory record before it is copied into
+    // the store, so the local cannot be const.
     auto run = m_store->runById( runId );
     if ( !run )
         return failVoid( QStringLiteral( "experiment.run_not_found" ),

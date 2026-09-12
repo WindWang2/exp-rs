@@ -66,6 +66,13 @@ DoctorReport runDoctor( const std::string &path, const InspectOptions &options =
 /// This backs `data inspect`; doctor adds the findings on top.
 Json::Value runInspect( const std::string &path, const InspectOptions &options = {} );
 
+/// 9.0 M9 — GDAL runtime capability matrix: the running GDAL version plus,
+/// for every profile this layer speaks about, the driver's honest
+/// CREATE/CreateCopy/Open capability flags and extension mapping. Pure
+/// runtime introspection (driver metadata only; no dataset is opened) — the
+/// answer documents what THIS build can do, never what a spec promises.
+Json::Value gdalCapabilityMatrix();
+
 } // namespace sicnu::geo
 
 #endif // SICNU_GEOSPATIAL_DATA_DOCTOR_H

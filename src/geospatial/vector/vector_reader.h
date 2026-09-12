@@ -38,6 +38,42 @@ struct VectorFeature
     std::string geometryWkt;  ///< WKT in (possibly transformed) layer CRS; empty when geometryless
 };
 
+/// 9.0 M6 — declared layer envelope. `exact` means the DRIVER REPORTED an
+/// envelope (computed or driver-cached/declared — e.g. PostGIS estimated
+/// extents and shapefile header bounds are indistinguishable at this API,
+/// so treat `exact` as "driver-backed", not "geometry-scanned here");
+/// metadata-carried envelopes keep their own provenance flag, fast-path
+/// failures are honestly invalid.
+struct VectorExtent
+{
+    bool valid = false;
+    bool exact = false;
+    double minX = 0.0;
+    double minY = 0.0;
+    double maxX = 0.0;
+    double maxY = 0.0;
+
+    Json::Value toJson() const;
+};
+
+/// 9.0 M6 — driver-evaluated aggregate statistics for one numeric field.
+/// Nulls never count as zeros: each aggregate carries its own presence flag.
+struct VectorFieldStatistics
+{
+    std::string field;
+    std::int64_t nonNullCount = 0;
+    bool hasMin = false;
+    double minValue = 0.0;
+    bool hasMax = false;
+    double maxValue = 0.0;
+    bool hasSum = false;
+    double sum = 0.0;
+    bool hasMean = false;
+    double mean = 0.0;
+
+    Json::Value toJson() const;
+};
+
 class VectorReader
 {
   public:
@@ -83,6 +119,26 @@ class VectorReader
     /// Explicit exact count — for drivers without cheap counts this scans the
     /// layer (documented, opt-in; never called by inspection paths).
     std::int64_t exactFeatureCount();
+
+    // --- 9.0 M6: extent & aggregate statistics ----------------------------
+
+    /// Layer envelope without a full-table surprise: the driver's cheap
+    /// extent is used when available; `allowScan` additionally permits a
+    /// geometry scan. Without the flag, an unavailable extent reports
+    /// valid=false (never a silent full-table load).
+    VectorExtent extent( bool allowScan = false ) const;
+
+    /// Driver-evaluated MIN/MAX/SUM/AVG/COUNT over one NUMERIC field
+    /// (optionally WHERE-filtered). Explicit opt-in: aggregates inherently
+    /// scan the features in the driver, so this is a caller decision, never
+    /// an inspection side effect. String fields are a typed error. The
+    /// current stream position is untouched.
+    /// SECURITY NOTE: `whereClause` is CALLER-OWNED raw OGR SQL passed
+    /// VERBATIM to the driver (field/layer identifiers are quoted here; the
+    /// clause itself is not sanitized). Only pass trusted clauses — on
+    /// SQL-capable drivers a non-SELECT clause would be driver-evaluated.
+    VectorFieldStatistics fieldStatistics( const std::string &fieldName,
+                                           const std::string &whereClause = std::string() ) const;
 
   private:
     void *mHandle = nullptr;   // GDALDatasetH
