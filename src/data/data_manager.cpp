@@ -58,15 +58,19 @@ Diagnostic wrongThreadDiagnostic()
 /// Mutations remain strictly owner-affine with wrong_thread diagnostics.
 
 /// Loud, non-fatal off-affinity marker for the live-container readers.
+/// Fires ONCE per process (qWarningOnce dedups on this call site): these
+/// readers are polling APIs (leaseCount / hasActiveEditLease / planUnload),
+/// so a repeated off-affinity poller must not spam the log — the first
+/// occurrence carries the diagnostic, later ones stay quiet.
 void checkLeaseReaderAffinity( const QObject *manager )
 {
   if ( QThread::currentThread() == manager->thread() )
     return;
-  qWarning( "DataManager: live-container reader called from thread %p off "
-            "the manager's owning thread %p (lease records are not "
-            "snapshot-served; marshal to the owner thread, #703/A-F2)",
-            static_cast<const void *>( QThread::currentThread() ),
-            static_cast<const void *>( manager->thread() ) );
+  qWarningOnce( "DataManager: live-container reader called from thread %p off "
+                "the manager's owning thread %p (lease records are not "
+                "snapshot-served; marshal to the owner thread, #703/A-F2)",
+                static_cast<const void *>( QThread::currentThread() ),
+                static_cast<const void *>( manager->thread() ) );
 }
 
 /// Builds the diagnostics for refusing to remove a leased asset, shared by

@@ -453,9 +453,23 @@ SelectionContextSnapshot SelectionContext::computeSnapshot() const
 {
     SelectionContextSnapshot snap;
 
+    // #849: the dying-layer probe below tests bare pointer membership in the
+    // project's layer map — it must never dereference the possibly-freed
+    // pointer. Materialize that pointer set once per pass; the previous
+    // per-probe mapLayers().values().contains() copied the whole layer map
+    // for every candidate layer.
+    QSet<const void *> liveLayerPointers;
+    if ( QgsProject::instance() )
+    {
+        const QMap<QString, QgsMapLayer *> layers = QgsProject::instance()->mapLayers();
+        liveLayerPointers.reserve( layers.size() );
+        for ( auto it = layers.constBegin(); it != layers.constEnd(); ++it )
+            liveLayerPointers.insert( it.value() );
+    }
+
     // #778: layers that announced removal are invisible to projections even
     // while they are still briefly reachable from the canvas / tree.
-    const auto dying = [this]( QgsMapLayer *layer ) {
+    const auto dying = [this, &liveLayerPointers]( QgsMapLayer *layer ) {
         if ( !layer )
             return true;
         for ( const DyingLayer &d : m_dyingLayers )
@@ -464,7 +478,7 @@ SelectionContextSnapshot SelectionContext::computeSnapshot() const
                 return true; // doomed and still alive
             if ( !d.guard && d.raw == layer )
             {
-                if ( QgsProject::instance() && QgsProject::instance()->mapLayers().values().contains( layer ) )
+                if ( liveLayerPointers.contains( layer ) )
                     continue; // valid new layer reusing the address
                 return true; // destroyed — the pointer must never resurface
             }

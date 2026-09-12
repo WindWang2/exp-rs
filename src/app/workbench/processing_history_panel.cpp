@@ -123,7 +123,6 @@ ProcessingHistoryPanel::ProcessingHistoryPanel( QWidget *parent )
     connect( m_compareBtn, &QPushButton::clicked, this, &ProcessingHistoryPanel::compareSelectedOutputs );
     connect( m_inspectBtn, &QPushButton::clicked, this, &ProcessingHistoryPanel::inspectSelected );
     connect( m_resumeBtn, &QPushButton::clicked, this, &ProcessingHistoryPanel::resumeSelected );
-    buildRowActions();
 
     m_taskCenter = &sicnu::TaskCenter::instance();
     m_coordinator = &sicnu::workflow::WorkflowRunCoordinator::instance();
@@ -341,12 +340,6 @@ void ProcessingHistoryPanel::resumeSelected()
     if ( !entry || !entry->resumable || entry->runId.isEmpty() )
         return;
     emit resumeRunRequested( entry->runId );
-}
-
-void ProcessingHistoryPanel::buildRowActions()
-{
-    // Row-level affordances live in the context menu + action row; nothing
-    // else to build per row (goal §H: no widget-per-row).
 }
 
 } // namespace sicnu::app

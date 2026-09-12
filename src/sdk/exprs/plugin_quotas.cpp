@@ -4,6 +4,7 @@
 #include "exprs/plugin_quotas.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <vector>
 
@@ -11,27 +12,44 @@ namespace exprs {
 
 namespace {
 
-long long envLongLong( const char *name, long long fallback )
+/// Parses an env override LOUDLY: an unset variable keeps the fallback
+/// silently, but a set-but-non-numeric or out-of-range value keeps the
+/// fallback AND reports on stderr (there is no diagnostics channel before a
+/// runtime exists). A negative quota would silently DISABLE enforcement
+/// (workerMemoryBytes <= 0 turns off the job-object/RLIMIT bound), so these
+/// ceilings must fail safe, never fail open. Ranges mirror parseManifest.
+long long envLongLongInRange( const char *name, long long fallback, long long low,
+                              long long high )
 {
-    const char *value = std::getenv( name );
-    if ( !value || !*value )
+    const char *raw = std::getenv( name );
+    if ( !raw || !*raw )
         return fallback;
     char *end = nullptr;
-    const long long parsed = std::strtoll( value, &end, 10 );
-    return ( end && *end == '\0' ) ? parsed : fallback;
+    const long long parsed = std::strtoll( raw, &end, 10 );
+    if ( !end || *end != '\0' )
+    {
+        std::fprintf( stderr, "plugin-quotas: %s='%s' is not a number; default %lld kept\n",
+                      name, raw, fallback );
+        return fallback;
+    }
+    if ( parsed < low || parsed > high )
+    {
+        std::fprintf( stderr,
+                      "plugin-quotas: %s=%lld outside [%lld, %lld]; default %lld kept\n", name,
+                      parsed, low, high, fallback );
+        return fallback;
+    }
+    return parsed;
 }
-
-} // namespace
-
-namespace {
 
 /// Clamps an env-provided byte bound into [1024, 1 GiB]: beyond the clamp a
 /// truncated 32-bit long (MSVC) could become 0 = "no bound" (fail-open).
+/// Non-positive or non-numeric values are refused loudly (default kept);
+/// positive values keep the clamp semantics.
 long long clampedBytes( const char *name, long long fallback )
 {
-    const long long value = envLongLong( name, fallback );
-    if ( value <= 0 )
-        return fallback;
+    const long long value = envLongLongInRange( name, fallback, 1,
+                                                1024LL * 1024LL * 1024LL * 64LL );
     return std::min( std::max( value, 1024LL ), 1024LL * 1024LL * 1024LL );
 }
 
@@ -40,21 +58,23 @@ long long clampedBytes( const char *name, long long fallback )
 PluginQuota PluginQuota::fromEnvironment()
 {
     PluginQuota quota;
-    quota.maxRequestConcurrency = static_cast<int>(
-        envLongLong( "SICNU_PLUGIN_QUOTA_CONCURRENCY", quota.maxRequestConcurrency ) );
-    quota.requestDeadlineMs = static_cast<int>(
-        envLongLong( "SICNU_PLUGIN_QUOTA_DEADLINE_MS", quota.requestDeadlineMs ) );
+    quota.maxRequestConcurrency = static_cast<int>( envLongLongInRange(
+        "SICNU_PLUGIN_QUOTA_CONCURRENCY", quota.maxRequestConcurrency, 1, 64 ) );
+    quota.requestDeadlineMs = static_cast<int>( envLongLongInRange(
+        "SICNU_PLUGIN_QUOTA_DEADLINE_MS", quota.requestDeadlineMs, 1000,
+        24LL * 60 * 60 * 1000 ) );
     quota.maxResponseBytes =
         static_cast<long>( clampedBytes( "SICNU_PLUGIN_QUOTA_RESPONSE_BYTES",
                                          quota.maxResponseBytes ) );
     quota.maxRequestBytes = static_cast<long>(
         clampedBytes( "SICNU_PLUGIN_QUOTA_REQUEST_BYTES", quota.maxRequestBytes ) );
     quota.workerMemoryBytes =
-        envLongLong( "SICNU_PLUGIN_QUOTA_MEMORY_BYTES", quota.workerMemoryBytes );
-    quota.workerCpuRatePercent = static_cast<int>(
-        envLongLong( "SICNU_PLUGIN_QUOTA_CPU_PERCENT", quota.workerCpuRatePercent ) );
-    quota.maxChildProcesses = static_cast<int>(
-        envLongLong( "SICNU_PLUGIN_QUOTA_CHILD_PROCESSES", quota.maxChildProcesses ) );
+        envLongLongInRange( "SICNU_PLUGIN_QUOTA_MEMORY_BYTES", quota.workerMemoryBytes, 0,
+                            1LL << 62 );
+    quota.workerCpuRatePercent = static_cast<int>( envLongLongInRange(
+        "SICNU_PLUGIN_QUOTA_CPU_PERCENT", quota.workerCpuRatePercent, 0, 100 ) );
+    quota.maxChildProcesses = static_cast<int>( envLongLongInRange(
+        "SICNU_PLUGIN_QUOTA_CHILD_PROCESSES", quota.maxChildProcesses, 0, 256 ) );
     if ( const char *gpu = std::getenv( "SICNU_PLUGIN_QUOTA_GPU" ) )
         quota.gpuHint = gpu;
     return quota;

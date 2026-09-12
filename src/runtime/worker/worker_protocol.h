@@ -196,6 +196,23 @@ inline std::string frameErrorCode( const Json::Value &errorFrame )
                : std::string();
 }
 
+/// True when an error frame reports cancellation — via the structured code
+/// (7.0 workers) or the legacy message text. The legacy fallback is
+/// type-checked with a neutral (false) verdict: a malformed peer frame
+/// ("message" absent or not a string, e.g. an object) must not be able to
+/// crash the host with a Json::LogicError — the same hazard class the
+/// asInt()/isObject() gates in parseFrame guard against. Shared by every
+/// local worker host (one-shot host + pool) so the cancellation semantics
+/// cannot drift between them.
+inline bool frameErrorMeansCancelled( const Json::Value &errorFrame )
+{
+    if ( !errorFrame.isObject() )
+        return false; // isMember() is only safe on object roots (see parseFrame)
+    return frameErrorCode( errorFrame ) == "cancelled"
+           || ( errorFrame.isMember( "message" ) && errorFrame["message"].isString()
+                && errorFrame["message"].asString() == "cancelled" );
+}
+
 /// Output identity manifest of a result frame (null when absent). Each entry
 /// is {"path","sizeBytes","lastModifiedMsec"} as produced by the worker.
 inline Json::Value frameOutputIdentity( const Json::Value &resultFrame )

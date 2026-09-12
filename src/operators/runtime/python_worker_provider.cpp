@@ -32,7 +32,7 @@ class PythonWorkerSession final : public IModelRuntime
   public:
     PythonWorkerSession( std::string interpreter, std::string workerScript,
                          std::string workingDir, std::string artifact, std::string digest,
-                         int timeoutMs, int resolvedCudaIndex = -1 )
+                         int timeoutMs, int resolvedCudaIndex = -1, long maxBodyMb = 0 )
         : m_interpreter( std::move( interpreter ) )
         , m_workerScript( std::move( workerScript ) )
         , m_workingDir( std::move( workingDir ) )
@@ -40,6 +40,8 @@ class PythonWorkerSession final : public IModelRuntime
         , m_digest( std::move( digest ) )
         , m_timeoutMs( timeoutMs > 0 ? timeoutMs : 30000 )
         , m_resolvedCudaIndex( resolvedCudaIndex )
+        , m_maxReadBytes( maxBodyMb > 0 ? static_cast<qint64>( maxBodyMb ) * 1024 * 1024
+                                        : static_cast<qint64>( 256 ) * 1024 * 1024 )
     {
     }
 
@@ -83,9 +85,11 @@ class PythonWorkerSession final : public IModelRuntime
         stopWorker();
         return false;
       }
-      // Handshake: one ready line within the timeout.
+      // Handshake: one ready line within the timeout (an oversized or
+      // unparseable line fails the handshake exactly like a timeout — the
+      // document is meaningless either way).
       QJsonObject ready;
-      if ( !readLine( ready, m_timeoutMs ) )
+      if ( readLine( ready, m_timeoutMs ) != ReadOutcome::Ok )
       {
         if ( errorMessage )
           *errorMessage = "python worker did not report ready (timed out or exited); "
@@ -186,8 +190,24 @@ class PythonWorkerSession final : public IModelRuntime
         }
 
         QJsonObject response;
-        if ( !readLine( response, m_timeoutMs ) )
+        const ReadOutcome outcome = readLine( response, m_timeoutMs );
+        if ( outcome != ReadOutcome::Ok )
         {
+          if ( outcome == ReadOutcome::Oversized )
+          {
+            // The worker is alive but its answer blew the same max_body_mb
+            // guard the HTTP transport enforces — fail the forward with the
+            // shared output-invalid classification (no truncation into the
+            // parser, no replay: the request would produce the same
+            // oversized answer). The worker is stopped because the exchange
+            // is left mid-stream; an abandoned tail must never be served to
+            // the next request.
+            recordFailure( "python worker response exceeds the runtime.provider.max_body_mb "
+                           "guard (output invalid); stderr: " + drainStderr() );
+            stopWorker();
+            throw std::runtime_error( "python worker response exceeds the "
+                                      "runtime.provider.max_body_mb guard (output invalid)" );
+          }
           if ( attempt == 0 && m_process->state() != QProcess::Running )
             continue; // worker EXITED (crash) → restart + replay
           recordFailure( "python worker exited unexpectedly before responding; stderr: "
@@ -306,9 +326,20 @@ class PythonWorkerSession final : public IModelRuntime
     }
 
   private:
-    /// Reads ONE newline-terminated JSON document. False on timeout or worker
-    /// exit (the response document is then meaningless).
-    bool readLine( QJsonObject &document, int timeoutMs )
+    /// Outcome of reading one wire document.
+    enum class ReadOutcome
+    {
+      Ok,
+      Failed,   // timeout or worker exit; the document is meaningless
+      Oversized // response exceeded the max_body_mb read guard
+    };
+
+    /// Reads ONE newline-terminated JSON document. Failed on timeout or
+    /// worker exit; Oversized once the accumulated bytes pass the same
+    /// runtime.provider.max_body_mb guard the HTTP transport enforces —
+    /// a worker streaming an unbounded stdout must hit a typed failure,
+    /// never silently truncate (or OOM the host while the timeout runs).
+    ReadOutcome readLine( QJsonObject &document, int timeoutMs )
     {
       QByteArray line;
       const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + timeoutMs;
@@ -318,21 +349,23 @@ class PythonWorkerSession final : public IModelRuntime
              || m_process->waitForReadyRead( 100 ) )
         {
           line += m_process->readAll();
+          if ( static_cast<qint64>( line.size() ) > m_maxReadBytes )
+            return ReadOutcome::Oversized;
           continue;
         }
         if ( m_process->state() != QProcess::Running )
-          return false;
+          return ReadOutcome::Failed;
         if ( QDateTime::currentMSecsSinceEpoch() > deadline )
-          return false;
+          return ReadOutcome::Failed;
       }
       const int newline = line.indexOf( '\n' );
       QJsonParseError parseError{};
       const QJsonDocument doc =
         QJsonDocument::fromJson( line.left( newline ), &parseError );
       if ( parseError.error != QJsonParseError::NoError || !doc.isObject() )
-        return false;
+        return ReadOutcome::Failed;
       document = doc.object();
-      return true;
+      return ReadOutcome::Ok;
     }
 
     std::string drainStderr()
@@ -369,6 +402,9 @@ class PythonWorkerSession final : public IModelRuntime
     std::string m_digest;
     int m_timeoutMs = 30000;
     int m_resolvedCudaIndex = -1; // Platform 9.0: -1 = cpu / no device pinning
+    /// Wire-read guard (same bound and manifest knob as the HTTP transport's
+    /// response guard — runtime.provider.max_body_mb, 256 MiB default).
+    qint64 m_maxReadBytes = 256 * 1024 * 1024;
     bool m_loaded = false;
     std::mutex m_inferMutex; // one request/response exchange at a time
     std::unique_ptr<QProcess> m_process;
@@ -397,7 +433,8 @@ ModelRuntimePtr makePythonWorkerRuntime( const ModelInfo &model,
     interpreter, script.toStdString(),
     QFileInfo( script ).absolutePath().toStdString(), model.resolvedArtifactPath,
     model.contentDigest, model.runtime.provider.timeoutMs,
-    model.runtime.gpu ? model.runtime.resolvedCudaIndex : -1 );
+    model.runtime.gpu ? model.runtime.resolvedCudaIndex : -1,
+    model.runtime.provider.maxBodyMb );
   if ( !session->startWorker( errorMessage ) )
     return nullptr;
   return session;
