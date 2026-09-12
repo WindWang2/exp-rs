@@ -5,6 +5,8 @@
 
 #include "command_registry.h"
 #include "main_window.h"
+#include "workflow/pipeline_editor_dock.h"
+#include "shell/workflow_session_controller.h"
 #include "workbench_host.h"
 
 #include "dialogs/extract_band_dialog.h"
@@ -440,6 +442,70 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
             if ( auto *rl = qobject_cast<QgsRasterLayer *>( window->mapCanvas()->currentLayer() ) )
                 dlg.setRasterLayer( rl );
             dlg.exec();
+        };
+        registry->registerCommand( d );
+    }
+
+    // ── 工作流 Workflow (Workbench 9.0 M2 — #882 residual: the pipeline
+    // editor dock previously advertised Ctrl+N/O/S in tooltips without any
+    // binding; the real capability now lives here as first-class commands,
+    // discoverable via palette/help. No default shortcut: the canonical
+    // Ctrl+N/O/S belong to project.new/open/save.) ──
+    {
+        RS_CMD( d, "workflow.new", QObject::tr( "新建工作流" ),
+                QObject::tr( "在流程编辑器中新建空工作流。" ),
+                "new_project", QObject::tr( "工作流" ) );
+        d.handler = [window] {
+            if ( auto *dock = window->pipelineDock() )
+            {
+                dock->show();
+                dock->raise();
+                dock->onNewClicked();
+            }
+        };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "workflow.open", QObject::tr( "打开工作流..." ),
+                QObject::tr( "打开 .json 工作流文件到流程编辑器。" ),
+                "document-open", QObject::tr( "工作流" ) );
+        d.handler = [window] {
+            if ( auto *dock = window->pipelineDock() )
+            {
+                dock->show();
+                dock->raise();
+                dock->onOpenClicked();
+            }
+        };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "workflow.save", QObject::tr( "保存工作流" ),
+                QObject::tr( "保存当前工作流为 .json 文件。" ),
+                "document-save", QObject::tr( "工作流" ) );
+        d.handler = [window] {
+            if ( auto *dock = window->pipelineDock() )
+                dock->onSaveClicked();
+        };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "workflow.run", QObject::tr( "运行全流程" ),
+                QObject::tr( "按拓扑顺序调度执行当前工作流。" ),
+                "media-playback-start", QObject::tr( "工作流" ) );
+        d.handler = [window] {
+            if ( auto *controller = window->sessionController() )
+                controller->runFullWorkflow();
+        };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "workflow.stop", QObject::tr( "停止工作流" ),
+                QObject::tr( "停止正在运行的流程任务。" ),
+                "media-playback-stop", QObject::tr( "工作流" ) );
+        d.handler = [window] {
+            if ( auto *controller = window->sessionController() )
+                controller->stopWorkflow();
         };
         registry->registerCommand( d );
     }

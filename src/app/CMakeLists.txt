@@ -110,6 +110,7 @@ add_executable(sicnu_geo_rs
     main_window_misc.cpp
     main_window_processing.cpp
     shell/schema_form_builder.cpp
+    shell/workbench_enum_provider.cpp
     shell/task_panel_host.cpp
     shell/workflow_session_controller.cpp
     shell/ribbon_controller.cpp
@@ -121,7 +122,9 @@ add_executable(sicnu_geo_rs
     workbench/workbench_host.cpp
     workbench/adapters.cpp
     workbench/selection_context.cpp
+    workbench/workbench_state.cpp
     workbench/command_registry.cpp
+    workbench/plugin_command_defs.cpp
     workbench/command_defs.cpp
     workbench/command_palette.cpp
     workbench/inspector_host.cpp

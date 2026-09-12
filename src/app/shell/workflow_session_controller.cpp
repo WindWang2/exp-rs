@@ -165,6 +165,13 @@ QString WorkflowSessionController::openTool( const QString &definitionId )
     if ( op )
     {
       schema = op->schema();
+      // Workbench 9.0 M6: bind dynamic enum sources at the shell boundary.
+      // Operator schemas keep declaring plain x-ui-type ports; the host
+      // annotates model/asset ports so the form resolves them live through
+      // the WorkbenchEnumProvider (ModelCatalog / DataManager) instead of
+      // rendering them as bare text inputs. Layer ports stay on the proven
+      // push channel (setRasterLayerChoices / setVectorLayerChoices).
+      schema = sicnu::app::applyEnumSourceAnnotations( schema );
       helpSummary = QString::fromStdString( op->description() );
       if ( title.isEmpty() )
         title = QString::fromStdString( op->displayName() );

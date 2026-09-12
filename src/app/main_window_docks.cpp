@@ -586,7 +586,13 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     // Session controller bridges TaskPanelHost ↔ WorkflowRuntime
     m_sessionController = new WorkflowSessionController( this );
     if ( m_projectContext )
+    {
         m_sessionController->setDataManager( &m_projectContext->dataManager() );
+        // Workbench 9.0 M6: the task panel's enum provider reads the
+        // authoritative asset store for x-ui-enum-source "assets".
+        if ( auto *provider = m_taskPanel->enumProvider() )
+            provider->attachDataManager( &m_projectContext->dataManager() );
+    }
     m_sessionController->registerBuiltins();
     m_sessionController->bindPanel( m_taskPanel );
 

@@ -48,15 +48,15 @@ void PipelineEditorDock::createToolBar()
   mToolBar->setIconSize( QSize( 16, 16 ) );
 
   auto *newAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "document-new" ), QIcon( QStringLiteral( ":/icons/document-new" ) ) ), tr( "新建" ) );
-  newAct->setToolTip( tr( "新建工作流 (Ctrl+N)" ) );
+  newAct->setToolTip( tr( "新建工作流" ) );
   connect( newAct, &QAction::triggered, this, &PipelineEditorDock::onNewClicked );
 
   auto *openAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "document-open" ), QIcon( QStringLiteral( ":/icons/document-open" ) ) ), tr( "打开" ) );
-  openAct->setToolTip( tr( "打开工作流 (.json) (Ctrl+O)" ) );
+  openAct->setToolTip( tr( "打开工作流 (.json) — 或通过命令面板 workflow.open" ) );
   connect( openAct, &QAction::triggered, this, &PipelineEditorDock::onOpenClicked );
 
   auto *saveAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "document-save" ), QIcon( QStringLiteral( ":/icons/document-save" ) ) ), tr( "保存" ) );
-  saveAct->setToolTip( tr( "保存工作流 (.json) (Ctrl+S)" ) );
+  saveAct->setToolTip( tr( "保存工作流 (.json)" ) );
   connect( saveAct, &QAction::triggered, this, &PipelineEditorDock::onSaveClicked );
 
   mToolBar->addSeparator();

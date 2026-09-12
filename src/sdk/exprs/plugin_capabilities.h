@@ -89,4 +89,55 @@ bool expandCapabilityPath( const std::string &declared, const std::string &plugi
 bool pathIsWithinRoot( const std::string &candidate, const std::string &root,
                        std::string &resolvedCandidate );
 
+/// Machine-readable honesty levels for the declaration-vs-enforcement
+/// matrix below. The names are part of the public contract: doctor output,
+/// `plugin inspect --json` and the debug bundle quote them verbatim, and
+/// docs/plugins/capabilities.md is generated FROM this table (never the
+/// other way round).
+enum class CapabilityEnforcementLevel
+{
+    EnforcedHost,        ///< refused/limited in the launcher process
+    EnforcedWorker,      ///< refused in the worker at the host-provided seam
+    EnforcedOs,          ///< kernel-enforced bound (platform nuances in note)
+    Advisory,            ///< surfaced + logged, never enforced
+    AuditOnly,           ///< recorded in diagnostics, no gate
+    RefusedByContract,   ///< documented non-goal; we never claim it
+};
+
+std::string capabilityEnforcementLevelName( CapabilityEnforcementLevel level );
+
+struct CapabilityEnforcementEntry
+{
+    const char *capability;    ///< stable id ("filesystem.workDir", "quotas.workerMemoryBytes", ...)
+    const char *runtimeScope;  ///< "in-process" | "host-process" | "all"
+    CapabilityEnforcementLevel level;
+    const char *note;          ///< boundaries and platform nuances, honest wording
+};
+
+/// The capability enforcement matrix — one source of truth shared by the
+/// docs, doctor, inspect and the debug bundle. Order is stable (manifest
+/// grouping) so consumers can diff output.
+std::vector<CapabilityEnforcementEntry> pluginCapabilityEnforcementMatrix();
+
+/// JSON projection of the matrix: [{"capability","runtimeScope","level","note"}].
+Json::Value pluginCapabilityEnforcementMatrixJson();
+
+/// True when the manifest declares an "access" object at all. The 9.0
+/// capability gates (model frameworks, explicit ui:false, explicit
+/// externalProcess:false, provider schemes) enforce EXPLICIT declarations
+/// only — manifests without an access object keep every pre-9.0 behavior
+/// (deny-by-default is never invented for undeclared policy).
+bool manifestDeclaresAccess( const Json::Value &access );
+
+/// True when @p framework may be served under the declared access model:
+/// a manifest without an access object allows everything (compatibility);
+/// a declared modelProvider.frameworks array bounds the plugin to it (an
+/// EMPTY declared array means the plugin deliberately serves nothing).
+bool modelFrameworkAllowed( const Json::Value &access, const std::string &framework );
+
+/// Tri-state for explicit boolean access declarations:
+///   1 = declared true, 0 = declared false, -1 = not declared.
+/// Gates act only on DECLARED values (0); undeclared never gates.
+int accessBool( const Json::Value &access, const char *key );
+
 } // namespace exprs

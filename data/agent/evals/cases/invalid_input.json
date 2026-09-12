@@ -1,0 +1,93 @@
+{
+  "cases": [
+    {
+      "case_id": "invalid_input/plan-duplicate-step-ids-typed",
+      "category": "invalid_input",
+      "description": "A plan with duplicate step ids is rejected with typed issues and is not compilable",
+      "steps": [
+        {"tool": "harness:plan", "input": {"plan": {
+          "schema_version": "2.0", "kind": "execution_plan", "plan_id": "plan-dup",
+          "intent": "", "inputs": [{"name": "primary", "ref": "$fixture"}],
+          "steps": [
+            {"id": "index", "operator_id": "rs:spectral_index",
+             "params": {"input": "$primary.path", "index": "NDVI", "output": "$outputs.ndvi"}},
+            {"id": "index", "operator_id": "rs:threshold_raster",
+             "params": {"input": "$outputs.ndvi", "output": "$outputs.cls"}}
+          ],
+          "outputs": []
+        }}, "expect": {"success": true, "asserts": [
+          {"path": "compilable", "equals": false},
+          {"path": "issues", "exists": true}]}},
+        {"tool": "harness:repair_plan", "input": {"plan": {
+          "schema_version": "2.0", "kind": "execution_plan", "plan_id": "plan-dup",
+          "intent": "", "inputs": [{"name": "primary", "ref": "$fixture"}],
+          "steps": [
+            {"id": "index", "operator_id": "rs:spectral_index",
+             "params": {"input": "$primary.path", "index": "NDVI", "output": "$outputs.ndvi"}},
+            {"id": "index", "operator_id": "rs:threshold_raster",
+             "params": {"input": "$outputs.ndvi", "output": "$outputs.cls"}}
+          ],
+          "outputs": []
+        }}, "expect": {"success": true, "asserts": [
+          {"path": "compilable", "equals": true},
+          {"path": "repair_log", "exists": true}]}}
+      ],
+      "fixture": {"kind": "raster", "width": 8, "height": 8, "bands": ["red", "nir"]}
+    },
+    {
+      "case_id": "invalid-input/plan-missing-parameter-typed",
+      "category": "invalid_input",
+      "description": "Calling harness:plan without the plan object fails with the typed code",
+      "steps": [
+        {"tool": "harness:plan", "input": {},
+         "expect": {"success": false, "error_code": "INVALID_PARAMETER"}}
+      ]
+    },
+    {
+      "case_id": "invalid-input/run-status-missing-run-id-typed",
+      "category": "invalid_input",
+      "description": "run_status without run_id fails with INVALID_PARAMETER, never prose",
+      "steps": [
+        {"tool": "harness:run_status", "input": {},
+         "expect": {"success": false, "error_code": "INVALID_PARAMETER"}}
+      ]
+    },
+    {
+      "case_id": "invalid-input/explain-unknown-run-typed",
+      "category": "invalid_input",
+      "description": "Explaining an unknown run id is a typed WORKFLOW_NOT_FOUND failure",
+      "steps": [
+        {"tool": "harness:explain", "input": {"run_id": "no-such-run"},
+         "expect": {"success": false, "error_code": "WORKFLOW_NOT_FOUND"}}
+      ]
+    },
+    {
+      "case_id": "invalid-input/instantiate-unknown-recipe-typed",
+      "category": "invalid_input",
+      "description": "Instantiating an unknown recipe fails with the typed TOOL_NOT_FOUND code",
+      "steps": [
+        {"tool": "harness:instantiate_recipe",
+         "input": {"recipe_id": "harness.does_not_exist", "bindings": {}},
+         "expect": {"success": false, "error_code": "TOOL_NOT_FOUND"}}
+      ]
+    },
+    {
+      "case_id": "invalid-input/plan-unknown-operator-referenced",
+      "category": "invalid_input",
+      "description": "A step referencing an operator that is not registered is a typed issue",
+      "steps": [
+        {"tool": "harness:plan", "input": {"plan": {
+          "schema_version": "2.0", "kind": "execution_plan", "plan_id": "plan-phantom",
+          "intent": "", "inputs": [],
+          "steps": [
+            {"id": "magic", "operator_id": "rs:teleport_band",
+             "params": {"output": "$outputs.x"}}
+          ],
+          "outputs": []
+        }}, "expect": {"success": true, "asserts": [
+          {"path": "compilable", "equals": false},
+          {"path": "issues[0].code", "exists": true}]}}
+      ]
+    }
+  ]
+}
