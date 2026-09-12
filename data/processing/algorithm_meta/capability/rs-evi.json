@@ -1,0 +1,149 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u68ee\u6797",
+        "\u5bc6\u96c6\u519c\u7530"
+      ],
+      "scenes" : 
+      [
+        "\u9ad8\u751f\u7269\u91cf\u533a\u690d\u88ab\u76d1\u6d4b",
+        "\u68ee\u6797\u84c4\u79ef\u91cf\u76f8\u5173\u7814\u7a76"
+      ]
+    },
+    "band_roles" : 
+    {
+      "blue" : 1,
+      "nir" : 1,
+      "red" : 1
+    },
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "BAND_ROLE_UNRESOLVED",
+        "remedy" : "\u8865\u9f50\u4e09\u4e2a\u6ce2\u6bb5\u7684\u89d2\u8272\u6807\u6ce8\u6216\u663e\u5f0f\u6ce2\u6bb5\u53f7",
+        "when" : "\u7f3a\u5c11 nir/red/blue \u6ce2\u6bb5\u89d2\u8272"
+      }
+    ],
+    "family" : "spectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "height",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "index",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "width",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "blue",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "4",
+          "name" : "nir",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "3",
+          "name" : "red",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "scale",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Band numbers are resolved from SICNU_BAND_ROLE when omitted."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u589e\u5f3a\u578b\u690d\u88ab\u6307\u6570 EVI\uff0c\u5728\u9ad8\u751f\u7269\u91cf\u533a\u6bd4 NDVI \u9971\u548c\u66f4\u6162\uff0c\u5e76\u5f15\u5165\u84dd\u6ce2\u6bb5\u6821\u6b63\u5927\u6c14\u4e0e\u571f\u58e4\u80cc\u666f\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "EVI",
+        "\u9971\u548c\u6548\u5e94",
+        "\u571f\u58e4\u80cc\u666f\u6821\u6b63"
+      ],
+      "courses" : 
+      [
+        "\u690d\u7269\u9065\u611f"
+      ],
+      "exercise" : "\u5728\u5bc6\u6797\u533a\u6bd4\u8f83 NDVI \u4e0e EVI \u7684\u9971\u548c\u5dee\u5f02\u3002"
+    }
+  },
+  "description" : "Compute Enhanced Vegetation Index: 2.5 * (NIR - Red) / (NIR + 6*Red - 7.5*Blue + 1).",
+  "display_name" : "Enhanced Vegetation Index (EVI)",
+  "id" : "rs:evi",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "spectral",
+    "evi",
+    "vegetation"
+  ]
+}

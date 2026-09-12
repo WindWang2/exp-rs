@@ -1,0 +1,147 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u884c\u653f\u533a\u5212",
+        "\u5730\u5757",
+        "\u9053\u8def"
+      ],
+      "scenes" : 
+      [
+        "\u6837\u672c\u63a9\u819c\u751f\u4ea7",
+        "\u53c2\u8003\u6570\u636e\u6805\u683c\u5316"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "CRS_MISMATCH",
+        "remedy" : "\u5148\u91cd\u6295\u5f71\u77e2\u91cf\u6216\u58f0\u660e\u76ee\u6807 CRS",
+        "when" : "\u77e2\u91cf\u4e0e\u53c2\u8003\u7f51\u683c\u5750\u6807\u7cfb\u4e0d\u4e00\u81f4"
+      },
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u4f7f\u7528\u6570\u503c\u6216\u7c7b\u522b\u578b\u5b57\u6bb5",
+        "when" : "\u5c5e\u6027\u5b57\u6bb5\u7c7b\u578b\u4e0d\u652f\u6301"
+      }
+    ],
+    "family" : "raster_spatial",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        },
+        {
+          "data_kind" : "vector",
+          "name" : "vector",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "false",
+          "name" : "allTouched",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "name" : "field",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "layer",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "1",
+          "name" : "value",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Overlapping geometries: last feature wins (input order).",
+      "Unburned pixels are NaN (declared NoData) \u2014 not zero.",
+      "The feature set is byte-budgeted (256 MiB); subset larger vectors first."
+    ],
+    "modality" : 
+    [
+      "vector"
+    ],
+    "operator_group" : "raster-vector",
+    "prerequisites" : 
+    [
+      "Reference raster carries a CRS and a north-up geotransform.",
+      "Vector features carry geometry; zone/attribute fields are numeric when used as burn values.",
+      "\u9700\u8981\u6307\u5b9a\u4e0e\u76ee\u6807\u8f93\u51fa\u4e00\u81f4\u7684\u53c2\u8003\u7f51\u683c\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "\u77e2\u91cf\u8f6c\u6805\u683c\uff1a\u6309\u5c5e\u6027\u5b57\u6bb5\u628a\u9762/\u7ebf/\u70b9\u8981\u7d20\u70e7\u5f55\u5230\u53c2\u8003\u7f51\u683c\uff0c\u751f\u6210\u7c7b\u522b\u6216\u63a9\u819c\u6805\u683c\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u6805\u683c\u5316",
+        "\u5c5e\u6027\u70e7\u5f55"
+      ],
+      "courses" : 
+      [
+        "GIS \u539f\u7406"
+      ],
+      "exercise" : "\u628a\u8015\u5730\u5730\u5757\u77e2\u91cf\u6309\u4f5c\u7269\u7c7b\u522b\u6805\u683c\u5316\u4e3a\u5206\u7c7b\u53c2\u8003\u56fe\u3002"
+    }
+  },
+  "description" : "Burn vector geometries onto a reference raster grid (constant value or numeric attribute), last-wins on overlap, NaN NoData.",
+  "display_name" : "Rasterize Vector",
+  "gpu" : false,
+  "id" : "rs:rasterize",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "raster-vector",
+    "rasterize",
+    "burn"
+  ],
+  "task" : "raster-vector"
+}

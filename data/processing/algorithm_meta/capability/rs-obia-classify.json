@@ -1,0 +1,277 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u57ce\u5e02",
+        "\u519c\u7530",
+        "\u6797\u5730"
+      ],
+      "scenes" : 
+      [
+        "\u9762\u5411\u5bf9\u8c61\u571f\u5730\u8986\u76d6\u5236\u56fe",
+        "\u5efa\u7b51/\u690d\u88ab\u5bf9\u8c61\u63d0\u53d6"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "TRAINING_INVALID",
+        "remedy" : "\u8865\u91c7\u5bf9\u8c61\u6837\u672c\u6216\u91cd\u7b97\u7279\u5f81",
+        "when" : "\u5bf9\u8c61\u6837\u672c\u7f3a\u5931\u6216\u4e0e\u7279\u5f81\u8868\u4e0d\u5339\u914d"
+      },
+      {
+        "code" : "DATASET_NOT_FOUND",
+        "remedy" : "\u5148\u8fd0\u884c rs:obia_features",
+        "when" : "\u7f3a\u5c11\u5bf9\u8c61\u7279\u5f81\u56fe\u5c42"
+      }
+    ],
+    "family" : "obia",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "labels",
+          "required" : false
+        },
+        {
+          "data_kind" : "vector",
+          "name" : "training",
+          "required" : false
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "string",
+          "name" : "accuracy",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "classes",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "labeledSegments",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "segments",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "bands",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "16",
+          "name" : "cellSize",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "classColors",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "class_id",
+          "name" : "classField",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "featureSelection",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "mean",
+          "enum" : 
+          [
+            "mean",
+            "full"
+          ],
+          "name" : "features",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "svm",
+          "enum" : 
+          [
+            "svm",
+            "normal_bayes",
+            "random_forest",
+            "kmeans",
+            "mlp"
+          ],
+          "name" : "method",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "3",
+          "name" : "minLabelPixels",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "20",
+          "name" : "minRegionSize",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "16",
+          "name" : "mlpHiddenLayerSize",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "500",
+          "name" : "mlpMaxIter",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "outputUncertainty",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "64",
+          "name" : "quantizeBins",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "10",
+          "name" : "rfMaxDepth",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "5",
+          "name" : "rfMinSampleCount",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "100",
+          "name" : "rfNumTrees",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "true",
+          "name" : "scale",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "name" : "segmentClasses",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "grid",
+          "enum" : 
+          [
+            "grid",
+            "quantize"
+          ],
+          "name" : "segmentMethod",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "3",
+          "name" : "smoothKernel",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "multimodal"
+    ],
+    "operator_group" : "obia",
+    "prerequisites" : 
+    [
+      "\u9700\u8981\u5bf9\u8c61\u7279\u5f81\u8868\uff08rs:obia_features\uff09\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "\u5bf9\u8c61\u7ea7\u5206\u7c7b\uff1a\u57fa\u4e8e\u5bf9\u8c61\u7279\u5f81\u7528\u89c4\u5219\u6216\u6a21\u578b\u7ed9\u5bf9\u8c61\u8d4b\u7c7b\u522b\uff0c\u8f93\u51fa\u77e2\u91cf/\u6805\u683c\u7c7b\u522b\u56fe\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5bf9\u8c61\u5206\u7c7b",
+        "\u89c4\u5219\u96c6"
+      ],
+      "courses" : 
+      [
+        "\u9762\u5411\u5bf9\u8c61\u9065\u611f"
+      ],
+      "exercise" : "\u7528 NDVI \u4e0e\u9762\u79ef\u89c4\u5219\u628a\u5bf9\u8c61\u5206\u4e3a\u690d\u88ab/\u88f8\u5730/\u5efa\u7b51\u4e09\u7c7b\u3002"
+    }
+  },
+  "description" : "Classify objects from polygon training or pre-labeled segments.",
+  "display_name" : "OBIA Classification",
+  "id" : "rs:obia_classify",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "obia",
+    "object-based",
+    "classification"
+  ]
+}

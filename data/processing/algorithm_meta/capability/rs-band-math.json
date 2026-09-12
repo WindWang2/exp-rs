@@ -1,0 +1,133 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269"
+      ],
+      "scenes" : 
+      [
+        "\u81ea\u5b9a\u4e49\u6307\u6570\u6784\u5efa",
+        "\u6559\u5b66\u6f14\u793a\u6ce2\u6bb5\u8fd0\u7b97"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u68c0\u67e5\u8868\u8fbe\u5f0f\u53d8\u91cf\u540d\u4e0e\u6ce2\u6bb5\u5217\u8868\u662f\u5426\u4e00\u81f4",
+        "when" : "\u8868\u8fbe\u5f0f\u8bed\u6cd5\u9519\u8bef\u6216\u5f15\u7528\u4e86\u4e0d\u5b58\u5728\u7684\u6ce2\u6bb5"
+      },
+      {
+        "code" : "EXECUTION_FAILED",
+        "remedy" : "\u5728\u8868\u8fbe\u5f0f\u4e2d\u52a0\u5165\u5206\u6bcd\u4e0b\u9650\u4fdd\u62a4\u6216\u540e\u5904\u7406\u8fc7\u6ee4",
+        "when" : "\u8868\u8fbe\u5f0f\u9664\u96f6\u4ea7\u751f\u5f02\u5e38\u503c"
+      }
+    ],
+    "family" : "spectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "string",
+          "name" : "expression",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "height",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "width",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "expression",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Expression uses 1-based band references (b1, b2, ...)."
+    ],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "thermal",
+      "dem"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u4efb\u610f\u6ce2\u6bb5\u4ee3\u6570\u8868\u8fbe\u5f0f\u8ba1\u7b97\u5668\uff1a\u4ee5\u8868\u8fbe\u5f0f\u5f62\u5f0f\u7ec4\u5408\u591a\u4e2a\u6ce2\u6bb5\u505a\u52a0\u51cf\u4e58\u9664\u4e0e\u51fd\u6570\u8fd0\u7b97\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u6ce2\u6bb5\u4ee3\u6570",
+        "\u8868\u8fbe\u5f0f\u6c42\u503c"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u7528 band_math \u8868\u8fbe\u5f0f\u5b9e\u73b0 NBR = (NIR-SWIR2)/(NIR+SWIR2) \u5e76\u7528\u4e8e\u706b\u70e7\u8ff9\u5730\u5206\u6790\u3002"
+    }
+  },
+  "description" : "Evaluate an arithmetic expression over raster bands.",
+  "display_name" : "Band Math",
+  "id" : "rs:band_math",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "band-math",
+    "spectral",
+    "calculator"
+  ]
+}

@@ -1,0 +1,165 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u690d\u88ab",
+        "\u6c34\u4f53",
+        "\u57ce\u5e02"
+      ],
+      "scenes" : 
+      [
+        "NDVI/NDWI \u65f6\u5e8f\u7acb\u65b9\u4f53\u751f\u4ea7",
+        "\u957f\u65f6\u5e8f\u53d8\u5316\u68c0\u6d4b\u8f93\u5165"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "cost_class" : "O(tile \u00d7 scenes)",
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "BAND_ROLE_UNRESOLVED",
+        "remedy" : "\u7edf\u4e00\u8f93\u5165\u96c6\u5408\u7684\u6ce2\u6bb5\u89d2\u8272\u6807\u6ce8",
+        "when" : "\u4e2a\u522b\u671f\u6b21\u5f71\u50cf\u7f3a\u5c11\u6ce2\u6bb5\u89d2\u8272\u6807\u6ce8"
+      },
+      {
+        "code" : "GRID_MISMATCH",
+        "remedy" : "\u9010\u671f rs:align \u5bf9\u9f50",
+        "when" : "\u671f\u6b21\u95f4\u7f51\u683c\u4e0d\u4e00\u81f4"
+      }
+    ],
+    "family" : "temporal",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "sceneCount",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "true",
+          "name" : "apply_qa_masking",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "name" : "bands",
+          "required" : false,
+          "type" : "json"
+        },
+        {
+          "name" : "collection",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "keep_all",
+          "enum" : 
+          [
+            "keep_all",
+            "reject"
+          ],
+          "name" : "duplicate_policy",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "NDVI",
+          "enum" : 
+          [
+            "NDVI",
+            "EVI",
+            "SAVI",
+            "NDWI",
+            "NDBI",
+            "MNDWI",
+            "NBR",
+            "NDRE",
+            "NDSI",
+            "NDTI"
+          ],
+          "name" : "index",
+          "required" : true,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "scenes",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "256",
+          "name" : "tile_size",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u65f6\u5e8f\u6307\u6570\u751f\u4ea7\uff1a\u5bf9\u591a\u671f\u5f71\u50cf\u9010\u671f\u8ba1\u7b97\u5149\u8c31\u6307\u6570\u5e76\u5806\u53e0\u4e3a\u65f6\u5e8f\u7acb\u65b9\u4f53\uff0c\u662f\u65f6\u5e8f\u5206\u6790\u7684\u6807\u51c6\u8f93\u5165\u51c6\u5907\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u6307\u6570\u65f6\u5e8f",
+        "\u65f6\u5e8f\u7acb\u65b9\u4f53"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u751f\u6210 5 \u5e74 16 \u5929\u5408\u6210\u7684 NDVI \u65f6\u5e8f\u7acb\u65b9\u4f53\u4f9b\u8d8b\u52bf\u5206\u6790\u3002"
+    }
+  },
+  "description" : "Spectral index time series: computes NDVI/EVI/SAVI/NDWI/NDBI/MNDWI/NBR/NDRE/NDSI/NDTI for every date of a temporal collection using the single-scene spectral-index kernels, output as one stacked raster (one band per date) with per-band acquisition metadata.",
+  "display_name" : "Temporal Index Series",
+  "id" : "rs:temporal_index_series",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "temporal",
+    "spectral-index",
+    "time-series"
+  ]
+}

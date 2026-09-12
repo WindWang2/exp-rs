@@ -1,0 +1,171 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u5c71\u5730\uff08SAR\uff09"
+      ],
+      "scenes" : 
+      [
+        "\u5c71\u533a SAR \u6570\u636e\u8d28\u91cf\u8bc4\u4f30",
+        "\u65f6\u5e8f SAR \u50cf\u5143\u53ef\u9760\u6027\u7b5b\u9009"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "DATASET_NOT_FOUND",
+        "remedy" : "\u63d0\u4f9b DEM \u4e0e\u8f68\u9053\u5165\u5c04\u89d2\u53c2\u6570",
+        "when" : "\u7f3a\u5c11 DEM \u6216\u5165\u5c04\u89d2\u4fe1\u606f"
+      }
+    ],
+    "family" : "sar",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "dem",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "product",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "0",
+          "name" : "heading",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "35",
+          "name" : "incidence",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "lookAzimuth",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "lookAzimuthDeg",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "right",
+          "enum" : 
+          [
+            "right",
+            "left"
+          ],
+          "name" : "lookDirection",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "0",
+          "name" : "look_azimuth",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "layover_shadow_mask",
+          "enum" : 
+          [
+            "local_incidence",
+            "layover_shadow_mask",
+            "local_incidence_orbit"
+          ],
+          "name" : "product",
+          "required" : true,
+          "type" : "enum"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Constant-geometry approximation: per-scene incidence/heading, not per-pixel orbit geometry.",
+      "The radiometric terrain factor cos(theta_i)/cos(theta_l) is exposed via the kernel for providers, not written by this operator (use rs:sar_terrain_flatten for normalized backscatter)."
+    ],
+    "modality" : 
+    [
+      "sar"
+    ],
+    "operator_group" : "sar",
+    "prerequisites" : 
+    [
+      "DEM on any grid; the DEM defines the geometry, no co-registered SAR input is required."
+    ],
+    "schema_version" : 2,
+    "summary" : "SAR \u5730\u5f62\u63a9\u819c\u751f\u6210\uff1a\u57fa\u4e8e DEM \u4e0e\u96f7\u8fbe\u51e0\u4f55\u6807\u8bb0\u53e0\u63a9\u3001\u9634\u5f71\u4e0e\u900f\u89c6\u6536\u7f29\u533a\u57df\uff0c\u4f9b\u540e\u7eed\u5206\u6790\u5254\u9664\u4e0d\u53ef\u9760\u50cf\u5143\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u96f7\u8fbe\u9634\u5f71",
+        "\u53e0\u63a9",
+        "\u900f\u89c6\u6536\u7f29"
+      ],
+      "courses" : 
+      [
+        "\u5fae\u6ce2\u9065\u611f"
+      ],
+      "exercise" : "\u751f\u6210\u5c71\u533a\u96f7\u8fbe\u9634\u5f71\u63a9\u819c\u5e76\u7edf\u8ba1\u4e0d\u53ef\u4fe1\u50cf\u5143\u6bd4\u4f8b\u3002"
+    }
+  },
+  "description" : "Local incidence angle and geometric layover/shadow masks from a DEM under declared constant SAR geometry (not full range-Doppler).",
+  "display_name" : "SAR Terrain Masks",
+  "gpu" : false,
+  "id" : "rs:sar_terrain_masks",
+  "input" : "raster",
+  "notes" : "Rigorous surface-normal geometry under the declared constant-incidence/heading contract. Full range-Doppler correction requires orbit state vectors + sensor timing, which the product metadata contract does not carry \u2014 that extension (SICNU_SAR_ORBIT_STATES et al.) is documented in sar_terrain_geometry.h and deliberately NOT approximated.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "sar",
+    "terrain",
+    "layover",
+    "shadow"
+  ],
+  "task" : "sar-geometry"
+}

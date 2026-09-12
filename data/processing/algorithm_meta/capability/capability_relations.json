@@ -1,0 +1,524 @@
+{
+  "chains": [
+    {
+      "from": "rs:atmospheric_correction",
+      "to": "rs:spectral_index",
+      "when": {
+        "radiometric_state": [
+          "digital_number",
+          "radiance",
+          "toa_reflectance"
+        ]
+      },
+      "why": "指数计算需要地表反射率；DN/TOA 输入先做大气校正"
+    },
+    {
+      "from": "rs:atmospheric_correction",
+      "to": "rs:ndvi",
+      "when": {
+        "radiometric_state": [
+          "digital_number",
+          "radiance",
+          "toa_reflectance"
+        ]
+      },
+      "why": "NDVI 物理意义依赖地表反射率"
+    },
+    {
+      "from": "rs:atmospheric_correction",
+      "to": "rs:evi",
+      "when": {
+        "radiometric_state": [
+          "digital_number",
+          "radiance",
+          "toa_reflectance"
+        ]
+      },
+      "why": "EVI 对大气干扰敏感，需反射率输入"
+    },
+    {
+      "from": "rs:atmospheric_correction",
+      "to": "rs:ndwi",
+      "when": {
+        "radiometric_state": [
+          "digital_number",
+          "radiance",
+          "toa_reflectance"
+        ]
+      },
+      "why": "水体指数需要可比的反射率量纲"
+    },
+    {
+      "from": "rs:atmospheric_correction",
+      "to": "rs:mndwi",
+      "when": {
+        "radiometric_state": [
+          "digital_number",
+          "radiance",
+          "toa_reflectance"
+        ]
+      },
+      "why": "MNDWI 需要地表反射率输入"
+    },
+    {
+      "from": "rs:atmospheric_correction",
+      "to": "rs:ndbi",
+      "when": {
+        "radiometric_state": [
+          "digital_number",
+          "radiance",
+          "toa_reflectance"
+        ]
+      },
+      "why": "NDBI 需要地表反射率输入"
+    },
+    {
+      "from": "rs:atmospheric_correction",
+      "to": "rs:savi",
+      "when": {
+        "radiometric_state": [
+          "digital_number",
+          "radiance",
+          "toa_reflectance"
+        ]
+      },
+      "why": "SAVI 需要地表反射率输入"
+    },
+    {
+      "from": "rs:dn_to_radiance",
+      "to": "rs:radiometric_calibration",
+      "when": {
+        "calibration_chain": [
+          "true"
+        ]
+      },
+      "why": "DN→辐亮度后继续做 TOA/地表反射率换算"
+    },
+    {
+      "from": "rs:spectral_index",
+      "to": "rs:change_normalized_difference",
+      "when": {
+        "index_timeseries": [
+          "true"
+        ]
+      },
+      "why": "先逐期计算指数再做归一化差值变化"
+    },
+    {
+      "from": "rs:sar_calibrate",
+      "to": "rs:sar_change",
+      "when": {
+        "radiometric_state": [
+          "digital_number"
+        ]
+      },
+      "why": "SAR 变化检测必须在定标后的数据上进行"
+    },
+    {
+      "from": "rs:sar_speckle",
+      "to": "rs:sar_change",
+      "when": {
+        "speckle_filtered": [
+          "false"
+        ]
+      },
+      "why": "未滤波时建议先做斑点抑制再做变化检测"
+    },
+    {
+      "from": "rs:sar_calibrate",
+      "to": "rs:sar_temporal_stats",
+      "when": {
+        "radiometric_state": [
+          "digital_number"
+        ]
+      },
+      "why": "时序统计必须基于定标后数据"
+    },
+    {
+      "from": "rs:pca",
+      "to": "rs:supervised_classification",
+      "when": {
+        "feature_reduction": [
+          "pca"
+        ]
+      },
+      "why": "PCA 降维特征作为监督分类输入"
+    },
+    {
+      "from": "rs:feature_stack",
+      "to": "rs:supervised_classification",
+      "when": {
+        "feature_stack": [
+          "ready"
+        ]
+      },
+      "why": "堆叠好的特征图层直接作为分类输入"
+    },
+    {
+      "from": "rs:feature_normalize",
+      "to": "rs:kmeans_classification",
+      "when": {
+        "feature_normalized": [
+          "true"
+        ]
+      },
+      "why": "归一化后的特征改善聚类表现"
+    },
+    {
+      "from": "rs:qa_mask",
+      "to": "rs:apply_mask",
+      "when": {},
+      "why": "应用掩膜前需先生成质量/云掩膜"
+    },
+    {
+      "from": "rs:obia_segment",
+      "to": "rs:obia_features",
+      "when": {},
+      "why": "对象特征必须基于已分割的对象图层"
+    },
+    {
+      "from": "rs:obia_features",
+      "to": "rs:obia_classify",
+      "when": {},
+      "why": "对象分类依赖对象特征表"
+    },
+    {
+      "from": "rs:temporal_index_series",
+      "to": "rs:temporal_trend",
+      "when": {
+        "trend_analysis": [
+          "true"
+        ]
+      },
+      "why": "趋势拟合以指数时序为输入"
+    },
+    {
+      "from": "rs:temporal_index_series",
+      "to": "rs:temporal_phenology",
+      "when": {
+        "phenology_analysis": [
+          "true"
+        ]
+      },
+      "why": "物候参数以重构的指数时序为输入"
+    },
+    {
+      "from": "rs:temporal_gap_fill",
+      "to": "rs:temporal_phenology",
+      "when": {
+        "timeseries": [
+          "gappy"
+        ]
+      },
+      "why": "含缺失的时序先补洞再提物候参数"
+    },
+    {
+      "from": "rs:temporal_smooth",
+      "to": "rs:temporal_phenology",
+      "when": {
+        "timeseries": [
+          "noisy"
+        ]
+      },
+      "why": "含噪时序先平滑再提物候参数"
+    },
+    {
+      "from": "rs:sentinel2_import",
+      "to": "rs:atmospheric_correction",
+      "when": {
+        "data_source": [
+          "sentinel2_l1c"
+        ]
+      },
+      "why": "L1C 为 TOA 反射率，定量使用前需大气校正"
+    },
+    {
+      "from": "rs:landsat_import",
+      "to": "rs:atmospheric_correction",
+      "when": {
+        "data_source": [
+          "landsat_l1"
+        ]
+      },
+      "why": "L1 产品定量使用前需大气校正"
+    }
+  ],
+  "exclusive": [
+    [
+      "rs:atmospheric_correction",
+      "rs:atmospheric_dos1"
+    ],
+    [
+      "rs:atmospheric_correction",
+      "rs:atmospheric_dos2"
+    ],
+    [
+      "rs:atmospheric_correction",
+      "rs:atmospheric_quac"
+    ],
+    [
+      "rs:atmospheric_dos1",
+      "rs:atmospheric_dos2"
+    ],
+    [
+      "rs:atmospheric_dos1",
+      "rs:atmospheric_quac"
+    ],
+    [
+      "rs:atmospheric_dos2",
+      "rs:atmospheric_quac"
+    ],
+    [
+      "rs:fusion_brovey",
+      "rs:fusion_gram_schmidt"
+    ],
+    [
+      "rs:fusion_brovey",
+      "rs:fusion_ihs"
+    ],
+    [
+      "rs:fusion_brovey",
+      "rs:fusion_linear"
+    ],
+    [
+      "rs:fusion_brovey",
+      "rs:fusion_pca"
+    ],
+    [
+      "rs:fusion_gram_schmidt",
+      "rs:fusion_ihs"
+    ],
+    [
+      "rs:fusion_gram_schmidt",
+      "rs:fusion_linear"
+    ],
+    [
+      "rs:fusion_gram_schmidt",
+      "rs:fusion_pca"
+    ],
+    [
+      "rs:fusion_ihs",
+      "rs:fusion_linear"
+    ],
+    [
+      "rs:fusion_ihs",
+      "rs:fusion_pca"
+    ],
+    [
+      "rs:fusion_linear",
+      "rs:fusion_pca"
+    ],
+    [
+      "rs:image_fusion",
+      "rs:fusion_brovey"
+    ],
+    [
+      "rs:image_fusion",
+      "rs:fusion_gram_schmidt"
+    ],
+    [
+      "rs:image_fusion",
+      "rs:fusion_ihs"
+    ],
+    [
+      "rs:image_fusion",
+      "rs:fusion_linear"
+    ],
+    [
+      "rs:image_fusion",
+      "rs:fusion_pca"
+    ],
+    [
+      "rs:change_difference",
+      "rs:change_ratio"
+    ],
+    [
+      "rs:change_difference",
+      "rs:change_log_ratio"
+    ],
+    [
+      "rs:change_difference",
+      "rs:change_cva"
+    ],
+    [
+      "rs:change_difference",
+      "rs:change_cva_angle"
+    ],
+    [
+      "rs:change_difference",
+      "rs:change_mad"
+    ],
+    [
+      "rs:change_difference",
+      "rs:change_irmad"
+    ],
+    [
+      "rs:change_difference",
+      "rs:change_sam"
+    ],
+    [
+      "rs:change_difference",
+      "rs:change_normalized_difference"
+    ],
+    [
+      "rs:change_ratio",
+      "rs:change_log_ratio"
+    ],
+    [
+      "rs:change_ratio",
+      "rs:change_cva"
+    ],
+    [
+      "rs:change_ratio",
+      "rs:change_cva_angle"
+    ],
+    [
+      "rs:change_ratio",
+      "rs:change_mad"
+    ],
+    [
+      "rs:change_ratio",
+      "rs:change_irmad"
+    ],
+    [
+      "rs:change_ratio",
+      "rs:change_sam"
+    ],
+    [
+      "rs:change_ratio",
+      "rs:change_normalized_difference"
+    ],
+    [
+      "rs:change_log_ratio",
+      "rs:change_cva"
+    ],
+    [
+      "rs:change_log_ratio",
+      "rs:change_cva_angle"
+    ],
+    [
+      "rs:change_log_ratio",
+      "rs:change_mad"
+    ],
+    [
+      "rs:change_log_ratio",
+      "rs:change_irmad"
+    ],
+    [
+      "rs:change_log_ratio",
+      "rs:change_sam"
+    ],
+    [
+      "rs:change_log_ratio",
+      "rs:change_normalized_difference"
+    ],
+    [
+      "rs:change_cva",
+      "rs:change_cva_angle"
+    ],
+    [
+      "rs:change_cva",
+      "rs:change_mad"
+    ],
+    [
+      "rs:change_cva",
+      "rs:change_irmad"
+    ],
+    [
+      "rs:change_cva",
+      "rs:change_sam"
+    ],
+    [
+      "rs:change_cva",
+      "rs:change_normalized_difference"
+    ],
+    [
+      "rs:change_cva_angle",
+      "rs:change_mad"
+    ],
+    [
+      "rs:change_cva_angle",
+      "rs:change_irmad"
+    ],
+    [
+      "rs:change_cva_angle",
+      "rs:change_sam"
+    ],
+    [
+      "rs:change_cva_angle",
+      "rs:change_normalized_difference"
+    ],
+    [
+      "rs:change_mad",
+      "rs:change_irmad"
+    ],
+    [
+      "rs:change_mad",
+      "rs:change_sam"
+    ],
+    [
+      "rs:change_mad",
+      "rs:change_normalized_difference"
+    ],
+    [
+      "rs:change_irmad",
+      "rs:change_sam"
+    ],
+    [
+      "rs:change_irmad",
+      "rs:change_normalized_difference"
+    ],
+    [
+      "rs:change_sam",
+      "rs:change_normalized_difference"
+    ],
+    [
+      "rs:change_detection",
+      "rs:change_difference"
+    ],
+    [
+      "rs:change_detection",
+      "rs:change_ratio"
+    ],
+    [
+      "rs:change_detection",
+      "rs:change_log_ratio"
+    ],
+    [
+      "rs:change_detection",
+      "rs:change_cva"
+    ],
+    [
+      "rs:change_detection",
+      "rs:change_cva_angle"
+    ],
+    [
+      "rs:change_detection",
+      "rs:change_mad"
+    ],
+    [
+      "rs:change_detection",
+      "rs:change_irmad"
+    ],
+    [
+      "rs:change_detection",
+      "rs:change_sam"
+    ],
+    [
+      "rs:change_detection",
+      "rs:change_normalized_difference"
+    ]
+  ],
+  "grid_fixer": "rs:align",
+  "requires_shared_grid": [
+    "rs:change_cva",
+    "rs:change_detection",
+    "rs:change_difference",
+    "rs:change_mad",
+    "rs:change_normalized_difference",
+    "rs:change_ratio",
+    "rs:sar_terrain_correction",
+    "rs:sar_terrain_flatten"
+  ],
+  "schema_version": 1
+}

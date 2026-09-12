@@ -1,0 +1,215 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u690d\u88ab",
+        "\u6c34\u4f53",
+        "\u4efb\u610f\u5730\u7269"
+      ],
+      "scenes" : 
+      [
+        "\u6708\u5ea6/\u5b63\u5ea6\u65e0\u4e91\u5e95\u56fe\u751f\u4ea7",
+        "NDVI \u65f6\u5e8f\u9884\u5904\u7406"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "cost_class" : "O(tile \u00d7 scenes)",
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "multipass_streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "TIME_ORDER_INVALID",
+        "remedy" : "\u63d0\u4f9b\u542b\u65e5\u671f\u7684\u65f6\u5e8f\u8f93\u5165\u96c6\u5408\u5e76\u68c0\u67e5\u6392\u5e8f",
+        "when" : "\u5404\u671f\u5f71\u50cf\u672a\u6309\u65f6\u95f4\u6392\u5e8f\u6216\u65e5\u671f\u7f3a\u5931"
+      },
+      {
+        "code" : "GRID_MISMATCH",
+        "remedy" : "\u9010\u671f rs:align \u5bf9\u9f50\u540e\u518d\u5408\u6210",
+        "when" : "\u5404\u671f\u5f71\u50cf\u7f51\u683c\u4e0d\u4e00\u81f4"
+      }
+    ],
+    "family" : "temporal",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "periodCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "sceneCount",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "true",
+          "name" : "apply_qa_masking",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "default" : "0",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "enum" : 
+          [
+            "blue",
+            "green",
+            "red",
+            "red_edge",
+            "nir",
+            "swir1",
+            "swir2"
+          ],
+          "name" : "band_role",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "collection",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "keep_all",
+          "enum" : 
+          [
+            "keep_all",
+            "reject"
+          ],
+          "name" : "duplicate_policy",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "best_pixel",
+          "enum" : 
+          [
+            "best_pixel",
+            "mean",
+            "median"
+          ],
+          "name" : "method",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "all",
+          "enum" : 
+          [
+            "all",
+            "month",
+            "quarter",
+            "season",
+            "year",
+            "custom"
+          ],
+          "name" : "period",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "0",
+          "name" : "period_days",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0",
+          "name" : "quality_band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "scenes",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "target_date",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "256",
+          "name" : "tile_size",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" : 
+    [
+      "\u6240\u6709\u671f\u6b21\u5f71\u50cf\u987b\u914d\u51c6\u5230\u540c\u4e00\u7f51\u683c\u5e76\u7edf\u4e00\u8f90\u5c04\u91cf\u7eb2\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "\u65f6\u5e8f\u5408\u6210\uff1a\u628a\u591a\u671f\u5f71\u50cf\u6309\u6700\u5927\u503c/\u5747\u503c/\u4e2d\u503c\u7b49\u5408\u6210\u4e00\u666f\uff0c\u538b\u5236\u4e91\u4e0e\u566a\u58f0\uff0c\u662f\u65f6\u5e8f\u751f\u4ea7\u7684\u5e38\u7528\u8d77\u70b9\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5f71\u50cf\u5408\u6210",
+        "\u6700\u5927\u503c\u5408\u6210\uff08MVC\uff09",
+        "\u4e2d\u503c\u5408\u6210"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u628a 12 \u671f\u6708\u5ea6 NDVI \u5408\u6210\u4e3a\u5e74\u5ea6\u6700\u5927\u503c\u56fe\u5e76\u5bf9\u6bd4\u4e91\u6c61\u67d3\u60c5\u51b5\u3002"
+    }
+  },
+  "description" : "Temporal composites (best-pixel, mean or median) over a multi-date collection, optionally grouped by month / quarter / season / year / custom period. Every output carries a valid-observation-count band and the chosen observation's quality score.",
+  "display_name" : "Best Pixel Composite",
+  "id" : "rs:temporal_composite",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "temporal",
+    "composite",
+    "best-pixel"
+  ]
+}

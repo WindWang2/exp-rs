@@ -1,0 +1,238 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u6c34\u4f53",
+        "\u519c\u7530",
+        "\u5efa\u6210\u533a\uff08SAR\uff09"
+      ],
+      "scenes" : 
+      [
+        "\u6d2a\u6d9d\u8303\u56f4\u5feb\u901f\u5236\u56fe",
+        "\u519c\u4f5c\u7269\u5012\u4f0f\u76d1\u6d4b"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "tolerance",
+      "large_raster_safe" : true,
+      "memory_policy" : "multipass_streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "GRID_MISMATCH",
+        "remedy" : "\u5148\u7528 rs:align \u6216 rs:sar_geocode \u914d\u51c6\u5230\u540c\u4e00\u7f51\u683c",
+        "when" : "\u4e24\u671f\u5f71\u50cf\u7f51\u683c\u4e0d\u4e00\u81f4"
+      },
+      {
+        "code" : "TIME_ORDER_INVALID",
+        "remedy" : "\u786e\u8ba4 before \u65e9\u4e8e after",
+        "when" : "before/after \u65f6\u76f8\u987a\u5e8f\u98a0\u5012"
+      }
+    ],
+    "family" : "sar",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "modality" : "sar",
+          "name" : "inputA",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "modality" : "sar",
+          "name" : "inputB",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "numeric",
+          "name" : "changedPercent",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "changedPixels",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "evaluatedPixels",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "magnitudeDomain",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "thresholdUsed",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "bandA",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "1",
+          "name" : "bandB",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "none",
+          "enum" : 
+          [
+            "none",
+            "erode",
+            "dilate",
+            "open",
+            "close"
+          ],
+          "name" : "cleanup",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "1",
+          "name" : "cleanupIterations",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "linear_power",
+          "enum" : 
+          [
+            "linear_power",
+            "db"
+          ],
+          "name" : "inputDomain",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "0",
+          "name" : "minAreaPixels",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "90",
+          "name" : "percentile",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "polarizations",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "sensor",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "2",
+          "name" : "statisticalK",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "threshold",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "otsu",
+          "enum" : 
+          [
+            "manual",
+            "otsu",
+            "percentile",
+            "statistical"
+          ],
+          "name" : "thresholdMethod",
+          "required" : false,
+          "type" : "enum"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Incoherent change only \u2014 no coherent/interferometric phase analysis.",
+      "Scenes must share CRS, pixel size, origin and extent; no hidden resampling is applied.",
+      "If either input declares SICNU_SAR_DOMAIN=db and inputDomain is left at linear_power, the operator refuses (pass inputDomain=db to convert, or convert first)."
+    ],
+    "modality" : 
+    [
+      "sar"
+    ],
+    "operator_group" : "sar",
+    "prerequisites" : 
+    [
+      "\u4e24\u671f SAR \u5f71\u50cf\u987b\u540c\u6781\u5316\u3001\u540c\u7f51\u683c\uff1b\u5efa\u8bae\u5148 rs:sar_speckle \u6ee4\u6ce2\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "SAR \u53cc\u65f6\u76f8\u53d8\u5316\u68c0\u6d4b\uff1a\u6bd4\u8f83\u4e24\u666f\u914d\u51c6 SAR \u5f71\u50cf\u7684\u540e\u5411\u6563\u5c04\u5dee\u5f02\uff0c\u63a2\u6d4b\u5730\u8868\u53d8\u5316\uff08\u6d2a\u6d9d\u3001\u5012\u4f0f\u3001\u5f62\u53d8\u524d\u5146\u7b49\uff09\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "SAR \u53d8\u5316\u68c0\u6d4b",
+        "\u540e\u5411\u6563\u5c04\u5dee\u5f02"
+      ],
+      "courses" : 
+      [
+        "\u5fae\u6ce2\u9065\u611f"
+      ],
+      "exercise" : "\u5bf9\u6d2a\u6c34\u524d\u540e\u4e24\u666f Sentinel-1 \u8ba1\u7b97\u6bd4\u503c\u53d8\u5316\u56fe\u5e76\u63d0\u53d6\u6df9\u6ca1\u533a\u3002"
+    }
+  },
+  "description" : "Detect change between two co-registered SAR scenes: log-ratio magnitude (dB) thresholded into a change mask (manual, Otsu, percentile or statistical).",
+  "display_name" : "SAR Change Detection",
+  "id" : "rs:sar_change",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "sar",
+    "change",
+    "change-detection"
+  ]
+}

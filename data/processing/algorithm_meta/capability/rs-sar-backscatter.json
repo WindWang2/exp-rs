@@ -1,0 +1,202 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269\uff08SAR\uff09"
+      ],
+      "scenes" : 
+      [
+        "SAR \u5b9a\u91cf\u5206\u6790\u5165\u53e3",
+        "\u571f\u58e4\u6c34\u5206\u4e0e\u4f5c\u7269\u76d1\u6d4b\u7684\u8f93\u5165"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "POLARIZATION_MISMATCH",
+        "remedy" : "\u786e\u8ba4\u6570\u636e\u542b VV/VH \u901a\u9053\u6216\u6539\u7528\u5b58\u5728\u7684\u6781\u5316",
+        "when" : "\u8bf7\u6c42\u7684\u6781\u5316\u901a\u9053\u5728\u6570\u636e\u4e2d\u4e0d\u5b58\u5728"
+      },
+      {
+        "code" : "INVALID_RADIOMETRY",
+        "remedy" : "\u5148\u7528 rs:sar_calibrate \u5b8c\u6210\u8f90\u5c04\u5b9a\u6807",
+        "when" : "\u8f93\u5165\u672a\u5b9a\u6807\u5bfc\u81f4 sigma0 \u91cf\u7eb2\u9519\u8bef"
+      }
+    ],
+    "family" : "sar",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "incidenceRaster",
+          "required" : false
+        },
+        {
+          "data_kind" : "raster",
+          "modality" : "sar",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "calibration",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "domain",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "sigma0",
+          "enum" : 
+          [
+            "sigma0",
+            "gamma0",
+            "beta0",
+            "dn"
+          ],
+          "name" : "fromCalibration",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "0",
+          "name" : "incidenceDeg",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "linear_power",
+          "enum" : 
+          [
+            "linear_power",
+            "db"
+          ],
+          "name" : "inputDomain",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "linear_power",
+          "enum" : 
+          [
+            "linear_power",
+            "db"
+          ],
+          "name" : "outputDomain",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "polarizations",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "sensor",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "gamma0",
+          "enum" : 
+          [
+            "sigma0",
+            "gamma0",
+            "beta0"
+          ],
+          "name" : "toCalibration",
+          "required" : false,
+          "type" : "enum"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "beta0 needs the incidence angle from geometry: set incidenceDeg > 0 or provide incidenceRaster.",
+      "DN input is unsupported; calibrate first with rs:sar_calibrate.",
+      "inputDomain=db cannot be combined with a calibration-state conversion; convert the numeric domain in a separate step."
+    ],
+    "modality" : 
+    [
+      "sar"
+    ],
+    "operator_group" : "sar",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "SAR \u540e\u5411\u6563\u5c04\u7cfb\u6570\u8ba1\u7b97\uff1a\u4ece SLC/GRD \u590d\u6570\u636e\u6216\u5b9a\u6807\u6570\u636e\u751f\u6210 sigma0/gamma0 \u540e\u5411\u6563\u5c04\u7cfb\u6570\u6805\u683c\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u540e\u5411\u6563\u5c04",
+        "sigma0",
+        "gamma0"
+      ],
+      "courses" : 
+      [
+        "\u5fae\u6ce2\u9065\u611f"
+      ],
+      "exercise" : "\u5bf9 Sentinel-1 GRD \u8ba1\u7b97 gamma0 \u5e76\u6bd4\u8f83\u519c\u7530\u4e0e\u6c34\u4f53\u7684\u6563\u5c04\u5dee\u5f02\u3002"
+    }
+  },
+  "description" : "Convert SAR backscatter between sigma0/gamma0/beta0 states and linear power or dB using a constant or per-pixel incidence angle.",
+  "display_name" : "SAR Backscatter Conversion",
+  "id" : "rs:sar_backscatter",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "sar",
+    "backscatter",
+    "radiometry"
+  ]
+}

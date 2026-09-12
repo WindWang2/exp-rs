@@ -1,0 +1,236 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u690d\u88ab",
+        "\u6c34\u4f53",
+        "\u5efa\u7b51",
+        "\u88f8\u571f"
+      ],
+      "scenes" : 
+      [
+        "\u690d\u88ab/\u6c34\u4f53/\u5efa\u7b51\u6307\u6570\u5236\u56fe",
+        "\u65f6\u95f4\u5e8f\u5217\u6307\u6570\u751f\u4ea7\uff08\u914d\u5408 rs:temporal_* \u7b97\u5b50\uff09"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "BAND_ROLE_UNRESOLVED",
+        "remedy" : "\u6807\u6ce8\u6ce2\u6bb5\u89d2\u8272\u6216\u4ee5\u53c2\u6570\u5f62\u5f0f\u6307\u5b9a red/nir \u7b49\u6ce2\u6bb5\u5e8f\u53f7",
+        "when" : "\u5f71\u50cf\u7f3a\u5c11 SICNU_BAND_ROLE \u89d2\u8272\u6807\u6ce8\u4e14\u672a\u7ed9\u663e\u5f0f\u6ce2\u6bb5\u53f7"
+      },
+      {
+        "code" : "INVALID_RADIOMETRY",
+        "remedy" : "\u5148\u5b8c\u6210\u8f90\u5c04\u5b9a\u6807\u4e0e\u5927\u6c14\u6821\u6b63\uff08rs:radiometric_calibration \u2192 rs:atmospheric_correction\uff09",
+        "when" : "\u8f93\u5165\u4e3a DN/\u8f90\u4eae\u5ea6\u5bfc\u81f4\u6307\u6570\u7269\u7406\u610f\u4e49\u5931\u771f"
+      }
+    ],
+    "family" : "spectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "postfire",
+          "required" : false
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "height",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "index",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "width",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "blue",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "2",
+          "name" : "green",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "NDVI",
+          "enum" : 
+          [
+            "NDVI",
+            "EVI",
+            "SAVI",
+            "NDWI",
+            "NDBI",
+            "MNDWI",
+            "NBR",
+            "dNBR",
+            "BSI",
+            "NDRE",
+            "CI",
+            "NDSI",
+            "NDTI",
+            "GNDVI",
+            "NDMI",
+            "MSAVI",
+            "ARVI",
+            "EVI2",
+            "BAI",
+            "UI",
+            "BUI"
+          ],
+          "name" : "index",
+          "required" : true,
+          "type" : "enum"
+        },
+        {
+          "default" : "4",
+          "name" : "nir",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "3",
+          "name" : "red",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "5",
+          "name" : "rededge",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "scale",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "5",
+          "name" : "swir",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "6",
+          "name" : "swir2",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Band numbers are 1-based and must exist in the input raster. When a band parameter is omitted, it is resolved from the input's SICNU_BAND_ROLE product metadata (semantic band roles) instead of the positional default.",
+      "EVI and SAVI constants assume unit reflectance [0,1]. When the input carries SICNU_NUMERIC_SCALE (stamped by rs:landsat_import / rs:sentinel2_import for verbatim DN-scale Level-2 stacks), or when params.scale is a finite multiplicative scale (e.g. 0.0001 for Landsat Collection 2 DN), the participating bands are mapped to unit reflectance for the computation; an explicit scale param wins over the metadata stamp. Ratio indices are scale-invariant and inputs are never rescaled on disk.",
+      "MSAVI, EVI2 and BAI are unit-reflectance-anchored like EVI/SAVI; without declared scale metadata they fall back to the same documented magnitude heuristic (grid-and-radiometric-policy \u00a72), which can misfire on all-dark DN scenes \u2014 declare the scale for honest results."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : 
+    [
+      "Input raster must have sufficient bands for the selected index.",
+      "\u5efa\u8bae\u8f93\u5165\u7ecf\u5927\u6c14\u6821\u6b63\u7684\u5730\u8868\u53cd\u5c04\u7387\u6570\u636e\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "\u89d2\u8272\u89e3\u6790\u7684\u901a\u7528\u5149\u8c31\u6307\u6570\u8ba1\u7b97\u5668\uff1a\u6309\u6ce2\u6bb5\u89d2\u8272\uff08nir/red/\u2026\uff09\u6216\u663e\u5f0f\u6ce2\u6bb5\u53f7\u8ba1\u7b97 NDVI/EVI/SAVI/NDWI/NDBI/MNDWI \u7b49\u5e38\u7528\u6307\u6570\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5f52\u4e00\u5316\u6307\u6570",
+        "\u6ce2\u6bb5\u89d2\u8272",
+        "\u5149\u8c31\u7279\u5f81\u5de5\u7a0b"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406",
+        "\u5b9a\u91cf\u9065\u611f\u57fa\u7840"
+      ],
+      "exercise" : "\u5bf9\u540c\u4e00\u666f\u5f71\u50cf\u5206\u522b\u8ba1\u7b97 NDVI\u3001NDWI\u3001NDBI \u5e76\u5408\u6210 RGB \u5047\u5f69\u8272\u5224\u8bfb\u3002"
+    }
+  },
+  "description" : "Compute a spectral index (NDVI, EVI, SAVI, NDWI, NDBI, MNDWI, NBR, dNBR, BSI, NDRE, CI, NDSI, NDTI) from raster bands. Scale rule (#680): EVI/SAVI constants assume unit reflectance [0,1]; when the input carries SICNU_NUMERIC_SCALE (stamped at Level-2 import) or params.scale is set (multiplicative, e.g. 0.0001 for Landsat C2 DN), the participating bands are mapped to unit reflectance for the computation, while ratio indices are scale-invariant and inputs are never rescaled on disk.",
+  "display_name" : "Spectral Index",
+  "gpu" : false,
+  "id" : "rs:spectral_index",
+  "input" : "raster",
+  "notes" : "Role-resolved spectral indices (NDVI, EVI, SAVI, NDWI, NDBI, MNDWI). NIR/Red resolve by SICNU_BAND_ROLE when present, otherwise explicit band numbers. First analysis step after preprocessing in most workflows.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "spectral",
+    "ndvi",
+    "evi",
+    "nbr",
+    "dnbr",
+    "bsi",
+    "ndre",
+    "ci",
+    "ndsi",
+    "ndti",
+    "gndvi",
+    "ndmi",
+    "msavi",
+    "arvi",
+    "evi2",
+    "bai",
+    "ui",
+    "bui",
+    "vegetation"
+  ],
+  "task" : "index-computation"
+}

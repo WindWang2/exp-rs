@@ -1,0 +1,173 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u6c34\u4f53",
+        "\u690d\u88ab\uff08SAR\uff09"
+      ],
+      "scenes" : 
+      [
+        "\u5feb\u901f SAR \u5224\u522b\u56fe\u751f\u4ea7",
+        "\u6559\u5b66\u6f14\u793a\u6563\u5c04\u673a\u5236\u5dee\u5f02"
+      ]
+    },
+    "band_roles" : 
+    {
+      "vh" : 1,
+      "vv" : 1
+    },
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "POLARIZATION_MISMATCH",
+        "remedy" : "\u786e\u8ba4\u4e24\u901a\u9053\u5747\u5b58\u5728\u4e14\u540c\u4e3a\u5b9a\u6807\u540e\u6570\u636e",
+        "when" : "\u901a\u9053\u7f3a\u5931\u6216\u6781\u5316\u4e0d\u4e00\u81f4"
+      }
+    ],
+    "family" : "sar",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "modality" : "sar",
+          "name" : "inputA",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "modality" : "sar",
+          "name" : "inputB",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "outputType",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "bandA",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "1",
+          "name" : "bandB",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "linear_power",
+          "enum" : 
+          [
+            "linear_power",
+            "db"
+          ],
+          "name" : "inputDomain",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "log_ratio",
+          "enum" : 
+          [
+            "ratio",
+            "log_ratio",
+            "log_difference"
+          ],
+          "name" : "outputType",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "polarizations",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "sensor",
+          "required" : false,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Scenes must share CRS, pixel size, origin and extent; no hidden resampling is applied.",
+      "If either input declares SICNU_SAR_DOMAIN=db and inputDomain is left at linear_power, the operator refuses (pass inputDomain=db to convert, or convert first).",
+      "Nonpositive power becomes NoData (NaN) for the log-domain outputs; B == 0 is NoData for ratio."
+    ],
+    "modality" : 
+    [
+      "sar"
+    ],
+    "operator_group" : "sar",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "SAR \u53cc\u901a\u9053\u6216\u591a\u65f6\u76f8\u6bd4\u503c\u8fd0\u7b97\uff1a\u7a81\u51fa\u6563\u5c04\u673a\u5236\u5dee\u5f02\uff0c\u5e38\u7528\u4e8e\u6c34\u4f53/\u690d\u88ab/\u5efa\u7b51\u5224\u522b\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u901a\u9053\u6bd4\u503c",
+        "\u6563\u5c04\u673a\u5236"
+      ],
+      "courses" : 
+      [
+        "\u5fae\u6ce2\u9065\u611f"
+      ],
+      "exercise" : "\u751f\u6210 VV/VH \u6bd4\u503c\u56fe\u5e76\u89e3\u91ca\u955c\u9762\u3001\u4f53\u6563\u5c04\u4e0e\u4e8c\u9762\u89d2\u533a\u57df\u7684\u53d6\u503c\u5dee\u5f02\u3002"
+    }
+  },
+  "description" : "Ratio, log-ratio or absolute log-difference magnitude between two co-registered SAR scenes (incoherent change pair metric).",
+  "display_name" : "SAR Ratio / Log-Ratio",
+  "id" : "rs:sar_ratio",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "sar",
+    "change",
+    "ratio"
+  ]
+}

@@ -1,0 +1,212 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u68ee\u6797",
+        "\u519c\u7530",
+        "\u6c34\u4f53"
+      ],
+      "scenes" : 
+      [
+        "\u68ee\u6797\u6270\u52a8\u5e74\u4efd\u5236\u56fe",
+        "\u571f\u5730\u5229\u7528\u8f6c\u578b\u68c0\u6d4b"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "cost_class" : "O(tile \u00d7 scenes \u00d7 breaks)",
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "NOT_SUPPORTED",
+        "remedy" : "\u5efa\u8bae 3 \u5e74\u4ee5\u4e0a\u5468\u671f\u89c2\u6d4b",
+        "when" : "\u65f6\u5e8f\u8fc7\u77ed\u65e0\u6cd5\u5efa\u7acb\u7a33\u5b9a\u5386\u53f2\u6bb5"
+      }
+    ],
+    "family" : "temporal",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "brokenPixelFraction",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "maxBreaks",
+          "required" : true
+        },
+        {
+          "data_kind" : "json",
+          "name" : "memory",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "sceneCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "timeEnd",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "timeStart",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "true",
+          "name" : "apply_qa_masking",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "default" : "0",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "enum" : 
+          [
+            "blue",
+            "green",
+            "red",
+            "red_edge",
+            "nir",
+            "swir1",
+            "swir2"
+          ],
+          "name" : "band_role",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "collection",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "keep_all",
+          "enum" : 
+          [
+            "keep_all",
+            "reject"
+          ],
+          "name" : "duplicate_policy",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "2",
+          "name" : "maxBreaks",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0.100000",
+          "name" : "minImprovement",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "90",
+          "name" : "minSegmentDays",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "true",
+          "name" : "outputBreakDates",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "name" : "scenes",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "256",
+          "name" : "tile_size",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u65f6\u5e8f\u65ad\u70b9\u68c0\u6d4b\uff1aBFAST/\u6eda\u52a8\u5747\u503c\u7b49\u68c0\u6d4b\u65f6\u5e8f\u7ed3\u6784\u6027\u7a81\u53d8\u70b9\uff08\u6270\u52a8\u3001\u6482\u8352\u3001\u6d2a\u6cdb\uff09\uff0c\u5b9a\u4f4d\u53d8\u5316\u53d1\u751f\u65f6\u95f4\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u7ed3\u6784\u65ad\u70b9",
+        "BFAST",
+        "\u7a81\u53d8\u68c0\u6d4b"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u5e94\u7528\u5206\u6790"
+      ],
+      "exercise" : "\u68c0\u6d4b 2000\u20132024 NDVI \u65f6\u5e8f\u7684\u65ad\u70b9\u5e74\u4efd\u5e76\u4e0e\u91c7\u4f10\u8bb0\u5f55\u6838\u5bf9\u3002"
+    }
+  },
+  "description" : "Per-pixel piecewise-linear trend segmentation with break detection (BSFAST-lite): the series (real acquisition day offsets) is split greedily where an additional OLS segment reduces the residual sum of squares the most, while the relative RSS reduction exceeds minImprovement and both sides keep the minimum segment sample count (derived from minSegmentDays and the collection time span). Outputs the break count, break dates (day offsets from the first acquisition), one per-day slope per segment and the overall RMSE.",
+  "display_name" : "Temporal Breakpoints",
+  "id" : "rs:temporal_breakpoints",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "temporal",
+    "breakpoint",
+    "change-detection"
+  ]
+}

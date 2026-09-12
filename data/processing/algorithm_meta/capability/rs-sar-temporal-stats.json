@@ -1,0 +1,143 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u519c\u7530",
+        "\u6c34\u4f53\uff08SAR\uff09"
+      ],
+      "scenes" : 
+      [
+        "\u4f5c\u7269\u7269\u5019\u7684\u96f7\u8fbe\u8868\u8fbe",
+        "\u6c38\u4e45\u6563\u5c04\u4f53\u9884\u7b5b\u9009"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "GRID_MISMATCH",
+        "remedy" : "\u9010\u671f rs:sar_geocode + rs:align \u540e\u518d\u505a\u65f6\u5e8f\u7edf\u8ba1",
+        "when" : "\u591a\u671f\u5f71\u50cf\u7f51\u683c\u4e0d\u4e00\u81f4"
+      }
+    ],
+    "family" : "sar",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "band",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "6",
+          "name" : "changeThresholdDb",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "declared",
+          "enum" : 
+          [
+            "declared",
+            "linear_power",
+            "db"
+          ],
+          "name" : "inputDomain",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "inputs",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "2",
+          "name" : "minValid",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Incoherent analysis only \u2014 no interferometric coherence.",
+      "Radiometric normalization between scenes (incidence/season) is the caller's responsibility.",
+      "Valid samples are finite and strictly positive; nonpositive power is NoData."
+    ],
+    "modality" : 
+    [
+      "sar"
+    ],
+    "operator_group" : "sar",
+    "prerequisites" : 
+    [
+      "Scenes must be co-registered on an identical grid (no hidden resampling).",
+      "Calibrate scenes first (rs:sar_calibrate): statistics of raw DN are not physical.",
+      "\u6240\u6709\u8f93\u5165\u987b\u5b9a\u6807\u5e76\u914d\u51c6\u5230\u540c\u4e00\u7f51\u683c\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "SAR \u65f6\u5e8f\u7edf\u8ba1\uff1a\u5bf9\u591a\u671f\u5b9a\u6807\u540e SAR \u5f71\u50cf\u6309\u50cf\u5143\u7edf\u8ba1\u5747\u503c/\u65b9\u5dee/\u5206\u4f4d\u6570\u7b49\uff0c\u523b\u753b\u6563\u5c04\u65f6\u5e8f\u7279\u5f81\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u65f6\u5e8f\u7edf\u8ba1",
+        "\u540e\u5411\u6563\u5c04\u65f6\u5e8f"
+      ],
+      "courses" : 
+      [
+        "\u5fae\u6ce2\u9065\u611f"
+      ],
+      "exercise" : "\u5bf9\u5168\u5e74 12 \u671f Sentinel-1 \u8ba1\u7b97\u5747\u503c\u4e0e\u6807\u51c6\u5dee\uff0c\u533a\u5206\u7a33\u5b9a\u6c34\u4f53\u4e0e\u6ce2\u52a8\u519c\u7530\u3002"
+    }
+  },
+  "description" : "Multi-date SAR statistics: linear-domain mean/dispersion, dB reporting, and robust log-domain change against the median baseline over N co-registered scenes.",
+  "display_name" : "SAR Temporal Statistics",
+  "gpu" : false,
+  "id" : "rs:sar_temporal_stats",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "sar",
+    "temporal",
+    "statistics",
+    "change"
+  ],
+  "task" : "sar-temporal"
+}

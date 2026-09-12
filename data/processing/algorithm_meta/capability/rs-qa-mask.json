@@ -1,0 +1,181 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269"
+      ],
+      "scenes" : 
+      [
+        "Landsat/Sentinel \u65f6\u5e8f\u751f\u4ea7\u7684\u53bb\u4e91\u6b65\u9aa4",
+        "\u8d28\u91cf\u7b5b\u9009\u81ea\u52a8\u5316"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "NOT_SUPPORTED",
+        "remedy" : "\u786e\u8ba4\u4f20\u611f\u5668\u7c7b\u578b\u53c2\u6570\u4e0e\u5b9e\u9645\u6570\u636e\u4e00\u81f4",
+        "when" : "QA \u6ce2\u6bb5\u7f16\u7801\u4e0e\u6240\u9009\u4f20\u611f\u5668\u6a21\u677f\u4e0d\u7b26"
+      },
+      {
+        "code" : "BAND_ROLE_UNRESOLVED",
+        "remedy" : "\u7528 SICNU_BAND_ROLE \u6807\u6ce8 qa \u6ce2\u6bb5\u6216\u663e\u5f0f\u6307\u5b9a\u6ce2\u6bb5\u53f7",
+        "when" : "\u8f93\u5165\u7f3a\u5c11 QA \u6ce2\u6bb5\u89d2\u8272\u6807\u6ce8"
+      }
+    ],
+    "family" : "optical",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "string",
+          "name" : "maskClasses",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "maskedPercent",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "maskedPixels",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "source",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "totalPixels",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "0",
+          "name" : "bits",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "cloud_and_shadow",
+          "enum" : 
+          [
+            "cloud_and_shadow",
+            "cloud",
+            "cloud_shadow",
+            "snow",
+            "water",
+            "all"
+          ],
+          "name" : "mask",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "qa_band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "auto",
+          "enum" : 
+          [
+            "auto",
+            "landsat_qa_pixel",
+            "sentinel2_scl",
+            "generic_bitmask"
+          ],
+          "name" : "source",
+          "required" : false,
+          "type" : "enum"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Sentinel-2 cloud shadow interpretation uses the SCL class only (no probability thresholds)."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "qa",
+    "prerequisites" : 
+    [
+      "Input must carry a QA band (Landsat QA_PIXEL or Sentinel-2 SCL) or an explicit qa_band."
+    ],
+    "schema_version" : 2,
+    "summary" : "\u89e3\u6790\u4f20\u611f\u5668 QA \u6ce2\u6bb5\uff08\u5982 Landsat QA_PIXEL\u3001Sentinel-2 SCL\uff09\u751f\u6210\u8d28\u91cf/\u4e91\u63a9\u819c\uff0c\u6309\u4f4d\u6216\u7c7b\u522b\u6311\u9009\u8981\u5254\u9664\u7684\u50cf\u5143\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "QA \u4f4d\u6807\u5fd7",
+        "\u4e91\u68c0\u6d4b",
+        "\u50cf\u5143\u8d28\u91cf"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u4ece Landsat QA_PIXEL \u63d0\u53d6\u4e91\u4e0e\u4e91\u5f71\u6807\u5fd7\uff0c\u751f\u6210\u63a9\u819c\u5e76\u7edf\u8ba1\u4e91\u8986\u76d6\u7387\u3002"
+    }
+  },
+  "description" : "Derive a cloud / cloud-shadow / snow mask from Landsat QA_PIXEL or Sentinel-2 SCL quality bands.",
+  "display_name" : "QA Mask",
+  "gpu" : false,
+  "id" : "rs:qa_mask",
+  "input" : "raster",
+  "notes" : "Landsat QA_PIXEL / Sentinel-2 SCL / generic bitmask to cloud, cloud-shadow, snow masks. Runs before atmospheric correction in the lab.preprocess.optical DAG.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "qa",
+    "cloud",
+    "mask"
+  ],
+  "task" : "quality-masking"
+}

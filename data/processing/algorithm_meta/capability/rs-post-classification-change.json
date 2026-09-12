@@ -1,0 +1,197 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u57ce\u5e02",
+        "\u519c\u7530",
+        "\u68ee\u6797"
+      ],
+      "scenes" : 
+      [
+        "\u571f\u5730\u8986\u76d6\u8f6c\u79fb\u77e9\u9635",
+        "\u7528\u9014\u53d8\u66f4\u7edf\u8ba1"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "multipass_streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "GRID_MISMATCH",
+        "remedy" : "\u5148 rs:align \u6700\u8fd1\u90bb\u5bf9\u9f50",
+        "when" : "\u4e24\u671f\u5206\u7c7b\u56fe\u7f51\u683c\u4e0d\u4e00\u81f4"
+      },
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u7edf\u4e00\u7c7b\u522b\u7f16\u7801\u6216\u63d0\u4f9b\u6620\u5c04\u8868",
+        "when" : "\u4e24\u671f\u5206\u7c7b\u4f53\u7cfb\uff08\u7c7b\u522b\u6570/\u7f16\u7801\uff09\u4e0d\u4e00\u81f4"
+      }
+    ],
+    "family" : "change",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "after",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "before",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "numeric",
+          "name" : "changedPercent",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "changedPixels",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "classCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "fromTotals",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "netChange",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "toTotals",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "totalPixels",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "transitionMatrix",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "unchangedPixels",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "0",
+          "name" : "afterBand",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "1",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0",
+          "name" : "beforeBand",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0",
+          "name" : "class_count",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "class_labels",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Change-type codes are UInt16: class_count must be <= 255 so before * classCount + after fits; auto class_count derives from the maximum observed class + 1."
+    ],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "multimodal"
+    ],
+    "operator_group" : "change-detection",
+    "prerequisites" : 
+    [
+      "Both inputs are thematic rasters with a shared class coding; before/after grids must be aligned (grid compatibility is preflighted).",
+      "\u4e24\u671f\u5206\u7c7b\u56fe\u987b\u540c\u4e00\u5206\u7c7b\u4f53\u7cfb\u4e0e\u7f51\u683c\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "\u5206\u7c7b\u540e\u53d8\u5316\u68c0\u6d4b\uff1a\u5bf9\u4e24\u671f\u5206\u7c7b\u56fe\u505a\u7c7b\u522b\u8f6c\u79fb\u77e9\u9635\u4e0e\u53d8\u5316/\u4fdd\u7559\u56fe\u8f93\u51fa\uff0c\u53d8\u5316\u7c7b\u578b\u53ef\u89e3\u91ca\uff0c\u7cbe\u5ea6\u53d7\u4e24\u671f\u5206\u7c7b\u8d28\u91cf\u7ea6\u675f\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u8f6c\u79fb\u77e9\u9635",
+        "\u5206\u7c7b\u540e\u6bd4\u8f83"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u5e94\u7528\u5206\u6790"
+      ],
+      "exercise" : "\u5bf9 2010/2020 \u4e24\u671f\u571f\u5730\u8986\u76d6\u56fe\u751f\u6210\u8f6c\u79fb\u77e9\u9635\u5e76\u7edf\u8ba1\u8015\u5730\u6d41\u5931\u53bb\u5411\u3002"
+    }
+  },
+  "description" : "Compare two thematic rasters and report the per-class transition matrix, gains/losses, and a change-type map.",
+  "display_name" : "Post-Classification Change",
+  "id" : "rs:post_classification_change",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "change-detection",
+    "temporal",
+    "classification",
+    "transition-matrix"
+  ]
+}

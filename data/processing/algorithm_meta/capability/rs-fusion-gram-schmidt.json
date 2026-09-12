@@ -1,0 +1,157 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u57ce\u5e02",
+        "\u6d77\u5cb8\u5e26",
+        "\u519c\u7530"
+      ],
+      "scenes" : 
+      [
+        "\u9ad8\u4fdd\u771f\u878d\u5408\u4ea7\u54c1",
+        "\u878d\u5408\u540e\u9700\u7ee7\u7eed\u505a\u6307\u6570\u8ba1\u7b97\u7684\u573a\u666f"
+      ]
+    },
+    "band_roles" : 
+    {
+      "blue" : 1,
+      "green" : 1,
+      "red" : 1
+    },
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "GRID_MISMATCH",
+        "remedy" : "\u5148\u7528 rs:align \u7edf\u4e00\u7f51\u683c",
+        "when" : "\u8f93\u5165\u7f51\u683c\u4e0d\u4e00\u81f4"
+      }
+    ],
+    "family" : "optical",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "ms",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "pan",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "method",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "2",
+          "name" : "blueIdx",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "1",
+          "name" : "greenIdx",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "msWeights",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "0.500000",
+          "name" : "panWeight",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "redIdx",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "multimodal",
+      "optical"
+    ],
+    "operator_group" : "fusion",
+    "prerequisites" : 
+    [
+      "Pan and MS rasters must be co-registered."
+    ],
+    "schema_version" : 2,
+    "summary" : "Gram-Schmidt \u5168\u8272\u9510\u5316\uff1a\u4ee5\u6b63\u4ea4\u5316\u65b9\u6cd5\u4fdd\u6301\u5149\u8c31\u4fe1\u606f\uff0c\u5149\u8c31\u4fdd\u771f\u5ea6\u9ad8\u4e8e Brovey\uff0c\u662f\u5b9a\u91cf\u7528\u9014\u7684\u63a8\u8350\u878d\u5408\u65b9\u6cd5\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "Gram-Schmidt \u6b63\u4ea4\u5316",
+        "\u5149\u8c31\u4fdd\u771f"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406",
+        "\u5b9a\u91cf\u9065\u611f\u57fa\u7840"
+      ],
+      "exercise" : "\u6bd4\u8f83 GS \u4e0e PCA \u878d\u5408\u540e NDWI \u7684\u504f\u5dee\uff0c\u8bc4\u4f30\u5149\u8c31\u4fdd\u771f\u3002"
+    }
+  },
+  "description" : "Gram-Schmidt pan-sharpening fusion.",
+  "display_name" : "Fusion Gram-Schmidt",
+  "id" : "rs:fusion_gram_schmidt",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "fusion",
+    "pan-sharpening",
+    "enhancement"
+  ]
+}

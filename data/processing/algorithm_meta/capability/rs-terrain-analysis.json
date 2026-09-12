@@ -1,0 +1,179 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u5c71\u5730",
+        "\u4e18\u9675",
+        "\u6cb3\u8c37"
+      ],
+      "scenes" : 
+      [
+        "\u5730\u5f62\u56e0\u5b50\u5236\u56fe",
+        "\u6ed1\u5761/\u6c34\u571f\u6d41\u5931\u5206\u6790\u7684\u57fa\u7840\u56fe\u5c42"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u786e\u8ba4 Z \u56e0\u5b50\u53c2\u6570\u4e0e DEM \u9ad8\u7a0b\u5355\u4f4d\u4e00\u81f4",
+        "when" : "Z \u56e0\u5b50\u4e0e DEM \u5782\u76f4\u5355\u4f4d\u4e0d\u5339\u914d\uff08\u5ea6 vs \u7c73\uff09"
+      },
+      {
+        "code" : "CRS_MISMATCH",
+        "remedy" : "\u5148\u91cd\u6295\u5f71\u5230\u6295\u5f71\u5750\u6807\u7cfb\uff08\u7c73\u5236\uff09\u518d\u8ba1\u7b97",
+        "when" : "DEM \u4f7f\u7528\u5730\u7406\u5750\u6807\u7cfb\u5bfc\u81f4\u5761\u5ea6\u8ba1\u7b97\u9519\u8bef"
+      }
+    ],
+    "family" : "terrain",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "height",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "product",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "width",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "30",
+          "name" : "cellSize",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "-9999",
+          "name" : "nodata",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "slope",
+          "enum" : 
+          [
+            "slope",
+            "aspect",
+            "hillshade",
+            "roughness",
+            "tri",
+            "tpi",
+            "curvature_profile",
+            "curvature_plan",
+            "curvature_total",
+            "hillshade_multidirectional",
+            "local_relief"
+          ],
+          "name" : "product",
+          "required" : true,
+          "type" : "enum"
+        },
+        {
+          "default" : "315",
+          "name" : "sunAzimuth",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "45",
+          "name" : "sunElevation",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "1",
+          "name" : "zFactor",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "dem"
+    ],
+    "operator_group" : "terrain",
+    "prerequisites" : 
+    [
+      "\u5efa\u8bae\u4f7f\u7528\u6295\u5f71\u5750\u6807\u7cfb\uff08\u7c73\u5236\uff09\u7684 DEM\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "\u5730\u5f62\u53c2\u6570\u5206\u6790\uff1a\u7531 DEM \u8ba1\u7b97\u5761\u5ea6\u3001\u5761\u5411\u3001\u5c71\u4f53\u9634\u5f71\u7b49\u5730\u5f62\u56e0\u5b50\uff0c\u662f\u6240\u6709\u5730\u5f62\u5b9a\u91cf\u5316\u5206\u6790\u7684\u5165\u53e3\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5761\u5ea6",
+        "\u5761\u5411",
+        "\u5c71\u4f53\u9634\u5f71"
+      ],
+      "courses" : 
+      [
+        "GIS \u539f\u7406",
+        "\u5730\u5f62\u5206\u6790"
+      ],
+      "exercise" : "\u7531 SRTM DEM \u751f\u6210\u5761\u5ea6\u3001\u5761\u5411\u4e0e\u5c71\u4f53\u9634\u5f71\u4e09\u5f20\u56fe\u5c42\u5e76\u53e0\u52a0\u5224\u8bfb\u3002"
+    }
+  },
+  "description" : "Compute slope, aspect, hillshade, roughness, TRI, or TPI from a DEM.",
+  "display_name" : "Terrain Analysis",
+  "id" : "rs:terrain_analysis",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "terrain",
+    "dem",
+    "slope",
+    "hillshade"
+  ]
+}

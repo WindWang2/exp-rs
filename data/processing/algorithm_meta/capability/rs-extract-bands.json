@@ -1,0 +1,114 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269"
+      ],
+      "scenes" : 
+      [
+        "\u5236\u4f5c\u6307\u6570\u8ba1\u7b97\u6240\u9700\u7684\u6700\u5c0f\u6ce2\u6bb5\u96c6",
+        "\u591a\u6e90\u5f71\u50cf\u6ce2\u6bb5\u7edf\u4e00"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u68c0\u67e5 bands \u5217\u8868\u90fd\u5728 1..N \u4e14\u65e0\u91cd\u590d",
+        "when" : "\u6ce2\u6bb5\u5e8f\u53f7\u8d8a\u754c\u6216\u91cd\u590d"
+      }
+    ],
+    "family" : "spectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "bands",
+          "required" : true,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "thermal",
+      "dem"
+    ],
+    "operator_group" : "enhancement",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u4ece\u591a\u6ce2\u6bb5\u5f71\u50cf\u4e2d\u62bd\u53d6\u6307\u5b9a\u6ce2\u6bb5\u5b50\u96c6\uff0c\u91cd\u6392\u4e3a\u65b0\u7684\u5f71\u50cf\uff0c\u662f\u7279\u5f81\u7b5b\u9009\u4e0e\u5e26\u5bbd\u538b\u7f29\u7684\u57fa\u7840\u64cd\u4f5c\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u6ce2\u6bb5\u9009\u62e9",
+        "\u7279\u5f81\u5b50\u96c6"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u4ece Sentinel-2 13 \u6ce2\u6bb5\u4e2d\u62bd\u53d6 B02/B03/B04/B08 \u505a\u540e\u7eed NDVI \u751f\u4ea7\u3002"
+    }
+  },
+  "description" : "Extract one or more bands into a new multi-band raster.",
+  "display_name" : "Extract Bands",
+  "id" : "rs:extract_bands",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "extract",
+    "bands"
+  ]
+}
