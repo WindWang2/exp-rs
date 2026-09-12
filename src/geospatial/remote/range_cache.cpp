@@ -1095,21 +1095,28 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
       CacheStore &cache = store();
       const std::string key = resourceKey( requestUrl );
 
+      // One config snapshot per open, taken under the store lock (P1
+      // remediation discipline): updateConfig() swaps the config under the
+      // same mutex, so the policy check and the validator options below
+      // must read the snapshot, never the live field.
+      std::uint64_t openConfigGeneration = 0;
+      const RangeCacheConfig config = cache.snapshotConfig( openConfigGeneration );
+
       // Identity: probe once, then revalidate per the declared policy. A
       // validator mismatch invalidates the resource's cached bytes.
       std::shared_ptr<ResourceEntry> entry = cache.findResource( key );
-      if ( entry != nullptr && cache.config.stalePolicy == RangeCacheStalePolicy::RevalidateOnOpen )
+      if ( entry != nullptr && config.stalePolicy == RangeCacheStalePolicy::RevalidateOnOpen )
       {
         // Revalidate against the ENTRY'S stored validators — a fresh probe
         // would always compare equal to itself and never see a change.
         cache.revalidations.fetch_add( 1 );
         RemoteSourceValidator validator = RemoteSourceValidator::fromIdentity(
           cache.snapshotIdentity( entry ), requestUrl );
-        const RevalidationResult result = validator.revalidate( validatorOptions( cache.config ) );
+        const RevalidationResult result = validator.revalidate( validatorOptions( config ) );
         if ( result.outcome == RevalidationOutcome::Changed )
         {
           cache.invalidate( key );
-          entry = cache.probeNewEntry( requestUrl, validatorOptions( cache.config ) );
+          entry = cache.probeNewEntry( requestUrl, validatorOptions( config ) );
           if ( entry == nullptr )
             return nullptr;
         }
@@ -1128,7 +1135,7 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
       }
       if ( entry == nullptr )
       {
-        entry = cache.probeNewEntry( requestUrl, validatorOptions( cache.config ) );
+        entry = cache.probeNewEntry( requestUrl, validatorOptions( config ) );
         if ( entry == nullptr )
         {
           // Missing (ENOENT) or unreachable: a quiet null like any local
@@ -1157,12 +1164,20 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
         return -1;
       const std::string key = resourceKey( requestUrl );
       CacheStore &cache = store();
+      // Config and entry size under the store lock (P1 remediation
+      // discipline): updateConfig() / updateEntrySize() write these fields
+      // under the same mutex — copy the small values once, then work on the
+      // copies so Stat never reads a racing live field.
+      std::uint64_t statConfigGeneration = 0;
+      const RangeCacheConfig config = cache.snapshotConfig( statConfigGeneration );
       std::shared_ptr<ResourceEntry> entry = cache.findResource( key );
-      if ( entry == nullptr || !entry->hasSize )
+      std::uint64_t sizeBytes = 0;
+      bool haveSize = entry != nullptr && cache.entrySize( entry, sizeBytes );
+      if ( entry == nullptr || !haveSize )
       {
         // A bounded identity probe (never a download) to learn the size.
         RemoteSourceValidator validator =
-          RemoteSourceValidator::probe( requestUrl, validatorOptions( cache.config ) );
+          RemoteSourceValidator::probe( requestUrl, validatorOptions( config ) );
         const RemoteSourceIdentity &identity = validator.identity();
         // Gone / unusable / unreachable: a quiet stat miss — speculative
         // sibling probes (\.aux, \.ovr, …) are normal GDAL behavior and
@@ -1175,8 +1190,10 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
           return -1;
         }
         entry = cache.getOrCreateResource( key, requestUrl, identity );
+        haveSize = identity.hasSize;
+        sizeBytes = identity.sizeBytes;
       }
-      if ( !entry->hasSize )
+      if ( !haveSize )
       {
         // Range-ignoring oversized origin: learn the size from the
         // underlying handle (open + Seek END — no content transfer).
@@ -1188,9 +1205,10 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
           return -1;
         }
         underlying->Seek( 0, SEEK_END );
-        cache.updateEntrySize( entry, underlying->Tell() );
+        sizeBytes = underlying->Tell();
+        cache.updateEntrySize( entry, sizeBytes );
       }
-      pStatBuf->st_size = static_cast<decltype( pStatBuf->st_size )>( entry->sizeBytes );
+      pStatBuf->st_size = static_cast<decltype( pStatBuf->st_size )>( sizeBytes );
       pStatBuf->st_mode = S_IFREG;
       return 0;
     }
