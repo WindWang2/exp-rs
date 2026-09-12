@@ -502,4 +502,51 @@ DoctorReport runDoctor( const std::string &path, const InspectOptions &options )
   return report;
 }
 
+
+Json::Value gdalCapabilityMatrix()
+{
+  Json::Value json;
+  json["gdal_version"] = GDALVersionInfo( "RELEASE" );
+  json["gdal_runtime_name"] = GDALVersionInfo( "--version" );
+  ensureGdalRegistered();
+
+  Json::Value formats( Json::arrayValue );
+  const FormatRegistry &registry = FormatRegistry::instance();
+  for ( const FormatProfile &profile : registry.profiles() )
+  {
+    // Driver truth first: every declared short name is resolved against
+    // THIS build; a profile is "driver_available" only when at least one is.
+    Json::Value drivers( Json::arrayValue );
+    bool anyAvailable = false;
+    bool anyCreate = false;
+    bool anyCreateCopy = false;
+    bool anyOpen = false;
+    for ( const std::string &driverName : profile.driverNames )
+    {
+      GDALDriverH driver = GDALGetDriverByName( driverName.c_str() );
+      if ( driver == nullptr )
+        continue;
+      anyAvailable = true;
+      Json::Value driverJson;
+      driverJson["name"] = driverName;
+      driverJson["create"] = GDALGetMetadataItem( driver, GDAL_DCAP_CREATE, nullptr ) != nullptr;
+      driverJson["create_copy"] = GDALGetMetadataItem( driver, GDAL_DCAP_CREATECOPY, nullptr ) != nullptr;
+      driverJson["open"] = GDALGetMetadataItem( driver, GDAL_DCAP_OPEN, nullptr ) != nullptr;
+      anyCreate = anyCreate || driverJson["create"].asBool();
+      anyCreateCopy = anyCreateCopy || driverJson["create_copy"].asBool();
+      anyOpen = anyOpen || driverJson["open"].asBool();
+      drivers.append( driverJson );
+    }
+    Json::Value entry = profile.toJson( anyAvailable );
+    entry["drivers"] = drivers;             // live per-driver truth (vs declared names)
+    entry["driver_available"] = anyAvailable;
+    entry["can_create"] = anyCreate;
+    entry["can_create_copy"] = anyCreateCopy;
+    entry["can_open"] = anyOpen;
+    formats.append( entry );
+  }
+  json["formats"] = formats;
+  return json;
+}
+
 } // namespace sicnu::geo

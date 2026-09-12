@@ -12,7 +12,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <sstream>
+
+#include <system_error>
 
 namespace sicnu::geo
 {
@@ -190,6 +194,21 @@ StacItem StacItem::parseText( const std::string &jsonText )
   if ( !Json::parseFromStream( builder, stream, &parsed, &errors ) )
     throw GeoError( ErrorCode::InvalidArgument, "STAC item is not valid JSON: " + errors );
   return parse( parsed );
+}
+
+StacItem StacItem::parseFromFile( const std::string &path )
+{
+  if ( path.empty() )
+    throw GeoError( ErrorCode::InvalidArgument, "StacItem::parseFromFile: empty path" );
+  std::ifstream in( path, std::ios::binary );
+  if ( !in )
+    throw GeoError( ErrorCode::OpenFailed, "StacItem::parseFromFile: cannot open " + path );
+  std::string text( ( std::istreambuf_iterator<char>( in ) ), std::istreambuf_iterator<char>() );
+  StacItem item = parseText( text );
+  std::error_code ec;
+  std::filesystem::path absolute = std::filesystem::weakly_canonical( std::filesystem::u8path( path ), ec );
+  item.sourceHref = ec ? path : absolute.string();
+  return item;
 }
 
 Json::Value StacItem::toJson() const

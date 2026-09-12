@@ -200,11 +200,12 @@ std::vector<FormatProfile> buildDeclaredProfiles()
     p.family = FormatFamily::Vector;
     p.driverNames = { "FlatGeobuf" };
     p.extensions = { "fgb" };
-    p.certification = Certification::Accessible;
+    p.certification = Certification::Certified;
     p.supportsRead = true;
     p.supportsWrite = true;
     p.supportsStreaming = true;
-    p.notes = "Certification pending streaming-filter round-trip coverage on this stack.";
+    p.notes = "Certified: GPKG <-> FlatGeobuf round-trip with filtered streaming reads "
+              "(tests/test_io_roundtrip_matrix.cpp); driver presence resolved at runtime.";
     profiles.push_back( p );
   }
   {

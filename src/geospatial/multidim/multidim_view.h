@@ -86,6 +86,11 @@ class MultidimView
     void close();
     const MultidimMetadata &metadata() const { return mMetadata; }
 
+    /// 9.0 M5: the store's declared geotransform for the trailing spatial
+    /// dimensions. Returns false when none is declared — callers never
+    /// synthesize grid geometry.
+    bool geotransform( double (&out)[6] ) const;
+
     /// Bounded window over a variable: every non-spatial dimension must be
     /// fixed by `dimSlices` (dimension name → index) so exactly two free
     /// dimensions remain (rows × cols). Unknown names → GeoError.

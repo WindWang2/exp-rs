@@ -93,9 +93,11 @@ vendor/
 !.planning/dataset-experiment-7/
 !.planning/geospatial-data-fabric-8/
 !.planning/scientific-processing-8/
+!.planning/scientific-algorithms-9/
 !.planning/plugin-platform-8/
 !.planning/verification-platform-8/
 !.planning/plugin-platform-9/
+!.planning/geospatial-data-fabric-9/
 .zcode/
 
 # IDE / editor / OS artifacts

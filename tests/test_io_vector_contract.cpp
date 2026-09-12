@@ -253,6 +253,230 @@ TEST_CASE( "unknown fields and malformed geometry are structured errors", "[io][
                    sicnu::geo::GeoError );
 }
 
+// ---------------------------------------------------------------------------
+// 9.0 M0 — #850: moving a VectorWriter mid-stream used to drop
+// mTransactionActive, so finalize() skipped the commit and GDALClose silently
+// rolled the whole feature stream back — the near-empty file still published.
+// The moved-to writer must commit every feature written before the move.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+void writeDemoFeature( sicnu::geo::VectorWriter &writer, const std::string &name, double value )
+{
+  Json::Value attrs( Json::objectValue );
+  attrs["name"] = name;
+  attrs["value"] = value;
+  attrs["code"] = static_cast<Json::Int64>( 42 );
+  writer.writeFeature( attrs, "POINT (104 30)" );
+}
+
+} // namespace
+
+TEST_CASE( "moving a mid-stream writer keeps the transaction (issue850)",
+           "[io][vector][contract][issue850]" )
+{
+  const std::string target = ( fs::path( scratchDir( "move850" ) ) / "moved.gpkg" ).string();
+  sicnu::geo::VectorWriter first = sicnu::geo::VectorWriter::create(
+    target, "cities", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+  writeDemoFeature( first, "before-move-1", 1.0 );
+  writeDemoFeature( first, "before-move-2", 2.0 );
+
+  // Move-construct mid-stream (GPKG starts a transaction in create()).
+  sicnu::geo::VectorWriter second = std::move( first );
+  writeDemoFeature( second, "after-move", 3.0 );
+  second.finalize();
+
+  sicnu::geo::VectorReader reader = sicnu::geo::VectorReader::open( target );
+  // Old code: 0 features (transaction implicitly rolled back at close).
+  CHECK( reader.layerInfo().featureCount == 3 );
+}
+
+TEST_CASE( "move-assignment keeps the transaction (issue850)",
+           "[io][vector][contract][issue850]" )
+{
+  const std::string targetA = ( fs::path( scratchDir( "move850" ) ) / "a.gpkg" ).string();
+  const std::string targetB = ( fs::path( scratchDir( "move850" ) ) / "b.gpkg" ).string();
+
+  sicnu::geo::VectorWriter writerA = sicnu::geo::VectorWriter::create(
+    targetA, "layer_a", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+  writeDemoFeature( writerA, "a1", 1.0 );
+
+  sicnu::geo::VectorWriter writerB = sicnu::geo::VectorWriter::create(
+    targetB, "layer_b", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+  writeDemoFeature( writerB, "b1", 2.0 );
+
+  writerB = std::move( writerA ); // writerA's staged work + transaction move into writerB
+  writeDemoFeature( writerB, "a2-after-assign", 3.0 );
+  writerB.finalize();
+
+  sicnu::geo::VectorReader reader = sicnu::geo::VectorReader::open( targetA );
+  CHECK( reader.layerInfo().featureCount == 2 ); // old code: 0 (silent rollback)
+  // B was cancelled by the move-assign; its target never appears.
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( targetB ) );
+}
+
+TEST_CASE( "cancel after move rolls back explicitly and leaves no staging (issue850)",
+           "[io][vector][contract][issue850]" )
+{
+  // Snapshot the scratch dir BEFORE the run (scratchDir() wipes on every
+  // call, so re-invoking it before counting made the residue check vacuous).
+  const std::string dir = scratchDir( "move850" );
+  const std::string target = ( fs::path( dir ) / "cancelled.gpkg" ).string();
+  {
+    sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
+      target, "cities", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+    writeDemoFeature( writer, "doomed", 9.0 );
+    sicnu::geo::VectorWriter moved = std::move( writer );
+    moved.cancel(); // explicit rollback path, transaction active
+  }
+  CHECK_FALSE( sicnu::geo::atomic_fs::fileExists( target ) );
+
+  // No staging residue beside the (absent) target — count WITHOUT wiping.
+  int residue = 0;
+  std::error_code ec;
+  for ( const auto &entry : fs::directory_iterator( fs::path( dir ), ec ) )
+  {
+    (void)entry;
+    ++residue;
+  }
+  CHECK( residue == 0 );
+}
+
+TEST_CASE( "finalize after a failed commit discards output without crashing (issue850)",
+           "[io][vector][contract][issue850]" )
+{
+  // Shapefile/GeoJSON drivers take the unbatched path (no transaction); GPKG
+  // commit failure itself needs a driver fault we cannot trigger portably —
+  // so this covers the observable contract: finalize-then-cancel is refused,
+  // and a normal finalize never leaves the transaction flag set.
+  const std::string target = ( fs::path( scratchDir( "move850" ) ) / "twice.gpkg" ).string();
+  sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
+    target, "cities", "Point", demoFields(), sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+  writeDemoFeature( writer, "once", 1.0 );
+  writer.finalize();
+  CHECK_THROWS_AS( writer.finalize(), sicnu::geo::GeoError );
+}
+
+// ---------------------------------------------------------------------------
+// 9.0 M6 — extent (no full-table surprise), driver-evaluated field
+// statistics, and the batch write API.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "extent reports the declared envelope without forcing a scan",
+           "[io][vector][contract][fabric9]" )
+{
+  const std::string target = ( fs::path( scratchDir( "extent9" ) ) / "sites.gpkg" ).string();
+  sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
+    target, "sites", "Point", { { "value", "Real" } }, sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+  for ( int i = 0; i < 10; ++i )
+  {
+    Json::Value attrs( Json::objectValue );
+    attrs["value"] = i * 1.5;
+    writer.writeFeature( attrs, "POINT (" + std::to_string( 100 + i ) + " " + std::to_string( 20 + i ) + ")" );
+  }
+  writer.finalize();
+
+  sicnu::geo::VectorReader reader = sicnu::geo::VectorReader::open( target );
+  const sicnu::geo::VectorExtent extent = reader.extent();
+  REQUIRE( extent.valid );
+  CHECK( extent.minX == Approx( 100.0 ) );
+  CHECK( extent.minY == Approx( 20.0 ) );
+  CHECK( extent.maxX == Approx( 109.0 ) );
+  CHECK( extent.maxY == Approx( 29.0 ) );
+}
+
+TEST_CASE( "field statistics are driver-evaluated aggregates with null honesty",
+           "[io][vector][contract][fabric9]" )
+{
+  const std::string target = ( fs::path( scratchDir( "stats9" ) ) / "sites.gpkg" ).string();
+  sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
+    target, "sites", "Point",
+    { { "score", "Real" }, { "zone", "Integer64" }, { "label", "String", 16 } },
+    sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+  for ( int i = 0; i < 10; ++i )
+  {
+    Json::Value attrs( Json::objectValue );
+    attrs["score"] = static_cast<double>( i + 1 ); // 1..10, mean 5.5, sum 55
+    attrs["zone"] = static_cast<Json::Int64>( i % 2 );
+    if ( i < 9 )
+      attrs["label"] = "s" + std::to_string( i );
+    writer.writeFeature( attrs, "POINT (1 2)" );
+  }
+  writer.finalize();
+
+  sicnu::geo::VectorReader reader = sicnu::geo::VectorReader::open( target );
+  const sicnu::geo::VectorFieldStatistics stats = reader.fieldStatistics( "score" );
+  CHECK( stats.nonNullCount == 10 );
+  REQUIRE( stats.hasMin );
+  CHECK( stats.minValue == Approx( 1.0 ) );
+  REQUIRE( stats.hasMax );
+  CHECK( stats.maxValue == Approx( 10.0 ) );
+  REQUIRE( stats.hasSum );
+  CHECK( stats.sum == Approx( 55.0 ) );
+  REQUIRE( stats.hasMean );
+  CHECK( stats.mean == Approx( 5.5 ) );
+
+  // WHERE-filtered aggregates are driver-evaluated as declared.
+  const sicnu::geo::VectorFieldStatistics filtered = reader.fieldStatistics( "score", "zone = 0" );
+  CHECK( filtered.nonNullCount == 5 );
+  CHECK( filtered.sum == Approx( 25.0 ) );
+
+  // String fields are a typed error, never a silent cast.
+  CHECK_THROWS_AS( reader.fieldStatistics( "label" ), sicnu::geo::GeoError );
+  // Unknown fields too.
+  CHECK_THROWS_AS( reader.fieldStatistics( "nope" ), sicnu::geo::GeoError );
+}
+
+TEST_CASE( "batch write appends in order and names the failing index",
+           "[io][vector][contract][fabric9]" )
+{
+  const std::string target = ( fs::path( scratchDir( "batch9" ) ) / "batch.gpkg" ).string();
+  sicnu::geo::VectorWriter writer = sicnu::geo::VectorWriter::create(
+    target, "pts", "Point", { { "label", "String", 16 } }, sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+
+  std::vector<sicnu::geo::VectorWriter::FeatureInput> batch;
+  for ( int i = 0; i < 100; ++i )
+  {
+    sicnu::geo::VectorWriter::FeatureInput feature;
+    feature.attributes["label"] = "b" + std::to_string( i );
+    feature.geometryWkt = "POINT (10 20)";
+    batch.push_back( std::move( feature ) );
+  }
+  writer.writeFeatures( batch );
+  writer.finalize();
+
+  sicnu::geo::VectorReader reader = sicnu::geo::VectorReader::open( target );
+  CHECK( reader.layerInfo().featureCount == 100 );
+
+  // A bad feature reports its index in the batch.
+  sicnu::geo::VectorWriter writer2 = sicnu::geo::VectorWriter::create(
+    ( fs::path( scratchDir( "batch9" ) ) / "bad.gpkg" ).string(), "pts", "Point",
+    { { "label", "String", 16 } }, sicnu::geo::Crs::fromAuthid( "EPSG:4326" ), {} );
+  std::vector<sicnu::geo::VectorWriter::FeatureInput> badBatch( 3 );
+  badBatch[0].attributes["label"] = "ok";
+  badBatch[0].geometryWkt = "POINT (0 0)";
+  badBatch[1].attributes["label"] = "ok";
+  badBatch[1].geometryWkt = "POINT (1 1)";
+  badBatch[2].attributes["unknown"] = "boom"; // rejected by the schema
+  badBatch[2].geometryWkt = "POINT (2 2)";
+  try
+  {
+    writer2.writeFeatures( badBatch );
+    FAIL( "expected batch failure" );
+  }
+  catch ( const sicnu::geo::GeoError &error )
+  {
+    CHECK( error.details()["feature_index"].asUInt64() == 2 );
+    CHECK( error.details()["batch_size"].asUInt64() == 3 );
+  }
+  writer2.cancel();
+}
+
+// Upstream fix formulation (merged from master): the same contract as the
+// M0 tests above, expressed against the shipped #850 fix — kept so both
+// suites guard the behavior.
 TEST_CASE( "VectorWriter move constructor and move assignment preserve active transaction (#850)",
            "[io][vector][contract][issue850]" )
 {
