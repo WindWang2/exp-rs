@@ -1,0 +1,43 @@
+{
+  "schema": "sicnu.lab-data-spec.v1",
+  "lab_id": "cartographic_mapping",
+  "title": "实验11 数据需求：制图出图（专题图合成与合规排版）",
+  "owner_track": "D1（数据生成）；D3 仅声明需求",
+  "offline": true,
+  "network_required": false,
+  "notes": "本实验复用实验8（lab8_temporal_analysis）的 12 期影像数据（规格见 data/labs/data-specs/lab8_temporal_analysis.json，不重复声明），本文件只补充制图环节的产品与元数据要求。",
+  "derived_products": [
+    {
+      "name": "thematic_mask",
+      "purpose": "专题图主图层：年内 NDVI 均值合成 → Otsu 阈值二值化（植被/非植被长势掩膜，UInt8，1=植被）",
+      "producer_chain": ["rs:temporal_index_series", "rs:temporal_composite", "rs:threshold_raster"],
+      "grid": "与实验8 影像完全一致（256×256, EPSG:4326, 原点 (102.5, 30.5), 像元 0.001°）",
+      "aux_statistics": "Otsu 阈值与 maskedPixels/totalPixels 统计随结果交付"
+    }
+  ],
+  "cartographic_metadata": {
+    "aoi_extent_epsg4326": [102.5, 30.244, 102.756, 30.5],
+    "page_suggestion": "A4 横向（297×210 mm）",
+    "source_attribution": "数据：D3 教学合成数据（2024年逐月，Grid 256×256, EPSG:4326）；制图：SICNU GEO RS 实验平台",
+    "crs_note": "EPSG:4326（WGS84 经纬度）——制图合规要求注明坐标系"
+  },
+  "aux_products": [
+    {
+      "name": "thematic_mask_layer_name",
+      "purpose": "MapSpec map_frames[].layers 引用工作区图层名 lab11_thematic_mask（学生把专题栅格加载进工程后按此命名，或保持默认图层名并在 MapSpec 中改成实际名）"
+    }
+  ],
+  "acceptance_criteria": [
+    "专题掩膜为 UInt8 值域 {0,1}，网格与源影像一致",
+    "合成 NDVI 全幅有效（valid_count = 12 或在 valid_count 波段可查）",
+    "Otsu 阈值落在合成 NDVI 全幅直方图双峰之间（判分意图 K3 校验直方图统计）",
+    "AOI 范围与影像 geotransform 推算的 coverage 一致（±0.001°）"
+  ],
+  "consumer_chain": [
+    "rs:temporal_index_series",
+    "rs:temporal_composite",
+    "rs:threshold_raster",
+    "cartography:compose（MapSpec 编译，MCP/代理工具）",
+    "cartography:export（PNG/PDF，MCP/代理工具）"
+  ]
+}

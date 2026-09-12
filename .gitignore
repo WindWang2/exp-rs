@@ -52,6 +52,11 @@ data/*
 # Harness 4.0 scientific recipes are tracked metadata, not local data.
 !data/agent/
 !data/agent/**
+# D3 lab content track: LabSpecs/pipelines/data-specs/grading intents are
+# tracked config, not rasters. Generated fixtures stay untracked via the
+# data/labs/_tmp/ rule at the end of this file (last match wins).
+!data/labs/
+!data/labs/**
 
 # Test golden data always tracked
 !tests/data/
@@ -105,6 +110,7 @@ vendor/
 !.planning/professional-workbench-9/
 !.planning/plugin-platform-9/
 !.planning/geospatial-data-fabric-9/
+!.planning/lab-content-expansion/
 .zcode/
 
 # IDE / editor / OS artifacts
@@ -138,3 +144,6 @@ __pycache__/
 *.governance.db-*
 *.governance.db.wal
 *.governance.db.shm
+
+# D3 lab track: temporary synthetic fixtures (never committed)
+data/labs/_tmp/

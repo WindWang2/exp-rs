@@ -1,0 +1,253 @@
+{
+  "schema": "sicnu.labspec.v1",
+  "id": "sar_processing",
+  "version": "1.0",
+  "title": "实验9：SAR 相干斑抑制与变化检测",
+  "theme": "sar",
+  "audience": "遥感导论本科生（已完成实验1、4）",
+  "duration_minutes": 120,
+  "prerequisites": [
+    "lab1_image_enhancement（空间滤波概念）",
+    "lab4_change_detection（光学变化检测，作对照）"
+  ],
+  "objectives": [
+    "理解 SAR 相干斑的乘性噪声本质与等效视数（ENL）度量，掌握 Lee 滤波的自适应均值-方差估计原理",
+    "掌握 SAR 辐射定标流程（DN → σ0），理解两景影像必须使用同一校准常数才能可比",
+    "掌握 dB 对数比 + Otsu 自动阈值的双时相变化检测方法，能报告检出率与虚警率",
+    "理解同极化配对与严格配准作为变化检测的前置条件",
+    "通过 #785（视角几何）与 #803（多波段 NoData）两个已修复缺陷的复现实验，理解传感器几何与 NoData 语义对 SAR 处理链的正确性意义"
+  ],
+  "principles": [
+    {
+      "heading": "相干斑：乘性噪声与统计模型",
+      "body": "SAR 以相干波成像，分辨单元内多个散射子的回波相干叠加，形成颗粒状相干斑。单视强度像元服从指数分布，L 视处理后服从 Gamma 分布（均值 σ0，方差 σ0²/L）。等效视数 ENL = mean²/var 是均匀区相干斑强度的直接度量：L 视数据 ENL ≈ L。滤波器的任务是在压斑（提 ENL）的同时保持辐射（均值不偏）与纹理（边缘不糊）。",
+      "formulas": [
+        "I = σ0 · X，X ~ Gamma(L,1)/L（L 视强度斑）",
+        "ENL = mean² / variance（均匀区）"
+      ],
+      "refs": [
+        "Lee, 1980, CGIP（REFINE/Lee 滤波）",
+        "Oliver & Quegan, 2004, Understanding SAR Images"
+      ]
+    },
+    {
+      "heading": "Lee 滤波：局部线性最小方差估计",
+      "body": "Lee 滤波假设窗内先验均值与方差可由窗口统计估计，在最小均方误差意义下对中心像元作线性组合：î = ī + b·(I − ī)，其中 b = var(ī)/var(I)·(1−1/ENL_window) 类权重——均匀区 b→0（输出趋近窗口均值，强压斑），边缘区 b→1（保留原始值，保边）。这就是它优于简单均值滤波的原因。5×5 窗口在 4 视数据上是常用起点：窗口越大压斑越强，但空间分辨率损失越大。",
+      "formulas": [
+        "î = ī + b · (I − ī)",
+        "b = (var_y / var_I)，var_y 为信号方差估计"
+      ],
+      "refs": []
+    },
+    {
+      "heading": "辐射定标与 dB 对数比",
+      "body": "传感器 DN 与后向散射的换算：σ0 = (DN/A)² − noise（本实验 noise=0，A=100）。两景必须用同一 A 定标，否则幅度系统差会被误判为变化。变化检测在 dB 域做对数比：Δ = 10·log10(σ0_B/σ0_A)，乘性斑在对数域近似加性高斯，比值对称（±Δ 分别对应增强/减弱）。Otsu 法在 Δ 直方图上自动求类间方差最大的阈值，无需人工先验。注意：向默认 inputDomain（linear_power）喂 dB 数据会被平台 typed refusal 拒绝——域声明错误是 SAR 处理链最常见的静默杀手。",
+      "formulas": [
+        "σ0 = (DN/A)² − noise",
+        "Δ(dB) = 10·log10(σ0_B/σ0_A)"
+      ],
+      "refs": []
+    },
+    {
+      "heading": "视角几何与 NoData 语义：两个已修缺陷的教学意义",
+      "body": "#785（视角方位角）：地形校正把斜距 σ0 投影到地面（γ0 = σ0 / sin θ_local 之类的几何因子），需要雷达视线方位角。视线方位角由航向角 ± 视向（左/右）推得；修复前 UI 与几何模块对'哪一侧'的口径不一致，山地 γ0 会系统性偏差。修复后平台明确：headingDeg 与 lookDirection 组合推导，显式 lookAzimuthDeg 才可覆盖，UI 不得自动填。#803（多波段 NoData）：滤波器在多波段模式下曾把单波段的 NoData 标记扩展到整个数据集，导致另一波段的有效像元被误置 NoData；修复后逐波段解析 NoData 哨兵。SAR 数据中 NoData（叠羽/阴影区）是常态，这条修复决定多极化/多时相栈处理是否可信。",
+      "formulas": [
+        "look_azimuth = heading ± 90°（视向 side 决定 ±）"
+      ],
+      "refs": [
+        "平台 ISSUES #785、#803（已修复）"
+      ]
+    }
+  ],
+  "data": {
+    "spec_ref": "data/labs/data-specs/lab9_sar_processing.json",
+    "offline": true,
+    "description": "同极化 VV/VV 配对 DN 影像（2025-03-01 / 2025-04-15，256×256，4 视相干斑，A=100）+ 同网格 DEM + 双波段 NoData 演示栈 + 变化真值码图。规格由 D1 离线生成；本地验证用 scripts/gen_lab_fixtures.py sar"
+  },
+  "pipeline": {
+    "ref": "data/labs/pipelines/lab9_sar_processing.pipeline.json",
+    "runner": "QT_QPA_PLATFORM=offscreen build/sicnu_geo_rs_cli --pipeline data/labs/pipelines/lab9_sar_processing.pipeline.json",
+    "description": "七步：前/后时相定标 → 各自 Lee 5×5 压斑 → Otsu 变化检测 → 全波段滤波（#803）→ 地形校正（#785）"
+  },
+  "operators": [
+    {
+      "operator_id": "rs:sar_calibrate",
+      "role": "DN → σ0 辐射定标（linear power 域）",
+      "params_digest": {
+        "calibrationA": 100.0,
+        "outputDomain": "linear_power"
+      }
+    },
+    {
+      "operator_id": "rs:sar_speckle",
+      "role": "Lee 5×5 相干斑抑制；band=0 全波段模式验证 #803 逐波段 NoData",
+      "params_digest": {
+        "method": "lee",
+        "kernelSize": 5,
+        "band": "1（单景）/ 0=全波段（#803 演示栈）"
+      }
+    },
+    {
+      "operator_id": "rs:sar_change",
+      "role": "双时相对数比 + Otsu 阈值 → UInt8 变化掩膜与统计",
+      "params_digest": {
+        "inputDomain": "linear_power",
+        "thresholdMethod": "otsu"
+      }
+    },
+    {
+      "operator_id": "rs:sar_terrain_correction",
+      "role": "教学演示：视角几何（heading±look side）与本地入射角（#785）",
+      "params_digest": {
+        "incidenceDeg": 35.0,
+        "headingDeg": 190.0,
+        "lookDirection": "right",
+        "flagIncidence": true
+      }
+    }
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "title": "辐射定标",
+      "detail": "对前/后时相 DN 影像用同一校准常数 A=100 定标到 σ0（linear power）。检查统计：水体区 ≈ -22 dB，森林区 ≈ -16 dB。强调两景必须同常数，否则幅度系统差会被当成变化。",
+      "operator_id": "rs:sar_calibrate",
+      "headless_note": "pipeline 步骤 cal_before / cal_after"
+    },
+    {
+      "id": "s2",
+      "title": "相干斑抑制",
+      "detail": "对两景 σ0 各做 Lee 5×5 滤波。评价：在水体均匀区计算 ENL，对比滤波前后（ENL 应提升 ≥ 1.5×）并检查均值保持（|Δ|≤10%）。",
+      "operator_id": "rs:sar_speckle",
+      "headless_note": "pipeline 步骤 speckle_before / speckle_after"
+    },
+    {
+      "id": "s3",
+      "title": "变化检测",
+      "detail": "以滤波后两景为输入（同极化配对 + 严格配准是硬前置条件），linear power 域进入对数比，Otsu 自动阈值，输出 UInt8 变化掩膜。对照植入变化区计算检出率与虚警率。",
+      "operator_id": "rs:sar_change",
+      "headless_note": "pipeline 步骤 change"
+    },
+    {
+      "id": "s4",
+      "title": "多波段 NoData 验证（#803）",
+      "detail": "对双波段 DN 栈（band2 含 20×20 NoData 洞）执行 band=0 全波段 Lee 滤波。验证：band2 的洞保持 NoData，band1 全幅有效——修复前 band1 会被 band2 的 NoData 污染。",
+      "operator_id": "rs:sar_speckle",
+      "headless_note": "pipeline 步骤 speckle_stack_allbands"
+    },
+    {
+      "id": "s5",
+      "title": "视角几何验证（#785）",
+      "detail": "对前时相 σ0 + DEM 做地形校正：incidenceDeg=35、headingDeg=190、lookDirection=right（视线方位角 = 190+90 = 280°）、flagIncidence=true。检查输出含 γ0、有效掩膜与本地入射角波段；理解为什么'哪一侧视'写错会让山地 γ0 系统性偏差。",
+      "operator_id": "rs:sar_terrain_correction",
+      "headless_note": "pipeline 步骤 terrain_correction"
+    },
+    {
+      "id": "s6",
+      "title": "综合判读",
+      "detail": "把变化掩膜叠加回影像，结合 dB 幅值解释变化方向（本实验为采伐迹地变亮：残余双次散射）。讨论：若跳过滤波直接做变化检测，Otsu 阈值会被斑噪声推向何处？",
+      "headless_note": "无需算子，属于结果解读"
+    }
+  ],
+  "grading_ref": {
+    "intent_ref": "data/labs/grading/lab9_sar_processing.intent.json",
+    "grader_owner": "D4"
+  },
+  "expected_results": [
+    {
+      "claim": "定标后水体 σ0 ≈ 0.006（-22 dB）、森林 ≈ 0.025（-16 dB），无负值",
+      "artifact": "data/labs/_tmp/out/lab9/sigma0_before.tif",
+      "tolerance_note": "见判分意图 S1"
+    },
+    {
+      "claim": "Lee 5×5 后水体 ENL ≥ 1.5×原始，均值保持 ±10%",
+      "artifact": "data/labs/_tmp/out/lab9/sigma0_before_lee5.tif",
+      "tolerance_note": "见判分意图 S2"
+    },
+    {
+      "claim": "变化掩膜检出率 ≥ 65%，虚警率 ≤ 2%，changedPercent ≈ 2.4%（容差 [1,6]%）",
+      "artifact": "data/labs/_tmp/out/lab9/change_otsu.tif",
+      "tolerance_note": "见判分意图 S3"
+    },
+    {
+      "claim": "#803：全波段滤波后 band2 的 NoData 洞保持、band1 不被污染",
+      "artifact": "data/labs/_tmp/out/lab9/stack_lee_allbands.tif",
+      "tolerance_note": "见判分意图 S4"
+    },
+    {
+      "claim": "#785：地形校正输出含 γ0/有效掩膜（+本地入射角），缓丘有效像元 ≥ 98%",
+      "artifact": "data/labs/_tmp/out/lab9/gamma0_before.tif",
+      "tolerance_note": "见判分意图 S5"
+    }
+  ],
+  "questions": [
+    {
+      "prompt": "为什么 SAR 相干斑是乘性噪声而光学传感器噪声近似加性？这决定了滤波器设计（Lee 的线性模型）的什么假设？",
+      "hint": "相干叠加的统计本质 vs 探测器读出噪声"
+    },
+    {
+      "prompt": "把 kernelSize 从 5 改到 9，ENL 与边缘保真各怎么变？'压斑'与'保细节'的取舍在什么应用里偏向哪边？",
+      "hint": "可自行跑 rs:sar_speckle 对比；作物制图 vs 城市变化"
+    },
+    {
+      "prompt": "若两景用了不同校准常数（A=100 与 A=80），对数比变化图会出现什么伪影？如何用直方图发现？",
+      "hint": "幅度系统差 → 全图单侧偏移 → Otsu 阈值失效"
+    },
+    {
+      "prompt": "#785 修复为什么坚持'UI 不得自动填充 lookAzimuthDeg'？自动填充在什么地形下会造成无法察觉的错误？",
+      "hint": "平地上错几何几乎无影响、山地 γ0 系统偏差且无报错——静默错误的危险"
+    },
+    {
+      "prompt": "平台拒绝'declared-dB 输入 + 默认 linear_power 域'的组合（typed refusal）。类比 #803，为什么'宁可拒绝、不可猜测'在 SAR 链里特别重要？",
+      "hint": "两个缺陷都与'隐式语义'有关：域（线性/对数）与 NoData 归属"
+    }
+  ],
+  "glossary": [
+    {
+      "term": "相干斑",
+      "en": "speckle",
+      "definition": "相干波成像中分辨单元内散射子相干叠加造成的颗粒状乘性噪声，L 视强度服从 Gamma 分布"
+    },
+    {
+      "term": "等效视数",
+      "en": "ENL",
+      "definition": "均匀区 mean²/variance，度量相干斑强度；L 视处理理论上 ENL ≈ L"
+    },
+    {
+      "term": "σ0 / γ0",
+      "en": "sigma-naught / gamma-naught",
+      "definition": "后向散射系数的两种归一化：σ0 相对水平地面投影面积，γ0 相对垂直于视线的平面投影面积（地形校正的核心差异）"
+    },
+    {
+      "term": "同极化配对",
+      "en": "like-polarization pairing",
+      "definition": "变化检测要求两景同极化通道（如 VV/VV）且严格配准，否则幅度差含极化/位置系统差"
+    },
+    {
+      "term": "typed refusal",
+      "en": "typed refusal",
+      "definition": "平台对无法满足前置条件（域不匹配、网格不一致等）的处理方式：带类型信息的明确拒绝，而非静默降级"
+    }
+  ],
+  "dependencies": [
+    {
+      "kind": "data",
+      "ref": "data/labs/data-specs/lab9_sar_processing.json",
+      "note": "D1 按规格离线生成；本地验证用临时合成数据"
+    },
+    {
+      "kind": "track",
+      "ref": "D4",
+      "note": "判分器由 D4 实现，本实验只交付判分意图"
+    },
+    {
+      "kind": "test",
+      "ref": "issues #785 #803",
+      "note": "两个缺陷已在平台修复；本实验含其回归性教学断言（S4/S5），若复现失败应视为平台回归而非数据问题"
+    }
+  ],
+  "notes": [
+    "可执行子集（诚实范围）：平台无极化分解（H/A/α、Freeman-Durden、Cloude-Pottier），rs:sar_dualpol_features 仅提供双极化特征 raster；rs:sar_change 严格双时相（多时相变化统计走 rs:sar_temporal_stats，其 argmax_date 输出是 0-based 场景索引而非日历日期）；rs:topographic_correction 是光学专用（太阳角），不适用于 SAR。完整缺口清单见仓库 ISSUES.md。",
+    "滤波顺序约定：本主线采用 定标 → 滤波 → 变化；山地场景规范顺序应为 定标 → 地形校正 → 滤波 → 变化，教学演示步骤 s5 单列以便对照 γ0 与 σ0。"
+  ]
+}

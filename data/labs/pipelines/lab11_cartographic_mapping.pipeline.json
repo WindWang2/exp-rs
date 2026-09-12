@@ -1,0 +1,71 @@
+{
+  "id": "lab11_cartographic_mapping",
+  "name": "lab11_cartographic_mapping",
+  "title": "实验11：制图出图——专题数据生产与合规地图排版",
+  "description": "把实验8 的 12 期 NDVI 时序变成一张可交付的专题图：管道生产专题栅格（NDVI 年内均值合成 → Otsu 阈值二值长势掩膜），MapSpec 声明式文档定义合规排版（标题/图例/比例尺/指北针/来源注记），由 cartography:compose + cartography:export 完成出图。headless 数据链运行： QT_QPA_PLATFORM=offscreen build/sicnu_geo_rs_cli --pipeline data/labs/pipelines/lab11_cartographic_mapping.pipeline.json （先由 scripts/gen_lab_fixtures.py temporal 生成 data/labs/_tmp/ 临时数据）",
+  "version": "1.0",
+  "host": 0,
+  "steps": [
+    {
+      "id": "ndvi",
+      "title": "步骤1 NDVI 时序栈（复用实验8 数据与参数）",
+      "kind": 0,
+      "operator": "rs:temporal_index_series",
+      "params": {
+        "scenes": [
+          { "path": "data/labs/_tmp/temporal/scene_2024-01-15.tif", "time": "2024-01-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-02-15.tif", "time": "2024-02-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-03-15.tif", "time": "2024-03-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-04-15.tif", "time": "2024-04-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-05-15.tif", "time": "2024-05-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-06-15.tif", "time": "2024-06-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-07-15.tif", "time": "2024-07-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-08-15.tif", "time": "2024-08-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-09-15.tif", "time": "2024-09-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-10-15.tif", "time": "2024-10-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-11-15.tif", "time": "2024-11-15", "bands": { "red": 3, "nir": 4 } },
+          { "path": "data/labs/_tmp/temporal/scene_2024-12-15.tif", "time": "2024-12-15", "bands": { "red": 3, "nir": 4 } }
+        ],
+        "index": "NDVI",
+        "output": "data/labs/_tmp/out/lab11/ndvi_series.tif"
+      }
+    },
+    {
+      "id": "composite",
+      "title": "步骤2 年内均值合成：一图概括全年长势",
+      "kind": 0,
+      "operator": "rs:temporal_composite",
+      "params": {
+        "scenes": [
+          { "path": "data/labs/_tmp/out/lab11/ndvi_series.tif", "time": "2024-01-15", "bands": { "ndvi": 1 } },
+          { "path": "data/labs/_tmp/out/lab11/ndvi_series.tif", "time": "2024-02-15", "bands": { "ndvi": 2 } },
+          { "path": "data/labs/_tmp/out/lab11/ndvi_series.tif", "time": "2024-03-15", "bands": { "ndvi": 3 } },
+          { "path": "data/labs/_tmp/out/lab11/ndvi_series.tif", "time": "2024-04-15", "bands": { "ndvi": 4 } },
+          { "path": "data/labs/_tmp/out/lab11/ndvi_series.tif", "time": "2024-05-15", "bands": { "ndvi": 5 } },
+          { "path": "data/labs/_tmp/out/lab11/ndvi_series.tif", "time": "2024-06-15", "bands": { "ndvi": 6 } },
+          { "path": "data/labs/_tmp/out/lab11/ndvi_series.tif", "time": "2024-07-15", "bands": { "ndvi": 7 } },
+          { "path": "data/labs/_tmp/out/lab11/ndvi_series.tif", "time": "2024-08-15", "bands": { "ndvi": 8 } },
+          { "path": "data/labs/_tmp/out/lab11/ndvi_series.tif", "time": "2024-09-15", "bands": { "ndvi": 9 } },
+          { "path": "data/labs/_tmp/out/lab11/ndvi_series.tif", "time": "2024-10-15", "bands": { "ndvi": 10 } },
+          { "path": "data/labs/_tmp/out/lab11/ndvi_series.tif", "time": "2024-11-15", "bands": { "ndvi": 11 } },
+          { "path": "data/labs/_tmp/out/lab11/ndvi_series.tif", "time": "2024-12-15", "bands": { "ndvi": 12 } }
+        ],
+        "band_role": "ndvi",
+        "method": "mean",
+        "period": "all",
+        "output": "data/labs/_tmp/out/lab11/ndvi_composite_mean.tif"
+      }
+    },
+    {
+      "id": "thematic",
+      "title": "步骤3 Otsu 阈值二值化：植被/非植被长势掩膜（UInt8）",
+      "kind": 0,
+      "operator": "rs:threshold_raster",
+      "params": {
+        "input": "data/labs/_tmp/out/lab11/ndvi_composite_mean.tif",
+        "output": "data/labs/_tmp/out/lab11/thematic_mask.tif",
+        "thresholdMethod": "otsu"
+      }
+    }
+  ]
+}

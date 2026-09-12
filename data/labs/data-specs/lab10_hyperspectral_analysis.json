@@ -1,0 +1,63 @@
+{
+  "schema": "sicnu.lab-data-spec.v1",
+  "lab_id": "hyperspectral_analysis",
+  "title": "实验10 数据需求：高光谱 MNF / PPI / SAM-SID / 线性解混",
+  "owner_track": "D1（数据生成）；D3 仅声明需求",
+  "offline": true,
+  "network_required": false,
+  "notes": "全部由 D1 离线合成或由既有存档裁切；D3 本地验证用 scripts/gen_lab_fixtures.py hyperspectral 在 data/labs/_tmp/ 生成等价临时数据（gitignored）。光谱库文件 data/labs/spectral-library/lab10_sicnu_library.json 是本实验的唯一光谱真值源（已入库的静态配置，非栅格）。",
+  "scene_count": 1,
+  "epochs": { "count": 1, "dates": ["2025-06-10"], "cadence": "single scene" },
+  "grid": {
+    "width": 128,
+    "height": 128,
+    "crs": "EPSG:4326",
+    "pixel_size_deg": "x: 0.001, y: 0.001（D3 临时数据 y 向用 0.002 仅覆盖率不同，D1 可统一为 0.001）",
+    "origin_hint": "左上角 (102.5, 30.5)"
+  },
+  "per_scene_product": {
+    "format": "GeoTIFF",
+    "dtype": "float32",
+    "bit_scaling": "反射率量化到 1/255 步长（8-bit-scaled float32）",
+    "value_range": [0.0, 1.0],
+    "no_data": null,
+    "bands": {
+      "count": 10,
+      "wavelengths_nm": [450, 500, 550, 600, 650, 700, 750, 800, 850, 900],
+      "fwhm_nm": 25,
+      "metadata": "逐波段写 WAVELENGTH / WAVELENGTH_UNIT=nm",
+      "note": "10 通道 VNIR 即可支撑全部教学环节；D1 若用更丰富通道数（如 60+），需同步更新光谱库与判分容差"
+    }
+  },
+  "scene_content": {
+    "description": "三种纯地物端元（来自光谱库）+ 线性混合过渡带：左 1/3 水体，中段植被，右 1/3 裸土；两处 8 像元宽线性丰度渐变过渡带（水体→植被、植被→裸土）",
+    "endmembers": "光谱库 data/labs/spectral-library/lab10_sicnu_library.json 的三条 spectrum",
+    "layout_px": {
+      "water": "x ∈ [0,40)",
+      "mix_water_veg": "x ∈ [40,48)，植被丰度 0→1 线性",
+      "vegetation": "x ∈ [48,84)",
+      "mix_veg_soil": "x ∈ [84,92)，土壤丰度 0→1 线性",
+      "bare_soil": "x ∈ [92,128)"
+    },
+    "noise": "每波段独立高斯噪声 σ = 0.004（约半个量化步长）"
+  },
+  "aux_products": [
+    {
+      "name": "hsi_zones",
+      "purpose": "判分辅助：分区码图（1=水体, 2=植被, 3=裸土, 4=混合带），供 D4 做分区分类精度/丰度统计",
+      "format": "GeoTIFF", "dtype": "byte", "grid": "与影像完全一致"
+    }
+  ],
+  "acceptance_criteria": [
+    "影像与分区码图网格完全一致",
+    "全部波段值 ∈ [0,1] 且无 NaN/Inf（SID 要求正谱）",
+    "纯水区（x<40）NIR 波段（≥800nm）均值 ≤ 0.01；纯植区红边斜率（700→750nm）均值 ≥ 0.15；纯土区反射率随波长单调上升（逐波段均值不降）",
+    "过渡带纯度：x=44 列的 750nm 均值介于水体与植被纯区同波段均值之间（混合存在）"
+  ],
+  "consumer_chain": [
+    "rs:mnf",
+    "rs:endmember_extraction",
+    "rs:sam_classify",
+    "rs:spectral_unmixing"
+  ]
+}

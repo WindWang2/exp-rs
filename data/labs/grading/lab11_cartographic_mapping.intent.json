@@ -1,0 +1,82 @@
+{
+  "schema": "sicnu.grading-intent.v1",
+  "lab_id": "cartographic_mapping",
+  "grader_owner": "D4（本文件只声明断言意图，不实现判分器）",
+  "pipeline_ref": "data/labs/pipelines/lab11_cartographic_mapping.pipeline.json",
+  "mapspec_ref": "data/labs/mapspecs/lab11_thematic_map.mapspec.json",
+  "aux_products": {
+    "zones": "data/labs/_tmp/temporal/zones.tif（复用实验8 分区码图，判分分区统计）",
+    "determinism_note": "本地验证固定 seed=42（scripts/gen_lab_fixtures.py temporal）；容差按该实现校准"
+  },
+  "assertions": [
+    {
+      "id": "K1_composite_statistics",
+      "artifact": "data/labs/_tmp/out/lab11/ndvi_composite_mean.tif",
+      "claim": "年内均值合成：全幅有效；常绿林区均值 ∈ [0.65, 0.85]，水体区 ∈ [-0.20, 0.00]，扰动地块均值介于林地与裸土之间（受采伐拉低）",
+      "tolerance": {
+        "forest_mean": [
+          0.65,
+          0.85
+        ],
+        "water_mean": [
+          -0.2,
+          0.0
+        ],
+        "valid_fraction": ">= 0.99"
+      }
+    },
+    {
+      "id": "K2_thematic_mask",
+      "artifact": "data/labs/_tmp/out/lab11/thematic_mask.tif",
+      "claim": "专题掩膜 UInt8 值域 {0,1}；Otsu 把年内均值直方图在『水体/低值』与『有植被覆盖』之间切开：掩膜=1（有植被覆盖）占比 ∈ [80%, 95%]（先验：森林 35% + 农田 50% + 扰动地块部分）；网格与源影像一致。这是制图分级选择的教学点：二值方案回答『哪里有植被覆盖』，不区分森林/农田——如需类别图要另选分级方案并在图例注明",
+      "tolerance": {
+        "values": [
+          0,
+          1
+        ],
+        "vegetated_fraction": [
+          0.8,
+          0.95
+        ]
+      }
+    },
+    {
+      "id": "K3_otsu_threshold_sanity",
+      "artifact": "rs:threshold_raster 步骤统计（thresholdUsed/maskedPixels/totalPixels）",
+      "claim": "Otsu 阈值落在水体负值与植被均值之间的谷部（先验 ≈ -0.1..0.2；容差 [-0.3, 0.3]），maskedPixels/totalPixels 与掩膜值域占比一致",
+      "tolerance": {
+        "threshold_used": [
+          -0.3,
+          0.3
+        ],
+        "masked_ratio_consistent": true
+      }
+    },
+    {
+      "id": "K4_mapspec_validation",
+      "artifact": "data/labs/mapspecs/lab11_thematic_map.mapspec.json",
+      "claim": "MapSpec v5 文档通过平台 validateMapSpec 零问题（envelope/几何/引用完整性）；preflight 无 MAP_MISSING_TITLE / MAP_MISSING_LEGEND / MAP_MISSING_SCALE_BAR / MAP_MISSING_NORTH_ARROW / MAP_MISSING_SOURCE_NOTE —— 合规五要素齐全",
+      "tolerance": {
+        "validate_problems": 0,
+        "preflight_missing_codes": []
+      }
+    },
+    {
+      "id": "K5_map_export",
+      "artifact": "data/labs/_tmp/out/lab11/map/ 下的 PNG（cartography:export 或等价 headless 导出）",
+      "claim": "导出 PNG 存在且页面为 A4 横向（297×210 mm @ 200 dpi ±5% 像素尺寸）；文件非空",
+      "tolerance": {
+        "pixel_size_at_200dpi": [
+          2330,
+          2342,
+          1652,
+          1660
+        ],
+        "file_size_bytes": ">= 10000"
+      },
+      "teaching_note": "导出走 cartography:export（显式受治理动作）；v5 output 块只声明、编译不自动导出"
+    }
+  ],
+  "dependencies_note": "平台级 test_mapspec 当前为红（READINESS.md:38，由 D10 负责修绿）。本实验断言自包含：K4/K5 用平台 validator/exporter 对本实验自己的文档出证据，不依赖 visual-cartography 全局用例；若 K4/K5 因平台回归失败，先对齐 D10。",
+  "pass_policy": "K1–K5 全部通过判满分；K4 是制图合规性的核心断言（五要素任一缺失即不合规）"
+}

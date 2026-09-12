@@ -535,6 +535,34 @@ target_include_directories(test_mapspec PRIVATE
 )
 sicnu_discover_tests(test_mapspec)
 
+# D3 lab content expansion track: lab-chain integrity tests (pipeline JSON ->
+# operator registry resolution, LabSpec artifact consistency, lab11 MapSpec
+# validate + compliance preflight + offscreen compile). Standalone target so
+# it stays green regardless of the visual-cartography aggregate's state.
+qt_add_executable(test_lab_chains
+  test_lab_chains.cpp
+)
+target_compile_definitions(test_lab_chains PRIVATE
+  SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_link_libraries(test_lab_chains PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+  sicnu_agent
+  sicnu_operators
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_lab_chains PRIVATE jsoncpp)
+endif()
+target_include_directories(test_lab_chains PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_lab_chains)
+
 # #35 — UI callers must not bypass Task Center; task views are projections.
 add_executable(test_ui_task_center_contract
   test_ui_task_center_contract.cpp
