@@ -1,0 +1,63 @@
+{
+ "schema": "exp.verification.ladder.v1",
+ "started_utc": "2026-09-12T00:26:07.727782+00:00",
+ "build_dir": "/home/kevin/projects/rs-studio/wt-contract-verification-9/build",
+ "host": {
+  "platform": "linux",
+  "cpus": 16
+ },
+ "lanes": {
+  "L0": {
+   "title": "compile-guards",
+   "items": [
+    {
+     "lane": "L0",
+     "label": "header_probes",
+     "name": "sicnu_header_probes",
+     "kind": "target",
+     "timeout_s": 600.0,
+     "status": "passed",
+     "detail": ""
+    }
+   ],
+   "status": "passed"
+  },
+  "L7": {
+   "title": "benchmarks",
+   "items": [
+    {
+     "lane": "L7",
+     "label": "quality7",
+     "name": "benchmark_quality7",
+     "kind": "bench",
+     "timeout_s": 600.0,
+     "status": "passed",
+     "elapsed_s": 7.6,
+     "detail": ""
+    },
+    {
+     "lane": "L7",
+     "label": "scale8",
+     "name": "benchmark_scale8",
+     "kind": "bench",
+     "timeout_s": 1800.0,
+     "status": "not-built",
+     "detail": "executable missing from build tree (target never compiled)"
+    },
+    {
+     "lane": "L7",
+     "label": "contract9",
+     "name": "benchmark_contract9",
+     "kind": "bench",
+     "timeout_s": 300.0,
+     "status": "passed",
+     "elapsed_s": 2.9,
+     "detail": ""
+    }
+   ],
+   "status": "passed"
+  }
+ },
+ "finished_utc": "2026-09-12T00:26:18.416050+00:00",
+ "overall": "passed"
+}

@@ -61,6 +61,14 @@ New product-code-free contract library (tooling/test side only):
 - Snapshot: data/contracts/contract_graph.snap.json — 824 nodes / 263 edges,
   byte-verified by test_contract_platform_9; regenerable via
   `contract_inventory --source-root . --out data/contracts/…`.
+- Ladder end-to-end (scripts/verification_ladder.py, resumable, honest
+  statuses; JSON in this directory):
+  - L2 contract-known: OVERALL PASSED — 7 pre-existing suites +
+    5 new contract suites, all passed (ladder_l2.json).
+  - L0 compile-guards: PASSED — 9 pre-existing + 7 new src/contracts header
+    probes (ladder_l0_l7.json).
+  - L7 benchmarks: contract9 PASSED (2.9 s); scale8 not-built (not run —
+    honest status, no gate).
 
 ## Adversarial review
 
