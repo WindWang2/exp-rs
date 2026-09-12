@@ -1227,6 +1227,7 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
     }
     sicnu::temporal::warmExecutionIdentityCache( catalogForWarm, params );
     long id = -1;
+    std::optional<PendingSubmissionFingerprint> pendingFingerprint;
     {
         QMutexLocker locker( &m_mutex );
         // Recheck under the lock: shutdown()'s finalization pass could have
@@ -1324,8 +1325,26 @@ long TaskCenter::enqueueTask( const QString &algorithmId,
             }
             return {};
         };
-        computeAndRecordSubmissionFingerprintLocked( id, resolver );
-
+        pendingFingerprint = prepareSubmissionFingerprintLocked( id, resolver );
+        if ( !pendingFingerprint )
+        {
+            // Fast path (no fingerprint — the default configuration): nothing
+            // to resolve, so the admission pass stays inside this same
+            // critical section and the ordering is unchanged.
+            processNextQueuedTasks();
+        }
+    }
+    if ( pendingFingerprint )
+    {
+        // Review P1 (hard): the input-identity collector can invoke the
+        // installed execution-identity resolver — a BLOCKING network probe —
+        // which must never run under m_mutex (it would stall every
+        // admission, progress and cancel for the whole scheduler). Resolve
+        // with no lock held; commit re-acquires the mutex only for the
+        // in-memory record, so the record still precedes the first
+        // admission pass exactly as before.
+        commitSubmissionFingerprint( std::move( *pendingFingerprint ) );
+        QMutexLocker locker( &m_mutex );
         processNextQueuedTasks();
     }
     flushPendingLaunches();
@@ -3183,6 +3202,10 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
     }
 
     long pipelineId = -1;
+    // Submission fingerprints prepared under the lock below; their
+    // input-identity resolution (potentially a blocking network probe) is
+    // committed AFTER the lock is released — see commitSubmissionFingerprint.
+    std::vector<PendingSubmissionFingerprint> pendingFingerprints;
     {
         QMutexLocker locker( &m_mutex );
         pipelineId = m_nextPipelineId++;
@@ -3316,7 +3339,8 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
                     upstream.declaredOutputPath = outIt.value();
                     return upstream;
                 };
-                computeAndRecordSubmissionFingerprintLocked( taskId, resolver );
+                if ( auto pending = prepareSubmissionFingerprintLocked( taskId, resolver ) )
+                    pendingFingerprints.push_back( std::move( *pending ) );
             }
 
             declaredOutputByStepId.insert( QString::fromStdString( stepId ),
@@ -3362,6 +3386,28 @@ long TaskCenter::submitPipeline( const sicnu::workflow::WorkflowDefinition &def,
         }
 
         m_pipelines[pipelineId] = pipeInfo;
+        if ( pendingFingerprints.empty() )
+        {
+            // Fast path (no fingerprint — the default configuration): the
+            // admission pass stays inside this same critical section and the
+            // ordering is unchanged.
+            processNextQueuedTasks();
+        }
+    }
+    if ( !pendingFingerprints.empty() )
+    {
+        // Review P1 (hard): input-identity resolution can invoke the
+        // installed execution-identity resolver — a BLOCKING network probe —
+        // which must never run under m_mutex (it would stall every
+        // admission, progress and cancel for the whole scheduler). Commit
+        // with no lock held, in submission (topological) order so each
+        // step's chained producer fingerprint is already recorded when its
+        // consumer commits; commit re-acquires the mutex only for the
+        // in-memory record, which still precedes the first admission pass
+        // exactly as before.
+        for ( auto &pending : pendingFingerprints )
+            commitSubmissionFingerprint( std::move( pending ) );
+        QMutexLocker locker( &m_mutex );
         processNextQueuedTasks();
     }
     flushPendingLaunches();
@@ -3495,15 +3541,16 @@ void TaskCenter::setCatalog( sicnu::data::DataManager *catalog )
     m_catalog = catalog;
 }
 
-void TaskCenter::computeAndRecordSubmissionFingerprintLocked( long taskId,
-                                                              const UpstreamResolver &resolver )
+std::optional<TaskCenter::PendingSubmissionFingerprint>
+TaskCenter::prepareSubmissionFingerprintLocked( long taskId,
+                                                const UpstreamResolver &resolver )
 {
     // Disabled cache ⇒ no fingerprint at all (also skips the operator
     // lookup/hash work for every submission in default configurations).
     if ( !sicnu::data::ExecutionResultCache::instance().isEnabled() )
-        return;
+        return std::nullopt;
     if ( !m_catalog )
-        return;
+        return std::nullopt;
     // The catalog is single-thread-affine by contract (its mutators enforce
     // it); identity resolution from a foreign thread would race concurrent
     // mutations — conservatively refuse to fingerprint there. Computing at
@@ -3511,11 +3558,11 @@ void TaskCenter::computeAndRecordSubmissionFingerprintLocked( long taskId,
     // thread, so downstream steps admitted later on JobEngine worker threads
     // reuse the recorded fingerprint without any catalog access (#726).
     if ( QThread::currentThread() != m_catalog->thread() )
-        return;
+        return std::nullopt;
 
     const auto it = m_tasks.constFind( taskId );
     if ( it == m_tasks.constEnd() )
-        return;
+        return std::nullopt;
     const AlgorithmTaskInfo &info = it.value();
 
     // Only registered RSOperators carry the schema/metadata contract needed
@@ -3524,7 +3571,7 @@ void TaskCenter::computeAndRecordSubmissionFingerprintLocked( long taskId,
     const auto op = sicnu::operators::RSOperatorRegistry::instance().create(
         info.algorithmId.toStdString() );
     if ( !op )
-        return;
+        return std::nullopt;
 
     // Determinism gate — two equivalent opt-in surfaces:
     //   1. metadata()["deterministic"] == true (explicit, e.g. temporal ops);
@@ -3538,7 +3585,7 @@ void TaskCenter::computeAndRecordSubmissionFingerprintLocked( long taskId,
         ( meta.isMember( "deterministic" ) && meta["deterministic"].asBool() )
         || op->determinismGrade() == "bit-exact";
     if ( !deterministicOptIn )
-        return;
+        return std::nullopt;
 
     // Implementation/version identity (#726): the operator's schema document
     // PLUS the explicit execution-cache contract version and the platform
@@ -3561,11 +3608,14 @@ void TaskCenter::computeAndRecordSubmissionFingerprintLocked( long taskId,
     // by KEY — never by string-value equality, which collided
     // {input:x,output:x} with {input:y,output:y} and made the fingerprint
     // non-injective. A destination value under any OTHER key stays hashed.
-    QVariantMap resolvedAll;   // full statically-resolved map (dispatch verification)
-    QJsonObject hashedParams;  // output-vocabulary keys excluded (identity)
+    PendingSubmissionFingerprint pending;
+    pending.taskId = taskId;
+    pending.catalog = m_catalog;
+    pending.algorithmId = info.algorithmId;
+    pending.implementationHash = versionHash;
+    pending.parameterMap = info.parameterMap;
     QString currentParamKey;
-    QMap<QString, long> chainedProducers; // param key → upstream producer task
-    auto resolveRef = [this, taskId, &resolver, &chainedProducers, &currentParamKey](
+    auto resolveRef = [this, taskId, &resolver, &pending, &currentParamKey](
                           const sicnu::workflow::PlaceholderRef &ref ) -> std::string {
         if ( resolver )
         {
@@ -3573,7 +3623,7 @@ void TaskCenter::computeAndRecordSubmissionFingerprintLocked( long taskId,
             if ( upstream.producerTaskId > 0 && !upstream.declaredOutputPath.isEmpty() )
             {
                 if ( !currentParamKey.isEmpty() )
-                    chainedProducers.insert( currentParamKey, upstream.producerTaskId );
+                    pending.chainedProducers.insert( currentParamKey, upstream.producerTaskId );
                 return upstream.declaredOutputPath.toStdString();
             }
         }
@@ -3583,21 +3633,39 @@ void TaskCenter::computeAndRecordSubmissionFingerprintLocked( long taskId,
     {
         currentParamKey = pIt.key();
         const QVariant substituted = substituteVariantRecursive( pIt.value(), resolveRef );
-        resolvedAll.insert( pIt.key(), substituted );
+        pending.resolvedAll.insert( pIt.key(), substituted );
         if ( !sicnu::data::isOutputVocabularyKey( pIt.key() ) )
-            hashedParams.insert( pIt.key(), QJsonValue::fromVariant( substituted ) );
+            pending.hashedParams.insert( pIt.key(), QJsonValue::fromVariant( substituted ) );
     }
+    // Revision-aware input identity (#726): chained producer edges are
+    // excluded by PARAMETER KEY (their identity is the producer fingerprint
+    // appended by the commit phase, not the file's registration revision);
+    // a literal key that merely carries the same path stays scanned and
+    // revision-stamped.
+    for ( auto cIt = pending.chainedProducers.constBegin();
+          cIt != pending.chainedProducers.constEnd(); ++cIt )
+        pending.chainedKeys.append( cIt.key() );
+    return pending;
+}
 
-    // Revision-aware input identity (#726): registered local/remote assets +
-    // inline scenes + workspace-bound temporal collections. ANY unidentifiable
-    // input ⇒ not cacheable — the conservative verdict that keeps hits honest.
-    // Chained producer edges are excluded by PARAMETER KEY (their identity is
-    // the producer fingerprint added below, not the file's registration
-    // revision); a literal key that merely carries the same path stays
-    // scanned and revision-stamped.
-    QStringList chainedKeys;
-    for ( auto cIt = chainedProducers.constBegin(); cIt != chainedProducers.constEnd(); ++cIt )
-        chainedKeys.append( cIt.key() );
+void TaskCenter::commitSubmissionFingerprint( PendingSubmissionFingerprint pending )
+{
+    // Cache disabled since prepare ⇒ nothing to record (and no reason to
+    // resolve any input identity).
+    if ( !sicnu::data::ExecutionResultCache::instance().isEnabled() )
+        return;
+
+    // Review P1 (hard): the input-identity collector is the only stage that
+    // can consult the installed execution-identity resolver — a BLOCKING
+    // network probe for unregistered remote inputs (5s budget per input on
+    // the shipped bridge). It runs HERE with NO scheduler mutex held, so
+    // admission, progress and cancel stay live for the whole scheduler;
+    // catalog access stays on the submitting thread, which prepare's
+    // affinity gate pinned to the catalog thread. Chained producer
+    // fingerprint appends (below) must wait for the record phase: at this
+    // point an in-pipeline producer's fingerprint may itself still be
+    // pending, so they are resolved under the re-acquired mutex in
+    // submission (topological) order.
     QVector<sicnu::data::TaggedDerivationInput> inputs;
     QString reason;
     // Registered-input stat binding (issue #749): captured at submission so
@@ -3605,11 +3673,25 @@ void TaskCenter::computeAndRecordSubmissionFingerprintLocked( long taskId,
     QMap<QString, qint64> registeredInputSizes;
     QMap<QString, qint64> registeredInputMsecs;
     if ( !sicnu::temporal::fingerprintInputsForOperatorParams(
-             m_catalog, resolvedAll, &inputs, &reason, chainedKeys,
+             pending.catalog, pending.resolvedAll, &inputs, &reason, pending.chainedKeys,
              &registeredInputSizes, &registeredInputMsecs ) )
     {
         return;
     }
+
+    // Record phase: the only section that re-acquires m_mutex, and it is
+    // pure in-memory bookkeeping (no catalog access, no resolver consult).
+    QMutexLocker locker( &m_mutex );
+    // Staleness gate for the prepare→commit window (tiny race accepted by
+    // design): the task may have been removed, reached a terminal state, or
+    // another thread's admission pass may already have staged it
+    // (placeholder-substituting its parameters). Either way the snapshot no
+    // longer describes this execution ⇒ no fingerprint (conservative miss;
+    // dispatch verification would fail closed identically).
+    const auto taskIt = m_tasks.constFind( pending.taskId );
+    if ( taskIt == m_tasks.constEnd() || taskIt->parameterMap != pending.parameterMap
+         || isTerminalStatus( taskIt->status ) )
+        return;
 
     // Chained in-pipeline producer identity: an input produced by an upstream
     // step of the same submission is keyed on the producer's own execution
@@ -3619,7 +3701,8 @@ void TaskCenter::computeAndRecordSubmissionFingerprintLocked( long taskId,
     // makes "same producer fingerprint" ⇒ "same output bytes", so the chained
     // identity is as strong as a revision stamp. An upstream step without a
     // valid fingerprint fails this step closed.
-    for ( auto cIt = chainedProducers.constBegin(); cIt != chainedProducers.constEnd(); ++cIt )
+    for ( auto cIt = pending.chainedProducers.constBegin();
+          cIt != pending.chainedProducers.constEnd(); ++cIt )
     {
         const auto producerFp = m_taskFingerprints.constFind( cIt.value() );
         if ( producerFp == m_taskFingerprints.constEnd() || !producerFp->isValid() )
@@ -3633,22 +3716,23 @@ void TaskCenter::computeAndRecordSubmissionFingerprintLocked( long taskId,
     }
 
     const sicnu::data::ExecutionFingerprint fp =
-        sicnu::data::makeExecutionFingerprintV2( info.algorithmId, versionHash,
-                                                 hashedParams, inputs );
+        sicnu::data::makeExecutionFingerprintV2( pending.algorithmId, pending.implementationHash,
+                                                 pending.hashedParams, inputs );
 
     if ( fp.isValid() )
     {
-        m_taskFingerprints[taskId] = fp;
-        m_taskFingerprintParams[taskId] = resolvedAll;
-        m_taskRegisteredInputStats[taskId] =
+        m_taskFingerprints[pending.taskId] = fp;
+        m_taskFingerprintParams[pending.taskId] = pending.resolvedAll;
+        m_taskRegisteredInputStats[pending.taskId] =
             qMakePair( registeredInputSizes, registeredInputMsecs );
         QVector<ChainedEdge> edges;
-        for ( auto cIt = chainedProducers.constBegin(); cIt != chainedProducers.constEnd(); ++cIt )
+        for ( auto cIt = pending.chainedProducers.constBegin();
+              cIt != pending.chainedProducers.constEnd(); ++cIt )
         {
             const auto producerFp = m_taskFingerprints.constFind( cIt.value() );
             if ( producerFp == m_taskFingerprints.constEnd() || !producerFp->isValid() )
                 continue;
-            const QVariant value = resolvedAll.value( cIt.key() );
+            const QVariant value = pending.resolvedAll.value( cIt.key() );
             if ( value.typeId() != QMetaType::QString )
                 continue;
             ChainedEdge edge;
@@ -3658,14 +3742,14 @@ void TaskCenter::computeAndRecordSubmissionFingerprintLocked( long taskId,
             edge.producerFingerprintHex = producerFp->toHex();
             edges.append( edge );
         }
-        m_taskChainedEdges[taskId] = edges;
+        m_taskChainedEdges[pending.taskId] = edges;
     }
     else
     {
-        m_taskFingerprints.remove( taskId );
-        m_taskFingerprintParams.remove( taskId );
-        m_taskChainedEdges.remove( taskId );
-        m_taskRegisteredInputStats.remove( taskId );
+        m_taskFingerprints.remove( pending.taskId );
+        m_taskFingerprintParams.remove( pending.taskId );
+        m_taskChainedEdges.remove( pending.taskId );
+        m_taskRegisteredInputStats.remove( pending.taskId );
     }
 }
 
