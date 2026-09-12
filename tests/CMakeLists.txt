@@ -2173,6 +2173,33 @@ target_include_directories(test_mlops8_e2e PRIVATE
 )
 sicnu_discover_tests(test_mlops8_e2e TIMEOUT 600)
 
+# D5 Lab Report & Lineage: sicnu.labreport.v1 schema/writers plus the desktop
+# lab auto-recorder end-to-end (real tracked pipelines → ExperimentStore →
+# report). Same link set as test_mlops8_e2e (bridge needs workflow + jobs).
+add_executable(test_lab_report test_lab_report.cpp)
+target_link_libraries(test_lab_report PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  SQLite::SQLite3
+  sicnu_workflow
+  sicnu_workflow_runtime
+  sicnu_data
+  sicnu_processing
+  sicnu_task_center
+  sicnu_jobs
+  sicnu_operators
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_lab_report PRIVATE jsoncpp)
+endif()
+target_include_directories(test_lab_report PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_lab_report TIMEOUT 600)
+
 
 # Phase C fused-chain equivalence (links through sicnu_task_center which
 # carries fused_chain.cpp; needs the standard set only).

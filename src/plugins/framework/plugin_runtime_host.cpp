@@ -59,7 +59,7 @@ Json::Value PluginRuntimeHost::describePluginUiSchema( const std::string &plugin
     // call. The raw pointer is safe: the unique_ptr is only ever ASSIGNED
     // in bootstrap (never reset), so it cannot dangle.
     mMutex.lock();
-    auto *runtime = mHostProcessRuntime;
+    auto *runtime = mHostProcessRuntime.get();
     mMutex.unlock();
     if ( runtime )
     {
@@ -79,7 +79,7 @@ Json::Value PluginRuntimeHost::invokePluginUi( const std::string &pluginId,
     // holding mMutex — the invoke blocks up to timeoutMs, and a wedged
     // plugin must not stall the GUI thread's next describe/bootstrap call.
     mMutex.lock();
-    auto *runtime = mHostProcessRuntime;
+    auto *runtime = mHostProcessRuntime.get();
     mMutex.unlock();
     if ( runtime )
     {
