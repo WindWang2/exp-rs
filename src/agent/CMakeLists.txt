@@ -107,6 +107,8 @@ add_library(sicnu_agent SHARED
   cartography/composition.h
   cartography/design_tokens.cpp
   cartography/design_tokens.h
+  cartography/export.cpp
+  cartography/export.h
   cartography/quality.cpp
   cartography/quality.h
   cartography/registry.cpp

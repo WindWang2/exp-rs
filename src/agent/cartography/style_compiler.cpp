@@ -698,6 +698,15 @@ bool applyStyleSpecToLayer( QgsMapLayer *layer, const Json::Value &styleSpecIn, 
   for ( const std::string &problem : tokenProblems )
     problems << QString::fromStdString( problem );
 
+  // Platform 9.0 honesty: a validated bivariate declaration is contract
+  // knowledge, not a renderer — the applied symbology stays single-axis and
+  // the apply report must say so rather than render silently single-axis.
+  if ( styleSpec.isMember( "bivariate" ) && styleSpec["bivariate"].isObject() )
+    problems << QStringLiteral(
+      "bivariate declared but not renderable in this platform version; the "
+      "applied renderer is single-axis (bivariate ships as contract-gated "
+      "knowledge only)" );
+
   bool appliedAny = false;
   if ( styleSpec.isMember( "raster" ) && styleSpec["raster"].isObject() )
   {
@@ -716,6 +725,12 @@ bool applyStyleSpecToLayer( QgsMapLayer *layer, const Json::Value &styleSpecIn, 
         applyRasterNodata( raster, styleSpec["raster"], styleSpec["raster"]["nodata"], applied,
                            problems );
       appliedAny = rasterApplied || appliedAny;
+      // Platform 9.0: raster scale-dependent visibility — the same
+      // QgsMapLayer scale contract the vector `scaledenominator` uses,
+      // declared on the raster block as `scale_ranges: {min?, max?}`.
+      if ( styleSpec["raster"].isMember( "scale_ranges" ) &&
+           styleSpec["raster"]["scale_ranges"].isObject() )
+        applyScaleVisibility( raster, styleSpec["raster"]["scale_ranges"] );
     }
     else
     {

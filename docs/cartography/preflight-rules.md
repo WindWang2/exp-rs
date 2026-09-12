@@ -129,3 +129,21 @@ ledger, instead of silently producing off-page geometry that only
 `MAP_OFF_PAGE` would find later without provenance. A permanent refusal
 like this cannot appear in the bounded unsat cores: no subset removal of
 other constraints changes the page bound that caused it.
+
+## Platform 9.0 additions
+
+| Code | Severity | Repairable | Meaning |
+|---|---|---|---|
+| `MAP_CHART_OVER_MAP` | warning | yes | a chart or colorbar (opaque picture item) overlaps a map frame without declared intent and would occlude map content; repair first moves the item to a free grid slot, and only when no free slot exists stamps `overlay_on` (explicit declared coverage) instead of leaving the overlap silent |
+| `MAP_DUAL_AXIS_UNSUPPORTED` | warning | no | the chart declares `chart.dual_axis: true`, but the chart renderers draw a single value axis — restructure as two charts or a table instead of relying on a capability that does not exist |
+
+Repair reporting also gained a **decision ledger**: `cartography:repair`
+records per pass what each repairable finding became — `applied` (the
+finding no longer appears for its item in the post-repair preflight) or
+`still_reported` (the repair did not clear it; the agent decides the next
+step). The ledger is surfaced in the `repair_ledger` field of the tool
+response.
+
+The report-CRS obligation (`MAP_MISSING_CRS_NOTE`) now also accepts a
+declared map-frame `crs` field (`"EPSG:4326"` or equivalent) in addition to
+CRS/EPSG/坐标 mentions in source notes.

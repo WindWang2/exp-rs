@@ -164,6 +164,26 @@ void checkRaster( const Json::Value &raster, std::vector<std::string> &problems 
     if ( resampling != "nearest" && resampling != "bilinear" && resampling != "cubic" )
       problems.push_back( "raster.resampling must be nearest|bilinear|cubic" );
   }
+  // Platform 9.0: scale-dependent raster visibility (same shape and scale
+  // semantics as vector.scaledenominator; min/max are 1:scale denominators).
+  if ( raster.isMember( "scale_ranges" ) )
+  {
+    const Json::Value &scale = raster["scale_ranges"];
+    if ( !scale.isObject() )
+      problems.push_back( "raster.scale_ranges must be an object" );
+    else
+    {
+      for ( const char *field : { "min", "max" } )
+        if ( scale.isMember( field ) &&
+             ( !scale[field].isNumeric() || scale[field].asDouble() <= 0 ) )
+          problems.push_back( std::string( "raster.scale_ranges." ) + field +
+                              " must be a positive scale denominator" );
+      if ( scale.isMember( "min" ) && scale.isMember( "max" ) && scale["min"].isNumeric() &&
+           scale["max"].isNumeric() && scale["min"].asDouble() <= scale["max"].asDouble() )
+        problems.push_back( "raster.scale_ranges.min must exceed max (1:scale "
+                            "denominators shrink as the map zooms in)" );
+    }
+  }
   if ( raster.isMember( "stretch" ) )
     checkStretch( raster["stretch"], problems );
   if ( raster.isMember( "classification" ) )
@@ -726,6 +746,60 @@ std::vector<std::string> validateStyleSemantics( const Json::Value &styleSpec )
         problems.push_back( id + ": uncertainty.level must be a number in [0, 1]" );
       if ( uncertainty.isMember( "field" ) && !uncertainty["field"].isString() )
         problems.push_back( id + ": uncertainty.field must be a string" );
+    }
+  }
+
+  // Platform 9.0: bivariate symbology is declaration-gated. A style may
+  // declare `bivariate` only with an EXPLICIT semantic contract naming both
+  // axes' fields and why their combination is meaningful — a renderer is
+  // never applied from a bivariate declaration that lacks the contract, and
+  // the declaration without it is invalid rather than silently ignored.
+  if ( styleSpec.isMember( "bivariate" ) )
+  {
+    const Json::Value &bivariate = styleSpec["bivariate"];
+    if ( !bivariate.isObject() )
+    {
+      problems.push_back( id + ": bivariate must be an object" );
+    }
+    else
+    {
+      const Json::Value &contract = bivariate.get( "contract", Json::Value() );
+      if ( !contract.isString() || contract.asString().size() < 12 )
+        problems.push_back( id + ": bivariate.contract must state the semantic contract "
+                                 "of the combination (at least 12 characters)" );
+      for ( const char *axis : { "x", "y" } )
+      {
+        if ( !bivariate.isMember( axis ) || !bivariate[axis].isObject() )
+        {
+          problems.push_back( id + std::string( ": bivariate." ) + axis +
+                              " must be an object declaring field or classes" );
+          continue;
+        }
+        const Json::Value &axisBlock = bivariate[axis];
+        const bool hasField =
+          axisBlock.isMember( "field" ) && axisBlock["field"].isString() &&
+          !axisBlock["field"].asString().empty();
+        const bool hasClasses =
+          axisBlock.isMember( "classes" ) && axisBlock["classes"].isArray() &&
+          !axisBlock["classes"].empty();
+        if ( !hasField && !hasClasses )
+          problems.push_back( id + std::string( ": bivariate." ) + axis +
+                              " needs a field or a classes array" );
+      }
+      if ( bivariate.isMember( "x" ) && bivariate.isMember( "y" ) && bivariate["x"].isObject() &&
+           bivariate["y"].isObject() )
+      {
+        const auto fieldOf = []( const Json::Value &axis ) {
+          return axis.isMember( "field" ) && axis["field"].isString()
+                   ? axis["field"].asString()
+                   : std::string();
+        };
+        const std::string xField = fieldOf( bivariate["x"] );
+        const std::string yField = fieldOf( bivariate["y"] );
+        if ( !xField.empty() && xField == yField )
+          problems.push_back( id + ": bivariate axes must reference different fields "
+                                   "(a field against itself is not bivariate)" );
+      }
     }
   }
   return problems;

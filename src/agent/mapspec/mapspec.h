@@ -124,6 +124,14 @@ bool removeMapSpecItem( Json::Value &spec, const std::string &id );
 /// problem per entry; empty means valid.
 std::vector<std::string> validateMapSpec( const Json::Value &spec );
 
+/// Platform 9.0: materializes `pages[k].furniture` as provenance clones
+/// (`<id>-p<page>`, `page`, `master_of`) appended next to the originals, so
+/// clones flow through validation, solving and compilation exactly like
+/// hand-declared furniture. Unresolvable ids and id collisions are left for
+/// validateMapSpec to report. Pure function of the input document except
+/// for the in-place append on `spec`.
+void expandMasterFurniture( Json::Value &spec );
+
 /// Migrates older documents to kMapSpecCurrentVersion. Returns the upgraded
 /// document; unknown/malformed input returns it unchanged.
 Json::Value upgradeMapSpec( const Json::Value &doc );

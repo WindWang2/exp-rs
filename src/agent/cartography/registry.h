@@ -109,6 +109,14 @@ Json::Value searchTemplates( const Json::Value &templates, const TemplateQuery &
 /// {id, description(truncated), page, medium, purpose, tasks, slot_roles}.
 Json::Value compactTemplateSummary( const Json::Value &descriptor );
 
+/// Platform 9.0: bounded semantic diff of two RESOLVED template
+/// descriptors. Slots are compared by role (added/removed/changed);
+/// top-level members by JSON member (added/removed/changed, with the
+/// stringified before/after values truncated for the token budget). The
+/// output carries a `truncated` flag when the delta list hit its cap —
+/// the diff is evidence for the agent, never a full-document dump.
+Json::Value diffTemplates( const Json::Value &before, const Json::Value &after );
+
 class ComponentRegistry
 {
   public:
