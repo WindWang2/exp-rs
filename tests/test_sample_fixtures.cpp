@@ -740,6 +740,34 @@ TEST_CASE( "CLI: --verify detects drift", "[foundry][cli]" )
     CHECK( runCli( { "--verify", "--out=" + dir.str() } ) == 4 );
 }
 
+TEST_CASE( "verifyDirectory flags a manifest edited after generation",
+           "[foundry][manifest]" )
+{
+    TempDir dir;
+    Options options;
+    options.out_dir = dir.str();
+    options.seed = 42;
+    GenerateResult result;
+    REQUIRE( generate( options, &result ).ok );
+
+    // In-place edit of one manifest field (content untouched): the recorded
+    // self_fingerprint no longer matches the edited payload.
+    const fs::path manifest_path = dir.path / "manifest.json";
+    std::string bytes = readBinary( manifest_path );
+    const std::size_t pos = bytes.find( "\"seed\" : 42" ); // jsoncpp "k : v" style
+    REQUIRE( pos != std::string::npos );
+    bytes.replace( pos, 11, "\"seed\" : 43" );
+    {
+        std::ofstream out( manifest_path, std::ios::binary | std::ios::trunc );
+        out << bytes;
+    }
+    VerifyReport report;
+    REQUIRE( verifyDirectory( dir.str(), &report ).ok );
+    REQUIRE( report.problems.size() == 1 );
+    CHECK( report.problems[0] ==
+           "self_fingerprint mismatch (manifest was edited after generation)" );
+}
+
 // ---------------------------------------------------------------------------
 // 5. stress profile smoke
 // ---------------------------------------------------------------------------

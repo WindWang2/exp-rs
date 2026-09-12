@@ -1,8 +1,10 @@
 # Lab Sample Data — `data/samples/`（本科实验样本数据）
 
 Generated, deterministic sample assets for the undergraduate labs in
-`docs/labs/`. Everything in `data/samples/` is **generated, never committed** —
-one command rebuilds it byte-identically (see [Determinism](#determinism)).
+`docs/labs/`. The rasters/vectors in `data/samples/` are **generated, never
+committed** — one command rebuilds them byte-identically (see
+[Determinism](#determinism)). Only the manifest schema template is tracked;
+a release manager MAY additionally commit a blessed `manifest.json`.
 
 ```sh
 cmake --build build --target sicnu_generate_samples
@@ -34,7 +36,7 @@ and the optical synthesis:
 
 | id | name | signature behaviour (docs/labs table) |
 |----|------|----------------------------------------|
-| 1 | water | low reflectance everywhere, NIR lowest |
+| 1 | water | low reflectance everywhere, SWIR2 lowest |
 | 2 | vegetation | red low, NIR high (red edge) |
 | 3 | urban | medium everywhere |
 | 4 | bare soil | rises with wavelength |
@@ -47,8 +49,8 @@ are **seed-independent constants** (lab grid: water 9728, vegetation 32842,
 urban 7854, bare 8242, forest 4814, shadow 2056).
 
 The ROI polygons are *derived from the class map at generation time* by a
-deterministic scan (first all-class rectangle ≥ W/16 per side, 2 px inset), so
-training ROIs always sit on their class.
+deterministic scan (first all-class rectangle with both sides ≥ max(12, W/16)
+pixels, 2 px inset), so training ROIs always sit on their class.
 
 ## DEM surface (closed form)
 
@@ -74,8 +76,10 @@ the tolerance policy for automatic grading is D4's concern.
 
 `change_before.tif` = `0.40 + 0.40·(nx−0.5)(ny−0.5) + noise`;
 `change_after.tif` replaces the deforestation disc `(nx−0.4)²+(ny−0.5)² < 0.03`
-with `0.15 + 0.03·(nx−0.4) + noise`. `change_truth.tif` is 1 inside the disc,
-0 outside (lab grid: 6180 changed pixels).
+with `0.15 + 0.03·(nx−0.4) + noise`, and adds a small tilt
+`+0.01·(2nx−1)` outside the disc (stable ground is not pixel-identical to
+before — a threshold lab must not be trivially zero). `change_truth.tif` is 1
+inside the disc, 0 outside (lab grid: 6180 changed pixels).
 
 ## Metadata contract
 

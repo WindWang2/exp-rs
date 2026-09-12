@@ -1,8 +1,10 @@
 # Lab Sample Data Foundry (goal D1) — deterministic sample-data generator for
-# docs/labs. Qt-free by design: only GDAL and jsoncpp (both REQUIRED at the
-# root), mirroring the src/geospatial leaf policy, so this target configures
-# and builds on every lane (Ninja/MSVC/Make, configure_wb7.cmd) without
-# pulling the QGIS stack, and ships as a standalone binary (D7 bundle).
+# docs/labs. Qt-free by design: only GDAL and jsoncpp (both available
+# unconditionally at the root — GDAL via find_package REQUIRED, jsoncpp via
+# the canonical target normalization), mirroring the src/geospatial leaf
+# policy, so this target configures and builds on every lane (Ninja/MSVC/Make,
+# configure_wb7.cmd) without pulling the QGIS stack, and ships as a standalone
+# binary (D7 bundle).
 #
 # FP contraction is disabled for the synth kernels: the foundry's
 # determinism contract (tools/sample_foundry.h) relies on exactly-rounded
