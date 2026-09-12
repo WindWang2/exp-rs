@@ -49,6 +49,12 @@ data/*
 !data/benchmarks/**
 !data/pipelines/
 !data/pipelines/**
+# LabSpec lab definitions are small tracked text: the single source of truth
+# for guided workflows, generated docs and (D4/D7) auto-grading.
+!data/labs/
+!data/labs/**
+# Lab step outputs (guided runs resolve outputs/... to /output/labs/<labId>/).
+/output/
 # Harness 4.0 scientific recipes are tracked metadata, not local data.
 !data/agent/
 !data/agent/**
@@ -92,6 +98,10 @@ vendor/
 !.planning/cartography-platform-7/
 !.planning/dataset-experiment-7/
 !.planning/geospatial-data-fabric-8/
+# LabSpec track planning notes (markdown only; logs stay local).
+!.planning/lab-spec-data-driven/
+.planning/lab-spec-data-driven/*
+!.planning/lab-spec-data-driven/*.md
 !.planning/scientific-processing-8/
 !.planning/scientific-algorithms-9/
 !.planning/plugin-platform-8/

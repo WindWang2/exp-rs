@@ -1,0 +1,45 @@
+{
+  "spec_version": 1,
+  "id": "lab10_mosaic",
+  "title": "Image Mosaic",
+  "title_zh": "影像镶嵌",
+  "objective": "理解影像镶嵌的流程与关键约束：把多景影像拼合成一幅无缝覆盖的整图，注意坐标系统一致性、色彩平衡与接缝线问题。",
+  "prerequisites": [
+    {
+      "path": "data/samples/change_before.tif",
+      "note": "参与镶嵌的影像一（教学演示）。"
+    },
+    {
+      "path": "data/samples/change_after.tif",
+      "note": "参与镶嵌的影像二（教学演示）。"
+    }
+  ],
+  "steps": [
+    {
+      "title": "Understanding Mosaic",
+      "title_zh": "理解镶嵌概念",
+      "description_zh": "阅读并理解：镶嵌把相邻或同区多景影像拼合为一幅连续影像。关键约束与问题是：统一的坐标参考系统、重叠区的色彩平衡、接缝线（seamline）的放置。",
+      "teaching_note": "镶嵌前通常需要将各景重投影到同一 CRS 并做相对辐射归一化，否则接缝处会出现明显色差。",
+      "completion_hint": "能列出镶嵌的三个关键问题。"
+    },
+    {
+      "title": "Run Mosaic",
+      "title_zh": "执行镶嵌",
+      "description_zh": "执行 rs:mosaic 算子，把 change_before.tif 与 change_after.tif 两景影像拼合输出。注意：所有输入影像必须具有相同的坐标参考系统。",
+      "operator_id": "rs:mosaic",
+      "params": {
+        "inputs": [
+          "data/samples/change_before.tif",
+          "data/samples/change_after.tif"
+        ],
+        "output": "outputs/lab10_mosaic.tif"
+      },
+      "completion_hint": "输出为覆盖两景范围的拼合影像。"
+    }
+  ],
+  "thinking_questions": [
+    "若两景影像 CRS 不同，直接镶嵌会得到什么结果？应如何预处理？",
+    "接缝线应如何选取才能最小化视觉突兀？",
+    "重叠区直方图匹配为什么能缓解色差？"
+  ]
+}

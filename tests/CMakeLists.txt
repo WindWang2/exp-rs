@@ -5254,19 +5254,32 @@ target_include_directories(test_histogram_stretch_widget PRIVATE
 set_target_properties(test_histogram_stretch_widget PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_histogram_stretch_widget)
 
-# Guided Workflow Widget tests
-add_executable(test_guided_workflow_widget test_guided_workflow_widget.cpp)
+# Guided Workflow Widget tests — data layer of the widget (LabSpec loading,
+# step model, param path resolution). Compiles the loader directly so the
+# target stays Qt-only (no app shell, no processing registry).
+add_executable(test_guided_workflow_widget test_guided_workflow_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp
+)
 target_link_libraries(test_guided_workflow_widget PRIVATE
   Catch2::Catch2WithMain
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  jsoncpp
 )
 target_include_directories(test_guided_workflow_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_guided_workflow_widget)
+
+# LabSpec drift guards: shipped labs vs the Processing Registry (operator ids,
+# param schemas, grading refs, generated docs). Full processing stack needed.
+sicnu_add_test(test_labspec)
+target_sources(test_labspec PRIVATE
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp
+)
 
 # STAC Client tests
 add_executable(test_stac_client

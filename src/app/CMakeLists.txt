@@ -202,6 +202,8 @@ add_executable(sicnu_geo_rs
     widgets/crs_selector.cpp
     widgets/progress_dialog.cpp
     widgets/comparison_widget.cpp
+    widgets/lab_spec_loader.cpp
+    widgets/lab_spec_loader.h
     widgets/guided_workflow_widget.cpp
     widgets/rs_empty_state_widget.cpp
     panels/data_manager_panel.cpp
