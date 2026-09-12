@@ -4,7 +4,7 @@
 
 ## 实验数据
 
-所有实验数据位于 `data/samples/` 目录：
+所有实验数据位于 `data/samples/` 目录（本地生成，不入库）：
 
 | 文件 | 说明 | 用途 |
 |------|------|------|
@@ -13,6 +13,17 @@
 | `change_before.tif` | 变化前影像 | 变化检测 |
 | `change_after.tif` | 变化后影像 | 变化检测 |
 | `training_samples.shp` | 训练样本ROI | 监督分类 |
+
+**生成方式**：样本数据由确定性生成器 `sicnu_generate_samples` 一键生成
+（每个产品附带真值伴生层与 SHA-256 清单，可离线分发）：
+
+```sh
+cmake --build build --target sicnu_generate_samples
+scripts/gen_samples.sh          # 生成到 data/samples/ 并校验清单
+```
+
+详见 `docs/datasets/lab-samples.md`（波段角色、真值约定、确定性契约、
+`--profile=lab|stress`、`--seed`、`--spec` 与 `--verify`）。
 
 ## 实验列表
 
