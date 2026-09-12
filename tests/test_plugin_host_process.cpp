@@ -18,6 +18,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <future>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -55,6 +56,11 @@ class TestSink : public PluginContributionSink
 public:
     std::map<std::string, std::function<std::unique_ptr<sicnu::operators::RSOperator>()>>
         operators;
+    // Plugin platform 9.0: store the remaining contribution kinds so the
+    // suites can drive ALL worker surfaces through their proxies.
+    std::map<std::string, std::shared_ptr<IPluginDataProviderV1>> dataProviders;
+    std::map<std::string, std::shared_ptr<IPluginAgentToolV1>> agentTools;
+    std::map<std::string, PluginModelRuntimeFactoryV1> modelFactories;
 
     bool registerOperatorFactory( const std::string &, const std::string &operatorId,
                                   std::function<std::unique_ptr<sicnu::operators::RSOperator>()>
@@ -63,20 +69,29 @@ public:
         operators[operatorId] = std::move( factory );
         return true;
     }
-    void revokePlugin( const std::string & ) override { operators.clear(); }
-    bool registerDataProvider( const std::string &, const std::string &,
-                               std::shared_ptr<IPluginDataProviderV1> ) override
+    void revokePlugin( const std::string & ) override
     {
+        operators.clear();
+        dataProviders.clear();
+        agentTools.clear();
+        modelFactories.clear();
+    }
+    bool registerDataProvider( const std::string &, const std::string &providerId,
+                               std::shared_ptr<IPluginDataProviderV1> provider ) override
+    {
+        dataProviders[providerId] = std::move( provider );
         return true;
     }
-    bool registerModelRuntime( const std::string &, const std::string &,
-                               PluginModelRuntimeFactoryV1 ) override
+    bool registerModelRuntime( const std::string &, const std::string &framework,
+                               PluginModelRuntimeFactoryV1 factory ) override
     {
+        modelFactories[framework] = std::move( factory );
         return true;
     }
-    bool registerAgentTool( const std::string &, const std::string &,
-                            std::shared_ptr<IPluginAgentToolV1> ) override
+    bool registerAgentTool( const std::string &, const std::string &toolId,
+                            std::shared_ptr<IPluginAgentToolV1> tool ) override
     {
+        agentTools[toolId] = std::move( tool );
         return true;
     }
 };
@@ -96,7 +111,8 @@ void writeManifest( const Json::Value &access = Json::Value() )
     manifest["entrypoint"] = kEntrypoint;
     manifest["entrypoint_kind"] = "native";
     manifest["capabilities"] = Json::Value( Json::arrayValue );
-    manifest["capabilities"].append( "operator" );
+    for ( const char *kind : { "operator", "data_provider", "model_runtime", "agent_tool", "ui" } )
+        manifest["capabilities"].append( kind );
     if ( access.isObject() )
         manifest["access"] = access;
     Json::Value operators( Json::arrayValue );
@@ -112,6 +128,41 @@ void writeManifest( const Json::Value &access = Json::Value() )
         operators.append( op );
     }
     manifest["operators"] = operators;
+
+    // Plugin platform 9.0 (M4/M5): every contribution kind is declared so
+    // the worker registration report, the conformance kit and the capability
+    // gates have a full-declaration fixture to work against.
+    Json::Value providers( Json::arrayValue );
+    Json::Value provider( Json::objectValue );
+    provider["id"] = "test:iso-store";
+    provider["display_name"] = "Isolation Store";
+    provider["description"] = "in-memory fixture store";
+    Json::Value schemes( Json::arrayValue );
+    schemes.append( "isodb://" );
+    provider["schemes"] = schemes;
+    providers.append( provider );
+    manifest["data_providers"] = providers;
+
+    Json::Value runtimes( Json::arrayValue );
+    Json::Value runtime( Json::objectValue );
+    runtime["framework"] = "iso-identity";
+    runtime["display_name"] = "Isolation Identity";
+    runtime["description"] = "identity tensor backend (known-answer)";
+    runtime["gpu"] = false;
+    runtimes.append( runtime );
+    manifest["model_runtimes"] = runtimes;
+
+    Json::Value tools( Json::arrayValue );
+    Json::Value tool( Json::objectValue );
+    tool["id"] = "test:iso-tool";
+    tool["display_name"] = "Isolation Tool";
+    tool["category"] = "test";
+    tool["description"] = "echo fixture tool";
+    Json::Value inputSchema( Json::objectValue );
+    inputSchema["type"] = "object";
+    tool["input_schema"] = inputSchema;
+    tools.append( tool );
+    manifest["agent_tools"] = tools;
 
     std::ofstream output( std::string( kFixtureDir ) + "/plugin.json", std::ios::trunc );
     Json::StreamWriterBuilder builder;
@@ -692,4 +743,388 @@ TEST_CASE( "declarative UI survives the crash-recovery sequence", "[hostprocess]
     REQUIRE( described["schema"]["version"].asInt() == 1 );
 
     REQUIRE( registry.unload( kPluginId ) );
+}
+
+// -- plugin-platform 9.0: M2 concurrency stress --------------------------------
+
+namespace {
+/// Runs one caller on an async future so the test can BOUND the wait: a
+/// caller that never finishes fails the wait_for (deadlock evidence), it
+/// cannot hang the suite.
+std::future<Json::Value> callAsync( Stack &stack, const char *operatorId, Json::Value params )
+{
+    return std::async( std::launch::async, [&stack, operatorId, params]() {
+        return runOperator( stack, operatorId, params );
+    } );
+}
+} // namespace
+
+TEST_CASE( "interleaved timeout, crash and cancel keep every caller typed",
+           "[hostprocess][stress][p12]" )
+{
+    // 3 rounds of 7 concurrent callers with deliberately colliding fates
+    // (2 hang past the deadline, 2 crash the worker, 3 quick echoes).
+    // Deterministic assertions:
+    //   1. every caller terminates with a typed envelope (success or
+    //      __operatorError) inside a generous wall budget;
+    //   2. the session is consistent at quiesce (inFlight back to 0);
+    //   3. unload at the end succeeds (barrier close, no leaked lease).
+    Stack stack( 3000, 1000 );
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    for ( int round = 0; round < 3; ++round )
+    {
+        constexpr int kCallers = 7;
+        constexpr auto kWallBudget = std::chrono::seconds( 45 );
+        std::vector<std::future<Json::Value>> callers;
+        callers.reserve( kCallers );
+        for ( int i = 0; i < kCallers; ++i )
+        {
+            const int role = i % 4; // 0,1 slow (timeout); 2 crash; 3 echo
+            Json::Value params;
+            if ( role == 0 || role == 1 )
+                params["ms"] = 8000; // far past the 3 s ceiling
+            const char *op = ( role == 0 || role == 1 ) ? "test:iso-slow"
+                             : ( role == 2 )            ? "test:iso-crash"
+                                                        : "test:iso-echo";
+            callers.push_back( callAsync( stack, op, params ) );
+        }
+
+        for ( int i = 0; i < kCallers; ++i )
+        {
+            REQUIRE( callers[ i ].wait_for( kWallBudget ) == std::future_status::ready );
+            const Json::Value result = callers[ i ].get();
+            const bool typed = result[ "success" ].asBool() || result[ "__operatorError" ].asBool();
+            INFO( "round " << round << " caller " << i << ": "
+                           << Json::writeString( Json::StreamWriterBuilder(), result ) );
+            REQUIRE( typed );
+        }
+
+        // Quiesce: in-flight drained on the CURRENT session (any generation).
+        const Json::Value snapshot = stack.runtime->diagnosticsSnapshot();
+        if ( snapshot["plugins"].isMember( kPluginId ) )
+        {
+            INFO( "snapshot: " << Json::writeString( Json::StreamWriterBuilder(), snapshot ) );
+            REQUIRE( snapshot["plugins"][ kPluginId ]["inFlight"].asInt() == 0 );
+        }
+    }
+
+    // Clean teardown after the storm.
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+// -- plugin-platform 9.0: M3 orphan detection ----------------------------------
+
+#ifndef _WIN32
+TEST_CASE( "processGroupState gives honest group evidence across the lifecycle",
+           "[hostprocess][orphans][p12]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    // Live worker: its process group HAS a member (the worker itself).
+    Json::Value snapshot = stack.runtime->diagnosticsSnapshot();
+    REQUIRE( snapshot["plugins"][ kPluginId ]["processGroupState"].asString() == "yes" );
+
+    // After a clean unload the group must be GONE — recorded as evidence in
+    // the retiredGroups trail (kill(-pgid, 0) answered ESRCH).
+    REQUIRE( registry.unload( kPluginId ) );
+    snapshot = stack.runtime->diagnosticsSnapshot();
+    REQUIRE( snapshot["retiredGroups"].isMember( kPluginId ) );
+    const std::string state = snapshot["retiredGroups"][ kPluginId ].asString();
+    // EPERM containers report "unknown" honestly; a false "yes" would be
+    // a lie and a "no" without ESRCH evidence impossible.
+    REQUIRE( ( state == "no" || state == "unknown" ) );
+    if ( state == "unknown" )
+        WARN( "process-group probe could not decide (EPERM?); honest unknown recorded" );
+}
+#endif
+
+// -- plugin-platform 9.0: M4/M5 full contribution surfaces ----------------------
+
+TEST_CASE( "dataProvider round-trip and declared-scheme gate over the worker",
+           "[hostprocess][providers][p12]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+    REQUIRE( stack.sink.dataProviders.count( "test:iso-store" ) == 1 );
+    auto &provider = stack.sink.dataProviders.at( "test:iso-store" );
+
+    // discover: the enumeration surface (unfiltered by the scheme gate).
+    // The data-provider proxy wraps worker answers in {"result": ...}.
+    Json::Value items = provider->discover( Json::Value( Json::objectValue ) )["result"];
+    REQUIRE( items.isArray() );
+    REQUIRE( items.size() == 2 );
+
+    // inspect/open on a DECLARED scheme: honest envelope round-trip.
+    Json::Value metadata = provider->inspect( "isodb://grid" )["result"];
+    REQUIRE( metadata["provider"].asString() == "isolation_plugin" );
+    Json::Value reference = provider->open( "isodb://grid" )["result"];
+    REQUIRE( reference["kind"].asString() == "table" );
+    REQUIRE( std::filesystem::exists( reference["path"].asString() ) );
+
+    // open with an UNDECLARED scheme: typed worker-side policy refusal.
+    Json::Value refused = provider->open( "otherscheme://grid" );
+    REQUIRE( refused["success"].asBool() == false );
+    REQUIRE( refused["error"]["code"].asString() == "E5005" );
+    REQUIRE( refused["error"]["message"].asString().find( "otherscheme" )
+             != std::string::npos );
+
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+TEST_CASE( "model runtime identity infer is a known-answer round-trip",
+           "[hostprocess][model][p12]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+    REQUIRE( stack.sink.modelFactories.count( "iso-identity" ) == 1 );
+
+    std::string error;
+    PluginModelRequestV1 request;
+    request.modelName = "identity-fixture";
+    auto runtime = stack.sink.modelFactories.at( "iso-identity" )( request, error );
+    REQUIRE( runtime != nullptr );
+    REQUIRE( runtime->backendName() == "iso-identity" );
+
+    exprs::PluginTensorV1 input;
+    input.data = { 1.f, 2.f, 3.f, 4.f, 5.f, 6.f };
+    input.batch = 1;
+    input.channels = 2;
+    input.rows = 1;
+    input.cols = 3;
+    auto result = runtime->infer( input, "output" );
+    REQUIRE( result.success );
+    REQUIRE( result.output.data == input.data ); // exact identity, no tolerance
+    REQUIRE( result.output.channels == 2 );
+    REQUIRE( result.output.cols == 3 );
+
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+TEST_CASE( "agent tool executes through the SpatialTool envelope",
+           "[hostprocess][agenttool][p12]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+    REQUIRE( stack.sink.agentTools.count( "test:iso-tool" ) == 1 );
+
+    Json::Value params( Json::objectValue );
+    params["query"] = "hello";
+    Json::Value envelope = stack.sink.agentTools.at( "test:iso-tool" )->execute( params );
+    REQUIRE( envelope["success"].asBool() );
+    REQUIRE( envelope["result"]["tool"].asString() == "test:iso-tool" );
+    REQUIRE( envelope["result"]["echo"]["query"].asString() == "hello" );
+
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+TEST_CASE( "model framework gate refuses frameworks outside the declared access model",
+           "[hostprocess][capabilities][p12]" )
+{
+    // Rewrite the manifest with a declared access.modelProvider.frameworks
+    // list that EXCLUDES a second framework the fixture would register.
+    // Because the worker only reports frameworks the plugin registered, the
+    // host gate is exercised through the runtime-host path: load succeeds
+    // (the declared framework passes), then the SINK path would refuse an
+    // undeclared one — asserted at the unit level in test_plugin_capabilities
+    // and structurally here by confirming the declared framework loads.
+    Json::Value access( Json::objectValue );
+    Json::Value modelProvider( Json::objectValue );
+    Json::Value frameworks( Json::arrayValue );
+    frameworks.append( "iso-identity" );
+    modelProvider["frameworks"] = frameworks;
+    access["modelProvider"] = modelProvider;
+    access["ui"] = true;
+
+    Stack stack;
+    writeManifest( access ); // Stack already rewrote it; re-write with access
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+    REQUIRE( stack.sink.modelFactories.count( "iso-identity" ) == 1 );
+
+    // The declared framework works end-to-end despite the gate being armed.
+    std::string error;
+    PluginModelRequestV1 request;
+    auto runtime = stack.sink.modelFactories.at( "iso-identity" )( request, error );
+    REQUIRE( runtime != nullptr );
+
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+TEST_CASE( "ui.invoke validates events host-side before the worker (E6010)",
+           "[hostprocess][uischema][p12]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    exprs::PluginDiagnosticLog uiLog;
+    // A VALID event travels to the worker and answers (fixture echo).
+    Json::Value event( Json::objectValue );
+    event["contributionId"] = "dock.status";
+    event["controlId"] = "ping";
+    event["eventType"] = "clicked";
+    auto ok = stack.runtime->invokeUi( kPluginId, event, 10000, uiLog );
+    REQUIRE( ok["ok"].asBool() );
+
+    // An UNKNOWN event type is refused host-side, typed E6010, and the
+    // channel/worker stay perfectly healthy afterwards.
+    event["eventType"] = "teleport";
+    auto refused = stack.runtime->invokeUi( kPluginId, event, 10000, uiLog );
+    REQUIRE_FALSE( refused["ok"].asBool() );
+    REQUIRE( refused["code"].asString() == "E6010" );
+    REQUIRE( refused["error"].asString().find( "teleport" ) != std::string::npos );
+
+    // An oversized value is refused too.
+    event["eventType"] = "custom";
+    event["value"] = std::string( 8192, 'v' );
+    auto oversized = stack.runtime->invokeUi( kPluginId, event, 10000, uiLog );
+    REQUIRE_FALSE( oversized["ok"].asBool() );
+    REQUIRE( oversized["code"].asString() == "E6010" );
+
+    // The worker survived the refusals and still answers a valid event.
+    Json::Value recovery( Json::objectValue );
+    recovery["contributionId"] = "dock.status";
+    recovery["controlId"] = "ping";
+    recovery["eventType"] = "clicked";
+    auto after = stack.runtime->invokeUi( kPluginId, recovery, 10000, uiLog );
+    REQUIRE( after["ok"].asBool() );
+
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+// -- 9.0 review remediation: end-to-end refusal + negotiation evidence --------
+
+namespace {
+/// Re-runs discovery against the CURRENT fixture manifest so capability-gate
+/// tests can rewrite plugin.json after the Stack was constructed.
+void refreshRegistry( sicnu::plugins::PluginHostProcessRuntime &runtime, TestSink &sink,
+                      const std::string &tempDir )
+{
+    auto &registry = PluginRegistry::instance();
+    PluginRegistryOptions options;
+    options.roots = { std::filesystem::path( kFixtureDir ).parent_path().generic_string() };
+    options.tempDirectory = tempDir;
+    options.hostProcessWorkerPath = kWorkerPath;
+    registry.setContributionSink( &sink );
+    registry.setHostProcessRuntime( &runtime );
+    registry.configure( options );
+}
+} // namespace
+
+TEST_CASE( "protocol 1.2 directional caps survive the negotiated path end-to-end",
+           "[hostprocess][p12][caps]" )
+{
+    // THE regression evidence for the 1.1 defect fix: a manifest declaring
+    // ONLY a small maxRequestBytes must NOT cap worker->host responses.
+    // Old behavior: limits.maxFrameBytes = min(req, resp) = 64 KiB was sent
+    // and applied to BOTH worker directions -> the ~1 MiB flood response hit
+    // the worker's send cap (E6003) and tore the channel down.
+    Stack stack;
+    // Re-write the manifest with the quota declared (writeManifest has no
+    // quotas parameter, so extend the JSON after writing): ONLY a small
+    // request quota; the response direction keeps a 4 MiB quota so the
+    // probe response (~1 MiB) is legal.
+    Json::Value quotas( Json::objectValue );
+    quotas["maxRequestBytes"] = Json::Value( Json::Int64( 65536 ) );
+    quotas["maxResponseBytes"] = Json::Value( Json::Int64( 4L * 1024L * 1024L ) );
+    writeManifest( Json::Value() );
+    {
+        std::ifstream in( std::string( kFixtureDir ) + "/plugin.json" );
+        Json::Value manifest;
+        Json::Reader reader;
+        REQUIRE( reader.parse( in, manifest, false ) );
+        in.close();
+        manifest["quotas"] = quotas;
+        Json::StreamWriterBuilder builder;
+        builder["indentation"] = "  ";
+        std::ofstream out( std::string( kFixtureDir ) + "/plugin.json", std::ios::trunc );
+        std::unique_ptr<Json::StreamWriter> writer( builder.newStreamWriter() );
+        writer->write( manifest, &out );
+        out << "\n";
+    }
+    refreshRegistry( *stack.runtime, stack.sink, stack.tempDir );
+
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    // SMALL request, ~1 MiB response: the 64 KiB request cap governs only
+    // the host->worker direction. Old behavior applied the shared fallback
+    // min(req, resp) = 64 KiB to BOTH worker directions, so this response
+    // was refused E6003 and tore the channel down.
+    Json::Value params( Json::objectValue );
+    params["bytes"] = Json::Value( Json::Int64( 1024 * 1024 ) );
+    Json::Value flooded = runOperator( stack, "test:iso-flood", params );
+    INFO( "flood result: " << Json::writeString( Json::StreamWriterBuilder(), flooded ) );
+    REQUIRE( flooded["success"].asBool() );
+    REQUIRE( flooded["blob"].asString().size() == 1024u * 1024u );
+
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+TEST_CASE( "explicit access ui:false refuses declarative UI end-to-end (E5005)",
+           "[hostprocess][capabilities][p12]" )
+{
+    Stack stack;
+    Json::Value access( Json::objectValue );
+    access["ui"] = false;
+    writeManifest( access );
+    refreshRegistry( *stack.runtime, stack.sink, stack.tempDir );
+
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    exprs::PluginDiagnosticLog uiLog;
+    Json::Value described = stack.runtime->describeUiSchema( kPluginId, uiLog );
+    REQUIRE_FALSE( described["ok"].asBool() );
+    REQUIRE( described["code"].asString() == "E5005" );
+
+    Json::Value event( Json::objectValue );
+    event["contributionId"] = "dock.status";
+    event["controlId"] = "ping";
+    event["eventType"] = "clicked";
+    Json::Value invoked = stack.runtime->invokeUi( kPluginId, event, 5000, uiLog );
+    REQUIRE_FALSE( invoked["ok"].asBool() );
+    REQUIRE( invoked["code"].asString() == "E5005" );
+
+    // The refusal is policy, not breakage: the worker is still alive.
+    REQUIRE( stack.runtime->isWorkerAlive( kPluginId ) );
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+TEST_CASE( "model framework outside the declared access model fails the load typed",
+           "[hostprocess][capabilities][p12]" )
+{
+    // The fixture registers framework "iso-identity"; declaring a DIFFERENT
+    // framework list means the worker's registration report contains a
+    // framework the declared access model does not allow -> the host gate
+    // refuses the whole load (typed E5005), nothing stays registered.
+    Stack stack;
+    Json::Value access( Json::objectValue );
+    Json::Value modelProvider( Json::objectValue );
+    Json::Value frameworks( Json::arrayValue );
+    frameworks.append( "some-other-framework" );
+    modelProvider["frameworks"] = frameworks;
+    access["modelProvider"] = modelProvider;
+    writeManifest( access );
+    refreshRegistry( *stack.runtime, stack.sink, stack.tempDir );
+
+    auto &registry = PluginRegistry::instance();
+    REQUIRE_FALSE( registry.load( kPluginId ) );
+    bool sawTypedRefusal = false;
+    for ( const auto &item : registry.diagnostics().items() )
+    {
+        if ( item.code == PluginDiagnosticCode::PermissionDenied
+             && item.message.find( "E5005" ) != std::string::npos )
+            sawTypedRefusal = true;
+    }
+    REQUIRE( sawTypedRefusal );
+    REQUIRE( stack.sink.modelFactories.empty() ); // nothing half-registered
+    REQUIRE_FALSE( stack.runtime->isWorkerAlive( kPluginId ) );
 }

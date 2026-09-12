@@ -10,7 +10,12 @@
  * Enforcement matrix (documented honestly, docs/plugins/capabilities.md):
  *   maxRequestConcurrency  host-side session gate (exact, all platforms)
  *   requestDeadlineMs      host-side per-request ceiling (exact)
- *   maxResponseBytes       frame cap on every worker->host frame (exact)
+ *   maxResponseBytes       frame cap on every worker->host frame (exact,
+ *                          protocol 1.2 per-direction: no longer side-caps
+ *                          host->worker request frames)
+ *   maxRequestBytes        frame cap on every host->worker request frame
+ *                          (exact; protocol 1.2; shared fallback for 1.1
+ *                          peers is min(maxRequestBytes, maxResponseBytes))
  *   workerMemoryBytes      Windows: job object limit (exact); POSIX:
  *                          RLIMIT_AS best effort (coarse, documented)
  *   workerCpuRatePercent   Windows: job object CPU rate control; POSIX: not
@@ -33,6 +38,7 @@ struct PluginQuota
     int maxRequestConcurrency = 4;
     int requestDeadlineMs = 120000;         ///< ceiling for per-request deadlines
     long maxResponseBytes = 32L * 1024L * 1024L;
+    long maxRequestBytes = 32L * 1024L * 1024L;  ///< host->worker request frames (1.2)
     long long workerMemoryBytes = 0;        ///< 0 = platform default
     int workerCpuRatePercent = 0;           ///< 1..100, 0 = uncapped
     int maxChildProcesses = 8;              ///< worker + children cap (Job)

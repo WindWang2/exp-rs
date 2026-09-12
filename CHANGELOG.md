@@ -4,6 +4,35 @@ All notable changes to the `exp-rs` project will be documented in this file.
 
 ## [Unreleased] - 2026-09-12
 
+### Plugin SDK / Isolated Extension Ecosystem 9.0 (feat/plugin-platform-9)
+- **Protocol 1.2** (additive): per-direction frame caps
+  (`limits.maxRequestBytes` / `maxResponseBytes`; fixes the 1.1 defect where
+  a small response quota also capped host->worker request frames),
+  `worker.hello` feature negotiation, quota `maxRequestBytes`, and honest
+  E6003 reporting from `statusCode()`. Seeded fuzz suites over the
+  frame/envelope codecs.
+- **Capability enforcement**: model-framework gate, declarative-UI gate
+  (ui:false refuses describe/invoke), external-tool spawn gate
+  (PolicyRefused 4102), worker-side provider scheme gate, and the
+  machine-readable capability enforcement matrix surfaced by
+  `plugin inspect` and the debug bundle.
+- **Concurrency/process observability**: gate waiters, peak in-flight,
+  typed last failure, restart-policy state and an honest post-unload
+  process-group probe (retiredGroups) in the runtime snapshot; rendezvous
+  stress suite (7 callers x 3 rounds of colliding fates, bounded waits).
+- **Declarative UI 2.0**: host-side ui.invoke validation (bounded ids,
+  renderer-vocabulary whitelist, value cap) with typed E6010 refusals that
+  never touch the channel; optional capped accessibility metadata.
+- **Packaging 3.0**: install-time dependency-constraint probe (semver-ish
+  ranges, typed warnings, load-time enforcement unchanged).
+- **Offline plugin index**: `plugin index` — manifest-only local scan with
+  api/abi/platform compatibility filtering and pure-function pin
+  annotation; no network, no service.
+- **Conformance kit 3.0**: pass/fail/skipped status per check, new
+  PT_PROVIDERS / PT_AGENTTOOL / PT_MODEL / PT_PERMISSIONS / PT_QUOTA /
+  PT_PROCESS_CLEANUP, strict verdict (any failed check fails the run).
+- **Diagnostics**: `plugin debug-bundle` with recursive secret redaction.
+
 ### Scientific Algorithms 9.0 (goal series) — scientific defect remediation
 
 - **Hydrology — priority-flood NoData-boundary seeding (#848)**:

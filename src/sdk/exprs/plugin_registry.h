@@ -75,6 +75,15 @@ public:
 
     const std::vector<PluginRecord> &records() const { return mRecords; }
     const PluginRecord *record( const std::string &pluginId ) const;
+
+    /// Plugin-platform 9.0: COPY accessors. record() hands out a pointer
+    /// into the mRecords vector WITHOUT holding the registry lock on the
+    /// caller's side, so a concurrent refresh (which reallocates the vector)
+    /// makes later dereferences a use-after-free. Gates that only need the
+    /// access declaration or the install directory must take copies through
+    /// these instead of holding the raw pointer.
+    Json::Value accessDeclarationFor( const std::string &pluginId ) const;
+    std::string pluginDirectoryFor( const std::string &pluginId ) const;
     PluginRecord *record( const std::string &pluginId );
     std::vector<std::string> pluginIds() const;
     const PluginDiagnosticLog &diagnostics() const { return mDiagnostics; }
