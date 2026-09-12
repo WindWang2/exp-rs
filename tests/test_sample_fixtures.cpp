@@ -95,10 +95,24 @@ std::string readBinary( const fs::path &path )
                         std::istreambuf_iterator<char>() );
 }
 
-/// Quote a single POSIX shell word. Test paths have no spaces; this is for
-/// robustness, not correctness under adversarial input.
+/// Quote one argument for the platform shell. Test paths are ASCII; this is
+/// for robustness, not adversarial input.
 std::string shellQuote( const std::string &word )
 {
+#ifdef _WIN32
+    // cmd.exe treats single quotes as literal characters; double quotes are
+    // the argument quoting there. std::system already routes through cmd.
+    std::string out = "\"";
+    for ( char c : word )
+    {
+        if ( c == '"' )
+            out += "\"\""; // cmd doubling is imperfect but fine for our args
+        else
+            out += c;
+    }
+    out += "\"";
+    return out;
+#else
     std::string out = "'";
     for ( char c : word )
     {
@@ -109,6 +123,7 @@ std::string shellQuote( const std::string &word )
     }
     out += "'";
     return out;
+#endif
 }
 
 int runCli( const std::vector<std::string> &args )
@@ -118,7 +133,7 @@ int runCli( const std::vector<std::string> &args )
         cmd += " " + shellQuote( arg );
     const int status = std::system( cmd.c_str() );
 #ifdef _WIN32
-    return status;
+    return status; // std::system via cmd.exe returns the exit code directly
 #else
     return WIFEXITED( status ) ? WEXITSTATUS( status ) : status;
 #endif
@@ -683,6 +698,21 @@ TEST_CASE( "CLI: typed exit codes", "[foundry][cli]" )
         out << "not json at all";
     }
     CHECK( runCli( { "--out=" + dir.str(), "--spec=" + bad } ) == 3 );
+    // Unknown spec keys are refused, never silently ignored.
+    {
+        std::ofstream out( bad );
+        out << "{\"experiment\":\"x\",\"products\":[\"dem_sample\"],\"auto_run\":true}";
+    }
+    CHECK( runCli( { "--out=" + dir.str(), "--spec=" + bad } ) == 3 );
+
+    // Seed boundaries: 0 and 4294967295 are valid, 2^32 is not; --out= is a
+    // usage error (no silent default for an explicitly empty value).
+    TempDir seeds;
+    CHECK( runCli( { "--out=" + seeds.str(), "--seed=0" } ) == 0 );
+    TempDir seeds_max;
+    CHECK( runCli( { "--out=" + seeds_max.str(), "--seed=4294967295" } ) == 0 );
+    CHECK( runCli( { "--out=" + seeds.str(), "--seed=4294967296" } ) == 2 );
+    CHECK( runCli( { "--out=" } ) == 2 );
 }
 
 TEST_CASE( "CLI: spec intake drives the selection (single file and directory)",
@@ -728,6 +758,16 @@ TEST_CASE( "CLI: spec intake drives the selection (single file and directory)",
     }
     TempDir dir2;
     CHECK( runCli( { "--out=" + dir2.str(), "--spec=" + spec_dir.str() } ) == 3 );
+
+    // Duplicate products across two spec files are a typed refusal too.
+    {
+        std::ofstream out( spec1 );
+        out << "{\"experiment\":\"lab-3\",\"products\":[\"dem_sample\"]}";
+        std::ofstream out2( spec2 );
+        out2 << "{\"experiment\":\"lab-3\",\"products\":[\"dem_sample\"]}";
+    }
+    TempDir dir3;
+    CHECK( runCli( { "--out=" + dir3.str(), "--spec=" + spec_dir.str() } ) == 3 );
 }
 
 TEST_CASE( "CLI: --verify detects drift", "[foundry][cli]" )
@@ -766,6 +806,47 @@ TEST_CASE( "verifyDirectory flags a manifest edited after generation",
     REQUIRE( report.problems.size() == 1 );
     CHECK( report.problems[0] ==
            "self_fingerprint mismatch (manifest was edited after generation)" );
+}
+
+TEST_CASE( "verifyDirectory detects in-place corruption and unlisted data files",
+           "[foundry][manifest]" )
+{
+    GDALAllRegister();
+    TempDir dir;
+    Options options;
+    options.out_dir = dir.str();
+    options.seed = 9;
+    GenerateResult result;
+    REQUIRE( generate( options, &result ).ok );
+
+    // Size-preserving byte flip: exactly one sha256 problem, no size problem.
+    {
+        std::fstream f( dir.path / "dem_sample.tif",
+                        std::ios::in | std::ios::out | std::ios::binary );
+        REQUIRE( f );
+        f.seekp( 200 );
+        char c = 0;
+        REQUIRE( static_cast<std::streamsize>( f.read( &c, 1 ).gcount() ) == 1 );
+        f.seekp( 200 );
+        f.put( static_cast<char>( c ^ 0xFF ) );
+        REQUIRE( f );
+    }
+    VerifyReport flip;
+    REQUIRE( verifyDirectory( dir.str(), &flip ).ok );
+    REQUIRE( flip.problems.size() == 1 );
+    CHECK( flip.problems[0] == "sha256 drift: dem_sample.tif" );
+
+    // An untracked-looking data file that the manifest does not list.
+    {
+        std::ofstream stray( dir.path / "stray.tif", std::ios::binary );
+        stray << 'x';
+    }
+    VerifyReport stray_report;
+    REQUIRE( verifyDirectory( dir.str(), &stray_report ).ok );
+    bool flagged_unlisted = false;
+    for ( const std::string &problem : stray_report.problems )
+        flagged_unlisted = flagged_unlisted || problem == "unlisted data file: stray.tif";
+    CHECK( flagged_unlisted );
 }
 
 // ---------------------------------------------------------------------------

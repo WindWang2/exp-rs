@@ -101,6 +101,8 @@ int main( int argc, char *argv[] )
     if ( startsWith( arg, "--out=" ) )
     {
       options.out_dir = arg.substr( 6 );
+      if ( options.out_dir.empty() )
+        return usageError( "--out= requires a directory" );
       continue;
     }
     if ( startsWith( arg, "--profile=" ) )
@@ -172,8 +174,8 @@ int main( int argc, char *argv[] )
   const Outcome outcome = generate( options, &result );
   if ( !outcome.ok )
   {
-    std::fprintf( stderr, "%s-failed: [%s] %s\n", outcome.error.category.c_str(),
-                  outcome.error.category.c_str(), outcome.error.message.c_str() );
+    std::fprintf( stderr, "generate-failed: [%s] %s\n", outcome.error.category.c_str(),
+                  outcome.error.message.c_str() );
     return outcome.error.category == std::string( "usage" ) ? 2 : 1;
   }
 

@@ -18,6 +18,9 @@ add_library(sicnu_sample_foundry STATIC
 target_link_libraries(sicnu_sample_foundry PUBLIC GDAL::GDAL jsoncpp)
 target_include_directories(sicnu_sample_foundry PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 if(MSVC)
+    # /fp:precise is the MSVC analog of -ffp-contract=off. Caveat recorded in
+    # the contract header: contraction could reappear under /arch:AVX2+ — this
+    # repo enables no /arch: flag, so x64 keeps the SSE2 default.
     target_compile_options(sicnu_sample_foundry PRIVATE /fp:precise)
 else()
     target_compile_options(sicnu_sample_foundry PRIVATE -ffp-contract=off -fno-fast-math)

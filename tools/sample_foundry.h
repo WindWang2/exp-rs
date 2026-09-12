@@ -15,6 +15,8 @@
 //     on IEEE doubles (no libm transcendentals), compiled with FP contraction
 //     off, so emitted bytes are identical across platforms and runs. Only the
 //     slope/aspect truth touches atan (bit-identical per host+compiler).
+//     MSVC note: /fp:precise is the counterpart of -ffp-contract=off; under
+//     /arch:AVX2+ MSVC may contract regardless — this repo sets no /arch:.
 //   * canonical draw order: row-major pixels; bands innermost (optical);
 //     before-noise then after-noise (change pair). Truth layers draw nothing.
 //   * no wall clock, locale, hash-order or thread dependence in the emit path.

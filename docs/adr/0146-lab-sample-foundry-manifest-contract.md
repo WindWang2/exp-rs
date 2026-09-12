@@ -62,7 +62,8 @@ semantic band-role vocabulary (ADR 0065).
    commit a blessed reference manifest.
 
 6. **Spec intake for D3**: `--spec=<file-or-dir>` where each `*.json` is
-   `{"experiment": "<non-empty>", "products": [<catalog id>…]}`. The catalog is
+   `{"experiment": "<non-empty>", "products": [<catalog id>…]}` — unknown
+   top-level keys are refused along with everything else. The catalog is
    the fixed nine-product id set. Unknown ids, missing paths, parse errors,
    duplicates, empty lists and cross-file experiment mismatches are typed
    refusals (exit 3, `spec-refusal:` on stderr) — never a silent default; a

@@ -231,11 +231,13 @@ bool readFileBytes( const fs::path &path, std::string *out, std::string *err )
     *err = "cannot open " + path.string() + " for reading";
     return false;
   }
-  char buf[1 << 20];
+  // Heap buffer: a 1 MiB stack frame would blow MSVC's default 1 MiB stack
+  // reserve on the first hashed file (P0 from the adversarial review).
+  std::vector<char> buf( 1 << 16 );
   while ( in )
   {
-    in.read( buf, sizeof( buf ) );
-    out->append( buf, static_cast<std::size_t>( in.gcount() ) );
+    in.read( buf.data(), static_cast<std::streamsize>( buf.size() ) );
+    out->append( buf.data(), static_cast<std::size_t>( in.gcount() ) );
   }
   if ( in.bad() )
   {
@@ -312,14 +314,31 @@ Outcome writeRaster( const GridSpec &grid, const std::string &out_dir,
     grid.origin_easting, grid.pixel_size_m, 0.0,
     grid.origin_northing, 0.0, -grid.pixel_size_m,
   };
-  ds->SetGeoTransform( geotransform );
+  if ( ds->SetGeoTransform( const_cast<double *>( geotransform ) ) != CE_None )
+  {
+    GDALClose( ds );
+    return gdalFail( "cannot set geotransform on " + path );
+  }
 
   OGRSpatialReference srs;
-  srs.importFromEPSG( 32648 );
+  if ( srs.importFromEPSG( 32648 ) != OGRERR_NONE )
+  {
+    GDALClose( ds );
+    return gdalFail( "cannot import EPSG:32648 (PROJ database unavailable?)" );
+  }
   char *wkt = nullptr;
-  if ( srs.exportToWkt( &wkt ) == OGRERR_NONE && wkt )
-    ds->SetProjection( wkt );
+  if ( srs.exportToWkt( &wkt ) != OGRERR_NONE || !wkt )
+  {
+    GDALClose( ds );
+    return gdalFail( "cannot export EPSG:32648 WKT" );
+  }
+  const bool projected = ds->SetProjection( wkt ) == CE_None;
   CPLFree( wkt );
+  if ( !projected )
+  {
+    GDALClose( ds );
+    return gdalFail( "cannot set projection on " + path );
+  }
 
   ds->SetMetadataItem( "SICNU_GENERATOR", kGeneratorName );
   ds->SetMetadataItem( "SICNU_GENERATOR_VERSION", kGeneratorVersion );
@@ -362,7 +381,10 @@ Outcome writeRaster( const GridSpec &grid, const std::string &out_dir,
       return gdalFail( std::string( "band write failed for " ) + path );
     }
   }
-  GDALClose( ds );
+  // A failed flush at close (disk full, quota) would otherwise bless a
+  // truncated TIFF with a self-consistent manifest.
+  if ( GDALClose( ds ) != CE_None )
+    return gdalFail( "close failed (flush?) on " + path );
   return okOut();
 }
 
@@ -457,6 +479,10 @@ Outcome writeTrainingShapefile( const std::vector<uint8_t> &cls, const GridSpec 
   }
 
   const std::string shp_path = ( fs::path( out_dir ) / "training_samples.shp" ).string();
+  // A stale .cpg from a prior run (created when SHAPE_ENCODING is set in the
+  // environment) must not survive into this run's directory listing.
+  std::error_code rm_ec;
+  fs::remove( fs::path( out_dir ) / "training_samples.cpg", rm_ec );
   GDALDriver *driver = GetGDALDriverManager()->GetDriverByName( "ESRI Shapefile" );
   if ( !driver )
     return fail( "gdal", "ESRI Shapefile driver unavailable" );
@@ -522,7 +548,8 @@ Outcome writeTrainingShapefile( const std::vector<uint8_t> &cls, const GridSpec 
       return gdalFail( "cannot write training feature" );
     }
   }
-  GDALClose( ds );
+  if ( GDALClose( ds ) != CE_None )
+    return gdalFail( "close failed (flush?) on " + shp_path );
 
   // ESRI Shapefile DBF headers embed the creation date, which would make the
   // output time-dependent; pin the 3 date bytes to 2000-01-01 (D-003).
@@ -553,6 +580,11 @@ Outcome writeTrainingShapefile( const std::vector<uint8_t> &cls, const GridSpec 
       return fail( "io", "shapefile sidecar missing after write: " + name );
     emitted->push_back( name );
   }
+  // The driver writes .cpg only when an encoding is in effect (host-dependent,
+  // e.g. SHAPE_ENCODING); record it when present so --verify never sees an
+  // unlisted data file.
+  if ( fs::exists( fs::path( out_dir ) / "training_samples.cpg" ) )
+    emitted->push_back( "training_samples.cpg" );
   return okOut();
 }
 
@@ -666,6 +698,20 @@ Outcome parseSpecBytes( const std::string &path, const std::string &label,
     return parsed;
   if ( !root.isObject() )
     return fail( "spec", label + ": top-level JSON object expected" );
+  // Typed strictness (D-008): unknown keys are refused, never silently
+  // ignored — failIfExtra only catches trailing garbage, not extra members.
+  {
+    static const char *kAllowed[] = { "experiment", "products" };
+    for ( const std::string &member : root.getMemberNames() )
+    {
+      bool allowed = false;
+      for ( const char *key : kAllowed )
+        allowed = allowed || member == key;
+      if ( !allowed )
+        return fail( "spec", label + ": unknown spec key '" + member +
+                               "' (allowed: experiment, products)" );
+    }
+  }
   const Json::Value &experiment = root["experiment"];
   if ( !experiment.isString() || experiment.asString().empty() )
     return fail( "spec", label + ": 'experiment' must be a non-empty string" );
@@ -1227,7 +1273,7 @@ Outcome verifyDirectory( const std::string &out_dir, VerifyReport *report )
   Json::Value root;
   Outcome parsed = parseJsonStrict( bytes, kManifestName, &root );
   if ( !parsed.ok )
-    return parsed;
+    return fail( "verify", parsed.error.message ); // report under verify, not spec
   if ( !root.isObject() )
     return fail( "verify", std::string( kManifestName ) + ": top-level JSON object expected" );
 

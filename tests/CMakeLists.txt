@@ -230,11 +230,23 @@ add_dependencies(test_sample_fixtures sicnu_generate_samples)
 set_target_properties(test_sample_fixtures PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
-# TEST_PREFIX keeps `ctest -R sample_fixtures` selectable: Catch discovery
-# would otherwise name the entries after the English TEST_CASE titles.
+# Discover through the same properties sicnu_discover_tests applies (GDAL
+# needs DL_PATHS in conda lanes, #730; sanitizer lanes need LSAN leak
+# suppression), plus a TEST_PREFIX so `ctest -R sample_fixtures` selects the
+# suite: Catch discovery names entries after the English TEST_CASE titles.
+set(_sf_discovery_props "")
+if(ENABLE_SANITIZERS)
+  list(APPEND _sf_discovery_props "ENVIRONMENT_MODIFICATION" "LSAN_OPTIONS=set:detect_leaks=0")
+endif()
+set(_sf_dl_paths "")
+if(SICNU_TEST_DL_PATHS)
+  set(_sf_dl_paths DL_PATHS ${SICNU_TEST_DL_PATHS})
+endif()
 catch_discover_tests(test_sample_fixtures
   DISCOVERY_MODE PRE_TEST
   TEST_PREFIX "sample_fixtures: "
+  ${_sf_dl_paths}
+  PROPERTIES ${_sf_discovery_props}
 )
 
 
