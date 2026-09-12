@@ -686,7 +686,7 @@ void PluginHostProcessSession::killProcess( const char *reason )
 
 bool PluginHostProcessSession::confirmProcessDeath()
 {
-    // Shared Channel-EOF handler (request/requestRaw). Probing is safe to
+    // Shared Channel-EOF handler (request/requestControlRaw). Probing is safe to
     // run concurrently (waitpid and WaitForSingleObject on the same handle
     // may race); the exchange afterwards elects exactly ONE closer — the
     // same discipline killProcess documents — so two concurrent requesters
@@ -759,6 +759,19 @@ void PluginHostProcessSession::escalateTimeout( long long requestId )
         killProcess( "request deadline ladder" );
 }
 
+IpcChannel::Outcome PluginHostProcessSession::channelClosedOutcome()
+{
+    // Typed, retryable refusal for a request on a dead/never-spawned
+    // worker; shared by every request path so the E6005 contract stays
+    // identical everywhere.
+    IpcChannel::Outcome outcome;
+    outcome.status = IpcChannel::Outcome::Status::ChannelClosed;
+    outcome.error.code = "E6005";
+    outcome.error.message = "worker process is not running";
+    outcome.error.retryable = true;
+    return outcome;
+}
+
 IpcChannel::Outcome PluginHostProcessSession::request(
     const std::string &method, const Json::Value &params, int deadlineMs,
     const IpcChannel::CancelPredicate &cancelPredicate, const IpcChannel::ProgressSink &progressSink )
@@ -768,14 +781,7 @@ IpcChannel::Outcome PluginHostProcessSession::request(
                                                  : mOptions.quota.requestDeadlineMs;
 
     if ( !mChannel || !mProcessAlive )
-    {
-        IpcChannel::Outcome outcome;
-        outcome.status = IpcChannel::Outcome::Status::ChannelClosed;
-        outcome.error.code = "E6005";
-        outcome.error.message = "worker process is not running";
-        outcome.error.retryable = true;
-        return outcome;
-    }
+        return channelClosedOutcome();
 
     // Drain-check first: a poisoned worker whose peers have finished must
     // die before anything else is sent (the next request then fails E6005
@@ -790,14 +796,7 @@ IpcChannel::Outcome PluginHostProcessSession::request(
         }
     }
     if ( !mProcessAlive )
-    {
-        IpcChannel::Outcome outcome;
-        outcome.status = IpcChannel::Outcome::Status::ChannelClosed;
-        outcome.error.code = "E6005";
-        outcome.error.message = "worker process is not running";
-        outcome.error.retryable = true;
-        return outcome;
-    }
+        return channelClosedOutcome();
 
     // Bounded FIFO gate = maxRequestConcurrency (exact enforcement of the
     // quota; overflow refuses typed instead of queueing without bound).
@@ -862,19 +861,12 @@ IpcChannel::Outcome PluginHostProcessSession::request(
     return outcome;
 }
 
-IpcChannel::Outcome PluginHostProcessSession::requestRaw(
+IpcChannel::Outcome PluginHostProcessSession::requestControlRaw(
     const std::string &method, const Json::Value &params, int deadlineMs,
     const IpcChannel::CancelPredicate &cancelPredicate, const IpcChannel::ProgressSink &progressSink )
 {
     if ( !mChannel || !mProcessAlive )
-    {
-        IpcChannel::Outcome outcome;
-        outcome.status = IpcChannel::Outcome::Status::ChannelClosed;
-        outcome.error.code = "E6005";
-        outcome.error.message = "worker process is not running";
-        outcome.error.retryable = true;
-        return outcome;
-    }
+        return channelClosedOutcome();
 
     // Liveness watchdog: if the process dies mid-request the channel fails
     // the wait with ChannelClosed; a hung process is handled by the ladder.

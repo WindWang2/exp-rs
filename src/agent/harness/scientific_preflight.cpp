@@ -8,6 +8,7 @@
 #include "entity_resolver.h"
 #include "grounding_tools.h"
 #include "harness_actions.h"
+#include "intent_vocabulary.h"
 #include "operators/framework/model_catalog.h"
 #include "spatial_tools/spatial_tool.h"
 
@@ -769,50 +770,50 @@ struct IntentSpec {
 const std::vector<IntentSpec> &intentSpecTable()
 {
   static const std::vector<IntentSpec> kTable = {
-    { "ndvi", PackKind::BandRatio, { { "red", BandRequirement::Red },
+    { kIntentNdvi, PackKind::BandRatio, { { "red", BandRequirement::Red },
                                     { "nir", BandRequirement::Nir } } },
-    { "evi", PackKind::BandRatio, { { "blue", BandRequirement::Blue },
+    { kIntentEvi, PackKind::BandRatio, { { "blue", BandRequirement::Blue },
                                     { "red", BandRequirement::Red },
                                     { "nir", BandRequirement::Nir } } },
-    { "savi", PackKind::BandRatio, { { "red", BandRequirement::Red },
+    { kIntentSavi, PackKind::BandRatio, { { "red", BandRequirement::Red },
                                      { "nir", BandRequirement::Nir } } },
-    { "ndre", PackKind::BandRatio, { { "red_edge", BandRequirement::RedEdge },
+    { kIntentNdre, PackKind::BandRatio, { { "red_edge", BandRequirement::RedEdge },
                                      { "nir", BandRequirement::Nir } } },
-    { "ndwi", PackKind::BandRatio, { { "green", BandRequirement::Green },
+    { kIntentNdwi, PackKind::BandRatio, { { "green", BandRequirement::Green },
                                      { "nir", BandRequirement::Nir } } },
-    { "water", PackKind::BandRatio, { { "green", BandRequirement::Green },
+    { kIntentWater, PackKind::BandRatio, { { "green", BandRequirement::Green },
                                       { "nir", BandRequirement::Nir } } },
-    { "flood", PackKind::BandRatio, { { "green", BandRequirement::Green },
+    { kIntentFlood, PackKind::BandRatio, { { "green", BandRequirement::Green },
                                       { "nir", BandRequirement::Nir } } },
-    { "mndwi", PackKind::BandRatio, { { "green", BandRequirement::Green },
+    { kIntentMndwi, PackKind::BandRatio, { { "green", BandRequirement::Green },
                                       { "swir", BandRequirement::Swir } } },
-    { "ndsi", PackKind::BandRatio, { { "green", BandRequirement::Green },
+    { kIntentNdsi, PackKind::BandRatio, { { "green", BandRequirement::Green },
                                      { "swir", BandRequirement::Swir } } },
-    { "nbr", PackKind::BandRatio, { { "nir", BandRequirement::Nir },
+    { kIntentNbr, PackKind::BandRatio, { { "nir", BandRequirement::Nir },
                                     { "swir", BandRequirement::Swir } } },
-    { "dnbr", PackKind::BandRatio, { { "nir", BandRequirement::Nir },
+    { kIntentDnbr, PackKind::BandRatio, { { "nir", BandRequirement::Nir },
                                      { "swir", BandRequirement::Swir } }, true },
-    { "ndbi", PackKind::BandRatio, { { "swir", BandRequirement::Swir },
+    { kIntentNdbi, PackKind::BandRatio, { { "swir", BandRequirement::Swir },
                                      { "nir", BandRequirement::Nir } } },
-    { "bsi", PackKind::BandRatio, { { "blue", BandRequirement::Blue },
+    { kIntentBsi, PackKind::BandRatio, { { "blue", BandRequirement::Blue },
                                     { "red", BandRequirement::Red },
                                     { "nir", BandRequirement::Nir },
                                     { "swir", BandRequirement::Swir } } },
-    { "change", PackKind::OpticalChange, {}, true },
-    { "sar_change", PackKind::SarChange, {}, true, true },
-    { "sar_flood", PackKind::SarChange, {}, true, true },
-    { "sar", PackKind::SarSingle, {}, false, true },
-    { "sar_water", PackKind::SarSingle, {}, false, true },
-    { "ship", PackKind::SharedOnly },
-    { "zonal", PackKind::SharedOnly },
-    { "classify", PackKind::Classify },
-    { "accuracy", PackKind::Classify },
-    { "phenology", PackKind::TemporalSeries, {}, false, false, 12 },
-    { "temporal", PackKind::TemporalSeries, {}, false, false, 3 },
-    { "terrain", PackKind::Terrain },
-    { "qa", PackKind::SharedOnly },
-    { "preprocess", PackKind::SharedOnly },
-    { "inference", PackKind::Inference },
+    { kIntentChange, PackKind::OpticalChange, {}, true },
+    { kIntentSarChange, PackKind::SarChange, {}, true, true },
+    { kIntentSarFlood, PackKind::SarChange, {}, true, true },
+    { kIntentSar, PackKind::SarSingle, {}, false, true },
+    { kIntentSarWater, PackKind::SarSingle, {}, false, true },
+    { kIntentShip, PackKind::SharedOnly },
+    { kIntentZonal, PackKind::SharedOnly },
+    { kIntentClassify, PackKind::Classify },
+    { kIntentAccuracy, PackKind::Classify },
+    { kIntentPhenology, PackKind::TemporalSeries, {}, false, false, 12 },
+    { kIntentTemporal, PackKind::TemporalSeries, {}, false, false, 3 },
+    { kIntentTerrain, PackKind::Terrain },
+    { kIntentQa, PackKind::SharedOnly },
+    { kIntentPreprocess, PackKind::SharedOnly },
+    { kIntentInference, PackKind::Inference },
   };
   return kTable;
 }
@@ -1158,8 +1159,8 @@ PreflightOutcome runScientificPreflight( const std::string &intent,
       {
         bandRatioRules( inputs, outcome, intent, spec->bands );
         if ( spec->requiresPair && inputs.size() < 2 && anyResolvedInput( inputs ) )
-          requirePair( outcome, intent == "dnbr" ? "dNBR" : intent );
-        if ( intent == "flood" )
+          requirePair( outcome, intent == kIntentDnbr ? "dNBR" : intent );
+        if ( intent == kIntentFlood )
           floodRules( inputs, outcome );
         if ( inputMixedModality( inputs ) )
           multimodalRules( inputs, outcome );
@@ -1170,7 +1171,7 @@ PreflightOutcome runScientificPreflight( const std::string &intent,
         break;
       case PackKind::SarChange:
         sarChangeRules( inputs, outcome );
-        if ( intent == "sar_flood" )
+        if ( intent == kIntentSarFlood )
         {
           floodRules( inputs, outcome );
           if ( inputMixedModality( inputs ) )
@@ -1187,7 +1188,7 @@ PreflightOutcome runScientificPreflight( const std::string &intent,
                           []( const PreflightInput &i ) { return i.supervised; } ) )
           classifyRules( inputs, outcome );
         landCoverRules( inputs, outcome );
-        if ( intent == "accuracy" )
+        if ( intent == kIntentAccuracy )
           accuracyRules( inputs, outcome );
         break;
       case PackKind::TemporalSeries:
