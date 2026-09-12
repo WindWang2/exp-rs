@@ -303,13 +303,36 @@ bool PluginHostProcessSession::spawnWorkerProcess( PluginDiagnosticLog &diagnost
 #else
     int hostToWorker[ 2 ] = { -1, -1 };
     int workerToHost[ 2 ] = { -1, -1 };
+#if defined( __linux__ )
+    // O_CLOEXEC is applied ATOMICALLY with pipe creation: a concurrent
+    // spawn's fork() can never capture these ends in the window between
+    // creation and the CLOEXEC mark (a child that inherited OTHER sessions'
+    // ends could write frames into their streams and defeat their EOF crash
+    // detection). pipe2 needs no feature-gate under g++/glibc (and musl).
+    if ( ::pipe2( hostToWorker, O_CLOEXEC ) != 0 || ::pipe2( workerToHost, O_CLOEXEC ) != 0 )
+#else
     if ( ::pipe( hostToWorker ) != 0 || ::pipe( workerToHost ) != 0 )
+#endif
     {
+        for ( int fd : { hostToWorker[ 0 ], hostToWorker[ 1 ], workerToHost[ 0 ],
+                         workerToHost[ 1 ] } )
+            if ( fd != -1 )
+                ::close( fd );
         diagnostics.add( PluginDiagnosticCode::HostProcessUnavailable,
                          PluginDiagnosticSeverity::Error, "pipe() failed",
                          mOptions.pluginId );
         return false;
     }
+#if !defined( __linux__ )
+    // No pipe2 on this platform: mark all four ends BEFORE fork instead of
+    // after. The dup2 into the child clears CLOEXEC on fds 3/4 (dup2
+    // semantics, plus the explicit F_SETFD 0 below), so only the parent
+    // ends keep the mark — which is exactly the intent.
+    ::fcntl( hostToWorker[ 0 ], F_SETFD, FD_CLOEXEC );
+    ::fcntl( hostToWorker[ 1 ], F_SETFD, FD_CLOEXEC );
+    ::fcntl( workerToHost[ 0 ], F_SETFD, FD_CLOEXEC );
+    ::fcntl( workerToHost[ 1 ], F_SETFD, FD_CLOEXEC );
+#endif
 
     // Everything the child touches is computed BEFORE fork: the child
     // between fork and exec must stay allocation-free (a multithreaded
@@ -379,11 +402,11 @@ bool PluginHostProcessSession::spawnWorkerProcess( PluginDiagnosticLog &diagnost
                  static_cast<char *>( nullptr ) );
         ::_exit( 127 );
     }
-    // Host-side ends never leak into later spawns: with several concurrent
-    // workers, a child that inherited OTHER sessions' pipe ends could write
-    // frames into their streams and would defeat their EOF crash detection.
-    ::fcntl( hostToWorker[ 1 ], F_SETFD, FD_CLOEXEC );
-    ::fcntl( workerToHost[ 0 ], F_SETFD, FD_CLOEXEC );
+    // Host-side ends never leak into later spawns: their FD_CLOEXEC mark
+    // was applied atomically-with-creation (Linux pipe2) or before fork
+    // (other POSIX) — see spawnWorkerProcess above. A child that inherited
+    // OTHER sessions' pipe ends could write frames into their streams and
+    // would defeat their EOF crash detection.
     ::close( hostToWorker[ 0 ] );
     ::close( workerToHost[ 1 ] );
     mProcessHandle = reinterpret_cast<void *>( static_cast<intptr_t>( pid ) );
@@ -614,6 +637,48 @@ void PluginHostProcessSession::killProcess( const char *reason )
         mChannel->close();
 }
 
+bool PluginHostProcessSession::confirmProcessDeath()
+{
+    // Shared Channel-EOF handler (request/requestRaw). Probing is safe to
+    // run concurrently (waitpid and WaitForSingleObject on the same handle
+    // may race); the exchange afterwards elects exactly ONE closer — the
+    // same discipline killProcess documents — so two concurrent requesters
+    // can never double-close a recycled handle.
+    bool dead = false;
+#ifdef _WIN32
+    if ( mProcessHandle )
+        dead = ::WaitForSingleObject( mProcessHandle, 0 ) == WAIT_OBJECT_0;
+#else
+    const pid_t pid = static_cast<pid_t>( reinterpret_cast<intptr_t>( mProcessHandle ) );
+    if ( pid > 0 )
+    {
+        int status = 0;
+        dead = ::waitpid( pid, &status, WNOHANG ) == pid;
+    }
+#endif
+    if ( !dead )
+        return false;
+    if ( !mProcessAlive.exchange( false ) )
+        return true; // a concurrent closer already released everything
+#ifdef _WIN32
+    if ( mJobHandle )
+    {
+        ::CloseHandle( mJobHandle );
+        mJobHandle = nullptr;
+    }
+    if ( mProcessHandle )
+    {
+        ::CloseHandle( mProcessHandle );
+        mProcessHandle = nullptr;
+    }
+#else
+    mProcessHandle = nullptr;
+    // mProcessGroupId deliberately survives: killProcess reaps the
+    // worker's process group on the self-dead path (grandchildren).
+#endif
+    return true;
+}
+
 void PluginHostProcessSession::escalateTimeout( long long requestId )
 {
     // The channel already sent the per-id cancel frame when its local wait
@@ -743,31 +808,7 @@ IpcChannel::Outcome PluginHostProcessSession::request(
     else if ( outcome.status == IpcChannel::Outcome::Status::ChannelClosed && mProcessAlive )
     {
         // Channel EOF while we believed the process lived: confirm death.
-#ifdef _WIN32
-        const DWORD wait = ::WaitForSingleObject( mProcessHandle, 0 );
-        if ( wait == WAIT_OBJECT_0 )
-        {
-            mProcessAlive = false;
-            if ( mJobHandle )
-            {
-                ::CloseHandle( mJobHandle );
-                mJobHandle = nullptr;
-            }
-            ::CloseHandle( mProcessHandle );
-            mProcessHandle = nullptr;
-        }
-#else
-        const pid_t pid = static_cast<pid_t>( reinterpret_cast<intptr_t>( mProcessHandle ) );
-        int status = 0;
-        const pid_t done = ::waitpid( pid, &status, WNOHANG );
-        if ( done == pid )
-        {
-            mProcessAlive = false;
-            mProcessHandle = nullptr;
-            // mProcessGroupId deliberately survives: killProcess reaps the
-            // worker's process group on the self-dead path (grandchildren).
-        }
-#endif
+        confirmProcessDeath();
         if ( !mProcessAlive )
             killProcess( "confirmed dead after channel close" );
     }
@@ -814,31 +855,7 @@ IpcChannel::Outcome PluginHostProcessSession::requestRaw(
     else if ( outcome.status == IpcChannel::Outcome::Status::ChannelClosed && mProcessAlive )
     {
         // Channel EOF while we believed the process lived: confirm death.
-#ifdef _WIN32
-        const DWORD wait = ::WaitForSingleObject( mProcessHandle, 0 );
-        if ( wait == WAIT_OBJECT_0 )
-        {
-            mProcessAlive = false;
-            if ( mJobHandle )
-            {
-                ::CloseHandle( mJobHandle );
-                mJobHandle = nullptr;
-            }
-            ::CloseHandle( mProcessHandle );
-            mProcessHandle = nullptr;
-        }
-#else
-        const pid_t pid = static_cast<pid_t>( reinterpret_cast<intptr_t>( mProcessHandle ) );
-        int status = 0;
-        const pid_t done = ::waitpid( pid, &status, WNOHANG );
-        if ( done == pid )
-        {
-            mProcessAlive = false;
-            mProcessHandle = nullptr;
-            // mProcessGroupId deliberately survives: killProcess reaps the
-            // worker's process group on the self-dead path (grandchildren).
-        }
-#endif
+        confirmProcessDeath();
         if ( !mProcessAlive )
             killProcess( "confirmed dead after channel close" );
     }
@@ -880,7 +897,12 @@ bool PluginHostProcessSession::shutdown( int timeoutMs, PluginDiagnosticLog &dia
 #endif
             std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
         }
-        mProcessAlive = false;
+        // NOTE: mProcessAlive is deliberately NOT cleared here before the
+        // !exited branch: killProcess owns the liveness flip (its exchange
+        // elects the single closer). Storing false here first made the
+        // exchange in killProcess no-op and disabled the whole escalation —
+        // the Windows worker was never terminated (handles leaked) and POSIX
+        // never waitpid()ed (zombie).
 #ifndef _WIN32
         if ( exited && mProcessGroupId > 0 )
         {
@@ -900,21 +922,28 @@ bool PluginHostProcessSession::shutdown( int timeoutMs, PluginDiagnosticLog &dia
                              mOptions.pluginId );
             return false;
         }
+        // Worker exited by itself: release the handles under the SAME
+        // exchange-winner discipline killProcess uses — a concurrent killer
+        // that won the flip already closed everything; we must not close it
+        // again.
+        if ( mProcessAlive.exchange( false ) )
+        {
 #ifdef _WIN32
-        if ( mProcessHandle )
-        {
-            ::CloseHandle( mProcessHandle );
-            mProcessHandle = nullptr;
-        }
-        if ( mJobHandle )
-        {
-            ::CloseHandle( mJobHandle );
-            mJobHandle = nullptr;
-        }
+            if ( mProcessHandle )
+            {
+                ::CloseHandle( mProcessHandle );
+                mProcessHandle = nullptr;
+            }
+            if ( mJobHandle )
+            {
+                ::CloseHandle( mJobHandle );
+                mJobHandle = nullptr;
+            }
 #else
-        mProcessHandle = nullptr;
-        mProcessGroupId = -1;
+            mProcessHandle = nullptr;
+            mProcessGroupId = -1;
 #endif
+        }
         if ( mChannel )
             mChannel->close();
         return true;
