@@ -800,8 +800,14 @@ sicnu::data::Result<SplitManifest> SplitEngine::generate( const SplitConfig &con
                           ? generateFolds( manifest, inputs )
                           : generatePlain( manifest, inputs );
         if ( result )
-            result->setSummary(
-                buildSplitSummary( result->assignments(), inputs, config ) );
+        {
+            // Result<T> exposes const access only; take() the manifest out,
+            // attach the summary, re-wrap.
+            SplitManifest withSummary = result.take();
+            withSummary.setSummary(
+                buildSplitSummary( withSummary.assignments(), inputs, config ) );
+            return Result::success( std::move( withSummary ) );
+        }
         return result;
     }
     catch ( const SplitRoleDegenerate & )
