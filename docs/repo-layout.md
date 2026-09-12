@@ -16,6 +16,7 @@ Design note: [superpowers/specs/2026-07-19-repo-layout-reorg-design.md](superpow
 | `external/` | Small vendored third-party sources |
 | `resources/`, `images/` | App + QGIS icon/resource packs |
 | `data/` | Config manifests, lab samples, local large rasters |
+| `.planning/` | Per-track planning records (`<track>/{GOAL,PLAN,FINAL_REPORT,…}.md`); tracked per-track via `.gitignore` allow-list |
 | `docs/` | All documentation |
 | `scripts/`, `tools/`, `packaging/` | Build helpers, sample generators, AppImage |
 | `itk_ref/`, `otb_ref/` | ITK / OTB source (CMake `add_subdirectory`; stay at root) |
@@ -27,7 +28,7 @@ Design note: [superpowers/specs/2026-07-19-repo-layout-reorg-design.md](superpow
 
 | Path | Role |
 |------|------|
-| `docs/adr/` | ADR ledger `0001`–`0122` (one file per decision) |
+| `docs/adr/` | ADR ledger `0001`–`0145` (one file per decision) |
 | `docs/design/` | Product design (`DESIGN.md`), UI mockups (`ui/`) |
 | `docs/architecture/` | QGIS/OTB implementation notes, phase reports |
 | `docs/labs/` | Course / tutorial lab writeups |
@@ -68,6 +69,21 @@ Runtime resolvers try `refs/qgis` first, then legacy `qgis_ref` and install `sha
 | `src/agent/mapspec/`, `src/agent/cartography/`, `data/cartography/` | MapSpec declarative cartography (ADR 0127/0130/0131): MapSpec 2.0 document model + compiler, design tokens, component/template registries, composition solver, preflight/repair quality gates; descriptors in `data/cartography/{tokens,components,templates}` (machine index `index.json`), docs in `docs/cartography/`. |
 | `src/operators/framework/model_catalog.*` | Model runtime catalog (`ModelCatalog`) scanning `models/*/model.json`; `rs:infer` resolves catalog names. |
 | `src/processing/framework/algorithm_meta_store.*` | Algorithm capability sidecar store (`AlgorithmMetaStore`) over `data/processing/algorithm_meta/*.json`. |
+
+## `src/` — foundation & platform modules (8.x/9.0 tracks)
+
+| Path | Role |
+|------|------|
+| `src/geospatial/` | `sicnu_geospatial` — Qt-free geospatial I/O foundation (ADR 0130/0134): canonical metadata, CRS policy, reader/writer contracts, certified format registry (`formats/`), COG validation (`cog/`), product adapters (`products/`), data doctor (`doctor/`), multidim semantics. |
+| `src/geospatial/stac/` | Qt-free STAC client + item mapper (ADR 0130, superseding ADR 0050's `src/app/` placement; the Qt browser-dialog client remains `src/app/stac_client.*`). |
+| `src/geospatial/remote/` | Remote I/O (ADR 0139): HTTP fetch, range cache (memory/disk), identity resolution + tokens, source validation. |
+| `src/geospatial/util/` | Qt-free helpers: `sha256`, URI identity (`resource_uri`), time normalization, atomic FS writes. |
+| `src/operators/` | RSOperator framework: `framework/` (operator base, JSON params, operation logger, model catalog) + `rs:` / `gdal:` / `otb:` / `opencv:` / `io:` operator families, `python/` (pybind bindings), `runtime/` (model inference: ONNX Runtime / OpenCV DNN / HTTP providers, tile inference). |
+| `src/plugins/` | Plugin platform (ADR 0130 plugin lifecycle): lifecycle/adapter `framework/`, out-of-process `host/`, bundled `layer_tree/` + `processing/` plugins. |
+| `src/runtime/` | Execution runtime: chunked tile pipeline (`chunk/`), GPU plane (`gpu/`), telemetry + fault registry (`observability/`), worker protocol (`worker/`). |
+| `src/dataset/` | Dataset foundation (ADR 0134/0136): SQLite store for datasets/versions/samples/splits, label schemas, fingerprints, leakage/fold audits. |
+| `src/experiment/` | Experiment foundation (ADR 0137/0138/0143): run identity/recording, metrics + evaluation, comparison, lineage + reproduction bundles, promotion. |
+| `src/sdk/` | Headless/plugin SDK (`exprs/`): plugin discovery/loader/registry with manifests/permissions/quotas, safe external-process spawn, IPC framing, CLI exit-code contract, workflow schema/builder. |
 
 ## Icons symlink
 

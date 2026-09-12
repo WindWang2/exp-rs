@@ -16,16 +16,22 @@ See [docs/repo-layout.md](docs/repo-layout.md) for the full directory map.
 *   `src/core/`: QGIS core library — layers, rendering, CRS, geometry, providers, expressions.
 *   `src/gui/`: QGIS GUI library — map canvas, map tools, layer tree, dialogs.
 *   `src/analysis/`: Analysis libraries — classification, georeferencing, segmentation.
-*   `src/agent/`: AI Agent infrastructure — MCP server, LLM copilot, unified Agent Tool Catalog (`tool_catalog/`), spatial tools (`spatial_tools/`, ADR 0122: `spatial:raster_inspect`, `spatial:vector_inspect`, `spatial:list_models`). STAC client lives in `src/app/` (ADR 0050).
+*   `src/agent/`: AI Agent infrastructure — MCP server, LLM copilot, unified Agent Tool Catalog (`tool_catalog/`), spatial tools (`spatial_tools/`, ADR 0122: `spatial:raster_inspect`, `spatial:vector_inspect`, `spatial:list_models`). STAC: canonical client lives in `src/geospatial/stac/` (ADR 0130, superseding ADR 0050's `src/app/` placement); the Qt browser-dialog client remains at `src/app/stac_client.*`.
 *   `src/processing/`: Processing framework — algorithms, GDAL wrappers, providers, Tool Call Dispatcher, Task Center, algorithm capability sidecar store (`framework/algorithm_meta_store.*`). Toolbox coverage manifest: `data/processing/toolbox_manifest.json`; algorithm capability sidecars: `data/processing/algorithm_meta/*.json`; Generic CLI tools: `data/tools/custom/*.json`.
-*   `src/operators/`: RSOperator framework (`framework/`, incl. the model runtime catalog `model_catalog.*`) + `rs:` / `gdal:` / `otb:` / `opencv:` operator families.
+*   `src/operators/`: RSOperator framework (`framework/`, incl. the model runtime catalog `model_catalog.*`) + `rs:` / `gdal:` / `otb:` / `opencv:` operator families, plus `io:` (geospatial I/O operators), `python/` (pybind bindings) and `runtime/` (model inference: ONNX Runtime / OpenCV DNN / HTTP providers, tile inference).
+*   `src/geospatial/`: Qt-free geospatial I/O foundation (ADR 0130/0134) — canonical metadata, CRS policy, reader/writer contracts, certified format registry (`formats/`), COG validation (`cog/`), product adapters (`products/`), data doctor (`doctor/`), STAC client (`stac/`), remote fetch + range cache (`remote/`, ADR 0139), URI/hash/fs helpers (`util/`).
+*   `src/runtime/`: Execution runtime — chunked tile pipeline (`chunk/`), GPU plane (`gpu/`), telemetry + fault registry (`observability/`), worker protocol (`worker/`).
+*   `src/dataset/`: Dataset foundation — SQLite store for datasets/versions/samples/splits, label schemas, fingerprints, leakage/fold audits (ADR 0134/0136).
+*   `src/experiment/`: Experiment foundation — run identity/recording, metrics + evaluation, comparison, lineage + reproduction bundles, promotion (ADR 0137/0138/0143).
+*   `src/sdk/`: Headless/plugin SDK (`exprs/`) — plugin discovery/loader/registry with manifests/permissions/quotas, safe external-process spawn, IPC framing, CLI exit-code contract, workflow schema/builder.
+*   `src/plugins/`: Plugin platform (ADR 0130 plugin lifecycle) — lifecycle/adapter `framework/`, out-of-process `host/`, bundled `layer_tree/` + `processing/` plugins.
 *   `pi/`: Pi agent-runtime adapter (ADR 0122) — `exp-rs-spatial.ts` spawns the binary with `--mcp` and bridges MCP tools as Pi tools; `pi/knowledge/` holds the agent algorithm-selection guide.
 *   `models/`: Model runtime catalog manifests (`models/*/model.json`); `rs:infer` resolves catalog names to weight paths.
 *   `src/native/`: Platform-native integration (Linux/macOS/Windows).
 *   `src/ui/`: Qt Designer .ui form files.
 *   `external/`: Vendored C++ dependencies (nlohmann_json, spatialindex, poly2tri, lazperf).
 *   `data/samples/`: Lab / tutorial sample datasets.
-*   `docs/`: Design, architecture, ADR ledger (`docs/adr/0001`–`0122`, lazily created by domain-modeling skills), labs, agent notes, specs/plans (`docs/superpowers/` holds historical design docs).
+*   `docs/`: Design, architecture, ADR ledger (`docs/adr/0001`–`0145`, lazily created by domain-modeling skills), labs, agent notes, specs/plans (`docs/superpowers/` holds historical design docs).
 *   `refs/qgis/`, `refs/boost/`: Optional local reference trees (gitignored).
 *   `itk_ref/`, `otb_ref/`: ITK / OTB source at repo root (CMake-coupled).
 *   `src/app/`: Application shell — see [P0–P5 refactor spec](docs/superpowers/specs/2026-07-03-refactor-sprint-design.md) for module map:
@@ -39,6 +45,7 @@ See [docs/repo-layout.md](docs/repo-layout.md) for the full directory map.
     *   `main_window_layers.cpp` — layers, identify results
     *   `main_window_misc.cpp` — preferences, help, panel layout
     *   `main_window_processing.cpp` — RS processing dialog slots
+    *   `main_window_workbench.cpp` — Workbench shell wiring (WorkbenchHost / SelectionContext / CommandRegistry, ADR 0130 unified shell + ADR 0134 workbench command model)
     *   `dialogs/raster_processing_dialog_base.{h,cpp}` — shared async dialog lifecycle
 
 ## Language
