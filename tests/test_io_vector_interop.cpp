@@ -236,9 +236,13 @@ TEST_CASE( "format registry answers truthfully for driver-gated vector profiles"
   CHECK( registry.driverAvailable( *gpkg ) );
   CHECK( gpkg->certification == sicnu::geo::Certification::Certified );
 
+  // 9.0: FlatGeobuf is Certified (filtered-streaming round-trip suite);
+  // the capability answer still follows the actual build — driver-gated.
   const sicnu::geo::FormatProfile *fgb = registry.find( "FlatGeobuf" );
   REQUIRE( fgb != nullptr );
-  CHECK( fgb->certification == sicnu::geo::Certification::Accessible );
+  CHECK( fgb->certification == sicnu::geo::Certification::Certified );
+  const bool fgbDriver = GDALGetDriverByName( "FlatGeobuf" ) != nullptr;
+  CHECK( registry.driverAvailable( *fgb ) == fgbDriver );
 
   // GeoParquet is driver-gated: the profile exists always, the capability
   // answer follows the actual build. The round-trip suite certifies it only

@@ -74,10 +74,20 @@ struct StacItem
     std::map<std::string, StacAsset> assets;
     Json::Value raw;                            ///< the full Item document
 
+    /// 9.0 M4 — delivery provenance, set by the surface that produced the
+    /// item (the search page URL with the rel="self" link preferred, or the
+    /// absolute local path for parseFromFile). Relative asset hrefs resolve
+    /// against it; it is PROVENANCE, never wire data — toJson() omits it.
+    std::string sourceHref;
+
     /// Parses a STAC Item document. Structural violations (missing id,
     /// missing datetime, missing assets) throw GeoError(InvalidArgument).
     static StacItem parse( const Json::Value &item );
     static StacItem parseText( const std::string &jsonText );
+    /// 9.0 M4: parses an Item document from a local file and stamps
+    /// `sourceHref` with the file's absolute path so relative asset hrefs
+    /// resolve (the local-file STAC pattern).
+    static StacItem parseFromFile( const std::string &path );
     Json::Value toJson() const;                 ///< STAC-compatible Item document
 };
 

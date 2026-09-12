@@ -74,6 +74,19 @@ struct RangeCacheConfig
     int timeoutSeconds = 15;
     int connectTimeoutSeconds = 5;
     int maxRetries = 1;
+    /// 9.0: global cap on bytes concurrently in flight across ALL ranged
+    /// GETs (bandwidth back-pressure). A fetch larger than the cap is
+    /// admitted only when nothing else is in flight; admission is
+    /// best-effort head-of-line — under sustained small-fetch load an
+    /// over-cap fetch can be starved by barging new arrivals (documented
+    /// caveat, not a guaranteed reservation). 0 = unlimited.
+    std::uint64_t maxConcurrentFetchBytes = 64ull * 1024 * 1024;
+    /// 9.0 M3 — optional disk block layer under the memory cache:
+    /// checksummed, content-identity keyed (a resource with no provable
+    /// identity is never disk-cached), LRU/byte-capped, atomically published.
+    /// An empty directory disables the layer.
+    std::string diskDirectory;
+    std::uint64_t diskMaxBytes = 1024ull * 1024 * 1024;
 
     Json::Value toJson() const;
 };
@@ -89,6 +102,13 @@ struct RangeCacheTelemetry
     std::uint64_t invalidations = 0;         ///< resource drops after a mismatch
     std::uint64_t fallbackReads = 0;         ///< reads degraded to direct /vsicurl/
     std::uint64_t revalidations = 0;         ///< conditional requests issued
+    /// 9.0: readers that found a concurrent fetch's results already cached
+    /// (the request-dedup outcome — a miss that became a hit without a
+    /// second origin request).
+    std::uint64_t dedupHits = 0;
+    /// 9.0: high-water mark of concurrently in-flight fetch bytes (the
+    /// observed peak against maxConcurrentFetchBytes).
+    std::uint64_t maxInFlightFetchBytes = 0;
 
     Json::Value toJson() const;
 };
@@ -116,6 +136,9 @@ class RemoteRangeCache
 
     static Json::Value telemetryJson();
     static RangeCacheConfig currentConfig();
+
+    /// 9.0 M3: stats of the optional disk block layer (zeros when disabled).
+    static Json::Value diskCacheStatsJson();
 
     /// Maps a caller URL to the cached spelling ("/vsirangecache/<url>").
     static std::string cachedPath( const std::string &url );

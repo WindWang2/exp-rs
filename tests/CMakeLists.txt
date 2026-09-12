@@ -280,6 +280,9 @@ sicnu_add_io_test(test_io_grid_descriptor)
 
 # io:* operator family suite — rides the operator chain (Qt + sicnu_operators).
 sicnu_add_io_test(test_io_operators)
+sicnu_add_io_test(test_io_catalog_query)
+sicnu_add_io_test(test_io_hints)
+sicnu_add_io_test(test_io_scale9)
 target_link_libraries(test_io_operators PRIVATE Qt6::Core sicnu_operators)
 sicnu_link_jsoncpp(test_io_operators)
 

@@ -149,6 +149,13 @@ void MultidimView::close()
   mHandle = nullptr;
 }
 
+bool MultidimView::geotransform( double ( &out )[6] ) const
+{
+  if ( !mHandle )
+    return false;
+  return GDALGetGeoTransform( datasetOf( mHandle ), out ) == CE_None;
+}
+
 MultidimGrid MultidimView::readSlice( const std::string &variable,
                                       const std::vector<std::pair<std::string, std::int64_t>> &dimSlices,
                                       std::size_t maxCells )
