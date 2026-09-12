@@ -50,6 +50,18 @@ add_library(sicnu_agent SHARED
   harness/grounding_tools.cpp
   harness/grounding_tools.h
   harness/intent_vocabulary.h
+  harness/lab_intent.cpp
+  harness/lab_intent.h
+  harness/lab_spec.cpp
+  harness/lab_spec.h
+  harness/lab_glossary.cpp
+  harness/lab_glossary.h
+  harness/lab_diagnostics.cpp
+  harness/lab_diagnostics.h
+  harness/lab_copilot.cpp
+  harness/lab_copilot.h
+  harness/lab_tools.cpp
+  harness/lab_tools.h
   harness/agent_plan.cpp
   harness/agent_plan.h
   harness/scientific_preflight.cpp

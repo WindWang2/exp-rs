@@ -19,6 +19,7 @@
 #include "../symbology/symbology_tools.h"
 #include "../commands/workspace_commands.h"
 #include "../harness/harness_tools.h"
+#include "../harness/lab_tools.h"
 #include "../harness/capability_graph.h"
 #include "../harness/grounding_tools.h"
 #include "../harness/plan_tools.h"
@@ -266,6 +267,8 @@ void SpatialToolRegistry::registerBuiltinTools()
   harness::registerCapabilityGraphTools();
   // Harness 9.0 (M5): bounded run diagnosis + structured repair proposals.
   harness::registerRunLoopTools();
+  // D9: lab copilot (teaching mode) — student-safe ask + teacher reference.
+  harness::registerLabTools();
   // Platform 5.0 solution knowledge: solution:search/describe/validate/instantiate.
   harness::registerSolutionTools();
 }
