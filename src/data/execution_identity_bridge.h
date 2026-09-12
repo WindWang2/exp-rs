@@ -6,9 +6,13 @@
 // inputs could never participate in execution-cache reuse. This bridge
 // installs the geospatial-backed resolver:
 //
-//   path → sicnu::geo::remoteIdentityToken(path) — fail-closed (an empty
-//   token means "cannot identify"; the input stays uncacheable, exactly the
-//   seam's documented conservative verdict).
+//   path → TTL session cache → sicnu::geo::remoteIdentityToken(path) on
+//   miss/expiry — fail-closed (an empty token means "cannot identify"; the
+//   input stays uncacheable, exactly the seam's documented conservative
+//   verdict; failures are never cached). The TTL window is what makes the
+//   TaskCenter warm-then-consult pattern work: the warm-up pass probes
+//   lock-free BEFORE the scheduler mutex is taken, and a consult under it
+//   hits the recent entry — no network under any lock.
 //
 // Only tokens carry identity into fingerprints: no URL, no credentials, no
 // validator strings — a cache key derived from the token never leaks anything

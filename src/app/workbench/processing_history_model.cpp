@@ -27,15 +27,19 @@ void ProcessingHistoryModel::setEntries( const QVector<HistoryEntry> &entries )
                               return a.taskId > b.taskId;
                           return a.started > b.started;
                       } );
-    if ( sorted.size() > kMaxRows )
+    const bool droppedRows = sorted.size() > kMaxRows;
+    if ( droppedRows )
     {
         m_droppedCount += sorted.size() - kMaxRows;
         sorted.resize( kMaxRows );
-        emit droppedCountChanged( m_droppedCount );
     }
     m_entries = sorted;
     refilter();
     endResetModel();
+    // Emit only once the model is no longer mid-reset: a listener that
+    // re-queries rowCount/data in response must see the settled model.
+    if ( droppedRows )
+        emit droppedCountChanged( m_droppedCount );
 }
 
 void ProcessingHistoryModel::setStateFilter( const QString &stateSubstring )
@@ -89,10 +93,7 @@ QVariant ProcessingHistoryModel::data( const QModelIndex &index, int role ) cons
     switch ( index.column() )
     {
         case Title:
-        {
-            const QString text = entry->title;
-            return role == Qt::ToolTipRole ? text : text;
-        }
+            return entry->title;
         case Source:
             return entry->source;
         case State:

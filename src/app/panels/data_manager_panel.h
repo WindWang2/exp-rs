@@ -129,6 +129,20 @@ class DataManagerPanel : public QDockWidget
     bool isPromotable( sicnu::data::AssetId id ) const;
     bool isRelocatable( sicnu::data::AssetId id ) const;
 
+    /// Shared constructor of one asset tree row: creates the item under
+    /// @p parent (or the tree root) and applies the cell layout shared by
+    /// addAssetRow/addIndexRow — kind icon + name cell, persistence and
+    /// reference-count cells, asset-id role, and the missing-source tooltip.
+    /// @p kindLabel stays caller-supplied: snapshot rows refine the raster
+    /// label with band count, index rows degrade to the plain kind word.
+    void createRow( QTreeWidgetItem *parent,
+                    const QString &displayName,
+                    const QString &kindLabel,
+                    sicnu::data::AssetKind kind,
+                    sicnu::data::AssetState state,
+                    const QString &source,
+                    sicnu::data::PersistencePolicy persistence,
+                    const sicnu::data::AssetId &id );
     void addAssetRow( QTreeWidgetItem *parent, const sicnu::data::AssetSnapshot &snapshot );
     /// Workbench 8.0: renders one catalog index entry as a tree row (the
     /// light path used by refresh; full snapshots stay a lazy query).

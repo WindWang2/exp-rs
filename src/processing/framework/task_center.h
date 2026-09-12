@@ -2,15 +2,18 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QVariantMap>
 #include <QList>
 #include <QMap>
 #include <QMultiHash>
 #include <QDateTime>
+#include <QJsonObject>
 #include <QMutex>
 #include <QWaitCondition>
 #include <QPointer>
 #include <memory>
+#include <optional>
 #include <queue>
 #include <string>
 #include <functional>
@@ -713,19 +716,53 @@ private:
     using UpstreamResolver = std::function<UpstreamResolution( const sicnu::workflow::PlaceholderRef &ref,
                                                               const QString &paramKey )>;
 
-    /// Computes and records the SUBMISSION-TIME execution fingerprint for
-    /// @a taskId (#726): the params are statically placeholder-resolved via
-    /// @a resolver, destination keys are excluded from the hashed parameters
-    /// by KEY (platform output vocabulary, never string-value equality), and
-    /// every input is resolved into identity — registered assets via the
-    /// catalog, in-pipeline producer outputs via the producer's own
-    /// fingerprint (chained identity). Any unidentifiable input, a
-    /// non-deterministic operator, an off-affinity submitting thread, or a
-    /// missing catalog records NO fingerprint (uncacheable — conservative).
-    /// Must be called with m_mutex held, once per task at enqueue/submit
-    /// time, so downstream steps admitted on JobEngine worker threads never
-    /// need the catalog.
-    void computeAndRecordSubmissionFingerprintLocked( long taskId, const UpstreamResolver &resolver );
+    /// Submission fingerprint snapshotted UP TO input-identity resolution:
+    /// everything in-memory (determinism gate, implementation identity,
+    /// statically-resolved parameters) is prepared under m_mutex; the
+    /// input-identity collector — the only stage that can reach the
+    /// installed remote-identity resolver, a BLOCKING network probe — runs
+    /// later in commitSubmissionFingerprint with NO scheduler mutex held
+    /// (review P1: never consult the resolver under m_mutex).
+    struct PendingSubmissionFingerprint
+    {
+        long taskId = -1;
+        sicnu::data::DataManager *catalog = nullptr;
+        QString algorithmId;
+        QString implementationHash;            // schema + contract + platform version hex
+        QJsonObject hashedParams;              // output-vocabulary keys excluded (identity)
+        QVariantMap resolvedAll;               // full statically-resolved map (dispatch verification)
+        QVariantMap parameterMap;              // task parameter map at prepare time (staleness gate)
+        QMap<QString, long> chainedProducers;  // param key → upstream producer task
+        QStringList chainedKeys;               // chained param keys (excluded from the input scan)
+    };
+
+    /// Prepares the SUBMISSION-TIME execution fingerprint for @a taskId
+    /// (#726): the params are statically placeholder-resolved via @a
+    /// resolver, destination keys are excluded from the hashed parameters
+    /// by KEY (platform output vocabulary, never string-value equality),
+    /// and the result is returned as a pending record. nullopt when the
+    /// task records NO fingerprint (cache disabled, missing catalog,
+    /// off-affinity submitting thread, unknown task, non-deterministic
+    /// operator — conservative uncacheable). Must be called with m_mutex
+    /// held, once per task at enqueue/submit time, so downstream steps
+    /// admitted on JobEngine worker threads never need the catalog.
+    /// Finish the record with commitSubmissionFingerprint, OUTSIDE m_mutex,
+    /// before the first admission pass that can dispatch the task.
+    std::optional<PendingSubmissionFingerprint>
+    prepareSubmissionFingerprintLocked( long taskId, const UpstreamResolver &resolver );
+
+    /// Commits a pending submission fingerprint: resolves every input's
+    /// identity (may invoke the installed remote-identity resolver —
+    /// BLOCKING network I/O) WITHOUT m_mutex — admission, progress and
+    /// cancel stay live throughout — then re-acquires the mutex only for
+    /// the pure in-memory record. The record phase re-validates the
+    /// snapshot (cache still enabled, task alive, parameters unchanged,
+    /// every chained producer fingerprint recorded); any divergence drops
+    /// the fingerprint (conservative miss — dispatch verification would
+    /// fail closed identically). Call pending records in submission
+    /// (topological) order so a producer's fingerprint is already recorded
+    /// when its consumer commits.
+    void commitSubmissionFingerprint( PendingSubmissionFingerprint pending );
 
     /// Dispatch-time verification (#726): the stored fingerprint was computed
     /// over statically-resolved parameters; once the real placeholder
