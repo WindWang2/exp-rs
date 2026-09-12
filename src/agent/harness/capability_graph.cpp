@@ -8,6 +8,7 @@
 #include "entity_resolver.h"
 #include "grounding_tools.h"
 #include "harness_error.h"
+#include "intent_vocabulary.h"
 #include "recipe_catalog.h"
 #include "scientific_preflight.h"
 #include "spatial_tools/spatial_tool.h"
@@ -40,41 +41,43 @@ const std::vector<IntentTriggers> &triggerTable()
   static const std::vector<IntentTriggers> kTable = {
     // Compound / most specific first — resolved by scoring, not order, but
     // keeping multi-word terms here documents them next to their singles.
-    { "sar_flood", { "sar flood", "sar 洪水", "雷达洪水", "sar inundation" } },
-    { "sar_change", { "sar change", "sar 变化", "雷达变化" } },
-    { "sar_water", { "sar water", "sar 水体", "雷达水体" } },
-    { "ndvi", { "ndvi", "植被指数", "vegetation index" } },
-    { "evi", { "evi" } },
-    { "savi", { "savi" } },
-    { "ndre", { "ndre" } },
-    { "ndwi", { "ndwi" } },
-    { "mndwi", { "mndwi" } },
-    { "ndsi", { "ndsi", "snow index", "雪指数" } },
-    { "nbr", { "nbr", "normalized burn", "燃烧指数" } },
-    { "dnbr", { "dnbr", "dnbr", "delta nbr", "差分燃烧" } },
-    { "ndbi", { "ndbi", "built-up index", "建筑指数" } },
-    { "bsi", { "bsi", "bare soil", "裸土指数" } },
-    { "water", { "water body", "water extraction", "水体提取", "水体", "水面", "water" } },
-    { "flood", { "flood", "洪水", "淹没", "内涝", "inundation" } },
-    { "sar", { "sar", "radar", "雷达", "合成孔径" } },
-    { "ship", { "ship", "vessel", "船只", "船舶" } },
-    { "change", { "change detection", "变化检测", "bitemporal", "bi-temporal", "双时相",
-                  "变化", "change" } },
-    { "classify", { "classification", "classify", "land cover", "land use", "土地覆盖",
+    // Intent keys (and single-word terms that coincide with an intent id)
+    // come from intent_vocabulary.h so the vocabulary has one definition.
+    { kIntentSarFlood, { "sar flood", "sar 洪水", "雷达洪水", "sar inundation" } },
+    { kIntentSarChange, { "sar change", "sar 变化", "雷达变化" } },
+    { kIntentSarWater, { "sar water", "sar 水体", "雷达水体" } },
+    { kIntentNdvi, { kIntentNdvi, "植被指数", "vegetation index" } },
+    { kIntentEvi, { kIntentEvi } },
+    { kIntentSavi, { kIntentSavi } },
+    { kIntentNdre, { kIntentNdre } },
+    { kIntentNdwi, { kIntentNdwi } },
+    { kIntentMndwi, { kIntentMndwi } },
+    { kIntentNdsi, { kIntentNdsi, "snow index", "雪指数" } },
+    { kIntentNbr, { kIntentNbr, "normalized burn", "燃烧指数" } },
+    { kIntentDnbr, { kIntentDnbr, kIntentDnbr, "delta nbr", "差分燃烧" } },
+    { kIntentNdbi, { kIntentNdbi, "built-up index", "建筑指数" } },
+    { kIntentBsi, { kIntentBsi, "bare soil", "裸土指数" } },
+    { kIntentWater, { "water body", "water extraction", "水体提取", "水体", "水面", kIntentWater } },
+    { kIntentFlood, { kIntentFlood, "洪水", "淹没", "内涝", "inundation" } },
+    { kIntentSar, { kIntentSar, "radar", "雷达", "合成孔径" } },
+    { kIntentShip, { kIntentShip, "vessel", "船只", "船舶" } },
+    { kIntentChange, { "change detection", "变化检测", "bitemporal", "bi-temporal", "双时相",
+                  "变化", kIntentChange } },
+    { kIntentClassify, { "classification", kIntentClassify, "land cover", "land use", "土地覆盖",
                     "土地利用", "kmeans", "监督分类", "supervised", "segmentation", "分割",
                     "obia" } },
-    { "phenology", { "phenology", "物候", "growing season", "生长季" } },
-    { "temporal", { "time series", "temporal", "时间序列", "时序", "trend", "趋势" } },
-    { "terrain", { "terrain", "slope", "aspect", "hillshade", "dem", "地形", "坡度",
+    { kIntentPhenology, { kIntentPhenology, "物候", "growing season", "生长季" } },
+    { kIntentTemporal, { "time series", kIntentTemporal, "时间序列", "时序", "trend", "趋势" } },
+    { kIntentTerrain, { kIntentTerrain, "slope", "aspect", "hillshade", "dem", "地形", "坡度",
                    "坡向", "山体阴影", "高程" } },
-    { "accuracy", { "accuracy", "confusion matrix", "精度", "混淆矩阵", "验证样本" } },
-    { "qa", { "cloud mask", "qa", "云掩膜", "云 mask", "质量波段" } },
-    { "preprocess", { "preprocess", "preprocessing", "mosaic", "reproject", "clip",
+    { kIntentAccuracy, { kIntentAccuracy, "confusion matrix", "精度", "混淆矩阵", "验证样本" } },
+    { kIntentQa, { "cloud mask", kIntentQa, "云掩膜", "云 mask", "质量波段" } },
+    { kIntentPreprocess, { kIntentPreprocess, "preprocessing", "mosaic", "reproject", "clip",
                       "orthorectify", "atmospheric correction", "预处理", "镶嵌", "重投影",
                       "裁剪", "正射", "大气校正" } },
-    { "inference", { "inference", "deep learning", "unet", "segformer", "推理", "深度学习",
+    { kIntentInference, { kIntentInference, "deep learning", "unet", "segformer", "推理", "深度学习",
                      "模型推理" } },
-    { "zonal", { "zonal statistics", "zonal stats", "per-zone", "区域统计", "分区统计" } },
+    { kIntentZonal, { "zonal statistics", "zonal stats", "per-zone", "区域统计", "分区统计" } },
   };
   return kTable;
 }
@@ -90,12 +93,12 @@ struct CompoundRule {
 const std::vector<CompoundRule> &compoundRules()
 {
   static const std::vector<CompoundRule> kRules = {
-    { "sar", "flood", "sar_flood" },
-    { "sar", "change", "sar_change" },
-    { "sar", "water", "sar_water" },
-    { "雷达", "flood", "sar_flood" },
-    { "雷达", "change", "sar_change" },
-    { "雷达", "水体", "sar_water" },
+    { kIntentSar, kIntentFlood, kIntentSarFlood },
+    { kIntentSar, kIntentChange, kIntentSarChange },
+    { kIntentSar, kIntentWater, kIntentSarWater },
+    { "雷达", kIntentFlood, kIntentSarFlood },
+    { "雷达", kIntentChange, kIntentSarChange },
+    { "雷达", "水体", kIntentSarWater },
   };
   return kRules;
 }

@@ -49,6 +49,7 @@ add_library(sicnu_agent SHARED
   harness/entity_resolver.h
   harness/grounding_tools.cpp
   harness/grounding_tools.h
+  harness/intent_vocabulary.h
   harness/agent_plan.cpp
   harness/agent_plan.h
   harness/scientific_preflight.cpp
