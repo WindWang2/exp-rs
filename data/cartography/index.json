@@ -959,6 +959,33 @@
 			"version" : 1
 		},
 		{
+			"category" : "chart",
+			"compatibility" : 
+			{
+				"requires_map_frame" : false,
+				"result_types" : 
+				[
+					"classification",
+					"land_cover",
+					"accuracy",
+					"change"
+				]
+			},
+			"description" : "Accuracy matrix table (reference classes against classified counts with producer/user accuracy columns); deterministic 24x24 budget inherited from the table renderer and the binding matrix shape.",
+			"id" : "table/accuracy-matrix",
+			"semantic_roles" : 
+			[
+				"accuracy.matrix",
+				"accuracy.report"
+			],
+			"variants" : 
+			[
+				"zebra",
+				"plain"
+			],
+			"version" : 1
+		},
+		{
 			"category" : "text",
 			"compatibility" : 
 			{

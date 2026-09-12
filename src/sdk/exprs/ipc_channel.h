@@ -25,6 +25,8 @@
  ***************************************************************************/
 #pragma once
 
+#include <algorithm>
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -132,8 +134,18 @@ public:
     /// BEFORE the next large frame is written, or it sees E6003 and tears the
     /// channel down; that is the enforcement contract, not a bug.
     void lowerFrameCap( uint32_t maxFrameBytes );
-    /// Current effective frame cap.
-    uint32_t frameCap() const { return mMaxFrameBytes.load(); }
+    /// Protocol 1.2 per-direction caps (monotonic per direction, both
+    /// initialized from the negotiated shared cap). send = frames THIS
+    /// endpoint writes (requests on the host, responses/progress/events on
+    /// the worker); recv = frames it accepts. Lowering one direction never
+    /// raises the other, so a 1.1 peer that only knows the shared cap stays
+    /// compatible: every directional bound is <= the shared bound it
+    /// already negotiated.
+    void setDirectionalFrameCaps( uint32_t maxSendBytes, uint32_t maxRecvBytes );
+    /// Current effective frame cap (min of the two directions).
+    uint32_t frameCap() const { return std::min( mMaxSendFrameBytes.load(), mMaxRecvFrameBytes.load() ); }
+    uint32_t sendFrameCap() const { return mMaxSendFrameBytes.load(); }
+    uint32_t recvFrameCap() const { return mMaxRecvFrameBytes.load(); }
     /// Events dropped by the pending-event queue cap (diagnostics).
     long long droppedEvents() const { return mDroppedEvents.load(); }
 
@@ -145,7 +157,8 @@ private:
         bool done = false;
     };
 
-    bool sendEnvelope( const Ipc::Envelope &envelope, std::string &error );
+    bool sendEnvelope( const Ipc::Envelope &envelope, std::string &error,
+                       std::string *failureCode = nullptr );
     void readerLoop();
     void handleFrame( const std::string &payload );
     void failAllPending( Outcome::Status status, const std::string &code, const std::string &message );
@@ -168,9 +181,12 @@ private:
     std::thread mReader;
     std::atomic<bool> mClosed{ false };
     std::atomic<long long> mNextId{ 1 };
-    /// Effective frame cap; initialized from Options, lowered via
-    /// lowerFrameCap(). Read on the writer and reader paths.
-    std::atomic<uint32_t> mMaxFrameBytes;
+    /// Effective per-direction frame caps (protocol 1.2). Initialized from
+    /// Options (the shared 1.1 cap); lowered via lowerFrameCap (both
+    /// directions) or setDirectionalFrameCaps (one direction each). Read on
+    /// the writer and reader paths.
+    std::atomic<uint32_t> mMaxSendFrameBytes;
+    std::atomic<uint32_t> mMaxRecvFrameBytes;
     std::atomic<long long> mDroppedEvents{ 0 };
     int mPeerMajor = -1;
     int mPeerMinor = -1;

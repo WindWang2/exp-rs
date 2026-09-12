@@ -55,6 +55,8 @@ bool isKnownIntent( const std::string &intent )
     "evi", "savi", "ndre", "ndwi", "mndwi", "ndsi", "nbr", "dnbr", "ndbi", "bsi",
     "water", "flood", "sar_water", "sar_flood", "sar", "ship",
     "temporal", "terrain", "accuracy", "qa", "preprocess", "inference",
+    // Harness 9.0 (M2): zonal raster statistics over vector zones.
+    "zonal",
   };
   for ( const char *candidate : kIntents )
     if ( intent == candidate )

@@ -54,6 +54,10 @@ const char *const kCategories[] = {
   "normal_workflow", "missing_data", "ambiguity", "invalid_science",
   "impossible_task", "multimodal", "context_continuation",
   "anti_hallucination", "map_confirmation", "budget",
+  // Harness 9.0 (M9): layered expansion — failure, recovery, handoff and
+  // adversarial-surfaces coverage, all still deterministic Tier A.
+  "invalid_input", "modality_mismatch", "recovery", "long_plan",
+  "cartography", "prompt_injection", "typed_contract",
 };
 
 std::string corpusDirectory()

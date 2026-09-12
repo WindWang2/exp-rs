@@ -35,6 +35,10 @@ add_library(sicnu_agent SHARED
   harness/context_ledger.h
   harness/harness_error.cpp
   harness/harness_error.h
+  harness/harness_actions.cpp
+  harness/harness_actions.h
+  harness/run_loop.cpp
+  harness/run_loop.h
   harness/tool_taxonomy.cpp
   harness/tool_taxonomy.h
   harness/tool_manifest.cpp
@@ -103,6 +107,8 @@ add_library(sicnu_agent SHARED
   cartography/composition.h
   cartography/design_tokens.cpp
   cartography/design_tokens.h
+  cartography/export.cpp
+  cartography/export.h
   cartography/quality.cpp
   cartography/quality.h
   cartography/registry.cpp

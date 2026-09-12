@@ -9,6 +9,7 @@
 #include "grounding_tools.h"
 #include "harness_error.h"
 #include "recipe_catalog.h"
+#include "scientific_preflight.h"
 #include "spatial_tools/spatial_tool.h"
 
 #include <algorithm>
@@ -73,6 +74,7 @@ const std::vector<IntentTriggers> &triggerTable()
                       "裁剪", "正射", "大气校正" } },
     { "inference", { "inference", "deep learning", "unet", "segformer", "推理", "深度学习",
                      "模型推理" } },
+    { "zonal", { "zonal statistics", "zonal stats", "per-zone", "区域统计", "分区统计" } },
   };
   return kTable;
 }
@@ -659,6 +661,8 @@ Json::Value gatherUnderstanding( const Json::Value &input )
       Json::Value understanding =
         sicnu::agent::contracts::datasetUnderstandingFromRasterInspect( result.output );
       understanding["modality"] = inferModality( result.output );
+      understanding["fact_status"]["modality"] =
+        understanding["modality"].asString() == "unknown" ? "unknown" : "assumed";
       return understanding;
     }
   }
@@ -730,6 +734,10 @@ class ResolveIntentTool final : public SpatialTool
       {
         document["intent"] = resolution.intent;
         document["matched_terms"] = resolution.matchedTerms;
+        // Harness 9.0 (M2): the typed intent document — required/optional
+        // facts, expected products, quality expectations — rides with the
+        // resolution so Pi plans against a contract, not a keyword.
+        document["intent_document"] = typedIntentDocument( resolution.intent );
         document["capabilities"] = capabilityCandidates( resolution.intent, understanding );
         // Harness 8.0 (Area C): explainable planning surface — what facts are
         // missing, what safe preparation exists for the blockers, and which

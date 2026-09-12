@@ -548,7 +548,12 @@ Json::Value PluginManifest::toJson() const
     // dropped "runtime" silently demoted host-process plugins to
     // in-process on every cache hit (the fixture crash-in-CLI bug class).
     json["runtime"] = pluginRuntimeKindName( runtime );
-    if ( entrypointKind == PluginEntrypointKind::Python )
+    // Project the python section whenever it carries content — the parser
+    // reads it regardless of entrypoint kind, so a native plugin with an
+    // auxiliary python payload must survive a round trip (found by the 9.0
+    // completeness walk; the kind-only guard silently dropped it).
+    if ( entrypointKind == PluginEntrypointKind::Python || !python.module.empty()
+         || !python.package.empty() )
         json["python"] = python.toJson();
     Json::Value caps( Json::arrayValue );
     for ( const std::string &capability : capabilities )

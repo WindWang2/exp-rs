@@ -16,6 +16,7 @@
 #include "workbench/command_defs.h"
 #include "workbench/command_palette.h"
 #include "workbench/command_registry.h"
+#include "workbench/workbench_state.h"
 #include "workbench/inspector_host.h"
 #include "workbench/layer_sections.h"
 #include "workbench/processing_history_panel.h"
@@ -128,7 +129,7 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     // Workbench 8.0: in-flight fact for ContextFacts / suggestedNextAction.
     // The predicate reads TaskCenter's authoritative task set on the GUI
     // thread only (the context recomputes on its own debounce).
-    m_selectionContext->setInFlightTaskPredicate( [] {
+    const auto inFlightPredicate = [] {
         const QList<sicnu::AlgorithmTaskInfo> tasks =
             sicnu::TaskCenter::instance().allTasks();
         for ( const sicnu::AlgorithmTaskInfo &task : tasks )
@@ -137,7 +138,20 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
                 return true;
         }
         return false;
-    } );
+    };
+    m_selectionContext->setInFlightTaskPredicate( inFlightPredicate );
+
+    // Workbench 9.0 M1: explicit coarse-state model. Single aggregation
+    // point for the empty-state projections (updateCanvasEmptyState /
+    // updateLayersEmptyState) and any enable/disable rule derived from the
+    // phase — consumers never re-derive hasLayers by hand anymore.
+    m_workbenchState = new sicnu::app::WorkbenchStateModel( m_mapCanvas, this );
+    m_workbenchState->attachSelectionContext( m_selectionContext );
+    m_workbenchState->setInFlightTaskPredicate( inFlightPredicate );
+    connect( m_workbenchState, &sicnu::app::WorkbenchStateModel::phaseChanged,
+             this, &QgisDesktopWindow::updateCanvasEmptyState );
+    connect( m_workbenchState, &sicnu::app::WorkbenchStateModel::phaseChanged,
+             this, &QgisDesktopWindow::updateLayersEmptyState );
 
     // ── Workbenches ───────────────────────────────────────────────────
     m_workbenchHost->registerWorkbench(

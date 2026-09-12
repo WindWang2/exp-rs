@@ -1,6 +1,11 @@
 #include "main_window.h"
 #include "dialogs/dialog_help_catalog.h"
 #include "active_view_host.h"
+#include "plugin_ui_invoke_delegate.h"
+#include "plugins/framework/plugin_ui_schema_host.h"
+#include "workbench/command_registry.h"
+#include "workbench/plugin_command_defs.h"
+#include <QPointer>
 #include "project_context.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
 #include "map_tools/map_tool_manager.h"
@@ -8,6 +13,7 @@
 #include "app_paths.h"
 #include "qgis_app_facade.h"
 #include "widgets/rs_empty_state_widget.h"
+#include "workbench/workbench_state.h"
 #include <QStackedWidget>
 
 #ifdef SICNU_EMBED_PYTHON
@@ -228,16 +234,40 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
         // attached and released THROUGH the shell, so unload can detach and
         // delete them while the plugin binary is still mapped.
         m_exprsShellUi = new ExprsPluginShellUi( this, exprsPluginMenu );
+        // Review A3: when a plugin's UI is released, its registry commands
+        // go with it — a reload can re-register cleanly.
+        m_exprsShellUi->setCommandReleaseHook( [this]( const QString &pluginId ) {
+            if ( m_commandRegistry )
+                m_commandRegistry->unregisterCommandsMatching(
+                    QStringLiteral( "plugin.%1." ).arg( pluginId ) );
+        } );
         uiHost->setShellSink( m_exprsShellUi );
+        // Workbench 9.0 M8: declarative out-of-process UI (protocol 1.1)
+        // renders through the SAME reverse-ownership sink; events reach the
+        // worker via the production invoke delegate.
+        sicnu::plugins::PluginUiSchemaRenderer::instance()->setShellSink( m_exprsShellUi );
         const auto exprsLoaded = exprs::PluginRegistry::instance().loadAllValidated();
         for ( const std::string &pluginIdStd : exprsLoaded ) {
             const QString pluginId = QString::fromStdString( pluginIdStd );
             const exprs::LoadedPlugin *loaded =
                 exprs::PluginRegistry::instance().loaded( pluginIdStd );
-            if ( !loaded || !loaded->uiContribution )
-                continue;
-            uiHost->attachCollectedUi(
-                pluginId, static_cast<exprs::UiContributionV1 *>( loaded->uiContribution ) );
+            if ( loaded && loaded->uiContribution )
+                uiHost->attachCollectedUi(
+                    pluginId, static_cast<exprs::UiContributionV1 *>( loaded->uiContribution ) );
+
+            // Declarative path: describe → render → attach. ok=false is the
+            // normal "no declarative UI" answer (E6008) — not a failure.
+            const Json::Value described =
+                sicnu::plugins::PluginRuntimeHost::instance().describePluginUiSchema( pluginIdStd );
+            if ( described.get( "ok", false ).asBool() && described.isMember( "schema" ) )
+            {
+                QString renderError;
+                sicnu::plugins::PluginUiSchemaRenderer::instance()->attachPluginSchema(
+                    pluginId, described["schema"],
+                    std::make_unique<sicnu::app::PluginUiInvokeDelegate>( pluginId ),
+                    renderError );
+                registerPluginCommands( pluginId );
+            }
         }
         // Plugin Manager entry point.
         exprsPluginMenu->addSeparator();
@@ -305,6 +335,11 @@ QgisDesktopWindow::~QgisDesktopWindow()
     disposeChildWindow(m_georefI2M);
     m_georefI2M = nullptr;
 
+    // Review A2: the declarative-UI renderer is a singleton holding a raw
+    // sink pointer into this window — clear it and drop every rendered
+    // plugin surface BEFORE the child widgets (docks/menus) disappear.
+    sicnu::plugins::PluginUiSchemaRenderer::instance()->setShellSink( nullptr );
+
     // Stop map jobs and release the active map tool before unique_ptr members
     // and QObject children (canvas) are destroyed — prevents double-delete of
     // QgsMapTool objects parented to the canvas (exit SIGSEGV).
@@ -336,6 +371,24 @@ QgisDesktopWindow::~QgisDesktopWindow()
 #endif
     m_activeViewHost.reset();
     m_projectContext.reset();
+}
+
+void QgisDesktopWindow::registerPluginCommands( const QString &pluginId )
+{
+    // Workbench 9.0 M8 (with M2): plugin UI contributions become first-class
+    // registry commands — palette/help/shortcut surfaces see them like every
+    // other command. Availability follows the rendered action, so unloading
+    // (or crashing) a plugin disables its commands instead of leaving dead
+    // menu entries behind.
+    if ( !m_commandRegistry || !m_exprsShellUi )
+        return;
+    // Re-attach (reload path): drop the previous generation first so
+    // registerCommand's duplicate rejection cannot strand the plugin.
+    m_commandRegistry->unregisterCommandsMatching(
+        QStringLiteral( "plugin.%1." ).arg( pluginId ) );
+    sicnu::app::registerPluginMenuCommands(
+        m_commandRegistry, m_exprsShellUi->menuActionsFor( pluginId ), pluginId,
+        tr( "插件" ) );
 }
 
 void QgisDesktopWindow::setupUi()
@@ -464,15 +517,21 @@ void QgisDesktopWindow::setupMapCanvas()
 
 void QgisDesktopWindow::updateCanvasEmptyState()
 {
-    const bool hasLayers = m_mapCanvas && !m_mapCanvas->layers().isEmpty();
+    // Workbench 9.0 M1: project from the shared state model (page 0 =
+    // welcome/empty, page 1 = canvas) instead of probing the canvas here.
+    const int page = m_workbenchState
+                         ? sicnu::app::WorkbenchRules::canvasStackPage( m_workbenchState->phase() )
+                         : ( m_mapCanvas && !m_mapCanvas->layers().isEmpty() ? 1 : 0 );
     if ( m_canvasStack )
-        m_canvasStack->setCurrentIndex( hasLayers ? 1 : 0 );
+        m_canvasStack->setCurrentIndex( page );
 }
 
 void QgisDesktopWindow::updateLayersEmptyState()
 {
-    const bool hasLayers = m_mapCanvas && !m_mapCanvas->layers().isEmpty();
+    const int page = m_workbenchState
+                         ? sicnu::app::WorkbenchRules::canvasStackPage( m_workbenchState->phase() )
+                         : ( m_mapCanvas && !m_mapCanvas->layers().isEmpty() ? 1 : 0 );
     if ( m_layersStack )
-        m_layersStack->setCurrentIndex( hasLayers ? 0 : 1 );
+        m_layersStack->setCurrentIndex( page == 1 ? 0 : 1 );
 }
 

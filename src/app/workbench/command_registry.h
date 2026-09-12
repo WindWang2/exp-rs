@@ -70,6 +70,13 @@ class CommandRegistry : public QObject
     /// @return false (with qWarning) when rejected; contract tests assert.
     bool registerCommand( CommandDefinition definition );
 
+    /// Workbench 9.0 M8 (review A3): remove every command whose id starts
+    /// with @p prefix, together with its projections and shortcut-owner
+    /// entries. Returns the number removed. Used for the reserved
+    /// `plugin.` namespace so an unload clears the commands and a reload
+    /// can re-register them.
+    int unregisterCommandsMatching( const QString &prefix );
+
     const CommandDefinition *definition( const QString &id ) const;
     /// All definitions sorted by id (stable for tests/palette).
     QList<const CommandDefinition *> definitions() const;
