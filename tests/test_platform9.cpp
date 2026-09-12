@@ -1178,7 +1178,6 @@ TEST_CASE( "M6: numeric rendering stays locale-independent (C-locale dot)",
   // pixels would require OCR. If a renderer switches to locale-aware
   // APIs, this test still passes; the render-determinism hashes are the
   // backstop.
-{
   // QString::number(v, 'g', n) is C-locale by contract: the chart
   // renderers rely on it, so pin the exact known-answer the table cells
   // will draw regardless of the host locale.
