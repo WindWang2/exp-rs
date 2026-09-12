@@ -126,10 +126,17 @@ ReadStatus read( IIpcStream &stream, std::string &payload,
         }
     }
 
-    uint32_t length = static_cast<uint32_t>( pending[ 0 ] )
-                      | ( static_cast<uint32_t>( pending[ 1 ] ) << 8 )
-                      | ( static_cast<uint32_t>( pending[ 2 ] ) << 16 )
-                      | ( static_cast<uint32_t>( pending[ 3 ] ) << 24 );
+    // Length bytes are unsigned. Casting a signed char 0x80..0xFF
+    // straight to uint32_t sign-extends (0x80 → 4294967168) and a legal
+    // 128–255 byte frame is refused as TooLarge (E6003) on MSVC / signed-char
+    // toolchains.
+    const auto lengthByte = []( char c ) -> uint32_t {
+        return static_cast<uint32_t>( static_cast<unsigned char>( c ) );
+    };
+    uint32_t length = lengthByte( pending[ 0 ] )
+                      | ( lengthByte( pending[ 1 ] ) << 8 )
+                      | ( lengthByte( pending[ 2 ] ) << 16 )
+                      | ( lengthByte( pending[ 3 ] ) << 24 );
     if ( length > limits.maxFrameBytes )
     {
         error = "peer announced a frame of " + std::to_string( length )
@@ -146,7 +153,10 @@ ReadStatus read( IIpcStream &stream, std::string &payload,
     if ( !readExact( stream, &pending[ 0 ] + kPrefixBytes, got, length,
                      deadline, timedOut, eof, error ) )
     {
-        pending.resize( got ); // keep only what was actually consumed
+        // `got` is payload bytes consumed, not the whole pending buffer.
+        // Keep the 4-byte length prefix so the next read() resumes the same
+        // frame instead of treating leftover payload as a fresh length.
+        pending.resize( kPrefixBytes + got );
         if ( timedOut )
             return ReadStatus::Timeout; // resumed by the next read() call
         return eof ? ReadStatus::Eof : ReadStatus::Error;
