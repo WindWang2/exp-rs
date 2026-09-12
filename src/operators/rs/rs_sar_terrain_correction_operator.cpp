@@ -92,8 +92,9 @@ Json::Value RsSarTerrainCorrectionOperator::metadata() const {
     meta["prerequisites"].append("sigma0 raster (linear power) and a DEM on the exact "
                                  "same grid (radar geometry for GRD products), plus the "
                                  "scene incidence angle and platform heading.");
-    meta["workflowHints"].append("For a plain single-band flattened gamma0 product use "
-                                 "rs:sar_terrain_flatten.");
+    meta["workflowHints"].append("rs:sar_terrain_flatten writes the 2-band gamma0+mask "
+                                 "product; this operator is the 3-band product "
+                                 "(gamma0 + validity mask + local incidence).");
     meta["limitations"].append("Plane-fit RTC model, NOT range-Doppler terrain correction.");
     meta["limitations"].append("The DEM must be co-registered with the input in radar "
                                "geometry; no resampling is performed.");

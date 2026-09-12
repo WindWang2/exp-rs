@@ -1,9 +1,11 @@
 // src/processing/algorithms/sar/sar_ratio.cpp
 #include "sar_ratio.h"
 
+#include "data/raster_grid_compat.h"
 #include "processing/algorithms/sar/sar_metadata.h"
 #include "processing/gdal/gdal_block_stream.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_grid_compat.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
 #include "processing/gdal/gdal_window_read.h"
 
@@ -66,6 +68,13 @@ bool ratioRaster( const GdalDatasetWrapper &a, int bandA, const GdalDatasetWrapp
   if ( !a.isValid() || !b.isValid() )
     return false;
   if ( a.width() != b.width() || a.height() != b.height() )
+    return false;
+  // Operator preflight throws the typed GridCompatIssue; this is the kernel
+  // safety net so a mismatched CRS/origin cannot silently pair pixels.
+  const sicnu::data::GridCompatReport gridReport =
+      sicnu::data::compareGrids( sicnu::processing::gridFromDataset( a ),
+                                 sicnu::processing::gridFromDataset( b ) );
+  if ( !gridReport.compatible() )
     return false;
 
   // Lockstep tile iteration (the change-streaming pattern): both scenes are

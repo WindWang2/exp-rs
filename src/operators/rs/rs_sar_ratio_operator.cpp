@@ -3,13 +3,16 @@
  ***************************************************************************/
 #include "rs_sar_ratio_operator.h"
 
+#include "data/raster_grid_compat.h"
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/nodata_utils.h"
+#include "processing/algorithms/sar/sar_metadata.h"
 #include "processing/algorithms/sar/sar_ratio.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_grid_compat.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
 
 #include <QString>
@@ -51,7 +54,11 @@ Json::Value RsSarRatioOperator::schema() const {
                                         "log_ratio (10·log10(A/B), dB), log_difference "
                                         "(|ΔdB| change magnitude)",
                                         s_output_types, "log_ratio");
-    props["inputDomain"] = makeEnumParam("inputDomain", "Numeric domain of both inputs", s_domains, "linear_power");
+    props["inputDomain"] = makeEnumParam("inputDomain",
+                                        "Numeric domain of both inputs. Explicit inputDomain=db "
+                                        "wins over declared SICNU_SAR_DOMAIN; a declared dB domain "
+                                        "with the default linear_power refuses rather than nested-logging",
+                                        s_domains, "linear_power");
     props["polarizations"] = makeStringParam("polarizations", "Comma-separated polarizations (e.g. VV,VH) recorded on the output", "");
     props["sensor"] = makeStringParam("sensor", "Sensor/instrument id recorded on the output", "");
 
@@ -84,7 +91,11 @@ Json::Value RsSarRatioOperator::metadata() const {
     units["log_ratio"] = "dB, 10·log10(A/B).";
     units["log_difference"] = "|ΔdB| (absolute dB change magnitude).";
     meta["units"] = units;
-    meta["limitations"].append("Scenes must be co-registered; no hidden resampling is applied.");
+    meta["limitations"].append("Scenes must share CRS, pixel size, origin and extent; "
+                               "no hidden resampling is applied.");
+    meta["limitations"].append("If either input declares SICNU_SAR_DOMAIN=db and "
+                               "inputDomain is left at linear_power, the operator refuses "
+                               "(pass inputDomain=db to convert, or convert first).");
     meta["limitations"].append("Nonpositive power becomes NoData (NaN) for the "
                                "log-domain outputs; B == 0 is NoData for ratio.");
     Json::Value contract(Json::objectValue);
@@ -135,7 +146,6 @@ Json::Value RsSarRatioOperator::run(const Json::Value& params,
     } else if (outputTypeStr == "log_difference") {
         ratioParams.output = sicnu::sar::RatioOutput::LogDifference;
     }
-    ratioParams.inputIsDb = inputDomainStr == "db";
 
     GdalDatasetWrapper srcA;
     if (!srcA.open(QString::fromStdString(pathA))) {
@@ -156,14 +166,44 @@ Json::Value RsSarRatioOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "bandB out of range: " + std::to_string(bandB));
     }
+
+    // Shared pixel-grid preflight (CRS, resolution, origin alignment, extent)
+    // before any pixel comparison. Two unreferenced rasters are not spatially
+    // comparable and pass as compatible; the dimension check below remains the
+    // fallback for them.
+    const sicnu::data::GridCompatReport gridReport =
+        sicnu::data::compareGrids(sicnu::processing::gridFromDataset(srcA),
+                                  sicnu::processing::gridFromDataset(srcB));
+    for (const sicnu::data::GridCompatIssue& issue : gridReport.issues) {
+        if (issue.blocking) {
+            throw RSOperatorError(ErrorCode::InvalidInputData, issue.message.toStdString());
+        }
+        context.logWarning(issue.message.toStdString());
+    }
     if (srcA.width() != srcB.width() || srcA.height() != srcB.height()) {
-        throw RSOperatorError(ErrorCode::InvalidParameter,
+        throw RSOperatorError(ErrorCode::InvalidInputData,
                               "Input dimensions do not match: inputA is " +
                                   std::to_string(srcA.width()) + "x" +
                                   std::to_string(srcA.height()) + ", inputB is " +
                                   std::to_string(srcB.width()) + "x" +
                                   std::to_string(srcB.height()) +
                                   " (co-registered scenes required)");
+    }
+
+    // Domain resolution: explicit inputDomain > declared SICNU_SAR_DOMAIN >
+    // linear. A declared dB domain with the default linear_power inputDomain
+    // is a typed refusal (do not silently nested-log).
+    const QString declaredA = sicnu::sar::readDomain(srcA);
+    const QString declaredB = sicnu::sar::readDomain(srcB);
+    if (inputDomainStr == "db") {
+        ratioParams.inputIsDb = true;
+    } else if (declaredA == QLatin1String("db") || declaredB == QLatin1String("db")) {
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "input declares SICNU_SAR_DOMAIN=db; convert with "
+                              "rs:sar_backscatter (or rs:sar_calibrate) first, or "
+                              "pass inputDomain=db");
+    } else {
+        ratioParams.inputIsDb = false;
     }
 
     // Declared sentinels on the analysis bands (NaN when undeclared).

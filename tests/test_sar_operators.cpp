@@ -48,8 +48,11 @@ struct AppInit
     }
 };
 
-/// Writes a single-band Float32 raster with the given values.
-bool writeRaster( const QString &path, const std::vector<float> &values, int width, int height )
+/// Writes a single-band Float32 raster. Default grid is EPSG:32648 /
+/// GT {500000, 10, 0, 4500000, 0, -10}. @a geoTransform overrides the origin
+/// and pixel size; @a sarDomain stamps SICNU_SAR_DOMAIN when non-null.
+bool writeRaster( const QString &path, const std::vector<float> &values, int width, int height,
+                  const double *geoTransform = nullptr, const char *sarDomain = nullptr )
 {
     ensureGdalInit();
     GDALDriverH driver = GDALGetDriverByName( "GTiff" );
@@ -59,7 +62,8 @@ bool writeRaster( const QString &path, const std::vector<float> &values, int wid
                                   GDT_Float32, nullptr );
     if ( !ds )
         return false;
-    const double gt[6] = { 500000, 10, 0, 4500000, 0, -10 };
+    const double defaultGt[6] = { 500000, 10, 0, 4500000, 0, -10 };
+    const double *gt = geoTransform ? geoTransform : defaultGt;
     GDALSetGeoTransform( ds, const_cast<double *>( gt ) );
     OGRSpatialReference srs;
     if ( srs.importFromEPSG( 32648 ) == OGRERR_NONE )
@@ -69,6 +73,8 @@ bool writeRaster( const QString &path, const std::vector<float> &values, int wid
         GDALSetProjection( ds, wkt );
         CPLFree( wkt );
     }
+    if ( sarDomain && sarDomain[0] != '\0' )
+        GDALSetMetadataItem( ds, sicnu::sar::kDomainKey, sarDomain, nullptr );
     GDALRasterBandH band = GDALGetRasterBand( ds, 1 );
     if ( GDALRasterIO( band, GF_Write, 0, 0, width, height,
                        const_cast<float *>( values.data() ), width, height, GDT_Float32,
@@ -416,6 +422,129 @@ TEST_CASE( "rs:sar_ratio refuses mismatched grids", "[sar][operator]" )
     REQUIRE_THROWS_AS( op->run( params, ctx ), RSOperatorError );
 }
 
+TEST_CASE( "rs:sar_ratio and rs:sar_change refuse same-size shifted grids",
+           "[sar][operator][grid]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString a = tmp.filePath( "a.tif" );
+    const QString b = tmp.filePath( "b.tif" );
+    const double shiftedGt[6] = { 500010, 10, 0, 4500000, 0, -10 };
+    REQUIRE( writeRaster( a, std::vector<float>( 4, 1.0f ), 2, 2 ) );
+    REQUIRE( writeRaster( b, std::vector<float>( 4, 1.0f ), 2, 2, shiftedGt ) );
+
+    Json::Value params( Json::objectValue );
+    params["inputA"] = a.toStdString();
+    params["inputB"] = b.toStdString();
+
+    {
+        auto op = RSOperatorRegistry::instance().create( "rs:sar_ratio" );
+        REQUIRE( op != nullptr );
+        params["output"] = tmp.filePath( "ratio.tif" ).toStdString();
+        RSOperatorContext ctx;
+        REQUIRE_THROWS_AS( op->run( params, ctx ), RSOperatorError );
+    }
+    {
+        auto op = RSOperatorRegistry::instance().create( "rs:sar_change" );
+        REQUIRE( op != nullptr );
+        params["output"] = tmp.filePath( "change.tif" ).toStdString();
+        RSOperatorContext ctx;
+        REQUIRE_THROWS_AS( op->run( params, ctx ), RSOperatorError );
+    }
+}
+
+TEST_CASE( "rs:sar_ratio and rs:sar_change refuse declared dB with default inputDomain",
+           "[sar][operator][domain]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString a = tmp.filePath( "a.tif" );
+    const QString b = tmp.filePath( "b.tif" );
+    REQUIRE( writeRaster( a, std::vector<float>( 4, 1.0f ), 2, 2, nullptr, "db" ) );
+    REQUIRE( writeRaster( b, std::vector<float>( 4, 1.0f ), 2, 2, nullptr, "db" ) );
+
+    auto refuseDefaultDomain = [&]( const char *operatorId, const char *outName,
+                                    bool setLinearPower ) {
+        auto op = RSOperatorRegistry::instance().create( operatorId );
+        REQUIRE( op != nullptr );
+        Json::Value params( Json::objectValue );
+        params["inputA"] = a.toStdString();
+        params["inputB"] = b.toStdString();
+        params["output"] = tmp.filePath( outName ).toStdString();
+        if ( setLinearPower )
+            params["inputDomain"] = "linear_power";
+        RSOperatorContext ctx;
+        REQUIRE_THROWS_AS( op->run( params, ctx ), RSOperatorError );
+    };
+
+    refuseDefaultDomain( "rs:sar_ratio", "ratio_omit.tif", false );
+    refuseDefaultDomain( "rs:sar_ratio", "ratio_linear.tif", true );
+    refuseDefaultDomain( "rs:sar_change", "change_omit.tif", false );
+    refuseDefaultDomain( "rs:sar_change", "change_linear.tif", true );
+
+    // Either input declaring dB is enough to refuse.
+    const QString linearOnly = tmp.filePath( "linear.tif" );
+    REQUIRE( writeRaster( linearOnly, std::vector<float>( 4, 1.0f ), 2, 2 ) );
+    auto op = RSOperatorRegistry::instance().create( "rs:sar_ratio" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["inputA"] = a.toStdString();
+    params["inputB"] = linearOnly.toStdString();
+    params["output"] = tmp.filePath( "ratio_either.tif" ).toStdString();
+    RSOperatorContext ctx;
+    REQUIRE_THROWS_AS( op->run( params, ctx ), RSOperatorError );
+}
+
+TEST_CASE( "rs:sar_ratio and rs:sar_change accept explicit inputDomain=db",
+           "[sar][operator][domain]" )
+{
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    // 10·log10(0.5) and 10·log10(2) → log-ratio = 10·log10(0.25) ≈ −6.02 dB.
+    const QString a = tmp.filePath( "a_db.tif" );
+    const QString b = tmp.filePath( "b_db.tif" );
+    REQUIRE( writeRaster( a, std::vector<float>( 4, -3.0103f ), 2, 2, nullptr, "db" ) );
+    REQUIRE( writeRaster( b, std::vector<float>( 4, 3.0103f ), 2, 2, nullptr, "db" ) );
+
+    {
+        auto op = RSOperatorRegistry::instance().create( "rs:sar_ratio" );
+        REQUIRE( op != nullptr );
+        Json::Value params( Json::objectValue );
+        params["inputA"] = a.toStdString();
+        params["inputB"] = b.toStdString();
+        params["output"] = tmp.filePath( "ratio.tif" ).toStdString();
+        params["inputDomain"] = "db";
+        params["outputType"] = "log_ratio";
+        RSOperatorContext ctx;
+        Json::Value result = op->run( params, ctx );
+        REQUIRE( result["outputType"].asString() == "log_ratio" );
+        const auto values = readBand( tmp.filePath( "ratio.tif" ) );
+        REQUIRE( values.size() == 4 );
+        for ( float v : values )
+            REQUIRE( v == Approx( -6.0206f ).margin( 1e-3 ) );
+    }
+
+    {
+        auto op = RSOperatorRegistry::instance().create( "rs:sar_change" );
+        REQUIRE( op != nullptr );
+        Json::Value params( Json::objectValue );
+        params["inputA"] = a.toStdString();
+        params["inputB"] = b.toStdString();
+        params["output"] = tmp.filePath( "change.tif" ).toStdString();
+        params["inputDomain"] = "db";
+        params["thresholdMethod"] = "manual";
+        params["threshold"] = 3.0;
+        RSOperatorContext ctx;
+        Json::Value result = op->run( params, ctx );
+        REQUIRE( result["evaluatedPixels"].asInt() == 4 );
+        REQUIRE( result["changedPixels"].asInt() == 4 );
+    }
+}
+
 TEST_CASE( "rs:sar_texture derives one band per requested measure",
            "[sar][operator]" )
 {
@@ -484,11 +613,54 @@ TEST_CASE( "rs:sar_terrain_flatten is the identity on flat DEMs",
     RSOperatorContext ctx;
     Json::Value result = op->run( params, ctx );
     REQUIRE( result["calibration"].asString() == "gamma0" );
+    REQUIRE( result["bands"].asInt() == 2 );
+    REQUIRE( result["maskBand"].asInt() == 2 );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( output ) );
+    REQUIRE( out.bandCount() == 2 );
+
+    const Json::Value schema = op->schema();
+    REQUIRE( schema["outputs"]["bands"]["default"].asInt() == 2 );
+    REQUIRE( schema["outputs"]["maskBand"]["default"].asInt() == 2 );
+    const std::string layout = schema["outputs"]["layout"]["default"].asString();
+    REQUIRE( layout.find( "gamma0" ) != std::string::npos );
+    REQUIRE( layout.find( "validity mask" ) != std::string::npos );
+    REQUIRE( schema["outputs"]["output"]["description"].asString().find( "validity mask" )
+             != std::string::npos );
+
+    const Json::Value meta = op->metadata();
+    const std::string purpose = meta["purpose"].asString();
+    REQUIRE( purpose.find( "single-band" ) == std::string::npos );
+    REQUIRE( purpose.find( "gamma0" ) != std::string::npos );
+    REQUIRE( purpose.find( "validity mask" ) != std::string::npos );
+    bool sawThreeBandHint = false;
+    for ( const Json::Value &hint : meta["workflowHints"] )
+    {
+        const std::string s = hint.asString();
+        if ( s.find( "rs:sar_terrain_correction" ) != std::string::npos
+             && s.find( "3-band" ) != std::string::npos )
+            sawThreeBandHint = true;
+    }
+    REQUIRE( sawThreeBandHint );
+    bool sawTwoBandLimit = false;
+    for ( const Json::Value &lim : meta["limitations"] )
+    {
+        const std::string s = lim.asString();
+        if ( s.find( "two bands" ) != std::string::npos
+             && s.find( "validity mask" ) != std::string::npos )
+            sawTwoBandLimit = true;
+    }
+    REQUIRE( sawTwoBandLimit );
 
     // Flat facets keep thetaI == theta0 → the flattening ratio is exactly 1.
     const auto values = readBand( output );
     for ( float v : values )
         REQUIRE( v == Approx( 0.4f ).margin( 1e-5 ) );
+    const auto mask = readBand( output, 2 );
+    REQUIRE( mask.size() == 16 );
+    for ( float v : mask )
+        REQUIRE( v == Approx( 1.0f ).margin( 1e-5 ) );
 }
 
 TEST_CASE( "rs:sar_terrain_flatten geometry consumes the look azimuth, not the flight heading",
