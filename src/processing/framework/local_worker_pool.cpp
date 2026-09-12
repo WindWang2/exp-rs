@@ -23,13 +23,10 @@ qint64 nowMs()
     return QDateTime::currentMSecsSinceEpoch();
 }
 
-/// True when an error frame reports cancellation — via the structured code
-/// (7.0 workers) or the legacy message text.
-bool errorFrameMeansCancelled( const Json::Value &frame )
-{
-    return sicnu::runtime::worker::frameErrorCode( frame ) == "cancelled"
-           || frame["message"].asString() == "cancelled";
-}
+// Cancellation verdict for error frames lives in the shared protocol header
+// (sicnu::runtime::worker::frameErrorMeansCancelled) so the pool and the
+// one-shot host cannot drift; it type-checks the legacy "message" fallback
+// there.
 
 /// Bounded single-line worker diagnostics for typed error reports.
 std::string diagnosticsSuffix( const WorkerDiagnosticsRing &diagnostics )
@@ -438,7 +435,7 @@ LocalWorkerPool::Outcome LocalWorkerPool::runOnWorker(
         }
         if ( op == "error" && frame["jobId"].asString() == jobId )
         {
-            if ( cancelRequested && errorFrameMeansCancelled( frame ) )
+            if ( cancelRequested && sicnu::runtime::worker::frameErrorMeansCancelled( frame ) )
             {
                 *errorMessage = "worker cancelled";
                 return Outcome::Cancelled;

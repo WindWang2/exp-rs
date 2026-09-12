@@ -19,8 +19,17 @@
 // about the origin (credential-shaped query values are removed inside the
 // token's basis by the geospatial layer).
 //
-// Install at host startup (app/CLI/worker), before any execution starts —
-// the same set-once discipline as the underlying seam.
+// Install at host startup, before any execution starts — the same set-once
+// discipline as the underlying seam. At HEAD this means the pipeline-host
+// processes: sicnu_geo_rs (app/main.cpp, GUI + MCP) and sicnu_geo_rs_cli
+// (cli/main_cli.cpp — the install there covers the pipeline runner and both
+// local worker hosts, which run in-process). Any other process that touches
+// TaskCenter gets the geospatial default installed by the TaskCenter
+// constructor (Execution Plane 8.0) as a backstop. The isolated sicnu_worker
+// process intentionally does NOT install it: the seam is process-global and
+// no identity consumer runs in the worker (fingerprinting happens only on
+// the host's submission/admission path), so a worker-side install would be
+// inert — no identity needs to cross the worker handshake either.
 #pragma once
 
 #include "execution_identity_resolver.h"

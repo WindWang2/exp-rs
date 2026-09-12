@@ -21,13 +21,9 @@ constexpr int kProtocolVersion = 1;
 // collide on the timestamp-only id.
 std::atomic<long> g_hostJobSeq{ 0 };
 
-/// True when an error frame reports cancellation — via the structured code
-/// (7.0 workers) or the legacy message text.
-bool errorFrameMeansCancelled( const Json::Value &frame )
-{
-    return sicnu::runtime::worker::frameErrorCode( frame ) == "cancelled"
-           || frame["message"].asString() == "cancelled";
-}
+// Cancellation verdict for error frames lives in the shared protocol header
+// (sicnu::runtime::worker::frameErrorMeansCancelled) so the one-shot host and
+// the pool cannot drift; it type-checks the legacy "message" fallback there.
 
 } // namespace
 
@@ -167,7 +163,7 @@ Json::Value runInLocalWorker( const QString &workerProgram,
         }
         if ( op == "error" && frame["jobId"].asString() == jobId )
         {
-            if ( cancelRequested && errorFrameMeansCancelled( frame ) )
+            if ( cancelRequested && sicnu::runtime::worker::frameErrorMeansCancelled( frame ) )
                 throw std::runtime_error( "worker cancelled" );
             std::string message = "worker error: " + frame["message"].asString();
             if ( report )
