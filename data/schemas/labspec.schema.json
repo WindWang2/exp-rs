@@ -1,0 +1,127 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://sicnu-geo-rs/schemas/labspec.schema.json",
+  "title": "SICNU GEO RS LabSpec",
+  "description": "Declarative specification of an undergraduate remote-sensing lab exercise. One file drives the guided workflow UI, headless execution (operator_id + params), auto-grading (grading_ref) and generated documentation (scripts/gen_lab_docs.py). Authoring guide: docs/labs/LABSPEC.md.",
+  "type": "object",
+  "required": ["spec_version", "id", "title", "title_zh", "objective", "steps"],
+  "additionalProperties": false,
+  "properties": {
+    "spec_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "LabSpec contract version; bump on breaking changes (see ADR 0146)."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^lab[0-9]{2}_[a-z][a-z0-9_]*$",
+      "description": "Canonical lab id; must equal the file name stem (<id>.lab.json). Zero-padded labNN keeps listings and generated docs in a stable order."
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "description": "English display title."
+    },
+    "title_zh": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Chinese display title (中文标题)."
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Teaching objective, shown as the lab description in the guided workflow list."
+    },
+    "prerequisites": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/data_ref" },
+      "description": "Data the student must load before stepping through the lab (paths relative to the project root)."
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/step" }
+    },
+    "grading_ref": {
+      "type": "object",
+      "required": ["pipeline"],
+      "additionalProperties": false,
+      "properties": {
+        "pipeline": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Path (project-root relative) to the pipeline JSON used for auto-grading, e.g. data/pipelines/landsat_ndvi.json."
+        }
+      },
+      "description": "Optional; consumed by D4/D7 auto-grading. Drift-guarded: the referenced file must exist."
+    },
+    "thinking_questions": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "description": "Open questions printed in the generated lab document."
+    }
+  },
+  "$defs": {
+    "data_ref": {
+      "type": "object",
+      "required": ["path"],
+      "additionalProperties": false,
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "note": { "type": "string" }
+      }
+    },
+    "step": {
+      "type": "object",
+      "required": ["title", "title_zh", "description_zh"],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "description": "English step title."
+        },
+        "title_zh": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Chinese step title (中文标题)."
+        },
+        "description_zh": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Chinese step instructions (中文说明), the teaching body of the step."
+        },
+        "operator_id": {
+          "type": "string",
+          "pattern": "^rs:[a-z0-9_]+$",
+          "description": "Processing Registry operator this step launches/executes; must resolve in the registry and params must match the operator schema."
+        },
+        "params": {
+          "type": "object",
+          "description": "Operator parameters (JobRequest.params); requires operator_id. Keys are drift-guarded against the operator descriptor's input ports."
+        },
+        "action": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_]*$",
+          "description": "UI-verb slot on the main window (Q_INVOKABLE/public slot) for steps with no operator, e.g. addRasterLayer. Mutually exclusive with operator_id."
+        },
+        "teaching_note": {
+          "type": "string",
+          "description": "Background theory the student should take away (printed in docs, shown as hint)."
+        },
+        "completion_hint": {
+          "type": "string",
+          "description": "How the student knows the step is done."
+        }
+      },
+      "dependencies": {
+        "params": ["operator_id"]
+      },
+      "oneOf": [
+        { "required": ["operator_id"] },
+        { "required": ["action"] },
+        { "not": { "anyOf": [ { "required": ["operator_id"] }, { "required": ["action"] } ] } }
+      ]
+    }
+  }
+}
