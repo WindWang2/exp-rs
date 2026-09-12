@@ -15,6 +15,22 @@
  *    (QgsMapRendererCustomPainterJob) — QGIS stays the only render engine.
  *    Pathological layers (> kMaxVectorFeatures) get a typed refusal, never
  *    an unbounded render.
+ *
+ *    Off-thread render safety argument (audited, DECIDED-KEEP as
+ *    documented-acceptable): (a) the QgsVectorLayer is standalone — never
+ *    registered in QgsProject, and created, rendered and destroyed on one
+ *    pool thread with no cross-thread handoff; (b) the render itself runs on
+ *    QgsMapRendererCustomPainterJob, documented by QGIS as a background-
+ *    thread renderer (vendored
+ *    src/core/maprenderer/qgsmaprendererjob.h:289-291); (c) labeling is
+ *    deliberately disabled (DrawLabeling off — font/labeling caches are the
+ *    main off-thread hazard); (d) work is bounded before any pixel work
+ *    (≤ kMaxVectorFeatures = 200000 features, output edges clamped to
+ *    16..kMaxEdgePixels = 1024 px, finite non-empty extent required) and the
+ *    finished image is marshaled back to the GUI thread via a queued
+ *    QMetaObject::invokeMethod in dispatch(). Residual risk: upstream QGIS
+ *    does not formally guarantee off-main-thread layer CONSTRUCTION; if that
+ *    ever bites, the fallback is a dedicated single preview render thread.
  *  - Generation + receiver semantics: a newer request for the same receiver
  *    supersedes older ones; results are delivered on the service's thread
  *    (the GUI thread in production) and dropped silently when the receiver
@@ -88,6 +104,10 @@ PreviewRender renderRasterPreview( const QString &path, const QSize &targetSize,
 
 /// Pure vector preview via QGIS rendering primitives. The layer is created,
 /// rendered and destroyed on the calling thread (never the GUI's project).
+/// The full off-thread render safety argument — standalone layer,
+/// background-thread job, labeling off, bounded work, queued marshaling back
+/// to the GUI thread, and the residual layer-construction risk — lives in
+/// the header contract block above.
 /// @p maxFeatures bounds the work: larger layers refuse with Unsupported
 /// (default: PreviewLimits::kMaxVectorFeatures).
 PreviewRender renderVectorPreview( const QString &path, const QSize &targetSize,

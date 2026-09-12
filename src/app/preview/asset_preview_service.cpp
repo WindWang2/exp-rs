@@ -381,6 +381,7 @@ void AssetPreviewService::dispatch( quint64 token )
 
   QPointer<AssetPreviewService> self( this );
   QThreadPool &pool = m_pool ? *m_pool : RsScanPool::instance().pool();
+  // Per-preview dispatch (not single-flight): with 2 pool workers, concurrent QGIS vector renders CAN overlap — each uses its own standalone layer/job/image.
   pool.start( [self, token, path, size, kind]()
   {
     // Worker side: pure computation — no service state, no widgets.
