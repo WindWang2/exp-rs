@@ -98,6 +98,10 @@ vendor/
 !.planning/cartography-platform-7/
 !.planning/dataset-experiment-7/
 !.planning/geospatial-data-fabric-8/
+# LabSpec track planning notes (markdown only; logs stay local).
+!.planning/lab-spec-data-driven/
+.planning/lab-spec-data-driven/*
+!.planning/lab-spec-data-driven/*.md
 !.planning/scientific-processing-8/
 !.planning/scientific-algorithms-9/
 !.planning/plugin-platform-8/
