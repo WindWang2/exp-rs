@@ -54,6 +54,30 @@ Json::Value typedFailure( const char *code, const std::string &message )
     return result;
 }
 
+/// Worker-controlled JSON fields: a type mismatch must fall back (the call
+/// reports a typed error instead), never throw a jsoncpp exception out of a
+/// proxy frame.
+bool jsonBoolOr( const Json::Value &value, bool fallback )
+{
+    if ( value.isBool() )
+        return value.asBool();
+    if ( value.isIntegral() || value.isDouble() )
+        return value.asBool(); // jsoncpp: numeric, interpreted as != 0
+    return fallback;
+}
+int jsonIntOr( const Json::Value &value, int fallback )
+{
+    return value.isIntegral() ? value.asInt() : fallback;
+}
+float jsonFloatOr( const Json::Value &value, float fallback )
+{
+    return value.isNumeric() ? value.asFloat() : fallback;
+}
+std::string jsonStringOr( const Json::Value &value, const char *fallback )
+{
+    return value.isString() ? value.asString() : std::string( fallback );
+}
+
 } // namespace
 
 namespace sicnu::plugins {
@@ -357,8 +381,8 @@ public:
             mLoaded = false;
             return;
         }
-        mBackend = outcome.result.get( "backendName", "" ).asString();
-        mDevice = outcome.result.get( "deviceName", "" ).asString();
+        mBackend = jsonStringOr( outcome.result.get( "backendName", "" ), "" );
+        mDevice = jsonStringOr( outcome.result.get( "deviceName", "" ), "" );
         mLoaded = true;
     }
 
@@ -405,16 +429,31 @@ public:
             result.error = outcome.error.message;
             return result;
         }
-        result.success = outcome.result.get( "success", false ).asBool();
-        result.error = outcome.result.get( "error", "" ).asString();
-        const Json::Value &output = outcome.result["output"];
-        result.output.batch = output.get( "batch", 1 ).asInt();
-        result.output.channels = output.get( "channels", 1 ).asInt();
-        result.output.rows = output.get( "rows", 0 ).asInt();
-        result.output.cols = output.get( "cols", 0 ).asInt();
-        for ( const Json::Value &value : output["data"] )
-            result.output.data.push_back( value.asFloat() );
-        result.diagnostics = outcome.result["diagnostics"];
+        // Worker-controlled result: every field is type-checked first — a
+        // buggy or hostile worker degrades to a typed error, never a
+        // jsoncpp exception escaping infer().
+        if ( !outcome.result.isObject() )
+        {
+            result.error = "worker sent a malformed inference result (E6002)";
+            return result;
+        }
+        const Json::Value &payload = outcome.result;
+        result.success = jsonBoolOr( payload[ "success" ], false );
+        result.error = jsonStringOr( payload[ "error" ], "" );
+        const Json::Value &output = payload[ "output" ];
+        if ( output.isObject() )
+        {
+            result.output.batch = jsonIntOr( output[ "batch" ], 1 );
+            result.output.channels = jsonIntOr( output[ "channels" ], 1 );
+            result.output.rows = jsonIntOr( output[ "rows" ], 0 );
+            result.output.cols = jsonIntOr( output[ "cols" ], 0 );
+            if ( output[ "data" ].isArray() )
+            {
+                for ( const Json::Value &value : output[ "data" ] )
+                    result.output.data.push_back( jsonFloatOr( value, 0.0f ) );
+            }
+        }
+        result.diagnostics = payload[ "diagnostics" ];
         return result;
     }
 
