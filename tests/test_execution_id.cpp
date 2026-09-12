@@ -44,7 +44,6 @@ TEST_CASE( "ExecutionId rejects malformed wire forms", "[execution_id]" )
     QStringLiteral( "not-a-task-id" ),
     QStringLiteral( "TASK-42" ),
     QStringLiteral( "task-1.5" ),
-    QStringLiteral( "task- 42" ),
     // The engine jobId (uuid-suffixed) is a JobEngine correlation key.
     QStringLiteral( "task-42-ab12cd34" ),
   };
@@ -54,10 +53,17 @@ TEST_CASE( "ExecutionId rejects malformed wire forms", "[execution_id]" )
 
 TEST_CASE( "ExecutionId accepts the lenient historical forms", "[execution_id]" )
 {
-  // Historical parse semantics: toLong accepts leading zeros; toWire()
-  // normalizes on the way out (hand-built forms were never canonical).
-  const auto parsed = ExecutionId::fromWire( QStringLiteral( "task-007" ) );
-  REQUIRE( parsed.has_value() );
-  CHECK( parsed->taskId() == 7 );
-  CHECK( parsed->toWire() == QStringLiteral( "task-7" ) );
+  // Historical parse semantics: toLong is strtol-shaped — leading
+  // whitespace is skipped ("task- 42" -> 42) and leading zeros parse
+  // ("task-007" -> 7); trailing garbage is rejected ("task-1.5" stays in
+  // the malformed list). toWire() normalizes on the way out (hand-built
+  // forms were never canonical).
+  const auto leadingSpace = ExecutionId::fromWire( QStringLiteral( "task- 42" ) );
+  REQUIRE( leadingSpace.has_value() );
+  CHECK( leadingSpace->taskId() == 42 );
+
+  const auto leadingZeros = ExecutionId::fromWire( QStringLiteral( "task-007" ) );
+  REQUIRE( leadingZeros.has_value() );
+  CHECK( leadingZeros->taskId() == 7 );
+  CHECK( leadingZeros->toWire() == QStringLiteral( "task-7" ) );
 }
