@@ -158,10 +158,10 @@ void PreferencesDialog::setupGeneralTab()
 
     m_crsCombo = new QComboBox( displayGroup );
     m_crsCombo->addItem( tr("EPSG:4326 - WGS 84 (geographic)"), "EPSG:4326" );
-    m_crsCombo->addItem( "EPSG:3857 - WGS 84 / Pseudo-Mercator", "EPSG:3857" );
-    m_crsCombo->addItem( "EPSG:32649 - WGS 84 / UTM zone 49N", "EPSG:32649" );
-    m_crsCombo->addItem( "EPSG:32650 - WGS 84 / UTM zone 50N", "EPSG:32650" );
-    m_crsCombo->addItem( "EPSG:32651 - WGS 84 / UTM zone 51N", "EPSG:32651" );
+    m_crsCombo->addItem( tr( "EPSG:3857 - WGS 84 / Pseudo-Mercator" ), "EPSG:3857" );
+    m_crsCombo->addItem( tr( "EPSG:32649 - WGS 84 / UTM zone 49N" ), "EPSG:32649" );
+    m_crsCombo->addItem( tr( "EPSG:32650 - WGS 84 / UTM zone 50N" ), "EPSG:32650" );
+    m_crsCombo->addItem( tr( "EPSG:32651 - WGS 84 / UTM zone 51N" ), "EPSG:32651" );
     m_crsCombo->addItem( tr("EPSG:4490 - CGCS2000 (China Geodetic Coordinate System 2000)"), "EPSG:4490" );
     m_crsCombo->setEditable( true );
     SicnuDialogHelp::tip( m_crsCombo, tr( "Default CRS for new remote-sensing projects." ) );

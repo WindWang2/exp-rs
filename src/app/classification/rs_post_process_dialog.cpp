@@ -295,13 +295,13 @@ bool RsPostProcessDialog::buildConfig( RsPostProcessConfig &cfg, QString *errorM
   if ( cfg.inputPath.isEmpty() )
   {
     if ( errorMessage )
-      *errorMessage = tr( "请指定输入栅格路径" );
+      *errorMessage = tr( "Please specify the input raster path" );
     return false;
   }
   if ( !QFileInfo::exists( cfg.inputPath ) )
   {
     if ( errorMessage )
-      *errorMessage = tr( "输入文件不存在: %1" ).arg( cfg.inputPath );
+      *errorMessage = tr( "Input file does not exist: %1" ).arg( cfg.inputPath );
     return false;
   }
 
@@ -346,7 +346,7 @@ bool RsPostProcessDialog::buildConfig( RsPostProcessConfig &cfg, QString *errorM
       if ( cfg.recodeMap.isEmpty() )
       {
         if ( errorMessage )
-          *errorMessage = tr( "请在重编码表中至少填写一行旧类→新类" );
+          *errorMessage = tr( "Fill in at least one old class → new class row in the recoding table" );
         return false;
       }
       cfg.outputRasterPath = out;
