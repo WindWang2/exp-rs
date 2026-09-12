@@ -1158,13 +1158,23 @@ void SchemaFormBuilder::connectValueSignals( Field &field )
   }
   if ( field.doubleSpin )
   {
+    const QString path = field.path;
     connect( field.doubleSpin, QOverload<double>::of( &QDoubleSpinBox::valueChanged ),
-             this, &SchemaFormBuilder::valuesChanged );
+             this, [this, path]( double ) {
+               if ( Field *found = findFieldMutable( m_fields, path ) )
+                 found->userTouched = true;
+               emit valuesChanged();
+             } );
   }
   if ( field.spin )
   {
+    const QString path = field.path;
     connect( field.spin, QOverload<int>::of( &QSpinBox::valueChanged ),
-             this, &SchemaFormBuilder::valuesChanged );
+             this, [this, path]( int ) {
+               if ( Field *found = findFieldMutable( m_fields, path ) )
+                 found->userTouched = true;
+               emit valuesChanged();
+             } );
   }
   if ( field.check )
   {
@@ -1793,11 +1803,19 @@ void SchemaFormBuilder::collectFields( const QVector<Field> &fields,
     {
       case FieldKind::Double:
         if ( field.doubleSpin )
+        {
+          if ( !isGroupRequired && !field.userTouched )
+            break;
           out[key] = field.doubleSpin->value();
+        }
         break;
       case FieldKind::Integer:
         if ( field.spin )
+        {
+          if ( !isGroupRequired && !field.userTouched )
+            break;
           out[key] = field.spin->value();
+        }
         break;
       case FieldKind::Boolean:
         if ( field.check )
@@ -1953,7 +1971,9 @@ void SchemaFormBuilder::applyFields( const QVector<Field> &fields, const Json::V
     const std::string key = field.name.toStdString();
     if ( !params.isMember( key ) )
       continue;
-    writeFieldValue( const_cast<Field &>( field ), params[key] );
+    Field &mutableField = const_cast<Field &>( field );
+    writeFieldValue( mutableField, params[key] );
+    mutableField.userTouched = true;
   }
 }
 
@@ -2342,7 +2362,12 @@ void SchemaFormBuilder::updateConditionalVisibility( QVector<Field> &fields )
       }
     }
 
+    const bool becomingVisible = field.condHidden && visible;
     field.condHidden = !visible;
+    // Revealing a conditional numeric by changing its driver counts as a
+    // user choice to include the schema default (x-ui-visible-when tests).
+    if ( becomingVisible )
+      field.userTouched = true;
     if ( field.widget->isVisibleTo( field.widget->parentWidget() ) != visible )
       field.widget->setVisible( visible );
     // Row label follows the widget: for label+buddy rows the form knows the
@@ -2410,6 +2435,14 @@ bool SchemaFormBuilder::groupTouched( const QVector<Field> &fields ) const
     else if ( child.kind == FieldKind::Object )
     {
       if ( groupTouched( child.children ) )
+        return true;
+    }
+    else if ( child.kind == FieldKind::Integer || child.kind == FieldKind::Double )
+    {
+      // Spinboxes always have a value (schema default or Qt 0). They do not
+      // mark the parent group in-use until the user edits them or setValues
+      // supplies the key — the same omit rule collectFields applies.
+      if ( child.userTouched )
         return true;
     }
     else if ( !readFieldValue( child ).trimmed().isEmpty() )
