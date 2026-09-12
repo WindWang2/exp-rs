@@ -995,3 +995,40 @@ TEST_CASE( "resume re-executes a completed step whose output was replaced out-of
     REQUIRE( firstRan.load() );
     REQUIRE( secondRan.load() );
 }
+
+TEST_CASE( "delayed checkpoint save does not block runForPipeline of another run (#931)",
+           "[workflow][coordinator][lock][931]" )
+{
+    CoordinatorFixture fx;
+    struct DelayGuard
+    {
+        WorkflowRunCoordinator &coordinator;
+        ~DelayGuard() { coordinator.setCheckpointIoDelayForTests( 0 ); }
+    } delayGuard{ fx.coordinator };
+
+    const std::string prefix = "coord_lock_io";
+    registerTwoStepExecutors( prefix );
+
+    fx.coordinator.setCheckpointIoDelayForTests( 400 );
+
+    std::atomic_bool started{ false };
+    std::thread persistThread( [&] {
+        started.store( true );
+        fx.coordinator.startTrackedPipeline( twoStepDefinition( prefix ), /*autoLoad=*/false );
+    } );
+    for ( int attempt = 0; attempt < 100 && !started.load(); ++attempt )
+        std::this_thread::sleep_for( std::chrono::milliseconds( 1 ) );
+    REQUIRE( started.load() );
+    // First persist sleeps 400ms AFTER dropping m_mutex. Sample during that
+    // window: pre-fix, runs()/runForPipeline waited out the save.
+    std::this_thread::sleep_for( std::chrono::milliseconds( 80 ) );
+    const auto t0 = std::chrono::steady_clock::now();
+    (void)fx.coordinator.runs();
+    (void)fx.coordinator.runForPipeline( -1 );
+    (void)fx.coordinator.explainDump();
+    const auto queryMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - t0 )
+                             .count();
+    REQUIRE( queryMs < 100 );
+    persistThread.join();
+}

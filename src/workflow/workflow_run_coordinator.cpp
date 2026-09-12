@@ -15,6 +15,8 @@
 #endif
 
 #include <algorithm>
+#include <chrono>
+#include <thread>
 
 #include "jobs/job_types.h"
 #include "operators/framework/rs_operator.h"
@@ -255,6 +257,11 @@ void WorkflowRunCoordinator::setCheckpointDirectory( const QString &directory )
     m_checkpointDir = directory;
 }
 
+void WorkflowRunCoordinator::setCheckpointIoDelayForTests( int milliseconds )
+{
+    m_checkpointIoDelayMs.store( milliseconds < 0 ? 0 : milliseconds );
+}
+
 QString WorkflowRunCoordinator::checkpointDirectory() const
 {
     std::lock_guard<std::mutex> lock( m_mutex );
@@ -372,12 +379,56 @@ void WorkflowRunCoordinator::drainRunNotifications()
     }
 }
 
-void WorkflowRunCoordinator::persistRunLocked( WorkflowRun &run )
+WorkflowRunCoordinator::PersistRequest
+WorkflowRunCoordinator::capturePersistLocked( const std::shared_ptr<WorkflowRun> &run,
+                                              bool sweepAndArchive )
 {
+    PersistRequest request;
+    if ( !run )
+        return request;
+    request.run = run;
+    request.runId = run->runId();
+    request.directory = checkpointDirectoryLocked();
+    request.seq = m_nextPersistSeq++;
+    m_latestPersistSeq[request.runId] = request.seq;
+    request.sweepAndArchive = sweepAndArchive;
+    return request;
+}
+
+void WorkflowRunCoordinator::persistRun( PersistRequest request )
+{
+    if ( !request.run || request.runId.empty() )
+        return;
+
+    // One-shot test delay AFTER m_mutex dropped so a concurrent
+    // runForPipeline / resumeRun of a different run stays live (#931).
+    const int delayMs = m_checkpointIoDelayMs.exchange( 0 );
+    if ( delayMs > 0 )
+        std::this_thread::sleep_for( std::chrono::milliseconds( delayMs ) );
+
+    std::lock_guard<std::mutex> io( m_checkpointIoMutex );
+    bool superseded = false;
+    {
+        std::lock_guard<std::mutex> lock( m_mutex );
+        const auto it = m_latestPersistSeq.find( request.runId );
+        superseded = it != m_latestPersistSeq.end() && request.seq < it->second;
+    }
     // Best-effort persistence: a failed save never aborts the pipeline — the
     // run keeps executing; recovery then treats it as Interrupted (the state
-    // on disk simply lags).
-    m_checkpoints.saveCheckpoint( run, checkpointDirectoryLocked() );
+    // on disk simply lags). Finalize still writes even when superseded so
+    // ArtifactGC / archive see a terminal checkpoint.
+    if ( !superseded || request.sweepAndArchive )
+        m_checkpoints.saveCheckpoint( *request.run, request.directory );
+
+    if ( request.sweepAndArchive && request.run->state() == WorkflowRunState::Completed )
+    {
+        ArtifactGC gc;
+        gc.sweepRun( *request.run, /*retainFinalOutputs=*/true );
+        WorkflowCheckpointManager::archiveCompletedRun(
+            request.directory + QDir::separator()
+                + QStringLiteral( "checkpoint_%1.json" ).arg( QString::fromStdString( request.runId ) ),
+            request.directory );
+    }
 }
 
 long WorkflowRunCoordinator::startTrackedPipelineJson( const std::string &jsonPipeline, bool autoLoad )
@@ -428,11 +479,13 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
     // real side effects with no on-disk run. The post-submission persist
     // below adds task ids and current step statuses.
     const qint64 startedMs = QDateTime::currentMSecsSinceEpoch();
+    PersistRequest firstPersist;
     {
         std::lock_guard<std::mutex> lock( m_mutex );
-        persistRunLocked( *run );
+        firstPersist = capturePersistLocked( run );
         queueRunStateNotificationLocked( *run, startedMs, 0 ); // state Running (issue #754)
     }
+    persistRun( std::move( firstPersist ) );
     // Flush the Running broadcast BEFORE dispatch: a pipeline whose first
     // step fails instantly must never surface Running after its Failed
     // terminal (observers see transitions in transition order, #860).
@@ -446,12 +499,14 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
     {
         run->setErrorMessage( "Pipeline contains no dispatchable operator steps" );
         run->transitionTo( WorkflowRunState::Failed );
+        PersistRequest failedPersist;
         {
             std::lock_guard<std::mutex> lock( m_mutex );
-            persistRunLocked( *run );
+            failedPersist = capturePersistLocked( run );
             queueRunStateNotificationLocked( *run, startedMs,
                                              QDateTime::currentMSecsSinceEpoch() );
         }
+        persistRun( std::move( failedPersist ) );
         drainRunNotifications();
         return -1; // the local runLock shared_ptr releases the flock here
     }
@@ -471,6 +526,9 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
     }
 
     const std::string freshRunId = run->runId();
+    PersistRequest postSubmitPersist;
+    PersistRequest finalizePersist;
+    bool persistFinalize = false;
     {
         std::lock_guard<std::mutex> lock( m_mutex );
         if ( !m_connected )
@@ -515,7 +573,7 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
                 run->updateStepPlan( *plan );
             }
         }
-        persistRunLocked( *run );
+        postSubmitPersist = capturePersistLocked( run );
 
         // All steps may have gone terminal inside the missed window.
         const auto plans = run->stepPlans();
@@ -527,8 +585,16 @@ long WorkflowRunCoordinator::startTrackedPipeline( const WorkflowDefinition &def
                                                                          || p2.status == "Skipped";
                                                                 } );
         if ( allTerminal && !isTerminalRunState( run->state() ) )
+        {
             finalizeRunLocked( pipelineId, *run );
+            finalizePersist = capturePersistLocked(
+                run, run->state() == WorkflowRunState::Completed );
+            persistFinalize = true;
+        }
     }
+    persistRun( std::move( postSubmitPersist ) );
+    if ( persistFinalize )
+        persistRun( std::move( finalizePersist ) );
     // The registration block may have folded fast transitions (even a full
     // finalize) while m_mutex was held — their notifications drain here,
     // outside the lock, before the pipeline id is handed to the caller.
@@ -571,6 +637,9 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
     // the swapped-in run) — never into a discarded object (#720).
     // SCOPE NOTE (#860): the brace below bounds the fold's critical section
     // so the notification drain after it runs strictly outside m_mutex.
+    PersistRequest foldPersist;
+    PersistRequest finalizePersist;
+    bool persistFinalize = false;
     {
     std::lock_guard<std::mutex> lock( m_mutex );
 
@@ -616,7 +685,7 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
         plan->errorMessage = info.errorMessage.toStdString();
     }
     run->updateStepPlan( *plan );
-    persistRunLocked( *run );
+    foldPersist = capturePersistLocked( run );
 
     // Terminal roll-up when every step plan reached a terminal status.
     const auto plans = run->stepPlans();
@@ -628,8 +697,16 @@ void WorkflowRunCoordinator::onTaskUpdated( const AlgorithmTaskInfo &info )
                                                                      || p.status == "Skipped";
                                                             } );
     if ( allTerminal && !isTerminalRunState( run->state() ) )
+    {
         finalizeRunLocked( info.pipelineId, *run ); // exactly once per run
+        finalizePersist = capturePersistLocked(
+            run, run->state() == WorkflowRunState::Completed );
+        persistFinalize = true;
     }
+    }
+    persistRun( std::move( foldPersist ) );
+    if ( persistFinalize )
+        persistRun( std::move( finalizePersist ) );
     // Lifecycle-safe eventing (#860): the fold's m_mutex scope ENDS above;
     // every queued notification drains strictly OUTSIDE the lock. (The
     // in-lock drain variant self-deadlocks the non-recursive mutex — caught
@@ -664,28 +741,10 @@ void WorkflowRunCoordinator::finalizeRunLocked( long pipelineId, WorkflowRun &ru
     {
         run.transitionTo( WorkflowRunState::Completed );
     }
-    persistRunLocked( run );
     queueRunStateNotificationLocked( run, 0, QDateTime::currentMSecsSinceEpoch() );
-
-    if ( run.state() == WorkflowRunState::Completed )
-    {
-        // Intermediate artifacts are reaped only for completed runs (resume
-        // and retry depend on the intermediates of unfinished ones). Deletion
-        // failures are collected by the GC report; surfaced via the run error
-        // field would mislabel a completed run, so they are logged only.
-        ArtifactGC gc;
-        gc.sweepRun( run, /*retainFinalOutputs=*/true );
-        // The run is finished and its outputs are committed assets. Phase J
-        // (run history): the checkpoint is ARCHIVED instead of deleted, so
-        // past outcomes stay inspectable; the archive is bounded (oldest
-        // pruned). Failed/Canceled/Interrupted checkpoints are KEPT in place —
-        // they are the resume handle.
-        // checkpointDirectoryLocked(): finalize holds m_mutex — the public
-        // checkpointDirectory() would self-deadlock (caught by the
-        // coordinator's own persistence test).
-        WorkflowCheckpointManager::archiveCompletedRun(
-            checkpointPathLocked( run.runId() ), checkpointDirectoryLocked() );
-    }
+    // Checkpoint IO, ArtifactGC and archive run AFTER m_mutex drops via
+    // persistRun (issue #931). The caller captures a PersistRequest with
+    // sweepAndArchive when this run completed.
     // The run is terminal: whoever acquires the run lock next may resume or
     // reconcile it. (Erasing the shared_ptr releases the flock.)
     m_locksByRunId.erase( run.runId() );
@@ -819,9 +878,13 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
     // recoverAtStartup pass (the MCP resume_workflow surface has none).
     if ( WorkflowCheckpointManager::reconcileToInterrupted( *run ) )
     {
-        std::lock_guard<std::mutex> lock( m_mutex );
-        persistRunLocked( *run );
-        queueRunStateNotificationLocked( *run, 0, QDateTime::currentMSecsSinceEpoch() ); // Interrupted
+        PersistRequest reconcilePersist;
+        {
+            std::lock_guard<std::mutex> lock( m_mutex );
+            reconcilePersist = capturePersistLocked( run );
+            queueRunStateNotificationLocked( *run, 0, QDateTime::currentMSecsSinceEpoch() ); // Interrupted
+        }
+        persistRun( std::move( reconcilePersist ) );
     }
     if ( run->state() != WorkflowRunState::Interrupted && run->state() != WorkflowRunState::Failed
          && run->state() != WorkflowRunState::Canceled )
@@ -1023,11 +1086,13 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
     {
         run->forceSetState( WorkflowRunState::Failed );
         run->setErrorMessage( "Resume submission failed" );
+        PersistRequest failedResumePersist;
         {
             std::lock_guard<std::mutex> lock( m_mutex );
             m_locksByRunId.erase( runId ); // releases the run lock
-            persistRunLocked( *run );
+            failedResumePersist = capturePersistLocked( run );
         }
+        persistRun( std::move( failedResumePersist ) );
         if ( error )
             *error = QStringLiteral( "Resume submission failed for run %1" )
                        .arg( QString::fromStdString( runId ) );
@@ -1037,6 +1102,7 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
     // swap in the ORIGINAL interrupted run so one runId carries the whole
     // lineage and a second interruption resumes from the union of both
     // passes (its Completed step plans + artifacts are already inside).
+    std::vector<PersistRequest> swapPersists;
     {
         std::lock_guard<std::mutex> lock( m_mutex );
         const auto it = m_runsByPipeline.find( pipelineId );
@@ -1131,10 +1197,10 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
                     QStringLiteral( "Superseded by resume of run %1 (temporary internal run)" )
                         .arg( QString::fromStdString( runId ) )
                         .toStdString() );
-                // Already inside the swap's m_mutex scope: persist + queue
-                // only — the public resumeRun wrapper drains the queue
-                // outside the lock.
-                persistRunLocked( *ghost );
+                // Already inside the swap's m_mutex scope: capture + queue
+                // only — persist runs after the lock drops; the public
+                // resumeRun wrapper drains the queue outside the lock.
+                swapPersists.push_back( capturePersistLocked( ghost ) );
                 queueRunStateNotificationLocked( *ghost, 0,
                                                  QDateTime::currentMSecsSinceEpoch() );
             }
@@ -1148,7 +1214,7 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
             m_locksByRunId.erase( ghostRunId );
             it->second = run;
             m_pipelineByRunId[run->runId()] = pipelineId;
-            persistRunLocked( *run );
+            swapPersists.push_back( capturePersistLocked( run ) );
 
             // Check if all steps already finished before the swap landed
             const auto plans = run->stepPlans();
@@ -1160,9 +1226,15 @@ long WorkflowRunCoordinator::resumeRunImpl( const std::string &runId, QString *e
                                                                              || p2.status == "Skipped";
                                                                     } );
             if ( allTerminal && !isTerminalRunState( run->state() ) )
+            {
                 finalizeRunLocked( pipelineId, *run );
+                swapPersists.push_back( capturePersistLocked(
+                    run, run->state() == WorkflowRunState::Completed ) );
+            }
         }
     }
+    for ( PersistRequest &persist : swapPersists )
+        persistRun( std::move( persist ) );
     return pipelineId;
 }
 
@@ -1177,10 +1249,12 @@ bool WorkflowRunCoordinator::cancelRun( long pipelineId )
         run = it->second;
     }
     run->transitionTo( WorkflowRunState::Cancelling );
+    PersistRequest cancelPersist;
     {
         std::lock_guard<std::mutex> lock( m_mutex );
-        persistRunLocked( *run );
+        cancelPersist = capturePersistLocked( run );
     }
+    persistRun( std::move( cancelPersist ) );
     return TaskCenter::instance().cancelPipeline( pipelineId );
 }
 

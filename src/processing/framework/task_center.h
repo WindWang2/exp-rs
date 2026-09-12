@@ -6,6 +6,7 @@
 #include <QVariantMap>
 #include <QList>
 #include <QMap>
+#include <QVector>
 #include <QMultiHash>
 #include <QDateTime>
 #include <QJsonObject>
@@ -441,8 +442,9 @@ private:
     /// cancelTask. Must be called with m_mutex held. @a userRootId is the
     /// caller-facing root task (gets the "by user" messages) or -1 when the
     /// root was already marked by the caller. @a upstreamCause is "failure" or
-    /// "cancellation". @a cleanupScratchOutputs enables cancelTask's
-    /// scratch-file removal. Cancelling targets are appended to
+    /// "cancellation". @a cleanupScratchOutputs collects cancelTask's
+    /// scratch-file paths into @a scratchPathsToUnlink (never QFile::remove
+    /// under m_mutex). Cancelling targets are appended to
     /// @a jobCancelTargets as (jobId, taskId) pairs; attached QgsTask handles
     /// are collected in @a handlesToCancel for thread-marshaled cancellation.
     void cascadeCancelTargetsLocked( const QList<long> &targets, long userRootId,
@@ -450,6 +452,7 @@ private:
                                      QList<long> &cascadeCanceledIds,
                                      std::vector<std::pair<std::string, long>> &jobCancelTargets,
                                      QList<QPointer<QgsTask>> &handlesToCancel,
+                                     QStringList &scratchPathsToUnlink,
                                      TaskCancelReason reason = TaskCancelReason::Upstream );
     /// Post-lock half of the cascade: marshals attached QgsTask cancellation
     /// to the handle's own thread, asks JobEngine to cancel dispatched jobs,
@@ -727,12 +730,12 @@ private:
                                                               const QString &paramKey )>;
 
     /// Submission fingerprint snapshotted UP TO input-identity resolution:
-    /// everything in-memory (determinism gate, implementation identity,
-    /// statically-resolved parameters) is prepared under m_mutex; the
-    /// input-identity collector — the only stage that can reach the
-    /// installed remote-identity resolver, a BLOCKING network probe — runs
-    /// later in commitSubmissionFingerprint with NO scheduler mutex held
-    /// (review P1: never consult the resolver under m_mutex).
+    /// in-memory gates and statically-resolved parameters are prepared
+    /// under m_mutex. Operator construction / schema hashing and the
+    /// input-identity collector (which can reach the installed
+    /// remote-identity resolver, a BLOCKING network probe) run later in
+    /// commitSubmissionFingerprint with NO scheduler mutex held
+    /// (review P1: never consult the registry or resolver under m_mutex).
     struct PendingSubmissionFingerprint
     {
         long taskId = -1;
@@ -746,24 +749,54 @@ private:
         QStringList chainedKeys;               // chained param keys (excluded from the input scan)
     };
 
+    /// One chained in-pipeline producer edge: the consuming parameter key,
+    /// the producer's declared output path (statted into the consumer's cache
+    /// entry so a corrupted intermediate invalidates it), and the producer
+    /// task (whose stamped payload fingerprint re-verifies the edge at
+    /// dispatch).
+    struct ChainedEdge
+    {
+        QString paramKey;
+        QString producerPath;
+        QString producerFingerprintHex; // what this consumer's identity was keyed on
+        long producerTaskId = -1;
+    };
+
+    /// Snapshot consumed from the fingerprint maps at Completed, to be
+    /// stored AFTER m_mutex drops (QFileInfo + ExecutionResultCache::storeExecution
+    /// are filesystem / optional artifact-pool copy).
+    struct ExecutionStoreRequest
+    {
+        long taskId = -1;
+        sicnu::data::ExecutionFingerprint fingerprint;
+        QString declaredOutputPath;
+        Json::Value resultPayload;
+        QVector<ChainedEdge> edges;
+        QMap<QString, qint64> registeredInputSizes;
+        QMap<QString, qint64> registeredInputMsecs;
+    };
+
     /// Prepares the SUBMISSION-TIME execution fingerprint for @a taskId
     /// (#726): the params are statically placeholder-resolved via @a
     /// resolver, destination keys are excluded from the hashed parameters
     /// by KEY (platform output vocabulary, never string-value equality),
     /// and the result is returned as a pending record. nullopt when the
     /// task records NO fingerprint (cache disabled, missing catalog,
-    /// off-affinity submitting thread, unknown task, non-deterministic
-    /// operator — conservative uncacheable). Must be called with m_mutex
-    /// held, once per task at enqueue/submit time, so downstream steps
-    /// admitted on JobEngine worker threads never need the catalog.
-    /// Finish the record with commitSubmissionFingerprint, OUTSIDE m_mutex,
-    /// before the first admission pass that can dispatch the task.
+    /// off-affinity submitting thread, unknown task — conservative
+    /// uncacheable). Does NOT construct the operator or hash its schema:
+    /// that work runs in commitSubmissionFingerprint outside m_mutex.
+    /// Must be called with m_mutex held, once per task at enqueue/submit
+    /// time, so downstream steps admitted on JobEngine worker threads
+    /// never need the catalog. Finish the record with
+    /// commitSubmissionFingerprint, OUTSIDE m_mutex, before the first
+    /// admission pass that can dispatch the task.
     std::optional<PendingSubmissionFingerprint>
     prepareSubmissionFingerprintLocked( long taskId, const UpstreamResolver &resolver );
 
-    /// Commits a pending submission fingerprint: resolves every input's
-    /// identity (may invoke the installed remote-identity resolver —
-    /// BLOCKING network I/O) WITHOUT m_mutex — admission, progress and
+    /// Commits a pending submission fingerprint: constructs the operator
+    /// and hashes its schema (determinism gate), then resolves every
+    /// input's identity (may invoke the installed remote-identity resolver
+    /// — BLOCKING network I/O) WITHOUT m_mutex — admission, progress and
     /// cancel stay live throughout — then re-acquires the mutex only for
     /// the pure in-memory record. The record phase re-validates the
     /// snapshot (cache still enabled, task alive, parameters unchanged,
@@ -791,12 +824,17 @@ private:
     /// mode falls through to a real execution.
     bool serveFromExecutionCache( long taskId, const sicnu::data::ExecutionFingerprint &fp );
     /// Must be called with m_mutex held. Consumes the task's submission-time
-    /// fingerprint (if any) and records the execution result for it in the
-    /// process cache: declared output, produced artifacts (existing files
-    /// referenced by the stamped result payload) and the payload itself, each
-    /// artifact stat'ed so a later lookup can refuse a replaced file. Called
-    /// on the Completed transition; the payload carries the fingerprint hex.
-    void storeExecutionResultLocked( long taskId );
+    /// fingerprint maps (if any) and returns the snapshot needed to record
+    /// the execution result after the lock drops. nullopt when there is
+    /// nothing to store (no fingerprint, missing task, empty declared output).
+    std::optional<ExecutionStoreRequest> takeExecutionStoreRequestLocked( long taskId );
+    /// Records the execution result in the process cache: declared output,
+    /// produced artifacts (existing files referenced by the stamped result
+    /// payload) and the payload itself, each artifact stat'ed so a later
+    /// lookup can refuse a replaced file. Called WITHOUT m_mutex (QFileInfo
+    /// + optional artifact-pool copy). Drops the store if the task is gone
+    /// or no longer Completed when the record would be written.
+    void storeExecutionResult( ExecutionStoreRequest request );
 
     sicnu::data::DataManager *m_catalog = nullptr;
     /// Submission-time fingerprints (dispatch order → completion store).
@@ -807,18 +845,6 @@ private:
     /// the actually-substituted parameterMap and drops the fingerprint on
     /// divergence.
     QMap<long, QVariantMap> m_taskFingerprintParams;
-    /// One chained in-pipeline producer edge: the consuming parameter key,
-    /// the producer's declared output path (statted into the consumer's cache
-    /// entry so a corrupted intermediate invalidates it), and the producer
-    /// task (whose stamped payload fingerprint re-verifies the edge at
-    /// dispatch).
-    struct ChainedEdge
-    {
-        QString paramKey;
-        QString producerPath;
-        QString producerFingerprintHex; // what this consumer's identity was keyed on
-        long producerTaskId = -1;
-    };
     QMap<long, QVector<ChainedEdge>> m_taskChainedEdges;
     /// Registered (non-chained) input stat bindings captured at submission
     /// (issue #749): merged into the cache entry at store time so an
