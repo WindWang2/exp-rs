@@ -811,6 +811,58 @@ TEST_CASE( "recipe presets reproduce the collapsed variants",
   CHECK( error.code == sicnu::agent::harness::error_codes::kInvalidParameter );
 }
 
+TEST_CASE( "alias ids without bindings.preset apply the matching Landsat preset (#933)",
+           "[harness][recipes][dedup]" )
+{
+  using sicnu::agent::harness::RecipeCatalog;
+  RecipeCatalog &catalog = RecipeCatalog::instance();
+  catalog.setDirectory( std::string( CMAKE_SOURCE_DIR ) + "/data/agent/recipes" );
+  REQUIRE( catalog.reload() > 0 );
+
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const std::string fixture =
+    ( QDir( dir.path() ).filePath( QStringLiteral( "alias_preset_fixture.tif" ) ) ).toStdString();
+  {
+    std::ofstream stream( fixture, std::ios::binary );
+    stream << "synthetic";
+  }
+
+  Json::Value bindings( Json::objectValue );
+  bindings["slots"]["primary"] = fixture;
+  sicnu::agent::harness::HarnessError error;
+  const Json::Value plan =
+    catalog.instantiateRecipe( "harness.optical_evi_landsat", bindings, error );
+  REQUIRE_FALSE( plan.isNull() );
+  REQUIRE( error.code.empty() );
+
+  bool sawIndex = false;
+  double scale = 1.0;
+  for ( const Json::Value &step : plan["steps"] )
+  {
+    if ( step["id"].asString() != "index" )
+      continue;
+    sawIndex = true;
+    REQUIRE( step["params"].isMember( "scale" ) );
+    scale = step["params"]["scale"].asDouble();
+  }
+  REQUIRE( sawIndex );
+  REQUIRE( scale == Catch::Approx( 0.0001 ) );
+
+  // Explicit bindings.preset still wins over alias-suffix inference.
+  Json::Value explicitBindings = bindings;
+  explicitBindings["preset"] = "landsat";
+  sicnu::agent::harness::HarnessError explicitError;
+  const Json::Value explicitPlan =
+    catalog.instantiateRecipe( "harness.optical_evi_landsat", explicitBindings, explicitError );
+  REQUIRE_FALSE( explicitPlan.isNull() );
+  double explicitScale = 1.0;
+  for ( const Json::Value &step : explicitPlan["steps"] )
+    if ( step["id"].asString() == "index" )
+      explicitScale = step["params"].get( "scale", 1.0 ).asDouble();
+  REQUIRE( explicitScale == Catch::Approx( 0.0001 ) );
+}
+
 TEST_CASE( "recipe expected_artifacts mirror declared outputs",
            "[harness][recipes][dedup]" )
 {

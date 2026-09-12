@@ -36,6 +36,9 @@ namespace sicnu::operators::rs {
  *   swir     (int, optional)    1-based SWIR/SWIR1 band number (default: 5)
  *   swir2    (int, optional)    1-based SWIR2 band number (default: 6)
  *   rededge  (int, optional)    1-based RedEdge band number (default: 5)
+ *   scale    (number, optional) Multiplicative scale mapping stored pixels to
+ *                               unit reflectance (e.g. 0.0001 for Landsat C2 DN).
+ *                               Wins over SICNU_NUMERIC_SCALE when both exist.
  *   postfire (string, optional) Optional postfire raster path for dNBR
  *
  * Returns JSON object with:
@@ -54,9 +57,10 @@ public:
         return "Compute a spectral index (NDVI, EVI, SAVI, NDWI, NDBI, MNDWI, NBR, dNBR, BSI, "
                "NDRE, CI, NDSI, NDTI) from raster bands. Scale rule (#680): EVI/SAVI constants "
                "assume unit reflectance [0,1]; when the input carries SICNU_NUMERIC_SCALE "
-               "(stamped at Level-2 import), the participating bands are divided by it for the "
-               "computation, while ratio indices are scale-invariant and inputs are never "
-               "rescaled on disk.";
+               "(stamped at Level-2 import) or params.scale is set (multiplicative, e.g. "
+               "0.0001 for Landsat C2 DN), the participating bands are mapped to unit "
+               "reflectance for the computation, while ratio indices are scale-invariant and "
+               "inputs are never rescaled on disk.";
     }
 
     RSOperatorMemoryPolicy memoryPolicy() const override

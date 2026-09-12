@@ -97,6 +97,9 @@
       "step_params": {
         "index": {
           "scale": 0.0001
+        },
+        "classify": {
+          "cleanup": "majority"
         }
       }
     }

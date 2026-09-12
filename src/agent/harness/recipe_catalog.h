@@ -27,11 +27,14 @@
 //   "presets": { "<name>": { "step_params": { "<step_id>": {..overrides..} },
 //                             "keep_outputs": ["<output name>", ...],
 //                             "<flat param key>": value, ... } }
-//     chosen via bindings.preset. Flat keys override ANY step param with the
-//     same name (the flood-mapping shape); "step_params" overrides params of
-//     one named step; "keep_outputs" filters declared outputs. Application is
-//     deterministic and validated at load (preset step/output names must
-//     exist).
+//     chosen via bindings.preset. When instantiateRecipe is called with an
+//     alias id (e.g. harness.optical_evi_landsat) and bindings.preset is
+//     empty, a matching "_<presetName>" suffix selects that preset
+//     automatically. Explicit bindings.preset always wins. Flat keys override
+//     ANY step param with the same name (the flood-mapping shape);
+//     "step_params" overrides params of one named step; "keep_outputs"
+//     filters declared outputs. Application is deterministic and validated at
+//     load (preset step/output names must exist).
 //
 
 #include <json/json.h>

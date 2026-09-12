@@ -14,11 +14,14 @@
 #include <qgscoordinatereferencesystem.h>
 
 #include "processing/algorithms/spectral_indices.h"
+#include "processing/providers/qgis_algorithms/algorithms/toolbox_raster_preflight.h"
 
 #include <gdal.h>
 #include <cpl_conv.h>
 
 #include <cmath>
+#include <limits>
+#include <memory>
 #include <vector>
 
 void RasterNdviAlgorithm::initAlgorithm( const QVariantMap & )
@@ -55,6 +58,9 @@ QVariantMap RasterNdviAlgorithm::processAlgorithm( const QVariantMap &parameters
             QObject::tr( "CRS mismatch: red layer has CRS '%1', but NIR layer has '%2'" )
                 .arg( redLayer->crs().authid(), nirLayer->crs().authid() ) );
     }
+
+    sicnu::processing::toolbox::requireCompatibleRasterGrid(
+        redLayer, nirLayer, QObject::tr( "NIR band" ) );
 
     feedback->setProgress( 10 );
 

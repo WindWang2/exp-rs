@@ -2,6 +2,7 @@
 #include "spectral_index_algorithm.h"
 
 #include "../../../../algorithms/spectral_indices.h"
+#include "processing/providers/qgis_algorithms/algorithms/toolbox_raster_preflight.h"
 
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
@@ -14,6 +15,8 @@
 #include <qgsrectangle.h>
 #include <qgscoordinatereferencesystem.h>
 
+#include <cmath>
+#include <limits>
 #include <vector>
 
 void SpectralIndexAlgorithm::initAlgorithm( const QVariantMap & )
@@ -135,6 +138,16 @@ QVariantMap SpectralIndexAlgorithm::processAlgorithm( const QVariantMap &paramet
         }
     }
 
+    auto requireGrid = [refLayer]( QgsRasterLayer *layer, const QString &label ) {
+        if ( layer && layer != refLayer )
+            sicnu::processing::toolbox::requireCompatibleRasterGrid( refLayer, layer, label );
+    };
+    requireGrid( nirLayer, QObject::tr( "NIR band" ) );
+    requireGrid( redLayer, QObject::tr( "Red band" ) );
+    requireGrid( greenLayer, QObject::tr( "Green band" ) );
+    requireGrid( blueLayer, QObject::tr( "Blue band" ) );
+    requireGrid( swirLayer, QObject::tr( "SWIR band" ) );
+
     if ( nCols <= 0 || nRows <= 0 )
         throw QgsProcessingException( QObject::tr( "Invalid raster dimensions" ) );
 
@@ -194,11 +207,27 @@ QVariantMap SpectralIndexAlgorithm::processAlgorithm( const QVariantMap &paramet
             ok = SpectralIndices::ndvi( nirData.data(), redData.data(), result.data(), totalPixels );
             break;
         case 1: // EVI
-            ok = SpectralIndices::evi( nirData.data(), redData.data(), blueData.data(), result.data(), totalPixels );
+        {
+            const float *probe[3] = { nirData.data(), redData.data(), blueData.data() };
+            const auto domain = sicnu::processing::toolbox::numericDomainFromLayer(
+                nirLayer ? nirLayer : redLayer, probe, 3, totalPixels );
+            sicnu::processing::toolbox::applyNumericDomain( nirData, domain );
+            sicnu::processing::toolbox::applyNumericDomain( redData, domain );
+            sicnu::processing::toolbox::applyNumericDomain( blueData, domain );
+            ok = SpectralIndices::eviUnit( nirData.data(), redData.data(), blueData.data(),
+                                           result.data(), totalPixels );
             break;
+        }
         case 2: // SAVI
-            ok = SpectralIndices::savi( nirData.data(), redData.data(), result.data(), totalPixels );
+        {
+            const float *probe[2] = { nirData.data(), redData.data() };
+            const auto domain = sicnu::processing::toolbox::numericDomainFromLayer(
+                nirLayer ? nirLayer : redLayer, probe, 2, totalPixels );
+            sicnu::processing::toolbox::applyNumericDomain( nirData, domain );
+            sicnu::processing::toolbox::applyNumericDomain( redData, domain );
+            ok = SpectralIndices::saviUnit( nirData.data(), redData.data(), result.data(), totalPixels );
             break;
+        }
         case 3: // NDWI
             ok = SpectralIndices::ndwi( greenData.data(), nirData.data(), result.data(), totalPixels );
             break;
