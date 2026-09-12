@@ -11,6 +11,7 @@ add_executable(sicnu_geo_rs_cli
     cli_commands.cpp
     cli_dataset_commands.cpp
     cli_lab_commands.cpp
+    lab_batch_runner.cpp
     cli_project_ops.cpp
     rs_pipeline_runner.cpp
     help_cli_projections.cpp

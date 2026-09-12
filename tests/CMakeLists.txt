@@ -8222,3 +8222,8 @@ target_include_directories(benchmark_scale8 PRIVATE
 # OutputVerifier::gradeArtifact teaching seam.
 sicnu_add_test(test_lab_grading TIMEOUT 300)
 sicnu_link_jsoncpp(test_lab_grading)
+
+# D7 batch grading: streaming engine + CSV export over the gradeArtifact
+# seam; CLI-level contract for --batch (error isolation, BOM, schema).
+sicnu_add_test(test_lab_batch TIMEOUT 300)
+sicnu_link_jsoncpp(test_lab_batch)
