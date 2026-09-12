@@ -7,4 +7,4 @@
 - [x] M4 D3d cartography lab artifacts + data-spec summary (headless pass: Phase 5)
 - [x] M5 docs 生成与中文审校 complete, zero drift
 - [x] M6 review P0=0 P1=0 (remediated; final headless evidence pending build)
-- [ ] M7 PR created (not merged)
+- [x] M7 PR created (not merged): WindWang2/exp-rs#948
