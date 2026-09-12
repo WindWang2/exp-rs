@@ -24,12 +24,14 @@ int remainingMs( Clock::time_point deadline )
         std::chrono::duration_cast<std::chrono::milliseconds>( deadline - now ).count() );
 }
 
-/// Reads exactly @p len bytes within the overall @p deadline. Returns false
-/// on timeout/EOF/error with @p timedOut / @p eof flagging which.
-bool readExact( IIpcStream &stream, char *data, size_t len, Clock::time_point deadline,
-                bool &timedOut, bool &eof, std::string &error )
+/// Reads exactly @p len bytes within the overall @p deadline, updating @p got
+/// with the bytes consumed so far. Returns false on timeout/EOF/error with
+/// @p timedOut / @p eof flagging which; on return @p got says how much of the
+/// frame is already in the buffer, so a timed-out attempt can be resumed
+/// instead of restarting from scratch.
+bool readExact( IIpcStream &stream, char *data, size_t &got, size_t len,
+                Clock::time_point deadline, bool &timedOut, bool &eof, std::string &error )
 {
-    size_t got = 0;
     while ( got < len )
     {
         const int slice = remainingMs( deadline );
@@ -92,42 +94,66 @@ bool writeJson( IIpcStream &stream, const Json::Value &json,
 }
 
 ReadStatus read( IIpcStream &stream, std::string &payload,
-                 const IpcFrameLimits &limits, int timeoutMs, std::string &error )
+                 const IpcFrameLimits &limits, int timeoutMs, std::string &error,
+                 std::string *pendingFrame )
 {
     const Clock::time_point deadline = Clock::now() + std::chrono::milliseconds( timeoutMs );
 
-    uint8_t prefix[ kPrefixBytes ];
+    // Bytes of the CURRENT frame already consumed from the stream by earlier
+    // timed-out attempts (length prefix first, then payload). Resuming —
+    // never restarting — is what keeps a slow-but-valid frame from
+    // desyncing the stream: re-reading mid-frame bytes as a fresh length
+    // prefix produces a bogus length and a spurious E6003 teardown.
+    std::string localPending;
+    std::string &pending = pendingFrame ? *pendingFrame : localPending;
+    payload.clear();
+
     bool timedOut = false;
     bool eof = false;
-    if ( !readExact( stream, reinterpret_cast<char *>( prefix ), kPrefixBytes, deadline,
-                     timedOut, eof, error ) )
+
+    // Phase 1: the length prefix.
+    size_t got = pending.size();
+    if ( got < kPrefixBytes )
     {
-        if ( timedOut )
-            return ReadStatus::Timeout;
-        return eof ? ReadStatus::Eof : ReadStatus::Error;
+        pending.resize( kPrefixBytes );
+        if ( !readExact( stream, &pending[ 0 ], got, kPrefixBytes, deadline,
+                         timedOut, eof, error ) )
+        {
+            pending.resize( got ); // keep only what was actually consumed
+            if ( timedOut )
+                return ReadStatus::Timeout; // resumed by the next read() call
+            return eof ? ReadStatus::Eof : ReadStatus::Error;
+        }
     }
 
-    uint32_t length = static_cast<uint32_t>( prefix[ 0 ] )
-                      | ( static_cast<uint32_t>( prefix[ 1 ] ) << 8 )
-                      | ( static_cast<uint32_t>( prefix[ 2 ] ) << 16 )
-                      | ( static_cast<uint32_t>( prefix[ 3 ] ) << 24 );
+    uint32_t length = static_cast<uint32_t>( pending[ 0 ] )
+                      | ( static_cast<uint32_t>( pending[ 1 ] ) << 8 )
+                      | ( static_cast<uint32_t>( pending[ 2 ] ) << 16 )
+                      | ( static_cast<uint32_t>( pending[ 3 ] ) << 24 );
     if ( length > limits.maxFrameBytes )
     {
         error = "peer announced a frame of " + std::to_string( length )
                 + " bytes, beyond the negotiated cap of "
                 + std::to_string( limits.maxFrameBytes ) + " bytes (E6003)";
+        pending.clear();
         return ReadStatus::TooLarge;
     }
 
-    payload.assign( length, '\0' );
-    if ( length == 0 )
-        return ReadStatus::Ok;
-    if ( !readExact( stream, payload.data(), length, deadline, timedOut, eof, error ) )
+    // Phase 2: the payload. Bytes from earlier timed-out attempts may
+    // already sit behind the prefix in @p pending — read only the rest.
+    got = pending.size() - kPrefixBytes;
+    pending.resize( kPrefixBytes + length );
+    if ( !readExact( stream, &pending[ 0 ] + kPrefixBytes, got, length,
+                     deadline, timedOut, eof, error ) )
     {
+        pending.resize( got ); // keep only what was actually consumed
         if ( timedOut )
-            return ReadStatus::Timeout;
+            return ReadStatus::Timeout; // resumed by the next read() call
         return eof ? ReadStatus::Eof : ReadStatus::Error;
     }
+
+    payload.assign( pending, kPrefixBytes, length );
+    pending.clear();
     return ReadStatus::Ok;
 }
 
