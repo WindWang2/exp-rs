@@ -313,3 +313,33 @@ TEST_CASE( "direct RSOperatorRegistry path is lease-guarded (issue #747)",
     barrier.cancelDrain( pluginId );
     REQUIRE( direct.create( operatorId ) != nullptr );
 }
+
+TEST_CASE( "installManifestContributionsFor copies the record under the lock (issue #932)",
+           "[plugins][host][copy]" )
+{
+    HostGuard guard;
+    const std::string root = "/tmp/exprs_test_host_copy";
+    ::system( ( "rm -rf " + root ).c_str() );
+    makeExternalPlugin( root, "-copy" );
+
+    exprs::PluginRegistryOptions options;
+    options.roots = { root };
+    sicnu::plugins::bootstrapPluginRuntime( options );
+
+    const std::string pluginId = "org.test.ext-echo-copy";
+    exprs::PluginRegistry &registry = exprs::PluginRegistry::instance();
+    exprs::PluginRecord snapshot;
+    REQUIRE( registry.copyRecord( pluginId, snapshot ) );
+    REQUIRE( snapshot.manifest.operators.size() == 1 );
+    REQUIRE( snapshot.manifest.operators[0].id == "test:ext_echo-copy" );
+
+    // refresh() reallocates mRecords; a raw record() pointer would dangle.
+    registry.refresh();
+    REQUIRE( snapshot.id() == pluginId );
+    REQUIRE( snapshot.manifest.operators[0].id == "test:ext_echo-copy" );
+
+    sicnu::plugins::PluginRuntimeHost::instance().installManifestContributionsFor( pluginId );
+    REQUIRE( sicnu::processing::AtomicAlgorithmRegistry::instance().findAdapter(
+                 "test:ext_echo-copy" )
+             != nullptr );
+}

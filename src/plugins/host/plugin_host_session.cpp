@@ -254,15 +254,7 @@ bool PluginHostProcessSession::spawnWorkerProcess( PluginDiagnosticLog &diagnost
             : FALSE;
     if ( attributesOk )
         ::DeleteProcThreadAttributeList( startupInfo.lpAttributeList );
-    if ( !created )
-    {
-        const DWORD error = ::GetLastError();
-        diagnostics.add( PluginDiagnosticCode::HostProcessUnavailable,
-                         PluginDiagnosticSeverity::Error,
-                         attributesOk ? "spawning exprs_plugin_host_worker failed with error "
-                                          + std::to_string( error )
-                                      : "worker process attribute list initialization failed",
-                         mOptions.pluginId );
+    auto closeSpawnHandles = [ & ]() {
         ::CloseHandle( hostToWorkerRead );
         ::CloseHandle( hostToWorkerWrite );
         ::CloseHandle( workerToHostRead );
@@ -272,10 +264,39 @@ bool PluginHostProcessSession::spawnWorkerProcess( PluginDiagnosticLog &diagnost
             ::CloseHandle( mJobHandle );
             mJobHandle = nullptr;
         }
+    };
+    if ( !created )
+    {
+        const DWORD error = ::GetLastError();
+        diagnostics.add( PluginDiagnosticCode::HostProcessUnavailable,
+                         PluginDiagnosticSeverity::Error,
+                         attributesOk ? "spawning exprs_plugin_host_worker failed with error "
+                                          + std::to_string( error )
+                                      : "worker process attribute list initialization failed",
+                         mOptions.pluginId );
+        closeSpawnHandles();
         return false;
     }
     if ( mJobHandle )
-        ::AssignProcessToJobObject( mJobHandle, processInfo.hProcess );
+    {
+        // Nested-job CI (and any other assignment failure): the child is
+        // still CREATE_SUSPENDED. Do not ResumeThread into an uncontained
+        // process — terminate it and fail typed (issue #932).
+        if ( !::AssignProcessToJobObject( mJobHandle, processInfo.hProcess ) )
+        {
+            const DWORD error = ::GetLastError();
+            ::TerminateProcess( processInfo.hProcess, 9 );
+            ::WaitForSingleObject( processInfo.hProcess, 5000 );
+            ::CloseHandle( processInfo.hThread );
+            ::CloseHandle( processInfo.hProcess );
+            diagnostics.add( PluginDiagnosticCode::HostProcessUnavailable,
+                             PluginDiagnosticSeverity::Error,
+                             "AssignProcessToJobObject failed: " + std::to_string( error ),
+                             mOptions.pluginId );
+            closeSpawnHandles();
+            return false;
+        }
+    }
     ::ResumeThread( processInfo.hThread );
     ::CloseHandle( processInfo.hThread );
     mProcessHandle = processInfo.hProcess;
@@ -370,6 +391,10 @@ bool PluginHostProcessSession::spawnWorkerProcess( PluginDiagnosticLog &diagnost
     const pid_t pid = ::fork();
     if ( pid < 0 )
     {
+        for ( int fd : { hostToWorker[ 0 ], hostToWorker[ 1 ], workerToHost[ 0 ],
+                         workerToHost[ 1 ] } )
+            if ( fd != -1 )
+                ::close( fd );
         diagnostics.add( PluginDiagnosticCode::HostProcessUnavailable,
                          PluginDiagnosticSeverity::Error, "fork() failed",
                          mOptions.pluginId );
@@ -786,15 +811,20 @@ IpcChannel::Outcome PluginHostProcessSession::request(
     // Drain-check first: a poisoned worker whose peers have finished must
     // die before anything else is sent (the next request then fails E6005
     // and the proxy's restart policy brings a fresh worker).
+    // killProcess waits (WaitForSingleObject / waitpid) and joins the
+    // channel reader — never while holding mStateMutex (issue #932).
+    bool killDrainedPoison = false;
     if ( mPoisoned )
     {
         std::lock_guard<std::mutex> stateLock( mStateMutex );
         if ( mInFlight == 0 && mPoisoned )
         {
             mPoisoned = false;
-            killProcess( "poisoned worker drained" );
+            killDrainedPoison = true;
         }
     }
+    if ( killDrainedPoison )
+        killProcess( "poisoned worker drained" );
     if ( !mProcessAlive )
         return channelClosedOutcome();
 
