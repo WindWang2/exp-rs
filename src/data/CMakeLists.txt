@@ -43,6 +43,8 @@ qt_add_library(sicnu_data STATIC
   internal/source_provider.h
   internal/source_provider_registry.cpp
   internal/source_provider_registry.h
+  offline_mode.cpp
+  offline_mode.h
   providers/gdal_runtime.cpp
   providers/gdal_runtime.h
   providers/gdal_raster_source_provider.cpp

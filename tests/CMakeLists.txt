@@ -231,6 +231,10 @@ sicnu_add_io_test(test_io_atomic_failures)
 sicnu_add_io_test(test_io_fidelity)
 sicnu_add_io_test(test_io_paths)
 sicnu_add_io_test(test_io_uri)
+
+# Offline classroom deployment (goal D7): the offline gate refuses remote
+# requests without any network attempt — typed error + GDAL cloud deny.
+sicnu_add_io_test(test_offline_mode)
 sicnu_add_io_test(test_io_product_registry)
 sicnu_add_io_test(test_io_probe)
 sicnu_add_io_test(test_adversarial_m3)
