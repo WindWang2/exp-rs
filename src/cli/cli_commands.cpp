@@ -1790,7 +1790,61 @@ int commandData( QStringList args, const CliIO &io )
     const QString sub = args.isEmpty() ? "inspect" : args.takeFirst();
     if ( args.isEmpty() )
         return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                          {}, "usage: data inspect|doctor|probe|capabilities|product describe|stac <dataset>|identity <url>|cache <url> [--bytes N]" );
+                          {}, "usage: data inspect|doctor|probe|capabilities|product describe|stac <dataset>|identity <url>|cache status|clear|<url> [--bytes N]" );
+    // Fabric 8.0 (D8): `data cache status|clear`. Claimed ONLY in the exact
+    // single-argument form — `status`/`clear` must be the first token after
+    // `cache` and the only one. Any other shape (a URL, or `status <url>`)
+    // falls through to the positional-URL grammar unchanged: REVIEW_LOG F7 —
+    // a grammar token must never swallow the positional path, so only the
+    // bare token changes meaning (a real cache target is a URL and never
+    // equals these words; anything else keeps parsing exactly as before).
+    if ( sub == QStringLiteral( "cache" ) && args.size() == 1 &&
+         ( args.first() == QStringLiteral( "status" ) ||
+           args.first() == QStringLiteral( "clear" ) ) )
+    {
+        if ( args.first() == QStringLiteral( "status" ) )
+        {
+            // Read-only: reports the live process-local state without
+            // installing anything, so `installed` is the honest answer and
+            // `telemetry` is null when this process never cached a byte.
+            Json::Value out;
+            out["scope"] = "process";
+            out["installed"] = sicnu::geo::RemoteRangeCache::installed();
+            out["config"] = sicnu::geo::RemoteRangeCache::currentConfig().toJson();
+            out["telemetry"] = sicnu::geo::RemoteRangeCache::telemetryJson();
+            out["disk"] = sicnu::geo::RemoteRangeCache::diskCacheStatsJson();
+            return io.finish( true, "data", out, 0 );
+        }
+        // Clear drops memory AND disk entries by reusing exactly the read
+        // path's teardown mechanism: install() guarantees a store exists
+        // (uninstall() early-returns without one), then the same RAII guard
+        // the `<url>` handler uses runs uninstall() on scope exit —
+        // g_store->dropAll() + RangeDiskBlockStore::clear(). The CURRENT
+        // config is re-applied so an in-process disk layer keeps its
+        // directory and uninstall()'s disk clear reaches its blocks.
+        // Process-local by contract (PLAN D8): only that directory is
+        // cleared.
+        try
+        {
+            struct CacheGuard
+            {
+                ~CacheGuard() { sicnu::geo::RemoteRangeCache::uninstall(); }
+            } cacheGuard;
+            sicnu::geo::RemoteRangeCache::install(
+                sicnu::geo::RemoteRangeCache::currentConfig() );
+        }
+        catch ( const sicnu::geo::GeoError &error )
+        {
+            return io.finish( false, "data", error.toJson(),
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                              {}, error.what() );
+        }
+        Json::Value out;
+        out["cleared"] = true;
+        out["scope"] = "process";
+        out["disk"] = sicnu::geo::RemoteRangeCache::diskCacheStatsJson();
+        return io.finish( true, "data", out, 0 );
+    }
     const QString path = args.takeFirst();
 
     sicnu::geo::InspectOptions options;
