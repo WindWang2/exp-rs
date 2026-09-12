@@ -55,7 +55,7 @@ std::string fixturePath( const char *name )
 OutputVerifier::LabGradeResult grade( const std::string &lab, const std::string &artifact,
                                       std::size_t maxBytes = 64ull * 1024ull * 1024ull )
 {
-    sicnu::geo::ensureGdalInit();
+    sicnu::geo::ensureGdalRegistered();
     OutputVerifier::LabGradeOptions options;
     options.maxBytes = maxBytes;
     const OutputVerifier verifier;
@@ -67,7 +67,7 @@ OutputVerifier::LabGradeResult gradeFile( const std::string &rulesFile,
                                           const std::string &artifact,
                                           std::size_t maxBytes = 64ull * 1024ull * 1024ull )
 {
-    sicnu::geo::ensureGdalInit();
+    sicnu::geo::ensureGdalRegistered();
     OutputVerifier::LabGradeOptions options;
     options.maxBytes = maxBytes;
     const OutputVerifier verifier;
@@ -515,7 +515,7 @@ TEST_CASE( "classification kernels accept inline truth grids", "[lab_grading][ke
 
 TEST_CASE( "existing binary verify path still works alongside teaching mode", "[lab_grading][binary_path]" )
 {
-    sicnu::geo::ensureGdalInit();
+    sicnu::geo::ensureGdalRegistered();
     const OutputVerifier verifier;
     const auto verification =
       verifier.verify( QString::fromLatin1( fixturePath( "ndvi_basics_reference.tif" ) ) );
