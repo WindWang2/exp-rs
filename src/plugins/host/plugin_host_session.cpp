@@ -442,9 +442,31 @@ bool PluginHostProcessSession::awaitHandshake( PluginDiagnosticLog &diagnostics 
                          mOptions.pluginId );
         return false;
     }
+    // Worker-controlled hello: every field is type-checked BEFORE use — a
+    // buggy or hostile worker must fail the handshake with a typed
+    // diagnostic, never throw a jsoncpp exception out of spawn(). The const
+    // alias forces const operator[] (no accidental insertion).
+    const Json::Value &hello = mHello;
+    if ( !hello.isObject() )
+    {
+        diagnostics.add( PluginDiagnosticCode::IpcProtocolError,
+                         PluginDiagnosticSeverity::Error,
+                         "worker.hello payload is not an object", mOptions.pluginId );
+        return false;
+    }
+    const Json::Value &peerMajorValue = hello[ "protocolMajor" ];
+    const Json::Value &peerMinorValue = hello[ "protocolMinor" ];
+    if ( !peerMajorValue.isIntegral() || !peerMinorValue.isIntegral() )
+    {
+        diagnostics.add( PluginDiagnosticCode::IpcProtocolError,
+                         PluginDiagnosticSeverity::Error,
+                         "worker.hello protocol version fields are missing or not integers",
+                         mOptions.pluginId );
+        return false;
+    }
     std::string reason;
-    const int peerMajor = mHello.get( "protocolMajor", 0 ).asInt();
-    const int peerMinor = mHello.get( "protocolMinor", 0 ).asInt();
+    const int peerMajor = peerMajorValue.asInt();
+    const int peerMinor = peerMinorValue.asInt();
     if ( !Ipc::isProtocolCompatible( hostProtocolVersionMajor(), hostProtocolVersionMinor(),
                                      peerMajor, peerMinor, reason ) )
     {
@@ -457,8 +479,19 @@ bool PluginHostProcessSession::awaitHandshake( PluginDiagnosticLog &diagnostics 
     }
     // The plugin API/ABI axes must ALSO agree: the worker maps the binary
     // with the same V1 ABI gates the in-process loader enforces.
-    const std::string workerApi = mHello.get( "apiVersion", "" ).asString();
-    const int workerAbi = mHello.get( "abiVersion", 0 ).asInt();
+    const Json::Value &apiValue = hello[ "apiVersion" ];
+    const Json::Value &abiValue = hello[ "abiVersion" ];
+    if ( !apiValue.isString() || !abiValue.isIntegral() )
+    {
+        diagnostics.add( PluginDiagnosticCode::IpcProtocolError,
+                         PluginDiagnosticSeverity::Error,
+                         "worker.hello api/abi version fields are missing or have the wrong "
+                         "type",
+                         mOptions.pluginId );
+        return false;
+    }
+    const std::string workerApi = apiValue.asString();
+    const int workerAbi = abiValue.asInt();
     if ( workerApi != EXP_RS_PLUGIN_API_VERSION || workerAbi != pluginAbiVersion() )
     {
         diagnostics.add( PluginDiagnosticCode::AbiVersionMismatch,
@@ -472,15 +505,29 @@ bool PluginHostProcessSession::awaitHandshake( PluginDiagnosticLog &diagnostics 
     }
     // Protocol 1.1: informational worker dispatch width (a v1.0 worker
     // omits the field → 1, i.e. serialized dispatch; the host gate still
-    // protects the host, the worker just serves slower).
-    const int workerConcurrent = mHello.get( "maxConcurrentRequests", 1 ).asInt();
+    // protects the host, the worker just serves slower). Omission stays
+    // legal (additive field); only a PRESENT-but-wrong-type value refuses.
+    const Json::Value &concurrencyValue = hello[ "maxConcurrentRequests" ];
+    if ( !concurrencyValue.isNull() && !concurrencyValue.isIntegral() )
+    {
+        diagnostics.add( PluginDiagnosticCode::IpcProtocolError,
+                         PluginDiagnosticSeverity::Error,
+                         "worker.hello maxConcurrentRequests is not an integer",
+                         mOptions.pluginId );
+        return false;
+    }
+    const int workerConcurrent = concurrencyValue.isIntegral() ? concurrencyValue.asInt() : 1;
     // Protocol 1.2: optional feature advertisement. A 1.1 worker omits the
     // array entirely; unknown feature names are ignored (additive axis).
     bool directionalCaps = false;
-    for ( const Json::Value &feature : mHello[ "features" ] )
+    const Json::Value &features = hello[ "features" ];
+    if ( features.isArray() )
     {
-        if ( feature.isString() && feature.asString() == "directionalFrameCaps" )
-            directionalCaps = true;
+        for ( const Json::Value &feature : features )
+        {
+            if ( feature.isString() && feature.asString() == "directionalFrameCaps" )
+                directionalCaps = true;
+        }
     }
     {
         std::lock_guard<std::mutex> stateLock( mStateMutex );
