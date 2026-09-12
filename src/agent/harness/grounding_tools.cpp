@@ -239,7 +239,7 @@ class UnderstandTool final : public SpatialTool
       if ( !wantsStats )
       {
         const Json::Value cached = ContextLedger::instance().cachedUnderstanding(
-          understandingCacheKey( resolved->path, resolved->revision ), 0 );
+          understandingCacheKey( resolved->path, resolved->revision ) );
         if ( !cached.isNull() )
         {
           Json::Value out( Json::objectValue );
@@ -291,7 +291,7 @@ class UnderstandTool final : public SpatialTool
       }
       understanding["entity"] = resolved->toJson();
       ContextLedger::instance().cacheUnderstanding(
-        understandingCacheKey( resolved->path, resolved->revision ), 0, understanding );
+        understandingCacheKey( resolved->path, resolved->revision ), understanding );
 
       // Harness 8.0 (typed context 2.0): remember the typed facts with the
       // stat identity they were observed at; harness:context surfaces them
@@ -519,8 +519,8 @@ std::string inferModality( const Json::Value &rasterInspect )
 
 Json::Value cachedUnderstandingFor( const QString &path, long long revision )
 {
-  return ContextLedger::instance().cachedUnderstanding( understandingCacheKey( path, revision ),
-                                                        0 );
+  return ContextLedger::instance().cachedUnderstanding(
+    understandingCacheKey( path, revision ) );
 }
 
 void registerGroundingTools()

@@ -19,7 +19,10 @@
 #include <QFileInfo>
 
 #include <algorithm>
+#include <cstddef>
+#include <deque>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
@@ -44,15 +47,37 @@ Json::Value objectSchema( Json::Value properties, Json::Value required )
 /// run. The 4.0 resume bound was "one per status call" — a poll loop could
 /// retry forever. The ledger caps automatic repair/resume attempts for the
 /// lifetime of the run id.
-/// Threading/ownership note: tool execution is serialized by the surfaces
-/// that drive it (MCP stdio loop, copilot UI thread), so the map is not
-/// mutex-guarded; entries are one string+int per run id for the process
-/// lifetime (bounded in practice by the coordinator's own run registry).
+/// Invariant (was previously only implied by prose): this is process-global
+/// mutable state, so EVERY access to kLedger happens under kLedgerMutex —
+/// safety does not depend on the (currently serialized) tool-execution
+/// surfaces. The ledger is also hard-capped: once it holds
+/// kMaxRepairLedgerEntries run ids, the oldest-inserted entry is evicted
+/// (FIFO) before a new id is added. An evicted run at worst regains a fresh
+/// budget of kMaxRepairAttempts attempts — a bounded regression, never
+/// unbounded retries. Note the returned reference intentionally stays valid
+/// (std::map references are stable); callers' check-then-increment stays
+/// best-effort exactly as before.
 constexpr int kMaxRepairAttempts = 3;
+constexpr std::size_t kMaxRepairLedgerEntries = 256;
+
+/// Guards the kLedger map inside repairAttempts() below.
+std::mutex kLedgerMutex;
 
 int &repairAttempts( const std::string &runId )
 {
   static std::map<std::string, int> kLedger;
+  // Insertion order of run ids, for FIFO eviction of the oldest entry.
+  static std::deque<std::string> kLedgerOrder;
+  std::lock_guard<std::mutex> lock( kLedgerMutex );
+  const auto existing = kLedger.find( runId );
+  if ( existing != kLedger.end() )
+    return existing->second;
+  while ( kLedger.size() >= kMaxRepairLedgerEntries && !kLedgerOrder.empty() )
+  {
+    kLedger.erase( kLedgerOrder.front() );
+    kLedgerOrder.pop_front();
+  }
+  kLedgerOrder.push_back( runId );
   return kLedger[ runId ];
 }
 

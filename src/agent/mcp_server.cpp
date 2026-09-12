@@ -2602,10 +2602,17 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
     const long pipelineId = sicnu::workflow::WorkflowRunCoordinator::instance().startTrackedPipelineJson(
         pipelineJson.toStdString(), autoLoad);
 
+    // Single rejection gate: one handler for BOTH the recording and
+    // non-recording paths (was duplicated with two different exception
+    // types). McpToolError — not bare std::runtime_error — keeps the
+    // structured INVALID_PIPELINE code in the tool-error payload.
+    if (pipelineId < 0)
+        throw McpToolError(
+            QStringLiteral("run_workflow: pipeline rejected; nothing submitted or recorded — "
+                           "invalid pipeline definition, expected {id, steps: [{id, operator, params, inputs}]}"),
+            QStringLiteral("INVALID_PIPELINE"), QStringLiteral("validation"));
+
     if (recordingRequested) {
-        if (pipelineId < 0)
-            throw McpToolError(QStringLiteral("run_workflow: pipeline rejected; nothing recorded"),
-                               QStringLiteral("INVALID_PIPELINE"), QStringLiteral("validation"));
         // Record the submission SYNCHRONOUSLY with its own pins: the run id
         // is known the moment the tracked submit returns, so identity pins
         // are part of the record from the first transition — immune to
@@ -2620,19 +2627,23 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
                                QStringLiteral("INVALID_PIPELINE"), QStringLiteral("validation"));
         const auto recorded = m_experimentMonitor->recordSubmission(*run, pins);
         if (!recorded) {
+            // Result::failure(QVector<Diagnostic>) accepts an EMPTY vector,
+            // so .first() here is conditional UB on the failure path — fall
+            // back to a stable message when no diagnostic was produced.
+            const QString failureMessage =
+                recorded.diagnostics().isEmpty()
+                    ? QStringLiteral("recording failed without a diagnostic")
+                    : recorded.diagnostics().first().message;
             SICNU_LOG_ERROR(SicnuLogTags::MCP,
                             QStringLiteral("run_workflow recording failed: %1")
-                                .arg(recorded.diagnostics().first().message));
+                                .arg(failureMessage));
             throw McpToolError(QStringLiteral("run_workflow: experiment recording failed: ")
-                                   + recorded.diagnostics().first().message,
+                                   + failureMessage,
                                QStringLiteral("EXPERIMENT_RECORDING_REFUSED"),
                                QStringLiteral("validation"));
         }
         recordedExperimentRunId = recorded.value();
     }
-    if (pipelineId < 0)
-        throw std::runtime_error(
-            "Invalid pipeline definition: expected {id, steps: [{id, operator, params, inputs}]}");
 
     QVariantMap result;
     result[QStringLiteral("pipeline_id")] = static_cast<qlonglong>(pipelineId);
