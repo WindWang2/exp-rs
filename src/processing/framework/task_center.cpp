@@ -335,6 +335,7 @@ void TaskCenter::shutdownForTests()
         m_lastForwardedProgress.clear();
         m_estimateMbCache.clear(); // task ids restart at 1: stale estimates must not leak across tests
         m_admissionDimsCache.clear();
+        m_resolveMbCache.clear(); // algorithm-keyed: stale estimates must not leak across tests
         m_completionCallbacks.clear();
         m_taskFingerprints.clear();
         m_taskFingerprintParams.clear();
@@ -695,12 +696,32 @@ void TaskCenter::setEstimateResolver( TaskEstimateResolver resolver )
     // admission wedged until restart). Active tasks keep their charged
     // identity; only idle entries re-resolve.
     purgeAdmissionCachesForIdleTasksLocked();
+    // The algorithm-keyed snapshot cache has no per-task notion of "active":
+    // candidates are not charged yet, so drop it wholesale — new candidates
+    // re-resolve under the new resolver while charged active tasks keep the
+    // per-task entries above.
+    m_resolveMbCache.clear();
 }
 
 unsigned int TaskCenter::resolveEstimateMb( const std::string &algorithmId ) const
 {
     QMutexLocker locker( &m_mutex );
-    return m_resourceBudget.resolve( algorithmId ).ramMb;
+    return estimateMbForAlgorithmLocked( algorithmId );
+}
+
+unsigned int TaskCenter::estimateMbForAlgorithmLocked( const std::string &algorithmId ) const
+{
+    // Same rationale as m_estimateMbCache (#702): the registry-backed resolver
+    // runs a locked registry lookup and parses descriptor JSON. admissionSnapshot
+    // resolves per algorithmId (the candidate has no task id yet), so cache per
+    // algorithmId — one parse per algorithm for the process lifetime instead of
+    // one per snapshot, all under m_mutex.
+    const auto cached = m_resolveMbCache.constFind( algorithmId );
+    if ( cached != m_resolveMbCache.constEnd() )
+        return cached.value();
+    const unsigned int mb = m_resourceBudget.resolve( algorithmId ).ramMb;
+    m_resolveMbCache.insert( algorithmId, mb );
+    return mb;
 }
 
 Json::Value TaskCenter::variantMapToJsonParams( const QVariantMap &params )
@@ -798,7 +819,7 @@ TaskAdmissionSnapshot TaskCenter::admissionSnapshot( const QString &algorithmId,
 
     snap.candidateMb = resourceEstimateOverrideMb > 0
                          ? resourceEstimateOverrideMb
-                         : m_resourceBudget.resolve( algorithmId.toStdString() ).ramMb;
+                         : estimateMbForAlgorithmLocked( algorithmId.toStdString() );
     snap.transientActive = m_active.transientChildren;
     snap.transientCap = kMaxTransientChildren;
 
