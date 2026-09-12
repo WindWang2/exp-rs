@@ -29,7 +29,7 @@
 HelpViewerDialog::HelpViewerDialog( QWidget *parent )
   : QDialog( parent )
 {
-  setWindowTitle( tr( "RS Studio 用户手册与帮助文档" ) );
+  setWindowTitle( tr( "RS Studio User Manual and Help" ) );
   SicnuUi::polishDialog( this, 720 );
   resize( 1060, 720 );
   setMinimumSize( 680, 460 );
@@ -53,13 +53,13 @@ void HelpViewerDialog::setupUi()
   leftLayout->setSpacing( 6 );
 
   auto *tocHeaderLayout = new QHBoxLayout();
-  auto *tocTitle = new QLabel( tr( "<b>文档目录</b>" ), leftWidget );
+  auto *tocTitle = new QLabel( tr( "<b>Documentation</b>" ), leftWidget );
   tocHeaderLayout->addWidget( tocTitle );
   leftLayout->addLayout( tocHeaderLayout );
 
   m_filterEdit = new QLineEdit( leftWidget );
   m_filterEdit->setObjectName( QStringLiteral( "helpViewerFilterEdit" ) );
-  m_filterEdit->setPlaceholderText( tr( "过滤章节目录…" ) );
+  m_filterEdit->setPlaceholderText( tr( "Filter the section catalog..." ) );
   m_filterEdit->setClearButtonEnabled( true );
   connect( m_filterEdit, &QLineEdit::textChanged, this, &HelpViewerDialog::filterToc );
   leftLayout->addWidget( m_filterEdit );
@@ -85,21 +85,21 @@ void HelpViewerDialog::setupUi()
 
   m_searchEdit = new QLineEdit( rightWidget );
   m_searchEdit->setObjectName( QStringLiteral( "helpViewerSearchEdit" ) );
-  m_searchEdit->setPlaceholderText( tr( "在文档正文中查找…" ) );
+  m_searchEdit->setPlaceholderText( tr( "Find in Document..." ) );
   m_searchEdit->setClearButtonEnabled( true );
   connect( m_searchEdit, &QLineEdit::returnPressed, this, [this]() {
     searchContent( m_searchEdit->text(), true );
   } );
   topBarLayout->addWidget( m_searchEdit, 1 );
 
-  auto *findNextBtn = new QPushButton( tr( "下一个" ), rightWidget );
+  auto *findNextBtn = new QPushButton( tr( "Next" ), rightWidget );
   SicnuUi::markSecondary( findNextBtn );
   connect( findNextBtn, &QPushButton::clicked, this, [this]() {
     searchContent( m_searchEdit->text(), true );
   } );
   topBarLayout->addWidget( findNextBtn );
 
-  auto *findPrevBtn = new QPushButton( tr( "上一个" ), rightWidget );
+  auto *findPrevBtn = new QPushButton( tr( "Previous" ), rightWidget );
   SicnuUi::markSecondary( findPrevBtn );
   connect( findPrevBtn, &QPushButton::clicked, this, [this]() {
     searchContent( m_searchEdit->text(), false );
@@ -108,12 +108,12 @@ void HelpViewerDialog::setupUi()
 
   topBarLayout->addSpacing( 8 );
 
-  m_zoomInBtn = new QPushButton( tr( "放大" ), rightWidget );
+  m_zoomInBtn = new QPushButton( tr( "Zoom In" ), rightWidget );
   SicnuUi::markSecondary( m_zoomInBtn );
   connect( m_zoomInBtn, &QPushButton::clicked, this, &HelpViewerDialog::zoomIn );
   topBarLayout->addWidget( m_zoomInBtn );
 
-  m_zoomOutBtn = new QPushButton( tr( "缩小" ), rightWidget );
+  m_zoomOutBtn = new QPushButton( tr( "Zoom Out" ), rightWidget );
   SicnuUi::markSecondary( m_zoomOutBtn );
   connect( m_zoomOutBtn, &QPushButton::clicked, this, &HelpViewerDialog::zoomOut );
   topBarLayout->addWidget( m_zoomOutBtn );
@@ -125,7 +125,7 @@ void HelpViewerDialog::setupUi()
 
   topBarLayout->addSpacing( 8 );
 
-  m_externalBtn = new QPushButton( tr( "外部浏览器" ), rightWidget );
+  m_externalBtn = new QPushButton( tr( "External Browser" ), rightWidget );
   SicnuUi::markSecondary( m_externalBtn );
   connect( m_externalBtn, &QPushButton::clicked, this, &HelpViewerDialog::openInExternalBrowser );
   topBarLayout->addWidget( m_externalBtn );
@@ -146,7 +146,7 @@ void HelpViewerDialog::setupUi()
   rootLayout->addWidget( m_splitter, 1 );
 
   auto *bottomBox = new QDialogButtonBox( QDialogButtonBox::Close, this );
-  bottomBox->button( QDialogButtonBox::Close )->setText( tr( "关闭" ) );
+  bottomBox->button( QDialogButtonBox::Close )->setText( tr( "Close" ) );
   SicnuUi::markSecondary( bottomBox->button( QDialogButtonBox::Close ) );
   connect( bottomBox, &QDialogButtonBox::rejected, this, &QDialog::accept );
   rootLayout->addWidget( bottomBox );
@@ -384,28 +384,28 @@ void HelpViewerDialog::openInExternalBrowser()
 QString HelpViewerDialog::fallbackGuideMarkdown()
 {
   return QStringLiteral(
-    "# RS Studio (exp-rs) 综合用户手册与操作指南\n\n"
-    "> **版本**：v2.0 Professional  \n"
-    "> **系统文档代码**：DOC-RS-STUDIO-USERGUIDE-CN  \n\n"
-    "# 第 1 章：系统概述与快速入门\n"
-    "RS Studio 是面向现代遥感科研、高校教学与工业生产的新一代桌面智能地理空间分析平台。\n\n"
-    "# 第 2 章：遥感数据加载与管理\n"
-    "支持多源卫星产品自动识别导入、STAC 云端检索与 Data Manager 资产管理。\n\n"
-    "# 第 3 章：视口可视化与多源联动\n"
-    "提供双视口分屏同步联动、卷帘对比 (Swipe)、波段合成与实时显示拉伸。\n\n"
-    "# 第 4 章：像素级遥感分类全流程\n"
-    "提供完整的 7 步引导流程：类别体系、ROI 采集、JM 距离可分性评价、模型训练、混淆矩阵精度评定、分类后处理与成果导出。\n\n"
-    "# 第 5 章：面向对象影像分析 (OBIA)\n"
-    "提供多尺度分割、多层级拓扑树、GLCM 纹理与几何特征提取及对象分类。\n\n"
-    "# 第 6 章：波谱分析与高光谱工具\n"
-    "提供光谱剖面图、连续统去除 (Continuum Removal)、光谱库 SAM / SID 匹配、线性解混与 RX 异常探测。\n\n"
-    "# 第 7 章：遥感预处理与图像增强\n"
-    "包括辐射定标、大气校正 (DOS1, DOS2, QUAC)、云雪 QA 掩膜、影像配准与空间滤波。\n\n"
-    "# 第 8 章：AI Copilot 智能助手\n"
-    "基于大语言模型的自然语言遥感分析对话、工具调用与 DAG 流程自动化编排。\n\n"
-    "# 第 9 章：常见问题排查与诊断\n"
-    "启动依赖、坐标投影异常、内存溢出分块优化与网络连通性排查。\n\n"
-    "# 第 10 章：快捷键与操作速查表\n"
-    "汇总全局工程、视口漫游、矢量编辑与影像配准快捷键速查表。\n"
+    tr("# RS Studio (exp-rs) Comprehensive User Manual and Operation Guide\n\n")
+    tr("> **Version**: v2.0 Professional  \n")
+    tr("> **System document code**: DOC-RS-STUDIO-USERGUIDE-CN  \n\n")
+    tr("# Chapter 1: System Overview and Quick Start\n")
+    tr("RS Studio is a new-generation desktop intelligent geospatial analysis platform for modern remote-sensing research, university teaching and industrial production.\n\n")
+    tr("# Chapter 2: Loading and Managing Remote-Sensing Data\n")
+    tr("Provides automatic multi-source satellite product import, STAC cloud search and Data Manager asset management.\n\n")
+    tr("# Chapter 3: Viewport Visualization and Multi-Source Linkage\n")
+    tr("Provides linked split viewports, swipe comparison, band composition and real-time display stretching.\n\n")
+    tr("# Chapter 4: The Full Pixel-Level Classification Workflow\n")
+    tr("Provides a complete 7-step guided workflow: class scheme, ROI collection, JM-distance separability evaluation, model training, confusion-matrix accuracy assessment, post-classification and result export.\n\n")
+    tr("# Chapter 5: Object-Based Image Analysis (OBIA)\n")
+    tr("Provides multiresolution segmentation, hierarchical topology trees, GLCM texture and geometric feature extraction, and object classification.\n\n")
+    tr("# Chapter 6: Spectral Analysis and Hyperspectral Tools\n")
+    tr("Provides spectral profiles, continuum removal, library SAM / SID matching, linear unmixing and the RX anomaly detector.\n\n")
+    tr("# Chapter 7: Remote-Sensing Preprocessing and Image Enhancement\n")
+    tr("Covers radiometric calibration, atmospheric correction (DOS1, DOS2, QUAC), cloud/snow QA masking, image registration and spatial filtering.\n\n")
+    tr("# Chapter 8: AI Copilot Assistant\n")
+    tr("LLM-powered natural-language remote-sensing analysis chat, tool calls and automated DAG pipeline orchestration.\n\n")
+    tr("# Chapter 9: Troubleshooting and Diagnostics\n")
+    tr("Covers startup dependencies, projection anomalies, out-of-memory tiling optimization and network connectivity troubleshooting.\n\n")
+    tr("# Chapter 10: Shortcut and Operation Quick Reference\n")
+    tr("A quick reference of shortcuts for projects, viewport navigation, vector editing and image registration.\n")
   );
 }

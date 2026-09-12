@@ -30,10 +30,10 @@ void RsClassifierSetupBar::buildLayout()
   root->setSpacing( 6 );
 
   SicnuDialogHelp::tip( this, SicnuDialogHelp::shortForTool(
-                          QStringLiteral( "classify_setup" ), tr( "分类设置栏" ) ) );
+                          QStringLiteral( "classify_setup" ), tr( "Classifier Setup Bar" ) ) );
 
   auto *flowHint = SicnuUi::makeHintLabel(
-    this, tr( "流程：选算法 → 设波段/训练比例 → 采集 ROI → 预览或训练分类 → 精度评价" ) );
+    this, tr( "Workflow: pick an algorithm → set bands / training ratio → collect ROIs → preview or train the classification → accuracy assessment" ) );
   root->addWidget( flowHint );
 
   auto *row = new QHBoxLayout();
@@ -55,14 +55,14 @@ void RsClassifierSetupBar::buildLayout()
   mBtnUnetDisabled = makeAlgoBtn( tr( "UNet" ), false );
   mBtnNormalBayes->setChecked( true );
   SicnuDialogHelp::tip( mBtnNormalBayes, tr(
-    "正态贝叶斯：假设各类光谱呈多维正态，适合样本较充分、类间可分的场景。" ) );
+    tr("Normal Bayes: assumes multivariate normal class spectra; suits well-sampled, separable classes.") ) );
   SicnuDialogHelp::tip( mBtnSvm, tr(
-    "SVM (RBF)：支持向量机 + 径向基核，适合中等样本、非线性边界。" ) );
+    tr("SVM (RBF): support vector machine with a radial basis kernel; suits medium samples and non-linear boundaries.") ) );
   SicnuDialogHelp::tip( mBtnKMeans, tr(
-    "K-Means：无监督聚类，类别数取自有样本的类；标签可能与 ROI 类号需对应。" ) );
-  SicnuDialogHelp::tip( mBtnRfDisabled, tr( "随机森林：计划中，当前构建未启用。" ) );
-  SicnuDialogHelp::tip( mBtnMahaDisabled, tr( "马氏距离分类：计划中。" ) );
-  SicnuDialogHelp::tip( mBtnUnetDisabled, tr( "UNet 深度学习：计划中。" ) );
+    tr("K-means: unsupervised clustering; the class count comes from the labeled samples, and labels may need mapping to ROI class ids.") ) );
+  SicnuDialogHelp::tip( mBtnRfDisabled, tr( "Random forest: planned; not enabled in this build." ) );
+  SicnuDialogHelp::tip( mBtnMahaDisabled, tr( "Mahalanobis distance classification: planned." ) );
+  SicnuDialogHelp::tip( mBtnUnetDisabled, tr( "UNet deep learning: planned." ) );
 
   // Use an explicit single-toggle group so the three enabled buttons are
   // mutually exclusive. Disabled placeholders are not added to the group.
@@ -84,7 +84,7 @@ void RsClassifierSetupBar::buildLayout()
     } );
   }
 
-  row->addWidget( new QLabel( tr( "算法:" ), this ) );
+  row->addWidget( new QLabel( tr( "Algorithm:" ), this ) );
   for ( QToolButton *b : algoBtns )
     row->addWidget( b );
   row->addSpacing( 6 );
@@ -94,19 +94,19 @@ void RsClassifierSetupBar::buildLayout()
 
   // --- Band picker ----------------------------------------------------------
   row->addSpacing( 12 );
-  row->addWidget( new QLabel( tr( "波段:" ), this ) );
+  row->addWidget( new QLabel( tr( "Bands:" ), this ) );
   mBandsEdit = new QLineEdit( this );
   mBandsEdit->setPlaceholderText( tr( "e.g. 1,2,3" ) );
   mBandsEdit->setMaximumWidth( 120 );
   mBandsEdit->setObjectName( QStringLiteral( "rsClassifierBands" ) );
   SicnuDialogHelp::tip( mBandsEdit, tr(
-    "参与分类的波段序号（从 1 开始），逗号分隔。\n"
-    "例：1,2,3 或 2,3,4,5。留空时默认取前若干波段。" ) );
+    tr("Band numbers taking part in the classification (starting at 1), comma-separated.\n")
+    tr("e.g. 1,2,3 or 2,3,4,5. Left empty, the first few bands are used by default.") ) );
   row->addWidget( mBandsEdit );
 
   // --- Train ratio ----------------------------------------------------------
   row->addSpacing( 8 );
-  row->addWidget( new QLabel( tr( "训练比例:" ), this ) );
+  row->addWidget( new QLabel( tr( "Training ratio:" ), this ) );
   mTrainRatioSpin = new QDoubleSpinBox( this );
   mTrainRatioSpin->setRange( 0.1, 0.95 );
   mTrainRatioSpin->setSingleStep( 0.05 );
@@ -114,42 +114,42 @@ void RsClassifierSetupBar::buildLayout()
   mTrainRatioSpin->setDecimals( 2 );
   mTrainRatioSpin->setObjectName( QStringLiteral( "rsClassifierTrainRatio" ) );
   SicnuDialogHelp::tip( mTrainRatioSpin, tr(
-    "分层抽样中用于训练的比例（0.1–0.95）。\n"
-    "其余样本用于测试精度（混淆矩阵）。默认 0.7。" ) );
+    tr("Training share in stratified sampling (0.1–0.95).\n")
+    tr("The remaining samples measure accuracy (confusion matrix). Defaults to 0.7.") ) );
   row->addWidget( mTrainRatioSpin );
 
   // --- Output path ----------------------------------------------------------
   row->addSpacing( 8 );
-  row->addWidget( new QLabel( tr( "输出:" ), this ) );
+  row->addWidget( new QLabel( tr( "Output:" ), this ) );
   mOutputEdit = new QLineEdit( this );
-  mOutputEdit->setPlaceholderText( tr( "/path/to/classified.tif (留空则提示)" ) );
+  mOutputEdit->setPlaceholderText( tr( "/path/to/classified.tif (prompt if empty)" ) );
   mOutputEdit->setObjectName( QStringLiteral( "rsClassifierOutput" ) );
   SicnuDialogHelp::tip( mOutputEdit, tr(
-    "分类结果 GeoTIFF 路径。留空时运行会弹出保存对话框。" ) );
+    tr("Classification result GeoTIFF path. Left empty, a save dialog pops up on run.") ) );
   row->addWidget( mOutputEdit, /*stretch*/ 1 );
 
   // --- Action buttons -------------------------------------------------------
-  mBtnCv = new QPushButton( tr( "交叉验证" ), this );
+  mBtnCv = new QPushButton( tr( "Cross-Validation" ), this );
   mBtnCv->setObjectName( QStringLiteral( "rsClassifierBtnCv" ) );
   SicnuDialogHelp::tip( mBtnCv, tr(
-    "分层 K 折交叉验证，估计模型稳定性（不写整景分类图）。" ) );
-  mBtnPreview = new QPushButton( tr( "快速预览" ), this );
+    tr("Stratified K-fold cross-validation to estimate model stability (writes no full-scene classification map).") ) );
+  mBtnPreview = new QPushButton( tr( "Quick Preview" ), this );
   mBtnPreview->setObjectName( QStringLiteral( "rsClassifierBtnPreview" ) );
   SicnuDialogHelp::tip( mBtnPreview, tr(
-    "仅对当前地图视口范围分类并临时加载，便于快速试参数。" ) );
-  mBtnApply = new QPushButton( tr( "训练并分类" ), this );
+    tr("Classifies only the current map viewport and loads it temporarily, for quick parameter trials.") ) );
+  mBtnApply = new QPushButton( tr( "Train and Classify" ), this );
   mBtnApply->setObjectName( QStringLiteral( "rsClassifierBtnApply" ) );
   SicnuUi::markPrimary( mBtnApply );
   SicnuDialogHelp::tip( mBtnApply, tr(
-    "用 ROI 样本训练并整景分类，写出输出栅格；完成后可做精度评价。" ) );
+    tr("Trains on the ROI samples and classifies the whole scene, writing the output raster; accuracy assessment follows.") ) );
 
-  auto *helpBtn = new QPushButton( tr( "帮助" ), this );
+  auto *helpBtn = new QPushButton( tr( "Help" ), this );
   helpBtn->setObjectName( QStringLiteral( "rsClassifierHelpBtn" ) );
   SicnuUi::markSecondary( helpBtn );
-  SicnuDialogHelp::tip( helpBtn, tr( "打开分类设置栏完整说明。" ) );
+  SicnuDialogHelp::tip( helpBtn, tr( "Opens the full Classifier Setup Bar explanation." ) );
   connect( helpBtn, &QPushButton::clicked, this, [this]() {
     SicnuDialogHelp::showToolHelp( this, QStringLiteral( "classify_setup" ),
-                                   tr( "分类设置" ) );
+                                   tr( "Classification Settings" ) );
   } );
 
   row->addWidget( mBtnCv );
@@ -169,32 +169,32 @@ void RsClassifierSetupBar::buildLayout()
   // --- NoData / ignore values (edge handling) -----------------------------
   auto *row2 = new QHBoxLayout();
   row2->setSpacing( 8 );
-  mUseSrcNodataCheck = new QCheckBox( tr( "使用源 NoData" ), this );
+  mUseSrcNodataCheck = new QCheckBox( tr( "Use source NoData" ), this );
   mUseSrcNodataCheck->setObjectName( QStringLiteral( "rsClassifierUseSrcNodata" ) );
   mUseSrcNodataCheck->setChecked( true );
   mUseSrcNodataCheck->setToolTip( tr(
-    "启用后，各输入波段的 GDAL NoData 像元不参与分类，输出为未分类 (0)。"
-    "适合影像边缘或无效区。" ) );
+    tr("When enabled, GDAL NoData pixels of the input bands are excluded from classification and output as unclassified (0).")
+    tr("Suits image edges or invalid areas.") ) );
   row2->addWidget( mUseSrcNodataCheck );
 
-  row2->addWidget( new QLabel( tr( "忽略值:" ), this ) );
+  row2->addWidget( new QLabel( tr( "Ignored values:" ), this ) );
   mIgnoreValuesEdit = new QLineEdit( this );
   mIgnoreValuesEdit->setObjectName( QStringLiteral( "rsClassifierIgnoreValues" ) );
-  mIgnoreValuesEdit->setPlaceholderText( tr( "如 0 或 0,-9999（逗号分隔）" ) );
+  mIgnoreValuesEdit->setPlaceholderText( tr( "e.g. 0 or 0,-9999 (comma-separated)" ) );
   mIgnoreValuesEdit->setMaximumWidth( 160 );
   mIgnoreValuesEdit->setToolTip( tr(
-    "额外忽略的像元值（任意波段等于该值则视为背景/边缘）。"
-    "常见：填充 0、背景 -9999。可与源 NoData 同时生效。" ) );
+    tr("Extra ignored pixel values (any band equal to them counts as background / edge).")
+    tr("Common: 0 fill, -9999 background. Can apply together with the source NoData.") ) );
   row2->addWidget( mIgnoreValuesEdit );
 
-  row2->addWidget( new QLabel( tr( "匹配:" ), this ) );
+  row2->addWidget( new QLabel( tr( "Matches:" ), this ) );
   mIgnoreModeCombo = new QComboBox( this );
   mIgnoreModeCombo->setObjectName( QStringLiteral( "rsClassifierIgnoreMode" ) );
-  mIgnoreModeCombo->addItem( tr( "任一波段" ), 0 );
-  mIgnoreModeCombo->addItem( tr( "全部波段" ), 1 );
+  mIgnoreModeCombo->addItem( tr( "Any band" ), 0 );
+  mIgnoreModeCombo->addItem( tr( "All Bands" ), 1 );
   mIgnoreModeCombo->setToolTip( tr(
-    "任一波段：只要有一个波段为 NoData/忽略值 → 整像素忽略（默认，适合边缘）。\n"
-    "全部波段：仅当所有波段均为忽略值时才忽略。" ) );
+    tr("Any band: if one band is NoData / ignored, the whole pixel is ignored (default; suits edges).\n")
+    tr("All bands: the pixel is ignored only when every band is an ignored value.") ) );
   row2->addWidget( mIgnoreModeCombo );
   row2->addStretch( 1 );
   root->addLayout( row2 );

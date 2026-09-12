@@ -395,20 +395,20 @@ QVariant QgsGCPListModel::headerData( int section, Qt::Orientation orientation, 
     {
       case Column::SourceMapX:
       case Column::SourceMapY:
-        return tr( "源影像图层坐标系下的地图坐标" );
+        return tr( "Map coordinates in the source image layer CRS" );
       case Column::SourceCol:
       case Column::SourceRow:
-        return tr( "源影像像元行列号（列=col，行=row，自左上角）" );
+        return tr( "Pixel column/row in the source image (col=column, row=row, from the top-left)" );
       case Column::DestMapX:
       case Column::DestMapY:
-        return tr( "参考影像/地图图层坐标系下的坐标（Base）" );
+        return tr( "Coordinates in the reference image / map layer CRS (Base)" );
       case Column::DestCol:
       case Column::DestRow:
-        return tr( "参考影像像元行列号（列=col，行=row）" );
+        return tr( "Pixel column/row in the reference image (col=column, row=row)" );
       case Column::ResidualDx:
       case Column::ResidualDy:
       case Column::TotalResidual:
-        return mResidualIsMap ? tr( "残差（地图单位）" ) : tr( "残差（源影像像元）" );
+        return mResidualIsMap ? tr( "Residuals (map units)" ) : tr( "Residuals (source image pixels)" );
       default:
         break;
     }
@@ -416,20 +416,20 @@ QVariant QgsGCPListModel::headerData( int section, Qt::Orientation orientation, 
 
   switch ( static_cast<Column>( section ) )
   {
-    case Column::Enabled:       return tr( "启用" );
+    case Column::Enabled:       return tr( "Enable" );
     case Column::ID:            return tr( "#" );
-    case Column::SourceMapX:    return tr( "X源(map)" );
-    case Column::SourceMapY:    return tr( "Y源(map)" );
-    case Column::SourceCol:     return tr( "列源" );
-    case Column::SourceRow:     return tr( "行源" );
-    case Column::DestMapX:      return tr( "X参(map)" );
-    case Column::DestMapY:      return tr( "Y参(map)" );
-    case Column::DestCol:       return tr( "列参" );
-    case Column::DestRow:       return tr( "行参" );
+    case Column::SourceMapX:    return tr( "X src (map)" );
+    case Column::SourceMapY:    return tr( "Y src (map)" );
+    case Column::SourceCol:     return tr( "Col src" );
+    case Column::SourceRow:     return tr( "Row src" );
+    case Column::DestMapX:      return tr( "X ref (map)" );
+    case Column::DestMapY:      return tr( "Y ref (map)" );
+    case Column::DestCol:       return tr( "Col ref" );
+    case Column::DestRow:       return tr( "Row ref" );
     case Column::ResidualDx:    return tr( "ΔX(%1)" ).arg( resU );
     case Column::ResidualDy:    return tr( "ΔY(%1)" ).arg( resU );
     case Column::TotalResidual: return tr( "RMS(%1)" ).arg( resU );
-    case Column::PointType:     return tr( "类型" );
+    case Column::PointType:     return tr( "Type" );
     case Column::LastColumn:    break;
   }
   return QVariant();

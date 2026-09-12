@@ -30,7 +30,7 @@ void ComparisonWidget::setupUi()
     // Mode selector
     controlsLayout->addWidget(new QLabel(tr("Mode:"), this));
     m_modeCombo = new QComboBox(this);
-    m_modeCombo->setToolTip(tr("对比模式：分屏（左右滑动对比）或闪烁（自动切换）。"));
+    m_modeCombo->setToolTip(tr("Comparison mode: swipe (side-by-side slider) or blink (auto toggle)."));
     m_modeCombo->addItems({tr("Split Screen"), tr("Flicker")});
     connect(m_modeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &ComparisonWidget::onModeComboChanged);
@@ -41,7 +41,7 @@ void ComparisonWidget::setupUi()
     // Split slider (for split-screen mode)
     controlsLayout->addWidget(new QLabel(tr("Split:"), this));
     m_splitSlider = new QSlider(Qt::Horizontal, this);
-    m_splitSlider->setToolTip(tr("分屏位置（0=全左，100=全右）。"));
+    m_splitSlider->setToolTip(tr("Split position (0 = all left, 100 = all right)."));
     m_splitSlider->setRange(0, 100);
     m_splitSlider->setValue(50);
     m_splitSlider->setTickPosition(QSlider::TicksBelow);
@@ -54,7 +54,7 @@ void ComparisonWidget::setupUi()
 
     // Flicker button (for flicker mode)
     m_flickerButton = new QPushButton(tr("Start Flicker"), this);
-    m_flickerButton->setToolTip(tr("开始/停止闪烁对比（自动在两个图层间切换）。"));
+    m_flickerButton->setToolTip(tr("Starts/stops blink comparison (auto-toggles between the two layers)."));
     m_flickerButton->setCheckable(true);
     m_flickerButton->setVisible(false);
     connect(m_flickerButton, &QPushButton::toggled, this, &ComparisonWidget::onFlickerButtonToggled);

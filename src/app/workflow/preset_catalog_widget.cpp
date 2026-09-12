@@ -15,12 +15,12 @@ PresetCatalogWidget::PresetCatalogWidget( QWidget *parent )
   layout->setContentsMargins( 8, 8, 8, 8 );
   layout->setSpacing( 6 );
 
-  auto *header = new QLabel( tr( "预设流程模板" ), this );
+  auto *header = new QLabel( tr( "Preset Pipeline Templates" ), this );
   header->setObjectName( QStringLiteral( "rsPresetHeader" ) );
   layout->addWidget( header );
 
   mSearchEdit = new QLineEdit( this );
-  mSearchEdit->setPlaceholderText( tr( "搜索流程模板..." ) );
+  mSearchEdit->setPlaceholderText( tr( "Search pipeline templates..." ) );
   mSearchEdit->setClearButtonEnabled( true );
   layout->addWidget( mSearchEdit );
 
@@ -29,13 +29,13 @@ PresetCatalogWidget::PresetCatalogWidget( QWidget *parent )
   mListWidget->setSelectionMode( QAbstractItemView::SingleSelection );
   layout->addWidget( mListWidget, 1 );
 
-  mDescLabel = new QLabel( tr( "请选择上方流程模板查看说明" ), this );
+  mDescLabel = new QLabel( tr( "Select a pipeline template above to see its description" ), this );
   mDescLabel->setObjectName( QStringLiteral( "rsPresetDesc" ) );
   mDescLabel->setWordWrap( true );
   mDescLabel->setMinimumHeight( 60 );
   layout->addWidget( mDescLabel );
 
-  mLoadBtn = new QPushButton( tr( "加载模板到画布" ), this );
+  mLoadBtn = new QPushButton( tr( "Load Template onto Canvas" ), this );
   mLoadBtn->setObjectName( QStringLiteral( "rsPresetLoadBtn" ) );
   mLoadBtn->setEnabled( false );
   mLoadBtn->setProperty( "primary", true );
@@ -58,9 +58,9 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
   {
     PresetItemInfo p1;
     p1.id = "preset_landsat_ndvi_change";
-    p1.title = tr( "Landsat 植被指数与变化检测" );
-    p1.category = tr( "遥感变化检测" );
-    p1.description = tr( "包含 Landsat 数据导入、植被指数 (NDVI) 计算以及前后时相变化检测流。" );
+    p1.title = tr( "Landsat Vegetation Indices and Change Detection" );
+    p1.category = tr( "Remote-Sensing Change Detection" );
+    p1.description = tr( "Covers Landsat import, NDVI computation and a two-date change detection pipeline." );
 
     WorkflowDefinition wf;
     wf.id = "landsat_ndvi_change";
@@ -68,21 +68,21 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s1;
     s1.id = "landsat_import_t1";
-    s1.title = "T1 影像导入";
+    s1.title = tr("T1 Image Import");
     s1.operatorId = "gdal:import";
     s1.artifactOnSuccess = "t1_raster";
     s1.uiMeta = { 80.0, 100.0 };
 
     StepDef s2;
     s2.id = "landsat_import_t2";
-    s2.title = "T2 影像导入";
+    s2.title = tr("T2 Image Import");
     s2.operatorId = "gdal:import";
     s2.artifactOnSuccess = "t2_raster";
     s2.uiMeta = { 80.0, 300.0 };
 
     StepDef s3;
     s3.id = "ndvi_calc";
-    s3.title = "植被指数 (NDVI)";
+    s3.title = tr("Vegetation Index (NDVI)");
     s3.operatorId = "rs:spectral_index";
     s3.artifactOnSuccess = "ndvi_raster";
     s3.uiMeta = { 360.0, 100.0 };
@@ -96,7 +96,7 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s4;
     s4.id = "change_detection";
-    s4.title = "影像变化检测";
+    s4.title = tr("Image Change Detection");
     s4.operatorId = "rs:change_detection";
     s4.artifactOnSuccess = "change_mask";
     s4.uiMeta = { 640.0, 200.0 };
@@ -123,9 +123,9 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
   {
     PresetItemInfo p2;
     p2.id = "preset_dem_terrain_slope";
-    p2.title = tr( "DEM 高程与坡度分析" );
-    p2.category = tr( "地形分析" );
-    p2.description = tr( "包含高程 DEM 导入、坡度 (Slope) 计算以及山体阴影 (Hillshade) 地形渲染。" );
+    p2.title = tr( "DEM Elevation and Slope Analysis" );
+    p2.category = tr( "Terrain Analysis" );
+    p2.description = tr( "Covers DEM import, slope computation and hillshade terrain rendering." );
 
     WorkflowDefinition wf;
     wf.id = "dem_terrain_slope";
@@ -133,14 +133,14 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s1;
     s1.id = "dem_import";
-    s1.title = "DEM 数据导入";
+    s1.title = tr("DEM Data Import");
     s1.operatorId = "gdal:import";
     s1.artifactOnSuccess = "dem_raster";
     s1.uiMeta = { 100.0, 150.0 };
 
     StepDef s2;
     s2.id = "slope_calc";
-    s2.title = "坡度计算 (Slope)";
+    s2.title = tr("Slope Computation");
     s2.operatorId = "gdal:slope";
     s2.artifactOnSuccess = "slope_raster";
     s2.uiMeta = { 400.0, 80.0 };
@@ -154,7 +154,7 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s3;
     s3.id = "hillshade_render";
-    s3.title = "山体阴影 (Hillshade)";
+    s3.title = tr("Hillshade");
     s3.operatorId = "gdal:hillshade";
     s3.artifactOnSuccess = "hillshade_raster";
     s3.uiMeta = { 400.0, 260.0 };
@@ -175,9 +175,9 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
   {
     PresetItemInfo p3;
     p3.id = "preset_obia_seg_classify";
-    p3.title = tr( "OBIA 面向对象分割与分类" );
-    p3.category = tr( "智能分类" );
-    p3.description = tr( "包含高分辨率影像导入、MeanShift 面向对象分割以及随机森林 (Random Forest) 对象分类。" );
+    p3.title = tr( "OBIA Object-Based Segmentation and Classification" );
+    p3.category = tr( "Smart Classification" );
+    p3.description = tr( "Covers high-resolution import, MeanShift object-based segmentation and Random Forest object classification." );
 
     WorkflowDefinition wf;
     wf.id = "obia_seg_classify";
@@ -186,14 +186,14 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s1;
     s1.id = "image_import";
-    s1.title = "高分影像导入";
+    s1.title = tr("High-Resolution Image Import");
     s1.operatorId = "gdal:import";
     s1.artifactOnSuccess = "image_raster";
     s1.uiMeta = { 100.0, 150.0 };
 
     StepDef s2;
     s2.id = "obia_segment";
-    s2.title = "MeanShift 图像分割";
+    s2.title = tr("MeanShift Image Segmentation");
     s2.operatorId = "rs:obia_segment";
     s2.artifactOnSuccess = "segmented_vector";
     s2.uiMeta = { 400.0, 150.0 };
@@ -208,7 +208,7 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s3;
     s3.id = "obia_classify";
-    s3.title = "随机森林分类";
+    s3.title = tr("Random Forest Classification");
     s3.operatorId = "rs:obia_classify";
     s3.artifactOnSuccess = "classified_result";
     s3.uiMeta = { 700.0, 150.0 };
@@ -230,9 +230,9 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
   {
     PresetItemInfo p4;
     p4.id = "preset_ndwi_water_extraction";
-    p4.title = tr( "水体指数 (NDWI) 提取" );
-    p4.category = tr( "波段运算" );
-    p4.description = tr( "包含绿光与近红外波段水体归一化差值指数计算。" );
+    p4.title = tr( "Water Index (NDWI) Extraction" );
+    p4.category = tr( "Band Math" );
+    p4.description = tr( "Covers the normalized-difference water index from the green and NIR bands." );
 
     WorkflowDefinition wf;
     wf.id = "ndwi_water_extraction";
@@ -240,14 +240,14 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s1;
     s1.id = "landsat_import";
-    s1.title = "Landsat 数据导入";
+    s1.title = tr("Landsat Data Import");
     s1.operatorId = "gdal:import";
     s1.artifactOnSuccess = "image_raster";
     s1.uiMeta = { 100.0, 150.0 };
 
     StepDef s2;
     s2.id = "ndwi_calc";
-    s2.title = "NDWI 水体指数";
+    s2.title = tr("NDWI Water Index");
     s2.operatorId = "rs:ndwi";
     s2.artifactOnSuccess = "ndwi_raster";
     s2.uiMeta = { 420.0, 150.0 };
@@ -268,9 +268,9 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
   {
     PresetItemInfo p5;
     p5.id = "preset_classification_postprocess_merge";
-    p5.title = tr( "遥感分类、降噪过滤与类别合并" );
-    p5.category = tr( "遥感图像分类" );
-    p5.description = tr( "包含监督/非监督分类、3x3 众数滤波降噪以及类别重编码合并全流程。" );
+    p5.title = tr( "Remote-sensing classification, denoising filters and class merging" );
+    p5.category = tr( "Remote-Sensing Image Classification" );
+    p5.description = tr( "Covers supervised/unsupervised classification, 3x3 majority-filter denoising and class recoding/merging end to end." );
 
     WorkflowDefinition wf;
     wf.id = "classification_postprocess_merge";
@@ -278,14 +278,14 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s1;
     s1.id = "classify_step";
-    s1.title = "遥感图像分类";
+    s1.title = tr("Remote-Sensing Image Classification");
     s1.operatorId = "rs:obia_classify";
     s1.artifactOnSuccess = "class_map";
     s1.uiMeta = { 100.0, 150.0 };
 
     StepDef s2;
     s2.id = "majority_filter";
-    s2.title = "3x3 众数滤波降噪";
+    s2.title = tr("3x3 majority filter denoising");
     s2.operatorId = "rs:majority_filter";
     s2.artifactOnSuccess = "filter_map";
     s2.uiMeta = { 400.0, 150.0 };
@@ -298,7 +298,7 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s3;
     s3.id = "recode_step";
-    s3.title = "类别合并重编码";
+    s3.title = tr("Class Merging and Recoding");
     s3.operatorId = "rs:recode";
     s3.artifactOnSuccess = "final_class_map";
     s3.uiMeta = { 700.0, 150.0 };
@@ -340,7 +340,7 @@ void PresetCatalogWidget::populatePresets( const QString &filter )
 
   if ( mListWidget->count() == 0 )
   {
-    mDescLabel->setText( tr( "无匹配的预设流程模板" ) );
+    mDescLabel->setText( tr( "No matching preset pipeline template" ) );
     mLoadBtn->setEnabled( false );
   }
 }
@@ -360,7 +360,7 @@ void PresetCatalogWidget::onItemSelectionChanged()
   auto *item = mListWidget->currentItem();
   if ( !item )
   {
-    mDescLabel->setText( tr( "请选择上方流程模板查看说明" ) );
+    mDescLabel->setText( tr( "Select a pipeline template above to see its description" ) );
     mLoadBtn->setEnabled( false );
     return;
   }

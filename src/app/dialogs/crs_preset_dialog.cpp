@@ -20,7 +20,7 @@
 CrsPresetDialog::CrsPresetDialog( QWidget *parent )
     : QDialog( parent )
 {
-    setWindowTitle( tr( "选择坐标系预设" ) );
+    setWindowTitle( tr( "Select CRS Preset" ) );
     
     SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "crs_preset" ) );
     resize( 650, 480 );
@@ -41,16 +41,16 @@ void CrsPresetDialog::setupUi()
     auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
 
     // Search bar at top
-    auto *searchGroup = SicnuUi::makeGroup( this, tr( "坐标系预设检索" ) );
+    auto *searchGroup = SicnuUi::makeGroup( this, tr( "CRS Preset Search" ) );
     auto *searchLayout = new QHBoxLayout( searchGroup );
     searchLayout->setContentsMargins( 10, 8, 10, 8 );
     searchLayout->setSpacing( 8 );
 
-    auto *searchLabel = new QLabel( tr( "快速检索" ), searchGroup );
+    auto *searchLabel = new QLabel( tr( "Quick Search" ), searchGroup );
     m_searchEdit = new QLineEdit( searchGroup );
     m_searchEdit->setObjectName( QStringLiteral( "crsSearchEdit" ) );
-    m_searchEdit->setPlaceholderText( tr( "按名称或 EPSG 代码过滤（如 WGS 84、3857、CGCS2000 等）…" ) );
-    SicnuDialogHelp::tip( m_searchEdit, tr( "按坐标系名称或 EPSG 代码快速过滤预设列表。" ) );
+    m_searchEdit->setPlaceholderText( tr( "Filter by name or EPSG code (e.g. WGS 84, 3857, CGCS2000)..." ) );
+    SicnuDialogHelp::tip( m_searchEdit, tr( "Quickly filter the preset list by CRS name or EPSG code." ) );
     searchLayout->addWidget( searchLabel );
     searchLayout->addWidget( m_searchEdit, 1 );
     mainLayout->addWidget( searchGroup );
@@ -59,43 +59,43 @@ void CrsPresetDialog::setupUi()
     auto *splitter = new QSplitter( Qt::Horizontal, this );
 
     // Left panel: tree view in group
-    auto *treeGroup = SicnuUi::makeGroup( this, tr( "常用坐标系预设" ) );
+    auto *treeGroup = SicnuUi::makeGroup( this, tr( "Common CRS Presets" ) );
     auto *treeGroupLayout = new QVBoxLayout( treeGroup );
     treeGroupLayout->setContentsMargins( 10, 8, 10, 8 );
     treeGroupLayout->setSpacing( 8 );
 
     m_treeWidget = new QTreeWidget( treeGroup );
     m_treeWidget->setObjectName( QStringLiteral( "crsTreeWidget" ) );
-    m_treeWidget->setHeaderLabels( { tr( "坐标系名称" ), tr( "EPSG" ) } );
+    m_treeWidget->setHeaderLabels( { tr( "Coordinate System Name" ), tr( "EPSG" ) } );
     m_treeWidget->setColumnCount( 2 );
     m_treeWidget->setRootIsDecorated( true );
     m_treeWidget->setAlternatingRowColors( true );
     m_treeWidget->setSelectionMode( QAbstractItemView::SingleSelection );
-    SicnuDialogHelp::tip( m_treeWidget, tr( "常用坐标系分组列表。选中后右侧显示详情，双击可直接应用。" ) );
+    SicnuDialogHelp::tip( m_treeWidget, tr( "Grouped list of common CRSs. Selecting shows details on the right; double-click applies directly." ) );
     treeGroupLayout->addWidget( m_treeWidget );
 
     // Right panel: details group box
-    auto *detailsGroup = SicnuUi::makeGroup( this, tr( "坐标系详细信息" ) );
+    auto *detailsGroup = SicnuUi::makeGroup( this, tr( "Coordinate System Details" ) );
     auto *detailsLayout = SicnuUi::makeFormLayout( detailsGroup );
 
     m_nameLabel = new QLabel( detailsGroup );
     m_nameLabel->setWordWrap( true );
-    detailsLayout->addRow( tr( "坐标系名称" ), m_nameLabel );
+    detailsLayout->addRow( tr( "Coordinate System Name" ), m_nameLabel );
 
     m_epsgLabel = new QLabel( detailsGroup );
-    detailsLayout->addRow( tr( "EPSG 代码" ), m_epsgLabel );
+    detailsLayout->addRow( tr( "EPSG code" ), m_epsgLabel );
 
     m_categoryLabel = new QLabel( detailsGroup );
-    detailsLayout->addRow( tr( "所属分类" ), m_categoryLabel );
+    detailsLayout->addRow( tr( "Classification" ), m_categoryLabel );
 
     m_descriptionLabel = new QLabel( detailsGroup );
     m_descriptionLabel->setWordWrap( true );
-    detailsLayout->addRow( tr( "详细描述" ), m_descriptionLabel );
+    detailsLayout->addRow( tr( "Detailed Description" ), m_descriptionLabel );
 
     m_wktLabel = new QLabel( detailsGroup );
     m_wktLabel->setWordWrap( true );
     m_wktLabel->setTextInteractionFlags( Qt::TextSelectableByMouse );
-    detailsLayout->addRow( tr( "WKT 定义" ), m_wktLabel );
+    detailsLayout->addRow( tr( "WKT Definition" ), m_wktLabel );
 
     splitter->addWidget( treeGroup );
     splitter->addWidget( detailsGroup );
@@ -108,17 +108,17 @@ void CrsPresetDialog::setupUi()
     auto *buttonBox = new QDialogButtonBox( this );
     buttonBox->setObjectName( QStringLiteral( "crsPresetButtonBox" ) );
 
-    auto *helpBtn = buttonBox->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
+    auto *helpBtn = buttonBox->addButton( tr( "Help" ), QDialogButtonBox::HelpRole );
     SicnuUi::markSecondary( helpBtn );
-    SicnuDialogHelp::tip( helpBtn, tr( "查看坐标系预设说明与帮助。" ) );
+    SicnuDialogHelp::tip( helpBtn, tr( "View CRS preset descriptions and help." ) );
     connect( helpBtn, &QPushButton::clicked, this, [this]() {
         SicnuDialogHelp::showToolHelp( this, QStringLiteral( "crs_preset" ), windowTitle() );
     } );
 
-    m_cancelButton = buttonBox->addButton( tr( "取消" ), QDialogButtonBox::RejectRole );
+    m_cancelButton = buttonBox->addButton( tr( "Cancel" ), QDialogButtonBox::RejectRole );
     SicnuUi::markSecondary( m_cancelButton );
 
-    m_okButton = buttonBox->addButton( tr( "确定" ), QDialogButtonBox::AcceptRole );
+    m_okButton = buttonBox->addButton( tr( "OK" ), QDialogButtonBox::AcceptRole );
     SicnuUi::markPrimary( m_okButton );
     m_okButton->setDefault( true );
     m_okButton->setEnabled( false );
@@ -149,7 +149,7 @@ void CrsPresetDialog::populateTree()
     if ( !recentPresets.isEmpty() )
     {
         auto *categoryItem = new QTreeWidgetItem( m_treeWidget );
-        categoryItem->setText( 0, tr( "最近使用" ) );
+        categoryItem->setText( 0, tr( "Recently Used" ) );
         categoryItem->setFlags( Qt::ItemIsEnabled );
 
         for ( const CrsPreset &preset : recentPresets )

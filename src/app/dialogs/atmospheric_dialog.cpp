@@ -22,7 +22,7 @@
 AtmosphericDialog::AtmosphericDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
 {
-  setWindowTitle( tr( "大气校正" ) );
+  setWindowTitle( tr( "Atmospheric Correction" ) );
   setupUi();
 }
 
@@ -59,66 +59,66 @@ void AtmosphericDialog::setupUi()
   setupHelpBanner( mainLayout );
 
   // Input Data Group
-  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "输入数据" ) );
+  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "Input Data" ) );
   auto *inputForm = SicnuUi::makeFormLayout();
   inputForm->setContentsMargins( 0, 0, 0, 0 );
 
   m_layerCombo = new RasterLayerCombo( inputGroup );
   m_layerCombo->setObjectName( QStringLiteral( "atmosphericInputLayerCombo" ) );
-  SicnuDialogHelp::tip( m_layerCombo, tr( "选择待执行大气校正的栅格图层。" ) );
+  SicnuDialogHelp::tip( m_layerCombo, tr( "Select the raster layer for atmospheric correction." ) );
   m_layerCombo->populate();
   connect( m_layerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &AtmosphericDialog::onLayerChanged );
-  inputForm->addRow( tr( "输入栅格" ), m_layerCombo );
+  inputForm->addRow( tr( "Input Raster" ), m_layerCombo );
   qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( inputForm );
 
   // Parameters Group
-  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "校正参数" ) );
+  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "Correction Parameters" ) );
   auto *form = SicnuUi::makeFormLayout();
   form->setContentsMargins( 0, 0, 0, 0 );
 
   m_methodCombo = new QComboBox( paramGroup );
-  m_methodCombo->addItem( tr( "DN → 辐射亮度" ), QStringLiteral( "dn_to_radiance" ) );
-  m_methodCombo->addItem( tr( "DOS1 暗目标减法" ), QStringLiteral( "dos1" ) );
-  m_methodCombo->addItem( tr( "DOS2（含透过率）" ), QStringLiteral( "dos2" ) );
-  m_methodCombo->addItem( tr( "QUAC 快速大气校正" ), QStringLiteral( "quac" ) );
+  m_methodCombo->addItem( tr( "DN → Radiance" ), QStringLiteral( "dn_to_radiance" ) );
+  m_methodCombo->addItem( tr( "DOS1 Dark-Object Subtraction" ), QStringLiteral( "dos1" ) );
+  m_methodCombo->addItem( tr( "DOS2 (with transmittance)" ), QStringLiteral( "dos2" ) );
+  m_methodCombo->addItem( tr( "QUAC Quick Atmospheric Correction" ), QStringLiteral( "quac" ) );
   SicnuDialogHelp::tip( m_methodCombo, tr(
-    "• DN->辐射：L=gain×DN+bias\n• DOS1：暗目标减法\n• DOS2：DOS1 + 透过率\n• QUAC：基于图像统计的全波段快速校正" ) );
+    tr("• DN to radiance: L=gain×DN+bias\n• DOS1: dark object subtraction\n• DOS2: DOS1 + transmittance\n• QUAC: fast all-band correction from image statistics") ) );
   connect( m_methodCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &AtmosphericDialog::onMethodChanged );
-  form->addRow( tr( "校正方法" ), m_methodCombo );
+  form->addRow( tr( "Correction Method" ), m_methodCombo );
 
   m_bandCombo = new QComboBox( paramGroup );
-  SicnuDialogHelp::tip( m_bandCombo, tr( "要校正的波段号。" ) );
+  SicnuDialogHelp::tip( m_bandCombo, tr( "Band number to correct." ) );
   connect( m_bandCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &AtmosphericDialog::refreshMetadata );
-  form->addRow( tr( "目标波段" ), m_bandCombo );
+  form->addRow( tr( "Target Band" ), m_bandCombo );
   m_bandLabel = qobject_cast<QLabel *>( form->labelForField( m_bandCombo ) );
 
   m_gainSpin = new QDoubleSpinBox( paramGroup );
   m_gainSpin->setRange( 0.0001, 1000.0 );
   m_gainSpin->setDecimals( 6 );
   m_gainSpin->setValue( 0.01 );
-  SicnuDialogHelp::tip( m_gainSpin, tr( "辐射定标增益 gain。" ) );
-  form->addRow( tr( "增益 Gain" ), m_gainSpin );
+  SicnuDialogHelp::tip( m_gainSpin, tr( "Radiometric calibration gain." ) );
+  form->addRow( tr( "Gain" ), m_gainSpin );
   m_gainLabel = qobject_cast<QLabel *>( form->labelForField( m_gainSpin ) );
 
   m_biasSpin = new QDoubleSpinBox( paramGroup );
   m_biasSpin->setRange( -1000.0, 1000.0 );
   m_biasSpin->setDecimals( 6 );
   m_biasSpin->setValue( 0.0 );
-  SicnuDialogHelp::tip( m_biasSpin, tr( "辐射定标偏置 bias。" ) );
-  form->addRow( tr( "偏置 Bias" ), m_biasSpin );
+  SicnuDialogHelp::tip( m_biasSpin, tr( "Radiometric calibration bias." ) );
+  form->addRow( tr( "Bias" ), m_biasSpin );
   m_biasLabel = qobject_cast<QLabel *>( form->labelForField( m_biasSpin ) );
 
-  m_airmassLabel = new QLabel( tr( "气团 Airmass" ), paramGroup );
+  m_airmassLabel = new QLabel( tr( "Airmass" ), paramGroup );
   m_airmassSpin = new QDoubleSpinBox( paramGroup );
   m_airmassSpin->setRange( 1.0, 10.0 );
   m_airmassSpin->setDecimals( 2 );
   m_airmassSpin->setValue( 1.0 );
   m_airmassSpin->setVisible( false );
   m_airmassLabel->setVisible( false );
-  SicnuDialogHelp::tip( m_airmassSpin, tr( "气团（仅 DOS2），通常≥1。" ) );
+  SicnuDialogHelp::tip( m_airmassSpin, tr( "Airmass (DOS2 only), usually ≥ 1." ) );
   form->addRow( m_airmassLabel, m_airmassSpin );
 
   m_metadataStatusLabel = SicnuUi::makeHintLabel( paramGroup, QString() );
@@ -151,7 +151,7 @@ void AtmosphericDialog::populateBandCombo()
   {
     const int bandCount = m_rasterLayer->bandCount();
     for ( int i = 1; i <= bandCount; ++i )
-      m_bandCombo->addItem( tr( "波段 %1" ).arg( i ), i );
+      m_bandCombo->addItem( tr( "Band %1" ).arg( i ), i );
   }
   m_bandCombo->blockSignals( false );
   refreshMetadata();
@@ -172,7 +172,7 @@ void AtmosphericDialog::refreshMetadata()
   if ( metadataPath.isEmpty() )
   {
     m_metadataStatusLabel->setText(
-      tr( "未找到传感器元数据文件；请手动输入 gain/bias。" ) );
+      tr( "Sensor metadata file not found; enter gain/bias manually." ) );
     return;
   }
 
@@ -202,10 +202,10 @@ void AtmosphericDialog::refreshMetadata()
        || !meta.bands.contains( band ) )
   {
     m_metadataStatusLabel->setText(
-      tr( "已探测到 %1，但波段 %2 无系数：%3" )
+      tr( "Detected %1, but band %2 has no coefficients: %3" )
         .arg( QFileInfo( metadataPath ).fileName() )
         .arg( band )
-        .arg( error.isEmpty() ? tr( "请手动输入 gain/bias。" ) : error ) );
+        .arg( error.isEmpty() ? tr( "Enter gain/bias manually." ) : error ) );
     return;
   }
 
@@ -219,7 +219,7 @@ void AtmosphericDialog::refreshMetadata()
 
   m_resolvedMetadataPath = metadataPath;
   m_metadataStatusLabel->setText(
-    tr( "已从 %1 自动填充 gain/bias（可手动修改）。" )
+    tr( "Gain/bias auto-filled from %1 (editable)." )
       .arg( QFileInfo( metadataPath ).fileName() ) );
 }
 
@@ -228,7 +228,7 @@ void AtmosphericDialog::onCoefficientChanged()
   m_coefficientsModified = true;
   if ( !m_resolvedMetadataPath.isEmpty() )
     m_metadataStatusLabel->setText(
-      tr( "使用手动 gain/bias（元数据 %1 仍可用于其他波段）。" )
+      tr( "Uses manual gain/bias (the %1 metadata remains available for other bands)." )
         .arg( QFileInfo( m_resolvedMetadataPath ).fileName() ) );
 }
 

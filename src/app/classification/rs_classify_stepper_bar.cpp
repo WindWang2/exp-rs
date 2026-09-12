@@ -11,13 +11,13 @@ namespace
 {
 
 const char *const kStepLabels[] = {
-  "1 体系",
-  "2 样本",
-  "3 评价",
-  "4 训练",
-  "5 精度",
-  "6 后处理",
-  "7 输出",
+  tr("1 Scheme"),
+  tr("2 Samples"),
+  tr("3 Evaluate"),
+  tr("4 Train"),
+  tr("5 Accuracy"),
+  tr("6 Post-Processing"),
+  tr("7 Output"),
 };
 
 static_assert( sizeof( kStepLabels ) / sizeof( kStepLabels[0] )
@@ -50,16 +50,16 @@ RsClassifyStepperBar::RsClassifyStepperBar( QWidget *parent )
     btn->setToolButtonStyle( Qt::ToolButtonTextOnly );
     mGroup->addButton( btn, i );
     mButtons[i] = btn;
-    btn->setToolTip( tr( "点击切换到步骤：%1" ).arg( QString::fromUtf8( kStepLabels[i] ) ) );
+    btn->setToolTip( tr( "Click to switch to step: %1" ).arg( QString::fromUtf8( kStepLabels[i] ) ) );
     row->addWidget( btn );
     rebuildStyle( i );
   }
 
   row->addStretch( 1 );
 
-  mExpertCheck = new QCheckBox( tr( "专家模式" ), this );
+  mExpertCheck = new QCheckBox( tr( "Expert Mode" ), this );
   mExpertCheck->setObjectName( QStringLiteral( "rsClassifyExpertMode" ) );
-  mExpertCheck->setToolTip( tr( "勾选后解锁全部步骤（默认向导模式逐步引导）。" ) );
+  mExpertCheck->setToolTip( tr( "When ticked, all steps are unlocked (the wizard guides step by step by default)." ) );
   row->addWidget( mExpertCheck );
 
   if ( !mButtons.isEmpty() )

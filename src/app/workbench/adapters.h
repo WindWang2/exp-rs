@@ -26,7 +26,7 @@ class MapWorkbench : public QObject, public IWorkbench
     explicit MapWorkbench( QWidget *canvasStack, QObject *parent = nullptr );
 
     QString id() const override { return QStringLiteral( "map" ); }
-    QString title() const override { return tr( "地图工作区" ); }
+    QString title() const override { return tr( "Map Workspace" ); }
     QIcon icon() const override { return QIcon( QStringLiteral( ":/icons/r_ster" ) ); }
     QWidget *primaryWidget() override { return m_canvasStack.data(); }
     void activate() override;

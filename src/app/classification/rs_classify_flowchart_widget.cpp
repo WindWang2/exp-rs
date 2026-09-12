@@ -41,7 +41,7 @@ void RsClassifyFlowchartWidget::setupUi()
 
   auto *titleRow = new QHBoxLayout();
   auto *titleIcon = new QLabel( QStringLiteral( "📊" ), headerFrame );
-  auto *titleText = new QLabel( tr( "遥感影像分类处理流程" ), headerFrame );
+  auto *titleText = new QLabel( tr( "Remote-Sensing Image Classification Pipeline" ), headerFrame );
   QFont titleFont = titleText->font();
   titleFont.setBold( true );
   titleFont.setPointSize( titleFont.pointSize() + 1 );
@@ -51,7 +51,7 @@ void RsClassifyFlowchartWidget::setupUi()
   titleRow->addStretch( 1 );
   headerLayout->addLayout( titleRow );
 
-  m_progressLabel = new QLabel( tr( "流程进度: 0/8 步已完成 (0%)" ), headerFrame );
+  m_progressLabel = new QLabel( tr( "Pipeline progress: 0/8 steps finished (0%)" ), headerFrame );
   m_progressLabel->setStyleSheet( QStringLiteral( "color: palette(placeholder-text); font-size: 11px;" ) );
   headerLayout->addWidget( m_progressLabel );
 
@@ -94,22 +94,22 @@ void RsClassifyFlowchartWidget::setupUi()
   };
 
   const StepMeta steps[] = {
-    { FlowStep::SourceRaster, QStringLiteral( "1" ), tr( "输入源影像" ),
-      tr( "加载多波段遥感栅格影像，检查波段与空间参考" ), tr( "打开影像" ) },
-    { FlowStep::ClassSystem, QStringLiteral( "2" ), tr( "定义分类体系" ),
-      tr( "创建/导入地物类别代码、类别名称与显示调色板" ), tr( "类别管理" ) },
-    { FlowStep::SampleCollection, QStringLiteral( "3" ), tr( "采集训练样本" ),
-      tr( "在源影像上数字化多边形/点 ROI 训练样本并提取像元" ), tr( "样本采集" ) },
-    { FlowStep::SampleEvaluation, QStringLiteral( "4" ), tr( "样本可分性评价" ),
-      tr( "计算 JM 分离度距离矩阵与类别均值光谱特征曲线" ), tr( "可分性评价" ) },
-    { FlowStep::TrainAndClassify, QStringLiteral( "5" ), tr( "分类器训练与分类" ),
-      tr( "训练随机森林/SVM/正态贝叶斯/KNN等分类器并分块流式预测" ), tr( "执行分类" ) },
-    { FlowStep::AccuracyAssessment, QStringLiteral( "6" ), tr( "分类精度评定" ),
-      tr( "基于独立验证集计算混淆矩阵、总体精度(OA)与Kappa系数" ), tr( "精度评定" ) },
-    { FlowStep::PostProcessing, QStringLiteral( "7" ), tr( "分类后处理" ),
-      tr( "碎斑过滤(Majority/Sieve)、聚类合并(Clump)与类别重编码" ), tr( "后处理" ) },
-    { FlowStep::ExportAndLoad, QStringLiteral( "8" ), tr( "成果导出与加载" ),
-      tr( "输出最终分类专题图 GeoTIFF、矢量 Shapefile 或保存模型" ), tr( "导出成果" ) }
+    { FlowStep::SourceRaster, QStringLiteral( "1" ), tr( "Input Source Image" ),
+      tr( "Load a multiband remote-sensing raster and inspect its bands and spatial reference" ), tr( "Open Image" ) },
+    { FlowStep::ClassSystem, QStringLiteral( "2" ), tr( "Define Classification Scheme" ),
+      tr( "Create/import land-cover class codes, names and display palette" ), tr( "Class Management" ) },
+    { FlowStep::SampleCollection, QStringLiteral( "3" ), tr( "Collect Training Samples" ),
+      tr( "Digitize polygon/point ROI training samples on the source image and extract pixels" ), tr( "Sample Collection" ) },
+    { FlowStep::SampleEvaluation, QStringLiteral( "4" ), tr( "Sample Separability Evaluation" ),
+      tr( "Compute the JM separability distance matrix and per-class mean spectral curves" ), tr( "Separability Evaluation" ) },
+    { FlowStep::TrainAndClassify, QStringLiteral( "5" ), tr( "Classifier Training and Classification" ),
+      tr( "Trains random forest / SVM / normal Bayes / KNN classifiers and predicts block-wise in a streaming fashion" ), tr( "Run Classification" ) },
+    { FlowStep::AccuracyAssessment, QStringLiteral( "6" ), tr( "Classification Accuracy Assessment" ),
+      tr( "Computes the confusion matrix, overall accuracy (OA) and Kappa on an independent validation set" ), tr( "Accuracy Assessment" ) },
+    { FlowStep::PostProcessing, QStringLiteral( "7" ), tr( "Post-Classification" ),
+      tr( "Small-patch filtering (Majority/Sieve), clumping and class recoding" ), tr( "Post-Processing" ) },
+    { FlowStep::ExportAndLoad, QStringLiteral( "8" ), tr( "Result Export and Loading" ),
+      tr( "Output the final classification theme GeoTIFF, a vector Shapefile, or save the model" ), tr( "Export Results" ) }
   };
 
   m_cards.resize( static_cast<int>( FlowStep::Count ) );
@@ -171,7 +171,7 @@ QFrame *RsClassifyFlowchartWidget::createStepCard( FlowStep step, const QString 
   titleLbl->setFont( tf );
   topRow->addWidget( titleLbl, 1 );
 
-  auto *statusBadge = new QLabel( tr( "未开始" ), card );
+  auto *statusBadge = new QLabel( tr( "Not started" ), card );
   statusBadge->setStyleSheet(
     QStringLiteral( "background: palette(midlight); "
                     "color: palette(placeholder-text); "
@@ -209,11 +209,11 @@ QFrame *RsClassifyFlowchartWidget::createStepCard( FlowStep step, const QString 
                     "QPushButton:hover { "
                     "  background: palette(midlight); "
                     "}" ) );
-  actBtn->setToolTip( tr( "点击执行流程步骤: %1" ).arg( title ) );
+  actBtn->setToolTip( tr( "Click to run pipeline step: %1" ).arg( title ) );
   bottomRow->addWidget( actBtn );
 
   cardLay->addLayout( bottomRow );
-  card->setToolTip( tr( "<b>第 %1 步：%2</b><br>%3" ).arg( num, title, desc ) );
+  card->setToolTip( tr( "<b>Step %1: %2</b><br>%3" ).arg( num, title, desc ) );
 
   const int idx = static_cast<int>( step );
   StepCard sc;
@@ -300,7 +300,7 @@ void RsClassifyFlowchartWidget::setSourceRasterInfo( const QString &fileName, in
   m_hasSource = !fileName.isEmpty() && width > 0 && height > 0;
   if ( m_hasSource )
   {
-    m_sourceRasterText = QStringLiteral( "%1 (%2×%3, %4波段)" )
+    m_sourceRasterText = QStringLiteral( tr("%1 (%2×%3, %4 bands)") )
                            .arg( fileName )
                            .arg( width )
                            .arg( height )
@@ -310,7 +310,7 @@ void RsClassifyFlowchartWidget::setSourceRasterInfo( const QString &fileName, in
   }
   else
   {
-    m_sourceRasterText = tr( "未加载影像" );
+    m_sourceRasterText = tr( "No image loaded" );
   }
   refreshState();
 }
@@ -318,24 +318,24 @@ void RsClassifyFlowchartWidget::setSourceRasterInfo( const QString &fileName, in
 void RsClassifyFlowchartWidget::setClassCountInfo( int totalClasses )
 {
   if ( totalClasses > 0 )
-    m_classCountText = tr( "已定义 %1 个地物类别" ).arg( totalClasses );
+    m_classCountText = tr( "%1 land-cover classes defined" ).arg( totalClasses );
   else
-    m_classCountText = tr( "未定义类别" );
+    m_classCountText = tr( "Undefined class" );
   refreshState();
 }
 
 void RsClassifyFlowchartWidget::setSampleInfo( int totalRois, int totalPixels )
 {
   if ( totalRois > 0 || totalPixels > 0 )
-    m_sampleText = tr( "%1 个 ROI, 共 %2 像元" ).arg( totalRois ).arg( totalPixels );
+    m_sampleText = tr( "%1 ROIs, %2 pixels in total" ).arg( totalRois ).arg( totalPixels );
   else
-    m_sampleText = tr( "0 个 ROI, 0 像元" );
+    m_sampleText = tr( "0 ROIs, 0 pixels" );
   refreshState();
 }
 
 void RsClassifyFlowchartWidget::setEvaluationInfo( const QString &summary )
 {
-  m_evalText = summary.isEmpty() ? tr( "未评估" ) : summary;
+  m_evalText = summary.isEmpty() ? tr( "Not assessed" ) : summary;
   refreshState();
 }
 
@@ -344,13 +344,13 @@ void RsClassifyFlowchartWidget::setClassificationInfo( const QString &methodName
   if ( !methodName.isEmpty() )
   {
     if ( durationMs > 0 )
-      m_classifyText = QStringLiteral( "%1 (耗时 %2 ms)" ).arg( methodName ).arg( durationMs );
+      m_classifyText = QStringLiteral( tr("%1 (elapsed %2 ms)") ).arg( methodName ).arg( durationMs );
     else
       m_classifyText = methodName;
   }
   else
   {
-    m_classifyText = tr( "未分类" );
+    m_classifyText = tr( "Unclassified" );
   }
   refreshState();
 }
@@ -362,19 +362,19 @@ void RsClassifyFlowchartWidget::setAccuracyInfo( double overallAccuracy, double 
                        .arg( overallAccuracy * 100.0, 0, 'f', 1 )
                        .arg( kappa, 0, 'f', 3 );
   else
-    m_accuracyText = tr( "未评估精度" );
+    m_accuracyText = tr( "Accuracy not assessed" );
   refreshState();
 }
 
 void RsClassifyFlowchartWidget::setPostProcessInfo( const QString &operations )
 {
-  m_postText = operations.isEmpty() ? tr( "未进行后处理" ) : operations;
+  m_postText = operations.isEmpty() ? tr( "No post-processing applied" ) : operations;
   refreshState();
 }
 
 void RsClassifyFlowchartWidget::setExportInfo( const QString &outputPath )
 {
-  m_exportText = outputPath.isEmpty() ? tr( "未导出" ) : tr( "已导出至: %1" ).arg( outputPath );
+  m_exportText = outputPath.isEmpty() ? tr( "Not exported" ) : tr( "Exported to: %1" ).arg( outputPath );
   refreshState();
 }
 
@@ -441,21 +441,21 @@ void RsClassifyFlowchartWidget::updateCardStyle( StepCard &card )
   if ( card.isComplete )
   {
     borderStyle = QStringLiteral( "border: 1px solid #4caf50; background: palette(window);" );
-    statusText = tr( "✓ 已完成" );
+    statusText = tr( "✓ Done" );
     statusStyle = QStringLiteral( "background: #e8f5e9; color: #2e7d32; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: bold;" );
     badgeStyle = QStringLiteral( "background: #4caf50; color: white; border-radius: 10px; font-weight: bold; font-size: 11px;" );
   }
   else if ( card.isActive )
   {
     borderStyle = QStringLiteral( "border: 2px solid #1976d2; background: palette(window);" );
-    statusText = tr( "● 当前步骤" );
+    statusText = tr( "● Current step" );
     statusStyle = QStringLiteral( "background: #e3f2fd; color: #1565c0; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: bold;" );
     badgeStyle = QStringLiteral( "background: #1976d2; color: white; border-radius: 10px; font-weight: bold; font-size: 11px;" );
   }
   else
   {
     borderStyle = QStringLiteral( "border: 1px solid palette(midlight); background: palette(window);" );
-    statusText = tr( "未开始" );
+    statusText = tr( "Not started" );
     statusStyle = QStringLiteral( "background: palette(midlight); color: palette(placeholder-text); border-radius: 4px; padding: 1px 6px; font-size: 10px;" );
     badgeStyle = QStringLiteral( "background: palette(midlight); color: palette(text); border-radius: 10px; font-weight: bold; font-size: 11px;" );
   }
@@ -482,5 +482,5 @@ void RsClassifyFlowchartWidget::updateOverallProgress()
   const int percent = total > 0 ? ( completed * 100 / total ) : 0;
   m_progressBar->setValue( completed );
   m_progressLabel->setText(
-    tr( "流程进度: %1/%2 步已完成 (%3%)" ).arg( completed ).arg( total ).arg( percent ) );
+    tr( "Pipeline progress: %1/%2 steps finished (%3%)" ).arg( completed ).arg( total ).arg( percent ) );
 }

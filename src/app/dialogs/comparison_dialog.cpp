@@ -22,7 +22,7 @@
 ComparisonDialog::ComparisonDialog( QWidget *parent )
   : QDialog( parent )
 {
-  setWindowTitle( tr( "图层对比" ) );
+  setWindowTitle( tr( "Layer Comparison" ) );
   SicnuUi::polishDialog( this, 800 );
   SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "comparison" ) );
   resize( 860, 640 );
@@ -33,31 +33,31 @@ void ComparisonDialog::setupUi()
 {
   auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
   mainLayout->addWidget( SicnuUi::makeHintLabel(
-    this, tr( "选择左右对比图层后点击「加载对比」，支持分割线卷帘 (Swipe)、并排对比与快速闪烁切换。" ) ) );
+    this, tr( "Select the left/right comparison layers and press 'Load Comparison'; supports a draggable swipe divider, side-by-side and quick blink toggling." ) ) );
 
-  QGroupBox *bar = SicnuUi::makeGroup( this, tr( "对比图层配置" ) );
+  QGroupBox *bar = SicnuUi::makeGroup( this, tr( "Comparison Layer Configuration" ) );
   auto *layerLayout = new QHBoxLayout( bar );
   layerLayout->setContentsMargins( 10, 8, 10, 8 );
   layerLayout->setSpacing( 8 );
 
-  layerLayout->addWidget( new QLabel( tr( "左侧图层 (前时相/基准)" ), bar ) );
+  layerLayout->addWidget( new QLabel( tr( "Left layer (earlier epoch / base)" ), bar ) );
   m_leftLayerCombo = new RasterLayerCombo( bar );
   m_leftLayerCombo->setObjectName( QStringLiteral( "compareLeftCombo" ) );
   m_leftLayerCombo->setMinimumWidth( 200 );
-  SicnuDialogHelp::tip( m_leftLayerCombo, tr( "左侧视口显示的基准或较早时相栅格。" ) );
+  SicnuDialogHelp::tip( m_leftLayerCombo, tr( "The left viewport shows the base or earlier-epoch raster." ) );
   layerLayout->addWidget( m_leftLayerCombo, 1 );
 
-  layerLayout->addWidget( new QLabel( tr( "右侧图层 (后时相/目标)" ), bar ) );
+  layerLayout->addWidget( new QLabel( tr( "Right layer (later epoch / target)" ), bar ) );
   m_rightLayerCombo = new RasterLayerCombo( bar );
   m_rightLayerCombo->setObjectName( QStringLiteral( "compareRightCombo" ) );
   m_rightLayerCombo->setMinimumWidth( 200 );
-  SicnuDialogHelp::tip( m_rightLayerCombo, tr( "右侧视口显示的目标或较晚时相栅格。" ) );
+  SicnuDialogHelp::tip( m_rightLayerCombo, tr( "The right viewport shows the target or later-epoch raster." ) );
   layerLayout->addWidget( m_rightLayerCombo, 1 );
 
-  m_loadButton = new QPushButton( tr( "加载对比" ), bar );
+  m_loadButton = new QPushButton( tr( "Load Comparison" ), bar );
   m_loadButton->setObjectName( QStringLiteral( "compareLoadButton" ) );
   SicnuUi::markPrimary( m_loadButton );
-  SicnuDialogHelp::tip( m_loadButton, tr( "将所选左右图层渲染加载到下方对比视图中。" ) );
+  SicnuDialogHelp::tip( m_loadButton, tr( "Renders the selected left/right layers into the comparison view below." ) );
   connect( m_loadButton, &QPushButton::clicked, this, &ComparisonDialog::onLoadLayers );
   layerLayout->addWidget( m_loadButton );
 
@@ -75,13 +75,13 @@ void ComparisonDialog::setupUi()
   auto *buttonBox = new QDialogButtonBox( this );
   buttonBox->setObjectName( QStringLiteral( "compareButtonBox" ) );
 
-  auto *helpBtn = buttonBox->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
+  auto *helpBtn = buttonBox->addButton( tr( "Help" ), QDialogButtonBox::HelpRole );
   SicnuUi::markSecondary( helpBtn );
   connect( helpBtn, &QPushButton::clicked, this, [this]() {
     SicnuDialogHelp::showToolHelp( this, QStringLiteral( "comparison" ), windowTitle() );
   } );
 
-  auto *closeBtn = buttonBox->addButton( tr( "关闭" ), QDialogButtonBox::RejectRole );
+  auto *closeBtn = buttonBox->addButton( tr( "Close" ), QDialogButtonBox::RejectRole );
   SicnuUi::markSecondary( closeBtn );
   connect( closeBtn, &QPushButton::clicked, this, &QDialog::accept );
 
@@ -123,8 +123,8 @@ void ComparisonDialog::onLoadLayers()
     onBrowseRight();
 
     if (!m_leftLayer || !m_rightLayer) {
-        QMessageBox::warning(this, tr("图层对比"),
-                             tr("请在左右两侧各选择一个有效的栅格图层。"));
+        QMessageBox::warning(this, tr("Layer Comparison"),
+                             tr("Select a valid raster layer on each side."));
         return;
     }
 }

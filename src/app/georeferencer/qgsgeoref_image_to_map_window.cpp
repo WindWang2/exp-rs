@@ -49,14 +49,14 @@ void QgsGeorefImageToMapWindow::setupCentralWidget()
   mSrcCanvas->setObjectName( QStringLiteral( "rsGeorefI2MSrcCanvas" ) );
   mSrcCanvas->setCanvasColor( Qt::white );
   mSrcCanvas->setToolTip( tr(
-    "源影像画布：加载待校正影像。\n"
-    "Add GCP：在影像上点击像点后，弹出对话框填写地图坐标，或从主窗口地图取点。" ) );
+    tr("Source image canvas: loads the image to correct.\n")
+    tr("Add GCP: after clicking an image point, a dialog pops up to enter map coordinates, or pick them from the main window map.") ) );
 
   mDstCanvas = nullptr; // no embedded base / map preview panel
 
   QWidget *srcPanel = makeCanvasPanel(
     mSrcCanvas, &mSrcLayerLabel,
-    tr( "源影像 (Warp)" ),
+    tr( "Source Image (Warp)" ),
     QStringLiteral( "rsGeorefI2MSrcPanel" ),
     QStringLiteral( "rsGeorefI2MSrcLayerLabel" ) );
   updateSourceLayerCaption();
@@ -75,11 +75,11 @@ void QgsGeorefImageToMapWindow::setupMenus()
   QMenu *fileMenu = createFileMenu();
   fileMenu->addSeparator();
   auto *loadPts = fileMenu->addAction( tr( "Load .points..." ), this, &QgsGeorefShellWindow::loadPoints );
-  loadPts->setToolTip( tr( "导入已保存的控制点文件。" ) );
+  loadPts->setToolTip( tr( "Import a saved control point file." ) );
   auto *savePts = fileMenu->addAction( tr( "Save .points..." ), this, &QgsGeorefShellWindow::savePoints );
-  savePts->setToolTip( tr( "导出当前控制点。" ) );
+  savePts->setToolTip( tr( "Exports the current control points." ) );
   fileMenu->addSeparator();
-  fileMenu->addAction( tr( "Close" ), this, &QWidget::close )->setToolTip( tr( "关闭本窗口。" ) );
+  fileMenu->addAction( tr( "Close" ), this, &QWidget::close )->setToolTip( tr( "Closes this window." ) );
   addStandardMenuBar();
 }
 
@@ -89,7 +89,7 @@ void QgsGeorefImageToMapWindow::setupToolbars()
   mToolBar->setObjectName( QStringLiteral( "rsGeorefI2MToolBar" ) );
   mToolBar->setMovable( false );
   mToolBar->setToolTip( tr(
-    "Image 2 Map：在源影像上取点，地图坐标手填或从主窗口地图拾取（无底图面板）。" ) );
+    tr("Image to Map: pick points on the source image; enter map coordinates manually or pick them from the main window map (no base map panel).") ) );
 
   addCanvasNavigationActions( mToolBar, QStringLiteral( "rsGeorefI2M" ) );
   mToolBar->addSeparator();
@@ -102,15 +102,15 @@ QString QgsGeorefImageToMapWindow::windowHelpText() const
 {
   return tr(
     "<b>Image Registration · Image 2 Map</b><br>"
-    "对齐 QGIS Georeferencer：仅显示待校正源影像，不在本窗口嵌入底图。<br><br>"
-    "<b>典型流程</b><br>"
-    "1. 主窗口加载已有地理参考的底图/矢量<br>"
-    "2. 本窗口打开源影像（文件或主工程图层）<br>"
-    "3. 点 Add GCP，在源影像上点击像点<br>"
-    "4. 在「输入地图坐标」对话框中：手填 X/Y，或点「从地图取点」在主窗口地图上点选<br>"
-    "5. 也可在 GCP 表中直接编辑目标 X/Y 列<br>"
-    "6. 可选 RPC / 多项式 → 运行校正<br><br>"
-    "无 SIFT；无内嵌 Base 影像面板。" );
+    tr("Aligned with the QGIS Georeferencer: only the source image to correct is shown; no base map is embedded in this window.<br><br>")
+    tr("<b>Typical Workflow</b><br>")
+    tr("1. Load a georeferenced base map / vector in the main window<br>")
+    tr("2. Open the source image in this window (file or main project layer)<br>")
+    tr("3. Press Add GCP and click an image point on the source image<br>")
+    tr("4. In the 'Enter Map Coordinates' dialog: type X/Y, or press 'Pick Point from Map' and click on the main window map<br>")
+    tr("5. You can also edit the target X/Y columns directly in the GCP table<br>")
+    tr("6. Optionally RPC / polynomial → run the correction<br><br>")
+    tr("No SIFT; no embedded base image panel.") );
 }
 
 bool QgsGeorefImageToMapWindow::hasDestReady() const

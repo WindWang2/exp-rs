@@ -61,10 +61,10 @@ void OrthorectificationDialog::setupUi()
   setupHelpBanner( mainLayout );
 
   QGroupBox *paramGroup = setupParamGroup(
-    mainLayout, tr( "正射参数" ) );
+    mainLayout, tr( "Orthorectification Parameters" ) );
   paramGroup->setToolTip(
-    tr( "基于 RPC/GCP 与可选 DEM 对影像做地形纠正。输入栅格必须携带 "
-        "RPC 元数据或 GCP。" ) );
+    tr( "Terrain-corrects the image using RPC/GCPs and an optional DEM. The input raster must carry "
+        tr("RPC metadata or GCPs.") ) );
   auto *form = SicnuUi::makeFormLayout();
   qobject_cast<QVBoxLayout *>( paramGroup->layout() )->addLayout( form );
 
@@ -74,67 +74,67 @@ void OrthorectificationDialog::setupUi()
   m_targetCrsEdit->lineEdit()->setObjectName( QStringLiteral( "orthoTargetCrsEdit" ) );
   m_targetCrsEdit->setCrsString( QStringLiteral( "EPSG:4326" ) );
   SicnuDialogHelp::tip( m_targetCrsEdit, tr(
-    "目标 CRS（如 EPSG:4326、EPSG:32650）。留空使用 RPC/GCP 自带 CRS。" ) );
-  form->addRow( tr( "目标 CRS" ), m_targetCrsEdit );
+    tr("Target CRS (e.g. EPSG:4326, EPSG:32650). Left empty, the CRS carried by the RPC / GCPs is used.") ) );
+  form->addRow( tr( "Target CRS" ), m_targetCrsEdit );
 
   auto *demRow = new QHBoxLayout;
   m_demEdit = new QLineEdit( paramGroup );
   m_demEdit->setObjectName( QStringLiteral( "orthoDemEdit" ) );
-  m_demEdit->setPlaceholderText( tr( "DEM 栅格（可选，用于地形纠正）" ) );
-  SicnuDialogHelp::tip( m_demEdit, tr( "指定用于地形校正的高程栅格路径（DEM/DSM）" ) );
-  m_demBrowseButton = new QPushButton( tr( "浏览…" ), paramGroup );
+  m_demEdit->setPlaceholderText( tr( "DEM raster (optional, for terrain correction)" ) );
+  SicnuDialogHelp::tip( m_demEdit, tr( "Path of the elevation raster for terrain correction (DEM/DSM)" ) );
+  m_demBrowseButton = new QPushButton( tr( "Browse..." ), paramGroup );
   SicnuUi::markSecondary( m_demBrowseButton );
-  SicnuDialogHelp::tip( m_demBrowseButton, tr( "浏览并选择 DEM 高程栅格文件" ) );
+  SicnuDialogHelp::tip( m_demBrowseButton, tr( "Browse and choose the DEM elevation raster file" ) );
   connect( m_demBrowseButton, &QPushButton::clicked, this,
            &OrthorectificationDialog::onBrowseDem );
   demRow->addWidget( m_demEdit, 1 );
   demRow->addWidget( m_demBrowseButton );
-  form->addRow( tr( "DEM 栅格" ), demRow );
+  form->addRow( tr( "DEM raster" ), demRow );
 
   m_resamplingCombo = new QComboBox( paramGroup );
   m_resamplingCombo->setObjectName( QStringLiteral( "orthoResamplingCombo" ) );
-  m_resamplingCombo->addItem( tr( "双线性（默认）" ), QStringLiteral( "bilinear" ) );
-  m_resamplingCombo->addItem( tr( "最邻近" ), QStringLiteral( "nearest" ) );
-  m_resamplingCombo->addItem( tr( "三次卷积" ), QStringLiteral( "cubic" ) );
-  m_resamplingCombo->addItem( tr( "三次样条" ), QStringLiteral( "cubicspline" ) );
+  m_resamplingCombo->addItem( tr( "Bilinear (default)" ), QStringLiteral( "bilinear" ) );
+  m_resamplingCombo->addItem( tr( "Nearest Neighbour" ), QStringLiteral( "nearest" ) );
+  m_resamplingCombo->addItem( tr( "Cubic Convolution" ), QStringLiteral( "cubic" ) );
+  m_resamplingCombo->addItem( tr( "Cubic Spline" ), QStringLiteral( "cubicspline" ) );
   m_resamplingCombo->addItem( tr( "Lanczos" ), QStringLiteral( "lanczos" ) );
-  SicnuDialogHelp::tip( m_resamplingCombo, tr( "栅格重采样插值算法：连续影像建议双线性或三次卷积，分类/离散栅格建议最邻近" ) );
-  form->addRow( tr( "重采样方法" ), m_resamplingCombo );
+  SicnuDialogHelp::tip( m_resamplingCombo, tr( "Raster resampling interpolation: bilinear or cubic convolution for continuous imagery; nearest neighbour for classification / discrete rasters" ) );
+  form->addRow( tr( "Resampling Method" ), m_resamplingCombo );
 
   m_resolutionSpin = new QDoubleSpinBox( paramGroup );
   m_resolutionSpin->setObjectName( QStringLiteral( "orthoResolutionSpin" ) );
   m_resolutionSpin->setRange( 0.0, 1e9 );
   m_resolutionSpin->setDecimals( 6 );
   m_resolutionSpin->setValue( 0.0 );
-  m_resolutionSpin->setSpecialValueText( tr( "自动" ) );
-  SicnuDialogHelp::tip( m_resolutionSpin, tr( "输出像元尺寸（目标 CRS 单位）；0 = 自动。" ) );
-  form->addRow( tr( "输出分辨率" ), m_resolutionSpin );
+  m_resolutionSpin->setSpecialValueText( tr( "Automatic" ) );
+  SicnuDialogHelp::tip( m_resolutionSpin, tr( "Output pixel size (in target CRS units); 0 = automatic." ) );
+  form->addRow( tr( "Output Resolution" ), m_resolutionSpin );
 
   m_heightSpin = new QDoubleSpinBox( paramGroup );
   m_heightSpin->setObjectName( QStringLiteral( "orthoHeightSpin" ) );
   m_heightSpin->setRange( -10000.0, 100000.0 );
   m_heightSpin->setDecimals( 2 );
   m_heightSpin->setValue( 0.0 );
-  m_heightSpin->setSpecialValueText( tr( "不使用" ) );
-  SicnuDialogHelp::tip( m_heightSpin, tr( "无 DEM 时的恒定高程（米）。" ) );
-  form->addRow( tr( "恒定高程" ), m_heightSpin );
+  m_heightSpin->setSpecialValueText( tr( "None" ) );
+  SicnuDialogHelp::tip( m_heightSpin, tr( "Constant elevation (m) when no DEM is available." ) );
+  form->addRow( tr( "Constant Elevation" ), m_heightSpin );
 
-  m_nodataCheck = new QCheckBox( tr( "指定 NoData 值" ), paramGroup );
+  m_nodataCheck = new QCheckBox( tr( "Specify NoData value" ), paramGroup );
   m_nodataCheck->setObjectName( QStringLiteral( "orthoNodataCheck" ) );
   m_nodataCheck->setChecked( false );
-  SicnuDialogHelp::tip( m_nodataCheck, tr( "是否为输出正射影像指定自定义的无效像元值 (NoData)" ) );
+  SicnuDialogHelp::tip( m_nodataCheck, tr( "Specify a custom NoData value for the output orthophoto" ) );
   m_nodataSpin = new QDoubleSpinBox( paramGroup );
   m_nodataSpin->setObjectName( QStringLiteral( "orthoNodataSpin" ) );
   m_nodataSpin->setRange( -1e9, 1e9 );
   m_nodataSpin->setDecimals( 6 );
   m_nodataSpin->setValue( 0.0 );
   m_nodataSpin->setEnabled( false );
-  SicnuDialogHelp::tip( m_nodataSpin, tr( "输出正射影像中无效/未覆盖区域的填充像元值" ) );
+  SicnuDialogHelp::tip( m_nodataSpin, tr( "Fill pixel value for invalid / uncovered areas of the output orthophoto" ) );
   connect( m_nodataCheck, &QCheckBox::toggled, m_nodataSpin, &QDoubleSpinBox::setEnabled );
   auto *nodataRow = new QHBoxLayout;
   nodataRow->addWidget( m_nodataCheck );
   nodataRow->addWidget( m_nodataSpin, 1 );
-  form->addRow( tr( "NoData 设置" ), nodataRow );
+  form->addRow( tr( "NoData Settings" ), nodataRow );
 
   m_modelStatusLabel = SicnuUi::makeHintLabel( paramGroup, QString() );
   m_modelStatusLabel->setWordWrap( true );
@@ -154,19 +154,19 @@ void OrthorectificationDialog::refreshModelStatus()
   }
   const int model = rpcOrGcp( m_rasterLayer->source() );
   if ( model == 1 )
-    m_modelStatusLabel->setText( tr( "输入含 RPC 元数据，将启用 RPC 正射。" ) );
+    m_modelStatusLabel->setText( tr( "The input carries RPC metadata; RPC orthorectification will be enabled." ) );
   else if ( model == 2 )
-    m_modelStatusLabel->setText( tr( "输入含 GCP，将基于 GCP 校正。" ) );
+    m_modelStatusLabel->setText( tr( "The input carries GCPs; correction will be GCP-based." ) );
   else
     m_modelStatusLabel->setText(
-      tr( "输入无 RPC 元数据且无 GCP；gdal:orthorectification 将拒绝执行。" ) );
+      tr( "The input has neither RPC metadata nor GCPs; gdal:orthorectification will refuse to run." ) );
 }
 
 void OrthorectificationDialog::onBrowseDem()
 {
   const QString path = QFileDialog::getOpenFileName(
-    this, tr( "选择 DEM 栅格" ), m_demEdit->text(),
-    tr( "栅格文件 (*.tif *.tiff *.img);;所有文件 (*)" ) );
+    this, tr( "Select DEM Raster" ), m_demEdit->text(),
+    tr( "Raster Files (*.tif *.tiff *.img);;All Files (*)" ) );
   if ( path.isEmpty() )
     return;
   m_demEdit->setText( path );
@@ -203,7 +203,7 @@ void OrthorectificationDialog::onRun()
 {
   if ( !m_rasterLayer || !m_rasterLayer->isValid() )
   {
-    handleFailed( tr( "请先选择一个有效的栅格图层。" ) );
+    handleFailed( tr( "Select a valid raster layer first." ) );
     return;
   }
   runOperatorTask( QStringLiteral( "gdal:orthorectification" ), buildParams() );

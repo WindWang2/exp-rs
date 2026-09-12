@@ -187,51 +187,51 @@ QString unavailabilityReason( const SelectionContextSnapshot &s, const QString &
     if ( commandId == QLatin1String( "layer.toggleEditing" ) )
     {
         if ( !vectorSelected( s ) )
-            return QObject::tr( "需要选中矢量图层" );
+            return QObject::tr( "A vector layer must be selected" );
         if ( !editingAvailable( s ) )
-            return QObject::tr( "当前图层不可编辑" );
+            return QObject::tr( "The current layer is not editable" );
     }
     else if ( commandId == QLatin1String( "layer.saveEdits" ) )
     {
         if ( !vectorSelected( s ) )
-            return QObject::tr( "需要选中矢量图层" );
+            return QObject::tr( "A vector layer must be selected" );
         if ( !editingActive( s ) )
-            return QObject::tr( "请先开启编辑会话" );
+            return QObject::tr( "Start an editing session first" );
     }
     else if ( commandId == QLatin1String( "layer.attributeTable" ) )
     {
         if ( !vectorSelected( s ) )
-            return QObject::tr( "需要选中矢量图层" );
+            return QObject::tr( "A vector layer must be selected" );
     }
     else if ( commandId.startsWith( QStringLiteral( "layer.edit." ) ) )
     {
         // Reserved edit-command family (no registrations yet).
         if ( !vectorSelected( s ) )
-            return QObject::tr( "需要选中矢量图层" );
+            return QObject::tr( "A vector layer must be selected" );
         if ( !editingAvailable( s ) )
-            return QObject::tr( "当前图层不可编辑" );
+            return QObject::tr( "The current layer is not editable" );
     }
     else if ( commandId.startsWith( QStringLiteral( "layer." ) ) && !layerSelected( s ) )
     {
-        return QObject::tr( "需要选中图层" );
+        return QObject::tr( "A layer must be selected" );
     }
     else if ( ( commandId.startsWith( QStringLiteral( "raster." ) )
                 || commandId.startsWith( QStringLiteral( "rs." ) ) )
               && !rasterSelected( s ) )
     {
-        return QObject::tr( "需要选中栅格图层" );
+        return QObject::tr( "A raster layer must be selected" );
     }
     else if ( commandId.startsWith( QStringLiteral( "sar." ) ) && !sarSelected( s ) )
     {
-        return QObject::tr( "需要选中 SAR 数据" );
+        return QObject::tr( "SAR data must be selected" );
     }
     else if ( commandId.startsWith( QStringLiteral( "result." ) ) && !resultSelected( s ) )
     {
-        return QObject::tr( "需要选中治理结果" );
+        return QObject::tr( "Governance results must be selected" );
     }
     else if ( commandId.startsWith( QStringLiteral( "asset." ) ) && !assetSelected( s ) )
     {
-        return QObject::tr( "需要选中数据资产" );
+        return QObject::tr( "Data assets must be selected" );
     }
     return QString();
 }
@@ -246,37 +246,37 @@ NextAction suggestedNextAction( const SelectionContextSnapshot &s )
     if ( editingActive( s ) )
     {
         action.commandId = QStringLiteral( "layer.saveEdits" );
-        action.text = QObject::tr( "编辑会话进行中 — 可保存或放弃编辑" );
+        action.text = QObject::tr( "An editing session is active — save or discard the edits" );
         return action;
     }
     if ( rasterSelected( s ) )
     {
         action.commandId = QStringLiteral( "rs.spectralIndex" );
-        action.text = QObject::tr( "已选中栅格 — 可运行光谱指数等处理工具" );
+        action.text = QObject::tr( "Raster selected — processing tools such as spectral indices can run" );
         return action;
     }
     if ( vectorSelected( s ) && editingAvailable( s ) )
     {
         action.commandId = QStringLiteral( "layer.toggleEditing" );
-        action.text = QObject::tr( "已选中矢量图层 — 可开始编辑" );
+        action.text = QObject::tr( "Vector layer selected — editing can start" );
         return action;
     }
     if ( s.hasTemporal )
     {
         action.commandId = QStringLiteral( "workbench.temporal" );
-        action.text = QObject::tr( "检测到时相数据 — 可进入时相工作台" );
+        action.text = QObject::tr( "Epoch data detected — the Temporal Workbench is available" );
         return action;
     }
     if ( s.hasInFlightTask )
     {
         action.commandId = QStringLiteral( "workbench.processingHistory" );
-        action.text = QObject::tr( "有任务正在执行 — 可在处理历史中查看进度与产物" );
+        action.text = QObject::tr( "A task is running — check progress and artifacts in the processing history" );
         return action;
     }
     if ( s.layerCount == 0 && !s.hasGovernanceSelection() )
     {
         action.commandId = QStringLiteral( "project.importLayer" );
-        action.text = QObject::tr( "工作区为空 — 导入或打开数据开始工作" );
+        action.text = QObject::tr( "Workspace is empty — import or open data to start" );
         return action;
     }
     return action;

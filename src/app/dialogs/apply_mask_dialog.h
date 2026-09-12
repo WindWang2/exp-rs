@@ -31,7 +31,7 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("apply_mask"); }
-    QString dialogTitle() const override { return tr("应用掩膜"); }
+    QString dialogTitle() const override { return tr("Apply Mask"); }
     bool validateInputs() override;
     void onRun() override;
 

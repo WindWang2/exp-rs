@@ -30,10 +30,10 @@ void PostClassificationDialog::setupUi()
   setupHelpBanner( mainLayout );
 
   QGroupBox *inputGroup = setupInputGroup(
-    mainLayout, tr( "双时相分类结果输入" ) );
+    mainLayout, tr( "Two-date classification result input" ) );
   inputGroup->setToolTip(
-    tr( "比较两期分类结果：输出逐类转移矩阵（行=前时相类，列=后时相类）、"
-        "逐类增益/损失与变化类型图。" ) );
+    tr( "Compares two classification dates: outputs a per-class transition matrix (rows = earlier classes, columns = later classes),"
+        tr("Per-class gains / losses and a change-type map.") ) );
   auto *form = SicnuUi::makeFormLayout();
   qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( form );
 
@@ -45,28 +45,28 @@ void PostClassificationDialog::setupUi()
   m_beforeBandCombo->setObjectName( QStringLiteral( "postClassBeforeBandCombo" ) );
   m_afterBandCombo = new QComboBox( inputGroup );
   m_afterBandCombo->setObjectName( QStringLiteral( "postClassAfterBandCombo" ) );
-  SicnuDialogHelp::tip( m_beforeLayerCombo, tr( "前期分类栅格（主题图）。" ) );
-  SicnuDialogHelp::tip( m_afterLayerCombo, tr( "后期分类栅格（主题图）。" ) );
-  SicnuDialogHelp::tip( m_beforeBandCombo, tr( "前期分类波段。" ) );
-  SicnuDialogHelp::tip( m_afterBandCombo, tr( "后期分类波段。" ) );
-  form->addRow( tr( "前期分类" ), m_beforeLayerCombo );
-  form->addRow( tr( "前期波段" ), m_beforeBandCombo );
-  form->addRow( tr( "后期分类" ), m_afterLayerCombo );
-  form->addRow( tr( "后期波段" ), m_afterBandCombo );
+  SicnuDialogHelp::tip( m_beforeLayerCombo, tr( "Earlier classification raster (theme map)." ) );
+  SicnuDialogHelp::tip( m_afterLayerCombo, tr( "Later classification raster (theme map)." ) );
+  SicnuDialogHelp::tip( m_beforeBandCombo, tr( "Earlier classification band." ) );
+  SicnuDialogHelp::tip( m_afterBandCombo, tr( "Later classification band." ) );
+  form->addRow( tr( "Earlier Classification" ), m_beforeLayerCombo );
+  form->addRow( tr( "Earlier Band" ), m_beforeBandCombo );
+  form->addRow( tr( "Later Classification" ), m_afterLayerCombo );
+  form->addRow( tr( "Later Band" ), m_afterBandCombo );
 
   m_classCountSpin = new QSpinBox( inputGroup );
   m_classCountSpin->setObjectName( QStringLiteral( "postClassCountSpin" ) );
   m_classCountSpin->setRange( 0, 255 );
   m_classCountSpin->setValue( 0 );
-  m_classCountSpin->setSpecialValueText( tr( "自动（按观测最大类 + 1）" ) );
+  m_classCountSpin->setSpecialValueText( tr( "Automatic (max observed class + 1)" ) );
   SicnuDialogHelp::tip( m_classCountSpin, tr(
-    "类别总数（变化码 before*classCount+after 须装入 UInt16，故 ≤255）。"
-    "0 = 按两期影像中观测到的最大类别自动推断。" ) );
-  form->addRow( tr( "类别总数" ), m_classCountSpin );
+    tr("Total classes (the change code before*classCount+after must fit a UInt16, hence ≤ 255).")
+    tr("0 = inferred automatically from the maximum class observed across the two images.") ) );
+  form->addRow( tr( "Total Classes" ), m_classCountSpin );
 
   setupOutputRow( mainLayout );
 
-  m_summaryLabel = SicnuUi::makeHintLabel( this, tr( "运行后在此显示变化统计摘要与转移矩阵。" ) );
+  m_summaryLabel = SicnuUi::makeHintLabel( this, tr( "After running, the change statistics summary and transition matrix appear here." ) );
   m_summaryLabel->setObjectName( QStringLiteral( "postClassSummaryLabel" ) );
   m_summaryLabel->setWordWrap( true );
   mainLayout->addWidget( m_summaryLabel );
@@ -89,7 +89,7 @@ void PostClassificationDialog::populateBandCombo( RasterLayerCombo *layerCombo, 
   if ( !rl )
     return;
   for ( int i = 1; i <= rl->bandCount(); ++i )
-    bandCombo->addItem( tr( "波段 %1" ).arg( i ), i );
+    bandCombo->addItem( tr( "Band %1" ).arg( i ), i );
 }
 
 void PostClassificationDialog::populateLayers()
@@ -122,13 +122,13 @@ bool PostClassificationDialog::validateInputs()
 {
   if ( outputPath().isEmpty() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请指定输出文件。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "Specify the output file." ) );
     return false;
   }
   if ( m_beforeLayerCombo->currentData().toString().isEmpty()
        || m_afterLayerCombo->currentData().toString().isEmpty() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请选择前期与后期分类栅格。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "Select the earlier and later classification rasters." ) );
     return false;
   }
   auto *before = qobject_cast<QgsRasterLayer *>(
@@ -137,7 +137,7 @@ bool PostClassificationDialog::validateInputs()
     QgsProject::instance()->mapLayer( m_afterLayerCombo->currentData().toString() ) );
   if ( !before || !before->isValid() || !after || !after->isValid() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "前期或后期分类栅格无效。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "The earlier or later classification raster is invalid." ) );
     return false;
   }
   const QString gridMessage = rasterGridCompatibilityMessage(
@@ -145,7 +145,7 @@ bool PostClassificationDialog::validateInputs()
   if ( !gridMessage.isEmpty() )
   {
     QMessageBox::warning( this, dialogTitle(),
-                          tr( "两张分类栅格的像元网格不兼容，无法比较：\n%1" )
+                          tr( "The pixel grids of the two classification rasters are incompatible; cannot compare:\n%1" )
                             .arg( gridMessage ) );
     return false;
   }
@@ -163,7 +163,7 @@ void PostClassificationDialog::onRun()
     QgsProject::instance()->mapLayer( m_afterLayerCombo->currentData().toString() ) );
   if ( !before || !before->isValid() || !after || !after->isValid() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "所选分类栅格无效。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "The selected classification raster is invalid." ) );
     return;
   }
 
@@ -181,7 +181,7 @@ void PostClassificationDialog::showResultSummary( const Json::Value &result )
   const uint64_t total = result.isMember( "totalPixels" ) ? result["totalPixels"].asUInt64() : 0;
   if ( result.isMember( "changedPixels" ) )
   {
-    lines << tr( "变化像元：%1 / %2（%3%）" )
+    lines << tr( "Changed pixels: %1 / %2 (%3%)" )
                .arg( result["changedPixels"].asUInt64() )
                .arg( total )
                .arg( result["changedPercent"].asDouble(), 0, 'f', 2 );
@@ -190,7 +190,7 @@ void PostClassificationDialog::showResultSummary( const Json::Value &result )
   if ( result.isMember( "fromTotals" ) && result["fromTotals"].isArray() &&
        result.isMember( "toTotals" ) && result["toTotals"].isArray() )
   {
-    lines << tr( "类别像元计数与占比变化（前期 → 后期）：" );
+    lines << tr( "Per-class pixel counts and share changes (earlier → later):" );
     const int n = static_cast<int>( result["fromTotals"].size() );
     for ( int c = 0; c < n; ++c )
     {
@@ -201,7 +201,7 @@ void PostClassificationDialog::showResultSummary( const Json::Value &result )
       const int64_t net = result.isMember( "netChange" ) && static_cast<int>( result["netChange"].size() ) > c
                             ? result["netChange"][c].asInt64()
                             : ( static_cast<int64_t>( tCount ) - static_cast<int64_t>( fCount ) );
-      lines << QStringLiteral( "  类别 %1: %2 (%3%) → %4 (%5%) [净变化: %6%7]" )
+      lines << QStringLiteral( tr("  class %1: %2 (%3%) → %4 (%5%) [net change: %6%7]") )
                    .arg( c )
                    .arg( fCount )
                    .arg( fRatio, 0, 'f', 2 )
@@ -215,7 +215,7 @@ void PostClassificationDialog::showResultSummary( const Json::Value &result )
   if ( result.isMember( "transitionMatrix" ) && result["transitionMatrix"].isArray()
        && result["transitionMatrix"].size() > 0 )
   {
-    lines << tr( "转移矩阵（行=前时相，列=后时相；仅列出非零转移）：" );
+    lines << tr( "Transition matrix (rows = earlier epoch, columns = later epoch; non-zero transitions only):" );
     const int n = static_cast<int>( result["transitionMatrix"].size() );
     for ( int from = 0; from < n; ++from )
     {
@@ -224,7 +224,7 @@ void PostClassificationDialog::showResultSummary( const Json::Value &result )
       {
         if ( from != to && row[to].asUInt64() > 0 )
         {
-          lines << QStringLiteral( "  类别 %1 → 类别 %2: %3 像元" )
+          lines << QStringLiteral( tr("  class %1 → class %2: %3 pixels") )
                        .arg( from )
                        .arg( to )
                        .arg( row[to].asUInt64() );
@@ -232,6 +232,6 @@ void PostClassificationDialog::showResultSummary( const Json::Value &result )
       }
     }
   }
-  m_summaryLabel->setText( lines.isEmpty() ? tr( "运行完成（无摘要数据）。" )
+  m_summaryLabel->setText( lines.isEmpty() ? tr( "Run finished (no summary data)." )
                                            : lines.join( QLatin1Char( '\n' ) ) );
 }

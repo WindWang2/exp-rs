@@ -170,24 +170,24 @@ void QgsGCPListWidget::contextMenuEvent( QContextMenuEvent *event )
   const QList<int> rows = selectedRows();
 
   QMenu menu( this );
-  auto *zoomSrc = menu.addAction( tr( "定位到源点" ) );
-  zoomSrc->setToolTip( tr( "将源影像画布平移到该 GCP 的源位置" ) );
-  auto *zoomDst = menu.addAction( tr( "定位到目标点" ) );
-  zoomDst->setToolTip( tr( "将参考/地图画布平移到该 GCP 的目标位置" ) );
-  auto *zoomBoth = menu.addAction( tr( "两侧定位" ) );
-  zoomBoth->setToolTip( tr( "同时在源与目标画布上定位该点" ) );
+  auto *zoomSrc = menu.addAction( tr( "Locate Source Point" ) );
+  zoomSrc->setToolTip( tr( "Pan the source image canvas to this GCP's source position" ) );
+  auto *zoomDst = menu.addAction( tr( "Locate Target Point" ) );
+  zoomDst->setToolTip( tr( "Pan the reference / map canvas to this GCP's target position" ) );
+  auto *zoomBoth = menu.addAction( tr( "Locate on Both Images" ) );
+  zoomBoth->setToolTip( tr( "Locate this point on both the source and target canvases" ) );
   menu.addSeparator();
 
   const bool rowValid = row >= 0 && row < mModel->rowCount();
   const bool enabled = rowValid
                          && mModel->data( mModel->index( row, 0 ), Qt::CheckStateRole ).toInt() == Qt::Checked;
-  auto *toggle = menu.addAction( rowValid && enabled ? tr( "禁用" ) : tr( "启用" ) );
-  auto *editSrc = menu.addAction( tr( "编辑源坐标…" ) );
-  auto *editDst = menu.addAction( tr( "编辑目标坐标…" ) );
+  auto *toggle = menu.addAction( rowValid && enabled ? tr( "Disable" ) : tr( "Enable" ) );
+  auto *editSrc = menu.addAction( tr( "Edit Source Coordinates..." ) );
+  auto *editDst = menu.addAction( tr( "Edit Target Coordinates..." ) );
   menu.addSeparator();
   auto *del = menu.addAction( rows.size() > 1
-                                ? tr( "删除选中的 %1 个点" ).arg( rows.size() )
-                                : tr( "删除" ) );
+                                ? tr( "Delete the %1 selected points" ).arg( rows.size() )
+                                : tr( "Delete" ) );
   del->setShortcut( QKeySequence::Delete );
 
   QAction *chosen = menu.exec( event->globalPos() );

@@ -80,26 +80,26 @@ void SpectralIndexDialog::setupUi()
   setupHelpBanner( mainLayout );
 
   // Input Group
-  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "输入数据" ) );
+  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "Input Data" ) );
   auto *inputForm = SicnuUi::makeFormLayout();
   inputForm->setContentsMargins( 0, 0, 0, 0 );
 
-  m_layerLabel = new QLabel( tr( "输入栅格" ), inputGroup );
+  m_layerLabel = new QLabel( tr( "Input Raster" ), inputGroup );
   m_layerCombo = new RasterLayerCombo( inputGroup );
   m_layerCombo->setObjectName( QStringLiteral( "spectralIndexInputLayerCombo" ) );
-  SicnuDialogHelp::tip( m_layerCombo, tr( "选择待计算光谱指数的栅格图层。" ) );
+  SicnuDialogHelp::tip( m_layerCombo, tr( "Select the raster layer for the spectral index." ) );
   m_layerCombo->populate();
   connect( m_layerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &SpectralIndexDialog::onLayerChanged );
   inputForm->addRow( m_layerLabel, m_layerCombo );
 
-  m_inputAssetLabel = new QLabel( tr( "数据资产" ), inputGroup );
+  m_inputAssetLabel = new QLabel( tr( "Data Assets" ), inputGroup );
   m_inputAssetCombo = new QComboBox( inputGroup );
   m_inputAssetCombo->setObjectName( QStringLiteral( "spectralIndexAssetCombo" ) );
   m_inputAssetCombo->setVisible( false );
   m_inputAssetLabel->setVisible( false );
   SicnuDialogHelp::tip( m_inputAssetCombo, tr(
-    "选择已注册的栅格数据资产作为输入。运行时会校验资产版本；若版本已变更将拒绝执行。" ) );
+    tr("Chooses a registered raster data asset as input. The asset version is validated at run time; execution is refused if the version has changed.") ) );
   connect( m_inputAssetCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &SpectralIndexDialog::onInputAssetChanged );
   inputForm->addRow( m_inputAssetLabel, m_inputAssetCombo );
@@ -107,62 +107,62 @@ void SpectralIndexDialog::setupUi()
   qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( inputForm );
 
   // Parameter Group
-  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "指数与波段映射" ) );
+  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "Index and Band Mapping" ) );
   auto *form = SicnuUi::makeFormLayout();
   form->setContentsMargins( 0, 0, 0, 0 );
 
   m_indexCombo = new QComboBox( paramGroup );
-  m_indexCombo->addItem( tr( "NDVI — 归一化植被指数" ), QStringLiteral( "NDVI" ) );
-  m_indexCombo->addItem( tr( "EVI — 增强型植被指数" ), QStringLiteral( "EVI" ) );
-  m_indexCombo->addItem( tr( "SAVI — 土壤调节植被指数" ), QStringLiteral( "SAVI" ) );
-  m_indexCombo->addItem( tr( "NDWI — 归一化水体指数" ), QStringLiteral( "NDWI" ) );
-  m_indexCombo->addItem( tr( "NDBI — 归一化建筑指数" ), QStringLiteral( "NDBI" ) );
-  m_indexCombo->addItem( tr( "MNDWI — 改进归一化水体指数" ), QStringLiteral( "MNDWI" ) );
+  m_indexCombo->addItem( tr( "NDVI — Normalized Difference Vegetation Index" ), QStringLiteral( "NDVI" ) );
+  m_indexCombo->addItem( tr( "EVI — Enhanced Vegetation Index" ), QStringLiteral( "EVI" ) );
+  m_indexCombo->addItem( tr( "SAVI — Soil-Adjusted Vegetation Index" ), QStringLiteral( "SAVI" ) );
+  m_indexCombo->addItem( tr( "NDWI — Normalized Difference Water Index" ), QStringLiteral( "NDWI" ) );
+  m_indexCombo->addItem( tr( "NDBI — Normalized Difference Built-up Index" ), QStringLiteral( "NDBI" ) );
+  m_indexCombo->addItem( tr( "MNDWI — Modified Normalized Difference Water Index" ), QStringLiteral( "MNDWI" ) );
   SicnuDialogHelp::tip( m_indexCombo, tr(
-    "光谱指数类型：\n"
-    "• NDVI：植被 (NIR, Red)\n"
-    "• EVI：增强植被 (NIR, Red, Blue)\n"
-    "• SAVI：土壤调节植被 (NIR, Red)\n"
-    "• NDWI：水体 (Green, NIR)\n"
-    "• NDBI：建成区 (SWIR, NIR)\n"
-    "• MNDWI：改进水体 (Green, SWIR)" ) );
+    tr("Spectral index type:\n")
+    tr("• NDVI: vegetation (NIR, Red)\n")
+    tr("• EVI: enhanced vegetation (NIR, Red, Blue)\n")
+    tr("• SAVI: soil-adjusted vegetation (NIR, Red)\n")
+    tr("• NDWI: water (Green, NIR)\n")
+    tr("• NDBI: built-up (SWIR, NIR)\n")
+    tr("• MNDWI: modified water (Green, SWIR)") ) );
   connect( m_indexCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &SpectralIndexDialog::onIndexChanged );
-  form->addRow( tr( "指数类型" ), m_indexCombo );
+  form->addRow( tr( "Index Type" ), m_indexCombo );
 
-  m_nirLabel = new QLabel( tr( "近红外 NIR" ), paramGroup );
+  m_nirLabel = new QLabel( tr( "NIR (Near Infrared)" ), paramGroup );
   m_nirCombo = new BandRoleCombo( paramGroup );
   m_nirCombo->setObjectName( QStringLiteral( "spectralIndexNirCombo" ) );
-  SicnuDialogHelp::tip( m_nirCombo, tr( "近红外波段。Landsat 8/9 常为 Band 5，Sentinel-2 常为 Band 8。" ) );
+  SicnuDialogHelp::tip( m_nirCombo, tr( "Near-infrared band; usually Band 5 on Landsat 8/9 and Band 8 on Sentinel-2." ) );
   form->addRow( m_nirLabel, m_nirCombo );
 
-  m_redLabel = new QLabel( tr( "红光 Red" ), paramGroup );
+  m_redLabel = new QLabel( tr( "Red" ), paramGroup );
   m_redCombo = new BandRoleCombo( paramGroup );
   m_redCombo->setObjectName( QStringLiteral( "spectralIndexRedCombo" ) );
-  SicnuDialogHelp::tip( m_redCombo, tr( "红光波段。用于 NDVI/EVI/SAVI。" ) );
+  SicnuDialogHelp::tip( m_redCombo, tr( "Red band; used by NDVI/EVI/SAVI." ) );
   form->addRow( m_redLabel, m_redCombo );
 
-  m_greenLabel = new QLabel( tr( "绿光 Green" ), paramGroup );
+  m_greenLabel = new QLabel( tr( "Green" ), paramGroup );
   m_greenCombo = new BandRoleCombo( paramGroup );
   m_greenCombo->setObjectName( QStringLiteral( "spectralIndexGreenCombo" ) );
-  SicnuDialogHelp::tip( m_greenCombo, tr( "绿光波段。用于 NDWI/MNDWI。" ) );
+  SicnuDialogHelp::tip( m_greenCombo, tr( "Green band; used by NDWI/MNDWI." ) );
   form->addRow( m_greenLabel, m_greenCombo );
 
-  m_blueLabel = new QLabel( tr( "蓝光 Blue" ), paramGroup );
+  m_blueLabel = new QLabel( tr( "Blue" ), paramGroup );
   m_blueCombo = new BandRoleCombo( paramGroup );
   m_blueCombo->setObjectName( QStringLiteral( "spectralIndexBlueCombo" ) );
-  SicnuDialogHelp::tip( m_blueCombo, tr( "蓝光波段。用于 EVI 计算大气背景修正。" ) );
+  SicnuDialogHelp::tip( m_blueCombo, tr( "Blue band; used for the atmospheric background correction in EVI." ) );
   form->addRow( m_blueLabel, m_blueCombo );
 
-  m_swirLabel = new QLabel( tr( "短波红外 SWIR" ), paramGroup );
+  m_swirLabel = new QLabel( tr( "SWIR (Shortwave Infrared)" ), paramGroup );
   m_swirCombo = new BandRoleCombo( paramGroup );
   m_swirCombo->setObjectName( QStringLiteral( "spectralIndexSwirCombo" ) );
-  SicnuDialogHelp::tip( m_swirCombo, tr( "短波红外波段。用于 NDBI/MNDWI。" ) );
+  SicnuDialogHelp::tip( m_swirCombo, tr( "Shortwave infrared band; used by NDBI/MNDWI." ) );
   form->addRow( m_swirLabel, m_swirCombo );
 
   qobject_cast<QVBoxLayout *>( paramGroup->layout() )->addLayout( form );
   qobject_cast<QVBoxLayout *>( paramGroup->layout() )->addWidget( SicnuUi::makeHintLabel(
-    paramGroup, tr( "已导入的产品按语义波段角色自动匹配；普通栅格按常见波段顺序预填，请核对后运行。" ) ) );
+    paramGroup, tr( "Imported products are matched by semantic band role automatically; plain rasters are pre-filled in the common band order — verify before running." ) ) );
 
   setupOutputRow( mainLayout );
   setupButtonBar( mainLayout );
@@ -345,20 +345,20 @@ void SpectralIndexDialog::runFromAsset()
   const auto assetId = sicnu::data::AssetId::fromString( idText );
   if ( !assetId )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请选择一个有效的输入数据资产。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "Select a valid input data asset." ) );
     return;
   }
   const auto snapshot = m_dataManager->asset( *assetId );
   if ( !snapshot )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "所选资产已不存在。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "The selected asset no longer exists." ) );
     return;
   }
 
   const QString inputPath = snapshot->source().canonicalSource;
   if ( inputPath.isEmpty() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "所选资产无有效数据路径。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "The selected asset has no valid data path." ) );
     return;
   }
 

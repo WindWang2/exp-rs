@@ -23,7 +23,7 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("spatial_filter"); }
-    QString dialogTitle() const override { return tr("空间滤波"); }
+    QString dialogTitle() const override { return tr("Spatial Filtering"); }
     void onRun() override;
 
 private slots:

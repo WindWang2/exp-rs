@@ -112,7 +112,7 @@ void RsToolbarFlowHost::ensureChips()
     drag->setObjectName( QStringLiteral( "rsToolbarDragGrip" ) );
     drag->setFixedWidth( kGripW );
     drag->setCursor( Qt::SizeAllCursor );
-    drag->setToolTip( tr( "拖动以排列工具栏（可放到同一行或第二行）" ) );
+    drag->setToolTip( tr( "Drag to arrange toolbars (place them on the same row or a second row)" ) );
     drag->installEventFilter( this );
 
     c.tb->setParent( frame, Qt::Widget );
@@ -128,7 +128,7 @@ void RsToolbarFlowHost::ensureChips()
     resize->setObjectName( QStringLiteral( "rsToolbarResizeGrip" ) );
     resize->setFixedWidth( kResizeW );
     resize->setCursor( Qt::SizeHorCursor );
-    resize->setToolTip( tr( "拖动以调整工具栏长度，显示更多图标" ) );
+    resize->setToolTip( tr( "Drag to resize the toolbar and reveal more icons" ) );
     resize->installEventFilter( this );
 
     lay->addWidget( drag );

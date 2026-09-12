@@ -63,52 +63,52 @@ void SpatialFilterDialog::setupUi()
   setupHelpBanner( mainLayout );
 
   // Input Data Group
-  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "输入数据" ) );
+  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "Input Data" ) );
   auto *inputForm = SicnuUi::makeFormLayout();
   inputForm->setContentsMargins( 0, 0, 0, 0 );
 
   m_layerCombo = new RasterLayerCombo( inputGroup );
   m_layerCombo->setObjectName( QStringLiteral( "spatialFilterInputLayerCombo" ) );
-  SicnuDialogHelp::tip( m_layerCombo, tr( "选择待执行空间滤波的栅格图层。" ) );
+  SicnuDialogHelp::tip( m_layerCombo, tr( "Select the raster layer for spatial filtering." ) );
   m_layerCombo->populate();
   connect( m_layerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &SpatialFilterDialog::onLayerChanged );
-  inputForm->addRow( tr( "输入栅格" ), m_layerCombo );
+  inputForm->addRow( tr( "Input Raster" ), m_layerCombo );
   qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( inputForm );
 
   // Parameters Group
-  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "滤波参数" ) );
+  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "Filter Parameters" ) );
   auto *form = SicnuUi::makeFormLayout();
   form->setContentsMargins( 0, 0, 0, 0 );
 
   m_filterTypeCombo = new QComboBox( paramGroup );
-  m_filterTypeCombo->addItem( tr( "均值滤波 (Mean)" ), QStringLiteral( "opencv:mean_blur" ) );
-  m_filterTypeCombo->addItem( tr( "高斯滤波 (Gaussian)" ), QStringLiteral( "opencv:gaussian_blur" ) );
-  m_filterTypeCombo->addItem( tr( "中值滤波 (Median)" ), QStringLiteral( "opencv:median_blur" ) );
-  m_filterTypeCombo->addItem( tr( "Sobel 边缘检测" ), QStringLiteral( "opencv:sobel" ) );
-  m_filterTypeCombo->addItem( tr( "Laplacian 边缘增强" ), QStringLiteral( "opencv:laplacian" ) );
+  m_filterTypeCombo->addItem( tr( "Mean Filter" ), QStringLiteral( "opencv:mean_blur" ) );
+  m_filterTypeCombo->addItem( tr( "Gaussian Filter" ), QStringLiteral( "opencv:gaussian_blur" ) );
+  m_filterTypeCombo->addItem( tr( "Median Filter" ), QStringLiteral( "opencv:median_blur" ) );
+  m_filterTypeCombo->addItem( tr( "Sobel Edge Detection" ), QStringLiteral( "opencv:sobel" ) );
+  m_filterTypeCombo->addItem( tr( "Laplacian Edge Enhancement" ), QStringLiteral( "opencv:laplacian" ) );
   SicnuDialogHelp::tip( m_filterTypeCombo, tr(
-    "• 均值 / 高斯 / 中值：平滑去噪\n"
-    "• Sobel / Laplacian：边缘检测与锐化增强\n"
-    "中值滤波对椒盐噪声具有极佳保边抑制效果。" ) );
+    tr("• Mean / Gaussian / median: smoothing and denoising\n")
+    tr("• Sobel / Laplacian: edge detection and sharpening\n")
+    tr("The median filter suppresses salt-and-pepper noise while preserving edges remarkably well.") ) );
   connect( m_filterTypeCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &SpatialFilterDialog::onFilterTypeChanged );
-  form->addRow( tr( "滤波器类型" ), m_filterTypeCombo );
+  form->addRow( tr( "Filter Type" ), m_filterTypeCombo );
 
   m_kernelSizeCombo = new QComboBox( paramGroup );
   m_kernelSizeCombo->addItem( tr( "3×3" ), 3 );
   m_kernelSizeCombo->addItem( tr( "5×5" ), 5 );
   m_kernelSizeCombo->addItem( tr( "7×7" ), 7 );
-  SicnuDialogHelp::tip( m_kernelSizeCombo, tr( "卷积滤波窗口大小。窗口越大平滑强度或响应范围越大。" ) );
-  form->addRow( tr( "窗口大小" ), m_kernelSizeCombo );
+  SicnuDialogHelp::tip( m_kernelSizeCombo, tr( "Convolution filter window size; larger windows smooth more or respond over a wider range." ) );
+  form->addRow( tr( "Window Size" ), m_kernelSizeCombo );
 
-  m_sigmaLabel = new QLabel( tr( "高斯标准差 Sigma" ), paramGroup );
+  m_sigmaLabel = new QLabel( tr( "Gaussian Std Dev Sigma" ), paramGroup );
   m_sigmaSpin = new QDoubleSpinBox( paramGroup );
   m_sigmaSpin->setRange( 0.1, 50.0 );
   m_sigmaSpin->setValue( 1.0 );
   m_sigmaSpin->setSingleStep( 0.5 );
   m_sigmaSpin->setDecimals( 2 );
-  SicnuDialogHelp::tip( m_sigmaSpin, tr( "高斯滤波核的空间标准差 Sigma，默认为 1.0。" ) );
+  SicnuDialogHelp::tip( m_sigmaSpin, tr( "Spatial std dev (Sigma) of the Gaussian kernel; defaults to 1.0." ) );
   form->addRow( m_sigmaLabel, m_sigmaSpin );
 
   qobject_cast<QVBoxLayout *>( paramGroup->layout() )->addLayout( form );

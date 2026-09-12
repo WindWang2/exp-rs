@@ -147,21 +147,21 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   // Subclass has created canvases; wire session stacks before loading layers.
   setupSessionMaps();
 
-  mGcpDock = new QDockWidget( tr( "GCP 表" ), this );
+  mGcpDock = new QDockWidget( tr( "GCP Table" ), this );
   mGcpDock->setObjectName( gcpDockObjectName );
   mGcpDock->setAllowedAreas( Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea );
   tipWidget( mGcpDock, SicnuDialogHelp::shortForTool(
-               QStringLiteral( "georef_gcp_table" ), tr( "GCP 控制点表" ) ) );
+               QStringLiteral( "georef_gcp_table" ), tr( "GCP Table" ) ) );
   mGcpDock->setWhatsThis( SicnuDialogHelp::htmlForTool(
-                            QStringLiteral( "georef_gcp_table" ), tr( "GCP 控制点表" ) ) );
+                            QStringLiteral( "georef_gcp_table" ), tr( "GCP Table" ) ) );
   mGcpTable = new QgsGCPListWidget( mGcpDock );
   mGcpTable->setGcpsSource( &mGeorefSession );
   tipWidget( mGcpTable, SicnuDialogHelp::shortForTool(
-               QStringLiteral( "georef_gcp_table" ), tr( "GCP 控制点表" ) )
+               QStringLiteral( "georef_gcp_table" ), tr( "GCP Table" ) )
              + QLatin1Char( '\n' )
-             + tr( "右键：定位 / 启用禁用 / 编辑 / 删除。Delete 删行。" ) );
+             + tr( "Right-click: locate / enable-disable / edit / delete. Delete removes the row." ) );
   mGcpTable->setWhatsThis( SicnuDialogHelp::htmlForTool(
-    QStringLiteral( "georef_gcp_table" ), tr( "GCP 控制点表" ) ) );
+    QStringLiteral( "georef_gcp_table" ), tr( "GCP Table" ) ) );
   mGcpDock->setWidget( mGcpTable );
   connect( mGcpTable, &QgsGCPListWidget::deleteRowsRequested,
            this, &QgsGeorefShellWindow::deleteGcpRows );
@@ -176,17 +176,17 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   addDockWidget( Qt::BottomDockWidgetArea, mGcpDock );
 
   // Task list dock — Apply/Run enqueues warp jobs here.
-  mTaskDock = new QDockWidget( tr( "校正任务" ), this );
+  mTaskDock = new QDockWidget( tr( "Correction Task" ), this );
   mTaskDock->setObjectName( gcpDockObjectName + QStringLiteral( "_tasks" ) );
   mTaskDock->setAllowedAreas( Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea );
   tipWidget( mTaskDock, SicnuDialogHelp::shortForTool(
-               QStringLiteral( "georef_tasks" ), tr( "校正任务列表" ) ) );
+               QStringLiteral( "georef_tasks" ), tr( "Correction Task List" ) ) );
   mTaskDock->setWhatsThis( SicnuDialogHelp::htmlForTool(
-                             QStringLiteral( "georef_tasks" ), tr( "校正任务列表" ) ) );
+                             QStringLiteral( "georef_tasks" ), tr( "Correction Task List" ) ) );
   mTaskList = new RsGeorefTaskList( mTaskDock );
   mTaskList->setObjectName( QStringLiteral( "rsGeorefTaskList" ) );
   mTaskList->setWhatsThis( SicnuDialogHelp::htmlForTool(
-    QStringLiteral( "georef_tasks" ), tr( "校正任务列表" ) ) );
+    QStringLiteral( "georef_tasks" ), tr( "Correction Task List" ) ) );
   mTaskDock->setWidget( mTaskList );
   addDockWidget( Qt::BottomDockWidgetArea, mTaskDock );
   tabifyDockWidget( mGcpDock, mTaskDock );
@@ -196,20 +196,20 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   connect( mTaskList, &RsGeorefTaskList::openOutputRequested, this,
            [this]( const QString &path ) {
              if ( statusBar() )
-               statusBar()->showMessage( tr( "输出: %1" ).arg( path ), 5000 );
+               statusBar()->showMessage( tr( "Output: %1" ).arg( path ), 5000 );
            } );
   connect( mTaskList, &RsGeorefTaskList::loadOutputRequested, this,
            &QgsGeorefShellWindow::loadWarpOutputToProject );
   connect( mTaskList, &RsGeorefTaskList::cancelTaskRequested, this,
            &QgsGeorefShellWindow::cancelWarpTask );
 
-  mParamDock = new QDockWidget( tr( "校正参数" ), this );
+  mParamDock = new QDockWidget( tr( "Correction Parameters" ), this );
   mParamDock->setObjectName( paramDockObjectName );
   mParamDock->setAllowedAreas( Qt::RightDockWidgetArea | Qt::LeftDockWidgetArea );
   tipWidget( mParamDock, SicnuDialogHelp::shortForTool(
-               QStringLiteral( "georef_params" ), tr( "校正参数面板" ) ) );
+               QStringLiteral( "georef_params" ), tr( "Correction Parameters Panel" ) ) );
   mParamDock->setWhatsThis( SicnuDialogHelp::htmlForTool(
-                              QStringLiteral( "georef_params" ), tr( "校正参数面板" ) ) );
+                              QStringLiteral( "georef_params" ), tr( "Correction Parameters Panel" ) ) );
   mParamsPanel = new RsGeorefParamsPanel( mParamDock );
   mParamsPanel->setProfile( profile );
   if ( profile == RsGeorefParamsPanel::Profile::ImageToImage )
@@ -220,7 +220,7 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
   // Interactive Flowchart panel
   mFlowchartWidget = new RsGeorefFlowchartWidget( this );
   mFlowchartWidget->bindSession( &mGeorefSession );
-  mFlowchartDock = new QDockWidget( tr( "校正流程图" ), this );
+  mFlowchartDock = new QDockWidget( tr( "Correction Flowchart" ), this );
   mFlowchartDock->setObjectName( QStringLiteral( "rsGeorefFlowchartDock" ) );
   mFlowchartDock->setAllowedAreas( Qt::RightDockWidgetArea | Qt::LeftDockWidgetArea );
   mFlowchartDock->setWidget( mFlowchartWidget );
@@ -336,7 +336,7 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
                if ( mTaskList )
                  mTaskList->finishSuccess( listId, 0, 0 );
                statusBar()->showMessage(
-                 tr( "任务 #%1 完成: %2 — 双击可加载到主工程" )
+                 tr( "Task #%1 finished: %2 — double-click to load into the main project" )
                    .arg( listId )
                    .arg( QFileInfo( outputPath ).fileName() ),
                  6000 );
@@ -345,14 +345,14 @@ void QgsGeorefShellWindow::finishCommonSetup( RsGeorefParamsPanel::Profile profi
              {
                if ( mTaskList )
                  mTaskList->finishCancelled( listId, 0 );
-               statusBar()->showMessage( tr( "任务 #%1 已取消" ).arg( listId ), 4000 );
+               statusBar()->showMessage( tr( "Task #%1 cancelled" ).arg( listId ), 4000 );
              }
              else
              {
                if ( mTaskList )
                  mTaskList->finishFailed( listId, errorMessage, 0 );
                statusBar()->showMessage(
-                 tr( "任务 #%1 失败: %2" ).arg( listId ).arg( errorMessage ), 6000 );
+                 tr( "Task #%1 failed: %2" ).arg( listId ).arg( errorMessage ), 6000 );
              }
            } );
 }
@@ -361,17 +361,17 @@ void QgsGeorefShellWindow::setupStatusBar( const QString &coordObj, const QStrin
 {
   mCoordLabel = new QLabel( tr( "—" ), this );
   mCoordLabel->setObjectName( coordObj );
-  tipWidget( mCoordLabel, tr( "提示与坐标信息。" ) );
+  tipWidget( mCoordLabel, tr( "Tips and coordinate information." ) );
   mCrsLabel = new QLabel( tr( "CRS: —" ), this );
   mCrsLabel->setObjectName( crsObj );
-  tipWidget( mCrsLabel, tr( "当前相关坐标系摘要。" ) );
+  tipWidget( mCrsLabel, tr( "Summary of the relevant coordinate systems." ) );
   mRmsLabel = new QLabel( tr( "RMS: —" ), this );
   mRmsLabel->setObjectName( rmsObj );
-  tipWidget( mRmsLabel, tr( "当前拟合总 RMS。点数不足或未拟合时显示 —。" ) );
+  tipWidget( mRmsLabel, tr( "Total RMS of the current fit. Shows — when points are insufficient or not fitted." ) );
   statusBar()->addWidget( mCoordLabel, 1 );
   statusBar()->addPermanentWidget( mCrsLabel );
   statusBar()->addPermanentWidget( mRmsLabel );
-  statusBar()->showMessage( tr( "准备就绪 — 打开源影像并选取 GCP，设置输出后点「运行」" ), 8000 );
+  statusBar()->showMessage( tr( "Ready — open a source image, pick GCPs, set the output and press 'Run'" ), 8000 );
 }
 
 QWidget *QgsGeorefShellWindow::makeCanvasPanel( QgsMapCanvas *canvas,
@@ -404,7 +404,7 @@ QWidget *QgsGeorefShellWindow::makeCanvasPanel( QgsMapCanvas *canvas,
       "  padding: 4px 8px;"
       "}" ) );
   tipWidget( caption, tr(
-    "当前画布对应的图层/文件名。悬停可查看完整路径。" ) );
+    tr("Layer / file name of the current canvas. Hover to see the full path.") ) );
 
   layout->addWidget( caption );
   layout->addWidget( canvas, 1 );
@@ -434,14 +434,14 @@ void QgsGeorefShellWindow::updateSourceLayerCaption()
 
   if ( name.isEmpty() )
   {
-    mSrcLayerLabel->setText( tr( "源 (Warp): —" ) );
-    mSrcLayerLabel->setToolTip( tr( "尚未打开源影像（待纠正 / Warp）。File → Open source raster…" ) );
+    mSrcLayerLabel->setText( tr( "Source (Warp): —" ) );
+    mSrcLayerLabel->setToolTip( tr( "No source image (to be corrected / Warp) open yet. File → Open source raster..." ) );
     return;
   }
 
-  mSrcLayerLabel->setText( tr( "源 (Warp): %1" ).arg( name ) );
+  mSrcLayerLabel->setText( tr( "Source (Warp): %1" ).arg( name ) );
   mSrcLayerLabel->setToolTip(
-    tr( "源影像（待纠正 / Warp）\n图层: %1\n路径: %2" )
+    tr( "Source image (to be corrected / Warp)\nLayer: %1\nPath: %2" )
       .arg( name, path.isEmpty() ? tr( "—" ) : path ) );
 }
 
@@ -453,61 +453,61 @@ void QgsGeorefShellWindow::updateDestLayerCaption( const QString &displayName,
 
   if ( displayName.isEmpty() )
   {
-    mDstLayerLabel->setText( tr( "基准 (Base): —" ) );
-    mDstLayerLabel->setToolTip( tr( "尚未指定基准（参考影像或地图图层）。" ) );
+    mDstLayerLabel->setText( tr( "Base: —" ) );
+    mDstLayerLabel->setToolTip( tr( "No base (reference image or map layer) has been set yet." ) );
     return;
   }
 
-  mDstLayerLabel->setText( tr( "基准 (Base): %1" ).arg( displayName ) );
+  mDstLayerLabel->setText( tr( "Base: %1" ).arg( displayName ) );
   if ( !fullPathOrTip.isEmpty() )
     mDstLayerLabel->setToolTip( fullPathOrTip );
   else
-    mDstLayerLabel->setToolTip( tr( "基准图层 / 参考: %1" ).arg( displayName ) );
+    mDstLayerLabel->setToolTip( tr( "Base / reference layer: %1" ).arg( displayName ) );
 }
 
 QMenu *QgsGeorefShellWindow::createFileMenu()
 {
-  auto *fileMenu = menuBar()->addMenu( tr( "文件(&F)" ) );
+  auto *fileMenu = menuBar()->addMenu( tr( "&File" ) );
   mOpenSourceFileAction = fileMenu->addAction(
     QIcon( QStringLiteral( ":/icons/o_en" ) ),
-    tr( "从文件打开源影像…" ),
+    tr( "Open Source Image from File..." ),
     this, &QgsGeorefShellWindow::openSourceRaster );
   tipAction( mOpenSourceFileAction, tr(
-    "从文件打开待校正源影像（SRC / Warp）。显示在源画布，路径用于写出 warp。" ) );
+    tr("Opens the source image to correct (SRC / Warp) from a file. Shown on the source canvas; the path is used to write the warp.") ) );
   mOpenSourceLayerAction = fileMenu->addAction(
     QIcon( QStringLiteral( ":/icons/r_ster" ) ),
-    tr( "从工程图层打开源影像…" ),
+    tr( "Open Source Image from Project Layer..." ),
     this, &QgsGeorefShellWindow::openSourceFromProjectLayer );
   tipAction( mOpenSourceLayerAction, tr(
-    "从主工程图层列表选择栅格作为源影像（Warp），无需再选文件。" ) );
+    tr("Chooses a raster from the main project layer list as the source image (Warp); no file picker needed.") ) );
   return fileMenu;
 }
 
 void QgsGeorefShellWindow::addStandardMenuBar()
 {
   // View menu is filled by addViewMenu() after toolbar actions exist.
-  menuBar()->addMenu( tr( "设置(&S)" ) );
-  auto *helpMenu = menuBar()->addMenu( tr( "帮助(&H)" ) );
-  auto *about = helpMenu->addAction( tr( "关于本窗口…" ), this, [this]() {
-    QMessageBox::information( this, tr( "几何校正帮助" ), windowHelpText() );
+  menuBar()->addMenu( tr( "&Settings" ) );
+  auto *helpMenu = menuBar()->addMenu( tr( "&Help" ) );
+  auto *about = helpMenu->addAction( tr( "About This Window..." ), this, [this]() {
+    QMessageBox::information( this, tr( "Geometric Correction Help" ), windowHelpText() );
   } );
-  tipAction( about, tr( "显示本窗口工作流程与各面板说明。" ) );
-  auto *whats = helpMenu->addAction( tr( "这是什么？(Shift+F1)" ), this, [this]() {
+  tipAction( about, tr( "Shows this window's workflow and panel explanations." ) );
+  auto *whats = helpMenu->addAction( tr( "What's This? (Shift+F1)" ), this, [this]() {
     QWhatsThis::enterWhatsThisMode();
   } );
-  tipAction( whats, tr( "进入「这是什么」模式，再点击控件查看说明。" ) );
+  tipAction( whats, tr( "Enter 'What's This?' mode, then click a widget for its explanation." ) );
 }
 
 QString QgsGeorefShellWindow::windowHelpText() const
 {
   return tr(
-    "<b>影像配准 / 几何校正</b><br><br>"
-    "1. 打开源影像（File）<br>"
-    "2. 在 SRC 与目标画布上采集 GCP<br>"
-    "3. 在右侧设置变换方法、目标 CRS、输出路径<br>"
-    "4. 查看残差；点数与方法满足后点工具栏「运行」<br>"
-    "5. 在「校正任务」中查看进度；完成后双击可加载结果<br><br>"
-    "提示：将鼠标悬停在工具按钮或参数控件上可查看详细说明。" );
+    tr("<b>Image Registration / Geometric Correction</b><br><br>")
+    tr("1. Open the source image (File)<br>")
+    tr("2. Collect GCPs on the SRC and target canvases<br>")
+    tr("3. Set the transform method, target CRS and output path on the right<br>")
+    tr("4. Check residuals; once point counts and the method are satisfied, press 'Run' on the toolbar<br>")
+    tr("5. Track progress under 'Correction Task'; double-click a finished task to load its result<br><br>")
+    tr("Tip: hover over tool buttons or parameter widgets for detailed explanations.") );
 }
 
 QActionGroup *QgsGeorefShellWindow::mapToolActionGroup()
@@ -527,51 +527,51 @@ void QgsGeorefShellWindow::addCanvasNavigationActions( QToolBar *bar, const QStr
 
   QActionGroup *group = mapToolActionGroup();
 
-  mPanAction = bar->addAction( QIcon( QStringLiteral( ":/icons/p_n" ) ), tr( "平移" ) );
+  mPanAction = bar->addAction( QIcon( QStringLiteral( ":/icons/p_n" ) ), tr( "Pan" ) );
   mPanAction->setObjectName( objectNamePrefix + QStringLiteral( "PanAction" ) );
   mPanAction->setCheckable( true );
   mPanAction->setShortcut( QKeySequence( Qt::Key_Space ) );
   mPanAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mPanAction, tr(
-    "平移 (Space)：在源与参考/地图画布上拖动浏览。与加点等工具互斥。" ) );
+    tr("Pan (Space): drag to browse the source and reference / map canvases. Mutually exclusive with the point-adding tools.") ) );
   group->addAction( mPanAction );
   addAction( mPanAction );
 
-  mZoomInAction = bar->addAction( QIcon( QStringLiteral( ":/icons/zoo_in" ) ), tr( "放大" ) );
+  mZoomInAction = bar->addAction( QIcon( QStringLiteral( ":/icons/zoo_in" ) ), tr( "Zoom In" ) );
   mZoomInAction->setObjectName( objectNamePrefix + QStringLiteral( "ZoomInAction" ) );
   mZoomInAction->setCheckable( true );
   mZoomInAction->setShortcut( QKeySequence::ZoomIn );
   mZoomInAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mZoomInAction, tr(
-    "放大 (Ctrl++)：框选或点击放大。两侧画布均可用。滚轮也可缩放。" ) );
+    tr("Zoom in (Ctrl++): drag a rectangle or click. Works on both canvases; the wheel zooms too.") ) );
   group->addAction( mZoomInAction );
   addAction( mZoomInAction );
 
-  mZoomOutAction = bar->addAction( QIcon( QStringLiteral( ":/icons/zoo_out" ) ), tr( "缩小" ) );
+  mZoomOutAction = bar->addAction( QIcon( QStringLiteral( ":/icons/zoo_out" ) ), tr( "Zoom Out" ) );
   mZoomOutAction->setObjectName( objectNamePrefix + QStringLiteral( "ZoomOutAction" ) );
   mZoomOutAction->setCheckable( true );
   mZoomOutAction->setShortcut( QKeySequence::ZoomOut );
   mZoomOutAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mZoomOutAction, tr(
-    "缩小 (Ctrl+-)：框选或点击缩小。两侧画布均可用。" ) );
+    tr("Zoom out (Ctrl+-): drag a rectangle or click. Works on both canvases.") ) );
   group->addAction( mZoomOutAction );
   addAction( mZoomOutAction );
 
   bar->addSeparator();
 
   mFitSrcAction = bar->addAction(
-    QIcon( QStringLiteral( ":/icons/full_extent" ) ), tr( "适合源" ),
+    QIcon( QStringLiteral( ":/icons/full_extent" ) ), tr( "Fit Source" ),
     this, &QgsGeorefShellWindow::fitSourceExtent );
   mFitSrcAction->setObjectName( objectNamePrefix + QStringLiteral( "FitSrcAction" ) );
   mFitSrcAction->setShortcut( QKeySequence( QStringLiteral( "F" ) ) );
   mFitSrcAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mFitSrcAction, tr(
-    "适合源 (F)：源影像画布缩放到全图。" ) );
+    tr("Fit source (F): zooms the source image canvas to full extent.") ) );
   addAction( mFitSrcAction );
 
   const QString fitDstLabel = ( shellId() == QLatin1String( "i2i" ) )
-                                ? tr( "适合参考" )
-                                : tr( "适合地图" );
+                                ? tr( "Fit Reference" )
+                                : tr( "Fit Map" );
   mFitDstAction = bar->addAction(
     QIcon( QStringLiteral( ":/icons/full_extent" ) ), fitDstLabel,
     this, &QgsGeorefShellWindow::fitDestExtent );
@@ -579,39 +579,39 @@ void QgsGeorefShellWindow::addCanvasNavigationActions( QToolBar *bar, const QStr
   mFitDstAction->setShortcut( QKeySequence( QStringLiteral( "Shift+F" ) ) );
   mFitDstAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mFitDstAction, tr(
-    "适合参考/地图 (Shift+F)：目标画布缩放到全图。" ) );
+    tr("Fit reference / map (Shift+F): zooms the target canvas to full extent.") ) );
   addAction( mFitDstAction );
 
   mFitBothAction = bar->addAction(
-    QIcon( QStringLiteral( ":/icons/full_extent" ) ), tr( "适合两侧" ),
+    QIcon( QStringLiteral( ":/icons/full_extent" ) ), tr( "Fit Both" ),
     this, &QgsGeorefShellWindow::fitBothExtents );
   mFitBothAction->setObjectName( objectNamePrefix + QStringLiteral( "FitBothAction" ) );
   mFitBothAction->setShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+F" ) ) );
   mFitBothAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mFitBothAction, tr(
-    "适合两侧 (Ctrl+Shift+F)：源与目标画布均缩放到全图。" ) );
+    tr("Fit both (Ctrl+Shift+F): zooms the source and target canvases to full extent.") ) );
   addAction( mFitBothAction );
 
   bar->addSeparator();
 
   mZoomPrevAction = bar->addAction(
-    QIcon( QStringLiteral( ":/icons/refresh_view" ) ), tr( "上一范围" ),
+    QIcon( QStringLiteral( ":/icons/refresh_view" ) ), tr( "Previous Extent" ),
     this, &QgsGeorefShellWindow::zoomPreviousBoth );
   mZoomPrevAction->setObjectName( objectNamePrefix + QStringLiteral( "ZoomPrevAction" ) );
   mZoomPrevAction->setShortcut( QKeySequence( QStringLiteral( "Alt+Left" ) ) );
   mZoomPrevAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mZoomPrevAction, tr(
-    "上一范围 (Alt+←)：两侧画布回退到上一次视图范围。" ) );
+    tr("Previous extent (Alt+←): both canvases go back to the previous view extent.") ) );
   addAction( mZoomPrevAction );
 
   mZoomNextAction = bar->addAction(
-    QIcon( QStringLiteral( ":/icons/refresh_view" ) ), tr( "下一范围" ),
+    QIcon( QStringLiteral( ":/icons/refresh_view" ) ), tr( "Next Extent" ),
     this, &QgsGeorefShellWindow::zoomNextBoth );
   mZoomNextAction->setObjectName( objectNamePrefix + QStringLiteral( "ZoomNextAction" ) );
   mZoomNextAction->setShortcut( QKeySequence( QStringLiteral( "Alt+Right" ) ) );
   mZoomNextAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mZoomNextAction, tr(
-    "下一范围 (Alt+→)：两侧画布前进到下一次视图范围。" ) );
+    tr("Next extent (Alt+→): both canvases advance to the next view extent.") ) );
   addAction( mZoomNextAction );
 }
 
@@ -624,36 +624,36 @@ void QgsGeorefShellWindow::addGcpEditActions( QToolBar *bar, const QString &obje
   const QIcon icSelect( QStringLiteral( ":/icons/select" ) );
   const QIcon icMove( QStringLiteral( ":/icons/mActionMoveFeature" ) );
   const QIcon icDel( QStringLiteral( ":/icons/mActionDeleteSelectedFeatures" ) );
-  tipWidget( bar, tr( "配准工具栏：导航、加点 / 移动 / 删除 GCP，导入导出控制点，运行校正。" ) );
+  tipWidget( bar, tr( "Registration toolbar: navigation, add / move / delete GCPs, import/export control points, run correction." ) );
 
-  mAddPointAction = bar->addAction( icSelect.isNull() ? ic : icSelect, tr( "添加控制点" ) );
+  mAddPointAction = bar->addAction( icSelect.isNull() ? ic : icSelect, tr( "Add Control Point" ) );
   mAddPointAction->setObjectName( objectNamePrefix + QStringLiteral( "AddPointAction" ) );
   mAddPointAction->setCheckable( true );
   mAddPointAction->setShortcut( QKeySequence( QStringLiteral( "A" ) ) );
   mAddPointAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mAddPointAction, tr(
-    "添加控制点 (A)：\n"
-    "1. 在源影像 (SRC) 点击源点\n"
-    "2. 在参考/地图上点击同名目标点\n"
-    "右键取消未完成的源点。点宜均匀分布。" ) );
+    tr("Add control point (A):\n")
+    tr("1. Click the source point on the source image (SRC)\n")
+    tr("2. Click the conjugate target point on the reference / map\n")
+    tr("Right-click cancels an unfinished source point. Points should be evenly spread.") ) );
   addAction( mAddPointAction );
 
-  mMovePointAction = bar->addAction( icMove.isNull() ? ic : icMove, tr( "移动控制点" ) );
+  mMovePointAction = bar->addAction( icMove.isNull() ? ic : icMove, tr( "Move Control Point" ) );
   mMovePointAction->setObjectName( objectNamePrefix + QStringLiteral( "MovePointAction" ) );
   mMovePointAction->setCheckable( true );
   mMovePointAction->setShortcut( QKeySequence( QStringLiteral( "M" ) ) );
   mMovePointAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mMovePointAction, tr(
-    "移动控制点 (M)：拖动已有 GCP 标记微调，残差自动重算。" ) );
+    tr("Move control point (M): drag an existing GCP marker to fine-tune; residuals recompute automatically.") ) );
   addAction( mMovePointAction );
 
-  mDeletePointAction = bar->addAction( icDel.isNull() ? ic : icDel, tr( "删除控制点" ) );
+  mDeletePointAction = bar->addAction( icDel.isNull() ? ic : icDel, tr( "Delete Control Point" ) );
   mDeletePointAction->setObjectName( objectNamePrefix + QStringLiteral( "DeletePointAction" ) );
   mDeletePointAction->setCheckable( true );
   mDeletePointAction->setShortcut( QKeySequence( QStringLiteral( "D" ) ) );
   mDeletePointAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mDeletePointAction, tr(
-    "删除控制点 (D)：点击标记删除；或在 GCP 表中删除行。" ) );
+    tr("Delete control point (D): click a marker to delete it, or delete the row in the GCP table.") ) );
   addAction( mDeletePointAction );
 
   QActionGroup *group = mapToolActionGroup();
@@ -661,12 +661,12 @@ void QgsGeorefShellWindow::addGcpEditActions( QToolBar *bar, const QString &obje
   group->addAction( mMovePointAction );
   group->addAction( mDeletePointAction );
 
-  mLoadGcpAction = bar->addAction( QIcon( QStringLiteral( ":/icons/o_en" ) ), tr( "加载控制点" ),
+  mLoadGcpAction = bar->addAction( QIcon( QStringLiteral( ":/icons/o_en" ) ), tr( "Load Control Points" ),
                                    this, &QgsGeorefShellWindow::loadPoints );
-  tipAction( mLoadGcpAction, tr( "从 .points / .gcp 文件加载控制点。" ) );
-  mSaveGcpAction = bar->addAction( QIcon( QStringLiteral( ":/icons/s_ve" ) ), tr( "导出控制点" ),
+  tipAction( mLoadGcpAction, tr( "Load control points from a .points / .gcp file." ) );
+  mSaveGcpAction = bar->addAction( QIcon( QStringLiteral( ":/icons/s_ve" ) ), tr( "Export Control Points" ),
                                    this, &QgsGeorefShellWindow::savePoints );
-  tipAction( mSaveGcpAction, tr( "导出控制点为 .points 文件。" ) );
+  tipAction( mSaveGcpAction, tr( "Exports control points as a .points file." ) );
 }
 
 void QgsGeorefShellWindow::addApplyAction( QToolBar *bar, const QString &objectName )
@@ -680,11 +680,11 @@ void QgsGeorefShellWindow::addApplyAction( QToolBar *bar, const QString &objectN
 
   mApplyAction = bar->addAction(
     QIcon( QStringLiteral( ":/icons/quick_run" ) ),
-    tr( "运行" ), this, &QgsGeorefShellWindow::applyTransform );
+    tr( "Run" ), this, &QgsGeorefShellWindow::applyTransform );
   mApplyAction->setObjectName( objectName );
   tipAction( mApplyAction, tr(
-    "运行几何校正：校验 GCP / 输出路径后，将任务加入「校正任务」列表并后台执行 warp。\n"
-    "可多次运行形成多条任务；运行中可在任务列表取消。" ) );
+    tr("Runs the geometric correction: after validating GCPs / the output path, the task joins the 'Correction Task' list and the warp executes in the background.\n")
+    tr("Multiple runs create multiple tasks; running ones can be cancelled in the task list.") ) );
   mApplyAction->setEnabled( false );
 }
 
@@ -705,7 +705,7 @@ void QgsGeorefShellWindow::createMapTools()
       return;
     clearPendingGcpPick();
     if ( statusBar() )
-      statusBar()->showMessage( tr( "已取消未完成的源点" ), 3000 );
+      statusBar()->showMessage( tr( "Cancelled the unfinished source point" ), 3000 );
   } );
 
   if ( mDstCanvas && !usesMapCoordsDialogForGcp() )
@@ -719,7 +719,7 @@ void QgsGeorefShellWindow::createMapTools()
         return;
       clearPendingGcpPick();
       if ( statusBar() )
-        statusBar()->showMessage( tr( "已取消未完成的源点" ), 3000 );
+        statusBar()->showMessage( tr( "Cancelled the unfinished source point" ), 3000 );
     } );
   }
 
@@ -875,10 +875,10 @@ void QgsGeorefShellWindow::wireMapToolActions()
       {
         if ( usesMapCoordsDialogForGcp() )
           statusBar()->showMessage(
-            tr( "添加 GCP：在源影像上点击像点，然后在对话框中填写地图坐标或从主窗口地图取点" ), 8000 );
+            tr( "Add a GCP: click an image point on the source image, then enter map coordinates in the dialog or pick them from the main window map" ), 8000 );
         else
           statusBar()->showMessage(
-            tr( "添加 GCP：先在源画布点击源点，再在参考影像上点击同名位置（右键取消）" ), 8000 );
+            tr( "Add a GCP: click the source point on the source canvas, then the same location on the reference image (right-click to cancel)" ), 8000 );
       }
     } );
   }
@@ -917,7 +917,7 @@ void QgsGeorefShellWindow::wireMapToolActions()
       if ( mDstCanvas && mPanDst )
         mDstCanvas->setMapTool( mPanDst );
       if ( statusBar() )
-        statusBar()->showMessage( tr( "平移：拖动画布浏览。两侧画布均可操作。" ), 4000 );
+        statusBar()->showMessage( tr( "Pan: drag the canvas to browse. Both canvases are active." ), 4000 );
     } );
   }
   if ( mZoomInAction )
@@ -931,7 +931,7 @@ void QgsGeorefShellWindow::wireMapToolActions()
       if ( mDstCanvas && mZoomInDst )
         mDstCanvas->setMapTool( mZoomInDst );
       if ( statusBar() )
-        statusBar()->showMessage( tr( "放大：点击或框选放大。" ), 4000 );
+        statusBar()->showMessage( tr( "Zoom in: click or drag a rectangle." ), 4000 );
     } );
   }
   if ( mZoomOutAction )
@@ -945,7 +945,7 @@ void QgsGeorefShellWindow::wireMapToolActions()
       if ( mDstCanvas && mZoomOutDst )
         mDstCanvas->setMapTool( mZoomOutDst );
       if ( statusBar() )
-        statusBar()->showMessage( tr( "缩小：点击或框选缩小。" ), 4000 );
+        statusBar()->showMessage( tr( "Zoom out: click or drag a rectangle." ), 4000 );
     } );
   }
 }
@@ -966,7 +966,7 @@ void QgsGeorefShellWindow::fitSourceExtent()
     mSrcCanvas->zoomToFullExtent();
   }
   if ( statusBar() )
-    statusBar()->showMessage( tr( "源画布已适合全图" ), 2500 );
+    statusBar()->showMessage( tr( "Source canvas zoomed to full extent" ), 2500 );
 }
 
 void QgsGeorefShellWindow::fitDestExtent()
@@ -988,8 +988,8 @@ void QgsGeorefShellWindow::fitDestExtent()
   if ( statusBar() )
     statusBar()->showMessage(
       ( shellId() == QLatin1String( "i2i" ) )
-        ? tr( "参考画布已适合全图" )
-        : tr( "地图画布已适合全图" ),
+        ? tr( "Reference canvas zoomed to full extent" )
+        : tr( "Map canvas zoomed to full extent" ),
       2500 );
 }
 
@@ -1040,7 +1040,7 @@ void QgsGeorefShellWindow::zoomPreviousBoth()
   zoomPreviousSource();
   zoomPreviousDest();
   if ( statusBar() )
-    statusBar()->showMessage( tr( "已回退上一视图范围" ), 2000 );
+    statusBar()->showMessage( tr( "Returned to the previous view extent" ), 2000 );
 }
 
 void QgsGeorefShellWindow::zoomNextBoth()
@@ -1048,7 +1048,7 @@ void QgsGeorefShellWindow::zoomNextBoth()
   zoomNextSource();
   zoomNextDest();
   if ( statusBar() )
-    statusBar()->showMessage( tr( "已前进下一视图范围" ), 2000 );
+    statusBar()->showMessage( tr( "Advanced to the next view extent" ), 2000 );
 }
 
 void QgsGeorefShellWindow::addViewMenu()
@@ -1057,14 +1057,14 @@ void QgsGeorefShellWindow::addViewMenu()
   QMenu *viewMenu = nullptr;
   for ( QAction *a : menuBar()->actions() )
   {
-    if ( a->menu() && a->text().contains( tr( "视图" ) ) )
+    if ( a->menu() && a->text().contains( tr( "View" ) ) )
     {
       viewMenu = a->menu();
       break;
     }
   }
   if ( !viewMenu )
-    viewMenu = menuBar()->addMenu( tr( "视图(&V)" ) );
+    viewMenu = menuBar()->addMenu( tr( "&View" ) );
   viewMenu->clear();
   viewMenu->setToolTipsVisible( true );
   if ( mPanAction )
@@ -1087,14 +1087,14 @@ void QgsGeorefShellWindow::addViewMenu()
     viewMenu->addAction( mZoomNextAction );
 
   // One-shot zoom steps (both canvases)
-  auto *zin = viewMenu->addAction( tr( "放大一级" ), this, [this]() {
+  auto *zin = viewMenu->addAction( tr( "Zoom In One Level" ), this, [this]() {
     zoomSourceIn();
     zoomDestIn();
   } );
   zin->setShortcut( QKeySequence( QStringLiteral( "+" ) ) );
   zin->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   addAction( zin );
-  auto *zout = viewMenu->addAction( tr( "缩小一级" ), this, [this]() {
+  auto *zout = viewMenu->addAction( tr( "Zoom Out One Level" ), this, [this]() {
     zoomSourceOut();
     zoomDestOut();
   } );
@@ -1120,27 +1120,27 @@ void QgsGeorefShellWindow::installCanvasContextMenu( QgsMapCanvas *canvas, bool 
              QMenu menu( canvas );
              if ( isSource )
              {
-               menu.addAction( tr( "适合源全图" ), this, &QgsGeorefShellWindow::fitSourceExtent );
-               menu.addAction( tr( "放大一级" ), this, &QgsGeorefShellWindow::zoomSourceIn );
-               menu.addAction( tr( "缩小一级" ), this, &QgsGeorefShellWindow::zoomSourceOut );
+               menu.addAction( tr( "Zoom Source to Full Extent" ), this, &QgsGeorefShellWindow::fitSourceExtent );
+               menu.addAction( tr( "Zoom In One Level" ), this, &QgsGeorefShellWindow::zoomSourceIn );
+               menu.addAction( tr( "Zoom Out One Level" ), this, &QgsGeorefShellWindow::zoomSourceOut );
                menu.addSeparator();
-               menu.addAction( tr( "上一范围" ), this, &QgsGeorefShellWindow::zoomPreviousSource );
-               menu.addAction( tr( "下一范围" ), this, &QgsGeorefShellWindow::zoomNextSource );
+               menu.addAction( tr( "Previous Extent" ), this, &QgsGeorefShellWindow::zoomPreviousSource );
+               menu.addAction( tr( "Next Extent" ), this, &QgsGeorefShellWindow::zoomNextSource );
              }
              else
              {
                menu.addAction( shellId() == QLatin1String( "i2i" )
-                                 ? tr( "适合参考全图" )
-                                 : tr( "适合地图全图" ),
+                                 ? tr( "Zoom Reference to Full Extent" )
+                                 : tr( "Zoom Map to Full Extent" ),
                                this, &QgsGeorefShellWindow::fitDestExtent );
-               menu.addAction( tr( "放大一级" ), this, &QgsGeorefShellWindow::zoomDestIn );
-               menu.addAction( tr( "缩小一级" ), this, &QgsGeorefShellWindow::zoomDestOut );
+               menu.addAction( tr( "Zoom In One Level" ), this, &QgsGeorefShellWindow::zoomDestIn );
+               menu.addAction( tr( "Zoom Out One Level" ), this, &QgsGeorefShellWindow::zoomDestOut );
                menu.addSeparator();
-               menu.addAction( tr( "上一范围" ), this, &QgsGeorefShellWindow::zoomPreviousDest );
-               menu.addAction( tr( "下一范围" ), this, &QgsGeorefShellWindow::zoomNextDest );
+               menu.addAction( tr( "Previous Extent" ), this, &QgsGeorefShellWindow::zoomPreviousDest );
+               menu.addAction( tr( "Next Extent" ), this, &QgsGeorefShellWindow::zoomNextDest );
              }
              menu.addSeparator();
-             menu.addAction( tr( "适合两侧" ), this, &QgsGeorefShellWindow::fitBothExtents );
+             menu.addAction( tr( "Fit Both" ), this, &QgsGeorefShellWindow::fitBothExtents );
              if ( mPanAction )
                menu.addAction( mPanAction );
              menu.exec( canvas->mapToGlobal( pos ) );
@@ -1292,7 +1292,7 @@ void QgsGeorefShellWindow::zoomToGcpSource( int row )
   setSelectedGcpRow( row );
   panCanvasToPoint( mSrcCanvas, mGeorefSession.gcps().at( row ).sourcePoint() );
   if ( statusBar() )
-    statusBar()->showMessage( tr( "已定位到源点 #%1" ).arg( row + 1 ), 3000 );
+    statusBar()->showMessage( tr( "Located source point #%1" ).arg( row + 1 ), 3000 );
 }
 
 void QgsGeorefShellWindow::zoomToGcpDest( int row )
@@ -1322,7 +1322,7 @@ void QgsGeorefShellWindow::zoomToGcpDest( int row )
     }
   }
   if ( statusBar() )
-    statusBar()->showMessage( tr( "已定位到目标点 #%1" ).arg( row + 1 ), 3000 );
+    statusBar()->showMessage( tr( "Located target point #%1" ).arg( row + 1 ), 3000 );
 }
 
 void QgsGeorefShellWindow::zoomToGcpBoth( int row )
@@ -1330,7 +1330,7 @@ void QgsGeorefShellWindow::zoomToGcpBoth( int row )
   zoomToGcpSource( row );
   zoomToGcpDest( row );
   if ( statusBar() )
-    statusBar()->showMessage( tr( "已两侧定位 GCP #%1" ).arg( row + 1 ), 3000 );
+    statusBar()->showMessage( tr( "GCP #%1 located on both sides" ).arg( row + 1 ), 3000 );
 }
 
 void QgsGeorefShellWindow::onGcpTableRowChanged( int row )
@@ -1499,22 +1499,22 @@ void QgsGeorefShellWindow::applyTransform()
 
   if ( enabled < minN )
   {
-    statusBar()->showMessage( tr( "GCP 数量不足（需要 %1，实际 %2）" ).arg( minN ).arg( enabled ), 3000 );
+    statusBar()->showMessage( tr( "Not enough GCPs (need %1, got %2)" ).arg( minN ).arg( enabled ), 3000 );
     return;
   }
   if ( mParamsPanel->outputPath().isEmpty() )
   {
-    statusBar()->showMessage( tr( "请填写输出路径" ), 3000 );
+    statusBar()->showMessage( tr( "Enter the output path" ), 3000 );
     return;
   }
   if ( mSourceRasterPath.isEmpty() )
   {
-    statusBar()->showMessage( tr( "未指定源栅格路径" ), 3000 );
+    statusBar()->showMessage( tr( "No source raster path specified" ), 3000 );
     return;
   }
   if ( !mGeorefSession.lastFit().ready )
   {
-    statusBar()->showMessage( tr( "变换尚未完成拟合" ), 3000 );
+    statusBar()->showMessage( tr( "The transformation has not been fitted yet" ), 3000 );
     return;
   }
 
@@ -1533,7 +1533,7 @@ void QgsGeorefShellWindow::applyTransform()
     outputPath, resampling, destCrs, pixelSize );
   if ( !snapOpt.has_value() )
   {
-    statusBar()->showMessage( tr( "无法创建校正快照" ), 3000 );
+    statusBar()->showMessage( tr( "Cannot create the correction snapshot" ), 3000 );
     return;
   }
   snapOpt->backgroundValue = mParamsPanel ? mParamsPanel->backgroundValue() : 0;
@@ -1568,15 +1568,15 @@ void QgsGeorefShellWindow::applyTransform()
   if ( tcId < 0 )
   {
     if ( mTaskList )
-      mTaskList->finishFailed( taskId, tr( "Task Center 提交失败" ), 0 );
-    statusBar()->showMessage( tr( "无法提交校正任务" ), 3000 );
+      mTaskList->finishFailed( taskId, tr( "Task Center submission failed" ), 0 );
+    statusBar()->showMessage( tr( "Cannot submit the correction task" ), 3000 );
     return;
   }
 
   mActiveWarpTaskListId = taskId;
   mWarpInProgress = true;
   updateApplyEnabled();
-  statusBar()->showMessage( tr( "已加入任务列表 #%1 并开始运行…" ).arg( taskId ), 3000 );
+  statusBar()->showMessage( tr( "Added to the task list as #%1 and started..." ).arg( taskId ), 3000 );
 }
 
 void QgsGeorefShellWindow::cancelWarpTask( int taskId )
@@ -1584,12 +1584,12 @@ void QgsGeorefShellWindow::cancelWarpTask( int taskId )
   if ( taskId < 0 || taskId != mActiveWarpTaskListId )
   {
     if ( statusBar() )
-      statusBar()->showMessage( tr( "任务 #%1 已不在运行" ).arg( taskId ), 3000 );
+      statusBar()->showMessage( tr( "Task #%1 is no longer running" ).arg( taskId ), 3000 );
     return;
   }
   mGeorefSession.cancelWarpTask( mGeorefSession.pendingWarpTaskId() );
   if ( statusBar() )
-    statusBar()->showMessage( tr( "正在取消任务 #%1…" ).arg( taskId ), 3000 );
+    statusBar()->showMessage( tr( "Cancelling task #%1..." ).arg( taskId ), 3000 );
 }
 
 void QgsGeorefShellWindow::loadWarpOutputToProject( const QString &path )
@@ -1627,7 +1627,7 @@ void QgsGeorefShellWindow::loadWarpOutputToProject( const QString &path )
       {
         delete layer;
         if ( statusBar() )
-          statusBar()->showMessage( tr( "无法加载结果: %1" ).arg( path ), 5000 );
+          statusBar()->showMessage( tr( "Cannot load results: %1" ).arg( path ), 5000 );
         return;
       }
       QgsProject::instance()->addMapLayer( layer );
@@ -1636,7 +1636,7 @@ void QgsGeorefShellWindow::loadWarpOutputToProject( const QString &path )
 
   if ( statusBar() )
     statusBar()->showMessage(
-      tr( "已请求加载到主工程: %1" ).arg( QFileInfo( path ).fileName() ), 5000 );
+      tr( "Requested to load into the main project: %1" ).arg( QFileInfo( path ).fileName() ), 5000 );
 }
 
 void QgsGeorefShellWindow::emitStructuredLog( const QgsImageWarper::WarpResult &r )
@@ -1763,7 +1763,7 @@ void QgsGeorefShellWindow::beginPendingSourcePick( const QgsPointXY &sourceMap )
   rearmAddPointTools();
   if ( statusBar() )
     statusBar()->showMessage(
-      tr( "已选源点 (%1, %2) — 请在参考/地图画布上点击同名位置（右键取消）" )
+      tr( "Source point selected (%1, %2) — click the same location on the reference / map canvas (right-click to cancel)" )
         .arg( sourceMap.x(), 0, 'f', 3 )
         .arg( sourceMap.y(), 0, 'f', 3 ),
       0 );
@@ -1783,7 +1783,7 @@ void QgsGeorefShellWindow::commitGcpPair( const QgsPointXY &sourceMap, const Qgs
   {
     if ( statusBar() )
       statusBar()->showMessage(
-        tr( "源点坐标无效 (0,0)。请重新在源画布上取点，再点目标位置。" ), 6000 );
+        tr( "Source point is invalid (0,0). Pick it again on the source canvas, then click the target position." ), 6000 );
     rearmAddPointTools();
     return;
   }
@@ -1798,7 +1798,7 @@ void QgsGeorefShellWindow::commitGcpPair( const QgsPointXY &sourceMap, const Qgs
     const double sep = std::hypot( src.x() - dst.x(), src.y() - dst.y() );
     if ( sep > 50000.0 )
     {
-      warn = tr( " ⚠ 源/参相距约 %1 km，请关闭 Sync zoom 并确认两侧 CRS 一致后重采。" )
+      warn = tr( " ⚠ Source and reference are about %1 km apart — turn off Sync zoom, confirm both CRS match, then resample." )
                .arg( sep / 1000.0, 0, 'f', 1 );
     }
   }
@@ -1831,7 +1831,7 @@ void QgsGeorefShellWindow::commitGcpPair( const QgsPointXY &sourceMap, const Qgs
   rearmAddPointTools();
   if ( statusBar() )
     statusBar()->showMessage(
-      tr( "已添加 GCP #%1：源 (%2, %3) → 目标 (%4, %5)%6" )
+      tr( "Added GCP #%1: source (%2, %3) → target (%4, %5)%6" )
         .arg( mGeorefSession.gcps().size() )
         .arg( src.x(), 0, 'f', 2 )
         .arg( src.y(), 0, 'f', 2 )
@@ -1860,7 +1860,7 @@ void QgsGeorefShellWindow::onDestPointPicked( const QgsPointXY &destMap )
   if ( !mHasPendingSource )
   {
     if ( statusBar() )
-      statusBar()->showMessage( tr( "请先在源影像画布上点击源点" ), 4000 );
+      statusBar()->showMessage( tr( "Click the source point on the source image canvas first" ), 4000 );
     rearmAddPointTools();
     return;
   }
@@ -1900,7 +1900,7 @@ void QgsGeorefShellWindow::showCoordDialog( const QgsPointXY &sourcePixel )
     // Fallback: seed a row so the user can fill dest X/Y in the GCP table.
     if ( statusBar() )
       statusBar()->showMessage(
-        tr( "无法连接主地图画布：请在 GCP 表中直接填写目标 X/Y，或先打开主窗口。" ), 6000 );
+        tr( "Cannot connect to the main map canvas: enter target X/Y directly in the GCP table, or open the main window first." ), 6000 );
     const QgsCoordinateReferenceSystem destCrs =
       mParamsPanel ? mParamsPanel->destCrs() : QgsCoordinateReferenceSystem();
     mGeorefSession.addGcp( QgsGcpPoint( sourcePixel, QgsPointXY(), destCrs, true ) );
@@ -1926,7 +1926,7 @@ void QgsGeorefShellWindow::showCoordDialog( const QgsPointXY &sourcePixel )
                    const QgsCoordinateReferenceSystem &destCrs ) {
              mGeorefSession.addGcp( QgsGcpPoint( srcCoord, dstCoord, destCrs, true ) );
              if ( statusBar() )
-               statusBar()->showMessage( tr( "已添加 GCP（源像点 + 地图坐标）" ), 4000 );
+               statusBar()->showMessage( tr( "Added GCP (source image point + map coordinates)" ), 4000 );
              rearmAddPointTools();
            } );
   connect( dlg, &QObject::destroyed, this, [tempGcp]() { delete tempGcp; } );
@@ -1948,7 +1948,7 @@ void QgsGeorefShellWindow::openSourceRaster()
 void QgsGeorefShellWindow::openSourceFromProjectLayer()
 {
   QgsRasterLayer *picked = pickProjectRasterLayer(
-    tr( "从主工程选择源影像 (Warp)" ) );
+    tr( "Select Source Image from Main Project (Warp)" ) );
   if ( !picked )
     return;
   loadSourceRaster( picked->source(), picked->name() );
@@ -1973,7 +1973,7 @@ bool QgsGeorefShellWindow::loadSourceRaster( const QString &path, const QString 
   {
     delete layer;
     if ( statusBar() )
-      statusBar()->showMessage( tr( "无法打开源影像: %1" ).arg( path ), 5000 );
+      statusBar()->showMessage( tr( "Cannot open the source image: %1" ).arg( path ), 5000 );
     return false;
   }
 
@@ -2018,7 +2018,7 @@ bool QgsGeorefShellWindow::loadSourceRaster( const QString &path, const QString 
   refreshFit();
   mGeorefSession.saveWorkflow( captureWorkflowSnapshot() );
   if ( statusBar() )
-    statusBar()->showMessage( tr( "已加载源影像 (Warp): %1" ).arg( layer->name() ), 4000 );
+    statusBar()->showMessage( tr( "Loaded source image (Warp): %1" ).arg( layer->name() ), 4000 );
   return true;
 }
 
@@ -2093,7 +2093,7 @@ QgsRasterLayer *QgsGeorefShellWindow::pickProjectRasterLayer( const QString &dia
   {
     QMessageBox::information(
       this, dialogTitle,
-      tr( "主工程中没有可用的栅格图层。\n请先在主窗口加载影像，或改用「从文件打开」。" ) );
+      tr( "No usable raster layer in the main project.\nLoad an image in the main window first, or use 'Open from File'." ) );
     return nullptr;
   }
 
@@ -2111,7 +2111,7 @@ QgsRasterLayer *QgsGeorefShellWindow::pickProjectRasterLayer( const QString &dia
   bool ok = false;
   const QString chosen = QInputDialog::getItem(
     this, dialogTitle,
-    tr( "选择栅格图层:" ),
+    tr( "Select raster layer:" ),
     labels, 0, false, &ok );
   if ( !ok || chosen.isEmpty() )
     return nullptr;
@@ -2128,15 +2128,15 @@ void QgsGeorefShellWindow::closeEvent( QCloseEvent *e )
   if ( busy )
   {
     const auto ans = QMessageBox::question(
-      this, tr( "几何校正" ), tr( "校正任务仍在运行，仍要关闭？" ),
+      this, tr( "Geometric Correction" ), tr( "A correction task is still running. Close anyway?" ),
       QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
     if ( ans != QMessageBox::Yes ) { e->ignore(); return; }
   }
   if ( mGeorefSession.isDirty() )
   {
     const auto ans = QMessageBox::question(
-      this, tr( "未保存的控制点" ),
-      tr( "GCP 列表有未保存的更改。是否保存？" ),
+      this, tr( "Unsaved control points" ),
+      tr( "The GCP list has unsaved changes. Save them?" ),
       QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save );
     if ( ans == QMessageBox::Cancel ) { e->ignore(); return; }
     if ( ans == QMessageBox::Save )
@@ -2155,7 +2155,7 @@ void QgsGeorefShellWindow::closeEvent( QCloseEvent *e )
       const double *gtPtr = sourceGeoTransformForPath( mSourceRasterPath, srcGt );
       if ( !rsSaveGcpPointsFile( path, mGeorefSession.gcps(), gtPtr ) )
       {
-        QMessageBox::warning( this, tr( "Save GCPs" ), tr( "保存失败，窗口未关闭。" ) );
+        QMessageBox::warning( this, tr( "Save GCPs" ), tr( "Saving failed; the window stays open." ) );
         e->ignore();
         return;
       }

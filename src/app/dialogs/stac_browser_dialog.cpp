@@ -29,7 +29,7 @@ StacBrowserDialog::StacBrowserDialog( QgsMapCanvas *canvas, QWidget *parent )
   , m_canvas( canvas )
   , m_stacClient( new StacClient( this ) )
 {
-  setWindowTitle( tr( "STAC 数据浏览" ) );
+  setWindowTitle( tr( "STAC Data Browser" ) );
   SicnuUi::polishDialog( this, 720 );
   SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "stac_browser" ) );
   resize( 820, 620 );
@@ -42,9 +42,9 @@ void StacBrowserDialog::setupUi()
 {
   auto *mainLayout = SicnuUi::makeDialogRootLayout( this );
   mainLayout->addWidget( SicnuUi::makeHintLabel(
-    this, tr( "流程：填写目录与时空条件 → 检索 → 选中结果 → 加载资产到工程。" ) ) );
+    this, tr( "Workflow: fill in the catalog and spatio-temporal filters → search → select results → load assets into the project." ) ) );
 
-  QFrame *querySec = SicnuUi::makeSection( this, tr( "检索条件" ) );
+  QFrame *querySec = SicnuUi::makeSection( this, tr( "Search Criteria" ) );
   auto *formLayout = new QFormLayout();
   formLayout->setContentsMargins( 0, 0, 0, 0 );
   formLayout->setHorizontalSpacing( 12 );
@@ -54,26 +54,26 @@ void StacBrowserDialog::setupUi()
   m_datetimeEdit = new QLineEdit( querySec );
   m_bboxEdit = new QLineEdit( querySec );
   m_bboxEdit->setPlaceholderText( tr( "min_lon,min_lat,max_lon,max_lat" ) );
-  m_moreButton = new QPushButton( tr( "更多结果" ), querySec );
-  m_moreButton->setToolTip( tr( "加载下一页检索结果。" ) );
+  m_moreButton = new QPushButton( tr( "More Results" ), querySec );
+  m_moreButton->setToolTip( tr( "Load the next page of search results." ) );
   m_moreButton->hide();
   connect( m_moreButton, &QPushButton::clicked, this, [this]() {
       m_moreButton->setEnabled( false );
       m_stacClient->searchNext();
   } );
-  SicnuDialogHelp::tip( m_endpointEdit, tr( "STAC API 根 URL。" ) );
-  SicnuDialogHelp::tip( m_collectionEdit, tr( "集合 ID，如 sentinel-2-l2a。" ) );
-  SicnuDialogHelp::tip( m_datetimeEdit, tr( "时间过滤（ISO）。" ) );
-  SicnuDialogHelp::tip( m_bboxEdit, tr( "空间范围。" ) );
-  formLayout->addRow( tr( "端点 Endpoint" ), m_endpointEdit );
-  formLayout->addRow( tr( "集合 Collection" ), m_collectionEdit );
-  formLayout->addRow( tr( "时间 Datetime" ), m_datetimeEdit );
-  formLayout->addRow( tr( "范围 BBox" ), m_bboxEdit );
+  SicnuDialogHelp::tip( m_endpointEdit, tr( "STAC API root URL." ) );
+  SicnuDialogHelp::tip( m_collectionEdit, tr( "Collection ID, e.g. sentinel-2-l2a." ) );
+  SicnuDialogHelp::tip( m_datetimeEdit, tr( "Time filter (ISO)." ) );
+  SicnuDialogHelp::tip( m_bboxEdit, tr( "Spatial extent." ) );
+  formLayout->addRow( tr( "Endpoint" ), m_endpointEdit );
+  formLayout->addRow( tr( "Collection" ), m_collectionEdit );
+  formLayout->addRow( tr( "Time (Datetime)" ), m_datetimeEdit );
+  formLayout->addRow( tr( "Bounding Box" ), m_bboxEdit );
   qobject_cast<QVBoxLayout *>( querySec->layout() )->addLayout( formLayout );
 
-  m_searchButton = new QPushButton( tr( "检索" ), querySec );
+  m_searchButton = new QPushButton( tr( "Search" ), querySec );
   SicnuUi::markPrimary( m_searchButton );
-  SicnuDialogHelp::tip( m_searchButton, tr( "按条件检索 STAC 要素。" ) );
+  SicnuDialogHelp::tip( m_searchButton, tr( "Search STAC items with filters." ) );
   connect( m_searchButton, &QPushButton::clicked, this, &StacBrowserDialog::searchCatalog );
   SicnuUi::markSecondary( m_moreButton );
   auto *searchRow = new QWidget( querySec );
@@ -84,27 +84,27 @@ void StacBrowserDialog::setupUi()
   qobject_cast<QVBoxLayout *>( querySec->layout() )->addWidget( searchRow );
   mainLayout->addWidget( querySec );
 
-  QFrame *resSec = SicnuUi::makeSection( this, tr( "检索结果" ) );
+  QFrame *resSec = SicnuUi::makeSection( this, tr( "Search Results" ) );
   m_resultsTable = new QTableWidget( resSec );
   m_resultsTable->setColumnCount( 4 );
   m_resultsTable->setHorizontalHeaderLabels(
-    { tr( "ID" ), tr( "集合" ), tr( "时间" ), tr( "资产" ) } );
+    { tr( "ID" ), tr( "Collections" ), tr( "Time" ), tr( "Assets" ) } );
   m_resultsTable->horizontalHeader()->setStretchLastSection( true );
   m_resultsTable->setSelectionBehavior( QAbstractItemView::SelectRows );
   m_resultsTable->setSelectionMode( QAbstractItemView::SingleSelection );
   m_resultsTable->setMinimumHeight( 200 );
-  SicnuDialogHelp::tip( m_resultsTable, tr( "检索结果。选中一行后加载资产。" ) );
+  SicnuDialogHelp::tip( m_resultsTable, tr( "Search results. Select a row to load the assets." ) );
   qobject_cast<QVBoxLayout *>( resSec->layout() )->addWidget(  m_resultsTable );
 
   auto *actRow = new QHBoxLayout();
-  m_loadButton = new QPushButton( tr( "加载选中资产" ), resSec );
+  m_loadButton = new QPushButton( tr( "Load Selected Assets" ), resSec );
   m_loadButton->setEnabled( false );
   SicnuUi::markPrimary( m_loadButton );
-  SicnuDialogHelp::tip( m_loadButton, tr( "加载到当前工程（需网络）。" ) );
+  SicnuDialogHelp::tip( m_loadButton, tr( "Loads into the current project (network required)." ) );
   connect( m_loadButton, &QPushButton::clicked, this, &StacBrowserDialog::loadSelectedAsset );
   actRow->addWidget( m_loadButton );
   actRow->addStretch();
-  auto *helpBtn = new QPushButton( tr( "帮助" ), resSec );
+  auto *helpBtn = new QPushButton( tr( "Help" ), resSec );
   SicnuUi::markSecondary( helpBtn );
   connect( helpBtn, &QPushButton::clicked, this, [this]() {
     SicnuDialogHelp::showToolHelp( this, QStringLiteral( "stac_browser" ), windowTitle() );

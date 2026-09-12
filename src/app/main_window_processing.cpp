@@ -237,11 +237,11 @@ void QgisDesktopWindow::openRadiometricCalibrationDialog()
 {
     QgsRasterLayer *rasterLayer = findAnyRaster(this);
     if (!rasterLayer) {
-        QMessageBox::information(this, tr("辐射定标"),
-                                 tr("请先选择一个栅格图层。"));
+        QMessageBox::information(this, tr("Radiometric Calibration"),
+                                 tr("Select a raster layer first."));
         return;
     }
-    openRasterDialog<RadiometricCalibrationDialog>(this, tr("辐射定标"), rasterLayer);
+    openRasterDialog<RadiometricCalibrationDialog>(this, tr("Radiometric Calibration"), rasterLayer);
 }
 
 // ---------------------------------------------------------------------------
@@ -252,11 +252,11 @@ void QgisDesktopWindow::openOrthorectificationDialog()
 {
     QgsRasterLayer *rasterLayer = findAnyRaster(this);
     if (!rasterLayer) {
-        QMessageBox::information(this, tr("正射纠正"),
-                                 tr("请先选择一个栅格图层。"));
+        QMessageBox::information(this, tr("Orthorectification"),
+                                 tr("Select a raster layer first."));
         return;
     }
-    openRasterDialog<OrthorectificationDialog>(this, tr("正射纠正"), rasterLayer);
+    openRasterDialog<OrthorectificationDialog>(this, tr("Orthorectification"), rasterLayer);
 }
 
 // ---------------------------------------------------------------------------
@@ -267,19 +267,19 @@ void QgisDesktopWindow::openQaMaskDialog()
 {
     QgsRasterLayer *rasterLayer = findAnyRaster(this);
     if (!rasterLayer) {
-        QMessageBox::information(this, tr("QA 掩膜"),
-                                 tr("请先选择一个栅格图层。"));
+        QMessageBox::information(this, tr("QA Mask"),
+                                 tr("Select a raster layer first."));
         return;
     }
-    openRasterDialog<QaMaskDialog>(this, tr("QA 掩膜"), rasterLayer);
+    openRasterDialog<QaMaskDialog>(this, tr("QA Mask"), rasterLayer);
 }
 
 void QgisDesktopWindow::openApplyMaskDialog()
 {
     QgsRasterLayer *rasterLayer = findAnyRaster(this);
     if (!rasterLayer) {
-        QMessageBox::information(this, tr("应用掩膜"),
-                                 tr("请先选择一个栅格图层。"));
+        QMessageBox::information(this, tr("Apply Mask"),
+                                 tr("Select a raster layer first."));
         return;
     }
     ApplyMaskDialog dlg(this);
@@ -292,8 +292,8 @@ void QgisDesktopWindow::openPostClassificationDialog()
     QgsRasterLayer *rasterLayer = findAnyRaster(this);
     if (!rasterLayer)
     {
-        QMessageBox::information(this, tr("后分类比较"),
-                                 tr("请先选择一个栅格图层。"));
+        QMessageBox::information(this, tr("Post-Classification Comparison"),
+                                 tr("Select a raster layer first."));
         return;
     }
     PostClassificationDialog dlg(this);
@@ -322,8 +322,8 @@ void QgisDesktopWindow::activateRoiSpectrumTool()
     QgsRasterLayer *rasterLayer = findActiveRaster(this);
     if (!rasterLayer)
     {
-        QMessageBox::information(this, tr("ROI 均值谱"),
-                                 tr("请先选择一个栅格图层。"));
+        QMessageBox::information(this, tr("ROI Mean Spectrum"),
+                                 tr("Select a raster layer first."));
         return;
     }
     if (!m_mapCanvas || !m_identifyTool)
@@ -382,26 +382,26 @@ void QgisDesktopWindow::openDisplayStretchPanel()
         rasterLayer = findAnyRaster( this );
     if ( !rasterLayer )
     {
-        QMessageBox::information( this, tr( "显示拉伸" ),
-                                  tr( "请先选择或加载一个栅格图层。\n"
-                                      "此功能仅调整地图显示对比度，不导出新文件。" ) );
+        QMessageBox::information( this, tr( "Display Stretch" ),
+                                  tr( "Select or load a raster layer first.\n"
+                                      tr("This feature only adjusts the map display contrast; it exports no new file.") ) );
         return;
     }
 
     if ( !m_histogramStretchDock || !m_histogramStretch )
     {
-        QMessageBox::warning( this, tr( "显示拉伸" ),
-                              tr( "显示拉伸面板尚未初始化。" ) );
+        QMessageBox::warning( this, tr( "Display Stretch" ),
+                              tr( "The display stretch panel has not been initialized." ) );
         return;
     }
 
     m_histogramStretch->setRasterLayer( rasterLayer );
     m_histogramStretchDock->setWindowTitle(
-      tr( "显示拉伸 — %1" ).arg( rasterLayer->name() ) );
+      tr( "Display Stretch — %1" ).arg( rasterLayer->name() ) );
     m_histogramStretchDock->show();
     m_histogramStretchDock->raise();
     statusBar()->showMessage(
-      tr( "显示拉伸：修改图层渲染器，仅影响显示，不写出新栅格。" ), 5000 );
+      tr( "Display stretch: modifies the layer renderer only; affects display and writes no new raster." ), 5000 );
 }
 
 // ---------------------------------------------------------------------------

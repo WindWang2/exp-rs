@@ -33,7 +33,7 @@ void AnnotationWidget::setupUi()
     auto *typeLayout = new QHBoxLayout();
     typeLayout->addWidget(new QLabel(tr("Type:")));
     m_typeCombo = new QComboBox();
-    m_typeCombo->setToolTip(tr("选择标注类型：文本/箭头/矩形/圆形/手绘。" ));
+    m_typeCombo->setToolTip(tr("Choose the annotation type: text / arrow / rectangle / circle / freehand." ));
     m_typeCombo->addItem(tr("Text"), Text);
     m_typeCombo->addItem(tr("Arrow"), Arrow);
     m_typeCombo->addItem(tr("Rectangle"), Rectangle);
@@ -46,7 +46,7 @@ void AnnotationWidget::setupUi()
     auto *colorLayout = new QHBoxLayout();
     colorLayout->addWidget(new QLabel(tr("Color:")));
     m_colorBtn = new QPushButton();
-    m_colorBtn->setToolTip(tr("点击选择标注颜色。" ));
+    m_colorBtn->setToolTip(tr("Click to choose the annotation color." ));
     m_colorBtn->setFixedSize(30, 30);
     m_colorBtn->setStyleSheet(QString("background-color: %1").arg(m_currentColor.name()));
     colorLayout->addWidget(m_colorBtn);
@@ -57,7 +57,7 @@ void AnnotationWidget::setupUi()
     auto *widthLayout = new QHBoxLayout();
     widthLayout->addWidget(new QLabel(tr("Width:")));
     auto *widthSpin = new QSpinBox();
-    widthSpin->setToolTip(tr("线条宽度（1-10 像素）。"));
+    widthSpin->setToolTip(tr("Line width (1–10 pixels)."));
     widthSpin->setRange(1, 10);
     widthSpin->setValue(2);
     widthLayout->addWidget(widthSpin);
@@ -67,9 +67,9 @@ void AnnotationWidget::setupUi()
     // Buttons
     auto *btnLayout = new QHBoxLayout();
     auto *addTextBtn = new QPushButton(tr("Add Text"));
-    addTextBtn->setToolTip(tr("添加文本标注。" ));
+    addTextBtn->setToolTip(tr("Adds a text annotation." ));
     auto *clearBtn = new QPushButton(tr("Clear All"));
-    clearBtn->setToolTip(tr("清除所有标注。" ));
+    clearBtn->setToolTip(tr("Clears all annotations." ));
     btnLayout->addWidget(addTextBtn);
     btnLayout->addWidget(clearBtn);
     btnLayout->addStretch();

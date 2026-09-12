@@ -41,7 +41,7 @@ void RsGeorefFlowchartWidget::setupUi()
 
   auto *titleRow = new QHBoxLayout();
   auto *titleIcon = new QLabel( QStringLiteral( "🌐" ), headerFrame );
-  auto *titleText = new QLabel( tr( "遥感影像几何校正流程" ), headerFrame );
+  auto *titleText = new QLabel( tr( "Remote-Sensing Geometric Correction Pipeline" ), headerFrame );
   QFont titleFont = titleText->font();
   titleFont.setBold( true );
   titleFont.setPointSize( titleFont.pointSize() + 1 );
@@ -51,7 +51,7 @@ void RsGeorefFlowchartWidget::setupUi()
   titleRow->addStretch( 1 );
   headerLayout->addLayout( titleRow );
 
-  m_progressLabel = new QLabel( tr( "流程进度: 0/7 步已就绪 (0%)" ), headerFrame );
+  m_progressLabel = new QLabel( tr( "Pipeline progress: 0/7 steps ready (0%)" ), headerFrame );
   m_progressLabel->setStyleSheet( QStringLiteral( "color: palette(placeholder-text); font-size: 11px;" ) );
   headerLayout->addWidget( m_progressLabel );
 
@@ -94,20 +94,20 @@ void RsGeorefFlowchartWidget::setupUi()
   };
 
   const StepMeta steps[] = {
-    { FlowStep::LoadSource, QStringLiteral( "1" ), tr( "加载源影像" ),
-      tr( "打开待几何校正/配准的原始遥感栅格影像" ), tr( "打开影像" ) },
-    { FlowStep::CollectGcps, QStringLiteral( "2" ), tr( "采集控制点 (GCP)" ),
-      tr( "在源影像与参考底图上采集同名控制点对，或使用自动匹配" ), tr( "控制点采集" ) },
-    { FlowStep::SelectModel, QStringLiteral( "3" ), tr( "选择变换模型" ),
-      tr( "设定几何校正数学模型（多项式1-3阶/线性/Helmert/薄板样条/RPC）" ), tr( "模型参数" ) },
-    { FlowStep::CheckResiduals, QStringLiteral( "4" ), tr( "残差与精度检查" ),
-      tr( "计算控制点像元残差(dx, dy)与总 RMS 均方根误差，剔除粗差点" ), tr( "残差检查" ) },
-    { FlowStep::ConfigureWarp, QStringLiteral( "5" ), tr( "配置校正参数" ),
-      tr( "指定目标坐标系(CRS)、像元分辨率、重采样方法与输出路径" ), tr( "输出配置" ) },
-    { FlowStep::ExecuteWarp, QStringLiteral( "6" ), tr( "执行重采样校正" ),
-      tr( "启动后台多线程重采样变换引擎，生成几何纠正后栅格" ), tr( "开始校正" ) },
-    { FlowStep::VerifyResult, QStringLiteral( "7" ), tr( "成果加载与验证" ),
-      tr( "将纠正后的栅格加载至主地图画布，与基准底图进行空间叠加比对" ), tr( "加载成果" ) }
+    { FlowStep::LoadSource, QStringLiteral( "1" ), tr( "Load Source Image" ),
+      tr( "Open the raw remote-sensing raster to be geometrically corrected / registered" ), tr( "Open Image" ) },
+    { FlowStep::CollectGcps, QStringLiteral( "2" ), tr( "Collect Control Points (GCPs)" ),
+      tr( "Collect conjugate control point pairs on the source image and reference base map, or use auto matching" ), tr( "Control Point Collection" ) },
+    { FlowStep::SelectModel, QStringLiteral( "3" ), tr( "Select Transform Model" ),
+      tr( "Set the geometric correction model (polynomial order 1–3 / linear / Helmert / thin plate spline / RPC)" ), tr( "Model Parameters" ) },
+    { FlowStep::CheckResiduals, QStringLiteral( "4" ), tr( "Residual and Accuracy Check" ),
+      tr( "Compute control point pixel residuals (dx, dy) and the total RMS, rejecting gross errors" ), tr( "Residual Check" ) },
+    { FlowStep::ConfigureWarp, QStringLiteral( "5" ), tr( "Configure Correction Parameters" ),
+      tr( "Specify the target CRS, pixel resolution, resampling method and output path" ), tr( "Output Settings" ) },
+    { FlowStep::ExecuteWarp, QStringLiteral( "6" ), tr( "Run Resampling Correction" ),
+      tr( "Starts the background multi-threaded resampling engine to produce the corrected raster" ), tr( "Start Correction" ) },
+    { FlowStep::VerifyResult, QStringLiteral( "7" ), tr( "Result Loading and Verification" ),
+      tr( "Load the corrected raster onto the main map canvas for spatial overlay against the base map" ), tr( "Load Results" ) }
   };
 
   m_cards.resize( static_cast<int>( FlowStep::Count ) );
@@ -169,7 +169,7 @@ QFrame *RsGeorefFlowchartWidget::createStepCard( FlowStep step, const QString &n
   titleLbl->setFont( tf );
   topRow->addWidget( titleLbl, 1 );
 
-  auto *statusBadge = new QLabel( tr( "未开始" ), card );
+  auto *statusBadge = new QLabel( tr( "Not started" ), card );
   statusBadge->setStyleSheet(
     QStringLiteral( "background: palette(midlight); "
                     "color: palette(placeholder-text); "
@@ -299,7 +299,7 @@ void RsGeorefFlowchartWidget::setSourceRasterInfo( const QString &sourcePath, in
   {
     QFileInfo fi( sourcePath );
     if ( width > 0 && height > 0 )
-      m_sourceText = QStringLiteral( "%1 (%2×%3, %4波段)" )
+      m_sourceText = QStringLiteral( tr("%1 (%2×%3, %4 bands)") )
                        .arg( fi.fileName() )
                        .arg( width )
                        .arg( height )
@@ -309,7 +309,7 @@ void RsGeorefFlowchartWidget::setSourceRasterInfo( const QString &sourcePath, in
   }
   else
   {
-    m_sourceText = tr( "未加载影像" );
+    m_sourceText = tr( "No image loaded" );
   }
   refreshState();
 }
@@ -317,16 +317,16 @@ void RsGeorefFlowchartWidget::setSourceRasterInfo( const QString &sourcePath, in
 void RsGeorefFlowchartWidget::setGcpInfo( int totalGcps, int enabledGcps )
 {
   if ( totalGcps > 0 )
-    m_gcpText = tr( "%1 个 GCP (启用 %2 点)" ).arg( totalGcps ).arg( enabledGcps );
+    m_gcpText = tr( "%1 GCPs (%2 enabled)" ).arg( totalGcps ).arg( enabledGcps );
   else
-    m_gcpText = tr( "0 个 GCP (启用 0)" );
+    m_gcpText = tr( "0 GCPs (0 enabled)" );
   refreshState();
 }
 
 void RsGeorefFlowchartWidget::setModelInfo( const QString &methodName, int minGcpRequired )
 {
   if ( !methodName.isEmpty() )
-    m_modelText = QStringLiteral( "%1 (需 ≥%2 点)" ).arg( methodName ).arg( minGcpRequired );
+    m_modelText = QStringLiteral( tr("%1 (needs ≥ %2 points)") ).arg( methodName ).arg( minGcpRequired );
   refreshState();
 }
 
@@ -334,9 +334,9 @@ void RsGeorefFlowchartWidget::setResidualInfo( double rmsPixels, bool isFitReady
 {
   if ( isFitReady && rmsPixels >= 0.0 )
   {
-    QString grade = ( rmsPixels <= 0.5 ) ? tr( " (优)" )
-                  : ( rmsPixels <= 1.0 ) ? tr( " (良好)" )
-                                         : tr( " (需优化)" );
+    QString grade = ( rmsPixels <= 0.5 ) ? tr( " (excellent)" )
+                  : ( rmsPixels <= 1.0 ) ? tr( " (good)" )
+                                         : tr( " (needs tuning)" );
     m_residualText = QStringLiteral( "RMS: %1 px%2" ).arg( rmsPixels, 0, 'f', 2 ).arg( grade );
   }
   else if ( !statusText.isEmpty() )
@@ -345,7 +345,7 @@ void RsGeorefFlowchartWidget::setResidualInfo( double rmsPixels, bool isFitReady
   }
   else
   {
-    m_residualText = tr( "未解算" );
+    m_residualText = tr( "Unsolved" );
   }
   refreshState();
 }
@@ -363,18 +363,18 @@ void RsGeorefFlowchartWidget::setWarpConfigInfo( const QString &destCrs, const Q
   if ( !parts.isEmpty() )
     m_warpConfigText = parts.join( QStringLiteral( " / " ) );
   else
-    m_warpConfigText = tr( "未配置参数" );
+    m_warpConfigText = tr( "Parameters not configured" );
   refreshState();
 }
 
 void RsGeorefFlowchartWidget::setWarpExecutionInfo( bool isRunning, const QString &statusText )
 {
   if ( isRunning )
-    m_warpExecText = tr( "校正任务运行中…" );
+    m_warpExecText = tr( "Correction task running..." );
   else if ( !statusText.isEmpty() )
     m_warpExecText = statusText;
   else
-    m_warpExecText = tr( "就绪，等待执行" );
+    m_warpExecText = tr( "Ready, waiting to run" );
   refreshState();
 }
 
@@ -384,12 +384,12 @@ void RsGeorefFlowchartWidget::setOutputInfo( const QString &outputPath, bool isL
   if ( m_hasOutput )
   {
     QFileInfo fi( outputPath );
-    m_verifyText = isLoaded ? tr( "已加载至主地图: %1" ).arg( fi.fileName() )
-                            : tr( "已输出: %1" ).arg( fi.fileName() );
+    m_verifyText = isLoaded ? tr( "Loaded into the main map: %1" ).arg( fi.fileName() )
+                            : tr( "Output: %1" ).arg( fi.fileName() );
   }
   else
   {
-    m_verifyText = tr( "未加载成果" );
+    m_verifyText = tr( "No results loaded" );
   }
   refreshState();
 }
@@ -428,7 +428,7 @@ void RsGeorefFlowchartWidget::refreshState()
   {
     m_cards[idx1].isComplete = ( enabledGcps >= minGcp );
     if ( totalGcps > 0 )
-      m_gcpText = tr( "%1 个 GCP (启用 %2 点)" ).arg( totalGcps ).arg( enabledGcps );
+      m_gcpText = tr( "%1 GCPs (%2 enabled)" ).arg( totalGcps ).arg( enabledGcps );
     m_cards[idx1].metricLabel->setText( m_gcpText );
     updateCardStyle( m_cards[idx1] );
   }
@@ -449,9 +449,9 @@ void RsGeorefFlowchartWidget::refreshState()
     m_cards[idx3].isComplete = fitReady && ( rms >= 0.0 );
     if ( fitReady && rms >= 0.0 )
     {
-      QString grade = ( rms <= 0.5 ) ? tr( " (优)" )
-                    : ( rms <= 1.0 ) ? tr( " (良好)" )
-                                           : tr( " (需优化)" );
+      QString grade = ( rms <= 0.5 ) ? tr( " (excellent)" )
+                    : ( rms <= 1.0 ) ? tr( " (good)" )
+                                           : tr( " (needs tuning)" );
       m_residualText = QStringLiteral( "RMS: %1 px%2" ).arg( rms, 0, 'f', 2 ).arg( grade );
     }
     m_cards[idx3].metricLabel->setText( m_residualText );
@@ -501,21 +501,21 @@ void RsGeorefFlowchartWidget::updateCardStyle( StepCard &card )
   if ( card.isComplete )
   {
     borderStyle = QStringLiteral( "border: 1px solid #4caf50; background: palette(window);" );
-    statusText = tr( "✓ 已就绪" );
+    statusText = tr( "✓ Ready" );
     statusStyle = QStringLiteral( "background: #e8f5e9; color: #2e7d32; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: bold;" );
     badgeStyle = QStringLiteral( "background: #4caf50; color: white; border-radius: 10px; font-weight: bold; font-size: 11px;" );
   }
   else if ( card.isActive )
   {
     borderStyle = QStringLiteral( "border: 2px solid #0288d1; background: palette(window);" );
-    statusText = tr( "● 当前步骤" );
+    statusText = tr( "● Current step" );
     statusStyle = QStringLiteral( "background: #e1f5fe; color: #0277bd; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: bold;" );
     badgeStyle = QStringLiteral( "background: #0288d1; color: white; border-radius: 10px; font-weight: bold; font-size: 11px;" );
   }
   else
   {
     borderStyle = QStringLiteral( "border: 1px solid palette(midlight); background: palette(window);" );
-    statusText = tr( "未就绪" );
+    statusText = tr( "Not Ready" );
     statusStyle = QStringLiteral( "background: palette(midlight); color: palette(placeholder-text); border-radius: 4px; padding: 1px 6px; font-size: 10px;" );
     badgeStyle = QStringLiteral( "background: palette(midlight); color: palette(text); border-radius: 10px; font-weight: bold; font-size: 11px;" );
   }
@@ -542,5 +542,5 @@ void RsGeorefFlowchartWidget::updateOverallProgress()
   const int percent = total > 0 ? ( completed * 100 / total ) : 0;
   m_progressBar->setValue( completed );
   m_progressLabel->setText(
-    tr( "流程进度: %1/%2 步已就绪 (%3%)" ).arg( completed ).arg( total ).arg( percent ) );
+    tr( "Pipeline progress: %1/%2 steps ready (%3%)" ).arg( completed ).arg( total ).arg( percent ) );
 }

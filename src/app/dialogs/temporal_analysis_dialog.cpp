@@ -44,12 +44,12 @@ struct AlgorithmEntry
 };
 
 const AlgorithmEntry kAlgorithms[] = {
-    { "rs:temporal_summary", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "时序统计（均值/最值/标准差/计数）" ) },
-    { "rs:temporal_composite", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "时序合成（最佳像元/均值/中值）" ) },
-    { "rs:temporal_index_series", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "指数时序（逐日 NDVI/EVI/…栈）" ) },
-    { "rs:temporal_trend", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "线性趋势（斜率/截距/R²）" ) },
-    { "rs:temporal_anomaly", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "时序异常（z-score / 差值）" ) },
-    { "rs:temporal_extract_series", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "点/ROI 时间序列提取（CSV）" ) },
+    { "rs:temporal_summary", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "Time series statistics (mean / min-max / std dev / count)" ) },
+    { "rs:temporal_composite", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "Temporal compositing (best pixel / mean / median)" ) },
+    { "rs:temporal_index_series", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "Index time series (per-date NDVI/EVI/... stack)" ) },
+    { "rs:temporal_trend", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "Linear trend (slope / intercept / R²)" ) },
+    { "rs:temporal_anomaly", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "Time series anomalies (z-score / difference)" ) },
+    { "rs:temporal_extract_series", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "Point/ROI time series extraction (CSV)" ) },
 };
 
 enum SceneColumns
@@ -78,41 +78,41 @@ void TemporalAnalysisDialog::setupUi()
   setupHelpBanner( mainLayout );
 
   // ---- input scenes ----
-  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "时相场景" ) );
-  inputGroup->setToolTip( tr( "多时相栅格列表。时间自动从产品元数据/文件名解析，可手动修改；运行前按时间排序。" ) );
+  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "Epoch Scenes" ) );
+  inputGroup->setToolTip( tr( "Multitemporal raster list. Times are parsed from product metadata / file names and can be edited; sorted by time before running." ) );
   auto *groupLayout = new QVBoxLayout( inputGroup );
   groupLayout->setContentsMargins( 10, 8, 10, 8 );
   groupLayout->setSpacing( 8 );
 
   m_sceneTable = new QTableWidget( 0, ColCount, inputGroup );
   m_sceneTable->setObjectName( QStringLiteral( "temporalSceneTable" ) );
-  m_sceneTable->setHorizontalHeaderLabels( { tr( "文件" ), tr( "时间 (ISO)" ), tr( "平台" ), tr( "模态" ), tr( "状态" ) } );
+  m_sceneTable->setHorizontalHeaderLabels( { tr( "Files" ), tr( "Time (ISO)" ), tr( "Platform" ), tr( "Modality" ), tr( "Status" ) } );
   m_sceneTable->horizontalHeader()->setSectionResizeMode( ColPath, QHeaderView::Stretch );
   m_sceneTable->horizontalHeader()->setSectionResizeMode( ColTime, QHeaderView::ResizeToContents );
   m_sceneTable->horizontalHeader()->setSectionResizeMode( ColPlatform, QHeaderView::ResizeToContents );
   m_sceneTable->horizontalHeader()->setSectionResizeMode( ColStatus, QHeaderView::ResizeToContents );
   m_sceneTable->setMinimumHeight( 160 );
   m_sceneTable->setAlternatingRowColors( true );
-  SicnuDialogHelp::tip( m_sceneTable, tr( "时相列表：时间列可编辑（YYYY-MM-DD 或完整时间戳）；状态列显示网格一致性与 QA 波段。" ) );
+  SicnuDialogHelp::tip( m_sceneTable, tr( "Epoch list: the time column is editable (YYYY-MM-DD or a full timestamp); the status column shows grid consistency and QA bands." ) );
   groupLayout->addWidget( m_sceneTable );
 
   auto *btnRow = new QHBoxLayout();
   btnRow->setSpacing( 8 );
-  auto *addBtn = new QPushButton( tr( "添加时相…" ), inputGroup );
+  auto *addBtn = new QPushButton( tr( "Add Epochs..." ), inputGroup );
   SicnuUi::markSecondary( addBtn );
-  SicnuDialogHelp::tip( addBtn, tr( "添加一个或多个时相栅格文件（自动解析获取时间）。" ) );
+  SicnuDialogHelp::tip( addBtn, tr( "Adds one or more epoch raster files (acquisition times parsed automatically)." ) );
   connect( addBtn, &QPushButton::clicked, this, &TemporalAnalysisDialog::addScenes );
   btnRow->addWidget( addBtn );
 
-  auto *removeBtn = new QPushButton( tr( "移除选中" ), inputGroup );
+  auto *removeBtn = new QPushButton( tr( "Remove Selected" ), inputGroup );
   SicnuUi::markSecondary( removeBtn );
-  SicnuDialogHelp::tip( removeBtn, tr( "从时相列表移除选中的栅格。" ) );
+  SicnuDialogHelp::tip( removeBtn, tr( "Removes the selected rasters from the epoch list." ) );
   connect( removeBtn, &QPushButton::clicked, this, &TemporalAnalysisDialog::removeSelectedScenes );
   btnRow->addWidget( removeBtn );
 
-  auto *preflightBtn = new QPushButton( tr( "预检 (Preflight)" ), inputGroup );
+  auto *preflightBtn = new QPushButton( tr( "Precheck" ), inputGroup );
   SicnuDialogHelp::tip( preflightBtn,
-                        tr( "运行时间/网格/波段角色/辐射一致性检查，不做任何计算。" ) );
+                        tr( "Runs time / grid / band-role / radiometric consistency checks without any computation." ) );
   connect( preflightBtn, &QPushButton::clicked, this, &TemporalAnalysisDialog::runPreflight );
   btnRow->addWidget( preflightBtn );
   btnRow->addStretch();
@@ -120,38 +120,38 @@ void TemporalAnalysisDialog::setupUi()
 
   auto *filterRow = new QHBoxLayout();
   filterRow->setSpacing( 8 );
-  filterRow->addWidget( new QLabel( tr( "日期过滤：" ), inputGroup ) );
+  filterRow->addWidget( new QLabel( tr( "Date filter:" ), inputGroup ) );
   m_filterEdit = new QLineEdit( inputGroup );
   m_filterEdit->setObjectName( QStringLiteral( "temporalFilterEdit" ) );
-  m_filterEdit->setPlaceholderText( tr( "例如 2025-04（按时间列过滤显示，不影响计算）" ) );
-  SicnuDialogHelp::tip( m_filterEdit, tr( "仅过滤列表显示；参与计算的是全部未移除的时相。" ) );
+  m_filterEdit->setPlaceholderText( tr( "e.g. 2025-04 (filters the display by the time column; does not affect computation)" ) );
+  SicnuDialogHelp::tip( m_filterEdit, tr( "Filters the list display only; all non-removed epochs take part in the computation." ) );
   connect( m_filterEdit, &QLineEdit::textChanged, this, &TemporalAnalysisDialog::filterChanged );
   filterRow->addWidget( m_filterEdit, 1 );
   groupLayout->addLayout( filterRow );
 
-  m_preflightLabel = SicnuUi::makeHintLabel( inputGroup, tr( "尚未预检：点击“预检”检查时间/网格/辐射一致性。" ) );
+  m_preflightLabel = SicnuUi::makeHintLabel( inputGroup, tr( "Not prechecked yet: press 'Precheck' to verify time / grid / radiometric consistency." ) );
   groupLayout->addWidget( m_preflightLabel );
 
   // ---- algorithm + parameters ----
-  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "分析与参数" ) );
+  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "Analysis and Parameters" ) );
   auto *paramLayout = new QVBoxLayout( paramGroup );
   paramLayout->setContentsMargins( 10, 8, 10, 8 );
   paramLayout->setSpacing( 8 );
 
   auto *algRow = new QHBoxLayout();
-  algRow->addWidget( new QLabel( tr( "分析：" ), paramGroup ) );
+  algRow->addWidget( new QLabel( tr( "Analysis:" ), paramGroup ) );
   m_algorithmCombo = new QComboBox( paramGroup );
   m_algorithmCombo->setObjectName( QStringLiteral( "temporalAlgorithmCombo" ) );
   for ( const auto &entry : kAlgorithms )
     m_algorithmCombo->addItem( tr( entry.label ), QString::fromLatin1( entry.id ) );
-  SicnuDialogHelp::tip( m_algorithmCombo, tr( "时间序列分析算法（经处理注册表执行，可在工具箱/Agent 中复用）。" ) );
+  SicnuDialogHelp::tip( m_algorithmCombo, tr( "Time series analysis algorithms (executed via the processing registry; reusable in the toolbox / Agent)." ) );
   connect( m_algorithmCombo, &QComboBox::currentIndexChanged, this, &TemporalAnalysisDialog::algorithmChanged );
   algRow->addWidget( m_algorithmCombo, 1 );
 
-  algRow->addWidget( new QLabel( tr( "波段角色：" ), paramGroup ) );
+  algRow->addWidget( new QLabel( tr( "Band roles:" ), paramGroup ) );
   m_bandRoleCombo = new QComboBox( paramGroup );
   m_bandRoleCombo->setObjectName( QStringLiteral( "temporalBandRoleCombo" ) );
-  m_bandRoleCombo->addItem( tr( "波段 1" ), QString() );
+  m_bandRoleCombo->addItem( tr( "Band 1" ), QString() );
   m_bandRoleCombo->addItem( QStringLiteral( "blue" ), QStringLiteral( "blue" ) );
   m_bandRoleCombo->addItem( QStringLiteral( "green" ), QStringLiteral( "green" ) );
   m_bandRoleCombo->addItem( QStringLiteral( "red" ), QStringLiteral( "red" ) );
@@ -159,7 +159,7 @@ void TemporalAnalysisDialog::setupUi()
   m_bandRoleCombo->addItem( QStringLiteral( "nir" ), QStringLiteral( "nir" ) );
   m_bandRoleCombo->addItem( QStringLiteral( "swir1" ), QStringLiteral( "swir1" ) );
   m_bandRoleCombo->addItem( QStringLiteral( "swir2" ), QStringLiteral( "swir2" ) );
-  SicnuDialogHelp::tip( m_bandRoleCombo, tr( "分析波段按语义角色解析（元数据优先，缺省按常规顺序回退并警告）。" ) );
+  SicnuDialogHelp::tip( m_bandRoleCombo, tr( "Analysis bands are resolved by semantic role (metadata first; falls back to the conventional order with a warning when absent)." ) );
   algRow->addWidget( m_bandRoleCombo );
   paramLayout->addLayout( algRow );
 
@@ -173,10 +173,10 @@ void TemporalAnalysisDialog::setupUi()
     auto *lay = new QHBoxLayout( page );
     lay->setContentsMargins( 0, 0, 0, 0 );
     lay->addWidget( SicnuUi::makeHintLabel(
-      page, tr( "输出波段：count / valid_count / mean / min / max / stddev。勾选中值时按内存预算自动缩小分块（精确值，非近似）。" ) ) );
-    m_medianCheck = new QCheckBox( tr( "包含中值 (median)" ), page );
+      page, tr( "Output bands: count / valid_count / mean / min / max / stddev. When median is ticked, tile size shrinks automatically to fit the memory budget (exact values, not approximate)." ) ) );
+    m_medianCheck = new QCheckBox( tr( "Includes median" ), page );
     m_medianCheck->setObjectName( QStringLiteral( "temporalMedianCheck" ) );
-    SicnuDialogHelp::tip( m_medianCheck, tr( "逐像元精确中值；长时序自动减小 tile 尺寸以满足内存预算。" ) );
+    SicnuDialogHelp::tip( m_medianCheck, tr( "Exact per-pixel median; tile size shrinks automatically for long series to respect the memory budget." ) );
     lay->addWidget( m_medianCheck );
     m_paramStack->addWidget( page );
   }
@@ -185,25 +185,25 @@ void TemporalAnalysisDialog::setupUi()
     auto *page = new QFrame( m_paramStack );
     auto *lay = new QHBoxLayout( page );
     lay->setContentsMargins( 0, 0, 0, 0 );
-    lay->addWidget( new QLabel( tr( "方法：" ), page ) );
+    lay->addWidget( new QLabel( tr( "Method:" ), page ) );
     m_compositeMethodCombo = new QComboBox( page );
     m_compositeMethodCombo->setObjectName( QStringLiteral( "temporalCompositeMethod" ) );
-    m_compositeMethodCombo->addItem( tr( "最佳像元" ), QStringLiteral( "best_pixel" ) );
-    m_compositeMethodCombo->addItem( tr( "均值" ), QStringLiteral( "mean" ) );
-    m_compositeMethodCombo->addItem( tr( "中值" ), QStringLiteral( "median" ) );
+    m_compositeMethodCombo->addItem( tr( "Best Pixel" ), QStringLiteral( "best_pixel" ) );
+    m_compositeMethodCombo->addItem( tr( "Mean" ), QStringLiteral( "mean" ) );
+    m_compositeMethodCombo->addItem( tr( "Median" ), QStringLiteral( "median" ) );
     SicnuDialogHelp::tip( m_compositeMethodCombo,
-                          tr( "最佳像元：有效观测中质量分最高（并列取最接近目标日期，再取更早时相）；"
-                              "输出含有效观测数与质量分波段。" ) );
+                          tr( "Best pixel: highest quality score among valid observations (ties broken by closeness to the target date, then by the earlier epoch);"
+                              tr("The output includes valid-observation count and quality score bands.") ) );
     lay->addWidget( m_compositeMethodCombo );
-    lay->addWidget( new QLabel( tr( "周期：" ), page ) );
+    lay->addWidget( new QLabel( tr( "Period:" ), page ) );
     m_periodCombo = new QComboBox( page );
     m_periodCombo->setObjectName( QStringLiteral( "temporalPeriodCombo" ) );
-    m_periodCombo->addItem( tr( "全部" ), QStringLiteral( "all" ) );
-    m_periodCombo->addItem( tr( "逐月" ), QStringLiteral( "month" ) );
-    m_periodCombo->addItem( tr( "逐季" ), QStringLiteral( "quarter" ) );
-    m_periodCombo->addItem( tr( "季节" ), QStringLiteral( "season" ) );
-    m_periodCombo->addItem( tr( "逐年" ), QStringLiteral( "year" ) );
-    SicnuDialogHelp::tip( m_periodCombo, tr( "按周期分组时每个周期输出一个文件（后缀为起始日期）。" ) );
+    m_periodCombo->addItem( tr( "All" ), QStringLiteral( "all" ) );
+    m_periodCombo->addItem( tr( "Monthly" ), QStringLiteral( "month" ) );
+    m_periodCombo->addItem( tr( "Seasonally" ), QStringLiteral( "quarter" ) );
+    m_periodCombo->addItem( tr( "Season" ), QStringLiteral( "season" ) );
+    m_periodCombo->addItem( tr( "Yearly" ), QStringLiteral( "year" ) );
+    SicnuDialogHelp::tip( m_periodCombo, tr( "When grouped by period, one file is written per period (suffix = start date)." ) );
     lay->addWidget( m_periodCombo );
     lay->addStretch();
     m_paramStack->addWidget( page );
@@ -213,13 +213,13 @@ void TemporalAnalysisDialog::setupUi()
     auto *page = new QFrame( m_paramStack );
     auto *lay = new QHBoxLayout( page );
     lay->setContentsMargins( 0, 0, 0, 0 );
-    lay->addWidget( new QLabel( tr( "指数：" ), page ) );
+    lay->addWidget( new QLabel( tr( "Index:" ), page ) );
     m_indexCombo = new QComboBox( page );
     m_indexCombo->setObjectName( QStringLiteral( "temporalIndexCombo" ) );
     for ( const char *idx : { "NDVI", "EVI", "SAVI", "NDWI", "NDBI", "MNDWI", "NBR", "NDRE", "NDSI", "NDTI" } )
       m_indexCombo->addItem( QString::fromLatin1( idx ), QString::fromLatin1( idx ) );
     SicnuDialogHelp::tip( m_indexCombo,
-                          tr( "与单景光谱指数相同的计算内核；输出为逐日期一个波段的栈（保留获取时间元数据）。" ) );
+                          tr( "Same kernel as the single-scene spectral index; output is a stack with one band per date (acquisition-time metadata preserved)." ) );
     lay->addWidget( m_indexCombo );
     lay->addStretch();
     m_paramStack->addWidget( page );
@@ -230,7 +230,7 @@ void TemporalAnalysisDialog::setupUi()
     auto *lay = new QHBoxLayout( page );
     lay->setContentsMargins( 0, 0, 0, 0 );
     lay->addWidget( SicnuUi::makeHintLabel(
-      page, tr( "输出：slope（每天）/ intercept / R² / n / RMSE。回归使用真实获取时间间隔，斜率×365.25 = 年变化率。" ) ) );
+      page, tr( "Outputs: slope (per day) / intercept / R² / n / RMSE. The regression uses real acquisition-time intervals; slope × 365.25 = annual change rate." ) ) );
     m_paramStack->addWidget( page );
   }
   // page: anomaly
@@ -238,13 +238,13 @@ void TemporalAnalysisDialog::setupUi()
     auto *page = new QFrame( m_paramStack );
     auto *lay = new QHBoxLayout( page );
     lay->setContentsMargins( 0, 0, 0, 0 );
-    lay->addWidget( new QLabel( tr( "方法：" ), page ) );
+    lay->addWidget( new QLabel( tr( "Method:" ), page ) );
     m_anomalyMethodCombo = new QComboBox( page );
     m_anomalyMethodCombo->setObjectName( QStringLiteral( "temporalAnomalyMethod" ) );
     m_anomalyMethodCombo->addItem( tr( "z-score" ), QStringLiteral( "zscore" ) );
-    m_anomalyMethodCombo->addItem( tr( "与基线均值之差" ), QStringLiteral( "difference" ) );
+    m_anomalyMethodCombo->addItem( tr( "Difference from baseline mean" ), QStringLiteral( "difference" ) );
     SicnuDialogHelp::tip( m_anomalyMethodCombo,
-                          tr( "基线默认为除目标时相外的全部时相；可用参数 baseline_start/end 缩小。" ) );
+                          tr( "The baseline defaults to all epochs except the target; narrow it with the baseline_start/end parameters." ) );
     lay->addWidget( m_anomalyMethodCombo );
     lay->addStretch();
     m_paramStack->addWidget( page );
@@ -255,17 +255,17 @@ void TemporalAnalysisDialog::setupUi()
     auto *grid = new QGridLayout( page );
     grid->setContentsMargins( 0, 0, 0, 0 );
     grid->setSpacing( 8 );
-    grid->addWidget( new QLabel( tr( "点 (x, y)：" ), page ), 0, 0 );
+    grid->addWidget( new QLabel( tr( "Point (x, y):" ), page ), 0, 0 );
     m_pointEdit = new QLineEdit( page );
     m_pointEdit->setObjectName( QStringLiteral( "temporalPointEdit" ) );
-    m_pointEdit->setPlaceholderText( tr( "地图坐标，例如 460000.5, 3390020.25（与点/多边形二选一）" ) );
-    SicnuDialogHelp::tip( m_pointEdit, tr( "点坐标须与时相集合同一坐标系。" ) );
+    m_pointEdit->setPlaceholderText( tr( "Map coordinates, e.g. 460000.5, 3390020.25 (alternative to point/polygon)" ) );
+    SicnuDialogHelp::tip( m_pointEdit, tr( "The point coordinates must share the epoch collection's CRS." ) );
     grid->addWidget( m_pointEdit, 0, 1 );
-    grid->addWidget( new QLabel( tr( "多边形 ROI：" ), page ), 1, 0 );
+    grid->addWidget( new QLabel( tr( "Polygon ROIs:" ), page ), 1, 0 );
     m_polygonEdit = new QLineEdit( page );
     m_polygonEdit->setObjectName( QStringLiteral( "temporalPolygonEdit" ) );
-    m_polygonEdit->setPlaceholderText( tr( "顶点串 x1,y1;x2,y2;x3,y3;…（闭合环，仅扫描包围盒）" ) );
-    SicnuDialogHelp::tip( m_polygonEdit, tr( "ROI 统计：mean/median/min/max/stddev/valid_count，按日期输出 CSV。" ) );
+    m_polygonEdit->setPlaceholderText( tr( "Vertex list x1,y1;x2,y2;x3,y3;... (closed ring; the bounding box is scanned only)" ) );
+    SicnuDialogHelp::tip( m_polygonEdit, tr( "ROI statistics: mean/median/min/max/stddev/valid_count, exported as CSV per date." ) );
     grid->addWidget( m_polygonEdit, 1, 1 );
     m_paramStack->addWidget( page );
   }
@@ -281,8 +281,8 @@ void TemporalAnalysisDialog::setupUi()
 void TemporalAnalysisDialog::addScenes()
 {
   const QStringList paths = QFileDialog::getOpenFileNames(
-    this, tr( "添加时相栅格" ), QString(),
-    tr( "栅格 (*.tif *.tiff *.img *.asc);;所有文件 (*)" ) );
+    this, tr( "Add Epoch Rasters" ), QString(),
+    tr( "Rasters (*.tif *.tiff *.img *.asc);;All Files (*)" ) );
   if ( paths.isEmpty() )
     return;
 
@@ -298,7 +298,7 @@ void TemporalAnalysisDialog::addScenes()
     pathItem->setFlags( pathItem->flags() & ~Qt::ItemIsEditable );
     m_sceneTable->setItem( row, ColPath, pathItem );
     auto *timeItem = new QTableWidgetItem( scene.time.valid ? scene.time.iso : QString() );
-    timeItem->setToolTip( tr( "可编辑：YYYY-MM-DD 或 ISO 时间戳；留空表示未知（预检将拒绝）。" ) );
+    timeItem->setToolTip( tr( "Editable: YYYY-MM-DD or ISO timestamp; empty means unknown (the precheck will reject it)." ) );
     m_sceneTable->setItem( row, ColTime, timeItem );
     auto *platformItem = new QTableWidgetItem( scene.platform );
     platformItem->setFlags( platformItem->flags() & ~Qt::ItemIsEditable );
@@ -353,7 +353,7 @@ void TemporalAnalysisDialog::refreshStatusColumn()
     GdalDatasetWrapper ds;
     if ( !ds.open( path ) )
     {
-      m_sceneTable->item( row, ColStatus )->setText( tr( "无法打开" ) );
+      m_sceneTable->item( row, ColStatus )->setText( tr( "Cannot Open" ) );
       continue;
     }
     if ( row == 0 )
@@ -366,7 +366,7 @@ void TemporalAnalysisDialog::refreshStatusColumn()
     }
     if ( !refDs )
     {
-      m_sceneTable->item( row, ColStatus )->setText( tr( "网格未知" ) );
+      m_sceneTable->item( row, ColStatus )->setText( tr( "Grid unknown" ) );
       continue;
     }
     QStringList status;
@@ -377,10 +377,10 @@ void TemporalAnalysisDialog::refreshStatusColumn()
     const sicnu::data::RasterGrid refGrid = sicnu::processing::gridFromDataset( *refDs );
     const bool gridOk = ds.width() == refW && ds.height() == refH &&
                         sicnu::data::compareGrids( refGrid, grid ).compatible();
-    status << ( gridOk ? tr( "网格一致" ) : tr( "网格不一致" ) );
+    status << ( gridOk ? tr( "Grids consistent" ) : tr( "Grids inconsistent" ) );
     const QString timeText = m_sceneTable->item( row, ColTime )->text().trimmed();
     if ( timeText.isEmpty() )
-      status << tr( "缺时间" );
+      status << tr( "Missing time" );
     bool hasQa = false;
     for ( int b = 1; b <= ds.bandCount() && !hasQa; ++b )
     {
@@ -449,7 +449,7 @@ void TemporalAnalysisDialog::runPreflight()
 {
   if ( m_sceneTable->rowCount() == 0 )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请先添加时相场景。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "Add epoch scenes first." ) );
     return;
   }
   const QStringList paths = scenePaths();
@@ -462,21 +462,21 @@ void TemporalAnalysisDialog::runPreflight()
   const auto report = sicnu::temporal::runPreflight( collection, options );
 
   QStringList summary;
-  summary << tr( "时相: %1" ).arg( report.sceneCount );
+  summary << tr( "Epoch: %1" ).arg( report.sceneCount );
   if ( !collection.timeRangeStartIso().isEmpty() )
-    summary << tr( "区间: %1 → %2" )
+    summary << tr( "Range: %1 → %2" )
                    .arg( collection.timeRangeStartIso(), collection.timeRangeEndIso() );
-  summary << ( report.gridCompatible ? tr( "网格: 一致" ) : tr( "网格: 不一致" ) );
-  summary << tr( "辐射态: %1" )
+  summary << ( report.gridCompatible ? tr( "Grid: consistent" ) : tr( "Grid: inconsistent" ) );
+  summary << tr( "Radiometric state: %1" )
                  .arg( report.commonRadiometricState.isEmpty()
-                           ? tr( "未知（警告）" )
+                           ? tr( "Unknown (warning)" )
                            : report.commonRadiometricState );
   int blocking = 0;
   for ( const auto &issue : report.issues )
     if ( issue.blocking )
       ++blocking;
-  summary << ( blocking == 0 ? tr( "预检通过" )
-                             : tr( "预检失败： %1 个阻断问题" ).arg( blocking ) );
+  summary << ( blocking == 0 ? tr( "Precheck Passed" )
+                             : tr( "Precheck failed: %1 blocking issues" ).arg( blocking ) );
   m_preflightLabel->setText( summary.join( QStringLiteral( "  |  " ) ) );
 
   if ( !report.ok() )
@@ -485,7 +485,7 @@ void TemporalAnalysisDialog::runPreflight()
     for ( const auto &issue : report.issues )
       if ( issue.blocking )
         lines << QStringLiteral( "[%1] %2" ).arg( issue.code, issue.message );
-    QMessageBox::warning( this, tr( "时间序列预检" ),
+    QMessageBox::warning( this, tr( "Time Series Precheck" ),
                           lines.join( QLatin1Char( '\n' ) ).left( 2000 ) );
   }
 }
@@ -494,7 +494,7 @@ bool TemporalAnalysisDialog::validateInputs()
 {
   if ( m_sceneTable->rowCount() < 2 )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "时间序列分析至少需要 2 个时相。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "Time series analysis needs at least 2 epochs." ) );
     return false;
   }
   for ( int row = 0; row < m_sceneTable->rowCount(); ++row )
@@ -502,13 +502,13 @@ bool TemporalAnalysisDialog::validateInputs()
     if ( m_sceneTable->item( row, ColTime )->text().trimmed().isEmpty() )
     {
       QMessageBox::warning( this, dialogTitle(),
-                            tr( "第 %1 行缺少获取时间（产品元数据/文件名未解析出，请手动填写）。" ).arg( row + 1 ) );
+                            tr( "Row %1 is missing an acquisition time (not parsed from product metadata / file name; enter it manually)." ).arg( row + 1 ) );
       return false;
     }
   }
   if ( outputPath().isEmpty() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请指定输出文件路径。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "Specify the output file path." ) );
     return false;
   }
   const QString id = m_algorithmCombo->currentData().toString();
@@ -518,7 +518,7 @@ bool TemporalAnalysisDialog::validateInputs()
     const bool hasPoly = !m_polygonEdit->text().trimmed().isEmpty();
     if ( hasPoint == hasPoly )
     {
-      QMessageBox::warning( this, dialogTitle(), tr( "序列提取需要且只能填写 点 或 多边形 之一。" ) );
+      QMessageBox::warning( this, dialogTitle(), tr( "Series extraction requires exactly one of: a point or a polygon." ) );
       return false;
     }
   }
@@ -558,7 +558,7 @@ bool TemporalAnalysisDialog::loadCollection( const sicnu::data::CollectionId &id
                                      : sicnu::temporal::modalityToString( contract.modality );
       m_sceneTable->setItem( row, ColModality, new QTableWidgetItem( modalityText ) );
     }
-    m_sceneTable->setItem( row, ColStatus, new QTableWidgetItem( tr( "已加载" ) ) );
+    m_sceneTable->setItem( row, ColStatus, new QTableWidgetItem( tr( "Loaded" ) ) );
   }
   refreshStatusColumn();
   return true;
@@ -604,7 +604,7 @@ void TemporalAnalysisDialog::onRun()
 
   if ( dm && collection.sceneCount() > 0 )
   {
-    QString colName = tr( "时序分析集合 %1" ).arg( QDateTime::currentDateTime().toString( QStringLiteral( "yyyy-MM-dd hh:mm" ) ) );
+    QString colName = tr( "Time Series Analysis Collection %1" ).arg( QDateTime::currentDateTime().toString( QStringLiteral( "yyyy-MM-dd hh:mm" ) ) );
     sicnu::data::CollectionId existingId = m_activeCollectionId.value_or( sicnu::data::CollectionId() );
     QString saveErr;
     const sicnu::data::CollectionId colId = sicnu::temporal::saveCollectionToWorkspace( *dm, colName, collection, existingId, &saveErr );
@@ -653,7 +653,7 @@ void TemporalAnalysisDialog::onRun()
     {
       if ( xy.size() != 2 )
       {
-        QMessageBox::warning( this, dialogTitle(), tr( "点坐标格式应为 x,y。" ) );
+        QMessageBox::warning( this, dialogTitle(), tr( "Point coordinates must be in x,y format." ) );
         return;
       }
       Json::Value point( Json::arrayValue );
@@ -670,7 +670,7 @@ void TemporalAnalysisDialog::onRun()
         const QStringList xyv = v.split( QLatin1Char( ',' ) );
         if ( xyv.size() != 2 )
         {
-          QMessageBox::warning( this, dialogTitle(), tr( "多边形顶点格式应为 x,y（分号分隔）。" ) );
+          QMessageBox::warning( this, dialogTitle(), tr( "Polygon vertices must be x,y pairs separated by semicolons." ) );
           return;
         }
         Json::Value vertex( Json::arrayValue );

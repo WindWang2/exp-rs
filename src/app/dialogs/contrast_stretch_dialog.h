@@ -25,7 +25,7 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("contrast_stretch"); }
-    QString dialogTitle() const override { return tr("对比度拉伸与色阶调节"); }
+    QString dialogTitle() const override { return tr("Contrast Stretch and Levels Adjustment"); }
     void onRun() override;
 
 private slots:

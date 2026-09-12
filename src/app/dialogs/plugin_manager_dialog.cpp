@@ -26,7 +26,7 @@ QString stateLabel( const char *state )
 PluginManagerDialog::PluginManagerDialog( QWidget *parent )
     : QDialog( parent )
 {
-    setWindowTitle( tr( "插件管理器" ) );
+    setWindowTitle( tr( "Plugin Manager" ) );
     resize( 760, 480 );
 
     auto *layout = new QVBoxLayout( this );
@@ -35,8 +35,8 @@ PluginManagerDialog::PluginManagerDialog( QWidget *parent )
 
     auto *splitter = new QSplitter( Qt::Vertical, this );
     mTable = new QTableWidget( 0, 5, this );
-    mTable->setHorizontalHeaderLabels( { tr( "ID" ), tr( "名称" ), tr( "版本" ), tr( "状态" ),
-                                         tr( "来源" ) } );
+    mTable->setHorizontalHeaderLabels( { tr( "ID" ), tr( "Name" ), tr( "Version" ), tr( "Status" ),
+                                         tr( "Source" ) } );
     mTable->horizontalHeader()->setStretchLastSection( true );
     mTable->setSelectionBehavior( QAbstractItemView::SelectRows );
     mTable->setSelectionMode( QAbstractItemView::SingleSelection );
@@ -45,14 +45,14 @@ PluginManagerDialog::PluginManagerDialog( QWidget *parent )
 
     mDiagnostics = new QTextEdit( this );
     mDiagnostics->setReadOnly( true );
-    mDiagnostics->setPlaceholderText( tr( "选中插件的诊断信息" ) );
+    mDiagnostics->setPlaceholderText( tr( "Diagnostics of the selected plugin" ) );
     splitter->addWidget( mDiagnostics );
     layout->addWidget( splitter, 1 );
 
     auto *buttons = new QHBoxLayout;
-    mEnableButton = new QPushButton( tr( "启用" ), this );
-    mDisableButton = new QPushButton( tr( "禁用" ), this );
-    auto *refreshButton = new QPushButton( tr( "刷新" ), this );
+    mEnableButton = new QPushButton( tr( "Enable" ), this );
+    mDisableButton = new QPushButton( tr( "Disable" ), this );
+    auto *refreshButton = new QPushButton( tr( "Refresh" ), this );
     buttons->addWidget( mEnableButton );
     buttons->addWidget( mDisableButton );
     buttons->addWidget( refreshButton );
@@ -108,8 +108,8 @@ void PluginManagerDialog::populate()
         ++row;
     }
     mTable->setRowCount( row );
-    mSummary->setText( tr( "已发现 %1 个插件（可用 %2，异常 %3）。扫描仅读取 plugin.json，"
-                           "不会加载插件二进制。" )
+    mSummary->setText( tr( "Found %1 plugins (%2 usable, %3 broken). The scan only reads plugin.json,"
+                           tr("Plugin binaries are not loaded.") )
                            .arg( row )
                            .arg( validated )
                            .arg( problem ) );
@@ -138,8 +138,8 @@ void PluginManagerDialog::applyEnabled( bool enable )
                 if ( item.code == exprs::PluginDiagnosticCode::PluginInUse )
                     inUse = QString::fromStdString( item.message );
             }
-            QMessageBox::warning( this, tr( "插件正在使用中" ),
-                                  inUse.isEmpty() ? tr( "插件正在执行，无法禁用。" ) : inUse );
+            QMessageBox::warning( this, tr( "Plugin In Use" ),
+                                  inUse.isEmpty() ? tr( "The plugin is executing and cannot be disabled." ) : inUse );
             populate();
             return;
         }
@@ -165,8 +165,8 @@ void PluginManagerDialog::applyEnabled( bool enable )
             if ( registry.copyRecord( id, snapshot )
                  && snapshot.state == exprs::PluginState::Failed )
             {
-                QMessageBox::warning( this, tr( "插件加载失败" ),
-                                      tr( "启用已保存，但插件加载失败——查看诊断信息。" ) );
+                QMessageBox::warning( this, tr( "Plugin Failed to Load" ),
+                                      tr( "Enablement saved, but the plugin failed to load — see the diagnostics." ) );
             }
         }
     }
@@ -183,7 +183,7 @@ void PluginManagerDialog::showDiagnostics()
         pluginId.toStdString() );
     if ( diagnostics.empty() )
     {
-        mDiagnostics->setPlainText( tr( "无诊断信息。" ) );
+        mDiagnostics->setPlainText( tr( "No diagnostics." ) );
         return;
     }
     QString text;

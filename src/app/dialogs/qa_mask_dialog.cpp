@@ -66,62 +66,62 @@ void QaMaskDialog::setupUi()
   setupHelpBanner( mainLayout );
 
   // Input Data Group
-  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "输入数据" ) );
+  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "Input Data" ) );
   auto *inputForm = SicnuUi::makeFormLayout();
   inputForm->setContentsMargins( 0, 0, 0, 0 );
 
   m_layerCombo = new RasterLayerCombo( inputGroup );
   m_layerCombo->setObjectName( QStringLiteral( "qaMaskInputLayerCombo" ) );
-  SicnuDialogHelp::tip( m_layerCombo, tr( "选择待提取掩膜的产品栅格图层。" ) );
+  SicnuDialogHelp::tip( m_layerCombo, tr( "Select the product raster layer to mask." ) );
   m_layerCombo->populate();
   connect( m_layerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &QaMaskDialog::onLayerChanged );
-  inputForm->addRow( tr( "输入栅格" ), m_layerCombo );
+  inputForm->addRow( tr( "Input Raster" ), m_layerCombo );
 
   m_bandCombo = new BandRoleCombo( inputGroup );
   SicnuDialogHelp::tip( m_bandCombo, tr(
-    "质量波段。默认按产品语义角色自动选择（SCL → 场景分类，QA → 质量）。" ) );
-  inputForm->addRow( tr( "质量波段" ), m_bandCombo );
+    tr("Quality band. Chosen automatically by product semantic role by default (SCL → scene classification, QA → quality).") ) );
+  inputForm->addRow( tr( "Quality Band" ), m_bandCombo );
 
   qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( inputForm );
 
   // Mask Parameters Group
-  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "掩膜参数" ) );
+  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "Mask Parameters" ) );
   auto *form = SicnuUi::makeFormLayout();
   form->setContentsMargins( 0, 0, 0, 0 );
 
   m_sourceCombo = new QComboBox( paramGroup );
-  m_sourceCombo->addItem( tr( "自动识别" ), QStringLiteral( "auto" ) );
-  m_sourceCombo->addItem( tr( "Landsat QA_PIXEL 位标志" ), QStringLiteral( "landsat_qa_pixel" ) );
-  m_sourceCombo->addItem( tr( "Sentinel-2 SCL 类别" ), QStringLiteral( "sentinel2_scl" ) );
-  m_sourceCombo->addItem( tr( "通用位掩码" ), QStringLiteral( "generic_bitmask" ) );
+  m_sourceCombo->addItem( tr( "Auto-detect" ), QStringLiteral( "auto" ) );
+  m_sourceCombo->addItem( tr( "Landsat QA_PIXEL Bit Flags" ), QStringLiteral( "landsat_qa_pixel" ) );
+  m_sourceCombo->addItem( tr( "Sentinel-2 SCL Classes" ), QStringLiteral( "sentinel2_scl" ) );
+  m_sourceCombo->addItem( tr( "Generic Bit Mask" ), QStringLiteral( "generic_bitmask" ) );
   SicnuDialogHelp::tip( m_sourceCombo, tr(
-    "• 自动：按波段角色/名称识别（SCL → Sentinel-2；QA → Landsat）\n"
-    "• Landsat QA_PIXEL：按 Collection 2 位标志\n"
-    "• Sentinel-2 SCL：按场景分类类别\n"
-    "• 通用位掩码：按 bits 参数逐位判断" ) );
+    tr("• Auto: identify by band role / name (SCL → Sentinel-2; QA → Landsat)\n")
+    tr("• Landsat QA_PIXEL: Collection 2 bit flags\n")
+    tr("• Sentinel-2 SCL: by scene classification classes\n")
+    tr("• Generic bitmask: decided bit by bit from the bits parameter") ) );
   connect( m_sourceCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &QaMaskDialog::onSourceChanged );
-  form->addRow( tr( "质量源" ), m_sourceCombo );
+  form->addRow( tr( "Quality Source" ), m_sourceCombo );
 
   m_maskCombo = new QComboBox( paramGroup );
-  m_maskCombo->addItem( tr( "云 + 云影（推荐）" ), QStringLiteral( "cloud_and_shadow" ) );
-  m_maskCombo->addItem( tr( "仅云（含薄卷云）" ), QStringLiteral( "cloud" ) );
-  m_maskCombo->addItem( tr( "仅云影" ), QStringLiteral( "cloud_shadow" ) );
-  m_maskCombo->addItem( tr( "雪" ), QStringLiteral( "snow" ) );
-  m_maskCombo->addItem( tr( "水体" ), QStringLiteral( "water" ) );
-  m_maskCombo->addItem( tr( "全部无效/遮挡类别" ), QStringLiteral( "all" ) );
+  m_maskCombo->addItem( tr( "Cloud + cloud shadow (recommended)" ), QStringLiteral( "cloud_and_shadow" ) );
+  m_maskCombo->addItem( tr( "Cloud only (incl. thin cirrus)" ), QStringLiteral( "cloud" ) );
+  m_maskCombo->addItem( tr( "Cloud shadow only" ), QStringLiteral( "cloud_shadow" ) );
+  m_maskCombo->addItem( tr( "Snow" ), QStringLiteral( "snow" ) );
+  m_maskCombo->addItem( tr( "Water" ), QStringLiteral( "water" ) );
+  m_maskCombo->addItem( tr( "All invalid/occluded classes" ), QStringLiteral( "all" ) );
   SicnuDialogHelp::tip( m_maskCombo, tr(
-    "选择要置为掩膜的类别。\n"
-    "• Landsat：云=bit1/2/3（膨胀云/卷云/云），云影=bit4，雪=bit5，水体=bit7\n"
-    "• Sentinel-2 SCL：云=类别 8/9/10，云影=3，雪=11，水体=6" ) );
-  form->addRow( tr( "掩膜类别" ), m_maskCombo );
+    tr("Choose the classes to turn into the mask.\n")
+    tr("• Landsat: cloud = bits 1/2/3 (dilated cloud / cirrus / cloud), shadow = bit 4, snow = bit 5, water = bit 7\n")
+    tr("• Sentinel-2 SCL: cloud = classes 8/9/10, shadow = 3, snow = 11, water = 6") ) );
+  form->addRow( tr( "Mask Classes" ), m_maskCombo );
 
   m_bitsSpin = new QSpinBox( paramGroup );
   m_bitsSpin->setRange( 1, 65535 );
   m_bitsSpin->setValue( 1 );
-  m_bitsSpin->setToolTip( tr( "通用位掩码：值为 (value & bits) != 0 的像素被掩膜。" ) );
-  form->addRow( tr( "位标志 (通用)" ), m_bitsSpin );
+  m_bitsSpin->setToolTip( tr( "Generic bit mask: pixels where (value & bits) != 0 are masked." ) );
+  form->addRow( tr( "Bit Flags (generic)" ), m_bitsSpin );
   m_bitsLabel = qobject_cast<QLabel *>( form->labelForField( m_bitsSpin ) );
 
   qobject_cast<QVBoxLayout *>( paramGroup->layout() )->addLayout( form );
@@ -129,10 +129,10 @@ void QaMaskDialog::setupUi()
   setupOutputRow( mainLayout );
 
   // Summary Group
-  QGroupBox *summaryGroup = SicnuUi::makeGroup( this, tr( "掩膜统计" ) );
+  QGroupBox *summaryGroup = SicnuUi::makeGroup( this, tr( "Mask Statistics" ) );
   auto *summaryLayout = new QVBoxLayout( summaryGroup );
   summaryLayout->setContentsMargins( 12, 10, 12, 10 );
-  m_summaryLabel = SicnuUi::makeHintLabel( summaryGroup, tr( "运行后在此显示掩膜统计结果。" ) );
+  m_summaryLabel = SicnuUi::makeHintLabel( summaryGroup, tr( "After running, mask statistics appear here." ) );
   m_summaryLabel->setObjectName( QStringLiteral( "qaMaskSummaryLabel" ) );
   m_summaryLabel->setWordWrap( true );
   summaryLayout->addWidget( m_summaryLabel );
@@ -162,7 +162,7 @@ void QaMaskDialog::onRun()
 {
   if ( !m_rasterLayer || !m_rasterLayer->isValid() )
   {
-    handleFailed( tr( "请先选择一个有效的栅格图层。" ) );
+    handleFailed( tr( "Select a valid raster layer first." ) );
     return;
   }
 
@@ -181,7 +181,7 @@ void QaMaskDialog::onRun()
                    [this]( const Json::Value &result ) {
                      if ( m_summaryLabel && result.isMember( "maskedPercent" ) )
                        m_summaryLabel->setText(
-                         tr( "掩膜像元：%1 / %2（%3%）" )
+                         tr( "Masked pixels: %1 / %2 (%3%)" )
                            .arg( result["maskedPixels"].asUInt64() )
                            .arg( result["totalPixels"].asUInt64() )
                            .arg( result["maskedPercent"].asDouble(), 0, 'f', 2 ) );

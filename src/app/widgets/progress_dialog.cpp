@@ -28,7 +28,7 @@ ProgressDialog::ProgressDialog(const QString &title, QWidget *parent)
     bottomLayout->addStretch();
 
     m_cancelButton = new QPushButton(tr("Cancel"), this);
-    m_cancelButton->setToolTip(tr("取消当前操作（操作可能不会立即停止）。"));
+    m_cancelButton->setToolTip(tr("Cancels the current operation (it may not stop immediately)."));
     connect(m_cancelButton, &QPushButton::clicked, this, &ProgressDialog::onCancelClicked);
     bottomLayout->addWidget(m_cancelButton);
 

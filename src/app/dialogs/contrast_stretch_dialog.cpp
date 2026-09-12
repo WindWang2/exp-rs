@@ -58,17 +58,17 @@ void ContrastStretchDialog::setupUi()
   setupHelpBanner( mainLayout );
 
   // Input Layer Group
-  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "输入数据" ) );
+  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "Input Data" ) );
   auto *inputForm = SicnuUi::makeFormLayout();
   inputForm->setContentsMargins( 0, 0, 0, 0 );
 
   m_layerCombo = new RasterLayerCombo( inputGroup );
   m_layerCombo->setObjectName( QStringLiteral( "contrastStretchInputLayerCombo" ) );
-  SicnuDialogHelp::tip( m_layerCombo, tr( "选择待执行对比度拉伸的栅格图层。" ) );
+  SicnuDialogHelp::tip( m_layerCombo, tr( "Select the raster layer for contrast stretching." ) );
   m_layerCombo->populate();
   connect( m_layerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &ContrastStretchDialog::onLayerChanged );
-  inputForm->addRow( tr( "输入栅格" ), m_layerCombo );
+  inputForm->addRow( tr( "Input Raster" ), m_layerCombo );
   qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( inputForm );
 
   // Embedded Interactive Photoshop Levels & Histogram Panel
@@ -76,41 +76,41 @@ void ContrastStretchDialog::setupUi()
   mainLayout->addWidget( m_stretchWidget, 1 );
 
   // Preset Parameters Group
-  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "预设算法与导出" ) );
+  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "Preset Algorithms and Export" ) );
   auto *form = SicnuUi::makeFormLayout();
   form->setContentsMargins( 0, 0, 0, 0 );
 
   m_methodCombo = new QComboBox( paramGroup );
-  m_methodCombo->addItems( { tr( "Photoshop 自定义色阶" ), tr( "线性拉伸 (Min-Max)" ), tr( "百分比裁剪拉伸" ),
-                             tr( "标准差拉伸" ), tr( "直方图均衡化" ) } );
+  m_methodCombo->addItems( { tr( "Custom Photoshop Levels" ), tr( "Linear Stretch (Min-Max)" ), tr( "Percent Clip Stretch" ),
+                             tr( "Std-Dev Stretch" ), tr( "Histogram Equalization" ) } );
   SicnuDialogHelp::tip( m_methodCombo, tr(
-    "拉伸方法：\n"
-    "• Photoshop 色阶：交互调节阴影、高光与 Gamma 中音\n"
-    "• 线性：最小–最大\n"
-    "• 百分比裁剪：两端裁剪后再拉伸\n"
-    "• 标准差：均值±K×标准差\n"
-    "• 直方图均衡化：增强全局对比" ) );
+    tr("Stretch method:\n")
+    tr("• Photoshop Levels: interactively adjust shadows, highlights and the gamma midtone\n")
+    tr("• Linear: min–max\n")
+    tr("• Percent clip: clip both tails, then stretch\n")
+    tr("• Std dev: mean±K×std dev\n")
+    tr("• Histogram equalization: enhances global contrast") ) );
   connect( m_methodCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &ContrastStretchDialog::onMethodChanged );
-  form->addRow( tr( "预设方法" ), m_methodCombo );
+  form->addRow( tr( "Preset Method" ), m_methodCombo );
 
-  m_clipLabel = new QLabel( tr( "裁剪比例" ), paramGroup );
+  m_clipLabel = new QLabel( tr( "Clip Ratio" ), paramGroup );
   m_clipSpin = new QDoubleSpinBox( paramGroup );
   m_clipSpin->setRange( 0.1, 50.0 );
   m_clipSpin->setValue( 2.0 );
   m_clipSpin->setSingleStep( 0.5 );
   m_clipSpin->setDecimals( 1 );
   m_clipSpin->setSuffix( QStringLiteral( " %" ) );
-  SicnuDialogHelp::tip( m_clipSpin, tr( "两端各舍弃该比例像元后再拉伸。常用 1–2%。" ) );
+  SicnuDialogHelp::tip( m_clipSpin, tr( "Discard this fraction of pixels at both tails before stretching; 1–2% is typical." ) );
   form->addRow( m_clipLabel, m_clipSpin );
 
-  m_stddevLabel = new QLabel( tr( "标准差倍数 K" ), paramGroup );
+  m_stddevLabel = new QLabel( tr( "Std-Dev Multiplier K" ), paramGroup );
   m_stddevSpin = new QDoubleSpinBox( paramGroup );
   m_stddevSpin->setRange( 0.1, 10.0 );
   m_stddevSpin->setValue( 2.0 );
   m_stddevSpin->setSingleStep( 0.5 );
   m_stddevSpin->setDecimals( 1 );
-  SicnuDialogHelp::tip( m_stddevSpin, tr( "拉伸到 mean±K·σ。常用 2。" ) );
+  SicnuDialogHelp::tip( m_stddevSpin, tr( "Stretches to mean±K·σ; 2 is typical." ) );
   form->addRow( m_stddevLabel, m_stddevSpin );
 
   qobject_cast<QVBoxLayout *>( paramGroup->layout() )->addLayout( form );
@@ -157,7 +157,7 @@ void ContrastStretchDialog::onRun()
       if ( piecewisePoints.size() < 2 )
       {
         QMessageBox::warning( this, dialogTitle(),
-                              tr( "自定义色阶至少需要两个控制点，请改用预设方法。" ) );
+                              tr( "Custom levels need at least two control points; use a preset method instead." ) );
         return;
       }
       params["method"] = "piecewise";

@@ -249,7 +249,7 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
   formLayout->setHorizontalSpacing( 12 );
   formLayout->setVerticalSpacing( 10 );
 
-  auto *advancedGroup = new QGroupBox( tr( "高级参数" ) );
+  auto *advancedGroup = new QGroupBox( tr( "Advanced Parameters" ) );
   advancedGroup->setObjectName( QStringLiteral( "rsDialogGroup" ) );
   auto *advancedLayout = new QFormLayout( advancedGroup );
   advancedLayout->setLabelAlignment( Qt::AlignRight | Qt::AlignVCenter );
@@ -319,18 +319,18 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
     formLayout->addWidget( advancedGroup );
 
   QSettings settings;
-  mLoadResultsCheck = new QCheckBox( tr( "完成后将结果图层加载到工程中" ) );
+  mLoadResultsCheck = new QCheckBox( tr( "Load the result layers into the project when finished" ) );
   mLoadResultsCheck->setChecked(
     settings.value( QStringLiteral( "processing/loadResultsToLayers" ), true ).toBool() );
   mLoadResultsCheck->setToolTip(
-    tr( "启用后，算法执行完毕生成的结果栅格或矢量图层将自动加入左侧图层树并显示在地图视图中。" ) );
+    tr( "When enabled, result rasters or vector layers produced by an algorithm are added to the layer tree on the left and shown on the map automatically." ) );
   formLayout->addRow( QString(), mLoadResultsCheck );
 
   // GDAL / OTB / Generic CLI: live command-line preview from current parameters.
-  mCommandGroup = new QGroupBox( tr( "调用命令行预览" ) );
+  mCommandGroup = new QGroupBox( tr( "Preview via Command Line" ) );
   mCommandGroup->setObjectName( QStringLiteral( "rsAlgCommandPreviewGroup" ) );
   mCommandGroup->setToolTip( tr(
-    "根据上方参数实时生成的外部命令行。可复制到终端手动执行（路径与临时输出可能与实际运行略有差异）。" ) );
+    tr("The external command line generated live from the parameters above. Copy it to a terminal to run manually (paths and temporary outputs may differ slightly from the actual run).") ) );
   auto *cmdLayout = new QVBoxLayout( mCommandGroup );
   cmdLayout->setContentsMargins( 8, 8, 8, 8 );
   mCommandPreview = new QPlainTextEdit( mCommandGroup );
@@ -344,7 +344,7 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
   mono.setFamily( QStringLiteral( "monospace" ) );
   mono.setStyleHint( QFont::Monospace );
   mCommandPreview->setFont( mono );
-  mCommandPreview->setPlaceholderText( tr( "（根据参数生成调用命令…）" ) );
+  mCommandPreview->setPlaceholderText( tr( "(command line generated from parameters...)" ) );
   mCommandPreview->setToolTip( mCommandGroup->toolTip() );
   cmdLayout->addWidget( mCommandPreview );
   formLayout->addRow( mCommandGroup );
@@ -410,7 +410,7 @@ void SicnuAlgorithmDialog::updateCommandPreview()
   }
   else
   {
-    cmd = tr( "# 此算法为内置实现，无外部 CLI 命令" );
+    cmd = tr( "# This algorithm is built in; no external CLI command" );
   }
 
   // Avoid resetting cursor if unchanged

@@ -111,13 +111,13 @@ private:
     QVector<StepCard> m_cards;
 
     // Metrics cache
-    QString m_sourceRasterText = QStringLiteral( "未加载影像" );
-    QString m_classCountText = QStringLiteral( "未定义类别" );
-    QString m_sampleText = QStringLiteral( "0 个 ROI, 0 像元" );
-    QString m_evalText = QStringLiteral( "未评估" );
-    QString m_classifyText = QStringLiteral( "未分类" );
-    QString m_accuracyText = QStringLiteral( "未评估精度" );
-    QString m_postText = QStringLiteral( "未进行后处理" );
-    QString m_exportText = QStringLiteral( "未导出" );
+    QString m_sourceRasterText = QStringLiteral( tr("No image loaded") );
+    QString m_classCountText = QStringLiteral( tr("Undefined class") );
+    QString m_sampleText = QStringLiteral( tr("0 ROIs, 0 pixels") );
+    QString m_evalText = QStringLiteral( tr("Not assessed") );
+    QString m_classifyText = QStringLiteral( tr("Unclassified") );
+    QString m_accuracyText = QStringLiteral( tr("Accuracy not assessed") );
+    QString m_postText = QStringLiteral( tr("No post-processing applied") );
+    QString m_exportText = QStringLiteral( tr("Not exported") );
     bool m_hasSource = false;
 };

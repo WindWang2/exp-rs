@@ -65,24 +65,24 @@ void QgsGeoreferencerMainWindow::setupCentralWidget()
   mSrcCanvas->setObjectName( QStringLiteral( "rsSrcCanvas" ) );
   mSrcCanvas->setCanvasColor( Qt::white );
   mSrcCanvas->setToolTip( tr(
-    "源影像画布 (SRC / Warp)：加载待校正影像。\n"
-    "Add GCP 时先在此点击源点，再在右侧 REF 点击同名点（不弹坐标表单）。" ) );
+    tr("Source image canvas (SRC / Warp): loads the image to correct.\n")
+    tr("When adding a GCP, click the source point here first, then the conjugate point on the REF side (no coordinate form pops up).") ) );
 
   mDstCanvas = new QgsMapCanvas( this );
   mDstCanvas->setObjectName( QStringLiteral( "rsRefCanvas" ) );
   mDstCanvas->setCanvasColor( Qt::white );
   mDstCanvas->setToolTip( tr(
-    "参考影像画布 (REF / Base)：加载已配准参考影像。\n"
-    "Add GCP 时在此点击与源点对应的同名位置，完成一对控制点。" ) );
+    tr("Reference image canvas (REF / Base): loads the registered reference image.\n")
+    tr("When adding a GCP, click the conjugate position corresponding to the source point here to complete the control point pair.") ) );
 
   QWidget *srcPanel = makeCanvasPanel(
     mSrcCanvas, &mSrcLayerLabel,
-    tr( "源 (Warp)" ),
+    tr( "Source (Warp)" ),
     QStringLiteral( "rsSrcCanvasPanel" ),
     QStringLiteral( "rsSrcLayerLabel" ) );
   QWidget *refPanel = makeCanvasPanel(
     mDstCanvas, &mDstLayerLabel,
-    tr( "基准 (Base)" ),
+    tr( "Base" ),
     QStringLiteral( "rsRefCanvasPanel" ),
     QStringLiteral( "rsRefLayerLabel" ) );
   // Role-specific empty captions (makeCanvasPanel used role as prefix once).
@@ -105,14 +105,14 @@ void QgsGeoreferencerMainWindow::setupCentralWidget()
     mSyncZoomAction->setCheckable( true );
     mSyncZoomAction->setChecked( false );
     mSyncZoomAction->setToolTip( tr(
-      "同步缩放（默认关闭）：仅当 SRC 与 REF 为同一 CRS 且范围相近时使用。\n"
-      "已配准影像对请保持关闭，否则取点坐标会错乱、残差异常。" ) );
+      tr("Sync zoom (off by default): use only when SRC and REF share a CRS and similar extents.\n")
+      tr("Keep Sync zoom off for already-registered image pairs, otherwise picked coordinates scramble and residuals go wild.") ) );
     connect( mSyncZoomAction, &QAction::toggled, this, [this]( bool on ) {
       if ( mSyncCtl )
         mSyncCtl->setEnabled( on );
       if ( on && statusBar() )
         statusBar()->showMessage(
-          tr( "已开启 Sync zoom — 请确认两侧 CRS 一致，否则 GCP 坐标可能错误" ), 6000 );
+          tr( "Sync zoom enabled — confirm both sides share the same CRS, otherwise GCP coordinates may be wrong" ), 6000 );
     } );
   }
 }
@@ -125,21 +125,21 @@ void QgsGeoreferencerMainWindow::setupMenus()
     tr( "Load reference raster from file..." ),
     this, QOverload<>::of( &QgsGeoreferencerMainWindow::loadReferenceRaster ) );
   mOpenRefFileAction->setToolTip( tr(
-    "从文件打开参考影像到右侧 REF（Base），作为 GCP 目标与对齐基准。" ) );
+    tr("Opens the reference image from a file into the right REF (Base) side, as the GCP target and alignment base.") ) );
   mOpenRefFileAction->setStatusTip( mOpenRefFileAction->toolTip() );
   mOpenRefLayerAction = fileMenu->addAction(
     tr( "Load reference from project layer..." ),
     this, &QgsGeoreferencerMainWindow::loadReferenceFromProjectLayer );
   mOpenRefLayerAction->setToolTip( tr(
-    "从主工程图层列表选择栅格作为参考影像（Base）。" ) );
+    tr("Chooses a raster from the main project layer list as the reference image (Base).") ) );
   mOpenRefLayerAction->setStatusTip( mOpenRefLayerAction->toolTip() );
   fileMenu->addSeparator();
   auto *loadPts = fileMenu->addAction( tr( "Load .points..." ), this, &QgsGeorefShellWindow::loadPoints );
-  loadPts->setToolTip( tr( "导入已保存的控制点文件。" ) );
+  loadPts->setToolTip( tr( "Import a saved control point file." ) );
   auto *savePts = fileMenu->addAction( tr( "Save .points..." ), this, &QgsGeorefShellWindow::savePoints );
-  savePts->setToolTip( tr( "导出当前控制点，关闭窗口前若有未保存更改也会提示。" ) );
+  savePts->setToolTip( tr( "Exports the current control points; unsaved changes are flagged before the window closes." ) );
   fileMenu->addSeparator();
-  fileMenu->addAction( tr( "Close" ), this, &QWidget::close )->setToolTip( tr( "关闭本窗口（不影响 Image 2 Map）。" ) );
+  fileMenu->addAction( tr( "Close" ), this, &QWidget::close )->setToolTip( tr( "Closes this window (does not affect Image to Map)." ) );
   addStandardMenuBar();
 }
 
@@ -148,7 +148,7 @@ void QgsGeoreferencerMainWindow::setupToolbars()
   mToolBar = addToolBar( tr( "Tools" ) );
   mToolBar->setObjectName( QStringLiteral( "rsGeorefToolBar" ) );
   mToolBar->setMovable( false );
-  mToolBar->setToolTip( tr( "Image 2 Image 工具：导航、双影像配准、SIFT 与运行。" ) );
+  mToolBar->setToolTip( tr( "Image-to-Image tool: navigation, two-image registration, SIFT and run." ) );
 
   addCanvasNavigationActions( mToolBar, QStringLiteral( "rsGeoref" ) );
   mToolBar->addSeparator();
@@ -156,33 +156,33 @@ void QgsGeoreferencerMainWindow::setupToolbars()
   mToolBar->addSeparator();
 
   mSyncZoomAction = mToolBar->addAction(
-    QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "同步缩放" ) );
+    QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Sync Zoom" ) );
   mSyncZoomAction->setObjectName( QStringLiteral( "rsGeorefSyncZoomAction" ) );
   mSyncZoomAction->setToolTip( tr(
-    "同步缩放（默认关）：两侧 CRS 一致且范围相近时才建议开启。\n"
-    "不同 CRS 时联动会弄乱取点坐标。" ) );
+    tr("Sync zoom (off by default): enable only when both sides share a CRS and similar extents.\n")
+    tr("With different CRSs, linking scrambles picked coordinates.") ) );
   mSyncZoomAction->setStatusTip( mSyncZoomAction->toolTip() );
   mSyncZoomAction->setWhatsThis( mSyncZoomAction->toolTip() );
 
   mSiftAction = mToolBar->addAction(
     QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ),
-    tr( "SIFT 自动匹配" ),
+    tr( "SIFT Auto Matching" ),
     this, &QgsGeoreferencerMainWindow::runSiftMatch );
   mSiftAction->setObjectName( QStringLiteral( "rsGeorefSiftAction" ) );
   mSiftAction->setToolTip( tr(
-    "SIFT 自动匹配：需已打开 SRC 与参考影像。提取特征并筛选内点后，可批量添加 GCP。\n"
-    "需要 OpenCV；仅 Image 2 Image 提供。" ) );
+    tr("SIFT auto-matching: SRC and the reference image must be open. After feature extraction and inlier filtering, GCPs can be added in batch.\n")
+    tr("Needs OpenCV; provided by Image to Image only.") ) );
   mSiftAction->setStatusTip( mSiftAction->toolTip() );
   mSiftAction->setWhatsThis( mSiftAction->toolTip() );
 
   mTemplateMatchAction = mToolBar->addAction(
     QIcon( QStringLiteral( ":/icons/select" ) ),
-    tr( "模板匹配" ),
+    tr( "Template Matching" ),
     this, &QgsGeoreferencerMainWindow::runTemplateMatch );
   mTemplateMatchAction->setObjectName( QStringLiteral( "rsGeorefTemplateMatchAction" ) );
   mTemplateMatchAction->setToolTip( tr(
-    "模板匹配（NCC）：利用源影像初始地理坐标预测参考影像搜索区，再做相关匹配。\n"
-    "适合已有近似坐标的遥感影像；可网格采样或用现有粗 GCP 作种子。需要 OpenCV。" ) );
+    tr("Template matching (NCC): predicts the reference search area from the source image's initial geocoordinates, then runs correlation matching.\n")
+    tr("Suits remote-sensing imagery with approximate coordinates; grid sampling or existing rough GCPs serve as seeds. Needs OpenCV.") ) );
   mTemplateMatchAction->setStatusTip( mTemplateMatchAction->toolTip() );
   mTemplateMatchAction->setWhatsThis( mTemplateMatchAction->toolTip() );
 
@@ -193,31 +193,31 @@ QString QgsGeoreferencerMainWindow::windowHelpText() const
 {
   return tr(
     "<b>Image Registration · Image 2 Image</b><br>"
-    "双影像配准：左侧源影像 (Warp)，右侧参考影像 (Base)。<br><br>"
-    "<b>典型流程</b><br>"
-    "1. 打开源影像：从文件 或 从主工程图层<br>"
-    "2. 打开参考影像：从文件 或 从主工程图层<br>"
-    "3. 两侧都打开后，Add / Move / Delete GCP 才可用<br>"
-    "4. 导航：平移 / 放大 / 缩小；适合源 / 适合参考 / 适合两侧<br>"
-    "5. 点选 Add GCP：先 SRC 再 REF（右键取消未完成源点）<br>"
-    "6. 可选：模板匹配（需 SRC 初始坐标）/ SIFT、Sync zoom → 设置输出 → 运行<br><br>"
-    "不含 RPC（RPC 请用 Image 2 Map）。" );
+    tr("Two-image registration: source image (Warp) on the left, reference image (Base) on the right.<br><br>")
+    tr("<b>Typical Workflow</b><br>")
+    tr("1. Open the source image: from a file or a main project layer<br>")
+    tr("2. Open the reference image: from a file or a main project layer<br>")
+    tr("3. Add / Move / Delete GCP become available once both sides are open<br>")
+    tr("4. Navigation: pan / zoom in / zoom out; fit source / fit reference / fit both<br>")
+    tr("5. Press Add GCP: SRC first, then REF (right-click to cancel an unfinished source point)<br>")
+    tr("6. Optionally: template matching (needs SRC initial coordinates) / SIFT, Sync zoom → set output → run<br><br>")
+    tr("No RPC (use Image to Map for RPC).") );
 }
 
 void QgsGeoreferencerMainWindow::runSiftMatch()
 {
 #ifndef SICNU_HAS_OPENCV
-  statusBar()->showMessage( tr( "OpenCV 不可用 — SIFT 已禁用" ), 5000 );
+  statusBar()->showMessage( tr( "OpenCV unavailable — SIFT disabled" ), 5000 );
   return;
 #else
   if ( !mRefRaster )
   {
-    statusBar()->showMessage( tr( "请先 File → Load reference raster…" ), 5000 );
+    statusBar()->showMessage( tr( "First use File → Load reference raster..." ), 5000 );
     return;
   }
   if ( mSourceRasterPath.isEmpty() )
   {
-    statusBar()->showMessage( tr( "请先打开 SRC 影像" ), 5000 );
+    statusBar()->showMessage( tr( "Open the SRC image first" ), 5000 );
     return;
   }
   RsSiftDialog dlg( this );
@@ -231,7 +231,7 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
 
   sicnu::jobs::JobRequest req;
   req.algorithmId = "module:georef:sift";
-  req.title = tr( "SIFT 匹配" ).toStdString();
+  req.title = tr( "SIFT Matching" ).toStdString();
   req.source = "module";
   req.exclusive = true;
 
@@ -281,26 +281,26 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
 
                      if ( info.status == sicnu::TaskStatus::Canceled )
                      {
-                       statusBar()->showMessage( tr( "SIFT 已取消" ), 3000 );
+                       statusBar()->showMessage( tr( "SIFT cancelled" ), 3000 );
                        return;
                      }
                      if ( info.status != sicnu::TaskStatus::Completed || !r.ok() )
                      {
                        statusBar()->showMessage(
-                         tr( "SIFT 失败：%1" )
+                         tr( "SIFT failed: %1" )
                            .arg( r.errorMessage.isEmpty()
                                    ? ( !info.errorMessage.isEmpty() ? info.errorMessage
-                                                                   : tr( "未知错误" ) )
+                                                                   : tr( "Unknown error" ) )
                                    : r.errorMessage ),
                          5000 );
                        return;
                      }
 
-                     const QString msg = tr( "找到 %1 对匹配，内点 %2 个 (%3%)，是否全部采用？" )
+                     const QString msg = tr( "Found %1 matches, %2 inliers (%3%). Accept all of them?" )
                                            .arg( r.totalMatches )
                                            .arg( r.inliers.size() )
                                            .arg( int( r.inlierRatio * 100 ) );
-                     if ( QMessageBox::question( this, tr( "SIFT 匹配结果" ), msg ) != QMessageBox::Yes )
+                     if ( QMessageBox::question( this, tr( "SIFT Matching Results" ), msg ) != QMessageBox::Yes )
                        return;
                       QVector<QgsGcpPoint> pairs;
                       pairs.reserve( r.inliers.size() );
@@ -348,24 +348,24 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
                        Qgis::MessageLevel::Info );
                    } );
 
-  statusBar()->showMessage( tr( "SIFT 匹配中…" ), 3000 );
+  statusBar()->showMessage( tr( "SIFT matching..." ), 3000 );
 #endif
 }
 
 void QgsGeoreferencerMainWindow::runTemplateMatch()
 {
 #ifndef SICNU_HAS_OPENCV
-  statusBar()->showMessage( tr( "OpenCV 不可用 — 模板匹配已禁用" ), 5000 );
+  statusBar()->showMessage( tr( "OpenCV unavailable — template matching disabled" ), 5000 );
   return;
 #else
   if ( !mRefRaster )
   {
-    statusBar()->showMessage( tr( "请先 File → Load reference raster…" ), 5000 );
+    statusBar()->showMessage( tr( "First use File → Load reference raster..." ), 5000 );
     return;
   }
   if ( mSourceRasterPath.isEmpty() )
   {
-    statusBar()->showMessage( tr( "请先打开 SRC 影像" ), 5000 );
+    statusBar()->showMessage( tr( "Open the SRC image first" ), 5000 );
     return;
   }
 
@@ -379,7 +379,7 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
   {
     if ( georefSession().gcps().isEmpty() )
     {
-      statusBar()->showMessage( tr( "种子模式需要至少一个已有 GCP" ), 5000 );
+      statusBar()->showMessage( tr( "Seed mode needs at least one existing GCP" ), 5000 );
       return;
     }
     // Enabled source points of the session's GCP list are the match seeds.
@@ -426,7 +426,7 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
     }
     if ( seeds.isEmpty() )
     {
-      statusBar()->showMessage( tr( "没有可用的种子点" ), 5000 );
+      statusBar()->showMessage( tr( "No seed points available" ), 5000 );
       return;
     }
   }
@@ -442,7 +442,7 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
 
   sicnu::jobs::JobRequest req;
   req.algorithmId = "module:georef:template_match";
-  req.title = tr( "模板匹配" ).toStdString();
+  req.title = tr( "Template Matching" ).toStdString();
   req.source = "module";
   req.exclusive = true;
 
@@ -493,25 +493,25 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
 
                      if ( info.status == sicnu::TaskStatus::Canceled )
                      {
-                       statusBar()->showMessage( tr( "模板匹配已取消" ), 3000 );
+                       statusBar()->showMessage( tr( "Template matching cancelled" ), 3000 );
                        return;
                      }
                      if ( info.status != sicnu::TaskStatus::Completed || !r.ok() )
                      {
                        statusBar()->showMessage(
-                         tr( "模板匹配失败：%1" )
+                         tr( "Template matching failed: %1" )
                            .arg( r.errorMessage.isEmpty()
                                    ? ( !info.errorMessage.isEmpty() ? info.errorMessage
-                                                                   : tr( "未知错误" ) )
+                                                                   : tr( "Unknown error" ) )
                                    : r.errorMessage ),
                          6000 );
                        return;
                      }
 
-                     const QString msg = tr( "尝试 %1 点，接受 %2 对匹配，是否写入 GCP 列表？" )
+                     const QString msg = tr( "Tried %1 points, accepted %2 match pairs. Write them into the GCP list?" )
                                            .arg( r.attempted )
                                            .arg( r.accepted );
-                     if ( QMessageBox::question( this, tr( "模板匹配结果" ), msg ) != QMessageBox::Yes )
+                     if ( QMessageBox::question( this, tr( "Template Matching Results" ), msg ) != QMessageBox::Yes )
                        return;
 
                      QVector<QgsGcpPoint> pairs;
@@ -559,10 +559,10 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
                        QStringLiteral( "Georeferencer" ),
                        Qgis::MessageLevel::Info );
                      statusBar()->showMessage(
-                       tr( "已添加 %1 个模板匹配 GCP" ).arg( r.accepted ), 5000 );
+                       tr( "Added %1 template-matching GCPs" ).arg( r.accepted ), 5000 );
                    } );
 
-  statusBar()->showMessage( tr( "模板匹配中…" ), 3000 );
+  statusBar()->showMessage( tr( "Template matching..." ), 3000 );
 #endif
 }
 
@@ -579,7 +579,7 @@ void QgsGeoreferencerMainWindow::loadReferenceRaster()
 void QgsGeoreferencerMainWindow::loadReferenceFromProjectLayer()
 {
   QgsRasterLayer *picked = pickProjectRasterLayer(
-    tr( "从主工程选择参考影像 (Base)" ) );
+    tr( "Select Reference Image from Main Project (Base)" ) );
   if ( !picked )
     return;
   loadReferenceRaster( picked->source() );
@@ -589,7 +589,7 @@ void QgsGeoreferencerMainWindow::loadReferenceFromProjectLayer()
     // Layer was created with file basename; caption already set — refresh name tip.
     updateDestLayerCaption(
       picked->name(),
-      tr( "参考影像（基准 / Base）— 来自主工程图层\n图层: %1\n路径: %2" )
+      tr( "Reference image (Base) — from a main project layer\nLayer: %1\nPath: %2" )
         .arg( picked->name(), picked->source() ) );
   }
 }
@@ -607,7 +607,7 @@ bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
     SICNU_LOG_ERROR( SicnuLogTags::Georeferencing, QString( "Failed to open reference raster: %1" ).arg( path ) );
     delete layer;
     if ( statusBar() )
-      statusBar()->showMessage( tr( "无法打开参考影像: %1" ).arg( path ), 5000 );
+      statusBar()->showMessage( tr( "Cannot open the reference image: %1" ).arg( path ), 5000 );
     return false;
   }
   if ( mDstSession )
@@ -649,7 +649,7 @@ bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
 
   updateDestLayerCaption(
     layer->name(),
-    tr( "参考影像（基准 / Base）\n图层: %1\n路径: %2\nCRS: %3" )
+    tr( "Reference image (Base)\nLayer: %1\nPath: %2\nCRS: %3" )
       .arg( layer->name(), path,
             layer->crs().isValid() ? layer->crs().authid() : tr( "—" ) ) );
   updateGcpTableRasterPaths();
@@ -657,7 +657,7 @@ bool QgsGeoreferencerMainWindow::loadReferenceRaster( const QString &path )
   refreshFit();
   mGeorefSession.saveWorkflow( captureWorkflowSnapshot() );
   if ( statusBar() )
-    statusBar()->showMessage( tr( "已加载参考影像 (Base): %1" ).arg( layer->name() ), 4000 );
+    statusBar()->showMessage( tr( "Loaded reference image (Base): %1" ).arg( layer->name() ), 4000 );
   return true;
 }
 
@@ -690,7 +690,7 @@ void QgsGeoreferencerMainWindow::applyShellSpecific( const RsGeoreferencingSessi
     // Caption only — full layer reload is user-driven if store was empty.
     updateDestLayerCaption(
       QFileInfo( s.lastRefPath ).fileName(),
-      tr( "参考影像（基准 / Base）\n路径: %1" ).arg( s.lastRefPath ) );
+      tr( "Reference image (Base)\nPath: %1" ).arg( s.lastRefPath ) );
   }
   if ( mSyncZoomAction )
     mSyncZoomAction->setChecked( s.syncZoom );

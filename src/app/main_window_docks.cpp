@@ -67,7 +67,7 @@ void QgisDesktopWindow::setupDockWidgets()
 {
     // View layer tree (Left) — presentation stack of the active Display View only.
     // Project data identity lives in Data Manager (tabified with this dock).
-    m_layersDock = new QgsDockWidget( tr( "视图图层" ), this );
+    m_layersDock = new QgsDockWidget( tr( "View Layers" ), this );
     m_layersDock->setObjectName( "layersDock" ); // stable for saveState / layout
     m_layersDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
 
@@ -85,9 +85,9 @@ void QgisDesktopWindow::setupDockWidgets()
 
     m_layersEmptyState = new sicnu::RsEmptyStateWidget(
         QStringLiteral( "l_yer_st_ck" ),
-        tr( "暂无图层" ),
-        tr( "从数据管理面板添加或直接打开遥感影像与矢量数据" ),
-        tr( "添加图层..." ),
+        tr( "No layers yet" ),
+        tr( "Add or open remote-sensing rasters and vector data from the Data Management panel" ),
+        tr( "Add Layer..." ),
         m_layersStack );
     connect( m_layersEmptyState, &sicnu::RsEmptyStateWidget::actionClicked, this, [this]() {
         importLayer();
@@ -102,7 +102,7 @@ void QgisDesktopWindow::setupDockWidgets()
 
     // Browser Panel (Left, below layers)
     m_browserModel = new QgsBrowserGuiModel( this );
-    m_browserDock = new QgsBrowserDockWidget( tr( "文件浏览" ), m_browserModel, this );
+    m_browserDock = new QgsBrowserDockWidget( tr( "File Browser" ), m_browserModel, this );
     m_browserDock->setObjectName( "browserDock" );
     m_browserDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
     addDockWidget( Qt::LeftDockWidgetArea, m_browserDock );
@@ -121,7 +121,7 @@ void QgisDesktopWindow::setupDockWidgets()
     // ProjectContext exists (setupDockWidgets runs before context creation).
 
     // Processing Toolbox Panel (Right, with Overview)
-    m_processingDock = new QgsDockWidget( tr( "处理工具箱" ), this );
+    m_processingDock = new QgsDockWidget( tr( "Processing Toolbox" ), this );
     m_processingDock->setObjectName("processingDock");
     m_processingDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
 
@@ -133,7 +133,7 @@ void QgisDesktopWindow::setupDockWidgets()
 
     auto *searchEdit = new QgsFilterLineEdit(toolboxContainer);
     searchEdit->setShowSearchIcon(true);
-    searchEdit->setPlaceholderText(tr("搜索算法..."));
+    searchEdit->setPlaceholderText(tr("Search algorithms..."));
     toolboxLayout->addWidget(searchEdit);
 
     m_toolboxView = new QgsProcessingToolboxTreeView( toolboxContainer,
@@ -154,14 +154,14 @@ void QgisDesktopWindow::setupDockWidgets()
 
 #ifdef SICNU_EMBED_PYTHON
     // Python Console (lazy-loaded on first use)
-    m_pythonDock = new QgsDockWidget(tr("Python 控制台"), this);
+    m_pythonDock = new QgsDockWidget(tr("Python Console"), this);
     m_pythonDock->setObjectName("pythonDock");
     m_pythonDock->setWidget(new QWidget(m_pythonDock)); // Placeholder
     addDockWidget(Qt::BottomDockWidgetArea, m_pythonDock);
     m_pythonDock->hide(); // Hidden until first use
 
     // Python Script Editor Dock (lazy-loaded on first use)
-    m_pythonScriptEditorDock = new QgsDockWidget(tr("Python 脚本编辑器"), this);
+    m_pythonScriptEditorDock = new QgsDockWidget(tr("Python Script Editor"), this);
     m_pythonScriptEditorDock->setObjectName("pythonScriptEditorDock");
     m_pythonScriptEditorDock->setWidget(new QWidget(m_pythonScriptEditorDock)); // Placeholder
     addDockWidget(Qt::BottomDockWidgetArea, m_pythonScriptEditorDock);
@@ -193,7 +193,7 @@ void QgisDesktopWindow::setupDockWidgets()
             // Check if already in favorites
             bool isFav = QgsGui::processingFavoriteAlgorithmManager()->isFavorite(algId);
             if (isFav) {
-                QAction *removeFav = menu.addAction(tr("从收藏夹中移除"));
+                QAction *removeFav = menu.addAction(tr("Remove from Favorites"));
                 connect(removeFav, &QAction::triggered, this, [this, algId]() {
                     QgsGui::processingFavoriteAlgorithmManager()->remove(algId);
                     m_toolboxView->setRegistry(QgsApplication::processingRegistry(),
@@ -201,7 +201,7 @@ void QgisDesktopWindow::setupDockWidgets()
                         QgsGui::processingFavoriteAlgorithmManager());
                 });
             } else {
-                QAction *addFav = menu.addAction(tr("添加到收藏夹"));
+                QAction *addFav = menu.addAction(tr("Add to Favorites"));
                 connect(addFav, &QAction::triggered, this, [this, algId]() {
                     QgsGui::processingFavoriteAlgorithmManager()->add(algId);
                     m_toolboxView->setRegistry(QgsApplication::processingRegistry(),
@@ -211,7 +211,7 @@ void QgisDesktopWindow::setupDockWidgets()
             }
 
             // Open algorithm action
-            QAction *openAlg = menu.addAction(tr("打开算法"));
+            QAction *openAlg = menu.addAction(tr("Open Algorithm"));
             connect(openAlg, &QAction::triggered, this, [this, algId]() {
                 openProcessingAlgorithm(algId);
             });
@@ -221,7 +221,7 @@ void QgisDesktopWindow::setupDockWidgets()
 
 
     // Overview Panel (Right, tabified with Processing Toolbox)
-    m_overviewDock = new QgsDockWidget( tr( "鹰眼视图" ), this );
+    m_overviewDock = new QgsDockWidget( tr( "Overview Map" ), this );
     m_overviewDock->setObjectName("overviewDock");
     m_overviewDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
     m_overviewCanvas = new QgsMapOverviewCanvas(m_overviewDock, m_mapCanvas);
@@ -232,19 +232,19 @@ void QgisDesktopWindow::setupDockWidgets()
     m_processingDock->raise();
 
     // Identify Results Panel (Right, tabified with Processing/Overview)
-    m_identifyDock = new QgsDockWidget(tr("要素识别"), this);
+    m_identifyDock = new QgsDockWidget(tr("Identify Features"), this);
     m_identifyDock->setObjectName("identifyDock");
     m_identifyDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
 
     m_identifyResults = new QTextBrowser(m_identifyDock);
     m_identifyResults->setOpenExternalLinks(false);
-    m_identifyResults->setPlaceholderText(tr("使用要素识别工具在地图上点击以查看要素详情。"));
+    m_identifyResults->setPlaceholderText(tr("Click features on the map with the Identify tool to see their details."));
     m_identifyDock->setWidget(m_identifyResults);
     addDockWidget(Qt::RightDockWidgetArea, m_identifyDock);
     tabifyDockWidget(m_overviewDock, m_identifyDock);
 
     // Spectral Profile Panel (Right, tabified with Identify Results)
-    m_spectralDock = new QgsDockWidget(tr("光谱曲线"), this);
+    m_spectralDock = new QgsDockWidget(tr("Spectral Curve"), this);
     m_spectralDock->setObjectName("spectralDock");
     m_spectralDock->setAllowedAreas(Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
 
@@ -254,7 +254,7 @@ void QgisDesktopWindow::setupDockWidgets()
     tabifyDockWidget(m_identifyDock, m_spectralDock);
 
     // Display stretch panel (renderer only — no export; like layer symbology stretch)
-    m_histogramStretchDock = new QgsDockWidget( tr( "显示拉伸" ), this );
+    m_histogramStretchDock = new QgsDockWidget( tr( "Display Stretch" ), this );
     m_histogramStretchDock->setObjectName( "histogramStretchDock" );
     m_histogramStretchDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
 
@@ -292,7 +292,7 @@ void QgisDesktopWindow::setupDockWidgets()
     auto *workflowWidget = new GuidedWorkflowWidget(this);
     m_workflowDock = new QgsDockWidget(this);
     m_workflowDock->setObjectName("workflowDock");
-    m_workflowDock->setWindowTitle(tr("引导式工作流"));
+    m_workflowDock->setWindowTitle(tr("Guided Workflow"));
     m_workflowDock->setWidget(workflowWidget);
     addDockWidget(Qt::RightDockWidgetArea, m_workflowDock);
     tabifyDockWidget(m_processingDock, m_workflowDock);
@@ -370,7 +370,7 @@ void QgisDesktopWindow::setupDataManagerPanel()
     m_workspaceBrowserPanel = new sicnu::app::WorkspaceBrowserPanel( this );
     m_workspaceBrowserPanel->setWorkspaceService(
         &m_projectContext->workspaceService() );
-    m_workspaceBrowserDock = new QDockWidget( tr( "工作区治理" ), this );
+    m_workspaceBrowserDock = new QDockWidget( tr( "Workspace Governance" ), this );
     m_workspaceBrowserDock->setWidget( m_workspaceBrowserPanel );
     // Governance rows open on the map through the Data/Display seam.
     connect( m_workspaceBrowserPanel, &sicnu::app::WorkspaceBrowserPanel::openPathRequested,
@@ -385,7 +385,7 @@ void QgisDesktopWindow::setupDataManagerPanel()
 
     m_dataManagerPanel =
         new sicnu::DataManagerPanel( &m_projectContext->dataManager(), this );
-    m_dataManagerPanel->setWindowTitle( tr( "数据管理" ) );
+    m_dataManagerPanel->setWindowTitle( tr( "Data Management" ) );
     addDockWidget( Qt::LeftDockWidgetArea, m_dataManagerPanel );
     if ( m_layersDock )
         tabifyDockWidget( m_layersDock, m_dataManagerPanel );
@@ -402,8 +402,8 @@ void QgisDesktopWindow::setupDataManagerPanel()
              || !m_activeViewHost->displayAsset( assetId ) )
         {
             QMessageBox::warning(
-                this, tr( "添加到显示" ),
-                tr( "无法将数据资产添加到当前视图。" ) );
+                this, tr( "Add to Display" ),
+                tr( "Cannot add the data assets to the current view." ) );
         }
     } );
 
@@ -414,15 +414,15 @@ void QgisDesktopWindow::setupDataManagerPanel()
         const sicnu::data::UnloadPlan plan = dataManager.planUnload( assetId );
         if ( confirm )
         {
-            QString detail = tr( "从工程卸载此数据资产？" );
+            QString detail = tr( "Unload this data asset from the project?" );
             if ( !plan.activeLeases().isEmpty() )
             {
-                detail = tr( "该资产正被 %1 个显示/处理租约引用。卸载将移除对应呈现。\n\n"
-                             "继续级联卸载？" )
+                detail = tr( "This asset is referenced by %1 display / processing leases. Unloading removes the corresponding presentation.\n\n"
+                             tr("Continue with the cascading unload?") )
                              .arg( plan.activeLeases().size() );
             }
             const auto choice = QMessageBox::question(
-                this, tr( "卸载数据资产" ), detail,
+                this, tr( "Unload Data Assets" ), detail,
                 QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
             if ( choice != QMessageBox::Yes )
                 return false;
@@ -439,23 +439,23 @@ void QgisDesktopWindow::setupDataManagerPanel()
         // Confirm path: if the user accepts and unload fails, surface a warning.
         sicnu::data::DataManager &dataManager = m_projectContext->dataManager();
         const sicnu::data::UnloadPlan plan = dataManager.planUnload( assetId );
-        QString detail = tr( "从工程卸载此数据资产？" );
+        QString detail = tr( "Unload this data asset from the project?" );
         if ( !plan.activeLeases().isEmpty() )
         {
-            detail = tr( "该资产正被 %1 个显示/处理租约引用。卸载将移除对应呈现。\n\n"
-                         "继续级联卸载？" )
+            detail = tr( "This asset is referenced by %1 display / processing leases. Unloading removes the corresponding presentation.\n\n"
+                         tr("Continue with the cascading unload?") )
                          .arg( plan.activeLeases().size() );
         }
         const auto choice = QMessageBox::question(
-            this, tr( "卸载数据资产" ), detail,
+            this, tr( "Unload Data Assets" ), detail,
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
         if ( choice != QMessageBox::Yes )
             return;
         if ( !unloadOne( assetId, false ) )
         {
             QMessageBox::warning(
-                this, tr( "卸载数据资产" ),
-                tr( "无法卸载该数据资产。" ) );
+                this, tr( "Unload Data Assets" ),
+                tr( "This data asset cannot be unloaded." ) );
         }
     } );
 
@@ -464,9 +464,9 @@ void QgisDesktopWindow::setupDataManagerPanel()
         if ( ids.isEmpty() || !m_projectContext )
             return;
         const auto choice = QMessageBox::question(
-            this, tr( "批量卸载" ),
-            tr( "从工程卸载选中的 %1 个数据资产？\n"
-                "若存在显示/处理引用，将级联移除对应呈现。" )
+            this, tr( "Batch Unload" ),
+            tr( "Unload the selected %1 data assets from the project?\n"
+                tr("If display / processing references exist, their presentations are removed cascadingly.") )
               .arg( ids.size() ),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
         if ( choice != QMessageBox::Yes )
@@ -484,12 +484,12 @@ void QgisDesktopWindow::setupDataManagerPanel()
         if ( failed > 0 )
         {
             QMessageBox::warning(
-                this, tr( "批量卸载" ),
-                tr( "完成：成功 %1，失败 %2。" ).arg( ok ).arg( failed ) );
+                this, tr( "Batch Unload" ),
+                tr( "Finished: %1 succeeded, %2 failed." ).arg( ok ).arg( failed ) );
         }
         else if ( statusBar() )
         {
-            statusBar()->showMessage( tr( "已卸载 %1 个数据资产" ).arg( ok ), 4000 );
+            statusBar()->showMessage( tr( "Unloaded %1 data assets" ).arg( ok ), 4000 );
         }
     } );
 
@@ -501,8 +501,8 @@ void QgisDesktopWindow::setupDataManagerPanel()
         if ( !promoted )
         {
             QMessageBox::warning(
-                this, tr( "提升为工程持久" ),
-                tr( "无法提升该临时数据资产。" ) );
+                this, tr( "Promote to Project Persistent" ),
+                tr( "This temporary data asset cannot be promoted." ) );
         }
     } );
 
@@ -514,17 +514,17 @@ void QgisDesktopWindow::setupDataManagerPanel()
         const auto snapshot = dataManager.asset( assetId );
         if ( !snapshot )
         {
-            QMessageBox::warning( this, tr( "重定位缺失源" ),
-                                  tr( "找不到该数据资产。" ) );
+            QMessageBox::warning( this, tr( "Re-link Missing Source" ),
+                                  tr( "This data asset cannot be found." ) );
             return;
         }
         const QString oldPath = snapshot->source().canonicalSource;
         const QString newPath = QFileDialog::getOpenFileName(
-            this, tr( "重定位缺失源 — 选择新的源文件" ), oldPath,
-            tr( "所有支持的文件 (*.tif *.tiff *.vrt *.shp *.gpkg *.geojson);;" )
-              + tr( "栅格 (*.tif *.tiff *.vrt);;" )
-              + tr( "矢量 (*.shp *.gpkg *.geojson);;" )
-              + tr( "所有文件 (*)" ) );
+            this, tr( "Re-link Missing Source — choose a new source file" ), oldPath,
+            tr( "All Supported Files (*.tif *.tiff *.vrt *.shp *.gpkg *.geojson);;" )
+              + tr( "Rasters (*.tif *.tiff *.vrt);;" )
+              + tr( "Vectors (*.shp *.gpkg *.geojson);;" )
+              + tr( "All Files (*)" ) );
         if ( newPath.isEmpty() )
             return;
         sicnu::data::SourceDescriptor replacement = snapshot->source();
@@ -533,15 +533,15 @@ void QgisDesktopWindow::setupDataManagerPanel()
             sicnu::data::RelocateRequest{ assetId, replacement } );
         if ( !result )
         {
-            QString detail = tr( "无法重定位该数据资产。" );
+            QString detail = tr( "This data asset cannot be re-linked." );
             if ( !result.diagnostics().isEmpty() )
                 detail = result.diagnostics().constFirst().message;
-            QMessageBox::warning( this, tr( "重定位缺失源" ), detail );
+            QMessageBox::warning( this, tr( "Re-link Missing Source" ), detail );
         }
         else if ( statusBar() )
         {
             statusBar()->showMessage(
-                tr( "已重定位资产 %1 → %2" ).arg( assetId.toString() ).arg( newPath ), 5000 );
+                tr( "Re-linked asset %1 → %2" ).arg( assetId.toString() ).arg( newPath ), 5000 );
         }
     } );
 
@@ -565,7 +565,7 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     // Do not tabify with Processing Toolbox — that stack made two UIs fight for the
     // same dock area. Processing stays available from 窗口 menu for experts.
     m_taskPanel = new TaskPanelHost( this );
-    m_taskPanelDock = new QgsDockWidget( tr( "任务" ), this );
+    m_taskPanelDock = new QgsDockWidget( tr( "Tasks" ), this );
     m_taskPanelDock->setObjectName( QStringLiteral( "rsTaskPanelDock" ) );
     m_taskPanelDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
     m_taskPanelDock->setWidget( m_taskPanel );

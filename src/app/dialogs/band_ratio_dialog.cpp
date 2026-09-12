@@ -53,55 +53,55 @@ void BandRatioDialog::setupUi()
   setupHelpBanner( mainLayout );
 
   // Input Data Group
-  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "输入数据" ) );
+  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "Input Data" ) );
   auto *inputForm = SicnuUi::makeFormLayout();
   inputForm->setContentsMargins( 0, 0, 0, 0 );
 
   m_layerCombo = new RasterLayerCombo( inputGroup );
   m_layerCombo->setObjectName( QStringLiteral( "bandRatioInputLayerCombo" ) );
-  SicnuDialogHelp::tip( m_layerCombo, tr( "选择待执行波段运算的栅格图层。" ) );
+  SicnuDialogHelp::tip( m_layerCombo, tr( "Select the raster layer for band math." ) );
   m_layerCombo->populate();
   connect( m_layerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &BandRatioDialog::onLayerChanged );
-  inputForm->addRow( tr( "输入栅格" ), m_layerCombo );
+  inputForm->addRow( tr( "Input Raster" ), m_layerCombo );
   qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( inputForm );
 
   // Parameters Group
-  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "运算参数" ) );
+  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "Operation Parameters" ) );
   auto *form = SicnuUi::makeFormLayout();
   form->setContentsMargins( 0, 0, 0, 0 );
 
   m_modeCombo = new QComboBox( paramGroup );
-  m_modeCombo->addItems( { tr( "波段比值 (Band Ratio)" ), tr( "IHS 颜色变换" ) } );
+  m_modeCombo->addItems( { tr( "Band Ratio" ), tr( "IHS Color Transform" ) } );
   SicnuDialogHelp::tip( m_modeCombo, tr(
-    "• 波段比值：分子波段 ÷ 分母波段\n• IHS 变换：RGB 三波段转换为强度 (Intensity)、色调 (Hue)、饱和度 (Saturation)" ) );
+    tr("• Band ratio: numerator band ÷ denominator band\n• IHS transform: converts the three RGB bands into intensity, hue and saturation") ) );
   connect( m_modeCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &BandRatioDialog::onModeChanged );
-  form->addRow( tr( "运算模式" ), m_modeCombo );
+  form->addRow( tr( "Operation Mode" ), m_modeCombo );
 
-  m_band1Label = new QLabel( tr( "分子波段" ), paramGroup );
+  m_band1Label = new QLabel( tr( "Numerator Band" ), paramGroup );
   m_band1Combo = new BandRoleCombo( paramGroup );
-  SicnuDialogHelp::tip( m_band1Combo, tr( "比值运算分子波段。" ) );
+  SicnuDialogHelp::tip( m_band1Combo, tr( "Numerator band of the ratio." ) );
   form->addRow( m_band1Label, m_band1Combo );
 
-  m_band2Label = new QLabel( tr( "分母波段" ), paramGroup );
+  m_band2Label = new QLabel( tr( "Denominator Band" ), paramGroup );
   m_band2Combo = new BandRoleCombo( paramGroup );
-  SicnuDialogHelp::tip( m_band2Combo, tr( "比值运算分母波段（请勿全为 0）。" ) );
+  SicnuDialogHelp::tip( m_band2Combo, tr( "Denominator band of the ratio (must not be all zeros)." ) );
   form->addRow( m_band2Label, m_band2Combo );
 
-  m_redLabel = new QLabel( tr( "红光波段 R" ), paramGroup );
+  m_redLabel = new QLabel( tr( "Red Band (R)" ), paramGroup );
   m_redCombo = new BandRoleCombo( paramGroup );
-  SicnuDialogHelp::tip( m_redCombo, tr( "IHS 变换红色分量波段。" ) );
+  SicnuDialogHelp::tip( m_redCombo, tr( "Red component band of the IHS transform." ) );
   form->addRow( m_redLabel, m_redCombo );
 
-  m_greenLabel = new QLabel( tr( "绿光波段 G" ), paramGroup );
+  m_greenLabel = new QLabel( tr( "Green Band (G)" ), paramGroup );
   m_greenCombo = new BandRoleCombo( paramGroup );
-  SicnuDialogHelp::tip( m_greenCombo, tr( "IHS 变换绿色分量波段。" ) );
+  SicnuDialogHelp::tip( m_greenCombo, tr( "Green component band of the IHS transform." ) );
   form->addRow( m_greenLabel, m_greenCombo );
 
-  m_blueLabel = new QLabel( tr( "蓝光波段 B" ), paramGroup );
+  m_blueLabel = new QLabel( tr( "Blue Band (B)" ), paramGroup );
   m_blueCombo = new BandRoleCombo( paramGroup );
-  SicnuDialogHelp::tip( m_blueCombo, tr( "IHS 变换蓝色分量波段。" ) );
+  SicnuDialogHelp::tip( m_blueCombo, tr( "Blue component band of the IHS transform." ) );
   form->addRow( m_blueLabel, m_blueCombo );
 
   qobject_cast<QVBoxLayout *>( paramGroup->layout() )->addLayout( form );
@@ -185,7 +185,7 @@ void BandRatioDialog::onRun()
   {
     if ( band1Num < 1 || band2Num < 1 || band1Num == band2Num )
     {
-      QMessageBox::warning( this, dialogTitle(), tr( "请为波段比值选择两个不同的有效波段。" ) );
+      QMessageBox::warning( this, dialogTitle(), tr( "Select two different valid bands for the band ratio." ) );
       return;
     }
   }
@@ -193,7 +193,7 @@ void BandRatioDialog::onRun()
   {
     if ( redNum < 1 || greenNum < 1 || blueNum < 1 )
     {
-      QMessageBox::warning( this, dialogTitle(), tr( "请为 IHS 变换选择有效的 RGB 波段。" ) );
+      QMessageBox::warning( this, dialogTitle(), tr( "Select valid RGB bands for the IHS transform." ) );
       return;
     }
   }

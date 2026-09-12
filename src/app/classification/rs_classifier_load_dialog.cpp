@@ -20,18 +20,18 @@
 RsClassifierLoadDialog::RsClassifierLoadDialog( QWidget *parent )
   : QDialog( parent )
 {
-  setWindowTitle( tr( "加载分类器模型" ) );
+  setWindowTitle( tr( "Load Classifier Model" ) );
   SicnuUi::polishDialog( this, 440 );
 
   auto *layout = SicnuUi::makeDialogRootLayout( this );
   layout->addWidget( SicnuUi::makeHintLabel(
-    this, tr( "选择算法类型并指定已训练的 OpenCV 模型文件 (.yml)。" ) ) );
+    this, tr( "Choose the algorithm type and specify the trained OpenCV model file (.yml)." ) ) );
 
-  QFrame *sec = SicnuUi::makeSection( this, tr( "模型" ) );
-  mRbBayes = new QRadioButton( tr( "NormalBayes（最大似然）" ), sec );
-  SicnuDialogHelp::tip( mRbBayes, tr( "正态贝叶斯分类器：假定各类样本服从多元正态分布的最大似然模型" ) );
-  mRbSvm = new QRadioButton( tr( "SVM（RBF 核）" ), sec );
-  SicnuDialogHelp::tip( mRbSvm, tr( "支持向量机分类器：采用径向基核函数 (RBF) 处理非线性可分地物" ) );
+  QFrame *sec = SicnuUi::makeSection( this, tr( "Model" ) );
+  mRbBayes = new QRadioButton( tr( "Normal Bayes (maximum likelihood)" ), sec );
+  SicnuDialogHelp::tip( mRbBayes, tr( "Normal Bayes classifier: a maximum-likelihood model assuming multivariate normal class distributions" ) );
+  mRbSvm = new QRadioButton( tr( "SVM (RBF kernel)" ), sec );
+  SicnuDialogHelp::tip( mRbSvm, tr( "Support vector machine classifier: uses the radial basis kernel (RBF) for non-linearly separable land covers" ) );
   mRbBayes->setChecked( true );
   auto *grp = new QButtonGroup( this );
   grp->addButton( mRbBayes );
@@ -41,11 +41,11 @@ RsClassifierLoadDialog::RsClassifierLoadDialog( QWidget *parent )
 
   auto *pathRow = new QHBoxLayout;
   mPathEdit = new QLineEdit( sec );
-  mPathEdit->setPlaceholderText( tr( "模型文件路径 (.yml)" ) );
-  SicnuDialogHelp::tip( mPathEdit, tr( "已保存的 OpenCV 训练模型参数文件路径 (*.yml)" ) );
-  auto *browse = new QPushButton( tr( "浏览…" ), sec );
+  mPathEdit->setPlaceholderText( tr( "Model file path (.yml)" ) );
+  SicnuDialogHelp::tip( mPathEdit, tr( "Path of the saved OpenCV trained model parameter file (*.yml)" ) );
+  auto *browse = new QPushButton( tr( "Browse..." ), sec );
   SicnuUi::markSecondary( browse );
-  SicnuDialogHelp::tip( browse, tr( "浏览并选择分类器模型文件" ) );
+  SicnuDialogHelp::tip( browse, tr( "Browse and choose the classifier model file" ) );
   pathRow->addWidget( mPathEdit, 1 );
   pathRow->addWidget( browse );
   qobject_cast<QVBoxLayout *>( sec->layout() )->addLayout( pathRow );
@@ -55,11 +55,11 @@ RsClassifierLoadDialog::RsClassifierLoadDialog( QWidget *parent )
 
   auto *buttons = new QDialogButtonBox(
     QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this );
-  buttons->button( QDialogButtonBox::Ok )->setText( tr( "确定" ) );
-  buttons->button( QDialogButtonBox::Cancel )->setText( tr( "取消" ) );
+  buttons->button( QDialogButtonBox::Ok )->setText( tr( "OK" ) );
+  buttons->button( QDialogButtonBox::Cancel )->setText( tr( "Cancel" ) );
   SicnuUi::markPrimary( buttons->button( QDialogButtonBox::Ok ) );
-  auto *helpBtn = buttons->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
-  helpBtn->setToolTip( tr( "打开本对话框的帮助说明。" ) );
+  auto *helpBtn = buttons->addButton( tr( "Help" ), QDialogButtonBox::HelpRole );
+  helpBtn->setToolTip( tr( "Opens the help for this dialog." ) );
   connect( helpBtn, &QPushButton::clicked, this, [this]() {
     SicnuDialogHelp::showToolHelp( this, QStringLiteral( "classifier_load" ), windowTitle() );
   } );
@@ -81,8 +81,8 @@ QString RsClassifierLoadDialog::modelPath() const
 void RsClassifierLoadDialog::browseForFile()
 {
   const QString path = QFileDialog::getOpenFileName(
-    this, tr( "加载分类器模型" ), QString(),
-    tr( "OpenCV YAML (*.yml *.yaml *.xml);;所有文件 (*)" ) );
+    this, tr( "Load Classifier Model" ), QString(),
+    tr( "OpenCV YAML (*.yml *.yaml *.xml);;All Files (*)" ) );
   if ( !path.isEmpty() && mPathEdit )
     mPathEdit->setText( path );
 }

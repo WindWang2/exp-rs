@@ -48,15 +48,15 @@ QgsMapCoordsDialog::QgsMapCoordsDialog( QgsMapCanvas *qgisCanvas, QgsGeorefDataP
 
   setAttribute( Qt::WA_DeleteOnClose );
 
-  mPointFromCanvasPushButton = new QPushButton( QgsApplication::getThemeIcon( "georeferencer/mPushButtonPencil.svg" ), tr( "从地图取点" ) );
-  mPointFromCanvasPushButton->setToolTip( tr( "点击后在主地图上点选一点，自动填入坐标。" ) );
-  mPointFromCanvasPushButton->setStatusTip( tr( "从地图画布取点" ) );
+  mPointFromCanvasPushButton = new QPushButton( QgsApplication::getThemeIcon( "georeferencer/mPushButtonPencil.svg" ), tr( "Pick Point from Map" ) );
+  mPointFromCanvasPushButton->setToolTip( tr( "After clicking, pick a point on the main map and the coordinates fill in automatically." ) );
+  mPointFromCanvasPushButton->setStatusTip( tr( "Pick point from the map canvas" ) );
   mPointFromCanvasPushButton->setCheckable( true );
   buttonBox->addButton( mPointFromCanvasPushButton, QDialogButtonBox::ActionRole );
   mPointFromCanvasPushButton->setFocus();
 
-  auto *helpBtn = buttonBox->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
-  SicnuDialogHelp::tip( helpBtn, tr( "打开 GCP 目标坐标输入帮助说明。" ) );
+  auto *helpBtn = buttonBox->addButton( tr( "Help" ), QDialogButtonBox::HelpRole );
+  SicnuDialogHelp::tip( helpBtn, tr( "Opens help for entering GCP target coordinates." ) );
   connect( helpBtn, &QPushButton::clicked, this, [this]() {
     SicnuDialogHelp::showToolHelp( this, QStringLiteral( "map_coords" ), windowTitle() );
   } );
@@ -65,15 +65,15 @@ QgsMapCoordsDialog::QgsMapCoordsDialog( QgsMapCanvas *qgisCanvas, QgsGeorefDataP
   QgsDMSAndDDValidator *validator = new QgsDMSAndDDValidator( this );
   leXCoord->setValidator( validator );
   leYCoord->setValidator( validator );
-  SicnuDialogHelp::tip( leXCoord, tr( "目标 X 坐标（经度或投影东坐标，支持十进制度或度分秒 DMS）" ) );
-  SicnuDialogHelp::tip( leYCoord, tr( "目标 Y 坐标（纬度或投影北坐标，支持十进制度或度分秒 DMS）" ) );
+  SicnuDialogHelp::tip( leXCoord, tr( "Target X coordinate (longitude or projected easting; decimal degrees or DMS accepted)" ) );
+  SicnuDialogHelp::tip( leYCoord, tr( "Target Y coordinate (latitude or projected northing; decimal degrees or DMS accepted)" ) );
 
   mToolEmitPoint = new QgsGeorefMapToolEmitPoint( qgisCanvas );
   mToolEmitPoint->setButton( mPointFromCanvasPushButton );
 
   const QgsSettings settings;
   mMinimizeWindowCheckBox->setChecked( settings.value( u"/Plugin-GeoReferencer/Config/Minimize"_s, u"1"_s ).toBool() );
-  SicnuDialogHelp::tip( mMinimizeWindowCheckBox, tr( "点击「从地图取点」时自动最小化配准窗口，便于在主画布上选点" ) );
+  SicnuDialogHelp::tip( mMinimizeWindowCheckBox, tr( "Minimizes the registration window when 'Pick Point from Map' is clicked, making it easy to pick points on the main canvas" ) );
 
   connect( mPointFromCanvasPushButton, &QAbstractButton::clicked, this, &QgsMapCoordsDialog::setToolEmitPoint );
 
@@ -84,7 +84,7 @@ QgsMapCoordsDialog::QgsMapCoordsDialog( QgsMapCanvas *qgisCanvas, QgsGeorefDataP
   connect( leYCoord, &QLineEdit::textChanged, this, &QgsMapCoordsDialog::updateOK );
 
   mProjectionSelector->setCrs( mRasterCrs );
-  SicnuDialogHelp::tip( mProjectionSelector, tr( "指定 GCP 点的目标坐标参考系 (CRS)" ) );
+  SicnuDialogHelp::tip( mProjectionSelector, tr( "Target CRS for the GCP points" ) );
 
   SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "map_coords" ) );
 

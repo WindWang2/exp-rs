@@ -31,37 +31,37 @@ void ApplyMaskDialog::setupUi()
   setupHelpBanner( mainLayout );
 
   QGroupBox *inputGroup = setupInputGroup(
-    mainLayout, tr( "输入数据与掩膜栅格" ) );
+    mainLayout, tr( "Input Data and Mask Raster" ) );
   inputGroup->setToolTip(
-    tr( "将掩膜（1 = 被遮挡，0 = 有效）应用到产品栅格：被遮挡像元在所有波段置为 "
-        "NoData，得到分析就绪影像。" ) );
+    tr( "Applies the mask (1 = obscured, 0 = valid) to the product raster: obscured pixels are set to "
+        tr("NoData, yielding an analysis-ready image.") ) );
   auto *form = SicnuUi::makeFormLayout();
   qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( form );
 
   m_inputLayerCombo = new QComboBox( inputGroup );
   m_inputLayerCombo->setObjectName( QStringLiteral( "applyMaskInputCombo" ) );
-  SicnuDialogHelp::tip( m_inputLayerCombo, tr( "待掩膜的产品栅格（多波段）。" ) );
-  form->addRow( tr( "产品栅格" ), m_inputLayerCombo );
+  SicnuDialogHelp::tip( m_inputLayerCombo, tr( "Product raster to mask (multiband)." ) );
+  form->addRow( tr( "Product Raster" ), m_inputLayerCombo );
 
   m_maskLayerCombo = new QComboBox( inputGroup );
   m_maskLayerCombo->setObjectName( QStringLiteral( "applyMaskMaskCombo" ) );
   SicnuDialogHelp::tip( m_maskLayerCombo, tr(
-    "二值掩膜栅格（第 1 波段，>0 视为被遮挡）。通常是“QA 掩膜”对话框的输出；"
-    "网格不同且 CRS 相同时会自动最近邻对齐。" ) );
-  form->addRow( tr( "掩膜栅格" ), m_maskLayerCombo );
+    tr("A binary mask raster (band 1; > 0 means obscured). Usually the output of the 'QA Mask' dialog;")
+    tr("With different grids but the same CRS, nearest-neighbour alignment happens automatically.") ) );
+  form->addRow( tr( "Mask Raster" ), m_maskLayerCombo );
 
   QGroupBox *optGroup = setupAdvancedGroup(
-    mainLayout, tr( "高级选项与对齐" ) );
+    mainLayout, tr( "Advanced Options and Alignment" ) );
   optGroup->setToolTip(
-    tr( "默认复用输入波段自身的 NoData；仅在输入波段未定义 NoData 时才需要指定。" ) );
+    tr( "By default the input band's own NoData is reused; specify a value only when the input band has none." ) );
   auto *optForm = SicnuUi::makeFormLayout();
   qobject_cast<QVBoxLayout *>( optGroup->layout() )->addLayout( optForm );
 
-  m_useNoDataCheck = new QCheckBox( tr( "指定输出 NoData 值" ), optGroup );
+  m_useNoDataCheck = new QCheckBox( tr( "Specify the output NoData value" ), optGroup );
   m_useNoDataCheck->setObjectName( QStringLiteral( "applyMaskNoDataCheck" ) );
   SicnuDialogHelp::tip( m_useNoDataCheck, tr(
-    "勾选后，被遮挡像元写入该 NoData 值（替代输入波段自带 NoData）。"
-    "输入波段未定义 NoData 时此项必填。" ) );
+    tr("When ticked, obscured pixels are written with this NoData value (instead of the input band's own NoData).")
+    tr("Required when the input bands define no NoData.") ) );
 
   m_noDataSpin = new QDoubleSpinBox( optGroup );
   m_noDataSpin->setObjectName( QStringLiteral( "applyMaskNoDataSpin" ) );
@@ -69,19 +69,19 @@ void ApplyMaskDialog::setupUi()
   m_noDataSpin->setDecimals( 2 );
   m_noDataSpin->setValue( -9999.0 );
   m_noDataSpin->setEnabled( false );
-  SicnuDialogHelp::tip( m_noDataSpin, tr( "被掩膜遮挡像元的 NoData 替换填充值" ) );
+  SicnuDialogHelp::tip( m_noDataSpin, tr( "NoData replacement fill value for masked pixels" ) );
   auto *nodataRow = new QHBoxLayout;
   nodataRow->addWidget( m_useNoDataCheck );
   nodataRow->addWidget( m_noDataSpin, 1 );
-  optForm->addRow( tr( "NoData 覆盖" ), nodataRow );
+  optForm->addRow( tr( "NoData Override" ), nodataRow );
 
-  m_alignMaskCheck = new QCheckBox( tr( "自动对齐掩膜网格（最近邻，仅限相同 CRS）" ), optGroup );
+  m_alignMaskCheck = new QCheckBox( tr( "Align the mask grid automatically (nearest neighbour, same CRS only)" ), optGroup );
   m_alignMaskCheck->setObjectName( QStringLiteral( "applyMaskAlignCheck" ) );
   m_alignMaskCheck->setChecked( true );
   SicnuDialogHelp::tip( m_alignMaskCheck, tr(
-    "掩膜网格与产品不同（如 20 m SCL 对 10 m 产品）时，用最近邻采样把掩膜对齐到产品网格。"
-    "CRS 不一致始终报错，不会自动纠正。" ) );
-  optForm->addRow( tr( "网格对齐" ), m_alignMaskCheck );
+    tr("When the mask grid differs from the product (e.g. a 20 m SCL against a 10 m product), nearest-neighbour sampling aligns the mask to the product grid.")
+    tr("A CRS mismatch always raises an error; it is never corrected automatically.") ) );
+  optForm->addRow( tr( "Grid Alignment" ), m_alignMaskCheck );
 
   setupOutputRow( mainLayout );
   setupButtonBar( mainLayout );
@@ -169,13 +169,13 @@ bool ApplyMaskDialog::validateInputs()
 {
   if ( outputPath().isEmpty() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请指定输出文件。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "Specify the output file." ) );
     return false;
   }
   if ( m_inputLayerCombo->currentData().toString().isEmpty()
        || m_maskLayerCombo->currentData().toString().isEmpty() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请选择产品栅格与掩膜栅格。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "Select the product raster and the mask raster." ) );
     return false;
   }
   return true;
@@ -192,7 +192,7 @@ void ApplyMaskDialog::onRun()
     QgsProject::instance()->mapLayer( m_maskLayerCombo->currentData().toString() ) );
   if ( !input || !input->isValid() || !mask || !mask->isValid() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "所选栅格图层无效。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "The selected raster layer is invalid." ) );
     return;
   }
 

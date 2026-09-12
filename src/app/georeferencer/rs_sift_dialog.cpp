@@ -15,7 +15,7 @@
 RsSiftDialog::RsSiftDialog( QWidget *parent )
   : QDialog( parent )
 {
-  setWindowTitle( tr( "SIFT 自动匹配参数" ) );
+  setWindowTitle( tr( "SIFT Auto-Matching Parameters" ) );
   setObjectName( QStringLiteral( "rsSiftDialog" ) );
   SicnuUi::polishDialog( this, 420 );
   SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "sift_match" ) );
@@ -52,31 +52,31 @@ RsSiftDialog::RsSiftDialog( QWidget *parent )
   mMaxImageSide->setSuffix( QStringLiteral( " px" ) );
   mMaxImageSide->setValue( defaults.maxImageSide );
 
-  SicnuDialogHelp::tip( mContrast, tr( "特征对比度阈值，越大点越少越稳。" ) );
-  SicnuDialogHelp::tip( mMaxMatches, tr( "最大匹配对数。" ) );
-  SicnuDialogHelp::tip( mMinInlier, tr( "RANSAC 内点比例下限。" ) );
-  SicnuDialogHelp::tip( mRansacThresh, tr( "RANSAC 像素容差。" ) );
-  SicnuDialogHelp::tip( mMaxImageSide, tr( "匹配前最大边长（加速）。" ) );
+  SicnuDialogHelp::tip( mContrast, tr( "Feature contrast threshold; larger values give fewer but steadier points." ) );
+  SicnuDialogHelp::tip( mMaxMatches, tr( "Maximum number of matched pairs." ) );
+  SicnuDialogHelp::tip( mMinInlier, tr( "Minimum RANSAC inlier ratio." ) );
+  SicnuDialogHelp::tip( mRansacThresh, tr( "RANSAC pixel tolerance." ) );
+  SicnuDialogHelp::tip( mMaxImageSide, tr( "Maximum edge length before matching (speed-up)." ) );
 
   auto *root = SicnuUi::makeDialogRootLayout( this );
   root->addWidget( SicnuUi::makeHintLabel(
     this, SicnuDialogHelp::shortForTool( QStringLiteral( "sift_match" ),
-                                         tr( "SIFT 自动匹配" ) ) ) );
+                                         tr( "SIFT Auto Matching" ) ) ) );
 
-  QGroupBox *paramGroup = SicnuUi::makeGroup( this, tr( "SIFT 特征提取与匹配参数" ) );
+  QGroupBox *paramGroup = SicnuUi::makeGroup( this, tr( "SIFT Feature Extraction and Matching Parameters" ) );
   auto *form = SicnuUi::makeFormLayout( paramGroup );
-  form->addRow( tr( "对比度阈值" ), mContrast );
-  form->addRow( tr( "最多匹配数" ), mMaxMatches );
-  form->addRow( tr( "最小内点比" ), mMinInlier );
-  form->addRow( tr( "RANSAC 容差" ), mRansacThresh );
-  form->addRow( tr( "最大边长" ), mMaxImageSide );
+  form->addRow( tr( "Contrast Threshold" ), mContrast );
+  form->addRow( tr( "Maximum Matches" ), mMaxMatches );
+  form->addRow( tr( "Minimum Inlier Ratio" ), mMinInlier );
+  form->addRow( tr( "RANSAC Tolerance" ), mRansacThresh );
+  form->addRow( tr( "Maximum Edge Length" ), mMaxImageSide );
   root->addWidget( paramGroup );
 
   auto *buttons = new QDialogButtonBox(
     QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Help, this );
-  buttons->button( QDialogButtonBox::Ok )->setText( tr( "确定" ) );
-  buttons->button( QDialogButtonBox::Cancel )->setText( tr( "取消" ) );
-  buttons->button( QDialogButtonBox::Help )->setText( tr( "帮助" ) );
+  buttons->button( QDialogButtonBox::Ok )->setText( tr( "OK" ) );
+  buttons->button( QDialogButtonBox::Cancel )->setText( tr( "Cancel" ) );
+  buttons->button( QDialogButtonBox::Help )->setText( tr( "Help" ) );
   SicnuUi::markPrimary( buttons->button( QDialogButtonBox::Ok ) );
   SicnuUi::markSecondary( buttons->button( QDialogButtonBox::Cancel ) );
   SicnuUi::markSecondary( buttons->button( QDialogButtonBox::Help ) );

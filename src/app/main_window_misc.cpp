@@ -109,9 +109,9 @@ void QgisDesktopWindow::options()
 
         // Log-to-file takes effect after restart (sink is opened in main.cpp at startup).
         if ( dialog.logToFile() )
-            statusBar()->showMessage( tr( "首选项已保存（文件日志将在下次启动时生效）" ), 4000 );
+            statusBar()->showMessage( tr( "Preferences saved (file logging takes effect on next start)" ), 4000 );
         else
-            statusBar()->showMessage( tr( "首选项已保存" ), 3000 );
+            statusBar()->showMessage( tr( "Preferences saved" ), 3000 );
     }
 }
 
@@ -132,7 +132,7 @@ void QgisDesktopWindow::showProcessingHistory()
 {
     // Create a dialog to show processing history
     QDialog dialog(this);
-    dialog.setWindowTitle(tr("处理历史"));
+    dialog.setWindowTitle(tr("Processing History"));
     dialog.setMinimumSize(600, 400);
 
     auto *layout = new QVBoxLayout(&dialog);
@@ -140,7 +140,7 @@ void QgisDesktopWindow::showProcessingHistory()
     // Get history entries from the registry
     QgsHistoryProviderRegistry *historyReg = QgsGui::historyProviderRegistry();
     if (!historyReg) {
-        auto *label = new QLabel(tr("处理历史记录不可用。"), &dialog);
+        auto *label = new QLabel(tr("Processing history is unavailable."), &dialog);
         layout->addWidget(label);
         dialog.exec();
         return;
@@ -152,7 +152,7 @@ void QgisDesktopWindow::showProcessingHistory()
     layout->addWidget(historyWidget);
 
     // Add close button
-    auto *closeButton = new QPushButton(tr("关闭"), &dialog);
+    auto *closeButton = new QPushButton(tr("Close"), &dialog);
     connect(closeButton, &QPushButton::clicked, &dialog, &QDialog::accept);
     layout->addWidget(closeButton);
 
@@ -168,19 +168,19 @@ void QgisDesktopWindow::helpContents()
     viewer->raise();
     viewer->activateWindow();
 }
-void QgisDesktopWindow::checkVersion() { QMessageBox::information(this, tr("版本信息"), tr("SICNU GEO RS 遥感图像解译平台 v0.9.2-dev")); }
+void QgisDesktopWindow::checkVersion() { QMessageBox::information(this, tr("Version Information"), tr("SICNU GEO RS Remote-Sensing Image Interpretation Platform v0.9.2-dev")); }
 void QgisDesktopWindow::about()
 {
-    QMessageBox::about(this, tr("关于 RS Studio"),
-        tr("SICNU GEO RS 遥感图像解译与分析平台\n\n"
-           "专业级遥感数据处理与智能解译桌面端\n"
-           "基于 Qt 6 与现代遥感算法架构构建\n\n"
-           "版本：v0.9.2-dev\n\n"
-           "核心特性：\n"
-           "- 完整的多源栅格与矢量图层支持\n"
-           "- 高性能多波段渲染与实时色彩拉伸\n"
-           "- 坐标参考系统与投影智能转换\n"
-           "- 丰富的遥感处理工具箱与异步任务调度"));
+    QMessageBox::about(this, tr("About RS Studio"),
+        tr("SICNU GEO RS Remote-Sensing Image Interpretation and Analysis Platform\n\n"
+           tr("A professional desktop for remote-sensing data processing and intelligent interpretation\n")
+           tr("Built on Qt 6 and a modern remote-sensing algorithm architecture\n\n")
+           tr("Version: v0.9.2-dev\n\n")
+           tr("Key features:\n")
+           tr("- Full multi-source raster and vector layer support\n")
+           tr("- High-performance multiband rendering with real-time color stretching\n")
+           tr("- Smart CRS and projection transformations\n")
+           tr("- A rich remote-sensing toolbox with asynchronous task scheduling")));
 }
 
 void QgisDesktopWindow::loadSampleData()
@@ -221,9 +221,9 @@ void QgisDesktopWindow::loadSampleData()
     }
 
     if ( failed > 0 )
-        statusBar()->showMessage(tr("已加载 %1 个示例数据集（失败 %2 个）").arg(loaded).arg(failed), 5000);
+        statusBar()->showMessage(tr("Loaded %1 sample datasets (%2 failed)").arg(loaded).arg(failed), 5000);
     else
-        statusBar()->showMessage(tr("已加载 %1 个示例数据集").arg(loaded), 5000);
+        statusBar()->showMessage(tr("Loaded %1 sample datasets").arg(loaded), 5000);
 }
 
 void QgisDesktopWindow::showGuidedWorkflows()
@@ -282,7 +282,7 @@ QMenu *QgisDesktopWindow::createPopupMenu()
     };
 
     // ── 面板 ──────────────────────────────────────────────────────────────
-    makeSectionTitle( tr( "面板" ) );
+    makeSectionTitle( tr( "Panels" ) );
 
     QList<QAction *> panelActions;
     const QList<QDockWidget *> docks = findChildren<QDockWidget *>(
@@ -312,8 +312,8 @@ QMenu *QgisDesktopWindow::createPopupMenu()
         if ( !act->property( "fixed_title" ).toBool() )
         {
             const QString base = act->text().trimmed();
-            if ( !base.isEmpty() && !base.endsWith( tr( "面板" ) ) )
-                act->setText( tr( "%1 面板" ).arg( base ) );
+            if ( !base.isEmpty() && !base.endsWith( tr( "Panels" ) ) )
+                act->setText( tr( "%1 Panel" ).arg( base ) );
             act->setProperty( "fixed_title", true );
         }
         panelActions.append( act );
@@ -328,14 +328,14 @@ QMenu *QgisDesktopWindow::createPopupMenu()
 
     if ( panelActions.isEmpty() )
     {
-        QAction *empty = menu->addAction( tr( "（无面板）" ) );
+        QAction *empty = menu->addAction( tr( "(no panels)" ) );
         empty->setEnabled( false );
     }
 
     menu->addSeparator();
 
     // ── 工具栏（Ribbon 下方，最多两行）──────────────────────────────────
-    makeSectionTitle( tr( "工具栏" ) );
+    makeSectionTitle( tr( "Toolbar" ) );
 
     QList<QAction *> toolbarActions;
     const QList<QToolBar *> productBars = { m_mapToolsToolBar, m_digitizeToolBar };
@@ -357,17 +357,17 @@ QMenu *QgisDesktopWindow::createPopupMenu()
 
     if ( toolbarActions.isEmpty() )
     {
-        QAction *empty = menu->addAction( tr( "（无工具栏）" ) );
+        QAction *empty = menu->addAction( tr( "(no toolbars)" ) );
         empty->setEnabled( false );
     }
     else
     {
-        QAction *hint = menu->addAction( tr( "提示：工具栏显示在 Ribbon 下方（最多两行）" ) );
+        QAction *hint = menu->addAction( tr( "Tip: toolbars appear below the ribbon (up to two rows)" ) );
         hint->setEnabled( false );
     }
 
     menu->addSeparator();
-    menu->addAction( tr( "重置布局" ), this, &QgisDesktopWindow::resetPanelLayout );
+    menu->addAction( tr( "Reset Layout" ), this, &QgisDesktopWindow::resetPanelLayout );
 
     return menu;
 }
@@ -422,17 +422,17 @@ void QgisDesktopWindow::resetPanelLayout()
     applyProductShellLayout();
     layoutToolbarsUnderRibbon();
     statusBar()->showMessage(
-      tr( "布局已重置为 Ribbon 模式（工具栏可选；任务中心默认收起）" ), 3000 );
+      tr( "Layout reset to Ribbon mode (toolbars optional; the Task Center starts collapsed)" ), 3000 );
 }
 
 void QgisDesktopWindow::updateWindowTitle()
 {
     const QString fileName = QgsProject::instance()->fileName();
     const QString project = fileName.isEmpty()
-                                ? tr( "未命名工程" )
+                                ? tr( "Untitled Project" )
                                 : QFileInfo( fileName ).completeBaseName();
     const QString dirtyMarker = m_projectDirty ? QStringLiteral( "*" ) : QString();
-    setWindowTitle( tr( "%1%2 — SICNU GEO RS 遥感分析平台" ).arg( dirtyMarker, project ) );
+    setWindowTitle( tr( "%1%2 — SICNU GEO RS Remote Sensing Platform" ).arg( dirtyMarker, project ) );
 }
 
 void QgisDesktopWindow::refreshWorkspaceBrowser()
@@ -457,7 +457,7 @@ void QgisDesktopWindow::closeEvent( QCloseEvent *event )
     // Workbench 7.0 (goal §A): benches and TaskCenter jobs are consulted
     // BEFORE the project-level save prompt so running compute is never
     // silently dropped by quit.
-    if (!confirmWorkbenchShutdown(tr("退出应用")))
+    if (!confirmWorkbenchShutdown(tr("Exit Application")))
     {
         event->ignore();
         return;

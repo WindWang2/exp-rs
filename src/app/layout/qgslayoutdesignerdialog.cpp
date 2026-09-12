@@ -837,7 +837,7 @@ void QgsLayoutDesignerDialog::onAddLegend()
 
     auto *legend = new QgsLayoutItemLegend(mLayout);
     legend->setLinkedMap(mMapItem);
-    legend->setTitle(tr("图例"));
+    legend->setTitle(tr("Legend"));
     legend->attemptSetSceneRect(defaultItemRect(195, 20, 60, 100));
     mLayout->addLayoutItem(legend);
     legend->update();
@@ -937,7 +937,7 @@ void QgsLayoutDesignerDialog::onAddLabel()
     if (!mLayout) return;
 
     auto *label = new QgsLayoutItemLabel(mLayout);
-    label->setText(tr("地图标题"));
+    label->setText(tr("Map Title"));
     label->attemptSetSceneRect(defaultItemRect(30, 4, 150, 12));
     mLayout->addLayoutItem(label);
 

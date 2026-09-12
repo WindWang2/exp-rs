@@ -23,7 +23,7 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("band_ratio"); }
-    QString dialogTitle() const override { return tr("波段比值与 IHS 变换"); }
+    QString dialogTitle() const override { return tr("Band Ratio and IHS Transform"); }
     void onRun() override;
 
 private slots:

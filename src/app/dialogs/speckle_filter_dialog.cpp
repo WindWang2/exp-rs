@@ -56,51 +56,51 @@ void SpeckleFilterDialog::setupUi()
   setupHelpBanner( mainLayout );
 
   // Input Data Group
-  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "输入数据" ) );
+  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "Input Data" ) );
   auto *inputForm = SicnuUi::makeFormLayout();
   inputForm->setContentsMargins( 0, 0, 0, 0 );
 
   m_layerCombo = new RasterLayerCombo( inputGroup );
   m_layerCombo->setObjectName( QStringLiteral( "speckleFilterInputLayerCombo" ) );
-  SicnuDialogHelp::tip( m_layerCombo, tr( "选择待执行斑点滤波的 SAR 栅格图层。" ) );
+  SicnuDialogHelp::tip( m_layerCombo, tr( "Select the SAR raster layer for speckle filtering." ) );
   m_layerCombo->populate();
   connect( m_layerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &SpeckleFilterDialog::onLayerChanged );
-  inputForm->addRow( tr( "输入栅格" ), m_layerCombo );
+  inputForm->addRow( tr( "Input Raster" ), m_layerCombo );
   qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( inputForm );
 
   // Parameters Group
-  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "滤波参数" ) );
+  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "Filter Parameters" ) );
   auto *form = SicnuUi::makeFormLayout();
   form->setContentsMargins( 0, 0, 0, 0 );
 
   m_filterTypeCombo = new QComboBox( paramGroup );
-  m_filterTypeCombo->addItems( { tr( "Lee 滤波" ), tr( "Frost 滤波" ), tr( "Kuan 滤波" ), tr( "Gamma-MAP 滤波" ) } );
-  SicnuDialogHelp::tip( m_filterTypeCombo, tr( "SAR 斑点噪声抑制算法：Lee、Frost、Kuan 或 Gamma-MAP。" ) );
-  form->addRow( tr( "滤波器" ), m_filterTypeCombo );
+  m_filterTypeCombo->addItems( { tr( "Lee Filter" ), tr( "Frost Filter" ), tr( "Kuan Filter" ), tr( "Gamma-MAP Filter" ) } );
+  SicnuDialogHelp::tip( m_filterTypeCombo, tr( "SAR speckle-reduction algorithm: Lee, Frost, Kuan or Gamma-MAP." ) );
+  form->addRow( tr( "Filter" ), m_filterTypeCombo );
 
   m_kernelSizeCombo = new QComboBox( paramGroup );
   m_kernelSizeCombo->addItems( { tr( "3×3" ), tr( "5×5" ), tr( "7×7" ) } );
   m_kernelSizeCombo->setCurrentIndex( 1 );
-  SicnuDialogHelp::tip( m_kernelSizeCombo, tr( "滤波窗口。3×3 保持细节边缘，7×7 平滑去噪更强。" ) );
-  form->addRow( tr( "滤波窗口" ), m_kernelSizeCombo );
+  SicnuDialogHelp::tip( m_kernelSizeCombo, tr( "Filter window: 3×3 keeps detail and edges; 7×7 smooths and denoises more strongly." ) );
+  form->addRow( tr( "Filter Window" ), m_kernelSizeCombo );
 
-  m_noiseVarLabel = new QLabel( tr( "噪声方差" ), paramGroup );
+  m_noiseVarLabel = new QLabel( tr( "Noise Variance" ), paramGroup );
   m_noiseVarSpin = new QDoubleSpinBox( paramGroup );
   m_noiseVarSpin->setRange( 0.001, 10.0 );
   m_noiseVarSpin->setValue( 1.0 );
   m_noiseVarSpin->setSingleStep( 0.1 );
   m_noiseVarSpin->setDecimals( 3 );
-  SicnuDialogHelp::tip( m_noiseVarSpin, tr( "Lee / Kuan / Gamma-MAP 模型的预估相对噪声方差。" ) );
+  SicnuDialogHelp::tip( m_noiseVarSpin, tr( "Estimated relative noise variance for the Lee / Kuan / Gamma-MAP models." ) );
   form->addRow( m_noiseVarLabel, m_noiseVarSpin );
 
-  m_dampingLabel = new QLabel( tr( "阻尼因子" ), paramGroup );
+  m_dampingLabel = new QLabel( tr( "Damping Factor" ), paramGroup );
   m_dampingSpin = new QDoubleSpinBox( paramGroup );
   m_dampingSpin->setRange( 0.1, 10.0 );
   m_dampingSpin->setValue( 2.0 );
   m_dampingSpin->setSingleStep( 0.5 );
   m_dampingSpin->setDecimals( 1 );
-  SicnuDialogHelp::tip( m_dampingSpin, tr( "Frost 滤波器的指数阻尼衰减系数：值越大越平滑。" ) );
+  SicnuDialogHelp::tip( m_dampingSpin, tr( "Exponential damping factor of the Frost filter: larger values give smoother output." ) );
   form->addRow( m_dampingLabel, m_dampingSpin );
 
   qobject_cast<QVBoxLayout *>( paramGroup->layout() )->addLayout( form );

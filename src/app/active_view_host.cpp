@@ -73,7 +73,7 @@ ActiveViewHost::ActiveViewHost( QgsMapCanvas *canvas,
     , m_confirmationFn( [parentWidget]( const QString &detailText ) {
         // Default: modal Yes/No confirmation, default No (safety-first).
         // Tests inject a non-interactive answer via setConfirmationFn.
-        return QMessageBox::question( parentWidget, QObject::tr( "移除图层" ), detailText,
+        return QMessageBox::question( parentWidget, QObject::tr( "Remove Layer" ), detailText,
                                       QMessageBox::Yes | QMessageBox::No, QMessageBox::No )
                == QMessageBox::Yes;
     } )
@@ -477,13 +477,13 @@ void ActiveViewHost::removeSelectedDisplayLayers()
         if ( layer )
             names.append( layer->name() );
     }
-    QString detail = QObject::tr( "从显示移除选中的 %1 个图层？\n（数据资产保留在工程中，仅移除显示；"
-                                  "外部 QGIS 图层将从工程移除。）" ).arg( selected.size() );
+    QString detail = QObject::tr( "Remove the selected %1 layers from the display?\n(The data assets stay in the project; only the display is removed;"
+                                  tr("External QGIS layers will be removed from the project.)") ).arg( selected.size() );
     if ( names.size() <= 5 )
         detail += QStringLiteral( "\n\n" ) + names.join( QStringLiteral( "\n" ) );
     else
         detail += QStringLiteral( "\n\n" ) + names.mid( 0, 5 ).join( QStringLiteral( "\n" ) )
-                  + QObject::tr( "\n…及其余 %1 个" ).arg( names.size() - 5 );
+                  + QObject::tr( "\n... and %1 more" ).arg( names.size() - 5 );
     if ( !m_confirmationFn( detail ) )
         return;
 

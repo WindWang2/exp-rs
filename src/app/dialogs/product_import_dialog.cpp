@@ -40,7 +40,7 @@ QString familyDisplayName( const QString &family )
     return QStringLiteral( "Sentinel-2" );
   if ( family == QLatin1String( "modis" ) )
     return QStringLiteral( "MODIS" );
-  return QStringLiteral( "遥感产品" );
+  return QStringLiteral( tr("Remote-Sensing Products") );
 }
 
 } // namespace
@@ -69,10 +69,10 @@ void ProductImportDialog::setProductFamily( const QString &family )
   m_productFamily = family;
   setWindowTitle( familyTitle() );
   const QString display = familyDisplayName( family );
-  m_pathEdit->setPlaceholderText( tr( "%1 产品目录（Landsat 含 *_MTL.txt；Sentinel-2 含 .SAFE）" ).arg( display ) );
-  SicnuDialogHelp::tip( m_pathEdit, tr( "%1 产品目录路径（自动识别产品类型）。" ).arg( display ) );
-  SicnuDialogHelp::tip( m_browseButton, tr( "浏览选择 %1 产品目录。" ).arg( display ) );
-  SicnuDialogHelp::tip( m_probeButton, tr( "解析产品元数据，列出可导入的子项与波段。" ) );
+  m_pathEdit->setPlaceholderText( tr( "%1 product directory (Landsat: *_MTL.txt; Sentinel-2: .SAFE)" ).arg( display ) );
+  SicnuDialogHelp::tip( m_pathEdit, tr( "%1 product directory (product type auto-detected)." ).arg( display ) );
+  SicnuDialogHelp::tip( m_browseButton, tr( "Browse and choose the %1 product directory." ).arg( display ) );
+  SicnuDialogHelp::tip( m_probeButton, tr( "Parses the product metadata and lists importable sub-items and bands." ) );
   setWhatsThis( SicnuDialogHelp::htmlForTool( helpTool(), windowTitle() ) );
   setToolTip( SicnuDialogHelp::shortForTool( helpTool(), windowTitle() ) );
 }
@@ -91,9 +91,9 @@ void ProductImportDialog::setupUi()
   layout->setSpacing( 10 );
 
   // Source directory group
-  auto *sourceGroup = new QGroupBox( tr( "产品数据源目录" ), this );
+  auto *sourceGroup = new QGroupBox( tr( "Product Data Source Directory" ), this );
   sourceGroup->setObjectName( QStringLiteral( "rsDialogGroup" ) );
-  sourceGroup->setToolTip( tr( "指定包含卫星元数据与各波段栅格的根目录。" ) );
+  sourceGroup->setToolTip( tr( "Specify the root directory containing the satellite metadata and per-band rasters." ) );
   auto *sourceLayout = new QVBoxLayout( sourceGroup );
   sourceLayout->setContentsMargins( 10, 8, 10, 8 );
   sourceLayout->setSpacing( 8 );
@@ -101,10 +101,10 @@ void ProductImportDialog::setupUi()
   auto *pathRow = new QHBoxLayout;
   pathRow->setSpacing( 8 );
   m_pathEdit = new QLineEdit( sourceGroup );
-  m_pathEdit->setPlaceholderText( tr( "产品目录（自动识别 Landsat / Sentinel-2 / MODIS）" ) );
-  m_browseButton = new QPushButton( tr( "浏览…" ), sourceGroup );
+  m_pathEdit->setPlaceholderText( tr( "Product directory (Landsat / Sentinel-2 / MODIS auto-detected)" ) );
+  m_browseButton = new QPushButton( tr( "Browse..." ), sourceGroup );
   m_browseButton->setProperty( "sicnuSecondary", true );
-  m_probeButton = new QPushButton( tr( "探测识别" ), sourceGroup );
+  m_probeButton = new QPushButton( tr( "Detection and Identification" ), sourceGroup );
   m_probeButton->setProperty( "sicnuPrimary", true );
   pathRow->addWidget( m_pathEdit, 1 );
   pathRow->addWidget( m_browseButton );
@@ -113,9 +113,9 @@ void ProductImportDialog::setupUi()
   layout->addWidget( sourceGroup );
 
   // Preview tree group
-  auto *previewGroup = new QGroupBox( tr( "发现的数据子项与波段预览" ), this );
+  auto *previewGroup = new QGroupBox( tr( "Discovered Data Sub-items and Band Preview" ), this );
   previewGroup->setObjectName( QStringLiteral( "rsDialogGroup" ) );
-  previewGroup->setToolTip( tr( "勾选需要导入到工程资产管理器的子项和波段。" ) );
+  previewGroup->setToolTip( tr( "Tick the sub-items and bands to import into the project asset manager." ) );
   auto *previewLayout = new QVBoxLayout( previewGroup );
   previewLayout->setContentsMargins( 10, 8, 10, 8 );
   previewLayout->setSpacing( 8 );
@@ -123,11 +123,11 @@ void ProductImportDialog::setupUi()
   m_previewTree = new QTreeWidget( previewGroup );
   m_previewTree->setObjectName( QStringLiteral( "productPreviewTree" ) );
   m_previewTree->setColumnCount( 2 );
-  m_previewTree->setHeaderLabels( { tr( "子项（网格组）" ), tr( "包含波段" ) } );
+  m_previewTree->setHeaderLabels( { tr( "Sub-items (grid groups)" ), tr( "Included Bands" ) } );
   m_previewTree->setRootIsDecorated( false );
   m_previewTree->setAlternatingRowColors( true );
   m_previewTree->header()->setSectionResizeMode( 0, QHeaderView::Stretch );
-  SicnuDialogHelp::tip( m_previewTree, tr( "预览探测到的子项（网格组）与波段；勾选需导入的波段。" ) );
+  SicnuDialogHelp::tip( m_previewTree, tr( "Preview the discovered sub-items (grid groups) and bands; tick the bands to import." ) );
   previewLayout->addWidget( m_previewTree, 1 );
   layout->addWidget( previewGroup, 1 );
 
@@ -140,21 +140,21 @@ void ProductImportDialog::setupUi()
   // Import / Cancel / Help buttons.
   auto *buttonRow = new QHBoxLayout;
   buttonRow->setSpacing( 8 );
-  auto *helpButton = new QPushButton( tr( "帮助" ), this );
+  auto *helpButton = new QPushButton( tr( "Help" ), this );
   helpButton->setProperty( "sicnuSecondary", true );
   connect( helpButton, &QPushButton::clicked, this, [this]() {
     SicnuDialogHelp::showToolHelp( this, helpTool(), windowTitle() );
   } );
   buttonRow->addWidget( helpButton );
   buttonRow->addStretch( 1 );
-  m_importButton = new QPushButton( tr( "导入所选" ), this );
+  m_importButton = new QPushButton( tr( "Import Selected" ), this );
   m_importButton->setProperty( "sicnuPrimary", true );
   m_importButton->setDefault( true );
   m_importButton->setEnabled( false );
-  SicnuDialogHelp::tip( m_importButton, tr( "导入选中的波段到工程（探测成功后可用）。" ) );
-  m_cancelButton = new QPushButton( tr( "取消" ), this );
+  SicnuDialogHelp::tip( m_importButton, tr( "Imports the selected bands into the project (available after successful detection)." ) );
+  m_cancelButton = new QPushButton( tr( "Cancel" ), this );
   m_cancelButton->setProperty( "sicnuSecondary", true );
-  SicnuDialogHelp::tip( m_cancelButton, tr( "关闭对话框，不执行导入。" ) );
+  SicnuDialogHelp::tip( m_cancelButton, tr( "Closes the dialog without importing." ) );
   buttonRow->addWidget( m_importButton );
   buttonRow->addWidget( m_cancelButton );
   layout->addLayout( buttonRow );
@@ -171,7 +171,7 @@ void ProductImportDialog::setupUi()
 void ProductImportDialog::onBrowse()
 {
   const QString dir = QFileDialog::getExistingDirectory(
-    this, tr( "选择%1产品目录" ).arg( familyDisplayName( m_productFamily ) ),
+    this, tr( "Choose the %1 product directory" ).arg( familyDisplayName( m_productFamily ) ),
     m_pathEdit->text() );
   if ( dir.isEmpty() )
     return;
@@ -196,7 +196,7 @@ void ProductImportDialog::onImport()
   }
   else
   {
-    QMessageBox::warning( this, tr( "导入失败" ), m_lastError );
+    QMessageBox::warning( this, tr( "Import Failed" ), m_lastError );
   }
 }
 
@@ -208,7 +208,7 @@ bool ProductImportDialog::probe()
 
   if ( !m_dataManager )
   {
-    m_lastError = tr( "数据管理器不可用，无法探测。" );
+    m_lastError = tr( "The data manager is unavailable; cannot probe." );
     m_statusLabel->setText( m_lastError );
     return false;
   }
@@ -216,7 +216,7 @@ bool ProductImportDialog::probe()
   const QString source = m_pathEdit->text().trimmed();
   if ( source.isEmpty() )
   {
-    m_lastError = tr( "请先选择产品目录。" );
+    m_lastError = tr( "Choose the product directory first." );
     m_statusLabel->setText( m_lastError );
     return false;
   }
@@ -227,7 +227,7 @@ bool ProductImportDialog::probe()
   if ( !result )
   {
     m_lastError = result.diagnostics().isEmpty()
-      ? tr( "产品探测失败。" )
+      ? tr( "Product detection failed." )
       : result.diagnostics().first().message;
     m_statusLabel->setText( m_lastError );
     populatePreview();
@@ -237,7 +237,7 @@ bool ProductImportDialog::probe()
   m_preview = result.value();
   populatePreview();
   m_statusLabel->setText(
-    tr( "发现 %1 个波段/网格组；勾选要导入的波段。" )
+    tr( "Found %1 bands / grid groups; tick the bands to import." )
       .arg( m_preview.children.size() ) );
   return true;
 }
@@ -296,14 +296,14 @@ CollectionId ProductImportDialog::commitSelection()
 
   if ( !m_dataManager )
   {
-    m_lastError = tr( "数据管理器不可用，无法导入。" );
+    m_lastError = tr( "The data manager is unavailable; cannot import." );
     return CollectionId();
   }
 
   const QVector<int> selection = checkedChildIndices();
   if ( selection.isEmpty() )
   {
-    m_lastError = tr( "请至少勾选一个波段组再导入。" );
+    m_lastError = tr( "Tick at least one band group before importing." );
     return CollectionId();
   }
 
@@ -318,14 +318,14 @@ CollectionId ProductImportDialog::commitSelection()
   if ( result.collectionId.isNull() )
   {
     m_lastError = result.diagnostics.isEmpty()
-      ? tr( "导入失败。" )
+      ? tr( "Import failed." )
       : result.diagnostics.first().message;
     return CollectionId();
   }
 
   m_committedCollectionId = result.collectionId;
   m_statusLabel->setText(
-    tr( "已将 %1 个波段导入集合 \"%2\"。" )
+    tr( "Imported %1 bands into collection \\"%2\\"." )
       .arg( result.childAssetIds.size() )
       .arg( m_preview.collectionDisplayName ) );
   return result.collectionId;
@@ -354,5 +354,5 @@ QString ProductImportDialog::helpTool() const
 
 QString ProductImportDialog::familyTitle() const
 {
-  return tr( "导入 %1" ).arg( familyDisplayName( m_productFamily ) );
+  return tr( "Import %1" ).arg( familyDisplayName( m_productFamily ) );
 }

@@ -263,9 +263,9 @@ WorkspaceBrowserPanel::WorkspaceBrowserPanel( QWidget *parent )
     footer->addWidget( m_status, 1 );
     m_healthButton = new QPushButton( tr( "Health check" ), this );
     footer->addWidget( m_healthButton );
-    m_scanButton = new QPushButton( tr( "扫描文件夹…" ), this );
+    m_scanButton = new QPushButton( tr( "Scan Folder..." ), this );
     footer->addWidget( m_scanButton );
-    m_remoteButton = new QPushButton( tr( "导入远程 URL…" ), this );
+    m_remoteButton = new QPushButton( tr( "Import Remote URL..." ), this );
     footer->addWidget( m_remoteButton );
     layout->addLayout( footer );
 
@@ -446,16 +446,16 @@ void WorkspaceBrowserPanel::scanFolder()
     if ( !m_service || !m_service->dataManager() || !m_importCenter )
         return;
     const QString dir = QFileDialog::getExistingDirectory(
-        this, tr( "选择要导入的文件夹" ) );
+        this, tr( "Choose the Folder to Import" ) );
     if ( dir.isEmpty() )
         return;
     sicnu::workspace::ImportScanOptions options;
     options.root = dir;
     options.recursive = true;
     if ( !m_importCenter->startScan( options ) )
-        m_details->setPlainText( tr( "已有导入任务在运行中。" ) );
+        m_details->setPlainText( tr( "An import task is already running." ) );
     else
-        m_details->setPlainText( tr( "正在后台扫描 %1 …" ).arg( dir ) );
+        m_details->setPlainText( tr( "Scanning %1 in the background..." ).arg( dir ) );
 }
 
 void WorkspaceBrowserPanel::importRemoteUrls()
@@ -463,8 +463,8 @@ void WorkspaceBrowserPanel::importRemoteUrls()
     if ( !m_service || !m_service->dataManager() || !m_importCenter )
         return;
     const QString text = QInputDialog::getMultiLineText(
-        this, tr( "导入远程数据" ),
-        tr( "每行一个远程 COG/URL（例如 STAC 资产 href）：" ) );
+        this, tr( "Import Remote Data" ),
+        tr( "One remote COG/URL per line (e.g. a STAC asset href):" ) );
     if ( text.isEmpty() )
         return;
     QStringList urls;
@@ -479,7 +479,7 @@ void WorkspaceBrowserPanel::importRemoteUrls()
     // Remote registration defers network opens off this thread (provider
     // contract), so a synchronous pass is safe here.
     const sicnu::workspace::ImportScanReport report = m_importCenter->importRemote( urls );
-    m_details->setPlainText( tr( "远程导入完成：注册 %1，重复 %2，失败 %3" )
+    m_details->setPlainText( tr( "Remote import finished: %1 registered, %2 duplicates, %3 failed" )
                                  .arg( report.registered )
                                  .arg( report.duplicates )
                                  .arg( report.failed ) );

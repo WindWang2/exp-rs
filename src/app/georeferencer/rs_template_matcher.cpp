@@ -227,16 +227,16 @@ RsTemplateMatcher::Result RsTemplateMatcher::run( const QString &srcRaster,
     GDALClose( srcDs );
     GDALClose( refDs );
     r.errorMessage = QStringLiteral(
-      "SRC 缺少可用的初始地理变换（GeoTransform）。"
-      "模板匹配依赖初始坐标预测搜索区；请先为源影像指定近似 CRS/地理参考，"
-      "或先手工打若干粗 GCP 后使用「现有种子点」模式。" );
+      tr("SRC lacks a usable initial geotransform.")
+      tr("Template matching predicts the search area from initial coordinates; first give the source image an approximate CRS / georeference,")
+      tr("Or place a few rough GCPs manually first and use the existing-seed mode.") );
     return r;
   }
   if ( !hasUsableGeoTransform( refGt ) )
   {
     GDALClose( srcDs );
     GDALClose( refDs );
-    r.errorMessage = QStringLiteral( "REF 缺少可用的地理变换，无法将匹配点转为地面坐标。" );
+    r.errorMessage = QStringLiteral( tr("REF lacks a usable geotransform; matched points cannot be converted to ground coordinates.") );
     return r;
   }
 
@@ -249,7 +249,7 @@ RsTemplateMatcher::Result RsTemplateMatcher::run( const QString &srcRaster,
     {
       GDALClose( srcDs );
       GDALClose( refDs );
-      r.errorMessage = QStringLiteral( "SRC 影像过小，无法生成网格种子点" );
+      r.errorMessage = QStringLiteral( tr("The SRC image is too small to generate grid seed points") );
       return r;
     }
     for ( int gy = 0; gy < params.gridRows; ++gy )
@@ -367,8 +367,8 @@ RsTemplateMatcher::Result RsTemplateMatcher::run( const QString &srcRaster,
   if ( r.matches.isEmpty() )
   {
     r.errorMessage = QStringLiteral(
-      "未找到满足阈值的匹配点。可增大搜索半径、降低最小相关分数，"
-      "或检查 SRC 初始坐标是否大致正确。" );
+      tr("No matches met the threshold. Increase the search radius or lower the minimum correlation score,")
+      tr("Or check that the SRC initial coordinates are roughly correct.") );
     return r;
   }
 

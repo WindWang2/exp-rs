@@ -35,16 +35,16 @@ RsAccuracyPanel::RsAccuracyPanel( QWidget *parent )
   layout->setSpacing( 6 );
 
   SicnuDialogHelp::tip( this, SicnuDialogHelp::shortForTool(
-                         QStringLiteral( "accuracy" ), tr( "精度评价" ) ) );
+                         QStringLiteral( "accuracy" ), tr( "Accuracy Assessment" ) ) );
 
   mEmptyHint = new QLabel(
-    tr( "完成全图分类（含验证/holdout 精度）后在此显示 OA、Kappa 与混淆矩阵。" ),
+    tr( "After full-image classification (with validation / holdout accuracy), shows OA, Kappa and the confusion matrix here." ),
     this );
   mEmptyHint->setObjectName( QStringLiteral( "rsAccuracyEmptyHint" ) );
   mEmptyHint->setWordWrap( true );
   mEmptyHint->setObjectName( QStringLiteral( "rsEmptyHint" ) );
   SicnuDialogHelp::tip( mEmptyHint, tr(
-    "总体精度 OA、Kappa、混淆矩阵（行=真实，列=预测）、制图/用户精度与 F1。" ) );
+    tr("Overall accuracy OA, Kappa, confusion matrix (rows = truth, columns = prediction), producer's / user's accuracy and F1.") ) );
   layout->addWidget( mEmptyHint );
 
   mHeaderLabel = new QLabel( this );
@@ -56,7 +56,7 @@ RsAccuracyPanel::RsAccuracyPanel( QWidget *parent )
   mHeaderLabel->setVisible( false );
   layout->addWidget( mHeaderLabel );
 
-  auto *cmTitle = new QLabel( tr( "混淆矩阵（行=真实，列=预测）" ), this );
+  auto *cmTitle = new QLabel( tr( "Confusion matrix (rows = truth, columns = prediction)" ), this );
   cmTitle->setObjectName( QStringLiteral( "rsAccuracyCmTitle" ) );
   layout->addWidget( cmTitle );
 
@@ -66,29 +66,29 @@ RsAccuracyPanel::RsAccuracyPanel( QWidget *parent )
   mConfusion->verticalHeader()->setSectionResizeMode( QHeaderView::Stretch );
   mConfusion->setMinimumHeight( 120 );
   SicnuDialogHelp::tip( mConfusion, tr(
-    "混淆矩阵：行=真实类别，列=预测类别。对角线上为正确分类样本数。" ) );
+    tr("Confusion matrix: rows = true classes, columns = predicted classes; the diagonal holds correctly classified sample counts.") ) );
   layout->addWidget( mConfusion, 2 );
 
-  auto *pmTitle = new QLabel( tr( "分类别指标" ), this );
+  auto *pmTitle = new QLabel( tr( "Per-Class Metrics" ), this );
   pmTitle->setObjectName( QStringLiteral( "rsAccuracyPmTitle" ) );
   layout->addWidget( pmTitle );
 
   mPerClass = new QTableWidget( this );
   mPerClass->setObjectName( QStringLiteral( "rsAccuracyPerClass" ) );
   mPerClass->setHorizontalHeaderLabels(
-    QStringList{ tr( "类别" ), tr( "制图精度" ),
-                 tr( "用户精度" ), tr( "F1" ) } );
+    QStringList{ tr( "Class" ), tr( "Producer's Accuracy" ),
+                 tr( "User's Accuracy" ), tr( "F1" ) } );
   mPerClass->horizontalHeader()->setSectionResizeMode( QHeaderView::Stretch );
   mPerClass->verticalHeader()->setVisible( false );
   mPerClass->setMinimumHeight( 80 );
   SicnuDialogHelp::tip( mPerClass, tr(
-    "制图精度≈召回率；用户精度≈精确率；F1 为二者调和平均。" ) );
+    tr("Producer's accuracy ≈ recall; user's accuracy ≈ precision; F1 is their harmonic mean.") ) );
   layout->addWidget( mPerClass, 1 );
 
-  mExportBtn = new QPushButton( tr( "导出 CSV…" ), this );
+  mExportBtn = new QPushButton( tr( "Export CSV..." ), this );
   mExportBtn->setObjectName( QStringLiteral( "rsAccuracyExportCsv" ) );
   mExportBtn->setEnabled( false );
-  SicnuDialogHelp::tip( mExportBtn, tr( "将精度表导出为 CSV 报告。" ) );
+  SicnuDialogHelp::tip( mExportBtn, tr( "Exports the accuracy table as a CSV report." ) );
   connect( mExportBtn, &QPushButton::clicked, this, &RsAccuracyPanel::exportCsv );
   layout->addWidget( mExportBtn );
 }
@@ -163,7 +163,7 @@ void RsAccuracyPanel::rebuildTables()
   if ( mHeaderLabel )
   {
     mHeaderLabel->setText(
-      tr( "总体精度: %1%   Kappa: %2" )
+      tr( "Overall accuracy: %1%   Kappa: %2" )
         .arg( mResult.overallAccuracy * 100.0, 0, 'f', 1 )
         .arg( mResult.kappa, 0, 'f', 3 ) );
     mHeaderLabel->setVisible( true );
@@ -244,7 +244,7 @@ bool RsAccuracyPanel::exportCsv()
     return false;
 
   const QString path = QFileDialog::getSaveFileName(
-    this, tr( "导出精度报告 (CSV)" ), QString(),
+    this, tr( "Export Accuracy Report (CSV)" ), QString(),
     tr( "CSV files (*.csv)" ) );
   if ( path.isEmpty() )
     return false;
@@ -252,8 +252,8 @@ bool RsAccuracyPanel::exportCsv()
   QFile f( path );
   if ( !f.open( QIODevice::WriteOnly | QIODevice::Text ) )
   {
-    QMessageBox::warning( this, tr( "导出失败" ),
-                          tr( "无法写入文件: %1" ).arg( path ) );
+    QMessageBox::warning( this, tr( "Export Failed" ),
+                          tr( "Cannot write file: %1" ).arg( path ) );
     return false;
   }
   QTextStream out( &f );

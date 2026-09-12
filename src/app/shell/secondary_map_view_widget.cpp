@@ -32,26 +32,26 @@ SecondaryMapViewWidget::SecondaryMapViewWidget( QWidget *parent )
   headerLay->setContentsMargins( 8, 2, 4, 2 );
   headerLay->setSpacing( 4 );
 
-  m_titleLabel = new QLabel( tr( "第二视图" ), header );
+  m_titleLabel = new QLabel( tr( "Second View" ), header );
   m_titleLabel->setObjectName( QStringLiteral( "rsSecondaryMapViewTitle" ) );
   headerLay->addWidget( m_titleLabel, 1 );
 
   m_activateBtn = new QToolButton( header );
-  m_activateBtn->setText( tr( "活动" ) );
+  m_activateBtn->setText( tr( "Active" ) );
   m_activateBtn->setCheckable( true );
-  m_activateBtn->setToolTip( tr( "将打开/显示操作路由到此视图" ) );
+  m_activateBtn->setToolTip( tr( "Route open / show operations to this view" ) );
   connect( m_activateBtn, &QToolButton::clicked, this, &SecondaryMapViewWidget::activateRequested );
   headerLay->addWidget( m_activateBtn );
 
   m_syncBtn = new QToolButton( header );
-  m_syncBtn->setText( tr( "同步主视图" ) );
-  m_syncBtn->setToolTip( tr( "将主视图中的显示图层克隆到此视图（独立渲染）" ) );
+  m_syncBtn->setText( tr( "Sync Main View" ) );
+  m_syncBtn->setToolTip( tr( "Clone the main view's display layers into this view (rendered independently)" ) );
   connect( m_syncBtn, &QToolButton::clicked, this, &SecondaryMapViewWidget::syncFromMainRequested );
   headerLay->addWidget( m_syncBtn );
 
   m_closeBtn = new QToolButton( header );
-  m_closeBtn->setText( tr( "关闭" ) );
-  m_closeBtn->setToolTip( tr( "关闭第二视图并释放其显示租约" ) );
+  m_closeBtn->setText( tr( "Close" ) );
+  m_closeBtn->setToolTip( tr( "Close the second view and release its display lease" ) );
   connect( m_closeBtn, &QToolButton::clicked, this, &SecondaryMapViewWidget::closeRequested );
   headerLay->addWidget( m_closeBtn );
 
@@ -107,7 +107,7 @@ void SecondaryMapViewWidget::setActiveHighlight( bool active )
     m_activateBtn->setChecked( active );
   if ( m_titleLabel )
   {
-    m_titleLabel->setText( active ? tr( "第二视图（活动）" ) : tr( "第二视图" ) );
+    m_titleLabel->setText( active ? tr( "Second View (active)" ) : tr( "Second View" ) );
   }
   auto *header = findChild<QWidget *>( QStringLiteral( "rsSecondaryMapViewHeader" ) );
   if ( header )

@@ -60,60 +60,60 @@ void RadiometricCalibrationDialog::setupUi()
   setupHelpBanner( mainLayout );
 
   // Input Data Group
-  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "输入数据" ) );
+  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "Input Data" ) );
   auto *inputForm = SicnuUi::makeFormLayout();
   inputForm->setContentsMargins( 0, 0, 0, 0 );
 
   m_layerCombo = new RasterLayerCombo( inputGroup );
   m_layerCombo->setObjectName( QStringLiteral( "radiometricInputLayerCombo" ) );
-  SicnuDialogHelp::tip( m_layerCombo, tr( "选择待执行辐射定标的栅格图层。" ) );
+  SicnuDialogHelp::tip( m_layerCombo, tr( "Select the raster layer for radiometric calibration." ) );
   m_layerCombo->populate();
   connect( m_layerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &RadiometricCalibrationDialog::onLayerChanged );
-  inputForm->addRow( tr( "输入栅格" ), m_layerCombo );
+  inputForm->addRow( tr( "Input Raster" ), m_layerCombo );
   qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( inputForm );
 
   // Calibration Parameters Group
-  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "定标参数" ) );
+  QGroupBox *paramGroup = setupParamGroup( mainLayout, tr( "Calibration Parameters" ) );
   auto *form = SicnuUi::makeFormLayout();
   form->setContentsMargins( 0, 0, 0, 0 );
 
   m_unitCombo = new QComboBox( paramGroup );
-  m_unitCombo->addItem( tr( "辐射亮度 (Radiance)" ), QStringLiteral( "radiance" ) );
-  m_unitCombo->addItem( tr( "TOA 表观反射率" ), QStringLiteral( "toa_reflectance" ) );
-  m_unitCombo->addItem( tr( "亮温 (K)" ), QStringLiteral( "brightness_temperature" ) );
+  m_unitCombo->addItem( tr( "Radiance" ), QStringLiteral( "radiance" ) );
+  m_unitCombo->addItem( tr( "TOA Apparent Reflectance" ), QStringLiteral( "toa_reflectance" ) );
+  m_unitCombo->addItem( tr( "Brightness Temperature (K)" ), QStringLiteral( "brightness_temperature" ) );
   SicnuDialogHelp::tip( m_unitCombo, tr(
-    "• 辐射亮度：L = gain×DN + bias\n"
-    "• TOA 反射率：Landsat (reflMult×DN+add)/sin(sun)；S2 (DN+offset)/scale\n"
-    "• 亮温：需热红外波段 K1/K2 常数" ) );
-  form->addRow( tr( "输出物理量" ), m_unitCombo );
+    tr("• Radiance: L = gain×DN + bias\n")
+    tr("• TOA reflectance: Landsat (reflMult×DN+add)/sin(sun); S2 (DN+offset)/scale\n")
+    tr("• Brightness temperature: needs the thermal band K1/K2 constants") ) );
+  form->addRow( tr( "Output Physical Quantity" ), m_unitCombo );
 
-  m_allBandsCheck = new QCheckBox( tr( "处理全部有效波段" ), paramGroup );
+  m_allBandsCheck = new QCheckBox( tr( "Process All Valid Bands" ), paramGroup );
   m_allBandsCheck->setChecked( true );
-  SicnuDialogHelp::tip( m_allBandsCheck, tr( "勾选时自动对输入影像的所有有效波段执行定标；取消勾选可指定单个目标波段。" ) );
+  SicnuDialogHelp::tip( m_allBandsCheck, tr( "When ticked, all valid bands of the input image are calibrated automatically; untick to calibrate a single target band." ) );
   connect( m_allBandsCheck, &QCheckBox::toggled, this, &RadiometricCalibrationDialog::onAllBandsToggled );
   form->addRow( QString(), m_allBandsCheck );
 
   m_bandCombo = new QComboBox( paramGroup );
-  SicnuDialogHelp::tip( m_bandCombo, tr( "选择待定标的单一目标波段号。" ) );
-  form->addRow( tr( "目标波段" ), m_bandCombo );
+  SicnuDialogHelp::tip( m_bandCombo, tr( "Chooses the single target band number to calibrate." ) );
+  form->addRow( tr( "Target Band" ), m_bandCombo );
   m_bandLabel = qobject_cast<QLabel *>( form->labelForField( m_bandCombo ) );
 
   auto *metadataRow = new QHBoxLayout;
   metadataRow->setContentsMargins( 0, 0, 0, 0 );
   metadataRow->setSpacing( 8 );
   m_metadataEdit = new QLineEdit( paramGroup );
-  m_metadataEdit->setPlaceholderText( tr( "自动探测（输入栅格旁 *_MTL.txt / MTD_MSI*.xml）" ) );
-  SicnuDialogHelp::tip( m_metadataEdit, tr( "Landsat *_MTL.txt 或 Sentinel-2 MTD_MSI*.xml 路径；留空则自动探测。" ) );
-  m_metadataBrowseButton = new QPushButton( tr( "浏览…" ), paramGroup );
+  m_metadataEdit->setPlaceholderText( tr( "Auto-detect (*_MTL.txt / MTD_MSI*.xml next to the input raster)" ) );
+  SicnuDialogHelp::tip( m_metadataEdit, tr( "Path to a Landsat *_MTL.txt or Sentinel-2 MTD_MSI*.xml; auto-detected if left empty." ) );
+  m_metadataBrowseButton = new QPushButton( tr( "Browse..." ), paramGroup );
   m_metadataBrowseButton->setFixedWidth( 76 );
   SicnuUi::markSecondary( m_metadataBrowseButton );
-  SicnuDialogHelp::tip( m_metadataBrowseButton, tr( "浏览并指定传感器元数据文件" ) );
+  SicnuDialogHelp::tip( m_metadataBrowseButton, tr( "Browse and choose the sensor metadata file" ) );
   connect( m_metadataBrowseButton, &QPushButton::clicked, this,
            &RadiometricCalibrationDialog::onBrowseMetadata );
   metadataRow->addWidget( m_metadataEdit, 1 );
   metadataRow->addWidget( m_metadataBrowseButton );
-  form->addRow( tr( "元数据文件" ), metadataRow );
+  form->addRow( tr( "Metadata File" ), metadataRow );
 
   m_metadataStatusLabel = SicnuUi::makeHintLabel( paramGroup, QString() );
   m_metadataStatusLabel->setWordWrap( true );
@@ -140,7 +140,7 @@ void RadiometricCalibrationDialog::populateBandCombo()
   m_bandCombo->clear();
   const int bandCount = m_rasterLayer->bandCount();
   for ( int i = 1; i <= bandCount; ++i )
-    m_bandCombo->addItem( tr( "波段 %1" ).arg( i ), i );
+    m_bandCombo->addItem( tr( "Band %1" ).arg( i ), i );
 }
 
 void RadiometricCalibrationDialog::onAllBandsToggled( bool checked )
@@ -153,8 +153,8 @@ void RadiometricCalibrationDialog::onAllBandsToggled( bool checked )
 void RadiometricCalibrationDialog::onBrowseMetadata()
 {
   const QString path = QFileDialog::getOpenFileName(
-    this, tr( "选择传感器元数据文件" ), m_metadataEdit->text(),
-    tr( "Landsat MTL (*_MTL.txt);;Sentinel-2 MTD (MTD_MSI*.xml);;所有文件 (*)" ) );
+    this, tr( "Select Sensor Metadata File" ), m_metadataEdit->text(),
+    tr( "Landsat MTL (*_MTL.txt);;Sentinel-2 MTD (MTD_MSI*.xml);;All Files (*)" ) );
   if ( path.isEmpty() )
     return;
   m_metadataEdit->setText( path );
@@ -183,7 +183,7 @@ void RadiometricCalibrationDialog::refreshMetadataStatus()
   if ( metadataPath.isEmpty() )
   {
     m_metadataStatusLabel->setText(
-      tr( "未找到传感器元数据文件；将回退到栅格内嵌 GDAL scale/offset。" ) );
+      tr( "Sensor metadata file not found; falling back to the raster's embedded GDAL scale/offset." ) );
     return;
   }
 
@@ -193,20 +193,20 @@ void RadiometricCalibrationDialog::refreshMetadataStatus()
                                               {}, &meta, &error ) )
   {
     m_metadataStatusLabel->setText(
-      tr( "已探测到 %1，但解析失败：%2" ).arg( QFileInfo( metadataPath ).fileName(), error ) );
+      tr( "Detected %1, but parsing failed: %2" ).arg( QFileInfo( metadataPath ).fileName(), error ) );
     return;
   }
 
   QStringList parts;
-  parts.append( tr( "%1 个波段" ).arg( meta.bands.size() ) );
+  parts.append( tr( "%1 bands" ).arg( meta.bands.size() ) );
   if ( !meta.spacecraft.isEmpty() )
-    parts.append( tr( "平台 %1" ).arg( meta.spacecraft ) );
+    parts.append( tr( "Platform %1" ).arg( meta.spacecraft ) );
   if ( !meta.processingLevel.isEmpty() )
-    parts.append( tr( "级别 %1" ).arg( meta.processingLevel ) );
+    parts.append( tr( "Level %1" ).arg( meta.processingLevel ) );
   if ( meta.sunElevationDeg > 0.0 && meta.sunElevationDeg < 90.0 )
-    parts.append( tr( "太阳高度 %1°" ).arg( meta.sunElevationDeg, 0, 'f', 1 ) );
+    parts.append( tr( "Sun elevation %1°" ).arg( meta.sunElevationDeg, 0, 'f', 1 ) );
   m_metadataStatusLabel->setText(
-    tr( "使用 %1：%2。" ).arg( QFileInfo( metadataPath ).fileName(),
+    tr( "Using %1: %2." ).arg( QFileInfo( metadataPath ).fileName(),
                               parts.join( QStringLiteral( "，" ) ) ) );
 }
 
@@ -214,7 +214,7 @@ void RadiometricCalibrationDialog::onRun()
 {
   if ( !m_rasterLayer || !m_rasterLayer->isValid() )
   {
-    handleFailed( tr( "请先选择一个有效的栅格图层。" ) );
+    handleFailed( tr( "Select a valid raster layer first." ) );
     return;
   }
 
