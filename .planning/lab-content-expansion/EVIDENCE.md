@@ -58,3 +58,5 @@ ccache (cached crash output), masking the real C++ error — CCACHE_DISABLE reve
   track builds; transient GCC 16.2.1 segfault-ICEs on unrelated TUs occurred under that
   contention and cleared on retry (documented in logs/build.log ITER markers).
 - data/labs/_tmp deleted before the final commit per runbook.
+
+Official ctest invocation: `QT_QPA_PLATFORM=offscreen ctest --test-dir build -R "Lab pipelines|LabSpecs|artifact sets|MapSpec validates" -j1` → 100% tests passed out of 4.
