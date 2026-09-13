@@ -1,7 +1,7 @@
-# [Inference/Operators] rs:infer Labels 输出的 class_mapping 重映射值未按输出栅格编码校验——≥255 的产品类被 GDAL 钳制为 NoData 哨兵，整类像素静默丢失
+# [IO/Operators] io:reproject 的 srcCrsOverride 是死参数——无 CRS 输入经"唯一获准兜底"重投影后静默错配地理参考
 
-P2
-Affected Location: src/operators/runtime/tile_inference_engine.cpp:852-874（writeType/writeNoData 由重映射前的类数决定）与 :1595-1613 / :687-708（productClass 直接写入）；src/operators/framework/model_catalog.cpp:829-845（校验只有非负+单射）
-Root Cause & Impact: 输出栅格编码（GDT_Byte/GDT_UInt16、NoData=255/65535）由模型类数选择，而像素写入的是 class_mapping 的目标值；清单校验不约束目标域上界。manifest 声明 class_mapping 值 ≥255 时，float→Byte 写入钳制为 255==writeNoData，该类像素读回即 NoData，palette 与 class_pixel_counts 仍声称该类存在——静默数据损坏，无任何报错。subagent V 独立复核确认：无任何一处存在 255/65535 上界检查。
-Reproduction: review/tests/F-OPS-1.cpp（Catch2 草稿）——validateManifestJson 对 class_mapping [0,1,300] 放行（现实现 issues 为空）；运行路径断言类 2 像素值==2（现实现得 255）。
-Recommended Fix: parseManifest 对 class_mapping 增加上界校验（≤254，或与 writeType 联动选择 UInt16/NoData=65535）；engine Labels 分支按 1+max(classMapping) 选择编码（stats.classPixelCounts 已经按此域分配，唯独栅格编码漏了）。
+P1
+Affected Location: src/operators/io/io_operators.cpp:301-323（读而不传；schema :278-279 文档化为"the only sanctioned fallback"）；src/geospatial/convert/raster_convert.h:50-62（WarpOptions 无源 CRS 字段）；src/geospatial/convert/raster_convert.cpp:202-204（warp 只建 -t_srs）
+Root Cause & Impact: run() 校验 CRS-less 输入必须声明 srcCrsOverride，但 WarpOptions 根本没有源 CRS 字段可承接，warpRaster 从不写 -s_srs。GDALWarp 对无 SRS 源按"源 CRS==目标 CRS"处理：像素零变换，输出栅格被打上 targetCrs 标签——像素坐标空间的数据被标注成例如 EPSG:4326，下游叠加/量测/切片全部静默错位。声明参数全程无效，正是 #646 "declared knob does nothing" 类。subagent V 补强：同文件 io:clip 对同名参数做了功能性消费（io_operators.cpp:383-386，折入 targetCrs），证明这是漂移而非设计。
+Reproduction: review/tests/F-OPS-4.cpp——4×4 无 SRS GTiff，io:reproject 带 srcCrsOverride=EPSG:4326、targetCrs=EPSG:32633；断言输出中心像元坐标等于 4326→32633 变换结果（现实现为未变换的像素网格）。
+Recommended Fix: WarpOptions 增加 sourceCrsOverride，warpRaster 非空时 emplace -s_srs；IoReprojectOperator 传入参数。
