@@ -726,6 +726,11 @@ if(TARGET sicnu_operators)
   add_subdirectory(src/cli)
 endif()
 add_subdirectory(src/app)
+# Offline classroom bundle (goal D7): standalone deterministic sample-data
+# generator (tools/sicnu_generate_samples). Qt-free — GDAL only — so it
+# configures unconditionally on every lane; goal D1 grows this directory into
+# the sample foundry behind the same executable target.
+add_subdirectory(tools)
 
 # SICNU_GEO_RS: Unit tests (Catch2)
 if(ENABLE_TESTS)

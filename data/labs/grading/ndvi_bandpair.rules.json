@@ -1,0 +1,52 @@
+{
+  "schema_version": "sicnu.lab.rules/1",
+  "lab_id": "ndvi_bandpair",
+  "title": "NDVI from a band pair — gain invariance of ratio indices",
+  "artifact": { "kind": "raster" },
+  "passing_score": 60,
+  "assertions": [
+    {
+      "id": "grid.compatible",
+      "kind": "crs_grid",
+      "weight": 10,
+      "severity": "blocking",
+      "params": { "epsg": 4326, "width": 16, "height": 16, "band_count": 2,
+                  "pixel_size_x": 0.001, "pixel_size_y": 0.001, "pixel_size_tolerance": 1e-9 },
+      "derivation": "Lab grid contract: two-band (NIR, Red) stack, 16x16 at 0.001 deg."
+    },
+    {
+      "id": "calib.gain_invariance",
+      "kind": "gain_invariance",
+      "weight": 20,
+      "severity": "blocking",
+      "params": { "bands": [1, 2], "tolerance": 1e-9, "max_violation_ratio": 0.0,
+                  "expected_mean": 0.248626374, "mean_tolerance": 0.001 },
+      "derivation": "KNOWN_ANSWER_MATRIX spectral family: ndvi(g*N, g*R) = ndvi(N,R) for g>0 — a pure gain cancels in the ratio. A per-band gain mismatch (scale 1e-4 vs 2e-4) breaks the cancellation: the index from metadata-calibrated values must equal the index from stored values per pixel. The declared offset must be zero for a gain-invariant index."
+    },
+    {
+      "id": "stats.index_mean_sigma",
+      "kind": "mean_sigma",
+      "weight": 30,
+      "severity": "blocking",
+      "params": { "index": "ndvi", "bands": [1, 2], "mean": 0.248626374, "mean_tolerance": 0.001,
+                  "sigma_min": 0.35, "sigma_max": 0.38, "sigma_tolerance": 0.0 },
+      "derivation": "Closed form over the four quadrants (DN with scale 1e-4): index values -1/7 (water 480/640), 5/7 (veg 7200/1200), -1/13 (soil 2400/2800), 1/2 (sparse veg 4500/1500). mu=(-1/7+5/7-1/13+1/2)/4=181/728=0.248626374; population sigma=0.367174723. DNs up to 7200 are exact in Float32. Catches swapped band order (mean flips sign)."
+    },
+    {
+      "id": "range.index",
+      "kind": "range",
+      "weight": 15,
+      "severity": "normal",
+      "params": { "index": "ndvi", "bands": [1, 2], "min": -1.0, "max": 1.0, "max_violation_ratio": 0.0 },
+      "derivation": "Ratio index bounded by [-1,1]."
+    },
+    {
+      "id": "mask.nodata_ratio",
+      "kind": "nodata_ratio",
+      "weight": 25,
+      "severity": "blocking",
+      "params": { "min_ratio": 0.0, "max_ratio": 0.001 },
+      "derivation": "The scene has no invalid inputs; a correct product has zero NoData pixels."
+    }
+  ]
+}

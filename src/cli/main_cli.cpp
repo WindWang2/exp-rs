@@ -2,6 +2,8 @@
 #include "cli_commands.h"
 #include "help_cli_projections.h"
 
+#include "data/offline_mode.h"
+
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/framework/algorithm_engine.h"
@@ -170,6 +172,17 @@ int main(int argc, char *argv[])
         "via SICNU_EXECUTION_CACHE=1). Re-executes every deterministic step.");
     parser.addOption(noCacheOption);
 
+    // Offline classroom deployment (goal D7): refuses every remote input with
+    // a typed error instead of attempting network I/O. Env twin: SICNU_OFFLINE.
+    // Engaged before routing so both the legacy pipeline surface and the
+    // CLI 3.0 subcommands honor it in one place.
+    const QCommandLineOption offlineOption(
+        QStringList() << "offline",
+        "Offline mode: refuse all remote inputs (STAC, http(s)/cloud raster "
+        "sources) without any network attempt. Zero startup network calls "
+        "either way. Env twin: SICNU_OFFLINE=1.");
+    parser.addOption(offlineOption);
+
     const QCommandLineOption exportCatalogOption(
         QStringList() << "export-catalog",
         "Regenerate the algorithm catalog sidecars from the descriptor-resolved "
@@ -179,10 +192,27 @@ int main(int argc, char *argv[])
         "dir");
     parser.addOption(exportCatalogOption);
 
+    // Offline gate (goal D7): the flag (any position, either routing mode) or
+    // SICNU_OFFLINE engages the process-wide refusal of remote inputs plus the
+    // GDAL cloud-/vsi* deny. Engaged before routing so CLI 3.0 subcommands
+    // (which parse their own flags) honor it without knowing it exists.
+    QStringList routedArguments = app.arguments();
+    const bool offlineFlag = routedArguments.removeAll( QStringLiteral( "--offline" ) ) > 0;
+    if ( offlineFlag || sicnu::data::offline::enabledFromEnv() )
+    {
+        sicnu::data::offline::setEnabled( true );
+        sicnu::data::offline::applyGdalNetworkDeny();
+        // Export so child processes (sicnu_worker spawns) inherit the gate —
+        // the flag itself cannot cross a process boundary.
+        qputenv( "SICNU_OFFLINE", "1" );
+        std::cerr << "offline mode enabled (--offline / SICNU_OFFLINE): "
+                     "remote inputs will be refused\n";
+    }
+
     // CLI 3.0 commands carry their own parsers and global flags (--json etc.);
     // the legacy parser below must not see them.
-    const bool commandMode = app.arguments().size() > 1
-                             && sicnu::cli::isCliCommand( app.arguments().at( 1 ) );
+    const bool commandMode = routedArguments.size() > 1
+                             && sicnu::cli::isCliCommand( routedArguments.at( 1 ) );
     // Unified Help 6.0 projections: handled before the legacy parser so a
     // --help-topic style query never trips pipeline argument validation.
     if ( int handled = sicnu::cli::runHelpProjections( app.arguments() ); handled >= 0 )
@@ -231,7 +261,8 @@ int main(int argc, char *argv[])
     }
 
     // CLI 3.0 subcommand routing: `sicnu_geo_rs_cli <command> ...`.
-    const QStringList arguments = app.arguments();
+    // routedArguments has the global --offline flag already stripped.
+    const QStringList arguments = routedArguments;
     if ( arguments.size() > 1 && sicnu::cli::isCliCommand( arguments.at( 1 ) ) ) {
         sicnu::cli::CliIO io;
         io.json = arguments.contains("--json");

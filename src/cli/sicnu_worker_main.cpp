@@ -13,6 +13,7 @@
 //
 // Built-in test hooks (used by the fault-injection suite):
 //   "__hang__"  — loops until cancelled (simulates an unresponsive operator)
+#include "geospatial/remote/offline_gate.h"
 #include "operators/framework/rs_operator.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_registry.h"
@@ -215,6 +216,16 @@ int runHangJob( const std::string &jobId, const std::atomic<bool> &cancel,
 
 int main( int argc, char **argv )
 {
+    // Offline gate (goal D7): the gate is a process global and the CPL deny is
+    // per-process, so a worker spawned by an offline host must engage it too —
+    // env-only here: the host passes its own --offline/SICNU_OFFLINE through
+    // the environment, and the worker has no CLI flag surface.
+    if ( sicnu::geo::offline::enabledFromEnv() )
+    {
+        sicnu::geo::offline::setEnabled( true );
+        sicnu::geo::offline::applyGdalNetworkDeny();
+    }
+
     int protocolArg = 0; // position of "--protocol" if present
     for ( int i = 1; i < argc - 1; ++i )
         if ( std::string( argv[i] ) == "--protocol" )
