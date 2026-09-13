@@ -11,3 +11,10 @@
   provenance (WP5-7), pi single-bridge + F-PI-1/2 + drift test (WP8), 3 new
   eval categories (WP9 data). All new .cpp/.cpp sources pass -fsyntax-only
   against the real build flag set; pi suite 9/9 green.
+
+- 2026-09-14 Phases 7-8: two read-only adversarial reviewers (architecture/
+  science; tests/bounds/pi/docs) delivered 4+1 P0, 5+6 P1, many P2/P3 — all
+  verified in code, all P0/P1 fixed, P2/P3 fixed or dispositioned with rationale
+  (REVIEW_LOG.md). Two fix commits. Final verification green at HEAD:
+  6 new suites + 8 regression suites + pi suite; corpus 756 assertions.
+  Phase 9: push + PR (do not merge).
