@@ -73,6 +73,7 @@ struct ChannelMapping
 /// declared SICNU_SAR_COMPLEX_CHANNELS metadata (DECISIONS D-002).
 ChannelMapping resolveChannels( const GdalDatasetWrapper &ds, const Json::Value &params )
 {
+    const bool assumeReciprocity = getInt( params, "assumeReciprocity", 1 ) != 0;
     ChannelMapping m;
 
     const bool hasHh = params.isMember( "hhBand" );
@@ -92,6 +93,7 @@ ChannelMapping resolveChannels( const GdalDatasetWrapper &ds, const Json::Value 
             throw RSOperatorError( ErrorCode::InvalidParameter,
                                    "full-pol decomposition needs a cross-pol channel "
                                    "(hvBand or vhBand)" );
+        m.reciprocalAssumed = !hasHv && hasVh; // VH standing in for HV
         m.source = QStringLiteral( "parameters" );
         return m;
     }
@@ -136,7 +138,15 @@ ChannelMapping resolveChannels( const GdalDatasetWrapper &ds, const Json::Value 
                                "POLARIZATION_MISMATCH: no cross-pol (HV/VH) complex channel "
                                "in the declaration: " + declared.toStdString() );
     if ( channels.size() == 4 && hvIt != bandOf.end() && vhIt != bandOf.end() )
+    {
+        if ( !assumeReciprocity )
+            throw RSOperatorError(
+                ErrorCode::InvalidInputData,
+                "NON_RECIPROCAL_CHANNELS: the declaration carries both HV and VH; "
+                "assumeReciprocity=0 refuses to collapse them (use reciprocal data or "
+                "drop one channel explicitly)" );
         m.reciprocalAssumed = true; // HV ≠ VH information deliberately collapsed
+    }
     m.source = QStringLiteral( "metadata" );
     return m;
 }
@@ -159,6 +169,11 @@ Json::Value RsSarPolsarDecomposeOperator::schema() const {
     props["vhBand"] = makeNumberParam( "vhBand", "Explicit 1-based VH complex band "
                                                    "(reciprocal stand-in for HV)", 0.0 );
     props["vvBand"] = makeNumberParam( "vvBand", "Explicit 1-based VV complex band", 0.0 );
+    props["assumeReciprocity"] = makeNumberParam( "assumeReciprocity",
+                                                  "1 (default) = collapse a 4-channel HV≠VH "
+                                                  "declaration onto HV; 0 = refuse instead "
+                                                  "(NON_RECIPROCAL_CHANNELS)",
+                                                  1.0 );
 
     Json::Value outputs( Json::objectValue );
     outputs["output"] = makeRasterParam( "output", "Output raster path" );
@@ -270,7 +285,9 @@ Json::Value RsSarPolsarDecomposeOperator::run( const Json::Value &params,
     out.setMetadataItem( "SICNU_SAR_POLSAR_DECOMPOSITION", decomposition.c_str() );
     out.setMetadataItem( "SICNU_SAR_POLSAR_BANDS", spec.bands );
     out.setMetadataItem( "SICNU_SAR_ENSEMBLE_WINDOW", std::to_string( window ).c_str() );
-    if ( decomposition != "pauli" )
+    // linear_power labels the POWER products; h_alpha's entropy/alpha bands
+    // are dimensionless statistics and carry no domain label.
+    if ( decomposition != "h_alpha" )
         out.setMetadataItem( sicnu::sar::kDomainKey, "linear_power" );
 
     std::vector<float> product( static_cast<size_t>( spec.count ) * kTileDim * kTileDim );

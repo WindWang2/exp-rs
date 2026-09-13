@@ -123,6 +123,7 @@
       "Dual-pol detected inputs are refused \u2014 no quad-pol approximation from dual-pol data.",
       "Single-look ensembles are rank 1: H is identically 0 and anisotropy is NaN \u2014 use windowSize > 1 for H/A/alpha.",
       "Freeman-Durden/Yamaguchi powers may clamp negative residuals to 0 (documented SPAN break near the noise floor).",
+      "Cost is O(windowSize^2) per pixel: windowSize=101 is a deliberately expensive ensemble \u2014 use the smallest window that decorrelates the speckle.",
       "\u5355\u89c6\u96c6\u5408\u79e9\u4e3a 1\uff1aH \u6052\u4e3a 0\u3001anisotropy \u4e3a NaN\u2014\u2014\u7528 windowSize>1 \u7684\u7a97\u53e3\u5e73\u5747\u83b7\u5f97\u6709\u6548 H/A/\u03b1\uff0c\u4ee3\u4ef7\u662f\u6709\u6548\u5206\u8fa8\u7387\u4e0b\u964d\u3002",
       "Freeman-Durden/Yamaguchi \u8d1f\u6b8b\u5dee\u88ab\u94b3\u5236\u4e3a 0\uff08\u566a\u58f0\u5e95\u9644\u8fd1 SPAN \u4e0d\u4e25\u683c\u5b88\u6052\uff09\u3002"
     ],

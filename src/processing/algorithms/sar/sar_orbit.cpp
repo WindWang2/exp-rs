@@ -398,4 +398,33 @@ double incidenceAngleDeg( const OrbitSegment &orbit, double azimuthTime, const G
     return std::acos( std::clamp( cosTheta, -1.0, 1.0 ) ) * kRadToDeg;
 }
 
+
+bool interferometricBaseline( double x1, double y1, double z1,
+                              double x2, double y2, double z2,
+                              double losX, double losY, double losZ,
+                              InterferometricBaseline *out )
+{
+    if ( !out )
+        return false;
+    const double dx = x2 - x1;
+    const double dy = y2 - y1;
+    const double dz = z2 - z1;
+    if ( !std::isfinite( dx ) || !std::isfinite( dy ) || !std::isfinite( dz )
+         || !std::isfinite( losX ) || !std::isfinite( losY ) || !std::isfinite( losZ ) )
+        return false;
+    const double losNorm = std::sqrt( losX * losX + losY * losY + losZ * losZ );
+    if ( std::fabs( losNorm - 1.0 ) > 1e-6 || losNorm == 0.0 )
+        return false; // callers must pass a unit LOS vector
+    const double ux = losX / losNorm;
+    const double uy = losY / losNorm;
+    const double uz = losZ / losNorm;
+    const double parallel = dx * ux + dy * uy + dz * uz;
+    const double magnitude = std::sqrt( dx * dx + dy * dy + dz * dz );
+    const double perpTerm = magnitude * magnitude - parallel * parallel;
+    out->parallelM = parallel;
+    out->perpendicularM = perpTerm > 0.0 ? std::sqrt( perpTerm ) : 0.0;
+    out->magnitudeM = magnitude;
+    return true;
+}
+
 } // namespace sicnu::sar

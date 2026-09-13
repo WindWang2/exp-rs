@@ -110,4 +110,24 @@ bool forwardRangeDoppler( const OrbitSegment &orbit, const GeodeticPoint &p,
 /// NaN outside the segment.
 double incidenceAngleDeg( const OrbitSegment &orbit, double azimuthTime, const GeodeticPoint &p );
 
+// --- Interferometric baseline geometry (Advanced SAR 10.0, D-011) ---
+
+struct InterferometricBaseline
+{
+    double parallelM = 0.0;     ///< B∥ — baseline projected on the line of sight
+    double perpendicularM = 0.0; ///< B⊥ — baseline component perpendicular to the LOS
+    double magnitudeM = 0.0;    ///< |Δr|
+};
+
+/// Interferometric baseline between two platform positions at a common
+/// epoch for the given unit line-of-sight vector (ground → sensor, ECEF).
+/// B∥ = Δr·ŝ, B⊥ = sqrt(|Δr|² − B∥²) (sign-free by construction; the
+/// sign of B∥ resolves near/far range). Returns false when @a los is not
+/// unit-length within 1e-6 or any input is non-finite — callers refuse
+/// rather than emit a degenerate baseline.
+bool interferometricBaseline( double x1, double y1, double z1,
+                              double x2, double y2, double z2,
+                              double losX, double losY, double losZ,
+                              InterferometricBaseline *out );
+
 } // namespace sicnu::sar

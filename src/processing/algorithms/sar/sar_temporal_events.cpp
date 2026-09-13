@@ -63,6 +63,21 @@ bool parseAcquisitionUtc( const QString &text, double *secondsSinceEpoch, QStrin
             *error = QStringLiteral( "invalid calendar date in \"%1\"" ).arg( text );
         return false;
     }
+    // Strict calendar: reject impossible day-of-month (2023-02-30 must not
+    // silently normalize to March).
+    {
+        static const int kMonthLen[13] = { 0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 };
+        bool leap = ( year % 4 == 0 && year % 100 != 0 ) || year % 400 == 0;
+        const int maxDay = ( month == 2 && leap ) ? 29 : kMonthLen[month];
+        if ( day > maxDay )
+        {
+            if ( error )
+                *error = QStringLiteral( "invalid calendar date in \"%1\" (month %2 has at "
+                                         "most %3 days)" )
+                             .arg( text ).arg( month ).arg( maxDay );
+            return false;
+        }
+    }
 
     int hour = 0;
     int minute = 0;

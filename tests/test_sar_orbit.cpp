@@ -217,3 +217,32 @@ TEST_CASE( "Geolocation refuses ranges that cannot reach the height shell",
     REQUIRE_FALSE( geolocateZeroDoppler( orbit, 61.0, kOrbitRadius - kSemiMajor, 0.0,
                                          &back ) );
 }
+
+// ---------------------------------------------------------------------------
+// Interferometric baseline (Advanced SAR 10.0, D-011)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "interferometricBaseline — closed-form geometry", "[sar][orbit][insar]" )
+{
+    sicnu::sar::InterferometricBaseline b;
+
+    // Master at origin; slave 100 m along x and 50 m along z. LOS along +y.
+    REQUIRE( sicnu::sar::interferometricBaseline( 0, 0, 0, 100, 0, 50, 0, 1, 0, &b ) );
+    REQUIRE( b.parallelM == Approx( 0.0 ).margin( 1e-12 ) );
+    REQUIRE( b.perpendicularM == Approx( std::sqrt( 100.0 * 100.0 + 50.0 * 50.0 ) ).margin( 1e-9 ) );
+    REQUIRE( b.magnitudeM == Approx( std::sqrt( 100.0 * 100.0 + 50.0 * 50.0 ) ).margin( 1e-9 ) );
+
+    // Δr = (40, 30, 0) with LOS +y: B∥ = 30, B⊥ = 40 (3-4-5 triangle).
+    REQUIRE( sicnu::sar::interferometricBaseline( 0, 0, 0, 40, 30, 0, 0, 1, 0, &b ) );
+    REQUIRE( b.parallelM == Approx( 30.0 ).margin( 1e-12 ) );
+    REQUIRE( b.perpendicularM == Approx( 40.0 ).margin( 1e-9 ) );
+    REQUIRE( b.magnitudeM == Approx( 50.0 ).margin( 1e-9 ) );
+
+    // Non-unit LOS is refused (callers must normalize).
+    REQUIRE_FALSE( sicnu::sar::interferometricBaseline( 0, 0, 0, 0, 30, 0, 0, 2, 0, &b ) );
+
+    // Identical positions: zero baseline.
+    REQUIRE( sicnu::sar::interferometricBaseline( 5, 5, 5, 5, 5, 5, 0, 1, 0, &b ) );
+    REQUIRE( b.magnitudeM == Approx( 0.0 ).margin( 1e-12 ) );
+    REQUIRE( b.perpendicularM == 0.0 );
+}

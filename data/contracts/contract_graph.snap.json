@@ -3577,6 +3577,11 @@
       "origin" : "harness_error.h"
     },
     {
+      "id" : "harness/TEACHING_REFUSAL",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
       "id" : "harness/TIME_ORDER_INVALID",
       "kind" : "error_code",
       "origin" : "harness_error.h"
@@ -5898,6 +5903,28 @@
     {
       "attributes" : 
       [
+        "bands",
+        "input",
+        "output"
+      ],
+      "id" : "rs:gaofen_import",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "input",
+        "output"
+      ],
+      "id" : "rs:hj_import",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
         "band1",
         "band2",
         "band3",
@@ -6437,6 +6464,37 @@
     {
       "attributes" : 
       [
+        "master",
+        "masterBand",
+        "minPeakRatio",
+        "output",
+        "patchSize",
+        "patchStride",
+        "reportOnly",
+        "searchRadius",
+        "slave",
+        "slaveBand"
+      ],
+      "id" : "rs:sar_coregister",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "input",
+        "output",
+        "warnThreshold",
+        "wavelengthUm"
+      ],
+      "id" : "rs:sar_displacement",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
         "domain",
         "feature",
         "input",
@@ -6458,6 +6516,51 @@
         "resampling"
       ],
       "id" : "rs:sar_geocode",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "coherenceOutput",
+        "coherenceWindow",
+        "flattenRamp",
+        "master",
+        "masterBand",
+        "output",
+        "slave",
+        "slaveBand"
+      ],
+      "id" : "rs:sar_interferogram",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "alpha",
+        "band",
+        "input",
+        "output",
+        "window"
+      ],
+      "id" : "rs:sar_phase_filter",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "decomposition",
+        "hhBand",
+        "hvBand",
+        "input",
+        "output",
+        "vhBand",
+        "vvBand",
+        "windowSize"
+      ],
+      "id" : "rs:sar_polsar_decompose",
       "kind" : "operator",
       "origin" : "src/operators/rs/rs_operators_init.cpp"
     },
@@ -6503,6 +6606,22 @@
       [
         "band",
         "changeThresholdDb",
+        "dates",
+        "inputDomain",
+        "inputs",
+        "minValid",
+        "output"
+      ],
+      "id" : "rs:sar_temporal_events",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "changeThresholdDb",
+        "dates",
         "inputDomain",
         "inputs",
         "minValid",
@@ -6584,6 +6703,20 @@
         "windowSize"
       ],
       "id" : "rs:sar_texture",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "input",
+        "output",
+        "provider",
+        "qualityBand",
+        "qualityInput"
+      ],
+      "id" : "rs:sar_unwrap",
       "kind" : "operator",
       "origin" : "src/operators/rs/rs_operators_init.cpp"
     },
@@ -7068,6 +7201,17 @@
         "zoneField"
       ],
       "id" : "rs:zonal_stats",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "input",
+        "output"
+      ],
+      "id" : "rs:zy3_import",
       "kind" : "operator",
       "origin" : "src/operators/rs/rs_operators_init.cpp"
     },

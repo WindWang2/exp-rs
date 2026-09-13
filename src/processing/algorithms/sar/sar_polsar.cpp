@@ -210,8 +210,10 @@ bool yamaguchi4( const PolEnsemble3 &cov, YamaguchiResult *out )
     const double fh = -2.0 * ( cov.c12.imag() + cov.c23.imag() );
 
     // 2. Volume from the helix-decontaminated cross-pol power (the helix
-    //    model's own |SHV|² = fh/4 must not inflate fv).
-    const double fv = 1.5 * ( cov.c22 - fh / 4.0 );
+    //    model's own |SHV|² = fh/4 must not inflate fv). Strong helicity can
+    //    push the estimate negative — clamp like every other residual power
+    //    (documented SPAN break).
+    const double fv = std::max( 0.0, 1.5 * ( cov.c22 - fh / 4.0 ) );
 
     // 3. Doubly-reduced residual for the surface/double models: the helix
     //    model contributes fh/4 to C11 and C33, −fh/4 to Re C13.

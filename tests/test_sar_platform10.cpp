@@ -654,6 +654,61 @@ TEST_CASE( "rs:sar_coregister estimates and applies a synthetic global shift",
         }
 }
 
+TEST_CASE( "rs:sar_interferogram flattenRamp keeps amplitude and removes a known ramp",
+           "[sar][insar][e2e][ramp]" )
+{
+    using namespace insar_fixture;
+    const AppInit app;
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+
+    // Master |s1| = 2 with phase 0.1x; slave |s2| = 3 with the same phase
+    // slope PLUS a known linear ramp r(x, y) = 0.01x + 0.002y (|r| < π, so
+    // the wrapped field still satisfies the robust linear fit exactly).
+    const QString master = tmp.filePath( "rm.tif" );
+    const QString slave = tmp.filePath( "rs.tif" );
+    auto mField = []( int, int x, int y ) {
+        const double phase = 0.1 * x + 0.02 * y;
+        return cfloat( static_cast<float>( 2.0 * std::cos( phase ) ),
+                       static_cast<float>( 2.0 * std::sin( phase ) ) );
+    };
+    auto sField = []( int, int x, int y ) {
+        const double ramp = 0.01 * x + 0.002 * y;
+        const double phase = 0.1 * x + 0.02 * y + ramp;
+        return cfloat( static_cast<float>( 3.0 * std::cos( phase ) ),
+                       static_cast<float>( 3.0 * std::sin( phase ) ) );
+    };
+    REQUIRE( writeComplex( master, kWidth, kHeight, 1, mField ) );
+    REQUIRE( writeComplex( slave, kWidth, kHeight, 1, sField ) );
+
+    Json::Value params( Json::objectValue );
+    params["master"] = master.toStdString();
+    params["slave"] = slave.toStdString();
+    params["output"] = tmp.filePath( "ramp_ifg.tif" ).toStdString();
+    params["coherenceOutput"] = tmp.filePath( "ramp_coh.tif" ).toStdString();
+    params["flattenRamp"] = "linear";
+    Json::Value result;
+    REQUIRE_NOTHROW( result = runOperator( "rs:sar_interferogram", params ) );
+    REQUIRE( result["ramp"].asString() == "linear" );
+    REQUIRE( result["rampCoefficients"].size() == 3 );
+
+    GdalDatasetWrapper ds;
+    REQUIRE( ds.open( tmp.filePath( "ramp_ifg.tif" ) ) );
+    std::vector<cfloat> plane( static_cast<size_t>( kWidth ) * kHeight );
+    REQUIRE( ds.readBandDataNative( 1, plane.data(), kWidth, kHeight ) );
+    for ( int y = 2; y < kHeight - 2; y += 5 )
+        for ( int x = 2; x < kWidth - 2; x += 5 )
+        {
+            const cfloat v = plane[static_cast<size_t>( y ) * kWidth + x];
+            // Amplitude contract: exactly |s1|·|s2| = 6 (no double-counted
+            // slave term).
+            REQUIRE( std::abs( v ) == Approx( 6.0 ).margin( 1e-3 ) );
+            // Phase contract: the known ramp was removed (fit is exact on a
+            // linear ramp) — residual = phase noise of the closed form, 0.
+            REQUIRE( std::arg( v ) == Approx( 0.0 ).margin( 1e-6 ) );
+        }
+}
+
 // ---------------------------------------------------------------------------
 // Scale / bounded execution (synthetic, no heavyweight fixture)
 // ---------------------------------------------------------------------------

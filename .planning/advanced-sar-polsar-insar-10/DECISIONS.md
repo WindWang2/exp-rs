@@ -101,3 +101,19 @@
   写进 sar-domain.md 追加章节。
 - 理由：验收标准写明"如科学/数据条件允许"；窗口 ensemble 后的四分量功率闭合
   （SPAN = 四分量之和）作为已知答案测试锚点。
+
+## 评审后修订（Phase 7，subagent A 输入后）
+
+- **D-002 修订（波段映射参数命名）**：实现与 docs §6.2 采用 camelCase
+  （`hhBand/hvBand/vhBand/vvBand`），与原决定"沿用 dualpol 的 snake_case"不符。
+  保留 camelCase：本算子参数多于 dualpol（4 个波段 + assumeReciprocity），
+  camelCase 与 schema 其余参数一致；docs/代码/能力页三方一致。原 snake_case
+  提议作废，记录为已修订决定。
+- **D-004 论证补全**：仓内已有 `ImageEnhancement::jacobiEigen`
+  （image_enhancement.h:99）为 float 实对称 Jacobi——复 Hermitian 需要复
+  Givens 旋转与复特征向量累积，不能直接复用；`sar_hermitian3` 不构成重复
+  实现，依据补记于此。
+- **D-006 兑现**：interferogram 结果 JSON 现报告 `rampCoefficients` 与
+  `rampCoefficientOrder`（原承诺的拟合系数）。
+- **D-011 状态**：`interferometricBaseline`（B∥/B⊥/|Δr|，unit-LOS 校验）
+  已实现于 sar_orbit.{h,cpp}，known-answer 测试钉住（test_sar_orbit.cpp）。

@@ -204,6 +204,20 @@ Json::Value RsSarUnwrapOperator::run( const Json::Value &params, RSOperatorConte
              &result, [ &context ] { context.throwIfCancelled(); } ) )
         throw RSOperatorError( ErrorCode::ComputationError,
                                "Unwrapping failed (non-finite phase plane)" );
+    // Honest refusal over a silent all-NaN product: finite phase existed but
+    // nothing could be seeded (typically an all-NoData quality plane).
+    {
+        long finitePhase = 0;
+        for ( size_t i = 0; i < wrapped.size(); ++i )
+            if ( std::isfinite( wrapped[i] ) )
+                ++finitePhase;
+        if ( finitePhase > 0 && result.unwrappedCount == 0 )
+            throw RSOperatorError(
+                ErrorCode::InvalidInputData,
+                "nothing was unwrapped: " + std::to_string( finitePhase )
+                    + " finite phase pixels but no component could be seeded (check the "
+                      "quality plane — every sample may be NoData)" );
+    }
 
     GdalStreamingOutput out( QString::fromStdString( outputPath ), width, height, 1,
                              GDT_Float32, ds.geoTransform(), ds.projection() );

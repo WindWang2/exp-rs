@@ -227,7 +227,7 @@ Json::Value RsSarDisplacementOperator::run( const Json::Value &params, RSOperato
     result["wavelengthUm"] = wavelengthUm;
     result["signConvention"] = "positive d_los = motion toward the sensor";
     result["validPixels"] = Json::Value::Int64( validPixels );
-    result["discontinuityRatio"] = discontinuityRatio;
+    result["phaseDiscontinuityRatio"] = discontinuityRatio;
     result["wrappedSuspicionWarning"] = discontinuityRatio > warnThreshold;
     context.reportProgress( 1.0, "Displacement complete" );
     return result;

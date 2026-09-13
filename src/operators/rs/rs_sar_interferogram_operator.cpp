@@ -212,7 +212,10 @@ Json::Value RsSarInterferogramOperator::run( const Json::Value &params,
             for ( int y = 0; y < tile.height; ++y )
                 for ( int x = 0; x < tile.width; ++x )
                 {
-                    const size_t idx = static_cast<size_t>( y ) * tile.bufferWidth + x;
+                    // Core pixels sit at (+halo, +halo) in the halo buffer
+                    // (ComplexBandTileStream BIP layout).
+                    const size_t idx = static_cast<size_t>( y + halo ) * tile.bufferWidth
+                                       + x + halo;
                     fitter.addSample( tile.xOffset + x, tile.yOffset + y,
                                       sicnu::sar::interferogramPhase( mbuf[idx], sbuf[idx] ) );
                 }
@@ -295,25 +298,31 @@ Json::Value RsSarInterferogramOperator::run( const Json::Value &params,
                 for ( int x = 0; x < tile.bufferWidth; ++x )
                 {
                     const size_t idx = static_cast<size_t>( y ) * tile.bufferWidth + x;
-                    std::complex<float> m( mbuf[idx] );
-                    std::complex<float> sv( sbuf[idx] );
-                    const double phase =
-                        sicnu::sar::interferogramPhase( m, sv )
-                        - sicnu::sar::evalPhaseRamp( ramp, tile.xOffset - halo + x,
-                                                     tile.yOffset - halo + y );
-                    const double amp = sicnu::sar::complexAmplitude( m )
-                                       * sicnu::sar::complexAmplitude( sv );
-                    if ( std::isfinite( phase ) && std::isfinite( amp ) )
+                    const std::complex<float> m( mbuf[idx] );
+                    const std::complex<float> sv( sbuf[idx] );
+                    // Flat-earth removal multiplies the MASTER by
+                    // e^{−i·ramp}: the product flatM·conj(flatS) then keeps
+                    // exactly |s1|·|s2| with phase (φ1−φ2−ramp), and the
+                    // coherence window sees the flattened pair (review
+                    // P1-1/P2-1 — an earlier draft rotated the pair phase
+                    // into the master amplitude slot and double-counted).
+                    const double corr =
+                        -sicnu::sar::evalPhaseRamp( ramp, tile.xOffset - halo + x,
+                                                    tile.yOffset - halo + y );
+                    const double amp = sicnu::sar::complexAmplitude( m );
+                    const double phase = std::arg( m );
+                    if ( std::isfinite( phase ) && std::isfinite( amp )
+                         && std::isfinite( corr ) )
                     {
-                        m = std::complex<float>( static_cast<float>( amp * std::cos( phase ) ),
-                                                 static_cast<float>( amp * std::sin( phase ) ) );
+                        flatM[idx] = std::complex<float>(
+                            static_cast<float>( amp * std::cos( phase + corr ) ),
+                            static_cast<float>( amp * std::sin( phase + corr ) ) );
                     }
                     else
                     {
-                        m = std::complex<float>( kNaN, kNaN );
+                        flatM[idx] = std::complex<float>( kNaN, kNaN );
                     }
-                    flatM[idx] = m;
-                    flatS[idx] = std::complex<float>( kNaN, kNaN ); // coherence consumes flatM only
+                    flatS[idx] = sv;
                 }
         }
         else
@@ -397,6 +406,17 @@ Json::Value RsSarInterferogramOperator::run( const Json::Value &params,
     Json::Value result;
     result["output"] = outputPath;
     result["ramp"] = rampMode;
+    if ( haveRamp )
+    {
+        // D-006: the fit is reported so callers can audit the removal.
+        Json::Value coefs( Json::arrayValue );
+        const int nCoef = ramp.quadratic ? 6 : 3;
+        for ( int c = 0; c < nCoef; ++c )
+            coefs.append( ramp.coef[c] );
+        result["rampCoefficients"] = coefs;
+        result["rampCoefficientOrder"] =
+            ramp.quadratic ? "1,x,y,x^2,xy,y^2" : "1,x,y";
+    }
     result["validPixels"] = Json::Value::Int64( validPixels );
     if ( wantCoherence )
     {

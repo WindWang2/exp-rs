@@ -225,5 +225,172 @@
       "Scenes must be co-registered; kernels compute in linear power and dB inputs are converted once",
       "Pixels with validCount < minValid are NaN on every band except validCount"
     ]
+  },
+  {
+    "id": "rs:sar_polsar_decompose",
+    "family": "sar",
+    "extends": "family:sar",
+    "modality": [
+      "sar"
+    ],
+    "verification": {
+      "expected_kind": "raster",
+      "checks": [
+        "existence",
+        "opens",
+        "crs_matches",
+        "dimensions",
+        "finite_fraction"
+      ]
+    },
+    "limitations": [
+      "Full-pol CFloat32 HH/HV/VV channels only; dual-pol detected inputs are refused",
+      "Single-look ensembles are rank 1: H is identically 0 and anisotropy is NaN — use windowSize > 1",
+      "Fixed band orders declared as SICNU_SAR_POLSAR_BANDS"
+    ]
+  },
+  {
+    "id": "rs:sar_interferogram",
+    "family": "sar",
+    "extends": "family:sar",
+    "modality": [
+      "sar"
+    ],
+    "resource": {
+      "cost_class": "medium",
+      "large_raster_safe": true
+    },
+    "verification": {
+      "expected_kind": "raster",
+      "checks": [
+        "existence",
+        "opens",
+        "crs_matches",
+        "dimensions",
+        "finite_fraction"
+      ]
+    },
+    "limitations": [
+      "Master and slave must be co-registered complex SLC on the SAME grid",
+      "flattenRamp is a low-order flat-earth approximation, not DEM/orbit topographic removal",
+      "No atmospheric correction, no PSI/SBAS — base interferometry only"
+    ]
+  },
+  {
+    "id": "rs:sar_phase_filter",
+    "family": "sar",
+    "extends": "family:sar",
+    "modality": [
+      "sar"
+    ],
+    "verification": {
+      "expected_kind": "raster",
+      "checks": [
+        "existence",
+        "opens",
+        "dimensions"
+      ]
+    },
+    "limitations": [
+      "Output is a unit phasor — the Goldstein-Werner filter is defined on phase only"
+    ]
+  },
+  {
+    "id": "rs:sar_unwrap",
+    "family": "sar",
+    "extends": "family:sar",
+    "modality": [
+      "sar"
+    ],
+    "resource": {
+      "cost_class": "heavy",
+      "large_raster_safe": false
+    },
+    "verification": {
+      "expected_kind": "raster",
+      "checks": [
+        "existence",
+        "opens",
+        "dimensions",
+        "finite_fraction"
+      ]
+    },
+    "limitations": [
+      "Reference unwrapper is quality-guided flood fill: not residue-aware, not a global optimum",
+      "Single-scale plane unwrap behind a 2 GiB budget; larger AOIs are refused",
+      "provider != builtin is refused (UNWRAP_PROVIDER_UNAVAILABLE), never silently substituted"
+    ]
+  },
+  {
+    "id": "rs:sar_displacement",
+    "family": "sar",
+    "extends": "family:sar",
+    "modality": [
+      "sar"
+    ],
+    "verification": {
+      "expected_kind": "raster",
+      "checks": [
+        "existence",
+        "opens",
+        "dimensions",
+        "finite_fraction"
+      ]
+    },
+    "limitations": [
+      "Input must be UNWRAPPED phase; radar wavelength required (wavelengthUm or SICNU_SAR_WAVELENGTH_UM)",
+      "Positive d_los = motion toward the sensor; Itoh discontinuity ratio is advisory only"
+    ]
+  },
+  {
+    "id": "rs:sar_coregister",
+    "family": "sar",
+    "extends": "family:sar",
+    "modality": [
+      "sar"
+    ],
+    "resource": {
+      "cost_class": "heavy",
+      "large_raster_safe": false
+    },
+    "verification": {
+      "expected_kind": "raster",
+      "checks": [
+        "existence",
+        "opens",
+        "crs_matches",
+        "dimensions"
+      ]
+    },
+    "limitations": [
+      "Global translation model only — no affine/DEM-based warping",
+      "Refines residual shifts of a same-grid pair; full planes behind a 4 GiB budget"
+    ]
+  },
+  {
+    "id": "rs:sar_temporal_events",
+    "family": "sar",
+    "extends": "family:sar",
+    "modality": [
+      "sar"
+    ],
+    "temporal": {
+      "min_scenes": 2,
+      "requires_acquisition_time": true
+    },
+    "verification": {
+      "expected_kind": "raster",
+      "checks": [
+        "existence",
+        "opens",
+        "crs_matches",
+        "dimensions",
+        "finite_fraction"
+      ]
+    },
+    "limitations": [
+      "Every scene needs an acquisition date (dates parameter or SICNU_SAR_ACQUISITION_UTC); missing dates are refused",
+      "Irregular revisit intervals are the norm: all time quantities are floating day offsets since scene 0"
+    ]
   }
 ]
