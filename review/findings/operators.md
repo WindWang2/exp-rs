@@ -41,3 +41,30 @@
 - **Reproduction**: `review/tests/F-OPS-1.cpp`（Catch2 草稿）：注册 manifest `{classes:[a,b,c], postprocess.class_mapping:[0,1,300]}`，对 2×2 全零输入跑 `TileInferenceEngine::run(outputMode=Labels)`，断言输出 Byte 栅格的类 2 像素值 == 2。现实现会得到 255（=NoData），断言失败。
 - **Recommended fix**: `parseManifest` 在 class_mapping 校验中增加上界（≤ 254，或与 writeType 联动：`max(classMapping) >= 255` 时强制 UInt16 且 NoData=65535）；`TileInferenceEngine` 在 Labels 分支按 `1+max(classMapping)` 选择 writeType/writeNoData（stats.classPixelCounts 已经按这个域分配大小，说明作者知道产品域 ≠ 模型类数，唯独漏了栅格编码）。
 - **Dedupe**: new——250 个既有 issue 与两份历史审计均未涉及 class_mapping 域校验（#878 是渲染端容器规则问题；#646 是该字段引入前的 declared-but-unenforced 清扫）。
+
+## F-OPS-2 · TensorBlob::fromMat 非连续回退拷贝对 ND Mat 是空转——静默喂入未初始化字节
+
+- **Severity**: P3
+- **Lens**: 2（内存安全）
+- **Location**: `src/operators/runtime/tensor_blob.cpp:163-173`
+- **Code**:
+  ```cpp
+      else
+      {
+        // Multi-dim Mats can be non-continuous when ROI'd; copy row ranges.
+        std::size_t offset = 0;
+        for ( int r = 0; r < mat.rows; ++r )
+        {
+          std::memcpy( blob.bytes.data() + offset, mat.ptr<const std::uint8_t>( r ),
+                       static_cast<std::size_t>( mat.step ) );
+          offset += static_cast<std::size_t>( mat.step );
+        }
+      }
+  ```
+- **Root cause**: 对 `dims > 2` 的 `cv::Mat`，`mat.rows` 恒为 `-1`（cv::Mat 契约：rows/cols 仅在 2D 有意义），循环体零次执行；而 `blob.bytes.resize(total)` 已按 `mat.total()*elemSize` 分配。结果：非连续 ND Mat（例如对 4-D blob 的 dim-0/1 Range ROI，插件 provider 的真实用法）走 `fromMat` 得到一个 `isValid()` 为真（字节数匹配）但内容**未初始化**的 TensorBlob。
+- **Impact**: 静默垃圾数据——校验全过（isValid 只查字节数），推理直接消费未初始化内存；无任何错误信号。
+- **Trigger condition**: 当前第一方调用方全部传连续矩阵（clone/fresh blob），故**现网不可达**；但 `fromMat` 是 provider/plugin 的公共拼装面（http/python/第三方 runtime 都把 `cv::Mat` 交给它），任何 ROI 化的多维张量都会触发。
+- **Evidence**: `static-only`
+- **Reproduction**: `review/tests/F-OPS-2.cpp` 草稿：构造 4-D 连续 Mat，取 `mat(Range(1,2), Range::all(), Range::all(), Range::all())` 得到非连续 4-D ROI，`TensorBlob::fromMat(roi)` 后断言 blob 内容与源平面逐字节相等——现实现字节全为未初始化。
+- **Recommended fix**: 循环上限用 `mat.total() / (mat.step[mat.dims-2] / mat.elemSize())`（或按 `mat.dims` 逐维步进），dims>2 且非连续时直接 `cv::Mat contiguous = mat.clone()` 复用连续分支。
+- **Dedupe**: new。
