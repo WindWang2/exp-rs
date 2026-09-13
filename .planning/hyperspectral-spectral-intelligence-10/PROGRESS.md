@@ -21,3 +21,9 @@ Append-only log. Newest last within a phase; phases in order.
 * WP-F/G: `rs:spectral_band_select` (bands/wavelength window/exclude ranges, nm normalization), `rs:library_select` (materials/window/sensor projection, near-duplicate QA, license report).
 * Docs: ADR 0148; tests for table/wavelength, MNF kernel, FCLS (appended), pipeline flow.
 * Commits to follow after build verification (ninja configure auto-picks up new CMake entries on next build).
+
+## Phase 4-6 + review kickoff (2026-09-13)
+
+* CLI integration verified (--list/--schema); drift gate green (2270 assertions).
+* Mechanical checks: git diff --check clean; 0 conflict markers; 0 secret-ish hits.
+* Phase 7 launched: subagent A (architecture + scientific correctness), subagent B (performance/concurrency/test-trust). Both read-only; total subagent budget = 2 (both now consumed).
