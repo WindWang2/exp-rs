@@ -1,0 +1,14 @@
+{
+ "gpu": false,
+ "id": "rs:temporal_harmonic_breaks",
+ "input": "multi-date raster collection (scenes or workspace collection)",
+ "notes": "Greedy seasonality-adjusted trend-break segmentation with per-segment harmonic + linear-trend refit (BFAST/CCDC-inspired; not the full algorithms). Outputs break count/day/magnitude bands, first/last segment slopes, RMSE/R2, optional disturbance onset and recovery days.",
+ "output": "raster",
+ "tags": [
+  "temporal",
+  "change-detection",
+  "harmonic-model",
+  "segmentation"
+ ],
+ "task": "temporal-change"
+}

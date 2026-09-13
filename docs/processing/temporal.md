@@ -37,6 +37,31 @@
 | `rs:temporal_decompose` | doy climatology over valid years; Whittaker trend | **index axis** (both the trend penalty and the trend step ignore real time) | seasonal+remainder NaN where y NaN |
 | `rs:temporal_anomaly` | z-score (y − mean)/σ vs baseline; σ sample (N−1) | baseline window selection | degenerate baselines → NaN |
 | `rs:temporal_index_series` | per-date spectral index through the same kernels as `rs:spectral_index` | n/a | NaN propagates through index arithmetic; validFraction reported |
+| `rs:temporal_regularize` | per-calendar-point statistic; `validObservations` = observations contributing to that point | real day offsets; grid anchored on the collection epoch (first acquisition) | closes T-2: irregular → regular calendar (nearest / window_mean / linear / whittaker-on-grid); no method extrapolates past the observed span; `filled` flag marks synthetic values; whittaker `maxGapNodes` bounds penalty bridging |
+| `rs:temporal_harmonic_breaks` | greedy seasonality-adjusted trend-break segmentation; per-segment harmonic + linear-trend OLS; magnitude = \|fitted jump\| at the break; RMSE = √(SSE / valid) | real day offsets | closes T-3: BFAST/CCDC-*inspired* greedy method, not the full algorithms; break days = offsets from the collection epoch; onset/recovery require `direction`; unrecovered recovery reports −1 |
+| `rs:temporal_extract_regions` | per region × date mean/min/max/stddev (population)/median/valid_count | real day offsets in the table | closes C-2: batch points/polygons with caller-owned ids; streaming by date (each scene read once); rows written only where validCount > 0, `emptyCells` reports omitted cells; median degrades to NaN beyond `median_budget_mb` |
+| `rs:temporal_region_features` | per-region feature row (quality, distribution, Sen/OLS trend, anomaly z, change features, per-cycle phenology medians across years) | real day offsets; phenology windows in doy | typed table + JSON schema sidecar `exp_rs_temporal_region_features/1`; join label tables by `region_id`; phenology medians need ≥ 3 valid samples per year × cycle window |
+
+## Platform 10.0 kernel notes
+
+- **Regular calendars** (`temporal_calendar.h`): the grid is generated from
+  real UTC instants anchored on the collection epoch — `"<N>d"` steps from
+  the epoch, monthly steps from the epoch's day-of-month (clamped). Whittaker
+  regularization is *defined on the calendar grid* (Eilers 2003): observations
+  map to their nearest node, unobserved nodes carry weight 0, and runs longer
+  than `maxGapNodes` split the solve rather than bridge.
+- **Joint change model** (`temporal_change.h`): each segment fits
+  `[1, t, sin/cos(kωt)...]`; breaks are trend breaks of the
+  seasonality-adjusted residual via the same greedy RSS kernel as
+  `rs:temporal_breakpoints`; up to 3 refinement iterations. Honesty rule:
+  descriptions say "BFAST/CCDC-inspired", never "BFAST"/"CCDC".
+- **Robust Whittaker** (`whittakerSmoothRobust`): IRLS with Cauchy weights
+  `1/(1+(r/3·1.4826·MAD)²)`; damps spikes instead of smearing them.
+- **Multi-cycle phenology** (`phenologyCyclesPerYear`): per-year, per-cycle
+  threshold metrics (windows declared in doy — hemisphere-neutral); the
+  raster operator (`rs:temporal_phenology cycles=2`) reports climatological
+  second-cycle bands (`c2_*` + `cycle_count`), the region-features operator
+  reports per-cycle median-across-years values.
 
 ## References
 

@@ -1,0 +1,14 @@
+{
+ "gpu": false,
+ "id": "rs:temporal_region_features",
+ "input": "multi-date raster collection + regions array (points/polygons with ids)",
+ "notes": "Typed per-region temporal feature table for ML joins by region_id: quality, distribution, Sen/OLS trend, anomaly z-scores, joint harmonic+trend change features, multi-cycle phenology medians. Ships a versioned JSON schema sidecar (exp_rs_temporal_region_features/1).",
+ "output": "table",
+ "tags": [
+  "temporal",
+  "features",
+  "machine-learning",
+  "phenology"
+ ],
+ "task": "temporal-features"
+}
