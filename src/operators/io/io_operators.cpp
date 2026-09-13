@@ -313,6 +313,10 @@ Json::Value IoReprojectOperator::run( const Json::Value &params, RSOperatorConte
     }
     sicnu::geo::WarpOptions options;
     options.targetCrs = params::requireString( params, "targetCrs" );
+    // F-OPS-4: the declared source CRS must reach the warp — before this it
+    // was validated and then dropped, so a CRS-less input was reprojected
+    // as a no-op while the output carried the target CRS tag.
+    options.sourceCrsOverride = params::getString( params, "srcCrsOverride" );
     options.resampling = params::getString( params, "resampling", "near" );
     options.creationOptions = { "COMPRESS=LZW", "TILED=YES" };
     ContextProgress progress( context );

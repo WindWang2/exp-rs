@@ -18,6 +18,7 @@ using Catch::Approx;
 #include <gdal.h>
 #include <gdal_priv.h>
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -220,4 +221,77 @@ TEST_CASE( "io: operators declare memory policy and determinism grades", "[io][o
     CHECK_FALSE( op->schema().isNull() );
     CHECK( ( op->determinismGrade() == "bit-exact" || op->determinismGrade() == "tolerance" ) );
   }
+}
+
+// --- F-OPS-4: srcCrsOverride must actually reach the warp -------------------
+
+namespace
+{
+
+/// 8x8 Byte raster on a plain pixel grid with NO CRS at all.
+std::string makeCrsLessRaster( const std::string &dir, const std::string &name )
+{
+  ensureGdal();
+  const std::string path = ( fs::path( dir ) / name ).string();
+  GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+  REQUIRE( driver );
+  GDALDatasetH dataset = GDALCreate( driver, path.c_str(), 8, 8, 1, GDT_Byte, nullptr );
+  REQUIRE( dataset );
+  double gt[6] = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 }; // pixel grid, no SRS
+  REQUIRE( GDALSetGeoTransform( dataset, gt ) == CE_None );
+  unsigned char pixels[64];
+  for ( int i = 0; i < 64; ++i )
+    pixels[i] = static_cast<unsigned char>( i % 200 );
+  REQUIRE( GDALRasterIO( GDALGetRasterBand( dataset, 1 ), GF_Write, 0, 0, 8, 8,
+                         pixels, 8, 8, GDT_Byte, 0, 0 ) == CE_None );
+  GDALClose( dataset );
+  return path;
+}
+
+} // namespace
+
+TEST_CASE( "io:reproject honours srcCrsOverride for CRS-less input (F-OPS-4)",
+           "[io][operators][f-ops-4]" )
+{
+  const std::string dir = scratch( "reproject_crsless" );
+  const std::string raster = makeCrsLessRaster( dir, "crsless.tif" );
+  const std::string output = ( fs::path( dir ) / "reproj.tif" ).string();
+
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "io:reproject" );
+  REQUIRE( op );
+
+  sicnu::operators::RSOperatorContext context;
+  const Json::Value result = op->execute( [ & ] {
+    Json::Value params;
+    params["input"] = raster;
+    params["output"] = output;
+    // Source pixels live on grid (0,0)..(8,-8) declared as EPSG:4326; the
+    // warp must transform them into UTM 33N, not pass them through.
+    params["srcCrsOverride"] = "EPSG:4326";
+    params["targetCrs"] = "EPSG:32633";
+    return params;
+  }(), context );
+
+  CHECK( result["output"].asString() == output );
+
+  // Output must carry the target CRS AND a geotransform actually derived
+  // from the 4326->32633 transform of the source pixel grid. Before the fix
+  // the pixels passed through untransformed: geotransform (0,1,0,0,0,-1)
+  // tagged EPSG:32633 — absurd for UTM (metre coordinates near 0).
+  GDALDatasetH dataset = GDALOpen( output.c_str(), GA_ReadOnly );
+  REQUIRE( dataset );
+  double gt[6];
+  REQUIRE( GDALGetGeoTransform( dataset, gt ) == CE_None );
+  OGRSpatialReferenceH target = OSRNewSpatialReference( nullptr );
+  REQUIRE( OSRImportFromEPSG( target, 32633 ) == OGRERR_NONE );
+  const bool utmTagged = OSRIsProjected( target ) != 0;
+  OSRDestroySpatialReference( target );
+  CHECK( utmTagged );
+  // A metre-based UTM grid cannot span only 8 units; the untransformed
+  // pixel-grid passthrough produced exactly that. Allow generous bounds —
+  // the point is "coordinates transformed", not a specific GDAL version's
+  // resampling placement.
+  CHECK( std::abs( gt[1] ) > 1.0 ); // pixel size in metres, not degrees-as-pixels
+  CHECK( std::abs( gt[0] ) > 100000.0 ); // UTM 33N easting of lon~0 is ~166k
+  GDALClose( dataset );
 }

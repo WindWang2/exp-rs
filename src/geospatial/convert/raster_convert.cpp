@@ -200,6 +200,15 @@ TranslateResult warpRaster( const std::string &inputPath, const std::string &tar
   GdalDatasetGuard source( openRasterReadOnly( inputPath ) );
 
   std::vector<std::string> args;
+  if ( !options.sourceCrsOverride.empty() )
+  {
+    // CRS-less input with a declared source CRS (the only sanctioned
+    // fallback): without -s_srs GDALWarp treats the source as already in
+    // the target CRS and the pixels pass through untransformed while the
+    // output is tagged targetCrs (whole-repo review F-OPS-4).
+    args.emplace_back( "-s_srs" );
+    args.emplace_back( options.sourceCrsOverride );
+  }
   args.emplace_back( "-t_srs" );
   args.emplace_back( options.targetCrs );
   args.emplace_back( "-r" );
