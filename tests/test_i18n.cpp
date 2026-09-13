@@ -18,6 +18,8 @@
 #include "help/help_search_index.h"
 #include "help/terminology_provider.h"
 
+using namespace sicnu::help;
+
 namespace
 {
 
@@ -92,12 +94,26 @@ TEST_CASE( "zh_CN translation file is complete", "[i18n]" )
         {
           if ( xml.attributes().hasAttribute( QStringLiteral( "type" ) ) )
             ++unfinished;
-          if ( xml.readElementText().trimmed().isEmpty() )
+          // numerus translations contain <numerusform> children: collect text tokens
+          QString text;
+          int depth = 0;
+          while ( !( xml.isEndElement() && xml.name() == QLatin1String( "translation" ) ) && !xml.atEnd() )
+          {
+            xml.readNext();
+            if ( xml.isStartElement() && xml.name() == QLatin1String( "numerusform" ) )
+              ++depth;
+            if ( xml.isCharacters() )
+              text += xml.text();
+            if ( xml.isEndElement() && xml.name() == QLatin1String( "numerusform" ) && depth > 0 )
+              --depth;
+          }
+          if ( text.trimmed().isEmpty() )
             ++empty;
         }
       }
     }
   }
+  INFO( "xml error: " << xml.errorString().toStdString() << " @line " << xml.lineNumber() );
   REQUIRE_FALSE( xml.hasError() );
   INFO( "messages: " << messages );
   CHECK( sourceLanguage == QLatin1String( "en" ) );

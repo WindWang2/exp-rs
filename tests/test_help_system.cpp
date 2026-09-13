@@ -141,6 +141,7 @@ TEST_CASE( "HelpSystem: HelpViewerDialog search and fallback resilience", "[help
   REQUIRE( viewer.tocTree()->topLevelItemCount() >= 10 );
   REQUIRE( viewer.currentMarkdown().contains( "RS Studio (exp-rs)" ) );
 
-  viewer.searchContent( QStringLiteral( "遥感" ), true );
+  // D6: fallback guide sources are English now; search an English term.
+  viewer.searchContent( QStringLiteral( "Remote-Sensing" ), true );
   REQUIRE( viewer.textBrowser()->textCursor().hasSelection() );
 }

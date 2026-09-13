@@ -144,7 +144,7 @@ TerminologyProvider::LoadResult TerminologyProvider::loadFromFile( const QString
 
 TerminologyProvider::LoadResult TerminologyProvider::loadFromResources()
 {
-    QFile file( QLatin1String( kGlossaryResource ) );
+    QFile file{ QString::fromUtf8( kGlossaryResource ) };
     LoadResult result;
     if ( !file.open( QIODevice::ReadOnly ) )
     {

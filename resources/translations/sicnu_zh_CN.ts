@@ -86,10 +86,6 @@
         <translation>输入数据与掩膜栅格</translation>
     </message>
     <message>
-        <source>Applies the mask (1 = obscured, 0 = valid) to the product raster: obscured pixels are set to </source>
-        <translation>将掩膜（1 = 被遮挡，0 = 有效）应用到产品栅格：被遮挡像元在所有波段置为 </translation>
-    </message>
-    <message>
         <source>Product raster to mask (multiband).</source>
         <translation>待掩膜的产品栅格（多波段）。</translation>
     </message>
@@ -98,8 +94,12 @@
         <translation>产品栅格</translation>
     </message>
     <message>
-        <source>With different grids but the same CRS, nearest-neighbour alignment happens automatically.</source>
-        <translation>网格不同且 CRS 相同时会自动最近邻对齐。</translation>
+        <source>Applies the mask (1 = obscured, 0 = valid) to the product raster: obscured pixels are set to NoData, yielding an analysis-ready image.</source>
+        <translation>将掩膜（1 = 被遮挡，0 = 有效）应用到产品栅格：被遮挡像元在所有波段置为 NoData，得到分析就绪影像。</translation>
+    </message>
+    <message>
+        <source>A binary mask raster (band 1; &gt; 0 means obscured). Usually the output of the 'QA Mask' dialog;With different grids but the same CRS, nearest-neighbour alignment happens automatically.</source>
+        <translation>二值掩膜栅格（第 1 波段，&gt;0 视为被遮挡）。通常是“QA 掩膜”对话框的输出；网格不同且 CRS 相同时会自动最近邻对齐。</translation>
     </message>
     <message>
         <source>Mask Raster</source>
@@ -118,8 +118,12 @@
         <translation>指定输出 NoData 值</translation>
     </message>
     <message>
-        <source>Required when the input bands define no NoData.</source>
-        <translation>输入波段未定义 NoData 时此项必填。</translation>
+        <source>When ticked, obscured pixels are written with this NoData value (instead of the input band's own NoData).Required when the input bands define no NoData.</source>
+        <translation>勾选后，被遮挡像元写入该 NoData 值（替代输入波段自带 NoData）。输入波段未定义 NoData 时此项必填。</translation>
+    </message>
+    <message>
+        <source>When the mask grid differs from the product (e.g. a 20 m SCL against a 10 m product), nearest-neighbour sampling aligns the mask to the product grid.A CRS mismatch always raises an error; it is never corrected automatically.</source>
+        <translation>掩膜网格与产品不同（如 20 m SCL 对 10 m 产品）时，用最近邻采样把掩膜对齐到产品网格。CRS 不一致始终报错，不会自动纠正。</translation>
     </message>
     <message>
         <source>NoData replacement fill value for masked pixels</source>
@@ -132,10 +136,6 @@
     <message>
         <source>Align the mask grid automatically (nearest neighbour, same CRS only)</source>
         <translation>自动对齐掩膜网格（最近邻，仅限相同 CRS）</translation>
-    </message>
-    <message>
-        <source>A CRS mismatch always raises an error; it is never corrected automatically.</source>
-        <translation>CRS 不一致始终报错，不会自动纠正。</translation>
     </message>
     <message>
         <source>Grid Alignment</source>
@@ -202,6 +202,16 @@
     <message>
         <source>QUAC Quick Atmospheric Correction</source>
         <translation>QUAC 快速大气校正</translation>
+    </message>
+    <message>
+        <source>• DN to radiance: L=gain×DN+bias
+• DOS1: dark object subtraction
+• DOS2: DOS1 + transmittance
+• QUAC: fast all-band correction from image statistics</source>
+        <translation>• DN-&gt;辐射：L=gain×DN+bias
+• DOS1：暗目标减法
+• DOS2：DOS1 + 透过率
+• QUAC：基于图像统计的全波段快速校正</translation>
     </message>
     <message>
         <source>Correction Method</source>
@@ -303,20 +313,14 @@
         <translation>例如：(b1 - b2) / (b1 + b2) 或 b1 * 0.0001</translation>
     </message>
     <message>
-        <source>Examples: (b1 - b2) / (b1 + b2); b1 * 0.0001; sqrt(b1*b1 + b2*b2); b1 &gt; 0.4 ? 1 : 0
-</source>
-        <translation>示例：(b1 - b2) / (b1 + b2)；b1 * 0.0001；sqrt(b1*b1 + b2*b2)；b1 &gt; 0.4 ? 1 : 0
-</translation>
-    </message>
-    <message>
-        <source>Supports: + - * /, parentheses, comparisons (&lt; &gt; &lt;= &gt;= == !=), logic (&amp;&amp; ||),
-</source>
-        <translation>支持：+ - * /、括号、比较(&lt; &gt; &lt;= &gt;= == !=)、逻辑(&amp;&amp; ||)、
-</translation>
-    </message>
-    <message>
-        <source>ternary conditionals (b1 &gt; x ? true : false) and math functions (sin/cos/exp/ln/sqrt/abs/pow/min/max/pi...)</source>
-        <translation>三元条件(b1 &gt; x ? true : false)、数学函数(sin/cos/exp/ln/sqrt/abs/pow/min/max/pi…)</translation>
+        <source>Band math expression. Bands are written b1, b2, ... (starting at 1).
+Examples: (b1 - b2) / (b1 + b2); b1 * 0.0001; sqrt(b1*b1 + b2*b2); b1 &gt; 0.4 ? 1 : 0
+Supports: + - * /, parentheses, comparisons (&lt; &gt; &lt;= &gt;= == !=), logic (&amp;&amp; ||),
+ternary conditionals (b1 &gt; x ? true : false) and math functions (sin/cos/exp/ln/sqrt/abs/pow/min/max/pi...)</source>
+        <translation>波段运算表达式。波段写作 b1, b2…（从 1 起）。
+示例：(b1 - b2) / (b1 + b2)；b1 * 0.0001；sqrt(b1*b1 + b2*b2)；b1 &gt; 0.4 ? 1 : 0
+支持：+ - * /、括号、比较(&lt; &gt; &lt;= &gt;= == !=)、逻辑(&amp;&amp; ||)、
+三元条件(b1 &gt; x ? true : false)、数学函数(sin/cos/exp/ln/sqrt/abs/pow/min/max/pi…)</translation>
     </message>
     <message>
         <source>Formula</source>
@@ -360,6 +364,12 @@
     <message>
         <source>IHS Color Transform</source>
         <translation>IHS 颜色变换</translation>
+    </message>
+    <message>
+        <source>• Band ratio: numerator band ÷ denominator band
+• IHS transform: converts the three RGB bands into intensity, hue and saturation</source>
+        <translation>• 波段比值：分子波段 ÷ 分母波段
+• IHS 变换：RGB 三波段转换为强度 (Intensity)、色调 (Hue)、饱和度 (Saturation)</translation>
     </message>
     <message>
         <source>Operation Mode</source>
@@ -450,6 +460,10 @@
     <message>
         <source>Algorithm Selection</source>
         <translation>算法选择</translation>
+    </message>
+    <message>
+        <source>Choose the remote-sensing or geoprocessing algorithm to batch-run. Validate it on a single file in the toolbox first.</source>
+        <translation>选择要批量运行的遥感或地理处理算法。建议先在工具箱对单个文件验证效果。</translation>
     </message>
     <message>
         <source>Processing Algorithms</source>
@@ -691,6 +705,10 @@
         <translation>双视图对比…</translation>
     </message>
     <message>
+        <source>Opens the side-by-side comparison view (divider / swipe + blink) to visually inspect registration and change.</source>
+        <translation>打开并排对比视图（分割线/Swipe + 闪烁），目视检查配准与变化。</translation>
+    </message>
+    <message>
         <source>Detection Method and Mask Options</source>
         <translation>检测方法与掩膜选项</translation>
     </message>
@@ -723,10 +741,16 @@
         <translation>变化掩膜（手动阈值）</translation>
     </message>
     <message>
-        <source>• CVA: multiband change vector magnitude (all bands)
+        <source>• Difference: later − earlier
+• Normalized difference: (later − earlier)/(later + earlier)
+• Ratio: later / earlier
+• CVA: multiband change vector magnitude (all bands)
 • MAD: multivariate alteration detection (canonical correlation analysis)
 • Mask: |difference| ≥ threshold</source>
-        <translation>• CVA：多波段变化向量幅值（用全部波段）
+        <translation>• 差值：后−前
+• 归一化差值：(后−前)/(后+前)
+• 比值：后/前
+• CVA：多波段变化向量幅值（用全部波段）
 • MAD：多变量变化检测（CCA 典型相关分析）
 • 掩膜：|差值|≥阈值</translation>
     </message>
@@ -737,6 +761,10 @@
     <message>
         <source>Also output a binary change mask</source>
         <translation>同时输出二值变化掩膜</translation>
+    </message>
+    <message>
+        <source>Besides the method raster, also outputs a 0/1 change mask (with threshold strategy, morphological cleanup and a minimum mapping unit).</source>
+        <translation>除方法栅格外，再输出 0/1 变化掩膜（可配阈值策略、形态学清理与最小制图单元）。</translation>
     </message>
     <message>
         <source>Manual Threshold</source>
@@ -1034,32 +1062,18 @@
         <translation>直方图均衡化</translation>
     </message>
     <message>
-        <source>• Photoshop Levels: interactively adjust shadows, highlights and the gamma midtone
-</source>
-        <translation>• Photoshop 色阶：交互调节阴影、高光与 Gamma 中间调
-</translation>
-    </message>
-    <message>
-        <source>• Linear: min–max
-</source>
-        <translation>• 线性：最小–最大
-</translation>
-    </message>
-    <message>
-        <source>• Percent clip: clip both tails, then stretch
-</source>
-        <translation>• 百分比裁剪：两端裁剪后再拉伸
-</translation>
-    </message>
-    <message>
-        <source>• Std dev: mean±K×std dev
-</source>
-        <translation>• 标准差：均值±K×标准差
-</translation>
-    </message>
-    <message>
-        <source>• Histogram equalization: enhances global contrast</source>
-        <translation>• 直方图均衡化：增强全局对比</translation>
+        <source>Stretch method:
+• Photoshop Levels: interactively adjust shadows, highlights and the gamma midtone
+• Linear: min–max
+• Percent clip: clip both tails, then stretch
+• Std dev: mean±K×std dev
+• Histogram equalization: enhances global contrast</source>
+        <translation>拉伸方法：
+• Photoshop 色阶：交互调节阴影、高光与 Gamma 中间调
+• 线性：最小–最大
+• 百分比裁剪：两端裁剪后再拉伸
+• 标准差：均值±K×标准差
+• 直方图均衡化：增强全局对比</translation>
     </message>
     <message>
         <source>Preset Method</source>
@@ -1303,6 +1317,10 @@
     <message>
         <source>GDAL Pansharpen</source>
         <translation>GDAL 全色锐化</translation>
+    </message>
+    <message>
+        <source>Built-in methods: Linear / Brovey / IHS / PCA; external tools: OTB / GDAL pansharpening.</source>
+        <translation>内置方法：Linear / Brovey / IHS / PCA；外部工具：OTB / GDAL 全色锐化。</translation>
     </message>
     <message>
         <source>Fusion Method</source>
@@ -1910,12 +1928,8 @@
         <translation>分割与分类</translation>
     </message>
     <message>
-        <source>&lt;p&gt;Run the OBIA pipeline in the OBIA window:&lt;/p&gt;&lt;ol&gt;&lt;li&gt;Adjust segmentation parameters if needed, then click &lt;b&gt;Segment&lt;/b&gt; (or hierarchical segment)&lt;/li&gt;&lt;li&gt;Click objects on the map and assign classes, or use &lt;b&gt;Import ROI&lt;/b&gt;&lt;/li&gt;&lt;li&gt;Choose a classifier and click &lt;b&gt;Classify&lt;/b&gt;&lt;/li&gt;</source>
-        <translation>&lt;p&gt;在 OBIA 窗口运行完整流程：&lt;/p&gt;&lt;ol&gt;&lt;li&gt;按需调整分割参数，点击&lt;b&gt;分割&lt;/b&gt;（或分级分割）&lt;/li&gt;&lt;li&gt;在地图上点击对象并赋类别，或使用&lt;b&gt;导入 ROI&lt;/b&gt;&lt;/li&gt;&lt;li&gt;选择分类器并点击&lt;b&gt;分类&lt;/b&gt;&lt;/li&gt;</translation>
-    </message>
-    <message>
-        <source>&lt;li&gt;Click &lt;b&gt;Load to Main View&lt;/b&gt; to place the result on the main canvas&lt;/li&gt;</source>
-        <translation>&lt;li&gt;点击&lt;b&gt;加载到主图&lt;/b&gt;将结果放置到主画布&lt;/li&gt;</translation>
+        <source>&lt;p&gt;Run the OBIA pipeline in the OBIA window:&lt;/p&gt;&lt;ol&gt;&lt;li&gt;Adjust segmentation parameters if needed, then click &lt;b&gt;Segment&lt;/b&gt; (or hierarchical segment)&lt;/li&gt;&lt;li&gt;Click objects on the map and assign classes, or use &lt;b&gt;Import ROI&lt;/b&gt;&lt;/li&gt;&lt;li&gt;Choose a classifier and click &lt;b&gt;Classify&lt;/b&gt;&lt;/li&gt;&lt;li&gt;Review &lt;b&gt;Accuracy Assessment&lt;/b&gt; (training OA / Kappa / confusion matrix)&lt;/li&gt;&lt;li&gt;Click &lt;b&gt;Load to Main View&lt;/b&gt; to place the result on the main canvas&lt;/li&gt;&lt;li&gt;Optional: &lt;b&gt;Export&lt;/b&gt; polygons from the class raster&lt;/li&gt;&lt;/ol&gt;&lt;p&gt;When OTB is installed, MeanShift is preferred; otherwise a built-in segmenter is used. Pipeline JSON labs: &lt;code&gt;data/pipelines/obia_*.json&lt;/code&gt; / workflow id &lt;code&gt;lab.obia&lt;/code&gt;.&lt;/p&gt;</source>
+        <translation>&lt;p&gt;在 OBIA 窗口中运行完整流程：&lt;/p&gt;&lt;ol&gt;&lt;li&gt;按需调整分割参数，点击&lt;b&gt;分割&lt;/b&gt;（或分级分割）&lt;/li&gt;&lt;li&gt;在地图上点击对象并赋类别，或使用&lt;b&gt;导入 ROI&lt;/b&gt;&lt;/li&gt;&lt;li&gt;选择分类器并点击&lt;b&gt;分类&lt;/b&gt;&lt;/li&gt;&lt;li&gt;查看&lt;b&gt;精度评价&lt;/b&gt;（训练 OA / Kappa / 混淆矩阵）&lt;/li&gt;&lt;li&gt;点击&lt;b&gt;加载到主视图&lt;/b&gt;将结果显示到主画布&lt;/li&gt;&lt;li&gt;可选：从分类栅格&lt;b&gt;导出&lt;/b&gt;矢量面&lt;/li&gt;&lt;/ol&gt;&lt;p&gt;安装 OTB 时优先使用 MeanShift，否则使用内置分割器。流程 JSON 实验：&lt;code&gt;data/pipelines/obia_*.json&lt;/code&gt; / 工作流 id &lt;code&gt;lab.obia&lt;/code&gt;。&lt;/p&gt;</translation>
     </message>
     <message>
         <source>Class map produced; accuracy reviewed; result available on main map.</source>
@@ -2098,161 +2112,73 @@
     <message>
         <source># RS Studio (exp-rs) Comprehensive User Manual and Operation Guide
 
+&gt; **Version**: v2.0 Professional  
+&gt; **System document code**: DOC-RS-STUDIO-USERGUIDE-CN  
+
+# Chapter 1: System Overview and Quick Start
+RS Studio is a new-generation desktop intelligent geospatial analysis platform for modern remote-sensing research, university teaching and industrial production.
+
+# Chapter 2: Loading and Managing Remote-Sensing Data
+Provides automatic multi-source satellite product import, STAC cloud search and Data Manager asset management.
+
+# Chapter 3: Viewport Visualization and Multi-Source Linkage
+Provides linked split viewports, swipe comparison, band composition and real-time display stretching.
+
+# Chapter 4: The Full Pixel-Level Classification Workflow
+Provides a complete 7-step guided workflow: class scheme, ROI collection, JM-distance separability evaluation, model training, confusion-matrix accuracy assessment, post-classification and result export.
+
+# Chapter 5: Object-Based Image Analysis (OBIA)
+Provides multiresolution segmentation, hierarchical topology trees, GLCM texture and geometric feature extraction, and object classification.
+
+# Chapter 6: Spectral Analysis and Hyperspectral Tools
+Provides spectral profiles, continuum removal, library SAM / SID matching, linear unmixing and the RX anomaly detector.
+
+# Chapter 7: Remote-Sensing Preprocessing and Image Enhancement
+Covers radiometric calibration, atmospheric correction (DOS1, DOS2, QUAC), cloud/snow QA masking, image registration and spatial filtering.
+
+# Chapter 8: AI Copilot Assistant
+LLM-powered natural-language remote-sensing analysis chat, tool calls and automated DAG pipeline orchestration.
+
+# Chapter 9: Troubleshooting and Diagnostics
+Covers startup dependencies, projection anomalies, out-of-memory tiling optimization and network connectivity troubleshooting.
+
+# Chapter 10: Shortcut and Operation Quick Reference
+A quick reference of shortcuts for projects, viewport navigation, vector editing and image registration.
 </source>
         <translation># RS Studio (exp-rs) 综合用户手册与操作指南
 
-</translation>
-    </message>
-    <message>
-        <source>&gt; **Version**: v2.0 Professional  
-</source>
-        <translation>&gt; **版本**：v2.0 Professional  
-</translation>
-    </message>
-    <message>
-        <source>&gt; **System document code**: DOC-RS-STUDIO-USERGUIDE-CN  
+&gt; **版本**：v2.0 Professional  
+&gt; **系统文档代码**：DOC-RS-STUDIO-USERGUIDE-CN  
 
-</source>
-        <translation>&gt; **系统文档代码**：DOC-RS-STUDIO-USERGUIDE-CN  
+# 第 1 章：系统概述与快速入门
+RS Studio 是面向现代遥感科研、高校教学与工业生产的新一代桌面智能地理空间分析平台。
 
-</translation>
-    </message>
-    <message>
-        <source># Chapter 1: System Overview and Quick Start
-</source>
-        <translation># 第 1 章：系统概述与快速入门
-</translation>
-    </message>
-    <message>
-        <source>RS Studio is a new-generation desktop intelligent geospatial analysis platform for modern remote-sensing research, university teaching and industrial production.
+# 第 2 章：遥感数据加载与管理
+支持多源卫星产品自动识别导入、STAC 云端检索与 Data Manager 资产管理。
 
-</source>
-        <translation>RS Studio 是面向现代遥感科研、高校教学与工业生产的新一代桌面智能地理空间分析平台。
+# 第 3 章：视口可视化与多源联动
+提供双视口分屏同步联动、卷帘对比 (Swipe)、波段合成与实时显示拉伸。
 
-</translation>
-    </message>
-    <message>
-        <source># Chapter 2: Loading and Managing Remote-Sensing Data
-</source>
-        <translation># 第 2 章：遥感数据加载与管理
-</translation>
-    </message>
-    <message>
-        <source>Provides automatic multi-source satellite product import, STAC cloud search and Data Manager asset management.
+# 第 4 章：像素级遥感分类全流程
+提供完整的 7 步引导流程：类别体系、ROI 采集、JM 距离可分性评价、模型训练、混淆矩阵精度评定、分类后处理与成果导出。
 
-</source>
-        <translation>支持多源卫星产品自动识别导入、STAC 云端检索与 Data Manager 资产管理。
+# 第 5 章：面向对象影像分析 (OBIA)
+提供多尺度分割、多层级拓扑树、GLCM 纹理与几何特征提取及对象分类。
 
-</translation>
-    </message>
-    <message>
-        <source># Chapter 3: Viewport Visualization and Multi-Source Linkage
-</source>
-        <translation># 第 3 章：视口可视化与多源联动
-</translation>
-    </message>
-    <message>
-        <source>Provides linked split viewports, swipe comparison, band composition and real-time display stretching.
+# 第 6 章：波谱分析与高光谱工具
+提供光谱剖面图、连续统去除 (Continuum Removal)、光谱库 SAM / SID 匹配、线性解混与 RX 异常探测。
 
-</source>
-        <translation>提供双视口分屏同步联动、卷帘对比 (Swipe)、波段合成与实时显示拉伸。
+# 第 7 章：遥感预处理与图像增强
+包括辐射定标、大气校正 (DOS1, DOS2, QUAC)、云雪 QA 掩膜、影像配准与空间滤波。
 
-</translation>
-    </message>
-    <message>
-        <source># Chapter 4: The Full Pixel-Level Classification Workflow
-</source>
-        <translation># 第 4 章：像素级遥感分类全流程
-</translation>
-    </message>
-    <message>
-        <source>Provides a complete 7-step guided workflow: class scheme, ROI collection, JM-distance separability evaluation, model training, confusion-matrix accuracy assessment, post-classification and result export.
+# 第 8 章：AI Copilot 智能助手
+基于大语言模型的自然语言遥感分析对话、工具调用与 DAG 流程自动化编排。
 
-</source>
-        <translation>提供完整的 7 步引导流程：类别体系、ROI 采集、JM 距离可分性评价、模型训练、混淆矩阵精度评定、分类后处理与成果导出。
+# 第 9 章：常见问题排查与诊断
+启动依赖、坐标投影异常、内存溢出分块优化与网络连通性排查。
 
-</translation>
-    </message>
-    <message>
-        <source># Chapter 5: Object-Based Image Analysis (OBIA)
-</source>
-        <translation># 第 5 章：面向对象影像分析 (OBIA)
-</translation>
-    </message>
-    <message>
-        <source>Provides multiresolution segmentation, hierarchical topology trees, GLCM texture and geometric feature extraction, and object classification.
-
-</source>
-        <translation>提供多尺度分割、多层级拓扑树、GLCM 纹理与几何特征提取及对象分类。
-
-</translation>
-    </message>
-    <message>
-        <source># Chapter 6: Spectral Analysis and Hyperspectral Tools
-</source>
-        <translation># 第 6 章：波谱分析与高光谱工具
-</translation>
-    </message>
-    <message>
-        <source>Provides spectral profiles, continuum removal, library SAM / SID matching, linear unmixing and the RX anomaly detector.
-
-</source>
-        <translation>提供光谱剖面图、连续统去除 (Continuum Removal)、光谱库 SAM / SID 匹配、线性解混与 RX 异常探测。
-
-</translation>
-    </message>
-    <message>
-        <source># Chapter 7: Remote-Sensing Preprocessing and Image Enhancement
-</source>
-        <translation># 第 7 章：遥感预处理与图像增强
-</translation>
-    </message>
-    <message>
-        <source>Covers radiometric calibration, atmospheric correction (DOS1, DOS2, QUAC), cloud/snow QA masking, image registration and spatial filtering.
-
-</source>
-        <translation>包括辐射定标、大气校正 (DOS1, DOS2, QUAC)、云雪 QA 掩膜、影像配准与空间滤波。
-
-</translation>
-    </message>
-    <message>
-        <source># Chapter 8: AI Copilot Assistant
-</source>
-        <translation># 第 8 章：AI Copilot 智能助手
-</translation>
-    </message>
-    <message>
-        <source>LLM-powered natural-language remote-sensing analysis chat, tool calls and automated DAG pipeline orchestration.
-
-</source>
-        <translation>基于大语言模型的自然语言遥感分析对话、工具调用与 DAG 流程自动化编排。
-
-</translation>
-    </message>
-    <message>
-        <source># Chapter 9: Troubleshooting and Diagnostics
-</source>
-        <translation># 第 9 章：常见问题排查与诊断
-</translation>
-    </message>
-    <message>
-        <source>Covers startup dependencies, projection anomalies, out-of-memory tiling optimization and network connectivity troubleshooting.
-
-</source>
-        <translation>启动依赖、坐标投影异常、内存溢出分块优化与网络连通性排查。
-
-</translation>
-    </message>
-    <message>
-        <source># Chapter 10: Shortcut and Operation Quick Reference
-</source>
-        <translation># 第 10 章：快捷键与操作速查表
-</translation>
-    </message>
-    <message>
-        <source>A quick reference of shortcuts for projects, viewport navigation, vector editing and image registration.
-</source>
-        <translation>汇总全局工程、视口漫游、矢量编辑与影像配准快捷键速查表。
+# 第 10 章：快捷键与操作速查表
+汇总全局工程、视口漫游、矢量编辑与影像配准快捷键速查表。
 </translation>
     </message>
 </context>
@@ -2473,6 +2399,10 @@
         <translation>斑点滤波 (SAR)</translation>
     </message>
     <message>
+        <source>Contrast stretch / spatial filtering / band ratio · IHS / SAR speckle filtering.</source>
+        <translation>对比度拉伸 / 空间滤波 / 波段比值·IHS / SAR 斑点滤波。</translation>
+    </message>
+    <message>
         <source>Type</source>
         <translation>类型</translation>
     </message>
@@ -2511,6 +2441,10 @@
     <message>
         <source>Histogram Equalization</source>
         <translation>直方图均衡化</translation>
+    </message>
+    <message>
+        <source>Linear / percent clip / std dev / histogram equalization.</source>
+        <translation>线性 / 百分比裁剪 / 标准差 / 直方图均衡。</translation>
     </message>
     <message>
         <source>Type:</source>
@@ -2853,8 +2787,12 @@
         <translation>正射参数</translation>
     </message>
     <message>
-        <source>Terrain-corrects the image using RPC/GCPs and an optional DEM. The input raster must carry </source>
-        <translation>基于 RPC/GCP 与可选 DEM 对影像做地形纠正。输入栅格必须携带 </translation>
+        <source>Terrain-corrects the image using RPC/GCPs and an optional DEM. The input raster must carry RPC metadata or GCPs.</source>
+        <translation>基于 RPC/GCP 与可选 DEM 对影像做地形纠正。输入栅格必须携带 RPC 元数据或 GCP。</translation>
+    </message>
+    <message>
+        <source>Target CRS (e.g. EPSG:4326, EPSG:32650). Left empty, the CRS carried by the RPC / GCPs is used.</source>
+        <translation>目标 CRS（如 EPSG:4326、EPSG:32650）。留空使用 RPC/GCP 自带 CRS。</translation>
     </message>
     <message>
         <source>Target CRS</source>
@@ -2988,8 +2926,8 @@
         <translation>主成分个数不得超过输入影像的波段总数；前几个主成分通常聚集了绝大部分方差信息。</translation>
     </message>
     <message>
-        <source>The first PCs usually hold most of the variance; used for band decorrelation and dimensionality-reduction compression.</source>
-        <translation>前几个 PC 通常含大部分方差，用于波段去相关与降维压缩。</translation>
+        <source>Number of output components, 0 = all bands; must be ≤ the input band count.The first PCs usually hold most of the variance; used for band decorrelation and dimensionality-reduction compression.</source>
+        <translation>输出主成分个数，0 = 全部波段；必须 ≤ 输入波段数。前几个 PC 通常含大部分方差，用于波段去相关与降维压缩。</translation>
     </message>
     <message>
         <source>Number of Components</source>
@@ -3051,8 +2989,8 @@
         <translation>刷新</translation>
     </message>
     <message>
-        <source>Found %1 plugins (%2 usable, %3 broken). The scan only reads plugin.json,</source>
-        <translation>已发现 %1 个插件（可用 %2，异常 %3）。扫描仅读取 plugin.json，</translation>
+        <source>Found %1 plugins (%2 usable, %3 broken). The scan only reads plugin.json,Plugin binaries are not loaded.</source>
+        <translation>已发现 %1 个插件（可用 %2，异常 %3）。扫描仅读取 plugin.json，不会加载插件二进制。</translation>
     </message>
     <message>
         <source>Plugin In Use</source>
@@ -3080,10 +3018,6 @@
     <message>
         <source>Two-date classification result input</source>
         <translation>双时相分类结果输入</translation>
-    </message>
-    <message>
-        <source>Compares two classification dates: outputs a per-class transition matrix (rows = earlier classes, columns = later classes),</source>
-        <translation>比较两期分类结果：输出逐类转移矩阵（行=前时相类，列=后时相类）、</translation>
     </message>
     <message>
         <source>Earlier classification raster (theme map).</source>
@@ -3122,8 +3056,12 @@
         <translation>自动（按观测最大类 + 1）</translation>
     </message>
     <message>
-        <source>0 = inferred automatically from the maximum class observed across the two images.</source>
-        <translation>0 = 按两期影像中观测到的最大类别自动推断。</translation>
+        <source>Compares two classification dates: outputs a per-class transition matrix (rows = earlier classes, columns = later classes),Per-class gains / losses and a change-type map.</source>
+        <translation>比较两期分类结果：输出逐类转移矩阵（行=前时相类，列=后时相类）、逐类增益/损失与变化类型图。</translation>
+    </message>
+    <message>
+        <source>Total classes (the change code before*classCount+after must fit a UInt16, hence ≤ 255).0 = inferred automatically from the maximum class observed across the two images.</source>
+        <translation>类别总数（变化码 before*classCount+after 须装入 UInt16，故 ≤255）。0 = 按两期影像中观测到的最大类别自动推断。</translation>
     </message>
     <message>
         <source>Total Classes</source>
@@ -3490,8 +3428,8 @@
         <translation>导入失败。</translation>
     </message>
     <message>
-        <source>Imported %1 bands into collection \</source>
-        <translation>已将 %1 个波段导入集合 </translation>
+        <source>Imported %1 bands into collection "%2".</source>
+        <translation>已将 %1 个波段导入集合 "%2"。</translation>
     </message>
     <message>
         <source>Import %1</source>
@@ -3577,9 +3515,9 @@
     </message>
     <message>
         <source>Remove the selected %1 layers from the display?
-(The data assets stay in the project; only the display is removed;</source>
+(The data assets stay in the project; only the display is removed;External QGIS layers will be removed from the project.)</source>
         <translation>从显示移除选中的 %1 个图层？
-（数据资产保留在工程中，仅移除显示；</translation>
+（数据资产保留在工程中，仅移除显示；外部 QGIS 图层将从工程移除。）</translation>
     </message>
     <message>
         <source>
@@ -3602,22 +3540,6 @@
     <message>
         <source>Algorithm failed after %1 seconds: %2</source>
         <translation>算法在 %1 秒后失败：%2</translation>
-    </message>
-    <message>
-        <source>&lt;h3&gt;%1&lt;/h3&gt;&lt;p&gt;&lt;b&gt;%2&lt;/b&gt;&lt;/p&gt;&lt;p&gt;%3&lt;/p&gt;&lt;hr/&gt;</source>
-        <translation>&lt;h3&gt;%1&lt;/h3&gt;&lt;p&gt;&lt;b&gt;%2&lt;/b&gt;&lt;/p&gt;&lt;p&gt;%3&lt;/p&gt;&lt;hr/&gt;</translation>
-    </message>
-    <message>
-        <source>Function Description</source>
-        <translation>功能说明</translation>
-    </message>
-    <message>
-        <source>Fill in inputs, parameters and output paths on the dialog's tabs, then run.</source>
-        <translation>请按对话框中的标签填写输入、参数与输出路径，然后运行。</translation>
-    </message>
-    <message>
-        <source>Help</source>
-        <translation>帮助</translation>
     </message>
     <message>
         <source>Cannot open the images; pixel-grid compatibility cannot be checked.</source>
@@ -4192,6 +4114,10 @@
         <translation>图层数</translation>
     </message>
     <message>
+        <source>• %1 · %2 · features %3 · %4&lt;br/&gt;%5&lt;br/&gt;</source>
+        <translation>• %1 · %2 · 要素 %3 · %4&lt;br/&gt;%5&lt;br/&gt;</translation>
+    </message>
+    <message>
         <source>Geometry Unknown</source>
         <translation>几何未知</translation>
     </message>
@@ -4258,6 +4184,502 @@
     <message>
         <source>Not parsed yet / no structural information</source>
         <translation>尚未解析 / 无结构信息</translation>
+    </message>
+    <message>
+        <source>Data Management</source>
+        <translation>数据管理</translation>
+    </message>
+    <message>
+        <source>Name</source>
+        <translation>名称</translation>
+    </message>
+    <message>
+        <source>Persistence</source>
+        <translation>持久性</translation>
+    </message>
+    <message>
+        <source>References</source>
+        <translation>引用</translation>
+    </message>
+    <message>
+        <source>The color bar on the left shows status (green = available, red = unavailable); the type prefixes the name</source>
+        <translation>左侧色条表示状态（绿=可用，红=不可用）；类型作为名称前缀</translation>
+    </message>
+    <message>
+        <source>Filter by name / path / ID...</source>
+        <translation>按名称 / 路径 / ID 过滤…</translation>
+    </message>
+    <message>
+        <source>Filter Data Assets</source>
+        <translation>过滤数据资产</translation>
+    </message>
+    <message>
+        <source>Previous Page</source>
+        <translation>上一页</translation>
+    </message>
+    <message>
+        <source>Asset Pagination Status</source>
+        <translation>资产分页状态</translation>
+    </message>
+    <message>
+        <source>Next Page</source>
+        <translation>下一页</translation>
+    </message>
+    <message>
+        <source>No data assets yet</source>
+        <translation>暂无数据资产</translation>
+    </message>
+    <message>
+        <source>No data assets or collections registered yet. Import remote-sensing imagery, vector files or hyperspectral data to start.</source>
+        <translation>暂未登记任何数据资产或集合。导入遥感影像、矢量文件或高光谱数据开始工作。</translation>
+    </message>
+    <message>
+        <source>Import Data Assets...</source>
+        <translation>导入数据资产...</translation>
+    </message>
+    <message>
+        <source>Meta Information</source>
+        <translation>元信息</translation>
+    </message>
+    <message>
+        <source>Select a data asset or collection to view its meta information.</source>
+        <translation>选择数据资产或集合以查看元信息。</translation>
+    </message>
+    <message>
+        <source>Data management: catalog of project data assets and collections; right-click to add to display, promote, unload or view properties.</source>
+        <translation>数据管理：工程数据资产与集合目录；右键可添加到显示、提升、卸载、查看属性。</translation>
+    </message>
+    <message>
+        <source>Asset / collection tree. The color bar on the left shows status (green = available, red = unavailable). Double-click = add to display; right-click for more actions.</source>
+        <translation>资产/集合树。左侧色条表示状态（绿=可用，红=不可用）。双击=添加到显示；右键更多操作。</translation>
+    </message>
+    <message>
+        <source>Meta information inspector for the selected assets (path, CRS, band / layer structure, etc.).</source>
+        <translation>选中资产的元信息检视器（路径、CRS、波段/图层结构等）。</translation>
+    </message>
+    <message>
+        <source>Title of the current inspector item.</source>
+        <translation>当前检视项标题。</translation>
+    </message>
+    <message>
+        <source>Drag the splitter to adjust the heights of the catalog tree and the inspector.</source>
+        <translation>拖动分隔条调整目录树与检视器的高度。</translation>
+    </message>
+    <message>
+        <source>%1
+Status: source missing — recoverable by re-linking
+%2</source>
+        <translation>%1
+状态: 源缺失 — 可通过重定位恢复
+%2</translation>
+    </message>
+    <message>
+        <source>Assets</source>
+        <translation>资产</translation>
+    </message>
+    <message>
+        <source>Showing first %1 of %2 items — use the filter to narrow down</source>
+        <translation>仅显示前 %1 项 / 共 %2 项 — 使用过滤缩小范围</translation>
+    </message>
+    <message>
+        <source>The data manager is unavailable.</source>
+        <translation>数据管理器不可用。</translation>
+    </message>
+    <message>
+        <source>Collections</source>
+        <translation>集合</translation>
+    </message>
+    <message>
+        <source>Epoch Collection</source>
+        <translation>时间相集合</translation>
+    </message>
+    <message>
+        <source>Workspace Records</source>
+        <translation>工作区记录</translation>
+    </message>
+    <message>
+        <source>Epoch collection (multitemporal scene collection)</source>
+        <translation>时间相集合（多时相场景集合）</translation>
+    </message>
+    <message>
+        <source>Revision %1</source>
+        <translation>修订 %1</translation>
+    </message>
+    <message>
+        <source>Items %1–%2 of %3 assets (page %4/%5)</source>
+        <translation>第 %1–%2 项 / 共 %3 项资产（第 %4/%5 页）</translation>
+    </message>
+    <message>
+        <source>Page %1/%2 · %3 items in total</source>
+        <translation>第 %1/%2 页 · 共 %3 项</translation>
+    </message>
+    <message>
+        <source>Opens and processes this collection in the time series analysis dialog.</source>
+        <translation>在时间序列分析对话框中打开并处理该集合。</translation>
+    </message>
+    <message>
+        <source>Precheck Collection</source>
+        <translation>预检集合</translation>
+    </message>
+    <message>
+        <source>Checks raster alignment, time and platform consistency of the collection's scenes.</source>
+        <translation>检查该集合场景的栅格对齐、时间与平台一致性。</translation>
+    </message>
+    <message>
+        <source>View Collection Info</source>
+        <translation>查看集合信息</translation>
+    </message>
+    <message>
+        <source>Shows scene count, time range and platform of this epoch collection.</source>
+        <translation>显示该时间相集合的场景数、时间范围与平台。</translation>
+    </message>
+    <message>
+        <source>Remove Collection Record</source>
+        <translation>移除集合记录</translation>
+    </message>
+    <message>
+        <source>Removes the record from the workspace (no scene data is deleted).</source>
+        <translation>从工作区移除该记录（不删除任何场景数据）。</translation>
+    </message>
+    <message>
+        <source>Precheck result: %1
+Total scenes: %2
+Valid times: %3
+</source>
+        <translation>预检结果：%1
+场景总数：%2
+有效时间：%3
+</translation>
+    </message>
+    <message>
+        <source>Passed</source>
+        <translation>通过</translation>
+    </message>
+    <message>
+        <source>
+Errors:
+- </source>
+        <translation>
+错误：
+- </translation>
+    </message>
+    <message>
+        <source>
+Warnings:
+- </source>
+        <translation>
+警告：
+- </translation>
+    </message>
+    <message>
+        <source>Collection Precheck Report</source>
+        <translation>集合预检报告</translation>
+    </message>
+    <message>
+        <source>Precheck Failed</source>
+        <translation>预检失败</translation>
+    </message>
+    <message>
+        <source>Cannot parse the collection descriptor: %1</source>
+        <translation>无法解析集合描述符：%1</translation>
+    </message>
+    <message>
+        <source>Name: %1
+Revision: %2</source>
+        <translation>名称：%1
+修订：%2</translation>
+    </message>
+    <message>
+        <source>Scenes: %1 (%2 assets bound)</source>
+        <translation>场景数：%1（已绑定资产 %2）</translation>
+    </message>
+    <message>
+        <source>Time range: %1 … %2</source>
+        <translation>时间范围：%1 … %2</translation>
+    </message>
+    <message>
+        <source>Platform: %1</source>
+        <translation>平台：%1</translation>
+    </message>
+    <message>
+        <source>Invalid descriptor: %1</source>
+        <translation>描述符无效：%1</translation>
+    </message>
+    <message>
+        <source>Remove Epoch Collection</source>
+        <translation>移除时间相集合</translation>
+    </message>
+    <message>
+        <source>Remove collection %1? Scene data will not be deleted.</source>
+        <translation>移除集合“%1”？场景数据不会被删除。</translation>
+    </message>
+    <message>
+        <source>Add to Display</source>
+        <translation>添加到显示</translation>
+    </message>
+    <message>
+        <source>Add to Display (%1 items)</source>
+        <translation>添加到显示（%1 项）</translation>
+    </message>
+    <message>
+        <source>Loads the selected assets as layers into the current view.</source>
+        <translation>把选中资产作为图层加载到当前视图。</translation>
+    </message>
+    <message>
+        <source>View Properties</source>
+        <translation>查看属性</translation>
+    </message>
+    <message>
+        <source>Refreshes this asset's meta information in the inspector below.</source>
+        <translation>在下方检视器中刷新该资产的元信息。</translation>
+    </message>
+    <message>
+        <source>Copy Source Path</source>
+        <translation>复制源路径</translation>
+    </message>
+    <message>
+        <source>Copy Source Paths (%1 items)</source>
+        <translation>复制源路径（%1 项）</translation>
+    </message>
+    <message>
+        <source>Copies the asset source path (canonicalSource) to the clipboard.</source>
+        <translation>把资产源路径（canonicalSource）复制到剪贴板。</translation>
+    </message>
+    <message>
+        <source>Promote to Project Persistent...</source>
+        <translation>提升为工程持久…</translation>
+    </message>
+    <message>
+        <source>Promote to Project Persistent (%1 items)...</source>
+        <translation>提升为工程持久（%1 项）…</translation>
+    </message>
+    <message>
+        <source>Promotes temporary assets to project-persistent (saved with the project).</source>
+        <translation>把临时资产提升为工程持久（随工程保存）。</translation>
+    </message>
+    <message>
+        <source>Re-link Missing Source...</source>
+        <translation>重定位缺失源…</translation>
+    </message>
+    <message>
+        <source>Assign a new source location to missing/unavailable assets so they can be resolved again.</source>
+        <translation>为缺失/不可用的资产指定新的源位置以重新解析。</translation>
+    </message>
+    <message>
+        <source>Unload...</source>
+        <translation>卸载…</translation>
+    </message>
+    <message>
+        <source>Unload (%1 items)...</source>
+        <translation>卸载（%1 项）…</translation>
+    </message>
+    <message>
+        <source>Unload the selected assets from the project (a confirmation pops up; dependents are removed cascadingly).</source>
+        <translation>从工程卸载选中资产（会弹出确认；若有引用将级联移除）。</translation>
+    </message>
+    <message>
+        <source>Select a data asset or collection to view its meta information. Ctrl / Shift multi-select.</source>
+        <translation>选择数据资产或集合以查看元信息。Ctrl/Shift 可多选。</translation>
+    </message>
+    <message>
+        <source>Asset Meta Information — %1</source>
+        <translation>资产元信息 — %1</translation>
+    </message>
+    <message>
+        <source>Display Name</source>
+        <translation>显示名</translation>
+    </message>
+    <message>
+        <source>Asset ID</source>
+        <translation>资产 ID</translation>
+    </message>
+    <message>
+        <source>Revision</source>
+        <translation>修订</translation>
+    </message>
+    <message>
+        <source>Type</source>
+        <translation>类型</translation>
+    </message>
+    <message>
+        <source>Storage</source>
+        <translation>存储</translation>
+    </message>
+    <message>
+        <source>Capabilities</source>
+        <translation>能力</translation>
+    </message>
+    <message>
+        <source>Show References</source>
+        <translation>显示引用</translation>
+    </message>
+    <message>
+        <source>Collection</source>
+        <translation>所属集合</translation>
+    </message>
+    <message>
+        <source>Provider</source>
+        <translation>提供者</translation>
+    </message>
+    <message>
+        <source>(automatic)</source>
+        <translation>（自动）</translation>
+    </message>
+    <message>
+        <source>Path / URI</source>
+        <translation>路径 / URI</translation>
+    </message>
+    <message>
+        <source>Sub-datasets</source>
+        <translation>子数据集</translation>
+    </message>
+    <message>
+        <source>Authentication Settings</source>
+        <translation>认证配置</translation>
+    </message>
+    <message>
+        <source>Data Options</source>
+        <translation>数据选项</translation>
+    </message>
+    <message>
+        <source>Algorithm</source>
+        <translation>算法</translation>
+    </message>
+    <message>
+        <source>Algorithm Version</source>
+        <translation>算法版本</translation>
+    </message>
+    <message>
+        <source>Parameters</source>
+        <translation>参数</translation>
+    </message>
+    <message>
+        <source>Task References</source>
+        <translation>任务引用</translation>
+    </message>
+    <message>
+        <source>Finish Time</source>
+        <translation>完成时间</translation>
+    </message>
+    <message>
+        <source>Derived from</source>
+        <translation>源自</translation>
+    </message>
+    <message>
+        <source>Provenance</source>
+        <translation>溯源</translation>
+    </message>
+    <message>
+        <source>No derivation record (registered directly)</source>
+        <translation>无派生记录（直接注册）</translation>
+    </message>
+    <message>
+        <source>Derived Artifacts</source>
+        <translation>派生产物</translation>
+    </message>
+    <message>
+        <source>Identity and Status</source>
+        <translation>标识与状态</translation>
+    </message>
+    <message>
+        <source>Data Source</source>
+        <translation>数据源</translation>
+    </message>
+    <message>
+        <source>Provenance and Lineage</source>
+        <translation>溯源与谱系</translation>
+    </message>
+    <message>
+        <source>Multiple selection — %1 items</source>
+        <translation>多选 — %1 项</translation>
+    </message>
+    <message>
+        <source>Selection Count</source>
+        <translation>选中数量</translation>
+    </message>
+    <message>
+        <source>Temporary Assets</source>
+        <translation>临时资产</translation>
+    </message>
+    <message>
+        <source>Raster Class</source>
+        <translation>栅格类</translation>
+    </message>
+    <message>
+        <source>%1 assets selected</source>
+        <translation>已选择 %1 个资产</translation>
+    </message>
+    <message>
+        <source>Summary</source>
+        <translation>汇总</translation>
+    </message>
+    <message>
+        <source>List</source>
+        <translation>列表</translation>
+    </message>
+    <message>
+        <source>Right-click for batch actions: add to display / promote / unload.</source>
+        <translation>右键可批量：添加到显示 / 提升 / 卸载。</translation>
+    </message>
+    <message>
+        <source>Collection Meta Information — %1</source>
+        <translation>集合元信息 — %1</translation>
+    </message>
+    <message>
+        <source>Collection ID</source>
+        <translation>集合 ID</translation>
+    </message>
+    <message>
+        <source>Sub-asset Count</source>
+        <translation>子资产数</translation>
+    </message>
+    <message>
+        <source>Platform</source>
+        <translation>平台</translation>
+    </message>
+    <message>
+        <source>Sensor</source>
+        <translation>传感器</translation>
+    </message>
+    <message>
+        <source>Product Level</source>
+        <translation>产品级别</translation>
+    </message>
+    <message>
+        <source>Acquisition Date</source>
+        <translation>获取日期</translation>
+    </message>
+    <message>
+        <source>Processing Level</source>
+        <translation>处理级别</translation>
+    </message>
+    <message>
+        <source>Extended Properties</source>
+        <translation>扩展属性</translation>
+    </message>
+    <message>
+        <source>(no sub-assets)</source>
+        <translation>（无子资产）</translation>
+    </message>
+    <message>
+        <source>Product Metadata</source>
+        <translation>产品元数据</translation>
+    </message>
+    <message>
+        <source>Sub-assets</source>
+        <translation>子资产</translation>
+    </message>
+    <message>
+        <source>Loading preview...</source>
+        <translation>预览加载中…</translation>
+    </message>
+    <message>
+        <source>Data Asset Preview — %1</source>
+        <translation>数据资产预览 — %1</translation>
+    </message>
+    <message>
+        <source>Preview Unavailable</source>
+        <translation>预览不可用</translation>
     </message>
     <message>
         <source>No active vector layer</source>
@@ -4931,6 +5353,62 @@
         <source>Waiting</source>
         <translation>等待中</translation>
     </message>
+    <message>
+        <source>Remote-Sensing Products</source>
+        <translation>遥感产品</translation>
+    </message>
+    <message>
+        <source>SRC lacks a usable initial geotransform.Template matching predicts the search area from initial coordinates; first give the source image an approximate CRS / georeference,Or place a few rough GCPs manually first and use the existing-seed mode.</source>
+        <translation>SRC 缺少可用的初始地理变换（GeoTransform）。模板匹配依赖初始坐标预测搜索区；请先为源影像指定近似 CRS/地理参考，或先手工打若干粗 GCP 后使用「现有种子点」模式。</translation>
+    </message>
+    <message>
+        <source>REF lacks a usable geotransform; matched points cannot be converted to ground coordinates.</source>
+        <translation>REF 缺少可用的地理变换，无法将匹配点转为地面坐标。</translation>
+    </message>
+    <message>
+        <source>The SRC image is too small to generate grid seed points</source>
+        <translation>SRC 影像过小，无法生成网格种子点</translation>
+    </message>
+    <message>
+        <source>No matches met the threshold. Increase the search radius or lower the minimum correlation score,Or check that the SRC initial coordinates are roughly correct.</source>
+        <translation>未找到满足阈值的匹配点。可增大搜索半径、降低最小相关分数，或检查 SRC 初始坐标是否大致正确。</translation>
+    </message>
+    <message>
+        <source>empty raster or zero bands</source>
+        <translation>空栅格或波段数为 0</translation>
+    </message>
+    <message>
+        <source>The %1×%2 raster has no built-in pyramids and exceeds the preview pixel cap %3 (refused to keep the UI responsive)</source>
+        <translation>栅格 %1×%2 无内建金字塔，超出预览像素上限 %3（已拒绝以保证界面响应）</translation>
+    </message>
+    <message>
+        <source>too few pixels read (incomplete data)</source>
+        <translation>读取的像素不足（数据不完整）</translation>
+    </message>
+    <message>
+        <source>Raster read failed: %1</source>
+        <translation>栅格读取失败：%1</translation>
+    </message>
+    <message>
+        <source>Cannot open the vector data (unsupported driver or corrupt file)</source>
+        <translation>矢量数据无法打开（驱动不支持或文件损坏）</translation>
+    </message>
+    <message>
+        <source>The feature count %1 exceeds the preview cap %2 (refused to keep the UI responsive)</source>
+        <translation>要素数 %1 超出预览上限 %2（已拒绝以保证界面响应）</translation>
+    </message>
+    <message>
+        <source>layer has no valid extent (empty layer)</source>
+        <translation>图层无有效范围（空图层）</translation>
+    </message>
+    <message>
+        <source>four Chinese characters</source>
+        <translation>四个汉字</translation>
+    </message>
+    <message>
+        <source>Label</source>
+        <translation>标签</translation>
+    </message>
 </context>
 <context>
     <name>QaMaskDialog</name>
@@ -4945,6 +5423,10 @@
     <message>
         <source>Input Raster</source>
         <translation>输入栅格</translation>
+    </message>
+    <message>
+        <source>Quality band. Chosen automatically by product semantic role by default (SCL → scene classification, QA → quality).</source>
+        <translation>质量波段。默认按产品语义角色自动选择（SCL → 场景分类，QA → 质量）。</translation>
     </message>
     <message>
         <source>Quality Band</source>
@@ -4971,20 +5453,22 @@
         <translation>通用位掩码</translation>
     </message>
     <message>
-        <source>• Landsat QA_PIXEL: Collection 2 bit flags
-</source>
-        <translation>• Landsat QA_PIXEL：按 Collection 2 位标志
-</translation>
+        <source>• Auto: identify by band role / name (SCL → Sentinel-2; QA → Landsat)
+• Landsat QA_PIXEL: Collection 2 bit flags
+• Sentinel-2 SCL: by scene classification classes
+• Generic bitmask: decided bit by bit from the bits parameter</source>
+        <translation>• 自动：按波段角色/名称识别（SCL → Sentinel-2；QA → Landsat）
+• Landsat QA_PIXEL：按 Collection 2 位标志
+• Sentinel-2 SCL：按场景分类类别
+• 通用位掩码：按 bits 参数逐位判断</translation>
     </message>
     <message>
-        <source>• Sentinel-2 SCL: by scene classification classes
-</source>
-        <translation>• Sentinel-2 SCL：按场景分类类别
-</translation>
-    </message>
-    <message>
-        <source>• Generic bitmask: decided bit by bit from the bits parameter</source>
-        <translation>• 通用位掩码：按 bits 参数逐位判断</translation>
+        <source>Choose the classes to turn into the mask.
+• Landsat: cloud = bits 1/2/3 (dilated cloud / cirrus / cloud), shadow = bit 4, snow = bit 5, water = bit 7
+• Sentinel-2 SCL: cloud = classes 8/9/10, shadow = 3, snow = 11, water = 6</source>
+        <translation>选择要置为掩膜的类别。
+• Landsat：云=bit1/2/3（膨胀云/卷云/云），云影=bit4，雪=bit5，水体=bit7
+• Sentinel-2 SCL：云=类别 8/9/10，云影=3，雪=11，水体=6</translation>
     </message>
     <message>
         <source>Quality Source</source>
@@ -5013,16 +5497,6 @@
     <message>
         <source>All invalid/occluded classes</source>
         <translation>全部无效/遮挡类别</translation>
-    </message>
-    <message>
-        <source>• Landsat: cloud = bits 1/2/3 (dilated cloud / cirrus / cloud), shadow = bit 4, snow = bit 5, water = bit 7
-</source>
-        <translation>• Landsat：云=bit1/2/3（膨胀云/卷云/云），云影=bit4，雪=bit5，水体=bit7
-</translation>
-    </message>
-    <message>
-        <source>• Sentinel-2 SCL: cloud = classes 8/9/10, shadow = 3, snow = 11, water = 6</source>
-        <translation>• Sentinel-2 SCL：云=类别 8/9/10，云影=3，雪=11，水体=6</translation>
     </message>
     <message>
         <source>Mask Classes</source>
@@ -5268,10 +5742,16 @@ Click the button below to import data, or press Ctrl+O to open an existing proje
     <message>
         <source>This asset is referenced by %1 display / processing leases. Unloading removes the corresponding presentation.
 
-</source>
+Continue with the cascading unload?</source>
         <translation>该资产正被 %1 个显示/处理租约引用。卸载将移除对应呈现。
 
-</translation>
+继续级联卸载？</translation>
+    </message>
+    <message>
+        <source>Unload the selected %1 data assets from the project?
+If display / processing references exist, their presentations are removed cascadingly.</source>
+        <translation>从工程卸载选中的 %1 个数据资产？
+若存在显示/处理引用，将级联移除对应呈现。</translation>
     </message>
     <message>
         <source>Unload Data Assets</source>
@@ -5284,12 +5764,6 @@ Click the button below to import data, or press Ctrl+O to open an existing proje
     <message>
         <source>Batch Unload</source>
         <translation>批量卸载</translation>
-    </message>
-    <message>
-        <source>Unload the selected %1 data assets from the project?
-</source>
-        <translation>从工程卸载选中的 %1 个数据资产？
-</translation>
     </message>
     <message>
         <source>Finished: %1 succeeded, %2 failed.</source>
@@ -6554,54 +7028,28 @@ Click the button below to import data, or press Ctrl+O to open an existing proje
     <message>
         <source>SICNU GEO RS Remote-Sensing Image Interpretation and Analysis Platform
 
-</source>
+A professional desktop for remote-sensing data processing and intelligent interpretation
+Built on Qt 6 and a modern remote-sensing algorithm architecture
+
+Version: v0.9.2-dev
+
+Key features:
+- Full multi-source raster and vector layer support
+- High-performance multiband rendering with real-time color stretching
+- Smart CRS and projection transformations
+- A rich remote-sensing toolbox with asynchronous task scheduling</source>
         <translation>SICNU GEO RS 遥感图像解译与分析平台
 
-</translation>
-    </message>
-    <message>
-        <source>Built on Qt 6 and a modern remote-sensing algorithm architecture
+专业级遥感数据处理与智能解译桌面端
+基于 Qt 6 与现代遥感算法架构构建
 
-</source>
-        <translation>基于 Qt 6 与现代遥感算法架构构建
+版本：v0.9.2-dev
 
-</translation>
-    </message>
-    <message>
-        <source>Version: v0.9.2-dev
-
-</source>
-        <translation>版本：v0.9.2-dev
-
-</translation>
-    </message>
-    <message>
-        <source>Key features:
-</source>
-        <translation>核心特性：
-</translation>
-    </message>
-    <message>
-        <source>- Full multi-source raster and vector layer support
-</source>
-        <translation>- 完整的多源栅格与矢量图层支持
-</translation>
-    </message>
-    <message>
-        <source>- High-performance multiband rendering with real-time color stretching
-</source>
-        <translation>- 高性能多波段渲染与实时色彩拉伸
-</translation>
-    </message>
-    <message>
-        <source>- Smart CRS and projection transformations
-</source>
-        <translation>- 坐标参考系统与投影智能转换
-</translation>
-    </message>
-    <message>
-        <source>- A rich remote-sensing toolbox with asynchronous task scheduling</source>
-        <translation>- 丰富的遥感处理工具箱与异步任务调度</translation>
+核心特性：
+- 完整的多源栅格与矢量图层支持
+- 高性能多波段渲染与实时色彩拉伸
+- 坐标参考系统与投影智能转换
+- 丰富的遥感处理工具箱与异步任务调度</translation>
     </message>
     <message>
         <source>Sample Data</source>
@@ -6719,9 +7167,9 @@ Expected data/samples/ at the project root.</source>
     </message>
     <message>
         <source>Select or load a raster layer first.
-</source>
+This feature only adjusts the map display contrast; it exports no new file.</source>
         <translation>请先选择或加载一个栅格图层。
-</translation>
+此功能仅调整地图显示对比度，不导出新文件。</translation>
     </message>
     <message>
         <source>The display stretch panel has not been initialized.</source>
@@ -7562,10 +8010,6 @@ Define classes -&gt; collect ROIs -&gt; train -&gt; preview/apply -&gt; accuracy
         <translation>样本编辑</translation>
     </message>
     <message>
-        <source>Selectable for deletion; samples show on the vector layer.</source>
-        <translation>选择后可删除；样本显示在矢量图层上。</translation>
-    </message>
-    <message>
         <source>Pan</source>
         <translation>平移</translation>
     </message>
@@ -7592,10 +8036,6 @@ Define classes -&gt; collect ROIs -&gt; train -&gt; preview/apply -&gt; accuracy
     <message>
         <source>Add Polygon</source>
         <translation>添加多边形</translation>
-    </message>
-    <message>
-        <source>The cls_id attribute takes the current class automatically.</source>
-        <translation>属性 cls_id 自动取当前类别。</translation>
     </message>
     <message>
         <source>Delete Selected</source>
@@ -7790,10 +8230,6 @@ Define classes -&gt; collect ROIs -&gt; train -&gt; preview/apply -&gt; accuracy
         <translation>从 Shapefile 加载 ROI（将替换当前样本）。</translation>
     </message>
     <message>
-        <source>The digitizing tools (point / rectangle / polygon / freehand / magic wand) are in the toolbar above;</source>
-        <translation>数字化工具（点/矩形/多边形/自由绘/魔棒）在上方工具栏；</translation>
-    </message>
-    <message>
         <source>Recompute Spectral Curves</source>
         <translation>重算光谱曲线</translation>
     </message>
@@ -7874,12 +8310,6 @@ Define classes -&gt; collect ROIs -&gt; train -&gt; preview/apply -&gt; accuracy
         <translation>精度来自全图 Apply 的 holdout/验证划分；可导出 CSV 或弹出大图查看。</translation>
     </message>
     <message>
-        <source>Post-processing uses one dialog per algorithm. Use the buttons below or the menu 'Processing → Post-Classification'.
-</source>
-        <translation>后处理为「一算法一对话框」。请用下方按钮或菜单「处理 → 分类后处理」。
-</translation>
-    </message>
-    <message>
         <source>Skip Post-Processing</source>
         <translation>跳过后处理</translation>
     </message>
@@ -7924,8 +8354,26 @@ Define classes -&gt; collect ROIs -&gt; train -&gt; preview/apply -&gt; accuracy
         <translation>加载分类结果到主窗口</translation>
     </message>
     <message>
-        <source>Tick artifacts and press 'Export Selected'; classification / post-processing rasters can be loaded into the main window layer tree.</source>
-        <translation>勾选产物后点「导出所选」；可将分类/后处理栅格加载到主窗口图层树。</translation>
+        <source>Same as main window vector editing: toggle editing → add polygon → double-click to finish;Selectable for deletion; samples show on the vector layer.</source>
+        <translation>与主窗口矢量编辑一致：切换编辑 → 添加多边形 → 双击结束；选择后可删除；样本显示在矢量图层上。</translation>
+    </message>
+    <message>
+        <source>Digitize polygon samples: left-click adds points; right-click / double-click finishes.The cls_id attribute takes the current class automatically.</source>
+        <translation>数字化多边形样本：左键加点，右键/双击结束。属性 cls_id 自动取当前类别。</translation>
+    </message>
+    <message>
+        <source>The digitizing tools (point / rectangle / polygon / freehand / magic wand) are in the toolbar above;Select a class in the class quick list before digitizing.</source>
+        <translation>数字化工具（点/矩形/多边形/自由绘/魔棒）在上方工具栏；先在类别快览中选中类别再勾绘。</translation>
+    </message>
+    <message>
+        <source>Post-processing uses one dialog per algorithm. Use the buttons below or the menu 'Processing → Post-Classification'.
+By default results load into this window's layer management on the left; you can also skip this step and go to output.</source>
+        <translation>后处理为「一算法一对话框」。请用下方按钮或菜单「处理 → 分类后处理」。
+默认会将结果加载到本窗口左侧图层管理。也可跳过本步进入输出。</translation>
+    </message>
+    <message>
+        <source>Tick artifacts and press 'Export Selected'; classification / post-processing rasters can be loaded into the main window layer tree.Any successful export or load completes this step.</source>
+        <translation>勾选产物后点「导出所选」；可将分类/后处理栅格加载到主窗口图层树。任一成功导出或加载即完成本步。</translation>
     </message>
     <message>
         <source>The class scheme already exists and was not overwritten</source>
@@ -8141,9 +8589,9 @@ ROI 数：%2 · 像元：%3 · 有像元类别：%4</translation>
     </message>
     <message>
         <source>K-means cross-validation is not applicable (cluster ↔ class labels do not align).
-</source>
+Use Normal Bayes or SVM.</source>
         <translation>K-Means 交叉验证不适用 (cluster ↔ class 标签不齐)。
-</translation>
+请用 NormalBayes 或 SVM。</translation>
     </message>
     <message>
         <source>5-fold Cross-Validation</source>
@@ -8533,8 +8981,10 @@ Loading refused; retry with a matching model and meta.json.</source>
         <translation>影像配准 · 影像对地图</translation>
     </message>
     <message>
-        <source>Add GCP: after clicking an image point, a dialog pops up to enter map coordinates, or pick them from the main window map.</source>
-        <translation>Add GCP：在影像上点击像点后，弹出对话框填写地图坐标，或从主窗口地图取点。</translation>
+        <source>Source image canvas: loads the image to correct.
+Add GCP: after clicking an image point, a dialog pops up to enter map coordinates, or pick them from the main window map.</source>
+        <translation>源影像画布：加载待校正影像。
+Add GCP：在影像上点击像点后，弹出对话框填写地图坐标，或从主窗口地图取点。</translation>
     </message>
     <message>
         <source>Source Image (Warp)</source>
@@ -8569,40 +9019,12 @@ Loading refused; retry with a matching model and meta.json.</source>
         <translation>工具</translation>
     </message>
     <message>
-        <source>&lt;b&gt;Image Registration · Image 2 Map&lt;/b&gt;&lt;br&gt;</source>
-        <translation>&lt;b&gt;影像配准 · 影像对地图&lt;/b&gt;&lt;br&gt;</translation>
+        <source>Image to Map: pick points on the source image; enter map coordinates manually or pick them from the main window map (no base map panel).</source>
+        <translation>Image 2 Map：在源影像上取点，地图坐标手填或从主窗口地图拾取（无底图面板）。</translation>
     </message>
     <message>
-        <source>&lt;b&gt;Typical Workflow&lt;/b&gt;&lt;br&gt;</source>
-        <translation>&lt;b&gt;典型流程&lt;/b&gt;&lt;br&gt;</translation>
-    </message>
-    <message>
-        <source>1. Load a georeferenced base map / vector in the main window&lt;br&gt;</source>
-        <translation>1. 主窗口加载已有地理参考的底图/矢量&lt;br&gt;</translation>
-    </message>
-    <message>
-        <source>2. Open the source image in this window (file or main project layer)&lt;br&gt;</source>
-        <translation>2. 本窗口打开源影像（文件或主工程图层）&lt;br&gt;</translation>
-    </message>
-    <message>
-        <source>3. Press Add GCP and click an image point on the source image&lt;br&gt;</source>
-        <translation>3. 点 Add GCP，在源影像上点击像点&lt;br&gt;</translation>
-    </message>
-    <message>
-        <source>4. In the 'Enter Map Coordinates' dialog: type X/Y, or press 'Pick Point from Map' and click on the main window map&lt;br&gt;</source>
-        <translation>4. 在「输入地图坐标」对话框中：手填 X/Y，或点「从地图取点」在主窗口地图上点选&lt;br&gt;</translation>
-    </message>
-    <message>
-        <source>5. You can also edit the target X/Y columns directly in the GCP table&lt;br&gt;</source>
-        <translation>5. 也可在 GCP 表中直接编辑目标 X/Y 列&lt;br&gt;</translation>
-    </message>
-    <message>
-        <source>6. Optionally RPC / polynomial → run the correction&lt;br&gt;&lt;br&gt;</source>
-        <translation>6. 可选 RPC / 多项式 → 运行校正&lt;br&gt;&lt;br&gt;</translation>
-    </message>
-    <message>
-        <source>No SIFT; no embedded base image panel.</source>
-        <translation>无 SIFT；无内嵌 Base 影像面板。</translation>
+        <source>&lt;b&gt;Image Registration · Image 2 Map&lt;/b&gt;&lt;br&gt;Aligned with the QGIS Georeferencer: only the source image to correct is shown; no base map is embedded in this window.&lt;br&gt;&lt;br&gt;&lt;b&gt;Typical Workflow&lt;/b&gt;&lt;br&gt;1. Load a georeferenced base map / vector in the main window&lt;br&gt;2. Open the source image in this window (file or main project layer)&lt;br&gt;3. Press Add GCP and click an image point on the source image&lt;br&gt;4. In the 'Enter Map Coordinates' dialog: type X/Y, or press 'Pick Point from Map' and click on the main window map&lt;br&gt;5. You can also edit the target X/Y columns directly in the GCP table&lt;br&gt;6. Optionally RPC / polynomial → run the correction&lt;br&gt;&lt;br&gt;No SIFT; no embedded base image panel.</source>
+        <translation>&lt;b&gt;影像配准 · 影像对地图&lt;/b&gt;&lt;br&gt;对齐 QGIS Georeferencer：仅显示待校正源影像，不在本窗口嵌入底图。&lt;br&gt;&lt;br&gt;&lt;b&gt;典型流程&lt;/b&gt;&lt;br&gt;1. 主窗口加载已有地理参考的底图/矢量&lt;br&gt;2. 本窗口打开源影像（文件或主工程图层）&lt;br&gt;3. 点 Add GCP，在源影像上点击像点&lt;br&gt;4. 在「输入地图坐标」对话框中：手填 X/Y，或点「从地图取点」在主窗口地图上点选&lt;br&gt;5. 也可在 GCP 表中直接编辑目标 X/Y 列&lt;br&gt;6. 可选 RPC / 多项式 → 运行校正&lt;br&gt;&lt;br&gt;无 SIFT；无内嵌 Base 影像面板。</translation>
     </message>
 </context>
 <context>
@@ -8680,6 +9102,10 @@ Loading refused; retry with a matching model and meta.json.</source>
         <translation>准备就绪 — 打开源影像并选取 GCP，设置输出后点「运行」</translation>
     </message>
     <message>
+        <source>Layer / file name of the current canvas. Hover to see the full path.</source>
+        <translation>当前画布对应的图层/文件名。悬停可查看完整路径。</translation>
+    </message>
+    <message>
         <source>Source (Warp): —</source>
         <translation>源 (Warp): —</translation>
     </message>
@@ -8724,8 +9150,16 @@ Path: %2</source>
         <translation>从文件打开源影像…</translation>
     </message>
     <message>
+        <source>Opens the source image to correct (SRC / Warp) from a file. Shown on the source canvas; the path is used to write the warp.</source>
+        <translation>从文件打开待校正源影像（SRC / Warp）。显示在源画布，路径用于写出 warp。</translation>
+    </message>
+    <message>
         <source>Open Source Image from Project Layer...</source>
         <translation>从工程图层打开源影像…</translation>
+    </message>
+    <message>
+        <source>Chooses a raster from the main project layer list as the source image (Warp); no file picker needed.</source>
+        <translation>从主工程图层列表选择栅格作为源影像（Warp），无需再选文件。</translation>
     </message>
     <message>
         <source>&amp;Settings</source>
@@ -8754,30 +9188,6 @@ Path: %2</source>
     <message>
         <source>Enter 'What's This?' mode, then click a widget for its explanation.</source>
         <translation>进入「这是什么」模式，再点击控件查看说明。</translation>
-    </message>
-    <message>
-        <source>1. Open the source image (File)&lt;br&gt;</source>
-        <translation>1. 打开源影像（File）&lt;br&gt;</translation>
-    </message>
-    <message>
-        <source>2. Collect GCPs on the SRC and target canvases&lt;br&gt;</source>
-        <translation>2. 在 SRC 与目标画布上采集 GCP&lt;br&gt;</translation>
-    </message>
-    <message>
-        <source>3. Set the transform method, target CRS and output path on the right&lt;br&gt;</source>
-        <translation>3. 在右侧设置变换方法、目标 CRS、输出路径&lt;br&gt;</translation>
-    </message>
-    <message>
-        <source>4. Check residuals; once point counts and the method are satisfied, press 'Run' on the toolbar&lt;br&gt;</source>
-        <translation>4. 查看残差；点数与方法满足后点工具栏「运行」&lt;br&gt;</translation>
-    </message>
-    <message>
-        <source>5. Track progress under 'Correction Task'; double-click a finished task to load its result&lt;br&gt;&lt;br&gt;</source>
-        <translation>5. 在「校正任务」中查看进度；完成后双击可加载结果&lt;br&gt;&lt;br&gt;</translation>
-    </message>
-    <message>
-        <source>Tip: hover over tool buttons or parameter widgets for detailed explanations.</source>
-        <translation>提示：将鼠标悬停在工具按钮或参数控件上可查看详细说明。</translation>
     </message>
     <message>
         <source>Pan</source>
@@ -8824,22 +9234,6 @@ Path: %2</source>
         <translation>添加控制点</translation>
     </message>
     <message>
-        <source>1. Click the source point on the source image (SRC)
-</source>
-        <translation>1. 在源影像 (SRC) 点击源点
-</translation>
-    </message>
-    <message>
-        <source>2. Click the conjugate target point on the reference / map
-</source>
-        <translation>2. 在参考/地图上点击同名目标点
-</translation>
-    </message>
-    <message>
-        <source>Right-click cancels an unfinished source point. Points should be evenly spread.</source>
-        <translation>右键取消未完成的源点。点宜均匀分布。</translation>
-    </message>
-    <message>
         <source>Move Control Point</source>
         <translation>移动控制点</translation>
     </message>
@@ -8868,8 +9262,64 @@ Path: %2</source>
         <translation>运行</translation>
     </message>
     <message>
-        <source>Multiple runs create multiple tasks; running ones can be cancelled in the task list.</source>
-        <translation>可多次运行形成多条任务；运行中可在任务列表取消。</translation>
+        <source>&lt;b&gt;Image Registration / Geometric Correction&lt;/b&gt;&lt;br&gt;&lt;br&gt;1. Open the source image (File)&lt;br&gt;2. Collect GCPs on the SRC and target canvases&lt;br&gt;3. Set the transform method, target CRS and output path on the right&lt;br&gt;4. Check residuals; once point counts and the method are satisfied, press 'Run' on the toolbar&lt;br&gt;5. Track progress under 'Correction Task'; double-click a finished task to load its result&lt;br&gt;&lt;br&gt;Tip: hover over tool buttons or parameter widgets for detailed explanations.</source>
+        <translation>&lt;b&gt;影像配准 / 几何校正&lt;/b&gt;&lt;br&gt;&lt;br&gt;1. 打开源影像（File）&lt;br&gt;2. 在 SRC 与目标画布上采集 GCP&lt;br&gt;3. 在右侧设置变换方法、目标 CRS、输出路径&lt;br&gt;4. 查看残差；点数与方法满足后点工具栏「运行」&lt;br&gt;5. 在「校正任务」中查看进度；完成后双击可加载结果&lt;br&gt;&lt;br&gt;提示：将鼠标悬停在工具按钮或参数控件上可查看详细说明。</translation>
+    </message>
+    <message>
+        <source>Pan (Space): drag to browse the source and reference / map canvases. Mutually exclusive with the point-adding tools.</source>
+        <translation>平移 (Space)：在源与参考/地图画布上拖动浏览。与加点等工具互斥。</translation>
+    </message>
+    <message>
+        <source>Zoom in (Ctrl++): drag a rectangle or click. Works on both canvases; the wheel zooms too.</source>
+        <translation>放大 (Ctrl++)：框选或点击放大。两侧画布均可用。滚轮也可缩放。</translation>
+    </message>
+    <message>
+        <source>Zoom out (Ctrl+-): drag a rectangle or click. Works on both canvases.</source>
+        <translation>缩小 (Ctrl+-)：框选或点击缩小。两侧画布均可用。</translation>
+    </message>
+    <message>
+        <source>Fit source (F): zooms the source image canvas to full extent.</source>
+        <translation>适合源 (F)：源影像画布缩放到全图。</translation>
+    </message>
+    <message>
+        <source>Fit reference / map (Shift+F): zooms the target canvas to full extent.</source>
+        <translation>适合参考/地图 (Shift+F)：目标画布缩放到全图。</translation>
+    </message>
+    <message>
+        <source>Fit both (Ctrl+Shift+F): zooms the source and target canvases to full extent.</source>
+        <translation>适合两侧 (Ctrl+Shift+F)：源与目标画布均缩放到全图。</translation>
+    </message>
+    <message>
+        <source>Previous extent (Alt+←): both canvases go back to the previous view extent.</source>
+        <translation>上一范围 (Alt+←)：两侧画布回退到上一次视图范围。</translation>
+    </message>
+    <message>
+        <source>Next extent (Alt+→): both canvases advance to the next view extent.</source>
+        <translation>下一范围 (Alt+→)：两侧画布前进到下一次视图范围。</translation>
+    </message>
+    <message>
+        <source>Add control point (A):
+1. Click the source point on the source image (SRC)
+2. Click the conjugate target point on the reference / map
+Right-click cancels an unfinished source point. Points should be evenly spread.</source>
+        <translation>添加控制点 (A)：
+1. 在源影像 (SRC) 点击源点
+2. 在参考/地图上点击同名目标点
+右键取消未完成的源点。点宜均匀分布。</translation>
+    </message>
+    <message>
+        <source>Move control point (M): drag an existing GCP marker to fine-tune; residuals recompute automatically.</source>
+        <translation>移动控制点 (M)：拖动已有 GCP 标记微调，残差自动重算。</translation>
+    </message>
+    <message>
+        <source>Delete control point (D): click a marker to delete it, or delete the row in the GCP table.</source>
+        <translation>删除控制点 (D)：点击标记删除；或在 GCP 表中删除行。</translation>
+    </message>
+    <message>
+        <source>Runs the geometric correction: after validating GCPs / the output path, the task joins the 'Correction Task' list and the warp executes in the background.
+Multiple runs create multiple tasks; running ones can be cancelled in the task list.</source>
+        <translation>运行几何校正：校验 GCP / 输出路径后，将任务加入「校正任务」列表并后台执行 warp。
+可多次运行形成多条任务；运行中可在任务列表取消。</translation>
     </message>
     <message>
         <source>Cancelled the unfinished source point</source>
@@ -9129,24 +9579,12 @@ Load an image in the main window first, or use 'Open from File'.</source>
         <translation>影像配准 · 影像对影像</translation>
     </message>
     <message>
-        <source>When adding a GCP, click the source point here first, then the conjugate point on the REF side (no coordinate form pops up).</source>
-        <translation>Add GCP 时先在此点击源点，再在右侧 REF 点击同名点（不弹坐标表单）。</translation>
-    </message>
-    <message>
-        <source>When adding a GCP, click the conjugate position corresponding to the source point here to complete the control point pair.</source>
-        <translation>Add GCP 时在此点击与源点对应的同名位置，完成一对控制点。</translation>
-    </message>
-    <message>
         <source>Source (Warp)</source>
         <translation>源 (Warp)</translation>
     </message>
     <message>
         <source>Base</source>
         <translation>基准 (Base)</translation>
-    </message>
-    <message>
-        <source>Keep Sync zoom off for already-registered image pairs, otherwise picked coordinates scramble and residuals go wild.</source>
-        <translation>已配准影像对请保持关闭，否则取点坐标会错乱、残差异常。</translation>
     </message>
     <message>
         <source>Sync zoom enabled — confirm both sides share the same CRS, otherwise GCP coordinates may be wrong</source>
@@ -9197,60 +9635,60 @@ Load an image in the main window first, or use 'Open from File'.</source>
         <translation>同步缩放</translation>
     </message>
     <message>
-        <source>With different CRSs, linking scrambles picked coordinates.</source>
-        <translation>不同 CRS 时联动会弄乱取点坐标。</translation>
-    </message>
-    <message>
         <source>SIFT Auto Matching</source>
         <translation>SIFT 自动匹配</translation>
-    </message>
-    <message>
-        <source>Needs OpenCV; provided by Image to Image only.</source>
-        <translation>需要 OpenCV；仅 Image 2 Image 提供。</translation>
     </message>
     <message>
         <source>Template Matching</source>
         <translation>模板匹配</translation>
     </message>
     <message>
-        <source>Suits remote-sensing imagery with approximate coordinates; grid sampling or existing rough GCPs serve as seeds. Needs OpenCV.</source>
-        <translation>适合已有近似坐标的遥感影像；可网格采样或用现有粗 GCP 作种子。需要 OpenCV。</translation>
+        <source>Source image canvas (SRC / Warp): loads the image to correct.
+When adding a GCP, click the source point here first, then the conjugate point on the REF side (no coordinate form pops up).</source>
+        <translation>源影像画布 (SRC / Warp)：加载待校正影像。
+Add GCP 时先在此点击源点，再在右侧 REF 点击同名点（不弹坐标表单）。</translation>
     </message>
     <message>
-        <source>&lt;b&gt;Image Registration · Image 2 Image&lt;/b&gt;&lt;br&gt;</source>
-        <translation>&lt;b&gt;影像配准 · 影像对影像&lt;/b&gt;&lt;br&gt;</translation>
+        <source>Reference image canvas (REF / Base): loads the registered reference image.
+When adding a GCP, click the conjugate position corresponding to the source point here to complete the control point pair.</source>
+        <translation>参考影像画布 (REF / Base)：加载已配准参考影像。
+Add GCP 时在此点击与源点对应的同名位置，完成一对控制点。</translation>
     </message>
     <message>
-        <source>&lt;b&gt;Typical Workflow&lt;/b&gt;&lt;br&gt;</source>
-        <translation>&lt;b&gt;典型流程&lt;/b&gt;&lt;br&gt;</translation>
+        <source>Sync zoom (off by default): use only when SRC and REF share a CRS and similar extents.
+Keep Sync zoom off for already-registered image pairs, otherwise picked coordinates scramble and residuals go wild.</source>
+        <translation>同步缩放（默认关闭）：仅当 SRC 与 REF 为同一 CRS 且范围相近时使用。
+已配准影像对请保持关闭，否则取点坐标会错乱、残差异常。</translation>
     </message>
     <message>
-        <source>1. Open the source image: from a file or a main project layer&lt;br&gt;</source>
-        <translation>1. 打开源影像：从文件 或 从主工程图层&lt;br&gt;</translation>
+        <source>Opens the reference image from a file into the right REF (Base) side, as the GCP target and alignment base.</source>
+        <translation>从文件打开参考影像到右侧 REF（Base），作为 GCP 目标与对齐基准。</translation>
     </message>
     <message>
-        <source>2. Open the reference image: from a file or a main project layer&lt;br&gt;</source>
-        <translation>2. 打开参考影像：从文件 或 从主工程图层&lt;br&gt;</translation>
+        <source>Chooses a raster from the main project layer list as the reference image (Base).</source>
+        <translation>从主工程图层列表选择栅格作为参考影像（Base）。</translation>
     </message>
     <message>
-        <source>3. Add / Move / Delete GCP become available once both sides are open&lt;br&gt;</source>
-        <translation>3. 两侧都打开后，Add / Move / Delete GCP 才可用&lt;br&gt;</translation>
+        <source>Sync zoom (off by default): enable only when both sides share a CRS and similar extents.
+With different CRSs, linking scrambles picked coordinates.</source>
+        <translation>同步缩放（默认关）：两侧 CRS 一致且范围相近时才建议开启。
+不同 CRS 时联动会弄乱取点坐标。</translation>
     </message>
     <message>
-        <source>4. Navigation: pan / zoom in / zoom out; fit source / fit reference / fit both&lt;br&gt;</source>
-        <translation>4. 导航：平移 / 放大 / 缩小；适合源 / 适合参考 / 适合两侧&lt;br&gt;</translation>
+        <source>SIFT auto-matching: SRC and the reference image must be open. After feature extraction and inlier filtering, GCPs can be added in batch.
+Needs OpenCV; provided by Image to Image only.</source>
+        <translation>SIFT 自动匹配：需已打开 SRC 与参考影像。提取特征并筛选内点后，可批量添加 GCP。
+需要 OpenCV；仅 Image 2 Image 提供。</translation>
     </message>
     <message>
-        <source>5. Press Add GCP: SRC first, then REF (right-click to cancel an unfinished source point)&lt;br&gt;</source>
-        <translation>5. 点选 Add GCP：先 SRC 再 REF（右键取消未完成源点）&lt;br&gt;</translation>
+        <source>Template matching (NCC): predicts the reference search area from the source image's initial geocoordinates, then runs correlation matching.
+Suits remote-sensing imagery with approximate coordinates; grid sampling or existing rough GCPs serve as seeds. Needs OpenCV.</source>
+        <translation>模板匹配（NCC）：利用源影像初始地理坐标预测参考影像搜索区，再做相关匹配。
+适合已有近似坐标的遥感影像；可网格采样或用现有粗 GCP 作种子。需要 OpenCV。</translation>
     </message>
     <message>
-        <source>6. Optionally: template matching (needs SRC initial coordinates) / SIFT, Sync zoom → set output → run&lt;br&gt;&lt;br&gt;</source>
-        <translation>6. 可选：模板匹配（需 SRC 初始坐标）/ SIFT、Sync zoom → 设置输出 → 运行&lt;br&gt;&lt;br&gt;</translation>
-    </message>
-    <message>
-        <source>No RPC (use Image to Map for RPC).</source>
-        <translation>不含 RPC（RPC 请用 Image 2 Map）。</translation>
+        <source>&lt;b&gt;Image Registration · Image 2 Image&lt;/b&gt;&lt;br&gt;Two-image registration: source image (Warp) on the left, reference image (Base) on the right.&lt;br&gt;&lt;br&gt;&lt;b&gt;Typical Workflow&lt;/b&gt;&lt;br&gt;1. Open the source image: from a file or a main project layer&lt;br&gt;2. Open the reference image: from a file or a main project layer&lt;br&gt;3. Add / Move / Delete GCP become available once both sides are open&lt;br&gt;4. Navigation: pan / zoom in / zoom out; fit source / fit reference / fit both&lt;br&gt;5. Press Add GCP: SRC first, then REF (right-click to cancel an unfinished source point)&lt;br&gt;6. Optionally: template matching (needs SRC initial coordinates) / SIFT, Sync zoom → set output → run&lt;br&gt;&lt;br&gt;No RPC (use Image to Map for RPC).</source>
+        <translation>&lt;b&gt;影像配准 · 影像对影像&lt;/b&gt;&lt;br&gt;双影像配准：左侧源影像 (Warp)，右侧参考影像 (Base)。&lt;br&gt;&lt;br&gt;&lt;b&gt;典型流程&lt;/b&gt;&lt;br&gt;1. 打开源影像：从文件 或 从主工程图层&lt;br&gt;2. 打开参考影像：从文件 或 从主工程图层&lt;br&gt;3. 两侧都打开后，Add / Move / Delete GCP 才可用&lt;br&gt;4. 导航：平移 / 放大 / 缩小；适合源 / 适合参考 / 适合两侧&lt;br&gt;5. 点选 Add GCP：先 SRC 再 REF（右键取消未完成源点）&lt;br&gt;6. 可选：模板匹配（需 SRC 初始坐标）/ SIFT、Sync zoom → 设置输出 → 运行&lt;br&gt;&lt;br&gt;不含 RPC（RPC 请用 Image 2 Map）。</translation>
     </message>
     <message>
         <source>OpenCV unavailable — SIFT disabled</source>
@@ -11278,14 +11716,12 @@ Beware that this option will be applied on all vertices of the edited geometries
         <translation>亮温 (K)</translation>
     </message>
     <message>
-        <source>• TOA reflectance: Landsat (reflMult×DN+add)/sin(sun); S2 (DN+offset)/scale
-</source>
-        <translation>• TOA 反射率：Landsat (reflMult×DN+add)/sin(sun)；S2 (DN+offset)/scale
-</translation>
-    </message>
-    <message>
-        <source>• Brightness temperature: needs the thermal band K1/K2 constants</source>
-        <translation>• 亮温：需热红外波段 K1/K2 常数</translation>
+        <source>• Radiance: L = gain×DN + bias
+• TOA reflectance: Landsat (reflMult×DN+add)/sin(sun); S2 (DN+offset)/scale
+• Brightness temperature: needs the thermal band K1/K2 constants</source>
+        <translation>• 辐射亮度：L = gain×DN + bias
+• TOA 反射率：Landsat (reflMult×DN+add)/sin(sun)；S2 (DN+offset)/scale
+• 亮温：需热红外波段 K1/K2 常数</translation>
     </message>
     <message>
         <source>Output Physical Quantity</source>
@@ -12438,8 +12874,16 @@ Beware that this option will be applied on all vertices of the edited geometries
         <translation>完成全图分类（含验证/holdout 精度）后在此显示 OA、Kappa 与混淆矩阵。</translation>
     </message>
     <message>
+        <source>Overall accuracy OA, Kappa, confusion matrix (rows = truth, columns = prediction), producer's / user's accuracy and F1.</source>
+        <translation>总体精度 OA、Kappa、混淆矩阵（行=真实，列=预测）、制图/用户精度与 F1。</translation>
+    </message>
+    <message>
         <source>Confusion matrix (rows = truth, columns = prediction)</source>
         <translation>混淆矩阵（行=真实，列=预测）</translation>
+    </message>
+    <message>
+        <source>Confusion matrix: rows = true classes, columns = predicted classes; the diagonal holds correctly classified sample counts.</source>
+        <translation>混淆矩阵：行=真实类别，列=预测类别。对角线上为正确分类样本数。</translation>
     </message>
     <message>
         <source>Per-Class Metrics</source>
@@ -12460,6 +12904,10 @@ Beware that this option will be applied on all vertices of the edited geometries
     <message>
         <source>F1</source>
         <translation>F1</translation>
+    </message>
+    <message>
+        <source>Producer's accuracy ≈ recall; user's accuracy ≈ precision; F1 is their harmonic mean.</source>
+        <translation>制图精度≈召回率；用户精度≈精确率；F1 为二者调和平均。</translation>
     </message>
     <message>
         <source>Export CSV...</source>
@@ -12634,6 +13082,18 @@ Beware that this option will be applied on all vertices of the edited geometries
         <translation>UNet</translation>
     </message>
     <message>
+        <source>Normal Bayes: assumes multivariate normal class spectra; suits well-sampled, separable classes.</source>
+        <translation>正态贝叶斯：假设各类光谱呈多维正态，适合样本较充分、类间可分的场景。</translation>
+    </message>
+    <message>
+        <source>SVM (RBF): support vector machine with a radial basis kernel; suits medium samples and non-linear boundaries.</source>
+        <translation>SVM (RBF)：支持向量机 + 径向基核，适合中等样本、非线性边界。</translation>
+    </message>
+    <message>
+        <source>K-means: unsupervised clustering; the class count comes from the labeled samples, and labels may need mapping to ROI class ids.</source>
+        <translation>K-Means：无监督聚类，类别数取自有样本的类；标签可能与 ROI 类号需对应。</translation>
+    </message>
+    <message>
         <source>Random forest: planned; not enabled in this build.</source>
         <translation>随机森林：计划中，当前构建未启用。</translation>
     </message>
@@ -12658,16 +13118,34 @@ Beware that this option will be applied on all vertices of the edited geometries
         <translation>如 1,2,3</translation>
     </message>
     <message>
-        <source>e.g. 1,2,3 or 2,3,4,5. Left empty, the first few bands are used by default.</source>
-        <translation>例：1,2,3 或 2,3,4,5。留空时默认取前若干波段。</translation>
+        <source>Band numbers taking part in the classification (starting at 1), comma-separated.
+e.g. 1,2,3 or 2,3,4,5. Left empty, the first few bands are used by default.</source>
+        <translation>参与分类的波段序号（从 1 开始），逗号分隔。
+例：1,2,3 或 2,3,4,5。留空时默认取前若干波段。</translation>
+    </message>
+    <message>
+        <source>Training share in stratified sampling (0.1–0.95).
+The remaining samples measure accuracy (confusion matrix). Defaults to 0.7.</source>
+        <translation>分层抽样中用于训练的比例（0.1–0.95）。
+其余样本用于测试精度（混淆矩阵）。默认 0.7。</translation>
+    </message>
+    <message>
+        <source>When enabled, GDAL NoData pixels of the input bands are excluded from classification and output as unclassified (0).Suits image edges or invalid areas.</source>
+        <translation>启用后，各输入波段的 GDAL NoData 像元不参与分类，输出为未分类 (0)。适合影像边缘或无效区。</translation>
+    </message>
+    <message>
+        <source>Extra ignored pixel values (any band equal to them counts as background / edge).Common: 0 fill, -9999 background. Can apply together with the source NoData.</source>
+        <translation>额外忽略的像元值（任意波段等于该值则视为背景/边缘）。常见：填充 0、背景 -9999。可与源 NoData 同时生效。</translation>
+    </message>
+    <message>
+        <source>Any band: if one band is NoData / ignored, the whole pixel is ignored (default; suits edges).
+All bands: the pixel is ignored only when every band is an ignored value.</source>
+        <translation>任一波段：只要有一个波段为 NoData/忽略值 → 整像素忽略（默认，适合边缘）。
+全部波段：仅当所有波段均为忽略值时才忽略。</translation>
     </message>
     <message>
         <source>Training ratio:</source>
         <translation>训练比例:</translation>
-    </message>
-    <message>
-        <source>The remaining samples measure accuracy (confusion matrix). Defaults to 0.7.</source>
-        <translation>其余样本用于测试精度（混淆矩阵）。默认 0.7。</translation>
     </message>
     <message>
         <source>Output:</source>
@@ -12678,16 +13156,32 @@ Beware that this option will be applied on all vertices of the edited geometries
         <translation>/path/to/classified.tif（留空则提示）</translation>
     </message>
     <message>
+        <source>Classification result GeoTIFF path. Left empty, a save dialog pops up on run.</source>
+        <translation>分类结果 GeoTIFF 路径。留空时运行会弹出保存对话框。</translation>
+    </message>
+    <message>
         <source>Cross-Validation</source>
         <translation>交叉验证</translation>
+    </message>
+    <message>
+        <source>Stratified K-fold cross-validation to estimate model stability (writes no full-scene classification map).</source>
+        <translation>分层 K 折交叉验证，估计模型稳定性（不写整景分类图）。</translation>
     </message>
     <message>
         <source>Quick Preview</source>
         <translation>快速预览</translation>
     </message>
     <message>
+        <source>Classifies only the current map viewport and loads it temporarily, for quick parameter trials.</source>
+        <translation>仅对当前地图视口范围分类并临时加载，便于快速试参数。</translation>
+    </message>
+    <message>
         <source>Train and Classify</source>
         <translation>训练并分类</translation>
+    </message>
+    <message>
+        <source>Trains on the ROI samples and classifies the whole scene, writing the output raster; accuracy assessment follows.</source>
+        <translation>用 ROI 样本训练并整景分类，写出输出栅格；完成后可做精度评价。</translation>
     </message>
     <message>
         <source>Help</source>
@@ -12706,20 +13200,12 @@ Beware that this option will be applied on all vertices of the edited geometries
         <translation>使用源 NoData</translation>
     </message>
     <message>
-        <source>Suits image edges or invalid areas.</source>
-        <translation>适合影像边缘或无效区。</translation>
-    </message>
-    <message>
         <source>Ignored values:</source>
         <translation>忽略值:</translation>
     </message>
     <message>
         <source>e.g. 0 or 0,-9999 (comma-separated)</source>
         <translation>如 0 或 0,-9999（逗号分隔）</translation>
-    </message>
-    <message>
-        <source>Common: 0 fill, -9999 background. Can apply together with the source NoData.</source>
-        <translation>常见：填充 0、背景 -9999。可与源 NoData 同时生效。</translation>
     </message>
     <message>
         <source>Matches:</source>
@@ -12732,10 +13218,6 @@ Beware that this option will be applied on all vertices of the edited geometries
     <message>
         <source>All Bands</source>
         <translation>全部波段</translation>
-    </message>
-    <message>
-        <source>All bands: the pixel is ignored only when every band is an ignored value.</source>
-        <translation>全部波段：仅当所有波段均为忽略值时才忽略。</translation>
     </message>
 </context>
 <context>
@@ -12922,26 +13404,35 @@ Beware that this option will be applied on all vertices of the edited geometries
     </message>
 </context>
 <context>
-    <name>RsClassifyStepHost</name>
-    <message>
-        <source>Previous Step</source>
-        <translation>上一步</translation>
-    </message>
-    <message>
-        <source>Returns to the previous step.</source>
-        <translation>返回上一个步骤。</translation>
-    </message>
-    <message>
-        <source>Next Step</source>
-        <translation>下一步</translation>
-    </message>
-    <message>
-        <source>Continue to the next step after finishing the current one.</source>
-        <translation>完成当前步骤后进入下一步。</translation>
-    </message>
-</context>
-<context>
     <name>RsClassifyStepperBar</name>
+    <message>
+        <source>1 Scheme</source>
+        <translation>1 体系</translation>
+    </message>
+    <message>
+        <source>2 Samples</source>
+        <translation>2 样本</translation>
+    </message>
+    <message>
+        <source>3 Evaluate</source>
+        <translation>3 评价</translation>
+    </message>
+    <message>
+        <source>4 Train</source>
+        <translation>4 训练</translation>
+    </message>
+    <message>
+        <source>5 Accuracy</source>
+        <translation>5 精度</translation>
+    </message>
+    <message>
+        <source>6 Post-Processing</source>
+        <translation>6 后处理</translation>
+    </message>
+    <message>
+        <source>7 Output</source>
+        <translation>7 输出</translation>
+    </message>
     <message>
         <source>Click to switch to step: %1</source>
         <translation>点击切换到步骤：%1</translation>
@@ -13211,10 +13702,6 @@ Beware that this option will be applied on all vertices of the edited geometries
         <translation>校正参数：变换 / 重采样 / 残差 / CRS / 输出</translation>
     </message>
     <message>
-        <source>Hover the section titles and widgets for details; press 'Parameter Description' for the full documentation.</source>
-        <translation>悬停各分区标题与控件可看详细说明；点「参数说明」查看完整文档。</translation>
-    </message>
-    <message>
         <source>Parameter Description</source>
         <translation>参数说明</translation>
     </message>
@@ -13225,16 +13712,6 @@ Beware that this option will be applied on all vertices of the edited geometries
     <message>
         <source>Coordinate Transformation</source>
         <translation>坐标变换</translation>
-    </message>
-    <message>
-        <source>Each method needs a different minimum point count; fitting is unreliable below it and 'Run' is disabled.
-</source>
-        <translation>不同方法所需最少点数不同；实际点数不足时无法可靠拟合，「运行」会禁用。
-</translation>
-    </message>
-    <message>
-        <source>Same-scene registration usually needs only Linear or a first-order polynomial; use higher orders / TPS for complex distortions.</source>
-        <translation>同景配准一般用 Linear 或 一次多项式即可；复杂畸变再用高阶/TPS。</translation>
     </message>
     <message>
         <source>Linear</source>
@@ -13269,54 +13746,6 @@ Beware that this option will be applied on all vertices of the edited geometries
         <translation>RPC 物理模型（RFM）</translation>
     </message>
     <message>
-        <source>• Linear (≥ 2 points): translation + scale; common for the same scene / nearly collinear cases
-</source>
-        <translation>• Linear（线性，≥2 点）：平移+缩放，同景/近似共线时常用
-</translation>
-    </message>
-    <message>
-        <source>• Helmert (≥ 2 points): similarity transform (rotation + uniform scale)
-</source>
-        <translation>• Helmert（≥2 点）：相似变换（旋转+统一缩放）
-</translation>
-    </message>
-    <message>
-        <source>• Polynomial 1 (≥ 3 points): affine; corrects rotation / shear
-</source>
-        <translation>• 一次多项式（≥3 点）：仿射，纠正旋转/剪切
-</translation>
-    </message>
-    <message>
-        <source>• Polynomial 2 / 3 (≥ 6/10 points): bending deformation; high orders overfit easily
-</source>
-        <translation>• 二次/三次多项式（≥6/10 点）：弯曲变形，阶数高易过拟合
-</translation>
-    </message>
-    <message>
-        <source>• TPS thin plate spline: strong local deformation; GCPs should be evenly spread
-</source>
-        <translation>• TPS 薄板样条：局部变形强，GCP 宜均匀
-</translation>
-    </message>
-    <message>
-        <source>• Projective: perspective (scanned maps, oblique imagery)
-</source>
-        <translation>• Projective：透视（扫描图、倾斜摄影）
-</translation>
-    </message>
-    <message>
-        <source>• RPC Physical: sensor RPC, Image→Map only; requires metadata and an optional DEM
-
-</source>
-        <translation>• RPC Physical：传感器 RPC，仅 Image→Map，需元数据与可选 DEM
-
-</translation>
-    </message>
-    <message>
-        <source>Tip: with exactly the minimum points, DOF = 0 and residuals approach 0 — that does not mean good accuracy; collect more points.</source>
-        <translation>提示：点数刚好等于最少点数时 DOF=0，残差会接近 0，不能说明精度好，应多采点。</translation>
-    </message>
-    <message>
         <source>Method</source>
         <translation>方法</translation>
     </message>
@@ -13327,30 +13756,6 @@ Beware that this option will be applied on all vertices of the edited geometries
     <message>
         <source>—</source>
         <translation>—</translation>
-    </message>
-    <message>
-        <source>For example, a cubic polynomial usually needs about 10 points. Below the minimum, fitting is unreliable.</source>
-        <translation>例如三次多项式通常约 10 点。未达下限时不能可靠拟合。</translation>
-    </message>
-    <message>
-        <source>Only enabled points take part in the fit and RMS computation.</source>
-        <translation>只有启用的点参与拟合与 RMS 计算。</translation>
-    </message>
-    <message>
-        <source>• DOF &lt; 0: not enough points to fit
-</source>
-        <translation>• DOF &lt; 0：点数不够，无法拟合
-</translation>
-    </message>
-    <message>
-        <source>• DOF = 0: exactly determined; residuals are 'fitted away' to almost always 0, with no statistical meaning
-</source>
-        <translation>• DOF = 0：刚好定解，残差会被「拟合光」，几乎总是 0，无统计意义
-</translation>
-    </message>
-    <message>
-        <source>• DOF &gt; 0: over-determined; assess accuracy via RMS — collecting more evenly distributed points is advisable</source>
-        <translation>• DOF &gt; 0：可过约束，用 RMS 评估精度；宜再多采均匀分布的点</translation>
     </message>
     <message>
         <source>Minimum Points</source>
@@ -13381,10 +13786,6 @@ Beware that this option will be applied on all vertices of the edited geometries
         <translation>重采样</translation>
     </message>
     <message>
-        <source>Affects only the output's smoothness / sharpness; the GCP geometric fit itself is unchanged.</source>
-        <translation>只影响输出影像的平滑/锐利程度，不改变 GCP 几何拟合本身。</translation>
-    </message>
-    <message>
         <source>Nearest Neighbour</source>
         <translation>最邻近</translation>
     </message>
@@ -13405,36 +13806,6 @@ Beware that this option will be applied on all vertices of the edited geometries
         <translation>Lanczos</translation>
     </message>
     <message>
-        <source>• Nearest Neighbour: no neighbourhood mixing; first choice for classification / integer labels
-</source>
-        <translation>• Nearest Neighbour：最近邻，不混合邻域，分类/整型标签首选
-</translation>
-    </message>
-    <message>
-        <source>• Bilinear: balanced speed and quality; common for continuous grayscale / multispectral
-</source>
-        <translation>• Bilinear：双线性，连续灰度/多光谱常用，速度与质量均衡
-</translation>
-    </message>
-    <message>
-        <source>• Cubic: cubic convolution, smoother with slightly softer edges
-</source>
-        <translation>• Cubic：三次卷积，更平滑，边缘略糊
-</translation>
-    </message>
-    <message>
-        <source>• Cubic Spline / Lanczos: higher order, sharper / slower; use with care for quantitative work
-
-</source>
-        <translation>• Cubic Spline / Lanczos：更高阶，更锐/更慢，慎用于定量
-
-</translation>
-    </message>
-    <message>
-        <source>Visual optics: Bilinear or Cubic; classification maps: Nearest.</source>
-        <translation>光学目视：Bilinear 或 Cubic；分类图：Nearest。</translation>
-    </message>
-    <message>
         <source>Algorithm</source>
         <translation>算法</translation>
     </message>
@@ -13445,22 +13816,6 @@ Beware that this option will be applied on all vertices of the edited geometries
     <message>
         <source>auto</source>
         <translation>自动</translation>
-    </message>
-    <message>
-        <source>• auto (0): estimated by the engine from the input / reference
-</source>
-        <translation>• auto（0）：由引擎按输入/参考估计
-</translation>
-    </message>
-    <message>
-        <source>• Manual: e.g. 30 means 30 m resolution (under UTM)
-</source>
-        <translation>• 手动：如 30 表示 30 m 分辨率（UTM 下）
-</translation>
-    </message>
-    <message>
-        <source>For I2I alignment to the reference, the reference resolution or auto is typical.</source>
-        <translation>I2I 对齐参考时常用参考分辨率或 auto。</translation>
     </message>
     <message>
         <source>Output Pixel Size</source>
@@ -13475,20 +13830,12 @@ Beware that this option will be applied on all vertices of the edited geometries
         <translation>自动 · 参考</translation>
     </message>
     <message>
-        <source>auto · ref: the extent follows the reference / transform result automatically; usually no change needed.</source>
-        <translation>auto · ref：按参考/变换结果自动确定范围，一般无需改。</translation>
-    </message>
-    <message>
         <source>Output Extent</source>
         <translation>输出范围</translation>
     </message>
     <message>
         <source>Map extent covered by the result.</source>
         <translation>结果覆盖的地图范围。</translation>
-    </message>
-    <message>
-        <source>Usually 0; if 0 is a valid DN, use e.g. 65535 instead and set it as NoData in the result.</source>
-        <translation>常用 0；若 0 是有效 DN，可改为如 65535 并在结果中设 NoData。</translation>
     </message>
     <message>
         <source>Background Value</source>
@@ -13503,42 +13850,12 @@ Beware that this option will be applied on all vertices of the edited geometries
         <translation>RMS 误差分布</translation>
     </message>
     <message>
-        <source>Usually in source image pixels (px). With accurate conjugate points and a suitable model, the RMS should be small.
-</source>
-        <translation>单位一般为源影像像元 (px)。同名点选得准、模型合适时 RMS 应较小。
-</translation>
-    </message>
-    <message>
-        <source>With DOF = 0, residuals are fitted to nearly 0 and do not represent real accuracy — collect more points.</source>
-        <translation>DOF=0 时残差会被拟合到接近 0，不能代表真实精度——请多采点。</translation>
-    </message>
-    <message>
-        <source>• Horizontal axis ≈ ΔX (column-direction residual)
-</source>
-        <translation>• 横轴 ≈ ΔX（列方向残差）
-</translation>
-    </message>
-    <message>
-        <source>• Vertical axis ≈ ΔY (row-direction residual)
-</source>
-        <translation>• 纵轴 ≈ ΔY（行方向残差）
-</translation>
-    </message>
-    <message>
-        <source>Points should stay near the origin and be roughly isotropic. For outliers: check whether the wrong feature was picked, or disable the point in the GCP table.</source>
-        <translation>点应靠近原点且大致各向均匀。离群点：检查是否取错同名地物，或在 GCP 表禁用该点。</translation>
-    </message>
-    <message>
         <source>Root-mean-square of X residuals (pixels).</source>
         <translation>X 方向残差的均方根（像元）。</translation>
     </message>
     <message>
         <source>Root-mean-square of Y residuals (pixels).</source>
         <translation>Y 方向残差的均方根（像元）。</translation>
-    </message>
-    <message>
-        <source>Visual same-scene registration: a few pixels is the norm; hundreds to thousands means checking CRS / Sync zoom / point picking.</source>
-        <translation>目视同景配准：通常希望数像素级；若数百～数千需检查 CRS/Sync zoom/取点。</translation>
     </message>
     <message>
         <source>X RMS</source>
@@ -13585,30 +13902,6 @@ Beware that this option will be applied on all vertices of the edited geometries
         <translation>坐标系</translation>
     </message>
     <message>
-        <source>I2I: usually identical to the reference image CRS (aligned automatically when the reference loads).
-</source>
-        <translation>I2I：通常与参考影像 CRS 一致（加载参考后会自动对齐）。
-</translation>
-    </message>
-    <message>
-        <source>I2M: the Map canvas follows the target CRS when showing main project layers.</source>
-        <translation>I2M：Map 画布会尽量跟随目标 CRS 显示主工程图层。</translation>
-    </message>
-    <message>
-        <source>Picked coordinates follow the layer CRS.</source>
-        <translation>取点坐标以图层 CRS 为准。</translation>
-    </message>
-    <message>
-        <source>Common choices: WGS 84 / UTM zone xxN, CGCS2000 Gauss projection, etc.
-</source>
-        <translation>常见：WGS 84 / UTM zone xxN、CGCS2000 高斯投影等。
-</translation>
-    </message>
-    <message>
-        <source>In I2I, it is set to the reference CRS automatically once the reference image loads.</source>
-        <translation>I2I 加载参考影像后会尽量自动设为参考 CRS。</translation>
-    </message>
-    <message>
         <source>Source CRS</source>
         <translation>源 CRS</translation>
     </message>
@@ -13637,22 +13930,8 @@ Beware that this option will be applied on all vertices of the edited geometries
         <translation>输出</translation>
     </message>
     <message>
-        <source>The toolbar 'Run' enables only after a valid path is entered (and GCP counts / fitting conditions are met).
-</source>
-        <translation>必须填写有效路径后，工具栏「运行」才会启用（且 GCP 数量与拟合需满足条件）。
-</translation>
-    </message>
-    <message>
-        <source>The task list records this path so the result can be loaded into the main project when finished.</source>
-        <translation>任务列表会记录该路径，完成后可加载到主工程。</translation>
-    </message>
-    <message>
         <source>/path/to/output.tif</source>
         <translation>/path/to/output.tif</translation>
-    </message>
-    <message>
-        <source>The directory must be writable; same-named files may be overwritten (depending on the task implementation).</source>
-        <translation>目录需可写；同名文件可能被覆盖（视任务实现）。</translation>
     </message>
     <message>
         <source>Browse…</source>
@@ -13667,8 +13946,176 @@ Beware that this option will be applied on all vertices of the edited geometries
         <translation>DEM（RPC 模式）</translation>
     </message>
     <message>
-        <source>An optional DEM improves RPC projection heights; the Z offset is a metric correction relative to the DEM.</source>
-        <translation>可选 DEM 改善 RPC 投影高程；Z 偏移为相对 DEM 的米制修正。</translation>
+        <source>This panel controls all write-out parameters of the geometric correction.
+Hover the section titles and widgets for details; press 'Parameter Description' for the full documentation.</source>
+        <translation>本面板控制几何校正的全部写出参数。
+悬停各分区标题与控件可看详细说明；点「参数说明」查看完整文档。</translation>
+    </message>
+    <message>
+        <source>[Transform] Fits a geometric model from source image coordinates to target coordinates using GCPs.
+Each method needs a different minimum point count; fitting is unreliable below it and 'Run' is disabled.
+Same-scene registration usually needs only Linear or a first-order polynomial; use higher orders / TPS for complex distortions.</source>
+        <translation>【坐标变换】用 GCP 拟合「源影像坐标 → 目标坐标」的几何模型。
+不同方法所需最少点数不同；实际点数不足时无法可靠拟合，「运行」会禁用。
+同景配准一般用 Linear 或 一次多项式即可；复杂畸变再用高阶/TPS。</translation>
+    </message>
+    <message>
+        <source>Transform method (geometric model):
+• Linear (≥ 2 points): translation + scale; common for the same scene / nearly collinear cases
+• Helmert (≥ 2 points): similarity transform (rotation + uniform scale)
+• Polynomial 1 (≥ 3 points): affine; corrects rotation / shear
+• Polynomial 2 / 3 (≥ 6/10 points): bending deformation; high orders overfit easily
+• TPS thin plate spline: strong local deformation; GCPs should be evenly spread
+• Projective: perspective (scanned maps, oblique imagery)
+• RPC Physical: sensor RPC, Image→Map only; requires metadata and an optional DEM
+
+Tip: with exactly the minimum points, DOF = 0 and residuals approach 0 — that does not mean good accuracy; collect more points.</source>
+        <translation>变换方法（几何模型）：
+• Linear（线性，≥2 点）：平移+缩放，同景/近似共线时常用
+• Helmert（≥2 点）：相似变换（旋转+统一缩放）
+• 一次多项式（≥3 点）：仿射，纠正旋转/剪切
+• 二次/三次多项式（≥6/10 点）：弯曲变形，阶数高易过拟合
+• TPS 薄板样条：局部变形强，GCP 宜均匀
+• Projective：透视（扫描图、倾斜摄影）
+• RPC Physical：传感器 RPC，仅 Image→Map，需元数据与可选 DEM
+
+提示：点数刚好等于最少点数时 DOF=0，残差会接近 0，不能说明精度好，应多采点。</translation>
+    </message>
+    <message>
+        <source>Minimum points: the lower bound of 'enabled' GCPs required by the current transform method.
+For example, a cubic polynomial usually needs about 10 points. Below the minimum, fitting is unreliable.</source>
+        <translation>最少点数：当前变换方法要求的「已启用」GCP 下限。
+例如三次多项式通常约 10 点。未达下限时不能可靠拟合。</translation>
+    </message>
+    <message>
+        <source>Usable points: the number of control points ticked 'enabled' in the GCP table.
+Only enabled points take part in the fit and RMS computation.</source>
+        <translation>实际可用点数：GCP 表中勾选「启用」的控制点个数。
+只有启用的点参与拟合与 RMS 计算。</translation>
+    </message>
+    <message>
+        <source>Degrees of freedom DOF = usable points − minimum points.
+• DOF &lt; 0: not enough points to fit
+• DOF = 0: exactly determined; residuals are 'fitted away' to almost always 0, with no statistical meaning
+• DOF &gt; 0: over-determined; assess accuracy via RMS — collecting more evenly distributed points is advisable</source>
+        <translation>自由度 DOF = 实际可用点数 − 最少点数。
+• DOF &lt; 0：点数不够，无法拟合
+• DOF = 0：刚好定解，残差会被「拟合光」，几乎总是 0，无统计意义
+• DOF &gt; 0：可过约束，用 RMS 评估精度；宜再多采均匀分布的点</translation>
+    </message>
+    <message>
+        <source>[Resampling] Pixel interpolation used when warping the source image onto the target grid by the transform model.
+Affects only the output's smoothness / sharpness; the GCP geometric fit itself is unchanged.</source>
+        <translation>【重采样】将源影像按变换模型「扭曲」到目标网格时的像元插值方式。
+只影响输出影像的平滑/锐利程度，不改变 GCP 几何拟合本身。</translation>
+    </message>
+    <message>
+        <source>Resampling algorithm (when writing the raster):
+• Nearest Neighbour: no neighbourhood mixing; first choice for classification / integer labels
+• Bilinear: balanced speed and quality; common for continuous grayscale / multispectral
+• Cubic: cubic convolution, smoother with slightly softer edges
+• Cubic Spline / Lanczos: higher order, sharper / slower; use with care for quantitative work
+
+Visual optics: Bilinear or Cubic; classification maps: Nearest.</source>
+        <translation>重采样算法（写出栅格时）：
+• Nearest Neighbour：最近邻，不混合邻域，分类/整型标签首选
+• Bilinear：双线性，连续灰度/多光谱常用，速度与质量均衡
+• Cubic：三次卷积，更平滑，边缘略糊
+• Cubic Spline / Lanczos：更高阶，更锐/更慢，慎用于定量
+
+光学目视：Bilinear 或 Cubic；分类图：Nearest。</translation>
+    </message>
+    <message>
+        <source>Output pixel size (ground units of the target CRS, e.g. metres).
+• auto (0): estimated by the engine from the input / reference
+• Manual: e.g. 30 means 30 m resolution (under UTM)
+For I2I alignment to the reference, the reference resolution or auto is typical.</source>
+        <translation>输出像元大小（目标 CRS 的地面单位，如米）。
+• auto（0）：由引擎按输入/参考估计
+• 手动：如 30 表示 30 m 分辨率（UTM 下）
+I2I 对齐参考时常用参考分辨率或 auto。</translation>
+    </message>
+    <message>
+        <source>Output geographic extent (read-only preview).
+auto · ref: the extent follows the reference / transform result automatically; usually no change needed.</source>
+        <translation>输出地理范围（只读预览）。
+auto · ref：按参考/变换结果自动确定范围，一般无需改。</translation>
+    </message>
+    <message>
+        <source>Background / fill value: written to pixels the warp leaves without source data.
+Usually 0; if 0 is a valid DN, use e.g. 65535 instead and set it as NoData in the result.</source>
+        <translation>背景/填充值：扭曲后无源数据覆盖的像元写入此值。
+常用 0；若 0 是有效 DN，可改为如 65535 并在结果中设 NoData。</translation>
+    </message>
+    <message>
+        <source>[RMS Error] Root mean square of 'predicted − observed' positions over enabled GCPs.
+Usually in source image pixels (px). With accurate conjugate points and a suitable model, the RMS should be small.
+With DOF = 0, residuals are fitted to nearly 0 and do not represent real accuracy — collect more points.</source>
+        <translation>【RMS 误差】启用 GCP 上「预测位置 − 观测位置」的均方根。
+单位一般为源影像像元 (px)。同名点选得准、模型合适时 RMS 应较小。
+DOF=0 时残差会被拟合到接近 0，不能代表真实精度——请多采点。</translation>
+    </message>
+    <message>
+        <source>Residual scatter plot:
+• Horizontal axis ≈ ΔX (column-direction residual)
+• Vertical axis ≈ ΔY (row-direction residual)
+Points should stay near the origin and be roughly isotropic. For outliers: check whether the wrong feature was picked, or disable the point in the GCP table.</source>
+        <translation>残差散点图：
+• 横轴 ≈ ΔX（列方向残差）
+• 纵轴 ≈ ΔY（行方向残差）
+点应靠近原点且大致各向均匀。离群点：检查是否取错同名地物，或在 GCP 表禁用该点。</translation>
+    </message>
+    <message>
+        <source>Total RMS: root mean square of the residual magnitudes of all enabled GCPs.
+Visual same-scene registration: a few pixels is the norm; hundreds to thousands means checking CRS / Sync zoom / point picking.</source>
+        <translation>Total RMS：所有启用 GCP 残差模长的均方根。
+目视同景配准：通常希望数像素级；若数百～数千需检查 CRS/Sync zoom/取点。</translation>
+    </message>
+    <message>
+        <source>The maximum residual and its GCP number. Check first whether that point was picked wrongly or suffers edge distortion.</source>
+        <translation>最大残差及对应 GCP 编号。优先检查该点是否取错或影像边缘畸变。</translation>
+    </message>
+    <message>
+        <source>[CRS] The target CRS determines the output GeoTIFF projection and how GCP target coordinates are interpreted.
+I2I: usually identical to the reference image CRS (aligned automatically when the reference loads).
+I2M: the Map canvas follows the target CRS when showing main project layers.</source>
+        <translation>【坐标系】目标 CRS 决定输出 GeoTIFF 的投影，并参与 GCP 目标坐标解释。
+I2I：通常与参考影像 CRS 一致（加载参考后会自动对齐）。
+I2M：Map 画布会尽量跟随目标 CRS 显示主工程图层。</translation>
+    </message>
+    <message>
+        <source>The source image (Warp) CRS. Shows — when undefined.
+Picked coordinates follow the layer CRS.</source>
+        <translation>源影像 (Warp) 的坐标系。未定义时显示 —。
+取点坐标以图层 CRS 为准。</translation>
+    </message>
+    <message>
+        <source>Target CRS: the coordinate system of the correction result and of the fit.
+Common choices: WGS 84 / UTM zone xxN, CGCS2000 Gauss projection, etc.
+In I2I, it is set to the reference CRS automatically once the reference image loads.</source>
+        <translation>目标 CRS：校正结果与拟合所用目标坐标系。
+常见：WGS 84 / UTM zone xxN、CGCS2000 高斯投影等。
+I2I 加载参考影像后会尽量自动设为参考 CRS。</translation>
+    </message>
+    <message>
+        <source>[Output] Save path of the corrected GeoTIFF.
+The toolbar 'Run' enables only after a valid path is entered (and GCP counts / fitting conditions are met).
+The task list records this path so the result can be loaded into the main project when finished.</source>
+        <translation>【输出】校正后的 GeoTIFF 保存路径。
+必须填写有效路径后，工具栏「运行」才会启用（且 GCP 数量与拟合需满足条件）。
+任务列表会记录该路径，完成后可加载到主工程。</translation>
+    </message>
+    <message>
+        <source>Full path of the output file; .tif / .tiff recommended.
+The directory must be writable; same-named files may be overwritten (depending on the task implementation).</source>
+        <translation>输出文件完整路径，建议使用 .tif / .tiff。
+目录需可写；同名文件可能被覆盖（视任务实现）。</translation>
+    </message>
+    <message>
+        <source>[DEM] Shown only when the transform method is RPC Physical.
+An optional DEM improves RPC projection heights; the Z offset is a metric correction relative to the DEM.</source>
+        <translation>【DEM】仅当变换方法为 RPC Physical 时显示。
+可选 DEM 改善 RPC 投影高程；Z 偏移为相对 DEM 的米制修正。</translation>
     </message>
     <message>
         <source>/path/to/dem.tif (optional)</source>
@@ -14157,26 +14604,16 @@ A running task will be aborted; intermediate results already produced are not ro
     <message>
         <source>The Task Center aggregates all algorithm tasks submitted through the Task Center (JobEngine is the internal execution adapter).
 
-</source>
+• The list shows title, status and progress; when the 'Load' column is ticked, outputs are loaded into the main view automatically on task success.
+• Right-click a task: view details (method/parameters/inputs/outputs), stop, load outputs, copy info.
+• Right-click empty list space: refresh, clear finished, this help.
+• Cancellation, logs and final states are authoritative in the Task Center; this panel is a projection and holds no independent lifecycle state.</source>
         <translation>任务中心汇总所有经 Task Center 提交的算法任务（JobEngine 为内部执行适配器）。
 
-</translation>
-    </message>
-    <message>
-        <source>• Right-click a task: view details (method/parameters/inputs/outputs), stop, load outputs, copy info.
-</source>
-        <translation>• 右键任务：查看详情（方法/参数/输入输出）、停止、加载输出、复制信息。
-</translation>
-    </message>
-    <message>
-        <source>• Right-click empty list space: refresh, clear finished, this help.
-</source>
-        <translation>• 列表空白处右键：刷新、清空已完成、本说明。
-</translation>
-    </message>
-    <message>
-        <source>• Cancellation, logs and final states are authoritative in the Task Center; this panel is a projection and holds no independent lifecycle state.</source>
-        <translation>• 取消、日志与终态均以 Task Center 为准；本面板为投影，不持有独立生命周期状态。</translation>
+• 列表显示标题、状态、进度；「加载」列勾选后，任务成功时自动把输出加载到主图。
+• 右键任务：查看详情（方法/参数/输入输出）、停止、加载输出、复制信息。
+• 列表空白处右键：刷新、清空已完成、本说明。
+• 取消、日志与终态均以 Task Center 为准；本面板为投影，不持有独立生命周期状态。</translation>
     </message>
     <message>
         <source>Refresh List</source>
@@ -14423,6 +14860,22 @@ A new task will be created with the same parameters.</source>
         <translation> 图斑：</translation>
     </message>
     <message>
+        <source>Smoothing kernel size (rs:obia_segment.smoothKernel, odd; also used as the OTB spatialRadius). Larger values give coarser boundaries and fewer small patches.</source>
+        <translation>平滑核大小（rs:obia_segment.smoothKernel，奇数；同时用作 OTB spatialRadius）。越大对象边界越粗、碎斑越少。</translation>
+    </message>
+    <message>
+        <source>Quantization levels (rs:obia_segment.quantizeBins, built-in segmentation fallback). More levels mean more detail and finer objects.</source>
+        <translation>量化级数（rs:obia_segment.quantizeBins，内置分割回退）。级数多则细节多、对象更碎。</translation>
+    </message>
+    <message>
+        <source>OTB MeanShift spectral radius (rs:obia_segment.rangeRadius, metres).</source>
+        <translation>OTB MeanShift 光谱半径（rs:obia_segment.rangeRadius，米）。</translation>
+    </message>
+    <message>
+        <source>Minimum object pixel count (rs:obia_segment.minRegionSize). Regions below it are merged, suppressing small patches.</source>
+        <translation>最小对象像元数（rs:obia_segment.minRegionSize）。小于此值的区域会被合并，抑制碎斑。</translation>
+    </message>
+    <message>
         <source>Segment</source>
         <translation>分割</translation>
     </message>
@@ -14433,6 +14886,10 @@ A new task will be created with the same parameters.</source>
     <message>
         <source>Hierarchy</source>
         <translation>分级分割</translation>
+    </message>
+    <message>
+        <source>Two-level hierarchical segmentation: fine MeanShift + coarse Watershed + parent links (rs:obia_hierarchy; needs OTB).</source>
+        <translation>两层层次分割：细层 MeanShift + 粗层 Watershed + 父链接（rs:obia_hierarchy，需 OTB）。</translation>
     </message>
     <message>
         <source> View L:</source>
@@ -14447,8 +14904,16 @@ A new task will be created with the same parameters.</source>
         <translation> 分类器：</translation>
     </message>
     <message>
+        <source>Object-level classifier (rs:obia_classify.method): Normal Bayes / SVM / Random Forest / K-means / MLP.</source>
+        <translation>对象级分类器（rs:obia_classify.method）：NormalBayes / SVM / RandomForest / KMeans / MLP。</translation>
+    </message>
+    <message>
         <source> Cls L:</source>
         <translation> 分类层级：</translation>
+    </message>
+    <message>
+        <source>Classification level, 0 (finest) by default. Training labels bind to objects of this level.</source>
+        <translation>分类层级，默认 0（最细）。训练标签绑定该层对象。</translation>
     </message>
     <message>
         <source>Classify</source>
@@ -14469,6 +14934,10 @@ A new task will be created with the same parameters.</source>
     <message>
         <source>Import ROI</source>
         <translation>导入 ROI</translation>
+    </message>
+    <message>
+        <source>Labels objects from training polygons by majority vote (rs:obia_label); click labels written later override and are reported.</source>
+        <translation>从训练多边形按多数票标注对象（rs:obia_label）；与点击标注冲突时后写覆盖并提示。</translation>
     </message>
     <message>
         <source>Consolidate</source>
@@ -15548,8 +16017,8 @@ Object labels already assigned to this class are not cleared automatically and c
         <translation>模板匹配（基于初始坐标）</translation>
     </message>
     <message>
-        <source>Applies when the source image already has approximate geocoordinates: the GeoTransform predicts the search area on the reference image,</source>
-        <translation>适用于源影像已有近似地理坐标的情况：使用 GeoTransform 预测参考影像搜索区，</translation>
+        <source>Applies when the source image already has approximate geocoordinates: the GeoTransform predicts the search area on the reference image,Then template correlation matching runs — steadier and more controllable than SIFT.</source>
+        <translation>适用于源影像已有近似地理坐标的情况：使用 GeoTransform 预测参考影像搜索区，再做模板相关匹配，比 SIFT 更稳健、更可控。</translation>
     </message>
     <message>
         <source>Template Correlation Matching Parameters</source>
@@ -15626,37 +16095,6 @@ Object labels already assigned to this class are not cleared automatically and c
     <message>
         <source>Opens the help for this dialog.</source>
         <translation>打开本对话框的帮助说明。</translation>
-    </message>
-</context>
-<context>
-    <name>RsTemplateMatcher</name>
-    <message>
-        <source>SRC lacks a usable initial geotransform.</source>
-        <translation>SRC 缺少可用的初始地理变换（GeoTransform）。</translation>
-    </message>
-    <message>
-        <source>Template matching predicts the search area from initial coordinates; first give the source image an approximate CRS / georeference,</source>
-        <translation>模板匹配依赖初始坐标预测搜索区；请先为源影像指定近似 CRS/地理参考，</translation>
-    </message>
-    <message>
-        <source>Or place a few rough GCPs manually first and use the existing-seed mode.</source>
-        <translation>或先手工打若干粗 GCP 后使用「现有种子点」模式。</translation>
-    </message>
-    <message>
-        <source>REF lacks a usable geotransform; matched points cannot be converted to ground coordinates.</source>
-        <translation>REF 缺少可用的地理变换，无法将匹配点转为地面坐标。</translation>
-    </message>
-    <message>
-        <source>The SRC image is too small to generate grid seed points</source>
-        <translation>SRC 影像过小，无法生成网格种子点</translation>
-    </message>
-    <message>
-        <source>No matches met the threshold. Increase the search radius or lower the minimum correlation score,</source>
-        <translation>未找到满足阈值的匹配点。可增大搜索半径、降低最小相关分数，</translation>
-    </message>
-    <message>
-        <source>Or check that the SRC initial coordinates are roughly correct.</source>
-        <translation>或检查 SRC 初始坐标是否大致正确。</translation>
     </message>
 </context>
 <context>
@@ -16003,6 +16441,10 @@ Object labels already assigned to this class are not cleared automatically and c
         <translation>调用命令行预览</translation>
     </message>
     <message>
+        <source>The external command line generated live from the parameters above. Copy it to a terminal to run manually (paths and temporary outputs may differ slightly from the actual run).</source>
+        <translation>根据上方参数实时生成的外部命令行。可复制到终端手动执行（路径与临时输出可能与实际运行略有差异）。</translation>
+    </message>
+    <message>
         <source>(command line generated from parameters...)</source>
         <translation>（根据参数生成调用命令…）</translation>
     </message>
@@ -16109,14 +16551,12 @@ Object labels already assigned to this class are not cleared automatically and c
         <translation>Laplacian 边缘增强</translation>
     </message>
     <message>
-        <source>• Sobel / Laplacian: edge detection and sharpening
-</source>
-        <translation>• Sobel / Laplacian：边缘检测与锐化增强
-</translation>
-    </message>
-    <message>
-        <source>The median filter suppresses salt-and-pepper noise while preserving edges remarkably well.</source>
-        <translation>中值滤波对椒盐噪声具有极佳保边抑制效果。</translation>
+        <source>• Mean / Gaussian / median: smoothing and denoising
+• Sobel / Laplacian: edge detection and sharpening
+The median filter suppresses salt-and-pepper noise while preserving edges remarkably well.</source>
+        <translation>• 均值 / 高斯 / 中值：平滑去噪
+• Sobel / Laplacian：边缘检测与锐化增强
+中值滤波对椒盐噪声具有极佳保边抑制效果。</translation>
     </message>
     <message>
         <source>Filter Type</source>
@@ -16257,6 +16697,10 @@ Object labels already assigned to this class are not cleared automatically and c
         <translation>数据资产</translation>
     </message>
     <message>
+        <source>Chooses a registered raster data asset as input. The asset version is validated at run time; execution is refused if the version has changed.</source>
+        <translation>选择已注册的栅格数据资产作为输入。运行时会校验资产版本；若版本已变更将拒绝执行。</translation>
+    </message>
+    <message>
         <source>Index and Band Mapping</source>
         <translation>指数与波段映射</translation>
     </message>
@@ -16285,38 +16729,20 @@ Object labels already assigned to this class are not cleared automatically and c
         <translation>MNDWI — 改进归一化水体指数</translation>
     </message>
     <message>
-        <source>• NDVI: vegetation (NIR, Red)
-</source>
-        <translation>• NDVI：植被 (NIR, Red)
-</translation>
-    </message>
-    <message>
-        <source>• EVI: enhanced vegetation (NIR, Red, Blue)
-</source>
-        <translation>• EVI：增强植被 (NIR, Red, Blue)
-</translation>
-    </message>
-    <message>
-        <source>• SAVI: soil-adjusted vegetation (NIR, Red)
-</source>
-        <translation>• SAVI：土壤调节植被 (NIR, Red)
-</translation>
-    </message>
-    <message>
-        <source>• NDWI: water (Green, NIR)
-</source>
-        <translation>• NDWI：水体 (Green, NIR)
-</translation>
-    </message>
-    <message>
-        <source>• NDBI: built-up (SWIR, NIR)
-</source>
-        <translation>• NDBI：建成区 (SWIR, NIR)
-</translation>
-    </message>
-    <message>
-        <source>• MNDWI: modified water (Green, SWIR)</source>
-        <translation>• MNDWI：改进水体 (Green, SWIR)</translation>
+        <source>Spectral index type:
+• NDVI: vegetation (NIR, Red)
+• EVI: enhanced vegetation (NIR, Red, Blue)
+• SAVI: soil-adjusted vegetation (NIR, Red)
+• NDWI: water (Green, NIR)
+• NDBI: built-up (SWIR, NIR)
+• MNDWI: modified water (Green, SWIR)</source>
+        <translation>光谱指数类型：
+• NDVI：植被 (NIR, Red)
+• EVI：增强植被 (NIR, Red, Blue)
+• SAVI：土壤调节植被 (NIR, Red)
+• NDWI：水体 (Green, NIR)
+• NDBI：建成区 (SWIR, NIR)
+• MNDWI：改进水体 (Green, SWIR)</translation>
     </message>
     <message>
         <source>Index Type</source>
@@ -16410,8 +16836,8 @@ Object labels already assigned to this class are not cleared automatically and c
         <translation>选择光谱库 JSON 文件 (*.json)...</translation>
     </message>
     <message>
-        <source>You can also save the current spectrum into the library below.</source>
-        <translation>也可在下方把当前谱保存进库。</translation>
+        <source>Spectral library file (SpectralLibrary JSON): named spectra plus optional wavelength rasters.You can also save the current spectrum into the library below.</source>
+        <translation>光谱库文件（SpectralLibrary JSON）：命名光谱 + 可选波长栅格。也可在下方把当前谱保存进库。</translation>
     </message>
     <message>
         <source>Browse...</source>
@@ -16526,12 +16952,8 @@ Object labels already assigned to this class are not cleared automatically and c
         <translation>—</translation>
     </message>
     <message>
-        <source>Matching finished: %1 comparable entries (ascending SAM). The library holds %2 entries in total.</source>
-        <translation>匹配完成：%1 个可比条目（SAM 升序）。谱库共 %2 个条目。</translation>
-    </message>
-    <message>
-        <source>Entries with wavelength rasters were resampled automatically before matching.</source>
-        <translation>带波长栅格的条目已自动重采样后匹配。</translation>
+        <source>Matching finished: %1 comparable entries (ascending SAM). The library holds %2 entries in total.Unmatched entries usually have a different band count and no wavelength raster.Entries with wavelength rasters were resampled automatically before matching.</source>
+        <translation>匹配完成：%1 个可比条目（SAM 升序）。谱库共 %2 个条目。未匹配条目通常因波段数不一致且缺少波长栅格。带波长栅格的条目已自动重采样后匹配。</translation>
     </message>
     <message>
         <source>Untitled</source>
@@ -16898,8 +17320,8 @@ Object labels already assigned to this class are not cleared automatically and c
         <translation>中值</translation>
     </message>
     <message>
-        <source>Best pixel: highest quality score among valid observations (ties broken by closeness to the target date, then by the earlier epoch);</source>
-        <translation>最佳像元：有效观测中质量分最高（并列取最接近目标日期，再取更早时相）；</translation>
+        <source>Best pixel: highest quality score among valid observations (ties broken by closeness to the target date, then by the earlier epoch);The output includes valid-observation count and quality score bands.</source>
+        <translation>最佳像元：有效观测中质量分最高（并列取最接近目标日期，再取更早时相）；输出含有效观测数与质量分波段。</translation>
     </message>
     <message>
         <source>Period:</source>
@@ -17137,6 +17559,10 @@ Object labels already assigned to this class are not cleared automatically and c
         <translation>地形位置指数 (TPI)</translation>
     </message>
     <message>
+        <source>Slope / aspect computation; hillshade needs solar azimuth and elevation; roughness / TRI / TPI are geomorphometric indices.</source>
+        <translation>坡度/坡向计算；山体阴影需指定太阳方位角与高度角；粗糙度/TRI/TPI 为地貌特征指数。</translation>
+    </message>
+    <message>
         <source>Analysis Type</source>
         <translation>分析类型</translation>
     </message>
@@ -17219,8 +17645,8 @@ Object labels already assigned to this class are not cleared automatically and c
         <translation>算子未注册：%1</translation>
     </message>
     <message>
-        <source>Workspace '%1' is open. Complete the interactive steps in the dedicated window;</source>
-        <translation>工作空间「%1」已打开。请在专用窗口中完成交互步骤；</translation>
+        <source>Workspace '%1' is open. Complete the interactive steps in the dedicated window;The task panel shows parameters of operator steps (e.g. rs:obia_segment / rs:obia_classify).</source>
+        <translation>工作空间「%1」已打开。请在专用窗口中完成交互步骤；任务面板可查看算子型步骤（如 rs:obia_segment / rs:obia_classify）的参数。</translation>
     </message>
     <message>
         <source>Opened tool: %1</source>
@@ -17273,591 +17699,6 @@ Object labels already assigned to this class are not cleared automatically and c
     <message>
         <source>Run succeeded: %1</source>
         <translation>运行成功：%1</translation>
-    </message>
-</context>
-<context>
-    <name>sicnu</name>
-    <message>
-        <source>• %1 · %2 · features %3 · %4&lt;br/&gt;%5&lt;br/&gt;</source>
-        <translation>• %1 · %2 · 要素 %3 · %4&lt;br/&gt;%5&lt;br/&gt;</translation>
-    </message>
-</context>
-<context>
-    <name>sicnu::DataManagerPanel</name>
-    <message>
-        <source>Data Management</source>
-        <translation>数据管理</translation>
-    </message>
-    <message>
-        <source>Name</source>
-        <translation>名称</translation>
-    </message>
-    <message>
-        <source>Persistence</source>
-        <translation>持久性</translation>
-    </message>
-    <message>
-        <source>References</source>
-        <translation>引用</translation>
-    </message>
-    <message>
-        <source>The color bar on the left shows status (green = available, red = unavailable); the type prefixes the name</source>
-        <translation>左侧色条表示状态（绿=可用，红=不可用）；类型作为名称前缀</translation>
-    </message>
-    <message>
-        <source>Filter by name / path / ID...</source>
-        <translation>按名称 / 路径 / ID 过滤…</translation>
-    </message>
-    <message>
-        <source>Filter Data Assets</source>
-        <translation>过滤数据资产</translation>
-    </message>
-    <message>
-        <source>Previous Page</source>
-        <translation>上一页</translation>
-    </message>
-    <message>
-        <source>Asset Pagination Status</source>
-        <translation>资产分页状态</translation>
-    </message>
-    <message>
-        <source>Next Page</source>
-        <translation>下一页</translation>
-    </message>
-    <message>
-        <source>No data assets yet</source>
-        <translation>暂无数据资产</translation>
-    </message>
-    <message>
-        <source>No data assets or collections registered yet. Import remote-sensing imagery, vector files or hyperspectral data to start.</source>
-        <translation>暂未登记任何数据资产或集合。导入遥感影像、矢量文件或高光谱数据开始工作。</translation>
-    </message>
-    <message>
-        <source>Import Data Assets...</source>
-        <translation>导入数据资产...</translation>
-    </message>
-    <message>
-        <source>Meta Information</source>
-        <translation>元信息</translation>
-    </message>
-    <message>
-        <source>Select a data asset or collection to view its meta information.</source>
-        <translation>选择数据资产或集合以查看元信息。</translation>
-    </message>
-    <message>
-        <source>Data management: catalog of project data assets and collections; right-click to add to display, promote, unload or view properties.</source>
-        <translation>数据管理：工程数据资产与集合目录；右键可添加到显示、提升、卸载、查看属性。</translation>
-    </message>
-    <message>
-        <source>Asset / collection tree. The color bar on the left shows status (green = available, red = unavailable). Double-click = add to display; right-click for more actions.</source>
-        <translation>资产/集合树。左侧色条表示状态（绿=可用，红=不可用）。双击=添加到显示；右键更多操作。</translation>
-    </message>
-    <message>
-        <source>Meta information inspector for the selected assets (path, CRS, band / layer structure, etc.).</source>
-        <translation>选中资产的元信息检视器（路径、CRS、波段/图层结构等）。</translation>
-    </message>
-    <message>
-        <source>Title of the current inspector item.</source>
-        <translation>当前检视项标题。</translation>
-    </message>
-    <message>
-        <source>Drag the splitter to adjust the heights of the catalog tree and the inspector.</source>
-        <translation>拖动分隔条调整目录树与检视器的高度。</translation>
-    </message>
-    <message>
-        <source>%1
-Status: source missing — recoverable by re-linking
-%2</source>
-        <translation>%1
-状态: 源缺失 — 可通过重定位恢复
-%2</translation>
-    </message>
-    <message>
-        <source>Assets</source>
-        <translation>资产</translation>
-    </message>
-    <message>
-        <source>Showing first %1 of %2 items — use the filter to narrow down</source>
-        <translation>仅显示前 %1 项 / 共 %2 项 — 使用过滤缩小范围</translation>
-    </message>
-    <message>
-        <source>The data manager is unavailable.</source>
-        <translation>数据管理器不可用。</translation>
-    </message>
-    <message>
-        <source>Collections</source>
-        <translation>集合</translation>
-    </message>
-    <message>
-        <source>Epoch Collection</source>
-        <translation>时间相集合</translation>
-    </message>
-    <message>
-        <source>Workspace Records</source>
-        <translation>工作区记录</translation>
-    </message>
-    <message>
-        <source>Epoch collection (multitemporal scene collection)</source>
-        <translation>时间相集合（多时相场景集合）</translation>
-    </message>
-    <message>
-        <source>Revision %1</source>
-        <translation>修订 %1</translation>
-    </message>
-    <message>
-        <source>Items %1–%2 of %3 assets (page %4/%5)</source>
-        <translation>第 %1–%2 项 / 共 %3 项资产（第 %4/%5 页）</translation>
-    </message>
-    <message>
-        <source>Page %1/%2 · %3 items in total</source>
-        <translation>第 %1/%2 页 · 共 %3 项</translation>
-    </message>
-    <message>
-        <source>Time Series Analysis...</source>
-        <translation>时间序列分析...</translation>
-    </message>
-    <message>
-        <source>Opens and processes this collection in the time series analysis dialog.</source>
-        <translation>在时间序列分析对话框中打开并处理该集合。</translation>
-    </message>
-    <message>
-        <source>Precheck Collection</source>
-        <translation>预检集合</translation>
-    </message>
-    <message>
-        <source>Checks raster alignment, time and platform consistency of the collection's scenes.</source>
-        <translation>检查该集合场景的栅格对齐、时间与平台一致性。</translation>
-    </message>
-    <message>
-        <source>View Collection Info</source>
-        <translation>查看集合信息</translation>
-    </message>
-    <message>
-        <source>Shows scene count, time range and platform of this epoch collection.</source>
-        <translation>显示该时间相集合的场景数、时间范围与平台。</translation>
-    </message>
-    <message>
-        <source>Remove Collection Record</source>
-        <translation>移除集合记录</translation>
-    </message>
-    <message>
-        <source>Removes the record from the workspace (no scene data is deleted).</source>
-        <translation>从工作区移除该记录（不删除任何场景数据）。</translation>
-    </message>
-    <message>
-        <source>Precheck result: %1
-Total scenes: %2
-Valid times: %3
-</source>
-        <translation>预检结果：%1
-场景总数：%2
-有效时间：%3
-</translation>
-    </message>
-    <message>
-        <source>Passed</source>
-        <translation>通过</translation>
-    </message>
-    <message>
-        <source>Failed</source>
-        <translation>失败</translation>
-    </message>
-    <message>
-        <source>
-Errors:
-- </source>
-        <translation>
-错误：
-- </translation>
-    </message>
-    <message>
-        <source>
-Warnings:
-- </source>
-        <translation>
-警告：
-- </translation>
-    </message>
-    <message>
-        <source>Collection Precheck Report</source>
-        <translation>集合预检报告</translation>
-    </message>
-    <message>
-        <source>Precheck Failed</source>
-        <translation>预检失败</translation>
-    </message>
-    <message>
-        <source>Cannot parse the collection descriptor: %1</source>
-        <translation>无法解析集合描述符：%1</translation>
-    </message>
-    <message>
-        <source>Name: %1
-Revision: %2</source>
-        <translation>名称：%1
-修订：%2</translation>
-    </message>
-    <message>
-        <source>Scenes: %1 (%2 assets bound)</source>
-        <translation>场景数：%1（已绑定资产 %2）</translation>
-    </message>
-    <message>
-        <source>Time range: %1 … %2</source>
-        <translation>时间范围：%1 … %2</translation>
-    </message>
-    <message>
-        <source>Platform: %1</source>
-        <translation>平台：%1</translation>
-    </message>
-    <message>
-        <source>Invalid descriptor: %1</source>
-        <translation>描述符无效：%1</translation>
-    </message>
-    <message>
-        <source>Remove Epoch Collection</source>
-        <translation>移除时间相集合</translation>
-    </message>
-    <message>
-        <source>Remove collection %1? Scene data will not be deleted.</source>
-        <translation>移除集合“%1”？场景数据不会被删除。</translation>
-    </message>
-    <message>
-        <source>Add to Display</source>
-        <translation>添加到显示</translation>
-    </message>
-    <message>
-        <source>Add to Display (%1 items)</source>
-        <translation>添加到显示（%1 项）</translation>
-    </message>
-    <message>
-        <source>Loads the selected assets as layers into the current view.</source>
-        <translation>把选中资产作为图层加载到当前视图。</translation>
-    </message>
-    <message>
-        <source>View Properties</source>
-        <translation>查看属性</translation>
-    </message>
-    <message>
-        <source>Refreshes this asset's meta information in the inspector below.</source>
-        <translation>在下方检视器中刷新该资产的元信息。</translation>
-    </message>
-    <message>
-        <source>Copy Source Path</source>
-        <translation>复制源路径</translation>
-    </message>
-    <message>
-        <source>Copy Source Paths (%1 items)</source>
-        <translation>复制源路径（%1 项）</translation>
-    </message>
-    <message>
-        <source>Copies the asset source path (canonicalSource) to the clipboard.</source>
-        <translation>把资产源路径（canonicalSource）复制到剪贴板。</translation>
-    </message>
-    <message>
-        <source>Promote to Project Persistent...</source>
-        <translation>提升为工程持久…</translation>
-    </message>
-    <message>
-        <source>Promote to Project Persistent (%1 items)...</source>
-        <translation>提升为工程持久（%1 项）…</translation>
-    </message>
-    <message>
-        <source>Promotes temporary assets to project-persistent (saved with the project).</source>
-        <translation>把临时资产提升为工程持久（随工程保存）。</translation>
-    </message>
-    <message>
-        <source>Re-link Missing Source...</source>
-        <translation>重定位缺失源…</translation>
-    </message>
-    <message>
-        <source>Assign a new source location to missing/unavailable assets so they can be resolved again.</source>
-        <translation>为缺失/不可用的资产指定新的源位置以重新解析。</translation>
-    </message>
-    <message>
-        <source>Unload...</source>
-        <translation>卸载…</translation>
-    </message>
-    <message>
-        <source>Unload (%1 items)...</source>
-        <translation>卸载（%1 项）…</translation>
-    </message>
-    <message>
-        <source>Unload the selected assets from the project (a confirmation pops up; dependents are removed cascadingly).</source>
-        <translation>从工程卸载选中资产（会弹出确认；若有引用将级联移除）。</translation>
-    </message>
-    <message>
-        <source>Select a data asset or collection to view its meta information. Ctrl / Shift multi-select.</source>
-        <translation>选择数据资产或集合以查看元信息。Ctrl/Shift 可多选。</translation>
-    </message>
-    <message>
-        <source>Asset Meta Information — %1</source>
-        <translation>资产元信息 — %1</translation>
-    </message>
-    <message>
-        <source>Display Name</source>
-        <translation>显示名</translation>
-    </message>
-    <message>
-        <source>Asset ID</source>
-        <translation>资产 ID</translation>
-    </message>
-    <message>
-        <source>Revision</source>
-        <translation>修订</translation>
-    </message>
-    <message>
-        <source>Type</source>
-        <translation>类型</translation>
-    </message>
-    <message>
-        <source>Status</source>
-        <translation>状态</translation>
-    </message>
-    <message>
-        <source>Storage</source>
-        <translation>存储</translation>
-    </message>
-    <message>
-        <source>Capabilities</source>
-        <translation>能力</translation>
-    </message>
-    <message>
-        <source>Show References</source>
-        <translation>显示引用</translation>
-    </message>
-    <message>
-        <source>Collection</source>
-        <translation>所属集合</translation>
-    </message>
-    <message>
-        <source>Provider</source>
-        <translation>提供者</translation>
-    </message>
-    <message>
-        <source>(automatic)</source>
-        <translation>（自动）</translation>
-    </message>
-    <message>
-        <source>Path / URI</source>
-        <translation>路径 / URI</translation>
-    </message>
-    <message>
-        <source>(none)</source>
-        <translation>（无）</translation>
-    </message>
-    <message>
-        <source>Sub-datasets</source>
-        <translation>子数据集</translation>
-    </message>
-    <message>
-        <source>Authentication Settings</source>
-        <translation>认证配置</translation>
-    </message>
-    <message>
-        <source>Data Options</source>
-        <translation>数据选项</translation>
-    </message>
-    <message>
-        <source>Algorithm</source>
-        <translation>算法</translation>
-    </message>
-    <message>
-        <source>Algorithm Version</source>
-        <translation>算法版本</translation>
-    </message>
-    <message>
-        <source>Parameters</source>
-        <translation>参数</translation>
-    </message>
-    <message>
-        <source>Task References</source>
-        <translation>任务引用</translation>
-    </message>
-    <message>
-        <source>Finish Time</source>
-        <translation>完成时间</translation>
-    </message>
-    <message>
-        <source>Derived from</source>
-        <translation>源自</translation>
-    </message>
-    <message>
-        <source>Provenance</source>
-        <translation>溯源</translation>
-    </message>
-    <message>
-        <source>No derivation record (registered directly)</source>
-        <translation>无派生记录（直接注册）</translation>
-    </message>
-    <message>
-        <source>Derived Artifacts</source>
-        <translation>派生产物</translation>
-    </message>
-    <message>
-        <source>Identity and Status</source>
-        <translation>标识与状态</translation>
-    </message>
-    <message>
-        <source>Data Source</source>
-        <translation>数据源</translation>
-    </message>
-    <message>
-        <source>Provenance and Lineage</source>
-        <translation>溯源与谱系</translation>
-    </message>
-    <message>
-        <source>Multiple selection — %1 items</source>
-        <translation>多选 — %1 项</translation>
-    </message>
-    <message>
-        <source>Selection Count</source>
-        <translation>选中数量</translation>
-    </message>
-    <message>
-        <source>Ready</source>
-        <translation>就绪</translation>
-    </message>
-    <message>
-        <source>Temporary Assets</source>
-        <translation>临时资产</translation>
-    </message>
-    <message>
-        <source>Raster Class</source>
-        <translation>栅格类</translation>
-    </message>
-    <message>
-        <source>Vector</source>
-        <translation>矢量</translation>
-    </message>
-    <message>
-        <source>%1 assets selected</source>
-        <translation>已选择 %1 个资产</translation>
-    </message>
-    <message>
-        <source>Summary</source>
-        <translation>汇总</translation>
-    </message>
-    <message>
-        <source>List</source>
-        <translation>列表</translation>
-    </message>
-    <message>
-        <source>Right-click for batch actions: add to display / promote / unload.</source>
-        <translation>右键可批量：添加到显示 / 提升 / 卸载。</translation>
-    </message>
-    <message>
-        <source>Collection Meta Information — %1</source>
-        <translation>集合元信息 — %1</translation>
-    </message>
-    <message>
-        <source>Collection ID</source>
-        <translation>集合 ID</translation>
-    </message>
-    <message>
-        <source>Sub-asset Count</source>
-        <translation>子资产数</translation>
-    </message>
-    <message>
-        <source>Platform</source>
-        <translation>平台</translation>
-    </message>
-    <message>
-        <source>Sensor</source>
-        <translation>传感器</translation>
-    </message>
-    <message>
-        <source>Product Level</source>
-        <translation>产品级别</translation>
-    </message>
-    <message>
-        <source>Acquisition Date</source>
-        <translation>获取日期</translation>
-    </message>
-    <message>
-        <source>Processing Level</source>
-        <translation>处理级别</translation>
-    </message>
-    <message>
-        <source>Extended Properties</source>
-        <translation>扩展属性</translation>
-    </message>
-    <message>
-        <source>(no sub-assets)</source>
-        <translation>（无子资产）</translation>
-    </message>
-    <message>
-        <source>Product Metadata</source>
-        <translation>产品元数据</translation>
-    </message>
-    <message>
-        <source>Sub-assets</source>
-        <translation>子资产</translation>
-    </message>
-    <message>
-        <source>Loading preview...</source>
-        <translation>预览加载中…</translation>
-    </message>
-    <message>
-        <source>Data Asset Preview — %1</source>
-        <translation>数据资产预览 — %1</translation>
-    </message>
-    <message>
-        <source>Preview Unavailable</source>
-        <translation>预览不可用</translation>
-    </message>
-</context>
-<context>
-    <name>sicnu::app</name>
-    <message>
-        <source>layer selected</source>
-        <translation>已选中图层</translation>
-    </message>
-    <message>
-        <source>layer is vector data</source>
-        <translation>图层为矢量数据</translation>
-    </message>
-    <message>
-        <source>layer supports editing sessions</source>
-        <translation>图层支持编辑会话</translation>
-    </message>
-    <message>
-        <source>Editing session enabled</source>
-        <translation>编辑会话已开启</translation>
-    </message>
-    <message>
-        <source>raster layer selected</source>
-        <translation>已选中栅格图层</translation>
-    </message>
-    <message>
-        <source>data is SAR imagery</source>
-        <translation>数据为 SAR 影像</translation>
-    </message>
-    <message>
-        <source>empty raster or zero bands</source>
-        <translation>空栅格或波段数为 0</translation>
-    </message>
-    <message>
-        <source>The %1×%2 raster has no built-in pyramids and exceeds the preview pixel cap %3 (refused to keep the UI responsive)</source>
-        <translation>栅格 %1×%2 无内建金字塔，超出预览像素上限 %3（已拒绝以保证界面响应）</translation>
-    </message>
-    <message>
-        <source>too few pixels read (incomplete data)</source>
-        <translation>读取的像素不足（数据不完整）</translation>
-    </message>
-    <message>
-        <source>Raster read failed: %1</source>
-        <translation>栅格读取失败：%1</translation>
-    </message>
-    <message>
-        <source>Cannot open the vector data (unsupported driver or corrupt file)</source>
-        <translation>矢量数据无法打开（驱动不支持或文件损坏）</translation>
-    </message>
-    <message>
-        <source>The feature count %1 exceeds the preview cap %2 (refused to keep the UI responsive)</source>
-        <translation>要素数 %1 超出预览上限 %2（已拒绝以保证界面响应）</translation>
-    </message>
-    <message>
-        <source>layer has no valid extent (empty layer)</source>
-        <translation>图层无有效范围（空图层）</translation>
     </message>
 </context>
 <context>
@@ -18163,24 +18004,16 @@ Revision: %2</source>
         <translation>—</translation>
     </message>
     <message>
-        <source>&lt;tr&gt;&lt;td&gt;Bands&lt;/td&gt;&lt;td&gt;%1&lt;/td&gt;&lt;/tr&gt;</source>
-        <translation>&lt;tr&gt;&lt;td&gt;波段数&lt;/td&gt;&lt;td&gt;%1&lt;/td&gt;&lt;/tr&gt;</translation>
+        <source>&lt;tr&gt;&lt;td&gt;Bands&lt;/td&gt;&lt;td&gt;%1&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;Pixel size&lt;/td&gt;&lt;td&gt;%2 × %3&lt;/td&gt;&lt;/tr&gt;</source>
+        <translation>&lt;tr&gt;&lt;td&gt;波段数&lt;/td&gt;&lt;td&gt;%1&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;像元尺寸&lt;/td&gt;&lt;td&gt;%2 × %3&lt;/td&gt;&lt;/tr&gt;</translation>
     </message>
     <message>
-        <source>&lt;tr&gt;&lt;td&gt;Features&lt;/td&gt;&lt;td&gt;%1&lt;/td&gt;&lt;/tr&gt;</source>
-        <translation>&lt;tr&gt;&lt;td&gt;要素数&lt;/td&gt;&lt;td&gt;%1&lt;/td&gt;&lt;/tr&gt;</translation>
+        <source>&lt;tr&gt;&lt;td&gt;Features&lt;/td&gt;&lt;td&gt;%1&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;Geometry type&lt;/td&gt;&lt;td&gt;%2&lt;/td&gt;&lt;/tr&gt;</source>
+        <translation>&lt;tr&gt;&lt;td&gt;要素数&lt;/td&gt;&lt;td&gt;%1&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;几何类型&lt;/td&gt;&lt;td&gt;%2&lt;/td&gt;&lt;/tr&gt;</translation>
     </message>
     <message>
-        <source>&lt;b&gt;%1&lt;/b&gt;&lt;br&gt;&lt;table cellspacing='2'&gt;</source>
-        <translation>&lt;b&gt;%1&lt;/b&gt;&lt;br&gt;&lt;table cellspacing='2'&gt;</translation>
-    </message>
-    <message>
-        <source>&lt;tr&gt;&lt;td&gt;Status&lt;/td&gt;&lt;td&gt;%3&lt;/td&gt;&lt;/tr&gt;</source>
-        <translation>&lt;tr&gt;&lt;td&gt;状态&lt;/td&gt;&lt;td&gt;%3&lt;/td&gt;&lt;/tr&gt;</translation>
-    </message>
-    <message>
-        <source>&lt;tr&gt;&lt;td&gt;Extent&lt;/td&gt;&lt;td&gt;%5&lt;/td&gt;&lt;/tr&gt;</source>
-        <translation>&lt;tr&gt;&lt;td&gt;范围&lt;/td&gt;&lt;td&gt;%5&lt;/td&gt;&lt;/tr&gt;</translation>
+        <source>&lt;b&gt;%1&lt;/b&gt;&lt;br&gt;&lt;table cellspacing='2'&gt;&lt;tr&gt;&lt;td&gt;Type&lt;/td&gt;&lt;td&gt;%2&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;Status&lt;/td&gt;&lt;td&gt;%3&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;CRS&lt;/td&gt;&lt;td&gt;%4&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;Extent&lt;/td&gt;&lt;td&gt;%5&lt;/td&gt;&lt;/tr&gt;%6&lt;/table&gt;</source>
+        <translation>&lt;b&gt;%1&lt;/b&gt;&lt;br&gt;&lt;table cellspacing='2'&gt;&lt;tr&gt;&lt;td&gt;类型&lt;/td&gt;&lt;td&gt;%2&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;状态&lt;/td&gt;&lt;td&gt;%3&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;CRS&lt;/td&gt;&lt;td&gt;%4&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;范围&lt;/td&gt;&lt;td&gt;%5&lt;/td&gt;&lt;/tr&gt;%6&lt;/table&gt;</translation>
     </message>
     <message>
         <source>General</source>
@@ -18668,12 +18501,8 @@ Revision: %2</source>
         <translation>&lt;tr&gt;&lt;td&gt;%1&lt;/td&gt;&lt;/tr&gt;</translation>
     </message>
     <message>
-        <source>&lt;b&gt;%1&lt;/b&gt;&lt;br&gt;</source>
-        <translation>&lt;b&gt;%1&lt;/b&gt;&lt;br&gt;</translation>
-    </message>
-    <message>
-        <source>&lt;tr&gt;&lt;td&gt;Bands&lt;/td&gt;&lt;td&gt;%2&lt;/td&gt;&lt;/tr&gt;</source>
-        <translation>&lt;tr&gt;&lt;td&gt;波段数&lt;/td&gt;&lt;td&gt;%2&lt;/td&gt;&lt;/tr&gt;</translation>
+        <source>&lt;b&gt;%1&lt;/b&gt;&lt;br&gt;Identified as a SAR product (heuristics from source / name; explicit detection can override).&lt;table cellspacing='2'&gt;&lt;tr&gt;&lt;td&gt;Bands&lt;/td&gt;&lt;td&gt;%2&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;CRS&lt;/td&gt;&lt;td&gt;%3&lt;/td&gt;&lt;/tr&gt;%4&lt;/table&gt;&lt;br&gt;%5</source>
+        <translation>&lt;b&gt;%1&lt;/b&gt;&lt;br&gt;已识别为 SAR 产品（基于数据源/名称启发式，可被显式判定覆盖）。&lt;table cellspacing='2'&gt;&lt;tr&gt;&lt;td&gt;波段&lt;/td&gt;&lt;td&gt;%2&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;CRS&lt;/td&gt;&lt;td&gt;%3&lt;/td&gt;&lt;/tr&gt;%4&lt;/table&gt;&lt;br&gt;%5</translation>
     </message>
     <message>
         <source>Undefined</source>
@@ -18868,24 +18697,8 @@ Revision: %2</source>
         <translation>可编辑（未开始）</translation>
     </message>
     <message>
-        <source>&lt;b&gt;%1&lt;/b&gt;&lt;br&gt;&lt;table cellspacing='2'&gt;</source>
-        <translation>&lt;b&gt;%1&lt;/b&gt;&lt;br&gt;&lt;table cellspacing='2'&gt;</translation>
-    </message>
-    <message>
-        <source>&lt;tr&gt;&lt;td&gt;Selected features&lt;/td&gt;&lt;td&gt;%3&lt;/td&gt;&lt;/tr&gt;</source>
-        <translation>&lt;tr&gt;&lt;td&gt;选中要素&lt;/td&gt;&lt;td&gt;%3&lt;/td&gt;&lt;/tr&gt;</translation>
-    </message>
-    <message>
-        <source>&lt;tr&gt;&lt;td&gt;Geometry type&lt;/td&gt;&lt;td&gt;%4&lt;/td&gt;&lt;/tr&gt;</source>
-        <translation>&lt;tr&gt;&lt;td&gt;几何类型&lt;/td&gt;&lt;td&gt;%4&lt;/td&gt;&lt;/tr&gt;</translation>
-    </message>
-    <message>
-        <source>&lt;tr&gt;&lt;td&gt;Edit state&lt;/td&gt;&lt;td&gt;%6&lt;/td&gt;&lt;/tr&gt;</source>
-        <translation>&lt;tr&gt;&lt;td&gt;编辑状态&lt;/td&gt;&lt;td&gt;%6&lt;/td&gt;&lt;/tr&gt;</translation>
-    </message>
-    <message>
-        <source>&lt;tr&gt;&lt;td&gt;Fields&lt;/td&gt;&lt;td&gt;%7&lt;/td&gt;&lt;/tr&gt;</source>
-        <translation>&lt;tr&gt;&lt;td&gt;字段数&lt;/td&gt;&lt;td&gt;%7&lt;/td&gt;&lt;/tr&gt;</translation>
+        <source>&lt;b&gt;%1&lt;/b&gt;&lt;br&gt;&lt;table cellspacing='2'&gt;&lt;tr&gt;&lt;td&gt;Features&lt;/td&gt;&lt;td&gt;%2&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;Selected features&lt;/td&gt;&lt;td&gt;%3&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;Geometry type&lt;/td&gt;&lt;td&gt;%4&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;CRS&lt;/td&gt;&lt;td&gt;%5&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;Edit state&lt;/td&gt;&lt;td&gt;%6&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;Fields&lt;/td&gt;&lt;td&gt;%7&lt;/td&gt;&lt;/tr&gt;%8%9&lt;/table&gt;</source>
+        <translation>&lt;b&gt;%1&lt;/b&gt;&lt;br&gt;&lt;table cellspacing='2'&gt;&lt;tr&gt;&lt;td&gt;要素&lt;/td&gt;&lt;td&gt;%2&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;选中要素&lt;/td&gt;&lt;td&gt;%3&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;几何类型&lt;/td&gt;&lt;td&gt;%4&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;CRS&lt;/td&gt;&lt;td&gt;%5&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;编辑状态&lt;/td&gt;&lt;td&gt;%6&lt;/td&gt;&lt;/tr&gt;&lt;tr&gt;&lt;td&gt;字段&lt;/td&gt;&lt;td&gt;%7&lt;/td&gt;&lt;/tr&gt;%8%9&lt;/table&gt;</translation>
     </message>
     <message>
         <source>Undefined</source>
@@ -19248,22 +19061,6 @@ Pick a preset template on the right or build a pipeline with the toolbar</source
         <translation>包含 Landsat 数据导入、植被指数 (NDVI) 计算以及前后时相变化检测流。</translation>
     </message>
     <message>
-        <source>T1 Image Import</source>
-        <translation>T1 影像导入</translation>
-    </message>
-    <message>
-        <source>T2 Image Import</source>
-        <translation>T2 影像导入</translation>
-    </message>
-    <message>
-        <source>Vegetation Index (NDVI)</source>
-        <translation>植被指数 (NDVI)</translation>
-    </message>
-    <message>
-        <source>Image Change Detection</source>
-        <translation>影像变化检测</translation>
-    </message>
-    <message>
         <source>DEM Elevation and Slope Analysis</source>
         <translation>DEM 高程与坡度分析</translation>
     </message>
@@ -19274,18 +19071,6 @@ Pick a preset template on the right or build a pipeline with the toolbar</source
     <message>
         <source>Covers DEM import, slope computation and hillshade terrain rendering.</source>
         <translation>包含高程 DEM 导入、坡度 (Slope) 计算以及山体阴影 (Hillshade) 地形渲染。</translation>
-    </message>
-    <message>
-        <source>DEM Data Import</source>
-        <translation>DEM 数据导入</translation>
-    </message>
-    <message>
-        <source>Slope Computation</source>
-        <translation>坡度计算 (Slope)</translation>
-    </message>
-    <message>
-        <source>Hillshade</source>
-        <translation>山体阴影 (Hillshade)</translation>
     </message>
     <message>
         <source>OBIA Object-Based Segmentation and Classification</source>
@@ -19300,18 +19085,6 @@ Pick a preset template on the right or build a pipeline with the toolbar</source
         <translation>包含高分辨率影像导入、MeanShift 面向对象分割以及随机森林 (Random Forest) 对象分类。</translation>
     </message>
     <message>
-        <source>High-Resolution Image Import</source>
-        <translation>高分影像导入</translation>
-    </message>
-    <message>
-        <source>MeanShift Image Segmentation</source>
-        <translation>MeanShift 图像分割</translation>
-    </message>
-    <message>
-        <source>Random Forest Classification</source>
-        <translation>随机森林分类</translation>
-    </message>
-    <message>
         <source>Water Index (NDWI) Extraction</source>
         <translation>水体指数 (NDWI) 提取</translation>
     </message>
@@ -19324,14 +19097,6 @@ Pick a preset template on the right or build a pipeline with the toolbar</source
         <translation>包含绿光与近红外波段水体归一化差值指数计算。</translation>
     </message>
     <message>
-        <source>Landsat Data Import</source>
-        <translation>Landsat 数据导入</translation>
-    </message>
-    <message>
-        <source>NDWI Water Index</source>
-        <translation>NDWI 水体指数</translation>
-    </message>
-    <message>
         <source>Remote-sensing classification, denoising filters and class merging</source>
         <translation>遥感分类、降噪过滤与类别合并</translation>
     </message>
@@ -19342,14 +19107,6 @@ Pick a preset template on the right or build a pipeline with the toolbar</source
     <message>
         <source>Covers supervised/unsupervised classification, 3x3 majority-filter denoising and class recoding/merging end to end.</source>
         <translation>包含监督/非监督分类、3x3 众数滤波降噪以及类别重编码合并全流程。</translation>
-    </message>
-    <message>
-        <source>3x3 majority filter denoising</source>
-        <translation>3x3 众数滤波降噪</translation>
-    </message>
-    <message>
-        <source>Class Merging and Recoding</source>
-        <translation>类别合并重编码</translation>
     </message>
     <message>
         <source>No matching preset pipeline template</source>
