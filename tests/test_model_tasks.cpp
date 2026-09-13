@@ -358,8 +358,10 @@ TEST_CASE( "NMS honors cooperative cancellation (#971)", "[models][detect][lsee1
 {
   using sicnu::operators::runtime::nonMaxSuppression;
   std::vector<DetectionBox> boxes;
+  // Stride 20 px, width 10: pairwise disjoint (IoU 0) — nothing is suppressed
+  // and the cancel callback must be pure observation.
   for ( int i = 0; i < 500; ++i )
-    boxes.push_back( DetectionBox{ static_cast<float>( i ), 0.0f, 10.0f, 10.0f, 0, 0.5f } );
+    boxes.push_back( DetectionBox{ static_cast<float>( i * 20 ), 0.0f, 10.0f, 10.0f, 0, 0.5f } );
 
   // A predicate that is already cancelled: the very first poll throws the
   // typed Cancelled error instead of running the O(n²) suppression loop.
