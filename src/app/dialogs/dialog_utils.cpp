@@ -162,7 +162,7 @@ QString rasterGridCompatibilityMessage( const QString &rasterA,
   GdalDatasetWrapper a;
   GdalDatasetWrapper b;
   if ( !a.open( rasterA ) || !b.open( rasterB ) )
-    return QObject::tr( "无法打开影像，无法检查像元网格兼容性。" );
+    return QObject::tr( "Cannot open the images; pixel-grid compatibility cannot be checked." );
 
   sicnu::data::GridCompatReport report =
       sicnu::data::compareGrids( sicnu::processing::gridFromDataset( a ),

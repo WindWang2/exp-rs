@@ -544,7 +544,7 @@ void SpectralProfileWidget::drawAxes( QPainter &painter, const QRect &chartRect 
         const bool wavelengthAxis = ( m_wavelengths.size() == static_cast<int>( bandCount ) )
                                     && std::none_of( m_wavelengths.begin(), m_wavelengths.end(),
                                                      []( double w ) { return w <= 0.0; } );
-        QString xTitle = wavelengthAxis ? tr( "波长 Wavelength (nm)" ) : tr( "Band" );
+        QString xTitle = wavelengthAxis ? tr( "Wavelength (nm)" ) : tr( "Band" );
         int xTitleX = chartRect.left() + ( chartRect.width() - fmTitle.horizontalAdvance( xTitle ) ) / 2;
         int xTitleY = chartRect.bottom() + 4 + ( bandCount > 6 ? 40 : fm.height() + 4 );
         painter.drawText( xTitleX, xTitleY, xTitle );

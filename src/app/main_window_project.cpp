@@ -161,7 +161,7 @@ QVector<sicnu::experiment::LabReportThumbnail> collectThumbnails( const QString 
 
 void QgisDesktopWindow::newProject()
 {
-    if (!confirmWorkbenchShutdown(tr("新建工程")))
+    if (!confirmWorkbenchShutdown(tr("New Project")))
         return;
     if (!checkUnsavedChanges())
         return;
@@ -202,7 +202,7 @@ void QgisDesktopWindow::newProject()
     updateEditingUI(nullptr);
     updateWindowTitle();
     refreshWorkspaceBrowser();
-    statusBar()->showMessage(tr("已新建工程"), 3000);
+    statusBar()->showMessage(tr("New project created"), 3000);
 }
 
 void QgisDesktopWindow::newLayout()
@@ -220,14 +220,14 @@ void QgisDesktopWindow::newLayout()
 
 void QgisDesktopWindow::openProject()
 {
-    if (!confirmWorkbenchShutdown(tr("打开工程")))
+    if (!confirmWorkbenchShutdown(tr("Open Project")))
         return;
     if (!checkUnsavedChanges())
         return;
 
     QString filePath = QFileDialog::getOpenFileName(
-        this, tr("打开工程"), "",
-        tr("QGIS 工程文件 (*.qgs *.qgz);;所有文件 (*.*)")
+        this, tr("Open Project"), "",
+        tr("QGIS Project Files (*.qgs *.qgz);;All Files (*)")
     );
     if (!filePath.isEmpty()) {
         if ( !m_projectContext )
@@ -261,7 +261,7 @@ void QgisDesktopWindow::openProject()
         // the serializer can restore governed state from a v3 document (or run
         // the in-memory v1 migration into it).
         if ( !m_projectContext->openWorkspaceStore( filePath ) )
-            statusBar()->showMessage( tr( "治理存储不可用：工作区状态将以仅内存模式运行" ), 5000 );
+            statusBar()->showMessage( tr( "Governance store unavailable: workspace state runs in memory-only mode" ), 5000 );
 
         if ( !QgsProject::instance()->read(filePath) )
         {
@@ -280,7 +280,7 @@ void QgisDesktopWindow::openProject()
         // D5: this project's lab executions now register as experiment runs
         // (opt-out via QSettings lab/autoRecordExperimentRuns).
         ensureLabRecordingForProject( filePath );
-        statusBar()->showMessage(tr("已打开工程：%1").arg(filePath), 3000);
+        statusBar()->showMessage(tr("Opened project: %1").arg(filePath), 3000);
     }
 }
 
@@ -291,15 +291,15 @@ void QgisDesktopWindow::saveProject()
     } else {
         QgsProject::instance()->write();
         updateWindowTitle();
-        statusBar()->showMessage(tr("工程已保存"), 3000);
+        statusBar()->showMessage(tr("Project saved"), 3000);
     }
 }
 
 void QgisDesktopWindow::saveProjectAs()
 {
     QString filePath = QFileDialog::getSaveFileName(
-        this, tr("保存工程"), "",
-        tr("QGIS 工程文件 (*.qgs);;所有文件 (*.*)")
+        this, tr("Save Project"), "",
+        tr("QGIS Project Files (*.qgs);;All Files (*)")
     );
     if (!filePath.isEmpty()) {
         // Reopen the governance store against the new project file so governed
@@ -309,7 +309,7 @@ void QgisDesktopWindow::saveProjectAs()
         QgsProject::instance()->write(filePath);
         updateWindowTitle();
         refreshWorkspaceBrowser();
-        statusBar()->showMessage(tr("工程已保存至：%1").arg(filePath), 3000);
+        statusBar()->showMessage(tr("Project saved to: %1").arg(filePath), 3000);
     }
 }
 
@@ -323,7 +323,7 @@ void QgisDesktopWindow::importLayer()
       "Vector files (*.shp *.gpkg *.geojson *.kml *.gml);;"
       "All files (*)" );
     const QStringList paths = QFileDialog::getOpenFileNames(
-      this, tr( "导入数据（可多选）" ), AppPaths::dataDir(), filter );
+      this, tr( "Import Data (multi-select)" ), AppPaths::dataDir(), filter );
     if ( paths.isEmpty() || !m_activeViewHost )
       return;
 
@@ -349,12 +349,12 @@ void QgisDesktopWindow::importLayer()
     if ( failed == 0 )
     {
       statusBar()->showMessage(
-        tr( "已导入 %1 个文件" ).arg( ok ), 4000 );
+        tr( "Imported %1 files" ).arg( ok ), 4000 );
     }
     else
     {
       statusBar()->showMessage(
-        tr( "导入完成：成功 %1，失败 %2" ).arg( ok ).arg( failed ), 6000 );
+        tr( "Import finished: %1 succeeded, %2 failed" ).arg( ok ).arg( failed ), 6000 );
     }
 }
 
@@ -368,8 +368,8 @@ void QgisDesktopWindow::openProductImportDialog(const QString &family)
 {
     if ( !m_projectContext )
     {
-        QMessageBox::information( this, tr( "导入产品" ),
-                                  tr( "工程数据上下文不可用。" ) );
+        QMessageBox::information( this, tr( "Import Product" ),
+                                  tr( "The project data context is unavailable." ) );
         return;
     }
 

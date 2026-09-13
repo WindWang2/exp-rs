@@ -49,7 +49,7 @@ class ProvenanceSection : public InspectorSection
                        WorkspaceServiceProvider workspace, QWidget *parent = nullptr );
 
     QString sectionId() const override { return QStringLiteral( "provenance" ); }
-    QString title() const override { return tr( "溯源" ); }
+    QString title() const override { return tr( "Provenance" ); }
     int order() const override { return 40; }
     bool supports( const SelectionContextSnapshot &snapshot ) const override;
     void populate( const SelectionContextSnapshot &snapshot ) override;

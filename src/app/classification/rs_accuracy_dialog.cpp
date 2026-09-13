@@ -25,8 +25,8 @@ RsAccuracyDialog::RsAccuracyDialog( const RsAccuracyAssessment::Result &result,
   layout->addWidget( mPanel, 1 );
 
   auto *row = new QHBoxLayout();
-  auto *helpBtn = new QPushButton( tr( "帮助" ), this );
-  SicnuDialogHelp::tip( helpBtn, tr( "查看精度指标说明（OA、Kappa、混淆矩阵等）。" ) );
+  auto *helpBtn = new QPushButton( tr( "Help" ), this );
+  SicnuDialogHelp::tip( helpBtn, tr( "View accuracy metric explanations (OA, Kappa, confusion matrix, etc.)." ) );
   connect( helpBtn, &QPushButton::clicked, this, [this]() {
     SicnuDialogHelp::showToolHelp( this, QStringLiteral( "accuracy" ), windowTitle() );
   } );

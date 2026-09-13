@@ -124,8 +124,8 @@ QString WorkflowSessionController::openTool( const QString &definitionId )
   const std::string sessionId = m_runtime.open( defId );
   if ( sessionId.empty() )
   {
-    m_panel->setFailed( tr( "未找到工作流定义：%1" ).arg( definitionId ) );
-    emit statusMessage( tr( "未找到工作流定义：%1" ).arg( definitionId ) );
+    m_panel->setFailed( tr( "Workflow definition not found: %1" ).arg( definitionId ) );
+    emit statusMessage( tr( "Workflow definition not found: %1" ).arg( definitionId ) );
     return {};
   }
 
@@ -134,7 +134,7 @@ QString WorkflowSessionController::openTool( const QString &definitionId )
   const auto def = m_runtime.findDefinitionShared( defId );
   if ( !def || def->steps.empty() )
   {
-    m_panel->setFailed( tr( "工作流无步骤：%1" ).arg( definitionId ) );
+    m_panel->setFailed( tr( "Workflow has no steps: %1" ).arg( definitionId ) );
     return {};
   }
 
@@ -178,7 +178,7 @@ QString WorkflowSessionController::openTool( const QString &definitionId )
     }
     else
     {
-      helpSummary = tr( "算子未注册：%1" ).arg( QString::fromStdString( step->operatorId ) );
+      helpSummary = tr( "Operator not registered: %1" ).arg( QString::fromStdString( step->operatorId ) );
     }
   }
   else if ( !step->title.empty() )
@@ -195,8 +195,8 @@ QString WorkflowSessionController::openTool( const QString &definitionId )
   if ( def->host == HostKind::Workspace && !def->workspaceKind.empty() )
   {
     emit requestOpenWorkspace( QString::fromStdString( def->workspaceKind ) );
-    helpSummary = tr( "工作空间「%1」已打开。请在专用窗口中完成交互步骤；"
-                      "任务面板可查看算子型步骤（如 rs:obia_segment / rs:obia_classify）的参数。" )
+    helpSummary = tr( "Workspace '%1' is open. Complete the interactive steps in the dedicated window;"
+                      "The task panel shows parameters of operator steps (e.g. rs:obia_segment / rs:obia_classify)." )
                     .arg( QString::fromStdString( def->workspaceKind ) );
   }
 
@@ -208,7 +208,7 @@ QString WorkflowSessionController::openTool( const QString &definitionId )
   m_panel->setRasterLayerChoices( m_layerIds, m_layerNames );
   ensureRunConnected();
 
-  emit statusMessage( tr( "已打开工具：%1" ).arg( title ) );
+  emit statusMessage( tr( "Opened tool: %1" ).arg( title ) );
   return m_activeSession;
 }
 
@@ -285,7 +285,7 @@ void WorkflowSessionController::onRunClicked()
   const StepDef *step = findStep( def.get(), stepId );
   if ( !step || step->kind != StepKind::Operator || step->operatorId.empty() )
   {
-    m_panel->setFailed( tr( "当前步骤不是可运行算子" ) );
+    m_panel->setFailed( tr( "The current step is not a runnable operator" ) );
     return;
   }
 
@@ -304,7 +304,7 @@ void WorkflowSessionController::onRunClicked()
   m_pendingLoadToMap = m_panel->loadResultToMap();
   m_panel->setRunning( true );
   emit stepStatusChanged( m_activeStepId, "running" );
-  emit statusMessage( tr( "正在运行…" ) );
+  emit statusMessage( tr( "Running..." ) );
 
   if ( taskId >= 0 )
   {
@@ -349,14 +349,14 @@ void WorkflowSessionController::runFullWorkflow()
   m_activePipelineId = sicnu::workflow::WorkflowRunCoordinator::instance().startTrackedPipeline( *def, /*autoLoad=*/false );
   if ( m_activePipelineId < 0 )
   {
-    emit statusMessage( tr( "工作流 DAG 提交失败" ) );
+    emit statusMessage( tr( "Workflow DAG submission failed" ) );
     return;
   }
 
   m_runInFlight = true;
   if ( m_panel )
     m_panel->setRunning( true );
-  emit statusMessage( tr( "工作流 TaskPipeline 已提交至 TaskCenter 运行…" ) );
+  emit statusMessage( tr( "Workflow TaskPipeline submitted to the Task Center for execution..." ) );
 }
 
 void WorkflowSessionController::runUpToNode( const QString &targetStepId )
@@ -406,14 +406,14 @@ void WorkflowSessionController::runUpToNode( const QString &targetStepId )
   m_activePipelineId = sicnu::workflow::WorkflowRunCoordinator::instance().startTrackedPipeline( targetDef, /*autoLoad=*/false );
   if ( m_activePipelineId < 0 )
   {
-    emit statusMessage( tr( "工作流 DAG 提交失败" ) );
+    emit statusMessage( tr( "Workflow DAG submission failed" ) );
     return;
   }
 
   m_runInFlight = true;
   if ( m_panel )
     m_panel->setRunning( true );
-  emit statusMessage( tr( "工作流 TaskPipeline (至 %1) 已提交运行…" ).arg( targetStepId ) );
+  emit statusMessage( tr( "Workflow TaskPipeline (up to %1) submitted for execution..." ).arg( targetStepId ) );
 }
 
 void WorkflowSessionController::cancelActiveRun()
@@ -434,7 +434,7 @@ void WorkflowSessionController::cancelActiveRun()
   if ( m_panel )
     m_panel->setRunning( false );
 
-  emit statusMessage( tr( "工作流运行已停止" ) );
+  emit statusMessage( tr( "Workflow run stopped" ) );
 }
 
 void WorkflowSessionController::stopWorkflow()
@@ -482,9 +482,9 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
     if ( error.isEmpty() )
     {
       if ( info.status == sicnu::TaskStatus::Canceled )
-        error = tr( "已取消" );
+        error = tr( "Cancelled" );
       else
-        error = tr( "运行失败" );
+        error = tr( "Run Failed" );
     }
     emit stepStatusChanged( targetStepId, "failed" );
     if ( isPipelineJob )
@@ -562,8 +562,8 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
       m_runInFlight = false;
       m_activePipelineId = -1;
       const QString msg = pipeInfo.isFailed
-                            ? tr( "工作流结束（有步骤失败）" )
-                            : tr( "工作流全流程运行完成！" );
+                            ? tr( "Workflow ended (some steps failed)" )
+                            : tr( "Workflow finished end to end!" );
       if ( m_panel )
       {
         if ( pipeInfo.isFailed )
@@ -577,8 +577,8 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
   }
 
   const QString msg = outputPath.isEmpty()
-                        ? tr( "运行成功" )
-                        : tr( "运行成功：%1" ).arg( outputPath );
+                        ? tr( "Run Succeeded" )
+                        : tr( "Run succeeded: %1" ).arg( outputPath );
   if ( m_panel )
     m_panel->setSuccess( msg );
   emit statusMessage( msg );

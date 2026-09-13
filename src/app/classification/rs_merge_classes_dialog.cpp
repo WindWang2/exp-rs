@@ -29,7 +29,7 @@ QMap<int, int> buildRecodeMap( const QList<int> &sourceIds, int targetId )
 RsMergeClassesDialog::RsMergeClassesDialog( QWidget *parent )
   : QDialog( parent )
 {
-  setWindowTitle( tr( "合并分类类别" ) );
+  setWindowTitle( tr( "Merge Classification Classes" ) );
   setObjectName( QStringLiteral( "rsMergeClassesDialog" ) );
   SicnuUi::polishDialog( this, 380 );
   setModal( true );
@@ -40,23 +40,23 @@ RsMergeClassesDialog::RsMergeClassesDialog( QWidget *parent )
   m_sourceLabel->setWordWrap( true );
   root->addWidget( m_sourceLabel );
 
-  auto *targetGroup = SicnuUi::makeGroup( this, tr( "合并目标类别属性" ) );
+  auto *targetGroup = SicnuUi::makeGroup( this, tr( "Merge Target Class Attributes" ) );
   auto *form = SicnuUi::makeFormLayout( targetGroup );
 
   m_targetIdLabel = new QLabel( targetGroup );
-  SicnuDialogHelp::tip( m_targetIdLabel, tr( "合并后新类别的 ID（固定取所选源类别的最小 ID）" ) );
-  form->addRow( tr( "目标 ID" ), m_targetIdLabel );
+  SicnuDialogHelp::tip( m_targetIdLabel, tr( "ID of the merged class (always the smallest ID of the selected source classes)" ) );
+  form->addRow( tr( "Target ID" ), m_targetIdLabel );
 
   m_nameEdit = new QLineEdit( targetGroup );
   m_nameEdit->setObjectName( QStringLiteral( "mergeTargetNameEdit" ) );
-  SicnuDialogHelp::tip( m_nameEdit, tr( "合并后新类别的显示名称" ) );
-  form->addRow( tr( "目标名称" ), m_nameEdit );
+  SicnuDialogHelp::tip( m_nameEdit, tr( "Display name of the merged class" ) );
+  form->addRow( tr( "Target Name" ), m_nameEdit );
 
   m_colorBtn = new QPushButton( targetGroup );
   m_colorBtn->setObjectName( QStringLiteral( "mergeTargetColorBtn" ) );
-  SicnuDialogHelp::tip( m_colorBtn, tr( "点击选择合并后新类别在地图与分类表中的显示颜色" ) );
+  SicnuDialogHelp::tip( m_colorBtn, tr( "Click to choose the display color of the merged class on the map and in the class table" ) );
   connect( m_colorBtn, &QPushButton::clicked, this, &RsMergeClassesDialog::pickColor );
-  form->addRow( tr( "目标颜色" ), m_colorBtn );
+  form->addRow( tr( "Target Color" ), m_colorBtn );
 
   root->addWidget( targetGroup );
 
@@ -64,13 +64,13 @@ RsMergeClassesDialog::RsMergeClassesDialog( QWidget *parent )
 
   auto *buttons = new QDialogButtonBox(
     QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this );
-  buttons->button( QDialogButtonBox::Ok )->setText( tr( "确定" ) );
-  buttons->button( QDialogButtonBox::Cancel )->setText( tr( "取消" ) );
+  buttons->button( QDialogButtonBox::Ok )->setText( tr( "OK" ) );
+  buttons->button( QDialogButtonBox::Cancel )->setText( tr( "Cancel" ) );
   SicnuUi::markPrimary( buttons->button( QDialogButtonBox::Ok ) );
   SicnuUi::markSecondary( buttons->button( QDialogButtonBox::Cancel ) );
 
-  auto *helpBtn = buttons->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
-  helpBtn->setToolTip( tr( "打开本对话框的帮助说明。" ) );
+  auto *helpBtn = buttons->addButton( tr( "Help" ), QDialogButtonBox::HelpRole );
+  helpBtn->setToolTip( tr( "Opens the help for this dialog." ) );
   SicnuUi::markSecondary( helpBtn );
   connect( helpBtn, &QPushButton::clicked, this, [this]() {
     SicnuDialogHelp::showToolHelp( this, QStringLiteral( "merge_classes" ), windowTitle() );
@@ -93,13 +93,13 @@ void RsMergeClassesDialog::setSourceClassIds( const QList<int> &ids,
   idTexts.reserve( m_sourceIds.size() );
   for ( int id : m_sourceIds )
     idTexts.append( QString::number( id ) );
-  m_sourceLabel->setText( tr( "合并以下类别: %1" ).arg( idTexts.join( QStringLiteral( ", " ) ) ) );
+  m_sourceLabel->setText( tr( "Merge the following classes: %1" ).arg( idTexts.join( QStringLiteral( ", " ) ) ) );
 
   if ( m_sourceIds.isEmpty() )
     return;
 
   m_targetIdLabel->setText( QString::number( m_sourceIds.first() )
-                            + tr( " (自动)" ) );
+                            + tr( " (auto)" ) );
   m_nameEdit->setText( firstName.isEmpty() ? QString::number( m_sourceIds.first() ) : firstName );
   m_color = firstColor.isValid() ? firstColor : QColor( QStringLiteral( "#888888" ) );
   refreshColorButton();
@@ -122,7 +122,7 @@ int RsMergeClassesDialog::targetClassId() const
 
 void RsMergeClassesDialog::pickColor()
 {
-  const QColor c = QColorDialog::getColor( m_color, this, tr( "选择目标颜色" ) );
+  const QColor c = QColorDialog::getColor( m_color, this, tr( "Choose Target Color" ) );
   if ( c.isValid() )
   {
     m_color = c;

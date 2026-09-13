@@ -26,9 +26,9 @@ void MosaicDialog::setupUi()
   setupHelpBanner( mainLayout );
 
   QGroupBox *inputGroup = setupInputGroup(
-    mainLayout, tr( "输入影像列表" ) );
+    mainLayout, tr( "Input Image List" ) );
   inputGroup->setToolTip(
-    tr( "至少添加 2 个栅格文件；建议统一空间参考与分辨率。重叠区按默认策略拼接合并。" ) );
+    tr( "Add at least 2 raster files; a common spatial reference and resolution are recommended. Overlaps are merged with the default strategy." ) );
 
   auto *groupLayout = new QVBoxLayout( inputGroup );
   groupLayout->setContentsMargins( 10, 8, 10, 8 );
@@ -38,27 +38,27 @@ void MosaicDialog::setupUi()
   m_inputList->setObjectName( QStringLiteral( "mosaicInputList" ) );
   m_inputList->setMinimumHeight( 140 );
   m_inputList->setAlternatingRowColors( true );
-  SicnuDialogHelp::tip( m_inputList, tr( "参与镶嵌的栅格文件列表。" ) );
+  SicnuDialogHelp::tip( m_inputList, tr( "List of raster files taking part in the mosaic." ) );
   groupLayout->addWidget( m_inputList );
 
   auto *btnRow = new QHBoxLayout();
   btnRow->setSpacing( 8 );
-  auto *addBtn = new QPushButton( tr( "添加文件…" ), inputGroup );
+  auto *addBtn = new QPushButton( tr( "Add Files..." ), inputGroup );
   SicnuUi::markSecondary( addBtn );
-  SicnuDialogHelp::tip( addBtn, tr( "添加一个或多个栅格文件到待镶嵌列表。" ) );
+  SicnuDialogHelp::tip( addBtn, tr( "Adds one or more raster files to the mosaic input list." ) );
   connect( addBtn, &QPushButton::clicked, this, &MosaicDialog::addInputFile );
   btnRow->addWidget( addBtn );
 
-  auto *removeBtn = new QPushButton( tr( "移除选中" ), inputGroup );
+  auto *removeBtn = new QPushButton( tr( "Remove Selected" ), inputGroup );
   SicnuUi::markSecondary( removeBtn );
-  SicnuDialogHelp::tip( removeBtn, tr( "从待镶嵌列表中移除选中的栅格文件。" ) );
+  SicnuDialogHelp::tip( removeBtn, tr( "Removes the selected raster files from the mosaic input list." ) );
   connect( removeBtn, &QPushButton::clicked, this, &MosaicDialog::removeInputFile );
   btnRow->addWidget( removeBtn );
   btnRow->addStretch();
   groupLayout->addLayout( btnRow );
 
   groupLayout->addWidget( SicnuUi::makeHintLabel(
-    inputGroup, tr( "提示：建议在镶嵌前统一各影像的坐标参考系 (CRS) 与像元分辨率。" ) ) );
+    inputGroup, tr( "Tip: align all images to the same CRS and pixel resolution before mosaicking." ) ) );
 
   setupOutputRow( mainLayout );
   setupButtonBar( mainLayout );
@@ -68,8 +68,8 @@ void MosaicDialog::setupUi()
 void MosaicDialog::addInputFile()
 {
   QStringList paths = QFileDialog::getOpenFileNames(
-    this, tr( "添加输入栅格" ), QString(),
-    tr( "栅格 (*.tif *.tiff *.img *.asc);;所有文件 (*)" ) );
+    this, tr( "Add Input Raster" ), QString(),
+    tr( "Rasters (*.tif *.tiff *.img *.asc);;All Files (*)" ) );
   for ( const QString &path : paths )
   {
     if ( !path.isEmpty() )
@@ -88,12 +88,12 @@ bool MosaicDialog::validateInputs()
 {
   if ( m_inputList->count() < 2 )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "至少需要 2 个输入栅格。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "At least 2 input rasters are required." ) );
     return false;
   }
   if ( outputPath().isEmpty() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请指定输出文件路径。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "Specify the output file path." ) );
     return false;
   }
   return true;

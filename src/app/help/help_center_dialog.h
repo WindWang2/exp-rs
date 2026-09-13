@@ -36,7 +36,7 @@ class HelpCenterDialog : public QDialog
     void navigateTo( const QString &helpId );
 
     /// Standard window title.
-    static QString dialogTitle() { return tr( "帮助中心" ); }
+    static QString dialogTitle() { return tr( "Help Center" ); }
 
   protected:
     void keyPressEvent( QKeyEvent *event ) override;

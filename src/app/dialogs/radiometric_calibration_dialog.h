@@ -29,7 +29,7 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("radiometric_calibration"); }
-    QString dialogTitle() const override { return tr("辐射定标"); }
+    QString dialogTitle() const override { return tr("Radiometric Calibration"); }
     void onRun() override;
 
 private slots:

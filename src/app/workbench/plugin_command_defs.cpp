@@ -28,7 +28,7 @@ int registerPluginMenuCommands( CommandRegistry *registry,
     d.id = QStringLiteral( "plugin.%1.%2" ).arg( pluginId, QString::number( index ) );
     d.title = action->text();
     d.title.remove( QLatin1Char( '&' ) );
-    d.description = QObject::tr( "插件 %1 提供的功能。" ).arg( pluginId );
+    d.description = QObject::tr( "Features provided by plugin %1." ).arg( pluginId );
     d.category = categoryLabel;
     const QPointer<QAction> guard( action );
     d.availability = [guard]( const SelectionContextSnapshot & ) {

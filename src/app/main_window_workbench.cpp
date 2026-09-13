@@ -91,7 +91,7 @@ void openComparisonForPaths( QgisDesktopWindow *window, const QString &pathA,
 {
     if ( !window->loadRasterLayer( pathA ) || !window->loadRasterLayer( pathB ) )
     {
-        window->statusBar()->showMessage( QgisDesktopWindow::tr( "无法加载待对比的产物。" ), 4000 );
+        window->statusBar()->showMessage( QgisDesktopWindow::tr( "Cannot load the artifacts to compare." ), 4000 );
         return;
     }
     QgsRasterLayer *left = nullptr;
@@ -109,7 +109,7 @@ void openComparisonForPaths( QgisDesktopWindow *window, const QString &pathA,
     }
     if ( !left || !right )
     {
-        window->statusBar()->showMessage( QgisDesktopWindow::tr( "未找到待对比的图层。" ), 4000 );
+        window->statusBar()->showMessage( QgisDesktopWindow::tr( "No layers to compare were found." ), 4000 );
         return;
     }
     ComparisonDialog dialog( window );
@@ -164,7 +164,7 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     // delegation to the window's own closeEvent confirmation.
     {
         auto *bench = new sicnu::app::ExternalWindowWorkbench(
-            QStringLiteral( "classify" ), tr( "分类工作区" ), QStringLiteral( "su_ervised" ),
+            QStringLiteral( "classify" ), tr( "Classification Workspace" ), QStringLiteral( "su_ervised" ),
             [this] {
 #ifdef SICNU_HAS_CLASSIFY
                 openClassificationWindow();
@@ -216,7 +216,7 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
 
     {
         auto *bench = new sicnu::app::ExternalWindowWorkbench(
-            QStringLiteral( "georef-i2i" ), tr( "影像对影像配准" ), QStringLiteral( "coregistr_tion" ),
+            QStringLiteral( "georef-i2i" ), tr( "Image-to-Image Registration" ), QStringLiteral( "coregistr_tion" ),
             [this] { openGeorefImageToImage(); }, m_workbenchHost );
         bench->setWindowGetter( [this]() -> QWidget * { return m_georefI2I; } );
         bench->setDirtyFn( [this] { return m_georefI2I && m_georefI2I->isDirtyForTest(); } );
@@ -231,7 +231,7 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
 
     {
         auto *bench = new sicnu::app::ExternalWindowWorkbench(
-            QStringLiteral( "georef-i2m" ), tr( "影像对地图配准" ), QStringLiteral( "geocorrection" ),
+            QStringLiteral( "georef-i2m" ), tr( "Image-to-Map Registration" ), QStringLiteral( "geocorrection" ),
             [this] { openGeorefImageToMap(); }, m_workbenchHost );
         bench->setWindowGetter( [this]() -> QWidget * { return m_georefI2M; } );
         bench->setDirtyFn( [this] { return m_georefI2M && m_georefI2M->isDirtyForTest(); } );
@@ -248,7 +248,7 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     // gains lifetime tracking and close delegation (#813 baseline).
     {
         auto *bench = new sicnu::app::ExternalWindowWorkbench(
-            QStringLiteral( "obia" ), tr( "对象级分类" ), QStringLiteral( "seg_ent_tion" ),
+            QStringLiteral( "obia" ), tr( "Object-Level Classification" ), QStringLiteral( "seg_ent_tion" ),
             [this] { openObiaWindow(); }, m_workbenchHost );
         bench->setWindowGetter( [this]() -> QWidget * { return m_obiaWindow; } );
         bench->setCloseFn( [this] {
@@ -263,7 +263,7 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     // Layout designers are created per invocation (no singleton window to
     // track); the bench keeps the plain lazy-open contract.
     m_workbenchHost->registerWorkbench( new sicnu::app::ExternalWindowWorkbench(
-        QStringLiteral( "layout" ), tr( "布局设计" ), QStringLiteral( "print_l_yout" ),
+        QStringLiteral( "layout" ), tr( "Layout Design" ), QStringLiteral( "print_l_yout" ),
         [this] { newLayout(); },
         nullptr,
         nullptr,
@@ -329,13 +329,13 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     m_commandPalette = new sicnu::app::CommandPalette( m_commandRegistry, this );
     sicnu::app::CommandDefinition paletteDef;
     paletteDef.id = QStringLiteral( "app.commandPalette" );
-    paletteDef.title = tr( "命令面板..." );
-    paletteDef.description = tr( "搜索并执行任意命令（键盘优先）。" );
+    paletteDef.title = tr( "Command Palette..." );
+    paletteDef.description = tr( "Search and run any command (keyboard-first)." );
     paletteDef.iconName = QStringLiteral( "toolbox" );
     paletteDef.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+P" ) );
-    paletteDef.category = tr( "工具" );
-    paletteDef.keywords = { QStringLiteral( "palette" ), QStringLiteral( "命令" ),
-                            QStringLiteral( "搜索" ), QStringLiteral( "command" ) };
+    paletteDef.category = tr( "Tools" );
+    paletteDef.keywords = { QStringLiteral( "palette" ), tr("Command") ,
+                            tr("Search") , QStringLiteral( "command" ) };
     paletteDef.handler = [this] { m_commandPalette->openPalette(); };
     // The palette itself must not appear inside the palette listing.
     if ( m_commandRegistry->registerCommand( paletteDef ) )
@@ -348,7 +348,7 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     // ── 窗口 menu → 工作区 switcher ──────────────────────────────────
     if ( m_windowMenu )
     {
-        QMenu *benchMenu = m_windowMenu->addMenu( tr( "工作区" ) );
+        QMenu *benchMenu = m_windowMenu->addMenu( tr( "Workspace" ) );
         benchMenu->setObjectName( QStringLiteral( "rsWorkbenchMenu" ) );
         populateWorkbenchMenu( benchMenu, m_workbenchHost );
         // Late registrations (plugins) extend the switcher.
@@ -360,7 +360,7 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     }
 
     // ── Inspector host dock (right side, follows the selection context) ──
-    m_inspectorDock = new QDockWidget( tr( "检查器" ), this );
+    m_inspectorDock = new QDockWidget( tr( "Inspector" ), this );
     m_inspectorDock->setObjectName( QStringLiteral( "rsInspectorDock" ) );
     m_inspectorDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
     m_inspectorHost = new sicnu::app::InspectorHost( m_inspectorDock );
@@ -397,7 +397,7 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     connect( m_historyPanel, &sicnu::app::ProcessingHistoryPanel::resultOpenRequested, this,
              [this]( const QString &path ) {
                  if ( !loadRasterLayer( path ) )
-                     statusBar()->showMessage( tr( "无法在地图上打开产物：%1" ).arg( path ), 5000 );
+                     statusBar()->showMessage( tr( "Cannot open the artifacts on the map: %1" ).arg( path ), 5000 );
              } );
     connect( m_historyPanel, &sicnu::app::ProcessingHistoryPanel::compareRequested, this,
              [this]( const QString &pathA, const QString &pathB ) {
@@ -426,8 +426,8 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
                  // "later through some state change that never comes".
                  if ( taskId < 0 )
                      statusBar()->showMessage(
-                         tr( "恢复运行 %1 失败：%2" )
-                             .arg( runId, error.isEmpty() ? tr( "未知原因" ) : error ),
+                         tr( "Failed to resume run %1: %2" )
+                             .arg( runId, error.isEmpty() ? tr( "Unknown reason" ) : error ),
                          6000 );
                  if ( m_historyPanel )
                      m_historyPanel->refreshNow();
@@ -552,17 +552,17 @@ bool QgisDesktopWindow::confirmWorkbenchShutdown( const QString &actionTitle )
     // the benches'/TaskCenter's own cancel seams, or aborts the operation.
     if ( !plan.inFlightBenches.isEmpty() || plan.runningTaskCount > 0 )
     {
-        QString text = tr( "以下工作仍有未完成的任务，%1 会中断它们：\n" ).arg( actionTitle );
+        QString text = tr( "The following jobs still have unfinished tasks; %1 will interrupt them:\n" ).arg( actionTitle );
         for ( const QString &bench : plan.inFlightBenches )
-            text += QStringLiteral( "• 工作区「%1」正在运行任务\n" ).arg( bench );
+            text += tr("• Workspace '%1' has tasks running\n" ).arg( bench );
         if ( plan.runningTaskCount > 0 )
-            text += tr( "• 任务中心还有 %1 个未完成任务（含排队/等待资源）\n" ).arg( plan.runningTaskCount );
-        text += tr( "\n是否取消这些任务并继续？" );
+            text += tr( "• The Task Center still has %1 unfinished tasks (queued / waiting for resources)\n" ).arg( plan.runningTaskCount );
+        text += tr( "\nCancel these tasks and continue?" );
 
         QMessageBox box( QMessageBox::Warning, actionTitle, text, QMessageBox::NoButton, this );
         QPushButton *cancelAndContinue =
-            box.addButton( tr( "取消任务并继续" ), QMessageBox::AcceptRole );
-        QPushButton *stay = box.addButton( tr( "留在当前操作" ), QMessageBox::RejectRole );
+            box.addButton( tr( "Cancel Task and Continue" ), QMessageBox::AcceptRole );
+        QPushButton *stay = box.addButton( tr( "Stay on Current Operation" ), QMessageBox::RejectRole );
         box.setDefaultButton( stay );
         box.exec();
         if ( box.clickedButton() != cancelAndContinue )

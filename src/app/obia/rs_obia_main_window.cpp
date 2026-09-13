@@ -142,7 +142,7 @@ void RsObiaMainWindow::setupUi()
 {
     // Central widget: map canvas in a frame
     mCanvas = new QgsMapCanvas( this );
-    SicnuDialogHelp::tip( mCanvas, tr( "地图画布：显示影像、分割边界与分类结果。用「选择对象」工具点选对象以查看/赋类。" ) );
+    SicnuDialogHelp::tip( mCanvas, tr( "Map canvas: shows the image, segmentation boundaries and classification results. Use the 'Select Objects' tool to inspect/label objects." ) );
     setCentralWidget( mCanvas );
 }
 
@@ -152,7 +152,7 @@ void RsObiaMainWindow::setupToolbar()
     mToolbar->setObjectName( "obiaToolbar" );
 
     auto *loadAct = mToolbar->addAction( tr( "Load Raster" ), this, &RsObiaMainWindow::loadRaster );
-    SicnuDialogHelp::tip( loadAct, tr( "加载待分割/分类的栅格影像。" ) );
+    SicnuDialogHelp::tip( loadAct, tr( "Load the raster image to be segmented / classified." ) );
 
     mToolbar->addSeparator();
 
@@ -164,7 +164,7 @@ void RsObiaMainWindow::setupToolbar()
     kernelSpin->setSingleStep( 2 ); // smoothKernel must be odd (simple engine)
     kernelSpin->setValue( schemaIntDefault( "rs:obia_segment", "smoothKernel", 5 ) );
     SicnuDialogHelp::tip( kernelSpin, tr(
-      "平滑核大小（rs:obia_segment.smoothKernel，奇数；同时用作 OTB spatialRadius）。越大对象边界越粗、碎斑越少。" ) );
+      "Smoothing kernel size (rs:obia_segment.smoothKernel, odd; also used as the OTB spatialRadius). Larger values give coarser boundaries and fewer small patches.")  );
     kernelSpin->setObjectName( "kernelSpin" );
     mToolbar->addWidget( kernelSpin );
 
@@ -172,7 +172,7 @@ void RsObiaMainWindow::setupToolbar()
     binsSpin->setRange( 2, 128 );
     binsSpin->setValue( schemaIntDefault( "rs:obia_segment", "quantizeBins", 32 ) );
     SicnuDialogHelp::tip( binsSpin, tr(
-      "量化级数（rs:obia_segment.quantizeBins，内置分割回退）。级数多则细节多、对象更碎。" ) );
+      "Quantization levels (rs:obia_segment.quantizeBins, built-in segmentation fallback). More levels mean more detail and finer objects.")  );
     binsSpin->setObjectName( "binsSpin" );
     mToolbar->addWidget( binsSpin );
 
@@ -182,7 +182,7 @@ void RsObiaMainWindow::setupToolbar()
     rangeSpin->setSingleStep( 0.5 );
     rangeSpin->setValue( schemaDoubleDefault( "rs:obia_segment", "rangeRadius", 15.0 ) );
     SicnuDialogHelp::tip( rangeSpin, tr(
-      "OTB MeanShift 光谱半径（rs:obia_segment.rangeRadius，米）。" ) );
+      "OTB MeanShift spectral radius (rs:obia_segment.rangeRadius, metres).")  );
     rangeSpin->setObjectName( "rangeSpin" );
     mToolbar->addWidget( rangeSpin );
 
@@ -190,23 +190,23 @@ void RsObiaMainWindow::setupToolbar()
     minRegionSpin->setRange( 10, 10000 );
     minRegionSpin->setValue( schemaIntDefault( "rs:obia_segment", "minRegionSize", 50 ) );
     SicnuDialogHelp::tip( minRegionSpin, tr(
-      "最小对象像元数（rs:obia_segment.minRegionSize）。小于此值的区域会被合并，抑制碎斑。" ) );
+      "Minimum object pixel count (rs:obia_segment.minRegionSize). Regions below it are merged, suppressing small patches.")  );
     minRegionSpin->setObjectName( "minRegionSpin" );
     mToolbar->addWidget( minRegionSpin );
 
     auto *segAct = mToolbar->addAction( tr( "Segment" ), this, &RsObiaMainWindow::runSegmentation );
-    SicnuDialogHelp::tip( segAct, tr( "运行单层影像分割（rs:obia_segment，优先 OTB MeanShift，缺失时内置分割回退）。" ) );
+    SicnuDialogHelp::tip( segAct, tr( "Runs single-level image segmentation (rs:obia_segment; prefers OTB MeanShift, falls back to the built-in segmentation)." ) );
 
     auto *hierAct = mToolbar->addAction( tr( "Hierarchy" ), this, &RsObiaMainWindow::runHierarchicalSegmentation );
     SicnuDialogHelp::tip( hierAct, tr(
-      "两层层次分割：细层 MeanShift + 粗层 Watershed + 父链接（rs:obia_hierarchy，需 OTB）。" ) );
+      "Two-level hierarchical segmentation: fine MeanShift + coarse Watershed + parent links (rs:obia_hierarchy; needs OTB).")  );
 
     mToolbar->addWidget( new QLabel( tr( " View L:" ) ) );
     auto *levelSpin = new QSpinBox;
     levelSpin->setRange( 0, 1 );
     levelSpin->setValue( 0 );
     levelSpin->setObjectName( "levelSpin" );
-    SicnuDialogHelp::tip( levelSpin, tr( "活动显示层级（0=最细）。对象 id 按层独立编号。" ) );
+    SicnuDialogHelp::tip( levelSpin, tr( "Active display level (0 = finest). Object ids are numbered per level." ) );
     mToolbar->addWidget( levelSpin );
     connect( levelSpin, QOverload<int>::of( &QSpinBox::valueChanged ),
              this, &RsObiaMainWindow::onActiveLevelChanged );
@@ -218,7 +218,7 @@ void RsObiaMainWindow::setupToolbar()
     auto *classifierCombo = new QComboBox;
     classifierCombo->addItems( { "NormalBayes", "SVM", "RandomForest", "KMeans", "MLP" } );
     SicnuDialogHelp::tip( classifierCombo, tr(
-      "对象级分类器（rs:obia_classify.method）：NormalBayes / SVM / RandomForest / KMeans / MLP。" ) );
+      "Object-level classifier (rs:obia_classify.method): Normal Bayes / SVM / Random Forest / K-means / MLP.")  );
     classifierCombo->setObjectName( "classifierCombo" );
     mToolbar->addWidget( classifierCombo );
 
@@ -228,34 +228,34 @@ void RsObiaMainWindow::setupToolbar()
     classifyLevelSpin->setValue( 0 );
     classifyLevelSpin->setObjectName( "classifyLevelSpin" );
     SicnuDialogHelp::tip( classifyLevelSpin, tr(
-      "分类层级，默认 0（最细）。训练标签绑定该层对象。" ) );
+      "Classification level, 0 (finest) by default. Training labels bind to objects of this level.")  );
     mToolbar->addWidget( classifyLevelSpin );
     connect( classifyLevelSpin, QOverload<int>::of( &QSpinBox::valueChanged ),
              this, &RsObiaMainWindow::onClassifyLevelChanged );
 
     auto *clsAct = mToolbar->addAction( tr( "Classify" ), this, &RsObiaMainWindow::runClassification );
-    SicnuDialogHelp::tip( clsAct, tr( "对所选层级的对象进行分类（rs:obia_classify / rs:obia_hierarchy）。" ) );
+    SicnuDialogHelp::tip( clsAct, tr( "Classifies objects at the selected level (rs:obia_classify / rs:obia_hierarchy)." ) );
 
     auto *cfgAct = mToolbar->addAction( tr( "Params" ), this, &RsObiaMainWindow::showClassifierConfigDialog );
-    SicnuDialogHelp::tip( cfgAct, tr( "配置所选分类器的超参数（rs:obia_classify 的 rfNumTrees / mlpHiddenLayerSize 等）。" ) );
+    SicnuDialogHelp::tip( cfgAct, tr( "Configure hyperparameters of the selected classifier (rfNumTrees / mlpHiddenLayerSize of rs:obia_classify, etc.)." ) );
 
     auto *roiAct = mToolbar->addAction( tr( "Import ROI" ), this, &RsObiaMainWindow::importRoiLabels );
     SicnuDialogHelp::tip( roiAct, tr(
-      "从训练多边形按多数票标注对象（rs:obia_label）；与点击标注冲突时后写覆盖并提示。" ) );
+      "Labels objects from training polygons by majority vote (rs:obia_label); click labels written later override and are reported.")  );
 
     auto *consAct = mToolbar->addAction( tr( "Consolidate" ), this, &RsObiaMainWindow::runHierarchyConsolidation );
-    SicnuDialogHelp::tip( consAct, tr( "消解多尺度层次之间的分类矛盾（向上多数票投票 / 向下集成）。" ) );
+    SicnuDialogHelp::tip( consAct, tr( "Resolves classification conflicts across scale levels (bottom-up majority vote / top-down integration)." ) );
 
     mToolbar->addSeparator();
-    auto *accAct = mToolbar->addAction( tr( "精度评价" ), this, &RsObiaMainWindow::showAccuracyAssessment );
-    SicnuDialogHelp::tip( accAct, tr( "查看最近一次对象分类的训练样本精度（混淆矩阵 / OA / Kappa）。" ) );
+    auto *accAct = mToolbar->addAction( tr( "Accuracy Assessment" ), this, &RsObiaMainWindow::showAccuracyAssessment );
+    SicnuDialogHelp::tip( accAct, tr( "View the training-sample accuracy of the last object classification (confusion matrix / OA / Kappa)." ) );
 
-    auto *toMainAct = mToolbar->addAction( tr( "加载到主图" ), this, &RsObiaMainWindow::loadResultToMainMap );
-    SicnuDialogHelp::tip( toMainAct, tr( "将分类结果栅格加载到主窗口地图。" ) );
+    auto *toMainAct = mToolbar->addAction( tr( "Load to Main View" ), this, &RsObiaMainWindow::loadResultToMainMap );
+    SicnuDialogHelp::tip( toMainAct, tr( "Loads the classification result raster into the main window map." ) );
 
     mToolbar->addSeparator();
     auto *expAct = mToolbar->addAction( tr( "Export" ), this, &RsObiaMainWindow::exportResult );
-    SicnuDialogHelp::tip( expAct, tr( "导出分类栅格（及可选矢量化 gdal:polygonize）。" ) );
+    SicnuDialogHelp::tip( expAct, tr( "Exports the classification raster (with optional gdal:polygonize vectorization)." ) );
 }
 
 void RsObiaMainWindow::setupDocks()
@@ -263,11 +263,11 @@ void RsObiaMainWindow::setupDocks()
     // Left dock: class assignment
     mClassDock = new QDockWidget( tr( "Classes" ), this );
     mClassDock->setObjectName( "obiaClassDock" );
-    SicnuDialogHelp::tip( mClassDock, tr( "类别表：ID、名称、显示颜色。用于对象分类图例与标注。" ) );
+    SicnuDialogHelp::tip( mClassDock, tr( "Class table: ID, name and display color; used for the object classification legend and labeling." ) );
     mClassTable = new QTableWidget;
     mClassTable->setColumnCount( 3 );
     mClassTable->setHorizontalHeaderLabels( { tr( "ID" ), tr( "Name" ), tr( "Color" ) } );
-    SicnuDialogHelp::tip( mClassTable, tr( "类别定义。ID 对应分类栅格像元值。右键可编辑名称/颜色、插入/删除类别。" ) );
+    SicnuDialogHelp::tip( mClassTable, tr( "Class definitions. IDs correspond to classification raster pixel values. Right-click to edit name/color or insert/delete classes." ) );
     mClassTable->horizontalHeader()->setStretchLastSection( true );
     mClassTable->setSelectionBehavior( QAbstractItemView::SelectRows );
     mClassTable->setSelectionMode( QAbstractItemView::SingleSelection );
@@ -296,7 +296,7 @@ void RsObiaMainWindow::setupDocks()
 
     // Assign button
     auto *assignBtn = new QPushButton( tr( "Assign to Selected Segment" ) );
-    SicnuDialogHelp::tip( assignBtn, tr( "把当前类别（选中行）赋给画布上选中的对象。" ) );
+    SicnuDialogHelp::tip( assignBtn, tr( "Assigns the current class (selected row) to the objects selected on the canvas." ) );
     connect( assignBtn, &QPushButton::clicked, this, &RsObiaMainWindow::onAssignClass );
 
     auto *classWidget = new QWidget;
@@ -309,7 +309,7 @@ void RsObiaMainWindow::setupDocks()
 
     // Bottom dock: segment info
     mInfoDock = new RsSegmentInfoDock( this );
-    SicnuDialogHelp::tip( mInfoDock, tr( "对象信息：选中对象的形状、光谱与层级统计（只读）。" ) );
+    SicnuDialogHelp::tip( mInfoDock, tr( "Object info: shape, spectral and hierarchy statistics of the selected object (read-only)." ) );
     mInfoDock->setWhatsThis( SicnuDialogHelp::htmlForTool(
         QStringLiteral( "obia_segment_info" ), mInfoDock->windowTitle() ) );
     addDockWidget( Qt::BottomDockWidgetArea, mInfoDock );
@@ -317,7 +317,7 @@ void RsObiaMainWindow::setupDocks()
     // Right dock: segment list
     mSegmentDock = new QDockWidget( tr( "Segments" ), this );
     mSegmentDock->setObjectName( "obiaSegmentDock" );
-    SicnuDialogHelp::tip( mSegmentDock, tr( "对象列表：当前层级所有分割对象。右键可赋类、查看信息、复制 ID。" ) );
+    SicnuDialogHelp::tip( mSegmentDock, tr( "Object list: all segmented objects at the current level. Right-click to assign a class, view info or copy the ID." ) );
     mSegmentTable = new QTableWidget;
     mSegmentTable->setColumnCount( 3 );
     mSegmentTable->setHorizontalHeaderLabels( { tr( "ID" ), tr( "Pixels" ), tr( "Class" ) } );
@@ -326,7 +326,7 @@ void RsObiaMainWindow::setupDocks()
     mSegmentTable->setSelectionMode( QAbstractItemView::SingleSelection );
     mSegmentTable->setContextMenuPolicy( Qt::CustomContextMenu );
     mSegmentTable->setEditTriggers( QAbstractItemView::NoEditTriggers ); // filled programmatically
-    SicnuDialogHelp::tip( mSegmentTable, tr( "对象列表（ID/像元数/类别）。右键赋为当前类别、查看信息或复制 ID。" ) );
+    SicnuDialogHelp::tip( mSegmentTable, tr( "Object list (ID / pixel count / class). Right-click to assign the current class, view info or copy the ID." ) );
     mSegmentDock->setWidget( mSegmentTable );
     addDockWidget( Qt::RightDockWidgetArea, mSegmentDock );
     connect( mSegmentTable, &QTableWidget::customContextMenuRequested,
@@ -348,89 +348,89 @@ void RsObiaMainWindow::setupDocks()
     mUncertaintyDock->hide();
 
     // Left dock: Feature selection tree
-    mFeatureDock = new QDockWidget( tr( "Feature Tree (特征树选择)" ), this );
+    mFeatureDock = new QDockWidget( tr( "Feature Tree" ), this );
     mFeatureDock->setObjectName( "obiaFeatureDock" );
     mFeatureTree = new QTreeWidget;
     mFeatureTree->setHeaderHidden( true );
 
-    auto *spectralRoot = new QTreeWidgetItem( mFeatureTree, { tr( "Spectral Features (光谱特征)" ) } );
+    auto *spectralRoot = new QTreeWidgetItem( mFeatureTree, { tr( "Spectral Features" ) } );
     spectralRoot->setFlags( spectralRoot->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsAutoTristate );
     spectralRoot->setCheckState( 0, Qt::Checked );
 
-    auto *itemMean = new QTreeWidgetItem( spectralRoot, { tr( "Band Mean (波段均值)" ) } );
+    auto *itemMean = new QTreeWidgetItem( spectralRoot, { tr( "Band Mean" ) } );
     itemMean->setFlags( itemMean->flags() | Qt::ItemIsUserCheckable );
     itemMean->setCheckState( 0, Qt::Checked );
     itemMean->setData( 0, Qt::UserRole, "mean" );
 
-    auto *itemStd = new QTreeWidgetItem( spectralRoot, { tr( "Band StdDev (标准差)" ) } );
+    auto *itemStd = new QTreeWidgetItem( spectralRoot, { tr( "Band StdDev" ) } );
     itemStd->setFlags( itemStd->flags() | Qt::ItemIsUserCheckable );
     itemStd->setCheckState( 0, Qt::Checked );
     itemStd->setData( 0, Qt::UserRole, "stddev" );
 
-    auto *itemMin = new QTreeWidgetItem( spectralRoot, { tr( "Band Min (最小值)" ) } );
+    auto *itemMin = new QTreeWidgetItem( spectralRoot, { tr( "Band Min" ) } );
     itemMin->setFlags( itemMin->flags() | Qt::ItemIsUserCheckable );
     itemMin->setCheckState( 0, Qt::Checked );
     itemMin->setData( 0, Qt::UserRole, "min" );
 
-    auto *itemMax = new QTreeWidgetItem( spectralRoot, { tr( "Band Max (最大值)" ) } );
+    auto *itemMax = new QTreeWidgetItem( spectralRoot, { tr( "Band Max" ) } );
     itemMax->setFlags( itemMax->flags() | Qt::ItemIsUserCheckable );
     itemMax->setCheckState( 0, Qt::Checked );
     itemMax->setData( 0, Qt::UserRole, "max" );
 
-    auto *textureRoot = new QTreeWidgetItem( mFeatureTree, { tr( "Texture Features (GLCM 纹理特征)" ) } );
+    auto *textureRoot = new QTreeWidgetItem( mFeatureTree, { tr( "Texture Features (GLCM)" ) } );
     textureRoot->setFlags( textureRoot->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsAutoTristate );
     textureRoot->setCheckState( 0, Qt::Checked );
 
-    auto *itemContrast = new QTreeWidgetItem( textureRoot, { tr( "GLCM Contrast (对比度)" ) } );
+    auto *itemContrast = new QTreeWidgetItem( textureRoot, { tr( "GLCM Contrast" ) } );
     itemContrast->setFlags( itemContrast->flags() | Qt::ItemIsUserCheckable );
     itemContrast->setCheckState( 0, Qt::Checked );
     itemContrast->setData( 0, Qt::UserRole, "contrast" );
 
-    auto *itemCorr = new QTreeWidgetItem( textureRoot, { tr( "GLCM Correlation (相关性)" ) } );
+    auto *itemCorr = new QTreeWidgetItem( textureRoot, { tr( "GLCM Correlation" ) } );
     itemCorr->setFlags( itemCorr->flags() | Qt::ItemIsUserCheckable );
     itemCorr->setCheckState( 0, Qt::Checked );
     itemCorr->setData( 0, Qt::UserRole, "correlation" );
 
-    auto *itemEnergy = new QTreeWidgetItem( textureRoot, { tr( "GLCM Energy (能量)" ) } );
+    auto *itemEnergy = new QTreeWidgetItem( textureRoot, { tr( "GLCM Energy" ) } );
     itemEnergy->setFlags( itemEnergy->flags() | Qt::ItemIsUserCheckable );
     itemEnergy->setCheckState( 0, Qt::Checked );
     itemEnergy->setData( 0, Qt::UserRole, "energy" );
 
-    auto *itemHomog = new QTreeWidgetItem( textureRoot, { tr( "GLCM Homogeneity (同质性)" ) } );
+    auto *itemHomog = new QTreeWidgetItem( textureRoot, { tr( "GLCM Homogeneity" ) } );
     itemHomog->setFlags( itemHomog->flags() | Qt::ItemIsUserCheckable );
     itemHomog->setCheckState( 0, Qt::Checked );
     itemHomog->setData( 0, Qt::UserRole, "homogeneity" );
 
-    auto *shapeRoot = new QTreeWidgetItem( mFeatureTree, { tr( "Shape Features (几何与形状特征)" ) } );
+    auto *shapeRoot = new QTreeWidgetItem( mFeatureTree, { tr( "Shape Features" ) } );
     shapeRoot->setFlags( shapeRoot->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsAutoTristate );
     shapeRoot->setCheckState( 0, Qt::Checked );
 
-    auto *itemArea = new QTreeWidgetItem( shapeRoot, { tr( "Area (像素面积)" ) } );
+    auto *itemArea = new QTreeWidgetItem( shapeRoot, { tr( "Area (pixel area)" ) } );
     itemArea->setFlags( itemArea->flags() | Qt::ItemIsUserCheckable );
     itemArea->setCheckState( 0, Qt::Checked );
     itemArea->setData( 0, Qt::UserRole, "area" );
 
-    auto *itemPerimeter = new QTreeWidgetItem( shapeRoot, { tr( "Perimeter (周长)" ) } );
+    auto *itemPerimeter = new QTreeWidgetItem( shapeRoot, { tr( "Perimeter" ) } );
     itemPerimeter->setFlags( itemPerimeter->flags() | Qt::ItemIsUserCheckable );
     itemPerimeter->setCheckState( 0, Qt::Checked );
     itemPerimeter->setData( 0, Qt::UserRole, "perimeter" );
 
-    auto *itemShapeIdx = new QTreeWidgetItem( shapeRoot, { tr( "Shape Index (形状指数)" ) } );
+    auto *itemShapeIdx = new QTreeWidgetItem( shapeRoot, { tr( "Shape Index" ) } );
     itemShapeIdx->setFlags( itemShapeIdx->flags() | Qt::ItemIsUserCheckable );
     itemShapeIdx->setCheckState( 0, Qt::Checked );
     itemShapeIdx->setData( 0, Qt::UserRole, "shapeIndex" );
 
-    auto *itemCompactness = new QTreeWidgetItem( shapeRoot, { tr( "Compactness (紧凑度)" ) } );
+    auto *itemCompactness = new QTreeWidgetItem( shapeRoot, { tr( "Compactness" ) } );
     itemCompactness->setFlags( itemCompactness->flags() | Qt::ItemIsUserCheckable );
     itemCompactness->setCheckState( 0, Qt::Checked );
     itemCompactness->setData( 0, Qt::UserRole, "compactness" );
 
-    auto *itemRect = new QTreeWidgetItem( shapeRoot, { tr( "Rectangularity (矩形度)" ) } );
+    auto *itemRect = new QTreeWidgetItem( shapeRoot, { tr( "Rectangularity" ) } );
     itemRect->setFlags( itemRect->flags() | Qt::ItemIsUserCheckable );
     itemRect->setCheckState( 0, Qt::Checked );
     itemRect->setData( 0, Qt::UserRole, "rectangularity" );
 
-    auto *itemAspect = new QTreeWidgetItem( shapeRoot, { tr( "Aspect Ratio (长宽比)" ) } );
+    auto *itemAspect = new QTreeWidgetItem( shapeRoot, { tr( "Aspect Ratio" ) } );
     itemAspect->setFlags( itemAspect->flags() | Qt::ItemIsUserCheckable );
     itemAspect->setCheckState( 0, Qt::Checked );
     itemAspect->setData( 0, Qt::UserRole, "aspectRatio" );
@@ -477,7 +477,7 @@ bool RsObiaMainWindow::loadRasterFile( const QString &path )
     {
         const auto choice = QMessageBox::question(
             this, tr( "OBIA" ),
-            tr( "加载新影像将清除当前分割与分类结果，是否继续？" ),
+            tr( "Loading a new image will clear the current segmentation and classification results. Continue?" ),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
         if ( choice != QMessageBox::Yes )
         {
@@ -749,13 +749,13 @@ void RsObiaMainWindow::showAccuracyAssessment()
     if ( !mHasAccuracy )
     {
         QMessageBox::information(
-            this, tr( "精度评价" ),
-            tr( "尚无精度结果。请先完成对象分类（基于已标注对象计算训练精度）。" ) );
+            this, tr( "Accuracy Assessment" ),
+            tr( "No accuracy results yet. Finish object classification first (training accuracy is computed from labeled objects)." ) );
         return;
     }
     auto *dlg = new RsAccuracyDialog( mLastAccuracy, classNameMap(), this );
     dlg->setAttribute( Qt::WA_DeleteOnClose );
-    dlg->setWindowTitle( tr( "OBIA 精度评价（训练样本）" ) );
+    dlg->setWindowTitle( tr( "OBIA Accuracy Assessment (training samples)" ) );
     dlg->show();
 }
 
@@ -764,12 +764,12 @@ void RsObiaMainWindow::loadResultToMainMap()
     if ( mLastClassRasterPath.isEmpty() || !QFileInfo::exists( mLastClassRasterPath ) )
     {
         QMessageBox::information(
-            this, tr( "加载到主图" ),
-            tr( "尚无分类结果。请先运行 Classify。" ) );
+            this, tr( "Load to Main View" ),
+            tr( "No classification results yet. Run Classify first." ) );
         return;
     }
     emit requestLoadToMainMap( mLastClassRasterPath );
-    statusBar()->showMessage( tr( "已请求将结果加载到主图：%1" ).arg( mLastClassRasterPath ), 4000 );
+    statusBar()->showMessage( tr( "Requested to load the result into the main view: %1" ).arg( mLastClassRasterPath ), 4000 );
 }
 
 void RsObiaMainWindow::cancelActiveTask()
@@ -786,7 +786,7 @@ void RsObiaMainWindow::cancelActiveTask()
         m_pendingUncertaintyCsv.clear();
         m_pendingRoiLabels.clear();
         finishPendingUi();
-        statusBar()->showMessage( tr( "OBIA 任务已取消" ), 3000 );
+        statusBar()->showMessage( tr( "OBIA task cancelled" ), 3000 );
     }
 }
 
@@ -955,7 +955,7 @@ void RsObiaMainWindow::onObiaTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
             loadClassifiedRaster( outputPath );
 
             const QString accLine = mHasAccuracy
-                                      ? tr( "\nOA=%1  Kappa=%2 (训练样本)" )
+                                      ? tr( "\nOA=%1  Kappa=%2 (training samples)" )
                                             .arg( mLastAccuracy.overallAccuracy, 0, 'f', 3 )
                                             .arg( mLastAccuracy.kappa, 0, 'f', 3 )
                                       : QString();
@@ -963,14 +963,14 @@ void RsObiaMainWindow::onObiaTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
             box.setIcon( QMessageBox::Information );
             box.setWindowTitle( tr( "OBIA Classification" ) );
             if ( op == PendingOp::HierarchyClassify )
-                box.setText( tr( "层级 %1 分类完成！\n输出：%2%3" )
+                box.setText( tr( "Level %1 classification finished!\nOutput: %2%3" )
                                  .arg( payload.get( "classifyLevel", 0 ).asInt() )
                                  .arg( outputPath )
                                  .arg( accLine ) );
             else
-                box.setText( tr( "对象分类完成！\n输出：%1%2" ).arg( outputPath ).arg( accLine ) );
-            auto *accBtn = box.addButton( tr( "精度评价" ), QMessageBox::ActionRole );
-            auto *mainBtn = box.addButton( tr( "加载到主图" ), QMessageBox::ActionRole );
+                box.setText( tr( "Object classification finished!\nOutput: %1%2" ).arg( outputPath ).arg( accLine ) );
+            auto *accBtn = box.addButton( tr( "Accuracy Assessment" ), QMessageBox::ActionRole );
+            auto *mainBtn = box.addButton( tr( "Load to Main View" ), QMessageBox::ActionRole );
             box.addButton( QMessageBox::Ok );
             box.exec();
             if ( box.clickedButton() == accBtn )
@@ -996,7 +996,7 @@ void RsObiaMainWindow::onObiaTaskUpdated( const sicnu::AlgorithmTaskInfo &info )
                 SICNU_LOG_WARN( SicnuLogTags::OBIA,
                                 QStringLiteral( "rs:obia_label produced no labels (CRS overlap? class field?)" ) );
                 statusBar()->showMessage(
-                    tr( "ROI 标注完成，但没有对象获得标签（请检查 CRS 覆盖与类别字段）。" ), 6000 );
+                    tr( "ROI labeling finished, but no object received a label (check CRS coverage and the class field)." ), 6000 );
                 updateStatusLabel();
                 return;
             }
@@ -1126,7 +1126,7 @@ void RsObiaMainWindow::setActiveLevelMap( int level )
     {
         // Nothing is queued here (no job is submitted): the user must re-select
         // this level once the current task finishes — keep the message honest.
-        statusBar()->showMessage( tr( "当前任务结束后请重新选择层级 %1 以提取特征。" ).arg( level ), 4000 );
+        statusBar()->showMessage( tr( "Re-select level %1 after the current task finishes to extract features." ).arg( level ), 4000 );
         return;
     }
     startFeaturesTask( level, /*afterHierarchyBuild=*/false );
@@ -1468,7 +1468,7 @@ void RsObiaMainWindow::importRoiLabels()
         {
             QMessageBox::information(
                 this, tr( "Import ROI" ),
-                tr( "Level %1 特征仍在提取，完成后请重新执行 Import ROI。" ).arg( clsLevel ) );
+                tr( "Level %1 features are still being extracted; re-run Import ROI once finished." ).arg( clsLevel ) );
             return;
         }
     }
@@ -1484,7 +1484,7 @@ void RsObiaMainWindow::importRoiLabels()
     {
         const auto choice = QMessageBox::question(
             this, tr( "Import ROI" ),
-            tr( "导入新 ROI 将替换当前 %1 个已赋标签的对象，是否继续？" ).arg( mSegmentLabels.size() ),
+            tr( "Importing new ROIs will replace the %1 currently labeled objects. Continue?" ).arg( mSegmentLabels.size() ),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
         if ( choice != QMessageBox::Yes )
             return;
@@ -1644,27 +1644,27 @@ void RsObiaMainWindow::onClassTableContextMenu( const QPoint &pos )
     const int row = mClassTable->rowAt( pos.y() );
     QMenu menu( this );
 
-    QAction *editNameAct = menu.addAction( tr( "编辑名称…" ) );
-    editNameAct->setToolTip( tr( "修改该类别的显示名称。" ) );
+    QAction *editNameAct = menu.addAction( tr( "Edit Name..." ) );
+    editNameAct->setToolTip( tr( "Changes the display name of this class." ) );
     editNameAct->setEnabled( row >= 0 && row < mClassDefs.size() );
 
-    QAction *editColorAct = menu.addAction( tr( "更改颜色…" ) );
-    editColorAct->setToolTip( tr( "打开调色板选择新的类别颜色。" ) );
+    QAction *editColorAct = menu.addAction( tr( "Change Color..." ) );
+    editColorAct->setToolTip( tr( "Opens the color palette to pick a new class color." ) );
     editColorAct->setEnabled( row >= 0 && row < mClassDefs.size() );
 
     menu.addSeparator();
 
-    QAction *insertAct = menu.addAction( tr( "在此之后插入类别…" ) );
-    insertAct->setToolTip( tr( "追加一个新类别（ID 自动取当前最大值 +1）。" ) );
+    QAction *insertAct = menu.addAction( tr( "Insert Class After This..." ) );
+    insertAct->setToolTip( tr( "Appends a new class (ID automatically set to the current maximum + 1)." ) );
     insertAct->setEnabled( row >= 0 );
 
-    QAction *deleteAct = menu.addAction( tr( "删除类别…" ) );
-    deleteAct->setToolTip( tr( "删除该类别（会弹出确认）。已赋该类的对象标签不会自动清除。" ) );
+    QAction *deleteAct = menu.addAction( tr( "Delete Class..." ) );
+    deleteAct->setToolTip( tr( "Deletes this class (a confirmation pops up). Object labels already assigned are not cleared automatically." ) );
     deleteAct->setEnabled( row >= 0 && row < mClassDefs.size() && mClassDefs.size() > 1 );
 
     menu.addSeparator();
-    QAction *copyIdAct = menu.addAction( tr( "复制类别 ID" ) );
-    copyIdAct->setToolTip( tr( "把该类别的 ID 复制到剪贴板。" ) );
+    QAction *copyIdAct = menu.addAction( tr( "Copy Class ID" ) );
+    copyIdAct->setToolTip( tr( "Copies this class's ID to the clipboard." ) );
     copyIdAct->setEnabled( row >= 0 && row < mClassDefs.size() );
 
     QAction *chosen = menu.exec( mClassTable->viewport()->mapToGlobal( pos ) );
@@ -1675,32 +1675,32 @@ void RsObiaMainWindow::onClassTableContextMenu( const QPoint &pos )
     {
         bool ok = false;
         const QString name = QInputDialog::getText(
-            this, tr( "编辑类别名称" ), tr( "名称：" ), QLineEdit::Normal,
+            this, tr( "Edit Class Name" ), tr( "Name:" ), QLineEdit::Normal,
             mClassDefs[row].name, &ok );
         if ( ok && !name.trimmed().isEmpty() )
         {
             mClassDefs[row].name = name.trimmed();
             mClassTable->item( row, 1 )->setText( mClassDefs[row].name );
-            statusBar()->showMessage( tr( "类别 %1 已更名为「%2」" )
+            statusBar()->showMessage( tr( "Class %1 renamed to '%2'" )
                                           .arg( mClassDefs[row].id )
                                           .arg( mClassDefs[row].name ), 3000 );
         }
     }
     else if ( chosen == editColorAct && row >= 0 && row < mClassDefs.size() )
     {
-        const QColor c = QColorDialog::getColor( mClassDefs[row].color, this, tr( "选择类别颜色" ) );
+        const QColor c = QColorDialog::getColor( mClassDefs[row].color, this, tr( "Choose Class Color" ) );
         if ( c.isValid() )
         {
             mClassDefs[row].color = c;
             mClassTable->item( row, 2 )->setBackground( c );
-            statusBar()->showMessage( tr( "类别 %1 颜色已更新" ).arg( mClassDefs[row].id ), 3000 );
+            statusBar()->showMessage( tr( "Class %1 color updated" ).arg( mClassDefs[row].id ), 3000 );
         }
     }
     else if ( chosen == insertAct && row >= 0 )
     {
         bool ok = false;
         const QString name = QInputDialog::getText(
-            this, tr( "新类别名称" ), tr( "名称：" ), QLineEdit::Normal,
+            this, tr( "New Class Name" ), tr( "Name:" ), QLineEdit::Normal,
             tr( "New class" ), &ok );
         if ( !ok || name.trimmed().isEmpty() )
             return;
@@ -1711,15 +1711,15 @@ void RsObiaMainWindow::onClassTableContextMenu( const QPoint &pos )
         // Insert right after the current row in the definition vector.
         mClassDefs.insert( row + 1, ClassDef{ newId, name.trimmed(), QColor::fromHsv( ( newId * 67 ) % 360, 200, 220 ) } );
         rebuildClassTable();
-        statusBar()->showMessage( tr( "已插入类别 %1「%2」" ).arg( newId ).arg( name.trimmed() ), 3000 );
+        statusBar()->showMessage( tr( "Inserted class %1 '%2'" ).arg( newId ).arg( name.trimmed() ), 3000 );
     }
     else if ( chosen == deleteAct && row >= 0 && row < mClassDefs.size() && mClassDefs.size() > 1 )
     {
         const ClassDef cd = mClassDefs[row];
         // Safety-first: default button is No.
         const auto choice = QMessageBox::question(
-            this, tr( "删除类别" ),
-            tr( "确定删除类别 %1「%2」？\n已赋该类的对象标签不会被自动清除，可重新赋类。" )
+            this, tr( "Delete Class" ),
+            tr( "Delete class %1 '%2'?\nObject labels already assigned to this class are not cleared automatically and can be reassigned." )
                 .arg( cd.id )
                 .arg( cd.name ),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
@@ -1729,7 +1729,7 @@ void RsObiaMainWindow::onClassTableContextMenu( const QPoint &pos )
         if ( mCurrentClassId == cd.id )
             mCurrentClassId = mClassDefs.isEmpty() ? 0 : mClassDefs.first().id;
         rebuildClassTable();
-        statusBar()->showMessage( tr( "已删除类别 %1" ).arg( cd.id ), 3000 );
+        statusBar()->showMessage( tr( "Deleted class %1" ).arg( cd.id ), 3000 );
     }
     else if ( chosen == copyIdAct && row >= 0 && row < mClassDefs.size() )
     {
@@ -1746,22 +1746,22 @@ void RsObiaMainWindow::onSegmentTableContextMenu( const QPoint &pos )
     const bool hasData = mSegmentTable->rowCount() > 0;
     const bool canAssign = hasData && row >= 0 && row < mSegmentTable->rowCount();
 
-    QAction *assignAct = menu.addAction( tr( "赋为当前类别" ) );
-    assignAct->setToolTip( tr( "把当前选中类别（Classes 表选中行）赋给该对象。" ) );
+    QAction *assignAct = menu.addAction( tr( "Assign Current Class" ) );
+    assignAct->setToolTip( tr( "Assigns the currently selected class (selected row in the Classes table) to this object." ) );
     assignAct->setEnabled( canAssign );
 
-    QAction *infoAct = menu.addAction( tr( "查看对象信息" ) );
-    infoAct->setToolTip( tr( "在下方信息面板显示该对象的形状/光谱/层级统计。" ) );
+    QAction *infoAct = menu.addAction( tr( "View Object Info" ) );
+    infoAct->setToolTip( tr( "Shows the object's shape/spectral/hierarchy statistics in the info panel below." ) );
     infoAct->setEnabled( canAssign );
 
     menu.addSeparator();
-    QAction *copyIdAct = menu.addAction( tr( "复制对象 ID" ) );
-    copyIdAct->setToolTip( tr( "把该对象 ID 复制到剪贴板。" ) );
+    QAction *copyIdAct = menu.addAction( tr( "Copy Object ID" ) );
+    copyIdAct->setToolTip( tr( "Copies this object's ID to the clipboard." ) );
     copyIdAct->setEnabled( canAssign );
 
     if ( !hasData )
     {
-        auto *hint = menu.addAction( tr( "（先完成分割后才有对象可操作）" ) );
+        auto *hint = menu.addAction( tr( "(objects become available after segmentation)" ) );
         hint->setEnabled( false );
     }
 
@@ -1781,7 +1781,7 @@ void RsObiaMainWindow::onSegmentTableContextMenu( const QPoint &pos )
         {
             QMessageBox::information(
                 this, tr( "OBIA" ),
-                tr( "切换 View L 到分类层级（%1）后再赋标签，或将 Cls L 设为当前视图层级。" )
+                tr( "Switch View L to the classification level (%1) before assigning labels, or make Cls L the current view level." )
                     .arg( currentClassifyLevel() ) );
             return;
         }
@@ -1790,7 +1790,7 @@ void RsObiaMainWindow::onSegmentTableContextMenu( const QPoint &pos )
             updateSegmentTableRow( segId );
         else
             updateSegmentTable();
-        statusBar()->showMessage( tr( "对象 %1 → 类别 %2" ).arg( segId ).arg( mCurrentClassId ), 3000 );
+        statusBar()->showMessage( tr( "Object %1 → class %2" ).arg( segId ).arg( mCurrentClassId ), 3000 );
     }
     else if ( chosen == infoAct )
     {
@@ -1951,9 +1951,9 @@ void RsObiaMainWindow::runHierarchyConsolidation()
         return;
     }
 
-    QStringList options = { tr( "Bottom-Up Majority Vote (子级多数票投票决定父级)" ),
-                            tr( "Area-Weighted Vote (子级像素面积加权投票决定父级)" ),
-                            tr( "Top-Down Inheritance (父级类别直接向下继承)" ) };
+    QStringList options = { tr( "Bottom-Up Majority Vote (parent decided by child majority)" ),
+                            tr( "Area-Weighted Vote (parent decided by child pixel area)" ),
+                            tr( "Top-Down Inheritance (parent class inherited directly)" ) };
     bool ok = false;
     QString choice = QInputDialog::getItem(
         this, tr( "Hierarchy Class Consolidator" ),

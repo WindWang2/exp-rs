@@ -51,8 +51,8 @@ void WorkbenchGuidance::setGuidance( const QString &helpTopicId )
     } else if ( d ) {
         setGuidanceText( d->title, d->summary, {}, helpTopicId );
     } else {
-        setGuidanceText( QObject::tr( "从这里开始" ),
-                         QObject::tr( "尚未为此面板配置引导内容。" ), {}, helpTopicId );
+        setGuidanceText( QObject::tr( "Start Here" ),
+                         QObject::tr( "No guidance content has been configured for this panel yet." ), {}, helpTopicId );
     }
 }
 
@@ -85,7 +85,7 @@ void WorkbenchGuidance::setGuidanceText( const QString &headline, const QString 
             rowLayout->addWidget( button );
         }
         if ( !helpTopicId.isEmpty() ) {
-            auto *learnMore = new QPushButton( QObject::tr( "了解更多 (F1)" ), m_actionsRow );
+            auto *learnMore = new QPushButton( QObject::tr( "Learn More (F1)" ), m_actionsRow );
             learnMore->setFlat( true );
             connect( learnMore, &QPushButton::clicked, this, [this, helpTopicId] {
                 HelpSystemController::instance().openHelpCenter( helpTopicId );

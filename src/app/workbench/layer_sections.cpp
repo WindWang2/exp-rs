@@ -58,7 +58,7 @@ void LayerGeneralSection::populate( const SelectionContextSnapshot &snapshot )
     QgsMapLayer *layer = snapshot.activeLayer;
     if ( !layer )
     {
-        m_summary->setText( tr( "未选中图层。" ) );
+        m_summary->setText( tr( "No layer selected." ) );
         return;
     }
 
@@ -66,21 +66,21 @@ void LayerGeneralSection::populate( const SelectionContextSnapshot &snapshot )
         switch ( layer->type() )
         {
             case Qgis::LayerType::Raster:
-                return tr( "栅格" );
+                return tr( "Raster" );
             case Qgis::LayerType::Vector:
-                return tr( "矢量" );
+                return tr( "Vector" );
             case Qgis::LayerType::VectorTile:
-                return tr( "矢量瓦片" );
+                return tr( "Vector Tiles" );
             case Qgis::LayerType::Mesh:
-                return tr( "网格" );
+                return tr( "Grid" );
             case Qgis::LayerType::PointCloud:
-                return tr( "点云" );
+                return tr( "Point Cloud" );
             default:
-                return tr( "图层" );
+                return tr( "Layer" );
         }
     }();
-    const QString validity = layer->isValid() ? tr( "有效" ) : tr( "无效 / 数据源缺失" );
-    const QString crs = layer->crs().isValid() ? layer->crs().authid() : tr( "未定义" );
+    const QString validity = layer->isValid() ? tr( "Valid" ) : tr( "Invalid / source missing" );
+    const QString crs = layer->crs().isValid() ? layer->crs().authid() : tr( "Undefined" );
     const QgsRectangle extent = layer->extent();
     const QString extentText = extent.isEmpty()
                                    ? tr( "—" )
@@ -93,16 +93,16 @@ void LayerGeneralSection::populate( const SelectionContextSnapshot &snapshot )
     QString extra;
     if ( auto *raster = qobject_cast<QgsRasterLayer *>( layer ) )
     {
-        extra = tr( "<tr><td>波段数</td><td>%1</td></tr>"
-                    "<tr><td>像元尺寸</td><td>%2 × %3</td></tr>" )
+        extra = tr( "<tr><td>Bands</td><td>%1</td></tr>"
+                    "<tr><td>Pixel size</td><td>%2 × %3</td></tr>" )
                     .arg( raster->bandCount() )
                     .arg( raster->width() )
                     .arg( raster->height() );
     }
     else if ( auto *vector = qobject_cast<QgsVectorLayer *>( layer ) )
     {
-        extra = tr( "<tr><td>要素数</td><td>%1</td></tr>"
-                    "<tr><td>几何类型</td><td>%2</td></tr>" )
+        extra = tr( "<tr><td>Features</td><td>%1</td></tr>"
+                    "<tr><td>Geometry type</td><td>%2</td></tr>" )
                     .arg( vector->featureCount() )
                     .arg( escapeCell( QgsWkbTypes::displayString(
                         vector->wkbType() ) ) );
@@ -111,10 +111,10 @@ void LayerGeneralSection::populate( const SelectionContextSnapshot &snapshot )
     m_summary->setText(
         tr( "<b>%1</b><br>"
             "<table cellspacing='2'>"
-            "<tr><td>类型</td><td>%2</td></tr>"
-            "<tr><td>状态</td><td>%3</td></tr>"
+            "<tr><td>Type</td><td>%2</td></tr>"
+            "<tr><td>Status</td><td>%3</td></tr>"
             "<tr><td>CRS</td><td>%4</td></tr>"
-            "<tr><td>范围</td><td>%5</td></tr>"
+            "<tr><td>Extent</td><td>%5</td></tr>"
             "%6"
             "</table>" )
             .arg( escapeCell( layer->name() ), type, validity, escapeCell( crs ),
@@ -147,7 +147,7 @@ void LayerMetadataSection::populate( const SelectionContextSnapshot &snapshot )
     QgsMapLayer *layer = snapshot.activeLayer;
     if ( !layer )
     {
-        m_body->setText( tr( "未选中图层。" ) );
+        m_body->setText( tr( "No layer selected." ) );
         return;
     }
 
@@ -188,7 +188,7 @@ void VectorStructureSection::populate( const SelectionContextSnapshot &snapshot 
     QgsVectorLayer *vector = snapshot.firstVectorLayer();
     if ( !vector )
     {
-        m_body->setText( tr( "未选中矢量图层。" ) );
+        m_body->setText( tr( "No vector layer selected." ) );
         return;
     }
 
@@ -206,13 +206,13 @@ void VectorStructureSection::populate( const SelectionContextSnapshot &snapshot 
     }
     const QString overflow =
         fields.count() > listed
-            ? tr( "<tr><td colspan='2'>…及其余 %1 个字段</td></tr>" ).arg( fields.count() - listed )
+            ? tr( "<tr><td colspan='2'>... and %1 more fields</td></tr>" ).arg( fields.count() - listed )
             : QString();
 
     const QString editState = vector->isEditable()
-                                  ? ( vector->isModified() ? tr( "编辑中（有未保存修改）" )
-                                                           : tr( "编辑中" ) )
-                                  : ( vector->readOnly() ? tr( "只读" ) : tr( "可编辑（未开始）" ) );
+                                  ? ( vector->isModified() ? tr( "Editing (unsaved changes)" )
+                                                           : tr( "Editing" ) )
+                                  : ( vector->readOnly() ? tr( "Read-only" ) : tr( "Editable (not started)" ) );
 
     // Single-pass multi-arg substitution (review L #6): layer-provided text
     // may contain "%N" lookalikes — chained single-arg .arg() calls would let
@@ -221,12 +221,12 @@ void VectorStructureSection::populate( const SelectionContextSnapshot &snapshot 
     m_body->setText(
         tr( "<b>%1</b><br>"
             "<table cellspacing='2'>"
-            "<tr><td>要素数</td><td>%2</td></tr>"
-            "<tr><td>选中要素</td><td>%3</td></tr>"
-            "<tr><td>几何类型</td><td>%4</td></tr>"
+            "<tr><td>Features</td><td>%2</td></tr>"
+            "<tr><td>Selected features</td><td>%3</td></tr>"
+            "<tr><td>Geometry type</td><td>%4</td></tr>"
             "<tr><td>CRS</td><td>%5</td></tr>"
-            "<tr><td>编辑状态</td><td>%6</td></tr>"
-            "<tr><td>字段数</td><td>%7</td></tr>"
+            "<tr><td>Edit state</td><td>%6</td></tr>"
+            "<tr><td>Fields</td><td>%7</td></tr>"
             "%8%9"
             "</table>" )
             .arg( escapeCell( vector->name() ),
@@ -234,7 +234,7 @@ void VectorStructureSection::populate( const SelectionContextSnapshot &snapshot 
                   QString::number( vector->selectedFeatureCount() ),
                   escapeCell( QgsWkbTypes::displayString( vector->wkbType() ) ),
                   escapeCell( vector->crs().isValid() ? vector->crs().authid()
-                                                      : tr( "未定义" ) ),
+                                                      : tr( "Undefined" ) ),
                   editState,
                   QString::number( fields.count() ),
                   fieldRows.join( QString() ),
@@ -269,7 +269,7 @@ void SarInfoSection::populate( const SelectionContextSnapshot &snapshot )
     QgsRasterLayer *raster = snapshot.firstRasterLayer();
     if ( !raster )
     {
-        m_body->setText( tr( "未选中 SAR 栅格。" ) );
+        m_body->setText( tr( "No SAR raster selected." ) );
         return;
     }
 
@@ -312,9 +312,9 @@ void SarInfoSection::populate( const SelectionContextSnapshot &snapshot )
     // "%N" lookalikes that chained .arg() calls would substitute into.
     m_body->setText(
         tr( "<b>%1</b><br>"
-            "识别为 SAR 产品（基于数据源/名称启发式，可被显式判定覆盖）。"
+            "Identified as a SAR product (heuristics from source / name; explicit detection can override)."
             "<table cellspacing='2'>"
-            "<tr><td>波段数</td><td>%2</td></tr>"
+            "<tr><td>Bands</td><td>%2</td></tr>"
             "<tr><td>CRS</td><td>%3</td></tr>"
             "%4"
             "</table>"
@@ -322,10 +322,10 @@ void SarInfoSection::populate( const SelectionContextSnapshot &snapshot )
             .arg( escapeCell( raster->name() ),
                   QString::number( raster->bandCount() ),
                   escapeCell( raster->crs().isValid() ? raster->crs().authid()
-                                                      : tr( "未定义" ) ),
+                                                      : tr( "Undefined" ) ),
                   facts.join( QString() ),
                   facts.isEmpty()
-                      ? tr( "提供方元数据中未发现极化/轨道/入射角等标准 SAR 字段。" )
+                      ? tr( "No standard SAR fields (polarization / orbit / incidence angle) found in the provider metadata." )
                       : QString() ) );
 }
 

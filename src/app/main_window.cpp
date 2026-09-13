@@ -100,7 +100,7 @@
 QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     : QMainWindow(parent)
 {
-    setWindowTitle( tr( "未命名工程 — SICNU GEO RS 遥感分析平台" ) );
+    setWindowTitle( tr( "Untitled Project — SICNU GEO RS Remote Sensing Platform" ) );
     setToolTip( SicnuDialogHelp::shortForTool( QStringLiteral( "main_window" ), windowTitle() ) );
     setWhatsThis( SicnuDialogHelp::htmlForTool( QStringLiteral( "main_window" ), windowTitle() ) );
     setStatusTip( toolTip() );
@@ -183,7 +183,7 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     m_pluginHost = std::make_unique<PluginHost>();
 #ifdef SICNU_EMBED_PYTHON
     m_appInterface = std::make_unique<SicnuAppInterface>( this, m_activeViewHost.get(), m_projectContext.get() );
-    m_appInterface->setPluginMenu( appMenuBar()->addMenu( tr( "插件" ) ) );
+    m_appInterface->setPluginMenu( appMenuBar()->addMenu( tr( "Plugins" ) ) );
     m_pluginHost->setAppInterface(m_appInterface.get());
 #endif
     m_pluginHost->loadPlugins(QCoreApplication::applicationDirPath() + "/../plugins");
@@ -223,13 +223,13 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
         // ends up with two menus of the same title.
         QMenu *exprsPluginMenu = nullptr;
         for ( QAction *menuAction : appMenuBar()->actions() ) {
-            if ( menuAction->menu() && menuAction->menu()->title() == tr( "插件" ) ) {
+            if ( menuAction->menu() && menuAction->menu()->title() == tr( "Plugins" ) ) {
                 exprsPluginMenu = menuAction->menu();
                 break;
             }
         }
         if ( !exprsPluginMenu )
-            exprsPluginMenu = appMenuBar()->addMenu( tr( "插件" ) );
+            exprsPluginMenu = appMenuBar()->addMenu( tr( "Plugins" ) );
         // Reverse-ownership sink (issue #747): plugin docks/actions/pages are
         // attached and released THROUGH the shell, so unload can detach and
         // delete them while the plugin binary is still mapped.
@@ -271,7 +271,7 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
         }
         // Plugin Manager entry point.
         exprsPluginMenu->addSeparator();
-        exprsPluginMenu->addAction( tr( "插件管理器…" ), this, [this] {
+        exprsPluginMenu->addAction( tr( "Plugin Manager..." ), this, [this] {
             PluginManagerDialog dialog( this );
             dialog.exec();
         } );
@@ -388,7 +388,7 @@ void QgisDesktopWindow::registerPluginCommands( const QString &pluginId )
         QStringLiteral( "plugin.%1." ).arg( pluginId ) );
     sicnu::app::registerPluginMenuCommands(
         m_commandRegistry, m_exprsShellUi->menuActionsFor( pluginId ), pluginId,
-        tr( "插件" ) );
+        tr( "Plugins" ) );
 }
 
 void QgisDesktopWindow::setupUi()
@@ -423,9 +423,9 @@ void QgisDesktopWindow::setupMapCanvas()
     // Page 0: Empty / Welcome State
     m_canvasEmptyState = new sicnu::RsEmptyStateWidget(
         QStringLiteral("app_icon"),
-        tr("RS Studio 遥感影像处理与分析工作台"),
-        tr("支持多源遥感卫星影像（光学/高光谱/SAR/DEM）的高性能渲染、波段运算、正射校正与智能解译。\n点击下方按钮导入数据，或按 Ctrl+O 打开已有工程。"),
-        tr("导入遥感数据..."),
+        tr("RS Studio Workbench for Remote-Sensing Image Processing and Analysis"),
+        tr("High-performance rendering, band math, orthorectification and intelligent interpretation for multi-source satellite imagery (optical / hyperspectral / SAR / DEM).\nClick the button below to import data, or press Ctrl+O to open an existing project."),
+        tr("Import Remote-Sensing Data..."),
         m_canvasStack);
     m_canvasEmptyState->setIconSize(QSize(64, 64));
     connect(m_canvasEmptyState, &sicnu::RsEmptyStateWidget::actionClicked, this, [this]() {

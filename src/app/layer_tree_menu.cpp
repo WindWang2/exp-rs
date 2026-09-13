@@ -30,8 +30,8 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
     auto addRasterAction = [hostPtr]() {
         if ( hostPtr ) {
             const QString file = QFileDialog::getOpenFileName(
-                nullptr, QObject::tr( "添加栅格图层" ), QString(),
-                QObject::tr( "栅格文件 (*.tif *.tiff *.img *.dat *.pix *.vrt *.nc *.hdf *.h5 *.png *.jpg *.jpeg);;所有文件 (*.*)" ) );
+                nullptr, QObject::tr( "Add Raster Layer" ), QString(),
+                QObject::tr( "Raster Files (*.tif *.tiff *.img *.dat *.pix *.vrt *.nc *.hdf *.h5 *.png *.jpg *.jpeg);;All Files (*.*)" ) );
             if ( !file.isEmpty() )
                 hostPtr->openRasterPath( file );
         }
@@ -40,8 +40,8 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
     auto addVectorAction = [hostPtr]() {
         if ( hostPtr ) {
             const QString file = QFileDialog::getOpenFileName(
-                nullptr, QObject::tr( "添加矢量图层" ), QString(),
-                QObject::tr( "矢量文件 (*.shp *.gpkg *.geojson *.kml *.tab *.mif);;所有文件 (*.*)" ) );
+                nullptr, QObject::tr( "Add Vector Layer" ), QString(),
+                QObject::tr( "Vector Files (*.shp *.gpkg *.geojson *.kml *.tab *.mif);;All Files (*.*)" ) );
             if ( !file.isEmpty() )
                 hostPtr->openVectorPath( file );
         }
@@ -72,12 +72,12 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
 
     if ( !node ) {
         if ( m_activeViewHost ) {
-            QAction *actRaster = menu->addAction( QObject::tr( "添加栅格图层..." ), menu, addRasterAction );
-            actRaster->setToolTip( QObject::tr( "打开并加载多波段遥感栅格影像图层" ) );
-            actRaster->setStatusTip( QObject::tr( "添加栅格影像图层到当前工程" ) );
-            QAction *actVector = menu->addAction( QObject::tr( "添加矢量图层..." ), menu, addVectorAction );
-            actVector->setToolTip( QObject::tr( "打开并加载矢量要素图层 (Shapefile / GeoPackage)" ) );
-            actVector->setStatusTip( QObject::tr( "添加矢量图层到当前工程" ) );
+            QAction *actRaster = menu->addAction( QObject::tr( "Add Raster Layer..." ), menu, addRasterAction );
+            actRaster->setToolTip( QObject::tr( "Open and load a multiband remote-sensing raster layer" ) );
+            actRaster->setStatusTip( QObject::tr( "Add a raster imagery layer to the current project" ) );
+            QAction *actVector = menu->addAction( QObject::tr( "Add Vector Layer..." ), menu, addVectorAction );
+            actVector->setToolTip( QObject::tr( "Open and load a vector feature layer (Shapefile / GeoPackage)" ) );
+            actVector->setStatusTip( QObject::tr( "Add a vector layer to the current project" ) );
         }
         menu->addSeparator();
         if ( mView ) {
@@ -105,9 +105,9 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
         addCommand( QStringLiteral( "layer.zoomTo" ) );
 
         if ( layer && layer->type() == Qgis::LayerType::Raster ) {
-            QAction *zoomNative = menu->addAction( QObject::tr( "缩放到原始分辨率 (1:1)" ) );
-            zoomNative->setToolTip( QObject::tr( "以 1:1 原始像元分辨率显示当前栅格" ) );
-            zoomNative->setStatusTip( QObject::tr( "缩放到原始像元分辨率" ) );
+            QAction *zoomNative = menu->addAction( QObject::tr( "Zoom to Native Resolution (1:1)" ) );
+            zoomNative->setToolTip( QObject::tr( "Display the current raster at 1:1 native pixel resolution" ) );
+            zoomNative->setStatusTip( QObject::tr( "Zoom to native pixel resolution" ) );
             QObject::connect( zoomNative, &QAction::triggered, menu, [hostPtr, layerPtr]() {
                 if ( hostPtr && layerPtr ) {
                     hostPtr->zoomToNativeResolution( layerPtr.data() );
@@ -129,12 +129,12 @@ QMenu *LayerTreeMenuProvider::createContextMenu()
 
     menu->addSeparator();
     if ( m_activeViewHost ) {
-        QAction *actRaster = menu->addAction( QObject::tr( "添加栅格图层..." ), menu, addRasterAction );
-        actRaster->setToolTip( QObject::tr( "打开并加载多波段遥感栅格影像图层" ) );
-        actRaster->setStatusTip( QObject::tr( "添加栅格影像图层到当前工程" ) );
-        QAction *actVector = menu->addAction( QObject::tr( "添加矢量图层..." ), menu, addVectorAction );
-        actVector->setToolTip( QObject::tr( "打开并加载矢量要素图层 (Shapefile / GeoPackage)" ) );
-        actVector->setStatusTip( QObject::tr( "添加矢量图层到当前工程" ) );
+        QAction *actRaster = menu->addAction( QObject::tr( "Add Raster Layer..." ), menu, addRasterAction );
+        actRaster->setToolTip( QObject::tr( "Open and load a multiband remote-sensing raster layer" ) );
+        actRaster->setStatusTip( QObject::tr( "Add a raster imagery layer to the current project" ) );
+        QAction *actVector = menu->addAction( QObject::tr( "Add Vector Layer..." ), menu, addVectorAction );
+        actVector->setToolTip( QObject::tr( "Open and load a vector feature layer (Shapefile / GeoPackage)" ) );
+        actVector->setStatusTip( QObject::tr( "Add a vector layer to the current project" ) );
     }
 
     return menu;

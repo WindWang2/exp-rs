@@ -497,11 +497,11 @@ void SchemaFormBuilder::applyParameterHelp( Field &field, const QString &label )
     if ( !knowledge.meaning.isEmpty() )
       tooltipLines << knowledge.meaning;
     if ( !knowledge.unit.isEmpty() )
-      tooltipLines << tr( "单位：%1" ).arg( knowledge.unit );
+      tooltipLines << tr( "Unit: %1" ).arg( knowledge.unit );
     if ( !knowledge.recommended.isEmpty() )
-      tooltipLines << tr( "推荐：%1" ).arg( knowledge.recommended );
+      tooltipLines << tr( "Recommended: %1" ).arg( knowledge.recommended );
     if ( !knowledge.tradeOff.isEmpty() )
-      tooltipLines << tr( "权衡：%1" ).arg( knowledge.tradeOff );
+      tooltipLines << tr( "Trade-offs: %1" ).arg( knowledge.tradeOff );
     for ( const QString &warning : knowledge.warnings )
       tooltipLines << QStringLiteral( "⚠ %1" ).arg( warning );
   }
@@ -597,7 +597,7 @@ SchemaFormBuilder::buildField( const QString &path, const Json::Value &prop, int
       auto *combo = new QComboBox( this );
       combo->setEditable( false );
       combo->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
-      combo->addItem( tr( "选择数据资产…" ), QString() );
+      combo->addItem( tr( "Select Data Assets..." ), QString() );
       if ( !tip.isEmpty() )
         combo->setToolTip( tip );
       field.combo = combo;
@@ -609,7 +609,7 @@ SchemaFormBuilder::buildField( const QString &path, const Json::Value &prop, int
       auto *combo = new QComboBox( this );
       combo->setEditable( false );
       combo->setSizePolicy( QSizePolicy::Expanding, QSizePolicy::Fixed );
-      combo->addItem( tr( "选择模型…" ), QString() );
+      combo->addItem( tr( "Select Model..." ), QString() );
       if ( !tip.isEmpty() )
         combo->setToolTip( tip );
       field.combo = combo;
@@ -637,7 +637,7 @@ SchemaFormBuilder::buildField( const QString &path, const Json::Value &prop, int
       mono.setFamily( QStringLiteral( "IBM Plex Mono" ) );
       mono.setStyleHint( QFont::Monospace );
       edit->setFont( mono );
-      edit->setPlaceholderText( tr( "{ \u2026 } JSON 对象" ) );
+      edit->setPlaceholderText( tr( "{ ... } JSON object" ) );
       if ( prop.isMember( "default" ) && prop["default"].isString() )
         edit->setPlainText( QString::fromStdString( prop["default"].asString() ) );
       if ( !tip.isEmpty() )
@@ -663,7 +663,7 @@ SchemaFormBuilder::buildField( const QString &path, const Json::Value &prop, int
       connect( pick, &QPushButton::clicked, this, [this, edit]()
       {
         const QColor chosen = QColorDialog::getColor(
-          QColor( edit->text() ), this, tr( "选择颜色" ) );
+          QColor( edit->text() ), this, tr( "Choose Color" ) );
         if ( chosen.isValid() )
         {
           edit->setText( chosen.name( QColor::HexRgb ) );
@@ -681,10 +681,10 @@ SchemaFormBuilder::buildField( const QString &path, const Json::Value &prop, int
       hl->setContentsMargins( 0, 0, 0, 0 );
       hl->setSpacing( 6 );
       auto *edit = new QLineEdit( row );
-      edit->setPlaceholderText( tr( "输出路径…" ) );
+      edit->setPlaceholderText( tr( "Output Path..." ) );
       if ( !tip.isEmpty() )
         edit->setToolTip( tip );
-      auto *browse = new QPushButton( tr( "浏览…" ), row );
+      auto *browse = new QPushButton( tr( "Browse..." ), row );
       browse->setObjectName( QStringLiteral( "rsTaskPanelBrowse" ) );
       hl->addWidget( edit, 1 );
       hl->addWidget( browse );
@@ -692,7 +692,7 @@ SchemaFormBuilder::buildField( const QString &path, const Json::Value &prop, int
       {
         const QString path = QFileDialog::getSaveFileName(
           this,
-          tr( "选择输出文件" ),
+          tr( "Select Output File" ),
           edit->text(),
           tr( "GeoTIFF (*.tif *.tiff);;All Files (*)" ) );
         if ( !path.isEmpty() )
@@ -816,11 +816,11 @@ SchemaFormBuilder::buildField( const QString &path, const Json::Value &prop, int
     case FieldKind::Array:
     {
       auto *edit = new QLineEdit( this );
-      edit->setPlaceholderText( tr( "多个值用逗号/分号/换行分隔" ) );
+      edit->setPlaceholderText( tr( "Separate multiple values with commas / semicolons / line breaks" ) );
       QString arrayTip = tip;
       if ( !arrayTip.isEmpty() )
         arrayTip += QStringLiteral( "\n" );
-      arrayTip += tr( "数组参数：多个值用逗号、分号或换行分隔" );
+      arrayTip += tr( "Array parameter: separate multiple values with commas, semicolons or line breaks" );
       edit->setToolTip( arrayTip );
       if ( prop.isMember( "default" ) && prop["default"].isArray() )
       {
@@ -887,7 +887,7 @@ SchemaFormBuilder::buildField( const QString &path, const Json::Value &prop, int
       field.arrayHint = hint;
       v->addWidget( hint );
 
-      auto *add = new QPushButton( tr( "添加一项" ), host );
+      auto *add = new QPushButton( tr( "Add an Item" ), host );
       add->setObjectName( QStringLiteral( "rsSchemaArrayAdd" ) );
       add->setSizePolicy( QSizePolicy::Fixed, QSizePolicy::Fixed );
       v->addWidget( add, 0, Qt::AlignLeft );
@@ -998,7 +998,7 @@ QWidget *SchemaFormBuilder::buildArrayItemRow( Field &field, int index )
   hl->setContentsMargins( 0, 0, 0, 0 );
   hl->setSpacing( 6 );
 
-  auto *box = new QGroupBox( tr( "项 %1" ).arg( index + 1 ), row );
+  auto *box = new QGroupBox( tr( "Item %1" ).arg( index + 1 ), row );
   auto *form = new QFormLayout( box );
   form->setContentsMargins( 8, 12, 8, 8 );
   form->setHorizontalSpacing( 12 );
@@ -1008,9 +1008,9 @@ QWidget *SchemaFormBuilder::buildArrayItemRow( Field &field, int index )
     buildChildFields( QStringLiteral( "%1.%2" ).arg( field.path ).arg( index ),
                       field.prop["items"], field.depth + 1, box, form );
 
-  auto *rm = new QPushButton( tr( "移除" ), row );
+  auto *rm = new QPushButton( tr( "Remove" ), row );
   rm->setObjectName( QStringLiteral( "rsSchemaArrayRemove" ) );
-  rm->setToolTip( tr( "移除该数组项" ) );
+  rm->setToolTip( tr( "Remove this array item" ) );
 
   const QString fieldPath = field.path;
   QPointer<QWidget> rowGuard( row );
@@ -1071,7 +1071,7 @@ void SchemaFormBuilder::removeArrayItem( Field &field, int index )
       if ( QWidget *row = li->widget() )
       {
         if ( QGroupBox *box = row->findChild<QGroupBox *>() )
-          box->setTitle( tr( "项 %1" ).arg( i + 1 ) );
+          box->setTitle( tr( "Item %1" ).arg( i + 1 ) );
       }
     }
   }
@@ -1105,7 +1105,7 @@ void SchemaFormBuilder::updateArrayBoundsUi( Field &field )
     add->setEnabled( maxItems < 0
                      || field.arrayItems.size() < maxItems );
     add->setToolTip( maxItems >= 0
-                       ? tr( "最多 %1 项" ).arg( maxItems )
+                       ? tr( "At most %1 items" ).arg( maxItems )
                        : QString() );
   }
   for ( int i = 0; i < field.arrayItems.size(); ++i )
@@ -1127,7 +1127,7 @@ void SchemaFormBuilder::updateArrayBoundsUi( Field &field )
     const QVariant truncated = field.arrayHost->property( "rsArrayTruncated" );
     if ( truncated.isValid() && truncated.toInt() > 0 )
     {
-      field.arrayHint->setText( tr( "⚠ 数据包含 %1 项，仅加载前 %2 项（超出编辑上限）" )
+      field.arrayHint->setText( tr( "⚠ Data has %1 items; loading only the first %2 (editing limit exceeded)" )
                                   .arg( truncated.toInt() )
                                   .arg( field.arrayItems.size() ) );
       field.arrayHint->show();
@@ -1246,19 +1246,19 @@ void SchemaFormBuilder::rebuild( const Json::Value &schema )
     {
       case FieldGroup::Input:
         if ( !inputBox )
-          inputBox = makeSectionBox( this, tr( "输入" ), false );
+          inputBox = makeSectionBox( this, tr( "Inputs" ), false );
         return inputBox;
       case FieldGroup::Output:
         if ( !outputBox )
-          outputBox = makeSectionBox( this, tr( "输出" ), false );
+          outputBox = makeSectionBox( this, tr( "Outputs" ), false );
         return outputBox;
       case FieldGroup::Params:
         if ( !paramsBox )
-          paramsBox = makeSectionBox( this, tr( "参数" ), false );
+          paramsBox = makeSectionBox( this, tr( "Parameters" ), false );
         return paramsBox;
       case FieldGroup::Advanced:
         if ( !advancedBox )
-          advancedBox = makeSectionBox( this, tr( "高级" ), true );
+          advancedBox = makeSectionBox( this, tr( "Advanced" ), true );
         return advancedBox;
     }
     return paramsBox;
@@ -1409,8 +1409,8 @@ void SchemaFormBuilder::refreshComboChoicesIn( QVector<Field> &fields,
     field.combo->blockSignals( true );
     field.combo->clear();
     if ( kind == FieldKind::AssetCombo || kind == FieldKind::ModelCombo )
-      field.combo->addItem( kind == FieldKind::AssetCombo ? tr( "选择数据资产…" )
-                                                          : tr( "选择模型…" ),
+      field.combo->addItem( kind == FieldKind::AssetCombo ? tr( "Select Data Assets..." )
+                                                          : tr( "Select Model..." ),
                             QString() );
     const int n = std::min( ids.size(), names.size() );
     for ( int i = 0; i < n; ++i )
@@ -1507,7 +1507,7 @@ void SchemaFormBuilder::refreshEnumSources()
         field.combo->setEditText( currentText );
       const QString tip = tooltipFor( field )
                           + ( tooltipFor( field ).isEmpty() ? QString() : QStringLiteral( "\n" ) )
-                          + tr( "⚠ 动态选项源“%1”暂不可用，可自由输入" ).arg( field.enumSource );
+                          + tr( "⚠ Dynamic option source %1 is unavailable; free-form input allowed" ).arg( field.enumSource );
       field.combo->setToolTip( tip );
     }
     field.combo->blockSignals( false );
@@ -2018,18 +2018,18 @@ void SchemaFormBuilder::validateFields(
       case FieldKind::Crs:
         if ( isRequired && text.trimmed().isEmpty() )
           issues.append( { field.path,
-                           tr( "必填参数“%1”不能为空" ).arg( field.name ), true } );
+                           tr( "Required parameter %1 must not be empty" ).arg( field.name ), true } );
         break;
       case FieldKind::AssetCombo:
       case FieldKind::ModelCombo:
         if ( isRequired && ( !field.combo || field.combo->currentIndex() <= 0 ) )
           issues.append( { field.path,
-                           tr( "必填参数“%1”未选择" ).arg( field.name ), true } );
+                           tr( "Required parameter %1 has not been chosen" ).arg( field.name ), true } );
         break;
       case FieldKind::Color:
         if ( !text.trimmed().isEmpty() && !QColor( text ).isValid() )
           issues.append( { field.path,
-                           tr( "“%1”不是有效颜色（#RRGGBB）" ).arg( field.name ), true } );
+                           tr( "%1 is not a valid color (#RRGGBB)" ).arg( field.name ), true } );
         break;
       case FieldKind::Enum:
         // Non-editable dynamic-enum combos with unresolved sources cannot
@@ -2038,7 +2038,7 @@ void SchemaFormBuilder::validateFields(
         // check beyond the required probe below.
         if ( isRequired && text.trimmed().isEmpty() )
           issues.append( { field.path,
-                           tr( "必填参数“%1”未选择" ).arg( field.name ), true } );
+                           tr( "Required parameter %1 has not been chosen" ).arg( field.name ), true } );
         break;
       case FieldKind::Json:
       {
@@ -2053,7 +2053,7 @@ void SchemaFormBuilder::validateFields(
         std::istringstream stream( body );
         if ( !Json::parseFromStream( builder, stream, &parsed, &errors ) )
           issues.append( { field.path,
-                           tr( "“%1”不是有效 JSON：%2" )
+                           tr( "%1 is not valid JSON: %2" )
                                .arg( field.name,
                                      QString::fromStdString( errors ).section( QLatin1Char( '\n' ), 0, 0 ) ),
                            true } );
@@ -2063,7 +2063,7 @@ void SchemaFormBuilder::validateFields(
       {
         if ( isRequired && text.trimmed().isEmpty() )
           issues.append( { field.path,
-                           tr( "必填参数“%1”不能为空" ).arg( field.name ), true } );
+                           tr( "Required parameter %1 must not be empty" ).arg( field.name ), true } );
         if ( field.prop.isObject() && field.prop.isMember( "minItems" )
              && field.prop["minItems"].isNumeric() )
         {
@@ -2072,7 +2072,7 @@ void SchemaFormBuilder::validateFields(
           const int minItems = field.prop["minItems"].asInt();
           if ( tokens.size() < minItems )
             issues.append( { field.path,
-                             tr( "“%1”至少需要 %2 个值" ).arg( field.name ).arg( minItems ),
+                             tr( "%1 requires at least %2 values" ).arg( field.name ).arg( minItems ),
                              true } );
         }
         break;
@@ -2096,11 +2096,11 @@ void SchemaFormBuilder::validateFields(
         const int maxItems = maxItemsOf( field.prop );
         if ( field.arrayItems.size() < minItems )
           issues.append( { field.path,
-                           tr( "“%1”至少需要 %2 项" ).arg( field.name ).arg( minItems ),
+                           tr( "%1 requires at least %2 items" ).arg( field.name ).arg( minItems ),
                            true } );
         if ( maxItems >= 0 && field.arrayItems.size() > maxItems )
           issues.append( { field.path,
-                           tr( "“%1”最多允许 %2 项" ).arg( field.name ).arg( maxItems ),
+                           tr( "%1 allows at most %2 items" ).arg( field.name ).arg( maxItems ),
                            true } );
         const QStringList itemRequired = requiredListOf( field.prop["items"] );
         for ( int i = 0; i < field.arrayItems.size(); ++i )
@@ -2141,7 +2141,7 @@ void SchemaFormBuilder::validateFields(
              && field.prop["x-ui-soft-min"].isNumeric()
              && value < field.prop["x-ui-soft-min"].asDouble() )
           issues.append( { field.path,
-                           tr( "“%1”低于建议下限 %2（科学合理性警告）" )
+                           tr( "%1 is below the suggested minimum %2 (scientific-plausibility warning)" )
                                .arg( field.name )
                                .arg( field.prop["x-ui-soft-min"].asDouble() ),
                            false } );
@@ -2149,7 +2149,7 @@ void SchemaFormBuilder::validateFields(
              && field.prop["x-ui-soft-max"].isNumeric()
              && value > field.prop["x-ui-soft-max"].asDouble() )
           issues.append( { field.path,
-                           tr( "“%1”高于建议上限 %2（科学合理性警告）" )
+                           tr( "%1 is above the suggested maximum %2 (scientific-plausibility warning)" )
                                .arg( field.name )
                                .arg( field.prop["x-ui-soft-max"].asDouble() ),
                            false } );
@@ -2253,7 +2253,7 @@ void SchemaFormBuilder::applyValidationMarks( const QList<ValidationIssue> &issu
     if ( errors > 0 )
     {
       m_validationLabel->setProperty( "state", QStringLiteral( "error" ) );
-      m_validationLabel->setText( tr( "⚠ %1 处参数无效：%2" ).arg( errors ).arg( firstError ) );
+      m_validationLabel->setText( tr( "⚠ %1 invalid parameters: %2" ).arg( errors ).arg( firstError ) );
     }
     else if ( warnings > 0 )
     {
@@ -2261,12 +2261,12 @@ void SchemaFormBuilder::applyValidationMarks( const QList<ValidationIssue> &issu
       // the first warning verbatim (not just a count), so keyboard-only and
       // screen-reader users can act on it.
       m_validationLabel->setProperty( "state", QStringLiteral( "warn" ) );
-      m_validationLabel->setText( tr( "△ %1 条提示：%2" ).arg( warnings ).arg( firstWarning ) );
+      m_validationLabel->setText( tr( "△ %1 hints: %2" ).arg( warnings ).arg( firstWarning ) );
     }
     else
     {
       m_validationLabel->setProperty( "state", QStringLiteral( "ok" ) );
-      m_validationLabel->setText( tr( "✓ 参数有效" ) );
+      m_validationLabel->setText( tr( "✓ Parameters valid" ) );
     }
     m_validationLabel->style()->unpolish( m_validationLabel );
     m_validationLabel->style()->polish( m_validationLabel );
@@ -2402,7 +2402,7 @@ QString SchemaFormBuilder::tooltipFor( const Field &field ) const
   QString tip = memberString( field.prop, "description" );
   if ( !field.recommended.isEmpty() )
   {
-    const QString recommendedText = tr( "推荐值：%1" ).arg( field.recommended );
+    const QString recommendedText = tr( "Recommended: %1" ).arg( field.recommended );
     tip += tip.isEmpty() ? recommendedText : QStringLiteral( " " ) + recommendedText;
   }
   return tip;
@@ -2581,7 +2581,7 @@ void SchemaFormBuilder::applyAsyncCheckResult( quint64 generation,
   {
     if ( check == QLatin1String( "path_exists" ) )
       tip += ( tip.isEmpty() ? QString() : QStringLiteral( "\n" ) )
-             + tr( "⚠ 路径不存在（%1）" ).arg( check );
+             + tr( "⚠ Path does not exist (%1)" ).arg( check );
   }
   target->setToolTip( tip );
 }

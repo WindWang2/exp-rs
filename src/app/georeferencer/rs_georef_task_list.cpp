@@ -23,17 +23,17 @@ RsGeorefTaskList::RsGeorefTaskList( QWidget *parent )
   root->setSpacing( 4 );
 
   auto *top = new QHBoxLayout;
-  mSummary = new QLabel( tr( "任务: 0" ), this );
+  mSummary = new QLabel( tr( "Tasks: 0" ), this );
   mSummary->setObjectName( QStringLiteral( "rsGeorefTaskSummary" ) );
-  mSummary->setToolTip( tr( "任务统计：总数 / 运行中 / 完成 / 失败。" ) );
-  mCancelBtn = new QPushButton( tr( "取消选中" ), this );
+  mSummary->setToolTip( tr( "Task statistics: total / running / done / failed." ) );
+  mCancelBtn = new QPushButton( tr( "Deselect" ), this );
   mCancelBtn->setObjectName( QStringLiteral( "rsGeorefTaskCancelBtn" ) );
   mCancelBtn->setEnabled( false );
-  mCancelBtn->setToolTip( tr( "取消当前选中且仍在运行的校正任务。" ) );
+  mCancelBtn->setToolTip( tr( "Cancels the selected correction task if it is still running." ) );
   mCancelBtn->setStatusTip( mCancelBtn->toolTip() );
-  mClearBtn = new QPushButton( tr( "清空已完成" ), this );
+  mClearBtn = new QPushButton( tr( "Clear Finished" ), this );
   mClearBtn->setObjectName( QStringLiteral( "rsGeorefTaskClearBtn" ) );
-  mClearBtn->setToolTip( tr( "从列表移除已完成/失败/取消的任务，不影响运行中任务。" ) );
+  mClearBtn->setToolTip( tr( "Removes finished/failed/cancelled tasks from the list; running tasks are not affected." ) );
   mClearBtn->setStatusTip( mClearBtn->toolTip() );
   top->addWidget( mSummary, 1 );
   top->addWidget( mCancelBtn );
@@ -44,14 +44,14 @@ RsGeorefTaskList::RsGeorefTaskList( QWidget *parent )
   mTable->setObjectName( QStringLiteral( "rsGeorefTaskTable" ) );
   mTable->setHorizontalHeaderLabels( {
     tr( "#" ),
-    tr( "类型" ),
-    tr( "方法" ),
-    tr( "状态" ),
-    tr( "进度" ),
+    tr( "Type" ),
+    tr( "Method" ),
+    tr( "Status" ),
+    tr( "Progress" ),
     tr( "GCP" ),
     tr( "RMS" ),
-    tr( "耗时" ),
-    tr( "输出" ),
+    tr( "Elapsed" ),
+    tr( "Outputs" ),
   } );
   mTable->verticalHeader()->setVisible( false );
   mTable->verticalHeader()->setDefaultSectionSize( 24 );
@@ -70,7 +70,7 @@ RsGeorefTaskList::RsGeorefTaskList( QWidget *parent )
   mTable->setColumnWidth( 7, 64 );
   mTable->horizontalHeader()->setSectionResizeMode( 2, QHeaderView::Stretch );
   mTable->horizontalHeader()->setSectionResizeMode( 8, QHeaderView::Stretch );
-  mTable->setToolTip( tr( "双击成功任务：加载结果到主工程；右键可取消运行中任务" ) );
+  mTable->setToolTip( tr( "Double-click a finished task to load its results into the main project; right-click a running task to cancel it" ) );
   root->addWidget( mTable, 1 );
 
   connect( mClearBtn, &QPushButton::clicked, this, &RsGeorefTaskList::onClearClicked );
@@ -260,9 +260,9 @@ void RsGeorefTaskList::onContextMenu( const QPoint &pos )
   const Entry e = entryAt( idx.row() );
 
   QMenu menu( this );
-  QAction *cancelAct = menu.addAction( tr( "取消任务" ) );
+  QAction *cancelAct = menu.addAction( tr( "Cancel Task" ) );
   cancelAct->setEnabled( e.status == Status::Running );
-  QAction *loadAct = menu.addAction( tr( "加载结果到主工程" ) );
+  QAction *loadAct = menu.addAction( tr( "Load Results into Main Project" ) );
   loadAct->setEnabled( e.status == Status::Success && !e.outputPath.isEmpty() );
   QAction *chosen = menu.exec( mTable->viewport()->mapToGlobal( pos ) );
   if ( chosen == cancelAct )
@@ -300,9 +300,9 @@ QString RsGeorefTaskList::kindLabel( Kind k )
   switch ( k )
   {
     case Kind::WarpI2I:
-      return QObject::tr( "I2I 校正" );
+      return QObject::tr( "I2I Correction" );
     case Kind::WarpI2M:
-      return QObject::tr( "I2M 校正" );
+      return QObject::tr( "I2M Correction" );
   }
   return QStringLiteral( "?" );
 }
@@ -312,13 +312,13 @@ QString RsGeorefTaskList::statusLabel( Status s )
   switch ( s )
   {
     case Status::Running:
-      return QObject::tr( "运行中" );
+      return QObject::tr( "Running" );
     case Status::Success:
-      return QObject::tr( "完成" );
+      return QObject::tr( "Done" );
     case Status::Failed:
-      return QObject::tr( "失败" );
+      return QObject::tr( "Failed" );
     case Status::Cancelled:
-      return QObject::tr( "取消" );
+      return QObject::tr( "Cancel" );
   }
   return QStringLiteral( "?" );
 }
@@ -363,7 +363,7 @@ void RsGeorefTaskList::rebuildTable()
     auto *methodItem = new QTableWidgetItem(
       e.methodLabel.isEmpty() ? e.title : e.methodLabel );
     if ( !e.sourcePath.isEmpty() )
-      methodItem->setToolTip( tr( "源: %1" ).arg( e.sourcePath ) );
+      methodItem->setToolTip( tr( "Source: %1" ).arg( e.sourcePath ) );
     mTable->setItem( row, 2, methodItem );
 
     auto *st = new QTableWidgetItem( statusLabel( e.status ) );
@@ -419,7 +419,7 @@ void RsGeorefTaskList::rebuildTable()
     {
       QString tip = e.outputPath;
       if ( e.outputBytes > 0 )
-        tip += tr( "\n%1 字节" ).arg( e.outputBytes );
+        tip += tr( "\n%1 bytes" ).arg( e.outputBytes );
       outItem->setToolTip( tip );
     }
     mTable->setItem( row, 8, outItem );
@@ -439,7 +439,7 @@ void RsGeorefTaskList::updateSummary()
     else if ( e.status == Status::Failed )
       ++fail;
   }
-  mSummary->setText( tr( "任务: %1  |  运行中 %2  ·  完成 %3  ·  失败 %4" )
+  mSummary->setText( tr( "Tasks: %1  |  Running %2  ·  Done %3  ·  Failed %4" )
                        .arg( mEntries.size() )
                        .arg( run )
                        .arg( ok )

@@ -48,54 +48,54 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
 
     // ── 工程 Project ──────────────────────────────────────────────────
     {
-        RS_CMD( d, "project.new", QObject::tr( "新建工程" ),
-                QObject::tr( "创建空白工程，清除当前图层与视图状态。" ),
-                "new_project", QObject::tr( "工程" ) );
+        RS_CMD( d, "project.new", QObject::tr( "New Project" ),
+                QObject::tr( "Create an empty project, clearing current layers and view state." ),
+                "new_project", QObject::tr( "Project" ) );
         d.shortcut = QKeySequence::New;
         d.handler = [window] { window->newProject(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "project.open", QObject::tr( "打开工程..." ),
-                QObject::tr( "打开已保存的工程文件。" ),
-                "o_en", QObject::tr( "工程" ) );
+        RS_CMD( d, "project.open", QObject::tr( "Open Project..." ),
+                QObject::tr( "Opens a saved project file." ),
+                "o_en", QObject::tr( "Project" ) );
         d.shortcut = QKeySequence::Open;
         d.handler = [window] { window->openProject(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "project.save", QObject::tr( "保存工程" ),
-                QObject::tr( "保存当前工程到已有路径。" ),
-                "s_ve", QObject::tr( "工程" ) );
+        RS_CMD( d, "project.save", QObject::tr( "Save Project" ),
+                QObject::tr( "Saves the current project to its existing path." ),
+                "s_ve", QObject::tr( "Project" ) );
         d.shortcut = QKeySequence::Save;
         d.handler = [window] { window->saveProject(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "project.saveAs", QObject::tr( "工程另存为..." ),
-                QObject::tr( "将工程另存为新文件。" ),
-                "ex_ort", QObject::tr( "工程" ) );
+        RS_CMD( d, "project.saveAs", QObject::tr( "Save Project As..." ),
+                QObject::tr( "Saves the project as a new file." ),
+                "ex_ort", QObject::tr( "Project" ) );
         d.handler = [window] { window->saveProjectAs(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "project.importLayer", QObject::tr( "导入图层..." ),
-                QObject::tr( "导入栅格或矢量图层到工程。" ),
-                "i_ort", QObject::tr( "工程" ) );
+        RS_CMD( d, "project.importLayer", QObject::tr( "Import Layer..." ),
+                QObject::tr( "Import raster or vector layers into the project." ),
+                "i_ort", QObject::tr( "Project" ) );
         d.handler = [window] { window->importLayer(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "project.stacBrowse", QObject::tr( "浏览 STAC 目录..." ),
-                QObject::tr( "浏览 STAC 目录检索遥感数据。" ),
-                "cloud_sync", QObject::tr( "工程" ) );
+        RS_CMD( d, "project.stacBrowse", QObject::tr( "Browse STAC Catalog..." ),
+                QObject::tr( "Browses STAC catalogs to find remote-sensing data." ),
+                "cloud_sync", QObject::tr( "Project" ) );
         d.handler = [window] { window->browseStacCatalog(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "project.newLayout", QObject::tr( "新建布局..." ),
-                QObject::tr( "创建打印布局 / 出图。" ),
-                "print_l_yout", QObject::tr( "工程" ) );
+        RS_CMD( d, "project.newLayout", QObject::tr( "New Layout..." ),
+                QObject::tr( "Create a print layout / map product." ),
+                "print_l_yout", QObject::tr( "Project" ) );
         // The layout bench opens the same designer — keep the workbench id
         // truthful when the surface goes through the command (review L #8).
         d.handler = [window] {
@@ -107,8 +107,8 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "project.exit", QObject::tr( "退出" ),
-                QObject::tr( "退出应用程序。" ), QString(), QObject::tr( "工程" ) );
+        RS_CMD( d, "project.exit", QObject::tr( "Exit" ),
+                QObject::tr( "Quits the application." ), QString(), QObject::tr( "Project" ) );
         d.shortcut = QKeySequence::Quit;
         d.destructive = true;
         d.handler = [window] { window->close(); };
@@ -117,20 +117,20 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
 
     // ── 图层 Layer ────────────────────────────────────────────────────
     {
-        RS_CMD( d, "layer.addRaster", QObject::tr( "添加栅格图层..." ),
-                QObject::tr( "从文件添加栅格图层。" ), "r_ster", QObject::tr( "图层" ) );
+        RS_CMD( d, "layer.addRaster", QObject::tr( "Add Raster Layer..." ),
+                QObject::tr( "Add a raster layer from a file." ), "r_ster", QObject::tr( "Layer" ) );
         d.handler = [window] { window->addRasterLayer(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "layer.addVector", QObject::tr( "添加矢量图层..." ),
-                QObject::tr( "从文件添加矢量图层。" ), "vector", QObject::tr( "图层" ) );
+        RS_CMD( d, "layer.addVector", QObject::tr( "Add Vector Layer..." ),
+                QObject::tr( "Add a vector layer from a file." ), "vector", QObject::tr( "Layer" ) );
         d.handler = [window] { window->addVectorLayer(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "layer.properties", QObject::tr( "图层属性..." ),
-                QObject::tr( "打开当前图层属性。" ), "met_d_t_", QObject::tr( "图层" ) );
+        RS_CMD( d, "layer.properties", QObject::tr( "Layer Properties..." ),
+                QObject::tr( "Opens the current layer properties." ), "met_d_t_", QObject::tr( "Layer" ) );
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+I" ) );
         d.availability = ContextRules::layerSelected;
         d.explain = [id = d.id]( const SelectionContextSnapshot &s ) { return ContextRules::unavailabilityReason( s, id ); };
@@ -138,8 +138,8 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "layer.remove", QObject::tr( "移除图层" ),
-                QObject::tr( "从工程中移除当前图层。" ), "er_se", QObject::tr( "图层" ) );
+        RS_CMD( d, "layer.remove", QObject::tr( "Remove Layer" ),
+                QObject::tr( "Remove the current layer from the project." ), "er_se", QObject::tr( "Layer" ) );
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+Delete" ) );
         d.availability = ContextRules::layerSelected;
         d.explain = [id = d.id]( const SelectionContextSnapshot &s ) { return ContextRules::unavailabilityReason( s, id ); };
@@ -148,8 +148,8 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "layer.zoomTo", QObject::tr( "缩放到图层" ),
-                QObject::tr( "缩放到当前图层范围。" ), "l_yer_m_n_ger", QObject::tr( "图层" ) );
+        RS_CMD( d, "layer.zoomTo", QObject::tr( "Zoom to Layer" ),
+                QObject::tr( "Zooms to the current layer's extent." ), "l_yer_m_n_ger", QObject::tr( "Layer" ) );
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+L" ) );
         d.availability = ContextRules::layerSelected;
         d.explain = [id = d.id]( const SelectionContextSnapshot &s ) { return ContextRules::unavailabilityReason( s, id ); };
@@ -157,9 +157,9 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "layer.toggleEditing", QObject::tr( "切换编辑" ),
-                QObject::tr( "开启/关闭当前矢量图层编辑。" ),
-                "mActionToggleEditing", QObject::tr( "矢量编辑" ) );
+        RS_CMD( d, "layer.toggleEditing", QObject::tr( "Toggle Editing" ),
+                QObject::tr( "Toggles editing of the current vector layer." ),
+                "mActionToggleEditing", QObject::tr( "Vector Editing" ) );
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+E" ) );
         d.checkable = true;
         d.availability = ContextRules::editingAvailable;
@@ -169,24 +169,24 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "layer.saveEdits", QObject::tr( "保存编辑" ),
-                QObject::tr( "保存矢量编辑。" ), "mActionSaveEdits", QObject::tr( "矢量编辑" ) );
+        RS_CMD( d, "layer.saveEdits", QObject::tr( "Save Edits" ),
+                QObject::tr( "Saves vector edits." ), "mActionSaveEdits", QObject::tr( "Vector Editing" ) );
         d.availability = ContextRules::editingActive;
         d.explain = [id = d.id]( const SelectionContextSnapshot &s ) { return ContextRules::unavailabilityReason( s, id ); };
         d.handler = [window] { window->saveEdits(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "layer.newVector", QObject::tr( "新建 Shapefile 图层..." ),
-                QObject::tr( "创建新的 Shapefile 矢量图层。" ),
-                "new_fe_ture_cl_ss", QObject::tr( "图层" ) );
+        RS_CMD( d, "layer.newVector", QObject::tr( "New Shapefile Layer..." ),
+                QObject::tr( "Create a new Shapefile vector layer." ),
+                "new_fe_ture_cl_ss", QObject::tr( "Layer" ) );
         d.handler = [window] { window->newVectorLayer(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "layer.attributeTable", QObject::tr( "打开属性表" ),
-                QObject::tr( "查看/编辑当前矢量图层属性表。" ),
-                "t_ble", QObject::tr( "图层" ) );
+        RS_CMD( d, "layer.attributeTable", QObject::tr( "Open Attribute Table" ),
+                QObject::tr( "View/edit the current vector layer's attribute table." ),
+                "t_ble", QObject::tr( "Layer" ) );
         d.availability = ContextRules::vectorSelected;
         d.explain = [id = d.id]( const SelectionContextSnapshot &s ) { return ContextRules::unavailabilityReason( s, id ); };
         d.handler = [window] { window->openAttributeTable(); };
@@ -195,71 +195,71 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
 
     // ── 视图 / 地图工具 View ─────────────────────────────────────────
     {
-        RS_CMD( d, "map.zoomIn", QObject::tr( "放大" ), QObject::tr( "放大地图视图。" ),
-                "zoo_in", QObject::tr( "地图" ) );
+        RS_CMD( d, "map.zoomIn", QObject::tr( "Zoom In" ), QObject::tr( "Zooms the map view in." ),
+                "zoo_in", QObject::tr( "Map" ) );
         d.shortcut = QKeySequence::ZoomIn;
         d.handler = [window] { window->zoomIn(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "map.zoomOut", QObject::tr( "缩小" ), QObject::tr( "缩小地图视图。" ),
-                "zoo_out", QObject::tr( "地图" ) );
+        RS_CMD( d, "map.zoomOut", QObject::tr( "Zoom Out" ), QObject::tr( "Zooms the map view out." ),
+                "zoo_out", QObject::tr( "Map" ) );
         d.shortcut = QKeySequence::ZoomOut;
         d.handler = [window] { window->zoomOut(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "map.zoomFull", QObject::tr( "全图" ), QObject::tr( "缩放到所有图层范围。" ),
-                "full_extent", QObject::tr( "地图" ) );
+        RS_CMD( d, "map.zoomFull", QObject::tr( "Full Extent" ), QObject::tr( "Zooms to the extent of all layers." ),
+                "full_extent", QObject::tr( "Map" ) );
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+F" ) );
         d.handler = [window] { window->zoomFullExtent(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "map.pan", QObject::tr( "平移" ), QObject::tr( "平移地图。" ),
-                "p_n", QObject::tr( "地图" ) );
+        RS_CMD( d, "map.pan", QObject::tr( "Pan" ), QObject::tr( "Pans the map." ),
+                "p_n", QObject::tr( "Map" ) );
         d.shortcut = QKeySequence( QStringLiteral( "H" ) );
         d.handler = [window] { window->panMap(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "map.identify", QObject::tr( "识别" ),
-                QObject::tr( "点击地图查询要素/像元属性。" ), "identify", QObject::tr( "地图" ) );
+        RS_CMD( d, "map.identify", QObject::tr( "Identify" ),
+                QObject::tr( "Click the map to query feature / pixel attributes." ), "identify", QObject::tr( "Map" ) );
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+I" ) );
         d.handler = [window] { window->identifyFeatures(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "map.measureDistance", QObject::tr( "测距" ), QObject::tr( "量测距离。" ),
-                "me_sure_dist", QObject::tr( "地图" ) );
+        RS_CMD( d, "map.measureDistance", QObject::tr( "Measure Distance" ), QObject::tr( "Measures distance." ),
+                "me_sure_dist", QObject::tr( "Map" ) );
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+D" ) );
         d.handler = [window] { window->measureDistance(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "map.measureArea", QObject::tr( "测面" ), QObject::tr( "量测面积。" ),
-                "me_sure_are_", QObject::tr( "地图" ) );
+        RS_CMD( d, "map.measureArea", QObject::tr( "Measure Area" ), QObject::tr( "Measures area." ),
+                "me_sure_are_", QObject::tr( "Map" ) );
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+A" ) );
         d.handler = [window] { window->measureArea(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "map.refresh", QObject::tr( "刷新" ), QObject::tr( "刷新地图渲染。" ),
-                "refresh_view", QObject::tr( "地图" ) );
+        RS_CMD( d, "map.refresh", QObject::tr( "Refresh" ), QObject::tr( "Refreshes the map rendering." ),
+                "refresh_view", QObject::tr( "Map" ) );
         d.shortcut = QKeySequence( QStringLiteral( "F5" ) );
         d.handler = [window] { window->refreshMap(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "map.compareLayers", QObject::tr( "图层对比..." ),
-                QObject::tr( "左右并排对比两个图层。" ), "overl_y", QObject::tr( "地图" ) );
+        RS_CMD( d, "map.compareLayers", QObject::tr( "Layer Comparison..." ),
+                QObject::tr( "Compare two layers side by side." ), "overl_y", QObject::tr( "Map" ) );
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+C" ) );
         d.handler = [window] { window->openComparisonDialog(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "map.swipe", QObject::tr( "卷帘对比" ),
-                QObject::tr( "在地图上拖动分割线对比上下图层。" ), "s_lit", QObject::tr( "地图" ) );
+        RS_CMD( d, "map.swipe", QObject::tr( "Swipe Comparison" ),
+                QObject::tr( "Drag the divider on the map to compare the layers above and below." ), "s_lit", QObject::tr( "Map" ) );
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+S" ) );
         d.handler = [window] { window->toggleSwipeTool(); };
         registry->registerCommand( d );
@@ -270,34 +270,34 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
     // projects these actions instead of defining competing sequences
     // (goal §I: one owner per shortcut).
     {
-        RS_CMD( d, "workbench.processingHistory", QObject::tr( "处理历史" ),
-                QObject::tr( "查看跨任务中心/工作流的统一处理历史。" ),
-                "b_tch_queue", QObject::tr( "工作区" ) );
+        RS_CMD( d, "workbench.processingHistory", QObject::tr( "Processing History" ),
+                QObject::tr( "View the unified processing history across the Task Center / workflows." ),
+                "b_tch_queue", QObject::tr( "Workspace" ) );
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+H" ) );
         d.handler = [window] { window->showUnifiedProcessingHistory(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "workbench.temporal", QObject::tr( "时序工作台" ),
-                QObject::tr( "浏览时序集合、筛选日期并预览时相。" ),
-                "ch_rt", QObject::tr( "工作区" ) );
+        RS_CMD( d, "workbench.temporal", QObject::tr( "Temporal Workbench" ),
+                QObject::tr( "Browse time series collections, filter dates and preview epochs." ),
+                "ch_rt", QObject::tr( "Workspace" ) );
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+T" ) );
         d.handler = [window] { window->showTemporalWorkbench(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "workbench.datasetExperiment", QObject::tr( "数据集与实验" ),
-                QObject::tr( "浏览数据集版本、样本、运行与指标对比。" ),
-                "d_t_b_se", QObject::tr( "工作区" ) );
+        RS_CMD( d, "workbench.datasetExperiment", QObject::tr( "Datasets and Experiments" ),
+                QObject::tr( "Browse dataset versions, samples, runs and metric comparisons." ),
+                "d_t_b_se", QObject::tr( "Workspace" ) );
         // Ctrl+Shift+D is taken by map.measureDistance — use E (E-xperiment).
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+E" ) );
         d.handler = [window] { window->showDatasetExperimentBench(); };
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "workbench.model", QObject::tr( "模型工作台" ),
-                QObject::tr( "查看模型目录、就绪状态并提交测试推理。" ),
-                "model_builder", QObject::tr( "工作区" ) );
+        RS_CMD( d, "workbench.model", QObject::tr( "Model Workbench" ),
+                QObject::tr( "Browse the model catalog, readiness and submit test inference." ),
+                "model_builder", QObject::tr( "Workspace" ) );
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+M" ) );
         d.handler = [window] { window->showModelBench(); };
         registry->registerCommand( d );
@@ -305,9 +305,9 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
 
     // ── 工作区 Workbenches ───────────────────────────────────────────
     {
-        RS_CMD( d, "workbench.classify", QObject::tr( "分类工作区..." ),
-                QObject::tr( "打开监督/非监督分类交互工作区。" ),
-                "su_ervised", QObject::tr( "工作区" ) );
+        RS_CMD( d, "workbench.classify", QObject::tr( "Classification Workspace..." ),
+                QObject::tr( "Opens the interactive supervised/unsupervised classification workspace." ),
+                "su_ervised", QObject::tr( "Workspace" ) );
         // Route through WorkbenchHost::activate (review L #8): the opener
         // alone left m_activeId on the previous bench, desyncing the switcher
         // and the selection context's workbench projection.
@@ -320,9 +320,9 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "workbench.georefI2I", QObject::tr( "影像对影像配准 (I2I)..." ),
-                QObject::tr( "双画布 SRC|REF 同名点配准，支持 SIFT。不含 RPC。" ),
-                "coregistr_tion", QObject::tr( "工作区" ) );
+        RS_CMD( d, "workbench.georefI2I", QObject::tr( "Image-to-Image Registration (I2I)..." ),
+                QObject::tr( "Two-canvas SRC|REF ground-point registration with SIFT support. No RPC." ),
+                "coregistr_tion", QObject::tr( "Workspace" ) );
         d.handler = [window] {
             if ( sicnu::app::WorkbenchHost *host = window->workbenchHost() )
                 host->activate( QStringLiteral( "georef-i2i" ) );
@@ -332,9 +332,9 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "workbench.georefI2M", QObject::tr( "影像对地图配准 (I2M)..." ),
-                QObject::tr( "源影像 + 主工程地图取点；支持 RPC Physical。" ),
-                "geocorrection", QObject::tr( "工作区" ) );
+        RS_CMD( d, "workbench.georefI2M", QObject::tr( "Image-to-Map Registration (I2M)..." ),
+                QObject::tr( "Source image + main-project map picking; RPC Physical supported." ),
+                "geocorrection", QObject::tr( "Workspace" ) );
         d.handler = [window] {
             if ( sicnu::app::WorkbenchHost *host = window->workbenchHost() )
                 host->activate( QStringLiteral( "georef-i2m" ) );
@@ -344,9 +344,9 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "workbench.obia", QObject::tr( "对象级分类 (OBIA)..." ),
-                QObject::tr( "分割 + 对象特征 + 面向对象分类。" ),
-                "seg_ent_tion", QObject::tr( "工作区" ) );
+        RS_CMD( d, "workbench.obia", QObject::tr( "Object-Based Classification (OBIA)..." ),
+                QObject::tr( "Segmentation + object features + object-based classification." ),
+                "seg_ent_tion", QObject::tr( "Workspace" ) );
         d.handler = [window] {
             if ( sicnu::app::WorkbenchHost *host = window->workbenchHost() )
                 host->activate( QStringLiteral( "obia" ) );
@@ -359,72 +359,72 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
     // ── 处理 Processing（对话框开放器批次） ──────────────────────────
     auto rasterTool = [&]( const char *id, const QString &title, const QString &desc,
                            const QString &icon, void ( QgisDesktopWindow::*slot )() ) {
-        CommandDefinition d = base( id, title, desc, icon, QObject::tr( "处理" ) );
+        CommandDefinition d = base( id, title, desc, icon, QObject::tr( "Processing" ) );
         d.availability = ContextRules::rasterSelected;
         d.explain = [id = d.id]( const SelectionContextSnapshot &s ) { return ContextRules::unavailabilityReason( s, id ); };
         d.handler = [window, slot] { ( window->*slot )(); };
         registry->registerCommand( d );
     };
-    rasterTool( "rs.bandMath", QObject::tr( "波段数学..." ),
-                QObject::tr( "表达式驱动的多波段运算。" ), "b_nd_m_th",
+    rasterTool( "rs.bandMath", QObject::tr( "Band Math..." ),
+                QObject::tr( "Expression-driven multiband math." ), "b_nd_m_th",
                 &QgisDesktopWindow::openBandMathDialog );
-    rasterTool( "rs.spectralIndex", QObject::tr( "光谱指数..." ),
-                QObject::tr( "NDVI / NDWI / NDBI 等常用指数计算。" ), "s_ectr_l_profile",
+    rasterTool( "rs.spectralIndex", QObject::tr( "Spectral Indices..." ),
+                QObject::tr( "Common indices such as NDVI / NDWI / NDBI." ), "s_ectr_l_profile",
                 &QgisDesktopWindow::openSpectralIndexDialog );
-    rasterTool( "rs.contrastStretch", QObject::tr( "对比度拉伸..." ),
-                QObject::tr( "线性 / 百分比裁剪 / 直方图均衡输出。" ), "enh_nce",
+    rasterTool( "rs.contrastStretch", QObject::tr( "Contrast Stretch..." ),
+                QObject::tr( "Linear / percent clip / histogram equalization output." ), "enh_nce",
                 &QgisDesktopWindow::openContrastStretchDialog );
-    rasterTool( "rs.spatialFilter", QObject::tr( "空间滤波..." ),
-                QObject::tr( "均值 / 高斯 / 中值 / 拉普拉斯卷积。" ), "r_ster_c_lc",
+    rasterTool( "rs.spatialFilter", QObject::tr( "Spatial Filtering..." ),
+                QObject::tr( "Mean / Gaussian / median / Laplacian convolution." ), "r_ster_c_lc",
                 &QgisDesktopWindow::openSpatialFilterDialog );
-    rasterTool( "rs.pca", QObject::tr( "主成分分析..." ),
-                QObject::tr( "多波段 PCA 变换与逆变换。" ), "pca", &QgisDesktopWindow::openPcaDialog );
-    rasterTool( "rs.bandRatio", QObject::tr( "波段比值..." ),
-                QObject::tr( "两波段比值 / 归一化比值输出。" ), "b_nd_m_th_pro",
+    rasterTool( "rs.pca", QObject::tr( "Principal Component Analysis..." ),
+                QObject::tr( "Multiband PCA forward and inverse transforms." ), "pca", &QgisDesktopWindow::openPcaDialog );
+    rasterTool( "rs.bandRatio", QObject::tr( "Band Ratio..." ),
+                QObject::tr( "Two-band ratio / normalized-ratio output." ), "b_nd_m_th_pro",
                 &QgisDesktopWindow::openBandRatioDialog );
-    rasterTool( "rs.mosaic", QObject::tr( "镶嵌..." ),
-                QObject::tr( "多景栅格镶嵌为连续影像。" ), "mos_ic",
+    rasterTool( "rs.mosaic", QObject::tr( "Mosaic..." ),
+                QObject::tr( "Mosaic multiple rasters into a continuous image." ), "mos_ic",
                 &QgisDesktopWindow::openMosaicDialog );
-    rasterTool( "rs.changeDetection", QObject::tr( "变化检测..." ),
-                QObject::tr( "双时相差异 / 比值 / CVA 检测。" ), "ch_nge_detect",
+    rasterTool( "rs.changeDetection", QObject::tr( "Change Detection..." ),
+                QObject::tr( "Two-date differencing / ratio / CVA detection." ), "ch_nge_detect",
                 &QgisDesktopWindow::openChangeDetectionDialog );
-    rasterTool( "rs.atmospheric", QObject::tr( "大气校正..." ),
-                QObject::tr( "6S / DOS 反射率产品。" ), "at_os_corr",
+    rasterTool( "rs.atmospheric", QObject::tr( "Atmospheric Correction..." ),
+                QObject::tr( "6S / DOS reflectance products." ), "at_os_corr",
                 &QgisDesktopWindow::openAtmosphericCorrectionDialog );
-    rasterTool( "rs.qaMask", QObject::tr( "QA 掩膜生成..." ),
-                QObject::tr( " Landsat/Sentinel QA 波段解码为掩膜。" ), "cloud_m_sk",
+    rasterTool( "rs.qaMask", QObject::tr( "Generate QA Mask..." ),
+                QObject::tr( " Decodes Landsat/Sentinel QA bands into a mask." ), "cloud_m_sk",
                 &QgisDesktopWindow::openQaMaskDialog );
-    rasterTool( "rs.applyMask", QObject::tr( "应用掩膜..." ),
-                QObject::tr( "以掩膜裁剪/置 NoData。" ), "fill_nod_t_",
+    rasterTool( "rs.applyMask", QObject::tr( "Apply Mask..." ),
+                QObject::tr( "Clip with a mask / set NoData." ), "fill_nod_t_",
                 &QgisDesktopWindow::openApplyMaskDialog );
-    rasterTool( "rs.radiometric", QObject::tr( "辐射定标..." ),
-                QObject::tr( "DN → 辐亮度 / 反射率。" ), "r_dio__c_lib",
+    rasterTool( "rs.radiometric", QObject::tr( "Radiometric Calibration..." ),
+                QObject::tr( "DN → radiance / reflectance." ), "r_dio__c_lib",
                 &QgisDesktopWindow::openRadiometricCalibrationDialog );
-    rasterTool( "rs.ortho", QObject::tr( "正射纠正..." ),
-                QObject::tr( "RPC / GCP 几何纠正到地图坐标。" ), "geocorrection",
+    rasterTool( "rs.ortho", QObject::tr( "Orthorectification..." ),
+                QObject::tr( "RPC / GCP geometric correction to map coordinates." ), "geocorrection",
                 &QgisDesktopWindow::openOrthorectificationDialog );
-    rasterTool( "rs.terrain", QObject::tr( "地形分析..." ),
-                QObject::tr( "坡度 / 坡向 / 山影等 DEM 产品。" ), "hillsh_de",
+    rasterTool( "rs.terrain", QObject::tr( "Terrain Analysis..." ),
+                QObject::tr( "DEM products such as slope / aspect / hillshade." ), "hillsh_de",
                 &QgisDesktopWindow::openTerrainDialog );
-    rasterTool( "rs.fusion", QObject::tr( "影像融合..." ),
-                QObject::tr( "全色锐化 (Brovey / IHS / Gram-Schmidt)。" ), "p_nsh_r_en",
+    rasterTool( "rs.fusion", QObject::tr( "Image Fusion..." ),
+                QObject::tr( "Pansharpening (Brovey / IHS / Gram-Schmidt)." ), "p_nsh_r_en",
                 &QgisDesktopWindow::openFusionDialog );
-    rasterTool( "rs.temporal", QObject::tr( "时间序列分析..." ),
-                QObject::tr( "时序 NDVI / 物候曲线分析。" ), "ti_e_series",
+    rasterTool( "rs.temporal", QObject::tr( "Time Series Analysis..." ),
+                QObject::tr( "Time-series NDVI / phenology curve analysis." ), "ti_e_series",
                 &QgisDesktopWindow::openTemporalAnalysisDialog );
 
     // SAR 感知：斑点滤波要求 raster + SAR 双条件。
     {
-        RS_CMD( d, "rs.speckle", QObject::tr( "斑点滤波 (SAR)..." ),
-                QObject::tr( "Lee / Frost / Kuan / Gamma-MAP。需要 SAR 栅格。" ),
-                "sar_process", QObject::tr( "处理" ) );
+        RS_CMD( d, "rs.speckle", QObject::tr( "Speckle Filtering (SAR)..." ),
+                QObject::tr( "Lee / Frost / Kuan / Gamma-MAP. Requires a SAR raster." ),
+                "sar_process", QObject::tr( "Processing" ) );
         d.availability = []( const SelectionContextSnapshot &s ) {
             return ContextRules::rasterSelected( s ) && ContextRules::sarSelected( s );
         };
         d.explain = []( const SelectionContextSnapshot &s ) {
             if ( !ContextRules::rasterSelected( s ) )
-                return QObject::tr( "需要选中栅格图层" );
-            return QObject::tr( "需要选中 SAR 数据" );
+                return QObject::tr( "A raster layer must be selected" );
+            return QObject::tr( "SAR data must be selected" );
         };
         d.handler = [window] { window->openSpeckleFilterDialog(); };
         registry->registerCommand( d );
@@ -432,9 +432,9 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
 
     // 提取波段：菜单内联 lambda 能力收编为命令（行为一致：模态对话框）。
     {
-        RS_CMD( d, "rs.extractBands", QObject::tr( "提取波段..." ),
-                QObject::tr( "从多波段栅格提取单一波段保存。" ),
-                "extr_ct_b_nd", QObject::tr( "处理" ) );
+        RS_CMD( d, "rs.extractBands", QObject::tr( "Extract Band..." ),
+                QObject::tr( "Extract and save a single band from a multiband raster." ),
+                "extr_ct_b_nd", QObject::tr( "Processing" ) );
         d.availability = ContextRules::rasterSelected;
         d.explain = [id = d.id]( const SelectionContextSnapshot &s ) { return ContextRules::unavailabilityReason( s, id ); };
         d.handler = [window] {
@@ -452,9 +452,9 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
     // discoverable via palette/help. No default shortcut: the canonical
     // Ctrl+N/O/S belong to project.new/open/save.) ──
     {
-        RS_CMD( d, "workflow.new", QObject::tr( "新建工作流" ),
-                QObject::tr( "在流程编辑器中新建空工作流。" ),
-                "new_project", QObject::tr( "工作流" ) );
+        RS_CMD( d, "workflow.new", QObject::tr( "New Workflow" ),
+                QObject::tr( "Creates an empty workflow in the pipeline editor." ),
+                "new_project", QObject::tr( "Workflow" ) );
         d.handler = [window] {
             if ( auto *dock = window->pipelineDock() )
             {
@@ -466,9 +466,9 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "workflow.open", QObject::tr( "打开工作流..." ),
-                QObject::tr( "打开 .json 工作流文件到流程编辑器。" ),
-                "document-open", QObject::tr( "工作流" ) );
+        RS_CMD( d, "workflow.open", QObject::tr( "Open Workflow..." ),
+                QObject::tr( "Opens a .json workflow file in the pipeline editor." ),
+                "document-open", QObject::tr( "Workflow" ) );
         d.handler = [window] {
             if ( auto *dock = window->pipelineDock() )
             {
@@ -480,9 +480,9 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "workflow.save", QObject::tr( "保存工作流" ),
-                QObject::tr( "保存当前工作流为 .json 文件。" ),
-                "document-save", QObject::tr( "工作流" ) );
+        RS_CMD( d, "workflow.save", QObject::tr( "Save Workflow" ),
+                QObject::tr( "Saves the current workflow as a .json file." ),
+                "document-save", QObject::tr( "Workflow" ) );
         d.handler = [window] {
             if ( auto *dock = window->pipelineDock() )
                 dock->onSaveClicked();
@@ -490,9 +490,9 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "workflow.run", QObject::tr( "运行全流程" ),
-                QObject::tr( "按拓扑顺序调度执行当前工作流。" ),
-                "media-playback-start", QObject::tr( "工作流" ) );
+        RS_CMD( d, "workflow.run", QObject::tr( "Run Full Pipeline" ),
+                QObject::tr( "Schedules and runs the current workflow in topological order." ),
+                "media-playback-start", QObject::tr( "Workflow" ) );
         d.handler = [window] {
             if ( auto *controller = window->sessionController() )
                 controller->runFullWorkflow();
@@ -500,9 +500,9 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         registry->registerCommand( d );
     }
     {
-        RS_CMD( d, "workflow.stop", QObject::tr( "停止工作流" ),
-                QObject::tr( "停止正在运行的流程任务。" ),
-                "media-playback-stop", QObject::tr( "工作流" ) );
+        RS_CMD( d, "workflow.stop", QObject::tr( "Stop Workflow" ),
+                QObject::tr( "Stops the running pipeline task." ),
+                "media-playback-stop", QObject::tr( "Workflow" ) );
         d.handler = [window] {
             if ( auto *controller = window->sessionController() )
                 controller->stopWorkflow();

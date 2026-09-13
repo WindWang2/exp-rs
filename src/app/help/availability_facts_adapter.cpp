@@ -16,28 +16,28 @@ const QVector<AvailabilityFactsAdapter::Requirement> &requirementsFor( const QSt
 {
     using R = AvailabilityFactsAdapter::Requirement;
     static const QVector<R> layerSelected = {
-        { "已选中图层", &ContextRules::layerSelected },
+        { "layer selected", &ContextRules::layerSelected },
     };
     static const QVector<R> vectorSelected = {
-        { "已选中图层", &ContextRules::layerSelected },
-        { "图层为矢量数据", &ContextRules::vectorSelected },
+        { "layer selected", &ContextRules::layerSelected },
+        { "layer is vector data", &ContextRules::vectorSelected },
     };
     static const QVector<R> editingAvailable = {
-        { "已选中图层", &ContextRules::layerSelected },
-        { "图层为矢量数据", &ContextRules::vectorSelected },
-        { "图层支持编辑会话", &ContextRules::editingAvailable },
+        { "layer selected", &ContextRules::layerSelected },
+        { "layer is vector data", &ContextRules::vectorSelected },
+        { "layer supports editing sessions", &ContextRules::editingAvailable },
     };
     static const QVector<R> editingActive = {
-        { "已选中图层", &ContextRules::layerSelected },
-        { "图层为矢量数据", &ContextRules::vectorSelected },
-        { "编辑会话已开启", &ContextRules::editingActive },
+        { "layer selected", &ContextRules::layerSelected },
+        { "layer is vector data", &ContextRules::vectorSelected },
+        { "Editing session enabled", &ContextRules::editingActive },
     };
     static const QVector<R> rasterSelected = {
-        { "已选中栅格图层", &ContextRules::rasterSelected },
+        { "raster layer selected", &ContextRules::rasterSelected },
     };
     static const QVector<R> sarRasterSelected = {
-        { "已选中栅格图层", &ContextRules::rasterSelected },
-        { "数据为 SAR 影像", &ContextRules::sarSelected },
+        { "raster layer selected", &ContextRules::rasterSelected },
+        { "data is SAR imagery", &ContextRules::sarSelected },
     };
     static const QVector<R> none;
 

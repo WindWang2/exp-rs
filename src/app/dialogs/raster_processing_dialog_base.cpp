@@ -89,7 +89,7 @@ bool RasterProcessingDialogBase::validateInputs()
   QString path = outputPath();
   if ( path.isEmpty() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请指定输出文件路径。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "Specify the output file path." ) );
     if ( m_outputEdit )
       m_outputEdit->setFocus();
     return false;
@@ -97,7 +97,7 @@ bool RasterProcessingDialogBase::validateInputs()
 
   if ( !m_rasterLayer || !m_rasterLayer->isValid() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "未选择有效的栅格图层。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "No valid raster layer selected." ) );
     return false;
   }
 
@@ -120,20 +120,20 @@ void RasterProcessingDialogBase::setupHelpBanner( QVBoxLayout *layout )
 
   auto *stepCol = new QVBoxLayout();
   stepCol->setSpacing( 2 );
-  auto *step = new QLabel( tr( "流程" ), frame );
+  auto *step = new QLabel( tr( "Pipeline" ), frame );
   step->setObjectName( QStringLiteral( "rsDialogStepBadge" ) );
   auto *lbl = new QLabel( SicnuDialogHelp::shortForTool( toolName(), dialogTitle() ), frame );
   lbl->setWordWrap( true );
   lbl->setObjectName( QStringLiteral( "rsDialogHelpSummary" ) );
-  SicnuDialogHelp::tip( lbl, tr( "本工具功能简介。点「帮助」查看参数说明。" ) );
+  SicnuDialogHelp::tip( lbl, tr( "Brief overview of this tool. Press 'Help' for parameter explanations." ) );
   stepCol->addWidget( step );
   stepCol->addWidget( lbl );
 
   hl->addLayout( stepCol, 1 );
-  auto *more = new QPushButton( tr( "参数说明" ), frame );
+  auto *more = new QPushButton( tr( "Parameter Description" ), frame );
   more->setObjectName( QStringLiteral( "rsDialogHelpBtn" ) );
   SicnuUi::markSecondary( more );
-  SicnuDialogHelp::tip( more, tr( "打开本功能的说明文档。" ) );
+  SicnuDialogHelp::tip( more, tr( "Opens the documentation for this feature." ) );
   connect( more, &QPushButton::clicked, this, [this]() {
     SicnuDialogHelp::showHelpBox( this, dialogTitle(), dialogHelpHtml() );
   } );
@@ -150,7 +150,7 @@ QGroupBox *RasterProcessingDialogBase::setupInputGroup( QVBoxLayout *layout, con
 {
   if ( !layout )
     return nullptr;
-  const QString gTitle = title.isEmpty() ? tr( "输入数据" ) : title;
+  const QString gTitle = title.isEmpty() ? tr( "Input Data" ) : title;
   auto *group = SicnuUi::makeGroup( this, gTitle );
   auto *gl = new QVBoxLayout( group );
   gl->setContentsMargins( 12, 10, 12, 10 );
@@ -163,7 +163,7 @@ QGroupBox *RasterProcessingDialogBase::setupParamGroup( QVBoxLayout *layout, con
 {
   if ( !layout )
     return nullptr;
-  const QString gTitle = title.isEmpty() ? tr( "算法参数" ) : title;
+  const QString gTitle = title.isEmpty() ? tr( "Algorithm Parameters" ) : title;
   auto *group = SicnuUi::makeGroup( this, gTitle );
   auto *gl = new QVBoxLayout( group );
   gl->setContentsMargins( 12, 10, 12, 10 );
@@ -176,7 +176,7 @@ QGroupBox *RasterProcessingDialogBase::setupAdvancedGroup( QVBoxLayout *layout, 
 {
   if ( !layout )
     return nullptr;
-  const QString gTitle = title.isEmpty() ? tr( "高级选项" ) : title;
+  const QString gTitle = title.isEmpty() ? tr( "Advanced Options" ) : title;
   auto *group = SicnuUi::makeGroup( this, gTitle );
   auto *gl = new QVBoxLayout( group );
   gl->setContentsMargins( 12, 10, 12, 10 );
@@ -189,8 +189,8 @@ QGroupBox *RasterProcessingDialogBase::setupOutputGroup( QVBoxLayout *layout, co
 {
   if ( !layout )
     return nullptr;
-  const QString gTitle = title.isEmpty() ? tr( "输出配置" ) : title;
-  auto *group = SicnuUi::makeGroup( this, gTitle, tr( "结果保存路径与输出选项。运行前必须填写；建议使用 .tif 扩展名。" ) );
+  const QString gTitle = title.isEmpty() ? tr( "Output Settings" ) : title;
+  auto *group = SicnuUi::makeGroup( this, gTitle, tr( "Result save path and output options. Required before running; the .tif extension is recommended." ) );
   auto *gl = new QVBoxLayout( group );
   gl->setContentsMargins( 12, 10, 12, 10 );
   gl->setSpacing( 8 );
@@ -200,14 +200,14 @@ QGroupBox *RasterProcessingDialogBase::setupOutputGroup( QVBoxLayout *layout, co
 
   m_outputEdit = new QLineEdit( group );
   m_outputEdit->setObjectName( QStringLiteral( "rsDialogOutputEdit" ) );
-  m_outputEdit->setPlaceholderText( tr( "选择或输入输出 GeoTIFF 文件路径 (*.tif)..." ) );
-  SicnuDialogHelp::tip( m_outputEdit, tr( "结果保存路径。建议使用 .tif 扩展名。" ) );
+  m_outputEdit->setPlaceholderText( tr( "Choose or enter the output GeoTIFF file path (*.tif)..." ) );
+  SicnuDialogHelp::tip( m_outputEdit, tr( "Result save path; the .tif extension is recommended." ) );
 
-  auto *browseBtn = new QPushButton( tr( "浏览…" ), group );
+  auto *browseBtn = new QPushButton( tr( "Browse..." ), group );
   browseBtn->setObjectName( QStringLiteral( "rsDialogBrowseBtn" ) );
   SicnuUi::markSecondary( browseBtn );
   browseBtn->setFixedWidth( 76 );
-  SicnuDialogHelp::tip( browseBtn, tr( "浏览选择输出文件位置。" ) );
+  SicnuDialogHelp::tip( browseBtn, tr( "Browse and choose the output file location." ) );
   connect( browseBtn, &QPushButton::clicked, this, &RasterProcessingDialogBase::browseOutput );
 
   auto *row = new QHBoxLayout();
@@ -216,14 +216,14 @@ QGroupBox *RasterProcessingDialogBase::setupOutputGroup( QVBoxLayout *layout, co
   row->addWidget( m_outputEdit, 1 );
   row->addWidget( browseBtn );
 
-  auto *pathLabel = new QLabel( tr( "输出路径" ), group );
-  SicnuDialogHelp::tip( pathLabel, tr( "输出 GeoTIFF 路径。运行前必须填写。" ) );
+  auto *pathLabel = new QLabel( tr( "Output Path" ), group );
+  SicnuDialogHelp::tip( pathLabel, tr( "Output GeoTIFF path. Required before running." ) );
   form->addRow( pathLabel, row );
 
   gl->addLayout( form );
 
   auto *hint = SicnuUi::makeHintLabel(
-    group, tr( "提示：处理完成后可从日志或工程图层中加载结果。" ) );
+    group, tr( "Tip: after processing, results can be loaded from the log or project layers." ) );
   gl->addWidget( hint );
 
   layout->addWidget( group );
@@ -244,29 +244,29 @@ void RasterProcessingDialogBase::setupButtonBar( QVBoxLayout *layout )
   m_buttonBox->setObjectName( QStringLiteral( "rsDialogButtonBox" ) );
 
   // Help button (HelpRole)
-  m_helpButton = m_buttonBox->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
+  m_helpButton = m_buttonBox->addButton( tr( "Help" ), QDialogButtonBox::HelpRole );
   m_helpButton->setObjectName( QStringLiteral( "rsDialogHelpButton" ) );
   SicnuUi::markSecondary( m_helpButton );
-  SicnuDialogHelp::tip( m_helpButton, tr( "查看本功能的说明文档与使用提示。" ) );
+  SicnuDialogHelp::tip( m_helpButton, tr( "View the documentation and usage tips for this feature." ) );
 
   // Reset button (ResetRole)
-  m_resetButton = m_buttonBox->addButton( tr( "重置" ), QDialogButtonBox::ResetRole );
+  m_resetButton = m_buttonBox->addButton( tr( "Reset" ), QDialogButtonBox::ResetRole );
   m_resetButton->setObjectName( QStringLiteral( "rsDialogResetButton" ) );
   SicnuUi::markSecondary( m_resetButton );
-  SicnuDialogHelp::tip( m_resetButton, tr( "恢复所有参数到默认初始状态。" ) );
+  SicnuDialogHelp::tip( m_resetButton, tr( "Restores all parameters to their defaults." ) );
 
   // Cancel button (RejectRole)
-  m_cancelButton = m_buttonBox->addButton( tr( "取消" ), QDialogButtonBox::RejectRole );
+  m_cancelButton = m_buttonBox->addButton( tr( "Cancel" ), QDialogButtonBox::RejectRole );
   m_cancelButton->setObjectName( QStringLiteral( "rsDialogCancelBtn" ) );
   SicnuUi::markSecondary( m_cancelButton );
-  SicnuDialogHelp::tip( m_cancelButton, tr( "任务运行中取消任务，否则关闭对话框。" ) );
+  SicnuDialogHelp::tip( m_cancelButton, tr( "Cancels the task while running; otherwise closes the dialog." ) );
 
   // Run button (AcceptRole)
-  m_runButton = m_buttonBox->addButton( tr( "运行" ), QDialogButtonBox::AcceptRole );
+  m_runButton = m_buttonBox->addButton( tr( "Run" ), QDialogButtonBox::AcceptRole );
   m_runButton->setObjectName( QStringLiteral( "rsPrimaryButton" ) );
   m_runButton->setDefault( true );
   SicnuUi::markPrimary( m_runButton );
-  SicnuDialogHelp::tip( m_runButton, tr( "校验输入后开始处理。运行中请勿关闭对话框。" ) );
+  SicnuDialogHelp::tip( m_runButton, tr( "Validates the inputs and starts processing. Do not close the dialog while running." ) );
 
   // Connect signals
   connect( m_buttonBox, &QDialogButtonBox::accepted, this, &RasterProcessingDialogBase::onRunClicked );
@@ -280,7 +280,7 @@ void RasterProcessingDialogBase::setupButtonBar( QVBoxLayout *layout )
       if ( isRunning() && m_cancelButton )
       {
         m_cancelButton->setEnabled( false );
-        m_cancelButton->setText( tr( "取消中…" ) );
+        m_cancelButton->setText( tr( "Cancelling..." ) );
       }
     }
     else
@@ -316,8 +316,8 @@ void RasterProcessingDialogBase::onHelpClicked()
 
 void RasterProcessingDialogBase::browseOutput()
 {
-  QString path = QFileDialog::getSaveFileName( this, tr( "选择输出文件" ), QString(),
-                                               tr( "GeoTIFF (*.tif *.tiff);;所有文件 (*)" ) );
+  QString path = QFileDialog::getSaveFileName( this, tr( "Select Output File" ), QString(),
+                                               tr( "GeoTIFF (*.tif *.tiff);;All Files (*)" ) );
   if ( !path.isEmpty() )
   {
     if ( !path.endsWith( QLatin1String( ".tif" ), Qt::CaseInsensitive )
@@ -333,7 +333,7 @@ void RasterProcessingDialogBase::startRun()
   if ( m_runButton )
   {
     m_runButton->setEnabled( false );
-    m_runButton->setText( tr( "运行中…" ) );
+    m_runButton->setText( tr( "Running..." ) );
   }
   if ( m_resetButton )
     m_resetButton->setEnabled( false );
@@ -347,12 +347,12 @@ void RasterProcessingDialogBase::finishRun()
   if ( m_runButton )
   {
     m_runButton->setEnabled( true );
-    m_runButton->setText( tr( "运行" ) );
+    m_runButton->setText( tr( "Run" ) );
   }
   if ( m_cancelButton )
   {
     m_cancelButton->setEnabled( true );
-    m_cancelButton->setText( tr( "取消" ) );
+    m_cancelButton->setText( tr( "Cancel" ) );
   }
   if ( m_resetButton )
     m_resetButton->setEnabled( true );
@@ -529,7 +529,7 @@ void RasterProcessingDialogBase::handleCompleted( const QString &outputPath )
 {
   cleanupRunResources();
   finishRun();
-  QgsMessageLog::logMessage( tr( "%1 完成。输出：%2" ).arg( toolName(), outputPath ),
+  QgsMessageLog::logMessage( tr( "%1 finished. Output: %2" ).arg( toolName(), outputPath ),
                              toolName(), Qgis::MessageLevel::Success );
   if ( shouldAutoAcceptOnSuccess() )
     accept();
@@ -539,7 +539,7 @@ void RasterProcessingDialogBase::handleCompleted( const QString &outputPath )
     // a review dialog that stays open had NO load path left (the
     // post-classification dialog never loads on accept). The dialog is the
     // single owner: emit for the main window to load.
-    QgsMessageLog::logMessage( tr( "%1 结果已在对话框中展示，请查看后手动关闭。" ).arg( dialogTitle() ),
+    QgsMessageLog::logMessage( tr( "%1 results are shown in the dialog; close it manually when done." ).arg( dialogTitle() ),
                                toolName(), Qgis::MessageLevel::Info );
     if ( !outputPath.isEmpty() )
       emit resultReadyForDisplay( outputPath );
@@ -552,7 +552,7 @@ void RasterProcessingDialogBase::handleFailed( const QString &error )
   finishRun();
   QgsMessageLog::logMessage( error, toolName(), Qgis::MessageLevel::Critical );
   QMessageBox::critical( this, dialogTitle(),
-                         error.isEmpty() ? tr( "处理失败，详见日志面板。" ) : error );
+                         error.isEmpty() ? tr( "Processing failed; see the log panel for details." ) : error );
 }
 
 void RasterProcessingDialogBase::onCompleted( const QString &outputPath )

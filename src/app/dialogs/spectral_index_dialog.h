@@ -34,7 +34,7 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("spectral_index"); }
-    QString dialogTitle() const override { return tr("光谱指数"); }
+    QString dialogTitle() const override { return tr("Spectral Indices"); }
     void onRun() override;
 
 private slots:

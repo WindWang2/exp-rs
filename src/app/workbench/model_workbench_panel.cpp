@@ -35,28 +35,28 @@ QString readinessText( sicnu::operators::ModelReadiness readiness )
     switch ( readiness )
     {
         case sicnu::operators::ModelReadiness::Ready:
-            return ModelWorkbenchPanel::tr( "就绪" );
+            return ModelWorkbenchPanel::tr( "Ready" );
         case sicnu::operators::ModelReadiness::MissingArtifact:
-            return ModelWorkbenchPanel::tr( "权重缺失" );
+            return ModelWorkbenchPanel::tr( "Weights missing" );
         case sicnu::operators::ModelReadiness::InvalidManifest:
-            return ModelWorkbenchPanel::tr( "清单无效" );
+            return ModelWorkbenchPanel::tr( "Manifest invalid" );
         case sicnu::operators::ModelReadiness::ChecksumMismatch:
-            return ModelWorkbenchPanel::tr( "校验和不匹配" );
+            return ModelWorkbenchPanel::tr( "Checksum mismatch" );
         case sicnu::operators::ModelReadiness::UnsupportedRuntime:
-            return ModelWorkbenchPanel::tr( "运行时不支持" );
+            return ModelWorkbenchPanel::tr( "Unsupported at Runtime" );
         case sicnu::operators::ModelReadiness::IncompatibleHardware:
-            return ModelWorkbenchPanel::tr( "硬件不兼容" );
+            return ModelWorkbenchPanel::tr( "Hardware Incompatible" );
     }
-    return ModelWorkbenchPanel::tr( "未知" );
+    return ModelWorkbenchPanel::tr( "Unknown" );
 }
 
 QString weightSummary( const sicnu::operators::ModelInfo &model )
 {
     if ( model.path.empty() )
-        return ModelWorkbenchPanel::tr( "无权重文件" );
+        return ModelWorkbenchPanel::tr( "No weights file" );
     QFileInfo info( QString::fromStdString( model.path ) );
     if ( !info.exists() )
-        return ModelWorkbenchPanel::tr( "文件不存在" );
+        return ModelWorkbenchPanel::tr( "File Not Found" );
     const double mib = info.size() / ( 1024.0 * 1024.0 );
     return ModelWorkbenchPanel::tr( "%1 MiB" ).arg( mib, 0, 'f', 1 );
 }
@@ -71,9 +71,9 @@ ModelWorkbenchPanel::ModelWorkbenchPanel( QWidget *parent )
 
     auto *toolRow = new QHBoxLayout;
     m_search = new QLineEdit( central );
-    m_search->setPlaceholderText( tr( "按名称 / 任务 / 标签过滤" ) );
+    m_search->setPlaceholderText( tr( "Filter by name / task / tag" ) );
     m_search->setClearButtonEnabled( true );
-    m_reloadBtn = new QPushButton( tr( "重新扫描目录" ), central );
+    m_reloadBtn = new QPushButton( tr( "Rescan Catalog" ), central );
     m_reloadBtn->setObjectName( QStringLiteral( "rsModelReload" ) );
     m_backendCombo = new QComboBox( central );
     m_backendCombo->addItem( tr( "CPU" ), QStringLiteral( "cpu" ) );
@@ -82,9 +82,9 @@ ModelWorkbenchPanel::ModelWorkbenchPanel( QWidget *parent )
     // A FILTER, not an execution promise: the combo narrows the catalog view;
     // inference device stays with the runtime ("auto") unless the operator
     // parameters say otherwise.
-    QLabel *deviceFilterLabel = new QLabel( tr( "设备筛选" ), central );
+    QLabel *deviceFilterLabel = new QLabel( tr( "Device Filter" ), central );
     deviceFilterLabel->setToolTip(
-        tr( "仅过滤目录视图；测试推理的设备由运行时自动解析。" ) );
+        tr( "Filters the catalog view only; the device for test inference is resolved by the runtime." ) );
     toolRow->addWidget( deviceFilterLabel );
     toolRow->addWidget( m_backendCombo );
     toolRow->addWidget( m_reloadBtn );
@@ -94,7 +94,7 @@ ModelWorkbenchPanel::ModelWorkbenchPanel( QWidget *parent )
     m_modelTable->setObjectName( QStringLiteral( "rsModelTable" ) );
     m_modelTable->setColumnCount( 6 );
     m_modelTable->setHorizontalHeaderLabels(
-        { tr( "模型" ), tr( "任务" ), tr( "框架" ), tr( "设备" ), tr( "权重" ), tr( "状态" ) } );
+        { tr( "Model" ), tr( "Tasks" ), tr( "Framework" ), tr( "Device" ), tr( "Weights" ), tr( "Status" ) } );
     m_modelTable->horizontalHeader()->setStretchLastSection( true );
     m_modelTable->setSelectionBehavior( QAbstractItemView::SelectRows );
     m_modelTable->setEditTriggers( QAbstractItemView::NoEditTriggers );
@@ -102,7 +102,7 @@ ModelWorkbenchPanel::ModelWorkbenchPanel( QWidget *parent )
     layout->addWidget( m_modelTable, 2 );
 
     auto *actionRow = new QHBoxLayout;
-    m_testInferenceBtn = new QPushButton( tr( "测试推理…" ), central );
+    m_testInferenceBtn = new QPushButton( tr( "Test inference..." ), central );
     m_testInferenceBtn->setObjectName( QStringLiteral( "rsModelTestInference" ) );
     actionRow->addWidget( m_testInferenceBtn );
     actionRow->addStretch( 1 );
@@ -111,13 +111,13 @@ ModelWorkbenchPanel::ModelWorkbenchPanel( QWidget *parent )
     m_manifestView = new QPlainTextEdit( central );
     m_manifestView->setReadOnly( true );
     m_manifestView->setMaximumHeight( 180 );
-    m_manifestView->setPlaceholderText( tr( "清单（manifest）细节" ) );
+    m_manifestView->setPlaceholderText( tr( "Manifest Details" ) );
     layout->addWidget( m_manifestView );
 
     m_issuesView = new QPlainTextEdit( central );
     m_issuesView->setReadOnly( true );
     m_issuesView->setMaximumHeight( 90 );
-    m_issuesView->setPlaceholderText( tr( "目录装载诊断（无问题时为空）" ) );
+    m_issuesView->setPlaceholderText( tr( "Catalog loading diagnostics (empty when healthy)" ) );
     layout->addWidget( m_issuesView );
 
     m_statusLabel = new QLabel( central );
@@ -162,7 +162,7 @@ void ModelWorkbenchPanel::refreshCatalog()
 void ModelWorkbenchPanel::reloadCatalog()
 {
     refreshCatalog();
-    m_statusLabel->setText( tr( "模型目录已重新扫描（%1 个模型）。" )
+    m_statusLabel->setText( tr( "Model catalog rescanned (%1 models)." )
                                 .arg( m_modelTable->rowCount() ) );
 }
 
@@ -240,7 +240,7 @@ void ModelWorkbenchPanel::showModelDetail()
         sicnu::operators::ModelCatalog::instance().inspect( name.toStdString() );
     if ( record.isNull() )
     {
-        m_manifestView->setPlainText( tr( "（该模型无注册记录）" ) );
+        m_manifestView->setPlainText( tr( "(this model has no registration record)" ) );
         return;
     }
     Json::StreamWriterBuilder builder;
@@ -270,15 +270,15 @@ void ModelWorkbenchPanel::runTestInference()
     if ( readiness != sicnu::operators::ModelReadiness::Ready )
     {
         m_statusLabel->setText(
-            tr( "模型未就绪（%1），已取消提交：%2" )
+            tr( "Model not ready (%1); submission cancelled: %2" )
                 .arg( readinessText( readiness ),
                       QString::fromStdString( reason.empty() ? "unknown" : reason ) ) );
         return;
     }
 
     const QString inputPath = QFileDialog::getOpenFileName(
-        this, tr( "选择测试输入栅格（%1）" ).arg( modelName ), QString(),
-        tr( "栅格文件 (*.tif *.tiff *.img *.dat);;所有文件 (*)" ) );
+        this, tr( "Select the test input raster (%1)" ).arg( modelName ), QString(),
+        tr( "Raster Files (*.tif *.tiff *.img *.dat);;All Files (*)" ) );
     if ( inputPath.isEmpty() )
         return;
 
@@ -296,8 +296,8 @@ void ModelWorkbenchPanel::runTestInference()
         QStringLiteral( "gui" ) );
     m_statusLabel->setText(
         taskId > 0
-            ? tr( "测试推理已提交（任务 %1），进度与失败原因见处理历史。" ).arg( taskId )
-            : tr( "提交被任务中心拒绝（资源或参数问题）——详见处理历史/日志。" ) );
+            ? tr( "Test inference submitted (task %1); see the processing history for progress and failure reasons." ).arg( taskId )
+            : tr( "The submission was rejected by the Task Center (resource or parameter problem) — see processing history / log." ) );
     if ( taskId > 0 )
         emit inferenceSubmitted( taskId );
 }

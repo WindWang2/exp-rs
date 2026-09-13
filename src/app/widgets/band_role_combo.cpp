@@ -16,7 +16,7 @@ void BandRoleCombo::setRaster( const QString &source )
   clear();
   m_hasRaster = false;
 
-  addItem( tr( "自动（按产品语义角色）" ), 0 );
+  addItem( tr( "Automatic (by product semantic role)" ), 0 );
 
   GdalDatasetWrapper ds;
   if ( !ds.open( source ) )
@@ -37,14 +37,14 @@ void BandRoleCombo::setRaster( const QString &source )
 
   for ( int b = 1; b <= bandCount; ++b )
   {
-    QString label = tr( "波段 %1" ).arg( b );
+    QString label = tr( "Band %1" ).arg( b );
     const sicnu::data::BandRole role = sicnu::data::bandRoleFromString(
       ds.bandMetadataItem( b, "SICNU_BAND_ROLE" ) );
     if ( role != sicnu::data::BandRole::Unknown )
     {
       const QString roleName = sicnu::data::bandRoleDisplayName( role );
       if ( !roleName.isEmpty() )
-        label = tr( "波段 %1 (%2)" ).arg( b ).arg( roleName );
+        label = tr( "Band %1 (%2)" ).arg( b ).arg( roleName );
     }
     addItem( label, b );
     setItemData( count() - 1, static_cast<int>( role ), Qt::UserRole + 1 );

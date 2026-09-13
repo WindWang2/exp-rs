@@ -62,13 +62,13 @@ ProcessingHistoryPanel::ProcessingHistoryPanel( QWidget *parent )
     auto *filterRow = new QHBoxLayout;
     m_search = new QLineEdit( central );
     m_search->setObjectName( QStringLiteral( "rsHistorySearch" ) );
-    m_search->setPlaceholderText( tr( "增量搜索：名称 / 来源 / 算法 / 任务 ID" ) );
+    m_search->setPlaceholderText( tr( "Incremental search: name / source / algorithm / task ID" ) );
     m_search->setClearButtonEnabled( true );
     m_stateFilter = new QComboBox( central );
     m_stateFilter->setObjectName( QStringLiteral( "rsHistoryStateFilter" ) );
-    m_stateFilter->addItems( { tr( "全部" ), tr( "运行中" ), tr( "排队中" ), tr( "等待资源" ),
-                               tr( "已完成" ), tr( "失败" ), tr( "已取消" ),
-                               tr( "已中断" ) } );
+    m_stateFilter->addItems( { tr( "All" ), tr( "Running" ), tr( "Queued" ), tr( "Waiting for Resources" ),
+                               tr( "Finished" ), tr( "Failed" ), tr( "Cancelled" ),
+                               tr( "Interrupted" ) } );
     filterRow->addWidget( m_search, 1 );
     filterRow->addWidget( m_stateFilter );
     layout->addLayout( filterRow );
@@ -89,12 +89,12 @@ ProcessingHistoryPanel::ProcessingHistoryPanel( QWidget *parent )
 
     // ── Action row ──────────────────────────────────────────────────────
     auto *actionRow = new QHBoxLayout;
-    m_cancelBtn = new QPushButton( tr( "取消" ), central );
-    m_rerunBtn = new QPushButton( tr( "重跑" ), central );
-    m_openBtn = new QPushButton( tr( "打开产物" ), central );
-    m_compareBtn = new QPushButton( tr( "对比产物" ), central );
-    m_inspectBtn = new QPushButton( tr( "查看溯源" ), central );
-    m_resumeBtn = new QPushButton( tr( "恢复运行" ), central );
+    m_cancelBtn = new QPushButton( tr( "Cancel" ), central );
+    m_rerunBtn = new QPushButton( tr( "Re-run" ), central );
+    m_openBtn = new QPushButton( tr( "Open Artifacts" ), central );
+    m_compareBtn = new QPushButton( tr( "Comparison Artifacts" ), central );
+    m_inspectBtn = new QPushButton( tr( "View Provenance" ), central );
+    m_resumeBtn = new QPushButton( tr( "Resume Run" ), central );
     for ( QPushButton *btn : { m_cancelBtn, m_rerunBtn, m_openBtn, m_compareBtn, m_inspectBtn, m_resumeBtn } )
         actionRow->addWidget( btn );
     actionRow->addStretch( 1 );
@@ -194,7 +194,7 @@ void ProcessingHistoryPanel::refreshNow()
             HistoryEntry entry;
             entry.kind = HistoryEntry::Kind::WorkflowRun;
             entry.runId = QString::fromStdString( run->runId() );
-            entry.title = tr( "工作流 %1" ).arg( QString::fromStdString( run->workflowId() ) );
+            entry.title = tr( "Workflow %1" ).arg( QString::fromStdString( run->workflowId() ) );
             entry.source = QStringLiteral( "workflow" );
             const sicnu::workflow::WorkflowRunState state = run->state();
             entry.stateText = historyRunStateText( state );
@@ -220,7 +220,7 @@ void ProcessingHistoryPanel::refreshNow()
     }
 
     m_model->setEntries( entries );
-    m_statusLabel->setText( tr( "共 %1 条（本会话投影；上限 %2 条，已截断 %3 条）。" )
+    m_statusLabel->setText( tr( "%1 rows in total (projected in this session; cap %2, truncated %3)." )
                                 .arg( m_model->rowCount() )
                                 .arg( ProcessingHistoryModel::kMaxRows )
                                 .arg( m_model->droppedCount() ) );
@@ -266,14 +266,14 @@ void ProcessingHistoryPanel::updateActionStates()
 void ProcessingHistoryPanel::onContextMenu( const QPoint &pos )
 {
     QMenu menu( this );
-    menu.addAction( tr( "刷新" ), this, &ProcessingHistoryPanel::refreshNow );
+    menu.addAction( tr( "Refresh" ), this, &ProcessingHistoryPanel::refreshNow );
     menu.addSeparator();
-    menu.addAction( tr( "打开产物" ), this, &ProcessingHistoryPanel::openSelectedOutput );
-    menu.addAction( tr( "对比产物" ), this, &ProcessingHistoryPanel::compareSelectedOutputs );
-    menu.addAction( tr( "查看溯源" ), this, &ProcessingHistoryPanel::inspectSelected );
-    menu.addAction( tr( "重跑" ), this, &ProcessingHistoryPanel::rerunSelected );
-    menu.addAction( tr( "取消" ), this, &ProcessingHistoryPanel::cancelSelected );
-    menu.addAction( tr( "恢复运行" ), this, &ProcessingHistoryPanel::resumeSelected );
+    menu.addAction( tr( "Open Artifacts" ), this, &ProcessingHistoryPanel::openSelectedOutput );
+    menu.addAction( tr( "Comparison Artifacts" ), this, &ProcessingHistoryPanel::compareSelectedOutputs );
+    menu.addAction( tr( "View Provenance" ), this, &ProcessingHistoryPanel::inspectSelected );
+    menu.addAction( tr( "Re-run" ), this, &ProcessingHistoryPanel::rerunSelected );
+    menu.addAction( tr( "Cancel" ), this, &ProcessingHistoryPanel::cancelSelected );
+    menu.addAction( tr( "Resume Run" ), this, &ProcessingHistoryPanel::resumeSelected );
     menu.exec( m_view->viewport()->mapToGlobal( pos ) );
 }
 

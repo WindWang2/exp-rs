@@ -211,10 +211,10 @@ void PipelineCanvasWidget::contextMenuEvent( QContextMenuEvent *event )
   if ( node )
   {
     QString stepId = node->stepId();
-    QAction *runUpToAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "media-playback-start" ), QIcon( QStringLiteral( ":/icons/media-playback-start" ) ) ), tr( "执行至此节点 '%1'" ).arg( node->title() ) );
-    QAction *viewLogsAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "text-x-generic" ), QIcon( QStringLiteral( ":/icons/text-x-generic" ) ) ), tr( "查看实时执行日志" ) );
+    QAction *runUpToAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "media-playback-start" ), QIcon( QStringLiteral( ":/icons/media-playback-start" ) ) ), tr( "Run up to node '%1'" ).arg( node->title() ) );
+    QAction *viewLogsAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "text-x-generic" ), QIcon( QStringLiteral( ":/icons/text-x-generic" ) ) ), tr( "View Live Execution Log" ) );
     menu.addSeparator();
-    QAction *deleteNodeAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "edit-delete" ), QIcon( QStringLiteral( ":/icons/edit-delete" ) ) ), tr( "删除节点" ) );
+    QAction *deleteNodeAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "edit-delete" ), QIcon( QStringLiteral( ":/icons/edit-delete" ) ) ), tr( "Delete Node" ) );
 
     QAction *selectedAct = menu.exec( event->globalPos() );
     if ( selectedAct == runUpToAct )
@@ -232,7 +232,7 @@ void PipelineCanvasWidget::contextMenuEvent( QContextMenuEvent *event )
   }
   else if ( conn )
   {
-    QAction *deleteConnAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "edit-delete" ), QIcon( QStringLiteral( ":/icons/edit-delete" ) ) ), tr( "删除连线" ) );
+    QAction *deleteConnAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "edit-delete" ), QIcon( QStringLiteral( ":/icons/edit-delete" ) ) ), tr( "Delete Link" ) );
     QAction *selectedAct = menu.exec( event->globalPos() );
     if ( selectedAct == deleteConnAct )
     {
@@ -241,8 +241,8 @@ void PipelineCanvasWidget::contextMenuEvent( QContextMenuEvent *event )
   }
   else
   {
-    QAction *zoomFitAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "zoom-fit-best" ), QIcon( QStringLiteral( ":/icons/zoom-fit-best" ) ) ), tr( "适应窗口" ) );
-    QAction *resetZoomAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "zoom-original" ), QIcon( QStringLiteral( ":/icons/zoom-original" ) ) ), tr( "100% 视图" ) );
+    QAction *zoomFitAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "zoom-fit-best" ), QIcon( QStringLiteral( ":/icons/zoom-fit-best" ) ) ), tr( "Fit in Window" ) );
+    QAction *resetZoomAct = menu.addAction( QIcon::fromTheme( QStringLiteral( "zoom-original" ), QIcon( QStringLiteral( ":/icons/zoom-original" ) ) ), tr( "100% View" ) );
 
     QAction *selectedAct = menu.exec( event->globalPos() );
     if ( selectedAct == zoomFitAct )

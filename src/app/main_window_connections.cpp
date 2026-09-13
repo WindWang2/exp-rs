@@ -161,7 +161,7 @@ void QgisDesktopWindow::updateScale()
         scaleText = QStringLiteral( "1:%1" ).arg( static_cast<qint64>( std::llround( s ) ) );
 
     if ( m_scaleLabel )
-        m_scaleLabel->setText( tr( "比例 %1" ).arg( scaleText ) );
+        m_scaleLabel->setText( tr( "Scale %1" ).arg( scaleText ) );
 }
 
 void QgisDesktopWindow::updateExtents()
@@ -192,8 +192,8 @@ void QgisDesktopWindow::syncStatusBarLayer( QgsMapLayer *layer )
         }
         else
         {
-            m_layerStatusLabel->setText( tr( "无图层" ) );
-            m_layerStatusLabel->setToolTip( tr( "当前活动图层" ) );
+            m_layerStatusLabel->setText( tr( "No Layers" ) );
+            m_layerStatusLabel->setToolTip( tr( "Current Active Layer" ) );
         }
     }
 
@@ -237,12 +237,12 @@ void QgisDesktopWindow::refreshStatusTaskSummary()
     const QString prevName = m_readyLabel->objectName();
     if ( cancelling > 0 )
     {
-        m_readyLabel->setText( tr( "取消中 %1 · 运行 %2 · 排队 %3" ).arg( cancelling ).arg( running ).arg( queued ) );
+        m_readyLabel->setText( tr( "Cancelling %1 · Running %2 · Queued %3" ).arg( cancelling ).arg( running ).arg( queued ) );
         m_readyLabel->setObjectName( QStringLiteral( "rsReadyBusy" ) );
     }
     else if ( running > 0 || queued > 0 )
     {
-        m_readyLabel->setText( tr( "运行 %1 · 排队 %2" ).arg( running ).arg( queued ) );
+        m_readyLabel->setText( tr( "Running %1 · Queued %2" ).arg( running ).arg( queued ) );
         m_readyLabel->setObjectName( QStringLiteral( "rsReadyBusy" ) );
     }
     else if ( qgisActive > 0 )
@@ -343,7 +343,7 @@ void QgisDesktopWindow::onProjectRead(const QDomDocument &doc)
     }
     updateEditingUI(activeVl);
 
-    statusBar()->showMessage(tr("工程已加载"), 3000);
+    statusBar()->showMessage(tr("Project loaded"), 3000);
 }
 
 void QgisDesktopWindow::onProjectWrite(QDomDocument &doc)
@@ -362,7 +362,7 @@ void QgisDesktopWindow::onProjectWrite(QDomDocument &doc)
                         written.diagnostics() ) ) );
         }
     }
-    statusBar()->showMessage(tr("工程已保存"), 2000);
+    statusBar()->showMessage(tr("Project saved"), 2000);
 }
 
 void QgisDesktopWindow::onCrsChanged(const QgsCoordinateReferenceSystem &crs)
@@ -404,7 +404,7 @@ void QgisDesktopWindow::onLayerTreeClicked(const QModelIndex &index)
                 m_histogramStretch->setRasterLayer( rl );
                 if ( m_histogramStretchDock && m_histogramStretchDock->isVisible() )
                     m_histogramStretchDock->setWindowTitle(
-                      tr( "显示拉伸 — %1" ).arg( rl->name() ) );
+                      tr( "Display Stretch — %1" ).arg( rl->name() ) );
             }
         }
         syncStatusBarLayer( layer );

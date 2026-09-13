@@ -24,7 +24,7 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("qa_mask"); }
-    QString dialogTitle() const override { return tr("QA 掩膜"); }
+    QString dialogTitle() const override { return tr("QA Mask"); }
     bool shouldAutoAcceptOnSuccess() const override { return false; }
     void onRun() override;
 

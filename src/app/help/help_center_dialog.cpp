@@ -25,20 +25,20 @@ namespace
 QStringList canonicalCategories()
 {
     return {
-        QObject::tr( "快速上手" ),
-        QObject::tr( "数据与工程" ),
-        QObject::tr( "光学遥感" ),
+        QObject::tr( "Quick Start" ),
+        QObject::tr( "Data and Project" ),
+        QObject::tr( "Optical Remote Sensing" ),
         QObject::tr( "SAR" ),
-        QObject::tr( "时序分析" ),
-        QObject::tr( "分类" ),
-        QObject::tr( "变化检测" ),
-        QObject::tr( "地形" ),
-        QObject::tr( "工作区" ),
-        QObject::tr( "制图" ),
-        QObject::tr( "智能体 / Pi" ),
-        QObject::tr( "错误与诊断" ),
-        QObject::tr( "快捷键" ),
-        QObject::tr( "处理框架" ),
+        QObject::tr( "Time Series Analysis" ),
+        QObject::tr( "Classification" ),
+        QObject::tr( "Change Detection" ),
+        QObject::tr( "Terrain" ),
+        QObject::tr( "Workspace" ),
+        QObject::tr( "Cartography" ),
+        QObject::tr( "Agent / Pi" ),
+        QObject::tr( "Errors and Diagnostics" ),
+        QObject::tr( "Shortcuts" ),
+        QObject::tr( "Processing Framework" ),
     };
 }
 
@@ -53,7 +53,7 @@ HelpCenterDialog::HelpCenterDialog( QWidget *parent )
     auto *root = new QVBoxLayout( this );
 
     m_searchBox = new QLineEdit( this );
-    m_searchBox->setPlaceholderText( tr( "搜索帮助主题（中文 / English / Help ID）…" ) );
+    m_searchBox->setPlaceholderText( tr( "Search help topics (Chinese / English / Help ID)..." ) );
     m_searchBox->setClearButtonEnabled( true );
     root->addWidget( m_searchBox );
 
@@ -61,7 +61,7 @@ HelpCenterDialog::HelpCenterDialog( QWidget *parent )
     root->addWidget( splitter, 1 );
 
     m_tree = new QTreeWidget( splitter );
-    m_tree->setHeaderLabel( tr( "主题" ) );
+    m_tree->setHeaderLabel( tr( "Theme" ) );
     splitter->addWidget( m_tree );
 
     auto *rightPane = new QWidget( splitter );
@@ -146,7 +146,7 @@ void HelpCenterDialog::showTopic( const QString &helpId )
     const sicnu::help::HelpDescriptor *d = sicnu::help::globalHelpRegistry().find( helpId );
     if ( !d ) {
         m_browser->setHtml( QStringLiteral( "<h1>%1</h1><p>%2</p>" )
-                                .arg( escapeHtml( tr( "未找到主题" ) ),
+                                .arg( escapeHtml( tr( "Topic not found" ) ),
                                       escapeHtml( helpId ) ) );
         return;
     }
@@ -197,16 +197,16 @@ void HelpCenterDialog::runSearch( const QString &query )
         item->setData( 0, Qt::UserRole, d->id );
     }
     m_tree->expandAll();
-    m_countLabel->setText( tr( "%1 个结果（%2 ms）" ).arg( hits.size() ).arg( elapsedMs ) );
+    m_countLabel->setText( tr( "%1 results (%2 ms)" ).arg( hits.size() ).arg( elapsedMs ) );
 }
 
 void HelpCenterDialog::renderHome()
 {
-    QString html = QStringLiteral( "<h1>%1</h1>" ).arg( escapeHtml( tr( "帮助中心" ) ) );
+    QString html = QStringLiteral( "<h1>%1</h1>" ).arg( escapeHtml( tr( "Help Center" ) ) );
     html += QStringLiteral( "<p>%1</p>" ).arg(
-        escapeHtml( tr( "在上方搜索，或从左侧目录浏览。聚焦任意界面元素后按 F1 可直接跳到相关主题。" ) ) );
+        escapeHtml( tr( "Search above or browse the catalog on the left. Focus any UI element and press F1 to jump to the related topic." ) ) );
     const int topics = sicnu::help::globalHelpRegistry().count();
-    html += QStringLiteral( "<p>%1</p>" ).arg( escapeHtml( tr( "共收录 %1 个主题。" ).arg( topics ) ) );
+    html += QStringLiteral( "<p>%1</p>" ).arg( escapeHtml( tr( "%1 topics are included." ).arg( topics ) ) );
     m_browser->setHtml( html );
 }
 
@@ -247,34 +247,34 @@ QString HelpCenterDialog::renderTopicHtml( const sicnu::help::HelpDescriptor &d 
     };
 
     if ( d.command.has_value() ) {
-        paragraph( tr( "用途" ), d.command->purpose );
-        section( tr( "前提" ), d.command->prerequisites );
-        paragraph( tr( "建议下一步" ), d.command->suggestedNextAction );
+        paragraph( tr( "When to Use" ), d.command->purpose );
+        section( tr( "Prerequisites" ), d.command->prerequisites );
+        paragraph( tr( "Suggested Next Step" ), d.command->suggestedNextAction );
     }
     if ( d.parameter.has_value() ) {
         const sicnu::help::ParameterKnowledge &p = *d.parameter;
-        paragraph( tr( "含义" ), p.meaning );
-        paragraph( tr( "单位" ), p.unit );
-        paragraph( tr( "推荐值" ), p.recommended );
-        paragraph( tr( "权衡" ), p.tradeOff );
-        paragraph( tr( "性能" ), p.performanceNote );
-        section( tr( "注意事项" ), p.warnings );
+        paragraph( tr( "Meaning" ), p.meaning );
+        paragraph( tr( "Unit" ), p.unit );
+        paragraph( tr( "Recommended Value" ), p.recommended );
+        paragraph( tr( "Trade-offs" ), p.tradeOff );
+        paragraph( tr( "Performance" ), p.performanceNote );
+        section( tr( "Notes" ), p.warnings );
     }
     if ( d.algorithm.has_value() ) {
         const sicnu::help::AlgorithmPage &a = *d.algorithm;
-        paragraph( tr( "原理" ), a.whatItDoes );
-        paragraph( tr( "适用" ), a.whenToUse );
-        section( tr( "输入要求" ), a.inputs );
-        section( tr( "输出" ), a.outputs );
-        section( tr( "假设" ), a.assumptions );
-        paragraph( tr( "数值域" ), a.unitsDomain );
-        section( tr( "局限" ), a.limitations );
-        section( tr( "典型失败模式" ), a.failureModes );
+        paragraph( tr( "How It Works" ), a.whatItDoes );
+        paragraph( tr( "Applicability" ), a.whenToUse );
+        section( tr( "Input Requirements" ), a.inputs );
+        section( tr( "Outputs" ), a.outputs );
+        section( tr( "Assumptions" ), a.assumptions );
+        paragraph( tr( "Value Range" ), a.unitsDomain );
+        section( tr( "Limitations" ), a.limitations );
+        section( tr( "Typical Failure Modes" ), a.failureModes );
     }
     if ( d.guidance.has_value() ) {
-        paragraph( tr( "下一步" ), d.guidance->body );
+        paragraph( tr( "Next Step" ), d.guidance->body );
         if ( !d.guidance->actionCommandIds.isEmpty() ) {
-            section( tr( "推荐操作" ), d.guidance->actionCommandIds );
+            section( tr( "Recommended Action" ), d.guidance->actionCommandIds );
         }
     }
     if ( d.diagnostic.has_value() ) {
@@ -282,14 +282,14 @@ QString HelpCenterDialog::renderTopicHtml( const sicnu::help::HelpDescriptor &d 
         html += QStringLiteral( "<p><code>%1</code> · %2</p>" )
                     .arg( escapeHtml( info.originCode ),
                           escapeHtml( info.originFamily ) );
-        paragraph( tr( "发生了什么" ), info.whatHappened );
-        paragraph( tr( "为什么重要" ), info.whyItMatters );
-        section( tr( "如何解决" ), info.remediation );
-        paragraph( tr( "技术细节" ), info.technicalNote );
+        paragraph( tr( "What Happened" ), info.whatHappened );
+        paragraph( tr( "Why It Matters" ), info.whyItMatters );
+        section( tr( "How to Fix" ), info.remediation );
+        paragraph( tr( "Technical Details" ), info.technicalNote );
     }
 
     if ( !d.relatedIds.isEmpty() ) {
-        html += QStringLiteral( "<h3>%1</h3><ul>" ).arg( escapeHtml( tr( "相关主题" ) ) );
+        html += QStringLiteral( "<h3>%1</h3><ul>" ).arg( escapeHtml( tr( "Related Topics" ) ) );
         for ( const QString &related : d.relatedIds ) {
             html += QStringLiteral( "<li><a href=\"helpid:/%1\"><code>%1</code></a></li>" ).arg( escapeHtml( related ) );
         }

@@ -78,7 +78,7 @@ QMenu *SicnuAppInterface::pluginMenu()
     {
         if ( auto *mainWin = qobject_cast<QMainWindow *>( m_mainWindow ) )
         {
-            m_pluginMenu = mainWin->menuBar()->addMenu( tr( "插件" ) );
+            m_pluginMenu = mainWin->menuBar()->addMenu( tr( "Plugins" ) );
         }
     }
     return m_pluginMenu;
@@ -90,7 +90,7 @@ QToolBar *SicnuAppInterface::pluginToolBar()
     {
         if ( auto *mainWin = qobject_cast<QMainWindow *>( m_mainWindow ) )
         {
-            m_pluginToolBar = mainWin->addToolBar( tr( "插件工具栏" ) );
+            m_pluginToolBar = mainWin->addToolBar( tr( "Plugin Toolbar" ) );
             m_pluginToolBar->setObjectName( QStringLiteral( "pluginToolBar" ) );
         }
     }

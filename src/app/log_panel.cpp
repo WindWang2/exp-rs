@@ -16,7 +16,7 @@
 #include <QAction>
 
 LogPanel::LogPanel(QWidget *parent)
-    : QgsDockWidget(tr("系统日志"), parent)
+    : QgsDockWidget(tr("System Log"), parent)
 {
     setupUi();
 
@@ -41,28 +41,28 @@ void LogPanel::setupUi()
     toolbarLayout->setSpacing(4);
 
     // Level filter
-    toolbarLayout->addWidget(new QLabel(tr("级别：")));
+    toolbarLayout->addWidget(new QLabel(tr("Level:")));
     m_levelFilter = new QComboBox(toolbar);
-    m_levelFilter->addItem(tr("全部"), -1);
-    m_levelFilter->addItem(tr("信息"), static_cast<int>(Qgis::MessageLevel::Info));
-    m_levelFilter->addItem(tr("警告"), static_cast<int>(Qgis::MessageLevel::Warning));
-    m_levelFilter->addItem(tr("错误"), static_cast<int>(Qgis::MessageLevel::Critical));
-    m_levelFilter->addItem(tr("成功"), static_cast<int>(Qgis::MessageLevel::Success));
+    m_levelFilter->addItem(tr("All"), -1);
+    m_levelFilter->addItem(tr("Info"), static_cast<int>(Qgis::MessageLevel::Info));
+    m_levelFilter->addItem(tr("Warning"), static_cast<int>(Qgis::MessageLevel::Warning));
+    m_levelFilter->addItem(tr("Error"), static_cast<int>(Qgis::MessageLevel::Critical));
+    m_levelFilter->addItem(tr("Succeeded"), static_cast<int>(Qgis::MessageLevel::Success));
     m_levelFilter->setMinimumWidth(80);
     toolbarLayout->addWidget(m_levelFilter);
 
     // Tag filter
-    toolbarLayout->addWidget(new QLabel(tr("标签：")));
+    toolbarLayout->addWidget(new QLabel(tr("Tags:")));
     m_tagFilter = new QComboBox(toolbar);
-    m_tagFilter->addItem(tr("全部"), "");
+    m_tagFilter->addItem(tr("All"), "");
     m_tagFilter->setEditable(true);
     m_tagFilter->setMinimumWidth(100);
     toolbarLayout->addWidget(m_tagFilter);
 
     // Search
-    toolbarLayout->addWidget(new QLabel(tr("搜索：")));
+    toolbarLayout->addWidget(new QLabel(tr("Search:")));
     m_searchEdit = new QLineEdit(toolbar);
-    m_searchEdit->setPlaceholderText(tr("过滤日志消息..."));
+    m_searchEdit->setPlaceholderText(tr("Filter log messages..."));
     m_searchEdit->setClearButtonEnabled(true);
     toolbarLayout->addWidget(m_searchEdit);
 
@@ -70,16 +70,16 @@ void LogPanel::setupUi()
     toolbarLayout->addStretch();
 
     // Auto-scroll
-    m_autoScrollCheck = new QCheckBox(tr("自动滚动"), toolbar);
+    m_autoScrollCheck = new QCheckBox(tr("Auto-Scroll"), toolbar);
     m_autoScrollCheck->setChecked(true);
     toolbarLayout->addWidget(m_autoScrollCheck);
 
     // Message count
-    m_countLabel = new QLabel(tr("0 条消息"), toolbar);
+    m_countLabel = new QLabel(tr("0 messages"), toolbar);
     toolbarLayout->addWidget(m_countLabel);
 
     // Clear button
-    m_clearButton = new QPushButton(tr("清空"), toolbar);
+    m_clearButton = new QPushButton(tr("Clear"), toolbar);
     toolbarLayout->addWidget(m_clearButton);
 
     mainLayout->addWidget(toolbar);
@@ -96,8 +96,8 @@ void LogPanel::setupUi()
 
     m_emptyState = new sicnu::RsEmptyStateWidget(
         QStringLiteral("chat_bubble_outline"),
-        tr("暂无系统日志"),
-        tr("系统运行正常，当前尚未产生日志消息。执行算法或操作时将在此显示详细记录。"),
+        tr("No system log yet"),
+        tr("The system is running normally and no log messages have been produced yet. Detailed records appear here as algorithms and operations run."),
         QString(),
         m_textStack);
     m_textStack->addWidget(m_emptyState); // Index 1: Empty
@@ -127,7 +127,7 @@ bool LogPanel::shouldShowMessage(const QString &message, const QString &tag, Qgi
     // Tag filter
     QString tagData = m_tagFilter->currentData().toString();
     QString tagText = m_tagFilter->currentText();
-    if (!tagData.isEmpty() && tagText != tr("全部") && tagText != tr("All") && !tag.contains(tagText, Qt::CaseInsensitive))
+    if (!tagData.isEmpty() && tagText != tr("All") && tagText != tr("All") && !tag.contains(tagText, Qt::CaseInsensitive))
         return false;
 
     // Search filter — match message body as well as tag
@@ -155,7 +155,7 @@ void LogPanel::clearMessages()
     mTextEdit->clear();
     mMessageCount = 0;
     mLastMessage.clear();
-    m_countLabel->setText(tr("0 条消息"));
+    m_countLabel->setText(tr("0 messages"));
     if (m_textStack)
         m_textStack->setCurrentIndex(1);
 }
@@ -164,7 +164,7 @@ void LogPanel::logMessage(const QString &message, const QString &tag, Qgis::Mess
 {
     int count = ++mMessageCount;
     mLastMessage = message;
-    m_countLabel->setText(tr("%1 条消息").arg(count));
+    m_countLabel->setText(tr("%1 messages").arg(count));
 
     // Add tag to filter dropdown if not already present
     if (m_tagFilter->findText(tag) == -1) {

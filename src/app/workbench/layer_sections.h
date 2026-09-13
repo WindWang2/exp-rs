@@ -24,7 +24,7 @@ class LayerGeneralSection : public InspectorSection
     explicit LayerGeneralSection( QWidget *parent = nullptr );
 
     QString sectionId() const override { return QStringLiteral( "general" ); }
-    QString title() const override { return tr( "常规" ); }
+    QString title() const override { return tr( "General" ); }
     int order() const override { return 0; }
     bool supports( const SelectionContextSnapshot &snapshot ) const override;
     void populate( const SelectionContextSnapshot &snapshot ) override;
@@ -40,7 +40,7 @@ class LayerMetadataSection : public InspectorSection
     explicit LayerMetadataSection( QWidget *parent = nullptr );
 
     QString sectionId() const override { return QStringLiteral( "metadata" ); }
-    QString title() const override { return tr( "元数据" ); }
+    QString title() const override { return tr( "Metadata" ); }
     int order() const override { return 10; }
     bool supports( const SelectionContextSnapshot &snapshot ) const override;
     void populate( const SelectionContextSnapshot &snapshot ) override;
@@ -61,7 +61,7 @@ class VectorStructureSection : public InspectorSection
     explicit VectorStructureSection( QWidget *parent = nullptr );
 
     QString sectionId() const override { return QStringLiteral( "vector" ); }
-    QString title() const override { return tr( "字段" ); }
+    QString title() const override { return tr( "Field" ); }
     int order() const override { return 20; }
     bool supports( const SelectionContextSnapshot &snapshot ) const override;
     void populate( const SelectionContextSnapshot &snapshot ) override;

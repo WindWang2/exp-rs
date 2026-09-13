@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "sicnu:data/terms/rs_glossary.schema.json",
+  "title": "SICNU unified remote-sensing glossary (D6)",
+  "description": "Single source of truth for bilingual (en/zh) remote-sensing terminology. Consumers: the zh_CN translation layer (terminology-critical UI strings), the help terminology provider (src/help), and the future RS Agent (D9). One entry per concept; aliases are alternative spellings/abbreviations, related[] must reference other entries' en values.",
+  "type": "array",
+  "items": { "$ref": "#/$defs/term" },
+  "$defs": {
+    "term": {
+      "type": "object",
+      "required": ["en", "zh", "definition_zh", "category"],
+      "additionalProperties": false,
+      "properties": {
+        "en": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Canonical English term, lower-case except proper nouns/acronyms; the key other entries reference in related[]."
+        },
+        "zh": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Standard Simplified Chinese term as used in Chinese RS textbooks (测绘/遥感学名词 style)."
+        },
+        "alias": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true,
+          "description": "Alternative English/Chinese spellings, abbreviations or common synonyms; lookups may match these."
+        },
+        "definition_zh": {
+          "type": "string",
+          "minLength": 1,
+          "description": "One-sentence classroom-usable Chinese definition; this is what students and the D9 agent quote."
+        },
+        "category": {
+          "enum": [
+            "radiometric",
+            "atmospheric",
+            "geometric",
+            "spectral",
+            "SAR",
+            "terrain",
+            "temporal",
+            "classification",
+            "change",
+            "cartography",
+            "OBIA",
+            "hyperspectral"
+          ]
+        },
+        "related": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "en values of semantically adjacent glossary entries; every reference must resolve."
+        }
+      }
+    }
+  }
+}

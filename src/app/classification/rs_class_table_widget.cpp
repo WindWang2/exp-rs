@@ -19,7 +19,7 @@ RsClassTableWidget::RsClassTableWidget( QWidget *parent )
 
   mTable = new QTableWidget( 0, 4, this );
   mTable->setObjectName( QStringLiteral( "rsClassTable" ) );
-  mTable->setHorizontalHeaderLabels( { tr( "色" ), tr( "名称" ), tr( "ROI" ), tr( "像元" ) } );
+  mTable->setHorizontalHeaderLabels( { tr( "Color" ), tr( "Name" ), tr( "ROI" ), tr( "Pixel" ) } );
   mTable->verticalHeader()->setVisible( false );
   mTable->verticalHeader()->setDefaultSectionSize( 26 );
   mTable->setSelectionBehavior( QAbstractItemView::SelectRows );
@@ -30,8 +30,8 @@ RsClassTableWidget::RsClassTableWidget( QWidget *parent )
   mTable->setColumnWidth( 2, 50 );
   mTable->setColumnWidth( 3, 70 );
   mTable->horizontalHeader()->setSectionResizeMode( 1, QHeaderView::Stretch );
-  mTable->setToolTip( tr( "类别表：双击编辑名称；列显示颜色、名称、ROI 数与像元数。" ) );
-  mTable->setStatusTip( tr( "类别定义表" ) );
+  mTable->setToolTip( tr( "Class table: double-click to edit a name; columns show color, name, ROI count and pixel count." ) );
+  mTable->setStatusTip( tr( "Class Definition Table" ) );
 
   lay->addWidget( mTable );
 
@@ -249,7 +249,7 @@ void RsClassTableWidget::onCellDoubleClicked( int row, int column )
 
     const int classId = colorItem->data( Qt::UserRole ).toInt();
     const QColor oldColor = colorItem->background().color();
-    const QColor newColor = QColorDialog::getColor( oldColor, this, tr( "选择类别颜色" ) );
+    const QColor newColor = QColorDialog::getColor( oldColor, this, tr( "Choose Class Color" ) );
     if ( newColor.isValid() && newColor != oldColor )
     {
       mBlockItemChanged = true;

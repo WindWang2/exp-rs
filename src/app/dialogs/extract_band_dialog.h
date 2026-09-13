@@ -18,7 +18,7 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("extract_band"); }
-    QString dialogTitle() const override { return tr("提取波段"); }
+    QString dialogTitle() const override { return tr("Extract Band"); }
     bool validateInputs() override;
     void onRun() override;
 

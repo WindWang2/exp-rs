@@ -151,7 +151,7 @@ QString taskTitle( const sicnu::AlgorithmTaskInfo &info )
 } // namespace
 
 RsJobPanel::RsJobPanel( QWidget *parent )
-  : QgsDockWidget( tr( "任务中心" ), parent )
+  : QgsDockWidget( tr( "Task Center" ), parent )
 {
   setObjectName( QStringLiteral( "rsJobPanelDock" ) );
   setAllowedAreas( Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea );
@@ -174,7 +174,7 @@ void RsJobPanel::setupUi()
   mainLayout->setSpacing( 4 );
 
   m_hintLabel = new QLabel(
-    tr( "右键任务可查看方法/参数/输入输出，或停止、加载结果到主图。空白处右键也可刷新与查看说明。" ),
+    tr( "Right-click a task for method/parameters/inputs/outputs, to stop it or load its results into the main view. Right-click empty space to refresh and view help." ),
     mainWidget );
   m_hintLabel->setObjectName( QStringLiteral( "rsJobPanelHint" ) );
   m_hintLabel->setWordWrap( true );
@@ -187,28 +187,28 @@ void RsJobPanel::setupUi()
 
   m_filterCombo = new QComboBox( toolbar );
   m_filterCombo->setObjectName( QStringLiteral( "rsJobFilterCombo" ) );
-  m_filterCombo->addItem( tr( "全部" ), QStringLiteral( "all" ) );
-  m_filterCombo->addItem( tr( "运行中" ), QStringLiteral( "active" ) );
-  m_filterCombo->addItem( tr( "失败" ), QStringLiteral( "failed" ) );
-  m_filterCombo->addItem( tr( "已完成" ), QStringLiteral( "finished" ) );
+  m_filterCombo->addItem( tr( "All" ), QStringLiteral( "all" ) );
+  m_filterCombo->addItem( tr( "Running" ), QStringLiteral( "active" ) );
+  m_filterCombo->addItem( tr( "Failed" ), QStringLiteral( "failed" ) );
+  m_filterCombo->addItem( tr( "Finished" ), QStringLiteral( "finished" ) );
   toolbarLayout->addWidget( m_filterCombo );
   toolbarLayout->addStretch();
 
-  m_cancelBtn = new QPushButton( tr( "停止" ), toolbar );
+  m_cancelBtn = new QPushButton( tr( "Stop" ), toolbar );
   m_cancelBtn->setObjectName( QStringLiteral( "rsJobCancelBtn" ) );
   m_cancelBtn->setProperty( "danger", true );
-  m_cancelBtn->setToolTip( tr( "取消排队或运行中的任务" ) );
+  m_cancelBtn->setToolTip( tr( "Cancel Queued or Running Tasks" ) );
   m_cancelBtn->setEnabled( false );
   toolbarLayout->addWidget( m_cancelBtn );
 
-  m_loadBtn = new QPushButton( tr( "加载到主图" ), toolbar );
+  m_loadBtn = new QPushButton( tr( "Load to Main View" ), toolbar );
   m_loadBtn->setObjectName( QStringLiteral( "rsJobLoadBtn" ) );
   m_loadBtn->setProperty( "primary", true );
-  m_loadBtn->setToolTip( tr( "将选中任务的输出路径加载到主程序图层" ) );
+  m_loadBtn->setToolTip( tr( "Load the selected task's output paths into the main program layers" ) );
   m_loadBtn->setEnabled( false );
   toolbarLayout->addWidget( m_loadBtn );
 
-  m_clearFinishedBtn = new QPushButton( tr( "清空已完成" ), toolbar );
+  m_clearFinishedBtn = new QPushButton( tr( "Clear Finished" ), toolbar );
   m_clearFinishedBtn->setObjectName( QStringLiteral( "rsJobClearBtn" ) );
   m_clearFinishedBtn->setProperty( "ghost", true );
   toolbarLayout->addWidget( m_clearFinishedBtn );
@@ -224,7 +224,7 @@ void RsJobPanel::setupUi()
   m_jobTree = new QTreeWidget( m_treeStack );
   m_jobTree->setObjectName( QStringLiteral( "rsJobTree" ) );
   m_jobTree->setColumnCount( 5 );
-  m_jobTree->setHeaderLabels( { tr( "标题" ), tr( "状态" ), tr( "进度" ), tr( "加载" ), tr( "预计剩余" ) } );
+  m_jobTree->setHeaderLabels( { tr( "Title" ), tr( "Status" ), tr( "Progress" ), tr( "Load" ), tr( "Estimated Remaining" ) } );
   m_jobTree->setRootIsDecorated( false );
   m_jobTree->setSelectionMode( QAbstractItemView::SingleSelection );
   m_jobTree->setUniformRowHeights( true );
@@ -237,18 +237,18 @@ void RsJobPanel::setupUi()
   m_jobTree->header()->setSectionResizeMode( ColLoad, QHeaderView::Interactive );
   m_jobTree->header()->setSectionResizeMode( ColEta, QHeaderView::Interactive );
   const QFontMetrics fm = m_jobTree->fontMetrics();
-  m_jobTree->setColumnWidth( ColState, qMax( 76, fm.horizontalAdvance( tr( "状态" ) ) + 36 ) );
+  m_jobTree->setColumnWidth( ColState, qMax( 76, fm.horizontalAdvance( tr( "Status" ) ) + 36 ) );
   m_jobTree->setColumnWidth( ColProgress, qMax( 84, fm.horizontalAdvance( QStringLiteral( "100.0%" ) ) + 36 ) );
-  m_jobTree->setColumnWidth( ColLoad, qMax( 52, fm.horizontalAdvance( tr( "加载" ) ) + 24 ) );
+  m_jobTree->setColumnWidth( ColLoad, qMax( 52, fm.horizontalAdvance( tr( "Load" ) ) + 24 ) );
   m_jobTree->setColumnWidth( ColEta, qMax( 80, fm.horizontalAdvance( QStringLiteral( "99h 59m 59s" ) ) + 24 ) );
-  m_jobTree->headerItem()->setToolTip( ColEta, tr( "基于已用时间与当前进度的估算；进度为 0 或暂停时不可用" ) );
-  m_jobTree->headerItem()->setToolTip( ColLoad, tr( "勾选：任务成功后自动将输出加载到主程序" ) );
+  m_jobTree->headerItem()->setToolTip( ColEta, tr( "Estimated from elapsed time and current progress; unavailable at 0% or while paused" ) );
+  m_jobTree->headerItem()->setToolTip( ColLoad, tr( "Tick: load outputs into the main program automatically after the task succeeds" ) );
   m_treeStack->addWidget( m_jobTree ); // Index 0: Tree
 
   m_emptyState = new sicnu::RsEmptyStateWidget(
       QStringLiteral( "check_outline" ),
-      tr( "暂无任务" ),
-      tr( "所有计算与算法任务均已完成或尚未提交。可在处理工具箱或工作流中启动新任务。" ),
+      tr( "No tasks yet" ),
+      tr( "All computation and algorithm tasks are finished or not yet submitted. Start new tasks in the Processing Toolbox or a workflow." ),
       QString(),
       m_treeStack );
   m_treeStack->addWidget( m_emptyState ); // Index 1: Empty State
@@ -262,13 +262,13 @@ void RsJobPanel::setupUi()
   m_detailView->setObjectName( QStringLiteral( "rsJobDetailView" ) );
   m_detailView->setFont( QFontDatabase::systemFont( QFontDatabase::FixedFont ) );
   m_detailView->setReadOnly( true );
-  m_detailView->setPlaceholderText( tr( "选择任务查看方法、参数、输入输出…" ) );
-  m_detailTabs->addTab( m_detailView, tr( "详情" ) );
+  m_detailView->setPlaceholderText( tr( "Select a task to view method, parameters, inputs/outputs..." ) );
+  m_detailTabs->addTab( m_detailView, tr( "Details" ) );
 
   // Structured result view (UX 4.0): operator result JSON rendered as
   // status/metrics/artifacts instead of raw JSON only.
   m_resultSummary = new RsResultSummary( m_detailTabs );
-  m_detailTabs->addTab( m_resultSummary, tr( "结果" ) );
+  m_detailTabs->addTab( m_resultSummary, tr( "Result" ) );
   connect( m_resultSummary, &RsResultSummary::openPathRequested,
            this, &RsJobPanel::resultOpenRequested );
 
@@ -276,9 +276,9 @@ void RsJobPanel::setupUi()
   m_logView->setObjectName( QStringLiteral( "rsJobLogView" ) );
   m_logView->setFont( QFontDatabase::systemFont( QFontDatabase::FixedFont ) );
   m_logView->setReadOnly( true );
-  m_logView->setPlaceholderText( tr( "选择任务以查看日志…" ) );
+  m_logView->setPlaceholderText( tr( "Select a task to view its log..." ) );
   m_logView->setMaximumBlockCount( 20000 );
-  m_detailTabs->addTab( m_logView, tr( "日志" ) );
+  m_detailTabs->addTab( m_logView, tr( "Log" ) );
 
   splitter->addWidget( m_detailTabs );
   splitter->setStretchFactor( 0, 1 );
@@ -299,8 +299,8 @@ void RsJobPanel::setupUi()
       return;
     const int n = loadPathsToMain( collectOutputPaths( id ) );
     if ( n <= 0 )
-      QMessageBox::information( this, tr( "加载到主图" ),
-                                tr( "未找到可加载的输出路径（或文件不存在）。" ) );
+      QMessageBox::information( this, tr( "Load to Main View" ),
+                                tr( "No loadable output path found (or the file does not exist)." ) );
   } );
   connect( m_clearFinishedBtn, &QPushButton::clicked, this, &RsJobPanel::onClearFinishedClicked );
   connect( m_filterCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
@@ -313,16 +313,16 @@ void RsJobPanel::applyHelpTips()
 {
   // Dock-level (also powers Shift+F1 "What's This").
   setWhatsThis( SicnuDialogHelp::htmlForTool( QStringLiteral( "obia_task_list" ), windowTitle() ) );
-  SicnuDialogHelp::tip( this, tr( "任务中心：汇总所有后台任务的标题、状态、进度与输出加载。" ) );
+  SicnuDialogHelp::tip( this, tr( "Task Center: aggregates title, status, progress and output loading for all background tasks." ) );
 
-  SicnuDialogHelp::tip( m_filterCombo, tr( "按状态筛选任务列表：全部 / 运行中 / 失败 / 已完成。" ) );
-  SicnuDialogHelp::tip( m_cancelBtn, tr( "取消排队或运行中的任务（会弹出确认）。" ) );
-  SicnuDialogHelp::tip( m_loadBtn, tr( "将选中任务的输出路径加载到主程序图层（仅成功任务）。" ) );
-  SicnuDialogHelp::tip( m_clearFinishedBtn, tr( "从列表清除所有已完成/失败/已取消的任务（会弹出确认）。" ) );
-  SicnuDialogHelp::tip( m_jobTree, tr( "任务列表。双击查看详情；右键查看详情/日志、停止、暂停/恢复、重试、加载输出、复制信息。" ) );
-  SicnuDialogHelp::tip( m_detailView, tr( "任务详情：方法 ID、参数、输入输出与结果。" ) );
-  SicnuDialogHelp::tip( m_logView, tr( "任务运行日志（只读）。" ) );
-  SicnuDialogHelp::tip( m_hintLabel, tr( "操作提示。" ) );
+  SicnuDialogHelp::tip( m_filterCombo, tr( "Filters the task list by state: all / running / failed / finished." ) );
+  SicnuDialogHelp::tip( m_cancelBtn, tr( "Cancels queued or running tasks (a confirmation pops up)." ) );
+  SicnuDialogHelp::tip( m_loadBtn, tr( "Loads the selected task's output paths into the main program layers (successful tasks only)." ) );
+  SicnuDialogHelp::tip( m_clearFinishedBtn, tr( "Clear all finished/failed/cancelled tasks from the list (a confirmation pops up)." ) );
+  SicnuDialogHelp::tip( m_jobTree, tr( "Task list. Double-click for details; right-click for details/log, stop, pause/resume, retry, load output and copy info." ) );
+  SicnuDialogHelp::tip( m_detailView, tr( "Task details: method ID, parameters, inputs/outputs and results." ) );
+  SicnuDialogHelp::tip( m_logView, tr( "Task run log (read-only)." ) );
+  SicnuDialogHelp::tip( m_hintLabel, tr( "Operation tips." ) );
 }
 
 QString RsJobPanel::statusToString( sicnu::TaskStatus status )
@@ -330,25 +330,25 @@ QString RsJobPanel::statusToString( sicnu::TaskStatus status )
   switch ( status )
   {
     case sicnu::TaskStatus::Queued:
-      return QObject::tr( "排队" );
+      return QObject::tr( "Queued" );
     case sicnu::TaskStatus::WaitingResource:
-      return QObject::tr( "等待资源" );
+      return QObject::tr( "Waiting for Resources" );
     case sicnu::TaskStatus::Dispatching:
-      return QObject::tr( "调度中" );
+      return QObject::tr( "Scheduling" );
     case sicnu::TaskStatus::Running:
-      return QObject::tr( "运行中" );
+      return QObject::tr( "Running" );
     case sicnu::TaskStatus::Cancelling:
-      return QObject::tr( "取消中" );
+      return QObject::tr( "Cancelling" );
     case sicnu::TaskStatus::Paused:
-      return QObject::tr( "已暂停" );
+      return QObject::tr( "Paused" );
     case sicnu::TaskStatus::Completed:
-      return QObject::tr( "成功" );
+      return QObject::tr( "Succeeded" );
     case sicnu::TaskStatus::Failed:
-      return QObject::tr( "失败" );
+      return QObject::tr( "Failed" );
     case sicnu::TaskStatus::Canceled:
-      return QObject::tr( "已取消" );
+      return QObject::tr( "Cancelled" );
   }
-  return QObject::tr( "未知" );
+  return QObject::tr( "Unknown" );
 }
 
 QString RsJobPanel::formatProgress( double progress )
@@ -414,11 +414,11 @@ bool RsJobPanel::passesFilter( const QString &stateText ) const
   if ( key == QLatin1String( "all" ) )
     return true;
   if ( key == QLatin1String( "active" ) )
-    return stateText == tr( "排队" ) || stateText == tr( "等待资源" ) || stateText == tr( "运行中" ) || stateText == tr( "取消中" ) || stateText == tr( "已暂停" );
+    return stateText == tr( "Queued" ) || stateText == tr( "Waiting for Resources" ) || stateText == tr( "Running" ) || stateText == tr( "Cancelling" ) || stateText == tr( "Paused" );
   if ( key == QLatin1String( "failed" ) )
-    return stateText == tr( "失败" );
+    return stateText == tr( "Failed" );
   if ( key == QLatin1String( "finished" ) )
-    return stateText == tr( "成功" ) || stateText == tr( "失败" ) || stateText == tr( "已取消" );
+    return stateText == tr( "Succeeded" ) || stateText == tr( "Failed" ) || stateText == tr( "Cancelled" );
   return true;
 }
 
@@ -481,10 +481,10 @@ void RsJobPanel::refreshAll()
     item->setFlags( item->flags() | Qt::ItemIsUserCheckable );
     item->setCheckState( ColLoad, loadToMainPreference( info.taskId ) ? Qt::Checked : Qt::Unchecked );
     item->setToolTip( ColTitle,
-                      tr( "任务 ID: %1\n方法: %2\n右键查看详情 / 停止 / 加载" )
+                      tr( "Task ID: %1\nMethod: %2\nRight-click for details / stop / load" )
                         .arg( info.taskId )
                         .arg( info.algorithmId ) );
-    item->setToolTip( ColLoad, tr( "勾选后任务成功时自动加载输出到主程序" ) );
+    item->setToolTip( ColLoad, tr( "When ticked, outputs are loaded into the main program automatically on task success" ) );
     items.insert( info.taskId, item );
 
     QTreeWidgetItem *parentItem = nullptr;
@@ -616,7 +616,7 @@ void RsJobPanel::upsertTaskRow( const sicnu::AlgorithmTaskInfo &info )
   found->setData( ColTitle, RoleTaskId, static_cast<qlonglong>( taskId ) );
   found->setData( ColTitle, RoleState, static_cast<int>( info.status ) );
   found->setToolTip( ColTitle,
-                     tr( "任务 ID: %1\n方法: %2\n右键查看详情 / 停止 / 加载" )
+                     tr( "Task ID: %1\nMethod: %2\nRight-click for details / stop / load" )
                        .arg( taskId )
                        .arg( info.algorithmId ) );
   m_blockItemChanged = false;
@@ -633,7 +633,7 @@ void RsJobPanel::fillLogForTask( long taskId )
   const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
   if ( info.taskId != taskId )
   {
-    m_logView->setPlainText( tr( "(任务不存在)" ) );
+    m_logView->setPlainText( tr( "(task not found)" ) );
     m_logTaskId = -1;
     m_logLinesShown = 0;
     return;
@@ -666,13 +666,13 @@ void RsJobPanel::fillLogForTask( long taskId )
 
   QStringList lines;
   lines.reserve( totalLines + 4 );
-  lines.append( tr( "—— 任务日志 · %1 ——" ).arg( taskTitle( info ) ) );
+  lines.append( tr( "—— Task Log · %1 ——" ).arg( taskTitle( info ) ) );
   for ( const QString &line : info.logBuffer )
     lines.append( line );
   if ( !info.errorMessage.isEmpty() )
     lines.append( QStringLiteral( "[ERROR] %1" ).arg( info.errorMessage ) );
   if ( lines.size() == 1 )
-    lines.append( tr( "(暂无日志)" ) );
+    lines.append( tr( "(no log yet)" ) );
   m_logLinesShown = totalLines;
 
   m_logView->setPlainText( lines.join( QLatin1Char( '\n' ) ) );
@@ -700,7 +700,7 @@ void RsJobPanel::fillDetailsForTask( long taskId )
   m_detailView->clear();
   if ( info.taskId != taskId )
   {
-    m_detailView->setPlainText( tr( "(任务不存在)" ) );
+    m_detailView->setPlainText( tr( "(task not found)" ) );
     m_resultSummary->clear();
     return;
   }
@@ -716,31 +716,31 @@ void RsJobPanel::fillDetailsForTask( long taskId )
   }
 
   QStringList lines;
-  lines << tr( "【基本信息】" );
-  lines << tr( "任务 ID：%1" ).arg( taskId );
-  lines << tr( "标题：%1" ).arg( taskTitle( info ) );
-  lines << tr( "方法 (algorithmId)：%1" ).arg( info.algorithmId );
+  lines << tr( "[Basic information]" );
+  lines << tr( "Task ID: %1" ).arg( taskId );
+  lines << tr( "Title: %1" ).arg( taskTitle( info ) );
+  lines << tr( "Method (algorithmId): %1" ).arg( info.algorithmId );
   if ( info.hasJobRequest && !info.jobRequest.source.empty() )
-    lines << tr( "来源：%1" ).arg( QString::fromStdString( info.jobRequest.source ) );
+    lines << tr( "Source: %1" ).arg( QString::fromStdString( info.jobRequest.source ) );
   if ( info.hasJobRequest && !info.jobRequest.clientTag.empty() )
-    lines << tr( "客户端标记：%1" ).arg( QString::fromStdString( info.jobRequest.clientTag ) );
+    lines << tr( "Client tag: %1" ).arg( QString::fromStdString( info.jobRequest.clientTag ) );
   if ( info.hasJobRequest )
-    lines << tr( "独占执行：%1" ).arg( info.jobRequest.exclusive ? tr( "是" ) : tr( "否" ) );
+    lines << tr( "Exclusive execution: %1" ).arg( info.jobRequest.exclusive ? tr( "Yes" ) : tr( "No" ) );
   if ( !info.jobId.empty() )
-    lines << tr( "内部 jobId：%1" ).arg( QString::fromStdString( info.jobId ) );
-  lines << tr( "状态：%1" ).arg( statusToString( info.status ) );
-  lines << tr( "进度：%1" ).arg( formatProgress( info.progressPercentage ) );
-  lines << tr( "成功后加载到主图：%1" )
-             .arg( loadToMainPreference( taskId ) ? tr( "是" ) : tr( "否" ) );
+    lines << tr( "Internal jobId: %1" ).arg( QString::fromStdString( info.jobId ) );
+  lines << tr( "Status: %1" ).arg( statusToString( info.status ) );
+  lines << tr( "Progress: %1" ).arg( formatProgress( info.progressPercentage ) );
+  lines << tr( "Loaded to main view on success: %1" )
+             .arg( loadToMainPreference( taskId ) ? tr( "Yes" ) : tr( "No" ) );
   if ( info.startTime.isValid() )
-    lines << tr( "开始时间：%1" ).arg( info.startTime.toString( Qt::ISODate ) );
+    lines << tr( "Start time: %1" ).arg( info.startTime.toString( Qt::ISODate ) );
   if ( info.endTime.isValid() )
-    lines << tr( "结束时间：%1" ).arg( info.endTime.toString( Qt::ISODate ) );
+    lines << tr( "End time: %1" ).arg( info.endTime.toString( Qt::ISODate ) );
   if ( !info.errorMessage.isEmpty() )
-    lines << tr( "错误：%1" ).arg( info.errorMessage );
+    lines << tr( "Error: %1" ).arg( info.errorMessage );
 
   lines << QString();
-  lines << tr( "【方法参数 params】" );
+  lines << tr( "[Method parameters (params)]" );
   if ( info.hasJobRequest
        && !( info.jobRequest.params.isNull()
              || ( info.jobRequest.params.isObject() && info.jobRequest.params.empty() ) ) )
@@ -754,11 +754,11 @@ void RsJobPanel::fillDetailsForTask( long taskId )
   }
   else
   {
-    lines << tr( "(无参数)" );
+    lines << tr( "(no parameters)" );
   }
 
   lines << QString();
-  lines << tr( "【输入 / 路径类参数】" );
+  lines << tr( "[Inputs / path-like parameters]" );
   bool anyIn = false;
   if ( info.hasJobRequest && info.jobRequest.params.isObject() )
   {
@@ -786,17 +786,17 @@ void RsJobPanel::fillDetailsForTask( long taskId )
     }
   }
   if ( !anyIn )
-    lines << tr( "  (未识别到路径类输入键)" );
+    lines << tr( "  (no path-like input parameters found)" );
 
   lines << QString();
-  lines << tr( "【结果 / 输出 result】" );
+  lines << tr( "[Result / output]" );
   if ( info.resultPayload.isNull()
        || ( info.resultPayload.isObject() && info.resultPayload.empty() ) )
   {
     if ( !info.outputLayerPath.isEmpty() )
       lines << QStringLiteral( "  output = %1" ).arg( info.outputLayerPath );
     else
-      lines << tr( "(尚无结果)" );
+      lines << tr( "(no results yet)" );
   }
   else
   {
@@ -805,16 +805,16 @@ void RsJobPanel::fillDetailsForTask( long taskId )
 
   const QStringList outs = collectOutputPaths( taskId );
   lines << QString();
-  lines << tr( "【可加载输出路径】" );
+  lines << tr( "[Loadable output paths]" );
   if ( outs.isEmpty() )
-    lines << tr( "  (无)" );
+    lines << tr( "  (None)" );
   else
   {
     for ( const QString &p : outs )
     {
       const bool ok = QFileInfo::exists( p );
       lines << QStringLiteral( "  %1  %2" )
-                 .arg( p, ok ? tr( "[存在]" ) : tr( "[不存在]" ) );
+                 .arg( p, ok ? tr( "[present]" ) : tr( "[missing]" ) );
     }
   }
 
@@ -1004,8 +1004,8 @@ void RsJobPanel::onCancelClicked()
     return;
   const auto info = sicnu::TaskCenter::instance().getTaskInfo( id );
   const QString title = ( info.taskId == id ) ? taskTitle( info ) : QString::number( id );
-  if ( !confirmDangerous( tr( "取消任务" ),
-                          tr( "确定取消任务「%1」？\n运行中的任务将被中止，已产生的中间结果不会回滚。" )
+  if ( !confirmDangerous( tr( "Cancel Task" ),
+                          tr( "Cancel task '%1'?\nA running task will be aborted; intermediate results already produced are not rolled back." )
                             .arg( title ) ) )
     return;
   sicnu::TaskCenter::instance().cancelTask( id );
@@ -1024,8 +1024,8 @@ void RsJobPanel::onClearFinishedClicked()
   }
   if ( terminalCount == 0 )
     return;
-  if ( !confirmDangerous( tr( "清空已完成" ),
-                          tr( "从列表清除 %1 个已完成/失败/已取消的任务？\n（不会删除磁盘上的输出文件。）" )
+  if ( !confirmDangerous( tr( "Clear Finished" ),
+                          tr( "Clear %1 finished/failed/cancelled tasks from the list?\n(Output files on disk are not deleted.)" )
                             .arg( terminalCount ) ) )
     return;
 
@@ -1076,12 +1076,12 @@ void RsJobPanel::copyText( const QString &text )
 void RsJobPanel::showAboutDialog()
 {
   QMessageBox::information(
-    this, tr( "任务中心" ),
-    tr( "任务中心汇总所有经 Task Center 提交的算法任务（JobEngine 为内部执行适配器）。\n\n"
-        "• 列表显示标题、状态、进度；「加载」列勾选后，任务成功时自动把输出加载到主图。\n"
-        "• 右键任务：查看详情（方法/参数/输入输出）、停止、加载输出、复制信息。\n"
-        "• 列表空白处右键：刷新、清空已完成、本说明。\n"
-        "• 取消、日志与终态均以 Task Center 为准；本面板为投影，不持有独立生命周期状态。" ) );
+    this, tr( "Task Center" ),
+    tr( "The Task Center aggregates all algorithm tasks submitted through the Task Center (JobEngine is the internal execution adapter).\n\n"
+        "• The list shows title, status and progress; when the 'Load' column is ticked, outputs are loaded into the main view automatically on task success.\n"
+        "• Right-click a task: view details (method/parameters/inputs/outputs), stop, load outputs, copy info.\n"
+        "• Right-click empty list space: refresh, clear finished, this help.\n"
+        "• Cancellation, logs and final states are authoritative in the Task Center; this panel is a projection and holds no independent lifecycle state." ) );
 }
 
 void RsJobPanel::onContextMenuRequested( const QPoint &pos )
@@ -1091,13 +1091,13 @@ void RsJobPanel::onContextMenuRequested( const QPoint &pos )
 
   if ( !item )
   {
-    auto *refreshAct = menu.addAction( tr( "刷新列表" ), this, [this]() { refreshAll(); } );
-    refreshAct->setToolTip( tr( "重新从 Task Center 拉取全部任务。" ) );
-    auto *clearAct = menu.addAction( tr( "清空已完成…" ), this, &RsJobPanel::onClearFinishedClicked );
-    clearAct->setToolTip( tr( "清除所有已完成/失败/已取消的任务（会弹出确认）。" ) );
+    auto *refreshAct = menu.addAction( tr( "Refresh List" ), this, [this]() { refreshAll(); } );
+    refreshAct->setToolTip( tr( "Re-fetches all tasks from the Task Center." ) );
+    auto *clearAct = menu.addAction( tr( "Clear Finished..." ), this, &RsJobPanel::onClearFinishedClicked );
+    clearAct->setToolTip( tr( "Clears all finished/failed/cancelled tasks (a confirmation pops up)." ) );
     menu.addSeparator();
-    auto *aboutAct = menu.addAction( tr( "任务中心说明…" ), this, &RsJobPanel::showAboutDialog );
-    aboutAct->setToolTip( tr( "查看任务中心的功能说明。" ) );
+    auto *aboutAct = menu.addAction( tr( "About the Task Center..." ), this, &RsJobPanel::showAboutDialog );
+    aboutAct->setToolTip( tr( "View the Task Center feature description." ) );
     const auto tasks = sicnu::TaskCenter::instance().allTasks();
     int active = 0, done = 0;
     for ( const auto &t : tasks )
@@ -1108,7 +1108,7 @@ void RsJobPanel::onContextMenuRequested( const QPoint &pos )
         ++done;
     }
     auto *info = menu.addAction(
-      tr( "当前：%1 个活动 / %2 个已结束（Task Center 共 %3）" )
+      tr( "Currently: %1 active / %2 finished (Task Center total %3)" )
         .arg( active )
         .arg( done )
         .arg( tasks.size() ) );
@@ -1126,68 +1126,68 @@ void RsJobPanel::onContextMenuRequested( const QPoint &pos )
   const bool canRetry = ( status == sicnu::TaskStatus::Failed
                           || status == sicnu::TaskStatus::Canceled );
 
-  auto *detailAct = menu.addAction( tr( "查看详情" ), this, [this, taskId]() {
+  auto *detailAct = menu.addAction( tr( "View Details" ), this, [this, taskId]() {
     if ( m_detailTabs )
       m_detailTabs->setCurrentWidget( m_detailView );
     fillDetailsForTask( taskId );
   } );
-  detailAct->setToolTip( tr( "在右侧详情页显示方法、参数、输入输出与结果。" ) );
-  auto *logAct = menu.addAction( tr( "查看日志" ), this, [this, taskId]() {
+  detailAct->setToolTip( tr( "Shows method, parameters, inputs/outputs and results on the details page to the right." ) );
+  auto *logAct = menu.addAction( tr( "View Log" ), this, [this, taskId]() {
     if ( m_detailTabs )
       m_detailTabs->setCurrentWidget( m_logView );
     fillLogForTask( taskId );
   } );
-  logAct->setToolTip( tr( "在右侧日志页显示运行日志。" ) );
+  logAct->setToolTip( tr( "Shows the run log on the Log page on the right." ) );
   menu.addSeparator();
 
-  QAction *stopAct = menu.addAction( tr( "停止 / 取消…" ), this, [this, taskId, item]() {
+  QAction *stopAct = menu.addAction( tr( "Stop / Cancel..." ), this, [this, taskId, item]() {
     const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
     const QString title = ( info.taskId == taskId ) ? taskTitle( info ) : QString::number( taskId );
-    if ( !confirmDangerous( tr( "取消任务" ),
-                            tr( "确定取消任务「%1」？\n运行中的任务将被中止，已产生的中间结果不会回滚。" )
+    if ( !confirmDangerous( tr( "Cancel Task" ),
+                            tr( "Cancel task '%1'?\nA running task will be aborted; intermediate results already produced are not rolled back." )
                               .arg( title ) ) )
       return;
     sicnu::TaskCenter::instance().cancelTask( taskId );
   } );
   stopAct->setEnabled( cancellable );
-  stopAct->setToolTip( tr( "中止排队/运行中/已暂停的任务（会弹出确认）。" ) );
+  stopAct->setToolTip( tr( "Abort queued / running / paused tasks (a confirmation pops up)." ) );
 
-  QAction *pauseAct = menu.addAction( tr( "暂停" ), this, [taskId]() {
+  QAction *pauseAct = menu.addAction( tr( "Pause" ), this, [taskId]() {
     sicnu::TaskCenter::instance().pauseTask( taskId );
   } );
   pauseAct->setEnabled( status == sicnu::TaskStatus::Running );
-  pauseAct->setToolTip( tr( "暂停运行中的任务，可稍后恢复。" ) );
+  pauseAct->setToolTip( tr( "Pauses running tasks; they can be resumed later." ) );
 
-  QAction *resumeAct = menu.addAction( tr( "恢复" ), this, [taskId]() {
+  QAction *resumeAct = menu.addAction( tr( "Resume" ), this, [taskId]() {
     sicnu::TaskCenter::instance().resumeTask( taskId );
   } );
   resumeAct->setEnabled( status == sicnu::TaskStatus::Paused );
-  resumeAct->setToolTip( tr( "恢复已暂停的任务。" ) );
+  resumeAct->setToolTip( tr( "Resumes paused tasks." ) );
 
-  QAction *retryAct = menu.addAction( tr( "重试…" ), this, [this, taskId]() {
+  QAction *retryAct = menu.addAction( tr( "Retry..." ), this, [this, taskId]() {
     const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
     const QString title = ( info.taskId == taskId ) ? taskTitle( info ) : QString::number( taskId );
-    if ( !confirmDangerous( tr( "重试任务" ),
-                            tr( "重新提交任务「%1」？\n将以相同参数创建一个新任务。" )
+    if ( !confirmDangerous( tr( "Retry Task" ),
+                            tr( "Resubmit task '%1'?\nA new task will be created with the same parameters." )
                               .arg( title ) ) )
       return;
     sicnu::TaskCenter::instance().retryTask( taskId );
   } );
   retryAct->setEnabled( canRetry );
-  retryAct->setToolTip( tr( "以相同参数重新提交失败/已取消的任务（会弹出确认）。" ) );
+  retryAct->setToolTip( tr( "Resubmits failed/cancelled tasks with the same parameters (a confirmation pops up)." ) );
 
-  QAction *loadAct = menu.addAction( tr( "加载输出到主图" ), this, [this, taskId]() {
+  QAction *loadAct = menu.addAction( tr( "Load Output to Main View" ), this, [this, taskId]() {
     const int n = loadPathsToMain( collectOutputPaths( taskId ) );
     if ( n <= 0 )
-      QMessageBox::information( this, tr( "加载到主图" ),
-                                tr( "未找到可加载的输出文件。" ) );
+      QMessageBox::information( this, tr( "Load to Main View" ),
+                                tr( "No loadable output file found." ) );
   } );
   loadAct->setEnabled( succeeded );
-  loadAct->setToolTip( tr( "将任务输出路径加载到主程序图层（仅成功任务）。" ) );
+  loadAct->setToolTip( tr( "Loads task output paths into the main program layers (successful tasks only)." ) );
 
-  QAction *autoLoad = menu.addAction( tr( "成功后加载到主图" ) );
+  QAction *autoLoad = menu.addAction( tr( "Load to Main View on Success" ) );
   autoLoad->setCheckable( true );
-  autoLoad->setToolTip( tr( "勾选后任务成功时自动把输出加载到主程序。" ) );
+  autoLoad->setToolTip( tr( "When ticked, outputs are loaded into the main program automatically on task success." ) );
   autoLoad->setChecked( loadToMainPreference( taskId ) );
   connect( autoLoad, &QAction::toggled, this, [this, taskId]( bool on ) {
     setLoadToMainPreference( taskId, on );
@@ -1200,36 +1200,36 @@ void RsJobPanel::onContextMenuRequested( const QPoint &pos )
   } );
 
   menu.addSeparator();
-  auto *copyIdAct = menu.addAction( tr( "复制任务 ID" ), this, [this, taskId]() {
+  auto *copyIdAct = menu.addAction( tr( "Copy Task ID" ), this, [this, taskId]() {
     copyText( QString::number( taskId ) );
   } );
-  copyIdAct->setToolTip( tr( "把任务 ID 复制到剪贴板。" ) );
-  auto *copyMethodAct = menu.addAction( tr( "复制方法 ID" ), this, [this, taskId]() {
+  copyIdAct->setToolTip( tr( "Copies the task ID to the clipboard." ) );
+  auto *copyMethodAct = menu.addAction( tr( "Copy Method ID" ), this, [this, taskId]() {
     const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
     if ( info.taskId == taskId )
       copyText( info.algorithmId );
   } );
-  copyMethodAct->setToolTip( tr( "把方法 algorithmId 复制到剪贴板。" ) );
-  auto *copyParamsAct = menu.addAction( tr( "复制参数 JSON" ), this, [this, taskId]() {
+  copyMethodAct->setToolTip( tr( "Copies the method algorithmId to the clipboard." ) );
+  auto *copyParamsAct = menu.addAction( tr( "Copy Parameters JSON" ), this, [this, taskId]() {
     const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
     if ( info.taskId == taskId && info.hasJobRequest )
       copyText( prettyJsonValue( info.jobRequest.params ) );
   } );
-  copyParamsAct->setToolTip( tr( "把格式化后的参数 JSON 复制到剪贴板。" ) );
-  auto *copyResultAct = menu.addAction( tr( "复制结果 JSON" ), this, [this, taskId]() {
+  copyParamsAct->setToolTip( tr( "Copies the formatted parameters JSON to the clipboard." ) );
+  auto *copyResultAct = menu.addAction( tr( "Copy Result JSON" ), this, [this, taskId]() {
     const auto info = sicnu::TaskCenter::instance().getTaskInfo( taskId );
     if ( info.taskId == taskId )
       copyText( prettyJsonValue( info.resultPayload ) );
   } );
-  copyResultAct->setToolTip( tr( "把格式化后的结果 JSON 复制到剪贴板。" ) );
-  auto *copyDetailAct = menu.addAction( tr( "复制详情全文" ), this, [this, taskId]() {
+  copyResultAct->setToolTip( tr( "Copies the formatted result JSON to the clipboard." ) );
+  auto *copyDetailAct = menu.addAction( tr( "Copy Full Details" ), this, [this, taskId]() {
     fillDetailsForTask( taskId );
     copyText( m_detailView->toPlainText() );
   } );
-  copyDetailAct->setToolTip( tr( "把详情页全文复制到剪贴板。" ) );
+  copyDetailAct->setToolTip( tr( "Copies the full details page to the clipboard." ) );
 
   menu.addSeparator();
-  QAction *removeAct = menu.addAction( tr( "从列表移除" ), this, [this, taskId]() {
+  QAction *removeAct = menu.addAction( tr( "Remove from List" ), this, [this, taskId]() {
     if ( auto *targetItem = findTaskItem( taskId ) )
       delete targetItem;
     m_loadToMain.remove( taskId );
@@ -1242,13 +1242,13 @@ void RsJobPanel::onContextMenuRequested( const QPoint &pos )
     updateActionEnabled();
   } );
   removeAct->setEnabled( !cancellable );
-  removeAct->setToolTip( tr( "仅从列表移除该行（不清除 Task Center 记录；刷新后会重新出现）。" ) );
+  removeAct->setToolTip( tr( "Removes the row from this list only (Task Center records are kept; they reappear after refresh)." ) );
 
   menu.addSeparator();
-  auto *refreshAct = menu.addAction( tr( "刷新列表" ), this, [this]() { refreshAll(); } );
-  refreshAct->setToolTip( tr( "重新从 Task Center 拉取全部任务。" ) );
-  auto *aboutAct = menu.addAction( tr( "任务中心说明…" ), this, &RsJobPanel::showAboutDialog );
-  aboutAct->setToolTip( tr( "查看任务中心的功能说明。" ) );
+  auto *refreshAct = menu.addAction( tr( "Refresh List" ), this, [this]() { refreshAll(); } );
+  refreshAct->setToolTip( tr( "Re-fetches all tasks from the Task Center." ) );
+  auto *aboutAct = menu.addAction( tr( "About the Task Center..." ), this, &RsJobPanel::showAboutDialog );
+  aboutAct->setToolTip( tr( "View the Task Center feature description." ) );
 
   menu.exec( m_jobTree->viewport()->mapToGlobal( pos ) );
 }

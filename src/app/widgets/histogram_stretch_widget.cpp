@@ -54,7 +54,7 @@ void HistogramStretchWidget::setupUi()
     // Histogram display (instrument chart chrome via QSS #rsHistogramChart)
     m_histogram = new HistogramWidget( this );
     m_histogram->setObjectName( QStringLiteral( "rsHistogramChart" ) );
-    m_histogram->setToolTip( tr( "直方图：拖动控制点做分段线性拉伸；双击添加、右键删除控制点。" ) );
+    m_histogram->setToolTip( tr( "Histogram: drag control points for a piecewise linear stretch; double-click adds and right-click removes a point." ) );
     connect( m_histogram, &HistogramWidget::cutoffsChanged,
              this, &HistogramStretchWidget::onHistogramCutoffsChanged );
     connect( m_histogram, &HistogramWidget::piecewisePointsChanged,
@@ -67,46 +67,46 @@ void HistogramStretchWidget::setupUi()
 
     // Channel Selector (Photoshop Style)
     m_channelCombo = new QComboBox( this );
-    m_channelCombo->setToolTip( tr( "选择直方图通道模式：RGB 综合、单通道或单波段灰度。" ) );
-    m_channelCombo->addItem( tr( "RGB 综合通道 (Master RGB)" ), static_cast<int>( HistogramWidget::ChannelMode::MasterRGB ) );
-    m_channelCombo->addItem( tr( "红通道 (Red)" ), static_cast<int>( HistogramWidget::ChannelMode::Red ) );
-    m_channelCombo->addItem( tr( "绿通道 (Green)" ), static_cast<int>( HistogramWidget::ChannelMode::Green ) );
-    m_channelCombo->addItem( tr( "蓝通道 (Blue)" ), static_cast<int>( HistogramWidget::ChannelMode::Blue ) );
-    m_channelCombo->addItem( tr( "单波段 / 灰度 (Single Band)" ), static_cast<int>( HistogramWidget::ChannelMode::SingleBand ) );
+    m_channelCombo->setToolTip( tr( "Choose the histogram channel mode: master RGB, a single channel, or single-band grayscale." ) );
+    m_channelCombo->addItem( tr( "Master RGB" ), static_cast<int>( HistogramWidget::ChannelMode::MasterRGB ) );
+    m_channelCombo->addItem( tr( "Red Channel" ), static_cast<int>( HistogramWidget::ChannelMode::Red ) );
+    m_channelCombo->addItem( tr( "Green Channel" ), static_cast<int>( HistogramWidget::ChannelMode::Green ) );
+    m_channelCombo->addItem( tr( "Blue Channel" ), static_cast<int>( HistogramWidget::ChannelMode::Blue ) );
+    m_channelCombo->addItem( tr( "Single Band / Grayscale" ), static_cast<int>( HistogramWidget::ChannelMode::SingleBand ) );
     connect( m_channelCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
              this, &HistogramStretchWidget::onChannelChanged );
-    formLayout->addRow( tr( "通道模式 (Channel):" ), m_channelCombo );
+    formLayout->addRow( tr( "Channel Mode:" ), m_channelCombo );
 
     // Band Selector
     m_bandCombo = new QComboBox( this );
-    m_bandCombo->setToolTip( tr( "选择单波段模式下的波段号。" ) );
+    m_bandCombo->setToolTip( tr( "Chooses the band number in single-band mode." ) );
     connect( m_bandCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
              this, &HistogramStretchWidget::onBandChanged );
-    formLayout->addRow( tr( "单波段选择 (Band):" ), m_bandCombo );
+    formLayout->addRow( tr( "Single Band (Band):" ), m_bandCombo );
 
     // Algorithm Selector
     m_algorithmCombo = new QComboBox( this );
-    m_algorithmCombo->setToolTip( tr( "拉伸算法：分段线性/PS 色阶/2% 剪裁/2σ/全阶线性/均衡化/无增强。" ) );
-    m_algorithmCombo->addItem( tr( "分段线性拉伸 (Piecewise Linear)" ), static_cast<int>( StretchAlgorithm::PiecewiseLinear ) );
-    m_algorithmCombo->addItem( tr( "Photoshop 色阶调整 (PS Levels)" ), static_cast<int>( StretchAlgorithm::PhotoshopLevels ) );
-    m_algorithmCombo->addItem( tr( "2% 累计剪裁线性拉伸 (2% Percent Clip)" ), static_cast<int>( StretchAlgorithm::PercentClip ) );
-    m_algorithmCombo->addItem( tr( "2σ 标准差拉伸 (StdDev)" ), static_cast<int>( StretchAlgorithm::StdDev ) );
-    m_algorithmCombo->addItem( tr( "全阶线性拉伸 (Linear Min-Max)" ), static_cast<int>( StretchAlgorithm::LinearMinMax ) );
-    m_algorithmCombo->addItem( tr( "直方图均衡化 (Histogram Eq)" ), static_cast<int>( StretchAlgorithm::HistogramEq ) );
-    m_algorithmCombo->addItem( tr( "无增强 (No Enhancement)" ), static_cast<int>( StretchAlgorithm::NoEnhancement ) );
+    m_algorithmCombo->setToolTip( tr( "Stretch algorithms: piecewise linear / PS levels / 2% clip / 2σ / full-range linear / histogram equalization / none." ) );
+    m_algorithmCombo->addItem( tr( "Piecewise Linear Stretch" ), static_cast<int>( StretchAlgorithm::PiecewiseLinear ) );
+    m_algorithmCombo->addItem( tr( "Photoshop Levels Adjustment" ), static_cast<int>( StretchAlgorithm::PhotoshopLevels ) );
+    m_algorithmCombo->addItem( tr( "2% Cumulative-Clip Linear Stretch" ), static_cast<int>( StretchAlgorithm::PercentClip ) );
+    m_algorithmCombo->addItem( tr( "2σ Std-Dev Stretch" ), static_cast<int>( StretchAlgorithm::StdDev ) );
+    m_algorithmCombo->addItem( tr( "Full-Range Linear Stretch (Min-Max)" ), static_cast<int>( StretchAlgorithm::LinearMinMax ) );
+    m_algorithmCombo->addItem( tr( "Histogram Equalization" ), static_cast<int>( StretchAlgorithm::HistogramEq ) );
+    m_algorithmCombo->addItem( tr( "No Enhancement" ), static_cast<int>( StretchAlgorithm::NoEnhancement ) );
     connect( m_algorithmCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
              this, &HistogramStretchWidget::onAlgorithmChanged );
-    formLayout->addRow( tr( "拉伸算法 (Algorithm):" ), m_algorithmCombo );
+    formLayout->addRow( tr( "Stretch Algorithm:" ), m_algorithmCombo );
 
     // Piecewise Interactive Hint Label
-    m_piecewiseHintLabel = new QLabel( tr( "分段交互: 双击添加控制点，拖拽移动，右键删除。" ), this );
+    m_piecewiseHintLabel = new QLabel( tr( "Piecewise interaction: double-click to add a control point, drag to move, right-click to delete." ), this );
     m_piecewiseHintLabel->setObjectName( QStringLiteral( "rsDialogHint" ) );
     formLayout->addRow( m_piecewiseHintLabel );
 
     // Percent Slider
     auto *percentLayout = new QHBoxLayout();
     m_percentSlider = new QSlider( Qt::Horizontal, this );
-    m_percentSlider->setToolTip( tr( "剪裁比例：保留中间 N% 像素做线性拉伸（2% 剪裁算法用）。" ) );
+    m_percentSlider->setToolTip( tr( "Clip ratio: keeps the middle N% of pixels for the linear stretch (used by the 2% clip algorithm)." ) );
     m_percentSlider->setRange( 1, 100 );
     m_percentSlider->setValue( 98 );
     connect( m_percentSlider, &QSlider::valueChanged,
@@ -115,21 +115,21 @@ void HistogramStretchWidget::setupUi()
     m_percentLabel->setMinimumWidth( 40 );
     percentLayout->addWidget( m_percentSlider );
     percentLayout->addWidget( m_percentLabel );
-    m_parameterLabel = new QLabel( tr( "剪裁比例 (Clip %):" ), this );
+    m_parameterLabel = new QLabel( tr( "Clip %:" ), this );
     formLayout->addRow( m_parameterLabel, percentLayout );
 
     // Photoshop Levels Controls
     auto *levelsLayout = new QHBoxLayout();
 
     m_minSpin = new QDoubleSpinBox( this );
-    m_minSpin->setToolTip( tr( "阴影（最小值）：低于此值的像素映射为黑。" ) );
+    m_minSpin->setToolTip( tr( "Shadows (minimum): pixels below this map to black." ) );
     m_minSpin->setDecimals( 2 );
     m_minSpin->setRange( -1e9, 1e9 );
     connect( m_minSpin, QOverload<double>::of( &QDoubleSpinBox::valueChanged ),
              this, &HistogramStretchWidget::onMinMaxChanged );
 
     m_gammaSpin = new QDoubleSpinBox( this );
-    m_gammaSpin->setToolTip( tr( "Gamma（中音）：1.0 为线性；<1 提亮，>1 压暗。" ) );
+    m_gammaSpin->setToolTip( tr( "Gamma (midtones): 1.0 is linear; <1 brightens, >1 darkens." ) );
     m_gammaSpin->setDecimals( 2 );
     m_gammaSpin->setRange( 0.1, 10.0 );
     m_gammaSpin->setSingleStep( 0.05 );
@@ -138,17 +138,17 @@ void HistogramStretchWidget::setupUi()
              this, &HistogramStretchWidget::onGammaChanged );
 
     m_maxSpin = new QDoubleSpinBox( this );
-    m_maxSpin->setToolTip( tr( "高光（最大值）：高于此值的像素映射为白。" ) );
+    m_maxSpin->setToolTip( tr( "Highlights (maximum): pixels above this map to white." ) );
     m_maxSpin->setDecimals( 2 );
     m_maxSpin->setRange( -1e9, 1e9 );
     connect( m_maxSpin, QOverload<double>::of( &QDoubleSpinBox::valueChanged ),
              this, &HistogramStretchWidget::onMinMaxChanged );
 
-    levelsLayout->addWidget( new QLabel( tr( "阴影 (Min):" ), this ) );
+    levelsLayout->addWidget( new QLabel( tr( "Shadows (Min):" ), this ) );
     levelsLayout->addWidget( m_minSpin );
-    levelsLayout->addWidget( new QLabel( tr( "Gamma (中音):" ), this ) );
+    levelsLayout->addWidget( new QLabel( tr( "Gamma (midtones):" ), this ) );
     levelsLayout->addWidget( m_gammaSpin );
-    levelsLayout->addWidget( new QLabel( tr( "高光 (Max):" ), this ) );
+    levelsLayout->addWidget( new QLabel( tr( "Highlights (Max):" ), this ) );
     levelsLayout->addWidget( m_maxSpin );
 
     formLayout->addRow( levelsLayout );
@@ -156,14 +156,14 @@ void HistogramStretchWidget::setupUi()
 
     // Buttons
     auto *buttonLayout = new QHBoxLayout();
-    m_applyButton = new QPushButton( tr( "应用到显示" ), this );
-    m_applyButton->setToolTip( tr( "把当前拉伸参数应用到地图显示。" ) );
+    m_applyButton = new QPushButton( tr( "Apply to Display" ), this );
+    m_applyButton->setToolTip( tr( "Applies the current stretch parameters to the map display." ) );
     m_applyButton->setProperty( "primary", true );
     m_applyButton->setObjectName( QStringLiteral( "rsPrimaryButton" ) );
     connect( m_applyButton, &QPushButton::clicked, this, &HistogramStretchWidget::applyStretch );
 
-    m_resetButton = new QPushButton( tr( "重置 (Reset)" ), this );
-    m_resetButton->setToolTip( tr( "重置拉伸参数为默认值。" ) );
+    m_resetButton = new QPushButton( tr( "Reset" ), this );
+    m_resetButton->setToolTip( tr( "Resets the stretch parameters to their defaults." ) );
     connect( m_resetButton, &QPushButton::clicked, this, &HistogramStretchWidget::resetStretch );
 
     buttonLayout->addWidget( m_applyButton );
@@ -275,14 +275,14 @@ void HistogramStretchWidget::onAlgorithmChanged( int index )
         const QSignalBlocker blocker( m_percentSlider );
         if ( m_algorithm == StretchAlgorithm::StdDev )
         {
-            m_parameterLabel->setText( tr( "标准差系数:" ) );
+            m_parameterLabel->setText( tr( "Std-dev factor:" ) );
             m_percentSlider->setRange( 5, 50 );
             m_percentSlider->setValue( 20 );
             m_percentLabel->setText( tr( "2.0σ" ) );
         }
         else
         {
-            m_parameterLabel->setText( tr( "保留比例 (Keep %):" ) );
+            m_parameterLabel->setText( tr( "Keep %:" ) );
             m_percentSlider->setRange( 1, 100 );
             m_percentSlider->setValue( 98 );
             m_percentLabel->setText( tr( "98%" ) );

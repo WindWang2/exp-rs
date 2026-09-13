@@ -14,7 +14,7 @@ ProgressDialog::ProgressDialog(const QString &title, QWidget *parent)
     auto *mainLayout = new QVBoxLayout(this);
 
     m_label = new QLabel(this);
-    m_label->setText("Initializing...");
+    m_label->setText( tr( "Initializing..." ) );
     mainLayout->addWidget(m_label);
 
     m_progressBar = new QProgressBar(this);
@@ -28,7 +28,7 @@ ProgressDialog::ProgressDialog(const QString &title, QWidget *parent)
     bottomLayout->addStretch();
 
     m_cancelButton = new QPushButton(tr("Cancel"), this);
-    m_cancelButton->setToolTip(tr("取消当前操作（操作可能不会立即停止）。"));
+    m_cancelButton->setToolTip(tr("Cancels the current operation (it may not stop immediately)."));
     connect(m_cancelButton, &QPushButton::clicked, this, &ProgressDialog::onCancelClicked);
     bottomLayout->addWidget(m_cancelButton);
 
@@ -92,7 +92,7 @@ void ProgressDialog::cancel()
     if (!m_cancelled) {
         m_cancelled = true;
         m_cancelButton->setEnabled(false);
-        m_cancelButton->setText("Cancelling...");
+        m_cancelButton->setText( tr( "Cancelling..." ) );
         emit cancelled();
     }
 }
@@ -102,7 +102,7 @@ void ProgressDialog::reset()
     m_cancelled = false;
     m_progressBar->setValue(0);
     m_cancelButton->setEnabled(true);
-    m_cancelButton->setText("Cancel");
+    m_cancelButton->setText( tr( "Cancel" ) );
     m_elapsedTimer.restart();
     updateElapsedLabel();
 }

@@ -178,7 +178,7 @@ void QgisDesktopWindow::onIdentifyResults(const QList<QgsMapToolIdentify::Identi
 void QgisDesktopWindow::addRasterLayer()
 {
     const QStringList paths = QFileDialog::getOpenFileNames(
-      this, tr( "打开栅格图层（可多选）" ),
+      this, tr( "Open Raster Layers (multi-select)" ),
       AppPaths::dataDir(),
       tr( "Raster files (*.tif *.tiff *.img *.jp2 *.png *.jpg *.jpeg *.asc *.dat *.hdr *.bil *.bsq *.bip);;"
           "ENVI raster (*.dat *.hdr *.img *.bil *.bsq *.bip);;"
@@ -203,15 +203,15 @@ void QgisDesktopWindow::addRasterLayer()
       m_dataManagerPanel->raise();
     }
     statusBar()->showMessage(
-      failed == 0 ? tr( "已加载 %1 个栅格" ).arg( ok )
-                  : tr( "栅格加载：成功 %1，失败 %2" ).arg( ok ).arg( failed ),
+      failed == 0 ? tr( "Loaded %1 rasters" ).arg( ok )
+                  : tr( "Raster loading: %1 succeeded, %2 failed" ).arg( ok ).arg( failed ),
       4000 );
 }
 
 void QgisDesktopWindow::addVectorLayer()
 {
     const QStringList paths = QFileDialog::getOpenFileNames(
-      this, tr( "打开矢量图层（可多选）" ),
+      this, tr( "Open Vector Layers (multi-select)" ),
       AppPaths::dataDir(),
       tr( "Vector Files (*.shp *.gpkg *.geojson *.kml *.gml);;All Files (*.*)" ) );
     if ( paths.isEmpty() || !m_activeViewHost )
@@ -234,8 +234,8 @@ void QgisDesktopWindow::addVectorLayer()
       m_dataManagerPanel->raise();
     }
     statusBar()->showMessage(
-      failed == 0 ? tr( "已加载 %1 个矢量" ).arg( ok )
-                  : tr( "矢量加载：成功 %1，失败 %2" ).arg( ok ).arg( failed ),
+      failed == 0 ? tr( "Loaded %1 vectors" ).arg( ok )
+                  : tr( "Vector loading: %1 succeeded, %2 failed" ).arg( ok ).arg( failed ),
       4000 );
 }
 
@@ -243,7 +243,7 @@ void QgisDesktopWindow::layerProperties()
 {
     QList<QgsMapLayer*> selected = m_activeViewHost->selectedLayers();
     if (selected.isEmpty()) {
-        QMessageBox::information(this, tr("图层属性"), tr("未选中任何图层"));
+        QMessageBox::information(this, tr("Layer Properties"), tr("No layer selected"));
         return;
     }
 
@@ -271,7 +271,7 @@ void QgisDesktopWindow::setProjectCrs()
                 m_mapCanvas->setDestinationCrs(crs);
                 m_mapCanvas->refresh();
                 updateCrsDisplay();
-                statusBar()->showMessage(tr("工程坐标系设置为: %1").arg(crs.authid()), 3000);
+                statusBar()->showMessage(tr("Project CRS set to: %1").arg(crs.authid()), 3000);
             }
         }
     }

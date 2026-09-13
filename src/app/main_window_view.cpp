@@ -34,13 +34,13 @@ void QgisDesktopWindow::identifyFeatures() { m_mapCanvas->setMapTool(m_identifyT
 void QgisDesktopWindow::measureDistance()
 {
     m_mapCanvas->setMapTool( m_measureDistanceTool );
-    statusBar()->showMessage( tr( "距离测量：单击添加点，双击或右键结束测量" ), 5000 );
+    statusBar()->showMessage( tr( "Distance measure: click to add points; double-click or right-click to finish" ), 5000 );
 }
 
 void QgisDesktopWindow::measureArea()
 {
     m_mapCanvas->setMapTool( m_measureAreaTool );
-    statusBar()->showMessage( tr( "面积测量：单击添加点，双击或右键结束测量" ), 5000 );
+    statusBar()->showMessage( tr( "Area measure: click to add points; double-click or right-click to finish" ), 5000 );
 }
 
 void QgisDesktopWindow::openGeoreferencer()
@@ -83,10 +83,10 @@ void QgisDesktopWindow::openGeorefImageToImage()
                          return;
                      if ( loadDataLayer( path ) )
                          statusBar()->showMessage(
-                             tr( "已加载校正结果到主图：%1" ).arg( path ), 5000 );
+                             tr( "Loaded the correction result into the main view: %1" ).arg( path ), 5000 );
                      else
                          statusBar()->showMessage(
-                             tr( "加载校正结果到主图失败：%1" ).arg( path ), 6000 );
+                             tr( "Failed to load the correction result into the main view: %1" ).arg( path ), 6000 );
                  } );
 
         if ( m_projectContext )
@@ -116,10 +116,10 @@ void QgisDesktopWindow::openGeorefImageToMap()
                          return;
                      if ( loadDataLayer( path ) )
                          statusBar()->showMessage(
-                             tr( "已加载校正结果到主图：%1" ).arg( path ), 5000 );
+                             tr( "Loaded the correction result into the main view: %1" ).arg( path ), 5000 );
                      else
                          statusBar()->showMessage(
-                             tr( "加载校正结果到主图失败：%1" ).arg( path ), 6000 );
+                             tr( "Failed to load the correction result into the main view: %1" ).arg( path ), 6000 );
                  } );
 
         if ( m_projectContext )
@@ -154,12 +154,12 @@ void QgisDesktopWindow::openClassificationWindow()
                      if ( loadDataLayer( path ) )
                      {
                          statusBar()->showMessage(
-                             tr( "已加载分类结果到主图：%1" ).arg( path ), 5000 );
+                             tr( "Loaded the classification result into the main view: %1" ).arg( path ), 5000 );
                      }
                      else
                      {
                          statusBar()->showMessage(
-                             tr( "加载分类结果到主图失败：%1" ).arg( path ), 6000 );
+                             tr( "Failed to load the classification result into the main view: %1" ).arg( path ), 6000 );
                      }
                  } );
 
@@ -170,7 +170,7 @@ void QgisDesktopWindow::openClassificationWindow()
                                            m_classifyViewId ) )
         {
             statusBar()->showMessage(
-                tr( "分类会话未注册为显示视图（使用会话本地图层栈）" ), 4000 );
+                tr( "Classification session not registered as a display view (using session-local layer stack)" ), 4000 );
         }
     }
     m_classifyWindow->show();
@@ -202,12 +202,12 @@ void QgisDesktopWindow::openObiaWindow()
                      if ( loadDataLayer( path ) )
                      {
                          statusBar()->showMessage(
-                             tr( "已加载 OBIA 分类结果到主图：%1" ).arg( path ), 5000 );
+                             tr( "Loaded the OBIA classification result into the main view: %1" ).arg( path ), 5000 );
                      }
                      else
                      {
                          statusBar()->showMessage(
-                             tr( "加载 OBIA 结果到主图失败：%1" ).arg( path ), 6000 );
+                             tr( "Failed to load the OBIA result into the main view: %1" ).arg( path ), 6000 );
                      }
                  } );
 
@@ -218,7 +218,7 @@ void QgisDesktopWindow::openObiaWindow()
                                            m_obiaViewId ) )
         {
             statusBar()->showMessage(
-                tr( "OBIA 会话未注册为显示视图（使用会话本地图层栈）" ), 4000 );
+                tr( "OBIA session not registered as a display view (using session-local layer stack)" ), 4000 );
         }
         m_obiaWindow = obia;
     }
@@ -290,8 +290,8 @@ void QgisDesktopWindow::openSecondaryMapView()
             m_projectContext->createSecondaryView( m_secondaryMapView->viewSpec() );
         if ( !created )
         {
-            QMessageBox::warning( this, tr( "第二视图" ),
-                                  tr( "无法创建第二显示视图。" ) );
+            QMessageBox::warning( this, tr( "Second View" ),
+                                  tr( "Cannot create the second display view." ) );
             if ( m_secondaryViewAction )
             {
                 QSignalBlocker b( m_secondaryViewAction );
@@ -309,7 +309,7 @@ void QgisDesktopWindow::openSecondaryMapView()
         QSignalBlocker b( m_secondaryViewAction );
         m_secondaryViewAction->setChecked( true );
     }
-    statusBar()->showMessage( tr( "第二视图已打开。可用「活动」切换显示目标。" ), 4000 );
+    statusBar()->showMessage( tr( "Second view open. Use 'Active' to switch the display target." ), 4000 );
 }
 
 void QgisDesktopWindow::closeSecondaryMapView()
@@ -348,7 +348,7 @@ void QgisDesktopWindow::closeSecondaryMapView()
         QSignalBlocker b( m_secondaryViewAction );
         m_secondaryViewAction->setChecked( false );
     }
-    statusBar()->showMessage( tr( "第二视图已关闭" ), 2500 );
+    statusBar()->showMessage( tr( "Second view closed" ), 2500 );
 }
 
 void QgisDesktopWindow::activateMainMapView()
@@ -358,7 +358,7 @@ void QgisDesktopWindow::activateMainMapView()
     m_activeViewHost->setActiveViewId( m_projectContext->mainViewId() );
     if ( m_secondaryMapView )
         m_secondaryMapView->setActiveHighlight( false );
-    statusBar()->showMessage( tr( "活动视图：主视图" ), 2500 );
+    statusBar()->showMessage( tr( "Active view: main view" ), 2500 );
 }
 
 void QgisDesktopWindow::activateSecondaryMapView()
@@ -371,19 +371,19 @@ void QgisDesktopWindow::activateSecondaryMapView()
     }
     if ( !m_activeViewHost->setActiveViewId( m_secondaryViewId ) )
     {
-        statusBar()->showMessage( tr( "无法激活第二视图" ), 3000 );
+        statusBar()->showMessage( tr( "Cannot activate the second view" ), 3000 );
         return;
     }
     if ( m_secondaryMapView )
         m_secondaryMapView->setActiveHighlight( true );
-    statusBar()->showMessage( tr( "活动视图：第二视图（打开/显示将路由到此）" ), 3500 );
+    statusBar()->showMessage( tr( "Active view: second view (open / show operations route here)" ), 3500 );
 }
 
 void QgisDesktopWindow::syncMainLayersToSecondaryView()
 {
     if ( !m_projectContext || m_secondaryViewId.isNull() )
     {
-        statusBar()->showMessage( tr( "请先打开第二视图" ), 3000 );
+        statusBar()->showMessage( tr( "Open the second view first" ), 3000 );
         return;
     }
 
@@ -391,7 +391,7 @@ void QgisDesktopWindow::syncMainLayersToSecondaryView()
     const auto mainView = display.view( m_projectContext->mainViewId() );
     if ( !mainView || mainView->layerIds().isEmpty() )
     {
-        statusBar()->showMessage( tr( "主视图没有可同步的显示图层" ), 3000 );
+        statusBar()->showMessage( tr( "The main view has no display layers to sync" ), 3000 );
         return;
     }
 
@@ -403,7 +403,7 @@ void QgisDesktopWindow::syncMainLayersToSecondaryView()
             ++cloned;
     }
     statusBar()->showMessage(
-        tr( "已将 %1 个主视图图层克隆到第二视图" ).arg( cloned ), 4000 );
+        tr( "Cloned %1 main view layers into the second view" ).arg( cloned ), 4000 );
 }
 
 void QgisDesktopWindow::toggleDualViewportSync( bool on )
@@ -417,19 +417,19 @@ void QgisDesktopWindow::toggleDualViewportSync( bool on )
             QSignalBlocker b( m_dualViewportSyncAction );
             m_dualViewportSyncAction->setChecked( false );
         }
-        statusBar()->showMessage( tr( "请先打开第二视图以启用双视口联动" ), 3000 );
+        statusBar()->showMessage( tr( "Open the second view first to enable linked viewports" ), 3000 );
         return;
     }
     m_dualViewportSync->setEnabled( on );
     if ( on )
         m_dualViewportSync->snapSecondaryToPrimary();
-    statusBar()->showMessage( on ? tr( "双视口联动已启用" ) : tr( "双视口联动已暂停" ), 2500 );
+    statusBar()->showMessage( on ? tr( "Linked viewports enabled" ) : tr( "Linked viewports paused" ), 2500 );
 }
 
 void QgisDesktopWindow::zoomFullExtent()
 {
     m_mapCanvas->zoomToFullExtent();
-    statusBar()->showMessage(tr("全图范围"), 2000);
+    statusBar()->showMessage(tr("Full Extent"), 2000);
 }
 
 void QgisDesktopWindow::zoomToLayer()
@@ -452,12 +452,12 @@ void QgisDesktopWindow::zoomToLayer()
         }
         m_mapCanvas->setExtent(extent);
         m_mapCanvas->refresh();
-        statusBar()->showMessage(tr("缩放到图层"), 2000);
+        statusBar()->showMessage(tr("Zoom to Layer"), 2000);
     }
 }
 
 void QgisDesktopWindow::refreshMap()
 {
     m_mapCanvas->refresh();
-    statusBar()->showMessage(tr("画布已刷新"), 2000);
+    statusBar()->showMessage(tr("Canvas refreshed"), 2000);
 }

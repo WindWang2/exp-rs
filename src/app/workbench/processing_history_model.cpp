@@ -125,7 +125,7 @@ QVariant ProcessingHistoryModel::data( const QModelIndex &index, int role ) cons
                 return QStringLiteral( "—" );
             if ( entry->outputPaths.size() == 1 )
                 return QFileInfo( entry->outputPaths.first() ).fileName();
-            return tr( "%1 项产物（%2 …）" )
+            return tr( "%1 artifacts (%2 ...)" )
                 .arg( entry->outputPaths.size() )
                 .arg( QFileInfo( entry->outputPaths.first() ).fileName() );
     }
@@ -139,19 +139,19 @@ QVariant ProcessingHistoryModel::headerData( int section, Qt::Orientation orient
     switch ( section )
     {
         case Title:
-            return tr( "任务" );
+            return tr( "Tasks" );
         case Source:
-            return tr( "来源" );
+            return tr( "Source" );
         case State:
-            return tr( "状态" );
+            return tr( "Status" );
         case Progress:
-            return tr( "进度" );
+            return tr( "Progress" );
         case Started:
-            return tr( "开始时间" );
+            return tr( "Start Time" );
         case Duration:
-            return tr( "耗时" );
+            return tr( "Elapsed" );
         case Output:
-            return tr( "产物" );
+            return tr( "Artifacts" );
     }
     return {};
 }

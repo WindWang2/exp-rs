@@ -102,21 +102,21 @@ QVariant TemporalSceneModel::data( const QModelIndex &index, int role ) const
     switch ( index.column() )
     {
         case Date:
-            return scene->time.valid ? scene->time.dateString() : tr( "未知日期" );
+            return scene->time.valid ? scene->time.dateString() : tr( "Unknown date" );
         case Platform:
             return scene->platform.isEmpty() ? QStringLiteral( "—" ) : scene->platform;
         case Modality:
             return scene->modality.isEmpty() ? QStringLiteral( "—" ) : scene->modality;
         case Cloud:
             if ( scene->cloudCoverPercent < 0 )
-                return tr( "未报告" );
+                return tr( "Not reported" );
             return QStringLiteral( "%1%" ).arg( scene->cloudCoverPercent, 0, 'f', 0 );
         case Bands:
         {
             if ( scene->maskBand > 0 )
-                return tr( "QA 掩膜 (%1)" ).arg( scene->maskBand );
+                return tr( "QA Mask (%1)" ).arg( scene->maskBand );
             if ( scene->qualityBand > 0 )
-                return tr( "质量波段 (%1)" ).arg( scene->qualityBand );
+                return tr( "Quality Band (%1)" ).arg( scene->qualityBand );
             return QStringLiteral( "—" );
         }
         case Path:
@@ -132,17 +132,17 @@ QVariant TemporalSceneModel::headerData( int section, Qt::Orientation orientatio
     switch ( section )
     {
         case Date:
-            return tr( "日期" );
+            return tr( "Date" );
         case Platform:
-            return tr( "平台" );
+            return tr( "Platform" );
         case Modality:
-            return tr( "模态" );
+            return tr( "Modality" );
         case Cloud:
-            return tr( "云量" );
+            return tr( "Cloud Cover" );
         case Bands:
             return tr( "QA" );
         case Path:
-            return tr( "路径" );
+            return tr( "Path" );
     }
     return {};
 }

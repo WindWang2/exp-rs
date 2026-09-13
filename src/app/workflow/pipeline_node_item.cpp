@@ -48,17 +48,17 @@ QString PipelineNodeItem::statusText( NodeStatus status )
   switch ( status )
   {
     case NodeStatus::Idle:
-      return QObject::tr( "空闲" );
+      return QObject::tr( "Idle" );
     case NodeStatus::Running:
-      return QObject::tr( "运行中" );
+      return QObject::tr( "Running" );
     case NodeStatus::Success:
-      return QObject::tr( "成功" );
+      return QObject::tr( "Succeeded" );
     case NodeStatus::Failure:
-      return QObject::tr( "失败" );
+      return QObject::tr( "Failed" );
     case NodeStatus::GateWaiting:
-      return QObject::tr( "等待中" );
+      return QObject::tr( "Waiting" );
   }
-  return QObject::tr( "未知" );
+  return QObject::tr( "Unknown" );
 }
 
 void PipelineNodeItem::setStatus( NodeStatus status )

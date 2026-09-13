@@ -89,7 +89,7 @@ void TemporalTimelineBar::paintEvent( QPaintEvent * )
 
     if ( m_times.isEmpty() )
     {
-        painter.drawText( rect(), Qt::AlignCenter, tr( "集合无场景" ) );
+        painter.drawText( rect(), Qt::AlignCenter, tr( "Collection Has No Scenes" ) );
         return;
     }
 
@@ -212,8 +212,8 @@ TemporalWorkbenchPanel::TemporalWorkbenchPanel( DataManagerProvider provider, QW
     m_collectionCombo->setObjectName( QStringLiteral( "rsTemporalCollectionCombo" ) );
     m_collectionSummary = new QLineEdit( central );
     m_collectionSummary->setReadOnly( true );
-    m_collectionSummary->setPlaceholderText( tr( "集合摘要" ) );
-    pickerRow->addWidget( new QLabel( tr( "时序集合" ), central ) );
+    m_collectionSummary->setPlaceholderText( tr( "Collection Summary" ) );
+    pickerRow->addWidget( new QLabel( tr( "Time Series Collection" ), central ) );
     pickerRow->addWidget( m_collectionCombo, 1 );
     layout->addLayout( pickerRow );
 
@@ -225,14 +225,14 @@ TemporalWorkbenchPanel::TemporalWorkbenchPanel( DataManagerProvider provider, QW
     {
         edit->setCalendarPopup( true );
         edit->setDisplayFormat( QStringLiteral( "yyyy-MM-dd" ) );
-        edit->setSpecialValueText( tr( "不限" ) );
+        edit->setSpecialValueText( tr( "Unlimited" ) );
         edit->setDateRange( QDate( 1970, 1, 1 ), QDate( 2100, 1, 1 ) );
         edit->setDate( QDate( 1970, 1, 1 ) );
     }
-    auto *clearFilter = new QPushButton( tr( "清除筛选" ), central );
-    filterRow->addWidget( new QLabel( tr( "起始" ), central ) );
+    auto *clearFilter = new QPushButton( tr( "Clear Filter" ), central );
+    filterRow->addWidget( new QLabel( tr( "Start" ), central ) );
     filterRow->addWidget( m_fromEdit );
-    filterRow->addWidget( new QLabel( tr( "截止" ), central ) );
+    filterRow->addWidget( new QLabel( tr( "Deadline" ), central ) );
     filterRow->addWidget( m_toEdit );
     filterRow->addWidget( clearFilter );
     filterRow->addStretch( 1 );
@@ -256,11 +256,11 @@ TemporalWorkbenchPanel::TemporalWorkbenchPanel( DataManagerProvider provider, QW
 
     // Paging + actions
     auto *pageRow = new QHBoxLayout;
-    m_prevPage = new QPushButton( tr( "上一页" ), central );
-    m_nextPage = new QPushButton( tr( "下一页" ), central );
+    m_prevPage = new QPushButton( tr( "Previous Page" ), central );
+    m_nextPage = new QPushButton( tr( "Next Page" ), central );
     m_pageLabel = new QLabel( central );
-    m_previewBtn = new QPushButton( tr( "预览当前时相" ), central );
-    m_compareBtn = new QPushButton( tr( "对比两时相" ), central );
+    m_previewBtn = new QPushButton( tr( "Preview Current Epoch" ), central );
+    m_compareBtn = new QPushButton( tr( "Compare Two Epochs" ), central );
     pageRow->addWidget( m_prevPage );
     pageRow->addWidget( m_pageLabel );
     pageRow->addWidget( m_nextPage );
@@ -287,7 +287,7 @@ TemporalWorkbenchPanel::TemporalWorkbenchPanel( DataManagerProvider provider, QW
         m_toEdit->setDate( QDate( 1970, 1, 1 ) );
     } );
     connect( m_model, &TemporalSceneModel::pageChanged, this, [this]( int page, int pages ) {
-        m_pageLabel->setText( tr( "第 %1 / %2 页" ).arg( page + 1 ).arg( pages ) );
+        m_pageLabel->setText( tr( "Page %1 / %2" ).arg( page + 1 ).arg( pages ) );
     } );
     connect( m_prevPage, &QPushButton::clicked, this, &TemporalWorkbenchPanel::onPrevPage );
     connect( m_nextPage, &QPushButton::clicked, this, &TemporalWorkbenchPanel::onNextPage );
@@ -320,14 +320,14 @@ TemporalWorkbenchPanel::TemporalWorkbenchPanel( DataManagerProvider provider, QW
         const int row = m_model->rowForSceneIndex( index );
         if ( row < 0 )
         {
-            m_qaLabel->setText( tr( "该场景被当前日期筛选隐藏。" ) );
+            m_qaLabel->setText( tr( "This scene is hidden by the current date filter." ) );
             return;
         }
         const int page = row / TemporalSceneModel::kPageSize;
         if ( page != m_model->page() )
         {
             m_model->setPage( page );
-            m_pageLabel->setText( tr( "第 %1 / %2 页" ).arg( page + 1 ).arg( m_model->pageCount() ) );
+            m_pageLabel->setText( tr( "Page %1 / %2" ).arg( page + 1 ).arg( m_model->pageCount() ) );
         }
         const int inPageRow = row - page * TemporalSceneModel::kPageSize;
         if ( inPageRow < m_model->rowCount() )
@@ -345,7 +345,7 @@ void TemporalWorkbenchPanel::refreshCollections()
     sicnu::data::DataManager *dataManager = m_dataManager ? m_dataManager() : nullptr;
     if ( !dataManager )
     {
-        m_qaLabel->setText( tr( "数据目录不可用。" ) );
+        m_qaLabel->setText( tr( "The data catalog is unavailable." ) );
         return;
     }
     const QVector<sicnu::data::TemporalCollectionRecord> records = dataManager->temporalCollections();
@@ -353,7 +353,7 @@ void TemporalWorkbenchPanel::refreshCollections()
         m_collectionCombo->addItem( record.displayName,
                                     QVariant( record.id.toString() ) );
     m_qaLabel->setText(
-        records.isEmpty() ? tr( "工程中尚无时序集合——可通过 Agent 时序工具或 STAC 导入创建。" )
+        records.isEmpty() ? tr( "No time series collections in the project yet — create one via the Agent temporal tools or a STAC import." )
                           : QString() );
     blocker.unblock();
     if ( !records.isEmpty() )
@@ -375,7 +375,7 @@ void TemporalWorkbenchPanel::onFilterChanged()
     const QDate to =
         m_toEdit->date() > sentinel ? m_toEdit->date() : QDate();
     m_model->setDateFilter( from, to );
-    m_pageLabel->setText( tr( "第 1 / %1 页" ).arg( m_model->pageCount() ) );
+    m_pageLabel->setText( tr( "Page 1 / %1" ).arg( m_model->pageCount() ) );
     // Highlight the active window on the timeline (sentinel = no filter).
     if ( from.isValid() || to.isValid() )
         m_timeline->setWindow( from.isValid()
@@ -401,7 +401,7 @@ void TemporalWorkbenchPanel::rebuildSceneTable()
     const QString collectionId = m_collectionCombo->currentData().toString();
     if ( !dataManager || collectionId.isEmpty() )
     {
-        m_pageLabel->setText( tr( "第 1 / 1 页" ) );
+        m_pageLabel->setText( tr( "Page 1 / 1" ) );
         return;
     }
     const auto id = sicnu::data::CollectionId::fromString( collectionId );
@@ -417,7 +417,7 @@ void TemporalWorkbenchPanel::rebuildSceneTable()
     if ( !parseDescriptor( record->descriptor, &collection, &error ) )
     {
         // Malformed descriptors are surfaced, never silently ignored.
-        m_qaLabel->setText( tr( "描述文档解析失败：%1" ).arg( error ) );
+        m_qaLabel->setText( tr( "Failed to parse the description document: %1" ).arg( error ) );
         return;
     }
 
@@ -446,27 +446,27 @@ void TemporalWorkbenchPanel::rebuildSceneTable()
     m_timeline->setScenes( times, valid );
 
     const QString range =
-        tr( "%1 至 %2" )
+        tr( "%1 to %2" )
             .arg( collection.timeRangeStartIso().isEmpty()
-                      ? tr( "未知" )
+                      ? tr( "Unknown" )
                       : collection.timeRangeStartIso(),
-                  collection.timeRangeEndIso().isEmpty() ? tr( "未知" )
+                  collection.timeRangeEndIso().isEmpty() ? tr( "Unknown" )
                                                          : collection.timeRangeEndIso() );
     m_collectionSummary->setText(
-        tr( "%1 — %2 个场景，%3" ).arg( record->displayName ).arg( scenes.size() ).arg( range ) );
+        tr( "%1 — %2 scenes, %3" ).arg( record->displayName ).arg( scenes.size() ).arg( range ) );
 
     QStringList qa;
     if ( unknownDates > 0 )
-        qa << tr( "%1 个场景缺少时间（预检会拒绝它们）" ).arg( unknownDates );
+        qa << tr( "%1 scenes have no acquisition time (the precheck will reject them)" ).arg( unknownDates );
     if ( clouds > 0 )
-        qa << tr( "平均云量 %1%（%2 个场景已报告）" )
+        qa << tr( "Mean cloud cover %1% (%2 scenes reported)" )
                    .arg( cloudSum / clouds, 0, 'f', 1 )
                    .arg( clouds );
     else
-        qa << tr( "无云量报告" );
-    m_qaLabel->setText( tr( "QA：%1" ).arg( qa.join( QStringLiteral( "；" ) ) ) );
+        qa << tr( "No cloud cover report" );
+    m_qaLabel->setText( tr( "QA：%1" ).arg( qa.join( QStringLiteral( "; " ) ) ) );
 
-    m_pageLabel->setText( tr( "第 1 / %1 页" ).arg( m_model->pageCount() ) );
+    m_pageLabel->setText( tr( "Page 1 / %1" ).arg( m_model->pageCount() ) );
 }
 
 void TemporalWorkbenchPanel::onSelectionChanged()

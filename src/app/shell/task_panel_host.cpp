@@ -72,24 +72,24 @@ TaskPanelHost::TaskPanelHost( QWidget *parent )
   auto *actions = new QHBoxLayout();
   actions->setSpacing( 8 );
 
-  m_helpBtn = new QPushButton( tr( "帮助" ), this );
+  m_helpBtn = new QPushButton( tr( "Help" ), this );
   m_helpBtn->setObjectName( QStringLiteral( "rsTaskPanelHelpBtn" ) );
   actions->addWidget( m_helpBtn );
 
-  m_loadToMap = new QCheckBox( tr( "加载结果到地图" ), this );
+  m_loadToMap = new QCheckBox( tr( "Load Results to Map" ), this );
   m_loadToMap->setObjectName( QStringLiteral( "rsTaskPanelLoadToMap" ) );
   m_loadToMap->setChecked( true );
   actions->addWidget( m_loadToMap );
 
   actions->addStretch( 1 );
 
-  m_runBtn = new QPushButton( tr( "运行" ), this );
+  m_runBtn = new QPushButton( tr( "Run" ), this );
   m_runBtn->setObjectName( QStringLiteral( "rsTaskPanelRun" ) );
   m_runBtn->setProperty( "primary", true );
-  m_runBtn->setAccessibleName( tr( "运行当前工具" ) );
+  m_runBtn->setAccessibleName( tr( "Run Current Tool" ) );
   actions->addWidget( m_runBtn );
 
-  m_closeBtn = new QPushButton( tr( "关闭" ), this );
+  m_closeBtn = new QPushButton( tr( "Close" ), this );
   m_closeBtn->setObjectName( QStringLiteral( "rsTaskPanelClose" ) );
   actions->addWidget( m_closeBtn );
 
@@ -199,7 +199,7 @@ void TaskPanelHost::updateRunButtonState()
   }
   m_runBtn->setEnabled( !m_validationBlocked );
   m_runBtn->setToolTip( m_validationBlocked
-                          ? tr( "请先修正表单中标红的参数" )
+                          ? tr( "Fix the parameters highlighted in red first" )
                           : QString() );
 }
 
@@ -212,12 +212,12 @@ void TaskPanelHost::setRunning( bool running )
     m_progress->setRange( 0, 0 );
     m_hint->clear();
     applyHintStyle( false );
-    m_runBtn->setText( tr( "停止" ) );
+    m_runBtn->setText( tr( "Stop" ) );
     m_runBtn->setEnabled( true ); // Stop stays clickable while running
   }
   else
   {
-    m_runBtn->setText( tr( "运行" ) );
+    m_runBtn->setText( tr( "Run" ) );
     m_validationBlocked = m_form->hasErrors();
     updateRunButtonState();
   }

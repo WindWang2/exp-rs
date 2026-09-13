@@ -26,7 +26,7 @@ InspectorHost::InspectorHost( QWidget *parent )
     m_stack->setObjectName( QStringLiteral( "rsInspectorStack" ) );
     layout->addWidget( m_stack );
 
-    m_placeholder = new QLabel( tr( "未选中对象" ), this );
+    m_placeholder = new QLabel( tr( "No object selected" ), this );
     m_placeholder->setObjectName( QStringLiteral( "rsInspectorPlaceholder" ) );
     m_placeholder->setAlignment( Qt::AlignCenter );
     m_stack->addWidget( m_placeholder );
