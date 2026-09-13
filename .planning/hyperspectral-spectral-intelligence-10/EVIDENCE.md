@@ -39,3 +39,10 @@ marked `not-executed`. Append per phase.
 * `./sicnu_geo_rs_cli --schema rs:mnf_inverse` → full JSON Schema rendered; `--schema rs:spectral_unmixing` shows endmembersRef/libraryPath/libraryMaterials/method params.
 * test_algorithm_meta_drift → All tests passed (2270 assertions) — new operators deliberately declare no taskFamily, shipped sidecar set unchanged (DECISIONS D-11).
 * MCP `tools/list` and the Agent Tool Catalog mirror the same RSOperatorRegistry (covered green by test_mcp_server + test_rs_operators).
+
+## Workflow execution-surface regression (2026-09-13)
+
+* test_e2e_phase2 → All tests passed (4106 assertions in 49 test cases)
+* test_workflow_cancel → All tests passed (3 assertions in 1 test case)
+* test_workflow_execution_plane → All tests passed (36 assertions in 6 test cases) — plane path with the new payload-port recording
+* test_pipeline_runner → All tests passed (81 assertions in 12 test cases)
