@@ -15,3 +15,8 @@
 * 2026-09-13 · Phase 1 · configure（build-fabric10, Debug, Ninja）成功。
 * 2026-09-13 · Phase 2 · object_store + catalog_service 实现完成；两测试套件全绿
   （75 + 56 断言）。提交 0d435512b8 + 本阶段修复 commit。
+* 2026-09-13 · Phase 5b/6 · docs/io/fabric-10.md + CHANGELOG；io 家族回归 7 套件全绿
+  （479 断言）；F-OPS-4 按 D-1013 窄修复纳入（WarpOptions.sourceCrsOverride + -s_srs +
+  回归测试，test_io_operators 95 断言全绿）。
+* 2026-09-13 · Phase 7 · 两个只读 subagent 对抗审查已启动（#1 架构+语义，
+  #2 性能/并发/测试可信度）。
