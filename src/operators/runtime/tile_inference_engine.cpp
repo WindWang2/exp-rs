@@ -853,10 +853,23 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     {
       case RasterOutputMode::Labels:
       {
-        const int classCount = static_cast<int>( m_model.output.classes.size() );
+        // The writable domain is the PRODUCT classes (after class_mapping),
+        // not the model classes: a mapped value >= the NoData sentinel would
+        // be clamped into it on write and silently vanish on read. This is
+        // the same domain classPixelCounts is allocated with below (F-OPS-1).
+        int domainSize = static_cast<int>( m_model.output.classes.size() );
+        if ( !m_model.postprocess.classMapping.empty() )
+          domainSize = 1 + *std::max_element( m_model.postprocess.classMapping.begin(),
+                                              m_model.postprocess.classMapping.end() );
+        if ( domainSize > 65535 )
+          throw RSOperatorError( ErrorCode::InvalidInputData,
+                                 "labels output declares a class domain of " +
+                                   std::to_string( domainSize ) +
+                                   " product classes; the maximum encodable domain is 65535 "
+                                 "(NoData sentinel excluded)" );
         writeBands = 1;
-        writeType = classCount <= 255 ? /*GDT_Byte*/ 1 : /*GDT_UInt16*/ 2;
-        writeNoData = classCount <= 255 ? 255.0f : 65535.0f;
+        writeType = domainSize <= 255 ? /*GDT_Byte*/ 1 : /*GDT_UInt16*/ 2;
+        writeNoData = domainSize <= 255 ? 255.0f : 65535.0f;
         break;
       }
       case RasterOutputMode::Mask:
