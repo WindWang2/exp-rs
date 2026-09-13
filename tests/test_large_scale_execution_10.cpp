@@ -117,29 +117,32 @@ TEST_CASE( "Wide fan-out join drains 10^6 logical tiles with bounded in-flight m
     ChunkGraph graph( config );
 
     // Live-tile accounting: incremented when a source hands a tile to its
-    // queue, decremented when the sink consumes it. The bounded-queue
-    // contract says this can never exceed (stages+1)*cap*inputs + 1.
+    // queue, decremented when the sink consumes it (and at the join for the
+    // dropped inputs). The bound derived below is checked after the drain.
     std::atomic<int> live{ 0 };
     std::atomic<int> peak{ 0 };
-    auto trackSource = [&]( int /*id*/ ) {
-        auto next = std::make_shared<std::atomic<int>>( 0 );
-        return [&, next]( TilePayload &out ) {
-            const int index = next->fetch_add( 1 );
-            if ( index >= totalTiles )
-                return false;
-            out = indexedPayload( index, totalTiles );
-            const int now = live.fetch_add( 1 ) + 1;
-            int expected = peak.load();
-            while ( now > expected && !peak.compare_exchange_weak( expected, now ) )
-            {
-            }
-            return true;
-        };
-    };
-
+    // NOTE: each source factory call returns a closure that must NOT capture
+    // an enclosing-lambda temporary by reference (the GCC `[&]` nested-lambda
+    // trap — a returned inner closure would dangle the outer temporary's
+    // frame). Every source captures the NAMED function-scope locals directly.
     std::vector<ChunkGraph::NodeId> sources;
     for ( int i = 0; i < sourceCount; ++i )
-        sources.push_back( graph.addSource( trackSource( i ) ) );
+    {
+        auto next = std::make_shared<std::atomic<int>>( 0 );
+        sources.push_back( graph.addSource(
+            [&live, &peak, next, totalTiles]( TilePayload &out ) {
+                const int index = next->fetch_add( 1 );
+                if ( index >= totalTiles )
+                    return false;
+                out = indexedPayload( index, totalTiles );
+                const int now = live.fetch_add( 1 ) + 1;
+                int expected = peak.load();
+                while ( now > expected && !peak.compare_exchange_weak( expected, now ) )
+                {
+                }
+                return true;
+            } ) );
+    }
     auto join = graph.addJoin( sources, [&]( std::vector<TilePayload> &&tiles ) {
         // Deterministic tuple: all four inputs carry the same index.
         TileSpec spec = tiles.front().spec;

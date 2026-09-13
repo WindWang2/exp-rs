@@ -36,3 +36,13 @@ Phase 7 对抗 review：Subagent A（架构/并发/正确性，verdict NOT-MERGE
 | — | — | 透镜 8（历史修复回归）：无发现；Windows 可移植性：无发现；10^6 压测断言质量：无发现（B 正面确认界=19 推导） | VERIFIED | A/B 报告 |
 
 清零结论：P0=0；P1：4 fixed / 0 accepted；P2：全部 fixed 或带测试；P3：fixed 为主，3 条 accepted 有理由。
+
+## Phase 8 复验追加发现（final HEAD 测试轮捕获）
+
+| # | 级别 | Finding | Disposition | Evidence |
+|---|---|---|---|---|
+| F-M-1 | P0（测试帧内存破坏） | fan-out 测试的 source 工厂嵌套 lambda `[&]` 捕获了外层闭包临时——GCC 语义下返回的内层闭包悬垂外层帧，源线程读取死栈（stack smashing，时序相关：8 连跑即复现） | FIXED：source 直接捕获具名函数作用域局部（live/peak/next/totalTiles），消除嵌套闭包间接层；测试内注释记录该 GCC 陷阱 | 8× 默认档 + 3× 10^6 压测复跑全绿（/tmp/lsee10-final-evidence.txt 前次失败已定位并修复） |
+
+生产代码（src/）不受此影响——该缺陷只在测试的 source 工厂内；ChunkGraph 生产路径无嵌套返回闭包。
+
+清零终值：P0=0（F-M-1 fixed）；P1=0；P2=0 未处置；P3 均处置。

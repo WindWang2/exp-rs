@@ -62,3 +62,25 @@
 - grid-indexed NMS（#971 的 O(n·k) 加速）——取消注入已闭环可中断性；精确等价的 grid 桶实现属独立 PR，见 PR_BODY follow-ups。
 
 | 核心回归补全 | test_job_engine / test_task_center | 446/34、382/32 全绿 |
+
+## Phase 8 最终验证（final HEAD @ review-remediation 后，2026-09-14）
+
+| 套件 | 结果 |
+|---|---|
+| test_chunk_graph | 353 assertions / 30 cases 全绿 |
+| test_external_memory_10 | 50 assertions / 8 cases 全绿 |
+| test_execution_fingerprint | 64 assertions / 17 cases 全绿 |
+| test_preflight（tilePlan 契约 + F-A-3 拒绝） | 118 assertions / 9 cases 全绿 |
+| test_model_tasks（#971 取消语义） | 1254 assertions / 10 cases 全绿 |
+| test_large_scale_execution_10 | 6218 assertions / 5 cases 全绿 |
+| test_large_scale_execution_10 [scale] ×3 压测档 | exit 0（10^6 逻辑 tile） |
+| test_worker_host | 61 assertions / 13 cases 全绿 |
+| test_task_center | 382 assertions / 32 cases 全绿 |
+| test_job_engine | 446 assertions / 34 cases 全绿 |
+| test_execution_plane_9 | 883 assertions 全绿 |
+| `git diff --check` | clean |
+| 冲突标记扫描（新增文件） | 0 命中 |
+| secret 扫描（新增文件） | 0 命中 |
+| 文档存在性断言（goal-template 引用面） | 0 MISSING |
+
+复验捕获并修复 F-M-1（测试内嵌套 lambda 悬垂捕获 → stack smashing，P0 级测试缺陷，生产代码无涉），修复后 8+3 连跑全绿。
