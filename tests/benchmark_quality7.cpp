@@ -94,14 +94,27 @@ std::string escapeForJson( const std::string &text )
 int main( int argc, char **argv )
 {
     std::string outPath = "benchmarks/quality7.json";
-    for ( int i = 1; i + 1 < argc; ++i )
-        if ( std::strcmp( argv[i], "--out" ) == 0 )
-            outPath = argv[i + 1];
+    bool quickTier = false;
+    for ( int i = 1; i < argc; ++i )
+    {
+        if ( std::strcmp( argv[i], "--out" ) == 0 && i + 1 < argc )
+            outPath = argv[ ++i ];
+        else if ( std::strcmp( argv[i], "--bench-quick" ) == 0 )
+            quickTier = true;
+    }
+
+    // Quick tier (D10 verification-baseline-green): fixed small iteration
+    // counts — the routine smoke tier, deterministic across hosts; the
+    // declared budget is well under 120 s single-threaded. Full tier keeps
+    // the documented counts and stays opt-in evidence.
+    const int kDiv = quickTier ? 10 : 1;
+    const int kRepeats = quickTier ? 3 : 7;
+    const int kDispatches = 2000 / kDiv;
 
     std::vector<Measurement> results;
 
     // --- trace: id generation -------------------------------------------
-    results.push_back( medianOf( "trace_id_generate", 7, 200000, []( int n ) {
+    results.push_back( medianOf( "trace_id_generate", kRepeats, 200000 / kDiv, []( int n ) {
         return measureOpsPerSecond( n, [] {
             volatile const char *id = TraceIdGenerator::next().c_str(); // keep it honest
             ( void )id;
@@ -120,13 +133,13 @@ int main( int argc, char **argv )
     sample.status = "ok";
     sample.detail = "benchmark representative event";
     sample.durationUs = 12345;
-    results.push_back( medianOf( "trace_ndjson_encode", 7, 200000, [ & ]( int n ) {
+    results.push_back( medianOf( "trace_ndjson_encode", kRepeats, 200000 / kDiv, [ & ]( int n ) {
         return measureOpsPerSecond( n, [ & ] { volatile size_t s = encodeNdjson( sample ).size(); ( void )s; } );
     } ) );
 
     // --- trace: emit disabled (hot path) ---------------------------------
     Trace::install( nullptr );
-    results.push_back( medianOf( "trace_emit_disabled", 7, 500000, []( int n ) {
+    results.push_back( medianOf( "trace_emit_disabled", kRepeats, 500000 / kDiv, []( int n ) {
         return measureOpsPerSecond( n, [] {
             TraceEvent event;
             event.event = "submitted";
@@ -138,7 +151,7 @@ int main( int argc, char **argv )
     {
         auto ring = std::make_shared<RingTraceSink>( 1024 );
         Trace::install( ring );
-        results.push_back( medianOf( "trace_emit_ring", 7, 200000, []( int n ) {
+        results.push_back( medianOf( "trace_emit_ring", kRepeats, 200000 / kDiv, []( int n ) {
             return measureOpsPerSecond( n, [] {
                 TraceEvent event;
                 event.task = "1";
@@ -151,7 +164,7 @@ int main( int argc, char **argv )
 
     // --- fault probe disarmed --------------------------------------------
     disarmAllFaults();
-    results.push_back( medianOf( "fault_probe_disarmed", 7, 500000, []( int n ) {
+    results.push_back( medianOf( "fault_probe_disarmed", kRepeats, 500000 / kDiv, []( int n ) {
         return measureOpsPerSecond( n, [] {
             volatile bool fired = SICNU_FAULT_POINT( "benchmark.probe" );
             ( void )fired;
@@ -164,7 +177,7 @@ int main( int argc, char **argv )
     context["count"] = 3;
     context["results"]["tiles"] = 1;
     context["name"] = "scene";
-    results.push_back( medianOf( "condition_validate", 7, 100000, [ & ]( int n ) {
+    results.push_back( medianOf( "condition_validate", kRepeats, 100000 / kDiv, [ & ]( int n ) {
         return measureOpsPerSecond( n, [ & ] {
             std::vector<std::string> problems;
             volatile bool ok =
@@ -172,7 +185,7 @@ int main( int argc, char **argv )
             ( void )ok;
         } );
     } ) );
-    results.push_back( medianOf( "condition_evaluate", 7, 200000, [ & ]( int n ) {
+    results.push_back( medianOf( "condition_evaluate", kRepeats, 200000 / kDiv, [ & ]( int n ) {
         return measureOpsPerSecond( n, [ & ] {
             bool value = false;
             std::string error;
@@ -184,7 +197,7 @@ int main( int argc, char **argv )
 
     // --- ResourceUri parse -------------------------------------------------
     const std::string url = "https://user:key@example.com:8443/prefix/scene.tif?token=abc&bbox=1,2,3,4";
-    results.push_back( medianOf( "resource_uri_parse", 7, 200000, [ & ]( int n ) {
+    results.push_back( medianOf( "resource_uri_parse", kRepeats, 200000 / kDiv, [ & ]( int n ) {
         return measureOpsPerSecond( n, [ & ] {
             volatile auto kind = sicnu::geo::ResourceUri::parse( url ).kind;
             ( void )kind;
@@ -202,8 +215,7 @@ int main( int argc, char **argv )
             result["ok"] = true;
             return result;
         };
-        const int kDispatches = 2000;
-        results.push_back( medianOf( "job_dispatch_roundtrip", 5, kDispatches, [ & ]( int n ) {
+        results.push_back( medianOf( "job_dispatch_roundtrip", quickTier ? 3 : 5, kDispatches, [ & ]( int n ) {
             std::vector<std::string> ids( static_cast<size_t>( n ) );
             using clock = std::chrono::steady_clock;
             const auto start = clock::now();
@@ -245,6 +257,7 @@ int main( int argc, char **argv )
 #else
     out << "  \"build\": \"debug\",\n";
 #endif
+    out << "  \"tier\": \"" << ( quickTier ? "quick" : "full" ) << "\",\n";
     out << "  \"note\": \"wall-clock evidence only — not a CI gate\",\n";
     out << "  \"measurements\": [\n";
     for ( size_t i = 0; i < results.size(); ++i )

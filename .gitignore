@@ -173,3 +173,7 @@ output/
 
 # D3 lab track: temporary synthetic fixtures (never committed)
 data/labs/_tmp/
+
+# The contract platform 9.0 freshness gate needs the committed snapshot
+!data/contracts/
+!data/contracts/contract_graph.snap.json

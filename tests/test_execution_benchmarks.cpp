@@ -40,6 +40,7 @@
 #include "operators/rs/rs_operators_init.h"
 #include "workflow/workflow_definition.h"
 #include "support/mini_cog_server.h"
+#include "support/offline_probe.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -623,6 +624,11 @@ struct BenchRasters
 //------------------------------------------------------------------------------
 // Single-operator workloads
 //------------------------------------------------------------------------------
+
+// ADR 0146: never die by timeout when the loopback transport is missing —
+// report `sicnu-skip: <reason>` + exit 77 instead.
+SICNU_OFFLINE_GUARD()
+
 
 TEST_CASE( "ebench spectral_index streaming", "[execution_bench]" )
 {

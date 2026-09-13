@@ -3,6 +3,10 @@
 
 #include <atomic>
 #include <chrono>
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 #include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
@@ -126,11 +130,14 @@ uint64_t group80( uint64_t hi, uint64_t lo, int g )
     return ( hi >> ( shift - 64 ) ) & 0x1F;
 }
 
-/// 26-char id: 50-bit ms epoch (10 chars) + 80-bit uniqueness (16 chars).
-/// Uniqueness payload = constant per-process origin tag (high 16 bits) and
-/// seq XOR origin-low-64 (low 64 bits) — XOR by a constant preserves order,
-/// so ids from the same process sort by (ms, seq).
-std::string encodeId( uint64_t epochMs, uint64_t origin, uint64_t seq )
+/// 26-char id: 50-bit ms epoch (10 chars) + 80-bit uniqueness payload
+/// (16 chars). The payload is a 15-bit per-process tag (encoded in bits
+/// 1..15 — the 5-bit group stride never reads bit 0) above the raw per-ms
+/// sequence counter (low 64 bits). The counter must stay order-preserving:
+/// XOR with an origin does NOT preserve numeric order (x < y does not
+/// imply x^c < y^c), which used to break the "monotonic ids sort
+/// ascending" contract within a single millisecond.
+std::string encodeId( uint64_t epochMs, uint64_t tag, uint64_t seq )
 {
     char out[27];
     uint64_t t = epochMs & ( ( UINT64_C( 1 ) << 50 ) - 1 );
@@ -139,8 +146,8 @@ std::string encodeId( uint64_t epochMs, uint64_t origin, uint64_t seq )
         out[i] = kBase32Alphabet[t & 0x1F];
         t >>= 5;
     }
-    const uint64_t hi = ( origin >> 48 ) & 0xFFFF;
-    const uint64_t lo = seq ^ origin;
+    const uint64_t hi = ( tag << 1 ) & 0xFFFF;
+    const uint64_t lo = seq;
     for ( int g = 15; g >= 0; --g )
         out[10 + ( 15 - g )] = kBase32Alphabet[group80( hi, lo, g )];
     out[26] = '\0';
@@ -149,18 +156,25 @@ std::string encodeId( uint64_t epochMs, uint64_t origin, uint64_t seq )
 
 uint64_t processOrigin()
 {
-    // Deterministic test mode: origin 0 keeps ids assertable (payload = seq).
+    // Deterministic test mode: tag 0 keeps ids assertable (payload = seq).
     if ( g_deterministic )
         return 0;
-    // Process-unique random origin: address-space + clock mixing.
-    // Not cryptographic; ids only need process uniqueness and sortability.
-    static const uint64_t origin = [] {
+    // 15-bit process tag, pid-dominant so parallel processes on one host
+    // disagree even when they start in the same millisecond with the same
+    // counter. Constant within a process, so sort order is untouched.
+    // Not cryptographic; ids only need process distinction and sortability.
+    static const uint64_t tag = [] {
+#if defined( _WIN32 )
+        const uint64_t pid = static_cast<uint64_t>( GetCurrentProcessId() );
+#else
+        const uint64_t pid = static_cast<uint64_t>( ::getpid() );
+#endif
         const uint64_t time =
             static_cast<uint64_t>( std::chrono::steady_clock::now().time_since_epoch().count() );
-        const uint64_t addr = reinterpret_cast<uint64_t>( &origin );
-        return time ^ ( addr << 1 ) ^ UINT64_C( 0x9E3779B97F4A7C15 );
+        const uint64_t addr = reinterpret_cast<uint64_t>( &tag );
+        return ( ( ( pid * UINT64_C( 0x9E3779B97F4A7C15 ) ) >> 48 ) ^ time ^ ( addr >> 17 ) ) & 0x7FFF;
     }();
-    return origin;
+    return tag;
 }
 } // namespace
 

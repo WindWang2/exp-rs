@@ -16,6 +16,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include "support/offline_probe.h"
+
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QTemporaryDir>
@@ -186,6 +188,10 @@ const ModelRuntimePtr acquireModel( const ModelInfo &model )
 }
 
 } // namespace
+
+// ADR 0146: never die by timeout when the loopback transport is missing —
+// report `sicnu-skip: <reason>` + exit 77 instead.
+SICNU_OFFLINE_GUARD()
 
 TEST_CASE( "http provider known answer through the registry seam", "[models][http]" )
 {

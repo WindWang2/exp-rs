@@ -7,6 +7,7 @@
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "data/providers/remote_source_cache.h"
 #include "support/mini_cog_server.h"
+#include "support/offline_probe.h"
 
 #include <QDir>
 #include <QTemporaryDir>
@@ -38,6 +39,11 @@ void writeTiledTiff( const QString &path )
     GDALClose( ds );
 }
 } // namespace
+
+// ADR 0146: never die by timeout when the loopback transport is missing —
+// report `sicnu-skip: <reason>` + exit 77 instead.
+SICNU_OFFLINE_GUARD()
+
 
 TEST_CASE( "remote caching defaults are applied and bounded", "[remote_cache][config]" )
 {

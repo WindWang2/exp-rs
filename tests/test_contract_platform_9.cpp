@@ -89,16 +89,11 @@ TEST_CASE( "Contract graph: no duplicate nodes, no dangling references "
 {
     // Live findings recorded in REVIEW_LOG.md: the preflight emits agent
     // tool suggestions with dot separators / stale ids. The emitting file
-    // is owned by the open spatial-scientist-harness-9 PR (#885) — entries
-    // are named "OWNED-BY-#885" so the pending drift cannot be missed.
-    static const std::set<std::string> kOwnedBy885 = {
-        "align_to_reference",       "calibrate_consistently",
-        "check_dataset",            "check_training",
-        "harness.plan",             "harness.preflight",
-        "inspect_bands",            "normalize_radiometry",
-        "reproject_to_reference",   "select_matching_polarization",
-        "spatial.understand",       "temporal.preflight_collection",
-    };
+    // was owned by the open spatial-scientist-harness-9 PR (#885); the
+    // assembler now pins the preflight_action vocabulary as nodes (D10
+    // baseline repair), which resolved every recorded entry — the list is
+    // empty and the rot guard below stays armed for future drift.
+    static const std::set<std::string> kOwnedBy885 = {};
     const auto assembled = assembleLive();
     const auto findings = assembled.graph.computeFindings();
     std::set<std::string> danglingActions;
@@ -148,13 +143,26 @@ TEST_CASE( "Contract snapshot is fresh (byte-compare against live graph)",
     const std::string snapshotPath =
         std::string( kSourceDir ) + "/data/contracts/contract_graph.snap.json";
 
+    const std::string fresh = canonicalJson( assembled.graph.toJson() );
+
+    // Deliberate regeneration path (R6): a contract change must consciously
+    // refresh the snapshot. Setting SICNU_CONTRACT_SNAPSHOT_WRITE=<path>
+    // writes the fresh canonical JSON to <path> and skips the byte-compare
+    // for this run; commit the result with the contract change.
+    if ( const char *writePath = std::getenv( "SICNU_CONTRACT_SNAPSHOT_WRITE" ) )
+    {
+        std::ofstream out( writePath, std::ios::binary );
+        REQUIRE_FALSE( out.fail() );
+        out << fresh;
+        WARN( "contract snapshot regenerated: " << writePath );
+        return;
+    }
+
     std::ifstream in( snapshotPath, std::ios::binary );
     REQUIRE_FALSE( in.fail() ); // snapshot must exist
     const std::string committed{
         std::istreambuf_iterator<char>( in ),
         std::istreambuf_iterator<char>{} };
-
-    const std::string fresh = canonicalJson( assembled.graph.toJson() );
     if ( committed != fresh )
     {
         // Distinguish formatting-only drift from real inventory drift.

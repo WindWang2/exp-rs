@@ -1,0 +1,7146 @@
+{
+  "edges" : 
+  [
+    {
+      "from" : "gdal:clip",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "gdal:clip"
+    },
+    {
+      "from" : "gdal:orthorectification",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "gdal:orthorectification"
+    },
+    {
+      "from" : "gdal:pansharpen",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "gdal:pansharpen"
+    },
+    {
+      "from" : "gdal:polygonize",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "gdal:polygonize"
+    },
+    {
+      "from" : "gdal:reproject",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "gdal:reproject"
+    },
+    {
+      "from" : "io:build_overviews",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "io:build_overviews"
+    },
+    {
+      "from" : "io:clip",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "io:clip"
+    },
+    {
+      "from" : "io:convert_format",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "io:convert_format"
+    },
+    {
+      "from" : "io:doctor",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "io:doctor"
+    },
+    {
+      "from" : "io:inspect",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "io:inspect"
+    },
+    {
+      "from" : "io:make_cog",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "io:make_cog"
+    },
+    {
+      "from" : "io:reproject",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "io:reproject"
+    },
+    {
+      "from" : "io:translate",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "io:translate"
+    },
+    {
+      "from" : "io:vector_convert",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "io:vector_convert"
+    },
+    {
+      "from" : "io:warp",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/io.json",
+      "to" : "io:warp"
+    },
+    {
+      "from" : "opencv:canny",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/filter.json",
+      "to" : "opencv:canny"
+    },
+    {
+      "from" : "opencv:gaussian_blur",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/filter.json",
+      "to" : "opencv:gaussian_blur"
+    },
+    {
+      "from" : "opencv:laplacian",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/filter.json",
+      "to" : "opencv:laplacian"
+    },
+    {
+      "from" : "opencv:mean_blur",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/filter.json",
+      "to" : "opencv:mean_blur"
+    },
+    {
+      "from" : "opencv:median_blur",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/filter.json",
+      "to" : "opencv:median_blur"
+    },
+    {
+      "from" : "opencv:sobel",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/filter.json",
+      "to" : "opencv:sobel"
+    },
+    {
+      "from" : "otb:bundle_to_perfect_sensor",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/otb.json",
+      "to" : "otb:bundle_to_perfect_sensor"
+    },
+    {
+      "from" : "otb:compute_images_statistics",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/otb.json",
+      "to" : "otb:compute_images_statistics"
+    },
+    {
+      "from" : "otb:meanshift_segmentation",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/otb.json",
+      "to" : "otb:meanshift_segmentation"
+    },
+    {
+      "from" : "otb:svm_classification",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/otb.json",
+      "to" : "otb:svm_classification"
+    },
+    {
+      "from" : "rs:ace",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral_transform.json",
+      "to" : "rs:ace"
+    },
+    {
+      "from" : "rs:align",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:align"
+    },
+    {
+      "from" : "rs:apply_mask",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:apply_mask"
+    },
+    {
+      "from" : "rs:atmospheric_correction",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:atmospheric_correction"
+    },
+    {
+      "from" : "rs:atmospheric_dos1",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:atmospheric_dos1"
+    },
+    {
+      "from" : "rs:atmospheric_dos2",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:atmospheric_dos2"
+    },
+    {
+      "from" : "rs:atmospheric_quac",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:atmospheric_quac"
+    },
+    {
+      "from" : "rs:band_math",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral.json",
+      "to" : "rs:band_math"
+    },
+    {
+      "from" : "rs:band_ratio",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral.json",
+      "to" : "rs:band_ratio"
+    },
+    {
+      "from" : "rs:change_cva",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/change.json",
+      "to" : "rs:change_cva"
+    },
+    {
+      "from" : "rs:change_cva_angle",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/change.json",
+      "to" : "rs:change_cva_angle"
+    },
+    {
+      "from" : "rs:change_detection",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/change.json",
+      "to" : "rs:change_detection"
+    },
+    {
+      "from" : "rs:change_difference",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/change.json",
+      "to" : "rs:change_difference"
+    },
+    {
+      "from" : "rs:change_irmad",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/change.json",
+      "to" : "rs:change_irmad"
+    },
+    {
+      "from" : "rs:change_log_ratio",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/change.json",
+      "to" : "rs:change_log_ratio"
+    },
+    {
+      "from" : "rs:change_mad",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/change.json",
+      "to" : "rs:change_mad"
+    },
+    {
+      "from" : "rs:change_normalized_difference",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/change.json",
+      "to" : "rs:change_normalized_difference"
+    },
+    {
+      "from" : "rs:change_ratio",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/change.json",
+      "to" : "rs:change_ratio"
+    },
+    {
+      "from" : "rs:change_sam",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/change.json",
+      "to" : "rs:change_sam"
+    },
+    {
+      "from" : "rs:connected_components",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/filter.json",
+      "to" : "rs:connected_components"
+    },
+    {
+      "from" : "rs:continuum_removal",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral_transform.json",
+      "to" : "rs:continuum_removal"
+    },
+    {
+      "from" : "rs:contrast_stretch",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:contrast_stretch"
+    },
+    {
+      "from" : "rs:detect",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/classify.json",
+      "to" : "rs:detect"
+    },
+    {
+      "from" : "rs:dn_to_radiance",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:dn_to_radiance"
+    },
+    {
+      "from" : "rs:embedding",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/inference.json",
+      "to" : "rs:embedding"
+    },
+    {
+      "from" : "rs:endmember_extraction",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral_transform.json",
+      "to" : "rs:endmember_extraction"
+    },
+    {
+      "from" : "rs:evi",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral.json",
+      "to" : "rs:evi"
+    },
+    {
+      "from" : "rs:extract_bands",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:extract_bands"
+    },
+    {
+      "from" : "rs:feature_normalize",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/inference.json",
+      "to" : "rs:feature_normalize"
+    },
+    {
+      "from" : "rs:feature_select",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/inference.json",
+      "to" : "rs:feature_select"
+    },
+    {
+      "from" : "rs:feature_stack",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/inference.json",
+      "to" : "rs:feature_stack"
+    },
+    {
+      "from" : "rs:fill_holes",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/filter.json",
+      "to" : "rs:fill_holes"
+    },
+    {
+      "from" : "rs:focal_stats",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/filter.json",
+      "to" : "rs:focal_stats"
+    },
+    {
+      "from" : "rs:fusion_brovey",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/fusion.json",
+      "to" : "rs:fusion_brovey"
+    },
+    {
+      "from" : "rs:fusion_gram_schmidt",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/fusion.json",
+      "to" : "rs:fusion_gram_schmidt"
+    },
+    {
+      "from" : "rs:fusion_ihs",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/fusion.json",
+      "to" : "rs:fusion_ihs"
+    },
+    {
+      "from" : "rs:fusion_linear",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/fusion.json",
+      "to" : "rs:fusion_linear"
+    },
+    {
+      "from" : "rs:fusion_pca",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/fusion.json",
+      "to" : "rs:fusion_pca"
+    },
+    {
+      "from" : "rs:image_enhancement",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:image_enhancement"
+    },
+    {
+      "from" : "rs:image_fusion",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/fusion.json",
+      "to" : "rs:image_fusion"
+    },
+    {
+      "from" : "rs:infer",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/inference.json",
+      "to" : "rs:infer"
+    },
+    {
+      "from" : "rs:kmeans_classification",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/classify.json",
+      "to" : "rs:kmeans_classification"
+    },
+    {
+      "from" : "rs:landsat_import",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:landsat_import"
+    },
+    {
+      "from" : "rs:local_extrema",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/filter.json",
+      "to" : "rs:local_extrema"
+    },
+    {
+      "from" : "rs:majority_filter",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/filter.json",
+      "to" : "rs:majority_filter"
+    },
+    {
+      "from" : "rs:matched_filter",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral_transform.json",
+      "to" : "rs:matched_filter"
+    },
+    {
+      "from" : "rs:mndwi",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral.json",
+      "to" : "rs:mndwi"
+    },
+    {
+      "from" : "rs:mnf",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral_transform.json",
+      "to" : "rs:mnf"
+    },
+    {
+      "from" : "rs:modis_georeference",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:modis_georeference"
+    },
+    {
+      "from" : "rs:modis_import",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:modis_import"
+    },
+    {
+      "from" : "rs:morphology",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/filter.json",
+      "to" : "rs:morphology"
+    },
+    {
+      "from" : "rs:mosaic",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:mosaic"
+    },
+    {
+      "from" : "rs:ndbi",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral.json",
+      "to" : "rs:ndbi"
+    },
+    {
+      "from" : "rs:ndvi",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral.json",
+      "to" : "rs:ndvi"
+    },
+    {
+      "from" : "rs:ndwi",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral.json",
+      "to" : "rs:ndwi"
+    },
+    {
+      "from" : "rs:obia_classify",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/classify.json",
+      "to" : "rs:obia_classify"
+    },
+    {
+      "from" : "rs:obia_features",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/classify.json",
+      "to" : "rs:obia_features"
+    },
+    {
+      "from" : "rs:obia_hierarchy",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/classify.json",
+      "to" : "rs:obia_hierarchy"
+    },
+    {
+      "from" : "rs:obia_label",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/classify.json",
+      "to" : "rs:obia_label"
+    },
+    {
+      "from" : "rs:obia_segment",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/classify.json",
+      "to" : "rs:obia_segment"
+    },
+    {
+      "from" : "rs:pca",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral_transform.json",
+      "to" : "rs:pca"
+    },
+    {
+      "from" : "rs:post_classification_change",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/classify.json",
+      "to" : "rs:post_classification_change"
+    },
+    {
+      "from" : "rs:proximity",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/filter.json",
+      "to" : "rs:proximity"
+    },
+    {
+      "from" : "rs:qa_mask",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:qa_mask"
+    },
+    {
+      "from" : "rs:radiometric_calibration",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:radiometric_calibration"
+    },
+    {
+      "from" : "rs:rasterize",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/filter.json",
+      "to" : "rs:rasterize"
+    },
+    {
+      "from" : "rs:recode",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/classify.json",
+      "to" : "rs:recode"
+    },
+    {
+      "from" : "rs:resample",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:resample"
+    },
+    {
+      "from" : "rs:rx_anomaly",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral_transform.json",
+      "to" : "rs:rx_anomaly"
+    },
+    {
+      "from" : "rs:sam_classify",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/classify.json",
+      "to" : "rs:sam_classify"
+    },
+    {
+      "from" : "rs:sar_backscatter",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_backscatter"
+    },
+    {
+      "from" : "rs:sar_calibrate",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_calibrate"
+    },
+    {
+      "from" : "rs:sar_change",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_change"
+    },
+    {
+      "from" : "rs:sar_dualpol_features",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_dualpol_features"
+    },
+    {
+      "from" : "rs:sar_geocode",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_geocode"
+    },
+    {
+      "from" : "rs:sar_ratio",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_ratio"
+    },
+    {
+      "from" : "rs:sar_speckle",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_speckle"
+    },
+    {
+      "from" : "rs:sar_temporal_stats",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_temporal_stats"
+    },
+    {
+      "from" : "rs:sar_terrain_correction",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_terrain_correction"
+    },
+    {
+      "from" : "rs:sar_terrain_flatten",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_terrain_flatten"
+    },
+    {
+      "from" : "rs:sar_terrain_masks",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_terrain_masks"
+    },
+    {
+      "from" : "rs:sar_texture",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_texture"
+    },
+    {
+      "from" : "rs:savi",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral.json",
+      "to" : "rs:savi"
+    },
+    {
+      "from" : "rs:segment",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/classify.json",
+      "to" : "rs:segment"
+    },
+    {
+      "from" : "rs:segment_stats",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/classify.json",
+      "to" : "rs:segment_stats"
+    },
+    {
+      "from" : "rs:sentinel2_import",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:sentinel2_import"
+    },
+    {
+      "from" : "rs:sieve",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/filter.json",
+      "to" : "rs:sieve"
+    },
+    {
+      "from" : "rs:spectral_derivative",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral_transform.json",
+      "to" : "rs:spectral_derivative"
+    },
+    {
+      "from" : "rs:spectral_index",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral.json",
+      "to" : "rs:spectral_index"
+    },
+    {
+      "from" : "rs:spectral_resample",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral_transform.json",
+      "to" : "rs:spectral_resample"
+    },
+    {
+      "from" : "rs:spectral_unmixing",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral_transform.json",
+      "to" : "rs:spectral_unmixing"
+    },
+    {
+      "from" : "rs:supervised_classification",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/classify.json",
+      "to" : "rs:supervised_classification"
+    },
+    {
+      "from" : "rs:temporal_anomaly",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/temporal.json",
+      "to" : "rs:temporal_anomaly"
+    },
+    {
+      "from" : "rs:temporal_breakpoints",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/temporal.json",
+      "to" : "rs:temporal_breakpoints"
+    },
+    {
+      "from" : "rs:temporal_composite",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/temporal.json",
+      "to" : "rs:temporal_composite"
+    },
+    {
+      "from" : "rs:temporal_decompose",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/temporal.json",
+      "to" : "rs:temporal_decompose"
+    },
+    {
+      "from" : "rs:temporal_extract_series",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/temporal.json",
+      "to" : "rs:temporal_extract_series"
+    },
+    {
+      "from" : "rs:temporal_gap_fill",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/temporal.json",
+      "to" : "rs:temporal_gap_fill"
+    },
+    {
+      "from" : "rs:temporal_harmonic_fit",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/temporal.json",
+      "to" : "rs:temporal_harmonic_fit"
+    },
+    {
+      "from" : "rs:temporal_index_series",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral.json",
+      "to" : "rs:temporal_index_series"
+    },
+    {
+      "from" : "rs:temporal_monitor",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/temporal.json",
+      "to" : "rs:temporal_monitor"
+    },
+    {
+      "from" : "rs:temporal_phenology",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/temporal.json",
+      "to" : "rs:temporal_phenology"
+    },
+    {
+      "from" : "rs:temporal_sen_trend",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/temporal.json",
+      "to" : "rs:temporal_sen_trend"
+    },
+    {
+      "from" : "rs:temporal_smooth",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/temporal.json",
+      "to" : "rs:temporal_smooth"
+    },
+    {
+      "from" : "rs:temporal_summary",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/temporal.json",
+      "to" : "rs:temporal_summary"
+    },
+    {
+      "from" : "rs:temporal_trend",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/temporal.json",
+      "to" : "rs:temporal_trend"
+    },
+    {
+      "from" : "rs:terrain_analysis",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/terrain.json",
+      "to" : "rs:terrain_analysis"
+    },
+    {
+      "from" : "rs:terrain_flow",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/terrain.json",
+      "to" : "rs:terrain_flow"
+    },
+    {
+      "from" : "rs:threshold_raster",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/spectral.json",
+      "to" : "rs:threshold_raster"
+    },
+    {
+      "from" : "rs:topographic_correction",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/terrain.json",
+      "to" : "rs:topographic_correction"
+    },
+    {
+      "from" : "rs:zonal_stats",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/filter.json",
+      "to" : "rs:zonal_stats"
+    },
+    {
+      "from" : "app.commandPalette",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.app.commandPalette"
+    },
+    {
+      "from" : "layer.addRaster",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.addRaster"
+    },
+    {
+      "from" : "layer.addVector",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.addVector"
+    },
+    {
+      "from" : "layer.attributeTable",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.attributeTable"
+    },
+    {
+      "from" : "layer.newVector",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.newVector"
+    },
+    {
+      "from" : "layer.properties",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.properties"
+    },
+    {
+      "from" : "layer.remove",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.remove"
+    },
+    {
+      "from" : "layer.saveEdits",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.saveEdits"
+    },
+    {
+      "from" : "layer.toggleEditing",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.toggleEditing"
+    },
+    {
+      "from" : "layer.zoomTo",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.layer.zoomTo"
+    },
+    {
+      "from" : "map.compareLayers",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.compareLayers"
+    },
+    {
+      "from" : "map.identify",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.identify"
+    },
+    {
+      "from" : "map.measureArea",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.measureArea"
+    },
+    {
+      "from" : "map.measureDistance",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.measureDistance"
+    },
+    {
+      "from" : "map.pan",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.pan"
+    },
+    {
+      "from" : "map.refresh",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.refresh"
+    },
+    {
+      "from" : "map.swipe",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.swipe"
+    },
+    {
+      "from" : "map.zoomFull",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.zoomFull"
+    },
+    {
+      "from" : "map.zoomIn",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.zoomIn"
+    },
+    {
+      "from" : "map.zoomOut",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.map.zoomOut"
+    },
+    {
+      "from" : "project.exit",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.project.exit"
+    },
+    {
+      "from" : "project.importLayer",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.project.importLayer"
+    },
+    {
+      "from" : "project.new",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.project.new"
+    },
+    {
+      "from" : "project.newLayout",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.project.newLayout"
+    },
+    {
+      "from" : "project.open",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.project.open"
+    },
+    {
+      "from" : "project.save",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.project.save"
+    },
+    {
+      "from" : "project.saveAs",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.project.saveAs"
+    },
+    {
+      "from" : "project.stacBrowse",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.project.stacBrowse"
+    },
+    {
+      "from" : "rs.applyMask",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.applyMask"
+    },
+    {
+      "from" : "rs.atmospheric",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.atmospheric"
+    },
+    {
+      "from" : "rs.bandMath",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.bandMath"
+    },
+    {
+      "from" : "rs.bandRatio",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.bandRatio"
+    },
+    {
+      "from" : "rs.changeDetection",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.changeDetection"
+    },
+    {
+      "from" : "rs.contrastStretch",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.contrastStretch"
+    },
+    {
+      "from" : "rs.extractBands",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.extractBands"
+    },
+    {
+      "from" : "rs.fusion",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.fusion"
+    },
+    {
+      "from" : "rs.mosaic",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.mosaic"
+    },
+    {
+      "from" : "rs.ortho",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.ortho"
+    },
+    {
+      "from" : "rs.pca",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.pca"
+    },
+    {
+      "from" : "rs.qaMask",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.qaMask"
+    },
+    {
+      "from" : "rs.radiometric",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.radiometric"
+    },
+    {
+      "from" : "rs.spatialFilter",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.spatialFilter"
+    },
+    {
+      "from" : "rs.speckle",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.speckle"
+    },
+    {
+      "from" : "rs.spectralIndex",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.spectralIndex"
+    },
+    {
+      "from" : "rs.temporal",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.temporal"
+    },
+    {
+      "from" : "rs.terrain",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.rs.terrain"
+    },
+    {
+      "from" : "workbench.classify",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.classify"
+    },
+    {
+      "from" : "workbench.datasetExperiment",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.datasetExperiment"
+    },
+    {
+      "from" : "workbench.georefI2I",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.georefI2I"
+    },
+    {
+      "from" : "workbench.georefI2M",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.georefI2M"
+    },
+    {
+      "from" : "workbench.model",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.model"
+    },
+    {
+      "from" : "workbench.obia",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.obia"
+    },
+    {
+      "from" : "workbench.processingHistory",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.processingHistory"
+    },
+    {
+      "from" : "workbench.temporal",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workbench.temporal"
+    },
+    {
+      "from" : "workflow.new",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workflow.new"
+    },
+    {
+      "from" : "workflow.open",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workflow.open"
+    },
+    {
+      "from" : "workflow.run",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workflow.run"
+    },
+    {
+      "from" : "workflow.save",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workflow.save"
+    },
+    {
+      "from" : "workflow.stop",
+      "kind" : "command_help",
+      "origin" : "data/help/commands.json",
+      "to" : "command.workflow.stop"
+    },
+    {
+      "from" : "diagnostic.harness.band_role_unresolved",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/BAND_ROLE_UNRESOLVED"
+    },
+    {
+      "from" : "diagnostic.harness.calibration_mismatch",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/CALIBRATION_MISMATCH"
+    },
+    {
+      "from" : "diagnostic.harness.cancelled",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/CANCELLED"
+    },
+    {
+      "from" : "diagnostic.harness.crs_mismatch",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/CRS_MISMATCH"
+    },
+    {
+      "from" : "diagnostic.harness.dataset_not_found",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/DATASET_NOT_FOUND"
+    },
+    {
+      "from" : "diagnostic.harness.entity_ambiguous",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/ENTITY_AMBIGUOUS"
+    },
+    {
+      "from" : "diagnostic.harness.execution_failed",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/EXECUTION_FAILED"
+    },
+    {
+      "from" : "diagnostic.harness.grid_mismatch",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/GRID_MISMATCH"
+    },
+    {
+      "from" : "diagnostic.harness.identity_mismatch",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/IDENTITY_MISMATCH"
+    },
+    {
+      "from" : "diagnostic.harness.insufficient_memory",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/INSUFFICIENT_MEMORY"
+    },
+    {
+      "from" : "diagnostic.harness.intent_ambiguous",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/INTENT_AMBIGUOUS"
+    },
+    {
+      "from" : "diagnostic.harness.invalid_parameter",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/INVALID_PARAMETER"
+    },
+    {
+      "from" : "diagnostic.harness.invalid_plan",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/INVALID_PLAN"
+    },
+    {
+      "from" : "diagnostic.harness.invalid_radiometry",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/INVALID_RADIOMETRY"
+    },
+    {
+      "from" : "diagnostic.harness.map_preflight_failed",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/MAP_PREFLIGHT_FAILED"
+    },
+    {
+      "from" : "diagnostic.harness.modality_mismatch",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/MODALITY_MISMATCH"
+    },
+    {
+      "from" : "diagnostic.harness.model_incompatible",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/MODEL_INCOMPATIBLE"
+    },
+    {
+      "from" : "diagnostic.harness.model_not_ready",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/MODEL_NOT_READY"
+    },
+    {
+      "from" : "diagnostic.harness.not_supported",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/NOT_SUPPORTED"
+    },
+    {
+      "from" : "diagnostic.harness.output_invalid",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/OUTPUT_INVALID"
+    },
+    {
+      "from" : "diagnostic.harness.path_outside_workspace",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/PATH_OUTSIDE_WORKSPACE"
+    },
+    {
+      "from" : "diagnostic.harness.polarization_mismatch",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/POLARIZATION_MISMATCH"
+    },
+    {
+      "from" : "diagnostic.harness.preflight_blocked",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/PREFLIGHT_BLOCKED"
+    },
+    {
+      "from" : "diagnostic.harness.time_order_invalid",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/TIME_ORDER_INVALID"
+    },
+    {
+      "from" : "diagnostic.harness.tool_not_found",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/TOOL_NOT_FOUND"
+    },
+    {
+      "from" : "diagnostic.harness.training_invalid",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/TRAINING_INVALID"
+    },
+    {
+      "from" : "diagnostic.harness.transient_failure",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/TRANSIENT_FAILURE"
+    },
+    {
+      "from" : "diagnostic.harness.workflow_not_found",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "harness/WORKFLOW_NOT_FOUND"
+    },
+    {
+      "from" : "diagnostic.operator.already_running",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/AlreadyRunning"
+    },
+    {
+      "from" : "diagnostic.operator.cancelled",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/Cancelled"
+    },
+    {
+      "from" : "diagnostic.operator.computation_error",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/ComputationError"
+    },
+    {
+      "from" : "diagnostic.operator.device_unavailable",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/DeviceUnavailable"
+    },
+    {
+      "from" : "diagnostic.operator.directory_not_found",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/DirectoryNotFound"
+    },
+    {
+      "from" : "diagnostic.operator.external_process_failed",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/ExternalProcessFailed"
+    },
+    {
+      "from" : "diagnostic.operator.external_process_timeout",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/ExternalProcessTimeout"
+    },
+    {
+      "from" : "diagnostic.operator.file_not_found",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/FileNotFound"
+    },
+    {
+      "from" : "diagnostic.operator.file_not_readable",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/FileNotReadable"
+    },
+    {
+      "from" : "diagnostic.operator.file_not_writable",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/FileNotWritable"
+    },
+    {
+      "from" : "diagnostic.operator.gdal_error",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/GdalError"
+    },
+    {
+      "from" : "diagnostic.operator.invalid_enum_value",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/InvalidEnumValue"
+    },
+    {
+      "from" : "diagnostic.operator.invalid_input_data",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/InvalidInputData"
+    },
+    {
+      "from" : "diagnostic.operator.invalid_parameter",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/InvalidParameter"
+    },
+    {
+      "from" : "diagnostic.operator.missing_required_parameter",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/MissingRequiredParameter"
+    },
+    {
+      "from" : "diagnostic.operator.not_initialized",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/NotInitialized"
+    },
+    {
+      "from" : "diagnostic.operator.open_cv_error",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/OpenCvError"
+    },
+    {
+      "from" : "diagnostic.operator.otb_error",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/OtbError"
+    },
+    {
+      "from" : "diagnostic.operator.out_of_range",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/OutOfRange"
+    },
+    {
+      "from" : "diagnostic.operator.policy_refused",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/PolicyRefused"
+    },
+    {
+      "from" : "diagnostic.operator.qgis_processing_error",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/QgisProcessingError"
+    },
+    {
+      "from" : "diagnostic.operator.runtime_provider_failed",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/RuntimeProviderFailed"
+    },
+    {
+      "from" : "diagnostic.operator.type_mismatch",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/TypeMismatch"
+    },
+    {
+      "from" : "diagnostic.operator.unknown",
+      "kind" : "diagnostic_for",
+      "origin" : "diagnostics.json",
+      "to" : "operator/Unknown"
+    },
+    {
+      "from" : "layer.saveEdits",
+      "kind" : "empty_state_cta",
+      "origin" : "command_defs.cpp:172",
+      "to" : "layer.saveEdits"
+    },
+    {
+      "from" : "layer.toggleEditing",
+      "kind" : "empty_state_cta",
+      "origin" : "command_defs.cpp:160",
+      "to" : "layer.toggleEditing"
+    },
+    {
+      "from" : "project.importLayer",
+      "kind" : "empty_state_cta",
+      "origin" : "command_defs.cpp:82",
+      "to" : "project.importLayer"
+    },
+    {
+      "from" : "rs.spectralIndex",
+      "kind" : "empty_state_cta",
+      "origin" : "command_defs.cpp:371",
+      "to" : "rs.spectralIndex"
+    },
+    {
+      "from" : "workbench.processingHistory",
+      "kind" : "empty_state_cta",
+      "origin" : "command_defs.cpp:273",
+      "to" : "workbench.processingHistory"
+    },
+    {
+      "from" : "workbench.temporal",
+      "kind" : "empty_state_cta",
+      "origin" : "command_defs.cpp:281",
+      "to" : "workbench.temporal"
+    },
+    {
+      "from" : "align_to_reference",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:277",
+      "to" : "align_to_reference"
+    },
+    {
+      "from" : "calibrate_consistently",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:341",
+      "to" : "calibrate_consistently"
+    },
+    {
+      "from" : "check_collection",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:460",
+      "to" : "check_collection"
+    },
+    {
+      "from" : "check_dataset",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:223",
+      "to" : "check_dataset"
+    },
+    {
+      "from" : "check_training",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:386",
+      "to" : "check_training"
+    },
+    {
+      "from" : "harness.plan",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:296",
+      "to" : "harness.plan"
+    },
+    {
+      "from" : "harness.preflight",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:127",
+      "to" : "harness.preflight"
+    },
+    {
+      "from" : "inspect_bands",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:233",
+      "to" : "inspect_bands"
+    },
+    {
+      "from" : "normalize_radiometry",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:290",
+      "to" : "normalize_radiometry"
+    },
+    {
+      "from" : "reproject_to_reference",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:268",
+      "to" : "reproject_to_reference"
+    },
+    {
+      "from" : "select_matching_polarization",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:336",
+      "to" : "select_matching_polarization"
+    },
+    {
+      "from" : "select_model",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:571",
+      "to" : "select_model"
+    },
+    {
+      "from" : "spatial.understand",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:120",
+      "to" : "spatial.understand"
+    },
+    {
+      "from" : "temporal.preflight_collection",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:447",
+      "to" : "temporal.preflight_collection"
+    },
+    {
+      "from" : "app.commandPalette",
+      "kind" : "surface_lookup",
+      "origin" : "main_window_workbench.cpp:331",
+      "to" : "app.commandPalette"
+    },
+    {
+      "from" : "workbench.datasetExperiment",
+      "kind" : "surface_lookup",
+      "origin" : "command_defs.cpp:289",
+      "to" : "workbench.datasetExperiment"
+    },
+    {
+      "from" : "workbench.model",
+      "kind" : "surface_lookup",
+      "origin" : "command_defs.cpp:298",
+      "to" : "workbench.model"
+    },
+    {
+      "from" : "workbench.processingHistory",
+      "kind" : "surface_lookup",
+      "origin" : "command_defs.cpp:273",
+      "to" : "workbench.processingHistory"
+    },
+    {
+      "from" : "workbench.temporal",
+      "kind" : "surface_lookup",
+      "origin" : "command_defs.cpp:281",
+      "to" : "workbench.temporal"
+    }
+  ],
+  "nodes" : 
+  [
+    {
+      "id" : "cartography:catalog_index",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:chart_create",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:chart_delete",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:chart_get",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:chart_list",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:compose",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:get_component",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:get_token_set",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:instantiate_template",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:lint_catalog",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:list_components",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:list_rules",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:list_templates",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:list_token_sets",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:preflight",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:repair",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "cartography:validate",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "dataset:diff",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "dataset:inspect",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "dataset:label_schema",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "dataset:leakage_audit",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "dataset:list",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "dataset:split_inspect",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "dataset:stats",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "dataset:validate",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "dataset:version",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "experiment:compare",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "experiment:inspect",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "experiment:list",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "family:cartography",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "family:change",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/change.json"
+    },
+    {
+      "id" : "family:classify",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/classify.json"
+    },
+    {
+      "id" : "family:dataset",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "family:experiment",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "family:filter",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "family:fusion",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/fusion.json"
+    },
+    {
+      "id" : "family:io",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
+      "id" : "family:model",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "family:otb",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/otb.json"
+    },
+    {
+      "id" : "family:preprocess",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "family:reproducibility",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "family:sar",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "family:solution",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "family:spectral_index",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral.json"
+    },
+    {
+      "id" : "family:spectral_transform",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral_transform.json"
+    },
+    {
+      "id" : "family:style",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "family:template",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "family:temporal",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/temporal.json"
+    },
+    {
+      "id" : "family:terrain",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/terrain.json"
+    },
+    {
+      "id" : "gdal:clip",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
+      "id" : "gdal:orthorectification",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "gdal:pansharpen",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
+      "id" : "gdal:polygonize",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
+      "id" : "gdal:reproject",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
+      "id" : "io:build_overviews",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
+      "id" : "io:clip",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
+      "id" : "io:convert_format",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
+      "id" : "io:doctor",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
+      "id" : "io:inspect",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
+      "id" : "io:make_cog",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
+      "id" : "io:reproject",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
+      "id" : "io:translate",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
+      "id" : "io:vector_convert",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
+      "id" : "io:warp",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/io.json"
+    },
+    {
+      "id" : "opencv:canny",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "opencv:gaussian_blur",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "opencv:laplacian",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "opencv:mean_blur",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "opencv:median_blur",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "opencv:sobel",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "otb:bundle_to_perfect_sensor",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/otb.json"
+    },
+    {
+      "id" : "otb:compute_images_statistics",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/otb.json"
+    },
+    {
+      "id" : "otb:meanshift_segmentation",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/otb.json"
+    },
+    {
+      "id" : "otb:svm_classification",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/otb.json"
+    },
+    {
+      "id" : "reproducibility:export",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "reproducibility:inspect",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "reproducibility:validate",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "rs:ace",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral_transform.json"
+    },
+    {
+      "id" : "rs:align",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:apply_mask",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:atmospheric_correction",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:atmospheric_dos1",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:atmospheric_dos2",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:atmospheric_quac",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:band_math",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral.json"
+    },
+    {
+      "id" : "rs:band_ratio",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral.json"
+    },
+    {
+      "id" : "rs:change_cva",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/change.json"
+    },
+    {
+      "id" : "rs:change_cva_angle",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/change.json"
+    },
+    {
+      "id" : "rs:change_detection",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/change.json"
+    },
+    {
+      "id" : "rs:change_difference",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/change.json"
+    },
+    {
+      "id" : "rs:change_irmad",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/change.json"
+    },
+    {
+      "id" : "rs:change_log_ratio",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/change.json"
+    },
+    {
+      "id" : "rs:change_mad",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/change.json"
+    },
+    {
+      "id" : "rs:change_normalized_difference",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/change.json"
+    },
+    {
+      "id" : "rs:change_ratio",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/change.json"
+    },
+    {
+      "id" : "rs:change_sam",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/change.json"
+    },
+    {
+      "id" : "rs:connected_components",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "rs:continuum_removal",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral_transform.json"
+    },
+    {
+      "id" : "rs:contrast_stretch",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:detect",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/classify.json"
+    },
+    {
+      "id" : "rs:dn_to_radiance",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:embedding",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/inference.json"
+    },
+    {
+      "id" : "rs:endmember_extraction",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral_transform.json"
+    },
+    {
+      "id" : "rs:evi",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral.json"
+    },
+    {
+      "id" : "rs:extract_bands",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:feature_normalize",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/inference.json"
+    },
+    {
+      "id" : "rs:feature_select",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/inference.json"
+    },
+    {
+      "id" : "rs:feature_stack",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/inference.json"
+    },
+    {
+      "id" : "rs:fill_holes",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "rs:focal_stats",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "rs:fusion_brovey",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/fusion.json"
+    },
+    {
+      "id" : "rs:fusion_gram_schmidt",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/fusion.json"
+    },
+    {
+      "id" : "rs:fusion_ihs",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/fusion.json"
+    },
+    {
+      "id" : "rs:fusion_linear",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/fusion.json"
+    },
+    {
+      "id" : "rs:fusion_pca",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/fusion.json"
+    },
+    {
+      "id" : "rs:image_enhancement",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:image_fusion",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/fusion.json"
+    },
+    {
+      "id" : "rs:infer",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/inference.json"
+    },
+    {
+      "id" : "rs:kmeans_classification",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/classify.json"
+    },
+    {
+      "id" : "rs:landsat_import",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:local_extrema",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "rs:majority_filter",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "rs:matched_filter",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral_transform.json"
+    },
+    {
+      "id" : "rs:mndwi",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral.json"
+    },
+    {
+      "id" : "rs:mnf",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral_transform.json"
+    },
+    {
+      "id" : "rs:modis_georeference",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:modis_import",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:morphology",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "rs:mosaic",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:ndbi",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral.json"
+    },
+    {
+      "id" : "rs:ndvi",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral.json"
+    },
+    {
+      "id" : "rs:ndwi",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral.json"
+    },
+    {
+      "id" : "rs:obia_classify",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/classify.json"
+    },
+    {
+      "id" : "rs:obia_features",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/classify.json"
+    },
+    {
+      "id" : "rs:obia_hierarchy",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/classify.json"
+    },
+    {
+      "id" : "rs:obia_label",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/classify.json"
+    },
+    {
+      "id" : "rs:obia_segment",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/classify.json"
+    },
+    {
+      "id" : "rs:pca",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral_transform.json"
+    },
+    {
+      "id" : "rs:post_classification_change",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/classify.json"
+    },
+    {
+      "id" : "rs:proximity",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "rs:qa_mask",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:radiometric_calibration",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:rasterize",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "rs:recode",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/classify.json"
+    },
+    {
+      "id" : "rs:resample",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:rx_anomaly",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral_transform.json"
+    },
+    {
+      "id" : "rs:sam_classify",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/classify.json"
+    },
+    {
+      "id" : "rs:sar_backscatter",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "rs:sar_calibrate",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "rs:sar_change",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "rs:sar_dualpol_features",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "rs:sar_geocode",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "rs:sar_ratio",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "rs:sar_speckle",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "rs:sar_temporal_stats",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "rs:sar_terrain_correction",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "rs:sar_terrain_flatten",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "rs:sar_terrain_masks",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "rs:sar_texture",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "rs:savi",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral.json"
+    },
+    {
+      "id" : "rs:segment",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/classify.json"
+    },
+    {
+      "id" : "rs:segment_stats",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/classify.json"
+    },
+    {
+      "id" : "rs:sentinel2_import",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:sieve",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "rs:spectral_derivative",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral_transform.json"
+    },
+    {
+      "id" : "rs:spectral_index",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral.json"
+    },
+    {
+      "id" : "rs:spectral_resample",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral_transform.json"
+    },
+    {
+      "id" : "rs:spectral_unmixing",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral_transform.json"
+    },
+    {
+      "id" : "rs:supervised_classification",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/classify.json"
+    },
+    {
+      "id" : "rs:temporal_anomaly",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/temporal.json"
+    },
+    {
+      "id" : "rs:temporal_breakpoints",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/temporal.json"
+    },
+    {
+      "id" : "rs:temporal_composite",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/temporal.json"
+    },
+    {
+      "id" : "rs:temporal_decompose",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/temporal.json"
+    },
+    {
+      "id" : "rs:temporal_extract_series",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/temporal.json"
+    },
+    {
+      "id" : "rs:temporal_gap_fill",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/temporal.json"
+    },
+    {
+      "id" : "rs:temporal_harmonic_fit",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/temporal.json"
+    },
+    {
+      "id" : "rs:temporal_index_series",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral.json"
+    },
+    {
+      "id" : "rs:temporal_monitor",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/temporal.json"
+    },
+    {
+      "id" : "rs:temporal_phenology",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/temporal.json"
+    },
+    {
+      "id" : "rs:temporal_sen_trend",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/temporal.json"
+    },
+    {
+      "id" : "rs:temporal_smooth",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/temporal.json"
+    },
+    {
+      "id" : "rs:temporal_summary",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/temporal.json"
+    },
+    {
+      "id" : "rs:temporal_trend",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/temporal.json"
+    },
+    {
+      "id" : "rs:terrain_analysis",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/terrain.json"
+    },
+    {
+      "id" : "rs:terrain_flow",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/terrain.json"
+    },
+    {
+      "id" : "rs:threshold_raster",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/spectral.json"
+    },
+    {
+      "id" : "rs:topographic_correction",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/terrain.json"
+    },
+    {
+      "id" : "rs:zonal_stats",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "solution:describe",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "solution:instantiate",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "solution:search",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "solution:validate",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "spatial:list_models",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "spatial:select_model",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "style:apply",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "style:describe",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "style:list",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "template:describe",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "template:preview",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "template:search",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "template:validate",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "workflow:preflight",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/tools.json"
+    },
+    {
+      "id" : "app.commandPalette",
+      "kind" : "command",
+      "origin" : "main_window_workbench.cpp:331"
+    },
+    {
+      "id" : "layer.addRaster",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:120"
+    },
+    {
+      "id" : "layer.addVector",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:126"
+    },
+    {
+      "id" : "layer.attributeTable",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:187"
+    },
+    {
+      "id" : "layer.newVector",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:180"
+    },
+    {
+      "id" : "layer.properties",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:132"
+    },
+    {
+      "id" : "layer.remove",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:141"
+    },
+    {
+      "id" : "layer.saveEdits",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:172"
+    },
+    {
+      "id" : "layer.toggleEditing",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:160"
+    },
+    {
+      "id" : "layer.zoomTo",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:151"
+    },
+    {
+      "id" : "map.compareLayers",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:254"
+    },
+    {
+      "id" : "map.identify",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:226"
+    },
+    {
+      "id" : "map.measureArea",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:240"
+    },
+    {
+      "id" : "map.measureDistance",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:233"
+    },
+    {
+      "id" : "map.pan",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:219"
+    },
+    {
+      "id" : "map.refresh",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:247"
+    },
+    {
+      "id" : "map.swipe",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:261"
+    },
+    {
+      "id" : "map.zoomFull",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:212"
+    },
+    {
+      "id" : "map.zoomIn",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:198"
+    },
+    {
+      "id" : "map.zoomOut",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:205"
+    },
+    {
+      "id" : "project.exit",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:110"
+    },
+    {
+      "id" : "project.importLayer",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:82"
+    },
+    {
+      "id" : "project.new",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:51"
+    },
+    {
+      "id" : "project.newLayout",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:96"
+    },
+    {
+      "id" : "project.open",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:59"
+    },
+    {
+      "id" : "project.save",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:67"
+    },
+    {
+      "id" : "project.saveAs",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:75"
+    },
+    {
+      "id" : "project.stacBrowse",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:89"
+    },
+    {
+      "id" : "rs.applyMask",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:397"
+    },
+    {
+      "id" : "rs.atmospheric",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:391"
+    },
+    {
+      "id" : "rs.bandMath",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:368"
+    },
+    {
+      "id" : "rs.bandRatio",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:382"
+    },
+    {
+      "id" : "rs.changeDetection",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:388"
+    },
+    {
+      "id" : "rs.contrastStretch",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:374"
+    },
+    {
+      "id" : "rs.extractBands",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:435"
+    },
+    {
+      "id" : "rs.fusion",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:409"
+    },
+    {
+      "id" : "rs.mosaic",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:385"
+    },
+    {
+      "id" : "rs.ortho",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:403"
+    },
+    {
+      "id" : "rs.pca",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:380"
+    },
+    {
+      "id" : "rs.qaMask",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:394"
+    },
+    {
+      "id" : "rs.radiometric",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:400"
+    },
+    {
+      "id" : "rs.spatialFilter",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:377"
+    },
+    {
+      "id" : "rs.speckle",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:418"
+    },
+    {
+      "id" : "rs.spectralIndex",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:371"
+    },
+    {
+      "id" : "rs.temporal",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:412"
+    },
+    {
+      "id" : "rs.terrain",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:406"
+    },
+    {
+      "id" : "workbench.classify",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:308"
+    },
+    {
+      "id" : "workbench.datasetExperiment",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:289"
+    },
+    {
+      "id" : "workbench.georefI2I",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:323"
+    },
+    {
+      "id" : "workbench.georefI2M",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:335"
+    },
+    {
+      "id" : "workbench.model",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:298"
+    },
+    {
+      "id" : "workbench.obia",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:347"
+    },
+    {
+      "id" : "workbench.processingHistory",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:273"
+    },
+    {
+      "id" : "workbench.temporal",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:281"
+    },
+    {
+      "id" : "workflow.new",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:455"
+    },
+    {
+      "id" : "workflow.open",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:469"
+    },
+    {
+      "id" : "workflow.run",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:493"
+    },
+    {
+      "id" : "workflow.save",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:483"
+    },
+    {
+      "id" : "workflow.stop",
+      "kind" : "command",
+      "origin" : "command_defs.cpp:503"
+    },
+    {
+      "id" : "diagnostic.dataset.label.conflict",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.label.duplicate_annotation",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.label.empty",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.label.invalid_geometry",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.label.multipart",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.label.outside_raster",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.label.tiny_polygon",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.label.unknown_class",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.augmentation_parent_leakage",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.buffer_overlap",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.distance_below_threshold",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.exact_duplicate",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.overlapping_patch",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.pre_post_pair_leakage",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.pseudo_label_parent_leakage",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.same_event_crossing",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.same_parent_polygon",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.same_source_object",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.same_source_scene",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.same_temporal_group_crossing",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.temporal_future_leakage",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.cancelled",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.corrupt_data",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.driver_missing",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.fidelity_loss",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.incompatible",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.invalid_argument",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.invalid_crs",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.invalid_metadata",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.io_error",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.missing_crs",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.network_error",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.not_found",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.open_failed",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.permission_denied",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.resource_exhausted",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.timeout",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.transform_failed",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.unsupported",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.unsupported_format",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.unsupported_product",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.write_failed",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.band_role_unresolved",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.calibration_mismatch",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.cancelled",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.crs_mismatch",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.dataset_not_found",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.entity_ambiguous",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.execution_failed",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.grid_mismatch",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.identity_mismatch",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.insufficient_memory",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.intent_ambiguous",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.invalid_parameter",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.invalid_plan",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.invalid_radiometry",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.map_preflight_failed",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.modality_mismatch",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.model_incompatible",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.model_not_ready",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.not_supported",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.output_invalid",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.path_outside_workspace",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.polarization_mismatch",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.preflight_blocked",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.time_order_invalid",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.tool_not_found",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.training_invalid",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.transient_failure",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.workflow_not_found",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.already_running",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.cancelled",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.computation_error",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.device_unavailable",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.directory_not_found",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.external_process_failed",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.external_process_timeout",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.file_not_found",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.file_not_readable",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.file_not_writable",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.gdal_error",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.invalid_enum_value",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.invalid_input_data",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.invalid_parameter",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.missing_required_parameter",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.not_initialized",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.open_cv_error",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.otb_error",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.out_of_range",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.policy_refused",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.qgis_processing_error",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.runtime_provider_failed",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.type_mismatch",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.unknown",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.preflight.align_to_reference",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.preflight.calibrate_consistently",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.preflight.inspect_bands",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.preflight.model_compatibility_checked",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.preflight.nodata_declared",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.preflight.normalize_radiometry",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.preflight.reproject_to_reference",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.preflight.select_matching_polarization",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.rs.sar.geometry.missing_look_direction",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.rs.sar.speckle.intensity_expected",
+      "kind" : "diagnostic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "harness/BAND_ROLE_UNRESOLVED",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/CALIBRATION_MISMATCH",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/CANCELLED",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/CRS_MISMATCH",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/DATASET_NOT_FOUND",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/ENTITY_AMBIGUOUS",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/EXECUTION_FAILED",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/GRID_MISMATCH",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/IDENTITY_MISMATCH",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/INSUFFICIENT_MEMORY",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/INTENT_AMBIGUOUS",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/INVALID_PARAMETER",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/INVALID_PLAN",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/INVALID_RADIOMETRY",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/MAP_PREFLIGHT_FAILED",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/MODALITY_MISMATCH",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/MODEL_INCOMPATIBLE",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/MODEL_NOT_READY",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/NOT_SUPPORTED",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/OUTPUT_INVALID",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/PATH_OUTSIDE_WORKSPACE",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/POLARIZATION_MISMATCH",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/PREFLIGHT_BLOCKED",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/TIME_ORDER_INVALID",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/TOOL_NOT_FOUND",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/TRAINING_INVALID",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/TRANSIENT_FAILURE",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/WORKFLOW_NOT_FOUND",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "operator/AlreadyRunning",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/Cancelled",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/ComputationError",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/DeviceUnavailable",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/DirectoryNotFound",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/ExternalProcessFailed",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/ExternalProcessTimeout",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/FileNotFound",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/FileNotReadable",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/FileNotWritable",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/GdalError",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/InvalidEnumValue",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/InvalidInputData",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/InvalidParameter",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/MissingRequiredParameter",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/NotInitialized",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/OpenCvError",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/OtbError",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/OutOfRange",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/PolicyRefused",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/QgisProcessingError",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/RuntimeProviderFailed",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/TypeMismatch",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "operator/Unknown",
+      "kind" : "error_code",
+      "origin" : "rs_operator_error.h"
+    },
+    {
+      "id" : "command.app.commandPalette",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.addRaster",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.addVector",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.attributeTable",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.newVector",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.properties",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.remove",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.saveEdits",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.toggleEditing",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.layer.zoomTo",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.compareLayers",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.identify",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.measureArea",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.measureDistance",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.pan",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.refresh",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.swipe",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.zoomFull",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.zoomIn",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.map.zoomOut",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.project.exit",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.project.importLayer",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.project.new",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.project.newLayout",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.project.open",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.project.save",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.project.saveAs",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.project.stacBrowse",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.applyMask",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.atmospheric",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.bandMath",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.bandRatio",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.changeDetection",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.contrastStretch",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.extractBands",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.fusion",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.mosaic",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.ortho",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.pca",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.qaMask",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.radiometric",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.spatialFilter",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.speckle",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.spectralIndex",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.temporal",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.rs.terrain",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.classify",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.datasetExperiment",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.georefI2I",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.georefI2M",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.model",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.obia",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.processingHistory",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workbench.temporal",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workflow.new",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workflow.open",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workflow.run",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workflow.save",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "command.workflow.stop",
+      "kind" : "help_topic",
+      "origin" : "data/help/commands.json"
+    },
+    {
+      "id" : "concept.dataset.provenance",
+      "kind" : "help_topic",
+      "origin" : "data/help/concepts.json"
+    },
+    {
+      "id" : "concept.dataset.spatial_leakage",
+      "kind" : "help_topic",
+      "origin" : "data/help/concepts.json"
+    },
+    {
+      "id" : "concept.rs.change_detection",
+      "kind" : "help_topic",
+      "origin" : "data/help/concepts.json"
+    },
+    {
+      "id" : "concept.rs.determinism",
+      "kind" : "help_topic",
+      "origin" : "data/help/concepts.json"
+    },
+    {
+      "id" : "concept.rs.memory_policy",
+      "kind" : "help_topic",
+      "origin" : "data/help/concepts.json"
+    },
+    {
+      "id" : "concept.rs.ndvi",
+      "kind" : "help_topic",
+      "origin" : "data/help/concepts.json"
+    },
+    {
+      "id" : "concept.rs.radiometric_chain",
+      "kind" : "help_topic",
+      "origin" : "data/help/concepts.json"
+    },
+    {
+      "id" : "concept.rs.rpc",
+      "kind" : "help_topic",
+      "origin" : "data/help/concepts.json"
+    },
+    {
+      "id" : "concept.rs.sar_geometry",
+      "kind" : "help_topic",
+      "origin" : "data/help/concepts.json"
+    },
+    {
+      "id" : "concept.rs.speckle",
+      "kind" : "help_topic",
+      "origin" : "data/help/concepts.json"
+    },
+    {
+      "id" : "concept.rs.temporal_analysis",
+      "kind" : "help_topic",
+      "origin" : "data/help/concepts.json"
+    },
+    {
+      "id" : "concept.rs.topographic_effects",
+      "kind" : "help_topic",
+      "origin" : "data/help/concepts.json"
+    },
+    {
+      "id" : "diagnostic.dataset.label.conflict",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.label.duplicate_annotation",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.label.empty",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.label.invalid_geometry",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.label.multipart",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.label.outside_raster",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.label.tiny_polygon",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.label.unknown_class",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.augmentation_parent_leakage",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.buffer_overlap",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.distance_below_threshold",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.exact_duplicate",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.overlapping_patch",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.pre_post_pair_leakage",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.pseudo_label_parent_leakage",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.same_event_crossing",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.same_parent_polygon",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.same_source_object",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.same_source_scene",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.same_temporal_group_crossing",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.dataset.leakage.temporal_future_leakage",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.cancelled",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.corrupt_data",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.driver_missing",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.fidelity_loss",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.incompatible",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.invalid_argument",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.invalid_crs",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.invalid_metadata",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.io_error",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.missing_crs",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.network_error",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.not_found",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.open_failed",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.permission_denied",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.resource_exhausted",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.timeout",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.transform_failed",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.unsupported",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.unsupported_format",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.unsupported_product",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.geospatial.write_failed",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.band_role_unresolved",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.calibration_mismatch",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.cancelled",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.crs_mismatch",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.dataset_not_found",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.entity_ambiguous",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.execution_failed",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.grid_mismatch",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.identity_mismatch",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.insufficient_memory",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.intent_ambiguous",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.invalid_parameter",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.invalid_plan",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.invalid_radiometry",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.map_preflight_failed",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.modality_mismatch",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.model_incompatible",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.model_not_ready",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.not_supported",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.output_invalid",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.path_outside_workspace",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.polarization_mismatch",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.preflight_blocked",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.time_order_invalid",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.tool_not_found",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.training_invalid",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.transient_failure",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.harness.workflow_not_found",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.already_running",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.cancelled",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.computation_error",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.device_unavailable",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.directory_not_found",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.external_process_failed",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.external_process_timeout",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.file_not_found",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.file_not_readable",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.file_not_writable",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.gdal_error",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.invalid_enum_value",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.invalid_input_data",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.invalid_parameter",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.missing_required_parameter",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.not_initialized",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.open_cv_error",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.otb_error",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.out_of_range",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.policy_refused",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.qgis_processing_error",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.runtime_provider_failed",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.type_mismatch",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.operator.unknown",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.preflight.align_to_reference",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.preflight.calibrate_consistently",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.preflight.inspect_bands",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.preflight.model_compatibility_checked",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.preflight.nodata_declared",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.preflight.normalize_radiometry",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.preflight.reproject_to_reference",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.preflight.select_matching_polarization",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.rs.sar.geometry.missing_look_direction",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "diagnostic.rs.sar.speckle.intensity_expected",
+      "kind" : "help_topic",
+      "origin" : "data/help/diagnostics.json"
+    },
+    {
+      "id" : "operator.rs.ace",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.apply_mask",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.atmospheric_correction",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.atmospheric_dos1",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.atmospheric_dos2",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.atmospheric_quac",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.band_math",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.band_ratio",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.change_cva",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/change.json"
+    },
+    {
+      "id" : "operator.rs.change_cva_angle",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/change.json"
+    },
+    {
+      "id" : "operator.rs.change_detection",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/change.json"
+    },
+    {
+      "id" : "operator.rs.change_difference",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/change.json"
+    },
+    {
+      "id" : "operator.rs.change_irmad",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/change.json"
+    },
+    {
+      "id" : "operator.rs.change_log_ratio",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/change.json"
+    },
+    {
+      "id" : "operator.rs.change_mad",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/change.json"
+    },
+    {
+      "id" : "operator.rs.change_normalized_difference",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/change.json"
+    },
+    {
+      "id" : "operator.rs.change_ratio",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/change.json"
+    },
+    {
+      "id" : "operator.rs.change_sam",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/change.json"
+    },
+    {
+      "id" : "operator.rs.connected_components",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.continuum_removal",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.contrast_stretch",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.detect",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.dn_to_radiance",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.embedding",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.endmember_extraction",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.evi",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.extract_bands",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.feature_normalize",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.feature_select",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.feature_stack",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.fill_holes",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.focal_stats",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.fusion_brovey",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.fusion_gram_schmidt",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.fusion_ihs",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.fusion_linear",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.fusion_pca",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.image_enhancement",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.image_fusion",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.infer",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.kmeans_classification",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.landsat_import",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.local_extrema",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.majority_filter",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.matched_filter",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.mndwi",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.mnf",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.modis_georeference",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.modis_import",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.morphology",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.mosaic",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.ndbi",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.ndvi",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.ndwi",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.obia_classify",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.obia_features",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.obia_hierarchy",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.obia_label",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.obia_segment",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.pca",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.post_classification_change",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/change.json"
+    },
+    {
+      "id" : "operator.rs.proximity",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.qa_mask",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.radiometric_calibration",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.recode",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.rx_anomaly",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.sam_classify",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.sar_backscatter",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/sar.json"
+    },
+    {
+      "id" : "operator.rs.sar_calibrate",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/sar.json"
+    },
+    {
+      "id" : "operator.rs.sar_change",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/sar.json"
+    },
+    {
+      "id" : "operator.rs.sar_dualpol_features",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/sar.json"
+    },
+    {
+      "id" : "operator.rs.sar_ratio",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/sar.json"
+    },
+    {
+      "id" : "operator.rs.sar_speckle",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/sar.json"
+    },
+    {
+      "id" : "operator.rs.sar_terrain_correction",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/sar.json"
+    },
+    {
+      "id" : "operator.rs.sar_terrain_flatten",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/sar.json"
+    },
+    {
+      "id" : "operator.rs.sar_terrain_masks",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/sar.json"
+    },
+    {
+      "id" : "operator.rs.sar_texture",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/sar.json"
+    },
+    {
+      "id" : "operator.rs.savi",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.segment",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.segment_stats",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.sentinel2_import",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.sieve",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/data_io.json"
+    },
+    {
+      "id" : "operator.rs.spectral_derivative",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.spectral_index",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.spectral_resample",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.spectral_unmixing",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/optical.json"
+    },
+    {
+      "id" : "operator.rs.supervised_classification",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/classify.json"
+    },
+    {
+      "id" : "operator.rs.temporal_anomaly",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/temporal.json"
+    },
+    {
+      "id" : "operator.rs.temporal_breakpoints",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/temporal.json"
+    },
+    {
+      "id" : "operator.rs.temporal_composite",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/temporal.json"
+    },
+    {
+      "id" : "operator.rs.temporal_decompose",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/temporal.json"
+    },
+    {
+      "id" : "operator.rs.temporal_extract_series",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/temporal.json"
+    },
+    {
+      "id" : "operator.rs.temporal_gap_fill",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/temporal.json"
+    },
+    {
+      "id" : "operator.rs.temporal_harmonic_fit",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/temporal.json"
+    },
+    {
+      "id" : "operator.rs.temporal_index_series",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/temporal.json"
+    },
+    {
+      "id" : "operator.rs.temporal_monitor",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/temporal.json"
+    },
+    {
+      "id" : "operator.rs.temporal_phenology",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/temporal.json"
+    },
+    {
+      "id" : "operator.rs.temporal_sen_trend",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/temporal.json"
+    },
+    {
+      "id" : "operator.rs.temporal_smooth",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/temporal.json"
+    },
+    {
+      "id" : "operator.rs.temporal_summary",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/temporal.json"
+    },
+    {
+      "id" : "operator.rs.temporal_trend",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/temporal.json"
+    },
+    {
+      "id" : "operator.rs.terrain_analysis",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/terrain.json"
+    },
+    {
+      "id" : "operator.rs.terrain_flow",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/terrain.json"
+    },
+    {
+      "id" : "operator.rs.threshold_raster",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/change.json"
+    },
+    {
+      "id" : "operator.rs.topographic_correction",
+      "kind" : "help_topic",
+      "origin" : "data/help/operators/terrain.json"
+    },
+    {
+      "id" : "workbench.classification",
+      "kind" : "help_topic",
+      "origin" : "data/help/workbenches.json"
+    },
+    {
+      "id" : "workbench.classify",
+      "kind" : "help_topic",
+      "origin" : "data/help/workbenches.json"
+    },
+    {
+      "id" : "workbench.data_manager",
+      "kind" : "help_topic",
+      "origin" : "data/help/workbenches.json"
+    },
+    {
+      "id" : "workbench.georef_i2i",
+      "kind" : "help_topic",
+      "origin" : "data/help/workbenches.json"
+    },
+    {
+      "id" : "workbench.georef_i2m",
+      "kind" : "help_topic",
+      "origin" : "data/help/workbenches.json"
+    },
+    {
+      "id" : "workbench.layout",
+      "kind" : "help_topic",
+      "origin" : "data/help/workbenches.json"
+    },
+    {
+      "id" : "workbench.map",
+      "kind" : "help_topic",
+      "origin" : "data/help/workbenches.json"
+    },
+    {
+      "id" : "workbench.obia",
+      "kind" : "help_topic",
+      "origin" : "data/help/workbenches.json"
+    },
+    {
+      "attributes" : 
+      [
+        "cropToCutline",
+        "cutline",
+        "extent",
+        "input",
+        "nodata",
+        "output",
+        "resampling"
+      ],
+      "id" : "gdal:clip",
+      "kind" : "operator",
+      "origin" : "src/operators/gdal/gdal_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "dem",
+        "dstCrs",
+        "height",
+        "input",
+        "nodata",
+        "output",
+        "resampling",
+        "targetResolution"
+      ],
+      "id" : "gdal:orthorectification",
+      "kind" : "operator",
+      "origin" : "src/operators/gdal/gdal_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "ms",
+        "output",
+        "pan"
+      ],
+      "id" : "gdal:pansharpen",
+      "kind" : "operator",
+      "origin" : "src/operators/gdal/gdal_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "connected8",
+        "field",
+        "input",
+        "output"
+      ],
+      "id" : "gdal:polygonize",
+      "kind" : "operator",
+      "origin" : "src/operators/gdal/gdal_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "dstCrs",
+        "input",
+        "nodata",
+        "output",
+        "reference",
+        "resampling",
+        "srcCrs",
+        "targetResolution"
+      ],
+      "id" : "gdal:reproject",
+      "kind" : "operator",
+      "origin" : "src/operators/gdal/gdal_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "levels",
+        "resampling"
+      ],
+      "id" : "io:build_overviews",
+      "kind" : "operator",
+      "origin" : "src/operators/io/io_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bounds",
+        "creationOptions",
+        "input",
+        "output",
+        "srcCrsOverride"
+      ],
+      "id" : "io:clip",
+      "kind" : "operator",
+      "origin" : "src/operators/io/io_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "creationOptions",
+        "driver",
+        "input",
+        "output"
+      ],
+      "id" : "io:convert_format",
+      "kind" : "operator",
+      "origin" : "src/operators/io/io_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "includeStatistics",
+        "input"
+      ],
+      "id" : "io:doctor",
+      "kind" : "operator",
+      "origin" : "src/operators/io/io_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "includeStatistics",
+        "input"
+      ],
+      "id" : "io:inspect",
+      "kind" : "operator",
+      "origin" : "src/operators/io/io_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "creationOptions",
+        "input",
+        "output",
+        "preset"
+      ],
+      "id" : "io:make_cog",
+      "kind" : "operator",
+      "origin" : "src/operators/io/io_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "output",
+        "resampling",
+        "srcCrsOverride",
+        "targetCrs"
+      ],
+      "id" : "io:reproject",
+      "kind" : "operator",
+      "origin" : "src/operators/io/io_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "creationOptions",
+        "driver",
+        "height",
+        "input",
+        "output",
+        "resampling",
+        "targetCrs",
+        "width"
+      ],
+      "id" : "io:translate",
+      "kind" : "operator",
+      "origin" : "src/operators/io/io_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "clipBounds",
+        "driver",
+        "input",
+        "layer",
+        "output",
+        "targetCrs",
+        "where"
+      ],
+      "id" : "io:vector_convert",
+      "kind" : "operator",
+      "origin" : "src/operators/io/io_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bounds",
+        "creationOptions",
+        "input",
+        "output",
+        "resampling",
+        "resolution",
+        "targetAlignedPixels",
+        "targetCrs"
+      ],
+      "id" : "io:warp",
+      "kind" : "operator",
+      "origin" : "src/operators/io/io_operators_init.cpp"
+    },
+    {
+      "id" : "opencv:canny",
+      "kind" : "operator",
+      "origin" : "src/operators/opencv/opencv_operators_init.cpp"
+    },
+    {
+      "id" : "opencv:gaussian_blur",
+      "kind" : "operator",
+      "origin" : "src/operators/opencv/opencv_operators_init.cpp"
+    },
+    {
+      "id" : "opencv:laplacian",
+      "kind" : "operator",
+      "origin" : "src/operators/opencv/opencv_operators_init.cpp"
+    },
+    {
+      "id" : "opencv:mean_blur",
+      "kind" : "operator",
+      "origin" : "src/operators/opencv/opencv_operators_init.cpp"
+    },
+    {
+      "id" : "opencv:median_blur",
+      "kind" : "operator",
+      "origin" : "src/operators/opencv/opencv_operators_init.cpp"
+    },
+    {
+      "id" : "opencv:sobel",
+      "kind" : "operator",
+      "origin" : "src/operators/opencv/opencv_operators_init.cpp"
+    },
+    {
+      "id" : "otb:bundle_to_perfect_sensor",
+      "kind" : "operator",
+      "origin" : "src/operators/otb/otb_operators_init.cpp"
+    },
+    {
+      "id" : "otb:compute_images_statistics",
+      "kind" : "operator",
+      "origin" : "src/operators/otb/otb_operators_init.cpp"
+    },
+    {
+      "id" : "otb:meanshift_segmentation",
+      "kind" : "operator",
+      "origin" : "src/operators/otb/otb_operators_init.cpp"
+    },
+    {
+      "id" : "otb:svm_classification",
+      "kind" : "operator",
+      "origin" : "src/operators/otb/otb_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "output",
+        "target"
+      ],
+      "id" : "rs:ace",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "categorical",
+        "input",
+        "output",
+        "reference",
+        "resampling",
+        "warpMemoryLimitBytes"
+      ],
+      "id" : "rs:align",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "align_mask",
+        "input",
+        "mask",
+        "no_data",
+        "output"
+      ],
+      "id" : "rs:apply_mask",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "airmass",
+        "band",
+        "bias",
+        "gain",
+        "input",
+        "metadata_path",
+        "method",
+        "output"
+      ],
+      "id" : "rs:atmospheric_correction",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "bias",
+        "gain",
+        "input",
+        "metadata_path",
+        "output"
+      ],
+      "id" : "rs:atmospheric_dos1",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "airmass",
+        "band",
+        "bias",
+        "gain",
+        "input",
+        "metadata_path",
+        "output"
+      ],
+      "id" : "rs:atmospheric_dos2",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "output"
+      ],
+      "id" : "rs:atmospheric_quac",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "expression",
+        "input",
+        "output"
+      ],
+      "id" : "rs:band_math",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "blueBand",
+        "denominatorBand",
+        "greenBand",
+        "input",
+        "mode",
+        "numeratorBand",
+        "output",
+        "redBand"
+      ],
+      "id" : "rs:band_ratio",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "after",
+        "afterBand",
+        "band",
+        "before",
+        "beforeBand",
+        "output"
+      ],
+      "id" : "rs:change_cva",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "after",
+        "afterBand1",
+        "afterBand2",
+        "before",
+        "beforeBand1",
+        "beforeBand2",
+        "mode",
+        "output"
+      ],
+      "id" : "rs:change_cva_angle",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "after",
+        "afterBand",
+        "band",
+        "before",
+        "beforeBand",
+        "cleanup",
+        "cleanupIterations",
+        "makeMask",
+        "method",
+        "minAreaPixels",
+        "output",
+        "percentile",
+        "statisticalK",
+        "threshold",
+        "thresholdMethod"
+      ],
+      "id" : "rs:change_detection",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "after",
+        "afterBand",
+        "band",
+        "before",
+        "beforeBand",
+        "output"
+      ],
+      "id" : "rs:change_difference",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "after",
+        "before",
+        "convThreshold",
+        "maxIterations",
+        "output"
+      ],
+      "id" : "rs:change_irmad",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "after",
+        "afterBand",
+        "band",
+        "before",
+        "beforeBand",
+        "epsilon",
+        "output"
+      ],
+      "id" : "rs:change_log_ratio",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "after",
+        "afterBand",
+        "band",
+        "before",
+        "beforeBand",
+        "output"
+      ],
+      "id" : "rs:change_mad",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "after",
+        "afterBand",
+        "band",
+        "before",
+        "beforeBand",
+        "output"
+      ],
+      "id" : "rs:change_normalized_difference",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "after",
+        "afterBand",
+        "band",
+        "before",
+        "beforeBand",
+        "output"
+      ],
+      "id" : "rs:change_ratio",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "after",
+        "before",
+        "output"
+      ],
+      "id" : "rs:change_sam",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "connectivity",
+        "input",
+        "iterations",
+        "min_area_pixels",
+        "op",
+        "output",
+        "window"
+      ],
+      "id" : "rs:connected_components",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "output"
+      ],
+      "id" : "rs:continuum_removal",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "clipPercent",
+        "input",
+        "method",
+        "output",
+        "piecewisePoints",
+        "stddevK"
+      ],
+      "id" : "rs:contrast_stretch",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "batchCap",
+        "conf",
+        "device",
+        "input",
+        "model",
+        "nms_iou",
+        "output",
+        "tta"
+      ],
+      "id" : "rs:detect",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "bias",
+        "gain",
+        "input",
+        "metadata_path",
+        "output"
+      ],
+      "id" : "rs:dn_to_radiance",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "aggregate",
+        "bands",
+        "batchCap",
+        "device",
+        "input",
+        "model",
+        "output",
+        "tta"
+      ],
+      "id" : "rs:embedding",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "nEndmembers",
+        "projections"
+      ],
+      "id" : "rs:endmember_extraction",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "blue",
+        "input",
+        "nir",
+        "output",
+        "red",
+        "scale"
+      ],
+      "id" : "rs:evi",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "input",
+        "output"
+      ],
+      "id" : "rs:extract_bands",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "inverse",
+        "method",
+        "output"
+      ],
+      "id" : "rs:feature_normalize",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "complement",
+        "ids",
+        "indices",
+        "input",
+        "output",
+        "roles"
+      ],
+      "id" : "rs:feature_select",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "feature_id",
+        "features",
+        "generator",
+        "output",
+        "reference"
+      ],
+      "id" : "rs:feature_stack",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "connectivity",
+        "input",
+        "iterations",
+        "min_area_pixels",
+        "op",
+        "output",
+        "window"
+      ],
+      "id" : "rs:fill_holes",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "input",
+        "output",
+        "stat",
+        "window"
+      ],
+      "id" : "rs:focal_stats",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "id" : "rs:fusion_brovey",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "id" : "rs:fusion_gram_schmidt",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "id" : "rs:fusion_ihs",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "id" : "rs:fusion_linear",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "id" : "rs:fusion_pca",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band1",
+        "band2",
+        "band3",
+        "clipPercent",
+        "damping",
+        "filterType",
+        "input",
+        "kernelSize",
+        "method",
+        "noiseVariance",
+        "output",
+        "sigma",
+        "speckleType",
+        "stddevK",
+        "stretchType",
+        "transform"
+      ],
+      "id" : "rs:image_enhancement",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "blueIdx",
+        "greenIdx",
+        "method",
+        "ms",
+        "msWeights",
+        "output",
+        "pan",
+        "panWeight",
+        "redIdx"
+      ],
+      "id" : "rs:image_fusion",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "batchCap",
+        "blend",
+        "device",
+        "input",
+        "model",
+        "named_inputs",
+        "output",
+        "tta"
+      ],
+      "id" : "rs:infer",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "algorithm",
+        "bands",
+        "input",
+        "k",
+        "maxSamples",
+        "output",
+        "scale"
+      ],
+      "id" : "rs:kmeans_classification",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "input",
+        "output"
+      ],
+      "id" : "rs:landsat_import",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "connectivity",
+        "input",
+        "iterations",
+        "min_area_pixels",
+        "op",
+        "output",
+        "window"
+      ],
+      "id" : "rs:local_extrema",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "kernel",
+        "output"
+      ],
+      "id" : "rs:majority_filter",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "output",
+        "target"
+      ],
+      "id" : "rs:matched_filter",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "green",
+        "input",
+        "output",
+        "swir"
+      ],
+      "id" : "rs:mndwi",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "numComponents",
+        "output"
+      ],
+      "id" : "rs:mnf",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "dstCrs",
+        "input",
+        "output",
+        "resampling",
+        "tileH",
+        "tileV"
+      ],
+      "id" : "rs:modis_georeference",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "input",
+        "output"
+      ],
+      "id" : "rs:modis_import",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "connectivity",
+        "input",
+        "iterations",
+        "min_area_pixels",
+        "op",
+        "output",
+        "window"
+      ],
+      "id" : "rs:morphology",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "inputs",
+        "output"
+      ],
+      "id" : "rs:mosaic",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "nir",
+        "output",
+        "swir"
+      ],
+      "id" : "rs:ndbi",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "nir",
+        "output",
+        "red"
+      ],
+      "id" : "rs:ndvi",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "green",
+        "input",
+        "nir",
+        "output"
+      ],
+      "id" : "rs:ndwi",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "cellSize",
+        "classColors",
+        "classField",
+        "featureSelection",
+        "features",
+        "input",
+        "labels",
+        "method",
+        "minLabelPixels",
+        "minRegionSize",
+        "mlpHiddenLayerSize",
+        "mlpMaxIter",
+        "output",
+        "outputUncertainty",
+        "quantizeBins",
+        "rfMaxDepth",
+        "rfMinSampleCount",
+        "rfNumTrees",
+        "scale",
+        "segmentClasses",
+        "segmentMethod",
+        "smoothKernel",
+        "training"
+      ],
+      "id" : "rs:obia_classify",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "input",
+        "labels",
+        "output"
+      ],
+      "id" : "rs:obia_features",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "classColors",
+        "classField",
+        "classifyLevel",
+        "input",
+        "labelsCoarse",
+        "labelsFine",
+        "maxIterations",
+        "method",
+        "minLabelPixels",
+        "minRegionSize",
+        "mlpHiddenLayerSize",
+        "mlpMaxIter",
+        "outputClass",
+        "outputCoarse",
+        "outputFine",
+        "outputParents",
+        "outputUncertainty",
+        "parents",
+        "rangeRadius",
+        "rfMaxDepth",
+        "rfMinSampleCount",
+        "rfNumTrees",
+        "segmentClasses",
+        "spatialRadius",
+        "threshold",
+        "training",
+        "watershedThreshold"
+      ],
+      "id" : "rs:obia_hierarchy",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "classField",
+        "input",
+        "labels",
+        "minLabelPixels",
+        "output",
+        "training"
+      ],
+      "id" : "rs:obia_label",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "engine",
+        "input",
+        "maxIterations",
+        "minRegionSize",
+        "output",
+        "quantizeBins",
+        "rangeRadius",
+        "smoothKernel",
+        "spatialRadius",
+        "threshold"
+      ],
+      "id" : "rs:obia_segment",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "numComponents",
+        "output"
+      ],
+      "id" : "rs:pca",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "after",
+        "afterBand",
+        "band",
+        "before",
+        "beforeBand",
+        "class_count",
+        "class_labels",
+        "output"
+      ],
+      "id" : "rs:post_classification_change",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "connectivity",
+        "input",
+        "iterations",
+        "min_area_pixels",
+        "op",
+        "output",
+        "window"
+      ],
+      "id" : "rs:proximity",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bits",
+        "input",
+        "mask",
+        "output",
+        "qa_band",
+        "source"
+      ],
+      "id" : "rs:qa_mask",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "input",
+        "metadata_path",
+        "output",
+        "unit"
+      ],
+      "id" : "rs:radiometric_calibration",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "allTouched",
+        "field",
+        "input",
+        "layer",
+        "output",
+        "value",
+        "vector"
+      ],
+      "id" : "rs:rasterize",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "map",
+        "output",
+        "recode",
+        "recode_map"
+      ],
+      "id" : "rs:recode",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "categorical",
+        "input",
+        "output",
+        "resampling",
+        "resolution",
+        "warpMemoryLimitBytes"
+      ],
+      "id" : "rs:resample",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "output"
+      ],
+      "id" : "rs:rx_anomaly",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "angleOut",
+        "bands",
+        "input",
+        "metric",
+        "output",
+        "refs"
+      ],
+      "id" : "rs:sam_classify",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "fromCalibration",
+        "incidenceDeg",
+        "incidenceRaster",
+        "input",
+        "inputDomain",
+        "output",
+        "outputDomain",
+        "polarizations",
+        "sensor",
+        "toCalibration"
+      ],
+      "id" : "rs:sar_backscatter",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "calibrationA",
+        "incidenceDeg",
+        "input",
+        "noiseLinear",
+        "output",
+        "outputDomain",
+        "polarizations",
+        "sensor"
+      ],
+      "id" : "rs:sar_calibrate",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bandA",
+        "bandB",
+        "cleanup",
+        "cleanupIterations",
+        "inputA",
+        "inputB",
+        "inputDomain",
+        "minAreaPixels",
+        "output",
+        "percentile",
+        "polarizations",
+        "sensor",
+        "statisticalK",
+        "threshold",
+        "thresholdMethod"
+      ],
+      "id" : "rs:sar_change",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "domain",
+        "feature",
+        "input",
+        "output",
+        "vh_band",
+        "vv_band"
+      ],
+      "id" : "rs:sar_dualpol_features",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "dem",
+        "input",
+        "output",
+        "resampling"
+      ],
+      "id" : "rs:sar_geocode",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bandA",
+        "bandB",
+        "inputA",
+        "inputB",
+        "inputDomain",
+        "output",
+        "outputType",
+        "polarizations",
+        "sensor"
+      ],
+      "id" : "rs:sar_ratio",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "companionScenes",
+        "dampingFactor",
+        "deviationK",
+        "input",
+        "kernelSize",
+        "looks",
+        "method",
+        "noiseVariance",
+        "output",
+        "polarizations",
+        "sensor"
+      ],
+      "id" : "rs:sar_speckle",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "changeThresholdDb",
+        "inputDomain",
+        "inputs",
+        "minValid",
+        "output"
+      ],
+      "id" : "rs:sar_temporal_stats",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "dem",
+        "demUnit",
+        "flagIncidence",
+        "flagMask",
+        "headingDeg",
+        "incidenceDeg",
+        "input",
+        "lookAzimuthDeg",
+        "lookDirection",
+        "output",
+        "polarizations",
+        "sensor"
+      ],
+      "id" : "rs:sar_terrain_correction",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "dem",
+        "demUnit",
+        "headingDeg",
+        "incidenceDeg",
+        "input",
+        "lookAzimuthDeg",
+        "lookDirection",
+        "output",
+        "polarizations",
+        "sensor"
+      ],
+      "id" : "rs:sar_terrain_flatten",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "dem",
+        "heading",
+        "incidence",
+        "lookAzimuth",
+        "lookAzimuthDeg",
+        "lookDirection",
+        "look_azimuth",
+        "output",
+        "product"
+      ],
+      "id" : "rs:sar_terrain_masks",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "directionDeg",
+        "displacement",
+        "input",
+        "measures",
+        "output",
+        "polarizations",
+        "quantLevels",
+        "sensor",
+        "windowSize"
+      ],
+      "id" : "rs:sar_texture",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "nir",
+        "output",
+        "red",
+        "scale"
+      ],
+      "id" : "rs:savi",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "batchCap",
+        "device",
+        "format",
+        "input",
+        "model",
+        "output",
+        "tta"
+      ],
+      "id" : "rs:segment",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "input",
+        "labels",
+        "output"
+      ],
+      "id" : "rs:segment_stats",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "input",
+        "output",
+        "resolution"
+      ],
+      "id" : "rs:sentinel2_import",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "connectivity",
+        "input",
+        "iterations",
+        "min_area_pixels",
+        "op",
+        "output",
+        "window"
+      ],
+      "id" : "rs:sieve",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "order",
+        "output",
+        "wavelengths"
+      ],
+      "id" : "rs:spectral_derivative",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "blue",
+        "green",
+        "index",
+        "input",
+        "nir",
+        "output",
+        "postfire",
+        "red",
+        "rededge",
+        "scale",
+        "swir",
+        "swir2"
+      ],
+      "id" : "rs:spectral_index",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "output",
+        "sourceWavelengths",
+        "wavelengths"
+      ],
+      "id" : "rs:spectral_resample",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "endmembers",
+        "errorOut",
+        "input",
+        "output"
+      ],
+      "id" : "rs:spectral_unmixing",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "classField",
+        "input",
+        "maxSamplesPerClass",
+        "method",
+        "modelIn",
+        "modelOut",
+        "output",
+        "probabilityOutput",
+        "scale",
+        "seed",
+        "testSplit",
+        "training"
+      ],
+      "id" : "rs:supervised_classification",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "apply_qa_masking",
+        "band",
+        "band_role",
+        "baseline_end",
+        "baseline_start",
+        "collection",
+        "duplicate_policy",
+        "method",
+        "min_observations",
+        "output",
+        "scenes",
+        "target_time",
+        "tile_size"
+      ],
+      "id" : "rs:temporal_anomaly",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "apply_qa_masking",
+        "band",
+        "band_role",
+        "collection",
+        "duplicate_policy",
+        "maxBreaks",
+        "minImprovement",
+        "minSegmentDays",
+        "output",
+        "outputBreakDates",
+        "scenes",
+        "tile_size"
+      ],
+      "id" : "rs:temporal_breakpoints",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "apply_qa_masking",
+        "band",
+        "band_role",
+        "collection",
+        "duplicate_policy",
+        "method",
+        "output",
+        "period",
+        "period_days",
+        "quality_band",
+        "scenes",
+        "target_date",
+        "tile_size"
+      ],
+      "id" : "rs:temporal_composite",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "apply_qa_masking",
+        "band",
+        "band_role",
+        "collection",
+        "components",
+        "duplicate_policy",
+        "output",
+        "scenes",
+        "seasonal_window_days",
+        "tile_size",
+        "trend_lambda"
+      ],
+      "id" : "rs:temporal_decompose",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "apply_qa_masking",
+        "band",
+        "band_role",
+        "collection",
+        "duplicate_policy",
+        "output",
+        "point",
+        "polygon",
+        "scenes"
+      ],
+      "id" : "rs:temporal_extract_series",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "apply_qa_masking",
+        "band",
+        "band_role",
+        "collection",
+        "duplicate_policy",
+        "max_gap_days",
+        "method",
+        "output",
+        "scenes",
+        "tile_size"
+      ],
+      "id" : "rs:temporal_gap_fill",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "apply_qa_masking",
+        "band",
+        "band_role",
+        "collection",
+        "duplicate_policy",
+        "harmonics",
+        "minObservations",
+        "output",
+        "robust",
+        "scenes",
+        "tile_size",
+        "writeCoefficients"
+      ],
+      "id" : "rs:temporal_harmonic_fit",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "apply_qa_masking",
+        "bands",
+        "collection",
+        "duplicate_policy",
+        "index",
+        "output",
+        "scenes",
+        "tile_size"
+      ],
+      "id" : "rs:temporal_index_series",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "apply_qa_masking",
+        "band",
+        "band_role",
+        "collection",
+        "drift",
+        "lambda",
+        "max_pairwork",
+        "method",
+        "min_observations",
+        "output",
+        "tile_size"
+      ],
+      "id" : "rs:temporal_monitor",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "apply_qa_masking",
+        "band",
+        "band_role",
+        "collection",
+        "crossingFraction",
+        "duplicate_policy",
+        "minValidPerSeason",
+        "output",
+        "scenes",
+        "seasonEndDoy",
+        "seasonStartDoy",
+        "tile_size"
+      ],
+      "id" : "rs:temporal_phenology",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "alpha",
+        "apply_qa_masking",
+        "band",
+        "band_role",
+        "collection",
+        "duplicate_policy",
+        "output",
+        "scenes",
+        "tile_size"
+      ],
+      "id" : "rs:temporal_sen_trend",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "apply_qa_masking",
+        "band",
+        "band_role",
+        "collection",
+        "degree",
+        "duplicate_policy",
+        "lambda",
+        "method",
+        "moving_average_window",
+        "output",
+        "scenes",
+        "tile_size",
+        "window"
+      ],
+      "id" : "rs:temporal_smooth",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "apply_qa_masking",
+        "band",
+        "band_role",
+        "collection",
+        "duplicate_policy",
+        "include_median",
+        "output",
+        "scenes",
+        "tile_size"
+      ],
+      "id" : "rs:temporal_summary",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "apply_qa_masking",
+        "band",
+        "band_role",
+        "collection",
+        "duplicate_policy",
+        "output",
+        "scenes",
+        "tile_size"
+      ],
+      "id" : "rs:temporal_trend",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "cellSize",
+        "input",
+        "nodata",
+        "output",
+        "product",
+        "sunAzimuth",
+        "sunElevation",
+        "zFactor"
+      ],
+      "id" : "rs:terrain_analysis",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "input",
+        "nodata",
+        "output",
+        "pour_points",
+        "product"
+      ],
+      "id" : "rs:terrain_flow",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "cleanup",
+        "cleanupIterations",
+        "input",
+        "minAreaPixels",
+        "output",
+        "percentile",
+        "statisticalK",
+        "threshold",
+        "thresholdMethod"
+      ],
+      "id" : "rs:threshold_raster",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "dem",
+        "input",
+        "method",
+        "output",
+        "solar_azimuth",
+        "solar_zenith"
+      ],
+      "id" : "rs:topographic_correction",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "input",
+        "layer",
+        "median",
+        "output",
+        "vector",
+        "zoneField"
+      ],
+      "id" : "rs:zonal_stats",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "id" : "align_to_reference",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:277"
+    },
+    {
+      "id" : "calibrate_consistently",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:341"
+    },
+    {
+      "id" : "check_collection",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:460"
+    },
+    {
+      "id" : "check_dataset",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:223"
+    },
+    {
+      "id" : "check_training",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:386"
+    },
+    {
+      "id" : "harness.plan",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:296"
+    },
+    {
+      "id" : "harness.preflight",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:127"
+    },
+    {
+      "id" : "inspect_bands",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:233"
+    },
+    {
+      "id" : "normalize_radiometry",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:290"
+    },
+    {
+      "id" : "reproject_to_reference",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:268"
+    },
+    {
+      "id" : "select_matching_polarization",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:336"
+    },
+    {
+      "id" : "select_model",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:571"
+    },
+    {
+      "id" : "spatial.understand",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:120"
+    },
+    {
+      "id" : "temporal.preflight_collection",
+      "kind" : "preflight_action",
+      "origin" : "scientific_preflight.cpp:447"
+    }
+  ],
+  "schema" : "exp.contract.graph.v1"
+}

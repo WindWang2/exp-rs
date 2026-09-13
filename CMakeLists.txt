@@ -53,6 +53,13 @@ set(COMPLETE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MIN
 option(ENABLE_LOCAL_BUILD_SHORTCUTS "Skip git version detection for faster local builds" ON)
 CREATE_QGSVERSION()
 
+# Teaching-lab build profile (D10): -DSICNU_LAB_PROFILE=ON drops optional
+# heavy dependencies and the verification suite BEFORE any option()/target
+# wiring below; a no-op (default OFF) for every existing build. Included
+# early so its CACHE FORCE decisions win over the option() declarations
+# further down.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/SicnuLabProfile.cmake")
+
 set(QT_VERSION_BASE "Qt6")
 set(QT_VERSION_BASE_LOWER "qt6")
 

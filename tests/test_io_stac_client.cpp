@@ -11,6 +11,7 @@
 
 #include "geospatial/stac/stac_client.h"
 #include "support/http_stac_server.h"
+#include "support/offline_probe.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -75,6 +76,11 @@ std::string renderPage( const std::vector<std::string> &items, const std::string
 }
 
 } // namespace
+
+// ADR 0146: never die by timeout when the loopback transport is missing —
+// report `sicnu-skip: <reason>` + exit 77 instead.
+SICNU_OFFLINE_GUARD()
+
 
 TEST_CASE( "StacClient search encodes core filters as GET query params",
            "[io][stac][client]" )

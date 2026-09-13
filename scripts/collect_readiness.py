@@ -177,6 +177,10 @@ def main() -> int:
             "artifact": binary,
             "compiled_here": compiled,
             "executed_status": status,
+            # ADR 0146: every skip must carry its reason code — a skip
+            # without a reason is a reporting defect, not a verdict.
+            **({"skip_reason": item.get("detail", "")}
+                if status == "skipped" and item is not None else {}),
         })
 
     # "ready" requires EVERY named capability to have executed and passed on
@@ -222,15 +226,24 @@ def main() -> int:
         "|---|---|---|---|",
     ]
     for cap in capabilities:
+        status = cap["executed_status"]
+        if status == "skipped" and cap.get("skip_reason"):
+            reason = cap["skip_reason"]
+            # The ladder stores the raw sentinel line; render the reason code.
+            if reason.startswith("sicnu-skip: "):
+                reason = reason[len("sicnu-skip: "):]
+            status = f"skipped ({reason})"
         lines.append(f"| {cap['capability']} | `{cap['artifact']}` "
                      f"| {'yes' if cap['compiled_here'] else 'NO'} "
-                     f"| {cap['executed_status']} |")
+                     f"| {status} |")
     lines += ["", "## Benchmarks (evidence snapshots, never gates)", ""]
     if bench:
         for name, data in bench.items():
             measurements = data.get("measurements", [])
             lines.append(f"### {name} (schema {data.get('schema', '?')})")
             lines.append("")
+            tier = data.get("tier")
+            lines.append(f"_tier: {tier}_" if tier else "_tier: unlabelled (pre-D10 artifact)_")
             for m in measurements:
                 lines.append(f"* `{m.get('name')}`: {m.get('ops_per_s')} ops/s "
                              f"({m.get('iterations')} iters)")

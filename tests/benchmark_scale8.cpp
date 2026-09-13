@@ -1,9 +1,18 @@
 // benchmark_scale8.cpp — scale/performance baselines for the verification
 // platform (task G, Verification Platform 8.0). Run manually:
 //
-//   benchmark_scale8 --out benchmarks/scale8.json
+//   benchmark_scale8 --out benchmarks/scale8.json            (full tier)
+//   benchmark_scale8 --bench-quick --out benchmarks/scale8.json  (smoke tier)
 //
-// Measures (median of repeats; scale bounded by env, hard wall-clock caps):
+// Tiers (D10 verification-baseline-green):
+//   * full (default) — the documented scales (1k/10k/100k schedule, 100k
+//     dataset rows), env-overridable. Opt-in evidence for meaningful hosts;
+//     the ladder gives it a hard 1800 s wall budget.
+//   * quick — FIXED small iteration counts (nothing env-overridable),
+//     declared budget: completes in well under 120 s single-threaded. This
+//     is the routine smoke tier: proves the benchmark path executes and
+//     produces a valid tier-labelled artifact on any host. Evidence only —
+//     neither tier is a gate.
 //   * schedule_1k / schedule_10k / schedule_100k
 //       JobEngine short-task scheduling at the three documented scales
 //       (submit + waitForJob of instant callable jobs). Evidence for
@@ -112,17 +121,26 @@ QString writeSyntheticRaster( const QString &path, int width, int height )
 int main( int argc, char **argv )
 {
     std::string outPath = "benchmarks/scale8.json";
-    for ( int i = 1; i + 1 < argc; ++i )
-        if ( std::strcmp( argv[i], "--out" ) == 0 )
-            outPath = argv[i + 1];
+    bool quickTier = false;
+    for ( int i = 1; i < argc; ++i )
+    {
+        if ( std::strcmp( argv[i], "--out" ) == 0 && i + 1 < argc )
+            outPath = argv[ ++i ];
+        else if ( std::strcmp( argv[i], "--bench-quick" ) == 0 )
+            quickTier = true;
+    }
 
-    const int scheduleMax = envOr( "SICNU_BENCH_SCHEDULE_MAX", 100000 );
-    const std::set<int> scheduleSet = { 1000, 10000, scheduleMax };
+    // Quick tier: fixed small counts, deliberately NOT env-overridable —
+    // the smoke tier must be deterministic across hosts (D10).
+    const int scheduleMax = quickTier ? 1000 : envOr( "SICNU_BENCH_SCHEDULE_MAX", 100000 );
+    const std::set<int> scheduleSet = quickTier
+        ? std::set<int>{ 1000 }
+        : std::set<int>{ 1000, 10000, scheduleMax };
     std::vector<int> scheduleScales( scheduleSet.begin(), scheduleSet.end() );
     scheduleScales.erase( std::remove_if( scheduleScales.begin(), scheduleScales.end(),
                                           [ scheduleMax ]( int v ) { return v > scheduleMax; } ),
                           scheduleScales.end() );
-    const int datasetRows = envOr( "SICNU_BENCH_DATASET_ROWS", 100000 );
+    const int datasetRows = quickTier ? 2000 : envOr( "SICNU_BENCH_DATASET_ROWS", 100000 );
 
     std::vector<Measurement> results;
 
@@ -242,8 +260,9 @@ int main( int argc, char **argv )
         if ( reader.isOpen() )
         {
             constexpr int kWindow = 64;
+            const int rasterIters = quickTier ? 64 : 256;
             results.push_back(
-                medianOf( "raster_window_reads", 5, 256,
+                medianOf( "raster_window_reads", 5, rasterIters,
                           "64x64 readWindow walk over a 1024x1024 Float32 raster",
                           [ & ]( int n ) {
                               using clock3 = std::chrono::steady_clock;
@@ -279,7 +298,7 @@ int main( int argc, char **argv )
         options.queueCapacity = 4096;
         auto sink = std::make_shared<FileTraceSink>( options );
         Trace::install( sink );
-        constexpr int kEvents = 10000;
+        const int kEvents = quickTier ? 2000 : 10000;
         results.push_back(
             medianOf( "trace_file_sink_overhead", 5, kEvents,
                       "emit into a FileTraceSink (4 MiB rotation, 4096 queue)",
@@ -315,6 +334,7 @@ int main( int argc, char **argv )
         << "\",\n";
     out << "  \"cpu_cores\": " << std::max( 1u, std::thread::hardware_concurrency() ) << ",\n";
     out << "  \"build\": \"release\",\n";
+    out << "  \"tier\": \"" << ( quickTier ? "quick" : "full" ) << "\",\n";
     out << "  \"dataset_rows\": " << datasetRows << ",\n";
     out << "  \"note\": \"wall-clock evidence only — not a gate\",\n";
     out << "  \"measurements\": [\n";

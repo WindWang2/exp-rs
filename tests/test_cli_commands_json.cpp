@@ -5,6 +5,7 @@
 #include <json/json.h>
 
 #include "support/http_range_server.h"
+#include "support/offline_probe.h"
 
 #include <cstdio>
 #include <fstream>
@@ -47,6 +48,11 @@ Json::Value parseEnvelope( const std::string &text )
     return root;
 }
 } // namespace
+
+// ADR 0146: never die by timeout when the loopback transport is missing —
+// report `sicnu-skip: <reason>` + exit 77 instead.
+SICNU_OFFLINE_GUARD()
+
 
 TEST_CASE( "algorithms list produces the documented envelope", "[cli][json]" )
 {

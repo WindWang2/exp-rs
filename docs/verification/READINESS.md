@@ -1,10 +1,10 @@
 # Release Readiness — local verification evidence
 
-* Generated (UTC): 2026-09-10T21:43:07.554488+00:00
-* Git SHA: `95307764f1e92e105e0587241e1c35143089b4e3`
+* Generated (UTC): 2026-09-13T06:33:20.989892+00:00
+* Git SHA: `f0f6869b274c336513e75296fd6d204fcd4b7cfb`
 * Host: linux
-* **Overall: ATTENTION**
-* Counts: {"compiled": 30, "passed": 25, "failed": 1, "not_built": 0, "skipped": 0, "timeout": 4, "no_evidence": 0}
+* **Overall: READY**
+* Counts: {"compiled": 36, "passed": 36, "failed": 0, "not_built": 0, "skipped": 0, "timeout": 0, "no_evidence": 0}
 
 | Capability | Artifact | Compiled here | Executed status |
 |---|---|---|---|
@@ -23,9 +23,9 @@
 | trace-chain-8 | `test_trace_chain_8` | yes | passed |
 | io-uri | `test_io_uri` | yes | passed |
 | io-paths | `test_io_paths` | yes | passed |
-| io-range-cache | `test_io_range_cache` | yes | timeout |
-| io-remote-range | `test_io_remote_range` | yes | timeout |
-| io-remote-validator | `test_io_remote_validator` | yes | timeout |
+| io-range-cache | `test_io_range_cache` | yes | passed |
+| io-remote-range | `test_io_remote_range` | yes | passed |
+| io-remote-validator | `test_io_remote_validator` | yes | passed |
 | io-atomic-failures | `test_io_atomic_failures` | yes | passed |
 | io-raster-contract | `test_io_raster_contract` | yes | passed |
 | io-grid-descriptor | `test_io_grid_descriptor` | yes | passed |
@@ -35,33 +35,39 @@
 | concurrency-stress | `test_concurrency_stress` | yes | passed |
 | posix-fault-injection | `test_fault_injection` | yes | passed |
 | worker-host-lifecycle | `test_worker_host` | yes | passed |
-| visual-cartography | `test_mapspec` | yes | failed |
+| visual-cartography | `test_mapspec` | yes | passed |
 | bench-quality7 | `benchmark_quality7` | yes | passed |
-| bench-scale8 | `benchmark_scale8` | yes | timeout |
+| bench-scale8 | `benchmark_scale8` | yes | passed |
+| contract-graph | `test_contract_platform_9` | yes | passed |
+| contract-operator-projection | `test_contract_projection_9` | yes | passed |
+| contract-command-reference | `test_command_contract_9` | yes | passed |
+| contract-diagnostics-census | `test_diagnostics_contract_9` | yes | passed |
+| contract-capability-floors | `test_capability_contract_9` | yes | passed |
+| bench-contract9 | `benchmark_contract9` | yes | passed |
 
 ## Benchmarks (evidence snapshots, never gates)
 
 ### quality7 (schema exp.bench.quality7.v1)
 
-* `trace_id_generate`: 314302 ops/s (200000 iters)
-* `trace_ndjson_encode`: 341441 ops/s (200000 iters)
-* `trace_emit_disabled`: 12598300.0 ops/s (500000 iters)
-* `trace_emit_ring`: 177205 ops/s (200000 iters)
-* `fault_probe_disarmed`: 20280000.0 ops/s (500000 iters)
-* `condition_validate`: 187483 ops/s (100000 iters)
-* `condition_evaluate`: 109410 ops/s (200000 iters)
-* `resource_uri_parse`: 981256 ops/s (200000 iters)
-* `job_dispatch_roundtrip`: 2310300.0 ops/s (2000 iters)
+_tier: quick_
+* `trace_id_generate`: 671040 ops/s (20000 iters)
+* `trace_ndjson_encode`: 2094770.0 ops/s (20000 iters)
+* `trace_emit_disabled`: 41228600.0 ops/s (50000 iters)
+* `trace_emit_ring`: 602095 ops/s (20000 iters)
+* `fault_probe_disarmed`: 302704000.0 ops/s (50000 iters)
+* `condition_validate`: 1571980.0 ops/s (10000 iters)
+* `condition_evaluate`: 895187 ops/s (20000 iters)
+* `resource_uri_parse`: 2039400.0 ops/s (20000 iters)
+* `job_dispatch_roundtrip`: 4502480.0 ops/s (200 iters)
 
 ### scale8 (schema exp.bench.scale8.v1)
 
-* `schedule_1000`: 26214.7 ops/s (1000 iters)
-* `schedule_10000`: 388.946 ops/s (10000 iters)
-* `schedule_20000`: 104.587 ops/s (20000 iters)
-* `dataset_metadata_insert_20000`: 15006.6 ops/s (20000 iters)
-* `dataset_metadata_page_read`: 44.5734 ops/s (20 iters)
-* `raster_window_reads`: 152618 ops/s (256 iters)
-* `trace_file_sink_overhead`: 220437 ops/s (10000 iters)
+_tier: quick_
+* `schedule_1000`: 68975.9 ops/s (1000 iters)
+* `dataset_metadata_insert_2000`: 37360.3 ops/s (2000 iters)
+* `dataset_metadata_page_read`: 703.564 ops/s (2 iters)
+* `raster_window_reads`: 172830 ops/s (64 iters)
+* `trace_file_sink_overhead`: 558932 ops/s (2000 iters)
 
 ## Platform caveats
 

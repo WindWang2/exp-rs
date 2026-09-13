@@ -10,6 +10,7 @@
 #include "geospatial/raster/raster_reader.h"
 #include "geospatial/raster/raster_writer.h"
 #include "support/http_range_server.h"
+#include "support/offline_probe.h"
 
 #include <cpl_conv.h>
 #include <cstdio>
@@ -23,6 +24,10 @@
 namespace fs = std::filesystem;
 using namespace sicnu::geo;
 using sicnu::geo::testsupport::HttpRangeServer;
+
+// ADR 0146: never die by timeout when the loopback transport is missing —
+// report `sicnu-skip: <reason>` + exit 77 instead.
+SICNU_OFFLINE_GUARD()
 
 namespace
 {
@@ -201,4 +206,15 @@ TEST_CASE( "probeRemote refuses local paths — it is a remote-only contract",
     CHECK( error.code() == ErrorCode::InvalidArgument );
   }
   CHECK( threw );
+}
+
+// Regression guard (D10 default #7): the loopback proxy exemption is what
+// keeps /vsicurl/ fixture reads away from machine-room proxies; if the
+// hygiene pass regresses, this fails in seconds instead of hanging a lab
+// host. Wall-clock bound: trivially < 1 s.
+TEST_CASE( "offline guard keeps loopback exempt from proxies",
+           "[io][offline-guard]" )
+{
+  sicnu::testsupport::offline::ensureLoopbackProxyHygiene();
+  CHECK( sicnu::testsupport::offline::loopbackProxyExempted() );
 }
