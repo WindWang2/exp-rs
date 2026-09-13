@@ -54,7 +54,7 @@ RibbonMetrics computeRibbonMetrics( const QFontMetrics &fm )
   RibbonMetrics m;
   m.iconSize = qMax( 24, qMin( 32, fm.height() * 2 ) );
   m.largeBtnHeight = m.iconSize + ( fm.lineSpacing() * 2 ) + 10;
-  m.largeBtnMinWidth = qMax( 56, fm.horizontalAdvance( QStringLiteral( "四个汉字" ) ) + 12 );
+  m.largeBtnMinWidth = qMax( 56, fm.horizontalAdvance( QObject::tr("four Chinese characters") ) ) + 12 ;
   m.titleHeight = qMax( 16, fm.height() + 4 );
   m.pageHeight = m.largeBtnHeight + m.titleHeight + 12 + 4;
   return m;
@@ -108,7 +108,7 @@ void polishTabButton( QPushButton *btn )
   btn->setCursor( Qt::PointingHandCursor );
   const QFontMetrics fm = btn->fontMetrics();
   btn->setMinimumHeight( qMax( 28, fm.height() + 10 ) );
-  const int textW = btn->text().isEmpty() ? fm.horizontalAdvance( QStringLiteral( "标签" ) ) : fm.horizontalAdvance( btn->text() );
+  const int textW = btn->text().isEmpty() ? fm.horizontalAdvance( QObject::tr("Label") ) : fm.horizontalAdvance( btn->text() );
   btn->setMinimumWidth( qMax( 56, textW + 20 ) );
   btn->setObjectName( QStringLiteral( "rsRibbonTabButton" ) );
 }
@@ -419,7 +419,7 @@ void RibbonController::fillBandItems( QComboBox *combo, int bandCount, int selec
   }
   combo->setEnabled( true );
   for ( int b = 1; b <= bandCount; ++b )
-    combo->addItem( tr( "波段 %1" ).arg( b ), b );
+    combo->addItem( tr( "Band %1" ).arg( b ), b );
   const int idx = combo->findData( selectedBand );
   combo->setCurrentIndex( idx >= 0 ? idx : 0 );
 }
@@ -657,9 +657,9 @@ QWidget *RibbonController::createRibbonBar()
     return btn;
   };
 
-  addQatBtn( "new_project", tr( "新建工程" ), &QgisDesktopWindow::newProject );
-  addQatBtn( "o_en", tr( "打开工程" ), &QgisDesktopWindow::openProject );
-  addQatBtn( "s_ve", tr( "保存工程" ), &QgisDesktopWindow::saveProject );
+  addQatBtn( "new_project", tr( "New Project" ), &QgisDesktopWindow::newProject );
+  addQatBtn( "o_en", tr( "Open Project" ), &QgisDesktopWindow::openProject );
+  addQatBtn( "s_ve", tr( "Save Project" ), &QgisDesktopWindow::saveProject );
 
   auto *sep = new QFrame( tabRow );
   sep->setObjectName( QStringLiteral( "rsRibbonQatSep" ) );
@@ -668,7 +668,7 @@ QWidget *RibbonController::createRibbonBar()
   sep->setFixedHeight( 16 );
   tabLay->addWidget( sep );
 
-  addQatBtn( "hel_", tr( "偏好设置" ), &QgisDesktopWindow::options );
+  addQatBtn( "hel_", tr( "Preferences" ), &QgisDesktopWindow::options );
 
   auto *qatTabSep = new QFrame( tabRow );
   qatTabSep->setObjectName( QStringLiteral( "rsRibbonQatSep" ) );
@@ -709,20 +709,20 @@ QWidget *RibbonController::createRibbonBar()
   {
     QWidget *pageW = makeTabPage();
     QHBoxLayout *pl = pageLayoutOf( pageW );
-    auto g = addGroup( pl, tr( "工程" ) );
-    if ( auto *btn = addToolButton( g, tr( "新建" ), "new_project", tr( "新建空白工程" ) ) )
+    auto g = addGroup( pl, tr( "Project" ) );
+    if ( auto *btn = addToolButton( g, tr( "New" ), "new_project", tr( "New Empty Project" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::newProject );
-    if ( auto *btn = addToolButton( g, tr( "打开" ), "o_en", tr( "打开工程文件" ) ) )
+    if ( auto *btn = addToolButton( g, tr( "Open" ), "o_en", tr( "Open Project File" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openProject );
-    if ( auto *btn = addToolButton( g, tr( "保存" ), "s_ve", tr( "保存工程" ) ) )
+    if ( auto *btn = addToolButton( g, tr( "Save" ), "s_ve", tr( "Save Project" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::saveProject );
     addGroupSeparator( pl );
-    auto g2 = addGroup( pl, tr( "数据入口" ) );
-    if ( auto *btn = addToolButton( g2, tr( "导入" ), "i_ort", tr( "导入图层" ) ) )
+    auto g2 = addGroup( pl, tr( "Data Entry" ) );
+    if ( auto *btn = addToolButton( g2, tr( "Import" ), "i_ort", tr( "Import Layer" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::importLayer );
-    if ( auto *btn = addToolButton( g2, tr( "示例" ), "r_ster", tr( "加载教学示例数据" ) ) )
+    if ( auto *btn = addToolButton( g2, tr( "Example" ), "r_ster", tr( "Load Teaching Sample Data" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::loadSampleData );
-    addTab( tr( "工程" ), pageW, tr( "工程 - 工程文件操作（新建/打开/保存、导入、偏好）" ) );
+    addTab( tr( "Project" ), pageW, tr( "Project - Project file operations (new/open/save, import, preferences)" ) );
   }
 
   // ── 编辑（通用：撤销 / 剪贴板 / 选择，非矢量数字化）──────────────────
@@ -730,37 +730,37 @@ QWidget *RibbonController::createRibbonBar()
     QWidget *pageW = makeTabPage();
     QHBoxLayout *pl = pageLayoutOf( pageW );
 
-    auto history = addGroup( pl, tr( "历史" ) );
-    if ( auto *btn = addToolButton( history, tr( "撤销" ), "mActionToggleEditing",
-                                    tr( "撤销上一步 (Ctrl+Z)" ) ) )
+    auto history = addGroup( pl, tr( "History" ) );
+    if ( auto *btn = addToolButton( history, tr( "Undo" ), "mActionToggleEditing",
+                                    tr( "Undo (Ctrl+Z)" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::undo );
-    if ( auto *btn = addToolButton( history, tr( "重做" ), "mActionSaveEdits",
-                                    tr( "重做 (Ctrl+Y)" ) ) )
+    if ( auto *btn = addToolButton( history, tr( "Redo" ), "mActionSaveEdits",
+                                    tr( "Redo (Ctrl+Y)" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::redo );
 
     addGroupSeparator( pl );
-    auto clip = addGroup( pl, tr( "剪贴板" ) );
-    if ( auto *btn = addToolButton( clip, tr( "剪切" ), "cut_fill", tr( "剪切选中要素" ) ) )
+    auto clip = addGroup( pl, tr( "Clipboard" ) );
+    if ( auto *btn = addToolButton( clip, tr( "Cut" ), "cut_fill", tr( "Cut Selected Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::cutFeatures );
-    if ( auto *btn = addToolButton( clip, tr( "复制" ), "l_yer_st_ck", tr( "复制选中要素" ) ) )
+    if ( auto *btn = addToolButton( clip, tr( "Copy" ), "l_yer_st_ck", tr( "Copy Selected Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::copyFeatures );
-    if ( auto *btn = addToolButton( clip, tr( "粘贴" ), "i_ort", tr( "粘贴要素" ) ) )
+    if ( auto *btn = addToolButton( clip, tr( "Paste" ), "i_ort", tr( "Paste Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::pasteFeatures );
 
     addGroupSeparator( pl );
-    auto sel = addGroup( pl, tr( "选择" ) );
-    if ( auto *btn = addToolButton( sel, tr( "全选" ), "select", tr( "选择当前图层全部要素" ) ) )
+    auto sel = addGroup( pl, tr( "Select" ) );
+    if ( auto *btn = addToolButton( sel, tr( "Select All" ), "select", tr( "Select All Features of the Current Layer" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::selectAll );
-    if ( auto *btn = addToolButton( sel, tr( "选择" ), "mActionSelectRectangle",
-                                    tr( "矩形选择要素" ) ) )
+    if ( auto *btn = addToolButton( sel, tr( "Select" ), "mActionSelectRectangle",
+                                    tr( "Select Features by Rectangle" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::selectFeatures );
-    if ( auto *btn = addToolButton( sel, tr( "删除" ), "mActionDeleteSelectedFeatures",
-                                    tr( "删除选中要素" ) ) )
+    if ( auto *btn = addToolButton( sel, tr( "Delete" ), "mActionDeleteSelectedFeatures",
+                                    tr( "Delete Selected Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::deleteSelectedFeatures );
-    if ( auto *btn = addToolButton( sel, tr( "属性表" ), "t_ble", tr( "打开属性表" ) ) )
+    if ( auto *btn = addToolButton( sel, tr( "Attribute Table" ), "t_ble", tr( "Open Attribute Table" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openAttributeTable );
 
-    addTab( tr( "编辑" ), pageW, tr( "编辑 - 要素编辑与数字化工具" ) );
+    addTab( tr( "Edit" ), pageW, tr( "Edit - Feature Editing and Digitizing Tools" ) );
   }
 
   // ── 矢量编辑（数字化 / 几何修改 — 与「编辑」剪贴板分离）────────────────
@@ -768,63 +768,63 @@ QWidget *RibbonController::createRibbonBar()
     QWidget *pageW = makeTabPage();
     QHBoxLayout *pl = pageLayoutOf( pageW );
 
-    auto manage = addGroup( pl, tr( "会话" ) );
-    if ( auto *btn = addToolButton( manage, tr( "开始编辑" ), "mActionToggleEditing",
-                                    tr( "切换矢量图层编辑会话" ) ) )
+    auto manage = addGroup( pl, tr( "Session" ) );
+    if ( auto *btn = addToolButton( manage, tr( "Start Editing" ), "mActionToggleEditing",
+                                    tr( "Toggle the vector layer editing session" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::toggleEditing );
-    if ( auto *btn = addToolButton( manage, tr( "保存编辑" ), "mActionSaveEdits",
-                                    tr( "保存矢量编辑到数据源" ) ) )
+    if ( auto *btn = addToolButton( manage, tr( "Save Edits" ), "mActionSaveEdits",
+                                    tr( "Save Vector Edits to Data Source" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::saveEdits );
 
     addGroupSeparator( pl );
-    auto capture = addGroup( pl, tr( "要素" ) );
-    if ( auto *btn = addToolButton( capture, tr( "选择" ), "mActionSelectRectangle",
-                                    tr( "选择要素" ) ) )
+    auto capture = addGroup( pl, tr( "Features" ) );
+    if ( auto *btn = addToolButton( capture, tr( "Select" ), "mActionSelectRectangle",
+                                    tr( "Select Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::selectFeatures );
-    if ( auto *btn = addToolButton( capture, tr( "添加" ), "mActionCapturePoint",
-                                    tr( "添加要素" ) ) )
+    if ( auto *btn = addToolButton( capture, tr( "Add" ), "mActionCapturePoint",
+                                    tr( "Add Feature" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::addFeature );
-    if ( auto *btn = addToolButton( capture, tr( "节点" ), "mActionVertexTool",
-                                    tr( "节点工具" ) ) )
+    if ( auto *btn = addToolButton( capture, tr( "Node" ), "mActionVertexTool",
+                                    tr( "Node Tool" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::vertexTool );
 
     addGroupSeparator( pl );
-    auto reshape = addGroup( pl, tr( "修改" ) );
-    if ( auto *btn = addToolButton( reshape, tr( "移动" ), "mActionMoveFeature",
-                                    tr( "移动要素" ) ) )
+    auto reshape = addGroup( pl, tr( "Modify" ) );
+    if ( auto *btn = addToolButton( reshape, tr( "Move" ), "mActionMoveFeature",
+                                    tr( "Move Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::moveFeature );
-    if ( auto *btn = addToolButton( reshape, tr( "旋转" ), "mActionRotateFeature",
-                                    tr( "旋转要素" ) ) )
+    if ( auto *btn = addToolButton( reshape, tr( "Rotate" ), "mActionRotateFeature",
+                                    tr( "Rotate Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::rotateFeature );
-    if ( auto *btn = addToolButton( reshape, tr( "整形" ), "mActionReshape",
-                                    tr( "整形" ) ) )
+    if ( auto *btn = addToolButton( reshape, tr( "Reshape" ), "mActionReshape",
+                                    tr( "Reshape" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::reshapeGeometry );
-    if ( auto *btn = addToolButton( reshape, tr( "分割" ), "mActionSplitFeatures",
-                                    tr( "分割要素" ) ) )
+    if ( auto *btn = addToolButton( reshape, tr( "Segmentation" ), "mActionSplitFeatures",
+                                    tr( "Split Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::splitFeatures );
 
     addGroupSeparator( pl );
-    auto advanced = addGroup( pl, tr( "高级" ) );
-    if ( auto *btn = addToolButton( advanced, tr( "偏移" ), "mActionOffsetCurve",
-                                    tr( "偏移曲线" ) ) )
+    auto advanced = addGroup( pl, tr( "Advanced" ) );
+    if ( auto *btn = addToolButton( advanced, tr( "Offset" ), "mActionOffsetCurve",
+                                    tr( "Offset Curve" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::offsetCurve );
-    if ( auto *btn = addToolButton( advanced, tr( "简化" ), "mActionSimplify",
-                                    tr( "简化要素" ) ) )
+    if ( auto *btn = addToolButton( advanced, tr( "Simplify" ), "mActionSimplify",
+                                    tr( "Simplify Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::simplifyFeature );
-    if ( auto *btn = addToolButton( advanced, tr( "反向" ), "mActionReverseLine",
-                                    tr( "线反向" ) ) )
+    if ( auto *btn = addToolButton( advanced, tr( "Reverse" ), "mActionReverseLine",
+                                    tr( "Reverse Line" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::reverseLine );
-    if ( auto *btn = addToolButton( advanced, tr( "挖环" ), "mActionAddRing",
-                                    tr( "添加环" ) ) )
+    if ( auto *btn = addToolButton( advanced, tr( "Add Ring" ), "mActionAddRing",
+                                    tr( "Add Ring" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::addRing );
-    if ( auto *btn = addToolButton( advanced, tr( "填环" ), "mActionFillRing",
-                                    tr( "填充环" ) ) )
+    if ( auto *btn = addToolButton( advanced, tr( "Fill Ring" ), "mActionFillRing",
+                                    tr( "Fill Ring" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::fillRing );
-    if ( auto *btn = addToolButton( advanced, tr( "删部件" ), "mActionDeletePart",
-                                    tr( "删除部件" ) ) )
+    if ( auto *btn = addToolButton( advanced, tr( "Delete Part" ), "mActionDeletePart",
+                                    tr( "Delete Part" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::deletePart );
 
-    addTab( tr( "矢量编辑" ), pageW, tr( "矢量编辑 - 矢量数据处理与几何操作" ) );
+    addTab( tr( "Vector Editing" ), pageW, tr( "Vector Editing - Vector Data Processing and Geometry Operations" ) );
   }
 
   // ── 地图（导航 + 查询 + 波段合成下拉 + 外观）────────────────────────────
@@ -832,7 +832,7 @@ QWidget *RibbonController::createRibbonBar()
     QWidget *pageW = makeTabPage();
     QHBoxLayout *pl = pageLayoutOf( pageW );
 
-    auto nav = addGroup( pl, tr( "导航" ) );
+    auto nav = addGroup( pl, tr( "Navigation" ) );
     // Workbench 5.0: 地图 tab buttons are CommandRegistry projections —
     // enablement follows the selection context, handlers stay single.
     addCommandButton( nav, QStringLiteral( "map.pan" ) );
@@ -842,88 +842,88 @@ QWidget *RibbonController::createRibbonBar()
     addCommandButton( nav, QStringLiteral( "map.refresh" ) );
 
     addGroupSeparator( pl );
-    auto inquiry = addGroup( pl, tr( "查询" ) );
+    auto inquiry = addGroup( pl, tr( "Query" ) );
     addCommandButton( inquiry, QStringLiteral( "map.identify" ) );
     addCommandButton( inquiry, QStringLiteral( "map.measureDistance" ) );
     addCommandButton( inquiry, QStringLiteral( "map.measureArea" ) );
 
     addGroupSeparator( pl );
     // 波段合成：下拉选择（模式 / R G B / 灰度）
-    auto bands = addGroup( pl, tr( "波段合成" ) );
-    m_renderModeCombo = addComboBox( bands, tr( "模式" ),
-                                     tr( "RGB 真彩色 或 灰度单波段显示" ), 96 );
+    auto bands = addGroup( pl, tr( "Band Composition" ) );
+    m_renderModeCombo = addComboBox( bands, tr( "Mode" ),
+                                     tr( "RGB true color or single-band grayscale display" ), 96 );
     if ( m_renderModeCombo )
     {
-      m_renderModeCombo->addItem( tr( "RGB 真彩色" ), 0 );
-      m_renderModeCombo->addItem( tr( "灰度" ), 1 );
+      m_renderModeCombo->addItem( tr( "RGB true color" ), 0 );
+      m_renderModeCombo->addItem( tr( "Grayscale" ), 1 );
     }
-    m_redBandCombo = addComboBox( bands, tr( "红 R" ), tr( "红色通道使用的波段" ), 80 );
-    m_greenBandCombo = addComboBox( bands, tr( "绿 G" ), tr( "绿色通道使用的波段" ), 80 );
-    m_blueBandCombo = addComboBox( bands, tr( "蓝 B" ), tr( "蓝色通道使用的波段" ), 80 );
-    m_grayBandCombo = addComboBox( bands, tr( "灰度" ), tr( "灰度显示使用的波段" ), 80 );
+    m_redBandCombo = addComboBox( bands, tr( "Red R" ), tr( "Band used by the red channel" ), 80 );
+    m_greenBandCombo = addComboBox( bands, tr( "Green G" ), tr( "Band used by the green channel" ), 80 );
+    m_blueBandCombo = addComboBox( bands, tr( "Blue B" ), tr( "Band used by the blue channel" ), 80 );
+    m_grayBandCombo = addComboBox( bands, tr( "Grayscale" ), tr( "Band used for grayscale display" ), 80 );
 
     addGroupSeparator( pl );
     // 不透明度在底部状态栏（唯一入口），此处只留属性入口
-    auto look = addGroup( pl, tr( "外观" ) );
+    auto look = addGroup( pl, tr( "Appearance" ) );
     addCommandButton( look, QStringLiteral( "layer.properties" ) );
 
-    addTab( tr( "地图" ), pageW, tr( "地图 - 视图导航、图层管理与识别工具" ) )->setChecked( true );
+    addTab( tr( "Map" ), pageW, tr( "Map - View Navigation, Layer Management and Identify Tools" ) )->setChecked( true );
   }
 
   // ── 数据 ───────────────────────────────────────────────────────────────
   {
     QWidget *pageW = makeTabPage();
     QHBoxLayout *pl = pageLayoutOf( pageW );
-    auto catalog = addGroup( pl, tr( "数据目录" ) );
-    if ( auto *btn = addToolButton( catalog, tr( "数据管理" ), "d_t_b_se",
-                                    tr( "打开数据资产目录（Data Manager）" ) ) )
+    auto catalog = addGroup( pl, tr( "Data Catalog" ) );
+    if ( auto *btn = addToolButton( catalog, tr( "Data Management" ), "d_t_b_se",
+                                    tr( "Open the Data Asset Catalog (Data Manager)" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::showDataManagerPanel );
     addGroupSeparator( pl );
-    auto layer = addGroup( pl, tr( "添加图层" ) );
-    if ( auto *btn = addToolButton( layer, tr( "栅格" ), "r_ster", tr( "添加栅格图层" ) ) )
+    auto layer = addGroup( pl, tr( "Add Layer" ) );
+    if ( auto *btn = addToolButton( layer, tr( "Raster" ), "r_ster", tr( "Add Raster Layer" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::addRasterLayer );
-    if ( auto *btn = addToolButton( layer, tr( "矢量" ), "vector", tr( "添加矢量图层" ) ) )
+    if ( auto *btn = addToolButton( layer, tr( "Vector" ), "vector", tr( "Add Vector Layer" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::addVectorLayer );
-    if ( auto *btn = addToolButton( layer, tr( "STAC" ), "s_tellite", tr( "STAC 目录检索" ) ) )
+    if ( auto *btn = addToolButton( layer, tr( "STAC" ), "s_tellite", tr( "STAC Catalog Search" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::browseStacCatalog );
     addGroupSeparator( pl );
-    auto reg = addGroup( pl, tr( "配准" ) );
-    if ( auto *btn = addToolButton( reg, tr( "影像配准" ), "geocorrection", tr( "影像对影像" ) ) )
+    auto reg = addGroup( pl, tr( "Registration" ) );
+    if ( auto *btn = addToolButton( reg, tr( "Image Registration" ), "geocorrection", tr( "Image to Image" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openGeorefImageToImage );
-    if ( auto *btn = addToolButton( reg, tr( "图上配准" ), "geocorrection", tr( "影像对地图" ) ) )
+    if ( auto *btn = addToolButton( reg, tr( "On-Map Registration" ), "geocorrection", tr( "Image to Map" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openGeorefImageToMap );
-    addTab( tr( "数据" ), pageW, tr( "数据 - 数据资产目录与数据管理" ) );
+    addTab( tr( "Data" ), pageW, tr( "Data - Data Asset Catalog and Data Management" ) );
   }
 
   // ── 预处理 ─────────────────────────────────────────────────────────────
   {
     QWidget *pageW = makeTabPage();
     QHBoxLayout *pl = pageLayoutOf( pageW );
-    auto prep = addGroup( pl, tr( "预处理" ) );
-    if ( auto *btn = addToolButton( prep, tr( "大气校正" ), "at_os_corr", tr( "大气 / 辐射校正" ) ) )
+    auto prep = addGroup( pl, tr( "Preprocessing" ) );
+    if ( auto *btn = addToolButton( prep, tr( "Atmospheric Correction" ), "at_os_corr", tr( "Atmospheric / Radiometric Correction" ) ) )
       connect( btn, &QToolButton::clicked, this, [this]() {
         emit openWorkflowTool( QStringLiteral( "tool.rs.atmospheric_correction" ) );
       } );
-    if ( auto *btn = addToolButton( prep, tr( "影像融合" ), "p_nsh_r_en", tr( "全色 + 多光谱融合" ) ) )
+    if ( auto *btn = addToolButton( prep, tr( "Image Fusion" ), "p_nsh_r_en", tr( "Panchromatic + multispectral fusion" ) ) )
       connect( btn, &QToolButton::clicked, this, [this]() {
         emit openWorkflowTool( QStringLiteral( "tool.rs.image_fusion" ) );
       } );
-    if ( auto *btn = addToolButton( prep, tr( "镶嵌" ), "mos_ic", tr( "多景镶嵌" ) ) )
+    if ( auto *btn = addToolButton( prep, tr( "Mosaic" ), "mos_ic", tr( "Multi-Scene Mosaic" ) ) )
       connect( btn, &QToolButton::clicked, this, [this]() {
         emit openWorkflowTool( QStringLiteral( "tool.rs.mosaic" ) );
       } );
-    if ( auto *btn = addToolButton( prep, tr( "斑点滤波" ), "sar_process", tr( "SAR 斑点滤波" ) ) )
+    if ( auto *btn = addToolButton( prep, tr( "Speckle Filtering" ), "sar_process", tr( "SAR Speckle Filtering" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openSpeckleFilterDialog );
-    addTab( tr( "预处理" ), pageW, tr( "预处理 - 辐射/大气校正、配准、融合、裁剪" ) );
+    addTab( tr( "Preprocessing" ), pageW, tr( "Preprocessing - Radiometric/Atmospheric Correction, Registration, Fusion, Clipping" ) );
   }
 
   // ── 增强 ───────────────────────────────────────────────────────────────
   {
     QWidget *pageW = makeTabPage();
     QHBoxLayout *pl = pageLayoutOf( pageW );
-    auto adj = addGroup( pl, tr( "显示调整" ) );
-    if ( QSlider *brightness = addSlider( adj, tr( "亮度" ), -100, 100, 0,
-                                          tr( "当前栅格显示亮度" ) ) )
+    auto adj = addGroup( pl, tr( "Display Adjustment" ) );
+    if ( QSlider *brightness = addSlider( adj, tr( "Brightness" ), -100, 100, 0,
+                                          tr( "Current raster display brightness" ) ) )
     {
       connect( brightness, &QSlider::valueChanged, m_window, [this]( int v ) {
         if ( auto *layer = currentRasterLayer() )
@@ -936,8 +936,8 @@ QWidget *RibbonController::createRibbonBar()
         }
       } );
     }
-    if ( QSlider *contrast = addSlider( adj, tr( "对比度" ), -100, 100, 0,
-                                        tr( "当前栅格显示对比度" ) ) )
+    if ( QSlider *contrast = addSlider( adj, tr( "Contrast" ), -100, 100, 0,
+                                        tr( "Current raster display contrast" ) ) )
     {
       connect( contrast, &QSlider::valueChanged, m_window, [this]( int v ) {
         if ( auto *layer = currentRasterLayer() )
@@ -951,82 +951,82 @@ QWidget *RibbonController::createRibbonBar()
       } );
     }
     addGroupSeparator( pl );
-    auto tools = addGroup( pl, tr( "拉伸与滤波" ) );
-    if ( auto *btn = addToolButton( tools, tr( "显示拉伸" ), "enh_nce",
-                                    tr( "仅改显示对比度，不写出文件" ) ) )
+    auto tools = addGroup( pl, tr( "Stretch and Filtering" ) );
+    if ( auto *btn = addToolButton( tools, tr( "Display Stretch" ), "enh_nce",
+                                    tr( "Changes display contrast only; no file is written" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openDisplayStretchPanel );
-    if ( auto *btn = addToolButton( tools, tr( "对比度写出" ), "enh_nce",
-                                    tr( "拉伸并导出 GeoTIFF" ) ) )
+    if ( auto *btn = addToolButton( tools, tr( "Write Contrast" ), "enh_nce",
+                                    tr( "Stretch and Export GeoTIFF" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openContrastStretchDialog );
-    if ( auto *btn = addToolButton( tools, tr( "空间滤波" ), "destri_ing", tr( "平滑 / 锐化" ) ) )
+    if ( auto *btn = addToolButton( tools, tr( "Spatial Filtering" ), "destri_ing", tr( "Smoothing / Sharpening" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openSpatialFilterDialog );
-    if ( auto *btn = addToolButton( tools, tr( "增强面板" ), "enh_nce", tr( "影像增强综合面板" ) ) )
+    if ( auto *btn = addToolButton( tools, tr( "Enhancement Panel" ), "enh_nce", tr( "Combined Image Enhancement Panel" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openImageEnhancementPanel );
-    addTab( tr( "增强" ), pageW, tr( "增强 - 影像增强、拉伸、滤波、波段运算" ) );
+    addTab( tr( "Enhancement" ), pageW, tr( "Enhancement - Image Enhancement, Stretch, Filtering, Band Math" ) );
   }
 
   // ── 分析 ───────────────────────────────────────────────────────────────
   {
     QWidget *pageW = makeTabPage();
     QHBoxLayout *pl = pageLayoutOf( pageW );
-    auto spectral = addGroup( pl, tr( "光谱" ) );
-    if ( auto *btn = addToolButton( spectral, tr( "光谱指数" ), "veget_tion_index",
-                                    tr( "NDVI / EVI 等" ) ) )
+    auto spectral = addGroup( pl, tr( "Spectrum" ) );
+    if ( auto *btn = addToolButton( spectral, tr( "Spectral Indices" ), "veget_tion_index",
+                                    tr( "NDVI / EVI, etc." ) ) )
       connect( btn, &QToolButton::clicked, this, [this]() {
         emit openWorkflowTool( QStringLiteral( "tool.rs.spectral_index" ) );
       } );
-    if ( auto *btn = addToolButton( spectral, tr( "波段运算" ), "b_nd_m_th", tr( "波段表达式" ) ) )
+    if ( auto *btn = addToolButton( spectral, tr( "Band Math" ), "b_nd_m_th", tr( "Band Expression" ) ) )
       connect( btn, &QToolButton::clicked, this, [this]() {
         emit openWorkflowTool( QStringLiteral( "tool.rs.band_math" ) );
       } );
-    if ( auto *btn = addToolButton( spectral, tr( "主成分" ), "pca", tr( "PCA" ) ) )
+    if ( auto *btn = addToolButton( spectral, tr( "Principal Component" ), "pca", tr( "PCA" ) ) )
       connect( btn, &QToolButton::clicked, this, [this]() {
         emit openWorkflowTool( QStringLiteral( "tool.rs.pca" ) );
       } );
     addGroupSeparator( pl );
-    auto spatial = addGroup( pl, tr( "空间分析" ) );
-    if ( auto *btn = addToolButton( spatial, tr( "变化检测" ), "ch_nge_detect", tr( "两期变化" ) ) )
+    auto spatial = addGroup( pl, tr( "Spatial Analysis" ) );
+    if ( auto *btn = addToolButton( spatial, tr( "Change Detection" ), "ch_nge_detect", tr( "Two-Date Change" ) ) )
       connect( btn, &QToolButton::clicked, this, [this]() {
         emit openWorkflowTool( QStringLiteral( "tool.rs.change_detection" ) );
       } );
-    if ( auto *btn = addToolButton( spatial, tr( "地形" ), "dem", tr( "坡度 / 坡向" ) ) )
+    if ( auto *btn = addToolButton( spatial, tr( "Terrain" ), "dem", tr( "Slope / Aspect" ) ) )
       connect( btn, &QToolButton::clicked, this, [this]() {
         emit openWorkflowTool( QStringLiteral( "tool.rs.terrain_analysis" ) );
       } );
-    addTab( tr( "分析" ), pageW, tr( "分析 - 光谱指数、变化检测、地形、分类" ) );
+    addTab( tr( "Analysis" ), pageW, tr( "Analysis - Spectral Indices, Change Detection, Terrain, Classification" ) );
   }
 
   // ── 分类 ───────────────────────────────────────────────────────────────
   {
     QWidget *pageW = makeTabPage();
     QHBoxLayout *pl = pageLayoutOf( pageW );
-    auto cls = addGroup( pl, tr( "分类" ) );
-    if ( auto *btn = addToolButton( cls, tr( "监督分类" ), "su_ervised", tr( "像元级监督分类" ) ) )
+    auto cls = addGroup( pl, tr( "Classification" ) );
+    if ( auto *btn = addToolButton( cls, tr( "Supervised Classification" ), "su_ervised", tr( "Pixel-Level Supervised Classification" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openClassificationWindow );
-    if ( auto *btn = addToolButton( cls, tr( "对象分类" ), "seg_ent_tion", tr( "面向对象 OBIA" ) ) )
+    if ( auto *btn = addToolButton( cls, tr( "Object Classification" ), "seg_ent_tion", tr( "Object-Based (OBIA)" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::openObiaWindow );
-    addTab( tr( "分类" ), pageW, tr( "分类 - 监督/非监督分类与精度评价" ) );
+    addTab( tr( "Classification" ), pageW, tr( "Classification - Supervised/Unsupervised and Accuracy Assessment" ) );
   }
 
   // ── 制图 ───────────────────────────────────────────────────────────────
   {
     QWidget *pageW = makeTabPage();
     QHBoxLayout *pl = pageLayoutOf( pageW );
-    auto map = addGroup( pl, tr( "输出" ) );
-    if ( auto *btn = addToolButton( map, tr( "打印布局" ), "print_l_yout", tr( "新建打印布局" ) ) )
+    auto map = addGroup( pl, tr( "Outputs" ) );
+    if ( auto *btn = addToolButton( map, tr( "Print Layout" ), "print_l_yout", tr( "New Print Layout" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::newLayout );
-    if ( auto *btn = addToolButton( map, tr( "卷帘对比" ), "l_yer_st_ck", tr( "卷帘对比图层" ) ) )
+    if ( auto *btn = addToolButton( map, tr( "Swipe Comparison" ), "l_yer_st_ck", tr( "Swipe Comparison Layer" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::toggleSwipeTool );
-    addTab( tr( "制图" ), pageW, tr( "制图 - 布局设计与制图输出" ) );
+    addTab( tr( "Cartography" ), pageW, tr( "Cartography - Layout Design and Map Output" ) );
   }
 
   // ── 任务 ───────────────────────────────────────────────────────────────
   {
     QWidget *pageW = makeTabPage();
     QHBoxLayout *pl = pageLayoutOf( pageW );
-    auto jobs = addGroup( pl, tr( "作业" ) );
-    if ( auto *btn = addToolButton( jobs, tr( "任务中心" ), "b_tch_queue",
-                                    tr( "队列、进度与日志" ) ) )
+    auto jobs = addGroup( pl, tr( "Jobs" ) );
+    if ( auto *btn = addToolButton( jobs, tr( "Task Center" ), "b_tch_queue",
+                                    tr( "Queue, Progress and Log" ) ) )
     {
       connect( btn, &QToolButton::clicked, m_window, [this]() {
         // Sole product task list: bottom RsJobPanel.
@@ -1037,11 +1037,11 @@ QWidget *RibbonController::createRibbonBar()
         }
       } );
     }
-    if ( auto *btn = addToolButton( jobs, tr( "处理历史" ), "log_viewer", tr( "处理历史" ) ) )
+    if ( auto *btn = addToolButton( jobs, tr( "Processing History" ), "log_viewer", tr( "Processing History" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::showProcessingHistory );
-    if ( auto *btn = addToolButton( jobs, tr( "工具箱" ), "model_builder", tr( "处理工具箱" ) ) )
+    if ( auto *btn = addToolButton( jobs, tr( "Toolbox" ), "model_builder", tr( "Processing Toolbox" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::showProcessingToolbox );
-    addTab( tr( "任务" ), pageW, tr( "任务 - 任务中心、处理历史与批量" ) );
+    addTab( tr( "Tasks" ), pageW, tr( "Tasks - Task Center, Processing History and Batch" ) );
   }
 
   // --- TAB: 流程 (Workflow Editor & Execution) ---
@@ -1049,8 +1049,8 @@ QWidget *RibbonController::createRibbonBar()
     QWidget *pageW = makeTabPage();
     QHBoxLayout *pLayout = pageLayoutOf( pageW );
 
-    GroupHost editGrp = addGroup( pLayout, tr( "流程编辑" ) );
-    if ( auto *btn = addToolButton( editGrp, tr( "新建流程" ), "file_new", tr( "新建空白工作流画布" ) ) )
+    GroupHost editGrp = addGroup( pLayout, tr( "Pipeline Editing" ) );
+    if ( auto *btn = addToolButton( editGrp, tr( "New Pipeline" ), "file_new", tr( "New empty workflow canvas" ) ) )
     {
       connect( btn, &QToolButton::clicked, m_window, [this]() {
         if ( auto *dock = m_window->findChild<QDockWidget *>( QStringLiteral( "rsPipelineEditorDock" ) ) )
@@ -1060,7 +1060,7 @@ QWidget *RibbonController::createRibbonBar()
         }
       } );
     }
-    if ( auto *btn = addToolButton( editGrp, tr( "打开流程" ), "file_open", tr( "打开工作流 JSON 定义" ) ) )
+    if ( auto *btn = addToolButton( editGrp, tr( "Open Pipeline" ), "file_open", tr( "Open Workflow JSON Definition" ) ) )
     {
       connect( btn, &QToolButton::clicked, m_window, [this]() {
         if ( auto *dock = m_window->findChild<sicnu::workflow::gui::PipelineEditorDock *>( QStringLiteral( "rsPipelineEditorDock" ) ) )
@@ -1076,7 +1076,7 @@ QWidget *RibbonController::createRibbonBar()
         }
       } );
     }
-    if ( auto *btn = addToolButton( editGrp, tr( "流程编辑器" ), "model_builder", tr( "显示/隐藏工作流图形编辑器" ) ) )
+    if ( auto *btn = addToolButton( editGrp, tr( "Pipeline Editor" ), "model_builder", tr( "Show/hide the workflow graphical editor" ) ) )
     {
       connect( btn, &QToolButton::clicked, m_window, [this]() {
         if ( auto *dock = m_window->findChild<QDockWidget *>( QStringLiteral( "rsPipelineEditorDock" ) ) )
@@ -1088,8 +1088,8 @@ QWidget *RibbonController::createRibbonBar()
       } );
     }
 
-    GroupHost execGrp = addGroup( pLayout, tr( "流程控制" ) );
-    if ( auto *btn = addToolButton( execGrp, tr( "运行全流程" ), "task_run", tr( "按 DAG 拓扑顺序顺序执行全流程" ) ) )
+    GroupHost execGrp = addGroup( pLayout, tr( "Pipeline Control" ) );
+    if ( auto *btn = addToolButton( execGrp, tr( "Run Full Pipeline" ), "task_run", tr( "Runs the whole pipeline in DAG topological order" ) ) )
     {
       connect( btn, &QToolButton::clicked, m_window, [this]() {
         if ( auto *dock = m_window->findChild<sicnu::workflow::gui::PipelineEditorDock *>( QStringLiteral( "rsPipelineEditorDock" ) ) )
@@ -1100,7 +1100,7 @@ QWidget *RibbonController::createRibbonBar()
         }
       } );
     }
-    if ( auto *btn = addToolButton( execGrp, tr( "停止运行" ), "task_cancel", tr( "停止当前正在运行的工作流" ) ) )
+    if ( auto *btn = addToolButton( execGrp, tr( "Stop Run" ), "task_cancel", tr( "Stop the currently running workflow" ) ) )
     {
       connect( btn, &QToolButton::clicked, m_window, [this]() {
         if ( auto *dock = m_window->findChild<sicnu::workflow::gui::PipelineEditorDock *>( QStringLiteral( "rsPipelineEditorDock" ) ) )
@@ -1110,7 +1110,7 @@ QWidget *RibbonController::createRibbonBar()
       } );
     }
 
-    addTab( tr( "流程" ), pageW, tr( "流程 - 工作流编辑器与模型构建" ) );
+    addTab( tr( "Pipeline" ), pageW, tr( "Pipeline - Workflow Editor and Model Building" ) );
   }
 
   tabLay->addStretch( 1 );
@@ -1122,9 +1122,9 @@ QWidget *RibbonController::createRibbonBar()
   auto *helpBtn = new QToolButton( tabRow );
   polishSmallButton( helpBtn );
   helpBtn->setText( tr( "?" ) );
-  helpBtn->setToolTip( tr( "帮助内容（打开帮助文档）" ) );
-  helpBtn->setStatusTip( tr( "打开帮助文档" ) );
-  helpBtn->setWhatsThis( tr( "帮助内容（打开帮助文档）。按 Shift+F1 后点击任意控件可查看该控件的说明。" ) );
+  helpBtn->setToolTip( tr( "Help content (opens the help document)" ) );
+  helpBtn->setStatusTip( tr( "Open Help Document" ) );
+  helpBtn->setWhatsThis( tr( "Help content (opens the help document). Press Shift+F1 and click any widget to see its explanation." ) );
   helpBtn->setToolButtonStyle( Qt::ToolButtonTextOnly );
   connect( helpBtn, &QToolButton::clicked, m_window, &QgisDesktopWindow::helpContents );
   tabLay->addWidget( helpBtn );
@@ -1135,7 +1135,7 @@ QWidget *RibbonController::createRibbonBar()
   collapseBtn->setAutoRaise( true );
   collapseBtn->setCursor( Qt::PointingHandCursor );
   collapseBtn->setFocusPolicy( Qt::StrongFocus );
-  collapseBtn->setToolTip( tr( "收起功能区 (Ctrl+F1)" ) );
+  collapseBtn->setToolTip( tr( "Collapse Ribbon (Ctrl+F1)" ) );
   collapseBtn->setShortcut( QKeySequence( Qt::CTRL | Qt::Key_F1 ) );
   collapseBtn->setFixedSize( 28, 24 );
   tabLay->addWidget( collapseBtn );
@@ -1195,7 +1195,7 @@ void RibbonController::setRibbonCollapsed( bool collapsed )
   if ( m_collapseBtn )
   {
     m_collapseBtn->setArrowType( collapsed ? Qt::DownArrow : Qt::UpArrow );
-    m_collapseBtn->setToolTip( collapsed ? tr( "展开功能区 (Ctrl+F1)" ) : tr( "收起功能区 (Ctrl+F1)" ) );
+    m_collapseBtn->setToolTip( collapsed ? tr( "Expand Ribbon (Ctrl+F1)" ) : tr( "Collapse Ribbon (Ctrl+F1)" ) );
   }
   // Persist alongside the dock-layout state (restored in setupRibbonAndTaskPanel).
   QSettings settings;

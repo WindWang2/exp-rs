@@ -19,7 +19,7 @@ CrsSelector::CrsSelector( QWidget *parent )
   layout->addWidget( m_edit, 1 );
 
   m_browseButton = new QPushButton( tr( "…" ), this );
-  m_browseButton->setToolTip( tr( "从投影选择器选择 CRS。" ) );
+  m_browseButton->setToolTip( tr( "Choose the CRS from the projection selector." ) );
   layout->addWidget( m_browseButton );
 
   connect( m_browseButton, &QPushButton::clicked, this, &CrsSelector::browse );

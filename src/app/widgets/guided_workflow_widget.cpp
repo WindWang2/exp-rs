@@ -25,7 +25,7 @@ void GuidedWorkflowWidget::setupUi()
     mainLayout->setContentsMargins(4, 4, 4, 4);
 
     // Title
-    auto *titleLabel = new QLabel(tr("<b>引导式工作流</b>"), this);
+    auto *titleLabel = new QLabel(tr("<b>Guided Workflow</b>"), this);
     titleLabel->setAlignment(Qt::AlignCenter);
     mainLayout->addWidget(titleLabel);
 
@@ -38,14 +38,14 @@ void GuidedWorkflowWidget::setupUi()
     auto *leftLayout = new QVBoxLayout(leftWidget);
     leftLayout->setContentsMargins(0, 0, 0, 0);
 
-    leftLayout->addWidget(new QLabel(tr("选择工作流："), this));
+    leftLayout->addWidget(new QLabel(tr("Select workflow:"), this));
     m_workflowList = new QListWidget(this);
-    m_workflowList->setToolTip(tr("选择一个引导式工作流。" ));
+    m_workflowList->setToolTip(tr("Choose a guided workflow." ));
     connect(m_workflowList, &QListWidget::currentRowChanged, this, &GuidedWorkflowWidget::onWorkflowSelected);
     leftLayout->addWidget(m_workflowList);
 
-    m_startButton = new QPushButton(tr("开始工作流"), this);
-    m_startButton->setToolTip(tr("开始所选工作流。" ));
+    m_startButton = new QPushButton(tr("Start Workflow"), this);
+    m_startButton->setToolTip(tr("Starts the selected workflow." ));
     m_startButton->setEnabled(false);
     connect(m_startButton, &QPushButton::clicked, this, &GuidedWorkflowWidget::onStartWorkflow);
     leftLayout->addWidget(m_startButton);
@@ -66,21 +66,21 @@ void GuidedWorkflowWidget::setupUi()
 
     // Navigation buttons
     auto *navLayout = new QHBoxLayout();
-    m_prevButton = new QPushButton(tr("上一步"), this);
-    m_prevButton->setToolTip(tr("返回上一个步骤。" ));
+    m_prevButton = new QPushButton(tr("Previous Step"), this);
+    m_prevButton->setToolTip(tr("Returns to the previous step." ));
     m_prevButton->setEnabled(false);
     connect(m_prevButton, &QPushButton::clicked, this, &GuidedWorkflowWidget::onPreviousStep);
     navLayout->addWidget(m_prevButton);
 
-    m_runButton = new QPushButton(tr("执行此步"), this);
-    m_runButton->setToolTip(tr("执行当前步骤的操作。" ));
+    m_runButton = new QPushButton(tr("Run This Step"), this);
+    m_runButton->setToolTip(tr("Runs the current step's action." ));
     m_runButton->setEnabled(false);
     m_runButton->setProperty("primary", true);
     connect(m_runButton, &QPushButton::clicked, this, &GuidedWorkflowWidget::onRunStepAction);
     navLayout->addWidget(m_runButton);
 
-    m_nextButton = new QPushButton(tr("下一步"), this);
-    m_nextButton->setToolTip(tr("完成当前步骤后进入下一步。" ));
+    m_nextButton = new QPushButton(tr("Next Step"), this);
+    m_nextButton->setToolTip(tr("Continue to the next step after finishing the current one." ));
     m_nextButton->setEnabled(false);
     connect(m_nextButton, &QPushButton::clicked, this, &GuidedWorkflowWidget::onNextStep);
     navLayout->addWidget(m_nextButton);
@@ -246,7 +246,7 @@ Workflow GuidedWorkflowWidget::createSpectralAnalysisWorkflow()
 {
     Workflow wf;
     wf.id = "spectral_analysis";
-    wf.title = tr("Spectral Analysis (光谱分析)");
+    wf.title = tr("Spectral Analysis");
     wf.description = tr("Learn to analyze spectral characteristics of different land cover types "
                         "using vegetation indices and band math.");
 
@@ -345,7 +345,7 @@ Workflow GuidedWorkflowWidget::createImageEnhancementWorkflow()
 {
     Workflow wf;
     wf.id = "image_enhancement";
-    wf.title = tr("Image Enhancement (影像增强)");
+    wf.title = tr("Image Enhancement");
     wf.description = tr("Learn contrast enhancement and spatial filtering techniques.");
 
     // Step 1: Load data
@@ -400,7 +400,7 @@ Workflow GuidedWorkflowWidget::createClassificationWorkflow()
 {
     Workflow wf;
     wf.id = "classification";
-    wf.title = tr("Image Classification (影像分类)");
+    wf.title = tr("Image Classification");
     wf.description = tr("Learn supervised and unsupervised classification methods.");
 
     // Step 1: Load data
@@ -452,7 +452,7 @@ Workflow GuidedWorkflowWidget::createChangeDetectionWorkflow()
 {
     Workflow wf;
     wf.id = "change_detection";
-    wf.title = tr("Change Detection (变化检测)");
+    wf.title = tr("Change Detection");
     wf.description = tr("Detect changes between two time periods.");
 
     // Step 1: Load data
@@ -503,7 +503,7 @@ Workflow GuidedWorkflowWidget::createTerrainAnalysisWorkflow()
 {
     Workflow wf;
     wf.id = "terrain_analysis";
-    wf.title = tr("Terrain Analysis (地形分析)");
+    wf.title = tr("Terrain Analysis");
     wf.description = tr("Analyze terrain characteristics from DEM data.");
 
     // Step 1: Load DEM
@@ -554,7 +554,7 @@ Workflow GuidedWorkflowWidget::createAtmosphericCorrectionWorkflow()
 {
     Workflow wf;
     wf.id = "atmospheric_correction";
-    wf.title = tr("Atmospheric Correction (大气校正)");
+    wf.title = tr("Atmospheric Correction");
     wf.description = tr("Remove atmospheric effects from satellite imagery using DOS methods.");
 
     // Step 1: Load data
@@ -606,7 +606,7 @@ Workflow GuidedWorkflowWidget::createImageFusionWorkflow()
 {
     Workflow wf;
     wf.id = "image_fusion";
-    wf.title = tr("Image Fusion (影像融合)");
+    wf.title = tr("Image Fusion");
     wf.description = tr("Combine high-resolution panchromatic with multispectral imagery.");
 
     // Step 1: Explain the concept
@@ -673,7 +673,7 @@ Workflow GuidedWorkflowWidget::createPCAWorkflow()
 {
     Workflow wf;
     wf.id = "pca_analysis";
-    wf.title = tr("PCA Analysis (主成分分析)");
+    wf.title = tr("PCA Analysis");
     wf.description = tr("Dimensionality reduction using Principal Component Analysis.");
 
     // Step 1: Load data
@@ -725,7 +725,7 @@ Workflow GuidedWorkflowWidget::createMosaicWorkflow()
 {
     Workflow wf;
     wf.id = "mosaic";
-    wf.title = tr("Image Mosaic (影像镶嵌)");
+    wf.title = tr("Image Mosaic");
     wf.description = tr("Combine multiple images into a single mosaic.");
 
     // Step 1: Explain concept
@@ -796,8 +796,8 @@ Workflow GuidedWorkflowWidget::createObiaWorkflow()
                               "<li>Adjust segmentation parameters if needed, then click <b>Segment</b> (or hierarchical segment)</li>"
                               "<li>Click objects on the map and assign classes, or use <b>Import ROI</b></li>"
                               "<li>Choose a classifier and click <b>Classify</b></li>"
-                              "<li>Review <b>精度评价</b> (training OA / Kappa / confusion matrix)</li>"
-                              "<li>Click <b>加载到主图</b> to place the result on the main canvas</li>"
+                              "<li>Review <b>Accuracy Assessment</b> (training OA / Kappa / confusion matrix)</li>"
+                              "<li>Click <b>Load to Main View</b> to place the result on the main canvas</li>"
                               "<li>Optional: <b>Export</b> polygons from the class raster</li>"
                               "</ol>"
                               "<p>When OTB is installed, MeanShift is preferred; otherwise a built-in segmenter is used. "

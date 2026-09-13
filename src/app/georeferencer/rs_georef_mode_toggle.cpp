@@ -20,12 +20,12 @@ RsGeorefModeToggle::RsGeorefModeToggle( QWidget *parent )
   const QStringList labels = {
     tr( "Image → Map" ),
     tr( "Image → Image" ),
-    tr( "RPC 物理模型" )
+    tr( "RPC Physical Model" )
   };
   const QStringList tips = {
-    tr( "影像对地图配准：在影像上选点并输入地理坐标。" ),
-    tr( "影像对影像配准：在待校正影像与参考影像上选同名点。" ),
-    tr( "RPC 物理模型：使用有理多项式系数进行物理模型校正。" )
+    tr( "Image-to-map registration: pick points on the image and enter geographic coordinates." ),
+    tr( "Image-to-image registration: pick conjugate points on the image to correct and the reference image." ),
+    tr( "RPC physical model: correction using rational polynomial coefficients." )
   };
 
   for ( int i = 0; i < labels.size(); ++i )

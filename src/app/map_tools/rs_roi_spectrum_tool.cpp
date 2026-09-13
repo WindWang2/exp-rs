@@ -89,7 +89,7 @@ void RsRoiSpectrumTool::finishPolygon()
   {
     if ( m_onResult )
       m_onResult( {}, {}, {},
-                  tr( "ROI 需要至少 3 个点且栅格图层有效。" ) );
+                  tr( "An ROI needs at least 3 points and a valid raster layer." ) );
     return;
   }
 
@@ -155,7 +155,7 @@ void RsRoiSpectrumTool::finishPolygon()
       if ( hasDs )
         label = ds.bandDescription( b );
       if ( label.isEmpty() )
-        label = QObject::tr( "波段 %1" ).arg( b );
+        label = QObject::tr( "Band %1" ).arg( b );
       res.labels.append( label );
     }
 

@@ -36,6 +36,8 @@ qt_add_library(sicnu_help STATIC
   help_topic_text.h
   help_markdown_writer.cpp
   help_markdown_writer.h
+  terminology_provider.cpp
+  terminology_provider.h
   # NOTE: help_content.qrc is intentionally NOT compiled into this static
   # library — resource initializers in static libs are dropped by the linker.
   # Executables that need the embedded knowledge layer list

@@ -46,8 +46,8 @@ bool WorkbenchRules::importIsPrimaryAction( const WorkbenchFacts &facts )
 QString WorkbenchRules::phaseSummary( const WorkbenchFacts &facts )
 {
   if ( facts.phase == ProjectPhase::Empty )
-    return QObject::tr( "工作区为空 — 导入数据开始" );
-  return QObject::tr( "工作区包含 %1 个图层" ).arg( facts.layerCount );
+    return QObject::tr( "Workspace is empty — import data to start" );
+  return QObject::tr( "Workspace contains %1 layers" ).arg( facts.layerCount );
 }
 
 // ── WorkbenchStateModel ─────────────────────────────────────────────────────

@@ -20,7 +20,9 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QDateTime>
+#include <QLocale>
 #include <QStyleFactory>
+#include <QTranslator>
 #include <QToolBar>
 #include <QToolButton>
 #include <QSplitter>
@@ -94,6 +96,39 @@ static void messageHandler(QtMsgType type, const QMessageLogContext &context, co
     QgsMessageLog::logMessage(msg, tag, level);
 }
 
+// D6 i18n: load sicnu_zh_CN.qm when the locale asks for Chinese. Candidate
+// directories cover the build tree (binary at CMAKE_BINARY_DIR root) and an
+// installed layout; SICNU_TRANSLATIONS_DIR wins for tests and demos. A
+// missing .qm degrades to English (the tr() source language), never to
+// empty strings.
+static void installAppTranslations(QCoreApplication *app)
+{
+    QString code = qEnvironmentVariable("SICNU_LANG");
+    if (code.isEmpty())
+        code = QLocale::system().name();
+    if (!code.startsWith(QLatin1String("zh")))
+        return;
+
+    const QStringList candidates = {
+        qEnvironmentVariable("SICNU_TRANSLATIONS_DIR"),
+        app->applicationDirPath() + QStringLiteral("/resources/translations"),
+        app->applicationDirPath() + QStringLiteral("/../resources/translations"),
+        app->applicationDirPath() + QStringLiteral("/translations"),
+    };
+    QTranslator *translator = new QTranslator(app);
+    for (const QString &dir : candidates) {
+        if (dir.isEmpty())
+            continue;
+        if (translator->load(QStringLiteral("sicnu_zh_CN"), dir)) {
+            app->installTranslator(translator);
+            qDebug() << "i18n: installed sicnu_zh_CN translations from" << dir;
+            return;
+        }
+    }
+    qDebug() << "i18n: no sicnu_zh_CN .qm found; continuing in English";
+    translator->deleteLater();
+}
+
 int main(int argc, char *argv[])
 {
   // Unified trace (Verification 7.0): opt-in via SICNU_TRACE=1 / SICNU_TRACE_DIR;
@@ -136,6 +171,10 @@ int main(int argc, char *argv[])
         if (!appIcon.isNull())
             app->setWindowIcon(appIcon);
     }
+
+    // D6 i18n: install sicnu_zh_CN.qm when LANG/LC_ALL (or SICNU_LANG) asks
+    // for Chinese; otherwise the English source text is used as-is.
+    installAppTranslations(app);
 
     // Set prefix path and initialize providers (GDAL, PROJ, etc.)
     qDebug() << "Setting prefix path...";

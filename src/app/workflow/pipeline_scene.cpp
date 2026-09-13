@@ -460,7 +460,7 @@ void PipelineScene::drawBackground( QPainter *painter, const QRectF &rect )
     painter->setPen( QColor( 148, 163, 184, 110 ) );
     painter->setFont( QFont( QStringLiteral( "IBM Plex Sans" ), 12, QFont::DemiBold ) );
     QRectF hintRect( -250, -50, 500, 100 );
-    painter->drawText( hintRect, Qt::AlignCenter, tr( "工作流画布为空\n从右侧选择预设模板或使用工具栏构建流程" ) );
+    painter->drawText( hintRect, Qt::AlignCenter, tr( "The workflow canvas is empty\nPick a preset template on the right or build a pipeline with the toolbar" ) );
   }
 }
 

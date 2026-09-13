@@ -31,7 +31,7 @@ CommandPalette::CommandPalette( CommandRegistry *registry, QWidget *parent )
     , m_registry( registry )
 {
     setObjectName( QStringLiteral( "rsCommandPalette" ) );
-    setWindowTitle( tr( "命令面板" ) );
+    setWindowTitle( tr( "Command Palette" ) );
     setModal( false );
     setWindowFlags( Qt::Dialog | Qt::FramelessWindowHint );
     setMinimumSize( 520, 120 );
@@ -44,18 +44,18 @@ CommandPalette::CommandPalette( CommandRegistry *registry, QWidget *parent )
 
     m_input = new QLineEdit( this );
     m_input->setObjectName( QStringLiteral( "rsCommandPaletteInput" ) );
-    m_input->setPlaceholderText( tr( "输入命令名称 / 关键词…" ) );
-    m_input->setAccessibleName( tr( "命令搜索" ) );
+    m_input->setPlaceholderText( tr( "Type a command name / keyword..." ) );
+    m_input->setAccessibleName( tr( "Command Search" ) );
     layout->addWidget( m_input );
 
     m_list = new QListWidget( this );
     m_list->setObjectName( QStringLiteral( "rsCommandPaletteList" ) );
     m_list->setUniformItemSizes( true );
     m_list->setAlternatingRowColors( false );
-    m_list->setAccessibleName( tr( "命令结果" ) );
+    m_list->setAccessibleName( tr( "Command Results" ) );
     layout->addWidget( m_list, 1 );
 
-    m_hint = new QLabel( tr( "↑↓ 选择 · Enter 执行 · Esc 关闭" ), this );
+    m_hint = new QLabel( tr( "↑↓ select · Enter run · Esc close" ), this );
     m_hint->setObjectName( QStringLiteral( "rsCommandPaletteHint" ) );
     layout->addWidget( m_hint );
 

@@ -13,7 +13,7 @@
 namespace sicnu::workflow::gui {
 
 PipelineEditorDock::PipelineEditorDock( QWidget *parent )
-  : QDockWidget( tr( "任务流程编辑器" ), parent )
+  : QDockWidget( tr( "Task Workflow Editor" ), parent )
 {
   setObjectName( QStringLiteral( "rsPipelineEditorDock" ) );
   setAllowedAreas( Qt::AllDockWidgetAreas );
@@ -47,46 +47,46 @@ void PipelineEditorDock::createToolBar()
   mToolBar->setObjectName( QStringLiteral( "rsPipelineToolBar" ) );
   mToolBar->setIconSize( QSize( 16, 16 ) );
 
-  auto *newAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "document-new" ), QIcon( QStringLiteral( ":/icons/document-new" ) ) ), tr( "新建" ) );
-  newAct->setToolTip( tr( "新建工作流" ) );
+  auto *newAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "document-new" ), QIcon( QStringLiteral( ":/icons/document-new" ) ) ), tr( "New" ) );
+  newAct->setToolTip( tr( "New Workflow" ) );
   connect( newAct, &QAction::triggered, this, &PipelineEditorDock::onNewClicked );
 
-  auto *openAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "document-open" ), QIcon( QStringLiteral( ":/icons/document-open" ) ) ), tr( "打开" ) );
-  openAct->setToolTip( tr( "打开工作流 (.json) — 或通过命令面板 workflow.open" ) );
+  auto *openAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "document-open" ), QIcon( QStringLiteral( ":/icons/document-open" ) ) ), tr( "Open" ) );
+  openAct->setToolTip( tr( "Open Workflow (.json) — or via the command palette workflow.open" ) );
   connect( openAct, &QAction::triggered, this, &PipelineEditorDock::onOpenClicked );
 
-  auto *saveAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "document-save" ), QIcon( QStringLiteral( ":/icons/document-save" ) ) ), tr( "保存" ) );
-  saveAct->setToolTip( tr( "保存工作流 (.json)" ) );
+  auto *saveAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "document-save" ), QIcon( QStringLiteral( ":/icons/document-save" ) ) ), tr( "Save" ) );
+  saveAct->setToolTip( tr( "Save Workflow (.json)" ) );
   connect( saveAct, &QAction::triggered, this, &PipelineEditorDock::onSaveClicked );
 
   mToolBar->addSeparator();
 
-  auto *runAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "media-playback-start" ), QIcon( QStringLiteral( ":/icons/media-playback-start" ) ) ), tr( "运行全流程" ) );
-  runAct->setToolTip( tr( "运行全流程 (按拓扑顺序调度执行)" ) );
+  auto *runAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "media-playback-start" ), QIcon( QStringLiteral( ":/icons/media-playback-start" ) ) ), tr( "Run Full Pipeline" ) );
+  runAct->setToolTip( tr( "Run Full Pipeline (scheduled in topological order)" ) );
   connect( runAct, &QAction::triggered, this, &PipelineEditorDock::onRunFullClicked );
 
-  auto *stopAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "media-playback-stop" ), QIcon( QStringLiteral( ":/icons/media-playback-stop" ) ) ), tr( "停止" ) );
-  stopAct->setToolTip( tr( "停止正在运行的流程任务" ) );
+  auto *stopAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "media-playback-stop" ), QIcon( QStringLiteral( ":/icons/media-playback-stop" ) ) ), tr( "Stop" ) );
+  stopAct->setToolTip( tr( "Stop the running pipeline task" ) );
   connect( stopAct, &QAction::triggered, this, &PipelineEditorDock::onStopClicked );
 
   mToolBar->addSeparator();
 
-  auto *zoomFitAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "zoom-fit-best" ), QIcon( QStringLiteral( ":/icons/zoom-fit-best" ) ) ), tr( "适应窗口" ) );
-  zoomFitAct->setToolTip( tr( "适应窗口显示所有节点" ) );
+  auto *zoomFitAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "zoom-fit-best" ), QIcon( QStringLiteral( ":/icons/zoom-fit-best" ) ) ), tr( "Fit in Window" ) );
+  zoomFitAct->setToolTip( tr( "Fit the window to show all nodes" ) );
   connect( zoomFitAct, &QAction::triggered, mCanvasWidget, &PipelineCanvasWidget::zoomToFit );
 
-  auto *zoomResetAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "zoom-original" ), QIcon( QStringLiteral( ":/icons/zoom-original" ) ) ), tr( "100% 视图" ) );
-  zoomResetAct->setToolTip( tr( "恢复 100% 比例" ) );
+  auto *zoomResetAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "zoom-original" ), QIcon( QStringLiteral( ":/icons/zoom-original" ) ) ), tr( "100% View" ) );
+  zoomResetAct->setToolTip( tr( "Reset to 100% Scale" ) );
   connect( zoomResetAct, &QAction::triggered, mCanvasWidget, &PipelineCanvasWidget::resetZoom );
 
-  auto *deleteAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "edit-delete" ), QIcon( QStringLiteral( ":/icons/edit-delete" ) ) ), tr( "删除选中" ) );
-  deleteAct->setToolTip( tr( "删除选中节点或连线 (Delete)" ) );
+  auto *deleteAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "edit-delete" ), QIcon( QStringLiteral( ":/icons/edit-delete" ) ) ), tr( "Delete Selected" ) );
+  deleteAct->setToolTip( tr( "Delete selected nodes or links (Delete)" ) );
   connect( deleteAct, &QAction::triggered, mCanvasWidget, &PipelineCanvasWidget::deleteSelected );
 
   mToolBar->addSeparator();
 
-  auto *presetAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "bookmarks" ), QIcon( QStringLiteral( ":/icons/bookmarks" ) ) ), tr( "预设模板" ) );
-  presetAct->setToolTip( tr( "展开预设模板库" ) );
+  auto *presetAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "bookmarks" ), QIcon( QStringLiteral( ":/icons/bookmarks" ) ) ), tr( "Preset Templates" ) );
+  presetAct->setToolTip( tr( "Expand the preset template library" ) );
   connect( presetAct, &QAction::triggered, this, &PipelineEditorDock::onTogglePresetCatalog );
 }
 
@@ -97,8 +97,8 @@ void PipelineEditorDock::onNewClicked()
     if ( !mCanvasWidget->pipelineScene()->nodes().empty() )
     {
       auto reply = QMessageBox::question( this,
-                                          tr( "新建流程确认" ),
-                                          tr( "新建流程将清空当前画布。是否继续？" ),
+                                          tr( "Confirm New Pipeline" ),
+                                          tr( "Creating a new pipeline will clear the current canvas. Continue?" ),
                                           QMessageBox::Yes | QMessageBox::No,
                                           QMessageBox::No );
       if ( reply != QMessageBox::Yes )
@@ -111,14 +111,14 @@ void PipelineEditorDock::onNewClicked()
 
 void PipelineEditorDock::onOpenClicked()
 {
-  QString fileName = QFileDialog::getOpenFileName( this, tr( "打开流程定义 JSON" ), QString(), tr( "JSON Files (*.json)" ) );
+  QString fileName = QFileDialog::getOpenFileName( this, tr( "Open Pipeline Definition JSON" ), QString(), tr( "JSON Files (*.json)" ) );
   if ( fileName.isEmpty() )
     return;
 
   std::ifstream inFile( fileName.toStdString() );
   if ( !inFile.is_open() )
   {
-    QMessageBox::warning( this, tr( "错误" ), tr( "无法打开文件: %1" ).arg( fileName ) );
+    QMessageBox::warning( this, tr( "Error" ), tr( "Cannot open file: %1" ).arg( fileName ) );
     return;
   }
 
@@ -127,7 +127,7 @@ void PipelineEditorDock::onOpenClicked()
   std::string errs;
   if ( !Json::parseFromStream( builder, inFile, &root, &errs ) )
   {
-    QMessageBox::warning( this, tr( "解析错误" ), QString::fromStdString( errs ) );
+    QMessageBox::warning( this, tr( "Parse Error" ), QString::fromStdString( errs ) );
     return;
   }
 
@@ -135,7 +135,7 @@ void PipelineEditorDock::onOpenClicked()
   std::string err;
   if ( !workflowDefinitionFromJson( root, def, err ) )
   {
-    QMessageBox::warning( this, tr( "格式错误" ), QString::fromStdString( err ) );
+    QMessageBox::warning( this, tr( "Format Error" ), QString::fromStdString( err ) );
     return;
   }
 
@@ -145,7 +145,7 @@ void PipelineEditorDock::onOpenClicked()
 
 void PipelineEditorDock::onSaveClicked()
 {
-  QString fileName = QFileDialog::getSaveFileName( this, tr( "保存流程定义 JSON" ), QStringLiteral( "workflow.json" ), tr( "JSON Files (*.json)" ) );
+  QString fileName = QFileDialog::getSaveFileName( this, tr( "Save Pipeline Definition JSON" ), QStringLiteral( "workflow.json" ), tr( "JSON Files (*.json)" ) );
   if ( fileName.isEmpty() )
     return;
 
@@ -159,7 +159,7 @@ void PipelineEditorDock::onSaveClicked()
   std::ofstream outFile( fileName.toStdString() );
   if ( !outFile.is_open() )
   {
-    QMessageBox::warning( this, tr( "错误" ), tr( "无法写入文件: %1" ).arg( fileName ) );
+    QMessageBox::warning( this, tr( "Error" ), tr( "Cannot write file: %1" ).arg( fileName ) );
     return;
   }
 
@@ -167,7 +167,7 @@ void PipelineEditorDock::onSaveClicked()
   builder["indentation"] = "  ";
   outFile << Json::writeString( builder, root );
 
-  QMessageBox::information( this, tr( "成功" ), tr( "流程定义已保存至: %1" ).arg( fileName ) );
+  QMessageBox::information( this, tr( "Succeeded" ), tr( "Pipeline definition saved to: %1" ).arg( fileName ) );
   emit saveWorkflowRequested();
 }
 
@@ -196,8 +196,8 @@ void PipelineEditorDock::onPresetSelected( const sicnu::workflow::WorkflowDefini
     if ( !mCanvasWidget->pipelineScene()->nodes().empty() )
     {
       auto reply = QMessageBox::question( this,
-                                          tr( "加载模板确认" ),
-                                          tr( "加载预设模板将替换当前画布中的流程。是否继续？" ),
+                                          tr( "Confirm Template Loading" ),
+                                          tr( "Loading a preset template will replace the pipeline on the canvas. Continue?" ),
                                           QMessageBox::Yes | QMessageBox::No,
                                           QMessageBox::No );
       if ( reply != QMessageBox::Yes )

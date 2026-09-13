@@ -107,13 +107,13 @@ private:
     QVector<StepCard> m_cards;
 
     // Metrics cache
-    QString m_sourceText = QStringLiteral( "未加载影像" );
-    QString m_gcpText = QStringLiteral( "0 个 GCP (启用 0)" );
-    QString m_modelText = QStringLiteral( "多项式 1 阶 (需 ≥3 点)" );
-    QString m_residualText = QStringLiteral( "未解算" );
-    QString m_warpConfigText = QStringLiteral( "未配置输出参数" );
-    QString m_warpExecText = QStringLiteral( "未开始校正" );
-    QString m_verifyText = QStringLiteral( "未加载成果" );
+    QString m_sourceText = tr("No image loaded");
+    QString m_gcpText = tr("0 GCPs (0 enabled)");
+    QString m_modelText = tr("Polynomial order 1 (needs ≥ 3 points)");
+    QString m_residualText = tr("Unsolved");
+    QString m_warpConfigText = tr("Output parameters not configured");
+    QString m_warpExecText = tr("Correction not started");
+    QString m_verifyText = tr("No results loaded");
     bool m_hasSource = false;
     bool m_hasOutput = false;
 };

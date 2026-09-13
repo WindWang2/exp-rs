@@ -48,26 +48,26 @@ void ExtractBandDialog::setupUi()
   setupHelpBanner( mainLayout );
 
   // Input & Band Selection Group
-  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "输入与波段选择" ) );
+  QGroupBox *inputGroup = setupInputGroup( mainLayout, tr( "Inputs and Band Selection" ) );
   auto *form = SicnuUi::makeFormLayout();
   form->setContentsMargins( 0, 0, 0, 0 );
 
   m_layerCombo = new RasterLayerCombo( inputGroup );
   m_layerCombo->setObjectName( QStringLiteral( "extractBandInputLayerCombo" ) );
-  SicnuDialogHelp::tip( m_layerCombo, tr( "工程中的多波段栅格图层。" ) );
+  SicnuDialogHelp::tip( m_layerCombo, tr( "A multiband raster layer from the project." ) );
   m_layerCombo->populate();
   connect( m_layerCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &ExtractBandDialog::onLayerChanged );
-  form->addRow( tr( "栅格图层" ), m_layerCombo );
+  form->addRow( tr( "Raster Layer" ), m_layerCombo );
 
   m_bandCombo = new BandRoleCombo( inputGroup );
   m_bandCombo->setObjectName( QStringLiteral( "extractBandRoleCombo" ) );
-  SicnuDialogHelp::tip( m_bandCombo, tr( "选择待抽取并单独导出的目标波段。" ) );
-  form->addRow( tr( "目标波段" ), m_bandCombo );
+  SicnuDialogHelp::tip( m_bandCombo, tr( "Chooses the target band to extract and export separately." ) );
+  form->addRow( tr( "Target Band" ), m_bandCombo );
 
   qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( form );
   qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addWidget( SicnuUi::makeHintLabel(
-    inputGroup, tr( "提示：从多波段栅格中抽取单一波段并另存为独立的单波段 GeoTIFF 影像。" ) ) );
+    inputGroup, tr( "Tip: extracts a single band from a multiband raster and saves it as a standalone single-band GeoTIFF." ) ) );
 
   setupOutputRow( mainLayout );
   setupButtonBar( mainLayout );
@@ -109,14 +109,14 @@ bool ExtractBandDialog::validateInputs()
   auto *rl = m_layerCombo ? m_layerCombo->currentRasterLayer() : m_rasterLayer;
   if ( !rl || !rl->isValid() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请选择有效的栅格图层。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "Select a valid raster layer." ) );
     return false;
   }
 
   int bandIndex = m_bandCombo ? m_bandCombo->currentData().toInt() : 0;
   if ( bandIndex < 1 )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请选择要提取的目标波段。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "Select the target band to extract." ) );
     return false;
   }
 
@@ -141,14 +141,14 @@ void ExtractBandDialog::onRun()
   auto *rl = m_layerCombo ? m_layerCombo->currentRasterLayer() : m_rasterLayer;
   if ( !rl )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请选择栅格图层。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "Select a raster layer." ) );
     return;
   }
 
   int bandIndex = m_bandCombo ? m_bandCombo->currentData().toInt() : 0;
   if ( bandIndex < 1 )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请选择要提取的目标波段。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "Select the target band to extract." ) );
     return;
   }
 

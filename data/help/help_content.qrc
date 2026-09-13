@@ -12,5 +12,6 @@
     <file>operators/terrain.json</file>
     <file>operators/classify.json</file>
     <file>operators/data_io.json</file>
+    <file alias="terms/rs_glossary.json">../terms/rs_glossary.json</file>
   </qresource>
 </RCC>

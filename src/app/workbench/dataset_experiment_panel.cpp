@@ -30,13 +30,13 @@ QString statusText( sicnu::dataset::DatasetVersionStatus status )
     switch ( status )
     {
         case sicnu::dataset::DatasetVersionStatus::Draft:
-            return DatasetExperimentPanel::tr( "草稿" );
+            return DatasetExperimentPanel::tr( "Draft" );
         case sicnu::dataset::DatasetVersionStatus::Committed:
-            return DatasetExperimentPanel::tr( "已提交" );
+            return DatasetExperimentPanel::tr( "Submitted" );
         case sicnu::dataset::DatasetVersionStatus::Deprecated:
-            return DatasetExperimentPanel::tr( "已弃用" );
+            return DatasetExperimentPanel::tr( "Deprecated" );
     }
-    return DatasetExperimentPanel::tr( "未知" );
+    return DatasetExperimentPanel::tr( "Unknown" );
 }
 
 QString qualityText( sicnu::dataset::DatasetQualityLevel level )
@@ -44,15 +44,15 @@ QString qualityText( sicnu::dataset::DatasetQualityLevel level )
     switch ( level )
     {
         case sicnu::dataset::DatasetQualityLevel::Unassessed:
-            return DatasetExperimentPanel::tr( "未评估" );
+            return DatasetExperimentPanel::tr( "Not assessed" );
         case sicnu::dataset::DatasetQualityLevel::Draft:
-            return DatasetExperimentPanel::tr( "草稿级" );
+            return DatasetExperimentPanel::tr( "Draft Grade" );
         case sicnu::dataset::DatasetQualityLevel::Valid:
-            return DatasetExperimentPanel::tr( "有效" );
+            return DatasetExperimentPanel::tr( "Valid" );
         case sicnu::dataset::DatasetQualityLevel::Certified:
-            return DatasetExperimentPanel::tr( "已认证" );
+            return DatasetExperimentPanel::tr( "Authenticated" );
     }
-    return DatasetExperimentPanel::tr( "未知" );
+    return DatasetExperimentPanel::tr( "Unknown" );
 }
 
 QString runStatusText( sicnu::dataset::RunStatus status )
@@ -60,21 +60,21 @@ QString runStatusText( sicnu::dataset::RunStatus status )
     switch ( status )
     {
         case sicnu::dataset::RunStatus::Created:
-            return DatasetExperimentPanel::tr( "已创建" );
+            return DatasetExperimentPanel::tr( "Created" );
         case sicnu::dataset::RunStatus::Running:
-            return DatasetExperimentPanel::tr( "运行中" );
+            return DatasetExperimentPanel::tr( "Running" );
         case sicnu::dataset::RunStatus::Interrupted:
-            return DatasetExperimentPanel::tr( "已中断" );
+            return DatasetExperimentPanel::tr( "Interrupted" );
         case sicnu::dataset::RunStatus::Cancelling:
-            return DatasetExperimentPanel::tr( "取消中" );
+            return DatasetExperimentPanel::tr( "Cancelling" );
         case sicnu::dataset::RunStatus::Cancelled:
-            return DatasetExperimentPanel::tr( "已取消" );
+            return DatasetExperimentPanel::tr( "Cancelled" );
         case sicnu::dataset::RunStatus::Failed:
-            return DatasetExperimentPanel::tr( "失败" );
+            return DatasetExperimentPanel::tr( "Failed" );
         case sicnu::dataset::RunStatus::Completed:
-            return DatasetExperimentPanel::tr( "已完成" );
+            return DatasetExperimentPanel::tr( "Finished" );
     }
-    return DatasetExperimentPanel::tr( "未知" );
+    return DatasetExperimentPanel::tr( "Unknown" );
 }
 
 } // namespace
@@ -89,9 +89,9 @@ DatasetExperimentPanel::DatasetExperimentPanel( QWidget *parent )
     auto *datasetLayout = new QVBoxLayout( datasetTab );
 
     auto *dbRow = new QHBoxLayout;
-    m_openDatasetDb = new QPushButton( tr( "打开数据集库…" ), datasetTab );
+    m_openDatasetDb = new QPushButton( tr( "Open Dataset Library..." ), datasetTab );
     m_openDatasetDb->setObjectName( QStringLiteral( "rsOpenDatasetDb" ) );
-    m_datasetDbLabel = new QLabel( tr( "未打开" ), datasetTab );
+    m_datasetDbLabel = new QLabel( tr( "Not open" ), datasetTab );
     dbRow->addWidget( m_openDatasetDb );
     dbRow->addWidget( m_datasetDbLabel, 1 );
     datasetLayout->addLayout( dbRow );
@@ -109,7 +109,7 @@ DatasetExperimentPanel::DatasetExperimentPanel( QWidget *parent )
     m_versionDetail->setTextFormat( Qt::RichText );
     datasetLayout->addWidget( m_versionDetail );
 
-    auto *samplesLabel = new QLabel( tr( "样本首页预览（最多 %1 条，完整数据以库为准）" )
+    auto *samplesLabel = new QLabel( tr( "First-page sample preview (up to %1 rows; the library holds the complete data)" )
                                         .arg( sicnu::dataset::DatasetStore::kMaxPageSize ),
                                     datasetTab );
     m_samplePreview = new QPlainTextEdit( datasetTab );
@@ -118,16 +118,16 @@ DatasetExperimentPanel::DatasetExperimentPanel( QWidget *parent )
     datasetLayout->addWidget( samplesLabel );
     datasetLayout->addWidget( m_samplePreview );
 
-    m_tabs->addTab( datasetTab, tr( "数据集" ) );
+    m_tabs->addTab( datasetTab, tr( "Dataset" ) );
 
     // ── 实验 tab ───────────────────────────────────────────────────────
     auto *experimentTab = new QWidget( m_tabs );
     auto *experimentLayout = new QVBoxLayout( experimentTab );
 
     auto *edbRow = new QHBoxLayout;
-    m_openExperimentDb = new QPushButton( tr( "打开实验库…" ), experimentTab );
+    m_openExperimentDb = new QPushButton( tr( "Open Experiment Library..." ), experimentTab );
     m_openExperimentDb->setObjectName( QStringLiteral( "rsOpenExperimentDb" ) );
-    m_experimentDbLabel = new QLabel( tr( "未打开" ), experimentTab );
+    m_experimentDbLabel = new QLabel( tr( "Not open" ), experimentTab );
     edbRow->addWidget( m_openExperimentDb );
     edbRow->addWidget( m_experimentDbLabel, 1 );
     experimentLayout->addLayout( edbRow );
@@ -139,8 +139,8 @@ DatasetExperimentPanel::DatasetExperimentPanel( QWidget *parent )
     m_runsTable = new QTableWidget( experimentTab );
     m_runsTable->setObjectName( QStringLiteral( "rsExperimentRunsTable" ) );
     m_runsTable->setColumnCount( 4 );
-    m_runsTable->setHorizontalHeaderLabels( { tr( "运行 ID" ), tr( "状态" ),
-                                              tr( "算法" ), tr( "数据集版本" ) } );
+    m_runsTable->setHorizontalHeaderLabels( { tr( "Run ID" ), tr( "Status" ),
+                                              tr( "Algorithm" ), tr( "Dataset Version" ) } );
     m_runsTable->horizontalHeader()->setStretchLastSection( true );
     m_runsTable->setSelectionBehavior( QAbstractItemView::SelectRows );
     m_runsTable->setSelectionMode( QAbstractItemView::ExtendedSelection );
@@ -148,7 +148,7 @@ DatasetExperimentPanel::DatasetExperimentPanel( QWidget *parent )
     experimentLayout->addWidget( m_runsTable, 1 );
 
     auto *runActionRow = new QHBoxLayout;
-    m_compareBtn = new QPushButton( tr( "对比选中运行" ), experimentTab );
+    m_compareBtn = new QPushButton( tr( "Compare Selected Runs" ), experimentTab );
     runActionRow->addWidget( m_compareBtn );
     runActionRow->addStretch( 1 );
     experimentLayout->addLayout( runActionRow );
@@ -158,7 +158,7 @@ DatasetExperimentPanel::DatasetExperimentPanel( QWidget *parent )
     m_runDetail->setMaximumHeight( 160 );
     experimentLayout->addWidget( m_runDetail );
 
-    m_tabs->addTab( experimentTab, tr( "实验" ) );
+    m_tabs->addTab( experimentTab, tr( "Experiment" ) );
 
     auto *layout = new QVBoxLayout( this );
     layout->setContentsMargins( 4, 4, 4, 4 );
@@ -186,20 +186,20 @@ DatasetExperimentPanel::DatasetExperimentPanel( QWidget *parent )
 void DatasetExperimentPanel::openDatasetStore()
 {
     const QString path = QFileDialog::getOpenFileName(
-        this, tr( "打开数据集库" ), QString(), tr( "SQLite 数据库 (*.db *.sqlite);;所有文件 (*)" ) );
+        this, tr( "Open Dataset Library" ), QString(), tr( "SQLite Databases (*.db *.sqlite);;All Files (*)" ) );
     if ( path.isEmpty() )
         return;
     // DatasetStore::open() creates missing files — a typo'd path must not
     // silently become a brand-new authoritative store in the GUI.
     if ( !QFileInfo::exists( path ) )
     {
-        m_datasetDbLabel->setText( tr( "文件不存在：%1" ).arg( path ) );
+        m_datasetDbLabel->setText( tr( "File not found: %1" ).arg( path ) );
         return;
     }
     QString error;
     if ( !m_datasetStore.open( path, &error ) )
     {
-        m_datasetDbLabel->setText( tr( "打开失败：%1" ).arg( error ) );
+        m_datasetDbLabel->setText( tr( "Open failed: %1" ).arg( error ) );
         return;
     }
     m_datasetDbLabel->setText( path );
@@ -209,18 +209,18 @@ void DatasetExperimentPanel::openDatasetStore()
 void DatasetExperimentPanel::openExperimentStore()
 {
     const QString path = QFileDialog::getOpenFileName(
-        this, tr( "打开实验库" ), QString(), tr( "SQLite 数据库 (*.db *.sqlite);;所有文件 (*)" ) );
+        this, tr( "Open Experiment Library" ), QString(), tr( "SQLite Databases (*.db *.sqlite);;All Files (*)" ) );
     if ( path.isEmpty() )
         return;
     if ( !QFileInfo::exists( path ) )
     {
-        m_experimentDbLabel->setText( tr( "文件不存在：%1" ).arg( path ) );
+        m_experimentDbLabel->setText( tr( "File not found: %1" ).arg( path ) );
         return;
     }
     QString error;
     if ( !m_experimentStore.open( path, &error ) )
     {
-        m_experimentDbLabel->setText( tr( "打开失败：%1" ).arg( error ) );
+        m_experimentDbLabel->setText( tr( "Open failed: %1" ).arg( error ) );
         return;
     }
     m_experimentDbLabel->setText( path );
@@ -239,8 +239,8 @@ void DatasetExperimentPanel::rebuildDatasets()
     if ( !page.has_value() )
     {
         m_datasetDbLabel->setText(
-            tr( "读取失败：%1" )
-                .arg( page.diagnostics().isEmpty() ? tr( "未知错误" )
+            tr( "Read failed: %1" )
+                .arg( page.diagnostics().isEmpty() ? tr( "Unknown error" )
                                                    : page.diagnostics().first().message ) );
         return;
     }
@@ -250,7 +250,7 @@ void DatasetExperimentPanel::rebuildDatasets()
             QStringLiteral( "%1 (%2)" ).arg( row.value( "name" ).toString(),
                                              row.value( "id" ).toString() ),
             row.value( "id" ).toString() );
-    m_datasetDbLabel->setText( tr( "%1 — 共 %2 个数据集" )
+    m_datasetDbLabel->setText( tr( "%1 — %2 datasets in total" )
                                    .arg( m_datasetStore.storePath() )
                                    .arg( page->first ) );
     blocker.unblock();
@@ -276,7 +276,7 @@ void DatasetExperimentPanel::rebuildVersions()
         m_versionList->addItem(
             QStringLiteral( "%1 — %2" ).arg( version.versionId(), statusText( version.status() ) ) );
     if ( m_versions.isEmpty() )
-        m_versionDetail->setText( tr( "该数据集暂无版本。" ) );
+        m_versionDetail->setText( tr( "This dataset has no versions yet." ) );
 }
 
 void DatasetExperimentPanel::onDatasetSelected( int index )
@@ -297,18 +297,18 @@ void DatasetExperimentPanel::onVersionSelected( int row )
     // Bounded, truthful facts only: counts + manifest refs, no derived stats.
     const qint64 sampleTotal = m_datasetStore.sampleCount( *versionId );
     QStringList lines;
-    lines << tr( "版本 %1（%2，质量：%3）" )
+    lines << tr( "Version %1 (%2, quality: %3)" )
                  .arg( version.versionId(), statusText( version.status() ),
                        qualityText( version.qualityLevel() ) );
     if ( !version.parentVersionId().isEmpty() )
-        lines << tr( "父版本：%1" ).arg( version.parentVersionId() );
+        lines << tr( "Parent version: %1" ).arg( version.parentVersionId() );
     if ( version.committedAtUtc().isValid() )
-        lines << tr( "提交时间：%1" ).arg( version.committedAtUtc().toString( Qt::ISODate ) );
-    lines << tr( "指纹：%1" )
-                 .arg( version.fingerprint().isEmpty() ? tr( "未计算" ) : version.fingerprint() );
+        lines << tr( "Submitted at: %1" ).arg( version.committedAtUtc().toString( Qt::ISODate ) );
+    lines << tr( "Fingerprint: %1" )
+                 .arg( version.fingerprint().isEmpty() ? tr( "Not computed" ) : version.fingerprint() );
     if ( !version.note().isEmpty() )
-        lines << tr( "说明：%1" ).arg( version.note() );
-    lines << tr( "样本数：%1" ).arg( sampleTotal );
+        lines << tr( "Description: %1" ).arg( version.note() );
+    lines << tr( "Samples: %1" ).arg( sampleTotal );
 
     // Label schema + splits live in the manifest document — project the
     // document's OWN references (label_schema.schema_id, split_manifests)
@@ -334,13 +334,13 @@ void DatasetExperimentPanel::onVersionSelected( int row )
                 splitManifests << value.toString();
         }
     }
-    lines << tr( "标注方案：%1" )
-                 .arg( schemaId.isEmpty() ? tr( "清单未声明" ) : schemaId );
+    lines << tr( "Labeling scheme: %1" )
+                 .arg( schemaId.isEmpty() ? tr( "Not declared in the manifest" ) : schemaId );
     if ( !splitManifests.isEmpty() )
-        lines << tr( "切分清单：%1" ).arg( splitManifests.join( QStringLiteral( ", " ) ) );
+        lines << tr( "Split list: %1" ).arg( splitManifests.join( QStringLiteral( ", " ) ) );
     else
-        lines << tr( "切分清单：无（未划分或未声明）" );
-    lines << tr( "泄露审计 / 质量报告 / 复现包：由 CLI/Agent 流程生成，此面板不重复计算。" );
+        lines << tr( "Split list: none (not split or not declared)" );
+    lines << tr( "Leak audit / quality report / reproduction bundle: generated by CLI / Agent pipelines; this panel does not recompute them." );
 
     m_versionDetail->setText( lines.join( QStringLiteral( "<br/>" ) ) );
 
@@ -353,11 +353,11 @@ void DatasetExperimentPanel::onVersionSelected( int row )
         for ( const sicnu::dataset::SampleRecord &sample : samples->second )
             preview << sample.sampleId();
         m_samplePreview->setPlainText(
-            preview.isEmpty() ? tr( "（无样本）" ) : preview.join( QStringLiteral( "\n" ) ) );
+            preview.isEmpty() ? tr( "(no samples)" ) : preview.join( QStringLiteral( "\n" ) ) );
     }
     else
     {
-        m_samplePreview->setPlainText( tr( "样本读取失败（库为只读或版本不存在）。" ) );
+        m_samplePreview->setPlainText( tr( "Failed to read samples (the library is read-only or the version does not exist)." ) );
     }
 }
 
@@ -372,8 +372,8 @@ void DatasetExperimentPanel::rebuildExperiments()
     if ( !page.has_value() )
     {
         m_experimentDbLabel->setText(
-            tr( "读取失败：%1" )
-                .arg( page.diagnostics().isEmpty() ? tr( "未知错误" )
+            tr( "Read failed: %1" )
+                .arg( page.diagnostics().isEmpty() ? tr( "Unknown error" )
                                                    : page.diagnostics().first().message ) );
         return;
     }
@@ -384,7 +384,7 @@ void DatasetExperimentPanel::rebuildExperiments()
             experiment.experimentId() );
     m_experimentDbLabel->setText( m_experimentDbLabel->text() +
                                   QStringLiteral( " — " ) +
-                                  tr( "共 %1 个实验" ).arg( page->first ) );
+                                  tr( "%1 experiments in total" ).arg( page->first ) );
     blocker.unblock();
     rebuildRuns();
     if ( !m_experiments.isEmpty() )
@@ -407,10 +407,10 @@ void DatasetExperimentPanel::rebuildRuns()
     // First-page projection: state the truncation instead of implying "all".
     m_runDetail->setPlaceholderText(
         page->first > static_cast<qint64>( m_runs.size() )
-            ? tr( "运行指标（仅显示前 %1 / %2 个运行）。" )
+            ? tr( "Run metrics (showing the first %1 of %2 runs)." )
                   .arg( m_runs.size() )
                   .arg( page->first )
-            : tr( "运行指标（共 %1 个运行）。" ).arg( page->first ) );
+            : tr( "Run metrics (%1 runs in total)." ).arg( page->first ) );
     for ( int i = 0; i < m_runs.size(); ++i )
     {
         const sicnu::experiment::ExperimentRun &run = m_runs[i];
@@ -445,7 +445,7 @@ void DatasetExperimentPanel::showMetricJson( const QString &runId )
     const auto record = m_experimentStore.metricRecordForRun( runId );
     if ( !record.has_value() )
     {
-        m_runDetail->setPlainText( tr( "该运行没有指标记录。" ) );
+        m_runDetail->setPlainText( tr( "This run has no recorded metrics." ) );
         return;
     }
     m_runDetail->setPlainText(
@@ -469,7 +469,7 @@ void DatasetExperimentPanel::compareSelectedRuns()
     const auto metricB = m_experimentStore.metricRecordForRun( runB );
     if ( !metricA.has_value() || !metricB.has_value() )
     {
-        m_runDetail->setPlainText( tr( "两个运行都有指标记录才能对比（缺一侧则显示单侧指标）。" ) );
+        m_runDetail->setPlainText( tr( "Both runs need recorded metrics to compare (metrics from one side only are shown otherwise)." ) );
         return;
     }
 

@@ -27,7 +27,7 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("atmospheric_correction"); }
-    QString dialogTitle() const override { return tr("大气校正"); }
+    QString dialogTitle() const override { return tr("Atmospheric Correction"); }
     void onRun() override;
 
 private slots:

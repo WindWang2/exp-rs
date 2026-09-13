@@ -19,7 +19,7 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("mosaic"); }
-    QString dialogTitle() const override { return tr("影像镶嵌"); }
+    QString dialogTitle() const override { return tr("Image Mosaic"); }
     bool validateInputs() override;
     void onRun() override;
 

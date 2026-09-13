@@ -16,13 +16,13 @@ struct StepMeta
 };
 
 const StepMeta kMeta[] = {
-  { "1 · 建立分类体系", "完成条件：至少 2 个类别（名称与颜色）" },
-  { "2 · 选择样本", "完成条件：至少 2 个类别有训练像元" },
-  { "3 · 样本评价", "完成条件：标记已审阅（JM / 光谱）" },
-  { "4 · 训练-分类", "完成条件：完成全图 Apply（预览不计）" },
-  { "5 · 精度评定", "完成条件：存在有效精度指标" },
-  { "6 · 分类后处理", "完成条件：跳过或生成后处理结果" },
-  { "7 · 输出", "完成条件：导出或加载到主图" },
+  { "1 · Define the Class Scheme", "Done when: at least 2 classes (name and color)" },
+  { "2 · Collect Samples", "Done when: at least 2 classes have training pixels" },
+  { "3 · Evaluate Samples", "Done when: marked as reviewed (JM / spectral)" },
+  { "4 · Train and Classify", "Done when: the full-image Apply has run (previews don't count)" },
+  { "5 · Accuracy Assessment", "Done when: valid accuracy metrics exist" },
+  { "6 · Post-Classification", "Done when: post-processing is skipped or produced" },
+  { "7 · Output", "Done when: exported or loaded to the main view" },
 };
 
 static_assert( sizeof( kMeta ) / sizeof( kMeta[0] )
@@ -62,7 +62,7 @@ QWidget *RsClassifyStepHost::buildPanel( RsClassifyStep s )
   layout->setContentsMargins( 12, 12, 12, 12 );
   layout->setSpacing( 8 );
 
-  auto *title = new QLabel( tr( kMeta[idx].title ), panel );
+  auto *title = new QLabel(  kMeta[idx].title , panel );
   title->setObjectName( QStringLiteral( "classifyStepTitle" ) );
   QFont tf = title->font();
   tf.setBold( true );
@@ -70,7 +70,7 @@ QWidget *RsClassifyStepHost::buildPanel( RsClassifyStep s )
   title->setFont( tf );
   layout->addWidget( title );
 
-  auto *tip = new QLabel( tr( kMeta[idx].tip ), panel );
+  auto *tip = new QLabel(  kMeta[idx].tip , panel );
   tip->setObjectName( QStringLiteral( "classifyStepTip" ) );
   tip->setWordWrap( true );
   tip->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
@@ -91,12 +91,12 @@ QWidget *RsClassifyStepHost::buildPanel( RsClassifyStep s )
   layout->addWidget( body, /*stretch=*/1 );
 
   auto *nav = new QHBoxLayout;
-  auto *prev = new QPushButton( tr( "上一步" ), panel );
+  auto *prev = new QPushButton(  "Previous Step" , panel );
   prev->setObjectName( QStringLiteral( "classifyStepPrev" ) );
-  prev->setToolTip( tr( "返回上一个步骤。" ) );
-  auto *next = new QPushButton( tr( "下一步" ), panel );
+  prev->setToolTip(  "Returns to the previous step."  );
+  auto *next = new QPushButton(  "Next Step" , panel );
   next->setObjectName( QStringLiteral( "classifyStepNext" ) );
-  next->setToolTip( tr( "完成当前步骤后进入下一步。" ) );
+  next->setToolTip(  "Continue to the next step after finishing the current one."  );
   nav->addWidget( prev );
   nav->addStretch( 1 );
   nav->addWidget( next );

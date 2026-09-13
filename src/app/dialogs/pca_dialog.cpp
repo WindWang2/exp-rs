@@ -26,9 +26,9 @@ void PcaDialog::setupUi()
     setupHelpBanner( mainLayout );
 
     QGroupBox *paramGroup = setupParamGroup(
-      mainLayout, tr( "PCA 变换参数" ) );
+      mainLayout, tr( "PCA Transform Parameters" ) );
     paramGroup->setToolTip(
-      tr( "主成分个数不得超过输入影像的波段总数；前几个主成分通常聚集了绝大部分方差信息。" ) );
+      tr( "The number of components cannot exceed the total band count of the input image; the first components usually capture most of the variance." ) );
     auto *form = SicnuUi::makeFormLayout();
     qobject_cast<QVBoxLayout *>( paramGroup->layout() )->addLayout( form );
 
@@ -39,9 +39,9 @@ void PcaDialog::setupUi()
     // the dialog must not invent its own default.
     m_componentsSpin->setValue( 0 );
     SicnuDialogHelp::tip( m_componentsSpin, tr(
-      "输出主成分个数，0 = 全部波段；必须 ≤ 输入波段数。"
-      "前几个 PC 通常含大部分方差，用于波段去相关与降维压缩。" ) );
-    form->addRow( tr( "主成分个数" ), m_componentsSpin );
+      "Number of output components, 0 = all bands; must be ≤ the input band count."
+      "The first PCs usually hold most of the variance; used for band decorrelation and dimensionality-reduction compression.")  );
+    form->addRow( tr( "Number of Components" ), m_componentsSpin );
 
     setupOutputRow( mainLayout );
     setupButtonBar( mainLayout );
@@ -51,7 +51,7 @@ void PcaDialog::setupUi()
 void PcaDialog::onRun()
 {
     if (!m_rasterLayer || !m_rasterLayer->isValid()) {
-        QMessageBox::warning(this, dialogTitle(), tr("请先选择一个有效的栅格图层。"));
+        QMessageBox::warning(this, dialogTitle(), tr("Select a valid raster layer first."));
         return;
     }
 
@@ -59,7 +59,7 @@ void PcaDialog::onRun()
     // 0 = all bands (operator schema default); only a positive count must fit.
     if ( numComponents > 0 && numComponents > m_rasterLayer->bandCount() ) {
         QMessageBox::warning(this, dialogTitle(),
-                             tr("指定的主成分数 (%1) 超出输入栅格的波段总数 (%2)。")
+                             tr("The number of components (%1) exceeds the total band count of the input raster (%2).")
                                  .arg(numComponents).arg(m_rasterLayer->bandCount()));
         return;
     }

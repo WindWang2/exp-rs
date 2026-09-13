@@ -24,17 +24,17 @@ QString RsPostProcessDialog::algorithmTitle( Algorithm a )
   switch ( a )
   {
     case Algorithm::Sieve:
-      return tr( "Sieve 小斑去除" );
+      return tr( "Sieve Small-Region Removal" );
     case Algorithm::Majority:
-      return tr( "多数滤波" );
+      return tr( "Majority Filter" );
     case Algorithm::Clump:
-      return tr( "Clump 连通域标记" );
+      return tr( "Clump Connected-Component Labeling" );
     case Algorithm::Recode:
-      return tr( "重编码" );
+      return tr( "Recode" );
     case Algorithm::Polygonize:
-      return tr( "矢量化 Polygonize" );
+      return tr( "Polygonize" );
   }
-  return tr( "后处理" );
+  return tr( "Post-Processing" );
 }
 
 QString RsPostProcessDialog::algorithmId( Algorithm a )
@@ -76,26 +76,26 @@ void RsPostProcessDialog::setupUi()
   switch ( m_algo )
   {
     case Algorithm::Sieve:
-      hint = tr( "去除面积小于阈值的连通斑块，并用邻域多数类填充。" );
+      hint = tr( "Removes connected patches smaller than the threshold and fills them with the neighbourhood majority class." );
       break;
     case Algorithm::Majority:
-      hint = tr( "滑动窗口众数滤波，平滑分类边界（核大小须为奇数）。" );
+      hint = tr( "Sliding-window majority filter that smooths classification boundaries (kernel size must be odd)." );
       break;
     case Algorithm::Clump:
-      hint = tr( "对同类像元做连通域标记，输出斑块编号栅格。" );
+      hint = tr( "Labels connected regions of like pixels and outputs a patch-id raster." );
       break;
     case Algorithm::Recode:
-      hint = tr( "按「旧类 → 新类」表重映射类别编号；未列出的类保持不变。" );
+      hint = tr( "Remaps class ids by the 'old class → new class' table; unlisted classes stay unchanged." );
       break;
     case Algorithm::Polygonize:
-      hint = tr( "将分类/标签栅格矢量化为面要素（.gpkg 或 .shp）。" );
+      hint = tr( "Vectorizes a classification / label raster into polygon features (.gpkg or .shp)." );
       break;
   }
   m_hintLabel = SicnuUi::makeHintLabel( this, hint );
   m_hintLabel->setWordWrap( true );
   root->addWidget( m_hintLabel );
 
-  auto *ioGroup = SicnuUi::makeGroup( this, tr( "输入与输出数据" ) );
+  auto *ioGroup = SicnuUi::makeGroup( this, tr( "Input and Output Data" ) );
   auto *ioForm = SicnuUi::makeFormLayout( ioGroup );
 
   auto makeBrowse = [this]( QLineEdit **editOut, const QString &obj,
@@ -107,9 +107,9 @@ void RsPostProcessDialog::setupUi()
     edit->setObjectName( obj );
     edit->setPlaceholderText( placeholder );
     *editOut = edit;
-    auto *btn = new QPushButton( tr( "浏览…" ), this );
+    auto *btn = new QPushButton( tr( "Browse..." ), this );
     SicnuUi::markSecondary( btn );
-    SicnuDialogHelp::tip( btn, save ? tr( "选择输出文件保存路径" ) : tr( "选择输入文件路径" ) );
+    SicnuDialogHelp::tip( btn, save ? tr( "Choose the Output File Save Path" ) : tr( "Select Input File Path" ) );
     connect( btn, &QPushButton::clicked, this, [this, edit, save, filter, placeholder]() {
       const QString p = save
                           ? QFileDialog::getSaveFileName( this, placeholder, edit->text(), filter )
@@ -123,26 +123,26 @@ void RsPostProcessDialog::setupUi()
   };
 
   auto *inRow = makeBrowse( &m_inputEdit, QStringLiteral( "ppInput" ),
-                            tr( "分类/标签栅格" ), false,
+                            tr( "Classification / label raster" ), false,
                             tr( "GeoTIFF (*.tif *.tiff);;All files (*)" ) );
-  SicnuDialogHelp::tip( m_inputEdit, tr( "待进行后处理的输入分类或标签栅格文件" ) );
-  ioForm->addRow( tr( "输入栅格" ), inRow );
+  SicnuDialogHelp::tip( m_inputEdit, tr( "Input classification or label raster file for post-processing" ) );
+  ioForm->addRow( tr( "Input Raster" ), inRow );
 
   const bool isVectorOut = ( m_algo == Algorithm::Polygonize );
   auto *outRow = makeBrowse( &m_outputEdit, QStringLiteral( "ppOutput" ),
-                             isVectorOut ? tr( "输出 .gpkg / .shp" ) : tr( "输出 GeoTIFF" ),
+                             isVectorOut ? tr( "Output .gpkg / .shp" ) : tr( "Output GeoTIFF" ),
                              true,
                              isVectorOut
                                ? tr( "GeoPackage (*.gpkg);;ESRI Shapefile (*.shp)" )
                                : tr( "GeoTIFF (*.tif)" ) );
-  SicnuDialogHelp::tip( m_outputEdit, isVectorOut ? tr( "矢量化输出文件路径 (*.gpkg 或 *.shp)" ) : tr( "后处理结果栅格输出路径 (*.tif)" ) );
-  ioForm->addRow( isVectorOut ? tr( "输出矢量" ) : tr( "输出栅格" ), outRow );
+  SicnuDialogHelp::tip( m_outputEdit, isVectorOut ? tr( "Vectorized output file path (*.gpkg or *.shp)" ) : tr( "Post-processing result raster output path (*.tif)" ) );
+  ioForm->addRow( isVectorOut ? tr( "Output Vector" ) : tr( "Output Raster" ), outRow );
   root->addWidget( ioGroup );
 
   // Algorithm-specific parameters
   if ( m_algo != Algorithm::Polygonize )
   {
-    auto *paramGroup = SicnuUi::makeGroup( this, tr( "算法控制参数" ) );
+    auto *paramGroup = SicnuUi::makeGroup( this, tr( "Algorithm Control Parameters" ) );
     auto *paramForm = SicnuUi::makeFormLayout( paramGroup );
 
     switch ( m_algo )
@@ -152,15 +152,15 @@ void RsPostProcessDialog::setupUi()
         m_sieveSpin->setObjectName( QStringLiteral( "ppSieveSpin" ) );
         m_sieveSpin->setRange( 1, 1000000 );
         m_sieveSpin->setValue( 10 );
-        SicnuDialogHelp::tip( m_sieveSpin, tr( "面积阈值（像元数）：小于该像元数的碎小连通斑块将被滤除并由邻域填充" ) );
-        paramForm->addRow( tr( "面积阈值 (像元)" ), m_sieveSpin );
+        SicnuDialogHelp::tip( m_sieveSpin, tr( "Area threshold (pixels): connected patches below this pixel count are filtered out and filled from the neighbourhood" ) );
+        paramForm->addRow( tr( "Area Threshold (pixels)" ), m_sieveSpin );
         m_connectSpin = new QSpinBox( paramGroup );
         m_connectSpin->setObjectName( QStringLiteral( "ppConnectSpin" ) );
         m_connectSpin->setRange( 4, 8 );
         m_connectSpin->setSingleStep( 4 );
         m_connectSpin->setValue( 8 );
-        SicnuDialogHelp::tip( m_connectSpin, tr( "像素连通性：4 连通（上下左右）或 8 连通（含对角线）" ) );
-        paramForm->addRow( tr( "连通性 (4/8)" ), m_connectSpin );
+        SicnuDialogHelp::tip( m_connectSpin, tr( "Pixel connectivity: 4-connected (edge neighbours) or 8-connected (incl. diagonals)" ) );
+        paramForm->addRow( tr( "Connectivity (4/8)" ), m_connectSpin );
         break;
       case Algorithm::Majority:
         m_majoritySpin = new QSpinBox( paramGroup );
@@ -168,8 +168,8 @@ void RsPostProcessDialog::setupUi()
         m_majoritySpin->setRange( 3, 7 );
         m_majoritySpin->setSingleStep( 2 );
         m_majoritySpin->setValue( 3 );
-        SicnuDialogHelp::tip( m_majoritySpin, tr( "众数滤波窗口边长（奇数 3/5/7），越大平滑强度越高" ) );
-        paramForm->addRow( tr( "核大小 (奇数)" ), m_majoritySpin );
+        SicnuDialogHelp::tip( m_majoritySpin, tr( "Majority filter window size (odd 3/5/7); larger values smooth more" ) );
+        paramForm->addRow( tr( "Kernel Size (odd)" ), m_majoritySpin );
         break;
       case Algorithm::Clump:
         m_connectSpin = new QSpinBox( paramGroup );
@@ -177,19 +177,19 @@ void RsPostProcessDialog::setupUi()
         m_connectSpin->setRange( 4, 8 );
         m_connectSpin->setSingleStep( 4 );
         m_connectSpin->setValue( 8 );
-        SicnuDialogHelp::tip( m_connectSpin, tr( "连通域判定方式：4 连通或 8 连通" ) );
-        paramForm->addRow( tr( "连通性 (4/8)" ), m_connectSpin );
+        SicnuDialogHelp::tip( m_connectSpin, tr( "Connected-region rule: 4-connectivity or 8-connectivity" ) );
+        paramForm->addRow( tr( "Connectivity (4/8)" ), m_connectSpin );
         break;
       case Algorithm::Recode:
         m_recodeTable = new QTableWidget( 6, 2, paramGroup );
         m_recodeTable->setObjectName( QStringLiteral( "ppRecodeTable" ) );
-        m_recodeTable->setHorizontalHeaderLabels( { tr( "旧类" ), tr( "新类" ) } );
+        m_recodeTable->setHorizontalHeaderLabels( { tr( "Old Class" ), tr( "New Class" ) } );
         m_recodeTable->horizontalHeader()->setStretchLastSection( true );
         m_recodeTable->verticalHeader()->setVisible( false );
         m_recodeTable->setAlternatingRowColors( true );
         m_recodeTable->setMinimumHeight( 140 );
-        SicnuDialogHelp::tip( m_recodeTable, tr( "旧类别 ID 到新类别 ID 的映射对照表" ) );
-        paramForm->addRow( tr( "重编码对照表" ), m_recodeTable );
+        SicnuDialogHelp::tip( m_recodeTable, tr( "Mapping table from old class IDs to new class IDs" ) );
+        paramForm->addRow( tr( "Recoding Table" ), m_recodeTable );
         break;
       case Algorithm::Polygonize:
         break;
@@ -200,22 +200,22 @@ void RsPostProcessDialog::setupUi()
   SicnuDialogHelp::applyDialogChrome( this, QStringLiteral( "post_process" ) );
 
   m_loadToLayersCb = new QCheckBox(
-    tr( "完成后加载结果到分类窗口图层管理" ), this );
+    tr( "Load results into the classification window layer management when finished" ), this );
   m_loadToLayersCb->setObjectName( QStringLiteral( "ppLoadToLayers" ) );
   m_loadToLayersCb->setChecked( true ); // default on
   m_loadToLayersCb->setToolTip(
-    tr( "默认勾选：结果栅格/矢量加入本分类窗口左侧图层树，而非仅写文件。" ) );
+    tr( "Ticked by default: result rasters / vectors join this classification window's layer tree on the left instead of only being written to files." ) );
   root->addWidget( m_loadToLayersCb );
 
   auto *buttons = new QDialogButtonBox(
     QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this );
-  buttons->button( QDialogButtonBox::Ok )->setText( tr( "运行" ) );
-  buttons->button( QDialogButtonBox::Cancel )->setText( tr( "取消" ) );
+  buttons->button( QDialogButtonBox::Ok )->setText( tr( "Run" ) );
+  buttons->button( QDialogButtonBox::Cancel )->setText( tr( "Cancel" ) );
   SicnuUi::markPrimary( buttons->button( QDialogButtonBox::Ok ) );
   SicnuUi::markSecondary( buttons->button( QDialogButtonBox::Cancel ) );
 
-  auto *helpBtn = buttons->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
-  helpBtn->setToolTip( tr( "打开本对话框的帮助说明。" ) );
+  auto *helpBtn = buttons->addButton( tr( "Help" ), QDialogButtonBox::HelpRole );
+  helpBtn->setToolTip( tr( "Opens the help for this dialog." ) );
   SicnuUi::markSecondary( helpBtn );
   connect( helpBtn, &QPushButton::clicked, this, [this]() {
     SicnuDialogHelp::showToolHelp( this, QStringLiteral( "post_process" ), windowTitle() );
@@ -295,13 +295,13 @@ bool RsPostProcessDialog::buildConfig( RsPostProcessConfig &cfg, QString *errorM
   if ( cfg.inputPath.isEmpty() )
   {
     if ( errorMessage )
-      *errorMessage = tr( "请指定输入栅格路径" );
+      *errorMessage = tr( "Please specify the input raster path" );
     return false;
   }
   if ( !QFileInfo::exists( cfg.inputPath ) )
   {
     if ( errorMessage )
-      *errorMessage = tr( "输入文件不存在: %1" ).arg( cfg.inputPath );
+      *errorMessage = tr( "Input file does not exist: %1" ).arg( cfg.inputPath );
     return false;
   }
 
@@ -346,7 +346,7 @@ bool RsPostProcessDialog::buildConfig( RsPostProcessConfig &cfg, QString *errorM
       if ( cfg.recodeMap.isEmpty() )
       {
         if ( errorMessage )
-          *errorMessage = tr( "请在重编码表中至少填写一行旧类→新类" );
+          *errorMessage = tr( "Fill in at least one old class → new class row in the recoding table" );
         return false;
       }
       cfg.outputRasterPath = out;

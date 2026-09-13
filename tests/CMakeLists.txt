@@ -8211,3 +8211,23 @@ target_include_directories(benchmark_scale8 PRIVATE
   ${CMAKE_SOURCE_DIR}/src/processing
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+# D6 i18n guards: .ts completeness, glossary resolution, unwrapped-string audit
+add_executable(test_i18n
+  test_i18n.cpp
+)
+target_link_libraries(test_i18n PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Xml
+  Sicnu::help
+)
+target_include_directories(test_i18n PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_i18n PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+set_target_properties(test_i18n PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_i18n)

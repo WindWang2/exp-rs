@@ -82,7 +82,7 @@ QWidget *PreferencesDialog::unregisterExternalPage( const QString &title )
 PreferencesDialog::PreferencesDialog(QWidget *parent)
     : QDialog(parent)
 {
-    setWindowTitle(tr("首选项"));
+    setWindowTitle(tr("Preferences"));
     SicnuUi::polishDialog( this, 560 );
     resize( 580, 440 );
     setMinimumSize( 520, 380 );
@@ -112,10 +112,10 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
     auto *buttonBox = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel | QDialogButtonBox::Apply | QDialogButtonBox::Help, this );
     buttonBox->setObjectName( QStringLiteral( "preferencesButtonBox" ) );
-    buttonBox->button( QDialogButtonBox::Ok )->setText( tr( "确定" ) );
-    buttonBox->button( QDialogButtonBox::Cancel )->setText( tr( "取消" ) );
-    buttonBox->button( QDialogButtonBox::Apply )->setText( tr( "应用" ) );
-    buttonBox->button( QDialogButtonBox::Help )->setText( tr( "帮助" ) );
+    buttonBox->button( QDialogButtonBox::Ok )->setText( tr( "OK" ) );
+    buttonBox->button( QDialogButtonBox::Cancel )->setText( tr( "Cancel" ) );
+    buttonBox->button( QDialogButtonBox::Apply )->setText( tr( "Apply" ) );
+    buttonBox->button( QDialogButtonBox::Help )->setText( tr( "Help" ) );
 
     SicnuUi::markPrimary( buttonBox->button( QDialogButtonBox::Ok ) );
     SicnuUi::markSecondary( buttonBox->button( QDialogButtonBox::Cancel ) );
@@ -131,11 +131,11 @@ PreferencesDialog::PreferencesDialog(QWidget *parent)
     mainLayout->addWidget(buttonBox);
 
     // Tips on key fields (after tabs built)
-    SicnuDialogHelp::tip( m_tabWidget, tr( "常规 / 外部工具路径 / 关于 等系统全局配置选项卡。" ) );
+    SicnuDialogHelp::tip( m_tabWidget, tr( "System-wide tabs such as General / external tool paths / About." ) );
     if ( m_themeCombo )
-        SicnuDialogHelp::tip( m_themeCombo, tr( "界面主题风格：浅色模式或深色模式。" ) );
+        SicnuDialogHelp::tip( m_themeCombo, tr( "Interface theme style: light mode or dark mode." ) );
     if ( m_crsCombo )
-        SicnuDialogHelp::tip( m_crsCombo, tr( "新建遥感工程时的默认投影坐标参考系 (CRS)。" ) );
+        SicnuDialogHelp::tip( m_crsCombo, tr( "Default projected CRS for new remote-sensing projects." ) );
 
     loadSettings();
 }
@@ -147,46 +147,46 @@ void PreferencesDialog::setupGeneralTab()
     tabLayout->setContentsMargins( 8, 8, 8, 8 );
     tabLayout->setSpacing( 10 );
 
-    auto *displayGroup = SicnuUi::makeGroup( tab, tr( "界面与默认坐标系" ) );
+    auto *displayGroup = SicnuUi::makeGroup( tab, tr( "Interface and Default CRS" ) );
     auto *displayForm = SicnuUi::makeFormLayout( displayGroup );
 
     m_themeCombo = new QComboBox( displayGroup );
-    m_themeCombo->addItem( tr( "浅色主题 (Light)" ), QStringLiteral( "light" ) );
-    m_themeCombo->addItem( tr( "深色主题 (Dark)" ), QStringLiteral( "dark" ) );
-    SicnuDialogHelp::tip( m_themeCombo, tr( "系统界面外观主题：浅色模式或深色模式。" ) );
-    displayForm->addRow( tr( "界面主题" ), m_themeCombo );
+    m_themeCombo->addItem( tr( "Light Theme" ), QStringLiteral( "light" ) );
+    m_themeCombo->addItem( tr( "Dark Theme" ), QStringLiteral( "dark" ) );
+    SicnuDialogHelp::tip( m_themeCombo, tr( "System interface theme: light mode or dark mode." ) );
+    displayForm->addRow( tr( "Interface Theme" ), m_themeCombo );
 
     m_crsCombo = new QComboBox( displayGroup );
-    m_crsCombo->addItem( "EPSG:4326 - WGS 84 (地理坐标系)", "EPSG:4326" );
-    m_crsCombo->addItem( "EPSG:3857 - WGS 84 / Pseudo-Mercator", "EPSG:3857" );
-    m_crsCombo->addItem( "EPSG:32649 - WGS 84 / UTM zone 49N", "EPSG:32649" );
-    m_crsCombo->addItem( "EPSG:32650 - WGS 84 / UTM zone 50N", "EPSG:32650" );
-    m_crsCombo->addItem( "EPSG:32651 - WGS 84 / UTM zone 51N", "EPSG:32651" );
-    m_crsCombo->addItem( "EPSG:4490 - CGCS2000 (国家2000大地坐标系)", "EPSG:4490" );
+    m_crsCombo->addItem( tr("EPSG:4326 - WGS 84 (geographic)"), "EPSG:4326" );
+    m_crsCombo->addItem( tr( "EPSG:3857 - WGS 84 / Pseudo-Mercator" ), "EPSG:3857" );
+    m_crsCombo->addItem( tr( "EPSG:32649 - WGS 84 / UTM zone 49N" ), "EPSG:32649" );
+    m_crsCombo->addItem( tr( "EPSG:32650 - WGS 84 / UTM zone 50N" ), "EPSG:32650" );
+    m_crsCombo->addItem( tr( "EPSG:32651 - WGS 84 / UTM zone 51N" ), "EPSG:32651" );
+    m_crsCombo->addItem( tr("EPSG:4490 - CGCS2000 (China Geodetic Coordinate System 2000)"), "EPSG:4490" );
     m_crsCombo->setEditable( true );
-    SicnuDialogHelp::tip( m_crsCombo, tr( "新建遥感工程时的默认坐标参考系。" ) );
-    displayForm->addRow( tr( "默认坐标系" ), m_crsCombo );
+    SicnuDialogHelp::tip( m_crsCombo, tr( "Default CRS for new remote-sensing projects." ) );
+    displayForm->addRow( tr( "Default CRS" ), m_crsCombo );
     tabLayout->addWidget( displayGroup );
 
     // Logging section
-    auto *logGroup = SicnuUi::makeGroup( tab, tr( "运行日志配置" ) );
+    auto *logGroup = SicnuUi::makeGroup( tab, tr( "Run Log Settings" ) );
     auto *logForm = SicnuUi::makeFormLayout( logGroup );
 
-    m_logToFileCheck = new QCheckBox( tr( "启用日志文件写入" ), logGroup );
-    SicnuDialogHelp::tip( m_logToFileCheck, tr( "是否将系统与算法运行日志输出保存到本地磁盘文件。" ) );
+    m_logToFileCheck = new QCheckBox( tr( "Write log file" ), logGroup );
+    SicnuDialogHelp::tip( m_logToFileCheck, tr( "Whether to save system and algorithm run logs to a local disk file." ) );
     logForm->addRow( QString(), m_logToFileCheck );
 
     auto *logPathLayout = new QHBoxLayout();
     logPathLayout->setSpacing( 8 );
     m_logFilePathEdit = new QLineEdit( logGroup );
-    m_logFilePathEdit->setPlaceholderText( tr( "日志文件完整路径…" ) );
-    SicnuDialogHelp::tip( m_logFilePathEdit, tr( "保存日志记录的完整文件路径。" ) );
+    m_logFilePathEdit->setPlaceholderText( tr( "Full path of the log file..." ) );
+    SicnuDialogHelp::tip( m_logFilePathEdit, tr( "Full file path where the log is saved." ) );
     logPathLayout->addWidget( m_logFilePathEdit, 1 );
-    auto *logBrowseBtn = new QPushButton( tr( "浏览…" ), logGroup );
+    auto *logBrowseBtn = new QPushButton( tr( "Browse..." ), logGroup );
     SicnuUi::markSecondary( logBrowseBtn );
     connect( logBrowseBtn, &QPushButton::clicked, this, &PreferencesDialog::onBrowseLogPath );
     logPathLayout->addWidget( logBrowseBtn );
-    logForm->addRow( tr( "日志文件路径" ), logPathLayout );
+    logForm->addRow( tr( "Log File Path" ), logPathLayout );
     tabLayout->addWidget( logGroup );
 
     tabLayout->addStretch( 1 );
@@ -194,7 +194,7 @@ void PreferencesDialog::setupGeneralTab()
     connect( m_logToFileCheck, &QCheckBox::toggled, this, &PreferencesDialog::onLogToFileToggled );
     onLogToFileToggled( m_logToFileCheck->isChecked() );
 
-    m_tabWidget->addTab( tab, tr( "常规设置" ) );
+    m_tabWidget->addTab( tab, tr( "General Settings" ) );
 }
 
 void PreferencesDialog::setupToolsTab()
@@ -204,38 +204,38 @@ void PreferencesDialog::setupToolsTab()
     tabLayout->setContentsMargins( 8, 8, 8, 8 );
     tabLayout->setSpacing( 10 );
 
-    auto *toolsGroup = SicnuUi::makeGroup( tab, tr( "外部工具目录配置" ),
-                                           tr( "指定外部命令行工具路径以启用高级算法功能。" ) );
+    auto *toolsGroup = SicnuUi::makeGroup( tab, tr( "External Tool Directory Settings" ),
+                                           tr( "Specify external command-line tool paths to enable advanced algorithms." ) );
     auto *toolsForm = SicnuUi::makeFormLayout( toolsGroup );
 
     auto *gdalLayout = new QHBoxLayout();
     gdalLayout->setSpacing( 8 );
     m_gdalPathEdit = new QLineEdit( toolsGroup );
-    m_gdalPathEdit->setPlaceholderText( tr( "GDAL 工具目录（包含 gdal_translate、gdalwarp 等）…" ) );
-    SicnuDialogHelp::tip( m_gdalPathEdit, tr( "GDAL 工具目录路径，用于底层栅格格式转换与投影变换。" ) );
+    m_gdalPathEdit->setPlaceholderText( tr( "GDAL tools directory (containing gdal_translate, gdalwarp, etc.)..." ) );
+    SicnuDialogHelp::tip( m_gdalPathEdit, tr( "Path to the GDAL tools directory, used for low-level raster format conversion and reprojection." ) );
     gdalLayout->addWidget( m_gdalPathEdit, 1 );
-    auto *gdalBrowseBtn = new QPushButton( tr( "浏览…" ), toolsGroup );
+    auto *gdalBrowseBtn = new QPushButton( tr( "Browse..." ), toolsGroup );
     SicnuUi::markSecondary( gdalBrowseBtn );
     connect( gdalBrowseBtn, &QPushButton::clicked, this, &PreferencesDialog::onBrowseGdalPath );
     gdalLayout->addWidget( gdalBrowseBtn );
-    toolsForm->addRow( tr( "GDAL 工具路径" ), gdalLayout );
+    toolsForm->addRow( tr( "GDAL Tools Path" ), gdalLayout );
 
     auto *otbLayout = new QHBoxLayout();
     otbLayout->setSpacing( 8 );
     m_otbPathEdit = new QLineEdit( toolsGroup );
-    m_otbPathEdit->setPlaceholderText( tr( "OTB 应用程序目录路径…" ) );
-    SicnuDialogHelp::tip( m_otbPathEdit, tr( "Orfeo ToolBox 工具目录，供 OTB 包装算法调用。" ) );
+    m_otbPathEdit->setPlaceholderText( tr( "Orfeo ToolBox application directory..." ) );
+    SicnuDialogHelp::tip( m_otbPathEdit, tr( "Orfeo ToolBox directory used by the OTB wrapper algorithms." ) );
     otbLayout->addWidget( m_otbPathEdit, 1 );
-    auto *otbBrowseBtn = new QPushButton( tr( "浏览…" ), toolsGroup );
+    auto *otbBrowseBtn = new QPushButton( tr( "Browse..." ), toolsGroup );
     SicnuUi::markSecondary( otbBrowseBtn );
     connect( otbBrowseBtn, &QPushButton::clicked, this, &PreferencesDialog::onBrowseOtbPath );
     otbLayout->addWidget( otbBrowseBtn );
-    toolsForm->addRow( tr( "OTB 工具路径" ), otbLayout );
+    toolsForm->addRow( tr( "OTB Tools Path" ), otbLayout );
 
     tabLayout->addWidget( toolsGroup );
     tabLayout->addStretch( 1 );
 
-    m_tabWidget->addTab( tab, tr( "外部工具" ) );
+    m_tabWidget->addTab( tab, tr( "External Tools" ) );
 }
 
 void PreferencesDialog::setupAboutTab()
@@ -249,15 +249,15 @@ void PreferencesDialog::setupAboutTab()
     titleLabel->setAlignment(Qt::AlignCenter);
     layout->addWidget(titleLabel);
 
-    auto *versionLabel = new QLabel(tr("版本 1.0.0"), tab);
+    auto *versionLabel = new QLabel(tr("Version 1.0.0"), tab);
     versionLabel->setAlignment(Qt::AlignCenter);
     layout->addWidget(versionLabel);
 
-    auto *descLabel = new QLabel(tr("遥感影像综合处理与空间分析平台"), tab);
+    auto *descLabel = new QLabel(tr("Integrated remote-sensing image processing and spatial analysis platform"), tab);
     descLabel->setAlignment(Qt::AlignCenter);
     layout->addWidget(descLabel);
 
-    auto *buildLabel = new QLabel(tr("基于 QGIS 核心引擎与 GDAL / OTB 外部算法库构建"), tab);
+    auto *buildLabel = new QLabel(tr("Built on the QGIS core engine with external GDAL / OTB algorithm libraries"), tab);
     buildLabel->setAlignment(Qt::AlignCenter);
     layout->addWidget(buildLabel);
 

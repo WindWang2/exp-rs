@@ -22,7 +22,7 @@
 ChangeDetectionDialog::ChangeDetectionDialog( QWidget *parent )
   : RasterProcessingDialogBase( parent )
 {
-  setWindowTitle( tr( "变化检测" ) );
+  setWindowTitle( tr( "Change Detection" ) );
   setMinimumWidth( 480 );
   setupUi();
 }
@@ -33,9 +33,9 @@ void ChangeDetectionDialog::setupUi()
   setupHelpBanner( mainLayout );
 
   QGroupBox *inputGroup = setupInputGroup(
-    mainLayout, tr( "双时相输入数据" ) );
+    mainLayout, tr( "Two-Date Input Data" ) );
   inputGroup->setToolTip(
-    tr( "前后时相须完成高精度几何配准与辐射归一化。" ) );
+    tr( "The two epochs must be precisely co-registered and radiometrically normalized." ) );
   auto *form = SicnuUi::makeFormLayout();
   qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( form );
 
@@ -45,51 +45,51 @@ void ChangeDetectionDialog::setupUi()
   m_afterLayerCombo->setObjectName( QStringLiteral( "cdAfterCombo" ) );
   m_beforeBandCombo = new QComboBox( inputGroup );
   m_afterBandCombo = new QComboBox( inputGroup );
-  SicnuDialogHelp::tip( m_beforeLayerCombo, tr( "变化前（较早）时相栅格影像。" ) );
-  SicnuDialogHelp::tip( m_afterLayerCombo, tr( "变化后（较晚）时相栅格影像。" ) );
-  SicnuDialogHelp::tip( m_beforeBandCombo, tr( "前期影像参与比较的波段。" ) );
-  SicnuDialogHelp::tip( m_afterBandCombo, tr( "后期影像参与比较的波段。" ) );
-  form->addRow( tr( "前期影像" ), m_beforeLayerCombo );
-  form->addRow( tr( "前期波段" ), m_beforeBandCombo );
-  form->addRow( tr( "后期影像" ), m_afterLayerCombo );
-  form->addRow( tr( "后期波段" ), m_afterBandCombo );
+  SicnuDialogHelp::tip( m_beforeLayerCombo, tr( "Raster image of the earlier (pre-change) epoch." ) );
+  SicnuDialogHelp::tip( m_afterLayerCombo, tr( "Raster image of the later (post-change) epoch." ) );
+  SicnuDialogHelp::tip( m_beforeBandCombo, tr( "Band of the earlier image used in the comparison." ) );
+  SicnuDialogHelp::tip( m_afterBandCombo, tr( "Band of the later image used in the comparison." ) );
+  form->addRow( tr( "Earlier Image" ), m_beforeLayerCombo );
+  form->addRow( tr( "Earlier Band" ), m_beforeBandCombo );
+  form->addRow( tr( "Later Image" ), m_afterLayerCombo );
+  form->addRow( tr( "Later Band" ), m_afterBandCombo );
 
   // Dual-view interpretation aid (DoD: synchronized viewports / swipe where
   // they improve interpretation): open the comparison dialog prefilled with
   // the selected before/after rasters.
-  auto *compareButton = new QPushButton( tr( "双视图对比…" ), inputGroup );
+  auto *compareButton = new QPushButton( tr( "Dual-View Comparison..." ), inputGroup );
   compareButton->setObjectName( QStringLiteral( "changeCompareButton" ) );
   SicnuUi::markSecondary( compareButton );
   SicnuDialogHelp::tip( compareButton, tr(
-    "打开并排对比视图（分割线/Swipe + 闪烁），目视检查配准与变化。" ) );
+    "Opens the side-by-side comparison view (divider / swipe + blink) to visually inspect registration and change.")  );
   connect( compareButton, &QPushButton::clicked,
            this, &ChangeDetectionDialog::openComparisonPreview );
   form->addRow( QString(), compareButton );
 
   QGroupBox *methodGroup = setupParamGroup(
-    mainLayout, tr( "检测方法与掩膜选项" ) );
+    mainLayout, tr( "Detection Method and Mask Options" ) );
   methodGroup->setToolTip(
-    tr( "支持差值法、归一化差值法、比值法、CVA 变化向量分析与 MAD 多变量变化检测。" ) );
+    tr( "Supports differencing, normalized differencing, ratioing, CVA change vector analysis and MAD multivariate change detection." ) );
   auto *methodForm = SicnuUi::makeFormLayout();
   qobject_cast<QVBoxLayout *>( methodGroup->layout() )->addLayout( methodForm );
 
   m_methodCombo = new QComboBox( methodGroup );
   m_methodCombo->setObjectName( QStringLiteral( "cdMethodCombo" ) );
-  m_methodCombo->addItem( tr( "差值 Difference" ), QStringLiteral( "difference" ) );
-  m_methodCombo->addItem( tr( "归一化差值" ), QStringLiteral( "normalized_difference" ) );
-  m_methodCombo->addItem( tr( "比值 Ratio" ), QStringLiteral( "ratio" ) );
-  m_methodCombo->addItem( tr( "变化向量分析 CVA" ), QStringLiteral( "cva" ) );
-  m_methodCombo->addItem( tr( "多变量变化检测 MAD" ), QStringLiteral( "mad" ) );
-  m_methodCombo->addItem( tr( "变化掩膜（手动阈值）" ), QStringLiteral( "change_mask" ) );
+  m_methodCombo->addItem( tr( "Difference" ), QStringLiteral( "difference" ) );
+  m_methodCombo->addItem( tr( "Normalized Difference" ), QStringLiteral( "normalized_difference" ) );
+  m_methodCombo->addItem( tr( "Ratio" ), QStringLiteral( "ratio" ) );
+  m_methodCombo->addItem( tr( "Change Vector Analysis (CVA)" ), QStringLiteral( "cva" ) );
+  m_methodCombo->addItem( tr( "Multivariate Alteration Detection (MAD)" ), QStringLiteral( "mad" ) );
+  m_methodCombo->addItem( tr( "Change Mask (manual threshold)" ), QStringLiteral( "change_mask" ) );
   SicnuDialogHelp::tip( m_methodCombo, tr(
-    "• 差值：后−前\n• 归一化差值：(后−前)/(后+前)\n• 比值：后/前\n"
-    "• CVA：多波段变化向量幅值（用全部波段）\n• MAD：多变量变化检测（CCA 典型相关分析）\n• 掩膜：|差值|≥阈值" ) );
-  methodForm->addRow( tr( "变化算法" ), m_methodCombo );
+    "• Difference: later − earlier\n• Normalized difference: (later − earlier)/(later + earlier)\n• Ratio: later / earlier\n"
+    "• CVA: multiband change vector magnitude (all bands)\n• MAD: multivariate alteration detection (canonical correlation analysis)\n• Mask: |difference| ≥ threshold")  );
+  methodForm->addRow( tr( "Change Algorithm" ), m_methodCombo );
 
-  m_makeMaskCheck = new QCheckBox( tr( "同时输出二值变化掩膜" ), methodGroup );
+  m_makeMaskCheck = new QCheckBox( tr( "Also output a binary change mask" ), methodGroup );
   m_makeMaskCheck->setObjectName( QStringLiteral( "cdMakeMaskCheck" ) );
   SicnuDialogHelp::tip( m_makeMaskCheck, tr(
-    "除方法栅格外，再输出 0/1 变化掩膜（可配阈值策略、形态学清理与最小制图单元）。" ) );
+    "Besides the method raster, also outputs a 0/1 change mask (with threshold strategy, morphological cleanup and a minimum mapping unit).")  );
   methodForm->addRow( QString(), m_makeMaskCheck );
 
   // Mask parameter section: threshold strategy + cleanup + minimum mapping unit.
@@ -101,20 +101,20 @@ void ChangeDetectionDialog::setupUi()
 
   m_thresholdMethodCombo = new QComboBox( m_maskParamFrame );
   m_thresholdMethodCombo->setObjectName( QStringLiteral( "cdThresholdMethodCombo" ) );
-  m_thresholdMethodCombo->addItem( tr( "手动阈值" ), QStringLiteral( "manual" ) );
-  m_thresholdMethodCombo->addItem( tr( "Otsu 大津法" ), QStringLiteral( "otsu" ) );
-  m_thresholdMethodCombo->addItem( tr( "分位数阈值" ), QStringLiteral( "percentile" ) );
-  m_thresholdMethodCombo->addItem( tr( "统计阈值（均值+kσ）" ), QStringLiteral( "statistical" ) );
-  SicnuDialogHelp::tip( m_thresholdMethodCombo, tr( "二值变化掩膜阈值提取策略。" ) );
-  maskForm->addRow( tr( "阈值策略" ), m_thresholdMethodCombo );
+  m_thresholdMethodCombo->addItem( tr( "Manual Threshold" ), QStringLiteral( "manual" ) );
+  m_thresholdMethodCombo->addItem( tr( "Otsu Threshold" ), QStringLiteral( "otsu" ) );
+  m_thresholdMethodCombo->addItem( tr( "Percentile Threshold" ), QStringLiteral( "percentile" ) );
+  m_thresholdMethodCombo->addItem( tr( "Statistical Threshold (mean + kσ)" ), QStringLiteral( "statistical" ) );
+  SicnuDialogHelp::tip( m_thresholdMethodCombo, tr( "Threshold extraction strategy for the binary change mask." ) );
+  maskForm->addRow( tr( "Threshold Strategy" ), m_thresholdMethodCombo );
 
-  m_thresholdLabel = new QLabel( tr( "阈值" ), m_maskParamFrame );
+  m_thresholdLabel = new QLabel( tr( "Threshold" ), m_maskParamFrame );
   m_thresholdSpin = new QDoubleSpinBox( m_maskParamFrame );
   m_thresholdSpin->setObjectName( QStringLiteral( "cdThresholdSpin" ) );
   m_thresholdSpin->setRange( 0.0, 10000.0 );
   m_thresholdSpin->setDecimals( 2 );
   m_thresholdSpin->setValue( 10.0 );
-  SicnuDialogHelp::tip( m_thresholdSpin, tr( "手动指定绝对变化阈值。" ) );
+  SicnuDialogHelp::tip( m_thresholdSpin, tr( "Specify an absolute change threshold manually." ) );
   maskForm->addRow( m_thresholdLabel, m_thresholdSpin );
 
   m_percentileSpin = new QDoubleSpinBox( m_maskParamFrame );
@@ -122,45 +122,45 @@ void ChangeDetectionDialog::setupUi()
   m_percentileSpin->setRange( 0.0, 100.0 );
   m_percentileSpin->setDecimals( 1 );
   m_percentileSpin->setValue( 90.0 );
-  SicnuDialogHelp::tip( m_percentileSpin, tr( "按变化强度百分位提取变化区域（0~100）。" ) );
-  maskForm->addRow( tr( "分位数值 (%)" ), m_percentileSpin );
+  SicnuDialogHelp::tip( m_percentileSpin, tr( "Extract change areas by change-magnitude percentile (0–100)." ) );
+  maskForm->addRow( tr( "Percentile Value (%)" ), m_percentileSpin );
 
   m_statisticalKSpin = new QDoubleSpinBox( m_maskParamFrame );
   m_statisticalKSpin->setObjectName( QStringLiteral( "cdStatisticalKSpin" ) );
   m_statisticalKSpin->setRange( 0.0, 10.0 );
   m_statisticalKSpin->setDecimals( 2 );
   m_statisticalKSpin->setValue( 2.0 );
-  SicnuDialogHelp::tip( m_statisticalKSpin, tr( "统计阈值 = 变化均值 + k × 标准差。" ) );
-  maskForm->addRow( tr( "k (标准差倍数)" ), m_statisticalKSpin );
+  SicnuDialogHelp::tip( m_statisticalKSpin, tr( "Statistical threshold = change mean + k × std dev." ) );
+  maskForm->addRow( tr( "k (std-dev multiplier)" ), m_statisticalKSpin );
 
   m_cleanupCombo = new QComboBox( m_maskParamFrame );
   m_cleanupCombo->setObjectName( QStringLiteral( "cdCleanupCombo" ) );
-  m_cleanupCombo->addItem( tr( "无操作" ), QStringLiteral( "none" ) );
-  m_cleanupCombo->addItem( tr( "形态学腐蚀" ), QStringLiteral( "erode" ) );
-  m_cleanupCombo->addItem( tr( "形态学膨胀" ), QStringLiteral( "dilate" ) );
-  m_cleanupCombo->addItem( tr( "开运算 (去孤立斑)" ), QStringLiteral( "open" ) );
-  m_cleanupCombo->addItem( tr( "闭运算 (填孔洞)" ), QStringLiteral( "close" ) );
-  SicnuDialogHelp::tip( m_cleanupCombo, tr( "二值变化掩膜形态学后处理操作。" ) );
-  maskForm->addRow( tr( "形态学清理" ), m_cleanupCombo );
+  m_cleanupCombo->addItem( tr( "No Operation" ), QStringLiteral( "none" ) );
+  m_cleanupCombo->addItem( tr( "Morphological Erosion" ), QStringLiteral( "erode" ) );
+  m_cleanupCombo->addItem( tr( "Morphological Dilation" ), QStringLiteral( "dilate" ) );
+  m_cleanupCombo->addItem( tr( "Opening (remove isolated patches)" ), QStringLiteral( "open" ) );
+  m_cleanupCombo->addItem( tr( "Closing (fill holes)" ), QStringLiteral( "close" ) );
+  SicnuDialogHelp::tip( m_cleanupCombo, tr( "Morphological post-processing for the binary change mask." ) );
+  maskForm->addRow( tr( "Morphological Cleanup" ), m_cleanupCombo );
 
   m_cleanupIterSpin = new QSpinBox( m_maskParamFrame );
   m_cleanupIterSpin->setObjectName( QStringLiteral( "cdCleanupIterSpin" ) );
   m_cleanupIterSpin->setRange( 1, 20 );
   m_cleanupIterSpin->setValue( 1 );
-  SicnuDialogHelp::tip( m_cleanupIterSpin, tr( "形态学运算迭代次数" ) );
-  maskForm->addRow( tr( "迭代次数" ), m_cleanupIterSpin );
+  SicnuDialogHelp::tip( m_cleanupIterSpin, tr( "Morphological operation iterations" ) );
+  maskForm->addRow( tr( "Iterations" ), m_cleanupIterSpin );
 
   m_minAreaSpin = new QSpinBox( m_maskParamFrame );
   m_minAreaSpin->setObjectName( QStringLiteral( "cdMinAreaSpin" ) );
   m_minAreaSpin->setRange( 0, 100000000 );
   m_minAreaSpin->setValue( 0 );
-  SicnuDialogHelp::tip( m_minAreaSpin, tr( "最小制图单元（像元）：移除小于该面积的碎小连通斑块；0 = 关闭。" ) );
-  maskForm->addRow( tr( "最小制图单元 (像元)" ), m_minAreaSpin );
+  SicnuDialogHelp::tip( m_minAreaSpin, tr( "Minimum mapping unit (pixels): removes small connected patches below this area; 0 = off." ) );
+  maskForm->addRow( tr( "Minimum Mapping Unit (pixels)" ), m_minAreaSpin );
 
   methodForm->addRow( m_maskParamFrame );
 
   setupOutputRow( mainLayout );
-  m_statusLabel = SicnuUi::makeHintLabel( this, tr( "就绪" ) );
+  m_statusLabel = SicnuUi::makeHintLabel( this, tr( "Ready" ) );
   mainLayout->addWidget( m_statusLabel );
   setupButtonBar( mainLayout );
   mainLayout->addStretch( 1 );
@@ -196,7 +196,7 @@ void ChangeDetectionDialog::updateBandSelectors()
     if ( !rl )
       return;
     for ( int i = 1; i <= rl->bandCount(); ++i )
-      bandCombo->addItem( tr( "波段 %1" ).arg( i ), i );
+      bandCombo->addItem( tr( "Band %1" ).arg( i ), i );
   };
   fillBands( m_beforeLayerCombo, m_beforeBandCombo );
   fillBands( m_afterLayerCombo, m_afterBandCombo );
@@ -261,7 +261,7 @@ void ChangeDetectionDialog::openComparisonPreview()
     QgsProject::instance()->mapLayer( m_afterLayerCombo->currentData().toString() ) );
   if ( !before || !before->isValid() || !after || !after->isValid() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请先选择前后时相影像。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "Select the earlier and later epoch images first." ) );
     return;
   }
 
@@ -275,13 +275,13 @@ bool ChangeDetectionDialog::validateInputs()
 {
   if ( outputPath().isEmpty() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请指定输出文件。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "Specify the output file." ) );
     return false;
   }
   if ( m_beforeLayerCombo->currentData().toString().isEmpty()
        || m_afterLayerCombo->currentData().toString().isEmpty() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "请选择前期与后期影像。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "Select the earlier and later images." ) );
     return false;
   }
   auto *before = qobject_cast<QgsRasterLayer *>(
@@ -290,7 +290,7 @@ bool ChangeDetectionDialog::validateInputs()
     QgsProject::instance()->mapLayer( m_afterLayerCombo->currentData().toString() ) );
   if ( !before || !before->isValid() || !after || !after->isValid() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "前期或后期影像无效。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "The earlier or later image is invalid." ) );
     return false;
   }
   const QString gridMessage = rasterGridCompatibilityMessage(
@@ -298,7 +298,7 @@ bool ChangeDetectionDialog::validateInputs()
   if ( !gridMessage.isEmpty() )
   {
     QMessageBox::warning( this, dialogTitle(),
-                          tr( "两张影像的像元网格不兼容，无法逐像元比较：\n%1" )
+                          tr( "The pixel grids of the two images are incompatible; per-pixel comparison is not possible:\n%1" )
                             .arg( gridMessage ) );
     return false;
   }
@@ -361,29 +361,29 @@ void ChangeDetectionDialog::onRun()
     QgsProject::instance()->mapLayer( m_afterLayerCombo->currentData().toString() ) );
   if ( !before || !before->isValid() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "前期影像无效。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "The earlier image is invalid." ) );
     return;
   }
   if ( !after || !after->isValid() )
   {
-    QMessageBox::warning( this, dialogTitle(), tr( "后期影像无效。" ) );
+    QMessageBox::warning( this, dialogTitle(), tr( "The later image is invalid." ) );
     return;
   }
 
   setRasterLayer( before );
   const Json::Value params = buildParams();
-  m_statusLabel->setText( tr( "运行中…" ) );
+  m_statusLabel->setText( tr( "Running..." ) );
   runOperatorTask( QStringLiteral( "rs:change_detection" ), params,
                    [this]( const Json::Value &result ) {
                      if ( !m_statusLabel )
                        return;
                      if ( result.isMember( "mean" ) )
                      {
-                       QString text = tr( "变化均值 %1，标准差 %2" )
+                       QString text = tr( "Change mean %1, std dev %2" )
                                         .arg( result["mean"].asDouble(), 0, 'f', 4 )
                                         .arg( result["stddev"].asDouble(), 0, 'f', 4 );
                        if ( result.isMember( "changedPercent" ) )
-                         text += tr( "；变化像元 %1 / %2（%3%）" )
+                         text += tr( "; changed pixels %1 / %2 (%3%)" )
                                    .arg( result["changedPixels"].asUInt64() )
                                    .arg( result["totalPixels"].asUInt64() )
                                    .arg( result["changedPercent"].asDouble(), 0, 'f', 2 );

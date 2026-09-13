@@ -64,7 +64,7 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral( "temporal_analysis" ); }
-    QString dialogTitle() const override { return tr( "时间序列分析" ); }
+    QString dialogTitle() const override { return tr( "Time Series Analysis" ); }
     bool validateInputs() override;
     void onRun() override;
 

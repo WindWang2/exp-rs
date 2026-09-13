@@ -179,15 +179,15 @@ QString kindText( sicnu::data::AssetKind kind )
   switch ( kind )
   {
     case sicnu::data::AssetKind::Raster:
-      return QObject::tr( "栅格" );
+      return QObject::tr( "Raster" );
     case sicnu::data::AssetKind::Vector:
-      return QObject::tr( "矢量" );
+      return QObject::tr( "Vector" );
     case sicnu::data::AssetKind::RemoteMap:
-      return QObject::tr( "远程地图" );
+      return QObject::tr( "Remote Map" );
     case sicnu::data::AssetKind::VirtualRaster:
-      return QObject::tr( "虚拟栅格" );
+      return QObject::tr( "Virtual Raster" );
   }
-  return QObject::tr( "未知" );
+  return QObject::tr( "Unknown" );
 }
 
 /// Detailed type label used as a name prefix (e.g. 多波段栅格 / 单波段栅格).
@@ -201,8 +201,8 @@ QString kindPrefix( const sicnu::data::AssetSnapshot &snapshot )
            std::get_if<sicnu::data::RasterStructure>( &snapshot.structure() ) )
     {
       if ( raster->bandCount <= 1 )
-        return QObject::tr( "单波段栅格" );
-      return QObject::tr( "多波段栅格" );
+        return QObject::tr( "Single-band raster" );
+      return QObject::tr( "Multiband Raster" );
     }
   }
   return kindText( snapshot.kind() );
@@ -225,7 +225,7 @@ void configureNameCell( QTreeWidgetItem *item,
   item->setData( 0, kStatusLabelRole, statusLabel );
   item->setData( 0, kStatusColorRole, barColor );
   QString tip = QStringLiteral( "%1\n%2: %3" )
-                  .arg( displayName, QObject::tr( "状态" ), statusLabel );
+                  .arg( displayName, QObject::tr( "Status" ), statusLabel );
   if ( !sourcePath.isEmpty() )
     tip += QStringLiteral( "\n%1" ).arg( sourcePath );
   item->setToolTip( 0, tip );
@@ -236,25 +236,25 @@ QString statusText( sicnu::data::AssetState state )
   switch ( state )
   {
     case sicnu::data::AssetState::Registered:
-      return QObject::tr( "已登记" );
+      return QObject::tr( "Registered" );
     case sicnu::data::AssetState::Resolving:
-      return QObject::tr( "解析中" );
+      return QObject::tr( "Parsing" );
     case sicnu::data::AssetState::Ready:
-      return QObject::tr( "就绪" );
+      return QObject::tr( "Ready" );
     case sicnu::data::AssetState::Missing:
-      return QObject::tr( "源缺失" );
+      return QObject::tr( "Source Missing" );
     case sicnu::data::AssetState::UnavailableSource:
-      return QObject::tr( "源不可用" );
+      return QObject::tr( "Source Unavailable" );
     case sicnu::data::AssetState::Offline:
-      return QObject::tr( "离线" );
+      return QObject::tr( "Offline" );
     case sicnu::data::AssetState::AuthenticationRequired:
-      return QObject::tr( "需要认证" );
+      return QObject::tr( "Authentication Required" );
     case sicnu::data::AssetState::Error:
-      return QObject::tr( "错误" );
+      return QObject::tr( "Error" );
     case sicnu::data::AssetState::Stale:
-      return QObject::tr( "过期" );
+      return QObject::tr( "Stale" );
   }
-  return QObject::tr( "未知" );
+  return QObject::tr( "Unknown" );
 }
 
 QString persistenceText( sicnu::data::PersistencePolicy persistence )
@@ -262,13 +262,13 @@ QString persistenceText( sicnu::data::PersistencePolicy persistence )
   switch ( persistence )
   {
     case sicnu::data::PersistencePolicy::ProjectPersistent:
-      return QObject::tr( "工程持久" );
+      return QObject::tr( "Project Persistent" );
     case sicnu::data::PersistencePolicy::SessionTemporary:
-      return QObject::tr( "会话临时" );
+      return QObject::tr( "Session Temporary" );
     case sicnu::data::PersistencePolicy::TaskTemporary:
-      return QObject::tr( "任务临时" );
+      return QObject::tr( "Task Temporary" );
   }
-  return QObject::tr( "未知" );
+  return QObject::tr( "Unknown" );
 }
 
 QString storageText( sicnu::data::StorageKind storage )
@@ -276,15 +276,15 @@ QString storageText( sicnu::data::StorageKind storage )
   switch ( storage )
   {
     case sicnu::data::StorageKind::File:
-      return QObject::tr( "文件" );
+      return QObject::tr( "Files" );
     case sicnu::data::StorageKind::TemporaryFile:
-      return QObject::tr( "临时文件" );
+      return QObject::tr( "Temporary Files" );
     case sicnu::data::StorageKind::Memory:
-      return QObject::tr( "内存" );
+      return QObject::tr( "Memory" );
     case sicnu::data::StorageKind::Remote:
-      return QObject::tr( "远程" );
+      return QObject::tr( "Remote" );
   }
-  return QObject::tr( "未知" );
+  return QObject::tr( "Unknown" );
 }
 
 QString capabilityBits( sicnu::data::AssetCapabilities caps )
@@ -292,34 +292,34 @@ QString capabilityBits( sicnu::data::AssetCapabilities caps )
   QStringList parts;
   using C = sicnu::data::AssetCapability;
   if ( caps.testFlag( C::Renderable ) )
-    parts << QObject::tr( "可渲染" );
+    parts << QObject::tr( "Renderable" );
   if ( caps.testFlag( C::ReadablePixels ) )
-    parts << QObject::tr( "可读像素" );
+    parts << QObject::tr( "Readable Pixels" );
   if ( caps.testFlag( C::BandMetadata ) )
-    parts << QObject::tr( "波段元数据" );
+    parts << QObject::tr( "Band Metadata" );
   if ( caps.testFlag( C::BandStatistics ) )
-    parts << QObject::tr( "波段统计" );
+    parts << QObject::tr( "Band Statistics" );
   if ( caps.testFlag( C::QueryableFeatures ) )
-    parts << QObject::tr( "可查询要素" );
+    parts << QObject::tr( "Identifiable" );
   if ( caps.testFlag( C::EditableFeatures ) )
-    parts << QObject::tr( "可编辑要素" );
+    parts << QObject::tr( "Editable" );
   if ( caps.testFlag( C::Temporal ) )
-    parts << QObject::tr( "时序" );
+    parts << QObject::tr( "Time Series" );
   if ( caps.testFlag( C::OfflineCacheable ) )
-    parts << QObject::tr( "可离线缓存" );
+    parts << QObject::tr( "Offline-cacheable" );
   if ( caps.testFlag( C::Exportable ) )
-    parts << QObject::tr( "可导出" );
+    parts << QObject::tr( "Exportable" );
   if ( caps.testFlag( C::Relocatable ) )
-    parts << QObject::tr( "可重定位" );
+    parts << QObject::tr( "Re-linkable" );
   if ( caps.testFlag( C::DeletableSource ) )
-    parts << QObject::tr( "可删除源" );
-  return parts.isEmpty() ? QObject::tr( "（无）" ) : parts.join( QStringLiteral( " · " ) );
+    parts << QObject::tr( "Source Removable" );
+  return parts.isEmpty() ? QObject::tr( "(none)" ) : parts.join( QStringLiteral( " · " ) );
 }
 
 QString formatExtent( const sicnu::data::SpatialExtent &extent )
 {
   if ( !extent.valid )
-    return QObject::tr( "（无）" );
+    return QObject::tr( "(none)" );
   return QStringLiteral( "X[%1, %2] Y[%3, %4]" )
     .arg( extent.minimumX, 0, 'f', 6 )
     .arg( extent.maximumX, 0, 'f', 6 )
@@ -345,21 +345,21 @@ QString formatStructure( const sicnu::data::AssetStructure &structure )
   if ( const auto *raster = std::get_if<sicnu::data::RasterStructure>( &structure ) )
   {
     QString rows;
-    rows += row( QObject::tr( "驱动" ), raster->driverName.isEmpty()
-                                          ? QObject::tr( "（未知）" )
+    rows += row( QObject::tr( "Drivers" ), raster->driverName.isEmpty()
+                                          ? QObject::tr( "(unknown)" )
                                           : raster->driverName );
-    rows += row( QObject::tr( "尺寸" ),
+    rows += row( QObject::tr( "Size" ),
                  QStringLiteral( "%1 × %2 px" )
                    .arg( raster->width )
                    .arg( raster->height ) );
-    rows += row( QObject::tr( "波段数" ), QString::number( raster->bandCount ) );
+    rows += row( QObject::tr( "Band Count" ), QString::number( raster->bandCount ) );
     rows += row( QObject::tr( "CRS" ),
-                 raster->crsWkt.isEmpty() ? QObject::tr( "（无）" ) : raster->crsWkt );
-    rows += row( QObject::tr( "范围" ), formatExtent( raster->extent ) );
+                 raster->crsWkt.isEmpty() ? QObject::tr( "(none)" ) : raster->crsWkt );
+    rows += row( QObject::tr( "Extent" ), formatExtent( raster->extent ) );
     if ( raster->hasGeoTransform )
     {
       const auto &gt = raster->geoTransform;
-      rows += row( QObject::tr( "仿射变换" ),
+      rows += row( QObject::tr( "Affine Transform" ),
                    QStringLiteral( "[%1, %2, %3, %4, %5, %6]" )
                      .arg( gt[0], 0, 'g', 12 )
                      .arg( gt[1], 0, 'g', 12 )
@@ -373,11 +373,11 @@ QString formatStructure( const sicnu::data::AssetStructure &structure )
     {
       QString nodata = band.noDataValue
                          ? QString::number( *band.noDataValue )
-                         : QObject::tr( "无" );
+                         : QObject::tr( "None" );
       bandLines += QStringLiteral( "B%1 · %2 · NoData=%3 · %4<br/>" )
                      .arg( band.number )
                      .arg( escapeHtml( band.dataType.isEmpty()
-                                         ? QObject::tr( "类型未知" )
+                                         ? QObject::tr( "Type unknown" )
                                          : band.dataType ) )
                      .arg( escapeHtml( nodata ) )
                      .arg( escapeHtml( band.colorInterpretation.isEmpty()
@@ -385,62 +385,62 @@ QString formatStructure( const sicnu::data::AssetStructure &structure )
                                          : band.colorInterpretation ) );
     }
     if ( bandLines.isEmpty() )
-      bandLines = escapeHtml( QObject::tr( "（未列出波段明细）" ) );
-    return section( QObject::tr( "栅格结构" ), rows )
+      bandLines = escapeHtml( QObject::tr( "(band details not listed)" ) );
+    return section( QObject::tr( "Raster Structure" ), rows )
            + QStringLiteral( "<h3>%1</h3><div class='block'>%2</div>" )
-               .arg( escapeHtml( QObject::tr( "波段" ) ), bandLines );
+               .arg( escapeHtml( QObject::tr( "Band" ) ), bandLines );
   }
 
   if ( const auto *vector = std::get_if<sicnu::data::VectorStructure>( &structure ) )
   {
     QString rows;
-    rows += row( QObject::tr( "驱动" ), vector->driverName.isEmpty()
-                                          ? QObject::tr( "（未知）" )
+    rows += row( QObject::tr( "Drivers" ), vector->driverName.isEmpty()
+                                          ? QObject::tr( "(unknown)" )
                                           : vector->driverName );
-    rows += row( QObject::tr( "图层数" ), QString::number( vector->layerCount ) );
+    rows += row( QObject::tr( "Layer Count" ), QString::number( vector->layerCount ) );
     QString layerLines;
     for ( const sicnu::data::VectorLayerStructure &layer : vector->layers )
     {
-      layerLines += QStringLiteral( "• %1 · %2 · 要素 %3 · %4<br/>%5<br/>" )
+      layerLines += QObject::tr("• %1 · %2 · features %3 · %4<br/>%5<br/>" )
                       .arg( escapeHtml( layer.name ) )
                       .arg( escapeHtml( layer.geometryType.isEmpty()
-                                          ? QObject::tr( "几何未知" )
+                                          ? QObject::tr( "Geometry Unknown" )
                                           : layer.geometryType ) )
                       .arg( layer.featureCount < 0
-                              ? QObject::tr( "未知" )
+                              ? QObject::tr( "Unknown" )
                               : QString::number( layer.featureCount ) )
                       .arg( escapeHtml( layer.crsWkt.isEmpty()
-                                          ? QObject::tr( "CRS 无" )
+                                          ? QObject::tr( "No CRS" )
                                           : layer.crsWkt ) )
                       .arg( escapeHtml( formatExtent( layer.extent ) ) );
     }
     if ( layerLines.isEmpty() )
-      layerLines = escapeHtml( QObject::tr( "（未列出子图层）" ) );
-    return section( QObject::tr( "矢量结构" ), rows )
+      layerLines = escapeHtml( QObject::tr( "(sub-layers not listed)" ) );
+    return section( QObject::tr( "Vector Structure" ), rows )
            + QStringLiteral( "<h3>%1</h3><div class='block'>%2</div>" )
-               .arg( escapeHtml( QObject::tr( "子图层" ) ), layerLines );
+               .arg( escapeHtml( QObject::tr( "Sub-layers" ) ), layerLines );
   }
 
   if ( const auto *remote = std::get_if<sicnu::data::RemoteMapStructure>( &structure ) )
   {
     QString rows;
-    rows += row( QObject::tr( "服务类型" ),
+    rows += row( QObject::tr( "Service Type" ),
                  sicnu::data::RemoteMapStructure::serviceToString( remote->service ) );
-    rows += row( QObject::tr( "图层" ),
+    rows += row( QObject::tr( "Layer" ),
                  remote->layerNames.isEmpty()
-                   ? QObject::tr( "（无）" )
+                   ? QObject::tr( "(none)" )
                    : remote->layerNames.join( QStringLiteral( ", " ) ) );
-    rows += row( QObject::tr( "CRS 列表" ),
+    rows += row( QObject::tr( "CRS list" ),
                  remote->crsList.isEmpty()
-                   ? QObject::tr( "（无）" )
+                   ? QObject::tr( "(none)" )
                    : remote->crsList.join( QStringLiteral( ", " ) ) );
-    rows += row( QObject::tr( "范围" ), formatExtent( remote->extent ) );
-    rows += row( QObject::tr( "格式" ),
-                 remote->imageFormat.isEmpty() ? QObject::tr( "（无）" )
+    rows += row( QObject::tr( "Extent" ), formatExtent( remote->extent ) );
+    rows += row( QObject::tr( "Format" ),
+                 remote->imageFormat.isEmpty() ? QObject::tr( "(none)" )
                                                : remote->imageFormat );
     if ( remote->pixelSizeX || remote->pixelSizeY )
     {
-      rows += row( QObject::tr( "像元大小" ),
+      rows += row( QObject::tr( "Pixel Size" ),
                    QStringLiteral( "%1 × %2" )
                      .arg( remote->pixelSizeX ? QString::number( *remote->pixelSizeX )
                                               : QStringLiteral( "?" ) )
@@ -448,15 +448,15 @@ QString formatStructure( const sicnu::data::AssetStructure &structure )
                                               : QStringLiteral( "?" ) ) );
     }
     if ( remote->zMax > 0 || remote->zMin > 0 )
-      rows += row( QObject::tr( "缩放级别" ),
+      rows += row( QObject::tr( "Zoom Level" ),
                    QStringLiteral( "%1 – %2" ).arg( remote->zMin ).arg( remote->zMax ) );
-    rows += row( QObject::tr( "有效" ),
-                 remote->valid ? QObject::tr( "是" ) : QObject::tr( "否" ) );
-    return section( QObject::tr( "远程地图结构" ), rows );
+    rows += row( QObject::tr( "Valid" ),
+                 remote->valid ? QObject::tr( "Yes" ) : QObject::tr( "No" ) );
+    return section( QObject::tr( "Remote Map Structure" ), rows );
   }
 
-  return section( QObject::tr( "结构" ),
-                  row( QObject::tr( "结构" ), QObject::tr( "尚未解析 / 无结构信息" ) ) );
+  return section( QObject::tr( "Structure" ),
+                  row( QObject::tr( "Structure" ), QObject::tr( "Not parsed yet / no structural information" ) ) );
 }
 
 QString wrapHtml( const QString &body )
@@ -478,7 +478,7 @@ QString wrapHtml( const QString &body )
 
 DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
                                     QWidget *parent )
-  : QDockWidget( tr( "数据管理" ), parent )
+  : QDockWidget( QObject::tr( "Data Management" ), parent )
   , m_dataManager( dataManager )
 {
   setObjectName( QStringLiteral( "DataManagerPanel" ) );
@@ -487,7 +487,7 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   m_tree->setObjectName( QStringLiteral( "dataManagerTree" ) );
   // Name embeds status bar + kind prefix/icon; no separate kind/status columns.
   m_tree->setColumnCount( 3 );
-  m_tree->setHeaderLabels( { tr( "名称" ), tr( "持久性" ), tr( "引用" ) } );
+  m_tree->setHeaderLabels( { QObject::tr( "Name" ), QObject::tr( "Persistence" ), QObject::tr( "References" ) } );
   m_tree->setRootIsDecorated( true );
   m_tree->setSelectionMode( QAbstractItemView::ExtendedSelection );
   m_tree->setContextMenuPolicy( Qt::CustomContextMenu );
@@ -499,7 +499,7 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   m_tree->header()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
   m_tree->header()->setSectionResizeMode( 2, QHeaderView::ResizeToContents );
   m_tree->headerItem()->setToolTip(
-    0, tr( "左侧色条表示状态（绿=可用，红=不可用）；类型作为名称前缀" ) );
+    0, QObject::tr( "The color bar on the left shows status (green = available, red = unavailable); the type prefixes the name" ) );
   m_tree->setMinimumWidth( 220 );
 
   m_treeStack = new QStackedWidget( this );
@@ -513,9 +513,9 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   treePaneLay->setSpacing( 2 );
   m_filterEdit = new QLineEdit( treePane );
   m_filterEdit->setObjectName( QStringLiteral( "dataManagerFilter" ) );
-  m_filterEdit->setPlaceholderText( tr( "按名称 / 路径 / ID 过滤…" ) );
+  m_filterEdit->setPlaceholderText( QObject::tr( "Filter by name / path / ID..." ) );
   m_filterEdit->setClearButtonEnabled( true );
-  m_filterEdit->setAccessibleName( tr( "过滤数据资产" ) );
+  m_filterEdit->setAccessibleName( QObject::tr( "Filter Data Assets" ) );
   treePaneLay->addWidget( m_filterEdit );
 
   // Workbench 9.0 M7: bounded pagination over the filtered catalog — the UI
@@ -528,14 +528,14 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   pagerLay->setContentsMargins( 0, 0, 0, 0 );
   m_prevPageBtn = new QToolButton( pagerRow );
   m_prevPageBtn->setObjectName( QStringLiteral( "dataManagerPagerPrev" ) );
-  m_prevPageBtn->setText( tr( "上一页" ) );
+  m_prevPageBtn->setText( QObject::tr( "Previous Page" ) );
   m_prevPageBtn->setAutoRepeat( false );
   m_pageLabel = new QLabel( pagerRow );
   m_pageLabel->setObjectName( QStringLiteral( "dataManagerPagerLabel" ) );
-  m_pageLabel->setAccessibleName( tr( "资产分页状态" ) );
+  m_pageLabel->setAccessibleName( QObject::tr( "Asset Pagination Status" ) );
   m_nextPageBtn = new QToolButton( pagerRow );
   m_nextPageBtn->setObjectName( QStringLiteral( "dataManagerPagerNext" ) );
-  m_nextPageBtn->setText( tr( "下一页" ) );
+  m_nextPageBtn->setText( QObject::tr( "Next Page" ) );
   m_nextPageBtn->setAutoRepeat( false );
   pagerLay->addWidget( m_prevPageBtn );
   pagerLay->addWidget( m_pageLabel, 1 );
@@ -549,9 +549,9 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
 
   m_emptyState = new RsEmptyStateWidget(
       QStringLiteral( "d_t_b_se" ),
-      tr( "暂无数据资产" ),
-      tr( "暂未登记任何数据资产或集合。导入遥感影像、矢量文件或高光谱数据开始工作。" ),
-      tr( "导入数据资产..." ),
+      QObject::tr( "No data assets yet" ),
+      QObject::tr( "No data assets or collections registered yet. Import remote-sensing imagery, vector files or hyperspectral data to start." ),
+      QObject::tr( "Import Data Assets..." ),
       m_treeStack );
   connect( m_emptyState, &RsEmptyStateWidget::actionClicked,
            this, &DataManagerPanel::importRequested );
@@ -564,7 +564,7 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   detailLay->setContentsMargins( 4, 4, 4, 4 );
   detailLay->setSpacing( 4 );
 
-  m_detailTitle = new QLabel( tr( "元信息" ), detailHost );
+  m_detailTitle = new QLabel( QObject::tr( "Meta Information" ), detailHost );
   m_detailTitle->setObjectName( QStringLiteral( "dataManagerDetailTitle" ) );
   m_detailTitle->setStyleSheet( QStringLiteral( "font-weight:600;" ) );
   detailLay->addWidget( m_detailTitle );
@@ -687,7 +687,7 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
     connect( m_refreshCoalesceTimer, &QTimer::timeout, this, &DataManagerPanel::refresh );
   }
 
-  clearDetails( tr( "选择数据资产或集合以查看元信息。" ) );
+  clearDetails( QObject::tr( "Select a data asset or collection to view its meta information." ) );
   refresh();
   applyHelpTips();
 }
@@ -696,11 +696,11 @@ void DataManagerPanel::applyHelpTips()
 {
   setWhatsThis(
     SicnuDialogHelp::htmlForTool( QStringLiteral( "obia_data_manager" ), windowTitle() ) );
-  SicnuDialogHelp::tip( this, tr( "数据管理：工程数据资产与集合目录；右键可添加到显示、提升、卸载、查看属性。" ) );
-  SicnuDialogHelp::tip( m_tree, tr( "资产/集合树。左侧色条表示状态（绿=可用，红=不可用）。双击=添加到显示；右键更多操作。" ) );
-  SicnuDialogHelp::tip( m_detailView, tr( "选中资产的元信息检视器（路径、CRS、波段/图层结构等）。" ) );
-  SicnuDialogHelp::tip( m_detailTitle, tr( "当前检视项标题。" ) );
-  SicnuDialogHelp::tip( m_splitter, tr( "拖动分隔条调整目录树与检视器的高度。" ) );
+  SicnuDialogHelp::tip( this, QObject::tr( "Data management: catalog of project data assets and collections; right-click to add to display, promote, unload or view properties." ) );
+  SicnuDialogHelp::tip( m_tree, QObject::tr( "Asset / collection tree. The color bar on the left shows status (green = available, red = unavailable). Double-click = add to display; right-click for more actions." ) );
+  SicnuDialogHelp::tip( m_detailView, QObject::tr( "Meta information inspector for the selected assets (path, CRS, band / layer structure, etc.)." ) );
+  SicnuDialogHelp::tip( m_detailTitle, QObject::tr( "Title of the current inspector item." ) );
+  SicnuDialogHelp::tip( m_splitter, QObject::tr( "Drag the splitter to adjust the heights of the catalog tree and the inspector." ) );
 }
 
 int DataManagerPanel::rowCount() const
@@ -823,7 +823,7 @@ void DataManagerPanel::createRow( QTreeWidgetItem *parent,
   if ( state == sicnu::data::AssetState::Missing )
   {
     item->setToolTip(
-      0, tr( "%1\n状态: 源缺失 — 可通过重定位恢复\n%2" )
+      0, QObject::tr( "%1\nStatus: source missing — recoverable by re-linking\n%2" )
            .arg( displayName, source ) );
   }
 }
@@ -858,7 +858,7 @@ void DataManagerPanel::addIndexRow( QTreeWidgetItem *parent,
       case sicnu::data::AssetKind::VirtualRaster:
         return kindText( entry.kind );
     }
-    return tr( "资产" );
+    return QObject::tr( "Assets" );
   }();
   createRow( parent, entry.displayName, kindLabel, entry.kind, entry.state,
              entry.source, entry.persistence, entry.id );
@@ -916,7 +916,7 @@ void DataManagerPanel::populateCollectionChildren(
   }
   if ( matchedInCollection > rendered )
     addSentinelRow( collectionItem,
-                    tr( "仅显示前 %1 项 / 共 %2 项 — 使用过滤缩小范围" )
+                    QObject::tr( "Showing first %1 of %2 items — use the filter to narrow down" )
                       .arg( rendered )
                       .arg( matchedInCollection ) );
   collectionItem->setData( 0, kLazyPopulateRole, false );
@@ -975,7 +975,7 @@ void DataManagerPanel::refresh()
   m_tree->clear();
   if ( !m_dataManager )
   {
-    clearDetails( tr( "数据管理器不可用。" ) );
+    clearDetails( QObject::tr( "The data manager is unavailable." ) );
     return;
   }
 
@@ -1042,9 +1042,9 @@ void DataManagerPanel::refresh()
     auto *collectionItem = new QTreeWidgetItem( m_tree );
     configureNameCell( collectionItem,
                        collection.displayName,
-                       tr( "集合" ),
+                       QObject::tr( "Collections" ),
                        appIcon( "d_t_b_se" ),
-                       tr( "集合" ),
+                       QObject::tr( "Collections" ),
                        QColor( 0x09, 0x69, 0xda ) ); // blue stripe for collections
     collectionItem->setText( 2, QString::number( collection.childAssetIds.size() ) );
     collectionItem->setData( 0, kCollectionIdRole, collection.id.toString() );
@@ -1077,7 +1077,7 @@ void DataManagerPanel::refresh()
       }
       if ( bucket.size() > rendered )
         addSentinelRow( collectionItem,
-                        tr( "仅显示前 %1 项 / 共 %2 项 — 使用过滤缩小范围" )
+                        QObject::tr( "Showing first %1 of %2 items — use the filter to narrow down" )
                           .arg( rendered )
                           .arg( bucket.size() ) );
       collectionItem->setExpanded( true );
@@ -1089,21 +1089,21 @@ void DataManagerPanel::refresh()
   if ( m_dataManager->temporalCollections().size() > 0 )
   {
     auto *temporalGroup = new QTreeWidgetItem( m_tree );
-    temporalGroup->setText( 0, tr( "时间相集合" ) );
-    temporalGroup->setText( 1, tr( "工作区记录" ) );
+    temporalGroup->setText( 0, QObject::tr( "Epoch Collection" ) );
+    temporalGroup->setText( 1, QObject::tr( "Workspace Records" ) );
     temporalGroup->setText( 2, QString::number( m_dataManager->temporalCollections().size() ) );
     for ( const auto &record : m_dataManager->temporalCollections() )
     {
       auto *temporalItem = new QTreeWidgetItem( temporalGroup );
       configureNameCell( temporalItem,
                          record.displayName,
-                         tr( "时间相集合" ),
+                         QObject::tr( "Epoch Collection" ),
                          appIcon( "d_t_b_se" ),
-                         tr( "时间相集合（多时相场景集合）" ),
+                         QObject::tr( "Epoch collection (multitemporal scene collection)" ),
                          QColor( 0x7c, 0x3a, 0xed ) ); // violet stripe for temporal records
       temporalItem->setData( 0, kTemporalCollectionIdRole, record.id.toString() );
       temporalItem->setText( 2, QString::number( record.revision ) );
-      temporalItem->setText( 1, tr( "修订 %1" ).arg( record.revision ) );
+      temporalItem->setText( 1, QObject::tr( "Revision %1" ).arg( record.revision ) );
     }
     temporalGroup->setExpanded( true );
   }
@@ -1127,7 +1127,7 @@ void DataManagerPanel::refresh()
     if ( paginated )
     {
       addSentinelRow( nullptr,
-                      tr( "第 %1–%2 项 / 共 %3 项资产（第 %4/%5 页）" )
+                      QObject::tr( "Items %1–%2 of %3 assets (page %4/%5)" )
                         .arg( begin + 1 )
                         .arg( end )
                         .arg( standalone.size() )
@@ -1138,7 +1138,7 @@ void DataManagerPanel::refresh()
     {
       m_pagerRow->setVisible( paginated );
       if ( m_pageLabel )
-        m_pageLabel->setText( tr( "第 %1/%2 页 · 共 %3 项" )
+        m_pageLabel->setText( QObject::tr( "Page %1/%2 · %3 items in total" )
                                 .arg( m_standalonePage + 1 )
                                 .arg( qMax( 1, m_standalonePageCount ) )
                                 .arg( standalone.size() ) );
@@ -1217,15 +1217,15 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
         return;
 
       QMenu menu( this );
-      QAction *analyzeAction = menu.addAction( tr( "时间序列分析…" ) );
-      analyzeAction->setToolTip( tr( "在时间序列分析对话框中打开并处理该集合。" ) );
-      QAction *preflightAction = menu.addAction( tr( "预检集合" ) );
-      preflightAction->setToolTip( tr( "检查该集合场景的栅格对齐、时间与平台一致性。" ) );
+      QAction *analyzeAction = menu.addAction( QObject::tr( "Time Series Analysis..." ) );
+      analyzeAction->setToolTip( QObject::tr( "Opens and processes this collection in the time series analysis dialog." ) );
+      QAction *preflightAction = menu.addAction( QObject::tr( "Precheck Collection" ) );
+      preflightAction->setToolTip( QObject::tr( "Checks raster alignment, time and platform consistency of the collection's scenes." ) );
       menu.addSeparator();
-      QAction *describeAction = menu.addAction( tr( "查看集合信息" ) );
-      describeAction->setToolTip( tr( "显示该时间相集合的场景数、时间范围与平台。" ) );
-      QAction *removeAction = menu.addAction( tr( "移除集合记录" ) );
-      removeAction->setToolTip( tr( "从工作区移除该记录（不删除任何场景数据）。" ) );
+      QAction *describeAction = menu.addAction( QObject::tr( "View Collection Info" ) );
+      describeAction->setToolTip( QObject::tr( "Shows scene count, time range and platform of this epoch collection." ) );
+      QAction *removeAction = menu.addAction( QObject::tr( "Remove Collection Record" ) );
+      removeAction->setToolTip( QObject::tr( "Removes the record from the workspace (no scene data is deleted)." ) );
       QAction *chosen = menu.exec( m_tree->viewport()->mapToGlobal( pos ) );
       if ( chosen == analyzeAction )
       {
@@ -1251,24 +1251,24 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
             else
               warnings.append( issue.message );
           }
-          QString repText = tr( "预检结果：%1\n场景总数：%2\n有效时间：%3\n" )
-                              .arg( report.ok() ? tr( "通过" ) : tr( "未通过" ) )
+          QString repText = QObject::tr( "Precheck result: %1\nTotal scenes: %2\nValid times: %3\n" )
+                              .arg( report.ok() ? QObject::tr( "Passed" ) : QObject::tr( "Failed" ) )
                               .arg( report.sceneCount )
                               .arg( report.scenesWithTime );
           if ( !errors.isEmpty() )
-            repText += tr( "\n错误：\n- " ) + errors.join( QStringLiteral( "\n- " ) );
+            repText += QObject::tr( "\nErrors:\n- " ) + errors.join( QStringLiteral( "\n- " ) );
           if ( !warnings.isEmpty() )
-            repText += tr( "\n警告：\n- " ) + warnings.join( QStringLiteral( "\n- " ) );
-          QMessageBox::information( this, tr( "集合预检报告" ), repText );
+            repText += QObject::tr( "\nWarnings:\n- " ) + warnings.join( QStringLiteral( "\n- " ) );
+          QMessageBox::information( this, QObject::tr( "Collection Precheck Report" ), repText );
         }
         else
         {
-          QMessageBox::warning( this, tr( "预检失败" ), tr( "无法解析集合描述符：%1" ).arg( parseError ) );
+          QMessageBox::warning( this, QObject::tr( "Precheck Failed" ), QObject::tr( "Cannot parse the collection descriptor: %1" ).arg( parseError ) );
         }
       }
       else if ( chosen == describeAction )
       {
-        QString summary = tr( "名称：%1\n修订：%2" ).arg( record->displayName )
+        QString summary = QObject::tr( "Name: %1\nRevision: %2" ).arg( record->displayName )
                             .arg( record->revision );
         sicnu::temporal::TemporalCollection parsed;
         QString parseError;
@@ -1283,25 +1283,25 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
             if ( !scene.platform.isEmpty() && !platforms.contains( scene.platform ) )
               platforms.append( scene.platform );
           }
-          summary += QLatin1Char( '\n' ) + tr( "场景数：%1（已绑定资产 %2）" )
+          summary += QLatin1Char( '\n' ) + QObject::tr( "Scenes: %1 (%2 assets bound)" )
                        .arg( parsed.sceneCount() ).arg( bound );
           if ( !parsed.timeRangeStartIso().isEmpty() )
-            summary += QLatin1Char( '\n' ) + tr( "时间范围：%1 … %2" )
+            summary += QLatin1Char( '\n' ) + QObject::tr( "Time range: %1 … %2" )
                          .arg( parsed.timeRangeStartIso(), parsed.timeRangeEndIso() );
           if ( !platforms.isEmpty() )
-            summary += QLatin1Char( '\n' ) + tr( "平台：%1" ).arg( platforms.join( ", " ) );
+            summary += QLatin1Char( '\n' ) + QObject::tr( "Platform: %1" ).arg( platforms.join( ", " ) );
         }
         else
         {
-          summary += QLatin1Char( '\n' ) + tr( "描述符无效：%1" ).arg( parseError );
+          summary += QLatin1Char( '\n' ) + QObject::tr( "Invalid descriptor: %1" ).arg( parseError );
         }
-        QMessageBox::information( this, tr( "时间相集合" ), summary );
+        QMessageBox::information( this, QObject::tr( "Epoch Collection" ), summary );
       }
       else if ( chosen == removeAction )
       {
         const auto answer = QMessageBox::question(
-          this, tr( "移除时间相集合" ),
-          tr( "移除集合“%1”？场景数据不会被删除。" ).arg( record->displayName ) );
+          this, QObject::tr( "Remove Epoch Collection" ),
+          QObject::tr( "Remove collection %1? Scene data will not be deleted." ).arg( record->displayName ) );
         if ( answer == QMessageBox::Yes )
           m_dataManager->removeTemporalCollection( *recordId ); // signals → coalesced refresh
       }
@@ -1317,21 +1317,21 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
   const int n = ids.size();
 
   QAction *displayAction = menu.addAction(
-    n == 1 ? tr( "添加到显示" ) : tr( "添加到显示（%1 项）" ).arg( n ) );
-  displayAction->setToolTip( tr( "把选中资产作为图层加载到当前视图。" ) );
+    n == 1 ? QObject::tr( "Add to Display" ) : QObject::tr( "Add to Display (%1 items)" ).arg( n ) );
+  displayAction->setToolTip( QObject::tr( "Loads the selected assets as layers into the current view." ) );
 
   // 查看属性：仅单选时提供（多选时下方检视器已汇总）。
   QAction *inspectAction = nullptr;
   if ( n == 1 && m_dataManager )
   {
-    inspectAction = menu.addAction( tr( "查看属性" ) );
-    inspectAction->setToolTip( tr( "在下方检视器中刷新该资产的元信息。" ) );
+    inspectAction = menu.addAction( QObject::tr( "View Properties" ) );
+    inspectAction->setToolTip( QObject::tr( "Refreshes this asset's meta information in the inspector below." ) );
   }
 
   // 复制源路径：单选/多选均可用。
   QAction *copyPathAction = menu.addAction(
-    n == 1 ? tr( "复制源路径" ) : tr( "复制源路径（%1 项）" ).arg( n ) );
-  copyPathAction->setToolTip( tr( "把资产源路径（canonicalSource）复制到剪贴板。" ) );
+    n == 1 ? QObject::tr( "Copy Source Path" ) : QObject::tr( "Copy Source Paths (%1 items)" ).arg( n ) );
+  copyPathAction->setToolTip( QObject::tr( "Copies the asset source path (canonicalSource) to the clipboard." ) );
 
   int promotable = 0;
   for ( const sicnu::data::AssetId &id : ids )
@@ -1340,24 +1340,24 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
       ++promotable;
   }
   QAction *promoteAction = menu.addAction(
-    promotable <= 1 ? tr( "提升为工程持久…" )
-                    : tr( "提升为工程持久（%1 项）…" ).arg( promotable ) );
+    promotable <= 1 ? QObject::tr( "Promote to Project Persistent..." )
+                    : QObject::tr( "Promote to Project Persistent (%1 items)..." ).arg( promotable ) );
   promoteAction->setEnabled( promotable > 0 );
-  promoteAction->setToolTip( tr( "把临时资产提升为工程持久（随工程保存）。" ) );
+  promoteAction->setToolTip( QObject::tr( "Promotes temporary assets to project-persistent (saved with the project)." ) );
 
   // 重定位缺失源：仅当单选且该资产 Missing/Unavailable。
   QAction *relocateAction = nullptr;
   if ( n == 1 && isRelocatable( ids.first() ) )
   {
-    relocateAction = menu.addAction( tr( "重定位缺失源…" ) );
-    relocateAction->setToolTip( tr( "为缺失/不可用的资产指定新的源位置以重新解析。" ) );
+    relocateAction = menu.addAction( QObject::tr( "Re-link Missing Source..." ) );
+    relocateAction->setToolTip( QObject::tr( "Assign a new source location to missing/unavailable assets so they can be resolved again." ) );
   }
 
   menu.addSeparator();
 
   QAction *unloadAction = menu.addAction(
-    n == 1 ? tr( "卸载…" ) : tr( "卸载（%1 项）…" ).arg( n ) );
-  unloadAction->setToolTip( tr( "从工程卸载选中资产（会弹出确认；若有引用将级联移除）。" ) );
+    n == 1 ? QObject::tr( "Unload..." ) : QObject::tr( "Unload (%1 items)..." ).arg( n ) );
+  unloadAction->setToolTip( QObject::tr( "Unload the selected assets from the project (a confirmation pops up; dependents are removed cascadingly)." ) );
 
   QAction *chosen = menu.exec( m_tree->viewport()->mapToGlobal( pos ) );
   if ( chosen == displayAction )
@@ -1421,7 +1421,7 @@ void DataManagerPanel::onSelectionChanged()
 
   if ( !m_dataManager )
   {
-    clearDetails( tr( "数据管理器不可用。" ) );
+    clearDetails( QObject::tr( "The data manager is unavailable." ) );
     return;
   }
 
@@ -1457,47 +1457,47 @@ void DataManagerPanel::onSelectionChanged()
     }
   }
 
-  clearDetails( tr( "选择数据资产或集合以查看元信息。Ctrl/Shift 可多选。" ) );
+  clearDetails( QObject::tr( "Select a data asset or collection to view its meta information. Ctrl / Shift multi-select." ) );
 }
 
 void DataManagerPanel::showAssetDetails( const sicnu::data::AssetSnapshot &snapshot )
 {
   if ( m_detailTitle )
-    m_detailTitle->setText( tr( "资产元信息 — %1" ).arg( snapshot.displayName() ) );
+    m_detailTitle->setText( QObject::tr( "Asset Meta Information — %1" ).arg( snapshot.displayName() ) );
 
   QString identity;
-  identity += row( tr( "显示名" ), snapshot.displayName() );
-  identity += row( tr( "资产 ID" ), snapshot.id().toString() );
-  identity += row( tr( "修订" ), QString::number( snapshot.revision().value() ) );
-  identity += row( tr( "类型" ), kindText( snapshot.kind() ) );
-  identity += row( tr( "状态" ), statusText( snapshot.state() ) );
-  identity += row( tr( "持久性" ), persistenceText( snapshot.persistence() ) );
-  identity += row( tr( "存储" ), storageText( snapshot.storageKind() ) );
-  identity += row( tr( "能力" ), capabilityBits( snapshot.capabilities() ) );
-  identity += row( tr( "显示引用" ), QString::number( referenceCount( snapshot.id() ) ) );
+  identity += row( QObject::tr( "Display Name" ), snapshot.displayName() );
+  identity += row( QObject::tr( "Asset ID" ), snapshot.id().toString() );
+  identity += row( QObject::tr( "Revision" ), QString::number( snapshot.revision().value() ) );
+  identity += row( QObject::tr( "Type" ), kindText( snapshot.kind() ) );
+  identity += row( QObject::tr( "Status" ), statusText( snapshot.state() ) );
+  identity += row( QObject::tr( "Persistence" ), persistenceText( snapshot.persistence() ) );
+  identity += row( QObject::tr( "Storage" ), storageText( snapshot.storageKind() ) );
+  identity += row( QObject::tr( "Capabilities" ), capabilityBits( snapshot.capabilities() ) );
+  identity += row( QObject::tr( "Show References" ), QString::number( referenceCount( snapshot.id() ) ) );
   if ( snapshot.parentCollectionId() )
-    identity += row( tr( "所属集合" ), snapshot.parentCollectionId()->toString() );
+    identity += row( QObject::tr( "Collection" ), snapshot.parentCollectionId()->toString() );
 
   QString source;
-  source += row( tr( "提供者" ),
+  source += row( QObject::tr( "Provider" ),
                  snapshot.source().providerKey.isEmpty()
-                   ? tr( "（自动）" )
+                   ? QObject::tr( "(automatic)" )
                    : snapshot.source().providerKey );
-  source += row( tr( "路径 / URI" ),
+  source += row( QObject::tr( "Path / URI" ),
                  snapshot.source().canonicalSource.isEmpty()
-                   ? tr( "（无）" )
+                   ? QObject::tr( "(none)" )
                    : snapshot.source().canonicalSource );
   if ( !snapshot.source().subdataset.isEmpty() )
-    source += row( tr( "子数据集" ), snapshot.source().subdataset );
+    source += row( QObject::tr( "Sub-datasets" ), snapshot.source().subdataset );
   if ( !snapshot.source().authConfigId.isEmpty() )
-    source += row( tr( "认证配置" ), snapshot.source().authConfigId );
+    source += row( QObject::tr( "Authentication Settings" ), snapshot.source().authConfigId );
   if ( !snapshot.source().dataOptions.isEmpty() )
   {
     QStringList opts;
     for ( auto it = snapshot.source().dataOptions.constBegin();
           it != snapshot.source().dataOptions.constEnd(); ++it )
       opts << QStringLiteral( "%1=%2" ).arg( it.key(), it.value() );
-    source += row( tr( "数据选项" ), opts.join( QStringLiteral( "; " ) ) );
+    source += row( QObject::tr( "Data Options" ), opts.join( QStringLiteral( "; " ) ) );
   }
 
   // Provenance + lineage: what produced this asset (derivation record) and
@@ -1509,17 +1509,17 @@ void DataManagerPanel::showAssetDetails( const sicnu::data::AssetSnapshot &snaps
       m_dataManager->provenance( snapshot.id() );
     if ( record )
     {
-      provenanceRows += row( tr( "算法" ), record->algorithmId );
+      provenanceRows += row( QObject::tr( "Algorithm" ), record->algorithmId );
       if ( !record->algorithmVersion.isEmpty() )
-        provenanceRows += row( tr( "算法版本" ), record->algorithmVersion );
+        provenanceRows += row( QObject::tr( "Algorithm Version" ), record->algorithmVersion );
       if ( !record->parameters.isEmpty() )
-        provenanceRows += row( tr( "参数" ),
+        provenanceRows += row( QObject::tr( "Parameters" ),
                                QString::fromUtf8(
                                  QJsonDocument( record->parameters ).toJson( QJsonDocument::Compact ) ) );
       if ( !record->taskReference.isEmpty() )
-        provenanceRows += row( tr( "任务引用" ), record->taskReference );
+        provenanceRows += row( QObject::tr( "Task References" ), record->taskReference );
       if ( record->completedAtUtc.isValid() )
-        provenanceRows += row( tr( "完成时间" ), record->completedAtUtc.toString( Qt::ISODate ) );
+        provenanceRows += row( QObject::tr( "Finish Time" ), record->completedAtUtc.toString( Qt::ISODate ) );
 
       const QVector<sicnu::data::AssetId> inputs = m_dataManager->derivedFrom( snapshot.id() );
       if ( !inputs.isEmpty() )
@@ -1530,12 +1530,12 @@ void DataManagerPanel::showAssetDetails( const sicnu::data::AssetSnapshot &snaps
           const auto input = m_dataManager->asset( id );
           names << ( input ? input->displayName() : id.toString() );
         }
-        provenanceRows += row( tr( "源自" ), names.join( QStringLiteral( ", " ) ) );
+        provenanceRows += row( QObject::tr( "Derived from" ), names.join( QStringLiteral( ", " ) ) );
       }
     }
     else
     {
-      provenanceRows += row( tr( "溯源" ), tr( "无派生记录（直接注册）" ) );
+      provenanceRows += row( QObject::tr( "Provenance" ), QObject::tr( "No derivation record (registered directly)" ) );
     }
 
     const QVector<sicnu::data::AssetId> outputs = m_dataManager->derivedOutputsOf( snapshot.id() );
@@ -1547,15 +1547,15 @@ void DataManagerPanel::showAssetDetails( const sicnu::data::AssetSnapshot &snaps
         const auto output = m_dataManager->asset( id );
         names << ( output ? output->displayName() : id.toString() );
       }
-      provenanceRows += row( tr( "派生产物" ), names.join( QStringLiteral( ", " ) ) );
+      provenanceRows += row( QObject::tr( "Derived Artifacts" ), names.join( QStringLiteral( ", " ) ) );
     }
   }
 
   const QString body =
     QStringLiteral( "<h2>%1</h2>" ).arg( escapeHtml( snapshot.displayName() ) )
-    + section( tr( "标识与状态" ), identity )
-    + section( tr( "数据源" ), source )
-    + section( tr( "溯源与谱系" ), provenanceRows )
+    + section( QObject::tr( "Identity and Status" ), identity )
+    + section( QObject::tr( "Data Source" ), source )
+    + section( QObject::tr( "Provenance and Lineage" ), provenanceRows )
     + formatStructure( snapshot.structure() );
 
   m_detailView->setHtml( wrapHtml( body ) );
@@ -1568,7 +1568,7 @@ void DataManagerPanel::showMultiSelectionDetails(
   if ( m_previewLabel )
     m_previewLabel->hide(); // previews are per-asset only (review A11)
   if ( m_detailTitle )
-    m_detailTitle->setText( tr( "多选 — %1 项" ).arg( ids.size() ) );
+    m_detailTitle->setText( QObject::tr( "Multiple selection — %1 items" ).arg( ids.size() ) );
 
   int ready = 0, temporary = 0, raster = 0, vector = 0;
   QString list;
@@ -1597,19 +1597,19 @@ void DataManagerPanel::showMultiSelectionDetails(
   }
 
   QString summary;
-  summary += row( tr( "选中数量" ), QString::number( ids.size() ) );
-  summary += row( tr( "就绪" ), QString::number( ready ) );
-  summary += row( tr( "临时资产" ), QString::number( temporary ) );
-  summary += row( tr( "栅格类" ), QString::number( raster ) );
-  summary += row( tr( "矢量" ), QString::number( vector ) );
+  summary += row( QObject::tr( "Selection Count" ), QString::number( ids.size() ) );
+  summary += row( QObject::tr( "Ready" ), QString::number( ready ) );
+  summary += row( QObject::tr( "Temporary Assets" ), QString::number( temporary ) );
+  summary += row( QObject::tr( "Raster Class" ), QString::number( raster ) );
+  summary += row( QObject::tr( "Vector" ), QString::number( vector ) );
 
   const QString body =
-    QStringLiteral( "<h2>%1</h2>" ).arg( escapeHtml( tr( "已选择 %1 个资产" ).arg( ids.size() ) ) )
-    + section( tr( "汇总" ), summary )
+    QStringLiteral( "<h2>%1</h2>" ).arg( escapeHtml( QObject::tr( "%1 assets selected" ).arg( ids.size() ) ) )
+    + section( QObject::tr( "Summary" ), summary )
     + QStringLiteral( "<h3>%1</h3><div class='block'>%2</div>" )
-        .arg( escapeHtml( tr( "列表" ) ), list )
+        .arg( escapeHtml( QObject::tr( "List" ) ), list )
     + QStringLiteral( "<p style='color:#656d76'>%1</p>" )
-        .arg( escapeHtml( tr( "右键可批量：添加到显示 / 提升 / 卸载。" ) ) );
+        .arg( escapeHtml( QObject::tr( "Right-click for batch actions: add to display / promote / unload." ) ) );
 
   m_detailView->setHtml( wrapHtml( body ) );
 }
@@ -1620,32 +1620,32 @@ void DataManagerPanel::showCollectionDetails(
   if ( m_previewLabel )
     m_previewLabel->hide(); // previews are per-asset only (review A11)
   if ( m_detailTitle )
-    m_detailTitle->setText( tr( "集合元信息 — %1" ).arg( collection.displayName ) );
+    m_detailTitle->setText( QObject::tr( "Collection Meta Information — %1" ).arg( collection.displayName ) );
 
   QString identity;
-  identity += row( tr( "显示名" ), collection.displayName );
-  identity += row( tr( "集合 ID" ), collection.id.toString() );
-  identity += row( tr( "子资产数" ),
+  identity += row( QObject::tr( "Display Name" ), collection.displayName );
+  identity += row( QObject::tr( "Collection ID" ), collection.id.toString() );
+  identity += row( QObject::tr( "Sub-asset Count" ),
                    QString::number( collection.childAssetIds.size() ) );
 
   QString product;
   const auto &md = collection.metadata;
-  product += row( tr( "平台" ),
-                  md.platform.isEmpty() ? tr( "（无）" ) : md.platform );
-  product += row( tr( "传感器" ),
-                  md.sensor.isEmpty() ? tr( "（无）" ) : md.sensor );
-  product += row( tr( "产品级别" ),
-                  md.productLevel.isEmpty() ? tr( "（无）" ) : md.productLevel );
-  product += row( tr( "获取日期" ),
-                  md.acquisitionDate.isEmpty() ? tr( "（无）" ) : md.acquisitionDate );
-  product += row( tr( "处理级别" ),
-                  md.processingLevel.isEmpty() ? tr( "（无）" ) : md.processingLevel );
+  product += row( QObject::tr( "Platform" ),
+                  md.platform.isEmpty() ? QObject::tr( "(none)" ) : md.platform );
+  product += row( QObject::tr( "Sensor" ),
+                  md.sensor.isEmpty() ? QObject::tr( "(none)" ) : md.sensor );
+  product += row( QObject::tr( "Product Level" ),
+                  md.productLevel.isEmpty() ? QObject::tr( "(none)" ) : md.productLevel );
+  product += row( QObject::tr( "Acquisition Date" ),
+                  md.acquisitionDate.isEmpty() ? QObject::tr( "(none)" ) : md.acquisitionDate );
+  product += row( QObject::tr( "Processing Level" ),
+                  md.processingLevel.isEmpty() ? QObject::tr( "(none)" ) : md.processingLevel );
   if ( !md.attributes.isEmpty() )
   {
     QStringList attrs;
     for ( auto it = md.attributes.constBegin(); it != md.attributes.constEnd(); ++it )
       attrs << QStringLiteral( "%1 = %2" ).arg( it.key(), it.value() );
-    product += row( tr( "扩展属性" ), attrs.join( QStringLiteral( "\n" ) ) );
+    product += row( QObject::tr( "Extended Properties" ), attrs.join( QStringLiteral( "\n" ) ) );
   }
 
   QString children;
@@ -1660,14 +1660,14 @@ void DataManagerPanel::showCollectionDetails(
       children += QStringLiteral( "• %1<br/>" ).arg( escapeHtml( id.toString() ) );
   }
   if ( children.isEmpty() )
-    children = escapeHtml( tr( "（无子资产）" ) );
+    children = escapeHtml( QObject::tr( "(no sub-assets)" ) );
 
   const QString body =
     QStringLiteral( "<h2>%1</h2>" ).arg( escapeHtml( collection.displayName ) )
-    + section( tr( "集合" ), identity )
-    + section( tr( "产品元数据" ), product )
+    + section( QObject::tr( "Collections" ), identity )
+    + section( QObject::tr( "Product Metadata" ), product )
     + QStringLiteral( "<h3>%1</h3><div class='block'>%2</div>" )
-        .arg( escapeHtml( tr( "子资产" ) ), children );
+        .arg( escapeHtml( QObject::tr( "Sub-assets" ) ), children );
 
   m_detailView->setHtml( wrapHtml( body ) );
 }
@@ -1675,7 +1675,7 @@ void DataManagerPanel::showCollectionDetails(
 void DataManagerPanel::clearDetails( const QString &message )
 {
   if ( m_detailTitle )
-    m_detailTitle->setText( tr( "元信息" ) );
+    m_detailTitle->setText( QObject::tr( "Meta Information" ) );
   if ( m_previewLabel )
     m_previewLabel->hide();
   if ( m_detailView )
@@ -1683,7 +1683,7 @@ void DataManagerPanel::clearDetails( const QString &message )
     m_detailView->setHtml( wrapHtml(
       QStringLiteral( "<p style='color:#656d76'>%1</p>" )
         .arg( escapeHtml( message.isEmpty()
-                            ? tr( "选择数据资产或集合以查看元信息。" )
+                            ? QObject::tr( "Select a data asset or collection to view its meta information." )
                             : message ) ) ) );
   }
 }
@@ -1707,7 +1707,7 @@ void DataManagerPanel::requestDetailPreview( const sicnu::data::AssetSnapshot &s
   }
 
   m_previewLabel->show();
-  m_previewLabel->setText( tr( "预览加载中…" ) );
+  m_previewLabel->setText( QObject::tr( "Loading preview..." ) );
   m_previewLabel->setPixmap( QPixmap() );
   m_previewSource = source;
 
@@ -1734,13 +1734,13 @@ void DataManagerPanel::requestDetailPreview( const sicnu::data::AssetSnapshot &s
         m_previewLabel->setText( QString() );
         m_previewLabel->setPixmap( QPixmap::fromImage( result.image ) );
         m_previewLabel->setAccessibleName(
-          tr( "数据资产预览 — %1" ).arg( result.path ) );
+          QObject::tr( "Data Asset Preview — %1" ).arg( result.path ) );
       }
       else
       {
         m_previewLabel->setPixmap( QPixmap() );
         m_previewLabel->setText( result.error.isEmpty()
-                                   ? tr( "预览不可用" )
+                                   ? QObject::tr( "Preview Unavailable" )
                                    : result.error );
       }
     } );

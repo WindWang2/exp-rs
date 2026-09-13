@@ -78,7 +78,7 @@ QVector<Choice> WorkbenchEnumProvider::capChoices( QVector<Choice> choices,
   // row would otherwise submit real choice #200 under the notice label).
   choices.resize( kMaxChoices - 1 );
   choices.append( { QString(),
-                    QObject::tr( "…（%1 选项源已截断到前 %2 项）" )
+                    QObject::tr( "... (%1 option source truncated to the first %2 items)" )
                       .arg( sourceId )
                       .arg( kMaxChoices - 1 ) } );
   return choices;

@@ -7,6 +7,7 @@
 #include "help/help_catalog_source.h"
 #include "help/help_content_store.h"
 #include "help/operator_help_provider.h"
+#include "help/terminology_provider.h"
 
 namespace sicnu::help
 {
@@ -50,7 +51,17 @@ CompositionReport composeHelpSystem( HelpRegistry &target,
             report.errors << QStringLiteral( "extra content: %1" ).arg( error );
     }
 
-    // 3. Derived descriptors from the authoritative catalogs, merged with the
+    // 3. Unified RS glossary (D6): data/terms/rs_glossary.json embedded via
+    //    help_content.qrc. Terms become concept.term.* descriptors in the same
+    //    registry — one catalog, no fork (the terminology provider is also the
+    //    direct lookup API for tools and the D9 agent).
+    {
+        TerminologyProvider::LoadResult glossary = TerminologyProvider::loadFromResources();
+        report.errors += glossary.errors;
+        TerminologyProvider::appendDescriptors( glossary.terms, target, &report.errors );
+    }
+
+    // 4. Derived descriptors from the authoritative catalogs, merged with the
     //    additive knowledge above. Providers read the knowledge snapshot and
     //    register derived descriptors into the live registry — no mutation of
     //    the container being iterated.

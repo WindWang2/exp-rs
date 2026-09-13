@@ -33,25 +33,25 @@ inline QString historyTaskStateText( sicnu::TaskStatus status )
     switch ( status )
     {
         case sicnu::TaskStatus::Queued:
-            return QObject::tr( "排队中" );
+            return QObject::tr( "Queued" );
         case sicnu::TaskStatus::Running:
-            return QObject::tr( "运行中" );
+            return QObject::tr( "Running" );
         case sicnu::TaskStatus::Paused:
-            return QObject::tr( "已暂停" );
+            return QObject::tr( "Paused" );
         case sicnu::TaskStatus::Completed:
-            return QObject::tr( "已完成" );
+            return QObject::tr( "Finished" );
         case sicnu::TaskStatus::Failed:
-            return QObject::tr( "失败" );
+            return QObject::tr( "Failed" );
         case sicnu::TaskStatus::Canceled:
-            return QObject::tr( "已取消" );
+            return QObject::tr( "Cancelled" );
         case sicnu::TaskStatus::Cancelling:
-            return QObject::tr( "取消中" );
+            return QObject::tr( "Cancelling" );
         case sicnu::TaskStatus::WaitingResource:
-            return QObject::tr( "等待资源" );
+            return QObject::tr( "Waiting for Resources" );
         case sicnu::TaskStatus::Dispatching:
-            return QObject::tr( "调度中" );
+            return QObject::tr( "Scheduling" );
     }
-    return QObject::tr( "未知" );
+    return QObject::tr( "Unknown" );
 }
 
 inline bool historyTaskTerminal( sicnu::TaskStatus status )
@@ -68,27 +68,27 @@ inline QString historyRunStateText( sicnu::workflow::WorkflowRunState state )
     switch ( state )
     {
         case sicnu::workflow::WorkflowRunState::Created:
-            return QObject::tr( "已创建" );
+            return QObject::tr( "Created" );
         case sicnu::workflow::WorkflowRunState::Planning:
-            return QObject::tr( "规划中" );
+            return QObject::tr( "Planned" );
         case sicnu::workflow::WorkflowRunState::Ready:
-            return QObject::tr( "就绪" );
+            return QObject::tr( "Ready" );
         case sicnu::workflow::WorkflowRunState::Running:
-            return QObject::tr( "运行中" );
+            return QObject::tr( "Running" );
         case sicnu::workflow::WorkflowRunState::WaitingResource:
-            return QObject::tr( "等待资源" );
+            return QObject::tr( "Waiting for Resources" );
         case sicnu::workflow::WorkflowRunState::Interrupted:
-            return QObject::tr( "已中断（可恢复）" );
+            return QObject::tr( "Interrupted (resumable)" );
         case sicnu::workflow::WorkflowRunState::Cancelling:
-            return QObject::tr( "取消中" );
+            return QObject::tr( "Cancelling" );
         case sicnu::workflow::WorkflowRunState::Canceled:
-            return QObject::tr( "已取消" );
+            return QObject::tr( "Cancelled" );
         case sicnu::workflow::WorkflowRunState::Failed:
-            return QObject::tr( "失败" );
+            return QObject::tr( "Failed" );
         case sicnu::workflow::WorkflowRunState::Completed:
-            return QObject::tr( "已完成" );
+            return QObject::tr( "Finished" );
     }
-    return QObject::tr( "未知" );
+    return QObject::tr( "Unknown" );
 }
 
 inline bool historyRunResumable( sicnu::workflow::WorkflowRunState state )

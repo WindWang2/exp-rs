@@ -23,7 +23,7 @@
 SpectralLibraryDialog::SpectralLibraryDialog( QWidget *parent )
   : QDialog( parent )
 {
-  setWindowTitle( tr( "光谱库匹配" ) );
+  setWindowTitle( tr( "Spectral Library Matching" ) );
   setMinimumWidth( 620 );
   setupUi();
 }
@@ -34,8 +34,8 @@ void SpectralLibraryDialog::setupUi()
 
   // 1. Input & Library Group
   QGroupBox *inputGroup = SicnuUi::makeGroup(
-    this, tr( "待匹配光谱与谱库" ),
-    tr( "使用光谱剖面面板采集的像元光谱；可与光谱库条目进行匹配或保存回库。" ) );
+    this, tr( "Spectrum to Match and Library" ),
+    tr( "Uses pixel spectra collected by the Spectral Profile panel; they can be matched against library entries or saved back to the library." ) );
   auto *inputLayout = new QVBoxLayout( inputGroup );
   inputLayout->setContentsMargins( 12, 10, 12, 10 );
   inputLayout->setSpacing( 8 );
@@ -43,26 +43,26 @@ void SpectralLibraryDialog::setupUi()
   auto *form = SicnuUi::makeFormLayout();
   form->setContentsMargins( 0, 0, 0, 0 );
 
-  m_spectrumSummary = new QLabel( tr( "（未采集光谱）" ), inputGroup );
+  m_spectrumSummary = new QLabel( tr( "(no spectrum collected)" ), inputGroup );
   m_spectrumSummary->setWordWrap( true );
-  form->addRow( tr( "当前剖面" ), m_spectrumSummary );
+  form->addRow( tr( "Current Profile" ), m_spectrumSummary );
 
   m_libraryPathEdit = new QLineEdit( inputGroup );
   m_libraryPathEdit->setObjectName( QStringLiteral( "spectralLibPathEdit" ) );
-  m_libraryPathEdit->setPlaceholderText( tr( "选择光谱库 JSON 文件 (*.json)..." ) );
+  m_libraryPathEdit->setPlaceholderText( tr( "Select a spectral library JSON file (*.json)..." ) );
   SicnuDialogHelp::tip( m_libraryPathEdit, tr(
-    "光谱库文件（SpectralLibrary JSON）：命名光谱 + 可选波长栅格。"
-    "也可在下方把当前谱保存进库。" ) );
+    "Spectral library file (SpectralLibrary JSON): named spectra plus optional wavelength rasters."
+    "You can also save the current spectrum into the library below.")  );
   connect( m_libraryPathEdit, &QLineEdit::textChanged, this, [this]( const QString &text ) {
     m_libraryLoaded = ( !m_loadedPath.isEmpty() && text.trimmed() == m_loadedPath );
     m_saveButton->setEnabled( !m_values.isEmpty() && m_libraryLoaded );
   } );
 
-  auto *browseButton = new QPushButton( tr( "浏览…" ), inputGroup );
+  auto *browseButton = new QPushButton( tr( "Browse..." ), inputGroup );
   browseButton->setObjectName( QStringLiteral( "spectralLibBrowseBtn" ) );
   browseButton->setFixedWidth( 76 );
   SicnuUi::markSecondary( browseButton );
-  SicnuDialogHelp::tip( browseButton, tr( "浏览并选择光谱库 JSON 文件" ) );
+  SicnuDialogHelp::tip( browseButton, tr( "Browse and choose the spectral library JSON file" ) );
   connect( browseButton, &QPushButton::clicked, this, &SpectralLibraryDialog::browseLibrary );
 
   auto *pathRow = new QHBoxLayout();
@@ -70,27 +70,27 @@ void SpectralLibraryDialog::setupUi()
   pathRow->setSpacing( 8 );
   pathRow->addWidget( m_libraryPathEdit, 1 );
   pathRow->addWidget( browseButton );
-  form->addRow( tr( "光谱库" ), pathRow );
+  form->addRow( tr( "Spectral Library" ), pathRow );
 
   inputLayout->addLayout( form );
   mainLayout->addWidget( inputGroup );
 
   // 2. Matching & Results Group
-  QGroupBox *resultGroup = SicnuUi::makeGroup( this, tr( "匹配与检索结果" ) );
+  QGroupBox *resultGroup = SicnuUi::makeGroup( this, tr( "Matching and Search Results" ) );
   auto *resultLayout = new QVBoxLayout( resultGroup );
   resultLayout->setContentsMargins( 12, 10, 12, 10 );
   resultLayout->setSpacing( 8 );
 
-  m_matchButton = new QPushButton( tr( "运行匹配" ), resultGroup );
+  m_matchButton = new QPushButton( tr( "Run Matching" ), resultGroup );
   SicnuUi::markPrimary( m_matchButton );
   m_matchButton->setObjectName( QStringLiteral( "spectralMatchBtn" ) );
-  SicnuDialogHelp::tip( m_matchButton, tr( "运行 SAM / SID 光谱匹配算法，对光谱库中条目按相似度排序" ) );
+  SicnuDialogHelp::tip( m_matchButton, tr( "Run the SAM / SID spectral matching algorithms and rank library entries by similarity" ) );
   connect( m_matchButton, &QPushButton::clicked, this, &SpectralLibraryDialog::runMatch );
 
-  m_saveButton = new QPushButton( tr( "保存当前谱到库" ), resultGroup );
+  m_saveButton = new QPushButton( tr( "Save Current Spectrum to Library" ), resultGroup );
   SicnuUi::markSecondary( m_saveButton );
   m_saveButton->setObjectName( QStringLiteral( "spectralSaveBtn" ) );
-  SicnuDialogHelp::tip( m_saveButton, tr( "将当前采集的像元光谱曲线追加或保存到已加载的光谱库中" ) );
+  SicnuDialogHelp::tip( m_saveButton, tr( "Append or save the currently collected pixel spectrum into the loaded spectral library" ) );
   connect( m_saveButton, &QPushButton::clicked, this, &SpectralLibraryDialog::saveCurrentToLibrary );
 
   auto *actionRow = new QHBoxLayout();
@@ -103,10 +103,10 @@ void SpectralLibraryDialog::setupUi()
 
   m_matchTable = new QTableWidget( resultGroup );
   m_matchTable->setObjectName( QStringLiteral( "spectralMatchTable" ) );
-  SicnuDialogHelp::tip( m_matchTable, tr( "匹配结果列表：显示 SAM 夹角（越小越相似）与 SID 散度" ) );
+  SicnuDialogHelp::tip( m_matchTable, tr( "Match list: shows the SAM angle (smaller is more similar) and the SID divergence" ) );
   m_matchTable->setColumnCount( 5 );
   m_matchTable->setHorizontalHeaderLabels(
-    { tr( "排名" ), tr( "名称" ), tr( "物质/类别" ), tr( "SAM (°)" ), tr( "SID" ) } );
+    { tr( "Rank" ), tr( "Name" ), tr( "Material / Class" ), tr( "SAM (°)" ), tr( "SID" ) } );
   m_matchTable->horizontalHeader()->setStretchLastSection( true );
   m_matchTable->setEditTriggers( QAbstractItemView::NoEditTriggers );
   m_matchTable->setSelectionBehavior( QAbstractItemView::SelectRows );
@@ -115,7 +115,7 @@ void SpectralLibraryDialog::setupUi()
   m_matchTable->horizontalHeader()->setSectionResizeMode( 2, QHeaderView::Stretch );
   resultLayout->addWidget( m_matchTable, 1 );
 
-  m_statusLabel = SicnuUi::makeHintLabel( resultGroup, tr( "就绪" ) );
+  m_statusLabel = SicnuUi::makeHintLabel( resultGroup, tr( "Ready" ) );
   m_statusLabel->setWordWrap( true );
   resultLayout->addWidget( m_statusLabel );
 
@@ -125,18 +125,18 @@ void SpectralLibraryDialog::setupUi()
   auto *buttonBox = new QDialogButtonBox( this );
   buttonBox->setObjectName( QStringLiteral( "rsDialogButtonBox" ) );
 
-  auto *helpButton = buttonBox->addButton( tr( "帮助" ), QDialogButtonBox::HelpRole );
+  auto *helpButton = buttonBox->addButton( tr( "Help" ), QDialogButtonBox::HelpRole );
   helpButton->setObjectName( QStringLiteral( "rsDialogHelpButton" ) );
   SicnuUi::markSecondary( helpButton );
-  SicnuDialogHelp::tip( helpButton, tr( "打开光谱库匹配帮助说明。" ) );
+  SicnuDialogHelp::tip( helpButton, tr( "Opens help for spectral library matching." ) );
   connect( helpButton, &QPushButton::clicked, this, [this]() {
     SicnuDialogHelp::showToolHelp( this, QStringLiteral( "spectral_library" ), windowTitle() );
   } );
 
-  auto *closeButton = buttonBox->addButton( tr( "关闭" ), QDialogButtonBox::RejectRole );
+  auto *closeButton = buttonBox->addButton( tr( "Close" ), QDialogButtonBox::RejectRole );
   closeButton->setObjectName( QStringLiteral( "rsDialogCloseButton" ) );
   SicnuUi::markSecondary( closeButton );
-  SicnuDialogHelp::tip( closeButton, tr( "关闭对话框。" ) );
+  SicnuDialogHelp::tip( closeButton, tr( "Closes the dialog." ) );
   connect( buttonBox, &QDialogButtonBox::rejected, this, &QDialog::accept );
 
   mainLayout->addWidget( buttonBox );
@@ -158,12 +158,12 @@ void SpectralLibraryDialog::updateSpectrumSummary()
 {
   if ( m_values.isEmpty() )
   {
-    m_spectrumSummary->setText( tr( "（未采集光谱）" ) );
+    m_spectrumSummary->setText( tr( "(no spectrum collected)" ) );
     m_matchButton->setEnabled( false );
     m_saveButton->setEnabled( false );
     return;
   }
-  m_spectrumSummary->setText( tr( "%1 个波段%2" )
+  m_spectrumSummary->setText( tr( "%1 bands%2" )
                                 .arg( m_values.size() )
                                 .arg( m_labels.isEmpty()
                                         ? QString()
@@ -175,7 +175,7 @@ void SpectralLibraryDialog::updateSpectrumSummary()
 void SpectralLibraryDialog::browseLibrary()
 {
   const QString path = QFileDialog::getOpenFileName(
-    this, tr( "选择光谱库" ), QString(), tr( "Spectral Library JSON (*.json);;所有文件 (*)" ) );
+    this, tr( "Select Spectral Library" ), QString(), tr( "Spectral Library JSON (*.json);;All Files (*)" ) );
   if ( !path.isEmpty() )
     m_libraryPathEdit->setText( path );
 }
@@ -199,13 +199,13 @@ void SpectralLibraryDialog::runMatch()
 {
   if ( m_values.isEmpty() )
   {
-    m_statusLabel->setText( tr( "请先在图上采集光谱剖面。" ) );
+    m_statusLabel->setText( tr( "Collect a spectral profile on the map first." ) );
     return;
   }
   const QString path = m_libraryPathEdit->text().trimmed();
   if ( path.isEmpty() )
   {
-    m_statusLabel->setText( tr( "请选择光谱库文件。" ) );
+    m_statusLabel->setText( tr( "Select a spectral library file." ) );
     return;
   }
   if ( !m_libraryLoaded || m_loadedPath != path )
@@ -214,7 +214,7 @@ void SpectralLibraryDialog::runMatch()
     SpectralLibrary::Library library;
     if ( !SpectralLibrary::Library::load( path, &library, &errorMessage ) )
     {
-      m_statusLabel->setText( tr( "加载失败：%1" ).arg( errorMessage ) );
+      m_statusLabel->setText( tr( "Load failed: %1" ).arg( errorMessage ) );
       return;
     }
     m_library = library;
@@ -263,9 +263,9 @@ void SpectralLibraryDialog::runMatch()
 
   const int comparable = m_tableRowCount;
   m_statusLabel->setText(
-    tr( "匹配完成：%1 个可比条目（SAM 升序）。谱库共 %2 个条目。"
-        "未匹配条目通常因波段数不一致且缺少波长栅格。"
-        "带波长栅格的条目已自动重采样后匹配。" )
+    tr( "Matching finished: %1 comparable entries (ascending SAM). The library holds %2 entries in total."
+        "Unmatched entries usually have a different band count and no wavelength raster."
+        "Entries with wavelength rasters were resampled automatically before matching." )
       .arg( comparable )
       .arg( m_library.entries.size() ) );
 }
@@ -278,7 +278,7 @@ void SpectralLibraryDialog::saveCurrentToLibrary()
   const QString path = m_libraryPathEdit->text().trimmed();
   if ( path.isEmpty() )
   {
-    m_statusLabel->setText( tr( "请选择光谱库文件。" ) );
+    m_statusLabel->setText( tr( "Select a spectral library file." ) );
     return;
   }
   if ( !m_libraryLoaded || m_loadedPath != path )
@@ -287,7 +287,7 @@ void SpectralLibraryDialog::saveCurrentToLibrary()
     SpectralLibrary::Library library;
     if ( !SpectralLibrary::Library::load( path, &library, &errorMessage ) )
     {
-      m_statusLabel->setText( tr( "加载失败：%1" ).arg( errorMessage ) );
+      m_statusLabel->setText( tr( "Load failed: %1" ).arg( errorMessage ) );
       return;
     }
     m_library = library;
@@ -298,8 +298,8 @@ void SpectralLibraryDialog::saveCurrentToLibrary()
 
   SpectralLibrary::Entry entry;
   entry.name = QStringLiteral( "profile_%1" ).arg( m_library.entries.size() + 1 );
-  entry.material = tr( "未命名" );
-  entry.source = tr( "光谱剖面面板" );
+  entry.material = tr( "Untitled" );
+  entry.source = tr( "Spectral Profile Panel" );
   entry.spectrum.reserve( m_values.size() );
   for ( double v : m_values )
     entry.spectrum.push_back( static_cast<float>( v ) );
@@ -314,10 +314,10 @@ void SpectralLibraryDialog::saveCurrentToLibrary()
   QString errorMessage;
   if ( !m_library.save( path, &errorMessage ) )
   {
-    m_statusLabel->setText( tr( "保存失败：%1" ).arg( errorMessage ) );
+    m_statusLabel->setText( tr( "Save failed: %1" ).arg( errorMessage ) );
     return;
   }
-  m_statusLabel->setText( tr( "已保存条目“%1”到 %2" ).arg( entry.name, path ) );
+  m_statusLabel->setText( tr( "Saved entry %1 to %2" ).arg( entry.name, path ) );
 }
 
 void SpectralLibraryDialog::showEvent( QShowEvent *event )

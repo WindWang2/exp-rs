@@ -24,7 +24,7 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("speckle_filter"); }
-    QString dialogTitle() const override { return tr("SAR 斑点滤波"); }
+    QString dialogTitle() const override { return tr("SAR Speckle Filtering"); }
     void onRun() override;
 
 private slots:

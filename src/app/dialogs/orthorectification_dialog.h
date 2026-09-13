@@ -36,7 +36,7 @@ public:
 
 protected:
     QString toolName() const override { return QStringLiteral("orthorectification"); }
-    QString dialogTitle() const override { return tr("正射纠正"); }
+    QString dialogTitle() const override { return tr("Orthorectification"); }
     void onRun() override;
 
 private slots:

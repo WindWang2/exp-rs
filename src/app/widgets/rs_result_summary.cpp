@@ -73,7 +73,7 @@ RsResultSummary::RsResultSummary( QWidget *parent )
                      emit openPathRequested( item->data( Qt::UserRole ).toString() );
              } );
 
-    m_rawToggle = new QPushButton( tr( "查看原始 JSON" ), this );
+    m_rawToggle = new QPushButton( tr( "View Raw JSON" ), this );
     m_rawToggle->setObjectName( QStringLiteral( "rsResultRawToggle" ) );
     m_rawToggle->setCheckable( true );
     m_rawToggle->hide();
@@ -159,10 +159,10 @@ void RsResultSummary::rebuildUi()
     if ( !m_operatorId.isEmpty() )
         context << m_operatorId;
     if ( m_elapsedMs >= 0 )
-        context << QObject::tr( "耗时 %1 s" ).arg( m_elapsedMs / 1000.0, 0, 'f', 1 );
+        context << QObject::tr( "Elapsed %1 s" ).arg( m_elapsedMs / 1000.0, 0, 'f', 1 );
     if ( m_fromCache )
-        context << QObject::tr( "缓存命中" );
-    m_statusLine->setText( QObject::tr( "✓ 处理完成%1" )
+        context << QObject::tr( "Cache Hit" );
+    m_statusLine->setText( QObject::tr( "✓ Processing finished%1" )
                                .arg( context.isEmpty()
                                          ? QString()
                                          : QStringLiteral( " · %1" ).arg( context.join( QStringLiteral( " · " ) ) ) ) );
@@ -179,7 +179,7 @@ void RsResultSummary::rebuildUi()
     {
         if ( metricLines.size() >= kMaxMetrics )
         {
-            metricLines << QObject::tr( "…（其余见原始 JSON）" );
+            metricLines << QObject::tr( "... (see the raw JSON for the rest)" );
             break;
         }
         if ( isNonMetricKey( key ) )
@@ -251,7 +251,7 @@ void RsResultSummary::rebuildUi()
                 continue;
             QListWidgetItem *item = new QListWidgetItem( p, m_artifacts );
             item->setData( Qt::UserRole, p );
-            item->setToolTip( QObject::tr( "双击加载到主图" ) );
+            item->setToolTip( QObject::tr( "Double-click to load into the main view" ) );
             m_artifacts->addItem( item );
         }
         m_artifacts->show();
