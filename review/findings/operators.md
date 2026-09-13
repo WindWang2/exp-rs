@@ -104,3 +104,42 @@
 - **Reproduction**: `review/tests/F-OPS-3.cpp`：Float32 QA 波段含 NaN 的 2×2 输入跑 `rs:qa_mask`（cloud_and_shadow），断言输出掩膜对 NaN 像素为 1（masked）；现实现写 0。SCL 路径：SCL=0 的像素即使 mask=all 也断言被掩蔽——现实现为 0。
 - **Recommended fix**: fail-closed：不可读 QA 词应产生 masked=1（或一个独立的 255=unknown 输出类）；SCL 类集至少在 "all" 中纳入 SclNoData。`#699` 注释表明这是"保留历史结果"的有意选择——修复时需同步更新其测试。
 - **Dedupe**: 与 #719（temporal point-extract fail-open）、#612（threshold_raster NoData→clear）同族但文件与行为均未覆盖；#699 修复 UB 时明确保留了该语义（"keep the historical clear outcome"），非重复提交。
+
+## F-OPS-4 · io:reproject 的 srcCrsOverride 是死参数——无 CRS 输入经"获准兜底"重投影后静默错配地理参考
+
+- **Severity**: P1
+- **Lens**: 5（契约/元数据漂移）+ 1（地理参考正确性）
+- **Location**: `src/operators/io/io_operators.cpp:301-323`（读而不传）、`src/geospatial/convert/raster_convert.h:50-62`（WarpOptions 无源 CRS 字段）、`src/geospatial/convert/raster_convert.cpp:202-204`（warp 参数只建 -t_srs）
+- **Code**:
+  ```cpp
+  // io_operators.cpp:306-313 —— 校验要求 CRS-less 输入必须声明 srcCrsOverride：
+    const sicnu::geo::RasterMetadata meta = sicnu::geo::inspectRaster( input );
+    if ( !meta.crs.valid && params::getString( params, "srcCrsOverride" ).empty() )
+    {
+      Json::Value details;
+      details["path"] = input;
+      details["policy"] = "declare srcCrsOverride to take responsibility for the source CRS";
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "input raster carries no CRS; refusing to guess", details );
+    }
+  ```
+  ```cpp
+  // io_operators.cpp:314-317 —— options 组装完全没有 srcCrsOverride：
+    sicnu::geo::WarpOptions options;
+    options.targetCrs = params::requireString( params, "targetCrs" );
+    options.resampling = params::getString( params, "resampling", "near" );
+    options.creationOptions = { "COMPRESS=LZW", "TILED=YES" };
+  ```
+  ```cpp
+  // raster_convert.cpp:202-204 —— warp 参数里没有 -s_srs（WarpOptions 也没有对应字段）：
+    std::vector<std::string> args;
+    args.emplace_back( "-t_srs" );
+    args.emplace_back( options.targetCrs );
+  ```
+- **Root cause**: schema 把 `srcCrsOverride` 文档化为"the only sanctioned fallback"（io_operators.cpp:278-279），run() 校验它，但 `WarpOptions` 根本没有源 CRS 字段可承接。CRS-less 输入放行后，`GDALWarp` 在源无 SRS 且无 `-s_srs` 时按"源 CRS == 目标 CRS"处理：像素不做任何变换，输出栅格却被打上 targetCrs 标签。
+- **Impact**: 数据静默损坏——像素坐标空间的数据被标注成（例如）EPSG:4326，下游按错误地理参考做叠加/量测/切片，无任何报错。声明参数全程无效，正是 #646 "declared knob does nothing" 类。
+- **Trigger condition**: 对无 CRS 的栅格（常见：产线外原始影像、部分 ENVI/二进制转换产物）调用 `io:reproject` 并按提示声明 `srcCrsOverride`。
+- **Evidence**: `verified-by-test-draft`
+- **Reproduction**: `review/tests/F-OPS-4.cpp`：GDAL 建一个 4×4、无 SRS 的 GTiff，调 `IoReprojectOperator` 带 `srcCrsOverride="EPSG:4326"`、`targetCrs="EPSG:32633"`；断言输出中心像元的地理坐标等于源像素中心经 4326→32633 变换后的坐标。现实现输出 geotransform 与源像素网格一致（未变换）。
+- **Recommended fix**: `WarpOptions` 增加 `sourceCrsOverride`，warpRaster 在其非空时 emplace `-s_srs`；IoReprojectOperator 把参数传入。
+- **Dedupe**: new——#903 覆盖 range_cache/python-worker/时间戳，未涉及 io:reproject；#880 是 io:inspect 的 schema 漂移；#637 是 VRT 提供者。
