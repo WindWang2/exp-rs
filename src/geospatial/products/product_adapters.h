@@ -77,6 +77,10 @@ struct ProductMetadata
     std::vector<BandCalibration> bandCalibration; ///< declared gain/bias per band
     std::vector<std::string> declaredBandIds;     ///< BandID order from the sidecar
     std::vector<std::pair<std::string, std::string>> extra; ///< bounded passthrough
+    // Sidecar parse diagnostics (ADR 0147): detected sidecar generation,
+    // root element, and top-level elements outside the parser's whitelist
+    // (bounded). Empty object for non-CN adapters.
+    Json::Value parseDiagnostics;
 
     Json::Value toJson() const;
 };
@@ -88,9 +92,10 @@ enum class ProductKind
     Sentinel2Safe,
     Sentinel1Safe,
     ModisContainer,
-    GaofenProduct, ///< GF-1/2/6 PMS/WFV L1A (CRESDA sidecar XML + TIFF)
+    GaofenProduct, ///< GF-1/2/6 PMS/WFV + GF-7 FWD/BWD L1A (CRESDA sidecar XML + TIFF)
     Zy3Product,    ///< ZY-3 TLC/NAD/FWD/BWD L1A
-    HjCcdProduct,  ///< HJ-1A/1B CCD L1A
+    Zy1Product,    ///< ZY-1 02C PMS/HRC L1A
+    HjCcdProduct,  ///< HJ-1A/1B CCD + HJ-2A/B CCD L1A
     GenericRaster
 };
 
