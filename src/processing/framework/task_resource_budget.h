@@ -37,6 +37,12 @@ enum class TaskMemoryClass
 {
     Streaming,                 ///< O(tile) memory — small default footprint
     MultiPassStreaming,        ///< O(tile) + O(global state) — medium default
+    /// Two-pass streaming with a pass-1 global statistic (mirrors
+    /// RSOperatorMemoryPolicy::GlobalReductionStreaming).
+    GlobalReductionStreaming,
+    /// Bounded-RAM streaming with scratch spill (mirrors
+    /// RSOperatorMemoryPolicy::ExternalMemoryStreaming).
+    ExternalMemoryStreaming,
     FullRaster,                ///< O(width*height*bands) — large default
     ExternalProcess,           ///< external process owns its memory — small
     UnsupportedForLargeRaster, ///< documented heavy — large default

@@ -17,6 +17,10 @@ unsigned int defaultEstimateMbForClass( TaskMemoryClass cls )
         return 64;          // O(tile): a few MB; round up generously
     case TaskMemoryClass::MultiPassStreaming:
         return 128;         // O(tile) + histograms / global state
+    case TaskMemoryClass::GlobalReductionStreaming:
+        return 128;         // O(tile) + one global statistic (same state shape)
+    case TaskMemoryClass::ExternalMemoryStreaming:
+        return 128;         // O(tile) RAM; spill buffers cost scratch disk, not RAM
     case TaskMemoryClass::ExternalProcess:
         return 64;          // child process owns its memory; parent's footprint small
     case TaskMemoryClass::FullRaster:

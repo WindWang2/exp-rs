@@ -21,13 +21,24 @@ enum class RSOperatorMemoryPolicy
 {
   Streaming,                  ///< out-of-core tile/block streaming (O(tile) memory)
   MultiPassStreaming,         ///< multiple streaming passes (O(tile) + O(histogram/global state))
+  /// Two-pass streaming with an explicit global reduction: pass 1 accumulates
+  /// one global statistic over all tiles, pass 2 produces output from it
+  /// (O(tile) RAM + O(global state); the runtime may offer the pass-1
+  /// accumulation through a shared multi-pass reduction primitive).
+  GlobalReductionStreaming,
+  /// Bounded-RAM streaming that spills intermediate tiles to the run's scratch
+  /// area: O(tile) RAM + a declared bounded scratch-disk footprint. Distinct
+  /// from ExternalProcess — the spilling kernel runs in this process and its
+  /// disk usage participates in admission (execution.temporaryDiskBytes).
+  ExternalMemoryStreaming,
   FullRaster,                 ///< whole raster(s) in memory (O(width*height*bands))
   ExternalProcess,            ///< delegates to an external process that manages its own tiling
   UnsupportedForLargeRaster,  ///< documented as unsuitable for large rasters
 };
 
 /// Stable lowercase identifier for a memory policy ("streaming",
-/// "multipass_streaming", "full_raster", "external_process",
+/// "multipass_streaming", "global_reduction_streaming",
+/// "external_memory_streaming", "full_raster", "external_process",
 /// "unsupported_for_large_raster"). Header-inline so any library that consumes
 /// the operator metadata (e.g. sicnu_processing) needs no link dependency on
 /// the operators library.
@@ -38,6 +49,10 @@ inline const char *memoryPolicyName( RSOperatorMemoryPolicy policy )
         return "streaming";
     case RSOperatorMemoryPolicy::MultiPassStreaming:
         return "multipass_streaming";
+    case RSOperatorMemoryPolicy::GlobalReductionStreaming:
+        return "global_reduction_streaming";
+    case RSOperatorMemoryPolicy::ExternalMemoryStreaming:
+        return "external_memory_streaming";
     case RSOperatorMemoryPolicy::FullRaster:
         return "full_raster";
     case RSOperatorMemoryPolicy::ExternalProcess:
@@ -133,6 +148,16 @@ public:
     {
       return RSOperatorMemoryPolicy::FullRaster;
     }
+
+    /// Neighborhood radius (pixels) each streamed tile needs from its
+    /// surroundings when the policy is a streaming family (Streaming /
+    /// MultiPassStreaming / GlobalReductionStreaming / ExternalMemoryStreaming).
+    /// 0 (default) = per-tile independent output. A nonzero halo declares the
+    /// operator as a neighborhood/halo kernel: streaming producers must
+    /// edge-replicate that margin into the tile buffer and the memory planner
+    /// widens the per-tile working set by it on every side. Meaningless for
+    /// FullRaster / ExternalProcess policies.
+    virtual int streamingHaloPixels() const { return 0; }
 
     /**
      * Numeric reproducibility under parallel or blocked execution (ADR 0124).
