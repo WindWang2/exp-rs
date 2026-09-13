@@ -50,6 +50,10 @@ struct TranslateOptions
 struct WarpOptions
 {
     std::string targetCrs;                         ///< REQUIRED for reproject (no guessing)
+    /// -s_srs: declare the source CRS when the input carries none (the
+    /// caller takes responsibility — io:reproject's srcCrsOverride lands
+    /// here). Empty = the source's own CRS governs (default).
+    std::string sourceCrsOverride;
     std::string resampling = "near";
     double targetResolutionX = 0;                  ///< 0 = derive (documented in result)
     double targetResolutionY = 0;

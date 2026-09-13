@@ -200,6 +200,13 @@ TranslateResult warpRaster( const std::string &inputPath, const std::string &tar
   GdalDatasetGuard source( openRasterReadOnly( inputPath ) );
 
   std::vector<std::string> args;
+  if ( !options.sourceCrsOverride.empty() )
+  {
+    // A CRS-less source must not silently warp as identity (F-OPS-4):
+    // the declared source CRS goes on the command line, before -t_srs.
+    args.emplace_back( "-s_srs" );
+    args.emplace_back( options.sourceCrsOverride );
+  }
   args.emplace_back( "-t_srs" );
   args.emplace_back( options.targetCrs );
   args.emplace_back( "-r" );

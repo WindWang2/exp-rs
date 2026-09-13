@@ -72,10 +72,14 @@ OfflineErrorCode，避免错误分类学分裂；拒绝文案必须引用 engagi
 （chunk 计划→预热报告）。CLI：`data catalog search …`、`data cube plan|window …`、
 `data cache prefetch …`。与 D8 已锁定的 `data cache status|clear` 语法同族扩展。
 
-## D-1013 · F-OPS-4 处置
-按 OWNERSHIP.md：Phase 6 时点 master 无认领且 rebase 干净 → 独立 commit 窄修复
-（io:reproject 消费已声明的 srcCrsOverride + 移植 review/tests/F-OPS-4.cpp 断言）；
-否则 OUT_OF_SCOPE 保持记录。执行结果回填此处与 REVIEW_LOG.md。
+## D-1013 · F-OPS-4 处置【已执行：窄修复纳入】
+Phase 6 时点 master 仍无人认领（origin/master 无新分支、issue 全 closed）、rebase 干净
+→ 按预案独立 commit 窄修复：
+* `WarpOptions` 增 `sourceCrsOverride` 字段；`warpRaster` 非空时写 `-s_srs`；
+* `io:reproject` 将已声明的 `srcCrsOverride` 传入（此前读而不传 = #646 类死参数）；
+* 回归测试移植进 `tests/test_io_operators.cpp`（4×4 无 CRS GTiff → 4326→32633，
+  断言输出为米制网格 + EPSG:32633 标签——旧缺陷输出为未变换像素网格）。
+套件：test_io_operators → All tests passed (95 assertions in 7 test cases)。
 
 ## D-1014 · 进程级缓存锁契约（accepted debt 声明）
 RemoteRangeCache/mirror 为单进程语义。跨进程共享同一 cache 目录不在本 track 实现

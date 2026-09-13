@@ -17,6 +17,7 @@ using Catch::Approx;
 
 #include <gdal.h>
 #include <gdal_priv.h>
+#include <ogr_spatialref.h>
 
 #include <filesystem>
 #include <fstream>
@@ -220,4 +221,58 @@ TEST_CASE( "io: operators declare memory policy and determinism grades", "[io][o
     CHECK_FALSE( op->schema().isNull() );
     CHECK( ( op->determinismGrade() == "bit-exact" || op->determinismGrade() == "tolerance" ) );
   }
+}
+TEST_CASE( "F-OPS-4: io:reproject srcCrsOverride actually warps a CRS-less source",
+           "[io][operators][crs][F-OPS-4]" )
+{
+  // The review finding (review/issues/F-OPS-4.md): a CRS-less input had to
+  // declare srcCrsOverride, but the declared CRS never reached the warp —
+  // GDAL treated the source as target-CRS and the output was an unwarped
+  // pixel grid wearing the target CRS label (silent georeferencing lie).
+  const std::string dir = scratch( "fops4" );
+  const std::string input = ( fs::path( dir ) / "crsless.tif" ).string();
+  ensureGdal();
+  {
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver );
+    GDALDatasetH dataset = GDALCreate( driver, input.c_str(), 4, 4, 1, GDT_Byte, nullptr );
+    REQUIRE( dataset );
+    double gt[6] = { 0.0, 1.0, 0.0, 0.0, 0.0, 1.0 };   // plain pixel grid, no CRS
+    REQUIRE( GDALSetGeoTransform( dataset, gt ) == CE_None );
+    GDALClose( dataset );
+  }
+
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "io:reproject" );
+  REQUIRE( op );
+  sicnu::operators::RSOperatorContext context;
+  Json::Value params;
+  params["input"] = input;
+  params["output"] = ( fs::path( dir ) / "warped.tif" ).string();
+  params["srcCrsOverride"] = "EPSG:4326";
+  params["targetCrs"] = "EPSG:32633";
+  const Json::Value result = op->execute( params, context );
+  CHECK( result["width"].asInt() > 0 );
+
+  GDALDatasetH warped = GDALOpen( params["output"].asString().c_str(), GA_ReadOnly );
+  REQUIRE( warped != nullptr );
+  REQUIRE( GDALGetProjectionRef( warped ) != nullptr );
+  OGRSpatialReferenceH srs = OSRNewSpatialReference( nullptr );
+  const char *projection = GDALGetProjectionRef( warped );
+  REQUIRE( OSRImportFromWkt( srs, const_cast<char **>( &projection ) ) == OGRERR_NONE );
+  const char *authorityName = OSRGetAuthorityName( srs, nullptr );
+  const char *authorityCode = OSRGetAuthorityCode( srs, nullptr );
+  REQUIRE( authorityName != nullptr );
+  REQUIRE( authorityCode != nullptr );
+  CHECK( std::string( authorityName ) == "EPSG" );
+  CHECK( std::string( authorityCode ) == "32633" );
+  double gt[6] = { 0, 1, 0, 0, 0, 1 };
+  REQUIRE( GDALGetGeoTransform( warped, gt ) == CE_None );
+  // The old defect produced the untouched pixel grid (gt[0]==0, |gt[1]|==1).
+  // A real 4326→UTM-33N warp carries a METRIC resolution (~111 km per
+  // degree); lon 0..4°E sits far WEST of the 15°E central meridian, so the
+  // origin easting is deeply negative — geometric truth, not a defect.
+  CHECK( gt[0] < 300000.0 );
+  CHECK( std::abs( gt[1] ) > 50000.0 );   // ~111 km per degree
+  OSRDestroySpatialReference( srs );
+  GDALClose( warped );
 }
