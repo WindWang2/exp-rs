@@ -8,6 +8,16 @@
 qt_add_library(sicnu_experiment_bridge STATIC
   workflow_experiment_adapter.cpp
   workflow_experiment_adapter.h
+  execution_event_conversion.cpp
+  execution_event_conversion.h
+  checkpoint_evidence.cpp
+  checkpoint_evidence.h
+  lab_run_recorder.cpp
+  lab_run_recorder.h
+  lab_report.cpp
+  lab_report.h
+  lab_report_writers.cpp
+  lab_report_writers.h
 )
 
 add_library(Sicnu::experiment_bridge ALIAS sicnu_experiment_bridge)

@@ -351,6 +351,9 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     Sicnu::help_gui
     Sicnu::dataset
     Sicnu::experiment
+    # D5: desktop lab auto-recording surface + lab report builder (bridge
+    # converts coordinator truth into experiment records).
+    Sicnu::experiment_bridge
     Sicnu::Geospatial
     sicnu_core
     sicnu_processing
