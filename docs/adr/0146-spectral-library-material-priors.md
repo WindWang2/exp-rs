@@ -80,7 +80,7 @@ hard-coded into C++.
 
 - The workbench, SAM/SID matching and the D3c lab chain have real data out of
   the box; teaching uses canonical, explainable curves (green peak, red edge,
-  water-vapour bands, quartz reststrahlen, ice absorption).
+  water-vapour bands, quartz Si-O overtone doublet, ice absorption).
 - D8/D9 consume stable JSON priors derived from data; future knowledge work
   needs no schema change.
 - The library is redistributable by construction (CC0-1.0, zero third-party

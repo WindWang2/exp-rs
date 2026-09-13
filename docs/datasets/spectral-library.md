@@ -105,7 +105,8 @@ swir2 2080–2350 nm. Statistics are computed from the data at query time.
 - **D3c lab experiments** reference the library by
   `library_id = "rs-studio.builtin-spectral-library.v1"` (root `id` field).
 - **D8 capability knowledge** reads `priorsFor(material)` JSON directly
-  (e.g. to state "water is dark in NIR: max 0.02" from shipped data).
+  (e.g. to state "water is dark in NIR: class-window max 0.09, and the
+  clear-deep entry tops out at 0.005" straight from shipped data).
 - **D9 teaching copilot** combines `byMaterial` + `priorsFor` + the
   `derivation` strings for explainable material facts.
 - **Spectral workbench (D6 UI)** keeps loading the same file through
