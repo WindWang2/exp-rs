@@ -432,5 +432,132 @@
     "related": [
       "operator.rs.modis_import"
     ]
+  },
+  {
+    "id": "operator.rs.gaofen_import",
+    "title": "高分导入",
+    "summary": "解析 GF-1/2/6 PMS/WFV 与 GF-7 FWD/BWD L1A 产品包：波段角色、太阳几何与声明定标系数。",
+    "category": "数据 I/O",
+    "keywords": [
+      "高分",
+      "Gaofen",
+      "GF",
+      "导入",
+      "CRESDA"
+    ],
+    "algorithm": {
+      "whatItDoes": "读取 CRESDA sidecar XML，按传感器画像映射波段角色，堆栈为多波段 GeoTIFF 并标注声明元数据。",
+      "whenToUse": "高分系列数据进入处理链的第一步。",
+      "assumptions": [
+        "完整产品包（sidecar XML + 同名 TIFF）"
+      ],
+      "limitations": [
+        "GF-3/GF-4/GF-5 等未适配家族会被拒绝并给出原因"
+      ],
+      "keyParameters": [
+        "input",
+        "bands",
+        "apply_calibration"
+      ]
+    },
+    "related": [
+      "operator.rs.cn_product_import",
+      "operator.rs.radiometric_calibration",
+      "operator.rs.ndvi"
+    ]
+  },
+  {
+    "id": "operator.rs.zy3_import",
+    "title": "资源三号导入",
+    "summary": "解析 ZY-3 TLC/NAD/FWD/BWD L1A 产品：自动区分全色/多光谱并映射波段角色。",
+    "category": "数据 I/O",
+    "keywords": [
+      "资源三号",
+      "ZY-3",
+      "导入"
+    ],
+    "algorithm": {
+      "whatItDoes": "按声明波段清单区分全色与多光谱，堆栈为多波段 GeoTIFF 并标注元数据。",
+      "whenToUse": "ZY-3 立体测绘/多光谱数据进入处理链的第一步。",
+      "assumptions": [
+        "完整产品包"
+      ],
+      "limitations": [
+        "ZY-1 02D/02E AHSI 高光谱不支持"
+      ],
+      "keyParameters": [
+        "input",
+        "bands",
+        "apply_calibration"
+      ]
+    },
+    "related": [
+      "operator.rs.cn_product_import",
+      "operator.rs.ndvi"
+    ]
+  },
+  {
+    "id": "operator.rs.hj_import",
+    "title": "环境减灾导入",
+    "summary": "解析 HJ-1A/1B CCD 与 HJ-2A/B CCD L1A 产品：B1–B4 波段角色与声明元数据。",
+    "category": "数据 I/O",
+    "keywords": [
+      "环境减灾",
+      "HJ",
+      "CCD",
+      "导入"
+    ],
+    "algorithm": {
+      "whatItDoes": "读取 CRESDA sidecar，映射 CCD 四波段角色，堆栈为多波段 GeoTIFF。",
+      "whenToUse": "环境减灾数据大区域 NDVI/水体监测的第一步。",
+      "assumptions": [
+        "完整产品包"
+      ],
+      "limitations": [
+        "HJ-1 IRS 与 HJ-2 HSI 载荷不支持"
+      ],
+      "keyParameters": [
+        "input",
+        "bands",
+        "apply_calibration"
+      ]
+    },
+    "related": [
+      "operator.rs.cn_product_import",
+      "operator.rs.ndvi"
+    ]
+  },
+  {
+    "id": "operator.rs.cn_product_import",
+    "title": "国产卫星产品统一导入",
+    "summary": "自动识别 GF/ZY-3/ZY-1 02C/HJ 家族，走标准化导入计划并输出完整溯源。",
+    "category": "数据 I/O",
+    "keywords": [
+      "国产卫星",
+      "产品识别",
+      "溯源",
+      "可选定标"
+    ],
+    "algorithm": {
+      "whatItDoes": "识别→检查→校验→组成解析→角色映射→可选定标（DN→辐亮度）→堆栈→溯源；结果携带 sidecar 世代、完整性与缺失声明字段。",
+      "whenToUse": "不确定产品家族时或 Agent 自动化数据准备的统一入口。",
+      "assumptions": [
+        "产品为受支持的国产 L1A 家族"
+      ],
+      "limitations": [
+        "未适配家族拒绝而不回退；部分波段缺定标系数时拒绝定标"
+      ],
+      "keyParameters": [
+        "input",
+        "bands",
+        "apply_calibration"
+      ]
+    },
+    "related": [
+      "operator.rs.gaofen_import",
+      "operator.rs.zy3_import",
+      "operator.rs.hj_import",
+      "operator.rs.radiometric_calibration"
+    ]
   }
 ]

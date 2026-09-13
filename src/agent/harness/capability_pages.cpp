@@ -188,7 +188,7 @@ std::string renderIndexPage()
   out << "<!-- 由 scripts/capability_knowledge_tool gen-pages 自动生成 — 手动编辑是缺陷（ADR 0146）。 -->\n\n";
   out << "# RS 算子能力知识索引\n\n";
   const std::vector<std::string> ids = catalog.entryIds();
-  out << "覆盖 " << ids.size() << " 个 `rs:` 算子（要求 111/111）。"
+  out << "覆盖 " << ids.size() << " 个 `rs:` 算子（要求 115/115）。"
          "逐算子元数据见 `data/processing/algorithm_meta/capability/`；"
          "关系图见同目录 `capability_relations.json`。\n\n";
   out << "| 算子族 | 数量 | 页面 |\n|---|---|---|\n";
