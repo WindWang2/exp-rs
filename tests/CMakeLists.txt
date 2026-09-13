@@ -8209,6 +8209,14 @@ sicnu_add_header_probes(
   contracts/command_ref_scanner.h
   contracts/error_code_scanner.h
   contracts/graph_assembly.h
+  # fabric-10: data fabric / data cube module headers.
+  geospatial/fabric/object_store.h
+  geospatial/fabric/catalog_service.h
+  geospatial/fabric/virtual_cube.h
+  geospatial/fabric/chunk_plan.h
+  geospatial/fabric/query_planner.h
+  geospatial/fabric/prefetch.h
+  geospatial/fabric/mirror.h
 )
 
 # Trace chain (task F) + store fault contracts (task E), Verification

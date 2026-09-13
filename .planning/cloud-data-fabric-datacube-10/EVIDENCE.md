@@ -38,7 +38,14 @@ $ git check-ignore -v .planning/cloud-data-fabric-datacube-10/GOAL.md
 
 ## Build 记录（Phase 1 起追加）
 
-（待填：configure 命令、exit code、-j 级别、RSS/load 采样）
+| 项 | 命令 | 结果 |
+| --- | --- | --- |
+| configure | `cmake -S . -B build-fabric10 -G Ninja -DCMAKE_BUILD_TYPE=Debug -DENABLE_TESTS=ON -DENABLE_LOCAL_BUILD_SHORTCUTS=ON` | exit 0，`Generating done`（首次 configure 遇 FetchContent 瞬态失败，第二次成功并缓存） |
+| 头自包含 | `cmake --build build-fabric10 --target header_probe_geospatial_fabric_{object_store,catalog_service,virtual_cube,chunk_plan,query_planner,prefetch,mirror}_h -j2` | exit 0（7/7 OBJECT 库编译通过；隐含 Sicnu::Geospatial + GDAL 依赖编译成功） |
+| 修复记录 | virtual_cube.h 嵌套 BuildOptions 默认参数 → 提升为命名空间级 `VirtualCubeBuildOptions`；mirror.h 补 include query_planner.h | 编译修复，2 处 |
+
+主机环境注记：`cc1plus: warning: .../Qca-qt6/QtCrypto/QtCrypto: not a directory`
+为既有环境噪音（非本 track 引入，master 同样出现）。
 
 ## 测试记录（Phase 2 起追加）
 
