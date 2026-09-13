@@ -65,6 +65,9 @@ Json::Value RsEndmemberExtractionOperator::metadata() const {
     meta["workflowHints"].append("In workflows set endmembersOut: the artifact path lands in "
                                  "endmembersArtifact and binds to the next step via "
                                  "$<stepId>.endmembersArtifact -> endmembersRef / refsRef.");
+    meta["workflowHints"].append("A step producing only the JSON artifact should set "
+                                 "verificationPolicy=skip in the workflow definition "
+                                 "(nothing raster/vector to verify).");
     meta["limitations"].append("PPI finds pixels at the data hull; it assumes endmembers "
                                "are present as pure pixels in the scene.");
     return meta;

@@ -30,6 +30,8 @@
 #include "workflow/workflow_session.h"
 
 using namespace sicnu::operators;
+using namespace sicnu::operators::rs;
+using namespace sicnu::workflow;
 using Catch::Approx;
 
 namespace
@@ -110,6 +112,10 @@ TEST_CASE("Endmember artifact flows PPI -> unmixing in one workflow",
     ppi.params["input"] = inputPath.toStdString();
     ppi.params["nEndmembers"] = 3;
     ppi.params["endmembersOut"] = (tmp.path() + "/endmembers.json").toStdString();
+    // The step's deliverable is a JSON spectral-table artifact, not a GDAL
+    // dataset: opt out of raster/vector output verification (the field's
+    // documented purpose).
+    ppi.verificationPolicy = "skip";
     def.steps.push_back(ppi);
 
     StepDef unmix;
@@ -126,10 +132,8 @@ TEST_CASE("Endmember artifact flows PPI -> unmixing in one workflow",
     runtime.registerDefinition(def);
     const std::string sessionId = runtime.open("spectral_chain");
     REQUIRE(!sessionId.empty());
-    auto session = runtime.session(sessionId);
-    REQUIRE(session != nullptr);
-    session->setParams("ppi", ppi.params);
-    session->setParams("unmix", unmix.params);
+    runtime.setParams(sessionId, "ppi", ppi.params);
+    runtime.setParams(sessionId, "unmix", unmix.params);
 
     Json::Value ppiResult = runtime.runStep(sessionId, "ppi");
     REQUIRE(ppiResult.isMember("endmembersArtifact"));

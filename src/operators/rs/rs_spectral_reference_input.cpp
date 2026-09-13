@@ -404,7 +404,32 @@ ResolvedSpectralReference resolveSpectralReference(
     if ( hasInline )
     {
         // Legacy contract: exact width match, no wavelength reconciliation.
+        // Two inline shapes exist across the operators: a flat spectrum
+        // (rs:matched_filter / rs:ace "target") and an array-of-arrays
+        // (rs:sam_classify "refs", rs:spectral_unmixing "endmembers"). The
+        // first element disambiguates; anything else is a typed refusal.
         const Json::Value &arr = params[inlineKey];
+        const bool flat = arr[0].isNumeric();
+        if ( flat )
+        {
+            if ( static_cast<int>( arr.size() ) != inputBandCount )
+                refuse( ErrorCode::InvalidParameter,
+                        std::string( inlineKey ) + " must be an array of " +
+                            std::to_string( inputBandCount ) + " numbers (one per band), got " +
+                            std::to_string( arr.size() ) );
+            for ( Json::ArrayIndex b = 0; b < arr.size(); ++b )
+            {
+                if ( !arr[b].isNumeric() )
+                    refuse( ErrorCode::InvalidParameter,
+                            std::string( inlineKey ) + " contains a non-numeric value" );
+                out.flat.push_back( static_cast<float>( arr[b].asDouble() ) );
+            }
+            out.width = inputBandCount;
+            out.count = 1;
+            out.sourceDescription = QStringLiteral( "inline %1 (single spectrum)" )
+                                        .arg( inlineKey );
+            return out;
+        }
         for ( Json::ArrayIndex r = 0; r < arr.size(); ++r )
         {
             const Json::Value &row = arr[r];

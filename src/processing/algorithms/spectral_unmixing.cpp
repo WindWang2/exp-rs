@@ -230,6 +230,16 @@ bool nnlsNormalEquations( const std::vector<double> &gram, int n,
     std::vector<double> uP;
     std::vector<double> zP;
 
+    // Dual-feasibility pivot tolerance, scaled to the problem: rounding in
+    // G·z is ~eps * |G| * |z|, so an absolute threshold (e.g. 1e-12) sits
+    // BELOW the noise floor of large-penalty systems and pivots forever on
+    // a zero-gradient variable. 1e-11 * |u|max is far above the noise yet
+    // corresponds to a negligible abundance error (~1e-11 / |G|diag).
+    double maxAbsU = 1.0;
+    for ( int i = 0; i < n; ++i )
+        maxAbsU = std::max( maxAbsU, std::abs( u[static_cast<size_t>( i )] ) );
+    const double pivotTol = 1e-11 * maxAbsU;
+
     for ( int sweep = 0; sweep < kMaxNnlsSweeps; ++sweep )
     {
         // Gradient of the objective at the current point.
@@ -241,7 +251,7 @@ bool nnlsNormalEquations( const std::vector<double> &gram, int n,
             gradient[static_cast<size_t>( i )] = sum;
         }
         int pivot = -1;
-        double best = 1e-12;
+        double best = pivotTol;
         for ( int i = 0; i < n; ++i )
         {
             if ( passive[static_cast<size_t>( i )] )
@@ -279,7 +289,7 @@ bool nnlsNormalEquations( const std::vector<double> &gram, int n,
             }
             l = gPp;
             if ( !choleskyInPlace( l, passiveCount, 0.0 ) )
-                return false; // principal submatrix lost PD — caller's guard failed
+                return false; // principal submatrix lost PD
             choleskySolve( l, passiveCount, uP, &zP );
             for ( int r = 0; r < passiveCount; ++r )
                 candidate[static_cast<size_t>( members[static_cast<size_t>( r )] )] =
