@@ -2073,6 +2073,16 @@ endif()
 sicnu_add_test(test_chunk_graph TIMEOUT 120)
 target_link_libraries(test_chunk_graph PRIVATE sicnu_runtime)
 
+# LSEE 10.0 external-memory contracts (scratch leases, disk tile store, tile
+# checkpoint; Qt-free; links sicnu_runtime only).
+sicnu_add_test(test_external_memory_10 TIMEOUT 120)
+target_link_libraries(test_external_memory_10 PRIVATE sicnu_runtime)
+
+# LSEE 10.0 scale & failure matrix (fan-out joins at 10^6 logical tiles under
+# SICNU_LSEE10_STRESS, scratch storms, checkpoint restart, poison-task
+# convergence). Drives the real TaskCenter/JobEngine singletons: serial.
+sicnu_add_test(test_large_scale_execution_10 TIMEOUT 900 RUN_SERIAL TRUE)
+
 # Phase D artifact identity store (Phase D of the epic). SQLite link for the
 # schema-guard test's direct DB surgery; sicnu_data keeps its own PRIVATE link.
 sicnu_add_test(test_artifact_store TIMEOUT 120)
