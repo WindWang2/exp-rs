@@ -1,110 +1,129 @@
 {
- "capability": {
-  "applicability": {
-   "land_cover": [
-    "植被",
-    "水体",
-    "火点迹地"
-   ],
-   "scenes": [
-    "环境监测",
-    "大区域普查"
-   ]
-  },
-  "band_roles": {},
-  "crs": {
-   "requires_projected": false,
-   "requires_shared_grid": false
-  },
-  "determinism": {
-   "grade": "bit_exact",
-   "large_raster_safe": false,
-   "memory_policy": "full_raster",
-   "side_effects": false,
-   "stochastic": false
-  },
-  "failure_modes": [
-   {
-    "code": "DATASET_NOT_FOUND",
-    "remedy": "检查产品目录与 CRESDA XML 是否完整",
-    "when": "产品目录或 XML 侧车缺失"
-   },
-   {
-    "code": "EXECUTION_FAILED",
-    "remedy": "确认 L1A 产品级别与波段列表",
-    "when": "波段声明与文件不符"
-   }
-  ],
-  "family": "io",
-  "io": {
-   "inputs": [],
-   "outputs": [
+  "capability" : 
+  {
+    "applicability" : 
     {
-     "data_kind": "integer",
-     "name": "bandCount",
-     "required": true
+      "land_cover" : 
+      [
+        "\u690d\u88ab",
+        "\u6c34\u4f53",
+        "\u706b\u70b9\u8ff9\u5730"
+      ],
+      "scenes" : 
+      [
+        "\u73af\u5883\u76d1\u6d4b",
+        "\u5927\u533a\u57df\u666e\u67e5"
+      ]
     },
+    "band_roles" : {},
+    "crs" : 
     {
-     "data_kind": "raster",
-     "file_format": "tif",
-     "name": "output",
-     "required": true
+      "requires_projected" : false,
+      "requires_shared_grid" : false
     },
+    "determinism" : 
     {
-     "data_kind": "string",
-     "name": "productId",
-     "required": true
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "DATASET_NOT_FOUND",
+        "remedy" : "\u68c0\u67e5\u4ea7\u54c1\u76ee\u5f55\u4e0e CRESDA XML \u662f\u5426\u5b8c\u6574",
+        "when" : "\u4ea7\u54c1\u76ee\u5f55\u6216 XML \u4fa7\u8f66\u7f3a\u5931"
+      },
+      {
+        "code" : "EXECUTION_FAILED",
+        "remedy" : "\u786e\u8ba4 L1A \u4ea7\u54c1\u7ea7\u522b\u4e0e\u6ce2\u6bb5\u5217\u8868",
+        "when" : "\u6ce2\u6bb5\u58f0\u660e\u4e0e\u6587\u4ef6\u4e0d\u7b26"
+      }
+    ],
+    "family" : "io",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bandCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "productId",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "bands",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "input",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Import an HJ-1 CCD L1A product (sidecar XML + TIFF) into a multi-band GeoTIFF with declared calibration/sun geometry stamped as SICNU_* metadata."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "data-formats",
+    "prerequisites" : 
+    [
+      "Product directory with CRESDA sidecar XML and TIFF (offline)"
+    ],
+    "schema_version" : 2,
+    "summary" : "HJ-1 CCD L1A \u4ea7\u54c1\u5bfc\u5165\u4e3a\u591a\u6ce2\u6bb5 GeoTIFF\uff0c\u7528\u4e8e\u73af\u5883\u51cf\u707e\u76d1\u6d4b\u6559\u5b66\u6d41\u7a0b\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u4ea7\u54c1\u5bfc\u5165",
+        "\u73af\u5883\u76d1\u6d4b"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u5bfc\u5165 HJ-1 CCD \u6570\u636e\u5e76\u4e0e\u73af\u5883\u536b\u661f\u8f68\u9053\u5143\u6570\u636e\u5bf9\u7167\uff0c\u8bf4\u660e\u91cd\u8bbf\u5468\u671f\u5bf9\u65f6\u76f8\u5206\u6790\u7684\u5f71\u54cd\u3002"
     }
-   ],
-   "parameters": [
-    {
-     "name": "bands",
-     "required": false,
-     "type": "string"
-    },
-    {
-     "name": "input",
-     "required": true,
-     "type": "string"
-    },
-    {
-     "name": "output",
-     "required": true,
-     "type": "string"
-    }
-   ]
   },
-  "limitations": [
-   "Import an HJ-1 CCD L1A product (sidecar XML + TIFF) into a multi-band GeoTIFF with declared calibration/sun geometry stamped as SICNU_* metadata."
-  ],
-  "modality": [
-   "optical"
-  ],
-  "operator_group": "io",
-  "prerequisites": [],
-  "schema_version": 2,
-  "summary": "HJ-1 CCD L1A 产品导入为多波段 GeoTIFF，用于环境减灾监测教学流程。",
-  "teaching_use": {
-   "concepts": [
-    "产品导入",
-    "环境监测"
-   ],
-   "courses": [
-    "遥感数字图像处理"
-   ],
-   "exercise": "导入 HJ-1 CCD 数据并与环境卫星轨道元数据对照，说明重访周期对时相分析的影响。"
-  }
- },
- "description": "Import an HJ-1 CCD L1A product (sidecar XML + TIFF) into a multi-band GeoTIFF with declared calibration/sun geometry stamped as SICNU_* metadata.",
- "display_name": "HJ-1 Product Import",
- "id": "rs:hj_import",
- "input": "",
- "output": "raster",
- "schema_version": 2,
- "tags": [
-  "hj",
-  "cn-satellite",
-  "import",
-  "data-format"
- ]
+  "description" : "Import a HJ-1A/1B CCD L1A product into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.",
+  "display_name" : "Huanjing CCD Product Import",
+  "id" : "rs:hj_import",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "hj-1",
+    "cn-satellite",
+    "import",
+    "data-format"
+  ]
 }

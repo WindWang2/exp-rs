@@ -1,110 +1,129 @@
 {
- "capability": {
-  "applicability": {
-   "land_cover": [
-    "植被",
-    "裸地",
-    "水体"
-   ],
-   "scenes": [
-    "地形辅助调查",
-    "资源调查"
-   ]
-  },
-  "band_roles": {},
-  "crs": {
-   "requires_projected": false,
-   "requires_shared_grid": false
-  },
-  "determinism": {
-   "grade": "bit_exact",
-   "large_raster_safe": false,
-   "memory_policy": "full_raster",
-   "side_effects": false,
-   "stochastic": false
-  },
-  "failure_modes": [
-   {
-    "code": "DATASET_NOT_FOUND",
-    "remedy": "检查产品目录与 CRESDA XML 是否完整",
-    "when": "产品目录或 XML 侧车缺失"
-   },
-   {
-    "code": "EXECUTION_FAILED",
-    "remedy": "确认 L1A 产品级别与波段列表",
-    "when": "波段声明与文件不符"
-   }
-  ],
-  "family": "io",
-  "io": {
-   "inputs": [],
-   "outputs": [
+  "capability" : 
+  {
+    "applicability" : 
     {
-     "data_kind": "integer",
-     "name": "bandCount",
-     "required": true
+      "land_cover" : 
+      [
+        "\u690d\u88ab",
+        "\u88f8\u5730",
+        "\u6c34\u4f53"
+      ],
+      "scenes" : 
+      [
+        "\u5730\u5f62\u8f85\u52a9\u8c03\u67e5",
+        "\u8d44\u6e90\u8c03\u67e5"
+      ]
     },
+    "band_roles" : {},
+    "crs" : 
     {
-     "data_kind": "raster",
-     "file_format": "tif",
-     "name": "output",
-     "required": true
+      "requires_projected" : false,
+      "requires_shared_grid" : false
     },
+    "determinism" : 
     {
-     "data_kind": "string",
-     "name": "productId",
-     "required": true
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "DATASET_NOT_FOUND",
+        "remedy" : "\u68c0\u67e5\u4ea7\u54c1\u76ee\u5f55\u4e0e CRESDA XML \u662f\u5426\u5b8c\u6574",
+        "when" : "\u4ea7\u54c1\u76ee\u5f55\u6216 XML \u4fa7\u8f66\u7f3a\u5931"
+      },
+      {
+        "code" : "EXECUTION_FAILED",
+        "remedy" : "\u786e\u8ba4 L1A \u4ea7\u54c1\u7ea7\u522b\u4e0e\u6ce2\u6bb5\u5217\u8868",
+        "when" : "\u6ce2\u6bb5\u58f0\u660e\u4e0e\u6587\u4ef6\u4e0d\u7b26"
+      }
+    ],
+    "family" : "io",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bandCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "productId",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "bands",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "input",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Import a ZY-3 L1A product (CRESDA sidecar XML + TIFF) into a multi-band GeoTIFF with declared calibration/sun geometry stamped as SICNU_* metadata."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "data-formats",
+    "prerequisites" : 
+    [
+      "Product directory with CRESDA sidecar XML and TIFF (offline)"
+    ],
+    "schema_version" : 2,
+    "summary" : "ZY-3 L1A \u4ea7\u54c1\u5bfc\u5165\u4e3a\u591a\u6ce2\u6bb5 GeoTIFF\uff0c\u4fdd\u7559\u4ea7\u54c1\u58f0\u660e\u7684\u5b9a\u6807\u4e0e\u51e0\u4f55\u4fe1\u606f\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u4ea7\u54c1\u5bfc\u5165",
+        "\u591a\u5149\u8c31\u6ce2\u6bb5"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u5bfc\u5165\u4e00\u666f ZY-3 \u591a\u5149\u8c31\u6570\u636e\uff0c\u5bf9\u6bd4\u4e0d\u540c\u6ce2\u6bb5\u5408\u6210\u65b9\u5f0f\u4e0b\u7684\u5730\u7269\u53ef\u5206\u6027\u3002"
     }
-   ],
-   "parameters": [
-    {
-     "name": "bands",
-     "required": false,
-     "type": "string"
-    },
-    {
-     "name": "input",
-     "required": true,
-     "type": "string"
-    },
-    {
-     "name": "output",
-     "required": true,
-     "type": "string"
-    }
-   ]
   },
-  "limitations": [
-   "Import a ZY-3 L1A product (CRESDA sidecar XML + TIFF) into a multi-band GeoTIFF with declared calibration/sun geometry stamped as SICNU_* metadata."
-  ],
-  "modality": [
-   "optical"
-  ],
-  "operator_group": "io",
-  "prerequisites": [],
-  "schema_version": 2,
-  "summary": "ZY-3 L1A 产品导入为多波段 GeoTIFF，保留产品声明的定标与几何信息。",
-  "teaching_use": {
-   "concepts": [
-    "产品导入",
-    "多光谱波段"
-   ],
-   "courses": [
-    "遥感数字图像处理"
-   ],
-   "exercise": "导入一景 ZY-3 多光谱数据，对比不同波段合成方式下的地物可分性。"
-  }
- },
- "description": "Import a ZY-3 L1A product (CRESDA sidecar XML + TIFF) into a multi-band GeoTIFF with declared calibration/sun geometry stamped as SICNU_* metadata.",
- "display_name": "ZY-3 Product Import",
- "id": "rs:zy3_import",
- "input": "",
- "output": "raster",
- "schema_version": 2,
- "tags": [
-  "zy3",
-  "cn-satellite",
-  "import",
-  "data-format"
- ]
+  "description" : "Import a Ziyuan-3 L1A product (TLC/NAD/FWD/BWD) into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.",
+  "display_name" : "Ziyuan-3 Product Import",
+  "id" : "rs:zy3_import",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "zy3",
+    "cn-satellite",
+    "import",
+    "data-format"
+  ]
 }

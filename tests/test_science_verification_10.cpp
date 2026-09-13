@@ -8,9 +8,10 @@
  *   2. reproducibility replay — the same input through the same operator
  *      twice must produce byte-identical output (deterministic-grade claim,
  *      made testable);
- *   3. seed determinism — the stochastic-family operators (kmeans) produce
- *      identical class maps across runs, pinning their declared
- *      deterministic_internal seed policy;
+ *   3. seed determinism — the deterministic-seeded clustering variant
+ *      (isodata) produces identical class maps across runs; plain kmeans is
+ *      deliberately NOT pinned (cv::kmeans permutes labels across runs), and
+ *      the scientific contract registry records that honestly;
  *   4. bounded CRS refusal fuzz — malformed CRS strings through the warp
  *      seam are always typed refusals, never crashes, never silent output
  *      (deterministic PRNG, offline, no public network);
@@ -38,6 +39,7 @@
 #include <QTemporaryDir>
 
 #include <random>
+#include <tuple>
 #include <string>
 #include <vector>
 
@@ -124,6 +126,9 @@ TEST_CASE( "NDVI is invariant under band scaling (metamorphic)", "[science10][me
         INFO( "pixel " << i );
         CHECK( ndviBase[i] == Catch::Approx( ndviScaled[i] ).margin( 1e-6 ) );
     }
+    // The metamorphic pair alone would pass a constant-output operator; pin
+    // the closed-form value too: nir = 2*red gives NDVI = 1/3 (review R-B3b).
+    CHECK( ndviBase[0] == Catch::Approx( 1.0f / 3.0f ).margin( 1e-5 ) );
 }
 
 TEST_CASE( "operator outputs replay byte-identically (reproducibility)",
@@ -216,6 +221,8 @@ TEST_CASE( "malformed CRS strings through the warp seam are typed refusals (fuzz
     // Deterministic corpus: hand-picked malformations + seeded mutations of
     // a valid WKT1 authority string. Every one must be REFUSED with the
     // operator's typed error — never a crash, never a published output.
+    // Both CRS-bearing parameters are fuzzed: targetCrs AND the F-OPS-4
+    // srcCrsOverride plumbing (review R-A2).
     std::vector<std::string> corpus = {
         "",          " ",   "EPSG:",  ":4326",   "EPSG:0",   "EPSG:-1",  "EPSG:999999999",
         "NOT_A_CRS", "4326", "EPSG:4 32633", "EPSG:\x01", "urn:ogc:def:crs:", "EPSG:32633 ",
@@ -233,38 +240,63 @@ TEST_CASE( "malformed CRS strings through the warp seam are typed refusals (fuzz
         corpus.push_back( mutation );
     }
 
-    auto op = create( "io:warp" );
+    auto warp = create( "io:warp" );
+    auto reproject = create( "io:reproject" );
     int refused = 0;
     int published = 0;
     for ( const std::string &crs : corpus )
     {
-        const QString output = dir.filePath( QStringLiteral( "warp_fuzz_out.tif" ) );
-        QFile::remove( output );
-        Json::Value params;
-        params["input"] = raster.toStdString();
-        params["output"] = output.toStdString();
-        params["targetCrs"] = crs;
-        RSOperatorContext context;
-        try
+        for ( const auto &[operatorId, op, useOverride] :
+              std::vector<std::tuple<const char *, RSOperator *, bool>>{
+                { "io:warp", warp.get(), false },
+                { "io:reproject", reproject.get(), true },
+              } )
         {
-            op->run( params, context );
-            // GDAL is allowed to accept weird-but-parseable strings; a
-            // publish, however, must actually exist and carry a CRS.
-            ++published;
-            INFO( "accepted CRS: " << crs );
-            CHECK( QFile::exists( output ) );
-        }
-        catch ( const RSOperatorError & )
-        {
-            ++refused;
-            // A refusal must not leave an output behind (atomic publication).
-            CHECK_FALSE( QFile::exists( output ) );
+            ( void )operatorId;
+            const QString output = dir.filePath( QStringLiteral( "warp_fuzz_out.tif" ) );
+            QFile::remove( output );
+            Json::Value params;
+            params["input"] = raster.toStdString();
+            params["output"] = output.toStdString();
+            params["targetCrs"] = "EPSG:32633";
+            if ( useOverride )
+                params["srcCrsOverride"] = crs;
+            else
+                params["targetCrs"] = crs;
+            RSOperatorContext context;
+            try
+            {
+                op->run( params, context );
+                // GDAL is allowed to accept weird-but-parseable strings; a
+                // publish, however, must exist, be readable, and carry a CRS
+                // (review R-B3a).
+                ++published;
+                INFO( "accepted CRS: " << crs );
+                CHECK( QFile::exists( output ) );
+                if ( GDALDatasetH publishedDataset =
+                       GDALOpen( output.toUtf8().constData(), GA_ReadOnly ) )
+                {
+                    CHECK( std::string( GDALGetProjectionRef( publishedDataset ) ).size() > 0 );
+                    GDALClose( publishedDataset );
+                }
+                else
+                {
+                    FAIL( "published output is not readable for CRS: " << crs );
+                }
+            }
+            catch ( const RSOperatorError & )
+            {
+                ++refused;
+                // A refusal must not leave an output behind (atomic publication).
+                CHECK_FALSE( QFile::exists( output ) );
+            }
         }
     }
     // The gate is live: the corpus must produce refusals (garbage is
-    // rejected) and must not silently publish everything.
+    // rejected) and must not silently publish everything. Two operators
+    // (io:warp targetCrs, io:reproject srcCrsOverride) run the corpus.
     CHECK( refused > 0 );
-    CHECK( refused + published == static_cast<int>( corpus.size() ) );
+    CHECK( refused + published == 2 * static_cast<int>( corpus.size() ) );
 }
 
 TEST_CASE( "qa_mask output carries its declared provenance metadata",

@@ -282,11 +282,20 @@ TEST_CASE( "io:reproject honours srcCrsOverride for CRS-less input (F-OPS-4)",
   REQUIRE( dataset );
   double gt[6];
   REQUIRE( GDALGetGeoTransform( dataset, gt ) == CE_None );
+  // The OUTPUT dataset must carry the target CRS: compare its WKT against
+  // EPSG:32633 with OSRIsSame (review R-B2 — the previous check inspected
+  // GDAL's constant EPSG definition, which can never fail).
   OGRSpatialReferenceH target = OSRNewSpatialReference( nullptr );
   REQUIRE( OSRImportFromEPSG( target, 32633 ) == OGRERR_NONE );
-  const bool utmTagged = OSRIsProjected( target ) != 0;
+  const char *outputWkt = GDALGetProjectionRef( dataset );
+  REQUIRE( outputWkt != nullptr );
+  REQUIRE( std::string( outputWkt ).size() > 0 );
+  OGRSpatialReferenceH outputSrs = OSRNewSpatialReference( nullptr );
+  REQUIRE( OSRImportFromWkt( const_cast<char **>( &outputWkt ), &outputSrs ) == OGRERR_NONE );
+  const bool sameCrs = OSRIsSame( outputSrs, target ) != 0;
+  OSRDestroySpatialReference( outputSrs );
   OSRDestroySpatialReference( target );
-  CHECK( utmTagged );
+  CHECK( sameCrs );
   // A metre-based UTM grid cannot span only 8 units; the untransformed
   // pixel-grid passthrough produced exactly that. Allow generous bounds —
   // the point is "coordinates transformed", not a specific GDAL version's

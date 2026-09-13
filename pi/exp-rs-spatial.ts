@@ -159,7 +159,12 @@ class McpBridge {
     this.child.on("error", (err) => {
       this.startError = `exp-rs MCP server error: ${err?.message ?? err}`;
     });
+    const spawned = this.child;
     this.child.on("exit", (code) => {
+      // Only the CURRENT generation's exit may flip bridge state: a stale
+      // child killed by a later spawn must not reject the new child's
+      // in-flight calls (review R-B5).
+      if (this.child !== spawned) return;
       this.exited = true;
       const tail = this.stderrTail.trim();
       const err = new Error(
@@ -259,6 +264,11 @@ class McpBridge {
         // already gone
       }
       child.kill();
+      // Same escalation ladder as stop(): a child stalling in SIGTERM
+      // teardown would otherwise keep `exited` false forever and the lazy
+      // respawn would never fire (review R-B4).
+      const killer = setTimeout(() => child.kill("SIGKILL"), 5000);
+      child.once("exit", () => clearTimeout(killer));
     }
   }
 

@@ -12,6 +12,7 @@ GF-1/2/6 L1A 产品（CRESDA XML 侧车）导入为多波段 GeoTIFF，定标与
 - 模态：optical
 - 输出：bandCount（integer）、output（raster）、productId（string）
 - 参数：bands（string）、input（string）、output（string）
+- 前置条件：Product directory with CRESDA sidecar XML and TIFF (offline)
 - 局限：Import a Gaofen-1/2/6 L1A product (CRESDA sidecar XML + TIFF) into a multi-band GeoTIFF with declared calibration/sun geometry stamped as SICNU_* metadata.
 - 适用地物：耕地、水体、不透水面
 - 适用场景：农业区制图、城市遥感
@@ -30,6 +31,7 @@ HJ-1 CCD L1A 产品导入为多波段 GeoTIFF，用于环境减灾监测教学�
 - 模态：optical
 - 输出：bandCount（integer）、output（raster）、productId（string）
 - 参数：bands（string）、input（string）、output（string）
+- 前置条件：Product directory with CRESDA sidecar XML and TIFF (offline)
 - 局限：Import an HJ-1 CCD L1A product (sidecar XML + TIFF) into a multi-band GeoTIFF with declared calibration/sun geometry stamped as SICNU_* metadata.
 - 适用地物：植被、水体、火点迹地
 - 适用场景：环境监测、大区域普查
@@ -119,6 +121,7 @@ ZY-3 L1A 产品导入为多波段 GeoTIFF，保留产品声明的定标与几何
 - 模态：optical
 - 输出：bandCount（integer）、output（raster）、productId（string）
 - 参数：bands（string）、input（string）、output（string）
+- 前置条件：Product directory with CRESDA sidecar XML and TIFF (offline)
 - 局限：Import a ZY-3 L1A product (CRESDA sidecar XML + TIFF) into a multi-band GeoTIFF with declared calibration/sun geometry stamped as SICNU_* metadata.
 - 适用地物：植被、裸地、水体
 - 适用场景：地形辅助调查、资源调查

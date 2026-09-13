@@ -34,10 +34,22 @@ test("both bridges tear the child down on stream desync (F-PI-1)", () => {
       /failDesyncedStream\(/,
       `${file}: overflow branch must call failDesyncedStream`,
     );
+    // The kill assertion is scoped to the failDesyncedStream BODY (from the
+    // signature to the next method boundary) — an unbounded wildcard would
+    // false-pass by matching stop()'s child.kill() instead (review R-B1).
+    const teardown = src.match(
+      /failDesyncedStream\(err: Error\): void \{[^]*?\n  \}\n/,
+    );
+    assert.ok(teardown, `${file}: failDesyncedStream body not found`);
     assert.match(
-      src,
-      /failDesyncedStream\(err: Error\)[^]*?child\.kill\(\)/,
+      teardown[0],
+      /child\.kill\(\)/,
       `${file}: failDesyncedStream must kill the child so lazy respawn replaces it`,
+    );
+    assert.match(
+      teardown[0],
+      /kill\("SIGKILL"\)/,
+      `${file}: failDesyncedStream must escalate to SIGKILL (review R-B4)`,
     );
     // Exactly one overflow rejection path: one call site plus the shared
     // teardown definition, and no leftover inline buffer-clear-and-return.

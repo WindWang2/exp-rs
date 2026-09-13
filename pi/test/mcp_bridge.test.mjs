@@ -117,7 +117,10 @@ test("a desynced (unterminated >32MiB) stream is killed, not left as a zombie (F
     // the NEXT request lazily respawns a healthy child. Before the fix the
     // overflow branch only cleared the buffer — alive stayed true, and every
     // subsequent call glued onto the unterminated line until reload.
-    await new Promise((r) => setTimeout(r, 100));
+    // Poll for the exit event instead of a fixed sleep: SIGTERM teardown of
+    // a child mid-write can exceed any small constant on a loaded machine.
+    for (let waited = 0; waited < 5000 && bridge.alive; waited += 25)
+      await new Promise((r) => setTimeout(r, 25));
     assert.equal(bridge.alive, false);
 
     const result = await bridge.request("tools/call", { n: 2 });

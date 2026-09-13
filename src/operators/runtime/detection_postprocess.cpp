@@ -180,10 +180,19 @@ std::vector<DetectionBox> nonMaxSuppression( const std::vector<DetectionBox> &bo
   double cellSize = 1.0;
   for ( const DetectionBox &b : ordered )
     cellSize = std::max( cellSize, std::max( static_cast<double>( b.w ), static_cast<double>( b.h ) ) );
+  // One raster-spanning box collapses the grid to ~1 cell and this pass
+  // degrades to the dense O(n^2) — never WORSE than the status quo ante, and
+  // bounded now by the cancellation probe. Realistic candidate sets (tile
+  // decode outputs) have bounded extents and stay near-linear.
 
   auto cellOf = [cellSize]( double v ) -> long long {
-    if ( !std::isfinite( v ) )
-      return 0; // non-finite geometry never suppresses (iou == 0); park it
+    // Non-finite geometry never suppresses (iou == 0); park it. Absurd-but-
+    // finite coordinates are parked too: the cast to long long is only
+    // defined within the integer range, and no real raster coordinate
+    // approaches 1e15 pixels (public API — decodeDetections clamps to int
+    // dims, but this function is callable directly, review R-B7).
+    if ( !std::isfinite( v ) || std::abs( v ) > 1e15 )
+      return 0;
     return static_cast<long long>( std::floor( v / cellSize ) );
   };
 

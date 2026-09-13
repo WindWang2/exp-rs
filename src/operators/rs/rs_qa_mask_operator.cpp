@@ -305,7 +305,8 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
         }
         if (v > 65535.0) {
             ++irregular;
-            return 65535; // clamp instead of silently truncating high bits
+            unknown[i] = 1; // outside the QA word domain -> unreadable -> masked
+            return 65535;   // clamp instead of silently truncating high bits
         }
         return static_cast<uint16_t>(v);
     };
@@ -418,8 +419,14 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
         }
 
         if (source == "sentinel2_scl") {
-            for (size_t i = 0; i < n; ++i)
+            // A word outside the 0..15 SCL domain has no class meaning; the
+            // uint8 cast would land on an arbitrary (possibly unselected)
+            // class and read as clear — fail closed instead (F-OPS-3 review).
+            for (size_t i = 0; i < n; ++i) {
+                if (values[i] > 15)
+                    unknown[i] = 1;
                 scl[i] = static_cast<uint8_t>(values[i]);
+            }
             QaMask::sclMask(scl.data(), mask.data(), n, sclClasses);
         } else if (source == "generic_bitmask") {
             QaMask::genericBitmaskMask(values.data(), mask.data(), n, genericBits);

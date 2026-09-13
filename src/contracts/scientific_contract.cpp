@@ -63,6 +63,16 @@ const std::vector<std::string> kCategoricalEncodings = {
     "uint16_nodata_65535",
     "uint32_nodata_0",
     "vector_labels",
+    // Dtype escalates with the class-id domain; 0 = unclassified/NoData
+    // (classification pipeline / RsClassRaster::paint convention).
+    "escalating_nodata_0",
+    // Byte/255 for <=255 product classes, UInt16/65535 above (the F-OPS-1
+    // labels escalation contract shared by rs:infer and rs:segment).
+    "byte_uint16_escalating",
+    // Labels carried in Float32 (spectral SAM class maps).
+    "float32_nodata_-9999",
+    // Component labels in Float32 with NaN NoData (exact ids only to 2^24).
+    "float32_nodata_nan",
 };
 
 const std::vector<std::string> kTimeAlignments = {
@@ -162,9 +172,12 @@ ScientificContract classificationFamily()
     ScientificContract c = baseRecord();
     c.inputDomain = "features";
     c.outputDomain = "classes";
-    c.categoricalEncoding = "byte_nodata_255";
-    c.classIdRange = "0..254";
-    c.evidence = "family:classification + RsClassRaster dtype escalation";
+    // RsClassificationPipeline escalates Byte -> UInt16 -> Int32 keyed on the
+    // max class id, with the unclassified value (default 0) as NoData — NOT
+    // the Byte/255 sentinel this family claimed before the honesty review.
+    c.categoricalEncoding = "escalating_nodata_0";
+    c.classIdRange = "1..2147483646";
+    c.evidence = "family:classification + pipeline dtype escalation review";
     return c;
 }
 
@@ -274,20 +287,37 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.evidence = "family:spectral; resampling needs SRF/center wavelengths";
             rows.push_back( c );
         }
-        for ( const char *id : { "rs:sam_classify", "rs:matched_filter", "rs:ace" } )
         {
-            ScientificContract c = classificationFamily();
-            c.operatorId = id;
-            c.inputDomain = "reflectance";
-            c.wavelengthPolicy = "srf_or_center"; // target spectra must compare radiometrically
-            rows.push_back( c );
+            // Matched filter / ACE write ONE continuous detection-score band
+            // (Float32, NaN NoData) — a probability-like surface, not classes.
+            for ( const char *id : { "rs:matched_filter", "rs:ace" } )
+            {
+                ScientificContract c = baseRecord();
+                c.operatorId = id;
+                c.inputDomain = "reflectance";
+                c.outputDomain = "probability";
+                c.noDataPolicy = "internal_sentinel";
+                c.wavelengthPolicy = "srf_or_center";
+                c.evidence = "review:spectral detection writer reads (Float32 scores)";
+                rows.push_back( c );
+            }
+            // SAM classifies in Float32 label space with -9999 NoData.
+            ScientificContract sam = baseRecord();
+            sam.operatorId = "rs:sam_classify";
+            sam.inputDomain = "reflectance";
+            sam.outputDomain = "classes";
+            sam.categoricalEncoding = "float32_nodata_-9999";
+            sam.wavelengthPolicy = "srf_or_center";
+            sam.evidence = "review:rs_sam_classify writer reads (Float32 labels, -9999)";
+            rows.push_back( sam );
         }
         {
-            ScientificContract c = classificationFamily();
+            ScientificContract c = baseRecord();
             c.operatorId = "rs:spectral_unmixing";
             c.inputDomain = "reflectance";
-            c.outputDomain = "features"; // abundance stacks + classes
+            c.outputDomain = "features"; // abundance stacks, continuous
             c.wavelengthPolicy = "srf_or_center";
+            c.evidence = "family:spectral + schema read";
             rows.push_back( c );
         }
         {
@@ -305,7 +335,7 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.outputDomain = "table";
             c.wavelengthPolicy = "srf_or_center";
             c.atomicPublication = "json_result_only";
-            c.evidence = "family:spectral; result is an endmember table";
+            c.evidence = "family:spectral; result is an endmember table (no file writes)";
             rows.push_back( c );
         }
 
@@ -316,9 +346,10 @@ const std::map<std::string, ScientificContract> &scientificContracts()
         {
             ScientificContract c = baseRecord();
             c.operatorId = id;
-            c.inputDomain = "reflectance";
+            c.inputDomain = "dn"; // dn_to_radiance is a first-class method
             c.outputDomain = "reflectance";
-            c.evidence = "family:atmospheric + schema read";
+            c.evidence = "review:atmospheric header reads (converts DN; radiance/reflectance out)";
+            c.note = "output domain follows the declared method (radiance or surface reflectance)";
             rows.push_back( c );
         }
         {
@@ -361,8 +392,10 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.operatorId = "rs:post_classification_change";
             c.inputDomain = "classes";
             c.outputDomain = "classes";
-            c.categoricalEncoding = "byte_nodata_255";
-            c.classIdRange = "0..254";
+            c.categoricalEncoding = "uint16_nodata_65535"; // change-type codes
+            c.classIdRange = "";
+            c.evidence = "review:change-map writer reads (UInt16 codes, 65535 sentinel)";
+            c.note = "change-type codes in UInt16; class_count param caps at 255";
             rows.push_back( c );
         }
 
@@ -372,7 +405,7 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.operatorId = "rs:sar_calibrate";
             c.outputDomain = "sigma0"; // declared outputDomain param; sigma0 default
             c.evidence = "review:schema read (sigma0 = DN^2/A^2, outputDomain param)";
-            c.note = "outputDomain param selects sigma0/gamma0/beta0/db";
+            c.note = "outputDomain param selects linear_power|db; the coefficient is always sigma0";
             rows.push_back( c );
         }
         {
@@ -441,8 +474,8 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.noDataPolicy = "fail_closed";
             c.cancellationGranularity = "row_block_level";
             c.provenance = "output_metadata";
-            c.refusalCodes = { "InvalidParameter", "MissingRequiredParameter", "GdalError",
-                               "FileNotWritable" };
+            c.refusalCodes = { "InvalidParameter", "MissingRequiredParameter", "FileNotFound",
+                               "GdalError", "FileNotWritable" };
             c.evidence = "test:test_qa_mask/f-ops-3 + review:F-OPS-3";
             rows.push_back( c );
         }
@@ -488,7 +521,7 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.operatorId = "rs:mosaic";
             c.inputDomain = "any";
             c.outputDomain = "any";
-            c.timeAlignment = "single_scene";
+            c.timeAlignment = "not_applicable"; // input is an array of scenes
             c.evidence = "family:mosaic + schema read";
             rows.push_back( c );
         }
@@ -596,6 +629,8 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             ScientificContract c = classificationFamily();
             c.operatorId = "rs:recode";
             c.inputDomain = "classes";
+            c.evidence = "review:recode writer reads (Byte/UInt16/Int32 by output range)";
+            c.note = "Int32 escalation; negative labels representable";
             rows.push_back( c );
         }
         for ( const char *id : { "rs:sieve", "rs:fill_holes", "rs:majority_filter" } )
@@ -611,8 +646,10 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             ScientificContract c = filterFamily();
             c.operatorId = "rs:connected_components";
             c.outputDomain = "classes";
-            c.categoricalEncoding = "uint32_nodata_0";
-            c.classIdRange = "1..4294967294";
+            c.categoricalEncoding = "float32_nodata_nan";
+            c.classIdRange = "1..16777216";
+            c.evidence = "review:connected-components writer reads (Float32 labels, NaN)";
+            c.note = "labels are int ids stored in Float32: exact only up to 2^24 components";
             rows.push_back( c );
         }
         {
@@ -647,8 +684,8 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.operatorId = "rs:zonal_stats";
             c.inputDomain = "any";
             c.outputDomain = "table";
-            c.atomicPublication = "json_result_only";
-            c.evidence = "family:zonal + schema read";
+            c.atomicPublication = "direct_write"; // CSV result file
+            c.evidence = "family:zonal + writer review (QFile CSV output)";
             rows.push_back( c );
         }
         {
@@ -656,16 +693,16 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.operatorId = "rs:segment_stats";
             c.inputDomain = "classes";
             c.outputDomain = "table";
-            c.atomicPublication = "json_result_only";
-            c.evidence = "family:zonal + schema read";
+            c.atomicPublication = "direct_write"; // CSV result file
+            c.evidence = "family:zonal + writer review (QFile CSV output)";
             rows.push_back( c );
         }
         {
             ScientificContract c = baseRecord();
             c.operatorId = "rs:rasterize";
             c.inputDomain = "vector";
-            c.outputDomain = "mask";
-            c.evidence = "family:vector-interop + schema read";
+            c.outputDomain = "any"; // burns a numeric attribute (Float32, NaN NoData)
+            c.evidence = "family:vector-interop + writer review (attribute grid)";
             rows.push_back( c );
         }
 
@@ -742,7 +779,7 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             ScientificContract c = temporalFamily( "increasing_dates" );
             c.operatorId = "rs:temporal_extract_series";
             c.outputDomain = "table";
-            c.atomicPublication = "json_result_only";
+            c.atomicPublication = "direct_write"; // CSV result file
             rows.push_back( c );
         }
 
@@ -762,6 +799,10 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.operatorId = "rs:infer";
             c.inputDomain = "features";
             c.outputDomain = "features";
+            // Labels output encoding: Byte/255 below 256 product classes,
+            // UInt16/65535 above — the F-OPS-1 escalation contract.
+            c.categoricalEncoding = "byte_uint16_escalating";
+            c.classIdRange = "0..65534";
             c.cancellationGranularity = "tile_level";
             c.atomicPublication = "staged_rename";
             c.provenance = "output_metadata";
@@ -773,8 +814,8 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.operatorId = "rs:segment";
             c.inputDomain = "features";
             c.outputDomain = "classes";
-            c.categoricalEncoding = "byte_nodata_255";
-            c.classIdRange = "0..254";
+            c.categoricalEncoding = "byte_uint16_escalating";
+            c.classIdRange = "0..65534";
             c.cancellationGranularity = "tile_level";
             c.atomicPublication = "staged_rename";
             c.provenance = "output_metadata";
