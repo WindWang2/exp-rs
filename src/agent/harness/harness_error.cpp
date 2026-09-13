@@ -55,6 +55,14 @@ const struct Entry {
     { "IDENTITY_MISMATCH",       { "validation", RetryClass::None } },
     // D9: the lab teaching constraint refused an artifact-producing action.
     { "TEACHING_REFUSAL",        { "validation", RetryClass::None } },
+    // Compiler 10.0 (ADR 0149): workflow-compiler static-analysis codes.
+    { "WAVELENGTH_INCOMPATIBLE", { "validation", RetryClass::None } },
+    { "TEMPORAL_MISALIGNMENT",   { "validation", RetryClass::None } },
+    { "CATEGORICAL_MISMATCH",    { "validation", RetryClass::None } },
+    { "RESOURCE_OVER_BUDGET",    { "validation", RetryClass::None } },
+    { "OUTPUT_PATH_COLLISION",   { "validation", RetryClass::None } },
+    { "NONDETERMINISTIC_CHAIN",  { "validation", RetryClass::None } },
+    { "FACT_CONFLICT",           { "validation", RetryClass::None } },
 };
 const Entry *kEntriesEnd = kEntries + sizeof( kEntries ) / sizeof( kEntries[0] );
 

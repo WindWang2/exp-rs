@@ -59,6 +59,16 @@ inline constexpr const char *kIdentityMismatch = "IDENTITY_MISMATCH";
 /// structurally (harness_actions); this code is the typed refusal — never a
 /// soft apology, never retryable.
 inline constexpr const char *kTeachingRefusal = "TEACHING_REFUSAL";
+/// Compiler 10.0 (ADR 0149): static-analysis findings of the workflow
+/// compiler. Severity discipline lives in workflow_analysis (warnings vs
+/// errors); here they are vocabulary + mapping only.
+inline constexpr const char *kWavelengthIncompatible = "WAVELENGTH_INCOMPATIBLE";
+inline constexpr const char *kTemporalMisalignment = "TEMPORAL_MISALIGNMENT";
+inline constexpr const char *kCategoricalMismatch = "CATEGORICAL_MISMATCH";
+inline constexpr const char *kResourceOverBudget = "RESOURCE_OVER_BUDGET";
+inline constexpr const char *kOutputPathCollision = "OUTPUT_PATH_COLLISION";
+inline constexpr const char *kNondeterministicChain = "NONDETERMINISTIC_CHAIN";
+inline constexpr const char *kFactConflict = "FACT_CONFLICT";
 } // namespace error_codes
 
 /// Retry policy class for an error code.
