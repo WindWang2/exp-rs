@@ -53,6 +53,12 @@ std::vector<CalendarPoint> buildRegularCalendar( const QString &epochIsoDate,
     // First grid point >= rangeStart: k = ceil((rangeStart - 0)/cadence) with
     // grid anchored at the epoch (t = 0 = epoch). A negative range start
     // steps backwards symmetrically (anchor + k·cadence, k any integer).
+    // Pathological spans refuse BEFORE materializing (the operator's typed
+    // guard then reports the empty grid without a giant allocation).
+    const double approxCount =
+      ( rangeEndDays - rangeStartDays ) / spec.cadenceDays + 2.0;
+    if ( approxCount > 1000000.0 )
+      return out;
     const long long kStart = static_cast<long long>( std::ceil( rangeStartDays / spec.cadenceDays ) );
     const long long kEnd = static_cast<long long>( std::floor( rangeEndDays / spec.cadenceDays ) );
     out.reserve( static_cast<size_t>( std::max<long long>( 0, kEnd - kStart + 1 ) ) );
@@ -144,6 +150,17 @@ RegularizedSeries regularizeSeries( const float *series, int nObs,
         return i;
     return nObs;
   };
+  // Duplicate instants (keep_all): an exact calendar hit resolves to the
+  // EARLIEST finite sample carrying that instant (ties prefer earlier).
+  auto firstAtInstant = [&]( int pos ) {
+    int first = pos;
+    while ( first > 0 && tDays[first - 1] == tDays[pos] )
+      --first;
+    for ( int i = first; i <= pos; ++i )
+      if ( std::isfinite( series[i] ) )
+        return i;
+    return pos;
+  };
 
   if ( options.method == RegularizeMethod::Whittaker )
   {
@@ -176,12 +193,18 @@ RegularizedSeries regularizeSeries( const float *series, int nObs,
                  ? prev
                  : static_cast<int>( it - calendar.begin() );
       }
-      // Multiple observations on one node average (deterministic order).
-      if ( !std::isfinite( gridY[static_cast<size_t>( node )] ) )
-        gridY[static_cast<size_t>( node )] = series[i];
-      else
-        gridY[static_cast<size_t>( node )] =
-          0.5f * ( gridY[static_cast<size_t>( node )] + series[i] );
+      // Multiple observations on one node average (running mean in double,
+      // deterministic input order — never a recency-biased recursion).
+      {
+        const size_t n = static_cast<size_t>( node );
+        const double v = static_cast<double>( series[i] );
+        if ( observedCount[n] == 0 )
+          gridY[n] = series[i];
+        else
+          gridY[n] = static_cast<float>(
+            ( static_cast<double>( gridY[n] ) * observedCount[n] + v ) /
+            ( observedCount[n] + 1.0 ) );
+      }
       ++observedCount[static_cast<size_t>( node )];
       if ( firstObsNode < 0 )
         firstObsNode = node;
@@ -245,9 +268,8 @@ RegularizedSeries regularizeSeries( const float *series, int nObs,
     }
     if ( segStart >= 0 )
       solveSegment( segStart, nCal - 1 );
-    // The final segment must end at the LAST OBSERVED node: trim trailing
-    // unobserved tail from the solve by masking (solveSegment already
-    // refuses past lastObsNode — nothing more needed).
+    // Trailing unobserved nodes inside the solve are masked by the
+    // lastFiniteDay refusal inside solveSegment — no extra trim needed.
     for ( const auto &p : out.points )
     {
       if ( std::isfinite( p.value ) )
@@ -268,7 +290,9 @@ RegularizedSeries regularizeSeries( const float *series, int nObs,
     if ( t < firstFiniteDay || t > lastFiniteDay )
       continue; // extrapolation refused for every method
 
-    const int left = finiteLeft( lowerBoundObs( tDays, nObs, t ) );
+    int left = finiteLeft( lowerBoundObs( tDays, nObs, t ) );
+    if ( left >= 0 && tDays[left] == t )
+      left = firstAtInstant( left );
     const int right = finiteRight( lowerBoundObs( tDays, nObs, t ) + 1 );
 
     if ( options.method == RegularizeMethod::Nearest )

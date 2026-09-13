@@ -298,7 +298,12 @@ Json::Value RsTemporalRegularizeOperator::run( const Json::Value &params, RSOper
       static_cast<size_t>( std::min( tileSize, width ) ) *
       static_cast<size_t>( std::min( tileSize, height ) );
   constexpr size_t kMaxSeriesBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
-  const size_t tileFloatsPerPixel = static_cast<size_t>( sceneCount ) + static_cast<size_t>( calCount );
+  // Full working set: the gathered series (sceneCount) + the band-major
+  // regularized values (calCount) + the output/scratch tiles (values mirror,
+  // read tile, valid/filled counts ≈ 3). Counting only the inputs would
+  // understate the real working set by ~2x at the guard boundary.
+  const size_t tileFloatsPerPixel =
+      2 * static_cast<size_t>( sceneCount ) + static_cast<size_t>( calCount ) + 3;
   if ( tileFloatsPerPixel * maxTilePixels * sizeof( float ) > kMaxSeriesBytes )
     throw RSOperatorError(
         ErrorCode::InvalidParameter,
@@ -342,6 +347,8 @@ Json::Value RsTemporalRegularizeOperator::run( const Json::Value &params, RSOper
 
     for ( size_t i = 0; i < pixels; ++i )
     {
+      if ( ( i & 4095 ) == 4095 )
+        context.throwIfCancelled(); // bounded latency inside heavy pixels
       for ( int s = 0; s < sceneCount; ++s )
         pixelSeries[static_cast<size_t>( s )] = series[s * tilePixels + i];
 

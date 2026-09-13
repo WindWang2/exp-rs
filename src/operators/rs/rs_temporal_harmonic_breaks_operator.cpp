@@ -247,13 +247,15 @@ Json::Value RsTemporalHarmonicBreaksOperator::run( const Json::Value &params, RS
   if ( totalSpan > 0.0 && sceneCount > 1 )
   {
     const double spacing = totalSpan / static_cast<double>( sceneCount - 1 );
+    // hi must satisfy clamp's lo <= hi precondition (4-5 scene series give
+    // sceneCount/2 < 3); the kernel re-floors at 3 regardless.
     minSegment = std::clamp(
-        static_cast<int>( std::lround( minSegmentDays / spacing ) ), 3, sceneCount / 2 );
+        static_cast<int>( std::lround( minSegmentDays / spacing ) ), 3,
+        std::max( 3, sceneCount / 2 ) );
   }
 
   // ISO date of a break day offset (the epoch is scene 0's acquisition date).
   const QString epochDate = prepared.collection.scenes().at( 0 ).time.dateString();
-  const QDate epochQDate = QDate::fromString( epochDate, Qt::ISODate );
 
   const bool wantOnset = decrease || increase;
   const int bandCount = 1 +                     // breaks_count
@@ -303,12 +305,16 @@ Json::Value RsTemporalHarmonicBreaksOperator::run( const Json::Value &params, RS
       static_cast<size_t>( std::min( tileSize, width ) ) *
       static_cast<size_t>( std::min( tileSize, height ) );
   constexpr size_t kMaxSeriesBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
-  if ( static_cast<size_t>( sceneCount ) * maxTilePixels * sizeof( float ) > kMaxSeriesBytes )
+  // Full working set: gathered series + output slices ≈ sceneCount again,
+  // plus the per-break day/magnitude buffers and fixed band tiles.
+  const size_t tileFloatsPerPixel = 2 * static_cast<size_t>( sceneCount ) +
+                                    2 * static_cast<size_t>( maxBreaks ) + 9;
+  if ( tileFloatsPerPixel * maxTilePixels * sizeof( float ) > kMaxSeriesBytes )
     throw RSOperatorError(
         ErrorCode::InvalidParameter,
         "tile_size " + std::to_string( tileSize ) + " x " +
             std::to_string( sceneCount ) +
-            " scenes exceeds the 2 GiB series-gathering budget; reduce tile_size" );
+            " scenes exceeds the 2 GiB tile working-set budget; reduce tile_size" );
   const size_t tilePixels = maxTilePixels;
 
   std::vector<float> tile( tilePixels );
@@ -474,7 +480,10 @@ Json::Value RsTemporalHarmonicBreaksOperator::run( const Json::Value &params, RS
   memory["tileHeight"] = tileSize;
   memory["workingSetEstimateBytes"] = Json::Value::UInt64(
       TemporalTileReader::estimateWorkingSetBytes(
-          tileSize, tileSize, 3 + static_cast<std::uint64_t>( sceneCount ), 0 ) );
+          tileSize, tileSize,
+          3 + 2 * static_cast<std::uint64_t>( sceneCount ) +
+              2 * static_cast<std::uint64_t>( maxBreaks ),
+          0 ) );
   result["memory"] = memory;
   context.reportProgress( 1.0, "Temporal harmonic breaks complete" );
   return result;

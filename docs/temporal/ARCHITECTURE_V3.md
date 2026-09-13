@@ -57,9 +57,11 @@ Extensions: `rs:temporal_monitor` accepts `scenes` (T-1);
 
 The date loop is outermost; each scene's raster is touched only inside
 region windows, and each scene file is opened once per execution
-(`TemporalTileReader` precedent). Peak working set is O(R) accumulators plus
-one bounded median scratch (CSR layout over regions) — independent of image
-size and date count. Cancellation checkpoints run per date and every 1024
+(`TemporalTileReader` precedent). Peak working set is O(R) accumulators +
+O(total region-window pixels) geometry (the parsed inside-pixel offsets)
+plus one bounded median scratch (CSR layout over regions) — independent of
+the image outside the region windows and of the date count; a single
+region window is itself capped by the 4 M-pixel per-region guard. Cancellation checkpoints run per date and every 1024
 regions. The 100k-region × 100-date target runs in O(scenes × window
 pixels) I/O + O(scenes × regions) row emission — no O(T²) anywhere; the
 Sen-trend features are O(dates²) per region and documented as such.

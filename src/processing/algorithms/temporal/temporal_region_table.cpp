@@ -14,9 +14,10 @@ namespace
 {
 constexpr float kNanF = std::numeric_limits<float>::quiet_NaN();
 
-/// Even-odd ray casting on a map point against one polygon (the
-/// rs:temporal_extract_series kernel, shared here so both surfaces implement
-/// one membership rule).
+/// Even-odd ray casting on a map point against one polygon. Textual twin of
+/// the kernel in rs_temporal_extract_series_operator.cpp (hoisting it into a
+/// shared detail header is a recorded follow-up): keep the two in sync so
+/// both surfaces implement one membership rule.
 bool pointInPolygon( double px, double py,
                      const std::vector<std::array<double, 2>> &poly )
 {
@@ -76,11 +77,32 @@ bool parseRegionsJson( const Json::Value &regionsJson, int maxRegions,
       return false;
     }
     RegionRef region;
-    region.id = QString::fromStdString( entry.get( "id", "" ).asString() );
+    // Type-guarded before asString(): a non-string id must surface as the
+    // contracted parse error, never as a jsoncpp LogicError from run().
+    const Json::Value &idValue = entry["id"];
+    if ( !idValue.isString() )
+    {
+      if ( error )
+        *error = QStringLiteral( "regions[%1].id must be a non-empty string" )
+                   .arg( out->size() );
+      return false;
+    }
+    region.id = QString::fromStdString( idValue.asString() );
     if ( region.id.isEmpty() )
     {
       if ( error )
         *error = QStringLiteral( "regions[%1].id must be a non-empty string" )
+                   .arg( out->size() );
+      return false;
+    }
+    // Region ids become CSV join keys: refuse separators that would corrupt
+    // the table (RFC 4180 specials + newlines) instead of escaping silently.
+    if ( region.id.contains( ',' ) || region.id.contains( '"' ) ||
+         region.id.contains( '\n' ) || region.id.contains( '\r' ) )
+    {
+      if ( error )
+        *error = QStringLiteral( "regions[%1].id must not contain ',', quote "
+                                 "or newline characters" )
                    .arg( out->size() );
       return false;
     }
@@ -332,7 +354,9 @@ void RegionDateReducer::endDate()
       if ( m_medianEnabled && m_regionWrites[i] > 0 )
       {
         const size_t lo = m_regionStarts[i];
-        const size_t cnt = m_regionWrites[i];
+        // Defensive clamp: writes can never exceed the declared region count,
+        // but a mis-declared regionInsideCounts must not sort out of bounds.
+        const size_t cnt = std::min( m_regionWrites[i], m_medianScratch.size() - lo );
         std::sort( m_medianScratch.begin() + static_cast<std::ptrdiff_t>( lo ),
                    m_medianScratch.begin() + static_cast<std::ptrdiff_t>( lo + cnt ) );
         s.median = cnt % 2 == 1

@@ -202,11 +202,32 @@ TEST_CASE( "regularizeSeries whittaker: bridges small gaps, splits large ones", 
   options.maxGapNodes = 1;
   const RegularizedSeries splitOut = regularizeSeries( split, splitT, splitCal, options );
   CAPTURE( splitOut.points[2].value, splitOut.points[3].value );
-  // The split points must NOT interpolate smoothly across the gap: the left
-  // side knows only 1.0 and the right only 2.0; the middle stays at the
-  // penalty level of its own side (finite or NaN), never a linear bridge.
-  REQUIRE( isNan( splitOut.points[0].value ) == false );
+  // Pinned split semantics: nodes 1..4 form a 4-node run > maxGapNodes, so
+  // the solve splits — interior nodes 2/3 belong to no observed span and stay
+  // NaN (a regression that ignores maxGapNodes and bridges the gap smoothly
+  // fails here), while each side keeps its own penalty level.
+  REQUIRE( std::isfinite( splitOut.points[0].value ) );
+  REQUIRE( splitOut.points[0].value == Approx( 1.0f ).margin( 0.1f ) );
+  REQUIRE( isNan( splitOut.points[2].value ) );
+  REQUIRE( isNan( splitOut.points[3].value ) );
+  REQUIRE( std::isfinite( splitOut.points[5].value ) );
+  REQUIRE( splitOut.points[5].value == Approx( 2.0f ).margin( 0.1f ) );
   REQUIRE( splitOut.points[5].validObservations == 1 );
+}
+
+TEST_CASE( "regularizeSeries: duplicate instants resolve to the earlier finite sample",
+           "[temporal][calendar]" )
+{
+  // keep_all duplicates at t = 10; the calendar point on that instant must
+  // report the EARLIER finite observation (ties prefer earlier).
+  std::vector<float> series{ 7.0f, 9.0f, 3.0f };
+  std::vector<double> tDays{ 0.0, 10.0, 10.0 };
+  std::vector<CalendarPoint> calendar{ { 10.0, "d10" } };
+  const RegularizedSeries out =
+    regularizeSeries( series, tDays, calendar, RegularizeOptions{} );
+  REQUIRE( out.points[0].value == Approx( 9.0f ) ); // earlier duplicate
+  REQUIRE( out.points[0].validObservations == 1 );
+  REQUIRE( out.points[0].filled == false );
 }
 
 TEST_CASE( "regularizeSeries: empty inputs yield empty results", "[temporal][calendar]" )

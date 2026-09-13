@@ -191,6 +191,9 @@ Json::Value RsTemporalExtractRegionsOperator::run( const Json::Value &params, RS
   const int maxRegions = std::clamp( getInt( params, "max_regions", kDefaultMaxRegions ),
                                      1, 10000000 );
   const double medianBudgetMb = getDouble( params, "median_budget_mb", 64.0 );
+  if ( !( medianBudgetMb >= 0.0 ) || medianBudgetMb > 65536.0 )
+    throw RSOperatorError( ErrorCode::InvalidParameter,
+                           "median_budget_mb must be in [0, 65536]" );
   const size_t medianBudgetFloats =
       medianBudgetMb > 0.0
           ? static_cast<size_t>( medianBudgetMb * 1024.0 * 1024.0 / sizeof( float ) )
@@ -281,12 +284,14 @@ Json::Value RsTemporalExtractRegionsOperator::run( const Json::Value &params, RS
 
   temporal::RegionDateReducer reducer( regionCount, medianBudgetFloats, insideCounts );
 
-  CsvOutputGuard csvGuard;
-  csvGuard.path = QString::fromStdString( outputPath );
-  QFile outFile( csvGuard.path );
+  QFile outFile( QString::fromStdString( outputPath ) );
   if ( !outFile.open( QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text ) )
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "cannot open output CSV: " + outputPath );
+  // The guard binds only AFTER a successful open: a pre-existing good file is
+  // not deleted when the open itself failed.
+  CsvOutputGuard csvGuard;
+  csvGuard.path = QString::fromStdString( outputPath );
   QTextStream ts( &outFile );
   ts << "region_id,date,t_days,mean,min,max,stddev,median,valid_count\n";
 

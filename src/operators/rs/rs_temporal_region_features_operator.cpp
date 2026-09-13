@@ -37,6 +37,7 @@ constexpr int kTypicalSceneEstimate = 12;
 constexpr int kDefaultMaxRegions = 100000;
 constexpr size_t kDefaultMedianBudgetFloats = 0; // features need no medians
 constexpr size_t kMaxSeriesCells = 50ULL * 1000ULL * 1000ULL; // R×T cell guard
+constexpr size_t kMaxWindowPixelsPerRegion = 4ULL * 1024ULL * 1024ULL; // 4 M pixels
 constexpr int kFeatureSchemaVersion = 1;
 constexpr float kNanF = std::numeric_limits<float>::quiet_NaN();
 
@@ -324,6 +325,14 @@ Json::Value RsTemporalRegionFeaturesOperator::run( const Json::Value &params, RS
     if ( !temporal::buildRegionGeometry( regions[r], r, reader.geoTransform(),
                                          reader.width(), reader.height(), &geom, &geomError ) )
       throw RSOperatorError( ErrorCode::InvalidInputData, geomError.toStdString() );
+    if ( !geom.isPoint &&
+         static_cast<size_t>( geom.w ) * static_cast<size_t>( geom.h ) >
+             kMaxWindowPixelsPerRegion )
+      throw RSOperatorError(
+          ErrorCode::InvalidParameter,
+          "region '" + regions[r].id.toStdString() + "' window exceeds the " +
+              std::to_string( kMaxWindowPixelsPerRegion ) + "-pixel per-region guard; "
+              "split the polygon" );
     insideCounts[static_cast<size_t>( r )] = geom.insideCount();
     geometries.push_back( std::move( geom ) );
   }
@@ -418,14 +427,24 @@ Json::Value RsTemporalRegionFeaturesOperator::run( const Json::Value &params, RS
   // Phenology windows.
   std::vector<temporal::SeasonWindow> windows{ { seasonStartDoy, seasonEndDoy } };
   if ( cycles == 2 )
+  {
     windows.push_back( temporal::complementSeasonWindow( windows.front() ) );
+    if ( windows.back().startDoy == windows.front().startDoy &&
+         windows.back().endDoy == windows.front().endDoy )
+      context.logWarning(
+          "cycles=2 with a full-year first window duplicates cycle 1 (the "
+          "complement of [1,366] is itself); declare season windows or drop "
+          "cycles=2" );
+  }
 
-  CsvOutputGuard csvGuard;
-  csvGuard.path = QString::fromStdString( outputPath );
-  QFile outFile( csvGuard.path );
+  QFile outFile( QString::fromStdString( outputPath ) );
   if ( !outFile.open( QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text ) )
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "cannot open output CSV: " + outputPath );
+  // Guard binds after a successful open (never deletes a pre-existing file
+  // when the open itself failed).
+  CsvOutputGuard csvGuard;
+  csvGuard.path = QString::fromStdString( outputPath );
   QTextStream ts( &outFile );
   ts << "region_id";
   for ( const auto &name : featureNames )
@@ -636,9 +655,9 @@ Json::Value RsTemporalRegionFeaturesOperator::run( const Json::Value &params, RS
   if ( ts.status() != QTextStream::Ok )
     throw RSOperatorError( ErrorCode::FileNotWritable, "CSV write failed (disk full?)" );
   outFile.close();
-  csvGuard.committed = true;
 
-  // Schema sidecar.
+  // Schema sidecar — written and flushed BEFORE the CSV is committed: the
+  // artifact contract is table + sidecar, never a table alone.
   const QString sidecarPath = sidecarParam.isEmpty()
                                 ? QString::fromStdString( outputPath ) + ".json"
                                 : sidecarParam;
@@ -671,9 +690,16 @@ Json::Value RsTemporalRegionFeaturesOperator::run( const Json::Value &params, RS
     if ( !sidecarFile.open( QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text ) )
       throw RSOperatorError( ErrorCode::FileNotWritable,
                              "cannot open sidecar: " + sidecarPath.toStdString() );
-    const Json::Value written = sidecar;
-    sidecarFile.write( Json::writeString( Json::StreamWriterBuilder(), written ).c_str() );
+    const std::string sidecarText =
+      Json::writeString( Json::StreamWriterBuilder(), sidecar );
+    const qint64 writtenBytes = sidecarFile.write( sidecarText.c_str() );
     sidecarFile.close();
+    if ( writtenBytes != static_cast<qint64>( sidecarText.size() ) )
+      throw RSOperatorError( ErrorCode::FileNotWritable,
+                             "sidecar write incomplete (disk full?): " +
+                                 sidecarPath.toStdString() );
+    // Both halves of the artifact exist verbatim — commit together.
+    csvGuard.committed = true;
   }
 
   Json::Value result( Json::objectValue );

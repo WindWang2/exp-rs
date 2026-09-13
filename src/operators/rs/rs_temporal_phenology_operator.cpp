@@ -203,12 +203,24 @@ Json::Value RsTemporalPhenologyOperator::run( const Json::Value &params, RSOpera
   const int season2StartDoy = std::clamp( getInt( params, "season2StartDoy", 0 ), 0, 366 );
   const int season2EndDoy = std::clamp( getInt( params, "season2EndDoy", 0 ), 0, 366 );
   // Second cycle window: explicit params win; otherwise the complement of
-  // the first window on the circular doy axis.
+  // the first window on the circular doy axis. A HALF-specified window is a
+  // caller error, never silently discarded; a full-year first window makes
+  // the complement equal cycle 1 (warned, computed anyway).
   const sicnu::temporal::SeasonWindow window1{ seasonStartDoy, seasonEndDoy };
   sicnu::temporal::SeasonWindow window2 =
       sicnu::temporal::complementSeasonWindow( window1 );
   if ( cycles == 2 && season2StartDoy > 0 && season2EndDoy > 0 )
       window2 = { season2StartDoy, season2EndDoy };
+  if ( cycles == 2 && ( season2StartDoy > 0 ) != ( season2EndDoy > 0 ) )
+    throw RSOperatorError( ErrorCode::InvalidParameter,
+                           "season2StartDoy and season2EndDoy must be given "
+                           "together (or both 0 for the complement window)" );
+  if ( cycles == 2 && window2.startDoy == window1.startDoy &&
+       window2.endDoy == window1.endDoy )
+    context.logWarning(
+        "cycles=2 with a full-year first window duplicates cycle 1 (the "
+        "complement of [1,366] is itself); declare season2 doy or drop "
+        "cycles=2" );
 
   auto prepared = temporal_input::prepareTemporalRun( params, context, {}, bandRole, bandOverride );
   const int sceneCount = prepared.collection.sceneCount();
@@ -438,7 +450,7 @@ Json::Value RsTemporalPhenologyOperator::run( const Json::Value &params, RSOpera
     }
     context.throwIfCancelled();
 
-    for ( int b = 0; b < kPhenologyBandCount; ++b )
+    for ( int b = 0; b < bandCount; ++b )
     {
       if ( !out.writeBandWindow( b + 1, x, y, w, h,
                                  metricBufs.data() + static_cast<size_t>( b ) * tilePixels ) )

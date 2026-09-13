@@ -224,30 +224,36 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
       start = b;
     }
     segments.push_back( { start, n } );
-    if ( static_cast<int>( breakIndices.size() ) >= maxSeg )
-      break;
+    if ( static_cast<int>( breakIndices.size() ) >= maxSeg - 1 )
+      break; // break budget spent (segments = breaks + 1)
   }
 
   // Backward pruning: the residual-driven search can propose splits that
   // only explain the GLOBAL fit's mis-fit (a false break). Remove, greedily
-  // and deterministically, any break whose removal raises the total SSE by
-  // less than minImprovement × SSE(kept) — the same relative-gain rule the
-  // forward split used, applied in reverse.
+  // and deterministically, any break whose removal raises the TOTAL kept SSE
+  // by less than minImprovement × SSE(kept). The denominator is the total
+  // (documented here), deliberately coarser than the forward per-segment
+  // rule; a configuration where any segment cannot fit (fewer valid samples
+  // than model terms) is treated as unacceptable (+infinity), so pruning
+  // never favors a layout that hides unfittable segments.
   {
+    constexpr double kUnfittable = std::numeric_limits<double>::infinity();
     auto totalSseFor = [&]( const std::vector<int> &cuts ) {
       double sse = 0.0;
       int prev = 0;
       for ( int b : cuts )
       {
         double s = 0.0;
-        fitSegment( y, tDays, prev, b, harm, weights, nullptr, &s, nullptr,
-                    nullptr, nullptr );
+        if ( !fitSegment( y, tDays, prev, b, harm, weights, nullptr, &s,
+                          nullptr, nullptr, nullptr ) )
+          return kUnfittable;
         sse += std::max( 0.0, s );
         prev = b;
       }
       double s = 0.0;
-      fitSegment( y, tDays, prev, n, harm, weights, nullptr, &s, nullptr,
-                  nullptr, nullptr );
+      if ( !fitSegment( y, tDays, prev, n, harm, weights, nullptr, &s,
+                        nullptr, nullptr, nullptr ) )
+        return kUnfittable;
       return sse + std::max( 0.0, s );
     };
     std::vector<int> cuts = breakIndices;
@@ -288,7 +294,10 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
     }
   }
 
-  // Final per-segment refit (optionally robust IRLS) + stats.
+  // Final per-segment refit (optionally robust IRLS) + stats. Coefficients
+  // are kept per segment so break magnitudes evaluate BOTH models AT the
+  // break day (no differential-trend leak from adjacent fitted samples).
+  std::vector<std::vector<double>> segCoefByIndex( segments.size() );
   double totalSse = 0.0;
   double totalSst = 0.0;
   long totalValidFinal = 0;
@@ -297,6 +306,7 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
     if ( weights[i] > 0.0 )
       totalSst += ( y[i] - meanY ) * ( y[i] - meanY );
   }
+  size_t segIndex = 0;
   for ( const auto &seg : segments )
   {
     // Weights for the final fit: optional Huber IRLS within the segment.
@@ -349,6 +359,7 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
       out.intercept = intercept;
       out.rmse = valid > 0 ? std::sqrt( std::max( 0.0, sse ) / valid ) : kNanD;
       out.validCount = valid;
+      segCoefByIndex[static_cast<size_t>( segIndex )] = coef;
       for ( int i = seg.first; i < seg.second; ++i )
       {
         if ( weights[i] <= 0.0 )
@@ -361,43 +372,33 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
     }
     else
     {
+      // No fit (underdetermined segment): the honest report is NaN, never a
+      // default-zero slope masquerading as a flat trend.
+      out.slopePerDay = kNanD;
+      out.intercept = kNanD;
       out.rmse = kNanD;
     }
     result.segments.push_back( out );
+    ++segIndex;
   }
 
   result.breaks.reserve( breakIndices.size() );
   for ( size_t s = 1; s < segments.size(); ++s )
   {
     const int idx = segments[s].first;
-    // Magnitude = |fitted level jump at the break| between the neighbouring
-    // segments' models (undefined when either side has no fit).
+    // Magnitude = |fitL(tBreak) − fitR(tBreak)|: both neighbouring segments'
+    // models evaluated AT the break day (undefined when either side has no
+    // stored fit).
     BreakEvent ev;
     ev.index = idx;
     ev.breakDays = tDays[static_cast<size_t>( idx )];
-    // Recover the jump from the stored fitted values around the break: use
-    // the nearest finite fitted sample on each side (deterministic).
-    double fitL = kNanD;
-    for ( int i = idx - 1; i >= segments[s - 1].first; --i )
-    {
-      if ( std::isfinite( result.fitted[static_cast<size_t>( i )] ) )
-      {
-        fitL = result.fitted[static_cast<size_t>( i )];
-        break;
-      }
-    }
-    double fitR = kNanD;
-    for ( int i = idx; i < segments[s].second; ++i )
-    {
-      if ( std::isfinite( result.fitted[static_cast<size_t>( i )] ) )
-      {
-        fitR = result.fitted[static_cast<size_t>( i )];
-        break;
-      }
-    }
-    ev.magnitude = ( std::isfinite( fitL ) && std::isfinite( fitR ) )
-                     ? std::abs( fitR - fitL )
-                     : kNanD;
+    const std::vector<double> &coefL = segCoefByIndex[s - 1];
+    const std::vector<double> &coefR = segCoefByIndex[s];
+    ev.magnitude =
+      ( !coefL.empty() && !coefR.empty() )
+        ? std::abs( evalCoefAt( coefR, ev.breakDays, harm ) -
+                    evalCoefAt( coefL, ev.breakDays, harm ) )
+        : kNanD;
     result.breaks.push_back( ev );
   }
 

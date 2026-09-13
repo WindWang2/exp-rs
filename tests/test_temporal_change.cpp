@@ -6,6 +6,8 @@
 #include "processing/algorithms/temporal/temporal_change.h"
 #include "processing/algorithms/temporal/temporal_fit.h"
 
+#include <QDate>
+
 #include <cmath>
 #include <limits>
 #include <vector>
@@ -117,6 +119,66 @@ TEST_CASE( "disturbanceOnset: decrease onset with recovery length", "[temporal][
   const double stuck = disturbanceOnset( neverRecovers, nt, nb, true, 3.0, &recovery, 1.0 );
   REQUIRE( stuck == Approx( 30.0 ) );
   REQUIRE( recovery == Approx( -1.0 ) );
+}
+
+TEST_CASE( "complementSeasonWindow + phenologyCyclesPerYear: double-cropping known answers",
+           "[temporal][change][phenology]" )
+{
+  // Complement algebra on the circular doy axis.
+  const SeasonWindow first{ 60, 200 };
+  const SeasonWindow second = complementSeasonWindow( first );
+  REQUIRE( second.startDoy == 201 );
+  REQUIRE( second.endDoy == 59 ); // wraps the year end
+  const SeasonWindow fullYear = complementSeasonWindow( { 1, 366 } );
+  REQUIRE( fullYear.startDoy == 1 ); // complement of the full year is itself
+  REQUIRE( fullYear.endDoy == 366 );
+
+  // Two years of a bimodal (double-cropping) series: peaks at doy ~90 and
+  // ~270, troughs between; weekly samples.
+  const int weeks = 104;
+  std::vector<float> y( static_cast<size_t>( weeks ) );
+  std::vector<double> t( static_cast<size_t>( weeks ) );
+  std::vector<int> doy( static_cast<size_t>( weeks ) );
+  std::vector<int> year( static_cast<size_t>( weeks ) );
+  for ( int i = 0; i < weeks; ++i )
+  {
+    const int day = 7 * i;
+    t[static_cast<size_t>( i )] = day;
+    const QDate d = QDate( 2024, 1, 1 ).addDays( day );
+    doy[static_cast<size_t>( i )] = d.dayOfYear();
+    year[static_cast<size_t>( i )] = d.year();
+    const double bimodal = 0.5 * std::cos( 2.0 * M_PI * ( d.dayOfYear() - 90 ) / 365.25 * 2.0 ) + 0.5;
+    y[static_cast<size_t>( i )] = static_cast<float>( 0.15 + 0.7 * bimodal );
+  }
+  const std::vector<SeasonYearMetrics> metrics =
+    phenologyCyclesPerYear( y, t, doy, year, { { 60, 200 }, { 201, 59 } }, 0.2 );
+  REQUIRE( metrics.size() == 4 ); // 2 years x 2 cycles
+  // Cycle 0 of each year: POS inside the first window; cycle 1: inside the
+  // wrapped complement window.
+  for ( const auto &entry : metrics )
+  {
+    CAPTURE( entry.year, entry.cycleIndex, entry.metrics.pos );
+    REQUIRE( entry.metrics.valid );
+    if ( entry.cycleIndex == 0 )
+      REQUIRE( ( entry.metrics.pos >= 60 && entry.metrics.pos <= 200 ) );
+    else
+      REQUIRE( ( entry.metrics.pos >= 201 || entry.metrics.pos <= 59 ) );
+  }
+  // Both years contribute.
+  REQUIRE( metrics[0].year == 2024 );
+  REQUIRE( metrics[2].year == 2025 );
+
+  // A window with < 3 valid samples marks the cycle invalid but keeps the
+  // entry (the year still appears for its other cycle).
+  const std::vector<SeasonYearMetrics> sparse =
+    phenologyCyclesPerYear( y, t, doy, year, { { 60, 65 }, { 201, 59 } }, 0.2 );
+  REQUIRE( sparse.size() == 4 );
+  REQUIRE( sparse[0].metrics.valid == false ); // [60,65] holds <= 1 weekly sample
+  REQUIRE( sparse[1].metrics.valid == true );
+
+  // Empty windows / bad fraction refuse.
+  REQUIRE( phenologyCyclesPerYear( y, t, doy, year, {}, 0.2 ).empty() );
+  REQUIRE( phenologyCyclesPerYear( y, t, doy, year, { { 1, 366 } }, 0.0 ).empty() );
 }
 
 TEST_CASE( "whittakerSmoothRobust: a spike is damped more than plain smoothing", "[temporal][change]" )

@@ -323,6 +323,26 @@ TEST_CASE( "temporal_monitor accepts a scenes array (T-1 regression)",
            "[temporal][operators][monitor][t1]" )
 {
     ensureApp();
+    // Schema-level pin: the T-1 fix declares 'scenes' and relaxes 'required'
+    // to {output, method} — a revert of the schema change fails here even
+    // though the run path always accepted scenes.
+    {
+        auto op = RSOperatorRegistry::instance().create( "rs:temporal_monitor" );
+        REQUIRE( op != nullptr );
+        const Json::Value schema = op->schema();
+        REQUIRE( schema["properties"].isMember( "scenes" ) );
+        const Json::Value required = schema["required"];
+        REQUIRE( required.size() == 2 );
+        bool hasOutput = false;
+        bool hasMethod = false;
+        for ( const Json::Value &r : required )
+        {
+            hasOutput = hasOutput || r.asString() == "output";
+            hasMethod = hasMethod || r.asString() == "method";
+        }
+        REQUIRE( hasOutput );
+        REQUIRE( hasMethod );
+    }
     Fixture fx;
     REQUIRE( writeTestScene( { fx.filePath( "m1.tif" ), { 1, 2 }, 2, 1,
                               { 500000, 30, 0, 4500000, 0, -30 }, "2025-01-01" } ) );
@@ -352,6 +372,64 @@ TEST_CASE( "temporal_monitor accepts a scenes array (T-1 regression)",
     const auto maxAbs = readBand( fx.filePath( "monitor.tif" ), 2 );
     REQUIRE( std::abs( finalS[0] ) < 1.0 ); // sums of z cancel
     REQUIRE( maxAbs[0] > maxAbs[1] );
+}
+
+TEST_CASE( "temporal_phenology cycles=2: double-cropping bands and cycle_count E2E",
+           "[temporal][operators][phenology][t-cycles]" )
+{
+    ensureApp();
+    Fixture fx;
+
+    // Weekly NDVI-like series over two crop cycles: peak around doy 120 and
+    // doy 280 each year, troughs between. 2 years, 1 pixel.
+    Json::Value scenes( Json::arrayValue );
+    const int weeks = 104;
+    for ( int i = 0; i < weeks; ++i )
+    {
+        const int doy = QDate( 2024, 1, 1 ).addDays( 7 * i ).dayOfYear();
+        const double bimodal =
+            0.5 * std::cos( 2.0 * M_PI * ( doy - 120 ) / 365.25 * 2.0 ) + 0.5;
+        const float ndvi = static_cast<float>( 0.15 + 0.7 * bimodal );
+        TestScene s;
+        s.path = fx.filePath( QStringLiteral( "p%1.tif" ).arg( i, 3, 10, QLatin1Char( '0' ) ) );
+        s.date = QDate( 2024, 1, 1 ).addDays( 7 * i ).toString( Qt::ISODate );
+        s.width = 1; // single-pixel series
+        s.values = { ndvi };
+        REQUIRE( writeTestScene( s ) );
+        scenes.append( s.path.toStdString() );
+    }
+
+    Json::Value params( Json::objectValue );
+    params["scenes"] = scenes;
+    params["band"] = 1;
+    params["cycles"] = 2;
+    params["seasonStartDoy"] = 60;
+    params["seasonEndDoy"] = 200;
+    params["output"] = fx.filePath( QStringLiteral( "ph2.tif" ) ).toStdString();
+    const Json::Value result = runOp( "rs:temporal_phenology", params );
+    // 7 (cycle 1) + 7 (c2_*) + cycle_count = 15 bands, c2 names pinned.
+    REQUIRE( result["bands"].asInt() == 15 );
+    const Json::Value metrics = result["metrics"];
+    REQUIRE( metrics.size() == 15 );
+    REQUIRE( std::string( metrics[7].asString() ) == "c2_sos" );
+    REQUIRE( std::string( metrics[14].asString() ) == "cycle_count" );
+    REQUIRE( bandCount( fx.filePath( "ph2.tif" ) ) == 15 );
+
+    // Both cycles are valid on the bimodal pixel; cycle_count = 2.
+    const auto c1Sos = readBand( fx.filePath( "ph2.tif" ), 1 );
+    CAPTURE( c1Sos[0] );
+    REQUIRE( std::isfinite( c1Sos[0] ) ); // cycle 1 defined on [60, 200]
+    const auto cycleCount = readBand( fx.filePath( "ph2.tif" ), 15 );
+    CAPTURE( cycleCount[0] );
+    REQUIRE( cycleCount[0] == Approx( 2 ) );
+    // The second cycle's SOS falls in the complement window (doy > 200 or
+    // < 60 by the complement of [60, 200] = [201, 59]). Band 8 must hold a
+    // real doy (>= 1): an unwritten band reads 0 and would pass the range
+    // test vacuously.
+    const auto c2Sos = readBand( fx.filePath( "ph2.tif" ), 8 );
+    CAPTURE( c2Sos[0] );
+    REQUIRE( c2Sos[0] >= 1.0 );
+    REQUIRE( ( c2Sos[0] >= 201.0 || c2Sos[0] <= 59.0 ) );
 }
 
 // ----------------------------------------------------- extract regions ----
