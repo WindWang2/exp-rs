@@ -132,7 +132,7 @@ class FabricPlan
     bool isWindowPlan() const { return mWindowPlan; }
 
   private:
-    friend FabricPlan planFabric( const FabricIntent &intent,
+    friend FabricPlan planFabric( FabricIntent intent,
                                   const FabricPlanOptions &options,
                                   const CancelToken &cancel );
     FabricPlan() = default;
@@ -156,10 +156,13 @@ struct FabricPlanOptions
                                      ///< uncounted — the estimate says so)
 };
 
-/// Runs the plan stages through chunk_planning. Throws GeoError for
+/// Runs the plan stages through chunk_planning. Takes the intent BY VALUE
+/// and consumes it: the in-memory records path MOVES the records into the
+/// catalog service (the plan keeps only the selected scenes — D-1009's
+/// O(page + selected) includes the plan itself). Throws GeoError for
 /// invalid intents, offline remote catalogs (typed refusal), cancel during
 /// crawl, and ResourceExhausted when the catalog exceeds declared bounds.
-FabricPlan planFabric( const FabricIntent &intent, const FabricPlanOptions &options = {},
+FabricPlan planFabric( FabricIntent intent, const FabricPlanOptions &options = {},
                        const CancelToken &cancel = {} );
 
 /// The ONE JSON → intent parser (operator and CLI surfaces share it; no

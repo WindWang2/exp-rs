@@ -205,25 +205,29 @@ Json::Value FabricPlan::toJson() const
     return json;
 }
 
-FabricPlan planFabric( const FabricIntent &intent, const FabricPlanOptions &options,
+FabricPlan planFabric( FabricIntent intent, const FabricPlanOptions &options,
                        const CancelToken &cancel )
 {
     intent.validate();
 
     FabricPlan plan;
-    plan.mIntent = intent;
+    // The records path consumes the caller's vector (single owner; the plan
+    // keeps only the selected scenes afterwards).
+    std::vector<AssetRecord> ownedRecords = std::move( intent.records );
+    intent.records.clear();
+    plan.mIntent = std::move( intent );
 
     // --- stage: catalog_query (streaming, O(page + K) memory) -------------
     FabricPlanStage catalogStage;
     catalogStage.name = "catalog_query";
-    TopKSelector selector( static_cast<std::size_t>( intent.sceneBudget ) );
+    TopKSelector selector( static_cast<std::size_t>( plan.mIntent.sceneBudget ) );
     std::uint64_t matches = 0;
     bool truncated = false;
 
-    if ( !intent.records.empty() )
+    if ( !ownedRecords.empty() )
     {
-        const CatalogService service = catalogServiceOverRecords( intent.records );
-        CatalogQuery countQuery = intent.query;
+        const CatalogService service = catalogServiceOverRecords( std::move( ownedRecords ) );
+        CatalogQuery countQuery = plan.mIntent.query;
         countQuery.limit = 0;
         // Records are already in memory; stream through the SAME engine.
         CatalogContinuation continuation;
@@ -243,12 +247,12 @@ FabricPlan planFabric( const FabricIntent &intent, const FabricPlanOptions &opti
     }
     else
     {
-        const CatalogService service = openCatalogService( intent.catalogUri, options.catalog );
+        const CatalogService service = openCatalogService( plan.mIntent.catalogUri, options.catalog );
         CatalogContinuation continuation;
         std::uint64_t inputIndex = 0;
         while ( true )
         {
-            const CatalogPage page = service.searchPage( intent.query, continuation, cancel );
+            const CatalogPage page = service.searchPage( plan.mIntent.query, continuation, cancel );
             for ( const AssetRecord &record : page.records )
             {
                 ++matches;
@@ -261,7 +265,7 @@ FabricPlan planFabric( const FabricIntent &intent, const FabricPlanOptions &opti
     }
     plan.mSelected = selector.take();
     truncated = matches > plan.mSelected.size() && static_cast<int>( plan.mSelected.size() ) >=
-                                                     intent.sceneBudget;
+                                                     plan.mIntent.sceneBudget;
     catalogStage.inputs = matches;
     catalogStage.outputs = plan.mSelected.size();
     catalogStage.status = "planned";
@@ -294,34 +298,34 @@ FabricPlan planFabric( const FabricIntent &intent, const FabricPlanOptions &opti
     selectionStage.outputs = plan.mSelected.size();
     Json::Value selectionDetails;
     selectionDetails["policy"] = "cloud_asc__newest_first__id__input";
-    selectionDetails["sceneBudget"] = intent.sceneBudget;
+    selectionDetails["sceneBudget"] = plan.mIntent.sceneBudget;
     selectionStage.details = selectionDetails;
     plan.mStages.push_back( std::move( selectionStage ) );
 
     // --- stage: grid_planning (bounded metadata probe when derived) -------
-    if ( !intent.grid.explicitGrid )
+    if ( !plan.mIntent.grid.explicitGrid )
     {
         VirtualCubeBuildOptions buildOptions;
         buildOptions.probeLimit = options.gridProbeLimit;
         // The probe re-runs at execution from the plan JSON; here it runs
         // once so the plan CARRIES the negotiated grid (inspectable).
         const VirtualCube negotiated = VirtualCube::build(
-          plan.mSelected, intent.grid, OverlapPolicy::FirstWins, VirtualCubeQuality {},
+          plan.mSelected, plan.mIntent.grid, OverlapPolicy::FirstWins, VirtualCubeQuality {},
           buildOptions, cancel );
         plan.mGrid = negotiated.grid();
     }
     else
     {
-        plan.mGrid = intent.grid;
-        plan.mGrid.scaleX = intent.grid.scaleX < 0 ? -intent.grid.scaleX : intent.grid.scaleX;
-        plan.mGrid.scaleY = intent.grid.scaleY < 0 ? -intent.grid.scaleY : intent.grid.scaleY;
+        plan.mGrid = plan.mIntent.grid;
+        plan.mGrid.scaleX = plan.mIntent.grid.scaleX < 0 ? -plan.mIntent.grid.scaleX : plan.mIntent.grid.scaleX;
+        plan.mGrid.scaleY = plan.mIntent.grid.scaleY < 0 ? -plan.mIntent.grid.scaleY : plan.mIntent.grid.scaleY;
     }
     FabricPlanStage gridStage;
     gridStage.name = "grid_planning";
     gridStage.status = "planned";
     gridStage.outputs = 1;
     Json::Value gridDetails;
-    gridDetails["derived"] = !intent.grid.explicitGrid;
+    gridDetails["derived"] = !plan.mIntent.grid.explicitGrid;
     gridStage.details = gridDetails;
     plan.mStages.push_back( std::move( gridStage ) );
 
@@ -330,7 +334,7 @@ FabricPlan planFabric( const FabricIntent &intent, const FabricPlanOptions &opti
       VirtualCube::build( plan.mSelected, plan.mGrid, OverlapPolicy::FirstWins,
                           VirtualCubeQuality {}, VirtualCubeBuildOptions {}, cancel );
     plan.mChunkPlan =
-      CubeChunkPlan::forVirtualCube( cubeForChunks, intent.chunkShape, intent.slice );
+      CubeChunkPlan::forVirtualCube( cubeForChunks, plan.mIntent.chunkShape, plan.mIntent.slice );
     FabricPlanStage chunkStage;
     chunkStage.name = "chunk_planning";
     chunkStage.status = "planned";
@@ -362,7 +366,7 @@ FabricPlan planFabric( const FabricIntent &intent, const FabricPlanOptions &opti
     plan.mCost.catalogMatchesTruncated = truncated;
     plan.mCost.scenes = plan.mSelected.size();
     plan.mCost.chunks = plan.mChunkPlan.chunkCountTotal();
-    if ( intent.hasWindow )
+    if ( plan.mIntent.hasWindow )
         plan.mWindowPlan = true;
 
     // Estimated bytes: window plans read exactly their window; chunk plans
@@ -379,18 +383,18 @@ FabricPlan planFabric( const FabricIntent &intent, const FabricPlanOptions &opti
     if ( bytesPerChunk == 0 )
         plan.mCost.bytesUnknown = true;
     plan.mCost.estimatedBytes =
-      intent.hasWindow
-        ? static_cast<std::uint64_t>( intent.windowW ) * intent.windowH * 8
+      plan.mIntent.hasWindow
+        ? static_cast<std::uint64_t>( plan.mIntent.windowW ) * plan.mIntent.windowH * 8
         : bytesPerChunk * plan.mCost.chunks;
-    if ( plan.mCost.bytesUnknown && intent.hasWindow )
+    if ( plan.mCost.bytesUnknown && plan.mIntent.hasWindow )
     {
-        plan.mCost.estimatedBytes = static_cast<std::uint64_t>( intent.windowW ) *
-                                    intent.windowH * 8;   // doubles in memory
+        plan.mCost.estimatedBytes = static_cast<std::uint64_t>( plan.mIntent.windowW ) *
+                                    plan.mIntent.windowH * 8;   // doubles in memory
         plan.mCost.bytesUnknown = false;
     }
     plan.mCost.estimatedMemoryBytes = plan.mCost.estimatedBytes;
     plan.mCost.estimatedRemoteCalls =
-      intent.hasWindow ? 1 : plan.mCost.chunks;   // pessimistic miss estimate
+      plan.mIntent.hasWindow ? 1 : plan.mCost.chunks;   // pessimistic miss estimate
     plan.mCost.undatedScenes = static_cast<std::uint64_t>( std::count_if(
       plan.mSelected.begin(), plan.mSelected.end(),
       [] ( const AssetRecord &record ) { return record.datetimeUtc.empty(); } ) );
@@ -413,31 +417,71 @@ FabricIntent fabricIntentFromJson( const Json::Value &json )
     if ( bounds.isArray() && ( bounds.size() == 4 || bounds.size() == 6 ) )
         for ( const Json::Value &value : bounds )
             intent.query.bbox.push_back( value.asDouble() );
+    // Nested query{} is authoritative; TOP-LEVEL shorthand fields (the
+    // flat operator/CLI shape) fill anything the nested object left unset.
     const Json::Value &queryJson = json["query"];
-    if ( queryJson.isObject() )
+    const Json::Value &effectiveQuery = queryJson.isObject() ? queryJson : json;
     {
-        if ( queryJson["bbox"].isArray() )
-            intent.query.bbox.clear();
-        for ( const Json::Value &value : queryJson["bbox"] )
-            intent.query.bbox.push_back( value.asDouble() );
-        intent.query.temporalStartUtc = queryJson.get( "temporalStartUtc", "" ).asString();
-        intent.query.temporalEndUtc = queryJson.get( "temporalEndUtc", "" ).asString();
-        for ( const Json::Value &value : queryJson["collections"] )
-            intent.query.collections.push_back( value.asString() );
-        for ( const Json::Value &value : queryJson["ids"] )
-            intent.query.ids.push_back( value.asString() );
-        if ( queryJson.isMember( "cloudCoverMax" ) )
+        const bool nestedBbox = queryJson.isObject() && queryJson["bbox"].isArray();
+        if ( !nestedBbox && !intent.query.bbox.empty() )
+        {
+            // top-level bounds already applied — keep them unless the query
+            // object declares its own
+        }
+        if ( effectiveQuery["bbox"].isArray() && !nestedBbox )
+        {
+            if ( !intent.query.bbox.empty() )
+                intent.query.bbox.clear();
+            for ( const Json::Value &value : effectiveQuery["bbox"] )
+                intent.query.bbox.push_back( value.asDouble() );
+        }
+        else
+        {
+            for ( const Json::Value &value : queryJson["bbox"] )
+                intent.query.bbox.push_back( value.asDouble() );
+        }
+        const auto pick = [ & ]( const char *field ) -> Json::Value {
+            if ( queryJson.isObject() && queryJson.isMember( field ) )
+                return queryJson[field];
+            return json[field];
+        };
+        if ( !pick( "temporalStartUtc" ).isNull() )
+            intent.query.temporalStartUtc = pick( "temporalStartUtc" ).asString();
+        if ( !pick( "temporalEndUtc" ).isNull() )
+            intent.query.temporalEndUtc = pick( "temporalEndUtc" ).asString();
+        if ( queryJson["collections"].isArray() )
+            for ( const Json::Value &value : queryJson["collections"] )
+                intent.query.collections.push_back( value.asString() );
+        else
+            for ( const Json::Value &value : json["collections"] )
+                intent.query.collections.push_back( value.asString() );
+        if ( queryJson["ids"].isArray() )
+            for ( const Json::Value &value : queryJson["ids"] )
+                intent.query.ids.push_back( value.asString() );
+        else
+            for ( const Json::Value &value : json["ids"] )
+                intent.query.ids.push_back( value.asString() );
+        if ( !pick( "cloudCoverMax" ).isNull() )
         {
             intent.query.hasCloudCoverMax = true;
-            intent.query.cloudCoverMax = queryJson["cloudCoverMax"].asDouble();
+            intent.query.cloudCoverMax = pick( "cloudCoverMax" ).asDouble();
         }
-        intent.query.platformEquals = queryJson.get( "platform", "" ).asString();
-        for ( const Json::Value &value : queryJson["sensors"] )
-            intent.query.sensorInstruments.push_back( value.asString() );
-        intent.query.assetRole = queryJson.get( "assetRole", "" ).asString();
-        intent.query.mediaTypeSubstring = queryJson.get( "mediaType", "" ).asString();
-        intent.query.limit = queryJson.get( "limit", 0 ).asInt();
-        intent.query.maxItems = queryJson.get( "maxItems", 1000 ).asInt();
+        if ( !pick( "platform" ).isNull() )
+            intent.query.platformEquals = pick( "platform" ).asString();
+        if ( queryJson["sensors"].isArray() )
+            for ( const Json::Value &value : queryJson["sensors"] )
+                intent.query.sensorInstruments.push_back( value.asString() );
+        else
+            for ( const Json::Value &value : json["sensors"] )
+                intent.query.sensorInstruments.push_back( value.asString() );
+        if ( !pick( "assetRole" ).isNull() )
+            intent.query.assetRole = pick( "assetRole" ).asString();
+        if ( !pick( "mediaType" ).isNull() )
+            intent.query.mediaTypeSubstring = pick( "mediaType" ).asString();
+        if ( !pick( "limit" ).isNull() )
+            intent.query.limit = pick( "limit" ).asInt();
+        if ( !pick( "maxItems" ).isNull() )
+            intent.query.maxItems = pick( "maxItems" ).asInt();
     }
 
     const Json::Value &gridJson = json["grid"];
