@@ -496,7 +496,9 @@ QJsonObject Library::priorsFor( const QString &material ) const
                 for ( size_t w = 0; w < sizeof( kPriorWindows ) / sizeof( kPriorWindows[0] ); ++w )
                 {
                     const PriorWindow &window = kPriorWindows[w];
-                    if ( wl >= window.minNm && wl <= window.maxNm )
+                    // half-open [minNm, maxNm): the shared boundary sample
+                    // counts only in the higher window, not in both.
+                    if ( wl >= window.minNm && wl < window.maxNm )
                     {
                         Accumulator &acc = windows[w];
                         acc.min = std::min( acc.min, v );

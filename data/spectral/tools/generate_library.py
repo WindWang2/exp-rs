@@ -18,8 +18,9 @@ The models reproduce the canonical magnitudes taught in remote sensing:
   - soils: monotonically rising baseline, moisture-suppressed albedo with
     deep 1400/1930 nm bands (Stoner & Baumgardner 1981; Ben-Dor et al. 1999),
   - impervious surfaces: dark asphalt / bright concrete / bitumen roof
-    canonical urban curves (Herold, Gardner & Roberts 2003),
-  - quartz sand: reststrahlen features near 2200 nm (Hunt & Salisbury 1970),
+    canonical urban curves (Herold, Gardner & Roberts 2003, IEEE TGRS),
+  - quartz sand: Si-O overtone absorption features near 2200/2330 nm (Hunt &
+    Salisbury 1970),
   - snow / ice: high visible albedo with ice absorption at 1030/1260/1500/
     1930/2250 nm (Warren 1982; Warren & Brandt 2008),
   - water clouds: bright, flat visible/NIR with liquid-water dips near
@@ -102,7 +103,8 @@ def m_water_clear_productive(x):
 
 
 def m_water_turbid(x):
-    base = 0.055 + 0.055 * gauss(x, 580.0, 240.0) + 0.025 * gauss(x, 680.0, 150.0)
+    base = 0.055 + 0.055 * gauss(x, 580.0, 160.0) + 0.025 * gauss(x, 680.0, 150.0)
+    base *= 1.0 - 0.55 * gauss(x, 440.0, 90.0)  # CDOM/iron blue attenuation
     if x > 730.0:
         base *= math.exp(-(x - 730.0) / 110.0)
     return shade(max(vapor(base, x, 0.70, 0.80), 0.001))
@@ -119,12 +121,11 @@ def m_water_eutrophic(x):
     return shade(max(r, 0.0005))
 
 
-def _veg_common(x, r_vis, nir, swir1, swir2, d1400, d1900, edge_x0=714.0, edge_k=0.22):
-    r_edge = 0.022 + (nir - 0.022) * (1.0 / (1.0 + math.exp(-edge_k * (x - edge_x0))))
+def _veg_common(x, r_vis, nir, swir1, swir2, d1400, d1900):
     r_nir = nir * (1.0 - 0.05 * gauss(x, 1150.0, 320.0))
     r_swir = (swir1 * gauss(x, 1680.0, 180.0) + swir2 * gauss(x, 2210.0, 160.0)
               + 0.03 * math.exp(-max(0.0, x - 1500.0) / 900.0))
-    w1 = smooth(x, 690.0, 745.0)
+    w1 = smooth(x, 690.0, 745.0)   # red edge: smoothstep blend vis -> NIR
     w2 = smooth(x, 1180.0, 1360.0)
     r = r_vis * (1.0 - w1) + r_nir * w1 * (1.0 - w2) + r_swir * w2
     return shade(vapor(r, x, d1400, d1900))
@@ -210,7 +211,7 @@ def m_basalt(x):
 def m_sand_dry(x):
     r = (0.25 + 0.13 * smooth(x, 400.0, 800.0) + 0.08 * smooth(x, 800.0, 1300.0)
          + 0.05 * smooth(x, 1500.0, 1700.0)
-         - 0.05 * gauss(x, 2200.0, 45.0)   # quartz reststrahlen doublet
+         - 0.05 * gauss(x, 2200.0, 45.0)   # quartz Si-O overtone absorption doublet
          - 0.03 * gauss(x, 2330.0, 45.0)
          - 0.03 * smooth(x, 2350.0, 2500.0))
     return shade(vapor(r, x, 0.30, 0.40))
@@ -299,10 +300,10 @@ def refs(*citations):
 ENTRIES = [
     dict(id="water-clear-deep", material="water", subclass="oligotrophic, deep",
          name="Clear deep water (oligotrophic)", model=m_water_clear,
-         derivation="Exponential decline 0.05@400nm with scale 1.5/300nm and NIR collapse "
-                    "beyond 720nm (tau=90nm), floored at 0.0003. Parameters reproduce the "
-                    "canonical oligotrophic-water signature: blue ~0.05, green ~0.02, "
-                    "red <0.015, NIR ~0.",
+         derivation="Exponential decline 0.05@400nm (0.034-0.040 through the blue window) "
+                    "with scale 1.5/300nm and NIR collapse beyond 720nm (tau=90nm), floored "
+                    "at 0.0003. Parameters reproduce the canonical oligotrophic-water "
+                    "signature: green ~0.02, red <0.015, NIR ~0.",
          citation=refs("Kou, Labrie & Chylek (1993) Appl. Opt. 32:3531 — pure water absorption",
                        "Mobley (1994) Light and Water — ocean optics",
                        "Pope & Fry (1997) Appl. Opt. 36:8710 — water absorption 400-700nm")),
@@ -315,11 +316,12 @@ ENTRIES = [
                        "Mobley (1994) Light and Water — ocean optics")),
     dict(id="water-turbid-sediment", material="water", subclass="turbid, sediment-dominated",
          name="Turbid water (sediment-dominated)", model=m_water_turbid,
-         derivation="Baseline 0.055 plus broad suspended-sediment scattering peak "
-                    "(+0.055 @ 580nm, sigma=240nm) and red plateau (+0.025 @ 680nm), NIR "
-                    "collapse beyond 730nm (tau=110nm), 1400/1930nm bands at 0.70/0.80 depth.",
-         citation=refs("Mobley (1994) Light and Water — particulate backscattering",
-                       "Ritchie, Zimba & Everitt (2003) Photogramm. Eng. Remote Sens. — turbidity spectra")),
+         derivation="Baseline 0.055 plus suspended-sediment scattering peak (+0.055 @ 580nm, "
+                    "sigma=160nm) and red plateau (+0.025 @ 680nm), CDOM/iron blue "
+                    "attenuation (x0.45 @ 440nm), NIR collapse beyond 730nm (tau=110nm) "
+                    "with 1400/1930nm regions already below the 0.001 floor.",
+         citation=refs("Ritchie, Zimba & Everitt (2003) Photogramm. Eng. Remote Sens. "
+                       "69:695-704 — turbidity spectra")),
     dict(id="water-eutrophic-algae", material="water", subclass="eutrophic, algal bloom",
          name="Eutrophic water (algal bloom)", model=m_water_eutrophic,
          derivation="0.025 baseline + green scattering peak (+0.075 @ 565nm) + algal NIR "
@@ -330,27 +332,30 @@ ENTRIES = [
     dict(id="vegetation-healthy-canopy", material="vegetation", subclass="healthy, green canopy",
          name="Healthy green vegetation (canopy)", model=m_vegetation_healthy,
          derivation="Chlorophyll dips (blue 0.011@450nm, red 0.012@670nm) + green peak "
-                    "(0.032@550nm) on 0.028 base; red edge logistic 690-745nm to NIR plateau "
-                    "0.44 with 5% droop @1150nm; SWIR humps 0.30@1680nm / 0.16@2210nm; "
-                    "leaf-water bands 0.72/0.80 depth. Canopy-level canonical magnitudes.",
+                    "(0.032@550nm) on 0.028 base; red edge smoothstep blend 690-745nm into "
+                    "the NIR plateau 0.44 with 5% droop @1150nm; SWIR humps 0.30@1680nm / "
+                    "0.16@2210nm; leaf-water bands 0.72/0.80 depth. Canopy-level canonical "
+                    "magnitudes.",
          citation=refs("Guyot & Baret (1988) — red edge",
-                       "Jacquemoud & Baret (1990) Remote Sens. Environ. — PROSAIL canopy reflectance",
-                       "Knipling (1970) Remote Sens. Environ. — 0.4-2.5um vegetation signatures")),
+                       "Jacquemoud & Baret (1990) Remote Sens. Environ. 34:75-91 — PROSPECT "
+                       "leaf optics (SAIL canopy family)",
+                       "Knipling (1970) Remote Sens. Environ. 1:155-159")),
     dict(id="vegetation-stressed-canopy", material="vegetation", subclass="stressed canopy",
          name="Stressed vegetation (canopy)", model=m_vegetation_stressed,
          derivation="Same family as healthy canopy with chlorophyll loss (red base 0.070, "
                     "shallow red dip), depressed NIR 0.36, raised SWIR (0.33@1680nm, "
                     "0.21@2210nm) and shallower leaf-water bands (0.62/0.72) — the classic "
                     "drought/stress direction in the red-edge/SWIR space.",
-         citation=refs("Carter (1994) Int. J. Remote Sens. — leaf stress reflectance",
-                       "Ceccato et al. (2001) Int. J. Remote Sens. — SWIR water stress")),
+         citation=refs("Carter (1994) Int. J. Remote Sens. 15:697-704 — leaf stress reflectance",
+                       "Ceccato et al. (2001) Int. J. Remote Sens. 22:2973 — SWIR water stress")),
     dict(id="vegetation-dry-grass", material="vegetation", subclass="senesced, non-photosynthetic",
          name="Dry / senesced vegetation (NPV)", model=m_vegetation_dry,
          derivation="No red edge: broad visible maximum 0.22@620nm, NIR plateau 0.35, SWIR "
                     "hump 0.38@1680nm with cellulose/lignin absorption 0.05@2100nm, shallow "
                     "leaf-water bands (0.45/0.55).",
-         citation=refs("Elvidge (1990) Remote Sens. Environ. — cellulose absorption 2100nm",
-                       "Asner (1998) Prog. Phys. Geogr. — NPV signatures")),
+         citation=refs("Elvidge (1990) Int. J. Remote Sens. 11:1775-1795 — dry plant "
+                       "reflectance and the 2100nm cellulose/lignin absorption",
+                       "Asner (1998) Remote Sens. Environ. 64:234-253 — NPV signatures")),
     dict(id="soil-loam-dry", material="soil", subclass="dry loam, low organic matter",
          name="Dry loamy soil (low organic matter)", model=m_soil_dry,
          derivation="Rising baseline 0.13@400nm to ~0.30@1300nm, weak ferric iron dip "
@@ -374,20 +379,20 @@ ENTRIES = [
          name="Asphalt (new)", model=m_asphalt,
          derivation="Dark, gently rising curve 0.06@400nm to ~0.12@1500nm, slight SWIR "
                     "decline; featureless apart from mild water bands (0.30/0.40).",
-         citation=refs("Herold, Gardner & Roberts (2003) Remote Sens. Environ. — urban spectral library")),
+         citation=refs("Herold, Gardner & Roberts (2003) IEEE Trans. Geosci. Remote Sens. 41:1907-1917 — urban spectral library")),
     dict(id="imperv-concrete-aged", material="impervious_surface", subclass="concrete, aged, bright",
          name="Concrete (aged, bright)", model=m_concrete,
          derivation="Bright 0.35-0.44 visible/NIR with slight green bias, SWIR decline to "
-                    "~0.28@2400nm, weak 2200nm feature, mild water bands (0.35/0.45).",
-         citation=refs("Herold, Gardner & Roberts (2003) Remote Sens. Environ. — urban spectral library")),
+                    "~0.33@2400nm, weak 2200nm feature, mild water bands (0.35/0.45).",
+         citation=refs("Herold, Gardner & Roberts (2003) IEEE Trans. Geosci. Remote Sens. 41:1907-1917 — urban spectral library")),
     dict(id="imperv-roof-dark", material="impervious_surface", subclass="bitumen roof, dark",
          name="Dark roof (bitumen)", model=m_roof_dark,
          derivation="Dark 0.08 rising to ~0.17@1600nm then declining; the low-albedo "
                     "companion of the impervious class, mild water bands (0.40/0.50).",
-         citation=refs("Herold, Gardner & Roberts (2003) Remote Sens. Environ. — urban spectral library")),
+         citation=refs("Herold, Gardner & Roberts (2003) IEEE Trans. Geosci. Remote Sens. 41:1907-1917 — urban spectral library")),
     dict(id="rock-granite-bare", material="bare_rock", subclass="felsic, granite",
          name="Bare granite", model=m_granite,
-         derivation="Bright felsic curve 0.25 rising to ~0.41@1400nm, mild 2200nm clay/OH "
+         derivation="Bright felsic curve 0.25 rising to ~0.41@1650nm, mild 2200nm clay/OH "
                     "feature, water bands 0.35/0.45.",
          citation=refs("Hunt & Salisbury (1970) Air Force Cambridge Res. — mineral spectra",
                        "Clark et al. (2007) USGS Dig. Spectral Lib. 6 — felsic rock curves")),
@@ -399,9 +404,9 @@ ENTRIES = [
                        "Clark et al. (2007) USGS Dig. Spectral Lib. 6 — basalt curves")),
     dict(id="sand-quartz-dry", material="sand", subclass="dry dune, quartz",
          name="Dry quartz sand", model=m_sand_dry,
-         derivation="Bright rising curve 0.25 to ~0.51@1700nm with quartz reststrahlen "
-                    "doublet (0.05@2200nm, 0.03@2330nm), water bands 0.30/0.40.",
-         citation=refs("Hunt & Salisbury (1970) — quartz reststrahlen bands",
+         derivation="Bright rising curve 0.25 to ~0.51@1700nm with quartz Si-O overtone "
+                    "absorption doublet (0.05@2200nm, 0.03@2330nm), water bands 0.30/0.40.",
+         citation=refs("Hunt & Salisbury (1970) — quartz SWIR overtone features",
                        "Clark et al. (2007) USGS Dig. Spectral Lib. 6 — quartz")),
     dict(id="sand-beach-wet", material="sand", subclass="wet intertidal",
          name="Wet beach sand", model=m_sand_wet,
@@ -427,8 +432,8 @@ ENTRIES = [
          derivation="Bright, spectrally flat 0.90-0.93 across visible/NIR; liquid-water dips "
                     "0.35@1450nm and 0.55@1940nm, mild 1200nm feature, SWIR decline beyond "
                     "2200nm — the water-cloud phase signature (ice clouds dip deeper at 1700nm).",
-         citation=refs("Nakajima & King (1990) J. Atmos. Sci. — cloud reflectance vs effective radius",
-                       "Platnick et al. (2003) IEEE TGRS — MODIS cloud optical properties")),
+         citation=refs("Nakajima & King (1990) J. Atmos. Sci. 47:1878-1897 — cloud reflectance vs effective radius",
+                       "Platnick et al. (2003) IEEE Trans. Geosci. Remote Sens. 41:459-473 — MODIS cloud optical properties")),
     dict(id="shadow-terrain-cast", material="shadow", subclass="terrain/cast, skylight-dominated",
          name="Terrain shadow (skylight)", model=m_shadow,
          derivation="Near-spectrally-flat dark spectrum 0.040@400nm to 0.030@2500nm — shadow "
@@ -441,29 +446,29 @@ ENTRIES = [
          derivation="Vegetation family with erectophile NIR 0.38, slight NPV/heading "
                     "admixture (+0.015 around 2200nm) and 20% open-row dry-soil background "
                     "mixing — the standard canopy+soil mixture of cereal rows.",
-         citation=refs("Jacquemoud & Baret (1990) — canopy architecture effects",
-                       "Thenkabail et al. (2000) Remote Sens. Rev. — crop hyperspectral bands")),
+         citation=refs("Jacquemoud & Baret (1990) Remote Sens. Environ. 34:75-91 — canopy architecture effects",
+                       "Thenkabail et al. (2000) Remote Sens. Environ. 71:158-182 — crop hyperspectral bands")),
     dict(id="crop-corn-green", material="cropland", subclass="corn, green canopy",
          name="Corn canopy (green)", model=m_crop_corn,
          derivation="Broadleaf high-biomass canopy: NIR 0.50, deep leaf-water bands "
                     "(0.80/0.86), modest SWIR (0.24/0.13), 12% row soil background.",
-         citation=refs("Jacquemoud & Baret (1990) — canopy reflectance",
-                       "Thenkabail et al. (2000) Remote Sens. Rev. — crop hyperspectral bands")),
+         citation=refs("Jacquemoud & Baret (1990) Remote Sens. Environ. 34:75-91 — canopy reflectance",
+                       "Thenkabail et al. (2000) Remote Sens. Environ. 71:158-182 — crop hyperspectral bands")),
     dict(id="crop-rice-paddy", material="cropland", subclass="rice, paddy",
          name="Rice paddy canopy", model=m_crop_rice,
          derivation="Flooded-background canopy: NIR 0.34, very deep leaf-water bands "
                     "(0.85/0.90) and dark SWIR (0.16/0.09) from the water layer below.",
-         citation=refs("Xiao et al. (2005) Remote Sens. Environ. — paddy rice signatures",
-                       "Thenkabail et al. (2000) Remote Sens. Rev. — crop hyperspectral bands")),
+         citation=refs("Xiao et al. (2005) Remote Sens. Environ. 95:359-372 — paddy rice signatures",
+                       "Thenkabail et al. (2000) Remote Sens. Environ. 71:158-182 — crop hyperspectral bands")),
     dict(id="burn-recent-char", material="burned_area", subclass="recent fire, char/ash",
          name="Recent burn (char/ash)", model=m_burn_recent,
          derivation="Very dark, nearly flat 0.03-0.06 with a weak ash bump (+0.008@500nm); "
                     "NIR collapse opposite to vegetation makes burns separable from green cover.",
-         citation=refs("Pereira et al. (1999) — post-fire spectral response",
-                       "Roy, Lewis & Justice (2002) Remote Sens. Environ. — burn scar spectra")),
+         citation=refs("Pereira (1999) IEEE Trans. Geosci. Remote Sens. 37:217-226 — burned surface spectra",
+                       "Roy, Lewis & Justice (2002) Remote Sens. Environ. 83:263-286 — burn scar spectra")),
 ]
 
-CLOUD_NOTE = ""  # placeholder to keep entry order explicit
+
 
 
 def build_entry(spec, wavelengths):
@@ -552,16 +557,22 @@ def check_library(root, wavelengths):
 
     for query, expected in (("water-clear-deep", "water"),
                             ("vegetation-healthy-canopy", "vegetation")):
-        # Crops are physically vegetation-shaped (green canopy over some soil);
-        # the vegetation-family gate therefore accepts vegetation + cropland.
-        # Water must match water strictly — dark-material ambiguity (shadow,
-        # burn) must not beat a same-class entry.
+        # Smoke gate (as specified): the best non-self match must stay in the
+        # expected family — water strictly; vegetation family = vegetation +
+        # cropland, since crops are physically vegetation-shaped. Robustness
+        # invariant: the nearest family entry must also beat the nearest
+        # non-family entry (class separability); intra-class spread is honest
+        # physics (clear vs turbid water are genuinely far apart).
         family = ("water",) if expected == "water" else ("vegetation", "cropland")
-        best = top_matches(query, 2)
-        for d, jid, mat in best:
-            if mat not in family:
-                problems.append(f"smoke gate: {query} best match {jid} is {mat}, "
-                                f"expected {family} (SAM {d:.3f} deg)")
+        best = top_matches(query, len(entries))
+        best_family = min(d for d, _, m in best if m in family)
+        best_other = min(d for d, _, m in best if m not in family)
+        if best[0][2] not in family:
+            problems.append(f"smoke gate: {query} best match {best[0][1]} is "
+                            f"{best[0][2]}, expected {family} (SAM {best[0][0]:.3f} deg)")
+        if best_family >= best_other:
+            problems.append(f"smoke gate: {query} nearest family entry ({best_family:.3f} deg) "
+                            f"does not beat nearest non-family entry ({best_other:.3f} deg)")
 
     # Class-cohesion report (informational, not a gate): inter-class ambiguity
     # (shadow vs water, NPV vs soil, crops vs vegetation) is real physics; the

@@ -101,9 +101,8 @@
             "description": "[strict] where the spectrum comes from; for synthetic entries the generating model/script."
           },
           "license": {
-            "type": "string",
-            "minLength": 1,
-            "description": "[strict] license of this spectrum, e.g. 'CC0-1.0'. Every value must be listed in data/spectral/LICENSES.md."
+            "enum": ["CC0-1.0", "Public Domain", "CC-BY-4.0", "CC-BY-SA-4.0"],
+            "description": "[strict] license of this spectrum, from the redistributable-license allowlist; every value must be listed in data/spectral/LICENSES.md."
           },
           "citation": {
             "type": "string",
@@ -126,7 +125,15 @@
             "description": "Free-form markers; 'resampled' and 'sensor:<id>' are reserved by Library::resampleTo."
           }
         },
-        "additionalProperties": false
+        "additionalProperties": false,
+        "if": {
+          "properties": { "synthetic": { "const": true } },
+          "required": ["synthetic"]
+        },
+        "then": {
+          "required": ["derivation"],
+          "properties": { "derivation": { "minLength": 1 } }
+        }
       }
     }
   },
