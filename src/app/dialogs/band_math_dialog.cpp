@@ -66,7 +66,7 @@ void BandMathDialog::updateBandInfo()
   }
   if ( count > 8 )
     bandNames.append( QStringLiteral( "..." ) );
-  m_bandInfoLabel->setText( tr( "Valid bands (%1): %2" ).arg( count ).arg( bandNames.join( QStringLiteral( "，" ) ) ) );
+  m_bandInfoLabel->setText( tr( "Valid bands (%1): %2" ).arg( count ).arg( bandNames.join( QStringLiteral( ", " ) ) ) );
 }
 
 void BandMathDialog::setupUi()

@@ -207,7 +207,7 @@ void RadiometricCalibrationDialog::refreshMetadataStatus()
     parts.append( tr( "Sun elevation %1°" ).arg( meta.sunElevationDeg, 0, 'f', 1 ) );
   m_metadataStatusLabel->setText(
     tr( "Using %1: %2." ).arg( QFileInfo( metadataPath ).fileName(),
-                              parts.join( QStringLiteral( "，" ) ) ) );
+                              parts.join( QStringLiteral( ", " ) ) ) );
 }
 
 void RadiometricCalibrationDialog::onRun()

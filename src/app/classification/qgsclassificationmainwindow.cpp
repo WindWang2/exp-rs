@@ -2036,7 +2036,7 @@ void QgsClassificationMainWindow::refreshWorkflowUi()
         }
         else
         {
-          gate->setText( tr( "Still needed: %1" ).arg( miss.join( QStringLiteral( "；" ) ) ) );
+          gate->setText( tr( "Still needed: %1" ).arg( miss.join( QStringLiteral( "; " ) ) ) );
           gate->setStyleSheet( QStringLiteral( "color: #9a6700;" ) );
         }
       }
@@ -2092,7 +2092,7 @@ void QgsClassificationMainWindow::refreshWorkflowUi()
   else if ( !m_workflow->canTrainOrClassify() )
     trainTip = tr( "Still needed: %1" ).arg(
       m_workflow->missingRequirements( RsClassifyStep::TrainClassify )
-        .join( QStringLiteral( "；" ) ) );
+        .join( QStringLiteral( "; " ) ) );
   if ( m_applyAction )
   {
     m_applyAction->setEnabled( canTrain );
@@ -2169,7 +2169,7 @@ void QgsClassificationMainWindow::refreshWorkflowUi()
     if ( !miss.isEmpty() )
     {
       statusBar()->showMessage(
-        tr( "Soft gate: %1 more needed" ).arg( miss.join( QStringLiteral( "；" ) ) ),
+        tr( "Soft gate: %1 more needed" ).arg( miss.join( QStringLiteral( "; " ) ) ),
         4000 );
     }
   }

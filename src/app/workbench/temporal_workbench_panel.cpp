@@ -464,7 +464,7 @@ void TemporalWorkbenchPanel::rebuildSceneTable()
                    .arg( clouds );
     else
         qa << tr( "No cloud cover report" );
-    m_qaLabel->setText( tr( "QA：%1" ).arg( qa.join( QStringLiteral( "；" ) ) ) );
+    m_qaLabel->setText( tr( "QA：%1" ).arg( qa.join( QStringLiteral( "; " ) ) ) );
 
     m_pageLabel->setText( tr( "Page 1 / %1" ).arg( m_model->pageCount() ) );
 }
