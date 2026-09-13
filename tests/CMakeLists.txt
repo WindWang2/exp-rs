@@ -7968,6 +7968,24 @@ sicnu_link_jsoncpp(test_contract_platform_9)
 
 # Contract Platform 9.0: contract generation cost baseline (M8). Evidence
 # artifact via `benchmark_contract9 --out <json>`.
+# Temporal Platform 10.0 scale evidence (regularize / harmonic-breaks /
+# 100k-region reducer / per-year phenology). Evidence only, never a gate:
+# benchmark_temporal10 --out benchmarks/temporal10.json
+add_executable(benchmark_temporal10
+  benchmark_temporal10.cpp
+)
+target_link_libraries(benchmark_temporal10 PRIVATE
+  sicnu_processing
+  Qt6::Core
+)
+if(TARGET jsoncpp)
+  target_link_libraries(benchmark_temporal10 PRIVATE jsoncpp)
+endif()
+target_include_directories(benchmark_temporal10 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
 add_executable(benchmark_contract9
   benchmark_contract9.cpp
 )
