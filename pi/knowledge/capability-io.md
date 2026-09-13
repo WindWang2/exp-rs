@@ -2,7 +2,43 @@
 
 # 数据导入（io）
 
-共 4 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 7 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+
+## rs:gaofen_import
+
+GF-1/2/6 L1A 产品（CRESDA XML 侧车）导入为多波段 GeoTIFF，定标与太阳几何写入 SICNU_* 元数据。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：bandCount（integer）、output（raster）、productId（string）
+- 参数：bands（string）、input（string）、output（string）
+- 局限：Import a Gaofen-1/2/6 L1A product (CRESDA sidecar XML + TIFF) into a multi-band GeoTIFF with declared calibration/sun geometry stamped as SICNU_* metadata.
+- 适用地物：耕地、水体、不透水面
+- 适用场景：农业区制图、城市遥感
+- 失败模式：
+  - `DATASET_NOT_FOUND` — 产品目录或 XML 侧车缺失。处置：检查产品目录与 CRESDA XML 是否完整
+  - `EXECUTION_FAILED` — 波段声明与文件不符。处置：确认 L1A 产品级别与波段列表
+- 教学概念：产品导入、定标元数据
+- 适用课程：遥感数字图像处理
+- 典型练习：下载一景 GF-1 WFV 数据，用 rs:gaofen_import 导入后检查 SICNU_* 元数据并计算 NDVI。
+
+## rs:hj_import
+
+HJ-1 CCD L1A 产品导入为多波段 GeoTIFF，用于环境减灾监测教学流程。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：bandCount（integer）、output（raster）、productId（string）
+- 参数：bands（string）、input（string）、output（string）
+- 局限：Import an HJ-1 CCD L1A product (sidecar XML + TIFF) into a multi-band GeoTIFF with declared calibration/sun geometry stamped as SICNU_* metadata.
+- 适用地物：植被、水体、火点迹地
+- 适用场景：环境监测、大区域普查
+- 失败模式：
+  - `DATASET_NOT_FOUND` — 产品目录或 XML 侧车缺失。处置：检查产品目录与 CRESDA XML 是否完整
+  - `EXECUTION_FAILED` — 波段声明与文件不符。处置：确认 L1A 产品级别与波段列表
+- 教学概念：产品导入、环境监测
+- 适用课程：遥感数字图像处理
+- 典型练习：导入 HJ-1 CCD 数据并与环境卫星轨道元数据对照，说明重访周期对时相分析的影响。
 
 ## rs:landsat_import
 
@@ -74,4 +110,22 @@ Sentinel-2 数据导入：解析 SAFE/JP2 产品包，输出多波段反射率�
 - 适用课程：遥感数据处理
 - 典型练习：导入 L1C 产品并组织 10m 四波段子集供后续指数计算。
 - 可接下游：rs:atmospheric_correction
+
+## rs:zy3_import
+
+ZY-3 L1A 产品导入为多波段 GeoTIFF，保留产品声明的定标与几何信息。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：bandCount（integer）、output（raster）、productId（string）
+- 参数：bands（string）、input（string）、output（string）
+- 局限：Import a ZY-3 L1A product (CRESDA sidecar XML + TIFF) into a multi-band GeoTIFF with declared calibration/sun geometry stamped as SICNU_* metadata.
+- 适用地物：植被、裸地、水体
+- 适用场景：地形辅助调查、资源调查
+- 失败模式：
+  - `DATASET_NOT_FOUND` — 产品目录或 XML 侧车缺失。处置：检查产品目录与 CRESDA XML 是否完整
+  - `EXECUTION_FAILED` — 波段声明与文件不符。处置：确认 L1A 产品级别与波段列表
+- 教学概念：产品导入、多光谱波段
+- 适用课程：遥感数字图像处理
+- 典型练习：导入一景 ZY-3 多光谱数据，对比不同波段合成方式下的地物可分性。
 

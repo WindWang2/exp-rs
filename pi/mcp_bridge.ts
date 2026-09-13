@@ -97,9 +97,19 @@ export class McpBridge {
     delete childEnv.LD_LIBRARY_PATH;
     childEnv.QT_QPA_PLATFORM = "offscreen";
 
-    this.child = spawn(this.bin, ["--mcp", ...this.extraArgs], {
+    // A desync kill leaves unread bytes in the OLD child's pipe; they must
+    // never glue onto the new generation's frames (F-PI-1 replay bug):
+    // reset the framing buffer and drop stdout chunks from any generation
+    // that is no longer current.
+    this.buffer = "";
+    const child = (this.child = spawn(this.bin, ["--mcp", ...this.extraArgs], {
       stdio: ["pipe", "pipe", "pipe"],
       env: childEnv,
+    }));
+    this.child.stdout!.setEncoding("utf8");
+    this.child.stdout!.on("data", (chunk) => {
+      if (this.child !== child) return; // stale generation
+      this.onStdout(chunk);
     });
     // spawn() reports late ENOENT/EACCES via an "error" event, not a throw.
     const spawnFailure = new Promise<never>((_, reject) => {
@@ -109,8 +119,6 @@ export class McpBridge {
       });
     });
 
-    this.child.stdout!.setEncoding("utf8");
-    this.child.stdout!.on("data", (chunk) => this.onStdout(chunk));
     // Keep a stderr tail so a child crash is diagnosable from exprs_status
     // and the exit error (Qt/QGIS plugin failures precede most crashes).
     this.child.stderr!.setEncoding("utf8");
@@ -176,16 +184,18 @@ export class McpBridge {
   private onStdout(chunk: string): void {
     this.buffer += chunk;
     if (this.buffer.length > MAX_LINE_BUFFER_CHARS) {
-      // Fail fast instead of growing without bound on a runaway server.
-      this.buffer = "";
-      const err = new Error(
-        `exp-rs MCP bridge: response line exceeded ${MAX_LINE_BUFFER_CHARS} chars`,
+      // A >32 MiB "line" means stdio framing is desynced (the server's own
+      // line cap is 4 MiB). Without a terminating newline every later
+      // response glues onto this one: each tool call would burn the full
+      // 10-minute timeout with no diagnosis. Reject pending AND kill the
+      // child so the next request takes the lazy-respawn path instead of
+      // talking into a zombie stream (whole-repo review F-PI-1).
+      this.failDesyncedStream(
+        new Error(
+          `exp-rs MCP bridge: response line exceeded ${MAX_LINE_BUFFER_CHARS} chars; ` +
+            `stdio framing desynced - respawning`,
+        ),
       );
-      for (const p of this.pending.values()) {
-        clearTimeout(p.timer);
-        p.reject(err);
-      }
-      this.pending.clear();
       return;
     }
     let newline = this.buffer.indexOf("\n");
@@ -194,6 +204,26 @@ export class McpBridge {
       this.buffer = this.buffer.slice(newline + 1);
       if (line) this.onLine(line);
       newline = this.buffer.indexOf("\n");
+    }
+  }
+
+  /** Shared desync teardown: reject everything, then tear the child down so
+   * `exited` flips and lazy respawn replaces it (F-PI-1). */
+  private failDesyncedStream(err: Error): void {
+    this.buffer = "";
+    for (const p of this.pending.values()) {
+      clearTimeout(p.timer);
+      p.reject(err);
+    }
+    this.pending.clear();
+    const child = this.child;
+    if (child && !this.exited) {
+      try {
+        child.stdin?.destroy();
+      } catch {
+        // already gone
+      }
+      child.kill();
     }
   }
 
