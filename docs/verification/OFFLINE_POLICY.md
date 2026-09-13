@@ -59,8 +59,8 @@ absent — the suites either run (loopback is enough) or skip with a reason.
 
 * `scripts/verification_ladder.py` maps the exit-77 contract to the `skipped`
   verdict (reason in `detail`) for directly-run test binaries.
-* `scripts/collect_readiness.py` prints `skipped (<reason>)` per capability and
-  never reports a reason-less skip.
+* `scripts/collect_readiness.py` prints `skipped (<reason>)` per capability;
+  the reason text is produced (and guaranteed) by the ladder.
 * READINESS regeneration on this host targets `failed=0`, `timeout=0`; any
   `skipped` entry carries its reason code.
 

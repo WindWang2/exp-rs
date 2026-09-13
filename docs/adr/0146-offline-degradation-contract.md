@@ -39,9 +39,10 @@ D10's baseline audit sharpened the picture:
    `sicnu-skip-detail: ...`) and exits with status **77** (the GNU automake
    "skipped test" convention). The verification ladder maps exit 77 — with or
    without a sentinel line, recording whichever reason exists — to the distinct
-   `skipped` verdict with the reason carried in its `detail` field. `collect_readiness.py`
-   refuses to print a reason-less skip: a skip without a reason is a reporting
-   defect, not a verdict.
+   `skipped` verdict with the reason carried in its `detail` field. The ladder
+   always records a reason (the sentinel line when present, otherwise the
+   explicit "exit-77 without a reason code" marker): a skip without a reason
+   is a reporting defect, not a verdict.
 2. **Frozen reason vocabulary** (extend, never reword):
    * `forced-offline` — `SICNU_FORCE_OFFLINE=1` is set in the environment;
      exercises the skip path itself and makes the offline behaviour of every
