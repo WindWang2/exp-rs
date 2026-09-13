@@ -48,3 +48,24 @@ Host: 16 cores / 62 GB; all builds `cmake --build build-ci-fast -j2` with `CMAKE
 ## Phase budgets (tool calls / files touched)
 
 - Phase 0: ~25 calls / 15 files · Phase 1 (recon+verify): ~20 calls / 0 files · Phases 2–5 (implement+verify): ~120 calls / 28 files · docs/planning: ~10 calls / 15 files.
+
+## Round-2 review fixes + final HEAD evidence (commits ce88af53..05597aa7)
+
+- Both subagent reviews' 22 findings fixed; dispositions in REVIEW_LOG.md.
+- header-probe aggregate repaired (Unix Makefiles AUTOMOC forwarding gap):
+  `cmake --build build-ci-fast --target sicnu_header_probes -j2` → Built.
+- Ladder rerun at final HEAD: `python3 scripts/verification_ladder.py
+  --build-dir build-ci-fast --lanes L0,L1,L2 --build-jobs 2` → exit 0,
+  **OVERALL PASSED**, 20/20 items passed
+  (.planning/…/ladder_l0_l2.json).
+- READINESS regenerated at final code SHA `7cca494625` →
+  `overall=insufficient-evidence, passed=20, failed=0, not_built=16,
+  skipped=3` (honest: L3–L7 not executed in this worktree).
+- Final suite sweep at final HEAD: test_scientific_contract_10 1048 ✓ ·
+  test_drift_projection_10 1885 ✓ · test_science_verification_10 1187 ✓ ·
+  test_qa_mask 117 ✓ · test_tensor_blob 173 ✓ · test_model_tasks 12595 ✓ ·
+  test_model_runtime_8 2358 ✓ · test_capability_knowledge 1028 ✓ ·
+  test_io_operators 92 ✓ · node --test pi/test 10/10 ✓.
+- Hygiene: `git diff origin/master --check` → only the jsoncpp-generated
+  snapshot's pre-existing `"key" : ` style (123 identical lines on
+  origin/master); conflict-marker scan clean; secret scan clean.
