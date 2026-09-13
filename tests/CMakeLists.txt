@@ -7841,6 +7841,35 @@ target_link_libraries(test_plugin_ui_schema_host PRIVATE sicnu_plugins_framework
 sicnu_add_test(test_harness_error)
 sicnu_link_jsoncpp(test_harness_error)
 
+
+# — Scientific Workflow Compiler 10.0 (ADR 0149) —
+# Typed WorkflowIR: fail-closed reader, closed fact vocabulary, bounds,
+# deterministic normalize/fingerprint, structural validation.
+sicnu_add_test(test_workflow_ir)
+sicnu_link_jsoncpp(test_workflow_ir)
+
+# Static analysis: typed issues over typed facts, fact-status severity
+# discipline, deterministic order.
+sicnu_add_test(test_workflow_analysis)
+sicnu_link_jsoncpp(test_workflow_analysis)
+
+# Deterministic repair insertion: closed rule table, risk classes, evidence
+# records, decision refusals, idempotence.
+sicnu_add_test(test_workflow_repair)
+sicnu_link_jsoncpp(test_workflow_repair)
+
+# Harness session checkpoint/resume with stale invalidation + budgeted
+# deterministic tool shortlist.
+sicnu_add_test(test_context_checkpoint)
+sicnu_link_jsoncpp(test_context_checkpoint)
+sicnu_add_test(test_tool_shortlist)
+sicnu_link_jsoncpp(test_tool_shortlist)
+
+# The staged planner: compileWorkflow over IR/recipe, plan<->IR conversion,
+# lowering with provenance.
+sicnu_add_test(test_workflow_planner)
+sicnu_link_jsoncpp(test_workflow_planner)
+
 sicnu_add_test(test_harness_catalog)
 sicnu_link_jsoncpp(test_harness_catalog)
 

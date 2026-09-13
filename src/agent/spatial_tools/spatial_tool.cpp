@@ -271,6 +271,11 @@ void SpatialToolRegistry::registerBuiltinTools()
   harness::registerLabTools();
   // Platform 5.0 solution knowledge: solution:search/describe/validate/instantiate.
   harness::registerSolutionTools();
+  // Compiler 10.0 (ADR 0149): typed WorkflowIR compiler, harness session
+  // checkpoint/resume, and budgeted tool shortlist / knowledge budget.
+  harness::registerWorkflowPlannerTools();
+  harness::registerContextSessionTools();
+  harness::registerToolShortlistTools();
 }
 
 void SpatialToolRegistry::reset()
