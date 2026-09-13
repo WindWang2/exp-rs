@@ -1,0 +1,250 @@
+945	CLOSED	[bug][agent] rs:spectral_index scale>1 is treated as a divisor, not multiplicative
+944	CLOSED	[bug][runtime] resumeRunImpl still loadCheckpoint under coordinator mutex (leftover of #931)
+943	CLOSED	[bug][plugin] CLI and Plugin Manager still hold records()/record() across refresh (leftover of #932)
+942	CLOSED	[bug][plugin] request() peeks non-atomic mPoisoned without mStateMutex (leftover of #932)
+935	CLOSED	[bug][processing] QGIS toolbox NDVI/spectral-index silently resamples mismatched grids
+934	CLOSED	[bug][geospatial] rs:sar_terrain_flatten claims a single-band product but always writes two bands
+933	CLOSED	[bug][agent] Landsat recipe scale: 0.0001 is a no-op; *_landsat aliases skip the preset
+932	CLOSED	[bug][plugin] Plugin host/registry leftover lifecycle defects after #899/#908/#913
+931	CLOSED	[bug][runtime] WorkflowRunCoordinator persists checkpoints and GC under m_mutex on DirectConnection
+930	CLOSED	[bug][runtime] TaskCenter still holds m_mutex across execution-cache FS and scratch unlink
+929	CLOSED	[bug][geospatial] rs:sar_ratio / rs:sar_change skip grid preflight and declared dB domain
+928	CLOSED	[bug][plugin] PluginRegistry::load holds gRegistryMutex across spawn and plugin.load IPC
+927	CLOSED	[bug][ui] SchemaForm always emits optional numeric defaults; operators treat isMember as explicit
+926	CLOSED	[bug][plugin] IpcFrame length prefix sign-extends on signed char (Windows/MSVC)
+925	CLOSED	[bug][plugin] IpcFrame payload-timeout resume drops the length prefix (incomplete #896)
+920	CLOSED	Intent vocabulary duplicated as raw string literals across harness sources
+918	CLOSED	docs(planning): spatial-scientist-harness-8 planning records were never committed (gitignore whitelist omission)
+916	CLOSED	cli: implement promised ^[[H^[[2J^[[3J grammar (fabric-8 PLAN D8)
+914	CLOSED	TaskCenter::admissionSnapshot parses descriptor JSON under m_mutex on every call
+913	CLOSED	fix(plugins): host-process lock scope, control-plane naming, session cleanup
+911	CLOSED	Asset preview off-thread QGIS render: strengthen contract docs (DECIDED-KEEP)
+909	CLOSED	Restore 29 recipe preset variants missing from master (solution-template-platform-5 salvage)
+906	CLOSED	TaskCenter: blocking remote-identity resolution under scheduler mutex (review follow-up)
+903	CLOSED	Geospatial/IO hardening review findings (branch fix/geospatial-io-hardening)
+900	CLOSED	fabric-8 D2: identity resolver coverage in worker host / pipeline runner + duplicate error-frame cancellation helper
+899	CLOSED	fix(plugins): plugin host lifecycle & concurrency defects (kill-ladder no-op, drain UAF, session-swap race, handle double-close)
+896	CLOSED	fix(sdk): IPC partial-frame timeout causes framing desync / spurious E6003
+895	CLOSED	docs: sync CLAUDE.md / repo-layout with actual module layout (STAC move, workbench shell, new top-level modules)
+894	CLOSED	fix(agent): harness ledger thread-safety + MCP recording-failure UB + dead-code cleanup
+893	CLOSED	workbench UI safety + hygiene remediation (deep-review findings at f316dfdb, re-verified at 010cdc74)
+882	CLOSED	[Workbench/EmptyState] Workbench empty state action and shortcut mismatches
+881	CLOSED	[Help/Preflight] Scientific preflight blocker action drift
+880	CLOSED	[Operators/Schema] Parameter schema drift in io:inspect
+879	CLOSED	[Operators/Schema] Parameter schema drift in atomic fusion operators
+878	CLOSED	[Cartography/Style] Rule-based renderer assigns default symbol to container rules causing double rendering
+877	CLOSED	[MapSpec/Condition] IEEE 754 NaN in compareValues corrupts comparison semantics
+876	CLOSED	[Concurrency/Governance] WorkflowRunCoordinator::resumeRun ghost run leak in WorkspaceService
+875	CLOSED	[Dataset/Split] Division by zero and undefined behavior in SplitEngine::generateFolds for SpatialKFold
+874	CLOSED	[Geospatial/Raster] Strict double equality in Float32 sentinel checking in RasterReader::readMask
+873	CLOSED	[Processing/Contracts] domainFromDeclaredScale accepts +Inf as divisor, multiplying imagery pixels by zero
+872	CLOSED	[Operators/Schema] Operator parameter schema drift in rs:infer
+871	CLOSED	[Help/Store] Double-loading and duplicate ID collision in HelpContentStore::loadFromDirectory
+870	CLOSED	[Help/Diagnostics] Operator error code drift in diagnostic catalog
+869	CLOSED	[Help/Coverage] Shell command drift in Unified Help System 6.0
+868	CLOSED	[Cartography/Solver] Unbounded coordinate drift during relaxation of cyclic constraints
+867	CLOSED	[Cartography/Harness] RecipeCatalog treats numeric parameter bindings as false and emits broken orphan steps on dropped dependencies
+866	CLOSED	[MapSpec/Condition] operandValue omits Op::Has handler, crashing has(x) == false with unknown path error
+865	CLOSED	[Cartography/Solver] fit_content is permanently blocked on items initialized with zero width/height
+864	CLOSED	[Cartography/Solver] Relaxation oscillation between clampSizes and match_width/match_height causes false non-convergence
+863	CLOSED	[Cartography/Solver] Solver::detectCycles ignores followers at index >= 2 in multi-item constraints
+862	CLOSED	[Concurrency/TaskCenter] TaskCenter sub-job admission deadlock (worker starvation)
+861	CLOSED	[Concurrency/ScanPool] RsScanPool global counter interference causes permanent UI widget lockup
+860	CLOSED	[Concurrency/Workflow] WorkflowRunCoordinator lock inversion and signal re-entrancy deadlock
+859	CLOSED	[Workbench/Teardown] Asynchronous canvas teardown race condition in ~QgisDesktopWindow and project clear
+858	CLOSED	[Workbench/Widgets] Dead signal listener in SpectralProfileWidget and HistogramWidget causes GDAL dataset handle leak
+857	CLOSED	[Display/Manager] Permanent memory leak of QgsLayerTreeMapCanvasBridge in QgisDisplayManager::removeView
+856	CLOSED	[Operators/Spectral] Undeclared negative sentinels falsely trigger DN-scale mode and corrupt spectral indices
+855	CLOSED	[Algorithms/SAR] Anisotropic pixel spacing distorts Horn gradients and downslope aspect in SAR flattening
+854	CLOSED	[Operators/SAR] Inconsistent NoData sentinel on SAR Flatten Operator validity mask band
+853	CLOSED	[Processing/Hydrology] Undefined Behavior via out-of-range float-to-int casts in D8 flow direction testing
+852	CLOSED	[Concurrency/DataManager] Temporal workspace off-affinity cross-thread reads and torn snapshots on DataManager
+851	CLOSED	[Concurrency/TaskCenter] TaskCenter::flushPendingLaunches self-deadlock on in-flight cancellation
+850	CLOSED	[Geospatial/Vector] VectorWriter move operations drop mTransactionActive, silently rolling back GeoPackage outputs
+849	CLOSED	[Workbench/Selection] Heap Use-After-Free in SelectionContext::computeSnapshot address reuse logic
+848	CLOSED	[Processing/Hydrology] TerrainFlow::fillDepressions silently fails to fill any depressions on rasters with NoData borders
+817	CLOSED	[P3][tests] Tests verify count and seed, omitting block isolation check
+816	CLOSED	[P3][tests] Complete lack of tests for readBlock & iterateTiles
+815	CLOSED	[P3][cartography] Design token resolution lacks multi-hop recursion
+814	CLOSED	[P2][tests] Assertions test JSON non-null rather than numerical tolerances
+813	CLOSED	[P2][workbench] ExternalWindowWorkbench adapters lack getters & dirty hooks
+812	CLOSED	[P2][workbench] tabs->currentChanged signal never connected
+811	CLOSED	[P2][concurrency] loadRunLocked runs validation outside SQLite transaction
+810	CLOSED	[P2][geospatial] isCredentialQueryKey omits common keys (auth, bearer)
+809	CLOSED	[P2][geospatial] Remote GDALOpenEx probe lacks HTTP timeout configuration
+808	CLOSED	[P2][geospatial] readWindow lacks memory budget check (maxBytes)
+807	CLOSED	[P2][geospatial] POSIX publishStagedFile uses raw ::rename()
+806	CLOSED	[P2][tests] Synthetic test data inverts physical radiance (L propto cos(i)^-0.5)
+805	CLOSED	[P2][cartography] Constraint solver single-pass linear order dependency
+804	CLOSED	[P2][cartography] Condition AST short-circuit evaluation swallows syntax errors
+803	CLOSED	[P2][scientific] Multi-band speckle reuses Band 1 NoData sentinel
+802	CLOSED	[P2][cartography] Condition pruning requires redundant condition_context
+801	CLOSED	[P2][scientific] Block-level scale heuristic causes tile-boundary seams
+800	CLOSED	[P1][concurrency] DataManager const accessors lack thread affinity checks
+799	CLOSED	[P1][concurrency] Race between submit() and m_taskByJobId registration
+798	CLOSED	[P1][concurrency] Worker thread pool deadlock on synchronous sub-jobs
+797	CLOSED	[P1][concurrency] Unbounded GDAL operations on global thread pool
+796	CLOSED	[P1][tests] Synchronous test omits multi-threaded rendering race
+795	CLOSED	[P1][tests] Conflict test only inspects main_window_menus.cpp
+794	CLOSED	[P1][tests] Test suite never tests action(..., installShortcut=true)
+793	CLOSED	[P1][workbench] refreshCanvasLayers reads global project checked layers
+792	CLOSED	[P1][workbench] m_shortcutOwner single-string check aborts process
+791	CLOSED	[P1][geospatial] publishStagedGroup omits targetMainPath from backup
+790	CLOSED	[P1][geospatial] readBlock returns truncated vector on edge blocks
+789	CLOSED	[P1][geospatial] Export boundary bypasses filterSecrets on environment
+788	CLOSED	[P1][dataset] assignByRatio assigns remainders and singletons to Test
+787	CLOSED	[P1][dataset] Negative coordinate truncation breaks spatial cell hashing
+786	CLOSED	[P1][dataset] SpatialBuffer includes excluded samples in remaining
+785	CLOSED	[P1][scientific] Flight heading used as antenna look azimuth (90-deg orthogonal error)
+784	CLOSED	[P1][cartography] Global anyGateClosed flag contaminates parallel branches
+783	CLOSED	[P1][scientific] Flow accumulation corrupts DEM NoData into 1.0f ridges
+782	CLOSED	[P1][cartography] QgsRuleBasedRenderer inverts rule hierarchy into nested tree
+781	CLOSED	[P1][cartography] Constraint solver discards single-item fit_content
+780	CLOSED	[P0][tests] test_inspector_host stops after unsupported snapshot, omitting re-selection
+779	CLOSED	[P0][workbench] Layer destroyed without stopping active canvas rendering
+778	CLOSED	[P0][workbench] Raw pointers to canvas & deleted layers in 150ms snapshot
+777	CLOSED	[P0][workbench] InspectorHost::rebuildTabs destroys InspectorSection via delete oldTabs (UAF)
+776	CLOSED	[P0][geospatial] Cleartext token & non-HTTP credential leakage in display()
+775	CLOSED	[P0][dataset] SpatialBlock splits samples internally within each block
+774	CLOSED	[P0][dataset] deleteDataset begins transaction but never calls commit()
+773	CLOSED	[P0][scientific] Minnaert log-log regression slope inversion (k = -m)
+760	CLOSED	[P3][docs] PROJECT.md describes the stale #708-#712 sprint as current and contradicts the actual worktree state (2 worktrees, not 0)
+759	CLOSED	[P3][temporal] rs:temporal_breakpoints RMSE denominator counts NaN samples — understated RMSE for gapped series
+758	CLOSED	[P3][governance] Store hardening bundle — unchecked step()/COMMIT writers, alias-steal asymmetry, summary counts clamp at page size, N+1 prepares, pool eviction vs shared objects, bidirectional lineage deletion, const_cast UB
+757	CLOSED	[P2][mcp/plugins] Plugin external-tool operators escape the SICNU_MCP_WORKSPACE sandbox via manifest constants (working_directory / env / argv outputs)
+756	CLOSED	[P2][sdk/security] Manifest entrypoint escapes the plugin directory — ../ passes validation and dlopens any library on the filesystem (validation→load TOCTOU)
+755	CLOSED	[P2][plugins] Enable-after-disable never restores the plugin; py: algorithms are never unregistered on unload
+754	CLOSED	[P2][governance] Runs table fabricates state="Completed" for every run — failed/interrupted runs reported Completed by summary/search/bundle
+753	CLOSED	[P2][governance] ImportCenter cancel() is ignored during the registration phase — a cancelled scan keeps registering everything
+752	CLOSED	[P2][governance] fromProjectJson swallows every store failure — read-only (newer-schema) or closed store restores nothing, silently
+751	CLOSED	[P2][governance] SnapshotService's WAL checkpoint is a no-op — snapshots copy a hot WAL-mode DB and lose recent governed writes
+750	CLOSED	[P2][workflow] Crash-resume trusts any non-empty file at a Completed step's recorded path — no identity check against what the step produced
+749	CLOSED	[P2][cache] Out-of-band content replacement of a registered (non-chained) input can never invalidate an execution-cache entry — stale bytes served as cache:hit
+748	CLOSED	[P1][build] sicnu_sdk cannot compile on the MSVC/Windows target CI Tier 3 claims to verify — POSIX headers/APIs unguarded
+747	CLOSED	[P1][plugins] Native plugin unload lifecycle is unsafe — dock/menu UAF after dlclose, no execution quiescence, GUI-exit ordering
+746	CLOSED	[P1][governance] Corrupt/unopenable governance DB silently downgrades a v3 project to v1 on next save — governed state permanently lost; cached JSON also bleeds across projects
+730	CLOSED	[Bug][tests] Medium: master suite is red — 16/2147 failures with the documented command: 14 embedded-Python tests broken by environment (encodings module / libxml2 preload conflict), QSS stress test segfaults at exit via fcitx5 input-context teardown, plus the AgentToolCatalog regression
+729	CLOSED	[Bug][agent] Medium: the 5 temporal:* tool schemas lack "type":"object" (invalid OpenAI/MCP exports — AgentToolCatalog test red on master), temporal:register_collection silently drops the per-scene bands/mask_band/quality_band it advertises, and the drift gate cannot pin the regenerated 6-sidecar state
+728	CLOSED	[Bug][temporal] Medium: STAC/remote-COG bundle — range end-date inclusivity is dead code (last day silently dropped), ingested https hrefs can never bind to /vsicurl-canonical assets (scenes_bound=0, silently), signed/query-string COGs are rejected outright, malformed range bounds silently open the filter, 6-significant-digit property round-trip breaks numeric filters, remote GDALOpen blocks the GUI thread during project restore
+727	CLOSED	[Bug][workflow] High: crash-resume — out-of-order definitions lose parent edges on resume, resume resolver is port-blind, cross-boundary lineage still lands in unresolvedInputPaths (the gap #725 claimed to close), checkpoint-served provenance records are silently empty, --list-runs mutates live runs
+726	CLOSED	[Bug][workflow] High: execution-cache identity — value-based destination exclusion collides fingerprints (cached bytes overwrite an undeclared file), remote inputs escape identity instead of failing conservative, per-run revision bumps never let chained steps converge, GC reaps cache-served intermediates
+721	CLOSED	[Bug][gui] Medium: layout designer runtime bundle — property panel stays bound to a deleted item (destroyed() handler defeated by the same-selection guard), raster-export preflight checks page 0 only, snap-setting lambdas capture a snapper that dangles after layout:load_project, autoArrange double-records the legend with created=false
+720	CLOSED	[Bug][workflow] Medium: platform bundle — resumeRun swap loses terminal transitions in the window (run stranded Running / ghost Interrupted), ExecutionResultCache::clear() skips the path store, removeWatch wired nowhere (watch leak unfixed), markTaskFailed lost PR #709's own-job cancel, change-streaming ±inf NoData branch is a no-op
+719	CLOSED	[Bug][temporal] Medium: multi-temporal bundle — scene removal deletes the wrong rows, best_pixel quality band rescaled with the analysis band's scale/offset, anomaly sceneCount never emitted, grouped composites never auto-load, point-extract QA fail-open, duplicate_policy coerced, preflight uniform flag frozen early
+718	CLOSED	[Bug][data] Medium: input-lineage resolution regressed the #698 review fixes — canonical (symlink-resolving) matching dropped and the param scan narrowed to "input"-keyed keys only
+717	CLOSED	[Bug][agent] High: layout:set_item_properties feeds unvalidated inner JSON to mutators between beginMacro/endMacro — one wrong-typed value throws Json::LogicError and permanently wedges the layout undo stack
+716	CLOSED	[Perf][operators] High: rs:spectral_index and rs:qa_mask were reverted to full-raster materialization but still declare memoryPolicy=Streaming — preflight/agent filters pass them as large-raster-safe and admission charges 32 MiB for GB-scale runs
+715	CLOSED	[Bug][operators] High: streaming rs:majority_filter lost the #700 "NoData center stays NoData" rule — grows classes into NoData and disagrees with the reference kernel while stamped bit-exact
+714	CLOSED	[Bug][layout] Critical: qgslayoutdesignerdialog.cpp (PR #710) has four ill-formed constructs — sicnu_geo_rs, test_layout_designer and test_w9_regressions cannot build from a clean tree
+713	CLOSED	[Bug][build] Critical: master does not compile — PR #711's squash-merge dropped the #661 JobEngine pool-sizing API while keeping the test that references it (also re-opens #686)
+707	CLOSED	[Architecture][metadata] Low: algorithm capability metadata lives in four overlapping hand-maintained surfaces (~3% sidecar coverage) with demonstrated drift — consolidate on AlgorithmDescriptor as the single source of truth
+706	CLOSED	[Build][tests] Low: build/test hygiene bundle — dead .clang-tidy (never run anywhere), duplicate ENABLE_LTO option, unregistered python-bindings test, no per-test TIMEOUT on perf benches, dead CTestCustom.cmake, README test-count drift, pi/ has zero tests
+705	CLOSED	[Bug][models] Low: model-system nits bundle — tensor_names/classes parsed but unenforced, list_models can't rank by band roles / defaults gpu_available=false, dtype check band-1-only, all-nodata tiles run full forward passes, README normalize example numerically inconsistent
+704	CLOSED	[Bug][gui] Low: GUI nits bundle — batch dialog closes mid-run, copilot stop can be overridden by a stale follow-up, no cancel affordance on task/classification surfaces, progress/status counters, job-panel detail rebuild, DataManagerPanel O(N²) refresh, ROI polygon O(V·px) test
+703	CLOSED	[Bug][data] Low: data-layer nits bundle — inactive leases block unload/reap, duplicate collection children, import drops band roles/wavelengths, staging-file orphan, rollback diagnostics discarded, undocumented read-affinity contract
+702	CLOSED	[Bug][taskcenter] Low: TaskCenter/jobs nits bundle — retry detaches pipeline steps, pause fabricates Paused, markTaskCanceled skips the root job, unlocked DataManager read, pool-sizing semantics, checkpoint JSON validation, watch registrations leak
+701	CLOSED	[Bug][mcp] Low: harness nits bundle — forced vector feature-count scan, 4 MiB guard after getline, LLM partial tool-call emission, schema dialect drift, frozen provider snapshot, approximate-stats flag, protocol edges, uncapped results, model-catalog rescan
+700	CLOSED	[Bug][algorithms] Low: spectral/change/fusion/terrain correctness nits bundle — unary-minus precedence, TRI formula, ratio sign, percentile bins, majority NoData, area units, mosaic snap, Brovey divergence, continuum order, OBIA zero-fill
+699	CLOSED	[Bug][algorithms] Low: radiometric/import correctness nits bundle — L7 VCID coefficient mismatch, ambiguous MTL autodetect, legacy NoData sentinel, QGIS wrapper band-1=B1 pinning, partial stack outputs, QA NaN cast
+698	CLOSED	[Bug][data] Medium: derivation records carry no input lineage — provenance graph is empty at its most-used edge (all agent/tool-call outputs)
+697	CLOSED	[Architecture][workflow] Medium: the entire Workflow v2 checkpoint / recovery / artifact-GC subsystem has zero production callers — crash mid-workflow still loses all run state
+696	CLOSED	[Bug][gui] Medium: dialog cancel re-enables Run immediately while the executor may still be writing the output — concurrent runs can target the same output file
+695	CLOSED	[Bug][processing] Medium: ProviderAlgorithmAdapter/AtomicAlgorithmRegistry cache raw QgsProcessingAlgorithm* owned by the QGIS provider — use-after-free on provider removal/refresh
+694	CLOSED	[Bug][operators] Medium: hand-rolled GDAL warp error paths — runGdalWarpOnDataset catch double-closes a freed dataset and deletes the good output; orthorectification operator leaves partial outputs and skips the cancel check
+693	CLOSED	[Bug][operators] Medium: operator-level OTB runner has no watchdog, no grace ladder, no partial-output cleanup — #618 fixed the provider wrappers only
+692	CLOSED	[Perf][operators] Medium: nested parallelism — ChunkedProcessor fans onto the global QThreadPool from JobEngine workers and OpenCV internal threads are never capped (up to 4×oversubscription, render starvation)
+691	CLOSED	[Perf][operators] High: large-raster memory blowout bundle #2 — OpenCV operator base, SAM change primitives, and enhancement/speckle dialogs materialize full-frame float stacks; IntegralImage indexes overflow int32
+690	CLOSED	[Bug][models] Medium: model output tensor depth never validated — int32/int64 argmax heads are type-punned into float32 garbage with no error
+689	CLOSED	[Bug][models] Medium: rs:infer memory estimate sizes the read window, not the fed tensor — resize-to-input models underestimate RAM by orders of magnitude; artifact weights uncounted unless declared
+688	CLOSED	[Bug][mcp] Medium: data:list_layers / data:describe_dataset always return empty in MCP mode — the agent cannot discover committed assets (verified live)
+687	CLOSED	[Bug][data] Medium: re-commit over an already-registered stable path replaces bytes and provenance without a revision bump or assetChanged — display layers never refresh and leases survive on stale revisions
+686	CLOSED	[Bug][taskcenter] Medium: JobEngine clamps workers to 2-4 while TaskCenter admits hw-1 concurrent tasks — Running status lies, priority order is undone, and the RAM budget is spent on queued tasks
+685	CLOSED	[Bug][taskcenter] Medium: retryTask of a cascade-canceled pipeline step strands the retry in Queued forever (canceled parent never satisfies)
+684	CLOSED	[Bug][taskcenter] Medium: scheduling paths ignore m_isShuttingDown and JobEngine::submit resurrects worker threads after shutdown — threads spawned during process teardown
+683	CLOSED	[Bug][taskcenter] Medium: submitJobImpl lacks the cancel-during-submit recheck — a task canceled while the engine submit is in flight keeps running to completion
+682	CLOSED	[Bug][ml] Medium: rs:kmeans and rs:obia_classify skip feature standardization — operator results diverge from the GUI path and RBF-SVM gamma tuned for z-scored inputs collapses on DN-scale features
+681	CLOSED	[Bug][ml] Medium: streaming PPI endmember selection includes NoData/NaN pixels — diverges from the kernel it documents itself as reproducing
+680	CLOSED	[Bug][algorithms] Medium: EVI/SAVI additive constants assume reflectance in [0,1] but the platform's own S2/Landsat L2 import path keeps the 0-10000 DN scale — SAVI silently degenerates to 1.5·NDVI
+679	CLOSED	[Bug][algorithms] Medium: cva_angle / sam / log_ratio / irmad change primitives read declared-NoData sentinels as valid observations
+678	CLOSED	[Bug][algorithms] Medium: "Lee" speckle filter implements Kuan's weighting — Lee and Kuan produce bit-identical output
+677	CLOSED	[Bug][algorithms] Medium: linear fusion accepts an msWeights array shorter than the band count — QVector operator[] out-of-bounds (crash or garbage weights)
+676	CLOSED	[Bug][algorithms] Medium: product import silently drops unavailable requested bands and reports the requested bandCount — index operators then compute on shifted bands
+675	CLOSED	[Bug][algorithms] Medium: QUAC streaming output declares band-1 NoData as the *source* sentinel while invalid pixels are written as NaN — dark valid pixels collide with NoData=0
+674	CLOSED	[Bug][gui] High: algorithm results load 2-3 duplicate layers per run — three independent auto-loaders with no single owner or dedup
+673	CLOSED	[Bug][algorithms] High: Landsat 4-7 imports are stamped with OLI (L8/9) center wavelengths — TM/ETM+ bands mislabeled by up to ~800 nm
+672	CLOSED	[Bug][algorithms] High: rs:atmospheric_correction dn_to_radiance passes DN through as "radiance" when metadata lacks RADIANCE_MULT (hasRadiance not checked)
+671	CLOSED	[Bug][models] High: rs:infer feeds 2-band or ≥5-band rasters into cv::dnn::blobFromImage(s), which asserts on anything but 1/3/4 channels — multispectral inference impossible, failure escapes as raw cv::Exception
+670	CLOSED	[Bug][algorithms] High: Jacobi eigensolver capped at 200 total rotations — PCA/MNF silently wrong for more than ~15 bands
+669	CLOSED	[Bug][pi] Critical: MCP bridge respawn after a child crash forks children in an unbounded loop (exited flag never reset in start())
+668	CLOSED	Production checkpoint recovery and ArtifactGC for pipeline runs
+667	CLOSED	End-to-end incremental cache hits for production pipeline resubmission
+666	CLOSED	Stream rs:majority_filter with halo-overlap block reads
+665	CLOSED	Stream rs:qa_mask and rs:recode from full-raster to block-streamed execution
+664	CLOSED	Stream rs:spectral_index from full-raster to block-streamed execution
+663	CLOSED	Consume rs:obia_* operators from the OBIA GUI instead of direct analysis calls
+662	CLOSED	Drive production pipeline execution with the Workflow Engine 2.0 orchestrator (integration for #589)
+661	CLOSED	JobEngine worker pool follows Resource Throttler concurrency cap
+660	CLOSED	Performance benchmark harness with baseline capture (headless)
+659	CLOSED	Per-operator determinism grade in operator schemas (ADR 0124)
+658	CLOSED	[hygiene] Low: stale audit planning artifacts tracked at repo root (findings.md, task_plan.md, progress.md, REVIEW_FINDINGS_B.md, HANDOFF.md, skills-lock.json)
+657	CLOSED	[build] Low: hygiene - PUBLIC SICNU_SOURCE_DIR machine-path leak; tests/CMakeLists 240 hand-rolled targets + 15 duplicated jsoncpp blocks
+656	CLOSED	[tests] Low: test-quality bundle - REQUIRE(true) x2, swipe tool 5 stack QApplications + shape-only missing fixture, histogram silent skip, /dev/shm vacuous on Windows + env leak
+655	CLOSED	[app] Low: OBIA importRoiLabels opens the raster dataset once per ROI feature on the GUI thread
+654	CLOSED	[algorithms] Low: correctness nits - brightness-temperature identity guard, streaming writer georef failure invisible, GDAL error handler out-of-LIFO, dead percentile helpers
+653	CLOSED	[build] Medium: LIBRARY-only install rules skip Windows DLLs for sicnu_processing/workflow/operators/plugins
+652	CLOSED	[build] Medium: ODR violations - rs_operator_context/error.cpp TUs in two SHARED libs; sicnu_app_interface.cpp in SHARED core + 2 executables (#573 class resurfaced)
+651	CLOSED	[stubs] Medium: QsciScintilla stub editing contracts broken while ToggleComment/insertText are live (insertAt appends at end, remove no-op, replaceSelectedText clobbers buffer)
+650	CLOSED	[app/gui] Medium: lifetime bundle - OBIA WaitCursor leak, app-exit feedback UAF, GCP pick leak, moveToThread UB, georef 5s busy-wait
+649	CLOSED	[python] Medium: proxy drain spin + UTF-8 carryover corruption; py:job 300s nested QEventLoop on GUI thread; unbounded sync wait (#624 residual)
+648	CLOSED	[performance] Medium: #631 deferred items never landed - connectedComponentFilter 12 B/px union-find, OBIA full-scene feature buffers
+647	CLOSED	[operators] Medium: runtime robustness bundle - jsoncpp LogicError escape, OTB no deadline + truncated output left, streaming writers leave partial outputs, CLI params misreported, estimates under-declared
+646	CLOSED	[model-runtime] Medium: manifest v2 fields parsed but never enforced/validated - nodata_policy, normalize values, scale-vs-normalize, tiling bounds, band_roles at inference, output/postprocess contracts, VRAM demotion, rank tie-break
+645	CLOSED	[pi] Medium: bridge abort never cancels server-side work; isError drops errorCode/errorCategory; extension reload leaks child + duplicate exit listeners (#623 residual)
+644	CLOSED	[agent/mcp] Low: MCP harness nits bundle - string-id cancellation, id:null response, Canceled-run pruning, error-code taxonomy drift, vector_inspect extent scan, describe_dataset drift, dead AgentRunCoordinator
+643	CLOSED	[agent] Medium: tool listing order non-deterministic for algorithms+spatial; tools/list unpaginated with full schemas (~216 tools); 4 overlapping discovery surfaces
+642	CLOSED	[agent] High: copilot plan-approval and rejected tool calls never re-enter the LLM loop; message history amnesia; unbounded payloads (#621 residual)
+641	CLOSED	[agent] High: data:* tools listed twice in the unified catalog (registry derivation + DataToolProvider) - duplicate OpenAI tool names
+640	CLOSED	[agent/mcp] High: run_workflow and preflight_algorithm bypass the SICNU_MCP_WORKSPACE sandbox; zero sandbox regression tests
+639	CLOSED	[data] Medium: execution fingerprint V2 framing still delimiter-injectable - false incremental-cache hits (#583 fixed V1 only)
+638	CLOSED	[jobs/taskcenter] High: #634 log-delta notify record omits id and breaks the slice-delta protocol - operator logs silently dropped
+637	CLOSED	[data] High: virtual-raster provider silently corrupts georeferencing/NoData via 6-significant-digit QString::arg; unchecked VRT dimension int cast (#633 incomplete); WKT-string CRS compare
+636	CLOSED	[data] High: DataManager unload family - unloadCollection stale-iterator UAF across assetAboutToUnload re-entrancy, non-cascade lease bypass, lease-release TOCTOU
+635	CLOSED	[model-runtime] Critical: rs:infer swaps R/B channels for every >=3-band raster (blobFromImage default swapRB=true) - silent wrong predictions
+634	CLOSED	[audit] Low: minor findings bundle — CLI duplicate step ids, JobEngine per-callback record copies, fingerprint canonicalization deviations, AlgorithmEngine unsynchronized provider map, agent dead code, stubs/plugins nits, macOS NSImage leaks, Windows scratch-path cleanup
+633	CLOSED	[data/processing] Medium: VRT target dimensions unchecked int truncation (silent wrong-size raster); gdal wrapper foot-guns (readBandData trusts caller buffer, error-handler nesting, unchecked setters, escapeXml misses quotes)
+632	CLOSED	[operators] Medium: model manifest input.dtype never enforced at inference; QUAC is a percentile approximation hard-clipped to [0,1]; spectral resampling ignores SRF/FWHM; continuum removal mixes index/nm scales
+631	CLOSED	[performance] High: large-raster memory blowout bundle — QUAC/satellite-import/band_math_algorithm/OBIA-features/SIFT full-scene buffers; connectedComponentFilter 12 B/px; raster_ndvi silent write failure; extent clip truncation
+630	CLOSED	[tests] High: MCP "executes algorithms" test never creates its input, uses an invalid expression, and accepts failure (zero real coverage); workspace-containment regression test cannot detect containment removal
+629	CLOSED	[platform/build] Medium: Windows USB notification emits doubled drive separator ("A:/:/"); --allow-shlib-undefined breaks macOS sanitizer builds; misc build hygiene
+628	CLOSED	[core] High: local fix for dangling QgsProcessingContext in runner task silently drops "load output layers" for async/batch algorithms
+627	CLOSED	[app] Medium: processing dialogs block close during run but wire no cancel/progress; legacy TaskCenterDock rebuilds tree per update (drops selection); dead hazardous widgets compiled
+626	CLOSED	[app] High: georeferencing close deletes a warp task that may still be running (UAF); OBIA cancel deletes RsObiaTask with no cancellation checks inside run() (UAF); in-flight tasks leak when windows close
+625	CLOSED	[app] Critical: ROI statistics reads the full raster and runs a per-pixel GEOS predicate on the GUI thread (no cancel, re-entrant); plus three more GUI-thread full-scan freezes
+624	CLOSED	[python] High: UTF-8 split at recv boundary kills the worker daemon; sendRequestSync runs a 5-minute nested event loop on the GUI thread (doc/impl mismatch); crash-backoff msleep freezes GUI up to 10s; callback iterator UB
+623	CLOSED	[pi] Medium: bridge leaks children on extension reload (stop() dead code), never respawns after child death, drops error.data taxonomy, abort never cancels server-side work; knowledge guide references non-existent algorithms
+622	CLOSED	[agent] Medium: catalog omits ~10 dispatchable interaction tools and duplicates registry schemas; tools/list lacks pagination/compact mode; main-thread blocking dispatch; notifications/cancelled unhandled; misc defects
+621	CLOSED	[agent] High: copilot interaction-tool results never sent back to the LLM (tool loop dead-ends); conversation history drops completed tool exchanges
+620	CLOSED	[agent] High: MCP tool failures returned as JSON-RPC protocol errors instead of isError tool results; unknown tool uses -32601; spatial tools bypass workspace sandbox; vector_inspect max_features unbounded
+619	CLOSED	[processing] Medium: jsoncpp asInt()/asInt64() on out-of-range JSON uints throws Json::LogicError inside TaskCenter parameter conversion (agent-reachable)
+618	CLOSED	[providers] Medium: external CLI tools have no timeout, cancel SIGKILLs without grace, and CrashExit is classified as success ("output file is missing")
+617	CLOSED	[processing] Medium: OutputCommitter::commit destroys the previous stable output when a re-commit fails midway (rollback deletes the last good copy); partial outputs left on failure paths across native kernels
+616	CLOSED	[taskcenter] Medium: retryTask double-submits non-terminal tasks; pause/resume call QgsTask hold()/unhold() cross-thread under mutex; log-forwarding delta check-then-act duplicates lines
+615	CLOSED	[data] High: DataManager::reap() stale-iterator/UAF across assetAboutToUnload re-entrancy (same family as DATAPY-7 fixed in unload()); createVirtualRaster end() deref; lease-release thread trap; restoreVirtualRaster scratch check
+614	CLOSED	[workflow] High: WorkflowRuntime fallback silently re-runs failed/timed-out plane tasks (double execution); WorkflowSession mutex regression of #503; misc session/runtime hardening
+613	CLOSED	[algorithms] High: band-math parser unbounded recursion (stack overflow DoS), band-literal int overflow UB, malformed numerics silently become NaN constants; Landsat L2 SR_/ST_ wavelength metadata lost
+612	CLOSED	[algorithms] Medium: terrain analysis silently wrong on geographic (degree) DEMs; threshold_raster marks source-NoData as "clear"; majority filter caps at 64 labels and lets NoData vote; apply_mask narrows all pixels through float32
+611	CLOSED	[algorithms] High: PCA fusion lacks PC1 sign convention (possible inverted sharpening); Brovey accepts negative band sums; IHS band indices 0-based in a 1-based framework
+610	CLOSED	[algorithms] Critical: DOS1/DOS2 output is haze-corrected radiance but labeled/registered as surface reflectance; Landsat TOA silently skips sun-angle normalization; brightness temperature writes 0 K
+609	CLOSED	[build] High: artifact_gc.cpp in sicnu_processing references sicnu_workflow symbols — executables linking only libsicnu_processing.so fail to link; sicnu_workflow install rule missing
+606	CLOSED	[Workflow Engine v2] High: runStepViaExecutionPlane preflight aborts when called from a worker thread (QgsApplication members created off main thread)
+605	CLOSED	[Workflow Engine v2] Low: ArtifactGC inspect-then-delete TOCTOU against concurrent cache-hit readers
+604	CLOSED	[Workflow Engine v2] Medium: Descendants stranded in Cancelling forever when JobEngine::cancel returns false
+603	CLOSED	[Workflow Engine v2] Low: TaggedDerivationInput defaulted fields let forgotten inputs produce colliding fingerprints (false cache hits)
+602	CLOSED	[Workflow Engine v2] Medium: WorkflowRun aggregate is fully unsynchronized - checkpoint saves will snapshot torn state once the orchestrator is wired
+601	CLOSED	[Workflow Engine v2] Medium: applyPlaceholdersForTask deep-copies the parameter tree and re-serializes JSON on every scheduling pass
+600	CLOSED	[Workflow Engine v2] Medium: Transitive-descendant fixpoint scan is O(V^2) and now runs under the TaskCenter mutex on every failure/cancel
+599	CLOSED	[Workflow Engine v2] Low: taskHandle->cancel() invoked from JobEngine worker threads on main-thread QgsTask objects
+598	CLOSED	[Workflow Engine v2] Medium: Recovery forces run to Interrupted but leaves step plans in Running without reconciliation
+597	CLOSED	[Workflow Engine v2] Medium: Pipeline fail-fast mislabels in-flight sibling steps as failed in PipelineResult
+596	CLOSED	[Workflow Engine v2] Low: Lint Findings Bundle - 56 Mechanical Items Across Changed Files (HDR-3, DEP-11, PAT-7, LCY-5, DEP-10, PAT-12, VAR-3, API-5, ERR-1)
+595	CLOSED	[Workflow Engine v2] High: Silent Regression-Coverage Loss from 19 Deleted Legacy Test Files
