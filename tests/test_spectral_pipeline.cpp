@@ -383,7 +383,7 @@ TEST_CASE("rs:mnf transformOut drives rs:mnf_inverse end to end",
         // Take pixel (0,0) from the component raster as the MNF-space input.
         GdalDatasetWrapper compDs;
         REQUIRE(compDs.open(QString::fromStdString(mnfResult["output"].asString())));
-        std::vector<float> row0(6, 0.0f);
+        std::vector<float> row0(static_cast<size_t>(6) * 5, 0.0f);
         REQUIRE(compDs.readBandData(1, row0.data(), 6, 5));
 
         SpectralTable::Table spectrumIn;
@@ -433,6 +433,7 @@ TEST_CASE("rs:mnf transformOut drives rs:mnf_inverse end to end",
         (void)mnfOp->run(mnf2, ctx);
 
         inv["transform"] = dir.filePath("transform2.json").toStdString();
+        inv["input"] = dir.filePath("components2.tif").toStdString(); // 2 bands
         Json::Value comps(Json::arrayValue);
         comps.append(0);
         comps.append(1);

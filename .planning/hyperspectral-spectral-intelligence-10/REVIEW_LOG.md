@@ -27,6 +27,14 @@ finding was verified in code by the main agent before disposition.
 | B-P3-C4 | P3 | tests | MNF digest did not cover snr/noiseEigenvalues/wavelengths (tamperable) | fixed | digest extended over all persisted numeric fields |
 | B-P3-A6/A7/A8, B2, B3, C5 | P3 | misc | estimate understatement; redundant digest recomputation; unchecked artifact write; Jacobi cancellation gap; artifact namespace pollution; >256 near-dup path untested | accepted with reasons | estimates corrected (A6); artifact write checked (A7b); digest recomputation accepted (bounded, k<=O(100) spectra typical); Jacobi hook accepted (pure compute, no context dependency; worst case minutes only at the 1024-band cap); namespace pollution accepted (bounded per-operator payload keys); >256 skip is reported to callers |
 
+## Phase 7 follow-up findings (main-agent, MALLOC_CHECK_ + control experiment)
+
+| ID | Sev | Area | Finding | Disposition | Evidence |
+|---|---|---|---|---|---|
+| M-1 | P1 | tests | test_spectral_pipeline MNF E2E allocated 6 floats for a 6x5 readBandData buffer — heap overrun surfaced as "malloc(): unaligned tcache chunk" (crash in the next heavy malloc, QCryptographicHash/OpenSSL — classic deferred-manifestation) | fixed | row0 buffer sized 6*5; suite green 188 assertions; found via MALLOC_CHECK_=3 ("free(): invalid next size") |
+| M-2 | P2 | tests | MNF E2E subset-refusal case pointed `input` at the 4-band raster instead of the 2-band one, so the P2-1 refusal never fired (test passed vacuously BEFORE the assertion was exercised) | fixed | input re-pointed to components2.tif; refusal asserts |
+| OUT-1 | P1 (out of scope) | fused chain | test_fused_chain "fused NDVI→threshold bit-identical" case SIGSEGVs deterministically (3/3, exit 139): ChangeDetection::changeMask unconditional SICNU_LOG_INFO -> QgsApplication::members() -> QgsSettings -> QLibraryInfo -> applicationFilePath crashes under QCoreApplication-only fixtures on the GCC-16 host | recorded, NOT fixed (out of scope) | CONTROL EXPERIMENT: pristine master (main/build-dev, zero track changes) reproduces identically (exit 139, 3\|2 passed\|1 failed). Files in the crash chain (change_detection.cpp, rs_change_streaming.cpp, test_fused_chain.cpp) are untouched by this track. Belongs to the execution/change-detection families. |
+
 ## Verdicts (subagent A, main-agent concurrence)
 
 1. Inverse-MNF roundtrip identity: HOLDS (UsUsᵀ=I composition; 1e-5 relative pinned incl. 256 bands).
