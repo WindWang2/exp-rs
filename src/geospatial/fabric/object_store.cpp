@@ -229,6 +229,10 @@ std::string fabricCachedPath( const std::string &fetchablePath )
 {
   if ( !RemoteRangeCache::installed() )
     return fetchablePath;
+  // The cache handler serves REMOTE resources only — a local path through
+  // /vsirangecache/ would be a typed error at open. Local stays local.
+  if ( !ResourceUri::parse( fetchablePath ).isRemote() )
+    return fetchablePath;
   return RemoteRangeCache::cachedPath( fetchablePath );
 }
 

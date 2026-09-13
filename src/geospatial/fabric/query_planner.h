@@ -121,6 +121,9 @@ class FabricPlan
     Json::Value toJson() const;
 
     const std::vector<FabricPlanStage> &stages() const { return mStages; }
+    /// The intent the plan was built from (execution budget + window live
+    /// here; execution reads them).
+    const FabricIntent &intent() const { return mIntent; }
     const FabricPlanCost &cost() const { return mCost; }
     const std::vector<AssetRecord> &selectedAssets() const { return mSelected; }
     const VirtualCubeGrid &grid() const { return mGrid; }
@@ -148,6 +151,9 @@ struct FabricPlanOptions
 {
     CatalogServiceOptions catalog;   ///< walk/network bounds
     int gridProbeLimit = 256;        ///< metadata opens for grid negotiation
+    int identityProbeLimit = 64;     ///< identity probes for cacheability
+                                     ///< cost facts (assets beyond stay
+                                     ///< uncounted — the estimate says so)
 };
 
 /// Runs the plan stages through chunk_planning. Throws GeoError for

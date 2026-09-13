@@ -81,6 +81,8 @@ struct MirrorReport
     std::uint64_t bytesWritten = 0;
     std::uint64_t mirrored = 0, alreadyPresent = 0, skippedUnprovable = 0;
     std::uint64_t skippedBudget = 0, skippedCancel = 0, failed = 0;
+    bool budgetStopped = false;   ///< the pass ended on the byte budget
+    bool cancelled = false;       ///< the pass ended on cancel
 
     Json::Value toJson() const;
 };

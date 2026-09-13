@@ -162,6 +162,18 @@ struct VirtualCubeAssetIndexEntry
     std::string epsgAuthid;       ///< "EPSG:xxxx" when the asset declares one
 };
 
+/// Maps a world extent onto an asset's pixel window (north-up grids),
+/// clamped to the raster. `ok=false` when the extent misses the raster.
+/// The ONE mapping rule shared by the cube read path, prefetch, mirror and
+/// the planner — drift here would mean prefetching the wrong bytes.
+struct VirtualCubeSourceWindow
+{
+    bool ok = false;
+    RasterWindow window;
+};
+VirtualCubeSourceWindow virtualCubeSourceWindow( const RasterMetadata &metadata, double minX,
+                                                 double minY, double maxX, double maxY );
+
 class VirtualCube
 {
   public:

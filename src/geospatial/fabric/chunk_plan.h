@@ -108,6 +108,7 @@ struct CubeChunkDim
 
 class CubeChunkPlan
 {
+  friend class FabricPlan;   // plans embed a chunk plan (private ctor)
   public:
     /// Plans the EO cube (time/y/x/band). The virtual cube's selection
     /// order IS the time dimension (each asset = one time step; undated
@@ -119,8 +120,9 @@ class CubeChunkPlan
 
     /// Plans a multidim descriptor (its own dimension names; the time axis
     /// is the TEMPORAL-typed axis or an axis named "time"; the two trailing
-    /// dims map to y/x). Band = single variable (band count 1) unless the
-    /// descriptor declares a band-ish axis.
+    /// dims map to y/x). A non-default CubeSlice is a typed refusal here —
+    /// slice narrowing for multidim stores is a follow-up (EO cubes carry
+    /// it in 10.0).
     static CubeChunkPlan forMultidimDescriptor( const MultidimCubeDescriptor &descriptor,
                                                 const CubeChunkShape &shape,
                                                 const CubeSlice &slice = {} );
@@ -128,6 +130,8 @@ class CubeChunkPlan
     const std::vector<CubeChunkDim> &dims() const { return mDims; }
     /// Total logical chunks (u64 product; overflow refused at plan time).
     std::uint64_t chunkCountTotal() const { return mChunkCountTotal; }
+    /// EO-cube plan (vs multidim descriptor plan).
+    bool isEo() const { return mIsEo; }
     /// Whether a time slice actually narrowed the time dim (honest stats).
     bool timeSliced() const { return mTimeSliced; }
     bool spatialSliced() const { return mSpatialSliced; }

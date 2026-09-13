@@ -1,0 +1,568 @@
+/***************************************************************************
+  geospatial/fabric/query_planner.cpp — bounded, inspectable, executable
+  query plans.
+  ---------------------------
+  Begin                : 2026-09
+  Copyright            : (C) 2026 SICNU GEO RS
+ ***************************************************************************/
+
+#include "geospatial/fabric/query_planner.h"
+
+#include "geospatial/fabric/object_store.h"
+#include "geospatial/identity/asset_identity.h"
+#include "geospatial/raster/raster_reader.h"
+#include "geospatial/util/time_normalization.h"
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <map>
+#include <set>
+
+namespace sicnu::geo
+{
+
+namespace
+{
+
+/// D-1007 rank for streaming top-K selection. Comparing the tuple
+/// (cloudCover declared, cloudCover, instant desc, id, input order) needs a
+/// strict weak order over declared facts only.
+struct SelectionRank
+{
+    bool hasCloud = false;
+    double cloud = 0.0;
+    std::int64_t instantNanos = 0;
+    bool hasInstant = false;
+    std::string id;
+    std::uint64_t inputIndex = 0;
+};
+
+bool rankBetter( const SelectionRank &a, const SelectionRank &b )
+{
+    // Fewer clouds first; undeclared last.
+    if ( a.hasCloud != b.hasCloud )
+        return a.hasCloud;
+    if ( a.hasCloud && a.cloud != b.cloud )
+        return a.cloud < b.cloud;
+    // Newest first; undated last.
+    if ( a.hasInstant != b.hasInstant )
+        return a.hasInstant;
+    if ( a.hasInstant && a.instantNanos != b.instantNanos )
+        return a.instantNanos > b.instantNanos;
+    if ( a.id != b.id )
+        return a.id < b.id;
+    return a.inputIndex < b.inputIndex;   // total (input order breaks ties)
+}
+
+SelectionRank rankOf( const AssetRecord &record, std::uint64_t inputIndex )
+{
+    SelectionRank rank;
+    rank.hasCloud = record.hasCloudCover;
+    rank.cloud = record.cloudCover;
+    rank.id = record.id;
+    rank.inputIndex = inputIndex;
+    if ( !record.datetimeUtc.empty() )
+    {
+        const InstantParse parse = parseIso8601Instant( record.datetimeUtc );
+        if ( parse.ok )
+        {
+            rank.hasInstant = true;
+            rank.instantNanos = parse.epochNanos;
+        }
+    }
+    return rank;
+}
+
+/// Bounded top-K under the selection order: O(matches) streaming, O(K)
+/// memory (D-1009).
+class TopKSelector
+{
+  public:
+    explicit TopKSelector( std::size_t k ) : mK( k ) {}
+
+    void offer( AssetRecord record, std::uint64_t inputIndex )
+    {
+        SelectionRank rank = rankOf( record, inputIndex );
+        if ( mSelected.size() < mK )
+        {
+            mSelected.push_back( { std::move( record ), std::move( rank ) } );
+            std::push_heap( mSelected.begin(), mSelected.end(), &worseFirst );
+            return;
+        }
+        if ( mK > 0 && rankBetter( rank, mSelected.front().rank ) )
+        {
+            std::pop_heap( mSelected.begin(), mSelected.end(), &worseFirst );
+            mSelected.back() = { std::move( record ), std::move( rank ) };
+            std::push_heap( mSelected.begin(), mSelected.end(), &worseFirst );
+        }
+    }
+
+    /// Selected assets in BEST-first order (D-1006 selection order).
+    std::vector<AssetRecord> take()
+    {
+        std::sort( mSelected.begin(), mSelected.end(),
+                   [] ( const Entry &a, const Entry &b ) { return rankBetter( a.rank, b.rank ); } );
+        std::vector<AssetRecord> result;
+        result.reserve( mSelected.size() );
+        for ( Entry &entry : mSelected )
+            result.push_back( std::move( entry.record ) );
+        return result;
+    }
+
+  private:
+    struct Entry
+    {
+        AssetRecord record;
+        SelectionRank rank;
+    };
+    // Heap predicate: "better" sorts as LESS, so the heap TOP is the
+    // WORST kept element — a full selector replaces exactly that element.
+    static bool worseFirst( const Entry &a, const Entry &b )
+    {
+        return rankBetter( a.rank, b.rank );
+    }
+
+    std::size_t mK;
+    std::vector<Entry> mSelected;
+};
+
+} // namespace
+
+void FabricIntent::validate() const
+{
+    if ( catalogUri.empty() && records.empty() )
+        throw GeoError( ErrorCode::InvalidArgument,
+                        "fabric intent needs a catalogUri or in-memory records" );
+    if ( !catalogUri.empty() && !records.empty() )
+        throw GeoError( ErrorCode::InvalidArgument,
+                        "fabric intent takes one source — catalogUri or records, not both" );
+    query.validate();
+    if ( sceneBudget < 1 )
+        throw GeoError( ErrorCode::InvalidArgument, "sceneBudget must be >= 1" );
+    if ( executionBudgetBytes == 0 )
+        throw GeoError( ErrorCode::InvalidArgument, "executionBudgetBytes must be positive" );
+    if ( hasWindow && ( windowW <= 0 || windowH <= 0 ) )
+        throw GeoError( ErrorCode::InvalidArgument, "window width/height must be positive" );
+}
+
+Json::Value FabricPlanCost::toJson() const
+{
+    Json::Value json;
+    json["catalogMatches"] = static_cast<Json::UInt64>( catalogMatches );
+    json["catalogMatchesTruncated"] = catalogMatchesTruncated;
+    json["scenes"] = static_cast<Json::UInt64>( scenes );
+    json["chunks"] = static_cast<Json::UInt64>( chunks );
+    json["estimatedBytes"] = static_cast<Json::UInt64>( estimatedBytes );
+    json["estimatedMemoryBytes"] = static_cast<Json::UInt64>( estimatedMemoryBytes );
+    json["estimatedRemoteCalls"] = static_cast<Json::UInt64>( estimatedRemoteCalls );
+    json["cacheableAssets"] = static_cast<Json::UInt64>( cacheableAssets );
+    json["unprovableIdentityAssets"] = static_cast<Json::UInt64>( unprovableIdentityAssets );
+    json["undatedScenes"] = static_cast<Json::UInt64>( undatedScenes );
+    json["bytesUnknown"] = bytesUnknown;
+    return json;
+}
+
+Json::Value FabricPlanStage::toJson() const
+{
+    Json::Value json;
+    json["name"] = name;
+    json["status"] = status;
+    json["inputs"] = static_cast<Json::UInt64>( inputs );
+    json["outputs"] = static_cast<Json::UInt64>( outputs );
+    if ( !details.isNull() )
+        json["details"] = details;
+    return json;
+}
+
+Json::Value FabricPlan::toJson() const
+{
+    Json::Value json;
+    Json::Value stages( Json::arrayValue );
+    for ( const FabricPlanStage &stage : mStages )
+        stages.append( stage.toJson() );
+    json["stages"] = stages;
+    json["cost"] = mCost.toJson();
+    json["grid"] = mGrid.toJson();
+    json["chunkPlan"] = mChunkPlan.toJson();
+    json["windowPlan"] = mWindowPlan;
+    Json::Value assets( Json::arrayValue );
+    for ( const AssetRecord &record : mSelected )
+    {
+        if ( static_cast<int>( assets.size() ) >= 64 )   // bounded preview
+        {
+            json["selectedAssetsTruncated"] = true;
+            break;
+        }
+        Json::Value asset;
+        asset["id"] = record.id;
+        asset["displayPath"] = ResourceUri::parse( record.path ).display();
+        asset["instantUtc"] = record.datetimeUtc;
+        assets.append( asset );
+    }
+    json["selectedAssets"] = assets;
+    json["executionBudgetBytes"] = static_cast<Json::UInt64>( mIntent.executionBudgetBytes );
+    return json;
+}
+
+FabricPlan planFabric( const FabricIntent &intent, const FabricPlanOptions &options,
+                       const CancelToken &cancel )
+{
+    intent.validate();
+
+    FabricPlan plan;
+    plan.mIntent = intent;
+
+    // --- stage: catalog_query (streaming, O(page + K) memory) -------------
+    FabricPlanStage catalogStage;
+    catalogStage.name = "catalog_query";
+    TopKSelector selector( static_cast<std::size_t>( intent.sceneBudget ) );
+    std::uint64_t matches = 0;
+    bool truncated = false;
+
+    if ( !intent.records.empty() )
+    {
+        const CatalogService service = catalogServiceOverRecords( intent.records );
+        CatalogQuery countQuery = intent.query;
+        countQuery.limit = 0;
+        // Records are already in memory; stream through the SAME engine.
+        CatalogContinuation continuation;
+        std::uint64_t inputIndex = 0;
+        while ( true )
+        {
+            const CatalogPage page = service.searchPage( countQuery, continuation, cancel );
+            for ( const AssetRecord &record : page.records )
+            {
+                ++matches;
+                selector.offer( record, inputIndex++ );
+            }
+            if ( !page.next.hasMore )
+                break;
+            continuation = page.next;
+        }
+    }
+    else
+    {
+        const CatalogService service = openCatalogService( intent.catalogUri, options.catalog );
+        CatalogContinuation continuation;
+        std::uint64_t inputIndex = 0;
+        while ( true )
+        {
+            const CatalogPage page = service.searchPage( intent.query, continuation, cancel );
+            for ( const AssetRecord &record : page.records )
+            {
+                ++matches;
+                selector.offer( record, inputIndex++ );
+            }
+            if ( !page.next.hasMore )
+                break;
+            continuation = page.next;
+        }
+    }
+    plan.mSelected = selector.take();
+    truncated = matches > plan.mSelected.size() && static_cast<int>( plan.mSelected.size() ) >=
+                                                     intent.sceneBudget;
+    catalogStage.inputs = matches;
+    catalogStage.outputs = plan.mSelected.size();
+    catalogStage.status = "planned";
+    plan.mStages.push_back( std::move( catalogStage ) );
+
+    if ( plan.mSelected.empty() )
+    {
+        FabricPlanStage selection;
+        selection.name = "asset_selection";
+        selection.status = "skipped";
+        plan.mStages.push_back( selection );
+        FabricPlanStage gridStage;
+        gridStage.name = "grid_planning";
+        gridStage.status = "skipped";
+        plan.mStages.push_back( gridStage );
+        FabricPlanStage chunkStage;
+        chunkStage.name = "chunk_planning";
+        chunkStage.status = "skipped";
+        plan.mStages.push_back( chunkStage );
+        plan.mCost.catalogMatches = matches;
+        plan.mCost.catalogMatchesTruncated = truncated;
+        return plan;   // an empty plan is a valid plan (nothing matches)
+    }
+
+    // --- stage: asset_selection (top-K ordering already applied) ----------
+    FabricPlanStage selectionStage;
+    selectionStage.name = "asset_selection";
+    selectionStage.status = "planned";
+    selectionStage.inputs = matches;
+    selectionStage.outputs = plan.mSelected.size();
+    Json::Value selectionDetails;
+    selectionDetails["policy"] = "cloud_asc__newest_first__id__input";
+    selectionDetails["sceneBudget"] = intent.sceneBudget;
+    selectionStage.details = selectionDetails;
+    plan.mStages.push_back( std::move( selectionStage ) );
+
+    // --- stage: grid_planning (bounded metadata probe when derived) -------
+    if ( !intent.grid.explicitGrid )
+    {
+        VirtualCubeBuildOptions buildOptions;
+        buildOptions.probeLimit = options.gridProbeLimit;
+        // The probe re-runs at execution from the plan JSON; here it runs
+        // once so the plan CARRIES the negotiated grid (inspectable).
+        const VirtualCube negotiated = VirtualCube::build(
+          plan.mSelected, intent.grid, OverlapPolicy::FirstWins, VirtualCubeQuality {},
+          buildOptions, cancel );
+        plan.mGrid = negotiated.grid();
+    }
+    else
+    {
+        plan.mGrid = intent.grid;
+        plan.mGrid.scaleX = intent.grid.scaleX < 0 ? -intent.grid.scaleX : intent.grid.scaleX;
+        plan.mGrid.scaleY = intent.grid.scaleY < 0 ? -intent.grid.scaleY : intent.grid.scaleY;
+    }
+    FabricPlanStage gridStage;
+    gridStage.name = "grid_planning";
+    gridStage.status = "planned";
+    gridStage.outputs = 1;
+    Json::Value gridDetails;
+    gridDetails["derived"] = !intent.grid.explicitGrid;
+    gridStage.details = gridDetails;
+    plan.mStages.push_back( std::move( gridStage ) );
+
+    // --- stage: chunk_planning --------------------------------------------
+    const VirtualCube cubeForChunks =
+      VirtualCube::build( plan.mSelected, plan.mGrid, OverlapPolicy::FirstWins,
+                          VirtualCubeQuality {}, VirtualCubeBuildOptions {}, cancel );
+    plan.mChunkPlan =
+      CubeChunkPlan::forVirtualCube( cubeForChunks, intent.chunkShape, intent.slice );
+    FabricPlanStage chunkStage;
+    chunkStage.name = "chunk_planning";
+    chunkStage.status = "planned";
+    chunkStage.outputs = plan.mChunkPlan.chunkCountTotal();
+    plan.mStages.push_back( std::move( chunkStage ) );
+
+    // --- stage: identity_cache (bounded probes; fail-closed) ---------------
+    FabricPlanStage identityStage;
+    identityStage.name = "identity_cache";
+    identityStage.status = "estimated";
+    identityStage.inputs = plan.mSelected.size();
+    int probed = 0;
+    for ( const AssetRecord &record : plan.mSelected )
+    {
+        if ( probed >= options.identityProbeLimit )
+            break;   // honest estimate bound: assets beyond stay uncounted
+        ++probed;
+        const AssetIdentity identity = assetIdentityToken( record.path, AssetIdentityOptions{} );
+        if ( identity.provable() )
+            ++plan.mCost.cacheableAssets;
+        else
+            ++plan.mCost.unprovableIdentityAssets;
+    }
+    identityStage.outputs = probed;
+    plan.mStages.push_back( std::move( identityStage ) );
+
+    // --- cost hints --------------------------------------------------------
+    plan.mCost.catalogMatches = matches;
+    plan.mCost.catalogMatchesTruncated = truncated;
+    plan.mCost.scenes = plan.mSelected.size();
+    plan.mCost.chunks = plan.mChunkPlan.chunkCountTotal();
+    if ( intent.hasWindow )
+        plan.mWindowPlan = true;
+
+    // Estimated bytes: window plans read exactly their window; chunk plans
+    // sum the chunk plan's declared estimates (math over dims, no
+    // materialization).
+    const Json::Value chunkJson = plan.mChunkPlan.toJson();
+    std::uint64_t bytesPerChunk = 0;
+    if ( !plan.mChunkPlan.dims().empty() && plan.mChunkPlan.chunkCountTotal() > 0 )
+    {
+        const std::vector<CubeChunkRequest> first = plan.mChunkPlan.materializeChunks( 0, 1 );
+        if ( !first.empty() )
+            bytesPerChunk = first.front().estimatedBytes;
+    }
+    if ( bytesPerChunk == 0 )
+        plan.mCost.bytesUnknown = true;
+    plan.mCost.estimatedBytes =
+      intent.hasWindow
+        ? static_cast<std::uint64_t>( intent.windowW ) * intent.windowH * 8
+        : bytesPerChunk * plan.mCost.chunks;
+    if ( plan.mCost.bytesUnknown && intent.hasWindow )
+    {
+        plan.mCost.estimatedBytes = static_cast<std::uint64_t>( intent.windowW ) *
+                                    intent.windowH * 8;   // doubles in memory
+        plan.mCost.bytesUnknown = false;
+    }
+    plan.mCost.estimatedMemoryBytes = plan.mCost.estimatedBytes;
+    plan.mCost.estimatedRemoteCalls =
+      intent.hasWindow ? 1 : plan.mCost.chunks;   // pessimistic miss estimate
+    plan.mCost.undatedScenes = static_cast<std::uint64_t>( std::count_if(
+      plan.mSelected.begin(), plan.mSelected.end(),
+      [] ( const AssetRecord &record ) { return record.datetimeUtc.empty(); } ) );
+
+    if ( cancel.cancelled() )
+        throw GeoError( ErrorCode::Cancelled, "plan cancelled" );
+    return plan;
+}
+
+// --- execution ----------------------------------------------------------------
+
+namespace
+{
+
+/// One-asset cube for time-correct chunk execution (the chunk's hinted
+/// asset is the whole world of that step).
+VirtualCube cubeOverSingleAsset( const AssetRecord &record, const VirtualCubeGrid &grid )
+{
+    return VirtualCube::build( { record }, grid, OverlapPolicy::FirstWins, {},
+                               VirtualCubeBuildOptions {}, CancelToken{} );
+}
+
+/// Chunk grid extent → grid pixel rect (clamped; ok=false when empty).
+bool chunkPixelRect( const CubeChunkRequest &request, const VirtualCubeGrid &grid, int &x, int &y,
+                     int &w, int &h )
+{
+    if ( !request.hasExtent )
+        return false;
+    const double px0 = ( request.minX - grid.minX ) / grid.scaleX;
+    const double px1 = ( request.maxX - grid.minX ) / grid.scaleX;
+    const double py0 = ( grid.maxY - request.maxY ) / grid.scaleY;
+    const double py1 = ( grid.maxY - request.minY ) / grid.scaleY;
+    const int gx = static_cast<int>( grid.width() );
+    const int gy = static_cast<int>( grid.height() );
+    x = static_cast<int>( std::max( 0.0, std::floor( px0 ) ) );
+    y = static_cast<int>( std::max( 0.0, std::floor( py0 ) ) );
+    w = static_cast<int>( std::clamp( std::ceil( px1 ) - x, 0.0, double( gx - x ) ) );
+    h = static_cast<int>( std::clamp( std::ceil( py1 ) - y, 0.0, double( gy - y ) ) );
+    return w > 0 && h > 0;
+}
+
+} // namespace
+
+VirtualCubeWindowResult executeWindow( const FabricPlan &plan, const VirtualCubeReadOptions &options,
+                                       FabricExecutionReport &report, const CancelToken &cancel )
+{
+    if ( !plan.isWindowPlan() )
+        throw GeoError( ErrorCode::InvalidArgument,
+                        "executeWindow needs a window plan (intent.hasWindow)" );
+    if ( plan.selectedAssets().empty() )
+        throw GeoError( ErrorCode::InvalidArgument, "plan selected no assets" );
+
+    const FabricIntent &intent = plan.intent();
+    const std::uint64_t windowBytes =
+      static_cast<std::uint64_t>( intent.windowW ) * intent.windowH * 8;
+    if ( windowBytes > intent.executionBudgetBytes )
+        throw GeoError( ErrorCode::ResourceExhausted,
+                        "window needs " + std::to_string( windowBytes ) +
+                          " bytes beyond the execution budget" );
+
+    const VirtualCube cube =
+      VirtualCube::build( plan.selectedAssets(), plan.grid(), OverlapPolicy::FirstWins, {},
+                          VirtualCubeBuildOptions {}, cancel );
+    VirtualCubeWindowResult result =
+      cube.readWindow( intent.windowX, intent.windowY, intent.windowW, intent.windowH, options,
+                       cancel );
+    report.assetsConsulted = result.provenance.size();
+    for ( const VirtualCubeProvenance &entry : result.provenance )
+        report.assetsFailed += entry.failed ? 1 : 0;
+    report.bytesRead = windowBytes;
+    report.chunksExecuted = 1;
+    return result;
+}
+
+std::vector<FabricChunkOutcome> executeChunks( const FabricPlan &plan,
+                                               const VirtualCubeReadOptions &options,
+                                               std::size_t chunkWindow,
+                                               const std::function<void( const CubeChunkRequest &,
+                                                                         const VirtualCubeWindowResult & )> &sink,
+                                               FabricExecutionReport &report,
+                                               const CancelToken &cancel )
+{
+    const FabricIntent &intent = plan.intent();
+    if ( plan.selectedAssets().empty() )
+        throw GeoError( ErrorCode::InvalidArgument, "plan selected no assets" );
+    if ( chunkWindow == 0 || chunkWindow > 4096 )
+        throw GeoError( ErrorCode::InvalidArgument, "chunkWindow must be within [1, 4096]" );
+
+    // Assets by id — the chunk hint resolves its time step's world.
+    std::map<std::string, AssetRecord> byId;
+    for ( const AssetRecord &record : plan.selectedAssets() )
+        byId[record.id] = record;
+
+    std::vector<FabricChunkOutcome> outcomes;
+    const std::uint64_t total = plan.chunkPlan().chunkCountTotal();
+    std::uint64_t bytesSpent = 0;
+    bool budgetBreached = false;
+    bool cancelled = false;
+    for ( std::uint64_t begin = 0; begin < total && !cancelled; begin += chunkWindow )
+    {
+        if ( cancel.cancelled() )
+            throw GeoError( ErrorCode::Cancelled, "chunk execution cancelled" );
+        const std::vector<CubeChunkRequest> requests =
+          plan.chunkPlan().materializeChunks( begin, chunkWindow );
+        for ( const CubeChunkRequest &request : requests )
+        {
+            if ( cancel.cancelled() )
+            {
+                cancelled = true;
+                break;
+            }
+
+            FabricChunkOutcome outcome;
+            outcome.index = request.index;
+            outcome.assetIdHint = request.assetIdHint;
+
+            const auto assetIt = byId.find( request.assetIdHint );
+            if ( assetIt == byId.end() )
+            {
+                outcome.ok = false;
+                outcome.errorText = "chunk hint '" + request.assetIdHint + "' is not a selected asset";
+                outcomes.push_back( outcome );
+                continue;
+            }
+
+            int x = 0, y = 0, w = 0, h = 0;
+            if ( !chunkPixelRect( request, plan.grid(), x, y, w, h ) )
+            {
+                outcome.ok = false;
+                outcome.errorText = "chunk extent maps to an empty pixel rect";
+                outcomes.push_back( outcome );
+                continue;
+            }
+            const std::uint64_t windowBytes = static_cast<std::uint64_t>( w ) * h * 8;
+            if ( bytesSpent + windowBytes > intent.executionBudgetBytes )
+            {
+                outcome.skippedBudget = true;
+                outcomes.push_back( outcome );
+                budgetBreached = true;
+                continue;   // keep reporting the remainder as skipped
+            }
+
+            // Time-correct execution: one asset IS one time step, so each
+            // chunk reads a single-asset cube (no probe: explicit grid).
+            const VirtualCube cube = cubeOverSingleAsset( assetIt->second, plan.grid() );
+            const VirtualCubeWindowResult window = cube.readWindow( x, y, w, h, options, cancel );
+            bytesSpent += windowBytes;
+            report.bytesRead += windowBytes;
+            report.chunksExecuted += 1;
+            report.assetsConsulted += window.provenance.size();
+            for ( const VirtualCubeProvenance &entry : window.provenance )
+                report.assetsFailed += entry.failed ? 1 : 0;
+            outcome.ok = true;
+            outcome.bytesRead = windowBytes;
+            outcomes.push_back( outcome );
+            if ( sink )
+                sink( request, window );
+        }
+    }
+    report.budgetBreached = budgetBreached;
+    return outcomes;
+}
+
+Json::Value FabricExecutionReport::toJson() const
+{
+    Json::Value json;
+    json["bytesRead"] = static_cast<Json::UInt64>( bytesRead );
+    json["assetsConsulted"] = static_cast<Json::UInt64>( assetsConsulted );
+    json["assetsFailed"] = static_cast<Json::UInt64>( assetsFailed );
+    json["chunksExecuted"] = static_cast<Json::UInt64>( chunksExecuted );
+    json["budgetBreached"] = budgetBreached;
+    return json;
+}
+
+} // namespace sicnu::geo
