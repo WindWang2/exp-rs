@@ -1,0 +1,171 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u519c\u7530",
+        "\u68ee\u6797",
+        "\u57ce\u5e02\uff08SAR\uff09"
+      ],
+      "scenes" : 
+      [
+        "\u673a\u5236\u8bc6\u522b\u4e0e\u5206\u7c7b\u8f93\u5165",
+        "\u5730\u8868\u8986\u76d6\u5236\u56fe"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "POLARIZATION_MISMATCH",
+        "remedy" : "\u786e\u8ba4\u6570\u636e\u4e3a\u5168\u6781\u5316\u590d\u4ea7\u54c1\uff0c\u6216\u5728\u5143\u6570\u636e/\u53c2\u6570\u4e2d\u58f0\u660e\u901a\u9053",
+        "when" : "\u8f93\u5165\u7f3a HH/HV/VV \u590d\u901a\u9053\u6216\u58f0\u660e\u4e0d\u5b8c\u6574"
+      },
+      {
+        "code" : "COMPLEX_BANDS_REQUIRED",
+        "remedy" : "\u4f7f\u7528\u590d SLC \u4ea7\u54c1\u6216\u6539\u7528 detected \u57df\u7b97\u5b50",
+        "when" : "\u6307\u5b9a\u6ce2\u6bb5\u4e0d\u662f CFloat32"
+      }
+    ],
+    "family" : "sar",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "string",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "h_alpha",
+          "enum" : 
+          [
+            "pauli",
+            "h_alpha",
+            "freeman_durden",
+            "yamaguchi"
+          ],
+          "name" : "decomposition",
+          "required" : true,
+          "type" : "enum"
+        },
+        {
+          "default" : "0",
+          "name" : "hhBand",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "hvBand",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "vhBand",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "vvBand",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "5",
+          "name" : "windowSize",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Dual-pol detected inputs are refused \u2014 no quad-pol approximation from dual-pol data.",
+      "Single-look ensembles are rank 1: H is identically 0 and anisotropy is NaN \u2014 use windowSize > 1 for H/A/alpha.",
+      "Freeman-Durden/Yamaguchi powers may clamp negative residuals to 0 (documented SPAN break near the noise floor).",
+      "\u5355\u89c6\u96c6\u5408\u79e9\u4e3a 1\uff1aH \u6052\u4e3a 0\u3001anisotropy \u4e3a NaN\u2014\u2014\u7528 windowSize>1 \u7684\u7a97\u53e3\u5e73\u5747\u83b7\u5f97\u6709\u6548 H/A/\u03b1\uff0c\u4ee3\u4ef7\u662f\u6709\u6548\u5206\u8fa8\u7387\u4e0b\u964d\u3002",
+      "Freeman-Durden/Yamaguchi \u8d1f\u6b8b\u5dee\u88ab\u94b3\u5236\u4e3a 0\uff08\u566a\u58f0\u5e95\u9644\u8fd1 SPAN \u4e0d\u4e25\u683c\u5b88\u6052\uff09\u3002"
+    ],
+    "modality" : 
+    [
+      "sar"
+    ],
+    "operator_group" : "sar",
+    "prerequisites" : 
+    [
+      "Complex CFloat32 HH/HV/VV (reciprocal) channels from a full-pol SLC product; calibrated scattering amplitudes.",
+      "\u5fc5\u987b\u4e3a CFloat32 \u590d HH/HV/VV \u5168\u6781\u5316\u901a\u9053\uff1bdual-pol/detected \u8f93\u5165\u88ab\u62d2\u7edd\uff08POLARIZATION_MISMATCH\uff09\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "\u5168\u6781\u5316\u5206\u89e3\uff1a\u4ece HH/HV/VV \u590d\u6563\u5c04\u901a\u9053\u63d0\u53d6 Pauli \u5206\u91cf\u3001H/A/\u03b1 \u71b5-\u5404\u5411\u5f02\u6027-\u5e73\u5747\u6563\u5c04\u89d2\u3001Freeman-Durden \u4e09\u5206\u91cf\u6216 Yamaguchi \u56db\u5206\u91cf\u529f\u7387\uff0c\u523b\u753b\u5730\u8868\u6563\u5c04\u673a\u5236\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u6781\u5316\u5206\u89e3",
+        "Pauli \u57fa",
+        "\u6563\u5c04\u71b5"
+      ],
+      "courses" : 
+      [
+        "\u5fae\u6ce2\u9065\u611f"
+      ],
+      "exercise" : "\u5bf9\u5168\u6781\u5316\u6570\u636e\u505a Freeman-Durden \u5206\u89e3\uff0c\u533a\u5206\u8868\u9762\u6563\u5c04\uff08\u88f8\u571f/\u6c34\u9762\uff09\u4e0e\u4f53\u6563\u5c04\uff08\u690d\u88ab\uff09\u4e3b\u5bfc\u533a\u3002"
+    }
+  },
+  "description" : "Full-polarimetric decomposition (Pauli, H/A/alpha, Freeman-Durden, Yamaguchi) of complex HH/HV/VV SLC channels under the reciprocity contract, with ensemble window averaging.",
+  "display_name" : "PolSAR Decomposition",
+  "gpu" : false,
+  "id" : "rs:sar_polsar_decompose",
+  "input" : "raster",
+  "notes" : "Model conventions (volume/helix matrices, branch rules) are defined in sar_polsar.h and pinned by known-answer tests (test_sar_polsar.cpp). The refined (2012) orientation-adapted Yamaguchi volume is NOT implemented.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "sar",
+    "polsar",
+    "polarimetry"
+  ],
+  "task" : "sar-polarimetry"
+}

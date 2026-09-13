@@ -133,8 +133,13 @@ Json::Value RsSarUnwrapOperator::run( const Json::Value &params, RSOperatorConte
 
     const int width = ds.width();
     const int height = ds.height();
-    const uint64_t planeBytes = 8ULL * static_cast<uint64_t>( width ) * height * 2
-                                + static_cast<uint64_t>( width ) * height;
+    // Full plane inventory (review F2): wrapped (8) + unwrapped (8) +
+    // visited (1) + write-back float copy (4) bytes per pixel, plus the
+    // optional quality plane (8) — and the flood-fill priority queue adds
+    // up to 4 entries/pixel (~96 B/px) transiently, counted at half weight.
+    const uint64_t wh = static_cast<uint64_t>( width ) * height;
+    const uint64_t planeBytes =
+        21ULL * wh + ( qualityPath.empty() ? 0ULL : 8ULL * wh ) + 48ULL * wh;
     if ( planeBytes > kPlaneBudgetBytes )
         throw RSOperatorError(
             ErrorCode::InvalidInputData,
@@ -194,9 +199,9 @@ Json::Value RsSarUnwrapOperator::run( const Json::Value &params, RSOperatorConte
     }
 
     sicnu::sar::UnwrapResult result;
-    if ( !sicnu::sar::qualityGuidedUnwrap( wrapped.data(),
-                                           quality.empty() ? nullptr : quality.data(), width,
-                                           height, &result ) )
+    if ( !sicnu::sar::qualityGuidedUnwrap(
+             wrapped.data(), quality.empty() ? nullptr : quality.data(), width, height,
+             &result, [ &context ] { context.throwIfCancelled(); } ) )
         throw RSOperatorError( ErrorCode::ComputationError,
                                "Unwrapping failed (non-finite phase plane)" );
 

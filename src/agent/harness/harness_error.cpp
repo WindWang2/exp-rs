@@ -55,6 +55,11 @@ const struct Entry {
     { "IDENTITY_MISMATCH",       { "validation", RetryClass::None } },
     // D9: the lab teaching constraint refused an artifact-producing action.
     { "TEACHING_REFUSAL",        { "validation", RetryClass::None } },
+    // Advanced SAR / PolSAR / InSAR 10.0 (append-only).
+    { "COMPLEX_BANDS_REQUIRED",  { "validation", RetryClass::None } },
+    { "ACQUISITION_DATES_MISSING", { "validation", RetryClass::None } },
+    { "DATES_NOT_ASCENDING",     { "validation", RetryClass::None } },
+    { "UNWRAP_PROVIDER_UNAVAILABLE", { "environment", RetryClass::Manual } },
 };
 const Entry *kEntriesEnd = kEntries + sizeof( kEntries ) / sizeof( kEntries[0] );
 

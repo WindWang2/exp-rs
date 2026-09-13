@@ -192,6 +192,9 @@ Json::Value RsSarPolsarDecomposeOperator::metadata() const {
                                 "anisotropy is NaN — use windowSize > 1 for H/A/alpha." );
     meta["limitations"].append( "Freeman-Durden/Yamaguchi powers may clamp negative "
                                 "residuals to 0 (documented SPAN break near the noise floor)." );
+    meta["limitations"].append( "Cost is O(windowSize^2) per pixel: windowSize=101 is a "
+                                "deliberately expensive ensemble — use the smallest window "
+                                "that decorrelates the speckle." );
     return meta;
 }
 

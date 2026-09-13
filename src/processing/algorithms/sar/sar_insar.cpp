@@ -235,7 +235,8 @@ bool fitPhaseRamp( const double *phase, int w, int h, bool quadratic, PhaseRampM
 }
 
 bool qualityGuidedUnwrap( const double *wrapped, const double *quality,
-                          int w, int h, UnwrapResult *out )
+                          int w, int h, UnwrapResult *out,
+                          const std::function<void()> &cancelProbe )
 {
     if ( !wrapped || !out || w <= 0 || h <= 0 )
         return false;
@@ -269,6 +270,43 @@ bool qualityGuidedUnwrap( const double *wrapped, const double *quality,
     long seqCounter = 0;
     out->seeds = 0;
 
+    auto qualityAt = [&]( size_t i ) {
+        if ( !quality )
+            return 0.0;
+        return std::isfinite( quality[i] ) ? quality[i]
+                                           : -std::numeric_limits<double>::infinity();
+    };
+
+    // Valid pixels ordered once by the seed order (quality desc, row, col):
+    // each component's seed is then the first unvisited entry — O(n) total
+    // instead of a full-plane rescan per component.
+    struct SeedEntry
+    {
+        double quality;
+        int row;
+        int col;
+        size_t index;
+        bool operator<( const SeedEntry &o ) const
+        {
+            if ( quality != o.quality )
+                return quality > o.quality; // descending
+            if ( row != o.row )
+                return row < o.row;
+            return col < o.col;
+        }
+    };
+    std::vector<SeedEntry> seedOrder;
+    seedOrder.reserve( n );
+    for ( size_t i = 0; i < n; ++i )
+    {
+        if ( !std::isfinite( wrapped[i] ) )
+            continue;
+        seedOrder.push_back( { qualityAt( i ), static_cast<int>( i / w ),
+                               static_cast<int>( i % w ), i } );
+    }
+    std::sort( seedOrder.begin(), seedOrder.end() );
+    size_t seedCursor = 0;
+
     auto push = [&]( int row, int col, long seqVal ) {
         if ( row < 0 || row >= h || col < 0 || col >= w )
             return; // seed/edge neighbors can leave the raster
@@ -290,21 +328,19 @@ bool qualityGuidedUnwrap( const double *wrapped, const double *quality,
     // construction and stay so — reported via `seeds`).
     while ( true )
     {
-        // Seed: highest-quality valid unvisited pixel (uniform quality when
-        // null → earliest raster position, deterministic).
+        if ( cancelProbe )
+            cancelProbe();
+
+        // Seed: next unvisited entry of the pre-ordered valid-pixel list
+        // (highest quality first — deterministic, O(1) amortized).
         int seedIdx = -1;
-        double bestQ = -std::numeric_limits<double>::infinity();
-        for ( size_t i = 0; i < n; ++i )
+        while ( seedCursor < seedOrder.size() )
         {
-            if ( visited[i] || !std::isfinite( wrapped[i] ) )
-                continue;
-            const double q = quality ? ( std::isfinite( quality[i] ) ? quality[i]
-                                                                     : -std::numeric_limits<double>::infinity() )
-                                     : 0.0;
-            if ( q > bestQ )
+            const SeedEntry &entry = seedOrder[seedCursor++];
+            if ( !visited[entry.index] )
             {
-                bestQ = q;
-                seedIdx = static_cast<int>( i );
+                seedIdx = static_cast<int>( entry.index );
+                break;
             }
         }
         if ( seedIdx < 0 )
@@ -319,10 +355,13 @@ bool qualityGuidedUnwrap( const double *wrapped, const double *quality,
         for ( const auto &nb : neighbors )
             push( seedRow + nb[0], seedCol + nb[1], seqCounter++ );
 
+        long pops = 0;
         while ( !queue.empty() )
         {
             const Candidate c = queue.top();
             queue.pop();
+            if ( cancelProbe && ( ++pops % 4096 ) == 0 )
+                cancelProbe();
             const size_t i = static_cast<size_t>( c.row ) * w + c.col;
             if ( visited[i] )
                 continue;
@@ -415,7 +454,8 @@ double phaseDiscontinuityRatio( const double *phase, int w, int h )
 
 bool coregistrationShift( const std::complex<float> *master, const std::complex<float> *slave,
                           int w, int h, int searchRadius, int patchSize, int patchStride,
-                          double minPeakRatio, CoregisterShift *out )
+                          double minPeakRatio, CoregisterShift *out,
+                          const std::function<void()> &cancelProbe )
 {
     if ( !master || !slave || !out || w <= 0 || h <= 0 )
         return false;
@@ -426,10 +466,14 @@ bool coregistrationShift( const std::complex<float> *master, const std::complex<
     std::vector<double> offsetsY;
     std::vector<double> peakRatios;
 
+    long patchesDone = 0;
     for ( int py = 0; py + patchSize <= h; py += patchStride )
     {
         for ( int px = 0; px + patchSize <= w; px += patchStride )
         {
+            if ( cancelProbe && ( ( ++patchesDone ) % 16 ) == 0 )
+                cancelProbe();
+
             // Master patch energy.
             double mEnergy = 0.0;
             for ( int y = py; y < py + patchSize; ++y )

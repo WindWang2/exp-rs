@@ -2,13 +2,13 @@
 
 # RS 算子能力知识索引
 
-覆盖 111 个 `rs:` 算子（要求 111/111）。逐算子元数据见 `data/processing/algorithm_meta/capability/`；关系图见同目录 `capability_relations.json`。
+覆盖 121 个 `rs:` 算子（要求 111/111）。逐算子元数据见 `data/processing/algorithm_meta/capability/`；关系图见同目录 `capability_relations.json`。
 
 | 算子族 | 数量 | 页面 |
 |---|---|---|
 | 光学预处理（optical） | 17 | [capability-optical.md](capability-optical.md) |
 | 光谱指数与波段运算（spectral） | 12 | [capability-spectral.md](capability-spectral.md) |
-| 雷达 SAR 处理（sar） | 12 | [capability-sar.md](capability-sar.md) |
+| 雷达 SAR 处理（sar） | 19 | [capability-sar.md](capability-sar.md) |
 | 地形分析（terrain） | 2 | [capability-terrain.md](capability-terrain.md) |
 | 时序分析（temporal） | 14 | [capability-temporal.md](capability-temporal.md) |
 | 分类与机器学习（classification） | 9 | [capability-classification.md](capability-classification.md) |
@@ -16,7 +16,7 @@
 | 面向对象影像分析（obia） | 7 | [capability-obia.md](capability-obia.md) |
 | 高光谱分析（hyperspectral） | 8 | [capability-hyperspectral.md](capability-hyperspectral.md) |
 | 栅格空间分析（raster_spatial） | 15 | [capability-raster_spatial.md](capability-raster_spatial.md) |
-| 数据导入（io） | 4 | [capability-io.md](capability-io.md) |
+| 数据导入（io） | 7 | [capability-io.md](capability-io.md) |
 
 ## 查询 API（D9 消费，保持稳定）
 

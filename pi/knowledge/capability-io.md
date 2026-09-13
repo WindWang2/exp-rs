@@ -2,7 +2,23 @@
 
 # 数据导入（io）
 
-共 4 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 7 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+
+## rs:gaofen_import
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：bandCount（integer）、output（raster）、productId（string）
+- 参数：bands（string）、input（string）、output（string）
+- 前置条件：Product directory with CRESDA sidecar XML and TIFF (offline)
+
+## rs:hj_import
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：bandCount（integer）、output（raster）、productId（string）
+- 参数：bands（string）、input（string）、output（string）
+- 前置条件：Product directory with CRESDA sidecar XML and TIFF (offline)
 
 ## rs:landsat_import
 
@@ -74,4 +90,12 @@ Sentinel-2 数据导入：解析 SAFE/JP2 产品包，输出多波段反射率�
 - 适用课程：遥感数据处理
 - 典型练习：导入 L1C 产品并组织 10m 四波段子集供后续指数计算。
 - 可接下游：rs:atmospheric_correction
+
+## rs:zy3_import
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：bandCount（integer）、output（raster）、productId（string）
+- 参数：bands（string）、input（string）、output（string）
+- 前置条件：Product directory with CRESDA sidecar XML and TIFF (offline)
 

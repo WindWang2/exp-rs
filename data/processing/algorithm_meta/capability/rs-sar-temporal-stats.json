@@ -63,6 +63,11 @@
           "type" : "numeric"
         },
         {
+          "name" : "dates",
+          "required" : false,
+          "type" : "string"
+        },
+        {
           "default" : "declared",
           "enum" : 
           [

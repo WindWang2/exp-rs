@@ -253,12 +253,17 @@ Json::Value RsSarInterferogramOperator::run( const Json::Value &params,
 
     std::vector<std::complex<float>> mbuf;
     std::vector<std::complex<float>> sbuf;
+    std::vector<std::complex<float>> flatM; // ramp-flattened copies of the
+    std::vector<std::complex<float>> flatS; // halo buffers (review F6: the
+    // coherence must see the flattened field, not the raw ramp)
     std::vector<std::complex<float>> ifgTile;
     std::vector<float> cohTile;
     const size_t maxTileSamples = static_cast<size_t>( kTileDim + 2 * halo )
                                   * ( kTileDim + 2 * halo );
     mbuf.resize( maxTileSamples );
     sbuf.resize( maxTileSamples );
+    flatM.resize( maxTileSamples );
+    flatS.resize( maxTileSamples );
     ifgTile.resize( static_cast<size_t>( kTileDim ) * kTileDim );
     cohTile.resize( static_cast<size_t>( kTileDim ) * kTileDim );
 
@@ -281,28 +286,50 @@ Json::Value RsSarInterferogramOperator::run( const Json::Value &params,
                                    "Failed to read SLC pair tiles (twin walk)" );
         }
 
+        if ( haveRamp )
+        {
+            // Flatten the WHOLE halo buffer once; every downstream product
+            // (interferogram AND coherence) then sees the same flattened
+            // field.
+            for ( int y = 0; y < tile.bufferHeight; ++y )
+                for ( int x = 0; x < tile.bufferWidth; ++x )
+                {
+                    const size_t idx = static_cast<size_t>( y ) * tile.bufferWidth + x;
+                    std::complex<float> m( mbuf[idx] );
+                    std::complex<float> sv( sbuf[idx] );
+                    const double phase =
+                        sicnu::sar::interferogramPhase( m, sv )
+                        - sicnu::sar::evalPhaseRamp( ramp, tile.xOffset - halo + x,
+                                                     tile.yOffset - halo + y );
+                    const double amp = sicnu::sar::complexAmplitude( m )
+                                       * sicnu::sar::complexAmplitude( sv );
+                    if ( std::isfinite( phase ) && std::isfinite( amp ) )
+                    {
+                        m = std::complex<float>( static_cast<float>( amp * std::cos( phase ) ),
+                                                 static_cast<float>( amp * std::sin( phase ) ) );
+                    }
+                    else
+                    {
+                        m = std::complex<float>( kNaN, kNaN );
+                    }
+                    flatM[idx] = m;
+                    flatS[idx] = std::complex<float>( kNaN, kNaN ); // coherence consumes flatM only
+                }
+        }
+        else
+        {
+            std::copy( mbuf.begin(), mbuf.end(), flatM.begin() );
+            std::copy( sbuf.begin(), sbuf.end(), flatS.begin() );
+        }
+
         for ( int y = 0; y < tile.height; ++y )
         {
             for ( int x = 0; x < tile.width; ++x )
             {
                 const size_t center =
                     static_cast<size_t>( y + halo ) * tile.bufferWidth + x + halo;
-                std::complex<float> m( mbuf[center] );
-                std::complex<float> s( sbuf[center] );
-
-                if ( haveRamp )
-                {
-                    const double phase =
-                        sicnu::sar::interferogramPhase( m, s )
-                        - sicnu::sar::evalPhaseRamp( ramp, tile.xOffset + x,
-                                                     tile.yOffset + y );
-                    // Preserve the pair's joint amplitude through the ramp
-                    // subtraction; an invalid pair stays NaN.
-                    const double amp = sicnu::sar::complexAmplitude( m )
-                                       * sicnu::sar::complexAmplitude( s );
-                    m = std::complex<float>( static_cast<float>( amp * std::cos( phase ) ),
-                                             static_cast<float>( amp * std::sin( phase ) ) );
-                }
+                const std::complex<float> m( flatM[center] );
+                const std::complex<float> s( flatS[center] );
 
                 const std::complex<float> ifg = static_cast<std::complex<float>>(
                     sicnu::sar::interferogramSample( m, s ) );
@@ -313,7 +340,7 @@ Json::Value RsSarInterferogramOperator::run( const Json::Value &params,
                 if ( wantCoherence )
                 {
                     const double coherence = sicnu::sar::windowCoherence(
-                        mbuf.data(), sbuf.data(), tile.bufferWidth, tile.bufferHeight,
+                        flatM.data(), flatS.data(), tile.bufferWidth, tile.bufferHeight,
                         x + halo, y + halo, radius );
                     cohTile[static_cast<size_t>( y ) * tile.width + x] =
                         static_cast<float>( coherence );

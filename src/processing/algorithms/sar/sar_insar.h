@@ -21,7 +21,11 @@
 // operator seam must gate them through the shared resource estimation and
 // refuse with a typed error when the plane exceeds the budget (the
 // reference unwrapper is deliberately single-scale; tiling breaks global
-// phase connectivity and is NOT approximated).
+// phase connectivity and is NOT approximated). The unwrapper additionally
+// holds a priority queue bounded by 4 entries per pixel (~96 bytes/pixel
+// worst case) — the operator gate counts it. cancelProbe() (operator
+// seam's cancellation) is invoked periodically inside the full-plane
+// kernels so long unwraps/NCC scans stay cancellable.
 //
 // Unwrapping (DECISIONS D-001): qualityGuidedUnwrap is the BUILT-IN
 // reference implementation — deterministic (quality-descending with
@@ -36,6 +40,7 @@
 
 #include <cstdint>
 #include <complex>
+#include <functional>
 #include <vector>
 
 namespace sicnu::sar
@@ -71,8 +76,9 @@ double goldsteinPhase( const std::complex<float> *ifg, int w, int h,
 /// Robust polynomial ramp fit (flat-earth approximation). Streaming
 /// accumulator form: samples are added in visit order (deterministic), the
 /// normal equations accumulate in O(1) memory, and the robust IQR clipping
-/// uses a bounded residual reservoir (≤ 65536 stride-sampled residuals) so
-/// full-raster fits never materialize a phase plane.
+/// uses a bounded reservoir of ≤ 65536 deterministic-reservoir-sampled
+/// residuals (uniform coverage over the whole stream — never the first
+/// rows only) so full-raster fits never materialize a phase plane.
 /// fit() runs `robustIterations` refits (3 recommended); @return false when
 /// fewer valid samples than model coefficients were added or the normal
 /// matrix is singular.
@@ -100,10 +106,18 @@ class PhaseRampFitter
     // normal-matrix accumulation below.
     struct SampleReservoir
     {
+        // Deterministic reservoir sampling (Algorithm R with a fixed-seed
+        // LCG): every streamed sample has the same 65536/seen inclusion
+        // probability regardless of raster size, so the robust fit is NOT
+        // biased toward the first rows of a large interferogram. The LCG
+        // (seed 123456789, the platform's test-fixture generator) makes the
+        // sample selection a pure function of the stream order — bit-exact
+        // determinism grade preserved.
         static constexpr size_t kMax = 65536;
         std::vector<double> phase;
         std::vector<std::pair<int, int>> xy;
         long seen = 0;
+        unsigned lcg = 123456789u;
         void add( int x, int y, double phi )
         {
             ++seen;
@@ -111,6 +125,14 @@ class PhaseRampFitter
             {
                 phase.push_back( phi );
                 xy.emplace_back( x, y );
+                return;
+            }
+            lcg = lcg * 1103515245u + 12345u;
+            const size_t slot = ( static_cast<size_t>( lcg ) >> 8 ) % static_cast<size_t>( seen );
+            if ( slot < kMax )
+            {
+                phase[slot] = phi;
+                xy[slot] = { x, y };
             }
         }
     };
@@ -140,7 +162,8 @@ struct UnwrapResult
     long seeds = 0;                     ///< connected components seeded
 };
 bool qualityGuidedUnwrap( const double *wrapped, const double *quality,
-                          int w, int h, UnwrapResult *out );
+                          int w, int h, UnwrapResult *out,
+                          const std::function<void()> &cancelProbe = {} );
 
 /// Line-of-sight displacement from unwrapped phase:
 /// d = −λ·φ/(4π). @p wavelengthM must be > 0 (callers refuse otherwise).
@@ -169,7 +192,8 @@ struct CoregisterShift
 };
 bool coregistrationShift( const std::complex<float> *master, const std::complex<float> *slave,
                           int w, int h, int searchRadius, int patchSize, int patchStride,
-                          double minPeakRatio, CoregisterShift *out );
+                          double minPeakRatio, CoregisterShift *out,
+                          const std::function<void()> &cancelProbe = {} );
 
 /// Bilinear complex resample of @a src by (dx, dy) into @a dst (both w*h):
 /// dst(x, y) = src(x − dx, y − dy) with out-of-range → NaN. Deterministic.

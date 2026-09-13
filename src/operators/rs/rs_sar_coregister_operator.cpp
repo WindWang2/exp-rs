@@ -213,11 +213,28 @@ Json::Value RsSarCoregisterOperator::run( const Json::Value &params, RSOperatorC
     context.reportProgress( 0.3, "Loading slave plane" );
     std::vector<std::complex<float>> slavePlane = loadPlane( slave, slaveBand );
 
+    // Compute-complexity guard: patch lattice x search window x patch area.
+    // Legal max parameters (searchRadius=64, patchSize=128, patchStride=1)
+    // would otherwise turn a mid-size scene into an un-cancellable day-long
+    // scan (review F3); refuse with guidance instead of running it.
+    const double lattice = ( static_cast<double>( width ) - patchSize ) / patchStride + 1.0;
+    const double latticeY = ( static_cast<double>( height ) - patchSize ) / patchStride + 1.0;
+    const double ops = std::max( 0.0, lattice ) * std::max( 0.0, latticeY )
+                       * ( 2.0 * searchRadius + 1.0 ) * ( 2.0 * searchRadius + 1.0 )
+                       * static_cast<double>( patchSize ) * patchSize;
+    if ( ops > 2.0e10 )
+        throw RSOperatorError(
+            ErrorCode::InvalidParameter,
+            "search complexity budget exceeded (estimated ~" + std::to_string( ops )
+                + " magnitude operations): reduce searchRadius / patchSize, or increase "
+                  "patchStride" );
+
     context.reportProgress( 0.5, "Estimating the global shift" );
     sicnu::sar::CoregisterShift shift;
-    if ( !sicnu::sar::coregistrationShift( masterPlane.data(), slavePlane.data(), width, height,
-                                           searchRadius, patchSize, patchStride, minPeakRatio,
-                                           &shift ) )
+    if ( !sicnu::sar::coregistrationShift(
+             masterPlane.data(), slavePlane.data(), width, height, searchRadius, patchSize,
+             patchStride, minPeakRatio, &shift,
+             [ &context ] { context.throwIfCancelled(); } ) )
         throw RSOperatorError(
             ErrorCode::ComputationError,
             "COREGISTRATION_FAILED: fewer than 3 confident patch peaks — the scenes may "

@@ -10,7 +10,6 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
-#include <cstdio>
 #include <complex>
 #include <vector>
 
@@ -389,13 +388,6 @@ TEST_CASE( "shiftComplexBilinear — exact for integer and linear fields", "[sar
     {
         std::vector<cf> dst( static_cast<size_t>( w ) * h );
         shiftComplexBilinear( src.data(), w, h, 0.5, 0.0, dst.data() );
-        if ( true )
-            for ( int y = 0; y < 2; ++y )
-            {
-                for ( int x = 0; x < 5; ++x )
-                    std::printf( "%6.2f", dst[static_cast<size_t>( y ) * w + x].real() );
-                std::printf( "\n" );
-            }
         for ( int y = 0; y < h; ++y )
             for ( int x = 1; x < w - 1; ++x )
                 REQUIRE( dst[static_cast<size_t>( y ) * w + x].real()

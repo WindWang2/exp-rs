@@ -13,6 +13,7 @@
 
 #include <gdal.h>
 
+#include <algorithm>
 #include <cmath>
 #include <complex>
 #include <limits>
@@ -284,6 +285,49 @@ TEST_CASE( "complex tile stream — values, halo, invalid normalization", "[sar]
         } ) );
         REQUIRE( visited == 1 );
     }
+}
+
+TEST_CASE( "complex tile stream — multi-tile with halo matches the raster exactly",
+           "[sar][complex]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString path = dir.filePath( QStringLiteral( "fixture.tif" ) );
+    REQUIRE( writeComplexFixture( path, /*declareSentinel=*/true ) );
+
+    GdalDatasetWrapper ds;
+    REQUIRE( ds.open( path ) );
+
+    // 5x4 raster on 2x2 tiles with halo 1: every core pixel must equal the
+    // source sample and every halo pixel must equal the edge-replicated
+    // source sample — the tile-seam mapping the ensemble kernels rely on.
+    ComplexBandTileStream stream( ds, { 1, 2 }, 2, 2, /*halo=*/1 );
+    REQUIRE( stream.tileCount() == 6 ); // ceil(5/2)=3 cols x ceil(4/2)=2 rows
+    REQUIRE( stream.forEach( [&]( const ComplexTile &tile,
+                                  const std::complex<float> *bip ) {
+        for ( int y = 0; y < tile.bufferHeight; ++y )
+        {
+            for ( int x = 0; x < tile.bufferWidth; ++x )
+            {
+                const std::complex<float> b1 =
+                    bip[( static_cast<size_t>( y ) * tile.bufferWidth + x ) * 2 + 0];
+                // Raster position of this buffer cell, edge-clamped.
+                const int gx = std::clamp( tile.xOffset - tile.halo + x, 0, kWidth - 1 );
+                const int gy = std::clamp( tile.yOffset - tile.halo + y, 0, kHeight - 1 );
+                if ( gx == 1 && gy == 1 )
+                {
+                    // Sentinel pair (clamped-to halo cells included): the
+                    // whole sample is normalized to (NaN, NaN).
+                    REQUIRE( std::isnan( b1.real() ) );
+                    REQUIRE( std::isnan( b1.imag() ) );
+                    continue;
+                }
+                REQUIRE( b1.real() == Approx( static_cast<float>( gx ) + 0.5f ) );
+                REQUIRE( b1.imag() == Approx( static_cast<float>( gy ) ) );
+            }
+        }
+        return true;
+    } ) );
 }
 
 TEST_CASE( "complex streaming write round-trip", "[sar][complex]" )

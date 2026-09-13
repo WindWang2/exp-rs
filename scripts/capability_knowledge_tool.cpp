@@ -2,7 +2,7 @@
 //
 // D8 capability knowledge generator (ADR 0146). One binary, three jobs:
 //
-//   gen-meta   Derive the v2 capability sidecars for all 111 rs: operators
+//   gen-meta   Derive the v2 capability sidecars for all rs: operators
 //              from the LIVE AlgorithmDescriptors and write them under
 //              data/processing/algorithm_meta/capability/. Authored keys in
 //              existing files (summary / failure_modes / applicability /
@@ -157,7 +157,7 @@ int cmdGenMeta( const QString &root )
     if ( desc.id.rfind( "rs:", 0 ) == 0 )
       rsDescriptors.push_back( &desc );
   }
-  if ( rsDescriptors.size() != 111 )
+  if ( rsDescriptors.size() != 121 )  // bumped with the 7 platform-10 SAR operators
   {
     std::cerr << "gen-meta: expected 111 rs: descriptors, found " << rsDescriptors.size()
               << " — refusing to write a partial catalog\n";

@@ -171,25 +171,32 @@ Json::Value RsSarDisplacementOperator::run( const Json::Value &params, RSOperato
                 if ( std::isfinite( d ) )
                     ++validPixels;
 
-                // Itoh pairs: left and top neighbors (halo covers tile edges;
-                // counting only core-anchored pairs avoids double counting).
+                // Itoh pairs: right and down neighbors. Both members must
+                // live in the CORE tile (the halo's edge-replicated fringe
+                // would pair a pixel with itself at raster borders).
                 const size_t cIdx =
                     static_cast<size_t>( y + tile.halo ) * tile.bufferWidth + x + tile.halo;
                 if ( std::isfinite( pixels[cIdx] ) )
                 {
-                    const float right = pixels[cIdx + 1];
-                    if ( x + 1 < tile.bufferWidth - tile.halo && std::isfinite( right ) )
+                    if ( x + 1 < tile.width )
                     {
-                        ++totalPairs;
-                        if ( std::abs( pixels[cIdx] - right ) > static_cast<float>( M_PI ) )
-                            ++jumpPairs;
+                        const float right = pixels[cIdx + 1];
+                        if ( std::isfinite( right ) )
+                        {
+                            ++totalPairs;
+                            if ( std::abs( pixels[cIdx] - right ) > static_cast<float>( M_PI ) )
+                                ++jumpPairs;
+                        }
                     }
-                    const float down = pixels[cIdx + tile.bufferWidth];
-                    if ( y + 1 < tile.bufferHeight - tile.halo && std::isfinite( down ) )
+                    if ( y + 1 < tile.height )
                     {
-                        ++totalPairs;
-                        if ( std::abs( pixels[cIdx] - down ) > static_cast<float>( M_PI ) )
-                            ++jumpPairs;
+                        const float down = pixels[cIdx + tile.bufferWidth];
+                        if ( std::isfinite( down ) )
+                        {
+                            ++totalPairs;
+                            if ( std::abs( pixels[cIdx] - down ) > static_cast<float>( M_PI ) )
+                                ++jumpPairs;
+                        }
                     }
                 }
             }
