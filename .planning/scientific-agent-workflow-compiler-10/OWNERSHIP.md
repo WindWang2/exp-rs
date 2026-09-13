@@ -14,7 +14,12 @@
 - `data/processing/algorithm_meta/capability/capability_relations.json` — append-only
   edge additions ONLY where repair contracts need them (validated by existing guard).
 - `pi/` — drift guard (`pi/drift_check.*` or test), F-PI-1/F-PI-2 fixes, `pi/test/*`.
-- `docs/adr/0149-workflow-compiler-10.md`; `CONTEXT.md` ADR index line (append-only).
+- `docs/adr/0149-workflow-compiler-10.md` (per-file record only; recent
+  0144–0147 tracks do not touch the CONTEXT.md ADR index — same-file churn
+  against 9 concurrent tracks).
+- `src/agent/harness/harness_error.{h,cpp}` + `run_loop.cpp` + `plan_tools.cpp`
+  + `context_ledger.{h,cpp}`: narrow additive extensions (7 new taxonomy codes;
+  repeated-error guard; compiler-meta binding parameter), single commits.
 - `.gitignore` — the one whitelist block (already committed first).
 - `.planning/scientific-agent-workflow-compiler-10/`.
 

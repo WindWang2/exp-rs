@@ -45,7 +45,7 @@ range). All findings re-verified in code by the main agent before action.
 | B-16 | P3 | eviction on overwrite / before write | FIXED: evict after successful write, never the target file |
 | B-17 | P3 | unbounded readAll in store | FIXED: load rejects >64KiB typed; list skips oversize |
 | B-19 | P3 | weak F-PI-2 regex | FIXED: positional check (Promise.race → finally → cancel) |
-| B-20 | P3 | CONTEXT.md ADR index + OWNERSHIP drift | DEFERRED to Phase 9 (CONTEXT.md index entry added with the ADR ledger update; OWNERSHIP table amended) |
+| B-20 | P3 | CONTEXT.md ADR index + OWNERSHIP drift | RESOLVED: recent tracks (0144–0147) deliberately keep ADRs as per-file records WITHOUT a CONTEXT.md index entry — same-file churn against 9 concurrent tracks buys nothing. OWNERSHIP.md amended (harness_error/run_loop listed; CONTEXT.md dropped). |
 | B-21 | P3 | live grounding inside tool execute ("must not block long") | ACCEPTED: same grounding cost as spatial:understand; documented in the tool description; fix would need an async seam (execution-plane lane) |
 | B-22 | P3 | dead declaredCentersForRole + stale comment | FIXED |
 
@@ -53,3 +53,32 @@ range). All findings re-verified in code by the main agent before action.
 All P0/P1 fixed and syntax-verified against the real build flag set. P2/P3
 dispositions above; accepted debt recorded (B-21). Re-verification of the full
 suites runs on the final HEAD (Phase 8) — local evidence only.
+
+
+## Post-fix suite status (local, serial, QT_QPA_PLATFORM=offscreen)
+
+| Suite | Result |
+|---|---|
+| test_workflow_ir (new) | 89 assertions / 8 cases PASS |
+| test_workflow_analysis (new) | 125 / 18 PASS |
+| test_workflow_repair (new) | 102 / 9 PASS |
+| test_workflow_planner (new) | 50 / 6 PASS |
+| test_context_checkpoint (new) | 75 / 6 PASS |
+| test_tool_shortlist (new) | 40 / 7 PASS |
+| test_harness_error | 42 / 4 PASS |
+| test_harness_eval_corpus (3 new categories) | 756 / 2 PASS |
+| test_harness9_contracts | 289 / 11 PASS |
+| test_harness_grounding | 126 / 7 PASS |
+| test_harness_evidence | 58 / 7 PASS |
+| test_harness_evals | 269 / 17 PASS |
+| test_agent_tools_3 | 126 / 6 PASS |
+| test_spatial_contracts | 67 / 9 PASS |
+| pi/test (node --test) | 9/9 PASS |
+
+Pre-existing master failures (NOT introduced by this branch, verified present
+at baseline): test_capability_drift — 3 uncovered items
+(cartography:diff_templates/explain/export, rs:gaofen/zy3/hj_import — merged
+by PR #956 / cartography tracks without knowledge-layer updates) and the
+harness.optical_ndvi_landsat alias surfacing in listRecipes. Knowledge-data
+and recipe-alias fixes belong to the D8/cn-product lanes; recorded here, not
+fixed (fixing generated sidecars by hand is itself drift per ADR 0146).

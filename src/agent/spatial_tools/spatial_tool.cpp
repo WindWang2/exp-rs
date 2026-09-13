@@ -26,6 +26,9 @@
 #include "../harness/recipe_tools.h"
 #include "../harness/run_loop.h"
 #include "../harness/solution_tools.h"
+#include "../harness/workflow_planner.h"
+#include "../harness/context_checkpoint.h"
+#include "../harness/tool_shortlist.h"
 #include "../contracts/spatial_contracts.h"
 
 namespace sicnu::agent::spatial_tools {

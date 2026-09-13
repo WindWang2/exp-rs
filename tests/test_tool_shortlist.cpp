@@ -9,8 +9,26 @@
 #include <string>
 
 #include "agent/harness/tool_shortlist.h"
+#include "agent/harness/capability_catalog.h"
+#include "agent/harness/capability_knowledge.h"
 
 using namespace sicnu::agent::harness;
+
+namespace
+{
+/// Repo convention (test_capability_drift.cpp): point the knowledge layers at
+/// the source tree explicitly — the default search paths do not resolve from
+/// the test working directory.
+void loadHarnessKnowledge()
+{
+  const std::string source = CMAKE_SOURCE_DIR;
+  CapabilityKnowledge::instance().setDirectory( source + "/data/agent/capabilities" );
+  CapabilityKnowledge::instance().reload();
+  CapabilityCatalog::instance().setDirectory(
+    source + "/data/processing/algorithm_meta/capability" );
+  CapabilityCatalog::instance().reload();
+}
+}
 
 namespace
 {
@@ -26,6 +44,7 @@ std::string rendered( const Json::Value &value )
 TEST_CASE( "Shortlist is deterministic: same query, byte-identical page",
            "[tool_shortlist]" )
 {
+  loadHarnessKnowledge();
   const Json::Value first = toolShortlist( "ndvi", Json::Value(), Json::Value(), 8 );
   const Json::Value second = toolShortlist( "ndvi", Json::Value(), Json::Value(), 8 );
   CHECK( rendered( first ) == rendered( second ) );

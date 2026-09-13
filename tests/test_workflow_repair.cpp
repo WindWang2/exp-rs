@@ -11,10 +11,32 @@
 #include <string>
 
 #include "agent/harness/workflow_repair.h"
+#include "agent/harness/capability_catalog.h"
+#include "agent/harness/capability_knowledge.h"
+#include "agent/harness/capability_relations.h"
 
 #include <vector>
 
 using namespace sicnu::agent::harness;
+
+namespace
+{
+/// Repo convention (test_capability_drift.cpp): point the knowledge layers at
+/// the source tree explicitly — the default search paths do not resolve from
+/// the test working directory.
+void loadHarnessKnowledge()
+{
+  const std::string source = CMAKE_SOURCE_DIR;
+  CapabilityKnowledge::instance().setDirectory( source + "/data/agent/capabilities" );
+  CapabilityKnowledge::instance().reload();
+  CapabilityCatalog::instance().setDirectory(
+    source + "/data/processing/algorithm_meta/capability" );
+  CapabilityCatalog::instance().reload();
+  CapabilityRelations::instance().setFilePath(
+    source + "/data/processing/algorithm_meta/capability/capability_relations.json" );
+  CapabilityRelations::instance().reload();
+}
+}
 
 namespace
 {
@@ -79,6 +101,7 @@ const IrRefusal *findRefusal( const IrRepairOutcome &outcome, const std::string 
 TEST_CASE( "The repair rule table is closed, documented and risk-classed",
            "[workflow_repair]" )
 {
+  loadHarnessKnowledge();
   const auto &table = repairRuleTable();
   CHECK( table.size() >= 7 );
   bool sawShape = false;
@@ -191,10 +214,10 @@ TEST_CASE( "CRS mismatch auto-inserts io:reproject with the reference CRS",
     if ( node.operatorId == "io:reproject" )
       reprojected = &node;
   REQUIRE( reprojected );
-  // The offending edge is t1 (normalized order); the reference CRS is the
-  // first sibling with a different CRS — t2's EPSG:32650.
-  CHECK( reprojected->params["targetCrs"].asString() == "EPSG:32650" );
-  CHECK( reprojected->outputs[0].artifact["crs"].asString() == "EPSG:32650" );
+  // The offending edge is t1 (declared/observed EPSG:32650); the reference
+  // CRS is the first differing sibling — t2's EPSG:4326.
+  CHECK( reprojected->params["targetCrs"].asString() == "EPSG:4326" );
+  CHECK( reprojected->outputs[0].artifact["crs"].asString() == "EPSG:4326" );
 }
 
 TEST_CASE( "Repairs are deterministic: same input, byte-identical repaired IR",

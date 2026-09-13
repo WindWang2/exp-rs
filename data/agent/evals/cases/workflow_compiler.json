@@ -207,14 +207,16 @@
                   "id": "a",
                   "operator": "rs:band_math",
                   "params": {
-                    "output": "/tmp/same.tif"
+                    "output": "/tmp/same.tif",
+                    "expression": "B1"
                   }
                 },
                 {
                   "id": "b",
                   "operator": "rs:band_math",
                   "params": {
-                    "output": "/tmp/same.tif"
+                    "output": "/tmp/same.tif",
+                    "expression": "B1"
                   }
                 }
               ],
@@ -300,7 +302,7 @@
                 "equals": "FACT_CONFLICT"
               },
               {
-                "path": "facts.primary.modality",
+                "path": "analysis.facts.primary.modality",
                 "equals": "optical"
               },
               {

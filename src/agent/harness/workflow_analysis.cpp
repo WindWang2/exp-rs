@@ -438,6 +438,15 @@ class AnalysisBuilder
       record( check, "pass", "", details );
     }
 
+    /// Ledger-only advisory: records a warn-status row WITHOUT emitting an
+    /// issue (for coverage notes that are not science findings).
+    void note( const char *check, const std::string &why )
+    {
+      Json::Value details = emptyObject();
+      details["why"] = why;
+      record( check, "warn", "", details );
+    }
+
     void skip( const char *check, const std::string &why, Json::Value details = Json::Value() )
     {
       if ( !details.isObject() )
@@ -768,9 +777,14 @@ IrAnalysis analyzeWorkflowIr( WorkflowIr &ir, const IrAnalysisInput &input )
     }
     builder.pass( "known_operator" );
     if ( !capability.isObject() || capability.empty() )
-      builder.warn( "known_operator", error_codes::kFactConflict, node.id, "",
-                    "Operator exists but carries no capability knowledge entry; contract checks "
-                    "are skipped" );
+    {
+      // Coverage advisory only: no contract facts exist here, so every
+      // knowledge check below degrades to skip. This is NOT a science
+      // finding — it must not become an issue (the registry-wide coverage
+      // floor lives in test_capability_drift).
+      builder.note( "known_operator", "no capability knowledge entry for this operator; "
+                                      "contract checks degrade to skip" );
+    }
 
     // c2: required params (capability io.parameters).
     bool checkedParams = false;
@@ -816,6 +830,12 @@ IrAnalysis analyzeWorkflowIr( WorkflowIr &ir, const IrAnalysisInput &input )
       std::set<std::string> boundPorts;
       for ( const IrNodeInput &edge : node.inputs )
         boundPorts.insert( edge.as );
+      // Plan/recipe style binds inputs through PARAMS ("input": path) rather
+      // than wiring edges — a present param satisfies the port exactly like
+      // an edge does (compilePlanToWorkflowJson treats them the same).
+      if ( node.params.isObject() )
+        for ( const std::string &key : node.params.getMemberNames() )
+          boundPorts.insert( key );
       for ( const Json::Value &input : capability["io"]["inputs"] )
       {
         if ( !input.isObject() || !input.isMember( "name" ) )
@@ -1355,9 +1375,11 @@ IrAnalysis analyzeWorkflowIr( WorkflowIr &ir, const IrAnalysisInput &input )
           : std::string();
       if ( modelId.empty() )
       {
+        Json::Value details = emptyObject();
+        details["parameter"] = "model";
         builder.fail( "model_compatibility", error_codes::kInvalidParameter, node.id, "",
                       node.operatorId + " needs a 'model' parameter (catalog id)", true,
-                      emptyObject() );
+                      details );
       }
       else if ( input.modelContracts.isObject() &&
                 input.modelContracts.isMember( modelId ) &&

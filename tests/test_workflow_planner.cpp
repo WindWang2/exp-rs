@@ -11,8 +11,30 @@
 #include <string>
 
 #include "agent/harness/workflow_planner.h"
+#include "agent/harness/capability_catalog.h"
+#include "agent/harness/capability_knowledge.h"
+#include "agent/harness/capability_relations.h"
 
 using namespace sicnu::agent::harness;
+
+namespace
+{
+/// Repo convention (test_capability_drift.cpp): point the knowledge layers at
+/// the source tree explicitly — the default search paths do not resolve from
+/// the test working directory.
+void loadHarnessKnowledge()
+{
+  const std::string source = CMAKE_SOURCE_DIR;
+  CapabilityKnowledge::instance().setDirectory( source + "/data/agent/capabilities" );
+  CapabilityKnowledge::instance().reload();
+  CapabilityCatalog::instance().setDirectory(
+    source + "/data/processing/algorithm_meta/capability" );
+  CapabilityCatalog::instance().reload();
+  CapabilityRelations::instance().setFilePath(
+    source + "/data/processing/algorithm_meta/capability/capability_relations.json" );
+  CapabilityRelations::instance().reload();
+}
+}
 
 namespace
 {
@@ -73,6 +95,7 @@ CompileWorkflowRequest requestFor( const Json::Value &ir )
 TEST_CASE( "compileWorkflow runs every stage and lowers a clean IR to an executable plan",
            "[workflow_planner]" )
 {
+  loadHarnessKnowledge();
   HarnessError error;
   const CompiledWorkflow compiled = compileWorkflow( requestFor( ndviIr() ), error );
   REQUIRE( error.code.empty() );
@@ -157,7 +180,7 @@ TEST_CASE( "planToWorkflowIr converts AgentPlan documents so recipes compile too
     "inputs": [ { "name": "primary", "ref": "asset-3" } ],
     "steps": [
       { "id": "step_1", "operator_id": "rs:spectral_index",
-        "params": { "index": "NDVI" },
+        "params": { "index": "NDVI", "input": "/data/scenes/august.tif" },
         "inputs": [],
         "verification": "raster" }
     ],
@@ -170,8 +193,11 @@ TEST_CASE( "planToWorkflowIr converts AgentPlan documents so recipes compile too
   REQUIRE( ir.nodes.size() == 1 );
   CHECK( ir.nodes[0].operatorId == "rs:spectral_index" );
   CHECK( ir.outputs[0].node == "step_1" );
-  // The converted IR compiles through the full pipeline.
-  const CompiledWorkflow compiled = compileWorkflow( requestFor( workflowIrToJson( ir ) ), error );
+  // The converted IR compiles through the full pipeline. Plans carry no
+  // output_dir, so the compile request supplies one for output derivation.
+  Json::Value irDoc = workflowIrToJson( ir );
+  irDoc["expectations"] = parse( R"({ "output_dir": "/tmp/compile-out" })" );
+  const CompiledWorkflow compiled = compileWorkflow( requestFor( irDoc ), error );
   CHECK( compiled.verdict() == "ok" );
   CHECK( compiled.workflowJson.size() > 0 );
 }

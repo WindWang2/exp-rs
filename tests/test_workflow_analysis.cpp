@@ -12,8 +12,30 @@
 
 #include "agent/harness/harness_error.h"
 #include "agent/harness/workflow_analysis.h"
+#include "agent/harness/capability_catalog.h"
+#include "agent/harness/capability_knowledge.h"
+#include "agent/harness/capability_relations.h"
 
 using namespace sicnu::agent::harness;
+
+namespace
+{
+/// Repo convention (test_capability_drift.cpp): point the knowledge layers at
+/// the source tree explicitly — the default search paths do not resolve from
+/// the test working directory.
+void loadHarnessKnowledge()
+{
+  const std::string source = CMAKE_SOURCE_DIR;
+  CapabilityKnowledge::instance().setDirectory( source + "/data/agent/capabilities" );
+  CapabilityKnowledge::instance().reload();
+  CapabilityCatalog::instance().setDirectory(
+    source + "/data/processing/algorithm_meta/capability" );
+  CapabilityCatalog::instance().reload();
+  CapabilityRelations::instance().setFilePath(
+    source + "/data/processing/algorithm_meta/capability/capability_relations.json" );
+  CapabilityRelations::instance().reload();
+}
+}
 
 namespace
 {
@@ -85,6 +107,7 @@ Json::Value healthyNdviIr()
 
 TEST_CASE( "New compiler error codes joined the closed taxonomy", "[workflow_analysis][errors]" )
 {
+  loadHarnessKnowledge();
   CHECK( isKnownErrorCode( "WAVELENGTH_INCOMPATIBLE" ) );
   CHECK( isKnownErrorCode( "TEMPORAL_MISALIGNMENT" ) );
   CHECK( isKnownErrorCode( "CATEGORICAL_MISMATCH" ) );
@@ -221,7 +244,8 @@ TEST_CASE( "Warn-class radiometry degrades to a warning, unknown facts skip the 
     "nodes": [
       { "id": "ndvi", "operator": "rs:spectral_index",
         "params": { "index": "NDVI" }, "inputs": [ { "input": "primary" } ] }
-    ]
+    ],
+    "expectations": { "output_dir": "/tmp/out" }
   })" );
   WorkflowIr ir;
   HarnessError error;
@@ -356,9 +380,10 @@ TEST_CASE( "Stochastic operators under deterministic expectations warn, not fail
     "inputs": [ { "name": "primary", "ref": "asset-3" } ],
     "nodes": [
       { "id": "a", "operator": "rs:band_math",
+        "params": { "expression": "B1" },
         "inputs": [ { "input": "primary" } ], "determinism": "stochastic" }
     ],
-    "expectations": { "deterministic": true }
+    "expectations": { "deterministic": true, "output_dir": "/tmp/out" }
   })" );
   WorkflowIr ir;
   HarnessError error;
@@ -469,10 +494,16 @@ TEST_CASE( "Assumed-only numeric domains degrade SAR findings to warnings",
   HarnessError error;
   REQUIRE( readWorkflowIr( doc, ir, error ) );
   const IrAnalysis analysis = analyzeWorkflowIr( ir, IrAnalysisInput{} );
+  // The consumer inherits the domain as ASSUMED — its finding is a warning.
   const IrIssue *calibration = findIssue( analysis, "CALIBRATION_MISMATCH", "backscatter" );
   REQUIRE( calibration );
   CHECK( calibration->severity == "warning" );
-  CHECK( analysis.verdict == "ok" );
+  // The producer sees the slot's DECLARED domain — its finding is the
+  // fact-backed (repairable) error; the verdict reflects that honestly.
+  const IrIssue *producer = findIssue( analysis, "CALIBRATION_MISMATCH", "filter" );
+  REQUIRE( producer );
+  CHECK( producer->severity == "error" );
+  CHECK( analysis.verdict == "fixable" );
 }
 
 TEST_CASE( "Duplicate input port bindings are rejected at read time",
@@ -545,8 +576,9 @@ TEST_CASE( "Object-shaped grid facts (the real inspect shapes) are compared",
   input.inputFacts["t1"] = doc3;
   input.inputFacts["t2"] = doc4;
   const IrAnalysis noCrsNoise = analyzeWorkflowIr( ir, input );
+  // Case-folded + crs_authid fallback: one CRS, no noise; identical grids.
   CHECK( findIssue( noCrsNoise, "CRS_MISMATCH" ) == nullptr );
-  CHECK( findIssue( noCrsNoise, "GRID_MISMATCH" ) != nullptr ); // same grid, 4326 both
+  CHECK( findIssue( noCrsNoise, "GRID_MISMATCH" ) == nullptr );
 }
 
 TEST_CASE( "Declared facts conflicting with observations become FACT_CONFLICT warnings",

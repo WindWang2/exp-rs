@@ -8,6 +8,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 
 #include <string>
 
@@ -144,6 +145,7 @@ TEST_CASE( "Resume marks changed fact files stale and rewinds to grounding",
     file.write( "v2-with-different-bytes" );
     file.flush();
   }
+  info.refresh();
   REQUIRE( static_cast<long long>( info.size() ) != 2 ); // self-check guard
   auto stale = store.resumeSession( "sess-stale", error );
   REQUIRE( stale );
@@ -220,6 +222,40 @@ TEST_CASE( "Compaction keeps the science and drops the bulk, deterministically",
   CHECK( first["ir"]["ir_id"].asString() == "wir-test" );
   CHECK( first["fact_identities"]["primary"]["path"].asString() ==
          "harness_session_fixture.tif" );
+}
+
+TEST_CASE( "An oversized session document compacts under the 64 KiB bound",
+           "[context_checkpoint]" )
+{
+  cleanStore();
+  HarnessSessionStore &store = HarnessSessionStore::instance();
+  store.setDirectory( kStoreDir );
+  HarnessSessionState state = sampleState( "huge" );
+  // Bulk: a large checks ledger + a large issues list in the analysis.
+  Json::Value analysis;
+  analysis["verdict"] = "fixable";
+  for ( int i = 0; i < 3000; ++i )
+  {
+    Json::Value check( Json::objectValue );
+    check["check"] = "filler_check_name_" + std::to_string( i );
+    check["status"] = "pass";
+    check["details"] = "padding blob to give the document real bulk volume";
+    analysis["checks"].append( check );
+  }
+  state.analysis = analysis;
+  REQUIRE( state.approxTokens() * 4 > HarnessSessionStore::kMaxDocumentBytes );
+
+  HarnessError error;
+  const QString path = store.saveSession( state, error );
+  REQUIRE( !path.isEmpty() ); // compaction saved it — no typed failure
+  QFileInfo info( path );
+  CHECK( static_cast<long long>( info.size() ) <=
+         HarnessSessionStore::kMaxDocumentBytes );
+  // The compacted document keeps the science verdict.
+  auto loaded = store.loadSession( "huge", error );
+  REQUIRE( loaded );
+  CHECK( loaded->analysis["verdict"].asString() == "fixable" );
+  cleanStore();
 }
 
 TEST_CASE( "Stage vocabulary is closed", "[context_checkpoint]" )

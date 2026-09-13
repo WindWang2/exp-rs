@@ -216,13 +216,47 @@ IrRepairOutcome planRepairs( const WorkflowIr &ir, const IrAnalysis &analysis,
       const IrNode *consumer = findNodeById( outcome.ir, consumerId );
       if ( !consumer )
         continue;
-      // The offending edge (issue.port == local port) must be a slot edge for
-      // a reproject to be insertable; node-to-node CRS conflicts mean the
-      // upstream producer must be repaired instead (decision). The edge is
-      // COPIED: inserting repair nodes reallocates the node vector and no
-      // pointer into it may survive a push_back (review A-3).
-      const IrNodeInput *edgePtr = findEdge( *consumer, issue.port );
-      if ( !edgePtr || edgePtr->input.empty() )
+      // The offending edge must be a SLOT edge for a reproject to be
+      // insertable; node-to-node CRS conflicts mean the upstream producer
+      // must be repaired instead (decision). The node-level issue carries no
+      // port, so the offending slot edge is re-derived deterministically:
+      // the first slot edge whose CRS differs from the reference sibling.
+      const IrNodeInput *edgePtr = nullptr;
+      std::string offendingCrs;
+      {
+        std::string referenceCrsProbe;
+        for ( const IrNodeInput &sibling : consumer->inputs )
+        {
+          const std::string authid = crsAuthidOf(
+            effectiveEdgeFacts( outcome.ir, *consumer, sibling, input ) );
+          if ( authid.empty() )
+            continue;
+          if ( referenceCrsProbe.empty() )
+          {
+            referenceCrsProbe = authid;
+            continue;
+          }
+          if ( authid != referenceCrsProbe )
+          {
+            referenceCrsProbe = authid;
+            break;
+          }
+        }
+        for ( const IrNodeInput &candidate : consumer->inputs )
+        {
+          if ( candidate.input.empty() )
+            continue;
+          const std::string authid = crsAuthidOf(
+            effectiveEdgeFacts( outcome.ir, *consumer, candidate, input ) );
+          if ( !authid.empty() && !referenceCrsProbe.empty() && authid != referenceCrsProbe )
+          {
+            edgePtr = &candidate;
+            offendingCrs = authid;
+            break;
+          }
+        }
+      }
+      if ( !edgePtr )
       {
         outcome.refusals.push_back( makeRefusal(
           kRuleReproject, issue.code,
