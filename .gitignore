@@ -74,6 +74,10 @@ data/*
 # into the build tree by the sicnu_i18n target and never committed.
 resources/translations/*.qm
 
+# Built-in spectral library and material priors (D12) are tracked, redistributable data.
+!data/spectral/
+!data/spectral/**
+
 # Test golden data always tracked
 !tests/data/
 !tests/data/**

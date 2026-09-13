@@ -1,0 +1,49 @@
+{
+  "description": "Sensor band grids used as resampling targets (SpectralLibrary::Library::resampleTo, ADR 0079 Gaussian SRF model). Nominal band centres and FWHM from the official user guides (USGS Landsat 8/9, ESA Sentinel-2, CRESDA GF-1/2); these are public facts approximated by Gaussian spectral response functions, not measured RSRs. Band order is strictly increasing by centre wavelength.",
+  "sensors": [
+    {
+      "id": "landsat-oli",
+      "name": "Landsat-8/9 OLI (nominal)",
+      "bands": [
+        { "name": "coastal-aerosol", "wavelengthNm": 443.0, "fwhmNm": 20.0 },
+        { "name": "blue", "wavelengthNm": 482.0, "fwhmNm": 65.0 },
+        { "name": "green", "wavelengthNm": 561.0, "fwhmNm": 60.0 },
+        { "name": "pan", "wavelengthNm": 589.0, "fwhmNm": 180.0 },
+        { "name": "red", "wavelengthNm": 654.0, "fwhmNm": 40.0 },
+        { "name": "nir", "wavelengthNm": 865.0, "fwhmNm": 30.0 },
+        { "name": "cirrus", "wavelengthNm": 1373.0, "fwhmNm": 30.0 },
+        { "name": "swir1", "wavelengthNm": 1609.0, "fwhmNm": 90.0 },
+        { "name": "swir2", "wavelengthNm": 2201.0, "fwhmNm": 180.0 }
+      ]
+    },
+    {
+      "id": "sentinel-2-msi",
+      "name": "Sentinel-2 MSI (S2A nominal)",
+      "bands": [
+        { "name": "B1-coastal", "wavelengthNm": 443.0, "fwhmNm": 21.0 },
+        { "name": "B2-blue", "wavelengthNm": 490.0, "fwhmNm": 66.0 },
+        { "name": "B3-green", "wavelengthNm": 560.0, "fwhmNm": 36.0 },
+        { "name": "B4-red", "wavelengthNm": 665.0, "fwhmNm": 31.0 },
+        { "name": "B5-rededge1", "wavelengthNm": 705.0, "fwhmNm": 15.0 },
+        { "name": "B6-rededge2", "wavelengthNm": 740.0, "fwhmNm": 15.0 },
+        { "name": "B7-rededge3", "wavelengthNm": 783.0, "fwhmNm": 20.0 },
+        { "name": "B8-nir", "wavelengthNm": 842.0, "fwhmNm": 115.0 },
+        { "name": "B8A-nir-narrow", "wavelengthNm": 865.0, "fwhmNm": 21.0 },
+        { "name": "B9-water-vapour", "wavelengthNm": 945.0, "fwhmNm": 20.0 },
+        { "name": "B10-cirrus", "wavelengthNm": 1375.0, "fwhmNm": 31.0 },
+        { "name": "B11-swir1", "wavelengthNm": 1610.0, "fwhmNm": 94.0 },
+        { "name": "B12-swir2", "wavelengthNm": 2190.0, "fwhmNm": 185.0 }
+      ]
+    },
+    {
+      "id": "gf-pms",
+      "name": "GF-1 / GF-2 PMS (nominal, identical multispectral grids)",
+      "bands": [
+        { "name": "B1-blue", "wavelengthNm": 485.0, "fwhmNm": 70.0 },
+        { "name": "B2-green", "wavelengthNm": 565.0, "fwhmNm": 70.0 },
+        { "name": "B3-red", "wavelengthNm": 660.0, "fwhmNm": 60.0 },
+        { "name": "B4-nir", "wavelengthNm": 830.0, "fwhmNm": 120.0 }
+      ]
+    }
+  ]
+}
