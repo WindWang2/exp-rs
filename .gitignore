@@ -189,3 +189,7 @@ data/labs/_tmp/
 # The contract platform 9.0 freshness gate needs the committed snapshot
 !data/contracts/
 !data/contracts/contract_graph.snap.json
+# advanced-sar-polsar-insar-10: track planning notes (markdown only; logs stay local).
+!.planning/advanced-sar-polsar-insar-10/
+.planning/advanced-sar-polsar-insar-10/*
+!.planning/advanced-sar-polsar-insar-10/*.md
