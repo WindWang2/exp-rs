@@ -1,7 +1,7 @@
 # Release Readiness — local verification evidence
 
-* Generated (UTC): 2026-09-13T03:50:12.319374+00:00
-* Git SHA: `c27d0ac1ab46d5e0330a8f7275ee9701bb5d2d43`
+* Generated (UTC): 2026-09-13T06:33:20.989892+00:00
+* Git SHA: `f0f6869b274c336513e75296fd6d204fcd4b7cfb`
 * Host: linux
 * **Overall: READY**
 * Counts: {"compiled": 36, "passed": 36, "failed": 0, "not_built": 0, "skipped": 0, "timeout": 0, "no_evidence": 0}

@@ -1,7 +1,7 @@
 {
  "schema": "exp.readiness.report.v1",
- "generated_utc": "2026-09-13T03:50:12.319374+00:00",
- "git_sha": "c27d0ac1ab46d5e0330a8f7275ee9701bb5d2d43",
+ "generated_utc": "2026-09-13T06:33:20.989892+00:00",
+ "git_sha": "f0f6869b274c336513e75296fd6d204fcd4b7cfb",
  "build_dir": "/home/kevin/projects/rs-studio/exp-rs-verification-baseline-green/build-ci-fast",
  "host": {
   "platform": "linux"
