@@ -14,10 +14,16 @@
 
 #include <opencv2/core.hpp>
 
+#include <functional>
 #include <string>
 #include <vector>
 
 namespace sicnu::operators::runtime {
+
+/// Cancellation probe invoked periodically inside long postprocess loops.
+/// It THROWS the caller's cancellation error (e.g. RSOperatorContext::
+/// throwIfCancelled); the postprocess module only calls it, never catches.
+using CancelProbe = std::function<void()>;
 
 /// One decoded detection in RASTER pixel coordinates (top-left corner + size).
 struct DetectionBox
@@ -53,11 +59,16 @@ std::string decodeDetections( const cv::Mat &output, const DetectionDecodeContra
 /// part of the tie-break key but do NOT gate suppression — overlapping boxes
 /// of different classes suppress each other; cross-class duplicates are the
 /// tile-overlap pathology this pass exists to remove).
-std::vector<DetectionBox> nonMaxSuppression( const std::vector<DetectionBox> &boxes, double iouThreshold );
+std::vector<DetectionBox> nonMaxSuppression( const std::vector<DetectionBox> &boxes, double iouThreshold,
+                                             const CancelProbe &cancelled = {} );
 
 /// Cross-tile dedup: exact-duplicate collapse (bit-equal boxes from overlap
 /// seams) followed by the whole-raster NMS. Bounded by contract.maxDetections
 /// upstream — the accumulator refuses more, it never silently drops.
-void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold );
+/// `cancelled` (F-OPS-5) is probed every iteration block so a near-max-budget
+/// candidate set cannot block worker cancellation for minutes; the kept set is
+/// unchanged whether or not a probe fires.
+void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold,
+                      const CancelProbe &cancelled = {} );
 
 } // namespace sicnu::operators::runtime

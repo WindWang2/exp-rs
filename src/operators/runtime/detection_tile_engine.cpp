@@ -421,7 +421,10 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
       "detection accumulated " + std::to_string( stats.rawDetections )
         + " boxes which exceeds output.detection.max_detections ("
         + std::to_string( det.maxDetections ) + ") — raise the cap or lower the conf_threshold" );
-  dedupDetections( detections, det.nmsIou );
+  // F-OPS-5: the dedup/NMS pass probes cancellation every iteration block —
+  // a near-max_detections candidate set used to block worker cancellation
+  // for minutes inside the O(n^2) pass.
+  dedupDetections( detections, det.nmsIou, [&context] { context.throwIfCancelled(); } );
   stats.detectionsKept = static_cast<int>( detections.size() );
 
   context.throwIfCancelled();

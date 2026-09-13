@@ -4,8 +4,10 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <set>
 #include <tuple>
+#include <utility>
 
 namespace sicnu::operators::runtime {
 
@@ -127,7 +129,7 @@ std::string decodeDetections( const cv::Mat &output, const DetectionDecodeContra
 }
 
 std::vector<DetectionBox> nonMaxSuppression( const std::vector<DetectionBox> &boxes,
-                                             double iouThreshold )
+                                             double iouThreshold, const CancelProbe &cancelled )
 {
   std::vector<DetectionBox> ordered = boxes;
   std::sort( ordered.begin(), ordered.end(), []( const DetectionBox &a, const DetectionBox &b ) {
@@ -145,25 +147,90 @@ std::vector<DetectionBox> nonMaxSuppression( const std::vector<DetectionBox> &bo
     return a.h < b.h;
   } );
 
+  // F-OPS-5: a negative threshold suppresses every pair regardless of
+  // geometry — no bucket domain can prune that, so keep the dense pass.
+  if ( iouThreshold < 0.0 )
+  {
+    std::vector<DetectionBox> keptDense;
+    std::vector<bool> suppressed( ordered.size(), false );
+    for ( std::size_t i = 0; i < ordered.size(); ++i )
+    {
+      if ( cancelled )
+        cancelled();
+      if ( suppressed[i] )
+        continue;
+      keptDense.push_back( ordered[i] );
+      for ( std::size_t j = i + 1; j < ordered.size(); ++j )
+      {
+        if ( !suppressed[j] && iou( ordered[i], ordered[j] ) > iouThreshold )
+          suppressed[j] = true;
+      }
+    }
+    return keptDense;
+  }
+
+  // F-OPS-5: bucket the boxes on a uniform grid with cell size >= the largest
+  // box extent. IoU > threshold (>0) requires overlapping AABBs, and two
+  // AABBs of length <= cellSize that intersect fall within one cell of each
+  // other per axis — so comparing each kept box only against kept boxes in
+  // its 3x3 cell neighbourhood reproduces the O(n^2) kept set EXACTLY while
+  // touching O(n) pairs for realistic distributions. Ties and output order
+  // are unchanged: candidates are still visited in the deterministic sort
+  // order and suppression decisions are identical.
+  double cellSize = 1.0;
+  for ( const DetectionBox &b : ordered )
+    cellSize = std::max( cellSize, std::max( static_cast<double>( b.w ), static_cast<double>( b.h ) ) );
+
+  auto cellOf = [cellSize]( double v ) -> long long {
+    if ( !std::isfinite( v ) )
+      return 0; // non-finite geometry never suppresses (iou == 0); park it
+    return static_cast<long long>( std::floor( v / cellSize ) );
+  };
+
+  // cell -> indices of KEPT boxes anchored there (a kept box is registered in
+  // every cell its AABB spans, so neighbourhood queries are complete).
+  std::map<std::pair<long long, long long>, std::vector<std::size_t>> keptByCell;
   std::vector<DetectionBox> kept;
-  std::vector<bool> suppressed( ordered.size(), false );
+  kept.reserve( ordered.size() );
   for ( std::size_t i = 0; i < ordered.size(); ++i )
   {
-    if ( suppressed[i] )
-      continue;
-    kept.push_back( ordered[i] );
-    for ( std::size_t j = i + 1; j < ordered.size(); ++j )
+    if ( cancelled && ( i % 256 == 0 ) )
+      cancelled();
+    const DetectionBox &candidate = ordered[i];
+    const long long cx0 = cellOf( candidate.x );
+    const long long cx1 = cellOf( static_cast<double>( candidate.x ) + candidate.w );
+    const long long cy0 = cellOf( candidate.y );
+    const long long cy1 = cellOf( static_cast<double>( candidate.y ) + candidate.h );
+    bool suppressed = false;
+    for ( long long cy = cy0 - 1; cy <= cy1 + 1 && !suppressed; ++cy )
     {
-      if ( suppressed[j] )
-        continue;
-      if ( iou( ordered[i], ordered[j] ) > iouThreshold )
-        suppressed[j] = true;
+      for ( long long cx = cx0 - 1; cx <= cx1 + 1 && !suppressed; ++cx )
+      {
+        const auto cellIt = keptByCell.find( { cx, cy } );
+        if ( cellIt == keptByCell.end() )
+          continue;
+        for ( const std::size_t keptIdx : cellIt->second )
+        {
+          if ( iou( kept[keptIdx], candidate ) > iouThreshold )
+          {
+            suppressed = true;
+            break;
+          }
+        }
+      }
     }
+    if ( suppressed )
+      continue;
+    kept.push_back( candidate );
+    const std::size_t keptIdx = kept.size() - 1;
+    for ( long long cy = cy0; cy <= cy1; ++cy )
+      for ( long long cx = cx0; cx <= cx1; ++cx )
+        keptByCell[{ cx, cy }].push_back( keptIdx );
   }
   return kept;
 }
 
-void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold )
+void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold, const CancelProbe &cancelled )
 {
   // Exact-duplicate collapse: overlap seams re-detect the identical object
   // with bit-equal geometry (same tile math); a set keyed on the geometry
@@ -173,8 +240,11 @@ void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold )
   std::set<std::tuple<int, int, int, int, int, float>> seen;
   std::vector<DetectionBox> collapsed;
   collapsed.reserve( boxes.size() );
-  for ( const DetectionBox &b : boxes )
+  for ( std::size_t idx = 0; idx < boxes.size(); ++idx )
   {
+    if ( cancelled && ( idx % 4096 == 0 ) )
+      cancelled();
+    const DetectionBox &b = boxes[idx];
     const auto key = std::make_tuple( static_cast<int>( std::lround( b.x * 100.0f ) ),
                                       static_cast<int>( std::lround( b.y * 100.0f ) ),
                                       static_cast<int>( std::lround( b.w * 100.0f ) ),
@@ -183,7 +253,7 @@ void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold )
     if ( seen.insert( key ).second )
       collapsed.push_back( b );
   }
-  boxes = nonMaxSuppression( collapsed, iouThreshold );
+  boxes = nonMaxSuppression( collapsed, iouThreshold, cancelled );
 }
 
 } // namespace sicnu::operators::runtime
