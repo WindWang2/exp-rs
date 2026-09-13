@@ -10,13 +10,19 @@
 namespace sicnu::sar
 {
 
+double sarUpperMedianLinear( std::vector<double> &samples )
+{
+    const size_t mid = samples.size() / 2;
+    std::nth_element( samples.begin(), samples.begin() + mid, samples.end() );
+    return samples[mid];
+}
+
 bool sarTemporalStats( const double *values, int n, SarTemporalStats *out,
                        double changeThresholdDb )
 {
     if ( values == nullptr || out == nullptr || n <= 0 || !( changeThresholdDb >= 0.0 ) )
         return false;
     *out = SarTemporalStats{};
-
     // Pass 1: valid samples + linear aggregates (median needs storage).
     std::vector<double> valid;
     valid.reserve( static_cast<size_t>( n ) );
@@ -59,9 +65,7 @@ bool sarTemporalStats( const double *values, int n, SarTemporalStats *out,
     out->cv = out->stdDevLinear / out->meanLinear;
 
     // Robust log-domain change vs the median linear baseline.
-    const size_t mid = valid.size() / 2;
-    std::nth_element( valid.begin(), valid.begin() + mid, valid.end() );
-    const double medianLinear = valid[mid];
+    const double medianLinear = sarUpperMedianLinear( valid );
     out->baselineDb = linearToDb( medianLinear );
 
     // Pass 2 over the valid samples: log deviations. (Repeated from the
