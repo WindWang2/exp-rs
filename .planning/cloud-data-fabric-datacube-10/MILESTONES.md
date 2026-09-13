@@ -9,5 +9,5 @@
 | M4 | planner + prefetch/mirror + 算子/CLI | test_io_fabric_plan（57）+ operators（40）绿；CLI 冒烟通过 | ✅ |
 | M5 | 规模证据 | test_io_fabric_scale 绿（32 断言，含 RSS 实测） | ✅ |
 | M6 | 边缘矩阵收尾 + F-OPS-4 裁决 | corrupt-mirror/typed/offline 入 scale 套件；F-OPS-4 窄修复+回归 | ✅ |
-| M7 | review P0/P1 清零 | REVIEW_LOG.md 全 finding 有 disposition | 🔄 进行中 |
-| M8 | PR 创建（不 merge） | gh pr view → OPEN | ⬜ |
+| M7 | review P0/P1 清零 | REVIEW_LOG.md 全 finding 有 disposition（36+4 项全处置，P1×5 全 fixed） | ✅ |
+| M8 | PR 创建（不 merge） | PR #974 OPEN | ✅ |
