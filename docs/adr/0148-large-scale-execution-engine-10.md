@@ -25,13 +25,16 @@
      a graph runner over value-type nodes (source / stage / join / sink)
      joined by `BoundedChunkQueue`s: an N-input join drains one tile from each
      bounded input per output tile (fan-in with natural backpressure,
-     deterministic row-major partition from a grid spec), `TileSpec` gains
-     optional `bandOffset`/`timeIndex` (additive, zero-cost defaults), and
-     tile payloads may reference a scratch-backed intermediate instead of
-     owning RAM. The existing linear `ChunkPipeline` keeps its role for
-     single-input chains; `ChunkGraph` generalizes it for multi-input DAGs.
-     Any input closing or cancelling drains downstream in bounded time (no
-     deadlocks — same contract family as the existing queue).
+     deterministic row-major partition from a grid spec; single-consumer
+     nodes — fan-out must go through an explicit copy stage), `TileSpec`
+     gains optional `bandOffset`/`timeIndex` (additive, zero-cost defaults).
+     STAGED: the tile-payload scratch-reference form ships with the first
+     external-memory operator adoption; this ADR's substrate (lease, store,
+     checkpoint) is the contract it will use. The existing linear
+     `ChunkPipeline` keeps its role for single-input chains; `ChunkGraph`
+     generalizes it for multi-input DAGs. Any input closing or cancelling
+     drains downstream in bounded time (no deadlocks — same contract family
+     as the existing queue).
   3. **Memory planner before admission, refusal with estimates.** A pure
      planner converts (tile geometry, halo, band count, stages, queue
      capacities, dtype) into a working-set estimate and a recommended
@@ -57,11 +60,13 @@
      (the same run-lock ownership rule as #727).
   6. **Scheduler integration without a second GPU truth.** The vram admission
      dimension may be fed from the Model Runtime's NVML-backed device report
-     (read-only consumer); scratch budget rides `tempDiskMb`; JobEngine gains
-     a bounded poison-task escalation — the same (executor, error class)
-     crashing workers N consecutive times stops auto-respawn for that task
-     and surfaces a typed, user-visible failure instead of an unbounded
-     crash/retry loop.
+     (`wireVramBudgetFromDeviceTruth`, an injectable, host opt-in seam — the
+     gate stays default-off per the conservative-defaults rule); scratch
+     budget rides `tempDiskMb`. Poison-task convergence stays where 7.0
+     bounded it: the transient auto-retry cap (0..3, infrastructure error
+     classes only) makes a worker-crashing task reach a terminal Failed after
+     exactly the budget — 10.0 pins that convergence with a storm test
+     instead of adding a second escalation mechanism.
   7. **Scale tests prove complexity, not wall-clock.** A gated
      (`SICNU_LSEE10_STRESS`) synthetic suite covers: wide fan-out joins,
      worker crash storms, bounded scratch under a 10^6 logical-tile stream,

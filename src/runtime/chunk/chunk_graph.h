@@ -32,6 +32,7 @@
 #include "chunk_pipeline.h"
 #include "tile_spec.h"
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <functional>
@@ -57,10 +58,13 @@ struct ChunkPartitionMismatch : std::runtime_error
     }
 };
 
-/// Raised by the runner on cooperative cancellation (not by nodes).
-struct ChunkGraphCancelled : std::runtime_error
+/// Raised by the runner on cooperative cancellation (not by nodes). Derives
+/// ChunkCancelled so callers written against the pipeline's cancellation
+/// type keep catching graph cancellations too (F-A-8); the graph-specific
+/// abort-to-cancel terminal semantics are documented at addSink.
+struct ChunkGraphCancelled : ChunkCancelled
 {
-    explicit ChunkGraphCancelled() : std::runtime_error( "chunk graph cancelled" ) {}
+    explicit ChunkGraphCancelled() : ChunkCancelled() {}
 };
 
 class ChunkGraph
@@ -88,10 +92,14 @@ class ChunkGraph
     /// Adds a tile source (one thread). @p fn produces tiles until it returns
     /// false. Tile index order defines the partition for downstream joins.
     NodeId addSource( SourceFn fn );
-    /// Adds a 1-input transform after @p input.
+    /// Adds a 1-input transform after @p input. A node may have at most ONE
+    /// consumer: pointing a second stage/join/sink at the same node throws
+    /// std::logic_error (a shared queue would silently split tiles between
+    /// consumers — fan-out must go through an explicit copy stage, F-A-10).
     NodeId addStage( NodeId input, StageFn fn );
     /// Adds an N-input join. Every input must be a live node id; inputs are
-    /// popped in the ORDER GIVEN (deterministic tuple alignment).
+    /// popped in the ORDER GIVEN (deterministic tuple alignment). The
+    /// single-consumer rule above applies to every input as well.
     NodeId addJoin( std::vector<NodeId> inputs, JoinFn fn );
     /// Sets the single consumer. Calling twice replaces the sink (tests);
     /// the previous sink's thread has not started yet — building happens
@@ -103,9 +111,14 @@ class ChunkGraph
     void setProgressCallback( ProgressFn cb ) { m_progress = std::move( cb ); }
 
     /// Runs the graph to completion: starts every node thread, joins them
-    /// all, then rethrows the first node error, throws ChunkGraphCancelled on
-    /// cooperative cancel, or returns normally when the sink drained every
-    /// source. Never returns with a node thread alive.
+    /// all, then rethrows the first node error, throws ChunkGraphCancelled
+    /// (as a ChunkCancelled) on cooperative cancel or sink abort, or returns
+    /// normally when the sink drained every source. Never returns with a
+    /// node thread alive. Throws std::logic_error when called twice — one
+    /// run per graph instance (F-A-18: a hard check, not a debug assert).
+    /// NOTE the deliberate divergence from ChunkPipeline: a consumer abort
+    /// IS a cancellable terminal state here, not a silent normal return —
+    /// graph-level callers get an observable "stopped early" outcome.
     void run();
 
     /// Tiles that left the final queue (tests / diagnostics).
@@ -133,6 +146,9 @@ class ChunkGraph
     using QueuePtr = std::shared_ptr<BoundedChunkQueue<TilePayload>>;
 
     QueuePtr queueFor( NodeId id ) const; ///< nullptr for the sink
+    /// Throws std::logic_error when @p input already has a consumer node
+    /// (single-consumer rule, F-A-10). Build-time only.
+    void requireFreeConsumerLocked( NodeId input ) const;
     /// Node bodies. Every body honors: exception capture + global cancel,
     /// close own output on finish, cancel everything on error.
     void runSource( Node &node );
@@ -166,7 +182,11 @@ class ChunkGraph
     mutable RunState m_state; ///< reset by run(); mutable: const observers lock it
     std::atomic<size_t> m_completedTiles{ 0 };
     std::atomic<int> m_sourceTileCount{ 0 }; ///< total tiles any source emitted
+    std::atomic<double> m_lastProgress{ 0.0 }; ///< monotonic progress clamp (F-A-9)
     std::vector<std::thread> m_threads;
+    bool m_ran = false; ///< one-run guard (F-A-18): threads are joined and
+                        ///  cleared at the end of every run(), so emptiness
+                        ///  cannot signal "already ran"
 };
 
 } // namespace sicnu::runtime::chunk

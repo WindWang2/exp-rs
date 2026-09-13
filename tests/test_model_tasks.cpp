@@ -364,9 +364,30 @@ TEST_CASE( "NMS honors cooperative cancellation (#971)", "[models][detect][lsee1
     boxes.push_back( DetectionBox{ static_cast<float>( i * 20 ), 0.0f, 10.0f, 10.0f, 0, 0.5f } );
 
   // A predicate that is already cancelled: the very first poll throws the
-  // typed Cancelled error instead of running the O(n²) suppression loop.
-  REQUIRE_THROWS_AS( nonMaxSuppression( boxes, 0.45, [] { return true; } ),
-                     sicnu::operators::RSOperatorError );
+  // typed CANCELLED error (code matters: the engine's terminal-state
+  // classification keys on ErrorCode::Cancelled, F-B-9).
+  try
+  {
+    nonMaxSuppression( boxes, 0.45, [] { return true; } );
+    FAIL( "expected a cancellation" );
+  }
+  catch ( const sicnu::operators::RSOperatorError &e )
+  {
+    REQUIRE( e.code() == sicnu::operators::ErrorCode::Cancelled );
+  }
+
+  // The dedup path (exact-duplicate collapse before NMS) polls too.
+  std::vector<DetectionBox> dupBoxes( 100,
+                                      DetectionBox{ 10, 10, 20, 20, 0, 0.9f } );
+  try
+  {
+    sicnu::operators::runtime::dedupDetections( dupBoxes, 0.45, [] { return true; } );
+    FAIL( "expected a cancellation" );
+  }
+  catch ( const sicnu::operators::RSOperatorError &e )
+  {
+    REQUIRE( e.code() == sicnu::operators::ErrorCode::Cancelled );
+  }
 
   // A never-cancelled predicate produces the identical result as no
   // predicate at all (the callback is pure observation, zero semantic shift).

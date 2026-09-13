@@ -438,6 +438,12 @@ TEST_CASE( "Execution cache fingerprints differ when the contract version differ
 TEST_CASE( "Implementation identity mixes the environment pin string",
            "[data][fingerprint][lsee10]" )
 {
+  // RAII restore (F-B-12): a failed REQUIRE must not leave the provider
+  // installed for the rest of the binary.
+  struct Restore
+  {
+    ~Restore() { sicnu::data::setExecutionEnvironmentPinProvider( {} ); }
+  } restore;
   const QByteArray base = sicnu::data::makeImplementationIdentity( "schema-v-test" ).digest;
 
   sicnu::data::setExecutionEnvironmentPinProvider( [] { return "gdal=3.13.3"; } );

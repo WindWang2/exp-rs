@@ -420,3 +420,81 @@ TEST_CASE( "preflight probe reports dtype, nodata, numericScale, scaleOffset (#6
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// LSEE 10.0 (F-B-3): the tile working-set plan (ADR 0148 §3)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Streaming-family stub descriptor with a caller-controlled execution block.
+AlgorithmDescriptor streamingStubDescriptor( const Json::Value &execution )
+{
+    AlgorithmDescriptor desc;
+    desc.id = "stub:tileplan";
+    desc.agentMetadata.memoryPolicy = "streaming";
+    desc.agentMetadata.execution = execution;
+
+    PortDescriptor input;
+    input.name = "input";
+    input.type = DataType::Raster;
+    input.required = true;
+    input.rsContract["dataKind"] = "raster";
+    desc.inputs.push_back( input );
+    return desc;
+}
+
+} // namespace
+
+TEST_CASE( "preflight attaches a tile working-set plan for streaming operators",
+           "[processing][preflight][lsee10]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString raster = tmp.path() + "/big.tif";
+    writeRaster( raster, 64, 64, 1.0f ); // 64x64 Float32
+
+    Json::Value execution( Json::objectValue );
+    execution["tileWidth"] = 16u;
+    execution["tileHeight"] = 16u;
+    execution["haloPixels"] = 2u;
+    ContractStubAdapter adapter( "stub:tileplan", streamingStubDescriptor( execution ) );
+
+    Json::Value params( Json::objectValue );
+    params["input"] = raster.toStdString();
+    const Json::Value preflight = preflightAdapter( adapter, params );
+
+    const Json::Value &plan = preflight["resources"]["tilePlan"];
+    REQUIRE( plan.isObject() );
+    CHECK( plan["action"].asString() == "advisory" );
+    // 64/16 = 4 tiles per side → 16 logical tiles.
+    CHECK( plan["expectedTileCount"].asUInt64() == 16u );
+    CHECK( plan["recommendedQueueCapacity"].asUInt() == 2u );
+    // Halo widening is visible in the peak: peak(16px tile, halo 2, 1 band,
+    // 4 B) with (stages+1)=1, cap=2: 2*2*(20*20*4) + (20*20*4) bytes.
+    const Json::UInt64 perTile = 20ull * 20 * 4;
+    CHECK( plan["requestedShapePeakBytes"].asUInt64() == 2ull * perTile + perTile );
+}
+
+TEST_CASE( "preflight survives a descriptor with zero tile dimensions (F-A-3)",
+           "[processing][preflight][lsee10]" )
+{
+    QTemporaryDir tmp;
+    REQUIRE( tmp.isValid() );
+    const QString raster = tmp.path() + "/r.tif";
+    writeRaster( raster, 64, 64, 1.0f );
+
+    Json::Value execution( Json::objectValue );
+    execution["tileWidth"] = 0u; // hostile/unvalidated descriptor JSON
+    execution["tileHeight"] = 0u;
+    ContractStubAdapter adapter( "stub:tileplan", streamingStubDescriptor( execution ) );
+
+    Json::Value params( Json::objectValue );
+    params["input"] = raster.toStdString();
+    // The clamp (>=1) must keep the planner's ceil-div defined; the plan
+    // reflects the clamped 1px tile (64x64 = 4096 tiles).
+    const Json::Value preflight = preflightAdapter( adapter, params );
+    const Json::Value &plan = preflight["resources"]["tilePlan"];
+    REQUIRE( plan.isObject() );
+    CHECK( plan["expectedTileCount"].asUInt64() == 4096u );
+}

@@ -2,6 +2,7 @@
 #include "tile_checkpoint.h"
 
 #include <cstddef>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -105,7 +106,11 @@ bool TileCheckpointWriter::save( const std::string &path, const TileCheckpoint &
 
     // Unique tmp in the same directory (rename stays on one volume), then
     // fsync file + dir, then atomic replace — the checkpoint family.
-    const std::string tmp = path + ".tmp." + std::to_string( currentPid() );
+    // Unique per CALL (F-A-15): pid alone collides for two threads saving
+    // the same path concurrently — the counter makes each attempt distinct.
+    static std::atomic<unsigned long long> saveCounter{ 0 };
+    const std::string tmp = path + ".tmp." + std::to_string( currentPid() ) + "."
+                            + std::to_string( saveCounter.fetch_add( 1 ) );
     {
         std::ofstream out( tmp, std::ios::binary | std::ios::trunc );
         if ( !out )

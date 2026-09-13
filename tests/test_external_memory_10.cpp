@@ -125,19 +125,52 @@ TEST_CASE( "DiskTileStore round-trips a payload and refuses corruption", "[scrat
         REQUIRE( *restored.pixels == *original.pixels );
     }
 
-    // Corrupt a finalized tile → typed refusal, never garbage pixels.
+    // Corrupt a finalized tile in the PAYLOAD region (past the 96-byte
+    // header, F-B-6) → typed refusal via the payload digest gate.
     auto badLease = registry.acquire( "run-ts", "tile", 4096 );
     DiskTileStore::write( badLease, makePayload( 3, 1.0f ) );
     {
         std::fstream out( badLease.finalPath(), std::ios::binary | std::ios::in | std::ios::out );
         REQUIRE( out.is_open() );
-        out.seekp( 40, std::ios::beg ); // inside the payload region
+        out.seekp( 100, std::ios::beg ); // offset 4 inside the payload region
         const char junk = 'z';
         out.write( &junk, 1 );
         out.flush();
         REQUIRE( out.good() );
     }
     REQUIRE_THROWS_AS( DiskTileStore::read( badLease ), ChunkCorruptTile );
+
+    // Corrupt the HEADER region (inside geometry fields) → the headerDigest
+    // gate must also refuse: a flipped halo/offset can never masquerade.
+    auto badHeaderLease = registry.acquire( "run-ts", "tile", 4096 );
+    DiskTileStore::write( badHeaderLease, makePayload( 1, 2.0f ) );
+    {
+        std::fstream out( badHeaderLease.finalPath(),
+                          std::ios::binary | std::ios::in | std::ios::out );
+        REQUIRE( out.is_open() );
+        out.seekp( 40, std::ios::beg ); // the halo field inside the header
+        const char junk = 9;
+        out.write( &junk, 1 );
+        out.flush();
+        REQUIRE( out.good() );
+    }
+    REQUIRE_THROWS_AS( DiskTileStore::read( badHeaderLease ), ChunkCorruptTile );
+
+    // A hostile header claiming an impossible payload size must be a typed
+    // refusal, never an allocation attempt (F-A-5/F-B-1).
+    auto hugeLease = registry.acquire( "run-ts", "tile", 4096 );
+    DiskTileStore::write( hugeLease, makePayload( 0, 0.0f ) );
+    {
+        std::fstream out( hugeLease.finalPath(),
+                          std::ios::binary | std::ios::in | std::ios::out );
+        REQUIRE( out.is_open() );
+        out.seekp( 88, std::ios::beg ); // payloadBytes field (header tail)
+        const std::uint64_t huge = 1ull << 40;
+        out.write( reinterpret_cast<const char *>( &huge ), sizeof( huge ) );
+        out.flush();
+        REQUIRE( out.good() );
+    }
+    REQUIRE_THROWS_AS( DiskTileStore::read( hugeLease ), ChunkCorruptTile );
 }
 
 TEST_CASE( "BoundedWriteGate throttles concurrent writers", "[scratch][lsee10][gate]" )

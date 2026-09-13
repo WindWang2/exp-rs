@@ -41,9 +41,20 @@ ChunkGraph::NodeId ChunkGraph::addSource( SourceFn fn )
     return static_cast<NodeId>( m_nodes.size() ) - 1;
 }
 
+void ChunkGraph::requireFreeConsumerLocked( NodeId input ) const
+{
+    for ( const auto &node : m_nodes )
+        for ( const NodeId id : node.inputs )
+            if ( id == input )
+                throw std::logic_error(
+                    "chunk graph: node has more than one consumer (fan-out "
+                    "would silently split tiles); use an explicit copy stage" );
+}
+
 ChunkGraph::NodeId ChunkGraph::addStage( NodeId input, StageFn fn )
 {
     assert( input >= 0 && input < static_cast<NodeId>( m_nodes.size() ) );
+    requireFreeConsumerLocked( input );
     Node node;
     node.kind = Node::Kind::Stage;
     node.stage = std::move( fn );
@@ -57,7 +68,10 @@ ChunkGraph::NodeId ChunkGraph::addJoin( std::vector<NodeId> inputs, JoinFn fn )
 {
     assert( !inputs.empty() );
     for ( const NodeId id : inputs )
+    {
         assert( id >= 0 && id < static_cast<NodeId>( m_nodes.size() ) );
+        requireFreeConsumerLocked( id );
+    }
     Node node;
     node.kind = Node::Kind::Join;
     node.join = std::move( fn );
@@ -121,6 +135,8 @@ void ChunkGraph::runSource( Node &node )
         TilePayload payload;
         while ( !isCancelling() && node.source( payload ) )
         {
+            if ( payload.spec.bufferElementCount() != payload.pixels->size() )
+                throw std::runtime_error( "chunk graph source buffer/spec mismatch" );
             if ( !node.out->push( std::move( payload ) ) )
                 return; // graph unwinding downstream — drop the tile
             payload = TilePayload{};
@@ -206,7 +222,19 @@ void ChunkGraph::runJoin( Node &node )
                 }
             }
             if ( anyDrained && anyDelivered )
+            {
+                // A "drained" input beside a delivering one is a partition
+                // breach ONLY when the graph is not unwinding: pop() also
+                // returns false for a queue that cancel() just emptied
+                // (F-A-1). In that case the terminal state is the cancel,
+                // never a producer-contract error.
+                if ( isCancelling() )
+                {
+                    cancelUnwind();
+                    return;
+                }
                 throw ChunkPartitionMismatch( firstDrained );
+            }
             if ( anyDrained )
                 break; // every input closed and drained: clean EOF
             TilePayload out = node.join( std::move( tiles ) );
@@ -239,7 +267,17 @@ void ChunkGraph::runSink( Node &node )
             {
                 const int emitted = m_sourceTileCount.load( std::memory_order_relaxed );
                 if ( emitted > 0 )
-                    m_progress( static_cast<double>( m_completedTiles.load() ) / emitted );
+                {
+                    // Monotonic clamp (F-A-9): the denominator is a moving
+                    // source-emitted count and drop-tile stages make the raw
+                    // ratio non-final — never report a regression.
+                    const double raw = static_cast<double>( m_completedTiles.load() ) / emitted;
+                    double prev = m_lastProgress.load( std::memory_order_relaxed );
+                    while ( raw > prev && !m_lastProgress.compare_exchange_weak( prev, raw ) )
+                    {
+                    }
+                    m_progress( std::max( raw, prev ) );
+                }
             }
             if ( !node.sink( std::move( payload ) ) )
             {
@@ -266,8 +304,11 @@ void ChunkGraph::throwTerminalState()
 
 void ChunkGraph::run()
 {
-    assert( m_sinkInput >= 0 && m_sink );
-    assert( m_threads.empty() ); // one run per graph instance
+    if ( m_sinkInput < 0 || !m_sink )
+        throw std::logic_error( "chunk graph: no sink attached" );
+    if ( m_ran )
+        throw std::logic_error( "chunk graph: run() called twice" );
+    m_ran = true;
 
     // Sink node is materialized last so it can be replaced during build.
     Node sinkNode;

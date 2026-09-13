@@ -59,7 +59,11 @@ bool stressEnabled()
 /// ep9 harness conventions).
 struct EngineGuard10
 {
+    // Saved for restore (F-B-8): mutating singleton configuration without
+    // restoring it cross-contaminates any test ordered after this file.
+    int previousMaxWorkers;
     EngineGuard10()
+        : previousMaxWorkers( sicnu::jobs::JobEngine::instance().maxWorkers() )
     {
         if ( !QCoreApplication::instance() )
         {
@@ -73,7 +77,12 @@ struct EngineGuard10
         engine.clearExecutors();
         engine.setMaxWorkers( 2 );
     }
-    ~EngineGuard10() { sicnu::jobs::JobEngine::instance().shutdownForTests(); }
+    ~EngineGuard10()
+    {
+        auto &engine = sicnu::jobs::JobEngine::instance();
+        engine.shutdownForTests();
+        engine.setMaxWorkers( previousMaxWorkers );
+    }
 };
 
 TilePayload indexedPayload( int index, int total )
@@ -170,8 +179,9 @@ TEST_CASE( "Wide fan-out join drains 10^6 logical tiles with bounded in-flight m
 TEST_CASE( "Concurrent scratch acquisition never exceeds the budget and ends unaccounted",
            "[lsee10][scale][scratch]" )
 {
-    ScratchRegistry registry( { ( std::filesystem::temp_directory_path() / "lsee10-storm" ).string(),
-                                 /*budgetBytes=*/4096 } );
+    const std::string stormRoot = ( std::filesystem::temp_directory_path() / "lsee10-storm" ).string();
+    std::filesystem::remove_all( stormRoot );
+    ScratchRegistry registry( { stormRoot, /*budgetBytes=*/4096 } );
     // Deterministically saturate the budget with 8 leases of 512 B: every
     // storm acquire below must refuse (8 × 512 == budget, nothing left).
     std::vector<ScratchLease> saturation;
@@ -208,6 +218,9 @@ TEST_CASE( "Concurrent scratch acquisition never exceeds the budget and ends una
     for ( auto &worker : workers )
         worker.join();
     REQUIRE( refused == threads * rounds );
+    // The peak the concurrency ever observed respected the budget (F-B-7:
+    // the instrument must be asserted, not just updated).
+    REQUIRE( observedPeak.load() <= 4096 );
     saturation.clear(); // release the saturation leases: accounting drains
 
     // A second storm where leases DO fit proves RAII drains the accounting
@@ -224,6 +237,7 @@ TEST_CASE( "Mid-stream tile checkpoint restarts a simulated crash and refuses dr
            "[lsee10][checkpoint]" )
 {
     const auto root = std::filesystem::temp_directory_path() / "lsee10-ckpt";
+    std::filesystem::remove_all( root );
     std::filesystem::create_directories( root );
     const std::string path = ( root / "task.tileckpt" ).string();
 
@@ -256,6 +270,11 @@ TEST_CASE( "Mid-stream tile checkpoint restarts a simulated crash and refuses dr
 TEST_CASE( "Execution cache hit/miss/self-heal stays correct at thousands of entries",
            "[lsee10][scale][cache]" )
 {
+    // Keep the persistent artifact tier OUT of this test (F-B-13): with
+    // SICNU_ARTIFACT_CACHE=1 the store would put 3000 junk objects into the
+    // developer's real pool and evict entries there.
+    const bool hadPoolEnv = std::getenv( "SICNU_ARTIFACT_CACHE" ) != nullptr;
+    unsetenv( "SICNU_ARTIFACT_CACHE" );
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
     auto &cache = sicnu::data::ExecutionResultCache::instance();
@@ -312,6 +331,7 @@ TEST_CASE( "Poison task converges to terminal Failed after exactly the bounded r
     EngineGuard10 guard;
     auto &center = sicnu::TaskCenter::instance();
     center.shutdownForTests();
+    const int previousRetries = center.maxAutoRetries();
     center.setMaxAutoRetries( 2 );
 
     std::atomic<int> executions{ 0 };
@@ -341,5 +361,6 @@ TEST_CASE( "Poison task converges to terminal Failed after exactly the bounded r
     // unbounded respawn loop.
     REQUIRE( center.getTaskInfo( taskId ).autoRetryAttempts == 2 );
     REQUIRE( executions.load() == 3 );
+    center.setMaxAutoRetries( previousRetries );
     center.clearCompletedTasks();
 }

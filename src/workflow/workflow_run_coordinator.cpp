@@ -1,6 +1,8 @@
 // src/workflow/workflow_run_coordinator.cpp — see header for the contract.
 #include "workflow_run_coordinator.h"
 
+#include "framework/execution_resource_bridge.h"
+
 #include "artifact_gc.h"
 
 #include <QDateTime>
@@ -247,7 +249,14 @@ WorkflowRunCoordinator &WorkflowRunCoordinator::instance()
     return s_instance;
 }
 
-WorkflowRunCoordinator::WorkflowRunCoordinator() = default;
+WorkflowRunCoordinator::WorkflowRunCoordinator()
+{
+    // Identity seam parity (LSEE 10.0 F-A-11): resume stamps hash the SAME
+    // implementation identity as the execution cache, so the environment pin
+    // provider must be installed before the first stamp — not only when a
+    // TaskCenter instance happens to exist.
+    processing::installExecutionEnvironmentPins();
+}
 
 WorkflowRunCoordinator::~WorkflowRunCoordinator() = default;
 

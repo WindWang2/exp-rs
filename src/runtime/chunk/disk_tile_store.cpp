@@ -86,19 +86,25 @@ TileFileHeader makeHeader( const TilePayload &payload, std::uint64_t payloadByte
     return header;
 }
 
-TilePayload decode( TileFileHeader header, std::vector<char> payloadBytes,
-                    const std::string &path )
+/// Validates the framing and the header digest BEFORE any payload-size
+/// allocation (F-A-5/F-B-1): a corrupted/hostile header must surface as a
+/// typed ChunkCorruptTile, never as bad_alloc.
+void validateHeader( TileFileHeader header, const std::string &path )
 {
     if ( std::memcmp( header.magic, kMagic, kMagicSize ) != 0
          || header.version != kFormatVersion
          || header.headerSize != sizeof( TileFileHeader ) )
         throw ChunkCorruptTile( path );
-    {
-        const std::uint64_t stored = header.headerDigest;
-        header.headerDigest = 0;
-        if ( fnv1a( &header, offsetof( TileFileHeader, headerDigest ) ) != stored )
-            throw ChunkCorruptTile( path );
-    }
+    const std::uint64_t stored = header.headerDigest;
+    header.headerDigest = 0;
+    if ( fnv1a( &header, offsetof( TileFileHeader, headerDigest ) ) != stored )
+        throw ChunkCorruptTile( path );
+}
+
+TilePayload decode( TileFileHeader header, std::vector<char> payloadBytes,
+                    const std::string &path )
+{
+    validateHeader( header, path );
     if ( fnv1a( payloadBytes.data(), payloadBytes.size() ) != header.payloadDigest
          || payloadBytes.size() != header.payloadBytes )
         throw ChunkCorruptTile( path );
@@ -160,6 +166,16 @@ TilePayload DiskTileStore::read( const ScratchLease &lease )
     in.read( reinterpret_cast<char *>( &header ), sizeof( header ) );
     if ( static_cast<std::size_t>( in.gcount() ) != sizeof( header ) )
         throw ChunkCorruptTile( lease.finalPath() );
+    validateHeader( header, lease.finalPath() );
+    // The stored payload size must match the actual trailing bytes, so the
+    // allocation below is bounded by the real file, never by a hostile
+    // header field.
+    {
+        std::error_code sizeEc;
+        const auto fileSize = std::filesystem::file_size( lease.finalPath(), sizeEc );
+        if ( sizeEc || fileSize != sizeof( TileFileHeader ) + header.payloadBytes )
+            throw ChunkCorruptTile( lease.finalPath() );
+    }
     std::vector<char> payloadBytes( static_cast<std::size_t>( header.payloadBytes ) );
     if ( !payloadBytes.empty() )
     {
@@ -181,6 +197,13 @@ TilePayload DiskTileStore::readProvisional( const ScratchLease &lease )
     in.read( reinterpret_cast<char *>( &header ), sizeof( header ) );
     if ( static_cast<std::size_t>( in.gcount() ) != sizeof( header ) )
         throw ChunkCorruptTile( lease.path() );
+    validateHeader( header, lease.path() );
+    {
+        std::error_code sizeEc;
+        const auto fileSize = std::filesystem::file_size( lease.path(), sizeEc );
+        if ( sizeEc || fileSize != sizeof( TileFileHeader ) + header.payloadBytes )
+            throw ChunkCorruptTile( lease.path() );
+    }
     std::vector<char> payloadBytes( static_cast<std::size_t>( header.payloadBytes ) );
     if ( !payloadBytes.empty() )
     {

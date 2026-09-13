@@ -40,9 +40,10 @@ struct ReductionResult
 /// Folds @p tiles into @p initialState in order via @p fold(acc, tile) → acc.
 /// @p isCancelled is polled between tiles (may be empty). Tiles are passed by
 /// const reference: the fold must not retain them.
-template<typename State, typename Tile, typename FoldFn, typename CancelFn = std::function<bool()>>
+template<typename State, typename Tile, typename FoldFn>
 ReductionResult<State> reduceTiles( const std::vector<Tile> &tiles, State initialState,
-                                    FoldFn fold, CancelFn isCancelled = {} )
+                                    FoldFn fold,
+                                    std::function<bool()> isCancelled = {} )
 {
     ReductionResult<State> result;
     result.state = std::move( initialState );
@@ -61,9 +62,9 @@ ReductionResult<State> reduceTiles( const std::vector<Tile> &tiles, State initia
 
 /// Streaming variant: folds a producer sequence (false = end of stream) —
 /// the pass-1 shape for producers that never materialize the tile vector.
-template<typename State, typename NextFn, typename FoldFn, typename CancelFn = std::function<bool()>>
+template<typename State, typename NextFn, typename FoldFn>
 ReductionResult<State> reduceStream( NextFn next, State initialState, FoldFn fold,
-                                     CancelFn isCancelled = {} )
+                                     std::function<bool()> isCancelled = {} )
 {
     ReductionResult<State> result;
     result.state = std::move( initialState );

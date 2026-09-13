@@ -92,6 +92,13 @@ struct TileMemoryPlan
 /// Peak-RAM model: (stageCount+1) source-to-consumer queue stages, each
 /// holding queueCapacity tiles per input, plus one tile in the consumer and
 /// the pass-1 global state. Every product saturates on overflow.
+///
+/// HONESTY NOTE (F-A-13): this is a heuristic working-set model, not a
+/// strict upper bound — it omits each stage thread's in-hand tile (a linear
+/// chain's true peak is ≈ (S+1)·cap + S + 1, the model gives (S+1)·cap + 1)
+/// and applies the join width to every stage. Good enough for advisory
+/// preflight planning; before wiring it as a HARD admission gate, extend
+/// the model with the per-stage in-hand term.
 std::uint64_t tileStreamPeakBytes( const TileMemoryRequest &request, std::uint32_t queueCapacity );
 
 /// Plans the working set per the contract ladder (see TileMemoryPlan).

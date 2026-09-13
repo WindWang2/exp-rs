@@ -458,11 +458,13 @@ Json::Value preflightAdapter( const AtomicAlgorithmAdapter &adapter, const Json:
     if ( firstRaster.isMember( "width" ) && firstRaster.isMember( "height" ) )
     {
       runtime::chunk::TileMemoryRequest request;
+      // Descriptor JSON is unvalidated for the execution block — a 0 tile
+      // dimension would divide by zero in the planner's ceil-div (F-A-3).
       request.tileWidth = agentExec.isMember( "tileWidth" ) && agentExec["tileWidth"].isUInt()
-                            ? agentExec["tileWidth"].asUInt()
+                            ? std::max( 1u, agentExec["tileWidth"].asUInt() )
                             : 256;
       request.tileHeight = agentExec.isMember( "tileHeight" ) && agentExec["tileHeight"].isUInt()
-                             ? agentExec["tileHeight"].asUInt()
+                             ? std::max( 1u, agentExec["tileHeight"].asUInt() )
                              : 256;
       request.haloPixels =
         agentExec.isMember( "haloPixels" ) && agentExec["haloPixels"].isUInt()
@@ -471,10 +473,15 @@ Json::Value preflightAdapter( const AtomicAlgorithmAdapter &adapter, const Json:
       request.bands = firstRaster.isMember( "bandCount" ) && firstRaster["bandCount"].isInt()
                         ? static_cast<std::uint32_t>( std::max( 1, firstRaster["bandCount"].asInt() ) )
                         : 1;
+      // Unknown dtype (probe writes 0) degrades to the 4-byte float default,
+      // NOT to 1 byte — the unknown case is where conservatism matters (F-B-11).
       request.bytesPerSample =
         firstRaster.isMember( "dataType" ) && firstRaster["dataType"].isUInt()
           ? std::max( 1u, firstRaster["dataType"].asUInt() / 8u )
           : 4;
+      if ( request.bytesPerSample == 1 && firstRaster.isMember( "dataType" )
+           && firstRaster["dataType"].isUInt() && firstRaster["dataType"].asUInt() == 0 )
+        request.bytesPerSample = 4;
       request.expectedTileCount =
         ( static_cast<std::uint64_t>( firstRaster["width"].asInt() ) + request.tileWidth - 1 )
           / request.tileWidth
@@ -514,10 +521,9 @@ Json::Value preflightAdapter( const AtomicAlgorithmAdapter &adapter, const Json:
       }();
       if ( !plan.reason.empty() )
         tilePlan["reason"] = plan.reason;
-      if ( result.isMember( "resources" ) )
-        result["resources"]["tilePlan"] = tilePlan;
-      else
-        result["resources"] = tilePlan;
+      // Unconditional key (F-B-10): the tilePlan lives at
+      // resources.tilePlan on every shape of the surrounding object.
+      result["resources"]["tilePlan"] = tilePlan;
     }
   }
 

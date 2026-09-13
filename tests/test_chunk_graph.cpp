@@ -371,6 +371,7 @@ TEST_CASE( "ChunkPipeline validates buffer/spec consistency", "[chunk][pipeline]
 
 #include "runtime/chunk/chunk_graph.h"
 #include "runtime/chunk/memory_planner.h"
+#include "runtime/chunk/multi_pass_reduction.h"
 
 namespace
 {
@@ -624,4 +625,89 @@ TEST_CASE( "planner arithmetic saturates instead of wrapping", "[chunk][planner]
     const TileMemoryPlan plan = planTileMemory( huge );
     REQUIRE( plan.action == TileMemoryPlan::Action::Refuse );
     REQUIRE( plan.requestedPeakBytes == UINT64_MAX );
+}
+
+// ---------------------------------------------------------------------------
+// multi_pass_reduction pass-1 primitives (F-B-5)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "reduceTiles folds deterministically in tile order and honors cancel",
+           "[chunk][reduction][lsee10]" )
+{
+    std::vector<int> tiles{ 1, 2, 3, 4 };
+    const auto result = reduceTiles( tiles, 0, []( int acc, const int &tile ) {
+        return acc + tile;
+    } );
+    REQUIRE( result.state == 10 );
+    REQUIRE( result.tilesFolded == 4 );
+    REQUIRE_FALSE( result.cancelled );
+
+    // Cancel after the first tile: the PARTIAL state survives (the caller
+    // can unwind without losing the accumulated prefix).
+    int polls = 0;
+    const auto partial = reduceTiles( tiles, 100, []( int acc, const int &tile ) {
+        return acc + tile;
+    }, [&polls] { return ++polls >= 2; } );
+    REQUIRE( partial.cancelled );
+    REQUIRE( partial.tilesFolded == 1 );
+    REQUIRE( partial.state == 101 );
+}
+
+TEST_CASE( "reduceStream folds a producer sequence to the same state",
+           "[chunk][reduction][lsee10]" )
+{
+    const std::vector<int> tiles{ 5, 6, 7 };
+    std::size_t cursor = 0;
+    const auto result = reduceStream(
+        [&]() -> const int * {
+            return cursor < tiles.size() ? &tiles[cursor++] : nullptr;
+        },
+        0, []( int acc, const int &tile ) { return acc * 10 + tile; } );
+    REQUIRE( result.state == 567 );
+    REQUIRE_FALSE( result.cancelled );
+}
+
+// ---------------------------------------------------------------------------
+// ChunkGraph construction guards (F-A-10 / F-A-18)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "ChunkGraph refuses a second consumer on the same node (fan-out guard)",
+           "[chunk][graph][lsee10]" )
+{
+    ChunkGraph graph;
+    auto src = graph.addSource( countingSource( 4, 1.0f ) );
+    (void)graph.addStage( src, []( TilePayload && p ) { return std::move( p ); } );
+    // A second consumer of src would silently split tiles between consumers.
+    REQUIRE_THROWS_AS( graph.addStage( src, []( TilePayload && p ) { return std::move( p ); } ),
+                       std::logic_error );
+}
+
+TEST_CASE( "ChunkGraph rejects run() without a sink and double run()", "[chunk][graph][lsee10]" )
+{
+    ChunkGraph noSink;
+    noSink.addSource( countingSource( 2, 1.0f ) );
+    REQUIRE_THROWS_AS( noSink.run(), std::logic_error );
+
+    ChunkGraph graph;
+    auto src = graph.addSource( countingSource( 2, 1.0f ) );
+    graph.addSink( src, []( TilePayload && ) { return true; } );
+    graph.run();
+    REQUIRE_THROWS_AS( graph.run(), std::logic_error );
+}
+
+TEST_CASE( "ChunkGraphCancelled is caught as the pipeline's ChunkCancelled (shared base)",
+           "[chunk][graph][lsee10]" )
+{
+    ChunkGraph graph;
+    auto src = graph.addSource( countingSource( 100, 1.0f ) );
+    graph.addSink( src, []( TilePayload && ) { return false; } ); // abort at tile 1
+    try
+    {
+        graph.run();
+        FAIL( "expected a cancellation" );
+    }
+    catch ( const ChunkCancelled & )
+    {
+        // A pipeline-era catch clause keeps working (F-A-8).
+    }
 }

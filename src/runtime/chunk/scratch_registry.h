@@ -34,6 +34,8 @@
 namespace sicnu::runtime::chunk
 {
 
+class ScratchRegistry; // F-A-2: forward decl for the atomic detachment pointer
+
 /// Raised by acquire() when the budget cannot cover the request. Carries the
 /// structured need/have numbers for the caller's actionable refusal.
 struct ScratchBudgetExceeded : std::runtime_error
@@ -124,7 +126,10 @@ class ScratchRegistry
     /// Removes every run directory under @p root whose last modification is
     /// older than @p age (crashed-run sweep). Returns the count of run
     /// directories removed. Static: runnable from startup recovery without a
-    /// registry instance.
+    /// registry instance. STARTUP-ONLY contract (F-A-17): a live run's
+    /// directory mtime stops advancing while it only appends to existing
+    /// files, so the sweep must never run concurrently with active runs on
+    /// the same root.
     static std::size_t sweepStale( const std::string &root,
                                    std::chrono::milliseconds age );
 

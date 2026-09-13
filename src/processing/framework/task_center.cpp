@@ -21,13 +21,13 @@
 #include "processing/algorithms/temporal/temporal_workspace.h"
 #include "framework/fused_chain.h"
 #include "framework/worker_execution_route.h"
+#include "framework/execution_resource_bridge.h"
 #include "runtime/observability/execution_telemetry.h"
 #include "runtime/observability/trace.h"
 #include "data/data_manager.h"
 #include "data/execution_identity_resolver.h"
 #include "geospatial/remote/remote_identity_resolver.h"
 
-#include <gdal.h> // GDALVersionInfo: execution environment pins (ADR 0148)
 
 #include <QCryptographicHash>
 #include <QDirIterator>
@@ -557,18 +557,10 @@ void TaskCenter::setRssSampler( std::function<unsigned int()> sampler )
 
 void TaskCenter::installDefaultEstimateResolver()
 {
-    // LSEE 10.0 (ADR 0148 / DECISIONS D-8): pin the environment facts that
-    // change an operator's observable output bytes into every execution and
-    // resume identity (closed set v1: the GDAL release). One-time install;
-    // empty-by-default elsewhere keeps identity bytes stable for callers
-    // that never reach the TaskCenter seam.
-    static const bool kEnvironmentPinsInstalled = [] {
-        sicnu::data::setExecutionEnvironmentPinProvider( [] {
-            return std::string( "gdal=" ) + GDALVersionInfo( "RELEASE_VERSION" );
-        } );
-        return true;
-    }();
-    (void)kEnvironmentPinsInstalled;
+    // LSEE 10.0 (ADR 0148 / DECISIONS D-8): identity seams install the shared
+    // environment pin provider (closed set v1: GDAL release) — never a local
+    // install whose timing could fork identity bytes (F-A-11).
+    processing::installExecutionEnvironmentPins();
     // Registry-backed resolver: read the operator's declared memoryPolicy +
     // executionEstimate via the AtomicAlgorithmRegistry descriptor. This is the
     // ONLY runtime consumer of those fields besides the agent tool catalog.

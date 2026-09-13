@@ -1,6 +1,8 @@
 // scratch_registry.cpp — see scratch_registry.h for the lease contract.
 #include "scratch_registry.h"
 
+#include "memory_planner.h" // saturatingAdd (F-A-14)
+
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -80,7 +82,9 @@ bool readDigestSidecar( const std::string &path, std::uint64_t &hash, std::uint6
 
 struct ScratchLease::Entry
 {
-    ScratchRegistry *registry = nullptr; // nulled when the registry dies
+    // Detachment pointer (F-A-2): read without any lock by the releasing
+    // thread, so the destructor's detach write must be atomic with it.
+    std::atomic<ScratchRegistry *> registry{ nullptr };
     std::string path;                    ///< provisional `<name>.part` path (writable)
     std::string finalPath;               ///< post-finalize name (no suffix)
     std::string runId;
@@ -153,8 +157,15 @@ const std::string &ScratchLease::finalize() const
             std::filesystem::rename( sidecarPath( m_impl->path ),
                                      sidecarPath( m_impl->finalPath ), ec2 );
         }
-        // A failed main rename is left as-is: a racing finalize may have
-        // won, or the next sweep/retry converges; never delete content.
+        else
+        {
+            // Roll the flag back so a retry can re-attempt the publish and
+            // the release path still cleans the provisional file (F-A-6) —
+            // a swallowed failure used to strand the .part forever.
+            m_impl->finalized.store( false, std::memory_order_release );
+            throw std::runtime_error( "scratch finalize: rename failed for "
+                                      + m_impl->finalPath + ": " + ec.message() );
+        }
     }
     return m_impl->finalPath;
 }
@@ -185,7 +196,7 @@ void ScratchLease::Deleter::operator()( Entry *entry ) const
 {
     if ( !entry )
         return;
-    ScratchRegistry *registry = entry->registry;
+    ScratchRegistry *registry = entry->registry.load( std::memory_order_acquire );
     if ( registry )
         registry->releaseEntry( entry ); // takes ownership of `entry`
     else
@@ -220,7 +231,7 @@ ScratchRegistry::~ScratchRegistry()
     for ( auto &weak : m_liveEntries )
     {
         if ( auto entry = weak.lock(); entry && !entry->released.load() )
-            entry->registry = nullptr;
+            entry->registry.store( nullptr, std::memory_order_release );
     }
     m_liveEntries.clear();
 }
@@ -234,7 +245,8 @@ ScratchLease ScratchRegistry::acquire( const std::string &runId, const std::stri
                                        std::uint64_t bytes )
 {
     std::lock_guard<std::mutex> lock( m_mutex );
-    if ( m_config.budgetBytes != 0 && m_outstandingTotal + bytes > m_config.budgetBytes )
+    if ( m_config.budgetBytes != 0
+         && saturatingAdd( m_outstandingTotal, bytes ) > m_config.budgetBytes )
         throw ScratchBudgetExceeded( bytes, m_outstandingTotal, m_config.budgetBytes );
 
     const auto runDir = m_rootPath / runId;
@@ -255,7 +267,7 @@ ScratchLease ScratchRegistry::acquire( const std::string &runId, const std::stri
     // refcount, and the LAST release must unaccount the bytes (the default
     // delete would leak the accounting and the provisional file).
     ScratchLease::Entry *rawEntry = new ScratchLease::Entry();
-    rawEntry->registry = this;
+    rawEntry->registry.store( this, std::memory_order_release );
     rawEntry->path = provisional.string();
     rawEntry->finalPath = final.string();
     rawEntry->runId = runId;
@@ -271,8 +283,8 @@ ScratchLease ScratchRegistry::acquire( const std::string &runId, const std::stri
             m_liveEntries.end() );
     }
 
-    m_outstandingTotal += bytes;
-    m_outstandingByRun[runId] += bytes;
+    m_outstandingTotal = saturatingAdd( m_outstandingTotal, bytes );
+    m_outstandingByRun[runId] = saturatingAdd( m_outstandingByRun[runId], bytes );
     return ScratchLease( std::move( entry ) );
 }
 
@@ -291,7 +303,7 @@ void ScratchRegistry::unaccountLocked( const std::string &runId, std::uint64_t b
 void ScratchRegistry::releaseEntry( ScratchLease::Entry *entry )
 {
     const bool wasReleased = entry->released.exchange( true );
-    if ( !wasReleased && entry->registry )
+    if ( !wasReleased && entry->registry.load( std::memory_order_acquire ) )
     {
         std::lock_guard<std::mutex> lock( m_mutex );
         unaccountLocked( entry->runId, entry->bytes );

@@ -313,6 +313,13 @@ ExecutionFingerprint makeImplementationIdentity( const std::string &identityText
 
 namespace
 {
+// F-B-12: the provider runs on identity-computation threads while hosts may
+// install it during startup — a mutex makes install vs. read race-free.
+std::mutex &environmentPinMutex()
+{
+  static std::mutex mutex;
+  return mutex;
+}
 EnvironmentPinProvider &environmentPinProvider()
 {
   static EnvironmentPinProvider provider;
@@ -322,11 +329,13 @@ EnvironmentPinProvider &environmentPinProvider()
 
 void setExecutionEnvironmentPinProvider( EnvironmentPinProvider provider )
 {
+  std::lock_guard<std::mutex> lock( environmentPinMutex() );
   environmentPinProvider() = std::move( provider );
 }
 
 std::string executionEnvironmentPins()
 {
+  std::lock_guard<std::mutex> lock( environmentPinMutex() );
   const EnvironmentPinProvider &provider = environmentPinProvider();
   return provider ? provider() : std::string();
 }

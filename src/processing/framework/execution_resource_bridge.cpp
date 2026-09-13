@@ -3,21 +3,28 @@
 
 #include "framework/task_center.h"
 #include "operators/runtime/nvml_inventory.h"
+#include "data/execution_fingerprint.h"
 
 #include <algorithm>
+#include <gdal.h>
+#include <mutex>
 
 namespace sicnu {
 namespace processing {
 
-VramWireResult wireVramBudgetFromDeviceTruth( TaskCenter &center, unsigned int reservePercent )
+VramWireResult wireVramBudgetFromDeviceTruth(
+  TaskCenter &center, unsigned int reservePercent,
+  const operators::runtime::NvidiaInventory *inventoryOverride )
 {
     VramWireResult result;
-    const operators::runtime::NvidiaInventory inventory = operators::runtime::NvidiaInventory::probe();
+    const operators::runtime::NvidiaInventory probed =
+      inventoryOverride ? *inventoryOverride : operators::runtime::NvidiaInventory::probe();
+    const operators::runtime::NvidiaInventory &inventory = probed;
     if ( !inventory.available )
     {
         result.unavailableReason = inventory.unavailableReason.empty()
                                        ? "no NVIDIA device truth"
-                                       : inventory.unavailableReason.c_str();
+                                       : inventory.unavailableReason;
         return result;
     }
     // The honest per-device free VRAM snapshot rides along for telemetry;
@@ -46,6 +53,16 @@ VramWireResult wireVramBudgetFromDeviceTruth( TaskCenter &center, unsigned int r
     result.wired = true;
     result.budgetMb = budget;
     return result;
+}
+
+void installExecutionEnvironmentPins()
+{
+    static std::once_flag installed;
+    std::call_once( installed, [] {
+        sicnu::data::setExecutionEnvironmentPinProvider( [] {
+            return std::string( "gdal=" ) + GDALVersionInfo( "RELEASE_VERSION" );
+        } );
+    } );
 }
 
 } // namespace processing
