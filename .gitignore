@@ -144,3 +144,6 @@ __pycache__/
 
 # D7 offline bundle output
 dist/
+
+# D7 smoke artifacts
+output/

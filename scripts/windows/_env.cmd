@@ -1,5 +1,5 @@
 @echo off
-rem _env.cmd — shared toolchain probe for the D7 one-click scripts.
+rem _env.cmd - shared toolchain probe for the D7 one-click scripts.
 rem Hardened sibling of the repo-root *_wb7.cmd scripts: everything is probed
 rem or %SICNU_*%-overridable, nothing is hardwired to one user profile.
 rem Sets (if not already set): SICNU_REPO_ROOT, SICNU_VCVARS, SICNU_CMAKE,
@@ -35,8 +35,10 @@ if not defined SICNU_CMAKE (
   )
 )
 if not defined SICNU_CMAKE for %%C in (cmake.exe) do set "SICNU_CMAKE=%%~$PATH:C"
-set "SICNU_CMAKE_DIR=!SICNU_CMAKE!\.."
-for %%I in ("!SICNU_CMAKE_DIR!") do set "SICNU_CTEST=%%~fI\ctest.exe"
+if defined SICNU_CMAKE (
+  set "SICNU_CMAKE_DIR=!SICNU_CMAKE!\.."
+  for %%I in ("!SICNU_CMAKE_DIR!") do set "SICNU_CTEST=%%~fI\ctest.exe"
+)
 
 rem --- ninja: Qt kit first (wb7 convention), then PATH -----------------------
 if not defined SICNU_NINJA (
@@ -59,6 +61,7 @@ set "QT_QPA_PLATFORM=offscreen"
 
 set "SICNU_ENV_LOADED=1"
 endlocal & (
+  set "SICNU_ENV_LOADED=%SICNU_ENV_LOADED%"
   set "SICNU_REPO_ROOT=%SICNU_REPO_ROOT%"
   set "SICNU_VCVARS=%SICNU_VCVARS%"
   set "SICNU_CMAKE=%SICNU_CMAKE%"

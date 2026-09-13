@@ -47,16 +47,33 @@ root = sys.argv[1]
 m = json.load(open(os.path.join(root, "manifest.json")))
 assert m.get("schema") == "sicnu.offline_bundle/1", "bad manifest schema"
 bad, total = [], 0
+listed = set()
 for f in m.get("files", []):
-    p = os.path.join(root, f["path"])
+    rel = f["path"]
+    # The manifest is completeness, not authenticity: reject entries that
+    # could read outside the bundle or point at the manifest itself.
+    p = os.path.normpath(os.path.join(root, rel))
+    if os.path.isabs(rel) or rel.startswith("..") or not p.startswith(root + os.sep):
+        bad.append(f"unsafe manifest path: {rel}"); continue
+    if rel == "manifest.json":
+        bad.append("manifest.json must not appear in files[]"); continue
+    listed.add(rel)
     if not os.path.isfile(p):
-        bad.append(f"missing {f['path']}"); continue
+        bad.append(f"missing {rel}"); continue
     b = os.path.getsize(p); total += b
     if b != f["bytes"]:
-        bad.append(f"size mismatch {f['path']}: {b} != {f['bytes']}"); continue
+        bad.append(f"size mismatch {rel}: {b} != {f['bytes']}"); continue
     h = hashlib.sha256(open(p, "rb").read()).hexdigest()
     if h != f["sha256"]:
-        bad.append(f"sha256 mismatch {f['path']}")
+        bad.append(f"sha256 mismatch {rel}")
+# files[] must cover EVERY regular file: re-walk and flag unlisted ones.
+extra = []
+for base, _dirs, names in os.walk(root):
+    for n in names:
+        rel = os.path.relpath(os.path.join(base, n), root).replace(os.sep, "/")
+        if rel != "manifest.json" and rel not in listed:
+            extra.append(f"unlisted file: {rel}")
+bad.extend(extra)
 for req in m.get("required", []):
     if req.endswith("/"):
         if not any(f["path"].startswith(req) for f in m.get("files", [])):
@@ -65,11 +82,12 @@ for req in m.get("required", []):
         bad.append(f"required missing: {req}")
 ceiling = int(m.get("size_ceiling_mb", 250))
 mb = total / (1024 * 1024)
-print(f"BUNDLE VERIFY {'FAIL' if bad else 'PASS'} {root} "
+over = mb > ceiling
+print(f"BUNDLE VERIFY {'FAIL' if (bad or over) else 'PASS'} {root} "
       f"({len(m.get('files', []))} files, {mb:.1f} MB / ceiling {ceiling} MB)")
 for b in bad: print("  " + b)
-if mb > ceiling: print(f"  size {mb:.1f} MB exceeds ceiling {ceiling} MB")
-sys.exit(1 if (bad or mb > ceiling) else 0)
+if over: print(f"  size {mb:.1f} MB exceeds ceiling {ceiling} MB")
+sys.exit(1 if (bad or over) else 0)
 PY
   exit $?
 fi
@@ -102,10 +120,9 @@ cp "$cli_bin" "$bundle/bin/"
 cp "$gen_bin" "$bundle/bin/"
 
 echo "== generating sample data (deterministic, offline) =="
+mkdir -p "$bundle/data/samples"
 if [ "$skip_samples" -eq 0 ]; then
-  ( cd "$bundle" && "$gen_bin" "$bundle/data/samples" )
-else
-  mkdir -p "$bundle/data/samples"
+  "$gen_bin" "$bundle/data/samples"
 fi
 
 echo "== copying data tree =="
@@ -115,16 +132,40 @@ done
 mkdir -p "$bundle/data/fonts"
 cp "$repo_root"/resources/fonts/*.ttf "$bundle/data/fonts/"
 
+echo "== applying D7 grading overlay (calibrated to the shipped scene) =="
+# The repo rules track D4/D1's fixture; the bundle's committed scene is the
+# deterministic generator output, so the bundled ndvi_basics rules are the
+# calibrated copy. Without this, a correct submission would fail the CRS/stats
+# assertions built for a different fixture.
+cp "$repo_root/packaging/bundle/labs/grading-overlay/"*.rules.json "$bundle/data/labs/grading/"
+
 echo "== copying lab 1 =="
 mkdir -p "$bundle/labs/lab1"
 cp "$repo_root/packaging/bundle/labs/lab1/lab1_ndvi.pipeline.json" "$bundle/labs/lab1/"
 cp "$repo_root/packaging/bundle/labs/lab1/INSTRUCTIONS-zh.md" "$bundle/labs/lab1/"
 
 echo "== copying one-click scripts and docs =="
-cp "$repo_root/packaging/bundle/RUN.cmd" "$bundle/"
-cp "$repo_root/packaging/bundle/GENERATE_SAMPLES.cmd" "$bundle/"
-cp "$repo_root/packaging/bundle/GRADE_ALL.cmd" "$bundle/"
-cp "$repo_root/packaging/bundle/README-zh.md" "$bundle/"
+for f in RUN.cmd GENERATE_SAMPLES.cmd GRADE_ALL.cmd VERIFY.cmd VERIFY.ps1 README-zh.md; do
+  cp "$repo_root/packaging/bundle/$f" "$bundle/"
+done
+
+echo "== runtime data (PROJ/GDAL grids & databases; grading needs proj.db) =="
+mkdir -p "$bundle/data/runtime"
+proj_share=""
+gdal_data="$( { gdal-config --datadir 2>/dev/null || true; } )"
+for c in /usr/share/proj "${gdal_data%/gdal}/proj" /usr/share/QGIS/share/proj; do
+  [ -f "$c/proj.db" ] && proj_share=$c && break
+done
+if [ -n "$proj_share" ]; then
+  cp -R "$proj_share" "$bundle/data/runtime/proj"
+else
+  die "proj.db not found (looked in /usr/share/proj et al.) — install proj-data; without it offline grading cannot identify EPSG authorities"
+fi
+if [ -n "$gdal_data" ] && [ -d "$gdal_data" ]; then
+  cp -R "$gdal_data" "$bundle/data/runtime/gdal"
+else
+  echo "note: gdal data dir not found via gdal-config — data/runtime/gdal skipped"
+fi
 
 echo "== writing manifest =="
 python3 - "$bundle" "$version" "$max_mb" <<'PY'
@@ -144,8 +185,9 @@ manifest = {"schema": "sicnu.offline_bundle/1", "bundle_version": version,
             "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
             "size_ceiling_mb": ceiling,
             "required": ["bin/", "data/samples/", "data/labs/grading/", "data/fonts/",
-                         "labs/lab1/", "RUN.cmd", "GENERATE_SAMPLES.cmd", "GRADE_ALL.cmd",
-                         "README-zh.md", "manifest.json"],
+                         "data/runtime/proj/", "labs/lab1/", "RUN.cmd",
+                         "GENERATE_SAMPLES.cmd", "GRADE_ALL.cmd", "VERIFY.cmd",
+                         "VERIFY.ps1", "README-zh.md", "manifest.json"],
             "files": files}
 with open(os.path.join(bundle, "manifest.json"), "w", encoding="utf-8") as fh:
     json.dump(manifest, fh, ensure_ascii=False, indent=2)

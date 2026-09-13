@@ -1,5 +1,5 @@
 @echo off
-rem setup.cmd — Windows one-click: dependency check -> configure -> build (D7).
+rem setup.cmd - Windows one-click: dependency check -> configure -> build (D7).
 rem Hardened descendant of configure_wb7.cmd / build_wb7.cmd: same toolchain,
 rem same resource bounds (-j2), no hardwired user paths.
 setlocal enabledelayedexpansion
@@ -22,9 +22,25 @@ if not exist "%SICNU_WINFLEXBISON%\win_bison.exe" (
   echo [missing] win_flex_bison: %SICNU_WINFLEXBISON% ^(override with SICNU_WINFLEXBISON^)
   set "MISSING=1"
 )
+if not exist "%SICNU_VCPKG%\scripts\buildsystems\vcpkg.cmake" (
+  echo [missing] vcpkg toolchain: %SICNU_VCPKG% ^(override with SICNU_VCPKG^)
+  set "MISSING=1"
+)
+if not exist "%SICNU_VCPKG_INSTALLED%\x64-windows\bin" (
+  echo [missing] vcpkg installed tree: %SICNU_VCPKG_INSTALLED% ^(override with SICNU_VCPKG_INSTALLED^)
+  set "MISSING=1"
+)
+if not exist "%SICNU_QCA_DIR%\include\Qca-qt6\QtCrypto" (
+  echo [missing] QCA: %SICNU_QCA_DIR% ^(override with SICNU_QCA_DIR^)
+  set "MISSING=1"
+)
+if not exist "%SICNU_KEYCHAIN_DIR%\lib\cmake\Qt6Keychain" (
+  echo [missing] Qt6Keychain: %SICNU_KEYCHAIN_DIR% ^(override with SICNU_KEYCHAIN_DIR^)
+  set "MISSING=1"
+)
 if "%MISSING%"=="1" (
   echo.
-  echo Missing dependencies — install them or set the SICNU_* overrides, then re-run.
+  echo Missing dependencies - install them or set the SICNU_* overrides, then re-run.
   exit /b 1
 )
 echo [ok] toolchain found. Details:
@@ -53,12 +69,14 @@ if not exist "%SICNU_REPO_ROOT%\build-dev\CMakeCache.txt" (
     -DQCA_LIBRARY="%SICNU_QCA_DIR%\lib\qca-qt6.lib" ^
     -DCMAKE_PREFIX_PATH="%SICNU_QT_DIR%" || exit /b 1
 ) else (
-  echo === build-dev already configured — skipping configure ^(delete build-dev to force^) ===
+  echo === build-dev already configured - skipping configure ^(delete build-dev to force^) ===
 )
 
 rem ---------------- 4. build at the bounded parallelism ------------------------
+rem sicnu_geo_rs is included so check_mcp.cmd (MCP discovery, D9 precondition)
+rem works right after setup - it is the GUI/MCP binary.
 echo === building ^(ninja -j2, CMAKE_BUILD_PARALLEL_LEVEL=%CMAKE_BUILD_PARALLEL_LEVEL%^) ===
-"%SICNU_NINJA%" -C "%SICNU_REPO_ROOT%\build-dev" -j2 sicnu_geo_rs_cli sicnu_generate_samples || exit /b 1
+"%SICNU_NINJA%" -C "%SICNU_REPO_ROOT%\build-dev" -j2 sicnu_geo_rs_cli sicnu_generate_samples sicnu_geo_rs || exit /b 1
 
 echo.
 echo === setup complete ===
@@ -68,7 +86,7 @@ exit /b 0
 
 :need
 if not defined %2 (
-  echo [missing] %1 — set the corresponding SICNU_* override or install it.
+  echo [missing] %1 - set the corresponding SICNU_* override or install it.
   set "MISSING=1"
 )
 exit /b 0

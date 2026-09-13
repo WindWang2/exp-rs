@@ -1,5 +1,5 @@
 @echo off
-rem build_offline_bundle.cmd — assemble the offline classroom bundle (goal D7).
+rem build_offline_bundle.cmd - assemble the offline classroom bundle (goal D7).
 rem
 rem Usage:
 rem   scripts\build_offline_bundle.cmd --build-dir <dir> [--out <dir>] [--version <v>]
@@ -64,37 +64,82 @@ copy /Y "%CLI_BIN%" "%BUNDLE%\bin\" >nul || exit /b 1
 copy /Y "%GEN_BIN%" "%BUNDLE%\bin\" >nul || exit /b 1
 
 rem Deploy the Qt/QGIS/GDAL runtime next to the CLI so bin/ is self-contained.
-rem WINDEPLOYQT comes from the Qt kit used at configure time; QGIS_BIN must be
-rem provided by the teacher build (configure_wb7.cmd prefix) when the CLI links
-rem the QGIS libraries. Missing windeployqt is a hard error: a non-self-contained
-rem bundle breaks on the offline classroom machine.
-where windeployqt.exe >nul 2>nul
-if errorlevel 1 (
-  echo build_offline_bundle: windeployqt.exe not on PATH — add the Qt bin dir ^(see configure_wb7.cmd CMAKE_PREFIX_PATH^)
+rem QGIS_BIN (the QGIS/vcpkg install's bin directory from the configure step)
+rem is a HARD requirement: the CLI links qgis_core, and windeployqt cannot
+rem supply QGIS/GDAL DLLs. A teacher shipping a non-self-contained bundle
+rem would only discover the missing DLLs on the offline classroom machine.
+if "%QGIS_BIN%"=="" if not "%SICNU_QGIS_BIN%"=="" set "QGIS_BIN=%SICNU_QGIS_BIN%"
+if "%QGIS_BIN%"=="" (
+  echo build_offline_bundle: QGIS_BIN is required ^(or set SICNU_QGIS_BIN^) -
+  echo   point it at the QGIS build's bin directory, e.g. the vcpkg_installed
+  echo   x64-windows\bin or qgis install used at configure time.
+  exit /b 1
+)
+if not exist "%QGIS_BIN%\qgis_core.dll" (
+  echo build_offline_bundle: QGIS_BIN does not contain qgis_core.dll: %QGIS_BIN%
+  exit /b 1
+)
+rem windeployqt: prefer the Qt kit used at configure time, fall back to PATH.
+set "WINDEPLOYQT="
+if not "%SICNU_QT_DIR%"=="" if exist "%SICNU_QT_DIR%\bin\windeployqt.exe" set "WINDEPLOYQT=%SICNU_QT_DIR%\bin\windeployqt.exe"
+if "%WINDEPLOYQT%"=="" for %%W in (windeployqt.exe) do set "WINDEPLOYQT=%%~$PATH:W"
+if "%WINDEPLOYQT%"=="" (
+  echo build_offline_bundle: windeployqt.exe not found ^(set SICNU_QT_DIR or add Qt bin to PATH^)
   exit /b 1
 )
 echo == deploying runtime (windeployqt) ==
-windeployqt.exe --no-translations --no-system-d3d-compiler --no-opengl-sw "%BUNDLE%\bin\sicnu_geo_rs_cli.exe" || exit /b 1
-if not "%QGIS_BIN%"=="" (
-  echo == copying QGIS/GDAL runtime from %QGIS_BIN% ==
-  for %%F in ("%QGIS_BIN%\*.dll") do copy /Y "%%~fF" "%BUNDLE%\bin\" >nul
+"%WINDEPLOYQT%" --no-translations --no-system-d3d-compiler --no-opengl-sw --compiler-runtime "%BUNDLE%\bin\sicnu_geo_rs_cli.exe" || exit /b 1
+echo == copying QGIS/GDAL runtime from %QGIS_BIN% ==
+for %%F in ("%QGIS_BIN%\*.dll") do copy /Y "%%~fF" "%BUNDLE%\bin\" >nul
+if not exist "%BUNDLE%\bin\qgis_core.dll" (
+  echo build_offline_bundle: qgis_core.dll missing after copy - QGIS_BIN DLL set incomplete
+  exit /b 1
+)
+rem proj.db is what lets offline grading identify EPSG authorities - without
+rem it the CRS assertion fails every submission. Copied next to the DLLs' data.
+set "QGIS_SHARE="
+if not "%SICNU_QGIS_SHARE%"=="" set "QGIS_SHARE=%SICNU_QGIS_SHARE%"
+if "%QGIS_SHARE%"=="" for %%I in ("%QGIS_BIN%\..") do set "QGIS_SHARE=%%~fI\share"
+if not exist "%QGIS_SHARE%\proj\proj.db" (
+  echo build_offline_bundle: proj.db not found under %QGIS_SHARE%\proj ^(set SICNU_QGIS_SHARE^)
+  exit /b 1
+)
+echo == copying PROJ/GDAL data from %QGIS_SHARE% ==
+mkdir "%BUNDLE%\data\runtime"
+robocopy "%QGIS_SHARE%\proj" "%BUNDLE%\data\runtime\proj" /E /NFL /NDL /NJH /NJS >nul
+if errorlevel 8 exit /b 1
+if exist "%QGIS_SHARE%\gdal" (
+  robocopy "%QGIS_SHARE%\gdal" "%BUNDLE%\data\runtime\gdal" /E /NFL /NDL /NJH /NJS >nul
+  if errorlevel 8 exit /b 1
+)
+if not exist "%BUNDLE%\data\runtime\proj\proj.db" (
+  echo build_offline_bundle: proj.db missing after copy
+  exit /b 1
 )
 
 echo == generating sample data (deterministic, offline) ==
-if "%SKIP_SAMPLES%"=="1" (
-  mkdir "%BUNDLE%\data\samples"
-) else (
+mkdir "%BUNDLE%\data\samples"
+if not "%SKIP_SAMPLES%"=="1" (
   pushd "%BUNDLE%"
   "%GEN_BIN%" "%BUNDLE%\data\samples" || ( popd & exit /b 1 )
   popd
 )
 
 echo == copying data tree ==
+rem robocopy exit codes: 0-7 are success flavors, >=8 is a real failure.
 for %%E in (labs pipelines schemas help plugins processing cartography agent tools) do (
   if exist "%REPO_ROOT%\data\%%E\" robocopy "%REPO_ROOT%\data\%%E" "%BUNDLE%\data\%%E" /E /NFL /NDL /NJH /NJS >nul
+  if errorlevel 8 (
+    echo build_offline_bundle: robocopy failed for data\%%E
+    exit /b 1
+  )
 )
 mkdir "%BUNDLE%\data\fonts"
 copy /Y "%REPO_ROOT%\resources\fonts\*.ttf" "%BUNDLE%\data\fonts\" >nul || exit /b 1
+
+echo == applying D7 grading overlay ^(calibrated to the shipped scene^) ==
+rem The repo rules track D4/D1's fixture; the bundle ships the calibrated copy.
+copy /Y "%REPO_ROOT%\packaging\bundle\labs\grading-overlay\*.rules.json" "%BUNDLE%\data\labs\grading\" >nul || exit /b 1
 
 echo == copying lab 1 ==
 mkdir "%BUNDLE%\labs\lab1"
@@ -102,7 +147,7 @@ copy /Y "%REPO_ROOT%\packaging\bundle\labs\lab1\lab1_ndvi.pipeline.json" "%BUNDL
 copy /Y "%REPO_ROOT%\packaging\bundle\labs\lab1\INSTRUCTIONS-zh.md" "%BUNDLE%\labs\lab1\" >nul || exit /b 1
 
 echo == copying one-click scripts and docs ==
-for %%F in (RUN.cmd GENERATE_SAMPLES.cmd GRADE_ALL.cmd README-zh.md) do (
+for %%F in (RUN.cmd GENERATE_SAMPLES.cmd GRADE_ALL.cmd VERIFY.cmd VERIFY.ps1 README-zh.md) do (
   copy /Y "%REPO_ROOT%\packaging\bundle\%%F" "%BUNDLE%\%%F" >nul || exit /b 1
 )
 

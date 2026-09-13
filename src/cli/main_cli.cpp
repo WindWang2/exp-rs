@@ -202,6 +202,9 @@ int main(int argc, char *argv[])
     {
         sicnu::data::offline::setEnabled( true );
         sicnu::data::offline::applyGdalNetworkDeny();
+        // Export so child processes (sicnu_worker spawns) inherit the gate —
+        // the flag itself cannot cross a process boundary.
+        qputenv( "SICNU_OFFLINE", "1" );
         std::cerr << "offline mode enabled (--offline / SICNU_OFFLINE): "
                      "remote inputs will be refused\n";
     }

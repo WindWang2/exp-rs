@@ -29,8 +29,8 @@ struct LabBatchSummary
 
 /// Injected so tests (and future callers) can drive the engine without GDAL:
 /// the production callable is `verifier.gradeArtifact(lab, path, options)`.
-using LabGradeFn =
-  std::function<OutputVerifier::LabGradeResult( const QString &artifactPath )>;
+using LabGradeFn = std::function< sicnu::agent::OutputVerifier::LabGradeResult(
+  const QString &artifactPath )>;
 
 struct LabBatchRunner
 {

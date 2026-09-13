@@ -47,7 +47,7 @@ void appendCsvField( std::string &row, const QString &field )
     if ( !row.empty() )
         row.push_back( ',' );
     std::string value = field.toStdString();
-    const bool needsQuoting = value.find_first_of( ",\"\n\r" ) != std::string::npos;
+    const bool needsQuoting = value.find_first_of( ",\"\r\n" ) != std::string::npos;
     if ( !needsQuoting )
     {
         row += value;
@@ -66,11 +66,14 @@ void appendCsvField( std::string &row, const QString &field )
     row.push_back( '"' );
 }
 
+/// Rows end CRLF: the bulletproof CSV form across Excel versions (the file
+/// still carries the UTF-8 BOM for Chinese student ids / error texts).
+
 /// Highest-weight failed assertion carries the CSV's top_deduction column
 /// (ties: first in rules order). A pass with no deductions yields "".
-QString topDeduction( const OutputVerifier::LabGradeResult &result )
+QString topDeduction( const sicnu::agent::OutputVerifier::LabGradeResult &result )
 {
-    const OutputVerifier::LabDeduction *top = nullptr;
+    const sicnu::agent::OutputVerifier::LabDeduction *top = nullptr;
     for ( const auto &deduction : result.deductions )
         if ( !top || deduction.weight > top->weight )
             top = &deduction;
@@ -88,7 +91,7 @@ std::string csvRowFor( const QString &studentId, const QString &labId,
     appendCsvField( row, verdict );
     appendCsvField( row, topDeduction );
     appendCsvField( row, artifactPath );
-    row.push_back( '\n' );
+    row += "\r\n";
     return row;
 }
 
@@ -119,7 +122,7 @@ LabBatchSummary LabBatchRunner::run( const QString &submissionsDir, const QStrin
     }
     csv.write( kUtf8Bom );
     csv.write( kCsvHeader );
-    csv.write( "\n" );
+    csv.write( "\r\n" );
     csv.flush();
 
     for ( const QString &name : submissions )

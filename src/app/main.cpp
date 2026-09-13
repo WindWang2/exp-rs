@@ -31,6 +31,7 @@
 #include "data/data_manager.h"
 #include "data/execution_identity_bridge.h"
 #include "data/governance/workspace_service.h"
+#include "geospatial/remote/offline_gate.h"
 #include "processing/framework/atomic_algorithm_adapter.h"
 #include "processing/framework/task_center.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -101,6 +102,17 @@ int main(int argc, char *argv[])
   sicnu::runtime::observability::trace::installFileSinkFromEnv();
     qInstallMessageHandler(messageHandler);
     qDebug() << "Starting SICNU GEO RS...";
+
+    // Offline gate (goal D7 / D9 precondition): the GUI/MCP binary honors
+    // SICNU_OFFLINE like the CLI — engage the process-wide refusal of remote
+    // inputs (and the GDAL cloud-source deny) before any init can open a
+    // network source. Same env semantics as the worker and CLI entry points.
+    if ( sicnu::geo::offline::enabledFromEnv() )
+    {
+        sicnu::geo::offline::setEnabled( true );
+        sicnu::geo::offline::applyGdalNetworkDeny();
+        qInfo() << "offline mode enabled (SICNU_OFFLINE): remote inputs will be refused";
+    }
 
     // Register GDAL drivers and apply the process-wide nested-parallelism cap
     // (OpenCV internal thread pool, #692) before any operator or provider can

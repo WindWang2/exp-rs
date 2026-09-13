@@ -1,4 +1,4 @@
-# check_mcp_stdio.ps1 — one MCP discovery round-trip over stdio (goal D7/F).
+# check_mcp_stdio.ps1 - one MCP discovery round-trip over stdio (goal D7/F).
 # Spawns the exp-rs binary with --mcp, speaks newline-delimited JSON-RPC, and
 # asserts: initialize -> serverInfo.name == "exp-rs-mcp"; tools/list -> array.
 # The Linux smoke (docs/deployment/lab-offline.md) runs the same protocol.
@@ -25,6 +25,10 @@ $psi.EnvironmentVariables["QT_QPA_PLATFORM"] = "offscreen"
 $psi.EnvironmentVariables["SICNU_OFFLINE"] = "1"
 
 $proc = [System.Diagnostics.Process]::Start($psi)
+# Drain stderr asynchronously - a chatty child (Qt/GDAL warnings) would fill
+# the ~4KB stderr pipe, block, and silence stdout, degrading the check to a
+# timeout FAIL. The lines are discarded; only the stdout protocol matters.
+$proc.BeginErrorReadLine()
 try {
   foreach ($msg in @($init, $initialized, $list)) {
     $proc.StandardInput.WriteLine($msg)
@@ -34,14 +38,15 @@ try {
   $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
   $initOk = $false; $toolsOk = $false; $toolCount = -1
   while ([DateTime]::UtcNow -lt $deadline -and (-not $initOk -or -not $toolsOk)) {
-    if ($proc.HasExited) { break }
     $lineTask = $proc.StandardOutput.ReadLineAsync()
     while (-not $lineTask.IsCompleted) {
-      if ([DateTime]::UtcNow -ge $deadline -or $proc.HasExited) { break }
+      if ([DateTime]::UtcNow -ge $deadline) { break }
       Start-Sleep -Milliseconds 100
     }
+    # Keep draining after exit too (a final buffered response must not be lost).
     if (-not $lineTask.IsCompleted) { break }
     $line = $lineTask.Result
+    if ($null -eq $line) { break }
     if ([string]::IsNullOrWhiteSpace($line)) { continue }
     try { $msg = $line | ConvertFrom-Json } catch { continue }
     if ($msg.id -eq 1 -and $msg.result) {

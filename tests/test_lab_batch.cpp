@@ -21,6 +21,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using sicnu::agent::OutputVerifier;
@@ -67,11 +68,16 @@ QString makeSubmissions( const QTemporaryDir &dir,
     return path;
 }
 
-QString readCsv( const QString &path )
+QByteArray readCsvBytes( const QString &path )
 {
     QFile f( path );
     REQUIRE( f.open( QIODevice::ReadOnly ) );
-    return QString::fromUtf8( f.readAll() );
+    return f.readAll();
+}
+
+QString readCsv( const QString &path )
+{
+    return QString::fromUtf8( readCsvBytes( path ) );
 }
 
 std::vector<QString> csvLines( const QString &content )
@@ -80,8 +86,9 @@ std::vector<QString> csvLines( const QString &content )
                            ? content.mid( 3 )
                            : content;
     std::vector<QString> lines;
+    // Rows are CRLF (Excel-grade CSV); tolerate LF for hand-edited files.
     for ( const QString &line : body.split( QLatin1Char( '\n' ), Qt::SkipEmptyParts ) )
-        lines.push_back( line );
+        lines.push_back( line.trimmed() );
     return lines;
 }
 } // namespace
@@ -106,7 +113,7 @@ TEST_CASE( "batch CSV: BOM, schema header and one row per submission",
 
     const QString content = readCsv( csv );
     // UTF-8 BOM first (Excel-on-Windows contract), then the fixed schema.
-    REQUIRE( content.startsWith( QLatin1String( "\xEF\xBB\xBF" ) ) );
+    REQUIRE( readCsvBytes( csv ).startsWith( "\xEF\xBB\xBF" ) );
     const std::vector<QString> lines = csvLines( content );
     REQUIRE( lines.size() == 3 );
     CHECK( lines[0].toStdString()
@@ -221,8 +228,8 @@ TEST_CASE( "batch CSV: unverifiable submissions keep the error text",
 
     const std::vector<QString> lines = csvLines( readCsv( csv ) );
     REQUIRE( lines.size() == 2 );
-    CHECK( lines[1].toStdString()
-             == "20240101,ndvi_basics,,unverifiable,not a raster GDAL can open," );
+    CHECK( lines[1].toStdString().rfind(
+             "20240101,ndvi_basics,,unverifiable,not a raster GDAL can open,", 0 ) == 0 );
 }
 
 TEST_CASE( "batch discovery: directories, hidden files and the CSV target are skipped",

@@ -5,3 +5,9 @@ otb_ref/ linguist-vendored
 # Prevent line-ending conversion in vendored sources (avoids massive diffs)
 itk_ref/** -text
 otb_ref/** -text
+
+# D7: batch scripts must keep CRLF - cmd.exe label seek misbehaves on LF-only
+# files (scripts using goto/call :label). PowerShell handles both, but keep
+# the pair uniform for editors on Windows.
+*.cmd text eol=crlf
+*.ps1 text eol=crlf

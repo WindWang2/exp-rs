@@ -533,7 +533,13 @@ bool parseRulesImpl( const QString &path, LabRuleSet *rules, QString *error )
   Json::CharReaderBuilder builder;
   builder["collectComments"] = false;
   std::string parseErrors;
-  if ( !Json::parseFromStream( builder, file, &root, &parseErrors ) )
+  // Parse from memory: Json::parseFromStream wants a std::istream and a QFile
+  // is not one (this TU never compiled against real jsoncpp before this fix).
+  const QByteArray rulesBytes = file.readAll();
+  const char *begin = rulesBytes.constData();
+  const char *end = begin + rulesBytes.size();
+  std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+  if ( !reader->parse( begin, end, &root, &parseErrors ) )
   {
     *error = QStringLiteral( "Rules file is not valid JSON: %1 (%2)" )
                .arg( path, QString::fromStdString( parseErrors ) );
@@ -1480,7 +1486,7 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
             // Structured vacuous evidence (an evidence-less deduction is a P0)
             Json::Value observed;
             observed["valid"] = 0;
-            observed["total_pixels"] = st.totalPixels;
+            observed["total_pixels"] = static_cast<Json::Int64>( st.totalPixels );
             Json::Value expected;
             if ( a.kind == QLatin1String( "range" ) )
             {
@@ -1500,8 +1506,8 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
             Json::Value observed;
             observed["min"] = st.minValue;
             observed["max"] = st.maxValue;
-            observed["valid"] = st.valid;
-            observed["violations"] = st.rangeViolations;
+            observed["valid"] = static_cast<Json::Int64>( st.valid );
+            observed["violations"] = static_cast<Json::Int64>( st.rangeViolations );
             observed["violation_ratio"] =
               static_cast<double>( st.rangeViolations ) / static_cast<double>( st.valid );
             Json::Value expected;
@@ -1524,7 +1530,7 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
         Json::Value observed;
         observed["mean"] = st.mean;
         observed["sigma"] = sigma;
-        observed["valid"] = st.valid;
+        observed["valid"] = static_cast<Json::Int64>( st.valid );
         observed["min"] = st.minValue;
         observed["max"] = st.maxValue;
         Json::Value expected;
@@ -1582,7 +1588,7 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
             Json::Value observed;
             observed["pair_total"] = 0;
             observed["pair_violations"] = 0;
-            observed["undefined_index_pixels"] = st.pairSkipped;
+            observed["undefined_index_pixels"] = static_cast<Json::Int64>( st.pairSkipped );
             Json::Value expected;
             expected["tolerance"] = params["tolerance"].asDouble();
             return makeOutcome( false, observed, expected,
@@ -1591,13 +1597,13 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
         const double ratio = static_cast<double>( st.pairViolations )
                              / static_cast<double>( st.pairTotal );
         Json::Value observed;
-        observed["violations"] = st.pairViolations;
-        observed["pair_total"] = st.pairTotal;
+        observed["violations"] = static_cast<Json::Int64>( st.pairViolations );
+        observed["pair_total"] = static_cast<Json::Int64>( st.pairTotal );
         observed["violation_ratio"] = ratio;
         observed["max_abs_delta"] = st.pairMaxDelta;
         observed["index_mean"] = st.mean;
-        observed["index_valid"] = st.valid;
-        observed["undefined_index_pixels"] = st.pairSkipped;
+        observed["index_valid"] = static_cast<Json::Int64>( st.valid );
+        observed["undefined_index_pixels"] = static_cast<Json::Int64>( st.pairSkipped );
         Json::Value declaredScale( Json::arrayValue );
         Json::Value declaredOffset( Json::arrayValue );
         for ( int b : { params["bands"][0].asInt(), params["bands"][1].asInt() } )
@@ -1647,8 +1653,8 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
             return makeOutcome( false, bandAvailabilityObserved( missing, meta ), Json::Value(),
                                 QStringLiteral( "Artifact lacks band %1" ).arg( missing ) );
         Json::Value observed;
-        observed["nodata_pixels"] = st.nodataPixels;
-        observed["total_pixels"] = st.totalPixels;
+        observed["nodata_pixels"] = static_cast<Json::Int64>( st.nodataPixels );
+        observed["total_pixels"] = static_cast<Json::Int64>( st.totalPixels );
         observed["ratio"] = st.totalPixels > 0
                               ? static_cast<double>( st.nodataPixels )
                                   / static_cast<double>( st.totalPixels )
@@ -1705,8 +1711,8 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
 
         Json::Value observed;
         observed["bins"] = bins;
-        observed["valid"] = st.valid;
-        observed["out_of_domain"] = st.outOfDomain;
+        observed["valid"] = static_cast<Json::Int64>( st.valid );
+        observed["out_of_domain"] = static_cast<Json::Int64>( st.outOfDomain );
         observed["min_mode_count"] = minCount;
 
         const QString shape = QString::fromStdString( params["shape"].asString() );
@@ -1737,7 +1743,7 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
             for ( int m : modes )
             {
                 centers.append( lo + ( static_cast<double>( m ) + 0.5 ) * binWidth );
-                counts.append( static_cast<qint64>( st.hist.at( static_cast<std::size_t>( m ) ) ) );
+                counts.append( Json::Value( static_cast<Json::Int64>( st.hist.at( static_cast<std::size_t>( m ) ) ) ) );
             }
             observed["mode_centers"] = centers;
             observed["mode_counts"] = counts;
@@ -1784,7 +1790,7 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
                 ++violatingSteps;
             }
         }
-        observed["violating_steps"] = violatingSteps;
+        observed["violating_steps"] = static_cast<Json::Int64>( violatingSteps );
         expected["allowed_violating_steps"] = 0;
         QString message;
         if ( !monotone )
@@ -1801,8 +1807,8 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
                                 QStringLiteral( "Artifact lacks band %1" ).arg( params["band"].asInt() ) );
         Json::Value observed;
         observed["value"] = params["value"].asDouble();
-        observed["value_count"] = st.valueCount;
-        observed["valid_pixels"] = st.totalPixels;
+        observed["value_count"] = static_cast<Json::Int64>( st.valueCount );
+        observed["valid_pixels"] = static_cast<Json::Int64>( st.totalPixels );
         Json::Value expected;
         expected["value"] = params["value"].asDouble();
         expected["min_px"] = static_cast<Json::Int64>( params["min_px"].asDouble() );
@@ -1854,9 +1860,9 @@ FinalOutcome finalizeClassification( const LabAssertion &a, const AssertionState
         Json::Value observed;
         observed["oa"] = oa;
         observed["kappa"] = kappa;
-        observed["total"] = total;
-        observed["unlabelled"] = st.unlabelled;
-        observed["truth_valid"] = st.truthValid;
+        observed["total"] = static_cast<Json::Int64>( total );
+        observed["unlabelled"] = static_cast<Json::Int64>( st.unlabelled );
+        observed["truth_valid"] = static_cast<Json::Int64>( st.truthValid );
         Json::Value expected;
         expected["kappa_min"] = params["kappa_min"].asDouble();
         if ( params.isMember( "oa_min" ) )
@@ -1920,8 +1926,8 @@ FinalOutcome finalizeClassification( const LabAssertion &a, const AssertionState
     }
     Json::Value observed;
     observed["proportions"] = observedProps;
-    observed["total"] = total;
-    observed["unlabelled"] = st.unlabelled;
+    observed["total"] = static_cast<Json::Int64>( total );
+    observed["unlabelled"] = static_cast<Json::Int64>( st.unlabelled );
     Json::Value expected;
     expected["expected_proportions"] = proportions;
     expected["tolerance"] = tolerance;
@@ -2136,7 +2142,7 @@ bool runClassificationWalks( const RasterReader &reader, const LabRuleSet &rules
 
 } // namespace lab_grading
 
-LabGradeResult OutputVerifier::gradeForTeaching( const QString &labIdOrRulesPath, const QString &artifactPath,
+OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &labIdOrRulesPath, const QString &artifactPath,
                                                  const LabGradeOptions &options ) const
 {
     using namespace lab_grading;
@@ -2308,8 +2314,8 @@ LabGradeResult OutputVerifier::gradeForTeaching( const QString &labIdOrRulesPath
         const AssertionState &st = states[a.id];
         if ( st.totalPixels > 0 )
         {
-            summary["valid_pixels"] = st.totalPixels - st.nodataPixels;
-            summary["nodata_pixels"] = st.nodataPixels;
+            summary["valid_pixels"] = static_cast<Json::Int64>( st.totalPixels - st.nodataPixels );
+            summary["nodata_pixels"] = static_cast<Json::Int64>( st.nodataPixels );
             summary["nodata_ratio"] = round12( static_cast<double>( st.nodataPixels )
                                                / static_cast<double>( st.totalPixels ) );
         }

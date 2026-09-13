@@ -6,8 +6,12 @@
   sockets — the whole point is that nothing is attempted.
  ***************************************************************************/
 
+#include "data/providers/remote_source_cache.h"
 #include "geospatial/remote/http_fetch.h"
 #include "geospatial/remote/offline_gate.h"
+
+#include <QByteArray>
+#include <QtGlobal>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -15,7 +19,6 @@
 #include <gdal.h>
 #include <gdal_priv.h>
 
-#include <cstdlib>
 #include <optional>
 #include <tuple>
 #include <utility>
@@ -31,19 +34,23 @@ struct OfflineGuard
     ~OfflineGuard() { offline::clearGdalNetworkDeny(); offline::setEnabled( false ); }
 };
 
+/// RAII env save/restore with the repo's cross-platform pattern (qputenv —
+/// see test_mcp_server.cpp; setenv/unsetenv do not exist on MSVC).
 struct RestoreEnv
 {
-    explicit RestoreEnv( std::string name ) : m_name( std::move( name ) )
+    explicit RestoreEnv( const char *name ) : m_name( name )
     {
-        if ( const char *v = std::getenv( m_name.c_str() ) ) m_saved = v;
+        m_saved = qgetenv( name );
+        m_hadValue = !m_saved.isEmpty();
     }
     ~RestoreEnv()
     {
-        if ( m_saved ) setenv( m_name.c_str(), m_saved->c_str(), 1 );
-        else unsetenv( m_name.c_str() );
+        if ( m_hadValue ) qputenv( m_name.constData(), m_saved );
+        else qunsetenv( m_name.constData() );
     }
-    std::string m_name;
-    std::optional<std::string> m_saved;
+    QByteArray m_name;
+    QByteArray m_saved;
+    bool m_hadValue = false;
 };
 } // namespace
 
@@ -65,20 +72,26 @@ TEST_CASE( "offline gate: remote classification", "[offline][d7]" )
     CHECK( isRemoteTarget( "/vsizip/archive.zip" ) == false );
     CHECK( isRemoteTarget( "/vsitar/archive.tar" ) == false );
     CHECK( isRemoteTarget( "" ) == false );
+
+    // The range cache wraps other sources: remote exactly when the wrapped
+    // target is remote.
+    CHECK( isRemoteTarget( "/vsirangecache/https://example.com/scene.tif" ) );
+    CHECK( isRemoteTarget( "/vsirangecache//vsis3/bucket/key.tif" ) );
+    CHECK( isRemoteTarget( "/vsirangecache/data/local/scene.tif" ) == false );
 }
 
 TEST_CASE( "offline gate: SICNU_OFFLINE env semantics", "[offline][d7]" )
 {
     RestoreEnv env( "SICNU_OFFLINE" );
-    setenv( "SICNU_OFFLINE", "1", 1 );
+    qputenv( "SICNU_OFFLINE", "1" );
     CHECK( sicnu::geo::offline::enabledFromEnv() );
-    setenv( "SICNU_OFFLINE", "true", 1 );
+    qputenv( "SICNU_OFFLINE", "true" );
     CHECK( sicnu::geo::offline::enabledFromEnv() );
-    setenv( "SICNU_OFFLINE", "ON", 1 );
+    qputenv( "SICNU_OFFLINE", "ON" );
     CHECK( sicnu::geo::offline::enabledFromEnv() );
-    setenv( "SICNU_OFFLINE", "0", 1 );
+    qputenv( "SICNU_OFFLINE", "0" );
     CHECK( sicnu::geo::offline::enabledFromEnv() == false );
-    unsetenv( "SICNU_OFFLINE" );
+    qunsetenv( "SICNU_OFFLINE" );
     CHECK( sicnu::geo::offline::enabledFromEnv() == false );
 }
 
@@ -135,10 +148,24 @@ TEST_CASE( "offline gate: GDAL cloud-source deny fails fast without network",
     CHECK( dataset == nullptr );
 }
 
+TEST_CASE( "offline gate: remote pool refuses with an empty lease, zero I/O",
+           "[offline][d7]" )
+{
+    OfflineGuard guard;
+
+    // The pool's acquire would otherwise GDALOpenEx the /vsicurl/ target; the
+    // gate must return the empty lease before any transport is attempted (the
+    // host name is unresolvable here, so a dispatch attempt would hang in DNS
+    // retries instead of returning immediately).
+    auto lease = sicnu::data::RemoteDatasetPool::instance().acquire(
+      "/vsicurl/https://offline-d7.invalid/scene.tif", GDAL_OF_RASTER );
+    CHECK( static_cast<bool>( lease ) == false );
+}
+
 TEST_CASE( "offline gate: gate off by default, clear restores", "[offline][d7]" )
 {
     RestoreEnv env( "SICNU_OFFLINE" );
-    unsetenv( "SICNU_OFFLINE" );
+    qunsetenv( "SICNU_OFFLINE" );
     CHECK( sicnu::geo::offline::enabled() == false );
 
     sicnu::geo::offline::applyGdalNetworkDeny();

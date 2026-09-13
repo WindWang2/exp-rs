@@ -24,18 +24,25 @@ keeps it copyable to 60 machines off a USB stick.
 ```
 sicnu-lab-<version>/
   bin/                      sicnu_geo_rs_cli(.exe), sicnu_generate_samples(.exe);
-                            Windows: self-contained (windeployqt output + QGIS/GDAL runtime DLLs)
+                            Windows: self-contained runtime (windeployqt output
+                            with --compiler-runtime + QGIS/GDAL DLL closure from
+                            the configured QGIS_BIN)
   data/
     samples/                deterministic sample rasters (generated at bundle time, seed-42 stable)
     labs/                   grading/<id>.rules.json + lab_rules.schema.json (+ labspecs when D2/D3 land)
     pipelines/              runnable pipelines shipped from the repo data tree
     schemas/                pipeline_schema.json and sibling schemas
     fonts/                  IBM Plex font set (repo resources/fonts)
+    runtime/                PROJ/GDAL data (proj.db & co) — grading compares
+                            EPSG authorities; without proj.db every submission
+                            would lose the blocking CRS assertion
   labs/
     lab1/                   lab1_ndvi.pipeline.json + INSTRUCTIONS-zh.md (the 5-minute experiment)
   RUN.cmd                   run lab 1 offline end-to-end (generate → process → report)
   GENERATE_SAMPLES.cmd      regenerate data/samples via bin/sicnu_generate_samples
   GRADE_ALL.cmd             batch-grade a submissions folder into grades.csv (lab --batch)
+  VERIFY.cmd / VERIFY.ps1   self-contained integrity check for the target machine
+                            (re-hashes every file against manifest.json)
   README-zh.md              teacher quick-start (中文)
   manifest.json             bundle identity + completeness contract (below)
 ```
@@ -51,13 +58,16 @@ manifest like any other file.
   "bundle_version": "<version>",
   "created_utc": "<iso8601>",
   "size_ceiling_mb": 250,
-  "required": ["bin/", "data/samples/", "data/labs/grading/", "data/fonts/", "labs/lab1/",
-               "RUN.cmd", "GENERATE_SAMPLES.cmd", "README-zh.md", "manifest.json"],
+  "required": ["bin/", "data/samples/", "data/labs/grading/", "data/fonts/",
+               "data/runtime/proj/", "labs/lab1/", "RUN.cmd",
+               "GENERATE_SAMPLES.cmd", "GRADE_ALL.cmd", "VERIFY.cmd",
+               "VERIFY.ps1", "README-zh.md", "manifest.json"],
   "files": [ { "path": "bin/sicnu_geo_rs_cli", "bytes": 123, "sha256": "<hex>" } ] }
 ```
 
 - `required` entries are prefixes; every one must match at least one file (or exist as a directory).
-- `files[]` covers **every regular file** in the bundle; verification recomputes bytes + sha256.
+- `files[]` covers **every regular file** in the bundle; verification recomputes bytes + sha256,
+  re-walks the tree to flag unlisted files, and rejects absolute/`..` manifest paths.
 - `size_ceiling_mb` is the declared ceiling (default 250 MB). `--max-mb` may lower it, never raise
   the default silently: a ceiling breach fails the build unless `--max-mb` explicitly overrides.
 
@@ -72,8 +82,15 @@ the same steps in the same order:
    bytes on any machine — the offline contract does not trust network mirrors).
 3. Assemble the layout above from the source tree (`data/` subset excluding `benchmarks/`,
    `resources/fonts` → `data/fonts/`, `packaging/bundle/` templates → top level).
-4. Windows only: make `bin/` self-contained (`windeployqt` + QGIS/GDAL runtime DLLs from the
-   configured prefix; the configure step's paths are the source of truth).
+4. Windows only: make `bin/` self-contained. `QGIS_BIN` (or `SICNU_QGIS_BIN`)
+   is a **hard requirement** — the CLI links `qgis_core`, which windeployqt
+   cannot supply; the builder fails fast when it is unset or lacks
+   `qgis_core.dll`, and after the copy loop when `qgis_core.dll` is still
+   missing. It deploys `windeployqt --compiler-runtime` (MSVC CRT), copies the
+   `%QGIS_BIN%\*.dll` closure, and copies `share/proj` + `share/gdal` (from
+   `SICNU_QGIS_SHARE`, default `QGIS_BIN\..\share`) into `data/runtime/`;
+   `proj.db` is a hard sentinel. The bundle scripts set `PROJ_DATA`/`GDAL_DATA`
+   relative to the bundle root.
 5. Write `manifest.json` (walk files, hash, sizes, ceiling).
 6. Verify (`--verify <bundle>`): re-walk, re-hash, check `required`, check ceiling; print
    `BUNDLE VERIFY PASS/FAIL <path> (<n> files, <size> MB / ceiling <c> MB)` and exit non-zero on any

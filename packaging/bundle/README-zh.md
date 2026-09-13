@@ -16,11 +16,12 @@ Python、不需要注册任何账号。整个过程零网络访问。
 | `RUN.cmd` | 一键运行实验 1（生成→处理→批改→报告） |
 | `GENERATE_SAMPLES.cmd` | 重新生成示例数据 |
 | `GRADE_ALL.cmd` | 一键批量批改全班作业 |
-| `manifest.json` | 完整性清单（SHA-256，可用构建方脚本校验） |
+| `VERIFY.cmd` / `VERIFY.ps1` | 完整性自检（拷贝到新机器 / U 盘后先跑一次） |
+| `manifest.json` | 完整性清单（SHA-256） |
 
 ## 五分钟上手
 
-1. 解压到任意本地目录（如 `D:\sicnu-lab`）。
+1. 解压到任意本地目录（如 `D:\sicnu-lab`），先双击 `VERIFY.cmd` 校验完整性。
 2. 双击 `RUN.cmd`。完成三步：生成示例数据 → 运行 NDVI 流水线 →
    自动批改并在 `output\lab1_report.json` 写出报告。
 3. 收作业后，把全班提交文件放进一个文件夹（如 `D:\lab1_submissions`，
