@@ -23,6 +23,34 @@ $ git check-ignore -v .planning/cloud-data-fabric-datacube-10/GOAL.md
 （无输出，exit 1）✅
 ```
 
+## Phase 8 — 最终验证（final HEAD @ 1b8bfa7b2e，origin/master 最新）
+
+`git fetch origin && git rebase origin/master` → 当前最新；`git diff --check` → 干净；
+冲突标记扫描（fabric/ operators/ cli/ tests/）→ 无；secret 扫描（排除 credential 字段名
+本身）→ 无；goal-template 存在性断言两条 → 输出为空（PASS）。
+
+最终全量套件（14/14 全绿，918 断言）：
+
+| 套件 | 断言 |
+| --- | --- |
+| test_io_fabric_object_store | 74 |
+| test_io_fabric_catalog | 56 |
+| test_io_fabric_cube | 70 |
+| test_io_fabric_plan | 72 |
+| test_io_fabric_scale | 32 |
+| test_io_fabric_operators | 40 |
+| test_io_uri | 96 |
+| test_io_stac | 22 |
+| test_io_stac_client | 136 |
+| test_io_range_cache | 123 |
+| test_io_remote_range | 25 |
+| test_io_catalog_query | 50 |
+| test_io_hints | 27 |
+| test_io_operators（含 F-OPS-4 回归） | 95 |
+
+not-executed（如实声明）：真实公有云端点（AWS/GCS/Azure）访问；OTB/ONNX/GPU 套件
+（非本 track 范围）。S3 集成以 loopback S3 兼容端点 + GDAL 真实 /vsis3/ 栈全链路验证。
+
 ## 预算节（每 Phase 结束更新）
 
 | Phase | 结束时间（UTC） | 工具调用次数（约） | 触及文件数 | vs 包线 |
