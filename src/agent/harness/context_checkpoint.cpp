@@ -186,7 +186,7 @@ QString HarnessSessionStore::defaultDirectory() const
 QString HarnessSessionStore::directory() const
 {
   QMutexLocker locker( &gStoreMutex );
-  return mDirectory.isEmpty() ? defaultDirectory() : mDirectory;
+  return directoryLocked();
 }
 
 void HarnessSessionStore::setDirectory( const QString &directory )
@@ -195,9 +195,17 @@ void HarnessSessionStore::setDirectory( const QString &directory )
   mDirectory = directory;
 }
 
-QString HarnessSessionStore::sessionPath( const std::string &sessionId ) const
+/// Callers hold gStoreMutex. The public directory()/sessionPath() lock;
+/// these must never lock (B-1: relocking the non-recursive mutex in the
+/// same thread self-deadlocks every store method).
+QString HarnessSessionStore::directoryLocked() const
 {
-  return directory() + QDir::separator() +
+  return mDirectory.isEmpty() ? defaultDirectory() : mDirectory;
+}
+
+QString HarnessSessionStore::sessionPathLocked( const std::string &sessionId ) const
+{
+  return directoryLocked() + QDir::separator() +
          QStringLiteral( "harness_session_%1.json" ).arg(
            QString::fromStdString( sessionId ) );
 }
@@ -236,8 +244,9 @@ QString HarnessSessionStore::saveSession( const HarnessSessionState &state, Harn
       HarnessSessionState::fromJson( compacted );
     if ( compactStateParsed )
     {
+      const std::string savedAt = toWrite.savedAt; // keep the fresh stamp
       toWrite = *compactStateParsed;
-      toWrite.savedAt = state.savedAt;
+      toWrite.savedAt = savedAt;
       text = compactText( toWrite.toJson() );
     }
   }
@@ -249,24 +258,19 @@ QString HarnessSessionStore::saveSession( const HarnessSessionState &state, Harn
     return {};
   }
 
-  const QDir dir( directory() );
+  const QDir dir( directoryLocked() );
   if ( !dir.exists() && !dir.mkpath( "." ) )
   {
     error = HarnessError::make( error_codes::kExecutionFailed,
                                 "cannot create session directory: " +
-                                  directory().toStdString() );
+                                  directoryLocked().toStdString() );
     return {};
   }
 
-  // Evict oldest sessions beyond the bound (by file mtime).
-  QFileInfoList sessions =
-    dir.entryInfoList( QStringList() << "harness_session_*.json", QDir::Files, QDir::Time );
-  while ( sessions.size() >= kMaxSessions )
-  {
-    QFile::remove( dir.filePath( sessions.takeLast().absoluteFilePath() ) );
-  }
-
-  const QString finalPath = sessionPath( state.sessionId );
+  const QString finalPath = sessionPathLocked( state.sessionId );
+  // Evict oldest sessions beyond the bound AFTER a successful write, and
+  // never when the target session already exists (a re-save must not destroy
+  // an unrelated oldest session — review B-16).
   QSaveFile file( finalPath );
   if ( !file.open( QIODevice::WriteOnly ) ||
        file.write( QByteArray::fromStdString( text ) ) < 0 || !file.commit() )
@@ -276,6 +280,16 @@ QString HarnessSessionStore::saveSession( const HarnessSessionState &state, Harn
                                   file.errorString().toStdString() );
     return {};
   }
+  QFileInfoList sessions =
+    dir.entryInfoList( QStringList() << "harness_session_*.json", QDir::Files, QDir::Time );
+  while ( sessions.size() > kMaxSessions )
+  {
+    const QString oldest = dir.filePath( sessions.takeLast().absoluteFilePath() );
+    if ( oldest != finalPath )
+      QFile::remove( oldest );
+    else
+      break;
+  }
   return finalPath;
 }
 
@@ -283,12 +297,20 @@ std::optional<HarnessSessionState> HarnessSessionStore::loadSession( const std::
                                                                      HarnessError &error ) const
 {
   QMutexLocker locker( &gStoreMutex );
-  const QString path = sessionPath( sessionId );
+  const QString path = sessionPathLocked( sessionId );
   QFile file( path );
   if ( !file.open( QIODevice::ReadOnly ) )
   {
     error = HarnessError::make( error_codes::kWorkflowNotFound,
                                 "no such harness session: " + sessionId );
+    return std::nullopt;
+  }
+  // Bound the read: a foreign oversized file in the store dir is rejected
+  // instead of fully buffered (review B-17).
+  if ( file.size() > kMaxDocumentBytes )
+  {
+    error = HarnessError::make( error_codes::kInvalidPlan,
+                                "session document exceeds the 64 KiB bound" );
     return std::nullopt;
   }
   const QByteArray bytes = file.readAll();
@@ -314,13 +336,16 @@ Json::Value HarnessSessionStore::listSessions() const
 {
   QMutexLocker locker( &gStoreMutex );
   Json::Value list( Json::arrayValue );
-  const QDir dir( directory() );
+  const QDir dir( directoryLocked() );
   const QFileInfoList files = dir.entryInfoList( QStringList() << "harness_session_*.json",
                                                  QDir::Files, QDir::Time );
   for ( const QFileInfo &info : files )
   {
     QFile file( info.absoluteFilePath() );
     if ( !file.open( QIODevice::ReadOnly ) )
+      continue;
+    // Skip foreign oversized files instead of fully buffering them (B-17).
+    if ( file.size() > kMaxDocumentBytes )
       continue;
     const QByteArray bytes = file.readAll();
     bool ok = false;
@@ -343,8 +368,8 @@ Json::Value HarnessSessionStore::listSessions() const
 bool HarnessSessionStore::deleteSession( const std::string &sessionId )
 {
   QMutexLocker locker( &gStoreMutex );
-  return QFile::exists( sessionPath( sessionId ) ) &&
-         QFile::remove( sessionPath( sessionId ) );
+  return QFile::exists( sessionPathLocked( sessionId ) ) &&
+         QFile::remove( sessionPathLocked( sessionId ) );
 }
 
 Json::Value HarnessSessionStore::stalenessReport( const HarnessSessionState &state ) const

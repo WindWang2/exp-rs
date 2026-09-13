@@ -2,6 +2,7 @@
 #include "workflow_repair.h"
 
 #include "capability_knowledge.h"
+#include "capability_relations.h"
 #include "intent_vocabulary.h"
 
 #include <algorithm>
@@ -44,6 +45,16 @@ const IrNodeInput *findEdge( const IrNode &node, const std::string &port )
     if ( edge.as == port )
       return &edge;
   }
+  return nullptr;
+}
+
+/// Finds a node by id in the CURRENT (possibly already mutated) document —
+/// the only safe way to touch a node across insertions (review B-1a).
+const IrNode *findNodeById( const WorkflowIr &ir, const std::string &nodeId )
+{
+  for ( const IrNode &node : ir.nodes )
+    if ( node.id == nodeId )
+      return &node;
   return nullptr;
 }
 
@@ -114,12 +125,13 @@ const std::vector<IrRepairRuleSpec> &repairRuleTable()
       "non-reference input onto the reference grid (ADR 0098 canonical fixer)." },
     { kRuleCalibrateToa, "INVALID_RADIOMETRY", repair_risk::kRadiometric,
       "rs:radiometric_calibration",
-      "DN input into a reflectance-consuming operator: radiometric calibration "
-      "to TOA reflectance. Auto-inserted only with observed product metadata." },
+      "DN input into a reflectance-consuming operator: a PREPARED DECISION to "
+      "wire radiometric calibration to TOA reflectance — never auto-inserted; "
+      "the refusal notes whether observed product metadata backs it." },
     { kRuleSarCalibrate, "CALIBRATION_MISMATCH", repair_risk::kRadiometric, "rs:sar_calibrate",
-      "DN input into a calibrated-backscatter operator: SAR radiometric "
-      "calibration. Requires calibration coefficients in observed metadata; "
-      "otherwise a decision (defaults would fabricate science)." },
+      "DN input into a calibrated-backscatter operator: a prepared decision to "
+      "wire SAR calibration. Coefficients must come from observed metadata — "
+      "defaults would fabricate science." },
     { kRuleQaMask, "", repair_risk::kScienceChanging, "rs:apply_mask",
       "Opportunity rule: observed quality masks exist for an optical "
       "index/change consumer. Applying them changes pixel semantics — "
@@ -200,17 +212,17 @@ IrRepairOutcome planRepairs( const WorkflowIr &ir, const IrAnalysis &analysis,
     // --- CRS_MISMATCH: reproject the slot-side input to the reference CRS.
     if ( issue.code == error_codes::kCrsMismatch && issue.repairable )
     {
-      const IrNode *consumer = nullptr;
-      for ( const IrNode &node : outcome.ir.nodes )
-        if ( node.id == issue.node )
-          consumer = &node;
+      const std::string consumerId = issue.node;
+      const IrNode *consumer = findNodeById( outcome.ir, consumerId );
       if ( !consumer )
         continue;
       // The offending edge (issue.port == local port) must be a slot edge for
       // a reproject to be insertable; node-to-node CRS conflicts mean the
-      // upstream producer must be repaired instead (decision).
-      const IrNodeInput *edge = findEdge( *consumer, issue.port );
-      if ( !edge || edge->input.empty() )
+      // upstream producer must be repaired instead (decision). The edge is
+      // COPIED: inserting repair nodes reallocates the node vector and no
+      // pointer into it may survive a push_back (review A-3).
+      const IrNodeInput *edgePtr = findEdge( *consumer, issue.port );
+      if ( !edgePtr || edgePtr->input.empty() )
       {
         outcome.refusals.push_back( makeRefusal(
           kRuleReproject, issue.code,
@@ -218,18 +230,19 @@ IrRepairOutcome planRepairs( const WorkflowIr &ir, const IrAnalysis &analysis,
             "'; insert the reprojection at the producing stage (decision)" ) );
         continue;
       }
-      if ( hasRepairNodeFor( outcome.ir, *consumer, edge->input, kRuleReproject ) )
+      if ( hasRepairNodeFor( outcome.ir, *consumer, edgePtr->input, kRuleReproject ) )
         continue;
       // Reference CRS: the first sibling edge with a known, different CRS.
       std::string referenceCrs;
       for ( const IrNodeInput &sibling : consumer->inputs )
       {
-        if ( sibling.as == edge->as )
+        if ( sibling.as == edgePtr->as )
           continue;
         const Json::Value facts = effectiveEdgeFacts( outcome.ir, *consumer, sibling, input );
         const std::string authid = crsAuthidOf( facts );
-        if ( !authid.empty() && authid != crsAuthidOf(
-                                    effectiveEdgeFacts( outcome.ir, *consumer, *edge, input ) ) )
+        if ( !authid.empty() &&
+             authid != crsAuthidOf(
+                         effectiveEdgeFacts( outcome.ir, *consumer, *edgePtr, input ) ) )
         {
           referenceCrs = authid;
           break;
@@ -252,8 +265,9 @@ IrRepairOutcome planRepairs( const WorkflowIr &ir, const IrAnalysis &analysis,
           { "output_dir" } ) );
         continue;
       }
+      const IrNodeInput edge = *edgePtr; // value copy — see review A-3
       const std::string newId =
-        uniqueNodeId( outcome.ir, consumer->id + "_" + edge->input + "_reprojected" );
+        uniqueNodeId( outcome.ir, consumerId + "_" + edge.input + "_reprojected" );
       IrNode repairNode;
       repairNode.id = newId;
       repairNode.operatorId = "io:reproject";
@@ -261,7 +275,7 @@ IrRepairOutcome planRepairs( const WorkflowIr &ir, const IrAnalysis &analysis,
       repairNode.params["output"] =
         outputDir + "/" + outcome.ir.irId + "_" + newId + ".tif";
       IrNodeInput repairEdge;
-      repairEdge.input = edge->input;
+      repairEdge.input = edge.input;
       repairEdge.as = "input";
       repairNode.inputs.push_back( repairEdge );
       IrPort repairPort;
@@ -270,16 +284,16 @@ IrRepairOutcome planRepairs( const WorkflowIr &ir, const IrAnalysis &analysis,
       repairPort.artifact["crs"] = referenceCrs;
       repairNode.outputs.push_back( repairPort );
       repairNode.source = "repair:" + std::string( kRuleReproject );
-      repairNode.semanticOutput = "input slot '" + edge->input + "' reprojected to " + referenceCrs;
+      repairNode.semanticOutput = "input slot '" + edge.input + "' reprojected to " + referenceCrs;
 
       // Rewire the consumer onto the repair node (keep the port binding).
       for ( IrNode &nodeIter : outcome.ir.nodes )
       {
-        if ( nodeIter.id != consumer->id )
+        if ( nodeIter.id != consumerId )
           continue;
         for ( IrNodeInput &wire : nodeIter.inputs )
         {
-          if ( wire.as == edge->as && wire.input == edge->input )
+          if ( wire.as == edge.as && wire.input == edge.input )
           {
             wire.node = newId;
             wire.output = "output";
@@ -294,7 +308,7 @@ IrRepairOutcome planRepairs( const WorkflowIr &ir, const IrAnalysis &analysis,
       record.insertedNode = newId;
       record.risk = repair_risk::kShapePreserving;
       record.factsUsed["target_crs"] = referenceCrs;
-      record.factsUsed["slot"] = edge->input;
+      record.factsUsed["slot"] = edge.input;
       outcome.repairs.push_back( std::move( record ) );
       outcome.changed = true;
       continue;
@@ -303,12 +317,14 @@ IrRepairOutcome planRepairs( const WorkflowIr &ir, const IrAnalysis &analysis,
     // --- GRID_MISMATCH: align the slot-side input onto the reference grid.
     if ( issue.code == error_codes::kGridMismatch && issue.repairable )
     {
-      const IrNode *consumer = nullptr;
+      const std::string consumerId = issue.node;
+      bool consumerFound = false;
       for ( const IrNode &node : outcome.ir.nodes )
-        if ( node.id == issue.node )
-          consumer = &node;
-      if ( !consumer )
+        if ( node.id == consumerId )
+          consumerFound = true;
+      if ( !consumerFound )
         continue;
+      const IrNode *consumer = findNodeById( outcome.ir, consumerId );
       const std::string outputDir = outcome.ir.expectations.get( "output_dir", "" ).asString();
       if ( outputDir.empty() )
       {
@@ -320,17 +336,18 @@ IrRepairOutcome planRepairs( const WorkflowIr &ir, const IrAnalysis &analysis,
       }
       // Align every SLOT-side raster edge onto the first slot-side edge whose
       // facts carry a grid (deterministic reference = normalized edge order).
-      // The edge list is copied before mutation: inserting repair nodes
-      // reallocates the node vector, so nothing may read `consumer` after a
-      // push_back.
-      const std::vector<IrNodeInput> consumerEdges = consumer->inputs;
+      // The edge list is copied and the consumer is re-found BY ID on every
+      // use: inserting repair nodes reallocates the node vector, so no
+      // pointer into it survives a push_back (review B-1a).
+      const std::vector<IrNodeInput> consumerEdges = findNodeById( outcome.ir, consumerId )->inputs;
       std::string referenceSlot;
       Json::Value referenceFacts;
       for ( const IrNodeInput &sibling : consumerEdges )
       {
         if ( sibling.input.empty() )
           continue;
-        const Json::Value facts = effectiveEdgeFacts( outcome.ir, *consumer, sibling, input );
+        const Json::Value facts = effectiveEdgeFacts(
+          outcome.ir, *findNodeById( outcome.ir, consumerId ), sibling, input );
         if ( facts.isMember( "size" ) && facts.isMember( "pixel_size" ) )
         {
           referenceSlot = sibling.input;
@@ -351,13 +368,14 @@ IrRepairOutcome planRepairs( const WorkflowIr &ir, const IrAnalysis &analysis,
       {
         if ( edge.input.empty() || edge.input == referenceSlot )
           continue;
-        if ( hasRepairNodeFor( outcome.ir, *consumer, edge.input, kRuleAlign ) )
+        const IrNode &consumerRef = *findNodeById( outcome.ir, consumerId );
+        if ( hasRepairNodeFor( outcome.ir, consumerRef, edge.input, kRuleAlign ) )
           continue;
         const std::string newId =
-          uniqueNodeId( outcome.ir, consumer->id + "_" + edge.input + "_aligned" );
+          uniqueNodeId( outcome.ir, consumerId + "_" + edge.input + "_aligned" );
         IrNode repairNode;
         repairNode.id = newId;
-        repairNode.operatorId = "rs:align";
+        repairNode.operatorId = CapabilityRelations::instance().gridFixer(); // ADR 0098 canonical fixer
         repairNode.params["output"] = outputDir + "/" + outcome.ir.irId + "_" + newId + ".tif";
         IrNodeInput inputEdge;
         inputEdge.input = edge.input;
@@ -380,7 +398,7 @@ IrRepairOutcome planRepairs( const WorkflowIr &ir, const IrAnalysis &analysis,
                                     "' warped onto the reference grid of '" + referenceSlot + "'";
         for ( IrNode &nodeIter : outcome.ir.nodes )
         {
-          if ( nodeIter.id != consumer->id )
+          if ( nodeIter.id != consumerId )
             continue;
           for ( IrNodeInput &wire : nodeIter.inputs )
           {
@@ -500,6 +518,36 @@ IrRepairOutcome planRepairs( const WorkflowIr &ir, const IrAnalysis &analysis,
           " — choose a different dataset or method (decision)" ) );
       continue;
     }
+  }
+
+  // Prepared decisions from WARNINGS: a warn-class radiometry finding (e.g.
+  // DN per the spectral_index family contract) never blocks, but the caller
+  // still gets the calibration decision spelled out — refused, never applied
+  // silently (review B-3).
+  for ( const IrIssue &issue : analysis.warnings() )
+  {
+    if ( issue.code != error_codes::kInvalidRadiometry )
+      continue;
+    const IrNode *consumer = findNodeById( outcome.ir, issue.node );
+    Json::Value facts;
+    if ( consumer )
+    {
+      if ( const IrNodeInput *edge = findEdge( *consumer, issue.port ) )
+        facts = effectiveEdgeFacts( outcome.ir, *consumer, *edge, input );
+    }
+    const bool metadataAvailable = factsHaveProductMetadata( facts );
+    IrRefusal refusal = makeRefusal(
+      kRuleCalibrateToa, issue.code,
+      std::string( "Radiometric repair for node '" ) + issue.node +
+        "' is a prepared decision: wire rs:radiometric_calibration (unit=toa_reflectance) "
+        "ahead of the consumer" +
+        ( metadataAvailable
+            ? " — product metadata was observed, so the calibration is fact-backed"
+            : " — no product metadata observed; calibrating would fabricate coefficients" ) );
+    refusal.missingFacts = Json::Value( Json::arrayValue );
+    if ( !metadataAvailable )
+      refusal.missingFacts.append( "product_metadata" );
+    outcome.refusals.push_back( std::move( refusal ) );
   }
 
   if ( outcome.changed )

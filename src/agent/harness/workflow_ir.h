@@ -82,6 +82,9 @@ bool isKnownArtifactKind( const std::string &kind );
 bool isLinearReflectiveDomain( const std::string &domain );
 
 /// The one bounds table. Enforced by readWorkflowIr; mirrored in docs/tests.
+/// Note: `params`/`expectations` JSON is carried as parsed by the caller —
+/// the reader adds no second depth/size bound beyond the incoming document
+/// it already holds (documented; review B-9).
 struct IrLimits
 {
     static constexpr int kMaxNodes = 64;
@@ -89,7 +92,6 @@ struct IrLimits
     static constexpr int kMaxOutputsPerNode = 8;
     static constexpr int kMaxDeclaredOutputs = 32;
     static constexpr int kMaxDocumentInputs = 16;
-    static constexpr int kMaxArtifacts = 128;
     static constexpr size_t kMaxIdChars = 64;
     static constexpr size_t kMaxTextChars = 512;
     static constexpr size_t kMaxCrsChars = 256;
@@ -230,6 +232,12 @@ Json::Value factStatusFor( const Json::Value &declared, const Json::Value &obser
 /// Deterministic ir_id for an IR whose document omitted one:
 /// "wir-" + workflowIrFingerprint(ir) — content-addressed, stable.
 std::string deriveIrId( const WorkflowIr &ir );
+
+/// Normalized CRS authid from a facts document: reads `crs` (string or
+/// {authid,wkt} object) AND `crs_authid`, case-folded to one spelling — the
+/// ONE normalizer every CRS comparison uses (analysis + repair), so shape or
+/// case differences can never fake a conflict or hide one.
+std::string normalizedCrsAuthid( const Json::Value &facts );
 
 /// The derived output path for a node (see the lowering contract):
 /// <output_dir>/<ir_id>_<node_id><ext>, or the declared path when the node's

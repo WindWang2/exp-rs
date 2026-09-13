@@ -50,11 +50,16 @@ test("the shared bridge kills the child on a runaway line (F-PI-1 behavior ancho
 
 test("the shared bridge clears the startup deadline on every settle path (F-PI-2)", () => {
   assert.match(bridgeSource, /cancelStartupDeadline/);
-  // The try/finally shape is the fix: the deadline cancel sits in a finally.
-  assert.match(
-    bridgeSource,
-    /finally \{[\s\S]*?cancelStartupDeadline\(\);[\s\S]*?\}/,
-  );
+  // The fix shape is positional: `await Promise.race` inside a try whose
+  // finally calls cancelStartupDeadline(). A loose regex would match any
+  // earlier finally in the file.
+  const raceAt = bridgeSource.indexOf("await Promise.race");
+  assert.ok(raceAt >= 0, "initialize race not found");
+  const tail = bridgeSource.slice(raceAt);
+  const finallyAt = tail.indexOf("} finally {");
+  const cancelAt = tail.indexOf("cancelStartupDeadline();");
+  assert.ok(finallyAt >= 0, "startup try/finally missing");
+  assert.ok(cancelAt > finallyAt, "cancelStartupDeadline not in the startup finally");
 });
 
 test("a >32 MiB unbounded line kills the child; the next request recovers", async () => {

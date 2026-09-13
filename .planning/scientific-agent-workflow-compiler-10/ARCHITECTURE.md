@@ -61,12 +61,18 @@ An IR that cannot be lowered to an AgentPlan v2 is a compiler bug, by constructi
 
 ### Artifact facts (closed key set, all optional)
 
-`kind` (raster|vector|table|model|structured) · `crs` · `grid` {width,height,
-pixel_size[2],extent[4]} · `band_roles` {role:count} · `wavelengths_nm` [{band,center,min,max}]
-· `numeric_domain` (reflectance|surface_reflectance|toa|dn|db|linear_power|index|categorical|
-masked|unknown) · `temporal` {dates[],scene_count} · `modality` (optical|sar|dem|unknown) ·
-`sensor` · `dtype` · `nodata[]` · `quality_masks[]` · `polarizations[]` · `calibration` ·
-`class_count` (categorical).
+Wire shapes mirror DatasetUnderstanding so observed facts flow through merges
+unchanged. IR-typed facts: `kind` (raster|vector|table|model|structured),
+`numeric_domain` (surface_reflectance|toa|dn|db|linear_power|index|categorical|
+masked|unknown), `dtype`, `wavelengths_nm` [{band,center,min,max}], `temporal`/
+`temporal_facts` {scene_count,dates[],max_gap_days}, `calibration`,
+`polarizations[]`, `class_count`. Understanding-native facts: `crs`
+({authid,wkt} or authid string) + `crs_authid`, `size` [w,h], `pixel_size`
+[x,y], `extent`, `band_roles` (array of role strings in band order, "" =
+unroleed), `band_count`, `bands[]` (per-band wavelength), `modality`, `sensor`,
+`nodata[]`, `quality_masks[]`, `radiometric_state`, `acquisition_time`,
+`processing_level`, `product_type`, `product_id`, `product_metadata`,
+`feature_count`, `geometry_type`. Unknown keys are rejected (fail-closed).
 
 Every fact carries provenance in `fact_status`: `observed` (from DatasetUnderstanding) >
 `declared` (agent wrote it) > `derived` (capability output contract) > `assumed` > `unknown`.
@@ -99,8 +105,8 @@ Output: `{verdict: "ok"|"fixable"|"blocked", issues:[{code, severity: error|warn
 node, port, message, repairable, facts}], checks:[...], fingerprint}`. Deterministic
 order: issue code, then node id, then port.
 
-Check families (each = one pure function over typed facts; table in
-`workflow_analysis.cpp` drives the loop so the set stays closed and testable):
+Check families (each a closed block in `analyzeWorkflowIr`; the checks ledger
+uses 17 distinct names):
 
 | # | Check | Facts consumed | Issue code (existing unless noted) |
 |---|---|---|---|
@@ -137,21 +143,26 @@ Closed rule table (`workflow_repair.cpp`), each row:
 
 | rule | on issue | inserts | risk |
 |---|---|---|---|
-| `reproject_to_reference` | CRS_MISMATCH | `io:reproject` (target = reference input CRS) | shape_preserving |
-| `align_to_reference` | GRID_MISMATCH | `rs:align` (ADR 0098 canonical fixer) | shape_preserving |
-| `resample_declared` | GRID_MISMATCH w/ declared target resolution | `rs:resample` | shape_preserving |
-| `extract_bands` | BAND_ROLE_UNRESOLVED w/ roles present but mis-ordered | `rs:extract_bands` | shape_preserving |
-| `calibrate_reflectance` | INVALID_RADIOMETRY (dn) w/ product metadata present | `rs:radiometric_calibrate` | radiometric |
-| `sar_db_to_power` | CALIBRATION_MISMATCH w/ calibration declared | `rs:sar_calibrate` | radiometric |
-| `apply_qa_mask` | quality_masks declared + optical index intent | `rs:apply_mask` | science_changing → NEVER auto-inserted; surfaced as decision |
+| `reproject_to_reference` | CRS_MISMATCH (slot edge) | `io:reproject` (target = reference sibling CRS) | shape_preserving — auto |
+| `align_to_reference` | GRID_MISMATCH (slot edges) | relation graph's `gridFixer` (`rs:align`), warp+resample onto the reference grid | shape_preserving — auto |
+| `calibrate_toa_reflectance` | INVALID_RADIOMETRY (warn or error class) | `rs:radiometric_calibration` (unit=toa_reflectance) | radiometric — PREPARED DECISION, never auto |
+| `sar_dn_calibration` | CALIBRATION_MISMATCH (DN) | `rs:sar_calibrate` | radiometric — prepared decision; coefficients must come from observed metadata |
+| `apply_qa_mask` | opportunity: observed quality_masks on an index/change consumer | `rs:apply_mask` | science_changing → decision only |
 | `temporal_gap_fill` | TEMPORAL_MISALIGNMENT | `rs:temporal_gap_fill` | science_changing → decision only |
+| `select_other_dataset` | BAND_ROLE_UNRESOLVED / CATEGORICAL_MISMATCH | — | decision only |
+
+Resampling is covered by the align rule (warp+resample to the reference grid);
+band selection has no auto rule — a missing physical band cannot be
+synthesized, and re-ordering is only a decision.
 
 Risk classes:
 - `shape_preserving`: geometry/format only; auto-inserted with a repair record.
-- `radiometric`: changes pixel semantics but is contract-defined; auto-inserted ONLY
-  when the metadata facts it needs are `observed`; otherwise becomes a refusal.
-- `science_changing`: never auto-inserted; becomes a typed REFUSAL entry
-  `{decision_required: true, why, options}` — Pi/user must decide.
+- `radiometric`: changes pixel semantics in a contract-defined way — under the
+  real knowledge contracts (DN is warn-class for the optical families) these are
+  PREPARED DECISIONS, never auto-insertions; the refusal notes whether observed
+  metadata would back the calibration.
+- `science_changing`: never auto-inserted; typed REFUSAL entries
+  `{decision_required: true, why, missing_facts}` — Pi/user decides.
 
 Every inserted node gets `source: "repair:<rule_id>"` and the IR document gains a
 `repairs[]` record {rule_id, issue_code, inserted_node, facts_used, risk, evidence} and
@@ -165,7 +176,7 @@ table and pinned by tests to not rely on those paths.
 
 Each stage is a pure function returning a typed doc; the stage list is closed:
 
-`intent → grounding → candidates → ir → analysis → repair → lower → plan`
+`parse → ground → candidates → analysis → repair → lower`
 
 - intent: `resolveGoalIntent` (existing).
 - grounding: resolve slot refs through `resolveDatasetRef` + cached/fresh
@@ -184,8 +195,13 @@ Each stage is a pure function returning a typed doc; the stage list is closed:
   stays deterministic.
 
 New tools (registered on SpatialToolRegistry — GUI/CLI/MCP/Pi all see them through the
-existing mirrors): `harness:compile_workflow`, `harness:tool_shortlist`, and
-`harness:workflow_session` (checkpoint/resume/compact/list/stale-report).
+existing mirrors): `harness:compile_workflow` (stages/ir/analysis/repairs/
+decisions; an authoritative verdict != ok withholds the engine JSON),
+`harness:tool_shortlist` + `harness:knowledge_budget`, and
+`harness:workflow_session` (save/resume/list/delete/staleness; compaction is a
+save-time projection). Session checkpoint coverage lives in
+`test_context_checkpoint` with an explicit temp store — the eval corpus must
+not write the real `~/.rs_studio` tree.
 
 ## Context checkpoint (`context_checkpoint`)
 
@@ -212,8 +228,10 @@ H(code, step, structural params), proposal kind, outcome}. Loop policy (typed, b
 - `stop: true, reason: "BUDGET_EXHAUSTED"` (existing) — unchanged semantics.
 - NEW `stop: true, reason: "REPEATED_ERROR"` when the same error fingerprint would be
   proposed twice (the caller would repeat the same repair — refused).
-- NEW `attempt` / `distinct_errors` / `original_intent` echo in every proposal document
-  so Pi can never lose the goal across repair attempts.
+- `original_intent` echo (goal/intent/plan fingerprint from the plan binding)
+  in every terminal diagnosis, and a `distinct_proposal_sets` count in bounds,
+  so Pi can never lose the goal or confuse "same repair twice" with a new
+  failure shape. The repeated guard stops with reason `repeated_error`.
 
 The full typed loop (preflight → execute → observe → diagnose → repair → bounded retry
 → verify → continue) is DOCUMENTED as the state machine Pi drives through the existing
@@ -246,12 +264,12 @@ budget machinery; provenance field explains EVERY inclusion (no silent truncatio
 ## Eval corpus (K)
 
 New category files (append-only) under `data/agent/evals/cases/`:
-`workflow_compiler.json` (wrong-CRS repair, dB-to-optical typed failure, missing
-metadata refusal, output collision, unknown operator, grid auto-align, over-budget,
-normalize idempotence, repeated-error stop), `repair_refusal.json` (science-changing
-repairs require decision), `long_context_session.json` (checkpoint→resume→stale
-invalidation determinism). Deterministic verdicts wherever the runner executes
-deterministically; schema validated by the existing corpus loader.
+`workflow_compiler.json` (healthy compile, declared-CRS conflict auto-reproject,
+unknown operator, output collision, declared-vs-observed modality conflict),
+`repair_refusal.json` (DN prepared decision, missing-band refusal),
+`knowledge_budget.json` (shortlist provenance + budget, family filter,
+knowledge-budget report). Deterministic verdicts are the POST-repair
+re-analysis; the corpus never writes the real session store.
 
 ## What we deliberately do NOT build
 

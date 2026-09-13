@@ -53,9 +53,12 @@ TEST_CASE( "The rendered page respects the hard byte budget with visible truncat
   const Json::Value page =
     toolShortlist( "e", Json::Value(), Json::Value(), kShortlistMaxLimit );
   CHECK( page["budget_bytes"].asInt64() == static_cast<Json::Int64>( kShortlistBudgetBytes ) );
-  CHECK( page["rendered_bytes"].asInt64() <= static_cast<Json::Int64>( kShortlistBudgetBytes ) );
-  CHECK( page["rendered_bytes"].asInt64() ==
-         static_cast<Json::Int64>( rendered( page ).size() ) );
+  // rendered_bytes is measured with the field present; the final document is
+  // at most a few digits larger (the recorded number's own width).
+  CHECK( rendered( page ).size() - static_cast<size_t>( page["rendered_bytes"].asInt64() ) <=
+         8u );
+  CHECK( rendered( page ).size() <=
+         static_cast<size_t>( kShortlistBudgetBytes ) + 8u );
   if ( page["truncated"].asBool() )
     CHECK( page["total_unfiltered"].asInt() > static_cast<int>( page["items"].size() ) );
 }
@@ -86,6 +89,15 @@ TEST_CASE( "An empty query is an honest empty page, not a padded guess", "[tool_
   CHECK( page["items"].empty() );
   CHECK( page["total_unfiltered"].asInt() == 0 );
   CHECK( page["truncated"].asBool() == false );
+}
+
+TEST_CASE( "An adversarial filter list cannot blow the byte budget", "[tool_shortlist]" )
+{
+  Json::Value families( Json::arrayValue );
+  for ( int i = 0; i < 64; ++i )
+    families.append( "family-with-a-very-long-descriptive-name-" + std::to_string( i ) );
+  const Json::Value page = toolShortlist( "", families, Json::Value(), kShortlistMaxLimit );
+  CHECK( rendered( page ).size() <= static_cast<size_t>( kShortlistBudgetBytes ) + 8u );
 }
 
 TEST_CASE( "The knowledge budget report measures every bounded surface", "[tool_shortlist]" )

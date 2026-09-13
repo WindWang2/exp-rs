@@ -446,6 +446,109 @@ TEST_CASE( "Model seam operators demand a model id and honor recorded contracts"
   CHECK( param->details["parameter"].asString() == "model" );
 }
 
+TEST_CASE( "Assumed-only numeric domains degrade SAR findings to warnings",
+           "[workflow_analysis]" )
+{
+  // A producer inherits an assumed numeric_domain downstream; the consumer's
+  // SAR calibration finding must be a WARNING, never an error grounded in a
+  // heuristic (review A-5).
+  Json::Value doc = parse( R"({
+    "kind": "workflow_ir", "schema_version": "1.0",
+    "intent": "sar",
+    "inputs": [ { "name": "primary", "ref": "asset-9",
+                  "artifact": { "modality": "sar", "numeric_domain": "dn" } } ],
+    "nodes": [
+      { "id": "filter", "operator": "rs:sar_speckle",
+        "inputs": [ { "input": "primary" } ] },
+      { "id": "backscatter", "operator": "rs:sar_backscatter",
+        "inputs": [ { "node": "filter" } ] }
+    ],
+    "expectations": { "output_dir": "/tmp/out" }
+  })" );
+  WorkflowIr ir;
+  HarnessError error;
+  REQUIRE( readWorkflowIr( doc, ir, error ) );
+  const IrAnalysis analysis = analyzeWorkflowIr( ir, IrAnalysisInput{} );
+  const IrIssue *calibration = findIssue( analysis, "CALIBRATION_MISMATCH", "backscatter" );
+  REQUIRE( calibration );
+  CHECK( calibration->severity == "warning" );
+  CHECK( analysis.verdict == "ok" );
+}
+
+TEST_CASE( "Duplicate input port bindings are rejected at read time",
+           "[workflow_analysis][workflow_ir]" )
+{
+  Json::Value doc = parse( R"({
+    "kind": "workflow_ir", "schema_version": "1.0",
+    "inputs": [ { "name": "t1", "ref": "a" }, { "name": "t2", "ref": "b" } ],
+    "nodes": [
+      { "id": "diff", "operator": "rs:change_difference",
+        "inputs": [ { "input": "t1", "as": "after" }, { "input": "t2", "as": "after" } ] }
+    ]
+  })" );
+  WorkflowIr ir;
+  HarnessError error;
+  CHECK( !readWorkflowIr( doc, ir, error ) );
+  CHECK( error.code == "INVALID_PLAN" );
+}
+
+TEST_CASE( "Object-shaped grid facts (the real inspect shapes) are compared",
+           "[workflow_analysis]" )
+{
+  Json::Value doc = parse( R"({
+    "kind": "workflow_ir", "schema_version": "1.0",
+    "intent": "change",
+    "inputs": [ { "name": "t1", "ref": "asset-1" }, { "name": "t2", "ref": "asset-2" } ],
+    "nodes": [
+      { "id": "diff", "operator": "rs:change_difference",
+        "inputs": [ { "input": "t1", "as": "after" }, { "input": "t2", "as": "before" } ] }
+    ]
+  })" );
+  WorkflowIr ir;
+  HarnessError error;
+  REQUIRE( readWorkflowIr( doc, ir, error ) );
+  IrAnalysisInput input;
+  // The shapes raster_inspect actually emits (objects, not arrays).
+  Json::Value doc1 = parse( R"({
+    "kind": "dataset_understanding", "source_kind": "raster",
+    "crs": { "authid": "EPSG:32650" },
+    "size": { "width": 100, "height": 100 },
+    "pixel_size": { "x": 10, "y": 10 },
+    "band_roles": [ "red", "nir" ]
+  })" );
+  Json::Value doc2 = parse( R"({
+    "kind": "dataset_understanding", "source_kind": "raster",
+    "crs": { "authid": "EPSG:32650" },
+    "size": { "width": 200, "height": 200 },
+    "pixel_size": { "x": 20, "y": 20 },
+    "band_roles": [ "red", "nir" ]
+  })" );
+  input.inputFacts["t1"] = doc1;
+  input.inputFacts["t2"] = doc2;
+  const IrAnalysis analysis = analyzeWorkflowIr( ir, input );
+  CHECK( findIssue( analysis, "GRID_MISMATCH", "diff" ) != nullptr );
+  // Case-folded CRS: epsg:4326 vs EPSG:4326 is NOT a conflict (review A-7).
+  Json::Value doc3 = parse( R"({
+    "kind": "dataset_understanding", "source_kind": "raster",
+    "crs": { "authid": "epsg:4326" },
+    "size": { "width": 100, "height": 100 },
+    "pixel_size": { "x": 10, "y": 10 },
+    "band_roles": [ "red", "nir" ]
+  })" );
+  Json::Value doc4 = parse( R"({
+    "kind": "dataset_understanding", "source_kind": "raster",
+    "crs_authid": "EPSG:4326",
+    "size": { "width": 100, "height": 100 },
+    "pixel_size": { "x": 10, "y": 10 },
+    "band_roles": [ "red", "nir" ]
+  })" );
+  input.inputFacts["t1"] = doc3;
+  input.inputFacts["t2"] = doc4;
+  const IrAnalysis noCrsNoise = analyzeWorkflowIr( ir, input );
+  CHECK( findIssue( noCrsNoise, "CRS_MISMATCH" ) == nullptr );
+  CHECK( findIssue( noCrsNoise, "GRID_MISMATCH" ) != nullptr ); // same grid, 4326 both
+}
+
 TEST_CASE( "Declared facts conflicting with observations become FACT_CONFLICT warnings",
            "[workflow_analysis]" )
 {

@@ -124,8 +124,10 @@ TEST_CASE( "Grid mismatch auto-inserts rs:align onto the reference grid with evi
   CHECK( outcome.repairs[0].ruleId == "align_to_reference" );
   CHECK( outcome.repairs[0].risk == repair_risk::kShapePreserving );
   CHECK( outcome.repairs[0].issueCode == "GRID_MISMATCH" );
-  CHECK( outcome.repairs[0].factsUsed["aligned_slot"].asString() == "t1" );
-  CHECK( outcome.repairs[0].factsUsed["reference_slot"].asString() == "t2" );
+  // Reference = the FIRST slot edge in normalized order carrying grid facts
+  // (t1), so t2 is the aligned side.
+  CHECK( outcome.repairs[0].factsUsed["aligned_slot"].asString() == "t2" );
+  CHECK( outcome.repairs[0].factsUsed["reference_slot"].asString() == "t1" );
 
   // The inserted node exists exactly once, is an rs:align wired to both
   // slots, and the consumer now reads from it.
@@ -143,10 +145,11 @@ TEST_CASE( "Grid mismatch auto-inserts rs:align onto the reference grid with evi
   REQUIRE( align );
   CHECK( align->source == "repair:align_to_reference" );
   REQUIRE( align->inputs.size() == 2 );
+  // Normalized edge order sorts by (input, as): t1/reference first.
   CHECK( align->inputs[0].input == "t1" );
-  CHECK( align->inputs[0].as == "input" );
+  CHECK( align->inputs[0].as == "reference" );
   CHECK( align->inputs[1].input == "t2" );
-  CHECK( align->inputs[1].as == "reference" );
+  CHECK( align->inputs[1].as == "input" );
   CHECK( align->params["output"].asString() == "/tmp/out/" + outcome.ir.irId + "_" + align->id + ".tif" );
   CHECK( align->outputs[0].artifact["kind"].asString() == "raster" );
 
@@ -156,7 +159,9 @@ TEST_CASE( "Grid mismatch auto-inserts rs:align onto the reference grid with evi
     if ( node.id != "diff" )
       continue;
     for ( const IrNodeInput &edge : node.inputs )
-      if ( edge.as == "input" && edge.node == align->id && edge.input.empty() )
+      // The aligned edge keeps its local port binding ("before"); only the
+      // source switches from the slot to the align node.
+      if ( edge.as == "before" && edge.node == align->id && edge.input.empty() )
         rewired = true;
   }
   CHECK( rewired );
@@ -186,8 +191,10 @@ TEST_CASE( "CRS mismatch auto-inserts io:reproject with the reference CRS",
     if ( node.operatorId == "io:reproject" )
       reprojected = &node;
   REQUIRE( reprojected );
-  CHECK( reprojected->params["targetCrs"].asString() == "EPSG:4326" );
-  CHECK( reprojected->outputs[0].artifact["crs"].asString() == "EPSG:4326" );
+  // The offending edge is t1 (normalized order); the reference CRS is the
+  // first sibling with a different CRS — t2's EPSG:32650.
+  CHECK( reprojected->params["targetCrs"].asString() == "EPSG:32650" );
+  CHECK( reprojected->outputs[0].artifact["crs"].asString() == "EPSG:32650" );
 }
 
 TEST_CASE( "Repairs are deterministic: same input, byte-identical repaired IR",

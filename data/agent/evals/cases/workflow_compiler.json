@@ -138,7 +138,7 @@
             "asserts": [
               {
                 "path": "verdict",
-                "equals": "fixable"
+                "equals": "ok"
               },
               {
                 "path": "repairs[0].rule_id",
@@ -293,11 +293,19 @@
             "asserts": [
               {
                 "path": "verdict",
-                "equals": "blocked"
+                "equals": "ok"
               },
               {
                 "path": "analysis.issues[0].code",
                 "equals": "FACT_CONFLICT"
+              },
+              {
+                "path": "facts.primary.modality",
+                "equals": "optical"
+              },
+              {
+                "path": "analysis.fact_status.primary.modality",
+                "equals": "observed"
               }
             ]
           }

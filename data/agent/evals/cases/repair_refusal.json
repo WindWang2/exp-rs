@@ -58,8 +58,12 @@
                 "equals": "ok"
               },
               {
-                "path": "decisions",
-                "exists": true
+                "path": "decisions[0].rule_id",
+                "equals": "calibrate_toa_reflectance"
+              },
+              {
+                "path": "decisions[0].decision_required",
+                "equals": true
               }
             ]
           }

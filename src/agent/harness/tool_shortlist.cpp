@@ -44,10 +44,29 @@ struct ScoredItem
 
 void addWhy( ScoredItem &item, const char *reason, const std::string &detail )
 {
+  // Bounded provenance: an adversarial filter list must not grow one item's
+  // why-array without end (review B-10).
+  if ( item.why.size() >= 4 )
+    return;
   Json::Value entry( Json::objectValue );
   entry["reason"] = reason;
   entry["detail"] = detail;
   item.why.append( entry );
+}
+
+/// Filter arrays are bounded too: at most 16 entries, each truncated.
+Json::Value boundedFilter( const Json::Value &filters )
+{
+  Json::Value out( Json::arrayValue );
+  if ( !filters.isArray() )
+    return out;
+  for ( const Json::Value &entry : filters )
+  {
+    if ( out.size() >= 16 )
+      break;
+    out.append( entry.isString() ? entry.asString().substr( 0, 64 ) : std::string() );
+  }
+  return out;
 }
 
 /// Closed scoring rules. Every inclusion MUST land at least one why entry —
@@ -132,16 +151,41 @@ Json::Value renderBounded( std::vector<ScoredItem> scored, const std::string &in
       items.append( entry );
     }
     doc["items"] = items;
-    doc["rendered_bytes"] = static_cast<Json::Int64>( rendered( doc ).size() );
+    // Measure with the field already present, then assign the measured value
+    // — the final document is at most a few digits larger than recorded
+    // (review B-4); the budget loop re-renders the final form.
+    doc["rendered_bytes"] = static_cast<Json::Int64>( 0 );
+    const long long measured = static_cast<long long>( rendered( doc ).size() );
+    doc["rendered_bytes"] = static_cast<Json::Int64>( measured );
     return doc;
   };
 
   Json::Value doc = build( static_cast<int>( scored.size() ) );
+  auto overBudget = [ & ]()
+  { return rendered( doc ).size() > kShortlistBudgetBytes; };
   int keep = static_cast<int>( scored.size() );
-  while ( rendered( doc ).size() > kShortlistBudgetBytes && keep > 1 )
+  while ( overBudget() && keep > 1 )
   {
     --keep;
     doc = build( keep );
+  }
+  // Hard-budget fallback: even a single oversized item fits — trim summaries
+  // until the page closes under the cap (or is one bare id row).
+  while ( overBudget() )
+  {
+    bool trimmed = false;
+    for ( int i = 0; i < keep && i < static_cast<int>( scored.size() ); ++i )
+    {
+      std::string &summary = scored[ i ].summary;
+      if ( summary.size() > 16 )
+      {
+        summary.resize( summary.size() / 2 );
+        trimmed = true;
+      }
+    }
+    doc = build( keep );
+    if ( !trimmed )
+      break;
   }
   return doc;
 }
@@ -162,6 +206,9 @@ Json::Value toolShortlist( const std::string &intent, const Json::Value &familie
   }
   if ( limit <= 0 )
     limit = 8;
+  const Json::Value boundedFamilies = boundedFilter( families );
+  const Json::Value boundedTags = boundedFilter( tags );
+  const std::string boundedIntent = intent.substr( 0, 64 );
 
   std::vector<ScoredItem> scored;
 
@@ -183,7 +230,7 @@ Json::Value toolShortlist( const std::string &intent, const Json::Value &familie
         }
       }
     }
-    scoreCandidate( item, intent, families, tags );
+    scoreCandidate( item, boundedIntent, boundedFamilies, boundedTags );
     if ( item.score > 0 )
       scored.push_back( std::move( item ) );
   }
@@ -223,12 +270,12 @@ Json::Value toolShortlist( const std::string &intent, const Json::Value &familie
         addWhy( item, "family_match", "capability family '" + family.asString() + "'" );
       }
     }
-    scoreCandidate( item, intent, Json::Value(), tags );
+    scoreCandidate( item, boundedIntent, Json::Value(), boundedTags );
     if ( item.score > 0 )
       scored.push_back( std::move( item ) );
   }
 
-  return renderBounded( std::move( scored ), intent, families, tags, limit );
+  return renderBounded( std::move( scored ), boundedIntent, boundedFamilies, boundedTags, limit );
 }
 
 Json::Value knowledgeBudgetReport()

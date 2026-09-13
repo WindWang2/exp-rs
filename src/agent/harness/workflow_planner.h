@@ -47,7 +47,8 @@ struct CompiledWorkflow
     std::vector<IrRefusal> refusals;
     AgentPlan plan;                           ///< lowered plan (meaningful on success)
     HarnessError planError;                   ///< set when lowering/compilation failed
-    std::string workflowJson;                 ///< engine JSON ("" when invalid)
+    std::string workflowJson;                 ///< engine JSON ("" when invalid or blocked)
+    bool executionBlocked = false;            ///< analysis verdict != ok — do not execute
     std::vector<PlannerStageReport> stages;
     Json::Value alternatives{Json::arrayValue}; ///< candidate methods with why/why-not
     Json::Value missingFacts{Json::arrayValue}; ///< what grounding could not supply

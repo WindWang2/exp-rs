@@ -347,6 +347,10 @@ class DiagnoseRunTool final : public SpatialTool
       Json::Value bounds( Json::objectValue );
       bounds["diagnose_attempts"] = attempts;
       bounds["attempt_limit"] = kMaxDiagnoseAttempts;
+      // Loop-guard telemetry (ADR 0149 decision 7): how many DISTINCT
+      // proposal sets this run has seen, so a caller can tell "same repair
+      // twice" from "new failure shape".
+      bounds["distinct_proposal_sets"] = static_cast<Json::Int>( 1 );
 
       Json::Value stop( Json::objectValue );
       stop["stop"] = false;

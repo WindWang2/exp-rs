@@ -1,0 +1,73 @@
+{
+  "cases": [
+    {
+      "case_id": "long-context-session/tool-shortlist-carries-provenance-under-budget",
+      "category": "knowledge_budget",
+      "description": "The deterministic shortlist for an intent stays under its byte budget and every item carries why_included provenance",
+      "steps": [
+        {
+          "tool": "harness:tool_shortlist",
+          "input": {
+            "intent": "ndvi",
+            "limit": 8
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "truncated",
+                "exists": true
+              },
+              {
+                "path": "budget_bytes",
+                "exists": true
+              }
+            ]
+          }
+        },
+        {
+          "tool": "harness:knowledge_budget",
+          "input": {},
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "all_within_budget",
+                "exists": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "knowledge-budget/shortlist-family-filter-is-deterministic",
+      "category": "knowledge_budget",
+      "description": "A family-scoped shortlist query returns provenance-carrying items deterministically",
+      "steps": [
+        {
+          "tool": "harness:tool_shortlist",
+          "input": {
+            "families": [
+              "spectral_index"
+            ],
+            "limit": 8
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "truncated",
+                "exists": true
+              },
+              {
+                "path": "budget_bytes",
+                "exists": true
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

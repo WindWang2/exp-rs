@@ -349,6 +349,10 @@ CompiledWorkflow compileWorkflow( const CompileWorkflowRequest &request, Harness
     ir.goal = request.goal;
   if ( !request.intent.empty() )
     ir.intent = request.intent;
+  // A derived ir_id is content-addressed; the overrides above changed the
+  // content, so re-derive (an EXPLICIT ir_id is an identity and stays).
+  if ( ir.irId.rfind( "wir-", 0 ) == 0 )
+    ir.irId = deriveIrId( ir );
   if ( ir.irId.empty() )
     ir.irId = deriveIrId( ir );
 
@@ -473,6 +477,11 @@ CompiledWorkflow compileWorkflow( const CompileWorkflowRequest &request, Harness
     }
     result.limitations = limitations;
   }
+
+  // Execution gate: a compile whose authoritative verdict is not ok hands
+  // over NO executable engine JSON — the plan document remains for audit
+  // (review A-6).
+  result.executionBlocked = result.analysis.verdict != "ok";
 
   // Stage: lower (IR -> AgentPlan v2 -> engine JSON).
   {
@@ -704,7 +713,17 @@ class CompileWorkflowTool final : public SpatialTool
       out["alternatives"] = compiled.alternatives;
       out["missing_facts"] = compiled.missingFacts;
       out["limitations"] = compiled.limitations;
-      if ( compiled.workflowJson.empty() )
+      if ( compiled.executionBlocked )
+      {
+        // Blocked/fixable-with-errors science: the engine JSON is withheld —
+        // the plan document stays for audit only.
+        out["workflow_json"] = "";
+        out["execution_blocked"] = true;
+        out["plan_document"] = compiled.workflowJson.empty()
+                                 ? Json::Value()
+                                 : agentPlanToDocument( compiled.plan );
+      }
+      else if ( compiled.workflowJson.empty() )
       {
         out["plan"] = Json::Value();
         out["workflow_json"] = "";
@@ -716,9 +735,12 @@ class CompileWorkflowTool final : public SpatialTool
         out["plan_document"] = agentPlanToDocument( compiled.plan );
         out["workflow_json"] = compiled.workflowJson;
       }
-      out["next"] = compiled.workflowJson.empty()
-                      ? "resolve the analysis issues (or the lower error), then re-compile"
-                      : "harness:execute_plan {plan} — the lowered AgentPlan v2";
+      out["next"] =
+        compiled.executionBlocked
+          ? "resolve the analysis issues (repairs/decisions below), then re-compile"
+          : ( compiled.workflowJson.empty()
+                ? "resolve the lower error, then re-compile"
+                : "harness:execute_plan {plan} — the lowered AgentPlan v2" );
       return SpatialToolResult::ok( std::move( out ) );
     }
 };

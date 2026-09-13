@@ -132,7 +132,10 @@ class HarnessSessionStore
   private:
     HarnessSessionStore() = default;
     QString defaultDirectory() const;
-    QString sessionPath( const std::string &sessionId ) const;
+    /// Locked variants — callers hold gStoreMutex; these never lock
+    /// (the public accessors do, and the mutex is non-recursive).
+    QString directoryLocked() const;
+    QString sessionPathLocked( const std::string &sessionId ) const;
 
     QString mDirectory;
 };

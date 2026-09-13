@@ -53,9 +53,13 @@ const FactKeySpec kFactKeys[] = {
   // into checks without a second vocabulary).
   { "crs", "object" },
   { "crs_authid", "string" },
-  { "size", "array" },
-  { "pixel_size", "array" },
-  { "extent", "array" },
+  // Grid/extent facts arrive as OBJECTS from the inspect tools
+  // ({width,height} / {x,y} / {minX,...}) and may be declared as ARRAYS —
+  // both shapes are accepted (review A-8; the type check below special-cases
+  // these keys).
+  { "size", "either" },
+  { "pixel_size", "either" },
+  { "extent", "either" },
   { "band_roles", "array" },
   { "band_count", "number" },
   { "bands", "array" },
@@ -155,7 +159,6 @@ Json::Value irLimits()
   limits["max_outputs_per_node"] = IrLimits::kMaxOutputsPerNode;
   limits["max_declared_outputs"] = IrLimits::kMaxDeclaredOutputs;
   limits["max_document_inputs"] = IrLimits::kMaxDocumentInputs;
-  limits["max_artifacts"] = IrLimits::kMaxArtifacts;
   limits["max_id_chars"] = static_cast<Json::Int>( IrLimits::kMaxIdChars );
   limits["max_text_chars"] = static_cast<Json::Int>( IrLimits::kMaxTextChars );
   return limits;
@@ -208,9 +211,17 @@ std::vector<std::string> validateArtifactFacts( const Json::Value &facts )
       continue;
     }
     // CRS arrives either as an {authid, wkt} object (raster inspect) or as a
-    // plain authid string (vector inspect / derived facts).
+    // plain authid string (vector inspect / derived facts). Grid/extent facts
+    // accept both shapes the platform actually produces (review A-8).
     const bool crsFlexible = key == "crs";
-    if ( !crsFlexible && typeOfJson( facts[key] ) != spec->type )
+    const bool gridFlexible = key == "size" || key == "pixel_size" || key == "extent";
+    const std::string actualType = typeOfJson( facts[key] );
+    if ( gridFlexible && actualType != "object" && actualType != "array" )
+    {
+      problems.push_back( "artifact fact '" + key + "' must be an object or an array" );
+      continue;
+    }
+    if ( !crsFlexible && !gridFlexible && actualType != spec->type )
     {
       problems.push_back( "artifact fact '" + key + "' must be " + spec->type );
       continue;
@@ -219,6 +230,12 @@ std::vector<std::string> validateArtifactFacts( const Json::Value &facts )
          typeOfJson( facts[key] ) != "string" )
     {
       problems.push_back( "artifact fact 'crs' must be a string or {authid, wkt} object" );
+      continue;
+    }
+    if ( crsFlexible && facts[key].isString() &&
+         facts[key].asString().size() > IrLimits::kMaxCrsChars )
+    {
+      problems.push_back( "artifact fact 'crs' exceeds the length bound" );
       continue;
     }
     if ( key == std::string( "kind" ) && !isKnownArtifactKind( facts[key].asString() ) )
@@ -325,6 +342,12 @@ bool readWorkflowIr( const Json::Value &doc, WorkflowIr &ir, HarnessError &error
       IrInputSlot parsed;
       parsed.name = name;
       parsed.reference = slot["ref"].asString();
+      if ( parsed.reference.size() > IrLimits::kMaxTextChars )
+      {
+        error = HarnessError::make( error_codes::kInvalidPlan,
+                                    "input slot ref exceeds the text length bound" );
+        return false;
+      }
       if ( slot.isMember( "artifact" ) )
       {
         const std::string artifactError =
@@ -425,6 +448,7 @@ bool readWorkflowIr( const Json::Value &doc, WorkflowIr &ir, HarnessError &error
                                     where + " exceeds the per-node input bound" );
         return false;
       }
+      std::set<std::string> boundPorts;
       for ( const Json::Value &edge : node["inputs"] )
       {
         if ( !edge.isObject() )
@@ -438,6 +462,15 @@ bool readWorkflowIr( const Json::Value &doc, WorkflowIr &ir, HarnessError &error
         parsedEdge.output = defaultString( edge, "output", "output" );
         parsedEdge.input = edge.get( "input", "" ).asString();
         parsedEdge.as = defaultString( edge, "as", "input" );
+        // Two edges feeding one port silently drop one data flow — reject at
+        // read time (review A-15).
+        if ( !boundPorts.insert( parsedEdge.as ).second )
+        {
+          error = HarnessError::make(
+            error_codes::kInvalidPlan,
+            where + " (" + parsed.id + ") has duplicate input port bindings: " + parsedEdge.as );
+          return false;
+        }
         const bool nodeForm = !parsedEdge.node.empty();
         const bool slotForm = !parsedEdge.input.empty();
         if ( nodeForm == slotForm )
@@ -475,6 +508,12 @@ bool readWorkflowIr( const Json::Value &doc, WorkflowIr &ir, HarnessError &error
         {
           error = HarnessError::make( error_codes::kInvalidPlan,
                                       where + " output ports need string 'name'" );
+          return false;
+        }
+        if ( parsedPort.name.size() > IrLimits::kMaxIdChars )
+        {
+          error = HarnessError::make( error_codes::kInvalidPlan,
+                                      where + " output port name exceeds the id bound" );
           return false;
         }
         if ( !portNames.insert( parsedPort.name ).second )
@@ -841,7 +880,8 @@ std::string workflowIrFingerprint( const WorkflowIr &ir )
 {
   Json::Value content( Json::objectValue );
   content["intent"] = ir.intent;
-  content["goal"] = ir.goal;
+  // `goal` is prose (planFingerprint parity): identical science with a
+  // reworded goal keeps one fingerprint.
   Json::Value inputs( Json::arrayValue );
   for ( const IrInputSlot &slot : ir.inputs )
   {
@@ -1032,6 +1072,23 @@ Json::Value factStatusFor( const Json::Value &declared, const Json::Value &obser
   };
   mark( declared, "declared" );
   mark( observed, "observed" ); // observed wins
+  // The audit surface must not advertise provenance for keys the merge
+  // dropped (envelope bookkeeping like path/driver/entity) — strip anything
+  // that is not a closed fact key.
+  for ( const std::string &key : status.getMemberNames() )
+  {
+    bool known = false;
+    for ( const FactKeySpec &spec : kFactKeys )
+    {
+      if ( key == spec.key )
+      {
+        known = true;
+        break;
+      }
+    }
+    if ( !known )
+      status.removeMember( key );
+  }
   return status;
 }
 
@@ -1080,6 +1137,21 @@ Json::Value mergeArtifactFacts( const Json::Value &declared, const Json::Value &
 std::string deriveIrId( const WorkflowIr &ir )
 {
   return "wir-" + workflowIrFingerprint( ir );
+}
+
+std::string normalizedCrsAuthid( const Json::Value &facts )
+{
+  const Json::Value &crs = facts.get( "crs", Json::Value() );
+  std::string authid;
+  if ( crs.isString() )
+    authid = crs.asString();
+  else if ( crs.isObject() )
+    authid = crs.get( "authid", "" ).asString();
+  if ( authid.empty() )
+    authid = facts.get( "crs_authid", "" ).asString();
+  std::transform( authid.begin(), authid.end(), authid.begin(),
+                  []( unsigned char c ) { return static_cast<char>( std::toupper( c ) ); } );
+  return authid;
 }
 
 std::string derivedOutputPath( const WorkflowIr &ir, const IrNode &node,

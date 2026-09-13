@@ -12,8 +12,10 @@
 //   shape_preserving — geometry/format only (reproject, align). Auto-inserted
 //                      with an evidence record whenever the facts suffice.
 //   radiometric      — changes pixel semantics in a contract-defined way
-//                      (calibration). Auto-inserted ONLY when the metadata it
-//                      needs was OBSERVED; otherwise it degrades to a refusal.
+//                      (calibration). NEVER auto-inserted under the real
+//                      knowledge contracts (DN is warn-class for the optical
+//                      families): it becomes a prepared decision refusal that
+//                      notes whether observed metadata would back it.
 //   science_changing — alters the scientific meaning (QA masking, gap
 //                      filling, dataset substitution). NEVER auto-inserted;
 //                      becomes a typed decision-required refusal.

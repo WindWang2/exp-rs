@@ -164,7 +164,6 @@ std::vector<double> wavelengthCentersForRole( const Json::Value &facts, const st
       centers.push_back( nm );
     }
   }
-  // The typed wavelengths_nm fact (band index-keyed) is the second source.
   return centers;
 }
 
@@ -182,27 +181,6 @@ bool roleSatisfiedByWavelength( const Json::Value &facts, const std::string &rol
         return true;
   }
   return false;
-}
-
-/// Centers declared for bands claiming `role`, from wavelengths_nm entries
-/// whose band index matches a band_roles position carrying that role.
-std::vector<double> declaredCentersForRole( const Json::Value &facts, const std::string &role )
-{
-  std::vector<double> centers;
-  if ( !facts.isMember( "band_roles" ) || !facts["band_roles"].isArray() )
-    return centers;
-  const std::vector<double> all = wavelengthCenters( facts );
-  int index = 0;
-  for ( const Json::Value &entry : facts["band_roles"] )
-  {
-    const bool matches = entry.isString() && lowered( entry.asString() ) == role;
-    if ( matches && index < static_cast<int>( all.size() ) )
-      centers.push_back( all[ index ] );
-    ++index;
-  }
-  if ( centers.empty() )
-    return wavelengthCentersForRole( facts, role );
-  return centers;
 }
 
 bool isGeographicCrs( const Json::Value &facts )
@@ -225,28 +203,69 @@ bool isGeographicCrs( const Json::Value &facts )
   return false;
 }
 
-/// Grid identity: (size, pixel_size) pair. True when both sides carry a grid
-/// and they disagree.
-bool gridsConflict( const Json::Value &a, const Json::Value &b )
+/// Shape-tolerant grid facts (review A-4): the inspect tools emit
+/// `size` {width,height} / `pixel_size` {x,y} OBJECTS while some declared
+/// facts use [w,h]/[x,y] ARRAYS; both shapes parse. Zero dimensions mean
+/// unknown — checks skip, never fake a verdict.
+struct GridShapeFacts
 {
-  facts::GridFacts ga = gridFacts( a );
-  facts::GridFacts gb = gridFacts( b );
-  if ( ga.width <= 0 || ga.height <= 0 || gb.width <= 0 || gb.height <= 0 )
-    return false;
+    bool known = false;
+    long long width = 0;
+    long long height = 0;
+    double pixelSizeX = 0;
+    double pixelSizeY = 0;
+};
+
+double numberOr( const Json::Value &value, const char *key, Json::ArrayIndex index )
+{
+  if ( value.isObject() && value.isMember( key ) && value[key].isNumeric() )
+    return value[key].asDouble();
+  if ( value.isArray() && index < value.size() && value[index].isNumeric() )
+    return value[index].asDouble();
+  return 0.0;
+}
+
+GridShapeFacts gridShapeFacts( const Json::Value &facts )
+{
+  GridShapeFacts g;
+  if ( !facts.isMember( "size" ) )
+    return g;
+  const Json::Value &size = facts["size"];
+  g.width = static_cast<long long>( numberOr( size, "width", 0 ) );
+  g.height = static_cast<long long>( numberOr( size, "height", 1 ) );
+  g.pixelSizeX = numberOr( facts.get( "pixel_size", Json::Value() ), "x", 0 );
+  g.pixelSizeY = numberOr( facts.get( "pixel_size", Json::Value() ), "y", 1 );
+  g.known = g.width > 0 && g.height > 0;
+  return g;
+}
+
+enum class GridCompare
+{
+    Equal,
+    Conflict,
+    Unknown
+};
+
+GridCompare compareGrids( const Json::Value &a, const Json::Value &b )
+{
+  const GridShapeFacts ga = gridShapeFacts( a );
+  const GridShapeFacts gb = gridShapeFacts( b );
+  if ( !ga.known || !gb.known )
+    return GridCompare::Unknown; // unknown facts never fake a pass
   if ( ga.width != gb.width || ga.height != gb.height )
-    return true;
+    return GridCompare::Conflict;
   if ( ga.pixelSizeX > 0 && gb.pixelSizeX > 0 &&
        std::fabs( ga.pixelSizeX - gb.pixelSizeX ) > 1e-9 )
-    return true;
+    return GridCompare::Conflict;
   if ( ga.pixelSizeY > 0 && gb.pixelSizeY > 0 &&
        std::fabs( ga.pixelSizeY - gb.pixelSizeY ) > 1e-9 )
-    return true;
-  return false;
+    return GridCompare::Conflict;
+  return GridCompare::Equal;
 }
 
 std::string gridSummary( const Json::Value &facts )
 {
-  const facts::GridFacts g = gridFacts( facts );
+  const GridShapeFacts g = gridShapeFacts( facts );
   return std::to_string( g.width ) + "x" + std::to_string( g.height ) + " @" +
          std::to_string( g.pixelSizeX );
 }
@@ -736,8 +755,9 @@ IrAnalysis analyzeWorkflowIr( WorkflowIr &ir, const IrAnalysisInput &input )
     {
       Json::Value details = emptyObject();
       details["operator"] = node.operatorId;
+      // Not repairable: no rule inserts operators — the author fixes the id.
       builder.fail( "known_operator", error_codes::kInvalidPlan, node.id, "",
-                    "Unknown operator id: " + node.operatorId, true, details );
+                    "Unknown operator id: " + node.operatorId, false, details );
       // No contract facts exist for an unknown operator; the remaining
       // per-node checks would all be noise. Record skips and continue.
       builder.skip( "required_params", "unknown operator" );
@@ -1025,112 +1045,6 @@ IrAnalysis analyzeWorkflowIr( WorkflowIr &ir, const IrAnalysisInput &input )
           builder.skip( "wavelength", "no wavelengths observed on this input" );
       }
 
-      // c8/c9: CRS + grid conflicts on multi-raster consumers, requires_projected.
-      // Collect sibling edge facts first.
-      std::vector<Json::Value> siblingFacts;
-      for ( const IrNodeInput &sibling : node.inputs )
-      {
-        if ( !sibling.node.empty() )
-        {
-          const auto upstream = env.nodeOutputs.find( sibling.node );
-          if ( upstream != env.nodeOutputs.end() )
-          {
-            const auto port = upstream->second.find( sibling.output );
-            if ( port != upstream->second.end() )
-              siblingFacts.push_back( port->second );
-          }
-        }
-        else
-        {
-          const auto slotFacts = env.slotFacts.find( sibling.input );
-          if ( slotFacts != env.slotFacts.end() )
-            siblingFacts.push_back( slotFacts->second );
-        }
-      }
-
-      {
-        bool crsChecked = false;
-        std::string firstCrs;
-        for ( const Json::Value &sibling : siblingFacts )
-        {
-          const std::string authid = crsOf( sibling );
-          if ( authid.empty() )
-            continue;
-          if ( firstCrs.empty() )
-          {
-            firstCrs = authid;
-            continue;
-          }
-          if ( authid != firstCrs )
-          {
-            crsChecked = true;
-            Json::Value details = emptyObject();
-            details["crs_a"] = firstCrs;
-            details["crs_b"] = authid;
-            builder.fail( "crs", error_codes::kCrsMismatch, node.id, edge.as,
-                          "Rasters feed " + node.operatorId + " in different CRS (" + firstCrs +
-                            " vs " + authid + ")",
-                          true, details );
-            break; // one CRS issue per node; details carry the pair
-          }
-        }
-        if ( entry.isMember( "crs" ) && entry["crs"].isObject() &&
-             entry["crs"].get( "requires_projected", false ).asBool() )
-        {
-          for ( const Json::Value &sibling : siblingFacts )
-          {
-            if ( crsOf( sibling ).empty() )
-              continue;
-            crsChecked = true;
-            if ( isGeographicCrs( sibling ) )
-            {
-              Json::Value details = emptyObject();
-              details["reason"] = "requires_projected";
-              builder.fail( "crs", error_codes::kCrsMismatch, node.id, edge.as,
-                            node.operatorId + " requires a projected CRS; input is geographic",
-                            false, details );
-            }
-            break;
-          }
-        }
-        if ( crsChecked )
-          ; // ledger row recorded by fail()
-        else if ( siblingFacts.size() >= 2 )
-          builder.skip( "crs", "CRS facts missing or equal" );
-        else
-          builder.skip( "crs", "fewer than two rasters on this node" );
-      }
-
-      {
-        const bool needsSharedGrid =
-          catalog.requiresGrid( node.operatorId ) || relations.requiresGrid( node.operatorId );
-        if ( needsSharedGrid && siblingFacts.size() >= 2 )
-        {
-          bool conflict = false;
-          for ( size_t i = 1; i < siblingFacts.size() && !conflict; ++i )
-            conflict = gridsConflict( siblingFacts[ 0 ], siblingFacts[ i ] );
-          if ( conflict )
-          {
-            Json::Value details = emptyObject();
-            details["grid_a"] = gridSummary( siblingFacts[ 0 ] );
-            details["grid_b"] = gridSummary( siblingFacts[ 1 ] );
-            builder.fail( "grid", error_codes::kGridMismatch, node.id, "",
-                          node.operatorId +
-                            " demands one shared grid (ADR 0098); inputs disagree",
-                          true, details );
-          }
-          else
-          {
-            builder.pass( "grid" );
-          }
-        }
-        else
-        {
-          builder.skip( "grid", needsSharedGrid ? "grid facts missing"
-                                                : "operator tolerates independent grids" );
-        }
-      }
-
       // c10: temporal.
       {
         const Json::Value temporalDemand =
@@ -1202,7 +1116,17 @@ IrAnalysis analyzeWorkflowIr( WorkflowIr &ir, const IrAnalysisInput &input )
             Json::Value details = emptyObject();
             details["numeric_domain"] = domain;
             details["expected_calibration"] = sarDemand["calibration"];
-            if ( domain == artifact_facts::kDomainDn )
+            if ( !factBacked )
+            {
+              // Assumed-only domain: severity degrades to a warning — facts
+              // narrow checks, they never fake errors (review A-5).
+              builder.warn( "numeric_domain", error_codes::kCalibrationMismatch, node.id, edge.as,
+                            "SAR input domain '" + domain +
+                              "' (assumed) does not match the calibration contract of " +
+                              node.operatorId,
+                            details );
+            }
+            else if ( domain == artifact_facts::kDomainDn )
             {
               details["repair"] = "rs:sar_calibrate";
               builder.fail( "numeric_domain", error_codes::kCalibrationMismatch, node.id, edge.as,
@@ -1285,10 +1209,18 @@ IrAnalysis analyzeWorkflowIr( WorkflowIr &ir, const IrAnalysisInput &input )
             {
               Json::Value details = emptyObject();
               details["family"] = family;
-              builder.fail( "numeric_domain", error_codes::kCategoricalMismatch, node.id, edge.as,
-                            "Categorical input fed into the continuous '" + family +
-                              "' kernel " + node.operatorId,
-                            false, details );
+              if ( factBacked )
+                builder.fail( "numeric_domain", error_codes::kCategoricalMismatch, node.id,
+                              edge.as,
+                              "Categorical input fed into the continuous '" + family +
+                                "' kernel " + node.operatorId,
+                              false, details );
+              else
+                builder.warn( "numeric_domain", error_codes::kCategoricalMismatch, node.id,
+                              edge.as,
+                              "Categorical input (assumed) fed into the continuous '" + family +
+                                "' kernel " + node.operatorId,
+                              details );
             }
           }
           if ( !sarChecked && !radiometricChecked &&
@@ -1298,6 +1230,117 @@ IrAnalysis analyzeWorkflowIr( WorkflowIr &ir, const IrAnalysisInput &input )
                           "domain known (" + domain + ") but no radiometric contract on " +
                             node.operatorId );
           }
+        }
+      }
+    }
+
+    // c8/c9 (node level, hoisted out of the edge loop — review A-11): CRS
+    // conflicts, requires_projected, and shared-grid demands are properties
+    // of the NODE's inputs, not of one edge; one issue per node, no dupes.
+    {
+      std::vector<Json::Value> siblingFacts;
+      for ( const IrNodeInput &sibling : node.inputs )
+      {
+        if ( !sibling.node.empty() )
+        {
+          const auto upstream = env.nodeOutputs.find( sibling.node );
+          if ( upstream != env.nodeOutputs.end() )
+          {
+            const auto port = upstream->second.find( sibling.output );
+            if ( port != upstream->second.end() )
+              siblingFacts.push_back( port->second );
+          }
+        }
+        else
+        {
+          const auto slotFacts = env.slotFacts.find( sibling.input );
+          if ( slotFacts != env.slotFacts.end() )
+            siblingFacts.push_back( slotFacts->second );
+        }
+      }
+
+      // Shared CRS normalizer (review A-7): both fact keys, case-folded —
+      // `epsg:4326` vs `EPSG:4326` is one CRS, not a conflict.
+      {
+        bool crsChecked = false;
+        std::string firstCrs;
+        for ( const Json::Value &sibling : siblingFacts )
+        {
+          const std::string authid = normalizedCrsAuthid( sibling );
+          if ( authid.empty() )
+            continue;
+          if ( firstCrs.empty() )
+          {
+            firstCrs = authid;
+            continue;
+          }
+          if ( authid != firstCrs )
+          {
+            crsChecked = true;
+            Json::Value details = emptyObject();
+            details["crs_a"] = firstCrs;
+            details["crs_b"] = authid;
+            builder.fail( "crs", error_codes::kCrsMismatch, node.id, "",
+                          "Rasters feed " + node.operatorId + " in different CRS (" + firstCrs +
+                            " vs " + authid + ")",
+                          true, details );
+            break; // one CRS conflict per node; details carry the pair
+          }
+        }
+        if ( entry.isMember( "crs" ) && entry["crs"].isObject() &&
+             entry["crs"].get( "requires_projected", false ).asBool() )
+        {
+          // Every sibling that declares a CRS must be projected (review A-13).
+          for ( const Json::Value &sibling : siblingFacts )
+          {
+            if ( normalizedCrsAuthid( sibling ).empty() )
+              continue;
+            crsChecked = true;
+            if ( isGeographicCrs( sibling ) )
+            {
+              Json::Value details = emptyObject();
+              details["reason"] = "requires_projected";
+              builder.fail( "crs", error_codes::kCrsMismatch, node.id, "",
+                            node.operatorId + " requires a projected CRS; input is geographic",
+                            false, details );
+            }
+          }
+        }
+        if ( !crsChecked && siblingFacts.size() >= 2 )
+          builder.skip( "crs", "CRS facts missing or equal" );
+        else if ( !crsChecked && siblingFacts.size() < 2 )
+          builder.skip( "crs", "fewer than two rasters on this node" );
+      }
+
+      {
+        const bool needsSharedGrid =
+          catalog.requiresGrid( node.operatorId ) || relations.requiresGrid( node.operatorId );
+        if ( needsSharedGrid && siblingFacts.size() >= 2 )
+        {
+          const GridCompare verdict = compareGrids( siblingFacts[ 0 ], siblingFacts[ 1 ] );
+          if ( verdict == GridCompare::Conflict )
+          {
+            Json::Value details = emptyObject();
+            details["grid_a"] = gridSummary( siblingFacts[ 0 ] );
+            details["grid_b"] = gridSummary( siblingFacts[ 1 ] );
+            builder.fail( "grid", error_codes::kGridMismatch, node.id, "",
+                          node.operatorId +
+                            " demands one shared grid (ADR 0098); inputs disagree",
+                          true, details );
+          }
+          else if ( verdict == GridCompare::Equal )
+          {
+            builder.pass( "grid" );
+          }
+          else
+          {
+            builder.skip( "grid", "grid shapes unknown — never a faked pass (review A-4)" );
+          }
+        }
+        else
+        {
+          builder.skip( "grid", needsSharedGrid ? "grid facts missing"
+                                                : "operator tolerates independent grids" );
         }
       }
     }
@@ -1410,7 +1453,7 @@ IrAnalysis analyzeWorkflowIr( WorkflowIr &ir, const IrAnalysisInput &input )
     builder.pass( "fact_conflict" );
 
   // Verdict: errors all repairable -> fixable; any non-repairable error -> blocked.
-  const std::vector<IrIssue> issues = builder.takeIssues();
+  std::vector<IrIssue> issues = builder.takeIssues();
   IrAnalysis analysis;
   bool anyError = false;
   bool allRepairable = true;
@@ -1422,6 +1465,12 @@ IrAnalysis analyzeWorkflowIr( WorkflowIr &ir, const IrAnalysisInput &input )
     if ( !issue.repairable )
       allRepairable = false;
   }
+  std::sort( issues.begin(), issues.end(),
+             []( const IrIssue &a, const IrIssue &b )
+             {
+               return std::make_tuple( a.code, a.node, a.port, a.message ) <
+                      std::make_tuple( b.code, b.node, b.port, b.message );
+             } );
   analysis.verdict = !anyError ? "ok" : ( allRepairable ? "fixable" : "blocked" );
   analysis.irFingerprint = fingerprint;
   analysis.facts = factsEcho;

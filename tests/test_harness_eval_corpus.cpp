@@ -58,6 +58,9 @@ const char *const kCategories[] = {
   // adversarial-surfaces coverage, all still deterministic Tier A.
   "invalid_input", "modality_mismatch", "recovery", "long_plan",
   "cartography", "prompt_injection", "typed_contract",
+  // Compiler 10.0 (ADR 0149): typed WorkflowIR compilation, deterministic
+  // repair insertion/refusals, and budgeted knowledge surfaces.
+  "workflow_compiler", "repair_refusal", "knowledge_budget",
 };
 
 std::string corpusDirectory()
