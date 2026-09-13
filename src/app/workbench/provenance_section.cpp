@@ -20,6 +20,7 @@
 #include "data/derivation_record.h"
 #include "data/governance/governance_store.h"
 #include "data/governance/workspace_service.h"
+#include "object_identity.h"
 
 namespace sicnu::app
 {
@@ -158,61 +159,13 @@ void ProvenanceSection::populate( const SelectionContextSnapshot &snapshot )
     }
 
     // ── Resolve targets (bounded) ────────────────────────────────────────
-    QVector<sicnu::data::AssetId> targets;
-    QStringList targetWarnings;
-    auto pushTarget = [&]( const sicnu::data::AssetId &id ) {
-        if ( id.isNull() || targets.contains( id ) || targets.size() >= kMaxTargets )
-            return;
-        targets.append( id );
-    };
-
-    // 1) Data Manager asset selection.
-    for ( const QString &idText : snapshot.selectedAssetIds )
-    {
-        if ( const auto id = sicnu::data::AssetId::fromString( idText ) )
-            pushTarget( *id );
-    }
-
-    // 2) Governance Results/History selection → GovernedAsset → asset id.
-    if ( workspace && targets.isEmpty() )
-    {
-        for ( const QString &entityId : snapshot.selectedResultIds )
-        {
-            if ( targets.size() >= kMaxTargets )
-                break;
-            const std::optional<sicnu::workspace::GovernedAsset> governed =
-                workspace->store().assetById( entityId );
-            if ( !governed )
-                continue;
-            if ( const auto id = sicnu::data::AssetId::fromString( governed->assetId ) )
-                pushTarget( *id );
-            else if ( !governed->canonicalSource.isEmpty() )
-                if ( const auto byPath = dataManager->findByPath( governed->canonicalSource ) )
-                    pushTarget( byPath->id() );
-        }
-    }
-
-    // 3) Layer selection: the layer's source path through the catalog.
-    if ( targets.isEmpty() )
-    {
-        QList<QgsMapLayer *> layers;
-        if ( snapshot.activeLayer )
-            layers.append( snapshot.activeLayer );
-        for ( QgsMapLayer *layer : snapshot.selectedLayers )
-            if ( layer && layers.size() < kMaxTargets )
-                layers.append( layer );
-        for ( QgsMapLayer *layer : layers )
-        {
-            if ( targets.size() >= kMaxTargets )
-                break;
-            if ( !layer || layer->source().isEmpty() )
-                continue;
-            const std::optional<sicnu::data::AssetSnapshot> asset =
-                dataManager->findByPath( layer->source() );
-            if ( asset )
-                pushTarget( asset->id() );
-        }
-    }
+    // Workbench 10.0: the asset-selection → governance-entity → layer-source
+    // cascade now lives in ONE resolver (object_identity.cpp) shared with the
+    // agent context projection and linked brushing; bounds and semantics are
+    // unchanged (kMaxTargets == kObjectLinkMaxTargets == 4, first-non-empty
+    // source wins, duplicates dropped).
+    const QVector<sicnu::data::AssetId> targets =
+        resolveSelectionAssetTargets( snapshot, dataManager, workspace );
 
     if ( targets.isEmpty() )
     {

@@ -10,3 +10,12 @@
 - 措辞自查：`grep -E "尽量|适当|必要时|合理|充分|酌情" GOAL.md | grep -vc "grep -E"` → 见下
 
 ### 存在性断言（Phase 0 版，最终 PR 前重跑）
+
+## Phase 1 (WP-A) 本地验证（第一轮）
+
+- `cmake --build build-dev --target test_object_identity test_agent_workbench_context -j2` → 全部 Built
+- `QT_QPA_PLATFORM=offscreen ctest -R "objectKindToken|primaryObject|selectedLayerIds|resolveSelectionAssetTargets|workbenchContextToJson|workbench:context" -j1` → **9/9 Passed**（2.79 s）
+- 修复记录：`<QgsMapLayer>` → `<qgsmaplayer.h>`（大小写）；ContextRules 4 个选择谓词的重复定义移除（保留 selection_context.cpp 版本）；
+  test_agent_workbench_context 链接改为 sicnu_agent（spatial_tool.cpp 拖入工具族）；
+  jsoncpp 链接改用 `sicnu_link_jsoncpp` helper；构建文件损坏（与旧后台构建并发生成）已通过重新 `cmake .` 修复。
+- 发现：PRE_TEST 发现模式下 ctest -R 需按 TEST_CASE 名称匹配，非二进制名。

@@ -283,6 +283,7 @@ void DatasetExperimentPanel::onDatasetSelected( int index )
 {
     Q_UNUSED( index );
     rebuildVersions();
+    emit datasetSelectionChanged( m_datasetCombo->currentData().toString() );
 }
 
 void DatasetExperimentPanel::onVersionSelected( int row )
@@ -433,6 +434,14 @@ void DatasetExperimentPanel::onRunsSelectionChanged()
         m_runsTable->selectionModel() ? m_runsTable->selectionModel()->selectedRows()
                                       : QModelIndexList();
     m_compareBtn->setEnabled( rows.size() == 2 );
+    QStringList runIds;
+    runIds.reserve( rows.size() );
+    for ( const QModelIndex &row : rows )
+    {
+        if ( const QTableWidgetItem *idItem = m_runsTable->item( row.row(), 0 ) )
+            runIds.append( idItem->text() );
+    }
+    emit experimentRunSelectionChanged( runIds );
     if ( rows.size() == 1 )
     {
         if ( const QTableWidgetItem *idItem = m_runsTable->item( rows.first().row(), 0 ) )

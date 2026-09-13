@@ -145,6 +145,7 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
         QStringLiteral("cartography:"), // MapSpec compose/preflight/repair, components, charts (ADR 0127/0128)
         QStringLiteral("symbology:"),   // structured symbology apply/rollback (ADR 0128)
         QStringLiteral("workflow:"),    // static workflow preflight (ADR 0128)
+        QStringLiteral("workbench:"),   // workbench context projection (read-only, 10.0)
         QStringLiteral("workspace:"),   // workspace command/undo tools (ADR 0128)
         QStringLiteral("project:"),     // workspace governance summary/search/health (Platform 3.0)
         QStringLiteral("asset:"),       // governed asset inspect/validate/relink (Platform 3.0)
@@ -1143,6 +1144,7 @@ void McpServer::handleRequest(const QVariantMap &request)
             else if (toolName.startsWith(QStringLiteral("spatial:")) ||
                      toolName.startsWith(QStringLiteral("layout:")) ||
                      toolName.startsWith(QStringLiteral("cartography:")) ||
+                     toolName.startsWith(QStringLiteral("workbench:")) ||
                      toolName.startsWith(QStringLiteral("symbology:")) ||
                      toolName.startsWith(QStringLiteral("workflow:")) ||
                      toolName.startsWith(QStringLiteral("workspace:")) ||

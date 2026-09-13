@@ -9,6 +9,11 @@
 #include <iostream>
 
 #include "workflow_definition.h"
+#include "agent/spatial_tools/spatial_tool.h"
+
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 namespace sicnu::workflow::gui {
 
@@ -68,6 +73,15 @@ void PipelineEditorDock::createToolBar()
   auto *stopAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "media-playback-stop" ), QIcon( QStringLiteral( ":/icons/media-playback-stop" ) ) ), tr( "Stop" ) );
   stopAct->setToolTip( tr( "Stop the running pipeline task" ) );
   connect( stopAct, &QAction::triggered, this, &PipelineEditorDock::onStopClicked );
+
+  // Workbench 10.0: editor-side preflight projection. The SAME
+  // workflow:preflight engine agents use validates the canvas DAG; issues
+  // scoped to a step light that node's error badge, and every finding stays
+  // listed with its repair suggestion.
+  auto *preflightAct = mToolBar->addAction( QIcon::fromTheme( QStringLiteral( "to_ology_check" ), QIcon( QStringLiteral( ":/icons/to_ology_check" ) ) ), tr( "Check" ) );
+  preflightAct->setToolTip( tr( "检查工作流结构（循环/未知算子/缺失参数/输出冲突），错误映射到节点徽标" ) );
+  preflightAct->setObjectName( QStringLiteral( "rsPipelinePreflightAction" ) );
+  connect( preflightAct, &QAction::triggered, this, &PipelineEditorDock::runPreflightProjection );
 
   mToolBar->addSeparator();
 
@@ -179,6 +193,78 @@ void PipelineEditorDock::onRunFullClicked()
 void PipelineEditorDock::onStopClicked()
 {
   emit stopWorkflowRequested();
+}
+
+void PipelineEditorDock::runPreflightProjection()
+{
+  if ( !mCanvasWidget || !mCanvasWidget->pipelineScene() )
+    return;
+
+  WorkflowDefinition baseDef;
+  baseDef.id = "editor_preflight";
+  baseDef.title = "Editor Pipeline";
+  const WorkflowDefinition exported = mCanvasWidget->exportWorkflowDefinition( baseDef );
+  const Json::Value workflowJson = workflowDefinitionToJson( exported );
+
+  Json::Value input( Json::objectValue );
+  input["workflow"] = workflowJson;
+  auto tool = sicnu::agent::spatial_tools::SpatialToolRegistry::instance().find(
+      "workflow:preflight" );
+  if ( !tool )
+  {
+    QMessageBox::warning( this, tr( "检查" ), tr( "workflow:preflight 工具未注册。" ) );
+    return;
+  }
+  const auto result = ( *tool )->execute( input );
+  if ( !result.success )
+  {
+    QMessageBox::warning( this, tr( "检查" ),
+                          QString::fromStdString( result.error ) );
+    return;
+  }
+
+  // Reset every node to Idle, then project error-severity issues onto the
+  // step-scoped nodes.
+  auto *scene = mCanvasWidget->pipelineScene();
+  for ( auto &[id, node] : scene->nodes() )
+  {
+    Q_UNUSED( id );
+    if ( node && node->status() == NodeStatus::Failure )
+      node->setStatus( NodeStatus::Idle );
+  }
+
+  QStringList lines;
+  int errors = 0;
+  const Json::Value issues = result.output.isMember( "issues" ) && result.output["issues"].isArray()
+                                 ? result.output["issues"]
+                                 : Json::Value( Json::arrayValue );
+  for ( const auto &issue : issues )
+  {
+    const std::string message = issue.isMember( "message" ) ? issue["message"].asString() : "";
+    const std::string severity = issue.isMember( "severity" ) ? issue["severity"].asString() : "";
+    const std::string stepId = issue.isMember( "item_id" ) ? issue["item_id"].asString() : "";
+    if ( severity == "error" )
+    {
+      ++errors;
+      if ( auto *node = scene->findNode( QString::fromStdString( stepId ) ) )
+        node->setStatus( NodeStatus::Failure );
+    }
+    lines << QStringLiteral( "[%1] %2%3" )
+                 .arg( QString::fromStdString( severity ).toUpper(),
+                       QString::fromStdString( message ),
+                       issue.isMember( "repairable" ) && issue["repairable"].asBool()
+                           ? tr( "（可修复）" )
+                           : QString() );
+  }
+
+  const QString verdict = result.output.isMember( "verdict" ) && result.output["verdict"].isString()
+                              ? QString::fromStdString( result.output["verdict"].asString() )
+                              : QString();
+  if ( errors == 0 )
+    QMessageBox::information( this, tr( "检查" ),
+                              tr( "未发现结构问题（verdict: %1）。" ).arg( verdict ) );
+  else
+    QMessageBox::warning( this, tr( "检查发现 %1 个问题" ).arg( errors ), lines.join( QLatin1Char( '\n' ) ) );
 }
 
 void PipelineEditorDock::onTogglePresetCatalog()

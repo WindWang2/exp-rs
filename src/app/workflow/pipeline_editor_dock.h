@@ -32,6 +32,9 @@ public slots:
   void onNewClicked();
   void onOpenClicked();
   void onSaveClicked();
+  /// Workbench 10.0: run workflow:preflight on the canvas DAG and project
+  /// error findings onto node badges (shared agent engine, no second check).
+  void runPreflightProjection();
 public:
   // Convenience for ribbon / programmatic open — delegates to onOpenClicked's file-dialog flow.
   void openPipelineDialog() { onOpenClicked(); }

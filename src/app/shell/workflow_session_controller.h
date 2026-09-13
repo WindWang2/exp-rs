@@ -45,6 +45,14 @@ class WorkflowSessionController : public QObject
      */
     QString openTool( const QString &definitionId );
 
+    /**
+     * Workbench 10.0: open a bare rs: operator as a ONE-STEP workflow in the
+     * TaskPanelHost (WP-F catalog entry point). Registers the synthesized
+     * definition in the runtime, then rides the normal session path — the
+     * run seam stays TaskCenter, never a second executor.
+     */
+    QString openBareOperator( const QString &operatorId );
+
     void setLayerChoices( const QStringList &ids, const QStringList &names );
 
     bool isRunInFlight() const { return m_runInFlight; }
@@ -59,6 +67,9 @@ class WorkflowSessionController : public QObject
     void runFullWorkflow();
     void runUpToNode( const QString &targetStepId );
     void stopWorkflow();
+    /// Workbench 10.0: canvas node selection drives the step parameter form
+    /// (TaskPanelHost stays the single schema-form surface).
+    void selectStep( const QString &stepId );
 
   signals:
     void requestLoadRaster( const QString &path );

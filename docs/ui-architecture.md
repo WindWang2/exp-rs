@@ -585,3 +585,106 @@ default shortcuts — canonical Ctrl+N/O/S stay with `project.*`.
 `test_marshal_ui` · `test_scan_pool` (per-owner generations) ·
 `test_histogram_widget` (failure marshal) · `test_workbench_enum_provider` ·
 `test_catalog_pagination` · `test_project_lifecycle_stress`.
+
+# Part VI — Workbench 10.0 (unified objects / VA / cartography bridge)
+
+## 28. Unified object identity (goal §B)
+
+`src/app/workbench/object_identity.h` mints ONE typed reference —
+`WorkbenchObjectRef{ObjectKind, id}` — over the owning stores' EXISTING ids
+(AssetId, `QgsMapLayer::id()`, governance entity id, DatasetStore id,
+ExperimentStore run id, ModelCatalog name, WorkflowRunCoordinator run id); no
+second id space. `SelectionContextSnapshot` carries dataset/experiment/model/
+workflow-run selection lists (same push-style `notify*Selection` seams as the
+wb5 layer/asset/result lists — panels emit, the shell connects, the context
+subscribes). `ContextRules::primaryObject` is the deterministic primary-selection
+rule (WorkflowRun > ExperimentRun > Dataset > Model > Result > Asset > Layer,
+documented in the header and pinned by `test_object_identity`); ContextFacts
+gains hasExperiment/hasDataset/hasModel/hasWorkflowRun, and the
+`experiment.`/`dataset.`/`model.`/`workflowrun.` command-prefix families have
+unavailability reasons. The provenance target resolution (asset selection →
+governance entity → layer source) collapsed into ONE resolver
+(`resolveSelectionAssetTargets`) shared by the provenance inspector, the agent
+context tool and future brushing consumers.
+
+## 29. UI→agent context projection (goal §H)
+
+`workbench:context` is a read-only SpatialTool (`agent_context_tool.h`)
+registered by the shell at assembly: active workbench id, typed primary object,
+every selection list, ContextFacts and the registry command ids the agent may
+run (`workbenchContextToJson`). The MCP server routes the `workbench:` prefix
+through the spatial-tool path; headless processes without a shell never
+register the tool, so `tools/list` hides it there (WORKBENCH_UNAVAILABLE if
+called anyway). Writes keep flowing through the existing command/tool
+authority — the projection widens nothing.
+
+## 30. Cartography bridge (goal §G, C-1)
+
+`src/agent/cartography/cartography_operators.cpp` wraps the SAME engine the
+agent tools use (composition solver, preflight, MapSpecCompiler, governed
+export) into five `cartography:*` RSOperators — compose/preflight/validate/
+repair/export — registered by `initCartographyOperators()` (app main + CLI
+main; idempotent). A workflow step, a CLI pipeline step, the MCP surface and
+the GUI dispatch the identical engine through the identical registry. Layout-
+bound operators refuse with NotInitialized on hosts without an initialized
+QgsApplication (workers) — an honest typed refusal, never a silent no-op.
+`CartographyDock` (src/app/cartography/) is the desktop surface: template
+drafts seed from the unified selection's map layers via the SAME
+TemplateRegistry the agent tools read; every action button dispatches the
+operator family; preview renders the compiled QgsPrintLayout through the
+vendored QgsLayoutExporter at a bounded DPI (a projection, not a second
+renderer); export shows the sha256 evidence. The cartography workflow preset
+(compose → preflight → export) chains an upstream raster into a MapSpec map
+frame through the placeholder grammar — the "analysis result as MapSpec input"
+path, workflow-native.
+
+## 31. Visual Analytics platform (goal §D)
+
+`src/app/visualanalytics/` — typed value payloads (`va_data.h`: histogram/
+series/scatter/boxplot/matrix/areas; all pre-bounded and truncation-labeled),
+one async source (`va_source.h`: compute on the sanctioned RsScanPool,
+generation-token cancellation, marshal_ui delivery, honest empty/loading/error
+states), one QPainter chart host (`va_chart_widget.h`; token colors in both
+themes, painter-side draw caps, brushing signals, CSV/JSON export of the
+current payload) and the first full consumer (`VaWorkbenchPanel`: raster band
+histogram + two-band scatter + per-band mean curve over Nearest-overview
+thumbnails — sampled estimates LABELED as estimates — with real linked
+filtering: a histogram brush filters the scatter client-side over the bounded
+payload). New chart consumers should build on these pieces instead of
+scanning rasters ad hoc; existing widgets stay until a milestone migrates
+them.
+
+## 32. Workflow editor 2.0 additions (goal §E)
+
+Node selection drives the step parameter form through
+`WorkflowSessionController::selectStep` — the TaskPanelHost stays the single
+schema-form surface (no second form framework). The editor's 检查 action runs
+the SAME `workflow:preflight` engine agents use and projects error-severity
+findings onto node failure badges with the repairable hint; no second
+validator exists.
+
+## 33. N-view link (goal §C)
+
+`ViewLinkController` (src/app/shell/) links registered Display Views
+(QgisDisplayManager authority): per-view toggles, throttled extent fan-out
+with CRS transform, unlink and viewAboutToBeRemoved detach. The dual 1x2
+split-canvas sync keeps its dedicated controller — a different surface.
+
+## 34. rs: operator catalog (goal §F)
+
+`RsOperatorCatalogPanel` lists every registered rs: operator (registry +
+capability-knowledge sidecars) with search, modality filter, recent
+(settings-backed, capped) and favorites. Opening an entry synthesizes a
+one-step workflow definition and rides `openTool` — TaskCenter remains the
+only executor; the QGIS Processing Toolbox keeps covering gdal:/otb:/native:
+with its own recent/favorites.
+
+## Contracts under test (10.0)
+
+`test_object_identity` · `test_agent_workbench_context` ·
+`test_cartography_operators_10` (inside the test_mapspec harness) ·
+`test_visual_analytics` · `test_view_link` · `test_processing_catalog_ux` ·
+plus the wb5–9 regression suites this track extends
+(`test_selection_context`, `test_provenance_section`,
+`test_command_registry`, `test_mapspec`, `test_pipeline_scene`,
+`test_qgis_display_manager`).

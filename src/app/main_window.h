@@ -135,6 +135,9 @@ class ProcessingHistoryPanel;
 class TemporalWorkbenchPanel;
 class DatasetExperimentPanel;
 class ModelWorkbenchPanel;
+class CartographyDock;
+namespace sicnu::app::va { class VaWorkbenchPanel; }
+class RsOperatorCatalogPanel;
 class SelectionContext;
 class InspectorHost;
 class CommandRegistry;
@@ -193,6 +196,14 @@ public:
     void showTemporalWorkbench();
     void showDatasetExperimentBench();
     void showModelBench();
+
+    /** Workbench 10.0: cartography bridge surface (compose/preflight/repair/export). */
+    void showCartographyDock();
+    /** Workbench 10.0: Visual Analytics surface (typed charts + linked filtering). */
+    void showVisualAnalyticsPanel();
+    /** Workbench 10.0: rs: operator catalog (search/recent/favorites/modality). */
+    void showOperatorCatalog();
+    sicnu::app::CartographyDock *cartographyDock() const { return m_cartographyDock; }
 
     /// The panel/toolbar visibility menu (exprs plugin docks add their
     /// toggle actions here; used by ExprsPluginShellUi).
@@ -562,6 +573,9 @@ private:
     class sicnu::app::TemporalWorkbenchPanel *m_temporalPanel = nullptr;
     class sicnu::app::DatasetExperimentPanel *m_datasetExperimentPanel = nullptr;
     class sicnu::app::ModelWorkbenchPanel *m_modelPanel = nullptr;
+    class sicnu::app::CartographyDock *m_cartographyDock = nullptr;
+    sicnu::app::va::VaWorkbenchPanel *m_vaPanel = nullptr;
+    class sicnu::app::RsOperatorCatalogPanel *m_operatorCatalogPanel = nullptr;
 
     // Declared before m_pluginHost so it is destroyed after it: the
     // plugin proxy (`PythonAppInterfaceProxy`) holds a raw `ActiveViewHost*`

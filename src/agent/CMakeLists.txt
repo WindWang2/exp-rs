@@ -120,6 +120,8 @@ add_library(sicnu_agent SHARED
   spatial_tools/workflow_preflight_tool.h
   cartography/cartography_tools.cpp
   cartography/cartography_tools.h
+  cartography/cartography_operators.cpp
+  cartography/cartography_operators.h
   cartography/chart_registry.cpp
   cartography/chart_registry.h
   cartography/composition.cpp

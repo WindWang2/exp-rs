@@ -25,6 +25,11 @@
 #include "workbench/temporal_workbench_panel.h"
 #include "workbench/dataset_experiment_panel.h"
 #include "workbench/model_workbench_panel.h"
+#include "workbench/object_identity.h"
+#include "cartography/cartography_dock.h"
+#include "visualanalytics/va_workbench_panel.h"
+#include "shell/rs_operator_catalog_panel.h"
+#include "workbench/agent_context_tool.h"
 #include "project_context.h"
 #include "dialogs/comparison_dialog.h"
 #include "data/data_asset.h"
@@ -507,6 +512,122 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
         if ( QAction *action = m_commandRegistry->action( QStringLiteral( "workbench.model" ), true ) )
             m_windowMenu->addAction( action );
     }
+
+    // ── Unified object selection (Workbench 10.0) ─────────────────────
+    // The dataset/experiment, model and history panels join the layer/data/
+    // governance sources: every selection kind lands in ONE SelectionContext.
+    connect( m_datasetExperimentPanel,
+             &sicnu::app::DatasetExperimentPanel::experimentRunSelectionChanged,
+             m_selectionContext, &sicnu::app::SelectionContext::notifyExperimentSelection );
+    connect( m_datasetExperimentPanel,
+             &sicnu::app::DatasetExperimentPanel::datasetSelectionChanged, m_selectionContext,
+             [this]( const QString &datasetId ) {
+                 m_selectionContext->notifyDatasetSelection(
+                     datasetId.isEmpty() ? QStringList() : QStringList{ datasetId } );
+             } );
+    connect( m_modelPanel, &sicnu::app::ModelWorkbenchPanel::modelSelectionChanged,
+             m_selectionContext, &sicnu::app::SelectionContext::notifyModelSelection );
+    connect( m_historyPanel, &sicnu::app::ProcessingHistoryPanel::workflowRunSelectionChanged,
+             m_selectionContext, &sicnu::app::SelectionContext::notifyWorkflowSelection );
+
+    // ── UI→agent context projection (Workbench 10.0, read-only) ───────
+    // Registers the `workbench:context` spatial tool: the agent can read the
+    // live selection/context; writes keep flowing through the existing
+    // command/tool authority. Re-registering over a previous shell instance
+    // is a no-op by name in the registry, so rebuild paths stay safe.
+    {
+        auto *contextTool = new sicnu::app::WorkbenchContextTool(
+            [this]() -> Json::Value {
+                if ( !m_selectionContext || !m_commandRegistry )
+                    return Json::Value();
+                return sicnu::app::workbenchContextToJson(
+                    m_selectionContext->snapshot(), m_commandRegistry->commandIds() );
+            } );
+        sicnu::agent::spatial_tools::SpatialToolRegistry::instance().registerTool(
+            sicnu::agent::spatial_tools::SpatialToolPtr{ contextTool } );
+    }
+
+    // ── Cartography bridge (Workbench 10.0, C-1) ──────────────────────
+    // Desktop surface over the SAME cartography:* operator family workflow
+    // nodes dispatch; inputs seed from the unified selection's map layers.
+    m_cartographyDock = new sicnu::app::CartographyDock(
+        [this]() -> QStringList {
+            QStringList sources;
+            if ( !m_selectionContext )
+                return sources;
+            const auto snap = m_selectionContext->snapshot();
+            const auto addLayer = [&sources]( QgsMapLayer *layer ) {
+                if ( layer && layer->isValid() && !sources.contains( layer->source() ) )
+                    sources.append( layer->source() );
+            };
+            // Selection first (primary object's provenance feeds the map),
+            // then the rest of the canvas so a template always has content.
+            addLayer( snap.activeLayer );
+            for ( QgsMapLayer *layer : snap.selectedLayers )
+                addLayer( layer );
+            return sources;
+        },
+        [this]() -> QString {
+            // Default export directory: the current project home (empty when
+            // no project — the file dialog then falls back to the cwd).
+            return QgsProject::instance()->homePath();
+        },
+        this );
+    m_cartographyDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
+    addDockWidget( Qt::RightDockWidgetArea, m_cartographyDock );
+    m_cartographyDock->hide();
+    connect( m_cartographyDock, &sicnu::app::CartographyDock::statusMessage, this,
+             [this]( const QString &message ) { statusBar()->showMessage( message, 8000 ); } );
+    if ( m_windowMenu )
+    {
+        if ( QAction *action = m_commandRegistry->action( QStringLiteral( "workbench.cartography" ), true ) )
+            m_windowMenu->addAction( action );
+    }
+
+    // ── Visual Analytics workbench (Workbench 10.0) ───────────────────
+    // Typed chart hosts over bounded, cancellable sampling jobs; inputs
+    // follow the unified selection's raster.
+    m_vaPanel = new sicnu::app::va::VaWorkbenchPanel(
+        [this]() -> QString {
+            if ( !m_selectionContext )
+                return QString();
+            const auto snap = m_selectionContext->snapshot();
+            if ( const QgsRasterLayer *raster = snap.firstRasterLayer() )
+                return raster->source();
+            return QString();
+        },
+        this );
+    m_vaPanel->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
+    addDockWidget( Qt::RightDockWidgetArea, m_vaPanel );
+    m_vaPanel->hide();
+    if ( m_windowMenu )
+    {
+        if ( QAction *action = m_commandRegistry->action( QStringLiteral( "workbench.visualAnalytics" ), true ) )
+            m_windowMenu->addAction( action );
+    }
+
+    // ── rs: operator catalog (Workbench 10.0, WP-F) ───────────────────
+    // Search/recent/favorites over the operator registry; opening an entry
+    // rides the workflow session (TaskCenter stays the only executor).
+    m_operatorCatalogPanel = new sicnu::app::RsOperatorCatalogPanel( this );
+    m_operatorCatalogPanel->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
+    addDockWidget( Qt::LeftDockWidgetArea, m_operatorCatalogPanel );
+    m_operatorCatalogPanel->hide();
+    if ( m_sessionController )
+    {
+        connect( m_operatorCatalogPanel, &sicnu::app::RsOperatorCatalogPanel::operatorSelected,
+                 this, [this]( const QString &operatorId ) {
+                     if ( !m_sessionController )
+                         return;
+                     m_sessionController->openBareOperator( operatorId );
+                     m_operatorCatalogPanel->noteOperatorRun( operatorId );
+                 } );
+    }
+    if ( m_windowMenu )
+    {
+        if ( QAction *action = m_commandRegistry->action( QStringLiteral( "workbench.operatorCatalog" ), true ) )
+            m_windowMenu->addAction( action );
+    }
 }
 
 bool QgisDesktopWindow::confirmWorkbenchShutdown( const QString &actionTitle )
@@ -614,4 +735,32 @@ void QgisDesktopWindow::showModelBench()
     m_modelPanel->raise();
     m_modelPanel->activateWindow();
     m_modelPanel->refreshCatalog();
+}
+
+void QgisDesktopWindow::showCartographyDock()
+{
+    if ( !m_cartographyDock )
+        return;
+    m_cartographyDock->show();
+    m_cartographyDock->raise();
+    m_cartographyDock->activateWindow();
+}
+
+void QgisDesktopWindow::showVisualAnalyticsPanel()
+{
+    if ( !m_vaPanel )
+        return;
+    m_vaPanel->show();
+    m_vaPanel->raise();
+    m_vaPanel->activateWindow();
+    m_vaPanel->refreshCharts();
+}
+
+void QgisDesktopWindow::showOperatorCatalog()
+{
+    if ( !m_operatorCatalogPanel )
+        return;
+    m_operatorCatalogPanel->show();
+    m_operatorCatalogPanel->raise();
+    m_operatorCatalogPanel->activateWindow();
 }

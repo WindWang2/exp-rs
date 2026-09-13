@@ -8,6 +8,8 @@
 #include "workflow/pipeline_editor_dock.h"
 #include "shell/workflow_session_controller.h"
 #include "workbench_host.h"
+#include "cartography/cartography_dock.h"
+#include "visualanalytics/va_workbench_panel.h"
 
 #include "dialogs/extract_band_dialog.h"
 
@@ -300,6 +302,84 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
                 "model_builder", QObject::tr( "Workspace" ) );
         d.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+M" ) );
         d.handler = [window] { window->showModelBench(); };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "workbench.cartography", QObject::tr( "Cartography Workbench" ),
+                QObject::tr( "Compose a map layout from templates, preflight, repair and export." ),
+                "print_l_yout", QObject::tr( "Workspace" ) );
+        // No default shortcut: the canonical Ctrl+N/O/S family stays with
+        // project.* and every other Ctrl+Shift letter is claimed already.
+        d.handler = [window] { window->showCartographyDock(); };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "workbench.visualAnalytics", QObject::tr( "Visual Analytics" ),
+                QObject::tr( "Bounded-sampled histograms, scatter and band curves with linked filtering." ),
+                "histogr_eq", QObject::tr( "Workspace" ) );
+        d.handler = [window] { window->showVisualAnalyticsPanel(); };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "workbench.operatorCatalog", QObject::tr( "RS Operator Catalog" ),
+                QObject::tr( "Search rs: operators by name/modality with recent and favorites." ),
+                "r_ster", QObject::tr( "Workspace" ) );
+        d.handler = [window] { window->showOperatorCatalog(); };
+        registry->registerCommand( d );
+    }
+    // ── Cartography workflow-node commands (Workbench 10.0, C-1) ──────
+    // Each handler runs the SAME operator a workflow node dispatches; the
+    // dock only collects inputs and renders reports/preview.
+    {
+        RS_CMD( d, "cartography.compose", QObject::tr( "Compose Map Layout" ),
+                QObject::tr( "Compile the drafted MapSpec into a print layout with a quality report." ),
+                "print_l_yout", QObject::tr( "Cartography" ) );
+        d.handler = [window] {
+            if ( sicnu::app::CartographyDock *dock = window->cartographyDock() )
+            {
+                dock->show();
+                dock->runCompose();
+            }
+        };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "cartography.preflight", QObject::tr( "Preflight Map Layout" ),
+                QObject::tr( "Run the deterministic preflight report on the current MapSpec draft." ),
+                "to_ology_check", QObject::tr( "Cartography" ) );
+        d.handler = [window] {
+            if ( sicnu::app::CartographyDock *dock = window->cartographyDock() )
+            {
+                dock->show();
+                dock->runPreflight();
+            }
+        };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "cartography.repair", QObject::tr( "Repair Map Layout" ),
+                QObject::tr( "Apply the bounded repair pass and show the applied/still_reported ledger." ),
+                "toolbox", QObject::tr( "Cartography" ) );
+        d.handler = [window] {
+            if ( sicnu::app::CartographyDock *dock = window->cartographyDock() )
+            {
+                dock->show();
+                dock->runRepair();
+            }
+        };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "cartography.export", QObject::tr( "Export Map Layout..." ),
+                QObject::tr( "Atomic governed export (png/pdf/svg) with sha256 evidence." ),
+                "ch_rt_l_yer", QObject::tr( "Cartography" ) );
+        d.handler = [window] {
+            if ( sicnu::app::CartographyDock *dock = window->cartographyDock() )
+            {
+                dock->show();
+                dock->runExport();
+            }
+        };
         registry->registerCommand( d );
     }
 

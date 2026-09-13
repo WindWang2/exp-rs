@@ -131,7 +131,21 @@ ModelWorkbenchPanel::ModelWorkbenchPanel( QWidget *parent )
     connect( m_backendCombo, &QComboBox::currentIndexChanged, this,
              &ModelWorkbenchPanel::rebuildModelTable );
     connect( m_modelTable->selectionModel(), &QItemSelectionModel::selectionChanged, this,
-             [this]( const QItemSelection &, const QItemSelection & ) { showModelDetail(); } );
+             [this]( const QItemSelection &, const QItemSelection & )
+             {
+                 showModelDetail();
+                 QStringList names;
+                 const QModelIndexList rows = m_modelTable->selectionModel()
+                                                  ? m_modelTable->selectionModel()->selectedRows()
+                                                  : QModelIndexList();
+                 names.reserve( rows.size() );
+                 for ( const QModelIndex &row : rows )
+                 {
+                     if ( row.row() >= 0 && row.row() < m_modelNames.size() )
+                         names.append( QString::fromStdString( m_modelNames.at( row.row() ) ) );
+                 }
+                 emit modelSelectionChanged( names );
+             } );
     connect( m_testInferenceBtn, &QPushButton::clicked, this,
              &ModelWorkbenchPanel::runTestInference );
 
