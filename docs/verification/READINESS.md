@@ -1,7 +1,7 @@
 # Release Readiness — local verification evidence
 
-* Generated (UTC): 2026-09-13T00:28:44.389644+00:00
-* Git SHA: `bd3ccca8ee8a3a0c27ce87c995442b869fbb17b9`
+* Generated (UTC): 2026-09-13T03:50:12.319374+00:00
+* Git SHA: `c27d0ac1ab46d5e0330a8f7275ee9701bb5d2d43`
 * Host: linux
 * **Overall: READY**
 * Counts: {"compiled": 36, "passed": 36, "failed": 0, "not_built": 0, "skipped": 0, "timeout": 0, "no_evidence": 0}
@@ -49,23 +49,25 @@
 
 ### quality7 (schema exp.bench.quality7.v1)
 
-* `trace_id_generate`: 547686 ops/s (20000 iters)
-* `trace_ndjson_encode`: 927713 ops/s (20000 iters)
-* `trace_emit_disabled`: 16944000.0 ops/s (50000 iters)
-* `trace_emit_ring`: 464187 ops/s (20000 iters)
-* `fault_probe_disarmed`: 194643000.0 ops/s (50000 iters)
-* `condition_validate`: 740499 ops/s (10000 iters)
-* `condition_evaluate`: 399193 ops/s (20000 iters)
-* `resource_uri_parse`: 1319390.0 ops/s (20000 iters)
-* `job_dispatch_roundtrip`: 2586820.0 ops/s (200 iters)
+_tier: quick_
+* `trace_id_generate`: 671040 ops/s (20000 iters)
+* `trace_ndjson_encode`: 2094770.0 ops/s (20000 iters)
+* `trace_emit_disabled`: 41228600.0 ops/s (50000 iters)
+* `trace_emit_ring`: 602095 ops/s (20000 iters)
+* `fault_probe_disarmed`: 302704000.0 ops/s (50000 iters)
+* `condition_validate`: 1571980.0 ops/s (10000 iters)
+* `condition_evaluate`: 895187 ops/s (20000 iters)
+* `resource_uri_parse`: 2039400.0 ops/s (20000 iters)
+* `job_dispatch_roundtrip`: 4502480.0 ops/s (200 iters)
 
 ### scale8 (schema exp.bench.scale8.v1)
 
-* `schedule_1000`: 45106.8 ops/s (1000 iters)
-* `dataset_metadata_insert_2000`: 19438.3 ops/s (2000 iters)
-* `dataset_metadata_page_read`: 368.882 ops/s (2 iters)
-* `raster_window_reads`: 150666 ops/s (64 iters)
-* `trace_file_sink_overhead`: 415937 ops/s (2000 iters)
+_tier: quick_
+* `schedule_1000`: 68975.9 ops/s (1000 iters)
+* `dataset_metadata_insert_2000`: 37360.3 ops/s (2000 iters)
+* `dataset_metadata_page_read`: 703.564 ops/s (2 iters)
+* `raster_window_reads`: 172830 ops/s (64 iters)
+* `trace_file_sink_overhead`: 558932 ops/s (2000 iters)
 
 ## Platform caveats
 

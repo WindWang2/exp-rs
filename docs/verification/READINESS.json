@@ -1,7 +1,7 @@
 {
  "schema": "exp.readiness.report.v1",
- "generated_utc": "2026-09-13T00:28:44.389644+00:00",
- "git_sha": "bd3ccca8ee8a3a0c27ce87c995442b869fbb17b9",
+ "generated_utc": "2026-09-13T03:50:12.319374+00:00",
+ "git_sha": "c27d0ac1ab46d5e0330a8f7275ee9701bb5d2d43",
  "build_dir": "/home/kevin/projects/rs-studio/exp-rs-verification-baseline-green/build-ci-fast",
  "host": {
   "platform": "linux"
@@ -246,47 +246,47 @@
    "measurements": [
     {
      "name": "trace_id_generate",
-     "ops_per_s": 547686,
+     "ops_per_s": 671040,
      "iterations": 20000
     },
     {
      "name": "trace_ndjson_encode",
-     "ops_per_s": 927713,
+     "ops_per_s": 2094770.0,
      "iterations": 20000
     },
     {
      "name": "trace_emit_disabled",
-     "ops_per_s": 16944000.0,
+     "ops_per_s": 41228600.0,
      "iterations": 50000
     },
     {
      "name": "trace_emit_ring",
-     "ops_per_s": 464187,
+     "ops_per_s": 602095,
      "iterations": 20000
     },
     {
      "name": "fault_probe_disarmed",
-     "ops_per_s": 194643000.0,
+     "ops_per_s": 302704000.0,
      "iterations": 50000
     },
     {
      "name": "condition_validate",
-     "ops_per_s": 740499,
+     "ops_per_s": 1571980.0,
      "iterations": 10000
     },
     {
      "name": "condition_evaluate",
-     "ops_per_s": 399193,
+     "ops_per_s": 895187,
      "iterations": 20000
     },
     {
      "name": "resource_uri_parse",
-     "ops_per_s": 1319390.0,
+     "ops_per_s": 2039400.0,
      "iterations": 20000
     },
     {
      "name": "job_dispatch_roundtrip",
-     "ops_per_s": 2586820.0,
+     "ops_per_s": 4502480.0,
      "iterations": 200
     }
    ]
@@ -302,31 +302,31 @@
    "measurements": [
     {
      "name": "schedule_1000",
-     "ops_per_s": 45106.8,
+     "ops_per_s": 68975.9,
      "iterations": 1000,
      "note": "JobEngine submit+await of instant callable jobs"
     },
     {
      "name": "dataset_metadata_insert_2000",
-     "ops_per_s": 19438.3,
+     "ops_per_s": 37360.3,
      "iterations": 2000,
      "note": "DatasetStore::createDataset single-threaded bulk"
     },
     {
      "name": "dataset_metadata_page_read",
-     "ops_per_s": 368.882,
+     "ops_per_s": 703.564,
      "iterations": 2,
      "note": "listDatasets 1000-row pages over the bulk store"
     },
     {
      "name": "raster_window_reads",
-     "ops_per_s": 150666,
+     "ops_per_s": 172830,
      "iterations": 64,
      "note": "64x64 readWindow walk over a 1024x1024 Float32 raster"
     },
     {
      "name": "trace_file_sink_overhead",
-     "ops_per_s": 415937,
+     "ops_per_s": 558932,
      "iterations": 2000,
      "note": "emit into a FileTraceSink (4 MiB rotation, 4096 queue)"
     }
@@ -338,5 +338,5 @@
   "macOS: GDAL 3.13 ladder exercised via PR #834 evidence; NOT executed on this host.",
   "Optional-feature omissions (OTB, Python worker, ONNX Runtime) follow the CMake option surface of this build tree; absent targets are reported as not-built, never as passing."
  ],
- "ladder_run_utc": "2026-09-13T00:28:08.961022+00:00"
+ "ladder_run_utc": "2026-09-13T03:50:04.023874+00:00"
 }
