@@ -1,0 +1,56 @@
+{
+  "spec_version": 1,
+  "id": "lab03_classification",
+  "title": "Remote Sensing Image Classification",
+  "title_zh": "遥感影像分类",
+  "objective": "掌握监督分类的完整流程：加载影像与训练样本，用 SVM 分类器完成地物分类，并通过混淆矩阵评价分类精度。",
+  "prerequisites": [
+    {
+      "path": "data/samples/landsat_sample.tif",
+      "note": "待分类的多光谱影像。"
+    },
+    {
+      "path": "data/samples/training_samples.shp",
+      "note": "训练样本 ROI（含类别字段）。"
+    }
+  ],
+  "steps": [
+    {
+      "title": "Load Image and Training Samples",
+      "title_zh": "加载影像与训练样本",
+      "description_zh": "通过 File > Add Raster Layer... 加载 landsat_sample.tif，再通过 File > Add Vector Layer... 加载 training_samples.shp。",
+      "action": "addRasterLayer",
+      "completion_hint": "两个图层均显示在图层面板中。"
+    },
+    {
+      "title": "Supervised Classification",
+      "title_zh": "监督分类",
+      "description_zh": "执行 rs:supervised_classification 算子：以训练样本为监督数据对影像分类。可将 method 参数改为 normal_bayes（正态分布贝叶斯/最大似然思想的实现）、rf（随机森林）等，比较不同分类器的结果差异。",
+      "operator_id": "rs:supervised_classification",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "training": "data/samples/training_samples.shp",
+        "output": "outputs/lab03_classification.tif",
+        "method": "svm"
+      },
+      "teaching_note": "监督分类用已知类别的样本训练决策规则，再对全影像逐像元分类；分类器选择与样本质量共同决定分类精度。",
+      "completion_hint": "输出类别图中不同地物被赋予不同类别编码。"
+    },
+    {
+      "title": "Accuracy Assessment",
+      "title_zh": "精度评价",
+      "description_zh": "在分类工作窗口中点击 Accuracy Assessment 查看混淆矩阵，记录总体精度（OA）与 Kappa 系数，并将结果导出为 CSV。",
+      "action": "openClassificationWindow",
+      "teaching_note": "混淆矩阵的对角线为正确分类像元；OA = 对角线之和 / 总像元数；Kappa 修正了随机一致性的影响。",
+      "completion_hint": "本练习中总体精度 > 80% 即为良好。"
+    }
+  ],
+  "grading_ref": {
+    "pipeline": "data/pipelines/supervised_classify.json"
+  },
+  "thinking_questions": [
+    "训练样本的空间分布与纯度如何影响分类精度？",
+    "SVM 与最大似然法在决策面上的假设有何本质差异？",
+    "Kappa 系数为什么比总体精度更严格？"
+  ]
+}

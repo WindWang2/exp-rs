@@ -1,0 +1,52 @@
+{
+  "spec_version": 1,
+  "id": "lab04_change_detection",
+  "title": "Change Detection",
+  "title_zh": "变化检测",
+  "objective": "掌握双时相影像变化检测的基本方法：先目视对比发现变化线索，再用归一化差异法自动提取变化区域。",
+  "prerequisites": [
+    {
+      "path": "data/samples/change_before.tif",
+      "note": "变化前影像。"
+    },
+    {
+      "path": "data/samples/change_after.tif",
+      "note": "变化后影像（含一处新增暗色区域）。"
+    }
+  ],
+  "steps": [
+    {
+      "title": "Load Before/After Images",
+      "title_zh": "加载双时相影像",
+      "description_zh": "依次加载 data/samples/change_before.tif 与 change_after.tif。",
+      "action": "addRasterLayer",
+      "completion_hint": "两期影像均已加载。"
+    },
+    {
+      "title": "Visual Comparison",
+      "title_zh": "目视对比",
+      "description_zh": "通过 View > Compare Layers... 用卷帘（Flicker）与分屏（Split Screen）模式对比两期影像，寻找变化线索。",
+      "action": "openComparisonDialog",
+      "completion_hint": "应能在 after 影像中发现一处新增的暗色斑块。"
+    },
+    {
+      "title": "Automated Change Detection",
+      "title_zh": "自动变化检测",
+      "description_zh": "执行 rs:change_detection 算子（归一化差异法），自动计算变化图。也可尝试 difference（差值法）、cva（变化向量分析）等方法并比较结果。",
+      "operator_id": "rs:change_detection",
+      "params": {
+        "before": "data/samples/change_before.tif",
+        "after": "data/samples/change_after.tif",
+        "method": "normalized_difference",
+        "output": "outputs/lab04_change.tif"
+      },
+      "teaching_note": "归一化差异对光照条件差异更稳健；变化图上高亮区域即为检测到的变化像元。",
+      "completion_hint": "变化图中新增暗色斑块的位置被高亮标出。"
+    }
+  ],
+  "thinking_questions": [
+    "两期影像辐射不一致时，差值法与归一化差异法哪个更稳健？为什么？",
+    "如何为变化图选择阈值？Otsu 自动阈值的思想是什么？",
+    "目视解译与自动变化检测各自的适用场景是什么？"
+  ]
+}

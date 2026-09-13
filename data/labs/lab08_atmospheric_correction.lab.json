@@ -1,0 +1,48 @@
+{
+  "spec_version": 1,
+  "id": "lab08_atmospheric_correction",
+  "title": "Atmospheric Correction",
+  "title_zh": "大气校正",
+  "objective": "理解大气对遥感信号的影响并掌握 DOS 暗目标校正方法：把 DN 值转换为地表反射率的近似，并对比校正前后的影像差异。",
+  "prerequisites": [
+    {
+      "path": "data/samples/landsat_sample.tif",
+      "note": "含 DN 值的类 Landsat 样本影像。"
+    }
+  ],
+  "steps": [
+    {
+      "title": "Load Satellite Image",
+      "title_zh": "加载卫星影像",
+      "description_zh": "加载 data/samples/landsat_sample.tif。大气校正把传感器记录的 DN 值转换为地表反射率。",
+      "action": "addRasterLayer",
+      "completion_hint": "影像已加载，当前像元值为 DN。"
+    },
+    {
+      "title": "DOS1 Correction",
+      "title_zh": "DOS1 暗目标校正",
+      "description_zh": "执行 rs:atmospheric_correction 算子（method=dos1）。DOS1 假设场景中最暗像元的反射率为 0，由此估计大气散射造成的路径辐射并从整幅影像中扣除。",
+      "operator_id": "rs:atmospheric_correction",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "output": "outputs/lab08_dos1.tif",
+        "method": "dos1"
+      },
+      "teaching_note": "电磁波穿过大气时被吸收与散射；暗目标减法是最简单的绝对校正方法，无需大气参数即可近似去除程辐射。",
+      "completion_hint": "输出像元值变为 0-1 的地表反射率。"
+    },
+    {
+      "title": "Compare Before/After",
+      "title_zh": "校正前后对比",
+      "description_zh": "通过 View > Compare Layers... 以分屏模式对比原始影像与校正结果，注意大气霾对暗色区域的掩盖被削弱。",
+      "action": "openComparisonDialog",
+      "teaching_note": "地表反射率更具物理意义，是跨期比较与定量反演的前提。",
+      "completion_hint": "校正后影像地物更清晰、暗色区域更暗。"
+    }
+  ],
+  "thinking_questions": [
+    "DOS1 的『暗像元反射率为 0』假设在什么场景下会失效？",
+    "为什么定量遥感（如反演叶面积指数）必须先做大气校正？",
+    "DOS2 相对 DOS1 增加了什么物理量？QUAC 又为什么不需要辅助数据？"
+  ]
+}
