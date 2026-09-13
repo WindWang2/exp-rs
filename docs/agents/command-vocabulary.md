@@ -62,7 +62,7 @@ grilling 的纪律是向用户提问；`/goal` 的 `autonomy=full` 禁止提问�
 
 | 实例 | 归类 | 判据依据 |
 | --- | --- | --- |
-| "master 每前进 N 个 merge 就重跑一遍全库线审查" | `/loop`（derived） | 同一件事反复发生；R0 是其中一轮 |
+| "master 每前进 N 个 merge 就重跑一遍全库线审查" | `/loop`（derived） | 同一件事反复发生；R0 是其中一轮。整库审查循环豁免"禁止全量重扫"反模式，但须按 `docs/agents/loop-template.md` 反模式表注脚在 Trigger 节写明事实依据 |
 | "每有新算子注册进 RSOperatorRegistry 就补 capability 元数据" | `/loop`（derived） | 增量反复发生；单次补齐版（/goal）做完后新算子会再产生缺口 |
 | "每周把上轮审查发现转成 issue 草稿" | `/loop`（derived） | 配套循环；审查若循环化，转票同步循环化 |
 | "还不知道下一个 track 该做什么" | `wayfinder` | 路未见，先映射决策票 |

@@ -45,10 +45,11 @@ Track: prompt-command-hygiene-review · Phase 2 · 2026-09-13
 - **Quoted**: `## Success = acceptance checklist (§26 of the goal)`
 - **Defect**: 断链引用
 - **同类位置**: dataset-experiment-7:14,19（"from the goal brief"）；professional-workbench-7:26；professional-workbench-ux-6:12,39（含 "See the goal brief §9"）；professional-workbench-9:10,19（"方向不变量（§7）"、"完成定义（§8）"）；professional-workbench-8:61（"See the goal contract"）；unified-help-diagnostics-6:40（"See the goal definition"）。
+- **补充证据（考古子代理发现）**: D 系列（lab-*）与 R 系列的原始 brief 以未跟踪本地文件存在于主工作树 `prompts/`（`00_goal_loop_command_review.md`–`12_spectral_library_priors.md` 共 13 件 + 3 个 zip；`git ls-tree origin/master -- prompts/` 为空）——brief 层从未进版本库，换机即失。
 - **Defect（同类合并）**: 断链引用 / 约定缺失
 - **Impact**: 验收判据（§9/§26）躺在仓库外。第三方只能知道"有一个 §26"，无法验证完成与否——验收门失去可核查性。
 - **Verified**: verified-by-file-inspection（逐处行号见 GOAL_MATRIX.csv external_goal_refs 列）
-- **Recommended fix**: goal-template.md 规定：Mission/验收中的每个判据必须自带全文，禁止 §N 外引。
+- **Recommended fix**: goal-template.md 规定：Mission/验收中的每个判据必须自带全文，禁止 §N 外引；brief 曾以本地文件存在的，全文并入 GOAL.md。
 
 ### D-005 · .planning/* 默认忽略 + 逐 track 白名单：新 track 的规划文件会被静默吞掉
 
@@ -86,10 +87,10 @@ Track: prompt-command-hygiene-review · Phase 2 · 2026-09-13
 - **Location**: `.planning/plugin-platform-8/GOAL.md:11`
 - **Quoted**: `Constraints honored: no second registry/scheduler/runtime; ≤2 subagents (reserved for the final adversarial review); master read-only; worktree `feat/plugin-platform-8`; local evidence only.`
 - **Defect**: 重复定义（冲突）/约定缺失
-- **实测分布**: `zcode/` 前缀 7 个；`feat/` 前缀 14 个；plugin-platform-8 把分支名写作 worktree（混淆）；execution-data-plane-3 一处三脱钩（branch `zcode/spatial-execution-data-plane-3` ≠ 目录 `execution-data-plane-3` ≠ worktree `exp-rs-execution-plane-3`，GOAL.md:3）；pi-spatial-scientist-harness-4 worktree 名 `exp-rs-pi-harness-4` ≠ slug（GOAL.md:4）；data-runtime-governance-4 worktree 名 `exp-rs-data-runtime-4` ≠ slug（GOAL.md:5）。
+- **实测分布（考古子代理修正后的时代表述）**: `feat/` 15 个 = 平台 6.0–9.0 代；`zcode/` 8 个 = 早期 3/4/5 代（execution-data-plane-3、data-runtime-governance-4、algorithm-foundation-5、pi-spatial-scientist-harness-4）+ 全部最新 D/R 系列（lab-content-expansion、lab-spec-data-driven、whole-repo-line-review、本 track）；2 个未写分支名。远端现存分支几乎全为 `zcode/`（晚近 track 未删）。worktree 脱钩三例：execution-data-plane-3:3（目录/分支/worktree 三名互异）、pi-spatial-scientist-harness-4:4（`exp-rs-pi-harness-4`）、data-runtime-governance-4:5（`exp-rs-data-runtime-4`）；plugin-platform-8:11 把分支名写作 worktree（混淆）。
 - **Impact**: 无法从 track 名推断分支/worktree 名；自动化脚本与人工导航都要考古。
 - **Verified**: verified-by-file-inspection
-- **Recommended fix**: 模板固化 `zcode/<slug>` + `../exp-rs-<slug>`，slug 与目录名必须一致（zcode/ 是现行多数与全部新近 track 的选择）。
+- **Recommended fix**: 模板固化 `zcode/<slug>` + `../exp-rs-<slug>`（裁决：最新时代 + 远端现状均为 zcode/），slug 与目录名必须一致；模板已附时代注记。
 
 ### D-009 · token 预算三种口径，20/24 缺失
 
@@ -262,7 +263,37 @@ Track: prompt-command-hygiene-review · Phase 2 · 2026-09-13
 - **Defect**: 不可判定措辞（未经验证的断言）
 - **Impact**: 实测 efc5c52f 处 21 个、当前 origin/master 24 个 GOAL.md（E-003）。按错误前提设计的穷尽度要求会误导执行者；这条记录同时是模板规则"Mission 中每个数字断言必须带验证命令"的反面教材。
 - **Verified**: verified-by-execution
-- **Recommended fix**: goal-template.md 硬性清单新增"每个现状断言附验证命令/文件:行号"。
+- **Recommended fix**: goal-template.md 硬性清单新增"每个现状断言附验证命令/文件:行号"。（Phase 7 已实施。）
+
+### D-026 · unified-help-diagnostics-6 引用不存在的目标名 `sicnu_cli`
+
+- **Lens**: 3
+- **Location**: `.planning/unified-help-diagnostics-6/GOAL.md:33`
+- **Quoted**: `| CLI help | `sicnu_cli` help projections |`
+- **Defect**: 断链引用
+- **Impact**: 按 GOAL 找 CLI help 落点的 agent 会去找 `sicnu_cli` 而失败；真实目标名是 `sicnu_geo_rs_cli`（`src/cli/CMakeLists.txt:9`）。（考古子代理发现。）
+- **Verified**: verified-by-execution（子代理实测 src/cli/CMakeLists.txt）
+- **Recommended fix**: 历史文件不改写；记录于此，CLI 相关 track 以 `sicnu_geo_rs_cli` 为准。
+
+### D-027 · ADR 0144 编号被三个文件复用
+
+- **Lens**: 3
+- **Location**: `docs/adr/0144-execution-plane-8.md` / `docs/adr/0144-harness-8.md` / `docs/adr/0144-model-runtime-platform-9.md`
+- **Quoted**: 三个文件共用编号 0144（`.planning/spatial-scientist-harness-8/GOAL.md:5` 引用的是其中之一："decision record `docs/adr/0144-harness-8.md`"）
+- **Defect**: 重复定义（编号冲突）
+- **Impact**: 按 "ADR 0144" 引用无法定位唯一文件；domain-modeling 技能的 ADR 编号约定被并发 track 打破。（考古子代理发现。）
+- **Verified**: verified-by-execution（子代理实测 docs/adr/）
+- **Recommended fix**: 编号重排归 domain-modeling 体系处理（本 track write scope 外，只记录）；goal-template 不受影响。
+
+### D-028 · 根目录构建脚本硬编码已消亡的 track worktree 路径
+
+- **Lens**: 5
+- **Location**: `build.cmd:4`
+- **Quoted**: `cd /d C:\Users\wangj.KEVIN\projects\exp-rs-unified-help-diagnostics-6`
+- **Defect**: 文档漂移（脚本与仓库状态脱节）
+- **Impact**: 按脚本名字面用途执行会把构建引到已不存在的目录；`configure_wb7.cmd` / `build_wb7.cmd` 同类。脚本实为历史 track 的本机一次性产物，却躺在仓库根。
+- **Verified**: verified-by-execution（子代理实测目录不存在；本 track 主代理复核 build.cmd:4 原文）
+- **Recommended fix**: 删除或移入 `.planning/` 对应 track（本 track write scope 外，只记录）；goal-template 已加"Do not follow build.cmd"防线。
 
 ---
 
@@ -304,4 +335,4 @@ Track: prompt-command-hygiene-review · Phase 2 · 2026-09-13
 | R-3 | "matt / planningwithfiles / gstack 是仓库内断链引用" | 全仓 grep 无任何仓库文件引用 planningwithfiles/gstack 作为技能（CHANGELOG.md:1017 记录的是"安装"动作本身，是历史事实陈述而非断链）；gstack 相关路径引用仅 docs/agent/progress.md:1382（历史工作记录）。定性改为"外部技能未落盘"（SKILL_INVENTORY.md），不进缺陷清单。 |
 | R-4 | "loop-me 的 disable-model-invocation: true 与 GOAL 用法矛盾" | disable-model-invocation 只限制模型自动触发，不限制用户显式调用 /loop-me；无矛盾。 |
 
-**假阳性率**：提交 25 条，撤下 4 条（撤下数/提交数以 Phase 8 执行摘要口径复核）。
+**假阳性率**：提交 28 条（D-001–D-025 主审 + D-026–D-028 交叉复核新增），撤下 4 条；撤下数/提交数 = 4/28 ≈ 14.3%（口径与计算见 Phase 8 执行摘要）。

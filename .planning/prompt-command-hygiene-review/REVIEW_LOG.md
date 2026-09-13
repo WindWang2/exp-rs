@@ -91,11 +91,23 @@
 
 ## Phase 6 · AGENTS.md 修复 + 镜像记录（2026-09-13）
 
-（待填。）
+- `.agents/AGENTS.md`：死指针 `file:///.agents/skills/karpathy-guidelines/SKILL.md` 删除，出处改指 `CHANGELOG.md` 2026-08-03 条目（D-001/D-005 修复）；C++17 → C++20 并附 `CMakeLists.txt:3` 权威锚（D-013 修复）；新增与 `CLAUDE.md` 的互引与裁决顺序（D-023 修复）；新增 unattended 适配句（B-1 修复）。
+- `CLAUDE.md`：Quick Commands 重写为 CMakePresets + `-j2` 形态（D-011/D-020 修复）；`.agents/vendor/` 断链删除，provenance 内联（D-012 修复）；"mirrored" 措辞改为与实测一致的表述并指向 `review/SKILL_MIRROR.md`（D-014 修复）；新增指向 `.agents/AGENTS.md` 的互引（D-023 修复）。
+- `review/SKILL_MIRROR.md` 产出：运行时映射、37/13/0 差异、历史漂移已修复的记录、单侧技能规则、复核命令。
+- `CONTEXT.md` 未改动：五透镜走查中无一条缺陷落点在 CONTEXT.md；按最小 churn 原则不动。
 
 ## Phase 7 · 模板修订 + UNDETERMINED 裁决（2026-09-13）
 
-（待填。）
+- `docs/agents/goal-template.md` 整体重写，落实 B 组裁决：优先级行（B-1）、构建入口 + build.cmd 死路径防线（B-2/B-9）、RSS/load 平台化测量（B-8）、Skills 骨架全路径（B-14）、Autonomy defaults 七类必答 + 子代理失败默认 + 范围外发现固定文本（B-15/B-20/B-21）、预算计量代理指标 + 总耗尽默认动作（B-16）、措辞封闭清单化（B-17）、Completion gate 强制"验证命令 → 期望输出"（B-18）、runbook 重排（B-4）+ per-Phase rebase（B-6）+ push 自包含与失败收尾（B-7）+ PR 被拒续跑第 9 步（B-19）、M-xx 引证全部删除（B-10）、兄弟文件引用全路径化（B-13）、"逐字保留"改为"格式逐字、数值按实际"（B-30）。
+- `docs/agents/loop-template.md` 整体重写：参数表 + steady 定义 + budget 参数（B-25/B-27）、再触发方式与"无常驻进程"声明（B-23）、白名单归设立方（B-26）、只读 fetch 归类（B-28）、Brief 条件化（B-28）、Review vocabulary 槽（B-29）、整库审查豁免注脚（B-24）、子游标（B-27）。
+- `docs/agents/command-vocabulary.md`：整库审查示例链接到 loop 反模式注脚（B-24）。
+- `review/PROMPT_DEFECTS.md`：D-008 按考古修正为时代表述；D-004 补 prompts/ 未跟踪层证据；新增 D-026（sicnu_cli）、D-027（ADR 0144 三重复用）、D-028（build.cmd 死路径）；假阳性率口径更新为 4/28。
+- **UNDETERMINED 裁决**：
+  1. "Karpathy Guidelines 原始出处具体指哪份文本" → 维持 UNDETERMINED（仓库内仅有 CHANGELOG 对"4 core guidelines"的转述记录，无原文副本）；处置：AGENTS.md 保留四原则实质 + 指向 CHANGELOG 条目。此项不再阻塞任何交付物。
+  2. "12 个无 GOAL.md track 的原始 brief" → UNDETERMINED 且不可恢复（未落盘）；处置：缺陷 D-003/D-004/D-006 记录，不臆造。
+  3. "qt-*/frontend-design 单侧部署是否有意" → 裁决为"按有意处理"（zcode 运行时不读 .claude/），规则落 SKILL_MIRROR.md。
+  4. "pw-9 的 ≤4 并行度" → 裁决为偏离（与 -j2 家族冲突且无解释），模板统一 -j2。
+  5. "pi-harness-4 M8 '6× adversarial review'" → UNDETERMINED（原文无法自证含义）；处置：D-010 记录，模板固定 ≤2。
 
 ## Phase 8 · 执行摘要 + PR（2026-09-13）
 
