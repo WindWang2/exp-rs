@@ -88,6 +88,8 @@ const std::vector<AllowEntry> kAllowedDanglingPreflightActions = {
     { "normalize_radiometry", "OWNED-BY-#885: no tool/command with this id" },
     { "reproject_to_reference", "OWNED-BY-#885: no tool/command with this id" },
     { "select_matching_polarization", "OWNED-BY-#885: no tool/command with this id" },
+    { "check_collection", "harness action-table id: resolves via harness_actions to temporal:preflight_collection (D10)" },
+    { "select_model", "harness action-table id: resolves via harness_actions to spatial:select_model (D10)" },
 };
 
 const std::vector<AllowEntry> kAllowedCommandsWithoutHelp = {

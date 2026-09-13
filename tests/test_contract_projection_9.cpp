@@ -419,9 +419,12 @@ TEST_CASE( "Mutation: deleting a schema declaration is caught on a copy of a "
     REQUIRE( inspectIt->undeclaredReads().empty() );
 
     // Mutate: remove the includeStatistics declaration from schema().
+    // Aligned with the current io_operators.cpp declaration (the scanner
+    // pins reality; re-align this needle when the declaration itself moves).
     const std::string decl =
-        "params[\"includeStatistics\"] = makeBooleanParam( "
-        "\"includeStatistics\", \"Compute and include statistics\", false );";
+        "params[\"includeStatistics\"] = makeBooleanParam( \"includeStatistics\",\n"
+        "                                                  \"Include bounded per-band statistics (decimated read, <=512x512)\",\n"
+        "                                                  false );";
     const auto declPos = original.find( decl );
     REQUIRE( declPos != std::string::npos );
     std::string mutated = original;
