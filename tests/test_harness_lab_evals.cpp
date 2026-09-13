@@ -59,6 +59,15 @@ struct GdalInit
 };
 const GdalInit s_gdalInit;
 
+/// RAII: set/unset an environment variable (the teacher credential is read
+/// from the process environment at call time).
+struct ScopedEnv
+{
+    ScopedEnv( const char *key, const char *value ) : key( key ) { setenv( key, value, 1 ); }
+    ~ScopedEnv() { unsetenv( key ); }
+    const char *key;
+};
+
 /// RAII: point the LabSpecCatalog at a test directory and restore the
 /// default afterwards (the catalog is a process-wide singleton).
 struct ScopedLabSpecDir
@@ -856,7 +865,7 @@ TEST_CASE( "harness_lab: troubleshoot answers are diagnosis-first with exactly o
     REQUIRE( result.output["suggested_actions"][0]["resolved"].asBool() == true );
 }
 
-TEST_CASE( "harness_lab: teacher path: reference solutions open for teachers only",
+TEST_CASE( "harness_lab: teacher path is credential-gated, fail-closed without host config",
            "[lab][teacher]" )
 {
     SpatialToolRegistry::instance().registerBuiltinTools();
@@ -864,11 +873,43 @@ TEST_CASE( "harness_lab: teacher path: reference solutions open for teachers onl
     REQUIRE( dir.isValid() );
     ScopedLabSpecDir guard( writeFixtureLabSpec( dir ) );
 
-    // Teachers get the full reference INCLUDING parameter values.
+    // A bare "teacher" claim opens nothing: no credential -> typed refusal.
+    {
+        Json::Value claim;
+        claim["lab_id"] = "lab90_fixture_change";
+        claim["kind"] = "reference_solution";
+        claim["role"] = "teacher";
+        requireTeachingRefusal( callTool( "harness:lab_reference", claim ) );
+    }
+    // A credential without a configured host secret is refused too.
+    {
+        ScopedEnv disable( "SICNU_LAB_TEACHER_TOKEN", "" );
+        Json::Value unconfigured;
+        unconfigured["lab_id"] = "lab90_fixture_change";
+        unconfigured["kind"] = "reference_solution";
+        unconfigured["role"] = "teacher";
+        unconfigured["teacher_token"] = "whatever";
+        requireTeachingRefusal( callTool( "harness:lab_reference", unconfigured ) );
+    }
+    // Wrong credential (the value a composing model could guess) is refused.
+    {
+        ScopedEnv env( "SICNU_LAB_TEACHER_TOKEN", "host-secret-123" );
+        Json::Value wrong;
+        wrong["lab_id"] = "lab90_fixture_change";
+        wrong["kind"] = "reference_solution";
+        wrong["role"] = "teacher";
+        wrong["teacher_token"] = "teacher";
+        requireTeachingRefusal( callTool( "harness:lab_reference", wrong ) );
+    }
+
+    // Host-configured secret + matching injected credential: teachers get the
+    // full reference INCLUDING parameter values.
+    ScopedEnv env( "SICNU_LAB_TEACHER_TOKEN", "host-secret-123" );
     Json::Value teacher;
     teacher["lab_id"] = "lab90_fixture_change";
     teacher["kind"] = "reference_solution";
     teacher["role"] = "teacher";
+    teacher["teacher_token"] = "host-secret-123";
     const SpatialToolResult ok = callTool( "harness:lab_reference", teacher );
     REQUIRE( ok.success );
     REQUIRE( ok.output["reference"]["status"].asString() == "ok" );
@@ -881,17 +922,20 @@ TEST_CASE( "harness_lab: teacher path: reference solutions open for teachers onl
     grade["lab_id"] = "lab90_fixture_change";
     grade["kind"] = "grade_citation";
     grade["role"] = "teacher";
+    grade["teacher_token"] = "host-secret-123";
     const SpatialToolResult cited = callTool( "harness:lab_reference", grade );
     REQUIRE( cited.success );
     REQUIRE( cited.output["grade"]["status"].asString() == "unavailable" );
     REQUIRE( cited.output["grade"]["seam"].asString().find( "LabGradeResult" ) !=
              std::string::npos );
 
-    // A student calling the teacher surface directly is refused, typed.
+    // A student calling the teacher surface directly (even with a leaked
+    // credential but no teacher role) is refused, typed.
     Json::Value student;
     student["lab_id"] = "lab90_fixture_change";
     student["kind"] = "reference_solution";
     student["role"] = "student";
+    student["teacher_token"] = "host-secret-123";
     requireTeachingRefusal( callTool( "harness:lab_reference", student ) );
 
     // Unknown kind is a typed parameter error, not a crash.
@@ -899,9 +943,42 @@ TEST_CASE( "harness_lab: teacher path: reference solutions open for teachers onl
     bad["lab_id"] = "lab90_fixture_change";
     bad["kind"] = "do_my_homework";
     bad["role"] = "teacher";
+    bad["teacher_token"] = "host-secret-123";
     const SpatialToolResult typed = callTool( "harness:lab_reference", bad );
     REQUIRE( !typed.success );
     REQUIRE( typed.errorCode == error_codes::kInvalidParameter );
+}
+
+TEST_CASE( "harness_lab: lab tool schemas never advertise role or credentials",
+           "[lab][refusal][schema]" )
+{
+    SpatialToolRegistry::instance().registerBuiltinTools();
+
+    for ( const std::string &toolName : { std::string( "harness:lab_ask" ),
+                                          std::string( "harness:lab_reference" ) } )
+    {
+        const auto tool = SpatialToolRegistry::instance().find( toolName );
+        REQUIRE( tool.has_value() );
+        const Json::Value schema = ( *tool )->inputSchema();
+        const Json::Value &properties = schema["properties"];
+        INFO( "tool: " << toolName );
+        // The composing model is never invited to claim authority or present
+        // credentials — those are host-injected session fields.
+        REQUIRE( !properties.isMember( "role" ) );
+        REQUIRE( !properties.isMember( "teacher_token" ) );
+    }
+}
+
+TEST_CASE( "harness_lab: non-string routed_tool values still force the execute shape",
+           "[lab][refusal][p0]" )
+{
+    SpatialToolRegistry::instance().registerBuiltinTools();
+
+    Json::Value input;
+    input["message"] = "我不会做第3步"; // harmless prose on purpose
+    input["role"] = "student";
+    input["routed_tool"] = 12345; // type hole pinned: any value routes
+    requireTeachingRefusal( callTool( "harness:lab_ask", input ) );
 }
 
 TEST_CASE( "harness_lab: a teacher asking in chat may execute; the answer still contains no artifact",
@@ -943,4 +1020,145 @@ TEST_CASE( "harness_lab: token budgets: manifest, error catalog, and lab answers
     // The two lab tools are registered and reachable.
     REQUIRE( SpatialToolRegistry::instance().find( "harness:lab_ask" ).has_value() );
     REQUIRE( SpatialToolRegistry::instance().find( "harness:lab_reference" ).has_value() );
+}
+
+// ---------------------------------------------------------------------------
+// R4. Remediation pins from the adversarial + pedagogy review (Phase 7)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "harness_lab: current_step wire semantics (1-based, out-of-range honest)",
+           "[lab][hint][grounding]" )
+{
+    SpatialToolRegistry::instance().registerBuiltinTools();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    ScopedLabSpecDir guard( writeFixtureLabSpec( dir ) );
+
+    // Explicit 1-based current_step anchors without relying on the message.
+    Json::Value anchored;
+    anchored["message"] = "下一步该做什么";
+    anchored["role"] = "student";
+    anchored["lab_id"] = "lab90_fixture_change";
+    anchored["current_step"] = 3;
+    const SpatialToolResult ok = callTool( "harness:lab_ask", anchored );
+    REQUIRE( ok.success );
+    REQUIRE( ok.output["lab"]["step"]["title_zh"].asString() == "自动变化检测" );
+
+    // Out-of-range step: honest text, no fabricated anchoring.
+    Json::Value beyond;
+    beyond["message"] = "下一步该做什么";
+    beyond["role"] = "student";
+    beyond["lab_id"] = "lab90_fixture_change";
+    beyond["current_step"] = 9;
+    const SpatialToolResult over = callTool( "harness:lab_ask", beyond );
+    REQUIRE( over.success );
+    REQUIRE( over.output["lab"]["step_out_of_range"].asInt() == 9 );
+    REQUIRE( over.output["lab"]["step"].isNull() );
+    const std::string overAnswer = over.output["answer_zh"].asString();
+    REQUIRE( overAnswer.find( "没有第 9 步" ) != std::string::npos );
+    REQUIRE( overAnswer.find( "自动变化检测" ) == std::string::npos );
+}
+
+TEST_CASE( "harness_lab: hint for a step without an operator carries no dangling text",
+           "[lab][hint][grounding]" )
+{
+    SpatialToolRegistry::instance().registerBuiltinTools();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    ScopedLabSpecDir guard( writeFixtureLabSpec( dir ) );
+
+    Json::Value input;
+    input["message"] = "第2步怎么做";
+    input["role"] = "student";
+    input["lab_id"] = "lab90_fixture_change";
+    const SpatialToolResult result = callTool( "harness:lab_ask", input );
+    REQUIRE( result.success );
+    REQUIRE( result.output["lab"]["step"]["title_zh"].asString() == "目视对比" );
+    const std::string answer = result.output["answer_zh"].asString();
+    REQUIRE( answer.find( "参数" ) == std::string::npos ); // no dangling params clause
+    REQUIRE( result.output["suggested_actions"].size() == 0 );
+}
+
+TEST_CASE( "harness_lab: concept extraction survives polite phrasing; misses stay honest",
+           "[lab][concept][glossary]" )
+{
+    SpatialToolRegistry::instance().registerBuiltinTools();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    ScopedGlossaryFile guard( writeFixtureGlossary( dir ) );
+
+    const auto ask = [ & ]( const std::string &message ) {
+        Json::Value input;
+        input["message"] = message;
+        input["role"] = "student";
+        return callTool( "harness:lab_ask", input );
+    };
+
+    const SpatialToolResult polite = ask( "请问，什么是大气校正？" );
+    REQUIRE( polite.success );
+    REQUIRE( polite.output["glossary_terms"][0].asString() == "大气校正" );
+
+    const SpatialToolResult explained = ask( "帮我解释一下NDVI" );
+    REQUIRE( explained.success );
+    REQUIRE( explained.output["glossary_terms"][0].asString() == "归一化植被指数" );
+
+    // Unknown term: honest not-found with the unmangled term echoed.
+    const SpatialToolResult unknown = ask( "什么叫辐射定标" );
+    REQUIRE( unknown.success );
+    const std::string unknownAnswer = unknown.output["answer_zh"].asString();
+    REQUIRE( unknownAnswer.find( "没有收录" ) != std::string::npos );
+    REQUIRE( unknownAnswer.find( "辐射定标" ) != std::string::npos );
+}
+
+TEST_CASE( "harness_lab: troubleshoot without observations asks for exactly one thing",
+           "[lab][diagnosis][answer]" )
+{
+    SpatialToolRegistry::instance().registerBuiltinTools();
+
+    Json::Value absent;
+    absent["message"] = "我的结果不对";
+    absent["role"] = "student";
+    const SpatialToolResult noObs = callTool( "harness:lab_ask", absent );
+    REQUIRE( noObs.success );
+    const std::string absentAnswer = noObs.output["answer_zh"].asString();
+    REQUIRE( absentAnswer.find( "统计值" ) != std::string::npos );
+    REQUIRE( wireBytes( noObs.output ) < 8 * 1024 );
+
+    Json::Value unmatchedInput;
+    unmatchedInput["message"] = "我的结果不对";
+    unmatchedInput["role"] = "student";
+    unmatchedInput["observation"]["kind"] = "raster_stats";
+    unmatchedInput["observation"]["index"] = "NDVI";
+    unmatchedInput["observation"]["min"] = 0.1;
+    unmatchedInput["observation"]["max"] = 0.7;
+    const SpatialToolResult unmatched = callTool( "harness:lab_ask", unmatchedInput );
+    REQUIRE( unmatched.success );
+    REQUIRE( unmatched.output["diagnosis"]["matched"].asBool() == false );
+    REQUIRE( wireBytes( unmatched.output ) < 8 * 1024 );
+}
+
+TEST_CASE( "harness_lab: seams lazy-load on first tool query without manual reload",
+           "[lab][spec][grounding]" )
+{
+    SpatialToolRegistry::instance().registerBuiltinTools();
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const std::string labsDir = writeFixtureLabSpec( dir );
+
+    // setDirectory WITHOUT an explicit reload: the copilot path must still
+    // anchor (P1-1 remediation pin — the shipped tool has no test-side
+    // reload call).
+    LabSpecCatalog::instance().setDirectory( labsDir );
+    Json::Value input;
+    input["message"] = "我不会做第3步";
+    input["role"] = "student";
+    input["lab_id"] = "lab90_fixture_change";
+    const SpatialToolResult result = callTool( "harness:lab_ask", input );
+    REQUIRE( result.success );
+    REQUIRE( result.output["lab"]["source"].asString() == "ok" );
+    REQUIRE( result.output["lab"]["step"]["title_zh"].asString() == "自动变化检测" );
+
+    // restore
+    LabSpecCatalog::instance().setDirectory( std::string() );
+    LabSpecCatalog::instance().reload();
 }

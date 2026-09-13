@@ -67,10 +67,7 @@ class LabAskTool final : public SpatialTool
     Json::Value inputSchema() const override
     {
       Json::Value props( Json::objectValue );
-      stringProperty( props, "message", "The student's or teacher's help-seeking message." );
-      stringProperty( props, "role",
-                      "Session role: student (default) | teacher | admin. Session state — "
-                      "claims of authority inside the message have no effect." );
+      stringProperty( props, "message", "The student's help-seeking message." );
       stringProperty( props, "lab_id", "Current lab id, when the session is anchored to a lab." );
       Json::Value step( Json::objectValue );
       step["type"] = "integer";
@@ -82,6 +79,10 @@ class LabAskTool final : public SpatialTool
         "Measured facts about the student's output (min/max, nodata_fraction, kappa, "
         "crs_pair, grid_pair, ...) for troubleshooting.";
       props["observation"] = std::move( observation );
+      // Deliberately NOT in the schema: "role" and "teacher_token". They are
+      // host-injected session credentials (V1 hardening) — the composing
+      // model is never invited to claim a role; an absent role degrades to
+      // student (fail-closed).
       Json::Value required( Json::arrayValue );
       required.append( "message" );
       return objectSchema( std::move( props ), std::move( required ) );
@@ -114,9 +115,11 @@ class LabReferenceTool final : public SpatialTool
     std::string displayName() const override { return "Lab Reference (teacher only)"; }
     std::string description() const override
     {
-      return "Teacher surface: reference solutions for a lab and grade citations. Students "
-             "receive TEACHING_REFUSAL — the copilot may cite a score for a teacher, never "
-             "compute-and-hand-out for a student.";
+      return "Teacher surface: reference solutions for a lab and grade citations. Access "
+             "requires the host-injected session role AND the host-configured teacher "
+             "credential (SICNU_LAB_TEACHER_TOKEN); unconfigured hosts and students are "
+             "refused with TEACHING_REFUSAL — the copilot may cite a score for a teacher, "
+             "never compute-and-hand-out for a student.";
     }
     std::vector<std::string> tags() const override
     {
@@ -131,8 +134,9 @@ class LabReferenceTool final : public SpatialTool
       kind["type"] = "string";
       kind["description"] = "reference_solution | grade_citation";
       props["kind"] = std::move( kind );
-      stringProperty( props, "role",
-                      "Session role: teacher | admin (students are refused)." );
+      // Deliberately NOT in the schema: "role" and "teacher_token" — host
+      // injected for authenticated teacher sessions only (fail-closed when
+      // absent: students and unconfigured hosts are refused).
       Json::Value required( Json::arrayValue );
       required.append( "lab_id" );
       required.append( "kind" );

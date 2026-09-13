@@ -91,7 +91,7 @@ LabDiagnosis diagnoseLabObservation( const LabObservation &observation )
   {
     return makeDiagnosis(
       "kappa_near_zero",
-      "分类精度评价的 Kappa 系数接近 0，分类结果与随机猜测几乎没有差别。",
+      "分类精度评价的 Kappa 系数接近 0，分类结果处于随机水平甚至更差。",
       "最可能的原因是参考样本与分类体系没有对齐：类别名不一致、样本标注错误或样本量过少。",
       "用 check_training 核对参考样本的类别映射与样本量：抽查 3–5 个样本位置，逐一看标注是否与真实地物一致。",
       "check_training", sicnu::help::DiagnosticFamily::Harness, "TRAINING_INVALID" );
@@ -112,8 +112,8 @@ LabDiagnosis diagnoseLabObservation( const LabObservation &observation )
   {
     return makeDiagnosis(
       "scale_stripes",
-      "输出出现规则的水平/垂直条带或锯齿状边界，条带宽度与某个输入的像元大小相当。",
-      "最可能的原因是两幅输入分辨率不一致，重采样在逐块执行时把错位累积成了条带。",
+      "两幅输入的分辨率不一致（像元大小相差超过 1%）——若输出出现规则的条带或锯齿边界，最可能由此累积。",
+      "最可能的原因是低分辨率输入在逐块重采样时把错位累积成了条带。",
       "用 align_to_reference 把低分辨率输入重采样到与参考一致后再重新运算，观察条带是否消失。",
       "align_to_reference", sicnu::help::DiagnosticFamily::Harness, "GRID_MISMATCH" );
   }
@@ -134,9 +134,9 @@ LabDiagnosis diagnoseLabObservation( const LabObservation &observation )
     return makeDiagnosis(
       "all_negative_index",
       observation.indexName + " 的所有像元值都为负（最大值 " + std::to_string( observation.max ) +
-        " < 0），这在该指数的物理范围之外。",
-      "最可能的原因是红、近红外两个波段选反了（角色互换），公式的分子分母颠倒。",
-      "用 inspect_bands 核对第 3、第 4 波段的角色（RED/NIR）后，交换波段重新计算一遍即可验证。",
+        " < 0）。对有植被覆盖的场景而言，该指数不应整体为负。",
+      "最可能的原因是红光与近红外两个波段选反了（角色互换），公式的分子被整体反号。",
+      "用 inspect_bands 核对红光（RED）与近红外（NIR）波段的角色后，交换波段重新计算一遍即可验证。",
       "inspect_bands", sicnu::help::DiagnosticFamily::Harness, "BAND_ROLE_UNRESOLVED" );
   }
 
@@ -145,7 +145,7 @@ LabDiagnosis diagnoseLabObservation( const LabObservation &observation )
     return makeDiagnosis(
       "blank_change_mask",
       "变化检测掩膜为全空白：没有一个像元被判定为变化。",
-      "最可能的原因是两期影像辐射基准不一致（未定标/未归一化），差值被整体压到了阈值以下。",
+      "最可能的原因是两期影像辐射基准不一致（未定标/未归一化）把差值整体压到了阈值以下，也可能是阈值设置过紧。",
       "用 normalize_radiometry 对两期影像做辐射归一化后，再按原阈值重算变化掩膜。",
       "normalize_radiometry", sicnu::help::DiagnosticFamily::Harness, "OUTPUT_INVALID" );
   }

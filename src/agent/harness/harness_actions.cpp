@@ -123,13 +123,13 @@ Json::Value resolvedSuggestedActionForRole( const std::string &key, Json::Value 
 {
   if ( teachingGateBlocks( context, key ) )
   {
-    // Structural withholding: the resolution carries no tool and no
-    // workbench command, so no dispatcher can execute it. The typed code
-    // (TEACHING_REFUSAL) is what Pi reads — this is a contract refusal, not
-    // a prose apology.
+    // Structural withholding: the resolution carries no tool, no workbench
+    // command, and NO arguments — nothing that lets a dispatcher re-resolve
+    // the surface out-of-band through the ungated path. The action key is
+    // kept for audit only. The typed code (TEACHING_REFUSAL) is what Pi
+    // reads — this is a contract refusal, not a prose apology.
     Json::Value doc( Json::objectValue );
     doc["action"] = key;
-    doc["arguments"] = arguments.isObject() ? std::move( arguments ) : Json::Value( Json::objectValue );
     doc["resolved"] = false;
     doc["withheld"] = true;
     doc["withheld_by"] = "teaching_constraint";

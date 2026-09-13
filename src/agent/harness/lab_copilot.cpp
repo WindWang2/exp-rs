@@ -8,6 +8,9 @@
 #include "lab_intent.h"
 #include "lab_spec.h"
 
+#include <cstdlib>
+#include <cstring>
+
 namespace sicnu::agent::harness {
 
 namespace {
@@ -44,6 +47,7 @@ struct LabAnchor
     std::string labId;
     std::string specStatus; ///< "ok" | "unspecified" | "unavailable" | "unknown_lab"
     int stepIndex = -1;     ///< 0-based; -1 unknown
+    int outOfRangeStep = 0; ///< explicit current_step beyond the lab's length
     Json::Value step;       ///< stepDoc or null
 };
 
@@ -86,6 +90,10 @@ LabAnchor resolveAnchor( const Json::Value &input, const std::string &message )
   {
     anchor.stepIndex = stepNumber - 1;
   }
+  else
+  {
+    anchor.outOfRangeStep = stepNumber; // e.g. 第9步 of a 3-step lab
+  }
   if ( anchor.stepIndex >= 0 )
     anchor.step = catalog.stepDoc( anchor.labId, anchor.stepIndex );
   return anchor;
@@ -97,6 +105,8 @@ void appendAnchorDoc( Json::Value &result, const LabAnchor &anchor )
   lab["source"] = anchor.specStatus;
   if ( !anchor.labId.empty() )
     lab["id"] = anchor.labId;
+  if ( anchor.outOfRangeStep > 0 )
+    lab["step_out_of_range"] = anchor.outOfRangeStep;
   if ( !anchor.step.isNull() )
     lab["step"] = anchor.step;
   result["lab"] = std::move( lab );
@@ -105,21 +115,41 @@ void appendAnchorDoc( Json::Value &result, const LabAnchor &anchor )
 /// Strips the interrogative frame from a concept question, leaving the term.
 std::string conceptTermFromMessage( const std::string &message )
 {
-  static const char *const kPrefixes[] = { "请问什么是", "请问", "什么是", "请解释一下",
-                                           "请解释", "解释一下", "解释下", "是什么意思",
-                                           "什么意思", "介绍一下" };
+  static const char *const kPrefixes[] = {
+    "请问一下", "请问什么是", "请问", "帮我解释一下", "帮我解释下", "帮我解释",
+    "请解释一下", "请解释", "解释一下", "解释下", "介绍一下", "什么是",
+    "什么叫", "是什么意思", "什么意思",
+  };
   std::string term = message;
-  for ( const char *prefix : kPrefixes )
+  // Leading whitespace/punctuation would hide the interrogative frame.
+  static const char *const kLeadingJunk[] = { " ", "\t", "，", "？", "！", "。", "、", "," };
+  bool changed = true;
+  while ( changed )
   {
-    const std::string p( prefix );
-    if ( term.compare( 0, p.size(), p ) == 0 )
+    changed = false;
+    for ( const char *junk : kLeadingJunk )
     {
-      term = term.substr( p.size() );
-      break;
+      const std::string j( junk );
+      if ( term.compare( 0, j.size(), j ) == 0 )
+      {
+        term.erase( 0, j.size() );
+        changed = true;
+      }
+    }
+    for ( const char *prefix : kPrefixes )
+    {
+      const std::string p( prefix );
+      if ( term.compare( 0, p.size(), p ) == 0 )
+      {
+        term = term.substr( p.size() );
+        changed = true;
+        break;
+      }
     }
   }
   // Strip trailing question particles/punctuation.
-  static const char *const kSuffixes[] = { "是什么意思", "什么意思", "是什么", "吗", "?", "？",
+  static const char *const kSuffixes[] = { "是什么意思", "的概念是什么", "什么意思", "的概念",
+                                           "的意思", "是什么", "谢谢", "吗", "?", "？",
                                            "。", "，", ",", " " };
   bool trimmed = true;
   while ( trimmed && !term.empty() )
@@ -143,9 +173,10 @@ Json::Value buildTroubleshootAnswer( Json::Value &result, const LabObservation &
 {
   if ( !observation.present )
   {
+    // One ask, not a menu: the raster stats are the first thing to collect.
     result["answer_zh"] =
-      "要诊断问题，我需要看到实测数据：请先在数据检查面板读取该输出的统计值（最小/最大值、"
-      "NoData 占比），或把两期数据的坐标系与像元大小发给我，再来找我分析。";
+      "要诊断问题，先看实测数据：请在该输出的数据检查面板读取统计值（最小/最大值、"
+      "NoData 占比）发给我，我们再判断原因。";
     return result;
   }
 
@@ -154,8 +185,8 @@ Json::Value buildTroubleshootAnswer( Json::Value &result, const LabObservation &
   if ( !diagnosis.matched )
   {
     result["answer_zh"] =
-      "你的观测数据里没有命中已知的错误特征。请先检查最基本的：数据是否加载成功、"
-      "统计值是否正常（最小/最大值、NoData 占比），把结果发给我再深入分析。";
+      "你的观测数据里没有命中已知的错误特征。请把最小/最大值与 NoData 占比发给我，"
+      "我们再一起深入分析。";
     return result;
   }
 
@@ -188,6 +219,9 @@ Json::Value buildHintAnswer( Json::Value &result, const std::string &role,
         "我来帮你分析。";
     else if ( anchor.specStatus == "unknown_lab" )
       result["answer_zh"] = "我找不到这个实验的步骤定义，请确认实验编号。";
+    else if ( anchor.outOfRangeStep > 0 )
+      result["answer_zh"] = "这个实验没有第 " + std::to_string( anchor.outOfRangeStep ) +
+                            " 步。告诉我你想做哪一步（或你在哪一步卡住了），我给你针对这一步的提示。";
     else
       result["answer_zh"] = "告诉我你正在做哪个实验、第几步，我给你针对这一步的提示（不是答案）。";
     return result;
@@ -202,16 +236,26 @@ Json::Value buildHintAnswer( Json::Value &result, const std::string &role,
     note = anchor.step["completion_hint"].asString();
 
   std::string answer = "你正在做第 " + std::to_string( anchor.step.get( "number", 0 ).asInt() ) +
-                       " 步「" + title + "」。这一步要做的是：" + description;
+                       " 步「" + title + "」。";
+  if ( !description.empty() )
+    answer += "这一步要做的是：" + description;
   if ( anchor.step.isMember( "operator_id" ) )
   {
     const std::string operatorId = anchor.step["operator_id"].asString();
-    answer += " 用到的算子是 " + operatorId + "，参数只需要填：";
-    for ( const Json::Value &name : anchor.step["param_names"] )
-      answer += name.asString() + "、";
-    if ( !anchor.step["param_names"].empty() )
+    answer += " 用到的算子是 " + operatorId;
+    const Json::Value &paramNames = anchor.step["param_names"];
+    if ( paramNames.isArray() && !paramNames.empty() )
+    {
+      answer += "，参数只需要填：";
+      for ( const Json::Value &name : paramNames )
+        answer += name.asString() + "、";
       answer.erase( answer.size() - 3 ); // drop the trailing 、
-    answer += "。具体取值建议你自己从数据检查面板读出来。";
+      answer += "。具体取值建议你自己从数据检查面板读出来。";
+    }
+    else
+    {
+      answer += "，本步无需填参数。";
+    }
     Json::Value args( Json::objectValue );
     args["query"] = operatorId;
     appendGatedAction( result, "set_operator", std::move( args ), role );
@@ -235,7 +279,9 @@ Json::Value buildConceptAnswer( Json::Value &result, const std::string &message 
   {
     result["answer_zh"] = "术语库（data/terms/rs_glossary.json）当前不可用，无法给出权威定义。"
                           "请先查看帮助面板中的对应主题。";
-    result["lab_source_unavailable"] = "glossary";
+    Json::Value glossaryDoc( Json::objectValue );
+    glossaryDoc["source"] = "unavailable";
+    result["glossary"] = std::move( glossaryDoc );
     return result;
   }
   const Json::Value entry = glossary.term( termText );
@@ -262,6 +308,37 @@ bool labRoleMayUseTeacherSurfaces( const std::string &role )
   const std::string normalized = normalizeLabRole( role );
   return normalized == "teacher" || normalized == "admin";
 }
+
+namespace {
+
+/// Constant-time-ish comparison (no early exit on content mismatch).
+bool constantTimeEquals( const std::string &a, const std::string &b )
+{
+  if ( a.size() != b.size() )
+    return false;
+  unsigned char diff = 0;
+  for ( size_t i = 0; i < a.size(); ++i )
+    diff |= static_cast<unsigned char>( a[i] ) ^ static_cast<unsigned char>( b[i] );
+  return diff == 0;
+}
+
+/// The teacher surface is credential-gated, not claim-gated: the host (UI
+/// session server) configures SICNU_LAB_TEACHER_TOKEN and injects the token
+/// ONLY into authenticated teacher sessions — a value a model composing tool
+/// arguments cannot know. Unset/empty token disables the teacher surface
+/// entirely (fail-closed): every caller is treated as a student.
+bool teacherCredentialValid( const Json::Value &input )
+{
+  const char *expected = std::getenv( "SICNU_LAB_TEACHER_TOKEN" );
+  if ( !expected || *expected == '\0' )
+    return false;
+  const Json::Value provided = input.get( "teacher_token", "" );
+  if ( !provided.isString() || provided.asString().empty() )
+    return false;
+  return constantTimeEquals( provided.asString(), std::string( expected ) );
+}
+
+} // namespace
 
 Json::Value teachingRefusalEnvelope( const std::string &intent, const std::string &role )
 {
@@ -295,10 +372,13 @@ Json::Value labAsk( const Json::Value &input )
   const LabIntentClassification classification = classifyLabIntent( message );
   std::string intent = classification.intent;
 
-  // A bypass routed at the executor is execute-shaped, regardless of prose.
-  const std::string routedTool =
-    input.get( "routed_tool", "" ).isString() ? input.get( "routed_tool", "" ).asString() : "";
-  if ( !routedTool.empty() )
+  // A bypass routed at the executor is execute-shaped, regardless of prose —
+  // and regardless of the field's JSON type (a non-string value is still a
+  // routing attempt).
+  const Json::Value &routed = input["routed_tool"];
+  const bool routedExecution = input.isMember( "routed_tool" ) && !routed.isNull() &&
+                               ( !routed.isString() || !routed.asString().empty() );
+  if ( routedExecution )
     intent = kIntentLabExecute;
 
   // Teacher surfaces: grading and do-it-for-me execution. Students are
@@ -340,7 +420,10 @@ Json::Value labReference( const Json::Value &input )
   const std::string role = normalizeLabRole( input.get( "role", "" ).asString() );
   const std::string kind = input.get( "kind", "" ).isString() ? input.get( "kind", "" ).asString() : "";
   const std::string labId = input.get( "lab_id", "" ).isString() ? input.get( "lab_id", "" ).asString() : "";
-  if ( !labRoleMayUseTeacherSurfaces( role ) )
+  // Two locks: the session role AND the host-injected credential. Either
+  // failing (including "teacher" without a token) is a typed refusal — a
+  // bare role claim never opens the reference surface.
+  if ( !labRoleMayUseTeacherSurfaces( role ) || !teacherCredentialValid( input ) )
     return teachingRefusalEnvelope( kIntentLabExecute, role );
 
   Json::Value result = objectWithSuggestedActions();

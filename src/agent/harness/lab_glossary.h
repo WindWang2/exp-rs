@@ -34,6 +34,10 @@ class LabGlossary
     /// the file is absent or invalid.
     int reload();
 
+    /// True after a completed load (auto-loaded on first query — same
+    /// contract as CapabilityKnowledge).
+    bool loaded() const { return mLoaded; }
+
     /// "ok" | "unavailable".
     std::string status() const;
     std::vector<std::string> loadProblems() const;

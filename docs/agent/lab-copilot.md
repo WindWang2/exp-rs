@@ -21,9 +21,13 @@ never a complete parameter set for the whole lab, never a grade.
 
 ## Roles
 
-`role` is **session state** supplied by the caller — `student` (default),
-`teacher`, `admin`. It is never read from the message text, so impersonation
-inside a message is inert. Unknown/empty roles degrade to `student`.
+`role` is **session state** injected by the host — `student` (default),
+`teacher`, `admin`. It is never read from the message text, and neither `role`
+nor the teacher credential appears in any tool input schema: the composing
+model is never invited to claim authority. The teacher surface additionally
+requires the host-configured credential `SICNU_LAB_TEACHER_TOKEN`, injected
+only into authenticated teacher sessions; when the variable is unset the
+teacher surface is disabled entirely (fail-closed).
 
 ## Intents
 
@@ -69,7 +73,11 @@ student — they are the solution, available only through the teacher surface.
 Dependencies that degrade with typed `unavailable` on branches where they have
 not landed: D2 lab specs (`data/labs/`), D6 glossary
 (`data/terms/rs_glossary.json`), D4 grade results (`LabGradeResult`). The
-copilot says so honestly in Chinese and continues with un-anchored help.
+copilot says so honestly in Chinese and continues with un-anchored help. Both
+seams lazy-load on first query (same contract as `CapabilityKnowledge`), so
+grounding activates as soon as the data exists. Step parsing is deliberately
+conservative: spaced ("第 3 步"), full-width-digit, and >10 (第十二步) forms do
+not parse and fall back to the generic prompt — never a wrong step.
 
 ## Acceptance
 

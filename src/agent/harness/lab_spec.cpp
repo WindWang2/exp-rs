@@ -19,6 +19,15 @@ namespace sicnu::agent::harness {
 
 namespace {
 
+/// The lab spec layer auto-loads on first query (same contract as
+/// CapabilityKnowledge/RecipeCatalog) so tool paths never answer from an
+/// empty catalog when the data is actually present.
+void ensureLoaded( LabSpecCatalog &catalog )
+{
+  if ( !catalog.loaded() )
+    catalog.reload();
+}
+
 bool parseIntUtf8( const std::string &text, int &value )
 {
   if ( text.empty() )
@@ -126,6 +135,7 @@ LabSpecCatalog &LabSpecCatalog::instance()
 void LabSpecCatalog::setDirectory( const std::string &directory )
 {
   mDirectory = directory;
+  mLoaded = false; // next query re-scans the new directory
 }
 
 std::string LabSpecCatalog::directory() const
@@ -230,6 +240,7 @@ int LabSpecCatalog::reload()
 
 std::string LabSpecCatalog::status() const
 {
+  ensureLoaded( const_cast<LabSpecCatalog &>( *this ) );
   return ( mLoaded && !mOrder.empty() ) ? "ok" : "unavailable";
 }
 
@@ -240,11 +251,13 @@ std::vector<std::string> LabSpecCatalog::loadProblems() const
 
 std::vector<std::string> LabSpecCatalog::labIds() const
 {
+  ensureLoaded( const_cast<LabSpecCatalog &>( *this ) );
   return mOrder;
 }
 
 Json::Value LabSpecCatalog::lab( const std::string &labId ) const
 {
+  ensureLoaded( const_cast<LabSpecCatalog &>( *this ) );
   if ( !mLoaded || labId.empty() || !mSpecs.isMember( labId ) )
     return Json::Value();
   return mSpecs[ labId ];

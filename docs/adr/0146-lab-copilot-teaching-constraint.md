@@ -66,6 +66,28 @@ code, on the only path an artifact can travel.
    deterministically (no model in the loop) and cite D6 glossary `zh` terms so
    the same word appears in the UI, the help panel, and the copilot answer.
 
+## Trust boundary (honest scoping)
+
+The adversarial review of this ADR surfaced two boundary facts that the
+decisions above scope but cannot, alone, enforce:
+
+1. **Role/credential injection.** Within this repo there is no session
+   plumbing that would cryptographically distinguish a teacher UI session from
+   a model composing tool arguments. The teaching gate therefore never trusts
+   a bare `role` claim for the artifact/grade surface:
+   `harness:lab_reference` requires BOTH the session role AND a host-injected
+   credential matching `SICNU_LAB_TEACHER_TOKEN` (unset ⇒ teacher surface
+   disabled entirely — fail-closed). Neither `role` nor `teacher_token`
+   appears in either tool's advertised input schema: the composing model is
+   never invited to claim authority. Hosts MUST inject these fields only into
+   authenticated teacher sessions.
+2. **The scientific executor is out of the lab domain.** `harness:execute_plan`
+   has no role concept on this branch — it is the research pipeline, and the
+   teaching gate is scoped to the lab intent domain. A classroom deployment
+   must not expose the scientific execution surfaces to student sessions;
+   per-role tool registration at the dispatch boundary is the platform-level
+   follow-up (tracked in REVIEW_LOG as the residual P0-class risk).
+
 ## Consequences
 
 - The eval suite (`tests/test_harness_lab_evals.cpp`) pins all of the above

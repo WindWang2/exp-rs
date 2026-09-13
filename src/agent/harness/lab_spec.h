@@ -36,6 +36,10 @@ class LabSpecCatalog
     /// specs loaded.
     int reload();
 
+    /// True after a completed scan (auto-loaded on first query — same
+    /// contract as CapabilityKnowledge).
+    bool loaded() const { return mLoaded; }
+
     /// "ok" | "unavailable" (missing/empty directory or parse failures only).
     std::string status() const;
     std::vector<std::string> loadProblems() const;

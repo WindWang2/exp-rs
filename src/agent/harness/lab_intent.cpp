@@ -38,7 +38,7 @@ std::vector<IntentSignals> signalTable()
                        "卡住", "卡在", "怎么继续", "提示", "第1步", "第2步", "第3步",
                        "第4步", "stuck", "how do i", "next step" } } );
   table.push_back( { kIntentLabConcept, 1,
-                     { "什么是", "是什么意思", "什么意思", "概念", "定义", "解释一下",
+                     { "什么是", "什么叫", "是什么意思", "什么意思", "概念", "定义", "解释一下",
                        "解释下", "是指", "什么区别", "what is", "explain" } } );
   table.push_back( { kIntentLabGradeRequest, 4,
                      { "打分", "批改", "评分", "成绩", "批阅", "grade" } } );

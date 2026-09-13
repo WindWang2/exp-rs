@@ -17,6 +17,15 @@ namespace sicnu::agent::harness {
 
 namespace {
 
+/// The glossary auto-loads on first query (same contract as
+/// CapabilityKnowledge/RecipeCatalog) so answers cite terms when D6 data is
+/// actually present.
+void ensureLoaded( LabGlossary &glossary )
+{
+  if ( !glossary.loaded() )
+    glossary.reload();
+}
+
 std::string loweredKey( const std::string &text )
 {
   std::string out = text;
@@ -36,6 +45,7 @@ LabGlossary &LabGlossary::instance()
 void LabGlossary::setFilePath( const std::string &path )
 {
   mFilePath = path;
+  mLoaded = false; // next query reloads the new file
 }
 
 std::string LabGlossary::filePath() const
@@ -130,6 +140,7 @@ int LabGlossary::reload()
 
 std::string LabGlossary::status() const
 {
+  ensureLoaded( const_cast<LabGlossary &>( *this ) );
   return mLoaded ? "ok" : "unavailable";
 }
 
@@ -140,6 +151,7 @@ std::vector<std::string> LabGlossary::loadProblems() const
 
 Json::Value LabGlossary::term( const std::string &word ) const
 {
+  ensureLoaded( const_cast<LabGlossary &>( *this ) );
   if ( !mLoaded || word.empty() )
     return Json::Value();
   const Json::Value &entry = mByLower[ loweredKey( word ) ];
