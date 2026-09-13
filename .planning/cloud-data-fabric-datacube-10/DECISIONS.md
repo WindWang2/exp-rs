@@ -81,3 +81,17 @@ OfflineErrorCode，避免错误分类学分裂；拒绝文案必须引用 engagi
 RemoteRangeCache/mirror 为单进程语义。跨进程共享同一 cache 目录不在本 track 实现
 （10.0 专项 G 的 process-safe 条款以此声明 + 头文件契约文档满足：写者唯一、
 publish 原子、损坏可恢复）。若未来多进程需求成立，另立 track。
+
+## D-1015 · 本地目录遍历走 GDAL VSI API，不用 std::filesystem
+本机 GCC 16 快照（gcc 16.2.1+r23, Arch）存在 include-order 敏感的头损坏：
+`<utility>`+`<string>` 之后 `<filesystem>` 的 std::filesystem 命名空间声明被破坏
+（复现：`#include <utility>` → `#include <string>` → `#include <filesystem>` →
+error: 'filesystem' is not a namespace）。同一文件在不同 TU 状态下时好时坏，
+风险不可控。fabric 层的目录遍历改用 GDAL VSI 原语（VSIReadDirRecursive/VSIStatL/
+CPLFormFilename 语义的本地 helper）——VSI 本就是本层传输权威（D-1002/ADR 0139 同源），
+跨平台。已验证：sicnu_geospatial 全量编译通过（catalog_service.cpp.o）。
+修复后回扫：其余 fabric 模块一律不引入 std::filesystem。
+
+## D-1016 · credential RAII 的恢复语义
+ScopedObjectStoreCredentials 析构时**恢复先前值**（hadPrior → 恢复，否则移除键），
+恢复顺序为安装的逆序。头文件措辞相应理解为"exactly what it set"（含恢复语义）。

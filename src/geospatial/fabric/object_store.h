@@ -120,6 +120,15 @@ std::string fabricCachedPath( const std::string &fetchablePath );
 /// The process-global serialization requirement is D-1003 — enforced by
 /// convention, documented here, and asserted by a test-visible counter
 /// (activeScopedCredentialWindows()) for diagnostics.
+/// One config key a credential window installed (with the prior state to
+/// restore — the window erases exactly what it set, nothing else).
+struct FabricInstalledConfigKey
+{
+    std::string key;
+    std::string priorValue;
+    bool hadPrior = false;
+};
+
 class ScopedObjectStoreCredentials
 {
   public:
@@ -131,7 +140,7 @@ class ScopedObjectStoreCredentials
 
   private:
     std::string mPrefix;
-    std::vector<std::string> mSetKeys;   ///< exactly what we set (to unset)
+    std::vector<FabricInstalledConfigKey> mSetKeys;   ///< exact restore journal
 };
 
 /// Diagnostic count of currently-open credential windows (tests observe

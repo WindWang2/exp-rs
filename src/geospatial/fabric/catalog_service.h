@@ -112,11 +112,14 @@ struct CatalogContinuation
     bool hasMore = false;
     // Local backend: offset into the walk order.
     std::size_t localOffset = 0;
-    // Remote backend: the StacPage continuation descriptor verbatim.
+    // Remote backend: the StacPage continuation descriptor verbatim, plus
+    // the producing request (POST pages merge their next body into self).
     std::string remoteMethod;
     std::string remoteHref;
     Json::Value remoteBody;
     bool remoteMerge = false;
+    std::string remoteSelfMethod;
+    Json::Value remoteSelfBody;
 };
 
 /// One bounded page.
