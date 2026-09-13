@@ -35,12 +35,24 @@ namespace sicnu::geo
 std::map<std::string, std::string> parseLandsatMtlKeys( const std::string &mtlPath );
 
 /// Product-level semantics extracted from sidecar/metadata files.
+/// Per-band radiometric calibration exactly as the sidecar declares it.
+/// A band may declare gain only, bias only, both, or neither — each field is
+/// independently flagged, and absent fields are absent (never defaulted).
+struct BandCalibration
+{
+    std::string band;        ///< native band id ("B1", "MS5", ...)
+    bool hasGain = false;
+    double gain = 0.0;
+    bool hasBias = false;
+    double bias = 0.0;
+};
+
 struct ProductMetadata
 {
     std::string productId;
-    std::string sensor;           ///< "OLI_TIRS", "MSI", "C-SAR", ...
-    std::string platform;         ///< "LANDSAT_8", "SENTINEL-2A", "SENTINEL-1B"
-    std::string processingLevel;  ///< "L1TP", "Level-1C", "GRD", ...
+    std::string sensor;           ///< "OLI_TIRS", "MSI", "C-SAR", "PMS1", "CCD1", ...
+    std::string platform;         ///< "LANDSAT_8", "SENTINEL-2A", "GF1", "ZY3", "HJ1A"
+    std::string processingLevel;  ///< "L1TP", "Level-1C", "GRD", "L1A", ...
     std::string acquisitionTime;  ///< ISO-8601 when declared
     std::string radiometricState; ///< ADR 0114 vocabulary when determinable
     double numericScale = 0.0;    ///< quantification (e.g. S2 BOA 10000)
@@ -53,6 +65,17 @@ struct ProductMetadata
     std::string orbitDirection;   ///< ASCENDING / DESCENDING (SAR)
     std::string instrumentMode;   ///< SAR acquisition mode (IW/EW/SM)
     std::string crsHint;          ///< declared projection (UTM zone / EPSG text) when declared
+    // CN products (ADR 0146): sensor mode ("PMS1", "WFV2", "NAD", "CCD1"),
+    // declared orbit id, sun geometry and per-band calibration — all optional,
+    // all explicitly flagged when absent.
+    std::string sensorMode;       ///< camera/sensor mode token when declared
+    std::string orbitId;          ///< declared orbit identifier when present
+    bool hasSunElevation = false;
+    double sunElevationDeg = 0.0; ///< sun elevation above horizon, degrees
+    bool hasSunAzimuth = false;
+    double sunAzimuthDeg = 0.0;   ///< sun azimuth, degrees
+    std::vector<BandCalibration> bandCalibration; ///< declared gain/bias per band
+    std::vector<std::string> declaredBandIds;     ///< BandID order from the sidecar
     std::vector<std::pair<std::string, std::string>> extra; ///< bounded passthrough
 
     Json::Value toJson() const;
@@ -65,6 +88,9 @@ enum class ProductKind
     Sentinel2Safe,
     Sentinel1Safe,
     ModisContainer,
+    GaofenProduct, ///< GF-1/2/6 PMS/WFV L1A (CRESDA sidecar XML + TIFF)
+    Zy3Product,    ///< ZY-3 TLC/NAD/FWD/BWD L1A
+    HjCcdProduct,  ///< HJ-1A/1B CCD L1A
     GenericRaster
 };
 

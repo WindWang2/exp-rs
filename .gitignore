@@ -56,6 +56,10 @@ data/*
 !data/labs/**
 # Lab step outputs (guided runs resolve outputs/... to /output/labs/<labId>/).
 /output/
+# CN satellite product metadata templates (band-role tables, field maps;
+# ADR 0146) are tracked config — imagery itself never lands here.
+!data/products/
+!data/products/**
 # Harness 4.0 scientific recipes are tracked metadata, not local data.
 !data/agent/
 !data/agent/**

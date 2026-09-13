@@ -6281,6 +6281,28 @@ target_include_directories(test_satellite_products PRIVATE
 sicnu_link_jsoncpp(test_satellite_products)
 sicnu_discover_tests(test_satellite_products)
 
+# Chinese satellite product adapters (GF-1/2/6, ZY-3, HJ-1A/1B CCD; ADR 0146) —
+# identity/refusal, CRESDA sidecar parsing, band-role tables, import operators,
+# and the headless GF-1 end-to-end chain (import → NDVI → supervised
+# classification). Synthetic fixtures only; no real imagery.
+add_executable(test_cn_products test_cn_products.cpp)
+target_link_libraries(test_cn_products PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  sicnu_geospatial
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_cn_products PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_cn_products)
+sicnu_discover_tests(test_cn_products)
+
 # Product import dialog tests - probe-preview-commit transaction (headless;
 # Landsat + Sentinel-2 fixtures, sensor-agnostic dialog).
 add_executable(test_product_import_dialog

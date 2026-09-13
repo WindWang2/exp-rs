@@ -13,6 +13,8 @@
 
 #include "geospatial/products/product_adapters.h"
 
+#include "geospatial/products/cn_product_metadata.h"
+
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
@@ -530,6 +532,40 @@ Json::Value ProductMetadata::toJson() const
   json["orbit_direction"] = orbitDirection;
   json["instrument_mode"] = instrumentMode;
   json["crs_hint"] = crsHint;
+  if ( !sensorMode.empty() )
+    json["sensor_mode"] = sensorMode;
+  if ( !orbitId.empty() )
+    json["orbit_id"] = orbitId;
+  json["has_sun_elevation"] = hasSunElevation;
+  if ( hasSunElevation )
+    json["sun_elevation_deg"] = sunElevationDeg;
+  json["has_sun_azimuth"] = hasSunAzimuth;
+  if ( hasSunAzimuth )
+    json["sun_azimuth_deg"] = sunAzimuthDeg;
+  if ( !bandCalibration.empty() )
+  {
+    Json::Value calibration( Json::arrayValue );
+    for ( const BandCalibration &entry : bandCalibration )
+    {
+      Json::Value band( Json::objectValue );
+      band["band"] = entry.band;
+      band["has_gain"] = entry.hasGain;
+      if ( entry.hasGain )
+        band["gain"] = entry.gain;
+      band["has_bias"] = entry.hasBias;
+      if ( entry.hasBias )
+        band["bias"] = entry.bias;
+      calibration.append( band );
+    }
+    json["band_calibration"] = calibration;
+  }
+  if ( !declaredBandIds.empty() )
+  {
+    Json::Value bandIds( Json::arrayValue );
+    for ( const std::string &band : declaredBandIds )
+      bandIds.append( band );
+    json["declared_band_ids"] = bandIds;
+  }
   if ( !extra.empty() )
   {
     Json::Value extras( Json::objectValue );
@@ -556,6 +592,23 @@ ProductKind detectProductKind( const std::string &path )
   if ( upper.find( "HDF" ) != std::string::npos || upper.find( "MOD0" ) != std::string::npos
        || upper.find( "MYD0" ) != std::string::npos )
     return ProductKind::ModisContainer;
+
+  // Chinese L1A families (ADR 0146) — claimed before the generic fallback.
+  const CnProductIdentity identity = cnIdentifyProduct( path );
+  if ( identity.supported )
+  {
+    if ( identity.kindName == "gaofen_product" )
+      return ProductKind::GaofenProduct;
+    if ( identity.kindName == "zy3_product" )
+      return ProductKind::Zy3Product;
+    if ( identity.kindName == "hj_ccd_product" )
+      return ProductKind::HjCcdProduct;
+  }
+  // A recognized Chinese family we deliberately do not adapt must not
+  // silently degrade to GenericRaster: Unknown keeps the readProductMetadataAuto
+  // refusal diagnosable (it reports the concrete reason).
+  if ( identity.recognized )
+    return ProductKind::Unknown;
   return ProductKind::GenericRaster;
 }
 
@@ -567,6 +620,9 @@ const char *productKindName( ProductKind kind )
     case ProductKind::Sentinel2Safe: return "sentinel2_safe";
     case ProductKind::Sentinel1Safe: return "sentinel1_safe";
     case ProductKind::ModisContainer: return "modis_container";
+    case ProductKind::GaofenProduct: return "gaofen_product";
+    case ProductKind::Zy3Product: return "zy3_product";
+    case ProductKind::HjCcdProduct: return "hj_ccd_product";
     case ProductKind::GenericRaster: return "generic_raster";
     case ProductKind::Unknown: break;
   }
@@ -581,6 +637,9 @@ std::string productKindDisplayName( ProductKind kind )
     case ProductKind::Sentinel2Safe: return "Sentinel-2 SAFE product";
     case ProductKind::Sentinel1Safe: return "Sentinel-1 SAFE product";
     case ProductKind::ModisContainer: return "MODIS HDF container";
+    case ProductKind::GaofenProduct: return "Gaofen (GF-1/2/6) L1A product";
+    case ProductKind::Zy3Product: return "Ziyuan-3 (ZY-3) L1A product";
+    case ProductKind::HjCcdProduct: return "Huanjing (HJ-1A/1B) CCD product";
     case ProductKind::GenericRaster: return "Generic raster";
     case ProductKind::Unknown: break;
   }
@@ -599,6 +658,24 @@ ProductMetadata readProductMetadata( const std::string &path, ProductKind kind )
       return readSentinel1( path );
     case ProductKind::ModisContainer:
       return readModis( path );
+    case ProductKind::GaofenProduct:
+    case ProductKind::Zy3Product:
+    case ProductKind::HjCcdProduct:
+    {
+      const CnProductIdentity identity = cnIdentifyProduct( path );
+      if ( identity.supported && identity.kindName == productKindName( kind ) )
+        return readCnProductMetadata( path, identity );
+      // The kind was forced but the path does not name that family: refuse
+      // with the identity diagnosis instead of parsing the wrong product.
+      Json::Value details;
+      details["path"] = path;
+      details["expected"] = productKindName( kind );
+      details["reason"] = identity.reason.empty()
+                            ? Json::Value( "path does not name this product family" )
+                            : Json::Value( identity.reason );
+      throw GeoError( ErrorCode::UnsupportedProduct,
+                      "Path does not name the requested CN product family", details );
+    }
     case ProductKind::GenericRaster:
     case ProductKind::Unknown:
       break;
@@ -615,6 +692,15 @@ ProductMetadata readProductMetadataAuto( const std::string &path )
   {
     Json::Value details;
     details["path"] = path;
+    const CnProductIdentity identity = cnIdentifyProduct( path );
+    if ( identity.recognized && !identity.supported && !identity.reason.empty() )
+    {
+      // Recognized Chinese family outside the adapted set: diagnosable
+      // refusal, never a silent generic-raster fallback (DECISIONS D-01).
+      details["reason"] = identity.reason;
+      throw GeoError( ErrorCode::UnsupportedProduct,
+                      "Chinese satellite product family is not adapted", details );
+    }
     throw GeoError( ErrorCode::InvalidArgument, "No product adapter detected for source", details );
   }
   return readProductMetadata( path, kind );

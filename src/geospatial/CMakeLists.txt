@@ -37,6 +37,8 @@ set(SICNU_GEOSPATIAL_SOURCES
     stac/stac_client.cpp
     products/product_adapters.cpp
     products/product_registry.cpp
+    products/cn_product_metadata.cpp
+    products/cn_product_adapters.cpp
     doctor/data_doctor.cpp
     multidim/multidim_view.cpp
     multidim/multidim_cube.cpp
