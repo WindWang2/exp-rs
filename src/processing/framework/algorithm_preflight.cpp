@@ -457,7 +457,7 @@ Json::Value preflightAdapter( const AtomicAlgorithmAdapter &adapter, const Json:
     const Json::Value &firstRaster = probedRasters.front().second;
     if ( firstRaster.isMember( "width" ) && firstRaster.isMember( "height" ) )
     {
-      chunk::TileMemoryRequest request;
+      runtime::chunk::TileMemoryRequest request;
       request.tileWidth = agentExec.isMember( "tileWidth" ) && agentExec["tileWidth"].isUInt()
                             ? agentExec["tileWidth"].asUInt()
                             : 256;
@@ -487,7 +487,7 @@ Json::Value preflightAdapter( const AtomicAlgorithmAdapter &adapter, const Json:
           : 0;
       // budgetBytes stays 0 → Advisory: the preflight reports the estimate;
       // the enforcing gate is TaskCenter admission.
-      const chunk::TileMemoryPlan plan = chunk::planTileMemory( request );
+      const runtime::chunk::TileMemoryPlan plan = runtime::chunk::planTileMemory( request );
 
       Json::Value tilePlan( Json::objectValue );
       tilePlan["requestedShapePeakBytes"] =
@@ -499,15 +499,15 @@ Json::Value preflightAdapter( const AtomicAlgorithmAdapter &adapter, const Json:
       tilePlan["action"] = [&] {
         switch ( plan.action )
         {
-        case chunk::TileMemoryPlan::Action::Admit:
+        case runtime::chunk::TileMemoryPlan::Action::Admit:
           return "admit";
-        case chunk::TileMemoryPlan::Action::Advisory:
+        case runtime::chunk::TileMemoryPlan::Action::Advisory:
           return "advisory";
-        case chunk::TileMemoryPlan::Action::ReduceConcurrency:
+        case runtime::chunk::TileMemoryPlan::Action::ReduceConcurrency:
           return "reduce_concurrency";
-        case chunk::TileMemoryPlan::Action::Spill:
+        case runtime::chunk::TileMemoryPlan::Action::Spill:
           return "spill";
-        case chunk::TileMemoryPlan::Action::Refuse:
+        case runtime::chunk::TileMemoryPlan::Action::Refuse:
           return "refuse";
         }
         return "advisory";
