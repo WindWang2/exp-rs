@@ -413,7 +413,9 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
   }
 
   // Whole-raster dedup: exact-duplicate collapse + NMS = the tile-overlap
-  // resolution. Bounded accumulation guard before the write.
+  // resolution. Bounded accumulation guard before the write. The cancel
+  // predicate rides along (#971): a huge candidate set polls the task's
+  // cancel flag per NMS round instead of blocking the whole O(n²) pass.
   stats.rawDetections = static_cast<int>( detections.size() );
   if ( stats.rawDetections > det.maxDetections )
     throw RSOperatorError(
@@ -421,7 +423,7 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
       "detection accumulated " + std::to_string( stats.rawDetections )
         + " boxes which exceeds output.detection.max_detections ("
         + std::to_string( det.maxDetections ) + ") — raise the cap or lower the conf_threshold" );
-  dedupDetections( detections, det.nmsIou );
+  dedupDetections( detections, det.nmsIou, [&context] { return context.isCancelled(); } );
   stats.detectionsKept = static_cast<int>( detections.size() );
 
   context.throwIfCancelled();

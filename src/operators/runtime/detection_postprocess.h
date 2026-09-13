@@ -10,10 +10,12 @@
 #pragma once
 
 #include "operators/framework/model_catalog.h"
+#include "operators/framework/rs_operator_error.h"
 
 
 #include <opencv2/core.hpp>
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -53,11 +55,18 @@ std::string decodeDetections( const cv::Mat &output, const DetectionDecodeContra
 /// part of the tie-break key but do NOT gate suppression — overlapping boxes
 /// of different classes suppress each other; cross-class duplicates are the
 /// tile-overlap pathology this pass exists to remove).
-std::vector<DetectionBox> nonMaxSuppression( const std::vector<DetectionBox> &boxes, double iouThreshold );
+/// @param isCancelled optional cooperative-cancel predicate (#971): polled
+/// between suppression rounds so a huge candidate set cannot block a cancel
+/// for the whole O(n²) pass; on cancel throws RSOperatorError(Cancelled).
+std::vector<DetectionBox> nonMaxSuppression(
+  const std::vector<DetectionBox> &boxes, double iouThreshold,
+  const std::function<bool()> &isCancelled = {} );
 
 /// Cross-tile dedup: exact-duplicate collapse (bit-equal boxes from overlap
 /// seams) followed by the whole-raster NMS. Bounded by contract.maxDetections
 /// upstream — the accumulator refuses more, it never silently drops.
-void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold );
+/// @param isCancelled optional cooperative-cancel predicate (see above).
+void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold,
+                      const std::function<bool()> &isCancelled = {} );
 
 } // namespace sicnu::operators::runtime

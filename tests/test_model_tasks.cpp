@@ -354,6 +354,28 @@ TEST_CASE( "NMS is deterministic and resolves tile-overlap duplicates", "[models
   CHECK( hasTieFirst );
 }
 
+TEST_CASE( "NMS honors cooperative cancellation (#971)", "[models][detect][lsee10]" )
+{
+  using sicnu::operators::runtime::nonMaxSuppression;
+  std::vector<DetectionBox> boxes;
+  for ( int i = 0; i < 500; ++i )
+    boxes.push_back( DetectionBox{ static_cast<float>( i ), 0.0f, 10.0f, 10.0f, 0, 0.5f } );
+
+  // A predicate that is already cancelled: the very first poll throws the
+  // typed Cancelled error instead of running the O(n²) suppression loop.
+  REQUIRE_THROWS_AS( nonMaxSuppression( boxes, 0.45, [] { return true; } ),
+                     sicnu::operators::RSOperatorError );
+
+  // A never-cancelled predicate produces the identical result as no
+  // predicate at all (the callback is pure observation, zero semantic shift).
+  bool polled = false;
+  const auto withFlag = nonMaxSuppression( boxes, 0.45, [&polled] { polled = true; return false; } );
+  const auto withoutFlag = nonMaxSuppression( boxes, 0.45 );
+  REQUIRE( polled );
+  REQUIRE( withFlag.size() == withoutFlag.size() );
+  REQUIRE( withFlag.size() == boxes.size() ); // disjoint boxes: nothing suppressed
+}
+
 // ---------------------------------------------------------------------------
 // The unified seam (T24/T25): four operators, one execution path
 // ---------------------------------------------------------------------------

@@ -127,7 +127,8 @@ std::string decodeDetections( const cv::Mat &output, const DetectionDecodeContra
 }
 
 std::vector<DetectionBox> nonMaxSuppression( const std::vector<DetectionBox> &boxes,
-                                             double iouThreshold )
+                                             double iouThreshold,
+                                             const std::function<bool()> &isCancelled )
 {
   std::vector<DetectionBox> ordered = boxes;
   std::sort( ordered.begin(), ordered.end(), []( const DetectionBox &a, const DetectionBox &b ) {
@@ -149,6 +150,12 @@ std::vector<DetectionBox> nonMaxSuppression( const std::vector<DetectionBox> &bo
   std::vector<bool> suppressed( ordered.size(), false );
   for ( std::size_t i = 0; i < ordered.size(); ++i )
   {
+    // Cooperative cancel (#971): polled once per suppression round, so the
+    // worst-case O(n²) pass stays interruptible within one round's work.
+    if ( isCancelled && isCancelled() )
+      throw RSOperatorError( ErrorCode::Cancelled,
+                             "cancelled during detection NMS after "
+                               + std::to_string( kept.size() ) + " kept boxes" );
     if ( suppressed[i] )
       continue;
     kept.push_back( ordered[i] );
@@ -163,7 +170,8 @@ std::vector<DetectionBox> nonMaxSuppression( const std::vector<DetectionBox> &bo
   return kept;
 }
 
-void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold )
+void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold,
+                      const std::function<bool()> &isCancelled )
 {
   // Exact-duplicate collapse: overlap seams re-detect the identical object
   // with bit-equal geometry (same tile math); a set keyed on the geometry
@@ -175,6 +183,10 @@ void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold )
   collapsed.reserve( boxes.size() );
   for ( const DetectionBox &b : boxes )
   {
+    if ( isCancelled && isCancelled() )
+      throw RSOperatorError( ErrorCode::Cancelled,
+                             "cancelled during detection dedup after "
+                               + std::to_string( collapsed.size() ) + " collapsed boxes" );
     const auto key = std::make_tuple( static_cast<int>( std::lround( b.x * 100.0f ) ),
                                       static_cast<int>( std::lround( b.y * 100.0f ) ),
                                       static_cast<int>( std::lround( b.w * 100.0f ) ),
@@ -183,7 +195,7 @@ void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold )
     if ( seen.insert( key ).second )
       collapsed.push_back( b );
   }
-  boxes = nonMaxSuppression( collapsed, iouThreshold );
+  boxes = nonMaxSuppression( collapsed, iouThreshold, isCancelled );
 }
 
 } // namespace sicnu::operators::runtime
