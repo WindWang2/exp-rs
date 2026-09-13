@@ -143,6 +143,10 @@ vendor/
 !.planning/prompt-command-hygiene-review/
 .planning/prompt-command-hygiene-review/*
 !.planning/prompt-command-hygiene-review/*.md
+# cn-eo-products-sensor-physics-10: track planning notes (markdown only; logs stay local).
+!.planning/cn-eo-products-sensor-physics-10/
+.planning/cn-eo-products-sensor-physics-10/*
+!.planning/cn-eo-products-sensor-physics-10/*.md
 .zcode/
 
 # IDE / editor / OS artifacts
