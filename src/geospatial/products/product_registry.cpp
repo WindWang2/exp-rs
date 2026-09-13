@@ -9,6 +9,8 @@
 
 #include "geospatial/products/product_registry.h"
 
+#include "geospatial/products/cn_product_metadata.h"
+
 #include "geospatial/gdal_guard.h"
 
 #include <cpl_conv.h>
@@ -922,6 +924,11 @@ ProductAdapterRegistry::ProductAdapterRegistry()
   mAdapters.push_back( std::make_unique<Sentinel2Adapter>() );
   mAdapters.push_back( std::make_unique<Sentinel1Adapter>() );
   mAdapters.push_back( std::make_unique<ModisAdapter>() );
+  // Chinese satellite families (ADR 0146) — specific adapters before the
+  // GenericRaster fallback.
+  mAdapters.push_back( makeGaofenAdapter() );
+  mAdapters.push_back( makeZy3Adapter() );
+  mAdapters.push_back( makeHjAdapter() );
   mAdapters.push_back( std::make_unique<GenericRasterAdapter>() );
 }
 
