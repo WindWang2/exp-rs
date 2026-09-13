@@ -1368,6 +1368,12 @@ TEST_CASE("cn_products: apply_calibration converts DN to radiance; partial cover
     } catch (const RSOperatorError &error) {
         threw = true;
         REQUIRE(error.code() == sicnu::operators::ErrorCode::InvalidInputData);
+        // The refusal names the bands whose coefficients are missing.
+        Json::Value details = error.details();
+        const Json::Value missing = details["bandsMissingCoefficients"];
+        REQUIRE(missing.size() == 2);
+        REQUIRE(missing[0].asString() == "B3");
+        REQUIRE(missing[1].asString() == "B4");
     }
     REQUIRE(threw);
     REQUIRE_FALSE(QFile::exists(tmp.path() + QStringLiteral("/partial_calibrated.tif")));

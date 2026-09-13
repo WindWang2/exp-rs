@@ -137,8 +137,6 @@ std::string familyFileFor( const std::string &sensorKey )
     return "zy1.json";
   if ( sensorKey.rfind( "hj", 0 ) == 0 )
     return "hj.json";
-  if ( sensorKey.rfind( "cb", 0 ) == 0 )
-    return "cbers.json";
   return std::string();
 }
 

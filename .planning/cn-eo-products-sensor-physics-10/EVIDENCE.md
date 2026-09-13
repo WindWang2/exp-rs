@@ -86,3 +86,11 @@
   test_help_coverage ×2 (rs_glossary 307 entries without `id`, #953;
   command.workflow.* knowledge, workflow track).
 - Existence + wording assertions (goal template): both clean (empty output).
+
+## Review-2 fix verification (2026-09-13)
+
+- Rebuild (operators+deps) exit 0; rerun after F1/F2/F3/F7/F8/F9/F14c fixes:
+  - test_cn_products → All tests passed (1363 assertions in 28 cases)
+  - test_io_products → All passed (38); test_io_product_registry → All passed (46)
+  - test_satellite_products → All passed (479); test_product_import_dialog → All passed (73)
+- origin/master unchanged at 7d78059d1a (fetch re-checked at rebase time).

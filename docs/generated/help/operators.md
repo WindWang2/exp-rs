@@ -496,7 +496,7 @@ Principal Component Analysis pan-sharpening fusion.
 
 ## Gaofen Product Import（operator.rs.gaofen_import）
 
-Convert a Gaofen-1/2/6 or GF-7 L1A product into analysis-ready multi-band GeoTIFF.
+Import a Gaofen-1/2/6 or GF-7 L1A product (PMS/WFV, FWD/BWD) into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.
 
 **原理**：读取 CRESDA sidecar XML，按传感器画像映射波段角色，堆栈为多波段 GeoTIFF 并标注声明元数据。
 
@@ -508,7 +508,7 @@ Convert a Gaofen-1/2/6 or GF-7 L1A product into analysis-ready multi-band GeoTIF
 
 ## Huanjing CCD Product Import（operator.rs.hj_import）
 
-Convert an HJ-1A/1B CCD or HJ-2A/B CCD L1A product into analysis-ready multi-band GeoTIFF.
+Import a Huanjing (HJ-1A/1B or HJ-2A/B) CCD L1A product into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.
 
 **原理**：读取 CRESDA sidecar，映射 CCD 四波段角色，堆栈为多波段 GeoTIFF。
 
@@ -1278,7 +1278,7 @@ Topographic correction of reflectance over a co-registered DEM (cosine, C/SCS+C,
 
 ## Ziyuan-3 Product Import（operator.rs.zy3_import）
 
-Convert a Ziyuan-3 L1A product into analysis-ready multi-band GeoTIFF.
+Import a Ziyuan-3 L1A product into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.
 
 **原理**：按声明波段清单区分全色与多光谱，堆栈为多波段 GeoTIFF 并标注元数据。
 

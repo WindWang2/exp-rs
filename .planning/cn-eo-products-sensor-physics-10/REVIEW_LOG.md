@@ -30,3 +30,30 @@ Subagent verified-clean list (ranges/wavelengths per family, pan_variant
 links, legacy result-key compatibility, fail-closed env handling, dispatch
 routing) recorded in agent report; main agent re-verified P0/P1 evidence in
 code before applying fixes.
+
+## Review 2 — adversarial test/contract review (subagent #2, read-only, 2026-09-13)
+
+Scope: the 8 (final: 10) commits on the branch, six lenses. Verdict: "needs
+fixes" — one P1, two P2, P3 follow-ups. All fixes verified by rebuild+rerun.
+
+| ID | Severity | Finding (file) | Disposition | Evidence |
+| --- | --- | --- | --- | --- |
+| R2-F1 | P1 | empty requestedBands → calibration vacuously applicable (radiance stamped over DN, bandCount=0 vs full stack); reachable via worker's absent schema validation (bands:[1,2]) | FIXED | executeCnProductImport materializes plan.bandNames for an empty request; evaluateCalibration also guards !requestedBands.isEmpty() |
+| R2-F2 | P2 | setRadiometricState failure after successful calibration left "radiance pixels + DN stamp" | FIXED | QFile::remove before throw |
+| R2-F3 | P2 | gaofen/hj description() understated coverage (no GF-7 / HJ-2); generated help entries diverged from description() | FIXED | descriptions updated; operators.md entries aligned to description() verbatim |
+| R2-F7 | P3 | dangling cb*→cbers.json route (file absent) | FIXED | route removed (CBERS support reintroduces it with the file) |
+| R2-F8 | P3 | zy3_pan note over-claimed FWD/BWD (dedicated entries exist) | FIXED | note narrowed to TLC/NAD |
+| R2-F9 | P3 | sibling scan: Unsorted + >64 xml nondeterminism; "SPAN" substring could read as PAN | FIXED | QDir::Name ordering; (^|[^A-Z])PAN([0-9]|$) boundary match |
+| R2-F4/5 | P3 | plan vs result satellite precision; (n/a merged into F9/F14 sets) | LOGGED | follow-ups |
+| R2-F6 | P3 | cnSensorKey swallows GeoError root cause on registry failure | LOGGED | follow-up: thread diagnostic into caller-visible warning |
+| R2-F10 | P3 | read-only dir test is a no-op guard on Windows | LOGGED | follow-up (platform-semantics note); Linux-enforced |
+| R2-F11 | P3 | HJ rpc_rpb constituent needs real-package confirmation | LOGGED | follow-up (verify against real HJ distribution; adjust registry) |
+| R2-F12 | P3 | writeCnImportMetadata failure keeps the valid DN stack (inconsistent with removal policy) | ACCEPTED | keeping a valid, correctly-stamped DN file is defensible; documented |
+| R2-F14 | P3 | fixture productId arg ignored; duplicate-scene comment overstates | FIXED (partial) | missing-bands assertion added (F14-c); fixture/comment cosmetics logged |
+
+Reviewer verified clean: 58/58 registry band midpoints == arithmetic range
+midpoints (script-checked); 9/9 pan/ms variant links resolve; 15/15 identity
+sensor keys exist; concurrency of the path-keyed profile cache (node-stable
+map, static storage, mutex discipline); stackedBands index alignment for
+subset/reorder/duplicate requests; no path injection. Capability sidecars:
+family=io, schema_version=2, zero drift vs operator metadata.

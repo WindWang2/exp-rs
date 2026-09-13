@@ -10,6 +10,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QRegularExpression>
 
 #include <gdal_priv.h>
 
@@ -39,9 +40,11 @@ void resolvePmsSibling( const QString &sidecarPath,
     const QFileInfo sidecarInfo( sidecarPath );
     const QString sidecarName = sidecarInfo.fileName();
     const auto roleOfName = []( const QString &name ) -> QString {
-        const QString upper = name.toUpper();
-        if ( upper.contains( "PAN" ) )
+        // Boundary-anchored: "SPAN"/"JAPAN" must not read as PAN.
+        static const QRegularExpression panRe( QStringLiteral( "(^|[^A-Z])PAN([0-9]|$)" ) );
+        if ( panRe.match( name.toUpper() ).hasMatch() )
             return QStringLiteral( "pan" );
+        const QString upper = name.toUpper();
         if ( upper.contains( "MSS" ) || upper.contains( "MSC" ) || upper.contains( "WFV" ) )
             return QStringLiteral( "ms" );
         return QString();
@@ -55,7 +58,7 @@ void resolvePmsSibling( const QString &sidecarPath,
     const QString dir = sidecarInfo.absolutePath();
     QDir directory( dir );
     const QStringList entries =
-        directory.entryList( QStringList() << QStringLiteral( "*.xml" ), QDir::Files, QDir::Unsorted );
+        directory.entryList( QStringList() << QStringLiteral( "*.xml" ), QDir::Files, QDir::Name );
     constexpr int kMaxSidecars = 64;
     int visited = 0;
     for ( const QString &entry : entries )
@@ -109,7 +112,7 @@ Json::Value ProductImportPlan::toJson() const
         plan["sibling_image"] = siblingImagePath.toStdString();
         plan["sibling_role"] = siblingImageRole.toStdString();
     }
-    plan["band_source"] = bandOrderDeclared ? "declared_band_ids" : "sensor_profile_layout";
+    plan["band_source"] = bandOrderDeclared ? "declared_band_ids" : "band_role_table";
     Json::Value bands( Json::arrayValue );
     for ( const QString &band : bandNames )
     {
@@ -276,16 +279,27 @@ CalibrationDecision evaluateCalibration( const ProductImportPlan &plan,
         if ( !calibration || !calibration->hasGain || !calibration->hasBias )
             decision.bandsMissingCoefficients << band;
     }
-    decision.applicable = decision.bandsMissingCoefficients.isEmpty();
+    // An empty request is never calibration-applicable (vacuous truth would
+    // stamp radiance over digital numbers).
+    decision.applicable = !requestedBands.isEmpty()
+                          && decision.bandsMissingCoefficients.isEmpty();
     return decision;
 }
 
 Json::Value executeCnProductImport( const ProductImportPlan &plan,
                                     const std::string &outputPath,
-                                    const QStringList &requestedBands,
+                                    const QStringList &requestedBandsIn,
                                     bool applyCalibration,
                                     RSOperatorContext &context )
 {
+    // An empty request means "the declared inventory": materializing it here
+    // keeps bandCount, the stacking selection and the calibration gate
+    // consistent (stackToGeoTiff's own empty-name default would otherwise
+    // stack every non-QA band while we reported zero bands).
+    QStringList requestedBands = requestedBandsIn;
+    if ( requestedBands.isEmpty() )
+        requestedBands = plan.bandNames;
+
     // ── optional calibration gate ───────────────────────────────────────────
     const CalibrationDecision calibration =
         evaluateCalibration( plan, applyCalibration, requestedBands );
@@ -443,6 +457,9 @@ Json::Value executeCnProductImport( const ProductImportPlan &plan,
                  QString::fromStdString( outputPath ),
                  SatelliteProducts::kRadiometricStateRadiance, &err ) )
         {
+            // The pixels are already radiance but the stamp would stay
+            // digital_number — a mislabeled file is worse than no file.
+            QFile::remove( QString::fromStdString( outputPath ) );
             throw RSOperatorError( ErrorCode::ComputationError,
                                    err.isEmpty()
                                      ? "Failed to stamp radiance state after calibration"

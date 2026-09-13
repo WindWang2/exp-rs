@@ -28,8 +28,9 @@ public:
     std::string displayName() const override { return "Gaofen Product Import"; }
     std::string group() const override { return "data-formats"; }
     std::string description() const override {
-        return "Import a Gaofen-1/2/6 L1A product (PMS/WFV) into a multi-band GeoTIFF "
-               "with band roles, sun geometry and declared calibration metadata.";
+        return "Import a Gaofen-1/2/6 or GF-7 L1A product (PMS/WFV, FWD/BWD) into a "
+               "multi-band GeoTIFF with band roles, sun geometry and declared "
+               "calibration metadata.";
     }
 
     Json::Value schema() const override;
