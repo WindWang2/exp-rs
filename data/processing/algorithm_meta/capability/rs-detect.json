@@ -1,0 +1,201 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u8239\u8236",
+        "\u8f66\u8f86",
+        "\u4eba\u5de5\u76ee\u6807"
+      ],
+      "scenes" : 
+      [
+        "\u6e2f\u53e3\u8239\u8236\u76d1\u6d4b",
+        "\u4ea4\u901a\u76ee\u6807\u666e\u67e5"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "MODEL_NOT_READY",
+        "remedy" : "\u5148\u6ce8\u518c/\u52a0\u8f7d\u6a21\u578b\u518d\u6267\u884c\u68c0\u6d4b",
+        "when" : "\u6a21\u578b\u6587\u4ef6\u7f3a\u5931\u6216\u672a\u52a0\u8f7d"
+      },
+      {
+        "code" : "MODEL_INCOMPATIBLE",
+        "remedy" : "\u6309\u6a21\u578b\u5361\u8981\u6c42\u91cd\u91c7\u6837\u6216\u8c03\u6574\u6ce2\u6bb5",
+        "when" : "\u8f93\u5165\u5206\u8fa8\u7387/\u6ce2\u6bb5\u4e0e\u6a21\u578b\u8bad\u7ec3\u8bbe\u7f6e\u4e0d\u7b26"
+      }
+    ],
+    "family" : "classification",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "string",
+          "name" : "backend",
+          "required" : true
+        },
+        {
+          "array" : true,
+          "data_kind" : "string",
+          "item_type" : "string",
+          "name" : "classes",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "detections",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "device",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "model",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "rawDetections",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "tileSize",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "tiles",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "bands",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0",
+          "name" : "batchCap",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "conf",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "device",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "model",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "nms_iou",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "none",
+          "enum" : 
+          [
+            "none",
+            "hflip",
+            "hvflip"
+          ],
+          "name" : "tta",
+          "required" : false,
+          "type" : "enum"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "multimodal"
+    ],
+    "operator_group" : "ml",
+    "prerequisites" : 
+    [
+      "\u9700\u8981\u5df2\u90e8\u7f72\u7684\u68c0\u6d4b\u6a21\u578b\u4e0e\u5339\u914d\u7684\u8f93\u5165\u89c4\u683c\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "\u76ee\u6807\u68c0\u6d4b\u7b97\u5b50\uff1a\u7528\u8bad\u7ec3\u597d\u7684\u68c0\u6d4b\u6a21\u578b\u5728\u5f71\u50cf\u4e2d\u5b9a\u4f4d\u76ee\u6807\uff08\u8f66\u8f86/\u8239\u8236/\u98de\u673a\u7b49\uff09\u5e76\u8f93\u51fa\u6846/\u7c7b\u522b/\u7f6e\u4fe1\u5ea6\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u76ee\u6807\u68c0\u6d4b",
+        "\u6df1\u5ea6\u5b66\u4e60\u63a8\u7406"
+      ],
+      "courses" : 
+      [
+        "\u6df1\u5ea6\u5b66\u4e60\u4e0e\u9065\u611f\u5e94\u7528"
+      ],
+      "exercise" : "\u5728\u6e2f\u53e3\u5f71\u50cf\u4e0a\u8fd0\u884c\u8239\u8236\u68c0\u6d4b\u6a21\u578b\u5e76\u6309\u7f6e\u4fe1\u5ea6\u8fc7\u6ee4\u7ed3\u679c\u3002"
+    }
+  },
+  "description" : "Run a detection model (output.detection contract) over a raster; publishes georeferenced detection boxes as vector output with NMS tile dedup.",
+  "display_name" : "Object Detection (Model)",
+  "gpu" : true,
+  "id" : "rs:detect",
+  "input" : "raster",
+  "notes" : "Requires a manifest with an output.detection contract. Tiles are decoded per window; overlap duplicates are removed by whole-raster NMS; boxes are published in geographic coordinates via an atomic vector write.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "inference",
+    "detection",
+    "deep-learning"
+  ],
+  "task" : "detection"
+}

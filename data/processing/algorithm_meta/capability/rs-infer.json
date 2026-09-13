@@ -1,0 +1,212 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269"
+      ],
+      "scenes" : 
+      [
+        "\u6a21\u578b\u4e1a\u52a1\u5316\u843d\u5730",
+        "\u5730\u7269\u8981\u7d20\u667a\u80fd\u63d0\u53d6"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "MODEL_NOT_READY",
+        "remedy" : "\u5728\u6a21\u578b\u5e93\u4e2d\u6ce8\u518c\u6a21\u578b\u5e76\u786e\u8ba4\u6743\u91cd\u8def\u5f84",
+        "when" : "\u6a21\u578b\u672a\u6ce8\u518c\u6216\u6743\u91cd\u6587\u4ef6\u7f3a\u5931"
+      },
+      {
+        "code" : "MODEL_INCOMPATIBLE",
+        "remedy" : "\u6309\u6a21\u578b\u6e05\u5355\u51c6\u5907\u8f93\u5165",
+        "when" : "\u6a21\u578b\u8f93\u5165\u89c4\u683c\uff08\u6ce2\u6bb5/\u5c3a\u5bf8/\u5f52\u4e00\u5316\uff09\u4e0d\u5339\u914d"
+      },
+      {
+        "code" : "INSUFFICIENT_MEMORY",
+        "remedy" : "\u542f\u7528\u5206\u5757\u63a8\u7406\u53c2\u6570\u6216\u964d\u4f4e\u8f93\u5165\u5c3a\u5bf8",
+        "when" : "\u5927\u56fe\u4e00\u6b21\u63a8\u7406\u5185\u5b58\u8d85\u9650"
+      }
+    ],
+    "family" : "classification",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "string",
+          "name" : "backend",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "device",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "height",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "model",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "outBands",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "tileSize",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "tiles",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "width",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "bands",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0",
+          "name" : "batchCap",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "unset",
+          "enum" : 
+          [
+            "unset",
+            "none",
+            "feather"
+          ],
+          "name" : "blend",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "device",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "model",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "named_inputs",
+          "required" : false,
+          "type" : "json"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "none",
+          "enum" : 
+          [
+            "none",
+            "hflip",
+            "hvflip"
+          ],
+          "name" : "tta",
+          "required" : false,
+          "type" : "enum"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "multimodal",
+      "temporal"
+    ],
+    "operator_group" : "ml",
+    "prerequisites" : 
+    [
+      "Model must be loadable by cv::dnn::readNetFromONNX.",
+      "\u9700\u8981\u5e73\u53f0\u6a21\u578b\u5e93\u4e2d\u7684\u5df2\u6ce8\u518c\u6a21\u578b\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "\u901a\u7528\u6df1\u5ea6\u5b66\u4e60\u63a8\u7406\u7b97\u5b50\uff1a\u52a0\u8f7d\u5e73\u53f0\u6a21\u578b\u5e93\u4e2d\u7684\u5206\u5272/\u5206\u7c7b/\u68c0\u6d4b\u6a21\u578b\u6267\u884c\u63a8\u7406\uff0c\u8f93\u51fa\u7c7b\u522b\u56fe\u6216\u76ee\u6807\u5217\u8868\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u6df1\u5ea6\u5b66\u4e60\u63a8\u7406",
+        "\u6a21\u578b\u90e8\u7f72"
+      ],
+      "courses" : 
+      [
+        "\u6df1\u5ea6\u5b66\u4e60\u4e0e\u9065\u611f\u5e94\u7528"
+      ],
+      "exercise" : "\u7528\u5efa\u7b51\u63d0\u53d6\u6a21\u578b\u5bf9\u57ce\u533a\u5f71\u50cf\u63a8\u7406\u5e76\u53e0\u52a0\u77e2\u91cf\u8fb9\u754c\u6838\u67e5\u3002"
+    }
+  },
+  "description" : "Run an ONNX model on a raster via the model runtime (tiled, bounded memory, manifest-driven pre/post-processing).",
+  "display_name" : "On-Device Inference (ONNX)",
+  "gpu" : true,
+  "id" : "rs:infer",
+  "input" : "raster",
+  "notes" : "ONNX inference via the model runtime (cv::dnn provider, cached sessions). Accepts a model path or a ModelCatalog name (spatial:list_models); catalog models must be ready (artifact present, checksum verified). Bounded tiled execution with manifest v2 preprocessing/postprocessing contracts; memory policy Streaming.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "inference",
+    "onnx",
+    "edge-ai",
+    "deep-learning"
+  ],
+  "task" : "inference"
+}

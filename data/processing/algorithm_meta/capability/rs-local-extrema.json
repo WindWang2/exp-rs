@@ -1,0 +1,118 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u5730\u5f62",
+        "\u6e29\u5ea6\u573a"
+      ],
+      "scenes" : 
+      [
+        "\u5c71\u810a\u70b9\u8bc6\u522b",
+        "\u57ce\u5e02\u70ed\u5c9b\u5cf0\u503c\u68c0\u6d4b"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u589e\u5927\u7a97\u53e3\u5e76\u53e0\u52a0\u9608\u503c\u8fc7\u6ee4",
+        "when" : "\u7a97\u53e3\u8fc7\u5c0f\u5bfc\u81f4\u5927\u91cf\u4f2a\u6781\u503c"
+      }
+    ],
+    "family" : "raster_spatial",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "3",
+          "name" : "window",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "thermal",
+      "dem"
+    ],
+    "operator_group" : "raster_spatial",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u5c40\u90e8\u6781\u503c\u68c0\u6d4b\uff1a\u5728\u7a97\u53e3\u5185\u6807\u8bb0\u5c40\u90e8\u6781\u5927/\u6781\u5c0f\u503c\u70b9\uff0c\u7528\u4e8e\u5cf0\u503c\u70b9\u4e0e\u5751\u7a74\u8bc6\u522b\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5c40\u90e8\u6781\u503c",
+        "\u7a97\u53e3\u5206\u6790"
+      ],
+      "courses" : 
+      [
+        "\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u5728\u5730\u8868\u6e29\u5ea6\u56fe\u4e0a\u6807\u8bb0\u70ed\u5c9b\u6838\u5fc3\u5cf0\u503c\u70b9\u3002"
+    }
+  },
+  "description" : "Flag window maxima or minima as 1/0.",
+  "display_name" : "Local Extrema",
+  "gpu" : false,
+  "id" : "rs:local_extrema",
+  "input" : "raster",
+  "notes" : "Window max/min test over streamed halo tiles (replicate edges); NoData neighbours are excluded from the comparison, NoData centres are NaN. Streaming.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "raster_spatial"
+  ],
+  "task" : "raster_cleanup"
+}

@@ -1,0 +1,137 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u57ce\u5e02",
+        "\u4e0d\u900f\u6c34\u9762"
+      ],
+      "scenes" : 
+      [
+        "\u57ce\u5e02\u6269\u5f20\u76d1\u6d4b",
+        "\u4e0d\u900f\u6c34\u9762\u5236\u56fe"
+      ]
+    },
+    "band_roles" : 
+    {
+      "nir" : 1,
+      "swir" : 1
+    },
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "BAND_ROLE_UNRESOLVED",
+        "remedy" : "\u6807\u6ce8\u89d2\u8272\u6216\u663e\u5f0f\u7ed9\u6ce2\u6bb5\u53f7",
+        "when" : "\u7f3a\u5c11 swir/nir \u6ce2\u6bb5\u89d2\u8272"
+      }
+    ],
+    "family" : "spectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "height",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "index",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "width",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "4",
+          "name" : "nir",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "5",
+          "name" : "swir",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Band numbers are resolved from SICNU_BAND_ROLE when omitted."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u5f52\u4e00\u5316\u5efa\u7b51\u6307\u6570 NDBI = (SWIR-NIR)/(SWIR+NIR)\uff0c\u7a81\u51fa\u4e0d\u900f\u6c34\u9762\u4e0e\u5efa\u7b51\u4fe1\u606f\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "NDBI",
+        "\u4e0d\u900f\u6c34\u9762"
+      ],
+      "courses" : 
+      [
+        "\u57ce\u5e02\u9065\u611f"
+      ],
+      "exercise" : "\u7ed3\u5408 NDVI \u4e0e MNDWI \u505a\u4e09\u6307\u6570\u7ea6\u675f\u7684\u57ce\u5e02\u5efa\u6210\u533a\u63d0\u53d6\u3002"
+    }
+  },
+  "description" : "Compute Normalized Difference Built-up Index: (SWIR - NIR) / (SWIR + NIR).",
+  "display_name" : "Normalized Difference Built-up Index (NDBI)",
+  "id" : "rs:ndbi",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "spectral",
+    "ndbi",
+    "urban",
+    "built-up"
+  ]
+}

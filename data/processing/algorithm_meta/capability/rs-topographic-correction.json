@@ -1,0 +1,174 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u5c71\u5730\u690d\u88ab",
+        "\u6797\u5730",
+        "\u68af\u7530"
+      ],
+      "scenes" : 
+      [
+        "\u5c71\u533a\u9065\u611f\u5b9a\u91cf\u5206\u6790",
+        "\u5c71\u5730\u690d\u88ab\u53d8\u5316\u76d1\u6d4b"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u5148\u7528 rs:align \u628a DEM \u4e0e\u5f71\u50cf\u5bf9\u9f50\u5230\u540c\u4e00\u7f51\u683c",
+        "when" : "\u8f93\u5165 DEM \u4e0e\u5f71\u50cf\u7f51\u683c\u6216\u8303\u56f4\u4e0d\u4e00\u81f4"
+      },
+      {
+        "code" : "CRS_MISMATCH",
+        "remedy" : "\u5bf9 DEM \u6216\u5f71\u50cf\u505a\u91cd\u6295\u5f71\u540e\u518d\u6267\u884c\u5730\u5f62\u6821\u6b63",
+        "when" : "DEM \u4e0e\u5f71\u50cf\u5750\u6807\u7cfb\u4e0d\u540c"
+      }
+    ],
+    "family" : "optical",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "dem",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bandCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "height",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "method",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "width",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "c_correction",
+          "enum" : 
+          [
+            "cosine",
+            "c_correction",
+            "minnaert"
+          ],
+          "name" : "method",
+          "required" : true,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "150",
+          "name" : "solar_azimuth",
+          "required" : true,
+          "type" : "numeric"
+        },
+        {
+          "default" : "30",
+          "name" : "solar_zenith",
+          "required" : true,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Self-shadowed pixels (cos_i <= 0, or cos_i + c <= 0 for the C model) and Minnaert-domain violations become NaN NoData.",
+      "The empirical C factor requires a usable radiance~illumination regression (|b| >= 1e-6, >= 2 valid pairs); otherwise the operator refuses with a typed error instead of passing data through.",
+      "c_correction is also the SCS+C form (Soenen et al. 2005) when c is estimated from the same radiance~illumination regression, as done here."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "optical",
+    "prerequisites" : 
+    [
+      "DEM must be on the same grid as the input (CRS, geotransform, size) \u2014 mismatched grids are refused, never resampled.",
+      "Solar zenith/azimuth of the scene must be supplied explicitly (import metadata does not carry them yet).",
+      "DEM \u4e0e\u5f71\u50cf\u987b\u8986\u76d6\u540c\u4e00\u533a\u57df\u4e14\u6ce2\u6bb5\u542b\u592a\u9633\u89d2\u5ea6\u4fe1\u606f\uff1b\u63a8\u8350\u5148 rs:align \u7edf\u4e00\u7f51\u683c\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "\u5730\u5f62\u8f90\u5c04\u6821\u6b63\uff1a\u5229\u7528 DEM \u4e0e\u592a\u9633\u51e0\u4f55\u6d88\u9664\u5761\u9762\u5149\u7167\u5dee\u5f02\uff0c\u6062\u590d\u5c71\u5730\u5730\u8868\u7684\u771f\u5b9e\u53cd\u5c04\u7387\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5730\u5f62\u6548\u5e94",
+        "\u4f59\u5f26\u6821\u6b63",
+        "C \u6821\u6b63",
+        "\u5149\u7167\u7cfb\u6570"
+      ],
+      "courses" : 
+      [
+        "\u5b9a\u91cf\u9065\u611f\u57fa\u7840",
+        "\u5c71\u5730\u9065\u611f\u4e13\u9898"
+      ],
+      "exercise" : "\u5728\u5c71\u533a DEM \u4e0a\u5206\u522b\u6267\u884c C \u6821\u6b63\u4e0e SCS \u6821\u6b63\uff0c\u6bd4\u8f83\u9634\u5761 NDVI \u7684\u6062\u590d\u7a0b\u5ea6\u3002"
+    }
+  },
+  "description" : "Topographic correction of reflectance over a co-registered DEM (cosine, C/SCS+C, or Minnaert illumination models).",
+  "display_name" : "Topographic Correction",
+  "gpu" : false,
+  "id" : "rs:topographic_correction",
+  "input" : "raster",
+  "notes" : "Two-pass streaming correction (regression + apply); fits are full-scene per band, accumulated in double; bit-exact grade (single-threaded, fixed order).",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "optical",
+    "topographic",
+    "c-correction",
+    "minnaert"
+  ],
+  "task" : "radiometric-normalization"
+}

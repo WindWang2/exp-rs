@@ -1,0 +1,154 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269"
+      ],
+      "scenes" : 
+      [
+        "\u65e0\u8bad\u7ec3\u6570\u636e\u65f6\u7684\u5feb\u901f\u805a\u7c7b",
+        "\u7c7b\u5185\u5149\u8c31\u7ed3\u6784\u63a2\u7d22"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "k \u53d6 5\u201320 \u5e76\u7ed3\u5408\u7814\u7a76\u533a\u590d\u6742\u5ea6\u8c03\u6574",
+        "when" : "\u7c7b\u522b\u6570 k \u8bbe\u7f6e\u4e0d\u5408\u7406"
+      },
+      {
+        "code" : "NOT_SUPPORTED",
+        "remedy" : "\u56fa\u5b9a seed \u53c2\u6570\u4fdd\u8bc1\u7ed3\u679c\u53ef\u590d\u73b0",
+        "when" : "\u672a\u56fa\u5b9a\u968f\u673a\u79cd\u5b50\u5bfc\u81f4\u4e24\u6b21\u7ed3\u679c\u4e0d\u540c"
+      }
+    ],
+    "family" : "classification",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "k",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "samplesUsed",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "kmeans",
+          "enum" : 
+          [
+            "kmeans",
+            "isodata"
+          ],
+          "name" : "algorithm",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "bands",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "3",
+          "name" : "k",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "100000",
+          "name" : "maxSamples",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "true",
+          "name" : "scale",
+          "required" : false,
+          "type" : "boolean"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "multimodal"
+    ],
+    "operator_group" : "classification",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "K-Means \u975e\u76d1\u7763\u5206\u7c7b\uff1a\u6309\u5149\u8c31\u805a\u7c7b\u81ea\u52a8\u5212\u5206\u5730\u7269\u7c7b\u522b\uff0c\u65e0\u9700\u8bad\u7ec3\u6837\u672c\uff0c\u7ed3\u679c\u53d7\u521d\u59cb\u4e2d\u5fc3\u5f71\u54cd\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u975e\u76d1\u7763\u5206\u7c7b",
+        "K-Means",
+        "\u805a\u7c7b\u4e2d\u5fc3"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u5bf9\u7814\u7a76\u533a\u505a 8 \u7c7b K-Means \u805a\u7c7b\u5e76\u4eba\u5de5\u5f52\u5e76\u7c7b\u522b\u4e3a\u571f\u5730\u8986\u76d6\u56fe\u3002"
+    }
+  },
+  "description" : "Unsupervised K-Means clustering of multi-band raster pixels.",
+  "display_name" : "K-Means Classification",
+  "id" : "rs:kmeans_classification",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "kmeans",
+    "unsupervised",
+    "classification"
+  ]
+}

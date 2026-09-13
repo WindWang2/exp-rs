@@ -1,0 +1,158 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u690d\u88ab",
+        "\u88f8\u571f"
+      ],
+      "scenes" : 
+      [
+        "\u5149\u7167\u5dee\u5f02\u8f83\u5927\u7684\u4e24\u671f\u6bd4\u8f83",
+        "\u77ff\u7269\u8680\u53d8\u7c97\u67e5"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : true
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "GRID_MISMATCH",
+        "remedy" : "\u5148 rs:align \u5bf9\u9f50",
+        "when" : "\u4e24\u671f\u5f71\u50cf\u7f51\u683c\u4e0d\u4e00\u81f4"
+      }
+    ],
+    "family" : "change",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "grid_relation" : "same-grid",
+          "name" : "after",
+          "radiometric_state" : 
+          [
+            "digital_number",
+            "radiance",
+            "toa_reflectance",
+            "surface_reflectance"
+          ],
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "grid_relation" : "same-grid",
+          "name" : "before",
+          "radiometric_state" : 
+          [
+            "digital_number",
+            "radiance",
+            "toa_reflectance",
+            "surface_reflectance"
+          ],
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "numeric",
+          "name" : "mean",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "method",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "stddev",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "0",
+          "name" : "afterBand",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "1",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0",
+          "name" : "beforeBand",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" : 
+    [
+      "Before and after rasters must be co-registered and same size (grid compatibility is preflighted)."
+    ],
+    "schema_version" : 2,
+    "summary" : "\u6bd4\u503c\u6cd5\u53d8\u5316\u68c0\u6d4b\uff1a\u4e24\u671f\u5f71\u50cf\u76f8\u6bd4\u503c\u7a81\u51fa\u6bd4\u4f8b\u578b\u53d8\u5316\uff0c\u5bf9\u4e58\u6027\u5149\u7167\u5dee\u5f02\u6bd4\u5dee\u503c\u6cd5\u66f4\u7a33\u5065\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5f71\u50cf\u6bd4\u503c",
+        "\u4e58\u6027\u566a\u58f0"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u5bf9\u4e24\u671f\u5f71\u50cf\u505a\u6bd4\u503c\u68c0\u6d4b\u5e76\u8ba8\u8bba\u5149\u7167\u5dee\u5f02\u4e0b\u5dee\u503c\u6cd5\u7684\u8bef\u62a5\u3002"
+    }
+  },
+  "description" : "Ratio change after / before (NaN where before is <= 0).",
+  "display_name" : "Change Ratio",
+  "id" : "rs:change_ratio",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "change-detection",
+    "temporal"
+  ]
+}

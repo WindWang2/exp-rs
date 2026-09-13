@@ -1,0 +1,123 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u77ff\u7269",
+        "\u690d\u88ab",
+        "\u571f\u58e4"
+      ],
+      "scenes" : 
+      [
+        "\u7aef\u5143\u5149\u8c31\u5e93\u6784\u5efa",
+        "\u89e3\u6df7\u524d\u7684\u7aef\u5143\u4f30\u8ba1"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "multipass_streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u6309\u573a\u666f\u4e3b\u8981\u5730\u7269\u6570\u91cf\u8bbe\u7f6e\u7aef\u5143\u6570",
+        "when" : "\u7aef\u5143\u6570\u8bbe\u7f6e\u4e0e\u573a\u666f\u590d\u6742\u5ea6\u4e0d\u7b26"
+      }
+    ],
+    "family" : "hyperspectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "array" : true,
+          "data_kind" : "string",
+          "item_type" : "string",
+          "name" : "endmembers",
+          "required" : true
+        },
+        {
+          "array" : true,
+          "data_kind" : "string",
+          "item_type" : "string",
+          "name" : "indices",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "0",
+          "name" : "nEndmembers",
+          "required" : true,
+          "type" : "integer"
+        },
+        {
+          "default" : "1000",
+          "name" : "projections",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "PPI finds pixels at the data hull; it assumes endmembers are present as pure pixels in the scene."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u7aef\u5143\u63d0\u53d6\uff1a\u7528 PPI\uff08\u50cf\u5143\u7eaf\u5ea6\u6307\u6570\uff09\u4ece\u5f71\u50cf\u4e2d\u62bd\u53d6\u6570\u636e\u4e91\u89d2\u70b9\u5904\u7684\u7eaf\u51c0\u5730\u7269\u5149\u8c31\uff0c\u662f\u5149\u8c31\u89e3\u6df7\u7684\u524d\u7f6e\u6b65\u9aa4\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u7aef\u5143",
+        "\u7eaf\u50cf\u5143",
+        "\u5355\u5f62"
+      ],
+      "courses" : 
+      [
+        "\u9ad8\u5149\u8c31\u9065\u611f"
+      ],
+      "exercise" : "\u63d0\u53d6\u7814\u7a76\u533a 4 \u4e2a\u7aef\u5143\u5e76\u4e0e USGS \u5149\u8c31\u5e93\u6bd4\u5bf9\u3002"
+    }
+  },
+  "description" : "Extract spectral endmembers by Pixel Purity Index.",
+  "display_name" : "Endmember Extraction (PPI)",
+  "id" : "rs:endmember_extraction",
+  "input" : "raster",
+  "output" : "",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "endmember",
+    "hyperspectral",
+    "ppi"
+  ]
+}

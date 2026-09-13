@@ -1,0 +1,127 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u6cb3\u6d41",
+        "\u9053\u8def",
+        "\u5c45\u6c11\u70b9"
+      ],
+      "scenes" : 
+      [
+        "\u6cb3\u6d41\u7f13\u51b2\u5206\u6790",
+        "\u57ce\u5e02\u8bbe\u65bd\u53ef\u8fbe\u6027"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "CRS_MISMATCH",
+        "remedy" : "\u5148\u91cd\u6295\u5f71\u5230\u7c73\u5236\u6295\u5f71\u5750\u6807\u7cfb",
+        "when" : "\u8f93\u5165\u4e3a\u5730\u7406\u5750\u6807\u7cfb\u5bfc\u81f4\u8ddd\u79bb\u5355\u4f4d\u4e3a\u5ea6"
+      }
+    ],
+    "family" : "raster_spatial",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "8",
+          "enum" : 
+          [
+            "4",
+            "8"
+          ],
+          "name" : "connectivity",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "thermal",
+      "dem"
+    ],
+    "operator_group" : "raster_spatial",
+    "prerequisites" : 
+    [
+      "\u8ddd\u79bb\u8ba1\u7b97\u8981\u6c42\u7c73\u5236\u6295\u5f71\u5750\u6807\u7cfb\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "proximity \u8ddd\u79bb\u6805\u683c\uff1a\u8ba1\u7b97\u6bcf\u4e2a\u50cf\u5143\u5230\u76ee\u6807\u8981\u7d20\u7684\u6b27\u6c0f\u8ddd\u79bb\uff0c\u751f\u4ea7\u53ef\u8fbe\u6027/\u5f71\u54cd\u533a\u5206\u6790\u56fe\u5c42\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u6b27\u6c0f\u8ddd\u79bb",
+        "\u7f13\u51b2\u533a"
+      ],
+      "courses" : 
+      [
+        "GIS \u539f\u7406"
+      ],
+      "exercise" : "\u751f\u6210\u8ddd\u6700\u8fd1\u6cb3\u6d41\u8ddd\u79bb\u56fe\u5e76\u6309 500m \u9608\u503c\u5212\u5b9a\u7f13\u51b2\u5e26\u3002"
+    }
+  },
+  "description" : "Exact Euclidean distance (pixels) to the nearest foreground cell; unreachable cells are NaN.",
+  "display_name" : "Proximity",
+  "gpu" : false,
+  "id" : "rs:proximity",
+  "input" : "raster",
+  "notes" : "Exact Euclidean distance transform (Felzenszwalb lower envelope), distance in pixels; unreachable pixels are NaN NoData; an all-background mask is a typed refusal. FullRaster contract.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "raster_spatial"
+  ],
+  "task" : "raster_cleanup"
+}

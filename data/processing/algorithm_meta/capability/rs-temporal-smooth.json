@@ -1,0 +1,219 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u690d\u88ab",
+        "\u519c\u7530"
+      ],
+      "scenes" : 
+      [
+        "\u7269\u5019\u66f2\u7ebf\u6574\u5f62",
+        "\u65f6\u5e8f\u5f02\u5e38\u68c0\u6d4b\u524d\u7684\u5e73\u6ed1"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "cost_class" : "O(tile \u00d7 scenes \u00d7 window\u00b2)",
+      "grade" : "tolerance",
+      "large_raster_safe" : true,
+      "memory_policy" : "multipass_streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u7f29\u77ed\u7a97\u53e3\u6216\u8865\u5145\u671f\u6b21",
+        "when" : "\u5e73\u6ed1\u7a97\u53e3\u5927\u4e8e\u65f6\u5e8f\u957f\u5ea6"
+      }
+    ],
+    "family" : "temporal",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "json",
+          "name" : "memory",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "method",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "sceneCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "timeEnd",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "timeStart",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "true",
+          "name" : "apply_qa_masking",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "default" : "0",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "enum" : 
+          [
+            "blue",
+            "green",
+            "red",
+            "red_edge",
+            "nir",
+            "swir1",
+            "swir2",
+            "vv",
+            "vh"
+          ],
+          "name" : "band_role",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "collection",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "2",
+          "name" : "degree",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "keep_all",
+          "enum" : 
+          [
+            "keep_all",
+            "reject"
+          ],
+          "name" : "duplicate_policy",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "10",
+          "name" : "lambda",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "savitzky_golay",
+          "enum" : 
+          [
+            "savitzky_golay",
+            "whittaker",
+            "moving_average"
+          ],
+          "name" : "method",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "3",
+          "name" : "moving_average_window",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "scenes",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "256",
+          "name" : "tile_size",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "7",
+          "name" : "window",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u65f6\u5e8f\u5e73\u6ed1\uff1aSavitzky-Golay \u7b49\u65b9\u6cd5\u538b\u5236\u65f6\u5e8f\u6b8b\u4f59\u566a\u58f0\uff0c\u6062\u590d\u7269\u5019\u66f2\u7ebf\u5f62\u6001\uff08\u5bb9\u5dee\u7ea7\u7b97\u5b50\uff09\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "Savitzky-Golay",
+        "\u65f6\u5e8f\u5e73\u6ed1"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u5e94\u7528\u5206\u6790"
+      ],
+      "exercise" : "\u5bf9\u6bd4\u539f\u59cb\u4e0e SG \u5e73\u6ed1\u540e\u7684 NDVI \u65f6\u5e8f\uff0c\u91cf\u5316\u566a\u58f0\u538b\u5236\u5e45\u5ea6\u3002"
+    }
+  },
+  "description" : "Quality-aware smoothing (Savitzky\u2013Golay, Whittaker or moving average) of a per-pixel time series across a multi-date collection. NaN samples are treated as absent; one output band per scene date, same order, so the result stays stackable with acquisition metadata.",
+  "display_name" : "Temporal Smoothing",
+  "id" : "rs:temporal_smooth",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "temporal",
+    "smoothing",
+    "savitzky-golay"
+  ]
+}

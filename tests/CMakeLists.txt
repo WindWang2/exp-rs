@@ -8296,3 +8296,24 @@ sicnu_link_jsoncpp(test_lab_grading)
 sicnu_add_test(test_lab_batch TIMEOUT 300)
 sicnu_link_jsoncpp(test_lab_batch)
 target_link_libraries(test_lab_batch PRIVATE sicnu_lab_batch)
+
+# D8 capability knowledge layer: generator tool (data-driven sidecars +
+# generated pi/knowledge pages) and the drift/coverage/composition guard.
+add_executable(capability_knowledge_tool
+  ${CMAKE_SOURCE_DIR}/scripts/capability_knowledge_tool.cpp
+)
+target_link_libraries(capability_knowledge_tool PRIVATE
+  Qt6::Core
+  sicnu_agent
+  sicnu_operators
+)
+sicnu_link_jsoncpp(capability_knowledge_tool)
+target_include_directories(capability_knowledge_tool PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+target_compile_definitions(capability_knowledge_tool PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+
+sicnu_add_test(test_capability_knowledge)
+sicnu_link_jsoncpp(test_capability_knowledge)

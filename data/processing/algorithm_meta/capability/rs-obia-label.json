@@ -1,0 +1,129 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269"
+      ],
+      "scenes" : 
+      [
+        "\u5bf9\u8c61\u6837\u672c\u91c7\u96c6",
+        "\u6807\u6ce8\u8d28\u91cf\u63a7\u5236"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u6309\u65e2\u5b9a\u7c7b\u522b\u7f16\u7801\u6807\u6ce8",
+        "when" : "\u6807\u7b7e\u503c\u8d85\u51fa\u7c7b\u522b\u4f53\u7cfb"
+      }
+    ],
+    "family" : "obia",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "labels",
+          "required" : true
+        },
+        {
+          "data_kind" : "vector",
+          "name" : "training",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "labeled",
+          "required" : true
+        },
+        {
+          "data_kind" : "table",
+          "file_format" : "csv",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "class_id",
+          "name" : "classField",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "3",
+          "name" : "minLabelPixels",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar"
+    ],
+    "operator_group" : "obia",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u5bf9\u8c61\u6807\u6ce8\uff1a\u628a\u6807\u7b7e/\u6837\u672c\u8d4b\u4e88\u5bf9\u8c61\uff0c\u751f\u6210\u5bf9\u8c61\u7ea7\u8bad\u7ec3\u96c6\uff0c\u652f\u6301\u4ea4\u4e92\u5f0f\u8865\u6807\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5bf9\u8c61\u6807\u6ce8",
+        "\u6837\u672c\u7ba1\u7406"
+      ],
+      "courses" : 
+      [
+        "\u9762\u5411\u5bf9\u8c61\u9065\u611f"
+      ],
+      "exercise" : "\u5bf9 200 \u4e2a\u7530\u5757\u5bf9\u8c61\u8d4b\u4e88\u4f5c\u7269\u7c7b\u522b\u6807\u7b7e\u5e76\u5bfc\u51fa\u8bad\u7ec3\u96c6\u3002"
+    }
+  },
+  "description" : "Label objects by pixel majority of training polygons (CSV output).",
+  "display_name" : "OBIA ROI Labeling",
+  "id" : "rs:obia_label",
+  "input" : "raster",
+  "output" : "",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "obia",
+    "training"
+  ]
+}

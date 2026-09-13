@@ -1,0 +1,132 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u57ce\u5e02",
+        "\u519c\u7530"
+      ],
+      "scenes" : 
+      [
+        "\u5bf9\u8c61\u5206\u7c7b\u7279\u5f81\u5de5\u7a0b",
+        "\u5bf9\u8c61\u7ea7\u7edf\u8ba1\u5206\u6790"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "DATASET_NOT_FOUND",
+        "remedy" : "\u5148\u8fd0\u884c rs:obia_segment/rs:segment",
+        "when" : "\u7f3a\u5c11\u5206\u5272\u5bf9\u8c61\u56fe\u5c42"
+      }
+    ],
+    "family" : "obia",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "labels",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "features",
+          "required" : true
+        },
+        {
+          "data_kind" : "table",
+          "file_format" : "csv",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "segments",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "bands",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar"
+    ],
+    "operator_group" : "obia",
+    "prerequisites" : 
+    [
+      "\u9700\u8981\u5148\u6709\u5206\u5272\u5bf9\u8c61\u56fe\u5c42\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "\u5bf9\u8c61\u7279\u5f81\u8ba1\u7b97\uff1a\u4e3a\u5206\u5272\u5bf9\u8c61\u7edf\u8ba1\u5149\u8c31\u5747\u503c\u3001\u5f62\u72b6\u6307\u6570\u3001\u7eb9\u7406\u7b49\u7279\u5f81\uff0c\u5f62\u6210\u5bf9\u8c61\u7ea7\u7279\u5f81\u8868\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5bf9\u8c61\u7279\u5f81",
+        "\u5f62\u72b6\u6307\u6570"
+      ],
+      "courses" : 
+      [
+        "\u9762\u5411\u5bf9\u8c61\u9065\u611f"
+      ],
+      "exercise" : "\u4e3a\u7530\u5757\u5bf9\u8c61\u8ba1\u7b97\u5149\u8c31\u4e0e\u5f62\u72b6\u7279\u5f81\u5e76\u5bfc\u51fa\u5c5e\u6027\u8868\u3002"
+    }
+  },
+  "description" : "Extract per-object spectral, GLCM texture and shape features to CSV.",
+  "display_name" : "OBIA Object Features",
+  "id" : "rs:obia_features",
+  "input" : "raster",
+  "output" : "",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "obia",
+    "features",
+    "texture"
+  ]
+}

@@ -1,0 +1,182 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u690d\u88ab",
+        "\u6c34\u4f53",
+        "\u519c\u7530"
+      ],
+      "scenes" : 
+      [
+        "\u8015\u5730\u6482\u8352\u9884\u8b66",
+        "\u88f8\u571f\u5f00\u53d1\u884c\u4e3a\u76d1\u6d4b"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u8865\u5168 window/threshold \u76d1\u6d4b\u53c2\u6570",
+        "when" : "\u76d1\u6d4b\u7a97\u53e3\u6216\u9608\u503c\u914d\u7f6e\u7f3a\u5931"
+      }
+    ],
+    "family" : "temporal",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "string",
+          "name" : "method",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "sceneCount",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "true",
+          "name" : "apply_qa_masking",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "default" : "0",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "band_role",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "collection",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "drift",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0.300000",
+          "name" : "lambda",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "200000000",
+          "name" : "max_pairwork",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "cusum",
+          "enum" : 
+          [
+            "cusum",
+            "ewma",
+            "seasonal_mk"
+          ],
+          "name" : "method",
+          "required" : true,
+          "type" : "enum"
+        },
+        {
+          "default" : "3",
+          "name" : "min_observations",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "256",
+          "name" : "tile_size",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "seasonal_mk is O(sum n_m^2) pairs per pixel; the max_pairwork guard refuses unbounded collections instead of degrading.",
+      "argmax bands are 0-based scene indices; scene dates travel in the collection metadata."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" : 
+    [
+      "Common grid, acquisition times, consistent radiometric state (temporal preflight)."
+    ],
+    "schema_version" : 2,
+    "summary" : "\u65f6\u5e8f\u76d1\u6d4b\u4efb\u52a1\u7b97\u5b50\uff1a\u4ee5\u6ed1\u52a8\u7a97\u53e3\u5bf9\u6700\u65b0\u89c2\u6d4b\u505a\u72b6\u6001\u8bc4\u4f30\uff08\u7ee7\u7eed/\u8b66\u6212/\u544a\u8b66\uff09\uff0c\u9762\u5411\u4e1a\u52a1\u5316\u6301\u7eed\u76d1\u6d4b\u573a\u666f\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u6ed1\u52a8\u7a97\u53e3",
+        "\u72b6\u6001\u76d1\u6d4b",
+        "\u9608\u503c\u544a\u8b66"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u5e94\u7528\u5206\u6790"
+      ],
+      "exercise" : "\u914d\u7f6e NDVI \u5b63\u5ea6\u6ed1\u52a8\u76d1\u6d4b\u5e76\u5728\u6389\u4ea7 20% \u65f6\u8f93\u51fa\u8b66\u6212\u72b6\u6001\u3002"
+    }
+  },
+  "description" : "Per-pixel temporal monitoring: CUSUM and EWMA of standardized anomalies, or seasonal Mann-Kendall trend (calendar-month seasons).",
+  "display_name" : "Temporal Monitor",
+  "gpu" : false,
+  "id" : "rs:temporal_monitor",
+  "input" : "",
+  "notes" : "CUSUM/EWMA standardize against the full-series per-pixel statistics (retrospective monitoring). Seasonal MK uses calendar-month seasons with the tie-corrected variance.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "temporal",
+    "cusum",
+    "ewma",
+    "mann-kendall"
+  ],
+  "task" : "temporal-monitoring"
+}

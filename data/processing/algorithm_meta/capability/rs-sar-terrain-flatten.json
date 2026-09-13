@@ -1,0 +1,216 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u5c71\u5730\u690d\u88ab\uff08SAR\uff09"
+      ],
+      "scenes" : 
+      [
+        "\u5c71\u533a\u68ee\u6797\u5236\u56fe",
+        "\u5927\u533a\u57df SAR \u65f6\u5e8f\u751f\u4ea7\u7684\u6807\u51c6\u6b65\u9aa4"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : true
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "DATASET_NOT_FOUND",
+        "remedy" : "\u63d0\u4f9b DEM \u540e\u91cd\u8bd5",
+        "when" : "\u7f3a\u5c11 DEM"
+      }
+    ],
+    "family" : "sar",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "grid_relation" : "same-grid",
+          "modality" : "dem",
+          "name" : "dem",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "modality" : "sar",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "calibration",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "demUnit",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "headingDeg",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "incidenceDeg",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "layout",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "lookAzimuthDeg",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "maskBand",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "meters",
+          "enum" : 
+          [
+            "meters",
+            "feet",
+            "decimeters"
+          ],
+          "name" : "demUnit",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "0",
+          "name" : "headingDeg",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "30",
+          "name" : "incidenceDeg",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "lookAzimuthDeg",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "right",
+          "enum" : 
+          [
+            "right",
+            "left"
+          ],
+          "name" : "lookDirection",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "polarizations",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "sensor",
+          "required" : false,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Plane-fit RTC model, NOT range-Doppler terrain correction.",
+      "The DEM must be co-registered with the input in radar geometry; no resampling is performed.",
+      "Facets with a local incidence angle >= 85\u00b0 are masked as layover/shadow.",
+      "Always writes two bands (gamma0 + validity mask). rs:sar_terrain_correction is the 3-band product (gamma0 + mask + local incidence)."
+    ],
+    "modality" : 
+    [
+      "sar"
+    ],
+    "operator_group" : "sar",
+    "prerequisites" : 
+    [
+      "sigma0 raster (linear power) and a DEM on the exact same grid (radar geometry for GRD products), plus the scene incidence angle and the antenna look azimuth (headingDeg + lookDirection, or an explicit lookAzimuthDeg).",
+      "\u9700\u8981 DEM\uff1b\u5728\u5b9a\u6807\uff08rs:sar_calibrate\uff09\u4e4b\u540e\u6267\u884c\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "SAR \u5730\u5f62\u8f90\u5c04\u5e73\u5766\u5316\uff08Gamma Flat / terrain flattening\uff09\uff1a\u4ee5\u5b9e\u9645\u6563\u5c04\u9762\u79ef\u5f52\u4e00\u5316\u540e\u5411\u6563\u5c04\uff0c\u4f7f\u5c71\u5730 gamma0 \u63a5\u8fd1\u771f\u5b9e\u5730\u8868\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5730\u5f62\u5e73\u5766\u5316",
+        "\u5b9e\u9645\u6563\u5c04\u9762\u79ef"
+      ],
+      "courses" : 
+      [
+        "\u5fae\u6ce2\u9065\u611f"
+      ],
+      "exercise" : "\u5bf9\u5c71\u533a Sentinel-1 \u6267\u884c terrain flattening \u5e76\u8bc4\u4f30\u5761\u9762gamma0\u7684\u7a33\u5b9a\u6027\u3002"
+    }
+  },
+  "description" : "Radiometric terrain flattening: sigma0 to gamma0 (sigma0\u00b7cos\u03b80/cos\u03b8i) using a co-registered DEM in radar geometry. Writes band 1 = gamma0 and band 2 = validity mask (1/0/255).",
+  "display_name" : "SAR Terrain Flattening",
+  "id" : "rs:sar_terrain_flatten",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "sar",
+    "terrain",
+    "radiometry"
+  ]
+}

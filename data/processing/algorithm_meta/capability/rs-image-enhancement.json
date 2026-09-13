@@ -1,0 +1,231 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269"
+      ],
+      "notes" : "\u663e\u793a\u7ea7\u589e\u5f3a\u4f1a\u7834\u574f\u8f90\u5c04\u5b9a\u91cf\u8bed\u4e49\uff0c\u5b9a\u91cf\u53cd\u6f14\u524d\u4e0d\u8981\u4f7f\u7528\u3002",
+      "scenes" : 
+      [
+        "\u76ee\u89c6\u89e3\u8bd1\u524d\u7684\u5f71\u50cf\u4f18\u5316",
+        "\u6559\u5b66\u6f14\u793a\u5404\u79cd\u589e\u5f3a\u65b9\u6cd5"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u67e5\u770b schema \u679a\u4e3e\u9009\u62e9\u652f\u6301\u7684\u589e\u5f3a\u65b9\u6cd5",
+        "when" : "method \u53d6\u503c\u4e0d\u5728\u679a\u4e3e\u5185"
+      }
+    ],
+    "family" : "optical",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "band1",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "2",
+          "name" : "band2",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "3",
+          "name" : "band3",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "2",
+          "name" : "clipPercent",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "2",
+          "name" : "damping",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "mean",
+          "enum" : 
+          [
+            "mean",
+            "gaussian",
+            "median",
+            "sobel",
+            "laplacian"
+          ],
+          "name" : "filterType",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "3",
+          "name" : "kernelSize",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "stretch",
+          "enum" : 
+          [
+            "stretch",
+            "filter",
+            "ratio_ihs",
+            "speckle"
+          ],
+          "name" : "method",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "1",
+          "name" : "noiseVariance",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "1",
+          "name" : "sigma",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "lee",
+          "enum" : 
+          [
+            "lee",
+            "frost",
+            "kuan",
+            "gamma_map"
+          ],
+          "name" : "speckleType",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "2",
+          "name" : "stddevK",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "linear",
+          "enum" : 
+          [
+            "linear",
+            "percent_clip",
+            "stddev",
+            "histogram_equalize"
+          ],
+          "name" : "stretchType",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "ratio",
+          "enum" : 
+          [
+            "ratio",
+            "ihs"
+          ],
+          "name" : "transform",
+          "required" : false,
+          "type" : "enum"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "thermal",
+      "dem"
+    ],
+    "operator_group" : "enhancement",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u901a\u7528\u5f71\u50cf\u589e\u5f3a\u5165\u53e3\uff1a\u96c6\u6210\u6ee4\u6ce2\u3001\u9510\u5316\u3001\u76f4\u65b9\u56fe\u5747\u8861\u7b49\u663e\u793a\u7ea7\u589e\u5f3a\u7b97\u5b50\uff0c\u6309 method \u53c2\u6570\u9009\u62e9\u5177\u4f53\u7b97\u6cd5\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u7a7a\u95f4\u57df\u589e\u5f3a",
+        "\u76f4\u65b9\u56fe\u5747\u8861",
+        "\u56fe\u50cf\u9510\u5316"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u540c\u4e00\u5f71\u50cf\u5206\u522b\u7528\u76f4\u65b9\u56fe\u5747\u8861\u4e0e\u62c9\u666e\u62c9\u65af\u9510\u5316\u589e\u5f3a\uff0c\u6bd4\u8f83\u9053\u8def\u4e0e\u5efa\u7b51\u8fb9\u7f18\u7684\u53ef\u89c1\u6027\u3002"
+    }
+  },
+  "description" : "Contrast stretch, spatial filter, band ratio/IHS, or SAR speckle filter.",
+  "display_name" : "Image Enhancement",
+  "id" : "rs:image_enhancement",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "enhancement",
+    "stretch",
+    "filter",
+    "speckle"
+  ]
+}

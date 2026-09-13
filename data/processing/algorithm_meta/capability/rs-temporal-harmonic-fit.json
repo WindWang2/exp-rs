@@ -1,0 +1,216 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u519c\u7530",
+        "\u843d\u53f6\u6797"
+      ],
+      "scenes" : 
+      [
+        "\u53cc\u5b63\u4f5c\u7269\u8bc6\u522b",
+        "\u7269\u5019\u53c2\u6570\uff08\u5cf0\u503c/\u76f8\u4f4d\uff09\u63d0\u53d6"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "cost_class" : "O(tile \u00d7 scenes \u00d7 terms\u00b2)",
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "multipass_streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "NOT_SUPPORTED",
+        "remedy" : "\u4fdd\u8bc1\u5168\u5e74\u81f3\u5c11 10\u201312 \u4e2a\u6709\u6548\u89c2\u6d4b",
+        "when" : "\u4e00\u5e74\u5185\u6709\u6548\u89c2\u6d4b\u8fc7\u5c11\u65e0\u6cd5\u7a33\u5b9a\u62df\u5408"
+      }
+    ],
+    "family" : "temporal",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "fittedPixelFraction",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "harmonics",
+          "required" : true
+        },
+        {
+          "data_kind" : "json",
+          "name" : "memory",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "boolean",
+          "name" : "robust",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "sceneCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "timeEnd",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "timeStart",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "true",
+          "name" : "apply_qa_masking",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "default" : "0",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "enum" : 
+          [
+            "blue",
+            "green",
+            "red",
+            "red_edge",
+            "nir",
+            "swir1",
+            "swir2"
+          ],
+          "name" : "band_role",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "collection",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "keep_all",
+          "enum" : 
+          [
+            "keep_all",
+            "reject"
+          ],
+          "name" : "duplicate_policy",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "2",
+          "name" : "harmonics",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "6",
+          "name" : "minObservations",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "false",
+          "name" : "robust",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "name" : "scenes",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "256",
+          "name" : "tile_size",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "false",
+          "name" : "writeCoefficients",
+          "required" : false,
+          "type" : "boolean"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u8c10\u6ce2\u62df\u5408\uff1a\u4ee5\u6b63\u5f26/\u4f59\u5f26\u57fa\u62df\u5408\u5e74\u5185\u5730\u7269\u8282\u5f8b\uff08HANTS \u601d\u60f3\uff09\uff0c\u53ef\u540c\u65f6\u63d2\u503c\u4e0e\u53bb\u4e91\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u8c10\u6ce2\u56de\u5f52",
+        "\u7269\u5019\u76f8\u4f4d",
+        "HANTS"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u5e94\u7528\u5206\u6790"
+      ],
+      "exercise" : "\u7528\u4e24\u4e2a\u8c10\u6ce2\u62df\u5408\u4e00\u5e74 NDVI \u5e76\u63d0\u53d6\u5cf0\u503c\u65e5\u671f\u56fe\u3002"
+    }
+  },
+  "description" : "Per-pixel harmonic regression (annual + sub-annual Fourier terms) across a multi-date collection: y(t) = a0 + \u03a3_k [ a_k\u00b7sin(2\u03c0kt/365.25) + b_k\u00b7cos(2\u03c0kt/365.25) ] with t in real acquisition days since the collection reference epoch. Solved in closed form (weighted least squares) with optional IRLS outlier damping. Outputs one fitted band per acquisition date plus RMSE and R\u00b2; optionally the raw coefficients. Pixels with fewer than minObservations valid samples stay NoData.",
+  "display_name" : "Temporal Harmonic Fit",
+  "id" : "rs:temporal_harmonic_fit",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "temporal",
+    "harmonic",
+    "regression"
+  ]
+}

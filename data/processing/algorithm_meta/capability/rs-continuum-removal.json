@@ -1,0 +1,110 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u77ff\u7269",
+        "\u690d\u88ab"
+      ],
+      "scenes" : 
+      [
+        "\u77ff\u7269\u5438\u6536\u7279\u5f81\u5206\u6790",
+        "\u5b9e\u9a8c\u5ba4\u5149\u8c31\u4e0e\u5f71\u50cf\u5149\u8c31\u6bd4\u5bf9"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u6309\u76ee\u6807\u5438\u6536\u8c37\u8bbe\u7f6e\u8d77\u6b62\u6ce2\u6bb5",
+        "when" : "\u6ce2\u6bb5\u8303\u56f4\u8bbe\u7f6e\u672a\u8986\u76d6\u5438\u6536\u7279\u5f81"
+      }
+    ],
+    "family" : "hyperspectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "hyperspectral",
+    "prerequisites" : 
+    [
+      "Input should be reflectance (0..1); DN values give meaningless ratios."
+    ],
+    "schema_version" : 2,
+    "summary" : "\u8fde\u7eed\u7edf\u53bb\u9664\uff1a\u5f52\u4e00\u5316\u5438\u6536\u7279\u5f81\u6df1\u5ea6\uff0c\u7a81\u51fa\u77ff\u7269/\u690d\u88ab\u7684\u5438\u6536\u5cf0\u4f4d\u7f6e\u4e0e\u5f62\u72b6\uff0c\u4fbf\u4e8e\u7279\u5f81\u6bd4\u5bf9\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u8fde\u7eed\u7edf",
+        "\u5438\u6536\u6df1\u5ea6"
+      ],
+      "courses" : 
+      [
+        "\u9ad8\u5149\u8c31\u9065\u611f"
+      ],
+      "exercise" : "\u5bf9\u8680\u53d8\u77ff\u7269\u5149\u8c31\u505a\u8fde\u7eed\u7edf\u53bb\u9664\u5e76\u6bd4\u8f83 2200nm \u5438\u6536\u6df1\u5ea6\u3002"
+    }
+  },
+  "description" : "Normalize each pixel's reflectance spectrum to its convex-hull continuum.",
+  "display_name" : "Continuum Removal",
+  "id" : "rs:continuum_removal",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "hyperspectral",
+    "spectral",
+    "continuum"
+  ]
+}

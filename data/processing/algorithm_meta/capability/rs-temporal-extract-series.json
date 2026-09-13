@@ -1,0 +1,161 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u690d\u88ab",
+        "\u6c34\u4f53",
+        "\u519c\u7530"
+      ],
+      "scenes" : 
+      [
+        "\u7269\u5019\u66f2\u7ebf\u63d0\u53d6",
+        "\u6837\u70b9\u65f6\u5e8f\u91c7\u6837"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "cost_class" : "O(roiPixels \u00d7 scenes) for polygons, O(scenes) for points",
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "DATASET_NOT_FOUND",
+        "remedy" : "\u68c0\u67e5\u65f6\u5e8f\u96c6\u5408\u6e05\u5355\u4e0e\u6587\u4ef6\u8def\u5f84",
+        "when" : "\u65f6\u5e8f\u96c6\u5408\u4e2d\u5f15\u7528\u7684\u5f71\u50cf\u7f3a\u5931"
+      }
+    ],
+    "family" : "temporal",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "table",
+          "file_format" : "csv",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "series",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "true",
+          "name" : "apply_qa_masking",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "default" : "0",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "enum" : 
+          [
+            "blue",
+            "green",
+            "red",
+            "red_edge",
+            "nir",
+            "swir1",
+            "swir2"
+          ],
+          "name" : "band_role",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "collection",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "keep_all",
+          "enum" : 
+          [
+            "keep_all",
+            "reject"
+          ],
+          "name" : "duplicate_policy",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "point",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "polygon",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "scenes",
+          "required" : false,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u4ece\u5f71\u50cf\u96c6\u5408\u4e2d\u6309 ROI \u6216\u50cf\u5143\u62bd\u53d6\u65f6\u5e8f\u66f2\u7ebf\uff0c\u8f93\u51fa\u70b9/\u533a\u65f6\u5e8f\u8868\uff0c\u7528\u4e8e\u65f6\u5e8f\u5efa\u6a21\u8f93\u5165\u4e0e\u6559\u5b66\u6f14\u793a\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u65f6\u5e8f\u66f2\u7ebf",
+        "\u7269\u5019"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u5e94\u7528\u5206\u6790"
+      ],
+      "exercise" : "\u63d0\u53d6\u519c\u7530\u6837\u533a NDVI \u65f6\u5e8f\u66f2\u7ebf\u5e76\u6807\u6ce8\u64ad\u79cd\u4e0e\u6536\u83b7\u7a97\u53e3\u3002"
+    }
+  },
+  "description" : "Extract a time series at a point or inside a polygon ROI from a multi-date collection. Points return (time, value, valid); ROI pixels are bounded by the polygon bounding box and summarized per date (mean/median/min/max/stddev/valid_count). Output: CSV plus the JSON series; missing observations stay missing (no interpolation).",
+  "display_name" : "Extract Temporal Series",
+  "id" : "rs:temporal_extract_series",
+  "input" : "",
+  "output" : "",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "temporal",
+    "time-series",
+    "zonal-stats"
+  ]
+}

@@ -1,0 +1,121 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269"
+      ],
+      "scenes" : 
+      [
+        "\u7c7b\u522b\u4f53\u7cfb\u5f52\u5e76",
+        "\u4e8c\u503c\u63a9\u819c\u751f\u6210"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "multipass_streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u6838\u5bf9\u7c7b\u522b\u7f16\u7801\u4e0e\u6620\u5c04\u8868",
+        "when" : "\u6620\u5c04\u8868\u4e2d\u5f15\u7528\u4e86\u4e0d\u5b58\u5728\u7684\u6e90\u7c7b\u522b"
+      }
+    ],
+    "family" : "raster_spatial",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "map",
+          "required" : false,
+          "type" : "json"
+        },
+        {
+          "name" : "output",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "recode",
+          "required" : false,
+          "type" : "json"
+        },
+        {
+          "name" : "recode_map",
+          "required" : false,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "multimodal"
+    ],
+    "operator_group" : "classification",
+    "prerequisites" : 
+    [
+      "Input raster must be a single-band integer classification raster."
+    ],
+    "schema_version" : 2,
+    "summary" : "\u7c7b\u522b\u91cd\u7f16\u7801\uff1a\u6309\u6620\u5c04\u8868\u628a\u65e7\u7c7b\u522b\u503c\u6620\u5c04\u4e3a\u65b0\u503c\uff08\u5408\u5e76/\u4e8c\u503c\u5316/\u91cd\u6392\u5e8f\uff09\uff0c\u4e0d\u6539\u51e0\u4f55\u53ea\u6539\u7f16\u7801\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u91cd\u7f16\u7801",
+        "\u7c7b\u522b\u6620\u5c04"
+      ],
+      "courses" : 
+      [
+        "GIS \u539f\u7406"
+      ],
+      "exercise" : "\u628a 10 \u7c7b\u571f\u5730\u8986\u76d6\u5f52\u5e76\u4e3a 5 \u5927\u7c7b\u5e76\u751f\u6210\u6620\u5c04\u5bf9\u7167\u8868\u3002"
+    }
+  },
+  "description" : "Remap integer class labels according to a recode mapping table.",
+  "display_name" : "Class Recode",
+  "id" : "rs:recode",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "classification",
+    "postprocess",
+    "recode"
+  ]
+}

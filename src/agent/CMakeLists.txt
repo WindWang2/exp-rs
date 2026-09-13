@@ -28,6 +28,12 @@ add_library(sicnu_agent SHARED
   harness/band_facts.h
   harness/capability_knowledge.cpp
   harness/capability_knowledge.h
+  harness/capability_catalog.cpp
+  harness/capability_catalog.h
+  harness/capability_relations.cpp
+  harness/capability_relations.h
+  harness/capability_pages.cpp
+  harness/capability_pages.h
   harness/capability_graph.cpp
   harness/evidence.cpp
   harness/capability_graph.h

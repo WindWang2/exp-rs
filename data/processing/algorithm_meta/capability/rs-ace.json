@@ -1,0 +1,117 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u77ff\u7269",
+        "\u4eba\u5de5\u76ee\u6807"
+      ],
+      "scenes" : 
+      [
+        "\u9ad8\u5149\u8c31\u76ee\u6807\u68c0\u6d4b",
+        "\u5c0f\u76ee\u6807\u641c\u7d22"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "multipass_streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u91cd\u91c7\u6837\u76ee\u6807\u5149\u8c31\u5230\u5f71\u50cf\u6ce2\u6bb5",
+        "when" : "\u76ee\u6807\u5149\u8c31\u4e0e\u5f71\u50cf\u6ce2\u6bb5\u6570\u4e0d\u5339\u914d"
+      }
+    ],
+    "family" : "hyperspectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "target",
+          "required" : true,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Pixels with degenerate whitened norm (no variance along any direction) score NaN."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : 
+    [
+      "'target' must have one finite value per input band."
+    ],
+    "schema_version" : 2,
+    "summary" : "\u81ea\u9002\u5e94\u76f8\u5e72\u4f30\u8ba1\uff08ACE\uff09\u76ee\u6807\u68c0\u6d4b\uff1a\u5728\u767d\u5316\u7a7a\u95f4\u5ea6\u91cf\u76ee\u6807\u5149\u8c31\u5339\u914d\u5ea6\uff0c\u5bf9\u566a\u58f0\u4e0e\u80cc\u666f\u53d8\u5316\u7a33\u5065\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "ACE",
+        "\u76ee\u6807\u68c0\u6d4b",
+        "\u767d\u5316"
+      ],
+      "courses" : 
+      [
+        "\u9ad8\u5149\u8c31\u9065\u611f"
+      ],
+      "exercise" : "\u4ee5\u6807\u5e03\u5149\u8c31\u4e3a\u76ee\u6807\u8fd0\u884c ACE \u5e76\u8bc4\u4f30 ROC \u68c0\u6d4b\u6027\u80fd\u3002"
+    }
+  },
+  "description" : "Adaptive coherence estimator: squared whitened cosine between a target spectrum and each pixel, in [0, 1].",
+  "display_name" : "ACE Detector",
+  "gpu" : false,
+  "id" : "rs:ace",
+  "input" : "raster",
+  "notes" : "Three-pass streaming detection sharing the matched filter's background pipeline; scores in [0,1] (1 = whitened spectrum parallel to the target); bit-exact grade.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "spectral",
+    "detection",
+    "target"
+  ],
+  "task" : "target-detection"
+}

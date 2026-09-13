@@ -1,0 +1,143 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u5e72\u65f1\u534a\u5e72\u65f1\u690d\u88ab",
+        "\u7a00\u758f\u8349\u5730",
+        "\u88f8\u571f\u6df7\u5408\u533a"
+      ],
+      "scenes" : 
+      [
+        "\u5e72\u65f1\u533a\u690d\u88ab\u76d1\u6d4b",
+        "\u4f4e\u8986\u76d6\u5ea6\u690d\u88ab\u4f30\u6d4b"
+      ]
+    },
+    "band_roles" : 
+    {
+      "nir" : 1,
+      "red" : 1
+    },
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "BAND_ROLE_UNRESOLVED",
+        "remedy" : "\u6807\u6ce8\u89d2\u8272\u6216\u663e\u5f0f\u7ed9\u6ce2\u6bb5\u53f7",
+        "when" : "\u7f3a\u5c11 nir/red \u6ce2\u6bb5\u89d2\u8272"
+      }
+    ],
+    "family" : "spectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "height",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "index",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "width",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "4",
+          "name" : "nir",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "3",
+          "name" : "red",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "scale",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Band numbers are resolved from SICNU_BAND_ROLE when omitted."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u571f\u58e4\u8c03\u8282\u690d\u88ab\u6307\u6570 SAVI\uff0c\u901a\u8fc7 L \u7cfb\u6570\u964d\u4f4e\u88f8\u571f\u80cc\u666f\u5bf9\u690d\u88ab\u6307\u6570\u7684\u5f71\u54cd\uff0c\u9002\u5408\u4f4e\u8986\u76d6\u5ea6\u690d\u88ab\u533a\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "SAVI",
+        "\u571f\u58e4\u7ebf",
+        "\u80cc\u666f\u8c03\u8282"
+      ],
+      "courses" : 
+      [
+        "\u690d\u7269\u9065\u611f"
+      ],
+      "exercise" : "\u5728\u8352\u6f20\u8349\u539f\u533a\u6bd4\u8f83 NDVI \u4e0e SAVI \u5bf9\u7a00\u758f\u690d\u88ab\u7684\u654f\u611f\u5ea6\u3002"
+    }
+  },
+  "description" : "Compute Soil-Adjusted Vegetation Index: ((NIR - Red) / (NIR + Red + 0.5)) * 1.5.",
+  "display_name" : "Soil-Adjusted Vegetation Index (SAVI)",
+  "id" : "rs:savi",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "spectral",
+    "savi",
+    "vegetation"
+  ]
+}

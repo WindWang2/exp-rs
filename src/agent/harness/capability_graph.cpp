@@ -4,6 +4,7 @@
 #include "agent_plan.h"
 #include "band_facts.h"
 #include "capability_knowledge.h"
+#include "capability_relations.h"
 #include "contracts/spatial_contracts.h"
 #include "entity_resolver.h"
 #include "grounding_tools.h"
@@ -776,6 +777,9 @@ void registerCapabilityGraphTools()
 {
   static std::shared_ptr<SpatialTool> tool = std::make_shared<ResolveIntentTool>();
   SpatialToolRegistry::instance().registerTool( tool );
+  // D8: the capability relation graph surfaces its deterministic composer
+  // through the same registration path — no separate call site.
+  registerCapabilityCompositionTools();
 }
 
 } // namespace sicnu::agent::harness

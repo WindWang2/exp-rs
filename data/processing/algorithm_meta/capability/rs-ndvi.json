@@ -1,0 +1,146 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u690d\u88ab",
+        "\u519c\u7530",
+        "\u6797\u5730",
+        "\u8349\u5730"
+      ],
+      "scenes" : 
+      [
+        "\u690d\u88ab\u957f\u52bf\u76d1\u6d4b",
+        "\u519c\u4f5c\u7269\u4f30\u4ea7\u9884\u5904\u7406",
+        "\u751f\u6001\u53d8\u5316\u76d1\u6d4b"
+      ]
+    },
+    "band_roles" : 
+    {
+      "nir" : 1,
+      "red" : 1
+    },
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "BAND_ROLE_UNRESOLVED",
+        "remedy" : "\u6807\u6ce8\u89d2\u8272\uff08SICNU_BAND_ROLE\uff09\u6216\u663e\u5f0f\u4f20\u53c2\u6ce2\u6bb5\u53f7",
+        "when" : "\u7f3a\u5c11 nir/red \u6ce2\u6bb5\u89d2\u8272\u6216\u6ce2\u6bb5\u53f7"
+      },
+      {
+        "code" : "INVALID_RADIOMETRY",
+        "remedy" : "\u5148\u6267\u884c rs:atmospheric_correction",
+        "when" : "\u672a\u505a\u5927\u6c14\u6821\u6b63\u5bfc\u81f4 NDVI \u7cfb\u7edf\u6027\u504f\u4f4e"
+      }
+    ],
+    "family" : "spectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "height",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "index",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "width",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "4",
+          "name" : "nir",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "3",
+          "name" : "red",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Band numbers are resolved from SICNU_BAND_ROLE when omitted."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u5f52\u4e00\u5316\u690d\u88ab\u6307\u6570 NDVI = (NIR-Red)/(NIR+Red)\uff0c\u6700\u5e38\u7528\u7684\u690d\u88ab\u6d3b\u529b\u4e0e\u8986\u76d6\u5ea6\u6307\u6807\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "NDVI",
+        "\u690d\u88ab\u6307\u6570",
+        "\u7ea2\u8fb9"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406",
+        "\u690d\u7269\u9065\u611f"
+      ],
+      "exercise" : "\u8ba1\u7b97\u7814\u7a76\u533a\u751f\u957f\u5b63 NDVI \u5e76\u6309\u571f\u5730\u8986\u76d6\u7c7b\u578b\u7edf\u8ba1\u5206\u5e03\u5dee\u5f02\u3002"
+    }
+  },
+  "description" : "Compute Normalized Difference Vegetation Index: (NIR - Red) / (NIR + Red).",
+  "display_name" : "Normalized Difference Vegetation Index (NDVI)",
+  "id" : "rs:ndvi",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "spectral",
+    "ndvi",
+    "vegetation"
+  ]
+}

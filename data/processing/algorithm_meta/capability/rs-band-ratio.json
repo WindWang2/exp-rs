@@ -1,0 +1,156 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u690d\u88ab",
+        "\u77ff\u7269",
+        "\u6c34\u4f53"
+      ],
+      "scenes" : 
+      [
+        "\u77ff\u7269\u5438\u6536\u7279\u5f81\u589e\u5f3a",
+        "\u6559\u5b66\u6f14\u793a\u6bd4\u503c\u8fd0\u7b97"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "BAND_ROLE_UNRESOLVED",
+        "remedy" : "\u786e\u8ba4\u6ce2\u6bb5\u5e8f\u53f7\u5728\u5f71\u50cf\u6ce2\u6bb5\u6570\u8303\u56f4\u5185",
+        "when" : "\u6ce2\u6bb5\u53f7\u8d8a\u754c\u6216\u672a\u6307\u5b9a"
+      }
+    ],
+    "family" : "spectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "3",
+          "name" : "blueBand",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "2",
+          "name" : "denominatorBand",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "2",
+          "name" : "greenBand",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "ratio",
+          "enum" : 
+          [
+            "ratio",
+            "ihs"
+          ],
+          "name" : "mode",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "1",
+          "name" : "numeratorBand",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "1",
+          "name" : "redBand",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "IHS masks NoData/sentinel pixels to NaN in all components."
+    ],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "thermal",
+      "dem"
+    ],
+    "operator_group" : "enhancement",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u901a\u7528\u6ce2\u6bb5\u6bd4\u503c\u8fd0\u7b97\uff1a\u4efb\u9009\u4e24\u4e2a\u6ce2\u6bb5\u505a\u6bd4\u503c\uff0c\u7a81\u51fa\u5438\u6536\u7279\u5f81\u4e0e\u6ce2\u6bb5\u5dee\u5f02\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u6ce2\u6bb5\u6bd4\u503c",
+        "\u5149\u8c31\u7279\u5f81"
+      ],
+      "courses" : 
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      ],
+      "exercise" : "\u7528 Landsat band5/band4 \u6bd4\u503c\u590d\u73b0\u7b80\u5355\u690d\u88ab\u6307\u6570\u5e76\u8ba8\u8bba\u5176\u4e0e NDVI \u7684\u5173\u7cfb\u3002"
+    }
+  },
+  "description" : "Band ratio (numerator/denominator) or RGB-to-IHS color transform.",
+  "display_name" : "Band Ratio / IHS",
+  "id" : "rs:band_ratio",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "band-ratio",
+    "ihs",
+    "enhancement"
+  ]
+}
