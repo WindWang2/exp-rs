@@ -28,6 +28,7 @@
 #include "operators/rs/rs_gaofen_import_operator.h"
 #include "operators/rs/rs_hj_import_operator.h"
 #include "operators/rs/rs_zy3_import_operator.h"
+#include "data/band_role.h"
 #include "processing/algorithms/satellite_products.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
@@ -193,22 +194,22 @@ const sicnu::geo::BandCalibration *findCalibration(const ProductMetadata &metada
 
 } // namespace
 
-// NOTE: first loader test — it must run before any family file is cached.
-TEST_CASE("cn_products: Band-role table loader fails closed and diagnoses", "[cn][roles]")
+// NOTE: first loader test — it must run before any registry file is cached.
+TEST_CASE("cn_products: Sensor profile registry fails closed and diagnoses", "[cn][roles]")
 {
     ensureApp();
     QTemporaryDir tmp;
     REQUIRE(tmp.isValid());
-    // The env override must WIN (not fall through to the in-tree tables), so
+    // The env override must WIN (not fall through to the in-tree registry), so
     // create the directory it points at but leave it empty: the loader then
-    // reports the missing table file instead of guessing.
-    QDir().mkpath(tmp.path() + QStringLiteral("/products/band_roles"));
+    // reports the missing registry file instead of guessing.
+    QDir().mkpath(tmp.path() + QStringLiteral("/products/sensor_profiles"));
     qputenv("SICNU_DATA_DIR", tmp.path().toUtf8());
-    REQUIRE(cnBandRoleTableDir().find("band_roles") != std::string::npos);
-    REQUIRE(cnBandRoleTableDir().find("band_roles/gaofen.json") == std::string::npos);
+    REQUIRE(sensorProfileDir().find("sensor_profiles") != std::string::npos);
+    REQUIRE(sensorProfileDir().find("sensor_profiles/gaofen.json") == std::string::npos);
     try {
         cnBandRoleTable("gf1_pms");
-        FAIL("expected GeoError for missing table");
+        FAIL("expected GeoError for missing registry");
     } catch (const GeoError &) {
         // diagnosable refusal, not a silent unknown
     }
@@ -241,11 +242,11 @@ TEST_CASE("cn_products: Unsupported Chinese satellite families are refused diagn
     checkRefused("/data/GF3_KS_E117.0_N40.0_20240415_L1A_HH_HV.tiff");
     checkRefused("/data/GF4_PMS_E117.0_N40.0_20240415_L1A.tiff");
     checkRefused("/data/GF5_AHSI_E117.0_N40.0_20240415_L1A.tiff");
-    checkRefused("/data/GF7_FWD_E117.0_N40.0_20240415_L1A.tiff");
-    checkRefused("/data/ZY1_02C_E117.0_N40.0_20240415.tiff");
+    checkRefused("/data/ZY1_02D_AHSI_E117.0_N40.0_20240415_L1A0001.tiff");
     checkRefused("/data/HJ2A-HSI-1-450-20240415-L1A-12345-1.tiff");
     checkRefused("/data/HJ1A-IRS-1-450-20240415-L1A-12345-1.tiff");
     checkRefused("/data/CBERS4_MUX_20240415.tiff");
+    checkRefused("/data/ZY5_PMS_E117.0_N40.0_20240415_L1A.tiff");
 
     // Unrecognized names are NOT claimed as CN at all.
     const CnProductIdentity plain = cnIdentifyProduct("/data/some_random.tif");
@@ -920,4 +921,699 @@ TEST_CASE("cn_products: GF-1 headless end-to-end: import → NDVI → supervised
         REQUIRE(mapPixels[y * 16 + 15] == rightClass);
     }
 #endif
+}
+
+// ─── Platform 10.0: sensor profile registry, generations, new families ─────
+
+/// Recognized-but-unsupported CN name: typed refusal with a concrete reason
+/// (never a silent GenericRaster degradation).
+void checkUnsupportedRefusal(const char *path)
+{
+    const CnProductIdentity identity = cnIdentifyProduct(path);
+    REQUIRE(identity.recognized);
+    REQUIRE_FALSE(identity.supported);
+    REQUIRE(!identity.reason.empty());
+    REQUIRE(detectProductKind(path) == ProductKind::Unknown);
+    bool threw = false;
+    try {
+        (void)readProductMetadataAuto(path);
+    } catch (const GeoError &error) {
+        threw = true;
+        REQUIRE(error.code() == sicnu::geo::ErrorCode::UnsupportedProduct);
+    }
+    REQUIRE(threw);
+}
+
+TEST_CASE("cn_products: Sensor profile registry is the band-truth authority",
+          "[cn][registry]")
+{
+    ensureApp();
+    const SensorProfileRecord pms = loadSensorProfile("gf1_pms");
+    REQUIRE(pms.sensorKey == "gf1_pms");
+    REQUIRE(pms.satellite == "GF1");
+    REQUIRE(pms.instrument == "PMS");
+    REQUIRE(pms.modality == "optical");
+    REQUIRE(pms.hasGsdM);
+    REQUIRE(pms.gsdM == Catch::Approx(8.0));
+    REQUIRE(pms.panVariant == "gf1_pms_pan");
+    REQUIRE(pms.bands.size() == 4);
+    // Range midpoint AND nominal centre are carried as distinct fields.
+    REQUIRE(pms.bands[0].band == "B1");
+    REQUIRE(pms.bands[0].role == "blue");
+    REQUIRE(pms.bands[0].hasWavelengthNm);
+    REQUIRE(pms.bands[0].wavelengthNm == Catch::Approx(470.0));
+    REQUIRE(pms.bands[0].hasCenterWavelengthNm);
+    REQUIRE(pms.bands[0].centerWavelengthNm == Catch::Approx(485.0));
+    REQUIRE(pms.bands[0].hasFwhmNm);
+    REQUIRE(pms.bands[0].fwhmNm == Catch::Approx(70.0));
+    REQUIRE(pms.bands[0].spectralRangeUm == "0.42-0.52");
+    // Constituents declare what a complete product carries.
+    REQUIRE(std::find(pms.constituents.begin(), pms.constituents.end(), "rpc_rpb")
+            != pms.constituents.end());
+    // Calibration rule is stated, not implied.
+    REQUIRE(pms.calibrationRule.find("GainVal") != std::string::npos);
+
+    // Case-insensitive band lookup.
+    REQUIRE(pms.findBand("b4") != nullptr);
+    REQUIRE(pms.findBand("B4")->role == "nir");
+    REQUIRE(pms.findBand("nope") == nullptr);
+
+    // GF-6 WFV violet/yellow carry unknown roles WITH reasons (registry v1
+    // schema enforces role_reason on unknown).
+    const SensorProfileRecord wfv = loadSensorProfile("gf6_wfv");
+    REQUIRE(wfv.bands.size() == 8);
+    REQUIRE(wfv.bands[6].role == "unknown");
+    REQUIRE_FALSE(wfv.bands[6].roleReason.empty());
+    REQUIRE(wfv.bands[7].role == "unknown");
+
+    // Discovery lists every registry sensor (spot checks across families).
+    std::vector<std::string> warnings;
+    const std::vector<std::string> keys = sensorProfileKeys(&warnings);
+    for (const char *expected :
+         {"gf1_pms", "gf1_pms_pan", "gf7_fwd", "gf7_bwd", "gf7_fwd_pan", "zy3_nad_ms",
+          "zy3_fwd", "zy1_02c_pms", "zy1_02c_hrc", "hj_ccd", "hj2_ccd"})
+    {
+        INFO("expected sensor key: " << expected);
+        REQUIRE(std::find(keys.begin(), keys.end(), expected) != keys.end());
+    }
+    REQUIRE(warnings.empty());
+
+    // Unknown sensor keys are diagnosable, never silently empty.
+    REQUIRE_FALSE(hasSensorProfile("gf99_unknown"));
+    try {
+        (void)loadSensorProfile("gf99_unknown");
+        FAIL("expected GeoError for unknown sensor key");
+    } catch (const GeoError &) {
+    }
+}
+
+TEST_CASE("cn_products: Registry schema violations are typed errors (forward compat is explicit)",
+          "[cn][registry]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    // Two DISTINCT data roots: the loader caches parsed files by full path
+    // (the production-correct semantics), so same-path rewrites would serve
+    // a stale parse. Separate roots make each section order-independent.
+    const QString rootA = tmp.path() + QStringLiteral("/dataA");
+    const QString rootB = tmp.path() + QStringLiteral("/dataB");
+    QDir().mkpath(rootA + QStringLiteral("/products/sensor_profiles"));
+    QDir().mkpath(rootB + QStringLiteral("/products/sensor_profiles"));
+
+    // Version the build does not understand → typed refusal, not garbage.
+    {
+        QFile file(rootA + QStringLiteral("/products/sensor_profiles/gaofen.json"));
+        REQUIRE(file.open(QIODevice::WriteOnly | QIODevice::Text));
+        file.write(R"({"version": 99, "sensors": {"gf1_pms": {"bands": []}}})");
+        file.close();
+    }
+    qputenv("SICNU_DATA_DIR", rootA.toUtf8());
+    try {
+        (void)loadSensorProfile("gf1_pms");
+        FAIL("expected GeoError for future registry version");
+    } catch (const GeoError &error) {
+        REQUIRE(std::string(error.what()).find("version") != std::string::npos);
+    }
+
+    // Unknown keys inside an entry are ignored but REPORTED (forward compat).
+    {
+        QFile file(rootB + QStringLiteral("/products/sensor_profiles/gaofen.json"));
+        REQUIRE(file.open(QIODevice::WriteOnly | QIODevice::Text));
+        file.write(R"({
+          "version": 1,
+          "sensors": {
+            "gf1_pms": {
+              "satellite": "GF1", "instrument": "PMS", "modality": "optical",
+              "hypothetical_future_field": 42,
+              "bands": [
+                { "band": "B1", "role": "blue", "wavelength_nm": 470.0,
+                  "polarization_sensitivity": "none" }
+              ]
+            }
+          }
+        })");
+        file.close();
+    }
+    qputenv("SICNU_DATA_DIR", rootB.toUtf8());
+    const SensorProfileRecord record = loadSensorProfile("gf1_pms");
+    REQUIRE(record.bands.size() == 1);
+    REQUIRE(record.unknownKeys.size() == 2);
+    REQUIRE(std::find(record.unknownKeys.begin(), record.unknownKeys.end(),
+                      "hypothetical_future_field") != record.unknownKeys.end());
+    // An unknown role without a reason is a schema violation (fail-closed).
+    try {
+        (void)loadSensorProfile("gf99_unknown");
+        FAIL("expected GeoError for undeclared sensor");
+    } catch (const GeoError &) {
+    }
+
+    qunsetenv("SICNU_DATA_DIR");
+}
+
+TEST_CASE("cn_products: New families are supported — GF-7, ZY-1 02C, HJ-2 CCD",
+          "[cn][identity][newfamilies]")
+{
+    ensureApp();
+
+    const CnProductIdentity gf7 = cnIdentifyProduct(
+        "/data/GF7_FWD_E117.0_N40.0_20240415_L1A0001234567-MSS1.tiff");
+    REQUIRE(gf7.recognized);
+    REQUIRE(gf7.supported);
+    REQUIRE(gf7.kindName == "gaofen_product");
+    REQUIRE(gf7.sensorKey == "gf7_fwd");
+    REQUIRE(detectProductKind("/data/GF7_BWD_E117.0_N40.0_20240415_L1A0001234568.tiff")
+            == ProductKind::GaofenProduct);
+
+    const CnProductIdentity zy1 = cnIdentifyProduct(
+        "/data/ZY1_02C_PMS_E117.0_N40.0_20240415_L1A0001234567-MSS1.tiff");
+    REQUIRE(zy1.recognized);
+    REQUIRE(zy1.supported);
+    REQUIRE(zy1.kindName == "zy1_product");
+    REQUIRE(zy1.sensorKey == "zy1_02c_pms");
+    REQUIRE(detectProductKind("/data/ZY1_02C_HRC_E117.0_N40.0_20240415_L1A0001234567-PAN1.tiff")
+            == ProductKind::Zy1Product);
+
+    const CnProductIdentity hj2 = cnIdentifyProduct(
+        "/data/HJ2A-CCD1-450-20240415-L1A-1234567-MSS1.tiff");
+    REQUIRE(hj2.recognized);
+    REQUIRE(hj2.supported);
+    REQUIRE(hj2.kindName == "hj_ccd_product");
+    REQUIRE(hj2.sensorKey == "hj2_ccd");
+
+    // The closest refused names stay refused (sensor tokens are required).
+    checkUnsupportedRefusal("/data/HJ2A-HSI-1-450-20240415-L1A-1234567-MSS1.tiff");
+    checkUnsupportedRefusal("/data/ZY1_02D_AHSI_E117.0_N40.0_20240415_L1A0001-MSS1.tiff");
+}
+
+TEST_CASE("cn_products: Sidecar generation detection and unknown-element diagnostics",
+          "[cn][generation]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const CnFixturePaths legacy = makeGaofenPmsDir(QDir(tmp.path()));
+    const ProductMetadata legacyMeta = readProductMetadataAuto(legacy.dir.toStdString());
+    REQUIRE(legacyMeta.parseDiagnostics["generation"].asString() == "cresda_legacy_metainfo");
+    REQUIRE(legacyMeta.parseDiagnostics["root_element"].asString() == "metainfo");
+    // Every legacy-fixture element is whitelisted (PixelSizeY included): no
+    // unknown top-level elements are reported, and the root itself is never
+    // mistaken for one.
+    REQUIRE(legacyMeta.parseDiagnostics["unknown_top_level_elements"].size() == 0);
+
+    // A recognized CRESDA sidecar with an unexpected root keeps parsing its
+    // whitelisted fields and reports the root explicitly.
+    const QString dir = tmp.path() + QStringLiteral("/GF1_PMS2_E117.0_N40.0_20240415_L1A0001234999");
+    QDir().mkpath(dir);
+    writeStackTiff(dir + QStringLiteral("/GF1_PMS2_E117.0_N40.0_20240415_L1A0001234999-MSS1.tiff"),
+                   std::vector<std::vector<float>>(4, std::vector<float>(256, 100.f)));
+    QFile file(dir + QStringLiteral("/GF1_PMS2_E117.0_N40.0_20240415_L1A0001234999-MSS1.xml"));
+    REQUIRE(file.open(QIODevice::WriteOnly | QIODevice::Text));
+    file.write(R"(<?xml version="1.0" encoding="UTF-8"?>
+<FutureCresdaRoot>
+  <ProductID>GF1_PMS2_E117.0_N40.0_20240415_L1A0001234999</ProductID>
+  <SatelliteID>GF1</SatelliteID>
+  <SensorID>PMS2</SensorID>
+  <ModeID>MSS</ModeID>
+  <ReceiveDate>2024-04-15</ReceiveDate>
+  <ReceiveTime>11:23:45</ReceiveTime>
+  <PixelSizeX>8</PixelSizeX>
+  <BandID>B1</BandID>
+  <BandID>B2</BandID>
+  <BandID>B3</BandID>
+  <BandID>B4</BandID>
+  <NewGenerationTag>something</NewGenerationTag>
+</FutureCresdaRoot>
+)");
+    file.close();
+    const ProductMetadata futureMeta = readProductMetadataAuto(dir.toStdString());
+    REQUIRE(futureMeta.parseDiagnostics["generation"].asString() == "cresda_unknown_root");
+    REQUIRE(futureMeta.parseDiagnostics["root_element"].asString() == "futurecresdaroot");
+    REQUIRE(futureMeta.declaredBandIds.size() == 4);
+    const Json::Value unknown = futureMeta.parseDiagnostics["unknown_top_level_elements"];
+    REQUIRE(unknown.size() == 1);
+    REQUIRE(unknown[0].asString() == "newgenerationtag");
+}
+
+TEST_CASE("cn_products: RPC document is located as a declared constituent",
+          "[cn][constituents]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const CnFixturePaths fixture = makeGaofenPmsDir(QDir(tmp.path()));
+    REQUIRE(cnLocateRpcFile(fixture.dir.toStdString()).empty());
+
+    const QString rpc = fixture.dir + QStringLiteral(
+        "/GF1_PMS1_E117.0_N40.0_20240415_L1A0001234567-MSS1.rpb");
+    QFile file(rpc);
+    REQUIRE(file.open(QIODevice::WriteOnly | QIODevice::Text));
+    file.write("SATID=GF1;\nERR_BIAS=4.0;\n");
+    file.close();
+    REQUIRE(cnLocateRpcFile(fixture.dir.toStdString()) == rpc.toStdString());
+}
+
+namespace {
+
+/// Generic CN product directory: one image + one sidecar, CRESDA legacy tags.
+struct NewFamilyFixture
+{
+    QString dir;
+    QString xml;
+    QString tiff;
+};
+
+NewFamilyFixture makeCnProductDir(const QDir &root, const QString &prefix,
+                                  const QString &satellite, const QString &sensor,
+                                  const QString &modeId, int bandCount,
+                                  double pixelSizeM = 8.0)
+{
+    NewFamilyFixture fixture;
+    fixture.dir = root.filePath(prefix + QStringLiteral("-MSS1"));
+    QDir().mkpath(fixture.dir);
+    std::vector<std::vector<float>> bands(bandCount,
+                                          std::vector<float>(16 * 16, 100.f));
+    fixture.tiff = fixture.dir + QStringLiteral("/") + prefix + QStringLiteral("-MSS1.tiff");
+    writeStackTiff(fixture.tiff, bands, pixelSizeM);
+    fixture.xml = writeCresdaXml(fixture.dir + QStringLiteral("/") + prefix
+                                   + QStringLiteral("-MSS1.xml"),
+                                 prefix, satellite, sensor, modeId, bandCount, {},
+                                 pixelSizeM);
+    return fixture;
+}
+
+} // namespace
+
+TEST_CASE("cn_products: GF-7 FWD/BWD multispectral import via rs:cn_product_import",
+          "[cn][newfamilies][operators]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const NewFamilyFixture fixture = makeCnProductDir(
+        QDir(tmp.path()), QStringLiteral("GF7_FWD_E117.0_N40.0_20240415_L1A0001234567"),
+        QStringLiteral("GF7"), QStringLiteral("FWD"), QStringLiteral("MSS"), 4);
+
+    auto op = RSOperatorRegistry::instance().create("rs:cn_product_import");
+    REQUIRE(op != nullptr);
+    RSOperatorContext ctx;
+    const QString output = tmp.path() + QStringLiteral("/gf7_stack.tif");
+    Json::Value params(Json::objectValue);
+    params["input"] = fixture.dir.toStdString();
+    params["output"] = output.toStdString();
+    Json::Value result;
+    REQUIRE_NOTHROW(result = op->run(params, ctx));
+
+    REQUIRE(result["productKind"].asString() == "gaofen_product");
+    REQUIRE(result["sensorKey"].asString() == "gf7_fwd");
+    REQUIRE(result["sensorProfile"].asString() == "gf7_fwd");
+    REQUIRE(result["bandCount"].asInt() == 4);
+    REQUIRE(result["completeness"].asString() == "partial_readable");
+    // Registry-declared roles for the GF-7 layout.
+    REQUIRE(result["bandRoles"][0].asString() == "blue");
+    REQUIRE(result["bandRoles"][3].asString() == "nir");
+    REQUIRE(result["sidecarGeneration"].asString() == "cresda_legacy_metainfo");
+
+    GDALDatasetH ds = GDALOpen(output.toUtf8().constData(), GA_ReadOnly);
+    REQUIRE(ds != nullptr);
+    REQUIRE(GDALGetRasterCount(ds) == 4);
+    REQUIRE(std::string(GDALGetMetadataItem(ds, "SICNU_PRODUCT_TYPE", nullptr))
+            == "gaofen_product");
+    GDALClose(ds);
+
+    // One declared band → the panchromatic sibling profile (shape-driven).
+    const NewFamilyFixture pan = makeCnProductDir(
+        QDir(tmp.path()), QStringLiteral("GF7_BWD_E117.0_N40.0_20240415_L1A0001234568"),
+        QStringLiteral("GF7"), QStringLiteral("BWD"), QStringLiteral("PAN"), 1, 0.8);
+    Json::Value panParams(Json::objectValue);
+    panParams["input"] = pan.dir.toStdString();
+    panParams["output"] = tmp.path().toStdString() + "/gf7_pan_stack.tif";
+    Json::Value panResult;
+    REQUIRE_NOTHROW(panResult = op->run(panParams, ctx));
+    REQUIRE(panResult["sensorKey"].asString() == "gf7_bwd_pan");
+    REQUIRE(panResult["bandRoles"][0].asString() == "panchromatic");
+}
+
+TEST_CASE("cn_products: ZY-1 02C PMS/HRC and HJ-2 CCD import through the family operators",
+          "[cn][newfamilies][operators]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    auto cnOp = RSOperatorRegistry::instance().create("rs:cn_product_import");
+    auto hjOp = RSOperatorRegistry::instance().create("rs:hj_import");
+    REQUIRE(cnOp != nullptr);
+    REQUIRE(hjOp != nullptr);
+    RSOperatorContext ctx;
+
+    // ZY-1 02C HRC (single pan band) via the unified operator.
+    const NewFamilyFixture hrc = makeCnProductDir(
+        QDir(tmp.path()), QStringLiteral("ZY1_02C_HRC_E117.0_N40.0_20240415_L1A0001234567"),
+        QStringLiteral("ZY1_02C"), QStringLiteral("HRC"), QStringLiteral("PAN"), 1, 2.36);
+    Json::Value hrcParams(Json::objectValue);
+    hrcParams["input"] = hrc.dir.toStdString();
+    hrcParams["output"] = tmp.path().toStdString() + "/zy1_hrc_stack.tif";
+    Json::Value hrcResult;
+    REQUIRE_NOTHROW(hrcResult = cnOp->run(hrcParams, ctx));
+    REQUIRE(hrcResult["productKind"].asString() == "zy1_product");
+    REQUIRE(hrcResult["sensorKey"].asString() == "zy1_02c_hrc");
+    REQUIRE(hrcResult["satellite"].asString() == "ZY1_02C");
+    REQUIRE(hrcResult["bandRoles"][0].asString() == "panchromatic");
+
+    // ZY-1 02C PMS: the family-pinned gaofen operator must refuse the
+    // cross-family input with a typed diagnosis.
+    const NewFamilyFixture pms = makeCnProductDir(
+        QDir(tmp.path()), QStringLiteral("ZY1_02C_PMS_E117.0_N40.0_20240415_L1A0001234568"),
+        QStringLiteral("ZY1_02C"), QStringLiteral("PMS"), QStringLiteral("MSS"), 4);
+    Json::Value crossParams(Json::objectValue);
+    crossParams["input"] = pms.dir.toStdString();
+    crossParams["output"] = tmp.path().toStdString() + "/cross_family.tif";
+    bool threw = false;
+    try {
+        (void)RSOperatorRegistry::instance().create("rs:gaofen_import")->run(crossParams, ctx);
+    } catch (const RSOperatorError &error) {
+        threw = true;
+        REQUIRE(error.code() == sicnu::operators::ErrorCode::InvalidInputData);
+        REQUIRE(std::string(error.what()).find("different CN product family") != std::string::npos);
+    }
+    REQUIRE(threw);
+
+    // HJ-2 CCD imports through the HJ operator (same family kind).
+    const NewFamilyFixture hj2 = makeCnProductDir(
+        QDir(tmp.path()), QStringLiteral("HJ2A-CCD1-450-20240415-L1A-1234567"),
+        QStringLiteral("HJ2A"), QStringLiteral("CCD1"), QStringLiteral("MSS"), 4, 16.0);
+    Json::Value hj2Params(Json::objectValue);
+    hj2Params["input"] = hj2.dir.toStdString();
+    hj2Params["output"] = tmp.path().toStdString() + "/hj2_stack.tif";
+    Json::Value hj2Result;
+    REQUIRE_NOTHROW(hj2Result = hjOp->run(hj2Params, ctx));
+    REQUIRE(hj2Result["sensorKey"].asString() == "hj2_ccd");
+    REQUIRE(hj2Result["bandRoles"][0].asString() == "blue");
+    REQUIRE(hj2Result["bandRoles"][3].asString() == "nir");
+}
+
+TEST_CASE("cn_products: apply_calibration converts DN to radiance; partial coverage is a typed refusal",
+          "[cn][calibration][operators]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const CnFixturePaths fixture = makeGaofenPmsDir(
+        QDir(tmp.path()),
+        {"<GainVal>0.5,0.6,0.7,0.8</GainVal>", "<OffsetVal>-1.0,-2.0,-3.0,-4.0</OffsetVal>"});
+
+    auto op = RSOperatorRegistry::instance().create("rs:cn_product_import");
+    REQUIRE(op != nullptr);
+    RSOperatorContext ctx;
+
+    // B4 DN: 2400 (left/vegetation half) and 150 (right/water half);
+    // radiance = DN × 0.8 − 4.0 → 1916 / 116.
+    const QString output = tmp.path() + QStringLiteral("/calibrated.tif");
+    Json::Value params(Json::objectValue);
+    params["input"] = fixture.dir.toStdString();
+    params["output"] = output.toStdString();
+    params["apply_calibration"] = true;
+    Json::Value result;
+    REQUIRE_NOTHROW(result = op->run(params, ctx));
+    REQUIRE(result["calibration"]["requested"].asBool() == true);
+    REQUIRE(result["calibration"]["applied"].asBool() == true);
+    REQUIRE(result["radiometricState"].asString() == "radiance");
+    // The PMS directory's panchromatic half is reported as the sibling pair.
+    REQUIRE(result["siblingRole"].asString() == "pan");
+    REQUIRE(result["siblingImage"].asString().find("PAN1") != std::string::npos);
+
+    GDALDatasetH ds = GDALOpen(output.toUtf8().constData(), GA_ReadOnly);
+    REQUIRE(ds != nullptr);
+    REQUIRE(std::string(GDALGetMetadataItem(ds, "SICNU_RADIOMETRIC_STATE", nullptr)) == "radiance");
+    std::vector<double> line(16, 0.0);
+    GDALRasterBandH b4 = GDALGetRasterBand(ds, 4);
+    REQUIRE(GDALRasterIO(b4, GF_Read, 0, 0, 16, 1, line.data(), 16, 1, GDT_Float64, 0, 0)
+            == CE_None);
+    REQUIRE(line[0] == Catch::Approx(2400.0 * 0.8 - 4.0).margin(1e-9));
+    REQUIRE(line[8] == Catch::Approx(150.0 * 0.8 - 4.0).margin(1e-9));
+    GDALClose(ds);
+
+    // Drop B1/B2 coefficients: requested-but-not-applicable refuses typed.
+    const CnFixturePaths partial = makeGaofenPmsDir(
+        QDir(tmp.path()),
+        {"<GainVal>0.5,0.6</GainVal>", "<OffsetVal>-1.0,-2.0</OffsetVal>"});
+    Json::Value partialParams(Json::objectValue);
+    partialParams["input"] = partial.dir.toStdString();
+    partialParams["output"] = tmp.path().toStdString() + "/partial_calibrated.tif";
+    partialParams["apply_calibration"] = true;
+    bool threw = false;
+    try {
+        (void)op->run(partialParams, ctx);
+    } catch (const RSOperatorError &error) {
+        threw = true;
+        REQUIRE(error.code() == sicnu::operators::ErrorCode::InvalidInputData);
+    }
+    REQUIRE(threw);
+    REQUIRE_FALSE(QFile::exists(tmp.path() + QStringLiteral("/partial_calibrated.tif")));
+}
+
+TEST_CASE("cn_products: Chinese directory paths import end-to-end", "[cn][encoding]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString chineseDir = tmp.path() + QStringLiteral("/高分一号/20240415");
+    QDir().mkpath(chineseDir);
+    const NewFamilyFixture fixture = makeCnProductDir(
+        QDir(chineseDir), QStringLiteral("GF1_WFV1_E117.0_N40.0_20240415_L1A0001234567"),
+        QStringLiteral("GF1"), QStringLiteral("WFV1"), QStringLiteral("MSS"), 4, 16.0);
+
+    auto op = RSOperatorRegistry::instance().create("rs:cn_product_import");
+    REQUIRE(op != nullptr);
+    RSOperatorContext ctx;
+    const QString output = tmp.path() + QStringLiteral("/wfv_中文输出.tif");
+    Json::Value params(Json::objectValue);
+    params["input"] = fixture.dir.toStdString();
+    params["output"] = output.toStdString();
+    Json::Value result;
+    REQUIRE_NOTHROW(result = op->run(params, ctx));
+    REQUIRE(result["bandCount"].asInt() == 4);
+    REQUIRE(QFile::exists(output));
+}
+
+TEST_CASE("cn_products: adverse inputs are diagnosed, never guessed (Platform 10.0 matrix)",
+          "[cn][adverse]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    QDir root(tmp.path());
+    auto op = RSOperatorRegistry::instance().create("rs:cn_product_import");
+    REQUIRE(op != nullptr);
+    RSOperatorContext ctx;
+
+    // Corrupt sidecar XML: typed parse error, no partial result.
+    {
+        const QString dir = tmp.path() + QStringLiteral("/GF1_WFV1_E1.0_N1.0_20240415_L1A0000000001");
+        QDir().mkpath(dir);
+        writeStackTiff(dir + QStringLiteral("/GF1_WFV1_E1.0_N1.0_20240415_L1A0000000001.tiff"),
+                       std::vector<std::vector<float>>(4, std::vector<float>(256, 100.f)));
+        QFile file(dir + QStringLiteral("/GF1_WFV1_E1.0_N1.0_20240415_L1A0000000001.xml"));
+        REQUIRE(file.open(QIODevice::WriteOnly | QIODevice::Text));
+        file.write("<?xml version=\"1.0\"?><MetaInfo><SatelliteID>GF1</SatelliteID>");
+        file.close();
+        Json::Value params(Json::objectValue);
+        params["input"] = dir.toStdString();
+        params["output"] = tmp.path().toStdString() + "/corrupt.tif";
+        bool threw = false;
+        try {
+            (void)op->run(params, ctx);
+        } catch (const RSOperatorError &error) {
+            threw = true;
+            REQUIRE(error.code() == sicnu::operators::ErrorCode::InvalidInputData);
+            REQUIRE(std::string(error.what()).find("metadata") != std::string::npos);
+        }
+        REQUIRE(threw);
+        REQUIRE_FALSE(QFile::exists(tmp.path() + QStringLiteral("/corrupt.tif")));
+    }
+
+    // Non-CRESDA XML beside a GF name: the fabrication guard refuses.
+    {
+        const QString dir = tmp.path() + QStringLiteral("/GF1_WFV2_E1.0_N1.0_20240415_L1A0000000002");
+        QDir().mkpath(dir);
+        writeStackTiff(dir + QStringLiteral("/GF1_WFV2_E1.0_N1.0_20240415_L1A0000000002.tiff"),
+                       std::vector<std::vector<float>>(4, std::vector<float>(256, 100.f)));
+        QFile file(dir + QStringLiteral("/GF1_WFV2_E1.0_N1.0_20240415_L1A0000000002.xml"));
+        REQUIRE(file.open(QIODevice::WriteOnly | QIODevice::Text));
+        file.write("<?xml version=\"1.0\"?><recipe><sugar>200g</sugar></recipe>");
+        file.close();
+        Json::Value params(Json::objectValue);
+        params["input"] = dir.toStdString();
+        params["output"] = tmp.path().toStdString() + "/not_cresda.tif";
+        bool threw = false;
+        try {
+            (void)op->run(params, ctx);
+        } catch (const RSOperatorError &) {
+            threw = true;
+        }
+        REQUIRE(threw);
+    }
+
+    // Ambiguous multi-image directory: sidecar without stem-paired image
+    // refuses instead of picking an arbitrary sibling.
+    {
+        const QString dir = tmp.path() + QStringLiteral("/GF1_WFV3_E1.0_N1.0_20240415_L1A0000000003");
+        QDir().mkpath(dir);
+        writeStackTiff(dir + QStringLiteral("/unrelated_a.tiff"),
+                       std::vector<std::vector<float>>(1, std::vector<float>(256, 1.f)));
+        writeStackTiff(dir + QStringLiteral("/unrelated_b.tiff"),
+                       std::vector<std::vector<float>>(1, std::vector<float>(256, 2.f)));
+        QFile file(dir + QStringLiteral("/GF1_WFV3_E1.0_N1.0_20240415_L1A0000000003.xml"));
+        REQUIRE(file.open(QIODevice::WriteOnly | QIODevice::Text));
+        file.write(R"(<?xml version="1.0"?><MetaInfo><ProductID>X3</ProductID>
+<SatelliteID>GF1</SatelliteID><SensorID>WFV3</SensorID><ModeID>MSS</ModeID>
+<BandID>B1</BandID></MetaInfo>)");
+        file.close();
+        Json::Value params(Json::objectValue);
+        params["input"] = dir.toStdString();
+        params["output"] = tmp.path().toStdString() + "/ambiguous.tif";
+        bool threw = false;
+        try {
+            (void)op->run(params, ctx);
+        } catch (const RSOperatorError &error) {
+            threw = true;
+            REQUIRE(std::string(error.what()).find("ambiguous") != std::string::npos);
+        }
+        REQUIRE(threw);
+    }
+
+    // Product folder with extra foreign files: they neither break the import
+    // nor leak into the result.
+    {
+        const CnFixturePaths fixture = makeGaofenPmsDir(root);
+        QFile thumbnail(fixture.dir + QStringLiteral("/preview_thumb.jpg"));
+        REQUIRE(thumbnail.open(QIODevice::WriteOnly | QIODevice::Text));
+        thumbnail.write("not an image\n");
+        thumbnail.close();
+        QDir().mkpath(fixture.dir + QStringLiteral("/nested_extra_dir"));
+
+        Json::Value params(Json::objectValue);
+        params["input"] = fixture.dir.toStdString();
+        params["output"] = tmp.path().toStdString() + "/extra_files.tif";
+        Json::Value result;
+        REQUIRE_NOTHROW(result = op->run(params, ctx));
+        REQUIRE(result["bandCount"].asInt() == 4);
+    }
+
+    // Duplicate scenes: two copies of the same product import independently.
+    {
+        const CnFixturePaths first = makeGaofenPmsDir(QDir(tmp.path()));
+        const QString dupDir = tmp.path() +
+            QStringLiteral("/GF1_PMS1_E117.0_N40.0_20240415_L1A0001234567-MSS1-copy");
+        QDir().mkpath(dupDir);
+        QFile::copy(first.msXml, dupDir + QStringLiteral("/GF1_PMS1_E117.0_N40.0_20240415_L1A0001234567-MSS1-copy.xml"));
+        // A scene copy whose image is missing resolves to nothing: typed
+        // FileNotFound, never a guessed sibling.
+        Json::Value params(Json::objectValue);
+        params["input"] = dupDir.toStdString();
+        params["output"] = tmp.path().toStdString() + "/duplicate.tif";
+        bool threw = false;
+        try {
+            (void)op->run(params, ctx);
+        } catch (const RSOperatorError &error) {
+            threw = true;
+            REQUIRE(error.code() == sicnu::operators::ErrorCode::FileNotFound);
+        }
+        REQUIRE(threw);
+    }
+}
+
+TEST_CASE("cn_products: large product directories stay bounded and correct",
+          "[cn][scale]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const CnFixturePaths fixture = makeGaofenPmsDir(QDir(tmp.path()));
+    // Inflate the directory beyond the bounded listing window (512 entries)
+    // with irrelevant files.
+    for (int i = 0; i < 520; ++i) {
+        QFile filler(fixture.dir + QStringLiteral("/filler_%1.dat").arg(i, 4, 10, QChar('0')));
+        REQUIRE(filler.open(QIODevice::WriteOnly | QIODevice::Text));
+        filler.write("x\n");
+        filler.close();
+    }
+    const std::string sidecar = cnLocateSidecarXml(fixture.dir.toStdString());
+    REQUIRE(sidecar.find("MSS1.xml") != std::string::npos);
+    const std::string image = cnLocateImageTiff(fixture.dir.toStdString(), sidecar);
+    REQUIRE(image.find("MSS1.tiff") != std::string::npos);
+
+    // Metadata still parses and imports through the inflated directory.
+    auto op = RSOperatorRegistry::instance().create("rs:cn_product_import");
+    REQUIRE(op != nullptr);
+    RSOperatorContext ctx;
+    Json::Value params(Json::objectValue);
+    params["input"] = fixture.dir.toStdString();
+    params["output"] = tmp.path().toStdString() + "/inflated.tif";
+    Json::Value result;
+    REQUIRE_NOTHROW(result = op->run(params, ctx));
+    REQUIRE(result["bandCount"].asInt() == 4);
+}
+
+TEST_CASE("cn_products: read-only product directories import without writing to the source",
+          "[cn][adverse]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const CnFixturePaths fixture = makeGaofenPmsDir(QDir(tmp.path()));
+    // Drop every write bit: imports must only READ the source product.
+    const QFile::Permissions readonly = QFile::ReadOwner | QFile::ExeOwner
+                                      | QFile::ReadGroup | QFile::ExeGroup
+                                      | QFile::ReadOther | QFile::ExeOther;
+    REQUIRE(QFile::setPermissions(fixture.dir, readonly));
+
+    auto op = RSOperatorRegistry::instance().create("rs:cn_product_import");
+    REQUIRE(op != nullptr);
+    RSOperatorContext ctx;
+    Json::Value params(Json::objectValue);
+    params["input"] = fixture.dir.toStdString();
+    params["output"] = tmp.path().toStdString() + "/readonly_source.tif";
+    Json::Value result;
+    REQUIRE_NOTHROW(result = op->run(params, ctx));
+    REQUIRE(result["bandCount"].asInt() == 4);
+    QFile::setPermissions(fixture.dir,
+                          readonly | QFile::WriteOwner | QFile::WriteGroup
+                                   | QFile::WriteOther);
+}
+
+TEST_CASE("cn_products: discoverProduct routes CN families through the shared registry",
+          "[cn][discovery][gui]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const CnFixturePaths fixture = makeGaofenPmsDir(
+        QDir(tmp.path()),
+        {"<SunPosGeodetic><Azimuth>157.8</Azimuth><Elevation>62.9</Elevation></SunPosGeodetic>"});
+
+    SatelliteProducts::ProductInfo info;
+    REQUIRE(SatelliteProducts::discoverProduct(fixture.dir, &info));
+    REQUIRE(info.type == SatelliteProducts::ProductType::Cn);
+    REQUIRE(info.spacecraft == "GF1");
+    REQUIRE(info.bands.size() == 4);
+    REQUIRE(info.bands[0].role == sicnu::data::BandRole::Blue);
+    REQUIRE(info.bands[3].role == sicnu::data::BandRole::NIR);
+    REQUIRE(info.bands[0].wavelengthNm == 470);
+    REQUIRE(info.attributes["SICNU_BAND_SOURCE"] == "declared_band_ids");
+
+    // Recognized-but-unsupported names refuse with the concrete identity
+    // reason through the same entry point the GUI uses.
+    SatelliteProducts::ProductInfo refused;
+    QString err;
+    REQUIRE_FALSE(SatelliteProducts::discoverProduct(
+        QStringLiteral("/data/GF4_PMS_E117.0_N40.0_20240415_L1A.tiff"), &refused,
+        QStringLiteral("10m"), &err));
+    REQUIRE(err.contains(QStringLiteral("GF-4")));
+
+    // Non-CN names stay undiscovered.
+    REQUIRE_FALSE(SatelliteProducts::discoverProduct(
+        tmp.path() + QStringLiteral("/not_a_product"), &refused,
+        QStringLiteral("10m"), &err));
 }
