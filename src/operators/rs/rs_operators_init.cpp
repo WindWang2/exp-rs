@@ -67,6 +67,9 @@
 #include "rs_landsat_import_operator.h"
 #include "rs_sentinel2_import_operator.h"
 #include "rs_modis_import_operator.h"
+#include "rs_gaofen_import_operator.h"
+#include "rs_zy3_import_operator.h"
+#include "rs_hj_import_operator.h"
 #include "rs_modis_georeference_operator.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/framework/atomic_algorithm_registry.h"
@@ -184,6 +187,9 @@ REGISTER_RS_OPERATOR(RsTemporalExtractSeriesOperator, "rs:temporal_extract_serie
 REGISTER_RS_OPERATOR(RsLandsatImportOperator, "rs:landsat_import")
 REGISTER_RS_OPERATOR(RsSentinel2ImportOperator, "rs:sentinel2_import")
 REGISTER_RS_OPERATOR(RsModisImportOperator, "rs:modis_import")
+REGISTER_RS_OPERATOR(RsGaofenImportOperator, "rs:gaofen_import")
+REGISTER_RS_OPERATOR(RsZy3ImportOperator, "rs:zy3_import")
+REGISTER_RS_OPERATOR(RsHjImportOperator, "rs:hj_import")
 REGISTER_RS_OPERATOR(RsModisGeoreferenceOperator, "rs:modis_georeference")
 
 #ifdef SICNU_HAS_OPENCV
@@ -327,6 +333,9 @@ void initBuiltinRsOperators() {
   add( "rs:landsat_import", [] { return std::make_unique<RsLandsatImportOperator>(); } );
   add( "rs:sentinel2_import", [] { return std::make_unique<RsSentinel2ImportOperator>(); } );
   add( "rs:modis_import", [] { return std::make_unique<RsModisImportOperator>(); } );
+  add( "rs:gaofen_import", [] { return std::make_unique<RsGaofenImportOperator>(); } );
+  add( "rs:zy3_import", [] { return std::make_unique<RsZy3ImportOperator>(); } );
+  add( "rs:hj_import", [] { return std::make_unique<RsHjImportOperator>(); } );
   add( "rs:modis_georeference", [] { return std::make_unique<RsModisGeoreferenceOperator>(); } );
 #ifdef SICNU_HAS_OPENCV
   add( "rs:kmeans_classification", [] { return std::make_unique<RsKmeansOperator>(); } );
