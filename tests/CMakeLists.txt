@@ -1860,6 +1860,44 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND)
         ${CMAKE_BINARY_DIR}
     )
     sicnu_discover_tests(test_model_tasks)
+
+    # Platform 10.0: F-OPS-5 regression — grid-bounded, cancellable detection NMS.
+    add_executable(test_detection_nms_10 test_detection_nms_10.cpp)
+    target_link_libraries(test_detection_nms_10 PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_detection_nms_10)
+    target_include_directories(test_detection_nms_10 PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_detection_nms_10)
+
+    # Platform 10.0: EO model platform regressions (F-OPS fixes + manifest/tasks).
+    add_executable(test_eo_platform_10 test_eo_platform_10.cpp)
+    target_link_libraries(test_eo_platform_10 PRIVATE
+        Catch2::Catch2WithMain
+        Qt6::Core
+        qgis_core
+        sicnu_processing
+        sicnu_task_center
+        sicnu_operators
+        ${OpenCV_LIBS}
+    )
+    sicnu_link_jsoncpp(test_eo_platform_10)
+    target_include_directories(test_eo_platform_10 PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/tests
+        ${CMAKE_BINARY_DIR}
+    )
+    sicnu_discover_tests(test_eo_platform_10)
 endif()
 
 # Platform 4.0: model runtime benchmark (env-gated: SICNU_MODEL_BENCH=1)

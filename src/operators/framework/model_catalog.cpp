@@ -15,7 +15,9 @@
 #include <QProcessEnvironment>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <map>
 #include <mutex>
 
 namespace sicnu::operators {
@@ -91,6 +93,7 @@ ModelPreprocessContract parsePreprocessContract( const QJsonObject &preObj )
   pre.stdv = parseDoubleArray( preObj, QStringLiteral( "std" ) );
   const double scale = preObj.value( QStringLiteral( "scale" ) ).toDouble( 1.0 );
   pre.scale = scale > 0.0 ? scale : 1.0;
+  pre.offset = preObj.value( QStringLiteral( "offset" ) ).toDouble( 0.0 );
   pre.resize = preObj.value( QStringLiteral( "resize" ) ).toString().toStdString();
   pre.interpolation = preObj.value( QStringLiteral( "interpolation" ) ).toString().toStdString();
   pre.nodataPolicy = preObj.value( QStringLiteral( "nodata_policy" ) ).toString().toStdString();
@@ -352,6 +355,33 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     info.maxResolutionMeters = resArr.at( 1 );
   }
 
+  // --- Platform 10.0: EO domain truth (`eo` section, additive) ----------------
+  {
+    const QJsonObject eoObj = obj.value( QStringLiteral( "eo" ) ).toObject();
+    if ( !eoObj.isEmpty() )
+    {
+      info.eo.declared = true;
+      const QJsonObject waves = eoObj.value( QStringLiteral( "wavelengths_nm" ) ).toObject();
+      for ( auto it = waves.begin(); it != waves.end(); ++it )
+      {
+        const QJsonArray window = it.value().toArray();
+        if ( window.size() != 2 )
+          continue; // flagged by validateEo below
+        ModelWavelengthWindowNm w;
+        w.minNm = window.at( 0 ).toDouble( -1.0 );
+        w.maxNm = window.at( 1 ).toDouble( -1.0 );
+        info.eo.wavelengthsNm[it.key().toLower().toStdString()] = w;
+      }
+      const QJsonObject calib = eoObj.value( QStringLiteral( "calibration" ) ).toObject();
+      info.eo.calibrationState = calib.value( QStringLiteral( "state" ) ).toString().toStdString();
+      info.eo.calibrationEnforced = calib.value( QStringLiteral( "enforced" ) ).toBool( false );
+      info.eo.crsFamily = eoObj.value( QStringLiteral( "grid" ) ).toObject()
+                            .value( QStringLiteral( "crs_family" ) )
+                            .toString()
+                            .toStdString();
+    }
+  }
+
   // --- Manifest v2: preprocess ----------------------------------------------
   info.preprocess = parsePreprocessContract( obj.value( QStringLiteral( "preprocess" ) ).toObject() );
 
@@ -388,6 +418,12 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   }
   const double simplify = postObj.value( QStringLiteral( "simplify" ) ).toDouble( 0.0 );
   info.postprocess.simplify = simplify > 0.0 ? simplify : 0.0;
+  // Platform 10.0: probability calibration temperature + morphology cleanup.
+  const QJsonValue calibVal = postObj.value( QStringLiteral( "calibration_temperature" ) );
+  if ( calibVal.isDouble() )
+    info.postprocess.calibrationTemperature = calibVal.toDouble();
+  info.postprocess.morphology = postObj.value( QStringLiteral( "morphology" ) ).toString().toStdString();
+  info.postprocess.morphologyKernelPx = postObj.value( QStringLiteral( "morphology_kernel_px" ) ).toInt( 3 );
 
   // --- Runtime (v2 nested wins over legacy flat) ------------------------------
   const QJsonObject runtimeObj = obj.value( QStringLiteral( "runtime" ) ).toObject();
@@ -488,14 +524,14 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     if ( declaredVersion.isDouble() )
     {
       const int v = declaredVersion.toInt();
-      if ( v < 1 || v > 5 )
-        markInvalid( "manifest_version " + std::to_string( v ) + " is unsupported (1..5)" );
+      if ( v < 1 || v > 6 )
+        markInvalid( "manifest_version " + std::to_string( v ) + " is unsupported (1..6)" );
       else
         info.manifestVersion = v;
     }
     else if ( !declaredVersion.isNull() && !declaredVersion.isUndefined() )
     {
-      markInvalid( "manifest_version must be an integer (1..5)" );
+      markInvalid( "manifest_version must be an integer (1..6)" );
     }
     int shapeVersion = 1;
     if ( inputsDeclaredAsArray )
@@ -506,8 +542,10 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     // output.format / output.detection) - it validates against shape 3.
     // Version 5 is the 7.0 vocabulary (multimodal inputs, typed heads,
     // provider contracts) on the same v3 shape.
+    // Version 6 is the Platform 10.0 EO surface (eo domain truth section) on
+    // the same v3 shape.
     const int effectiveDeclared =
-      ( info.manifestVersion == 4 || info.manifestVersion == 5 ) ? 3 : info.manifestVersion;
+      ( info.manifestVersion >= 4 && info.manifestVersion <= 6 ) ? 3 : info.manifestVersion;
     if ( effectiveDeclared > 0 && effectiveDeclared != shapeVersion )
       markInvalid( "declared manifest_version " + std::to_string( info.manifestVersion )
                    + " but the manifest shape is version " + std::to_string( shapeVersion )
@@ -532,6 +570,8 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
                           "polarizations", "temporal_length", "radiometric_state", "resolution_range",
                           "cpu_fallback", "estimated_ram_mb", "estimated_vram_mb", "supports_tiling",
                           "package",
+                          // Platform 10.0 EO domain truth section
+                          "eo",
                           // legacy freeform version string superseded by
                           // model_version (historically ignored; kept legal)
                           "version",
@@ -540,6 +580,7 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
                           // keep working)
                           "readiness", "readiness_reason", "resolved_artifact_path",
                           "content_digest", "input_contract", "output_contract",
+                          "task_canonical",
                           "sourceManifest" },
                         "", &unknown );
     if ( inputVal.isObject() )
@@ -568,7 +609,7 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
             collectUnknownKeys(
               entryObj.value( QStringLiteral( "preprocess" ) ).toObject(),
               { "normalize", "mean", "std", "scale", "resize", "interpolation",
-                "nodata_policy", "clamp_min", "clamp_max", "pad" },
+                "nodata_policy", "clamp_min", "clamp_max", "pad", "offset" },
               "inputs[" + std::to_string( index ) + "].preprocess.", &unknown );
         }
         ++index;
@@ -602,14 +643,15 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     }
     collectUnknownKeys( obj.value( QStringLiteral( "preprocess" ) ).toObject(),
                         { "normalize", "mean", "std", "scale", "resize", "interpolation",
-                          "nodata_policy", "clamp_min", "clamp_max", "pad" },
+                          "nodata_policy", "clamp_min", "clamp_max", "pad", "offset" },
                         "preprocess.", &unknown );
     collectUnknownKeys( tilingObj,
                         { "supported", "tile_size", "overlap", "halo", "batch_size",
                           "min_valid_coverage", "blend" },
                         "tiling.", &unknown );
     collectUnknownKeys( postObj, { "nms", "mask_threshold", "polygonize", "simplify",
-                                    "class_mapping" },
+                                    "class_mapping", "calibration_temperature", "morphology",
+                                    "morphology_kernel_px" },
                         "postprocess.", &unknown );
     collectUnknownKeys( runtimeObj,
                         { "gpu", "cpu_fallback", "estimated_ram_mb", "estimated_vram_mb", "device",
@@ -648,6 +690,22 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
                           { "sensors", "modalities", "polarizations", "temporal_length",
                             "radiometric_state", "resolution_range" },
                           "domain.", &unknown );
+    if ( obj.contains( QStringLiteral( "eo" ) ) )
+    {
+      collectUnknownKeys( obj.value( QStringLiteral( "eo" ) ).toObject(),
+                          { "wavelengths_nm", "calibration", "grid" },
+                          "eo.", &unknown );
+      collectUnknownKeys( obj.value( QStringLiteral( "eo" ) ).toObject()
+                            .value( QStringLiteral( "calibration" ) )
+                            .toObject(),
+                          { "state", "enforced" },
+                          "eo.calibration.", &unknown );
+      collectUnknownKeys( obj.value( QStringLiteral( "eo" ) ).toObject()
+                            .value( QStringLiteral( "grid" ) )
+                            .toObject(),
+                          { "crs_family" },
+                          "eo.grid.", &unknown );
+    }
     for ( const std::string &key : unknown )
       markInvalid( "unknown key '" + key + "' is not part of the manifest contract - "
                    "declare it where it belongs or remove it (unsupported keys are never ignored)" );
@@ -693,6 +751,12 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
                      + "' contradicts output.heads[0].name '" + info.output.heads.front().name
                      + "'" );
   }
+  // Platform 10.0: offset (like scale) only executes under linear/mean_std —
+  // declaring it with normalize "none" would silently do nothing.
+  if ( info.preprocess.offset != 0.0 && info.preprocess.normalize != "linear"
+       && info.preprocess.normalize != "mean_std" )
+    markInvalid( "preprocess.offset only executes with normalize linear or mean_std "
+                 "(declared knobs are never silently ignored)" );
   if ( !std::isnan( info.preprocess.clampMin ) && !std::isnan( info.preprocess.clampMax )
        && info.preprocess.clampMin >= info.preprocess.clampMax )
     markInvalid( "preprocess.clamp_min must be < preprocess.clamp_max" );
@@ -826,6 +890,12 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     markInvalid( "postprocess.polygonize is declared but not implemented by any runtime - remove it or implement mask->polygon chaining" );
   if ( info.postprocess.simplify > 0.0 )
     markInvalid( "postprocess.simplify is declared but not implemented by any runtime" );
+  // Platform 10.0: EO domain contract vocabulary/range checks.
+  if ( info.eo.declared )
+  {
+    if ( const std::string eoError = info.eo.validate(); !eoError.empty() )
+      markInvalid( eoError );
+  }
   // Platform 8.0 WP-E: the Labels class remap must be injective and
   // non-negative — a colliding remap would silently merge classes.
   {
@@ -835,6 +905,14 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
       if ( mapping[i] < 0 )
         markInvalid( "postprocess.class_mapping values must be >= 0 (element "
                        + std::to_string( i ) + " is " + std::to_string( mapping[i] ) + ")" );
+      // F-OPS-1: the Labels raster encoding stores product classes in Byte
+      // (sentinel 255) or UInt16 (sentinel 65535, promoted when the product
+      // domain needs it); a target at/above the sentinel would clamp into
+      // NoData on write. 65534 is the hard representable ceiling.
+      if ( mapping[i] > 65534 )
+        markInvalid( "postprocess.class_mapping values must fit the UInt16 labels "
+                     "encoding with 65535 reserved as NoData (element "
+                       + std::to_string( i ) + " is " + std::to_string( mapping[i] ) + ")" );
       for ( std::size_t j = 0; j < i; ++j )
         if ( mapping[i] == mapping[j] )
           markInvalid( "postprocess.class_mapping maps classes "
@@ -842,6 +920,16 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
                          + "product class " + std::to_string( mapping[i] )
                          + " (a colliding remap silently merges classes)" );
     }
+  }
+  // Platform 10.0: calibration temperature + morphology vocabulary/range.
+  {
+    const double t = info.postprocess.calibrationTemperature;
+    if ( !std::isnan( t ) && t <= 0.0 )
+      markInvalid( "postprocess.calibration_temperature must be > 0 (got "
+                     + std::to_string( t ) + ")" );
+    if ( const std::string morphologyError = info.postprocess.validateMorphology();
+         !morphologyError.empty() )
+      markInvalid( morphologyError );
   }
   // Platform 4.0 raster-task output format vocabulary.
   if ( !info.output.format.empty() && info.output.format != "probability"
@@ -906,6 +994,37 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
 
 } // namespace
 
+// --- Platform 10.0: EO task vocabulary --------------------------------------
+
+std::vector<std::string> eoTaskVocabulary()
+{
+  return { "segmentation", "detection", "classification", "change_detection",
+           "regression", "instance_segmentation", "embedding", "super_resolution" };
+}
+
+std::string canonicalEoTask( const std::string &task )
+{
+  auto lower = []( std::string v )
+  {
+    std::transform( v.begin(), v.end(), v.begin(),
+                    []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+    return v;
+  };
+  const std::string t = lower( task );
+  static const std::map<std::string, std::string> aliases = {
+    { "semantic_segmentation", "segmentation" },
+    { "object_detection", "detection" },
+    { "scene_classification", "classification" },
+    { "ssl", "embedding" },
+    { "feature_embedding", "embedding" },
+  };
+  const auto vocab = eoTaskVocabulary();
+  if ( std::find( vocab.begin(), vocab.end(), t ) != vocab.end() )
+    return t;
+  const auto it = aliases.find( t );
+  return it != aliases.end() ? it->second : std::string();
+}
+
 std::string ModelInputContract::validate() const
 {
   if ( !modality.empty() && modality != "optical" && modality != "sar" && modality != "dem"
@@ -955,6 +1074,65 @@ std::string ModelInputContract::validate() const
     if ( !preprocess.resize.empty() && preprocess.resize != "none" )
       return "inputs[].preprocess.resize '" + preprocess.resize
                + "' is not executed per feed — declare it in the global preprocess section";
+  }
+  return {};
+}
+
+std::string ModelPostprocessContract::validateMorphology() const
+{
+  if ( morphology.empty() )
+  {
+    if ( morphologyKernelPx != 3 )
+      return "postprocess.morphology_kernel_px is declared but postprocess.morphology is off — "
+             "a declared knob is never silently ignored";
+    return {};
+  }
+  if ( morphology != "erode" && morphology != "dilate" && morphology != "open"
+       && morphology != "close" )
+    return "postprocess.morphology '" + morphology
+           + "' is not part of the vocabulary (erode, dilate, open, close)";
+  if ( morphologyKernelPx < 3 || morphologyKernelPx % 2 == 0 )
+    return "postprocess.morphology_kernel_px must be an odd value >= 3 (got "
+             + std::to_string( morphologyKernelPx ) + ")";
+  return {};
+}
+
+std::string ModelEoDomainContract::validate() const
+{
+  static const char *kStates[] = { "radiance", "toa_reflectance", "surface_reflectance",
+                                   "brightness_temperature", "digital_number", "gamma0",
+                                   "indices", "any" };
+  if ( !calibrationState.empty() )
+  {
+    bool known = false;
+    for ( const char *state : kStates )
+      if ( calibrationState == state )
+        known = true;
+    if ( !known )
+      return "eo.calibration.state '" + calibrationState
+             + "' is not part of the radiometric-state vocabulary (radiance, toa_reflectance, "
+               "surface_reflectance, brightness_temperature, digital_number, gamma0, indices, any)";
+    if ( calibrationEnforced && calibrationState == "any" )
+      return "eo.calibration.state 'any' cannot be enforced (an enforced calibration must name "
+             "a concrete state)";
+  }
+  else if ( calibrationEnforced )
+  {
+    return "eo.calibration.enforced requires eo.calibration.state";
+  }
+  if ( !crsFamily.empty() && crsFamily != "any" && crsFamily != "geographic"
+       && crsFamily != "projected" )
+    return "eo.grid.crs_family '" + crsFamily
+           + "' is not part of the vocabulary (any, geographic, projected)";
+  for ( const auto &entry : wavelengthsNm )
+  {
+    const ModelWavelengthWindowNm &w = entry.second;
+    if ( w.minNm <= 0.0 || w.maxNm <= 0.0 )
+      return "eo.wavelengths_nm['" + entry.first
+             + "'] must carry positive bounds (both min and max, nanometers)";
+    if ( w.minNm > w.maxNm )
+      return "eo.wavelengths_nm['" + entry.first + "'] min (" + std::to_string( w.minNm )
+             + ") exceeds max (" + std::to_string( w.maxNm ) + ")";
   }
   return {};
 }
@@ -1038,6 +1216,39 @@ Json::Value ModelInfo::toJson() const
       out["package"] = package;
   }
   out["task"] = task;
+  if ( const std::string canonical = canonicalEoTask( task ); !canonical.empty() )
+    out["task_canonical"] = canonical;
+  if ( eo.declared )
+  {
+    Json::Value eoOut( Json::objectValue );
+    if ( !eo.wavelengthsNm.empty() )
+    {
+      Json::Value waves( Json::objectValue );
+      for ( const auto &entry : eo.wavelengthsNm )
+      {
+        Json::Value window( Json::arrayValue );
+        window.append( entry.second.minNm );
+        window.append( entry.second.maxNm );
+        waves[entry.first.c_str()] = window;
+      }
+      eoOut["wavelengths_nm"] = waves;
+    }
+    if ( !eo.calibrationState.empty() )
+    {
+      Json::Value calib( Json::objectValue );
+      calib["state"] = eo.calibrationState;
+      if ( eo.calibrationEnforced )
+        calib["enforced"] = true;
+      eoOut["calibration"] = calib;
+    }
+    if ( !eo.crsFamily.empty() )
+    {
+      Json::Value grid( Json::objectValue );
+      grid["crs_family"] = eo.crsFamily;
+      eoOut["grid"] = grid;
+    }
+    out["eo"] = eoOut;
+  }
   out["input"] = inputType;
   out["output"] = outputType;
   out["framework"] = framework;
@@ -1205,6 +1416,8 @@ Json::Value ModelInfo::toJson() const
       pre["clamp_max"] = preprocess.clampMax;
     if ( preprocess.pad > 0 )
       pre["pad"] = preprocess.pad;
+    if ( preprocess.offset != 0.0 )
+      pre["offset"] = preprocess.offset; // Platform 10.0
     out["preprocess"] = pre;
   }
   if ( tiling.tileSize > 0 || tiling.overlap > 0 || tiling.halo > 0 || tiling.batchSize != 1
@@ -1275,7 +1488,8 @@ Json::Value ModelInfo::toJson() const
     out["output_contract"] = o;
   }
   if ( postprocess.nms || postprocess.maskThreshold >= 0.0 || postprocess.polygonize
-       || postprocess.simplify > 0.0 || !postprocess.classMapping.empty() )
+       || postprocess.simplify > 0.0 || !postprocess.classMapping.empty()
+       || !std::isnan( postprocess.calibrationTemperature ) || !postprocess.morphology.empty() )
   {
     Json::Value p( Json::objectValue );
     if ( postprocess.nms )
@@ -1292,6 +1506,13 @@ Json::Value ModelInfo::toJson() const
       for ( int mapped : postprocess.classMapping )
         mapping.append( mapped );
       p["class_mapping"] = mapping;
+    }
+    if ( !std::isnan( postprocess.calibrationTemperature ) )
+      p["calibration_temperature"] = postprocess.calibrationTemperature; // Platform 10.0
+    if ( !postprocess.morphology.empty() )
+    {
+      p["morphology"] = postprocess.morphology; // Platform 10.0
+      p["morphology_kernel_px"] = postprocess.morphologyKernelPx;
     }
     out["postprocess"] = p;
   }

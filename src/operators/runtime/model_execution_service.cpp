@@ -175,6 +175,22 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
     throw RSOperatorError( ErrorCode::InvalidInputData,
                            "detection decode runs on the single-input path — multi-input "
                              "detection heads are not wired yet" );
+  if ( request.asSceneClassification && ( request.asDetection || multiInput ) )
+    throw RSOperatorError( ErrorCode::InvalidInputData,
+                           "scene classification runs the single-input path — it classifies "
+                             "ONE scene in ONE forward pass; multi-feed/detection requests "
+                             "are different tasks" );
+  // Platform 10.0: task INTENT gates. A task adapter carries a canonical EO
+  // task; the resolved model's manifest must agree — running a detection
+  // manifest through rs:classify would silently misread the outputs.
+  if ( !request.requiredEoTask.empty()
+       && sicnu::operators::canonicalEoTask( model.task ) != request.requiredEoTask )
+    throw RSOperatorError(
+      ErrorCode::InvalidInputData,
+      "model '" + model.name + "' declares task '" + model.task
+        + "' which carries no '" + request.requiredEoTask
+        + "' contract — this operator requires a model whose canonical task is '"
+        + request.requiredEoTask + "' (fix the manifest task or pick the matching operator)" );
   rejectUnwiredContracts( model, request.namedInputs );
   if ( !multiInput )
     preflightFeatureCube( model, request.inputPath );
@@ -280,6 +296,18 @@ ModelExecutionResult runModelInference( const ModelExecutionRequest &request,
       classes.append( cls );
     payload["classes"] = classes;
     result.payload = payload;
+    return result;
+  }
+
+  if ( request.asSceneClassification )
+  {
+    TileInferenceEngine engine( effectiveModel, session );
+    Json::Value doc =
+      engine.runSceneClassification( request.inputPath, bands, request.outputPath, context, options );
+    doc["backend"] = result.backend;
+    doc["device"] = result.device;
+    doc["model_ref"] = model.stableId();
+    result.payload = doc;
     return result;
   }
 

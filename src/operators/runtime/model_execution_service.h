@@ -39,6 +39,14 @@ struct ModelExecutionRequest
   TtaMode tta = TtaMode::None;
   int batchSizeOverride = 0;    ///< batchCap (a cap, never an upgrade)
   bool asDetection = false;     ///< vector output via DetectionTileEngine
+  /// Platform 10.0 scene classification (rs:classify): single forward pass,
+  /// typed exp-rs-classification/1 JSON artifact. Requires the model's
+  /// canonical EO task to be "classification".
+  bool asSceneClassification = false;
+  /// Platform 10.0 canonical-task gates for the task adapters: when set,
+  /// the resolved model's canonicalEoTask(task) must equal this token —
+  /// task INTENT and model contract must agree (never silently executed).
+  std::string requiredEoTask;
   RasterOutputMode outputMode = RasterOutputMode::Probability; ///< manifest default unless overridden
   double confOverride = -1.0;   ///< detection confidence gate override (<0 = manifest)
   double nmsIouOverride = -1.0; ///< detection NMS IoU override (<0 = manifest)

@@ -321,7 +321,7 @@ TEST_CASE( "manifest_version 5 keeps the shape cross-check", "[models][manifest7
                  "but the manifest shape is version 1" );
   expectRefusal( R"({
       "name": "m7-v9", "task": "t", "framework": "onnx", "manifest_version": 9 })",
-                 "manifest_version 9 is unsupported (1..5)" );
+                 "manifest_version 9 is unsupported (1..6)" );
 }
 
 TEST_CASE( "7.0 fields survive the toJson projection", "[models][manifest7]" )

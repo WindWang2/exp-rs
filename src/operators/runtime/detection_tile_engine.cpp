@@ -1,6 +1,7 @@
 // src/operators/runtime/detection_tile_engine.cpp
 #include "operators/runtime/detection_tile_engine.h"
 
+#include "operators/runtime/eo_preflight.h"
 #include "operators/framework/rs_operator_error.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
@@ -89,6 +90,12 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
 {
   if ( !m_runtime )
     throw RSOperatorError( ErrorCode::ComputationError, "detection engine has no runtime session" );
+
+  // Platform 10.0: EO domain preflight before any tile is read (the report
+  // is advisory-visible through context logging; enforced facts refuse).
+  if ( m_model.eo.declared )
+    enforceEoPreflight( m_model, inputPath );
+
   if ( const std::string contractError = checkContract( m_model ); !contractError.empty() )
     throw RSOperatorError( ErrorCode::InvalidInputData, contractError );
   const ModelDetectionContract &det = m_model.output.detection;
@@ -413,7 +420,10 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
   }
 
   // Whole-raster dedup: exact-duplicate collapse + NMS = the tile-overlap
-  // resolution. Bounded accumulation guard before the write.
+  // resolution. Bounded accumulation guard before the write. The dedup/NMS
+  // pair is grid-accelerated and polls the operator's cancel predicate
+  // (F-OPS-5): a dense candidate field can no longer hold the worker
+  // un-cancellable for the whole pass.
   stats.rawDetections = static_cast<int>( detections.size() );
   if ( stats.rawDetections > det.maxDetections )
     throw RSOperatorError(
@@ -421,7 +431,8 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
       "detection accumulated " + std::to_string( stats.rawDetections )
         + " boxes which exceeds output.detection.max_detections ("
         + std::to_string( det.maxDetections ) + ") — raise the cap or lower the conf_threshold" );
-  dedupDetections( detections, det.nmsIou );
+  context.throwIfCancelled();
+  dedupDetections( detections, det.nmsIou, [&context] { return context.isCancelled(); } );
   stats.detectionsKept = static_cast<int>( detections.size() );
 
   context.throwIfCancelled();

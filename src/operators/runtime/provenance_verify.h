@@ -54,4 +54,16 @@ ProvenanceVerdict verifyProductProvenance( const std::string &outputPath,
 /// Convenience: the sidecar path for a product path.
 std::string provenanceSidecarPath( const std::string &outputPath );
 
+/// Platform 10.0 MLOps seam (the 9.0 track's "stable accessor"): verify a
+/// published product against a MODEL REFERENCE (catalog stable id or weight
+/// path) instead of hand-built expectations. Resolves the model exactly like
+/// inference does (catalog readiness pipeline), then checks identity tag,
+/// content digest and backend. This is the entry point for benchmark sets,
+/// promotion evidence and replay-deviation checks — they call THIS, never
+/// re-derive expectations from manifest fields.
+/// Never throws: an unresolvable reference is a typed ModelMismatch verdict
+/// with the resolution detail (no product claim is invented).
+ProvenanceVerdict verifyProductAgainstModel( const std::string &outputPath,
+                                             const std::string &modelReference );
+
 } // namespace sicnu::operators::runtime

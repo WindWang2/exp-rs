@@ -6,11 +6,27 @@
 #include <json/json.h>
 
 #include <limits>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
 
 namespace sicnu::operators {
+
+// --- Platform 10.0: EO task vocabulary ---------------------------------------
+
+/// Canonical EO task vocabulary (Platform 10.0). The manifest `task` string
+/// stays the single source; a canonical token declares which task adapter and
+/// which typed output artifact contract the model participates in. Legacy and
+/// third-party free-form strings keep parsing (they simply carry no canonical
+/// adapter contract); aliases map 1:1 to canonical tokens.
+std::vector<std::string> eoTaskVocabulary();
+/// Canonical token for @p task (case-insensitive): the token itself when in
+/// the vocabulary, the alias target for a known alias ("semantic_segmentation"
+/// → "segmentation", "object_detection" → "detection",
+/// "scene_classification" → "classification", "ssl"/"feature_embedding" →
+/// "embedding"), or "" when the task carries no canonical contract.
+std::string canonicalEoTask( const std::string &task );
 
 /**
  * Artifact (weight file) contract — manifest v2 `artifact` section. All fields
@@ -35,6 +51,10 @@ struct ModelPreprocessContract
   std::vector<double> mean;   ///< Per-channel means (mean_std)
   std::vector<double> stdv;   ///< Per-channel standard deviations (mean_std)
   double scale = 1.0;         ///< Multiplicative scale applied last (linear & mean_std)
+  /// Platform 10.0: additive offset applied AFTER scale (linear & mean_std:
+  /// v = ((x - mean) / std) * scale + offset). Refused with normalize "none"
+  /// — a declared knob that does nothing is the #646 failure class.
+  double offset = 0.0;
   std::string resize;         ///< "none" (default) | "to_input" (resize each tile to input.width/height)
   std::string interpolation;  ///< "bilinear" (default) | "nearest"
   std::string nodataPolicy;   ///< "zero" (default): non-finite input pixels become 0 before the model
@@ -156,6 +176,53 @@ struct ModelAuxFileContract
   unsigned long long sizeBytes = 0; ///< Declared size; 0 = unchecked
 };
 
+/// One per-band-role wavelength sensitivity window (Platform 10.0, manifest
+/// `eo.wavelengths_nm`, e.g. {"nir": [780, 1400]}). A model trained on
+/// Sentinel-2 red (665 nm) misreads a 630 nm red band SILENTLY; declaring the
+/// training sensitivity window lets the runtime and the agent knowledge layer
+/// compare the input raster's declared band wavelengths against the model's
+/// expectation instead of matching band-role NAMES alone.
+struct ModelWavelengthWindowNm
+{
+  double minNm = -1.0; ///< inclusive lower bound (both bounds must be > 0)
+  double maxNm = -1.0; ///< inclusive upper bound
+};
+
+/**
+ * EO domain truth extension (Platform 10.0, manifest `eo` section) — the
+ * physical facts a preflight check (and an agent) needs to decide "can this
+ * model read THIS raster" beyond band-role names. Additive and optional: an
+ * absent `eo` section keeps historical behavior bit-identical, and every
+ * runtime check is enforced only when the corresponding fact is declared.
+ *
+ * Calibration vocabulary mirrors the platform-wide SICNU_RADIOMETRIC_STATE
+ * domain (satellite_products.h / ADR 0114): "radiance" | "toa_reflectance" |
+ * "surface_reflectance" | "brightness_temperature" | "digital_number" |
+ * "gamma0" | "indices" | "any". The authority for input facts is the
+ * canonical metadata layer (`inspectRaster`), never a guess.
+ */
+struct ModelEoDomainContract
+{
+  bool declared = false; ///< true when the manifest carries an `eo` section
+  /// Training sensitivity windows keyed by lower-case band role
+  /// (inputs[].band_roles tokens). Roles without a window are simply
+  /// wavelength-unchecked.
+  std::map<std::string, ModelWavelengthWindowNm> wavelengthsNm;
+  /// Required radiometric state of the input. "" = no requirement (the legacy
+  /// domain.radiometric_state string stays an advisory ranking fact).
+  std::string calibrationState;
+  /// When true (with a non-empty calibrationState) the runtime PREFLIGHT
+  /// refuses a typed error when the input's declared radiometric state is
+  /// absent or different — a required calibration is verified, never assumed.
+  bool calibrationEnforced = false;
+  /// Grid assumption vocabulary: "" | "any" (default) | "geographic" |
+  /// "projected". Enforced against the input CRS at preflight when set.
+  std::string crsFamily;
+
+  /// Vocabulary + range validation (empty string = ok).
+  std::string validate() const;
+};
+
 /**
  * Tiling contract — manifest v2 `tiling` section. Drives the tile inference
  * engine geometry; `supported` also mirrors the legacy supportsTiling field.
@@ -250,6 +317,23 @@ struct ModelPostprocessContract
   /// remap would silently merge classes. Mask/confidence semantics stay on
   /// MODEL classes so the background test never moves under a remap.
   std::vector<int> classMapping;
+  // --- Platform 10.0: calibration + morphology (effective contract recorded)
+  /// Probability calibration temperature (>0; NaN/unset = off). Applied to
+  /// the class probabilities BEFORE the derived collapse (labels/mask/
+  /// confidence): p' = p^(1/T) / sum_j p_j^(1/T). Argmax is invariant; a
+  /// fixed mask threshold deliberately shifts with the calibration — that is
+  /// the point of post-hoc calibration. Recorded in the provenance sidecar.
+  double calibrationTemperature = std::numeric_limits<double>::quiet_NaN();
+  /// Morphological cleanup on the published Labels/Mask product: "" (off, the
+  /// historical behavior) | "erode" | "dilate" | "open" | "close". Executed
+  /// as a bounded streaming pass (window reads with kernel-radius halo), so
+  /// seams stay exact and memory stays O(W * kernel).
+  std::string morphology;
+  /// Square kernel edge in px for postprocess.morphology (odd, >= 3).
+  int morphologyKernelPx = 3;
+
+  /// Vocabulary + range validation (empty = ok).
+  std::string validateMorphology() const;
 };
 
 /**
@@ -353,6 +437,10 @@ struct ModelInfo {
   /// declared (role, digest) pair — the identity anchor for the WHOLE package.
   /// Empty when no aux files are declared (then contentDigest alone anchors).
   std::string packageDigest;
+
+  // --- Platform 10.0: EO domain truth (manifest `eo` section) -----------------
+  /// Optional, additive; absent section = declared=false = historical behavior.
+  ModelEoDomainContract eo;
 
   // Real availability state computed at load time (catalog-static half: the
   // runtime layer adds UnsupportedRuntime/IncompatibleHardware on top).
