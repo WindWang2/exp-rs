@@ -315,9 +315,12 @@ TEST_CASE("rs:qa_mask reads float QA bands natively and guards non-finite values
 
     RSOperatorContext ctx;
     Json::Value result = op->run(params, ctx);
-    // 8 = cloud -> masked; NaN -> clear (no UB); 70000 -> clamped to 65535
-    // (all QA bits set -> masked), not truncated; -5 -> clear.
-    CHECK(result["maskedPixels"].asUInt64() == 2);
+    // 8 = cloud -> masked; NaN -> unreadable -> MASKED (fail-closed, F-OPS-3);
+    // 70000 -> clamped to 65535 (all QA bits set -> masked), not truncated;
+    // -5 -> negative sentinel -> unreadable -> MASKED. A quality gate must
+    // fail toward "excluded", never silently toward "clear".
+    CHECK(result["maskedPixels"].asUInt64() == 4);
+    CHECK(result["unreadableSamples"].asUInt64() == 3);
     CHECK(result["totalPixels"].asUInt64() == 4);
 
     GdalDatasetWrapper out;
@@ -325,9 +328,9 @@ TEST_CASE("rs:qa_mask reads float QA bands natively and guards non-finite values
     std::vector<float> mask(W * H);
     REQUIRE(out.readBandData(1, mask.data(), W, H));
     CHECK(mask[0] == 1.0f);
-    CHECK(mask[1] == 0.0f);
+    CHECK(mask[1] == 1.0f);
     CHECK(mask[2] == 1.0f);
-    CHECK(mask[3] == 0.0f);
+    CHECK(mask[3] == 1.0f);
 }
 
 TEST_CASE("rs:qa_mask reads UInt16 QA bands natively and honours declared nodata (#699)",
@@ -364,9 +367,10 @@ TEST_CASE("rs:qa_mask reads UInt16 QA bands natively and honours declared nodata
     RSOperatorContext ctx;
     Json::Value result = op->run(params, ctx);
     // 8 = cloud -> masked; 16 = shadow -> masked; 65535 = declared nodata ->
-    // unmasked (must not be confused with "all flags set"); 4 = bit 2 =
+    // no QA word -> MASKED (fail-closed, F-OPS-3); 4 = bit 2 =
     // CIRRUS, which the cloud mask includes (cloud|dilated|cirrus) -> masked.
-    CHECK(result["maskedPixels"].asUInt64() == 3);
+    CHECK(result["maskedPixels"].asUInt64() == 4);
+    CHECK(result["unreadableSamples"].asUInt64() == 1);
     CHECK(result["totalPixels"].asUInt64() == 4);
 
     GdalDatasetWrapper out;
@@ -375,6 +379,94 @@ TEST_CASE("rs:qa_mask reads UInt16 QA bands natively and honours declared nodata
     REQUIRE(out.readBandData(1, mask.data(), W, H));
     CHECK(mask[0] == 1.0f);
     CHECK(mask[1] == 1.0f);
-    CHECK(mask[2] == 0.0f);
+    CHECK(mask[2] == 1.0f);
     CHECK(mask[3] == 1.0f);
+}
+
+// --- F-OPS-3: fail-closed semantics for unreadable QA samples ---------------
+
+TEST_CASE("rs:qa_mask fails CLOSED on unreadable samples (F-OPS-3)",
+          "[operators][rs][qa][f-ops-3]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+
+    // Sentinel-2 SCL via a float band holding an out-of-class NaN: the SCL
+    // word is unreadable, so the pixel must be masked even though the SCL
+    // kernel never selects class 0 for any named selection.
+    {
+        const QString input = tmp.path() + "/scl_nan.tif";
+        const QString output = tmp.path() + "/scl_nan_mask.tif";
+        ensureGdalInit();
+        constexpr int W = 2, H = 1;
+        std::array<double, 6> gt = {500000, 30, 0, 4500000, 0, -30};
+        GDALDatasetH ds = createOutputTiff(input, W, H, 1, GDT_Float32, gt, QString());
+        REQUIRE(ds != nullptr);
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        std::vector<float> scl = {4.0f, nan}; // vegetation, unreadable
+        REQUIRE(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, W, H, scl.data(),
+                             W, H, GDT_Float32, 0, 0) == CE_None);
+        GDALClose(ds);
+
+        auto op = RSOperatorRegistry::instance().create("rs:qa_mask");
+        REQUIRE(op != nullptr);
+        Json::Value params(Json::objectValue);
+        params["input"] = input.toStdString();
+        params["output"] = output.toStdString();
+        params["qa_band"] = 1;
+        params["source"] = "sentinel2_scl";
+        params["mask"] = "cloud";
+
+        RSOperatorContext ctx;
+        Json::Value result = op->run(params, ctx);
+        CHECK(result["maskedPixels"].asUInt64() == 1); // only the NaN pixel
+        CHECK(result["unreadableSamples"].asUInt64() == 1);
+
+        GdalDatasetWrapper out;
+        REQUIRE(out.open(output));
+        std::vector<float> mask(W * H);
+        REQUIRE(out.readBandData(1, mask.data(), W, H));
+        CHECK(mask[0] == 0.0f); // vegetation stays clear
+        CHECK(mask[1] == 1.0f); // NaN fails closed
+    }
+
+    // SCL mask=all must include SCL class 0 (NO_DATA): an unreadable
+    // classification word is exactly what an "everything questionable" gate
+    // exists to exclude.
+    {
+        const QString input = tmp.path() + "/scl_zero.tif";
+        const QString output = tmp.path() + "/scl_zero_mask.tif";
+        ensureGdalInit();
+        constexpr int W = 2, H = 1;
+        std::array<double, 6> gt = {500000, 30, 0, 4500000, 0, -30};
+        GDALDatasetH ds = createOutputTiff(input, W, H, 1, GDT_Byte, gt, QString());
+        REQUIRE(ds != nullptr);
+        const uint8_t scl[W] = {0, 4}; // NO_DATA, vegetation
+        REQUIRE(GDALRasterIO(GDALGetRasterBand(ds, 1), GF_Write, 0, 0, W, H,
+                             const_cast<uint8_t*>(scl), W, H, GDT_Byte, 0, 0) == CE_None);
+        GDALClose(ds);
+
+        auto op = RSOperatorRegistry::instance().create("rs:qa_mask");
+        REQUIRE(op != nullptr);
+        Json::Value params(Json::objectValue);
+        params["input"] = input.toStdString();
+        params["output"] = output.toStdString();
+        params["qa_band"] = 1;
+        params["source"] = "sentinel2_scl";
+        params["mask"] = "all";
+
+        RSOperatorContext ctx;
+        Json::Value result = op->run(params, ctx);
+        // "all" masks NO_DATA(0) + saturated/dark/cloud/shadow/cirrus/snow —
+        // vegetation stays clear. Exactly one masked pixel here.
+        CHECK(result["maskedPixels"].asUInt64() == 1);
+
+        GdalDatasetWrapper out;
+        REQUIRE(out.open(output));
+        std::vector<float> mask(W * H);
+        REQUIRE(out.readBandData(1, mask.data(), W, H));
+        CHECK(mask[0] == 1.0f); // class 0 (NO_DATA) masked by "all"
+        CHECK(mask[1] == 0.0f); // vegetation clear under "all"
+    }
 }
