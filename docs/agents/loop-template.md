@@ -154,7 +154,7 @@ Trigger / Checkpoint / Push right / Brief 词汇，注入本仓库的硬约束�
 - [ ] Autonomy defaults ≥6 条且每条可判定。
 - [ ] 零 PR 收尾流程、零 merge 术语。
 - [ ] 单轮超时是明确数字。
-- [ ] `grep -cE "尽量|适当|必要时|合理|充分|酌情" <loop 文本>` 输出 0。
+- [ ] 全文不可判定词命中数 = 0（排除检查命令自身行后；命令见 goal-template.md"措辞"一节）。
 
 ---
 
