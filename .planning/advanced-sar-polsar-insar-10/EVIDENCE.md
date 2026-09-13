@@ -47,3 +47,52 @@
 ## OUT_OF_SCOPE（范围外发现）
 
 （暂无；持续记录）
+
+## Phase 8 — 最终本地验证（最终 HEAD `2d19055`，rebase 后无漂移）
+
+`git fetch origin && git rebase origin/master` → Already up to date（origin/master 仍为 7d78059）。
+`git diff --check` exit 0；conflict-marker 扫描 0 命中；secret 扫描 0 命中（唯一命中为
+`parsePolChannel(const QString &token, ...)` 的通道 token 参数名，非凭据）。
+
+### 测试矩阵（QT_QPA_PLATFORM=offscreen，逐二进制直跑，最终 HEAD）
+
+| 套件 | 结果 |
+| --- | --- |
+| test_sar_complex（新） | All tests passed (378 assertions / 7 cases) |
+| test_sar_polsar（新） | All tests passed (143 / 8) |
+| test_sar_insar（新） | All tests passed (266 / 10) |
+| test_sar_temporal_events（新） | All tests passed (90 / 5) |
+| test_sar_platform10（新 E2E） | All tests passed (2766 / 11) |
+| test_sar_temporal_stats（回归） | All tests passed (238 / 5) |
+| test_sar_orbit（回归+新基线测试） | All tests passed (57 / 8) |
+| test_sar_kernels（回归） | All tests passed (89 / 12) |
+| test_sar_operators（回归） | All tests passed (595 / 19) |
+| test_sar_geocoding（回归） | All tests passed (5769 / 8) |
+| test_sar_foundation5（回归） | All tests passed (279 / 6) |
+| test_capability_contract_9 | All tests passed (2013 / 5) |
+| test_contract_platform_9（快照重生成后） | All tests passed (15 / 4) |
+
+### 生成物校验
+
+- `capability_knowledge_tool gen-meta` → wrote 121 sidecars, 0 problems
+- `gen-pages` → written；`gen-pages --check` → **zero diff**
+- `contract_inventory` → nodes 873 / edges 279 / findings 0（快照已随 schema 演进再生成并提交）
+
+### 预存在失败（master @ 7d78059 即失败，OUT_OF_SCOPE，证据见 REVIEW_LOG 守卫节）
+
+- test_capability_drift：cartography tools ×3、rs:gaofen/zy3/hj_import 知识条目、recipe 别名 canary
+- test_mapspec：制图视觉用例 SIGABRT（classification-a4l；与本 track 零文件交集）
+
+### 存在性断言（runbook 第 6 步）
+
+- 技能路径断言：输出为空（全部存在）✓
+- docs/review/.planning 引用断言：输出为空（全部存在）✓
+- `git ls-files .planning/advanced-sar-polsar-insar-10/ | wc -l` → 10（planning 全部被跟踪）
+- `git log --oneline origin/master..HEAD | wc -l` → 8 commits（含独立 integration commit）
+
+### 预算节（续）
+
+| Phase | 时间戳 | 工具调用数 | 触及文件数 |
+| --- | --- | --- | --- |
+| 6（sidecar/knowledge/守卫） | 2026-09-14 凌晨 | ~25 | ~15 |
+| 7-8（review 两轮 + 修复 + 最终验证） | 2026-09-14 | ~45 | ~20 |
