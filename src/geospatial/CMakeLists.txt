@@ -19,6 +19,8 @@ set(SICNU_GEOSPATIAL_SOURCES
     util/resource_uri.cpp
     util/time_normalization.cpp
     util/sha256.cpp
+    remote/offline_gate.cpp
+    remote/offline_gate.h
     remote/remote_identity_token.cpp
     probe/probe.cpp
     remote/probe_remote.cpp

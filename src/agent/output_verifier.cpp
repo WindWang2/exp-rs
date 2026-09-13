@@ -529,21 +529,21 @@ bool parseRulesImpl( const QString &path, LabRuleSet *rules, QString *error )
     *error = QStringLiteral( "Cannot read rules file: %1" ).arg( path );
     return false;
   }
-  const QByteArray bytes = file.readAll();
   Json::Value root;
   Json::CharReaderBuilder builder;
   builder["collectComments"] = false;
   std::string parseErrors;
+  // Parse from memory: Json::parseFromStream wants a std::istream and a QFile
+  // is not one (this TU never compiled against real jsoncpp before this fix).
+  const QByteArray rulesBytes = file.readAll();
+  const char *begin = rulesBytes.constData();
+  const char *end = begin + rulesBytes.size();
+  std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+  if ( !reader->parse( begin, end, &root, &parseErrors ) )
   {
-    std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
-    const char *begin = bytes.constData();
-    const char *end = begin + bytes.size();
-    if ( !reader->parse( begin, end, &root, &parseErrors ) )
-    {
-      *error = QStringLiteral( "Rules file is not valid JSON: %1 (%2)" )
-                 .arg( path, QString::fromStdString( parseErrors ) );
-      return false;
-    }
+    *error = QStringLiteral( "Rules file is not valid JSON: %1 (%2)" )
+               .arg( path, QString::fromStdString( parseErrors ) );
+    return false;
   }
 
   rules->path = QFileInfo( path ).absoluteFilePath();
@@ -1743,7 +1743,7 @@ FinalOutcome finalizeAssertion( const LabAssertion &a, const AssertionState &st,
             for ( int m : modes )
             {
                 centers.append( lo + ( static_cast<double>( m ) + 0.5 ) * binWidth );
-                counts.append( Json::Int64( st.hist.at( static_cast<std::size_t>( m ) ) ) );
+                counts.append( Json::Value( static_cast<Json::Int64>( st.hist.at( static_cast<std::size_t>( m ) ) ) ) );
             }
             observed["mode_centers"] = centers;
             observed["mode_counts"] = counts;

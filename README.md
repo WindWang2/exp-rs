@@ -96,6 +96,46 @@ make -j$(nproc)
 ./sicnu_geo_rs
 ```
 
+## Windows（离线机房部署）
+
+Windows 是教学机房的一等目标：一键构建、一键实验、一键批改全班，全程可离线。
+
+### Windows 先决条件
+
+| 依赖 | 默认探测位置（`SICNU_*` 可覆盖） |
+|------|--------------------------------|
+| Visual Studio 2022（MSVC x64 工具集） | vswhere 自动定位 |
+| CMake 3.20+ / Ninja | VS 自带 → `PATH` → `C:\Qt\Tools\Ninja` |
+| Qt 6.8 (msvc2022_64) | `SICNU_QT_DIR`（默认 `C:\deps\Qt\6.8.0\msvc2022_64`） |
+| vcpkg 依赖树（GDAL/QGIS/…） | `SICNU_VCPKG`、`SICNU_VCPKG_INSTALLED` |
+| win_flex_bison | `SICNU_WINFLEXBISON` |
+| QCA / Qt6Keychain | `SICNU_QCA_DIR`、`SICNU_KEYCHAIN_DIR` |
+
+### Windows 一键构建与实验
+
+```bat
+scripts\windows\setup.cmd      rem 依赖检查 -> 配置 build-dev -> ninja -j2 构建
+scripts\windows\run_lab.cmd    rem 离线跑实验1：生成示例 -> NDVI -> 自动批改
+scripts\windows\grade_all.cmd D:\lab1_submissions ndvi_basics grades.csv
+scripts\windows\check_mcp.cmd  rem `sicnu_geo_rs --mcp` stdio 发现握手自检
+```
+
+资源上限硬编码：`CMAKE_BUILD_PARALLEL_LEVEL=2`、`CTEST_PARALLEL_LEVEL=1`、
+`ninja -j2`、`QT_QPA_PLATFORM=offscreen`。
+
+### Windows 离线实验包（打包 / 校验 / 分发）
+
+```bat
+scripts\build_offline_bundle.cmd --build-dir build-dev
+scripts\build_offline_bundle.cmd --verify dist\sicnu-lab-<version>
+```
+
+产出自包含的 `sicnu-lab-<version>\`（程序、确定性示例数据、批改规则、字体、
+`RUN.cmd` / `GENERATE_SAMPLES.cmd` / `GRADE_ALL.cmd`、中文说明），带逐文件
+SHA-256 清单与 250 MB 体积上限。离线运行时以 `--offline` / `SICNU_OFFLINE=1`
+保证：任何远程请求都被类型化拒绝，不发出任何数据包；启动零网络调用。
+详见 `docs/deployment/lab-offline.md` 与 `packaging/OFFLINE_BUNDLE.md`。
+
 ### With Tests
 
 ```bash

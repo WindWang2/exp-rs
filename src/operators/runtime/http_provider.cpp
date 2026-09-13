@@ -3,6 +3,7 @@
 // "http" stays catalog-visible but surfaces runtime_unavailable.
 #include "operators/runtime/http_provider.h"
 
+#include "geospatial/remote/offline_gate.h"
 #include "operators/runtime/model_runtime.h"
 #include "operators/runtime/provider_wire.h"
 
@@ -56,6 +57,12 @@ class HttpRuntimeSession final : public IModelRuntime
         throw std::runtime_error( "inference canceled before the forward pass" );
       if ( inputs.empty() )
         throw std::runtime_error( "multi-input inference needs at least one input tensor" );
+
+      // Offline gate (goal D7): this provider carries its own QNetworkAccess
+      // HTTP stack and therefore bypasses geospatial's httpFetch choke point —
+      // refuse before any request can be dispatched.
+      if ( sicnu::geo::offline::enabled() )
+        throw std::runtime_error( sicnu::geo::offline::refusalMessage( m_endpoint ) );
 
       const QJsonObject request = encodeInferRequest( inputs, outputNames, m_artifact, m_digest );
       const QByteArray payload = QJsonDocument( request ).toJson( QJsonDocument::Compact );

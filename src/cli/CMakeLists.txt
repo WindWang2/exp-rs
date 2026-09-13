@@ -18,6 +18,27 @@ add_executable(sicnu_geo_rs_cli
     ${CMAKE_SOURCE_DIR}/data/help/help_content.qrc
 )
 
+# D7 batch grading engine: a small static lib so test_lab_batch can drive the
+# runner without linking the whole CLI executable.
+add_library(sicnu_lab_batch STATIC
+    lab_batch_runner.cpp
+    lab_batch_runner.h
+)
+target_include_directories(sicnu_lab_batch PUBLIC
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+)
+target_link_libraries(sicnu_lab_batch PUBLIC
+    Qt6::Core
+    sicnu_agent
+    sicnu_sdk
+)
+if(TARGET jsoncpp)
+    target_link_libraries(sicnu_lab_batch PUBLIC jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+    target_link_libraries(sicnu_lab_batch PUBLIC ${JSONCPP_LIBRARIES})
+endif()
+
 # Headless CLI embeds no QML; skip Qt's configure-time qmlimportscanner pass
 # (unreliable on Windows hosts — see the tail of tests/CMakeLists.txt).
 set_target_properties(sicnu_geo_rs_cli PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN TRUE)
@@ -63,6 +84,7 @@ target_include_directories(sicnu_geo_rs_cli PRIVATE
 target_link_libraries(sicnu_geo_rs_cli PRIVATE
     Qt6::Core
     Sicnu::data
+    sicnu_lab_batch
     Sicnu::dataset
     Sicnu::experiment
     Sicnu::experiment_bridge

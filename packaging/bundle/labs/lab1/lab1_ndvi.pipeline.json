@@ -1,0 +1,17 @@
+{
+  "name": "Lab 1 — NDVI over the generated scene",
+  "version": "1.0",
+  "description": "Compute NDVI (Landsat B5 NIR, B4 Red) over data/samples/landsat_sample.tif and export output/lab1_ndvi.tif for grading against ndvi_basics.",
+  "steps": [
+    {
+      "operator": "rs:spectral_index",
+      "params": {
+        "input": "data/samples/landsat_sample.tif",
+        "output": "output/lab1_ndvi.tif",
+        "index": "NDVI",
+        "nir": 5,
+        "red": 4
+      }
+    }
+  ]
+}

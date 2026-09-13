@@ -112,8 +112,12 @@ class SICNU_AGENT_EXPORT OutputVerifier
     /// Options for the teaching grader.
     struct SICNU_AGENT_EXPORT LabGradeOptions
     {
+        // Explicit default constructor: a default member initializer here
+        // would not be "required before the end of the enclosing class"
+        // (CWG 1397) — the grade*() default arguments below are parsed while
+        // OutputVerifier is still incomplete, which GCC 16 enforces.
         LabGradeOptions()
-          : maxBytes( 64ull * 1024ull * 1024ull )
+            : maxBytes( 64ull * 1024ull * 1024ull )
         {
         }
 

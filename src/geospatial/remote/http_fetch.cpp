@@ -21,6 +21,7 @@
 #include "geospatial/remote/http_fetch.h"
 
 #include "geospatial/gdal_guard.h"
+#include "geospatial/remote/offline_gate.h"
 #include "geospatial/util/resource_uri.h"
 
 #include <cpl_conv.h>
@@ -132,6 +133,12 @@ HttpFetchResult fetchImpl( const std::string &url, const HttpFetchOptions &optio
     details["url"] = uri.display();
     throw GeoError( ErrorCode::InvalidArgument, "httpFetch: not a remote http(s) resource", details );
   }
+
+  // Offline gate (goal D7): typed refusal before any request is dispatched.
+  // This is the single HTTP choke point of the layer (ADR 0139), so STAC,
+  // the remote validator and every future caller are covered here.
+  if ( offline::enabled() )
+    throw GeoError( ErrorCode::NetworkError, offline::refusalMessage( uri.display() ) );
   const std::string target =
     uri.kind == ResourceKind::RemoteHttp ? uri.canonical() : uri.remoteUrl();
 

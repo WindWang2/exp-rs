@@ -16,6 +16,7 @@
 #include <gdal.h>
 
 #include "data/band_role.h"
+#include "data/offline_mode.h"
 #include "data/providers/remote_source_cache.h"
 #include "gdal_runtime.h"
 
@@ -245,6 +246,21 @@ Result<internal::ResolvedSource> GdalRasterSourceProvider::resolve(
   resolved.storageKind = remote ? StorageKind::Remote : StorageKind::File;
   resolved.canonicalSource = normalizedPath;
   resolved.canonicalProviderKey = QStringLiteral( "gdal" );
+
+  // Offline gate (goal D7): refuse network sources with a typed diagnostic
+  // instead of letting GDAL probe them (the deny config also makes any open
+  // that slips through fail fast — see offline_gate.cpp).
+  if ( remote && offline::enabled() && offline::isRemoteTarget( normalizedPath ) )
+  {
+    resolved.state = AssetState::Missing;
+    resolved.capabilities = AssetCapability::Relocatable;
+    return Result<internal::ResolvedSource>::success(
+      std::move( resolved ),
+      { Diagnostic{ QStringLiteral( "source.offline_refused" ),
+                    offline::refusalMessage( normalizedPath ),
+                    DiagnosticSeverity::Warning } } );
+  }
+
   if ( remote )
   {
     QString urlText = normalizedPath;

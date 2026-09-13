@@ -1,5 +1,6 @@
 // remote_source_cache.cpp — see remote_source_cache.h for the contract.
 #include "remote_source_cache.h"
+#include "data/offline_mode.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -96,6 +97,12 @@ RemoteDatasetLease &RemoteDatasetLease::operator=( RemoteDatasetLease &&other ) 
 
 RemoteDatasetLease RemoteDatasetPool::acquire( const QString &url, unsigned int oflag )
 {
+    // Offline gate (goal D7): refuse before GDALOpenEx can touch the network.
+    // The caller sees the same empty lease as a failed open; the typed
+    // refusal surfaces from the resolve layer's diagnostic.
+    if ( offline::enabled() && offline::isRemoteTarget( url ) )
+        return RemoteDatasetLease{};
+
     configureRemoteCachingDefaults();
     if ( !m_impl )
     {

@@ -231,6 +231,10 @@ sicnu_add_io_test(test_io_atomic_failures)
 sicnu_add_io_test(test_io_fidelity)
 sicnu_add_io_test(test_io_paths)
 sicnu_add_io_test(test_io_uri)
+
+# Offline classroom deployment (goal D7): the offline gate refuses remote
+# requests without any network attempt — typed error + GDAL cloud deny.
+sicnu_add_test(test_offline_mode TIMEOUT 300)
 sicnu_add_io_test(test_io_product_registry)
 sicnu_add_io_test(test_io_probe)
 sicnu_add_io_test(test_adversarial_m3)
@@ -8218,3 +8222,9 @@ target_include_directories(benchmark_scale8 PRIVATE
 # OutputVerifier::gradeArtifact teaching seam.
 sicnu_add_test(test_lab_grading TIMEOUT 300)
 sicnu_link_jsoncpp(test_lab_grading)
+
+# D7 batch grading: streaming engine + CSV export over the gradeArtifact
+# seam; CLI-level contract for --batch (error isolation, BOM, schema).
+sicnu_add_test(test_lab_batch TIMEOUT 300)
+sicnu_link_jsoncpp(test_lab_batch)
+target_link_libraries(test_lab_batch PRIVATE sicnu_lab_batch)
