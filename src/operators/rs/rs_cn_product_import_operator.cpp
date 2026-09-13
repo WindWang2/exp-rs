@@ -1,7 +1,8 @@
 /***************************************************************************
- * rs_hj_import_operator.cpp
+ * rs_cn_product_import_operator.cpp — unified Chinese-satellite product
+ * import (ADR 0147).
  ***************************************************************************/
-#include "rs_hj_import_operator.h"
+#include "rs_cn_product_import_operator.h"
 
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
@@ -12,12 +13,15 @@ namespace sicnu::operators::rs {
 
 using namespace params;
 
-Json::Value RsHjImportOperator::schema() const
+Json::Value RsCnProductImportOperator::schema() const
 {
     using namespace schema;
     Json::Value props(Json::objectValue);
     props["input"] = makeStringParam(
-        "input", "HJ-1A/1B CCD product directory, sidecar XML or image TIFF", "");
+        "input",
+        "CN product directory, CRESDA sidecar XML or image TIFF (GF-1/2/6/7, ZY-3, ZY-1 02C, "
+        "HJ-1/2 CCD families; unsupported CN names are refused with a diagnosis)",
+        "");
     props["output"] = makeOutputParam("output", "Output multi-band GeoTIFF", "tif");
     Json::Value bands = makeStringParam(
         "bands", "Optional band list (default: all bands declared by the sidecar)", "");
@@ -35,32 +39,44 @@ Json::Value RsHjImportOperator::schema() const
 
     Json::Value outputs(Json::objectValue);
     outputs["output"] = makeOutputParam("output", "Stacked GeoTIFF", "tif");
-    outputs["productId"] = makeStringParam("productId", "HJ-1 product id", "");
+    outputs["productId"] = makeStringParam("productId", "Product id", "");
     outputs["bandCount"] = makeIntegerParam("bandCount", "Number of stacked bands", 0);
+    outputs["sensorKey"] = makeStringParam("sensorKey", "Resolved sensor profile key", "");
+    outputs["completeness"] = makeStringParam("completeness", "Constituent completeness verdict", "");
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
     root["required"] = makeRequired({"input", "output"});
     return root;
 }
 
-Json::Value RsHjImportOperator::metadata() const
+Json::Value RsCnProductImportOperator::metadata() const
 {
     Json::Value meta(Json::objectValue);
     meta["group"] = group();
     meta["provider"] = "rs";
     meta["tags"] = Json::Value(Json::arrayValue);
-    meta["tags"].append("hj-1");
     meta["tags"].append("cn-satellite");
+    meta["tags"].append("gaofen");
+    meta["tags"].append("zy3");
+    meta["tags"].append("hj");
     meta["tags"].append("import");
     meta["tags"].append("data-format");
-    meta["purpose"] = "Convert a HJ-1A/1B CCD L1A product into analysis-ready multi-band GeoTIFF";
+    meta["purpose"] = "Convert any supported Chinese satellite L1A product into "
+                      "analysis-ready multi-band GeoTIFF with full provenance";
     meta["prerequisites"].append("Product directory with CRESDA sidecar XML and TIFF (offline)");
-    meta["workflowHints"].append("Stack B1-B4 then run rs:spectral_index for NDVI (30 m CCD grids)");
+    meta["workflowHints"].append(
+        "The result carries the sensor profile, sidecar generation, completeness verdict and "
+        "missingDeclaredFields so agents can decide usability without re-reading the product");
+    meta["workflowHints"].append(
+        "apply_calibration=true converts DN to radiance only when every requested band "
+        "declares gain and bias; otherwise a typed refusal names the bands");
     return meta;
 }
 
-Json::Value RsHjImportOperator::executionEstimate() const
+Json::Value RsCnProductImportOperator::executionEstimate() const
 {
+    // FullRaster (default policy). Band stacking copies one full Float32 band
+    // at a time: peak RAM is a single 1024x1024 band buffer plus fixed overhead.
     Json::Value est(Json::objectValue);
     est["tileWidth"] = 0;
     est["tileHeight"] = 0;
@@ -68,17 +84,18 @@ Json::Value RsHjImportOperator::executionEstimate() const
     return est;
 }
 
-Json::Value RsHjImportOperator::run(const Json::Value& p, RSOperatorContext& context)
+Json::Value RsCnProductImportOperator::run(const Json::Value& p, RSOperatorContext& context)
 {
     const std::string inputPath = requireString(p, "input");
     const std::string outputPath = requireString(p, "output");
     const bool applyCalibration = getBool(p, "apply_calibration", false);
 
-    context.reportProgress(0.05, "Identifying HJ CCD product");
-    const ProductImportPlan plan = planCnProductImport(inputPath, "hj_ccd_product");
-    context.logInfo("HJ product: " + plan.metadata.productId
+    context.reportProgress(0.05, "Identifying Chinese satellite product");
+    const ProductImportPlan plan = planCnProductImport(inputPath, nullptr);
+    context.logInfo("CN product: " + plan.metadata.productId
                     + " (" + plan.metadata.platform + "/" + plan.metadata.sensor
-                    + ", " + std::to_string(plan.bandNames.size()) + " declared bands)");
+                    + ", sensor key " + plan.sensorKey
+                    + ", " + std::to_string(plan.bandNames.size()) + " bands)");
     context.throwIfCancelled();
 
     const bool explicitBands = p.isMember("bands") && p["bands"].isArray() && !p["bands"].empty();
