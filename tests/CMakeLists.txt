@@ -5055,6 +5055,24 @@ if(TARGET sicnu_operators)
   )
   sicnu_discover_tests(test_spectral_library)
 
+  # Built-in spectral library data contract (D12): strict validation of the
+  # shipped data/spectral/ deliverable, provenance/LICENSES drift guards,
+  # material-prior queries, sensor resampling and SAM/SID smoke matching.
+  add_executable(test_spectral_library_data test_spectral_library_data.cpp)
+  target_link_libraries(test_spectral_library_data PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_processing
+  )
+  target_include_directories(test_spectral_library_data PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  target_compile_definitions(test_spectral_library_data PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
+  sicnu_discover_tests(test_spectral_library_data)
+
   # ROI mean spectrum tests - mean/stddev over a polygon, wavelengths, guards.
   add_executable(test_spectral_roi test_spectral_roi.cpp)
   target_link_libraries(test_spectral_roi PRIVATE
