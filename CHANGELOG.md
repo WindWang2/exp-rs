@@ -7,7 +7,7 @@ All notable changes to the `exp-rs` project will be documented in this file.
 ### Cloud-Native Data Fabric / Data Cube 10.0 (goal series)
 
 - **Object storage seam** (`fabric/object_store`): `s3://`/`gs://`/`az://`
-  profile registry over GDAL's own /vsi\* stack (no SDK), credential injection
+  profile registry over GDAL's own /vsi* stack (no SDK), credential injection
   as an RAII window that restores prior config state exactly and wipes GDAL's
   per-URL handle cache on close (signed contexts never linger), offline typed
   refusals, and a REAL /vsis3/ loopback integration proof.
