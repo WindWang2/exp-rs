@@ -68,3 +68,39 @@
 - **Reproduction**: `review/tests/F-OPS-2.cpp` 草稿：构造 4-D 连续 Mat，取 `mat(Range(1,2), Range::all(), Range::all(), Range::all())` 得到非连续 4-D ROI，`TensorBlob::fromMat(roi)` 后断言 blob 内容与源平面逐字节相等——现实现字节全为未初始化。
 - **Recommended fix**: 循环上限用 `mat.total() / (mat.step[mat.dims-2] / mat.elemSize())`（或按 `mat.dims` 逐维步进），dims>2 且非连续时直接 `cv::Mat contiguous = mat.clone()` 复用连续分支。
 - **Dedupe**: new。
+
+## F-OPS-3 · rs:qa_mask 对不可读 QA 样本 fail-open（NaN/NoData→0=clear），质量门失效方向错误
+
+- **Severity**: P2
+- **Lens**: 1（科学计算与算法契约）+ 5（输出契约）
+- **Location**: `src/operators/rs/rs_qa_mask_operator.cpp:296-311`（convertSample）、`:106-113`（buildMaskRule 的 SCL 类集从不选 class 0/NoData）
+- **Code**:
+  ```cpp
+    auto convertSample = [&](double v) -> uint16_t {
+        if (hasNodata && std::isfinite(nodataVal) && std::abs(v - nodataVal) < 1e-9) {
+            ++irregular;
+            return 0; // declared NoData -> not a QA word; leave unmasked
+        }
+        if (!std::isfinite(v)) {
+            ++irregular;
+            return 0; // NaN/Inf -> keep the historical "clear" outcome, no UB
+        }
+        if (v < 0.0) {
+            ++irregular;
+            return 0; // negative sentinel -> clear
+        }
+  ```
+  ```cpp
+        if (maskSelection == "all")
+            select({QaMask::SclSaturated, QaMask::SclDarkFeatures,
+                    QaMask::SclCloudShadow, QaMask::SclCloudMediumProbability,
+                    QaMask::SclCloudHighProbability, QaMask::SclThinCirrus,
+                    QaMask::SclSnow});
+  ```
+- **Root cause**: QA 词不可读（NaN/负哨兵/声明 NoData）时返回 uint16 值 0：Landsat QA_PIXEL 词 0 = 全位清零 = "clear"；SCL 值 0 = NO_DATA 类，而 sclClasses 对任何 maskSelection（含 "all"）都不选中 class 0。两条路都把"QA 不可知"判为"无云"。
+- **Impact**: 科学结论污染——质量掩膜是下游云掩蔽的门；QA 波段损坏/带声明 NoData 的区域（S2 堆栈中 SCL 波段声明 nodata=0 很常见）被掩膜产品判为 clear，云/雪像素流入合成与指数计算。仅有一条 warning 日志，管线消费者不会失败。
+- **Trigger condition**: 输入 QA 波段带声明 NoData（或含 NaN/负值），且这些像素处光学数据可能有云。常见于 landsat_import/sentinel2_import 产出的堆栈。
+- **Evidence**: `verified-by-test-draft`
+- **Reproduction**: `review/tests/F-OPS-3.cpp`：Float32 QA 波段含 NaN 的 2×2 输入跑 `rs:qa_mask`（cloud_and_shadow），断言输出掩膜对 NaN 像素为 1（masked）；现实现写 0。SCL 路径：SCL=0 的像素即使 mask=all 也断言被掩蔽——现实现为 0。
+- **Recommended fix**: fail-closed：不可读 QA 词应产生 masked=1（或一个独立的 255=unknown 输出类）；SCL 类集至少在 "all" 中纳入 SclNoData。`#699` 注释表明这是"保留历史结果"的有意选择——修复时需同步更新其测试。
+- **Dedupe**: 与 #719（temporal point-extract fail-open）、#612（threshold_raster NoData→clear）同族但文件与行为均未覆盖；#699 修复 UB 时明确保留了该语义（"keep the historical clear outcome"），非重复提交。
