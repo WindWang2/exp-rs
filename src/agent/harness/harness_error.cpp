@@ -15,13 +15,12 @@ struct CodeInfo {
 };
 
 /// The authoritative code table. A code must be added here before producers
-/// may emit it — `isKnownErrorCode` enforces the closed vocabulary.
-const CodeInfo *codeInfo( const std::string &code )
-{
-  static const struct Entry {
+/// may emit it — `isKnownErrorCode` enforces the closed vocabulary, and
+/// `allErrorCodes` derives listing surfaces from this one copy.
+const struct Entry {
     const char *code;
     CodeInfo info;
-  } kEntries[] = {
+} kEntries[] = {
     // Mission-mandated codes.
     { "DATASET_NOT_FOUND",       { "validation", RetryClass::None } },
     { "BAND_ROLE_UNRESOLVED",    { "validation", RetryClass::None } },
@@ -54,10 +53,14 @@ const CodeInfo *codeInfo( const std::string &code )
     { "NOT_SUPPORTED",           { "runtime", RetryClass::None } },
     // Harness 8.0: pinned identity (dataset/model/split) vs resolved entity.
     { "IDENTITY_MISMATCH",       { "validation", RetryClass::None } },
-  };
-  static const Entry *kBegin = kEntries;
-  static const Entry *kEnd = kEntries + sizeof( kEntries ) / sizeof( kEntries[0] );
-  for ( const Entry *it = kBegin; it != kEnd; ++it )
+    // D9: the lab teaching constraint refused an artifact-producing action.
+    { "TEACHING_REFUSAL",        { "validation", RetryClass::None } },
+};
+const Entry *kEntriesEnd = kEntries + sizeof( kEntries ) / sizeof( kEntries[0] );
+
+const CodeInfo *codeInfo( const std::string &code )
+{
+  for ( const Entry *it = kEntries; it != kEntriesEnd; ++it )
   {
     if ( code == it->code )
       return &it->info;
@@ -98,6 +101,15 @@ const char *retryClassToString( RetryClass retryClass )
 bool isKnownErrorCode( const std::string &code )
 {
   return codeInfo( code ) != nullptr;
+}
+
+std::vector<std::string> allErrorCodes()
+{
+  std::vector<std::string> codes;
+  codes.reserve( static_cast<size_t>( kEntriesEnd - kEntries ) );
+  for ( const Entry *it = kEntries; it != kEntriesEnd; ++it )
+    codes.push_back( it->code );
+  return codes;
 }
 
 Json::Value suggestedAction( const std::string &action, Json::Value arguments )

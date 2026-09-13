@@ -67,7 +67,14 @@ struct AllowEntry
 
 // Rot guard note: PREFLIGHT_BLOCKED previously lived here; it gained a
 // curated page, and the stale-entry check below/after the census caught it.
-const std::vector<AllowEntry> kAllowedHarnessCodesWithoutPage = {};
+const std::vector<AllowEntry> kAllowedHarnessCodesWithoutPage = {
+    // D9: TEACHING_REFUSAL is a contract refusal, not a malfunction — the
+    // student-facing explanation travels in the refusal envelope
+    // (lab_copilot teachingRefusalEnvelope), so no curated diagnostics page.
+    { "TEACHING_REFUSAL",
+      "contract refusal (lab teaching constraint); explained in-band by the "
+      "copilot, not a diagnosable failure" },
+};
 
 const std::vector<AllowEntry> kAllowedOperatorCodesWithoutPage = {
     // { "code", "reason" }

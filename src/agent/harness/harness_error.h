@@ -18,6 +18,7 @@
 
 #include <json/json.h>
 #include <string>
+#include <vector>
 
 namespace sicnu::agent::harness {
 
@@ -53,6 +54,11 @@ inline constexpr const char *kNotSupported = "NOT_SUPPORTED";
 /// Harness 8.0: a declared pin (dataset/model/split identity) does not match
 /// the resolved entity — the plan binds inputs that are not the pinned ones.
 inline constexpr const char *kIdentityMismatch = "IDENTITY_MISMATCH";
+/// D9: a student attempted to reach an artifact-producing action through the
+/// lab (teaching) surface. The teaching constraint withholds the action
+/// structurally (harness_actions); this code is the typed refusal — never a
+/// soft apology, never retryable.
+inline constexpr const char *kTeachingRefusal = "TEACHING_REFUSAL";
 } // namespace error_codes
 
 /// Retry policy class for an error code.
@@ -73,6 +79,10 @@ const char *retryClassToString( RetryClass retryClass );
 /// True when `code` is part of the stable taxonomy (guards against typos in
 /// producers; unknown codes degrade to category "runtime", retry Manual).
 bool isKnownErrorCode( const std::string &code );
+
+/// Every code in the closed taxonomy, in table order. Surfaces that list the
+/// vocabulary (harness:error_codes) must derive from THIS, never keep a copy.
+std::vector<std::string> allErrorCodes();
 
 /// Structured harness error: one code, one summary, structured details,
 /// recoverability, and machine-actionable suggested actions.

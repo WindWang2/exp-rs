@@ -19,6 +19,8 @@
 // capability knowledge) — never a new copy of the strings.
 //
 
+#include <string>
+
 namespace sicnu::agent::harness {
 
 inline constexpr const char *kIntentNdvi = "ndvi";
@@ -63,5 +65,40 @@ inline constexpr const char *const kIntentVocabulary[] = {
   kIntentInference,
   kIntentZonal,
 };
+
+//
+// D9: the lab (teaching) intent domain.
+//
+// A SECOND closed list, deliberately disjoint from the scientific vocabulary
+// above: lab intents describe help-seeking in a classroom (diagnose, hint,
+// explain), not processing pipelines, and carry no capability/preflight
+// semantics — the capability drift floor must not see them. Same rule as the
+// scientific list: declare once here, key behavior off the constants, never
+// re-spell the strings.
+//
+// Refusal default: an unclassifiable request classifies as lab_hint. It NEVER
+// defaults to lab_execute — that intent is reachable only through explicit
+// do-it-for-me signals and is gated to the teacher role downstream
+// (harness_actions teaching constraint).
+//
+inline constexpr const char *kIntentLabTroubleshoot = "lab_troubleshoot";
+inline constexpr const char *kIntentLabHint = "lab_hint";
+inline constexpr const char *kIntentLabConcept = "lab_concept";
+inline constexpr const char *kIntentLabGradeRequest = "lab_grade_request";
+inline constexpr const char *kIntentLabExecute = "lab_execute";
+
+inline constexpr const char *const kLabIntentVocabulary[] = {
+  kIntentLabTroubleshoot, kIntentLabHint, kIntentLabConcept,
+  kIntentLabGradeRequest, kIntentLabExecute,
+};
+
+/// True when `intent` is part of the lab (teaching) vocabulary.
+inline bool isKnownLabIntent( const std::string &intent )
+{
+  for ( const char *candidate : kLabIntentVocabulary )
+    if ( intent == candidate )
+      return true;
+  return false;
+}
 
 } // namespace sicnu::agent::harness
