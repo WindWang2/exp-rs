@@ -143,3 +143,43 @@
 - **Reproduction**: `review/tests/F-OPS-4.cpp`：GDAL 建一个 4×4、无 SRS 的 GTiff，调 `IoReprojectOperator` 带 `srcCrsOverride="EPSG:4326"`、`targetCrs="EPSG:32633"`；断言输出中心像元的地理坐标等于源像素中心经 4326→32633 变换后的坐标。现实现输出 geotransform 与源像素网格一致（未变换）。
 - **Recommended fix**: `WarpOptions` 增加 `sourceCrsOverride`，warpRaster 在其非空时 emplace `-s_srs`；IoReprojectOperator 把参数传入。
 - **Dedupe**: new——#903 覆盖 range_cache/python-worker/时间戳，未涉及 io:reproject；#880 是 io:inspect 的 schema 漂移；#637 是 VRT 提供者。
+
+## F-OPS-5 · 检测 NMS/去重是 O(n²) 且位于取消检查点之外——max_detections 上限内可长时间不可取消阻塞 worker
+
+- **Severity**: P2
+- **Lens**: 3（取消契约/吞吐）+ 2（无界计算）
+- **Location**: `src/operators/runtime/detection_postprocess.cpp:150-163`（nonMaxSuppression 双层循环）、`:166-187`（dedupDetections）；调用点 `src/operators/runtime/detection_tile_engine.cpp:424`（dedup 在 `context.throwIfCancelled()` 之前执行）
+- **Code**:
+  ```cpp
+  // detection_postprocess.cpp:150-159 —— 双层全扫描，无取消注入点：
+    for ( std::size_t i = 0; i < ordered.size(); ++i )
+    {
+      if ( suppressed[i] )
+        continue;
+      kept.push_back( ordered[i] );
+      for ( std::size_t j = i + 1; j < ordered.size(); ++j )
+      {
+        if ( suppressed[j] )
+          continue;
+        if ( iou( ordered[i], ordered[j] ) > iouThreshold )
+          suppressed[j] = true;
+      }
+    }
+  ```
+  ```cpp
+  // detection_tile_engine.cpp:417-427 —— 去重先于取消检查：
+    stats.rawDetections = static_cast<int>( detections.size() );
+    if ( stats.rawDetections > det.maxDetections )
+      throw RSOperatorError(...);
+    dedupDetections( detections, det.nmsIou );
+    stats.detectionsKept = static_cast<int>( detections.size() );
+
+    context.throwIfCancelled();
+  ```
+- **Root cause**: `output.detection.max_detections` 默认 100000，成为 NMS 输入的合法上界而非拒绝线；全栅格 NMS 是 O(n²)（最坏 ~5×10⁹ 次 IoU），且 `dedupDetections` 与 `nonMaxSuppression` 都不接收 `RSOperatorContext`，整个去重段不可取消。
+- **Impact**: 高候选密度输入（大栅格低阈值检测头常见数万候选）时 worker 线程被去重段阻塞数十秒到分钟级；用户取消要等整段结束才生效（writeTile 后续检查才抛）。属性能瓶颈 + 取消契约缺口。
+- **Trigger condition**: 检测模型 + conf 阈值低/目标密集场景，rawDetections 逼近 maxDetections（如 5 万框 → ~1.25×10⁹ IoU 比较）。
+- **Evidence**: `verified-by-test-draft`
+- **Reproduction**: `review/tests/F-OPS-5.cpp`：直接调用 `dedupDetections`（纯函数，无需模型）构造 100,000 个互不重叠的框，断言在 1s 内完成或提供可取消重载；现实现 O(n²) 无法达标。
+- **Recommended fix**: ① NMS 前按 tile 网格分桶（空间哈希）把比较限制到邻近桶；② 给 dedup/NMS 传入 `std::function<bool()>` 取消谓词，内层每 N 次迭代检查；③ 或将 maxDetections 的默认值从"拒绝线"语义改为"NMS 输入预算"并按批分块。
+- **Dedupe**: new——#620/#701 的 unbounded 家族针对 MCP vector_inspect/harness；检测 NMS 的 O(n²)+不可取消未被既有 issue 覆盖。

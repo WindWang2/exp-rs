@@ -24,7 +24,7 @@
       }
   ```
 - **Root cause**: >32 MiB 的"行"意味着 stdio 的 JSON-RPC 帧已经失步（服务器自己的行上限是 4 MiB，正常数据到不了 32 MiB）。fail-fast 只清空本地 buffer 并拒绝 pending；子进程保持存活，失步的字节流继续作为后续响应被 JSON.parse 丢弃。之后每个新请求写入正常，但响应永远解析不出来 → 10 分钟超时/次，且 lazy-respawn 分支不触发（`exited` 仍为 false）。
-- **Trigger condition**: 服务端输出异常字节（崩溃前的内存垃圾、stdout 被第三方库污染）或帧边界错位后的连续输出。
+- **Trigger condition**: 服务端输出**不带换行的**超长异常字节（崩溃前的内存垃圾、stdout 被第三方库污染）或持续刷屏——无终止换行符时失步尾部把后续每个响应粘连成永不解析的行（subagent V 精化：以换行结尾的有界超长行会在下一行边界自愈，onLine 丢弃非 JSON 行即可恢复；僵尸态特指无终止换行/持续洪泛）。
 - **Impact**: 桥永久失效但表现为"每个工具调用超时 10 分钟"，无诊断指向失步；唯一的恢复路径是重载扩展。
 - **Evidence**: `static-only`（逻辑封闭，可由 fake server 注入 >32MiB 无换行输出验证）
 - **Reproduction**: `pi/test/mcp_bridge.test.mjs` 增补用例：fake server 写入 33 MiB 无 `\n` 数据后写正常响应 `{"jsonrpc":"2.0","id":1,...}`；断言后续 request() 能在正常超时内 resolve。现实现 pending 清空后新请求永远等不到解析成功的行。
