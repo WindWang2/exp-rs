@@ -1929,10 +1929,10 @@ src/plugins/layer_tree/layer_tree_plugin.h,32,A,pending,0,
 src/plugins/processing/CMakeLists.txt,22,A,pending,0,
 src/plugins/processing/processing_plugin.cpp,56,A,pending,0,
 src/plugins/processing/processing_plugin.h,30,A,pending,0,
-pi/exp-rs-spatial.ts,608,A,pending,0,
-pi/mcp_bridge.ts,347,A,pending,0,
-pi/test/fake_mcp_server.mjs,57,A,pending,0,
-pi/test/mcp_bridge.test.mjs,103,A,pending,0,
+pi/exp-rs-spatial.ts,608,A,reviewed,1,2026-09-13
+pi/mcp_bridge.ts,347,A,reviewed,1,2026-09-13
+pi/test/fake_mcp_server.mjs,57,A,reviewed,0,2026-09-13
+pi/test/mcp_bridge.test.mjs,103,A,reviewed,0,2026-09-13
 tests/CMakeLists.txt,8213,A',pending,0,
 tests/asan_smoke_core.cpp,95,A',pending,0,
 tests/benchmark_contract9.cpp,173,A',pending,0,
