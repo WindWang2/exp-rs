@@ -8,5 +8,5 @@
 | M3 | MNF chain | WP-D (H-3) + known answers | DONE |
 | M4 | Unmixing & preprocessing | WP-E FCLS + WP-F band select + WP-G library select | DONE |
 | M5 | Integration & scale | WP-H surfaces, sidecars, scale/edge evidence | DONE |
-| M6 | Review | 2 read-only subagents, P0/P1 fixes, re-review | IN PROGRESS |
-| M7 | Finalization | final verification at HEAD, PR created (not merged) | PENDING |
+| M6 | Review | 2 read-only subagents, P0/P1 fixes, re-review | DONE |
+| M7 | Finalization | final verification at HEAD, PR created (not merged) | DONE |

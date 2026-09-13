@@ -1,7 +1,5 @@
 # PR BODY — hyperspectral-spectral-intelligence-10
 
-> Final numbers to be refreshed at Phase 9 against the final HEAD; structure
-> fixed here so the review delta is visible.
 
 ## Baseline
 origin/master `7d78059d1a6d316d606656759a506d17bc5e3b55` (2026-09-13, PR #958 merge).
@@ -45,8 +43,23 @@ acceptance; CLI `--list`/`--schema`; algorithm-meta drift gate.
 PERFORMANCE.md; no wall-clock gates added.
 
 ## Review findings
-Populated from REVIEW_LOG.md at Phase 7 (two read-only subagents:
-architecture/science, performance/concurrency/test-trust).
+Phase 7 ran two read-only subagents (architecture/science; performance/
+concurrency/lifecycle/test-trust). Full ledger in REVIEW_LOG.md. Highlights:
+- **Fixed P0 x2** (FWHM-absence encoding refused all four consumer operators
+  on the most common wavelength-tagged raster class; RowFeeder double-counted
+  samples halving reported SNR), **P1 x3** (plain close() swallowing flush
+  failures -> truncated outputs reported as success; no partial-output
+  cleanup; dropped-mass errorOut identically zero for truncated inputs),
+  **P2 x9** (cell bounds on library/resampled paths, PPI parameter caps,
+  NNLS scratch hoisting, component-index bounds, table validate OOB read,
+  wavelength positivity, abundance-sum QA, two test-trustworthiness gaps —
+  incl. an FCLS known answer that fails the degenerate OLS+clip+renorm
+  implementation).
+- One real defect found in my own new test by MALLOC_CHECK_ (buffer overrun),
+  fixed; a vacuous refusal case fixed.
+- **Out of scope, recorded with control evidence:** test_fused_chain
+  SIGSEGV reproduces identically on pristine master (pre-existing on this
+  GCC-16 host; files untouched by this track).
 
 ## Known limitations
 - Component subsets in MNF inverse are a documented approximation

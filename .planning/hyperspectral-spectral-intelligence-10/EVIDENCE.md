@@ -46,3 +46,16 @@ marked `not-executed`. Append per phase.
 * test_workflow_cancel → All tests passed (3 assertions in 1 test case)
 * test_workflow_execution_plane → All tests passed (36 assertions in 6 test cases) — plane path with the new payload-port recording
 * test_pipeline_runner → All tests passed (81 assertions in 12 test cases)
+
+
+## Phase 8 final verification (2026-09-13, final HEAD)
+
+* Final HEAD at verification: `e5bfbfaaec` (+ whitespace commit); origin/master unchanged at baseline `7d78059d1a` (fetched; nothing to rebase).
+* Full suite (QT_QPA_PLATFORM=offscreen, serial, all exit 0):
+  - Track binaries: test_spectral_table 62 ✓ · test_mnf_transform 1879 ✓ · test_spectral_unmixing 58 ✓ · test_spectral_detection 556 ✓ · test_spectral_selection 45 ✓ · test_spectral_pipeline 188 ✓
+  - Adjacent/regression: test_spectral_classification 133 ✓ · test_mnf 22 ✓ · test_spectral_library 47 ✓ · test_spectral_library_data 64879 ✓ · test_spectral_resampling 46 ✓ · test_spectral_roi 35 ✓ · test_spectral_derivative 122 ✓ · test_spectral_anomaly 90239 ✓ · test_spectral_formula_drift 145 ✓
+  - Workflow/engine surfaces: test_workflow_runtime 223 ✓ · test_workflow_cancel 3 ✓ · test_workflow_execution_plane 36 ✓ · test_pipeline_runner 81 ✓ · test_e2e_phase2 4106 ✓ · test_rs_operators 8948 ✓ · test_algorithm_meta_drift 2270 ✓
+  - Total ≈ 175,500 assertions, 0 failures. (test_fused_chain excluded: deterministic SIGSEGV reproduced identically on pristine master — see REVIEW_LOG OUT-1.)
+* CLI rebuilt at final HEAD: `--list` shows rs:mnf_inverse, rs:library_select, rs:spectral_band_select (3/3); `--schema rs:mnf_inverse` renders.
+* Mechanical: `git diff --check` clean; 0 conflict markers; 0 secret-ish strings; skill/doc existence assertions (goal-template) empty output = pass.
+* Known non-goals recorded: DECISIONS D-7 (sparse unmixing, SID-SAM hybrid, local RX), D-11 (sidecar task families), D-6; REVIEW_LOG OUT-1 (fused-chain segfault, pre-existing on master).
