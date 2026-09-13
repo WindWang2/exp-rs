@@ -8193,7 +8193,7 @@ sicnu_add_io_test(test_portability_contract)
 # aggregate target so a missing-include regression fails before any heavy
 # target compiles.
 function(sicnu_add_header_probes)
-  set(_probe_objs "")
+  set(_probe_libs "")
   foreach(header IN LISTS ARGN)
     string(REGEX REPLACE "[/\\.-]" "_" probe "header_probe_${header}")
     set(_probe_src "${CMAKE_CURRENT_BINARY_DIR}/generated/${probe}.cpp")
@@ -8207,9 +8207,13 @@ function(sicnu_add_header_probes)
       ${CMAKE_CURRENT_SOURCE_DIR}
     )
     target_link_libraries(${probe} PRIVATE Sicnu::Geospatial)
-    list(APPEND _probe_objs $<TARGET_OBJECTS:${probe}>)
+    list(APPEND _probe_libs ${probe})
   endforeach()
-  add_custom_target(sicnu_header_probes DEPENDS ${_probe_objs})
+  # Depend on the probe TARGETS, not $<TARGET_OBJECTS> file paths: the
+  # AUTOMOC object files (mocs_compilation.cpp.o) have no forwarding rules in
+  # the custom target's build.make under the Unix Makefiles generator, which
+  # broke the aggregate with "no rule to make ..." (platform 10.0).
+  add_custom_target(sicnu_header_probes DEPENDS ${_probe_libs})
 endfunction()
 sicnu_add_header_probes(
   runtime/observability/trace_id.h

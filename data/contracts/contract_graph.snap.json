@@ -380,6 +380,18 @@
       "to" : "rs:fusion_pca"
     },
     {
+      "from" : "rs:gaofen_import",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:gaofen_import"
+    },
+    {
+      "from" : "rs:hj_import",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:hj_import"
+    },
+    {
       "from" : "rs:image_enhancement",
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/preprocess.json",
@@ -816,6 +828,12 @@
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/filter.json",
       "to" : "rs:zonal_stats"
+    },
+    {
+      "from" : "rs:zy3_import",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/preprocess.json",
+      "to" : "rs:zy3_import"
     },
     {
       "from" : "app.commandPalette",
@@ -2896,6 +2914,16 @@
       "origin" : "data/agent/capabilities/fusion.json"
     },
     {
+      "id" : "rs:gaofen_import",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
+      "id" : "rs:hj_import",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
+    },
+    {
       "id" : "rs:image_enhancement",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/preprocess.json"
@@ -3259,6 +3287,11 @@
       "id" : "rs:zonal_stats",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/filter.json"
+    },
+    {
+      "id" : "rs:zy3_import",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/preprocess.json"
     },
     {
       "id" : "solution:describe",
