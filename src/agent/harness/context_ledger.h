@@ -31,7 +31,8 @@ class ContextLedger {
     void recordPlanBinding( const std::string &runId, const std::string &planId,
                             const std::string &goal, const std::string &intent,
                             const std::string &verificationStatus = "",
-                            const std::string &planFingerprint = "" );
+                            const std::string &planFingerprint = "",
+                            const Json::Value &compilerMeta = Json::Value() );
     Json::Value planBindings() const; ///< [{run_id, plan_id, goal, intent, verification_status, plan_fingerprint, bound_at}]
 
     /// Records a typed decision. kind: "ambiguity"|"alternative"|"parameter".

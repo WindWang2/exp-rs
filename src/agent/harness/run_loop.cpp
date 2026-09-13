@@ -5,6 +5,7 @@
 #include "evidence.h"
 #include "harness_actions.h"
 #include "harness_error.h"
+#include "context_ledger.h"
 #include "harness_verification.h"
 #include "spatial_tools/spatial_tool.h"
 #include "workflow/workflow_run.h"
@@ -53,6 +54,41 @@ int &diagnoseAttempts( const std::string &runId )
     kLedger.clear();
   return kLedger[ runId ];
 }
+/// Proposal-set signature of the LAST issued diagnosis per run. A caller
+/// that re-invokes diagnose WITHOUT changing anything gets a typed
+/// "repeated_error" stop instead of the same proposals again — the loop can
+/// never repair the same error twice (Compiler 10.0 loop guard).
+std::string &lastProposalSignature( const std::string &runId )
+{
+  // Same ownership/threading model as diagnoseAttempts: serialized by the
+  // driving surfaces, bounded by eviction.
+  static std::map<std::string, std::string> kSignatures;
+  constexpr size_t kMaxTrackedRuns = 256;
+  if ( kSignatures.size() > kMaxTrackedRuns )
+    kSignatures.erase( kSignatures.begin() );
+  return kSignatures[ runId ];
+}
+
+/// The original scientific intent for the run, from the authoritative plan
+/// binding (ContextLedger) — echoed on every diagnosis so a repair loop can
+/// never lose sight of what it was trying to achieve.
+Json::Value originalIntentFor( const std::string &runId )
+{
+  for ( const Json::Value &binding : ContextLedger::instance().planBindings() )
+  {
+    if ( binding.isObject() && binding.get( "run_id", "" ).asString() == runId )
+    {
+      Json::Value intent( Json::objectValue );
+      intent["goal"] = binding.get( "goal", "" ).asString();
+      intent["intent"] = binding.get( "intent", "" ).asString();
+      intent["plan_fingerprint"] = binding.get( "plan_fingerprint", "" ).asString();
+      intent["plan_id"] = binding.get( "plan_id", "" ).asString();
+      return intent;
+    }
+  }
+  return Json::Value();
+}
+
 
 /// Proposal kinds (closed vocabulary):
 ///   retry_transient      — bounded resume of a transient-class failure;
@@ -385,6 +421,7 @@ class DiagnoseRunTool final : public SpatialTool
         deduped.append( proposal );
       }
 
+      diagnosis["original_intent"] = originalIntentFor( runId );
       diagnosis["status"] =
         run->state() == sicnu::workflow::WorkflowRunState::Failed ? "failed" : "completed";
       diagnosis["failures"] = failures;
@@ -392,6 +429,36 @@ class DiagnoseRunTool final : public SpatialTool
       diagnosis["missing_artifacts"] = missingArtifacts;
       if ( !warnings.empty() )
         diagnosis["warnings"] = warnings;
+
+      // Loop guard: the exact same proposal set as the previous diagnosis
+      // means the caller re-invoked without changing the world — refuse to
+      // point at the same repair twice.
+      std::string signature;
+      for ( const Json::Value &proposal : deduped )
+        signature += proposal.get( "kind", "" ).asString() + "|" +
+                     proposal.get( "target_step", "" ).asString() + ";";
+      if ( !deduped.empty() && signature == lastProposalSignature( runId ) )
+      {
+        diagnosis["original_intent"] = originalIntentFor( runId );
+        diagnosis["status"] =
+          run->state() == sicnu::workflow::WorkflowRunState::Failed ? "failed" : "completed";
+        diagnosis["failures"] = failures;
+        diagnosis["verification_failures"] = verificationFailures;
+        diagnosis["missing_artifacts"] = missingArtifacts;
+        diagnosis["repair_proposals"] = deduped;
+        diagnosis["bounds"] = bounds;
+        Json::Value repeated( Json::objectValue );
+        repeated["stop"] = true;
+        repeated["reason"] = "repeated_error";
+        repeated["detail"] =
+          "The previous diagnosis returned identical proposals; the repair did not "
+          "change the run. Change the approach or escalate to the human.";
+        diagnosis["stop"] = repeated;
+        Json::Value out( Json::objectValue );
+        out["diagnosis"] = diagnosis;
+        return SpatialToolResult::ok( std::move( out ) );
+      }
+      lastProposalSignature( runId ) = signature;
 
       if ( attempts >= kMaxDiagnoseAttempts && !deduped.empty() )
       {

@@ -593,6 +593,11 @@ class ExplainTool final : public SpatialTool
       {
         explanation["plan_id"] = binding.get( "plan_id", "" );
         explanation["plan_fingerprint"] = binding.get( "plan_fingerprint", "" );
+        // Compiler 10.0: a run started from a WorkflowIR carries the compiler
+        // provenance in its binding — echo it so the scientific evidence
+        // answers "which repairs were auto-inserted and on what facts".
+        if ( binding.isMember( "workflow_ir" ) )
+          explanation["workflow_ir"] = binding["workflow_ir"];
       }
 
       // Harness 9.0 (M7): explainability 2.0 — degradations, resource
@@ -1015,9 +1020,13 @@ class ExecutePlanTool final : public SpatialTool
                           ? "running"
                           : sicnu::workflow::workflowRunStateToString( run->state() );
         // Harness 7.0 (Area E): bind plan -> run for typed cross-turn context.
-        ContextLedger::instance().recordPlanBinding( run->runId(), plan.planId, plan.goal,
-                                                     plan.intent, "running",
-                                                     planFingerprint( plan ) );
+        // Compiler 10.0: a plan lowered from a WorkflowIR carries its
+        // provenance (ir id/fingerprint, repairs, refusals) in the raw
+        // document; it rides into the run binding for evidence/explain.
+        ContextLedger::instance().recordPlanBinding(
+          run->runId(), plan.planId, plan.goal, plan.intent, "running",
+          planFingerprint( plan ),
+          plan.raw.isObject() ? plan.raw.get( "workflow_ir", Json::Value() ) : Json::Value() );
       }
       out["next"] = "harness:run_status {run_id} — poll until terminal";
       return SpatialToolResult::ok( std::move( out ) );
