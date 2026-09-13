@@ -4,9 +4,10 @@ Pure C++ Remote Sensing analysis platform built on the QGIS engine.
 
 ## Quick Commands
 
-*   **Build:** `cd build && cmake .. && make -j$(nproc)`
-*   **Launch:** `./build/sicnu_geo_rs`
-*   **Clean build:** `rm -rf build && mkdir build && cd build && cmake .. && make -j$(nproc)`
+*   **Configure:** `cmake --preset build-dev` (presets in `CMakePresets.json`; build dir `build-dev/`)
+*   **Build:** `cmake --build build-dev -j2` — parallelism cap 2 (`CMAKE_BUILD_PARALLEL_LEVEL=2`); `-j$(nproc)` is forbidden (shared 16-core / 62 GB host, parallel epics; drop to `-j1` when RSS > 70% or load > 1.5× cores)
+*   **Launch:** `./build-dev/sicnu_geo_rs`
+*   **Test (targeted first):** `ctest -R <family> -j1` with `QT_QPA_PLATFORM=offscreen`, run inside the build dir
 
 ## Codebase Architecture
 
@@ -61,9 +62,11 @@ See [docs/repo-layout.md](docs/repo-layout.md) for the full directory map.
 
 ## Skills
 
-Project skills live under `.agents/skills/` (mirrored to `.claude/skills/` for Claude Code). Prefer those for engineering workflows (`tdd`, `implement`, `to-spec`, `code-review`, …).
+Project skills live under `.agents/skills/` (zcode reads this directory). `.claude/skills/` carries a byte-identical copy of those 37 plus vendor skills that exist only on the Claude Code side. Mirror state and the one-sidedness rules: `review/SKILL_MIRROR.md`. Prefer project skills for engineering workflows (`tdd`, `implement`, `to-spec`, `code-review`, …).
 
-Additional vendor skills (see `.agents/vendor/` for provenance):
+Behavioral rules for agents: `.agents/AGENTS.md` (zcode reads it; keep it consistent with this file).
+
+Additional vendor skills (provenance = the upstream repos cited inline; no local vendor directory exists):
 
 * **Qt AI skills** ([TheQtCompanyRnD/agent-skills](https://github.com/TheQtCompanyRnD/agent-skills)): `qt-cpp-review`, `qt-qml-review`, `qt-qml`, `qt-ui-design`, `qt-cmake-project`, `qt-cpp-docs`, `qt-qml-docs`, `qt-qml-test`, `qt-qml-test-run`, `qt-qml-profiler`, `qt-figma-token-extraction`, `qt-figma-component-generation`.
 * **frontend-design** ([anthropics/claude-code](https://github.com/anthropics/claude-code) plugin): distinctive UI/visual design guidance.

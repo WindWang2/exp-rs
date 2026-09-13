@@ -1,6 +1,10 @@
 # Project Agent Guidelines & Conventions (`exp-rs`)
 
-All AI agents assisting with coding, reviewing, or refactoring in this repository must strictly adhere to the following core guidelines derived from the [Karpathy Guidelines](file:///.agents/skills/karpathy-guidelines/SKILL.md).
+All AI agents assisting with coding, reviewing, or refactoring in this repository must strictly adhere to the following four core guidelines — Andrej Karpathy's guidelines for AI coding agents (provenance: `CHANGELOG.md`, "Agent & Tooling Integration" entry, 2026-08-03: "Configured project-scoped behavioral rules integrating Andrej Karpathy's 4 core guidelines").
+
+Sibling runtime doc: `CLAUDE.md` (Claude Code reads it; zcode reads this file). Keep the two consistent; when they disagree, `CMakeLists.txt` / `CMakePresets.json` decide, then this file.
+
+> **Unattended mode** (`/goal` with `autonomy=full`): where a guideline below says to surface options or clarify, write the options and the taken default into `.planning/<slug>/DECISIONS.md` instead of asking the user.
 
 ---
 
@@ -16,7 +20,7 @@ All AI agents assisting with coding, reviewing, or refactoring in this repositor
 ## 3. Surgical Changes
 - **Local Isolation**: Touch only the lines directly required for the task.
 - **No Unrelated Churn**: Do not "clean up", reformat, or refactor adjacent, unrelated code, comments, or headers.
-- **Style Alignment**: Match existing project C++17 / Qt 6 coding conventions exactly.
+- **Style Alignment**: Match existing project C++20 / Qt 6 coding conventions exactly (`CMAKE_CXX_STANDARD 20`, `CMakeLists.txt:3`).
 - **Orphan Cleanup**: Only delete unused variables/headers/functions that *your* changes rendered obsolete.
 
 ## 4. Goal-Driven Execution & Verification

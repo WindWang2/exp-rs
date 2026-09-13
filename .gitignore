@@ -139,6 +139,10 @@ vendor/
 !.planning/plugin-platform-9/
 !.planning/geospatial-data-fabric-9/
 !.planning/lab-content-expansion/
+# prompt-command-hygiene-review: track planning notes (markdown only; logs stay local).
+!.planning/prompt-command-hygiene-review/
+.planning/prompt-command-hygiene-review/*
+!.planning/prompt-command-hygiene-review/*.md
 .zcode/
 
 # IDE / editor / OS artifacts

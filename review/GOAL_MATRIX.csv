@@ -1,0 +1,517 @@
+track,convention,value,evidence
+algorithm-foundation-5,branch_name,zcode/algorithm-foundation-5,.planning/algorithm-foundation-5/GOAL.md:3
+algorithm-foundation-5,worktree_path,../exp-rs-algorithm-foundation-5,.planning/algorithm-foundation-5/GOAL.md:3
+algorithm-foundation-5,base_pinned,origin/master @ 93a7fb0bbd,.planning/algorithm-foundation-5/GOAL.md:4
+algorithm-foundation-5,token_budget,absent,.planning/algorithm-foundation-5/GOAL.md:1-71
+algorithm-foundation-5,subagent_limit,absent,.planning/algorithm-foundation-5/GOAL.md:1-71
+algorithm-foundation-5,no_ci_clause,"Local build/test/bench evidence only — never block on online CI",.planning/algorithm-foundation-5/GOAL.md:5
+algorithm-foundation-5,build_parallelism,"Ninja -j2 default, -j1 under memory pressure",.planning/algorithm-foundation-5/GOAL.md:36
+algorithm-foundation-5,never_nproc_ban,"never -j$(nproc)",.planning/algorithm-foundation-5/GOAL.md:37
+algorithm-foundation-5,test_protocol,"targeted ctest -R <family> -j1",.planning/algorithm-foundation-5/GOAL.md:37
+algorithm-foundation-5,master_readonly,implicit (track branch + worktree only),.planning/algorithm-foundation-5/GOAL.md:3
+algorithm-foundation-5,pr_exit,"docs sync → coherent commits → PR",.planning/algorithm-foundation-5/GOAL.md:62
+algorithm-foundation-5,fail_honesty,"delivered as executable subset + typed refusal … never faked",.planning/algorithm-foundation-5/GOAL.md:69-71
+algorithm-foundation-5,review_gate,"5+ review lenses → P0/P1 remediation; review P0/P1 = 0",.planning/algorithm-foundation-5/GOAL.md:62,68
+algorithm-foundation-5,autonomy_defaults,absent,.planning/algorithm-foundation-5/GOAL.md:1-71
+algorithm-foundation-5,ownership_section,absent,.planning/algorithm-foundation-5/GOAL.md:1-71
+algorithm-foundation-5,external_goal_refs,absent,.planning/algorithm-foundation-5/GOAL.md:1-71
+algorithm-foundation-5,skills_referenced,none,.planning/algorithm-foundation-5/GOAL.md:1-71
+algorithm-foundation-5,language,EN,.planning/algorithm-foundation-5/GOAL.md:1
+algorithm-foundation-5,planning_file_set,"ARCHITECTURE BASELINE CAPABILITY_MATRIX DOCS_LEDGER GOAL MILESTONES PERFORMANCE_PLAN REVIEW_LOG TEST_MATRIX",ls .planning/algorithm-foundation-5/
+algorithm-foundation-5,single_chain_invariants,"No new scheduler/registry/runtime; kernel chain UI → TaskCenter → JobEngine → RSOperator → kernel",.planning/algorithm-foundation-5/GOAL.md:28-31
+algorithm-foundation-5,phase_structure,"Phase 0 baseline audit + milestones A–L",.planning/algorithm-foundation-5/GOAL.md:41-62
+cartography-platform-7,branch_name,feat/cartography-platform-7,.planning/cartography-platform-7/GOAL.md:17
+cartography-platform-7,worktree_path,C:/Users/wangj.KEVIN/projects/exp-rs-cartography-platform-7,.planning/cartography-platform-7/GOAL.md:18
+cartography-platform-7,base_pinned,absent,.planning/cartography-platform-7/GOAL.md:1-41
+cartography-platform-7,token_budget,absent,.planning/cartography-platform-7/GOAL.md:1-41
+cartography-platform-7,subagent_limit,"At most 2 subagents total (read-only audit / adversarial review)",.planning/cartography-platform-7/GOAL.md:20-21
+cartography-platform-7,no_ci_clause,absent,.planning/cartography-platform-7/GOAL.md:1-41
+cartography-platform-7,build_parallelism,"-j2 max (CMAKE_BUILD_PARALLEL_LEVEL=2)",.planning/cartography-platform-7/GOAL.md:19
+cartography-platform-7,never_nproc_ban,absent,.planning/cartography-platform-7/GOAL.md:1-41
+cartography-platform-7,test_protocol,"tests CTEST_PARALLEL_LEVEL=1",.planning/cartography-platform-7/GOAL.md:19
+cartography-platform-7,master_readonly,"Master is read-only",.planning/cartography-platform-7/GOAL.md:17
+cartography-platform-7,pr_exit,"PR submitted",.planning/cartography-platform-7/GOAL.md:41
+cartography-platform-7,fail_honesty,"FAIL is never wrapped as success: unverifiable checks report warning/unknown",.planning/cartography-platform-7/GOAL.md:16
+cartography-platform-7,review_gate,"adversarial review remediated",.planning/cartography-platform-7/GOAL.md:41
+cartography-platform-7,autonomy_defaults,absent,.planning/cartography-platform-7/GOAL.md:1-41
+cartography-platform-7,ownership_section,absent,.planning/cartography-platform-7/GOAL.md:1-41
+cartography-platform-7,external_goal_refs,"Work packages (from the goal definition)",.planning/cartography-platform-7/GOAL.md:23
+cartography-platform-7,skills_referenced,none,.planning/cartography-platform-7/GOAL.md:1-41
+cartography-platform-7,language,EN,.planning/cartography-platform-7/GOAL.md:1
+cartography-platform-7,planning_file_set,"ARCHITECTURE BASELINE FINAL_REPORT GOAL MILESTONES PLAN REVIEW_LOG TEST_MATRIX",ls .planning/cartography-platform-7/
+cartography-platform-7,single_chain_invariants,"QGIS stays the single rendering/layout authority; no second render engine",.planning/cartography-platform-7/GOAL.md:10-11
+cartography-platform-7,phase_structure,"Work packages A–I",.planning/cartography-platform-7/GOAL.md:25-35
+cartography-platform-8,branch_name,feat/cartography-platform-8 from origin/master @ 2d4f0daedd,.planning/cartography-platform-8/GOAL.md:9
+cartography-platform-8,worktree_path,absent,.planning/cartography-platform-8/GOAL.md:1-65
+cartography-platform-8,base_pinned,origin/master @ 2d4f0daedd,.planning/cartography-platform-8/GOAL.md:9
+cartography-platform-8,token_budget,absent,.planning/cartography-platform-8/GOAL.md:1-65
+cartography-platform-8,subagent_limit,"Subagent budget: ≤2 (adversarial review only)",.planning/cartography-platform-8/GOAL.md:11
+cartography-platform-8,no_ci_clause,"Local verification only; online CI/CD not required and not waited on",.planning/cartography-platform-8/GOAL.md:10
+cartography-platform-8,build_parallelism,absent,.planning/cartography-platform-8/GOAL.md:1-65
+cartography-platform-8,never_nproc_ban,absent,.planning/cartography-platform-8/GOAL.md:1-65
+cartography-platform-8,test_protocol,absent,.planning/cartography-platform-8/GOAL.md:1-65
+cartography-platform-8,master_readonly,implicit,.planning/cartography-platform-8/GOAL.md:9
+cartography-platform-8,pr_exit,"M10 push, PR",.planning/cartography-platform-8/GOAL.md:51-52
+cartography-platform-8,fail_honesty,"honest `unsatisfied` evidence (page overflow) instead of silently off-page geometry",.planning/cartography-platform-8/GOAL.md:30-32
+cartography-platform-8,review_gate,"M9 ≤2 read-only subagents over the full diff; P0/P1 fixed, P2/P3 fixed or justified; REVIEW_LOG",.planning/cartography-platform-8/GOAL.md:49-50
+cartography-platform-8,autonomy_defaults,absent,.planning/cartography-platform-8/GOAL.md:1-65
+cartography-platform-8,ownership_section,absent,.planning/cartography-platform-8/GOAL.md:1-65
+cartography-platform-8,external_goal_refs,absent,.planning/cartography-platform-8/GOAL.md:1-65
+cartography-platform-8,skills_referenced,none,.planning/cartography-platform-8/GOAL.md:1-65
+cartography-platform-8,language,EN,.planning/cartography-platform-8/GOAL.md:1
+cartography-platform-8,planning_file_set,"ARCHITECTURE BASELINE CAPABILITY_MATRIX FINAL_REPORT GOAL MILESTONES OWNERSHIP PERFORMANCE REVIEW_LOG TEST_MATRIX",ls .planning/cartography-platform-8/
+cartography-platform-8,single_chain_invariants,"No second rendering path: every pixel still comes from QGIS",.planning/cartography-platform-8/GOAL.md:56-58
+cartography-platform-8,phase_structure,"Milestones M0–M10",.planning/cartography-platform-8/GOAL.md:13-52
+cartography-platform-9,branch_name,feat/cartography-platform-9 from origin/master @ f316dfdbb4,.planning/cartography-platform-9/GOAL.md:3-4
+cartography-platform-9,worktree_path,/home/kevin/projects/rs-studio/exp-rs-cartography-platform-9,.planning/cartography-platform-9/GOAL.md:6
+cartography-platform-9,base_pinned,origin/master @ f316dfdbb4,.planning/cartography-platform-9/GOAL.md:4
+cartography-platform-9,token_budget,"program-level (≥ 3×10^8 tokens budget)",.planning/cartography-platform-9/GOAL.md:8
+cartography-platform-9,subagent_limit,"Max 2 read-only review subagents",.planning/cartography-platform-9/GOAL.md:9
+cartography-platform-9,no_ci_clause,"Online CI/CD is NOT a completion condition — all evidence is local and reproducible",.planning/cartography-platform-9/GOAL.md:9-10
+cartography-platform-9,build_parallelism,absent,.planning/cartography-platform-9/GOAL.md:1-60
+cartography-platform-9,never_nproc_ban,absent,.planning/cartography-platform-9/GOAL.md:1-60
+cartography-platform-9,test_protocol,absent,.planning/cartography-platform-9/GOAL.md:1-60
+cartography-platform-9,master_readonly,implicit,.planning/cartography-platform-9/GOAL.md:3-6
+cartography-platform-9,pr_exit,absent (no PR step in milestones),.planning/cartography-platform-9/GOAL.md:54-60
+cartography-platform-9,fail_honesty,absent,.planning/cartography-platform-9/GOAL.md:1-60
+cartography-platform-9,review_gate,absent,.planning/cartography-platform-9/GOAL.md:1-60
+cartography-platform-9,autonomy_defaults,absent,.planning/cartography-platform-9/GOAL.md:1-60
+cartography-platform-9,ownership_section,"Owned / NOT owned lists",.planning/cartography-platform-9/GOAL.md:27-37
+cartography-platform-9,external_goal_refs,"See MILESTONES.md for the per-milestone scope decisions",.planning/cartography-platform-9/GOAL.md:60
+cartography-platform-9,skills_referenced,none,.planning/cartography-platform-9/GOAL.md:1-60
+cartography-platform-9,language,EN,.planning/cartography-platform-9/GOAL.md:1
+cartography-platform-9,planning_file_set,"ARCHITECTURE BASELINE CAPABILITY_MATRIX FINAL_REPORT GOAL ISSUE_TRIAGE MILESTONES OVERLAP_MAP OWNERSHIP PERFORMANCE REVIEW_LOG TEST_MATRIX",ls .planning/cartography-platform-9/
+cartography-platform-9,single_chain_invariants,"NOT owned: execution scheduler (WorkflowRunCoordinator → TaskCenter → JobEngine → Executor)",.planning/cartography-platform-9/GOAL.md:34-36
+cartography-platform-9,phase_structure,"Milestones M0–M10",.planning/cartography-platform-9/GOAL.md:54-60
+data-runtime-governance-4,branch_name,zcode/data-runtime-governance-4,.planning/data-runtime-governance-4/GOAL.md:4
+data-runtime-governance-4,worktree_path,/home/kevin/projects/rs-studio/exp-rs-data-runtime-4,.planning/data-runtime-governance-4/GOAL.md:5
+data-runtime-governance-4,base_pinned,master @ 58eb196baa,.planning/data-runtime-governance-4/GOAL.md:6
+data-runtime-governance-4,token_budget,absent,.planning/data-runtime-governance-4/GOAL.md:1-49
+data-runtime-governance-4,subagent_limit,absent,.planning/data-runtime-governance-4/GOAL.md:1-49
+data-runtime-governance-4,no_ci_clause,"no dependence on online CI",.planning/data-runtime-governance-4/GOAL.md:7
+data-runtime-governance-4,build_parallelism,absent,.planning/data-runtime-governance-4/GOAL.md:1-49
+data-runtime-governance-4,never_nproc_ban,absent,.planning/data-runtime-governance-4/GOAL.md:1-49
+data-runtime-governance-4,test_protocol,absent,.planning/data-runtime-governance-4/GOAL.md:1-49
+data-runtime-governance-4,master_readonly,implicit ("one final PR into master"),.planning/data-runtime-governance-4/GOAL.md:7
+data-runtime-governance-4,pr_exit,"one final PR into master; PR title: fix(runtime): …",.planning/data-runtime-governance-4/GOAL.md:7-8
+data-runtime-governance-4,fail_honesty,"PR opened with evidence-backed claims only",.planning/data-runtime-governance-4/GOAL.md:49
+data-runtime-governance-4,review_gate,"No unresolved P0/P1 from the governance/runtime/cache/workflow cluster",.planning/data-runtime-governance-4/GOAL.md:43
+data-runtime-governance-4,autonomy_defaults,absent,.planning/data-runtime-governance-4/GOAL.md:1-49
+data-runtime-governance-4,ownership_section,"Primary ownership + hot-spots-only-when-necessary rule + DOCS_LEDGER.md",.planning/data-runtime-governance-4/GOAL.md:17-23
+data-runtime-governance-4,external_goal_refs,"In-scope issue cluster (verified open at HEAD, 2026-09-06)",.planning/data-runtime-governance-4/GOAL.md:25
+data-runtime-governance-4,skills_referenced,none,.planning/data-runtime-governance-4/GOAL.md:1-49
+data-runtime-governance-4,language,EN,.planning/data-runtime-governance-4/GOAL.md:1
+data-runtime-governance-4,planning_file_set,"ARCHITECTURE BASELINE DOCS_LEDGER FINAL_REPORT GOAL PLAN REVIEW_LOG SCALE_BASELINE TEST_MATRIX",ls .planning/data-runtime-governance-4/
+data-runtime-governance-4,single_chain_invariants,implicit,.planning/data-runtime-governance-4/GOAL.md:1-49
+data-runtime-governance-4,phase_structure,"Issue-cluster milestones A–G",.planning/data-runtime-governance-4/GOAL.md:27-36
+dataset-experiment-7,branch_name,feat/dataset-experiment-7,.planning/dataset-experiment-7/GOAL.md:3
+dataset-experiment-7,worktree_path,C:\Users\wangj.KEVIN\projects\exp-rs-dataset-experiment-7,.planning/dataset-experiment-7/GOAL.md:4
+dataset-experiment-7,base_pinned,master @ 2041f6fa,.planning/dataset-experiment-7/GOAL.md:5
+dataset-experiment-7,token_budget,absent,.planning/dataset-experiment-7/GOAL.md:1-38
+dataset-experiment-7,subagent_limit,"Max 2 subagents total (read-only analysis/review preferred)",.planning/dataset-experiment-7/GOAL.md:21
+dataset-experiment-7,no_ci_clause,"Local build/test evidence only; no CI/CD dependency",.planning/dataset-experiment-7/GOAL.md:23
+dataset-experiment-7,build_parallelism,"Build parallelism ≤ 2",.planning/dataset-experiment-7/GOAL.md:23
+dataset-experiment-7,never_nproc_ban,absent,.planning/dataset-experiment-7/GOAL.md:1-38
+dataset-experiment-7,test_protocol,"CTest parallelism 1",.planning/dataset-experiment-7/GOAL.md:24
+dataset-experiment-7,master_readonly,"master is read-only; all work in this worktree/branch",.planning/dataset-experiment-7/GOAL.md:22
+dataset-experiment-7,pr_exit,absent (no PR step stated),.planning/dataset-experiment-7/GOAL.md:1-38
+dataset-experiment-7,fail_honesty,"FAIL is never wrapped as success; unvalidatable ⇒ warning/unknown",.planning/dataset-experiment-7/GOAL.md:28
+dataset-experiment-7,review_gate,absent,.planning/dataset-experiment-7/GOAL.md:1-38
+dataset-experiment-7,autonomy_defaults,absent,.planning/dataset-experiment-7/GOAL.md:1-38
+dataset-experiment-7,ownership_section,absent,.planning/dataset-experiment-7/GOAL.md:1-38
+dataset-experiment-7,external_goal_refs,"Completion definition (from the goal brief); Hard constraints (from the goal brief)",.planning/dataset-experiment-7/GOAL.md:14,19
+dataset-experiment-7,skills_referenced,none,.planning/dataset-experiment-7/GOAL.md:1-38
+dataset-experiment-7,language,EN,.planning/dataset-experiment-7/GOAL.md:1
+dataset-experiment-7,planning_file_set,"ARCHITECTURE BASELINE FINAL_REPORT GOAL MILESTONES PLAN REVIEW_LOG TEST_MATRIX pr_body.md",ls .planning/dataset-experiment-7/
+dataset-experiment-7,single_chain_invariants,"No second agent foundation, no second scheduler, no second map engine",.planning/dataset-experiment-7/GOAL.md:27
+dataset-experiment-7,phase_structure,"Deliverable sections A–G",.planning/dataset-experiment-7/GOAL.md:30-38
+dataset-experiment-mlops-8,branch_name,feat/dataset-experiment-mlops-8,.planning/dataset-experiment-mlops-8/GOAL.md:8
+dataset-experiment-mlops-8,worktree_path,../exp-rs-dataset-experiment-mlops-8,.planning/dataset-experiment-mlops-8/GOAL.md:9
+dataset-experiment-mlops-8,base_pinned,origin/master 322dfd3876 (re-verified 2026-09-10),.planning/dataset-experiment-mlops-8/GOAL.md:10
+dataset-experiment-mlops-8,token_budget,absent,.planning/dataset-experiment-mlops-8/GOAL.md:1-36
+dataset-experiment-mlops-8,subagent_limit,absent (adversarial review required, count unstated),.planning/dataset-experiment-mlops-8/GOAL.md:35
+dataset-experiment-mlops-8,no_ci_clause,absent,.planning/dataset-experiment-mlops-8/GOAL.md:1-36
+dataset-experiment-mlops-8,build_parallelism,absent,.planning/dataset-experiment-mlops-8/GOAL.md:1-36
+dataset-experiment-mlops-8,never_nproc_ban,absent,.planning/dataset-experiment-mlops-8/GOAL.md:1-36
+dataset-experiment-mlops-8,test_protocol,"local build + test evidence (unit + E2E)",.planning/dataset-experiment-mlops-8/GOAL.md:33
+dataset-experiment-mlops-8,master_readonly,implicit,.planning/dataset-experiment-mlops-8/GOAL.md:8-10
+dataset-experiment-mlops-8,pr_exit,"PR created (no merge)",.planning/dataset-experiment-mlops-8/GOAL.md:36
+dataset-experiment-mlops-8,fail_honesty,"Secondary gaps either implemented or explicitly refused with rationale",.planning/dataset-experiment-mlops-8/GOAL.md:34
+dataset-experiment-mlops-8,review_gate,"Adversarial review completed; no open P0/P1; P2/P3 fixed or justified",.planning/dataset-experiment-mlops-8/GOAL.md:35
+dataset-experiment-mlops-8,autonomy_defaults,absent,.planning/dataset-experiment-mlops-8/GOAL.md:1-36
+dataset-experiment-mlops-8,ownership_section,"Hard laws: ownership unchanged (RSOperatorRegistry, IModelRuntime, QGIS, stores, src/geospatial)",.planning/dataset-experiment-mlops-8/GOAL.md:17-18
+dataset-experiment-mlops-8,external_goal_refs,"Verified primary gap (see BASELINE.md)",.planning/dataset-experiment-mlops-8/GOAL.md:21
+dataset-experiment-mlops-8,skills_referenced,none,.planning/dataset-experiment-mlops-8/GOAL.md:1-36
+dataset-experiment-mlops-8,language,EN,.planning/dataset-experiment-mlops-8/GOAL.md:1
+dataset-experiment-mlops-8,planning_file_set,"ARCHITECTURE BASELINE CAPABILITY_MATRIX DOCS_LEDGER FINAL_REPORT GOAL MILESTONES OWNERSHIP PERFORMANCE PLAN REVIEW_LOG TEST_MATRIX",ls .planning/dataset-experiment-mlops-8/
+dataset-experiment-mlops-8,single_chain_invariants,"Pi stays the single agent loop; execution stays WorkflowRunCoordinator → TaskCenter → JobEngine → Executor/RSOperator",.planning/dataset-experiment-mlops-8/GOAL.md:14-16
+dataset-experiment-mlops-8,phase_structure,"WP-A + secondary gaps",.planning/dataset-experiment-mlops-8/GOAL.md:30-36
+execution-data-plane-3,branch_name,zcode/spatial-execution-data-plane-3,.planning/execution-data-plane-3/GOAL.md:3
+execution-data-plane-3,worktree_path,exp-rs-execution-plane-3 (relative name only),.planning/execution-data-plane-3/GOAL.md:3
+execution-data-plane-3,base_pinned,off origin/master @ bf26b74a34,.planning/execution-data-plane-3/GOAL.md:3
+execution-data-plane-3,token_budget,absent,.planning/execution-data-plane-3/GOAL.md:1-56
+execution-data-plane-3,subagent_limit,absent (adversarial review in checklist),.planning/execution-data-plane-3/GOAL.md:55
+execution-data-plane-3,no_ci_clause,"No online CI/CD dependency: local build + ctest + bench + fault injection only",.planning/execution-data-plane-3/GOAL.md:28
+execution-data-plane-3,build_parallelism,"CMAKE_BUILD_PARALLEL_LEVEL=2, ctest -j2 (stress -j1)",.planning/execution-data-plane-3/GOAL.md:29
+execution-data-plane-3,never_nproc_ban,"Never -j$(nproc) (16 logical CPUs / 62 GB RAM host, other epics co-running)",.planning/execution-data-plane-3/GOAL.md:30
+execution-data-plane-3,test_protocol,"ctest -j2 (stress -j1); fault injection",.planning/execution-data-plane-3/GOAL.md:29,28
+execution-data-plane-3,master_readonly,"master is read-only; all work in this worktree/branch; staged commits; final PR",.planning/execution-data-plane-3/GOAL.md:27
+execution-data-plane-3,pr_exit,"master sync → push + PR; no CI wait",.planning/execution-data-plane-3/GOAL.md:43,56
+execution-data-plane-3,fail_honesty,"Scientific correctness > hit rate",.planning/execution-data-plane-3/GOAL.md:32
+execution-data-plane-3,review_gate,"Review passes 1-4; adversarial review ✓",.planning/execution-data-plane-3/GOAL.md:43,55
+execution-data-plane-3,autonomy_defaults,absent,.planning/execution-data-plane-3/GOAL.md:1-56
+execution-data-plane-3,ownership_section,"Ownership (files this epic may change) + Off-limits",.planning/execution-data-plane-3/GOAL.md:16-23
+execution-data-plane-3,external_goal_refs,"Success = acceptance checklist (§26 of the goal)",.planning/execution-data-plane-3/GOAL.md:47
+execution-data-plane-3,skills_referenced,none,.planning/execution-data-plane-3/GOAL.md:1-56
+execution-data-plane-3,language,EN,.planning/execution-data-plane-3/GOAL.md:1
+execution-data-plane-3,planning_file_set,"ARCHITECTURE BASELINE COMPLETION DATA_MODEL EXECUTION_LIFECYCLE FAILURE_MATRIX GOAL MEMORY_BUDGET PERF_BASELINE PHASES REVIEW_LOG TEST_MATRIX",ls .planning/execution-data-plane-3/
+execution-data-plane-3,single_chain_invariants,implicit (off-limits: Pi UX; execution seams only),.planning/execution-data-plane-3/GOAL.md:22-23
+execution-data-plane-3,phase_structure,"Phases A–M + Review passes 1-4",.planning/execution-data-plane-3/GOAL.md:37-43
+execution-plane-8,branch_name,feat/execution-plane-8,.planning/execution-plane-8/GOAL.md:16
+execution-plane-8,worktree_path,/home/kevin/projects/rs-studio/exp-rs-execution-plane-8,.planning/execution-plane-8/GOAL.md:17
+execution-plane-8,base_pinned,origin/master = 322dfd3876 (latest verified 2026-09-10),.planning/execution-plane-8/GOAL.md:18
+execution-plane-8,token_budget,absent,.planning/execution-plane-8/GOAL.md:1-34
+execution-plane-8,subagent_limit,"Subagent budget: ≤ 2 total (read-only reviewers)",.planning/execution-plane-8/GOAL.md:20
+execution-plane-8,no_ci_clause,"Local verification only; no online CI waiting",.planning/execution-plane-8/GOAL.md:19
+execution-plane-8,build_parallelism,absent,.planning/execution-plane-8/GOAL.md:1-34
+execution-plane-8,never_nproc_ban,absent,.planning/execution-plane-8/GOAL.md:1-34
+execution-plane-8,test_protocol,absent,.planning/execution-plane-8/GOAL.md:1-34
+execution-plane-8,master_readonly,implicit,.planning/execution-plane-8/GOAL.md:16-18
+execution-plane-8,pr_exit,absent,.planning/execution-plane-8/GOAL.md:1-34
+execution-plane-8,fail_honesty,absent,.planning/execution-plane-8/GOAL.md:1-34
+execution-plane-8,review_gate,absent,.planning/execution-plane-8/GOAL.md:1-34
+execution-plane-8,autonomy_defaults,absent,.planning/execution-plane-8/GOAL.md:1-34
+execution-plane-8,ownership_section,absent,.planning/execution-plane-8/GOAL.md:1-34
+execution-plane-8,external_goal_refs,"7.0 known-limitation source column",.planning/execution-plane-8/GOAL.md:24-34
+execution-plane-8,skills_referenced,none,.planning/execution-plane-8/GOAL.md:1-34
+execution-plane-8,language,EN,.planning/execution-plane-8/GOAL.md:1
+execution-plane-8,planning_file_set,"ARCHITECTURE BASELINE CAPABILITY_MATRIX DOCS_LEDGER FINAL_REPORT GOAL MILESTONES OWNERSHIP PERFORMANCE PLAN REVIEW_LOG TEST_MATRIX",ls .planning/execution-plane-8/
+execution-plane-8,single_chain_invariants,"Non-negotiable: the single scheduling chain … remains the ONLY scheduling path. No second scheduler, no second agent loop, no competing model runtime",.planning/execution-plane-8/GOAL.md:9-12
+execution-plane-8,phase_structure,"Work packages A–I",.planning/execution-plane-8/GOAL.md:22-34
+execution-plane-runtime-7,branch_name,feat/execution-plane-runtime-7,.planning/execution-plane-runtime-7/GOAL.md:3
+execution-plane-runtime-7,worktree_path,../exp-rs-execution-plane-runtime-7,.planning/execution-plane-runtime-7/GOAL.md:3
+execution-plane-runtime-7,base_pinned,cut from master 2041f6fa,.planning/execution-plane-runtime-7/GOAL.md:3
+execution-plane-runtime-7,token_budget,absent,.planning/execution-plane-runtime-7/GOAL.md:1-38
+execution-plane-runtime-7,subagent_limit,"最多 2 个 subagents（#1 已用于基线审计，#2 保留给最终 adversarial review）",.planning/execution-plane-runtime-7/GOAL.md:34
+execution-plane-runtime-7,no_ci_clause,"无线上 CI；一切结论来自本地可重复构建/测试",.planning/execution-plane-runtime-7/GOAL.md:35
+execution-plane-runtime-7,build_parallelism,"CMAKE_BUILD_PARALLEL_LEVEL=2、CTEST_PARALLEL_LEVEL=1；重目标 -j1/-j2",.planning/execution-plane-runtime-7/GOAL.md:36
+execution-plane-runtime-7,never_nproc_ban,absent,.planning/execution-plane-runtime-7/GOAL.md:1-38
+execution-plane-runtime-7,test_protocol,absent,.planning/execution-plane-runtime-7/GOAL.md:1-38
+execution-plane-runtime-7,master_readonly,"master 只读；只在 worktree 开发；small commits；先 contract 后功能",.planning/execution-plane-runtime-7/GOAL.md:37
+execution-plane-runtime-7,pr_exit,absent,.planning/execution-plane-runtime-7/GOAL.md:1-38
+execution-plane-runtime-7,fail_honesty,"FAIL 不得包装成 success；无法验证用 warning/unknown",.planning/execution-plane-runtime-7/GOAL.md:38
+execution-plane-runtime-7,review_gate,"#2 subagent reserved for final adversarial review",.planning/execution-plane-runtime-7/GOAL.md:34
+execution-plane-runtime-7,autonomy_defaults,absent,.planning/execution-plane-runtime-7/GOAL.md:1-38
+execution-plane-runtime-7,ownership_section,absent,.planning/execution-plane-runtime-7/GOAL.md:1-38
+execution-plane-runtime-7,external_goal_refs,absent,.planning/execution-plane-runtime-7/GOAL.md:1-38
+execution-plane-runtime-7,skills_referenced,none,.planning/execution-plane-runtime-7/GOAL.md:1-38
+execution-plane-runtime-7,language,CN,.planning/execution-plane-runtime-7/GOAL.md:5
+execution-plane-runtime-7,planning_file_set,"ARCHITECTURE BASELINE FINAL_REPORT GOAL MILESTONES PLAN REVIEW_LOG TEST_MATRIX",ls .planning/execution-plane-runtime-7/
+execution-plane-runtime-7,single_chain_invariants,"唯一调度链（不变量）WorkflowRunCoordinator -> TaskCenter -> JobEngine -> Executor; 不允许出现第二个 job graph/scheduler",.planning/execution-plane-runtime-7/GOAL.md:8-12
+execution-plane-runtime-7,phase_structure,"开发包 A–H with 里程碑 M1–M8",.planning/execution-plane-runtime-7/GOAL.md:14-25
+geospatial-data-fabric-8,branch_name,feat/geospatial-data-fabric-8,.planning/geospatial-data-fabric-8/GOAL.md:4
+geospatial-data-fabric-8,worktree_path,../exp-rs-geospatial-data-fabric-8,.planning/geospatial-data-fabric-8/GOAL.md:4
+geospatial-data-fabric-8,base_pinned,origin/master = 322dfd3876c3… (verified 2026-09-10),.planning/geospatial-data-fabric-8/GOAL.md:5-6
+geospatial-data-fabric-8,token_budget,absent,.planning/geospatial-data-fabric-8/GOAL.md:1-29
+geospatial-data-fabric-8,subagent_limit,absent,.planning/geospatial-data-fabric-8/GOAL.md:1-29
+geospatial-data-fabric-8,no_ci_clause,absent,.planning/geospatial-data-fabric-8/GOAL.md:1-29
+geospatial-data-fabric-8,build_parallelism,absent,.planning/geospatial-data-fabric-8/GOAL.md:1-29
+geospatial-data-fabric-8,never_nproc_ban,absent,.planning/geospatial-data-fabric-8/GOAL.md:1-29
+geospatial-data-fabric-8,test_protocol,absent,.planning/geospatial-data-fabric-8/GOAL.md:1-29
+geospatial-data-fabric-8,master_readonly,implicit,.planning/geospatial-data-fabric-8/GOAL.md:4
+geospatial-data-fabric-8,pr_exit,absent,.planning/geospatial-data-fabric-8/GOAL.md:1-29
+geospatial-data-fabric-8,fail_honesty,"no policy change without evidence",.planning/geospatial-data-fabric-8/GOAL.md:19
+geospatial-data-fabric-8,review_gate,absent,.planning/geospatial-data-fabric-8/GOAL.md:1-29
+geospatial-data-fabric-8,autonomy_defaults,absent,.planning/geospatial-data-fabric-8/GOAL.md:1-29
+geospatial-data-fabric-8,ownership_section,"src/geospatial stays the single I/O authority (ownership boundary)",.planning/geospatial-data-fabric-8/GOAL.md:11
+geospatial-data-fabric-8,external_goal_refs,"Track contract table (Prompt ask column)",.planning/geospatial-data-fabric-8/GOAL.md:13-25
+geospatial-data-fabric-8,skills_referenced,none,.planning/geospatial-data-fabric-8/GOAL.md:1-29
+geospatial-data-fabric-8,language,EN,.planning/geospatial-data-fabric-8/GOAL.md:1
+geospatial-data-fabric-8,planning_file_set,"ARCHITECTURE BASELINE CAPABILITY_MATRIX DOCS_LEDGER FINAL_REPORT GOAL MILESTONES OWNERSHIP PERFORMANCE PLAN REVIEW_LOG TEST_MATRIX",ls .planning/geospatial-data-fabric-8/
+geospatial-data-fabric-8,single_chain_invariants,"Pi stays the single agent loop; no second scheduler; … stay authoritative; all new surface is additive",.planning/geospatial-data-fabric-8/GOAL.md:27-29
+geospatial-data-fabric-8,phase_structure,"Track contract packages A–I",.planning/geospatial-data-fabric-8/GOAL.md:13-25
+lab-content-expansion,branch_name,zcode/lab-content-expansion,.planning/lab-content-expansion/GOAL.md:14
+lab-content-expansion,worktree_path,../exp-rs-lab-content-expansion,.planning/lab-content-expansion/GOAL.md:14
+lab-content-expansion,base_pinned,absent (base origin/master unpinned),.planning/lab-content-expansion/GOAL.md:14
+lab-content-expansion,token_budget,absent,.planning/lab-content-expansion/GOAL.md:1-40
+lab-content-expansion,subagent_limit,"≤2 subagents at any moment, read-only (research in Phase 0, adversarial review in Phase 6). Main agent does 100% of implementation",.planning/lab-content-expansion/GOAL.md:16
+lab-content-expansion,no_ci_clause,"No CI: local evidence only → EVIDENCE.md",.planning/lab-content-expansion/GOAL.md:17
+lab-content-expansion,build_parallelism,"CMAKE_BUILD_PARALLEL_LEVEL=2, CTEST_PARALLEL_LEVEL=1, Ninja -j2 (drop to -j1 if RSS > 70% or load > 1.5× cores); log CPU/RSS every 60 s",.planning/lab-content-expansion/GOAL.md:18
+lab-content-expansion,never_nproc_ban,implicit (Ninja -j2 with RSS rule),.planning/lab-content-expansion/GOAL.md:18
+lab-content-expansion,test_protocol,"QT_QPA_PLATFORM=offscreen; targeted ctest -R <family> -j1 first",.planning/lab-content-expansion/GOAL.md:19
+lab-content-expansion,master_readonly,"master read-only. No changes under src/operators/",.planning/lab-content-expansion/GOAL.md:15
+lab-content-expansion,pr_exit,"PR created, NOT merged",.planning/lab-content-expansion/GOAL.md:24
+lab-content-expansion,fail_honesty,absent,.planning/lab-content-expansion/GOAL.md:1-40
+lab-content-expansion,review_gate,"P0=P1=0 in review",.planning/lab-content-expansion/GOAL.md:23
+lab-content-expansion,autonomy_defaults,absent (constraints act as defaults),.planning/lab-content-expansion/GOAL.md:12-24
+lab-content-expansion,ownership_section,"diff confined to data/labs/, docs/labs/, scripts/, tests/",.planning/lab-content-expansion/GOAL.md:23
+lab-content-expansion,external_goal_refs,"Hard constraints (from track GOAL, verbatim compliance); D1/D2/D4/D10 sibling tracks",.planning/lab-content-expansion/GOAL.md:12,22
+lab-content-expansion,skills_referenced,none,.planning/lab-content-expansion/GOAL.md:1-40
+lab-content-expansion,language,CN-mixed,.planning/lab-content-expansion/GOAL.md:1
+lab-content-expansion,planning_file_set,"BASELINE DECISIONS EVIDENCE GOAL MILESTONES PLAN PR_BODY REVIEW_LOG logs",ls .planning/lab-content-expansion/
+lab-content-expansion,single_chain_invariants,absent,.planning/lab-content-expansion/GOAL.md:1-40
+lab-content-expansion,phase_structure,"Phase order 0–8",.planning/lab-content-expansion/GOAL.md:26-36
+lab-spec-data-driven,branch_name,zcode/lab-spec-data-driven,.planning/lab-spec-data-driven/GOAL.md:3
+lab-spec-data-driven,worktree_path,/home/kevin/projects/rs-studio/exp-rs-lab-spec-data-driven,.planning/lab-spec-data-driven/GOAL.md:4
+lab-spec-data-driven,base_pinned,absent,.planning/lab-spec-data-driven/GOAL.md:3-4
+lab-spec-data-driven,token_budget,absent,.planning/lab-spec-data-driven/GOAL.md:1-46
+lab-spec-data-driven,subagent_limit,"Subagents ≤ 2，只读（审查/验证用）",.planning/lab-spec-data-driven/GOAL.md:15
+lab-spec-data-driven,no_ci_clause,"No CI — 本地 build/test/bench 证据入 EVIDENCE.md",.planning/lab-spec-data-driven/GOAL.md:16
+lab-spec-data-driven,build_parallelism,"CMAKE_BUILD_PARALLEL_LEVEL=2, CTEST_PARALLEL_LEVEL=1, Ninja -j2（RSS>70% 或 load>1.5×cores 时 -j1）；每 60s 记录 CPU/RSS",.planning/lab-spec-data-driven/GOAL.md:18-19
+lab-spec-data-driven,never_nproc_ban,implicit (Ninja -j2 with RSS rule),.planning/lab-spec-data-driven/GOAL.md:18
+lab-spec-data-driven,test_protocol,"QT_QPA_PLATFORM=offscreen；先 targeted ctest -R <family> -j1",.planning/lab-spec-data-driven/GOAL.md:20
+lab-spec-data-driven,master_readonly,"master 只读；worktree + branch 先行",.planning/lab-spec-data-driven/GOAL.md:17
+lab-spec-data-driven,pr_exit,"退出: PR 创建即停，不 merge，不等 checks",.planning/lab-spec-data-driven/GOAL.md:21
+lab-spec-data-driven,fail_honesty,"缺失/非法 LabSpec = 类型化错误",.planning/lab-spec-data-driven/GOAL.md:28
+lab-spec-data-driven,review_gate,"Review P0=P1=0；处置记入 REVIEW_LOG.md",.planning/lab-spec-data-driven/GOAL.md:44
+lab-spec-data-driven,autonomy_defaults,"Autonomy defaults（已采纳，不再询问）8 条",.planning/lab-spec-data-driven/GOAL.md:23-34
+lab-spec-data-driven,ownership_section,"Diff 限于 data/labs/ data/schemas/ src/app/widgets/ tests/ docs/labs/ scripts/",.planning/lab-spec-data-driven/GOAL.md:45-46
+lab-spec-data-driven,external_goal_refs,"Source: D2 goal directive (2026-09-12)",.planning/lab-spec-data-driven/GOAL.md:3
+lab-spec-data-driven,skills_referenced,none,.planning/lab-spec-data-driven/GOAL.md:1-46
+lab-spec-data-driven,language,CN,.planning/lab-spec-data-driven/GOAL.md:1
+lab-spec-data-driven,planning_file_set,"CAPABILITY_MATRIX DECISIONS EVIDENCE GOAL MILESTONES PLAN PROGRESS PR_BODY REVIEW_LOG",ls .planning/lab-spec-data-driven/
+lab-spec-data-driven,single_chain_invariants,absent,.planning/lab-spec-data-driven/GOAL.md:1-46
+lab-spec-data-driven,phase_structure,absent (autonomy defaults + completion gate only),.planning/lab-spec-data-driven/GOAL.md:1-46
+pi-spatial-scientist-harness-4,branch_name,zcode/pi-spatial-scientist-harness-4,.planning/pi-spatial-scientist-harness-4/GOAL.md:3
+pi-spatial-scientist-harness-4,worktree_path,C:\Users\wangj.KEVIN\projects\exp-rs-pi-harness-4,.planning/pi-spatial-scientist-harness-4/GOAL.md:4
+pi-spatial-scientist-harness-4,base_pinned,master@a89c0c20,.planning/pi-spatial-scientist-harness-4/GOAL.md:5
+pi-spatial-scientist-harness-4,token_budget,absent,.planning/pi-spatial-scientist-harness-4/GOAL.md:1-83
+pi-spatial-scientist-harness-4,subagent_limit,absent (M8 says "6× adversarial review"),.planning/pi-spatial-scientist-harness-4/GOAL.md:73
+pi-spatial-scientist-harness-4,no_ci_clause,absent,.planning/pi-spatial-scientist-harness-4/GOAL.md:1-83
+pi-spatial-scientist-harness-4,build_parallelism,absent,.planning/pi-spatial-scientist-harness-4/GOAL.md:1-83
+pi-spatial-scientist-harness-4,never_nproc_ban,absent,.planning/pi-spatial-scientist-harness-4/GOAL.md:1-83
+pi-spatial-scientist-harness-4,test_protocol,"Evals + anti-hallucination tests + token benchmarks (Phases 18–20)",.planning/pi-spatial-scientist-harness-4/GOAL.md:72
+pi-spatial-scientist-harness-4,master_readonly,implicit,.planning/pi-spatial-scientist-harness-4/GOAL.md:3-5
+pi-spatial-scientist-harness-4,pr_exit,"PR submitted",.planning/pi-spatial-scientist-harness-4/GOAL.md:83
+pi-spatial-scientist-harness-4,fail_honesty,"no false success after FAIL verification; unknown → inspect, ambiguous → resolve, missing → typed failure",.planning/pi-spatial-scientist-harness-4/GOAL.md:40-42,82
+pi-spatial-scientist-harness-4,review_gate,"review P0/P1 = 0",.planning/pi-spatial-scientist-harness-4/GOAL.md:83
+pi-spatial-scientist-harness-4,autonomy_defaults,absent,.planning/pi-spatial-scientist-harness-4/GOAL.md:1-83
+pi-spatial-scientist-harness-4,ownership_section,"Directory ownership primary + touch-only-through-contracts + thin-seam exceptions",.planning/pi-spatial-scientist-harness-4/GOAL.md:49-59
+pi-spatial-scientist-harness-4,external_goal_refs,absent,.planning/pi-spatial-scientist-harness-4/GOAL.md:1-83
+pi-spatial-scientist-harness-4,skills_referenced,none,.planning/pi-spatial-scientist-harness-4/GOAL.md:1-83
+pi-spatial-scientist-harness-4,language,EN,.planning/pi-spatial-scientist-harness-4/GOAL.md:1
+pi-spatial-scientist-harness-4,planning_file_set,"ARCHITECTURE BASELINE DOCS_LEDGER FINAL_REPORT GOAL PLAN PR_BODY REVIEW_LOG TEST_MATRIX",ls .planning/pi-spatial-scientist-harness-4/
+pi-spatial-scientist-harness-4,single_chain_invariants,"Architecture invariants (non-negotiable) 1–6: Pi generic; single execution engine; single tool catalog; anti-hallucination; deterministic core; minimal hot-file footprint",.planning/pi-spatial-scientist-harness-4/GOAL.md:27-47
+pi-spatial-scientist-harness-4,phase_structure,"Milestones M0–M8 with goal-phase mapping",.planning/pi-spatial-scientist-harness-4/GOAL.md:61-73
+plugin-platform-8,branch_name,conflated: "worktree `feat/plugin-platform-8`",.planning/plugin-platform-8/GOAL.md:11
+plugin-platform-8,worktree_path,absent,.planning/plugin-platform-8/GOAL.md:1-13
+plugin-platform-8,base_pinned,absent,.planning/plugin-platform-8/GOAL.md:1-13
+plugin-platform-8,token_budget,absent,.planning/plugin-platform-8/GOAL.md:1-13
+plugin-platform-8,subagent_limit,"≤2 subagents (reserved for the final adversarial review)",.planning/plugin-platform-8/GOAL.md:10-11
+plugin-platform-8,no_ci_clause,"local evidence only",.planning/plugin-platform-8/GOAL.md:11
+plugin-platform-8,build_parallelism,absent,.planning/plugin-platform-8/GOAL.md:1-13
+plugin-platform-8,never_nproc_ban,absent,.planning/plugin-platform-8/GOAL.md:1-13
+plugin-platform-8,test_protocol,absent,.planning/plugin-platform-8/GOAL.md:1-13
+plugin-platform-8,master_readonly,"master read-only",.planning/plugin-platform-8/GOAL.md:11
+plugin-platform-8,pr_exit,absent,.planning/plugin-platform-8/GOAL.md:1-13
+plugin-platform-8,fail_honesty,absent,.planning/plugin-platform-8/GOAL.md:1-13
+plugin-platform-8,review_gate,"reserved for the final adversarial review",.planning/plugin-platform-8/GOAL.md:10-11
+plugin-platform-8,autonomy_defaults,absent,.planning/plugin-platform-8/GOAL.md:1-13
+plugin-platform-8,ownership_section,absent,.planning/plugin-platform-8/GOAL.md:1-13
+plugin-platform-8,external_goal_refs,"Milestones and status live in MILESTONES.md; per-package decisions in ARCHITECTURE.md",.planning/plugin-platform-8/GOAL.md:13
+plugin-platform-8,skills_referenced,none,.planning/plugin-platform-8/GOAL.md:1-13
+plugin-platform-8,language,EN,.planning/plugin-platform-8/GOAL.md:1
+plugin-platform-8,planning_file_set,"ARCHITECTURE BASELINE CAPABILITY_MATRIX FINAL_REPORT GOAL MILESTONES OWNERSHIP PERFORMANCE PLAN REVIEW_LOG TEST_MATRIX",ls .planning/plugin-platform-8/
+plugin-platform-8,single_chain_invariants,"no second registry/scheduler/runtime",.planning/plugin-platform-8/GOAL.md:10
+plugin-platform-8,phase_structure,absent (deferred to MILESTONES.md),.planning/plugin-platform-8/GOAL.md:13
+professional-workbench-7,branch_name,feat/professional-workbench-7,.planning/professional-workbench-7/GOAL.md:3
+professional-workbench-7,worktree_path,../exp-rs-professional-workbench-7,.planning/professional-workbench-7/GOAL.md:3
+professional-workbench-7,base_pinned,origin/master @ c731e3e7,.planning/professional-workbench-7/GOAL.md:3
+professional-workbench-7,token_budget,absent,.planning/professional-workbench-7/GOAL.md:1-53
+professional-workbench-7,subagent_limit,"≤ 2 subagents TOTAL (reserved for final adversarial review)",.planning/professional-workbench-7/GOAL.md:15-16
+professional-workbench-7,no_ci_clause,"No online CI dependency",.planning/professional-workbench-7/GOAL.md:16
+professional-workbench-7,build_parallelism,"-j2 build (heavy deps -j1)",.planning/professional-workbench-7/GOAL.md:21
+professional-workbench-7,never_nproc_ban,implicit (-j2 with heavy-deps -j1),.planning/professional-workbench-7/GOAL.md:21
+professional-workbench-7,test_protocol,"CTEST_PARALLEL_LEVEL=1, offscreen Qt tests, shared vcpkg install from ../exp-rs-win/build-win",.planning/professional-workbench-7/GOAL.md:22-23
+professional-workbench-7,master_readonly,"master read-only; work only in this worktree",.planning/professional-workbench-7/GOAL.md:15
+professional-workbench-7,pr_exit,absent,.planning/professional-workbench-7/GOAL.md:1-53
+professional-workbench-7,fail_honesty,"FAIL stays FAIL; unverifiable → warning/unknown. No fabricated success",.planning/professional-workbench-7/GOAL.md:24
+professional-workbench-7,review_gate,"review P0/P1 zero, reasonable P2 fixed",.planning/professional-workbench-7/GOAL.md:52
+professional-workbench-7,autonomy_defaults,absent,.planning/professional-workbench-7/GOAL.md:1-53
+professional-workbench-7,ownership_section,absent,.planning/professional-workbench-7/GOAL.md:1-53
+professional-workbench-7,external_goal_refs,"Track sections (from the goal brief)",.planning/professional-workbench-7/GOAL.md:26
+professional-workbench-7,skills_referenced,none,.planning/professional-workbench-7/GOAL.md:1-53
+professional-workbench-7,language,EN,.planning/professional-workbench-7/GOAL.md:1
+professional-workbench-7,planning_file_set,"ARCHITECTURE BASELINE FINAL_REPORT GOAL MILESTONES PLAN REVIEW_LOG TEST_MATRIX",ls .planning/professional-workbench-7/
+professional-workbench-7,single_chain_invariants,"Thin client only: GUI never re-implements algorithms or owns a second data store",.planning/professional-workbench-7/GOAL.md:17-20
+professional-workbench-7,phase_structure,"Track sections A–I",.planning/professional-workbench-7/GOAL.md:26-48
+professional-workbench-8,branch_name,feat/professional-workbench-8,.planning/professional-workbench-8/GOAL.md:3
+professional-workbench-8,worktree_path,../exp-rs-professional-workbench-8,.planning/professional-workbench-8/GOAL.md:3
+professional-workbench-8,base_pinned,origin/master @ 2d4f0daedd (execution-time latest; PR #836 merged),.planning/professional-workbench-8/GOAL.md:4
+professional-workbench-8,token_budget,absent,.planning/professional-workbench-8/GOAL.md:1-65
+professional-workbench-8,subagent_limit,absent (adversarial review remediated in DoD, count unstated),.planning/professional-workbench-8/GOAL.md:64
+professional-workbench-8,no_ci_clause,"Online CI/CD not required and not waited on",.planning/professional-workbench-8/GOAL.md:65
+professional-workbench-8,build_parallelism,absent,.planning/professional-workbench-8/GOAL.md:1-65
+professional-workbench-8,never_nproc_ban,absent,.planning/professional-workbench-8/GOAL.md:1-65
+professional-workbench-8,test_protocol,"targeted builds green; tests pass with honest classification; deterministic bounded tests; scale evidence",.planning/professional-workbench-8/GOAL.md:62-63
+professional-workbench-8,master_readonly,implicit,.planning/professional-workbench-8/GOAL.md:3-4
+professional-workbench-8,pr_exit,"branch pushed; PR created",.planning/professional-workbench-8/GOAL.md:64
+professional-workbench-8,fail_honesty,"tests pass with honest classification; New registries/managers require proof that no equivalent exists",.planning/professional-workbench-8/GOAL.md:55-57,62-63
+professional-workbench-8,review_gate,"adversarial review remediated",.planning/professional-workbench-8/GOAL.md:64
+professional-workbench-8,autonomy_defaults,absent,.planning/professional-workbench-8/GOAL.md:1-65
+professional-workbench-8,ownership_section,"Non-negotiable invariants (authority list incl. src/geospatial, persistence)",.planning/professional-workbench-8/GOAL.md:40-57
+professional-workbench-8,external_goal_refs,"See the goal contract; explicitly deferred by track 7.0",.planning/professional-workbench-8/GOAL.md:61,20
+professional-workbench-8,skills_referenced,none,.planning/professional-workbench-8/GOAL.md:1-65
+professional-workbench-8,language,EN,.planning/professional-workbench-8/GOAL.md:1
+professional-workbench-8,planning_file_set,"ARCHITECTURE BASELINE DOCS_LEDGER FINAL_REPORT GOAL MILESTONES OWNERSHIP PERFORMANCE PLAN REVIEW_LOG TEST_MATRIX",ls .planning/professional-workbench-8/
+professional-workbench-8,single_chain_invariants,"Pi single agent loop; no parallel scheduler; RSOperatorRegistry authoritative; IModelRuntime; QGIS only render engine; persistence stays; CommandRegistry convergence",.planning/professional-workbench-8/GOAL.md:40-54
+professional-workbench-8,phase_structure,"Scope A–I",.planning/professional-workbench-8/GOAL.md:14-38
+professional-workbench-9,branch_name,feat/professional-workbench-9,.planning/professional-workbench-9/GOAL.md:3
+professional-workbench-9,worktree_path,../exp-rs-professional-workbench-9,.planning/professional-workbench-9/GOAL.md:3
+professional-workbench-9,base_pinned,origin/master @ f316dfdbb4,.planning/professional-workbench-9/GOAL.md:4
+professional-workbench-9,token_budget,absent,.planning/professional-workbench-9/GOAL.md:1-35
+professional-workbench-9,subagent_limit,"最多 2 个只读 subagent 做 adversarial review",.planning/professional-workbench-9/GOAL.md:34
+professional-workbench-9,no_ci_clause,"CI 不作为完成条件，一切以本地可复现证据为准",.planning/professional-workbench-9/GOAL.md:34-35
+professional-workbench-9,build_parallelism,"构建并行度 ≤4（默认 2）",.planning/professional-workbench-9/GOAL.md:35
+professional-workbench-9,never_nproc_ban,implicit (≤4 cap),.planning/professional-workbench-9/GOAL.md:35
+professional-workbench-9,test_protocol,absent,.planning/professional-workbench-9/GOAL.md:1-35
+professional-workbench-9,master_readonly,implicit,.planning/professional-workbench-9/GOAL.md:3-4
+professional-workbench-9,pr_exit,absent,.planning/professional-workbench-9/GOAL.md:1-35
+professional-workbench-9,fail_honesty,absent,.planning/professional-workbench-9/GOAL.md:1-35
+professional-workbench-9,review_gate,absent,.planning/professional-workbench-9/GOAL.md:1-35
+professional-workbench-9,autonomy_defaults,"执行模式：全自动",.planning/professional-workbench-9/GOAL.md:34
+professional-workbench-9,ownership_section,absent,.planning/professional-workbench-9/GOAL.md:1-35
+professional-workbench-9,external_goal_refs,"方向不变量（§7）；完成定义（§8）",.planning/professional-workbench-9/GOAL.md:10,19
+professional-workbench-9,skills_referenced,none,.planning/professional-workbench-9/GOAL.md:1-35
+professional-workbench-9,language,CN,.planning/professional-workbench-9/GOAL.md:6
+professional-workbench-9,planning_file_set,"ARCHITECTURE BASELINE CAPABILITY_MATRIX FINAL_REPORT GOAL ISSUE_TRIAGE OVERLAP_MAP OWNERSHIP PERFORMANCE REVIEW_LOG TEST_MATRIX",ls .planning/professional-workbench-9/
+professional-workbench-9,single_chain_invariants,"CommandRegistry 是 command id 权威；QGIS canvas/bridge/render job 生命周期显式",.planning/professional-workbench-9/GOAL.md:12-17
+professional-workbench-9,phase_structure,"Milestones M0–M9",.planning/professional-workbench-9/GOAL.md:27-32
+professional-workbench-ux-6,branch_name,feat/professional-workbench-ux-6,.planning/professional-workbench-ux-6/GOAL.md:3
+professional-workbench-ux-6,worktree_path,../exp-rs-professional-workbench-ux-6,.planning/professional-workbench-ux-6/GOAL.md:3
+professional-workbench-ux-6,base_pinned,master @ 74fd0c7c,.planning/professional-workbench-ux-6/GOAL.md:3
+professional-workbench-ux-6,token_budget,absent,.planning/professional-workbench-ux-6/GOAL.md:1-39
+professional-workbench-ux-6,subagent_limit,"at most 2 subagents (reserved for Milestone L review)",.planning/professional-workbench-ux-6/GOAL.md:14
+professional-workbench-ux-6,no_ci_clause,"No online CI dependency; push + open PR at the end, do not merge",.planning/professional-workbench-ux-6/GOAL.md:20
+professional-workbench-ux-6,build_parallelism,"-j2",.planning/professional-workbench-ux-6/GOAL.md:18
+professional-workbench-ux-6,never_nproc_ban,implicit (-j2),.planning/professional-workbench-ux-6/GOAL.md:18
+professional-workbench-ux-6,test_protocol,"shared vcpkg_installed (exp-rs-win/build-win), offscreen Qt tests, no timing-sensitive assertions",.planning/professional-workbench-ux-6/GOAL.md:18-19
+professional-workbench-ux-6,master_readonly,"No work directly on master",.planning/professional-workbench-ux-6/GOAL.md:14
+professional-workbench-ux-6,pr_exit,"push + open PR at the end, do not merge",.planning/professional-workbench-ux-6/GOAL.md:20
+professional-workbench-ux-6,fail_honesty,absent,.planning/professional-workbench-ux-6/GOAL.md:1-39
+professional-workbench-ux-6,review_gate,"L. Adversarial review (2 subagents) + resolution",.planning/professional-workbench-ux-6/GOAL.md:35
+professional-workbench-ux-6,autonomy_defaults,absent,.planning/professional-workbench-ux-6/GOAL.md:1-39
+professional-workbench-ux-6,ownership_section,absent,.planning/professional-workbench-ux-6/GOAL.md:1-39
+professional-workbench-ux-6,external_goal_refs,"Hard constraints (from the goal brief); See the goal brief §9",.planning/professional-workbench-ux-6/GOAL.md:12,39
+professional-workbench-ux-6,skills_referenced,none,.planning/professional-workbench-ux-6/GOAL.md:1-39
+professional-workbench-ux-6,language,EN,.planning/professional-workbench-ux-6/GOAL.md:1
+professional-workbench-ux-6,planning_file_set,"BASELINE COMMAND_INVENTORY FINAL_REPORT GOAL ISSUE_MAP MILESTONES REVIEW_LOG TEST_MATRIX UI_INVENTORY WORKBENCH_LIFECYCLE",ls .planning/professional-workbench-ux-6/
+professional-workbench-ux-6,single_chain_invariants,"UI stays a thin client over TaskCenter → JobEngine → RSOperator; no raster kernels on the UI thread; no new scheduler",.planning/professional-workbench-ux-6/GOAL.md:15-16
+professional-workbench-ux-6,phase_structure,"Milestones A–L",.planning/professional-workbench-ux-6/GOAL.md:22-35
+scientific-processing-8,branch_name,absent,.planning/scientific-processing-8/GOAL.md:1-24
+scientific-processing-8,worktree_path,absent,.planning/scientific-processing-8/GOAL.md:1-24
+scientific-processing-8,base_pinned,absent,.planning/scientific-processing-8/GOAL.md:1-24
+scientific-processing-8,token_budget,"Workload class: 3e8+ token goal",.planning/scientific-processing-8/GOAL.md:20
+scientific-processing-8,subagent_limit,"at most 2 total (adversarial review only)",.planning/scientific-processing-8/GOAL.md:23
+scientific-processing-8,no_ci_clause,"Online CI/CD: not required; local reproducible evidence only",.planning/scientific-processing-8/GOAL.md:24
+scientific-processing-8,build_parallelism,absent,.planning/scientific-processing-8/GOAL.md:1-24
+scientific-processing-8,never_nproc_ban,absent,.planning/scientific-processing-8/GOAL.md:1-24
+scientific-processing-8,test_protocol,absent,.planning/scientific-processing-8/GOAL.md:1-24
+scientific-processing-8,master_readonly,absent,.planning/scientific-processing-8/GOAL.md:1-24
+scientific-processing-8,pr_exit,absent,.planning/scientific-processing-8/GOAL.md:1-24
+scientific-processing-8,fail_honesty,"depth, validation, and correctness first",.planning/scientific-processing-8/GOAL.md:20-21
+scientific-processing-8,review_gate,"adversarial review only (subagent allocation)",.planning/scientific-processing-8/GOAL.md:23
+scientific-processing-8,autonomy_defaults,absent,.planning/scientific-processing-8/GOAL.md:1-24
+scientific-processing-8,ownership_section,"Non-negotiable architecture laws (see BASELINE.md/OWNERSHIP.md)",.planning/scientific-processing-8/GOAL.md:8-9
+scientific-processing-8,external_goal_refs,"see BASELINE.md/OWNERSHIP.md for how this track honors them",.planning/scientific-processing-8/GOAL.md:8-9
+scientific-processing-8,skills_referenced,none,.planning/scientific-processing-8/GOAL.md:1-24
+scientific-processing-8,language,EN,.planning/scientific-processing-8/GOAL.md:1
+scientific-processing-8,planning_file_set,"ARCHITECTURE BASELINE CAPABILITY_MATRIX DOCS_LEDGER FINAL_REPORT GOAL MILESTONES OWNERSHIP PERFORMANCE PLAN REVIEW_LOG TEST_MATRIX",ls .planning/scientific-processing-8/
+scientific-processing-8,single_chain_invariants,"Pi is the single agent loop; Workflow execution stays …; RSOperatorRegistry authoritative; IModelRuntime; QGIS authoritative renderer; src/geospatial; DatasetStore/ExperimentStore; new registries require proof",.planning/scientific-processing-8/GOAL.md:11-18
+scientific-processing-8,phase_structure,absent,.planning/scientific-processing-8/GOAL.md:1-24
+spatial-scientist-harness-8,branch_name,feat/spatial-scientist-harness-8,.planning/spatial-scientist-harness-8/GOAL.md:5
+spatial-scientist-harness-8,worktree_path,absent,.planning/spatial-scientist-harness-8/GOAL.md:1-30
+spatial-scientist-harness-8,base_pinned,absent (ADR 0144 + PR #842 lineage),.planning/spatial-scientist-harness-8/GOAL.md:5
+spatial-scientist-harness-8,token_budget,absent,.planning/spatial-scientist-harness-8/GOAL.md:1-30
+spatial-scientist-harness-8,subagent_limit,absent,.planning/spatial-scientist-harness-8/GOAL.md:1-30
+spatial-scientist-harness-8,no_ci_clause,absent,.planning/spatial-scientist-harness-8/GOAL.md:1-30
+spatial-scientist-harness-8,build_parallelism,absent,.planning/spatial-scientist-harness-8/GOAL.md:1-30
+spatial-scientist-harness-8,never_nproc_ban,absent,.planning/spatial-scientist-harness-8/GOAL.md:1-30
+spatial-scientist-harness-8,test_protocol,absent,.planning/spatial-scientist-harness-8/GOAL.md:1-30
+spatial-scientist-harness-8,master_readonly,absent,.planning/spatial-scientist-harness-8/GOAL.md:1-30
+spatial-scientist-harness-8,pr_exit,delivered via PR #842,.planning/spatial-scientist-harness-8/GOAL.md:5
+spatial-scientist-harness-8,fail_honesty,"no uncertainty fabrication; the deterministic core stays C++/JSON",.planning/spatial-scientist-harness-8/GOAL.md:30
+spatial-scientist-harness-8,review_gate,absent,.planning/spatial-scientist-harness-8/GOAL.md:1-30
+spatial-scientist-harness-8,autonomy_defaults,absent,.planning/spatial-scientist-harness-8/GOAL.md:1-30
+spatial-scientist-harness-8,ownership_section,absent,.planning/spatial-scientist-harness-8/GOAL.md:1-30
+spatial-scientist-harness-8,external_goal_refs,"Reconstructed … from ADR 0144 + commit evidence; original planning files were never committed (gitignore whitelist omission)",.planning/spatial-scientist-harness-8/GOAL.md:1
+spatial-scientist-harness-8,skills_referenced,none,.planning/spatial-scientist-harness-8/GOAL.md:1-30
+spatial-scientist-harness-8,language,EN,.planning/spatial-scientist-harness-8/GOAL.md:3
+spatial-scientist-harness-8,planning_file_set,"FINAL_REPORT GOAL PLAN README (reconstructed set)",ls .planning/spatial-scientist-harness-8/
+spatial-scientist-harness-8,single_chain_invariants,"Pi stays the only agent loop",.planning/spatial-scientist-harness-8/GOAL.md:29-30
+spatial-scientist-harness-8,phase_structure,absent,.planning/spatial-scientist-harness-8/GOAL.md:1-30
+unified-help-diagnostics-6,branch_name,absent,.planning/unified-help-diagnostics-6/GOAL.md:1-44
+unified-help-diagnostics-6,worktree_path,absent,.planning/unified-help-diagnostics-6/GOAL.md:1-44
+unified-help-diagnostics-6,base_pinned,absent,.planning/unified-help-diagnostics-6/GOAL.md:1-44
+unified-help-diagnostics-6,token_budget,absent,.planning/unified-help-diagnostics-6/GOAL.md:1-44
+unified-help-diagnostics-6,subagent_limit,absent,.planning/unified-help-diagnostics-6/GOAL.md:1-44
+unified-help-diagnostics-6,no_ci_clause,absent,.planning/unified-help-diagnostics-6/GOAL.md:1-44
+unified-help-diagnostics-6,build_parallelism,"-j1/-j2 builds",.planning/unified-help-diagnostics-6/GOAL.md:21
+unified-help-diagnostics-6,never_nproc_ban,implicit (-j1/-j2),.planning/unified-help-diagnostics-6/GOAL.md:21
+unified-help-diagnostics-6,test_protocol,absent,.planning/unified-help-diagnostics-6/GOAL.md:1-44
+unified-help-diagnostics-6,master_readonly,absent,.planning/unified-help-diagnostics-6/GOAL.md:1-44
+unified-help-diagnostics-6,pr_exit,absent,.planning/unified-help-diagnostics-6/GOAL.md:1-44
+unified-help-diagnostics-6,fail_honesty,"generated docs do not duplicate authoritative facts",.planning/unified-help-diagnostics-6/GOAL.md:43
+unified-help-diagnostics-6,review_gate,"no unresolved P0/P1 at final review; local validation evidence recorded",.planning/unified-help-diagnostics-6/GOAL.md:44
+unified-help-diagnostics-6,autonomy_defaults,absent,.planning/unified-help-diagnostics-6/GOAL.md:1-44
+unified-help-diagnostics-6,ownership_section,"Help only references and presents (authority boundary)",.planning/unified-help-diagnostics-6/GOAL.md:10-12
+unified-help-diagnostics-6,external_goal_refs,"See the goal definition; summarized:",.planning/unified-help-diagnostics-6/GOAL.md:40
+unified-help-diagnostics-6,skills_referenced,none,.planning/unified-help-diagnostics-6/GOAL.md:1-44
+unified-help-diagnostics-6,language,EN,.planning/unified-help-diagnostics-6/GOAL.md:1
+unified-help-diagnostics-6,planning_file_set,"ARCHITECTURE BASELINE COVERAGE_MATRIX DIAGNOSTIC_TAXONOMY DUPLICATION_AUDIT FINAL_REPORT GOAL HELP_SURFACE_INVENTORY MILESTONES REVIEW_LOG TEST_MATRIX",ls .planning/unified-help-diagnostics-6/
+unified-help-diagnostics-6,single_chain_invariants,"Help metadata is never a second business-logic engine; facts owned elsewhere are derived at runtime",.planning/unified-help-diagnostics-6/GOAL.md:10-14
+unified-help-diagnostics-6,phase_structure,absent (surfaces table instead),.planning/unified-help-diagnostics-6/GOAL.md:23-36
+verification-platform-8,branch_name,feat/verification-platform-8 from origin/master = 322dfd3876c3…,.planning/verification-platform-8/GOAL.md:29-30
+verification-platform-8,worktree_path,absent,.planning/verification-platform-8/GOAL.md:1-30
+verification-platform-8,base_pinned,origin/master = 322dfd3876c34ed62b42846598cacd711c8c91d6,.planning/verification-platform-8/GOAL.md:29-30
+verification-platform-8,token_budget,absent,.planning/verification-platform-8/GOAL.md:1-30
+verification-platform-8,subagent_limit,absent,.planning/verification-platform-8/GOAL.md:1-30
+verification-platform-8,no_ci_clause,"No online CI. Every capability claim in the final report maps to a local command + exit code, or is explicitly marked not-compiled / not-executed",.planning/verification-platform-8/GOAL.md:24-25
+verification-platform-8,build_parallelism,absent,.planning/verification-platform-8/GOAL.md:1-30
+verification-platform-8,never_nproc_ban,absent,.planning/verification-platform-8/GOAL.md:1-30
+verification-platform-8,test_protocol,absent,.planning/verification-platform-8/GOAL.md:1-30
+verification-platform-8,master_readonly,absent,.planning/verification-platform-8/GOAL.md:1-30
+verification-platform-8,pr_exit,absent,.planning/verification-platform-8/GOAL.md:1-30
+verification-platform-8,fail_honesty,"or is explicitly marked not-compiled / not-executed",.planning/verification-platform-8/GOAL.md:25
+verification-platform-8,review_gate,absent,.planning/verification-platform-8/GOAL.md:1-30
+verification-platform-8,autonomy_defaults,absent,.planning/verification-platform-8/GOAL.md:1-30
+verification-platform-8,ownership_section,"Trace/fault infrastructure stays inside src/runtime/observability/**",.planning/verification-platform-8/GOAL.md:18-20
+verification-platform-8,external_goal_refs,absent,.planning/verification-platform-8/GOAL.md:1-30
+verification-platform-8,skills_referenced,none,.planning/verification-platform-8/GOAL.md:1-30
+verification-platform-8,language,EN,.planning/verification-platform-8/GOAL.md:1
+verification-platform-8,planning_file_set,"ARCHITECTURE BASELINE CAPABILITY_MATRIX DOCS_LEDGER FINAL_REPORT GOAL MILESTONES OWNERSHIP PERFORMANCE PLAN PR_BODY REVIEW_LOG TEST_MATRIX ladder.json",ls .planning/verification-platform-8/
+verification-platform-8,single_chain_invariants,"Non-negotiable laws (restated): Pi single agent loop; execution chain; RSOperatorRegistry; IModelRuntime; QGIS; geospatial I/O; persistence",.planning/verification-platform-8/GOAL.md:9-20
+verification-platform-8,phase_structure,absent,.planning/verification-platform-8/GOAL.md:1-30
+whole-repo-line-review,branch_name,zcode/whole-repo-line-review,.planning/whole-repo-line-review/GOAL.md:3
+whole-repo-line-review,worktree_path,/home/kevin/projects/rs-studio/exp-rs-whole-repo-line-review,.planning/whole-repo-line-review/GOAL.md:3
+whole-repo-line-review,base_pinned,absent,.planning/whole-repo-line-review/GOAL.md:1-10
+whole-repo-line-review,token_budget,"300,000,000 tokens total, phase allocation in PLAN.md",.planning/whole-repo-line-review/GOAL.md:5
+whole-repo-line-review,subagent_limit,"Subagents ≤ 2 (Phase 7 only, read-only)",.planning/whole-repo-line-review/GOAL.md:5
+whole-repo-line-review,no_ci_clause,"No CI. Local evidence only → EVIDENCE.md. No remote issue creation (gh issue create forbidden)",.planning/whole-repo-line-review/GOAL.md:6
+whole-repo-line-review,build_parallelism,absent (review-only track),.planning/whole-repo-line-review/GOAL.md:1-10
+whole-repo-line-review,never_nproc_ban,absent,.planning/whole-repo-line-review/GOAL.md:1-10
+whole-repo-line-review,test_protocol,absent,.planning/whole-repo-line-review/GOAL.md:1-10
+whole-repo-line-review,master_readonly,"src/ + tests/ read-only (review-only mode)",.planning/whole-repo-line-review/GOAL.md:4
+whole-repo-line-review,pr_exit,absent (PLAN.md presumably carries it),.planning/whole-repo-line-review/GOAL.md:1-10
+whole-repo-line-review,fail_honesty,"verbatim code quotes for every finding; repro for every P0/P1",.planning/whole-repo-line-review/GOAL.md:7
+whole-repo-line-review,review_gate,"Hard gates: … zero duplicates vs the 250 closed issues; Tier A coverage 100% reviewed; PR diff contains no src/tests changes",.planning/whole-repo-line-review/GOAL.md:7
+whole-repo-line-review,autonomy_defaults,absent,.planning/whole-repo-line-review/GOAL.md:1-10
+whole-repo-line-review,ownership_section,"Write scope: review/, WHOLE_REPO_REVIEW.md, docs/, .planning/",.planning/whole-repo-line-review/GOAL.md:4
+whole-repo-line-review,external_goal_refs,"Full original GOAL text: provided by user at track start",.planning/whole-repo-line-review/GOAL.md:10
+whole-repo-line-review,skills_referenced,none,.planning/whole-repo-line-review/GOAL.md:1-10
+whole-repo-line-review,language,CN-mixed,.planning/whole-repo-line-review/GOAL.md:8
+whole-repo-line-review,planning_file_set,"DECISIONS DEDUPE_BASELINE_ISSUES.txt EVIDENCE GOAL PLAN PR_BODY REVIEW_LOG",ls .planning/whole-repo-line-review/
+whole-repo-line-review,single_chain_invariants,absent,.planning/whole-repo-line-review/GOAL.md:1-10
+whole-repo-line-review,phase_structure,"Six lenses; severity vocabulary P0–P3",.planning/whole-repo-line-review/GOAL.md:8-9
+agent-rs-performance,GOAL_md,absent (uses task_plan.md/progress.md/findings.md lowercase set),ls .planning/agent-rs-performance/
+agent-rs-platform,GOAL_md,absent (uses task_plan.md/progress.md/findings.md lowercase set + ci-matrix.md),ls .planning/agent-rs-platform/
+display-perf-pipeline,GOAL_md,absent (uses task_plan.md/progress.md/findings.md lowercase set),ls .planning/display-perf-pipeline/
+execution-cache,GOAL_md,absent (uses CACHE_CONTRACT/IMPLEMENTATION_PLAN/ROOT_CAUSES set),ls .planning/execution-cache/
+execution-concurrency-lifecycle-9,GOAL_md,absent (9-series planning set without GOAL.md),ls .planning/execution-concurrency-lifecycle-9/
+geospatial-data-fabric-9,GOAL_md,absent (9-series planning set; ISSUE_TRIAGE.md:4 cites unlanded "/goal vocabulary"),ls .planning/geospatial-data-fabric-9/ + .planning/geospatial-data-fabric-9/ISSUE_TRIAGE.md:4
+model-runtime-multimodal-9,GOAL_md,absent (9-series planning set without GOAL.md),ls .planning/model-runtime-multimodal-9/
+plugin-platform-9,GOAL_md,absent (9-series planning set without GOAL.md),ls .planning/plugin-platform-9/
+scientific-algorithms-9,GOAL_md,absent (9-series planning set without GOAL.md),ls .planning/scientific-algorithms-9/
+scientific-mlops-9,GOAL_md,absent (9-series planning set without GOAL.md),ls .planning/scientific-mlops-9/
+temporal-agent-contract,GOAL_md,absent (uses CONTRACT_AUDIT/IMPLEMENTATION_PLAN/ROOT_CAUSES set),ls .planning/temporal-agent-contract/
+unified-contract-verification-9,GOAL_md,absent (9-series planning set + PLAN.md + ladder jsons),ls .planning/unified-contract-verification-9/
