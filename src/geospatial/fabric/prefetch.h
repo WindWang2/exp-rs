@@ -36,7 +36,11 @@ namespace sicnu::geo
 struct PrefetchOptions
 {
     /// Total bytes this run may pull from origins (measured via the cache
-    /// telemetry delta). 0 = the chunk plan's estimatedBytes (capped).
+    /// telemetry delta — a process-global counter, so concurrent in-process
+    /// cache users inflate it; run exclusively for exact budgets).
+    /// 0 = the chunk plan's own byte estimate (bounded by default); a plan
+    /// without byte facts yields a zero estimate and the budget does not
+    /// engage (nothing to bound with — stated, not hidden).
     std::uint64_t maxBytes = 0;
     /// Per-chunk read budget (window bytes).
     std::size_t maxChunkBytes = 16ull * 1024 * 1024;
@@ -66,6 +70,8 @@ struct PrefetchReport
     std::uint64_t warmed = 0, cacheHits = 0, mirrorHits = 0;
     std::uint64_t skippedBudget = 0, skippedCancel = 0, failed = 0;
     bool budgetExhausted = false;
+    std::uint64_t outcomesDropped = 0;   ///< per-chunk outcomes past the
+                                         ///< retained window (counters only)
 
     Json::Value toJson() const;
 };

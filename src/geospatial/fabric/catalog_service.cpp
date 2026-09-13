@@ -829,7 +829,10 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
     }
     page.next.hasMore = index < mLocal->itemFiles.size();
     page.next.localOffset = index;
-    page.truncatedByCap = false;
+    // The walk bounds are honest: a page that consumed candidates up to
+    // (or past) the declared file cap reports the truncation.
+    page.truncatedByCap =
+      static_cast<int>( mLocal->itemFiles.size() ) >= mOptions.localMaxFiles;
     return page;
   }
 

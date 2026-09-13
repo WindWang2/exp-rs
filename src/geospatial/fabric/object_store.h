@@ -18,11 +18,12 @@
   which redacts credential shapes).
 
   Threading contract (DECISIONS D-1003): GDAL credential config options are
-  PROCESS-GLOBAL. While a ScopedObjectStoreCredentials window is open, no
-  other thread may open /vsi* paths through GDAL. Callers with UI threads
-  must already be off-thread (same contract as every remote call here); the
-  window additionally requires process-wide serialization of /vsi* opens for
-  its duration.
+  PROCESS-GLOBAL. While a ScopedObjectStoreCredentials window is open — AND
+  through its destructor's VSICURL cache wipe — no other thread may open
+  /vsi* paths through GDAL. Callers with UI threads must already be
+  off-thread (same contract as every remote call here); the window
+  additionally requires process-wide serialization of /vsi* opens covering
+  construction, use, and destruction.
  ***************************************************************************/
 
 #ifndef SICNU_GEOSPATIAL_FABRIC_OBJECT_STORE_H
@@ -57,10 +58,12 @@ struct ObjectStoreProfile
 /// (gcs), az→/vsiaz/ (azure).
 std::vector<ObjectStoreProfile> objectStoreProfiles();
 
-/// Looks a scheme up in the table. nullptr when the scheme is not a
+/// Looks a scheme up in the table (BY VALUE — registrations may
+/// reallocate the underlying storage at any time; a returned reference
+/// would be a race the caller cannot see). Empty when the scheme is not a
 /// registered object-store scheme (the caller then falls through to the
 /// generic ResourceUri classification).
-const ObjectStoreProfile *findObjectStoreProfile( const std::string &scheme );
+ObjectStoreProfile findObjectStoreProfile( const std::string &scheme );   // empty scheme = miss
 
 /// Extends the table. Throws GeoError(InvalidArgument) for an empty scheme,
 /// a missing VSI prefix, or a duplicate scheme. Thread-safety: registration

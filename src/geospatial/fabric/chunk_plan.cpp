@@ -196,14 +196,12 @@ CubeChunkPlan CubeChunkPlan::forVirtualCube( const VirtualCube &cube, const Cube
   // Band dim: role/index selection narrows; the cube exposes one band per
   // read (bandIndex/bandRole), so the plan's band dim is the selection SIZE.
   std::int64_t bandSize = 1;
-  std::int64_t bandOffset = 0;
   if ( !slice.bandRoles.empty() || !slice.bandIndices.empty() )
   {
     const std::size_t wanted =
       slice.bandRoles.empty() ? slice.bandIndices.size()
                               : std::max( slice.bandRoles.size(), slice.bandIndices.size() );
     bandSize = static_cast<std::int64_t>( std::max<std::size_t>( wanted, 1 ) );
-    bandOffset = slice.bandIndices.empty() ? 0 : slice.bandIndices.front();
   }
 
   const std::int64_t timeChunk = shape.time > 0 ? shape.time : 1;
@@ -232,8 +230,6 @@ CubeChunkPlan CubeChunkPlan::forVirtualCube( const VirtualCube &cube, const Cube
   }
   plan.mInstants = instants;
   plan.mAssetIdByTime = assetIdByTime;
-  plan.mTimeOffset = timeOffset;
-  plan.mBandOffset = bandOffset;
   plan.mTimeSliced = !slice.timeStartUtc.empty() || !slice.timeEndUtc.empty();
   plan.mSpatialSliced = slice.hasSpatialSlice;
   plan.mBandSliced = !slice.bandRoles.empty() || !slice.bandIndices.empty();
@@ -360,8 +356,7 @@ std::vector<CubeChunkRequest> CubeChunkPlan::materializeChunks( std::uint64_t be
       // EO facts: time instant + grid extent of the chunk.
       if ( !mDims.empty() && mDims[0].name == "time" && !mInstants.empty() )
       {
-        const std::int64_t timeBegin = mTimeOffset + dimOffsets[0];
-        const std::int64_t timeIndex = timeBegin;   // chunk covers [begin, begin+size)
+        const std::int64_t timeIndex = dimOffsets[0];   // mInstants is post-slice
         if ( timeIndex >= 0 &&
              timeIndex < static_cast<std::int64_t>( mInstants.size() ) )
         {

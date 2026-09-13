@@ -44,6 +44,7 @@ Json::Value PrefetchReport::toJson() const
     json["skippedCancel"] = static_cast<Json::UInt64>( skippedCancel );
     json["failed"] = static_cast<Json::UInt64>( failed );
     json["budgetExhausted"] = budgetExhausted;
+    json["outcomesDropped"] = static_cast<Json::UInt64>( outcomesDropped );
     return json;
 }
 
@@ -60,13 +61,31 @@ PrefetchReport prefetchChunksImpl( const VirtualCube &cube, const CubeChunkPlan 
     if ( !RemoteRangeCache::installed() )
         throw GeoError( ErrorCode::InvalidArgument,
                         "prefetch needs the range cache installed (/vsirangecache/)" );
-    if ( cube.grid().crs.authid.empty() && !cube.grid().valid() )
+    if ( !cube.grid().valid() )
         throw GeoError( ErrorCode::InvalidArgument, "cube grid is invalid — cannot prefetch" );
 
     PrefetchReport report;
+    report.chunks.reserve( 1024 );
     std::uint64_t pulled = 0;
-    const std::uint64_t budget = options.maxBytes;
-    const bool budgeted = budget > 0;
+    std::uint64_t outcomesDropped = 0;
+    const auto recordOutcome = [ & ]( PrefetchChunkOutcome outcome ) {
+      if ( report.chunks.size() < 1024 )
+        report.chunks.push_back( std::move( outcome ) );
+      else
+        ++outcomesDropped;
+    };
+    // maxBytes==0 means the DECLARED default bound: the chunk plan's own
+    // byte estimate (first-chunk size × chunk count) — never unbounded.
+    std::uint64_t budget = options.maxBytes;
+    if ( budget == 0 )
+    {
+        const std::uint64_t total = plan.chunkCountTotal();
+        if ( total > 0 )
+        {
+            const std::vector<CubeChunkRequest> first = plan.materializeChunks( 0, 1 );
+            budget = ( first.empty() ? 0 : first.front().estimatedBytes ) * total;
+        }
+    }
 
     std::map<std::string, AssetRecord> byId;
     for ( const VirtualCubeAssetIndexEntry &entry : cube.assets() )
@@ -87,7 +106,11 @@ PrefetchReport prefetchChunksImpl( const VirtualCube &cube, const CubeChunkPlan 
         for ( const CubeChunkRequest &request : requests )
         {
             if ( cancel.cancelled() )
+            {
+                // The un-walked remainder is reported as skipped, not silent.
+                report.skippedCancel += total - request.index;
                 break;
+            }
 
             PrefetchChunkOutcome outcome;
             outcome.index = request.index;
@@ -100,57 +123,68 @@ PrefetchReport prefetchChunksImpl( const VirtualCube &cube, const CubeChunkPlan 
                 outcome.errorText = "chunk hint '" + request.assetIdHint +
                                     "' is not an indexed asset";
                 ++report.failed;
-                report.chunks.push_back( std::move( outcome ) );
+                recordOutcome( std::move( outcome ) );
                 continue;
             }
             const AssetRecord &record = assetIt->second;
 
             // Mirror first: a token-keyed hit means the chunk is already local.
-            // (The identity check runs only when a mirror was declared.)
+            // (The identity check runs only when a mirror was declared; the
+            // whole probe sits inside the per-chunk failure budget — one dead
+            // asset cannot void the walk.)
             if ( !options.mirrorDirectory.empty() )
             {
-                AssetIdentity identity;
-                const auto identityIt = identities.find( record.id );
-                if ( identityIt != identities.end() )
+                try
                 {
-                    identity = identityIt->second;
-                }
-                else
-                {
-                    identity = assetIdentityToken( record.path, AssetIdentityOptions{} );
-                    identities[record.id] = identity;
-                }
-                if ( identity.provable() )
-                {
-                    std::string skippedCorrupt;
-                    RasterReader probeReader = RasterReader::open( fabricCachedPath( record.path ) );
-                    const VirtualCubeSourceWindow mapped =
-                      virtualCubeSourceWindow( probeReader.metadata(), request.minX, request.minY,
-                                               request.maxX, request.maxY );
-                    if ( mapped.ok )
+                    AssetIdentity identity;
+                    const auto identityIt = identities.find( record.id );
+                    if ( identityIt != identities.end() )
                     {
-                        const std::string key = fabricChunkMirrorKey(
-                          identity.token, record.path, mapped.window, "band1" );
-                        const std::string hit =
-                          resolveMirrorHit( options.mirrorDirectory, identity.token, key,
-                                            &skippedCorrupt );
-                        if ( !hit.empty() )
+                        identity = identityIt->second;
+                    }
+                    else
+                    {
+                        identity = assetIdentityToken( record.path, AssetIdentityOptions{} );
+                        identities[record.id] = identity;
+                    }
+                    if ( identity.provable() )
+                    {
+                        std::string skippedCorrupt;
+                        RasterReader probeReader =
+                          RasterReader::open( fabricCachedPath( record.path ) );
+                        const VirtualCubeSourceWindow mapped = virtualCubeSourceWindow(
+                          probeReader.metadata(), request.minX, request.minY, request.maxX,
+                          request.maxY );
+                        if ( mapped.ok )
                         {
-                            outcome.status = "mirror-hit";
-                            ++report.mirrorHits;
-                            report.chunks.push_back( std::move( outcome ) );
-                            continue;
+                            const std::string key = fabricChunkMirrorKey(
+                              identity.token, record.path, mapped.window, "band1" );
+                            const std::string hit =
+                              resolveMirrorHit( options.mirrorDirectory, identity.token, key,
+                                                &skippedCorrupt );
+                            if ( !hit.empty() )
+                            {
+                                outcome.status = "mirror-hit";
+                                ++report.mirrorHits;
+                                recordOutcome( std::move( outcome ) );
+                                continue;
+                            }
                         }
                     }
                 }
+                catch ( const GeoError &error )
+                {
+                    // Mirror probing is best-effort: fall through to the
+                    // normal read path (which has its own per-chunk handling).
+                }
             }
 
-            if ( budgeted && pulled >= budget )
+            if ( budget > 0 && pulled >= budget )
             {
                 outcome.status = "skipped-budget";
                 ++report.skippedBudget;
                 report.budgetExhausted = true;
-                report.chunks.push_back( std::move( outcome ) );
+                recordOutcome( std::move( outcome ) );
                 continue;
             }
 
@@ -164,16 +198,16 @@ PrefetchReport prefetchChunksImpl( const VirtualCube &cube, const CubeChunkPlan 
                     outcome.status = "failed";
                     outcome.errorText = "chunk extent misses the asset raster";
                     ++report.failed;
-                    report.chunks.push_back( std::move( outcome ) );
+                    recordOutcome( std::move( outcome ) );
                     continue;
                 }
                 const std::uintmax_t telemetryBefore =
-                  RemoteRangeCache::telemetryJson()["bytesFetched"].asUInt64();
+                  RemoteRangeCache::telemetryJson()["bytes_fetched"].asUInt64();
                 ( void )reader.readWindow( { 1 }, mapped.window,
                                            options.maxChunkBytes ? options.maxChunkBytes
                                                                  : 16ull * 1024 * 1024 );
                 const std::uintmax_t telemetryAfter =
-                  RemoteRangeCache::telemetryJson()["bytesFetched"].asUInt64();
+                  RemoteRangeCache::telemetryJson()["bytes_fetched"].asUInt64();
                 const std::uint64_t chunkBytes =
                   static_cast<std::uint64_t>( telemetryAfter - telemetryBefore );
                 pulled += chunkBytes;
@@ -190,14 +224,14 @@ PrefetchReport prefetchChunksImpl( const VirtualCube &cube, const CubeChunkPlan 
                     ++report.warmed;
                 }
                 report.bytesPulled += chunkBytes;
-                report.chunks.push_back( std::move( outcome ) );
+                recordOutcome( std::move( outcome ) );
             }
             catch ( const GeoError &error )
             {
                 outcome.status = "failed";
                 outcome.errorText = error.what();
                 ++report.failed;
-                report.chunks.push_back( std::move( outcome ) );
+                recordOutcome( std::move( outcome ) );
             }
         }
     }

@@ -69,12 +69,18 @@ std::vector<std::size_t> selectionOrder( const std::vector<AssetRecord> &assets,
   std::vector<std::size_t> order( assets.size() );
   for ( std::size_t i = 0; i < order.size(); ++i )
     order[i] = i;
-  std::vector<std::string> instants( assets.size() );
+  // Epoch-nanos instants (never string ordering — same-second values with
+  // different fraction shapes would order inversely as strings).
+  std::vector<std::int64_t> instants( assets.size(), 0 );
+  std::vector<bool> dated( assets.size(), false );
   for ( std::size_t i = 0; i < assets.size(); ++i )
   {
     const InstantParse parse = parseIso8601Instant( assets[i].datetimeUtc );
     if ( parse.ok )
-      instants[i] = instantToUtcString( parse.epochNanos );
+    {
+      instants[i] = parse.epochNanos;
+      dated[i] = true;
+    }
   }
   std::stable_sort( order.begin(), order.end(), [ & ]( std::size_t a, std::size_t b ) {
     if ( quality.byCloudCoverAscending )
@@ -86,14 +92,12 @@ std::vector<std::size_t> selectionOrder( const std::vector<AssetRecord> &assets,
       if ( aHas && assets[a].cloudCover != assets[b].cloudCover )
         return assets[a].cloudCover < assets[b].cloudCover;
     }
-    if ( quality.byNewestFirst && instants[a] != instants[b] && ( !instants[a].empty() || !instants[b].empty() ) )
+    if ( quality.byNewestFirst && dated[a] != dated[b] )
     {
-      if ( instants[a].empty() )
-        return false;   // undated last
-      if ( instants[b].empty() )
-        return true;
-      return instants[a] > instants[b];   // newest first
+      return static_cast<bool>( dated[a] );   // dated first, undated last
     }
+    if ( quality.byNewestFirst && dated[a] && dated[b] && instants[a] != instants[b] )
+      return instants[a] > instants[b];   // newest first, exact nanos
     if ( assets[a].id != assets[b].id )
       return assets[a].id < assets[b].id;
     return false;   // input order (stable_sort keeps it)
@@ -531,7 +535,18 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
           const auto cached = mirrorTokens.find( entry.record.id );
           if ( cached == mirrorTokens.end() )
           {
-            token = assetIdentityToken( entry.record.path, AssetIdentityOptions{} ).token;
+            // A failed identity probe (offline remote, unreadable file)
+            // means NO mirror key — the asset falls through to the normal
+            // read path and fails there with its own typed error. Never a
+            // guess, never a walk-aborting throw.
+            try
+            {
+              token = assetIdentityToken( entry.record.path, AssetIdentityOptions{} ).token;
+            }
+            catch ( const GeoError & )
+            {
+              token.clear();
+            }
             mirrorTokens[entry.record.id] = token;
           }
           else
@@ -572,6 +587,9 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
                                     std::min( sourceWindow.height, mirrored.metadata().height ) };
         values = mirrored.readWindow( { 1 }, readWindow, options.maxWindowBytes );
         bandInfo = &mirrored.metadata().bands[0];
+        // Provenance reports the bytes ACTUALLY read (the mirrored raster
+        // may pad to block boundaries).
+        provenance.sourceWindow = readWindow;
       }
 
       if ( !noDataSet )

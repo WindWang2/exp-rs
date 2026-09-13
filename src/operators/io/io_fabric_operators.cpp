@@ -260,13 +260,22 @@ Json::Value IoCubeWindowOperator::run( const Json::Value &params, RSOperatorCont
 
     const std::string output = requireString( params, "output" );
     sicnu::geo::atomic_fs::writeFileAtomic( output, [ & ]( const std::string &staged ) {
+      // The band declares the window's NoData (uncovered cells are NOT
+      // valid data) and keeps Float64 precision (no silent narrowing).
+      sicnu::geo::RasterBandSpec band;
+      band.dtype = "Float64";
+      band.hasNoData = true;
+      band.noDataIsNaN = window.noDataIsNaN;
+      band.noDataValue = window.noDataIsNaN ? 0.0 : window.gridNoData;
       sicnu::geo::RasterWriter writer =
-        sicnu::geo::RasterWriter::create( staged, window.width, window.height,
-                                          { sicnu::geo::RasterBandSpec {} },
+        sicnu::geo::RasterWriter::create( staged, window.width, window.height, { band },
                                           { "GTiff", { "TILED=YES", "BLOCKXSIZE=64", "BLOCKYSIZE=64" },
                                             true } );
       const VirtualCubeGrid &grid = plan.grid();
-      writer.setCrs( sicnu::geo::Crs::fromAuthid( grid.crs.authid ) );
+      // A derived grid may legally carry no CRS (every probed asset CRS-less):
+      // publish without a CRS label rather than throwing after the read.
+      if ( grid.crs.valid && !grid.crs.authid.empty() )
+        writer.setCrs( sicnu::geo::Crs::fromAuthid( grid.crs.authid ) );
       writer.setGeotransform( { grid.minX, grid.scaleX, 0.0, grid.maxY, 0.0, -grid.scaleY } );
       writer.writeWindow( 1, { 0, 0, window.width, window.height }, window.values.data() );
       writer.finalize();

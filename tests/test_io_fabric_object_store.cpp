@@ -93,21 +93,20 @@ TEST_CASE( "object store profile table exposes built-ins and accepts extension",
   const std::vector<ObjectStoreProfile> profiles = objectStoreProfiles();
   REQUIRE( profiles.size() >= 5 );
 
-  const ObjectStoreProfile *s3 = findObjectStoreProfile( "s3" );
-  REQUIRE( s3 != nullptr );
-  CHECK( s3->vsiPrefix == "/vsis3/" );
-  CHECK( s3->provider == "aws" );
-  CHECK( findObjectStoreProfile( "S3" ) != nullptr );   // scheme lookup is case-insensitive
-  CHECK( findObjectStoreProfile( "gs" ) != nullptr );
-  CHECK( findObjectStoreProfile( "az" ) != nullptr );
-  CHECK( findObjectStoreProfile( "s3a" ) != nullptr );
-  CHECK( findObjectStoreProfile( "https" ) == nullptr ); // http(s) never claimable
-  CHECK( findObjectStoreProfile( "nope" ) == nullptr );
+  const ObjectStoreProfile s3 = findObjectStoreProfile( "s3" );
+  CHECK( s3.scheme == "s3" );   // by-value lookup: empty scheme = miss
+  CHECK( s3.vsiPrefix == "/vsis3/" );
+  CHECK( s3.provider == "aws" );
+  CHECK( findObjectStoreProfile( "S3" ).scheme == "s3" );   // case-insensitive
+  CHECK( findObjectStoreProfile( "gs" ).scheme == "gs" );
+  CHECK( findObjectStoreProfile( "az" ).scheme == "az" );
+  CHECK( findObjectStoreProfile( "s3a" ).scheme == "s3a" );
+  CHECK( findObjectStoreProfile( "https" ).scheme.empty() ); // http(s) never claimable
+  CHECK( findObjectStoreProfile( "nope" ).scheme.empty() );
 
   ObjectStoreProfile custom { "cos", "/vsis3/", "s3-compatible", true };
   registerObjectStoreProfile( custom );
-  REQUIRE( findObjectStoreProfile( "cos" ) != nullptr );
-  CHECK( findObjectStoreProfile( "cos" )->vsiPrefix == "/vsis3/" );
+  CHECK( findObjectStoreProfile( "cos" ).vsiPrefix == "/vsis3/" );
 
   ObjectStoreProfile duplicate { "s3", "/vsis3/", "aws", true };
   REQUIRE_THROWS_AS( registerObjectStoreProfile( duplicate ), GeoError );

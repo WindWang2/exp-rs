@@ -100,15 +100,15 @@ std::vector<ObjectStoreProfile> objectStoreProfiles()
   return table.profiles;
 }
 
-const ObjectStoreProfile *findObjectStoreProfile( const std::string &scheme )
+ObjectStoreProfile findObjectStoreProfile( const std::string &scheme )
 {
   const std::string wanted = lowerAscii( scheme );
   ProfileTable &table = profileTable();
   std::lock_guard<std::mutex> lock( table.mutex );
   for ( const ObjectStoreProfile &profile : table.profiles )
     if ( profile.scheme == wanted )
-      return &table.profiles[static_cast<std::size_t>( &profile - table.profiles.data() )];
-  return nullptr;
+      return profile;   // copy under the lock — safe against reallocation
+  return ObjectStoreProfile {};
 }
 
 void registerObjectStoreProfile( const ObjectStoreProfile &profile )
@@ -195,8 +195,8 @@ ObjectStoreResolution resolveObjectStore( const std::string &rawUri )
     throw GeoError( ErrorCode::InvalidArgument,
                     "not an object-store spelling (no scheme, no VSI prefix): " + displayForm( rawUri ) );
   const std::string scheme = trimmed.substr( 0, schemeEnd );
-  const ObjectStoreProfile *profile = findObjectStoreProfile( scheme );
-  if ( !profile )
+  const ObjectStoreProfile profile = findObjectStoreProfile( scheme );
+  if ( profile.scheme.empty() )
     throw GeoError( ErrorCode::InvalidArgument,
                     "unknown object-store scheme '" + scheme + "': " + displayForm( rawUri ) );
 
@@ -217,10 +217,10 @@ ObjectStoreResolution resolveObjectStore( const std::string &rawUri )
 
   ObjectStoreResolution resolution;
   resolution.uri = ResourceUri::parse( rawUri );
-  resolution.profile = *profile;
+  resolution.profile = profile;
   resolution.bucket = authority.substr( 0, slash );
   resolution.key = authority.substr( slash + 1 );
-  resolution.vsiPath = profile->vsiPrefix + resolution.bucket + "/" + resolution.key;
+  resolution.vsiPath = profile.vsiPrefix + resolution.bucket + "/" + resolution.key;
   resolution.needsCredentials = true;
   return resolution;
 }
@@ -229,9 +229,13 @@ std::string fabricCachedPath( const std::string &fetchablePath )
 {
   if ( !RemoteRangeCache::installed() )
     return fetchablePath;
-  // The cache handler serves REMOTE resources only — a local path through
-  // /vsirangecache/ would be a typed error at open. Local stays local.
-  if ( !ResourceUri::parse( fetchablePath ).isRemote() )
+  const ResourceUri uri = ResourceUri::parse( fetchablePath );
+  // The range cache's contract is http(s) (validators, conditional GETs,
+  // its fallback path all speak URLs). Local paths are never wrapped;
+  // s3/gs/az VSI spellings pass UNWRAPPED too — their cachedPath
+  // composition is not URL-shaped (a known 10.0 limitation: S3-block
+  // caching keys are a follow-up; GDAL's own block cache applies there).
+  if ( uri.kind != ResourceKind::RemoteHttp )
     return fetchablePath;
   return RemoteRangeCache::cachedPath( fetchablePath );
 }
@@ -251,9 +255,9 @@ ScopedObjectStoreCredentials::ScopedObjectStoreCredentials(
     if ( credentials.anonymous )
     {
       // GDAL renamed the key (AWS_NO_SIGNREQUEST → AWS_NO_SIGN_REQUEST);
-      // set both spellings so every GDAL build understands the intent.
-      installConfigKey( mSetKeys, "AWS_NO_SIGN_REQUEST", "YES" );
-      installConfigKey( mSetKeys, kS3Anonymous, "YES" );
+      // install BOTH spellings so every GDAL build understands the intent.
+      installConfigKey( mSetKeys, kS3Anonymous, "YES" );              // modern
+      installConfigKey( mSetKeys, "AWS_NO_SIGNREQUEST", "YES" );      // legacy
     }
     else
     {

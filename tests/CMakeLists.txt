@@ -308,6 +308,7 @@ sicnu_add_io_test(test_io_fabric_cube)
 target_include_directories(test_io_fabric_cube PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 sicnu_add_io_test(test_io_fabric_plan)
 target_include_directories(test_io_fabric_plan PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_sources(test_io_fabric_plan PRIVATE support/http_range_server.cpp)
 # The operator suite rides the operator chain (Qt + sicnu_operators), same
 # shape as test_io_operators.
 sicnu_add_io_test(test_io_fabric_scale)

@@ -102,6 +102,41 @@ struct MirrorWalkResult
 
 } // namespace
 
+Json::Value MirrorReport::toJson() const
+{
+  Json::Value json;
+  Json::Value chunkArray( Json::arrayValue );
+  for ( const MirrorChunkOutcome &outcome : chunks )
+  {
+    Json::Value entry;
+    entry["index"] = static_cast<Json::UInt64>( outcome.index );
+    entry["status"] = outcome.status;
+    if ( !outcome.file.empty() )
+      entry["file"] = outcome.file;
+    entry["bytes"] = static_cast<Json::UInt64>( outcome.bytes );
+    if ( !outcome.token.empty() )
+      entry["token"] = outcome.token.substr( 0, 16 );   // bounded prefix only
+    if ( !outcome.chunkKey.empty() )
+      entry["chunkKey"] = outcome.chunkKey;
+    if ( !outcome.errorText.empty() )
+      entry["error"] = outcome.errorText;
+    if ( !outcome.assetIdHint.empty() )
+      entry["assetIdHint"] = outcome.assetIdHint;
+    chunkArray.append( entry );
+  }
+  json["chunks"] = chunkArray;
+  json["bytesWritten"] = static_cast<Json::UInt64>( bytesWritten );
+  json["mirrored"] = static_cast<Json::UInt64>( mirrored );
+  json["alreadyPresent"] = static_cast<Json::UInt64>( alreadyPresent );
+  json["skippedUnprovable"] = static_cast<Json::UInt64>( skippedUnprovable );
+  json["skippedBudget"] = static_cast<Json::UInt64>( skippedBudget );
+  json["skippedCancel"] = static_cast<Json::UInt64>( skippedCancel );
+  json["failed"] = static_cast<Json::UInt64>( failed );
+  json["budgetStopped"] = budgetStopped;
+  json["cancelled"] = cancelled;
+  return json;
+}
+
 std::string fabricChunkMirrorKey( const std::string &identityToken, const std::string &assetPath,
                                   const RasterWindow &sourceWindow, const std::string &bandSelector )
 {
@@ -129,6 +164,14 @@ std::string resolveMirrorHit( const std::string &mirrorDirectory, const std::str
   if ( !entry.isObject() || !entry[chunkKey].isObject() )
     return {};
   const Json::Value &chunk = entry[chunkKey];
+  // Wrong-typed manifest entries are CORRUPT entries (a {file: {...}} must
+  // skip, not throw Json::LogicError through the reader's GeoError catch).
+  if ( !chunk["file"].isString() )
+  {
+    if ( skippedCorrupt )
+      *skippedCorrupt = "entry with non-string file: token " + token.substr( 0, 8 );
+    return {};
+  }
   const std::string file = chunk["file"].asString();
   if ( file.empty() )
   {
@@ -199,9 +242,19 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
     manifest = Json::Value( Json::objectValue );
 
   const std::uint64_t total = plan.chunkCountTotal();
-  const std::uint64_t budget =
-    options.maxBytes > 0 ? options.maxBytes : std::numeric_limits<std::uint64_t>::max();
-  std::uint64_t bytesWritten = 0;
+  // maxBytes==0 means the DECLARED default bound: the chunk plan's own byte
+  // estimate — never unbounded (mirror.h contract).
+  const std::uint64_t budget = [ & ] {
+    if ( options.maxBytes > 0 )
+      return options.maxBytes;
+    if ( total == 0 )
+      return std::uint64_t { 0 };
+    const std::vector<CubeChunkRequest> first = plan.materializeChunks( 0, 1 );
+    return ( first.empty() ? 0 : first.front().estimatedBytes ) * total;
+  }();
+  std::uint64_t bytesWritten = 0;       ///< real file bytes (report truth)
+  std::uint64_t logicalWritten = 0;     ///< declared chunk estimates (budget basis)
+  std::uint64_t manifestWrites = 0;
   // Identity tokens are cached per walk (a local token hashes ≤ 8 MiB —
   // once per asset, never once per chunk).
   std::map<std::string, std::string> tokenCache;
@@ -278,24 +331,10 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
       }
       RasterReader reader = RasterReader::open( fabricCachedPath( asset->record.path ) );
       const RasterMetadata &metadata = reader.metadata();
-      if ( !metadata.hasGeotransform )
-      {
-        outcome.status = "failed";
-        outcome.errorText = "asset carries no geotransform";
-        ++report.failed;
-        report.chunks.push_back( std::move( outcome ) );
-        continue;
-      }
-      const std::array<double, 6> &gt = metadata.geotransform;
-      const int sx0 = std::max(
-        0, static_cast<int>( std::floor( ( request.minX - gt[0] ) / gt[1] ) ) );
-      const int sy0 = std::max(
-        0, static_cast<int>( std::floor( ( request.maxY - gt[3] ) / gt[5] ) ) );
-      const int sx1 = std::min(
-        metadata.width, static_cast<int>( std::ceil( ( request.maxX - gt[0] ) / gt[1] ) ) );
-      const int sy1 = std::min(
-        metadata.height, static_cast<int>( std::ceil( ( request.minY - gt[3] ) / gt[5] ) ) );
-      if ( sx1 <= sx0 || sy1 <= sy0 )
+      // THE shared mapping rule (sign-safe, clamped) — no inline re-derivation.
+      const VirtualCubeSourceWindow mapped = virtualCubeSourceWindow(
+        metadata, request.minX, request.minY, request.maxX, request.maxY );
+      if ( !mapped.ok )
       {
         outcome.status = "failed";
         outcome.errorText = "chunk extent misses the asset's raster";
@@ -303,14 +342,27 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
         report.chunks.push_back( std::move( outcome ) );
         continue;
       }
-      const RasterWindow sourceWindow { sx0, sy0, sx1 - sx0, sy1 - sy0 };
+      const RasterWindow sourceWindow = mapped.window;
       const std::string key =
         fabricChunkMirrorKey( token, asset->record.path, sourceWindow, "band1" );
       outcome.chunkKey = key;
 
       // Already mirrored? A token-keyed hit is the proof — skip the fetch.
-      std::string skippedCorrupt;
-      const std::string existing = resolveMirrorHit( mirrorDirectory, token, key, &skippedCorrupt );
+      // The in-memory manifest answers (the walk re-reads nothing; quadratic
+      // manifest I/O would sink 10k-chunk passes).
+      std::string existing;
+      {
+        const Json::Value &tokenEntry = manifest[token];
+        if ( tokenEntry.isObject() && tokenEntry[key].isObject() &&
+             tokenEntry[key]["file"].isString() )
+        {
+          const std::string candidate =
+            mirrorDirectory + "/" + kMirrorChunkDir + "/" + tokenEntry[key]["file"].asString();
+          VSIStatBufL statBuffer;
+          if ( VSIStatL( candidate.c_str(), &statBuffer ) == 0 )
+            existing = candidate;
+        }
+      }
       if ( !existing.empty() )
       {
         outcome.status = "already-present";
@@ -320,7 +372,11 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
         continue;
       }
 
-      if ( bytesWritten >= budget )
+      // The budget counts DECLARED chunk estimates (logical bytes); the
+      // report's bytesWritten stays the real file size (GeoTIFF containers
+      // are larger than their payload — comparing file bytes to a logical
+      // estimate would skip most of the pass).
+      if ( logicalWritten >= budget && budget > 0 )
       {
         outcome.status = "skipped-budget";
         ++report.skippedBudget;
@@ -339,8 +395,11 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
         RasterWriter writer = RasterWriter::create(
           stagedPath, sourceWindow.width, sourceWindow.height, { RasterBandSpec {} },
           { "GTiff", { "TILED=YES", "BLOCKXSIZE=64", "BLOCKYSIZE=64" }, true } );
-        writer.setGeotransform( { 0.0, 1.0, 0.0, static_cast<double>( sourceWindow.height ), 0.0,
-                                  -1.0 } );
+        // Real georeferencing: the chunk sits at its source extent in the
+        // asset's own grid (a plain pixel grid would make mirrored chunks
+        // un-geolocatable to direct consumers).
+        const std::array<double, 6> &gt = metadata.geotransform;
+        writer.setGeotransform( { request.minX, gt[1], 0.0, request.maxY, 0.0, gt[5] } );
         writer.writeWindow( 1, { 0, 0, sourceWindow.width, sourceWindow.height }, values.data() );
         writer.finalize();
         std::ifstream in( stagedPath, std::ios::binary );
@@ -372,12 +431,21 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
       outcome.file = target;
       outcome.bytes = written;
       bytesWritten += written;
+      logicalWritten += request.estimatedBytes;
       ++report.mirrored;
       report.bytesWritten += written;
       report.chunks.push_back( std::move( outcome ) );
     }
   }
   report.cancelled = cancel.cancelled();
+  if ( manifestWrites % 32 != 0 )
+  {
+    atomic_fs::writeFileAtomic( mirrorDirectory + "/" + kMirrorManifest,
+                         [ & ]( const std::string &staged ) {
+      std::ofstream out( staged, std::ios::binary );
+      out << Json::writeString( Json::StreamWriterBuilder(), manifest );
+    } );
+  }
   return report;
 }
 

@@ -52,8 +52,11 @@ struct MirrorOptions
 {
     /// The mirror directory (created on demand; must be empty-or-valid).
     std::string mirrorDirectory;
-    /// Total bytes this pass may materialize (measured on written files).
-    /// 0 = the plan's estimatedBytes (bounded either way).
+    /// Total DECLARED chunk bytes this pass may materialize (the plan's
+    /// estimates — real GeoTIFF files run larger; bytesWritten reports the
+    /// file truth). 0 = the plan's estimatedBytes; a plan WITHOUT byte
+    /// facts (unknown dtypes) yields a zero estimate and the budget does
+    /// not engage (nothing to bound with — stated, not hidden).
     std::uint64_t maxBytes = 0;
     /// Chunks materialized per internal window (bounded memory).
     std::size_t chunkWindow = 64;

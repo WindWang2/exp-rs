@@ -224,44 +224,58 @@ FabricPlan planFabric( FabricIntent intent, const FabricPlanOptions &options,
     std::uint64_t matches = 0;
     bool truncated = false;
 
+    // The walk: count stop at query.maxItems, a no-progress break (a
+    // backend that returns pages at a stuck offset must not spin forever),
+    // and a page guard (bounds beats cleverness — same doctrine as
+    // searchAll). THE one walk implementation for both sources.
+    const auto walkPages = [ & ]( const CatalogService &service, const CatalogQuery &query ) {
+        CatalogContinuation continuation;
+        std::uint64_t inputIndex = 0;
+        std::size_t previousOffset = 0;
+        int guard = 0;
+        while ( true )
+        {
+            if ( cancel.cancelled() )
+                throw GeoError( ErrorCode::Cancelled, "catalog walk cancelled" );
+            if ( ++guard > 100000 )
+                throw GeoError( ErrorCode::ResourceExhausted,
+                                "catalog pagination failed to terminate" );
+            const CatalogPage page = service.searchPage( query, continuation, cancel );
+            for ( const AssetRecord &record : page.records )
+            {
+                if ( plan.mIntent.query.maxItems > 0 &&
+                     matches >= static_cast<std::uint64_t>( plan.mIntent.query.maxItems ) )
+                {
+                    truncated = true;
+                    break;
+                }
+                ++matches;
+                selector.offer( record, inputIndex++ );
+            }
+            if ( truncated )
+                return;
+            if ( !page.next.hasMore )
+                return;
+            if ( page.records.empty() && page.next.localOffset == previousOffset &&
+                 page.next.remoteHref.empty() )
+                return;   // no progress and no continuation: stop honestly
+            previousOffset = page.next.localOffset;
+            continuation = page.next;
+        }
+    };
+
     if ( !ownedRecords.empty() )
     {
         const CatalogService service = catalogServiceOverRecords( std::move( ownedRecords ) );
         CatalogQuery countQuery = plan.mIntent.query;
         countQuery.limit = 0;
         // Records are already in memory; stream through the SAME engine.
-        CatalogContinuation continuation;
-        std::uint64_t inputIndex = 0;
-        while ( true )
-        {
-            const CatalogPage page = service.searchPage( countQuery, continuation, cancel );
-            for ( const AssetRecord &record : page.records )
-            {
-                ++matches;
-                selector.offer( record, inputIndex++ );
-            }
-            if ( !page.next.hasMore )
-                break;
-            continuation = page.next;
-        }
+        walkPages( service, countQuery );
     }
     else
     {
         const CatalogService service = openCatalogService( plan.mIntent.catalogUri, options.catalog );
-        CatalogContinuation continuation;
-        std::uint64_t inputIndex = 0;
-        while ( true )
-        {
-            const CatalogPage page = service.searchPage( plan.mIntent.query, continuation, cancel );
-            for ( const AssetRecord &record : page.records )
-            {
-                ++matches;
-                selector.offer( record, inputIndex++ );
-            }
-            if ( !page.next.hasMore )
-                break;
-            continuation = page.next;
-        }
+        walkPages( service, plan.mIntent.query );
     }
     plan.mSelected = selector.take();
     truncated = matches > plan.mSelected.size() && static_cast<int>( plan.mSelected.size() ) >=
@@ -313,6 +327,11 @@ FabricPlan planFabric( FabricIntent intent, const FabricPlanOptions &options,
           plan.mSelected, plan.mIntent.grid, OverlapPolicy::FirstWins, VirtualCubeQuality {},
           buildOptions, cancel );
         plan.mGrid = negotiated.grid();
+        // The negotiated grid is a DECISION of the plan: every later rebuild
+        // (single-asset chunk execution, mirror, prefetch) must reuse it
+        // exactly — re-deriving per rebuild would let a single-asset cube
+        // negotiate a DIFFERENT grid and silently read the wrong area.
+        plan.mGrid.explicitGrid = true;
     }
     else
     {
@@ -352,11 +371,22 @@ FabricPlan planFabric( FabricIntent intent, const FabricPlanOptions &options,
         if ( probed >= options.identityProbeLimit )
             break;   // honest estimate bound: assets beyond stay uncounted
         ++probed;
-        const AssetIdentity identity = assetIdentityToken( record.path, AssetIdentityOptions{} );
-        if ( identity.provable() )
-            ++plan.mCost.cacheableAssets;
-        else
+        // The probe is a COST ESTIMATE: a failed probe (offline, unsupported
+        // spelling, dead origin) means UNPROVABLE — fail-closed, never a
+        // plan failure.
+        try
+        {
+            const AssetIdentity identity =
+              assetIdentityToken( record.path, AssetIdentityOptions{} );
+            if ( identity.provable() )
+                ++plan.mCost.cacheableAssets;
+            else
+                ++plan.mCost.unprovableIdentityAssets;
+        }
+        catch ( const GeoError & )
+        {
             ++plan.mCost.unprovableIdentityAssets;
+        }
     }
     identityStage.outputs = probed;
     plan.mStages.push_back( std::move( identityStage ) );
@@ -370,8 +400,9 @@ FabricPlan planFabric( FabricIntent intent, const FabricPlanOptions &options,
         plan.mWindowPlan = true;
 
     // Estimated bytes: window plans read exactly their window; chunk plans
-    // sum the chunk plan's declared estimates (math over dims, no
-    // materialization).
+    // report FIRST-CHUNK-SIZE × chunk count — a deliberate UPPER bound
+    // (tail chunks are strictly smaller; exact sums need per-dim tail math
+    // that buys nothing for a planning estimate).
     const Json::Value chunkJson = plan.mChunkPlan.toJson();
     std::uint64_t bytesPerChunk = 0;
     if ( !plan.mChunkPlan.dims().empty() && plan.mChunkPlan.chunkCountTotal() > 0 )
@@ -408,6 +439,8 @@ FabricPlan planFabric( FabricIntent intent, const FabricPlanOptions &options,
 
 FabricIntent fabricIntentFromJson( const Json::Value &json )
 {
+    try
+    {
     FabricIntent intent;
     intent.catalogUri = json.get( "catalog", "" ).asString();
     intent.sceneBudget = json.get( "sceneBudget", 64 ).asInt();
@@ -540,6 +573,15 @@ FabricIntent fabricIntentFromJson( const Json::Value &json )
     }
     intent.validate();
     return intent;
+    }
+    catch ( const Json::Exception &error )
+    {
+        // Wrong-typed JSON (a string where a number belongs…) is a caller
+        // contract violation — typed, never a std exception through the
+        // operator boundary.
+        throw GeoError( ErrorCode::InvalidArgument,
+                        std::string( "fabric intent JSON field type mismatch: " ) + error.what() );
+    }
 }
 
 // --- execution ----------------------------------------------------------------
@@ -628,9 +670,19 @@ std::vector<FabricChunkOutcome> executeChunks( const FabricPlan &plan,
 
     std::vector<FabricChunkOutcome> outcomes;
     const std::uint64_t total = plan.chunkPlan().chunkCountTotal();
+    outcomes.reserve( std::min<std::uint64_t>( total, 1024 ) );
+    std::uint64_t outcomesDropped = 0;   // beyond the retained window: counters only
     std::uint64_t bytesSpent = 0;
+    std::uint64_t settled = 0;           // chunks with a recorded outcome
     bool budgetBreached = false;
     bool cancelled = false;
+    const auto recordOutcome = [ & ]( FabricChunkOutcome outcome ) {
+      if ( outcomes.size() < 1024 )
+        outcomes.push_back( std::move( outcome ) );
+      else
+        ++outcomesDropped;   // D-1008: never materialize the whole enumeration
+      ++settled;
+    };
     for ( std::uint64_t begin = 0; begin < total && !cancelled; begin += chunkWindow )
     {
         if ( cancel.cancelled() )
@@ -654,7 +706,7 @@ std::vector<FabricChunkOutcome> executeChunks( const FabricPlan &plan,
             {
                 outcome.ok = false;
                 outcome.errorText = "chunk hint '" + request.assetIdHint + "' is not a selected asset";
-                outcomes.push_back( outcome );
+                recordOutcome( std::move( outcome ) );
                 continue;
             }
 
@@ -663,16 +715,16 @@ std::vector<FabricChunkOutcome> executeChunks( const FabricPlan &plan,
             {
                 outcome.ok = false;
                 outcome.errorText = "chunk extent maps to an empty pixel rect";
-                outcomes.push_back( outcome );
+                recordOutcome( std::move( outcome ) );
                 continue;
             }
             const std::uint64_t windowBytes = static_cast<std::uint64_t>( w ) * h * 8;
-            if ( bytesSpent + windowBytes > intent.executionBudgetBytes )
+            if ( bytesSpent + windowBytes > plan.intent().executionBudgetBytes )
             {
                 outcome.skippedBudget = true;
-                outcomes.push_back( outcome );
+                recordOutcome( std::move( outcome ) );
                 budgetBreached = true;
-                continue;   // keep reporting the remainder as skipped
+                continue;   // keep counting the remainder as skipped
             }
 
             // Time-correct execution: one asset IS one time step, so each
@@ -687,12 +739,15 @@ std::vector<FabricChunkOutcome> executeChunks( const FabricPlan &plan,
                 report.assetsFailed += entry.failed ? 1 : 0;
             outcome.ok = true;
             outcome.bytesRead = windowBytes;
-            outcomes.push_back( outcome );
+            recordOutcome( std::move( outcome ) );
             if ( sink )
                 sink( request, window );
         }
     }
     report.budgetBreached = budgetBreached;
+    report.outcomesDropped = outcomesDropped;
+    if ( cancelled )
+        report.cancelledRemaining = total > settled ? total - settled : 0;
     return outcomes;
 }
 

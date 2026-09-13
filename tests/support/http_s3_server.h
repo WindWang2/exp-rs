@@ -137,15 +137,20 @@ class HttpS3Server
         }
       }
       s3fixture::s3CloseSocket( mListener );
+      // Shutdown in-flight clients BEFORE joining: POSIX does not wake a
+      // peer thread's recv() when an fd is closed elsewhere, so a client
+      // stuck mid-request would hang the join (http_range_server doctrine).
+      {
+        std::set<int> inFlight;
+        {
+          std::lock_guard<std::mutex> lock( mMutex );
+          inFlight = mInFlight;
+        }
+        for ( const int client : inFlight )
+          ::shutdown( client, SD_BOTH );
+      }
       if ( mThread.joinable() )
         mThread.join();
-      std::set<int> inFlight;
-      {
-        std::lock_guard<std::mutex> lock( mMutex );
-        inFlight = mInFlight;
-      }
-      for ( const int client : inFlight )
-        ::shutdown( client, SD_BOTH );
     }
 
     bool valid() const { return mPort != 0; }

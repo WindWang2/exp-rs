@@ -184,6 +184,10 @@ struct FabricExecutionReport
     std::uint64_t assetsFailed = 0;
     std::uint64_t chunksExecuted = 0;
     bool budgetBreached = false;               ///< execution stopped on budget
+    std::uint64_t outcomesDropped = 0;         ///< per-chunk outcomes past the
+                                               ///< retained window (counters only
+                                               ///< — D-1008 bounded enumeration)
+    std::uint64_t cancelledRemaining = 0;      ///< chunks not attempted at cancel
     Json::Value toJson() const;
 };
 

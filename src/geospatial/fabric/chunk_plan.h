@@ -111,8 +111,9 @@ class CubeChunkPlan
   friend class FabricPlan;   // plans embed a chunk plan (private ctor)
   public:
     /// Plans the EO cube (time/y/x/band). The virtual cube's selection
-    /// order IS the time dimension (each asset = one time step; undated
-    /// assets keep their selection slot — the instant may be empty).
+    /// order IS the time dimension (each asset = one time step). A temporal
+    /// slice DROPS undated assets (absence is not evidence — they cannot
+    /// prove membership); without a slice they keep their selection slot.
     /// Throws GeoError(InvalidArgument) for non-positive chunk extents and
     /// GeoError(ResourceExhausted) when the u64 count would overflow.
     static CubeChunkPlan forVirtualCube( const VirtualCube &cube, const CubeChunkShape &shape,
@@ -153,13 +154,12 @@ class CubeChunkPlan
     bool mSpatialSliced = false;
     bool mBandSliced = false;
     // EO specifics (empty for multidim plans):
-    std::vector<std::string> mInstants;          ///< per time step ("" undated)
+    std::vector<std::string> mInstants;          ///< per time step ("" undated),
+                                                 ///< already post-slice
     std::vector<std::string> mAssetIdByTime;     ///< selection-order routing
     VirtualCubeGrid mGrid;                        ///< valid() only for EO plans
     bool mIsEo = false;
     double mBytesPerCell = 0.0;                   ///< dtype fact (0 unknown)
-    std::int64_t mTimeOffset = 0;                 ///< slice offsets (basis for coords)
-    std::int64_t mBandOffset = 0;
 };
 
 } // namespace sicnu::geo

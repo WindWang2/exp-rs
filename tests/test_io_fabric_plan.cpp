@@ -4,6 +4,8 @@
  ***************************************************************************/
 
 #include "geospatial/fabric/mirror.h"
+#include "geospatial/fabric/object_store.h"
+#include "support/http_range_server.h"
 #include "geospatial/fabric/prefetch.h"
 #include "geospatial/fabric/query_planner.h"
 #include "geospatial/remote/offline_gate.h"
@@ -14,6 +16,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -265,6 +268,100 @@ TEST_CASE( "prefetch warms the range cache within budget and cancel stops it",
   cancel.cancel();
   const PrefetchReport cancelledReport = prefetchChunks( plan, options, cancel );
   CHECK( cancelledReport.warmed + cancelledReport.cacheHits + cancelledReport.skippedCancel == 0 );
+  RemoteRangeCache::uninstall();
+}
+
+TEST_CASE( "prefetch pulls REAL origin bytes through the range cache and honors a byte budget",
+           "[io][fabric][plan][prefetch][integration]" )
+{
+  // A real remote source over the range cache's native protocol (http(s)):
+  // the only way the budget machinery (telemetry-measured origin bytes) is
+  // exercised for truth. Local assets pull zero and prove nothing here.
+  const std::string dir = scratchDir( "prefetchhttp" );
+  const std::string scenePath = dir + "/scene.tif";
+  {
+    sicnu::geo::RasterWriter writer =
+      sicnu::geo::RasterWriter::create( scenePath, 64, 64, { sicnu::geo::RasterBandSpec {} },
+                                        { "GTiff", { "TILED=YES", "BLOCKXSIZE=32", "BLOCKYSIZE=32" },
+                                          true } );
+    writer.setCrs( sicnu::geo::Crs::fromAuthid( "EPSG:4326" ) );
+    writer.setGeotransform( { 0.0, 1.0, 0.0, 64.0, 0.0, -1.0 } );
+    std::vector<double> raster( 64ull * 64 );
+    for ( std::size_t i = 0; i < raster.size(); ++i )
+      raster[i] = static_cast<double>( i % 251 );
+    writer.writeWindow( 1, { 0, 0, 64, 64 }, raster.data() );
+    writer.finalize();
+  }
+  std::ifstream sceneFile( scenePath, std::ios::binary );
+  const std::vector<unsigned char> payload( ( std::istreambuf_iterator<char>( sceneFile ) ),
+                                            std::istreambuf_iterator<char>() );
+  REQUIRE( payload.size() > 4096 );
+
+  testsupport::HttpRangeServer server( payload, testsupport::ServerBehavior::Normal );
+  REQUIRE( server.port() > 0 );
+
+  sicnu::geo::AssetRecord record;
+  record.id = "scene";
+  record.path = server.url();
+  record.datetimeUtc = "2024-01-01T00:00:00Z";
+  record.hasCloudCover = true;
+  record.cloudCover = 0.0;
+  record.hasBbox = true;
+  record.minX = 0.0;
+  record.minY = 0.0;
+  record.maxX = 64.0;
+  record.maxY = 64.0;
+
+  FabricIntent intent;
+  intent.records = { record };
+  intent.sceneBudget = 2;
+  intent.grid.explicitGrid = true;
+  intent.grid.crs.valid = true;
+  intent.grid.crs.authid = "EPSG:4326";
+  intent.grid.scaleX = 1.0;
+  intent.grid.scaleY = 1.0;
+  intent.grid.minX = 0.0;
+  intent.grid.minY = 0.0;
+  intent.grid.maxX = 64.0;
+  intent.grid.maxY = 64.0;
+  intent.chunkShape = { 1, 32, 32, 1 };
+  const FabricPlan plan = planFabric( std::move( intent ) );
+  REQUIRE( plan.chunkPlan().chunkCountTotal() == 4 );
+
+  RemoteRangeCache::install( {} );
+  PrefetchOptions options;
+  options.chunkWindow = 4;
+
+  const PrefetchReport warmed = prefetchChunks( plan, options );
+  CHECK( warmed.failed == 0 );
+  // The DEFAULT budget (first-chunk estimate × count) is ENGAGED: real
+  // origin bytes exceed the logical estimate (identity head window + GeoTIFF
+  // framing), so the pass may legitimately stop early — every chunk is
+  // warmed, a first-pass hit, or skipped-budget. ACCOUNTED, never silent.
+  CHECK( warmed.warmed + warmed.cacheHits + warmed.skippedBudget == 4 );
+  CHECK( warmed.warmed >= 1 );
+  CHECK( warmed.bytesPulled > 0 );   // REAL origin bytes, not a local no-op
+  CHECK( warmed.bytesPulled < payload.size() * 2 );   // bounded, not a full crawl
+  CHECK( warmed.budgetExhausted );   // the default bound did its job
+
+  // An explicit generous budget completes the whole plan.
+  PrefetchOptions generous;
+  generous.chunkWindow = 4;
+  generous.maxBytes = payload.size() * 4;
+  const PrefetchReport full = prefetchChunks( plan, generous );
+  CHECK( full.failed == 0 );
+  CHECK( full.warmed + full.cacheHits + full.skippedBudget == 4 );
+  CHECK( full.budgetExhausted == false );
+
+  // A tiny budget: the first pull exhausts it — the remainder is
+  // skipped-budget (counted, not silent).
+  PrefetchOptions starved;
+  starved.maxBytes = 1;
+  RemoteRangeCache::clearEntries();
+  const PrefetchReport starvedReport = prefetchChunks( plan, starved );
+  CHECK( starvedReport.skippedBudget + starvedReport.warmed == 4 );
+  CHECK( starvedReport.skippedBudget >= 1 );
+  CHECK( starvedReport.budgetExhausted );
   RemoteRangeCache::uninstall();
 }
 
