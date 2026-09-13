@@ -40,6 +40,7 @@ enum class Method
 {
   SavitzkyGolay,
   Whittaker,
+  WhittakerRobust,
   MovingAverage
 };
 
@@ -107,9 +108,10 @@ Json::Value RsTemporalSmoothOperator::schema() const
   props["method"] = makeEnumParam( "method",
                                    "savitzky_golay: local polynomial fit (needs degree+1 valid "
                                    "samples per window); whittaker: penalty smoother "
-                                   "Σ(y−z)²+λΣ(Δ²z)²; moving_average: centered boxcar of "
-                                   "valid samples",
-                                   { "savitzky_golay", "whittaker", "moving_average" },
+                                   "Σ(y−z)²+λΣ(Δ²z)²; whittaker_robust: whittaker with IRLS "
+                                   "Cauchy reweighting (damps spikes); moving_average: "
+                                   "centered boxcar of valid samples",
+                                   { "savitzky_golay", "whittaker", "whittaker_robust", "moving_average" },
                                    "savitzky_golay" );
   Json::Value window = makeIntegerParam(
       "window", "Savitzky–Golay window length (odd number of samples)", kDefaultWindow );
@@ -124,6 +126,10 @@ Json::Value RsTemporalSmoothOperator::schema() const
       kDefaultLambda );
   setRange( lambda, 1e-9, 1e12 );
   props["lambda"] = lambda;
+  Json::Value robustIterations = makeIntegerParam(
+      "robust_iterations", "whittaker_robust IRLS iterations (1-10)", 3 );
+  setRange( robustIterations, 1, 10 );
+  props["robust_iterations"] = robustIterations;
   Json::Value maWindow = makeIntegerParam(
       "moving_average_window", "Moving-average window length (samples)", kDefaultMovingAverageWindow );
   setRange( maWindow, 3, 31 );
@@ -204,9 +210,11 @@ Json::Value RsTemporalSmoothOperator::run( const Json::Value &params, RSOperator
 {
   const std::string outputPath = requireString( params, "output" );
   const QString methodToken = QString::fromStdString(
-      getEnum( params, "method", { "savitzky_golay", "whittaker", "moving_average" },
+      getEnum( params, "method", { "savitzky_golay", "whittaker", "whittaker_robust", "moving_average" },
                "savitzky_golay" ) );
   const Method method = methodToken == QLatin1String( "whittaker" )  ? Method::Whittaker
+                        : methodToken == QLatin1String( "whittaker_robust" )
+                            ? Method::WhittakerRobust
                         : methodToken == QLatin1String( "moving_average" )
                             ? Method::MovingAverage
                             : Method::SavitzkyGolay;
@@ -220,7 +228,10 @@ Json::Value RsTemporalSmoothOperator::run( const Json::Value &params, RSOperator
     throw RSOperatorError( ErrorCode::InvalidParameter,
                            "degree must be in [1, 4] (got " + std::to_string( degree ) + ")" );
   const double lambda = getDouble( params, "lambda", kDefaultLambda );
-  if ( method == Method::Whittaker && !( lambda > 0.0 ) )
+  const int robustIterations =
+      std::clamp( getInt( params, "robust_iterations", 3 ), 1, 10 );
+  if ( ( method == Method::Whittaker || method == Method::WhittakerRobust ) &&
+       !( lambda > 0.0 ) )
     throw RSOperatorError( ErrorCode::InvalidParameter, "lambda must be > 0" );
   const int maWindow = getInt( params, "moving_average_window", kDefaultMovingAverageWindow );
   if ( maWindow < 3 || maWindow > 31 )
@@ -350,6 +361,8 @@ Json::Value RsTemporalSmoothOperator::run( const Json::Value &params, RSOperator
         smoothed = temporal::savitzkyGolay( pixelSeries, window, degree );
       else if ( method == Method::Whittaker )
         smoothed = temporal::whittakerSmooth( pixelSeries, {}, lambda );
+      else if ( method == Method::WhittakerRobust )
+        smoothed = temporal::whittakerSmoothRobust( pixelSeries, {}, lambda, robustIterations );
       else
         movingAverage( pixelSeries, maWindow, &smoothed );
       for ( int s = 0; s < sceneCount; ++s )
@@ -380,12 +393,13 @@ Json::Value RsTemporalSmoothOperator::run( const Json::Value &params, RSOperator
   }
   temporal_output::writeTemporalDatasetMetadata(
     out, prepared.collection, "rs:temporal_smooth",
-    QStringLiteral( "method=%1 window=%2 degree=%3 lambda=%4 ma_window=%5" )
+    QStringLiteral( "method=%1 window=%2 degree=%3 lambda=%4 ma_window=%5 robust_iterations=%6" )
         .arg( methodToken )
         .arg( window )
         .arg( degree )
         .arg( lambda )
-        .arg( maWindow ) );
+        .arg( maWindow )
+        .arg( robustIterations ) );
   if ( !prepared.preflight.commonRadiometricState.isEmpty() )
     GDALSetMetadataItem( static_cast<GDALDatasetH>( out.dataset() ), "SICNU_RADIOMETRIC_STATE",
                          prepared.preflight.commonRadiometricState.toUtf8().constData(), nullptr );

@@ -53,7 +53,11 @@ std::string RsTemporalPhenologyOperator::description() const
          "season window [seasonStartDoy, seasonEndDoy] (a window that wraps "
          "the year end is supported). Metrics are computed once per pixel over "
          "the whole series for the requested season window; pixels with fewer "
-         "than minValidPerSeason valid in-season samples stay NoData.";
+         "than minValidPerSeason valid in-season samples stay NoData. "
+         "cycles=2 adds a second cycle window (double cropping): the "
+         "complement of the first window or an explicit [season2StartDoy, "
+         "season2EndDoy], reporting c2_<metric> bands plus a cycle_count band; "
+         "per-year cycle metrics are the rs:temporal_region_features surface.";
 }
 
 Json::Value RsTemporalPhenologyOperator::schema() const
@@ -89,6 +93,20 @@ Json::Value RsTemporalPhenologyOperator::schema() const
                                                  "Season end day-of-year (inclusive)", 366 );
   setRange( seasonEndParam, 1, 366 );
   props["seasonEndDoy"] = seasonEndParam;
+  Json::Value cycles = makeIntegerParam(
+      "cycles", "Crop cycles per year: 1 = single window [seasonStartDoy, seasonEndDoy]; "
+                "2 = adds a second cycle (explicit season2 window or the complement of the "
+                "first)", 1 );
+  setRange( cycles, 1, 2 );
+  props["cycles"] = cycles;
+  Json::Value season2StartParam = makeIntegerParam(
+      "season2StartDoy", "Second cycle start day-of-year (0 = complement of the first window)", 0 );
+  setRange( season2StartParam, 0, 366 );
+  props["season2StartDoy"] = season2StartParam;
+  Json::Value season2EndParam = makeIntegerParam(
+      "season2EndDoy", "Second cycle end day-of-year (0 = complement of the first window)", 0 );
+  setRange( season2EndParam, 0, 366 );
+  props["season2EndDoy"] = season2EndParam;
   props["minValidPerSeason"] = makeIntegerParam( "minValidPerSeason",
                                                  "Minimum valid samples inside the season window "
                                                  "(fewer → NoData pixel)",
@@ -144,8 +162,9 @@ Json::Value RsTemporalPhenologyOperator::metadata() const
                           "results; tune crossingFraction to move SOS/EOS along the greening "
                           "flanks";
   meta["limitations"] = "Metrics are computed once per pixel over the whole series for the "
-                        "requested season window — multi-year data mixes years (per-year splits "
-                        "are a follow-up); the kernel needs at least 3 valid in-season samples";
+                        "requested season window — multi-year data mixes years (per-year "
+                        "cycle metrics live in rs:temporal_region_features); the kernel "
+                        "needs at least 3 valid in-season samples";
   return meta;
 }
 
@@ -180,6 +199,16 @@ Json::Value RsTemporalPhenologyOperator::run( const Json::Value &params, RSOpera
   const int seasonStartDoy = std::clamp( getInt( params, "seasonStartDoy", 1 ), 1, 366 );
   const int seasonEndDoy = std::clamp( getInt( params, "seasonEndDoy", 366 ), 1, 366 );
   const int minValidPerSeason = std::max( getInt( params, "minValidPerSeason", 3 ), 1 );
+  const int cycles = std::clamp( getInt( params, "cycles", 1 ), 1, 2 );
+  const int season2StartDoy = std::clamp( getInt( params, "season2StartDoy", 0 ), 0, 366 );
+  const int season2EndDoy = std::clamp( getInt( params, "season2EndDoy", 0 ), 0, 366 );
+  // Second cycle window: explicit params win; otherwise the complement of
+  // the first window on the circular doy axis.
+  const sicnu::temporal::SeasonWindow window1{ seasonStartDoy, seasonEndDoy };
+  sicnu::temporal::SeasonWindow window2 =
+      sicnu::temporal::complementSeasonWindow( window1 );
+  if ( cycles == 2 && season2StartDoy > 0 && season2EndDoy > 0 )
+      window2 = { season2StartDoy, season2EndDoy };
 
   auto prepared = temporal_input::prepareTemporalRun( params, context, {}, bandRole, bandOverride );
   const int sceneCount = prepared.collection.sceneCount();
@@ -243,21 +272,34 @@ Json::Value RsTemporalPhenologyOperator::run( const Json::Value &params, RSOpera
   const int width = reader.width();
   const int height = reader.height();
 
+  const int bandCount =
+      kPhenologyBandCount + ( cycles == 2 ? kPhenologyBandCount + 1 : 0 );
+  std::vector<QString> bandNames( static_cast<size_t>( bandCount ) );
+  for ( int b = 0; b < kPhenologyBandCount; ++b )
+    bandNames[static_cast<size_t>( b )] = kPhenologyBandNames[b];
+  if ( cycles == 2 )
+  {
+    for ( int b = 0; b < kPhenologyBandCount; ++b )
+      bandNames[static_cast<size_t>( kPhenologyBandCount + b )] =
+          QStringLiteral( "c2_%1" ).arg( kPhenologyBandNames[b] );
+    bandNames[static_cast<size_t>( bandCount - 1 )] = QStringLiteral( "cycle_count" );
+  }
+
   context.reportProgress( 0.05, "Creating phenology output" );
   GdalDatasetWrapper out;
   QString outErr;
   temporal_output::TemporalOutputGuard guard;
   guard.manage( &out, QString::fromStdString( outputPath ) );
-  if ( !out.create( QString::fromStdString( outputPath ), width, height, kPhenologyBandCount,
+  if ( !out.create( QString::fromStdString( outputPath ), width, height, bandCount,
                     static_cast<int>( GDT_Float32 ), reader.geoTransform(), reader.projection(),
                     &outErr ) )
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "failed to create output: " + outErr.toStdString() );
-  for ( int b = 1; b <= kPhenologyBandCount; ++b )
+  for ( int b = 1; b <= bandCount; ++b )
   {
     out.setBandNoDataValue( b, std::numeric_limits<double>::quiet_NaN() );
     GDALSetDescription( GDALGetRasterBand( static_cast<GDALDatasetH>( out.dataset() ), b ),
-                        kPhenologyBandNames[b - 1] );
+                        bandNames[static_cast<size_t>( b - 1 )].toUtf8().constData() );
   }
 
   const int tiles = reader.totalTileCount();
@@ -281,7 +323,7 @@ Json::Value RsTemporalPhenologyOperator::run( const Json::Value &params, RSOpera
 
   std::vector<float> tile( tilePixels );
   std::vector<float> series( static_cast<size_t>( sceneCount ) * tilePixels );
-  std::vector<float> metricBufs( static_cast<size_t>( kPhenologyBandCount ) * tilePixels );
+  std::vector<float> metricBufs( static_cast<size_t>( bandCount ) * tilePixels );
   std::vector<float> pixSeries( sceneCount );
   std::uint64_t validPixels = 0;
   int tileDone = 0;
@@ -350,6 +392,49 @@ Json::Value RsTemporalPhenologyOperator::run( const Json::Value &params, RSOpera
         for ( int b = 0; b < kPhenologyBandCount; ++b )
           metricBufs[static_cast<size_t>( b ) * tilePixels + i] = kNan;
       }
+      if ( cycles == 2 )
+      {
+        // Second cycle: same gate semantics, second window.
+        int validInSeason2 = 0;
+        for ( int s = 0; s < sceneCount; ++s )
+        {
+          const float v = series[s * tilePixels + i];
+          if ( !std::isfinite( v ) )
+            continue;
+          const int doy = doyOf[s];
+          const bool inSeason =
+            window2.startDoy <= window2.endDoy
+              ? ( doy >= window2.startDoy && doy <= window2.endDoy )
+              : ( doy >= window2.startDoy || doy <= window2.endDoy );
+          if ( inSeason )
+            ++validInSeason2;
+        }
+        const float *values2 = nullptr;
+        float season2[kPhenologyBandCount];
+        if ( validInSeason2 >= minValidPerSeason )
+        {
+          const sicnu::temporal::SeasonalMetrics m2 = sicnu::temporal::phenologyThreshold(
+            pixSeries, tDays, doyOf, window2.startDoy, window2.endDoy, crossingFraction );
+          if ( m2.valid )
+          {
+            season2[0] = static_cast<float>( m2.sos );
+            season2[1] = static_cast<float>( m2.pos );
+            season2[2] = static_cast<float>( m2.eos );
+            season2[3] = static_cast<float>( m2.los );
+            season2[4] = static_cast<float>( m2.amplitude );
+            season2[5] = static_cast<float>( m2.base );
+            season2[6] = static_cast<float>( m2.integral );
+            values2 = season2;
+          }
+        }
+        for ( int b = 0; b < kPhenologyBandCount; ++b )
+          metricBufs[static_cast<size_t>( kPhenologyBandCount + b ) * tilePixels + i] =
+            values2 ? values2[b] : kNan;
+        const float cycleCount =
+          ( values2 ? 1.0f : 0.0f ) +
+          ( std::isfinite( metricBufs[i] ) ? 1.0f : 0.0f ); // cycle 1 sos slot
+        metricBufs[static_cast<size_t>( bandCount - 1 ) * tilePixels + i] = cycleCount;
+      }
     }
     context.throwIfCancelled();
 
@@ -389,10 +474,10 @@ Json::Value RsTemporalPhenologyOperator::run( const Json::Value &params, RSOpera
   result["output"] = outputPath;
   result["sceneCount"] = sceneCount;
   Json::Value metrics( Json::arrayValue );
-  for ( const char *name : kPhenologyBandNames )
-    metrics.append( name );
+  for ( const auto &name : bandNames )
+    metrics.append( name.toStdString() );
   result["metrics"] = metrics;
-  result["bands"] = kPhenologyBandCount;
+  result["bands"] = bandCount;
   if ( !prepared.collection.timeRangeStartIso().isEmpty() )
   {
     result["timeStart"] = prepared.collection.timeRangeStartIso().toStdString();
