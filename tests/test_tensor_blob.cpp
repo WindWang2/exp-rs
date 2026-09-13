@@ -139,6 +139,47 @@ TEST_CASE( "TensorBlob cv bridge is exact-dtype and rank-preserving", "[models][
   // Empty mats refuse.
   cv::Mat empty;
   REQUIRE_THROWS_AS( TensorBlob::fromMat( empty ), std::runtime_error );
+
+  // F-OPS-2: a non-continuous ND Mat (Range ROI of a fresh 4-D tensor) must
+  // produce byte-identical content. The old fallback iterated mat.rows (-1
+  // for ND), copying nothing: bytes were allocated but stayed zero while
+  // isValid() reported true — silent garbage into the runtime.
+  const int dims4[4] = { 2, 3, 4, 5 };
+  std::vector<float> cube( 120 );
+  for ( std::size_t i = 0; i < cube.size(); ++i )
+    cube[i] = static_cast<float>( i ) * 0.5f;
+  cv::Mat nd( 4, dims4, CV_32F, cube.data() );
+  cv::Mat ndRoi = nd( std::vector<cv::Range>{ cv::Range::all(), cv::Range::all(),
+                                              cv::Range::all(), cv::Range( 1, 4 ) } );
+  REQUIRE_FALSE( ndRoi.isContinuous() );
+  auto ndBlob = TensorBlob::fromMat( ndRoi );
+  REQUIRE( ndBlob.isValid() );
+  REQUIRE( ndBlob.rank() == 4 );
+  CHECK( ndBlob.shape == std::vector<std::int64_t>( { 2, 3, 4, 3 } ) );
+  // Element (b,c,t,k) of the ROI equals source element (b,c,t,k+1).
+  const float *roi = reinterpret_cast< const float * >( ndBlob.bytes.data() );
+  for ( int b = 0; b < 2; ++b )
+    for ( int c = 0; c < 3; ++c )
+      for ( int t = 0; t < 4; ++t )
+        for ( int k = 0; k < 3; ++k )
+        {
+          const std::size_t srcIdx = ( ( ( b * 3 + c ) * 4 + t ) * 5 ) + ( k + 1 );
+          const std::size_t roiIdx = static_cast<std::size_t>( ( ( b * 3 + c ) * 4 + t ) * 3 + k );
+          INFO( "b=" << b << " c=" << c << " t=" << t << " k=" << k );
+          CHECK( roi[roiIdx] == cube[srcIdx] );
+        }
+
+  // A non-continuous 2-D ROI keeps the row-range copy path.
+  cv::Mat plane( 6, 8, CV_32F, cv::Scalar( 0.0f ) );
+  plane.setTo( cv::Scalar( 3.5f ) );
+  cv::Mat planeRoi = plane( cv::Range( 1, 5 ), cv::Range( 2, 7 ) );
+  REQUIRE_FALSE( planeRoi.isContinuous() );
+  auto planeBlob = TensorBlob::fromMat( planeRoi );
+  REQUIRE( planeBlob.isValid() );
+  CHECK( planeBlob.countOrZero() == 20 );
+  const float *planeData = reinterpret_cast< const float * >( planeBlob.bytes.data() );
+  for ( int i = 0; i < 20; ++i )
+    CHECK( planeData[i] == 3.5f );
 }
 
 TEST_CASE( "failure taxonomy classifies the 7.0 kinds", "[models][failure]" )
