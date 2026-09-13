@@ -127,7 +127,22 @@ AssemblyResult buildLiveGraph( const std::string &sourceRoot )
     for ( const auto &id : refs.ctaCommandIds )
         g.addEdge( { "empty_state_cta", id, id, refs.evidence[id] } );
     for ( const auto &id : refs.preflightActionIds )
+    {
+        // Preflight action ids are their own authoritative vocabulary (the
+        // harness suggested-action table resolves them to tools, not to
+        // workbench commands). Pin each id as a node so the edge below
+        // resolves; without it every tool-kind action reads as a dangling
+        // command reference.
+        if ( !g.hasNode( "preflight_action", id ) )
+        {
+            ContractNode node;
+            node.id = id;
+            node.kind = "preflight_action";
+            node.origin = refs.evidence[id];
+            g.addNode( std::move( node ) );
+        }
         g.addEdge( { "preflight_action", id, id, refs.evidence[id] } );
+    }
 
     // ── help topics ──────────────────────────────────────────────────────
     const std::string helpDir = joinPath( sourceRoot, "data/help" );

@@ -26,7 +26,14 @@ EndpointKinds endpointKinds( const std::string &edgeKind )
         return { "diagnostic", "error_code" };
     if ( edgeKind == "capability_for" )
         return { "capability_entry", "operator" };
-    // surface_lookup | empty_state_cta | preflight_action
+    if ( edgeKind == "preflight_action" )
+    {
+        // Preflight action ids are the harness suggested-action vocabulary
+        // (harness_actions table) — they resolve to tools, not to workbench
+        // commands, so their endpoints are preflight_action nodes.
+        return { "preflight_action", "preflight_action" };
+    }
+    // surface_lookup | empty_state_cta
     return { "command", "command" };
 }
 

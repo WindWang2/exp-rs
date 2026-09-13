@@ -138,3 +138,7 @@ __pycache__/
 *.governance.db-*
 *.governance.db.wal
 *.governance.db.shm
+
+# The contract platform 9.0 freshness gate needs the committed snapshot
+!data/contracts/
+!data/contracts/contract_graph.snap.json
