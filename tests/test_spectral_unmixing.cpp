@@ -10,6 +10,7 @@
 
 #include <array>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 #include "operators/framework/rs_operator_registry.h"
@@ -167,4 +168,130 @@ TEST_CASE("rs:spectral_unmixing writes abundance bands", "[operators][rs][unmixi
     REQUIRE(ds.readBandData(1, a1.data(), W, H));
     CHECK(a1[0] == Approx(0.6f).margin(0.02f));
     CHECK(a1[1] == Approx(0.2f).margin(0.02f));
+}
+
+// ── Fully constrained least squares (Hyperspectral Platform 10.0) ─────────
+
+TEST_CASE("FCLS recovers exact abundances for simplex mixtures", "[unmixing][fcls]")
+{
+    // Three-endmember simplex (matches the PPI fixture geometry).
+    const std::vector<float> endmembers = {
+        1.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f,
+        0.0f, 0.0f, 1.0f,
+    };
+    // Pure pixels must recover the vertex exactly under the constraints.
+    std::vector<float> pixels = endmembers;
+
+    SpectralUnmixing::UnmixResult result;
+    QString err;
+    REQUIRE(SpectralUnmixing::unmixFcls(pixels.data(), 3, 3, endmembers.data(), 3,
+                                        &result, &err));
+    REQUIRE(result.abundances.size() == 9);
+
+    // Pure pixel 0 -> [1, 0, 0], pixel 1 -> [0, 1, 0], pixel 2 -> [0, 0, 1].
+    CHECK(result.abundances[0] == Approx(1.0f).margin(1e-4f));
+    CHECK(result.abundances[1] == Approx(0.0f).margin(1e-4f));
+    CHECK(result.abundances[2] == Approx(0.0f).margin(1e-4f));
+    CHECK(result.abundances[4] == Approx(1.0f).margin(1e-4f));
+    CHECK(result.abundances[8] == Approx(1.0f).margin(1e-4f));
+
+    // Mixture pixel: 0.2 E1 + 0.3 E2 + 0.5 E3.
+    std::vector<float> mixture(3);
+    for (int b = 0; b < 3; ++b)
+        mixture[b] = 0.2f * endmembers[b] + 0.3f * endmembers[3 + b]
+                     + 0.5f * endmembers[6 + b];
+    REQUIRE(SpectralUnmixing::unmixFcls(mixture.data(), 1, 3, endmembers.data(), 3,
+                                        &result, &err));
+    CHECK(result.abundances[0] == Approx(0.2f).margin(1e-3f));
+    CHECK(result.abundances[1] == Approx(0.3f).margin(1e-3f));
+    CHECK(result.abundances[2] == Approx(0.5f).margin(1e-3f));
+    // Sum-to-one enforced to the documented penalty accuracy.
+    CHECK(result.abundances[0] + result.abundances[1] + result.abundances[2]
+          == Approx(1.0f).margin(1e-4f));
+}
+
+TEST_CASE("FCLS sums to one where OLS renormalization alone cannot", "[unmixing][fcls]")
+{
+    // A pixel off the data simplex: unconstrained LS wants a negative
+    // abundance; FCLS must clamp to the constrained optimum and still satisfy
+    // the sum constraint to the stated accuracy.
+    const std::vector<float> endmembers = {
+        0.6f, 0.2f, 0.2f,
+        0.1f, 0.4f, 0.5f,
+    };
+    std::vector<float> pixel = { -0.1f, 0.3f, 0.35f }; // off-simplex
+    std::vector<float> pixels = pixel;
+
+    SpectralUnmixing::UnmixResult ols;
+    QString err;
+    REQUIRE(SpectralUnmixing::unmix(pixels.data(), 1, 3, endmembers.data(), 2, &ols, &err));
+    SpectralUnmixing::UnmixResult fcls;
+    REQUIRE(SpectralUnmixing::unmixFcls(pixels.data(), 1, 3, endmembers.data(), 2, &fcls, &err));
+
+    for (int e = 0; e < 2; ++e)
+        CHECK(fcls.abundances[static_cast<size_t>(e)] >= -1e-6f);
+    CHECK(fcls.abundances[0] + fcls.abundances[1] == Approx(1.0f).margin(1e-4f));
+}
+
+TEST_CASE("FCLS refuses collinear and zero endmembers", "[unmixing][fcls]")
+{
+    QString err;
+
+    SECTION("collinear endmembers")
+    {
+        // E2 = 2 * E1: rank-deficient simplex.
+        const std::vector<float> collinear = {
+            0.5f, 0.3f, 0.2f,
+            1.0f, 0.6f, 0.4f,
+        };
+        std::vector<float> pixel = { 0.4f, 0.3f, 0.3f };
+        SpectralUnmixing::UnmixResult result;
+        REQUIRE_FALSE(SpectralUnmixing::unmixFcls(pixel.data(), 1, 3, collinear.data(), 2,
+                                                  &result, &err));
+        CHECK(err.contains("rank-deficient"));
+    }
+    SECTION("zero endmember")
+    {
+        const std::vector<float> zeroEm = {
+            0.5f, 0.3f, 0.2f,
+            0.0f, 0.0f, 0.0f,
+        };
+        std::vector<float> pixel = { 0.4f, 0.3f, 0.3f };
+        SpectralUnmixing::UnmixResult result;
+        REQUIRE_FALSE(SpectralUnmixing::unmixFcls(pixel.data(), 1, 3, zeroEm.data(), 2,
+                                                  &result, &err));
+        CHECK(err.contains("zero vector"));
+    }
+    SECTION("near-collinear pairs survive the guard when numerically distinct")
+    {
+        // 2% off collinearity: a legal simplex, must not refuse.
+        const std::vector<float> nearCollinear = {
+            0.50f, 0.30f, 0.20f,
+            0.51f, 0.31f, 0.20f,
+        };
+        std::vector<float> pixel = { 0.40f, 0.30f, 0.25f };
+        SpectralUnmixing::UnmixResult result;
+        REQUIRE(SpectralUnmixing::unmixFcls(pixel.data(), 1, 3, nearCollinear.data(), 2,
+                                            &result, &err));
+    }
+}
+
+TEST_CASE("FCLS produces NaN abundances for NaN pixels", "[unmixing][fcls]")
+{
+    const std::vector<float> endmembers = {
+        0.6f, 0.2f, 0.2f,
+        0.1f, 0.4f, 0.5f,
+    };
+    std::vector<float> pixels = {
+        0.3f, 0.3f, 0.35f,
+        std::numeric_limits<float>::quiet_NaN(), 0.3f, 0.35f,
+    };
+    SpectralUnmixing::UnmixResult result;
+    QString err;
+    REQUIRE(SpectralUnmixing::unmixFcls(pixels.data(), 2, 3, endmembers.data(), 2,
+                                        &result, &err));
+    CHECK(std::isfinite(result.abundances[0]));
+    CHECK(std::isnan(result.abundances[2]));
+    CHECK(std::isnan(result.reconstructionError[1]));
 }

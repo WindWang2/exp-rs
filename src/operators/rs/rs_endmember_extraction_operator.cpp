@@ -8,8 +8,11 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/endmember_extraction.h"
+#include "processing/algorithms/spectral_table.h"
+#include "processing/algorithms/spectral_wavelength.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include <QDateTime>
 #include <QString>
 
 #include <algorithm>
@@ -28,6 +31,11 @@ Json::Value RsEndmemberExtractionOperator::schema() const {
     props["input"] = makeRasterParam("input", "Input multi-band raster");
     props["nEndmembers"] = makeIntegerParam("nEndmembers", "Number of endmembers to extract", 0);
     props["projections"] = makeIntegerParam("projections", "Random projections (min 16)", 1000);
+    props["endmembersOut"] = makeOutputParam(
+        "endmembersOut",
+        "Optional path for the endmember set as a typed spectral-table artifact "
+        "(exp-rs:spectral-table) consumable by downstream workflow steps",
+        "json");
 
     Json::Value outputs(Json::objectValue);
     outputs["endmembers"] = Json::Value(Json::objectValue);
@@ -54,6 +62,9 @@ Json::Value RsEndmemberExtractionOperator::metadata() const {
                      "for spectral unmixing / matching.";
     meta["workflowHints"].append("Feed the returned endmembers into rs:spectral_unmixing "
                                  "or rs:sam_classify.");
+    meta["workflowHints"].append("In workflows set endmembersOut: the artifact path lands in "
+                                 "endmembersArtifact and binds to the next step via "
+                                 "$<stepId>.endmembersArtifact -> endmembersRef / refsRef.");
     meta["limitations"].append("PPI finds pixels at the data hull; it assumes endmembers "
                                "are present as pure pixels in the scene.");
     return meta;
@@ -352,6 +363,76 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
         });
     }
 
+    // Optional typed artifact output: the endmember set as a spectral table,
+    // consumable by downstream steps through refsRef/endmembersRef.
+    const std::string endmembersOut = getString(params, "endmembersOut", "");
+    if (!endmembersOut.empty())
+    {
+        SpectralTable::Table table;
+        table.id = QStringLiteral("ppi-endmembers");
+        table.bandCount = bandCount;
+        table.spectra.resize(static_cast<size_t>(take));
+        for (int e = 0; e < take; ++e)
+        {
+            table.spectra[static_cast<size_t>(e)].reserve(static_cast<size_t>(bandCount));
+            for (int b = 0; b < bandCount; ++b)
+                table.spectra[static_cast<size_t>(e)].push_back(
+                    result.endmembers[static_cast<size_t>(e) * bandCount + b]);
+            table.labels.append(QStringLiteral("endmember_%1").arg(e + 1));
+        }
+        // Carry the raster's wavelength axis when it declares one.
+        std::vector<std::pair<double, std::string>> wavelengths;
+        bool allWavelengths = true;
+        for (int b = 0; b < bandCount && allWavelengths; ++b)
+        {
+            const QString wl = ds.bandMetadataItem(b + 1, "WAVELENGTH");
+            if (wl.isEmpty())
+            {
+                allWavelengths = false;
+                break;
+            }
+            bool ok = false;
+            const double value = wl.toDouble(&ok);
+            if (!ok)
+            {
+                allWavelengths = false;
+                break;
+            }
+            wavelengths.emplace_back(
+                value, ds.bandMetadataItem(b + 1, "WAVELENGTH_UNITS").toStdString());
+        }
+        if (allWavelengths)
+        {
+            SpectralWavelength::Grid grid;
+            if (SpectralWavelength::gridFromBandValues(wavelengths, {}, &grid)
+                == SpectralWavelength::Status::Ok)
+                table.wavelengthsNm = grid.centersNm;
+        }
+        table.provenance.sourceOperator = "rs:endmember_extraction";
+        table.provenance.sourceInput = QString::fromStdString(inputPath);
+        table.provenance.synthetic = false;
+        table.provenance.derived = true;
+        table.provenance.createdAtMs = QDateTime::currentMSecsSinceEpoch();
+        {
+            Json::Value paramLog(Json::objectValue);
+            paramLog["nEndmembers"] = nEndmembers;
+            paramLog["projections"] = projections;
+            Json::StreamWriterBuilder builder;
+            builder["indentation"] = "";
+            table.provenance.parameters =
+                QString::fromStdString(Json::writeString(builder, paramLog));
+        }
+        QStringList tableErrors;
+        if (!SpectralTable::validate(table, &tableErrors))
+            throw RSOperatorError(
+                ErrorCode::ComputationError,
+                "Generated endmember table failed validation: " +
+                    tableErrors.join("; ").toStdString());
+        QString saveError;
+        if (!SpectralTable::save(table, QString::fromStdString(endmembersOut), &saveError))
+            throw RSOperatorError(ErrorCode::FileNotWritable, saveError.toStdString());
+    }
+
     ds.close();
     context.reportProgress(1.0, "Endmember extraction complete");
 
@@ -381,6 +462,8 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
     {
         json["ppiCountsTruncated"] = true;
     }
+    if (!endmembersOut.empty())
+        json["endmembersArtifact"] = endmembersOut;
     return json;
 }
 

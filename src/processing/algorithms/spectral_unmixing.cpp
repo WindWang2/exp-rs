@@ -2,6 +2,7 @@
 #include "spectral_unmixing.h"
 #include "processing/algorithms/primitives/dense_linalg.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <vector>
@@ -142,6 +143,348 @@ bool unmix( const float *pixels, size_t count, int bands,
                 est[static_cast<size_t>( b )] += ae * static_cast<double>( emRow[b] );
         }
 
+        double errorSq = 0.0;
+        for ( int b = 0; b < bands; ++b )
+        {
+            const double diff = static_cast<double>( x[b] ) - est[static_cast<size_t>( b )];
+            errorSq += diff * diff;
+        }
+        result->reconstructionError[p] =
+            static_cast<float>( std::sqrt( errorSq / bands ) );
+    }
+    return true;
+}
+
+namespace
+{
+
+/// Cholesky factorization (lower triangular, in place) of a symmetric PD
+/// matrix. Returns false when a pivot is non-positive — i.e. the matrix is
+/// not positive definite at the working tolerance.
+bool choleskyInPlace( std::vector<double> &a, int n, double minPivot )
+{
+    for ( int i = 0; i < n; ++i )
+    {
+        for ( int j = 0; j <= i; ++j )
+        {
+            double sum = a[static_cast<size_t>( i ) * n + j];
+            for ( int k = 0; k < j; ++k )
+                sum -= a[static_cast<size_t>( i ) * n + k]
+                       * a[static_cast<size_t>( j ) * n + k];
+            if ( i == j )
+            {
+                if ( sum <= minPivot )
+                    return false;
+                a[static_cast<size_t>( i ) * n + i] = std::sqrt( sum );
+            }
+            else
+            {
+                a[static_cast<size_t>( i ) * n + j] =
+                    sum / a[static_cast<size_t>( j ) * n + j];
+            }
+        }
+        for ( int j = i + 1; j < n; ++j )
+            a[static_cast<size_t>( i ) * n + j] = 0.0;
+    }
+    return true;
+}
+
+/// Solve L Lᵀ z = b in place for the factored @p l (from choleskyInPlace).
+void choleskySolve( const std::vector<double> &l, int n, const std::vector<double> &b,
+                    std::vector<double> *z )
+{
+    z->assign( static_cast<size_t>( n ), 0.0 );
+    for ( int i = 0; i < n; ++i )
+    {
+        double sum = b[static_cast<size_t>( i )];
+        for ( int k = 0; k < i; ++k )
+            sum -= l[static_cast<size_t>( i ) * n + k] * ( *z )[static_cast<size_t>( k )];
+        ( *z )[static_cast<size_t>( i )] = sum / l[static_cast<size_t>( i ) * n + i];
+    }
+    for ( int i = n - 1; i >= 0; --i )
+    {
+        double sum = ( *z )[static_cast<size_t>( i )];
+        for ( int k = i + 1; k < n; ++k )
+            sum -= l[static_cast<size_t>( k ) * n + i] * ( *z )[static_cast<size_t>( k )];
+        ( *z )[static_cast<size_t>( i )] = sum / l[static_cast<size_t>( i ) * n + i];
+    }
+}
+
+constexpr int kMaxNnlsSweeps = 4096;
+
+/// Lawson–Hanson active-set NNLS on the normal equations: minimize
+/// ½ zᵀ G z − uᵀ z subject to z ≥ 0, with @p gram positive definite.
+/// Deterministic pivot order (most-negative gradient first, lowest index on
+/// ties). Finite by the NNLS theorem; the sweep cap is a defensive bound.
+bool nnlsNormalEquations( const std::vector<double> &gram, int n,
+                          const std::vector<double> &u, std::vector<double> *z )
+{
+    z->assign( static_cast<size_t>( n ), 0.0 );
+    std::vector<bool> passive( static_cast<size_t>( n ), false );
+    int passiveCount = 0;
+
+    std::vector<double> gradient( static_cast<size_t>( n ), 0.0 );
+    std::vector<double> l( static_cast<size_t>( n ) * n, 0.0 );
+    std::vector<double> candidate( static_cast<size_t>( n ), 0.0 );
+    std::vector<double> gPp;
+    std::vector<double> uP;
+    std::vector<double> zP;
+
+    for ( int sweep = 0; sweep < kMaxNnlsSweeps; ++sweep )
+    {
+        // Gradient of the objective at the current point.
+        for ( int i = 0; i < n; ++i )
+        {
+            double sum = u[static_cast<size_t>( i )];
+            for ( int j = 0; j < n; ++j )
+                sum -= gram[static_cast<size_t>( i ) * n + j] * ( *z )[static_cast<size_t>( j )];
+            gradient[static_cast<size_t>( i )] = sum;
+        }
+        int pivot = -1;
+        double best = 1e-12;
+        for ( int i = 0; i < n; ++i )
+        {
+            if ( passive[static_cast<size_t>( i )] )
+                continue;
+            if ( gradient[static_cast<size_t>( i )] > best )
+            {
+                best = gradient[static_cast<size_t>( i )];
+                pivot = i;
+            }
+        }
+        if ( pivot < 0 )
+            return true; // KKT satisfied
+        passive[static_cast<size_t>( pivot )] = true;
+        ++passiveCount;
+
+        bool innerProgressed = true;
+        while ( innerProgressed )
+        {
+            // Solve the unconstrained problem on the passive set.
+            gPp.assign( static_cast<size_t>( passiveCount * passiveCount ), 0.0 );
+            uP.assign( static_cast<size_t>( passiveCount ), 0.0 );
+            int idx = 0;
+            std::vector<int> members;
+            members.reserve( static_cast<size_t>( passiveCount ) );
+            for ( int i = 0; i < n; ++i )
+                if ( passive[static_cast<size_t>( i )] )
+                    members.push_back( i );
+            for ( int r = 0; r < passiveCount; ++r )
+            {
+                uP[static_cast<size_t>( r )] = u[static_cast<size_t>( members[static_cast<size_t>( r )] )];
+                for ( int c = 0; c < passiveCount; ++c )
+                    gPp[static_cast<size_t>( r ) * passiveCount + c] =
+                        gram[static_cast<size_t>( members[static_cast<size_t>( r )] ) * n
+                             + members[static_cast<size_t>( c )]];
+            }
+            l = gPp;
+            if ( !choleskyInPlace( l, passiveCount, 0.0 ) )
+                return false; // principal submatrix lost PD — caller's guard failed
+            choleskySolve( l, passiveCount, uP, &zP );
+            for ( int r = 0; r < passiveCount; ++r )
+                candidate[static_cast<size_t>( members[static_cast<size_t>( r )] )] =
+                    zP[static_cast<size_t>( r )];
+
+            bool allPositive = true;
+            for ( int r = 0; r < passiveCount; ++r )
+                if ( zP[static_cast<size_t>( r )] <= 0.0 )
+                    allPositive = false;
+            if ( allPositive )
+            {
+                std::fill( z->begin(), z->end(), 0.0 );
+                for ( int r = 0; r < passiveCount; ++r )
+                    ( *z )[static_cast<size_t>( members[static_cast<size_t>( r )] )] =
+                        zP[static_cast<size_t>( r )];
+                break;
+            }
+
+            // Step toward the candidate until a variable hits zero, then
+            // move it back to the active set.
+            double alpha = std::numeric_limits<double>::max();
+            for ( int r = 0; r < passiveCount; ++r )
+            {
+                const int m = members[static_cast<size_t>( r )];
+                if ( zP[static_cast<size_t>( r )] <= 0.0 )
+                {
+                    if ( ( *z )[static_cast<size_t>( m )] <= 0.0 )
+                    {
+                        // Degenerate: an already-zero passive member wants to
+                        // go negative — deactivate it with a zero step.
+                        alpha = 0.0;
+                        break;
+                    }
+                    const double denom =
+                        ( *z )[static_cast<size_t>( m )] - zP[static_cast<size_t>( r )];
+                    if ( denom > 1e-300 )
+                        alpha = std::min( alpha,
+                                          ( *z )[static_cast<size_t>( m )] / denom );
+                }
+            }
+            if ( alpha == std::numeric_limits<double>::max() )
+                return false; // no feasible step — defensive
+            for ( int i = 0; i < n; ++i )
+            {
+                if ( !passive[static_cast<size_t>( i )] )
+                    continue;
+                ( *z )[static_cast<size_t>( i )] +=
+                    alpha * ( candidate[static_cast<size_t>( i )]
+                              - ( *z )[static_cast<size_t>( i )] );
+                if ( ( *z )[static_cast<size_t>( i )] <= 1e-14 )
+                {
+                    ( *z )[static_cast<size_t>( i )] = 0.0;
+                    passive[static_cast<size_t>( i )] = false;
+                    --passiveCount;
+                }
+            }
+            if ( passiveCount == 0 )
+                innerProgressed = false;
+        }
+    }
+    return false; // sweep cap exhausted — defensive, should be unreachable
+}
+
+} // namespace
+
+bool unmixFcls( const float *pixels, size_t count, int bands,
+                const float *endmembers, int nEndmembers,
+                UnmixResult *result, QString *errorMessage )
+{
+    if ( !pixels || !endmembers || !result || count == 0 || bands <= 0
+         || nEndmembers < 1 || nEndmembers > bands )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "Invalid FCLS unmixing arguments" );
+        return false;
+    }
+
+    // Fail-closed guards: zero-norm endmembers and collinear (rank-deficient)
+    // endmember sets refuse up front — a fully constrained solve over a
+    // degenerate simplex is not defined.
+    double maxNormSq = 0.0;
+    std::vector<double> normSq( static_cast<size_t>( nEndmembers ), 0.0 );
+    for ( int e = 0; e < nEndmembers; ++e )
+    {
+        double sum = 0.0;
+        for ( int b = 0; b < bands; ++b )
+        {
+            const double v = static_cast<double>( endmembers[static_cast<size_t>( e ) * bands + b] );
+            sum += v * v;
+        }
+        normSq[static_cast<size_t>( e )] = sum;
+        maxNormSq = std::max( maxNormSq, sum );
+    }
+    if ( maxNormSq <= 0.0 )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "All endmembers are zero vectors" );
+        return false;
+    }
+    for ( int e = 0; e < nEndmembers; ++e )
+    {
+        if ( normSq[static_cast<size_t>( e )] <= maxNormSq * 1e-24 )
+        {
+            if ( errorMessage )
+                *errorMessage = QStringLiteral( "Endmember %1 is (numerically) a zero "
+                                                "vector" )
+                                    .arg( e );
+            return false;
+        }
+    }
+
+    std::vector<double> gram( static_cast<size_t>( nEndmembers ) * nEndmembers, 0.0 );
+    double gramTrace = 0.0;
+    for ( int e = 0; e < nEndmembers; ++e )
+    {
+        for ( int f = e; f < nEndmembers; ++f )
+        {
+            double sum = 0.0;
+            for ( int b = 0; b < bands; ++b )
+                sum += static_cast<double>( endmembers[static_cast<size_t>( e ) * bands + b] )
+                       * endmembers[static_cast<size_t>( f ) * bands + b];
+            gram[static_cast<size_t>( e ) * nEndmembers + f] = sum;
+            gram[static_cast<size_t>( f ) * nEndmembers + e] = sum;
+        }
+        gramTrace += gram[static_cast<size_t>( e ) * nEndmembers + e];
+    }
+    const double gramMeanDiag = gramTrace / nEndmembers;
+    {
+        // PD probe of the raw Gram matrix: a rank-deficient endmember set has
+        // a singular Gram matrix (collinear endmembers refuse here).
+        std::vector<double> probe = gram;
+        if ( !choleskyInPlace( probe, nEndmembers, gramMeanDiag * 1e-12 ) )
+        {
+            if ( errorMessage )
+                *errorMessage = QStringLiteral( "Endmember matrix is rank-deficient "
+                                                "(collinear endmembers); FCLS requires a "
+                                                "non-degenerate simplex" );
+            return false;
+        }
+    }
+
+    // Penalty augmentation for sum-to-one: G~ = G + rho*11^T, u~ = u + rho.
+    const double rho = gramMeanDiag * 1e6;
+    std::vector<double> augmentedGram( static_cast<size_t>( nEndmembers ) * nEndmembers );
+    for ( int e = 0; e < nEndmembers; ++e )
+        for ( int f = 0; f < nEndmembers; ++f )
+            augmentedGram[static_cast<size_t>( e ) * nEndmembers + f] =
+                gram[static_cast<size_t>( e ) * nEndmembers + f] + rho;
+    // The augmented matrix stays PD (G PD, 11^T PSD, rho > 0).
+
+    result->abundances.assign( count * static_cast<size_t>( nEndmembers ), 0.0f );
+    result->reconstructionError.assign( count, 0.0f );
+
+    std::vector<double> u( nEndmembers, 0.0 );
+    std::vector<double> augmentedU( nEndmembers, 0.0 );
+    std::vector<double> abundance( nEndmembers, 0.0 );
+    std::vector<double> est( bands, 0.0 );
+
+    for ( size_t p = 0; p < count; ++p )
+    {
+        const float *x = pixels + p * static_cast<size_t>( bands );
+
+        bool hasNonFinite = false;
+        for ( int b = 0; b < bands; ++b )
+            if ( !std::isfinite( x[b] ) ) { hasNonFinite = true; break; }
+        if ( hasNonFinite )
+        {
+            for ( int e = 0; e < nEndmembers; ++e )
+                result->abundances[p * static_cast<size_t>( nEndmembers ) + e] =
+                    std::numeric_limits<float>::quiet_NaN();
+            result->reconstructionError[p] = std::numeric_limits<float>::quiet_NaN();
+            continue;
+        }
+
+        for ( int e = 0; e < nEndmembers; ++e )
+        {
+            const float *emRow = &endmembers[static_cast<size_t>( e ) * bands];
+            double sum = 0.0;
+            for ( int b = 0; b < bands; ++b )
+                sum += static_cast<double>( emRow[b] ) * x[b];
+            u[static_cast<size_t>( e )] = sum;
+            augmentedU[static_cast<size_t>( e )] = sum + rho;
+        }
+
+        if ( !nnlsNormalEquations( augmentedGram, nEndmembers, augmentedU, &abundance ) )
+        {
+            if ( errorMessage )
+                *errorMessage = QStringLiteral( "FCLS inner solver failed to converge" );
+            return false;
+        }
+
+        for ( int e = 0; e < nEndmembers; ++e )
+            result->abundances[p * static_cast<size_t>( nEndmembers ) + e] =
+                static_cast<float>( abundance[static_cast<size_t>( e )] );
+
+        std::fill( est.begin(), est.end(), 0.0 );
+        for ( int e = 0; e < nEndmembers; ++e )
+        {
+            const double ae = abundance[static_cast<size_t>( e )];
+            if ( ae == 0.0 )
+                continue;
+            const float *emRow = &endmembers[static_cast<size_t>( e ) * bands];
+            for ( int b = 0; b < bands; ++b )
+                est[static_cast<size_t>( b )] += ae * static_cast<double>( emRow[b] );
+        }
         double errorSq = 0.0;
         for ( int b = 0; b < bands; ++b )
         {

@@ -1147,6 +1147,36 @@ target_include_directories(test_scientific_contracts PRIVATE
 )
 sicnu_discover_tests(test_scientific_contracts)
 
+# Spectral table artifact + wavelength grid helpers (Hyperspectral Platform
+# 10.0): digest/tamper contract, provenance/license rule, cell bound, unit
+# normalization and grid validation.
+add_executable(test_spectral_table test_spectral_table.cpp)
+target_link_libraries(test_spectral_table PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_spectral_table PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_table)
+
+# Complete MNF chain (Hyperspectral Platform 10.0): forward/inverse known
+# answers, SNR ordering, dropped-mass RMSE, singular-noise refusal, transform
+# artifact digest.
+add_executable(test_mnf_transform test_mnf_transform.cpp)
+target_link_libraries(test_mnf_transform PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_mnf_transform PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_mnf_transform)
+
 # Spectral derivatives (Foundation 5.0 Milestone B3): kernel closed forms +
 # operator E2E over an explicit wavelength axis + index-space refusal.
 add_executable(test_spectral_derivative test_spectral_derivative.cpp)
@@ -5470,6 +5500,29 @@ if(TARGET sicnu_workflow)
   endif()
   target_include_directories(test_workflow_runtime PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
   sicnu_discover_tests(test_workflow_runtime)
+
+  # Spectral pipeline (Hyperspectral Platform 10.0): PPI -> unmixing/SAM in
+  # one workflow through placeholder-bound spectral-table artifacts, plus the
+  # shared reference seam's typed refusals.
+  add_executable(test_spectral_pipeline test_spectral_pipeline.cpp)
+  target_link_libraries(test_spectral_pipeline PRIVATE
+    Catch2::Catch2WithMain
+    sicnu_workflow
+    sicnu_workflow_runtime
+    sicnu_operators
+    sicnu_processing
+    sicnu_task_center
+    sicnu_jobs
+    Sicnu::data
+    Qt6::Core
+    qgis_core
+    GDAL::GDAL
+  )
+  if(TARGET jsoncpp)
+    target_link_libraries(test_spectral_pipeline PRIVATE jsoncpp)
+  endif()
+  target_include_directories(test_spectral_pipeline PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+  sicnu_discover_tests(test_spectral_pipeline)
 
   add_executable(test_workflow_cancel test_workflow_cancel.cpp)
   target_link_libraries(test_workflow_cancel PRIVATE
