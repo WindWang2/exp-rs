@@ -456,7 +456,9 @@ std::vector<AgentTool> AgentToolCatalog::searchTools( const SearchQuery &query )
     {
       const bool safe = tool.agentMetadata.largeRasterSafe ||
                         tool.agentMetadata.memoryPolicy == "streaming" ||
-                        tool.agentMetadata.memoryPolicy == "multipass_streaming";
+                        tool.agentMetadata.memoryPolicy == "multipass_streaming" ||
+                        tool.agentMetadata.memoryPolicy == "global_reduction_streaming" ||
+                        tool.agentMetadata.memoryPolicy == "external_memory_streaming";
       if ( !safe ) continue;
     }
 
