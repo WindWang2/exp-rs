@@ -44,4 +44,3 @@ finding was verified in code by the main agent before disposition.
 
 Rounds 1-4 churned because CMakeLists/header edits landed while a build ran
 (stale build.make link failures). Later rounds: edit-then-build discipline.
-
