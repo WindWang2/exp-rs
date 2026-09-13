@@ -19,3 +19,9 @@
 - [x] #971 取消注入 + catalog 过滤器对齐（2b77b2febf / 827dcd58d1）
 - [x] scale/failure 测试族 + ADR 0148（3a8bc47ab1）
 - [ ] 构建验证（build-dev 全链编译进行中）
+
+## 2026-09-14 收尾
+
+- [x] Phase 7: 双 subagent 对抗 review；4×P1 全修 + P2 全修带测试 + P3 fixed/justified；复验捕获 F-M-1（测试内嵌套闭包悬垂）并修复
+- [x] Phase 8: final HEAD 全量测试轮（10 套件全绿 + 10^6 压测 ×3）+ 静态检查全净
+- [x] Phase 9: CHANGELOG/ADR 索引/PR_BODY 终稿 → rebase → push → PR（不 merge）
