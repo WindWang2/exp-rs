@@ -115,4 +115,7 @@
 - `PR_BODY.md` 产出；EVIDENCE E-007/E-008 断言结果落盘。
 - rebase origin/master 后 push（护栏拦截则按 runbook 第 7 步处理）→ `gh pr create` → 报告 URL 后停止。
 - Completion gate 逐条复核：全部满足（对照 GOAL 存档的 Required artifacts 与 Completion gate）。
+- push 结果：一次成功，**未发生护栏 hook 拦截**（runbook 第 6 条重试分支未触发）。
+- **PR URL: https://github.com/WindWang2/exp-rs/pull/958**。未合并、未建远端 issue、未等待 CI。
+- worktree 按协议保留至合并后移除。
 
