@@ -125,7 +125,7 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
         throw RSOperatorError( ErrorCode::ComputationError, "Background covariance is singular" );
 
     SpectralDetection::TargetModel model;
-    if ( !SpectralDetection::buildTargetModel( target.data(), bandCount, stats.mean, invCov, &model ) )
+    if ( !SpectralDetection::buildTargetModel( target, bandCount, stats.mean, invCov, &model ) )
         throw RSOperatorError( ErrorCode::InvalidInputData,
                                "Target spectrum is degenerate against the background "
                                "(non-finite values or zero whitened norm)" );

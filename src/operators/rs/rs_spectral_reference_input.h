@@ -1,6 +1,7 @@
 // src/operators/rs/rs_spectral_reference_input.h — shared spectral reference seam
 #pragma once
 
+#include "processing/algorithms/spectral_wavelength.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <json/json.h>

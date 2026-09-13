@@ -10,7 +10,7 @@
 #include "processing/algorithms/spectral_wavelength.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
-#include <gdal_priv.h>
+#include <gdal.h>
 
 #include <QString>
 
@@ -239,7 +239,7 @@ Json::Value RsSpectralBandSelectOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to create output raster: " + outputPath);
 
-    GDALDataset *outHandle = static_cast<GDALDataset *>( out.dataset() );
+    GDALDatasetH outHandle = static_cast<GDALDatasetH>( out.dataset() );
     std::vector<float> row(static_cast<size_t>(width), 0.0f);
     for (size_t outBand = 0; outBand < selection.bands.size(); ++outBand)
     {
@@ -270,10 +270,12 @@ Json::Value RsSpectralBandSelectOperator::run(const Json::Value& params,
                     const QString units = ds.bandMetadataItem(srcBand, "WAVELENGTH_UNITS");
                     if (SpectralWavelength::normalizeToNm(value, units.toStdString(), &nm))
                     {
-                        outHandle->GetRasterBand(static_cast<int>(outBand) + 1)
-                            ->SetMetadataItem("WAVELENGTH", QString::number(static_cast<double>(nm), 'f', 6).toUtf8().constData());
-                        outHandle->GetRasterBand(static_cast<int>(outBand) + 1)
-                            ->SetMetadataItem("WAVELENGTH_UNITS", "nm");
+                        const QByteArray wlText =
+                            QString::number(static_cast<double>(nm), 'f', 6).toUtf8();
+                        GDALRasterBandH outBandH =
+                            GDALGetRasterBand(outHandle, static_cast<int>(outBand) + 1);
+                        GDALSetMetadataItem(outBandH, "WAVELENGTH", wlText.constData(), nullptr);
+                        GDALSetMetadataItem(outBandH, "WAVELENGTH_UNITS", "nm", nullptr);
                     }
                 }
             }

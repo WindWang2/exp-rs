@@ -81,3 +81,21 @@ build-dev preset in the worktree; `-j2` default, `-j1` if RSS > 70% or load >
 `rs:mnf_inverse`, `rs:spectral_band_select`, `rs:library_select` — colon
 namespace, snake_case, aligned with the existing vocabulary. Sidecar files in
 `data/processing/algorithm_meta/` named after the operator id.
+
+## D-11 (added) New operators omit `task` metadata; sidecars untouched
+
+The algorithm_meta drift gate (`tests/test_algorithm_meta_drift.cpp`) pins
+the task-declaring descriptor set to 29 with byte-exact sidecars (#707/#729).
+`rs:mnf_inverse`, `rs:spectral_band_select`, `rs:library_select` do not
+declare task families, so the shipped sidecar set is unchanged and the gate
+stays green without regenerating generated artifacts. Promoting them into
+task families later goes through `--export-catalog` in the same PR as the
+metadata change.
+
+## D-12 (added) WorkflowRuntime payload-port recording is generic
+
+Both step-execution paths record every non-empty STRING result-payload value
+as `<stepId>.<port>` artifacts, so `$step.port` resolves identically on the
+session path and the TaskCenter/resume path (#727 policy). Qualified keys
+are new namespace — no collision with existing artifact names; payload keys
+are few and bounded.

@@ -23,6 +23,8 @@
 #include <QJsonObject>
 #include <QString>
 
+#include <gdal.h>
+
 #include <cmath>
 #include <limits>
 #include <vector>

@@ -22,10 +22,10 @@
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
+#include "operators/rs/rs_spectral_reference_input.h"
 #include "processing/algorithms/spectral_table.h"
 #include "processing/algorithms/spectral_wavelength.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
-#include "rs_spectral_reference_input.h"
 #include "workflow/workflow_runtime.h"
 #include "workflow/workflow_session.h"
 

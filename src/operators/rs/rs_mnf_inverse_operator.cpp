@@ -12,7 +12,6 @@
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <gdal.h>
-#include <gdal_priv.h>
 
 #include <QFile>
 #include <QJsonDocument>
@@ -125,7 +124,7 @@ Json::Value runRasterMode(const Json::Value &params, RSOperatorContext &context,
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to create reconstructed raster: " + outputPath);
     outDataset.setBandNoDataValue(1, std::numeric_limits<float>::quiet_NaN());
-    GDALDataset *outHandle = static_cast<GDALDataset *>( outDataset.dataset() );
+    GDALDatasetH outHandle = static_cast<GDALDatasetH>( outDataset.dataset() );
     for (int b = 0; b < model.bandCount; ++b)
     {
         if (static_cast<int>(model.wavelengthsNm.size()) == model.bandCount && outHandle)
@@ -134,9 +133,9 @@ Json::Value runRasterMode(const Json::Value &params, RSOperatorContext &context,
                 QString::number(static_cast<double>(model.wavelengthsNm[static_cast<size_t>(b)]),
                                 'f', 6)
                     .toUtf8();
-            GDALRasterBand *band = outHandle->GetRasterBand(b + 1);
-            band->SetMetadataItem("WAVELENGTH", wl.constData());
-            band->SetMetadataItem("WAVELENGTH_UNITS", "nm");
+            GDALRasterBandH band = GDALGetRasterBand(outHandle, b + 1);
+            GDALSetMetadataItem(band, "WAVELENGTH", wl.constData(), nullptr);
+            GDALSetMetadataItem(band, "WAVELENGTH_UNITS", "nm", nullptr);
         }
     }
 
@@ -274,7 +273,8 @@ Json::Value runSpectrumMode(const Json::Value &params, RSOperatorContext &contex
     SpectralTable::Table converted;
     converted.id = QStringLiteral("mnf-converted");
     converted.bandCount = model.bandCount;
-    converted.spectra.push_back(spectrumBuffer);
+    converted.spectra.push_back(
+        std::vector<float>(spectrumBuffer.begin(), spectrumBuffer.end()));
     if (static_cast<int>(model.wavelengthsNm.size()) == model.bandCount)
         converted.wavelengthsNm = model.wavelengthsNm;
     converted.labels.append(

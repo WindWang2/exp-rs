@@ -146,8 +146,8 @@ bool loadRowsFromPath( const QString &path, const QString &refKey, LoadedRows *o
                 uniformLicense = false;
         }
         out->synthetic = allSynthetic;
-        out->license = ( anyLicense && uniformLicense ) ? firstLicense
-                                                        : QStringLiteral( "mixed" );
+        out->license = !anyLicense ? QString()
+                       : ( uniformLicense ? firstLicense : QStringLiteral( "mixed" ) );
         out->description = QStringLiteral( "spectral library '%1' (%2 entries)" )
                                .arg( library.libraryId().isEmpty()
                                          ? QStringLiteral( "<unnamed>" )
@@ -440,7 +440,12 @@ ResolvedSpectralReference resolveSpectralReference(
         refuse( ErrorCode::InvalidParameter, error.toStdString() );
     if ( hasLibrary )
         applyMaterialFilter(
-            QString::fromStdString( params::getStringArray( params, "libraryMaterials" ) ),
+            [&params]() {
+                QStringList filter;
+                for ( const std::string &m : params::getStringArray( params, "libraryMaterials" ) )
+                    filter.append( QString::fromStdString( m ) );
+                return filter;
+            }(),
             &rows );
 
     reconcileWidths( rows, inputGrid, inputBandCount, usedKey,

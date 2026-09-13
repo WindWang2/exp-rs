@@ -222,7 +222,7 @@ TEST_CASE( "Wavelength grids normalize units and refuse bad input", "[spectral_w
     using namespace SpectralWavelength;
 
     float nm = 0.0f;
-    REQUIRE( normalizeToNm( 0.65, "nm", &nm ) );
+    REQUIRE( normalizeToNm( 650.0, "nm", &nm ) );
     REQUIRE( nm == Approx( 650.0f ) );
     REQUIRE( normalizeToNm( 0.65, "µm", &nm ) );
     REQUIRE( nm == Approx( 650.0f ) );

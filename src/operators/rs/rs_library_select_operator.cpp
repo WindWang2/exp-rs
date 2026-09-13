@@ -147,7 +147,6 @@ Json::Value RsLibrarySelectOperator::run(const Json::Value& params,
     const QString sensorId = QString::fromStdString(getString(params, "sensor", ""));
     const double duplicateThreshold = getDouble(params, "nearDuplicateAngleDeg", 0.5);
 
-    ensureGdalInit();
 
     SpectralLibrary::Library library;
     QString error;
@@ -191,7 +190,7 @@ Json::Value RsLibrarySelectOperator::run(const Json::Value& params,
         QVector<SpectralLibrary::Entry> clipped;
         for (const auto &entry : selected)
         {
-            if (entry.wavelengths.isEmpty())
+            if (entry.wavelengths.empty())
                 continue; // documented: entries without a grid drop in this mode
             bool inside = false;
             for (float w : entry.wavelengths)
