@@ -67,7 +67,7 @@ void installConfigKey( std::vector<FabricInstalledConfigKey> &installed, const c
   installed.push_back( std::move( state ) );
 }
 
-const char *kS3Anonymous = "AWS_NO_SIGNREQUEST";
+const char *kS3Anonymous = "AWS_NO_SIGN_REQUEST";   ///< modern spelling (pre-3.x used AWS_NO_SIGNREQUEST)
 const char *kS3Endpoint = "AWS_S3_ENDPOINT";
 const char *kS3Https = "AWS_HTTPS";
 const char *kS3VirtualHosting = "AWS_VIRTUAL_HOSTING";
@@ -246,6 +246,9 @@ ScopedObjectStoreCredentials::ScopedObjectStoreCredentials(
   {
     if ( credentials.anonymous )
     {
+      // GDAL renamed the key (AWS_NO_SIGNREQUEST → AWS_NO_SIGN_REQUEST);
+      // set both spellings so every GDAL build understands the intent.
+      installConfigKey( mSetKeys, "AWS_NO_SIGN_REQUEST", "YES" );
       installConfigKey( mSetKeys, kS3Anonymous, "YES" );
     }
     else
@@ -292,7 +295,8 @@ ScopedObjectStoreCredentials::ScopedObjectStoreCredentials(
       throw GeoError( ErrorCode::Unsupported,
                       "gcs credential injection is service-account JSON based — "
                       "not wired in this track (anonymous public buckets only)" );
-    installConfigKey( mSetKeys, "GS_NO_SIGNREQUEST", "YES" );
+    installConfigKey( mSetKeys, "GS_NO_SIGN_REQUEST", "YES" );
+    installConfigKey( mSetKeys, "GS_NO_SIGNREQUEST", "YES" );   // legacy spelling
   }
   else
   {
@@ -312,6 +316,13 @@ ScopedObjectStoreCredentials::~ScopedObjectStoreCredentials()
     else
       CPLSetConfigOption( it->key.c_str(), nullptr );
   }
+  // GDAL caches authenticated handles per URL (the VSICURL property cache):
+  // without this wipe, a LATER window for the same URL would silently reuse
+  // the PREVIOUS window's signed context — credentials lingering past their
+  // scope. The cache is GDAL-side metadata only; our /vsirangecache/ blocks
+  // live in a separate handler and are untouched.
+  if ( !mSetKeys.empty() )
+    VSICurlClearCache();
   gActiveCredentialWindows.fetch_sub( 1 );
 }
 

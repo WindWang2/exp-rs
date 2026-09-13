@@ -13,3 +13,5 @@
   （object_store / catalog_service / virtual_cube / chunk_plan / query_planner /
   prefetch / mirror）；DECISIONS D-1001..D-1014 对应设计已固化。
 * 2026-09-13 · Phase 1 · configure（build-fabric10, Debug, Ninja）成功。
+* 2026-09-13 · Phase 2 · object_store + catalog_service 实现完成；两测试套件全绿
+  （75 + 56 断言）。提交 0d435512b8 + 本阶段修复 commit。

@@ -113,9 +113,10 @@ ObjectStoreResolution resolveObjectStore( const std::string &rawUri );
 std::string fabricCachedPath( const std::string &fetchablePath );
 
 /// RAII credential window: installs the GDAL config options that make the
-/// profile's VSI prefix authenticate with these credentials, and removes
-/// exactly those keys on destruction (never touches unrelated ambient
-/// options). Throws GeoError(InvalidArgument) when !anonymous lacks the
+/// profile's VSI prefix authenticate with these credentials, and on
+/// destruction restores exactly those keys to their prior state AND wipes
+/// GDAL's per-URL VSICURL handle cache (a later window for the same URL
+/// must never reuse this window's signed context). Throws GeoError(InvalidArgument) when !anonymous lacks the
 /// key pair, or the prefix is not a known /vsi* network prefix.
 /// The process-global serialization requirement is D-1003 — enforced by
 /// convention, documented here, and asserted by a test-visible counter

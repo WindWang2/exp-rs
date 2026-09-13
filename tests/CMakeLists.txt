@@ -293,6 +293,21 @@ sicnu_add_io_test(test_io_scale9)
 target_link_libraries(test_io_operators PRIVATE Qt6::Core sicnu_operators)
 sicnu_link_jsoncpp(test_io_operators)
 
+# fabric-10: data fabric / data cube suites. The object-store suite runs a
+# REAL /vsis3/ open against a loopback S3-shaped endpoint (header-only
+# fixture); both suites need the tests/ include for shared fixtures.
+sicnu_add_io_test(test_io_fabric_object_store)
+target_include_directories(test_io_fabric_object_store PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(WIN32)
+  target_link_libraries(test_io_fabric_object_store PRIVATE ws2_32)
+endif()
+sicnu_add_io_test(test_io_fabric_catalog)
+target_include_directories(test_io_fabric_catalog PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_sources(test_io_fabric_catalog PRIVATE support/http_stac_server.cpp support/http_range_server.cpp)
+if(WIN32)
+  target_link_libraries(test_io_fabric_catalog PRIVATE ws2_32)
+endif()
+
 # Geospatial I/O benchmark harness (Phase 15): run manually —
 #   benchmark_io --out benchmarks/io-foundation-4.json
 add_executable(benchmark_io benchmark_io.cpp)

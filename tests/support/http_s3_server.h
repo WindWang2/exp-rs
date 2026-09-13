@@ -23,7 +23,7 @@
 #include <map>
 #include <mutex>
 #include <set>
-#include <signal.h>
+#include <csignal>
 #include <string>
 #include <thread>
 #include <vector>

@@ -95,3 +95,10 @@ CPLFormFilename 语义的本地 helper）——VSI 本就是本层传输权威�
 ## D-1016 · credential RAII 的恢复语义
 ScopedObjectStoreCredentials 析构时**恢复先前值**（hadPrior → 恢复，否则移除键），
 恢复顺序为安装的逆序。头文件措辞相应理解为"exactly what it set"（含恢复语义）。
+
+## D-1017 · credential 窗口关闭时清 GDAL VSICURL 句柄缓存
+实测：GDAL 按 URL 缓存已认证的 /vsis3/ 句柄（VSICURL property cache）；窗口
+关闭后，同 URL 的后续窗口会复用上一窗口的签名上下文——凭据残留超出作用域。
+因此 ScopedObjectStoreCredentials 析构在恢复 config 键之后调用
+VSICurlClearCache()（仅 GDAL 元数据缓存；/vsirangecache/ 的数据块不受影响）。
+测试证据：signed 窗口后 anonymous 重开同一 URL，修复前 typed open 失败，修复后通过。

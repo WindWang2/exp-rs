@@ -134,6 +134,9 @@ struct CatalogPage
     bool truncatedByCap = false;        ///< a declared bound stopped the walk
     bool serverFiltered = false;        ///< remote pushdown contributed
     std::uint64_t clientFilteredOut = 0;///< dropped by service-side filters
+    std::uint64_t unresolvable = 0;     ///< dropped: qualifying asset href
+                                        ///< resolved to nothing fetchable
+                                        ///< (containment refusal, no provenance)
     Json::Value statsJson() const;
 };
 
@@ -180,6 +183,7 @@ class CatalogService
         std::vector<StacItem> items;
         bool truncatedByCap = false;
         std::uint64_t clientFilteredOut = 0;
+        std::uint64_t unresolvable = 0;
     };
     SearchAllResult searchAll( const CatalogQuery &query, const CancelToken &cancel = {} ) const;
 

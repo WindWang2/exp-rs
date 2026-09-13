@@ -54,23 +54,6 @@ std::string stacDatetimeInterval( const CatalogQuery &query )
   return start + "/" + end;
 }
 
-/// Effective UTC instant of an item (datetime else range start) — "" when
-/// unresolvable. Ordering/filtering always instant-based (8.0 contract).
-bool itemEffectiveInstant( const StacItem &item, std::string &instantUtc )
-{
-  const std::string &raw = !item.datetimeUtc.empty()
-                             ? item.datetimeUtc
-                             : ( !item.startDatetimeUtc.empty() ? item.startDatetimeUtc
-                                                                : item.endDatetimeUtc );
-  if ( raw.empty() )
-    return false;
-  const InstantParse parse = parseIso8601Instant( raw );
-  if ( !parse.ok )
-    return false;
-  instantUtc = instantToUtcString( parse.epochNanos );
-  return true;
-}
-
 bool itemMatchesPlatform( const StacItem &item, const CatalogQuery &query )
 {
   if ( query.platformEquals.empty() )
@@ -283,19 +266,35 @@ bool recordPasses( const AssetRecord &record, const CatalogQuery &query )
 
 /// Builds the record + provenance pair for one item (typed failure when the
 /// qualifying asset cannot resolve to a fetchable path).
-bool recordForItem( const StacClient &client, const StacItem &item, const CatalogQuery &query,
-                    AssetRecord &recordOut )
+enum class ItemVerdict
+{
+    Rejected,      ///< filtered out by the query vocabulary
+    Unresolvable,  ///< passed filters but the qualifying asset href resolves
+                   ///< to nothing fetchable — dropped with its own counter
+    Accepted,
+};
+
+ItemVerdict recordForItem( const StacClient &client, const StacItem &item,
+                           const CatalogQuery &query, AssetRecord &recordOut )
 {
   const StacAsset *qualifying = nullptr;
   if ( !itemMatchesQuery( item, query, qualifying ) )
-    return false;
-  const std::string resolved = client.resolveAssetHref( item, *qualifying );
+    return ItemVerdict::Rejected;
+  std::string resolved;
+  try
+  {
+    resolved = client.resolveAssetHref( item, *qualifying );
+  }
+  catch ( const GeoError & )
+  {
+    return ItemVerdict::Unresolvable;   // a path we cannot fetch is not a record
+  }
   recordOut = assetRecordFromStacItem( item, resolved );
   enrichRecord( recordOut, item, *qualifying );
   // The service-layer temporal/bbox checks ride on the record (one truth).
   if ( !recordPasses( recordOut, query ) )
-    return false;
-  return true;
+    return ItemVerdict::Rejected;
+  return ItemVerdict::Accepted;
 }
 
 } // namespace
@@ -370,6 +369,7 @@ Json::Value CatalogPage::statsJson() const
   json["truncatedByCap"] = truncatedByCap;
   json["serverFiltered"] = serverFiltered;
   json["clientFilteredOut"] = static_cast<Json::UInt64>( clientFilteredOut );
+  json["unresolvable"] = static_cast<Json::UInt64>( unresolvable );
   return json;
 }
 
@@ -534,7 +534,10 @@ CatalogService openCatalogService( const std::string &root, const CatalogService
     service.mOptions = options;
     service.mLocal = std::make_unique<CatalogService::LocalImpl>();
     service.mLocal->root = root;
-    service.mLocal->resolver = std::make_unique<StacClient>( root, options.stac );
+    // StacClient's ctor validates remote roots, but resolveAssetHref (the
+    // only call we make) uses the item's own provenance for local items —
+    // the placeholder root is never dereferenced and never hits the network.
+    service.mLocal->resolver = std::make_unique<StacClient>( "http://fabric-local-resolver", options.stac );
 
     if ( uri.kind == ResourceKind::LocalFile )
     {
@@ -750,14 +753,18 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
       if ( cancel.cancelled() )
         throw GeoError( ErrorCode::Cancelled, "catalog search cancelled" );
       AssetRecord record;
-      if ( recordForItem( *mRemote->client, item, query, record ) )
+      switch ( recordForItem( *mRemote->client, item, query, record ) )
       {
-        page.records.push_back( std::move( record ) );
-        page.items.push_back( item );
-      }
-      else
-      {
-        ++page.clientFilteredOut;
+        case ItemVerdict::Accepted:
+          page.records.push_back( std::move( record ) );
+          page.items.push_back( item );
+          break;
+        case ItemVerdict::Unresolvable:
+          ++page.unresolvable;
+          break;
+        case ItemVerdict::Rejected:
+          ++page.clientFilteredOut;
+          break;
       }
     }
     page.offset = 0;
@@ -785,7 +792,8 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
       if ( cancel.cancelled() )
         throw GeoError( ErrorCode::Cancelled, "catalog search cancelled" );
       if ( query.maxItems > 0 &&
-           page.offset + fetched >= query.maxItems )
+           page.offset + static_cast<std::size_t>( fetched ) >=
+             static_cast<std::size_t>( query.maxItems ) )
         break;
       if ( static_cast<int>( page.records.size() ) >= pageSize )
         break;
@@ -799,15 +807,19 @@ CatalogPage CatalogService::searchPage( const CatalogQuery &query,
         }
         const StacItem item = StacItem::parseFromFile( mLocal->itemFiles[index] );
         AssetRecord record;
-        if ( recordForItem( *mLocal->resolver, item, query, record ) )
+        switch ( recordForItem( *mLocal->resolver, item, query, record ) )
         {
-          page.records.push_back( std::move( record ) );
-          page.items.push_back( item );
-          ++fetched;
-        }
-        else
-        {
-          ++page.clientFilteredOut;
+          case ItemVerdict::Accepted:
+            page.records.push_back( std::move( record ) );
+            page.items.push_back( item );
+            ++fetched;
+            break;
+          case ItemVerdict::Unresolvable:
+            ++page.unresolvable;
+            break;
+          case ItemVerdict::Rejected:
+            ++page.clientFilteredOut;
+            break;
         }
       }
       catch ( const GeoError & )
@@ -847,6 +859,7 @@ CatalogService::SearchAllResult CatalogService::searchAll( const CatalogQuery &q
         result.items.push_back( page.items[i] );
     }
     result.clientFilteredOut += page.clientFilteredOut;
+    result.unresolvable += page.unresolvable;
     continuation = page.next;
     if ( !page.next.hasMore )
       return result;
