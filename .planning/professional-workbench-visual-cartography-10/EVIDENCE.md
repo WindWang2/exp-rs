@@ -19,3 +19,31 @@
   test_agent_workbench_context 链接改为 sicnu_agent（spatial_tool.cpp 拖入工具族）；
   jsoncpp 链接改用 `sicnu_link_jsoncpp` helper；构建文件损坏（与旧后台构建并发生成）已通过重新 `cmake .` 修复。
 - 发现：PRE_TEST 发现模式下 ctest -R 需按 TEST_CASE 名称匹配，非二进制名。
+
+## 回归矩阵（第一轮，本地证据）
+
+| 套件 | 结果 | 备注 |
+| --- | --- | --- |
+| test_object_identity | 5/5 cases 全绿 | 新增 |
+| test_agent_workbench_context | 4/4 全绿 | 新增 |
+| test_selection_context + ContextFacts | 8/8 全绿 | 扩展字段回归 |
+| test_provenance_section | 6/6 全绿（61 断言） | **master 上 4/6 红** → 本 track 修复（见下） |
+| test_command_registry | 9/9 全绿 | 新命令族注册回归 |
+| test_shortcut_conflicts | 7/7 全绿 | **master 无法编译** → 本 track 修复（见下） |
+| test_mapspec（含 test_cartography_operators_10） | 601/602 断言 | 1 个失败为 PNG 渲染确定性，master 同样失败（本机字体环境），非本 track 引入 |
+
+## 基线修复（如实声明，均为独立 commit 候选）
+
+1. `tests/test_shortcut_conflicts.cpp`：master 在本工具链无法编译——
+   `QRegularExpressionMatchIterator::captured()` 不存在（应为 match.next().captured()）。
+   wb9 时段可编译，GCC 16 拒绝。最小修复：取 match 再 captured。
+2. `tests/test_provenance_section.cpp`：PR #953 i18n 机械重写把
+   `src/app/workbench/provenance_section.cpp` 的 tr() 源文改为英文，测试期望未同步
+   → master 上 4/6 用例红。期望更新为现行源文（61 断言全绿）。
+3. `test_mapspec` 的 PNG 渲染确定性用例在本机失败（master 同样失败）：环境级
+   字体差异，记 OUT_OF_SCOPE，不由本 track 追逐像素确定性。
+
+## OUT_OF_SCOPE（发现但不属于本 track ownership）
+
+- master 的 PNG 渲染确定性用例在本机不稳定（字体环境）——建议制图 track 在
+  渲染确定性测试中固定字体/禁用系统字体替换。

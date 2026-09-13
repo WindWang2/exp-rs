@@ -158,7 +158,7 @@ TEST_CASE( "ProvenanceSection renders derivation records for asset selection",
   CHECK( text.contains( "task-42" ) );                 // task reference
   CHECK( text.contains( "abc123" ) );                  // execution fingerprint
   CHECK( text.contains( QStringLiteral( "r1" ) ) );    // input revision rendered
-  CHECK_FALSE( text.contains( QStringLiteral( "已从目录中删除" ) ) );
+  CHECK_FALSE( text.contains( QStringLiteral( "removed from the catalog" ) ) );
 }
 
 TEST_CASE( "ProvenanceSection resolves map layers through the catalog and warns for deleted assets",
@@ -179,7 +179,7 @@ TEST_CASE( "ProvenanceSection resolves map layers through the catalog and warns 
   snapshot.activeLayer = &layer;
   section.populate( snapshot );
   QLabel *body = section.findChild<QLabel *>( QStringLiteral( "rsInspectorProvenance" ) );
-  CHECK( body->text().contains( QStringLiteral( "无派生记录" ) ) ); // directly registered
+  CHECK( body->text().contains( QStringLiteral( "No derivation record" ) ) ); // directly registered
 
   // The asset disappearing between selection and inspection must surface as a
   // truthful warning — never as invented provenance (goal: deleted layer in
@@ -194,7 +194,7 @@ TEST_CASE( "ProvenanceSection resolves map layers through the catalog and warns 
       [&fx]() -> sicnu::workspace::WorkspaceService * { return &fx.service; } );
     goneSection.populate( gone );
     QLabel *goneBody = goneSection.findChild<QLabel *>( QStringLiteral( "rsInspectorProvenance" ) );
-    CHECK( goneBody->text().contains( QStringLiteral( "已不在数据目录" ) ) );
+    CHECK( goneBody->text().contains( QStringLiteral( "no longer in the data catalog" ) ) );
   }
 
   // An unregistered layer path stays truthful too.
@@ -202,7 +202,7 @@ TEST_CASE( "ProvenanceSection resolves map layers through the catalog and warns 
   sicnu::app::SelectionContextSnapshot foreignSnapshot;
   foreignSnapshot.activeLayer = &foreign;
   section.populate( foreignSnapshot );
-  CHECK( body->text().contains( QStringLiteral( "未注册到数据目录" ) ) );
+  CHECK( body->text().contains( QStringLiteral( "not registered in the data catalog" ) ) );
 }
 
 TEST_CASE( "ProvenanceSection walks the derivation chain and renders governance verification",
@@ -241,14 +241,14 @@ TEST_CASE( "ProvenanceSection walks the derivation chain and renders governance 
   const QString text = section.findChild<QLabel *>( QStringLiteral( "rsInspectorProvenance" ) )->text();
   CAPTURE( text );
   // Chain: child ← parent ← grand, rendered as one projection.
-  CHECK( text.contains( QStringLiteral( "派生链" ) ) );
+  CHECK( text.contains( QStringLiteral( "Derivation Chain" ) ) );
   CHECK( text.contains( QStringLiteral( "prov-chain-1" ) ) );
   CHECK( text.contains( QStringLiteral( "prov-chain-0" ) ) );
   // Governance enrichment: fingerprint + verification stamp, no stale warning.
   CHECK( text.contains( "fp-1" ) );
-  CHECK( text.contains( QStringLiteral( "校验与治理" ) ) );
-  CHECK_FALSE( text.contains( QStringLiteral( "从未校验" ) ) );
-  CHECK_FALSE( text.contains( QStringLiteral( "已从目录中删除" ) ) );
+  CHECK( text.contains( QStringLiteral( "Validation and Governance" ) ) );
+  CHECK_FALSE( text.contains( QStringLiteral( "Never validated" ) ) );
+  CHECK_FALSE( text.contains( QStringLiteral( "removed from the catalog" ) ) );
 }
 
 TEST_CASE( "ProvenanceSection unresolved inputs and unverified assets surface as warnings",
@@ -275,8 +275,8 @@ TEST_CASE( "ProvenanceSection unresolved inputs and unverified assets surface as
   const QString text = section.findChild<QLabel *>( QStringLiteral( "rsInspectorProvenance" ) )->text();
   CAPTURE( text );
   CHECK( text.contains( "/ghost/input.tif" ) );
-  CHECK( text.contains( QStringLiteral( "未能解析" ) ) );
-  CHECK( text.contains( QStringLiteral( "从未校验" ) ) ); // no verification recorded
+  CHECK( text.contains( QStringLiteral( "did not resolve" ) ) );
+  CHECK( text.contains( QStringLiteral( "Never validated" ) ) ); // no verification recorded
 }
 
 TEST_CASE( "ProvenanceSection without a service stays truthful",
@@ -294,5 +294,5 @@ TEST_CASE( "ProvenanceSection without a service stays truthful",
 
   section.populate( snapshot );
   const QString text = section.findChild<QLabel *>( QStringLiteral( "rsInspectorProvenance" ) )->text();
-  CHECK( text.contains( QStringLiteral( "不可用" ) ) );
+  CHECK( text.contains( QStringLiteral( "unavailable" ) ) );
 }

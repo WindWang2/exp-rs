@@ -680,6 +680,7 @@ sicnu_discover_tests(test_workbench_shutdown_policy)
 add_executable(test_provenance_section
   test_provenance_section.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/inspector_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/provenance_section.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp

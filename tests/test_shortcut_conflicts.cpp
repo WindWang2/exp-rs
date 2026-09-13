@@ -74,8 +74,9 @@ QVector<SequenceUse> collectSequenceUses( const QString &source )
         m = enumLit.globalMatch( lines.at( i ) );
         while ( m.hasNext() )
         {
-            const QString mods = m.captured( 1 );
-            const QString key = m.captured( 2 );
+            const QRegularExpressionMatch match = m.next();
+            const QString mods = match.captured( 1 );
+            const QString key = match.captured( 2 );
             const QString word = mods.at( 0 ).toUpper() + mods.mid( 1 ).toLower();
             uses.append( { QStringLiteral( "%1+%2" ).arg( word, key ).toUpper(), i + 1 } );
         }
