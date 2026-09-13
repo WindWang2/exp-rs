@@ -143,6 +143,10 @@ vendor/
 !.planning/prompt-command-hygiene-review/
 .planning/prompt-command-hygiene-review/*
 !.planning/prompt-command-hygiene-review/*.md
+# cloud-data-fabric-datacube-10: track planning notes (markdown only; logs stay local).
+!.planning/cloud-data-fabric-datacube-10/
+.planning/cloud-data-fabric-datacube-10/*
+!.planning/cloud-data-fabric-datacube-10/*.md
 .zcode/
 
 # IDE / editor / OS artifacts
