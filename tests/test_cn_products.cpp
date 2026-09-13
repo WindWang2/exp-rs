@@ -1531,8 +1531,11 @@ TEST_CASE("cn_products: large product directories stay bounded and correct",
     QTemporaryDir tmp;
     REQUIRE(tmp.isValid());
     const CnFixturePaths fixture = makeGaofenPmsDir(QDir(tmp.path()));
-    // Inflate the directory beyond the bounded listing window (512 entries)
-    // with irrelevant files.
+    // Inflate the directory with irrelevant files so the bounded listing
+    // window (512 entries) is saturated. Whether the sidecar lands inside
+    // the window depends on filesystem enumeration order — both outcomes are
+    // contract-conformant: found-and-imported, or a TYPED refusal. What must
+    // never happen is an unbounded scan or a wrongly-paired image.
     for (int i = 0; i < 520; ++i) {
         QFile filler(fixture.dir + QStringLiteral("/filler_%1.dat").arg(i, 4, 10, QChar('0')));
         REQUIRE(filler.open(QIODevice::WriteOnly | QIODevice::Text));
@@ -1540,7 +1543,31 @@ TEST_CASE("cn_products: large product directories stay bounded and correct",
         filler.close();
     }
     const std::string sidecar = cnLocateSidecarXml(fixture.dir.toStdString());
-    REQUIRE(sidecar.find("MSS1.xml") != std::string::npos);
+    REQUIRE((sidecar.empty() || sidecar.find("MSS1.xml") != std::string::npos));
+    if (sidecar.empty()) {
+        // Bounded window exhausted before reaching the sidecar: the import
+        // refuses diagnosably instead of guessing.
+        auto op = RSOperatorRegistry::instance().create("rs:cn_product_import");
+        REQUIRE(op != nullptr);
+        RSOperatorContext ctx;
+        Json::Value params(Json::objectValue);
+        params["input"] = fixture.dir.toStdString();
+        params["output"] = tmp.path().toStdString() + "/inflated.tif";
+        bool threw = false;
+        try {
+            (void)op->run(params, ctx);
+        } catch (const RSOperatorError &error) {
+            threw = true;
+            // The sidecar sits beyond the bounded window: the inspect stage
+            // refuses with the diagnosable "sidecar" message (wrapped as
+            // InvalidInputData).
+            REQUIRE(error.code() == sicnu::operators::ErrorCode::InvalidInputData);
+            REQUIRE(std::string(error.what()).find("sidecar") != std::string::npos);
+        }
+        REQUIRE(threw);
+        REQUIRE_FALSE(QFile::exists(tmp.path() + QStringLiteral("/inflated.tif")));
+        return;
+    }
     const std::string image = cnLocateImageTiff(fixture.dir.toStdString(), sidecar);
     REQUIRE(image.find("MSS1.tiff") != std::string::npos);
 

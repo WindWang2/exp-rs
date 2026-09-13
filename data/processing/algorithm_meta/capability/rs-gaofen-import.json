@@ -2,13 +2,11 @@
   "capability": {
     "applicability": {
       "land_cover": [
-        "植被",
-        "地表温度",
-        "积雪"
+        "任意地物"
       ],
       "scenes": [
-        "大区域低分辨率时序生产",
-        "全球产品本地化"
+        "高分系列数据处理入口",
+        "国内教学数据标准化导入"
       ]
     },
     "band_roles": {},
@@ -26,13 +24,13 @@
     "failure_modes": [
       {
         "code": "DATASET_NOT_FOUND",
-        "when": "HDF 文件缺失或损坏",
-        "remedy": "检查下载文件完整性"
+        "when": "产品目录缺少 sidecar XML 或测量 TIFF",
+        "remedy": "检查 CRESDA 产品包的 -MSS1.xml/-PAN1.xml 与同名 TIFF"
       },
       {
-        "code": "CRS_MISMATCH",
-        "when": "目标投影参数缺失",
-        "remedy": "显式指定目标 EPSG/WKT 与分辨率"
+        "code": "NOT_SUPPORTED",
+        "when": "输入为 GF-3/GF-4/GF-5 等未适配家族",
+        "remedy": "查看诊断原因；SAR/高光谱产品暂不支持"
       }
     ],
     "family": "io",
@@ -54,19 +52,15 @@
           "data_kind": "string",
           "name": "productId",
           "required": true
-        },
-        {
-          "data_kind": "integer",
-          "name": "tileH",
-          "required": true
-        },
-        {
-          "data_kind": "integer",
-          "name": "tileV",
-          "required": true
         }
       ],
       "parameters": [
+        {
+          "default": "false",
+          "name": "apply_calibration",
+          "required": false,
+          "type": "boolean"
+        },
         {
           "name": "bands",
           "required": false,
@@ -86,37 +80,38 @@
     },
     "limitations": [],
     "modality": [
-      "optical",
-      "thermal"
+      "optical"
     ],
     "operator_group": "data-formats",
     "prerequisites": [
-      "GDAL with HDF4 and/or HDF5 for NASA .hdf; GeoTIFF exports always work"
+      "Product directory with CRESDA sidecar XML and TIFF (offline)",
+      "离线可用：仅解析产品自带文件；大部分批次需另查发布定标表做 TOA 转换。"
     ],
     "schema_version": 2,
-    "summary": "MODIS 数据导入：读取 MODIS HDF 产品（MOD13Q1 等），完成重投影与定标缩放（scale/offset），输出标准栅格。",
+    "summary": "高分数据导入：读取 GF-1/2/6 PMS/WFV 与 GF-7 FWD/BWD L1A 产品包（CRESDA sidecar XML + TIFF），自动解析元数据、映射波段角色并标注太阳几何与定标系数。",
     "teaching_use": {
       "concepts": [
-        "HDF 格式",
-        "Sinusoidal 投影",
-        "scale/offset"
+        "CRESDA 产品结构",
+        "波段角色",
+        "辐射定标声明",
+        "太阳几何"
       ],
       "courses": [
         "遥感数据处理"
       ],
-      "exercise": "导入一年 MOD13Q1 NDVI 并重投影到研究区 UTM 网格。"
+      "exercise": "导入 GF-1 WFV 四波段影像并直接计算 NDVI（波段角色自动解析）。"
     }
   },
-  "description": "Import a MODIS HDF/GeoTIFF product into a multi-band GeoTIFF (with sinusoidal tile georeference when h/v known).",
-  "display_name": "MODIS Product Import",
-  "id": "rs:modis_import",
+  "description": "Import a Gaofen-1/2/6 L1A product (PMS/WFV) into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.",
+  "display_name": "Gaofen Product Import",
+  "id": "rs:gaofen_import",
   "input": "",
   "output": "raster",
   "schema_version": 2,
   "tags": [
-    "modis",
+    "gaofen",
+    "cn-satellite",
     "import",
-    "data-format",
-    "hdf"
+    "data-format"
   ]
 }

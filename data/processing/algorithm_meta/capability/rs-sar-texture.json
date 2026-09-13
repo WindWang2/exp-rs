@@ -1,177 +1,158 @@
 {
-  "capability" : 
-  {
-    "applicability" : 
-    {
-      "land_cover" : 
-      [
-        "\u57ce\u5e02",
-        "\u519c\u7530",
-        "\u68ee\u6797\uff08SAR\uff09"
+  "capability": {
+    "applicability": {
+      "land_cover": [
+        "城市",
+        "农田",
+        "森林（SAR）"
       ],
-      "scenes" : 
-      [
-        "SAR \u5206\u7c7b\u7279\u5f81\u589e\u5f3a",
-        "\u5efa\u7b51\u533a\u63d0\u53d6"
+      "scenes": [
+        "SAR 分类特征增强",
+        "建筑区提取"
       ]
     },
-    "band_roles" : {},
-    "crs" : 
-    {
-      "requires_projected" : false,
-      "requires_shared_grid" : false
+    "band_roles": {},
+    "crs": {
+      "requires_projected": false,
+      "requires_shared_grid": false
     },
-    "determinism" : 
-    {
-      "grade" : "tolerance",
-      "large_raster_safe" : true,
-      "memory_policy" : "streaming",
-      "side_effects" : false,
-      "stochastic" : false
+    "determinism": {
+      "grade": "tolerance",
+      "large_raster_safe": true,
+      "memory_policy": "streaming",
+      "side_effects": false,
+      "stochastic": false
     },
-    "failure_modes" : 
-    [
+    "failure_modes": [
       {
-        "code" : "INVALID_PARAMETER",
-        "remedy" : "\u7a97\u53e3\u53d6\u5947\u6570\u4e14\u5927\u4e8e 1",
-        "when" : "\u7a97\u53e3\u6216\u4f4d\u79fb\u53c2\u6570\u975e\u6cd5"
+        "code": "INVALID_PARAMETER",
+        "when": "窗口或位移参数非法",
+        "remedy": "窗口取奇数且大于 1"
       },
       {
-        "code" : "INSUFFICIENT_MEMORY",
-        "remedy" : "\u5206\u5e45\u5904\u7406\u6216\u51cf\u5c0f\u7a97\u53e3",
-        "when" : "\u8d85\u5927\u5f71\u50cf GLCM \u5168\u56fe\u8ba1\u7b97\u5185\u5b58\u8d85\u9650"
+        "code": "INSUFFICIENT_MEMORY",
+        "when": "超大影像 GLCM 全图计算内存超限",
+        "remedy": "分幅处理或减小窗口"
       }
     ],
-    "family" : "sar",
-    "io" : 
-    {
-      "inputs" : 
-      [
+    "family": "sar",
+    "io": {
+      "inputs": [
         {
-          "data_kind" : "raster",
-          "modality" : "sar",
-          "name" : "input",
-          "required" : true
+          "data_kind": "raster",
+          "modality": "sar",
+          "name": "input",
+          "required": true
         }
       ],
-      "outputs" : 
-      [
+      "outputs": [
         {
-          "data_kind" : "integer",
-          "name" : "bands",
-          "required" : true
+          "data_kind": "integer",
+          "name": "bands",
+          "required": true
         },
         {
-          "data_kind" : "string",
-          "name" : "measures",
-          "required" : true
+          "data_kind": "string",
+          "name": "measures",
+          "required": true
         },
         {
-          "data_kind" : "raster",
-          "name" : "output",
-          "required" : true
+          "data_kind": "raster",
+          "name": "output",
+          "required": true
         }
       ],
-      "parameters" : 
-      [
+      "parameters": [
         {
-          "default" : "1",
-          "name" : "band",
-          "required" : false,
-          "type" : "integer"
+          "default": "1",
+          "name": "band",
+          "required": false,
+          "type": "integer"
         },
         {
-          "default" : "0",
-          "enum" : 
-          [
+          "default": "0",
+          "enum": [
             "0",
             "45",
             "90",
             "135"
           ],
-          "name" : "directionDeg",
-          "required" : false,
-          "type" : "enum"
+          "name": "directionDeg",
+          "required": false,
+          "type": "enum"
         },
         {
-          "default" : "1",
-          "name" : "displacement",
-          "required" : false,
-          "type" : "integer"
+          "default": "1",
+          "name": "displacement",
+          "required": false,
+          "type": "integer"
         },
         {
-          "name" : "measures",
-          "required" : false,
-          "type" : "string"
+          "name": "measures",
+          "required": false,
+          "type": "string"
         },
         {
-          "name" : "output",
-          "required" : true,
-          "type" : "string"
+          "name": "output",
+          "required": true,
+          "type": "string"
         },
         {
-          "name" : "polarizations",
-          "required" : false,
-          "type" : "string"
+          "name": "polarizations",
+          "required": false,
+          "type": "string"
         },
         {
-          "default" : "16",
-          "name" : "quantLevels",
-          "required" : false,
-          "type" : "integer"
+          "default": "16",
+          "name": "quantLevels",
+          "required": false,
+          "type": "integer"
         },
         {
-          "name" : "sensor",
-          "required" : false,
-          "type" : "string"
+          "name": "sensor",
+          "required": false,
+          "type": "string"
         },
         {
-          "default" : "5",
-          "name" : "windowSize",
-          "required" : false,
-          "type" : "integer"
+          "default": "5",
+          "name": "windowSize",
+          "required": false,
+          "type": "integer"
         }
       ]
     },
-    "limitations" : 
-    [
+    "limitations": [
       "Windows containing NoData produce NaN in every measure.",
       "Quantization is equal-width per window, so measures are not directly comparable across windows with different dynamic ranges."
     ],
-    "modality" : 
-    [
+    "modality": [
       "sar"
     ],
-    "operator_group" : "sar",
-    "prerequisites" : 
-    [
+    "operator_group": "sar",
+    "prerequisites": [
       "Calibrated SAR intensity raster (rs:sar_calibrate first) so window statistics operate on physically scaled data.",
       "Each window is quantized to quantLevels equal-width bins spanning the window's [min, max]."
     ],
-    "schema_version" : 2,
-    "summary" : "SAR \u7eb9\u7406\u7279\u5f81\u63d0\u53d6\uff1a\u57fa\u4e8e GLCM \u7b49\u8ba1\u7b97\u65b9\u5dee/\u5bf9\u6bd4\u5ea6/\u71b5\u7b49\u7eb9\u7406\u91cf\uff0c\u8865\u5145\u540e\u5411\u6563\u5c04\u4e4b\u5916\u7684\u5730\u8868\u4fe1\u606f\u3002",
-    "teaching_use" : 
-    {
-      "concepts" : 
-      [
+    "schema_version": 2,
+    "summary": "SAR 纹理特征提取：基于 GLCM 等计算方差/对比度/熵等纹理量，补充后向散射之外的地表信息。",
+    "teaching_use": {
+      "concepts": [
         "GLCM",
-        "\u7eb9\u7406\u7279\u5f81"
+        "纹理特征"
       ],
-      "courses" : 
-      [
-        "\u5fae\u6ce2\u9065\u611f"
+      "courses": [
+        "微波遥感"
       ],
-      "exercise" : "\u63d0\u53d6 8 \u90bb\u57df GLCM \u5bf9\u6bd4\u5ea6\u4e0e\u71b5\uff0c\u8bc4\u4f30\u5176\u5bf9\u57ce\u4e2d\u6751\u8fb9\u754c\u7684\u523b\u753b\u80fd\u529b\u3002"
+      "exercise": "提取 8 邻域 GLCM 对比度与熵，评估其对城中村边界的刻画能力。"
     }
   },
-  "description" : "Compute GLCM (Haralick) texture measures over a sliding window of a SAR intensity raster; one Float32 output band per measure.",
-  "display_name" : "SAR GLCM Texture",
-  "id" : "rs:sar_texture",
-  "input" : "raster",
-  "output" : "raster",
-  "schema_version" : 2,
-  "tags" : 
-  [
+  "description": "Compute GLCM (Haralick) texture measures over a sliding window of a SAR intensity raster; one Float32 output band per measure.",
+  "display_name": "SAR GLCM Texture",
+  "id": "rs:sar_texture",
+  "input": "raster",
+  "output": "raster",
+  "schema_version": 2,
+  "tags": [
     "sar",
     "texture",
     "glcm"

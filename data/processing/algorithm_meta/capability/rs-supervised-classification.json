@@ -1,141 +1,129 @@
 {
-  "capability" : 
-  {
-    "applicability" : 
-    {
-      "land_cover" : 
-      [
-        "\u519c\u7530",
-        "\u68ee\u6797",
-        "\u57ce\u5e02",
-        "\u6c34\u4f53"
+  "capability": {
+    "applicability": {
+      "land_cover": [
+        "农田",
+        "森林",
+        "城市",
+        "水体"
       ],
-      "scenes" : 
-      [
-        "\u571f\u5730\u8986\u76d6/\u5229\u7528\u5236\u56fe",
-        "\u4f5c\u7269\u5206\u5e03\u5236\u56fe"
+      "scenes": [
+        "土地覆盖/利用制图",
+        "作物分布制图"
       ]
     },
-    "band_roles" : {},
-    "crs" : 
-    {
-      "requires_projected" : false,
-      "requires_shared_grid" : false
+    "band_roles": {},
+    "crs": {
+      "requires_projected": false,
+      "requires_shared_grid": false
     },
-    "determinism" : 
-    {
-      "grade" : "bit_exact",
-      "large_raster_safe" : false,
-      "memory_policy" : "full_raster",
-      "side_effects" : false,
-      "stochastic" : false
+    "determinism": {
+      "grade": "bit_exact",
+      "large_raster_safe": false,
+      "memory_policy": "full_raster",
+      "side_effects": false,
+      "stochastic": false
     },
-    "failure_modes" : 
-    [
+    "failure_modes": [
       {
-        "code" : "TRAINING_INVALID",
-        "remedy" : "\u68c0\u67e5\u8bad\u7ec3\u6837\u672c\u8986\u76d6\u6240\u6709\u7c7b\u522b\u4e14\u6bcf\u7c7b\u6709\u8db3\u591f\u6837\u672c",
-        "when" : "\u8bad\u7ec3\u6837\u672c\u7f3a\u5931\u3001\u7c7b\u95f4\u4e0d\u5e73\u8861\u6216\u7c7b\u522b\u6570\u4e0d\u4e00\u81f4"
+        "code": "TRAINING_INVALID",
+        "when": "训练样本缺失、类间不平衡或类别数不一致",
+        "remedy": "检查训练样本覆盖所有类别且每类有足够样本"
       },
       {
-        "code" : "MODEL_INCOMPATIBLE",
-        "remedy" : "\u8ba9\u6a21\u578b\u4e0e\u7279\u5f81\u6ce2\u6bb5\u96c6\u4e00\u81f4\uff0c\u6216\u7528 rs:feature_stack \u91cd\u6392\u7279\u5f81",
-        "when" : "\u8f93\u5165\u6ce2\u6bb5\u6570\u4e0e\u6a21\u578b\u671f\u671b\u7279\u5f81\u6570\u4e0d\u7b26"
+        "code": "MODEL_INCOMPATIBLE",
+        "when": "输入波段数与模型期望特征数不符",
+        "remedy": "让模型与特征波段集一致，或用 rs:feature_stack 重排特征"
       }
     ],
-    "family" : "classification",
-    "io" : 
-    {
-      "inputs" : 
-      [
+    "family": "classification",
+    "io": {
+      "inputs": [
         {
-          "data_kind" : "raster",
-          "name" : "input",
-          "required" : true
+          "data_kind": "raster",
+          "name": "input",
+          "required": true
         },
         {
-          "data_kind" : "vector",
-          "name" : "training",
-          "required" : false
+          "data_kind": "vector",
+          "name": "training",
+          "required": false
         }
       ],
-      "outputs" : 
-      [
+      "outputs": [
         {
-          "data_kind" : "integer",
-          "name" : "classes",
-          "required" : true
+          "data_kind": "integer",
+          "name": "classes",
+          "required": true
         },
         {
-          "data_kind" : "string",
-          "name" : "imbalanceWarnings",
-          "required" : true
+          "data_kind": "string",
+          "name": "imbalanceWarnings",
+          "required": true
         },
         {
-          "data_kind" : "numeric",
-          "name" : "kappa",
-          "required" : true
+          "data_kind": "numeric",
+          "name": "kappa",
+          "required": true
         },
         {
-          "data_kind" : "numeric",
-          "name" : "meanConfidence",
-          "required" : true
+          "data_kind": "numeric",
+          "name": "meanConfidence",
+          "required": true
         },
         {
-          "data_kind" : "string",
-          "name" : "mode",
-          "required" : true
+          "data_kind": "string",
+          "name": "mode",
+          "required": true
         },
         {
-          "data_kind" : "raster",
-          "file_format" : "tif",
-          "name" : "output",
-          "required" : true
+          "data_kind": "raster",
+          "file_format": "tif",
+          "name": "output",
+          "required": true
         },
         {
-          "data_kind" : "numeric",
-          "name" : "overallAccuracy",
-          "required" : true
+          "data_kind": "numeric",
+          "name": "overallAccuracy",
+          "required": true
         },
         {
-          "data_kind" : "string",
-          "name" : "perClassMetrics",
-          "required" : true
+          "data_kind": "string",
+          "name": "perClassMetrics",
+          "required": true
         },
         {
-          "data_kind" : "integer",
-          "name" : "trainSamples",
-          "required" : true
+          "data_kind": "integer",
+          "name": "trainSamples",
+          "required": true
         },
         {
-          "data_kind" : "string",
-          "name" : "trainSamplesByClass",
-          "required" : true
+          "data_kind": "string",
+          "name": "trainSamplesByClass",
+          "required": true
         }
       ],
-      "parameters" : 
-      [
+      "parameters": [
         {
-          "name" : "bands",
-          "required" : false,
-          "type" : "integer"
+          "name": "bands",
+          "required": false,
+          "type": "integer"
         },
         {
-          "default" : "class_id",
-          "name" : "classField",
-          "required" : false,
-          "type" : "string"
+          "default": "class_id",
+          "name": "classField",
+          "required": false,
+          "type": "string"
         },
         {
-          "default" : "5000",
-          "name" : "maxSamplesPerClass",
-          "required" : false,
-          "type" : "integer"
+          "default": "5000",
+          "name": "maxSamplesPerClass",
+          "required": false,
+          "type": "integer"
         },
         {
-          "default" : "svm",
-          "enum" : 
-          [
+          "default": "svm",
+          "enum": [
             "svm",
             "normal_bayes",
             "rf",
@@ -144,96 +132,90 @@
             "min_distance",
             "mahalanobis"
           ],
-          "name" : "method",
-          "required" : false,
-          "type" : "enum"
+          "name": "method",
+          "required": false,
+          "type": "enum"
         },
         {
-          "name" : "modelIn",
-          "required" : false,
-          "type" : "string"
+          "name": "modelIn",
+          "required": false,
+          "type": "string"
         },
         {
-          "name" : "modelOut",
-          "required" : false,
-          "type" : "string"
+          "name": "modelOut",
+          "required": false,
+          "type": "string"
         },
         {
-          "name" : "output",
-          "required" : true,
-          "type" : "string"
+          "name": "output",
+          "required": true,
+          "type": "string"
         },
         {
-          "name" : "probabilityOutput",
-          "required" : false,
-          "type" : "string"
+          "name": "probabilityOutput",
+          "required": false,
+          "type": "string"
         },
         {
-          "default" : "true",
-          "name" : "scale",
-          "required" : false,
-          "type" : "boolean"
+          "default": "true",
+          "name": "scale",
+          "required": false,
+          "type": "boolean"
         },
         {
-          "default" : "42",
-          "name" : "seed",
-          "required" : false,
-          "type" : "integer"
+          "default": "42",
+          "name": "seed",
+          "required": false,
+          "type": "integer"
         },
         {
-          "default" : "0",
-          "name" : "testSplit",
-          "required" : false,
-          "type" : "numeric"
+          "default": "0",
+          "name": "testSplit",
+          "required": false,
+          "type": "numeric"
         }
       ]
     },
-    "limitations" : [],
-    "modality" : 
-    [
+    "limitations": [],
+    "modality": [
       "optical",
       "sar",
       "multimodal"
     ],
-    "operator_group" : "classification",
-    "prerequisites" : 
-    [
+    "operator_group": "classification",
+    "prerequisites": [
       "Train mode: training polygons must overlap the raster",
       "Predict-only: modelIn must match method and band set",
-      "\u9700\u8981\u6807\u6ce8\u8bad\u7ec3\u6570\u636e\uff1b\u8f93\u5165\u7279\u5f81\u5efa\u8bae\u5148\u7edf\u4e00\u7f51\u683c\u4e0e\u91cf\u7eb2\u3002"
+      "需要标注训练数据；输入特征建议先统一网格与量纲。"
     ],
-    "schema_version" : 2,
-    "summary" : "\u76d1\u7763\u5206\u7c7b\uff1a\u57fa\u4e8e\u8bad\u7ec3\u6837\u672c\uff08\u968f\u673a\u68ee\u6797/ SVM \u7b49\u6309 model \u53c2\u6570\uff09\u5bf9\u5f71\u50cf\u9010\u50cf\u5143\u5206\u7c7b\uff0c\u8f93\u51fa\u7c7b\u522b\u56fe\u4e0e\u7cbe\u5ea6\u62a5\u544a\u3002",
-    "teaching_use" : 
-    {
-      "concepts" : 
-      [
-        "\u76d1\u7763\u5206\u7c7b",
-        "\u8bad\u7ec3\u6837\u672c",
-        "\u6df7\u6dc6\u77e9\u9635"
+    "schema_version": 2,
+    "summary": "监督分类：基于训练样本（随机森林/ SVM 等按 model 参数）对影像逐像元分类，输出类别图与精度报告。",
+    "teaching_use": {
+      "concepts": [
+        "监督分类",
+        "训练样本",
+        "混淆矩阵"
       ],
-      "courses" : 
-      [
-        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406",
-        "\u6a21\u5f0f\u8bc6\u522b"
+      "courses": [
+        "遥感数字图像处理",
+        "模式识别"
       ],
-      "exercise" : "\u7528 5 \u7c7b\u8bad\u7ec3\u6837\u672c\u5b8c\u6210\u7814\u7a76\u533a\u571f\u5730\u8986\u76d6\u5206\u7c7b\uff0c\u5e76\u4ee5 30% \u72ec\u7acb\u6837\u672c\u8bc4\u4ef7\u603b\u4f53\u7cbe\u5ea6\u3002"
+      "exercise": "用 5 类训练样本完成研究区土地覆盖分类，并以 30% 独立样本评价总体精度。"
     }
   },
-  "description" : "Train or apply SVM/NormalBayes classification on multi-band rasters.",
-  "display_name" : "Supervised Classification",
-  "gpu" : false,
-  "id" : "rs:supervised_classification",
-  "input" : "raster",
-  "notes" : "NormalBayes / SVM / KMeans with cross-validation, per-class metrics and probability outputs. Model sidecar records features and validation results for compatibility checks.",
-  "output" : "raster",
-  "schema_version" : 2,
-  "tags" : 
-  [
+  "description": "Train or apply SVM/NormalBayes classification on multi-band rasters.",
+  "display_name": "Supervised Classification",
+  "gpu": false,
+  "id": "rs:supervised_classification",
+  "input": "raster",
+  "notes": "NormalBayes / SVM / KMeans with cross-validation, per-class metrics and probability outputs. Model sidecar records features and validation results for compatibility checks.",
+  "output": "raster",
+  "schema_version": 2,
+  "tags": [
     "supervised",
     "classification",
     "svm",
     "model"
   ],
-  "task" : "classification"
+  "task": "classification"
 }

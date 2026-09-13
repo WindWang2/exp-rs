@@ -3,12 +3,12 @@
     "applicability": {
       "land_cover": [
         "植被",
-        "地表温度",
-        "积雪"
+        "水体",
+        "灾区"
       ],
       "scenes": [
-        "大区域低分辨率时序生产",
-        "全球产品本地化"
+        "环境减灾数据处理入口",
+        "灾区快速 NDVI/水体提取"
       ]
     },
     "band_roles": {},
@@ -26,13 +26,13 @@
     "failure_modes": [
       {
         "code": "DATASET_NOT_FOUND",
-        "when": "HDF 文件缺失或损坏",
-        "remedy": "检查下载文件完整性"
+        "when": "sidecar XML 或 TIFF 缺失",
+        "remedy": "检查 HJ1A/HJ1B/HJ2A/HJ2B-CCD 命名产品包完整性"
       },
       {
-        "code": "CRS_MISMATCH",
-        "when": "目标投影参数缺失",
-        "remedy": "显式指定目标 EPSG/WKT 与分辨率"
+        "code": "NOT_SUPPORTED",
+        "when": "HJ-1 IRS 或 HJ-2 HSI 载荷不支持",
+        "remedy": "仅支持 CCD 光学相机产品"
       }
     ],
     "family": "io",
@@ -54,19 +54,15 @@
           "data_kind": "string",
           "name": "productId",
           "required": true
-        },
-        {
-          "data_kind": "integer",
-          "name": "tileH",
-          "required": true
-        },
-        {
-          "data_kind": "integer",
-          "name": "tileV",
-          "required": true
         }
       ],
       "parameters": [
+        {
+          "default": "false",
+          "name": "apply_calibration",
+          "required": false,
+          "type": "boolean"
+        },
         {
           "name": "bands",
           "required": false,
@@ -86,37 +82,36 @@
     },
     "limitations": [],
     "modality": [
-      "optical",
-      "thermal"
+      "optical"
     ],
     "operator_group": "data-formats",
     "prerequisites": [
-      "GDAL with HDF4 and/or HDF5 for NASA .hdf; GeoTIFF exports always work"
+      "Product directory with CRESDA sidecar XML and TIFF (offline)"
     ],
     "schema_version": 2,
-    "summary": "MODIS 数据导入：读取 MODIS HDF 产品（MOD13Q1 等），完成重投影与定标缩放（scale/offset），输出标准栅格。",
+    "summary": "环境减灾 CCD 数据导入：读取 HJ-1A/1B CCD 与 HJ-2A/B CCD L1A 产品，映射 B1–B4 波段角色并标注声明元数据。",
     "teaching_use": {
       "concepts": [
-        "HDF 格式",
-        "Sinusoidal 投影",
-        "scale/offset"
+        "HJ CCD 产品结构",
+        "波段角色",
+        "16m/30m 分辨率"
       ],
       "courses": [
         "遥感数据处理"
       ],
-      "exercise": "导入一年 MOD13Q1 NDVI 并重投影到研究区 UTM 网格。"
+      "exercise": "导入 HJ-1A CCD 四波段并计算大区域 NDVI。"
     }
   },
-  "description": "Import a MODIS HDF/GeoTIFF product into a multi-band GeoTIFF (with sinusoidal tile georeference when h/v known).",
-  "display_name": "MODIS Product Import",
-  "id": "rs:modis_import",
+  "description": "Import a HJ-1A/1B CCD L1A product into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.",
+  "display_name": "Huanjing CCD Product Import",
+  "id": "rs:hj_import",
   "input": "",
   "output": "raster",
   "schema_version": 2,
   "tags": [
-    "modis",
+    "hj-1",
+    "cn-satellite",
     "import",
-    "data-format",
-    "hdf"
+    "data-format"
   ]
 }
