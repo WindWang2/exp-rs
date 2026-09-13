@@ -132,9 +132,15 @@ TEST_CASE( "whittakerSmoothRobust: a spike is damped more than plain smoothing",
   REQUIRE( robust[15] < plain[15] );           // spike pulled down harder
   REQUIRE( robust[0] == Approx( 5.0f ).margin( 0.5f ) );
   REQUIRE( robust[29] == Approx( 5.0f ).margin( 0.5f ) );
-  // NaN inputs stay NaN in the output (weight 0, never fabricated data).
+  // A gap is bridged by the penalty (the documented whittakerSmooth w=0
+  // semantics the robust variant reuses); the bridged value stays near the
+  // data level, and an all-NaN series produces an all-NaN result.
   std::vector<float> gapped{ kNan, 1.0f, 1.0f, 1.0f };
   const std::vector<float> out = whittakerSmoothRobust( gapped, {}, 5.0, 2 );
-  REQUIRE( std::isnan( out[0] ) );
-  REQUIRE( std::isfinite( out[1] ) );
+  REQUIRE( std::isfinite( out[0] ) );
+  REQUIRE( out[0] < 2.0f );
+  const std::vector<float> allNan( 5, kNan );
+  const std::vector<float> refused = whittakerSmoothRobust( allNan, {}, 5.0, 2 );
+  for ( float v : refused )
+    REQUIRE( std::isnan( v ) );
 }

@@ -206,9 +206,12 @@ TEST_CASE( "temporal_regularize: 10-day calendar with linear interpolation E2E",
 
     const auto validCount = readBand( fx.filePath( "reg.tif" ), 5 );
     const auto filledCount = readBand( fx.filePath( "reg.tif" ), 6 );
-    REQUIRE( validCount[0] == Approx( 1 ) ); // linear: one observation on-point
+    // valid_count sums per-point contributions over the calendar: pixel 0
+    // sits on an observation at every point (4 × 1), pixel 1 interpolates
+    // at t=10 (2 anchors) and sits on observations elsewhere.
+    REQUIRE( validCount[0] == Approx( 4 ) );
     REQUIRE( filledCount[0] == Approx( 0 ) );
-    REQUIRE( validCount[1] == Approx( 1 ) );
+    REQUIRE( validCount[1] == Approx( 5 ) ); // 1+2+1+1
     REQUIRE( filledCount[1] == Approx( 1 ) ); // t=10 pixel 1 is synthetic
 }
 
@@ -342,9 +345,13 @@ TEST_CASE( "temporal_monitor accepts a scenes array (T-1 regression)",
     const Json::Value result = runOp( "rs:temporal_monitor", params );
     REQUIRE( result["sceneCount"].asInt() == 4 );
     REQUIRE( bandCount( fx.filePath( "monitor.tif" ) ) == 3 );
-    // Pixel 0 jumps 2 → 9 (persistent shift); pixel 1 ramps gently.
-    const auto cusum = readBand( fx.filePath( "monitor.tif" ), 1 );
-    REQUIRE( cusum[0] > cusum[1] );
+    // The FINAL CUSUM S is ~0 for any series standardized against its own
+    // mean; the informative band is max|S_t| — pixel 0 (2 → 9 jump at the
+    // end) accumulates a larger excursion than pixel 1 (gentle ramp).
+    const auto finalS = readBand( fx.filePath( "monitor.tif" ), 1 );
+    const auto maxAbs = readBand( fx.filePath( "monitor.tif" ), 2 );
+    REQUIRE( std::abs( finalS[0] ) < 1.0 ); // sums of z cancel
+    REQUIRE( maxAbs[0] > maxAbs[1] );
 }
 
 // ----------------------------------------------------- extract regions ----
@@ -379,8 +386,8 @@ TEST_CASE( "temporal_extract_regions: point + polygon over 3 dates E2E",
     poly["id"] = "field";
     Json::Value coords( Json::arrayValue );
     const double x0 = 500000.0 + 30.0, x1 = 500000.0 + 60.0;
-    const double yTop = 4500000.0 - 30.0, yBot = 4500000.0 - 60.0;
-    // 1×1 pixel polygon over col 1, row 0.
+    const double yTop = 4500000.0, yBot = 4500000.0 - 30.0;
+    // 1×1 pixel polygon over col 1, row 0 (the grid is 2×1).
     for ( const auto &[px, py] :
           { std::pair{x0, yTop}, { x1, yTop }, { x1, yBot }, { x0, yBot } } )
     {

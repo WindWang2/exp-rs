@@ -32,6 +32,8 @@ using temporal::TemporalTileReader;
 
 namespace
 {
+constexpr int kDefaultTileSize = 256;
+constexpr int kTypicalSceneEstimate = 12;
 constexpr int kDefaultMaxRegions = 100000;
 constexpr size_t kDefaultMedianBudgetFloats = 0; // features need no medians
 constexpr size_t kMaxSeriesCells = 50ULL * 1000ULL * 1000ULL; // R×T cell guard
@@ -425,7 +427,6 @@ Json::Value RsTemporalRegionFeaturesOperator::run( const Json::Value &params, RS
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "cannot open output CSV: " + outputPath );
   QTextStream ts( &outFile );
-  ts.setCodec( "UTF-8" );
   ts << "region_id";
   for ( const auto &name : featureNames )
     ts << ',' << name;

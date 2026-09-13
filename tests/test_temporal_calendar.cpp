@@ -52,7 +52,7 @@ TEST_CASE( "buildRegularCalendar: days cadence covers the closed range", "[tempo
   // A range starting mid-step anchors at the first grid point >= start.
   const std::vector<CalendarPoint> clipped =
     buildRegularCalendar( "2026-01-01", 1.0, 20.0, spec );
-  REQUIRE( clipped.size() == 2 );
+  REQUIRE( clipped.size() == 1 ); // only t = 16 lies inside [1, 20]
   REQUIRE( clipped[0].tDays == Approx( 16.0 ) );
 
   // Inverted / degenerate ranges are empty (refusal, never a guess).
@@ -143,15 +143,22 @@ TEST_CASE( "regularizeSeries nearest + window_mean respect the window radius", "
 
   RegularizeOptions options;
   options.method = RegularizeMethod::Nearest;
-  options.maxWindowDays = 15.0;
+  options.maxWindowDays = 14.0;
   const RegularizedSeries nearest = regularizeSeries( series, tDays, calendar, options );
-  REQUIRE( nearest.points[0].value == Approx( 10.0f ) ); // distance 10 <= 15
-  REQUIRE( isNan( nearest.points[1].value ) );           // distances 15/15? -> tie prefers earlier? 25-0=25 > 15
+  REQUIRE( nearest.points[0].value == Approx( 10.0f ) ); // distance 10 <= 14
+  REQUIRE( isNan( nearest.points[1].value ) );           // distances 25 / 15: both out
+
+  options.maxWindowDays = 15.0;
+  const RegularizedSeries nearest2 = regularizeSeries( series, tDays, calendar, options );
+  // t=25: left distance 25 (out), right 15 (in) -> nearest-observation fill.
+  REQUIRE( nearest2.points[1].value == Approx( 20.0f ) );
+  REQUIRE( nearest2.points[1].filled == true );
+  REQUIRE( nearest2.points[1].validObservations == 1 );
 
   options.maxWindowDays = 25.0;
-  const RegularizedSeries nearest2 = regularizeSeries( series, tDays, calendar, options );
-  // t=25: left distance 25, right 15 -> right wins.
-  REQUIRE( nearest2.points[1].value == Approx( 20.0f ) );
+  const RegularizedSeries nearest3 = regularizeSeries( series, tDays, calendar, options );
+  // t=25: left 25, right 15 -> both inside; right is closer and wins.
+  REQUIRE( nearest3.points[1].value == Approx( 20.0f ) );
 
   options.method = RegularizeMethod::WindowMean;
   options.maxWindowDays = 25.0;

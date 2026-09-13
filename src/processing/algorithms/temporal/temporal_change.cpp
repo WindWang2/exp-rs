@@ -228,6 +228,66 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
       break;
   }
 
+  // Backward pruning: the residual-driven search can propose splits that
+  // only explain the GLOBAL fit's mis-fit (a false break). Remove, greedily
+  // and deterministically, any break whose removal raises the total SSE by
+  // less than minImprovement × SSE(kept) — the same relative-gain rule the
+  // forward split used, applied in reverse.
+  {
+    auto totalSseFor = [&]( const std::vector<int> &cuts ) {
+      double sse = 0.0;
+      int prev = 0;
+      for ( int b : cuts )
+      {
+        double s = 0.0;
+        fitSegment( y, tDays, prev, b, harm, weights, nullptr, &s, nullptr,
+                    nullptr, nullptr );
+        sse += std::max( 0.0, s );
+        prev = b;
+      }
+      double s = 0.0;
+      fitSegment( y, tDays, prev, n, harm, weights, nullptr, &s, nullptr,
+                  nullptr, nullptr );
+      return sse + std::max( 0.0, s );
+    };
+    std::vector<int> cuts = breakIndices;
+    while ( !cuts.empty() )
+    {
+      const double sseWith = totalSseFor( cuts );
+      double bestIncrease = 0.0;
+      size_t bestIdx = cuts.size();
+      for ( size_t k = 0; k < cuts.size(); ++k )
+      {
+        std::vector<int> without( cuts );
+        without.erase( without.begin() + static_cast<std::ptrdiff_t>( k ) );
+        const double increase = totalSseFor( without ) - sseWith;
+        if ( bestIdx == cuts.size() || increase < bestIncrease )
+        {
+          bestIncrease = increase;
+          bestIdx = k;
+        }
+      }
+      // Drop the least-missed break while its removal is within the same
+      // relative-improvement budget the forward pass demanded.
+      if ( bestIdx < cuts.size() && bestIncrease <= minImprovement * sseWith )
+        cuts.erase( cuts.begin() + static_cast<std::ptrdiff_t>( bestIdx ) );
+      else
+        break;
+    }
+    if ( cuts.size() != breakIndices.size() )
+    {
+      breakIndices = cuts;
+      segments.clear();
+      int start = 0;
+      for ( int b : breakIndices )
+      {
+        segments.push_back( { start, b } );
+        start = b;
+      }
+      segments.push_back( { start, n } );
+    }
+  }
+
   // Final per-segment refit (optionally robust IRLS) + stats.
   double totalSse = 0.0;
   double totalSst = 0.0;

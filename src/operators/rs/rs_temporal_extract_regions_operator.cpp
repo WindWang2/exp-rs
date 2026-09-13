@@ -28,6 +28,8 @@ using temporal::TemporalTileReader;
 
 namespace
 {
+constexpr int kDefaultTileSize = 256;
+constexpr int kTypicalSceneEstimate = 12;
 constexpr int kDefaultMaxRegions = 100000;
 constexpr size_t kDefaultMedianBudgetFloats = 16ULL * 1024ULL * 1024ULL; // 64 MB
 constexpr size_t kMaxWindowPixelsPerRegion = 4ULL * 1024ULL * 1024ULL;   // 4 M pixels
@@ -286,7 +288,6 @@ Json::Value RsTemporalExtractRegionsOperator::run( const Json::Value &params, RS
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "cannot open output CSV: " + outputPath );
   QTextStream ts( &outFile );
-  ts.setCodec( "UTF-8" );
   ts << "region_id,date,t_days,mean,min,max,stddev,median,valid_count\n";
 
   std::vector<float> window;

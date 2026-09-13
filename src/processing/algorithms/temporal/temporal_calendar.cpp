@@ -105,9 +105,45 @@ RegularizedSeries regularizeSeries( const float *series, int nObs,
 {
   RegularizedSeries out;
   const int nCal = static_cast<int>( calendar.size() );
-  out.points.assign( static_cast<size_t>( nCal ), RegularizedPoint{} );
+  // Every point starts refused (NaN): methods fill values in explicitly, so
+  // an untouched point can never masquerade as a 0 observation.
+  RegularizedPoint refused;
+  refused.value = kNan;
+  out.points.assign( static_cast<size_t>( nCal ), refused );
   if ( nCal == 0 || nObs <= 0 || series == nullptr || tDays == nullptr )
     return out;
+
+  // Observed span (finite samples only): every method refuses outside it.
+  double firstFiniteDay = 0.0;
+  double lastFiniteDay = 0.0;
+  bool haveSpan = false;
+  for ( int i = 0; i < nObs; ++i )
+  {
+    if ( !std::isfinite( series[i] ) )
+      continue;
+    if ( !haveSpan )
+    {
+      firstFiniteDay = tDays[i];
+      haveSpan = true;
+    }
+    lastFiniteDay = tDays[i];
+  }
+  if ( !haveSpan )
+    return out;
+
+  // Nearest FINITE anchor at or before / after @a t (-1 / nObs when none).
+  auto finiteLeft = [&]( int pos ) {
+    for ( int i = pos; i >= 0; --i )
+      if ( std::isfinite( series[i] ) )
+        return i;
+    return -1;
+  };
+  auto finiteRight = [&]( int pos ) {
+    for ( int i = pos; i < nObs; ++i )
+      if ( std::isfinite( series[i] ) )
+        return i;
+    return nObs;
+  };
 
   if ( options.method == RegularizeMethod::Whittaker )
   {
@@ -172,8 +208,12 @@ RegularizedSeries regularizeSeries( const float *series, int nObs,
       for ( int i = 0; i < len; ++i )
       {
         const int node = lo + i;
-        if ( node < firstObsNode || node > lastObsNode )
-          continue; // outside the observed span of the whole grid: refuse
+        // Refuse outside the OBSERVED DAY SPAN (not the mapped-node span):
+        // a node before the first / after the last finite observation has no
+        // data support even when the penalty would happily extend there.
+        if ( calendar[static_cast<size_t>( node )].tDays < firstFiniteDay ||
+             calendar[static_cast<size_t>( node )].tDays > lastFiniteDay )
+          continue;
         const float v = smoothed[static_cast<size_t>( i )];
         auto &dst = out.points[static_cast<size_t>( node )];
         dst.value = v;
@@ -225,17 +265,17 @@ RegularizedSeries regularizeSeries( const float *series, int nObs,
   {
     const double t = calendar[static_cast<size_t>( c )].tDays;
     auto &dst = out.points[static_cast<size_t>( c )];
+    if ( t < firstFiniteDay || t > lastFiniteDay )
+      continue; // extrapolation refused for every method
 
-    const int right = lowerBoundObs( tDays, nObs, t ) + 1; // first tDays > t
-    const int left = right - 1;                            // last tDays <= t
+    const int left = finiteLeft( lowerBoundObs( tDays, nObs, t ) );
+    const int right = finiteRight( lowerBoundObs( tDays, nObs, t ) + 1 );
 
     if ( options.method == RegularizeMethod::Nearest )
     {
       const double radius = options.maxWindowDays;
-      const bool hasLeft = left >= 0 && std::isfinite( series[left] ) &&
-                           ( t - tDays[left] ) <= radius;
-      const bool hasRight = right < nObs && std::isfinite( series[right] ) &&
-                            ( tDays[right] - t ) <= radius;
+      const bool hasLeft = left >= 0 && ( t - tDays[left] ) <= radius;
+      const bool hasRight = right < nObs && ( tDays[right] - t ) <= radius;
       if ( hasLeft && hasRight )
       {
         // Tie prefers the earlier observation (left on equal distance).
@@ -244,6 +284,7 @@ RegularizedSeries regularizeSeries( const float *series, int nObs,
         const int pick = dr < dl ? right : left;
         dst.value = series[pick];
         dst.validObservations = 1;
+        dst.filled = std::fabs( tDays[pick] - t ) >= 1e-9;
       }
       else if ( hasLeft )
       {
@@ -285,9 +326,19 @@ RegularizedSeries regularizeSeries( const float *series, int nObs,
     }
     else // Linear
     {
-      const bool hasLeft = left >= 0 && std::isfinite( series[left] );
-      const bool hasRight = right < nObs && std::isfinite( series[right] );
-      if ( hasLeft && hasRight )
+      const bool hasLeft = left >= 0;
+      const bool hasRight = right < nObs;
+      if ( hasLeft && std::fabs( t - tDays[left] ) < 1e-9 )
+      {
+        dst.value = series[left]; // exact observation, no interpolation
+        dst.validObservations = 1;
+      }
+      else if ( hasRight && std::fabs( tDays[right] - t ) < 1e-9 )
+      {
+        dst.value = series[right];
+        dst.validObservations = 1;
+      }
+      else if ( hasLeft && hasRight )
       {
         const double t0 = tDays[left];
         const double t1 = tDays[right];
@@ -297,27 +348,13 @@ RegularizedSeries regularizeSeries( const float *series, int nObs,
         {
           const double a = ( t - t0 ) / ( t1 - t0 );
           dst.value = static_cast<float>( v0 + a * ( v1 - v0 ) );
-          dst.validObservations = 2;
-          // Interpolated between two observed instants counts as synthetic
-          // only when no observation sits at the grid point itself.
-          dst.filled = ( t0 != t );
         }
         else
         {
           dst.value = v0; // duplicate instants bracket degenerately
-          dst.validObservations = 2;
-          dst.filled = ( t0 != t );
         }
-      }
-      else if ( hasLeft && std::fabs( t - tDays[left] ) < 1e-9 )
-      {
-        dst.value = series[left]; // exact observation, no interpolation
-        dst.validObservations = 1;
-      }
-      else if ( hasRight && std::fabs( tDays[right] - t ) < 1e-9 )
-      {
-        dst.value = series[right];
-        dst.validObservations = 1;
+        dst.validObservations = 2;
+        dst.filled = true;
       }
     }
 

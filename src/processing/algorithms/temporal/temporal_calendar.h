@@ -8,10 +8,11 @@
 //     epoch (never array indices); the grid is generated from the first to
 //     the last valid acquisition instant, inclusive.
 //   - A sample is valid iff finite (the TemporalTileReader already collapsed
-//     NoData / QA-masked / non-finite values to NaN before this kernel).
-//   - Calendar points BEFORE the first / AFTER the last valid observation are
-//     never extrapolated: they stay NaN for every method (refusal, not a
-//     guess — the gap-fill contract carried forward).
+//     NoData / QA-masked / non-finite values to NaN before this kernel); NaN
+//     observations are transparent — anchors and windows skip them.
+//   - Calendar points BEFORE the first / AFTER the last finite observation
+//     are never produced: every method refuses them (NaN), a carried-forward
+//     gap-fill contract, not a guessing heuristic.
 //   - Deterministic: fixed evaluation order, explicit tie-breaks (ties prefer
 //     the earlier observation). Bit-exact for nearest / window_mean / linear;
 //     whittaker is tolerance-grade (banded solve, documented 1e-4) like

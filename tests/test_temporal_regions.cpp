@@ -151,7 +151,8 @@ TEST_CASE( "RegionDateReducer: statistics and median budget degradation", "[temp
   REQUIRE( r0.mean == Approx( 4.0 ) );
   REQUIRE( r0.min == Approx( 1.0 ) );
   REQUIRE( r0.max == Approx( 10.0 ) );
-  REQUIRE( r0.stddev == Approx( std::sqrt( ( 9.0 + 1.0 + 1.0 + 36.0 ) / 4.0 ) ) );
+  // Population variance of {1,2,3,10} about mean 4: (9+4+1+36)/4.
+  REQUIRE( r0.stddev == Approx( std::sqrt( ( 9.0 + 4.0 + 1.0 + 36.0 ) / 4.0 ) ) );
   REQUIRE( r0.median == Approx( 2.5f ) );
 
   const auto &r1 = reducer.stats( 1 );
