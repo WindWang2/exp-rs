@@ -35,11 +35,11 @@
 
 using namespace sicnu::geo;
 using sicnu::geo::testsupport::HttpRangeServer;
+using sicnu::geo::testsupport::ServerBehavior;
 
 // ADR 0146: never die by timeout when the loopback transport is missing —
 // report `sicnu-skip: <reason>` + exit 77 instead.
 SICNU_OFFLINE_GUARD()
-using sicnu::geo::testsupport::ServerBehavior;
 
 namespace
 {

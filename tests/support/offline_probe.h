@@ -79,6 +79,27 @@ inline bool loopbackProxyExempted()
   return false;
 }
 
+/// Platform-agnostic socket/poll shims for the bounded probe. Windows
+/// exposes sockets as SOCKET handles and WSAPoll (ws2tcpip.h); POSIX uses
+/// int fds and poll().
+#ifdef _WIN32
+using SocketHandle = SOCKET;
+constexpr SocketHandle kInvalidSocket = INVALID_SOCKET;
+using PollDesc = WSAPOLLFD;
+inline int pollSockets( PollDesc *fds, ULONG count, int timeoutMs )
+{
+  return WSAPoll( fds, count, timeoutMs );
+}
+#else
+using SocketHandle = int;
+constexpr SocketHandle kInvalidSocket = -1;
+using PollDesc = pollfd;
+inline int pollSockets( PollDesc *fds, nfds_t count, int timeoutMs )
+{
+  return ::poll( fds, count, timeoutMs );
+}
+#endif
+
 /// Loopback fixtures must bypass proxies: libcurl (hence /vsicurl/) honours
 /// http_proxy/ALL_PROXY for every host unless no_proxy says otherwise, and a
 /// machine-room proxy env turns a 127.0.0.1 fixture into a hang or a typed
@@ -121,15 +142,17 @@ inline const char *probeLoopbackTcp( int timeoutMs )
   addr.sin_addr.s_addr = htonl( INADDR_LOOPBACK );
   addr.sin_port = 0;
 
-  auto closeFd = []( int fd )
+  auto closeFd = []( SocketHandle fd )
   {
+    if ( fd == kInvalidSocket )
+      return;
 #ifdef _WIN32
     closesocket( fd );
 #else
     ::close( fd );
 #endif
   };
-  auto setNonBlocking = []( int fd ) -> bool
+  auto setNonBlocking = []( SocketHandle fd ) -> bool
   {
 #ifdef _WIN32
     u_long mode = 1;
@@ -140,8 +163,8 @@ inline const char *probeLoopbackTcp( int timeoutMs )
 #endif
   };
 
-  const int listener = ::socket( AF_INET, SOCK_STREAM, 0 );
-  if ( listener < 0 )
+  const SocketHandle listener = ::socket( AF_INET, SOCK_STREAM, 0 );
+  if ( listener == kInvalidSocket )
     return "loopback-unavailable:socket";
   if ( ::bind( listener, reinterpret_cast<sockaddr *>( &addr ), sizeof( addr ) ) != 0 )
   {
@@ -162,8 +185,8 @@ inline const char *probeLoopbackTcp( int timeoutMs )
     return "loopback-unavailable:getsockname";
   }
 
-  const int client = ::socket( AF_INET, SOCK_STREAM, 0 );
-  if ( client < 0 )
+  const SocketHandle client = ::socket( AF_INET, SOCK_STREAM, 0 );
+  if ( client == kInvalidSocket )
   {
     closeFd( listener );
     return "loopback-unavailable:socket";
@@ -176,8 +199,8 @@ inline const char *probeLoopbackTcp( int timeoutMs )
   }
   if ( ::connect( client, reinterpret_cast<sockaddr *>( &bound ), sizeof( bound ) ) != 0 )
   {
-    pollfd pfd{ client, POLLOUT, 0 };
-    if ( ::poll( &pfd, 1, timeoutMs ) <= 0 )
+    PollDesc pfd{ client, POLLOUT, 0 };
+    if ( pollSockets( &pfd, 1, timeoutMs ) <= 0 )
     {
       closeFd( client );
       closeFd( listener );
@@ -194,15 +217,15 @@ inline const char *probeLoopbackTcp( int timeoutMs )
     }
   }
 
-  pollfd lfd{ listener, POLLIN, 0 };
-  if ( ::poll( &lfd, 1, timeoutMs ) <= 0 )
+  PollDesc lfd{ listener, POLLIN, 0 };
+  if ( pollSockets( &lfd, 1, timeoutMs ) <= 0 )
   {
     closeFd( client );
     closeFd( listener );
     return "loopback-unavailable:accept-timeout";
   }
-  const int accepted = ::accept( listener, nullptr, nullptr );
-  if ( accepted < 0 )
+  const SocketHandle accepted = ::accept( listener, nullptr, nullptr );
+  if ( accepted == kInvalidSocket )
   {
     closeFd( client );
     closeFd( listener );

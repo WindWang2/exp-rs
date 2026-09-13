@@ -236,21 +236,24 @@ sicnu_add_io_test(test_io_probe)
 sicnu_add_io_test(test_adversarial_m3)
 
 # Remote range harness (ADR 0139): local HTTP fixture with byte accounting.
-sicnu_add_io_test(test_io_remote_range)
+# ADR 0146: exit 77 = skipped (matches the ladder's verdict mapping).
+sicnu_add_io_test(test_io_remote_range SKIP_RETURN_CODE 77)
 target_sources(test_io_remote_range PRIVATE support/http_range_server.cpp)
 if(WIN32)
   target_link_libraries(test_io_remote_range PRIVATE ws2_32)
 endif()
 
 # 7.0 remote source identity & validators (shared HTTP fixture).
-sicnu_add_io_test(test_io_remote_validator)
+# ADR 0146: exit 77 = skipped (matches the ladder's verdict mapping).
+sicnu_add_io_test(test_io_remote_validator SKIP_RETURN_CODE 77)
 target_sources(test_io_remote_validator PRIVATE support/http_range_server.cpp)
 if(WIN32)
   target_link_libraries(test_io_remote_validator PRIVATE ws2_32)
 endif()
 
 # 7.0 bounded byte-range cache over remote rasters.
-sicnu_add_io_test(test_io_range_cache)
+# ADR 0146: exit 77 = skipped (matches the ladder's verdict mapping).
+sicnu_add_io_test(test_io_range_cache SKIP_RETURN_CODE 77)
 target_sources(test_io_range_cache PRIVATE support/http_range_server.cpp)
 if(WIN32)
   target_link_libraries(test_io_range_cache PRIVATE ws2_32)
