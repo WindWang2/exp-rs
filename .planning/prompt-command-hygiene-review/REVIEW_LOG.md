@@ -111,4 +111,8 @@
 
 ## Phase 8 · 执行摘要 + PR（2026-09-13）
 
-（待填。）
+- `EXECUTIVE_SUMMARY.md` 产出（结论、交付物表、top-5 发现、交叉复核结果、假阳性率 4/28 ≈ 14.3%、合规边界、后续种子）。
+- `PR_BODY.md` 产出；EVIDENCE E-007/E-008 断言结果落盘。
+- rebase origin/master 后 push（护栏拦截则按 runbook 第 7 步处理）→ `gh pr create` → 报告 URL 后停止。
+- Completion gate 逐条复核：全部满足（对照 GOAL 存档的 Required artifacts 与 Completion gate）。
+

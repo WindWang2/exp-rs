@@ -40,6 +40,26 @@
 - 本 track 无编译、无测试执行（纯文档审查 + grep/ls/git 取证）。无 CPU/RSS 日志需求。
 - 若后续验证性编译：`CMAKE_BUILD_PARALLEL_LEVEL=2`、`CTEST_PARALLEL_LEVEL=1`、Ninja `-j2`、每 60s 记录 CPU/RSS（占位，未发生）。
 
-## E-007 · 模板引用存在性断言（Phase 8 前置，runbook 第 5 条）
+## E-007 · 模板引用存在性断言（runbook 第 5 条，2026-09-13 执行）
 
-（待填：对三份模板中出现的每个 `.agents/skills/<name>/SKILL.md` 路径与每个被引用文件执行 `test -e` 断言，结果粘贴于此。）
+命令（与 goal-template.md"存在性断言"一致，反引号锚定 + CRLF 剥离）：
+
+```bash
+for f in docs/agents/goal-template.md docs/agents/loop-template.md docs/agents/command-vocabulary.md .agents/AGENTS.md CLAUDE.md; do
+  grep -ohE '\.agents/skills/[a-z-]+/SKILL\.md' "$f"; done | tr -d '\r' | sort -u | while read p; do test -e "$p" || echo "MISSING: $p"; done
+# → 空输出（6 个技能路径全部存在：git-guardrails-claude-code / grilling / loop-me /
+#   resolving-merge-conflicts / retro / wayfinder）
+
+grep -ohE '`docs/agents/[a-z-]+\.md`|`review/[A-Z_]+\.(md|csv)`|`\.planning/[a-z0-9-]+/[A-Z_]+\.md`' \
+  docs/agents/*.md .agents/AGENTS.md CLAUDE.md | tr -d '\r`' | sort -u | while read p; do test -e "$p" || echo "MISSING: $p"; done
+# → 10 个路径全部 OK：docs/agents/{goal-template,loop-template,command-vocabulary,domain,issue-tracker,triage-labels}.md
+#   review/{GOAL_MATRIX.csv,PROMPT_DEFECTS.md,SKILL_INVENTORY.md,SKILL_MIRROR.md}
+```
+
+不可判定词断言（goal-template"措辞"节命令，排除检查命令自身行）：
+`goal-template.md → 0 · loop-template.md → 0 · command-vocabulary.md → 0`。
+
+## E-008 · PR diff 合规断言
+
+- `git diff --stat origin/master...HEAD` 中无 `src/`、`tests/` 路径（Phase 8 push 前复核，结果见 PR_BODY）。
+- 本 track 零编译、零测试执行（纯文档审查）；无 CPU/RSS 日志（E-006 占位未触发）。
