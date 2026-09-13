@@ -2,6 +2,14 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Verification Platform 10.0] - 2026-09-13
+
+### Scientific Correctness, Contract & Verification Platform 10.0 (zcode/scientific-contract-verification-10)
+- **Whole-repo review findings fixed (7/7, re-verified live on `7d78059d1a`)**: `io:reproject` `srcCrsOverride` now reaches the warp as `-s_srs` (F-OPS-4/P1 — a CRS-less input previously reprojected as identity while being tagged with the target CRS); Labels `class_mapping` drives the output raster encoding (`1+max(classMapping)` escalates Byte→UInt16; manifest refuses targets ≥65535; F-OPS-1); `rs:qa_mask` fails CLOSED on unreadable QA samples (NaN/negative/declared-NoData → masked=1; SCL `all` masks class 0; result gains `unreadableSamples`; F-OPS-3); detection dedup/NMS is cancelable and spatially bucketed with an exactly-equal kept set (F-OPS-5); `TensorBlob::fromMat` handles non-continuous N-D Mats (F-OPS-2); pi bridges kill the child on stdio desync and cancel the startup deadline on every settle path, with a structural parity test (F-PI-1/F-PI-2).
+- **Scientific Contract Registry**: `src/contracts/scientific_contract.*` — one machine-readable record per first-party `rs:` operator covering the dimensions that had no authority (numeric domain, scale/offset, NoData semantics, categorical encoding, class-id range, time alignment, wavelength policy, seed policy, cancellation granularity, atomic publication, provenance); completeness enforced against the LIVE registry; schema `exp.scientific_contract.v1`; projected into the contract graph snapshot.
+- **Cross-projection drift gates**: `test_drift_projection_10` — schema determinism stamps must agree with capability sidecar grades; capability sidecar io parameters must match the live schema in both directions; every LabSpec `operator_id` must resolve in the live registry. The three CN-satellite import operators gained their missing capability sidecars.
+- **Verification Platform 10.0 lanes**: `test_science_verification_10` — metamorphic NDVI scale-invariance, byte-identical reproducibility replay, kmeans seed determinism, bounded deterministic CRS-refusal fuzz, provenance metadata verification; registered in the verification ladder (L2) and readiness collector.
+
 ## [Workbench 9.0] - 2026-09-12
 
 ### 🚀 Professional QGIS Remote-Sensing Workbench 9.0 (feat/professional-workbench-9)
