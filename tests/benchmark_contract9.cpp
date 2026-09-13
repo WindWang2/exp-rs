@@ -57,11 +57,16 @@ double elapsedMs( const std::chrono::steady_clock::time_point &start )
 int main( int argc, char **argv )
 {
     std::string outPath;
+    bool quickTier = false;
     for ( int i = 1; i < argc; ++i )
     {
         const std::string arg = argv[i];
         if ( arg == "--out" && i + 1 < argc )
             outPath = argv[++i];
+        else if ( arg == "--bench-quick" )
+            quickTier = true; // accepted for tier parity; the scan is
+                              // already a bounded fixed pass — nothing to
+                              // shrink, but the artifact still labels it.
     }
 
     std::vector<Timing> timings;
@@ -155,6 +160,7 @@ int main( int argc, char **argv )
         "debug"
 #endif
         "\",\n";
+    out << "  \"tier\": \"" << ( quickTier ? "quick" : "full" ) << "\",\n";
     out << "  \"note\": \"wall-clock evidence only — not a gate; tooling-side cost\",\n";
     out << "  \"measurements\": [\n";
     for ( std::size_t i = 0; i < timings.size(); ++i )

@@ -237,6 +237,8 @@ def main() -> int:
             measurements = data.get("measurements", [])
             lines.append(f"### {name} (schema {data.get('schema', '?')})")
             lines.append("")
+            tier = data.get("tier")
+            lines.append(f"_tier: {tier}_" if tier else "_tier: unlabelled (pre-D10 artifact)_")
             for m in measurements:
                 lines.append(f"* `{m.get('name')}`: {m.get('ops_per_s')} ops/s "
                              f"({m.get('iterations')} iters)")

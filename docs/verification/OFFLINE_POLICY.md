@@ -37,12 +37,15 @@ The guard runs once when the test run starts (not during `--list-tests`), and:
 On skip the binary prints `sicnu-skip: <reason-code>` on stdout and exits **77**.
 
 ```console
-$ SICNU_FORCE_OFFLINE=1 ./tests/test_io_remote_range
-Randomness seeded to: 4127241104
+$ SICNU_FORCE_OFFLINE=1 ./test_io_remote_range
 sicnu-skip: forced-offline
 $ echo $?
 77
 ```
+
+(The guard fires before Catch2 flushes its banner, so stdout shows only the
+sentinel line; the human-readable detail goes to stderr as
+`sicnu-skip-detail: SICNU_FORCE_OFFLINE is set`.)
 
 ## The three remote I/O suites are loopback suites
 
