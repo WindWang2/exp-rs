@@ -128,8 +128,10 @@ uint64_t group80( uint64_t hi, uint64_t lo, int g )
 
 /// 26-char id: 50-bit ms epoch (10 chars) + 80-bit uniqueness (16 chars).
 /// Uniqueness payload = constant per-process origin tag (high 16 bits) and
-/// seq XOR origin-low-64 (low 64 bits) — XOR by a constant preserves order,
-/// so ids from the same process sort by (ms, seq).
+/// the raw per-ms sequence counter (low 64 bits). The counter must stay
+/// order-preserving: XOR with an origin does NOT preserve numeric order
+/// (x < y does not imply x^c < y^c), which used to break the "monotonic
+/// ids sort ascending" contract within a single millisecond.
 std::string encodeId( uint64_t epochMs, uint64_t origin, uint64_t seq )
 {
     char out[27];
@@ -140,7 +142,7 @@ std::string encodeId( uint64_t epochMs, uint64_t origin, uint64_t seq )
         t >>= 5;
     }
     const uint64_t hi = ( origin >> 48 ) & 0xFFFF;
-    const uint64_t lo = seq ^ origin;
+    const uint64_t lo = seq;
     for ( int g = 15; g >= 0; --g )
         out[10 + ( 15 - g )] = kBase32Alphabet[group80( hi, lo, g )];
     out[26] = '\0';
