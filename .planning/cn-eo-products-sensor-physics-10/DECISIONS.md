@@ -24,3 +24,11 @@
 - D-06 (2026-09-13) Unknown sidecar generations on a recognized family produce
   ProductCompleteness::UnsupportedVersion + bounded raw passthrough of discriminator
   elements, never a parse attempt with the wrong whitelist.
+- D-07 (2026-09-13) Registry replaces band_roles entirely (revises D-01's
+  "keep loading" fallback): consumers were all in-track, and keeping two live
+  sources would preserve the drift the track is chartered to remove.
+- D-08 (2026-09-13) Capability pins 111→115: the pinned count is a coverage
+  floor, not a historical record; D-08 also repairs #956's inherited break.
+- D-09 (2026-09-13) Operator results keep legacy ADR 0146 keys verbatim
+  (productKind/bandSource/declared{}/missingDeclaredFields[]) with new
+  provenance added alongside; courses and labs key on the old shape.
