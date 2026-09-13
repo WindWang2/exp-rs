@@ -162,6 +162,17 @@ struct FabricPlanOptions
 FabricPlan planFabric( const FabricIntent &intent, const FabricPlanOptions &options = {},
                        const CancelToken &cancel = {} );
 
+/// The ONE JSON → intent parser (operator and CLI surfaces share it; no
+/// second parser may appear). Accepts the intent vocabulary:
+///   catalog, sceneBudget, executionBudgetBytes,
+///   bounds[minX,minY,maxX,maxY] | query{...CatalogQuery fields...},
+///   grid{crs,scaleX,scaleY,extent[4]}, chunkShape{time,y,x,band},
+///   slice{timeStartUtc,timeEndUtc,extent[4],bandRoles[]},
+///   window{x,y,w,h}
+/// Throws GeoError(InvalidArgument) for structural violations (typed, and
+/// the message names the field).
+FabricIntent fabricIntentFromJson( const Json::Value &json );
+
 /// Execution report (bounded; per-asset truth from the virtual cube).
 struct FabricExecutionReport
 {

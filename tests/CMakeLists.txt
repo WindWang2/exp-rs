@@ -308,6 +308,12 @@ sicnu_add_io_test(test_io_fabric_cube)
 target_include_directories(test_io_fabric_cube PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 sicnu_add_io_test(test_io_fabric_plan)
 target_include_directories(test_io_fabric_plan PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# The operator suite rides the operator chain (Qt + sicnu_operators), same
+# shape as test_io_operators.
+sicnu_add_io_test(test_io_fabric_operators)
+target_include_directories(test_io_fabric_operators PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(test_io_fabric_operators PRIVATE Qt6::Core sicnu_operators)
+sicnu_link_jsoncpp(test_io_fabric_operators)
 if(WIN32)
   target_link_libraries(test_io_fabric_catalog PRIVATE ws2_32)
 endif()

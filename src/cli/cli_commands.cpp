@@ -14,6 +14,13 @@
 #include "geospatial/remote/remote_source_validator.h"
 #include "geospatial/remote/range_cache.h"
 #include "geospatial/stac/stac_mapper.h"
+// Cloud-Native Data Fabric / Data Cube 10.0 (additive surfaces).
+#include "geospatial/fabric/catalog_service.h"
+#include "geospatial/fabric/query_planner.h"
+#include "geospatial/raster/raster_writer.h"
+#include "geospatial/util/atomic_fs.h"
+#include "geospatial/fabric/query_planner.h"
+#include "geospatial/util/atomic_fs.h"
 
 #include "rs_pipeline_runner.h"
 #include "cli_project_ops.h"
@@ -1908,6 +1915,128 @@ int commandData( QStringList args, const CliIO &io )
             out["platform"] = item.platform;
             out["assets"] = static_cast<int>( item.assets.size() );
             out["canonical_preview"] = sicnu::geo::stacItemToCanonical( item ).toJson();
+            return io.finish( true, "data", out, 0 );
+        }
+        // Cloud-Native Data Fabric 10.0: unified catalog search — one
+        // filter vocabulary across local STAC trees and remote STAC APIs
+        // (bounded, offline-typed; display paths stay credential-redacted).
+        if ( sub == "catalog" )
+        {
+            // Grammar: `data catalog search <root> [flags]` — the outer
+            // dispatch already consumed "catalog" and the second token.
+            const QString sub2 = stdPath.c_str();
+            if ( sub2 != "search" )
+                return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                  {}, "unknown data catalog subcommand: " + sub2.toStdString() );
+            if ( args.isEmpty() )
+                return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                  {}, "data catalog search needs a catalog root" );
+            const std::string catalogRoot = args.takeFirst().toStdString();
+            sicnu::geo::CatalogQuery query;
+            for ( int i = 0; i + 1 < args.size(); ++i )
+            {
+                const bool takesValue = args[i] == "--cloud-max" || args[i] == "--limit" ||
+                                        args[i] == "--max-items" || args[i] == "--platform";
+                if ( !takesValue )
+                    continue;
+                if ( args[i] == "--cloud-max" )
+                {
+                    query.hasCloudCoverMax = true;
+                    query.cloudCoverMax = args[i + 1].toDouble();
+                }
+                else if ( args[i] == "--limit" )
+                    query.limit = args[i + 1].toInt();
+                else if ( args[i] == "--max-items" )
+                    query.maxItems = args[i + 1].toInt();
+                else if ( args[i] == "--platform" )
+                    query.platformEquals = args[i + 1].toStdString();
+            }
+            sicnu::geo::CatalogServiceOptions serviceOptions;
+            sicnu::geo::CatalogService service =
+                sicnu::geo::openCatalogService( catalogRoot, serviceOptions );
+            sicnu::geo::CancelToken cancel;
+            const sicnu::geo::CatalogService::SearchAllResult result = service.searchAll( query, cancel );
+            Json::Value records( Json::arrayValue );
+            for ( const sicnu::geo::AssetRecord &record : result.records )
+            {
+                Json::Value entry;
+                entry["id"] = record.id;
+                entry["displayPath"] = sicnu::geo::ResourceUri::parse( record.path ).display();
+                entry["instantUtc"] = record.datetimeUtc;
+                entry["cloudCover"] = record.cloudCover;
+                records.append( entry );
+            }
+            Json::Value out;
+            out["backend"] = sicnu::geo::catalogBackendKindName( service.info().kind );
+            out["records"] = records;
+            out["truncatedByCap"] = result.truncatedByCap;
+            out["unresolvable"] = static_cast<Json::UInt64>( result.unresolvable );
+            return io.finish( true, "data", out, 0 );
+        }
+        // Cloud-Native Data Fabric 10.0: cube plans and window execution
+        // from a spec JSON (the ONE shared intent parser — no CLI dialect).
+        if ( sub == "cube" )
+        {
+            // Grammar: `data cube plan|window <spec.json> [-o out.tif]` —
+            // the outer dispatch already consumed "cube" and the sub2 token.
+            const QString sub2 = stdPath.c_str();
+            if ( sub2 != "plan" && sub2 != "window" )
+                return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                  {}, "usage: data cube plan|window <spec.json> [-o out.tif]" );
+            if ( args.isEmpty() )
+                return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                  {}, "data cube " + sub2.toStdString() + " needs a spec JSON path" );
+            const std::string specPath = args.takeFirst().toStdString();
+            std::string specText;
+            if ( !cliReadFileUtf8( specPath, specText ) )
+                return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                  {}, "cannot read cube spec: " + specPath );
+            Json::Value spec;
+            {
+                Json::CharReaderBuilder builder;
+                std::string errors;
+                std::stringstream specStream( specText );
+                if ( !Json::parseFromStream( builder, specStream, &spec, &errors ) )
+                    return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                      {}, "invalid cube spec JSON: " + errors );
+            }
+            sicnu::geo::FabricIntent intent = sicnu::geo::fabricIntentFromJson( spec );
+            sicnu::geo::CancelToken cancel;
+            const sicnu::geo::FabricPlan plan = sicnu::geo::planFabric( intent, {}, cancel );
+            if ( sub2 == "plan" )
+                return io.finish( true, "data", plan.toJson(), 0 );
+            const QString outputArg = [ & ] {
+                for ( int i = 0; i + 1 < args.size(); ++i )
+                    if ( args[i] == "-o" || args[i] == "--output" )
+                        return args[i + 1];
+                return QString();
+            }();
+            if ( outputArg.isEmpty() )
+                return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                  {}, "data cube window needs -o <out.tif>" );
+            sicnu::geo::VirtualCubeReadOptions readOptions;
+            sicnu::geo::FabricExecutionReport report;
+            const sicnu::geo::VirtualCubeWindowResult window =
+                sicnu::geo::executeWindow( plan, readOptions, report, cancel );
+            const std::string output = outputArg.toStdString();
+            sicnu::geo::atomic_fs::writeFileAtomic( output, [ & ]( const std::string &staged ) {
+                sicnu::geo::RasterWriter writer = sicnu::geo::RasterWriter::create(
+                    staged, window.width, window.height, { sicnu::geo::RasterBandSpec {} },
+                    { "GTiff", { "TILED=YES", "BLOCKXSIZE=64", "BLOCKYSIZE=64" }, true } );
+                const sicnu::geo::VirtualCubeGrid &grid = plan.grid();
+                writer.setCrs( sicnu::geo::Crs::fromAuthid( grid.crs.authid ) );
+                writer.setGeotransform(
+                    { grid.minX, grid.scaleX, 0.0, grid.maxY, 0.0, -grid.scaleY } );
+                writer.writeWindow( 1, { 0, 0, window.width, window.height },
+                                    window.values.data() );
+                writer.finalize();
+            } );
+            Json::Value out;
+            out["output"] = output;
+            out["width"] = window.width;
+            out["height"] = window.height;
+            out["provenance"] = window.provenanceJson();
+            out["report"] = report.toJson();
             return io.finish( true, "data", out, 0 );
         }
         // Data Fabric 8.0: bounded remote-identity probe/revalidate. Offline

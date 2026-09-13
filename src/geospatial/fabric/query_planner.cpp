@@ -400,6 +400,104 @@ FabricPlan planFabric( const FabricIntent &intent, const FabricPlanOptions &opti
     return plan;
 }
 
+// --- JSON intent parsing (the single shared parser) ---------------------------
+
+FabricIntent fabricIntentFromJson( const Json::Value &json )
+{
+    FabricIntent intent;
+    intent.catalogUri = json.get( "catalog", "" ).asString();
+    intent.sceneBudget = json.get( "sceneBudget", 64 ).asInt();
+    intent.executionBudgetBytes = static_cast<std::uint64_t>( json.get( "executionBudgetBytes", 268435456.0 ).asUInt64() );
+
+    const Json::Value &bounds = json["bounds"];
+    if ( bounds.isArray() && ( bounds.size() == 4 || bounds.size() == 6 ) )
+        for ( const Json::Value &value : bounds )
+            intent.query.bbox.push_back( value.asDouble() );
+    const Json::Value &queryJson = json["query"];
+    if ( queryJson.isObject() )
+    {
+        if ( queryJson["bbox"].isArray() )
+            intent.query.bbox.clear();
+        for ( const Json::Value &value : queryJson["bbox"] )
+            intent.query.bbox.push_back( value.asDouble() );
+        intent.query.temporalStartUtc = queryJson.get( "temporalStartUtc", "" ).asString();
+        intent.query.temporalEndUtc = queryJson.get( "temporalEndUtc", "" ).asString();
+        for ( const Json::Value &value : queryJson["collections"] )
+            intent.query.collections.push_back( value.asString() );
+        for ( const Json::Value &value : queryJson["ids"] )
+            intent.query.ids.push_back( value.asString() );
+        if ( queryJson.isMember( "cloudCoverMax" ) )
+        {
+            intent.query.hasCloudCoverMax = true;
+            intent.query.cloudCoverMax = queryJson["cloudCoverMax"].asDouble();
+        }
+        intent.query.platformEquals = queryJson.get( "platform", "" ).asString();
+        for ( const Json::Value &value : queryJson["sensors"] )
+            intent.query.sensorInstruments.push_back( value.asString() );
+        intent.query.assetRole = queryJson.get( "assetRole", "" ).asString();
+        intent.query.mediaTypeSubstring = queryJson.get( "mediaType", "" ).asString();
+        intent.query.limit = queryJson.get( "limit", 0 ).asInt();
+        intent.query.maxItems = queryJson.get( "maxItems", 1000 ).asInt();
+    }
+
+    const Json::Value &gridJson = json["grid"];
+    if ( gridJson.isObject() && gridJson.isMember( "crs" ) )
+    {
+        intent.grid.explicitGrid = true;
+        intent.grid.crs.valid = true;
+        intent.grid.crs.authid = gridJson["crs"].asString();
+        intent.grid.scaleX = gridJson.get( "scaleX", 0.0 ).asDouble();
+        intent.grid.scaleY = gridJson.get( "scaleY", 0.0 ).asDouble();
+        const Json::Value &extent = gridJson["extent"];
+        if ( extent.isArray() && extent.size() == 4 )
+        {
+            intent.grid.minX = extent[0].asDouble();
+            intent.grid.minY = extent[1].asDouble();
+            intent.grid.maxX = extent[2].asDouble();
+            intent.grid.maxY = extent[3].asDouble();
+        }
+    }
+
+    const Json::Value &shapeJson = json["chunkShape"];
+    if ( shapeJson.isObject() )
+    {
+        intent.chunkShape.time = shapeJson.get( "time", 1 ).asInt64();
+        intent.chunkShape.y = shapeJson.get( "y", 256 ).asInt64();
+        intent.chunkShape.x = shapeJson.get( "x", 256 ).asInt64();
+        intent.chunkShape.band = shapeJson.get( "band", 1 ).asInt64();
+    }
+
+    const Json::Value &sliceJson = json["slice"];
+    if ( sliceJson.isObject() )
+    {
+        intent.slice.timeStartUtc = sliceJson.get( "timeStartUtc", "" ).asString();
+        intent.slice.timeEndUtc = sliceJson.get( "timeEndUtc", "" ).asString();
+        const Json::Value &extent = sliceJson["extent"];
+        if ( extent.isArray() && extent.size() == 4 )
+        {
+            intent.slice.hasSpatialSlice = true;
+            intent.slice.minX = extent[0].asDouble();
+            intent.slice.minY = extent[1].asDouble();
+            intent.slice.maxX = extent[2].asDouble();
+            intent.slice.maxY = extent[3].asDouble();
+        }
+        for ( const Json::Value &role : sliceJson["bandRoles"] )
+            intent.slice.bandRoles.push_back( role.asString() );
+    }
+
+    const Json::Value &windowJson = json["window"];
+    if ( windowJson.isObject() )
+    {
+        intent.hasWindow = true;
+        intent.windowX = windowJson.get( "x", 0 ).asInt();
+        intent.windowY = windowJson.get( "y", 0 ).asInt();
+        intent.windowW = windowJson.get( "w", 0 ).asInt();
+        intent.windowH = windowJson.get( "h", 0 ).asInt();
+    }
+    intent.validate();
+    return intent;
+}
+
 // --- execution ----------------------------------------------------------------
 
 namespace

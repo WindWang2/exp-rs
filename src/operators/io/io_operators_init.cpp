@@ -1,6 +1,7 @@
 /***************************************************************************
  * io_operators_init.cpp — Static registration of the io:* operator family.
  ***************************************************************************/
+#include "io_fabric_operators.h"
 #include "io_operators.h"
 #include "operators/framework/rs_operator_registry.h"
 
@@ -47,6 +48,10 @@ void initBuiltinIoOperators()
   add( "io:vector_convert", [] { return std::make_unique<IoVectorConvertOperator>(); } );
   add( "io:inspect", [] { return std::make_unique<IoInspectOperator>(); } );
   add( "io:doctor", [] { return std::make_unique<IoDoctorOperator>(); } );
+  add( "io:catalog_search", [] { return std::make_unique<IoCatalogSearchOperator>(); } );
+  add( "io:cube_plan", [] { return std::make_unique<IoCubePlanOperator>(); } );
+  add( "io:cube_window", [] { return std::make_unique<IoCubeWindowOperator>(); } );
+  add( "io:cache_prefetch", [] { return std::make_unique<IoCachePrefetchOperator>(); } );
 }
 
 } // namespace sicnu::operators::io
