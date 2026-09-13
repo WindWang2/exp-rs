@@ -384,7 +384,7 @@ void QgisDesktopWindow::openDisplayStretchPanel()
     {
         QMessageBox::information( this, tr( "Display Stretch" ),
                                   tr( "Select or load a raster layer first.\n"
-                                      tr("This feature only adjusts the map display contrast; it exports no new file.") ) );
+                                      "This feature only adjusts the map display contrast; it exports no new file." ) );
         return;
     }
 

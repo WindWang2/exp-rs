@@ -330,7 +330,7 @@ void SicnuAlgorithmDialog::buildParameterWidgets()
   mCommandGroup = new QGroupBox( tr( "Preview via Command Line" ) );
   mCommandGroup->setObjectName( QStringLiteral( "rsAlgCommandPreviewGroup" ) );
   mCommandGroup->setToolTip( tr(
-    tr("The external command line generated live from the parameters above. Copy it to a terminal to run manually (paths and temporary outputs may differ slightly from the actual run).") ) );
+    "The external command line generated live from the parameters above. Copy it to a terminal to run manually (paths and temporary outputs may differ slightly from the actual run).")  );
   auto *cmdLayout = new QVBoxLayout( mCommandGroup );
   cmdLayout->setContentsMargins( 8, 8, 8, 8 );
   mCommandPreview = new QPlainTextEdit( mCommandGroup );

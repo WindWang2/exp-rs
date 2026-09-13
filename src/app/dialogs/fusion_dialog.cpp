@@ -53,7 +53,7 @@ FusionDialog::FusionDialog( QWidget *parent )
   mMethodCombo->addItem( tr( "OTB BundleToPerfectSensor" ), QStringLiteral( "otb_btps" ) );
   mMethodCombo->addItem( tr( "GDAL Pansharpen" ), QStringLiteral( "gdal_pansharp" ) );
   SicnuDialogHelp::tip( mMethodCombo, tr(
-    tr("Built-in methods: Linear / Brovey / IHS / PCA; external tools: OTB / GDAL pansharpening.") ) );
+    "Built-in methods: Linear / Brovey / IHS / PCA; external tools: OTB / GDAL pansharpening.")  );
   inputLayout->addRow( tr( "Fusion Method" ), mMethodCombo );
 
   mWeightLabel = new QLabel( tr( "Pan Weight" ), inputGroup );

@@ -404,7 +404,7 @@ QWidget *QgsGeorefShellWindow::makeCanvasPanel( QgsMapCanvas *canvas,
       "  padding: 4px 8px;"
       "}" ) );
   tipWidget( caption, tr(
-    tr("Layer / file name of the current canvas. Hover to see the full path.") ) );
+    "Layer / file name of the current canvas. Hover to see the full path.")  );
 
   layout->addWidget( caption );
   layout->addWidget( canvas, 1 );
@@ -473,13 +473,13 @@ QMenu *QgsGeorefShellWindow::createFileMenu()
     tr( "Open Source Image from File..." ),
     this, &QgsGeorefShellWindow::openSourceRaster );
   tipAction( mOpenSourceFileAction, tr(
-    tr("Opens the source image to correct (SRC / Warp) from a file. Shown on the source canvas; the path is used to write the warp.") ) );
+    "Opens the source image to correct (SRC / Warp) from a file. Shown on the source canvas; the path is used to write the warp.")  );
   mOpenSourceLayerAction = fileMenu->addAction(
     QIcon( QStringLiteral( ":/icons/r_ster" ) ),
     tr( "Open Source Image from Project Layer..." ),
     this, &QgsGeorefShellWindow::openSourceFromProjectLayer );
   tipAction( mOpenSourceLayerAction, tr(
-    tr("Chooses a raster from the main project layer list as the source image (Warp); no file picker needed.") ) );
+    "Chooses a raster from the main project layer list as the source image (Warp); no file picker needed.")  );
   return fileMenu;
 }
 
@@ -501,13 +501,13 @@ void QgsGeorefShellWindow::addStandardMenuBar()
 QString QgsGeorefShellWindow::windowHelpText() const
 {
   return tr(
-    tr("<b>Image Registration / Geometric Correction</b><br><br>")
-    tr("1. Open the source image (File)<br>")
-    tr("2. Collect GCPs on the SRC and target canvases<br>")
-    tr("3. Set the transform method, target CRS and output path on the right<br>")
-    tr("4. Check residuals; once point counts and the method are satisfied, press 'Run' on the toolbar<br>")
-    tr("5. Track progress under 'Correction Task'; double-click a finished task to load its result<br><br>")
-    tr("Tip: hover over tool buttons or parameter widgets for detailed explanations.") );
+    "<b>Image Registration / Geometric Correction</b><br><br>"
+    "1. Open the source image (File)<br>"
+    "2. Collect GCPs on the SRC and target canvases<br>"
+    "3. Set the transform method, target CRS and output path on the right<br>"
+    "4. Check residuals; once point counts and the method are satisfied, press 'Run' on the toolbar<br>"
+    "5. Track progress under 'Correction Task'; double-click a finished task to load its result<br><br>"
+    "Tip: hover over tool buttons or parameter widgets for detailed explanations." );
 }
 
 QActionGroup *QgsGeorefShellWindow::mapToolActionGroup()
@@ -533,7 +533,7 @@ void QgsGeorefShellWindow::addCanvasNavigationActions( QToolBar *bar, const QStr
   mPanAction->setShortcut( QKeySequence( Qt::Key_Space ) );
   mPanAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mPanAction, tr(
-    tr("Pan (Space): drag to browse the source and reference / map canvases. Mutually exclusive with the point-adding tools.") ) );
+    "Pan (Space): drag to browse the source and reference / map canvases. Mutually exclusive with the point-adding tools.")  );
   group->addAction( mPanAction );
   addAction( mPanAction );
 
@@ -543,7 +543,7 @@ void QgsGeorefShellWindow::addCanvasNavigationActions( QToolBar *bar, const QStr
   mZoomInAction->setShortcut( QKeySequence::ZoomIn );
   mZoomInAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mZoomInAction, tr(
-    tr("Zoom in (Ctrl++): drag a rectangle or click. Works on both canvases; the wheel zooms too.") ) );
+    "Zoom in (Ctrl++): drag a rectangle or click. Works on both canvases; the wheel zooms too.")  );
   group->addAction( mZoomInAction );
   addAction( mZoomInAction );
 
@@ -553,7 +553,7 @@ void QgsGeorefShellWindow::addCanvasNavigationActions( QToolBar *bar, const QStr
   mZoomOutAction->setShortcut( QKeySequence::ZoomOut );
   mZoomOutAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mZoomOutAction, tr(
-    tr("Zoom out (Ctrl+-): drag a rectangle or click. Works on both canvases.") ) );
+    "Zoom out (Ctrl+-): drag a rectangle or click. Works on both canvases.")  );
   group->addAction( mZoomOutAction );
   addAction( mZoomOutAction );
 
@@ -566,7 +566,7 @@ void QgsGeorefShellWindow::addCanvasNavigationActions( QToolBar *bar, const QStr
   mFitSrcAction->setShortcut( QKeySequence( QStringLiteral( "F" ) ) );
   mFitSrcAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mFitSrcAction, tr(
-    tr("Fit source (F): zooms the source image canvas to full extent.") ) );
+    "Fit source (F): zooms the source image canvas to full extent.")  );
   addAction( mFitSrcAction );
 
   const QString fitDstLabel = ( shellId() == QLatin1String( "i2i" ) )
@@ -579,7 +579,7 @@ void QgsGeorefShellWindow::addCanvasNavigationActions( QToolBar *bar, const QStr
   mFitDstAction->setShortcut( QKeySequence( QStringLiteral( "Shift+F" ) ) );
   mFitDstAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mFitDstAction, tr(
-    tr("Fit reference / map (Shift+F): zooms the target canvas to full extent.") ) );
+    "Fit reference / map (Shift+F): zooms the target canvas to full extent.")  );
   addAction( mFitDstAction );
 
   mFitBothAction = bar->addAction(
@@ -589,7 +589,7 @@ void QgsGeorefShellWindow::addCanvasNavigationActions( QToolBar *bar, const QStr
   mFitBothAction->setShortcut( QKeySequence( QStringLiteral( "Ctrl+Shift+F" ) ) );
   mFitBothAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mFitBothAction, tr(
-    tr("Fit both (Ctrl+Shift+F): zooms the source and target canvases to full extent.") ) );
+    "Fit both (Ctrl+Shift+F): zooms the source and target canvases to full extent.")  );
   addAction( mFitBothAction );
 
   bar->addSeparator();
@@ -601,7 +601,7 @@ void QgsGeorefShellWindow::addCanvasNavigationActions( QToolBar *bar, const QStr
   mZoomPrevAction->setShortcut( QKeySequence( QStringLiteral( "Alt+Left" ) ) );
   mZoomPrevAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mZoomPrevAction, tr(
-    tr("Previous extent (Alt+←): both canvases go back to the previous view extent.") ) );
+    "Previous extent (Alt+←): both canvases go back to the previous view extent.")  );
   addAction( mZoomPrevAction );
 
   mZoomNextAction = bar->addAction(
@@ -611,7 +611,7 @@ void QgsGeorefShellWindow::addCanvasNavigationActions( QToolBar *bar, const QStr
   mZoomNextAction->setShortcut( QKeySequence( QStringLiteral( "Alt+Right" ) ) );
   mZoomNextAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mZoomNextAction, tr(
-    tr("Next extent (Alt+→): both canvases advance to the next view extent.") ) );
+    "Next extent (Alt+→): both canvases advance to the next view extent.")  );
   addAction( mZoomNextAction );
 }
 
@@ -632,10 +632,10 @@ void QgsGeorefShellWindow::addGcpEditActions( QToolBar *bar, const QString &obje
   mAddPointAction->setShortcut( QKeySequence( QStringLiteral( "A" ) ) );
   mAddPointAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mAddPointAction, tr(
-    tr("Add control point (A):\n")
-    tr("1. Click the source point on the source image (SRC)\n")
-    tr("2. Click the conjugate target point on the reference / map\n")
-    tr("Right-click cancels an unfinished source point. Points should be evenly spread.") ) );
+    "Add control point (A):\n"
+    "1. Click the source point on the source image (SRC)\n"
+    "2. Click the conjugate target point on the reference / map\n"
+    "Right-click cancels an unfinished source point. Points should be evenly spread.")  );
   addAction( mAddPointAction );
 
   mMovePointAction = bar->addAction( icMove.isNull() ? ic : icMove, tr( "Move Control Point" ) );
@@ -644,7 +644,7 @@ void QgsGeorefShellWindow::addGcpEditActions( QToolBar *bar, const QString &obje
   mMovePointAction->setShortcut( QKeySequence( QStringLiteral( "M" ) ) );
   mMovePointAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mMovePointAction, tr(
-    tr("Move control point (M): drag an existing GCP marker to fine-tune; residuals recompute automatically.") ) );
+    "Move control point (M): drag an existing GCP marker to fine-tune; residuals recompute automatically.")  );
   addAction( mMovePointAction );
 
   mDeletePointAction = bar->addAction( icDel.isNull() ? ic : icDel, tr( "Delete Control Point" ) );
@@ -653,7 +653,7 @@ void QgsGeorefShellWindow::addGcpEditActions( QToolBar *bar, const QString &obje
   mDeletePointAction->setShortcut( QKeySequence( QStringLiteral( "D" ) ) );
   mDeletePointAction->setShortcutContext( Qt::WidgetWithChildrenShortcut );
   tipAction( mDeletePointAction, tr(
-    tr("Delete control point (D): click a marker to delete it, or delete the row in the GCP table.") ) );
+    "Delete control point (D): click a marker to delete it, or delete the row in the GCP table.")  );
   addAction( mDeletePointAction );
 
   QActionGroup *group = mapToolActionGroup();
@@ -683,8 +683,8 @@ void QgsGeorefShellWindow::addApplyAction( QToolBar *bar, const QString &objectN
     tr( "Run" ), this, &QgsGeorefShellWindow::applyTransform );
   mApplyAction->setObjectName( objectName );
   tipAction( mApplyAction, tr(
-    tr("Runs the geometric correction: after validating GCPs / the output path, the task joins the 'Correction Task' list and the warp executes in the background.\n")
-    tr("Multiple runs create multiple tasks; running ones can be cancelled in the task list.") ) );
+    "Runs the geometric correction: after validating GCPs / the output path, the task joins the 'Correction Task' list and the warp executes in the background.\n"
+    "Multiple runs create multiple tasks; running ones can be cancelled in the task list.")  );
   mApplyAction->setEnabled( false );
 }
 

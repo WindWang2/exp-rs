@@ -65,15 +65,15 @@ void QgsGeoreferencerMainWindow::setupCentralWidget()
   mSrcCanvas->setObjectName( QStringLiteral( "rsSrcCanvas" ) );
   mSrcCanvas->setCanvasColor( Qt::white );
   mSrcCanvas->setToolTip( tr(
-    tr("Source image canvas (SRC / Warp): loads the image to correct.\n")
-    tr("When adding a GCP, click the source point here first, then the conjugate point on the REF side (no coordinate form pops up).") ) );
+    "Source image canvas (SRC / Warp): loads the image to correct.\n"
+    "When adding a GCP, click the source point here first, then the conjugate point on the REF side (no coordinate form pops up).")  );
 
   mDstCanvas = new QgsMapCanvas( this );
   mDstCanvas->setObjectName( QStringLiteral( "rsRefCanvas" ) );
   mDstCanvas->setCanvasColor( Qt::white );
   mDstCanvas->setToolTip( tr(
-    tr("Reference image canvas (REF / Base): loads the registered reference image.\n")
-    tr("When adding a GCP, click the conjugate position corresponding to the source point here to complete the control point pair.") ) );
+    "Reference image canvas (REF / Base): loads the registered reference image.\n"
+    "When adding a GCP, click the conjugate position corresponding to the source point here to complete the control point pair.")  );
 
   QWidget *srcPanel = makeCanvasPanel(
     mSrcCanvas, &mSrcLayerLabel,
@@ -105,8 +105,8 @@ void QgsGeoreferencerMainWindow::setupCentralWidget()
     mSyncZoomAction->setCheckable( true );
     mSyncZoomAction->setChecked( false );
     mSyncZoomAction->setToolTip( tr(
-      tr("Sync zoom (off by default): use only when SRC and REF share a CRS and similar extents.\n")
-      tr("Keep Sync zoom off for already-registered image pairs, otherwise picked coordinates scramble and residuals go wild.") ) );
+      "Sync zoom (off by default): use only when SRC and REF share a CRS and similar extents.\n"
+      "Keep Sync zoom off for already-registered image pairs, otherwise picked coordinates scramble and residuals go wild.")  );
     connect( mSyncZoomAction, &QAction::toggled, this, [this]( bool on ) {
       if ( mSyncCtl )
         mSyncCtl->setEnabled( on );
@@ -125,13 +125,13 @@ void QgsGeoreferencerMainWindow::setupMenus()
     tr( "Load reference raster from file..." ),
     this, QOverload<>::of( &QgsGeoreferencerMainWindow::loadReferenceRaster ) );
   mOpenRefFileAction->setToolTip( tr(
-    tr("Opens the reference image from a file into the right REF (Base) side, as the GCP target and alignment base.") ) );
+    "Opens the reference image from a file into the right REF (Base) side, as the GCP target and alignment base.")  );
   mOpenRefFileAction->setStatusTip( mOpenRefFileAction->toolTip() );
   mOpenRefLayerAction = fileMenu->addAction(
     tr( "Load reference from project layer..." ),
     this, &QgsGeoreferencerMainWindow::loadReferenceFromProjectLayer );
   mOpenRefLayerAction->setToolTip( tr(
-    tr("Chooses a raster from the main project layer list as the reference image (Base).") ) );
+    "Chooses a raster from the main project layer list as the reference image (Base).")  );
   mOpenRefLayerAction->setStatusTip( mOpenRefLayerAction->toolTip() );
   fileMenu->addSeparator();
   auto *loadPts = fileMenu->addAction( tr( "Load .points..." ), this, &QgsGeorefShellWindow::loadPoints );
@@ -159,8 +159,8 @@ void QgsGeoreferencerMainWindow::setupToolbars()
     QIcon( QStringLiteral( ":/icons/r_ster_calc" ) ), tr( "Sync Zoom" ) );
   mSyncZoomAction->setObjectName( QStringLiteral( "rsGeorefSyncZoomAction" ) );
   mSyncZoomAction->setToolTip( tr(
-    tr("Sync zoom (off by default): enable only when both sides share a CRS and similar extents.\n")
-    tr("With different CRSs, linking scrambles picked coordinates.") ) );
+    "Sync zoom (off by default): enable only when both sides share a CRS and similar extents.\n"
+    "With different CRSs, linking scrambles picked coordinates.")  );
   mSyncZoomAction->setStatusTip( mSyncZoomAction->toolTip() );
   mSyncZoomAction->setWhatsThis( mSyncZoomAction->toolTip() );
 
@@ -170,8 +170,8 @@ void QgsGeoreferencerMainWindow::setupToolbars()
     this, &QgsGeoreferencerMainWindow::runSiftMatch );
   mSiftAction->setObjectName( QStringLiteral( "rsGeorefSiftAction" ) );
   mSiftAction->setToolTip( tr(
-    tr("SIFT auto-matching: SRC and the reference image must be open. After feature extraction and inlier filtering, GCPs can be added in batch.\n")
-    tr("Needs OpenCV; provided by Image to Image only.") ) );
+    "SIFT auto-matching: SRC and the reference image must be open. After feature extraction and inlier filtering, GCPs can be added in batch.\n"
+    "Needs OpenCV; provided by Image to Image only.")  );
   mSiftAction->setStatusTip( mSiftAction->toolTip() );
   mSiftAction->setWhatsThis( mSiftAction->toolTip() );
 
@@ -181,8 +181,8 @@ void QgsGeoreferencerMainWindow::setupToolbars()
     this, &QgsGeoreferencerMainWindow::runTemplateMatch );
   mTemplateMatchAction->setObjectName( QStringLiteral( "rsGeorefTemplateMatchAction" ) );
   mTemplateMatchAction->setToolTip( tr(
-    tr("Template matching (NCC): predicts the reference search area from the source image's initial geocoordinates, then runs correlation matching.\n")
-    tr("Suits remote-sensing imagery with approximate coordinates; grid sampling or existing rough GCPs serve as seeds. Needs OpenCV.") ) );
+    "Template matching (NCC): predicts the reference search area from the source image's initial geocoordinates, then runs correlation matching.\n"
+    "Suits remote-sensing imagery with approximate coordinates; grid sampling or existing rough GCPs serve as seeds. Needs OpenCV.")  );
   mTemplateMatchAction->setStatusTip( mTemplateMatchAction->toolTip() );
   mTemplateMatchAction->setWhatsThis( mTemplateMatchAction->toolTip() );
 
@@ -193,15 +193,15 @@ QString QgsGeoreferencerMainWindow::windowHelpText() const
 {
   return tr(
     "<b>Image Registration · Image 2 Image</b><br>"
-    tr("Two-image registration: source image (Warp) on the left, reference image (Base) on the right.<br><br>")
-    tr("<b>Typical Workflow</b><br>")
-    tr("1. Open the source image: from a file or a main project layer<br>")
-    tr("2. Open the reference image: from a file or a main project layer<br>")
-    tr("3. Add / Move / Delete GCP become available once both sides are open<br>")
-    tr("4. Navigation: pan / zoom in / zoom out; fit source / fit reference / fit both<br>")
-    tr("5. Press Add GCP: SRC first, then REF (right-click to cancel an unfinished source point)<br>")
-    tr("6. Optionally: template matching (needs SRC initial coordinates) / SIFT, Sync zoom → set output → run<br><br>")
-    tr("No RPC (use Image to Map for RPC).") );
+    "Two-image registration: source image (Warp) on the left, reference image (Base) on the right.<br><br>"
+    "<b>Typical Workflow</b><br>"
+    "1. Open the source image: from a file or a main project layer<br>"
+    "2. Open the reference image: from a file or a main project layer<br>"
+    "3. Add / Move / Delete GCP become available once both sides are open<br>"
+    "4. Navigation: pan / zoom in / zoom out; fit source / fit reference / fit both<br>"
+    "5. Press Add GCP: SRC first, then REF (right-click to cancel an unfinished source point)<br>"
+    "6. Optionally: template matching (needs SRC initial coordinates) / SIFT, Sync zoom → set output → run<br><br>"
+    "No RPC (use Image to Map for RPC)." );
 }
 
 void QgsGeoreferencerMainWindow::runSiftMatch()

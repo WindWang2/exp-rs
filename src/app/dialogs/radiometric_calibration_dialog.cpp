@@ -83,9 +83,9 @@ void RadiometricCalibrationDialog::setupUi()
   m_unitCombo->addItem( tr( "TOA Apparent Reflectance" ), QStringLiteral( "toa_reflectance" ) );
   m_unitCombo->addItem( tr( "Brightness Temperature (K)" ), QStringLiteral( "brightness_temperature" ) );
   SicnuDialogHelp::tip( m_unitCombo, tr(
-    tr("• Radiance: L = gain×DN + bias\n")
-    tr("• TOA reflectance: Landsat (reflMult×DN+add)/sin(sun); S2 (DN+offset)/scale\n")
-    tr("• Brightness temperature: needs the thermal band K1/K2 constants") ) );
+    "• Radiance: L = gain×DN + bias\n"
+    "• TOA reflectance: Landsat (reflMult×DN+add)/sin(sun); S2 (DN+offset)/scale\n"
+    "• Brightness temperature: needs the thermal band K1/K2 constants")  );
   form->addRow( tr( "Output Physical Quantity" ), m_unitCombo );
 
   m_allBandsCheck = new QCheckBox( tr( "Process All Valid Bands" ), paramGroup );

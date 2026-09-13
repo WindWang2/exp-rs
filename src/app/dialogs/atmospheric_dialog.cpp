@@ -83,7 +83,7 @@ void AtmosphericDialog::setupUi()
   m_methodCombo->addItem( tr( "DOS2 (with transmittance)" ), QStringLiteral( "dos2" ) );
   m_methodCombo->addItem( tr( "QUAC Quick Atmospheric Correction" ), QStringLiteral( "quac" ) );
   SicnuDialogHelp::tip( m_methodCombo, tr(
-    tr("• DN to radiance: L=gain×DN+bias\n• DOS1: dark object subtraction\n• DOS2: DOS1 + transmittance\n• QUAC: fast all-band correction from image statistics") ) );
+    "• DN to radiance: L=gain×DN+bias\n• DOS1: dark object subtraction\n• DOS2: DOS1 + transmittance\n• QUAC: fast all-band correction from image statistics")  );
   connect( m_methodCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &AtmosphericDialog::onMethodChanged );
   form->addRow( tr( "Correction Method" ), m_methodCombo );

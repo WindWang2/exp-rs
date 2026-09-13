@@ -1078,10 +1078,10 @@ void RsJobPanel::showAboutDialog()
   QMessageBox::information(
     this, tr( "Task Center" ),
     tr( "The Task Center aggregates all algorithm tasks submitted through the Task Center (JobEngine is the internal execution adapter).\n\n"
-        tr("• The list shows title, status and progress; when the 'Load' column is ticked, outputs are loaded into the main view automatically on task success.\n")
-        tr("• Right-click a task: view details (method/parameters/inputs/outputs), stop, load outputs, copy info.\n")
-        tr("• Right-click empty list space: refresh, clear finished, this help.\n")
-        tr("• Cancellation, logs and final states are authoritative in the Task Center; this panel is a projection and holds no independent lifecycle state.") ) );
+        "• The list shows title, status and progress; when the 'Load' column is ticked, outputs are loaded into the main view automatically on task success.\n"
+        "• Right-click a task: view details (method/parameters/inputs/outputs), stop, load outputs, copy info.\n"
+        "• Right-click empty list space: refresh, clear finished, this help.\n"
+        "• Cancellation, logs and final states are authoritative in the Task Center; this panel is a projection and holds no independent lifecycle state." ) );
 }
 
 void RsJobPanel::onContextMenuRequested( const QPoint &pos )

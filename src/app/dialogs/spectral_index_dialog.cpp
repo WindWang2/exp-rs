@@ -99,7 +99,7 @@ void SpectralIndexDialog::setupUi()
   m_inputAssetCombo->setVisible( false );
   m_inputAssetLabel->setVisible( false );
   SicnuDialogHelp::tip( m_inputAssetCombo, tr(
-    tr("Chooses a registered raster data asset as input. The asset version is validated at run time; execution is refused if the version has changed.") ) );
+    "Chooses a registered raster data asset as input. The asset version is validated at run time; execution is refused if the version has changed.")  );
   connect( m_inputAssetCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &SpectralIndexDialog::onInputAssetChanged );
   inputForm->addRow( m_inputAssetLabel, m_inputAssetCombo );
@@ -119,13 +119,13 @@ void SpectralIndexDialog::setupUi()
   m_indexCombo->addItem( tr( "NDBI — Normalized Difference Built-up Index" ), QStringLiteral( "NDBI" ) );
   m_indexCombo->addItem( tr( "MNDWI — Modified Normalized Difference Water Index" ), QStringLiteral( "MNDWI" ) );
   SicnuDialogHelp::tip( m_indexCombo, tr(
-    tr("Spectral index type:\n")
-    tr("• NDVI: vegetation (NIR, Red)\n")
-    tr("• EVI: enhanced vegetation (NIR, Red, Blue)\n")
-    tr("• SAVI: soil-adjusted vegetation (NIR, Red)\n")
-    tr("• NDWI: water (Green, NIR)\n")
-    tr("• NDBI: built-up (SWIR, NIR)\n")
-    tr("• MNDWI: modified water (Green, SWIR)") ) );
+    "Spectral index type:\n"
+    "• NDVI: vegetation (NIR, Red)\n"
+    "• EVI: enhanced vegetation (NIR, Red, Blue)\n"
+    "• SAVI: soil-adjusted vegetation (NIR, Red)\n"
+    "• NDWI: water (Green, NIR)\n"
+    "• NDBI: built-up (SWIR, NIR)\n"
+    "• MNDWI: modified water (Green, SWIR)")  );
   connect( m_indexCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &SpectralIndexDialog::onIndexChanged );
   form->addRow( tr( "Index Type" ), m_indexCombo );

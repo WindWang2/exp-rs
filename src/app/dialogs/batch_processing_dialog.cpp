@@ -204,7 +204,7 @@ void BatchProcessingDialog::setupUi()
   m_algorithmCombo->setObjectName( QStringLiteral( "batchAlgorithmCombo" ) );
   m_algorithmCombo->setMinimumWidth( 320 );
   SicnuDialogHelp::tip( m_algorithmCombo, tr(
-    tr("Choose the remote-sensing or geoprocessing algorithm to batch-run. Validate it on a single file in the toolbox first.") ) );
+    "Choose the remote-sensing or geoprocessing algorithm to batch-run. Validate it on a single file in the toolbox first.")  );
   connect( m_algorithmCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &BatchProcessingDialog::onAlgorithmChanged );
   algForm->addRow( tr( "Processing Algorithms" ), m_algorithmCombo );

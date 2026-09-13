@@ -94,7 +94,7 @@ void LayerGeneralSection::populate( const SelectionContextSnapshot &snapshot )
     if ( auto *raster = qobject_cast<QgsRasterLayer *>( layer ) )
     {
         extra = tr( "<tr><td>Bands</td><td>%1</td></tr>"
-                    tr("<tr><td>Pixel size</td><td>%2 × %3</td></tr>") )
+                    "<tr><td>Pixel size</td><td>%2 × %3</td></tr>" )
                     .arg( raster->bandCount() )
                     .arg( raster->width() )
                     .arg( raster->height() );
@@ -102,7 +102,7 @@ void LayerGeneralSection::populate( const SelectionContextSnapshot &snapshot )
     else if ( auto *vector = qobject_cast<QgsVectorLayer *>( layer ) )
     {
         extra = tr( "<tr><td>Features</td><td>%1</td></tr>"
-                    tr("<tr><td>Geometry type</td><td>%2</td></tr>") )
+                    "<tr><td>Geometry type</td><td>%2</td></tr>" )
                     .arg( vector->featureCount() )
                     .arg( escapeCell( QgsWkbTypes::displayString(
                         vector->wkbType() ) ) );
@@ -111,10 +111,10 @@ void LayerGeneralSection::populate( const SelectionContextSnapshot &snapshot )
     m_summary->setText(
         tr( "<b>%1</b><br>"
             "<table cellspacing='2'>"
-            tr("<tr><td>Type</td><td>%2</td></tr>")
-            tr("<tr><td>Status</td><td>%3</td></tr>")
+            "<tr><td>Type</td><td>%2</td></tr>"
+            "<tr><td>Status</td><td>%3</td></tr>"
             "<tr><td>CRS</td><td>%4</td></tr>"
-            tr("<tr><td>Extent</td><td>%5</td></tr>")
+            "<tr><td>Extent</td><td>%5</td></tr>"
             "%6"
             "</table>" )
             .arg( escapeCell( layer->name() ), type, validity, escapeCell( crs ),
@@ -221,12 +221,12 @@ void VectorStructureSection::populate( const SelectionContextSnapshot &snapshot 
     m_body->setText(
         tr( "<b>%1</b><br>"
             "<table cellspacing='2'>"
-            tr("<tr><td>Features</td><td>%2</td></tr>")
-            tr("<tr><td>Selected features</td><td>%3</td></tr>")
-            tr("<tr><td>Geometry type</td><td>%4</td></tr>")
+            "<tr><td>Features</td><td>%2</td></tr>"
+            "<tr><td>Selected features</td><td>%3</td></tr>"
+            "<tr><td>Geometry type</td><td>%4</td></tr>"
             "<tr><td>CRS</td><td>%5</td></tr>"
-            tr("<tr><td>Edit state</td><td>%6</td></tr>")
-            tr("<tr><td>Fields</td><td>%7</td></tr>")
+            "<tr><td>Edit state</td><td>%6</td></tr>"
+            "<tr><td>Fields</td><td>%7</td></tr>"
             "%8%9"
             "</table>" )
             .arg( escapeCell( vector->name() ),
@@ -312,9 +312,9 @@ void SarInfoSection::populate( const SelectionContextSnapshot &snapshot )
     // "%N" lookalikes that chained .arg() calls would substitute into.
     m_body->setText(
         tr( "<b>%1</b><br>"
-            tr("Identified as a SAR product (heuristics from source / name; explicit detection can override).")
+            "Identified as a SAR product (heuristics from source / name; explicit detection can override)."
             "<table cellspacing='2'>"
-            tr("<tr><td>Bands</td><td>%2</td></tr>")
+            "<tr><td>Bands</td><td>%2</td></tr>"
             "<tr><td>CRS</td><td>%3</td></tr>"
             "%4"
             "</table>"

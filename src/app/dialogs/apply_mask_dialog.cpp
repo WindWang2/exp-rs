@@ -34,7 +34,7 @@ void ApplyMaskDialog::setupUi()
     mainLayout, tr( "Input Data and Mask Raster" ) );
   inputGroup->setToolTip(
     tr( "Applies the mask (1 = obscured, 0 = valid) to the product raster: obscured pixels are set to "
-        tr("NoData, yielding an analysis-ready image.") ) );
+        "NoData, yielding an analysis-ready image." ) );
   auto *form = SicnuUi::makeFormLayout();
   qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( form );
 
@@ -46,8 +46,8 @@ void ApplyMaskDialog::setupUi()
   m_maskLayerCombo = new QComboBox( inputGroup );
   m_maskLayerCombo->setObjectName( QStringLiteral( "applyMaskMaskCombo" ) );
   SicnuDialogHelp::tip( m_maskLayerCombo, tr(
-    tr("A binary mask raster (band 1; > 0 means obscured). Usually the output of the 'QA Mask' dialog;")
-    tr("With different grids but the same CRS, nearest-neighbour alignment happens automatically.") ) );
+    "A binary mask raster (band 1; > 0 means obscured). Usually the output of the 'QA Mask' dialog;"
+    "With different grids but the same CRS, nearest-neighbour alignment happens automatically.")  );
   form->addRow( tr( "Mask Raster" ), m_maskLayerCombo );
 
   QGroupBox *optGroup = setupAdvancedGroup(
@@ -60,8 +60,8 @@ void ApplyMaskDialog::setupUi()
   m_useNoDataCheck = new QCheckBox( tr( "Specify the output NoData value" ), optGroup );
   m_useNoDataCheck->setObjectName( QStringLiteral( "applyMaskNoDataCheck" ) );
   SicnuDialogHelp::tip( m_useNoDataCheck, tr(
-    tr("When ticked, obscured pixels are written with this NoData value (instead of the input band's own NoData).")
-    tr("Required when the input bands define no NoData.") ) );
+    "When ticked, obscured pixels are written with this NoData value (instead of the input band's own NoData)."
+    "Required when the input bands define no NoData.")  );
 
   m_noDataSpin = new QDoubleSpinBox( optGroup );
   m_noDataSpin->setObjectName( QStringLiteral( "applyMaskNoDataSpin" ) );
@@ -79,8 +79,8 @@ void ApplyMaskDialog::setupUi()
   m_alignMaskCheck->setObjectName( QStringLiteral( "applyMaskAlignCheck" ) );
   m_alignMaskCheck->setChecked( true );
   SicnuDialogHelp::tip( m_alignMaskCheck, tr(
-    tr("When the mask grid differs from the product (e.g. a 20 m SCL against a 10 m product), nearest-neighbour sampling aligns the mask to the product grid.")
-    tr("A CRS mismatch always raises an error; it is never corrected automatically.") ) );
+    "When the mask grid differs from the product (e.g. a 20 m SCL against a 10 m product), nearest-neighbour sampling aligns the mask to the product grid."
+    "A CRS mismatch always raises an error; it is never corrected automatically.")  );
   optForm->addRow( tr( "Grid Alignment" ), m_alignMaskCheck );
 
   setupOutputRow( mainLayout );

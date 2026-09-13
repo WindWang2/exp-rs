@@ -796,8 +796,8 @@ Workflow GuidedWorkflowWidget::createObiaWorkflow()
                               "<li>Adjust segmentation parameters if needed, then click <b>Segment</b> (or hierarchical segment)</li>"
                               "<li>Click objects on the map and assign classes, or use <b>Import ROI</b></li>"
                               "<li>Choose a classifier and click <b>Classify</b></li>"
-                              tr("<li>Review <b>Accuracy Assessment</b> (training OA / Kappa / confusion matrix)</li>")
-                              tr("<li>Click <b>Load to Main View</b> to place the result on the main canvas</li>")
+                              "<li>Review <b>Accuracy Assessment</b> (training OA / Kappa / confusion matrix)</li>"
+                              "<li>Click <b>Load to Main View</b> to place the result on the main canvas</li>"
                               "<li>Optional: <b>Export</b> polygons from the class raster</li>"
                               "</ol>"
                               "<p>When OTB is installed, MeanShift is preferred; otherwise a built-in segmenter is used. "

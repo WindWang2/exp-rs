@@ -401,7 +401,7 @@ QString formatStructure( const sicnu::data::AssetStructure &structure )
     QString layerLines;
     for ( const sicnu::data::VectorLayerStructure &layer : vector->layers )
     {
-      layerLines += QStringLiteral( tr("• %1 · %2 · features %3 · %4<br/>%5<br/>") )
+      layerLines += QObject::tr("• %1 · %2 · features %3 · %4<br/>%5<br/>" )
                       .arg( escapeHtml( layer.name ) )
                       .arg( escapeHtml( layer.geometryType.isEmpty()
                                           ? QObject::tr( "Geometry Unknown" )
@@ -478,7 +478,7 @@ QString wrapHtml( const QString &body )
 
 DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
                                     QWidget *parent )
-  : QDockWidget( tr( "Data Management" ), parent )
+  : QDockWidget( QObject::tr( "Data Management" ), parent )
   , m_dataManager( dataManager )
 {
   setObjectName( QStringLiteral( "DataManagerPanel" ) );
@@ -487,7 +487,7 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   m_tree->setObjectName( QStringLiteral( "dataManagerTree" ) );
   // Name embeds status bar + kind prefix/icon; no separate kind/status columns.
   m_tree->setColumnCount( 3 );
-  m_tree->setHeaderLabels( { tr( "Name" ), tr( "Persistence" ), tr( "References" ) } );
+  m_tree->setHeaderLabels( { QObject::tr( "Name" ), QObject::tr( "Persistence" ), QObject::tr( "References" ) } );
   m_tree->setRootIsDecorated( true );
   m_tree->setSelectionMode( QAbstractItemView::ExtendedSelection );
   m_tree->setContextMenuPolicy( Qt::CustomContextMenu );
@@ -499,7 +499,7 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   m_tree->header()->setSectionResizeMode( 1, QHeaderView::ResizeToContents );
   m_tree->header()->setSectionResizeMode( 2, QHeaderView::ResizeToContents );
   m_tree->headerItem()->setToolTip(
-    0, tr( "The color bar on the left shows status (green = available, red = unavailable); the type prefixes the name" ) );
+    0, QObject::tr( "The color bar on the left shows status (green = available, red = unavailable); the type prefixes the name" ) );
   m_tree->setMinimumWidth( 220 );
 
   m_treeStack = new QStackedWidget( this );
@@ -513,9 +513,9 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   treePaneLay->setSpacing( 2 );
   m_filterEdit = new QLineEdit( treePane );
   m_filterEdit->setObjectName( QStringLiteral( "dataManagerFilter" ) );
-  m_filterEdit->setPlaceholderText( tr( "Filter by name / path / ID..." ) );
+  m_filterEdit->setPlaceholderText( QObject::tr( "Filter by name / path / ID..." ) );
   m_filterEdit->setClearButtonEnabled( true );
-  m_filterEdit->setAccessibleName( tr( "Filter Data Assets" ) );
+  m_filterEdit->setAccessibleName( QObject::tr( "Filter Data Assets" ) );
   treePaneLay->addWidget( m_filterEdit );
 
   // Workbench 9.0 M7: bounded pagination over the filtered catalog — the UI
@@ -528,14 +528,14 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   pagerLay->setContentsMargins( 0, 0, 0, 0 );
   m_prevPageBtn = new QToolButton( pagerRow );
   m_prevPageBtn->setObjectName( QStringLiteral( "dataManagerPagerPrev" ) );
-  m_prevPageBtn->setText( tr( "Previous Page" ) );
+  m_prevPageBtn->setText( QObject::tr( "Previous Page" ) );
   m_prevPageBtn->setAutoRepeat( false );
   m_pageLabel = new QLabel( pagerRow );
   m_pageLabel->setObjectName( QStringLiteral( "dataManagerPagerLabel" ) );
-  m_pageLabel->setAccessibleName( tr( "Asset Pagination Status" ) );
+  m_pageLabel->setAccessibleName( QObject::tr( "Asset Pagination Status" ) );
   m_nextPageBtn = new QToolButton( pagerRow );
   m_nextPageBtn->setObjectName( QStringLiteral( "dataManagerPagerNext" ) );
-  m_nextPageBtn->setText( tr( "Next Page" ) );
+  m_nextPageBtn->setText( QObject::tr( "Next Page" ) );
   m_nextPageBtn->setAutoRepeat( false );
   pagerLay->addWidget( m_prevPageBtn );
   pagerLay->addWidget( m_pageLabel, 1 );
@@ -549,9 +549,9 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
 
   m_emptyState = new RsEmptyStateWidget(
       QStringLiteral( "d_t_b_se" ),
-      tr( "No data assets yet" ),
-      tr( "No data assets or collections registered yet. Import remote-sensing imagery, vector files or hyperspectral data to start." ),
-      tr( "Import Data Assets..." ),
+      QObject::tr( "No data assets yet" ),
+      QObject::tr( "No data assets or collections registered yet. Import remote-sensing imagery, vector files or hyperspectral data to start." ),
+      QObject::tr( "Import Data Assets..." ),
       m_treeStack );
   connect( m_emptyState, &RsEmptyStateWidget::actionClicked,
            this, &DataManagerPanel::importRequested );
@@ -564,7 +564,7 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
   detailLay->setContentsMargins( 4, 4, 4, 4 );
   detailLay->setSpacing( 4 );
 
-  m_detailTitle = new QLabel( tr( "Meta Information" ), detailHost );
+  m_detailTitle = new QLabel( QObject::tr( "Meta Information" ), detailHost );
   m_detailTitle->setObjectName( QStringLiteral( "dataManagerDetailTitle" ) );
   m_detailTitle->setStyleSheet( QStringLiteral( "font-weight:600;" ) );
   detailLay->addWidget( m_detailTitle );
@@ -687,7 +687,7 @@ DataManagerPanel::DataManagerPanel( sicnu::data::DataManager *dataManager,
     connect( m_refreshCoalesceTimer, &QTimer::timeout, this, &DataManagerPanel::refresh );
   }
 
-  clearDetails( tr( "Select a data asset or collection to view its meta information." ) );
+  clearDetails( QObject::tr( "Select a data asset or collection to view its meta information." ) );
   refresh();
   applyHelpTips();
 }
@@ -696,11 +696,11 @@ void DataManagerPanel::applyHelpTips()
 {
   setWhatsThis(
     SicnuDialogHelp::htmlForTool( QStringLiteral( "obia_data_manager" ), windowTitle() ) );
-  SicnuDialogHelp::tip( this, tr( "Data management: catalog of project data assets and collections; right-click to add to display, promote, unload or view properties." ) );
-  SicnuDialogHelp::tip( m_tree, tr( "Asset / collection tree. The color bar on the left shows status (green = available, red = unavailable). Double-click = add to display; right-click for more actions." ) );
-  SicnuDialogHelp::tip( m_detailView, tr( "Meta information inspector for the selected assets (path, CRS, band / layer structure, etc.)." ) );
-  SicnuDialogHelp::tip( m_detailTitle, tr( "Title of the current inspector item." ) );
-  SicnuDialogHelp::tip( m_splitter, tr( "Drag the splitter to adjust the heights of the catalog tree and the inspector." ) );
+  SicnuDialogHelp::tip( this, QObject::tr( "Data management: catalog of project data assets and collections; right-click to add to display, promote, unload or view properties." ) );
+  SicnuDialogHelp::tip( m_tree, QObject::tr( "Asset / collection tree. The color bar on the left shows status (green = available, red = unavailable). Double-click = add to display; right-click for more actions." ) );
+  SicnuDialogHelp::tip( m_detailView, QObject::tr( "Meta information inspector for the selected assets (path, CRS, band / layer structure, etc.)." ) );
+  SicnuDialogHelp::tip( m_detailTitle, QObject::tr( "Title of the current inspector item." ) );
+  SicnuDialogHelp::tip( m_splitter, QObject::tr( "Drag the splitter to adjust the heights of the catalog tree and the inspector." ) );
 }
 
 int DataManagerPanel::rowCount() const
@@ -823,7 +823,7 @@ void DataManagerPanel::createRow( QTreeWidgetItem *parent,
   if ( state == sicnu::data::AssetState::Missing )
   {
     item->setToolTip(
-      0, tr( "%1\nStatus: source missing — recoverable by re-linking\n%2" )
+      0, QObject::tr( "%1\nStatus: source missing — recoverable by re-linking\n%2" )
            .arg( displayName, source ) );
   }
 }
@@ -858,7 +858,7 @@ void DataManagerPanel::addIndexRow( QTreeWidgetItem *parent,
       case sicnu::data::AssetKind::VirtualRaster:
         return kindText( entry.kind );
     }
-    return tr( "Assets" );
+    return QObject::tr( "Assets" );
   }();
   createRow( parent, entry.displayName, kindLabel, entry.kind, entry.state,
              entry.source, entry.persistence, entry.id );
@@ -916,7 +916,7 @@ void DataManagerPanel::populateCollectionChildren(
   }
   if ( matchedInCollection > rendered )
     addSentinelRow( collectionItem,
-                    tr( "Showing first %1 of %2 items — use the filter to narrow down" )
+                    QObject::tr( "Showing first %1 of %2 items — use the filter to narrow down" )
                       .arg( rendered )
                       .arg( matchedInCollection ) );
   collectionItem->setData( 0, kLazyPopulateRole, false );
@@ -975,7 +975,7 @@ void DataManagerPanel::refresh()
   m_tree->clear();
   if ( !m_dataManager )
   {
-    clearDetails( tr( "The data manager is unavailable." ) );
+    clearDetails( QObject::tr( "The data manager is unavailable." ) );
     return;
   }
 
@@ -1042,9 +1042,9 @@ void DataManagerPanel::refresh()
     auto *collectionItem = new QTreeWidgetItem( m_tree );
     configureNameCell( collectionItem,
                        collection.displayName,
-                       tr( "Collections" ),
+                       QObject::tr( "Collections" ),
                        appIcon( "d_t_b_se" ),
-                       tr( "Collections" ),
+                       QObject::tr( "Collections" ),
                        QColor( 0x09, 0x69, 0xda ) ); // blue stripe for collections
     collectionItem->setText( 2, QString::number( collection.childAssetIds.size() ) );
     collectionItem->setData( 0, kCollectionIdRole, collection.id.toString() );
@@ -1077,7 +1077,7 @@ void DataManagerPanel::refresh()
       }
       if ( bucket.size() > rendered )
         addSentinelRow( collectionItem,
-                        tr( "Showing first %1 of %2 items — use the filter to narrow down" )
+                        QObject::tr( "Showing first %1 of %2 items — use the filter to narrow down" )
                           .arg( rendered )
                           .arg( bucket.size() ) );
       collectionItem->setExpanded( true );
@@ -1089,21 +1089,21 @@ void DataManagerPanel::refresh()
   if ( m_dataManager->temporalCollections().size() > 0 )
   {
     auto *temporalGroup = new QTreeWidgetItem( m_tree );
-    temporalGroup->setText( 0, tr( "Epoch Collection" ) );
-    temporalGroup->setText( 1, tr( "Workspace Records" ) );
+    temporalGroup->setText( 0, QObject::tr( "Epoch Collection" ) );
+    temporalGroup->setText( 1, QObject::tr( "Workspace Records" ) );
     temporalGroup->setText( 2, QString::number( m_dataManager->temporalCollections().size() ) );
     for ( const auto &record : m_dataManager->temporalCollections() )
     {
       auto *temporalItem = new QTreeWidgetItem( temporalGroup );
       configureNameCell( temporalItem,
                          record.displayName,
-                         tr( "Epoch Collection" ),
+                         QObject::tr( "Epoch Collection" ),
                          appIcon( "d_t_b_se" ),
-                         tr( "Epoch collection (multitemporal scene collection)" ),
+                         QObject::tr( "Epoch collection (multitemporal scene collection)" ),
                          QColor( 0x7c, 0x3a, 0xed ) ); // violet stripe for temporal records
       temporalItem->setData( 0, kTemporalCollectionIdRole, record.id.toString() );
       temporalItem->setText( 2, QString::number( record.revision ) );
-      temporalItem->setText( 1, tr( "Revision %1" ).arg( record.revision ) );
+      temporalItem->setText( 1, QObject::tr( "Revision %1" ).arg( record.revision ) );
     }
     temporalGroup->setExpanded( true );
   }
@@ -1127,7 +1127,7 @@ void DataManagerPanel::refresh()
     if ( paginated )
     {
       addSentinelRow( nullptr,
-                      tr( "Items %1–%2 of %3 assets (page %4/%5)" )
+                      QObject::tr( "Items %1–%2 of %3 assets (page %4/%5)" )
                         .arg( begin + 1 )
                         .arg( end )
                         .arg( standalone.size() )
@@ -1138,7 +1138,7 @@ void DataManagerPanel::refresh()
     {
       m_pagerRow->setVisible( paginated );
       if ( m_pageLabel )
-        m_pageLabel->setText( tr( "Page %1/%2 · %3 items in total" )
+        m_pageLabel->setText( QObject::tr( "Page %1/%2 · %3 items in total" )
                                 .arg( m_standalonePage + 1 )
                                 .arg( qMax( 1, m_standalonePageCount ) )
                                 .arg( standalone.size() ) );
@@ -1217,15 +1217,15 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
         return;
 
       QMenu menu( this );
-      QAction *analyzeAction = menu.addAction( tr( "Time Series Analysis..." ) );
-      analyzeAction->setToolTip( tr( "Opens and processes this collection in the time series analysis dialog." ) );
-      QAction *preflightAction = menu.addAction( tr( "Precheck Collection" ) );
-      preflightAction->setToolTip( tr( "Checks raster alignment, time and platform consistency of the collection's scenes." ) );
+      QAction *analyzeAction = menu.addAction( QObject::tr( "Time Series Analysis..." ) );
+      analyzeAction->setToolTip( QObject::tr( "Opens and processes this collection in the time series analysis dialog." ) );
+      QAction *preflightAction = menu.addAction( QObject::tr( "Precheck Collection" ) );
+      preflightAction->setToolTip( QObject::tr( "Checks raster alignment, time and platform consistency of the collection's scenes." ) );
       menu.addSeparator();
-      QAction *describeAction = menu.addAction( tr( "View Collection Info" ) );
-      describeAction->setToolTip( tr( "Shows scene count, time range and platform of this epoch collection." ) );
-      QAction *removeAction = menu.addAction( tr( "Remove Collection Record" ) );
-      removeAction->setToolTip( tr( "Removes the record from the workspace (no scene data is deleted)." ) );
+      QAction *describeAction = menu.addAction( QObject::tr( "View Collection Info" ) );
+      describeAction->setToolTip( QObject::tr( "Shows scene count, time range and platform of this epoch collection." ) );
+      QAction *removeAction = menu.addAction( QObject::tr( "Remove Collection Record" ) );
+      removeAction->setToolTip( QObject::tr( "Removes the record from the workspace (no scene data is deleted)." ) );
       QAction *chosen = menu.exec( m_tree->viewport()->mapToGlobal( pos ) );
       if ( chosen == analyzeAction )
       {
@@ -1251,24 +1251,24 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
             else
               warnings.append( issue.message );
           }
-          QString repText = tr( "Precheck result: %1\nTotal scenes: %2\nValid times: %3\n" )
-                              .arg( report.ok() ? tr( "Passed" ) : tr( "Failed" ) )
+          QString repText = QObject::tr( "Precheck result: %1\nTotal scenes: %2\nValid times: %3\n" )
+                              .arg( report.ok() ? QObject::tr( "Passed" ) : QObject::tr( "Failed" ) )
                               .arg( report.sceneCount )
                               .arg( report.scenesWithTime );
           if ( !errors.isEmpty() )
-            repText += tr( "\nErrors:\n- " ) + errors.join( QStringLiteral( "\n- " ) );
+            repText += QObject::tr( "\nErrors:\n- " ) + errors.join( QStringLiteral( "\n- " ) );
           if ( !warnings.isEmpty() )
-            repText += tr( "\nWarnings:\n- " ) + warnings.join( QStringLiteral( "\n- " ) );
-          QMessageBox::information( this, tr( "Collection Precheck Report" ), repText );
+            repText += QObject::tr( "\nWarnings:\n- " ) + warnings.join( QStringLiteral( "\n- " ) );
+          QMessageBox::information( this, QObject::tr( "Collection Precheck Report" ), repText );
         }
         else
         {
-          QMessageBox::warning( this, tr( "Precheck Failed" ), tr( "Cannot parse the collection descriptor: %1" ).arg( parseError ) );
+          QMessageBox::warning( this, QObject::tr( "Precheck Failed" ), QObject::tr( "Cannot parse the collection descriptor: %1" ).arg( parseError ) );
         }
       }
       else if ( chosen == describeAction )
       {
-        QString summary = tr( "Name: %1\nRevision: %2" ).arg( record->displayName )
+        QString summary = QObject::tr( "Name: %1\nRevision: %2" ).arg( record->displayName )
                             .arg( record->revision );
         sicnu::temporal::TemporalCollection parsed;
         QString parseError;
@@ -1283,25 +1283,25 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
             if ( !scene.platform.isEmpty() && !platforms.contains( scene.platform ) )
               platforms.append( scene.platform );
           }
-          summary += QLatin1Char( '\n' ) + tr( "Scenes: %1 (%2 assets bound)" )
+          summary += QLatin1Char( '\n' ) + QObject::tr( "Scenes: %1 (%2 assets bound)" )
                        .arg( parsed.sceneCount() ).arg( bound );
           if ( !parsed.timeRangeStartIso().isEmpty() )
-            summary += QLatin1Char( '\n' ) + tr( "Time range: %1 … %2" )
+            summary += QLatin1Char( '\n' ) + QObject::tr( "Time range: %1 … %2" )
                          .arg( parsed.timeRangeStartIso(), parsed.timeRangeEndIso() );
           if ( !platforms.isEmpty() )
-            summary += QLatin1Char( '\n' ) + tr( "Platform: %1" ).arg( platforms.join( ", " ) );
+            summary += QLatin1Char( '\n' ) + QObject::tr( "Platform: %1" ).arg( platforms.join( ", " ) );
         }
         else
         {
-          summary += QLatin1Char( '\n' ) + tr( "Invalid descriptor: %1" ).arg( parseError );
+          summary += QLatin1Char( '\n' ) + QObject::tr( "Invalid descriptor: %1" ).arg( parseError );
         }
-        QMessageBox::information( this, tr( "Epoch Collection" ), summary );
+        QMessageBox::information( this, QObject::tr( "Epoch Collection" ), summary );
       }
       else if ( chosen == removeAction )
       {
         const auto answer = QMessageBox::question(
-          this, tr( "Remove Epoch Collection" ),
-          tr( "Remove collection %1? Scene data will not be deleted." ).arg( record->displayName ) );
+          this, QObject::tr( "Remove Epoch Collection" ),
+          QObject::tr( "Remove collection %1? Scene data will not be deleted." ).arg( record->displayName ) );
         if ( answer == QMessageBox::Yes )
           m_dataManager->removeTemporalCollection( *recordId ); // signals → coalesced refresh
       }
@@ -1317,21 +1317,21 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
   const int n = ids.size();
 
   QAction *displayAction = menu.addAction(
-    n == 1 ? tr( "Add to Display" ) : tr( "Add to Display (%1 items)" ).arg( n ) );
-  displayAction->setToolTip( tr( "Loads the selected assets as layers into the current view." ) );
+    n == 1 ? QObject::tr( "Add to Display" ) : QObject::tr( "Add to Display (%1 items)" ).arg( n ) );
+  displayAction->setToolTip( QObject::tr( "Loads the selected assets as layers into the current view." ) );
 
   // 查看属性：仅单选时提供（多选时下方检视器已汇总）。
   QAction *inspectAction = nullptr;
   if ( n == 1 && m_dataManager )
   {
-    inspectAction = menu.addAction( tr( "View Properties" ) );
-    inspectAction->setToolTip( tr( "Refreshes this asset's meta information in the inspector below." ) );
+    inspectAction = menu.addAction( QObject::tr( "View Properties" ) );
+    inspectAction->setToolTip( QObject::tr( "Refreshes this asset's meta information in the inspector below." ) );
   }
 
   // 复制源路径：单选/多选均可用。
   QAction *copyPathAction = menu.addAction(
-    n == 1 ? tr( "Copy Source Path" ) : tr( "Copy Source Paths (%1 items)" ).arg( n ) );
-  copyPathAction->setToolTip( tr( "Copies the asset source path (canonicalSource) to the clipboard." ) );
+    n == 1 ? QObject::tr( "Copy Source Path" ) : QObject::tr( "Copy Source Paths (%1 items)" ).arg( n ) );
+  copyPathAction->setToolTip( QObject::tr( "Copies the asset source path (canonicalSource) to the clipboard." ) );
 
   int promotable = 0;
   for ( const sicnu::data::AssetId &id : ids )
@@ -1340,24 +1340,24 @@ void DataManagerPanel::onContextMenu( const QPoint &pos )
       ++promotable;
   }
   QAction *promoteAction = menu.addAction(
-    promotable <= 1 ? tr( "Promote to Project Persistent..." )
-                    : tr( "Promote to Project Persistent (%1 items)..." ).arg( promotable ) );
+    promotable <= 1 ? QObject::tr( "Promote to Project Persistent..." )
+                    : QObject::tr( "Promote to Project Persistent (%1 items)..." ).arg( promotable ) );
   promoteAction->setEnabled( promotable > 0 );
-  promoteAction->setToolTip( tr( "Promotes temporary assets to project-persistent (saved with the project)." ) );
+  promoteAction->setToolTip( QObject::tr( "Promotes temporary assets to project-persistent (saved with the project)." ) );
 
   // 重定位缺失源：仅当单选且该资产 Missing/Unavailable。
   QAction *relocateAction = nullptr;
   if ( n == 1 && isRelocatable( ids.first() ) )
   {
-    relocateAction = menu.addAction( tr( "Re-link Missing Source..." ) );
-    relocateAction->setToolTip( tr( "Assign a new source location to missing/unavailable assets so they can be resolved again." ) );
+    relocateAction = menu.addAction( QObject::tr( "Re-link Missing Source..." ) );
+    relocateAction->setToolTip( QObject::tr( "Assign a new source location to missing/unavailable assets so they can be resolved again." ) );
   }
 
   menu.addSeparator();
 
   QAction *unloadAction = menu.addAction(
-    n == 1 ? tr( "Unload..." ) : tr( "Unload (%1 items)..." ).arg( n ) );
-  unloadAction->setToolTip( tr( "Unload the selected assets from the project (a confirmation pops up; dependents are removed cascadingly)." ) );
+    n == 1 ? QObject::tr( "Unload..." ) : QObject::tr( "Unload (%1 items)..." ).arg( n ) );
+  unloadAction->setToolTip( QObject::tr( "Unload the selected assets from the project (a confirmation pops up; dependents are removed cascadingly)." ) );
 
   QAction *chosen = menu.exec( m_tree->viewport()->mapToGlobal( pos ) );
   if ( chosen == displayAction )
@@ -1421,7 +1421,7 @@ void DataManagerPanel::onSelectionChanged()
 
   if ( !m_dataManager )
   {
-    clearDetails( tr( "The data manager is unavailable." ) );
+    clearDetails( QObject::tr( "The data manager is unavailable." ) );
     return;
   }
 
@@ -1457,47 +1457,47 @@ void DataManagerPanel::onSelectionChanged()
     }
   }
 
-  clearDetails( tr( "Select a data asset or collection to view its meta information. Ctrl / Shift multi-select." ) );
+  clearDetails( QObject::tr( "Select a data asset or collection to view its meta information. Ctrl / Shift multi-select." ) );
 }
 
 void DataManagerPanel::showAssetDetails( const sicnu::data::AssetSnapshot &snapshot )
 {
   if ( m_detailTitle )
-    m_detailTitle->setText( tr( "Asset Meta Information — %1" ).arg( snapshot.displayName() ) );
+    m_detailTitle->setText( QObject::tr( "Asset Meta Information — %1" ).arg( snapshot.displayName() ) );
 
   QString identity;
-  identity += row( tr( "Display Name" ), snapshot.displayName() );
-  identity += row( tr( "Asset ID" ), snapshot.id().toString() );
-  identity += row( tr( "Revision" ), QString::number( snapshot.revision().value() ) );
-  identity += row( tr( "Type" ), kindText( snapshot.kind() ) );
-  identity += row( tr( "Status" ), statusText( snapshot.state() ) );
-  identity += row( tr( "Persistence" ), persistenceText( snapshot.persistence() ) );
-  identity += row( tr( "Storage" ), storageText( snapshot.storageKind() ) );
-  identity += row( tr( "Capabilities" ), capabilityBits( snapshot.capabilities() ) );
-  identity += row( tr( "Show References" ), QString::number( referenceCount( snapshot.id() ) ) );
+  identity += row( QObject::tr( "Display Name" ), snapshot.displayName() );
+  identity += row( QObject::tr( "Asset ID" ), snapshot.id().toString() );
+  identity += row( QObject::tr( "Revision" ), QString::number( snapshot.revision().value() ) );
+  identity += row( QObject::tr( "Type" ), kindText( snapshot.kind() ) );
+  identity += row( QObject::tr( "Status" ), statusText( snapshot.state() ) );
+  identity += row( QObject::tr( "Persistence" ), persistenceText( snapshot.persistence() ) );
+  identity += row( QObject::tr( "Storage" ), storageText( snapshot.storageKind() ) );
+  identity += row( QObject::tr( "Capabilities" ), capabilityBits( snapshot.capabilities() ) );
+  identity += row( QObject::tr( "Show References" ), QString::number( referenceCount( snapshot.id() ) ) );
   if ( snapshot.parentCollectionId() )
-    identity += row( tr( "Collection" ), snapshot.parentCollectionId()->toString() );
+    identity += row( QObject::tr( "Collection" ), snapshot.parentCollectionId()->toString() );
 
   QString source;
-  source += row( tr( "Provider" ),
+  source += row( QObject::tr( "Provider" ),
                  snapshot.source().providerKey.isEmpty()
-                   ? tr( "(automatic)" )
+                   ? QObject::tr( "(automatic)" )
                    : snapshot.source().providerKey );
-  source += row( tr( "Path / URI" ),
+  source += row( QObject::tr( "Path / URI" ),
                  snapshot.source().canonicalSource.isEmpty()
-                   ? tr( "(none)" )
+                   ? QObject::tr( "(none)" )
                    : snapshot.source().canonicalSource );
   if ( !snapshot.source().subdataset.isEmpty() )
-    source += row( tr( "Sub-datasets" ), snapshot.source().subdataset );
+    source += row( QObject::tr( "Sub-datasets" ), snapshot.source().subdataset );
   if ( !snapshot.source().authConfigId.isEmpty() )
-    source += row( tr( "Authentication Settings" ), snapshot.source().authConfigId );
+    source += row( QObject::tr( "Authentication Settings" ), snapshot.source().authConfigId );
   if ( !snapshot.source().dataOptions.isEmpty() )
   {
     QStringList opts;
     for ( auto it = snapshot.source().dataOptions.constBegin();
           it != snapshot.source().dataOptions.constEnd(); ++it )
       opts << QStringLiteral( "%1=%2" ).arg( it.key(), it.value() );
-    source += row( tr( "Data Options" ), opts.join( QStringLiteral( "; " ) ) );
+    source += row( QObject::tr( "Data Options" ), opts.join( QStringLiteral( "; " ) ) );
   }
 
   // Provenance + lineage: what produced this asset (derivation record) and
@@ -1509,17 +1509,17 @@ void DataManagerPanel::showAssetDetails( const sicnu::data::AssetSnapshot &snaps
       m_dataManager->provenance( snapshot.id() );
     if ( record )
     {
-      provenanceRows += row( tr( "Algorithm" ), record->algorithmId );
+      provenanceRows += row( QObject::tr( "Algorithm" ), record->algorithmId );
       if ( !record->algorithmVersion.isEmpty() )
-        provenanceRows += row( tr( "Algorithm Version" ), record->algorithmVersion );
+        provenanceRows += row( QObject::tr( "Algorithm Version" ), record->algorithmVersion );
       if ( !record->parameters.isEmpty() )
-        provenanceRows += row( tr( "Parameters" ),
+        provenanceRows += row( QObject::tr( "Parameters" ),
                                QString::fromUtf8(
                                  QJsonDocument( record->parameters ).toJson( QJsonDocument::Compact ) ) );
       if ( !record->taskReference.isEmpty() )
-        provenanceRows += row( tr( "Task References" ), record->taskReference );
+        provenanceRows += row( QObject::tr( "Task References" ), record->taskReference );
       if ( record->completedAtUtc.isValid() )
-        provenanceRows += row( tr( "Finish Time" ), record->completedAtUtc.toString( Qt::ISODate ) );
+        provenanceRows += row( QObject::tr( "Finish Time" ), record->completedAtUtc.toString( Qt::ISODate ) );
 
       const QVector<sicnu::data::AssetId> inputs = m_dataManager->derivedFrom( snapshot.id() );
       if ( !inputs.isEmpty() )
@@ -1530,12 +1530,12 @@ void DataManagerPanel::showAssetDetails( const sicnu::data::AssetSnapshot &snaps
           const auto input = m_dataManager->asset( id );
           names << ( input ? input->displayName() : id.toString() );
         }
-        provenanceRows += row( tr( "Derived from" ), names.join( QStringLiteral( ", " ) ) );
+        provenanceRows += row( QObject::tr( "Derived from" ), names.join( QStringLiteral( ", " ) ) );
       }
     }
     else
     {
-      provenanceRows += row( tr( "Provenance" ), tr( "No derivation record (registered directly)" ) );
+      provenanceRows += row( QObject::tr( "Provenance" ), QObject::tr( "No derivation record (registered directly)" ) );
     }
 
     const QVector<sicnu::data::AssetId> outputs = m_dataManager->derivedOutputsOf( snapshot.id() );
@@ -1547,15 +1547,15 @@ void DataManagerPanel::showAssetDetails( const sicnu::data::AssetSnapshot &snaps
         const auto output = m_dataManager->asset( id );
         names << ( output ? output->displayName() : id.toString() );
       }
-      provenanceRows += row( tr( "Derived Artifacts" ), names.join( QStringLiteral( ", " ) ) );
+      provenanceRows += row( QObject::tr( "Derived Artifacts" ), names.join( QStringLiteral( ", " ) ) );
     }
   }
 
   const QString body =
     QStringLiteral( "<h2>%1</h2>" ).arg( escapeHtml( snapshot.displayName() ) )
-    + section( tr( "Identity and Status" ), identity )
-    + section( tr( "Data Source" ), source )
-    + section( tr( "Provenance and Lineage" ), provenanceRows )
+    + section( QObject::tr( "Identity and Status" ), identity )
+    + section( QObject::tr( "Data Source" ), source )
+    + section( QObject::tr( "Provenance and Lineage" ), provenanceRows )
     + formatStructure( snapshot.structure() );
 
   m_detailView->setHtml( wrapHtml( body ) );
@@ -1568,7 +1568,7 @@ void DataManagerPanel::showMultiSelectionDetails(
   if ( m_previewLabel )
     m_previewLabel->hide(); // previews are per-asset only (review A11)
   if ( m_detailTitle )
-    m_detailTitle->setText( tr( "Multiple selection — %1 items" ).arg( ids.size() ) );
+    m_detailTitle->setText( QObject::tr( "Multiple selection — %1 items" ).arg( ids.size() ) );
 
   int ready = 0, temporary = 0, raster = 0, vector = 0;
   QString list;
@@ -1597,19 +1597,19 @@ void DataManagerPanel::showMultiSelectionDetails(
   }
 
   QString summary;
-  summary += row( tr( "Selection Count" ), QString::number( ids.size() ) );
-  summary += row( tr( "Ready" ), QString::number( ready ) );
-  summary += row( tr( "Temporary Assets" ), QString::number( temporary ) );
-  summary += row( tr( "Raster Class" ), QString::number( raster ) );
-  summary += row( tr( "Vector" ), QString::number( vector ) );
+  summary += row( QObject::tr( "Selection Count" ), QString::number( ids.size() ) );
+  summary += row( QObject::tr( "Ready" ), QString::number( ready ) );
+  summary += row( QObject::tr( "Temporary Assets" ), QString::number( temporary ) );
+  summary += row( QObject::tr( "Raster Class" ), QString::number( raster ) );
+  summary += row( QObject::tr( "Vector" ), QString::number( vector ) );
 
   const QString body =
-    QStringLiteral( "<h2>%1</h2>" ).arg( escapeHtml( tr( "%1 assets selected" ).arg( ids.size() ) ) )
-    + section( tr( "Summary" ), summary )
+    QStringLiteral( "<h2>%1</h2>" ).arg( escapeHtml( QObject::tr( "%1 assets selected" ).arg( ids.size() ) ) )
+    + section( QObject::tr( "Summary" ), summary )
     + QStringLiteral( "<h3>%1</h3><div class='block'>%2</div>" )
-        .arg( escapeHtml( tr( "List" ) ), list )
+        .arg( escapeHtml( QObject::tr( "List" ) ), list )
     + QStringLiteral( "<p style='color:#656d76'>%1</p>" )
-        .arg( escapeHtml( tr( "Right-click for batch actions: add to display / promote / unload." ) ) );
+        .arg( escapeHtml( QObject::tr( "Right-click for batch actions: add to display / promote / unload." ) ) );
 
   m_detailView->setHtml( wrapHtml( body ) );
 }
@@ -1620,32 +1620,32 @@ void DataManagerPanel::showCollectionDetails(
   if ( m_previewLabel )
     m_previewLabel->hide(); // previews are per-asset only (review A11)
   if ( m_detailTitle )
-    m_detailTitle->setText( tr( "Collection Meta Information — %1" ).arg( collection.displayName ) );
+    m_detailTitle->setText( QObject::tr( "Collection Meta Information — %1" ).arg( collection.displayName ) );
 
   QString identity;
-  identity += row( tr( "Display Name" ), collection.displayName );
-  identity += row( tr( "Collection ID" ), collection.id.toString() );
-  identity += row( tr( "Sub-asset Count" ),
+  identity += row( QObject::tr( "Display Name" ), collection.displayName );
+  identity += row( QObject::tr( "Collection ID" ), collection.id.toString() );
+  identity += row( QObject::tr( "Sub-asset Count" ),
                    QString::number( collection.childAssetIds.size() ) );
 
   QString product;
   const auto &md = collection.metadata;
-  product += row( tr( "Platform" ),
-                  md.platform.isEmpty() ? tr( "(none)" ) : md.platform );
-  product += row( tr( "Sensor" ),
-                  md.sensor.isEmpty() ? tr( "(none)" ) : md.sensor );
-  product += row( tr( "Product Level" ),
-                  md.productLevel.isEmpty() ? tr( "(none)" ) : md.productLevel );
-  product += row( tr( "Acquisition Date" ),
-                  md.acquisitionDate.isEmpty() ? tr( "(none)" ) : md.acquisitionDate );
-  product += row( tr( "Processing Level" ),
-                  md.processingLevel.isEmpty() ? tr( "(none)" ) : md.processingLevel );
+  product += row( QObject::tr( "Platform" ),
+                  md.platform.isEmpty() ? QObject::tr( "(none)" ) : md.platform );
+  product += row( QObject::tr( "Sensor" ),
+                  md.sensor.isEmpty() ? QObject::tr( "(none)" ) : md.sensor );
+  product += row( QObject::tr( "Product Level" ),
+                  md.productLevel.isEmpty() ? QObject::tr( "(none)" ) : md.productLevel );
+  product += row( QObject::tr( "Acquisition Date" ),
+                  md.acquisitionDate.isEmpty() ? QObject::tr( "(none)" ) : md.acquisitionDate );
+  product += row( QObject::tr( "Processing Level" ),
+                  md.processingLevel.isEmpty() ? QObject::tr( "(none)" ) : md.processingLevel );
   if ( !md.attributes.isEmpty() )
   {
     QStringList attrs;
     for ( auto it = md.attributes.constBegin(); it != md.attributes.constEnd(); ++it )
       attrs << QStringLiteral( "%1 = %2" ).arg( it.key(), it.value() );
-    product += row( tr( "Extended Properties" ), attrs.join( QStringLiteral( "\n" ) ) );
+    product += row( QObject::tr( "Extended Properties" ), attrs.join( QStringLiteral( "\n" ) ) );
   }
 
   QString children;
@@ -1660,14 +1660,14 @@ void DataManagerPanel::showCollectionDetails(
       children += QStringLiteral( "• %1<br/>" ).arg( escapeHtml( id.toString() ) );
   }
   if ( children.isEmpty() )
-    children = escapeHtml( tr( "(no sub-assets)" ) );
+    children = escapeHtml( QObject::tr( "(no sub-assets)" ) );
 
   const QString body =
     QStringLiteral( "<h2>%1</h2>" ).arg( escapeHtml( collection.displayName ) )
-    + section( tr( "Collections" ), identity )
-    + section( tr( "Product Metadata" ), product )
+    + section( QObject::tr( "Collections" ), identity )
+    + section( QObject::tr( "Product Metadata" ), product )
     + QStringLiteral( "<h3>%1</h3><div class='block'>%2</div>" )
-        .arg( escapeHtml( tr( "Sub-assets" ) ), children );
+        .arg( escapeHtml( QObject::tr( "Sub-assets" ) ), children );
 
   m_detailView->setHtml( wrapHtml( body ) );
 }
@@ -1675,7 +1675,7 @@ void DataManagerPanel::showCollectionDetails(
 void DataManagerPanel::clearDetails( const QString &message )
 {
   if ( m_detailTitle )
-    m_detailTitle->setText( tr( "Meta Information" ) );
+    m_detailTitle->setText( QObject::tr( "Meta Information" ) );
   if ( m_previewLabel )
     m_previewLabel->hide();
   if ( m_detailView )
@@ -1683,7 +1683,7 @@ void DataManagerPanel::clearDetails( const QString &message )
     m_detailView->setHtml( wrapHtml(
       QStringLiteral( "<p style='color:#656d76'>%1</p>" )
         .arg( escapeHtml( message.isEmpty()
-                            ? tr( "Select a data asset or collection to view its meta information." )
+                            ? QObject::tr( "Select a data asset or collection to view its meta information." )
                             : message ) ) ) );
   }
 }
@@ -1707,7 +1707,7 @@ void DataManagerPanel::requestDetailPreview( const sicnu::data::AssetSnapshot &s
   }
 
   m_previewLabel->show();
-  m_previewLabel->setText( tr( "Loading preview..." ) );
+  m_previewLabel->setText( QObject::tr( "Loading preview..." ) );
   m_previewLabel->setPixmap( QPixmap() );
   m_previewSource = source;
 
@@ -1734,13 +1734,13 @@ void DataManagerPanel::requestDetailPreview( const sicnu::data::AssetSnapshot &s
         m_previewLabel->setText( QString() );
         m_previewLabel->setPixmap( QPixmap::fromImage( result.image ) );
         m_previewLabel->setAccessibleName(
-          tr( "Data Asset Preview — %1" ).arg( result.path ) );
+          QObject::tr( "Data Asset Preview — %1" ).arg( result.path ) );
       }
       else
       {
         m_previewLabel->setPixmap( QPixmap() );
         m_previewLabel->setText( result.error.isEmpty()
-                                   ? tr( "Preview Unavailable" )
+                                   ? QObject::tr( "Preview Unavailable" )
                                    : result.error );
       }
     } );

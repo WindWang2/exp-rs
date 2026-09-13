@@ -54,7 +54,7 @@ RibbonMetrics computeRibbonMetrics( const QFontMetrics &fm )
   RibbonMetrics m;
   m.iconSize = qMax( 24, qMin( 32, fm.height() * 2 ) );
   m.largeBtnHeight = m.iconSize + ( fm.lineSpacing() * 2 ) + 10;
-  m.largeBtnMinWidth = qMax( 56, fm.horizontalAdvance( QStringLiteral( tr("four Chinese characters") ) ) + 12 );
+  m.largeBtnMinWidth = qMax( 56, fm.horizontalAdvance( QObject::tr("four Chinese characters") ) ) + 12 ;
   m.titleHeight = qMax( 16, fm.height() + 4 );
   m.pageHeight = m.largeBtnHeight + m.titleHeight + 12 + 4;
   return m;
@@ -108,7 +108,7 @@ void polishTabButton( QPushButton *btn )
   btn->setCursor( Qt::PointingHandCursor );
   const QFontMetrics fm = btn->fontMetrics();
   btn->setMinimumHeight( qMax( 28, fm.height() + 10 ) );
-  const int textW = btn->text().isEmpty() ? fm.horizontalAdvance( QStringLiteral( tr("Label") ) ) : fm.horizontalAdvance( btn->text() );
+  const int textW = btn->text().isEmpty() ? fm.horizontalAdvance( QObject::tr("Label") ) : fm.horizontalAdvance( btn->text() );
   btn->setMinimumWidth( qMax( 56, textW + 20 ) );
   btn->setObjectName( QStringLiteral( "rsRibbonTabButton" ) );
 }

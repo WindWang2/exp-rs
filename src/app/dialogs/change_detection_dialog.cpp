@@ -61,7 +61,7 @@ void ChangeDetectionDialog::setupUi()
   compareButton->setObjectName( QStringLiteral( "changeCompareButton" ) );
   SicnuUi::markSecondary( compareButton );
   SicnuDialogHelp::tip( compareButton, tr(
-    tr("Opens the side-by-side comparison view (divider / swipe + blink) to visually inspect registration and change.") ) );
+    "Opens the side-by-side comparison view (divider / swipe + blink) to visually inspect registration and change.")  );
   connect( compareButton, &QPushButton::clicked,
            this, &ChangeDetectionDialog::openComparisonPreview );
   form->addRow( QString(), compareButton );
@@ -82,14 +82,14 @@ void ChangeDetectionDialog::setupUi()
   m_methodCombo->addItem( tr( "Multivariate Alteration Detection (MAD)" ), QStringLiteral( "mad" ) );
   m_methodCombo->addItem( tr( "Change Mask (manual threshold)" ), QStringLiteral( "change_mask" ) );
   SicnuDialogHelp::tip( m_methodCombo, tr(
-    tr("• Difference: later − earlier\n• Normalized difference: (later − earlier)/(later + earlier)\n• Ratio: later / earlier\n")
-    tr("• CVA: multiband change vector magnitude (all bands)\n• MAD: multivariate alteration detection (canonical correlation analysis)\n• Mask: |difference| ≥ threshold") ) );
+    "• Difference: later − earlier\n• Normalized difference: (later − earlier)/(later + earlier)\n• Ratio: later / earlier\n"
+    "• CVA: multiband change vector magnitude (all bands)\n• MAD: multivariate alteration detection (canonical correlation analysis)\n• Mask: |difference| ≥ threshold")  );
   methodForm->addRow( tr( "Change Algorithm" ), m_methodCombo );
 
   m_makeMaskCheck = new QCheckBox( tr( "Also output a binary change mask" ), methodGroup );
   m_makeMaskCheck->setObjectName( QStringLiteral( "cdMakeMaskCheck" ) );
   SicnuDialogHelp::tip( m_makeMaskCheck, tr(
-    tr("Besides the method raster, also outputs a 0/1 change mask (with threshold strategy, morphological cleanup and a minimum mapping unit).") ) );
+    "Besides the method raster, also outputs a 0/1 change mask (with threshold strategy, morphological cleanup and a minimum mapping unit).")  );
   methodForm->addRow( QString(), m_makeMaskCheck );
 
   // Mask parameter section: threshold strategy + cleanup + minimum mapping unit.

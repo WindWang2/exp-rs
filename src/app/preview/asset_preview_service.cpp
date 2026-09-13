@@ -109,7 +109,7 @@ PreviewRender renderRasterPreview( const QString &path, const QSize &targetSize,
     if ( meta.width <= 0 || meta.height <= 0 || meta.bandCount <= 0 )
     {
       out.status = PreviewRender::Status::Failed;
-      out.error = QStringLiteral( tr("empty raster or zero bands") );
+      out.error = QObject::tr("empty raster or zero bands" );
       return out;
     }
 
@@ -121,7 +121,7 @@ PreviewRender renderRasterPreview( const QString &path, const QSize &targetSize,
          && static_cast<long long>( meta.width ) * meta.height > maxNativePixels )
     {
       out.status = PreviewRender::Status::Unsupported;
-      out.error = QStringLiteral( tr("The %1×%2 raster has no built-in pyramids and exceeds the preview pixel cap %3 (refused to keep the UI responsive)") )
+      out.error = QObject::tr("The %1×%2 raster has no built-in pyramids and exceeds the preview pixel cap %3 (refused to keep the UI responsive)" )
                     .arg( meta.width )
                     .arg( meta.height )
                     .arg( maxNativePixels );
@@ -148,7 +148,7 @@ PreviewRender renderRasterPreview( const QString &path, const QSize &targetSize,
     if ( values.size() < bands.size() * plane )
     {
       out.status = PreviewRender::Status::Failed;
-      out.error = QStringLiteral( tr("too few pixels read (incomplete data)") );
+      out.error = QObject::tr("too few pixels read (incomplete data)" );
       return out;
     }
 
@@ -207,7 +207,7 @@ PreviewRender renderRasterPreview( const QString &path, const QSize &targetSize,
   catch ( const std::exception &e )
   {
     out.status = PreviewRender::Status::Failed;
-    out.error = QStringLiteral( tr("Raster read failed: %1") ).arg( QString::fromUtf8( e.what() ) );
+    out.error = QObject::tr("Raster read failed: %1" ).arg( QString::fromUtf8( e.what() ) );
     return out;
   }
 }
@@ -223,7 +223,7 @@ PreviewRender renderVectorPreview( const QString &path, const QSize &targetSize,
   if ( !layer.isValid() )
   {
     out.status = PreviewRender::Status::Failed;
-    out.error = QStringLiteral( tr("Cannot open the vector data (unsupported driver or corrupt file)") );
+    out.error = QObject::tr("Cannot open the vector data (unsupported driver or corrupt file)" );
     return out;
   }
 
@@ -231,7 +231,7 @@ PreviewRender renderVectorPreview( const QString &path, const QSize &targetSize,
   if ( count > maxFeatures )
   {
     out.status = PreviewRender::Status::Unsupported;
-    out.error = QStringLiteral( tr("The feature count %1 exceeds the preview cap %2 (refused to keep the UI responsive)") )
+    out.error = QObject::tr("The feature count %1 exceeds the preview cap %2 (refused to keep the UI responsive)" )
                   .arg( count )
                   .arg( maxFeatures );
     return out;
@@ -241,7 +241,7 @@ PreviewRender renderVectorPreview( const QString &path, const QSize &targetSize,
   if ( extent.isEmpty() || !extent.isFinite() )
   {
     out.status = PreviewRender::Status::Failed;
-    out.error = QStringLiteral( tr("layer has no valid extent (empty layer)") );
+    out.error = QObject::tr("layer has no valid extent (empty layer)" );
     return out;
   }
 

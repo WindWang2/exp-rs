@@ -173,14 +173,14 @@ void QgisDesktopWindow::about()
 {
     QMessageBox::about(this, tr("About RS Studio"),
         tr("SICNU GEO RS Remote-Sensing Image Interpretation and Analysis Platform\n\n"
-           tr("A professional desktop for remote-sensing data processing and intelligent interpretation\n")
-           tr("Built on Qt 6 and a modern remote-sensing algorithm architecture\n\n")
-           tr("Version: v0.9.2-dev\n\n")
-           tr("Key features:\n")
-           tr("- Full multi-source raster and vector layer support\n")
-           tr("- High-performance multiband rendering with real-time color stretching\n")
-           tr("- Smart CRS and projection transformations\n")
-           tr("- A rich remote-sensing toolbox with asynchronous task scheduling")));
+           "A professional desktop for remote-sensing data processing and intelligent interpretation\n"
+           "Built on Qt 6 and a modern remote-sensing algorithm architecture\n\n"
+           "Version: v0.9.2-dev\n\n"
+           "Key features:\n"
+           "- Full multi-source raster and vector layer support\n"
+           "- High-performance multiband rendering with real-time color stretching\n"
+           "- Smart CRS and projection transformations\n"
+           "- A rich remote-sensing toolbox with asynchronous task scheduling"));
 }
 
 void QgisDesktopWindow::loadSampleData()

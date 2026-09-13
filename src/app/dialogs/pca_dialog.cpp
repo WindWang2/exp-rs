@@ -39,8 +39,8 @@ void PcaDialog::setupUi()
     // the dialog must not invent its own default.
     m_componentsSpin->setValue( 0 );
     SicnuDialogHelp::tip( m_componentsSpin, tr(
-      tr("Number of output components, 0 = all bands; must be ≤ the input band count.")
-      tr("The first PCs usually hold most of the variance; used for band decorrelation and dimensionality-reduction compression.") ) );
+      "Number of output components, 0 = all bands; must be ≤ the input band count."
+      "The first PCs usually hold most of the variance; used for band decorrelation and dimensionality-reduction compression.")  );
     form->addRow( tr( "Number of Components" ), m_componentsSpin );
 
     setupOutputRow( mainLayout );

@@ -111,13 +111,13 @@ private:
     QVector<StepCard> m_cards;
 
     // Metrics cache
-    QString m_sourceRasterText = QStringLiteral( tr("No image loaded") );
-    QString m_classCountText = QStringLiteral( tr("Undefined class") );
-    QString m_sampleText = QStringLiteral( tr("0 ROIs, 0 pixels") );
-    QString m_evalText = QStringLiteral( tr("Not assessed") );
-    QString m_classifyText = QStringLiteral( tr("Unclassified") );
-    QString m_accuracyText = QStringLiteral( tr("Accuracy not assessed") );
-    QString m_postText = QStringLiteral( tr("No post-processing applied") );
-    QString m_exportText = QStringLiteral( tr("Not exported") );
+    QString m_sourceRasterText = tr("No image loaded");
+    QString m_classCountText = tr("Undefined class");
+    QString m_sampleText = tr("0 ROIs, 0 pixels");
+    QString m_evalText = tr("Not assessed");
+    QString m_classifyText = tr("Unclassified");
+    QString m_accuracyText = tr("Accuracy not assessed");
+    QString m_postText = tr("No post-processing applied");
+    QString m_exportText = tr("Not exported");
     bool m_hasSource = false;
 };

@@ -40,7 +40,7 @@ QString familyDisplayName( const QString &family )
     return QStringLiteral( "Sentinel-2" );
   if ( family == QLatin1String( "modis" ) )
     return QStringLiteral( "MODIS" );
-  return QStringLiteral( tr("Remote-Sensing Products") );
+  return QObject::tr("Remote-Sensing Products" );
 }
 
 } // namespace
@@ -325,7 +325,7 @@ CollectionId ProductImportDialog::commitSelection()
 
   m_committedCollectionId = result.collectionId;
   m_statusLabel->setText(
-    tr( "Imported %1 bands into collection \\"%2\\"." )
+    tr( "Imported %1 bands into collection \"%2\"." )
       .arg( result.childAssetIds.size() )
       .arg( m_preview.collectionDisplayName ) );
   return result.collectionId;

@@ -187,35 +187,35 @@ QStringList RsClassifyWorkflowController::missingRequirements( RsClassifyStep s 
   {
     case RsClassifyStep::ClassSystem:
       if ( mClassCount < 2 )
-        miss << QStringLiteral( tr("at least 2 classes") );
+        miss << tr( "at least 2 classes" );
       break;
     case RsClassifyStep::Samples:
       if ( !mHasSource )
-        miss << QStringLiteral( tr("Open Source Image") );
+        miss << tr( "Open Source Image" );
       if ( mClassCount < 1 )
-        miss << QStringLiteral( tr("at least 1 class") );
+        miss << tr( "at least 1 class" );
       break;
     case RsClassifyStep::Evaluate:
       if ( mTrainPixels <= 0 )
-        miss << QStringLiteral( tr("training pixels ≥ 1") );
+        miss << tr( "training pixels ≥ 1" );
       break;
     case RsClassifyStep::TrainClassify:
       if ( !mHasSource )
-        miss << QStringLiteral( tr("Open Source Image") );
+        miss << tr( "Open Source Image" );
       if ( mTrainPixels < 10 )
-        miss << QStringLiteral( tr("training pixels ≥ 10") );
+        miss << tr( "training pixels ≥ 10" );
       break;
     case RsClassifyStep::Accuracy:
       if ( !mHasFullResult && !mHasAccuracy )
-        miss << QStringLiteral( tr("Finish Full-Image Classification") );
+        miss << tr( "Finish Full-Image Classification" );
       break;
     case RsClassifyStep::PostProcess:
       if ( !mHasFullResult )
-        miss << QStringLiteral( tr("Finish Full-Image Classification") );
+        miss << tr( "Finish Full-Image Classification" );
       break;
     case RsClassifyStep::Export:
       if ( !mHasFullResult && !mHasPost )
-        miss << QStringLiteral( tr("Finish Full-Image Classification or Post-Processing") );
+        miss << tr( "Finish Full-Image Classification or Post-Processing" );
       break;
     case RsClassifyStep::Count:
       break;

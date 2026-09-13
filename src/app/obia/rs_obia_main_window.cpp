@@ -164,7 +164,7 @@ void RsObiaMainWindow::setupToolbar()
     kernelSpin->setSingleStep( 2 ); // smoothKernel must be odd (simple engine)
     kernelSpin->setValue( schemaIntDefault( "rs:obia_segment", "smoothKernel", 5 ) );
     SicnuDialogHelp::tip( kernelSpin, tr(
-      tr("Smoothing kernel size (rs:obia_segment.smoothKernel, odd; also used as the OTB spatialRadius). Larger values give coarser boundaries and fewer small patches.") ) );
+      "Smoothing kernel size (rs:obia_segment.smoothKernel, odd; also used as the OTB spatialRadius). Larger values give coarser boundaries and fewer small patches.")  );
     kernelSpin->setObjectName( "kernelSpin" );
     mToolbar->addWidget( kernelSpin );
 
@@ -172,7 +172,7 @@ void RsObiaMainWindow::setupToolbar()
     binsSpin->setRange( 2, 128 );
     binsSpin->setValue( schemaIntDefault( "rs:obia_segment", "quantizeBins", 32 ) );
     SicnuDialogHelp::tip( binsSpin, tr(
-      tr("Quantization levels (rs:obia_segment.quantizeBins, built-in segmentation fallback). More levels mean more detail and finer objects.") ) );
+      "Quantization levels (rs:obia_segment.quantizeBins, built-in segmentation fallback). More levels mean more detail and finer objects.")  );
     binsSpin->setObjectName( "binsSpin" );
     mToolbar->addWidget( binsSpin );
 
@@ -182,7 +182,7 @@ void RsObiaMainWindow::setupToolbar()
     rangeSpin->setSingleStep( 0.5 );
     rangeSpin->setValue( schemaDoubleDefault( "rs:obia_segment", "rangeRadius", 15.0 ) );
     SicnuDialogHelp::tip( rangeSpin, tr(
-      tr("OTB MeanShift spectral radius (rs:obia_segment.rangeRadius, metres).") ) );
+      "OTB MeanShift spectral radius (rs:obia_segment.rangeRadius, metres).")  );
     rangeSpin->setObjectName( "rangeSpin" );
     mToolbar->addWidget( rangeSpin );
 
@@ -190,7 +190,7 @@ void RsObiaMainWindow::setupToolbar()
     minRegionSpin->setRange( 10, 10000 );
     minRegionSpin->setValue( schemaIntDefault( "rs:obia_segment", "minRegionSize", 50 ) );
     SicnuDialogHelp::tip( minRegionSpin, tr(
-      tr("Minimum object pixel count (rs:obia_segment.minRegionSize). Regions below it are merged, suppressing small patches.") ) );
+      "Minimum object pixel count (rs:obia_segment.minRegionSize). Regions below it are merged, suppressing small patches.")  );
     minRegionSpin->setObjectName( "minRegionSpin" );
     mToolbar->addWidget( minRegionSpin );
 
@@ -199,7 +199,7 @@ void RsObiaMainWindow::setupToolbar()
 
     auto *hierAct = mToolbar->addAction( tr( "Hierarchy" ), this, &RsObiaMainWindow::runHierarchicalSegmentation );
     SicnuDialogHelp::tip( hierAct, tr(
-      tr("Two-level hierarchical segmentation: fine MeanShift + coarse Watershed + parent links (rs:obia_hierarchy; needs OTB).") ) );
+      "Two-level hierarchical segmentation: fine MeanShift + coarse Watershed + parent links (rs:obia_hierarchy; needs OTB).")  );
 
     mToolbar->addWidget( new QLabel( tr( " View L:" ) ) );
     auto *levelSpin = new QSpinBox;
@@ -218,7 +218,7 @@ void RsObiaMainWindow::setupToolbar()
     auto *classifierCombo = new QComboBox;
     classifierCombo->addItems( { "NormalBayes", "SVM", "RandomForest", "KMeans", "MLP" } );
     SicnuDialogHelp::tip( classifierCombo, tr(
-      tr("Object-level classifier (rs:obia_classify.method): Normal Bayes / SVM / Random Forest / K-means / MLP.") ) );
+      "Object-level classifier (rs:obia_classify.method): Normal Bayes / SVM / Random Forest / K-means / MLP.")  );
     classifierCombo->setObjectName( "classifierCombo" );
     mToolbar->addWidget( classifierCombo );
 
@@ -228,7 +228,7 @@ void RsObiaMainWindow::setupToolbar()
     classifyLevelSpin->setValue( 0 );
     classifyLevelSpin->setObjectName( "classifyLevelSpin" );
     SicnuDialogHelp::tip( classifyLevelSpin, tr(
-      tr("Classification level, 0 (finest) by default. Training labels bind to objects of this level.") ) );
+      "Classification level, 0 (finest) by default. Training labels bind to objects of this level.")  );
     mToolbar->addWidget( classifyLevelSpin );
     connect( classifyLevelSpin, QOverload<int>::of( &QSpinBox::valueChanged ),
              this, &RsObiaMainWindow::onClassifyLevelChanged );
@@ -241,7 +241,7 @@ void RsObiaMainWindow::setupToolbar()
 
     auto *roiAct = mToolbar->addAction( tr( "Import ROI" ), this, &RsObiaMainWindow::importRoiLabels );
     SicnuDialogHelp::tip( roiAct, tr(
-      tr("Labels objects from training polygons by majority vote (rs:obia_label); click labels written later override and are reported.") ) );
+      "Labels objects from training polygons by majority vote (rs:obia_label); click labels written later override and are reported.")  );
 
     auto *consAct = mToolbar->addAction( tr( "Consolidate" ), this, &RsObiaMainWindow::runHierarchyConsolidation );
     SicnuDialogHelp::tip( consAct, tr( "Resolves classification conflicts across scale levels (bottom-up majority vote / top-down integration)." ) );

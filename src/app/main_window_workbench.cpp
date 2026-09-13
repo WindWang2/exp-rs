@@ -334,8 +334,8 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     paletteDef.iconName = QStringLiteral( "toolbox" );
     paletteDef.shortcut = QKeySequence( QStringLiteral( "Ctrl+Shift+P" ) );
     paletteDef.category = tr( "Tools" );
-    paletteDef.keywords = { QStringLiteral( "palette" ), QStringLiteral( tr("Command") ),
-                            QStringLiteral( tr("Search") ), QStringLiteral( "command" ) };
+    paletteDef.keywords = { QStringLiteral( "palette" ), tr("Command") ,
+                            tr("Search") , QStringLiteral( "command" ) };
     paletteDef.handler = [this] { m_commandPalette->openPalette(); };
     // The palette itself must not appear inside the palette listing.
     if ( m_commandRegistry->registerCommand( paletteDef ) )
@@ -554,7 +554,7 @@ bool QgisDesktopWindow::confirmWorkbenchShutdown( const QString &actionTitle )
     {
         QString text = tr( "The following jobs still have unfinished tasks; %1 will interrupt them:\n" ).arg( actionTitle );
         for ( const QString &bench : plan.inFlightBenches )
-            text += QStringLiteral( tr("• Workspace '%1' has tasks running\n") ).arg( bench );
+            text += tr("• Workspace '%1' has tasks running\n" ).arg( bench );
         if ( plan.runningTaskCount > 0 )
             text += tr( "• The Task Center still has %1 unfinished tasks (queued / waiting for resources)\n" ).arg( plan.runningTaskCount );
         text += tr( "\nCancel these tasks and continue?" );

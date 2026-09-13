@@ -23,7 +23,7 @@ RsTemplateMatchDialog::RsTemplateMatchDialog( QWidget *parent )
   auto *hint = SicnuUi::makeHintLabel(
     this,
     tr( "Applies when the source image already has approximate geocoordinates: the GeoTransform predicts the search area on the reference image,"
-        tr("Then template correlation matching runs — steadier and more controllable than SIFT.") ) );
+        "Then template correlation matching runs — steadier and more controllable than SIFT." ) );
   hint->setObjectName( QStringLiteral( "rsDialogHelpSummary" ) );
   root->addWidget( hint );
 

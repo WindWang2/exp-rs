@@ -418,7 +418,7 @@ void QgisDesktopWindow::setupDataManagerPanel()
             if ( !plan.activeLeases().isEmpty() )
             {
                 detail = tr( "This asset is referenced by %1 display / processing leases. Unloading removes the corresponding presentation.\n\n"
-                             tr("Continue with the cascading unload?") )
+                             "Continue with the cascading unload?" )
                              .arg( plan.activeLeases().size() );
             }
             const auto choice = QMessageBox::question(
@@ -443,7 +443,7 @@ void QgisDesktopWindow::setupDataManagerPanel()
         if ( !plan.activeLeases().isEmpty() )
         {
             detail = tr( "This asset is referenced by %1 display / processing leases. Unloading removes the corresponding presentation.\n\n"
-                         tr("Continue with the cascading unload?") )
+                         "Continue with the cascading unload?" )
                          .arg( plan.activeLeases().size() );
         }
         const auto choice = QMessageBox::question(
@@ -466,7 +466,7 @@ void QgisDesktopWindow::setupDataManagerPanel()
         const auto choice = QMessageBox::question(
             this, tr( "Batch Unload" ),
             tr( "Unload the selected %1 data assets from the project?\n"
-                tr("If display / processing references exist, their presentations are removed cascadingly.") )
+                "If display / processing references exist, their presentations are removed cascadingly." )
               .arg( ids.size() ),
             QMessageBox::Yes | QMessageBox::No, QMessageBox::No );
         if ( choice != QMessageBox::Yes )

@@ -55,11 +55,11 @@ void RsClassifierSetupBar::buildLayout()
   mBtnUnetDisabled = makeAlgoBtn( tr( "UNet" ), false );
   mBtnNormalBayes->setChecked( true );
   SicnuDialogHelp::tip( mBtnNormalBayes, tr(
-    tr("Normal Bayes: assumes multivariate normal class spectra; suits well-sampled, separable classes.") ) );
+    "Normal Bayes: assumes multivariate normal class spectra; suits well-sampled, separable classes.")  );
   SicnuDialogHelp::tip( mBtnSvm, tr(
-    tr("SVM (RBF): support vector machine with a radial basis kernel; suits medium samples and non-linear boundaries.") ) );
+    "SVM (RBF): support vector machine with a radial basis kernel; suits medium samples and non-linear boundaries.")  );
   SicnuDialogHelp::tip( mBtnKMeans, tr(
-    tr("K-means: unsupervised clustering; the class count comes from the labeled samples, and labels may need mapping to ROI class ids.") ) );
+    "K-means: unsupervised clustering; the class count comes from the labeled samples, and labels may need mapping to ROI class ids.")  );
   SicnuDialogHelp::tip( mBtnRfDisabled, tr( "Random forest: planned; not enabled in this build." ) );
   SicnuDialogHelp::tip( mBtnMahaDisabled, tr( "Mahalanobis distance classification: planned." ) );
   SicnuDialogHelp::tip( mBtnUnetDisabled, tr( "UNet deep learning: planned." ) );
@@ -100,8 +100,8 @@ void RsClassifierSetupBar::buildLayout()
   mBandsEdit->setMaximumWidth( 120 );
   mBandsEdit->setObjectName( QStringLiteral( "rsClassifierBands" ) );
   SicnuDialogHelp::tip( mBandsEdit, tr(
-    tr("Band numbers taking part in the classification (starting at 1), comma-separated.\n")
-    tr("e.g. 1,2,3 or 2,3,4,5. Left empty, the first few bands are used by default.") ) );
+    "Band numbers taking part in the classification (starting at 1), comma-separated.\n"
+    "e.g. 1,2,3 or 2,3,4,5. Left empty, the first few bands are used by default.")  );
   row->addWidget( mBandsEdit );
 
   // --- Train ratio ----------------------------------------------------------
@@ -114,8 +114,8 @@ void RsClassifierSetupBar::buildLayout()
   mTrainRatioSpin->setDecimals( 2 );
   mTrainRatioSpin->setObjectName( QStringLiteral( "rsClassifierTrainRatio" ) );
   SicnuDialogHelp::tip( mTrainRatioSpin, tr(
-    tr("Training share in stratified sampling (0.1–0.95).\n")
-    tr("The remaining samples measure accuracy (confusion matrix). Defaults to 0.7.") ) );
+    "Training share in stratified sampling (0.1–0.95).\n"
+    "The remaining samples measure accuracy (confusion matrix). Defaults to 0.7.")  );
   row->addWidget( mTrainRatioSpin );
 
   // --- Output path ----------------------------------------------------------
@@ -125,23 +125,23 @@ void RsClassifierSetupBar::buildLayout()
   mOutputEdit->setPlaceholderText( tr( "/path/to/classified.tif (prompt if empty)" ) );
   mOutputEdit->setObjectName( QStringLiteral( "rsClassifierOutput" ) );
   SicnuDialogHelp::tip( mOutputEdit, tr(
-    tr("Classification result GeoTIFF path. Left empty, a save dialog pops up on run.") ) );
+    "Classification result GeoTIFF path. Left empty, a save dialog pops up on run.")  );
   row->addWidget( mOutputEdit, /*stretch*/ 1 );
 
   // --- Action buttons -------------------------------------------------------
   mBtnCv = new QPushButton( tr( "Cross-Validation" ), this );
   mBtnCv->setObjectName( QStringLiteral( "rsClassifierBtnCv" ) );
   SicnuDialogHelp::tip( mBtnCv, tr(
-    tr("Stratified K-fold cross-validation to estimate model stability (writes no full-scene classification map).") ) );
+    "Stratified K-fold cross-validation to estimate model stability (writes no full-scene classification map).")  );
   mBtnPreview = new QPushButton( tr( "Quick Preview" ), this );
   mBtnPreview->setObjectName( QStringLiteral( "rsClassifierBtnPreview" ) );
   SicnuDialogHelp::tip( mBtnPreview, tr(
-    tr("Classifies only the current map viewport and loads it temporarily, for quick parameter trials.") ) );
+    "Classifies only the current map viewport and loads it temporarily, for quick parameter trials.")  );
   mBtnApply = new QPushButton( tr( "Train and Classify" ), this );
   mBtnApply->setObjectName( QStringLiteral( "rsClassifierBtnApply" ) );
   SicnuUi::markPrimary( mBtnApply );
   SicnuDialogHelp::tip( mBtnApply, tr(
-    tr("Trains on the ROI samples and classifies the whole scene, writing the output raster; accuracy assessment follows.") ) );
+    "Trains on the ROI samples and classifies the whole scene, writing the output raster; accuracy assessment follows.")  );
 
   auto *helpBtn = new QPushButton( tr( "Help" ), this );
   helpBtn->setObjectName( QStringLiteral( "rsClassifierHelpBtn" ) );
@@ -173,8 +173,8 @@ void RsClassifierSetupBar::buildLayout()
   mUseSrcNodataCheck->setObjectName( QStringLiteral( "rsClassifierUseSrcNodata" ) );
   mUseSrcNodataCheck->setChecked( true );
   mUseSrcNodataCheck->setToolTip( tr(
-    tr("When enabled, GDAL NoData pixels of the input bands are excluded from classification and output as unclassified (0).")
-    tr("Suits image edges or invalid areas.") ) );
+    "When enabled, GDAL NoData pixels of the input bands are excluded from classification and output as unclassified (0)."
+    "Suits image edges or invalid areas.")  );
   row2->addWidget( mUseSrcNodataCheck );
 
   row2->addWidget( new QLabel( tr( "Ignored values:" ), this ) );
@@ -183,8 +183,8 @@ void RsClassifierSetupBar::buildLayout()
   mIgnoreValuesEdit->setPlaceholderText( tr( "e.g. 0 or 0,-9999 (comma-separated)" ) );
   mIgnoreValuesEdit->setMaximumWidth( 160 );
   mIgnoreValuesEdit->setToolTip( tr(
-    tr("Extra ignored pixel values (any band equal to them counts as background / edge).")
-    tr("Common: 0 fill, -9999 background. Can apply together with the source NoData.") ) );
+    "Extra ignored pixel values (any band equal to them counts as background / edge)."
+    "Common: 0 fill, -9999 background. Can apply together with the source NoData.")  );
   row2->addWidget( mIgnoreValuesEdit );
 
   row2->addWidget( new QLabel( tr( "Matches:" ), this ) );
@@ -193,8 +193,8 @@ void RsClassifierSetupBar::buildLayout()
   mIgnoreModeCombo->addItem( tr( "Any band" ), 0 );
   mIgnoreModeCombo->addItem( tr( "All Bands" ), 1 );
   mIgnoreModeCombo->setToolTip( tr(
-    tr("Any band: if one band is NoData / ignored, the whole pixel is ignored (default; suits edges).\n")
-    tr("All bands: the pixel is ignored only when every band is an ignored value.") ) );
+    "Any band: if one band is NoData / ignored, the whole pixel is ignored (default; suits edges).\n"
+    "All bands: the pixel is ignored only when every band is an ignored value.")  );
   row2->addWidget( mIgnoreModeCombo );
   row2->addStretch( 1 );
   root->addLayout( row2 );

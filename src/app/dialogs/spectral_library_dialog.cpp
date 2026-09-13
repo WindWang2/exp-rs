@@ -51,8 +51,8 @@ void SpectralLibraryDialog::setupUi()
   m_libraryPathEdit->setObjectName( QStringLiteral( "spectralLibPathEdit" ) );
   m_libraryPathEdit->setPlaceholderText( tr( "Select a spectral library JSON file (*.json)..." ) );
   SicnuDialogHelp::tip( m_libraryPathEdit, tr(
-    tr("Spectral library file (SpectralLibrary JSON): named spectra plus optional wavelength rasters.")
-    tr("You can also save the current spectrum into the library below.") ) );
+    "Spectral library file (SpectralLibrary JSON): named spectra plus optional wavelength rasters."
+    "You can also save the current spectrum into the library below.")  );
   connect( m_libraryPathEdit, &QLineEdit::textChanged, this, [this]( const QString &text ) {
     m_libraryLoaded = ( !m_loadedPath.isEmpty() && text.trimmed() == m_loadedPath );
     m_saveButton->setEnabled( !m_values.isEmpty() && m_libraryLoaded );
@@ -264,8 +264,8 @@ void SpectralLibraryDialog::runMatch()
   const int comparable = m_tableRowCount;
   m_statusLabel->setText(
     tr( "Matching finished: %1 comparable entries (ascending SAM). The library holds %2 entries in total."
-        tr("Unmatched entries usually have a different band count and no wavelength raster.")
-        tr("Entries with wavelength rasters were resampled automatically before matching.") )
+        "Unmatched entries usually have a different band count and no wavelength raster."
+        "Entries with wavelength rasters were resampled automatically before matching." )
       .arg( comparable )
       .arg( m_library.entries.size() ) );
 }

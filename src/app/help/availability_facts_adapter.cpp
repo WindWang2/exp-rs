@@ -16,28 +16,28 @@ const QVector<AvailabilityFactsAdapter::Requirement> &requirementsFor( const QSt
 {
     using R = AvailabilityFactsAdapter::Requirement;
     static const QVector<R> layerSelected = {
-        { tr("layer selected"), &ContextRules::layerSelected },
+        { "layer selected", &ContextRules::layerSelected },
     };
     static const QVector<R> vectorSelected = {
-        { tr("layer selected"), &ContextRules::layerSelected },
-        { tr("layer is vector data"), &ContextRules::vectorSelected },
+        { "layer selected", &ContextRules::layerSelected },
+        { "layer is vector data", &ContextRules::vectorSelected },
     };
     static const QVector<R> editingAvailable = {
-        { tr("layer selected"), &ContextRules::layerSelected },
-        { tr("layer is vector data"), &ContextRules::vectorSelected },
-        { tr("layer supports editing sessions"), &ContextRules::editingAvailable },
+        { "layer selected", &ContextRules::layerSelected },
+        { "layer is vector data", &ContextRules::vectorSelected },
+        { "layer supports editing sessions", &ContextRules::editingAvailable },
     };
     static const QVector<R> editingActive = {
-        { tr("layer selected"), &ContextRules::layerSelected },
-        { tr("layer is vector data"), &ContextRules::vectorSelected },
-        { tr("Editing session enabled"), &ContextRules::editingActive },
+        { "layer selected", &ContextRules::layerSelected },
+        { "layer is vector data", &ContextRules::vectorSelected },
+        { "Editing session enabled", &ContextRules::editingActive },
     };
     static const QVector<R> rasterSelected = {
-        { tr("raster layer selected"), &ContextRules::rasterSelected },
+        { "raster layer selected", &ContextRules::rasterSelected },
     };
     static const QVector<R> sarRasterSelected = {
-        { tr("raster layer selected"), &ContextRules::rasterSelected },
-        { tr("data is SAR imagery"), &ContextRules::sarSelected },
+        { "raster layer selected", &ContextRules::rasterSelected },
+        { "data is SAR imagery", &ContextRules::sarSelected },
     };
     static const QVector<R> none;
 

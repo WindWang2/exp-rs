@@ -478,7 +478,7 @@ void ActiveViewHost::removeSelectedDisplayLayers()
             names.append( layer->name() );
     }
     QString detail = QObject::tr( "Remove the selected %1 layers from the display?\n(The data assets stay in the project; only the display is removed;"
-                                  tr("External QGIS layers will be removed from the project.)") ).arg( selected.size() );
+                                  "External QGIS layers will be removed from the project.)" ).arg( selected.size() );
     if ( names.size() <= 5 )
         detail += QStringLiteral( "\n\n" ) + names.join( QStringLiteral( "\n" ) );
     else

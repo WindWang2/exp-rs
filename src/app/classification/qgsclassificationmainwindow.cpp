@@ -533,8 +533,8 @@ void QgsClassificationMainWindow::setupToolbars()
   roiBar->setObjectName( QStringLiteral( "rsClassifyRoiBar" ) );
   roiBar->setMovable( false );
   roiBar->setToolTip( tr(
-    tr("Same as main window vector editing: toggle editing → add polygon → double-click to finish;")
-    tr("Selectable for deletion; samples show on the vector layer.") ) );
+    "Same as main window vector editing: toggle editing → add polygon → double-click to finish;"
+    "Selectable for deletion; samples show on the vector layer.")  );
 
   auto *toolPan = roiBar->addAction( tr( "Pan" ) );
   toolPan->setObjectName( QStringLiteral( "rsToolSamplePan" ) );
@@ -558,8 +558,8 @@ void QgsClassificationMainWindow::setupToolbars()
   m_addPolygonAction->setObjectName( QStringLiteral( "rsToolSampleAddPolygon" ) );
   m_addPolygonAction->setCheckable( true );
   m_addPolygonAction->setToolTip( tr(
-    tr("Digitize polygon samples: left-click adds points; right-click / double-click finishes.")
-    tr("The cls_id attribute takes the current class automatically.") ) );
+    "Digitize polygon samples: left-click adds points; right-click / double-click finishes."
+    "The cls_id attribute takes the current class automatically.")  );
 
   m_deleteSelectedAction = roiBar->addAction( tr( "Delete Selected" ) );
   m_deleteSelectedAction->setObjectName( QStringLiteral( "rsToolSampleDelete" ) );
@@ -1619,7 +1619,7 @@ void QgsClassificationMainWindow::populateStepPanels()
 
     auto *note = new QLabel(
       tr( "The digitizing tools (point / rectangle / polygon / freehand / magic wand) are in the toolbar above;"
-          tr("Select a class in the class quick list before digitizing.") ),
+          "Select a class in the class quick list before digitizing." ),
       body );
     note->setWordWrap( true );
     note->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
@@ -1802,7 +1802,7 @@ void QgsClassificationMainWindow::populateStepPanels()
 
     auto *hint = new QLabel(
       tr( "Post-processing uses one dialog per algorithm. Use the buttons below or the menu 'Processing → Post-Classification'.\n"
-          tr("By default results load into this window's layer management on the left; you can also skip this step and go to output.") ),
+          "By default results load into this window's layer management on the left; you can also skip this step and go to output." ),
       body );
     hint->setWordWrap( true );
     hint->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
@@ -1892,7 +1892,7 @@ void QgsClassificationMainWindow::populateStepPanels()
 
     auto *hint = new QLabel(
       tr( "Tick artifacts and press 'Export Selected'; classification / post-processing rasters can be loaded into the main window layer tree."
-          tr("Any successful export or load completes this step.") ),
+          "Any successful export or load completes this step." ),
       body );
     hint->setWordWrap( true );
     hint->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
@@ -3073,7 +3073,7 @@ void QgsClassificationMainWindow::runCrossValidation()
     QMessageBox::information(
       this, tr( "K-Means CV" ),
       tr( "K-means cross-validation is not applicable (cluster ↔ class labels do not align).\n"
-          tr("Use Normal Bayes or SVM.") ) );
+          "Use Normal Bayes or SVM." ) );
     return;
   }
   auto factory = [kind]() -> std::unique_ptr<RsClassifierBackend>

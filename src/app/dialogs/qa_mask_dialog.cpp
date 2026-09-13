@@ -80,7 +80,7 @@ void QaMaskDialog::setupUi()
 
   m_bandCombo = new BandRoleCombo( inputGroup );
   SicnuDialogHelp::tip( m_bandCombo, tr(
-    tr("Quality band. Chosen automatically by product semantic role by default (SCL → scene classification, QA → quality).") ) );
+    "Quality band. Chosen automatically by product semantic role by default (SCL → scene classification, QA → quality).")  );
   inputForm->addRow( tr( "Quality Band" ), m_bandCombo );
 
   qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( inputForm );
@@ -96,10 +96,10 @@ void QaMaskDialog::setupUi()
   m_sourceCombo->addItem( tr( "Sentinel-2 SCL Classes" ), QStringLiteral( "sentinel2_scl" ) );
   m_sourceCombo->addItem( tr( "Generic Bit Mask" ), QStringLiteral( "generic_bitmask" ) );
   SicnuDialogHelp::tip( m_sourceCombo, tr(
-    tr("• Auto: identify by band role / name (SCL → Sentinel-2; QA → Landsat)\n")
-    tr("• Landsat QA_PIXEL: Collection 2 bit flags\n")
-    tr("• Sentinel-2 SCL: by scene classification classes\n")
-    tr("• Generic bitmask: decided bit by bit from the bits parameter") ) );
+    "• Auto: identify by band role / name (SCL → Sentinel-2; QA → Landsat)\n"
+    "• Landsat QA_PIXEL: Collection 2 bit flags\n"
+    "• Sentinel-2 SCL: by scene classification classes\n"
+    "• Generic bitmask: decided bit by bit from the bits parameter")  );
   connect( m_sourceCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &QaMaskDialog::onSourceChanged );
   form->addRow( tr( "Quality Source" ), m_sourceCombo );
@@ -112,9 +112,9 @@ void QaMaskDialog::setupUi()
   m_maskCombo->addItem( tr( "Water" ), QStringLiteral( "water" ) );
   m_maskCombo->addItem( tr( "All invalid/occluded classes" ), QStringLiteral( "all" ) );
   SicnuDialogHelp::tip( m_maskCombo, tr(
-    tr("Choose the classes to turn into the mask.\n")
-    tr("• Landsat: cloud = bits 1/2/3 (dilated cloud / cirrus / cloud), shadow = bit 4, snow = bit 5, water = bit 7\n")
-    tr("• Sentinel-2 SCL: cloud = classes 8/9/10, shadow = 3, snow = 11, water = 6") ) );
+    "Choose the classes to turn into the mask.\n"
+    "• Landsat: cloud = bits 1/2/3 (dilated cloud / cirrus / cloud), shadow = bit 4, snow = bit 5, water = bit 7\n"
+    "• Sentinel-2 SCL: cloud = classes 8/9/10, shadow = 3, snow = 11, water = 6")  );
   form->addRow( tr( "Mask Classes" ), m_maskCombo );
 
   m_bitsSpin = new QSpinBox( paramGroup );

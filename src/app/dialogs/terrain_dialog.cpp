@@ -49,7 +49,7 @@ void TerrainDialog::setupUi()
   mAnalysisCombo->addItem( tr( "Terrain Ruggedness Index (TRI)" ), QStringLiteral( "tri" ) );
   mAnalysisCombo->addItem( tr( "Topographic Position Index (TPI)" ), QStringLiteral( "tpi" ) );
   SicnuDialogHelp::tip( mAnalysisCombo, tr(
-    tr("Slope / aspect computation; hillshade needs solar azimuth and elevation; roughness / TRI / TPI are geomorphometric indices.") ) );
+    "Slope / aspect computation; hillshade needs solar azimuth and elevation; roughness / TRI / TPI are geomorphometric indices.")  );
   inputForm->addRow( tr( "Analysis Type" ), mAnalysisCombo );
 
   QGroupBox *paramGroup = setupParamGroup(

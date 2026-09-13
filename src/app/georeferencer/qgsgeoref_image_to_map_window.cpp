@@ -49,8 +49,8 @@ void QgsGeorefImageToMapWindow::setupCentralWidget()
   mSrcCanvas->setObjectName( QStringLiteral( "rsGeorefI2MSrcCanvas" ) );
   mSrcCanvas->setCanvasColor( Qt::white );
   mSrcCanvas->setToolTip( tr(
-    tr("Source image canvas: loads the image to correct.\n")
-    tr("Add GCP: after clicking an image point, a dialog pops up to enter map coordinates, or pick them from the main window map.") ) );
+    "Source image canvas: loads the image to correct.\n"
+    "Add GCP: after clicking an image point, a dialog pops up to enter map coordinates, or pick them from the main window map.")  );
 
   mDstCanvas = nullptr; // no embedded base / map preview panel
 
@@ -89,7 +89,7 @@ void QgsGeorefImageToMapWindow::setupToolbars()
   mToolBar->setObjectName( QStringLiteral( "rsGeorefI2MToolBar" ) );
   mToolBar->setMovable( false );
   mToolBar->setToolTip( tr(
-    tr("Image to Map: pick points on the source image; enter map coordinates manually or pick them from the main window map (no base map panel).") ) );
+    "Image to Map: pick points on the source image; enter map coordinates manually or pick them from the main window map (no base map panel).")  );
 
   addCanvasNavigationActions( mToolBar, QStringLiteral( "rsGeorefI2M" ) );
   mToolBar->addSeparator();
@@ -102,15 +102,15 @@ QString QgsGeorefImageToMapWindow::windowHelpText() const
 {
   return tr(
     "<b>Image Registration · Image 2 Map</b><br>"
-    tr("Aligned with the QGIS Georeferencer: only the source image to correct is shown; no base map is embedded in this window.<br><br>")
-    tr("<b>Typical Workflow</b><br>")
-    tr("1. Load a georeferenced base map / vector in the main window<br>")
-    tr("2. Open the source image in this window (file or main project layer)<br>")
-    tr("3. Press Add GCP and click an image point on the source image<br>")
-    tr("4. In the 'Enter Map Coordinates' dialog: type X/Y, or press 'Pick Point from Map' and click on the main window map<br>")
-    tr("5. You can also edit the target X/Y columns directly in the GCP table<br>")
-    tr("6. Optionally RPC / polynomial → run the correction<br><br>")
-    tr("No SIFT; no embedded base image panel.") );
+    "Aligned with the QGIS Georeferencer: only the source image to correct is shown; no base map is embedded in this window.<br><br>"
+    "<b>Typical Workflow</b><br>"
+    "1. Load a georeferenced base map / vector in the main window<br>"
+    "2. Open the source image in this window (file or main project layer)<br>"
+    "3. Press Add GCP and click an image point on the source image<br>"
+    "4. In the 'Enter Map Coordinates' dialog: type X/Y, or press 'Pick Point from Map' and click on the main window map<br>"
+    "5. You can also edit the target X/Y columns directly in the GCP table<br>"
+    "6. Optionally RPC / polynomial → run the correction<br><br>"
+    "No SIFT; no embedded base image panel." );
 }
 
 bool QgsGeorefImageToMapWindow::hasDestReady() const

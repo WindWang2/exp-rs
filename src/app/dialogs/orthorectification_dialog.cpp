@@ -64,7 +64,7 @@ void OrthorectificationDialog::setupUi()
     mainLayout, tr( "Orthorectification Parameters" ) );
   paramGroup->setToolTip(
     tr( "Terrain-corrects the image using RPC/GCPs and an optional DEM. The input raster must carry "
-        tr("RPC metadata or GCPs.") ) );
+        "RPC metadata or GCPs." ) );
   auto *form = SicnuUi::makeFormLayout();
   qobject_cast<QVBoxLayout *>( paramGroup->layout() )->addLayout( form );
 
@@ -74,7 +74,7 @@ void OrthorectificationDialog::setupUi()
   m_targetCrsEdit->lineEdit()->setObjectName( QStringLiteral( "orthoTargetCrsEdit" ) );
   m_targetCrsEdit->setCrsString( QStringLiteral( "EPSG:4326" ) );
   SicnuDialogHelp::tip( m_targetCrsEdit, tr(
-    tr("Target CRS (e.g. EPSG:4326, EPSG:32650). Left empty, the CRS carried by the RPC / GCPs is used.") ) );
+    "Target CRS (e.g. EPSG:4326, EPSG:32650). Left empty, the CRS carried by the RPC / GCPs is used.")  );
   form->addRow( tr( "Target CRS" ), m_targetCrsEdit );
 
   auto *demRow = new QHBoxLayout;

@@ -44,7 +44,7 @@ RsAccuracyPanel::RsAccuracyPanel( QWidget *parent )
   mEmptyHint->setWordWrap( true );
   mEmptyHint->setObjectName( QStringLiteral( "rsEmptyHint" ) );
   SicnuDialogHelp::tip( mEmptyHint, tr(
-    tr("Overall accuracy OA, Kappa, confusion matrix (rows = truth, columns = prediction), producer's / user's accuracy and F1.") ) );
+    "Overall accuracy OA, Kappa, confusion matrix (rows = truth, columns = prediction), producer's / user's accuracy and F1.")  );
   layout->addWidget( mEmptyHint );
 
   mHeaderLabel = new QLabel( this );
@@ -66,7 +66,7 @@ RsAccuracyPanel::RsAccuracyPanel( QWidget *parent )
   mConfusion->verticalHeader()->setSectionResizeMode( QHeaderView::Stretch );
   mConfusion->setMinimumHeight( 120 );
   SicnuDialogHelp::tip( mConfusion, tr(
-    tr("Confusion matrix: rows = true classes, columns = predicted classes; the diagonal holds correctly classified sample counts.") ) );
+    "Confusion matrix: rows = true classes, columns = predicted classes; the diagonal holds correctly classified sample counts.")  );
   layout->addWidget( mConfusion, 2 );
 
   auto *pmTitle = new QLabel( tr( "Per-Class Metrics" ), this );
@@ -82,7 +82,7 @@ RsAccuracyPanel::RsAccuracyPanel( QWidget *parent )
   mPerClass->verticalHeader()->setVisible( false );
   mPerClass->setMinimumHeight( 80 );
   SicnuDialogHelp::tip( mPerClass, tr(
-    tr("Producer's accuracy ≈ recall; user's accuracy ≈ precision; F1 is their harmonic mean.") ) );
+    "Producer's accuracy ≈ recall; user's accuracy ≈ precision; F1 is their harmonic mean.")  );
   layout->addWidget( mPerClass, 1 );
 
   mExportBtn = new QPushButton( tr( "Export CSV..." ), this );

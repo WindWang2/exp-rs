@@ -226,17 +226,16 @@ RsTemplateMatcher::Result RsTemplateMatcher::run( const QString &srcRaster,
   {
     GDALClose( srcDs );
     GDALClose( refDs );
-    r.errorMessage = QStringLiteral(
-      tr("SRC lacks a usable initial geotransform.")
-      tr("Template matching predicts the search area from initial coordinates; first give the source image an approximate CRS / georeference,")
-      tr("Or place a few rough GCPs manually first and use the existing-seed mode.") );
+    r.errorMessage = QObject::tr("SRC lacks a usable initial geotransform."
+      "Template matching predicts the search area from initial coordinates; first give the source image an approximate CRS / georeference,"
+      "Or place a few rough GCPs manually first and use the existing-seed mode." );
     return r;
   }
   if ( !hasUsableGeoTransform( refGt ) )
   {
     GDALClose( srcDs );
     GDALClose( refDs );
-    r.errorMessage = QStringLiteral( tr("REF lacks a usable geotransform; matched points cannot be converted to ground coordinates.") );
+    r.errorMessage = QObject::tr("REF lacks a usable geotransform; matched points cannot be converted to ground coordinates." );
     return r;
   }
 
@@ -249,7 +248,7 @@ RsTemplateMatcher::Result RsTemplateMatcher::run( const QString &srcRaster,
     {
       GDALClose( srcDs );
       GDALClose( refDs );
-      r.errorMessage = QStringLiteral( tr("The SRC image is too small to generate grid seed points") );
+      r.errorMessage = QObject::tr("The SRC image is too small to generate grid seed points" );
       return r;
     }
     for ( int gy = 0; gy < params.gridRows; ++gy )
@@ -366,9 +365,8 @@ RsTemplateMatcher::Result RsTemplateMatcher::run( const QString &srcRaster,
 
   if ( r.matches.isEmpty() )
   {
-    r.errorMessage = QStringLiteral(
-      tr("No matches met the threshold. Increase the search radius or lower the minimum correlation score,")
-      tr("Or check that the SRC initial coordinates are roughly correct.") );
+    r.errorMessage = QObject::tr("No matches met the threshold. Increase the search radius or lower the minimum correlation score,"
+      "Or check that the SRC initial coordinates are roughly correct.");
     return r;
   }
 

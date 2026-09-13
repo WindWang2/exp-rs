@@ -84,12 +84,12 @@ void ContrastStretchDialog::setupUi()
   m_methodCombo->addItems( { tr( "Custom Photoshop Levels" ), tr( "Linear Stretch (Min-Max)" ), tr( "Percent Clip Stretch" ),
                              tr( "Std-Dev Stretch" ), tr( "Histogram Equalization" ) } );
   SicnuDialogHelp::tip( m_methodCombo, tr(
-    tr("Stretch method:\n")
-    tr("• Photoshop Levels: interactively adjust shadows, highlights and the gamma midtone\n")
-    tr("• Linear: min–max\n")
-    tr("• Percent clip: clip both tails, then stretch\n")
-    tr("• Std dev: mean±K×std dev\n")
-    tr("• Histogram equalization: enhances global contrast") ) );
+    "Stretch method:\n"
+    "• Photoshop Levels: interactively adjust shadows, highlights and the gamma midtone\n"
+    "• Linear: min–max\n"
+    "• Percent clip: clip both tails, then stretch\n"
+    "• Std dev: mean±K×std dev\n"
+    "• Histogram equalization: enhances global contrast")  );
   connect( m_methodCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &ContrastStretchDialog::onMethodChanged );
   form->addRow( tr( "Preset Method" ), m_methodCombo );

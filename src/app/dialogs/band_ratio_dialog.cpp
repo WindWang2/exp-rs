@@ -74,7 +74,7 @@ void BandRatioDialog::setupUi()
   m_modeCombo = new QComboBox( paramGroup );
   m_modeCombo->addItems( { tr( "Band Ratio" ), tr( "IHS Color Transform" ) } );
   SicnuDialogHelp::tip( m_modeCombo, tr(
-    tr("• Band ratio: numerator band ÷ denominator band\n• IHS transform: converts the three RGB bands into intensity, hue and saturation") ) );
+    "• Band ratio: numerator band ÷ denominator band\n• IHS transform: converts the three RGB bands into intensity, hue and saturation")  );
   connect( m_modeCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &BandRatioDialog::onModeChanged );
   form->addRow( tr( "Operation Mode" ), m_modeCombo );

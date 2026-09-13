@@ -196,7 +196,7 @@ QString WorkflowSessionController::openTool( const QString &definitionId )
   {
     emit requestOpenWorkspace( QString::fromStdString( def->workspaceKind ) );
     helpSummary = tr( "Workspace '%1' is open. Complete the interactive steps in the dedicated window;"
-                      tr("The task panel shows parameters of operator steps (e.g. rs:obia_segment / rs:obia_classify).") )
+                      "The task panel shows parameters of operator steps (e.g. rs:obia_segment / rs:obia_classify)." )
                     .arg( QString::fromStdString( def->workspaceKind ) );
   }
 

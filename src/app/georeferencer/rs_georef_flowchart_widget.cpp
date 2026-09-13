@@ -299,7 +299,7 @@ void RsGeorefFlowchartWidget::setSourceRasterInfo( const QString &sourcePath, in
   {
     QFileInfo fi( sourcePath );
     if ( width > 0 && height > 0 )
-      m_sourceText = QStringLiteral( tr("%1 (%2×%3, %4 bands)") )
+      m_sourceText = tr("%1 (%2×%3, %4 bands)" )
                        .arg( fi.fileName() )
                        .arg( width )
                        .arg( height )
@@ -326,7 +326,7 @@ void RsGeorefFlowchartWidget::setGcpInfo( int totalGcps, int enabledGcps )
 void RsGeorefFlowchartWidget::setModelInfo( const QString &methodName, int minGcpRequired )
 {
   if ( !methodName.isEmpty() )
-    m_modelText = QStringLiteral( tr("%1 (needs ≥ %2 points)") ).arg( methodName ).arg( minGcpRequired );
+    m_modelText = tr("%1 (needs ≥ %2 points)" ).arg( methodName ).arg( minGcpRequired );
   refreshState();
 }
 

@@ -11,13 +11,13 @@ namespace
 {
 
 const char *const kStepLabels[] = {
-  tr("1 Scheme"),
-  tr("2 Samples"),
-  tr("3 Evaluate"),
-  tr("4 Train"),
-  tr("5 Accuracy"),
-  tr("6 Post-Processing"),
-  tr("7 Output"),
+  QT_TRANSLATE_NOOP( "RsClassifyStepperBar", "1 Scheme" ),
+  QT_TRANSLATE_NOOP( "RsClassifyStepperBar", "2 Samples" ),
+  QT_TRANSLATE_NOOP( "RsClassifyStepperBar", "3 Evaluate" ),
+  QT_TRANSLATE_NOOP( "RsClassifyStepperBar", "4 Train" ),
+  QT_TRANSLATE_NOOP( "RsClassifyStepperBar", "5 Accuracy" ),
+  QT_TRANSLATE_NOOP( "RsClassifyStepperBar", "6 Post-Processing" ),
+  QT_TRANSLATE_NOOP( "RsClassifyStepperBar", "7 Output" ),
 };
 
 static_assert( sizeof( kStepLabels ) / sizeof( kStepLabels[0] )

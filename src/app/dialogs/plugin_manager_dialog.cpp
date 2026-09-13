@@ -109,7 +109,7 @@ void PluginManagerDialog::populate()
     }
     mTable->setRowCount( row );
     mSummary->setText( tr( "Found %1 plugins (%2 usable, %3 broken). The scan only reads plugin.json,"
-                           tr("Plugin binaries are not loaded.") )
+                           "Plugin binaries are not loaded." )
                            .arg( row )
                            .arg( validated )
                            .arg( problem ) );

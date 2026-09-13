@@ -193,7 +193,7 @@ void TemporalAnalysisDialog::setupUi()
     m_compositeMethodCombo->addItem( tr( "Median" ), QStringLiteral( "median" ) );
     SicnuDialogHelp::tip( m_compositeMethodCombo,
                           tr( "Best pixel: highest quality score among valid observations (ties broken by closeness to the target date, then by the earlier epoch);"
-                              tr("The output includes valid-observation count and quality score bands.") ) );
+                              "The output includes valid-observation count and quality score bands." ) );
     lay->addWidget( m_compositeMethodCombo );
     lay->addWidget( new QLabel( tr( "Period:" ), page ) );
     m_periodCombo = new QComboBox( page );

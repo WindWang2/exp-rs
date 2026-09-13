@@ -383,29 +383,27 @@ void HelpViewerDialog::openInExternalBrowser()
 
 QString HelpViewerDialog::fallbackGuideMarkdown()
 {
-  return QStringLiteral(
-    tr("# RS Studio (exp-rs) Comprehensive User Manual and Operation Guide\n\n")
-    tr("> **Version**: v2.0 Professional  \n")
-    tr("> **System document code**: DOC-RS-STUDIO-USERGUIDE-CN  \n\n")
-    tr("# Chapter 1: System Overview and Quick Start\n")
-    tr("RS Studio is a new-generation desktop intelligent geospatial analysis platform for modern remote-sensing research, university teaching and industrial production.\n\n")
-    tr("# Chapter 2: Loading and Managing Remote-Sensing Data\n")
-    tr("Provides automatic multi-source satellite product import, STAC cloud search and Data Manager asset management.\n\n")
-    tr("# Chapter 3: Viewport Visualization and Multi-Source Linkage\n")
-    tr("Provides linked split viewports, swipe comparison, band composition and real-time display stretching.\n\n")
-    tr("# Chapter 4: The Full Pixel-Level Classification Workflow\n")
-    tr("Provides a complete 7-step guided workflow: class scheme, ROI collection, JM-distance separability evaluation, model training, confusion-matrix accuracy assessment, post-classification and result export.\n\n")
-    tr("# Chapter 5: Object-Based Image Analysis (OBIA)\n")
-    tr("Provides multiresolution segmentation, hierarchical topology trees, GLCM texture and geometric feature extraction, and object classification.\n\n")
-    tr("# Chapter 6: Spectral Analysis and Hyperspectral Tools\n")
-    tr("Provides spectral profiles, continuum removal, library SAM / SID matching, linear unmixing and the RX anomaly detector.\n\n")
-    tr("# Chapter 7: Remote-Sensing Preprocessing and Image Enhancement\n")
-    tr("Covers radiometric calibration, atmospheric correction (DOS1, DOS2, QUAC), cloud/snow QA masking, image registration and spatial filtering.\n\n")
-    tr("# Chapter 8: AI Copilot Assistant\n")
-    tr("LLM-powered natural-language remote-sensing analysis chat, tool calls and automated DAG pipeline orchestration.\n\n")
-    tr("# Chapter 9: Troubleshooting and Diagnostics\n")
-    tr("Covers startup dependencies, projection anomalies, out-of-memory tiling optimization and network connectivity troubleshooting.\n\n")
-    tr("# Chapter 10: Shortcut and Operation Quick Reference\n")
-    tr("A quick reference of shortcuts for projects, viewport navigation, vector editing and image registration.\n")
-  );
+  return tr("# RS Studio (exp-rs) Comprehensive User Manual and Operation Guide\n\n"
+    "> **Version**: v2.0 Professional  \n"
+    "> **System document code**: DOC-RS-STUDIO-USERGUIDE-CN  \n\n"
+    "# Chapter 1: System Overview and Quick Start\n"
+    "RS Studio is a new-generation desktop intelligent geospatial analysis platform for modern remote-sensing research, university teaching and industrial production.\n\n"
+    "# Chapter 2: Loading and Managing Remote-Sensing Data\n"
+    "Provides automatic multi-source satellite product import, STAC cloud search and Data Manager asset management.\n\n"
+    "# Chapter 3: Viewport Visualization and Multi-Source Linkage\n"
+    "Provides linked split viewports, swipe comparison, band composition and real-time display stretching.\n\n"
+    "# Chapter 4: The Full Pixel-Level Classification Workflow\n"
+    "Provides a complete 7-step guided workflow: class scheme, ROI collection, JM-distance separability evaluation, model training, confusion-matrix accuracy assessment, post-classification and result export.\n\n"
+    "# Chapter 5: Object-Based Image Analysis (OBIA)\n"
+    "Provides multiresolution segmentation, hierarchical topology trees, GLCM texture and geometric feature extraction, and object classification.\n\n"
+    "# Chapter 6: Spectral Analysis and Hyperspectral Tools\n"
+    "Provides spectral profiles, continuum removal, library SAM / SID matching, linear unmixing and the RX anomaly detector.\n\n"
+    "# Chapter 7: Remote-Sensing Preprocessing and Image Enhancement\n"
+    "Covers radiometric calibration, atmospheric correction (DOS1, DOS2, QUAC), cloud/snow QA masking, image registration and spatial filtering.\n\n"
+    "# Chapter 8: AI Copilot Assistant\n"
+    "LLM-powered natural-language remote-sensing analysis chat, tool calls and automated DAG pipeline orchestration.\n\n"
+    "# Chapter 9: Troubleshooting and Diagnostics\n"
+    "Covers startup dependencies, projection anomalies, out-of-memory tiling optimization and network connectivity troubleshooting.\n\n"
+    "# Chapter 10: Shortcut and Operation Quick Reference\n"
+    "A quick reference of shortcuts for projects, viewport navigation, vector editing and image registration.\n" );
 }

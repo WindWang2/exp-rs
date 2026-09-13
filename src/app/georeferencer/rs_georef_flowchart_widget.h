@@ -107,13 +107,13 @@ private:
     QVector<StepCard> m_cards;
 
     // Metrics cache
-    QString m_sourceText = QStringLiteral( tr("No image loaded") );
-    QString m_gcpText = QStringLiteral( tr("0 GCPs (0 enabled)") );
-    QString m_modelText = QStringLiteral( tr("Polynomial order 1 (needs ≥ 3 points)") );
-    QString m_residualText = QStringLiteral( tr("Unsolved") );
-    QString m_warpConfigText = QStringLiteral( tr("Output parameters not configured") );
-    QString m_warpExecText = QStringLiteral( tr("Correction not started") );
-    QString m_verifyText = QStringLiteral( tr("No results loaded") );
+    QString m_sourceText = tr("No image loaded");
+    QString m_gcpText = tr("0 GCPs (0 enabled)");
+    QString m_modelText = tr("Polynomial order 1 (needs ≥ 3 points)");
+    QString m_residualText = tr("Unsolved");
+    QString m_warpConfigText = tr("Output parameters not configured");
+    QString m_warpExecText = tr("Correction not started");
+    QString m_verifyText = tr("No results loaded");
     bool m_hasSource = false;
     bool m_hasOutput = false;
 };

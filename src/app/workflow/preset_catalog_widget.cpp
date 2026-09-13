@@ -68,21 +68,21 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s1;
     s1.id = "landsat_import_t1";
-    s1.title = tr("T1 Image Import");
+    s1.title = "T1 Image Import";
     s1.operatorId = "gdal:import";
     s1.artifactOnSuccess = "t1_raster";
     s1.uiMeta = { 80.0, 100.0 };
 
     StepDef s2;
     s2.id = "landsat_import_t2";
-    s2.title = tr("T2 Image Import");
+    s2.title = "T2 Image Import";
     s2.operatorId = "gdal:import";
     s2.artifactOnSuccess = "t2_raster";
     s2.uiMeta = { 80.0, 300.0 };
 
     StepDef s3;
     s3.id = "ndvi_calc";
-    s3.title = tr("Vegetation Index (NDVI)");
+    s3.title = "Vegetation Index (NDVI)";
     s3.operatorId = "rs:spectral_index";
     s3.artifactOnSuccess = "ndvi_raster";
     s3.uiMeta = { 360.0, 100.0 };
@@ -96,7 +96,7 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s4;
     s4.id = "change_detection";
-    s4.title = tr("Image Change Detection");
+    s4.title = "Image Change Detection";
     s4.operatorId = "rs:change_detection";
     s4.artifactOnSuccess = "change_mask";
     s4.uiMeta = { 640.0, 200.0 };
@@ -133,14 +133,14 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s1;
     s1.id = "dem_import";
-    s1.title = tr("DEM Data Import");
+    s1.title = "DEM Data Import";
     s1.operatorId = "gdal:import";
     s1.artifactOnSuccess = "dem_raster";
     s1.uiMeta = { 100.0, 150.0 };
 
     StepDef s2;
     s2.id = "slope_calc";
-    s2.title = tr("Slope Computation");
+    s2.title = "Slope Computation";
     s2.operatorId = "gdal:slope";
     s2.artifactOnSuccess = "slope_raster";
     s2.uiMeta = { 400.0, 80.0 };
@@ -154,7 +154,7 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s3;
     s3.id = "hillshade_render";
-    s3.title = tr("Hillshade");
+    s3.title = "Hillshade";
     s3.operatorId = "gdal:hillshade";
     s3.artifactOnSuccess = "hillshade_raster";
     s3.uiMeta = { 400.0, 260.0 };
@@ -186,14 +186,14 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s1;
     s1.id = "image_import";
-    s1.title = tr("High-Resolution Image Import");
+    s1.title = "High-Resolution Image Import";
     s1.operatorId = "gdal:import";
     s1.artifactOnSuccess = "image_raster";
     s1.uiMeta = { 100.0, 150.0 };
 
     StepDef s2;
     s2.id = "obia_segment";
-    s2.title = tr("MeanShift Image Segmentation");
+    s2.title = "MeanShift Image Segmentation";
     s2.operatorId = "rs:obia_segment";
     s2.artifactOnSuccess = "segmented_vector";
     s2.uiMeta = { 400.0, 150.0 };
@@ -208,7 +208,7 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s3;
     s3.id = "obia_classify";
-    s3.title = tr("Random Forest Classification");
+    s3.title = "Random Forest Classification";
     s3.operatorId = "rs:obia_classify";
     s3.artifactOnSuccess = "classified_result";
     s3.uiMeta = { 700.0, 150.0 };
@@ -240,14 +240,14 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s1;
     s1.id = "landsat_import";
-    s1.title = tr("Landsat Data Import");
+    s1.title = "Landsat Data Import";
     s1.operatorId = "gdal:import";
     s1.artifactOnSuccess = "image_raster";
     s1.uiMeta = { 100.0, 150.0 };
 
     StepDef s2;
     s2.id = "ndwi_calc";
-    s2.title = tr("NDWI Water Index");
+    s2.title = "NDWI Water Index";
     s2.operatorId = "rs:ndwi";
     s2.artifactOnSuccess = "ndwi_raster";
     s2.uiMeta = { 420.0, 150.0 };
@@ -278,14 +278,14 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s1;
     s1.id = "classify_step";
-    s1.title = tr("Remote-Sensing Image Classification");
+    s1.title = "Remote-Sensing Image Classification";
     s1.operatorId = "rs:obia_classify";
     s1.artifactOnSuccess = "class_map";
     s1.uiMeta = { 100.0, 150.0 };
 
     StepDef s2;
     s2.id = "majority_filter";
-    s2.title = tr("3x3 majority filter denoising");
+    s2.title = "3x3 majority filter denoising";
     s2.operatorId = "rs:majority_filter";
     s2.artifactOnSuccess = "filter_map";
     s2.uiMeta = { 400.0, 150.0 };
@@ -298,7 +298,7 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
 
     StepDef s3;
     s3.id = "recode_step";
-    s3.title = tr("Class Merging and Recoding");
+    s3.title = "Class Merging and Recoding";
     s3.operatorId = "rs:recode";
     s3.artifactOnSuccess = "final_class_map";
     s3.uiMeta = { 700.0, 150.0 };

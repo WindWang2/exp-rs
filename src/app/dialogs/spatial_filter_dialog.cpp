@@ -88,9 +88,9 @@ void SpatialFilterDialog::setupUi()
   m_filterTypeCombo->addItem( tr( "Sobel Edge Detection" ), QStringLiteral( "opencv:sobel" ) );
   m_filterTypeCombo->addItem( tr( "Laplacian Edge Enhancement" ), QStringLiteral( "opencv:laplacian" ) );
   SicnuDialogHelp::tip( m_filterTypeCombo, tr(
-    tr("• Mean / Gaussian / median: smoothing and denoising\n")
-    tr("• Sobel / Laplacian: edge detection and sharpening\n")
-    tr("The median filter suppresses salt-and-pepper noise while preserving edges remarkably well.") ) );
+    "• Mean / Gaussian / median: smoothing and denoising\n"
+    "• Sobel / Laplacian: edge detection and sharpening\n"
+    "The median filter suppresses salt-and-pepper noise while preserving edges remarkably well.")  );
   connect( m_filterTypeCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
            this, &SpatialFilterDialog::onFilterTypeChanged );
   form->addRow( tr( "Filter Type" ), m_filterTypeCombo );

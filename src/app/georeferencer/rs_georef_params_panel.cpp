@@ -93,8 +93,8 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
       banner );
     sum->setWordWrap( true );
     setHelp( sum, tr(
-      tr("This panel controls all write-out parameters of the geometric correction.\n")
-      tr("Hover the section titles and widgets for details; press 'Parameter Description' for the full documentation.") ) );
+      "This panel controls all write-out parameters of the geometric correction.\n"
+      "Hover the section titles and widgets for details; press 'Parameter Description' for the full documentation.")  );
     auto *helpBtn = new QPushButton( tr( "Parameter Description" ), banner );
     helpBtn->setObjectName( QStringLiteral( "rsGeorefParamsHelpBtn" ) );
     helpBtn->setFlat( false );
@@ -113,9 +113,9 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     QFrame *sec = makeSectionFrame(
       tr( "Coordinate Transformation" ), this,
       tr(
-        tr("[Transform] Fits a geometric model from source image coordinates to target coordinates using GCPs.\n")
-        tr("Each method needs a different minimum point count; fitting is unreliable below it and 'Run' is disabled.\n")
-        tr("Same-scene registration usually needs only Linear or a first-order polynomial; use higher orders / TPS for complex distortions.") ) );
+        "[Transform] Fits a geometric model from source image coordinates to target coordinates using GCPs.\n"
+        "Each method needs a different minimum point count; fitting is unreliable below it and 'Run' is disabled.\n"
+        "Same-scene registration usually needs only Linear or a first-order polynomial; use higher orders / TPS for complex distortions." ) );
     auto *form = new QFormLayout();
     form->setContentsMargins( 0, 0, 0, 0 );
 
@@ -143,15 +143,15 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
              this, [this]( int ) { emit transformMethodChanged(); } );
 
     setHelp( mTransformCombo, tr(
-      tr("Transform method (geometric model):\n")
-      tr("• Linear (≥ 2 points): translation + scale; common for the same scene / nearly collinear cases\n")
-      tr("• Helmert (≥ 2 points): similarity transform (rotation + uniform scale)\n")
-      tr("• Polynomial 1 (≥ 3 points): affine; corrects rotation / shear\n")
-      tr("• Polynomial 2 / 3 (≥ 6/10 points): bending deformation; high orders overfit easily\n")
-      tr("• TPS thin plate spline: strong local deformation; GCPs should be evenly spread\n")
-      tr("• Projective: perspective (scanned maps, oblique imagery)\n")
-      tr("• RPC Physical: sensor RPC, Image→Map only; requires metadata and an optional DEM\n\n")
-      tr("Tip: with exactly the minimum points, DOF = 0 and residuals approach 0 — that does not mean good accuracy; collect more points.") ) );
+      "Transform method (geometric model):\n"
+      "• Linear (≥ 2 points): translation + scale; common for the same scene / nearly collinear cases\n"
+      "• Helmert (≥ 2 points): similarity transform (rotation + uniform scale)\n"
+      "• Polynomial 1 (≥ 3 points): affine; corrects rotation / shear\n"
+      "• Polynomial 2 / 3 (≥ 6/10 points): bending deformation; high orders overfit easily\n"
+      "• TPS thin plate spline: strong local deformation; GCPs should be evenly spread\n"
+      "• Projective: perspective (scanned maps, oblique imagery)\n"
+      "• RPC Physical: sensor RPC, Image→Map only; requires metadata and an optional DEM\n\n"
+      "Tip: with exactly the minimum points, DOF = 0 and residuals approach 0 — that does not mean good accuracy; collect more points.")  );
     form->addRow( formLabel( tr( "Method" ),
                               tr( "Geometric transformation model. Hover the combo box for per-method descriptions and minimum point counts." ), sec ),
                  mTransformCombo );
@@ -163,16 +163,16 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     mActualPtsLabel->setObjectName( QStringLiteral( "rsActualPtsLabel" ) );
     mDofLabel->setObjectName( QStringLiteral( "rsDofLabel" ) );
     setHelp( mMinPtsLabel, tr(
-      tr("Minimum points: the lower bound of 'enabled' GCPs required by the current transform method.\n")
-      tr("For example, a cubic polynomial usually needs about 10 points. Below the minimum, fitting is unreliable.") ) );
+      "Minimum points: the lower bound of 'enabled' GCPs required by the current transform method.\n"
+      "For example, a cubic polynomial usually needs about 10 points. Below the minimum, fitting is unreliable.")  );
     setHelp( mActualPtsLabel, tr(
-      tr("Usable points: the number of control points ticked 'enabled' in the GCP table.\n")
-      tr("Only enabled points take part in the fit and RMS computation.") ) );
+      "Usable points: the number of control points ticked 'enabled' in the GCP table.\n"
+      "Only enabled points take part in the fit and RMS computation.")  );
     setHelp( mDofLabel, tr(
-      tr("Degrees of freedom DOF = usable points − minimum points.\n")
-      tr("• DOF < 0: not enough points to fit\n")
-      tr("• DOF = 0: exactly determined; residuals are 'fitted away' to almost always 0, with no statistical meaning\n")
-      tr("• DOF > 0: over-determined; assess accuracy via RMS — collecting more evenly distributed points is advisable") ) );
+      "Degrees of freedom DOF = usable points − minimum points.\n"
+      "• DOF < 0: not enough points to fit\n"
+      "• DOF = 0: exactly determined; residuals are 'fitted away' to almost always 0, with no statistical meaning\n"
+      "• DOF > 0: over-determined; assess accuracy via RMS — collecting more evenly distributed points is advisable")  );
 
     form->addRow( formLabel( tr( "Minimum Points" ),
                               tr( "Minimum number of enabled GCPs required by the method." ), sec ), mMinPtsLabel );
@@ -190,8 +190,8 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     QFrame *sec = makeSectionFrame(
       tr( "Resampling" ), this,
       tr(
-        tr("[Resampling] Pixel interpolation used when warping the source image onto the target grid by the transform model.\n")
-        tr("Affects only the output's smoothness / sharpness; the GCP geometric fit itself is unchanged.") ) );
+        "[Resampling] Pixel interpolation used when warping the source image onto the target grid by the transform model.\n"
+        "Affects only the output's smoothness / sharpness; the GCP geometric fit itself is unchanged.") ) ;
     auto *form = new QFormLayout();
     form->setContentsMargins( 0, 0, 0, 0 );
 
@@ -206,12 +206,12 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     connect( mResamplingCombo, QOverload<int>::of( &QComboBox::currentIndexChanged ),
              this, [this]( int ) { emit resamplingMethodChanged(); } );
     setHelp( mResamplingCombo, tr(
-      tr("Resampling algorithm (when writing the raster):\n")
-      tr("• Nearest Neighbour: no neighbourhood mixing; first choice for classification / integer labels\n")
-      tr("• Bilinear: balanced speed and quality; common for continuous grayscale / multispectral\n")
-      tr("• Cubic: cubic convolution, smoother with slightly softer edges\n")
-      tr("• Cubic Spline / Lanczos: higher order, sharper / slower; use with care for quantitative work\n\n")
-      tr("Visual optics: Bilinear or Cubic; classification maps: Nearest.") ) );
+      "Resampling algorithm (when writing the raster):\n"
+      "• Nearest Neighbour: no neighbourhood mixing; first choice for classification / integer labels\n"
+      "• Bilinear: balanced speed and quality; common for continuous grayscale / multispectral\n"
+      "• Cubic: cubic convolution, smoother with slightly softer edges\n"
+      "• Cubic Spline / Lanczos: higher order, sharper / slower; use with care for quantitative work\n\n"
+      "Visual optics: Bilinear or Cubic; classification maps: Nearest.")  );
     form->addRow( formLabel( tr( "Algorithm" ), tr( "Pixel interpolation method." ), sec ), mResamplingCombo );
 
     mPixelSize = new QDoubleSpinBox( sec );
@@ -221,10 +221,10 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     mPixelSize->setValue( 0.0 );
     mPixelSize->setSpecialValueText( tr( "auto" ) );
     setHelp( mPixelSize, tr(
-      tr("Output pixel size (ground units of the target CRS, e.g. metres).\n")
-      tr("• auto (0): estimated by the engine from the input / reference\n")
-      tr("• Manual: e.g. 30 means 30 m resolution (under UTM)\n")
-      tr("For I2I alignment to the reference, the reference resolution or auto is typical.") ) );
+      "Output pixel size (ground units of the target CRS, e.g. metres).\n"
+      "• auto (0): estimated by the engine from the input / reference\n"
+      "• Manual: e.g. 30 means 30 m resolution (under UTM)\n"
+      "For I2I alignment to the reference, the reference resolution or auto is typical.")  );
     form->addRow( formLabel( tr( "Output Pixel Size" ),
                               tr( "Target grid resolution; auto = automatic." ), sec ), mPixelSize );
 
@@ -233,8 +233,8 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     mOutputExtent->setReadOnly( true );
     mOutputExtent->setText( tr( "auto · ref" ) );
     setHelp( mOutputExtent, tr(
-      tr("Output geographic extent (read-only preview).\n")
-      tr("auto · ref: the extent follows the reference / transform result automatically; usually no change needed.") ) );
+      "Output geographic extent (read-only preview).\n"
+      "auto · ref: the extent follows the reference / transform result automatically; usually no change needed.")  );
     form->addRow( formLabel( tr( "Output Extent" ), tr( "Map extent covered by the result." ), sec ), mOutputExtent );
 
     mBackground = new QSpinBox( sec );
@@ -242,8 +242,8 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     mBackground->setRange( 0, 65535 );
     mBackground->setValue( 0 );
     setHelp( mBackground, tr(
-      tr("Background / fill value: written to pixels the warp leaves without source data.\n")
-      tr("Usually 0; if 0 is a valid DN, use e.g. 65535 instead and set it as NoData in the result.") ) );
+      "Background / fill value: written to pixels the warp leaves without source data.\n"
+      "Usually 0; if 0 is a valid DN, use e.g. 65535 instead and set it as NoData in the result.")  );
     connect( mBackground, QOverload<int>::of( &QSpinBox::valueChanged ),
              this, [this]( int v ) { emit backgroundValueChanged( v ); } );
     form->addRow( formLabel( tr( "Background Value" ), tr( "Pixel value used to fill holes." ), sec ), mBackground );
@@ -257,18 +257,18 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     QFrame *sec = makeSectionFrame(
       tr( "RMS Error Distribution" ), this,
       tr(
-        tr("[RMS Error] Root mean square of 'predicted − observed' positions over enabled GCPs.\n")
-        tr("Usually in source image pixels (px). With accurate conjugate points and a suitable model, the RMS should be small.\n")
-        tr("With DOF = 0, residuals are fitted to nearly 0 and do not represent real accuracy — collect more points.") ) );
+        "[RMS Error] Root mean square of 'predicted − observed' positions over enabled GCPs.\n"
+        "Usually in source image pixels (px). With accurate conjugate points and a suitable model, the RMS should be small.\n"
+        "With DOF = 0, residuals are fitted to nearly 0 and do not represent real accuracy — collect more points.") ) ;
     auto *vbox = new QVBoxLayout();
     vbox->setContentsMargins( 0, 0, 0, 0 );
 
     mScatter = new RsRmsScatterWidget( sec );
     setHelp( mScatter, tr(
-      tr("Residual scatter plot:\n")
-      tr("• Horizontal axis ≈ ΔX (column-direction residual)\n")
-      tr("• Vertical axis ≈ ΔY (row-direction residual)\n")
-      tr("Points should stay near the origin and be roughly isotropic. For outliers: check whether the wrong feature was picked, or disable the point in the GCP table.") ) );
+      "Residual scatter plot:\n"
+      "• Horizontal axis ≈ ΔX (column-direction residual)\n"
+      "• Vertical axis ≈ ΔY (row-direction residual)\n"
+      "Points should stay near the origin and be roughly isotropic. For outliers: check whether the wrong feature was picked, or disable the point in the GCP table.")  );
     vbox->addWidget( mScatter, 0, Qt::AlignHCenter );
 
     auto *grid = new QFormLayout();
@@ -284,10 +284,10 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     setHelp( mXRms, tr( "Root-mean-square of X residuals (pixels)." ) );
     setHelp( mYRms, tr( "Root-mean-square of Y residuals (pixels)." ) );
     setHelp( mTotalRms, tr(
-      tr("Total RMS: root mean square of the residual magnitudes of all enabled GCPs.\n")
-      tr("Visual same-scene registration: a few pixels is the norm; hundreds to thousands means checking CRS / Sync zoom / point picking.") ) );
+      "Total RMS: root mean square of the residual magnitudes of all enabled GCPs.\n"
+      "Visual same-scene registration: a few pixels is the norm; hundreds to thousands means checking CRS / Sync zoom / point picking.")  );
     setHelp( mMaxRms, tr(
-      tr("The maximum residual and its GCP number. Check first whether that point was picked wrongly or suffers edge distortion.") ) );
+      "The maximum residual and its GCP number. Check first whether that point was picked wrongly or suffers edge distortion.")  );
     grid->addRow( formLabel( tr( "X RMS" ), tr( "RMS of X residuals." ), sec ), mXRms );
     grid->addRow( formLabel( tr( "Y RMS" ), tr( "RMS of Y residuals." ), sec ), mYRms );
     grid->addRow( formLabel( tr( "Total RMS" ), tr( "Total residual RMS." ), sec ), mTotalRms );
@@ -314,25 +314,25 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     QFrame *sec = makeSectionFrame(
       tr( "Coordinate System" ), this,
       tr(
-        tr("[CRS] The target CRS determines the output GeoTIFF projection and how GCP target coordinates are interpreted.\n")
-        tr("I2I: usually identical to the reference image CRS (aligned automatically when the reference loads).\n")
-        tr("I2M: the Map canvas follows the target CRS when showing main project layers.") ) );
+        "[CRS] The target CRS determines the output GeoTIFF projection and how GCP target coordinates are interpreted.\n"
+        "I2I: usually identical to the reference image CRS (aligned automatically when the reference loads).\n"
+        "I2M: the Map canvas follows the target CRS when showing main project layers.") ) ;
     auto *form = new QFormLayout();
     form->setContentsMargins( 0, 0, 0, 0 );
 
     mSrcCrsLabel = new QLabel( tr( "—" ), sec );
     mSrcCrsLabel->setObjectName( QStringLiteral( "rsSrcCrsLabel" ) );
     setHelp( mSrcCrsLabel, tr(
-      tr("The source image (Warp) CRS. Shows — when undefined.\n")
-      tr("Picked coordinates follow the layer CRS.") ) );
+      "The source image (Warp) CRS. Shows — when undefined.\n"
+      "Picked coordinates follow the layer CRS.")  );
 
     // Task 11.5.1 — real CRS picker replaces the hard-coded EPSG:32650 label.
     mCrsWidget = new QgsProjectionSelectionWidget( sec );
     mCrsWidget->setObjectName( QStringLiteral( "rsCrsWidget" ) );
     setHelp( mCrsWidget, tr(
-      tr("Target CRS: the coordinate system of the correction result and of the fit.\n")
-      tr("Common choices: WGS 84 / UTM zone xxN, CGCS2000 Gauss projection, etc.\n")
-      tr("In I2I, it is set to the reference CRS automatically once the reference image loads.") ) );
+      "Target CRS: the coordinate system of the correction result and of the fit.\n"
+      "Common choices: WGS 84 / UTM zone xxN, CGCS2000 Gauss projection, etc.\n"
+      "In I2I, it is set to the reference CRS automatically once the reference image loads.")  );
 
     // Restore last user choice (default to EPSG:32650 to preserve previous
     // behaviour from Task 11.4 when no setting exists yet).
@@ -378,9 +378,9 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     QFrame *sec = makeSectionFrame(
       tr( "Outputs" ), this,
       tr(
-        tr("[Output] Save path of the corrected GeoTIFF.\n")
-        tr("The toolbar 'Run' enables only after a valid path is entered (and GCP counts / fitting conditions are met).\n")
-        tr("The task list records this path so the result can be loaded into the main project when finished.") ) );
+        "[Output] Save path of the corrected GeoTIFF.\n"
+        "The toolbar 'Run' enables only after a valid path is entered (and GCP counts / fitting conditions are met).\n"
+        "The task list records this path so the result can be loaded into the main project when finished.") ) ;
     auto *row = new QHBoxLayout();
     row->setContentsMargins( 0, 0, 0, 0 );
 
@@ -390,8 +390,8 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     connect( mOutputPath, &QLineEdit::textChanged,
              this, [this]( const QString &s ) { emit outputPathChanged( s ); } );
     setHelp( mOutputPath, tr(
-      tr("Full path of the output file; .tif / .tiff recommended.\n")
-      tr("The directory must be writable; same-named files may be overwritten (depending on the task implementation).") ) );
+      "Full path of the output file; .tif / .tiff recommended.\n"
+      "The directory must be writable; same-named files may be overwritten (depending on the task implementation).")  );
 
     mBrowseBtn = new QPushButton( tr( "Browse…" ), sec );
     mBrowseBtn->setObjectName( QStringLiteral( "rsBrowseOutputBtn" ) );
@@ -409,8 +409,8 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     mDemSection = makeSectionFrame(
       tr( "DEM (RPC mode)" ), this,
       tr(
-        tr("[DEM] Shown only when the transform method is RPC Physical.\n")
-        tr("An optional DEM improves RPC projection heights; the Z offset is a metric correction relative to the DEM.") ) );
+        "[DEM] Shown only when the transform method is RPC Physical.\n"
+        "An optional DEM improves RPC projection heights; the Z offset is a metric correction relative to the DEM.")  );
     mDemSection->setObjectName( QStringLiteral( "rsDemSection" ) );
 
     auto *form = new QFormLayout();

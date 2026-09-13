@@ -33,7 +33,7 @@ void PostClassificationDialog::setupUi()
     mainLayout, tr( "Two-date classification result input" ) );
   inputGroup->setToolTip(
     tr( "Compares two classification dates: outputs a per-class transition matrix (rows = earlier classes, columns = later classes),"
-        tr("Per-class gains / losses and a change-type map.") ) );
+        "Per-class gains / losses and a change-type map." ) );
   auto *form = SicnuUi::makeFormLayout();
   qobject_cast<QVBoxLayout *>( inputGroup->layout() )->addLayout( form );
 
@@ -60,8 +60,8 @@ void PostClassificationDialog::setupUi()
   m_classCountSpin->setValue( 0 );
   m_classCountSpin->setSpecialValueText( tr( "Automatic (max observed class + 1)" ) );
   SicnuDialogHelp::tip( m_classCountSpin, tr(
-    tr("Total classes (the change code before*classCount+after must fit a UInt16, hence ≤ 255).")
-    tr("0 = inferred automatically from the maximum class observed across the two images.") ) );
+    "Total classes (the change code before*classCount+after must fit a UInt16, hence ≤ 255)."
+    "0 = inferred automatically from the maximum class observed across the two images.")  );
   form->addRow( tr( "Total Classes" ), m_classCountSpin );
 
   setupOutputRow( mainLayout );
@@ -201,7 +201,7 @@ void PostClassificationDialog::showResultSummary( const Json::Value &result )
       const int64_t net = result.isMember( "netChange" ) && static_cast<int>( result["netChange"].size() ) > c
                             ? result["netChange"][c].asInt64()
                             : ( static_cast<int64_t>( tCount ) - static_cast<int64_t>( fCount ) );
-      lines << QStringLiteral( tr("  class %1: %2 (%3%) → %4 (%5%) [net change: %6%7]") )
+      lines << tr("  class %1: %2 (%3%) → %4 (%5%) [net change: %6%7]" )
                    .arg( c )
                    .arg( fCount )
                    .arg( fRatio, 0, 'f', 2 )
@@ -224,7 +224,7 @@ void PostClassificationDialog::showResultSummary( const Json::Value &result )
       {
         if ( from != to && row[to].asUInt64() > 0 )
         {
-          lines << QStringLiteral( tr("  class %1 → class %2: %3 pixels") )
+          lines << tr("  class %1 → class %2: %3 pixels" )
                        .arg( from )
                        .arg( to )
                        .arg( row[to].asUInt64() );

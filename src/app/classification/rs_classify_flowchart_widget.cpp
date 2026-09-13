@@ -300,7 +300,7 @@ void RsClassifyFlowchartWidget::setSourceRasterInfo( const QString &fileName, in
   m_hasSource = !fileName.isEmpty() && width > 0 && height > 0;
   if ( m_hasSource )
   {
-    m_sourceRasterText = QStringLiteral( tr("%1 (%2×%3, %4 bands)") )
+    m_sourceRasterText = tr("%1 (%2×%3, %4 bands)" )
                            .arg( fileName )
                            .arg( width )
                            .arg( height )
@@ -344,7 +344,7 @@ void RsClassifyFlowchartWidget::setClassificationInfo( const QString &methodName
   if ( !methodName.isEmpty() )
   {
     if ( durationMs > 0 )
-      m_classifyText = QStringLiteral( tr("%1 (elapsed %2 ms)") ).arg( methodName ).arg( durationMs );
+      m_classifyText = tr("%1 (elapsed %2 ms)" ).arg( methodName ).arg( durationMs );
     else
       m_classifyText = methodName;
   }

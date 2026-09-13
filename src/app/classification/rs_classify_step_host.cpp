@@ -16,13 +16,13 @@ struct StepMeta
 };
 
 const StepMeta kMeta[] = {
-  { tr("1 · Define the Class Scheme"), tr("Done when: at least 2 classes (name and color)") },
-  { tr("2 · Collect Samples"), tr("Done when: at least 2 classes have training pixels") },
-  { tr("3 · Evaluate Samples"), tr("Done when: marked as reviewed (JM / spectral)") },
-  { tr("4 · Train and Classify"), tr("Done when: the full-image Apply has run (previews don't count)") },
-  { tr("5 · Accuracy Assessment"), tr("Done when: valid accuracy metrics exist") },
-  { tr("6 · Post-Classification"), tr("Done when: post-processing is skipped or produced") },
-  { tr("7 · Output"), tr("Done when: exported or loaded to the main view") },
+  { "1 · Define the Class Scheme", "Done when: at least 2 classes (name and color)" },
+  { "2 · Collect Samples", "Done when: at least 2 classes have training pixels" },
+  { "3 · Evaluate Samples", "Done when: marked as reviewed (JM / spectral)" },
+  { "4 · Train and Classify", "Done when: the full-image Apply has run (previews don't count)" },
+  { "5 · Accuracy Assessment", "Done when: valid accuracy metrics exist" },
+  { "6 · Post-Classification", "Done when: post-processing is skipped or produced" },
+  { "7 · Output", "Done when: exported or loaded to the main view" },
 };
 
 static_assert( sizeof( kMeta ) / sizeof( kMeta[0] )
@@ -62,7 +62,7 @@ QWidget *RsClassifyStepHost::buildPanel( RsClassifyStep s )
   layout->setContentsMargins( 12, 12, 12, 12 );
   layout->setSpacing( 8 );
 
-  auto *title = new QLabel( tr( kMeta[idx].title ), panel );
+  auto *title = new QLabel(  kMeta[idx].title , panel );
   title->setObjectName( QStringLiteral( "classifyStepTitle" ) );
   QFont tf = title->font();
   tf.setBold( true );
@@ -70,7 +70,7 @@ QWidget *RsClassifyStepHost::buildPanel( RsClassifyStep s )
   title->setFont( tf );
   layout->addWidget( title );
 
-  auto *tip = new QLabel( tr( kMeta[idx].tip ), panel );
+  auto *tip = new QLabel(  kMeta[idx].tip , panel );
   tip->setObjectName( QStringLiteral( "classifyStepTip" ) );
   tip->setWordWrap( true );
   tip->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
@@ -91,12 +91,12 @@ QWidget *RsClassifyStepHost::buildPanel( RsClassifyStep s )
   layout->addWidget( body, /*stretch=*/1 );
 
   auto *nav = new QHBoxLayout;
-  auto *prev = new QPushButton( tr( "Previous Step" ), panel );
+  auto *prev = new QPushButton(  "Previous Step" , panel );
   prev->setObjectName( QStringLiteral( "classifyStepPrev" ) );
-  prev->setToolTip( tr( "Returns to the previous step." ) );
-  auto *next = new QPushButton( tr( "Next Step" ), panel );
+  prev->setToolTip(  "Returns to the previous step."  );
+  auto *next = new QPushButton(  "Next Step" , panel );
   next->setObjectName( QStringLiteral( "classifyStepNext" ) );
-  next->setToolTip( tr( "Continue to the next step after finishing the current one." ) );
+  next->setToolTip(  "Continue to the next step after finishing the current one."  );
   nav->addWidget( prev );
   nav->addStretch( 1 );
   nav->addWidget( next );

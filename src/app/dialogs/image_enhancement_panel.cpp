@@ -50,7 +50,7 @@ void ImageEnhancementPanel::setupUi()
   m_methodCombo->addItem( tr( "Band Ratio / IHS" ), 2 );
   m_methodCombo->addItem( tr( "Speckle Filtering (SAR)" ), 3 );
   SicnuDialogHelp::tip( m_methodCombo, tr(
-    tr("Contrast stretch / spatial filtering / band ratio · IHS / SAR speckle filtering.") ) );
+    "Contrast stretch / spatial filtering / band ratio · IHS / SAR speckle filtering.")  );
   methodForm->addRow( tr( "Type" ), m_methodCombo );
   qobject_cast<QVBoxLayout *>( methodSec->layout() )->addLayout( methodForm );
   mainLayout->addWidget( methodSec );
@@ -94,7 +94,7 @@ void ImageEnhancementPanel::setupStretchOptions(QVBoxLayout *layout)
     m_stretchTypeCombo->addItem(tr("Standard Deviation"), 2);
     m_stretchTypeCombo->addItem(tr("Histogram Equalization"), 3);
     SicnuDialogHelp::tip( m_stretchTypeCombo, tr(
-      tr("Linear / percent clip / std dev / histogram equalization.") ) );
+      "Linear / percent clip / std dev / histogram equalization.")  );
     formLayout->addRow(tr("Type:"), m_stretchTypeCombo);
 
     m_clipPercentSpin = new QDoubleSpinBox();

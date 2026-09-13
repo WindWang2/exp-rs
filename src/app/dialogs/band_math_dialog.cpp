@@ -103,10 +103,10 @@ void BandMathDialog::setupUi()
   m_expressionEdit->setPlaceholderText( tr( "e.g. (b1 - b2) / (b1 + b2) or b1 * 0.0001" ) );
   m_expressionEdit->setMinimumHeight( 32 );
   SicnuDialogHelp::tip( m_expressionEdit, tr(
-    tr("Band math expression. Bands are written b1, b2, ... (starting at 1).\n")
-    tr("Examples: (b1 - b2) / (b1 + b2); b1 * 0.0001; sqrt(b1*b1 + b2*b2); b1 > 0.4 ? 1 : 0\n")
-    tr("Supports: + - * /, parentheses, comparisons (< > <= >= == !=), logic (&& ||),\n")
-    tr("ternary conditionals (b1 > x ? true : false) and math functions (sin/cos/exp/ln/sqrt/abs/pow/min/max/pi...)") ) );
+    "Band math expression. Bands are written b1, b2, ... (starting at 1).\n"
+    "Examples: (b1 - b2) / (b1 + b2); b1 * 0.0001; sqrt(b1*b1 + b2*b2); b1 > 0.4 ? 1 : 0\n"
+    "Supports: + - * /, parentheses, comparisons (< > <= >= == !=), logic (&& ||),\n"
+    "ternary conditionals (b1 > x ? true : false) and math functions (sin/cos/exp/ln/sqrt/abs/pow/min/max/pi...)")  );
   form->addRow( tr( "Formula" ), m_expressionEdit );
 
   qobject_cast<QVBoxLayout *>( paramGroup->layout() )->addLayout( form );
