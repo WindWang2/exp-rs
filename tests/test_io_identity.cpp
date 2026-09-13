@@ -19,6 +19,7 @@
 #include "geospatial/util/time_normalization.h"
 
 #include "support/http_range_server.h"
+#include "support/offline_probe.h"
 
 #include <json/json.h>
 
@@ -40,6 +41,11 @@ std::vector<unsigned char> otherPayloadOfSize( std::size_t size )
 }
 
 } // namespace
+
+// ADR 0146: never die by timeout when the loopback transport is missing —
+// report `sicnu-skip: <reason>` + exit 77 instead.
+SICNU_OFFLINE_GUARD()
+
 
 TEST_CASE( "SHA-256 matches the FIPS 180-4 known-answer vectors",
            "[io][identity][sha256]" )

@@ -5,6 +5,7 @@
 
 #include "geospatial/doctor/data_doctor.h"
 #include "support/http_range_server.h"
+#include "support/offline_probe.h"
 #include "geospatial/raster/raster_writer.h"
 #include "geospatial/util/atomic_fs.h"
 
@@ -32,6 +33,11 @@ std::string scratch( const std::string &name )
   return dir.string();
 }
 } // namespace
+
+// ADR 0146: never die by timeout when the loopback transport is missing —
+// report `sicnu-skip: <reason>` + exit 77 instead.
+SICNU_OFFLINE_GUARD()
+
 
 TEST_CASE( "doctor reports structured findings for a healthy raster", "[io][doctor]" )
 {
