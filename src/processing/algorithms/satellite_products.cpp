@@ -4,6 +4,9 @@
 #include "satellite_products.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include "geospatial/products/cn_product_metadata.h"
+#include "geospatial/products/product_adapters.h"
+
 #include <QDir>
 #include <QDebug>
 #include <QDirIterator>
@@ -586,6 +589,8 @@ QString productTypeName(ProductType type)
         return QStringLiteral("Sentinel-2");
     case ProductType::Modis:
         return QStringLiteral("MODIS");
+    case ProductType::Cn:
+        return QStringLiteral("CN");
     default:
         return QStringLiteral("Unknown");
     }
@@ -1339,6 +1344,100 @@ bool discoverModis(const QString& path, ProductInfo* out, QString* errorMessage)
     return true;
 }
 
+
+bool discoverCn(const QString& path, ProductInfo* out, QString* errorMessage)
+{
+    if (!out)
+        return false;
+    const std::string stdPath = path.toStdString();
+    const sicnu::geo::CnProductIdentity identity = sicnu::geo::cnIdentifyProduct(stdPath);
+    if (!identity.supported) {
+        if (errorMessage) {
+            *errorMessage = identity.reason.empty()
+                ? QStringLiteral("Not a supported Chinese satellite product: %1").arg(path)
+                : QStringLiteral("%1 (%2)")
+                      .arg(path, QString::fromStdString(identity.reason));
+        }
+        return false;
+    }
+
+    try {
+        const sicnu::geo::ProductMetadata metadata =
+            sicnu::geo::readCnProductMetadata(stdPath, identity);
+        const std::string sensorKey = sicnu::geo::cnSensorKey(identity, metadata);
+        const sicnu::geo::CnBandRoleTable table = sicnu::geo::cnBandRoleTable(sensorKey);
+
+        *out = ProductInfo{};
+        out->type = ProductType::Cn;
+        out->productId = QString::fromStdString(metadata.productId);
+        out->metadataPath =
+            QString::fromStdString(sicnu::geo::cnLocateSidecarXml(stdPath));
+        {
+            const QFileInfo rootInfo(path);
+            out->rootDir = rootInfo.isDir() ? rootInfo.absoluteFilePath()
+                                            : rootInfo.absolutePath();
+        }
+        out->spacecraft = QString::fromStdString(
+            metadata.platform.empty() ? identity.satellite : metadata.platform);
+        out->processingLevel = QString::fromStdString(metadata.processingLevel);
+        out->acquisitionDate = QString::fromStdString(metadata.acquisitionTime);
+        out->attributes[QStringLiteral("SICNU_SENSOR")] =
+            QString::fromStdString(metadata.sensor);
+        if (!metadata.sensorMode.empty())
+            out->attributes[QStringLiteral("SICNU_SENSOR_MODE")] =
+                QString::fromStdString(metadata.sensorMode);
+        if (metadata.hasSunElevation)
+            out->attributes[QStringLiteral("SUN_ELEVATION")] =
+                QString::number(metadata.sunElevationDeg, 'f', 4);
+
+        const QString image =
+            QString::fromStdString(sicnu::geo::cnLocateImageTiff(stdPath,
+                                                                   out->metadataPath.toStdString()));
+        if (image.isEmpty()) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("No measurement TIFF paired with the sidecar: %1").arg(path);
+            return false;
+        }
+
+        // Declared band inventory in sidecar order = TIFF band order; the
+        // registry layout backs the inventory-free case (reported, not hidden).
+        std::vector<std::string> bandIds = metadata.declaredBandIds;
+        const bool declaredInventory = !bandIds.empty();
+        if (!declaredInventory) {
+            for (const sicnu::geo::CnBandSpec& spec : table.bands)
+                bandIds.push_back(spec.band);
+            out->attributes[QStringLiteral("SICNU_BAND_SOURCE")] =
+                QStringLiteral("band_role_table");
+        } else {
+            out->attributes[QStringLiteral("SICNU_BAND_SOURCE")] =
+                QStringLiteral("declared_band_ids");
+        }
+
+        for (std::size_t i = 0; i < bandIds.size(); ++i) {
+            BandFile bf;
+            bf.path = image;
+            bf.name = QString::fromStdString(bandIds[i]);
+            bf.sourceBand = static_cast<int>(i) + 1;
+            for (const sicnu::geo::CnBandSpec& spec : table.bands) {
+                if (QString::fromStdString(spec.band).compare(bf.name, Qt::CaseInsensitive) == 0) {
+                    if (spec.hasWavelength)
+                        bf.wavelengthNm = static_cast<int>(spec.wavelengthNm + 0.5);
+                    bf.role = sicnu::data::bandRoleFromString(QString::fromStdString(spec.role));
+                    break;
+                }
+            }
+            out->bands.append(bf);
+        }
+        (void)declaredInventory;
+        return true;
+    } catch (const sicnu::geo::GeoError& error) {
+        if (errorMessage)
+            *errorMessage = QStringLiteral("CN product discovery failed for %1: %2")
+                                 .arg(path, QString::fromUtf8(error.what()));
+        return false;
+    }
+}
+
 bool discoverProduct(const QString& path, ProductInfo* out,
                      const QString& sentinelResolution, QString* errorMessage)
 {
@@ -1374,6 +1473,21 @@ bool discoverProduct(const QString& path, ProductInfo* out,
                  .isEmpty())
             return discoverModis(abs, out, errorMessage);
     }
+    // Chinese L1A families: recognized names outside the supported set must
+    // refuse with the concrete identity reason (ADR 0146), never the generic
+    // "Unrecognized" fallback.
+    {
+        const sicnu::geo::CnProductIdentity identity = sicnu::geo::cnIdentifyProduct(abs.toStdString());
+        if (identity.recognized && !identity.supported) {
+            if (errorMessage)
+                *errorMessage = QStringLiteral("%1 (%2)")
+                                    .arg(abs, QString::fromStdString(identity.reason));
+            return false;
+        }
+        if (identity.supported)
+            return discoverCn(abs, out, errorMessage);
+    }
+
     // Try Landsat then Sentinel then MODIS
     QString e1, e2, e3;
     if (discoverLandsat(abs, out, &e1))
@@ -1642,6 +1756,14 @@ bool stackToGeoTiff(const ProductInfo& product,
             // than assert a physical state we cannot verify.
             importedState = nullptr;
         }
+    }
+    else if ( product.type == ProductType::Cn )
+    {
+        // CRESDA L1A pixels are digital numbers; only an L1 level is labelled
+        // (declared levels are never mislabeled), mirroring the CN import
+        // operators' metadata contract.
+        if ( product.processingLevel.contains( QLatin1String( "L1" ), Qt::CaseInsensitive ) )
+            importedState = kRadiometricStateDigitalNumber;
     }
     if ( importedState )
         GDALSetMetadataItem( outDs, kRadiometricStateKey, importedState, nullptr );
