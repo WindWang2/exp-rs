@@ -1842,5 +1842,30 @@
       "pin",
       "身份"
     ]
+  },
+  {
+    "id": "diagnostic.operator.policy_refused",
+    "family": "operator",
+    "code": "PolicyRefused",
+    "title": "算子被策略拒绝执行",
+    "whatHappened": "算子在执行前被能力/策略层拒绝（capability/policy refusal），而非执行失败。",
+    "whyItMatters": "这是类型化的拒绝而非通用错误：算子本身没有被运行，数据不会被部分写入。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "在插件/算子管理器中确认该算子已被授权启用",
+      "检查工作流参数是否触及策略边界（如外部工具白名单）",
+      "调整策略配置后重新运行"
+    ],
+    "keywords": [
+      "policy",
+      "refused",
+      "策略",
+      "拒绝"
+    ],
+    "related": [
+      "workbench.plugin_manager"
+    ],
+    "category": "错误与诊断"
   }
 ]

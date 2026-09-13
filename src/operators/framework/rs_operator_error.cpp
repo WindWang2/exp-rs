@@ -30,6 +30,7 @@ const char* errorCodeToString(ErrorCode code) noexcept {
         case ErrorCode::ExternalProcessFailed: return "ExternalProcessFailed";
         case ErrorCode::DeviceUnavailable: return "DeviceUnavailable";
         case ErrorCode::RuntimeProviderFailed: return "RuntimeProviderFailed";
+        case ErrorCode::PolicyRefused: return "PolicyRefused";
         case ErrorCode::Unknown: return "Unknown";
     }
     return "Unknown";

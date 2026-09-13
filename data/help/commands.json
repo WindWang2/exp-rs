@@ -777,5 +777,93 @@
       "搜索命令",
       "command palette"
     ]
+  },
+  {
+    "id": "command.workflow.new",
+    "purpose": "新建一个空的工作流画布，开始编排数据处理全流程。",
+    "prerequisites": [
+      "当前工程未保存的修改已确认处理"
+    ],
+    "suggestedNextAction": "从算子库拖入第一个算子（例如“读取栅格”）",
+    "related": [
+      "command.workflow.open",
+      "command.workflow.save",
+      "command.workflow.run"
+    ],
+    "keywords": [
+      "新建工作流",
+      "画布",
+      "new workflow"
+    ]
+  },
+  {
+    "id": "command.workflow.open",
+    "purpose": "打开一个已保存的工作流文件，继续编排或执行。",
+    "prerequisites": [
+      "已知工作流文件位置"
+    ],
+    "suggestedNextAction": "点击“运行全流程”执行工作流",
+    "related": [
+      "command.workflow.new",
+      "command.workflow.save",
+      "command.workflow.run"
+    ],
+    "keywords": [
+      "打开工作流",
+      "加载",
+      "open workflow"
+    ]
+  },
+  {
+    "id": "command.workflow.save",
+    "purpose": "把当前工作流（算子、连线与参数）保存为可复用文件。",
+    "prerequisites": [
+      "画布上存在至少一个算子或连线"
+    ],
+    "suggestedNextAction": "需要再次使用时通过“打开工作流”载入",
+    "related": [
+      "command.workflow.new",
+      "command.workflow.open",
+      "command.workflow.run"
+    ],
+    "keywords": [
+      "保存工作流",
+      "另存为",
+      "save workflow"
+    ]
+  },
+  {
+    "id": "command.workflow.run",
+    "purpose": "按拓扑顺序执行画布上的全部算子，产出最终数据产品。",
+    "prerequisites": [
+      "工作流参数已校验通过",
+      "输入数据已就绪"
+    ],
+    "suggestedNextAction": "在运行日志与诊断面板查看执行进度",
+    "related": [
+      "command.workflow.stop",
+      "command.workflow.save"
+    ],
+    "keywords": [
+      "运行工作流",
+      "执行",
+      "run workflow"
+    ]
+  },
+  {
+    "id": "command.workflow.stop",
+    "purpose": "停止正在运行的工作流，已完成的中间结果会被保留。",
+    "prerequisites": [
+      "工作流正在运行"
+    ],
+    "suggestedNextAction": "修正参数后可再次“运行全流程”",
+    "related": [
+      "command.workflow.run"
+    ],
+    "keywords": [
+      "停止工作流",
+      "取消执行",
+      "stop workflow"
+    ]
   }
 ]
