@@ -6,11 +6,12 @@
 // and log friendly), uppercase Crockford base32, sortable within a process
 // (monotonic generator), and safe to embed in file names.
 //
-//   TraceId      — 26-char ULID-shaped token: 48-bit ms epoch + 80-bit
-//                  process-unique counter/randomness. Generation is
-//                  monotonic (never repeats within a process); a
-//                  deterministic mode (setDeterministicSeed) exists for
-//                  known-answer tests only.
+//   TraceId      — 26-char ULID-shaped token: 50-bit ms epoch + 80-bit
+//                  payload (15-bit per-process tag above the raw per-ms
+//                  counter). Generation is monotonic within a process
+//                  (never repeats within a process; ids sort ascending in
+//                  generation order); a deterministic mode
+//                  (resetForTests) exists for known-answer tests only.
 //   TraceContext — the ids one execution carries: run (workflow/agent run),
 //                  task, job, worker, operator, artifact. `with*` helpers
 //                  derive child contexts immutably.
