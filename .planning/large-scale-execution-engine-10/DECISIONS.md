@@ -37,3 +37,12 @@ tile 落盘用 `ScratchRegistry`（登记、预算记账、引用计数、原子
 
 ### D-8 缓存 environment pin 语义
 fingerprint 的 implementation identity 追加可选 `environmentPins`（GDAL major.minor、PROJ major、声明的 SICNU_* 行为开关集合）。默认 pin 集为空 ⇒ 旧条目字节不变（additive，同 8.0 WP-F 先例）。
+
+### D-9 issue #971 处置：取消注入先行，grid NMS 记为 follow-up
+本次交付"可中断性"（cancel 谓词逐轮注入 NMS/dedup，抛 RSOperatorError(Cancelled)，任务终态走既有 Cancelled 分类）；谓词是纯观察（never-cancelled 结果逐字节一致，已钉测）。grid-indexed NMS（O(n²)→O(n·k)）需要"kept 桶跨大盒注册"的正确性论证，属独立 PR 体量，记 follow-up 不混入本修复。
+
+### D-10 catalog largeRasterSafeOnly 过滤器与新策略对齐
+`agent_tool_catalog.cpp` 的过滤硬编码了 streaming 家族字符串表；新策略虽由 `largeRasterSafe` 布尔兜住，仍把两个新值追加进表消除漂移（窄 append）。
+
+### D-11 算子侧 chunk/scratch 采用为渐进 opt-in
+`RSOperatorContext` 不新增 scratch seam（会形成 operators→runtime 新链接边，与并行轨冲突面大）。首个采用路径：算子声明 `external_memory_streaming` + `temporaryDiskBytes`，TaskCenter 已有的 tempDisk 准入维度即生效；ChunkGraph/planner/scratch 由 preflight tilePlan 与后续算子迁移消费。理由：10.0 交付基座 + 契约，不批量重写 111 个算子内核（不动科学算法所有权）。

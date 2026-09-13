@@ -30,3 +30,35 @@
 | Phase | 时间戳(UTC) | 工具调用 | 触及文件 |
 |---|---|---|---|
 | 0 | 2026-09-14 | ~20 | .gitignore + 10 planning 文件 |
+
+## Phase 1-3 构建与测试证据（2026-09-14，worktree build-dev Debug -j2）
+
+| 证据 | 命令 | 结果 |
+|---|---|---|
+| configure | `cmake --preset dev-default` | exit 0 |
+| 构建（runtime 链） | `cmake --build build-dev --target test_chunk_graph test_external_memory_10 -j2` | exit 0 |
+| 构建（TaskCenter/算子链） | `--target test_large_scale_execution_10 test_execution_fingerprint / test_rs_operator test_atomic_algorithm_adapter test_model_tasks` | exit 0 |
+| ChunkGraph 契约 | `./tests/test_chunk_graph` | 342 assertions / 25 cases 全绿 |
+| 外存层 | `./tests/test_external_memory_10` | 44 assertions / 8 cases 全绿 |
+| fingerprint 契约（env pins） | `./tests/test_execution_fingerprint` | 64 assertions / 17 cases 全绿 |
+| scale/failure 默认档 | `./tests/test_large_scale_execution_10` | 6218 assertions / 5 cases 全绿 |
+| scale 压测档 | `SICNU_LSEE10_STRESS=1 ./tests/test_large_scale_execution_10 "[scale]"` | exit 0（10^6 逻辑 tile fan-out join + scratch storm + cache 规模） |
+| 算子契约 | test_rs_operator / test_atomic_algorithm_adapter | 625/16、34/3 全绿 |
+| 模型任务（#971 NMS 取消） | test_model_tasks | 1253 assertions / 10 cases 全绿 |
+| 回归（TaskCenter/worker） | test_execution_plane_9 / test_worker_host | 构建后执行（见下） |
+
+修复轮次：preflight 命名空间（92abf063d9）；scratch Deleter 未接线 + tile/checkpoint 头 digest 覆盖缺口（fda52869a5）；scale 测试 live 计数口径（f056e617f4）；NMS 测试 fixture disjoint 化（80023e290f）。
+
+## 补充回归证据
+
+| 证据 | 命令 | 结果 |
+|---|---|---|
+| ep9 执行平面回归（TaskCenter/协调器/checkpoint） | `./tests/test_execution_plane_9` | 883 assertions 全绿 |
+| worker 宿主/池回归（首跑 8 失败 = sicnu_worker 未构建，构建后复跑） | `cmake --build build-dev --target sicnu_worker` + `PATH=$PWD:$PATH ./tests/test_worker_host` | 61 assertions / 13 cases 全绿 |
+| 10^6 压测复跑（落盘日志） | `SICNU_LSEE10_STRESS=1 ./tests/test_large_scale_execution_10 "[scale]"` | exit 0 / 6208 assertions 全绿（/tmp/lsee10-stress.log） |
+
+## OUT_OF_SCOPE（补充）
+
+- grid-indexed NMS（#971 的 O(n·k) 加速）——取消注入已闭环可中断性；精确等价的 grid 桶实现属独立 PR，见 PR_BODY follow-ups。
+
+| 核心回归补全 | test_job_engine / test_task_center | 446/34、382/32 全绿 |
