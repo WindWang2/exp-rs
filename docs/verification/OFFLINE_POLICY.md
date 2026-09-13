@@ -58,6 +58,16 @@ not from the code under test. They are, therefore, the local substitute
 evidence for remote I/O: no path goes permanently unverified when a network is
 absent — the suites either run (loopback is enough) or skip with a reason.
 
+## Plain ctest (and the L8 backstop lane)
+
+The ten transport-dependent suites register with `SKIP_RETURN_CODE 77`, so a
+plain `ctest` run labels an offline skip as "Not Run" rather than FAILED. Note
+the honest limitation of the L8 full-sweep lane: it aggregates ctest's exit
+code, so per-suite skips surface there as "Not Run" without a reason code in
+the ladder JSON. The authoritative skip evidence (reason codes per suite) comes
+from the direct-run lanes (L0–L7), which execute the binaries and map exit 77
+to `skipped` with its reason.
+
 ## Verification ladder / READINESS integration
 
 * `scripts/verification_ladder.py` maps the exit-77 contract to the `skipped`

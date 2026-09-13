@@ -41,9 +41,6 @@ set(SICNU_VENDOR_GDAL OFF CACHE BOOL
   "SICNU_LAB_PROFILE: use the system GDAL, not the vendored chain" FORCE)
 set(SICNU_EMBED_PYTHON OFF CACHE BOOL
   "SICNU_LAB_PROFILE: no embedded Python console" FORCE)
-set(ENABLE_DOWNLOAD_GDAL_TOOLS OFF CACHE BOOL
-  "SICNU_LAB_PROFILE: never download binary tools" FORCE)
-
 # ── Python bindings: opt-in detection pulls pybind11 over the network ──────
 # src/operators/CMakeLists.txt honours this guard; lab machines must be able
 # to configure with no egress at all.

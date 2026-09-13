@@ -179,7 +179,8 @@ def main() -> int:
             "executed_status": status,
             # ADR 0146: every skip must carry its reason code — a skip
             # without a reason is a reporting defect, not a verdict.
-            **({"skip_reason": item.get("detail", "")} if status == "skipped" else {}),
+            **({"skip_reason": item.get("detail", "")}
+                if status == "skipped" and item is not None else {}),
         })
 
     # "ready" requires EVERY named capability to have executed and passed on
@@ -227,7 +228,11 @@ def main() -> int:
     for cap in capabilities:
         status = cap["executed_status"]
         if status == "skipped" and cap.get("skip_reason"):
-            status = f"skipped ({cap['skip_reason']})"
+            reason = cap["skip_reason"]
+            # The ladder stores the raw sentinel line; render the reason code.
+            if reason.startswith("sicnu-skip: "):
+                reason = reason[len("sicnu-skip: "):]
+            status = f"skipped ({reason})"
         lines.append(f"| {cap['capability']} | `{cap['artifact']}` "
                      f"| {'yes' if cap['compiled_here'] else 'NO'} "
                      f"| {status} |")
