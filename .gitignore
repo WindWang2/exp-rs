@@ -143,6 +143,10 @@ vendor/
 !.planning/prompt-command-hygiene-review/
 .planning/prompt-command-hygiene-review/*
 !.planning/prompt-command-hygiene-review/*.md
+# scientific-contract-verification-10: track planning notes (markdown only; logs stay local).
+!.planning/scientific-contract-verification-10/
+.planning/scientific-contract-verification-10/*
+!.planning/scientific-contract-verification-10/*.md
 .zcode/
 
 # IDE / editor / OS artifacts
