@@ -1,0 +1,308 @@
+{
+  "cases": [
+    {
+      "case_id": "workflow-compiler/healthy-ndvi-compiles-clean",
+      "category": "workflow_compiler",
+      "description": "A typed WorkflowIR over grounded optical facts compiles to an executable plan with verdict ok",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "metadata": {
+          "SICNU_RADIOMETRIC_STATE": "surface_reflectance"
+        }
+      },
+      "steps": [
+        {
+          "tool": "harness:compile_workflow",
+          "input": {
+            "ir": {
+              "kind": "workflow_ir",
+              "schema_version": "1.0",
+              "goal": "NDVI over the fixture scene",
+              "intent": "ndvi",
+              "inputs": [
+                {
+                  "name": "primary",
+                  "ref": "$fixture"
+                }
+              ],
+              "nodes": [
+                {
+                  "id": "ndvi",
+                  "operator": "rs:spectral_index",
+                  "params": {
+                    "index": "NDVI"
+                  },
+                  "inputs": [
+                    {
+                      "input": "primary"
+                    }
+                  ],
+                  "verification": "raster"
+                }
+              ],
+              "outputs": [
+                {
+                  "name": "ndvi",
+                  "node": "ndvi",
+                  "kind": "raster"
+                }
+              ],
+              "expectations": {
+                "output_dir": "$tmp/compiler-out"
+              }
+            }
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "verdict",
+                "equals": "ok"
+              },
+              {
+                "path": "plan_document.kind",
+                "equals": "execution_plan"
+              },
+              {
+                "path": "stages",
+                "exists": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "workflow-compiler/declared-crs-conflict-auto-reprojects",
+      "category": "workflow_compiler",
+      "description": "Two declared CRS on a shared consumer is a fixable error; the repair table inserts io:reproject with the reference CRS as evidence",
+      "steps": [
+        {
+          "tool": "harness:compile_workflow",
+          "input": {
+            "ir": {
+              "kind": "workflow_ir",
+              "schema_version": "1.0",
+              "goal": "cross-CRS difference",
+              "intent": "change",
+              "inputs": [
+                {
+                  "name": "t1",
+                  "ref": "declared:wgs84-scene",
+                  "artifact": {
+                    "crs": {
+                      "authid": "EPSG:4326"
+                    }
+                  }
+                },
+                {
+                  "name": "t2",
+                  "ref": "declared:utm51n-scene",
+                  "artifact": {
+                    "crs": {
+                      "authid": "EPSG:32650"
+                    }
+                  }
+                }
+              ],
+              "nodes": [
+                {
+                  "id": "diff",
+                  "operator": "rs:change_difference",
+                  "inputs": [
+                    {
+                      "input": "t1",
+                      "as": "after"
+                    },
+                    {
+                      "input": "t2",
+                      "as": "before"
+                    }
+                  ]
+                }
+              ],
+              "expectations": {
+                "output_dir": "$tmp/compiler-out"
+              }
+            },
+            "input_facts": {}
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "verdict",
+                "equals": "fixable"
+              },
+              {
+                "path": "repairs[0].rule_id",
+                "equals": "reproject_to_reference"
+              },
+              {
+                "path": "repairs[0].facts_used.target_crs",
+                "equals": "EPSG:32650"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "workflow-compiler/unknown-operator-is-typed-blocked",
+      "category": "workflow_compiler",
+      "description": "An unknown operator compiles to a typed INVALID_PLAN blocker, never a guess",
+      "steps": [
+        {
+          "tool": "harness:compile_workflow",
+          "input": {
+            "ir": {
+              "kind": "workflow_ir",
+              "schema_version": "1.0",
+              "nodes": [
+                {
+                  "id": "ghost",
+                  "operator": "rs:does_not_exist"
+                }
+              ],
+              "expectations": {
+                "output_dir": "$tmp/compiler-out"
+              }
+            }
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "verdict",
+                "equals": "blocked"
+              },
+              {
+                "path": "analysis.issues[0].code",
+                "equals": "INVALID_PLAN"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "workflow-compiler/output-path-collision-is-typed",
+      "category": "workflow_compiler",
+      "description": "Two nodes claiming one output path compile to OUTPUT_PATH_COLLISION",
+      "steps": [
+        {
+          "tool": "harness:compile_workflow",
+          "input": {
+            "ir": {
+              "kind": "workflow_ir",
+              "schema_version": "1.0",
+              "nodes": [
+                {
+                  "id": "a",
+                  "operator": "rs:band_math",
+                  "params": {
+                    "output": "/tmp/same.tif"
+                  }
+                },
+                {
+                  "id": "b",
+                  "operator": "rs:band_math",
+                  "params": {
+                    "output": "/tmp/same.tif"
+                  }
+                }
+              ],
+              "expectations": {
+                "output_dir": "$tmp/compiler-out"
+              }
+            }
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "analysis.issues[0].code",
+                "equals": "OUTPUT_PATH_COLLISION"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "workflow-compiler/declared-modality-conflicts-with-observation",
+      "category": "workflow_compiler",
+      "description": "A declared SAR modality over an observed optical scene yields a typed modality mismatch (metadata stays data, facts win with evidence)",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "metadata": {
+          "SICNU_RADIOMETRIC_STATE": "surface_reflectance"
+        }
+      },
+      "steps": [
+        {
+          "tool": "harness:compile_workflow",
+          "input": {
+            "ir": {
+              "kind": "workflow_ir",
+              "schema_version": "1.0",
+              "goal": "mismatched modality",
+              "intent": "ndvi",
+              "inputs": [
+                {
+                  "name": "primary",
+                  "ref": "$fixture",
+                  "artifact": {
+                    "modality": "sar"
+                  }
+                }
+              ],
+              "nodes": [
+                {
+                  "id": "ndvi",
+                  "operator": "rs:spectral_index",
+                  "params": {
+                    "index": "NDVI"
+                  },
+                  "inputs": [
+                    {
+                      "input": "primary"
+                    }
+                  ]
+                }
+              ],
+              "expectations": {
+                "output_dir": "$tmp/compiler-out"
+              }
+            }
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "verdict",
+                "equals": "blocked"
+              },
+              {
+                "path": "analysis.issues[0].code",
+                "equals": "FACT_CONFLICT"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,136 @@
+{
+  "cases": [
+    {
+      "case_id": "repair-refusal/dn-into-index-kernel-is-a-prepared-decision",
+      "category": "repair_refusal",
+      "description": "DN facts into a reflectance kernel grade as a warning per the capability contract, and the repair layer answers with a prepared calibration decision — never a silent insertion",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "metadata": {
+          "SICNU_RADIOMETRIC_STATE": "dn"
+        }
+      },
+      "steps": [
+        {
+          "tool": "harness:compile_workflow",
+          "input": {
+            "ir": {
+              "kind": "workflow_ir",
+              "schema_version": "1.0",
+              "goal": "NDVI over DN",
+              "intent": "ndvi",
+              "inputs": [
+                {
+                  "name": "primary",
+                  "ref": "$fixture"
+                }
+              ],
+              "nodes": [
+                {
+                  "id": "ndvi",
+                  "operator": "rs:spectral_index",
+                  "params": {
+                    "index": "NDVI"
+                  },
+                  "inputs": [
+                    {
+                      "input": "primary"
+                    }
+                  ]
+                }
+              ],
+              "expectations": {
+                "output_dir": "$tmp/compiler-out"
+              }
+            }
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "verdict",
+                "equals": "ok"
+              },
+              {
+                "path": "decisions",
+                "exists": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "repair-refusal/missing-band-synthesizing-is-refused",
+      "category": "repair_refusal",
+      "description": "A scene without NIR never gets a fabricated band: the compiler blocks with BAND_ROLE_UNRESOLVED and answers with a dataset-choice decision",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "green"
+        ],
+        "metadata": {
+          "SICNU_RADIOMETRIC_STATE": "surface_reflectance"
+        }
+      },
+      "steps": [
+        {
+          "tool": "harness:compile_workflow",
+          "input": {
+            "ir": {
+              "kind": "workflow_ir",
+              "schema_version": "1.0",
+              "goal": "NDVI over RGB",
+              "intent": "ndvi",
+              "inputs": [
+                {
+                  "name": "primary",
+                  "ref": "$fixture"
+                }
+              ],
+              "nodes": [
+                {
+                  "id": "ndvi",
+                  "operator": "rs:spectral_index",
+                  "params": {
+                    "index": "NDVI"
+                  },
+                  "inputs": [
+                    {
+                      "input": "primary"
+                    }
+                  ]
+                }
+              ],
+              "expectations": {
+                "output_dir": "$tmp/compiler-out"
+              }
+            }
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "verdict",
+                "equals": "blocked"
+              },
+              {
+                "path": "decisions[0].rule_id",
+                "equals": "select_other_dataset"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,177 @@
+{
+  "cases": [
+    {
+      "case_id": "long-context-session/checkpoint-resume-continues-from-saved-stage",
+      "category": "long_context_session",
+      "description": "A harness session survives checkpoint/resume: the saved stage cursor and compiler evidence come back, decisions survive",
+      "steps": [
+        {
+          "tool": "harness:workflow_session",
+          "input": {
+            "action": "save",
+            "session_id": "eval-session-1",
+            "stage_cursor": "analysis",
+            "goal": "NDVI change pair",
+            "intent": "change",
+            "ir": {
+              "kind": "workflow_ir",
+              "schema_version": "1.0",
+              "ir_id": "wir-eval",
+              "nodes": [
+                {
+                  "id": "diff",
+                  "operator": "rs:change_difference"
+                }
+              ]
+            },
+            "analysis": {
+              "verdict": "ok"
+            },
+            "decisions": [
+              {
+                "kind": "alternative",
+                "subject": "method",
+                "status": "resolved"
+              }
+            ],
+            "input_facts": {}
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "ok",
+                "equals": true
+              }
+            ]
+          }
+        },
+        {
+          "tool": "harness:workflow_session",
+          "input": {
+            "action": "resume",
+            "session_id": "eval-session-1"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "rewind_to_stage",
+                "equals": "analysis"
+              },
+              {
+                "path": "session.ir.ir_id",
+                "equals": "wir-eval"
+              },
+              {
+                "path": "session.decisions[0].subject",
+                "equals": "method"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "long-context-session/list-and-delete-are-bounded-and-typed",
+      "category": "long_context_session",
+      "description": "Session listing shows the saved checkpoint with its token cost; delete removes it",
+      "steps": [
+        {
+          "tool": "harness:workflow_session",
+          "input": {
+            "action": "save",
+            "session_id": "eval-session-2",
+            "stage_cursor": "ir",
+            "goal": "flood mapping",
+            "intent": "flood"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "ok",
+                "equals": true
+              }
+            ]
+          }
+        },
+        {
+          "tool": "harness:workflow_session",
+          "input": {
+            "action": "list"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "ok",
+                "equals": true
+              },
+              {
+                "path": "sessions",
+                "exists": true
+              }
+            ]
+          }
+        },
+        {
+          "tool": "harness:workflow_session",
+          "input": {
+            "action": "delete",
+            "session_id": "eval-session-2"
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "ok",
+                "equals": true
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "long-context-session/tool-shortlist-carries-provenance-under-budget",
+      "category": "long_context_session",
+      "description": "The deterministic shortlist for an intent stays under its byte budget and every item carries why_included provenance",
+      "steps": [
+        {
+          "tool": "harness:tool_shortlist",
+          "input": {
+            "intent": "ndvi",
+            "limit": 8
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "truncated",
+                "exists": true
+              },
+              {
+                "path": "budget_bytes",
+                "exists": true
+              }
+            ]
+          }
+        },
+        {
+          "tool": "harness:knowledge_budget",
+          "input": {},
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "all_within_budget",
+                "exists": true
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
