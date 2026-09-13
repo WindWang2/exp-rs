@@ -65,7 +65,9 @@ Adjudications: `.planning/prompt-command-hygiene-review/REVIEW_LOG.md`.
 - No build, no tests executed (documentation-only track). No CI triggered, waited on, or cited.
 - No remote issues created. PR not merged by the author.
 
-Diff stat vs base: (filled at push time)
+Diff stat vs base (origin/master @ 60179408): 16 files changed, 2088 insertions(+), 7 deletions(-).
+Paths touched: `.agents/AGENTS.md`, `.gitignore`, `.planning/prompt-command-hygiene-review/*` (8 files), `CLAUDE.md`, `docs/agents/*` (3 new), `review/*` (4 new).
+`git diff --name-only origin/master...HEAD | grep -cE "^(src|tests)/"` → **0**.
 
 ---
 Track planning: `.planning/prompt-command-hygiene-review/` (GOAL / PLAN-facade via EXECUTIVE_SUMMARY / DECISIONS / EVIDENCE / REVIEW_LOG / PR_BODY).
