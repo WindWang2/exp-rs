@@ -64,17 +64,51 @@ substrates under it:
   off by default.
 - Worker protocol untouched; no wire change.
 
-## Tests
+## Tests (final HEAD, build-dev Debug, `-j2` build / serial tests, QT_QPA_PLATFORM=offscreen)
 
-(filled at Phase 8 with final-HEAD runs)
+| Suite | Result |
+|---|---|
+| test_chunk_graph (ChunkGraph + planner + reduction + guards) | 353 assertions / 30 cases — all green |
+| test_external_memory_10 (scratch/tile store/checkpoint) | 50 assertions / 8 cases — all green |
+| test_execution_fingerprint (incl. env pins v3) | 64 assertions / 17 cases — all green |
+| test_preflight (incl. tilePlan + zero-dim refusal) | 118 assertions / 9 cases — all green |
+| test_model_tasks (incl. #971 cancel semantics) | 1254 assertions / 10 cases — all green |
+| test_large_scale_execution_10 | 6218 assertions / 5 cases — all green |
+| test_large_scale_execution_10 `[scale]` @ SICNU_LSEE10_STRESS=1 (10^6 tiles) | exit 0, ×3 runs |
+| test_worker_host / test_task_center / test_job_engine / test_execution_plane_9 (regression) | 61/13, 382/32, 446/34, 883 assertions — all green |
+
+Static: `git diff --check` clean; conflict-marker and secret scans over the
+touched trees return zero hits.
 
 ## Performance / resource evidence
 
-(filled at Phase 8)
+- The 10^6-logical-tile fan-out join asserts PEAK IN-FLIGHT PAYLOADS ≤
+  producer hands + input queues + tuple + output queue + sink (19 at the
+  tested shape) — a bounded-state proof, never wall-clock. (An unbounded
+  queue would show peak ≈ totalTiles and fail.)
+- `BoundedWriteGate` pins writer throttle semantics (8 concurrent 300 B
+  writers under a 1000 B cap never exceed 3 in flight; one oversized write
+  proceeds when idle).
+- Scratch storm: deterministic budget refusal (8 × 512 B saturation) plus
+  RAII drain to exactly 0 accounting.
+- Hot-path changes are O(1) per tile (validation, counters); no operator
+  kernel was touched.
 
 ## Review findings
 
-(filled at Phase 7/8)
+Two independent read-only subagent reviews (architecture/concurrency; test
+credibility/boundaries/performance). Verdicts: NOT-MERGEABLE (4×P1) and
+MERGEABLE-WITH-FIXES — **all P0/P1 findings are fixed** (join
+cancel-race misclassification, scratch lease UAF race, preflight
+division-by-zero, dangling `const char*`), all P2 findings fixed with
+tests (validate-before-allocate, finalize failure contract, source buffer
+validation, shared cancellation base, monotonic progress, fan-out guard,
+pin-install seam + mutex, tilePlan coverage, injectable NVML bridge), and
+every P3 fixed or justified with rationale. One additional P0-grade TEST
+defect (dangling nested-lambda capture → stack smashing) was caught by the
+final-HEAD verification loop, fixed, and verified with 8× + 3×(10^6-tile)
+repeat runs. Full finding→disposition→evidence table:
+`.planning/large-scale-execution-engine-10/REVIEW_LOG.md`.
 
 ## Known limitations / follow-ups
 
