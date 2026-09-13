@@ -1,0 +1,52 @@
+{
+  "schema_version": "sicnu.lab.rules/1",
+  "lab_id": "ndvi_basics",
+  "title": "NDVI basics — single-band NDVI product (scene: water / vegetation)",
+  "artifact": { "kind": "raster" },
+  "passing_score": 60,
+  "assertions": [
+    {
+      "id": "grid.compatible",
+      "kind": "crs_grid",
+      "weight": 10,
+      "severity": "blocking",
+      "params": { "epsg": 4326, "width": 128, "height": 128, "band_count": 1,
+                  "pixel_size_x": 0.001, "pixel_size_y": 0.001, "pixel_size_tolerance": 1e-9 },
+      "derivation": "Lab grid contract: EPSG:4326, 128x128 at 0.001 deg; a submission on another grid is not comparable to the known answer."
+    },
+    {
+      "id": "range.ndvi",
+      "kind": "range",
+      "weight": 15,
+      "severity": "normal",
+      "params": { "band": 1, "min": -1.0, "max": 1.0, "max_violation_ratio": 0.0 },
+      "derivation": "NDVI=(N-R)/(N+R) is bounded by [-1,1] for non-negative reflectance (KNOWN_ANSWER_MATRIX spectral family). Catches display stretches (x100+50) and unit slips."
+    },
+    {
+      "id": "stats.ndvi_mean_sigma",
+      "kind": "mean_sigma",
+      "weight": 30,
+      "severity": "blocking",
+      "params": { "band": 1, "mean": 0.4912843, "mean_tolerance": 0.01,
+                  "sigma_min": 0.39, "sigma_max": 0.41, "sigma_tolerance": 0.0 },
+      "derivation": "Closed form over the committed scene: 4096 water pixels at ndvi(0.02,0.03)=-0.2 and 12160 valid vegetation pixels at ndvi(0.50,0.08)=21/29 (128 declared-invalid inputs are NoData). mu=(4096*(-0.2)+12160*(21/29))/16256=0.49128428; two-point population sigma=0.40120826 (both exact in double over the stored Float32 values)."
+    },
+    {
+      "id": "mask.nodata_ratio",
+      "kind": "nodata_ratio",
+      "weight": 15,
+      "severity": "blocking",
+      "params": { "min_ratio": 0.002, "max_ratio": 0.05 },
+      "derivation": "The scene input declares 128/16384=0.78% invalid pixels; a correct product masks them (ratio 0.0078). Ratio 0 = forgot to mask; ratio > 0.05 = masked usable data. Both directions are wrong."
+    },
+    {
+      "id": "hist.bimodal",
+      "kind": "histogram_shape",
+      "weight": 30,
+      "severity": "normal",
+      "params": { "band": 1, "bins": 64, "min": -1.0, "max": 1.0, "shape": "bimodal",
+                  "min_mode_fraction": 0.05, "min_separation": 0.5 },
+      "derivation": "The scene has exactly two surface states (water -0.2, vegetation 21/29); the NDVI histogram must be bimodal with well-separated modes. Catches stretches that smear the classes."
+    }
+  ]
+}

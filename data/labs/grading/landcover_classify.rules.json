@@ -1,0 +1,50 @@
+{
+  "schema_version": "sicnu.lab.rules/1",
+  "lab_id": "landcover_classify",
+  "title": "Supervised classification — OA/Kappa floor against committed truth",
+  "artifact": { "kind": "raster" },
+  "passing_score": 60,
+  "assertions": [
+    {
+      "id": "grid.compatible",
+      "kind": "crs_grid",
+      "weight": 10,
+      "severity": "blocking",
+      "params": { "epsg": 4326, "width": 32, "height": 32, "band_count": 1,
+                  "pixel_size_x": 0.001, "pixel_size_y": 0.001, "pixel_size_tolerance": 1e-9 },
+      "derivation": "Lab grid contract: 32x32 Byte class map at 0.001 deg."
+    },
+    {
+      "id": "acc.oa_kappa_floor",
+      "kind": "classification_kappa",
+      "weight": 50,
+      "severity": "blocking",
+      "params": { "band": 1,
+                  "truth": { "path": "../../../tests/fixtures/lab/landcover_truth.tif" },
+                  "labels": [1, 2, 3, 4], "nodata_class": 0,
+                  "oa_min": 0.85, "kappa_min": 0.75 },
+      "derivation": "Truth is the committed scene map (tests/fixtures/lab/landcover_truth.tif; stands in for D1 ground truth per DECISIONS #8/#13). Pixels where truth is NoData(0) are excluded from the confusion matrix. Floors: OA>=0.85 and kappa>=0.75 — legend-shift or majority-class collapse score far below."
+    },
+    {
+      "id": "acc.class_proportions",
+      "kind": "confusion_marginals",
+      "weight": 20,
+      "severity": "normal",
+      "params": { "band": 1,
+                  "truth": { "path": "../../../tests/fixtures/lab/landcover_truth.tif" },
+                  "labels": [1, 2, 3, 4], "nodata_class": 0,
+                  "expected_proportions": { "1": 0.258064516, "2": 0.483870968,
+                                            "3": 0.129032258, "4": 0.129032258 },
+                  "tolerance": 0.01 },
+      "derivation": "Predicted-side marginals must reproduce the known scene composition over the 992 truth-valid pixels: water 256/992, vegetation 480/992, bare 128/992, urban 128/992. Catches systematic over/under-mapping even when point accuracy is high."
+    },
+    {
+      "id": "mask.nodata_ratio",
+      "kind": "nodata_ratio",
+      "weight": 20,
+      "severity": "blocking",
+      "params": { "min_ratio": 0.02, "max_ratio": 0.05 },
+      "derivation": "Truth declares 32/1024=3.1% unclassifiable pixels; a correct submission carries them as NoData(0). Ratio 0 = filled pixels the lab required masking."
+    }
+  ]
+}

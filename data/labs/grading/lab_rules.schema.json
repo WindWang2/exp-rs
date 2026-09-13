@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "sicnu.lab.rules/1",
+  "title": "SICNU lab grading rules (authoring contract)",
+  "description": "One file per lab: data/labs/grading/<lab_id>.rules.json. The grading engine validates these constraints in code (data/labs/grading/lab_rules.schema.json is the human/authoring contract). See docs/labs/GRADING.md.",
+  "type": "object",
+  "required": ["schema_version", "lab_id", "title", "artifact", "assertions"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "sicnu.lab.rules/1" },
+    "lab_id": { "type": "string", "pattern": "^[a-z0-9_]+$" },
+    "title": { "type": "string", "minLength": 1 },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "const": "raster" }
+      },
+      "required": ["kind"]
+    },
+    "passing_score": { "type": "number", "minimum": 0, "maximum": 100, "default": 60 },
+    "assertions": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/assertion" }
+    }
+  },
+  "definitions": {
+    "assertion": {
+      "type": "object",
+      "required": ["id", "kind", "weight", "params"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": {
+          "enum": ["range", "mean_sigma", "gain_invariance", "nodata_ratio",
+                   "histogram_shape", "classification_kappa", "confusion_marginals",
+                   "change_area_interval", "crs_grid"]
+        },
+        "weight": { "type": "number", "exclusiveMinimum": 0, "maximum": 100 },
+        "severity": { "enum": ["normal", "blocking"], "default": "normal" },
+        "params": { "type": "object" },
+        "derivation": { "type": "string" }
+      }
+    },
+    "band": { "type": "integer", "minimum": 1 },
+    "ratio01": { "type": "number", "minimum": 0, "maximum": 1 },
+    "truth_source": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false,
+          "required": ["path"], "properties": { "path": { "type": "string" } } },
+        { "type": "object", "additionalProperties": false,
+          "required": ["inline"], "properties": { "inline": { "type": "array", "items": { "type": "array", "items": { "type": "integer" } } } } }
+      ]
+    }
+  }
+}

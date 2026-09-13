@@ -8211,3 +8211,10 @@ target_include_directories(benchmark_scale8 PRIVATE
   ${CMAKE_SOURCE_DIR}/src/processing
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+# D4 Lab Auto-Grading (ADR 0146): rule-DSL validation, byte-identical
+# determinism, wrong-answer discrimination vs the committed corpus, reference
+# corpus scoring, and windowed memory-budget behaviour — all through the
+# OutputVerifier::gradeArtifact teaching seam.
+sicnu_add_test(test_lab_grading TIMEOUT 300)
+sicnu_link_jsoncpp(test_lab_grading)

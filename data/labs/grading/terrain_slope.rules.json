@@ -1,0 +1,43 @@
+{
+  "schema_version": "sicnu.lab.rules/1",
+  "lab_id": "terrain_slope",
+  "title": "Terrain slope — Horn kernel on the inclined plane z=2x",
+  "artifact": { "kind": "raster" },
+  "passing_score": 60,
+  "assertions": [
+    {
+      "id": "grid.compatible",
+      "kind": "crs_grid",
+      "weight": 10,
+      "severity": "blocking",
+      "params": { "epsg": 32648, "width": 32, "height": 32, "band_count": 1,
+                  "pixel_size_x": 1.0, "pixel_size_y": 1.0, "pixel_size_tolerance": 1e-9 },
+      "derivation": "Metric grid contract: EPSG:32648 with 1 m cells so the closed form slope=atan(dz/dcell) holds."
+    },
+    {
+      "id": "mask.border_nodata",
+      "kind": "nodata_ratio",
+      "weight": 15,
+      "severity": "blocking",
+      "params": { "min_ratio": 0.1201171875, "max_ratio": 0.1220703125 },
+      "derivation": "Horn needs a 3x3 neighbourhood; the documented platform convention marks the 1-pixel border undefined: 124/1024=0.12109375, plus/minus one pixel (1/1024). Catches submissions that fill the border with estimates."
+    },
+    {
+      "id": "stats.slope_mean_sigma",
+      "kind": "mean_sigma",
+      "weight": 45,
+      "severity": "normal",
+      "params": { "band": 1, "mean": 1.1071487178, "mean_tolerance": 1e-6,
+                  "sigma_min": 0.0, "sigma_max": 1e-6, "sigma_tolerance": 0.0 },
+      "derivation": "KNOWN_ANSWER_MATRIX terrain family: the Horn 3x3 kernel is EXACT on linear surfaces. On z=2x with 1 m cells the interior slope is atan(2)=1.10714871779 rad everywhere, so mean=atan(2) and population sigma=0 (Float32 rounding of a constant is constant)."
+    },
+    {
+      "id": "range.slope_band",
+      "kind": "range",
+      "weight": 30,
+      "severity": "normal",
+      "params": { "band": 1, "min": 1.1071477178, "max": 1.1071497178, "max_violation_ratio": 0.0 },
+      "derivation": "Every valid pixel is the same closed form atan(2)+-1e-6; catches degrees-instead-of-radians (63.43) and wrong-axis gradients (0)."
+    }
+  ]
+}

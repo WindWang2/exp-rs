@@ -49,6 +49,9 @@ data/*
 !data/benchmarks/**
 !data/pipelines/
 !data/pipelines/**
+# Lab grading rules are tracked metadata (D4), not local rasters.
+!data/labs/
+!data/labs/**
 # Harness 4.0 scientific recipes are tracked metadata, not local data.
 !data/agent/
 !data/agent/**
