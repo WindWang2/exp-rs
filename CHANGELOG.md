@@ -2,6 +2,51 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - 2026-09-14
+
+### Large-Scale Execution / External-Memory / Multi-Worker Engine 10.0 (goal series)
+
+- **Capability contract (ADR 0148)**: `RSOperatorMemoryPolicy` gains
+  `global_reduction_streaming` (two-pass with a pass-1 global statistic) and
+  `external_memory_streaming` (bounded RAM + declared scratch spill);
+  `RSOperator::streamingHaloPixels()` declares the neighborhood radius.
+  Projected through the conservative RAM-class defaults, the descriptor
+  validator's closed list, `largeRasterSafe`, agent metadata
+  (`execution.haloPixels`), and the tool-catalog `largeRasterSafeOnly`
+  filter. All additive; no operator re-classified.
+- **Tile DAG**: `runtime/chunk/ChunkGraph` runs source/stage/join/sink node
+  graphs over bounded queues — N-input joins pop in declared order for
+  deterministic tuple alignment, a drained input beside a delivering one is
+  a typed `ChunkPartitionMismatch`, cancel unwinds by cancelling every
+  queue (no parked-waiter deadlock), fan-out construction is rejected, and
+  `ChunkGraphCancelled` derives `ChunkCancelled`. `TileSpec` gains additive
+  `bandOffset`/`timeIndex` identity.
+- **Memory planner**: an overflow-saturating tile working-set model with the
+  Admit → ReduceConcurrency → Spill → Refuse ladder and structured
+  need/have reasons; preflight attaches the advisory `resources.tilePlan`
+  for streaming operators over probed rasters.
+- **External memory**: `ScratchRegistry` (byte-budgeted leases, RAII
+  refcounting, atomic finalize with digest sidecar, stale-run sweep),
+  `DiskTileStore` (self-describing tile files, header+payload digests,
+  validate-before-allocate fail-closed reads), `BoundedWriteGate` (disk
+  writer backpressure), `TileCheckpointWriter` (versioned mid-task tile
+  checkpoints with identity gates — any drift re-executes).
+- **Scheduler integration**: `wireVramBudgetFromDeviceTruth` feeds the vram
+  admission dimension from the Model Runtime's NVML inventory (injectable,
+  host opt-in); the execution fingerprint contract moves to v3 with
+  environment pins (GDAL release) installed through a shared once-seam used
+  by TaskCenter AND WorkflowRunCoordinator, so resume stamps and cache
+  identities never fork on install order.
+- **#971**: detection NMS/dedup poll the task's cancel flag per suppression
+  round and surface `RSOperatorError(Cancelled)` — a candidate set near the
+  `max_detections` budget can no longer block a cancel for the whole O(n²)
+  pass; terminal semantics classify through the existing Canceled path.
+- **Scale evidence**: a synthetic suite proves bounded in-flight memory for
+  4-input joins over 10^6 logical tiles (gated `SICNU_LSEE10_STRESS`),
+  scratch-budget storms, mid-stream checkpoint restart, 3000-entry cache
+  hit/miss/self-heal, and poison-task convergence to terminal Failed after
+  exactly the bounded retry budget.
+
 ## [Workbench 9.0] - 2026-09-12
 
 ### 🚀 Professional QGIS Remote-Sensing Workbench 9.0 (feat/professional-workbench-9)

@@ -683,6 +683,7 @@ ADR 0062 onward moved to per-file records in `docs/adr/` (full context, decision
 - **ADR 0130 (UI)**: Unified Application Shell (workspace dock wiring, project-context title, dead-panel removal, menu dedup)
 - **ADR 0131 (Cartography)**: MapSpec 2.0 — Compositional Constraints, Composition Solver & Visual Regression
 - **ADR 0131 (UI)**: Schema-Driven Operator UI & Thin-Client Continuance (validated schema forms; band tools/pan-sharpen operator promotions; batch registry fix)
+- **ADR 0148**: Large-Scale Execution Engine 10.0 (memory-policy grades global-reduction/external-memory + halo declaration; ChunkGraph multi-input tile DAG with deterministic joins; tile working-set memory planner with the reduce/spill/refuse ladder; scratch leases + disk tile store + tile checkpoint; NVML-fed vram admission; environment-pinned fingerprint contract v3; detection NMS cancellation (#971))
 - **ADR 0132**: Unified Task & Result Surface (pipeline grouping in RsJobPanel; shared RsResultSummary; Data vs Results concept contract)
 - **ADR 0133**: Design Token Layer & QSS Parity Contract (SicnuUi::Tokens; single status palette; shortcut conflict guardrail)
 
