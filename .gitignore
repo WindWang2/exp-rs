@@ -189,3 +189,8 @@ data/labs/_tmp/
 # The contract platform 9.0 freshness gate needs the committed snapshot
 !data/contracts/
 !data/contracts/contract_graph.snap.json
+
+# r2-deep-review: track planning notes (markdown only; logs stay local).
+!.planning/r2-deep-review/
+.planning/r2-deep-review/*
+!.planning/r2-deep-review/*.md
