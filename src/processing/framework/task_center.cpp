@@ -27,6 +27,8 @@
 #include "data/execution_identity_resolver.h"
 #include "geospatial/remote/remote_identity_resolver.h"
 
+#include <gdal.h> // GDALVersionInfo: execution environment pins (ADR 0148)
+
 #include <QCryptographicHash>
 #include <QDirIterator>
 #include <QFileInfo>
@@ -555,6 +557,18 @@ void TaskCenter::setRssSampler( std::function<unsigned int()> sampler )
 
 void TaskCenter::installDefaultEstimateResolver()
 {
+    // LSEE 10.0 (ADR 0148 / DECISIONS D-8): pin the environment facts that
+    // change an operator's observable output bytes into every execution and
+    // resume identity (closed set v1: the GDAL release). One-time install;
+    // empty-by-default elsewhere keeps identity bytes stable for callers
+    // that never reach the TaskCenter seam.
+    static const bool kEnvironmentPinsInstalled = [] {
+        sicnu::data::setExecutionEnvironmentPinProvider( [] {
+            return std::string( "gdal=" ) + GDALVersionInfo( "RELEASE_VERSION" );
+        } );
+        return true;
+    }();
+    (void)kEnvironmentPinsInstalled;
     // Registry-backed resolver: read the operator's declared memoryPolicy +
     // executionEstimate via the AtomicAlgorithmRegistry descriptor. This is the
     // ONLY runtime consumer of those fields besides the agent tool catalog.
@@ -574,6 +588,10 @@ void TaskCenter::installDefaultEstimateResolver()
                     est.memoryClass = TaskMemoryClass::Streaming;
                 else if ( policy == "multipass_streaming" )
                     est.memoryClass = TaskMemoryClass::MultiPassStreaming;
+                else if ( policy == "global_reduction_streaming" )
+                    est.memoryClass = TaskMemoryClass::GlobalReductionStreaming;
+                else if ( policy == "external_memory_streaming" )
+                    est.memoryClass = TaskMemoryClass::ExternalMemoryStreaming;
                 else if ( policy == "external_process" )
                     est.memoryClass = TaskMemoryClass::ExternalProcess;
                 else if ( policy == "unsupported_for_large_raster" )

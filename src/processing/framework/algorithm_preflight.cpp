@@ -4,6 +4,7 @@
 #include "atomic_algorithm_registry.h"
 #include "gdal/gdal_dataset_wrapper.h"
 #include "resource_estimation.h"
+#include "runtime/chunk/memory_planner.h"
 #include "schema_validator.h"
 #include "qgsdatasourceresolver.h"
 
@@ -12,7 +13,9 @@
 
 #include <QString>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 
@@ -433,6 +436,88 @@ Json::Value preflightAdapter( const AtomicAlgorithmAdapter &adapter, const Json:
       unknown["basis"] = "unknown";
       unknown["estimatedRamBytes"] = 0;
       result["resources"] = unknown;
+    }
+  }
+
+  // --- 5b. Tile working-set plan (LSEE 10.0, ADR 0148 §3) -------------------
+  // For streaming-family operators over a probed raster, refine the estimate
+  // with the runtime memory planner: the planner widens the per-tile working
+  // set by the declared halo and reports the peak in-RAM stream footprint
+  // (advisory here — the gate stays in TaskCenter admission; the plan's
+  // actionable reason is what a refusal would carry).
+  const Json::Value &agentExec = desc.agentMetadata.execution;
+  const std::string &memoryPolicy = desc.agentMetadata.memoryPolicy;
+  const bool streamingFamily =
+    memoryPolicy.empty() || memoryPolicy == "streaming"
+    || memoryPolicy == "multipass_streaming"
+    || memoryPolicy == "global_reduction_streaming"
+    || memoryPolicy == "external_memory_streaming";
+  if ( streamingFamily && !probedRasters.empty() && agentExec.isObject() )
+  {
+    const Json::Value &firstRaster = probedRasters.front().second;
+    if ( firstRaster.isMember( "width" ) && firstRaster.isMember( "height" ) )
+    {
+      chunk::TileMemoryRequest request;
+      request.tileWidth = agentExec.isMember( "tileWidth" ) && agentExec["tileWidth"].isUInt()
+                            ? agentExec["tileWidth"].asUInt()
+                            : 256;
+      request.tileHeight = agentExec.isMember( "tileHeight" ) && agentExec["tileHeight"].isUInt()
+                             ? agentExec["tileHeight"].asUInt()
+                             : 256;
+      request.haloPixels =
+        agentExec.isMember( "haloPixels" ) && agentExec["haloPixels"].isUInt()
+          ? agentExec["haloPixels"].asUInt()
+          : 0;
+      request.bands = firstRaster.isMember( "bandCount" ) && firstRaster["bandCount"].isInt()
+                        ? static_cast<std::uint32_t>( std::max( 1, firstRaster["bandCount"].asInt() ) )
+                        : 1;
+      request.bytesPerSample =
+        firstRaster.isMember( "dataType" ) && firstRaster["dataType"].isUInt()
+          ? std::max( 1u, firstRaster["dataType"].asUInt() / 8u )
+          : 4;
+      request.expectedTileCount =
+        ( static_cast<std::uint64_t>( firstRaster["width"].asInt() ) + request.tileWidth - 1 )
+          / request.tileWidth
+        * ( ( static_cast<std::uint64_t>( firstRaster["height"].asInt() ) + request.tileHeight - 1 )
+            / request.tileHeight );
+      request.allowSpill = memoryPolicy == "external_memory_streaming";
+      request.scratchBudgetBytes =
+        agentExec.isMember( "temporaryDiskBytes" ) && agentExec["temporaryDiskBytes"].isUInt64()
+          ? agentExec["temporaryDiskBytes"].asUInt64()
+          : 0;
+      // budgetBytes stays 0 → Advisory: the preflight reports the estimate;
+      // the enforcing gate is TaskCenter admission.
+      const chunk::TileMemoryPlan plan = chunk::planTileMemory( request );
+
+      Json::Value tilePlan( Json::objectValue );
+      tilePlan["requestedShapePeakBytes"] =
+        static_cast<Json::UInt64>( plan.requestedPeakBytes );
+      tilePlan["recommendedShapePeakBytes"] =
+        static_cast<Json::UInt64>( plan.estimatedPeakBytes );
+      tilePlan["recommendedQueueCapacity"] = plan.recommendedQueueCapacity;
+      tilePlan["expectedTileCount"] = static_cast<Json::UInt64>( request.expectedTileCount );
+      tilePlan["action"] = [&] {
+        switch ( plan.action )
+        {
+        case chunk::TileMemoryPlan::Action::Admit:
+          return "admit";
+        case chunk::TileMemoryPlan::Action::Advisory:
+          return "advisory";
+        case chunk::TileMemoryPlan::Action::ReduceConcurrency:
+          return "reduce_concurrency";
+        case chunk::TileMemoryPlan::Action::Spill:
+          return "spill";
+        case chunk::TileMemoryPlan::Action::Refuse:
+          return "refuse";
+        }
+        return "advisory";
+      }();
+      if ( !plan.reason.empty() )
+        tilePlan["reason"] = plan.reason;
+      if ( result.isMember( "resources" ) )
+        result["resources"]["tilePlan"] = tilePlan;
+      else
+        result["resources"] = tilePlan;
     }
   }
 
