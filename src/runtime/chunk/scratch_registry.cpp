@@ -144,21 +144,17 @@ const std::string &ScratchLease::finalize() const
             fsyncPath( dir.string(), /*directory=*/true );
         std::error_code ec;
         std::filesystem::rename( m_impl->path, m_impl->finalPath, ec );
-        if ( ec )
+        if ( !ec )
         {
-            // A racing finalize already renamed (or the OS kept the .part).
-            // Move the digest sidecar with whatever content exists so a
-            // crash restart verifies against the live file.
+            // Rename is atomic; the sidecar follows with a non-atomic move —
+            // a crash between the two leaves the final file without a
+            // digest, which verifyDigest() answers fail-closed (recompute).
             std::error_code ec2;
             std::filesystem::rename( sidecarPath( m_impl->path ),
                                      sidecarPath( m_impl->finalPath ), ec2 );
         }
-        else
-        {
-            std::error_code ec2;
-            std::filesystem::rename( sidecarPath( m_impl->path ),
-                                     sidecarPath( m_impl->finalPath ), ec2 );
-        }
+        // A failed main rename is left as-is: a racing finalize may have
+        // won, or the next sweep/retry converges; never delete content.
     }
     return m_impl->finalPath;
 }

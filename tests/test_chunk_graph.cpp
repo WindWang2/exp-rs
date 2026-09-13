@@ -480,9 +480,10 @@ TEST_CASE( "ChunkGraph consumer abort unwinds the whole graph", "[chunk][graph]"
     auto src = graph.addSource( countingSource( 1000, 1.0f ) );
     std::atomic<int> seen{ 0 };
     graph.addSink( src, [&]( TilePayload && ) {
-        return ++seen < 5; // abort after 5
+        return ++seen < 5; // abort after 5 — same contract as ChunkPipeline's
+                           // consumer abort: the run ends with a cancel error
     } );
-    graph.run();
+    REQUIRE_THROWS_AS( graph.run(), ChunkGraphCancelled );
     REQUIRE( seen == 5 );
     REQUIRE( graph.completedTiles() == 5 );
 }
