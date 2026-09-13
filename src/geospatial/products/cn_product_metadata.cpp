@@ -164,6 +164,13 @@ struct XmlPathScan
   std::vector<std::string> pathStack;
   std::string currentPattern;
   std::ostringstream buffer;
+  // Record mode: inside a per-band <BandCalibration> scope the direct
+  // children (BandID/Gain/Offset/Bias) are captured per element so partial
+  // declarations can never be paired positionally across the document.
+  bool recordActive = false;
+  std::size_t recordDepth = 0;
+  std::map<std::string, std::string> record;
+  std::vector<std::map<std::string, std::string>> records;
 };
 
 std::string joinPathSegments( const std::vector<std::string> &segments )
@@ -176,6 +183,19 @@ std::string joinPathSegments( const std::vector<std::string> &segments )
     joined += segment;
   }
   return joined;
+}
+
+/// Per-band calibration scopes repeat their own <BandID> elements; a flat
+/// watched pattern like "bandid" must never match inside them or the
+/// declared top-level band inventory gets polluted with per-band repeats.
+bool inCalibrationScope( const std::vector<std::string> &pathStack )
+{
+  for ( const std::string &segment : pathStack )
+  {
+    if ( segment.rfind( "bandcalibr", 0 ) == 0 || segment.rfind( "calibr", 0 ) == 0 )
+      return true;
+  }
+  return false;
 }
 
 bool patternMatches( const std::string &pattern, const std::vector<std::string> &pathStack )
@@ -199,19 +219,37 @@ void xmlPathStart( void *user, const XML_Char *element, const XML_Char ** )
   scan->buffer.str( std::string() );
   scan->buffer.clear();
   scan->currentPattern.clear();
+  if ( !scan->recordActive && scan->pathStack.back() == "bandcalibration" )
+  {
+    scan->recordActive = true;
+    // Stack size INCLUDING the bandcalibration element; its direct children
+    // end at recordDepth + 1, the element itself at recordDepth.
+    scan->recordDepth = scan->pathStack.size();
+    scan->record.clear();
+  }
   for ( const std::string &pattern : scan->watched )
   {
-    if ( patternMatches( pattern, scan->pathStack ) )
-    {
-      scan->currentPattern = pattern;
-      break;
-    }
+    if ( !patternMatches( pattern, scan->pathStack ) )
+      continue;
+    // Inside per-band calibration scopes only patterns that explicitly
+    // target them (…::gain / …::offset / …::bias) may fire — flat patterns
+    // like "bandid" would otherwise pollute the top-level inventory.
+    if ( inCalibrationScope( scan->pathStack ) && pattern.find( "calibr" ) == std::string::npos )
+      continue;
+    scan->currentPattern = pattern;
+    break;
   }
 }
 
 void xmlPathEnd( void *user, const XML_Char * )
 {
   auto *scan = static_cast<XmlPathScan *>( user );
+  if ( scan->recordActive && scan->pathStack.size() == scan->recordDepth + 1 && !scan->pathStack.empty() )
+  {
+    const std::string text = trimText( scan->buffer.str() );
+    if ( !text.empty() )
+      scan->record[scan->pathStack.back()] = text;
+  }
   if ( !scan->currentPattern.empty() )
   {
     const std::string text = trimText( scan->buffer.str() );
@@ -223,6 +261,13 @@ void xmlPathEnd( void *user, const XML_Char * )
     }
   }
   scan->currentPattern.clear();
+  if ( scan->recordActive && !scan->pathStack.empty()
+       && scan->pathStack.back() == "bandcalibration" )
+  {
+    scan->records.push_back( scan->record );
+    scan->recordActive = false;
+    scan->record.clear();
+  }
   if ( !scan->pathStack.empty() )
     scan->pathStack.pop_back();
 }
@@ -266,6 +311,26 @@ std::string scanText( const XmlPathScan &scan, const char *pattern )
 }
 
 // ─── Identity ───────────────────────────────────────────────────────────────
+/// True when @p token occurs in @p upper at a name-segment start (path
+/// start or right after a separator) — "AGF3_x" or "2023GF3_" never trip a
+/// "GF3_" token.
+bool nameHasToken( const std::string &upper, const char *token )
+{
+  const std::size_t len = std::strlen( token );
+  if ( len == 0 || upper.size() < len )
+    return false;
+  std::size_t pos = 0;
+  while ( true )
+  {
+    pos = upper.find( token, pos );
+    if ( pos == std::string::npos )
+      return false;
+    if ( pos == 0 || upper[pos - 1] == '/' || upper[pos - 1] == '\\' )
+      return true;
+    ++pos;
+  }
+}
+
 
 struct FamilyPattern
 {
@@ -300,9 +365,20 @@ bool unsupportedFamilyReason( const std::string &upper, std::string &reason )
   auto pathHas = [ &upper, &base ] ( const char *token ) {
     if ( base.rfind( token, 0 ) == 0 )
       return true;
-    return upper.find( token ) != std::string::npos;
+    return nameHasToken( upper, token );
   };
 
+  if ( pathHas( "GF1B_" ) || pathHas( "GF1B-" ) || pathHas( "GF1C_" ) || pathHas( "GF1C-" ) ||
+       pathHas( "GF1D_" ) || pathHas( "GF1D-" ) )
+  {
+    reason = "GF-1B/1C/1D products are not adapted; only GF-1/2/6 PMS/WFV";
+    return true;
+  }
+  if ( pathHas( "HJ1C-" ) || pathHas( "HJ1C_" ) )
+  {
+    reason = "Huanjing-1C (SAR) products are not adapted; only HJ-1A/1B CCD";
+    return true;
+  }
   if ( pathHas( "GF3_" ) || pathHas( "GF3-" ) )
   {
     reason = "Gaofen-3 (GF-3) is a SAR mission; only GF-1/2/6 PMS/WFV optical "
@@ -333,7 +409,7 @@ bool unsupportedFamilyReason( const std::string &upper, std::string &reason )
   if ( base.rfind( "HJ2", 0 ) == 0 || upper.find( "HJ2A-" ) != std::string::npos ||
        upper.find( "HJ2B-" ) != std::string::npos )
   {
-    reason = "Huanjing-2 (HJ-2) SAR products are not adapted; only HJ-1A/1B CCD";
+    reason = "HJ-2 (02 batch) CCD/HSI products are not adapted; only HJ-1A/1B CCD";
     return true;
   }
   if ( ( base.rfind( "HJ1A", 0 ) == 0 || base.rfind( "HJ1B", 0 ) == 0 ) &&
@@ -387,7 +463,14 @@ std::string normalizeAcquisitionTime( const std::string &date, const std::string
   if ( isoDate.empty() && isoTime.empty() )
     return std::string();
   if ( isoDate.empty() )
-    return isoTime; // full ISO declared in the time tag
+  {
+    // Single-tag timestamp: CRESDA declares "YYYY-MM-DD HH:MM:SS(.ms)" —
+    // normalize the separator to the ISO-8601 'T'.
+    const std::size_t space = isoTime.find( ' ' );
+    if ( space != std::string::npos )
+      isoTime[space] = 'T';
+    return isoTime;
+  }
   if ( isoTime.empty() )
     return isoDate;
   if ( isoTime.find( 'T' ) != std::string::npos )
@@ -397,10 +480,16 @@ std::string normalizeAcquisitionTime( const std::string &date, const std::string
 
 ProductMetadata parseCresdaXml( const std::string &xmlPath, const CnProductIdentity &identity )
 {
+  // Two CRESDA sidecar generations are whitelisted:
+  //  - legacy <MetaInfo>: ReceiveDate/ReceiveTime, PixelSizeX, CloudPercent,
+  //    SunPosGeodetic::Azimuth/Elevation, BandID, GainVal/OffsetVal;
+  //  - current <ProductMetaData>: CenterTime/StartTime, ImageGSD,
+  //    SolarAzimuth/SolarZenith, Bands (comma list), ProductLevel.
   const XmlPathScan scan = scanXmlPaths( xmlPath, {
                                                     "productid",
                                                     "satelliteid",
                                                     "sensorid",
+                                                    "sensormode",
                                                     "modeid",
                                                     "productlevel",
                                                     "receivetimedate",
@@ -408,21 +497,31 @@ ProductMetadata parseCresdaXml( const std::string &xmlPath, const CnProductIdent
                                                     "receivetime",
                                                     "stopdate",
                                                     "stoptime",
+                                                    "centertime",
+                                                    "starttime",
                                                     "width",
                                                     "height",
                                                     "pixelsizex",
                                                     "pixelsizey",
                                                     "groundresolution",
                                                     "resolution",
+                                                    "imagegsd",
+                                                    "imagegsdline",
+                                                    "imagegsdsample",
                                                     "cloudpercent",
                                                     "cloudcoveragepercentage",
                                                     "orbitid",
                                                     "bandid",
+                                                    "bands",
                                                     "sunposgeodetic::azimuth",
                                                     "sunposgeodetic::elevation",
                                                     "sunelevation",
                                                     "sunzenithangle",
                                                     "sunazimuth",
+                                                    "solarazimuth",
+                                                    "solarzenith",
+                                                    "mapprojection",
+                                                    "mapzone",
                                                     "gainval",
                                                     "offsetval",
                                                     "bandcalibration::gain",
@@ -447,18 +546,13 @@ ProductMetadata parseCresdaXml( const std::string &xmlPath, const CnProductIdent
     product.platform = identity.satellite;
   product.sensor = scanText( scan, "sensorid" );
   product.sensorMode = scanText( scan, "sensorid" );
+  const std::string sensorModeTag = scanText( scan, "sensormode" );
+  if ( !sensorModeTag.empty() )
+    product.sensorMode = sensorModeTag;
   if ( product.sensorMode.empty() )
     product.sensorMode = identity.sensorMode;
-  const std::string modeId = upperAscii( scanText( scan, "modeid" ) );
+  const std::string modeId = upperAscii( !sensorModeTag.empty() ? sensorModeTag : scanText( scan, "modeid" ) );
   product.modality = "optical";
-  // CRESDA L1A products deliver digital numbers; TOA reflectance is computed
-  // downstream from the (published or declared) calibration coefficients.
-  product.radiometricState = "digital_number";
-
-  product.acquisitionTime = normalizeAcquisitionTime( scanText( scan, "receivedate" ),
-                                                      scanText( scan, "receivetime" ) );
-  if ( product.acquisitionTime.empty() )
-    product.acquisitionTime = normalizeAcquisitionTime( scanText( scan, "receivetimedate" ), std::string() );
 
   // Processing level: declared tag wins, otherwise the L1A token in the
   // product id (the CRESDA distribution naming) — never a default.
@@ -469,6 +563,23 @@ ProductMetadata parseCresdaXml( const std::string &xmlPath, const CnProductIdent
     if ( upperId.find( "L1A" ) != std::string::npos )
       product.processingLevel = "L1A";
   }
+  // CRESDA L1A pixels are digital numbers (TOA reflectance is computed
+  // downstream from declared/published coefficients). Only an L1 level is
+  // stamped so any other declared level is never mislabeled.
+  if ( upperAscii( product.processingLevel ).find( "L1" ) != std::string::npos )
+    product.radiometricState = "digital_number";
+
+  // Acquisition time: CenterTime (imaging time) wins — the legacy
+  // ReceiveDate/ReceiveTime pair is the Beijing ground-station receive time,
+  // which can sit hours away from the imaging instant.
+  product.acquisitionTime = normalizeAcquisitionTime( std::string(), scanText( scan, "centertime" ) );
+  if ( product.acquisitionTime.empty() )
+    product.acquisitionTime = normalizeAcquisitionTime( scanText( scan, "receivedate" ),
+                                                        scanText( scan, "receivetime" ) );
+  if ( product.acquisitionTime.empty() )
+    product.acquisitionTime = normalizeAcquisitionTime( scanText( scan, "receivetimedate" ), std::string() );
+  if ( product.acquisitionTime.empty() )
+    product.acquisitionTime = normalizeAcquisitionTime( std::string(), scanText( scan, "starttime" ) );
 
   const std::string cloud = scanText( scan, "cloudpercent" ).empty()
                               ? scanText( scan, "cloudcoveragepercentage" )
@@ -483,7 +594,8 @@ ProductMetadata parseCresdaXml( const std::string &xmlPath, const CnProductIdent
     }
   }
 
-  for ( const char *sizeTag : { "pixelsizex", "groundresolution", "resolution" } )
+  for ( const char *sizeTag : { "pixelsizex", "imagegsd", "imagegsdline", "imagegsdsample",
+                                "groundresolution", "resolution" } )
   {
     const std::string sizeText = scanText( scan, sizeTag );
     double parsed = 0.0;
@@ -495,9 +607,24 @@ ProductMetadata parseCresdaXml( const std::string &xmlPath, const CnProductIdent
     }
   }
 
-  const std::string sunElevation = scanText( scan, "sunposgeodetic::elevation" ).empty()
-                                     ? scanText( scan, "sunelevation" )
-                                     : scanText( scan, "sunposgeodetic::elevation" );
+  std::string sunElevation = scanText( scan, "sunposgeodetic::elevation" );
+  if ( sunElevation.empty() )
+    sunElevation = scanText( scan, "sunelevation" );
+  std::string sunElevationSource;
+  if ( sunElevation.empty() )
+  {
+    // Current-generation sidecars declare the solar ZENITH; elevation is
+    // derived as 90 − zenith and the derivation is reported, not hidden.
+    const std::string zenithText = scanText( scan, "solarzenith" ).empty()
+                                     ? scanText( scan, "sunzenithangle" )
+                                     : scanText( scan, "solarzenith" );
+    double zenith = 0.0;
+    if ( !zenithText.empty() && parseDouble( zenithText, zenith ) )
+    {
+      sunElevation = std::to_string( 90.0 - zenith );
+      sunElevationSource = "derived as 90 - declared solar zenith";
+    }
+  }
   if ( !sunElevation.empty() )
   {
     double parsed = 0.0;
@@ -505,11 +632,18 @@ ProductMetadata parseCresdaXml( const std::string &xmlPath, const CnProductIdent
     {
       product.sunElevationDeg = parsed;
       product.hasSunElevation = true;
+      if ( !sunElevationSource.empty() && product.extra.size() < 16 )
+        product.extra.emplace_back( "sun_elevation_source", sunElevationSource );
     }
   }
-  const std::string sunAzimuth = scanText( scan, "sunposgeodetic::azimuth" ).empty()
-                                   ? scanText( scan, "sunazimuth" )
-                                   : scanText( scan, "sunposgeodetic::azimuth" );
+  const std::string sunAzimuth = [&] {
+    std::string azimuth = scanText( scan, "sunposgeodetic::azimuth" );
+    if ( azimuth.empty() )
+      azimuth = scanText( scan, "sunazimuth" );
+    if ( azimuth.empty() )
+      azimuth = scanText( scan, "solarazimuth" );
+    return azimuth;
+  }();
   if ( !sunAzimuth.empty() )
   {
     double parsed = 0.0;
@@ -519,89 +653,130 @@ ProductMetadata parseCresdaXml( const std::string &xmlPath, const CnProductIdent
       product.hasSunAzimuth = true;
     }
   }
-  ( void )scanText( scan, "sunzenithangle" ); // watched for diagnostics only
+
+  // Declared projection text, when the sidecar carries one (report-only;
+  // CRS resolution stays with the georeferencing layer).
+  const std::string mapProjection = scanText( scan, "mapprojection" );
+  if ( !mapProjection.empty() )
+  {
+    product.crsHint = mapProjection;
+    const std::string mapZone = scanText( scan, "mapzone" );
+    if ( !mapZone.empty() )
+      product.crsHint += " zone " + mapZone;
+  }
 
   product.orbitId = scanText( scan, "orbitid" );
 
   // Declared band inventory, in sidecar order (drives band-role lookup and
-  // the band index inside the multi-band TIFF).
-  for ( const std::string &band : scan.listValues["bandid"] )
+  // the band index inside the multi-band TIFF). Legacy sidecars repeat
+  // <BandID> elements; current-generation sidecars carry a comma list in
+  // <Bands> whose numeric indices become canonical "B<n>" ids. Find-based:
+  // a sidecar without a band inventory is handled below, not by an
+  // out-of-range throw.
+  static const std::vector<std::string> kNoBandIds;
+  const auto bandIdIt = scan.listValues.find( "bandid" );
+  const std::vector<std::string> &bandIds = bandIdIt == scan.listValues.end()
+                                              ? kNoBandIds
+                                              : bandIdIt->second;
+  for ( const std::string &band : bandIds )
     product.declaredBandIds.push_back( band );
-
-  // Declared calibration: flat comma lists (GainVal/OffsetVal) or per-band
-  // elements (BandCalibration::Gain/Offset/Bias). Whatever the sidecar
-  // declares is carried verbatim; nothing is defaulted (DECISIONS D-06).
-  auto parseCalibrationList = [] ( const std::string &text, std::vector<double> &out ) {
-    std::istringstream stream( text );
-    std::string item;
-    while ( std::getline( stream, item, ',' ) )
+  if ( product.declaredBandIds.empty() )
+  {
+    const std::string bandsText = scanText( scan, "bands" );
+    if ( !bandsText.empty() )
     {
-      double parsed = 0.0;
-      if ( parseDouble( item, parsed ) )
-        out.push_back( parsed );
-      else
-        out.push_back( std::numeric_limits<double>::quiet_NaN() );
-    }
-  };
-
-  std::vector<double> gains;
-  std::vector<double> offsets;
-  const std::string gainValText = scanText( scan, "gainval" );
-  const std::string offsetValText = scanText( scan, "offsetval" );
-  bool hasFlatGain = false;
-  bool hasFlatOffset = false;
-  if ( !gainValText.empty() )
-  {
-    parseCalibrationList( gainValText, gains );
-    hasFlatGain = !gains.empty();
-  }
-  if ( !offsetValText.empty() )
-  {
-    parseCalibrationList( offsetValText, offsets );
-    hasFlatOffset = !offsets.empty();
-  }
-  const std::vector<std::string> &gainList = scan.listValues["bandcalibration::gain"];
-  const std::vector<std::string> &offsetList = scan.listValues["bandcalibration::offset"];
-  const std::vector<std::string> &biasList = scan.listValues["bandcalibration::bias"];
-
-  const std::size_t bandCount = product.declaredBandIds.empty() ? 0 : product.declaredBandIds.size();
-  const bool anyCalibration = hasFlatGain || hasFlatOffset || !gainList.empty() ||
-                              !offsetList.empty() || !biasList.empty();
-  if ( anyCalibration && bandCount == 0 )
-  {
-    Json::Value details;
-    details["xml"] = xmlPath;
-    throw GeoError( ErrorCode::InvalidArgument,
-                    "Sidecar declares calibration coefficients but no BandID inventory", details );
-  }
-  for ( std::size_t i = 0; i < bandCount; ++i )
-  {
-    BandCalibration calibration;
-    calibration.band = product.declaredBandIds[i];
-    const auto readFrom = [] ( const std::vector<double> &values, std::size_t index,
-                               const std::vector<std::string> &textValues, bool &flag, double &out ) {
-      if ( index < values.size() && !std::isnan( values[index] ) )
+      std::istringstream stream( bandsText );
+      std::string item;
+      while ( std::getline( stream, item, ',' ) )
       {
-        out = values[index];
-        flag = true;
-        return;
+        const std::string trimmed = trimText( item );
+        if ( trimmed.empty() )
+          continue;
+        char *endChar = nullptr;
+        const long index = std::strtol( trimmed.c_str(), &endChar, 10 );
+        if ( endChar && *endChar == '\0' && index > 0 )
+          product.declaredBandIds.push_back( "B" + std::to_string( index ) );
+        else
+          product.declaredBandIds.push_back( trimmed );
       }
-      if ( index < textValues.size() )
+    }
+  }
+
+  // Declared calibration, verbatim (DECISIONS D-06). Per-band
+  // <BandCalibration> records are captured per element (a partial
+  // declaration can never pair positionally); the legacy flat GainVal /
+  // OffsetVal comma lists are indexed against the declared inventory.
+  for ( const auto &record : scan.records )
+  {
+    const auto bandIt = record.find( "bandid" );
+    if ( bandIt == record.end() )
+      continue;
+    BandCalibration calibration;
+    calibration.band = bandIt->second;
+    const auto readRecord = [ & ] ( const char *key, bool &flag, double &out ) {
+      const auto it = record.find( key );
+      double parsed = 0.0;
+      if ( it != record.end() && parseDouble( it->second, parsed ) )
       {
-        double parsed = 0.0;
-        if ( parseDouble( textValues[index], parsed ) )
-        {
-          out = parsed;
-          flag = true;
-        }
+        out = parsed;
+        flag = true;
       }
     };
-    readFrom( gains, i, gainList, calibration.hasGain, calibration.gain );
-    readFrom( offsets, i, offsetList, calibration.hasBias, calibration.bias );
-    if ( !calibration.hasBias && !biasList.empty() )
-      readFrom( {}, i, biasList, calibration.hasBias, calibration.bias );
+    readRecord( "gain", calibration.hasGain, calibration.gain );
+    readRecord( "offset", calibration.hasBias, calibration.bias );
+    if ( !calibration.hasBias )
+      readRecord( "bias", calibration.hasBias, calibration.bias );
     if ( calibration.hasGain || calibration.hasBias )
       product.bandCalibration.push_back( calibration );
+  }
+  if ( product.bandCalibration.empty() &&
+       ( !scanText( scan, "gainval" ).empty() || !scanText( scan, "offsetval" ).empty() ) )
+  {
+    auto parseCalibrationList = [] ( const std::string &text, std::vector<double> &out ) {
+      std::istringstream stream( text );
+      std::string item;
+      while ( std::getline( stream, item, ',' ) )
+      {
+        double parsed = 0.0;
+        if ( parseDouble( item, parsed ) )
+          out.push_back( parsed );
+        else
+          out.push_back( std::numeric_limits<double>::quiet_NaN() );
+      }
+    };
+    std::vector<double> gains;
+    std::vector<double> offsets;
+    const std::string gainValText = scanText( scan, "gainval" );
+    const std::string offsetValText = scanText( scan, "offsetval" );
+    if ( !gainValText.empty() )
+      parseCalibrationList( gainValText, gains );
+    if ( !offsetValText.empty() )
+      parseCalibrationList( offsetValText, offsets );
+    const std::size_t bandCount = product.declaredBandIds.empty() ? 0 : product.declaredBandIds.size();
+    if ( bandCount == 0 )
+    {
+      Json::Value details;
+      details["xml"] = xmlPath;
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "Sidecar declares calibration coefficients but no band inventory", details );
+    }
+    for ( std::size_t i = 0; i < bandCount; ++i )
+    {
+      BandCalibration calibration;
+      calibration.band = product.declaredBandIds[i];
+      if ( i < gains.size() && !std::isnan( gains[i] ) )
+      {
+        calibration.gain = gains[i];
+        calibration.hasGain = true;
+      }
+      if ( i < offsets.size() && !std::isnan( offsets[i] ) )
+      {
+        calibration.bias = offsets[i];
+        calibration.hasBias = true;
+      }
+      if ( calibration.hasGain || calibration.hasBias )
+        product.bandCalibration.push_back( calibration );
+    }
   }
 
   // Bounded passthrough of declared values that downstream consumers may
@@ -609,8 +784,10 @@ ProductMetadata parseCresdaXml( const std::string &xmlPath, const CnProductIdent
   product.extra.emplace_back( "parsed_sidecar", baseNameOf( xmlPath ) );
   if ( !modeId.empty() && product.extra.size() < 16 )
     product.extra.emplace_back( "mode_id", modeId );
-  const std::string stopTime = normalizeAcquisitionTime( scanText( scan, "stopdate" ),
-                                                         scanText( scan, "stoptime" ) );
+  std::string stopTime = normalizeAcquisitionTime( scanText( scan, "stopdate" ),
+                                                   scanText( scan, "stoptime" ) );
+  if ( stopTime.empty() )
+    stopTime = normalizeAcquisitionTime( std::string(), scanText( scan, "stoptime" ) );
   if ( !stopTime.empty() && product.extra.size() < 16 )
     product.extra.emplace_back( "stop_time", stopTime );
   return product;
@@ -633,7 +810,7 @@ std::string resolveBandRoleDir()
   auto hasMarker = [] ( const std::string &dir ) {
     return isDirectoryLocal( dir + "/data/products/band_roles" );
   };
-  auto walkUp = [] ( std::string dir ) -> std::string {
+  auto walkUp = [ &hasMarker ] ( std::string dir ) -> std::string {
     for ( int hops = 0; hops < 8 && !dir.empty(); ++hops )
     {
       std::error_code ec;
@@ -775,7 +952,7 @@ CnProductIdentity cnIdentifyProduct( const std::string &path )
 
   for ( const FamilyPattern &pattern : kSupportedPatterns )
   {
-    if ( upper.find( pattern.prefix ) != std::string::npos )
+    if ( nameHasToken( upper, pattern.prefix ) )
     {
       identity.recognized = true;
       identity.supported = true;
@@ -869,7 +1046,19 @@ std::string cnLocateImageTiff( const std::string &path, const std::string &sidec
         }
       }
     }
-    return firstTiffIn( path );
+    // Ambiguous directory (several images, none matching the sidecar stem):
+    // refuse instead of taking an arbitrary sibling that may belong to the
+    // other pair.
+    int tiffCount = 0;
+    for ( const std::string &entry : listDirectoryBounded( path ) )
+    {
+      const std::string extension = extensionOfLower( baseNameOf( entry ) );
+      if ( extension == ".tif" || extension == ".tiff" )
+        ++tiffCount;
+    }
+    if ( tiffCount <= 1 )
+      return firstTiffIn( path );
+    return std::string();
   }
 
   const std::string fileName = baseNameOf( path );

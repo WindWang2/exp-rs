@@ -9,7 +9,7 @@
 
 #include "geospatial/products/product_registry.h"
 
-#include "geospatial/products/cn_product_metadata.h"
+#include "geospatial/products/cn_product_adapters.h"
 
 #include "geospatial/gdal_guard.h"
 

@@ -41,6 +41,9 @@ struct CnImportProduct
     /// Declared band ids in sidecar order = TIFF band order (1-based index is
     /// the stacking sourceBand).
     QStringList bandNames;
+    /// True when the band order comes from the sidecar's own inventory;
+    /// false when it fell back to the band-role table (reported, not hidden).
+    bool bandOrderDeclared = false;
 };
 
 /// Identify + read a CN product from any accepted input shape (sidecar XML,
@@ -114,15 +117,18 @@ inline CnImportProduct resolveCnImportProduct( const std::string &input,
     if ( product.metadata.declaredBandIds.empty() )
     {
         // No declared inventory: use the table's band list (the sensor layout
-        // is documented even when the sidecar omits BandID entries) and say
-        // so in the result.
+        // is documented even when the sidecar omits BandID entries). The
+        // table-derived order is reported via bandSource — never silently
+        // presented as declared.
         for ( const sicnu::geo::CnBandSpec &spec : product.bandTable.bands )
             product.bandNames << QString::fromStdString( spec.band );
+        product.bandOrderDeclared = false;
     }
     else
     {
         for ( const std::string &band : product.metadata.declaredBandIds )
             product.bandNames << QString::fromStdString( band );
+        product.bandOrderDeclared = true;
     }
     return product;
 }
@@ -138,12 +144,6 @@ inline SatelliteProducts::ProductInfo buildCnProductInfo( const CnImportProduct 
     info.acquisitionDate = QString::fromStdString( product.metadata.acquisitionTime );
     info.attributes[QStringLiteral( "SICNU_SENSOR" )] =
       QString::fromStdString( product.metadata.sensor );
-    if ( product.metadata.hasSunElevation )
-        info.attributes[QStringLiteral( "SICNU_SUN_ELEVATION_DEG" )] =
-          QString::number( product.metadata.sunElevationDeg, 'f', 4 );
-    if ( product.metadata.hasSunAzimuth )
-        info.attributes[QStringLiteral( "SICNU_SUN_AZIMUTH_DEG" )] =
-          QString::number( product.metadata.sunAzimuthDeg, 'f', 4 );
 
     for ( int i = 0; i < product.bandNames.size(); ++i )
     {
@@ -173,6 +173,7 @@ inline SatelliteProducts::ProductInfo buildCnProductInfo( const CnImportProduct 
 /// wavelength items stackToGeoTiff already wrote.
 inline bool writeCnImportMetadata( const QString &outputPath,
                                    const sicnu::geo::ProductMetadata &metadata,
+                                   const QStringList &stackedBands,
                                    const QString &productKindName,
                                    QString *errorMessage )
 {
@@ -194,9 +195,13 @@ inline bool writeCnImportMetadata( const QString &outputPath,
     if ( !metadata.orbitId.empty() )
         GDALSetMetadataItem( dataset, "SICNU_ORBIT_ID", metadata.orbitId.c_str(), nullptr );
     if ( metadata.hasSunElevation )
-        GDALSetMetadataItem( dataset, "SICNU_SUN_ELEVATION_DEG",
-                             QByteArray::number( metadata.sunElevationDeg, 'f', 4 ).constData(),
-                             nullptr );
+    {
+        const QByteArray elevation = QByteArray::number( metadata.sunElevationDeg, 'f', 4 );
+        GDALSetMetadataItem( dataset, "SICNU_SUN_ELEVATION_DEG", elevation.constData(), nullptr );
+        // Consumer-compat key: rs:radiometric_calibration and the DOS flows
+        // read the Landsat-convention "SUN_ELEVATION" (degrees above horizon).
+        GDALSetMetadataItem( dataset, "SUN_ELEVATION", elevation.constData(), nullptr );
+    }
     if ( metadata.hasSunAzimuth )
         GDALSetMetadataItem( dataset, "SICNU_SUN_AZIMUTH_DEG",
                              QByteArray::number( metadata.sunAzimuthDeg, 'f', 4 ).constData(),
@@ -204,11 +209,14 @@ inline bool writeCnImportMetadata( const QString &outputPath,
 
     for ( const sicnu::geo::BandCalibration &calibration : metadata.bandCalibration )
     {
+        // Index by the STACKED band order (the user may have reordered or
+        // subset the declared inventory via the "bands" parameter) — keying
+        // by the sidecar inventory would mislabel coefficients.
         const int bandIndex = [&] {
-            for ( int i = 0; i < metadata.declaredBandIds.size(); ++i )
+            for ( int i = 0; i < stackedBands.size(); ++i )
             {
-                if ( QString::fromStdString( metadata.declaredBandIds[i] )
-                       .compare( QString::fromStdString( calibration.band ), Qt::CaseInsensitive ) == 0 )
+                if ( stackedBands[i].compare( QString::fromStdString( calibration.band ),
+                                              Qt::CaseInsensitive ) == 0 )
                     return i + 1;
             }
             return 0;
@@ -235,16 +243,20 @@ inline bool writeCnImportMetadata( const QString &outputPath,
     }
     GDALClose( dataset );
 
-    // L1A pixels are digital numbers; declared-state consumers rely on this
-    // label (change detection comparability checks).
-    QString err;
-    if ( !SatelliteProducts::setRadiometricState( outputPath,
-                                                  SatelliteProducts::kRadiometricStateDigitalNumber,
-                                                  &err ) )
+    // L1 pixels are digital numbers; the state was decided by the parser
+    // (only a declared/derived L1 level is stamped) — never labelled here
+    // unconditionally (change-detection comparability checks rely on it).
+    if ( metadata.radiometricState == SatelliteProducts::kRadiometricStateDigitalNumber )
     {
-        if ( errorMessage )
-            *errorMessage = err;
-        return false;
+        QString err;
+        if ( !SatelliteProducts::setRadiometricState( outputPath,
+                                                      SatelliteProducts::kRadiometricStateDigitalNumber,
+                                                      &err ) )
+        {
+            if ( errorMessage )
+                *errorMessage = err;
+            return false;
+        }
     }
     return true;
 }
@@ -268,6 +280,8 @@ inline Json::Value cnMissingDeclaredFields( const sicnu::geo::ProductMetadata &m
         missing.append( "orbit_id" );
     if ( metadata.bandCalibration.empty() )
         missing.append( "band_calibration" );
+    if ( metadata.declaredBandIds.empty() )
+        missing.append( "band_inventory" );
     return missing;
 }
 
@@ -289,6 +303,7 @@ inline Json::Value cnImportResult( const CnImportProduct &product,
     result["processingLevel"] = product.metadata.processingLevel;
     result["acquisitionTime"] = product.metadata.acquisitionTime;
     result["radiometricState"] = product.metadata.radiometricState;
+    result["bandSource"] = product.bandOrderDeclared ? "declared_band_ids" : "band_role_table";
     result["bandCount"] = static_cast<Json::Int64>( stackedBands.size() );
     Json::Value bands( Json::arrayValue );
     Json::Value roles( Json::arrayValue );

@@ -110,7 +110,7 @@ Json::Value RsHjImportOperator::run(const Json::Value& p, RSOperatorContext& con
 
     context.reportProgress(0.95, "Writing HJ-1 metadata");
     if (!writeCnImportMetadata(QString::fromStdString(outputPath), product.metadata,
-                               QString::fromStdString(product.identity.kindName), &err)) {
+                               requested, QString::fromStdString(product.identity.kindName), &err)) {
         throw RSOperatorError(ErrorCode::ComputationError,
                               err.isEmpty() ? "Failed to write HJ-1 import metadata"
                                             : err.toStdString());

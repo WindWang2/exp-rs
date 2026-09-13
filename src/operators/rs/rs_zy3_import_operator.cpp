@@ -111,7 +111,7 @@ Json::Value RsZy3ImportOperator::run(const Json::Value& p, RSOperatorContext& co
 
     context.reportProgress(0.95, "Writing ZY-3 metadata");
     if (!writeCnImportMetadata(QString::fromStdString(outputPath), product.metadata,
-                               QString::fromStdString(product.identity.kindName), &err)) {
+                               requested, QString::fromStdString(product.identity.kindName), &err)) {
         throw RSOperatorError(ErrorCode::ComputationError,
                               err.isEmpty() ? "Failed to write ZY-3 import metadata"
                                             : err.toStdString());

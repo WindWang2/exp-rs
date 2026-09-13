@@ -18,9 +18,9 @@
   silent GenericRaster degradation for recognized CN names.
  ***************************************************************************/
 
-#include "geospatial/products/cn_product_metadata.h"
+#include "geospatial/products/cn_product_adapters.h"
 
-#include "geospatial/products/product_registry.h"
+#include "geospatial/products/cn_product_metadata.h"
 
 #include <json/json.h>
 

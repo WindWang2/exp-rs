@@ -27,7 +27,6 @@
 
 #include <json/json.h>
 
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -109,13 +108,6 @@ std::string cnLocateImageTiff( const std::string &path,
 /// identity-derived key. Never returns "" for supported identities.
 std::string cnSensorKey( const CnProductIdentity &identity,
                          const ProductMetadata &metadata );
-
-/// ProductAdapter instances for the CN families, registered into the
-/// ProductAdapterRegistry (first-match ordering keeps them ahead of the
-/// GenericRaster fallback).
-std::unique_ptr<ProductAdapter> makeGaofenAdapter();
-std::unique_ptr<ProductAdapter> makeZy3Adapter();
-std::unique_ptr<ProductAdapter> makeHjAdapter();
 
 } // namespace sicnu::geo
 

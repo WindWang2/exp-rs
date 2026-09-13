@@ -114,7 +114,7 @@ Json::Value RsGaofenImportOperator::run(const Json::Value& p, RSOperatorContext&
 
     context.reportProgress(0.95, "Writing Gaofen metadata");
     if (!writeCnImportMetadata(QString::fromStdString(outputPath), product.metadata,
-                               QString::fromStdString(product.identity.kindName), &err)) {
+                               requested, QString::fromStdString(product.identity.kindName), &err)) {
         throw RSOperatorError(ErrorCode::ComputationError,
                               err.isEmpty() ? "Failed to write Gaofen import metadata"
                                             : err.toStdString());
