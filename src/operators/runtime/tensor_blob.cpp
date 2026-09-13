@@ -162,14 +162,14 @@ TensorBlob TensorBlob::fromMat( const cv::Mat &mat )
         std::memcpy( blob.bytes.data(), mat.ptr<const std::uint8_t>(), total );
     else
     {
-        // Multi-dim Mats can be non-continuous when ROI'd; copy row ranges.
-        std::size_t offset = 0;
-        for ( int r = 0; r < mat.rows; ++r )
-        {
-            std::memcpy( blob.bytes.data() + offset, mat.ptr<const std::uint8_t>( r ),
-                         static_cast<std::size_t>( mat.step ) );
-            offset += static_cast<std::size_t>( mat.step );
-        }
+        // Non-continuous (ROI'd) Mats — 2-D or ND. The historical per-row loop
+        // was only meaningful for 2-D: ND headers report rows == -1, the loop
+        // copied NOTHING and the blob stayed all-valid (byte count matched)
+        // but uninitialized (F-OPS-2). clone() of an ROI yields a fresh
+        // CONTIGUOUS matrix of identical shape/bytes for every dimensionality,
+        // so one contiguous copy from it is exact.
+        const cv::Mat contiguous = mat.clone();
+        std::memcpy( blob.bytes.data(), contiguous.ptr<const std::uint8_t>(), total );
     }
     return blob;
 }
