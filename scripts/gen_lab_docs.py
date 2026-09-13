@@ -27,7 +27,16 @@ GENERATED_NOTICE = (
 
 # Hand-authored docs that live under docs/labs/ alongside generated output.
 # They are never overwritten and never reported as stale by --check.
-HAND_WRITTEN = {"docs/labs/LABSPEC.md"}
+HAND_WRITTEN = {
+    "docs/labs/LABSPEC.md",
+    "docs/labs/GRADING.md",
+    # D3 track docs: hand-authored lab pages in the pre-LabSpec layout (lab8–11
+    # single-digit names); the canonical zero-padded set is lab01–lab11.
+    "docs/labs/lab8_temporal_analysis.md",
+    "docs/labs/lab9_sar_processing.md",
+    "docs/labs/lab10_hyperspectral_analysis.md",
+    "docs/labs/lab11_cartographic_mapping.md",
+}
 
 # Shipped sample-data reference (fixed template content, not per-lab data):
 # describes the gitignored data/samples/ rasters the labs reference by path.
