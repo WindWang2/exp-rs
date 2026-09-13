@@ -38,7 +38,56 @@
 
 ## Phase 5 · 交叉复核（2026-09-13）
 
-（待填：subagent A 对照结果、subagent B 漏洞清单、逐条裁决。）
+两只只读子代理（A 考古、B 对抗）均已返回。裁决记录（全量原文见会话；此处存裁决结论）：
+
+### A（考古对照）裁决
+
+| # | A 的发现/修正 | 裁决 |
+| --- | --- | --- |
+| A-1 | GOAL.md 计数 25（含本 track 自存档件），主代理口径 24（历史件） | **双方口径并存**：矩阵与缺陷清单用"24 历史件"；本 track GOAL.md 落盘后自增 1。记入口径注释，不改交付物。 |
+| A-2 | 分支前缀是**时代分布**：feat/ 15 个 = 平台 6.0–9.0 代；zcode/ 8 个 = 早期 3/4/5 代 + 全部最新 D/R 系列；远端现存分支几乎全为 zcode/ | **采纳 A 的修正**：D-008 的"zcode/ 是现行多数"表述不准确，改为时代表述；模板统一为 zcode/ 的裁决不变（最新时代 + 远端现状）。D-008 已修订。 |
+| A-3 | 新缺陷：`unified-help-diagnostics-6/GOAL.md:33` 引用 `sicnu_cli`，实际目标是 `sicnu_geo_rs_cli`（src/cli/CMakeLists.txt:9） | **采纳**，新增 D-026。 |
+| A-4 | 新缺陷：ADR 0144 编号被三个文件复用（0144-execution-plane-8 / 0144-harness-8 / 0144-model-runtime-platform-9） | **采纳**，新增 D-027（重复定义/编号冲突；修复归 domain-modeling 体系，本 track 只记录）。 |
+| A-5 | 子代理名额标准分配模式："#1 = Phase 0 基线审计，#2 = 终审对抗"（epr-7:34） | **采纳**：与模板 envelope 的"各自唯一职责"一致；Phase 7 在模板中补该惯分配示例。 |
+| A-6 | R0 "250 closed issues (#595–#945)" 本地不可核验 | 并入 D-003 的不可核查问题，不另立条。 |
+
+### B（对抗测试）裁决
+
+30 项发现全部有效；**0 项驳回，2 项部分采纳**。修复映射（Phase 7 执行）：
+
+| B# | 漏洞 | 处置 |
+| --- | --- | --- |
+| B-1 | AGENTS.md"先澄清"vs autonomy=full 无裁决 | 采纳 → goal-template envelope 加优先级行；AGENTS.md 加 unattended 适配句（Phase 6） |
+| B-2/B-9 | 构建入口缺位；CLAUDE.md `make -j$(nproc)` + build.cmd 死路径 | 采纳 → 模板加构建入口行；CLAUDE.md Quick Commands 重写（Phase 6）；build.cmd 死路径新增 D-028（超出本 track write scope，只记录） |
+| B-3 | C++17/20 + Catch2/pytest 三重不一致 | **部分采纳**：AGENTS.md C++17→C++20（CMakeLists.txt:3 为权威，Phase 6）；pytest 证据仅是 settings.local.json 历史允许项，不构成测试框架权威——Catch2/ctest 维持 |
+| B-4 | runbook 第 0/1 步顺序死锁 + 主树规划文件进不了 worktree | 采纳 → runbook 重排：先 worktree，白名单在 worktree 内改，GOAL.md 落 worktree |
+| B-5 | `grep -c "^A"` 断言对修改型 Phase 恒 0，"预期"无定义 | 采纳 → 改为 git status --porcelain 留档 EVIDENCE.md |
+| B-6 | "checkpoint"术语在 /goal 语境未定义；rebase 技能验证步骤无预算约束 | 采纳 → 改"每个 Phase commit 后"；技能验证步骤限定 targeted ctest |
+| B-7 | push 拦截分支引用安装型技能；hook 实测不存在；无 push 失败兜底 | 采纳 → 第 6 步自包含化 + 禁止在 track 内执行安装步骤 + 失败即收尾报告 |
+| B-8 | RSS/load 触发器在 Windows Git Bash 无测量手段 | 采纳 → envelope 加平台化测量说明；不可测时显式声明 not-executed 并固定 -j2 |
+| B-10 | 模板 M-xx 引证在 GOAL_MATRIX.csv 中不存在 | 采纳 → 删除全部 M-xx 引证，仅保留 D-xxx |
+| B-11/B-12 | AGENTS.md karpathy 断链；CLAUDE.md .agents/vendor 断链 | 采纳 → Phase 6 修复；AGENTS/CLAUDE 纳入存在性断言扫描范围 |
+| B-13 | 模板裸相对路径引用兄弟文件 | 采纳 → 全部改为 docs/agents/ 全路径 |
+| B-14 | Skills 表骨架缺 /SKILL.md 后缀 | 采纳 → 骨架补全路径 |
+| B-15 | Autonomy defaults"覆盖全部"不可判定 | 采纳 → 改为封闭必答类清单（7 类） |
+| B-16 | token 预算不可测量 + 总预算耗尽无处理 | 采纳 → 上报落点 EVIDENCE.md 固定节 + 可测量代理指标 + 总预算耗尽默认动作 |
+| B-17 | 措辞禁令超出 6 词检测范围，不可判定 | 采纳（改法）→ 禁用词定义为**封闭清单**（= grep 模式本身）；清单外措辞归人工评审，不进自动断言 |
+| B-18 | Completion gate"可第三方核查"是元要求 | 采纳 → 每条 gate 强制附"验证命令 → 期望输出" |
+| B-19 | PR 被拒零处理 | 采纳 → runbook 加第 9 步（同 track 续跑规则） |
+| B-20 | 子代理失败零处理 | 采纳 → Autonomy defaults 加默认动作（主线内联复核 + 记录） |
+| B-21 | 范围外发现无固定落点、无 P0 例外 | 采纳 → 固定文本：OUT_OF_SCOPE 节 + P0 在 PR_BODY 顶部标注 |
+| B-22 | 同 B-16 | 合并 |
+| B-23 | /loop 无唤醒机制定义 | 采纳 → Trigger 节强制"再触发方式"字段 + 声明"本模板不提供常驻进程" |
+| B-24 | 全库重审循环与反模式表冲突 | 采纳 → 反模式表加整库审查豁免注脚；vocabulary 补链接 |
+| B-25 | loop 参数表缺失，autonomy=steady 无定义 | 采纳 → 补参数表并定义 steady |
+| B-26 | loop 改 .gitignore 与"不改被跟踪文件"自相矛盾 | 采纳 → 白名单由设立方一次性提交；循环运行期只写 State home |
+| B-27 | loop 无预算参数 | 采纳 → 参数头加 budget=<N>（每轮包线）+ 子游标可选约定 |
+| B-28 | checkpoint=no 仍强制 Brief；git fetch 归类不明 | 采纳 → gate 第 4 条加条件；只读 fetch 不算对外动作 |
+| B-29 | loop 无透镜/严重度挂载点 | 采纳 → 骨架加 Review vocabulary 槽（引用 command-vocabulary P0–P3 节） |
+| B-30 | "逐字保留"与可变预算张力 | 采纳 → 改"格式逐字保留；数值参数按实际值填写" |
+
+**结论**：B 用模板跑假想 track 产生的缺口共 30 项，全部修复进模板（Phase 7）；无任何一项需要向用户提问才能裁决——满足 Completion gate"subagent B 产生的缺口全部修复模板"。
+
 
 ## Phase 6 · AGENTS.md 修复 + 镜像记录（2026-09-13）
 
