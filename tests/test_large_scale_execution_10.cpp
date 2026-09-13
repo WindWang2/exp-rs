@@ -131,13 +131,16 @@ TEST_CASE( "Wide fan-out join drains 10^6 logical tiles with bounded in-flight m
     std::vector<ChunkGraph::NodeId> sources;
     for ( int i = 0; i < sourceCount; ++i )
         sources.push_back( graph.addSource( trackSource( i ) ) );
-    auto join = graph.addJoin( sources, []( std::vector<TilePayload> &&tiles ) {
+    auto join = graph.addJoin( sources, [&]( std::vector<TilePayload> &&tiles ) {
         // Deterministic tuple: all four inputs carry the same index.
         TileSpec spec = tiles.front().spec;
         const float index = tiles[0].pixels->at( 0 );
         for ( const auto &tile : tiles )
             if ( tile.pixels->at( 0 ) != index )
                 throw std::runtime_error( "join tuple misaligned" );
+        // The dropped inputs' payloads die HERE: the live counter follows
+        // payload lifetime, not production count.
+        live.fetch_sub( sourceCount - 1 );
         return TilePayload{ spec, tiles[0].pixels };
     } );
     std::atomic<int> consumed{ 0 };
@@ -151,7 +154,16 @@ TEST_CASE( "Wide fan-out join drains 10^6 logical tiles with bounded in-flight m
     REQUIRE( consumed == totalTiles );
     REQUIRE( graph.completedTiles() == static_cast<std::size_t>( totalTiles ) );
 
-    const int bound = ( stages + 1 ) * static_cast<int>( queueCap ) * sourceCount + 1;
+    // Precise bound for THIS counter's accounting: a tile is live from the
+    // producer's hands (before push) until the sink consumes it, so
+    //   producers' hands + input queues + join tuple + output queue + sink.
+    // The planner's stream bound (stages+1)*cap*inputs + 1 = 17 covers the
+    // queue/node-held subset; the +sourceCount is the pre-push hands.
+    const int bound = sourceCount                                   /*producer hands*/
+                      + sourceCount * static_cast<int>( queueCap )  /*input queues*/
+                      + sourceCount                                 /*join tuple*/
+                      + static_cast<int>( queueCap )                /*join output queue*/
+                      + 1;                                          /*sink tile*/
     REQUIRE( peak.load() <= bound );
 }
 
