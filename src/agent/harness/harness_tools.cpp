@@ -171,16 +171,10 @@ class ErrorCodesTool final : public SpatialTool
 
     SpatialToolResult execute( const Json::Value & ) override
     {
-      static const char *kCodes[] = {
-        "DATASET_NOT_FOUND", "BAND_ROLE_UNRESOLVED", "CRS_MISMATCH", "GRID_MISMATCH",
-        "INVALID_RADIOMETRY", "INSUFFICIENT_MEMORY", "MODEL_INCOMPATIBLE", "MODEL_NOT_READY",
-        "EXECUTION_FAILED", "CANCELLED", "OUTPUT_INVALID", "MAP_PREFLIGHT_FAILED",
-        "PREFLIGHT_BLOCKED", "ENTITY_AMBIGUOUS", "INVALID_PLAN", "INVALID_PARAMETER",
-        "TRANSIENT_FAILURE", "IO_ERROR", "PATH_OUTSIDE_WORKSPACE", "WORKFLOW_NOT_FOUND",
-        "TOOL_NOT_FOUND", "NOT_SUPPORTED",
-      };
+      // Derived from the authoritative table (harness_error allErrorCodes) —
+      // a hardcoded copy here had drifted behind the taxonomy (D9 fix).
       Json::Value codes( Json::arrayValue );
-      for ( const char *code : kCodes )
+      for ( const std::string &code : allErrorCodes() )
       {
         Json::Value entry( Json::objectValue );
         entry["code"] = code;

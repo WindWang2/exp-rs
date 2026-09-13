@@ -7741,6 +7741,11 @@ sicnu_add_test(test_harness_evidence)
 sicnu_add_test(test_harness_eval_corpus)
 sicnu_link_jsoncpp(test_harness_evals)
 
+# D9: lab copilot (teaching mode) evaluation suite — must-refuse reverse
+# cases, diagnostic brain, step anchoring, budgets.
+sicnu_add_test(test_harness_lab_evals)
+sicnu_link_jsoncpp(test_harness_lab_evals)
+
 
 # Harness 7.0 capability-knowledge drift guard: entries vs the live operator
 # registry, operator x-rs-contract facts, and the closed intent vocabulary.
