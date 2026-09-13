@@ -1,0 +1,181 @@
+// disk_tile_store.cpp — see disk_tile_store.h.
+#include "disk_tile_store.h"
+
+#include <cstring>
+#include <fstream>
+#include <string>
+#include <vector>
+
+namespace sicnu::runtime::chunk
+{
+
+namespace
+{
+constexpr std::size_t kMagicSize = 8;
+constexpr std::uint32_t kFormatVersion = 1;
+const char kMagic[kMagicSize] = { 'S', 'I', 'C', 'N', 'U', 'T', 'L', '1' };
+
+#pragma pack( push, 1 )
+struct TileFileHeader
+{
+    char magic[kMagicSize];
+    std::uint32_t version;
+    std::uint32_t headerSize;
+    // TileSpec geometry (int fields, declared order).
+    std::int32_t index;
+    std::int32_t totalTiles;
+    std::int32_t xOffset;
+    std::int32_t yOffset;
+    std::int32_t width;
+    std::int32_t height;
+    std::int32_t halo;
+    std::int32_t bufferWidth;
+    std::int32_t bufferHeight;
+    std::int32_t rasterWidth;
+    std::int32_t rasterHeight;
+    std::int32_t bands;
+    std::int32_t bandOffset;
+    std::int32_t timeIndex;
+    std::uint64_t payloadBytes;
+    std::uint64_t payloadDigest;
+};
+#pragma pack( pop )
+
+std::uint64_t fnv1a( const void *data, std::size_t size )
+{
+    const auto *bytes = static_cast<const std::uint8_t *>( data );
+    std::uint64_t hash = 1469598103934665603ull;
+    for ( std::size_t i = 0; i < size; ++i )
+    {
+        hash ^= bytes[i];
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
+TileFileHeader makeHeader( const TilePayload &payload, std::uint64_t payloadBytes,
+                           std::uint64_t digest )
+{
+    TileFileHeader header{};
+    std::memcpy( header.magic, kMagic, kMagicSize );
+    header.version = kFormatVersion;
+    header.headerSize = static_cast<std::uint32_t>( sizeof( TileFileHeader ) );
+    header.index = payload.spec.index;
+    header.totalTiles = payload.spec.totalTiles;
+    header.xOffset = payload.spec.xOffset;
+    header.yOffset = payload.spec.yOffset;
+    header.width = payload.spec.width;
+    header.height = payload.spec.height;
+    header.halo = payload.spec.halo;
+    header.bufferWidth = payload.spec.bufferWidth;
+    header.bufferHeight = payload.spec.bufferHeight;
+    header.rasterWidth = payload.spec.rasterWidth;
+    header.rasterHeight = payload.spec.rasterHeight;
+    header.bands = payload.spec.bands;
+    header.bandOffset = payload.spec.bandOffset;
+    header.timeIndex = payload.spec.timeIndex;
+    header.payloadBytes = payloadBytes;
+    header.payloadDigest = digest;
+    return header;
+}
+
+TilePayload decode( const TileFileHeader &header, std::vector<char> payloadBytes,
+                    const std::string &path )
+{
+    if ( std::memcmp( header.magic, kMagic, kMagicSize ) != 0
+         || header.version != kFormatVersion
+         || header.headerSize != sizeof( TileFileHeader ) )
+        throw ChunkCorruptTile( path );
+    if ( fnv1a( payloadBytes.data(), payloadBytes.size() ) != header.payloadDigest
+         || payloadBytes.size() != header.payloadBytes )
+        throw ChunkCorruptTile( path );
+
+    TileSpec spec;
+    spec.index = header.index;
+    spec.totalTiles = header.totalTiles;
+    spec.xOffset = header.xOffset;
+    spec.yOffset = header.yOffset;
+    spec.width = header.width;
+    spec.height = header.height;
+    spec.halo = header.halo;
+    spec.bufferWidth = header.bufferWidth;
+    spec.bufferHeight = header.bufferHeight;
+    spec.rasterWidth = header.rasterWidth;
+    spec.rasterHeight = header.rasterHeight;
+    spec.bands = header.bands;
+    spec.bandOffset = header.bandOffset;
+    spec.timeIndex = header.timeIndex;
+    if ( spec.bufferElementCount() * sizeof( float ) != payloadBytes.size() )
+        throw ChunkCorruptTile( path );
+
+    auto buffer = std::make_shared<std::vector<float>>( payloadBytes.size() / sizeof( float ) );
+    if ( !payloadBytes.empty() )
+        std::memcpy( buffer->data(), payloadBytes.data(), payloadBytes.size() );
+    return TilePayload{ spec, std::move( buffer ) };
+}
+} // namespace
+
+void DiskTileStore::write( const ScratchLease &lease, const TilePayload &payload )
+{
+    if ( !lease.isValid() || !payload.pixels )
+        throw std::runtime_error( "disk tile write: invalid lease or payload" );
+    const auto *data = payload.pixels->data();
+    const std::size_t bytes = payload.pixels->size() * sizeof( float );
+    const TileFileHeader header = makeHeader( payload, bytes, fnv1a( data, bytes ) );
+
+    std::ofstream out( lease.path(), std::ios::binary | std::ios::trunc );
+    if ( !out )
+        throw std::runtime_error( "disk tile write: cannot open " + lease.path() );
+    out.write( reinterpret_cast<const char *>( &header ), sizeof( header ) );
+    if ( bytes )
+        out.write( reinterpret_cast<const char *>( data ), static_cast<std::streamsize>( bytes ) );
+    out.flush();
+    if ( !out )
+        throw std::runtime_error( "disk tile write: short write on " + lease.path() );
+    lease.sealDigest();
+    lease.finalize();
+}
+
+TilePayload DiskTileStore::read( const ScratchLease &lease )
+{
+    if ( !lease.isValid() )
+        throw ChunkCorruptTile( "<null lease>" );
+    TileFileHeader header{};
+    std::ifstream in( lease.finalPath(), std::ios::binary );
+    if ( !in )
+        throw ChunkCorruptTile( lease.finalPath() );
+    in.read( reinterpret_cast<char *>( &header ), sizeof( header ) );
+    if ( static_cast<std::size_t>( in.gcount() ) != sizeof( header ) )
+        throw ChunkCorruptTile( lease.finalPath() );
+    std::vector<char> payloadBytes( static_cast<std::size_t>( header.payloadBytes ) );
+    if ( !payloadBytes.empty() )
+    {
+        in.read( payloadBytes.data(), static_cast<std::streamsize>( payloadBytes.size() ) );
+        if ( static_cast<std::size_t>( in.gcount() ) != payloadBytes.size() )
+            throw ChunkCorruptTile( lease.finalPath() );
+    }
+    return decode( header, std::move( payloadBytes ), lease.finalPath() );
+}
+
+TilePayload DiskTileStore::readProvisional( const ScratchLease &lease )
+{
+    if ( !lease.isValid() )
+        throw ChunkCorruptTile( "<null lease>" );
+    TileFileHeader header{};
+    std::ifstream in( lease.path(), std::ios::binary );
+    if ( !in )
+        throw ChunkCorruptTile( lease.path() );
+    in.read( reinterpret_cast<char *>( &header ), sizeof( header ) );
+    if ( static_cast<std::size_t>( in.gcount() ) != sizeof( header ) )
+        throw ChunkCorruptTile( lease.path() );
+    std::vector<char> payloadBytes( static_cast<std::size_t>( header.payloadBytes ) );
+    if ( !payloadBytes.empty() )
+    {
+        in.read( payloadBytes.data(), static_cast<std::streamsize>( payloadBytes.size() ) );
+        if ( static_cast<std::size_t>( in.gcount() ) != payloadBytes.size() )
+            throw ChunkCorruptTile( lease.path() );
+    }
+    return decode( header, std::move( payloadBytes ), lease.path() );
+}
+
+} // namespace sicnu::runtime::chunk
