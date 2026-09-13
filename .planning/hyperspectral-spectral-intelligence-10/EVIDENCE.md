@@ -31,3 +31,11 @@ marked `not-executed`. Append per phase.
 * test_spectral_selection → All tests passed (45 assertions in 4 test cases): band_select wavelength-window + nm normalization + exclusion + refusals; library_select material filter + near-duplicate QA + license echo + strict-load refusal.
 * test_mnf_transform (with 256-band scale case) → All tests passed (432 assertions): 256-band logical cube fit + SNR ordering + roundtrip ≤1e-5 (Phase 5 scale evidence; streaming by construction).
 * Regression family re-run green: test_mnf, test_spectral_library (47), test_spectral_library_data (64879), test_spectral_resampling (46), test_spectral_roi (35), test_spectral_derivative (122), test_spectral_anomaly (90239), test_workflow_runtime (223), test_rs_operators (8948).
+
+## Phase 4 integration evidence (2026-09-13)
+
+* `cmake --build build-dev --target sicnu_geo_rs_cli -j1` → exit 0.
+* `QT_QPA_PLATFORM=offscreen ./sicnu_geo_rs_cli --list | grep -E "spectral_band_select|library_select|mnf_inverse"` → all three new operators listed (rs:mnf_inverse, rs:library_select, rs:spectral_band_select).
+* `./sicnu_geo_rs_cli --schema rs:mnf_inverse` → full JSON Schema rendered; `--schema rs:spectral_unmixing` shows endmembersRef/libraryPath/libraryMaterials/method params.
+* test_algorithm_meta_drift → All tests passed (2270 assertions) — new operators deliberately declare no taskFamily, shipped sidecar set unchanged (DECISIONS D-11).
+* MCP `tools/list` and the Agent Tool Catalog mirror the same RSOperatorRegistry (covered green by test_mcp_server + test_rs_operators).
