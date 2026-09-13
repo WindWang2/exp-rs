@@ -1,0 +1,134 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://rs-studio.local/schemas/spectral-library-v2.json",
+  "title": "rs-studio built-in spectral library (format v2)",
+  "description": "Schema of record for curated spectral libraries shipped with rs-studio (data/spectral/library.json). The C++ loader (SpectralLibrary::fromJson) additionally enforces shape rules that JSON Schema cannot express (array length equality, strict wavelength monotonicity, no NaN/Inf) and SpectralLibrary::validateLibrary / Library::loadValidated enforce the curation rules marked [strict] below. Curated libraries must pass loadValidated; size guidance: an uncompressed curated library stays under 5 MB by sharing dense wavelength grids and 4-decimal fixed-point reflectance values — never by dropping material classes.",
+  "type": "object",
+  "required": ["entries"],
+  "properties": {
+    "format": {
+      "const": "sicnu-spectral-library",
+      "description": "Format tag shared with the v1 workbench format."
+    },
+    "version": {
+      "const": 2,
+      "description": "2 = v2 fields introduced by D12 (per-entry provenance, per-entry grids)."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$",
+      "description": "Stable library identity referenced by lab experiments (library_id) and the knowledge layer."
+    },
+    "bandCount": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Shared band count; all entries of one library carry the same number of values."
+    },
+    "wavelengths": {
+      "type": "array",
+      "items": { "type": "number", "exclusiveMinimum": 0 },
+      "description": "Optional shared wavelength grid (nm). Entries with their own 'wavelengths' ignore it. Strictly increasing is required for any grid used in resampling/matching [strict for curated libraries]."
+    },
+    "fwhm": {
+      "type": "array",
+      "items": { "type": "number", "exclusiveMinimum": 0 },
+      "description": "Optional shared FWHM grid (nm), sized like 'wavelengths'."
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "material", "wavelengths", "reflectance", "source", "license", "citation", "fwhm"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9._-]*$",
+            "description": "[strict] stable slug identity; unique across the library."
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Display name; defaults to the id when omitted."
+          },
+          "material": {
+            "description": "[strict] coarse material label from the fixed taxonomy.",
+            "enum": [
+              "bare_rock",
+              "burned_area",
+              "cloud",
+              "cropland",
+              "ice",
+              "impervious_surface",
+              "sand",
+              "shadow",
+              "snow",
+              "soil",
+              "vegetation",
+              "water"
+            ]
+          },
+          "subclass": {
+            "type": "string",
+            "description": "Fine-grained within-class label, e.g. 'turbid, sediment-dominated'."
+          },
+          "wavelengths": {
+            "type": "array",
+            "minItems": 2,
+            "items": { "type": "number", "minimum": 400, "maximum": 2500 },
+            "description": "[strict] band center wavelengths (nm), strictly increasing, sized like 'reflectance'. Curated libraries cover 400-2500 nm (VNIR+SWIR) so Landsat OLI/TM, Sentinel-2 MSI and GF-1/2 PMS band grids are fully covered."
+          },
+          "fwhm": {
+            "type": "array",
+            "minItems": 2,
+            "items": { "type": "number", "exclusiveMinimum": 0 },
+            "description": "[strict] band FWHM (nm), sized like 'reflectance'."
+          },
+          "reflectance": {
+            "type": "array",
+            "minItems": 2,
+            "items": { "type": "number", "minimum": 0, "maximum": 1 },
+            "description": "[strict] surface reflectance values in [0, 1]; no NaN/Inf; sized like 'wavelengths'."
+          },
+          "spectrum": {
+            "type": "array",
+            "items": { "type": "number" },
+            "description": "Legacy v1 alias of 'reflectance'. Never combine both in one entry unless the arrays are identical; the C++ reader rejects conflicts."
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "description": "[strict] where the spectrum comes from; for synthetic entries the generating model/script."
+          },
+          "license": {
+            "type": "string",
+            "minLength": 1,
+            "description": "[strict] license of this spectrum, e.g. 'CC0-1.0'. Every value must be listed in data/spectral/LICENSES.md."
+          },
+          "citation": {
+            "type": "string",
+            "minLength": 1,
+            "description": "[strict] attribution string; for synthetic spectra this cites the physical literature the model is grounded in."
+          },
+          "synthetic": {
+            "type": "boolean",
+            "default": false,
+            "description": "True when the spectrum is physics-model derived rather than measured."
+          },
+          "derivation": {
+            "type": "string",
+            "minLength": 1,
+            "description": "[strict when synthetic=true] how the spectrum was computed; names the generator script and its parameters."
+          },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Free-form markers; 'resampled' and 'sensor:<id>' are reserved by Library::resampleTo."
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
