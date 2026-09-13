@@ -1,0 +1,110 @@
+{
+ "capability": {
+  "applicability": {
+   "land_cover": [
+    "植被",
+    "水体",
+    "火点迹地"
+   ],
+   "scenes": [
+    "环境监测",
+    "大区域普查"
+   ]
+  },
+  "band_roles": {},
+  "crs": {
+   "requires_projected": false,
+   "requires_shared_grid": false
+  },
+  "determinism": {
+   "grade": "bit_exact",
+   "large_raster_safe": false,
+   "memory_policy": "full_raster",
+   "side_effects": false,
+   "stochastic": false
+  },
+  "failure_modes": [
+   {
+    "code": "DATASET_NOT_FOUND",
+    "remedy": "检查产品目录与 CRESDA XML 是否完整",
+    "when": "产品目录或 XML 侧车缺失"
+   },
+   {
+    "code": "EXECUTION_FAILED",
+    "remedy": "确认 L1A 产品级别与波段列表",
+    "when": "波段声明与文件不符"
+   }
+  ],
+  "family": "io",
+  "io": {
+   "inputs": [],
+   "outputs": [
+    {
+     "data_kind": "integer",
+     "name": "bandCount",
+     "required": true
+    },
+    {
+     "data_kind": "raster",
+     "file_format": "tif",
+     "name": "output",
+     "required": true
+    },
+    {
+     "data_kind": "string",
+     "name": "productId",
+     "required": true
+    }
+   ],
+   "parameters": [
+    {
+     "name": "bands",
+     "required": false,
+     "type": "string"
+    },
+    {
+     "name": "input",
+     "required": true,
+     "type": "string"
+    },
+    {
+     "name": "output",
+     "required": true,
+     "type": "string"
+    }
+   ]
+  },
+  "limitations": [
+   "Import an HJ-1 CCD L1A product (sidecar XML + TIFF) into a multi-band GeoTIFF with declared calibration/sun geometry stamped as SICNU_* metadata."
+  ],
+  "modality": [
+   "optical"
+  ],
+  "operator_group": "io",
+  "prerequisites": [],
+  "schema_version": 2,
+  "summary": "HJ-1 CCD L1A 产品导入为多波段 GeoTIFF，用于环境减灾监测教学流程。",
+  "teaching_use": {
+   "concepts": [
+    "产品导入",
+    "环境监测"
+   ],
+   "courses": [
+    "遥感数字图像处理"
+   ],
+   "exercise": "导入 HJ-1 CCD 数据并与环境卫星轨道元数据对照，说明重访周期对时相分析的影响。"
+  }
+ },
+ "description": "Import an HJ-1 CCD L1A product (sidecar XML + TIFF) into a multi-band GeoTIFF with declared calibration/sun geometry stamped as SICNU_* metadata.",
+ "display_name": "HJ-1 Product Import",
+ "id": "rs:hj_import",
+ "input": "",
+ "output": "raster",
+ "schema_version": 2,
+ "tags": [
+  "hj",
+  "cn-satellite",
+  "import",
+  "data-format"
+ ]
+}
