@@ -246,9 +246,9 @@ for f in <本 GOAL.md> docs/agents/goal-template.md docs/agents/loop-template.md
   grep -ohE '\.agents/skills/[a-z-]+/SKILL\.md' "$f"
 done | tr -d '\r' | sort -u | while read p; do test -e "$p" || echo "MISSING: $p"; done
 
-grep -ohE 'docs/agents/[a-z-]+\.md|review/[A-Z_]+\.(md|csv)|\.planning/[a-z0-9-]+/[A-Z_]+\.md' \
+grep -ohE '`docs/agents/[a-z-]+\.md`|`review/[A-Z_]+\.(md|csv)`|`\.planning/[a-z0-9-]+/[A-Z_]+\.md`' \
   <本 GOAL.md> docs/agents/*.md .agents/AGENTS.md CLAUDE.md \
-  | tr -d '\r' | sort -u | while read p; do test -e "$p" || echo "MISSING: $p"; done
+  | tr -d '\r`' | sort -u | while read p; do test -e "$p" || echo "MISSING: $p"; done
 ```
 
 两条命令输出为空才算通过（`tr -d '\r'` 必须保留——Windows 工作副本是 CRLF）；
