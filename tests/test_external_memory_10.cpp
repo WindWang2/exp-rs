@@ -129,10 +129,13 @@ TEST_CASE( "DiskTileStore round-trips a payload and refuses corruption", "[scrat
     auto badLease = registry.acquire( "run-ts", "tile", 4096 );
     DiskTileStore::write( badLease, makePayload( 3, 1.0f ) );
     {
-        std::ofstream out( badLease.finalPath(), std::ios::binary | std::ios::in );
+        std::fstream out( badLease.finalPath(), std::ios::binary | std::ios::in | std::ios::out );
+        REQUIRE( out.is_open() );
         out.seekp( 40, std::ios::beg ); // inside the payload region
         const char junk = 'z';
         out.write( &junk, 1 );
+        out.flush();
+        REQUIRE( out.good() );
     }
     REQUIRE_THROWS_AS( DiskTileStore::read( badLease ), ChunkCorruptTile );
 }
@@ -206,10 +209,13 @@ TEST_CASE( "TileCheckpoint round-trips and gates on identity, version and digest
     REQUIRE( TileCheckpointWriter::save( path, tampered ) );
     {
         // Flip a byte inside the file so the stored digest no longer matches.
-        std::ofstream out( path, std::ios::binary | std::ios::in );
+        std::fstream out( path, std::ios::binary | std::ios::in | std::ios::out );
+        REQUIRE( out.is_open() );
         out.seekp( 16, std::ios::beg );
         const char junk = 0x5A;
         out.write( &junk, 1 );
+        out.flush();
+        REQUIRE( out.good() );
     }
     REQUIRE_FALSE( TileCheckpointWriter::load( path, 0xABCDEF, 0x1234 ).has_value() );
 

@@ -41,8 +41,6 @@ struct TileCheckpoint
     /// Run-scoped scratch directory the completed tiles live in (opaque to
     /// this layer; the operator's own tile store re-verifies digests).
     std::string scratchRunId;
-    /// Digest of the payload bytes above (corruption tripwire).
-    std::uint64_t payloadDigest = 0;
 
     bool operator==( const TileCheckpoint & ) const = default;
 };

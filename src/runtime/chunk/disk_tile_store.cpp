@@ -1,6 +1,7 @@
 // disk_tile_store.cpp — see disk_tile_store.h.
 #include "disk_tile_store.h"
 
+#include <cstddef>
 #include <cstring>
 #include <fstream>
 #include <string>
@@ -38,6 +39,10 @@ struct TileFileHeader
     std::int32_t timeIndex;
     std::uint64_t payloadBytes;
     std::uint64_t payloadDigest;
+    // FNV over EVERY preceding byte of this header (field zeroed while
+    // hashing): a bitflip in the geometry fields cannot masquerade as a
+    // valid tile — the payload digest alone does not cover them.
+    std::uint64_t headerDigest;
 };
 #pragma pack( pop )
 
@@ -76,16 +81,24 @@ TileFileHeader makeHeader( const TilePayload &payload, std::uint64_t payloadByte
     header.timeIndex = payload.spec.timeIndex;
     header.payloadBytes = payloadBytes;
     header.payloadDigest = digest;
+    header.headerDigest = 0;
+    header.headerDigest = fnv1a( &header, offsetof( TileFileHeader, headerDigest ) );
     return header;
 }
 
-TilePayload decode( const TileFileHeader &header, std::vector<char> payloadBytes,
+TilePayload decode( TileFileHeader header, std::vector<char> payloadBytes,
                     const std::string &path )
 {
     if ( std::memcmp( header.magic, kMagic, kMagicSize ) != 0
          || header.version != kFormatVersion
          || header.headerSize != sizeof( TileFileHeader ) )
         throw ChunkCorruptTile( path );
+    {
+        const std::uint64_t stored = header.headerDigest;
+        header.headerDigest = 0;
+        if ( fnv1a( &header, offsetof( TileFileHeader, headerDigest ) ) != stored )
+            throw ChunkCorruptTile( path );
+    }
     if ( fnv1a( payloadBytes.data(), payloadBytes.size() ) != header.payloadDigest
          || payloadBytes.size() != header.payloadBytes )
         throw ChunkCorruptTile( path );

@@ -251,12 +251,16 @@ ScratchLease ScratchRegistry::acquire( const std::string &runId, const std::stri
             throw std::runtime_error( "scratch acquire: cannot create " + provisional.string() );
     }
 
-    auto entry = std::make_shared<ScratchLease::Entry>();
-    entry->registry = this;
-    entry->path = provisional.string();
-    entry->finalPath = final.string();
-    entry->runId = runId;
-    entry->bytes = bytes;
+    // Raw new + custom deleter: the shared_ptr refcount IS the lease
+    // refcount, and the LAST release must unaccount the bytes (the default
+    // delete would leak the accounting and the provisional file).
+    ScratchLease::Entry *rawEntry = new ScratchLease::Entry();
+    rawEntry->registry = this;
+    rawEntry->path = provisional.string();
+    rawEntry->finalPath = final.string();
+    rawEntry->runId = runId;
+    rawEntry->bytes = bytes;
+    std::shared_ptr<ScratchLease::Entry> entry( rawEntry, ScratchLease::Deleter{} );
     m_liveEntries.emplace_back( entry );
     if ( m_liveEntries.size() >= 256 )
     {

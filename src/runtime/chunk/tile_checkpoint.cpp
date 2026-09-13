@@ -1,6 +1,7 @@
 // tile_checkpoint.cpp — see tile_checkpoint.h.
 #include "tile_checkpoint.h"
 
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
@@ -41,6 +42,9 @@ struct TileCheckpointFile
     std::uint64_t payloadDigest;
     // scratchRunId follows as a length-prefixed blob:
     std::uint32_t runIdBytes;
+    // FNV over EVERY preceding byte of this struct (field zeroed while
+    // hashing): protects the framing fields too, not just the payload.
+    std::uint64_t fileDigest;
 };
 #pragma pack( pop )
 
@@ -96,6 +100,8 @@ bool TileCheckpointWriter::save( const std::string &path, const TileCheckpoint &
     file.completedTiles = checkpoint.completedTiles;
     file.payloadDigest = payloadDigestOf( checkpoint );
     file.runIdBytes = static_cast<std::uint32_t>( checkpoint.scratchRunId.size() );
+    file.fileDigest = 0;
+    file.fileDigest = tileCheckpointHash( &file, offsetof( TileCheckpointFile, fileDigest ) );
 
     // Unique tmp in the same directory (rename stays on one volume), then
     // fsync file + dir, then atomic replace — the checkpoint family.
@@ -152,13 +158,18 @@ std::optional<TileCheckpoint> TileCheckpointWriter::load(
         return std::nullopt;
     if ( file.runIdBytes > 4096 )
         return std::nullopt;
+    {
+        const std::uint64_t stored = file.fileDigest;
+        file.fileDigest = 0;
+        if ( tileCheckpointHash( &file, offsetof( TileCheckpointFile, fileDigest ) ) != stored )
+            return std::nullopt;
+    }
 
     TileCheckpoint checkpoint;
     checkpoint.formatVersion = file.formatVersion;
     checkpoint.operatorIdentity = file.operatorIdentity;
     checkpoint.inputIdentity = file.inputIdentity;
     checkpoint.completedTiles = file.completedTiles;
-    checkpoint.payloadDigest = file.payloadDigest;
     checkpoint.scratchRunId.resize( file.runIdBytes );
     if ( file.runIdBytes )
     {
@@ -167,7 +178,7 @@ std::optional<TileCheckpoint> TileCheckpointWriter::load(
         if ( static_cast<std::size_t>( in.gcount() ) != file.runIdBytes )
             return std::nullopt;
     }
-    if ( checkpoint.payloadDigest != payloadDigestOf( checkpoint ) )
+    if ( file.payloadDigest != payloadDigestOf( checkpoint ) )
         return std::nullopt;
     // Fail-closed identity gates: ANY drift re-executes from scratch.
     if ( checkpoint.operatorIdentity != expectedOperatorIdentity )
