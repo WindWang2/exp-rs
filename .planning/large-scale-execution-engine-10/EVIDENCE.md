@@ -84,3 +84,9 @@
 | 文档存在性断言（goal-template 引用面） | 0 MISSING |
 
 复验捕获并修复 F-M-1（测试内嵌套 lambda 悬垂捕获 → stack smashing，P0 级测试缺陷，生产代码无涉），修复后 8+3 连跑全绿。
+
+## PR
+
+- URL：https://github.com/WindWang2/exp-rs/pull/980
+- 状态：OPEN，不由本 track merge（track 契约）
+- 分支：zcode/large-scale-execution-engine-10 → master（rebase 于 origin/master @ 7d78059d1a，无冲突）
