@@ -295,3 +295,30 @@ TEST_CASE("FCLS produces NaN abundances for NaN pixels", "[unmixing][fcls]")
     CHECK(std::isnan(result.abundances[2]));
     CHECK(std::isnan(result.reconstructionError[1]));
 }
+
+TEST_CASE("FCLS on a brightness-off-simplex pixel equals the analytic constrained optimum",
+          "[unmixing][fcls][known-answer]")
+{
+    // Hand-derived known answer (validation-policy §1: reviewer-derivable).
+    //
+    // Endmembers e1=[1,0,0], e2=[0,1,0]; pixel x=[2,1,0].
+    // Hard-constrained optimum: minimize (2-a1)^2 + (1-a2)^2 s.t.
+    // a1+a2=1, a>=0. Lagrange: a1 = 2 - L/2, a2 = 1 - L/2, sum ->
+    // 3 - L = 1 -> L = 2 -> a = [1, 0].
+    //
+    // The degenerate "OLS then clip to [0,1] and renormalize" method this
+    // solver replaces gives a_OLS = [2,1] -> [2/3, 1/3], so this assertion
+    // fails for the degenerate implementation and pins the real one.
+    const std::vector<float> endmembers = {
+        1.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f,
+    };
+    std::vector<float> pixel = { 2.0f, 1.0f, 0.0f };
+
+    SpectralUnmixing::UnmixResult fcls;
+    QString err;
+    REQUIRE(SpectralUnmixing::unmixFcls(pixel.data(), 1, 3, endmembers.data(), 2,
+                                        &fcls, &err));
+    CHECK(fcls.abundances[0] == Approx(1.0f).margin(1e-3f));
+    CHECK(fcls.abundances[1] == Approx(0.0f).margin(1e-3f));
+}

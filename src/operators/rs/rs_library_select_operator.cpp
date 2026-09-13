@@ -119,8 +119,9 @@ Json::Value RsLibrarySelectOperator::metadata() const {
     meta["tags"] = Json::Value(Json::arrayValue);
     meta["tags"].append("spectral");
     meta["tags"].append("library");
-    meta["purpose"] = "Compose library-driven spectral workflows: pick materials, clip "
-                      "wavelengths, project onto a sensor grid, keep license control.";
+    meta["purpose"] = "Compose library-driven spectral workflows: pick materials, "
+                      "select entries by wavelength window, project onto a sensor "
+                      "grid, keep license control.";
     meta["prerequisites"].append("The source library must pass strict validation "
                                  "(loadValidated); sensor projection needs entries with "
                                  "wavelength grids.");

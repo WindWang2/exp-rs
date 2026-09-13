@@ -79,10 +79,16 @@ Json::Value RsEndmemberExtractionOperator::executionEstimate() const {
     // full-scene pixel buffer. For a 1024x1024x4 float32 input: 4 MiB tile
     // buffers + 1000x4x8 B directions + 4 MiB counts ≈ 9 MiB regardless of
     // band-materialized pixel buffer.
+    // Tile buffer (256x256xBIP) scales with the raster's band count; the
+    // projection matrix with `projections x bands` doubles. Nominal numbers
+    // below assume the 30-band guard of a typical scene.
     Json::Value est(Json::objectValue);
     est["tileWidth"] = 256;
     est["tileHeight"] = 256;
-    est["estimatedRamBytes"] = 9437184; // ~9 MiB nominal
+    est["estimatedRamBytes"] = 9437184; // ~9 MiB nominal at ~30 bands
+    est["notes"] = "tile bytes = 256*256*bands*4; projections*bands*8 adds "
+                   "projections=1000,bands=30 -> ~240 KiB; pixel-count int array "
+                   "= 4 B/px. Wide-band cubes scale the tile term linearly.";
     return est;
 }
 
@@ -99,6 +105,17 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
                               "nEndmembers must be at least 1");
     const int projections = getInt(params, "projections", 1000);
 
+    // Anti-abuse caps (typed refusals, not raw allocations): the projection
+    // matrix and the endmember payload scale with these.
+    constexpr int kMaxProjections = 100000;
+    constexpr int kMaxEndmembers = 1024;
+    if (projections > kMaxProjections)
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "projections must not exceed " + std::to_string(kMaxProjections));
+    if (nEndmembers > kMaxEndmembers)
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "nEndmembers must not exceed " + std::to_string(kMaxEndmembers));
+
     ensureGdalInit();
 
     GdalDatasetWrapper ds;
@@ -113,6 +130,11 @@ Json::Value RsEndmemberExtractionOperator::run(const Json::Value& params,
         throw RSOperatorError(ErrorCode::InvalidInputData,
                               "Endmember extraction requires at least 2 bands, got "
                                   + std::to_string(bandCount));
+    constexpr int kMaxPpiBands = 4096;
+    if (bandCount > kMaxPpiBands)
+        throw RSOperatorError(ErrorCode::InvalidInputData,
+                              "PPI supports up to " + std::to_string(kMaxPpiBands) +
+                                  " bands, got " + std::to_string(bandCount));
 
     const size_t pixelCount = static_cast<size_t>(width) * height;
     if (static_cast<size_t>(nEndmembers) > pixelCount)

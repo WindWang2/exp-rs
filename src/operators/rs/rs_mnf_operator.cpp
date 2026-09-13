@@ -9,6 +9,8 @@
  ***************************************************************************/
 #include "rs_mnf_operator.h"
 
+#include "rs_partial_output_guard.h"
+
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -82,13 +84,14 @@ Json::Value RsMnfOperator::metadata() const {
 }
 
 Json::Value RsMnfOperator::executionEstimate() const {
-    // Streaming: one row buffer (width x bands float), the B x B statistics
-    // and basis matrices (double), and the component output row buffers.
-    // Nominal 16 MiB (row + matrix state) — independent of image height.
+    // Streaming: one row buffer (width x bands float) + ~10 B x B double
+    // matrices for statistics and eigensolver temporaries. At the accepted
+    // band cap (1024) the matrix term alone is ~90 MiB; the nominal number
+    // below covers a 256-band cube with a 2k-wide row.
     Json::Value est(Json::objectValue);
     est["tileWidth"] = 0;          // row-streaming: tiling not applicable
     est["tileHeight"] = 1;
-    est["estimatedRamBytes"] = 16777216;
+    est["estimatedRamBytes"] = 188743680; // ~180 MiB nominal (256 bands, wide row)
     return est;
 }
 
@@ -259,17 +262,30 @@ Json::Value RsMnfOperator::run(const Json::Value& params, RSOperatorContext& con
         if (!artifactFile.open(QIODevice::WriteOnly | QIODevice::Truncate))
             throw RSOperatorError(ErrorCode::FileNotWritable,
                                   "Cannot write transform artifact: " + transformOut);
-        artifactFile.write(QJsonDocument(modelJson).toJson(QJsonDocument::Compact));
+        const QByteArray artifactBytes = QJsonDocument(modelJson).toJson(QJsonDocument::Compact);
+        if (artifactFile.write(artifactBytes) != artifactBytes.size())
+        {
+            artifactFile.close();
+            QFile::remove(QString::fromStdString(transformOut));
+            throw RSOperatorError(ErrorCode::FileNotWritable,
+                                  "Short write to transform artifact: " + transformOut);
+        }
         artifactFile.close();
     }
 
     // Pass 3: apply the forward transform, writing the top-k components.
+    // Any failure from here on removes the partial output AND the transform
+    // artifact, so no half-published chain survives (ADR 0148 pair rule).
     context.reportProgress(0.70, "MNF pass 3/3: forward transform");
     GdalDatasetWrapper outDataset;
     if (!outDataset.create(QString::fromStdString(outputPath), width, height, numComponents,
                            GDT_Float32, src.geoTransform(), src.projection()))
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to create MNF output: " + outputPath);
+    QStringList guardedPaths{ QString::fromStdString(outputPath) };
+    if (!transformOut.empty())
+        guardedPaths.append(QString::fromStdString(transformOut));
+    PartialOutputGuard partialGuard(guardedPaths);
     outDataset.setBandNoDataValue(1, std::numeric_limits<float>::quiet_NaN());
 
     std::vector<double> yBuffer(static_cast<size_t>(bandCount), 0.0);
@@ -310,7 +326,13 @@ Json::Value RsMnfOperator::run(const Json::Value& params, RSOperatorContext& con
     }
 
     src.close();
-    outDataset.close();
+    QString closeError;
+    if (!outDataset.closeWithError(&closeError))
+        throw RSOperatorError(ErrorCode::GdalError,
+                              closeError.isEmpty()
+                                  ? "Failed to finalize MNF output"
+                                  : closeError.toStdString());
+    partialGuard.disarm();
     context.reportProgress(1.0, "MNF complete");
 
     Json::Value result(Json::objectValue);

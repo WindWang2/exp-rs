@@ -100,6 +100,8 @@ Status gridFromBandValues( const std::vector<std::pair<double, std::string>> &wa
         if ( s != Status::Ok )
             return s;
     }
+    if ( grid.centersNm.front() <= 0.0f )
+        return Status::NonFinite; // centers must be positive (documented)
     for ( size_t i = 1; i < grid.centersNm.size(); ++i )
         if ( !( grid.centersNm[i] > grid.centersNm[i - 1] ) )
             return Status::NonMonotonic;

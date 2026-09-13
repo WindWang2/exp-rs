@@ -261,10 +261,13 @@ TEST_CASE("MNF chain handles a 256-band logical cube through forward+inverse",
 {
     // Band count is the scale axis: 256 bands (hundreds-to-thousand band
     // hyperspectral logical cubes), small extents to keep the test fast.
-    // The chain is row-streaming by construction: peak memory is
-    // O(row * bands + bands^2), asserted here by the run completing within
-    // a bounded working set (16x12x256 float cube, 3 basis matrices ~1.5 MiB).
-    constexpr int W = 16, H = 12, B = 256;
+    // This case scales the KERNEL axis (b^2 statistics, Jacobi sweeps, b-wide
+    // rows through the two-pass RowFeeder); the row-streaming operator path
+    // itself has no full-cube copies by construction (single bipRow buffer
+    // per pass, reviewed against rs_mnf_operator.cpp).
+    // Pixels must exceed bands for a full-rank signal covariance (a real
+    // scene always satisfies this; fit() refuses rank-deficient fits).
+    constexpr int W = 16, H = 32, B = 256;
     std::mt19937 rng(1234);
     std::normal_distribution<float> noise(0.0f, 0.005f);
     std::vector<float> cube(static_cast<size_t>(W) * H * B);
@@ -282,10 +285,13 @@ TEST_CASE("MNF chain handles a 256-band logical cube through forward+inverse",
     REQUIRE(model.bandCount == B);
     REQUIRE(model.snr.size() == static_cast<size_t>(B));
 
-    // SNR ordering descends; SNR is non-negative for valid fits.
+    // SNR ordering descends. Values are finite; the tail may sit a rounding
+    // epsilon below zero (Jacobi on a near-degenerate axis) — that is a
+    // documented diagnostic, not an error, and never enters the transforms.
     for (size_t i = 1; i < model.snr.size(); ++i)
         CHECK(model.snr[i - 1] >= model.snr[i]);
-    CHECK(model.snr.back() >= 0.0);
+    CHECK(std::isfinite(model.snr.back()));
+    CHECK(model.snr.back() > -1e-6);
 
     // Roundtrip a sample of pixels within the stated tolerance.
     std::vector<double> y(B, 0.0);
@@ -302,10 +308,15 @@ TEST_CASE("MNF chain handles a 256-band logical cube through forward+inverse",
         }
     }
 
-    // Truncated reconstruction error stays quantified and bounded by the
-    // full-spectrum data scale.
+    // Dropped-mass RMSE is finite, positive for a cube whose bands all carry
+    // signal, and strictly grows as the selection keeps fewer components.
     forward(model, &cube[0], y.data(), B);
-    const double rmse255 = reconstructionRmse(model, y.data(), { 0 });
-    CHECK(rmse255 >= 0.0);
-    CHECK(std::isfinite(rmse255));
+    std::vector<int> keep128;
+    for ( int c = 0; c < 128; ++c )
+        keep128.push_back( c );
+    const double rmseKeep128 = reconstructionRmse(model, y.data(), keep128);
+    const double rmseKeep0 = reconstructionRmse(model, y.data(), { 0 });
+    CHECK( std::isfinite( rmseKeep128 ) );
+    CHECK( rmseKeep128 >= 0.0 );
+    CHECK( rmseKeep0 > rmseKeep128 );
 }

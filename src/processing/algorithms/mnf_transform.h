@@ -68,7 +68,8 @@ namespace MnfTransform
         /// every pixel is valid.
         void addRow( const float *bipRow, int width, const uint8_t *validMask = nullptr );
 
-        /// Freeze pass 1. Resets the row carry state; call before pass 2.
+        /// Freeze pass 1 (computes the mean; resets the sample counter so
+        /// pass 2 counts its own samples). Call before pass 2.
         void finalizeMean();
 
         /// Freeze pass 2 (requires finalizeMean first). After this the
@@ -122,8 +123,9 @@ namespace MnfTransform
                                const std::vector<int> &components );
 
     /// Serialize the model into the kind/versioned JSON artifact (kind
-    /// exp-rs:mnf-transform, version 1, digest over the canonical basis text,
-    /// provenance block).
+    /// exp-rs:mnf-transform, version 1, digest over the canonical text of the
+    /// mean, bases, SNR/noise spectra and the wavelength axis; provenance
+    /// block).
     void modelToJson( const Model &model, const QString &sourceInput,
                       const QString &parametersJson, qint64 createdAtMs,
                       QJsonObject &root );

@@ -226,9 +226,13 @@ bool nnlsNormalEquations( const std::vector<double> &gram, int n,
     std::vector<double> gradient( static_cast<size_t>( n ), 0.0 );
     std::vector<double> l( static_cast<size_t>( n ) * n, 0.0 );
     std::vector<double> candidate( static_cast<size_t>( n ), 0.0 );
-    std::vector<double> gPp;
-    std::vector<double> uP;
-    std::vector<double> zP;
+    // Scratch reused across active-set iterations: this solver runs once per
+    // pixel, so per-iteration (re)allocation would dominate the profile.
+    std::vector<double> gPp( static_cast<size_t>( n ) * n, 0.0 );
+    std::vector<double> uP( static_cast<size_t>( n ), 0.0 );
+    std::vector<double> zP( static_cast<size_t>( n ), 0.0 );
+    std::vector<int> members;
+    members.reserve( static_cast<size_t>( n ) );
 
     // Dual-feasibility pivot tolerance, scaled to the problem: rounding in
     // G·z is ~eps * |G| * |z|, so an absolute threshold (e.g. 1e-12) sits
@@ -273,9 +277,7 @@ bool nnlsNormalEquations( const std::vector<double> &gram, int n,
             // Solve the unconstrained problem on the passive set.
             gPp.assign( static_cast<size_t>( passiveCount * passiveCount ), 0.0 );
             uP.assign( static_cast<size_t>( passiveCount ), 0.0 );
-            int idx = 0;
-            std::vector<int> members;
-            members.reserve( static_cast<size_t>( passiveCount ) );
+            members.clear();
             for ( int i = 0; i < n; ++i )
                 if ( passive[static_cast<size_t>( i )] )
                     members.push_back( i );
@@ -425,8 +427,9 @@ bool unmixFcls( const float *pixels, size_t count, int bands,
         {
             if ( errorMessage )
                 *errorMessage = QStringLiteral( "Endmember matrix is rank-deficient "
-                                                "(collinear endmembers); FCLS requires a "
-                                                "non-degenerate simplex" );
+                                                "(collinear endmembers; Gram pivot at or "
+                                                "below 1e-12x mean diagonal); FCLS "
+                                                "requires a non-degenerate simplex" );
             return false;
         }
     }

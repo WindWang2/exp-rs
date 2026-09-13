@@ -132,6 +132,13 @@ QString modelDigest( const Model &model )
     feed( model.mean );
     feed( model.forwardBasis );
     feed( model.inverseBasis );
+    feed( model.snr );
+    feed( model.noiseEigenvalues );
+    for ( float w : model.wavelengthsNm )
+    {
+        hash.addData( formatDouble( static_cast<double>( w ) ).toUtf8() );
+        hash.addData( "\n", 1 );
+    }
     return QString::fromLatin1( hash.result().toHex() );
 }
 
@@ -237,6 +244,10 @@ void RowFeeder::finalizeMean()
         m_mean[static_cast<size_t>( i )] =
             m_sum[static_cast<size_t>( i )] / static_cast<double>( m_samples );
     m_meanFinalized = true;
+    // sampleCount() reports the covariance-pass samples from here on; the
+    // mean pass was fully consumed above. Feeding the same raster twice must
+    // not double the covariance divisor.
+    m_samples = 0;
 }
 
 void RowFeeder::finalizeCovariances()

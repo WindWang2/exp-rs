@@ -3,6 +3,8 @@
  ***************************************************************************/
 #include "rs_spectral_band_select_operator.h"
 
+#include "rs_partial_output_guard.h"
+
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -238,6 +240,7 @@ Json::Value RsSpectralBandSelectOperator::run(const Json::Value& params,
                     ds.geoTransform(), ds.projection()))
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to create output raster: " + outputPath);
+    PartialOutputGuard partialGuard(QString::fromStdString(outputPath));
 
     GDALDatasetH outHandle = static_cast<GDALDatasetH>( out.dataset() );
     std::vector<float> row(static_cast<size_t>(width), 0.0f);
@@ -286,7 +289,13 @@ Json::Value RsSpectralBandSelectOperator::run(const Json::Value& params,
     }
 
     ds.close();
-    out.close();
+    QString closeError;
+    if (!out.closeWithError(&closeError))
+        throw RSOperatorError(ErrorCode::GdalError,
+                              closeError.isEmpty()
+                                  ? "Failed to finalize band-subset raster"
+                                  : closeError.toStdString());
+    partialGuard.disarm();
     context.reportProgress(1.0, "Band selection complete");
 
     Json::Value result(Json::objectValue);

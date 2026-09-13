@@ -15,6 +15,7 @@
 
 #include <QString>
 
+#include <cmath>
 #include <numeric>
 #include <vector>
 
@@ -158,6 +159,8 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
 
     double totalErrorSum = 0.0;
     uint64_t totalUnmixedPixels = 0;
+    double sumDeviationAcc = 0.0;
+    uint64_t sumDeviationPixels = 0;
 
     const int totalBlocksY = (height + tileHeight - 1) / tileHeight;
     int processedBlocksY = 0;
@@ -219,6 +222,28 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
                     totalUnmixedPixels++;
                 }
             }
+
+            // Abundance-sum QA (documented for FCLS): mean |sum(a) - 1| over
+            // valid pixels of the tile.
+            {
+                double devSum = 0.0;
+                uint64_t devCount = 0;
+                for (size_t p = 0; p < tileSize; ++p) {
+                    const float *ab =
+                        &unmixResult.abundances[p * static_cast<size_t>(nEndmembers)];
+                    double sum = 0.0;
+                    bool valid = true;
+                    for (int e = 0; e < nEndmembers; ++e) {
+                        if (std::isnan(ab[e])) { valid = false; break; }
+                        sum += ab[e];
+                    }
+                    if (!valid) continue;
+                    devSum += std::abs(sum - 1.0);
+                    ++devCount;
+                }
+                sumDeviationAcc += devSum;
+                sumDeviationPixels += devCount;
+            }
         }
         processedBlocksY++;
         context.reportProgress(0.1 + 0.85 * (static_cast<double>(processedBlocksY) / totalBlocksY), "Unmixing tile rows");
@@ -227,8 +252,21 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
     const double meanError = (totalUnmixedPixels > 0) ? (totalErrorSum / static_cast<double>(totalUnmixedPixels)) : 0.0;
 
     ds.close();
-    outDataset.close();
-    if (!errorPath.empty()) errorDataset.close();
+    QString closeError;
+    if (!outDataset.closeWithError(&closeError))
+        throw RSOperatorError(ErrorCode::GdalError,
+                              closeError.isEmpty()
+                                  ? "Failed to finalize abundance raster"
+                                  : closeError.toStdString());
+    if (!errorPath.empty())
+    {
+        QString errorCloseError;
+        if (!errorDataset.closeWithError(&errorCloseError))
+            throw RSOperatorError(ErrorCode::GdalError,
+                                  errorCloseError.isEmpty()
+                                      ? "Failed to finalize reconstruction-error raster"
+                                      : errorCloseError.toStdString());
+    }
 
     context.reportProgress(1.0, "Spectral unmixing complete");
 
@@ -237,13 +275,17 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
     result["endmembers"] = nEndmembers;
     result["meanError"] = meanError;
     result["method"] = method;
+    result["abundanceSumDeviation"] =
+        (sumDeviationPixels > 0)
+            ? (sumDeviationAcc / static_cast<double>(sumDeviationPixels))
+            : 0.0;
     // Endmember provenance echo (library/table identity, resampling, license).
     result["endmemberSource"] = endsResolved.sourceDescription.toStdString();
     if (endsResolved.resampled)
         result["endmembersResampled"] = true;
     if (!endsResolved.license.isEmpty())
         result["endmemberLicense"] = endsResolved.license.toStdString();
-    if (!endsResolved.synthetic)
+    if (endsResolved.measured)
         result["endmembersMeasured"] = true;
     return result;
 }

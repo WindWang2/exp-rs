@@ -28,7 +28,7 @@ bool sizeInt( const QJsonValue &v, int *out )
     if ( !v.isDouble() )
         return false;
     const double d = v.toDouble();
-    if ( d < 0.0 || d != static_cast<double>( static_cast<int>( d ) ) )
+    if ( d < 0.0 || d > 2147483647.0 || d != static_cast<double>( static_cast<int>( d ) ) )
         return false;
     *out = static_cast<int>( d );
     return true;
@@ -70,6 +70,7 @@ bool validate( const Table &table, QStringList *errors )
         fail( QStringLiteral( "spectra: must contain at least one row" ) );
 
     long long cells = 0;
+    bool widthsConsistent = true;
     for ( int r = 0; r < static_cast<int>( table.spectra.size() ); ++r )
     {
         const auto &row = table.spectra[static_cast<size_t>( r )];
@@ -77,6 +78,7 @@ bool validate( const Table &table, QStringList *errors )
         {
             fail( QStringLiteral( "spectra[%1]: width %2 != bandCount %3" )
                       .arg( r ).arg( row.size() ).arg( table.bandCount ) );
+            widthsConsistent = false;
             continue;
         }
         cells += static_cast<long long>( row.size() );
@@ -140,7 +142,9 @@ bool validate( const Table &table, QStringList *errors )
         fail( QStringLiteral( "provenance: measured field tables (synthetic=false, "
                               "derived=false) require non-empty license and citation" ) );
 
-    if ( !table.digestHex.isEmpty() )
+    // The digest walk indexes row[b] for b in [0, bandCount): only safe once
+    // every row width is verified — width violations are already reported.
+    if ( !table.digestHex.isEmpty() && widthsConsistent )
     {
         const QString computed = digestHex( table.spectra, table.bandCount );
         if ( computed != table.digestHex )
@@ -360,6 +364,19 @@ bool load( const QString &path, Table *out, QString *errorMessage )
     {
         if ( errorMessage )
             *errorMessage = QStringLiteral( "Cannot open table file: %1" ).arg( path );
+        return false;
+    }
+    // Read-nothing precheck: the kMaxCells bound caps the legal JSON size far
+    // below this (worst-case ~20 bytes per cell); refuse absurd files without
+    // materializing them.
+    constexpr qint64 kMaxTableFileBytes = 256LL * 1024LL * 1024LL;
+    if ( file.size() > kMaxTableFileBytes )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "Table file is %1 bytes, above the %2-byte "
+                                            "pre-read bound" )
+                                .arg( file.size() )
+                                .arg( kMaxTableFileBytes );
         return false;
     }
     QJsonParseError parseError;

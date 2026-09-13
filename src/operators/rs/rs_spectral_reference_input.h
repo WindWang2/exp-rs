@@ -61,6 +61,7 @@ struct ResolvedSpectralReference
     QString license;              ///< when the source declares one (uniform)
     QString citation;
     bool synthetic = false;       ///< true when every source spectrum is synthetic
+    bool measured = false;        ///< true when every source spectrum is measured
     bool resampled = false;       ///< true when wavelength reconciliation resampled
 
     /// Strict single-spectrum view for target-style consumers.

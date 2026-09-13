@@ -56,6 +56,7 @@ struct LoadedRows
     QString license;
     QString citation;
     bool synthetic = false;
+    bool measured = false;
 };
 
 /// Parse a JSON file into either a spectral table or a library. Returns
@@ -68,6 +69,18 @@ bool loadRowsFromPath( const QString &path, const QString &refKey, LoadedRows *o
     {
         *error = QStringLiteral( "%1: cannot open spectral reference file: %2" )
                      .arg( refKey, path );
+        return false;
+    }
+    // Read-nothing precheck: a JSON reference above this size cannot satisfy
+    // the cell bound anyway (worst-case ~20 bytes per cell in JSON).
+    constexpr qint64 kMaxReferenceFileBytes = 256LL * 1024LL * 1024LL;
+    if ( file.size() > kMaxReferenceFileBytes )
+    {
+        *error = QStringLiteral( "%1: reference file is %2 bytes, above the %3-byte "
+                                 "pre-read bound" )
+                     .arg( refKey )
+                     .arg( file.size() )
+                     .arg( kMaxReferenceFileBytes );
         return false;
     }
     QJsonParseError parseError;
@@ -105,6 +118,7 @@ bool loadRowsFromPath( const QString &path, const QString &refKey, LoadedRows *o
         out->license = table.license;
         out->citation = table.citation;
         out->synthetic = table.provenance.synthetic;
+        out->measured = !table.provenance.synthetic;
         return true;
     }
 
@@ -117,6 +131,20 @@ bool loadRowsFromPath( const QString &path, const QString &refKey, LoadedRows *o
         if ( !SpectralLibrary::Library::loadValidated( path, &library, &libraryError ) )
         {
             *error = QStringLiteral( "%1: %2" ).arg( refKey, libraryError );
+            return false;
+        }
+        // Anti-abuse bound on the materialized rows (the library domain has
+        // no entry-count bound of its own).
+        long long cells = 0;
+        for ( const auto &entry : library.entries )
+            cells += static_cast<long long>( entry.spectrum.size() );
+        if ( cells > SpectralTable::kMaxCells )
+        {
+            *error = QStringLiteral( "%1: library materializes %2 spectral cells, above "
+                                     "the %3-cell bound" )
+                         .arg( refKey )
+                         .arg( cells )
+                         .arg( SpectralTable::kMaxCells );
             return false;
         }
         out->spectra.reserve( static_cast<size_t>( library.entries.size() ) );
@@ -133,19 +161,29 @@ bool loadRowsFromPath( const QString &path, const QString &refKey, LoadedRows *o
         // Table-level claims stay conservative: a library is "synthetic" only
         // when every entry is, and the license echoes only when uniform.
         bool allSynthetic = !library.entries.isEmpty();
+        bool anySynthetic = false;
         bool uniformLicense = !library.entries.isEmpty();
         bool anyLicense = false;
         QString firstLicense;
         for ( const auto &entry : library.entries )
         {
             allSynthetic = allSynthetic && entry.synthetic;
-            if ( firstLicense.isEmpty() && !entry.license.isEmpty() )
+            anySynthetic = anySynthetic || entry.synthetic;
+            if ( entry.license.isEmpty() )
+            {
+                // A licensed library with unlicensed entries does not echo a
+                // single license — the echo stays conservative.
+                uniformLicense = false;
+                continue;
+            }
+            if ( firstLicense.isEmpty() )
                 firstLicense = entry.license;
-            anyLicense = anyLicense || !entry.license.isEmpty();
-            if ( !entry.license.isEmpty() && entry.license != firstLicense )
+            anyLicense = true;
+            if ( entry.license != firstLicense )
                 uniformLicense = false;
         }
         out->synthetic = allSynthetic;
+        out->measured = !allSynthetic && !anySynthetic;
         out->license = !anyLicense ? QString()
                        : ( uniformLicense ? firstLicense : QStringLiteral( "mixed" ) );
         out->description = QStringLiteral( "spectral library '%1' (%2 entries)" )
@@ -216,6 +254,16 @@ void reconcileWidths( const LoadedRows &rows, const RasterWavelengthGrid &inputG
         }
 
         const bool useGaussian = inputGrid.grid.hasFwhm() && !rows.fwhmNm.empty();
+        // Resampling can widen every row: enforce the cell bound on the OUTPUT
+        // shape (count x input-band-count), not just the source.
+        const long long outCells = static_cast<long long>( rows.spectra.size() )
+                                   * inputBandCount;
+        if ( outCells > SpectralTable::kMaxCells )
+            refuse( ErrorCode::InvalidInputData,
+                    std::string( refKey ) + ": resampled reference would hold " +
+                        std::to_string( outCells ) + " cells (count x input bands), above " +
+                        "the " + std::to_string( SpectralTable::kMaxCells ) + "-cell bound; " +
+                        "reduce the reference count or select fewer input bands" );
         out->flat.reserve( rows.spectra.size() * static_cast<size_t>( inputBandCount ) );
         std::vector<float> resampled( static_cast<size_t>( inputBandCount ), 0.0f );
         for ( size_t r = 0; r < rows.spectra.size(); ++r )
@@ -288,6 +336,7 @@ RasterWavelengthGrid RasterWavelengthGrid::read( const GdalDatasetWrapper &ds,
     std::vector<std::pair<double, std::string>> wavelengths;
     std::vector<std::pair<double, std::string>> fwhm;
     int withWavelength = 0;
+    int withFwhm = 0;
 
     for ( int band : bands )
     {
@@ -295,7 +344,6 @@ RasterWavelengthGrid RasterWavelengthGrid::read( const GdalDatasetWrapper &ds,
         if ( wl.isEmpty() )
         {
             wavelengths.emplace_back( 0.0, std::string() );
-            fwhm.emplace_back( 0.0, std::string() );
             continue;
         }
         ++withWavelength;
@@ -312,25 +360,30 @@ RasterWavelengthGrid RasterWavelengthGrid::read( const GdalDatasetWrapper &ds,
         const QString units = ds.bandMetadataItem( band, "WAVELENGTH_UNITS" );
         wavelengths.emplace_back( value, units.toStdString() );
 
+        // FWHM is optional per band; the grid helper treats an EMPTY vector
+        // as "absent" (linear resampling fallback), so it is only built when
+        // coverage turns out complete below.
         const QString fw = ds.bandMetadataItem( band, "FWHM" );
         if ( fw.isEmpty() )
+            continue;
+        ++withFwhm;
+        const double fValue = fw.toDouble( &ok );
+        if ( !ok )
         {
-            fwhm.emplace_back( 0.0, std::string() );
+            if ( error )
+                *error = QStringLiteral( "band %1 FWHM is not numeric: %2" )
+                             .arg( band )
+                             .arg( fw );
+            return result;
         }
-        else
-        {
-            const double fValue = fw.toDouble( &ok );
-            if ( !ok )
-            {
-                if ( error )
-                    *error = QStringLiteral( "band %1 FWHM is not numeric: %2" )
-                                 .arg( band )
-                                 .arg( fw );
-                return result;
-            }
-            const QString fUnits = ds.bandMetadataItem( band, "FWHM_UNITS" );
-            fwhm.emplace_back( fValue, fUnits.toStdString() );
-        }
+        const QString fUnits = ds.bandMetadataItem( band, "FWHM_UNITS" );
+        fwhm.emplace_back( fValue, fUnits.toStdString() );
+    }
+    if ( withFwhm != withWavelength )
+    {
+        // Partial FWHM coverage cannot feed the Gaussian kernel; fall back to
+        // linear resampling rather than refusing (FWHM is optional metadata).
+        fwhm.clear();
     }
 
     if ( withWavelength == 0 )

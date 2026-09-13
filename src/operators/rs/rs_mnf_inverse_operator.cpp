@@ -3,6 +3,8 @@
  ***************************************************************************/
 #include "rs_mnf_inverse_operator.h"
 
+#include "rs_partial_output_guard.h"
+
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -51,6 +53,9 @@ MnfTransform::Model loadModel(const std::string &path)
 }
 
 /// Parse + validate the component selection (empty = default selection).
+/// Indices must lie inside the KNOWN coefficient width @p inputBands: a
+/// component absent from the input has an unknown coefficient, and silently
+/// substituting zero would understate the reconstruction error.
 std::vector<int> parseComponents(const Json::Value &params, int inputBands, int modelBands)
 {
     std::vector<int> components;
@@ -77,6 +82,13 @@ std::vector<int> parseComponents(const Json::Value &params, int inputBands, int 
             throw RSOperatorError(ErrorCode::InvalidParameter,
                                   "Component index " + std::to_string(c) +
                                       " outside [0, " + std::to_string(modelBands) + ")");
+        if (c >= inputBands)
+            throw RSOperatorError(ErrorCode::InvalidParameter,
+                                  "Component index " + std::to_string(c) +
+                                      " is beyond the input's component width (" +
+                                      std::to_string(inputBands) +
+                                      "); its coefficient is unknown and cannot be "
+                                      "selected or reported as dropped mass");
         if (!unique.insert(c).second)
             throw RSOperatorError(ErrorCode::InvalidParameter,
                                   "Duplicate component index " + std::to_string(c));
@@ -114,8 +126,19 @@ Json::Value runRasterMode(const Json::Value &params, RSOperatorContext &context,
 
     // Input validity: declared NoData / non-finite anywhere in the component
     // vector invalidates the pixel (its reconstruction would be garbage).
-    bool hasNoData = false;
-    double noData = src.bandNoDataValue(1, &hasNoData);
+    // Sentinels are per band (a mixed-sentinel component raster is legal).
+    std::vector<bool> hasNoData(static_cast<size_t>(inputBands), false);
+    std::vector<double> noData(static_cast<size_t>(inputBands), 0.0);
+    for (int b = 0; b < inputBands; ++b)
+    {
+        bool has = false;
+        const double nd = src.bandNoDataValue(b + 1, &has);
+        if (has)
+        {
+            hasNoData[static_cast<size_t>(b)] = true;
+            noData[static_cast<size_t>(b)] = nd;
+        }
+    }
 
     GdalDatasetWrapper outDataset;
     if (!outDataset.create(QString::fromStdString(outputPath), width, height,
@@ -123,6 +146,10 @@ Json::Value runRasterMode(const Json::Value &params, RSOperatorContext &context,
                            src.projection()))
         throw RSOperatorError(ErrorCode::FileNotWritable,
                               "Failed to create reconstructed raster: " + outputPath);
+    QStringList guardedPaths{ QString::fromStdString(outputPath) };
+    if (!errorOut.empty())
+        guardedPaths.append(QString::fromStdString(errorOut));
+    PartialOutputGuard partialGuard(guardedPaths);
     outDataset.setBandNoDataValue(1, std::numeric_limits<float>::quiet_NaN());
     GDALDatasetH outHandle = static_cast<GDALDatasetH>( outDataset.dataset() );
     for (int b = 0; b < model.bandCount; ++b)
@@ -157,6 +184,18 @@ Json::Value runRasterMode(const Json::Value &params, RSOperatorContext &context,
     }();
 
     std::vector<float> bipRow(static_cast<size_t>(width) * inputBands, 0.0f);
+    // Dropped-mass honesty: coefficients for components >= inputBands are
+    // unknown (not zero). If the selection drops any UNKNOWN component, the
+    // reconstruction error cannot be computed — write NaN and flag it instead
+    // of reporting a perfect reconstruction.
+    bool droppedMassUnknown = false;
+    {
+        std::set<int> selected(components.begin(), components.end());
+        for (int c = 0; c < model.bandCount; ++c)
+            if (selected.count(c) == 0 && c >= inputBands)
+                droppedMassUnknown = true;
+    }
+
     std::vector<double> yBuffer(static_cast<size_t>(model.bandCount), 0.0);
     std::vector<double> spectrumBuffer(static_cast<size_t>(model.bandCount), 0.0);
     std::vector<std::vector<float>> bandRows(
@@ -185,7 +224,8 @@ Json::Value runRasterMode(const Json::Value &params, RSOperatorContext &context,
             for (int c = 0; c < inputBands && valid; ++c)
             {
                 if (!std::isfinite(coeffs[c])
-                    || (hasNoData && coeffs[c] == static_cast<float>(noData)))
+                    || (hasNoData[static_cast<size_t>(c)]
+                        && coeffs[c] == static_cast<float>(noData[static_cast<size_t>(c)])))
                     valid = false;
             }
             if (!valid)
@@ -198,8 +238,13 @@ Json::Value runRasterMode(const Json::Value &params, RSOperatorContext &context,
                 bandRows[static_cast<size_t>(b)][static_cast<size_t>(p)] =
                     static_cast<float>(spectrumBuffer[static_cast<size_t>(b)]);
             if (!errorOut.empty())
-                errorRow[static_cast<size_t>(p)] = static_cast<float>(
-                    MnfTransform::reconstructionRmse(model, yBuffer.data(), components));
+            {
+                errorRow[static_cast<size_t>(p)] =
+                    droppedMassUnknown
+                        ? std::numeric_limits<float>::quiet_NaN()
+                        : static_cast<float>(MnfTransform::reconstructionRmse(
+                              model, yBuffer.data(), components));
+            }
         }
 
         for (int b = 0; b < model.bandCount; ++b)
@@ -222,9 +267,22 @@ Json::Value runRasterMode(const Json::Value &params, RSOperatorContext &context,
     }
 
     src.close();
-    outDataset.close();
+    QString closeError;
+    if (!outDataset.closeWithError(&closeError))
+        throw RSOperatorError(ErrorCode::GdalError,
+                              closeError.isEmpty()
+                                  ? "Failed to finalize reconstructed raster"
+                                  : closeError.toStdString());
     if (!errorOut.empty())
-        errorDataset.close();
+    {
+        QString errorCloseError;
+        if (!errorDataset.closeWithError(&errorCloseError))
+            throw RSOperatorError(ErrorCode::GdalError,
+                                  errorCloseError.isEmpty()
+                                      ? "Failed to finalize reconstruction-error raster"
+                                      : errorCloseError.toStdString());
+    }
+    partialGuard.disarm();
     context.reportProgress(1.0, "Inverse MNF complete");
 
     Json::Value result(Json::objectValue);
@@ -235,6 +293,15 @@ Json::Value runRasterMode(const Json::Value &params, RSOperatorContext &context,
     result["height"] = height;
     if (!errorOut.empty())
         result["errorOut"] = errorOut;
+    if (droppedMassUnknown)
+    {
+        result["droppedMassUnknown"] = true;
+        result["reconstructionErrorNote"] =
+            "input holds " + std::to_string(inputBands) + " of " +
+            std::to_string(model.bandCount) +
+            " components; unselected components beyond that are unknown, so "
+            "errorOut is NaN instead of a zero dropped-mass report";
+    }
     return result;
 }
 
@@ -268,7 +335,17 @@ Json::Value runSpectrumMode(const Json::Value &params, RSOperatorContext &contex
             static_cast<double>(table.spectra[0][static_cast<size_t>(c)]);
     std::vector<double> spectrumBuffer(static_cast<size_t>(model.bandCount), 0.0);
     MnfTransform::inverse(model, yBuffer.data(), components, spectrumBuffer.data());
-    const double rmse = MnfTransform::reconstructionRmse(model, yBuffer.data(), components);
+    bool droppedMassUnknown = false;
+    {
+        std::set<int> selected(components.begin(), components.end());
+        for (int c = 0; c < model.bandCount; ++c)
+            if (selected.count(c) == 0 && c >= table.bandCount)
+                droppedMassUnknown = true;
+    }
+    const double rmse = droppedMassUnknown
+                            ? std::numeric_limits<double>::quiet_NaN()
+                            : MnfTransform::reconstructionRmse(model, yBuffer.data(),
+                                                               components);
 
     SpectralTable::Table converted;
     converted.id = QStringLiteral("mnf-converted");
@@ -299,6 +376,8 @@ Json::Value runSpectrumMode(const Json::Value &params, RSOperatorContext &contex
     result["spectrumOut"] = spectrumOut;
     result["bands"] = model.bandCount;
     result["reconstructionError"] = rmse;
+    if (droppedMassUnknown)
+        result["droppedMassUnknown"] = true;
     return result;
 }
 

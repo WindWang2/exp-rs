@@ -170,6 +170,11 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
     result["bandCount"] = bandCount;
     result["width"] = width;
     result["height"] = height;
+    result["targetSource"] = targetResolved.sourceDescription.toStdString();
+    if ( targetResolved.resampled )
+        result["targetResampled"] = true;
+    if ( !targetResolved.license.isEmpty() )
+        result["targetLicense"] = targetResolved.license.toStdString();
     context.reportProgress( 1.0, kind + " detection complete" );
     return result;
 }

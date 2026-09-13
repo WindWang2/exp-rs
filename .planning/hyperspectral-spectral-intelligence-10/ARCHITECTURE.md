@@ -134,8 +134,9 @@ streams out via `errorOut`; FCLS adds abundance-sum QA to the result payload
 * `rs:library_select` (new): subset a validated library by material list /
   wavelength window / sensor projection (`resampleTo`) → writes the subset as
   a spectral-table **or** library-format artifact with license/citation
-  preserved; QA payload reports near-duplicate pairs (SAM angle < 0.5°, using
-  `matchSpectrum`) rather than silently deduplicating.
+  preserved; QA payload reports near-duplicate pairs (SAM angle below a QA
+  threshold, computed by a nodata-guarded cosine kernel in the operator)
+  rather than silently deduplicating.
 
 ## Integration surfaces (Phase 4 checklist)
 
