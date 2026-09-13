@@ -75,6 +75,10 @@ CAPABILITIES = {
     "contract-diagnostics-census": ("test_diagnostics_contract_9", "L2:diagnostics_contract_9"),
     "contract-capability-floors": ("test_capability_contract_9", "L2:capability_contract_9"),
     "bench-contract9": ("benchmark_contract9", "L7:contract9"),
+    # Verification Platform 10.0: scientific contract + drift lanes.
+    "scientific-contract-10": ("test_scientific_contract_10", "L2:scientific_contract_10"),
+    "drift-projection-10": ("test_drift_projection_10", "L2:drift_projection_10"),
+    "science-verification-10": ("test_science_verification_10", "L2:science_verification_10"),
 }
 
 # Documented, honest compatibility caveats — copied into every report so the

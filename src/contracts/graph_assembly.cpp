@@ -3,6 +3,8 @@
  ***************************************************************************/
 #include "graph_assembly.h"
 
+#include "scientific_contract.h"
+
 #include "command_ref_scanner.h"
 #include "error_code_scanner.h"
 #include "operator_param_scanner.h"
@@ -255,6 +257,24 @@ AssemblyResult buildLiveGraph( const std::string &sourceRoot )
             if ( operatorIds.count( id ) )
                 g.addEdge( { "capability_for", id, id, file } );
         }
+    }
+
+    // ── scientific contracts (Platform 10.0) ────────────────────────────
+    // One node per declared scientific contract, one edge to its operator.
+    // The completeness gate itself lives in test_scientific_contract_10;
+    // here the declarations become part of the pinned snapshot so a change
+    // to any record forces the conscious snapshot-diff ritual.
+    for ( const auto &[contractId, contract] : scientificContracts() )
+    {
+        ContractNode node;
+        node.id = contractId;
+        node.kind = "scientific_contract";
+        node.origin = "src/contracts/scientific_contract.cpp";
+        node.attributes = { contract.evidence };
+        g.addNode( std::move( node ) );
+        if ( operatorIds.count( contractId ) )
+            g.addEdge( { "scientific_contract_for", contractId, contractId,
+                         "src/contracts/scientific_contract.cpp" } );
     }
 
     // Normalize evidence paths to be relative to the source root so the

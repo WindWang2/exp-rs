@@ -12,6 +12,7 @@ add_library( sicnu_contracts STATIC
     command_ref_scanner.cpp
     error_code_scanner.cpp
     graph_assembly.cpp
+    scientific_contract.cpp
 )
 
 target_include_directories( sicnu_contracts PUBLIC ${CMAKE_SOURCE_DIR}/src )

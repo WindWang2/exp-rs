@@ -7895,6 +7895,25 @@ sicnu_add_test(test_contract_platform_9)
 target_link_libraries(test_contract_platform_9 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_contract_platform_9)
 
+# Contract Platform 10.0: scientific contract registry completeness and
+# known answers against the LIVE operator registry (append-only block).
+sicnu_add_test(test_scientific_contract_10)
+target_link_libraries(test_scientific_contract_10 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_scientific_contract_10)
+
+# Contract Platform 10.0: cross-projection drift gates for the projections
+# contract-9 did not bind (determinism agreement, sidecar io projection,
+# LabSpec operator references).
+sicnu_add_test(test_drift_projection_10)
+target_link_libraries(test_drift_projection_10 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_drift_projection_10)
+
+# Verification Platform 10.0: metamorphic invariants, reproducibility
+# replay, seed determinism, bounded CRS refusal fuzz, provenance checks.
+sicnu_add_test(test_science_verification_10)
+target_link_libraries(test_science_verification_10 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_science_verification_10)
+
 # Contract Platform 9.0: contract generation cost baseline (M8). Evidence
 # artifact via `benchmark_contract9 --out <json>`.
 add_executable(benchmark_contract9

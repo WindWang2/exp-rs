@@ -1604,6 +1604,690 @@
       "to" : "temporal.preflight_collection"
     },
     {
+      "from" : "rs:ace",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:ace"
+    },
+    {
+      "from" : "rs:align",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:align"
+    },
+    {
+      "from" : "rs:apply_mask",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:apply_mask"
+    },
+    {
+      "from" : "rs:atmospheric_correction",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:atmospheric_correction"
+    },
+    {
+      "from" : "rs:atmospheric_dos1",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:atmospheric_dos1"
+    },
+    {
+      "from" : "rs:atmospheric_dos2",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:atmospheric_dos2"
+    },
+    {
+      "from" : "rs:atmospheric_quac",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:atmospheric_quac"
+    },
+    {
+      "from" : "rs:band_math",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:band_math"
+    },
+    {
+      "from" : "rs:band_ratio",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:band_ratio"
+    },
+    {
+      "from" : "rs:change_cva",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:change_cva"
+    },
+    {
+      "from" : "rs:change_cva_angle",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:change_cva_angle"
+    },
+    {
+      "from" : "rs:change_detection",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:change_detection"
+    },
+    {
+      "from" : "rs:change_difference",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:change_difference"
+    },
+    {
+      "from" : "rs:change_irmad",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:change_irmad"
+    },
+    {
+      "from" : "rs:change_log_ratio",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:change_log_ratio"
+    },
+    {
+      "from" : "rs:change_mad",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:change_mad"
+    },
+    {
+      "from" : "rs:change_normalized_difference",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:change_normalized_difference"
+    },
+    {
+      "from" : "rs:change_ratio",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:change_ratio"
+    },
+    {
+      "from" : "rs:change_sam",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:change_sam"
+    },
+    {
+      "from" : "rs:connected_components",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:connected_components"
+    },
+    {
+      "from" : "rs:continuum_removal",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:continuum_removal"
+    },
+    {
+      "from" : "rs:contrast_stretch",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:contrast_stretch"
+    },
+    {
+      "from" : "rs:detect",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:detect"
+    },
+    {
+      "from" : "rs:dn_to_radiance",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:dn_to_radiance"
+    },
+    {
+      "from" : "rs:embedding",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:embedding"
+    },
+    {
+      "from" : "rs:endmember_extraction",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:endmember_extraction"
+    },
+    {
+      "from" : "rs:evi",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:evi"
+    },
+    {
+      "from" : "rs:extract_bands",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:extract_bands"
+    },
+    {
+      "from" : "rs:feature_normalize",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:feature_normalize"
+    },
+    {
+      "from" : "rs:feature_select",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:feature_select"
+    },
+    {
+      "from" : "rs:feature_stack",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:feature_stack"
+    },
+    {
+      "from" : "rs:fill_holes",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:fill_holes"
+    },
+    {
+      "from" : "rs:focal_stats",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:focal_stats"
+    },
+    {
+      "from" : "rs:fusion_brovey",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:fusion_brovey"
+    },
+    {
+      "from" : "rs:fusion_gram_schmidt",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:fusion_gram_schmidt"
+    },
+    {
+      "from" : "rs:fusion_ihs",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:fusion_ihs"
+    },
+    {
+      "from" : "rs:fusion_linear",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:fusion_linear"
+    },
+    {
+      "from" : "rs:fusion_pca",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:fusion_pca"
+    },
+    {
+      "from" : "rs:gaofen_import",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:gaofen_import"
+    },
+    {
+      "from" : "rs:hj_import",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:hj_import"
+    },
+    {
+      "from" : "rs:image_enhancement",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:image_enhancement"
+    },
+    {
+      "from" : "rs:image_fusion",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:image_fusion"
+    },
+    {
+      "from" : "rs:infer",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:infer"
+    },
+    {
+      "from" : "rs:kmeans_classification",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:kmeans_classification"
+    },
+    {
+      "from" : "rs:landsat_import",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:landsat_import"
+    },
+    {
+      "from" : "rs:local_extrema",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:local_extrema"
+    },
+    {
+      "from" : "rs:majority_filter",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:majority_filter"
+    },
+    {
+      "from" : "rs:matched_filter",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:matched_filter"
+    },
+    {
+      "from" : "rs:mndwi",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:mndwi"
+    },
+    {
+      "from" : "rs:mnf",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:mnf"
+    },
+    {
+      "from" : "rs:modis_georeference",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:modis_georeference"
+    },
+    {
+      "from" : "rs:modis_import",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:modis_import"
+    },
+    {
+      "from" : "rs:morphology",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:morphology"
+    },
+    {
+      "from" : "rs:mosaic",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:mosaic"
+    },
+    {
+      "from" : "rs:ndbi",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:ndbi"
+    },
+    {
+      "from" : "rs:ndvi",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:ndvi"
+    },
+    {
+      "from" : "rs:ndwi",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:ndwi"
+    },
+    {
+      "from" : "rs:obia_classify",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:obia_classify"
+    },
+    {
+      "from" : "rs:obia_features",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:obia_features"
+    },
+    {
+      "from" : "rs:obia_hierarchy",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:obia_hierarchy"
+    },
+    {
+      "from" : "rs:obia_label",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:obia_label"
+    },
+    {
+      "from" : "rs:obia_segment",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:obia_segment"
+    },
+    {
+      "from" : "rs:pca",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:pca"
+    },
+    {
+      "from" : "rs:post_classification_change",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:post_classification_change"
+    },
+    {
+      "from" : "rs:proximity",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:proximity"
+    },
+    {
+      "from" : "rs:qa_mask",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:qa_mask"
+    },
+    {
+      "from" : "rs:radiometric_calibration",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:radiometric_calibration"
+    },
+    {
+      "from" : "rs:rasterize",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:rasterize"
+    },
+    {
+      "from" : "rs:recode",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:recode"
+    },
+    {
+      "from" : "rs:resample",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:resample"
+    },
+    {
+      "from" : "rs:rx_anomaly",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:rx_anomaly"
+    },
+    {
+      "from" : "rs:sam_classify",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:sam_classify"
+    },
+    {
+      "from" : "rs:sar_backscatter",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:sar_backscatter"
+    },
+    {
+      "from" : "rs:sar_calibrate",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:sar_calibrate"
+    },
+    {
+      "from" : "rs:sar_change",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:sar_change"
+    },
+    {
+      "from" : "rs:sar_dualpol_features",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:sar_dualpol_features"
+    },
+    {
+      "from" : "rs:sar_geocode",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:sar_geocode"
+    },
+    {
+      "from" : "rs:sar_ratio",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:sar_ratio"
+    },
+    {
+      "from" : "rs:sar_speckle",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:sar_speckle"
+    },
+    {
+      "from" : "rs:sar_temporal_stats",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:sar_temporal_stats"
+    },
+    {
+      "from" : "rs:sar_terrain_correction",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:sar_terrain_correction"
+    },
+    {
+      "from" : "rs:sar_terrain_flatten",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:sar_terrain_flatten"
+    },
+    {
+      "from" : "rs:sar_terrain_masks",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:sar_terrain_masks"
+    },
+    {
+      "from" : "rs:sar_texture",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:sar_texture"
+    },
+    {
+      "from" : "rs:savi",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:savi"
+    },
+    {
+      "from" : "rs:segment",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:segment"
+    },
+    {
+      "from" : "rs:segment_stats",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:segment_stats"
+    },
+    {
+      "from" : "rs:sentinel2_import",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:sentinel2_import"
+    },
+    {
+      "from" : "rs:sieve",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:sieve"
+    },
+    {
+      "from" : "rs:spectral_derivative",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:spectral_derivative"
+    },
+    {
+      "from" : "rs:spectral_index",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:spectral_index"
+    },
+    {
+      "from" : "rs:spectral_resample",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:spectral_resample"
+    },
+    {
+      "from" : "rs:spectral_unmixing",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:spectral_unmixing"
+    },
+    {
+      "from" : "rs:supervised_classification",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:supervised_classification"
+    },
+    {
+      "from" : "rs:temporal_anomaly",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:temporal_anomaly"
+    },
+    {
+      "from" : "rs:temporal_breakpoints",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:temporal_breakpoints"
+    },
+    {
+      "from" : "rs:temporal_composite",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:temporal_composite"
+    },
+    {
+      "from" : "rs:temporal_decompose",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:temporal_decompose"
+    },
+    {
+      "from" : "rs:temporal_extract_series",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:temporal_extract_series"
+    },
+    {
+      "from" : "rs:temporal_gap_fill",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:temporal_gap_fill"
+    },
+    {
+      "from" : "rs:temporal_harmonic_fit",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:temporal_harmonic_fit"
+    },
+    {
+      "from" : "rs:temporal_index_series",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:temporal_index_series"
+    },
+    {
+      "from" : "rs:temporal_monitor",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:temporal_monitor"
+    },
+    {
+      "from" : "rs:temporal_phenology",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:temporal_phenology"
+    },
+    {
+      "from" : "rs:temporal_sen_trend",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:temporal_sen_trend"
+    },
+    {
+      "from" : "rs:temporal_smooth",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:temporal_smooth"
+    },
+    {
+      "from" : "rs:temporal_summary",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:temporal_summary"
+    },
+    {
+      "from" : "rs:temporal_trend",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:temporal_trend"
+    },
+    {
+      "from" : "rs:terrain_analysis",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:terrain_analysis"
+    },
+    {
+      "from" : "rs:terrain_flow",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:terrain_flow"
+    },
+    {
+      "from" : "rs:threshold_raster",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:threshold_raster"
+    },
+    {
+      "from" : "rs:topographic_correction",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:topographic_correction"
+    },
+    {
+      "from" : "rs:zonal_stats",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:zonal_stats"
+    },
+    {
+      "from" : "rs:zy3_import",
+      "kind" : "scientific_contract_for",
+      "origin" : "src/contracts/scientific_contract.cpp",
+      "to" : "rs:zy3_import"
+    },
+    {
       "from" : "app.commandPalette",
       "kind" : "surface_lookup",
       "origin" : "main_window_workbench.cpp:331",
@@ -3573,6 +4257,11 @@
     },
     {
       "id" : "harness/PREFLIGHT_BLOCKED",
+      "kind" : "error_code",
+      "origin" : "harness_error.h"
+    },
+    {
+      "id" : "harness/TEACHING_REFUSAL",
       "kind" : "error_code",
       "origin" : "harness_error.h"
     },
@@ -5898,6 +6587,28 @@
     {
       "attributes" : 
       [
+        "bands",
+        "input",
+        "output"
+      ],
+      "id" : "rs:gaofen_import",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "bands",
+        "input",
+        "output"
+      ],
+      "id" : "rs:hj_import",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
         "band1",
         "band2",
         "band3",
@@ -7072,6 +7783,17 @@
       "origin" : "src/operators/rs/rs_operators_init.cpp"
     },
     {
+      "attributes" : 
+      [
+        "bands",
+        "input",
+        "output"
+      ],
+      "id" : "rs:zy3_import",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
       "id" : "align_to_reference",
       "kind" : "preflight_action",
       "origin" : "scientific_preflight.cpp:277"
@@ -7140,6 +7862,1032 @@
       "id" : "temporal.preflight_collection",
       "kind" : "preflight_action",
       "origin" : "scientific_preflight.cpp:447"
+    },
+    {
+      "attributes" : 
+      [
+        "family:classification + RsClassRaster dtype escalation"
+      ],
+      "id" : "rs:ace",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:grid + schema read"
+      ],
+      "id" : "rs:align",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:mask + schema read"
+      ],
+      "id" : "rs:apply_mask",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:atmospheric + schema read"
+      ],
+      "id" : "rs:atmospheric_correction",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:atmospheric + schema read"
+      ],
+      "id" : "rs:atmospheric_dos1",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:atmospheric + schema read"
+      ],
+      "id" : "rs:atmospheric_dos2",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:atmospheric + schema read"
+      ],
+      "id" : "rs:atmospheric_quac",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:spectral-index; expression is domain-agnostic"
+      ],
+      "id" : "rs:band_math",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:spectral-index + schema read"
+      ],
+      "id" : "rs:band_ratio",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:change + schema read"
+      ],
+      "id" : "rs:change_cva",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:change + schema read"
+      ],
+      "id" : "rs:change_cva_angle",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:change + schema read"
+      ],
+      "id" : "rs:change_detection",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:change + schema read"
+      ],
+      "id" : "rs:change_difference",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:change + schema read"
+      ],
+      "id" : "rs:change_irmad",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:change + schema read"
+      ],
+      "id" : "rs:change_log_ratio",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:change + schema read"
+      ],
+      "id" : "rs:change_mad",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:change + schema read"
+      ],
+      "id" : "rs:change_normalized_difference",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:change + schema read"
+      ],
+      "id" : "rs:change_ratio",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:change + schema read"
+      ],
+      "id" : "rs:change_sam",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:filter + schema read"
+      ],
+      "id" : "rs:connected_components",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:spectral + schema read"
+      ],
+      "id" : "rs:continuum_removal",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:enhancement + schema read"
+      ],
+      "id" : "rs:contrast_stretch",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "test:test_model_tasks/f-ops-5 + detection engine seam"
+      ],
+      "id" : "rs:detect",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:radiometric + schema read"
+      ],
+      "id" : "rs:dn_to_radiance",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:model-runtime + schema read"
+      ],
+      "id" : "rs:embedding",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:spectral; result is an endmember table"
+      ],
+      "id" : "rs:endmember_extraction",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:spectral-index + schema read"
+      ],
+      "id" : "rs:evi",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:bands + schema read"
+      ],
+      "id" : "rs:extract_bands",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:features + schema read"
+      ],
+      "id" : "rs:feature_normalize",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:features + schema read"
+      ],
+      "id" : "rs:feature_select",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:features + schema read"
+      ],
+      "id" : "rs:feature_stack",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:classification + RsClassRaster dtype escalation"
+      ],
+      "id" : "rs:fill_holes",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:filter + schema read"
+      ],
+      "id" : "rs:focal_stats",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:fusion + schema read"
+      ],
+      "id" : "rs:fusion_brovey",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:fusion + schema read"
+      ],
+      "id" : "rs:fusion_gram_schmidt",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:fusion + schema read"
+      ],
+      "id" : "rs:fusion_ihs",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:fusion + schema read"
+      ],
+      "id" : "rs:fusion_linear",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:fusion + schema read"
+      ],
+      "id" : "rs:fusion_pca",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:import + schema read"
+      ],
+      "id" : "rs:gaofen_import",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:import + schema read"
+      ],
+      "id" : "rs:hj_import",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:enhancement + schema read"
+      ],
+      "id" : "rs:image_enhancement",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:fusion + schema read"
+      ],
+      "id" : "rs:image_fusion",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "test:test_model_runtime_8/f-ops-1 + tile engine seam"
+      ],
+      "id" : "rs:infer",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "review:cv::kmeans attempts=3 RNG semantics + replay test"
+      ],
+      "id" : "rs:kmeans_classification",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:import + schema read"
+      ],
+      "id" : "rs:landsat_import",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:filter + schema read"
+      ],
+      "id" : "rs:local_extrema",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:classification + RsClassRaster dtype escalation"
+      ],
+      "id" : "rs:majority_filter",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:classification + RsClassRaster dtype escalation"
+      ],
+      "id" : "rs:matched_filter",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:spectral-index + schema read"
+      ],
+      "id" : "rs:mndwi",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:components + schema read"
+      ],
+      "id" : "rs:mnf",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:import-georef + schema read"
+      ],
+      "id" : "rs:modis_georeference",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:import + schema read"
+      ],
+      "id" : "rs:modis_import",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:filter + schema read"
+      ],
+      "id" : "rs:morphology",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:mosaic + schema read"
+      ],
+      "id" : "rs:mosaic",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:spectral-index + schema read"
+      ],
+      "id" : "rs:ndbi",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:spectral-index + schema read"
+      ],
+      "id" : "rs:ndvi",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:spectral-index + schema read"
+      ],
+      "id" : "rs:ndwi",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:classification + pipeline seam"
+      ],
+      "id" : "rs:obia_classify",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:classification + RsClassRaster dtype escalation"
+      ],
+      "id" : "rs:obia_features",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:classification + RsClassRaster dtype escalation"
+      ],
+      "id" : "rs:obia_hierarchy",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:classification + RsClassRaster dtype escalation"
+      ],
+      "id" : "rs:obia_label",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:classification + RsClassRaster dtype escalation"
+      ],
+      "id" : "rs:obia_segment",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:components + schema read"
+      ],
+      "id" : "rs:pca",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:change + schema read"
+      ],
+      "id" : "rs:post_classification_change",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:filter + schema read"
+      ],
+      "id" : "rs:proximity",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "test:test_qa_mask/f-ops-3 + review:F-OPS-3"
+      ],
+      "id" : "rs:qa_mask",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:radiometric + schema read"
+      ],
+      "id" : "rs:radiometric_calibration",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:vector-interop + schema read"
+      ],
+      "id" : "rs:rasterize",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:classification + RsClassRaster dtype escalation"
+      ],
+      "id" : "rs:recode",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:grid + schema read"
+      ],
+      "id" : "rs:resample",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:spectral + schema read"
+      ],
+      "id" : "rs:rx_anomaly",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:classification + RsClassRaster dtype escalation"
+      ],
+      "id" : "rs:sam_classify",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:sar + schema read"
+      ],
+      "id" : "rs:sar_backscatter",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "review:schema read (sigma0 = DN^2/A^2, outputDomain param)"
+      ],
+      "id" : "rs:sar_calibrate",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:sar + schema read"
+      ],
+      "id" : "rs:sar_change",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:sar + schema read"
+      ],
+      "id" : "rs:sar_dualpol_features",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:sar + radiometric-terrain semantics"
+      ],
+      "id" : "rs:sar_geocode",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:sar + schema read"
+      ],
+      "id" : "rs:sar_ratio",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:sar + schema read"
+      ],
+      "id" : "rs:sar_speckle",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:sar + schema read"
+      ],
+      "id" : "rs:sar_temporal_stats",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:sar + radiometric-terrain semantics"
+      ],
+      "id" : "rs:sar_terrain_correction",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:sar + radiometric-terrain semantics"
+      ],
+      "id" : "rs:sar_terrain_flatten",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:sar + schema read"
+      ],
+      "id" : "rs:sar_terrain_masks",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:sar + schema read"
+      ],
+      "id" : "rs:sar_texture",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:spectral-index + schema read"
+      ],
+      "id" : "rs:savi",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:model-runtime + schema read"
+      ],
+      "id" : "rs:segment",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:zonal + schema read"
+      ],
+      "id" : "rs:segment_stats",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:import + schema read"
+      ],
+      "id" : "rs:sentinel2_import",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:classification + RsClassRaster dtype escalation"
+      ],
+      "id" : "rs:sieve",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:spectral + schema read"
+      ],
+      "id" : "rs:spectral_derivative",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:spectral-index + schema read"
+      ],
+      "id" : "rs:spectral_index",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:spectral; resampling needs SRF/center wavelengths"
+      ],
+      "id" : "rs:spectral_resample",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:classification + RsClassRaster dtype escalation"
+      ],
+      "id" : "rs:spectral_unmixing",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:classification + pipeline seam"
+      ],
+      "id" : "rs:supervised_classification",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:temporal + schema read"
+      ],
+      "id" : "rs:temporal_anomaly",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:temporal + schema read"
+      ],
+      "id" : "rs:temporal_breakpoints",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:temporal + schema read"
+      ],
+      "id" : "rs:temporal_composite",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:temporal + schema read"
+      ],
+      "id" : "rs:temporal_decompose",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:temporal + schema read"
+      ],
+      "id" : "rs:temporal_extract_series",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:temporal + schema read"
+      ],
+      "id" : "rs:temporal_gap_fill",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:temporal + schema read"
+      ],
+      "id" : "rs:temporal_harmonic_fit",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:temporal + schema read"
+      ],
+      "id" : "rs:temporal_index_series",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:temporal + schema read"
+      ],
+      "id" : "rs:temporal_monitor",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:temporal + schema read"
+      ],
+      "id" : "rs:temporal_phenology",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:temporal + schema read"
+      ],
+      "id" : "rs:temporal_sen_trend",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:temporal + schema read"
+      ],
+      "id" : "rs:temporal_smooth",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:temporal + schema read"
+      ],
+      "id" : "rs:temporal_summary",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:temporal + schema read"
+      ],
+      "id" : "rs:temporal_trend",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:terrain + schema read"
+      ],
+      "id" : "rs:terrain_analysis",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:terrain + schema read"
+      ],
+      "id" : "rs:terrain_flow",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:threshold; 255 marks NoData in the output mask"
+      ],
+      "id" : "rs:threshold_raster",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:terrain + schema read"
+      ],
+      "id" : "rs:topographic_correction",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:zonal + schema read"
+      ],
+      "id" : "rs:zonal_stats",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "family:import + schema read"
+      ],
+      "id" : "rs:zy3_import",
+      "kind" : "scientific_contract",
+      "origin" : "src/contracts/scientific_contract.cpp"
     }
   ],
   "schema" : "exp.contract.graph.v1"
