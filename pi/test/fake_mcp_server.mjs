@@ -50,6 +50,14 @@ function handle(line) {
       // Crash mid-run without replying — the exact #669 trigger shape.
       process.exit(1);
     }
+    if (a.flood || (a.arguments && a.arguments.flood)) {
+      // F-PI-1 trigger shape: >32 MiB of bytes with NO terminating newline,
+      // then normal operation. A bridge that only fails fast stays zombied —
+      // every later response glues onto the runaway line.
+      process.stdout.write("x".repeat(33 * 1024 * 1024));
+      send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "ok" }] } });
+      return;
+    }
     send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "ok" }] } });
     return;
   }
