@@ -143,6 +143,10 @@ vendor/
 !.planning/prompt-command-hygiene-review/
 .planning/prompt-command-hygiene-review/*
 !.planning/prompt-command-hygiene-review/*.md
+# large-scale-execution-engine-10: track planning notes (markdown only; logs stay local).
+!.planning/large-scale-execution-engine-10/
+.planning/large-scale-execution-engine-10/*
+!.planning/large-scale-execution-engine-10/*.md
 .zcode/
 
 # IDE / editor / OS artifacts
