@@ -41,3 +41,20 @@ explicitly `not-executed`.
   state too (files `src/app/workbench/temporal_scene_model.*` and the test are untouched by
   this track — `git diff --name-only origin/master...HEAD | grep app/` is empty). QA cloud
   rendering lives in the workbench-9 / app layer: recorded here, not fixed in this track.
+
+## Phase 8 — final verification (final HEAD a27654dc60, rebased on origin/master)
+
+- `git fetch origin && git rebase origin/master` → "当前分支 ... 是最新的" (origin/master
+  unchanged at 7d78059d1a; rebase a no-op).
+- `cmake --build build-dev --target <all 11 temporal targets + benchmark> -j2` → EXIT=0
+  (includes test_sar_temporal_stats — previously not-executed, now built and run).
+- Final test run on final HEAD (QT_QPA_PLATFORM=offscreen, serial):
+  calendar 84 / change 54 / regions 46 / operators_10 418 / core 367 / fit 162 /
+  algorithms 791 / workspace 267 / agent_tools 234 / spatiotemporal_contracts 103 /
+  sar_temporal_stats 238 — **ALL PASS** (11 suites, 2564 assertions).
+- `benchmark_temporal10 --bench-quick` → EXIT=0 (4 benchmarks, valid artifact).
+- `git diff --check origin/master...HEAD` → exit 0 (no whitespace errors).
+- Conflict-marker scan over changed files → none.
+- Secret scan over changed files → only baseline-pre-existing CHANGELOG text (identical hit
+  count at baseline and HEAD; none in this track's sections).
+- Runbook existence assertions (skills/docs/planning refs) → no MISSING output.
