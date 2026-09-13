@@ -25,3 +25,9 @@ marked `not-executed`. Append per phase.
   - NNLS pivot tolerance was absolute (1e-12) → infinite activate/deactivate loop on penalty-scaled systems (u~1e6, gradient noise ~1e-10); fixed with problem-scaled dual tolerance 1e-11·|u|max (root-caused via instrumented repro).
   - seam inline shape: MF/ACE `target` is a flat array; seam now disambiguates flat vs rows.
   - JSON-artifact steps need `verificationPolicy=skip` (documented in operator metadata).
+
+## Phase 3/5 completion evidence (2026-09-13)
+
+* test_spectral_selection → All tests passed (45 assertions in 4 test cases): band_select wavelength-window + nm normalization + exclusion + refusals; library_select material filter + near-duplicate QA + license echo + strict-load refusal.
+* test_mnf_transform (with 256-band scale case) → All tests passed (432 assertions): 256-band logical cube fit + SNR ordering + roundtrip ≤1e-5 (Phase 5 scale evidence; streaming by construction).
+* Regression family re-run green: test_mnf, test_spectral_library (47), test_spectral_library_data (64879), test_spectral_resampling (46), test_spectral_roi (35), test_spectral_derivative (122), test_spectral_anomaly (90239), test_workflow_runtime (223), test_rs_operators (8948).

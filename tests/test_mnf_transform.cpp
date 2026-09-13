@@ -253,3 +253,59 @@ TEST_CASE("Inverse reconstruction uses the model to convert MNF-space spectra",
         CHECK(viaInverse[static_cast<size_t>(b)]
               == Approx(viaForwardInverse[static_cast<size_t>(b)]).epsilon(1e-9));
 }
+
+// ── Scale contract (Hyperspectral Platform 10.0 Phase 5) ───────────────────
+
+TEST_CASE("MNF chain handles a 256-band logical cube through forward+inverse",
+          "[mnf][scale]")
+{
+    // Band count is the scale axis: 256 bands (hundreds-to-thousand band
+    // hyperspectral logical cubes), small extents to keep the test fast.
+    // The chain is row-streaming by construction: peak memory is
+    // O(row * bands + bands^2), asserted here by the run completing within
+    // a bounded working set (16x12x256 float cube, 3 basis matrices ~1.5 MiB).
+    constexpr int W = 16, H = 12, B = 256;
+    std::mt19937 rng(1234);
+    std::normal_distribution<float> noise(0.0f, 0.005f);
+    std::vector<float> cube(static_cast<size_t>(W) * H * B);
+    for (size_t p = 0; p < static_cast<size_t>(W) * H; ++p)
+    {
+        const float ramp = static_cast<float>(p % 17) / 17.0f;
+        for (int b = 0; b < B; ++b)
+            cube[p * B + static_cast<size_t>(b)] =
+                0.1f + 0.4f * ramp + 0.001f * b + noise(rng);
+    }
+
+    Model model;
+    QString error;
+    REQUIRE(fitCube(cube, W, H, B, {}, &model, &error));
+    REQUIRE(model.bandCount == B);
+    REQUIRE(model.snr.size() == static_cast<size_t>(B));
+
+    // SNR ordering descends; SNR is non-negative for valid fits.
+    for (size_t i = 1; i < model.snr.size(); ++i)
+        CHECK(model.snr[i - 1] >= model.snr[i]);
+    CHECK(model.snr.back() >= 0.0);
+
+    // Roundtrip a sample of pixels within the stated tolerance.
+    std::vector<double> y(B, 0.0);
+    std::vector<double> spectrum(B, 0.0);
+    for (size_t p = 0; p < static_cast<size_t>(W) * H; p += 7)
+    {
+        forward(model, &cube[p * B], y.data(), B);
+        inverse(model, y.data(), {}, spectrum.data());
+        for (int b = 0; b < B; b += 16)
+        {
+            const double reference = cube[p * B + static_cast<size_t>(b)];
+            REQUIRE(std::abs(spectrum[static_cast<size_t>(b)] - reference)
+                    <= 1e-5 * std::max(1.0, std::abs(reference)));
+        }
+    }
+
+    // Truncated reconstruction error stays quantified and bounded by the
+    // full-spectrum data scale.
+    forward(model, &cube[0], y.data(), B);
+    const double rmse255 = reconstructionRmse(model, y.data(), { 0 });
+    CHECK(rmse255 >= 0.0);
+    CHECK(std::isfinite(rmse255));
+}

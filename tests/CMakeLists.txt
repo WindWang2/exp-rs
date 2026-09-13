@@ -5478,6 +5478,24 @@ sicnu_add_dialog_test(test_raster_processing_dialog_base
 )
 
 # Workflow engine runtime smoke test (Qt-free headers; may link Qt6::Core via sicnu_operators)
+# Band selection / library selection operators (Hyperspectral Platform
+# 10.0 work packages F/G): wavelength-window picks with unit normalization,
+# bad-band exclusion, material filters and near-duplicate QA.
+add_executable(test_spectral_selection test_spectral_selection.cpp)
+target_link_libraries(test_spectral_selection PRIVATE
+  Catch2::Catch2WithMain
+sicnu_operators
+sicnu_processing
+  Qt6::Core
+  qgis_core
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+target_link_libraries(test_spectral_selection PRIVATE jsoncpp)
+endif()
+target_include_directories(test_spectral_selection PRIVATE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR})
+sicnu_discover_tests(test_spectral_selection)
+
 if(TARGET sicnu_workflow)
   add_executable(test_workflow_runtime test_workflow_runtime.cpp)
   target_link_libraries(test_workflow_runtime PRIVATE
