@@ -33,3 +33,17 @@
 | Phase | 时间戳 | 工具调用数 | 触及文件数 |
 | --- | --- | --- | --- |
 | 0 | 2026-09-13 | ~20 | ~15 (读) |
+| 2-5 (WP-A..D 落盘) | 2026-09-13 深夜 | ~60 | 新增 30（内核 10 + 算子 14 + 测试 5 + CMake/docs） |
+
+## 并发 Track 观察
+
+- `exp-rs-scientific-contract-verification-10` worktree @ 同 baseline 正在并行构建
+  （sicnu_geospatial/sicnu_operators/sicnu_contracts，-j2）。共享热点监控中；
+  目前无同文件触碰。我方 -j2 + 对方 -j2 ≤ 16 核预算。
+- 发现并修复的编译缺陷：`sar_complex.h` 中 `class GdalStreamingOutput&` 写在
+  namespace 内导致声明了 `sicnu::sar::GdalStreamingOutput` 独立类型
+  （build2 失败原文见 /tmp/sar10-build2.log）；前向声明移到全局作用域修复。
+
+## OUT_OF_SCOPE（范围外发现）
+
+（暂无；持续记录）

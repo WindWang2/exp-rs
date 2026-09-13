@@ -11,6 +11,7 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/sar/sar_metadata.h"
 #include "processing/algorithms/sar/sar_temporal.h"
+#include "processing/algorithms/sar/sar_temporal_events.h"
 #include "processing/gdal/gdal_block_stream.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h" // GdalStreamingOutput
@@ -53,6 +54,16 @@ Json::Value RsSarTemporalStatsOperator::schema() const {
     inputs["items"]["type"] = "string";
     inputs["required"] = true;
     props["inputs"] = inputs;
+    Json::Value dates = makeStringParam( "dates",
+                                         "Optional acquisition dates (ISO 8601 UTC), one per "
+                                         "scene; echoed into the result JSON for date "
+                                         "semantics (falls back to per-scene "
+                                         "SICNU_SAR_ACQUISITION_UTC metadata)",
+                                         "" );
+    dates["type"] = "array";
+    dates["items"] = Json::Value( Json::objectValue );
+    dates["items"]["type"] = "string";
+    props["dates"] = dates;
     props["output"] = makeOutputParam( "output", "Output raster path", "tif" );
     props["band"] = makeNumberParam( "band", "1-based band used from every scene", 1.0 );
     Json::Value domain = makeEnumParam( "inputDomain", "Radiometric domain resolution",
@@ -382,6 +393,58 @@ Json::Value RsSarTemporalStatsOperator::run( const Json::Value &params, RSOperat
     result["inputDomainResolved"] = inputIsDb ? "db" : "linear_power";
     result["changeThresholdDb"] = changeThresholdDb;
     result["minValid"] = minValid;
+    // Additive (Advanced SAR 10.0, D-007): echo the acquisition dates so
+    // index-valued bands (argmax_date/argmin) gain calendar semantics at
+    // the consumer. Missing dates keep the legacy index-only behavior.
+    {
+        std::vector<QString> dateStrings( nScenes );
+        bool explicitDates = false;
+        if ( params.isMember( "dates" ) && params["dates"].isArray()
+             && params["dates"].size() == static_cast<Json::ArrayIndex>( nScenes ) )
+        {
+            for ( Json::ArrayIndex i = 0; i < params["dates"].size(); ++i )
+                if ( params["dates"][i].isString() )
+                {
+                    dateStrings[i] = QString::fromStdString( params["dates"][i].asString() );
+                    explicitDates = true;
+                }
+        }
+        bool allResolved = true;
+        std::vector<double> epoch( nScenes, 0.0 );
+        for ( size_t i = 0; i < nScenes; ++i )
+        {
+            if ( explicitDates && !dateStrings[i].isEmpty() )
+                continue;
+            const char *declared = GDALGetMetadataItem(
+                static_cast<GDALDatasetH>( scenes[i]->dataset() ), sicnu::sar::kAcquisitionUtcKey, nullptr );
+            dateStrings[i] = declared != nullptr ? QString::fromUtf8( declared ) : QString();
+        }
+        QString dateError;
+        for ( size_t i = 0; i < nScenes; ++i )
+        {
+            if ( dateStrings[i].isEmpty()
+                 || !sicnu::sar::parseAcquisitionUtc( dateStrings[i], &epoch[i], &dateError ) )
+            {
+                allResolved = false;
+                break;
+            }
+            if ( i > 0 && !( epoch[i] > epoch[i - 1] ) )
+            {
+                allResolved = false;
+                break;
+            }
+        }
+        if ( allResolved )
+        {
+            Json::Value datesJson( Json::arrayValue );
+            for ( size_t i = 0; i < nScenes; ++i )
+                datesJson.append( dateStrings[i].toStdString() );
+            result["dates"] = datesJson;
+            result["timeSemantics"] =
+                "argmax_date/argmin_date bands are 0-based scene indices; dates[] maps "
+                "them to acquisition times in scene order";
+        }
+    }
     context.reportProgress( 1.0, "SAR temporal statistics complete" );
     return result;
 }

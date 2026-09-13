@@ -26,6 +26,13 @@
 #include "rs_sar_terrain_correction_operator.h"
 #include "rs_sar_terrain_flatten_operator.h"
 #include "rs_sar_texture_operator.h"
+#include "rs_sar_polsar_decompose_operator.h"
+#include "rs_sar_interferogram_operator.h"
+#include "rs_sar_phase_filter_operator.h"
+#include "rs_sar_unwrap_operator.h"
+#include "rs_sar_displacement_operator.h"
+#include "rs_sar_coregister_operator.h"
+#include "rs_sar_temporal_events_operator.h"
 #include "rs_post_classification_change_operator.h"
 #include "rs_qa_mask_operator.h"
 #include "rs_apply_mask_operator.h"
@@ -156,6 +163,13 @@ REGISTER_RS_OPERATOR(RsSarTerrainMasksOperator, "rs:sar_terrain_masks")
 REGISTER_RS_OPERATOR(RsSarGeocodeOperator, "rs:sar_geocode")
 REGISTER_RS_OPERATOR(RsRasterizeOperator, "rs:rasterize")
 REGISTER_RS_OPERATOR(RsSarTemporalStatsOperator, "rs:sar_temporal_stats")
+REGISTER_RS_OPERATOR(RsSarPolsarDecomposeOperator, "rs:sar_polsar_decompose")
+REGISTER_RS_OPERATOR(RsSarInterferogramOperator, "rs:sar_interferogram")
+REGISTER_RS_OPERATOR(RsSarPhaseFilterOperator, "rs:sar_phase_filter")
+REGISTER_RS_OPERATOR(RsSarUnwrapOperator, "rs:sar_unwrap")
+REGISTER_RS_OPERATOR(RsSarDisplacementOperator, "rs:sar_displacement")
+REGISTER_RS_OPERATOR(RsSarCoregisterOperator, "rs:sar_coregister")
+REGISTER_RS_OPERATOR(RsSarTemporalEventsOperator, "rs:sar_temporal_events")
 REGISTER_RS_OPERATOR(RsZonalStatsOperator, "rs:zonal_stats")
 REGISTER_RS_OPERATOR(RsTemporalMonitorOperator, "rs:temporal_monitor")
 REGISTER_RS_OPERATOR(RsTerrainFlowOperator, "rs:terrain_flow")
@@ -302,6 +316,13 @@ void initBuiltinRsOperators() {
   add( "rs:sar_geocode", [] { return std::make_unique<RsSarGeocodeOperator>(); } );
   add( "rs:rasterize", [] { return std::make_unique<RsRasterizeOperator>(); } );
   add( "rs:sar_temporal_stats", [] { return std::make_unique<RsSarTemporalStatsOperator>(); } );
+  add( "rs:sar_polsar_decompose", [] { return std::make_unique<RsSarPolsarDecomposeOperator>(); } );
+  add( "rs:sar_interferogram", [] { return std::make_unique<RsSarInterferogramOperator>(); } );
+  add( "rs:sar_phase_filter", [] { return std::make_unique<RsSarPhaseFilterOperator>(); } );
+  add( "rs:sar_unwrap", [] { return std::make_unique<RsSarUnwrapOperator>(); } );
+  add( "rs:sar_displacement", [] { return std::make_unique<RsSarDisplacementOperator>(); } );
+  add( "rs:sar_coregister", [] { return std::make_unique<RsSarCoregisterOperator>(); } );
+  add( "rs:sar_temporal_events", [] { return std::make_unique<RsSarTemporalEventsOperator>(); } );
   add( "rs:zonal_stats", [] { return std::make_unique<RsZonalStatsOperator>(); } );
   add( "rs:temporal_monitor", [] { return std::make_unique<RsTemporalMonitorOperator>(); } );
   add( "rs:terrain_flow", [] { return std::make_unique<RsTerrainFlowOperator>(); } );
