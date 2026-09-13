@@ -4934,6 +4934,77 @@ if(TARGET sicnu_operators)
   sicnu_link_jsoncpp(test_spatiotemporal_contracts)
   sicnu_discover_tests(test_spatiotemporal_contracts)
 
+  # Temporal Platform 10.0: regular-calendar normalization, joint
+  # seasonal-trend change, multi-region extraction, region features.
+  add_executable(test_temporal_calendar test_temporal_calendar.cpp)
+  target_link_libraries(test_temporal_calendar PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    Sicnu::data
+    sicnu_processing
+    GDAL::GDAL
+  )
+  target_include_directories(test_temporal_calendar PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/processing/algorithms/temporal
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_temporal_calendar)
+  sicnu_discover_tests(test_temporal_calendar)
+
+  add_executable(test_temporal_change test_temporal_change.cpp)
+  target_link_libraries(test_temporal_change PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    Sicnu::data
+    sicnu_processing
+    GDAL::GDAL
+  )
+  target_include_directories(test_temporal_change PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/processing/algorithms/temporal
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_temporal_change)
+  sicnu_discover_tests(test_temporal_change)
+
+  add_executable(test_temporal_regions test_temporal_regions.cpp)
+  target_link_libraries(test_temporal_regions PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    Sicnu::data
+    sicnu_processing
+    GDAL::GDAL
+  )
+  target_include_directories(test_temporal_regions PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/processing/algorithms/temporal
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_temporal_regions)
+  sicnu_discover_tests(test_temporal_regions)
+
+  add_executable(test_temporal_operators_10 test_temporal_operators_10.cpp)
+  target_link_libraries(test_temporal_operators_10 PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    Sicnu::data
+    sicnu_processing
+    sicnu_operators
+    GDAL::GDAL
+  )
+  target_include_directories(test_temporal_operators_10 PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/processing/algorithms/temporal
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_temporal_operators_10)
+  sicnu_discover_tests(test_temporal_operators_10)
+
   add_executable(test_temporal_core test_temporal_core.cpp)
   target_link_libraries(test_temporal_core PRIVATE
     Catch2::Catch2WithMain
