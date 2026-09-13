@@ -151,6 +151,48 @@ arity must match that input's role count.
 }
 ```
 
+### v6 (Platform 10.0 — EO domain truth, strictly additive)
+
+```jsonc
+{
+  "manifest_version": 6,
+  "task": "classification",
+  "eo": {
+    "wavelengths_nm": { "red": [630, 700], "nir": [780, 1400] },
+    "calibration": { "state": "toa_reflectance", "enforced": true },
+    "grid": { "crs_family": "projected" }
+  },
+  "preprocess": { "normalize": "linear", "scale": 1.0, "offset": -0.5 },
+  "postprocess": {
+    "calibration_temperature": 1.5,
+    "morphology": "open",
+    "morphology_kernel_px": 3
+  }
+}
+```
+
+- `eo.wavelengths_nm` — per-band-role sensitivity windows (nm, inclusive).
+  Enforced when the input band declares a center wavelength; enforced
+  mismatches refuse BEFORE inference, missing facts become recorded advisories.
+- `eo.calibration.state` — radiometric-state requirement
+  (SICNU_RADIOMETRIC_STATE vocabulary). `enforced: true` is fail-closed: an
+  input that declares no state, or a different one, is a typed refusal.
+- `eo.grid.crs_family` — `geographic` | `projected` | `any`.
+- `preprocess.offset` — additive after scale (linear/mean_std only).
+- `postprocess.calibration_temperature` — probability-space temperature
+  scaling before the derived collapse (argmax invariant, thresholds move).
+- `postprocess.morphology` — `erode` | `dilate` | `open` | `close` on the
+  published labels/mask product (bounded streaming pass).
+
+Canonical task tokens: `segmentation`, `detection`, `classification`,
+`change_detection`, `regression`, `instance_segmentation`, `embedding`,
+`super_resolution` (aliases `semantic_segmentation`, `object_detection`,
+`scene_classification`, `ssl`, `feature_embedding`). Task adapters
+(`rs:classify`, `rs:change`, `rs:regress`) require the matching canonical
+task. Optional providers: frameworks `tensorrt` (prebuilt engine files) and
+`openvino` (IR/ONNX) exist when built with `SICNU_ENABLE_TENSORRT` /
+`SICNU_ENABLE_OPENVINO`; otherwise they surface `unsupported_runtime`.
+
 ## Registered templates
 
 | Name | Task | Contract | Framework | Weights |

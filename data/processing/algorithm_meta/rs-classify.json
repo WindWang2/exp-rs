@@ -1,0 +1,14 @@
+{
+  "gpu" : true,
+  "id" : "rs:classify",
+  "input" : "raster",
+  "notes" : "Single forward pass over ONE scene window (chip-sized input bound: 2048x2048 px); class planes reduce by spatial mean-pooling; probabilities follow the manifest head confidence semantics. Typed artifact: exp-rs-classification/1.",
+  "output" : "",
+  "tags" : 
+  [
+    "inference",
+    "classification",
+    "deep-learning"
+  ],
+  "task" : "classification"
+}

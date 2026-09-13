@@ -2,7 +2,23 @@
 
 # 分类与机器学习（classification）
 
-共 9 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 12 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+
+## rs:change
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical、sar、multimodal
+- 输入：inputA（raster）、inputB（raster）
+- 输出：backend（string）、device（string）、height（integer）、model（string）、outBands（integer）、output（raster）、tileSize（integer）、tiles（integer）、width（integer）
+- 参数：bandsA（integer）、bandsB（integer）、batchCap（integer）、device（string）、model（string）、output（string）
+
+## rs:classify
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical、sar
+- 输入：input（raster）
+- 输出：backend（string）、device（string）、model（string）、output（string）、predicted_class（string）、predicted_index（integer）
+- 参数：bands（integer）、batchCap（integer）、device（string）、model（string）、output（string）、tta（enum）
 
 ## rs:detect
 
@@ -138,6 +154,14 @@ K-Means 非监督分类：按光谱聚类自动划分地物类别，无需训练
 - 适用课程：遥感数字图像处理
 - 典型练习：对研究区做 8 类 K-Means 聚类并人工归并类别为土地覆盖图。
 - 可接上游：rs:feature_normalize
+
+## rs:regress
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical、sar
+- 输入：input（raster）
+- 输出：backend（string）、device（string）、height（integer）、model（string）、outBands（integer）、output（raster）、tileSize（integer）、tiles（integer）、width（integer）
+- 参数：bands（integer）、batchCap（integer）、device（string）、model（string）、output（string）、tta（enum）
 
 ## rs:sam_classify
 

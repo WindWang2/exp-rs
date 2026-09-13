@@ -1,0 +1,147 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "classification",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "inputA",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "inputB",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "string",
+          "name" : "backend",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "device",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "height",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "model",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "outBands",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "tileSize",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "tiles",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "width",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "bandsA",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "bandsB",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0",
+          "name" : "batchCap",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "device",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "model",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar",
+      "multimodal"
+    ],
+    "operator_group" : "ml",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Detect change between two co-registered dates with a siamese/change model; publishes the change-probability stack (band semantics from the manifest classes).",
+  "display_name" : "Change Detection (Model)",
+  "gpu" : true,
+  "id" : "rs:change",
+  "input" : "raster",
+  "notes" : "Two co-registered dates feed the model's declared multi-input contracts by position (A then B); the first feed is the grid authority; misaligned feeds are refused, never warped. Output is the change-probability stack; class semantics come from the manifest output classes.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "inference",
+    "change_detection",
+    "deep-learning"
+  ],
+  "task" : "change_detection"
+}

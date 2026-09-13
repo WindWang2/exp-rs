@@ -1,0 +1,14 @@
+{
+  "gpu" : true,
+  "id" : "rs:change",
+  "input" : "raster",
+  "notes" : "Two co-registered dates feed the model's declared multi-input contracts by position (A then B); the first feed is the grid authority; misaligned feeds are refused, never warped. Output is the change-probability stack; class semantics come from the manifest output classes.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "inference",
+    "change_detection",
+    "deep-learning"
+  ],
+  "task" : "change_detection"
+}

@@ -91,5 +91,32 @@
     "family": "io",
     "extends": "family:io",
     "verification": { "expected_kind": "vector", "checks": ["existence", "opens", "feature_count"] }
+  },
+  {
+    "id": "rs:gaofen_import",
+    "family": "io",
+    "extends": "family:io",
+    "modality": ["optical"],
+    "intents": ["preprocess"],
+    "verification": { "expected_kind": "raster", "checks": ["existence", "opens", "crs_present"] },
+    "limitations": ["CN Gaofen product import: sensor, band roles and radiometric metadata are discovered from the product"]
+  },
+  {
+    "id": "rs:zy3_import",
+    "family": "io",
+    "extends": "family:io",
+    "modality": ["optical"],
+    "intents": ["preprocess"],
+    "verification": { "expected_kind": "raster", "checks": ["existence", "opens", "crs_present"] },
+    "limitations": ["CN ZY-3 product import: sensor, band roles and radiometric metadata are discovered from the product"]
+  },
+  {
+    "id": "rs:hj_import",
+    "family": "io",
+    "extends": "family:io",
+    "modality": ["optical"],
+    "intents": ["preprocess"],
+    "verification": { "expected_kind": "raster", "checks": ["existence", "opens", "crs_present"] },
+    "limitations": ["CN HJ-1 product import: sensor, band roles and radiometric metadata are discovered from the product"]
   }
 ]

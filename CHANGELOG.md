@@ -2,6 +2,48 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - 2026-09-14
+
+### EO AI Model Runtime / Foundation Model Platform 10.0 (goal series)
+
+- **EO manifest truth layer (manifest_version 6)**: additive `eo` section —
+  per-band-role wavelength windows (`wavelengths_nm`), required radiometric
+  calibration (`calibration.state`/`enforced`, SICNU_RADIOMETRIC_STATE
+  vocabulary) and a CRS-family grid assumption. Enforced facts are verified
+  against the canonical metadata layer BEFORE inference (typed refusals,
+  fail-closed on undeclared state); checks and advisories land in run stats
+  and provenance sidecars.
+- **Canonical EO task vocabulary + task adapters**: `canonicalEoTask()` with
+  1:1 aliases; `rs:classify` (single-scene forward pass →
+  `exp-rs-classification/1` JSON artifact with probabilities + fingerprint),
+  `rs:change` (two co-registered feeds over the multi-input seam), and
+  `rs:regress` (continuous-value raster). Task-intent gates refuse models
+  whose canonical task does not match the operator.
+- **Manifest-driven pre/postprocessing**: `preprocess.offset` (after scale;
+  refused with normalize "none"), `postprocess.calibration_temperature`
+  (probability-space temperature scaling before the derived collapse) and
+  `postprocess.morphology` / `morphology_kernel_px` (sentinel-aware streaming
+  cleanup on published labels/mask products, bounded O(W·rows) memory,
+  seam-exact halos). All recorded in the provenance sidecar.
+- **Optional deployment providers**: TensorRT (prebuilt .engine/.plan) and
+  OpenVINO (IR/ONNX) adapters behind `SICNU_ENABLE_TENSORRT` /
+  `SICNU_ENABLE_OPENVINO` — absent SDKs degrade to typed
+  `UnsupportedRuntime`; the default build is unchanged.
+- **Defect fixes (whole-repo line review)**: F-OPS-5 — detection NMS/dedup is
+  grid-bounded (bit-identical kept set) and honours the cancel predicate;
+  F-OPS-1 — Labels encoding derives from the PRODUCT class domain and
+  `class_mapping` is validated below the UInt16 NoData sentinel (values ≥255
+  no longer clamp into silent class loss); F-OPS-2 — `TensorBlob::fromMat`
+  copies non-continuous ND Mats byte-exact (was: uninitialized blob).
+- **MLOps seam**: `verifyProductAgainstModel(outputPath, modelReference)` —
+  model-anchored provenance verification for benchmark sets, promotion
+  evidence and replay-deviation checks.
+- **Bounded stderr for the python worker**: worker stderr is drained on the
+  exchange cadence and kept as a bounded 64 KiB tail — a chatty worker can no
+  longer balloon host memory while a stdout exchange waits.
+- **Agent knowledge**: capability entries for the new operators + a
+  manifest-facts model-selection guide (never pick a model by name).
+
 ## [Workbench 9.0] - 2026-09-12
 
 ### 🚀 Professional QGIS Remote-Sensing Workbench 9.0 (feat/professional-workbench-9)

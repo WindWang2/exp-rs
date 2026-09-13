@@ -1,0 +1,133 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "classification",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "string",
+          "name" : "backend",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "device",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "model",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "predicted_class",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "predicted_index",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "bands",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0",
+          "name" : "batchCap",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "device",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "model",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "none",
+          "enum" : 
+          [
+            "none",
+            "hflip",
+            "hvflip"
+          ],
+          "name" : "tta",
+          "required" : false,
+          "type" : "enum"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar"
+    ],
+    "operator_group" : "ml",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Classify a scene/chip with a classification model (single forward pass); publishes a typed classification JSON artifact with the predicted class and probability distribution.",
+  "display_name" : "Scene Classification (Model)",
+  "gpu" : true,
+  "id" : "rs:classify",
+  "input" : "raster",
+  "notes" : "Single forward pass over ONE scene window (chip-sized input bound: 2048x2048 px); class planes reduce by spatial mean-pooling; probabilities follow the manifest head confidence semantics. Typed artifact: exp-rs-classification/1.",
+  "output" : "",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "inference",
+    "classification",
+    "deep-learning"
+  ],
+  "task" : "classification"
+}
