@@ -60,12 +60,20 @@
 
 ## Tests
 
-- `tests/test_cn_products.cpp`: registry authority/schema/forward-compat, generation
-  detection + unknown-element diagnostics, RPC + PMS-sibling constituents, GF-7 / ZY-1 02C /
-  HJ-2 imports (unified + family operators), apply_calibration DN→radiance numeric check +
-  typed partial-coverage refusal, corrupt/non-CRESDA/ambiguous/duplicate scenes, Chinese
-  paths, 520-file inflated directories, read-only source dirs, GUI discovery routing.
+- `tests/test_cn_products.cpp`: 28 cases / 1363 assertions — registry
+  authority/schema/forward-compat, generation detection + unknown-element diagnostics,
+  RPC + PMS-sibling constituents, GF-7 / ZY-1 02C / HJ-2 imports (unified + family
+  operators), cross-family operator filter, apply_calibration DN→radiance numeric check +
+  typed partial-coverage refusal (naming the missing bands), corrupt/non-CRESDA/ambiguous/
+  duplicate scenes, Chinese paths, saturated 524-entry directories, read-only source dirs,
+  GUI discovery routing.
+- Regression reruns on final HEAD (all green): test_satellite_products (479 assertions),
+  test_io_products (38), test_io_product_registry (46), test_product_import_dialog (73),
+  test_capability_knowledge (1036), test_algorithm_meta_drift (2270).
 - Determinism: imports are bit-exact copies/affine transforms of source pixels.
+- Two failing tests inherited from master are documented as out-of-scope in EVIDENCE.md
+  (cartography tool knowledge ×3, recipe alias, rs_glossary missing `id` fields, workflow
+  command knowledge) — all outside this track's ownership.
 
 ## Performance / resource
 
@@ -75,12 +83,17 @@
 
 ## Review findings
 
-- Independent read-only review (architecture + science correctness) found 1 P0 (stacking
-  source-band semantics), 3 P1 (diagnostics depth, test compile, missing capability
-  sidecars), 3 P2 (half-calibrated output on IO failure, test cache isolation, GF-7 B1
-  midpoint), 9 P3 — **all P0/P1/P2 fixed**; accepted debt recorded in
+- Round 1 (architecture + science correctness): 1 P0 (stacking source-band semantics),
+  3 P1 (diagnostics depth, test compile, missing capability sidecars), 3 P2, 9 P3 —
+  **all P0/P1/P2 fixed**.
+- Round 2 (adversarial test/contract review, final HEAD): 1 P1 (empty bands request
+  passed the calibration gate vacuously — worker paths skip schema validation), 2 P2
+  (failed radiance stamp left a mislabeled file; operator descriptions understated
+  GF-7/HJ-2 coverage), P3 set — **P1/P2 fixed**; re-verified by rebuild + full rerun.
+- Accepted debt + follow-ups recorded in
   `.planning/cn-eo-products-sensor-physics-10/REVIEW_LOG.md` (registry type hardening,
-  double directory scan, midpoint-vs-centre consumer semantics).
+  cnSensorKey root-cause threading, HJ rpc_rpb real-package confirmation, Windows
+  read-only test semantics, midpoint-vs-centre consumer semantics).
 
 ## Known limitations / follow-ups
 
