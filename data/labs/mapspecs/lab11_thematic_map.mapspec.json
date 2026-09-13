@@ -1,0 +1,96 @@
+{
+  "schema_version": "1.0",
+  "kind": "map_spec",
+  "spec_version": 5,
+  "layout_name": "lab11_thematic_map",
+  "description": "实验11 合规专题图：2024年实验区植被长势分布图（A4 横向）。排版要素：主标题、地图主框（EPSG:4326）、图例、比例尺、指北针、来源注记；output 块声明交付面（v5 语义：仅声明，编译不自动导出，导出必须显式调用 cartography:export）。",
+  "page": {
+    "width_mm": 297,
+    "height_mm": 210
+  },
+  "map_frames": [
+    {
+      "id": "map-1",
+      "rect_mm": [
+        15,
+        28,
+        185,
+        160
+      ],
+      "extent": [
+        102.5,
+        30.244,
+        102.756,
+        30.5
+      ],
+      "layers": [
+        "lab11_thematic_mask"
+      ]
+    }
+  ],
+  "titles": [
+    {
+      "id": "title-1",
+      "text": "2024年实验区植被长势分布图",
+      "semantic_role": "title.main",
+      "rect_mm": [
+        15,
+        8,
+        185,
+        16
+      ]
+    }
+  ],
+  "legends": [
+    {
+      "id": "legend-1",
+      "map_ref": "map-1",
+      "rect_mm": [
+        208,
+        30,
+        60,
+        70
+      ]
+    }
+  ],
+  "scale_bars": [
+    {
+      "id": "scale-bar-1",
+      "map_ref": "map-1"
+    }
+  ],
+  "north_arrows": [
+    {
+      "id": "north-arrow-1",
+      "map_ref": "map-1"
+    }
+  ],
+  "source_notes": [
+    {
+      "id": "source-note-1",
+      "text": "数据：D3 教学合成数据（2024年逐月，Grid 256×256, EPSG:4326）；制图：SICNU GEO RS 实验平台",
+      "rect_mm": [
+        15,
+        194,
+        265,
+        8
+      ]
+    }
+  ],
+  "output": {
+    "formats": [
+      "png"
+    ],
+    "dpi": 200,
+    "dir": "data/labs/_tmp/out/lab11/map"
+  },
+  "layers": [],
+  "symbols": [],
+  "labels": [],
+  "charts": [],
+  "colorbars": [],
+  "inset_maps": [],
+  "grids": [],
+  "annotations": [],
+  "constraints": []
+}

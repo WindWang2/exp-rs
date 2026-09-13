@@ -1,0 +1,99 @@
+{
+  "id": "lab9_sar_processing",
+  "name": "lab9_sar_processing",
+  "title": "实验9：SAR 相干斑抑制与变化检测",
+  "description": "同极化（VV/VV）配对 DN 影像 → σ0 辐射定标 → Lee 滤波相干斑抑制 → Otsu 阈值二值变化检测；另含 #785 视角几何（地形校正演示）与 #803 多波段 NoData（全波段滤波演示）两个已修缺陷的教学验证。headless 运行： QT_QPA_PLATFORM=offscreen build/sicnu_geo_rs_cli --pipeline data/labs/pipelines/lab9_sar_processing.pipeline.json （先由 scripts/gen_lab_fixtures.py sar 生成 data/labs/_tmp/ 临时数据）",
+  "version": "1.0",
+  "host": 0,
+  "steps": [
+    {
+      "id": "cal_before",
+      "title": "步骤1 前时相辐射定标：DN → σ0（linear power）",
+      "kind": 0,
+      "operator": "rs:sar_calibrate",
+      "params": {
+        "input": "data/labs/_tmp/sar/sar_before_dn.tif",
+        "output": "data/labs/_tmp/out/lab9/sigma0_before.tif",
+        "calibrationA": 100.0,
+        "outputDomain": "linear_power"
+      }
+    },
+    {
+      "id": "cal_after",
+      "title": "步骤2 后时相辐射定标（同常数 A=100，保证两景可比）",
+      "kind": 0,
+      "operator": "rs:sar_calibrate",
+      "params": {
+        "input": "data/labs/_tmp/sar/sar_after_dn.tif",
+        "output": "data/labs/_tmp/out/lab9/sigma0_after.tif",
+        "calibrationA": 100.0,
+        "outputDomain": "linear_power"
+      }
+    },
+    {
+      "id": "speckle_before",
+      "title": "步骤3 前时相 Lee 相干斑抑制（5×5）",
+      "kind": 0,
+      "operator": "rs:sar_speckle",
+      "params": {
+        "input": "data/labs/_tmp/out/lab9/sigma0_before.tif",
+        "output": "data/labs/_tmp/out/lab9/sigma0_before_lee5.tif",
+        "method": "lee",
+        "kernelSize": 5
+      }
+    },
+    {
+      "id": "speckle_after",
+      "title": "步骤4 后时相 Lee 相干斑抑制（5×5）",
+      "kind": 0,
+      "operator": "rs:sar_speckle",
+      "params": {
+        "input": "data/labs/_tmp/out/lab9/sigma0_after.tif",
+        "output": "data/labs/_tmp/out/lab9/sigma0_after_lee5.tif",
+        "method": "lee",
+        "kernelSize": 5
+      }
+    },
+    {
+      "id": "change",
+      "title": "步骤5 双时相变化检测：dB 对数比幅值 + Otsu 自动阈值",
+      "kind": 0,
+      "operator": "rs:sar_change",
+      "params": {
+        "inputA": "data/labs/_tmp/out/lab9/sigma0_before_lee5.tif",
+        "inputB": "data/labs/_tmp/out/lab9/sigma0_after_lee5.tif",
+        "inputDomain": "linear_power",
+        "thresholdMethod": "otsu",
+        "output": "data/labs/_tmp/out/lab9/change_otsu.tif"
+      }
+    },
+    {
+      "id": "speckle_stack_allbands",
+      "title": "步骤6 教学验证（#803）：双波段栈全波段滤波，逐波段 NoData 保持",
+      "kind": 0,
+      "operator": "rs:sar_speckle",
+      "params": {
+        "input": "data/labs/_tmp/sar/sar_stack_dn.tif",
+        "output": "data/labs/_tmp/out/lab9/stack_lee_allbands.tif",
+        "method": "lee",
+        "kernelSize": 5,
+        "band": 0
+      }
+    },
+    {
+      "id": "terrain_correction",
+      "title": "步骤7 教学验证（#785）：地形校正的视角几何（航向±视向）",
+      "kind": 0,
+      "operator": "rs:sar_terrain_correction",
+      "params": {
+        "input": "data/labs/_tmp/out/lab9/sigma0_before.tif",
+        "dem": "data/labs/_tmp/sar/dem.tif",
+        "incidenceDeg": 35.0,
+        "headingDeg": 190.0,
+        "lookDirection": "right",
+        "flagIncidence": true,
+        "output": "data/labs/_tmp/out/lab9/gamma0_before.tif"
+      }
+    }
+  ]
+}

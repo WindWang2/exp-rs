@@ -1,0 +1,81 @@
+{
+  "id": "lab10_hyperspectral_analysis",
+  "name": "lab10_hyperspectral_analysis",
+  "title": "实验10：高光谱分析——MNF 降维、PPI 端元提取、SAM/SID 匹配与线性解混",
+  "description": "10 波段 VNIR 合成场景 → MNF 降维（SNR 有序分量）→ PPI 端元提取（JSON 结果对照光谱库）→ SAM 与 SID 光谱匹配分类 → 线性光谱解混（丰度 + 重构误差）。refs/endmembers 从平台光谱库 data/labs/spectral-library/lab10_sicnu_library.json 内联（平台算子暂无 libraryPath 参数与 PPI→SAM 管道内直连，见 ISSUES.md）。headless 运行： QT_QPA_PLATFORM=offscreen build/sicnu_geo_rs_cli --pipeline data/labs/pipelines/lab10_hyperspectral_analysis.pipeline.json",
+  "version": "1.0",
+  "host": 0,
+  "steps": [
+    {
+      "id": "mnf",
+      "title": "步骤1 MNF 降维：噪声白化主成分（SNR 有序）",
+      "kind": 0,
+      "operator": "rs:mnf",
+      "params": {
+        "input": "data/labs/_tmp/hyperspectral/hsi_scene.tif",
+        "output": "data/labs/_tmp/out/lab10/mnf_components.tif",
+        "numComponents": 4
+      }
+    },
+    {
+      "id": "ppi",
+      "title": "步骤2 PPI 端元提取：结果 JSON 与光谱库对照（不产栅格）",
+      "kind": 0,
+      "operator": "rs:endmember_extraction",
+      "params": {
+        "input": "data/labs/_tmp/hyperspectral/hsi_scene.tif",
+        "nEndmembers": 3,
+        "projections": 1000
+      }
+    },
+    {
+      "id": "sam",
+      "title": "步骤3 SAM 光谱角匹配分类（光谱库内联 refs）",
+      "kind": 0,
+      "operator": "rs:sam_classify",
+      "params": {
+        "input": "data/labs/_tmp/hyperspectral/hsi_scene.tif",
+        "output": "data/labs/_tmp/out/lab10/sam_labels.tif",
+        "angleOut": "data/labs/_tmp/out/lab10/sam_angle.tif",
+        "metric": "sam",
+        "refs": [
+          [0.02, 0.03, 0.04, 0.03, 0.02, 0.01, 0.005, 0.002, 0.001, 0.001],
+          [0.03, 0.04, 0.05, 0.04, 0.06, 0.10, 0.35, 0.45, 0.48, 0.46],
+          [0.15, 0.18, 0.22, 0.28, 0.33, 0.38, 0.42, 0.45, 0.47, 0.48]
+        ]
+      }
+    },
+    {
+      "id": "sid",
+      "title": "步骤4 SID 光谱信息散度分类（对照 SAM 的稳健性）",
+      "kind": 0,
+      "operator": "rs:sam_classify",
+      "params": {
+        "input": "data/labs/_tmp/hyperspectral/hsi_scene.tif",
+        "output": "data/labs/_tmp/out/lab10/sid_labels.tif",
+        "metric": "sid",
+        "refs": [
+          [0.02, 0.03, 0.04, 0.03, 0.02, 0.01, 0.005, 0.002, 0.001, 0.001],
+          [0.03, 0.04, 0.05, 0.04, 0.06, 0.10, 0.35, 0.45, 0.48, 0.46],
+          [0.15, 0.18, 0.22, 0.28, 0.33, 0.38, 0.42, 0.45, 0.47, 0.48]
+        ]
+      }
+    },
+    {
+      "id": "unmix",
+      "title": "步骤5 线性光谱解混：逐端元丰度 + 重构误差",
+      "kind": 0,
+      "operator": "rs:spectral_unmixing",
+      "params": {
+        "input": "data/labs/_tmp/hyperspectral/hsi_scene.tif",
+        "output": "data/labs/_tmp/out/lab10/abundances.tif",
+        "errorOut": "data/labs/_tmp/out/lab10/unmix_error.tif",
+        "endmembers": [
+          [0.02, 0.03, 0.04, 0.03, 0.02, 0.01, 0.005, 0.002, 0.001, 0.001],
+          [0.03, 0.04, 0.05, 0.04, 0.06, 0.10, 0.35, 0.45, 0.48, 0.46],
+          [0.15, 0.18, 0.22, 0.28, 0.33, 0.38, 0.42, 0.45, 0.47, 0.48]
+        ]
+      }
+    }
+  ]
+}
