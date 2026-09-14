@@ -1,0 +1,33 @@
+{
+  "version": "2.0",
+  "workflowId": "wf-min-001",
+  "name": "Minimal",
+  "description": "one node",
+  "metadata": {},
+  "nodes": [
+    {
+      "nodeId": "solo",
+      "operatorId": "rs:import_raster",
+      "displayName": "Solo import",
+      "parameters": {},
+      "canvasPosition": {
+        "x": 0,
+        "y": 0
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "*",
+          "radiometricState": "None",
+          "resolutionX": 0.0,
+          "resolutionY": 0.0,
+          "bandCount": 0,
+          "isRequired": false
+        }
+      ]
+    }
+  ],
+  "edges": []
+}

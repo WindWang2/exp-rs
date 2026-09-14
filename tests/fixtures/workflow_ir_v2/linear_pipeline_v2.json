@@ -1,0 +1,208 @@
+{
+  "version": "2.0",
+  "workflowId": "wf-linear-001",
+  "name": "Linear NDVI pipeline",
+  "description": "Import->Calibration->Atmosphere->NDVI->Threshold",
+  "metadata": {},
+  "nodes": [
+    {
+      "nodeId": "node_import",
+      "operatorId": "rs:import_raster",
+      "displayName": "Import GF-1",
+      "parameters": {
+        "sensor": "GF-1"
+      },
+      "canvasPosition": {
+        "x": 0,
+        "y": 0
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "DN",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 4,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "node_calib",
+      "operatorId": "rs:radiometric_calibration",
+      "displayName": "Radiometric Calibration",
+      "parameters": {
+        "method": "linear"
+      },
+      "canvasPosition": {
+        "x": 220,
+        "y": 0
+      },
+      "inputPorts": [
+        {
+          "portName": "input",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "DN",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 4,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "Radiance",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 4,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "node_atm",
+      "operatorId": "rs:atmospheric_correction",
+      "displayName": "Atmospheric Correction",
+      "parameters": {
+        "method": "dos1"
+      },
+      "canvasPosition": {
+        "x": 440,
+        "y": 0
+      },
+      "inputPorts": [
+        {
+          "portName": "input",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "Radiance",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 4,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "BOA",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 4,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "node_ndvi",
+      "operatorId": "rs:spectral_index",
+      "displayName": "NDVI",
+      "parameters": {
+        "index": "NDVI"
+      },
+      "canvasPosition": {
+        "x": 660,
+        "y": 0
+      },
+      "inputPorts": [
+        {
+          "portName": "input",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "BOA",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 4,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "Index",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 1,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "node_threshold",
+      "operatorId": "rs:threshold",
+      "displayName": "Threshold",
+      "parameters": {
+        "threshold": 0.45
+      },
+      "canvasPosition": {
+        "x": 880,
+        "y": 0
+      },
+      "inputPorts": [
+        {
+          "portName": "input",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "Index",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 1,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Mask",
+          "crs": "EPSG:32649",
+          "radiometricState": "Mask",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 1,
+          "isRequired": false
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "e1",
+      "sourceNodeId": "node_import",
+      "sourcePortName": "output",
+      "targetNodeId": "node_calib",
+      "targetPortName": "input"
+    },
+    {
+      "edgeId": "e2",
+      "sourceNodeId": "node_calib",
+      "sourcePortName": "output",
+      "targetNodeId": "node_atm",
+      "targetPortName": "input"
+    },
+    {
+      "edgeId": "e3",
+      "sourceNodeId": "node_atm",
+      "sourcePortName": "output",
+      "targetNodeId": "node_ndvi",
+      "targetPortName": "input"
+    },
+    {
+      "edgeId": "e4",
+      "sourceNodeId": "node_ndvi",
+      "sourcePortName": "output",
+      "targetNodeId": "node_threshold",
+      "targetPortName": "input"
+    }
+  ]
+}

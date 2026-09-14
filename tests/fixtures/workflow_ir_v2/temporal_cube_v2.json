@@ -1,0 +1,214 @@
+{
+  "version": "2.0",
+  "workflowId": "wf-temporal-001",
+  "name": "Temporal cube",
+  "description": "3 scenes -> stack -> smooth",
+  "metadata": {
+    "temporal": {
+      "dates": [
+        "2025-04-01",
+        "2025-07-01",
+        "2025-10-01"
+      ]
+    }
+  },
+  "nodes": [
+    {
+      "nodeId": "t_scene_a",
+      "operatorId": "rs:import_raster",
+      "displayName": "Scene A",
+      "parameters": {
+        "date": "2025-04-01"
+      },
+      "canvasPosition": {
+        "x": 0,
+        "y": 0
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 2,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "t_scene_b",
+      "operatorId": "rs:import_raster",
+      "displayName": "Scene B",
+      "parameters": {
+        "date": "2025-07-01"
+      },
+      "canvasPosition": {
+        "x": 0,
+        "y": 140
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 2,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "t_scene_c",
+      "operatorId": "rs:import_raster",
+      "displayName": "Scene C",
+      "parameters": {
+        "date": "2025-10-01"
+      },
+      "canvasPosition": {
+        "x": 0,
+        "y": 280
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 2,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "t_stack",
+      "operatorId": "rs:temporal_stack",
+      "displayName": "Stack scenes",
+      "parameters": {
+        "order": "date"
+      },
+      "canvasPosition": {
+        "x": 220,
+        "y": 140
+      },
+      "inputPorts": [
+        {
+          "portName": "slot_a",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 2,
+          "isRequired": true
+        },
+        {
+          "portName": "slot_b",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 2,
+          "isRequired": true
+        },
+        {
+          "portName": "slot_c",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 2,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 6,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "t_smooth",
+      "operatorId": "rs:whittaker_smooth",
+      "displayName": "Whittaker smoothing",
+      "parameters": {
+        "lambda": 10.0
+      },
+      "canvasPosition": {
+        "x": 440,
+        "y": 140
+      },
+      "inputPorts": [
+        {
+          "portName": "input",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 6,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 6,
+          "isRequired": false
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "t_e1",
+      "sourceNodeId": "t_scene_a",
+      "sourcePortName": "output",
+      "targetNodeId": "t_stack",
+      "targetPortName": "slot_a"
+    },
+    {
+      "edgeId": "t_e2",
+      "sourceNodeId": "t_scene_b",
+      "sourcePortName": "output",
+      "targetNodeId": "t_stack",
+      "targetPortName": "slot_b"
+    },
+    {
+      "edgeId": "t_e3",
+      "sourceNodeId": "t_scene_c",
+      "sourcePortName": "output",
+      "targetNodeId": "t_stack",
+      "targetPortName": "slot_c"
+    },
+    {
+      "edgeId": "t_e4",
+      "sourceNodeId": "t_stack",
+      "sourcePortName": "output",
+      "targetNodeId": "t_smooth",
+      "targetPortName": "input"
+    }
+  ]
+}

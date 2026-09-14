@@ -1,0 +1,168 @@
+{
+  "version": "2.0",
+  "workflowId": "wf-diamond-001",
+  "name": "Diamond branch/merge",
+  "description": "4-node diamond",
+  "metadata": {},
+  "nodes": [
+    {
+      "nodeId": "node_src",
+      "operatorId": "rs:import_raster",
+      "displayName": "Source",
+      "parameters": {},
+      "canvasPosition": {
+        "x": 0,
+        "y": 100
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 6,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "node_a",
+      "operatorId": "rs:spatial_filter",
+      "displayName": "Filter A",
+      "parameters": {
+        "kernel": "mean"
+      },
+      "canvasPosition": {
+        "x": 220,
+        "y": 20
+      },
+      "inputPorts": [
+        {
+          "portName": "input",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 6,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 6,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "node_b",
+      "operatorId": "rs:spatial_filter",
+      "displayName": "Filter B",
+      "parameters": {
+        "kernel": "gaussian"
+      },
+      "canvasPosition": {
+        "x": 220,
+        "y": 180
+      },
+      "inputPorts": [
+        {
+          "portName": "input",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 6,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 6,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "node_sink",
+      "operatorId": "rs:band_merge",
+      "displayName": "Merge",
+      "parameters": {},
+      "canvasPosition": {
+        "x": 440,
+        "y": 100
+      },
+      "inputPorts": [
+        {
+          "portName": "input",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 6,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 6,
+          "isRequired": false
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "d_e1",
+      "sourceNodeId": "node_src",
+      "sourcePortName": "output",
+      "targetNodeId": "node_a",
+      "targetPortName": "input"
+    },
+    {
+      "edgeId": "d_e2",
+      "sourceNodeId": "node_src",
+      "sourcePortName": "output",
+      "targetNodeId": "node_b",
+      "targetPortName": "input"
+    },
+    {
+      "edgeId": "d_e3",
+      "sourceNodeId": "node_a",
+      "sourcePortName": "output",
+      "targetNodeId": "node_sink",
+      "targetPortName": "input"
+    },
+    {
+      "edgeId": "d_e4",
+      "sourceNodeId": "node_b",
+      "sourcePortName": "output",
+      "targetNodeId": "node_sink",
+      "targetPortName": "input"
+    }
+  ]
+}
