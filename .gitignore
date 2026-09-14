@@ -155,7 +155,6 @@ vendor/
 !.planning/scientific-contract-verification-10/
 .planning/scientific-contract-verification-10/*
 !.planning/scientific-contract-verification-10/*.md
->>>>>>> origin/zcode/scientific-contract-verification-10
 .zcode/
 
 # IDE / editor / OS artifacts

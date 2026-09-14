@@ -54,7 +54,6 @@ struct WarpOptions
     /// Empty = trust the file CRS, never guess. Without it GDALWarp treats an
     /// SRS-less source as "already in target CRS" and re-tags the pixels.
     std::string sourceCrsOverride;                 ///< -s_srs (empty = from file)
->>>>>>> origin/zcode/scientific-contract-verification-10
     std::string resampling = "near";
     double targetResolutionX = 0;                  ///< 0 = derive (documented in result)
     double targetResolutionY = 0;

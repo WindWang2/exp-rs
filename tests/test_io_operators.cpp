@@ -304,5 +304,4 @@ TEST_CASE( "io:reproject honours srcCrsOverride for CRS-less input (F-OPS-4)",
   CHECK( std::abs( gt[1] ) > 1.0 ); // pixel size in metres, not degrees-as-pixels
   CHECK( std::abs( gt[0] ) > 100000.0 ); // UTM 33N easting of lon~0 is ~166k
   GDALClose( dataset );
->>>>>>> origin/zcode/scientific-contract-verification-10
 }

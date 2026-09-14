@@ -75,7 +75,6 @@ All notable changes to the `exp-rs` project will be documented in this file.
 - **Scientific Contract Registry**: `src/contracts/scientific_contract.*` — one machine-readable record per first-party `rs:` operator covering the dimensions that had no authority (numeric domain, scale/offset, NoData semantics, categorical encoding, class-id range, time alignment, wavelength policy, seed policy, cancellation granularity, atomic publication, provenance); completeness enforced against the LIVE registry; schema `exp.scientific_contract.v1`; projected into the contract graph snapshot.
 - **Cross-projection drift gates**: `test_drift_projection_10` — schema determinism stamps must agree with capability sidecar grades; capability sidecar io parameters must match the live schema in both directions; every LabSpec `operator_id` must resolve in the live registry. The three CN-satellite import operators gained their missing capability sidecars.
 - **Verification Platform 10.0 lanes**: `test_science_verification_10` — metamorphic NDVI scale-invariance, byte-identical reproducibility replay, kmeans seed determinism, bounded deterministic CRS-refusal fuzz, provenance metadata verification; registered in the verification ladder (L2) and readiness collector.
->>>>>>> origin/zcode/scientific-contract-verification-10
 
 ## [Workbench 9.0] - 2026-09-12
 

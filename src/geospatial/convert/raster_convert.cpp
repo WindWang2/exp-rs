@@ -206,7 +206,6 @@ TranslateResult warpRaster( const std::string &inputPath, const std::string &tar
     // fallback): without -s_srs GDALWarp treats the source as already in
     // the target CRS and the pixels pass through untransformed while the
     // output is tagged targetCrs (whole-repo review F-OPS-4).
->>>>>>> origin/zcode/scientific-contract-verification-10
     args.emplace_back( "-s_srs" );
     args.emplace_back( options.sourceCrsOverride );
   }
