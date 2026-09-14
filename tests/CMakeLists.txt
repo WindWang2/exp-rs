@@ -8912,5 +8912,18 @@ sicnu_discover_tests(test_processing_catalog_ux)
   )
   target_compile_definitions(test_virtual_cube_memory PRIVATE
     CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    CMAKE_BINARY_DIR="${CMAKE_BINARY_DIR}"
   )
   sicnu_discover_tests(test_virtual_cube_memory)
+
+  add_executable(test_whittaker_smooth test_whittaker_smooth.cpp)
+  target_link_libraries(test_whittaker_smooth PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_temporal_timeline
+  )
+  target_include_directories(test_whittaker_smooth PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_whittaker_smooth)
