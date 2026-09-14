@@ -159,3 +159,136 @@ the N-scene summary. Authority: `processing/algorithms/sar/sar_temporal.h`.
 5. **Evidence**: `tests/test_sar_temporal_stats.cpp` (closed forms on
    hand-computed series, threshold counting, invalid-sample bookkeeping,
    domain conversion, refusal matrix).
+
+## 6. Complex (SLC) raster artifact (`sar/sar_complex.h`, Advanced SAR 10.0)
+
+1. One SLC channel = one **CFloat32** GDAL band (complex scattering
+   amplitude). Complex kernels never pass through the float BIP streams:
+   GDAL's complex→float conversion keeps only the real part, which would
+   silently destroy the phase. Reads go through
+   `readBandWindowNative` (native CFloat32), writes through
+   `GdalStreamingOutput::writeTileRaw(..., GDT_CFloat32)`.
+2. Channel identity contract (additive dataset metadata):
+   `SICNU_SAR_COMPLEX_CHANNELS` = "HH;HV;VV" (reciprocity: SHV = SVH) or
+   "HH;HV;VH;VV" — **token order is band order**. Operators additionally
+   accept explicit band-mapping parameters (`hhBand`/`hvBand`/`vhBand`/
+   `vvBand`); an explicit mapping wins. A declared-but-missing channel is a
+   typed refusal (`POLARIZATION_MISMATCH`), never a guessed band.
+3. Invalid samples — non-finite components or the componentwise declared
+   NoData sentinel pair — are normalized to (NaN, NaN) by the tile stream
+   (`ComplexBandTileStream`), so kernels never see sentinels (the
+   sar_metadata.h per-kernel policy, generalized componentwise).
+4. Memory: the complex tile stream materializes O(tile + halo) per step;
+   halo regions are edge-replicated (the GdalBlockStream contract). Full
+   complex planes are never created by streaming kernels.
+5. Evidence: `tests/test_sar_complex.cpp` (round-trip, halo replication,
+   sentinel normalization, detected-input refusal).
+
+## 7. PolSAR decompositions (`rs:sar_polsar_decompose`, package B)
+
+1. **Mode contract**: full-pol complex channels only (HH/HV/VV under the
+   reciprocity contract; a 4-channel declaration with HV≠VH collapses to
+   HV when `assumeReciprocity` holds, and this is reported as
+   `reciprocityAssumed: true`). Dual-pol detected inputs are refused —
+   no dual-pol approximation is relabeled as a quad-pol decomposition.
+2. **Ensemble**: single-look covariances are rank 1 (H identically 0,
+   anisotropy NaN). The window (`windowSize`, odd, default 5) accumulates
+   the local covariance ensemble; the effective-resolution cost is the
+   window's.
+3. **Model conventions** (defined in `sar_polsar.h`, pinned by
+   `test_sar_polsar.cpp`):
+   Volume Cv = fv·[[1,0,1/3],[0,2/3,0],[1/3,0,1]] (Freeman-Durden 1998
+   random dipoles); double Cd = fd·[[|α|²,0,α],[0,0,0],[ᾱ,0,1]]; surface
+   Cs = fs·[[1,0,conj β],[0,0,0],[β,0,|β|²]]; helix Ch = fh·u·u^H with
+   u = [1, j, −1]/2 (right helicity; left = conjugate). Branch rule:
+   Re(C13 − fv/3) ≥ 0 → surface branch (α = 0), else double branch
+   (β = 0). Yamaguchi: helix first (fh = −4·mean(Im C12, Im C23)), then
+   volume from the decontaminated cross-pol power (fv = 1.5·(C22 − fh/4)),
+   then the shared branch rule. Negative residuals are clamped to 0 —
+   documented SPAN break near the noise floor; unclamped cases conserve
+   SPAN exactly (test-pinned). The orientation-adapted volume of the
+   refined (2012) Yamaguchi variant is NOT implemented.
+4. **Products** (fixed band orders, declared as `SICNU_SAR_POLSAR_BANDS`):
+   `pauli` → odd_bounce/double_bounce/volume/span;
+   `h_alpha` → entropy/anisotropy/alpha_deg/dominance/λ1/λ2/λ3
+   (Cloude-Pottier; anisotropy NaN for rank-1 ensembles — honest, not 0);
+   `freeman_durden` → surface/double_bounce/volume/span;
+   `yamaguchi` → surface/double_bounce/volume/helix/span.
+5. **Eigen machinery**: deterministic cyclic Jacobi for 3×3 Hermitian
+   matrices (`sar_hermitian3.h`, fixed sweep order, fail-closed convergence
+   gate). No new third-party dependency (OpenCV `cv::eigen` is real-
+   symmetric only).
+6. Evidence: `tests/test_sar_polsar.cpp` (constructed eigen-systems,
+   canonical targets, exact model recovery, SPAN conservation),
+   `test_sar_platform10.cpp` (registry E2E).
+
+## 8. InSAR base chain (package C)
+
+Honest scope: base interferometry on CO-REGISTERED same-grid complex SLC
+pairs. NOT implemented and never claimed: full image co-registration
+(translation-model refinement only), topographic phase removal from
+DEM/orbit, atmospheric correction, PSI/SBAS time-series analysis.
+
+1. `rs:sar_interferogram` — same-grid preflight (#929 `compareGrids`;
+   `GRID_MISMATCH` / `DIMENSION_MISMATCH` refusals) → complex
+   interferogram s1·conj(s2) (CFloat32) + optional coherence
+   (windowCoherence, [0,1], NaN where no jointly valid pair).
+   `flattenRamp` = none|linear|quadratic removes a robust low-order
+   polynomial fit of the WRAPPED phase (streaming IQR-clipped least
+   squares, `PhaseRampFitter`, O(1) memory) — an honest flat-earth
+   approximation, not topographic removal.
+2. `rs:sar_phase_filter` — Goldstein-Werner spatial filter
+   (Z_f = Σ|z|^α·z / Σ|z|^α; α ∈ [0,1]); output = filtered UNIT phasor as
+   a complex raster (the chain stays in the complex artifact domain).
+3. `rs:sar_unwrap` — the BUILT-IN reference unwrapper is a deterministic
+   quality-guided flood fill (seed = highest-quality valid pixel;
+   neighbor-relative Itoh unwrapping; exact when |Δφ| < π). It is NOT
+   residue-aware and NOT a global optimum — no SNAPHU/MCF semantics. The
+   `provider` parameter is the external seam: any name other than
+   "builtin" is refused (`UNWRAP_PROVIDER_UNAVAILABLE`), never silently
+   substituted. Single-scale plane unwrapping behind a 2 GiB budget
+   (`MEMORY_BUDGET_EXCEEDED` beyond — smaller AOI or external provider).
+4. `rs:sar_displacement` — d_los = −λ·φ/(4π) (positive = toward the
+   sensor) with λ from `wavelengthUm` or `SICNU_SAR_WAVELENGTH_UM`
+   (refusal when missing). The Itoh discontinuity ratio is reported in the
+   result; above `warnThreshold` the operator WARNS — it cannot reliably
+   detect "wrapped vs unwrapped" from data alone and refuses to pretend.
+5. `rs:sar_coregister` — global-translation refinement: magnitude patch
+   NCC with parabolic sub-pixel refinement and a median over confident
+   patches; the slave is resampled by bilinear complex interpolation.
+   Translation only — no affine/DEM-based warp. `reportOnly=1` estimates
+   without writing.
+6. Evidence: `tests/test_sar_insar.cpp` (kernel closed forms, exact
+   unwrap under the Itoh condition, ramp recovery with outlier clipping),
+   `test_sar_platform10.cpp` (full chain closure interferogram → filter →
+   unwrap → displacement on a synthetic pair).
+
+## 9. Multi-temporal SAR with acquisition-time semantics
+   (`rs:sar_temporal_events`, package D; closes ISSUES.md S-1)
+
+1. **Date contract**: the explicit `dates` parameter (ISO 8601 UTC array,
+   ascending) wins; per-scene `SICNU_SAR_ACQUISITION_UTC` metadata fills
+   the rest. Missing/unparseable/non-ascending dates are typed refusals
+   (`ACQUISITION_DATES_MISSING` / `DATES_NOT_ASCENDING`) — this family no
+   longer emits index-only temporal products.
+2. **Irregular intervals are the normal case**: every time quantity is an
+   actual floating-day offset since scene 0 (never an equal-interval
+   assumption). Missing acquisitions (sentinel/nonpositive samples) drop
+   out of the aggregates without shifting the dates of the remaining
+   scenes.
+3. **Event kernel** (shared baseline convention with §5: upper-median of
+   the linear-power samples): a date is an EVENT when
+   |10·log10(x) − 10·log10(median)| ≥ `changeThresholdDb`. Products (fixed
+   9-band order, `SICNU_SAR_TEMPORAL_EVENT_BANDS`): event_flag,
+   event_count, first/last_event_index (0-based), first/last_event_days
+   (days since scene 0), max_deviation_db, argmax_days, valid_count.
+   Pixels under `minValid` observations are NaN everywhere except
+   valid_count.
+4. `rs:sar_temporal_stats` stays byte-compatible (fixed band order per
+   §5) and gains an ADDITIVE result-JSON echo: `dates[]` +
+   `timeSemantics`, so its index-valued argmax/argmin bands gain calendar
+   semantics at the consumer. Without resolvable dates it keeps the
+   legacy index-only behavior.
+5. Evidence: `tests/test_sar_temporal_events.cpp` (grammar, day
+   arithmetic, hand-computed events with holes), `test_sar_platform10.cpp`
+   (registry E2E dating an event at day 24; the stats dates echo).

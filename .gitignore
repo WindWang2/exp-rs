@@ -206,3 +206,8 @@ data/labs/_tmp/
 !.planning/r2-deep-review/
 .planning/r2-deep-review/*
 !.planning/r2-deep-review/*.md
+# advanced-sar-polsar-insar-10: track planning notes (markdown only; logs stay local).
+!.planning/advanced-sar-polsar-insar-10/
+.planning/advanced-sar-polsar-insar-10/*
+!.planning/advanced-sar-polsar-insar-10/*.md
+>>>>>>> origin/zcode/advanced-sar-polsar-insar-10

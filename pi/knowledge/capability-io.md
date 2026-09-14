@@ -7,7 +7,7 @@
 ## rs:gaofen_import
 
 GF-1/2/6 L1A 产品（CRESDA XML 侧车）导入为多波段 GeoTIFF，定标与太阳几何写入 SICNU_* 元数据。
-
+>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：bandCount（integer）、output（raster）、productId（string）
@@ -26,7 +26,7 @@ GF-1/2/6 L1A 产品（CRESDA XML 侧车）导入为多波段 GeoTIFF，定标与
 ## rs:hj_import
 
 HJ-1 CCD L1A 产品导入为多波段 GeoTIFF，用于环境减灾监测教学流程。
-
+>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：bandCount（integer）、output（raster）、productId（string）
@@ -40,7 +40,7 @@ HJ-1 CCD L1A 产品导入为多波段 GeoTIFF，用于环境减灾监测教学�
   - `EXECUTION_FAILED` — 波段声明与文件不符。处置：确认 L1A 产品级别与波段列表
 - 教学概念：产品导入、环境监测
 - 适用课程：遥感数字图像处理
-- 典型练习：导入 HJ-1 CCD 数据并与环境卫星轨道元数据对照，说明重访周期对时相分析的影响。
+- 典型练习：导入 HJ-1 CCD 数据并与环境卫星轨道元数据对照，说明重访周期对时相分析的影响。>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
 
 ## rs:landsat_import
 
@@ -116,7 +116,7 @@ Sentinel-2 数据导入：解析 SAFE/JP2 产品包，输出多波段反射率�
 ## rs:zy3_import
 
 ZY-3 L1A 产品导入为多波段 GeoTIFF，保留产品声明的定标与几何信息。
-
+>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：bandCount（integer）、output（raster）、productId（string）
@@ -130,5 +130,5 @@ ZY-3 L1A 产品导入为多波段 GeoTIFF，保留产品声明的定标与几何
   - `EXECUTION_FAILED` — 波段声明与文件不符。处置：确认 L1A 产品级别与波段列表
 - 教学概念：产品导入、多光谱波段
 - 适用课程：遥感数字图像处理
-- 典型练习：导入一景 ZY-3 多光谱数据，对比不同波段合成方式下的地物可分性。
+- 典型练习：导入一景 ZY-3 多光谱数据，对比不同波段合成方式下的地物可分性。>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
 

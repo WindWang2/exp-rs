@@ -602,6 +602,18 @@
       "to" : "rs:sar_change"
     },
     {
+      "from" : "rs:sar_coregister",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_coregister"
+    },
+    {
+      "from" : "rs:sar_displacement",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_displacement"
+    },
+    {
       "from" : "rs:sar_dualpol_features",
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/sar.json",
@@ -614,6 +626,24 @@
       "to" : "rs:sar_geocode"
     },
     {
+      "from" : "rs:sar_interferogram",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_interferogram"
+    },
+    {
+      "from" : "rs:sar_phase_filter",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_phase_filter"
+    },
+    {
+      "from" : "rs:sar_polsar_decompose",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_polsar_decompose"
+    },
+    {
       "from" : "rs:sar_ratio",
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/sar.json",
@@ -624,6 +654,12 @@
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/sar.json",
       "to" : "rs:sar_speckle"
+    },
+    {
+      "from" : "rs:sar_temporal_events",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_temporal_events"
     },
     {
       "from" : "rs:sar_temporal_stats",
@@ -654,6 +690,12 @@
       "kind" : "capability_for",
       "origin" : "data/agent/capabilities/sar.json",
       "to" : "rs:sar_texture"
+    },
+    {
+      "from" : "rs:sar_unwrap",
+      "kind" : "capability_for",
+      "origin" : "data/agent/capabilities/sar.json",
+      "to" : "rs:sar_unwrap"
     },
     {
       "from" : "rs:savi",
@@ -3099,6 +3141,16 @@
       "origin" : "data/agent/capabilities/sar.json"
     },
     {
+      "id" : "rs:sar_coregister",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "rs:sar_displacement",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
       "id" : "rs:sar_dualpol_features",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/sar.json"
@@ -3109,12 +3161,32 @@
       "origin" : "data/agent/capabilities/sar.json"
     },
     {
+      "id" : "rs:sar_interferogram",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "rs:sar_phase_filter",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "rs:sar_polsar_decompose",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
       "id" : "rs:sar_ratio",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/sar.json"
     },
     {
       "id" : "rs:sar_speckle",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "rs:sar_temporal_events",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/sar.json"
     },
@@ -3140,6 +3212,11 @@
     },
     {
       "id" : "rs:sar_texture",
+      "kind" : "capability_entry",
+      "origin" : "data/agent/capabilities/sar.json"
+    },
+    {
+      "id" : "rs:sar_unwrap",
       "kind" : "capability_entry",
       "origin" : "data/agent/capabilities/sar.json"
     },
@@ -7181,6 +7258,37 @@
     {
       "attributes" : 
       [
+        "master",
+        "masterBand",
+        "minPeakRatio",
+        "output",
+        "patchSize",
+        "patchStride",
+        "reportOnly",
+        "searchRadius",
+        "slave",
+        "slaveBand"
+      ],
+      "id" : "rs:sar_coregister",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "input",
+        "output",
+        "warnThreshold",
+        "wavelengthUm"
+      ],
+      "id" : "rs:sar_displacement",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
         "domain",
         "feature",
         "input",
@@ -7202,6 +7310,52 @@
         "resampling"
       ],
       "id" : "rs:sar_geocode",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "coherenceOutput",
+        "coherenceWindow",
+        "flattenRamp",
+        "master",
+        "masterBand",
+        "output",
+        "slave",
+        "slaveBand"
+      ],
+      "id" : "rs:sar_interferogram",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "alpha",
+        "band",
+        "input",
+        "output",
+        "window"
+      ],
+      "id" : "rs:sar_phase_filter",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "assumeReciprocity",
+        "decomposition",
+        "hhBand",
+        "hvBand",
+        "input",
+        "output",
+        "vhBand",
+        "vvBand",
+        "windowSize"
+      ],
+      "id" : "rs:sar_polsar_decompose",
       "kind" : "operator",
       "origin" : "src/operators/rs/rs_operators_init.cpp"
     },
@@ -7247,6 +7401,22 @@
       [
         "band",
         "changeThresholdDb",
+        "dates",
+        "inputDomain",
+        "inputs",
+        "minValid",
+        "output"
+      ],
+      "id" : "rs:sar_temporal_events",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "changeThresholdDb",
+        "dates",
         "inputDomain",
         "inputs",
         "minValid",
@@ -7328,6 +7498,20 @@
         "windowSize"
       ],
       "id" : "rs:sar_texture",
+      "kind" : "operator",
+      "origin" : "src/operators/rs/rs_operators_init.cpp"
+    },
+    {
+      "attributes" : 
+      [
+        "band",
+        "input",
+        "output",
+        "provider",
+        "qualityBand",
+        "qualityInput"
+      ],
+      "id" : "rs:sar_unwrap",
       "kind" : "operator",
       "origin" : "src/operators/rs/rs_operators_init.cpp"
     },

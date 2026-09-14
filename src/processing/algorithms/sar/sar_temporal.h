@@ -25,6 +25,7 @@
 #pragma once
 
 #include <limits>
+#include <vector>
 
 namespace sicnu::sar
 {
@@ -55,5 +56,11 @@ struct SarTemporalStats
 /// Needs at least one valid sample (false otherwise).
 bool sarTemporalStats( const double *values, int n, SarTemporalStats *out,
                        double changeThresholdDb = 6.0 );
+
+/// The shared robust baseline selection: upper-median of the linear-power
+/// samples (nth_element at n/2 — deterministic single selection, NOT an
+/// interpolated average). Consumed by sar_temporal_events too so both
+/// kernels share one convention. Reorders @a samples (they are scratch).
+double sarUpperMedianLinear( std::vector<double> &samples );
 
 } // namespace sicnu::sar

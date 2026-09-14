@@ -153,6 +153,13 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_raster_vector.cpp
     rs/rs_rasterize_operator.cpp
     rs/rs_sar_temporal_stats_operator.cpp
+    rs/rs_sar_polsar_decompose_operator.cpp
+    rs/rs_sar_interferogram_operator.cpp
+    rs/rs_sar_phase_filter_operator.cpp
+    rs/rs_sar_unwrap_operator.cpp
+    rs/rs_sar_displacement_operator.cpp
+    rs/rs_sar_coregister_operator.cpp
+    rs/rs_sar_temporal_events_operator.cpp
     rs/rs_zonal_stats_operator.cpp
     rs/rs_temporal_monitor_operator.cpp
     rs/rs_terrain_flow_operator.cpp

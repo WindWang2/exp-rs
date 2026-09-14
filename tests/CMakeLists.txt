@@ -1301,6 +1301,97 @@ target_include_directories(test_sar_geocoding PRIVATE
 )
 sicnu_discover_tests(test_sar_geocoding)
 
+# Complex (SLC) raster contract (Advanced SAR 10.0, package A): channel
+# declaration grammar, complex scalar kernels, CFloat32 validation, tile
+# stream round-trip + halo replication + invalid normalization.
+add_executable(test_sar_complex test_sar_complex.cpp)
+target_link_libraries(test_sar_complex PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_sar_complex PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_sar_complex)
+
+# PolSAR decomposition kernels (Advanced SAR 10.0, package B): 3×3
+# Hermitian eigensolver + Pauli / H-A-α / Freeman-Durden / Yamaguchi
+# known answers.
+add_executable(test_sar_polsar test_sar_polsar.cpp)
+target_link_libraries(test_sar_polsar PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_sar_polsar PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_sar_polsar)
+
+# InSAR base-chain kernels (Advanced SAR 10.0, package C): interferogram,
+# coherence, Goldstein filter, ramp fit, quality-guided unwrap,
+# displacement, coregistration shift.
+add_executable(test_sar_insar test_sar_insar.cpp)
+target_link_libraries(test_sar_insar PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_sar_insar PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_sar_insar)
+
+# Multi-temporal SAR event dating (Advanced SAR 10.0, package D): ISO 8601
+# contract, irregular-interval day arithmetic, event kernel known answers.
+add_executable(test_sar_temporal_events test_sar_temporal_events.cpp)
+target_link_libraries(test_sar_temporal_events PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_sar_temporal_events PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_sar_temporal_events)
+
+# Advanced SAR / PolSAR / InSAR 10.0 operator E2E: PolSAR decomposition,
+# full InSAR chain closure, temporal event dating, coregistration — through
+# the live operator registry on synthetic fixtures.
+add_executable(test_sar_platform10 test_sar_platform10.cpp)
+target_link_libraries(test_sar_platform10 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_sar_platform10)
+target_include_directories(test_sar_platform10 PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_sar_platform10)
+
 add_executable(test_sar_foundation5 test_sar_foundation5.cpp)
 target_link_libraries(test_sar_foundation5 PRIVATE
   Catch2::Catch2WithMain

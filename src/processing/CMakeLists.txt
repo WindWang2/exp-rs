@@ -30,6 +30,11 @@ add_library(sicnu_processing SHARED
     algorithms/sar/sar_orbit.cpp
     algorithms/sar/sar_geocoding.cpp
     algorithms/sar/sar_temporal.cpp
+    algorithms/sar/sar_complex.cpp
+    algorithms/sar/sar_hermitian3.cpp
+    algorithms/sar/sar_polsar.cpp
+    algorithms/sar/sar_insar.cpp
+    algorithms/sar/sar_temporal_events.cpp
     algorithms/temporal/temporal_monitoring.cpp
     algorithms/terrain_flow.cpp
 

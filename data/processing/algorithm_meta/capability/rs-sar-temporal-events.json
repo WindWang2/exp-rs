@@ -1,0 +1,158 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u519c\u7530",
+        "\u6c34\u4f53\uff08SAR\uff09"
+      ],
+      "scenes" : 
+      [
+        "\u4f5c\u7269\u7269\u5019\u7684\u96f7\u8fbe\u8868\u8fbe",
+        "\u6d2a\u6c34/\u5012\u4f0f\u4e8b\u4ef6\u5b9a\u5e74"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "ACQUISITION_DATES_MISSING",
+        "remedy" : "\u63d0\u4f9b dates \u6570\u7ec4\u6216\u4e3a\u6bcf\u666f\u5199 SICNU_SAR_ACQUISITION_UTC",
+        "when" : "\u666f\u65e0\u65e5\u671f\u58f0\u660e\u4e14\u672a\u7ed9 dates \u53c2\u6570"
+      },
+      {
+        "code" : "DATES_NOT_ASCENDING",
+        "remedy" : "\u6309\u65f6\u95f4\u6392\u5e8f\u573a\u666f\u4e0e\u65e5\u671f\u6570\u7ec4",
+        "when" : "\u65e5\u671f\u975e\u4e25\u683c\u9012\u589e"
+      }
+    ],
+    "family" : "sar",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "string",
+          "name" : "dates",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "band",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "6",
+          "name" : "changeThresholdDb",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "dates",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "declared",
+          "enum" : 
+          [
+            "declared",
+            "linear_power",
+            "db"
+          ],
+          "name" : "inputDomain",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "inputs",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "2",
+          "name" : "minValid",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Incoherent amplitude analysis only \u2014 no interferometric phase.",
+      "Dates must be UTC ISO 8601 and strictly ascending.",
+      "Pixels under minValid observations are NaN everywhere except valid_count.",
+      "\u975e\u76f8\u5e72\u5e45\u5ea6\u5206\u6790\uff1b\u4e0d\u89c4\u5219\u95f4\u9694\u662f\u5e38\u6001\uff08\u6240\u6709\u65f6\u95f4\u91cf\u6309\u5b9e\u9645\u5929\u6570\u504f\u79fb\uff09\u3002"
+    ],
+    "modality" : 
+    [
+      "sar"
+    ],
+    "operator_group" : "sar",
+    "prerequisites" : 
+    [
+      "Scenes co-registered on an identical grid; acquisition dates via the dates parameter or per-scene SICNU_SAR_ACQUISITION_UTC metadata (missing dates are refused \u2014 no index-only products).",
+      "Calibrate scenes first (rs:sar_calibrate).",
+      "\u6bcf\u666f\u5fc5\u987b\u6709\u83b7\u53d6\u65e5\u671f\uff08dates \u53c2\u6570\u6216 SICNU_SAR_ACQUISITION_UTC \u5143\u6570\u636e\uff0c\u4e25\u683c\u9012\u589e\uff09\u2014\u2014\u7f3a\u65e5\u671f\u7c7b\u578b\u5316\u62d2\u7edd\uff0c\u4e0d\u4ea7\u51fa\u65e0\u8bed\u4e49\u7d22\u5f15\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "SAR \u65f6\u5e8f\u4e8b\u4ef6\u5b9a\u5e74\uff1a\u5bf9\u591a\u671f\u5b9a\u6807 SAR \u5f71\u50cf\u6309\u50cf\u5143\u68c0\u6d4b\u76f8\u5bf9\u4e2d\u4f4d\u6570\u57fa\u7ebf\u7684\u8d85\u9608\u503c\u53d8\u5316\uff0c\u8f93\u51fa\u4e8b\u4ef6\u6807\u5fd7/\u9996\u672b\u4e8b\u4ef6/\u6301\u7eed\u5929\u6570\u7b49\uff0c\u5168\u90e8\u5e26\u771f\u5b9e\u83b7\u53d6\u65e5\u671f\u8bed\u4e49\uff08ISO 8601 \u58f0\u660e\uff09\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u65f6\u5e8f\u53d8\u5316\u68c0\u6d4b",
+        "\u4e8b\u4ef6\u5b9a\u5e74"
+      ],
+      "courses" : 
+      [
+        "\u5fae\u6ce2\u9065\u611f"
+      ],
+      "exercise" : "\u7528\u4e0d\u89c4\u5219\u91cd\u8bbf\uff0812 \u5929/6 \u5929\u6df7\u5408\uff09\u7684\u65f6\u5e8f\u5b9a\u4f4d\u519c\u7530\u6df9\u6ca1\u6216\u5012\u4f0f\u53d1\u751f\u65e5\u671f\uff0c\u7406\u89e3\u4e0d\u89c4\u5219\u95f4\u9694\u6309\u5b9e\u9645\u5929\u6570\u8ba1\u7b97\u3002"
+    }
+  },
+  "description" : "Per-pixel change-event dating across N co-registered SAR scenes with declared acquisition dates: event flags, first/last event scene and day offsets, max deviation, and argmax timing.",
+  "display_name" : "SAR Temporal Events",
+  "gpu" : false,
+  "id" : "rs:sar_temporal_events",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "sar",
+    "temporal",
+    "change"
+  ],
+  "task" : "sar-temporal"
+}

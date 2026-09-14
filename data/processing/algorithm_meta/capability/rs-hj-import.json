@@ -14,7 +14,7 @@
         "\u73af\u5883\u76d1\u6d4b",
         "\u5927\u533a\u57df\u666e\u67e5"
       ]
-    },
+    },>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
     "band_roles" : {},
     "crs" : 
     {
@@ -41,7 +41,7 @@
         "remedy" : "\u786e\u8ba4 L1A \u4ea7\u54c1\u7ea7\u522b\u4e0e\u6ce2\u6bb5\u5217\u8868",
         "when" : "\u6ce2\u6bb5\u58f0\u660e\u4e0e\u6587\u4ef6\u4e0d\u7b26"
       }
-    ],
+    ],>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
     "family" : "io",
     "io" : 
     {
@@ -87,7 +87,7 @@
     "limitations" : 
     [
       "Import an HJ-1 CCD L1A product (sidecar XML + TIFF) into a multi-band GeoTIFF with declared calibration/sun geometry stamped as SICNU_* metadata."
-    ],
+    ],>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
     "modality" : 
     [
       "optical"
@@ -111,7 +111,7 @@
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
       "exercise" : "\u5bfc\u5165 HJ-1 CCD \u6570\u636e\u5e76\u4e0e\u73af\u5883\u536b\u661f\u8f68\u9053\u5143\u6570\u636e\u5bf9\u7167\uff0c\u8bf4\u660e\u91cd\u8bbf\u5468\u671f\u5bf9\u65f6\u76f8\u5206\u6790\u7684\u5f71\u54cd\u3002"
-    }
+    }>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
   },
   "description" : "Import a HJ-1A/1B CCD L1A product into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.",
   "display_name" : "Huanjing CCD Product Import",

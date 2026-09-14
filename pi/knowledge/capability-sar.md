@@ -2,7 +2,7 @@
 
 # 雷达 SAR 处理（sar）
 
-共 12 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 19 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:sar_backscatter
 
@@ -65,6 +65,45 @@ SAR 双时相变化检测：比较两景配准 SAR 影像的后向散射幅度�
 - 典型练习：对洪水前后两景 Sentinel-1 计算比值变化图并提取淹没区。
 - 可接上游：rs:sar_calibrate、rs:sar_speckle
 
+## rs:sar_coregister
+
+SAR 配准精化：对同网格复 SLC 对做幅度域 patch 归一化互相关（抛物线亚像元精化+中位数稳健估计），估计全局平移并双线性复采样从景。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：sar
+- 输入：master（raster）、slave（raster）
+- 输出：dx（string）、dy（string）、output（raster）
+- 参数：masterBand（numeric）、minPeakRatio（numeric）、output（string）、patchSize（numeric）、patchStride（numeric）、reportOnly（numeric）、searchRadius（numeric）、slaveBand（numeric）
+- 前置条件：Two complex (CFloat32) SLC rasters on the same grid; granular misalignment within the search radius.；两景复 SLC 必须已粗配准到同一网格，残余偏移在 searchRadius 内。
+- 局限：Global translation model only — no affine/polynomial warp, no DEM-based or range-Doppler coregistration.；Full planes are materialized behind a 4 GiB budget (MEMORY_BUDGET_EXCEEDED beyond).；仅全局平移模型——不含仿射/多项式/DEM 配准；整平面材料化受 4 GiB 预算约束。
+- 适用地物：任意地物（SAR）
+- 适用场景：InSAR 前置配准
+- 失败模式：
+  - `EXECUTION_FAILED` — 置信 patch 少于 3 个。处置：增大 searchRadius 或检查两景是否相关
+  - `INSUFFICIENT_MEMORY` — 平面超出预算。处置：缩小 AOI
+- 教学概念：影像配准、互相关
+- 适用课程：微波遥感
+- 典型练习：对人工平移的合成 SLC 对估计平移量并验证恢复精度（亚像元级）。
+
+## rs:sar_displacement
+
+InSAR 形变：把解缠相位按 d_los = −λ·φ/(4π) 转换为视线向形变（米），附带 Itoh 不连续率诊断（输入疑似仍为缠绕相位时告警）。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：sar
+- 输入：input（raster）
+- 输出：discontinuityRatio（string）、output（raster）
+- 参数：band（numeric）、output（string）、warnThreshold（numeric）、wavelengthUm（numeric）
+- 前置条件：Unwrapped phase (rs:sar_unwrap or an external provider); declared or explicit radar wavelength.；输入必须是解缠相位；雷达波长通过 wavelengthUm 参数或场景 SICNU_SAR_WAVELENGTH_UM 声明。
+- 局限：Sign convention: positive d_los = motion TOWARD the sensor.；Cannot reliably distinguish wrapped from unwrapped input; the Itoh discontinuity ratio is reported for the caller to judge.；算子无法从数据可靠区分缠绕/解缠——Itoh 不连续率仅供参考告警，判定权在调用方。
+- 适用地物：城市（SAR）、农田、矿区
+- 适用场景：地表形变定量制图
+- 失败模式：
+  - `INVALID_PARAMETER` — 波长未声明。处置：传 wavelengthUm（如 Sentinel-1 为 56235）或声明场景元数据
+- 教学概念：形变测量、相位-位移转换
+- 适用课程：微波遥感
+- 典型练习：对已知形变梯度的合成解缠相位验证位移幅值与符号约定（正值朝向传感器）。
+
 ## rs:sar_dualpol_features
 
 双极化特征提取：从 VV/VH 双通道计算比值、极化分解量等特征，服务作物分类与地表类型识别。
@@ -105,6 +144,65 @@ SAR 地理编码（Range-Doppler 正射校正）：把 SAR 影像从斜距/地�
 - 适用课程：微波遥感
 - 典型练习：用 SRTM DEM 对 Sentinel-1 GRD 做地理编码并检查几何精度。
 
+## rs:sar_interferogram
+
+InSAR 干涉图：对同网格配准的复 SLC 对生成 s1·conj(s2) 干涉复栅格（缠绕相位+幅度）与窗口相干性质量层，可选稳健平地多项式去除。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：sar
+- 输入：master（raster）、slave（raster）
+- 输出：coherence（string）、output（raster）
+- 参数：coherenceOutput（string）、coherenceWindow（numeric）、flattenRamp（enum）、masterBand（numeric）、output（string）、slaveBand（numeric）
+- 前置条件：Co-registered complex (CFloat32) SLC pair on the SAME grid (CRS, resolution, origin, extent); use rs:sar_coregister first when the scenes are misaligned.；主/从景必须为 CFloat32 复 SLC 且位于同一网格（CRS/分辨率/原点/范围一致）。
+- 局限：Same-grid contract — no hidden resampling.；flattenRamp is a low-order polynomial approximation of the flat-earth phase, not DEM/orbit-based topographic removal.；flattenRamp 是低阶多项式平地近似，不是基于 DEM/轨道的地形相位去除。；不包含大气校正、PSI/SBAS 时序分析——超出基础链的请求不属于本算子能力。
+- 适用地物：任意地物（SAR）
+- 适用场景：形变监测入口、地表变化检测
+- 失败模式：
+  - `GRID_MISMATCH` — 主/从景网格不一致。处置：先用 rs:sar_coregister 或外部配准对齐
+  - `COMPLEX_BANDS_REQUIRED` — 输入不是复波段。处置：提供复 SLC 产品
+- 教学概念：干涉测量、相干性
+- 适用课程：微波遥感
+- 典型练习：对合成 SLC 对生成干涉图并解释相干性从 1（完全相干）到 0（失相干）的物理含义。
+
+## rs:sar_phase_filter
+
+InSAR 相位滤波：对复干涉图做 Goldstein-Werner 空间自适应滤波，抑制相位噪声，输出单位相量复栅格。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：sar
+- 输入：input（raster）
+- 输出：output（raster）
+- 参数：alpha（numeric）、band（numeric）、output（string）、window（numeric）
+- 前置条件：Complex interferogram from rs:sar_interferogram.；输入应为 rs:sar_interferogram 输出的复干涉图。
+- 局限：Spatial Goldstein-Werner form; the output is a UNIT phasor (magnitude information is deliberately dropped — the filter is defined on phase).；输出为单位相量（模长被有意归一）——滤波定义在相位上，幅度信息不保留。
+- 适用地物：任意地物（SAR）
+- 适用场景：形变监测链路中间步骤
+- 失败模式：
+  - `COMPLEX_BANDS_REQUIRED` — 输入不是复波段。处置：提供复干涉图
+- 教学概念：相位滤波、Goldstein-Werner
+- 适用课程：微波遥感
+- 典型练习：对比滤波前后干涉图条纹清晰度，理解 α 参数对平滑强度的影响。
+
+## rs:sar_polsar_decompose
+
+全极化分解：从 HH/HV/VV 复散射通道提取 Pauli 分量、H/A/α 熵-各向异性-平均散射角、Freeman-Durden 三分量或 Yamaguchi 四分量功率，刻画地表散射机制。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：sar
+- 输入：input（raster）
+- 输出：bands（string）、output（raster）
+- 参数：decomposition（enum）、hhBand（numeric）、hvBand（numeric）、output（string）、vhBand（numeric）、vvBand（numeric）、windowSize（numeric）
+- 前置条件：Complex CFloat32 HH/HV/VV (reciprocal) channels from a full-pol SLC product; calibrated scattering amplitudes.；必须为 CFloat32 复 HH/HV/VV 全极化通道；dual-pol/detected 输入被拒绝（POLARIZATION_MISMATCH）。
+- 局限：Dual-pol detected inputs are refused — no quad-pol approximation from dual-pol data.；Single-look ensembles are rank 1: H is identically 0 and anisotropy is NaN — use windowSize > 1 for H/A/alpha.；Freeman-Durden/Yamaguchi powers may clamp negative residuals to 0 (documented SPAN break near the noise floor).；单视集合秩为 1：H 恒为 0、anisotropy 为 NaN——用 windowSize>1 的窗口平均获得有效 H/A/α，代价是有效分辨率下降。；Freeman-Durden/Yamaguchi 负残差被钳制为 0（噪声底附近 SPAN 不严格守恒）。
+- 适用地物：农田、森林、城市（SAR）
+- 适用场景：机制识别与分类输入、地表覆盖制图
+- 失败模式：
+  - `POLARIZATION_MISMATCH` — 输入缺 HH/HV/VV 复通道或声明不完整。处置：确认数据为全极化复产品，或在元数据/参数中声明通道
+  - `COMPLEX_BANDS_REQUIRED` — 指定波段不是 CFloat32。处置：使用复 SLC 产品或改用 detected 域算子
+- 教学概念：极化分解、Pauli 基、散射熵
+- 适用课程：微波遥感
+- 典型练习：对全极化数据做 Freeman-Durden 分解，区分表面散射（裸土/水面）与体散射（植被）主导区。
+
 ## rs:sar_ratio
 
 SAR 双通道或多时相比值运算：突出散射机制差异，常用于水体/植被/建筑判别。
@@ -144,6 +242,25 @@ SAR 斑点噪声抑制：提供 Refine-Lee 等自适应滤波，保持边缘的�
 - 典型练习：比较 3x3 与 7x7 Refine-Lee 滤波对田块边缘保持的效果。
 - 可接下游：rs:sar_change
 
+## rs:sar_temporal_events
+
+SAR 时序事件定年：对多期定标 SAR 影像按像元检测相对中位数基线的超阈值变化，输出事件标志/首末事件/持续天数等，全部带真实获取日期语义（ISO 8601 声明）。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：sar
+- 输出：dates（string）、output（raster）
+- 参数：band（numeric）、changeThresholdDb（numeric）、dates（string）、inputDomain（enum）、inputs（string）、minValid（numeric）、output（string）
+- 前置条件：Scenes co-registered on an identical grid; acquisition dates via the dates parameter or per-scene SICNU_SAR_ACQUISITION_UTC metadata (missing dates are refused — no index-only products).；Calibrate scenes first (rs:sar_calibrate).；每景必须有获取日期（dates 参数或 SICNU_SAR_ACQUISITION_UTC 元数据，严格递增）——缺日期类型化拒绝，不产出无语义索引。
+- 局限：Incoherent amplitude analysis only — no interferometric phase.；Dates must be UTC ISO 8601 and strictly ascending.；Pixels under minValid observations are NaN everywhere except valid_count.；非相干幅度分析；不规则间隔是常态（所有时间量按实际天数偏移）。
+- 适用地物：农田、水体（SAR）
+- 适用场景：作物物候的雷达表达、洪水/倒伏事件定年
+- 失败模式：
+  - `ACQUISITION_DATES_MISSING` — 景无日期声明且未给 dates 参数。处置：提供 dates 数组或为每景写 SICNU_SAR_ACQUISITION_UTC
+  - `DATES_NOT_ASCENDING` — 日期非严格递增。处置：按时间排序场景与日期数组
+- 教学概念：时序变化检测、事件定年
+- 适用课程：微波遥感
+- 典型练习：用不规则重访（12 天/6 天混合）的时序定位农田淹没或倒伏发生日期，理解不规则间隔按实际天数计算。
+
 ## rs:sar_temporal_stats
 
 SAR 时序统计：对多期定标后 SAR 影像按像元统计均值/方差/分位数等，刻画散射时序特征。
@@ -151,7 +268,7 @@ SAR 时序统计：对多期定标后 SAR 影像按像元统计均值/方差/分
 - 确定性：逐位一致（bit_exact）
 - 模态：sar
 - 输出：output（raster）
-- 参数：band（numeric）、changeThresholdDb（numeric）、inputDomain（enum）、inputs（string）、minValid（numeric）、output（string）
+- 参数：band（numeric）、changeThresholdDb（numeric）、dates（string）、inputDomain（enum）、inputs（string）、minValid（numeric）、output（string）
 - 前置条件：Scenes must be co-registered on an identical grid (no hidden resampling).；Calibrate scenes first (rs:sar_calibrate): statistics of raw DN are not physical.；所有输入须定标并配准到同一网格。
 - 局限：Incoherent analysis only — no interferometric coherence.；Radiometric normalization between scenes (incidence/season) is the caller's responsibility.；Valid samples are finite and strictly positive; nonpositive power is NoData.
 - 适用地物：农田、水体（SAR）
@@ -241,4 +358,24 @@ SAR 纹理特征提取：基于 GLCM 等计算方差/对比度/熵等纹理量�
 - 教学概念：GLCM、纹理特征
 - 适用课程：微波遥感
 - 典型练习：提取 8 邻域 GLCM 对比度与熵，评估其对城中村边界的刻画能力。
+
+## rs:sar_unwrap
+
+InSAR 相位解缠：内建参考实现（质量引导洪泛、确定性），从缠绕相位恢复绝对相位；提供外部 provider 接口（未注册名称类型化拒绝，绝不静默替代）。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：sar
+- 输入：input（raster）、qualityInput（raster）
+- 输出：output（raster）、unwrappedPixels（string）
+- 参数：band（numeric）、output（string）、provider（string）、qualityBand（numeric）
+- 前置条件：Complex interferogram (ideally filtered via rs:sar_phase_filter); optional coherence raster for quality guidance.；输入应为滤波后的复干涉图（rs:sar_phase_filter）；可选相干性栅格引导种子顺序。
+- 局限：Single-scale plane unwrapping: 2 GiB plane budget (MEMORY_BUDGET_EXCEEDED beyond; use a smaller AOI).；Dense residue fields yield wrong 2π branches — no branch-cut/MCF global optimization is claimed.；参考实现不感知残差点、不做全局最优（非 SNAPHU/MCF 语义）；残差密集场会产生错误 2π 分支。；单尺度整平面解缠，2 GiB 预算（超出拒绝 MEMORY_BUDGET_EXCEEDED）——用更小 AOI 或外部 provider。
+- 适用地物：任意地物（SAR）
+- 适用场景：形变定量前处理
+- 失败模式：
+  - `UNWRAP_PROVIDER_UNAVAILABLE` — 请求未注册的外部解缠 provider。处置：使用 builtin，或先注册对应外部工具
+  - `INSUFFICIENT_MEMORY` — 栅格超出整平面预算。处置：缩小 AOI 或使用外部 provider
+- 教学概念：相位解缠、Itoh 条件
+- 适用课程：微波遥感
+- 典型练习：在合成相位坡面上验证解缠的精确性，并观察残差点密集时的 2π 跳变错误。
 

@@ -1,0 +1,145 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5730\u7269\uff08SAR\uff09"
+      ],
+      "scenes" : 
+      [
+        "\u5f62\u53d8\u5b9a\u91cf\u524d\u5904\u7406"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "UNWRAP_PROVIDER_UNAVAILABLE",
+        "remedy" : "\u4f7f\u7528 builtin\uff0c\u6216\u5148\u6ce8\u518c\u5bf9\u5e94\u5916\u90e8\u5de5\u5177",
+        "when" : "\u8bf7\u6c42\u672a\u6ce8\u518c\u7684\u5916\u90e8\u89e3\u7f20 provider"
+      },
+      {
+        "code" : "INSUFFICIENT_MEMORY",
+        "remedy" : "\u7f29\u5c0f AOI \u6216\u4f7f\u7528\u5916\u90e8 provider",
+        "when" : "\u6805\u683c\u8d85\u51fa\u6574\u5e73\u9762\u9884\u7b97"
+      }
+    ],
+    "family" : "sar",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "qualityInput",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "unwrappedPixels",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "1",
+          "name" : "band",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "builtin",
+          "name" : "provider",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "1",
+          "name" : "qualityBand",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Single-scale plane unwrapping: 2 GiB plane budget (MEMORY_BUDGET_EXCEEDED beyond; use a smaller AOI).",
+      "Dense residue fields yield wrong 2\u03c0 branches \u2014 no branch-cut/MCF global optimization is claimed.",
+      "\u53c2\u8003\u5b9e\u73b0\u4e0d\u611f\u77e5\u6b8b\u5dee\u70b9\u3001\u4e0d\u505a\u5168\u5c40\u6700\u4f18\uff08\u975e SNAPHU/MCF \u8bed\u4e49\uff09\uff1b\u6b8b\u5dee\u5bc6\u96c6\u573a\u4f1a\u4ea7\u751f\u9519\u8bef 2\u03c0 \u5206\u652f\u3002",
+      "\u5355\u5c3a\u5ea6\u6574\u5e73\u9762\u89e3\u7f20\uff0c2 GiB \u9884\u7b97\uff08\u8d85\u51fa\u62d2\u7edd MEMORY_BUDGET_EXCEEDED\uff09\u2014\u2014\u7528\u66f4\u5c0f AOI \u6216\u5916\u90e8 provider\u3002"
+    ],
+    "modality" : 
+    [
+      "sar"
+    ],
+    "operator_group" : "sar",
+    "prerequisites" : 
+    [
+      "Complex interferogram (ideally filtered via rs:sar_phase_filter); optional coherence raster for quality guidance.",
+      "\u8f93\u5165\u5e94\u4e3a\u6ee4\u6ce2\u540e\u7684\u590d\u5e72\u6d89\u56fe\uff08rs:sar_phase_filter\uff09\uff1b\u53ef\u9009\u76f8\u5e72\u6027\u6805\u683c\u5f15\u5bfc\u79cd\u5b50\u987a\u5e8f\u3002"
+    ],
+    "schema_version" : 2,
+    "summary" : "InSAR \u76f8\u4f4d\u89e3\u7f20\uff1a\u5185\u5efa\u53c2\u8003\u5b9e\u73b0\uff08\u8d28\u91cf\u5f15\u5bfc\u6d2a\u6cdb\u3001\u786e\u5b9a\u6027\uff09\uff0c\u4ece\u7f20\u7ed5\u76f8\u4f4d\u6062\u590d\u7edd\u5bf9\u76f8\u4f4d\uff1b\u63d0\u4f9b\u5916\u90e8 provider \u63a5\u53e3\uff08\u672a\u6ce8\u518c\u540d\u79f0\u7c7b\u578b\u5316\u62d2\u7edd\uff0c\u7edd\u4e0d\u9759\u9ed8\u66ff\u4ee3\uff09\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u76f8\u4f4d\u89e3\u7f20",
+        "Itoh \u6761\u4ef6"
+      ],
+      "courses" : 
+      [
+        "\u5fae\u6ce2\u9065\u611f"
+      ],
+      "exercise" : "\u5728\u5408\u6210\u76f8\u4f4d\u5761\u9762\u4e0a\u9a8c\u8bc1\u89e3\u7f20\u7684\u7cbe\u786e\u6027\uff0c\u5e76\u89c2\u5bdf\u6b8b\u5dee\u70b9\u5bc6\u96c6\u65f6\u7684 2\u03c0 \u8df3\u53d8\u9519\u8bef\u3002"
+    }
+  },
+  "description" : "Reference quality-guided flood-fill phase unwrapping of a complex interferogram, with an explicit external-provider seam and a plane memory budget.",
+  "display_name" : "InSAR Phase Unwrap",
+  "gpu" : false,
+  "id" : "rs:sar_unwrap",
+  "input" : "raster",
+  "notes" : "Reference implementation: deterministic quality-guided flood fill. Not residue-aware, not a global optimum; external tools slot in through the provider seam (typed refusal when unregistered).",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "sar",
+    "insar"
+  ],
+  "task" : "sar-insar"
+}

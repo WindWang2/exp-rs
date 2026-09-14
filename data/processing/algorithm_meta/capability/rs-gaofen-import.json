@@ -14,7 +14,7 @@
         "\u519c\u4e1a\u533a\u5236\u56fe",
         "\u57ce\u5e02\u9065\u611f"
       ]
-    },
+    },>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
     "band_roles" : {},
     "crs" : 
     {
@@ -41,7 +41,7 @@
         "remedy" : "\u786e\u8ba4 L1A \u4ea7\u54c1\u7ea7\u522b\u4e0e\u6ce2\u6bb5\u5217\u8868",
         "when" : "\u6ce2\u6bb5\u58f0\u660e\u4e0e\u6587\u4ef6\u4e0d\u7b26"
       }
-    ],
+    ],>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
     "family" : "io",
     "io" : 
     {
@@ -87,7 +87,7 @@
     "limitations" : 
     [
       "Import a Gaofen-1/2/6 L1A product (CRESDA sidecar XML + TIFF) into a multi-band GeoTIFF with declared calibration/sun geometry stamped as SICNU_* metadata."
-    ],
+    ],>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
     "modality" : 
     [
       "optical"
@@ -111,7 +111,7 @@
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
       "exercise" : "\u4e0b\u8f7d\u4e00\u666f GF-1 WFV \u6570\u636e\uff0c\u7528 rs:gaofen_import \u5bfc\u5165\u540e\u68c0\u67e5 SICNU_* \u5143\u6570\u636e\u5e76\u8ba1\u7b97 NDVI\u3002"
-    }
+    }>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
   },
   "description" : "Import a Gaofen-1/2/6 L1A product (PMS/WFV) into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.",
   "display_name" : "Gaofen Product Import",
