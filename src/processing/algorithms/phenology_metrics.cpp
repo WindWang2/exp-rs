@@ -475,11 +475,121 @@ PhenologyExtractor::fitDoubleLogistic( const std::vector<float> &y,
     return result;
 }
 
-std::vector<PhenologyMetrics> PhenologyExtractor::extractMultiCycle( const std::vector<float> &,
-                                                                     const std::vector<double> &,
-                                                                     int, double )
+std::vector<PhenologyMetrics> PhenologyExtractor::extractMultiCycle(
+    const std::vector<float> &y, const std::vector<double> &tDays, int cycles,
+    double thresholdFraction )
 {
-    return {};
+    if ( cycles < 1 || y.size() != tDays.size() )
+        return {};
+
+    // Finite pairs, ascending time.
+    std::vector<double> ts;
+    std::vector<float> ys;
+    for ( std::size_t i = 0; i < y.size(); ++i )
+        if ( std::isfinite( y[i] ) && std::isfinite( tDays[i] ) )
+        {
+            ts.push_back( tDays[i] );
+            ys.push_back( y[i] );
+        }
+    std::vector<std::size_t> order( ts.size() );
+    for ( std::size_t i = 0; i < order.size(); ++i )
+        order[i] = i;
+    std::sort( order.begin(), order.end(),
+               [&]( std::size_t a, std::size_t b ) { return ts[a] < ts[b]; } );
+    std::vector<double> tSorted( ts.size() );
+    std::vector<float> ySorted( ts.size() );
+    for ( std::size_t i = 0; i < order.size(); ++i )
+    {
+        tSorted[i] = ts[order[i]];
+        ySorted[i] = ys[order[i]];
+    }
+    const std::size_t n = tSorted.size();
+    if ( n < 3 )
+        return {};
+
+    // Derivative zero structure: local maxima (rising→falling) and local
+    // minima (falling→rising). First-wins on plateaus (>= left, > right).
+    auto isMax = [&]( std::size_t i ) {
+        return i > 0 && i + 1 < n && ySorted[i] >= ySorted[i - 1] && ySorted[i] > ySorted[i + 1];
+    };
+    auto isMin = [&]( std::size_t i ) {
+        return i > 0 && i + 1 < n && ySorted[i] <= ySorted[i - 1] && ySorted[i] < ySorted[i + 1];
+    };
+    std::vector<std::size_t> peaks;
+    std::vector<std::size_t> valleys;
+    for ( std::size_t i = 1; i + 1 < n; ++i )
+    {
+        if ( isMax( i ) )
+            peaks.push_back( i );
+        if ( isMin( i ) )
+            valleys.push_back( i );
+    }
+    if ( peaks.empty() )
+        return {}; // no season structure: refuse, never invent cycles
+
+    // Collapse same-structure duplicates: two maxima with no valley between
+    // them are one season (float plateaus at the tails) — keep the higher.
+    {
+        std::vector<std::size_t> realPeaks;
+        auto hasValleyBetween = [&]( std::size_t a, std::size_t b ) {
+            for ( std::size_t v : valleys )
+                if ( v > a && v < b )
+                    return true;
+            return false;
+        };
+        for ( std::size_t peak : peaks )
+        {
+            if ( !realPeaks.empty() && !hasValleyBetween( realPeaks.back(), peak ) )
+            {
+                if ( ySorted[peak] > ySorted[realPeaks.back()] )
+                    realPeaks.back() = peak;
+                continue;
+            }
+            realPeaks.push_back( peak );
+        }
+        peaks = std::move( realPeaks );
+    }
+
+    // The @a cycles most prominent peaks (value desc, earliest wins ties).
+    std::sort( peaks.begin(), peaks.end(), [&]( std::size_t a, std::size_t b ) {
+        if ( ySorted[a] != ySorted[b] )
+            return ySorted[a] > ySorted[b];
+        return a < b;
+    } );
+    if ( peaks.size() > static_cast<std::size_t>( cycles ) )
+        peaks.resize( static_cast<std::size_t>( cycles ) );
+    std::sort( peaks.begin(), peaks.end() ); // back onto the time axis
+
+    std::vector<PhenologyMetrics> results;
+    results.reserve( peaks.size() );
+    for ( std::size_t p = 0; p < peaks.size(); ++p )
+    {
+        // Segment: from the deepest valley left of the peak (or the start)
+        // to the deepest valley right of it (or the end). Neighbor selected
+        // peaks bound the search so segments never overlap.
+        const std::size_t leftBound =
+            p == 0 ? 0 : peaks[p - 1];
+        const std::size_t rightBound =
+            p + 1 == peaks.size() ? n - 1 : peaks[p + 1];
+        std::size_t segBegin = 0;
+        for ( std::size_t i = leftBound + 1; i < peaks[p]; ++i )
+            if ( isMin( i ) )
+                segBegin = i;
+        std::size_t segEnd = n - 1;
+        for ( std::size_t i = peaks[p] + 1; i < rightBound; ++i )
+            if ( isMin( i ) )
+            {
+                segEnd = i;
+                break; // first valley after the peak delimits this season
+            }
+
+        std::vector<float> segY( ySorted.begin() + segBegin, ySorted.begin() + segEnd + 1 );
+        std::vector<double> segT( tSorted.begin() + segBegin, tSorted.begin() + segEnd + 1 );
+        PhenologyMetrics m = extractDynamicThreshold( segY, segT, thresholdFraction, 1, 365 );
+        if ( m.valid )
+            results.push_back( m );
+    }
+    return results;
 }
 
 } // namespace sicnu::temporal

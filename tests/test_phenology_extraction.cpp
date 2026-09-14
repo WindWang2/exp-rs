@@ -206,3 +206,70 @@ TEST_CASE( "Double-logistic fit recovers injected parameters and phenology",
     }
     REQUIRE( metrics.integral == Approx( integralRef ).margin( 0.02 * integralRef ) );
 }
+
+// ---------------------------------------------------------------------------
+// Slice 3: multi-cycle (double-crop) segmentation + monotonicity guards.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Multi-cycle extraction separates a double-crop paddy season",
+           "[d16][phenology]" )
+{
+    // Two well-separated Gaussian seasons: cycle 1 peaks at doy 140,
+    // cycle 2 at doy 265 (both on the daily sample grid).
+    const GaussianSeason first{ 0.1, 0.7, 140.0, 13.0 };
+    const GaussianSeason second{ 0.1, 0.55, 265.0, 18.0 };
+    const auto t = dailyAxis();
+    std::vector<float> y( t.size() );
+    for ( std::size_t i = 0; i < t.size(); ++i )
+        y[i] = static_cast<float>( first.value( t[i] ) + second.value( t[i] ) - first.base );
+
+    const auto results = PhenologyExtractor::extractMultiCycle( y, t, 2, 0.2 );
+    REQUIRE( results.size() == 2 );
+
+    // Independent closed-form truths per season (same Gaussian algebra as
+    // the single-season case; each segment's range is its own peak/base).
+    const ThresholdTruth truth1( first, 0.2 );
+    const ThresholdTruth truth2( second, 0.2 );
+    const double c2 = second.sigma * std::sqrt( -2.0 * std::log( 0.2 ) );
+
+    INFO( "c1: sos=" << results[0].sos << " pos=" << results[0].pos
+          << " eos=" << results[0].eos );
+    INFO( "c2: sos=" << results[1].sos << " pos=" << results[1].pos
+          << " eos=" << results[1].eos );
+    REQUIRE( results[0].sos == Approx( truth1.sos ).margin( 1.0 ) );
+    REQUIRE( results[0].pos == Approx( 140.0 ).margin( 0.5 ) );
+    REQUIRE( results[0].eos == Approx( truth1.eos ).margin( 1.0 ) );
+    REQUIRE( results[1].sos == Approx( second.mu - c2 ).margin( 1.0 ) );
+    REQUIRE( results[1].pos == Approx( 265.0 ).margin( 0.5 ) );
+    REQUIRE( results[1].eos == Approx( second.mu + c2 ).margin( 1.0 ) );
+
+    // Biology monotonicity inside every cycle, and strict cycle ordering.
+    for ( const auto &m : results )
+    {
+        REQUIRE( m.valid );
+        REQUIRE( m.sos < m.pos );
+        REQUIRE( m.pos < m.eos );
+        REQUIRE( m.los == Approx( m.eos - m.sos ).margin( 1e-6 ) );
+    }
+    REQUIRE( results[0].eos < results[1].sos );
+}
+
+TEST_CASE( "Multi-cycle refuses to fabricate cycles that are not in the data",
+           "[d16][phenology]" )
+{
+    const GaussianSeason g;
+    const auto t = dailyAxis();
+    std::vector<float> single( t.size() );
+    for ( std::size_t i = 0; i < t.size(); ++i )
+        single[i] = static_cast<float>( g.value( t[i] ) );
+
+    // One season only: asking for 2 cycles returns what exists (1), never a
+    // padded or merged duplicate.
+    const auto results = PhenologyExtractor::extractMultiCycle( single, t, 2, 0.2 );
+    REQUIRE( results.size() == 1 );
+    REQUIRE( results[0].valid );
+
+    // Flat data: no cycles at all.
+    std::vector<float> flat( t.size(), 0.3f );
+    REQUIRE( PhenologyExtractor::extractMultiCycle( flat, t, 2, 0.2 ).empty() );
+}
