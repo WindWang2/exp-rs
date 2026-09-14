@@ -1,0 +1,48 @@
+{
+  "spec_version": 1,
+  "id": "temporal_phenology_timeline",
+  "title": "Lab 8: NDVI Time Series, Phenology and Breakpoint Timeline",
+  "title_zh": "实验8B：NDVI 时序规整化、物候监测与突变时间轴",
+  "objective": "在大时空尺度时序工作台中完成从多时相虚拟立方体到物候监测的完整闭环：构建 16 天规则日历的数据立方体，使用稳健 Whittaker 平滑压制云噪声，以 BFAST 简化模型定位地表覆被突变，并用动态阈值法提取物候参数（SOS/POS/EOS/LOS），最终通过时间轴部件回放整个生长季。",
+  "prerequisites": [
+    "完成实验4（变化检测）与实验8（NDVI 时序分析，labspec temporal_analysis）",
+    "理解 NDVI 的季节动态与云污染的负向偏置",
+    "了解 Whittaker 惩罚最小二乘与谐波回归的基本思想"
+  ],
+  "steps": [
+    {
+      "title": "Build the Regularized Temporal Cube",
+      "title_zh": "构建 16 天规则日历的时序虚拟立方体",
+      "description_zh": "加载一个季度内的多景影像（文件名含采集日期），TemporalCube 以 2020-01-01 为历元、16 天为步长生成规则时间轴；窗口半宽 32 天内的观测按 (1-云量)·高斯时距权重合成，窗口内无有效观测或前后观测间隔超过 45 天时输出 NaN，严禁虚假插值。",
+      "action": "openTemporalCube",
+      "completion_hint": "timeline() 返回 46 个日历节点，云污染像元已由最近的无云观测替代。"
+    },
+    {
+      "title": "Robust Whittaker Smoothing",
+      "title_zh": "稳健 Whittaker 平滑压制云噪声",
+      "description_zh": "对像元时序执行 Cauchy IRLS 加权 Whittaker 平滑（λ=100，迭代 3 次），观察平滑曲线如何紧贴植被生长上限包络线，将负向云尖峰的拟合 MAE 压制到 0.03 以内。",
+      "action": "applyTemporalSmooth",
+      "completion_hint": "平滑曲线与解析真值的平均绝对误差小于 0.03，未出现云噪声下陷。"
+    },
+    {
+      "title": "BFAST Breakpoint Detection",
+      "title_zh": "谐波+分段趋势的突变点定位",
+      "description_zh": "在平滑序列上运行谐波（周期 365.25 天，3 阶）与分段线性联合回归：以 RSS 最小化贪婪定位断点，F 检验 p 值与 BIC 严格下降共同把关，第二年初的毁林阶跃（-0.35）应被精准命中。",
+      "action": "runHarmonicBreaks",
+      "completion_hint": "断点索引命中年界附近，跃迁幅值误差小于 0.06，p 值小于 0.05。"
+    },
+    {
+      "title": "Phenology Retrieval and Timeline Playback",
+      "title_zh": "物候参数反演与时间轴回放",
+      "description_zh": "用动态相对阈值法（Ratio>=0.2 线性插值）提取 SOS/POS/EOS 与生长季长度 LOS，在校验 SOS<POS<EOS 后由时间轴刷选部件回放生长季：物候区间带、突变虚线与逐帧切片联动。",
+      "action": "extractPhenologyAndPlay",
+      "completion_hint": "SOS/POS/EOS 与闭式真值误差在 2 天以内，时间轴回放流畅无卡顿。"
+    }
+  ],
+  "thinking_questions": [
+    "为什么 45 天无观测缺口必须输出 NaN 而不能插值？在哪些地表类型上虚假插值危害最大？",
+    "λ 取 1e-6 与 1e4 时 Whittaker 曲线分别退化为哪些形态？稳健 IRLS 为何对负向尖峰更有效？",
+    "BFAST 的 F 检验与 BIC 惩罚各自防止哪一类误判？若把 minSegmentSamples 调小会冒什么风险？",
+    "双季稻的 extractMultiCycle 如何用一阶导数峰谷配对避免两个生长季粘连？"
+  ]
+}
