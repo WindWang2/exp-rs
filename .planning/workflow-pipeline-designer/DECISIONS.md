@@ -43,9 +43,11 @@ only file paths of five seams move, each documented above.
 The V1 input is the *real* ADR 0149 document (`kind: "workflow_ir"`,
 `schema_version`/`version: "1.0"`, nodes with typed ports + artifact facts).
 The migrator maps node ids, operator ids, port wiring and artifact facts into
-`NodeFact`/`EdgeFact`, defaulting missing `radiometricState` (→ `"DN"` when a
-DN domain is declared, else `"Unknown"`) and `canvasPosition` (grid layout),
-and fails closed on malformed documents.
+`NodeFact`/`EdgeFact`, defaulting missing `radiometricState` from the artifact
+numeric domain (`dn` → DN, `surface_reflectance` → BOA, `toa` → TOA, `index` →
+Index, `masked` → Mask, else None) and `canvasPosition` (4-per-row grid),
+derive distinct default input-port names for as-less wirings, and fails
+closed on malformed documents.
 
 ## D3 — Execution substrate: dedicated `QThreadPool`, not the JobEngine singleton
 
@@ -84,13 +86,16 @@ signatures are concatenated in lexicographic node-id order per the brief's
 ## D6 — Repair rule table is closed and ordered
 
 `{CrsMismatch → rs:reproject(bilinear)}`,
-`{ResolutionMismatch → rs:resample(nearest|bilinear by dtype)}`,
-`{RadiometricStateMismatch DN→* → rs:radiometric_calibration`,
- then `rs:atmospheric_correction when target is BOA/TOA}`,
-`{DataTypeMismatch → rs:convert_dtype}`, `{DimensionMismatch → rs:clip_to_extent}`.
-Application order = violation enumeration order (deterministic source-order);
-inserted node ids are `adapter_<n>_<operator>` with collision suffixes. The
-repair invariant (post-inspect empty) is a test gate.
+`{ResolutionMismatch → rs:resample(bilinear)}`,
+`{RadiometricStateMismatch DN→Radiance → rs:radiometric_calibration`,
+ `DN→TOA|BOA → rs:radiometric_calibration then rs:atmospheric_correction`,
+ `Radiance→TOA|BOA → rs:atmospheric_correction}`,
+`{DataTypeMismatch → rs:convert_dtype}`. DimensionMismatch is enumerated but
+not derivable from today's PortFact facts, so no rule fires for it (checked
+and documented, not silently invented). Application order = violation
+enumeration order (deterministic source-order); inserted node ids are
+`adapter_<edgeId>_<operator>` with numeric collision suffixes. The repair
+invariant (post-inspect empty) is a test gate.
 
 ## D7 — Checkpoint atomicity = QSaveFile-equivalent tmp+fsync+rename, done manually
 
