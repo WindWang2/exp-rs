@@ -8894,3 +8894,114 @@ target_include_directories(test_processing_catalog_ux PRIVATE
 )
 set_target_properties(test_processing_catalog_ux PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_processing_catalog_ux)
+
+# =============================================================================
+# D17 — workflow pipeline designer (ADR 0162)
+# =============================================================================
+# D17 test targets are deliberately MINIMAL: Catch2 + Qt (Core/Gui/Widgets as
+# needed) + jsoncpp where the LabSpec loader is compiled in. They do not link
+# the qgis/processing/task_center chain, so the whole designer suite builds
+# and runs hermetically (ADR 0162). Widget/engine sources are compiled into
+# the test targets — the established repo pattern for UI suites.
+function(sicnu_add_d17_test NAME)
+  cmake_parse_arguments(D17 "" "" "SOURCES;LIBS" ${ARGN})
+  add_executable(${NAME} ${NAME}.cpp ${D17_SOURCES})
+  target_link_libraries(${NAME} PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    ${D17_LIBS}
+  )
+  target_include_directories(${NAME} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/app
+    ${CMAKE_BINARY_DIR}
+  )
+  target_compile_definitions(${NAME} PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
+  set_target_properties(${NAME} PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(${NAME})
+endfunction()
+
+set(D17_ENGINE_SOURCES
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_ir_v2.cpp
+  ${CMAKE_SOURCE_DIR}/src/workflow/workflow_dag_analyzer.cpp
+)
+set(D17_CANVAS_SOURCES
+  ${CMAKE_SOURCE_DIR}/src/app/pipeline/pipeline_canvas_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/pipeline/pipeline_scene.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/pipeline/pipeline_node_item.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/pipeline/pipeline_port_item.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/pipeline/pipeline_connection_item.cpp
+)
+
+# --- Package A: Workflow IR 2.0
+sicnu_add_d17_test(test_workflow_ir_v2
+  SOURCES ${CMAKE_SOURCE_DIR}/src/workflow/workflow_ir_v2.cpp
+)
+
+# --- Package B: DAG analyzer
+sicnu_add_d17_test(test_workflow_dag_analysis
+  SOURCES ${D17_ENGINE_SOURCES}
+)
+
+# --- Package C: contract checker + repair engine
+sicnu_add_d17_test(test_workflow_repair_rules
+  SOURCES ${D17_ENGINE_SOURCES}
+    ${CMAKE_SOURCE_DIR}/src/workflow/contract_checker.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_repair_engine.cpp
+)
+
+# --- Package D: plan optimizer + cost estimator
+sicnu_add_d17_test(test_workflow_cost_estimator
+  SOURCES ${D17_ENGINE_SOURCES}
+    ${CMAKE_SOURCE_DIR}/src/workflow/plan_optimizer.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_cost_estimator.cpp
+)
+
+# --- Package E: run coordinator + checkpoints
+sicnu_add_d17_test(test_workflow_checkpoint_cache
+  SOURCES ${D17_ENGINE_SOURCES}
+    ${CMAKE_SOURCE_DIR}/src/workflow/plan_optimizer.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_cost_estimator.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
+  LIBS Qt6::Widgets Qt6::Test
+)
+
+# --- Package F: canvas
+sicnu_add_d17_test(test_pipeline_canvas_widget
+  SOURCES ${D17_CANVAS_SOURCES}
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_ir_v2.cpp
+  LIBS Qt6::Widgets
+)
+
+# --- Package G: guided workbench (dual view)
+sicnu_add_d17_test(test_guided_workflow_sync
+  SOURCES ${D17_CANVAS_SOURCES}
+    ${CMAKE_SOURCE_DIR}/src/app/pipeline/guided_workflow_workbench.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/pipeline/labspec_workflow_lift.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_ir_v2.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_dag_analyzer.cpp
+  LIBS Qt6::Widgets Qt6::Test jsoncpp
+)
+
+# --- Package H: agent orchestrator tool
+sicnu_add_d17_test(test_workflow_agent_tools
+  SOURCES ${D17_ENGINE_SOURCES}
+    ${CMAKE_SOURCE_DIR}/src/workflow/contract_checker.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_repair_engine.cpp
+    ${CMAKE_SOURCE_DIR}/src/agent/tools/workflow_orchestrator_tool.cpp
+)
+
+# --- Package I: end-to-end (labs corpus needs the LabSpec loader -> jsoncpp)
+sicnu_add_d17_test(test_d17_workflow_pipeline_e2e
+  SOURCES ${D17_ENGINE_SOURCES}
+    ${CMAKE_SOURCE_DIR}/src/workflow/plan_optimizer.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_cost_estimator.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/pipeline/labspec_workflow_lift.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp
+  LIBS Qt6::Widgets Qt6::Test jsoncpp
+)

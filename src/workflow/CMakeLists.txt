@@ -22,6 +22,16 @@ set(SICNU_WORKFLOW_CORE_SOURCES
   workflow_run.cpp
   workflow_checkpoint.cpp
   workflow_run_lock.cpp
+  # D17 (ADR 0162): Workflow IR 2.0 designer layer (Qt Core value types;
+  # no new link deps). DAG analyzer / contract repair / optimizer /
+  # coordinator (A..E).
+  workflow_ir_v2.cpp
+  workflow_dag_analyzer.cpp
+  contract_checker.cpp
+  workflow_repair_engine.cpp
+  plan_optimizer.cpp
+  workflow_cost_estimator.cpp
+  pipeline_run_coordinator.cpp
 )
 set(SICNU_WORKFLOW_RUNTIME_SOURCES
   workflow_runtime.cpp
@@ -30,6 +40,8 @@ set(SICNU_WORKFLOW_RUNTIME_SOURCES
 add_library(sicnu_workflow SHARED ${SICNU_WORKFLOW_CORE_SOURCES})
 add_library(sicnu_workflow_runtime STATIC ${SICNU_WORKFLOW_RUNTIME_SOURCES})
 target_link_libraries(sicnu_workflow_runtime PUBLIC sicnu_workflow)
+# D17: pipeline_run_coordinator.h carries Q_OBJECT — moc the core library.
+set_target_properties(sicnu_workflow PROPERTIES AUTOMOC ON)
 target_include_directories(sicnu_workflow PUBLIC
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/processing
