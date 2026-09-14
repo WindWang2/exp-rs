@@ -271,12 +271,21 @@ TEST_CASE("test_geometric_transform - Degenerate geometry reports failure instea
     REQUIRE_FALSE(res.success);
     REQUIRE(res.forwardCoeffs.empty());
 
-    // Nearly collinear: solvable but visibly degraded conditioning (the
-    // Hartley-normalized design still spans a thin triangle).
+    // Nearly collinear: solvable but visibly degraded conditioning.
     const std::vector<std::pair<double, double>> src2{{0.0, 0.0}, {50.0, 50.0}, {100.0, 100.5}};
-    const auto res2 = GeometricTransform::solve(TransformModel::Affine, src2, dst);
-    if (res2.success)
-        REQUIRE(res2.conditionNumber > 100.0);
+    // Nearly collinear sources under a mild rotation: solvable in both
+    // directions but visibly degraded conditioning (the Hartley-normalized
+    // designs still span thin triangles). A *translation* target would keep
+    // the reversed configuration exactly collinear and rightly fail, so the
+    // truth here rotates by one degree.
+    const double c1 = std::cos(std::numbers::pi / 180.0);
+    const double s1 = std::sin(std::numbers::pi / 180.0);
+    std::vector<std::pair<double, double>> dst2;
+    for (const auto& [u, v] : src2)
+        dst2.emplace_back(5.0 + c1 * u - s1 * v, 3.0 + s1 * u + c1 * v);
+    const auto res2 = GeometricTransform::solve(TransformModel::Affine, src2, dst2);
+    REQUIRE(res2.success);
+    REQUIRE(res2.conditionNumber > 100.0);
 }
 
 TEST_CASE("test_geometric_transform - Batch mapping agrees with pointwise evaluation", "[transform][d14]")

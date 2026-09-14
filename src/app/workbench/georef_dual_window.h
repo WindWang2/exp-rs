@@ -96,8 +96,8 @@ class GeorefDualWindow : public QMainWindow {
 
     QPointer<QgsRasterLayer> mSourceLayer;
     QPointer<QgsRasterLayer> mReferenceLayer;
-    QPointer<QgsMapTool> mDefaultTool;
     QPointer<QgsMapTool> mSwipeTool;
+    int mNextGcpSerial = 1;
 
     rs::core::GcpManager mGcpManager;
     rs::algorithms::TransformModel mModel = rs::algorithms::TransformModel::Affine;

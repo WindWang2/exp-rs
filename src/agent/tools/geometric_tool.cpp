@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
 #include <numeric>
 #include <vector>
 
@@ -249,30 +250,40 @@ QJsonObject GeometricTool::inspectMisalignment(const QString& sourceImagePath,
     }
 
     GDALAllRegister();
-    GDALDataset* src = static_cast<GDALDataset*>(GDALOpen(sourceImagePath.toUtf8().constData(), GA_ReadOnly));
-    GDALDataset* ref = static_cast<GDALDataset*>(GDALOpen(refImagePath.toUtf8().constData(), GA_ReadOnly));
+    struct DatasetCloser {
+        void operator()(GDALDataset* dataset) const { if (dataset) GDALClose(dataset); }
+    };
+    std::unique_ptr<GDALDataset, DatasetCloser> src(
+        static_cast<GDALDataset*>(GDALOpen(sourceImagePath.toUtf8().constData(), GA_ReadOnly)));
+    std::unique_ptr<GDALDataset, DatasetCloser> ref(
+        static_cast<GDALDataset*>(GDALOpen(refImagePath.toUtf8().constData(), GA_ReadOnly)));
     if (!src || !ref) {
-        if (src)
-            GDALClose(src);
-        if (ref)
-            GDALClose(ref);
         return envelope(false, QStringLiteral("inspect_misalignment"),
                         QStringLiteral("Failed to open one of the rasters with GDAL."));
     }
 
+    // Agent-supplied rasters can be arbitrarily large: decimate to at most
+    // 512 px on the long side through GDAL's read-time resampling so the
+    // in-memory footprint stays bounded (alignment diagnosis needs no full
+    // resolution).
     auto readBand1 = [](GDALDataset* dataset, int& width, int& height) -> std::vector<float> {
-        width = dataset->GetRasterXSize();
-        height = dataset->GetRasterYSize();
+        const int rawW = dataset->GetRasterXSize();
+        const int rawH = dataset->GetRasterYSize();
+        const int longest = std::max(rawW, rawH);
+        width = longest > 512 ? rawW * 512 / longest : rawW;
+        height = longest > 512 ? rawH * 512 / longest : rawH;
+        width = std::clamp(width, 1, rawW);
+        height = std::clamp(height, 1, rawH);
         std::vector<float> buffer(static_cast<size_t>(width) * height, 0.0f);
-        dataset->GetRasterBand(1)->RasterIO(GF_Read, 0, 0, width, height, buffer.data(),
+        dataset->GetRasterBand(1)->RasterIO(GF_Read, 0, 0, rawW, rawH, buffer.data(),
                                             width, height, GDT_Float32, 0, 0);
         return buffer;
     };
     int srcW = 0, srcH = 0, refW = 0, refH = 0;
-    const std::vector<float> srcData = readBand1(src, srcW, srcH);
-    const std::vector<float> refData = readBand1(ref, refW, refH);
-    GDALClose(src);
-    GDALClose(ref);
+    const std::vector<float> srcData = readBand1(src.get(), srcW, srcH);
+    const std::vector<float> refData = readBand1(ref.get(), refW, refH);
+    src.reset();
+    ref.reset();
 
     rs::algorithms::FeatureMatchOptions options;
     rs::algorithms::FeatureMatcher matcher;

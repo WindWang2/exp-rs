@@ -44,9 +44,7 @@ void l2Normalize(std::vector<float>& v)
         value = static_cast<float>(value / norm);
 }
 
-/// Deterministic synthetic texture: sums of oriented sines plus a seeded LCG
-/// blob pattern. Used by matchImages tests but shipped here so the sampling
-/// seam stays exercised end to end.
+/// Central-difference gradient magnitude at an integer pixel.
 double gradientMagnitudeAt(const float* data, int width, int height, int x, int y)
 {
     if (x <= 0 || y <= 0 || x >= width - 1 || y >= height - 1)
@@ -180,7 +178,8 @@ FeatureMatchReport FeatureMatcher::matchDescriptors(const std::vector<KeyPoint2D
         const DescriptorHit hit = ratioMatch(query, normalizedDst);
         if (hit.best < 0)
             continue;
-        if (hit.secondDist > 0.0 && hit.bestDist / hit.secondDist >= options.loweRatioThreshold)
+        // secondDist == 0 means duplicated descriptors: maximally ambiguous.
+        if (hit.secondDist <= 0.0 || hit.bestDist / hit.secondDist >= options.loweRatioThreshold)
             continue; // ambiguous correspondence
         MatchPair pair;
         pair.srcPt = srcKps[i];

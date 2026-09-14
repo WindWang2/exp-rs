@@ -1,7 +1,8 @@
 // tps_interpolator.cpp — D14 Package C implementation (ADR 0159).
 //
 // The augmented system [[K+λI, P], [Pᵀ, 0]] is small and dense; partial-pivot
-// LU factorizes it once per fit and both right-hand sides reuse the factors.
+// LU solves it per output dimension (two factorizations per fit — negligible
+// at admissible knot counts, and it keeps the solver trivially correct).
 #include "processing/algorithms/tps_interpolator.h"
 
 #include <algorithm>

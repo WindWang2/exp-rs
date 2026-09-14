@@ -213,16 +213,19 @@ inline bool dltHomography(const std::vector<std::pair<double, double>>& src,
     if (!jacobiSvd(m, sigma, v))
         return false;
     const double sigmaMax = sigma[0];
-    double sigmaMin = 0.0;
-    for (int j = 8; j >= 0; --j) {
-        if (sigma[j] > kSvdRelTruncation * sigmaMax) {
-            sigmaMin = sigma[j];
-            break;
-        }
+    // For correspondences taken from a genuine homography the 9-column DLT
+    // matrix always has the true h in its null space, so its rank is at most
+    // 8 (and exactly 8 for the minimal padded 4-pair case). Degenerate
+    // configurations (collinear triplets, duplicated points) drop the rank
+    // below 8 — fail closed there, and report kappa over the first 8 values.
+    int nonZeroSingularValues = 0;
+    for (int j = 0; j < 8; ++j) {
+        if (sigma[j] > kSvdRelTruncation * sigmaMax)
+            ++nonZeroSingularValues;
     }
-    if (sigmaMin <= 0.0)
+    if (nonZeroSingularValues < 8)
         return false;
-    kappa = sigmaMax / sigmaMin;
+    kappa = sigmaMax / sigma[7];
 
     std::array<double, 9> hNorm{};
     for (int k = 0; k < 9; ++k)

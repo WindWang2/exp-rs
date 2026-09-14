@@ -129,10 +129,13 @@ void GeorefDualWindow::loadSourceImage(const QString& filePath)
         delete layer;
         return;
     }
+    layer->setParent(this); // window object tree owns the layer
     if (mSourceCanvas) {
         mSourceCanvas->setLayers({layer});
         mSourceCanvas->zoomToFullExtent();
     }
+    if (mSourceLayer)
+        mSourceLayer->deleteLater(); // canvas does not take ownership
     mSourceLayer = layer;
 }
 
@@ -145,10 +148,13 @@ void GeorefDualWindow::loadReferenceImage(const QString& filePath)
         delete layer;
         return;
     }
+    layer->setParent(this); // window object tree owns the layer
     if (mReferenceCanvas) {
         mReferenceCanvas->setLayers({layer});
         mReferenceCanvas->zoomToFullExtent();
     }
+    if (mReferenceLayer)
+        mReferenceLayer->deleteLater(); // canvas does not take ownership
     mReferenceLayer = layer;
 }
 
@@ -212,7 +218,7 @@ bool GeorefDualWindow::eventFilter(QObject* watched, QEvent* event)
         if (moved) {
             const auto* mouse = static_cast<QMouseEvent*>(event);
             const QgsPointXY point = moved->getCoordinateTransform()->toMapCoordinates(
-                mouse->pos());
+                mouse->position().toPoint());
             updateCrosshair(moved, point);
         }
     }
@@ -258,7 +264,11 @@ void GeorefDualWindow::applyPendingExtentSync()
 void GeorefDualWindow::onAddGcpPoint(const QgsPointXY& srcPt, const QgsPointXY& refPt)
 {
     rs::core::GcpPoint point;
-    point.id = QStringLiteral("GCP_%1").arg(mGcpManager.size() + 1);
+    // Monotonic serial: size()+1 would collide after any deletion and
+    // silently wedge the add-point flow.
+    point.id = QStringLiteral("GCP_%1").arg(mNextGcpSerial++);
+    while (mGcpManager.findPoint(point.id).has_value())
+        point.id = QStringLiteral("GCP_%1").arg(mNextGcpSerial++);
     point.sourceX = srcPt.x();
     point.sourceY = srcPt.y();
     point.targetX = refPt.x();
@@ -380,15 +390,12 @@ void GeorefDualWindow::updateResidualBand()
 
 void GeorefDualWindow::onExecuteWarpClicked()
 {
-    // Execute the real reverse-mapped warp through the D14 resampler when a
-    // source raster is loaded; the numeric pipeline is the one validated by
-    // test_resampler and the D14 e2e suite.
-    QString outputPath;
-    if (mSourceLayer && mSourceLayer->isValid() && mFitted.success) {
-        outputPath = mSourceLayer->source() + QStringLiteral("_rectified.tif");
-    }
+    // Refit and report the achieved RMSE. GeoTIFF export is deliberately NOT
+    // performed here: warp execution and product writing are owned by the
+    // georeferencing session / task pipeline (ADR 0020 executor seam), so the
+    // emitted path stays empty until that hand-off exists.
     refitTransform();
-    emit rectificationFinished(outputPath, mDisplayedRmse);
+    emit rectificationFinished(QString(), mDisplayedRmse);
 }
 
 void GeorefDualWindow::onToggleSwipeComparison(bool enabled)
@@ -405,10 +412,8 @@ void GeorefDualWindow::onToggleSwipeComparison(bool enabled)
     if (enabled) {
         if (mSwipeTool)
             mReferenceCanvas->setMapTool(mSwipeTool);
-    } else {
+    } else if (mSwipeTool) {
         mReferenceCanvas->unsetMapTool(mSwipeTool);
-        if (mDefaultTool)
-            mReferenceCanvas->setMapTool(mDefaultTool);
     }
 }
 

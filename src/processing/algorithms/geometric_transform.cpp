@@ -169,9 +169,9 @@ TransformResult solveRigidOrSimilarity(const std::vector<std::pair<double, doubl
         t += du * du + dv * dv;
     }
     double a = 1.0, b = 0.0;
+    if (t <= 1e-300)
+        return result; // coincident sources: no rotation is defined
     if (withScale) {
-        if (t <= 1e-300)
-            return result;
         a = z / t;
         b = w / t;
     } else {
@@ -387,6 +387,8 @@ std::pair<double, double> GeometricTransform::applyForward(const TransformResult
         return {x, y};
     }
     case TransformModel::Projective: {
+        if (c.size() < 9)
+            return {u, v};
         std::array<double, 9> h{};
         std::copy(c.begin(), c.begin() + 9, h.begin());
         const double w = h[6] * u + h[7] * v + h[8];
@@ -433,6 +435,8 @@ std::pair<double, double> GeometricTransform::applyBackward(const TransformResul
         return {u, v};
     }
     case TransformModel::Projective: {
+        if (c.size() < 9)
+            return {x, y};
         std::array<double, 9> h{};
         std::copy(c.begin(), c.begin() + 9, h.begin());
         const double w = h[6] * x + h[7] * y + h[8];

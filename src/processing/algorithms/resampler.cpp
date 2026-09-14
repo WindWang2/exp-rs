@@ -2,9 +2,9 @@
 #include "processing/algorithms/resampler.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <numbers>
-#include <vector>
 
 namespace rs::algorithms {
 
@@ -46,8 +46,10 @@ double sampleWeighted(const float* buffer, int width, int height,
     const double du = u - iu;
     const double dv = v - iv;
 
-    std::vector<double> wx(static_cast<size_t>(2 * taps), 0.0);
-    std::vector<double> wy(static_cast<size_t>(2 * taps), 0.0);
+    // Fixed-capacity stack weights (max kernel half-width 3 → 6 taps) keep
+    // the per-pixel warp loop allocation-free.
+    std::array<double, 6> wx{};
+    std::array<double, 6> wy{};
     for (int m = 0; m < 2 * taps; ++m) {
         wx[static_cast<size_t>(m)] = kernel1D(static_cast<double>(iu + m - (taps - 1)) - u);
         wy[static_cast<size_t>(m)] = kernel1D(static_cast<double>(iv + m - (taps - 1)) - v);

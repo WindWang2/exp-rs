@@ -180,7 +180,7 @@ double triangleAspectRatio(const DelaunayVertex& a, const DelaunayVertex& b, con
 {
     const double area = std::abs(cross(a.x, a.y, b.x, b.y, c.x, c.y)) / 2.0;
     if (area < 1e-12)
-        return 0.0;
+        return std::numeric_limits<double>::infinity(); // degenerate = worst-case diagnostic
     const double ab = std::hypot(b.x - a.x, b.y - a.y);
     const double bc = std::hypot(c.x - b.x, c.y - b.y);
     const double ca = std::hypot(a.x - c.x, a.y - c.y);
@@ -432,17 +432,19 @@ bool GcpManager::loadFromCsv(const QString& filePath)
             continue;
         GcpPoint pt;
         pt.id = fields[0].trimmed();
-        bool okEnabled = false;
-        pt.sourceX = fields[1].toDouble();
-        pt.sourceY = fields[2].toDouble();
-        pt.targetX = fields[3].toDouble();
-        pt.targetY = fields[4].toDouble();
-        pt.residualX = fields[5].toDouble();
-        pt.residualY = fields[6].toDouble();
-        pt.residualTotal = fields[7].toDouble();
+        bool okSx = false, okSy = false, okTx = false, okTy = false;
+        bool okRx = false, okRy = false, okRt = false, okEnabled = false;
+        pt.sourceX = fields[1].toDouble(&okSx);
+        pt.sourceY = fields[2].toDouble(&okSy);
+        pt.targetX = fields[3].toDouble(&okTx);
+        pt.targetY = fields[4].toDouble(&okTy);
+        pt.residualX = fields[5].toDouble(&okRx);
+        pt.residualY = fields[6].toDouble(&okRy);
+        pt.residualTotal = fields[7].toDouble(&okRt);
         pt.enabled = fields[8].trimmed().toInt(&okEnabled) != 0;
-        if (pt.id.isEmpty() || !okEnabled || !allFinite(pt))
-            continue;
+        const bool allParsed = okSx && okSy && okTx && okTy && okRx && okRy && okRt && okEnabled;
+        if (pt.id.isEmpty() || !allParsed || !allFinite(pt))
+            continue; // malformed row: skip per the header contract
         parsed.push_back(pt);
     }
     if (parsed.empty())
