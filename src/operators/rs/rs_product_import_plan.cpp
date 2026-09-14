@@ -113,6 +113,7 @@ Json::Value ProductImportPlan::toJson() const
         plan["sibling_role"] = siblingImageRole.toStdString();
     }
     plan["band_source"] = bandOrderDeclared ? "declared_band_ids" : "band_role_table";
+    plan["band_order_unverified"] = !bandOrderDeclared;
     Json::Value bands( Json::arrayValue );
     for ( const QString &band : bandNames )
     {
@@ -231,8 +232,9 @@ ProductImportPlan planCnProductImport( const std::string &input, const char *fam
             plan.bandNames << QString::fromStdString( spec.band );
         plan.bandOrderDeclared = false;
         plan.warnings << QStringLiteral(
-            "sidecar declares no band inventory; band order falls back to the sensor "
-            "profile layout (reported, not hidden)" );
+            "sidecar declares no band inventory; TIFF band order is ASSUMED to match "
+            "the sensor profile layout (unverified — reported via bandOrderUnverified, "
+            "not hidden)" );
     }
     else
     {
@@ -331,6 +333,12 @@ Json::Value executeCnProductImport( const ProductImportPlan &plan,
     info.acquisitionDate = QString::fromStdString( plan.metadata.acquisitionTime );
     info.attributes[QStringLiteral( "SICNU_SENSOR" )] =
         QString::fromStdString( plan.metadata.sensor );
+    info.attributes[QStringLiteral( "SICNU_BAND_SOURCE" )] =
+        plan.bandOrderDeclared ? QStringLiteral( "declared_band_ids" )
+                               : QStringLiteral( "band_role_table" );
+    if ( !plan.bandOrderDeclared )
+        info.attributes[QStringLiteral( "SICNU_BAND_ORDER_UNVERIFIED" )] =
+            QStringLiteral( "true" );
     for ( int i = 0; i < plan.bandNames.size(); ++i )
     {
         SatelliteProducts::BandFile band;
@@ -340,7 +348,9 @@ Json::Value executeCnProductImport( const ProductImportPlan &plan,
         if ( const SensorBandProfile *spec =
                  plan.profile.findBand( plan.bandNames[i].toStdString() ) )
         {
-            if ( spec->hasWavelengthNm )
+            if ( spec->hasCenterWavelengthNm )
+                band.wavelengthNm = static_cast<int>( spec->centerWavelengthNm + 0.5 );
+            else if ( spec->hasWavelengthNm )
                 band.wavelengthNm = static_cast<int>( spec->wavelengthNm + 0.5 );
             band.role = sicnu::data::bandRoleFromString( QString::fromStdString( spec->role ) );
         }
@@ -375,7 +385,8 @@ Json::Value executeCnProductImport( const ProductImportPlan &plan,
     context.reportProgress( 0.90, "Writing CN product metadata" );
     if ( !writeCnImportMetadata( QString::fromStdString( outputPath ), plan.metadata,
                                  requestedBands,
-                                 QString::fromStdString( plan.identity.kindName ), &err ) )
+                                 QString::fromStdString( plan.identity.kindName ), &err,
+                                 /*bandOrderUnverified=*/!plan.bandOrderDeclared ) )
     {
         throw RSOperatorError( ErrorCode::ComputationError,
                                err.isEmpty() ? "Failed to write CN import metadata"
@@ -486,6 +497,7 @@ Json::Value executeCnProductImport( const ProductImportPlan &plan,
                                    ? std::string( SatelliteProducts::kRadiometricStateRadiance )
                                    : plan.metadata.radiometricState;
     result["bandSource"] = plan.bandOrderDeclared ? "declared_band_ids" : "band_role_table";
+    result["bandOrderUnverified"] = !plan.bandOrderDeclared;
     result["bandCount"] = static_cast<Json::Int64>( requestedBands.size() );
     Json::Value bands( Json::arrayValue );
     Json::Value roles( Json::arrayValue );
@@ -497,7 +509,9 @@ Json::Value executeCnProductImport( const ProductImportPlan &plan,
         if ( const SensorBandProfile *spec = plan.profile.findBand( band.toStdString() ) )
         {
             role = spec->role;
-            if ( spec->hasWavelengthNm )
+            if ( spec->hasCenterWavelengthNm )
+                wavelengths.append( spec->centerWavelengthNm );
+            else if ( spec->hasWavelengthNm )
                 wavelengths.append( spec->wavelengthNm );
             else
                 wavelengths.append( Json::nullValue );
@@ -514,6 +528,8 @@ Json::Value executeCnProductImport( const ProductImportPlan &plan,
     Json::Value declared( Json::objectValue );
     declared["sunElevationDeg"] = plan.metadata.hasSunElevation;
     declared["sunAzimuthDeg"] = plan.metadata.hasSunAzimuth;
+    if ( !plan.metadata.sunElevationSource.empty() )
+        result["sunElevationSource"] = plan.metadata.sunElevationSource;
     declared["calibration"] = !plan.metadata.bandCalibration.empty();
     declared["cloudCover"] = plan.metadata.hasCloudCover;
     declared["orbitId"] = !plan.metadata.orbitId.empty();

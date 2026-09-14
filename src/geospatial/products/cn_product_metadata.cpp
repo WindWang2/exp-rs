@@ -481,6 +481,31 @@ std::string extraValue( const ProductMetadata &metadata, const char *key )
   return std::string();
 }
 
+/// Insert or update a key in the bounded extra map. Critical provenance must
+/// not be silently dropped: if the map is at capacity without this key, fail.
+void putExtraOrThrow( ProductMetadata &product, const std::string &key,
+                      const std::string &value )
+{
+  for ( auto &entry : product.extra )
+  {
+    if ( entry.first == key )
+    {
+      entry.second = value;
+      return;
+    }
+  }
+  if ( product.extra.size() >= 16 )
+  {
+    Json::Value details;
+    details["key"] = key;
+    details["extra_size"] = static_cast<int>( product.extra.size() );
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "product.extra is full; cannot record provenance key '" + key + "'",
+                    details );
+  }
+  product.extra.emplace_back( key, value );
+}
+
 // ─── CRESDA sidecar parsing ─────────────────────────────────────────────────
 
 bool looksLikeCresdaXml( const XmlPathScan &scan )
@@ -699,8 +724,13 @@ ProductMetadata parseCresdaXml( const std::string &xmlPath, const CnProductIdent
     {
       product.sunElevationDeg = parsed;
       product.hasSunElevation = true;
-      if ( !sunElevationSource.empty() && product.extra.size() < 16 )
-        product.extra.emplace_back( "sun_elevation_source", sunElevationSource );
+      if ( !sunElevationSource.empty() )
+      {
+        product.sunElevationSource = sunElevationSource;
+        // Also mirror into extra for adapters that only scan that map —
+        // fail loud if the bounded map cannot accept it.
+        putExtraOrThrow( product, "sun_elevation_source", sunElevationSource );
+      }
     }
   }
   const std::string sunAzimuth = [&] {
@@ -887,8 +917,18 @@ CnBandRoleTable profileToBandRoleTable( const SensorProfileRecord &profile )
     spec.band = band.band;
     spec.role = band.role;
     spec.roleReason = band.roleReason;
-    spec.hasWavelength = band.hasWavelengthNm;
-    spec.wavelengthNm = band.wavelengthNm;
+    // Prefer published nominal centres when present — that is what science
+    // consumers (CnBandSpec.wavelengthNm / WAVELENGTH metadata) actually use.
+    if ( band.hasCenterWavelengthNm )
+    {
+      spec.hasWavelength = true;
+      spec.wavelengthNm = band.centerWavelengthNm;
+    }
+    else if ( band.hasWavelengthNm )
+    {
+      spec.hasWavelength = true;
+      spec.wavelengthNm = band.wavelengthNm;
+    }
     table.bands.push_back( std::move( spec ) );
   }
   return table;

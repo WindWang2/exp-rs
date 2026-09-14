@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "source": "CRESDA/Gaofen published product specifications (GF-1/2/6/7). wavelength_nm is the documented spectral-range midpoint; center_wavelength_nm and fwhm_nm are stated only where a nominal band centre/FWHM is published (GF-1/GF-2 PMS, matching data/spectral/sensors.json 'gf-pms'). A range width is never a FWHM. GF-7 uses the published dual-line PMS camera layout (PAN 0.45-0.90 um; MS B1-B4).",
+  "source": "CRESDA/Gaofen published product specifications (GF-1/2/6/7). wavelength_nm prefers the published nominal band centre when documented (GF-1/GF-2 PMS centres match data/spectral/sensors.json 'gf-pms'); otherwise it is the spectral-range midpoint. center_wavelength_nm and fwhm_nm are stated only where a nominal band centre/FWHM is published. A range width is never a FWHM. GF-7 uses the published dual-line PMS camera layout (PAN 0.45-0.90 um; MS B1-B4).",
   "sensors": {
     "gf1_pms": {
       "satellite": "GF1",
@@ -13,10 +13,10 @@
       "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients; most batches publish per-date tables separately)",
       "qa_vocabulary": [],
       "bands": [
-        { "band": "B1", "role": "blue", "wavelength_nm": 470.0, "center_wavelength_nm": 485.0, "fwhm_nm": 70.0, "spectral_range_um": "0.42-0.52", "gsd_m": 8.0, "note": "multispectral 8 m" },
-        { "band": "B2", "role": "green", "wavelength_nm": 560.0, "center_wavelength_nm": 565.0, "fwhm_nm": 70.0, "spectral_range_um": "0.52-0.60", "gsd_m": 8.0 },
-        { "band": "B3", "role": "red", "wavelength_nm": 650.0, "center_wavelength_nm": 660.0, "fwhm_nm": 60.0, "spectral_range_um": "0.61-0.69", "gsd_m": 8.0 },
-        { "band": "B4", "role": "nir", "wavelength_nm": 825.0, "center_wavelength_nm": 830.0, "fwhm_nm": 120.0, "spectral_range_um": "0.76-0.89", "gsd_m": 8.0 }
+        { "band": "B1", "role": "blue", "wavelength_nm": 485.0, "center_wavelength_nm": 485.0, "fwhm_nm": 70.0, "spectral_range_um": "0.45-0.52", "gsd_m": 8.0, "note": "multispectral 8 m" },
+        { "band": "B2", "role": "green", "wavelength_nm": 565.0, "center_wavelength_nm": 565.0, "fwhm_nm": 70.0, "spectral_range_um": "0.52-0.59", "gsd_m": 8.0 },
+        { "band": "B3", "role": "red", "wavelength_nm": 660.0, "center_wavelength_nm": 660.0, "fwhm_nm": 60.0, "spectral_range_um": "0.63-0.69", "gsd_m": 8.0 },
+        { "band": "B4", "role": "nir", "wavelength_nm": 830.0, "center_wavelength_nm": 830.0, "fwhm_nm": 120.0, "spectral_range_um": "0.77-0.89", "gsd_m": 8.0 }
       ]
     },
     "gf1_pms_pan": {
@@ -43,9 +43,9 @@
       "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
       "qa_vocabulary": [],
       "bands": [
-        { "band": "B1", "role": "blue", "wavelength_nm": 470.0, "spectral_range_um": "0.42-0.52", "gsd_m": 16.0, "note": "16 m wide-field" },
+        { "band": "B1", "role": "blue", "wavelength_nm": 485.0, "spectral_range_um": "0.45-0.52", "gsd_m": 16.0, "note": "16 m wide-field" },
         { "band": "B2", "role": "green", "wavelength_nm": 560.0, "spectral_range_um": "0.52-0.60", "gsd_m": 16.0 },
-        { "band": "B3", "role": "red", "wavelength_nm": 650.0, "spectral_range_um": "0.61-0.69", "gsd_m": 16.0 },
+        { "band": "B3", "role": "red", "wavelength_nm": 660.0, "spectral_range_um": "0.63-0.69", "gsd_m": 16.0 },
         { "band": "B4", "role": "nir", "wavelength_nm": 825.0, "spectral_range_um": "0.76-0.89", "gsd_m": 16.0 }
       ]
     },
@@ -60,9 +60,9 @@
       "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
       "qa_vocabulary": [],
       "bands": [
-        { "band": "B1", "role": "blue", "wavelength_nm": 470.0, "center_wavelength_nm": 485.0, "fwhm_nm": 70.0, "spectral_range_um": "0.42-0.52", "gsd_m": 4.0, "note": "multispectral 4 m class" },
-        { "band": "B2", "role": "green", "wavelength_nm": 555.0, "center_wavelength_nm": 565.0, "fwhm_nm": 70.0, "spectral_range_um": "0.52-0.59", "gsd_m": 4.0 },
-        { "band": "B3", "role": "red", "wavelength_nm": 645.0, "center_wavelength_nm": 660.0, "fwhm_nm": 60.0, "spectral_range_um": "0.60-0.69", "gsd_m": 4.0 },
+        { "band": "B1", "role": "blue", "wavelength_nm": 485.0, "center_wavelength_nm": 485.0, "fwhm_nm": 70.0, "spectral_range_um": "0.45-0.52", "gsd_m": 4.0, "note": "multispectral 4 m class" },
+        { "band": "B2", "role": "green", "wavelength_nm": 565.0, "center_wavelength_nm": 565.0, "fwhm_nm": 70.0, "spectral_range_um": "0.52-0.59", "gsd_m": 4.0 },
+        { "band": "B3", "role": "red", "wavelength_nm": 660.0, "center_wavelength_nm": 660.0, "fwhm_nm": 60.0, "spectral_range_um": "0.63-0.69", "gsd_m": 4.0 },
         { "band": "B4", "role": "nir", "wavelength_nm": 830.0, "center_wavelength_nm": 830.0, "fwhm_nm": 120.0, "spectral_range_um": "0.77-0.89", "gsd_m": 4.0 }
       ]
     },

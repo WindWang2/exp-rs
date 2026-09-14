@@ -104,6 +104,9 @@ class LabAskTool final : public SpatialTool
            input["message"].asString().empty() )
         return SpatialToolResult::failure( "message must be a non-empty string",
                                            error_codes::kInvalidParameter, "validation" );
+      // Dispatch whitelist: role / teacher_token are host session fields.
+      // labAsk strips forged teacher claims lacking a valid credential; we
+      // do not invite them via the schema and do not trust them ungated here.
       return envelopeToResult( labAsk( input ) );
     }
 };

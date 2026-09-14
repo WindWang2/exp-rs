@@ -57,6 +57,15 @@ bool resampleSpectrumGaussian( const float *src, const float *srcWl, int srcBand
     if ( !src || !srcWl || !dstWl || !out || srcBands < 2 || dstBands < 1 )
         return false;
 
+    // Same contract as the linear path / spectral_library.h: source wavelength
+    // grids must be strictly increasing. Refuse (do not silently weight) a
+    // non-monotonic grid — matchSpectrum then skips the entry.
+    for ( int i = 1; i < srcBands; ++i )
+    {
+        if ( srcWl[i] <= srcWl[i - 1] )
+            return false;
+    }
+
     if ( !dstFwhm )
     {
         return resampleSpectrum( src, srcWl, srcBands, dstWl, dstBands, out );

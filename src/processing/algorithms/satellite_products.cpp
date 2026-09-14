@@ -1389,6 +1389,9 @@ bool discoverCn(const QString& path, ProductInfo* out, QString* errorMessage)
         if (metadata.hasSunElevation)
             out->attributes[QStringLiteral("SUN_ELEVATION")] =
                 QString::number(metadata.sunElevationDeg, 'f', 4);
+        if (!metadata.sunElevationSource.empty())
+            out->attributes[QStringLiteral("SICNU_SUN_ELEVATION_SOURCE")] =
+                QString::fromStdString(metadata.sunElevationSource);
 
         const QString image =
             QString::fromStdString(sicnu::geo::cnLocateImageTiff(stdPath,
@@ -1408,6 +1411,10 @@ bool discoverCn(const QString& path, ProductInfo* out, QString* errorMessage)
                 bandIds.push_back(spec.band);
             out->attributes[QStringLiteral("SICNU_BAND_SOURCE")] =
                 QStringLiteral("band_role_table");
+            // No sidecar inventory: TIFF order is assumed equal to the table
+            // order. Callers must treat roles as unverified until confirmed.
+            out->attributes[QStringLiteral("SICNU_BAND_ORDER_UNVERIFIED")] =
+                QStringLiteral("true");
         } else {
             out->attributes[QStringLiteral("SICNU_BAND_SOURCE")] =
                 QStringLiteral("declared_band_ids");
