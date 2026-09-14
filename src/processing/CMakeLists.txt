@@ -61,6 +61,9 @@ add_library(sicnu_processing SHARED
     algorithms/spectral_resampling.cpp
     algorithms/endmember_extraction.cpp
     algorithms/spectral_library.cpp
+    algorithms/spectral_table.cpp
+    algorithms/spectral_wavelength.cpp
+    algorithms/mnf_transform.cpp
     algorithms/spectral_roi.cpp
     algorithms/satellite_products.cpp
 

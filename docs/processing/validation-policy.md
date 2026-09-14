@@ -95,6 +95,18 @@ Maintained in the epic planning dossier; the durable summary:
   (`test_temporal_algorithms`), terrain curvature/hillshade/flow analytic
   surfaces (`test_terrain_foundation5`), and raster-spatial operator E2E
   (`test_raster_spatial5`).
+- Hyperspectral Platform 10.0 additions: MNF forward/inverse roundtrip
+  (eigensolver tolerance 1e-5 relative, stated in `tests/test_mnf_transform.cpp`),
+  SNR ordering, dropped-mass RMSE monotonicity, singular-noise typed
+  refusal, 256-band logical-cube scale case, transform-artifact digest
+  verification; FCLS pure-pixel/mixture known answers with sum-to-one
+  margin 1e-4 and collinearity/zero-norm refusals (`test_spectral_unmixing`);
+  spectral-table digest/tamper contract, provenance/license rule
+  (measured field tables require license+citation) and cell bound
+  (`test_spectral_table`); wavelength-unit normalization and grid rules
+  (`test_spectral_table`, `test_spectral_selection`); PPI -> unmixing/SAM
+  artifact workflow known answer against the synthetic simplex
+  (`test_spectral_pipeline`).
 
 Known thin areas are tracked as issues, not silently tolerated.
 

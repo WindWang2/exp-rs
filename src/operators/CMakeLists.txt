@@ -115,6 +115,7 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_band_tools_operators.cpp
     rs/rs_image_enhancement_operator.cpp
     rs/rs_sam_classify_operator.cpp
+    rs/rs_spectral_reference_input.cpp
     rs/rs_spectral_unmixing_operator.cpp
     rs/rs_rx_anomaly_operator.cpp
     rs/rs_continuum_removal_operator.cpp
@@ -167,6 +168,9 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_raster_spatial_operators.cpp
     rs/rs_pca_operator.cpp
     rs/rs_mnf_operator.cpp
+    rs/rs_mnf_inverse_operator.cpp
+    rs/rs_spectral_band_select_operator.cpp
+    rs/rs_library_select_operator.cpp
     rs/rs_mosaic_operator.cpp
     rs/rs_temporal_collection_input.cpp
     rs/rs_temporal_output.cpp

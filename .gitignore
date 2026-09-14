@@ -155,6 +155,10 @@ vendor/
 !.planning/scientific-contract-verification-10/
 .planning/scientific-contract-verification-10/*
 !.planning/scientific-contract-verification-10/*.md
+# hyperspectral-spectral-intelligence-10: track planning notes (markdown only; logs stay local).
+!.planning/hyperspectral-spectral-intelligence-10/
+.planning/hyperspectral-spectral-intelligence-10/*
+!.planning/hyperspectral-spectral-intelligence-10/*.md
 .zcode/
 
 # IDE / editor / OS artifacts

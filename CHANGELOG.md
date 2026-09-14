@@ -75,6 +75,51 @@ All notable changes to the `exp-rs` project will be documented in this file.
 - **Scientific Contract Registry**: `src/contracts/scientific_contract.*` — one machine-readable record per first-party `rs:` operator covering the dimensions that had no authority (numeric domain, scale/offset, NoData semantics, categorical encoding, class-id range, time alignment, wavelength policy, seed policy, cancellation granularity, atomic publication, provenance); completeness enforced against the LIVE registry; schema `exp.scientific_contract.v1`; projected into the contract graph snapshot.
 - **Cross-projection drift gates**: `test_drift_projection_10` — schema determinism stamps must agree with capability sidecar grades; capability sidecar io parameters must match the live schema in both directions; every LabSpec `operator_id` must resolve in the live registry. The three CN-satellite import operators gained their missing capability sidecars.
 - **Verification Platform 10.0 lanes**: `test_science_verification_10` — metamorphic NDVI scale-invariance, byte-identical reproducibility replay, kmeans seed determinism, bounded deterministic CRS-refusal fuzz, provenance metadata verification; registered in the verification ladder (L2) and readiness collector.
+## [Hyperspectral & Spectral Intelligence 10.0] - 2026-09-13
+
+### 🛰️ Spectral Intelligence Platform 10.0 (zcode/hyperspectral-spectral-intelligence-10, ADR 0148)
+- **Structured spectral artifacts (H-2)**: `SpectralTable` — typed
+  `exp-rs:spectral-table` JSON with SHA-256 digest over a canonical
+  round-trip-exact spectra block, provenance block, optional nm
+  wavelength/FWHM grids, anti-abuse 4 Mi-cell bound, and a machine-checked
+  provenance/license rule (measured field tables require license+citation;
+  operator-derived tables carry `derived` + recorded source). `rs:endmember_extraction`
+  gains `endmembersOut`; the artifact path lands in the result payload
+  (`endmembersArtifact`) and binds downstream via the existing placeholder
+  contract — WorkflowRuntime records `<stepId>.<port>` payload strings on
+  both execution paths, so PPI → SAM/SID/unmixing runs as one workflow
+  (pinned by `test_spectral_pipeline` against the synthetic simplex).
+- **Libraries as first-class operator inputs (H-1)**: one shared reference
+  seam (`rs_spectral_reference_input`) resolves `refs`/`endmembers`/`target`
+  inline arrays XOR `refsRef`/`endmembersRef`/`targetRef` artifact paths XOR
+  `libraryPath` (+`libraryMaterials`) across `rs:sam_classify`,
+  `rs:spectral_unmixing`, `rs:matched_filter`, `rs:ace`. Wavelength
+  reconciliation resamples references onto the input band grid (Gaussian SRF
+  with FWHM, linear otherwise; ADR 0079 kernels); disjoint coverage and
+  missing-axis mismatches are typed refusals; provenance/license echo in
+  every result payload.
+- **Complete MNF chain (H-3)**: `MnfTransform` — double-precision, row-streaming
+  (two statistics passes + one application pass, O(row·bands + bands²)
+  memory) with the transform model exposed as a digest-verified
+  `exp-rs:mnf-transform` artifact. `rs:mnf` streams and emits the model;
+  new `rs:mnf_inverse` reconstructs band space from a component raster
+  (component subset with quantified dropped-mass `errorOut`, wavelength
+  metadata restored) and converts single MNF-space spectra back to
+  reflectance space (`spectrumRef`/`spectrumOut`) — the classic
+  MNF→PPI→SAM chain with safe-conversion rules. Singular noise covariance
+  is a typed refusal (the legacy kernel's 1e-9 clamp is gone from the new
+  path); legacy `ImageEnhancement` untouched. 256-band logical-cube scale
+  case in `test_mnf_transform`.
+- **True FCLS unmixing**: `SpectralUnmixing::unmixFcls` — Lawson–Hanson
+  active-set NNLS on penalty-augmented normal equations (sum-to-one to
+  ~1e-6), fail-closed collinearity and zero-norm endmember refusals;
+  `rs:spectral_unmixing` gains `method` (`ols` default, unchanged).
+- **Preprocessing & library composition**: `rs:spectral_band_select`
+  (explicit bands / wavelength window / bad-band exclusion ranges, unit
+  normalization to nm, metadata propagation); `rs:library_select`
+  (material/wavelength subsets and sensor projection written as validated
+  library artifacts; near-duplicate pairs reported by SAM angle; license
+  mix reported).
 
 ## [Workbench 9.0] - 2026-09-12
 

@@ -9,11 +9,13 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/spectral_unmixing.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "rs_spectral_reference_input.h"
 
 #include <gdal.h>
 
 #include <QString>
 
+#include <cmath>
 #include <numeric>
 #include <vector>
 
@@ -21,60 +23,20 @@ namespace sicnu::operators::rs {
 
 using namespace params;
 
-namespace {
-
-/// Parses the `endmembers` parameter (array of band-count arrays) into the
-/// endmember-major flat buffer the kernel expects. Mirrors the reference
-/// parsing in rs_sam_classify_operator.
-std::vector<float> parseEndmembers(const Json::Value& endmembers, int bandCount)
-{
-    if (!endmembers.isArray() || endmembers.empty())
-        throw RSOperatorError(ErrorCode::InvalidParameter,
-                              "'endmembers' must be a non-empty array of spectra");
-
-    std::vector<float> flat;
-    flat.reserve(static_cast<size_t>(endmembers.size()) * static_cast<size_t>(bandCount));
-    int idx = 0;
-    for (const auto& entry : endmembers)
-    {
-        if (!entry.isArray() || static_cast<int>(entry.size()) != bandCount)
-            throw RSOperatorError(ErrorCode::InvalidParameter,
-                                  "Endmember " + std::to_string(idx) +
-                                      " must be an array of " + std::to_string(bandCount) +
-                                      " numbers");
-        for (Json::ArrayIndex b = 0; b < entry.size(); ++b)
-        {
-            if (!entry[b].isNumeric())
-                throw RSOperatorError(ErrorCode::InvalidParameter,
-                                      "Endmember " + std::to_string(idx) +
-                                          " contains a non-numeric value");
-            flat.push_back(static_cast<float>(entry[b].asDouble()));
-        }
-        ++idx;
-    }
-    return flat;
-}
-
-/// Parses the 1-based band subset; empty = all bands.
-std::vector<int> parseBands(const Json::Value& params, int bandCount)
-{
-    return params::parseBands(params, bandCount);
-}
-
-} // anonymous namespace
-
 Json::Value RsSpectralUnmixingOperator::schema() const {
     using namespace schema;
     Json::Value props(Json::objectValue);
     props["input"] = makeRasterParam("input", "Multi-band raster to unmix");
     props["output"] = makeOutputParam("output", "Abundance raster (one band per endmember)", "tif");
-    Json::Value endsParam(Json::objectValue);
-    endsParam["type"] = "array";
-    endsParam["description"] = "Endmember spectra: array of arrays of band-count floats";
-    endsParam["items"]["type"] = "array";
-    endsParam["items"]["items"]["type"] = "number";
-    props["endmembers"] = endsParam;
+    // Endmember inputs: exactly one of endmembers (inline), endmembersRef
+    // (table/library artifact path) or libraryPath (+libraryMaterials).
+    const Json::Value referenceProps = referenceInputSchemaProps(
+        "endmembers", "endmembersRef", "Endmember spectra: array of arrays of band-count floats");
+    for (const auto& key : referenceProps.getMemberNames())
+        props[key] = referenceProps[key];
     props["bands"] = makeIntegerParam("bands", "1-based band subset (reserved; default all)", 0);
+    props["method"] = makeEnumParam("method", "Abundance estimation method",
+                                    {"ols", "fcls"}, "ols");
     props["errorOut"] = makeOutputParam("errorOut", "Optional per-pixel reconstruction-error raster", "tif");
 
     Json::Value outputs(Json::objectValue);
@@ -83,7 +45,7 @@ Json::Value RsSpectralUnmixingOperator::schema() const {
     outputs["meanError"] = makeNumberParam("meanError", "Mean reconstruction error", 0.0);
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
-    root["required"] = makeRequired({"input", "output", "endmembers"});
+    root["required"] = makeRequired({"input", "output"});
     return root;
 }
 
@@ -138,12 +100,24 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
     const std::vector<int> bands = parseBands(params, bandCount);
     const int nBands = static_cast<int>(bands.size());
 
-    const std::vector<float> endmembers = parseEndmembers(params["endmembers"], nBands);
-    const int nEndmembers = static_cast<int>(endmembers.size() / static_cast<size_t>(nBands));
+    // Shared reference seam: inline endmembers / endmembersRef / libraryPath.
+    QString gridError;
+    const RasterWavelengthGrid inputGrid = RasterWavelengthGrid::read(ds, bands, &gridError);
+    if (!gridError.isEmpty())
+        throw RSOperatorError(ErrorCode::InvalidInputData, gridError.toStdString());
+    const ResolvedSpectralReference endsResolved =
+        resolveSpectralReference(params, "endmembers", "endmembersRef", ds, bands, inputGrid);
+    const std::vector<float> endmembers = endsResolved.flat;
+    const int nEndmembers = endsResolved.count;
+    if (nEndmembers < 1)
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "At least one endmember spectrum is required");
     if (nEndmembers > nBands)
         throw RSOperatorError(ErrorCode::InvalidParameter,
                               "Endmember count (" + std::to_string(nEndmembers) +
                                   ") exceeds the band count (" + std::to_string(nBands) + ")");
+
+    const std::string method = getEnum(params, "method", {"ols", "fcls"}, "ols");
 
     context.logInfo("Spectral unmixing: " + std::to_string(nEndmembers) +
                     " endmembers over " + std::to_string(nBands) + " bands");
@@ -185,6 +159,8 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
 
     double totalErrorSum = 0.0;
     uint64_t totalUnmixedPixels = 0;
+    double sumDeviationAcc = 0.0;
+    uint64_t sumDeviationPixels = 0;
 
     const int totalBlocksY = (height + tileHeight - 1) / tileHeight;
     int processedBlocksY = 0;
@@ -212,9 +188,14 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
 
             SpectralUnmixing::UnmixResult unmixResult;
             QString errorMsg;
-            if (!SpectralUnmixing::unmix(tilePixels.data(), tileSize, nBands,
-                                         endmembers.data(), nEndmembers,
-                                         &unmixResult, &errorMsg))
+            const bool unmixOk = (method == "fcls")
+                ? SpectralUnmixing::unmixFcls(tilePixels.data(), tileSize, nBands,
+                                              endmembers.data(), nEndmembers,
+                                              &unmixResult, &errorMsg)
+                : SpectralUnmixing::unmix(tilePixels.data(), tileSize, nBands,
+                                          endmembers.data(), nEndmembers,
+                                          &unmixResult, &errorMsg);
+            if (!unmixOk)
                 throw RSOperatorError(ErrorCode::ComputationError,
                                       errorMsg.isEmpty() ? "Spectral unmixing failed" : errorMsg.toStdString());
 
@@ -241,6 +222,28 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
                     totalUnmixedPixels++;
                 }
             }
+
+            // Abundance-sum QA (documented for FCLS): mean |sum(a) - 1| over
+            // valid pixels of the tile.
+            {
+                double devSum = 0.0;
+                uint64_t devCount = 0;
+                for (size_t p = 0; p < tileSize; ++p) {
+                    const float *ab =
+                        &unmixResult.abundances[p * static_cast<size_t>(nEndmembers)];
+                    double sum = 0.0;
+                    bool valid = true;
+                    for (int e = 0; e < nEndmembers; ++e) {
+                        if (std::isnan(ab[e])) { valid = false; break; }
+                        sum += ab[e];
+                    }
+                    if (!valid) continue;
+                    devSum += std::abs(sum - 1.0);
+                    ++devCount;
+                }
+                sumDeviationAcc += devSum;
+                sumDeviationPixels += devCount;
+            }
         }
         processedBlocksY++;
         context.reportProgress(0.1 + 0.85 * (static_cast<double>(processedBlocksY) / totalBlocksY), "Unmixing tile rows");
@@ -249,8 +252,21 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
     const double meanError = (totalUnmixedPixels > 0) ? (totalErrorSum / static_cast<double>(totalUnmixedPixels)) : 0.0;
 
     ds.close();
-    outDataset.close();
-    if (!errorPath.empty()) errorDataset.close();
+    QString closeError;
+    if (!outDataset.closeWithError(&closeError))
+        throw RSOperatorError(ErrorCode::GdalError,
+                              closeError.isEmpty()
+                                  ? "Failed to finalize abundance raster"
+                                  : closeError.toStdString());
+    if (!errorPath.empty())
+    {
+        QString errorCloseError;
+        if (!errorDataset.closeWithError(&errorCloseError))
+            throw RSOperatorError(ErrorCode::GdalError,
+                                  errorCloseError.isEmpty()
+                                      ? "Failed to finalize reconstruction-error raster"
+                                      : errorCloseError.toStdString());
+    }
 
     context.reportProgress(1.0, "Spectral unmixing complete");
 
@@ -258,6 +274,19 @@ Json::Value RsSpectralUnmixingOperator::run(const Json::Value& params,
     result["output"] = outputPath;
     result["endmembers"] = nEndmembers;
     result["meanError"] = meanError;
+    result["method"] = method;
+    result["abundanceSumDeviation"] =
+        (sumDeviationPixels > 0)
+            ? (sumDeviationAcc / static_cast<double>(sumDeviationPixels))
+            : 0.0;
+    // Endmember provenance echo (library/table identity, resampling, license).
+    result["endmemberSource"] = endsResolved.sourceDescription.toStdString();
+    if (endsResolved.resampled)
+        result["endmembersResampled"] = true;
+    if (!endsResolved.license.isEmpty())
+        result["endmemberLicense"] = endsResolved.license.toStdString();
+    if (endsResolved.measured)
+        result["endmembersMeasured"] = true;
     return result;
 }
 

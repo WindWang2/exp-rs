@@ -333,6 +333,18 @@ Json::Value WorkflowRuntime::runStepSync( const std::string &sessionId, const st
     sessionPtr->setArtifact( step->artifactOnSuccess, jsonValueToArtifactString( result ) );
   }
 
+  // Structured-artifact ports (Hyperspectral Platform 10.0): every non-empty
+  // STRING value in the result payload is recorded as "<stepId>.<port>" so
+  // `$stepId.port` placeholders resolve in the session path exactly as the
+  // TaskCenter/resume path resolves them from the payload (one port
+  // resolution policy, #727). Qualified keys are new territory — no existing
+  // artifact names collide.
+  for ( auto it = result.begin(); it != result.end(); ++it )
+  {
+    if ( it->isString() && !it->asString().empty() )
+      sessionPtr->setArtifact( stepId + "." + it.name(), it->asString() );
+  }
+
   sessionPtr->markStepComplete( stepId );
   return result;
 }
@@ -677,6 +689,16 @@ Json::Value WorkflowRuntime::runStepViaExecutionPlane( const std::string &sessio
   else if ( !step->artifactOnSuccess.empty() )
   {
     sessionPtr->setArtifact( step->artifactOnSuccess, jsonValueToArtifactString( result ) );
+  }
+
+  // Structured-artifact ports (Hyperspectral Platform 10.0): mirror of the
+  // runStepSync payload recording so `$stepId.port` placeholders resolve
+  // identically on both execution paths. Payload strings only; qualified
+  // "<stepId>.<port>" keys cannot collide with existing artifact names.
+  for ( auto it = result.begin(); it != result.end(); ++it )
+  {
+    if ( it->isString() && !it->asString().empty() )
+      sessionPtr->setArtifact( stepId + "." + it.name(), it->asString() );
   }
 
   sessionPtr->markStepComplete( stepId );

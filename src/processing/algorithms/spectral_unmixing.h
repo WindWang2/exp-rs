@@ -38,4 +38,29 @@ namespace SpectralUnmixing
     bool unmix( const float *pixels, size_t count, int bands,
                 const float *endmembers, int nEndmembers,
                 UnmixResult *result, QString *errorMessage = nullptr );
+
+    /**
+     * Fully constrained least squares (FCLS): minimize ||x - E a||^2 subject
+     * to a >= 0 and sum(a) = 1.
+     *
+     * Method: Lawson-Hanson active-set NNLS on the penalty-augmented normal
+     * equations — G~ = E^T E + rho * 11^T, u~ = E^T x + rho * 1 with
+     * rho = 1e6 * mean(diag(E^T E)); the sum-to-one constraint therefore
+     * holds to a relative deviation of about 1e-6 (callers report the exact
+     * mean |sum(a) - 1| as QA). The sum constraint is a penalty, not a hard
+     * KKT constraint: this is a deliberate, documented trade — it keeps one
+     * small, well-tested solver for both constraints. NNLS terminates
+     * finitely; the grade is tolerance (iteration order is deterministic).
+     *
+     * Guarded, fail-closed: a zero-norm endmember or a rank-deficient
+     * (collinear) endmember set refuses with a named message before any
+     * pixel is processed — unlike unmix(), which degrades via a ridge.
+     * NaN pixels produce NaN abundances/error (same convention as unmix).
+     *
+     * @return true on success; false with @p errorMessage for invalid
+     *         arguments or the collinearity/zero-norm refusals above.
+     */
+    bool unmixFcls( const float *pixels, size_t count, int bands,
+                    const float *endmembers, int nEndmembers,
+                    UnmixResult *result, QString *errorMessage = nullptr );
 } // namespace SpectralUnmixing

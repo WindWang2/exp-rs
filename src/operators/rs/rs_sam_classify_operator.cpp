@@ -10,6 +10,7 @@
 #include "processing/algorithms/spectral_classification.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
+#include "rs_spectral_reference_input.h"
 
 #include <QString>
 
@@ -21,53 +22,17 @@ namespace sicnu::operators::rs {
 
 using namespace params;
 
-namespace {
-
-// Parse the `refs` parameter (array of equal-length float arrays) into a flat
-// row-major buffer. Throws RSOperatorError on malformed input.
-std::vector<float> parseReferenceSpectra( const Json::Value &refs, int bandCount )
-{
-    if ( !refs.isArray() || refs.empty() )
-        throw RSOperatorError( ErrorCode::InvalidParameter,
-                              "'refs' must be a non-empty array of reference spectra" );
-
-    std::vector<float> flat;
-    flat.reserve( static_cast<size_t>( refs.size() ) * static_cast<size_t>( bandCount ) );
-    int idx = 0;
-    for ( const auto &entry : refs )
-    {
-        if ( !entry.isArray() || static_cast<int>( entry.size() ) != bandCount )
-            throw RSOperatorError( ErrorCode::InvalidParameter,
-                                  "Reference spectrum " + std::to_string( idx ) +
-                                  " must be an array of " + std::to_string( bandCount ) +
-                                  " numbers" );
-        for ( Json::ArrayIndex b = 0; b < entry.size(); ++b )
-        {
-            if ( !entry[b].isNumeric() )
-                throw RSOperatorError( ErrorCode::InvalidParameter,
-                                      "Reference spectrum " + std::to_string( idx ) +
-                                      " contains a non-numeric value" );
-            flat.push_back( static_cast<float>( entry[b].asDouble() ) );
-        }
-        ++idx;
-    }
-    return flat;
-}
-
-} // anonymous namespace
-
 Json::Value RsSamClassifyOperator::schema() const {
     using namespace schema;
     Json::Value props( Json::objectValue );
     props["input"] = makeRasterParam( "input", "Multi-band raster to classify" );
     props["output"] = makeOutputParam( "output", "Classified raster (class id per pixel)", "tif" );
-    // refs: array of arrays of numbers — schema describes the outer array.
-    Json::Value refsParam( Json::objectValue );
-    refsParam["type"] = "array";
-    refsParam["description"] = "Reference spectra: array of arrays of band-count floats";
-    refsParam["items"]["type"] = "array";
-    refsParam["items"]["items"]["type"] = "number";
-    props["refs"] = refsParam;
+    // Reference inputs: exactly one of refs (inline), refsRef (table/library
+    // artifact path) or libraryPath (+libraryMaterials) — one shared seam.
+    const Json::Value referenceProps = referenceInputSchemaProps(
+        "refs", "refsRef", "Reference spectra: array of arrays of band-count floats" );
+    for ( const auto &key : referenceProps.getMemberNames() )
+        props[key] = referenceProps[key];
     props["bands"] = makeIntegerParam( "bands", "1-based band subset (reserved; default all)", 0 );
     props["metric"] = makeEnumParam( "metric", "Spectral matching metric",
                                      { "sam", "sid" }, "sam" );
@@ -79,7 +44,7 @@ Json::Value RsSamClassifyOperator::schema() const {
     outputs["classes"] = makeIntegerParam( "classes", "Number of reference classes", 0 );
 
     Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
-    root["required"] = makeRequired( { "input", "output", "refs" } );
+    root["required"] = makeRequired( { "input", "output" } );
     return root;
 }
 
@@ -96,6 +61,11 @@ Json::Value RsSamClassifyOperator::metadata() const {
     meta["prerequisites"].append( "Reference spectra must use the same band order and units as the input raster." );
     meta["workflowHints"].append( "SAM is illumination-invariant and well-suited to hyperspectral mapping; "
                                   "SID additionally captures spectral brightness differences." );
+    meta["workflowHints"].append( "In workflows, reference spectra can flow as artifacts: "
+                                  "rs:endmember_extraction with endmembersOut -> refsRef; "
+                                  "or libraryPath (+libraryMaterials) selects from a "
+                                  "validated spectral library, resampled onto the input "
+                                  "band grid when wavelength metadata is present." );
     meta["limitations"].append( "SID requires non-negative reflectance-like spectra (a zero or negative "
                                 "band invalidates the pair)." );
     return meta;
@@ -148,8 +118,18 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
     const std::vector<int> bands = parseBands( params, bandCount );
     const int nBands = static_cast<int>( bands.size() );
 
-    std::vector<float> refs = parseReferenceSpectra( params["refs"], nBands );
-    const int refCount = static_cast<int>( refs.size() / static_cast<size_t>( nBands ) );
+    // Shared reference seam: inline refs / refsRef artifact / libraryPath.
+    QString gridError;
+    const RasterWavelengthGrid inputGrid = RasterWavelengthGrid::read( ds, bands, &gridError );
+    if ( !gridError.isEmpty() )
+        throw RSOperatorError( ErrorCode::InvalidInputData, gridError.toStdString() );
+    const ResolvedSpectralReference refsResolved =
+        resolveSpectralReference( params, "refs", "refsRef", ds, bands, inputGrid );
+    const std::vector<float> refs = refsResolved.flat;
+    const int refCount = refsResolved.count;
+    if ( refCount < 1 )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                              "At least one reference spectrum is required" );
 
     const std::string metric = getEnum( params, "metric", { "sam", "sid" }, "sam" );
 
@@ -249,6 +229,14 @@ Json::Value RsSamClassifyOperator::run( const Json::Value &params, RSOperatorCon
     result["bands"] = nBands;
     result["classes"] = refCount;
     result["metric"] = metric;
+    // Reference provenance echo (library/table identity, resampling, license).
+    result["reference"] = refsResolved.sourceDescription.toStdString();
+    if ( refsResolved.resampled )
+        result["referenceResampled"] = true;
+    if ( !refsResolved.license.isEmpty() )
+        result["referenceLicense"] = refsResolved.license.toStdString();
+    if ( !refsResolved.synthetic )
+        result["referenceMeasured"] = true;
     return result;
 }
 

@@ -16,6 +16,7 @@
 #include "processing/algorithms/spectral_detection.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
+#include "rs_spectral_reference_input.h"
 
 #include <QString>
 
@@ -54,21 +55,22 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
                                kind + " detection requires at least 2 bands, got " +
                                    std::to_string( bandCount ) );
 
-    // Target spectrum: one finite value per band.
-    if ( !params.isMember( "target" ) || !params["target"].isArray() ||
-         static_cast<int>( params["target"].size() ) != bandCount )
-        throw RSOperatorError( ErrorCode::InvalidParameter,
-                               "'target' must be an array with one value per band (" +
-                                   std::to_string( bandCount ) + ")" );
-    std::vector<float> target( static_cast<size_t>( bandCount ) );
+    // Target spectrum via the shared seam: inline array, targetRef artifact
+    // (table/library) or libraryPath — exactly one spectrum after resolution.
+    std::vector<int> allBands( static_cast<size_t>( bandCount ) );
     for ( int b = 0; b < bandCount; ++b )
-    {
-        const Json::Value &tv = params["target"][b];
-        if ( !tv.isNumeric() )
-            throw RSOperatorError( ErrorCode::InvalidParameter,
-                                   "'target' entry " + std::to_string( b ) + " is not a number" );
-        target[static_cast<size_t>( b )] = static_cast<float>( tv.asDouble() );
-    }
+        allBands[static_cast<size_t>( b )] = b + 1;
+    QString gridError;
+    const RasterWavelengthGrid inputGrid = RasterWavelengthGrid::read( ds, allBands, &gridError );
+    if ( !gridError.isEmpty() )
+        throw RSOperatorError( ErrorCode::InvalidInputData, gridError.toStdString() );
+    const ResolvedSpectralReference targetResolved = resolveSpectralReference(
+        params, "target", "targetRef", ds, allBands, inputGrid );
+    const float *target = targetResolved.single();
+    if ( !target )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "'target' must resolve to exactly one spectrum, got " +
+                                   std::to_string( targetResolved.count ) );
 
     constexpr int kTile = 256;
     GdalMultibandBlockStream stream( ds, bandCount, kTile, kTile );
@@ -123,7 +125,7 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
         throw RSOperatorError( ErrorCode::ComputationError, "Background covariance is singular" );
 
     SpectralDetection::TargetModel model;
-    if ( !SpectralDetection::buildTargetModel( target.data(), bandCount, stats.mean, invCov, &model ) )
+    if ( !SpectralDetection::buildTargetModel( target, bandCount, stats.mean, invCov, &model ) )
         throw RSOperatorError( ErrorCode::InvalidInputData,
                                "Target spectrum is degenerate against the background "
                                "(non-finite values or zero whitened norm)" );
@@ -168,6 +170,11 @@ Json::Value runDetector( const std::string &kind, const Json::Value &params,
     result["bandCount"] = bandCount;
     result["width"] = width;
     result["height"] = height;
+    result["targetSource"] = targetResolved.sourceDescription.toStdString();
+    if ( targetResolved.resampled )
+        result["targetResampled"] = true;
+    if ( !targetResolved.license.isEmpty() )
+        result["targetLicense"] = targetResolved.license.toStdString();
     context.reportProgress( 1.0, kind + " detection complete" );
     return result;
 }
@@ -178,17 +185,16 @@ Json::Value detectorSchema( const std::string &displayName, const std::string &d
     Json::Value props( Json::objectValue );
     props["input"] = makeRasterParam( "input", "Input multi-band raster" );
     props["output"] = makeOutputParam( "output", "Single-band detection score raster", "tif" );
-    Json::Value target( Json::objectValue );
-    target["type"] = "array";
-    target["description"] = "Target spectrum (one value per input band, same order)";
-    target["items"]["type"] = "number";
-    props["target"] = target;
+    const Json::Value referenceProps = referenceInputSchemaProps(
+        "target", "targetRef", "Target spectrum (one value per input band, same order)" );
+    for ( const auto &key : referenceProps.getMemberNames() )
+        props[key] = referenceProps[key];
 
     Json::Value outputs( Json::objectValue );
     outputs["output"] = makeRasterParam( "output", "Output raster path" );
 
     Json::Value root = makeRootSchema( displayName, description, props, outputs );
-    root["required"] = makeRequired( { "input", "output", "target" } );
+    root["required"] = makeRequired( { "input", "output" } );
     return root;
 }
 
