@@ -351,6 +351,7 @@ set(SICNU_TEMPORAL_TIMELINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/temporal_cube.cpp
     ${CMAKE_SOURCE_DIR}/src/processing/algorithms/temporal_smoothing.cpp
     ${CMAKE_SOURCE_DIR}/src/processing/algorithms/phenology_metrics.cpp
+    ${CMAKE_SOURCE_DIR}/src/processing/algorithms/breakpoint_detection.cpp
 )
 qt_add_library(sicnu_temporal_timeline STATIC ${SICNU_TEMPORAL_TIMELINE_SOURCES})
 target_include_directories(sicnu_temporal_timeline PUBLIC

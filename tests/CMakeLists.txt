@@ -8939,3 +8939,15 @@ sicnu_discover_tests(test_processing_catalog_ux)
     ${CMAKE_BINARY_DIR}
   )
   sicnu_discover_tests(test_phenology_extraction)
+
+  add_executable(test_bfast_harmonic_breaks test_bfast_harmonic_breaks.cpp)
+  target_link_libraries(test_bfast_harmonic_breaks PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_temporal_timeline
+  )
+  target_include_directories(test_bfast_harmonic_breaks PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_bfast_harmonic_breaks)
