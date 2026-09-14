@@ -26,6 +26,9 @@
 #include "../harness/recipe_tools.h"
 #include "../harness/run_loop.h"
 #include "../harness/solution_tools.h"
+#include "../harness/workflow_planner.h"
+#include "../harness/context_checkpoint.h"
+#include "../harness/tool_shortlist.h"
 #include "../contracts/spatial_contracts.h"
 
 namespace sicnu::agent::spatial_tools {
@@ -271,6 +274,11 @@ void SpatialToolRegistry::registerBuiltinTools()
   harness::registerLabTools();
   // Platform 5.0 solution knowledge: solution:search/describe/validate/instantiate.
   harness::registerSolutionTools();
+  // Compiler 10.0 (ADR 0149): typed WorkflowIR compiler, harness session
+  // checkpoint/resume, and budgeted tool shortlist / knowledge budget.
+  harness::registerWorkflowPlannerTools();
+  harness::registerContextSessionTools();
+  harness::registerToolShortlistTools();
 }
 
 void SpatialToolRegistry::reset()

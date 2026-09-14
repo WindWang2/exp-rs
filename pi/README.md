@@ -75,6 +75,12 @@ session prompt can point the model at
 
 ## Files
 
-- `exp-rs-spatial.ts` — the extension (dependency-free TypeScript, loaded
-  by Pi via jiti; no build step).
+- `exp-rs-spatial.ts` — the extension shell (dependency-free TypeScript,
+  loaded by Pi via jiti; no build step). The transport lives ONLY in
+  `mcp_bridge.ts` — the shell imports it, and `test/no_drift.test.mjs` fails
+  if a second McpBridge copy, constants, or teardown hook reappear
+  (Compiler 10.0 drift guard for review findings F-PI-1/F-PI-2).
+- `mcp_bridge.ts` — the single newline-delimited JSON-RPC transport:
+  lifecycle, cancellation, circuit breaker, and the F-PI-1 overflow recovery
+  (a runaway line kills the child so the next request lazy-respawns).
 - `knowledge/spatial-algorithm-guide.md` — algorithm selection knowledge.

@@ -49,6 +49,12 @@ export class McpBridge {
   /** In-flight start, so concurrent requests after a crash share ONE
    * respawn instead of each forking its own child (#669). */
   private starting: Promise<void> | null = null;
+  /** Circuit-breaker accounting (absorbed from the exp-rs-spatial.ts copy):
+   * a child dying within 10s of spawn is a fast crash; 5 in a row disables
+   * lazy respawn instead of looping. */
+  private lastSpawnAt = 0;
+  private fastCrashCount = 0;
+  private lastExitError: string | null = null;
 
   readonly bin: string;
   readonly extraArgs: string[];
@@ -81,6 +87,19 @@ export class McpBridge {
   }
 
   private async spawnAndInitialize(): Promise<void> {
+    // Startup-race guard (absorbed from the exp-rs-spatial.ts copy): if a
+    // previous spawn's child is somehow still alive (e.g. an initialize
+    // timeout left it hanging with exited=false), kill it before spawning a
+    // replacement — otherwise it blocks every respawn while its stdio goes
+    // nowhere.
+    if (this.child && !this.exited) {
+      try {
+        this.child.kill();
+      } catch {
+        /* already dead */
+      }
+    }
+    this.lastSpawnAt = Date.now();
     // Clear the crash latch BEFORE any await: the initialize request below
     // flows through request(), which re-reads this.exited to decide whether
     // it needs another start(). Leaving the latch set across that await is
@@ -111,9 +130,10 @@ export class McpBridge {
       if (this.child !== child) return; // stale generation
       this.onStdout(chunk);
     });
+    this.child = child;
     // spawn() reports late ENOENT/EACCES via an "error" event, not a throw.
     const spawnFailure = new Promise<never>((_, reject) => {
-      this.child!.once("error", (err) => {
+      child.once("error", (err) => {
         this.startError = `Failed to launch ${this.bin}: ${err?.message ?? err}`;
         reject(new Error(this.startError));
       });
@@ -121,13 +141,15 @@ export class McpBridge {
 
     // Keep a stderr tail so a child crash is diagnosable from exprs_status
     // and the exit error (Qt/QGIS plugin failures precede most crashes).
-    this.child.stderr!.setEncoding("utf8");
-    this.child.stderr!.on("data", (chunk: string) => {
+    child.stderr!.setEncoding("utf8");
+    child.stderr!.on("data", (chunk: string) => {
+      if (this.child !== child) return;
       this.stderrTail = (this.stderrTail + chunk).slice(-4000);
     });
     // Persistent handler: once("error") left later child errors unhandled
     // (EventEmitter throws on an "error" event with no listener).
-    this.child.on("error", (err) => {
+    child.on("error", (err) => {
+      if (this.child !== child) return; // stale event from a previous child
       this.startError = `exp-rs MCP server error: ${err?.message ?? err}`;
     });
     const spawned = this.child;
@@ -141,13 +163,18 @@ export class McpBridge {
       const err = new Error(
         `exp-rs MCP server exited (code ${code})${tail ? `; stderr tail:\n${tail}` : ""}`,
       );
+      this.lastExitError = err.message;
+      // Circuit-breaker accounting: a child dying within 10s of spawn is a
+      // fast crash; 5 in a row disables lazy respawn instead of looping.
+      if (Date.now() - this.lastSpawnAt < 10_000) this.fastCrashCount++;
+      else this.fastCrashCount = 0;
       for (const p of this.pending.values()) {
         clearTimeout(p.timer);
         p.reject(err);
       }
       this.pending.clear();
     });
-    this.child.stdin!.on("error", () => {});
+    child.stdin!.on("error", () => {});
     // Process-exit teardown is installed once at module level (see
     // installExitHook) - registering it here stacked a listener per
     // (re)spawn and MaxListeners-warned after ~10 respawns (#645).
@@ -281,6 +308,15 @@ export class McpBridge {
         return;
       }
       if (!this.child || this.exited) {
+        if (this.fastCrashCount >= 5) {
+          reject(
+            new Error(
+              `exp-rs MCP server keeps crashing (${this.fastCrashCount} fast crashes); ` +
+                `lazy respawn disabled. Last exit: ${this.lastExitError ?? "unknown"}`,
+            ),
+          );
+          return;
+        }
         // Lazy respawn after a crash: without this every tool failed
         // permanently until the Pi process restarted (#623). start() is
         // idempotent, so concurrent callers share one respawn (#669).

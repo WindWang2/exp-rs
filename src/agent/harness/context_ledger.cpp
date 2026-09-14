@@ -32,7 +32,8 @@ ContextLedger &ContextLedger::instance()
 void ContextLedger::recordPlanBinding( const std::string &runId, const std::string &planId,
                                        const std::string &goal, const std::string &intent,
                                        const std::string &verificationStatus,
-                                       const std::string &planFingerprint )
+                                       const std::string &planFingerprint,
+                                       const Json::Value &compilerMeta )
 {
   QMutexLocker locker( &mMutex );
   // Re-binding an existing run updates in place (verification status changes
@@ -44,6 +45,8 @@ void ContextLedger::recordPlanBinding( const std::string &runId, const std::stri
       mPlanBindings[i]["verification_status"] = verificationStatus;
       if ( !planFingerprint.empty() )
         mPlanBindings[i]["plan_fingerprint"] = planFingerprint;
+      if ( compilerMeta.isObject() && !compilerMeta.empty() )
+        mPlanBindings[i]["workflow_ir"] = compilerMeta;
       mPlanBindings[i]["updated_at"] = nowIso().toStdString();
       return;
     }
@@ -56,6 +59,8 @@ void ContextLedger::recordPlanBinding( const std::string &runId, const std::stri
   binding["verification_status"] = verificationStatus;
   if ( !planFingerprint.empty() )
     binding["plan_fingerprint"] = planFingerprint;
+  if ( compilerMeta.isObject() && !compilerMeta.empty() )
+    binding["workflow_ir"] = compilerMeta;
   binding["bound_at"] = nowIso().toStdString();
   mPlanBindings.append( binding );
   while ( mPlanBindings.size() > kMaxPlanBindings )

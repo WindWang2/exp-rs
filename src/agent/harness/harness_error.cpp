@@ -60,6 +60,14 @@ const struct Entry {
     { "ACQUISITION_DATES_MISSING", { "validation", RetryClass::None } },
     { "DATES_NOT_ASCENDING",     { "validation", RetryClass::None } },
     { "UNWRAP_PROVIDER_UNAVAILABLE", { "environment", RetryClass::Manual } },
+    // Compiler 10.0 (ADR 0149): workflow-compiler static-analysis codes.
+    { "WAVELENGTH_INCOMPATIBLE", { "validation", RetryClass::None } },
+    { "TEMPORAL_MISALIGNMENT",   { "validation", RetryClass::None } },
+    { "CATEGORICAL_MISMATCH",    { "validation", RetryClass::None } },
+    { "RESOURCE_OVER_BUDGET",    { "validation", RetryClass::None } },
+    { "OUTPUT_PATH_COLLISION",   { "validation", RetryClass::None } },
+    { "NONDETERMINISTIC_CHAIN",  { "validation", RetryClass::None } },
+    { "FACT_CONFLICT",           { "validation", RetryClass::None } },
 };
 const Entry *kEntriesEnd = kEntries + sizeof( kEntries ) / sizeof( kEntries[0] );
 

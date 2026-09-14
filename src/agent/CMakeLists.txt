@@ -26,6 +26,18 @@ add_library(sicnu_agent SHARED
   contracts/spatial_contracts.h
   harness/band_facts.cpp
   harness/band_facts.h
+  harness/workflow_ir.cpp
+  harness/workflow_ir.h
+  harness/workflow_analysis.cpp
+  harness/workflow_analysis.h
+  harness/workflow_repair.cpp
+  harness/workflow_repair.h
+  harness/workflow_planner.cpp
+  harness/workflow_planner.h
+  harness/context_checkpoint.cpp
+  harness/context_checkpoint.h
+  harness/tool_shortlist.cpp
+  harness/tool_shortlist.h
   harness/capability_knowledge.cpp
   harness/capability_knowledge.h
   harness/capability_catalog.cpp

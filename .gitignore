@@ -163,6 +163,10 @@ vendor/
 !.planning/cn-eo-products-sensor-physics-10/
 .planning/cn-eo-products-sensor-physics-10/*
 !.planning/cn-eo-products-sensor-physics-10/*.md
+# scientific-agent-workflow-compiler-10: track planning notes (markdown only; logs stay local).
+!.planning/scientific-agent-workflow-compiler-10/
+.planning/scientific-agent-workflow-compiler-10/*
+!.planning/scientific-agent-workflow-compiler-10/*.md
 .zcode/
 
 # IDE / editor / OS artifacts
