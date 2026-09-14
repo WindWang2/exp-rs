@@ -44,3 +44,12 @@
 
 i18n 期望漂移修复清单（PR #953 机械重写源文未同步测试；master 上皆红）：
 test_provenance_section、test_processing_history_model、test_selection_context。
+
+## 最终矩阵（Phase 8，最终 HEAD = rebase 后 cae17355ee 系列 + review 修复 commit）
+
+- 状态：rebase origin/master → up to date（无新提交）；`git diff --check` 干净；
+  冲突标记扫描为空；秘钥扫描为空；存在性断言两条全过；措辞检测 0 命中。
+- **26/26 套件全绿**（列表见上两轮矩阵）+ test_mapspec 601/602 断言
+  （唯一失败 = test_cartography_visual.cpp:230 PNG 渲染确定性，本机字体环境，
+  master 上同样失败 —— 见 OUT_OF_SCOPE）。
+- sicnu_geo_rs + sicnu_geo_rs_cli 于最终 HEAD 构建零 error。

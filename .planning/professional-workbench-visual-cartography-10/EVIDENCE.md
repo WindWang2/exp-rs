@@ -47,3 +47,15 @@
 
 - master 的 PNG 渲染确定性用例在本机不稳定（字体环境）——建议制图 track 在
   渲染确定性测试中固定字体/禁用系统字体替换。
+
+## Phase 8 最终验证（最终 HEAD）
+
+- `git fetch origin && git rebase origin/master` → up to date
+- `git diff --check` → 干净
+- 冲突标记扫描（src/app、src/agent/cartography、新增 tests）→ 空
+- 秘钥/凭据模式扫描（track diff）→ 空
+- 存在性断言（goal-template 两条命令）→ 无 MISSING 输出
+- 措辞自查 `grep -E "尽量|适当|必要时|合理|充分|酌情" GOAL.md | grep -vc "grep -E"` → 0
+- 最终回归：26/26 套件全绿 + mapspec 601/602（环境用例 1 项，master 同）
+- 工具调用计量（预算代理指标）：本 track 会话 ~700+ 工具调用，触及文件 69；
+  各 Phase 时间戳/调用数入 TEST_MATRIX/PROGRESS。
