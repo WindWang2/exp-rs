@@ -164,6 +164,40 @@ TEST_CASE( "Optimize is a no-op when every node feeds the sink", "[d17][workflow
     REQUIRE( optimized == def );
 }
 
+TEST_CASE( "Legal distinct-port parallel edges survive optimization untouched", "[d17][workflow][optimizer]" )
+{
+    // src -> sink.input AND src -> sink.aux: both legal (per-port in-degree
+    // <= 1), neither produced by a merge. The optimizer must preserve both.
+    WorkflowDefinition def;
+    def.nodes = {
+        node( "src", "rs:import_raster" ),
+        node( "sink", "rs:stack_bands" ),
+    };
+    NodeFact &sink = def.nodes.last();
+    sink.inputPorts.append( PortFact{ QStringLiteral( "aux" ), QStringLiteral( "Raster" ), QStringLiteral( "*" ),
+                                      QStringLiteral( "None" ), 0, 0, 4, true } );
+    def.edges = {
+        edge( "src", "sink", "e_in" ),
+        EdgeFact{ QStringLiteral( "e_aux" ), QStringLiteral( "src" ), QStringLiteral( "output" ),
+                  QStringLiteral( "sink" ), QStringLiteral( "aux" ) },
+    };
+
+    OptimizationReport report;
+    const WorkflowDefinition optimized = WorkflowPlanOptimizer::optimizePlan(
+        def, QSet<QString>{ QStringLiteral( "sink" ) }, &report );
+    REQUIRE( report.deadNodesPruned == 0 );
+    REQUIRE( report.commonSubexpressionsMerged == 0 );
+    REQUIRE( optimized.edges.size() == 2 );
+    QString error;
+    REQUIRE( WorkflowIR::validateSemantics( optimized, &error ) );
+    INFO( error.toStdString() );
+    bool auxFed = false;
+    for ( const EdgeFact &e : optimized.edges )
+        if ( e.targetPortName == QLatin1String( "aux" ) )
+            auxFed = true;
+    REQUIRE( auxFed );
+}
+
 TEST_CASE( "Cache hits are reported and keep the node unmerged", "[d17][workflow][optimizer]" )
 {
     const WorkflowDefinition def = redundantWorkflow();
@@ -240,10 +274,20 @@ TEST_CASE( "Oversized working sets degrade recommended parallelism to 1", "[d17]
     dims.insert( QStringLiteral( "branch_a" ), QSize( 40000, 40000 ) );
     dims.insert( QStringLiteral( "branch_b" ), QSize( 40000, 40000 ) );
 
-    const CostEstimate cost = WorkflowCostEstimator::estimatePipelineCost( def, dims );
+    // Injected host RAM: the waterline behavior is pinned against an
+    // EXPLICIT 64 GiB budget — ground truth must not depend on the live
+    // host's memory.
+    const CostEstimate cost = WorkflowCostEstimator::estimatePipelineCostWithHostRam(
+        def, dims, 64LL * 1024 * 1024 * 1024 );
     const qint64 working = 2LL * qint64( 40000 ) * 40000 * 4 * WorkflowCostEstimator::kBytesPerPixel;
     REQUIRE( cost.peakRssBytes == working + WorkflowCostEstimator::kBaseEngineOverheadBytes );
     REQUIRE( cost.recommendedMaxParallelism == 1 );
+
+    // The same document against a 512 GiB budget stays under the waterline
+    // and keeps the tier width as the recommendation.
+    const CostEstimate roomy = WorkflowCostEstimator::estimatePipelineCostWithHostRam(
+        def, dims, 512LL * 1024 * 1024 * 1024 );
+    REQUIRE( roomy.recommendedMaxParallelism == 2 );
 }
 
 TEST_CASE( "Unknown operators default to complexity 1.0", "[d17][workflow][cost]" )

@@ -9,7 +9,6 @@
 #include <QStringList>
 
 #include <algorithm>
-#include <functional>
 
 namespace sicnu::workflow {
 namespace {
@@ -110,18 +109,26 @@ WorkflowDefinition WorkflowPlanOptimizer::optimizePlan( const WorkflowDefinition
     for ( const EdgeFact &edge : def.edges )
         children[edge.sourceNodeId].append( edge.targetNodeId );
 
+    // Iterative ancestor marking (explicit worklist — no recursion depth
+    // limit on hostile-deep chains).
     QSet<QString> active;
-    std::function<void( const QString & )> markActive = [&]( const QString &nodeId ) {
-        if ( active.contains( nodeId ) )
-            return;
-        active.insert( nodeId );
-        for ( const EdgeFact &edge : def.edges )
-            if ( edge.targetNodeId == nodeId )
-                markActive( edge.sourceNodeId );
-    };
+    QVector<QString> worklist;
     for ( const QString &sink : targetSinkNodeIds )
-        if ( def.findNode( sink ) )
-            markActive( sink );
+        if ( def.findNode( sink ) && !active.contains( sink ) )
+        {
+            active.insert( sink );
+            worklist.append( sink );
+        }
+    while ( !worklist.isEmpty() )
+    {
+        const QString current = worklist.takeLast();
+        for ( const EdgeFact &edge : def.edges )
+            if ( edge.targetNodeId == current && !active.contains( edge.sourceNodeId ) )
+            {
+                active.insert( edge.sourceNodeId );
+                worklist.append( edge.sourceNodeId );
+            }
+    }
 
     QVector<NodeFact> keptNodes;
     for ( const NodeFact &node : def.nodes )
@@ -145,6 +152,14 @@ WorkflowDefinition WorkflowPlanOptimizer::optimizePlan( const WorkflowDefinition
     for ( const NodeFact &node : working.nodes ) // document order: first wins
     {
         const QString signature = signatures.value( node.nodeId );
+        if ( signature.isEmpty() && !signatures.contains( node.nodeId ) )
+        {
+            // Cyclic input violates the documented precondition — fail safe
+            // by keeping the node unmerged instead of collapsing arbitrary
+            // signature-less nodes into the first.
+            uniqueNodes.append( node );
+            continue;
+        }
         const auto existing = canonicalOf.find( signature );
         if ( existing != canonicalOf.end() && !cachedSignatures.contains( signature ) )
         {
@@ -158,7 +173,12 @@ WorkflowDefinition WorkflowPlanOptimizer::optimizePlan( const WorkflowDefinition
     }
 
     // Redirect edges out of merged nodes onto their canonical twin; drop
-    // edges that became degenerate self-loops.
+    // edges that became degenerate self-loops. The parallel-edge collapse
+    // applies ONLY where a merge redirected the endpoints: untouched edges
+    // between surviving nodes are preserved verbatim (two legal edges
+    // A->B.in and A->B.aux must both survive). Among REDIRECTED edges,
+    // duplicates landing on the same (source, target, target port) collapse
+    // to the first.
     QVector<EdgeFact> finalEdges;
     QSet<QString> edgeIds;
     auto resolve = [&mergedInto]( QString id ) {
@@ -166,7 +186,7 @@ WorkflowDefinition WorkflowPlanOptimizer::optimizePlan( const WorkflowDefinition
             id = mergedInto.value( id );
         return id;
     };
-    QSet<QPair<QString, QString>> parallelSeen;
+    QSet<QPair<QPair<QString, QString>, QString>> parallelSeen;
     for ( const EdgeFact &edge : working.edges )
     {
         EdgeFact redirected = edge;
@@ -174,9 +194,14 @@ WorkflowDefinition WorkflowPlanOptimizer::optimizePlan( const WorkflowDefinition
         redirected.targetNodeId = resolve( edge.targetNodeId );
         if ( redirected.sourceNodeId == redirected.targetNodeId )
             continue; // degenerate self-loop after merging
-        // Two twins feeding the same consumer collapse to ONE edge.
-        const auto parallelKey = qMakePair( redirected.sourceNodeId, redirected.targetNodeId );
-        if ( parallelSeen.contains( parallelKey ) )
+        const auto parallelKey = qMakePair( qMakePair( redirected.sourceNodeId, redirected.targetNodeId ),
+                                            redirected.targetPortName );
+        const bool wasRedirected = redirected.sourceNodeId != edge.sourceNodeId
+            || redirected.targetNodeId != edge.targetNodeId;
+        // Untouched edges are ALWAYS kept, but their key is recorded so a
+        // redirected twin landing on the same (source, target, port) after a
+        // merge collapses into them instead of double-feeding the port.
+        if ( wasRedirected && parallelSeen.contains( parallelKey ) )
             continue;
         parallelSeen.insert( parallelKey );
         if ( edgeIds.contains( redirected.edgeId ) )

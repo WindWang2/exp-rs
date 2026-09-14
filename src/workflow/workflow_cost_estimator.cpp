@@ -81,6 +81,13 @@ double WorkflowCostEstimator::operatorComplexity( const QString &operatorId )
 CostEstimate WorkflowCostEstimator::estimatePipelineCost( const WorkflowDefinition &def,
                                                           const QMap<QString, QSize> &rasterDimensions )
 {
+    return estimatePipelineCostWithHostRam( def, rasterDimensions, hostTotalRamBytes() );
+}
+
+CostEstimate WorkflowCostEstimator::estimatePipelineCostWithHostRam( const WorkflowDefinition &def,
+                                                                     const QMap<QString, QSize> &rasterDimensions,
+                                                                     qint64 hostRamBytes )
+{
     CostEstimate estimate;
 
     const auto tierInfo = WorkflowDagAnalyzer::computeConcurrencyTiers( def );
@@ -102,7 +109,7 @@ CostEstimate WorkflowCostEstimator::estimatePipelineCost( const WorkflowDefiniti
     estimate.peakRssBytes = peakWorking + kBaseEngineOverheadBytes;
 
     const int tierWidth = WorkflowDagAnalyzer::calculateMaxParallelism( tierInfo );
-    const double waterlineBytes = double( hostTotalRamBytes() ) * kRssWaterline;
+    const double waterlineBytes = double( hostRamBytes ) * kRssWaterline;
     if ( double( estimate.peakRssBytes ) > waterlineBytes )
         estimate.recommendedMaxParallelism = 1;
     else
