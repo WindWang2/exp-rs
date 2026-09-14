@@ -324,6 +324,8 @@ TEST_CASE( "All 11 shipped lab templates execute green through the full stack",
                 INFO( labFile.toStdString() << " / " << it.first.toStdString() );
                 REQUIRE( it.second.state == ExecutionState::Succeeded );
             }
+            // Hygiene: a green lab run leaves no scratch behind.
+            QDir( dir ).removeRecursively();
         }
     }
     REQUIRE( corpusOperatorSteps == 16 );
