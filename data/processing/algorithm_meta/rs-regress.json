@@ -1,0 +1,14 @@
+{
+  "gpu" : true,
+  "id" : "rs:regress",
+  "input" : "raster",
+  "notes" : "Continuous-value semantics: the output bands are the model's raw output channels (no argmax, no class stack). Values are physical quantities per the model contract; NoData pixels stay NoData.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "inference",
+    "regression",
+    "deep-learning"
+  ],
+  "task" : "regression"
+}

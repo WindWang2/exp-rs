@@ -68,4 +68,64 @@ public:
     Json::Value run( const Json::Value &params, RSOperatorContext &context ) override;
 };
 
+// --- Platform 10.0 task families (typed artifact contracts) ------------------
+
+/// Scene classification: ONE chip/scene, ONE forward pass, typed JSON
+/// artifact (exp-rs-classification/1: predicted class + probability
+/// distribution + model identity + input fingerprint). Requires a model
+/// whose canonical EO task is "classification".
+class RsClassifyOperator : public RSOperator {
+public:
+    std::string name() const override { return "rs:classify"; }
+    std::string displayName() const override { return "Scene Classification (Model)"; }
+    std::string group() const override { return "ml"; }
+    std::string description() const override {
+        return "Classify a scene/chip with a classification model (single forward pass); publishes a typed classification JSON artifact with the predicted class and probability distribution.";
+    }
+    RSOperatorMemoryPolicy memoryPolicy() const override { return RSOperatorMemoryPolicy::Streaming; }
+    Json::Value schema() const override;
+    Json::Value metadata() const override;
+    Json::Value executionEstimate() const override;
+    Json::Value estimateExecution( const Json::Value &params ) const override;
+    Json::Value run( const Json::Value &params, RSOperatorContext &context ) override;
+};
+
+/// Change detection: two co-registered dates through a siamese/change model
+/// (multi-input seam), change-probability stack output. Requires a model
+/// whose canonical EO task is "change_detection".
+class RsChangeOperator : public RSOperator {
+public:
+    std::string name() const override { return "rs:change"; }
+    std::string displayName() const override { return "Change Detection (Model)"; }
+    std::string group() const override { return "ml"; }
+    std::string description() const override {
+        return "Detect change between two co-registered dates with a siamese/change model; publishes the change-probability stack (band semantics from the manifest classes).";
+    }
+    RSOperatorMemoryPolicy memoryPolicy() const override { return RSOperatorMemoryPolicy::Streaming; }
+    Json::Value schema() const override;
+    Json::Value metadata() const override;
+    Json::Value executionEstimate() const override;
+    Json::Value estimateExecution( const Json::Value &params ) const override;
+    Json::Value run( const Json::Value &params, RSOperatorContext &context ) override;
+};
+
+/// Regression: continuous-value raster (e.g. biomass, height, PM2.5
+/// surface). Probability-stack single-band semantics over the same engine.
+/// Requires a model whose canonical EO task is "regression".
+class RsRegressOperator : public RSOperator {
+public:
+    std::string name() const override { return "rs:regress"; }
+    std::string displayName() const override { return "Continuous Regression (Model)"; }
+    std::string group() const override { return "ml"; }
+    std::string description() const override {
+        return "Run a regression model on a raster; publishes the continuous-value output band(s) (one per manifest output channel).";
+    }
+    RSOperatorMemoryPolicy memoryPolicy() const override { return RSOperatorMemoryPolicy::Streaming; }
+    Json::Value schema() const override;
+    Json::Value metadata() const override;
+    Json::Value executionEstimate() const override;
+    Json::Value estimateExecution( const Json::Value &params ) const override;
+    Json::Value run( const Json::Value &params, RSOperatorContext &context ) override;
+};
+
 } // namespace sicnu::operators::rs

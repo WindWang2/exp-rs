@@ -77,6 +77,10 @@ struct TileInferenceStats
   /// for probability/confidence products. Computed during the final
   /// streaming pass — O(classes) memory, never a second raster read.
   std::vector<long long> classPixelCounts;
+  /// Platform 10.0: EO domain preflight report (calibration / wavelength /
+  /// grid facts the engine verified — or advisories it recorded). Null when
+  /// the manifest declares no `eo` section.
+  Json::Value eoPreflight;
 };
 
 /// Raster-task output mode (Platform 4.0, manifest `output.format`).
@@ -200,6 +204,26 @@ class TileInferenceEngine
                                       const std::string &outputPath, RSOperatorContext &context,
                                       const TileInferenceRunOptions &options = {} );
 
+    // --- Platform 10.0: scene classification (rs:classify) -------------------
+    /**
+     * Classify ONE scene/chip in a single forward pass and publish a typed
+     * JSON classification artifact (schema exp-rs-classification/1). Unlike
+     * run() there is NO tiling: the whole raster is one window (bounded —
+     * chip-sized inputs only), preprocessed with the manifest contract,
+     * forwarded once, and the class planes reduce to per-class scores by
+     * spatial mean-pooling. Scores become probabilities per the head's
+     * confidence semantics ("logit" → softmax; default "probability" →
+     * used as-is, clamped to [0,1]). The artifact carries the model identity,
+     * the input fingerprint, the effective scene shape and the EO preflight
+     * report — provenance without a sidecar.
+     * @throws RSOperatorError on any contract/size/read/forward/write failure.
+     */
+    Json::Value runSceneClassification( const std::string &inputPath,
+                                        const std::vector<int> &bands,
+                                        const std::string &outputPath,
+                                        RSOperatorContext &context,
+                                        const TileInferenceRunOptions &options = {} );
+
     /// Same-grid contract check shared by validation and tests: empty string
     /// when both rasters carry the geometry, else a typed refusal naming both
     /// paths and the offending property (size / geotransform).
@@ -310,6 +334,9 @@ class TileInferenceEngine
     int m_declaredDtype = -1;
     ModelInfo m_model;
     ModelRuntimePtr m_runtime;
+    /// Platform 10.0: EO preflight report of the most recent run (empty when
+    /// the manifest declares no `eo` section).
+    Json::Value m_lastEoPreflight;
 };
 
 } // namespace sicnu::operators::runtime

@@ -2,7 +2,9 @@
 // verification (see the header for the contract).
 #include "operators/runtime/provenance_verify.h"
 
+#include "operators/framework/model_readiness.h"
 #include "operators/framework/rs_operator_error.h"
+#include "operators/runtime/model_execution_service.h"
 
 #include <gdal.h>
 #include <gdal_priv.h>
@@ -90,6 +92,25 @@ int gridMismatchEvidence( const QString &productPath, const Json::Value &prov,
 std::string provenanceSidecarPath( const std::string &outputPath )
 {
   return outputPath + ".prov.json";
+}
+
+ProvenanceVerdict verifyProductAgainstModel( const std::string &outputPath,
+                                             const std::string &modelReference )
+{
+  ProvenanceExpectation expectation;
+  std::string error;
+  const ModelInfo model = resolveModelReference( modelReference, &error );
+  if ( model.readiness != ModelReadiness::Ready )
+  {
+    ProvenanceVerdict verdict;
+    verdict.state = ProvenanceVerdict::State::ModelMismatch;
+    verdict.detail = "model reference could not be resolved: "
+                     + ( error.empty() ? modelReference : error );
+    return verdict;
+  }
+  expectation.modelIdentityTag = model.identityTag();
+  expectation.modelContentDigest = model.contentDigest;
+  return verifyProductProvenance( outputPath, expectation );
 }
 
 ProvenanceVerdict verifyProductProvenance( const std::string &outputPath,

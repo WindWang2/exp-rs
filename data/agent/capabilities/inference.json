@@ -45,5 +45,58 @@
     "family": "inference",
     "extends": "rs:feature_stack",
     "resource": { "cost_class": "light", "large_raster_safe": true }
+  },
+  {
+    "id": "rs:classify",
+    "family": "inference",
+    "modality": ["optical", "sar"],
+    "intents": ["classify", "inference"],
+    "model_compatibility": { "families": ["classification"] },
+    "resource": { "cost_class": "medium", "large_raster_safe": false },
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "json",
+      "checks": ["existence", "provenance"]
+    },
+    "limitations": [
+      "Single forward pass: the input must be a chip/resampled scene within the 2048x2048 px scene bound",
+      "The model's canonical task must be classification (typed refusal otherwise)",
+      "Probabilities follow the manifest head confidence semantics (logit heads are softmaxed)"
+    ]
+  },
+  {
+    "id": "rs:change",
+    "family": "inference",
+    "modality": ["optical", "sar", "multimodal"],
+    "intents": ["change", "inference"],
+    "model_compatibility": { "families": ["change_detection"] },
+    "resource": { "cost_class": "heavy", "large_raster_safe": true },
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "finite_fraction", "class_domain"]
+    },
+    "limitations": [
+      "Two co-registered dates feed the manifest's multi-input contracts positionally (A then B)",
+      "Misaligned or cross-CRS feeds are refused, never warped",
+      "Output is the change-probability stack; derive masks from band semantics"
+    ]
+  },
+  {
+    "id": "rs:regress",
+    "family": "inference",
+    "modality": ["optical", "sar"],
+    "intents": ["inference"],
+    "model_compatibility": { "families": ["regression"] },
+    "resource": { "cost_class": "heavy", "large_raster_safe": true },
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "finite_fraction"]
+    },
+    "limitations": [
+      "Continuous-value semantics: output bands are raw model channels (no argmax, no class stack)",
+      "The model's canonical task must be regression (typed refusal otherwise)"
+    ]
   }
 ]

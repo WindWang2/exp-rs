@@ -1,0 +1,148 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "classification",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "string",
+          "name" : "backend",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "device",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "height",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "model",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "outBands",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "tileSize",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "tiles",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "width",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "bands",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0",
+          "name" : "batchCap",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "device",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "model",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "none",
+          "enum" : 
+          [
+            "none",
+            "hflip",
+            "hvflip"
+          ],
+          "name" : "tta",
+          "required" : false,
+          "type" : "enum"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical",
+      "sar"
+    ],
+    "operator_group" : "ml",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Run a regression model on a raster; publishes the continuous-value output band(s) (one per manifest output channel).",
+  "display_name" : "Continuous Regression (Model)",
+  "gpu" : true,
+  "id" : "rs:regress",
+  "input" : "raster",
+  "notes" : "Continuous-value semantics: the output bands are the model's raw output channels (no argmax, no class stack). Values are physical quantities per the model contract; NoData pixels stay NoData.",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "inference",
+    "regression",
+    "deep-learning"
+  ],
+  "task" : "regression"
+}

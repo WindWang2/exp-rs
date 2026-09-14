@@ -31,6 +31,9 @@ The desktop ships this chain as the `lab.preprocess.optical` DAG;
 | Segmentation (OBIA) | `rs:obia_segment` (engine=otb \| auto \| simple) | auto prefers OTB MeanShift with teaching fallback; chain `rs:obia_features` (full stats CSV) → `rs:obia_classify` (labels + segmentClasses/training) or `gdal:polygonize` |
 | Vectorize a raster | `gdal:polygonize` | segmentation/classification maps → polygons |
 | Deep-learning inference | `rs:infer` | ONNX via cv::dnn; model name from `spatial:list_models` |
+| Scene classification (model) | `rs:classify` | ONE chip/scene forward pass → typed classification JSON (predicted class + probabilities); requires canonical task `classification` |
+| Change detection (model) | `rs:change` | two co-registered dates → change-probability stack; requires canonical task `change_detection` |
+| Continuous regression (model) | `rs:regress` | continuous-value bands (biomass/height/...); requires canonical task `regression` |
 | Hyperspectral | `rs:mnf`, `rs:sam_classify`, `rs:spectral_unmixing`, `rs:rx_anomaly` | wavelength-aware; start from an ROI mean spectrum |
 | Terrain | `rs:terrain_analysis` (slope/aspect/hillshade/TRI/TPI; geographic DEMs auto-converted) or `gdal_tools:gdaldem` | needs an elevation raster |
 | Pan-sharpening | fusion (Brovey/IHS/PCA) | grid preflight runs automatically in dialogs |
@@ -102,3 +105,33 @@ e.g. `harness.optical_ndvi` + preset `landsat` replaces the old Landsat twin.
 | Plan fingerprint | Every execute response, binding, and evidence sidecar carries `plan_fingerprint`; identical science → identical fingerprint. Cite it when reproducing a run. |
 | Evidence sidecars | Completed runs leave `<out>.verification.json` and `<out>.provenance.json` (harness run-identity when the engine wrote none) beside each artifact; `<out>.uncertainty.json` exists only where the operator declared uncertainty facts — absence is the honest answer, never fabricate one. |
 | `harness:context` 2.0 | Now also carries `asset_contexts` (typed per-dataset facts with `stale` flags — re-run `spatial:understand` when stale) and `model_contracts` (model readiness observed by the harness). |
+
+## Choosing a model by manifest facts (Platform 10.0)
+
+Never pick a model by NAME. The manifest is the truth layer; every fact below
+is machine-readable (manifest `model.json`, `spatial:list_models`, and the
+catalog's `rankModels(criteria)`):
+
+1. **Canonical task** — `task` resolves through `canonicalEoTask`; the task
+   operators (`rs:classify` / `rs:change` / `rs:regress`, plus
+   `rs:segment` / `rs:detect` / `rs:embedding`) require the matching canonical
+   task and refuse otherwise.
+2. **Sensor + band roles + wavelengths** — `domain.sensors`,
+   `inputs[].band_roles`, and (since manifest 10.0) `eo.wavelengths_nm`
+   windows. An input band whose declared center wavelength falls outside the
+   model's window is refused, not silently misread.
+3. **Radiometric state** — `eo.calibration` (enforced preflight) and the
+   legacy advisory `radiometric_state`. If the input is DN and the model
+   requires TOA reflectance, run the calibration chain FIRST.
+4. **Resolution + grid** — `domain.resolution_range` (advisory) and
+   `eo.grid.crs_family`.
+5. **Cost + device** — `runtime.estimated_vram_mb`, `gpu`, `cpu_fallback`,
+   `device`.
+6. **Output semantics** — `output.format/classes/heads[].confidence` tell you
+   what the artifact MEANS (probability vs logit vs distance); scene
+   classification artifacts are `exp-rs-classification/1` JSON documents.
+7. **Identity** — reference models by stable id (`id@version`); products carry
+   a provenance sidecar verifiable with `verifyProductAgainstModel`.
+
+When several models fit, rank with `spatial:list_models` compatibility facts
+and prefer the one whose `eo` contract best matches the actual input raster.

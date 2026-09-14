@@ -237,6 +237,9 @@ REGISTER_RS_OPERATOR(RsInferenceOperator, "rs:infer")
 REGISTER_RS_OPERATOR(RsSegmentOperator, "rs:segment")
 REGISTER_RS_OPERATOR(RsDetectOperator, "rs:detect")
 REGISTER_RS_OPERATOR(RsEmbeddingOperator, "rs:embedding")
+REGISTER_RS_OPERATOR(RsClassifyOperator, "rs:classify")
+REGISTER_RS_OPERATOR(RsChangeOperator, "rs:change")
+REGISTER_RS_OPERATOR(RsRegressOperator, "rs:regress")
 #endif
 
 void installRsOperatorProvider();
@@ -393,6 +396,9 @@ void initBuiltinRsOperators() {
   add( "rs:segment", [] { return std::make_unique<RsSegmentOperator>(); } );
   add( "rs:detect", [] { return std::make_unique<RsDetectOperator>(); } );
   add( "rs:embedding", [] { return std::make_unique<RsEmbeddingOperator>(); } );
+  add( "rs:classify", [] { return std::make_unique<RsClassifyOperator>(); } );
+  add( "rs:change", [] { return std::make_unique<RsChangeOperator>(); } );
+  add( "rs:regress", [] { return std::make_unique<RsRegressOperator>(); } );
 #endif
 }
 

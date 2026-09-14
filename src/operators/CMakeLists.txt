@@ -63,6 +63,9 @@ if(SICNU_HAS_OPENCV AND OpenCV_FOUND AND OpenCV_imgproc_FOUND)
         runtime/opencv_dnn_runtime.cpp
         runtime/onnxruntime_provider.cpp
         runtime/tile_inference_engine.cpp
+        runtime/eo_preflight.cpp
+        runtime/tensorrt_provider.cpp
+        runtime/openvino_provider.cpp
         runtime/detection_postprocess.cpp
         runtime/detection_tile_engine.cpp
         runtime/model_execution_service.cpp
@@ -270,6 +273,38 @@ endif()
 target_compile_definitions(sicnu_operators PUBLIC
   SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
+
+# --- Platform 10.0: optional deployment providers (TensorRT / OpenVINO) -----
+# Both compile ONLY when explicitly enabled AND the dependency is found; the
+# default build configuration is byte-identical to a master build without
+# them (the provider TUs degrade to typed-unavailable stubs at compile time).
+option(SICNU_ENABLE_TENSORRT "Build the optional TensorRT provider when the SDK is found" OFF)
+if(SICNU_ENABLE_TENSORRT)
+    find_path(TENSORRT_INCLUDE_DIR NvInfer.h HINTS $ENV{TENSORRT_HOME}/include)
+    find_library(TENSORRT_LIBRARY nvinfer HINTS $ENV{TENSORRT_HOME}/lib)
+    if(TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY)
+        target_include_directories(sicnu_operators PRIVATE ${TENSORRT_INCLUDE_DIR})
+        target_compile_definitions(sicnu_operators PRIVATE SICNU_WITH_TENSORRT=1)
+        target_link_libraries(sicnu_operators PRIVATE ${TENSORRT_LIBRARY})
+        message(STATUS "TensorRT model provider enabled (${TENSORRT_LIBRARY})")
+    else()
+        message(STATUS "TensorRT model provider requested but the SDK was not found")
+    endif()
+endif()
+
+option(SICNU_ENABLE_OPENVINO "Build the optional OpenVINO provider when the SDK is found" OFF)
+if(SICNU_ENABLE_OPENVINO)
+    find_path(OpenVINO_INCLUDE_DIR openvino/openvino.hpp HINTS $ENV{OPENVINO_HOME}/runtime/include $ENV{OPENVINO_HOME}/include)
+    find_library(OpenVINO_LIBRARY openvino HINTS $ENV{OPENVINO_HOME}/runtime/lib $ENV{OPENVINO_HOME}/lib)
+    if(OpenVINO_INCLUDE_DIR AND OpenVINO_LIBRARY)
+        target_include_directories(sicnu_operators PRIVATE ${OpenVINO_INCLUDE_DIR})
+        target_compile_definitions(sicnu_operators PRIVATE SICNU_WITH_OPENVINO=1)
+        target_link_libraries(sicnu_operators PRIVATE ${OpenVINO_LIBRARY})
+        message(STATUS "OpenVINO model provider enabled (${OpenVINO_LIBRARY})")
+    else()
+        message(STATUS "OpenVINO model provider requested but the SDK was not found")
+    endif()
+endif()
 
 if(SICNU_WITH_ONNX_RUNTIME AND ONNXRUNTIME_INCLUDE_DIR AND ONNXRUNTIME_LIBRARY)
     target_include_directories(sicnu_operators PRIVATE ${ONNXRUNTIME_INCLUDE_DIR}/onnxruntime ${ONNXRUNTIME_INCLUDE_DIR})

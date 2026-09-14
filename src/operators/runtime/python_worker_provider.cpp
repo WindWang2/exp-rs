@@ -345,6 +345,11 @@ class PythonWorkerSession final : public IModelRuntime
       const qint64 deadline = QDateTime::currentMSecsSinceEpoch() + timeoutMs;
       while ( !line.contains( '\n' ) )
       {
+        // Platform 10.0 security audit: drain stderr on the same cadence and
+        // keep only a bounded tail — a worker spamming stderr must not grow
+        // QProcess-internal buffers without bound while a stdout exchange
+        // waits (the stdout side is already bounded by max_body_mb).
+        drainStderr();
         if ( m_process->bytesAvailable() > 0
              || m_process->waitForReadyRead( 100 ) )
         {
@@ -368,11 +373,30 @@ class PythonWorkerSession final : public IModelRuntime
       return ReadOutcome::Ok;
     }
 
+    /// Bounded stderr drain: QProcess-internal stderr buffers are drained on
+    /// every poll and only the LAST m_maxStderrBytes bytes are kept (with an
+    /// explicit truncation marker) — a chatty worker surfaces its tail in
+    /// diagnostics without ever being able to balloon host memory.
     std::string drainStderr()
     {
       if ( !m_process )
         return {};
-      return QString::fromUtf8( m_process->readAllStandardError() ).toStdString();
+      const QByteArray fresh = m_process->readAllStandardError();
+      if ( !fresh.isEmpty() )
+      {
+        m_stderrTail.append( fresh );
+        const qint64 cap = m_maxStderrBytes;
+        if ( m_stderrTail.size() > cap )
+        {
+          m_stderrTail.remove( 0, m_stderrTail.size() - cap );
+          m_stderrTruncated = true;
+        }
+      }
+      std::string out;
+      if ( m_stderrTruncated )
+        out = "...[stderr truncated]...";
+      out += QString::fromUtf8( m_stderrTail ).toStdString();
+      return out;
     }
 
     void stopWorker()
@@ -405,6 +429,10 @@ class PythonWorkerSession final : public IModelRuntime
     /// Wire-read guard (same bound and manifest knob as the HTTP transport's
     /// response guard — runtime.provider.max_body_mb, 256 MiB default).
     qint64 m_maxReadBytes = 256 * 1024 * 1024;
+    /// Platform 10.0: bounded stderr tail (see drainStderr).
+    qint64 m_maxStderrBytes = 64 * 1024;
+    QByteArray m_stderrTail;
+    bool m_stderrTruncated = false;
     bool m_loaded = false;
     std::mutex m_inferMutex; // one request/response exchange at a time
     std::unique_ptr<QProcess> m_process;

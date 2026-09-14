@@ -425,4 +425,232 @@ Json::Value RsEmbeddingOperator::run( const Json::Value &params, RSOperatorConte
     return payload;
 }
 
+// --- rs:classify ---------------------------------------------------------------
+
+Json::Value RsClassifyOperator::schema() const
+{
+    using namespace schema;
+    Json::Value props( Json::objectValue );
+    addCommonProps( props );
+    props["output"]["description"] = "Output JSON artifact path (.json)";
+    Json::Value outputs( Json::objectValue );
+    outputs["output"] = makeStringParam( "output", "Classification artifact path (.json)", "" );
+    outputs["predicted_class"] = makeStringParam( "predicted_class", "Winner class name", "" );
+    outputs["predicted_index"] = makeIntegerParam( "predicted_index", "Winner class index", 0 );
+    outputs["backend"] = makeStringParam( "backend", "Inference backend", "" );
+    outputs["device"] = makeStringParam( "device", "Execution device (cpu/cuda:N)", "" );
+    outputs["model"] = makeStringParam( "model", "Resolved model stable id or path", "" );
+    Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
+    root["required"] = makeRequired( { "input", "model", "output" } );
+    return root;
+}
+
+Json::Value RsClassifyOperator::metadata() const
+{
+    Json::Value meta( Json::objectValue );
+    meta["group"] = group();
+    meta["displayName"] = displayName();
+    meta["description"] = description();
+    meta["tags"].append( "inference" );
+    meta["tags"].append( "classification" );
+    meta["tags"].append( "deep-learning" );
+    meta["task"] = "classification";
+    meta["gpu"] = true;
+    meta["notes"] = "Single forward pass over ONE scene window (chip-sized input bound: 2048x2048 px); class planes reduce by spatial mean-pooling; probabilities follow the manifest head confidence semantics. Typed artifact: exp-rs-classification/1.";
+    return meta;
+}
+
+Json::Value RsClassifyOperator::executionEstimate() const
+{
+    return sicnu::processing::makeStreamingEstimate( 512, 512, 4, 4, 3, 0, 64 * 1024 * 1024 );
+}
+
+Json::Value RsClassifyOperator::estimateExecution( const Json::Value &params ) const
+{
+    return commonEstimate( params );
+}
+
+Json::Value RsClassifyOperator::run( const Json::Value &params, RSOperatorContext &context )
+{
+    if ( !params.isObject() )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "Operator parameters must be a JSON object" );
+    ModelExecutionRequest request;
+    fillCommonRequest( request, params, context );
+    request.asSceneClassification = true;
+    request.requiredEoTask = "classification";
+    const runtime::ModelExecutionResult result = runtime::runModelInference( request, context );
+    return result.payload;
+}
+
+// --- rs:change -----------------------------------------------------------------
+
+Json::Value RsChangeOperator::schema() const
+{
+    using namespace schema;
+    Json::Value props( Json::objectValue );
+    props["model"] = makeStringParam( "model", "Model catalog stable id (spatial:list_models) or a weight file path" );
+    props["output"] = makeOutputParam( "output", "Output change-probability stack path", "tif" );
+    props["inputA"] = makeRasterParam( "inputA", "Before-date raster (co-registered with inputB)" );
+    props["inputB"] = makeRasterParam( "inputB", "After-date raster (co-registered with inputA)" );
+    for ( const char *bandsKey : { "bandsA", "bandsB" } )
+    {
+      Json::Value bandsParam( Json::objectValue );
+      bandsParam["name"] = bandsKey;
+      bandsParam["type"] = "array";
+      bandsParam["description"] = std::string( "1-based band numbers for " )
+                                    + ( std::string( bandsKey ) == "bandsA" ? "inputA" : "inputB" )
+                                    + " (default: all bands)";
+      Json::Value items( Json::objectValue );
+      items["type"] = "integer";
+      items["minimum"] = 1;
+      bandsParam["items"] = items;
+      props[bandsKey] = bandsParam;
+    }
+    props["device"] = makeStringParam( "device", "Execution device: auto | cpu | cuda | cuda:N (default: manifest/auto)", "" );
+    props["batchCap"] = makeIntegerParam( "batchCap", "Hard cap on tiles per forward pass (0 = manifest/budget default)", 0 );
+    Json::Value outputs( Json::objectValue );
+    addCommonOutputs( outputs, "Output change-probability stack path" );
+    outputs["outBands"] = makeIntegerParam( "outBands", "Number of bands written", 0 );
+    outputs["width"] = makeIntegerParam( "width", "Output raster width", 0 );
+    outputs["height"] = makeIntegerParam( "height", "Output raster height", 0 );
+    Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
+    root["required"] = makeRequired( { "inputA", "inputB", "model", "output" } );
+    return root;
+}
+
+Json::Value RsChangeOperator::metadata() const
+{
+    Json::Value meta( Json::objectValue );
+    meta["group"] = group();
+    meta["displayName"] = displayName();
+    meta["description"] = description();
+    meta["tags"].append( "inference" );
+    meta["tags"].append( "change_detection" );
+    meta["tags"].append( "deep-learning" );
+    meta["task"] = "change_detection";
+    meta["gpu"] = true;
+    meta["notes"] = "Two co-registered dates feed the model's declared multi-input contracts by position (A then B); the first feed is the grid authority; misaligned feeds are refused, never warped. Output is the change-probability stack; class semantics come from the manifest output classes.";
+    return meta;
+}
+
+Json::Value RsChangeOperator::executionEstimate() const
+{
+    return sicnu::processing::makeStreamingEstimate( 512, 512, 4, 4, 3, 0, 64 * 1024 * 1024 );
+}
+
+Json::Value RsChangeOperator::estimateExecution( const Json::Value &params ) const
+{
+    return commonEstimate( params );
+}
+
+Json::Value RsChangeOperator::run( const Json::Value &params, RSOperatorContext &context )
+{
+    if ( !params.isObject() )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "Operator parameters must be a JSON object" );
+    ModelExecutionRequest request;
+    request.modelReference = requireString( params, "model" );
+    request.outputPath = requireString( params, "output" );
+    request.requiredEoTask = "change_detection";
+    if ( params.isMember( "device" ) )
+    {
+      if ( !params["device"].isString() )
+        throw RSOperatorError( ErrorCode::InvalidParameter, "device must be a string" );
+      request.deviceToken = params["device"].asString();
+    }
+    request.batchSizeOverride = std::max( 0, getInt( params, "batchCap", 0 ) );
+
+    // Two-date feeds in declaration order; the manifest's multi-input
+    // contracts bind POSITIONALLY (A -> inputs[0], B -> inputs[1]) — the feed
+    // name stays empty so the engine's positional fallback applies regardless
+    // of what the manifest named its inputs.
+    for ( const char *key : { "inputA", "inputB" } )
+    {
+      runtime::NamedRasterFeed feed;
+      feed.paths.push_back( requireString( params, key ) );
+      const char *bandsKey = key == std::string( "inputA" ) ? "bandsA" : "bandsB";
+      if ( params.isMember( bandsKey ) )
+      {
+        if ( !params[bandsKey].isArray() )
+          throw RSOperatorError( ErrorCode::InvalidParameter,
+                                 std::string( bandsKey ) + " must be an array of 1-based band numbers" );
+        GdalDatasetWrapper ds;
+        if ( !ds.open( QString::fromStdString( feed.paths.front() ) ) )
+          throw RSOperatorError( ErrorCode::GdalError,
+                                 "failed to open " + std::string( key ) + ": " + feed.paths.front() );
+        for ( const auto &b : params[bandsKey] )
+        {
+          if ( !b.isIntegral() )
+            throw RSOperatorError( ErrorCode::InvalidParameter,
+                                   std::string( bandsKey ) + " entries must be integers" );
+          const int band = b.asInt();
+          if ( band < 1 || band > ds.bandCount() )
+            throw RSOperatorError( ErrorCode::InvalidParameter,
+                                   std::string( bandsKey ) + " band " + std::to_string( band )
+                                     + " out of range (1.." + std::to_string( ds.bandCount() ) + ")" );
+          feed.bands.push_back( band );
+        }
+      }
+      request.namedInputs.push_back( std::move( feed ) );
+    }
+
+    const runtime::ModelExecutionResult result = runtime::runModelInference( request, context );
+    return result.payload;
+}
+
+// --- rs:regress ----------------------------------------------------------------
+
+Json::Value RsRegressOperator::schema() const
+{
+    using namespace schema;
+    Json::Value props( Json::objectValue );
+    addCommonProps( props );
+    Json::Value outputs( Json::objectValue );
+    addCommonOutputs( outputs, "Output continuous-value raster path" );
+    outputs["outBands"] = makeIntegerParam( "outBands", "Number of continuous bands written", 0 );
+    outputs["width"] = makeIntegerParam( "width", "Output raster width", 0 );
+    outputs["height"] = makeIntegerParam( "height", "Output raster height", 0 );
+    Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
+    root["required"] = makeRequired( { "input", "model", "output" } );
+    return root;
+}
+
+Json::Value RsRegressOperator::metadata() const
+{
+    Json::Value meta( Json::objectValue );
+    meta["group"] = group();
+    meta["displayName"] = displayName();
+    meta["description"] = description();
+    meta["tags"].append( "inference" );
+    meta["tags"].append( "regression" );
+    meta["tags"].append( "deep-learning" );
+    meta["task"] = "regression";
+    meta["gpu"] = true;
+    meta["notes"] = "Continuous-value semantics: the output bands are the model's raw output channels (no argmax, no class stack). Values are physical quantities per the model contract; NoData pixels stay NoData.";
+    return meta;
+}
+
+Json::Value RsRegressOperator::executionEstimate() const
+{
+    return sicnu::processing::makeStreamingEstimate( 512, 512, 4, 4, 3, 0, 64 * 1024 * 1024 );
+}
+
+Json::Value RsRegressOperator::estimateExecution( const Json::Value &params ) const
+{
+    return commonEstimate( params );
+}
+
+Json::Value RsRegressOperator::run( const Json::Value &params, RSOperatorContext &context )
+{
+    if ( !params.isObject() )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "Operator parameters must be a JSON object" );
+    ModelExecutionRequest request;
+    fillCommonRequest( request, params, context );
+    request.requiredEoTask = "regression";
+    const runtime::ModelExecutionResult result = runtime::runModelInference( request, context );
+    return result.payload;
+}
+
 } // namespace sicnu::operators::rs

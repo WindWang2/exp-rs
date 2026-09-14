@@ -63,6 +63,15 @@ std::string decodeDetections( const cv::Mat &output, const DetectionDecodeContra
 std::vector<DetectionBox> nonMaxSuppression( const std::vector<DetectionBox> &boxes, double iouThreshold,
                                              const CancelProbe &cancelled = {} );
 
+/// Cancellation-aware NMS: keeps the exact kept-set contract of the two-
+/// argument form while running grid-accelerated (spatial hash on box
+/// coverage — bounded comparisons instead of the dense O(n²) scan). @a
+/// cancelled is polled at bounded granularity; when it turns true the pass
+/// aborts with RSOperatorError(ErrorCode::Cancelled) — never a partial
+/// kept-set, never a silent no-op.
+std::vector<DetectionBox> nonMaxSuppression( const std::vector<DetectionBox> &boxes, double iouThreshold,
+                                             const std::function<bool()> &cancelled );
+
 /// Cross-tile dedup: exact-duplicate collapse (bit-equal boxes from overlap
 /// seams) followed by the whole-raster NMS. Bounded by contract.maxDetections
 /// upstream — the accumulator refuses more, it never silently drops.
@@ -71,5 +80,10 @@ std::vector<DetectionBox> nonMaxSuppression( const std::vector<DetectionBox> &bo
 /// unchanged whether or not a probe fires.
 void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold,
                       const CancelProbe &cancelled = {} );
+
+/// Cancellation-aware dedup: same two-phase contract; @a cancelled is polled
+/// during the collapse pass and the NMS scan.
+void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold,
+                      const std::function<bool()> &cancelled );
 
 } // namespace sicnu::operators::runtime

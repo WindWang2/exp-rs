@@ -226,3 +226,7 @@ data/labs/_tmp/
 !.planning/advanced-sar-polsar-insar-10/
 .planning/advanced-sar-polsar-insar-10/*
 !.planning/advanced-sar-polsar-insar-10/*.md
+# eo-ai-model-runtime-foundation-10: track planning notes (markdown only; logs stay local).
+!.planning/eo-ai-model-runtime-foundation-10/
+.planning/eo-ai-model-runtime-foundation-10/*
+!.planning/eo-ai-model-runtime-foundation-10/*.md

@@ -8,6 +8,8 @@
 #include "operators/runtime/opencv_dnn_runtime.h"
 #include "operators/runtime/onnxruntime_provider.h"
 #include "operators/runtime/python_worker_provider.h"
+#include "operators/runtime/tensorrt_provider.h"
+#include "operators/runtime/openvino_provider.h"
 
 #include <QDateTime>
 #include <QFileInfo>
@@ -683,6 +685,11 @@ ModelRuntimeRegistry::ModelRuntimeRegistry()
   // would re-enter the static initializer.
   registerHttpProvider( *this );
   registerPythonWorkerProvider( *this );
+  // Platform 10.0: optional deployment providers — each registers itself when
+  // compiled in and degrades to a typed-unavailable stub otherwise, so the
+  // DEFAULT build never changes behavior when the dependency is absent.
+  registerTensorRTProvider( *this );
+  registerOpenVinoProvider( *this );
 }
 
 ModelRuntimePtr ModelRuntimeRegistry::acquire( const ModelInfo &model, std::string *errorMessage )
