@@ -159,6 +159,10 @@ vendor/
 !.planning/hyperspectral-spectral-intelligence-10/
 .planning/hyperspectral-spectral-intelligence-10/*
 !.planning/hyperspectral-spectral-intelligence-10/*.md
+# cn-eo-products-sensor-physics-10: track planning notes (markdown only; logs stay local).
+!.planning/cn-eo-products-sensor-physics-10/
+.planning/cn-eo-products-sensor-physics-10/*
+!.planning/cn-eo-products-sensor-physics-10/*.md
 .zcode/
 
 # IDE / editor / OS artifacts

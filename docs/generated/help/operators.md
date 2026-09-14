@@ -300,6 +300,18 @@ Spectral Angle Mapper (SAM) change angle (radians) across multi-spectral bands.
 
 **局限**：纯幅度变化（亮度）不敏感是双刃剑
 
+## Chinese Satellite Product Import（operator.rs.cn_product_import）
+
+Import any supported Chinese satellite L1A product (GF-1/2/6/7, ZY-3, ZY-1 02C, HJ-1/2 CCD) into a multi-band GeoTIFF with full provenance.
+
+**原理**：识别→检查→校验→组成解析→角色映射→可选定标（DN→辐亮度）→堆栈→溯源；结果携带 sidecar 世代、完整性与缺失声明字段。
+
+**适用**：不确定产品家族时或 Agent 自动化数据准备的统一入口。
+
+**假设**：产品为受支持的国产 L1A 家族
+
+**局限**：未适配家族拒绝而不回退；部分波段缺定标系数时拒绝定标
+
 ## Connected Components（operator.rs.connected_components）
 
 Deterministic connected-component labeling of a 0/1 mask (raster-order compact labels).
@@ -481,6 +493,30 @@ Principal Component Analysis pan-sharpening fusion.
 **原理**：MS 做 PCA，PC1 与 PAN 直方图匹配后替换，逆变换输出。
 
 **局限**：统计依赖整幅场景
+
+## Gaofen Product Import（operator.rs.gaofen_import）
+
+Import a Gaofen-1/2/6 or GF-7 L1A product (PMS/WFV, FWD/BWD) into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.
+
+**原理**：读取 CRESDA sidecar XML，按传感器画像映射波段角色，堆栈为多波段 GeoTIFF 并标注声明元数据。
+
+**适用**：高分系列数据进入处理链的第一步。
+
+**假设**：完整产品包（sidecar XML + 同名 TIFF）
+
+**局限**：GF-3/GF-4/GF-5 等未适配家族会被拒绝并给出原因
+
+## Huanjing CCD Product Import（operator.rs.hj_import）
+
+Import a Huanjing (HJ-1A/1B or HJ-2A/B) CCD L1A product into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.
+
+**原理**：读取 CRESDA sidecar，映射 CCD 四波段角色，堆栈为多波段 GeoTIFF。
+
+**适用**：环境减灾数据大区域 NDVI/水体监测的第一步。
+
+**假设**：完整产品包
+
+**局限**：HJ-1 IRS 与 HJ-2 HSI 载荷不支持
 
 ## Image Enhancement（operator.rs.image_enhancement）
 
@@ -1239,4 +1275,16 @@ Topographic correction of reflectance over a co-registered DEM (cosine, C/SCS+C,
 **局限**：陡坡低光照角可能过补偿；模型选择影响植被坡面一致性
 
 深入阅读：docs/processing/grid-and-radiometric-policy.md
+
+## Ziyuan-3 Product Import（operator.rs.zy3_import）
+
+Import a Ziyuan-3 L1A product into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.
+
+**原理**：按声明波段清单区分全色与多光谱，堆栈为多波段 GeoTIFF 并标注元数据。
+
+**适用**：ZY-3 立体测绘/多光谱数据进入处理链的第一步。
+
+**假设**：完整产品包
+
+**局限**：ZY-1 02D/02E AHSI 高光谱不支持
 

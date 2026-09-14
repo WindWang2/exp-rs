@@ -753,6 +753,18 @@
 ### parameter.rs.change_sam.output
 
 
+### parameter.rs.cn_product_import.apply_calibration
+
+
+### parameter.rs.cn_product_import.bands
+
+
+### parameter.rs.cn_product_import.input
+
+
+### parameter.rs.cn_product_import.output
+
+
 ### parameter.rs.connected_components.band
 
 
@@ -1045,6 +1057,30 @@
 
 
 ### parameter.rs.fusion_linear.redIdx
+
+
+### parameter.rs.hj_import.apply_calibration
+
+
+### parameter.rs.hj_import.bands
+
+
+### parameter.rs.hj_import.input
+
+
+### parameter.rs.hj_import.output
+
+
+### parameter.rs.gaofen_import.apply_calibration
+
+
+### parameter.rs.gaofen_import.bands
+
+
+### parameter.rs.gaofen_import.input
+
+
+### parameter.rs.gaofen_import.output
 
 
 ### parameter.rs.fusion_pca.blueIdx
@@ -2742,6 +2778,18 @@
 
 
 ### parameter.rs.threshold_raster.thresholdMethod
+
+
+### parameter.rs.zy3_import.apply_calibration
+
+
+### parameter.rs.zy3_import.bands
+
+
+### parameter.rs.zy3_import.input
+
+
+### parameter.rs.zy3_import.output
 
 
 ### parameter.rs.topographic_correction.dem

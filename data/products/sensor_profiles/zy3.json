@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "source": "ZY-3 published product specifications. wavelength_nm is the documented spectral-range midpoint; FWHM is not published here and therefore not stated.",
+  "sensors": {
+    "zy3_nad_ms": {
+      "satellite": "ZY3",
+      "instrument": "NAD",
+      "sensor_mode": "NAD-MS",
+      "modality": "optical",
+      "gsd_m": 5.8,
+      "pan_variant": "zy3_pan",
+      "constituents": [ "sidecar_xml", "image_tiff", "rpc_rpb" ],
+      "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
+      "qa_vocabulary": [],
+      "bands": [
+        { "band": "B1", "role": "blue", "wavelength_nm": 485.0, "spectral_range_um": "0.45-0.52", "gsd_m": 5.8, "note": "nadir multispectral 5.8 m" },
+        { "band": "B2", "role": "green", "wavelength_nm": 555.0, "spectral_range_um": "0.52-0.59", "gsd_m": 5.8 },
+        { "band": "B3", "role": "red", "wavelength_nm": 660.0, "spectral_range_um": "0.63-0.69", "gsd_m": 5.8 },
+        { "band": "B4", "role": "nir", "wavelength_nm": 830.0, "spectral_range_um": "0.77-0.89", "gsd_m": 5.8 }
+      ]
+    },
+    "zy3_pan": {
+      "satellite": "ZY3",
+      "instrument": "NAD",
+      "sensor_mode": "PAN",
+      "modality": "optical",
+      "gsd_m": 2.1,
+      "ms_variant": "zy3_nad_ms",
+      "constituents": [ "sidecar_xml", "image_tiff", "rpc_rpb" ],
+      "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
+      "qa_vocabulary": [],
+      "bands": [
+        { "band": "B1", "role": "panchromatic", "wavelength_nm": 550.0, "spectral_range_um": "0.50-0.60", "gsd_m": 2.1, "note": "panchromatic 2.1 m (TLC and NAD cameras)" }
+      ]
+    },
+    "zy3_fwd": {
+      "satellite": "ZY3",
+      "instrument": "FWD",
+      "sensor_mode": "FWD",
+      "modality": "optical",
+      "gsd_m": 3.5,
+      "constituents": [ "sidecar_xml", "image_tiff", "rpc_rpb" ],
+      "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
+      "qa_vocabulary": [],
+      "bands": [
+        { "band": "B1", "role": "panchromatic", "wavelength_nm": 550.0, "spectral_range_um": "0.50-0.60", "gsd_m": 3.5, "note": "forward camera panchromatic 3.5 m" }
+      ]
+    },
+    "zy3_bwd": {
+      "satellite": "ZY3",
+      "instrument": "BWD",
+      "sensor_mode": "BWD",
+      "modality": "optical",
+      "gsd_m": 3.5,
+      "constituents": [ "sidecar_xml", "image_tiff", "rpc_rpb" ],
+      "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
+      "qa_vocabulary": [],
+      "bands": [
+        { "band": "B1", "role": "panchromatic", "wavelength_nm": 550.0, "spectral_range_um": "0.50-0.60", "gsd_m": 3.5, "note": "backward camera panchromatic 3.5 m" }
+      ]
+    }
+  }
+}

@@ -40,6 +40,8 @@ QString familyDisplayName( const QString &family )
     return QStringLiteral( "Sentinel-2" );
   if ( family == QLatin1String( "modis" ) )
     return QStringLiteral( "MODIS" );
+  if ( family == QLatin1String( "cn" ) )
+    return QObject::tr( "Chinese Satellite (GF/ZY-3/ZY-1/HJ)" );
   return QObject::tr("Remote-Sensing Products" );
 }
 
@@ -349,6 +351,8 @@ QString ProductImportDialog::helpTool() const
     return QStringLiteral( "sentinel2_import" );
   if ( m_productFamily == QLatin1String( "modis" ) )
     return QStringLiteral( "modis_import" );
+  if ( m_productFamily == QLatin1String( "cn" ) )
+    return QStringLiteral( "cn_product_import" );
   return QStringLiteral( "product_import" );
 }
 

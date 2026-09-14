@@ -928,6 +928,7 @@ ProductAdapterRegistry::ProductAdapterRegistry()
   // GenericRaster fallback.
   mAdapters.push_back( makeGaofenAdapter() );
   mAdapters.push_back( makeZy3Adapter() );
+  mAdapters.push_back( makeZy1Adapter() );
   mAdapters.push_back( makeHjAdapter() );
   mAdapters.push_back( std::make_unique<GenericRasterAdapter>() );
 }

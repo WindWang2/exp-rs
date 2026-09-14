@@ -1,126 +1,114 @@
 {
-  "capability" : 
-  {
-    "applicability" : 
-    {
-      "land_cover" : 
-      [
-        "\u8015\u5730",
-        "\u6c34\u4f53",
-        "\u4e0d\u900f\u6c34\u9762"
+  "capability": {
+    "applicability": {
+      "land_cover": [
+        "任意地物"
       ],
-      "scenes" : 
-      [
-        "\u519c\u4e1a\u533a\u5236\u56fe",
-        "\u57ce\u5e02\u9065\u611f"
+      "scenes": [
+        "高分系列数据处理入口",
+        "国内教学数据标准化导入"
       ]
-    },>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
-    "band_roles" : {},
-    "crs" : 
-    {
-      "requires_projected" : false,
-      "requires_shared_grid" : false
     },
-    "determinism" : 
-    {
-      "grade" : "bit_exact",
-      "large_raster_safe" : false,
-      "memory_policy" : "full_raster",
-      "side_effects" : false,
-      "stochastic" : false
+    "band_roles": {},
+    "crs": {
+      "requires_projected": false,
+      "requires_shared_grid": false
     },
-    "failure_modes" : 
-    [
+    "determinism": {
+      "grade": "bit_exact",
+      "large_raster_safe": false,
+      "memory_policy": "full_raster",
+      "side_effects": false,
+      "stochastic": false
+    },
+    "failure_modes": [
       {
-        "code" : "DATASET_NOT_FOUND",
-        "remedy" : "\u68c0\u67e5\u4ea7\u54c1\u76ee\u5f55\u4e0e CRESDA XML \u662f\u5426\u5b8c\u6574",
-        "when" : "\u4ea7\u54c1\u76ee\u5f55\u6216 XML \u4fa7\u8f66\u7f3a\u5931"
+        "code": "DATASET_NOT_FOUND",
+        "when": "产品目录缺少 sidecar XML 或测量 TIFF",
+        "remedy": "检查 CRESDA 产品包的 -MSS1.xml/-PAN1.xml 与同名 TIFF"
       },
       {
-        "code" : "EXECUTION_FAILED",
-        "remedy" : "\u786e\u8ba4 L1A \u4ea7\u54c1\u7ea7\u522b\u4e0e\u6ce2\u6bb5\u5217\u8868",
-        "when" : "\u6ce2\u6bb5\u58f0\u660e\u4e0e\u6587\u4ef6\u4e0d\u7b26"
+        "code": "NOT_SUPPORTED",
+        "when": "输入为 GF-3/GF-4/GF-5 等未适配家族",
+        "remedy": "查看诊断原因；SAR/高光谱产品暂不支持"
       }
-    ],>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
-    "family" : "io",
-    "io" : 
-    {
-      "inputs" : [],
-      "outputs" : 
-      [
+    ],
+    "family": "io",
+    "io": {
+      "inputs": [],
+      "outputs": [
         {
-          "data_kind" : "integer",
-          "name" : "bandCount",
-          "required" : true
+          "data_kind": "integer",
+          "name": "bandCount",
+          "required": true
         },
         {
-          "data_kind" : "raster",
-          "file_format" : "tif",
-          "name" : "output",
-          "required" : true
+          "data_kind": "raster",
+          "file_format": "tif",
+          "name": "output",
+          "required": true
         },
         {
-          "data_kind" : "string",
-          "name" : "productId",
-          "required" : true
+          "data_kind": "string",
+          "name": "productId",
+          "required": true
         }
       ],
-      "parameters" : 
-      [
+      "parameters": [
         {
-          "name" : "bands",
-          "required" : false,
-          "type" : "string"
+          "default": "false",
+          "name": "apply_calibration",
+          "required": false,
+          "type": "boolean"
         },
         {
-          "name" : "input",
-          "required" : true,
-          "type" : "string"
+          "name": "bands",
+          "required": false,
+          "type": "string"
         },
         {
-          "name" : "output",
-          "required" : true,
-          "type" : "string"
+          "name": "input",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "output",
+          "required": true,
+          "type": "string"
         }
       ]
     },
-    "limitations" : 
-    [
-      "Import a Gaofen-1/2/6 L1A product (CRESDA sidecar XML + TIFF) into a multi-band GeoTIFF with declared calibration/sun geometry stamped as SICNU_* metadata."
-    ],>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
-    "modality" : 
-    [
+    "limitations": [],
+    "modality": [
       "optical"
     ],
-    "operator_group" : "data-formats",
-    "prerequisites" : 
-    [
-      "Product directory with CRESDA sidecar XML and TIFF (offline)"
+    "operator_group": "data-formats",
+    "prerequisites": [
+      "Product directory with CRESDA sidecar XML and TIFF (offline)",
+      "离线可用：仅解析产品自带文件；大部分批次需另查发布定标表做 TOA 转换。"
     ],
-    "schema_version" : 2,
-    "summary" : "GF-1/2/6 L1A \u4ea7\u54c1\uff08CRESDA XML \u4fa7\u8f66\uff09\u5bfc\u5165\u4e3a\u591a\u6ce2\u6bb5 GeoTIFF\uff0c\u5b9a\u6807\u4e0e\u592a\u9633\u51e0\u4f55\u5199\u5165 SICNU_* \u5143\u6570\u636e\u3002",
-    "teaching_use" : 
-    {
-      "concepts" : 
-      [
-        "\u4ea7\u54c1\u5bfc\u5165",
-        "\u5b9a\u6807\u5143\u6570\u636e"
+    "schema_version": 2,
+    "summary": "高分数据导入：读取 GF-1/2/6 PMS/WFV 与 GF-7 FWD/BWD L1A 产品包（CRESDA sidecar XML + TIFF），自动解析元数据、映射波段角色并标注太阳几何与定标系数。",
+    "teaching_use": {
+      "concepts": [
+        "CRESDA 产品结构",
+        "波段角色",
+        "辐射定标声明",
+        "太阳几何"
       ],
-      "courses" : 
-      [
-        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      "courses": [
+        "遥感数据处理"
       ],
-      "exercise" : "\u4e0b\u8f7d\u4e00\u666f GF-1 WFV \u6570\u636e\uff0c\u7528 rs:gaofen_import \u5bfc\u5165\u540e\u68c0\u67e5 SICNU_* \u5143\u6570\u636e\u5e76\u8ba1\u7b97 NDVI\u3002"
-    }>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
+      "exercise": "导入 GF-1 WFV 四波段影像并直接计算 NDVI（波段角色自动解析）。"
+    }
   },
-  "description" : "Import a Gaofen-1/2/6 L1A product (PMS/WFV) into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.",
-  "display_name" : "Gaofen Product Import",
-  "id" : "rs:gaofen_import",
-  "input" : "",
-  "output" : "raster",
-  "schema_version" : 2,
-  "tags" : 
-  [
+  "description": "Import a Gaofen-1/2/6 L1A product (PMS/WFV) into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.",
+  "display_name": "Gaofen Product Import",
+  "id": "rs:gaofen_import",
+  "input": "",
+  "output": "raster",
+  "schema_version": 2,
+  "tags": [
     "gaofen",
     "cn-satellite",
     "import",

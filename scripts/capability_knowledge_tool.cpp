@@ -3,7 +3,7 @@
 // D8 capability knowledge generator (ADR 0146). One binary, three jobs:
 //
 //   gen-meta   Derive the v2 capability sidecars for every registered rs:
-//              operator>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
+//              operator
 //              from the LIVE AlgorithmDescriptors and write them under
 //              data/processing/algorithm_meta/capability/. Authored keys in
 //              existing files (summary / failure_modes / applicability /
@@ -161,7 +161,7 @@ int cmdGenMeta( const QString &root )
   // Monotone floor (history: 111 at D8, 114 since CN-satellite imports,
   // 121 with the 7 platform-10 SAR operators). Guards against a silently
   // half-registered catalog, not against growth; per-operator gates bind the set.
-  if ( rsDescriptors.size() < 121 )>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
+  if ( rsDescriptors.size() < 121 )
   {
     std::cerr << "gen-meta: expected at least 121 rs: descriptors, found " << rsDescriptors.size()
               << " — refusing to write a partial catalog\n";

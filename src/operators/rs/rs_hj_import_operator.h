@@ -24,8 +24,9 @@ public:
     std::string displayName() const override { return "Huanjing CCD Product Import"; }
     std::string group() const override { return "data-formats"; }
     std::string description() const override {
-        return "Import a HJ-1A/1B CCD L1A product into a multi-band GeoTIFF with band roles, "
-               "sun geometry and declared calibration metadata.";
+        return "Import a Huanjing (HJ-1A/1B or HJ-2A/B) CCD L1A product into a "
+               "multi-band GeoTIFF with band roles, sun geometry and declared "
+               "calibration metadata.";
     }
 
     Json::Value schema() const override;

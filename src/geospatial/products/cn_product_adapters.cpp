@@ -227,17 +227,22 @@ ProductAssets enumerateCnProduct( const std::string &path, ProductKind kind,
   return result;
 }
 
-/// The GF-1/2/6 family: GF{1,2,6}_{PMS,WFV} naming (files and directories).
-class GaofenAdapter final : public ProductAdapter
+/// One parameterized adapter per CN product family (the family semantics —
+/// sidecar location, metadata parsing, registry-backed role mapping — are
+/// shared; only the identity key differs).
+class CnAdapter final : public ProductAdapter
 {
   public:
-    std::string id() const override { return "gaofen_product"; }
-    ProductKind kind() const override { return ProductKind::GaofenProduct; }
+    CnAdapter( ProductKind kind, std::string id )
+      : mKind( kind ), mId( std::move( id ) ) {}
+
+    std::string id() const override { return mId; }
+    ProductKind kind() const override { return mKind; }
 
     bool accepts( const std::string &path ) const override
     {
       const CnProductIdentity identity = cnIdentifyProduct( path );
-      if ( identity.supported && identity.kindName == id() )
+      if ( identity.supported && identity.kindName == mId )
         return true;
       if ( !isDirectoryLocal( path ) )
         return false;
@@ -250,7 +255,7 @@ class GaofenAdapter final : public ProductAdapter
         const std::u8string u8 = it->path().generic_u8string();
         const std::string entry( reinterpret_cast<const char *>( u8.data() ), u8.size() );
         const CnProductIdentity entryIdentity = cnIdentifyProduct( entry );
-        if ( entryIdentity.supported && entryIdentity.kindName == id() )
+        if ( entryIdentity.supported && entryIdentity.kindName == mId )
           return true;
       }
       return false;
@@ -258,95 +263,34 @@ class GaofenAdapter final : public ProductAdapter
 
     ProductAssets enumerate( const std::string &path ) const override
     {
-      return enumerateCnProduct( path, kind(), id(), "gaofen_product" );
-    }
-};
-
-/// The ZY-3 family: ZY3_{TLC,NAD,FWD,BWD} naming.
-class Zy3Adapter final : public ProductAdapter
-{
-  public:
-    std::string id() const override { return "zy3_product"; }
-    ProductKind kind() const override { return ProductKind::Zy3Product; }
-
-    bool accepts( const std::string &path ) const override
-    {
-      const CnProductIdentity identity = cnIdentifyProduct( path );
-      if ( identity.supported && identity.kindName == id() )
-        return true;
-      if ( !isDirectoryLocal( path ) )
-        return false;
-      std::error_code ec;
-      int visited = 0;
-      for ( std::filesystem::directory_iterator it( std::filesystem::u8path( path ), ec ), end;
-            !ec && it != end && visited < 512; it.increment( ec ) )
-      {
-        ++visited;
-        const std::u8string u8 = it->path().generic_u8string();
-        const std::string entry( reinterpret_cast<const char *>( u8.data() ), u8.size() );
-        const CnProductIdentity entryIdentity = cnIdentifyProduct( entry );
-        if ( entryIdentity.supported && entryIdentity.kindName == id() )
-          return true;
-      }
-      return false;
+      return enumerateCnProduct( path, mKind, mId, mId.c_str() );
     }
 
-    ProductAssets enumerate( const std::string &path ) const override
-    {
-      return enumerateCnProduct( path, kind(), id(), "zy3_product" );
-    }
-};
-
-/// The HJ-1A/1B CCD family: HJ1A-CCD*/HJ1B-CCD* naming.
-class HjAdapter final : public ProductAdapter
-{
-  public:
-    std::string id() const override { return "hj_ccd_product"; }
-    ProductKind kind() const override { return ProductKind::HjCcdProduct; }
-
-    bool accepts( const std::string &path ) const override
-    {
-      const CnProductIdentity identity = cnIdentifyProduct( path );
-      if ( identity.supported && identity.kindName == id() )
-        return true;
-      if ( !isDirectoryLocal( path ) )
-        return false;
-      std::error_code ec;
-      int visited = 0;
-      for ( std::filesystem::directory_iterator it( std::filesystem::u8path( path ), ec ), end;
-            !ec && it != end && visited < 512; it.increment( ec ) )
-      {
-        ++visited;
-        const std::u8string u8 = it->path().generic_u8string();
-        const std::string entry( reinterpret_cast<const char *>( u8.data() ), u8.size() );
-        const CnProductIdentity entryIdentity = cnIdentifyProduct( entry );
-        if ( entryIdentity.supported && entryIdentity.kindName == id() )
-          return true;
-      }
-      return false;
-    }
-
-    ProductAssets enumerate( const std::string &path ) const override
-    {
-      return enumerateCnProduct( path, kind(), id(), "hj_ccd_product" );
-    }
+  private:
+    ProductKind mKind;
+    std::string mId;
 };
 
 } // namespace
 
 std::unique_ptr<ProductAdapter> makeGaofenAdapter()
 {
-  return std::make_unique<GaofenAdapter>();
+  return std::make_unique<CnAdapter>( ProductKind::GaofenProduct, "gaofen_product" );
 }
 
 std::unique_ptr<ProductAdapter> makeZy3Adapter()
 {
-  return std::make_unique<Zy3Adapter>();
+  return std::make_unique<CnAdapter>( ProductKind::Zy3Product, "zy3_product" );
+}
+
+std::unique_ptr<ProductAdapter> makeZy1Adapter()
+{
+  return std::make_unique<CnAdapter>( ProductKind::Zy1Product, "zy1_product" );
 }
 
 std::unique_ptr<ProductAdapter> makeHjAdapter()
 {
-  return std::make_unique<HjAdapter>();
+  return std::make_unique<CnAdapter>( ProductKind::HjCcdProduct, "hj_ccd_product" );
 }
 
 } // namespace sicnu::geo

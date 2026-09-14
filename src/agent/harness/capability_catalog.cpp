@@ -129,7 +129,7 @@ bool isDataKindType( const std::string &kind )
 }
 
 /// group()-based fallback for the canonical family map (id map below covers
-/// all 111 rs: operators; this keeps future operators classifiable).
+/// all 115 rs: operators; this keeps future operators classifiable).
 std::string familyForGroup( const std::string &group )
 {
   static const std::map<std::string, std::string> kGroupFamily = {
@@ -154,7 +154,7 @@ std::string familyForGroup( const std::string &group )
   return it == kGroupFamily.end() ? std::string( "io" ) : it->second;
 }
 
-/// Authored id → family map: complete over the 111 rs: operators (the guard
+/// Authored id → family map: complete over the 115 rs: operators (the guard
 /// test pins totality). One line per operator keeps review diffs readable.
 const std::map<std::string, std::string> &familyMap()
 {
@@ -277,10 +277,14 @@ const std::map<std::string, std::string> &familyMap()
     { "rs:threshold_raster", "raster_spatial" },
     { "rs:zonal_stats", "raster_spatial" },
     // io: sensor import / georeference entry points
+    { "rs:cn_product_import", "io" },
+    { "rs:gaofen_import", "io" },
+    { "rs:hj_import", "io" },
     { "rs:landsat_import", "io" },
     { "rs:modis_georeference", "io" },
     { "rs:modis_import", "io" },
     { "rs:sentinel2_import", "io" },
+    { "rs:zy3_import", "io" },
   };
   return kMap;
 }
@@ -508,7 +512,7 @@ Json::Value deriveCapabilityBlock( const sicnu::processing::AlgorithmDescriptor 
   block[ "limitations" ] = mergeStringLists( derivedLimits, authoredCapability[ "limitations" ] );
 
   // Authored-only enrichment: passthrough, empty scaffolding when absent so
-  // the schema stays uniform across all 111 sidecars.
+  // the schema stays uniform across all 115 sidecars.
   block[ "summary" ] = authoredCapability[ "summary" ].isString()
     ? authoredCapability[ "summary" ]
     : Json::Value( "" );

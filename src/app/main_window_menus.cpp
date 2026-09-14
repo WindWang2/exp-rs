@@ -152,6 +152,9 @@ void QgisDesktopWindow::setupMenu()
     tip( projectMenu->addAction( ic( "i_ort" ), tr( "Import Sentinel-2 Product..." ),
                                  this, [this]() { openProductImportDialog( QStringLiteral( "sentinel2" ) ); } ),
          tr( "Import a Sentinel-2 SAFE product (a .SAFE directory containing MTD_MSI*.xml)." ) );
+    tip( projectMenu->addAction( ic( "i_ort" ), tr( "导入国产卫星产品..." ),
+                                 this, [this]() { openProductImportDialog( QStringLiteral( "cn" ) ); } ),
+         tr( "Import a Chinese satellite L1A product (GF-1/2/6/7, ZY-3, ZY-1 02C, HJ-1/2 CCD): band roles, sun geometry, declared calibration and sidecar generation detected from the CRESDA sidecar." ) );
     tip( addCmd( projectMenu, "project.stacBrowse" ),
          tr( "Browses STAC catalogs to find remote-sensing data." ) );
     projectMenu->addSeparator();

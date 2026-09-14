@@ -164,6 +164,13 @@ struct XmlPathScan
   std::vector<std::string> pathStack;
   std::string currentPattern;
   std::ostringstream buffer;
+  // Generation + unknown-element diagnostics (ADR 0147): root element name,
+  // every DIRECT CHILD of the root seen (bounded), and the child names the
+  // whitelist actually consumes. (Depth-2, not depth-1: the root itself is
+  // the document element and is never a whitelist entry.)
+  std::string rootElement;
+  std::vector<std::string> topLevelSeen;
+  std::vector<std::string> consumedTopLevel;
   // Record mode: inside a per-band <BandCalibration> scope the direct
   // children (BandID/Gain/Offset/Bias) are captured per element so partial
   // declarations can never be paired positionally across the document.
@@ -219,6 +226,19 @@ void xmlPathStart( void *user, const XML_Char *element, const XML_Char ** )
   scan->buffer.str( std::string() );
   scan->buffer.clear();
   scan->currentPattern.clear();
+  if ( scan->pathStack.size() == 1 )
+  {
+    if ( scan->rootElement.empty() )
+      scan->rootElement = scan->pathStack.back();
+  }
+  else if ( scan->pathStack.size() == 2 )
+  {
+    constexpr std::size_t kMaxTopLevelNames = 64;
+    if ( scan->topLevelSeen.size() < kMaxTopLevelNames &&
+         std::find( scan->topLevelSeen.begin(), scan->topLevelSeen.end(),
+                    scan->pathStack.back() ) == scan->topLevelSeen.end() )
+      scan->topLevelSeen.push_back( scan->pathStack.back() );
+  }
   if ( !scan->recordActive && scan->pathStack.back() == "bandcalibration" )
   {
     scan->recordActive = true;
@@ -286,6 +306,14 @@ XmlPathScan scanXmlPaths( const std::string &path, std::vector<std::string> watc
 
   XmlPathScan scan;
   scan.watched = std::move( watchedPatterns );
+  for ( const std::string &pattern : scan.watched )
+  {
+    const std::size_t sep = pattern.find( "::" );
+    const std::string first = sep == std::string::npos ? pattern : pattern.substr( 0, sep );
+    if ( std::find( scan.consumedTopLevel.begin(), scan.consumedTopLevel.end(), first ) ==
+         scan.consumedTopLevel.end() )
+      scan.consumedTopLevel.push_back( first );
+  }
   XML_Parser parser = XML_ParserCreate( nullptr );
   if ( !parser )
     throw GeoError( ErrorCode::OpenFailed, "Cannot allocate XML parser for " + path );
@@ -347,12 +375,18 @@ const FamilyPattern kSupportedPatterns[] = {
   { "GF2_PMS", "GF2", "PMS", "gf2_pms", "gaofen_product" },
   { "GF6_PMS", "GF6", "PMS", "gf6_pms", "gaofen_product" },
   { "GF6_WFV", "GF6", "WFV", "gf6_wfv", "gaofen_product" },
+  { "GF7_FWD", "GF7", "FWD", "gf7_fwd", "gaofen_product" },
+  { "GF7_BWD", "GF7", "BWD", "gf7_bwd", "gaofen_product" },
   { "ZY3_TLC", "ZY3", "TLC", "zy3_pan", "zy3_product" },
   { "ZY3_NAD", "ZY3", "NAD", "zy3_nad_ms", "zy3_product" },
-  { "ZY3_FWD", "ZY3", "FWD", "zy3_pan", "zy3_product" },
-  { "ZY3_BWD", "ZY3", "BWD", "zy3_pan", "zy3_product" },
+  { "ZY3_FWD", "ZY3", "FWD", "zy3_fwd", "zy3_product" },
+  { "ZY3_BWD", "ZY3", "BWD", "zy3_bwd", "zy3_product" },
+  { "ZY1_02C_PMS", "ZY1_02C", "PMS", "zy1_02c_pms", "zy1_product" },
+  { "ZY1_02C_HRC", "ZY1_02C", "HRC", "zy1_02c_hrc", "zy1_product" },
   { "HJ1A-CCD", "HJ1A", "CCD", "hj_ccd", "hj_ccd_product" },
   { "HJ1B-CCD", "HJ1B", "CCD", "hj_ccd", "hj_ccd_product" },
+  { "HJ2A-CCD", "HJ2A", "CCD", "hj2_ccd", "hj_ccd_product" },
+  { "HJ2B-CCD", "HJ2B", "CCD", "hj2_ccd", "hj_ccd_product" },
 };
 
 /// Reasons for CN-family names we deliberately refuse (DECISIONS D-01:
@@ -379,10 +413,17 @@ bool unsupportedFamilyReason( const std::string &upper, std::string &reason )
     reason = "Huanjing-1C (SAR) products are not adapted; only HJ-1A/1B CCD";
     return true;
   }
+  // GF-7 names outside the two adapted cameras (FWD/BWD, matched above) stay
+  // recognized-but-refused instead of falling through as unknown.
+  if ( pathHas( "GF7_" ) || pathHas( "GF7-" ) )
+  {
+    reason = "only GF-7 FWD/BWD camera products are adapted; other GF-7 products are not";
+    return true;
+  }
   if ( pathHas( "GF3_" ) || pathHas( "GF3-" ) )
   {
-    reason = "Gaofen-3 (GF-3) is a SAR mission; only GF-1/2/6 PMS/WFV optical "
-             "products are adapted";
+    reason = "Gaofen-3 (GF-3) is a SAR mission; only the GF optical families "
+             "GF-1/2/6 PMS/WFV and GF-7 FWD/BWD are adapted";
     return true;
   }
   if ( pathHas( "GF4_" ) || pathHas( "GF4-" ) )
@@ -395,21 +436,20 @@ bool unsupportedFamilyReason( const std::string &upper, std::string &reason )
     reason = "Gaofen-5 (GF-5) hyperspectral/AHSI products are not adapted";
     return true;
   }
-  if ( pathHas( "GF7_" ) || pathHas( "GF7-" ) )
-  {
-    reason = "Gaofen-7 (GF-7) stereo mapping products are not adapted";
-    return true;
-  }
+  // ZY-1 02C PMS/HRC is supported (checked above); the rest of the ZY-1
+  // family (02B, 02D/02E AHSI hyperspectral, IRS) and ZY-5 stay refused.
   if ( base.rfind( "ZY1", 0 ) == 0 || base.rfind( "ZY5", 0 ) == 0 ||
        upper.find( "ZY1_" ) != std::string::npos || upper.find( "ZY5_" ) != std::string::npos )
   {
-    reason = "only ZY-3 TLC/NAD/FWD/BWD products are adapted";
+    reason = "only ZY-3 TLC/NAD/FWD/BWD and ZY-1 02C PMS/HRC products are adapted; "
+             "ZY-1 02B/02D/02E (AHSI) and ZY-5 are not";
     return true;
   }
+  // HJ-2 (02 batch) CCD is supported (checked above); HJ-2 HSI/AIS stay refused.
   if ( base.rfind( "HJ2", 0 ) == 0 || upper.find( "HJ2A-" ) != std::string::npos ||
        upper.find( "HJ2B-" ) != std::string::npos )
   {
-    reason = "HJ-2 (02 batch) CCD/HSI products are not adapted; only HJ-1A/1B CCD";
+    reason = "only HJ-2 A/B CCD products are adapted; HJ-2 HSI/AIS payloads are not";
     return true;
   }
   if ( ( base.rfind( "HJ1A", 0 ) == 0 || base.rfind( "HJ1B", 0 ) == 0 ) &&
@@ -426,17 +466,11 @@ bool unsupportedFamilyReason( const std::string &upper, std::string &reason )
   return false;
 }
 
-/// Band-order table key for ZY-3 NAD: the same sensor id carries both a
-/// panchromatic and a multispectral product; the sidecar's declared band
-/// count decides (1 band → pan, ≥2 → multispectral). Never guessed from
-/// band numbers — from the declared band inventory.
-std::string zy3NadKey( const ProductMetadata &metadata )
-{
-  if ( metadata.declaredBandIds.size() == 1 )
-    return "zy3_pan";
-  return "zy3_nad_ms";
-}
-
+/// Band-order key resolution for sensors that carry pan and multispectral
+/// products under the same band letters is registry-driven: the profile's
+/// `pan_variant` names the panchromatic sibling, and the sidecar's declared
+/// shape (ModeID=PAN or a 1-band inventory) selects it. Never guessed from
+/// band numbers — from the declared band inventory plus the registry link.
 std::string extraValue( const ProductMetadata &metadata, const char *key )
 {
   for ( const auto &entry : metadata.extra )
@@ -452,6 +486,38 @@ std::string extraValue( const ProductMetadata &metadata, const char *key )
 bool looksLikeCresdaXml( const XmlPathScan &scan )
 {
   return !scanText( scan, "satelliteid" ).empty() || !scanText( scan, "productid" ).empty();
+}
+
+/// Sidecar generation id (ADR 0147): legacy CRESDA `<MetaInfo>` vs current
+/// `<ProductMetaData>`; a recognized CRESDA document with any other root
+/// stays parseable (the whitelist still matches by tag) and is reported as
+/// "cresda_unknown_root" — explicit, never silently treated as a known
+/// generation.
+std::string cresdaGeneration( const std::string &rootElement )
+{
+  if ( rootElement == "metainfo" )
+    return "cresda_legacy_metainfo";
+  if ( rootElement == "productmetadata" || rootElement == "productmetadataversion" )
+    return "cresda_current_metadata";
+  return "cresda_unknown_root";
+}
+
+/// Bounded report of top-level elements the whitelist did not consume
+/// (forward-compatibility diagnostic — unknown does not mean fatal).
+Json::Value unknownTopLevelReport( const XmlPathScan &scan )
+{
+  Json::Value unknown( Json::arrayValue );
+  constexpr std::size_t kMaxReported = 16;
+  for ( const std::string &name : scan.topLevelSeen )
+  {
+    if ( std::find( scan.consumedTopLevel.begin(), scan.consumedTopLevel.end(), name ) !=
+         scan.consumedTopLevel.end() )
+      continue;
+    if ( unknown.size() >= static_cast<Json::ArrayIndex>( kMaxReported ) )
+      break;
+    unknown.append( name );
+  }
+  return unknown;
 }
 
 /// Normalizes a declared receive date/time into ISO-8601. Accepts
@@ -538,6 +604,7 @@ ProductMetadata parseCresdaXml( const std::string &xmlPath, const CnProductIdent
     throw GeoError( ErrorCode::UnsupportedProduct,
                     "Sidecar does not declare a CRESDA product (no SatelliteID/ProductID)", details );
   }
+
 
   ProductMetadata product;
   product.productId = scanText( scan, "productid" );
@@ -790,150 +857,38 @@ ProductMetadata parseCresdaXml( const std::string &xmlPath, const CnProductIdent
     stopTime = normalizeAcquisitionTime( std::string(), scanText( scan, "stoptime" ) );
   if ( !stopTime.empty() && product.extra.size() < 16 )
     product.extra.emplace_back( "stop_time", stopTime );
+
+  // Generation + unknown-element diagnostics (ADR 0147). Reported on the
+  // metadata, mirrored into import results; an unknown generation or unknown
+  // element degrades nothing by itself — the whitelisted fields were read,
+  // and what was NOT understood is named.
+  product.parseDiagnostics["generation"] = cresdaGeneration( scan.rootElement );
+  product.parseDiagnostics["root_element"] = scan.rootElement;
+  product.parseDiagnostics["sidecar"] = baseNameOf( xmlPath );
+  product.parseDiagnostics["unknown_top_level_elements"] = unknownTopLevelReport( scan );
   return product;
 }
 
-// ─── Band-role table loader ─────────────────────────────────────────────────
+// ─── Sensor profile registry projection ─────────────────────────────────────
+// Since ADR 0147 the band→role truth lives in data/products/sensor_profiles/
+// (loaded by sensor_profile.cpp); this projects a profile onto the
+// import-path CnBandRoleTable view.
 
-/// Resolves data/products/band_roles the way processing/framework resolves
-/// data/ paths, Qt-free (ADR 0146).
-std::string resolveBandRoleDir()
+CnBandRoleTable profileToBandRoleTable( const SensorProfileRecord &profile )
 {
-  const char *envDataDir = std::getenv( "SICNU_DATA_DIR" );
-  if ( envDataDir && *envDataDir )
-  {
-    const std::string candidate = std::string( envDataDir ) + "/products/band_roles";
-    if ( isDirectoryLocal( candidate ) )
-      return candidate;
-  }
-
-  auto hasMarker = [] ( const std::string &dir ) {
-    return isDirectoryLocal( dir + "/data/products/band_roles" );
-  };
-  auto walkUp = [ &hasMarker ] ( std::string dir ) -> std::string {
-    for ( int hops = 0; hops < 8 && !dir.empty(); ++hops )
-    {
-      std::error_code ec;
-      if ( hasMarker( dir ) )
-        return dir + "/data/products/band_roles";
-      const std::string parent = parentOf( dir );
-      if ( parent == dir )
-        break;
-      dir = parent;
-      ( void )ec;
-    }
-    return std::string();
-  };
-
-  // Executable directory (in-tree builds/tests, Linux).
-  std::error_code exeEc;
-  const fs::path exe = fs::canonical( "/proc/self/exe", exeEc );
-  if ( !exeEc )
-  {
-    const std::string fromExe = walkUp( exe.parent_path().generic_string() );
-    if ( !fromExe.empty() )
-      return fromExe;
-  }
-
-  // Current working directory.
-  {
-    std::error_code cwdEc;
-    const std::string cwd = fs::current_path( cwdEc ).generic_string();
-    if ( !cwdEc )
-    {
-      const std::string fromCwd = walkUp( cwd );
-      if ( !fromCwd.empty() )
-        return fromCwd;
-    }
-  }
-
-#if defined( SICNU_SOURCE_DIR )
-  {
-    const std::string fromSource = std::string( SICNU_SOURCE_DIR ) + "/data/products/band_roles";
-    if ( isDirectoryLocal( fromSource ) )
-      return fromSource;
-  }
-#endif
-  return std::string();
-}
-
-std::string bandRoleFamilyFile( const std::string &sensorKey )
-{
-  if ( sensorKey.rfind( "gf", 0 ) == 0 )
-    return "gaofen.json";
-  if ( sensorKey.rfind( "zy3", 0 ) == 0 )
-    return "zy3.json";
-  if ( sensorKey.rfind( "hj", 0 ) == 0 )
-    return "hj.json";
-  return std::string();
-}
-
-const Json::Value &familyJson( const std::string &familyFile )
-{
-  static std::map<std::string, Json::Value> cache;
-  static std::mutex cacheMutex;
-  std::lock_guard<std::mutex> lock( cacheMutex );
-  auto it = cache.find( familyFile );
-  if ( it != cache.end() )
-    return it->second;
-
-  const std::string dir = resolveBandRoleDir();
-  if ( dir.empty() )
-    throw GeoError( ErrorCode::OpenFailed,
-                    "Band-role table directory not found: data/products/band_roles "
-                    "(set SICNU_DATA_DIR to the platform data root)" );
-  const std::string path = dir + "/" + familyFile;
-  std::string text;
-  if ( !readFileText( path, text ) )
-    throw GeoError( ErrorCode::OpenFailed, "Band-role table not found: " + path );
-  Json::Value json;
-  Json::CharReaderBuilder builder;
-  std::string errors;
-  std::istringstream stream( text );
-  if ( !Json::parseFromStream( builder, stream, &json, &errors ) )
-    throw GeoError( ErrorCode::InvalidArgument, "Unparseable band-role table " + path + ": " + errors );
-  it = cache.emplace( familyFile, std::move( json ) ).first;
-  return it->second;
-}
-
-CnBandRoleTable loadBandRoleTable( const std::string &sensorKey )
-{
-  const std::string familyFile = bandRoleFamilyFile( sensorKey );
-  if ( familyFile.empty() )
-    throw GeoError( ErrorCode::InvalidArgument, "No band-role table family for sensor key: " + sensorKey );
-  const Json::Value &json = familyJson( familyFile );
-  const Json::Value &sensors = json["sensors"];
-  if ( !sensors.isObject() || !sensors.isMember( sensorKey ) )
-    throw GeoError( ErrorCode::InvalidArgument,
-                    "Band-role table " + familyFile + " does not declare sensor key: " + sensorKey );
-  const Json::Value &entry = sensors[sensorKey];
-
   CnBandRoleTable table;
-  table.sensorKey = sensorKey;
-  table.satellite = entry.get( "satellite", Json::Value() ).asString();
-  table.sensorMode = entry.get( "sensor_mode", Json::Value() ).asString();
-  table.source = json.get( "source", Json::Value() ).asString();
-  const Json::Value &bands = entry["bands"];
-  if ( !bands.isArray() || bands.empty() )
-    throw GeoError( ErrorCode::InvalidArgument,
-                    "Band-role table entry " + sensorKey + " declares no bands" );
-  for ( const Json::Value &band : bands )
+  table.sensorKey = profile.sensorKey;
+  table.satellite = profile.satellite;
+  table.sensorMode = profile.sensorMode;
+  table.source = profile.source;
+  for ( const SensorBandProfile &band : profile.bands )
   {
     CnBandSpec spec;
-    spec.band = band.get( "band", Json::Value() ).asString();
-    spec.role = band.get( "role", Json::Value( "unknown" ) ).asString();
-    spec.roleReason = band.get( "role_reason", Json::Value() ).asString();
-    const Json::Value wavelength = band["wavelength_nm"];
-    if ( wavelength.isNumeric() )
-    {
-      spec.hasWavelength = true;
-      spec.wavelengthNm = wavelength.asDouble();
-    }
-    // Contract enforcement: an unmappable band must say why (D-07).
-    if ( spec.role == "unknown" && spec.roleReason.empty() )
-      throw GeoError( ErrorCode::InvalidArgument,
-                      "Band-role table entry " + sensorKey + "/" + spec.band +
-                        " has role \"unknown\" without a role_reason" );
+    spec.band = band.band;
+    spec.role = band.role;
+    spec.roleReason = band.roleReason;
+    spec.hasWavelength = band.hasWavelengthNm;
+    spec.wavelengthNm = band.wavelengthNm;
     table.bands.push_back( std::move( spec ) );
   }
   return table;
@@ -972,14 +927,9 @@ CnProductIdentity cnIdentifyProduct( const std::string &path )
   return identity;
 }
 
-std::string cnBandRoleTableDir()
-{
-  return resolveBandRoleDir();
-}
-
 CnBandRoleTable cnBandRoleTable( const std::string &sensorKey )
 {
-  return loadBandRoleTable( sensorKey );
+  return profileToBandRoleTable( loadSensorProfile( sensorKey ) );
 }
 
 std::string cnLocateSidecarXml( const std::string &path )
@@ -1076,22 +1026,63 @@ std::string cnLocateImageTiff( const std::string &path, const std::string &sidec
   return std::string();
 }
 
+std::string cnLocateRpcFile( const std::string &path, const std::string &imagePath )
+{
+  auto rpcSibling = [] ( const std::string &image ) {
+    const std::string stem = stemOf( baseNameOf( image ) );
+    const std::string parent = parentOf( image );
+    if ( parent.empty() || stem.empty() )
+      return std::string();
+    for ( const char *suffix : { ".rpb", ".RPB", "_RPC.TXT", "_RPC.txt" } )
+    {
+      const std::string candidate = parent + "/" + stem + suffix;
+      if ( fileExistsLocal( candidate ) )
+        return candidate;
+    }
+    return std::string();
+  };
+
+  if ( !imagePath.empty() && extensionOfLower( baseNameOf( imagePath ) ) != ".xml" )
+  {
+    const std::string sibling = rpcSibling( imagePath );
+    if ( !sibling.empty() )
+      return sibling;
+  }
+  if ( isDirectoryLocal( path ) )
+  {
+    for ( const std::string &entry : listDirectoryBounded( path ) )
+    {
+      const std::string extension = extensionOfLower( baseNameOf( entry ) );
+      if ( extension == ".rpb" )
+        return entry;
+    }
+    return std::string();
+  }
+  return rpcSibling( path );
+}
+
 std::string cnSensorKey( const CnProductIdentity &identity, const ProductMetadata &metadata )
 {
-  if ( identity.sensorKey == "zy3_nad_ms" )
-    return zy3NadKey( metadata );
-  // PMS cameras deliver two products with the same BandID letters: the
-  // multispectral stack (B1..B4) and the panchromatic band (B1). The sidecar
-  // ModeID decides; a single declared band without a ModeID is the pan
-  // product by inventory shape (same resolution as zy3NadKey — shape-driven,
-  // not band-number guessing).
-  if ( identity.sensorKey.size() > 3 && identity.sensorKey.compare( identity.sensorKey.size() - 3, 3, "pms" ) == 0 )
+  // Pan-vs-MS resolution via the registry's declared pan_variant link plus
+  // the sidecar's declared shape: ModeID=PAN or a 1-band inventory selects
+  // the panchromatic sibling (shape-driven, not band-number guessing).
+  try
   {
-    const std::string modeId = upperAscii( extraValue( metadata, "mode_id" ) );
-    if ( modeId == "PAN" || metadata.declaredBandIds.size() == 1 )
-      return identity.sensorKey + "_pan";
+    const SensorProfileRecord profile = loadSensorProfile( identity.sensorKey );
+    if ( !profile.panVariant.empty() )
+    {
+      const std::string modeId = upperAscii( extraValue( metadata, "mode_id" ) );
+      if ( modeId == "PAN" || metadata.declaredBandIds.size() == 1 )
+        return profile.panVariant;
+    }
+    return identity.sensorKey;
   }
-  return identity.sensorKey;
+  catch ( const GeoError & )
+  {
+    // Registry unavailable: identity-derived key without pan/MS refinement
+    // (callers fail closed when loading the table for the refined key).
+    return identity.sensorKey;
+  }
 }
 
 ProductMetadata readCnProductMetadata( const std::string &path, const CnProductIdentity &identity )

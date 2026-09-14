@@ -19,7 +19,8 @@ enum class ProductType {
     Unknown = 0,
     Landsat,
     Sentinel2,
-    Modis
+    Modis,
+    Cn  ///< Chinese satellite L1A families (ADR 0146/0147): GF, ZY-3, ZY-1 02C, HJ
 };
 
 struct BandFile {
@@ -73,6 +74,15 @@ bool discoverLandsat(const QString& path, ProductInfo* out, QString* errorMessag
 bool discoverSentinel2(const QString& path, ProductInfo* out,
                        const QString& preferredResolution = QStringLiteral("10m"),
                        QString* errorMessage = nullptr);
+
+/**
+ * Discover a supported Chinese satellite L1A product (GF-1/2/6 PMS/WFV,
+ * GF-7 FWD/BWD, ZY-3, ZY-1 02C PMS/HRC, HJ-1/2 CCD) from a product directory,
+ * CRESDA sidecar XML or image TIFF. Sensor truth (roles, wavelengths, pan/MS
+ * variant) comes from the shared sensor profile registry (data/products/
+ * sensor_profiles) — the same authority the import operators use.
+ */
+bool discoverCn(const QString& path, ProductInfo* out, QString* errorMessage = nullptr);
 
 /**
  * Discover a MODIS product from:

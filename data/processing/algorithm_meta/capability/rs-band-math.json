@@ -1,131 +1,114 @@
 {
-  "capability" : 
-  {
-    "applicability" : 
-    {
-      "land_cover" : 
-      [
-        "\u4efb\u610f\u5730\u7269"
+  "capability": {
+    "applicability": {
+      "land_cover": [
+        "任意地物"
       ],
-      "scenes" : 
-      [
-        "\u81ea\u5b9a\u4e49\u6307\u6570\u6784\u5efa",
-        "\u6559\u5b66\u6f14\u793a\u6ce2\u6bb5\u8fd0\u7b97"
+      "scenes": [
+        "自定义指数构建",
+        "教学演示波段运算"
       ]
     },
-    "band_roles" : {},
-    "crs" : 
-    {
-      "requires_projected" : false,
-      "requires_shared_grid" : false
+    "band_roles": {},
+    "crs": {
+      "requires_projected": false,
+      "requires_shared_grid": false
     },
-    "determinism" : 
-    {
-      "grade" : "bit_exact",
-      "large_raster_safe" : false,
-      "memory_policy" : "full_raster",
-      "side_effects" : false,
-      "stochastic" : false
+    "determinism": {
+      "grade": "bit_exact",
+      "large_raster_safe": false,
+      "memory_policy": "full_raster",
+      "side_effects": false,
+      "stochastic": false
     },
-    "failure_modes" : 
-    [
+    "failure_modes": [
       {
-        "code" : "INVALID_PARAMETER",
-        "remedy" : "\u68c0\u67e5\u8868\u8fbe\u5f0f\u53d8\u91cf\u540d\u4e0e\u6ce2\u6bb5\u5217\u8868\u662f\u5426\u4e00\u81f4",
-        "when" : "\u8868\u8fbe\u5f0f\u8bed\u6cd5\u9519\u8bef\u6216\u5f15\u7528\u4e86\u4e0d\u5b58\u5728\u7684\u6ce2\u6bb5"
+        "code": "INVALID_PARAMETER",
+        "when": "表达式语法错误或引用了不存在的波段",
+        "remedy": "检查表达式变量名与波段列表是否一致"
       },
       {
-        "code" : "EXECUTION_FAILED",
-        "remedy" : "\u5728\u8868\u8fbe\u5f0f\u4e2d\u52a0\u5165\u5206\u6bcd\u4e0b\u9650\u4fdd\u62a4\u6216\u540e\u5904\u7406\u8fc7\u6ee4",
-        "when" : "\u8868\u8fbe\u5f0f\u9664\u96f6\u4ea7\u751f\u5f02\u5e38\u503c"
+        "code": "EXECUTION_FAILED",
+        "when": "表达式除零产生异常值",
+        "remedy": "在表达式中加入分母下限保护或后处理过滤"
       }
     ],
-    "family" : "spectral",
-    "io" : 
-    {
-      "inputs" : 
-      [
+    "family": "spectral",
+    "io": {
+      "inputs": [
         {
-          "data_kind" : "raster",
-          "name" : "input",
-          "required" : true
+          "data_kind": "raster",
+          "name": "input",
+          "required": true
         }
       ],
-      "outputs" : 
-      [
+      "outputs": [
         {
-          "data_kind" : "string",
-          "name" : "expression",
-          "required" : true
+          "data_kind": "string",
+          "name": "expression",
+          "required": true
         },
         {
-          "data_kind" : "integer",
-          "name" : "height",
-          "required" : true
+          "data_kind": "integer",
+          "name": "height",
+          "required": true
         },
         {
-          "data_kind" : "raster",
-          "file_format" : "tif",
-          "name" : "output",
-          "required" : true
+          "data_kind": "raster",
+          "file_format": "tif",
+          "name": "output",
+          "required": true
         },
         {
-          "data_kind" : "integer",
-          "name" : "width",
-          "required" : true
+          "data_kind": "integer",
+          "name": "width",
+          "required": true
         }
       ],
-      "parameters" : 
-      [
+      "parameters": [
         {
-          "name" : "expression",
-          "required" : true,
-          "type" : "string"
+          "name": "expression",
+          "required": true,
+          "type": "string"
         },
         {
-          "name" : "output",
-          "required" : true,
-          "type" : "string"
+          "name": "output",
+          "required": true,
+          "type": "string"
         }
       ]
     },
-    "limitations" : 
-    [
+    "limitations": [
       "Expression uses 1-based band references (b1, b2, ...)."
     ],
-    "modality" : 
-    [
+    "modality": [
       "optical",
       "sar",
       "thermal",
       "dem"
     ],
-    "operator_group" : "spectral",
-    "prerequisites" : [],
-    "schema_version" : 2,
-    "summary" : "\u4efb\u610f\u6ce2\u6bb5\u4ee3\u6570\u8868\u8fbe\u5f0f\u8ba1\u7b97\u5668\uff1a\u4ee5\u8868\u8fbe\u5f0f\u5f62\u5f0f\u7ec4\u5408\u591a\u4e2a\u6ce2\u6bb5\u505a\u52a0\u51cf\u4e58\u9664\u4e0e\u51fd\u6570\u8fd0\u7b97\u3002",
-    "teaching_use" : 
-    {
-      "concepts" : 
-      [
-        "\u6ce2\u6bb5\u4ee3\u6570",
-        "\u8868\u8fbe\u5f0f\u6c42\u503c"
+    "operator_group": "spectral",
+    "prerequisites": [],
+    "schema_version": 2,
+    "summary": "任意波段代数表达式计算器：以表达式形式组合多个波段做加减乘除与函数运算。",
+    "teaching_use": {
+      "concepts": [
+        "波段代数",
+        "表达式求值"
       ],
-      "courses" : 
-      [
-        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
+      "courses": [
+        "遥感数字图像处理"
       ],
-      "exercise" : "\u7528 band_math \u8868\u8fbe\u5f0f\u5b9e\u73b0 NBR = (NIR-SWIR2)/(NIR+SWIR2) \u5e76\u7528\u4e8e\u706b\u70e7\u8ff9\u5730\u5206\u6790\u3002"
+      "exercise": "用 band_math 表达式实现 NBR = (NIR-SWIR2)/(NIR+SWIR2) 并用于火烧迹地分析。"
     }
   },
-  "description" : "Evaluate an arithmetic expression over raster bands.",
-  "display_name" : "Band Math",
-  "id" : "rs:band_math",
-  "input" : "raster",
-  "output" : "raster",
-  "schema_version" : 2,
-  "tags" : 
-  [
+  "description": "Evaluate an arithmetic expression over raster bands.",
+  "display_name": "Band Math",
+  "id": "rs:band_math",
+  "input": "raster",
+  "output": "raster",
+  "schema_version": 2,
+  "tags": [
     "band-math",
     "spectral",
     "calculator"

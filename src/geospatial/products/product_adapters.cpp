@@ -532,6 +532,8 @@ Json::Value ProductMetadata::toJson() const
   json["orbit_direction"] = orbitDirection;
   json["instrument_mode"] = instrumentMode;
   json["crs_hint"] = crsHint;
+  if ( !parseDiagnostics.isNull() && parseDiagnostics.isObject() && !parseDiagnostics.empty() )
+    json["parse_diagnostics"] = parseDiagnostics;
   if ( !sensorMode.empty() )
     json["sensor_mode"] = sensorMode;
   if ( !orbitId.empty() )
@@ -601,6 +603,8 @@ ProductKind detectProductKind( const std::string &path )
       return ProductKind::GaofenProduct;
     if ( identity.kindName == "zy3_product" )
       return ProductKind::Zy3Product;
+    if ( identity.kindName == "zy1_product" )
+      return ProductKind::Zy1Product;
     if ( identity.kindName == "hj_ccd_product" )
       return ProductKind::HjCcdProduct;
   }
@@ -622,6 +626,7 @@ const char *productKindName( ProductKind kind )
     case ProductKind::ModisContainer: return "modis_container";
     case ProductKind::GaofenProduct: return "gaofen_product";
     case ProductKind::Zy3Product: return "zy3_product";
+    case ProductKind::Zy1Product: return "zy1_product";
     case ProductKind::HjCcdProduct: return "hj_ccd_product";
     case ProductKind::GenericRaster: return "generic_raster";
     case ProductKind::Unknown: break;
@@ -637,9 +642,10 @@ std::string productKindDisplayName( ProductKind kind )
     case ProductKind::Sentinel2Safe: return "Sentinel-2 SAFE product";
     case ProductKind::Sentinel1Safe: return "Sentinel-1 SAFE product";
     case ProductKind::ModisContainer: return "MODIS HDF container";
-    case ProductKind::GaofenProduct: return "Gaofen (GF-1/2/6) L1A product";
+    case ProductKind::GaofenProduct: return "Gaofen (GF-1/2/6, GF-7) L1A product";
     case ProductKind::Zy3Product: return "Ziyuan-3 (ZY-3) L1A product";
-    case ProductKind::HjCcdProduct: return "Huanjing (HJ-1A/1B) CCD product";
+    case ProductKind::Zy1Product: return "Ziyuan-1 02C (ZY-1 02C) L1A product";
+    case ProductKind::HjCcdProduct: return "Huanjing (HJ-1A/1B, HJ-2A/B) CCD product";
     case ProductKind::GenericRaster: return "Generic raster";
     case ProductKind::Unknown: break;
   }
@@ -660,6 +666,7 @@ ProductMetadata readProductMetadata( const std::string &path, ProductKind kind )
       return readModis( path );
     case ProductKind::GaofenProduct:
     case ProductKind::Zy3Product:
+    case ProductKind::Zy1Product:
     case ProductKind::HjCcdProduct:
     {
       const CnProductIdentity identity = cnIdentifyProduct( path );

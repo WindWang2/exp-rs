@@ -192,6 +192,8 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_temporal_harmonic_breaks_operator.cpp
     rs/rs_temporal_region_features_operator.cpp
     rs/rs_landsat_import_operator.cpp
+    rs/rs_product_import_plan.cpp
+    rs/rs_cn_product_import_operator.cpp
     rs/rs_gaofen_import_operator.cpp
     rs/rs_zy3_import_operator.cpp
     rs/rs_hj_import_operator.cpp

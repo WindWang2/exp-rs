@@ -1,115 +1,98 @@
 {
-  "capability" : 
-  {
-    "applicability" : 
-    {
-      "land_cover" : 
-      [
-        "\u4efb\u610f\u5730\u7269\uff08\u9ad8\u5149\u8c31\uff09"
+  "capability": {
+    "applicability": {
+      "land_cover": [
+        "任意地物（高光谱）"
       ],
-      "scenes" : 
-      [
-        "\u9ad8\u5149\u8c31\u6570\u636e\u964d\u7ef4",
-        "\u53bb\u566a\u540e\u7684\u6ce2\u6bb5\u7cbe\u7b80"
+      "scenes": [
+        "高光谱数据降维",
+        "去噪后的波段精简"
       ]
     },
-    "band_roles" : {},
-    "crs" : 
-    {
-      "requires_projected" : false,
-      "requires_shared_grid" : false
+    "band_roles": {},
+    "crs": {
+      "requires_projected": false,
+      "requires_shared_grid": false
     },
-    "determinism" : 
-    {
-      "grade" : "bit_exact",
-      "large_raster_safe" : false,
-      "memory_policy" : "full_raster",
-      "side_effects" : false,
-      "stochastic" : false
+    "determinism": {
+      "grade": "bit_exact",
+      "large_raster_safe": false,
+      "memory_policy": "full_raster",
+      "side_effects": false,
+      "stochastic": false
     },
-    "failure_modes" : 
-    [
+    "failure_modes": [
       {
-        "code" : "INSUFFICIENT_MEMORY",
-        "remedy" : "\u5206\u5757\u7edf\u8ba1\u6216\u5148\u505a\u6ce2\u6bb5\u7b5b\u9009",
-        "when" : "\u6ce2\u6bb5\u6570\u8fc7\u5927\u5bfc\u81f4\u534f\u65b9\u5dee\u77e9\u9635\u5185\u5b58\u8d85\u9650"
+        "code": "INSUFFICIENT_MEMORY",
+        "when": "波段数过大导致协方差矩阵内存超限",
+        "remedy": "分块统计或先做波段筛选"
       }
     ],
-    "family" : "hyperspectral",
-    "io" : 
-    {
-      "inputs" : 
-      [
+    "family": "hyperspectral",
+    "io": {
+      "inputs": [
         {
-          "data_kind" : "raster",
-          "name" : "input",
-          "required" : true
+          "data_kind": "raster",
+          "name": "input",
+          "required": true
         }
       ],
-      "outputs" : 
-      [
+      "outputs": [
         {
-          "data_kind" : "integer",
-          "name" : "numComponents",
-          "required" : true
+          "data_kind": "integer",
+          "name": "numComponents",
+          "required": true
         },
         {
-          "data_kind" : "raster",
-          "file_format" : "tif",
-          "name" : "output",
-          "required" : true
+          "data_kind": "raster",
+          "file_format": "tif",
+          "name": "output",
+          "required": true
         }
       ],
-      "parameters" : 
-      [
+      "parameters": [
         {
-          "default" : "0",
-          "name" : "numComponents",
-          "required" : false,
-          "type" : "integer"
+          "default": "0",
+          "name": "numComponents",
+          "required": false,
+          "type": "integer"
         },
         {
-          "name" : "output",
-          "required" : true,
-          "type" : "string"
+          "name": "output",
+          "required": true,
+          "type": "string"
         }
       ]
     },
-    "limitations" : [],
-    "modality" : 
-    [
+    "limitations": [],
+    "modality": [
       "optical"
     ],
-    "operator_group" : "spectral",
-    "prerequisites" : 
-    [
+    "operator_group": "spectral",
+    "prerequisites": [
       "Input should be calibrated reflectance/radiance; wavelength metadata is not required for MNF itself."
     ],
-    "schema_version" : 2,
-    "summary" : "MNF \u6700\u5c0f\u566a\u58f0\u5206\u79bb\u53d8\u6362\uff1a\u6309\u4fe1\u566a\u6bd4\u6392\u5e8f\u7684\u6b63\u4ea4\u53d8\u6362\uff0c\u5148\u767d\u5316\u566a\u58f0\u518d\u505a PCA\uff0c\u662f\u9ad8\u5149\u8c31\u53bb\u566a\u4e0e\u964d\u7ef4\u7684\u6807\u51c6\u8d77\u70b9\u3002",
-    "teaching_use" : 
-    {
-      "concepts" : 
-      [
+    "schema_version": 2,
+    "summary": "MNF 最小噪声分离变换：按信噪比排序的正交变换，先白化噪声再做 PCA，是高光谱去噪与降维的标准起点。",
+    "teaching_use": {
+      "concepts": [
         "MNF",
-        "\u4fe1\u566a\u6bd4",
-        "\u566a\u58f0\u767d\u5316"
+        "信噪比",
+        "噪声白化"
       ],
-      "courses" : 
-      [
-        "\u9ad8\u5149\u8c31\u9065\u611f"
+      "courses": [
+        "高光谱遥感"
       ],
-      "exercise" : "\u5bf9 200 \u6ce2\u6bb5\u5f71\u50cf\u505a MNF \u5e76\u4fdd\u7559\u524d 20 \u4e2a\u9ad8\u4fe1\u566a\u6bd4\u5206\u91cf\u3002"
+      "exercise": "对 200 波段影像做 MNF 并保留前 20 个高信噪比分量。"
     }
   },
-  "description" : "Minimum Noise Fraction transform for hyperspectral dimensionality reduction.",
-  "display_name" : "MNF (Minimum Noise Fraction)",
-  "id" : "rs:mnf",
-  "input" : "raster",
-  "output" : "raster",
-  "schema_version" : 2,
-  "tags" : 
-  [
+  "description": "Minimum Noise Fraction transform for hyperspectral dimensionality reduction.",
+  "display_name": "MNF (Minimum Noise Fraction)",
+  "id": "rs:mnf",
+  "input": "raster",
+  "output": "raster",
+  "schema_version": 2,
+  "tags": [
     "mnf",
     "hyperspectral",
     "dimensionality-reduction"

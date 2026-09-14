@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "source": "ZY-1 02C published product specifications (CRESDA). wavelength_nm is the documented spectral-range midpoint; FWHM is not published here and therefore not stated.",
+  "sensors": {
+    "zy1_02c_pms": {
+      "satellite": "ZY1_02C",
+      "instrument": "PMS",
+      "sensor_mode": "PMS",
+      "modality": "optical",
+      "gsd_m": 10.0,
+      "pan_variant": "zy1_02c_pms_pan",
+      "constituents": [ "sidecar_xml", "image_tiff", "rpc_rpb" ],
+      "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
+      "qa_vocabulary": [],
+      "bands": [
+        { "band": "B1", "role": "blue", "wavelength_nm": 485.0, "spectral_range_um": "0.45-0.52", "gsd_m": 10.0, "note": "multispectral 10 m" },
+        { "band": "B2", "role": "green", "wavelength_nm": 560.0, "spectral_range_um": "0.52-0.60", "gsd_m": 10.0 },
+        { "band": "B3", "role": "red", "wavelength_nm": 660.0, "spectral_range_um": "0.63-0.69", "gsd_m": 10.0 },
+        { "band": "B4", "role": "nir", "wavelength_nm": 830.0, "spectral_range_um": "0.77-0.89", "gsd_m": 10.0 }
+      ]
+    },
+    "zy1_02c_pms_pan": {
+      "satellite": "ZY1_02C",
+      "instrument": "PMS",
+      "sensor_mode": "PMS-PAN",
+      "modality": "optical",
+      "gsd_m": 5.0,
+      "ms_variant": "zy1_02c_pms",
+      "constituents": [ "sidecar_xml", "image_tiff", "rpc_rpb" ],
+      "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
+      "qa_vocabulary": [],
+      "bands": [
+        { "band": "B1", "role": "panchromatic", "wavelength_nm": 650.0, "spectral_range_um": "0.50-0.80", "gsd_m": 5.0, "note": "panchromatic 5 m" }
+      ]
+    },
+    "zy1_02c_hrc": {
+      "satellite": "ZY1_02C",
+      "instrument": "HRC",
+      "sensor_mode": "HRC",
+      "modality": "optical",
+      "gsd_m": 2.36,
+      "constituents": [ "sidecar_xml", "image_tiff", "rpc_rpb" ],
+      "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
+      "qa_vocabulary": [],
+      "bands": [
+        { "band": "B1", "role": "panchromatic", "wavelength_nm": 650.0, "spectral_range_um": "0.50-0.80", "gsd_m": 2.36, "note": "high-resolution camera panchromatic 2.36 m" }
+      ]
+    }
+  }
+}

@@ -1,12 +1,14 @@
 /***************************************************************************
- * rs_gaofen_import_operator.cpp
+ * rs_gaofen_import_operator.cpp — GF-1/2/6 PMS/WFV + GF-7 FWD/BWD import
+ * (thin adapter over the standardized rs_product_import_plan service,
+ * ADR 0147).
  ***************************************************************************/
 #include "rs_gaofen_import_operator.h"
 
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_schema.h"
-#include "rs_cn_import_operator.h"
+#include "rs_product_import_plan.h"
 
 namespace sicnu::operators::rs {
 
@@ -17,7 +19,7 @@ Json::Value RsGaofenImportOperator::schema() const
     using namespace schema;
     Json::Value props(Json::objectValue);
     props["input"] = makeStringParam(
-        "input", "Gaofen product directory, sidecar XML (GF*_PMS*/WFV*) or image TIFF", "");
+        "input", "Gaofen product directory, sidecar XML (GF*_PMS*/WFV*/GF7_FWD*/GF7_BWD*) or image TIFF", "");
     props["output"] = makeOutputParam("output", "Output multi-band GeoTIFF", "tif");
     Json::Value bands = makeStringParam(
         "bands", "Optional band list (default: all bands declared by the sidecar)", "");
@@ -26,6 +28,12 @@ Json::Value RsGaofenImportOperator::schema() const
     bands["items"]["type"] = "string";
     bands["required"] = false;
     props["bands"] = bands;
+    Json::Value applyCalibration = makeBooleanParam(
+        "apply_calibration",
+        "Apply declared gain/bias coefficients (radiance = DN * gain + bias); requires every "
+        "requested band to declare both coefficients", false);
+    applyCalibration["required"] = false;
+    props["apply_calibration"] = applyCalibration;
 
     Json::Value outputs(Json::objectValue);
     outputs["output"] = makeOutputParam("output", "Stacked GeoTIFF", "tif");
@@ -47,10 +55,11 @@ Json::Value RsGaofenImportOperator::metadata() const
     meta["tags"].append("cn-satellite");
     meta["tags"].append("import");
     meta["tags"].append("data-format");
-    meta["purpose"] = "Convert a Gaofen-1/2/6 L1A product into analysis-ready multi-band GeoTIFF";
+    meta["purpose"] = "Convert a Gaofen-1/2/6 or GF-7 L1A product into analysis-ready multi-band GeoTIFF";
     meta["prerequisites"].append("Product directory with CRESDA sidecar XML and TIFF (offline)");
     meta["workflowHints"].append("Stack B1-B4 then run rs:spectral_index for NDVI (roles resolve bands)");
     meta["workflowHints"].append("Declared calibration/sun geometry are stamped as SICNU_* metadata");
+    meta["workflowHints"].append("apply_calibration=true converts DN to radiance when the sidecar declares coefficients");
     return meta;
 }
 
@@ -69,16 +78,16 @@ Json::Value RsGaofenImportOperator::run(const Json::Value& p, RSOperatorContext&
 {
     const std::string inputPath = requireString(p, "input");
     const std::string outputPath = requireString(p, "output");
+    const bool applyCalibration = getBool(p, "apply_calibration", false);
 
     context.reportProgress(0.05, "Identifying Gaofen product");
-    const CnImportProduct product =
-        resolveCnImportProduct(inputPath, sicnu::geo::ProductKind::GaofenProduct, "gaofen_product");
-    context.logInfo("Gaofen product: " + product.metadata.productId
-                    + " (" + product.metadata.platform + "/" + product.metadata.sensor
-                    + ", " + std::to_string(product.bandNames.size()) + " declared bands)");
+    const ProductImportPlan plan =
+        planCnProductImport(inputPath, "gaofen_product");
+    context.logInfo("Gaofen product: " + plan.metadata.productId
+                    + " (" + plan.metadata.platform + "/" + plan.metadata.sensor
+                    + ", " + std::to_string(plan.bandNames.size()) + " declared bands)");
     context.throwIfCancelled();
 
-    const SatelliteProducts::ProductInfo info = buildCnProductInfo(product);
     const bool explicitBands = p.isMember("bands") && p["bands"].isArray() && !p["bands"].empty();
     QStringList requested;
     if (explicitBands) {
@@ -87,41 +96,10 @@ Json::Value RsGaofenImportOperator::run(const Json::Value& p, RSOperatorContext&
                 requested << QString::fromStdString(p["bands"][i].asString());
         }
     } else {
-        requested = product.bandNames;
+        requested = plan.bandNames;
     }
 
-    // Fail closed on unresolvable band lists (#676 contract).
-    const QStringList missing = SatelliteProducts::unresolvableBands(info, requested);
-    if (!missing.isEmpty()) {
-        throw RSOperatorError(ErrorCode::InvalidInputData,
-                              ("Requested bands not found in product (missingBands: "
-                               + missing.join(QStringLiteral(", ")) + ")")
-                                  .toStdString());
-    }
-
-    context.reportProgress(0.15, "Stacking bands to GeoTIFF");
-    QString err;
-    const bool ok = SatelliteProducts::stackToGeoTiff(
-        info, requested, QString::fromStdString(outputPath), &err,
-        [&](double frac, const QString& msg) {
-            context.reportProgress(0.15 + 0.75 * frac, msg.toStdString());
-            context.throwIfCancelled();
-        });
-    if (!ok) {
-        throw RSOperatorError(ErrorCode::ComputationError,
-                              err.isEmpty() ? "Failed to stack Gaofen bands" : err.toStdString());
-    }
-
-    context.reportProgress(0.95, "Writing Gaofen metadata");
-    if (!writeCnImportMetadata(QString::fromStdString(outputPath), product.metadata,
-                               requested, QString::fromStdString(product.identity.kindName), &err)) {
-        throw RSOperatorError(ErrorCode::ComputationError,
-                              err.isEmpty() ? "Failed to write Gaofen import metadata"
-                                            : err.toStdString());
-    }
-
-    context.reportProgress(1.0, "Gaofen import complete");
-    return cnImportResult(product, outputPath, requested);
+    return executeCnProductImport(plan, outputPath, requested, applyCalibration, context);
 }
 
 } // namespace sicnu::operators::rs

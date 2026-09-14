@@ -116,7 +116,7 @@ TEST_CASE( "D8 coverage: every rs operator carries capability metadata",
     // Monotone floor (history: 111 at D8, 114 since the PR #956 CN-satellite
     // imports). A silent catalog shrinkage below the last known full count
     // must fail even if registry==catalog were both filtered somehow.
-    REQUIRE( registry.size() >= 114 );
+    REQUIRE( registry.size() >= 121 );
     REQUIRE( boot.catalog.loadProblems().empty() );
     REQUIRE( catalog.size() == registry.size() );
 

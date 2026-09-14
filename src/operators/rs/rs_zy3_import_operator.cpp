@@ -6,7 +6,7 @@
 #include "operators/framework/rs_json_params.h"
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_schema.h"
-#include "rs_cn_import_operator.h"
+#include "rs_product_import_plan.h"
 
 namespace sicnu::operators::rs {
 
@@ -26,6 +26,12 @@ Json::Value RsZy3ImportOperator::schema() const
     bands["items"]["type"] = "string";
     bands["required"] = false;
     props["bands"] = bands;
+    Json::Value applyCalibration = makeBooleanParam(
+        "apply_calibration",
+        "Apply declared gain/bias coefficients (radiance = DN * gain + bias); requires every "
+        "requested band to declare both coefficients", false);
+    applyCalibration["required"] = false;
+    props["apply_calibration"] = applyCalibration;
 
     Json::Value outputs(Json::objectValue);
     outputs["output"] = makeOutputParam("output", "Stacked GeoTIFF", "tif");
@@ -67,16 +73,15 @@ Json::Value RsZy3ImportOperator::run(const Json::Value& p, RSOperatorContext& co
 {
     const std::string inputPath = requireString(p, "input");
     const std::string outputPath = requireString(p, "output");
+    const bool applyCalibration = getBool(p, "apply_calibration", false);
 
     context.reportProgress(0.05, "Identifying ZY-3 product");
-    const CnImportProduct product =
-        resolveCnImportProduct(inputPath, sicnu::geo::ProductKind::Zy3Product, "zy3_product");
-    context.logInfo("ZY-3 product: " + product.metadata.productId
-                    + " (" + product.metadata.platform + "/" + product.metadata.sensor
-                    + ", " + std::to_string(product.bandNames.size()) + " declared bands)");
+    const ProductImportPlan plan = planCnProductImport(inputPath, "zy3_product");
+    context.logInfo("ZY-3 product: " + plan.metadata.productId
+                    + " (" + plan.metadata.platform + "/" + plan.metadata.sensor
+                    + ", " + std::to_string(plan.bandNames.size()) + " declared bands)");
     context.throwIfCancelled();
 
-    const SatelliteProducts::ProductInfo info = buildCnProductInfo(product);
     const bool explicitBands = p.isMember("bands") && p["bands"].isArray() && !p["bands"].empty();
     QStringList requested;
     if (explicitBands) {
@@ -85,40 +90,10 @@ Json::Value RsZy3ImportOperator::run(const Json::Value& p, RSOperatorContext& co
                 requested << QString::fromStdString(p["bands"][i].asString());
         }
     } else {
-        requested = product.bandNames;
+        requested = plan.bandNames;
     }
 
-    const QStringList missing = SatelliteProducts::unresolvableBands(info, requested);
-    if (!missing.isEmpty()) {
-        throw RSOperatorError(ErrorCode::InvalidInputData,
-                              ("Requested bands not found in product (missingBands: "
-                               + missing.join(QStringLiteral(", ")) + ")")
-                                  .toStdString());
-    }
-
-    context.reportProgress(0.15, "Stacking bands to GeoTIFF");
-    QString err;
-    const bool ok = SatelliteProducts::stackToGeoTiff(
-        info, requested, QString::fromStdString(outputPath), &err,
-        [&](double frac, const QString& msg) {
-            context.reportProgress(0.15 + 0.75 * frac, msg.toStdString());
-            context.throwIfCancelled();
-        });
-    if (!ok) {
-        throw RSOperatorError(ErrorCode::ComputationError,
-                              err.isEmpty() ? "Failed to stack ZY-3 bands" : err.toStdString());
-    }
-
-    context.reportProgress(0.95, "Writing ZY-3 metadata");
-    if (!writeCnImportMetadata(QString::fromStdString(outputPath), product.metadata,
-                               requested, QString::fromStdString(product.identity.kindName), &err)) {
-        throw RSOperatorError(ErrorCode::ComputationError,
-                              err.isEmpty() ? "Failed to write ZY-3 import metadata"
-                                            : err.toStdString());
-    }
-
-    context.reportProgress(1.0, "ZY-3 import complete");
-    return cnImportResult(product, outputPath, requested);
+    return executeCnProductImport(plan, outputPath, requested, applyCalibration, context);
 }
 
 } // namespace sicnu::operators::rs

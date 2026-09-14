@@ -397,6 +397,12 @@ const QHash<QString, Entry> &catalog()
             "[Product directory] Choose a product folder containing standard sensor metadata.\n"
             "[Probe] Reads the metadata and analyses grid resolution, band names and wavelength ranges.\n"
             "[Preview tree] Shows bands grouped by resolution and purpose; tick to import into the project." } },
+        { QStringLiteral( "cn_product_import" ),
+          { "Import Chinese satellite product: detect GF / ZY-3 / ZY-1 02C / HJ CCD packages",
+            "[Product directory] A Chinese satellite L1A product directory, CRESDA sidecar XML or image TIFF.\n"
+            "[Probe] Parses the CRESDA sidecar: band roles and wavelengths come from the sensor profile registry, the sidecar generation and unknown elements are reported.\n"
+            "[Preview tree] Shows the declared band inventory with roles; the PMS panchromatic sibling and RPC document appear as constituents.\n"
+            "[Import] Stacks the selected bands with sun geometry and declared calibration metadata; provenance covers identity, sensor profile and completeness." } },
         { QStringLiteral( "spectral_library" ),
           { "Spectral library matching and management: SAM / SID spectral angle matching",
             "[Spectral library file] Choose a USGS / ASTER format library or a JSON spectral library exported by this project.\n"

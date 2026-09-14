@@ -2,7 +2,7 @@
 
 # RS 算子能力知识索引
 
-覆盖 121 个 `rs:` 算子（要求 111/111）。逐算子元数据见 `data/processing/algorithm_meta/capability/`；关系图见同目录 `capability_relations.json`。>>>>>>> origin/zcode/advanced-sar-polsar-insar-10
+覆盖 121+ 个 `rs:` 算子（要求 111/111；含 SAR/HSI/CN-EO）。逐算子元数据见 `data/processing/algorithm_meta/capability/`；关系图见同目录 `capability_relations.json`。
 
 | 算子族 | 数量 | 页面 |
 |---|---|---|
@@ -16,7 +16,7 @@
 | 面向对象影像分析（obia） | 7 | [capability-obia.md](capability-obia.md) |
 | 高光谱分析（hyperspectral） | 8 | [capability-hyperspectral.md](capability-hyperspectral.md) |
 | 栅格空间分析（raster_spatial） | 15 | [capability-raster_spatial.md](capability-raster_spatial.md) |
-| 数据导入（io） | 7 | [capability-io.md](capability-io.md) |
+| 数据导入（io） | 8 | [capability-io.md](capability-io.md) |
 
 ## 查询 API（D9 消费，保持稳定）
 

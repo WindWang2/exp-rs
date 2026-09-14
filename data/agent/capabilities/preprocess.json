@@ -148,6 +148,55 @@
     "limitations": ["Writes derived products beside the source archive"]
   },
   {
+    "id": "rs:gaofen_import",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "modality": ["optical"],
+    "side_effects": true,
+    "limitations": [
+      "Writes derived products beside the source archive",
+      "GF-3/GF-4/GF-5 names are refused with a typed reason (supported: GF-1/2/6 PMS/WFV, GF-7 FWD/BWD)"
+    ]
+  },
+  {
+    "id": "rs:zy3_import",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "modality": ["optical"],
+    "side_effects": true,
+    "limitations": [
+      "Writes derived products beside the source archive",
+      "Supported: ZY-3 TLC/NAD/FWD/BWD (pan and multispectral inventories)"
+    ]
+  },
+  {
+    "id": "rs:hj_import",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "modality": ["optical"],
+    "side_effects": true,
+    "limitations": [
+      "Writes derived products beside the source archive",
+      "Supported: HJ-1A/1B CCD and HJ-2A/B CCD; HJ IRS/HSI are refused with a typed reason"
+    ]
+  },
+  {
+    "id": "rs:cn_product_import",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "modality": ["optical"],
+    "side_effects": true,
+    "limitations": [
+      "Writes derived products beside the source archive",
+      "Any supported CN family (GF-1/2/6/7, ZY-3, ZY-1 02C, HJ-1/2 CCD); unsupported CN names produce a typed diagnosis",
+      "apply_calibration=true converts DN to radiance only when every requested band declares gain and bias"
+    ]
+  },
+  {
     "id": "rs:sentinel2_import",
     "family": "preprocess",
     "extends": "family:preprocess",
