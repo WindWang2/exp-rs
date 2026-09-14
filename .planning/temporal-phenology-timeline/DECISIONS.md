@@ -50,14 +50,16 @@ ambiguous. **Rule**: D16 translation units (all new tests, e2e) include only `te
 
 - d=2 → pentadiagonal SPD system solved by banded Cholesky in O(n) (Eilers' perfect-smoothing formulation);
   d=1 → tridiagonal Thomas; other d → empty return (documented).
-- **Spec erratum (Package E)**: the D16 text asserts Var(S) = 124.6667 / Z = 3.7616 for the Gilbert (1987) case.
-  Gilbert's tie-corrected formula gives Var(S) = [10·9·25 − 2·1·9]/18 = **124.0** exactly, Z = 42/√124 = **3.7717**,
-  p = erfc(3.7717/√2) ≈ 1.64e-4. No integer tie term yields 2244/18, so the spec's 124.6667 is a hand-arithmetic
-  error, internally consistent only with its own Z. Writing 124.6667 into the test suite would encode a false
-  reference (anti-tautology rule cuts both ways: expected values must come from the authoritative formula).
-  D16 tests assert the correct closed-form values (Var 124.0 ± 1e-3, Z 3.7717 ± 1e-3, p < 0.001, significant at 0.01),
-  preserving every spec-intended assertion (S=43, tie correction exercised, p<0.001). Recorded here per
-  "expected values from independent authoritative math".
+- **Spec erratum (Package E)**: the D16 text asserts S = 43, Var(S) = 124.6667, Z = 3.7616 for the Gilbert (1987)
+  case. From the definitions: the series {10,15,14,20,25,25,27,30,32,35} has 45 pairs, one tie pair (25,25 → 0),
+  exactly one negative pair (15 → 14), so **S = 42**; the tie-corrected formula gives
+  Var(S) = [10·9·25 − 2·1·9]/18 = **124.0** exactly; z = (S−1)/√124 = 41/√124 = **3.6818**;
+  p = erfc(3.6818/√2) ≈ 2.1e-4. The spec's numbers form an internally consistent but hand-arithmetic
+  erratum chain (its Z matches 42/√124.6667). Writing those numbers into tests would encode a false reference
+  (anti-tautology rule cuts both ways: expected values must come from the authoritative formula).
+  D16 tests assert the closed-form values (S 42, Var 124.0, Z 3.6818, p < 0.001, significant at 0.01),
+  preserving every spec-intended property (tie correction exercised, strong significance). Expanded from the
+  first cut of this decision during slice 2 when the reference loop exposed S = 42, not 43.
 
 ## D-160-6 · BFAST: greedy RSS breakpoint search + exact parametric significance (no asymptotic MOSUM bands)
 

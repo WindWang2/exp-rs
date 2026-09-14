@@ -111,3 +111,46 @@ TEST_CASE( "Strictly monotonic series yields the exact slope and perfect tau",
     REQUIRE( d.tau == Approx( -1.0 ).margin( 1e-12 ) );
     REQUIRE( d.zScore < 0.0 );
 }
+
+// ---------------------------------------------------------------------------
+// Slice 2: Gilbert (1987) textbook benchmark with ties.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Gilbert benchmark: tie-corrected variance, z and significance",
+           "[d16][trend]" )
+{
+    // Gilbert (1987) case study series: one tie group (25.0 twice), one
+    // negative pair (15 -> 14). From the definition:
+    //   S      = 42   (44 signed pairs, one negative, one zero)
+    //   var(S) = [10·9·25 − 2·1·9]/18 = 124 exactly
+    //   z      = (S−1)/sqrt(var) = 41/sqrt(124) = 3.6818
+    // (The D16 spec text's S=43 / var=124.6667 / z=3.7616 is a hand-
+    // arithmetic erratum chain; the formula is the authority — D-160-5.)
+    const std::vector<float> y = { 10, 15, 14, 20, 25, 25, 27, 30, 32, 35 };
+    const std::vector<double> t = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+
+    const GilbertReference ref( y, t );
+    REQUIRE( ref.S == 42 );
+    REQUIRE( ref.varS == Approx( 124.0 ).margin( 1e-9 ) );
+
+    const auto r = TrendAnalyzer::computeMannKendall( y, t );
+    REQUIRE( r.valid );
+    REQUIRE( r.sampleCount == 10 );
+    REQUIRE( r.tauVariance == Approx( 124.0 ).margin( 1e-9 ) );
+    REQUIRE( r.tau == Approx( 42.0 / 45.0 ).margin( 1e-12 ) );     // tau-a = S/(n(n−1)/2)
+    REQUIRE( r.zScore == Approx( 41.0 / std::sqrt( 124.0 ) ).margin( 1e-12 ) ); // 3.6818
+    REQUIRE( r.pValue == Approx( std::erfc( r.zScore / std::sqrt( 2.0 ) ) ).margin( 1e-12 ) );
+    REQUIRE( r.pValue < 0.001 );
+    REQUIRE( r.isSignificant( 0.01 ) );
+    REQUIRE( r.senSlope == Approx( senSlopeReference( y, t ) ).margin( 1e-12 ) );
+    // Sen slope median for this series: 2.5 units/day (pairwise-slope set median).
+    REQUIRE( r.senSlope == Approx( 2.5 ).margin( 1e-9 ) );
+
+    // Underpowered input: fewer than 3 finite samples is invalid, 3 exactly works.
+    const std::vector<float> two = { 1, 2 };
+    const auto r2 = TrendAnalyzer::computeMannKendall( two, { 0, 1 } );
+    REQUIRE( !r2.valid );
+    REQUIRE( r2.sampleCount == 2 );
+    const auto r3 = TrendAnalyzer::computeMannKendall( { 1, 2, 3 }, { 0, 1, 2 } );
+    REQUIRE( r3.valid );
+}
