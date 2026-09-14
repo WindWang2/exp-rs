@@ -8963,3 +8963,15 @@ sicnu_discover_tests(test_processing_catalog_ux)
     ${CMAKE_BINARY_DIR}
   )
   sicnu_discover_tests(test_d16_temporal_trend)
+
+  add_executable(test_d16_starfm test_d16_starfm.cpp)
+  target_link_libraries(test_d16_starfm PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_temporal_timeline
+  )
+  target_include_directories(test_d16_starfm PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_d16_starfm)
