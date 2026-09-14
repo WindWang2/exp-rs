@@ -16,7 +16,7 @@ offline. Three constraints shape deployment today:
    submissions at once would scale memory with class size, and one corrupt
    file must not cost the whole evening.
 
-D4's ADR 0146 fixed the grading seam; D7 fixes the deployment around it.
+D4's ADR 0150 fixed the grading seam; D7 fixes the deployment around it.
 
 ## Decision
 
@@ -39,7 +39,7 @@ D4's ADR 0146 fixed the grading seam; D7 fixes the deployment around it.
    (/vsimem/, /vsizip/, ...) stay usable.
 
 3. **Batch grading streams.** `lab --batch <dir>` grades one submission at a
-   time over ADR 0146's `gradeArtifact` seam and appends one UTF-8-BOM CSV row
+   time over ADR 0150's `gradeArtifact` seam and appends one UTF-8-BOM CSV row
    (`student_id,lab_id,score,verdict,top_deduction,artifact_path`) to disk
    **before** the next submission is graded: memory is bounded by the largest
    single artifact, never by class size, and a crash keeps the rows already
@@ -71,5 +71,5 @@ D4's ADR 0146 fixed the grading seam; D7 fixes the deployment around it.
 
 ## References
 
-- ADR 0146 (grading seam), `packaging/OFFLINE_BUNDLE.md` (bundle contract),
+- ADR 0150 (grading seam), `packaging/OFFLINE_BUNDLE.md` (bundle contract),
   `docs/deployment/lab-offline.md` (operator runbook).

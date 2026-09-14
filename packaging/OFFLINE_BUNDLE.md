@@ -106,7 +106,7 @@ typed refusals (see `docs/deployment/lab-offline.md`); the bundle scripts always
 
 - **Builder seam**: `--verify` is the single testable seam — a bundle either passes the manifest
   check or names the offending file/cause. The phase-5 smoke exercises it end-to-end on Linux.
-- **Grading seam**: `OutputVerifier::gradeArtifact` (ADR 0146) — batch grading composes it one
+- **Grading seam**: `OutputVerifier::gradeArtifact` (ADR 0150) — batch grading composes it one
   submission at a time (`tests/test_lab_batch.cpp`).
 - **Offline seam**: `sicnu::data::offline` mode flag — typed refusal, no socket attempt.
 

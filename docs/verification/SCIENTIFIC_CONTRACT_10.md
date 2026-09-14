@@ -32,7 +32,7 @@ workflow) must know and that until now lived in no machine-readable place:
 Dimensions that ALREADY had an authority were **not duplicated**:
 
 - modality, band roles, crs, memory policy, io ports → capability sidecars
-  (`data/processing/algorithm_meta/capability/`, ADR 0146);
+  (`data/processing/algorithm_meta/capability/`, ADR 0154);
 - determinism grade → the live schema stamp (`stampDeterminismGrade`,
   ADR 0124) *and* the sidecar grade — `test_drift_projection_10` binds the
   two published truths to agreement (spelling-normalized: `bit-exact` ≡

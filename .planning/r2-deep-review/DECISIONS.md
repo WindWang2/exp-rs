@@ -42,3 +42,7 @@
 - 采纳：创建 `needs-triage`、`severity:P1`、`severity:P2`、`severity:P3`
  （颜色沿用 bug/quality 系）；沿用既有 `bug`/`documentation` 类型标签。
 - 理由：与 docs/agents/triage-labels.md 对齐；severity 标签使 P0–P3 词汇可检索。
+
+## D-006 · ADR 0146 numbering arbitration (issue #969)
+
+Nine files shared `0146-*`. Kept canonical `0146-labspec.md` (earliest by git add). Renumbered the other eight sequentially after highest ADR 0149: 0150 lab-auto-grading, 0151 unified-rs-terminology-contract, 0152 lab-report-schema, 0153 offline-degradation-contract, 0154 capability-relation-graph, 0155 lab-copilot-teaching-constraint, 0156 spectral-library-material-priors, 0157 cn-product-adapters. Internal titles and cross-references updated.

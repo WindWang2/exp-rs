@@ -2,7 +2,7 @@
  * src/cli/lab_batch_runner.h — D7 batch grading engine
  *
  * Streams a submissions directory through the OutputVerifier::gradeArtifact
- * teaching seam (ADR 0146), one submission at a time, appending a CSV row
+ * teaching seam (ADR 0150), one submission at a time, appending a CSV row
  * (UTF-8 with BOM) and flushing it before the next submission is graded —
  * memory stays bounded by the largest single artifact, never by class size.
  * A throwing grade call is isolated into an `error` row; the run continues.

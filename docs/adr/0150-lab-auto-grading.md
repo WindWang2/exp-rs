@@ -1,4 +1,4 @@
-# ADR 0146: Lab Auto-Grading — Known-Answer Teaching Scores
+# ADR 0150: Lab Auto-Grading — Known-Answer Teaching Scores
 
 Date: 2026-09-12 · Status: Proposed (D4) · Owners: D4 track
 

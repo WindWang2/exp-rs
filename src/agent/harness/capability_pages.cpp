@@ -170,7 +170,7 @@ std::string renderFamilyPage( const std::string &family )
   CapabilityCatalog &catalog = CapabilityCatalog::instance();
   const std::vector<std::string> ids = catalog.byFamily( family );
   std::ostringstream out;
-  out << "<!-- 由 scripts/capability_knowledge_tool gen-pages 自动生成 — 手动编辑是缺陷（ADR 0146）。"
+  out << "<!-- 由 scripts/capability_knowledge_tool gen-pages 自动生成 — 手动编辑是缺陷（ADR 0154）。"
          " 修改请改对应 sidecar 后重新生成。 -->\n\n";
   out << "# " << familyDisplayName( family ) << "（" << family << "）\n\n";
   out << "共 " << ids.size() << " 个算子。数据源："
@@ -185,7 +185,7 @@ std::string renderIndexPage()
   CapabilityCatalog &catalog = CapabilityCatalog::instance();
   CapabilityRelations &relations = CapabilityRelations::instance();
   std::ostringstream out;
-  out << "<!-- 由 scripts/capability_knowledge_tool gen-pages 自动生成 — 手动编辑是缺陷（ADR 0146）。 -->\n\n";
+  out << "<!-- 由 scripts/capability_knowledge_tool gen-pages 自动生成 — 手动编辑是缺陷（ADR 0154）。 -->\n\n";
   out << "# RS 算子能力知识索引\n\n";
   const std::vector<std::string> ids = catalog.entryIds();
   out << "覆盖 " << ids.size() << " 个 `rs:` 算子（要求 115/115）。"

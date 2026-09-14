@@ -2251,7 +2251,7 @@ bool isCliCommand( const QString &firstArg )
                                            "data-providers",
                                            // Foundation 5.0/7.0 dataset-experiment surface.
                                            "dataset", "experiment", "reproduce",
-                                           // D4 teaching auto-grader (ADR 0146).
+                                           // D4 teaching auto-grader (ADR 0150).
                                            "lab" };
     return kCommands.contains( firstArg );
 }

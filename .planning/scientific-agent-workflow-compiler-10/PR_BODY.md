@@ -9,7 +9,7 @@ local command + exit code recorded in
 - `origin/master @ 7d78059d1a` (unchanged at PR time; no rebase needed).
 - Direct predecessors consumed, not duplicated: AgentPlan v2 (ADR 0130-harness),
   capability knowledge (ADR 0142), harness 8/9 (ADR 0144/0145), capability
-  sidecars + relation graph (ADR 0146), eval corpus 9.0.
+  sidecars + relation graph (ADR 0154), eval corpus 9.0.
 
 ## Architecture (ADR 0149, `docs/adr/0149-workflow-compiler-10.md`)
 
@@ -125,7 +125,7 @@ P2/P3 fixed or dispositioned with rationale — full ledger in
   explain/export` lack knowledge entries (merged by other tracks),
   `harness.optical_ndvi_landsat` alias surfaces in listRecipes. Generated-data
   fixes belong to the D8/cn-product lanes (hand-editing generated sidecars is
-  drift per ADR 0146).
+  drift per ADR 0154).
 - Radiometric repairs are prepared decisions, not auto-insertions — the real
   knowledge contracts grade DN as warn-class, so no fact-backed auto-insertion
   path exists (recorded in ADR 0149 decision 4).

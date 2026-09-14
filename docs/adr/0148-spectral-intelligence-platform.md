@@ -8,7 +8,7 @@ detection (`rs:matched_filter`, `rs:ace`) consume only inline JSON arrays;
 `rs:endmember_extraction` (PPI) dies as terminal JSON because the workflow
 placeholder contract substitutes *string* ports
 (`src/workflow/placeholder_grammar.*`, the #727 dual-path resolution); the
-validated spectral library (ADR 0146) is GUI-only; MNF is forward-only with
+validated spectral library (ADR 0156) is GUI-only; MNF is forward-only with
 the transform discarded (`ImageEnhancement::mnf` returns components + SNR
 only), full-raster in memory, and its 1e-9 noise-eigenvalue clamp silently
 pseudo-inverts a singular noise estimate. The D3 lab track registered these

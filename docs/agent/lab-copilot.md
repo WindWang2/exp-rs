@@ -3,7 +3,7 @@
 The harness' research pipeline answers analysis questions. The **lab copilot**
 answers *students*: it diagnoses their broken outputs, hints the next step, and
 explains concepts — and it is structurally unable to hand a student a finished
-artifact. The hard rule is code, not a prompt (ADR 0146).
+artifact. The hard rule is code, not a prompt (ADR 0155).
 
 ## The one rule
 

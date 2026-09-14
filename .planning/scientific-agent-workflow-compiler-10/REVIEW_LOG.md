@@ -81,4 +81,4 @@ at baseline): test_capability_drift — 3 uncovered items
 by PR #956 / cartography tracks without knowledge-layer updates) and the
 harness.optical_ndvi_landsat alias surfacing in listRecipes. Knowledge-data
 and recipe-alias fixes belong to the D8/cn-product lanes; recorded here, not
-fixed (fixing generated sidecars by hand is itself drift per ADR 0146).
+fixed (fixing generated sidecars by hand is itself drift per ADR 0154).

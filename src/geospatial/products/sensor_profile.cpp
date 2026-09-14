@@ -243,7 +243,7 @@ SensorProfileRecord parseSensorEntry( const std::string &sensorKey, const std::s
                       "Sensor profile entry " + sensorKey + " declares a band without an id" );
     spec.role = band.get( "role", Json::Value( "unknown" ) ).asString();
     spec.roleReason = band.get( "role_reason", Json::Value() ).asString();
-    // Contract enforcement: an unmappable band must say why (ADR 0146 D-07).
+    // Contract enforcement: an unmappable band must say why (ADR 0157 D-07).
     if ( spec.role == "unknown" && spec.roleReason.empty() )
       throw GeoError( ErrorCode::InvalidArgument,
                       "Sensor profile entry " + sensorKey + "/" + spec.band +

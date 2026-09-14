@@ -65,7 +65,7 @@ struct ProductMetadata
     std::string orbitDirection;   ///< ASCENDING / DESCENDING (SAR)
     std::string instrumentMode;   ///< SAR acquisition mode (IW/EW/SM)
     std::string crsHint;          ///< declared projection (UTM zone / EPSG text) when declared
-    // CN products (ADR 0146): sensor mode ("PMS1", "WFV2", "NAD", "CCD1"),
+    // CN products (ADR 0157): sensor mode ("PMS1", "WFV2", "NAD", "CCD1"),
     // declared orbit id, sun geometry and per-band calibration — all optional,
     // all explicitly flagged when absent.
     std::string sensorMode;       ///< camera/sensor mode token when declared

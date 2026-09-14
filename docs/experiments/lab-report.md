@@ -49,7 +49,7 @@ JSON-first；Markdown/HTML 是同一文档的渲染，无格式独有信息。
 `RSOperatorContext` 不携带 run/step 身份，操作轨迹无法在记录时刻绑定执行。报告的
 `steps[].attribution.policy = "time-window+operator-name"`：轨迹记录的起始时间落在某 run
 的执行窗口内 → 归属该 run（`quality: "exact"`）；窗外 → `unattributed`；多候选 →
-`ambiguous` 且不指派。归属策略写在每个 step 与 ADR 0146 里，绝不静默指派。
+`ambiguous` 且不指派。归属策略写在每个 step 与 ADR 0152 里，绝不静默指派。
 
 ### 成绩缝（D4）
 
@@ -73,4 +73,4 @@ JSON-first；Markdown/HTML 是同一文档的渲染，无格式独有信息。
 真实 coordinator 端到端（自动登记 / opt-out 零记录 / 轨迹证据脱敏 / 报告闭环）。
 
 相关：`docs/experiments/auto-recording.md`（ADR 0143 的用户视角）、
-`docs/adr/0143-workflow-experiment-auto-recording.md`、`docs/adr/0146-lab-report-schema.md`。
+`docs/adr/0143-workflow-experiment-auto-recording.md`、`docs/adr/0152-lab-report-schema.md`。

@@ -8,7 +8,7 @@
 //                   artifacts, workflow evidence) — never re-derived;
 //   - steps[]       are the RSOperationLogger operation records, joined to
 //                   runs by an EXPLICIT attribution policy (the operator
-//                   trail carries no step identity — see ADR 0146);
+//                   trail carries no step identity — see ADR 0152);
 //   - lineage{}     is a LineageGraph slice around the primary run (or, with
 //                   no dataset store wired, the experiment-store edges around
 //                   it — existence reported as unchecked, never asserted);

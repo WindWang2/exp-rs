@@ -1,4 +1,4 @@
-# Lab Auto-Grading — authoring guide (D4, ADR 0146)
+# Lab Auto-Grading — authoring guide (D4, ADR 0150)
 
 The platform's known-answer tradition (`docs/verification/KNOWN_ANSWER_MATRIX.md`)
 proves the platform; lab grading spends it in the classroom. A teacher authors
@@ -95,7 +95,7 @@ fire. `ctest -R lab_grading` asserts the whole corpus contract.
   calibration identity), not the geographic position of each pixel. A change
   mask with the right area in the wrong place, or an NDVI scene with its
   biomes spatially swapped, still scores 100 — labs that care about placement
-  need a position-sensitive kernel (future work, ADR 0146 alternative
+  need a position-sensitive kernel (future work, ADR 0150 alternative
   "pixel-diff grading" was rejected as brittle).
 - **Unlabelled truth+prediction pairs** (both outside the legend) count as
   agreement in OA and as their own marginal column; exclude such values via

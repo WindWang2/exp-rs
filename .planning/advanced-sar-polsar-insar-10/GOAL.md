@@ -49,7 +49,7 @@
 | 无 PolSAR 分解（S-2） | `grep -rn "Freeman\|Cloude\|Pauli\|polarimetric" src/` → 0 命中；ISSUES.md S-2 |
 | 无 complex 数据路径 | `grep -rn "CFloat" src/processing/algorithms/sar/ src/operators/rs/` → 0 命中；GdalMultibandBlockStream 仅 float BIP（`gdal_multiband_block_stream.h:91`） |
 | 轨道/zero-Doppler/forward-RD 已实现 | `sar_orbit.h:89-104`；docs/processing/sar-domain.md §3-§4 |
-| capability sidecar 体系（ADR 0146） | `data/processing/algorithm_meta/capability/rs-sar-*.json`（4 个 SAR sidecar）；`scripts/capability_knowledge_tool.cpp` gen-meta/gen-pages |
+| capability sidecar 体系（ADR 0154） | `data/processing/algorithm_meta/capability/rs-sar-*.json`（4 个 SAR sidecar）；`scripts/capability_knowledge_tool.cpp` gen-meta/gen-pages |
 | 最近 SAR 相关修复（不重做） | PR #938（pair grid/dB preflight）、#934/#854（flatten 2-band/NoData）、#855（各向异性 Horn）、#785、#803、#330；issue 全部 CLOSED |
 
 ## Work packages

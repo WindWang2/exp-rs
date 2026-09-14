@@ -24,7 +24,7 @@
   truth (#867), condition NaN/has (#866/#877), typed intents (zonal), advice tier +
   preparation table, `harness:diagnose_run`, bounded run summaries w/ token meter,
   explain 2.0, eval corpus 91 cases, capability-knowledge coverage floor fix.
-- **agent-capability-knowledge (D8)** (ADR 0146 sidecars + capability-relation-graph):
+- **agent-capability-knowledge (D8)** (ADR 0154 sidecars + capability-relation-graph):
   111/111 v2 capability sidecars, 11 families, relation graph (chains/exclusive/
   requires_shared_grid), `composeChain` w/ automatic grid fixer (`rs:align`),
   `harness:compose_chain`, bounded manifest (64 KiB) + error catalog (8 KiB).

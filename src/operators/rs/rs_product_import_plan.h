@@ -14,7 +14,7 @@
  * declared-field flags, missing constituents, numeric-domain state and the
  * applied calibration per band.
  *
- * Absence policy (ADR 0146): declared values are copied verbatim; fields the
+ * Absence policy (ADR 0157): declared values are copied verbatim; fields the
  * sidecar does not declare are reported as missing — never defaulted, and
  * calibration is applied only when EVERY requested band declares both
  * coefficients (partial coverage is a typed refusal naming the bands).

@@ -406,7 +406,7 @@ Result<QString> labReportHtml( const QJsonObject &document )
     }
     html += QStringLiteral( "</table>\n" );
     html += QStringLiteral( "<p class=\"label\">归属策略：%1 — 步骤记录不携带 run 标识，"
-                            "按时间窗归属，见 ADR 0146。</p>\n" )
+                            "按时间窗归属，见 ADR 0152。</p>\n" )
                 .arg( htmlEscape( QString::fromUtf8( kLabStepAttributionPolicy ) ) );
     for ( const QJsonValue &value : stepsOf( document ) )
     {

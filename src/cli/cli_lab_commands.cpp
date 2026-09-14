@@ -2,7 +2,7 @@
  * src/cli/cli_lab_commands.cpp — `lab` command: teaching auto-grader (D4)
  *
  * The grading itself lives behind the stable OutputVerifier::gradeArtifact()
- * seam (ADR 0146); this file is the CLI shell: flag parsing, transcript
+ * seam (ADR 0150); this file is the CLI shell: flag parsing, transcript
  * output, --out file writing, and the exit-code contract.
  ***************************************************************************/
 #include "cli_lab_commands.h"

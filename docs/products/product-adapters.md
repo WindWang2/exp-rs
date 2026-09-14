@@ -9,7 +9,7 @@ registry answers three questions per product path:
 
 1. **which family claims it** — Landsat MTL, Sentinel-2 SAFE, Sentinel-1 SAFE,
    MODIS container, the Chinese satellite families (GF-1/2/6, ZY-3,
-   HJ-1A/1B CCD — see [cn-satellites.md](cn-satellites.md), ADR 0146), or the
+   HJ-1A/1B CCD — see [cn-satellites.md](cn-satellites.md), ADR 0157), or the
    GenericRaster fallback that always claims openable rasters;
 2. **what constituents it carries** — logical assets with role
    (`measurement` / `mask` / `annotation` / `metadata` / `browse`), native

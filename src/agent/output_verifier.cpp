@@ -326,7 +326,7 @@ QString OutputVerifier::kindHintFromPath( const QString &path )
 }
 
 // ---------------------------------------------------------------------------
-// Teaching grade mode (D4 / ADR 0146)
+// Teaching grade mode (D4 / ADR 0150)
 // ---------------------------------------------------------------------------
 
 namespace lab_grading

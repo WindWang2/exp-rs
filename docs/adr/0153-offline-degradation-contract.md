@@ -1,4 +1,4 @@
-# ADR 0146: Offline Degradation Contract for Transport-Dependent Tests
+# ADR 0153: Offline Degradation Contract for Transport-Dependent Tests
 
 Status: accepted · Branch `zcode/verification-baseline-green` · Baseline `origin/master@27b9aa0a63`
 

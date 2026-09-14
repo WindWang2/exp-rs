@@ -1,4 +1,4 @@
-# ADR 0146: Lab Copilot — The Teaching Constraint Is a Code-Level Gate
+# ADR 0155: Lab Copilot — The Teaching Constraint Is a Code-Level Gate
 
 Status: accepted · Branch `zcode/agent-lab-copilot` · Baseline `origin/master@27b9aa0a63`
 

@@ -5,7 +5,7 @@ The platform ships a redistributable, license-clean spectral library at
 well under the 5 MB budget). It feeds the spectral workbench
 ([ADR 0092](../adr/0092-*.md)), wavelength-aware matching
 ([ADR 0096](../adr/0096-*.md)), resampling ([ADR 0079](../adr/0079-*.md)) and
-— through the material-prior API ([ADR 0146](../adr/0146-spectral-library-material-priors.md))
+— through the material-prior API ([ADR 0156](../adr/0156-spectral-library-material-priors.md))
 — the knowledge (D8) and teaching-copilot (D9) layers, plus lab experiments
 (D3c) that only need to reference `library_id`.
 

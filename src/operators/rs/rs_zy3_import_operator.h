@@ -17,7 +17,7 @@ namespace sicnu::operators::rs {
  *   output  (string, required)  Output multi-band GeoTIFF
  *   bands   (array, optional)   Band names; default: all bands declared by the sidecar
  *
- * Result: same contract as rs:gaofen_import (ADR 0146).
+ * Result: same contract as rs:gaofen_import (ADR 0157).
  */
 class RsZy3ImportOperator : public RSOperator {
 public:

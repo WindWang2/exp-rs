@@ -24,7 +24,7 @@ agent before fixing.
 | R1-13 | P3 | bandSource wording drift (sensor_profile_layout vs band_role_table) | FIXED | discoverCn attribute uses band_role_table |
 | R1-14 | P3 | asString() type-unsafety on registry fields; empty role bypasses role_reason | ACCEPTED (defect noted) | registry files are in-repo trusted data; fail-closed loader + tests pin schema; hardening deferred (recorded in PR follow-ups) |
 | R1-15 | P3 | planCnProductImport double directory scan | ACCEPTED | bounded 512-entry scans, no correctness impact |
-| R1-16 | P3 | BandFile.wavelengthNm carries midpoint (15 nm ambiguity vs center) | ACCEPTED | matches ADR 0146 behavior; ADR 0147 documents both fields; SRF consumers use the spectral store |
+| R1-16 | P3 | BandFile.wavelengthNm carries midpoint (15 nm ambiguity vs center) | ACCEPTED | matches ADR 0157 behavior; ADR 0147 documents both fields; SRF consumers use the spectral store |
 
 Subagent verified-clean list (ranges/wavelengths per family, pan_variant
 links, legacy result-key compatibility, fail-closed env handling, dispatch

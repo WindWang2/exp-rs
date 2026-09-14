@@ -2,7 +2,7 @@
 #pragma once
 
 //
-// D8 capability relation graph (ADR 0146): the operator relation data that
+// D8 capability relation graph (ADR 0154): the operator relation data that
 // lets the agent COMPOSE processing chains by query instead of guessing.
 //
 // Data lives in data/processing/algorithm_meta/capability/capability_relations.json:

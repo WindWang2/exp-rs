@@ -1,4 +1,4 @@
-# ADR 0146: Chinese Satellite Product Adapters (GF / ZY-3 / HJ-1 CCD)
+# ADR 0157: Chinese Satellite Product Adapters (GF / ZY-3 / HJ-1 CCD)
 
 ## Context
 

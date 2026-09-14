@@ -481,7 +481,7 @@ Json::Value executeCnProductImport( const ProductImportPlan &plan,
     // ── provenance ─────────────────────────────────────────────────────────
     context.reportProgress( 1.0, "CN product import complete" );
     Json::Value result( Json::objectValue );
-    // Legacy keys (ADR 0146 operator results — kept stable for courses).
+    // Legacy keys (ADR 0157 operator results — kept stable for courses).
     result["output"] = outputPath;
     result["productId"] = plan.metadata.productId;
     result["productKind"] = plan.identity.kindName;
