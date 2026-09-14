@@ -1,0 +1,13 @@
+{
+ "gpu": false,
+ "id": "rs:temporal_regularize",
+ "input": "multi-date raster collection (scenes or workspace collection)",
+ "notes": "Re-casts an irregular acquisition series onto a regular calendar (day or monthly cadence). Methods: nearest, window_mean, linear, whittaker (penalized fit defined on the calendar grid). No extrapolation past the observed span; valid_count + filled_count provenance bands separate observed from synthetic values.",
+ "output": "raster",
+ "tags": [
+  "temporal",
+  "resampling",
+  "regular-calendar"
+ ],
+ "task": "temporal-preprocessing"
+}

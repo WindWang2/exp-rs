@@ -55,7 +55,13 @@ int seasonOfMonth( const QString &dateString )
 Json::Value RsTemporalMonitorOperator::schema() const {
     using namespace schema;
     Json::Value props( Json::objectValue );
-    props["collection"] = makeStringParam( "collection", "Temporal collection id or workspace path" );
+    Json::Value scenes = makeStringParam( "scenes",
+                                          "Scenes: array of {path, time?, bands?} or bare paths (alternative to collection)" );
+    scenes["type"] = "array";
+    scenes["items"] = Json::Value( Json::objectValue );
+    scenes["items"]["type"] = "string";
+    props["scenes"] = scenes;
+    props["collection"] = makeStringParam( "collection", "Temporal collection id or workspace path", "" );
     props["output"] = makeOutputParam( "output", "3-band monitoring raster", "tif" );
     props["method"] = makeEnumParam( "method", "Monitoring method",
                                      { "cusum", "ewma", "seasonal_mk" }, "cusum" );
@@ -74,7 +80,10 @@ Json::Value RsTemporalMonitorOperator::schema() const {
     outputs["sceneCount"] = makeIntegerParam( "sceneCount", "Scenes analysed", 0 );
 
     Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
-    root["required"] = makeRequired( { "collection", "output", "method" } );
+    // collection OR scenes: the shared prepareTemporalRun/parseCollection seam
+    // rejects runs with neither (ISSUES T-1 closed — headless pipelines no
+    // longer need a workspace collection to monitor).
+    root["required"] = makeRequired( { "output", "method" } );
     return root;
 }
 

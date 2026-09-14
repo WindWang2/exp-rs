@@ -35,6 +35,15 @@ std::vector<float> savitzkyGolay( const std::vector<float> &y, int window,
 std::vector<float> whittakerSmooth( const std::vector<float> &y,
                                     const std::vector<float> &w, double lambda );
 
+/// Robust Whittaker smoother: @a iterations (1..10, default 3) of IRLS with
+/// Cauchy reweighting w_i ∝ 1 / (1 + (r_i / k)²), k = 3 · 1.4826 · MAD of
+/// the residuals — damps spikes (undetected clouds, BRDF outliers) instead
+/// of smearing them. Same contract as whittakerSmooth otherwise; final
+/// result is the last solve. Tolerance-grade (documented 1e-4).
+std::vector<float> whittakerSmoothRobust( const std::vector<float> &y,
+                                          const std::vector<float> &w,
+                                          double lambda, int iterations = 3 );
+
 /// One harmonic regressor column pair (sin/cos of 2π·k·t / period).
 struct HarmonicFitResult
 {
@@ -78,6 +87,42 @@ SeasonalMetrics phenologyThreshold( const std::vector<float> &y,
                                     const std::vector<int> &doyOf,
                                     int seasonStartDoy, int seasonEndDoy,
                                     double crossingFraction );
+
+// --- Multi-cycle phenology (Temporal Platform 10.0) ---
+
+/// One season window in day-of-year; wrapped windows (start > end) span the
+/// year end. Hemisphere-neutral: the caller declares the windows (the
+/// operator documents the northern-hemisphere default and the complement
+/// rule for second cycles).
+struct SeasonWindow
+{
+  int startDoy = 0;
+  int endDoy = 0;
+};
+
+/// The doy window covering the complement of @a window inside the year
+/// (second crop cycle when @a window is the first).
+SeasonWindow complementSeasonWindow( const SeasonWindow &window );
+
+struct SeasonYearMetrics
+{
+  int year = 0;                ///< calendar year of the season's samples
+  int cycleIndex = 0;          ///< 0-based cycle inside the year
+  SeasonalMetrics metrics;     ///< same thresholds semantics as phenologyThreshold
+};
+
+/// Per-year, per-cycle threshold phenology (multiple crop cycles). For every
+/// calendar year present in @a yearOf and every window in @a windows (1 or 2
+/// entries), the year's samples inside the window are extracted and scored
+/// with the phenologyThreshold semantics (base/amplitude/POS from the
+/// window's valid samples; SOS/EOS by the crossing fraction; LOS over the
+/// year axis). Years with fewer than 3 valid samples in a window yield no
+/// metrics for that cycle (the year still appears for its other cycles).
+/// @a windows empty or > 2 returns an empty result.
+std::vector<SeasonYearMetrics> phenologyCyclesPerYear(
+  const std::vector<float> &y, const std::vector<double> &tDays,
+  const std::vector<int> &doyOf, const std::vector<int> &yearOf,
+  const std::vector<SeasonWindow> &windows, double crossingFraction );
 
 /// Greedy piecewise-linear trend segmentation (BSFAST-lite): repeated OLS on
 /// segments, splitting at the point with the largest RSS reduction while the

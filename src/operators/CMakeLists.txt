@@ -174,6 +174,10 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_temporal_decompose_operator.cpp
     rs/rs_temporal_anomaly_operator.cpp
     rs/rs_temporal_extract_series_operator.cpp
+    rs/rs_temporal_extract_regions_operator.cpp
+    rs/rs_temporal_regularize_operator.cpp
+    rs/rs_temporal_harmonic_breaks_operator.cpp
+    rs/rs_temporal_region_features_operator.cpp
     rs/rs_landsat_import_operator.cpp
     rs/rs_gaofen_import_operator.cpp
     rs/rs_zy3_import_operator.cpp

@@ -64,6 +64,10 @@
 #include "rs_temporal_phenology_operator.h"
 #include "rs_temporal_smooth_operator.h"
 #include "rs_temporal_extract_series_operator.h"
+#include "rs_temporal_extract_regions_operator.h"
+#include "rs_temporal_regularize_operator.h"
+#include "rs_temporal_harmonic_breaks_operator.h"
+#include "rs_temporal_region_features_operator.h"
 #include "rs_landsat_import_operator.h"
 #include "rs_sentinel2_import_operator.h"
 #include "rs_modis_import_operator.h"
@@ -184,6 +188,10 @@ REGISTER_RS_OPERATOR(RsTemporalSenTrendOperator, "rs:temporal_sen_trend")
 REGISTER_RS_OPERATOR(RsTemporalDecomposeOperator, "rs:temporal_decompose")
 REGISTER_RS_OPERATOR(RsTemporalAnomalyOperator, "rs:temporal_anomaly")
 REGISTER_RS_OPERATOR(RsTemporalExtractSeriesOperator, "rs:temporal_extract_series")
+REGISTER_RS_OPERATOR(RsTemporalExtractRegionsOperator, "rs:temporal_extract_regions")
+REGISTER_RS_OPERATOR(RsTemporalRegularizeOperator, "rs:temporal_regularize")
+REGISTER_RS_OPERATOR(RsTemporalHarmonicBreaksOperator, "rs:temporal_harmonic_breaks")
+REGISTER_RS_OPERATOR(RsTemporalRegionFeaturesOperator, "rs:temporal_region_features")
 REGISTER_RS_OPERATOR(RsLandsatImportOperator, "rs:landsat_import")
 REGISTER_RS_OPERATOR(RsSentinel2ImportOperator, "rs:sentinel2_import")
 REGISTER_RS_OPERATOR(RsModisImportOperator, "rs:modis_import")

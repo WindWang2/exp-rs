@@ -110,4 +110,83 @@
     "extends": "family:temporal",
     "intents": ["temporal"]
   }
+,
+ {
+  "id": "rs:temporal_regularize",
+  "family": "temporal",
+  "extends": "family:temporal",
+  "intents": [
+   "temporal",
+   "preprocess"
+  ],
+  "temporal": {
+   "min_scenes": 2,
+   "requires_acquisition_time": true
+  },
+  "limitations": [
+   "No method extrapolates past the observed span; whittaker values without a mapped observation are synthetic (see filled_count)"
+  ]
+ },
+ {
+  "id": "rs:temporal_harmonic_breaks",
+  "family": "temporal",
+  "extends": "family:temporal",
+  "intents": [
+   "temporal",
+   "change"
+  ],
+  "temporal": {
+   "min_scenes": 4,
+   "requires_acquisition_time": true
+  },
+  "limitations": [
+   "Greedy BFAST/CCDC-inspired segmentation, not the full algorithms; ~2 years of data needed for stable harmonics"
+  ]
+ },
+ {
+  "id": "rs:temporal_extract_regions",
+  "family": "temporal",
+  "extends": "family:temporal",
+  "intents": [
+   "temporal"
+  ],
+  "verification": {
+   "expected_kind": "table",
+   "checks": [
+    "existence",
+    "opens"
+   ]
+  },
+  "temporal": {
+   "min_scenes": 1,
+   "requires_acquisition_time": true
+  },
+  "limitations": [
+   "Rows appear only for region-date cells with at least one valid sample; emptyCells reports the omitted count"
+  ]
+ },
+ {
+  "id": "rs:temporal_region_features",
+  "family": "temporal",
+  "extends": "family:temporal",
+  "intents": [
+   "temporal",
+   "phenology",
+   "change"
+  ],
+  "verification": {
+   "expected_kind": "table",
+   "checks": [
+    "existence",
+    "opens"
+   ]
+  },
+  "temporal": {
+   "min_scenes": 3,
+   "requires_acquisition_time": true
+  },
+  "limitations": [
+   "Feature table joins label tables by region_id; phenology medians need 3 valid samples per year and cycle window"
+  ]
+ }
 ]

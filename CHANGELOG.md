@@ -2,6 +2,34 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)
+
+- **Regular-calendar normalization (T-2)**: `rs:temporal_regularize` re-casts irregular
+  acquisitions onto a configurable calendar (`16d`-style or monthly, anchored on the
+  collection epoch) with nearest / window_mean / linear / whittaker-on-grid methods,
+  valid_count + filled_count provenance bands and a no-extrapolation refusal.
+- **Joint seasonal-trend change (T-3)**: `rs:temporal_harmonic_breaks` — greedy
+  seasonality-adjusted trend-break segmentation with per-segment harmonic + linear-trend
+  refit (BFAST/CCDC-inspired, honest naming), break day/magnitude bands and disturbance
+  onset/recovery semantics.
+- **Batch multi-ROI extraction (C-2)**: `rs:temporal_extract_regions` — one call for many
+  points/polygons with caller-owned ids; streaming by date (each scene read once), CSV
+  region×date table (mean/min/max/stddev/median/valid_count), O(regions) memory,
+  bounded median scratch with declared degradation.
+- **ML feature artifact (G)**: `rs:temporal_region_features` — typed per-region feature
+  table (quality, distribution, Sen/OLS trend, anomaly z, change features, multi-cycle
+  phenology medians) with a versioned schema sidecar (`exp_rs_temporal_region_features/1`)
+  for label joins by region_id.
+- **Monitor scenes seam (T-1)**: `rs:temporal_monitor` accepts inline `scenes` arrays;
+  headless pipelines no longer need a workspace collection.
+- **Smoothing & phenology extensions**: `whittaker_robust` (IRLS Cauchy reweighting) in
+  `rs:temporal_smooth`; `cycles=2` double-cropping phenology in `rs:temporal_phenology`
+  (second window explicit or the complement of the first; `c2_*` + `cycle_count` bands);
+  per-year per-cycle kernel `phenologyCyclesPerYear`.
+- **Scientific contracts**: `docs/processing/temporal.md` gains the Platform 10.0
+  per-operator rows and kernel notes; architecture in `docs/temporal/ARCHITECTURE_V3.md`;
+  decision record in ADR 0148.
+
 ## [Workbench 9.0] - 2026-09-12
 
 ### 🚀 Professional QGIS Remote-Sensing Workbench 9.0 (feat/professional-workbench-9)

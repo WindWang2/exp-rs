@@ -1,6 +1,8 @@
 // src/processing/algorithms/temporal/temporal_fit.cpp
 #include "temporal_fit.h"
 
+#include "temporal_linalg_detail.h"
+
 #include <algorithm>
 #include <utility>
 #include <cmath>
@@ -14,54 +16,6 @@ namespace
 {
 constexpr double kPi = 3.14159265358979323846;
 constexpr float kNan = std::numeric_limits<float>::quiet_NaN();
-
-/// Solves the small symmetric-positive system A·x = b by Gaussian elimination
-/// with partial pivoting. Returns false on a singular system.
-bool solveSmall( std::vector<double> a, std::vector<double> b, int n,
-                 std::vector<double> *x )
-{
-  for ( int col = 0; col < n; ++col )
-  {
-    int pivot = col;
-    double best = std::fabs( a[static_cast<size_t>( col ) * n + col] );
-    for ( int row = col + 1; row < n; ++row )
-    {
-      const double v = std::fabs( a[static_cast<size_t>( row ) * n + col] );
-      if ( v > best )
-      {
-        best = v;
-        pivot = row;
-      }
-    }
-    if ( best < 1e-12 )
-      return false;
-    if ( pivot != col )
-    {
-      for ( int k = col; k < n; ++k )
-        std::swap( a[static_cast<size_t>( col ) * n + k], a[static_cast<size_t>( pivot ) * n + k] );
-      std::swap( b[col], b[pivot] );
-    }
-    const double d = a[static_cast<size_t>( col ) * n + col];
-    for ( int row = col + 1; row < n; ++row )
-    {
-      const double factor = a[static_cast<size_t>( row ) * n + col] / d;
-      if ( factor == 0.0 )
-        continue;
-      for ( int k = col; k < n; ++k )
-        a[static_cast<size_t>( row ) * n + k] -= factor * a[static_cast<size_t>( col ) * n + k];
-      b[row] -= factor * b[col];
-    }
-  }
-  x->assign( n, 0.0 );
-  for ( int row = n - 1; row >= 0; --row )
-  {
-    double sum = b[row];
-    for ( int k = row + 1; k < n; ++k )
-      sum -= a[static_cast<size_t>( row ) * n + k] * ( *x )[k];
-    ( *x )[row] = sum / a[static_cast<size_t>( row ) * n + row];
-  }
-  return true;
-}
 
 /// One local polynomial fit (normal equations, degree <= 4) over the window
 /// [lo, hi] of y/t; evaluates the fitted polynomial at xEval.
@@ -89,7 +43,7 @@ float localPolynomialAt( const std::vector<float> &y, const std::vector<double> 
   if ( count < terms )
     return kNan;
   std::vector<double> coef;
-  if ( !solveSmall( ata, atb, terms, &coef ) )
+  if ( !detail::solveSmallDense( ata, atb, terms, &coef ) )
     return kNan;
   double value = 0.0;
   double xPow = 1.0;
@@ -126,7 +80,7 @@ bool solvePentadiagonal( const std::vector<double> &main, const std::vector<doub
         a[static_cast<size_t>( i + 2 ) * n + i] = off2[i];
       }
     }
-    return solveSmall( a, rhs, n, x );
+    return detail::solveSmallDense( a, rhs, n, x );
   }
   std::vector<double> d( n, 0.0 ), l1( n, 0.0 ), l2( n, 0.0 );
   // Column-wise banded LDLᵀ for bandwidth 2:
@@ -294,7 +248,7 @@ HarmonicFitResult harmonicFit( const std::vector<float> &y,
     if ( valid < terms )
       return result; // underdetermined: NaN fit (documented contract)
     std::vector<double> coef;
-    if ( !solveSmall( ata, atb, terms, &coef ) )
+    if ( !detail::solveSmallDense( ata, atb, terms, &coef ) )
       return result;
 
     // Stats + fitted values.
@@ -366,6 +320,57 @@ HarmonicFitResult harmonicFit( const std::vector<float> &y,
     }
   }
   return result;
+}
+
+std::vector<float> whittakerSmoothRobust( const std::vector<float> &y,
+                                          const std::vector<float> &w,
+                                          double lambda, int iterations )
+{
+  const int n = static_cast<int>( y.size() );
+  if ( n == 0 || !( lambda > 0.0 ) )
+    return std::vector<float>( static_cast<size_t>( n ), kNan );
+  const bool haveWeights = !w.empty() && static_cast<int>( w.size() ) == n;
+  std::vector<float> weights( static_cast<size_t>( n ), 0.0f );
+  for ( int i = 0; i < n; ++i )
+    weights[static_cast<size_t>( i )] =
+      std::isfinite( y[i] ) ? ( haveWeights ? w[static_cast<size_t>( i )] : 1.0f ) : 0.0f;
+
+  const int maxIter = std::clamp( iterations, 1, 10 );
+  std::vector<float> z = whittakerSmooth( y, weights, lambda );
+  for ( int iter = 1; iter < maxIter; ++iter )
+  {
+    // Residual scale from the current fit (median |r| of finite samples).
+    std::vector<double> absRes;
+    absRes.reserve( static_cast<size_t>( n ) );
+    for ( int i = 0; i < n; ++i )
+    {
+      if ( std::isfinite( y[i] ) && std::isfinite( z[static_cast<size_t>( i )] ) )
+        absRes.push_back( std::abs( static_cast<double>( y[i] ) -
+                                    z[static_cast<size_t>( i )] ) );
+    }
+    if ( absRes.empty() )
+      break;
+    std::sort( absRes.begin(), absRes.end() );
+    const double mad = absRes[absRes.size() / 2];
+    const double k = std::max( 3.0 * 1.4826 * mad, 1e-9 );
+    bool changed = false;
+    for ( int i = 0; i < n; ++i )
+    {
+      if ( weights[static_cast<size_t>( i )] <= 0.0f )
+        continue;
+      const double r = std::abs( static_cast<double>( y[i] ) -
+                                 z[static_cast<size_t>( i )] );
+      const double cauchy = 1.0 / ( 1.0 + ( r / k ) * ( r / k ) );
+      const double newW = ( haveWeights ? w[static_cast<size_t>( i )] : 1.0 ) * cauchy;
+      if ( std::abs( newW - weights[static_cast<size_t>( i )] ) > 1e-6 )
+        changed = true;
+      weights[static_cast<size_t>( i )] = static_cast<float>( newW );
+    }
+    if ( !changed )
+      break;
+    z = whittakerSmooth( y, weights, lambda );
+  }
+  return z;
 }
 
 SeasonalMetrics phenologyThreshold( const std::vector<float> &y,
@@ -769,6 +774,106 @@ DecompositionResult seasonalDecompose( const std::vector<float> &y,
     const int doy = std::clamp( doyOf[i], 1, 366 );
     out.seasonal[i] = static_cast<float>( clim[doy - 1] );
     out.remainder[i] = y[i] - out.trend[i] - out.seasonal[i];
+  }
+  return out;
+}
+
+
+// --- Multi-cycle phenology (Temporal Platform 10.0) ---
+
+SeasonWindow complementSeasonWindow( const SeasonWindow &window )
+{
+  // Complement of [s, e] (possibly wrapped) is [e+1, s-1] on the circular
+  // doy axis; a full-year window has no complement (returns itself).
+  SeasonWindow out;
+  out.startDoy = window.endDoy + 1;
+  out.endDoy = window.startDoy - 1;
+  if ( out.startDoy > 366 )
+    out.startDoy -= 366;
+  if ( out.endDoy < 1 )
+    out.endDoy += 366;
+  return out;
+}
+
+namespace
+{
+bool doyInWindow( int doy, const SeasonWindow &window )
+{
+  return window.startDoy <= window.endDoy
+           ? ( doy >= window.startDoy && doy <= window.endDoy )
+           : ( doy >= window.startDoy || doy <= window.endDoy );
+}
+} // namespace
+
+std::vector<SeasonYearMetrics> phenologyCyclesPerYear(
+  const std::vector<float> &y, const std::vector<double> &tDays,
+  const std::vector<int> &doyOf, const std::vector<int> &yearOf,
+  const std::vector<SeasonWindow> &windows, double crossingFraction )
+{
+  std::vector<SeasonYearMetrics> out;
+  const int n = static_cast<int>( y.size() );
+  if ( n == 0 || static_cast<int>( tDays.size() ) != n ||
+       static_cast<int>( doyOf.size() ) != n ||
+       static_cast<int>( yearOf.size() ) != n ||
+       windows.empty() || windows.size() > 2 )
+    return out;
+  if ( !( crossingFraction > 0.0 && crossingFraction <= 1.0 ) )
+    return out;
+
+  // Collect the distinct years (ascending, deterministic input order scan).
+  std::vector<int> years;
+  for ( int i = 0; i < n; ++i )
+  {
+    if ( std::isfinite( y[i] ) &&
+         ( years.empty() || years.back() != yearOf[static_cast<size_t>( i )] ) )
+      years.push_back( yearOf[static_cast<size_t>( i )] );
+  }
+
+  for ( int year : years )
+  {
+    // This year's valid samples, in time order.
+    std::vector<int> yearIdx;
+    for ( int i = 0; i < n; ++i )
+    {
+      if ( std::isfinite( y[i] ) && yearOf[static_cast<size_t>( i )] == year )
+        yearIdx.push_back( i );
+    }
+    for ( size_t c = 0; c < windows.size(); ++c )
+    {
+      std::vector<int> windowIdx;
+      for ( int i : yearIdx )
+      {
+        if ( doyInWindow( doyOf[static_cast<size_t>( i )], windows[c] ) )
+          windowIdx.push_back( i );
+      }
+      SeasonYearMetrics entry;
+      entry.year = year;
+      entry.cycleIndex = static_cast<int>( c );
+      if ( windowIdx.size() < 3 )
+      {
+        entry.metrics.valid = false;
+        out.push_back( entry );
+        continue;
+      }
+      // SeasonalMetrics on the year × window subset (tDays sub-vector keeps
+      // the real time axis; doyOf drives the metric reporting).
+      std::vector<float> subY;
+      std::vector<double> subT;
+      std::vector<int> subDoy;
+      subY.reserve( windowIdx.size() );
+      subT.reserve( windowIdx.size() );
+      subDoy.reserve( windowIdx.size() );
+      for ( int i : windowIdx )
+      {
+        subY.push_back( y[static_cast<size_t>( i )] );
+        subT.push_back( tDays[static_cast<size_t>( i )] );
+        subDoy.push_back( doyOf[static_cast<size_t>( i )] );
+      }
+      entry.metrics = phenologyThreshold( subY, subT, subDoy,
+                                          windows[c].startDoy, windows[c].endDoy,
+                                          crossingFraction );
+      out.push_back( entry );
+    }
   }
   return out;
 }

@@ -143,6 +143,10 @@ vendor/
 !.planning/prompt-command-hygiene-review/
 .planning/prompt-command-hygiene-review/*
 !.planning/prompt-command-hygiene-review/*.md
+# temporal-eo-phenology-change-10: track planning notes (markdown only; logs stay local).
+!.planning/temporal-eo-phenology-change-10/
+.planning/temporal-eo-phenology-change-10/*
+!.planning/temporal-eo-phenology-change-10/*.md
 .zcode/
 
 # IDE / editor / OS artifacts
