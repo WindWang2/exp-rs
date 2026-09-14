@@ -143,7 +143,13 @@ TEST_CASE( "Failure at node 5 skips the downstream cascade", "[d17][workflow][en
         }
         const QString artifact = QDir( dir ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
         QFile f( artifact );
-        REQUIRE( f.open( QIODevice::WriteOnly ) );
+        // No Catch2 assertions on pool threads (they are thread-local):
+        // report IO failure through the typed result instead.
+        if ( !f.open( QIODevice::WriteOnly ) )
+        {
+            result.errorMessage = QStringLiteral( "artifact open failed for %1" ).arg( node.nodeId );
+            return result;
+        }
         f.write( QByteArrayLiteral( "ok" ) );
         result.success = true;
         result.artifactPath = artifact;
@@ -201,10 +207,16 @@ TEST_CASE( "Resume from checkpoint reuses exactly the succeeded prefix", "[d17][
         NodeExecutionResult result;
         const QString artifact = QDir( dir ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
         QFile f( artifact );
-        REQUIRE( f.open( QIODevice::WriteOnly ) );
-        f.write( QByteArrayLiteral( "ok" ) );
-        result.success = true;
-        result.artifactPath = artifact;
+        if ( f.open( QIODevice::WriteOnly ) )
+        {
+            f.write( QByteArrayLiteral( "ok" ) );
+            result.success = true;
+            result.artifactPath = artifact;
+        }
+        else
+        {
+            result.errorMessage = QStringLiteral( "artifact open failed for %1" ).arg( node.nodeId );
+        }
         return result;
     } );
 
@@ -227,6 +239,56 @@ TEST_CASE( "Resume from checkpoint reuses exactly the succeeded prefix", "[d17][
         REQUIRE_FALSE( postStatuses.value( QStringLiteral( "node_%1" ).arg( i ) ).isCacheHit );
         REQUIRE( postStatuses.value( QStringLiteral( "node_%1" ).arg( i ) ).state == ExecutionState::Succeeded );
     }
+}
+
+TEST_CASE( "Resume works when the checkpoint document order is NOT topological", "[d17][workflow][engine]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "resume-nt" ) );
+    QString checkpointFile;
+
+    // Document order: the CONSUMER first, the PRODUCER second, wired
+    // consumer <- producer. Both succeed; the checkpoint records them in
+    // this non-topological order (creation order, not tier order).
+    WorkflowDefinition def;
+    auto makeNode = []( const QString &id, bool withInput ) {
+        NodeFact n;
+        n.nodeId = id;
+        n.operatorId = QStringLiteral( "rs:step" );
+        n.canvasPosition = QPointF( 0, 0 );
+        n.outputPorts = { PortFact{ QStringLiteral( "output" ), QStringLiteral( "Raster" ), QStringLiteral( "*" ),
+                                    QStringLiteral( "None" ), 0, 0, 1, false } };
+        if ( withInput )
+            n.inputPorts = { PortFact{ QStringLiteral( "input" ), QStringLiteral( "Raster" ), QStringLiteral( "*" ),
+                                       QStringLiteral( "None" ), 0, 0, 1, true } };
+        return n;
+    };
+    def.nodes = { makeNode( QStringLiteral( "consumer" ), true ), makeNode( QStringLiteral( "producer" ), false ) };
+    def.edges = { EdgeFact{ QStringLiteral( "e1" ), QStringLiteral( "producer" ), QStringLiteral( "output" ),
+                            QStringLiteral( "consumer" ), QStringLiteral( "input" ) } };
+
+    {
+        PipelineRunCoordinator coordinator;
+        REQUIRE( coordinator.startRun( def, dir ) );
+        REQUIRE( waitForCompleted( coordinator ) );
+        checkpointFile = coordinator.checkpointPath();
+        REQUIRE( QFile::exists( checkpointFile ) );
+    }
+
+    PipelineRunCoordinator resumeCoordinator;
+    QString error;
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpointFile, &error ) );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+
+    const auto statuses = resumeCoordinator.getAllStatuses();
+    REQUIRE( statuses.size() == 2 );
+    // Both nodes were cached — including the consumer whose producer is
+    // listed AFTER it in the document. A one-pass parent count would stall
+    // this resume forever (P0 regression pin).
+    REQUIRE( statuses.value( QStringLiteral( "consumer" ) ).isCacheHit );
+    REQUIRE( statuses.value( QStringLiteral( "producer" ) ).isCacheHit );
+    REQUIRE( statuses.value( QStringLiteral( "consumer" ) ).state == ExecutionState::Succeeded );
+    REQUIRE( statuses.value( QStringLiteral( "producer" ) ).state == ExecutionState::Succeeded );
 }
 
 TEST_CASE( "Resume rejects a corrupted checkpoint fail-closed", "[d17][workflow][engine]" )

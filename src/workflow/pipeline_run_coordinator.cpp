@@ -99,7 +99,11 @@ QString atomicWriteJson( const QString &path, const QJsonObject &document )
     }
     file.flush();
     file.close();
-    fsyncFile( tmp );
+    if ( !fsyncFile( tmp ) )
+    {
+        QFile::remove( tmp );
+        return {};
+    }
     // POSIX rename(2) atomically REPLACES the target (QFile::rename refuses
     // when the destination exists) — exactly the two-phase commit semantics
     // this checkpoint writer needs.
@@ -472,7 +476,7 @@ void PipelineRunCoordinator::finalizeIfDone()
 
     m_state->finished = true;
     bool success = true;
-    int succeeded = 0, skipped = 0, failed = 0;
+    int succeeded = 0, skipped = 0, failed = 0, cancelled = 0;
     for ( const NodeStatusSnapshot &snapshot : std::as_const( m_state->statuses ) )
     {
         switch ( snapshot.state )
@@ -489,6 +493,7 @@ void PipelineRunCoordinator::finalizeIfDone()
                 success = false;
                 break;
             case ExecutionState::Cancelled:
+                ++cancelled;
                 success = false;
                 break;
             default:
@@ -499,7 +504,11 @@ void PipelineRunCoordinator::finalizeIfDone()
     persistCheckpoint();
     emit pipelineCompleted(
         success,
-        QStringLiteral( "%1 succeeded, %2 skipped, %3 failed" ).arg( succeeded ).arg( skipped ).arg( failed ) );
+        QStringLiteral( "%1 succeeded, %2 skipped, %3 failed, %4 cancelled" )
+            .arg( succeeded )
+            .arg( skipped )
+            .arg( failed )
+            .arg( cancelled ) );
 }
 
 void PipelineRunCoordinator::persistCheckpoint()
@@ -547,6 +556,11 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
             *outError = message;
         return false;
     };
+
+    // Symmetric with startRun: a live run's queued completions must never
+    // mutate a resumed run's state.
+    if ( !m_state->finished && !m_state->def.nodes.isEmpty() )
+        return fail( QStringLiteral( "a run is already active on this coordinator" ) );
 
     QFile file( checkpointFilePath );
     if ( !file.open( QIODevice::ReadOnly ) )
@@ -612,23 +626,29 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
         }
         snapshot.lineageSignature = recomputed.value( nodeId );
         m_state->statuses.insert( nodeId, snapshot );
+    }
+    if ( m_state->statuses.size() != m_state->def.nodes.size() )
+        return fail( QStringLiteral( "checkpoint is missing node statuses" ) );
 
-        // Count only parents that still need to RUN this round: CacheHit
-        // (Succeeded) parents release their children immediately, otherwise
-        // a fully-cached prefix would stall the resumed frontier.
+    // Second pass over the FULL status map (never the partially filled one):
+    // count only parents that still need to RUN this round — CacheHit
+    // (Succeeded) parents release their children immediately, otherwise a
+    // fully-cached prefix would stall the resumed frontier. Document order
+    // of the checkpoint array is irrelevant.
+    const WorkflowDefinition &resumedDef = m_state->def;
+    for ( const NodeFact &node : resumedDef.nodes )
+    {
         int parents = 0;
         for ( const EdgeFact &edge : m_state->def.edges )
         {
-            if ( edge.targetNodeId != nodeId )
+            if ( edge.targetNodeId != node.nodeId )
                 continue;
             const NodeStatusSnapshot &parentSnapshot = m_state->statuses.value( edge.sourceNodeId );
             if ( parentSnapshot.state != ExecutionState::Succeeded )
                 ++parents;
         }
-        m_state->remainingParents.insert( nodeId, parents );
+        m_state->remainingParents.insert( node.nodeId, parents );
     }
-    if ( m_state->statuses.size() != m_state->def.nodes.size() )
-        return fail( QStringLiteral( "checkpoint is missing node statuses" ) );
 
     dispatchReadyNodes();
     finalizeIfDone();
