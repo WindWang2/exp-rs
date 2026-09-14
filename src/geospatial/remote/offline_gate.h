@@ -16,10 +16,11 @@
 
 namespace sicnu::geo::offline {
 
-/// Engages/disengages the gate. Idempotent; set once at startup.
+/// Engages/disengages the gate. Idempotent. The flag is atomic so concurrent
+/// readers (worker threads) are well-defined; typical use is once at startup.
 void setEnabled( bool offline );
 
-/// True when remote requests must be refused.
+/// True when remote requests must be refused. Thread-safe (atomic load).
 bool enabled();
 
 /// SICNU_OFFLINE with the repo's env-flag semantics ("1"/"true"/"yes"/"on",
@@ -37,7 +38,8 @@ std::string refusalMessage( const std::string &source );
 /// GDAL-level backstop: CPL_VSIL_CURL_ALLOWED_EXTENSIONS is set to an
 /// impossible extension so every network /vsi* open fails fast ("does not
 /// exist", no packet leaves the machine) even on open paths that bypass this
-/// layer. Idempotent.
+/// layer. Idempotent. Must run single-threaded at startup (GDAL global config
+/// is not synchronized).
 void applyGdalNetworkDeny();
 
 /// Inverse of applyGdalNetworkDeny (tests re-enabling networking).

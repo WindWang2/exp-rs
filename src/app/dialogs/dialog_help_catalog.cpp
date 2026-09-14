@@ -2,6 +2,7 @@
 #include "dialog_help_catalog.h"
 
 #include <QAction>
+#include <QCoreApplication>
 #include <QDialog>
 #include <QHash>
 #include <QMessageBox>
@@ -13,17 +14,37 @@ namespace
 
 struct Entry
 {
-    const char *summary; // short one-line
+    const char *summary; // short one-line (QT_TRANSLATE_NOOP at storage)
     const char *body;    // multi-sentence plain (wrapped as <p>)
 };
+
+// lupdate extracts QT_TRANSLATE_NOOP; lookup uses the same context.
+QString translateHelp( const char *source )
+{
+    return QCoreApplication::translate( "SicnuDialogHelp", source );
+}
+
+const char *const kHelpWindowTitle =
+    QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Help" );
+const char *const kGenericSummary =
+    QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Function Description" );
+const char *const kGenericBody =
+    QT_TRANSLATE_NOOP( "SicnuDialogHelp",
+                       "Fill in inputs, parameters and output paths on the dialog's tabs, then run."
+                       "Hover widgets for more hints; press 'Help' for the full explanation (if available)." );
+const char *const kHelpTip =
+    QT_TRANSLATE_NOOP( "SicnuDialogHelp",
+                       "Tip: hover over any widget to see its explanation;"
+                       "Menu Help → What's This? (Shift+F1), then click a widget;"
+                       "The GDAL / OTB algorithms in the toolbox have their own help and command previews." );
 
 const QHash<QString, Entry> &catalog()
 {
     static const QHash<QString, Entry> k = {
         // ========== Raster processing dialogs (toolName) ==========
         { QStringLiteral( "spectral_index" ),
-          { "Spectral indices: NDVI / EVI / SAVI / NDWI / NDBI / MNDWI",
-            "[Index]\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Spectral indices: NDVI / EVI / SAVI / NDWI / NDBI / MNDWI" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Index]\n"
             "• NDVI = (NIR−Red)/(NIR+Red): vegetation vigour, −1 to 1\n"
             "• EVI: enhanced vegetation index; needs NIR/Red/Blue and suppresses atmosphere and soil\n"
             "• SAVI: soil-adjusted vegetation index; better for sparse vegetation\n"
@@ -32,10 +53,10 @@ const QHash<QString, Entry> &catalog()
             "• MNDWI = (Green−SWIR)/(Green+SWIR): modified water index\n"
             "[Bands] Map NIR / Red / Green / Blue / SWIR per sensor (band numbers start at 1)."
             "Pre-filled in the common Landsat / Sentinel order; verify against your actual data.\n"
-            "[Output] Single-band float GeoTIFF. The path is required before running." } },
+            "[Output] Single-band float GeoTIFF. The path is required before running." ) } },
         { QStringLiteral( "terrain" ),
-          { "DEM terrain analysis: slope / aspect / hillshade, etc.",
-            "[DEM layer] Elevation raster; units should match the CRS (a metric projection is more reliable).\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "DEM terrain analysis: slope / aspect / hillshade, etc." ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[DEM layer] Elevation raster; units should match the CRS (a metric projection is more reliable).\n"
             "[Analysis type]\n"
             "• Slope: slope (degrees)\n"
             "• Aspect: aspect (degrees; north = 0, clockwise)\n"
@@ -43,28 +64,28 @@ const QHash<QString, Entry> &catalog()
             "• Roughness / TRI / TPI: roughness and topographic position indices\n"
             "[Cell Size] Ground resolution (map units); usually estimated automatically once a layer is chosen.\n"
             "[Solar azimuth / elevation] Hillshade only: azimuth 0–360° (north = 0), elevation 0–90°.\n"
-            "[Output] Single-band result GeoTIFF." } },
+            "[Output] Single-band result GeoTIFF." ) } },
         { QStringLiteral( "extract_band" ),
-          { "Extract a Single Band from a Multiband Raster",
-            "[Raster layer] A project raster with more than 1 band.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Extract a Single Band from a Multiband Raster" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Raster layer] A project raster with more than 1 band.\n"
             "[Band] Band number / name to save separately.\n"
-            "[Output] A single-band GeoTIFF for single-band analysis or combination with other data." } },
+            "[Output] A single-band GeoTIFF for single-band analysis or combination with other data." ) } },
         { QStringLiteral( "temporal_analysis" ),
-          { "Time series analysis: multitemporal statistics / compositing / index time series / trends / anomalies / series extraction",
-            "[Epoch scenes] Add multiple epoch rasters; acquisition times are parsed from product metadata or file names and can be edited.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Time series analysis: multitemporal statistics / compositing / index time series / trends / anomalies / series extraction" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Epoch scenes] Add multiple epoch rasters; acquisition times are parsed from product metadata or file names and can be edited.\n"
             "[Precheck] Checks before running: time completeness, duplicate epochs, grid consistency (CRS / resolution / origin, no implicit resampling),"
             "Band-role resolvability, radiometric state and scale/offset consistency, QA band availability.\n"
             "[Analysis] Time series statistics (Welford mean/variance), best-pixel compositing (quality score + observation count), index time series (same kernel as single scenes),"
             "Linear trends (real time intervals), anomalies (z-score / difference), point and ROI series (CSV).\n"
-            "[Memory] Processes in streaming tiles; working memory is independent of the date count, so tens to hundreds of epochs are safe." } },
+            "[Memory] Processes in streaming tiles; working memory is independent of the date count, so tens to hundreds of epochs are safe." ) } },
         { QStringLiteral( "mosaic" ),
-          { "Mosaic multiple rasters into a continuous image",
-            "[Input list] At least 2 raster files; projections should match, and the engine merges overlaps with its default strategy.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Mosaic multiple rasters into a continuous image" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Input list] At least 2 raster files; projections should match, and the engine merges overlaps with its default strategy.\n"
             "[Add / Remove] Manage the files taking part in the mosaic.\n"
-            "[Output] The mosaicked GeoTIFF. Watch disk and memory for large images." } },
+            "[Output] The mosaicked GeoTIFF. Watch disk and memory for large images." ) } },
         { QStringLiteral( "atmospheric_correction" ),
-          { "Atmospheric Correction / DN to Radiance",
-            "[Method]\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Atmospheric Correction / DN to Radiance" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Method]\n"
             "• DN to Radiance: L = gain×DN + bias, requires sensor gain/offset\n"
             "• DOS1: dark object subtraction estimating path radiance\n"
             "• DOS2: DOS1 plus transmittance; needs the airmass\n"
@@ -72,20 +93,20 @@ const QHash<QString, Entry> &catalog()
             "[Band] Band number to process (QUAC processes all bands and ignores this).\n"
             "[Gain / Bias] Radiometric calibration coefficients (from metadata or the product handbook; ignored by QUAC).\n"
             "[Airmass] DOS2 only: the airmass, usually ≥ 1.\n"
-            "[Output] The corrected raster." } },
+            "[Output] The corrected raster." ) } },
         { QStringLiteral( "contrast_stretch" ),
-          { "Contrast stretching to improve display and downstream analysis",
-            "[Method]\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Contrast stretching to improve display and downstream analysis" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Method]\n"
             "• Linear: min–max linear stretch to the output range\n"
             "• Percentage Clip: clips Clip% at both tails before stretching, suppressing extremes\n"
             "• Std Dev: stretch to mean±K×std dev\n"
             "• Histogram Equalization: enhances global contrast\n"
             "[Clip %] Percent clip only; 1–2% is typical.\n"
             "[Std Dev K] Std-dev method only; 2 is typical.\n"
-            "[Output] Stretched multiband GeoTIFF (band by band over the input)." } },
+            "[Output] Stretched multiband GeoTIFF (band by band over the input)." ) } },
         { QStringLiteral( "fusion" ),
-          { "Pansharpening / Image Fusion",
-            "[Panchromatic] High spatial resolution single band.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Pansharpening / Image Fusion" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Panchromatic] High spatial resolution single band.\n"
             "[Multispectral] Lower resolution multiband. Both must cover roughly the same extent and be registered.\n"
             "[Method]\n"
             "• Linear Weighted: weighted fusion with adjustable Pan Weight and per-band weights\n"
@@ -95,278 +116,278 @@ const QHash<QString, Entry> &catalog()
             "• OTB BundleToPerfectSensor / GDAL pansharpen: external toolchains\n"
             "[Pan Weight] Panchromatic share in the linear method, 0–1.\n"
             "[RGB Bands] IHS only: red / green / blue band numbers within the multispectral image.\n"
-            "[Output] The sharpened multispectral GeoTIFF." } },
+            "[Output] The sharpened multispectral GeoTIFF." ) } },
         { QStringLiteral( "change_detection" ),
-          { "Two-Date Change Detection",
-            "[Earlier / later images] Must be geometrically aligned (same projection, ideally same resolution); registration can be done first.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Two-Date Change Detection" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Earlier / later images] Must be geometrically aligned (same projection, ideally same resolution); registration can be done first.\n"
             "[Band] The band used in the computation for each epoch (usually the same-named band or the same index).\n"
             "[Method]\n"
             "• Difference: later − earlier\n"
             "• Normalized Difference: (later − earlier)/(later + earlier)\n"
             "• Change Mask: binary change mask where the difference exceeds the threshold\n"
             "[Threshold] Change Mask only: the change threshold (same scale as the DN).\n"
-            "[Output] Difference or mask GeoTIFF." } },
+            "[Output] Difference or mask GeoTIFF." ) } },
         { QStringLiteral( "speckle_filter" ),
-          { "SAR Speckle Filtering",
-            "[Filter] Lee / Frost / Kuan / Gamma-MAP; all suppress speckle with different edge preservation.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "SAR Speckle Filtering" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Filter] Lee / Frost / Kuan / Gamma-MAP; all suppress speckle with different edge preservation.\n"
             "[Window] 3×3 / 5×5 / 7×7; larger values smooth more and keep less detail.\n"
             "[Noise Variance] Noise variance estimate for Lee / Kuan / Gamma-MAP; adjust per sensor.\n"
             "[Damping] Frost only: the damping factor; larger values smooth more.\n"
-            "[Output] The filtered raster (band count preserved)." } },
+            "[Output] The filtered raster (band count preserved)." ) } },
         { QStringLiteral( "band_ratio" ),
-          { "Band ratio or IHS transform",
-            "[Mode]\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Band ratio or IHS transform" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Mode]\n"
             "• Band Ratio: numerator / denominator, highlighting spectral differences of specific features\n"
             "• IHS Transform: converts RGB into intensity-hue-saturation space\n"
             "[Numerator / Denominator] Numerator and denominator bands of the ratio.\n"
             "[R/G/B] The three input bands of the IHS transform.\n"
-            "[Output] Single-band ratio or multiband IHS result." } },
+            "[Output] Single-band ratio or multiband IHS result." ) } },
         { QStringLiteral( "pca" ),
-          { "Principal Component Analysis (PCA)",
-            "[Components] Number of output components, ≤ the input band count.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Principal Component Analysis (PCA)" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Components] Number of output components, ≤ the input band count.\n"
             "The first components usually contain most of the variance; used for decorrelation, dimensionality reduction and visual enhancement.\n"
-            "[Output] Multiband PCA GeoTIFF (bands = PC1, PC2, ...)." } },
+            "[Output] Multiband PCA GeoTIFF (bands = PC1, PC2, ...)." ) } },
         { QStringLiteral( "spatial_filter" ),
-          { "Spatial Convolution Filtering",
-            "[Filter]\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Spatial Convolution Filtering" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Filter]\n"
             "• Mean / Gaussian / Median: smooth noise (median preserves edges better)\n"
             "• Sobel / Laplacian: edge enhancement\n"
             "[Kernel Size] Convolution kernel 3×3 or 5×5.\n"
-            "[Output] The filtered raster." } },
+            "[Output] The filtered raster." ) } },
         { QStringLiteral( "image_enhancement" ),
-          { "Combined Image Enhancement Panel",
-            "[Method] Switches within the same dialog: contrast stretch / spatial filtering / band ratio · IHS / SAR speckle filtering.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Combined Image Enhancement Panel" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Method] Switches within the same dialog: contrast stretch / spatial filtering / band ratio · IHS / SAR speckle filtering.\n"
             "Each sub-page's parameters match the corresponding standalone menu tool; see the hover descriptions.\n"
-            "[Output] Enhanced result GeoTIFF." } },
+            "[Output] Enhanced result GeoTIFF." ) } },
         { QStringLiteral( "band_math" ),
-          { "Band Math Expression",
-            "[Expression] Arithmetic expression; bands are b1, b2, ... (starting at 1).\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Band Math Expression" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Expression] Arithmetic expression; bands are b1, b2, ... (starting at 1).\n"
             "Examples: (b1-b2)/(b1+b2) is an NDVI-style operation; b1*0.0001 rescales.\n"
             "Supports + − * / and parentheses.\n"
-            "[Output] Single-band computation result." } },
+            "[Output] Single-band computation result." ) } },
         { QStringLiteral( "apply_mask" ),
-          { "Apply Mask: set obscured pixels to NoData with a binary / QA mask",
-            "[Input Layer] The multiband product raster to process.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Apply Mask: set obscured pixels to NoData with a binary / QA mask" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Input Layer] The multiband product raster to process.\n"
             "[Mask Layer] A binary or quality mask raster (1 / non-zero = obscured or invalid, 0 = clear and valid).\n"
             "[Auto-align grid] If the mask and input raster differ in resolution or extent, nearest-neighbour resampling aligns them automatically.\n"
             "[Output NoData] Replacement value for obscured pixels (metadata NoData by default, or custom e.g. -9999).\n"
-            "[Output] The masked multiband GeoTIFF." } },
+            "[Output] The masked multiband GeoTIFF." ) } },
         { QStringLiteral( "radiometric_calibration" ),
-          { "Radiometric Calibration: DN to radiance / TOA reflectance / brightness temperature",
-            "[Physical quantity]\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Radiometric Calibration: DN to radiance / TOA reflectance / brightness temperature" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Physical quantity]\n"
             "• Radiance: W/(m²·sr·µm), computed from gain and offset\n"
             "• TOA Reflectance: dimensionless reflectance [0, 1], corrected with the solar elevation and sun–earth distance\n"
             "• Brightness Temperature: Kelvin temperature (K) of thermal infrared bands\n"
             "[Band] Tick 'process all bands' or choose a specific band.\n"
             "[Metadata file] Auto-detect or manually choose a Landsat MTL text or Sentinel-2 MTD XML to extract calibration gain/offset and the sun elevation.\n"
-            "[Output] Calibrated float GeoTIFF." } },
+            "[Output] Calibrated float GeoTIFF." ) } },
         { QStringLiteral( "qa_mask" ),
-          { "Generate QA Mask: extract cloud, cloud shadow, snow or water",
-            "[Quality source]\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Generate QA Mask: extract cloud, cloud shadow, snow or water" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Quality source]\n"
             "• Auto: identify the QA band automatically from sensor metadata\n"
             "• Landsat QA_PIXEL: parses the Landsat 8/9 quality assessment bitmask\n"
             "• Sentinel-2 SCL: parses the Scene Classification Layer\n"
             "• Generic Bitmask: bitwise-AND extraction with a generic integer mask\n"
             "[Mask category] Cloud and cloud shadow, cloud only, shadow only, snow/ice, water, or all invalid pixels.\n"
             "[Bit mask value] Generic bitmask mode only: the integer value used in the test.\n"
-            "[Output] Single-band binary mask GeoTIFF (1 = obscured / invalid, 0 = clear and valid)." } },
+            "[Output] Single-band binary mask GeoTIFF (1 = obscured / invalid, 0 = clear and valid)." ) } },
         { QStringLiteral( "post_classification_change" ),
-          { "Post-classification change detection: two-date classification comparison and transition matrix",
-            "[Earlier / later layers] Single-band classification rasters of the same area at two epochs (pixel values are integer class ids).\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Post-classification change detection: two-date classification comparison and transition matrix" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Earlier / later layers] Single-band classification rasters of the same area at two epochs (pixel values are integer class ids).\n"
             "[Num Classes] Number of classes used to build the transition matrix (0 = auto-detect the maximum class id).\n"
             "[Transition Matrix] Rows are earlier classes, columns later classes; summarises class flows and area transitions.\n"
-            "[Output] A change-type map GeoTIFF (pixel value encoded as earlier-id × base + later-id) plus a detailed statistics report." } },
+            "[Output] A change-type map GeoTIFF (pixel value encoded as earlier-id × base + later-id) plus a detailed statistics report." ) } },
         { QStringLiteral( "orthorectification" ),
-          { "Orthorectification: geometric orthorectification based on RPC / GCPs and a DEM",
-            "[Geometry model] Detects the rational polynomial coefficients (RPC) or ground control points (GCPs) carried by the input raster automatically.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Orthorectification: geometric orthorectification based on RPC / GCPs and a DEM" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Geometry model] Detects the rational polynomial coefficients (RPC) or ground control points (GCPs) carried by the input raster automatically.\n"
             "[Target CRS] The projected CRS of the orthorectification output (a metric projection such as UTM is recommended).\n"
             "[DEM terrain correction] Specify an elevation raster to remove terrain-induced geometric distortion; a reference elevation can be given when none is provided.\n"
             "[Resampling] Bilinear (smooth, continuous) / Nearest (preserves pixel values) / Cubic / Lanczos.\n"
             "[Cell Size] Target resolution (map units); 0 infers it automatically from the sensor resolution.\n"
-            "[Output] The orthorectified GeoTIFF." } },
+            "[Output] The orthorectified GeoTIFF." ) } },
 
         // ========== Standalone dialogs ==========
         { QStringLiteral( "batch_processing" ),
-          { "Batch processing: one algorithm over many files",
-            "[Algorithm] Choose an algorithm from the processing registry (GDAL / OTB / built-in, etc.).\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Batch processing: one algorithm over many files" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Algorithm] Choose an algorithm from the processing registry (GDAL / OTB / built-in, etc.).\n"
             "[Input Files] Add / Remove manage the list of files to process.\n"
             "[Output Directory] All results are written here (file names derived from the inputs).\n"
             "[Run Batch] Executes in order; a progress bar and status line provide feedback.\n"
-            "Suits repeatable pipelines; validate complex parameters on a single file in the toolbox first." } },
+            "Suits repeatable pipelines; validate complex parameters on a single file in the toolbox first." ) } },
         { QStringLiteral( "preferences" ),
-          { "Preferences: theme, CRS, logging and external tool paths",
-            "[Theme] Light / dark interface theme.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Preferences: theme, CRS, logging and external tool paths" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Theme] Light / dark interface theme.\n"
             "[Default CRS] Default CRS for new projects.\n"
             "[Log to file / Log File] Whether to write a log file, and its path.\n"
             "[GDAL Path / OTB Path] External executable directories used by the CLI wrapper algorithms.\n"
-            "Some options take full effect only after a restart." } },
+            "Some options take full effect only after a restart." ) } },
         { QStringLiteral( "stac_browser" ),
-          { "STAC Catalog Search and Asset Loading",
-            "[Endpoint] STAC API root URL, e.g. Element84 Earth Search.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "STAC Catalog Search and Asset Loading" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Endpoint] STAC API root URL, e.g. Element84 Earth Search.\n"
             "[Collection] Dataset ID, e.g. sentinel-2-l2a.\n"
             "[Datetime] Time filter (ISO interval or instant, as supported by the catalog).\n"
             "【BBox】min_lon,min_lat,max_lon,max_lat。\n"
             "[Search] Searches items; the table shows ID / collection / time / asset count.\n"
-            "[Load Selected Asset] Loads the selected assets into the project (network and permissions required)." } },
+            "[Load Selected Asset] Loads the selected assets into the project (network and permissions required)." ) } },
         { QStringLiteral( "comparison" ),
-          { "Side-by-side visual layer comparison",
-            "[Left / Right Layer] Raster layers from the project.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Side-by-side visual layer comparison" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Left / Right Layer] Raster layers from the project.\n"
             "[Load] Loads into the comparison view to inspect registration, change or classification differences.\n"
-            "Complements the main window's swipe: this tool is a side-by-side comparison." } },
+            "Complements the main window's swipe: this tool is a side-by-side comparison." ) } },
         { QStringLiteral( "crs_preset" ),
-          { "Common CRS Presets",
-            "[Search] Filter by name or EPSG.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Common CRS Presets" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Search] Filter by name or EPSG.\n"
             "[Tree list] Browse presets in groups.\n"
             "[Details] EPSG, name and WKT summary of the selection.\n"
-            "Double-click or OK applies the CRS to the project / caller." } },
+            "Double-click or OK applies the CRS to the project / caller." ) } },
         { QStringLiteral( "processing_algorithm" ),
-          { "Processing Algorithm Dialog (Toolbox)",
-            "[Parameter table] Hover any parameter label for its description; required fields are validated before running.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Processing Algorithm Dialog (Toolbox)" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Parameter table] Hover any parameter label for its description; required fields are validated before running.\n"
             "[Advanced] Advanced parameters are collapsed by default.\n"
             "[Load result layers] Joins the layer tree automatically when finished.\n"
             "[Command] Live preview of the GDAL / OTB / generic CLI call; copy it to a terminal.\n"
-            "The help page shows the algorithm shortHelp; it complements the RS-specific dialogs behind the menu entries." } },
+            "The help page shows the algorithm shortHelp; it complements the RS-specific dialogs behind the menu entries." ) } },
         { QStringLiteral( "sift_match" ),
-          { "SIFT Auto-Matching GCP Generation",
-            "[Contrast] Feature contrast threshold; larger values give fewer but steadier points.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "SIFT Auto-Matching GCP Generation" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Contrast] Feature contrast threshold; larger values give fewer but steadier points.\n"
             "[Max Matches] Upper bound on the number of matched pairs kept.\n"
             "[Min Inlier] Minimum RANSAC inlier ratio.\n"
             "[RANSAC Threshold] Pixel tolerance.\n"
             "[Max Image Side] Maximum edge length to scale to before matching (speed-up).\n"
-            "Even after importing results into the GCP table, inspect outliers visually." } },
+            "Even after importing results into the GCP table, inspect outliers visually." ) } },
         { QStringLiteral( "map_coords" ),
-          { "GCP Target Coordinate Input",
-            "Enter or pick control point target coordinates from the map, pairing them with source pixel positions."
-            "In I2I two-canvas mode, points are usually picked on both sides directly; this form is rarely used." } },
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "GCP Target Coordinate Input" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Enter or pick control point target coordinates from the map, pairing them with source pixel positions."
+            "In I2I two-canvas mode, points are usually picked on both sides directly; this form is rarely used." ) } },
 
         // ========== Georeferencer ==========
         { QStringLiteral( "georef_i2i" ),
-          { "Image to Image Registration",
-            "[Canvases] left = source (Warp), right = reference (Base); Add / Move / Delete GCP need both sides open.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Image to Image Registration" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Canvases] left = source (Warp), right = reference (Base); Add / Move / Delete GCP need both sides open.\n"
             "[Open] A file or a main project layer.\n"
             "[Sync zoom] Off by default; do not force sync with different CRSs or when checking row/column on the same scene.\n"
             "[SIFT] Auto-matches GCPs (OpenCV).\n"
             "[Correction parameters] The panel on the right: transform / resampling / RMS / CRS / output (see 'Parameter Description').\n"
             "[GCP table] Row/column and residuals; right-click to locate / enable-disable / delete.\n"
-            "[Task] Tracks warp progress after running and loads the result." } },
+            "[Task] Tracks warp progress after running and loads the result." ) } },
         { QStringLiteral( "georef_i2m" ),
-          { "Image to Map Registration",
-            "[Source] A file or project layer; [Base] a visible main project map layer.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Image to Map Registration" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Source] A file or project layer; [Base] a visible main project map layer.\n"
             "[Transform] Includes RPC Physical (needs RPC metadata, optional DEM).\n"
-            "The rest is similar to I2I: the GCP table, correction parameters and task list." } },
+            "The rest is similar to I2I: the GCP table, correction parameters and task list." ) } },
         { QStringLiteral( "georef_params" ),
-          { "Geometric correction parameters (panel on the right)",
-            "[Transform] Linear / Helmert ≥ 2 points; polynomial 1/2/3 about 3/6/10 points; TPS / projective / RPC.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Geometric correction parameters (panel on the right)" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Transform] Linear / Helmert ≥ 2 points; polynomial 1/2/3 about 3/6/10 points; TPS / projective / RPC.\n"
             "Minimum / actual points / DOF: DOF = actual − minimum; residual assessment needs DOF > 0; at DOF = 0 residuals carry no statistical meaning.\n"
             "[Resampling] Nearest preserves classes; Bilinear / Cubic for continuous imagery; cell size auto; the background value fills gaps.\n"
             "[RMS] In source pixel units; scatter plus X / Y / total / maximum residuals.\n"
             "[CRS] The target CRS determines the output and the fit; in I2I it usually follows the reference.\n"
-            "[Output] A path is required before running. [DEM] RPC only." } },
+            "[Output] A path is required before running. [DEM] RPC only." ) } },
         { QStringLiteral( "georef_gcp_table" ),
-          { "GCP Table",
-            "Columns: map coordinates, pixel column/row on both sides, residuals ΔX/ΔY/RMS, enabled state.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "GCP Table" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Columns: map coordinates, pixel column/row on both sides, residuals ΔX/ΔY/RMS, enabled state.\n"
             "Right-click: locate, enable / disable, edit, delete. Delete removes the selection.\n"
-            "For same-scene registration, 'col src / row src' should be close to 'col ref / row ref'." } },
+            "For same-scene registration, 'col src / row src' should be close to 'col ref / row ref'." ) } },
         { QStringLiteral( "georef_tasks" ),
-          { "Correction Task List",
-            "Shows progress after running; can be cancelled; results load into the project when finished." } },
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Correction Task List" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Shows progress after running; can be cancelled; results load into the project when finished." ) } },
 
         // ========== Classification / OBIA ==========
         { QStringLiteral( "classification" ),
-          { "Pixel-Level Supervised Classification",
-            "[Workflow] Load image → define classes → collect ROIs → set algorithm / bands / ignored values → train and classify → accuracy assessment.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Pixel-Level Supervised Classification" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Workflow] Load image → define classes → collect ROIs → set algorithm / bands / ignored values → train and classify → accuracy assessment.\n"
             "[ROI Tools] Collect training samples with point / rectangle / polygon / freehand / magic wand.\n"
             "[Setup bar] Algorithm, bands, training ratio, NoData / ignored values, output path; preview / cross-validation / apply.\n"
-            "[Accuracy] OA, Kappa, confusion matrix, producer's / user's accuracy." } },
+            "[Accuracy] OA, Kappa, confusion matrix, producer's / user's accuracy." ) } },
         { QStringLiteral( "classify_setup" ),
-          { "Classifier Setup Bar Parameters",
-            "[Algorithm] Normal Bayes / SVM / K-means (RF / Mahalanobis / UNet placeholders).\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Classifier Setup Bar Parameters" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Algorithm] Normal Bayes / SVM / K-means (RF / Mahalanobis / UNet placeholders).\n"
             "[Bands] Comma-separated, e.g. 1,2,3.\n"
             "[Training ratio] Stratified training share; the rest is a holdout for accuracy.\n"
             "[Output] Classification result GeoTIFF.\n"
             "[Use source NoData] Metadata NoData values are ignored.\n"
             "[Ignored values] Extra DN list (e.g. 0-fill edges).\n"
             "[Matching] Ignore the whole pixel if any band is ignored (default), or only when all bands are ignored.\n"
-            "[Preview] Current viewport only. [Cross-Validation] K-fold evaluation. [Apply] Full-image classification." } },
+            "[Preview] Current viewport only. [Cross-Validation] K-fold evaluation. [Apply] Full-image classification." ) } },
         { QStringLiteral( "obia" ),
-          { "Object-Based Classification (OBIA)",
-            "[Load Raster] Loads the image to segment.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Object-Based Classification (OBIA)" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Load Raster] Loads the image to segment.\n"
             "[Segments Kernel] Smoothing kernel size 3–21; larger values give coarser objects.\n"
             "[Bins] Quantization levels (built-in segmentation fallback), 2–128.\n"
             "[Min region] Minimum object pixel count; suppresses small patches.\n"
             "[Segment] Runs segmentation. [Classifier] Normal Bayes / SVM / K-means.\n"
             "[Classify] Object-level classification. [Export] Export results.\n"
-            "[Classes table] Class ID / name / color. Suits high-resolution imagery." } },
+            "[Classes table] Class ID / name / color. Suits high-resolution imagery." ) } },
         { QStringLiteral( "obia_class_table" ),
-          { "OBIA Class Table",
-            "[Columns] ID / name / color.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "OBIA Class Table" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Columns] ID / name / color.\n"
             "[ID] Corresponds to the classification raster pixel value, starting at 1; not directly editable.\n"
             "[Right-click] Edit name, change color, insert / delete classes.\n"
-            "[Assign] Assigns the current class to the objects selected on the canvas." } },
+            "[Assign] Assigns the current class to the objects selected on the canvas." ) } },
         { QStringLiteral( "obia_segment_table" ),
-          { "OBIA Object List",
-            "[Columns] ID / pixel count / class.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "OBIA Object List" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Columns] ID / pixel count / class.\n"
             "[Right-click] Locate the object on the canvas, assign the current class, copy the ID.\n"
-            "Refills from the current level when switching levels; segmentation must be done first." } },
+            "Refills from the current level when switching levels; segmentation must be done first." ) } },
         { QStringLiteral( "obia_segment_info" ),
-          { "OBIA Object Info",
-            "Shows shape, spectral and hierarchy statistics of the object selected on the canvas (read-only HTML).\n"
-            "Use the 'Select Objects' map tool to click objects on the canvas and refresh." } },
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "OBIA Object Info" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Shows shape, spectral and hierarchy statistics of the object selected on the canvas (read-only HTML).\n"
+            "Use the 'Select Objects' map tool to click objects on the canvas and refresh." ) } },
         { QStringLiteral( "obia_task_list" ),
-          { "Task Center (OBIA task list)",
-            "[Columns] Title / status / progress / load checkbox.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Task Center (OBIA task list)" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Columns] Title / status / progress / load checkbox.\n"
             "[Right-click] View details and log, stop, pause/resume, retry, load outputs into the main view, copy info.\n"
             "[Load checkbox] Loads outputs into the main program automatically after the task succeeds.\n"
-            "[Status colors] blue = running, green = finished, red = failed, grey = queued / cancelled." } },
+            "[Status colors] blue = running, green = finished, red = failed, grey = queued / cancelled." ) } },
         { QStringLiteral( "obia_data_manager" ),
-          { "Data Management",
-            "[Tree] Project data assets and collections; the color bar on the left shows status (green = available, red = unavailable).\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Data Management" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Tree] Project data assets and collections; the color bar on the left shows status (green = available, red = unavailable).\n"
             "[Right-click] Add to display, promote to project persistent, unload, view properties, copy source path.\n"
-            "[Double-click] Same as 'Add to Display'. The meta information inspector is below." } },
+            "[Double-click] Same as 'Add to Display'. The meta information inspector is below." ) } },
         { QStringLiteral( "accuracy" ),
-          { "Classification Accuracy Assessment",
-            "[OA] Overall accuracy. [Kappa] Agreement coefficient.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Classification Accuracy Assessment" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[OA] Overall accuracy. [Kappa] Agreement coefficient.\n"
             "[Confusion matrix] Rows = truth, columns = prediction.\n"
             "[Producer's accuracy] Share of a class's true samples classified correctly (recall).\n"
             "[User's accuracy] Share of a class's predictions that are correct (precision).\n"
-            "[F1] Harmonic mean of producer's and user's accuracy. [Export CSV] Saves the report." } },
+            "[F1] Harmonic mean of producer's and user's accuracy. [Export CSV] Saves the report." ) } },
         { QStringLiteral( "post_process" ),
-          { "Post-Classification",
-            "[Vectorize] Converts the classification raster into vector polygons.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Post-Classification" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Vectorize] Converts the classification raster into vector polygons.\n"
             "[Filter] Filters small patches by minimum area.\n"
             "[Merge] Merges small patches into adjacent major classes.\n"
-            "[Output] Exports the processed raster / vector." } },
+            "[Output] Exports the processed raster / vector." ) } },
         { QStringLiteral( "classifier_load" ),
-          { "Load Trained Classifier",
-            "Loads a previously saved classifier model file from disk.\n"
-            "Once loaded, the classification can be applied to new images directly, without retraining." } },
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Load Trained Classifier" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Loads a previously saved classifier model file from disk.\n"
+            "Once loaded, the classification can be applied to new images directly, without retraining." ) } },
         { QStringLiteral( "merge_classes" ),
-          { "Class Merging",
-            "Merges several fine classes into one coarse class, updating the class table and classified results.\n"
-            "Executes the merge after source and target classes are chosen." } },
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Class Merging" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Merges several fine classes into one coarse class, updating the class table and classified results.\n"
+            "Executes the merge after source and target classes are chosen." ) } },
         { QStringLiteral( "template_match" ),
-          { "Geometric Correction - Template Matching",
-            "[Template] Drag a rectangle around the reference template area on the source image.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Geometric Correction - Template Matching" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Template] Drag a rectangle around the reference template area on the source image.\n"
             "[Search] Auto-matches conjugate points on the image to correct, generating GCPs.\n"
-            "[Correlation threshold] Controls match confidence; too low invites mismatches, too high misses points." } },
+            "[Correlation threshold] Controls match confidence; too low invites mismatches, too high misses points." ) } },
         { QStringLiteral( "landsat_import" ),
-          { "Import Landsat Product",
-            "[Scene directory] An extracted directory containing *_MTL.txt.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Import Landsat Product" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Scene directory] An extracted directory containing *_MTL.txt.\n"
             "[Probe] Parses the MTL and lists sub-items (grid groups) and bands.\n"
             "[Preview tree] Tick the bands to import; multispectral bands by default.\n"
-            "[Import] Composites as selected and loads into the project." } },
+            "[Import] Composites as selected and loads into the project." ) } },
         { QStringLiteral( "digitize_tools" ),
-          { "Vector Digitizing Edit Tools",
-            "[Select] Select features with a rectangle. [Add Feature] Draw a new feature.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Vector Digitizing Edit Tools" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Select] Select features with a rectangle. [Add Feature] Draw a new feature.\n"
             "[Node Tool] Edit vertices. [Move / Rotate] Transform the whole feature.\n"
             "[Reshape] Modify boundaries. [Split] Split features. [Offset] Offset lines.\n"
             "[Simplify] Thins vertices. [Reverse] Reverses line direction.\n"
-            "[Add Ring / Fill Ring] Handles holes inside polygons. [Delete Part] Removes one part of a multipart feature." } },
+            "[Add Ring / Fill Ring] Handles holes inside polygons. [Delete Part] Removes one part of a multipart feature." ) } },
 
         // ========== Main / misc ==========
         { QStringLiteral( "main_window" ),
-          { "Main Window — SICNU GEO RS",
-            "[Menu layout]\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Main Window — SICNU GEO RS" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Menu layout]\n"
             "• Project: open/save, import, STAC, layouts and reports\n"
             "• Edit: feature editing; digitizing tools live in the 'Edit → Digitizing' submenu\n"
             "• View: zoom, pan, identify, measure, compare / swipe\n"
@@ -376,49 +397,49 @@ const QHash<QString, Entry> &catalog()
             "• Vector: geometry processing, overlay, spatial selection, attributes and projection\n"
             "• Processing: toolbox / history / batch\n"
             "• Settings / Window / Help\n"
-            "Hover menu items and dialog widgets for parameter explanations; Shift+F1 is 'What's This?'." } },
+            "Hover menu items and dialog widgets for parameter explanations; Shift+F1 is 'What's This?'." ) } },
         { QStringLiteral( "swipe" ),
-          { "Swipe Comparison Tool",
-            "Drag the divider on the map to compare the layers above and below, checking registration or change." } },
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Swipe Comparison Tool" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Drag the divider on the map to compare the layers above and below, checking registration or change." ) } },
         { QStringLiteral( "sentinel2_import" ),
-          { "Import Sentinel-2 Product: detect and import L1C / L2A SAFE directories",
-            "[Product directory] An extracted Sentinel-2 .SAFE folder or a directory containing MTD_MSIL*.xml.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Import Sentinel-2 Product: detect and import L1C / L2A SAFE directories" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Product directory] An extracted Sentinel-2 .SAFE folder or a directory containing MTD_MSIL*.xml.\n"
             "[Probe] Parses the metadata XML, identifying the 10 m/20 m/60 m resolution grid groups and the SCL quality band.\n"
             "[Band selection] Tick the multispectral bands or derived indices to import in the candidate tree.\n"
-            "[Import] Loads the selected bands into the data manager automatically and registers them as a dataset collection." } },
+            "[Import] Loads the selected bands into the data manager automatically and registers them as a dataset collection." ) } },
         { QStringLiteral( "modis_import" ),
-          { "Import MODIS Product: detect and import HDF / GeoTIFF tiles",
-            "[Product path] A MODIS HDF4 scientific dataset file (e.g. MOD09GA, MOD13Q1) or an extracted tile directory.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Import MODIS Product: detect and import HDF / GeoTIFF tiles" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Product path] A MODIS HDF4 scientific dataset file (e.g. MOD09GA, MOD13Q1) or an extracted tile directory.\n"
             "[Tile] Auto-identify or specify the hXXvYY sinusoidal grid number.\n"
             "[Probe] Parses the internal subdataset band list and scale factors.\n"
-            "[Import] Imports the selected surface reflectance / vegetation index bands into the project." } },
+            "[Import] Imports the selected surface reflectance / vegetation index bands into the project." ) } },
         { QStringLiteral( "product_import" ),
-          { "Satellite product import: detect Landsat / Sentinel-2 / MODIS packages",
-            "[Product directory] Choose a product folder containing standard sensor metadata.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Satellite product import: detect Landsat / Sentinel-2 / MODIS packages" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Product directory] Choose a product folder containing standard sensor metadata.\n"
             "[Probe] Reads the metadata and analyses grid resolution, band names and wavelength ranges.\n"
-            "[Preview tree] Shows bands grouped by resolution and purpose; tick to import into the project." } },
+            "[Preview tree] Shows bands grouped by resolution and purpose; tick to import into the project." ) } },
         { QStringLiteral( "cn_product_import" ),
-          { "Import Chinese satellite product: detect GF / ZY-3 / ZY-1 02C / HJ CCD packages",
-            "[Product directory] A Chinese satellite L1A product directory, CRESDA sidecar XML or image TIFF.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Import Chinese satellite product: detect GF / ZY-3 / ZY-1 02C / HJ CCD packages" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Product directory] A Chinese satellite L1A product directory, CRESDA sidecar XML or image TIFF.\n"
             "[Probe] Parses the CRESDA sidecar: band roles and wavelengths come from the sensor profile registry, the sidecar generation and unknown elements are reported.\n"
             "[Preview tree] Shows the declared band inventory with roles; the PMS panchromatic sibling and RPC document appear as constituents.\n"
-            "[Import] Stacks the selected bands with sun geometry and declared calibration metadata; provenance covers identity, sensor profile and completeness." } },
+            "[Import] Stacks the selected bands with sun geometry and declared calibration metadata; provenance covers identity, sensor profile and completeness." ) } },
         { QStringLiteral( "spectral_library" ),
-          { "Spectral library matching and management: SAM / SID spectral angle matching",
-            "[Spectral library file] Choose a USGS / ASTER format library or a JSON spectral library exported by this project.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Spectral library matching and management: SAM / SID spectral angle matching" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Spectral library file] Choose a USGS / ASTER format library or a JSON spectral library exported by this project.\n"
             "[Matching algorithm]\n"
             "• SAM (Spectral Angle Mapper): spectral angle in high-dimensional space; smaller is more similar\n"
             "• SID (Spectral Information Divergence): spectral information divergence\n"
             "[Match] Ranks library reference spectra by similarity against the pixel spectrum collected on the current canvas.\n"
-            "[Export / Save] Saves the current pixel spectrum to the spectral library with a custom name and class." } },
+            "[Export / Save] Saves the current pixel spectrum to the spectral library with a custom name and class." ) } },
         { QStringLiteral( "task_center" ),
-          { "Task Center: asynchronous task progress monitoring and result management",
-            "[Task list] Shows the state of running and queued algorithm tasks with live progress bars and elapsed time.\n"
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Task Center: asynchronous task progress monitoring and result management" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "[Task list] Shows the state of running and queued algorithm tasks with live progress bars and elapsed time.\n"
             "[Actions] Right-click to pause, resume, cancel or retry a task; view the live log output.\n"
-            "[Auto-load] When ticked, artifacts are loaded into map layers automatically after the task succeeds." } },
+            "[Auto-load] When ticked, artifacts are loaded into map layers automatically after the task succeeds." ) } },
         { QStringLiteral( "layout" ),
-          { "Print Layout / Map Output",
-            "Design map frames, legends and scale bars, and export map products." } },
+          { QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Print Layout / Map Output" ),
+            QT_TRANSLATE_NOOP( "SicnuDialogHelp", "Design map frames, legends and scale bars, and export map products." ) } },
     };
     return k;
 }
@@ -434,10 +455,9 @@ QString wrapBody( const QString &title, const QString &summary, const QString &b
              "<p><b>%2</b></p>"
              "<p>%3</p>"
              "<hr/>"
-             "<p>Tip: hover over any widget to see its explanation;"
-             "Menu Help → What's This? (Shift+F1), then click a widget;"
-             "The GDAL / OTB algorithms in the toolbox have their own help and command previews.</p>" )
-      .arg( title.toHtmlEscaped(), summary.toHtmlEscaped(), bodyHtml );
+             "<p>%4</p>" )
+      .arg( title.toHtmlEscaped(), summary.toHtmlEscaped(), bodyHtml,
+            translateHelp( kHelpTip ).toHtmlEscaped() );
 }
 
 } // namespace
@@ -464,7 +484,7 @@ QString SicnuDialogHelp::shortForTool( const QString &toolId, const QString &tit
 {
     const auto it = catalog().constFind( toolId );
     if ( it != catalog().constEnd() )
-        return  it->summary ;
+        return translateHelp( it->summary );
     if ( !titleFallback.isEmpty() )
         return titleFallback;
     return toolId;
@@ -476,13 +496,9 @@ QString SicnuDialogHelp::htmlForTool( const QString &toolId, const QString &titl
     const QString title = titleFallback.isEmpty() ? toolId : titleFallback;
     if ( it != catalog().constEnd() )
     {
-        return wrapBody( title,  it->summary ,  it->body  );
+        return wrapBody( title, translateHelp( it->summary ), translateHelp( it->body ) );
     }
-    return wrapBody(
-      title,
-      "Function Description" ,
-      "Fill in inputs, parameters and output paths on the dialog's tabs, then run."
-                   "Hover widgets for more hints; press 'Help' for the full explanation (if available)."  );
+    return wrapBody( title, translateHelp( kGenericSummary ), translateHelp( kGenericBody ) );
 }
 
 void SicnuDialogHelp::applyDialogChrome( QDialog *dlg, const QString &toolId )
@@ -499,7 +515,7 @@ void SicnuDialogHelp::applyDialogChrome( QDialog *dlg, const QString &toolId )
 void SicnuDialogHelp::showHelpBox( QWidget *parent, const QString &title, const QString &html )
 {
     QMessageBox box( parent );
-    box.setWindowTitle( title.isEmpty() ? "Help"  : title );
+    box.setWindowTitle( title.isEmpty() ? translateHelp( kHelpWindowTitle ) : title );
     box.setTextFormat( Qt::RichText );
     box.setIcon( QMessageBox::Information );
     box.setText( html );
@@ -509,6 +525,6 @@ void SicnuDialogHelp::showHelpBox( QWidget *parent, const QString &title, const 
 
 void SicnuDialogHelp::showToolHelp( QWidget *parent, const QString &toolId, const QString &title )
 {
-    showHelpBox( parent, title.isEmpty() ? "Help"  : title,
+    showHelpBox( parent, title.isEmpty() ? translateHelp( kHelpWindowTitle ) : title,
                  htmlForTool( toolId, title ) );
 }
