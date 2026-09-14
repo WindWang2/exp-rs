@@ -7,9 +7,10 @@
 //   CrsMismatch              -> rs:reproject {target_crs, resampling:bilinear}
 //   ResolutionMismatch       -> rs:resample {target_resolution_x/y, resampling:bilinear}
 //   RadiometricStateMismatch -> DN -> Radiance: rs:radiometric_calibration
-//                               DN/TOA -> TOA|BOA: rs:radiometric_calibration
+//                               DN -> TOA|BOA: rs:radiometric_calibration
 //                                 then rs:atmospheric_correction
 //                               Radiance -> TOA|BOA: rs:atmospheric_correction
+//                               (TOA -> BOA is same-rank, never a violation)
 //   DataTypeMismatch         -> rs:convert_dtype {target_data_type}
 //
 // Repair invariant (test-pinned): inspectContracts(applyRepairPlan(W,
