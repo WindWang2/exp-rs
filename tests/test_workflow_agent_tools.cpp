@@ -178,6 +178,31 @@ TEST_CASE( "Agent self-heals a CRS mismatch from a PROJ error log", "[d17][workf
     REQUIRE( reprojectPresent );
 }
 
+TEST_CASE( "A matched CRS log with no offending wiring is a typed failure, not a fake heal",
+           "[d17][workflow][agent]" )
+{
+    // A contract-CLEAN workflow whose ports never carry the log's source
+    // CRS: the pattern matches, but there is nothing to heal.
+    WorkflowDefinition clean;
+    clean.nodes = {
+        node( QStringLiteral( "src" ), QStringLiteral( "rs:import_raster" ), {},
+              { port( QStringLiteral( "output" ), QStringLiteral( "Raster" ), QStringLiteral( "EPSG:32649" ),
+                      QStringLiteral( "BOA" ), 10.0 ) } ),
+        node( QStringLiteral( "dst" ), QStringLiteral( "rs:slope_aspect" ),
+              { port( QStringLiteral( "input" ), QStringLiteral( "Raster" ), QStringLiteral( "*" ),
+                      QStringLiteral( "BOA" ), 10.0, 4, true ) }, {} ),
+    };
+    clean.edges = { EdgeFact{ QStringLiteral( "e" ), QStringLiteral( "src" ), QStringLiteral( "output" ),
+                              QStringLiteral( "dst" ), QStringLiteral( "input" ) } };
+    REQUIRE( inspectContracts( clean ).isEmpty() );
+
+    const AutonomousCompileResult result = WorkflowOrchestratorTool::healWorkflow(
+        clean, QStringLiteral( "ERROR 1: PROJ: proj_create: Different spatial reference system EPSG:4326 and EPSG:32649" ) );
+    REQUIRE_FALSE( result.isSuccess );
+    REQUIRE( result.injectedRepairRules.isEmpty() );
+    REQUIRE( result.workflow == clean );
+}
+
 TEST_CASE( "Unknown error logs produce a typed no-op heal", "[d17][workflow][agent]" )
 {
     const WorkflowDefinition broken = crsMismatchWorkflow();

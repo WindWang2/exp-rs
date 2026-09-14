@@ -273,12 +273,12 @@ AutonomousCompileResult WorkflowOrchestratorTool::healWorkflow( const WorkflowDe
         // contract checker; heal them toward the LOG's target CRS by
         // rewriting the consumer requirement when it matches the log source.
         WorkflowDefinition working = brokenWorkflow;
-        auto violations = sicnu::workflow::inspectContracts( working );
+        const auto violations = sicnu::workflow::inspectContracts( working );
+        bool adopted = false;
         if ( violations.isEmpty() )
         {
             // The document's port facts did not encode the break the engine
             // hit at runtime: adopt the log's facts on the mismatched edge.
-            bool adopted = false;
             for ( sicnu::workflow::NodeFact &node : working.nodes )
                 for ( PortFact &port : node.inputPorts )
                     if ( port.crs == logSource )
@@ -303,10 +303,17 @@ AutonomousCompileResult WorkflowOrchestratorTool::healWorkflow( const WorkflowDe
             result.workflow = working;
         }
 
-        result.isSuccess = sicnu::workflow::inspectContracts( result.workflow ).isEmpty();
-        result.textualExplanation = QStringLiteral( "healed CRS mismatch %1 -> %2 (%3 rule(s) injected)" )
-                                        .arg( logSource, logTarget )
-                                        .arg( result.injectedRepairRules.size() );
+        // A matched log pattern with nothing actually changed is a typed
+        // failure, never a fake heal (header contract).
+        const bool somethingChanged = adopted || plan.requiresRepair;
+        result.isSuccess = somethingChanged
+            && sicnu::workflow::inspectContracts( result.workflow ).isEmpty();
+        result.textualExplanation = somethingChanged
+            ? QStringLiteral( "healed CRS mismatch %1 -> %2 (%3 rule(s) injected)" )
+                  .arg( logSource, logTarget )
+                  .arg( result.injectedRepairRules.size() )
+            : QStringLiteral( "CRS pattern matched but no offending wiring found for %1 -> %2" )
+                  .arg( logSource, logTarget );
         return result;
     }
 
