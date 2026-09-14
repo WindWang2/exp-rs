@@ -34,7 +34,7 @@ namespace sicnu::workflow {
 
 /// Minimal expected-like result. No exceptions cross this seam.
 template <typename T>
-class Result
+class [[nodiscard]] Result
 {
   public:
     static Result ok( T value ) { Result r; r.m_ok = true; r.m_value = std::move( value ); return r; }

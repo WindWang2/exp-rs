@@ -43,21 +43,34 @@ double portDouble( const QJsonObject &port, const char *key, QString *error, con
     return value.toDouble();
 }
 
-Result<PortFact> parsePort( const QJsonValue &value, QString *error, const QString &context )
+Result<PortFact> parsePort( const QJsonValue &value, const QString &context )
 {
+    // A fresh error buffer per port: a stale message from a previous port
+    // must never reject THIS port, and every failure must fail closed.
+    QString error;
     if ( !value.isObject() )
         return Result<PortFact>::error( QStringLiteral( "%1: port is not an object" ).arg( context ) );
     const QJsonObject obj = value.toObject();
 
     PortFact port;
-    port.portName = portString( obj, "portName", error, context );
-    port.dataType = portString( obj, "dataType", error, context );
-    port.crs = portString( obj, "crs", error, context );
-    port.radiometricState = portString( obj, "radiometricState", error, context );
-    if ( error && !error->isEmpty() )
-        return Result<PortFact>::error( *error );
-    port.resolutionX = portDouble( obj, "resolutionX", error, context );
-    port.resolutionY = portDouble( obj, "resolutionY", error, context );
+    port.portName = portString( obj, "portName", &error, context );
+    if ( !error.isEmpty() )
+        return Result<PortFact>::error( error );
+    port.dataType = portString( obj, "dataType", &error, context );
+    if ( !error.isEmpty() )
+        return Result<PortFact>::error( error );
+    port.crs = portString( obj, "crs", &error, context );
+    if ( !error.isEmpty() )
+        return Result<PortFact>::error( error );
+    port.radiometricState = portString( obj, "radiometricState", &error, context );
+    if ( !error.isEmpty() )
+        return Result<PortFact>::error( error );
+    port.resolutionX = portDouble( obj, "resolutionX", &error, context );
+    if ( !error.isEmpty() )
+        return Result<PortFact>::error( error );
+    port.resolutionY = portDouble( obj, "resolutionY", &error, context );
+    if ( !error.isEmpty() )
+        return Result<PortFact>::error( error );
     const QJsonValue bands = obj.value( QLatin1String( "bandCount" ) );
     if ( !bands.isDouble() )
         return Result<PortFact>::error( QStringLiteral( "%1: missing or non-numeric field 'bandCount'" ).arg( context ) );
@@ -206,7 +219,6 @@ Result<WorkflowDefinition> WorkflowIR::fromJson( const QJsonObject &doc )
                 QStringLiteral( "node '%1': canvasPosition needs numeric 'x' and 'y'" ).arg( node.nodeId ) );
         node.canvasPosition = QPointF( x.toDouble(), y.toDouble() );
 
-        QString portError;
         for ( const QString &listKey : { QStringLiteral( "inputPorts" ), QStringLiteral( "outputPorts" ) } )
         {
             const QJsonArray ports = nodeObj.value( listKey ).toArray();
@@ -214,7 +226,7 @@ Result<WorkflowDefinition> WorkflowIR::fromJson( const QJsonObject &doc )
             target.reserve( ports.size() );
             for ( const QJsonValue &portValue : ports )
             {
-                auto port = parsePort( portValue, &portError, node.nodeId );
+                auto port = parsePort( portValue, node.nodeId );
                 if ( !port.isSuccess() )
                     return Result<WorkflowDefinition>::error(
                         QStringLiteral( "node '%1': %2" ).arg( node.nodeId, port.error() ) );
@@ -389,18 +401,25 @@ Result<WorkflowDefinition> WorkflowIR::migrateFromV1( const QJsonObject &v1Doc )
         }
         // Input ports derive from the wiring (as-name + the upstream port's
         // facts once resolved below).
+        int asLessIndex = 0;
         for ( const QJsonValue &inValue : nodeObj.value( QLatin1String( "inputs" ) ).toArray() )
         {
             const QJsonObject inObj = inValue.toObject();
             PortFact in;
             in.portName = inObj.value( QLatin1String( "as" ) ).toString();
             if ( in.portName.isEmpty() )
-                in.portName = QStringLiteral( "input" );
+            {
+                // Multiple as-less inputs must not collide on one port name
+                // (single-source invariant would reject the lift).
+                in.portName = asLessIndex == 0 ? QStringLiteral( "input" )
+                                               : QStringLiteral( "input_%1" ).arg( asLessIndex + 1 );
+            }
             in.dataType = QStringLiteral( "Raster" );
             in.crs = QStringLiteral( "*" );
             in.radiometricState = QStringLiteral( "None" );
             in.isRequired = true;
             node.inputPorts.append( in );
+            ++asLessIndex;
         }
         def.nodes.append( node );
         ++index;
@@ -450,7 +469,7 @@ Result<WorkflowDefinition> WorkflowIR::migrateFromV1( const QJsonObject &v1Doc )
             in.bandCount = resolvedBands;
 
             EdgeFact edge;
-            edge.edgeId = QStringLiteral( "mig_%1_%2" ).arg( upstreamId, nodeId );
+            edge.edgeId = QStringLiteral( "mig_%1_%2_%3" ).arg( upstreamId, nodeId, in.portName );
             edge.sourceNodeId = upstreamId;
             edge.sourcePortName = upstreamPort.isEmpty() ? QStringLiteral( "output" ) : upstreamPort;
             edge.targetNodeId = nodeId;

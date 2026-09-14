@@ -160,6 +160,24 @@ TEST_CASE( "fromJson rejects malformed documents with fail-closed errors", "[d17
     }
 }
 
+TEST_CASE( "fromJson fails closed on a port with a missing resolution field", "[d17][workflow][ir]" )
+{
+    QJsonObject doc = loadGoldenJson( QStringLiteral( "minimal_single_node_v2.json" ) );
+    QJsonArray ports = doc[QStringLiteral( "nodes" )].toArray()[0].toObject()[QStringLiteral( "outputPorts" )].toArray();
+    QJsonObject first = ports[0].toObject();
+    first.remove( QStringLiteral( "resolutionX" ) );
+    ports[0] = first;
+    QJsonArray nodes = doc[QStringLiteral( "nodes" )].toArray();
+    QJsonObject solo = nodes[0].toObject();
+    solo[QStringLiteral( "outputPorts" )] = ports;
+    nodes[0] = solo;
+    doc[QStringLiteral( "nodes" )] = nodes;
+
+    auto result = WorkflowIR::fromJson( doc );
+    REQUIRE_FALSE( result.isSuccess() );
+    REQUIRE( result.error().contains( QStringLiteral( "resolutionX" ) ) );
+}
+
 TEST_CASE( "Semantic validation rejects dangling edges naming the offender", "[d17][workflow][ir]" )
 {
     WorkflowDefinition def;
