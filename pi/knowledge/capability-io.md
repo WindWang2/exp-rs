@@ -7,7 +7,6 @@
 ## rs:gaofen_import
 
 GF-1/2/6 L1A 产品（CRESDA XML 侧车）导入为多波段 GeoTIFF，定标与太阳几何写入 SICNU_* 元数据。
->>>>>>> origin/zcode/advanced-sar-polsar-insar-10
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：bandCount（integer）、output（raster）、productId（string）
@@ -26,7 +25,6 @@ GF-1/2/6 L1A 产品（CRESDA XML 侧车）导入为多波段 GeoTIFF，定标与
 ## rs:hj_import
 
 HJ-1 CCD L1A 产品导入为多波段 GeoTIFF，用于环境减灾监测教学流程。
->>>>>>> origin/zcode/advanced-sar-polsar-insar-10
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：bandCount（integer）、output（raster）、productId（string）
@@ -116,7 +114,6 @@ Sentinel-2 数据导入：解析 SAFE/JP2 产品包，输出多波段反射率�
 ## rs:zy3_import
 
 ZY-3 L1A 产品导入为多波段 GeoTIFF，保留产品声明的定标与几何信息。
->>>>>>> origin/zcode/advanced-sar-polsar-insar-10
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：bandCount（integer）、output（raster）、productId（string）
