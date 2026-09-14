@@ -82,3 +82,47 @@ TEST_CASE( "Harmonic-only series reconstructs exactly and yields no breakpoints"
     // MOSUM screen bookkeeping: h = floor(0.15 * 92) = 13.
     REQUIRE( result.mosumH == 13 );
 }
+
+// ---------------------------------------------------------------------------
+// Slice 2: deforestation step detection (D16 §D spec scenario).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Deforestation intercept step is pinpointed exactly with significance",
+           "[d16][bfast]" )
+{
+    // 4 years, 92 samples; harmonics + gentle trend until the step at
+    // index 46, then the intercept drops by 0.35 (fitted-level jump).
+    HarmonicSeries before;
+    before.slope = 0.0001;
+    HarmonicSeries after = before;
+    after.intercept = before.intercept - 0.35;
+
+    const auto t = fourYearAxis();
+    std::vector<float> y( t.size() );
+    for ( std::size_t i = 0; i < t.size(); ++i )
+        y[i] = static_cast<float>( ( i < 46 ? before : after ).value( t[i] ) );
+
+    const auto result = BreakpointDetector::detectHarmonicBreaks( y, t, 3, 2, 20 );
+    REQUIRE( result.valid );
+    REQUIRE( result.breakCount == 1 );
+    REQUIRE( result.breakpoints[0].index == 46 ); // exact hit (D16 §D)
+    REQUIRE( result.breakpoints[0].magnitude == Approx( -0.35 ).margin( 0.03 ) );
+    REQUIRE( result.breakpoints[0].pValue < 0.01 );
+    REQUIRE( result.overallRmse < 1e-4 );
+
+    // Decomposition consistency: trend + harmonics reproduces the input.
+    double worst = 0.0;
+    for ( std::size_t i = 0; i < t.size(); ++i )
+        worst = std::max( worst, static_cast<double>( std::abs(
+            result.fittedTrend[i] + result.fittedHarmonics[i] - y[i] ) ) );
+    REQUIRE( worst < 1e-4 );
+
+    // A clean parallel series in the same call pattern must stay break-free
+    // (the detector is selective, not trigger-happy).
+    std::vector<float> yClean( t.size() );
+    for ( std::size_t i = 0; i < t.size(); ++i )
+        yClean[i] = static_cast<float>( before.value( t[i] ) );
+    const auto clean = BreakpointDetector::detectHarmonicBreaks( yClean, t, 3, 2, 20 );
+    REQUIRE( clean.valid );
+    REQUIRE( clean.breakCount == 0 );
+}

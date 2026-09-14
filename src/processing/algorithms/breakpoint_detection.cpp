@@ -330,11 +330,15 @@ BfastResult BreakpointDetector::detectHarmonicBreaks( const std::vector<float> &
 
             const std::size_t segLen = b - a;
             const double splitRss = candidate.leftRss + candidate.rightRss;
-            // Chow-type F test for the split.
-            const double fStat = splitRss > kTinyRss
-                                     ? ( candidate.rssReduction / static_cast<double>( p ) ) /
-                                           ( splitRss / static_cast<double>( segLen - 2 * p ) )
-                                     : 0.0;
+            // Chow-type F test for the split. Strict positivity, not an
+            // absolute floor: noise-free series have residual RSS far below
+            // any absolute epsilon while the test stays well-defined
+            // (constant series are caught by the rssReduction gate instead).
+            const double fStat =
+                ( splitRss > 0.0 && candidate.rssReduction > 0.0 )
+                    ? ( candidate.rssReduction / static_cast<double>( p ) ) /
+                          ( splitRss / static_cast<double>( segLen - 2 * p ) )
+                    : 0.0;
             candidate.pValue = fTestPValue( fStat, p, static_cast<double>( segLen - 2 * p ) );
             // BIC gate: n·ln(RSS/n) + p·ln(n), strictly decreasing.
             const double bicPool = static_cast<double>( segLen ) *
