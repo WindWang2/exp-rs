@@ -8927,3 +8927,15 @@ sicnu_discover_tests(test_processing_catalog_ux)
     ${CMAKE_BINARY_DIR}
   )
   sicnu_discover_tests(test_whittaker_smooth)
+
+  add_executable(test_phenology_extraction test_phenology_extraction.cpp)
+  target_link_libraries(test_phenology_extraction PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_temporal_timeline
+  )
+  target_include_directories(test_phenology_extraction PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_phenology_extraction)
