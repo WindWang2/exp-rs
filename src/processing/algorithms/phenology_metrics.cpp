@@ -45,6 +45,99 @@ double crossingTime( double t0, double v0, double t1, double v1, double level )
     return t0 + ( level - v0 ) / span * ( t1 - t0 );
 }
 
+/// σ(x) = 1/(1+exp(−x)); overflow-safe for |x| beyond ±700.
+double sigmoid( double x )
+{
+    if ( x >= 0.0 )
+    {
+        const double e = std::exp( -x );
+        return 1.0 / ( 1.0 + e );
+    }
+    const double e = std::exp( x );
+    return e / ( 1.0 + e );
+}
+
+/// The documented asymmetric double logistic (see phenology_metrics.h):
+/// f = base + amp·[σ(k1(t−τ1)) + σ(−k2(t−τ2)) − 1].
+double doubleLogisticModel( const DoubleLogisticParams &p, double t )
+{
+    return p.baseVal +
+           p.amplitude *
+               ( sigmoid( p.sosRate * ( t - p.sosInflection ) ) -
+                 sigmoid( p.eosRate * ( t - p.eosInflection ) ) );
+}
+
+void paramsToArray( const DoubleLogisticParams &p, double *v )
+{
+    v[0] = p.baseVal;
+    v[1] = p.amplitude;
+    v[2] = p.sosInflection;
+    v[3] = p.sosRate;
+    v[4] = p.eosInflection;
+    v[5] = p.eosRate;
+}
+
+DoubleLogisticParams paramsFromArray( const double *v )
+{
+    DoubleLogisticParams p;
+    p.baseVal = v[0];
+    p.amplitude = v[1];
+    p.sosInflection = v[2];
+    p.sosRate = v[3];
+    p.eosInflection = v[4];
+    p.eosRate = v[5];
+    return p;
+}
+
+double modelCost( const double *v, const std::vector<double> &t, const std::vector<float> &y )
+{
+    DoubleLogisticParams p = paramsFromArray( v );
+    double s = 0.0;
+    for ( std::size_t i = 0; i < t.size(); ++i )
+    {
+        const double r = doubleLogisticModel( p, t[i] ) - y[i];
+        s += r * r;
+    }
+    return s;
+}
+
+/// Solves the symmetric 6×6 system (a) x = b by Gaussian elimination with
+/// partial pivoting; returns false on a singular system.
+bool solveDense6( std::vector<double> &a, std::vector<double> &b )
+{
+    constexpr int n = 6;
+    for ( int col = 0; col < n; ++col )
+    {
+        int pivot = col;
+        for ( int r = col + 1; r < n; ++r )
+            if ( std::abs( a[r * n + col] ) > std::abs( a[pivot * n + col] ) )
+                pivot = r;
+        if ( !( std::abs( a[pivot * n + col] ) > kTiny ) )
+            return false;
+        if ( pivot != col )
+        {
+            for ( int c = 0; c < n; ++c )
+                std::swap( a[pivot * n + c], a[col * n + c] );
+            std::swap( b[pivot], b[col] );
+        }
+        for ( int r = col + 1; r < n; ++r )
+        {
+            const double f = a[r * n + col] / a[col * n + col];
+            for ( int c = col; c < n; ++c )
+                a[r * n + c] -= f * a[col * n + c];
+            b[r] -= f * b[col];
+        }
+    }
+    for ( int r = n; r-- > 0; )
+    {
+        double v = b[r];
+        for ( int c = r + 1; c < n; ++c )
+            v -= a[r * n + c] * b[c];
+        b[r] = v / a[r * n + r];
+    }
+    return true;
+}
+
 } // namespace
 
 PhenologyMetrics PhenologyExtractor::extractDynamicThreshold( const std::vector<float> &y,
@@ -181,9 +274,205 @@ PhenologyMetrics PhenologyExtractor::extractDynamicThreshold( const std::vector<
 }
 
 std::pair<DoubleLogisticParams, PhenologyMetrics>
-PhenologyExtractor::fitDoubleLogistic( const std::vector<float> &, const std::vector<double> & )
+PhenologyExtractor::fitDoubleLogistic( const std::vector<float> &y,
+                                       const std::vector<double> &tDays )
 {
-    return { DoubleLogisticParams{}, PhenologyMetrics{} };
+    std::pair<DoubleLogisticParams, PhenologyMetrics> result;
+    auto &params = result.first;
+    auto &metrics = result.second;
+
+    if ( y.size() != tDays.size() )
+        return result;
+
+    // Finite pairs, ascending time.
+    std::vector<double> t;
+    std::vector<float> v;
+    for ( std::size_t i = 0; i < y.size(); ++i )
+        if ( std::isfinite( y[i] ) && std::isfinite( tDays[i] ) )
+        {
+            t.push_back( tDays[i] );
+            v.push_back( y[i] );
+        }
+    if ( t.size() < 8 )
+        return result;
+    std::vector<std::size_t> order( t.size() );
+    for ( std::size_t i = 0; i < order.size(); ++i )
+        order[i] = i;
+    std::sort( order.begin(), order.end(),
+               [&]( std::size_t a, std::size_t b ) { return t[a] < t[b]; } );
+    std::vector<double> ts( t.size() );
+    std::vector<float> ys( t.size() );
+    for ( std::size_t i = 0; i < order.size(); ++i )
+    {
+        ts[i] = t[order[i]];
+        ys[i] = v[order[i]];
+    }
+
+    // Initialize from the mid-level threshold crossings (τ sits exactly on
+    // the 0.5 rising/falling crossings when the opposite flank is flat).
+    DoubleLogisticParams init;
+    const PhenologyMetrics mid = extractDynamicThreshold( y, tDays, 0.5, 1, 365 );
+    double tMin = ts.front();
+    double tMax = ts.back();
+    double yMin = ys.front();
+    double yMax = ys.front();
+    for ( std::size_t i = 0; i < ys.size(); ++i )
+    {
+        tMin = std::min( tMin, ts[i] );
+        tMax = std::max( tMax, ts[i] );
+        yMin = std::min( yMin, static_cast<double>( ys[i] ) );
+        yMax = std::max( yMax, static_cast<double>( ys[i] ) );
+    }
+    if ( mid.valid )
+    {
+        init.baseVal = mid.baseVal;
+        init.amplitude = std::max( mid.peakVal - mid.baseVal, 1e-3 );
+        init.sosInflection = mid.sos;
+        init.eosInflection = mid.eos;
+        init.sosRate = 6.0 / std::max( mid.pos - mid.sos, 1.0 );
+        init.eosRate = 6.0 / std::max( mid.eos - mid.pos, 1.0 );
+    }
+    else
+    {
+        init.baseVal = yMin;
+        init.amplitude = std::max( yMax - yMin, 1e-3 );
+        init.sosInflection = tMin + 0.25 * ( tMax - tMin );
+        init.eosInflection = tMin + 0.75 * ( tMax - tMin );
+        init.sosRate = 0.1;
+        init.eosRate = 0.1;
+    }
+
+    // Levenberg–Marquardt with a central-difference Jacobian.
+    double p[6];
+    paramsToArray( init, p );
+    double cost = modelCost( p, ts, ys );
+    double mu = 1e-3;
+    constexpr int kMaxIters = 200;
+    for ( int iter = 0; iter < kMaxIters; ++iter )
+    {
+        // Jacobian and gradient at the current point.
+        double jtJ[36];
+        double jtR[6];
+        for ( int r = 0; r < 36; ++r )
+            jtJ[r] = 0.0;
+        for ( int c = 0; c < 6; ++c )
+            jtR[c] = 0.0;
+        for ( std::size_t i = 0; i < ts.size(); ++i )
+        {
+            double jac[6];
+            for ( int c = 0; c < 6; ++c )
+            {
+                const double step = std::max( 1e-6, 1e-5 * std::abs( p[c] ) );
+                double pp[6], pm[6];
+                for ( int k = 0; k < 6; ++k )
+                {
+                    pp[k] = p[k];
+                    pm[k] = p[k];
+                }
+                pp[c] += step;
+                pm[c] -= step;
+                jac[c] = ( doubleLogisticModel( paramsFromArray( pp ), ts[i] ) -
+                           doubleLogisticModel( paramsFromArray( pm ), ts[i] ) ) /
+                         ( 2.0 * step );
+            }
+            DoubleLogisticParams cur = paramsFromArray( p );
+            const double residual = doubleLogisticModel( cur, ts[i] ) - ys[i];
+            for ( int r = 0; r < 6; ++r )
+            {
+                jtR[r] += jac[r] * residual;
+                for ( int c = 0; c < 6; ++c )
+                    jtJ[r * 6 + c] += jac[r] * jac[c];
+            }
+        }
+
+        bool improved = false;
+        for ( int retry = 0; retry < 12 && !improved; ++retry )
+        {
+            std::vector<double> a( 36 );
+            std::vector<double> b( 6 );
+            for ( int r = 0; r < 36; ++r )
+                a[r] = jtJ[r];
+            for ( int c = 0; c < 6; ++c )
+            {
+                a[c * 6 + c] += mu * ( jtJ[c * 6 + c] > kTiny ? jtJ[c * 6 + c] : 1.0 );
+                b[c] = -jtR[c];
+            }
+            if ( !solveDense6( a, b ) )
+            {
+                mu *= 10.0;
+                continue;
+            }
+            double trial[6];
+            for ( int c = 0; c < 6; ++c )
+                trial[c] = p[c] + b[c];
+            const double trialCost = modelCost( trial, ts, ys );
+            if ( std::isfinite( trialCost ) && trialCost < cost )
+            {
+                const double improvement = cost - trialCost;
+                std::copy( trial, trial + 6, p );
+                cost = trialCost;
+                mu = std::max( mu / 3.0, 1e-12 );
+                improved = true;
+                if ( improvement <= 1e-12 * std::max( cost, 1.0 ) )
+                    iter = kMaxIters; // converged
+            }
+            else
+            {
+                mu *= 5.0;
+            }
+        }
+        if ( !improved )
+            break;
+    }
+
+    params = paramsFromArray( p );
+
+    // Phenology from the curvature extremes: sos = τ1, eos = τ2, pos =
+    // argmax of the fitted curve on a fine deterministic grid.
+    metrics.sos = params.sosInflection;
+    metrics.eos = params.eosInflection;
+    const int fine = 2000;
+    double bestT = tMin;
+    double bestV = -std::numeric_limits<double>::infinity();
+    for ( int i = 0; i <= fine; ++i )
+    {
+        const double tt = tMin + ( tMax - tMin ) * static_cast<double>( i ) / fine;
+        const double val = doubleLogisticModel( params, tt );
+        if ( val > bestV )
+        {
+            bestV = val;
+            bestT = tt;
+        }
+    }
+    metrics.pos = bestT;
+    metrics.baseVal = params.baseVal;
+    metrics.peakVal = bestV;
+    metrics.los = metrics.eos - metrics.sos;
+    if ( metrics.los < 0.0 )
+        metrics.los += kYearDays;
+
+    // Trapezoid integral of the fitted curve over [sos, eos] with exact
+    // boundary values.
+    double integral = 0.0;
+    double leftT = metrics.sos;
+    double leftV = doubleLogisticModel( params, metrics.sos );
+    for ( std::size_t i = 0; i < ts.size(); ++i )
+    {
+        if ( ts[i] < metrics.sos || ts[i] > metrics.eos )
+            continue;
+        const double yi = doubleLogisticModel( params, ts[i] );
+        integral += 0.5 * ( yi + leftV ) * ( ts[i] - leftT );
+        leftT = ts[i];
+        leftV = yi;
+    }
+    if ( leftT < metrics.eos )
+    {
+        const double yi = doubleLogisticModel( params, metrics.eos );
+        integral += 0.5 * ( yi + leftV ) * ( metrics.eos - leftT );
+    }
+    metrics.integral = integral;
+    metrics.valid = std::isfinite( cost ) && metrics.sos < metrics.pos && metrics.pos < metrics.eos;
+    return result;
 }
 
 std::vector<PhenologyMetrics> PhenologyExtractor::extractMultiCycle( const std::vector<float> &,
