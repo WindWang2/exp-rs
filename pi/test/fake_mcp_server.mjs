@@ -50,6 +50,13 @@ function handle(line) {
       // Crash mid-run without replying — the exact #669 trigger shape.
       process.exit(1);
     }
+    if (a.flood || (a.arguments && a.arguments.flood)) {
+      // 33 MiB with NO terminating newline — the F-PI-1 desync trigger.
+      // The server stays alive afterwards; without the bridge-side kill
+      // every later response glues onto the unterminated line.
+      process.stdout.write("x".repeat(33 * 1024 * 1024));
+      return;
+    }
     send({ jsonrpc: "2.0", id: msg.id, result: { content: [{ type: "text", text: "ok" }] } });
     return;
   }

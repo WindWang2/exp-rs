@@ -4,6 +4,8 @@
 // operators, and the embedding/regression semantics.
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <random>
+#include <stdexcept>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "operators/framework/model_catalog.h"
@@ -352,6 +354,88 @@ TEST_CASE( "NMS is deterministic and resolves tile-overlap duplicates", "[models
   }
   CHECK( hasDistinct );
   CHECK( hasTieFirst );
+}
+
+TEST_CASE( "NMS bucketing reproduces the dense kept set and stays cancelable (F-OPS-5)",
+           "[models][detect][f-ops-5]" )
+{
+  using sicnu::operators::runtime::nonMaxSuppression;
+  using sicnu::operators::runtime::dedupDetections;
+
+  // Deterministic pseudo-random candidate set: overlapping clusters across a
+  // 2000x2000 canvas. The bucketed pass must keep EXACTLY the set a dense
+  // O(n^2) reference keeps — bucketing prunes comparison pairs that cannot
+  // overlap, never the suppression decisions.
+  std::mt19937 rng( 20260913 );
+  std::uniform_real_distribution<float> pos( 0.0f, 2000.0f );
+  std::uniform_real_distribution<float> size( 8.0f, 60.0f );
+  std::uniform_real_distribution<float> conf( 0.1f, 1.0f );
+  std::vector<DetectionBox> boxes;
+  boxes.reserve( 4000 );
+  for ( int i = 0; i < 4000; ++i )
+    boxes.push_back( DetectionBox{ pos( rng ), pos( rng ), size( rng ), size( rng ),
+                                   i % 3, conf( rng ) } );
+
+  const auto bucketed = nonMaxSuppression( boxes, 0.45 );
+  // Dense reference: the pre-F-OPS-5 algorithm, verbatim.
+  std::vector<DetectionBox> ordered = boxes;
+  std::sort( ordered.begin(), ordered.end(), []( const DetectionBox &a, const DetectionBox &b ) {
+    if ( a.confidence != b.confidence ) return a.confidence > b.confidence;
+    if ( a.classId != b.classId ) return a.classId < b.classId;
+    if ( a.x != b.x ) return a.x < b.x;
+    if ( a.y != b.y ) return a.y < b.y;
+    if ( a.w != b.w ) return a.w < b.w;
+    return a.h < b.h;
+  } );
+  std::vector<DetectionBox> reference;
+  std::vector<bool> suppressed( ordered.size(), false );
+  auto iouOf = []( const DetectionBox &a, const DetectionBox &b ) {
+    const double ax1 = a.x, ay1 = a.y, ax2 = a.x + a.w, ay2 = a.y + a.h;
+    const double bx1 = b.x, by1 = b.y, bx2 = b.x + b.w, by2 = b.y + b.h;
+    const double interW = std::max( 0.0, std::min( ax2, bx2 ) - std::max( ax1, bx1 ) );
+    const double interH = std::max( 0.0, std::min( ay2, by2 ) - std::max( ay1, by1 ) );
+    const double inter = interW * interH;
+    const double areaA = std::max( 0.0, ax2 - ax1 ) * std::max( 0.0, ay2 - ay1 );
+    const double areaB = std::max( 0.0, bx2 - bx1 ) * std::max( 0.0, by2 - by1 );
+    const double unionArea = areaA + areaB - inter;
+    return unionArea > 0.0 ? inter / unionArea : 0.0;
+  };
+  for ( std::size_t i = 0; i < ordered.size(); ++i )
+  {
+    if ( suppressed[i] ) continue;
+    reference.push_back( ordered[i] );
+    for ( std::size_t j = i + 1; j < ordered.size(); ++j )
+      if ( !suppressed[j] && iouOf( ordered[i], ordered[j] ) > 0.45 )
+        suppressed[j] = true;
+  }
+  REQUIRE( bucketed.size() == reference.size() );
+  for ( std::size_t k = 0; k < reference.size(); ++k )
+  {
+    CAPTURE( k );
+    CHECK( bucketed[k].confidence == reference[k].confidence );
+    CHECK( bucketed[k].x == reference[k].x );
+    CHECK( bucketed[k].y == reference[k].y );
+  }
+
+  // Cancellation: the probe throws through the pass instead of letting a
+  // near-budget candidate set block the worker until the pass ends.
+  std::vector<DetectionBox> victim = boxes;
+  REQUIRE_THROWS_AS( dedupDetections( victim, 0.45,
+                                      [] { throw std::runtime_error( "cancelled" ); } ),
+                     std::runtime_error );
+
+  // Near the default max_detections budget, disjoint boxes must resolve in
+  // bounded time: the dense pass was O(n^2) (10^10 comparisons at 100k).
+  std::vector<DetectionBox> budget;
+  budget.reserve( 100000 );
+  for ( int i = 0; i < 100000; ++i )
+  {
+    const float x = static_cast<float>( ( i % 500 ) * 4 );
+    const float y = static_cast<float>( ( i / 500 ) * 4 );
+    budget.push_back( DetectionBox{ x, y, 2.0f, 2.0f, 0, 0.5f } );
+  }
+  const auto kept = nonMaxSuppression( budget, 0.45 );
+  CHECK( kept.size() == 100000 ); // nothing overlaps; everything survives
 }
 
 // ---------------------------------------------------------------------------

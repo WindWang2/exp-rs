@@ -7994,6 +7994,25 @@ sicnu_add_test(test_contract_platform_9)
 target_link_libraries(test_contract_platform_9 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_contract_platform_9)
 
+# Contract Platform 10.0: scientific contract registry completeness and
+# known answers against the LIVE operator registry (append-only block).
+sicnu_add_test(test_scientific_contract_10)
+target_link_libraries(test_scientific_contract_10 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_scientific_contract_10)
+
+# Contract Platform 10.0: cross-projection drift gates for the projections
+# contract-9 did not bind (determinism agreement, sidecar io projection,
+# LabSpec operator references).
+sicnu_add_test(test_drift_projection_10)
+target_link_libraries(test_drift_projection_10 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_drift_projection_10)
+
+# Verification Platform 10.0: metamorphic invariants, reproducibility
+# replay, seed determinism, bounded CRS refusal fuzz, provenance checks.
+sicnu_add_test(test_science_verification_10)
+target_link_libraries(test_science_verification_10 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_science_verification_10)
+
 # Contract Platform 9.0: contract generation cost baseline (M8). Evidence
 # artifact via `benchmark_contract9 --out <json>`.
 # Temporal Platform 10.0 scale evidence (regularize / harmonic-breaks /
@@ -8291,7 +8310,7 @@ sicnu_add_io_test(test_portability_contract)
 # aggregate target so a missing-include regression fails before any heavy
 # target compiles.
 function(sicnu_add_header_probes)
-  set(_probe_objs "")
+  set(_probe_libs "")
   foreach(header IN LISTS ARGN)
     string(REGEX REPLACE "[/\\.-]" "_" probe "header_probe_${header}")
     set(_probe_src "${CMAKE_CURRENT_BINARY_DIR}/generated/${probe}.cpp")
@@ -8305,9 +8324,13 @@ function(sicnu_add_header_probes)
       ${CMAKE_CURRENT_SOURCE_DIR}
     )
     target_link_libraries(${probe} PRIVATE Sicnu::Geospatial)
-    list(APPEND _probe_objs $<TARGET_OBJECTS:${probe}>)
+    list(APPEND _probe_libs ${probe})
   endforeach()
-  add_custom_target(sicnu_header_probes DEPENDS ${_probe_objs})
+  # Depend on the probe TARGETS, not $<TARGET_OBJECTS> file paths: the
+  # AUTOMOC object files (mocs_compilation.cpp.o) have no forwarding rules in
+  # the custom target's build.make under the Unix Makefiles generator, which
+  # broke the aggregate with "no rule to make ..." (platform 10.0).
+  add_custom_target(sicnu_header_probes DEPENDS ${_probe_libs})
 endfunction()
 sicnu_add_header_probes(
   runtime/observability/trace_id.h

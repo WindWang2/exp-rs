@@ -841,6 +841,15 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
                          + std::to_string( j ) + " and " + std::to_string( i ) + " to the same "
                          + "product class " + std::to_string( mapping[i] )
                          + " (a colliding remap silently merges classes)" );
+      // F-OPS-1: the labels raster encodes product classes in UInt16 with
+      // NoData=65535 — a remap target of 65535+ cannot be represented and
+      // would clamp into the sentinel (or wrap), silently destroying the
+      // class. The engine escalates Byte->UInt16 at 256 product classes;
+      // nothing can save a target beyond the UInt16 domain.
+      if ( mapping[i] > 65534 )
+        markInvalid( "postprocess.class_mapping target " + std::to_string( mapping[i] )
+                       + " (element " + std::to_string( i ) + ") exceeds the encodable "
+                       + "labels domain (max 65534; 65535 is the NoData sentinel)" );
     }
   }
   // Platform 4.0 raster-task output format vocabulary.

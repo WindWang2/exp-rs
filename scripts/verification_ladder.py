@@ -96,6 +96,11 @@ LANES: dict[str, dict] = {
             ("command_contract_9", "test_command_contract_9", "test", 180),
             ("diagnostics_contract_9", "test_diagnostics_contract_9", "test", 180),
             ("capability_contract_9", "test_capability_contract_9", "test", 180),
+            # Verification Platform 10.0 (scientific contracts + drift
+            # gates + metamorphic/replay/seed/fuzz lanes):
+            ("scientific_contract_10", "test_scientific_contract_10", "test", 300),
+            ("drift_projection_10", "test_drift_projection_10", "test", 300),
+            ("science_verification_10", "test_science_verification_10", "test", 300),
         ],
     },
     "L3": {

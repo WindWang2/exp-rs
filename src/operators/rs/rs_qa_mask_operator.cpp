@@ -131,7 +131,9 @@ bool buildMaskRule(const std::string& source, const std::string& maskSelection,
             select({QaMask::SclCloudShadow, QaMask::SclCloudMediumProbability,
                     QaMask::SclCloudHighProbability, QaMask::SclThinCirrus});
         else if (maskSelection == "all")
-            select({QaMask::SclSaturated, QaMask::SclDarkFeatures,
+            // F-OPS-3: SCL 0 = NO_DATA — an unreadable classification word
+            // must fail closed like every other unreadable QA sample.
+            select({QaMask::SclNoData, QaMask::SclSaturated, QaMask::SclDarkFeatures,
                     QaMask::SclCloudShadow, QaMask::SclCloudMediumProbability,
                     QaMask::SclCloudHighProbability, QaMask::SclThinCirrus,
                     QaMask::SclSnow});
@@ -278,23 +280,33 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
     std::vector<uint16_t> values(blockSize, 0);
     std::vector<uint8_t> mask(blockSize);
     std::vector<uint8_t> scl(blockSize);
+    std::vector<uint8_t> unknown(blockSize);
     size_t irregular = 0;
-    auto convertSample = [&](double v) -> uint16_t {
+    // F-OPS-3: an unreadable QA sample is a FAILED quality observation, not a
+    // trusted-clear one. The sample is flagged `unknown` and the mask kernel
+    // output is OR-ed with the flag below, so NaN / negative sentinels /
+    // declared NoData fail CLOSED (masked). The historical behaviour
+    // (word 0 = clear) silently leaked cloud/snow into downstream composites.
+    auto convertSample = [&](double v, size_t i) -> uint16_t {
         if (hasNodata && std::isfinite(nodataVal) && std::abs(v - nodataVal) < 1e-9) {
             ++irregular;
-            return 0; // declared NoData -> not a QA word; leave unmasked
+            unknown[i] = 1; // declared NoData -> no QA word -> masked
+            return 0;
         }
         if (!std::isfinite(v)) {
             ++irregular;
-            return 0; // NaN/Inf -> keep the historical "clear" outcome, no UB
+            unknown[i] = 1; // NaN/Inf -> unreadable -> masked (no UB)
+            return 0;
         }
         if (v < 0.0) {
             ++irregular;
-            return 0; // negative sentinel -> clear
+            unknown[i] = 1; // negative sentinel -> unreadable -> masked
+            return 0;
         }
         if (v > 65535.0) {
             ++irregular;
-            return 65535; // clamp instead of silently truncating high bits
+            unknown[i] = 1; // outside the QA word domain -> unreadable -> masked
+            return 65535;   // clamp instead of silently truncating high bits
         }
         return static_cast<uint16_t>(v);
     };
@@ -326,6 +338,7 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
 
         // Read the QA block in its native dtype and convert to uint16 with
         // the #699 guards (per-block buffers; lazily sized on first use).
+        std::fill(unknown.begin(), unknown.begin() + static_cast<std::ptrdiff_t>(n), 0);
         bool readOk = true;
         switch (qaType) {
         case GDT_Byte: {
@@ -333,7 +346,7 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
             raw.resize(blockSize);
             readOk = ds.readBandWindowNative(qaBand, 0, y0, width, rows, raw.data());
             for (size_t i = 0; readOk && i < n; ++i)
-                values[i] = convertSample(raw[i]);
+                values[i] = convertSample(raw[i], i);
             break;
         }
         case GDT_UInt16: {
@@ -344,6 +357,7 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
                 for (size_t i = 0; i < n; ++i) {
                     if (values[i] == nd) {
                         values[i] = 0;
+                        unknown[i] = 1; // declared NoData -> no QA word -> masked
                         ++irregular;
                     }
                 }
@@ -355,7 +369,7 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
             raw.resize(blockSize);
             readOk = ds.readBandWindowNative(qaBand, 0, y0, width, rows, raw.data());
             for (size_t i = 0; readOk && i < n; ++i)
-                values[i] = convertSample(raw[i]);
+                values[i] = convertSample(raw[i], i);
             break;
         }
         case GDT_UInt32: {
@@ -363,7 +377,7 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
             raw.resize(blockSize);
             readOk = ds.readBandWindowNative(qaBand, 0, y0, width, rows, raw.data());
             for (size_t i = 0; readOk && i < n; ++i)
-                values[i] = convertSample(raw[i]);
+                values[i] = convertSample(raw[i], i);
             break;
         }
         case GDT_Int32: {
@@ -371,14 +385,14 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
             raw.resize(blockSize);
             readOk = ds.readBandWindowNative(qaBand, 0, y0, width, rows, raw.data());
             for (size_t i = 0; readOk && i < n; ++i)
-                values[i] = convertSample(raw[i]);
+                values[i] = convertSample(raw[i], i);
             break;
         }
         case GDT_Float32: {
             std::vector<float> raw(blockSize);
             readOk = ds.readBandWindow(qaBand, 0, y0, width, rows, raw.data());
             for (size_t i = 0; readOk && i < n; ++i)
-                values[i] = convertSample(raw[i]);
+                values[i] = convertSample(raw[i], i);
             break;
         }
         case GDT_Float64: {
@@ -386,7 +400,7 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
             raw.resize(blockSize);
             readOk = ds.readBandWindowNative(qaBand, 0, y0, width, rows, raw.data());
             for (size_t i = 0; readOk && i < n; ++i)
-                values[i] = convertSample(raw[i]);
+                values[i] = convertSample(raw[i], i);
             break;
         }
         default: {
@@ -395,7 +409,7 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
             std::vector<float> raw(blockSize);
             readOk = ds.readBandWindow(qaBand, 0, y0, width, rows, raw.data());
             for (size_t i = 0; readOk && i < n; ++i)
-                values[i] = convertSample(raw[i]);
+                values[i] = convertSample(raw[i], i);
             break;
         }
         }
@@ -405,14 +419,24 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
         }
 
         if (source == "sentinel2_scl") {
-            for (size_t i = 0; i < n; ++i)
+            // A word outside the 0..15 SCL domain has no class meaning; the
+            // uint8 cast would land on an arbitrary (possibly unselected)
+            // class and read as clear — fail closed instead (F-OPS-3 review).
+            for (size_t i = 0; i < n; ++i) {
+                if (values[i] > 15)
+                    unknown[i] = 1;
                 scl[i] = static_cast<uint8_t>(values[i]);
+            }
             QaMask::sclMask(scl.data(), mask.data(), n, sclClasses);
         } else if (source == "generic_bitmask") {
             QaMask::genericBitmaskMask(values.data(), mask.data(), n, genericBits);
         } else {
             QaMask::landsatQaMask(values.data(), mask.data(), n, landsatFlags);
         }
+        // Fail closed: unreadable samples are masked regardless of what the
+        // kernel decided for the placeholder word (F-OPS-3).
+        for (size_t i = 0; i < n; ++i)
+            mask[i] = static_cast<uint8_t>(mask[i] | unknown[i]);
         for (size_t i = 0; i < n; ++i)
             masked += (mask[i] != 0) ? 1 : 0;
 
@@ -429,7 +453,7 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
     if (irregular > 0) {
         context.logWarning(
             "QA band contained " + std::to_string(irregular)
-            + " non-finite / out-of-range / declared-NoData sample(s); treated as clear (unmasked)");
+            + " non-finite / out-of-range / declared-NoData sample(s); masked (fail-closed)");
     }
 
     context.reportProgress(0.7, "Writing mask raster");
@@ -451,6 +475,7 @@ Json::Value RsQaMaskOperator::run(const Json::Value& params,
     result["source"] = source;
     result["maskClasses"] = maskSelection;
     result["maskedPixels"] = static_cast<Json::UInt64>(masked);
+    result["unreadableSamples"] = static_cast<Json::UInt64>(irregular);
     result["totalPixels"] = static_cast<Json::UInt64>(pixelCount);
     result["maskedPercent"] = pixelCount == 0
         ? 0.0

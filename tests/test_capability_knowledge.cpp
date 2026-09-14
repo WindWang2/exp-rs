@@ -2,8 +2,9 @@
 //
 // D8 capability knowledge layer guard (ADR 0146). Deterministic, no CI, no
 // model calls. Asserts the completion contract:
-//   1. coverage: exactly 111/111 rs: operators carry a v2 capability sidecar
-//      (binary — 110 is a failure), and every sidecar resolves live;
+//   1. coverage: EVERY registered rs: operator carries a v2 capability
+//      sidecar (registry set == catalog set; the floor below only catches
+//      silent catalog shrinkage), and every sidecar resolves live;
 //   2. no dangling operator reference in the sidecars or the relation graph;
 //   3. the relation graph is a DAG, exclusive pairs never double as chain
 //      edges, and every family is populated;
@@ -105,16 +106,19 @@ struct Bootstrap
 
 } // namespace
 
-TEST_CASE( "D8 coverage: 111/111 rs operators carry capability metadata",
+TEST_CASE( "D8 coverage: every rs operator carries capability metadata",
            "[capability][d8][coverage]" )
 {
     Bootstrap boot;
     const std::set<std::string> registry = boot.registrySet();
     const std::set<std::string> catalog = boot.catalogSet();
 
-    REQUIRE( registry.size() == 111 );
+    // Monotone floor (history: 111 at D8, 114 since the PR #956 CN-satellite
+    // imports). A silent catalog shrinkage below the last known full count
+    // must fail even if registry==catalog were both filtered somehow.
+    REQUIRE( registry.size() >= 114 );
     REQUIRE( boot.catalog.loadProblems().empty() );
-    REQUIRE( catalog.size() == 111 );
+    REQUIRE( catalog.size() == registry.size() );
 
     for ( const std::string &id : registry )
     {
@@ -243,7 +247,7 @@ TEST_CASE( "D8 knowledge mirror agreement: modality and band roles",
     {
         const Json::Value mirror = knowledge.entryForOperator( id );
         if ( mirror.isNull() )
-          continue; // mirror covers the preflight subset; D8 covers all 111
+          continue; // mirror covers the preflight subset; D8 covers all
         const Json::Value block = boot.catalog.capability( id );
         INFO( "modality/band_roles disagree with the knowledge mirror for " + id
               + " — rerun capability_knowledge_tool gen-meta" );

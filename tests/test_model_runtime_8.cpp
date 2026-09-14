@@ -709,6 +709,79 @@ TEST_CASE( "class_mapping manifests validate injectivity", "[models][mapping][ma
     REQUIRE_FALSE( issues.empty() );
     CHECK( issues.front().find( ">= 0" ) != std::string::npos );
   }
+  {
+    // F-OPS-1: a remap target beyond the encodable labels domain (UInt16,
+    // NoData=65535) can only clamp into the sentinel — refuse the manifest.
+    const auto issues = catalog.validateManifestJson(
+      QString( manifestTemplate.c_str() ).arg( "[0, 1, 65535]" ).toStdString() );
+    REQUIRE_FALSE( issues.empty() );
+    CHECK( issues.front().find( "encodable" ) != std::string::npos );
+  }
+}
+
+TEST_CASE( "Labels encoding escalates with the class_mapping product domain (F-OPS-1)",
+           "[models][mapping][f-ops-1]" )
+{
+  QTemporaryDir dir;
+  auto input = sicnu::testing::RsSyntheticRasterBuilder( 24, 24, 1, GDT_Float32 )
+                 .withConstantValue( 1, 1.0f )
+                 .writeToDisk( dir.filePath( QStringLiteral( "in.tif" ) ) );
+  REQUIRE_FALSE( input.isEmpty() );
+
+  // Product classes {0, 300, 1}: a Byte labels raster (NoData=255) cannot
+  // hold 300 — the encoding must escalate to UInt16 (NoData=65535) and the
+  // mapped value must survive a read. Before the fix the encoding followed
+  // the MODEL class count (Byte) and GDAL clamped 300 into the 255 sentinel,
+  // silently erasing the class while palette/counts still claimed it.
+  ModelInfo model;
+  model.name = "m8-escalated";
+  model.framework = "m8-fake";
+  model.tiling.tileSize = 24;
+  model.output.format = "labels";
+  model.output.tensorNames = { "classes" };
+  model.output.classes = { "c0", "c1", "c2" };
+  model.postprocess.classMapping = { 0, 300, 1 };
+
+  auto runtime = std::make_shared<ThreeClassRuntime>();
+  TileInferenceEngine engine( model, runtime );
+  RSOperatorContext context;
+  const QString out = dir.filePath( QStringLiteral( "labels16.tif" ) );
+  TileInferenceRunOptions options;
+  options.outputMode = RasterOutputMode::Labels;
+  const TileInferenceStats stats = engine.run( input.toStdString(), {}, out.toStdString(),
+                                               context, options );
+  CHECK( stats.outBands == 1 );
+
+  GDALDataset *ds = static_cast<GDALDataset *>(
+    GDALOpen( out.toUtf8().constData(), GA_ReadOnly ) );
+  REQUIRE( ds );
+  CHECK( ds->GetRasterBand( 1 )->GetRasterDataType() == GDT_UInt16 );
+  int haveNoData = 0;
+  const double noData = ds->GetRasterBand( 1 )->GetNoDataValue( &haveNoData );
+  CHECK( haveNoData );
+  CHECK( noData == Catch::Approx( 65535.0 ).margin( 1e-6 ) );
+  GDALClose( ds );
+
+  int width = 0;
+  int height = 0;
+  const std::vector<float> band = readBand( out, 1, width, height );
+  REQUIRE( width == 24 );
+  // The fake assigns model class (x+y)%3; the remap sends 0->0, 1->300,
+  // 2->1. The 300 pixels are the regression: they used to read back as the
+  // 255 NoData sentinel.
+  bool sawEscalated = false;
+  for ( int y = 0; y < 24; ++y )
+  {
+    for ( int x = 0; x < 24; ++x )
+    {
+      const float expected = static_cast<float>( ( x + y ) % 3 == 1 ? 300
+                                                    : ( ( x + y ) % 3 == 2 ? 1 : 0 ) );
+      sawEscalated = sawEscalated || ( x + y ) % 3 == 1;
+      CHECK( band[static_cast<std::size_t>( y ) * 24 + x]
+             == Catch::Approx( expected ).margin( 1e-4 ) );
+    }
+  }
+  CHECK( sawEscalated );
 }
 
 TEST_CASE( "Labels products carry the remapped product classes", "[models][mapping]" )

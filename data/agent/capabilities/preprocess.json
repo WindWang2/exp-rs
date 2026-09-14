@@ -181,5 +181,32 @@
     "intents": ["preprocess"],
     "resource": { "cost_class": "heavy", "large_raster_safe": true },
     "limitations": ["Requires a DEM and RPC/TIMING geometry; wrong DEM datum shifts the product"]
+  },
+  {
+    "id": "rs:gaofen_import",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "modality": ["optical"],
+    "side_effects": true,
+    "limitations": ["CRESDA/HJ L1A products need the sidecar XML next to the TIFFs"]
+  },
+  {
+    "id": "rs:zy3_import",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "modality": ["optical"],
+    "side_effects": true,
+    "limitations": ["CRESDA/HJ L1A products need the sidecar XML next to the TIFFs"]
+  },
+  {
+    "id": "rs:hj_import",
+    "family": "preprocess",
+    "extends": "family:preprocess",
+    "intents": ["preprocess"],
+    "modality": ["optical"],
+    "side_effects": true,
+    "limitations": ["CRESDA/HJ L1A products need the sidecar XML next to the TIFFs"]
   }
 ]

@@ -26,6 +26,8 @@ EndpointKinds endpointKinds( const std::string &edgeKind )
         return { "diagnostic", "error_code" };
     if ( edgeKind == "capability_for" )
         return { "capability_entry", "operator" };
+    if ( edgeKind == "scientific_contract_for" )
+        return { "scientific_contract", "operator" };
     if ( edgeKind == "preflight_action" )
     {
         // Preflight action ids are the harness suggested-action vocabulary

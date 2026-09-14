@@ -157,12 +157,19 @@ TensorBlob TensorBlob::fromMat( const cv::Mat &mat )
     blob.dtype = dtype;
     blob.shape.assign( mat.size.p, mat.size.p + mat.dims );
     const std::size_t total = static_cast<std::size_t>( mat.total() ) * mat.elemSize();
+    // F-OPS-2: the row-range fallback iterated mat.rows, which is -1 for
+    // dims > 2 — the loop body never ran and the blob stayed all-zero while
+    // reporting a valid byte count. Non-continuous ND Mats now take one
+    // clone() (contiguous, single allocation) through the same memcpy path
+    // as continuous input; 2-D Mats keep the row-range copy.
+    if ( mat.dims > 2 && !mat.isContinuous() )
+        return fromMat( mat.clone() );
     blob.bytes.resize( total );
     if ( mat.isContinuous() )
         std::memcpy( blob.bytes.data(), mat.ptr<const std::uint8_t>(), total );
     else
     {
-        // Multi-dim Mats can be non-continuous when ROI'd; copy row ranges.
+        // 2-D Mats can be non-continuous when ROI'd; copy row ranges.
         std::size_t offset = 0;
         for ( int r = 0; r < mat.rows; ++r )
         {

@@ -2,7 +2,8 @@
 //
 // D8 capability knowledge generator (ADR 0146). One binary, three jobs:
 //
-//   gen-meta   Derive the v2 capability sidecars for all 111 rs: operators
+//   gen-meta   Derive the v2 capability sidecars for every registered rs:
+//              operator
 //              from the LIVE AlgorithmDescriptors and write them under
 //              data/processing/algorithm_meta/capability/. Authored keys in
 //              existing files (summary / failure_modes / applicability /
@@ -157,9 +158,12 @@ int cmdGenMeta( const QString &root )
     if ( desc.id.rfind( "rs:", 0 ) == 0 )
       rsDescriptors.push_back( &desc );
   }
-  if ( rsDescriptors.size() != 111 )
+  // Monotone floor (history: 111 at D8, 114 since the PR #956 CN-satellite
+  // imports). Guards against a silently half-registered catalog, not against
+  // growth; the per-operator gates bind the actual set.
+  if ( rsDescriptors.size() < 114 )
   {
-    std::cerr << "gen-meta: expected 111 rs: descriptors, found " << rsDescriptors.size()
+    std::cerr << "gen-meta: expected at least 114 rs: descriptors, found " << rsDescriptors.size()
               << " — refusing to write a partial catalog\n";
     return 2;
   }

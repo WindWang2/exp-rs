@@ -126,9 +126,19 @@ class McpBridge {
     this.startError = null;
     this.stderrTail = "";
     this.lastSpawnAt = Date.now();
-    this.child = spawn(this.bin, ["--mcp", ...this.extraArgs], {
+    // A desync kill leaves unread bytes in the OLD child's pipe; they must
+    // never glue onto the new generation's frames (F-PI-1 replay bug):
+    // reset the framing buffer and drop stdout chunks from any generation
+    // that is no longer current.
+    this.buffer = "";
+    const child = (this.child = spawn(this.bin, ["--mcp", ...this.extraArgs], {
       stdio: ["pipe", "pipe", "pipe"],
       env: childEnv,
+    }));
+    this.child.stdout!.setEncoding("utf8");
+    this.child.stdout!.on("data", (chunk) => {
+      if (this.child !== child) return; // stale generation
+      this.onStdout(chunk);
     });
     // spawn() reports late ENOENT/EACCES via an "error" event, not a throw.
     const spawnFailure = new Promise<never>((_, reject) => {
@@ -138,8 +148,6 @@ class McpBridge {
       });
     });
 
-    this.child.stdout!.setEncoding("utf8");
-    this.child.stdout!.on("data", (chunk) => this.onStdout(chunk));
     // Keep a stderr tail so a child crash is diagnosable from exprs_status
     // and the exit error (Qt/QGIS plugin failures precede most crashes).
     this.child.stderr!.setEncoding("utf8");
@@ -151,7 +159,12 @@ class McpBridge {
     this.child.on("error", (err) => {
       this.startError = `exp-rs MCP server error: ${err?.message ?? err}`;
     });
+    const spawned = this.child;
     this.child.on("exit", (code) => {
+      // Only the CURRENT generation's exit may flip bridge state: a stale
+      // child killed by a later spawn must not reject the new child's
+      // in-flight calls (review R-B5).
+      if (this.child !== spawned) return;
       this.exited = true;
       const tail = this.stderrTail.trim();
       const err = new Error(
@@ -175,6 +188,7 @@ class McpBridge {
 
     // Startup deadline: a child that spawns but hangs during Qt/QGIS init
     // must not stall extension load for the full 10-minute request timeout.
+    let cancelStartupDeadline: () => void = () => {};
     const startupDeadline = new Promise<never>((_, reject) => {
       const t = setTimeout(
         () =>
@@ -185,33 +199,43 @@ class McpBridge {
           ),
         STARTUP_TIMEOUT_MS,
       );
+      cancelStartupDeadline = () => clearTimeout(t);
       spawnFailure.catch(() => {}).finally(() => clearTimeout(t));
     });
-    await Promise.race([
-      this.request("initialize", {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        clientInfo: { name: "pi-exp-rs-spatial", version: "1.0.0" },
-      }),
-      spawnFailure,
-      startupDeadline,
-    ]);
+    try {
+      await Promise.race([
+        this.request("initialize", {
+          protocolVersion: "2024-11-05",
+          capabilities: {},
+          clientInfo: { name: "pi-exp-rs-spatial", version: "1.0.0" },
+        }),
+        spawnFailure,
+        startupDeadline,
+      ]);
+    } finally {
+      // Clear on EVERY settle path: a healthy initialize used to leave the
+      // 30s timer armed, pinning the event loop after every spawn/respawn
+      // (whole-repo review F-PI-2: backport of mcp_bridge.ts's fix).
+      cancelStartupDeadline();
+    }
     this.notify("notifications/initialized", {});
   }
 
   private onStdout(chunk: string): void {
     this.buffer += chunk;
     if (this.buffer.length > MAX_LINE_BUFFER_CHARS) {
-      // Fail fast instead of growing without bound on a runaway server.
-      this.buffer = "";
-      const err = new Error(
-        `exp-rs MCP bridge: response line exceeded ${MAX_LINE_BUFFER_CHARS} chars`,
+      // A >32 MiB "line" means stdio framing is desynced (the server's own
+      // line cap is 4 MiB). Without a terminating newline every later
+      // response glues onto this one: each tool call would burn the full
+      // 10-minute timeout with no diagnosis. Reject pending AND kill the
+      // child so the next request takes the lazy-respawn path instead of
+      // talking into a zombie stream (whole-repo review F-PI-1).
+      this.failDesyncedStream(
+        new Error(
+          `exp-rs MCP bridge: response line exceeded ${MAX_LINE_BUFFER_CHARS} chars; ` +
+            `stdio framing desynced - respawning`,
+        ),
       );
-      for (const p of this.pending.values()) {
-        clearTimeout(p.timer);
-        p.reject(err);
-      }
-      this.pending.clear();
       return;
     }
     let newline = this.buffer.indexOf("\n");
@@ -220,6 +244,31 @@ class McpBridge {
       this.buffer = this.buffer.slice(newline + 1);
       if (line) this.onLine(line);
       newline = this.buffer.indexOf("\n");
+    }
+  }
+
+  /** Shared desync teardown: reject everything, then tear the child down so
+   * `exited` flips and lazy respawn replaces it (F-PI-1). */
+  private failDesyncedStream(err: Error): void {
+    this.buffer = "";
+    for (const p of this.pending.values()) {
+      clearTimeout(p.timer);
+      p.reject(err);
+    }
+    this.pending.clear();
+    const child = this.child;
+    if (child && !this.exited) {
+      try {
+        child.stdin?.destroy();
+      } catch {
+        // already gone
+      }
+      child.kill();
+      // Same escalation ladder as stop(): a child stalling in SIGTERM
+      // teardown would otherwise keep `exited` false forever and the lazy
+      // respawn would never fire (review R-B4).
+      const killer = setTimeout(() => child.kill("SIGKILL"), 5000);
+      child.once("exit", () => clearTimeout(killer));
     }
   }
 

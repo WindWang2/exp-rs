@@ -50,10 +50,11 @@ struct TranslateOptions
 struct WarpOptions
 {
     std::string targetCrs;                         ///< REQUIRED for reproject (no guessing)
-    /// -s_srs: declare the source CRS when the input carries none (the
-    /// caller takes responsibility — io:reproject's srcCrsOverride lands
-    /// here). Empty = the source's own CRS governs (default).
-    std::string sourceCrsOverride;
+    /// Source CRS override for CRS-less inputs (reproject's srcCrsOverride).
+    /// Empty = trust the file CRS, never guess. Without it GDALWarp treats an
+    /// SRS-less source as "already in target CRS" and re-tags the pixels.
+    std::string sourceCrsOverride;                 ///< -s_srs (empty = from file)
+>>>>>>> origin/zcode/scientific-contract-verification-10
     std::string resampling = "near";
     double targetResolutionX = 0;                  ///< 0 = derive (documented in result)
     double targetResolutionY = 0;
