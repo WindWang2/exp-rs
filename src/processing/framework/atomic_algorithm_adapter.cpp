@@ -165,11 +165,21 @@ AlgorithmDescriptor AlgorithmDescriptorBuilder::buildFromRsOperator( const opera
   const operators::RSOperatorMemoryPolicy policy = op.memoryPolicy();
   const bool largeRasterSafe = ( policy == operators::RSOperatorMemoryPolicy::Streaming
                                  || policy == operators::RSOperatorMemoryPolicy::MultiPassStreaming
+                                 || policy == operators::RSOperatorMemoryPolicy::GlobalReductionStreaming
+                                 || policy == operators::RSOperatorMemoryPolicy::ExternalMemoryStreaming
                                  || policy == operators::RSOperatorMemoryPolicy::ExternalProcess );
   meta["largeRasterSafe"] = largeRasterSafe;
   // Declared execution-resource estimate (tile size / RAM / disk), when the
   // operator quantifies its large-raster behavior (ADR 0117).
   Json::Value estimate = op.executionEstimate();
+  // Neighborhood streaming kernels advertise their halo so the agent surface
+  // and the memory planner see the same per-tile window widening.
+  if ( const int halo = op.streamingHaloPixels(); halo > 0 )
+  {
+    if ( !estimate.isObject() )
+      estimate = Json::Value( Json::objectValue );
+    estimate["haloPixels"] = halo;
+  }
   if ( estimate.isObject() && !estimate.empty() )
     meta["execution"] = std::move( estimate );
   desc.agentMetadata = AgentMetadata::fromJson( meta );

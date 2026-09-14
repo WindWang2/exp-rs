@@ -4,6 +4,7 @@
 #include "atomic_algorithm_registry.h"
 #include "gdal/gdal_dataset_wrapper.h"
 #include "resource_estimation.h"
+#include "runtime/chunk/memory_planner.h"
 #include "schema_validator.h"
 #include "qgsdatasourceresolver.h"
 
@@ -12,7 +13,9 @@
 
 #include <QString>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 
@@ -433,6 +436,94 @@ Json::Value preflightAdapter( const AtomicAlgorithmAdapter &adapter, const Json:
       unknown["basis"] = "unknown";
       unknown["estimatedRamBytes"] = 0;
       result["resources"] = unknown;
+    }
+  }
+
+  // --- 5b. Tile working-set plan (LSEE 10.0, ADR 0148 §3) -------------------
+  // For streaming-family operators over a probed raster, refine the estimate
+  // with the runtime memory planner: the planner widens the per-tile working
+  // set by the declared halo and reports the peak in-RAM stream footprint
+  // (advisory here — the gate stays in TaskCenter admission; the plan's
+  // actionable reason is what a refusal would carry).
+  const Json::Value &agentExec = desc.agentMetadata.execution;
+  const std::string &memoryPolicy = desc.agentMetadata.memoryPolicy;
+  const bool streamingFamily =
+    memoryPolicy.empty() || memoryPolicy == "streaming"
+    || memoryPolicy == "multipass_streaming"
+    || memoryPolicy == "global_reduction_streaming"
+    || memoryPolicy == "external_memory_streaming";
+  if ( streamingFamily && !probedRasters.empty() && agentExec.isObject() )
+  {
+    const Json::Value &firstRaster = probedRasters.front().second;
+    if ( firstRaster.isMember( "width" ) && firstRaster.isMember( "height" ) )
+    {
+      runtime::chunk::TileMemoryRequest request;
+      // Descriptor JSON is unvalidated for the execution block — a 0 tile
+      // dimension would divide by zero in the planner's ceil-div (F-A-3).
+      request.tileWidth = agentExec.isMember( "tileWidth" ) && agentExec["tileWidth"].isUInt()
+                            ? std::max( 1u, agentExec["tileWidth"].asUInt() )
+                            : 256;
+      request.tileHeight = agentExec.isMember( "tileHeight" ) && agentExec["tileHeight"].isUInt()
+                             ? std::max( 1u, agentExec["tileHeight"].asUInt() )
+                             : 256;
+      request.haloPixels =
+        agentExec.isMember( "haloPixels" ) && agentExec["haloPixels"].isUInt()
+          ? agentExec["haloPixels"].asUInt()
+          : 0;
+      request.bands = firstRaster.isMember( "bandCount" ) && firstRaster["bandCount"].isInt()
+                        ? static_cast<std::uint32_t>( std::max( 1, firstRaster["bandCount"].asInt() ) )
+                        : 1;
+      // Unknown dtype (probe writes 0) degrades to the 4-byte float default,
+      // NOT to 1 byte — the unknown case is where conservatism matters (F-B-11).
+      request.bytesPerSample =
+        firstRaster.isMember( "dataType" ) && firstRaster["dataType"].isUInt()
+          ? std::max( 1u, firstRaster["dataType"].asUInt() / 8u )
+          : 4;
+      if ( request.bytesPerSample == 1 && firstRaster.isMember( "dataType" )
+           && firstRaster["dataType"].isUInt() && firstRaster["dataType"].asUInt() == 0 )
+        request.bytesPerSample = 4;
+      request.expectedTileCount =
+        ( static_cast<std::uint64_t>( firstRaster["width"].asInt() ) + request.tileWidth - 1 )
+          / request.tileWidth
+        * ( ( static_cast<std::uint64_t>( firstRaster["height"].asInt() ) + request.tileHeight - 1 )
+            / request.tileHeight );
+      request.allowSpill = memoryPolicy == "external_memory_streaming";
+      request.scratchBudgetBytes =
+        agentExec.isMember( "temporaryDiskBytes" ) && agentExec["temporaryDiskBytes"].isUInt64()
+          ? agentExec["temporaryDiskBytes"].asUInt64()
+          : 0;
+      // budgetBytes stays 0 → Advisory: the preflight reports the estimate;
+      // the enforcing gate is TaskCenter admission.
+      const runtime::chunk::TileMemoryPlan plan = runtime::chunk::planTileMemory( request );
+
+      Json::Value tilePlan( Json::objectValue );
+      tilePlan["requestedShapePeakBytes"] =
+        static_cast<Json::UInt64>( plan.requestedPeakBytes );
+      tilePlan["recommendedShapePeakBytes"] =
+        static_cast<Json::UInt64>( plan.estimatedPeakBytes );
+      tilePlan["recommendedQueueCapacity"] = plan.recommendedQueueCapacity;
+      tilePlan["expectedTileCount"] = static_cast<Json::UInt64>( request.expectedTileCount );
+      tilePlan["action"] = [&] {
+        switch ( plan.action )
+        {
+        case runtime::chunk::TileMemoryPlan::Action::Admit:
+          return "admit";
+        case runtime::chunk::TileMemoryPlan::Action::Advisory:
+          return "advisory";
+        case runtime::chunk::TileMemoryPlan::Action::ReduceConcurrency:
+          return "reduce_concurrency";
+        case runtime::chunk::TileMemoryPlan::Action::Spill:
+          return "spill";
+        case runtime::chunk::TileMemoryPlan::Action::Refuse:
+          return "refuse";
+        }
+        return "advisory";
+      }();
+      if ( !plan.reason.empty() )
+        tilePlan["reason"] = plan.reason;
+      // Unconditional key (F-B-10): the tilePlan lives at
+      // resources.tilePlan on every shape of the surrounding object.
+      result["resources"]["tilePlan"] = tilePlan;
     }
   }
 

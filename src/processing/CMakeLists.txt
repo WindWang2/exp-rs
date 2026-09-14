@@ -285,6 +285,8 @@ add_library(sicnu_task_center STATIC
     framework/local_worker_pool.cpp
     framework/worker_execution_route.h
     framework/worker_execution_route.cpp
+    framework/execution_resource_bridge.h
+    framework/execution_resource_bridge.cpp
     framework/resource_monitor.cpp
     framework/task_resource_budget.cpp
     framework/agent_workflow_executor.cpp

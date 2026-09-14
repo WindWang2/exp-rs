@@ -167,6 +167,10 @@ vendor/
 !.planning/scientific-agent-workflow-compiler-10/
 .planning/scientific-agent-workflow-compiler-10/*
 !.planning/scientific-agent-workflow-compiler-10/*.md
+# large-scale-execution-engine-10: track planning notes (markdown only; logs stay local).
+!.planning/large-scale-execution-engine-10/
+.planning/large-scale-execution-engine-10/*
+!.planning/large-scale-execution-engine-10/*.md
 .zcode/
 
 # IDE / editor / OS artifacts

@@ -10,6 +10,7 @@
 #pragma once
 
 #include "operators/framework/model_catalog.h"
+#include "operators/framework/rs_operator_error.h"
 
 
 #include <opencv2/core.hpp>

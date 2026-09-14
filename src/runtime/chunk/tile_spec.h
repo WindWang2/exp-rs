@@ -29,6 +29,14 @@ struct TileSpec
                            ///< edge-replicated; kernels must clamp window rects)
     int rasterHeight = 0;
     int bands = 1;         ///< band count carried by the tile payload
+    /// Band subset (LSEE 10.0): the payload's first band within the SOURCE
+    /// raster. 0 = payload starts at band 1 (the historical reading). Pure
+    /// provenance for consumers/planners — the buffer still carries exactly
+    /// @p bands interleaved bands.
+    int bandOffset = 0;
+    /// Time chunk (LSEE 10.0): 0-based index of the payload within a temporal
+    /// stack (one chunk per acquisition). 0 = the single/historical time step.
+    int timeIndex = 0;
 
     /// Buffer element count (interleaved bands, band-major within a pixel is
     /// the producer's choice; see the pipeline contract).

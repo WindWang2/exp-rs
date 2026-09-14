@@ -27,6 +27,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <cstddef>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -37,16 +38,30 @@ namespace sicnu::data
 /// Version of the fingerprint CONTRACT itself (#726): mixed into the
 /// implementation-version hash by every producer, so any semantic change to
 /// what a fingerprint covers (v2: chained producer identity, key-based
-/// destination exclusion, remote input identity) invalidates every entry
-/// computed under the old contract instead of silently comparing
-/// incomparable digests. Bump together with the platform version below.
-inline constexpr int kExecutionFingerprintContractVersion = 2;
+/// destination exclusion, remote input identity; v3: environment pins mixed
+/// into the implementation identity) invalidates every entry computed under
+/// the old contract instead of silently comparing incomparable digests.
+/// Bump together with the platform version below.
+inline constexpr int kExecutionFingerprintContractVersion = 3;
 
 /// Platform software version participating in the implementation identity
 /// (matches the CMake project() version). Deliberately NOT a build path,
 /// timestamp, or VCS hash: those change per machine/commit and would split
 /// the cache without any behavioral meaning.
 inline constexpr const char *kExecutionFingerprintPlatformVersion = "1.0";
+
+/// Environment facts that change an operator's observable output bytes
+/// (LSEE 10.0, closed set): the host installs a provider returning a stable
+/// canonical string (e.g. GDAL release version); it is mixed into EVERY
+/// implementation identity, so an environment change invalidates cached
+/// artifacts and resume stamps instead of silently mixing outputs produced
+/// under different library behavior. Empty string (the default) means no
+/// pins: the identity bytes stay exactly as in contract v2 — wiring the
+/// provider is an explicit host decision, not an accident of linkage.
+using EnvironmentPinProvider = std::function<std::string()>;
+void setExecutionEnvironmentPinProvider( EnvironmentPinProvider provider );
+/// Current environment pin string ("" when no provider is installed).
+std::string executionEnvironmentPins();
 
 /// A deterministic hash of an execution's identity: algorithm + version +
 /// normalized parameters + input asset identities/revisions. Two executions

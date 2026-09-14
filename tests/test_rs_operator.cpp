@@ -312,6 +312,10 @@ TEST_CASE( "memoryPolicyName maps every policy to a stable id", "[operators][fra
          == "streaming" );
   CHECK( std::string( memoryPolicyName( RSOperatorMemoryPolicy::MultiPassStreaming ) )
          == "multipass_streaming" );
+  CHECK( std::string( memoryPolicyName( RSOperatorMemoryPolicy::GlobalReductionStreaming ) )
+         == "global_reduction_streaming" );
+  CHECK( std::string( memoryPolicyName( RSOperatorMemoryPolicy::ExternalMemoryStreaming ) )
+         == "external_memory_streaming" );
   CHECK( std::string( memoryPolicyName( RSOperatorMemoryPolicy::FullRaster ) )
          == "full_raster" );
   CHECK( std::string( memoryPolicyName( RSOperatorMemoryPolicy::ExternalProcess ) )
@@ -327,8 +331,9 @@ TEST_CASE( "Every registered operator declares a valid memory policy", "[operato
   REQUIRE_FALSE( names.empty() );
 
   const auto validPolicy = []( const std::string &p ) {
-    return p == "streaming" || p == "multipass_streaming" || p == "full_raster"
-           || p == "external_process" || p == "unsupported_for_large_raster";
+    return p == "streaming" || p == "multipass_streaming"
+           || p == "global_reduction_streaming" || p == "external_memory_streaming"
+           || p == "full_raster" || p == "external_process" || p == "unsupported_for_large_raster";
   };
 
   for ( const auto &name : names )

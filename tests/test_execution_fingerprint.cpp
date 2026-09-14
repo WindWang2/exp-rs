@@ -430,3 +430,35 @@ TEST_CASE( "Execution cache fingerprints differ when the contract version differ
       "rs:spectral_index", "impl", params, { chained } );
   REQUIRE( withoutChain != withChain );
 }
+
+// ---------------------------------------------------------------------------
+// LSEE 10.0: environment pins in the implementation identity (ADR 0148 D-8)
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Implementation identity mixes the environment pin string",
+           "[data][fingerprint][lsee10]" )
+{
+  // RAII restore (F-B-12): a failed REQUIRE must not leave the provider
+  // installed for the rest of the binary.
+  struct Restore
+  {
+    ~Restore() { sicnu::data::setExecutionEnvironmentPinProvider( {} ); }
+  } restore;
+  const QByteArray base = sicnu::data::makeImplementationIdentity( "schema-v-test" ).digest;
+
+  sicnu::data::setExecutionEnvironmentPinProvider( [] { return "gdal=3.13.3"; } );
+  const QByteArray pinned =
+    sicnu::data::makeImplementationIdentity( "schema-v-test" ).digest;
+  REQUIRE( pinned != base );
+
+  // A changed environment invalidates (different identity ⇒ cache miss).
+  sicnu::data::setExecutionEnvironmentPinProvider( [] { return "gdal=3.14.0"; } );
+  const QByteArray repinned =
+    sicnu::data::makeImplementationIdentity( "schema-v-test" ).digest;
+  REQUIRE( repinned != pinned );
+
+  // Clearing the provider restores the unpinned identity byte-for-byte.
+  sicnu::data::setExecutionEnvironmentPinProvider( {} );
+  REQUIRE( sicnu::data::makeImplementationIdentity( "schema-v-test" ).digest == base );
+  REQUIRE( sicnu::data::executionEnvironmentPins().empty() );
+}

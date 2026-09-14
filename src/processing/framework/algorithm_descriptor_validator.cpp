@@ -29,7 +29,8 @@ const std::set<std::string> kValidBandRoles = {
 };
 
 const std::set<std::string> kValidMemoryPolicies = {
-  "streaming", "multipass_streaming", "full_raster", "external_process",
+  "streaming", "multipass_streaming", "global_reduction_streaming",
+  "external_memory_streaming", "full_raster", "external_process",
   "unsupported_for_large_raster"
 };
 

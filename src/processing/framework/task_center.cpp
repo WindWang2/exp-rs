@@ -21,11 +21,13 @@
 #include "processing/algorithms/temporal/temporal_workspace.h"
 #include "framework/fused_chain.h"
 #include "framework/worker_execution_route.h"
+#include "framework/execution_resource_bridge.h"
 #include "runtime/observability/execution_telemetry.h"
 #include "runtime/observability/trace.h"
 #include "data/data_manager.h"
 #include "data/execution_identity_resolver.h"
 #include "geospatial/remote/remote_identity_resolver.h"
+
 
 #include <QCryptographicHash>
 #include <QDirIterator>
@@ -555,6 +557,10 @@ void TaskCenter::setRssSampler( std::function<unsigned int()> sampler )
 
 void TaskCenter::installDefaultEstimateResolver()
 {
+    // LSEE 10.0 (ADR 0148 / DECISIONS D-8): identity seams install the shared
+    // environment pin provider (closed set v1: GDAL release) — never a local
+    // install whose timing could fork identity bytes (F-A-11).
+    processing::installExecutionEnvironmentPins();
     // Registry-backed resolver: read the operator's declared memoryPolicy +
     // executionEstimate via the AtomicAlgorithmRegistry descriptor. This is the
     // ONLY runtime consumer of those fields besides the agent tool catalog.
@@ -574,6 +580,10 @@ void TaskCenter::installDefaultEstimateResolver()
                     est.memoryClass = TaskMemoryClass::Streaming;
                 else if ( policy == "multipass_streaming" )
                     est.memoryClass = TaskMemoryClass::MultiPassStreaming;
+                else if ( policy == "global_reduction_streaming" )
+                    est.memoryClass = TaskMemoryClass::GlobalReductionStreaming;
+                else if ( policy == "external_memory_streaming" )
+                    est.memoryClass = TaskMemoryClass::ExternalMemoryStreaming;
                 else if ( policy == "external_process" )
                     est.memoryClass = TaskMemoryClass::ExternalProcess;
                 else if ( policy == "unsupported_for_large_raster" )

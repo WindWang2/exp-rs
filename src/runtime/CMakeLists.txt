@@ -11,6 +11,10 @@
 # sicnu_workflow precedent.
 add_library(sicnu_runtime SHARED
     chunk/chunk_pipeline.cpp
+    chunk/chunk_graph.cpp
+    chunk/scratch_registry.cpp
+    chunk/disk_tile_store.cpp
+    chunk/tile_checkpoint.cpp
     gpu/gpu_plane.cpp
     observability/execution_telemetry.cpp
     observability/fault_registry.cpp
