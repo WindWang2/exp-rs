@@ -204,6 +204,18 @@ TEST_CASE("SpectralResampling resampleSpectrumGaussian uses FWHM Gaussian weight
     CHECK(out[0] > 0.5f);
 }
 
+TEST_CASE("SpectralResampling resampleSpectrumGaussian rejects non-monotonic source grids", "[resample][gaussian]")
+{
+    const float src[] = {0.1f, 0.3f};
+    const float badWl[] = {500.0f, 400.0f};
+    const float dstWl[] = {450.0f};
+    const float dstFwhm[] = {50.0f};
+    float out[1] = {0.0f};
+    CHECK_FALSE(SpectralResampling::resampleSpectrumGaussian(src, badWl, 2, dstWl, dstFwhm, 1, out));
+}
+
+
+
 
 TEST_CASE("rs:spectral_resample propagates NoData sentinel instead of interpolating it (#445)", "[operators][rs][resample][nodata]")
 {

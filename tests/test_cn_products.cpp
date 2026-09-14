@@ -301,7 +301,7 @@ TEST_CASE("cn_products: GF-1 PMS detection, metadata and band roles", "[cn][gaof
     // Band roles through the data-driven table.
     REQUIRE(assets.assets.size() == 5); // 4 bands + sidecar metadata asset
     const char *expectedRoles[] = {"blue", "green", "red", "nir"};
-    const double expectedWavelengths[] = {470.0, 560.0, 650.0, 825.0};
+    const double expectedWavelengths[] = {485.0, 565.0, 660.0, 830.0};
     for (int i = 0; i < 4; ++i) {
         const ProductAsset &asset = assets.assets[i];
         INFO("band " << asset.nativeBandName);
@@ -353,7 +353,7 @@ TEST_CASE("cn_products: GF-2 PMS and GF-6 WFV layouts", "[cn][gaofen]")
         const CnBandRoleTable table = cnBandRoleTable("gf2_pms");
         REQUIRE(table.bands.size() == 4);
         REQUIRE(table.bands[1].role == "green");
-        REQUIRE(table.bands[1].wavelengthNm == Catch::Approx(555.0));
+        REQUIRE(table.bands[1].wavelengthNm == Catch::Approx(565.0));
     }
 
     SECTION("GF-6 WFV 8 bands; violet/yellow are explicitly unknown") {
@@ -575,7 +575,7 @@ TEST_CASE("cn_products: rs:gaofen_import stacks roles, sun geometry and calibrat
     REQUIRE(std::string(GDALGetMetadataItem(ds, "SICNU_ORBIT_ID", nullptr)) == "28861");
 
     const char *expectedRoles[] = {"blue", "green", "red", "nir"};
-    const char *expectedWavelengths[] = {"470", "560", "650", "825"};
+    const char *expectedWavelengths[] = {"485", "565", "660", "830"};
     const char *expectedGains[] = {"0.5", "0.6", "0.7", "0.8"};
     for (int b = 1; b <= 4; ++b) {
         GDALRasterBandH band = GDALGetRasterBand(ds, b);
@@ -781,13 +781,15 @@ TEST_CASE("cn_products: Current-generation ProductMetaData sidecar (Bands/ImageG
     REQUIRE(metadata.acquisitionTime == "2022-06-24T13:39:09.0");
     REQUIRE(metadata.declaredBandIds
             == std::vector<std::string>({"B1", "B2", "B3", "B4"}));
-    // Zenith → elevation derived and the derivation reported.
+    // Zenith → elevation derived and the derivation reported (not hidden).
     REQUIRE(metadata.hasSunElevation);
     REQUIRE(metadata.sunElevationDeg == Catch::Approx(90.0 - 25.1707).margin(1e-6));
+    REQUIRE(metadata.sunElevationSource == "derived as 90 - declared solar zenith");
     REQUIRE(metadata.hasSunAzimuth);
     REQUIRE(metadata.sunAzimuthDeg == Catch::Approx(106.266));
 
-    // Import: band order is declared (Bands list), result says so.
+    // Import: band order is declared (Bands list), result says so; provenance
+    // reaches GDAL metadata and the import result.
     auto op = RSOperatorRegistry::instance().create("rs:gaofen_import");
     REQUIRE(op != nullptr);
     RSOperatorContext ctx;
@@ -795,13 +797,73 @@ TEST_CASE("cn_products: Current-generation ProductMetaData sidecar (Bands/ImageG
     Json::Value params(Json::objectValue);
     params["input"] = dir.toStdString();
     params["output"] = output.toStdString();
-    REQUIRE_NOTHROW((void)op->run(params, ctx));
+    Json::Value result;
+    REQUIRE_NOTHROW(result = op->run(params, ctx));
+    REQUIRE(result["sunElevationSource"].asString() ==
+            "derived as 90 - declared solar zenith");
+    REQUIRE(result["bandOrderUnverified"].asBool() == false);
     GDALDatasetH ds = GDALOpen(output.toUtf8().constData(), GA_ReadOnly);
     REQUIRE(ds != nullptr);
     REQUIRE(GDALGetRasterCount(ds) == 4);
     REQUIRE(std::string(GDALGetMetadataItem(GDALGetRasterBand(ds, 4), "SICNU_BAND_ROLE", nullptr))
             == "nir");
+    REQUIRE(std::string(GDALGetMetadataItem(ds, "SICNU_SUN_ELEVATION_SOURCE", nullptr))
+            == "derived as 90 - declared solar zenith");
+    REQUIRE(GDALGetMetadataItem(ds, "SICNU_BAND_ORDER_UNVERIFIED", nullptr) == nullptr);
     GDALClose(ds);
+}
+
+TEST_CASE("cn_products: no sidecar band inventory marks band order unverified",
+          "[cn][gaofen][bandorder]")
+{
+    ensureApp();
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    const QString dir = tmp.path() + QStringLiteral("/GF1_PMS1_E117.0_N40.0_20240415_L1A0009990001-MSS1");
+    QDir().mkpath(dir);
+    writeStackTiff(dir + QStringLiteral("/GF1_PMS1_E117.0_N40.0_20240415_L1A0009990001-MSS1.tiff"),
+                   std::vector<std::vector<float>>(4, std::vector<float>(256, 100.f)));
+    // Sidecar with no BandID / Bands — inventory falls back to the profile.
+    QFile file(dir + QStringLiteral("/GF1_PMS1_E117.0_N40.0_20240415_L1A0009990001-MSS1.xml"));
+    REQUIRE(file.open(QIODevice::WriteOnly | QIODevice::Text));
+    file.write(R"(<?xml version="1.0" encoding="UTF-8"?>
+<MetaInfo>
+  <ProductID>GF1_PMS1_E117.0_N40.0_20240415_L1A0009990001</ProductID>
+  <SatelliteID>GF1</SatelliteID>
+  <SensorID>PMS1</SensorID>
+  <ModeID>MSS</ModeID>
+  <ReceiveDate>2024-04-15</ReceiveDate>
+  <ReceiveTime>11:23:45.123</ReceiveTime>
+  <Width>16</Width>
+  <Height>16</Height>
+  <PixelSizeX>8</PixelSizeX>
+  <PixelSizeY>8</PixelSizeY>
+</MetaInfo>
+)");
+    file.close();
+
+    auto op = RSOperatorRegistry::instance().create("rs:gaofen_import");
+    REQUIRE(op != nullptr);
+    RSOperatorContext ctx;
+    const QString output = tmp.path() + QStringLiteral("/unverified_order.tif");
+    Json::Value params(Json::objectValue);
+    params["input"] = dir.toStdString();
+    params["output"] = output.toStdString();
+    Json::Value result = op->run(params, ctx);
+    REQUIRE(result["bandSource"].asString() == "band_role_table");
+    REQUIRE(result["bandOrderUnverified"].asBool() == true);
+    REQUIRE(result["declared"]["bandInventory"].asBool() == false);
+
+    GDALDatasetH ds = GDALOpen(output.toUtf8().constData(), GA_ReadOnly);
+    REQUIRE(ds != nullptr);
+    REQUIRE(std::string(GDALGetMetadataItem(ds, "SICNU_BAND_ORDER_UNVERIFIED", nullptr))
+            == "true");
+    GDALClose(ds);
+
+    SatelliteProducts::ProductInfo info;
+    REQUIRE(SatelliteProducts::discoverProduct(dir, &info));
+    REQUIRE(info.attributes["SICNU_BAND_SOURCE"] == "band_role_table");
+    REQUIRE(info.attributes["SICNU_BAND_ORDER_UNVERIFIED"] == "true");
 }
 
 TEST_CASE("cn_products: GF-1 headless end-to-end: import → NDVI → supervised classification",
@@ -957,16 +1019,16 @@ TEST_CASE("cn_products: Sensor profile registry is the band-truth authority",
     REQUIRE(pms.gsdM == Catch::Approx(8.0));
     REQUIRE(pms.panVariant == "gf1_pms_pan");
     REQUIRE(pms.bands.size() == 4);
-    // Range midpoint AND nominal centre are carried as distinct fields.
+    // wavelength_nm prefers the published centre; centre/FWHM stay explicit.
     REQUIRE(pms.bands[0].band == "B1");
     REQUIRE(pms.bands[0].role == "blue");
     REQUIRE(pms.bands[0].hasWavelengthNm);
-    REQUIRE(pms.bands[0].wavelengthNm == Catch::Approx(470.0));
+    REQUIRE(pms.bands[0].wavelengthNm == Catch::Approx(485.0));
     REQUIRE(pms.bands[0].hasCenterWavelengthNm);
     REQUIRE(pms.bands[0].centerWavelengthNm == Catch::Approx(485.0));
     REQUIRE(pms.bands[0].hasFwhmNm);
     REQUIRE(pms.bands[0].fwhmNm == Catch::Approx(70.0));
-    REQUIRE(pms.bands[0].spectralRangeUm == "0.42-0.52");
+    REQUIRE(pms.bands[0].spectralRangeUm == "0.45-0.52");
     // Constituents declare what a complete product carries.
     REQUIRE(std::find(pms.constituents.begin(), pms.constituents.end(), "rpc_rpb")
             != pms.constituents.end());
@@ -1633,7 +1695,7 @@ TEST_CASE("cn_products: discoverProduct routes CN families through the shared re
     REQUIRE(info.bands.size() == 4);
     REQUIRE(info.bands[0].role == sicnu::data::BandRole::Blue);
     REQUIRE(info.bands[3].role == sicnu::data::BandRole::NIR);
-    REQUIRE(info.bands[0].wavelengthNm == 470);
+    REQUIRE(info.bands[0].wavelengthNm == 485);
     REQUIRE(info.attributes["SICNU_BAND_SOURCE"] == "declared_band_ids");
 
     // Recognized-but-unsupported names refuse with the concrete identity

@@ -541,6 +541,8 @@ Json::Value ProductMetadata::toJson() const
   json["has_sun_elevation"] = hasSunElevation;
   if ( hasSunElevation )
     json["sun_elevation_deg"] = sunElevationDeg;
+  if ( !sunElevationSource.empty() )
+    json["sun_elevation_source"] = sunElevationSource;
   json["has_sun_azimuth"] = hasSunAzimuth;
   if ( hasSunAzimuth )
     json["sun_azimuth_deg"] = sunAzimuthDeg;

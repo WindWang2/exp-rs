@@ -366,7 +366,14 @@ Json::Value teachingRefusalEnvelope( const std::string &intent, const std::strin
 Json::Value labAsk( const Json::Value &input )
 {
   // Role is session state. The message body is never consulted for authority.
-  const std::string role = normalizeLabRole( input.get( "role", "" ).asString() );
+  // Harden-by-construction (not schema-omission): a model-stuffed
+  // role:"teacher" without the host-injected credential is stripped to
+  // student. Teacher/admin claims require the same credential gate as
+  // lab_reference.
+  std::string role = normalizeLabRole( input.get( "role", "" ).asString() );
+  if ( labRoleMayUseTeacherSurfaces( role ) && !teacherCredentialValid( input ) )
+    role = "student";
+
   const std::string message = input.get( "message", "" ).asString();
 
   const LabIntentClassification classification = classifyLabIntent( message );
@@ -384,7 +391,7 @@ Json::Value labAsk( const Json::Value &input )
   // Teacher surfaces: grading and do-it-for-me execution. Students are
   // refused at the contract level — this branch IS the teaching constraint
   // applied to whole-request intents (the action-level twin lives in
-  // harness_actions).
+  // harness_actions). Credential-stripped forged teacher claims land here.
   if ( ( intent == kIntentLabExecute || intent == kIntentLabGradeRequest ) && isStudentRole( role ) )
     return teachingRefusalEnvelope( intent, role );
 

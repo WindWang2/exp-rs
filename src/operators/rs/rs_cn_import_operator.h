@@ -35,7 +35,8 @@ inline bool writeCnImportMetadata( const QString &outputPath,
                                    const sicnu::geo::ProductMetadata &metadata,
                                    const QStringList &stackedBands,
                                    const QString &productKindName,
-                                   QString *errorMessage )
+                                   QString *errorMessage,
+                                   bool bandOrderUnverified = false )
 {
     GDALDatasetH dataset = GDALOpen( outputPath.toUtf8().constData(), GA_Update );
     if ( dataset == nullptr )
@@ -61,7 +62,12 @@ inline bool writeCnImportMetadata( const QString &outputPath,
         // Consumer-compat key: rs:radiometric_calibration and the DOS flows
         // read the Landsat-convention "SUN_ELEVATION" (degrees above horizon).
         GDALSetMetadataItem( dataset, "SUN_ELEVATION", elevation.constData(), nullptr );
+        if ( !metadata.sunElevationSource.empty() )
+            GDALSetMetadataItem( dataset, "SICNU_SUN_ELEVATION_SOURCE",
+                                 metadata.sunElevationSource.c_str(), nullptr );
     }
+    if ( bandOrderUnverified )
+        GDALSetMetadataItem( dataset, "SICNU_BAND_ORDER_UNVERIFIED", "true", nullptr );
     if ( metadata.hasSunAzimuth )
         GDALSetMetadataItem( dataset, "SICNU_SUN_AZIMUTH_DEG",
                              QByteArray::number( metadata.sunAzimuthDeg, 'f', 4 ).constData(),

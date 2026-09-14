@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "source": "HJ-1A/1B CCD and HJ-2A/B CCD published product specifications. wavelength_nm is the documented spectral-range midpoint; FWHM is not published here and therefore not stated.",
+  "source": "HJ-1A/1B CCD and HJ-2A/B CCD published product specifications. wavelength_nm is the documented spectral-range midpoint (aligned with CRESDA ranges); FWHM is not published here and therefore not stated.",
   "sensors": {
     "hj_ccd": {
       "satellite": "HJ1A/HJ1B",
@@ -12,9 +12,9 @@
       "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
       "qa_vocabulary": [],
       "bands": [
-        { "band": "B1", "role": "blue", "wavelength_nm": 470.0, "spectral_range_um": "0.42-0.52", "gsd_m": 30.0, "note": "HJ-1A/1B CCD1/CCD2, 30 m" },
+        { "band": "B1", "role": "blue", "wavelength_nm": 485.0, "spectral_range_um": "0.45-0.52", "gsd_m": 30.0, "note": "HJ-1A/1B CCD1/CCD2, 30 m" },
         { "band": "B2", "role": "green", "wavelength_nm": 560.0, "spectral_range_um": "0.52-0.60", "gsd_m": 30.0 },
-        { "band": "B3", "role": "red", "wavelength_nm": 650.0, "spectral_range_um": "0.61-0.69", "gsd_m": 30.0 },
+        { "band": "B3", "role": "red", "wavelength_nm": 660.0, "spectral_range_um": "0.63-0.69", "gsd_m": 30.0 },
         { "band": "B4", "role": "nir", "wavelength_nm": 825.0, "spectral_range_um": "0.76-0.89", "gsd_m": 30.0 }
       ]
     },

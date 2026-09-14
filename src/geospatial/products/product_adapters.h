@@ -72,6 +72,10 @@ struct ProductMetadata
     std::string orbitId;          ///< declared orbit identifier when present
     bool hasSunElevation = false;
     double sunElevationDeg = 0.0; ///< sun elevation above horizon, degrees
+    /// Provenance for sunElevationDeg when derived (e.g. from solar zenith).
+    /// Empty when the sidecar declared elevation directly. First-class so it
+    /// cannot be silently dropped when the bounded `extra` map is full.
+    std::string sunElevationSource;
     bool hasSunAzimuth = false;
     double sunAzimuthDeg = 0.0;   ///< sun azimuth, degrees
     std::vector<BandCalibration> bandCalibration; ///< declared gain/bias per band

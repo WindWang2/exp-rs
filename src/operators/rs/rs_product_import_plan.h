@@ -52,7 +52,8 @@ struct ProductImportPlan
     QString siblingImageRole; ///< "pan" | "ms" | ""
     /// Declared band ids in sidecar order = TIFF band order; falls back to
     /// the registry layout when the sidecar declares no inventory (reported
-    /// via bandOrderDeclared=false + a warning, never hidden).
+    /// via bandOrderDeclared=false, bandOrderUnverified in the result, a
+    /// warning, and SICNU_BAND_ORDER_UNVERIFIED metadata — never hidden).
     QStringList bandNames;
     bool bandOrderDeclared = false;
     /// Completeness verdict over the resolved constituents.
