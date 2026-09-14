@@ -356,6 +356,7 @@ set(SICNU_TEMPORAL_TIMELINE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/processing/algorithms/spatiotemporal_filter.cpp
     ${CMAKE_SOURCE_DIR}/src/app/widgets/timeline_scrubber_widget.cpp
     ${CMAKE_SOURCE_DIR}/src/app/workbench/temporal_timeline_widget.cpp
+    ${CMAKE_SOURCE_DIR}/src/agent/spatial_tools/temporal_spatial_tools.cpp
 )
 qt_add_library(sicnu_temporal_timeline STATIC ${SICNU_TEMPORAL_TIMELINE_SOURCES})
 target_include_directories(sicnu_temporal_timeline PUBLIC
@@ -368,3 +369,13 @@ target_link_libraries(sicnu_temporal_timeline PUBLIC
     Sicnu::Geospatial
     GDAL::GDAL
 )
+# jsoncpp for the agent temporal tools (top-level canonical target, same
+# fallback pattern as sicnu_geospatial).
+if(TARGET jsoncpp)
+    target_link_libraries(sicnu_temporal_timeline PUBLIC jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+    target_include_directories(sicnu_temporal_timeline SYSTEM PUBLIC ${JSONCPP_INCLUDE_DIRS})
+    target_link_libraries(sicnu_temporal_timeline PUBLIC ${JSONCPP_LIBRARIES})
+else()
+    target_link_libraries(sicnu_temporal_timeline PUBLIC jsoncpp)
+endif()
