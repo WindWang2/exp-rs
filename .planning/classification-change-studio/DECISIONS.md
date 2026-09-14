@@ -132,13 +132,15 @@ Packages A–I; changing one requires updating the corresponding test truth.
 
 ## I. E2E + labs
 
-- **I1 Scene synthesis: 4 signatures with per-class Gaussian noise σ=0.02**
-  on [0,1] reflectance scale; classes water/veg/built/bare spatially laid out
-  as 4 quadrant rectangles + texture modulation so GLCM features help; change
-  block 32×32 veg→built in T2 (Dice target ≥0.9 is comfortably reachable
-  with CVA mean+1.5σ threshold on a 64×64 true-change footprint of 1024 px
-  out of 65 536 → wait: 32×32 = 1024 px; threshold calibration slice tunes α
-  only via fixed 1.5σ — validated in Slice 2 before freezing).
+- **I1 Scene synthesis: 4 signatures with per-class Gaussian noise σ=0.01**
+  on [0,1] reflectance scale; classes water/veg/built/bare as 4 quadrant
+  rectangles (spectral separations >= 20 sigma); change block 32×32
+  veg→built in T2 (1024 of 65 536 px).  CVA threshold uses α = 4.0: unchanged
+  per-pixel magnitudes are chi(4)-distributed (4 independent band diffs), and
+  the Gaussian 1.5σ heuristic sits inside that distribution's fat tail
+  (~3% false alarms → Dice ≈ 0.6); at 4σ the false-alarm probability drops
+  to ~5e-6 while the true-change magnitude (0.5) dwarfs the threshold
+  (~0.08).  Calibrated analytically, verified by the E2E Dice gate.
 - **I2 Training samples: 400 per class drawn from the truth map under a
   Package-A split** (buffer 10 px, blocks 32 px) — leakage-free by
   construction and audited in-pipeline.

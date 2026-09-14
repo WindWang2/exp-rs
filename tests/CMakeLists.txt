@@ -22,13 +22,21 @@ endif()
 # system libxml2. CTestCustom.cmake (sicnu_configure_test_harness_env)
 # still pins PYTHONHOME / QT_IM_MODULE for the ctest process.
 function(sicnu_discover_tests NAME)
+  # Optional TEST_PREFIX (D15): forwarded to catch_discover_tests so track
+  # gates can select cases by binary name (`ctest -R "test_xxx::"`).
+  set(_sat_prefix "")
+  cmake_parse_arguments(SDT "" "TEST_PREFIX" "" ${ARGN})
+  if(SDT_TEST_PREFIX)
+    set(_sat_prefix TEST_PREFIX ${SDT_TEST_PREFIX})
+  endif()
   set(_discovery_props "")
   if(ENABLE_SANITIZERS)
     list(APPEND _discovery_props "ENVIRONMENT_MODIFICATION" "LSAN_OPTIONS=set:detect_leaks=0")
   endif()
-  if(ARGN)
-    # ARGN is a flat list of key/value test properties (RUN_SERIAL TRUE, ...).
-    list(APPEND _discovery_props ${ARGN})
+  if(SDT_UNPARSED_ARGUMENTS)
+    # Remaining args are a flat list of key/value test properties
+    # (RUN_SERIAL TRUE, ...) — unchanged behavior for existing callers.
+    list(APPEND _discovery_props ${SDT_UNPARSED_ARGUMENTS})
   endif()
   set(_dl_paths "")
   if(SICNU_TEST_DL_PATHS)
@@ -38,6 +46,7 @@ function(sicnu_discover_tests NAME)
   # tries to run the test executable before it is linked.
   catch_discover_tests(${NAME}
     DISCOVERY_MODE PRE_TEST
+    ${_sat_prefix}
     ${_dl_paths}
     PROPERTIES ${_discovery_props})
 endfunction()
@@ -46,7 +55,7 @@ endfunction()
 # RUN_SERIAL TRUE, ...) are forwarded to sicnu_discover_tests as test
 # properties — previously they were accepted and silently dropped.
 function(sicnu_add_test NAME)
-  cmake_parse_arguments(SAT "" "" "" ${ARGN})
+  cmake_parse_arguments(SAT "" "TEST_PREFIX" "" ${ARGN})
   qt_add_executable(${NAME} ${NAME}.cpp)
   target_link_libraries(${NAME} PRIVATE
     Catch2::Catch2WithMain
@@ -73,7 +82,13 @@ function(sicnu_add_test NAME)
   target_compile_definitions(${NAME} PRIVATE
     CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
   )
-  if(SAT_UNPARSED_ARGUMENTS)
+  if(SAT_TEST_PREFIX)
+    if(SAT_UNPARSED_ARGUMENTS)
+      sicnu_discover_tests(${NAME} TEST_PREFIX ${SAT_TEST_PREFIX} ${SAT_UNPARSED_ARGUMENTS})
+    else()
+      sicnu_discover_tests(${NAME} TEST_PREFIX ${SAT_TEST_PREFIX})
+    endif()
+  elseif(SAT_UNPARSED_ARGUMENTS)
     sicnu_discover_tests(${NAME} ${SAT_UNPARSED_ARGUMENTS})
   else()
     sicnu_discover_tests(${NAME})
@@ -8894,3 +8909,79 @@ target_include_directories(test_processing_catalog_ux PRIVATE
 )
 set_target_properties(test_processing_catalog_ux PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_processing_catalog_ux)
+
+# ---------------------------------------------------------------------------
+# D15 classification-change-studio track (Packages A-I).
+# ---------------------------------------------------------------------------
+
+# Package A: spatial leakage defense (block split + Moran's I audit).
+sicnu_add_test(test_spatial_block_leakage TIMEOUT 120 TEST_PREFIX "test_spatial_block_leakage::")
+
+# Package B: GLCM texture features.
+sicnu_add_test(test_glcm_texture TIMEOUT 120 TEST_PREFIX "test_glcm_texture::")
+
+# Package C: classifier kernels (KMeans/ISODATA/RF/SVM/NormalBayes).
+sicnu_add_test(test_classifier_engine TIMEOUT 300 TEST_PREFIX "test_classifier_engine::")
+
+# Package D: post-classification morphology.
+sicnu_add_test(test_classification_postprocess TIMEOUT 120 TEST_PREFIX "test_classification_postprocess::")
+
+# Packages E/F: pixel change detection + accuracy assessment.
+sicnu_add_test(test_change_detector TIMEOUT 120 TEST_PREFIX "test_change_detector::")
+sicnu_add_test(test_confusion_matrix TIMEOUT 120 TEST_PREFIX "test_confusion_matrix::")
+
+# Package H: agent classification diagnostics.
+sicnu_add_test(test_classification_agent_tools TIMEOUT 120 TEST_PREFIX "test_classification_agent_tools::")
+
+# Package G: studio workbench (widget translation unit is compiled into the
+# test executables, mirroring the test_view_link pattern; the app target
+# also lists the TU).
+foreach(_d15_g_test test_magic_wand_roi test_feature_scatter test_classification_studio_widget)
+  add_executable(${_d15_g_test}
+    ${_d15_g_test}.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/workbench/classification_studio_widget.cpp
+  )
+  target_link_libraries(${_d15_g_test} PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    qgis_gui
+    GDAL::GDAL
+  )
+  target_include_directories(${_d15_g_test} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/app
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(${_d15_g_test} PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(${_d15_g_test} TIMEOUT 120 TEST_PREFIX "${_d15_g_test}::")
+endforeach()
+
+# Package I: full-pipeline E2E + lab grading contracts (needs the agent
+# grader seam, jsoncpp for the OutputVerifier header, GDAL for synthesis).
+add_executable(test_d15_classification_change_e2e
+  test_d15_classification_change_e2e.cpp
+  ${CMAKE_SOURCE_DIR}/tests/support/d15_e2e_pipeline.cpp
+)
+target_link_libraries(test_d15_classification_change_e2e PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_agent
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_d15_classification_change_e2e PRIVATE jsoncpp)
+endif()
+target_include_directories(test_d15_classification_change_e2e PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_d15_classification_change_e2e PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_d15_classification_change_e2e TIMEOUT 600 TEST_PREFIX "test_d15_classification_change_e2e::")

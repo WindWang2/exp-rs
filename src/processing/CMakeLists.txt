@@ -1,5 +1,14 @@
 add_library(sicnu_processing SHARED
     algorithm_help_catalog.cpp
+    # D15 classification-change-studio: spatial leakage defense seam.
+    # Header lives at its spec-mandated src/core/ path; the translation
+    # unit ships with this library to keep qgis_core relinks off the loop.
+    ${CMAKE_SOURCE_DIR}/src/core/spatial_split.cpp
+    algorithms/glcm_texture.cpp
+    algorithms/classifier_engine.cpp
+    algorithms/classification_postprocess.cpp
+    algorithms/change_detector.cpp
+    algorithms/confusion_matrix.cpp
     tools/tool_path_manager.cpp
     tools/cli_tool_discovery.cpp
 
