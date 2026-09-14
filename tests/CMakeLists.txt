@@ -8459,8 +8459,6 @@ sicnu_discover_tests(test_visual_analytics)
 add_executable(test_view_link
   test_view_link.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/view_link_controller.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/display/qgis_display_manager.cpp
-  ${CMAKE_SOURCE_DIR}/src/app/display/auth_resolver.cpp
 )
 target_link_libraries(test_view_link PRIVATE
   Catch2::Catch2

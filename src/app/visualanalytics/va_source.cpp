@@ -7,6 +7,7 @@
 #include "workbench/marshal_ui.h"
 
 #include <QMetaType>
+#include <QPointer>
 
 namespace sicnu::app::va
 {
@@ -52,27 +53,37 @@ void VaDataSource::request( ComputeFn fn )
     };
 
     // Pool thread: compute the bounded payload, then marshal the delivery.
-    // The receiver-scoped queued call dies with this object; the generation
-    // check drops results superseded while in flight.
-    RsScanPool::instance().pool().start( [this, generation, fn = std::move( fn ), stale]() {
+    // The receiver-scoped queued call dies with this object, and the
+    // generation check drops results superseded while in flight. The raw
+    // `this` in `stale` is only a RsScanPool owner key (never dereferenced);
+    // the MARSHAL target must be re-derived from a QPointer on the pool
+    // thread — marshal_ui.h's discard guarantee only covers calls made
+    // before destruction, so a job outrunning this object's destructor must
+    // not invokeMethod on the freed receiver (histogram_widget pattern).
+    QPointer<VaDataSource> self( this );
+    RsScanPool::instance().pool().start( [self, generation, fn = std::move( fn ), stale]() {
         try
         {
             VaData data = fn( stale );
-            ui_callback::marshalTo( this, [this, generation, data = std::move( data )]() {
-                if ( RsScanPool::instance().isStale( generation, this ) )
+            ui_callback::marshalTo( self.data(), [self, generation, data = std::move( data )]() {
+                if ( !self )
                     return;
-                m_busy.store( false, std::memory_order_release );
-                emit ready( data );
+                if ( RsScanPool::instance().isStale( generation, self.data() ) )
+                    return;
+                self->m_busy.store( false, std::memory_order_release );
+                emit self->ready( data );
             } );
         }
         catch ( const std::exception &e )
         {
             const QByteArray message = QString::fromUtf8( e.what() ).toUtf8();
-            ui_callback::marshalTo( this, [this, generation, message]() {
-                if ( RsScanPool::instance().isStale( generation, this ) )
+            ui_callback::marshalTo( self.data(), [self, generation, message]() {
+                if ( !self )
                     return;
-                m_busy.store( false, std::memory_order_release );
-                emit failed( QString::fromUtf8( message ) );
+                if ( RsScanPool::instance().isStale( generation, self.data() ) )
+                    return;
+                self->m_busy.store( false, std::memory_order_release );
+                emit self->failed( QString::fromUtf8( message ) );
             } );
         }
     } );

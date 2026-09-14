@@ -358,7 +358,7 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
     rect.append( 140.0 );
     frame["rect_mm"] = rect;
     Json::Value frameLayers( Json::arrayValue );
-    frameLayers.append( "${carto_raster}" );
+    frameLayers.append( "${carto_import.output}" );
     frame["layers"] = frameLayers;
     spec["map_frames"] = Json::Value( Json::arrayValue );
     spec["map_frames"].append( frame );
@@ -403,7 +403,7 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
     s4.artifactOnSuccess = "map_file";
     s4.uiMeta = { 700.0, 150.0 };
     s4.uiMeta.portAddToMap["map_file"] = true;
-    s4.params["layout"] = "${output}";
+    s4.params["layout"] = "${carto_compose.output}";
     s4.params["format"] = "png";
     s4.params["directory"] = "output/maps";
     s4.params["dpi"] = 300;

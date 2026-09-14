@@ -23,7 +23,8 @@ std::string WorkbenchContextTool::description() const
     return "Read the CURRENT desktop workbench selection and context (read-only): "
            "active workbench id, the typed primary object, every selection list "
            "(layers/assets/results/datasets/experiment runs/models/workflow runs), "
-           "availability facts and the command ids the workbench currently allows. "
+           "availability facts and the registered command ids (a vocabulary, not an "
+           "enablement guarantee — check availability facts before running). "
            "Use it before proposing UI-side actions so they anchor to the user's "
            "real selection. This tool never mutates anything.";
 }

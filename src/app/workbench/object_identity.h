@@ -117,10 +117,12 @@ QVector<sicnu::data::AssetId> resolveSelectionAssetTargets(
 
 /// Projects a snapshot into the `workbench:context` tool payload:
 /// active workbench, primary object (typed + wire token), every selection
-/// list, ContextFacts and the unavailability-free command ids the agent may
-/// run. Pure — unit-testable without widgets. Never includes paths outside
-/// what the snapshot already carries (the MCP workspace policy still applies
-/// to any tool the agent runs afterwards).
+/// list, ContextFacts and the REGISTERED command ids (the full registry —
+/// availability still depends on the live facts, so agents must treat the
+/// list as the vocabulary, not an enablement guarantee). Pure —
+/// unit-testable without widgets. Never includes paths outside what the
+/// snapshot already carries (the MCP workspace policy still applies to any
+/// tool the agent runs afterwards).
 Json::Value workbenchContextToJson( const SelectionContextSnapshot &snapshot,
                                     const QStringList &availableCommandIds );
 

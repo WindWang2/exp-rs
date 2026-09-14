@@ -80,12 +80,14 @@ TEST_CASE( "workbench:context registers under its name without clobbering",
   auto &registry = SpatialToolRegistry::instance();
   const bool first = registry.registerTool(
     SpatialToolPtr{ new WorkbenchContextTool( [] { return Json::Value(); } ) } );
-  // Second registration with the same name must be rejected (existing entry
-  // kept) — the shell may run this path on rebuild.
+  // Second registration with the same name must be rejected and the FIRST
+  // entry kept (registerTool semantics) — the shell's provider is therefore
+  // QPointer-guarded against a stale window instead of relying on replace.
   const bool second = registry.registerTool(
     SpatialToolPtr{ new WorkbenchContextTool( [] { return Json::Value(); } ) } );
   const auto found = registry.find( "workbench:context" );
   REQUIRE( found.has_value() );
-  REQUIRE( ( first || !second ) ); // at most one live registration wins
+  if ( first )
+    CHECK( !second ); // keep-first: the duplicate was rejected outright
   REQUIRE( ( *found )->name() == "workbench:context" );
 }

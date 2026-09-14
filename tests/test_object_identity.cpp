@@ -71,19 +71,24 @@ struct Fixture
 {
   sicnu::data::DataManager manager;
   sicnu::workspace::WorkspaceService service;
+  QString storeDir;
 
   Fixture()
   {
     ensureApp();
     service.bindDataManager( &manager );
     static int instance = 0;
-    const QString storeDir = QDir::temp().filePath(
+    storeDir = QDir::temp().filePath(
       QStringLiteral( "wb10-object-identity-%1-%2" ).arg( QCoreApplication::applicationPid() ).arg( ++instance ) );
     REQUIRE( QDir().mkpath( storeDir ) );
     const QString storePath = QDir( storeDir ).filePath( QStringLiteral( "gov.db" ) );
     REQUIRE( service.openStore( storePath ) );
   }
-  ~Fixture() { service.closeStore(); }
+  ~Fixture()
+  {
+    service.closeStore();
+    QDir( storeDir ).removeRecursively(); // no /tmp litter across CI runs
+  }
 
   sicnu::data::RegisterResult registerRaster( const QString &name )
   {
@@ -222,14 +227,24 @@ TEST_CASE( "resolveSelectionAssetTargets reproduces the provenance cascade",
     REQUIRE( resolveSelectionAssetTargets( unknown, &fx.manager, &fx.service ).isEmpty() );
   }
 
-  SECTION( "layer source resolution is last and unknown paths resolve empty" )
+  SECTION( "layer source resolution runs when nothing else matched" )
   {
+    // A live layer whose source path is the registered payload: branch 3 of
+    // the cascade (layer source → findByPath) must land on the asset.
+    QgsRasterLayer layer( makeRaster( QStringLiteral( "id-derived.tif" ) ),
+                          QStringLiteral( "derived" ) );
     SelectionContextSnapshot snap;
-    snap.selectedResultIds.append( QStringLiteral( "no-such-entity" ) );
-    snap.selectedAssetIds.clear();
-    snap.selectedResultIds.clear();
+    snap.activeLayer = &layer;
     const auto targets = resolveSelectionAssetTargets( snap, &fx.manager, &fx.service );
-    REQUIRE( targets.isEmpty() );
+    REQUIRE_FALSE( targets.isEmpty() );
+    CHECK( targets.first() == derived.assetId );
+
+    // An unregistered layer path stays truthful (no invention).
+    QgsRasterLayer foreign( QStringLiteral( "/definitely/not/registered-10.tif" ),
+                            QStringLiteral( "x" ) );
+    SelectionContextSnapshot foreignSnap;
+    foreignSnap.activeLayer = &foreign;
+    CHECK( resolveSelectionAssetTargets( foreignSnap, &fx.manager, &fx.service ).isEmpty() );
   }
 
   SECTION( "null data manager refuses everything" )

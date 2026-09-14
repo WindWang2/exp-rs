@@ -6,7 +6,7 @@
  * re-queried through the manager on every event, and viewAboutToBeRemoved
  * detaches automatically. Per-view link toggles let one view pan while the
  * others stay put; propagation fans one source view's viewport out to every
- * linked peer (center+span, optional scale/rotation) with the same CRS
+ * linked peer (center+span, optional scale) with the same CRS
  * transform behavior and reentrancy/throttle guards the proven dual-viewport
  * sync uses.
  *

@@ -98,8 +98,10 @@ TEST_CASE( "cartography:preflight returns the quality report", "[cartography10][
     Json::Value params( Json::objectValue );
     params["mapspec"] = frameSpec( "preflight-op-map" );
     const Json::Value out = runOperator( "cartography:preflight", params );
-    CHECK( out.isMember( "quality" ) );
-    CHECK( out["quality"].isObject() );
+    // Tool-identical shape: the report IS the output and echoes the resolved
+    // document as its `mapspec` member.
+    CHECK( out.isMember( "quality_score" ) );
+    CHECK( out["mapspec"].isObject() );
 }
 
 TEST_CASE( "cartography:repair reports an applied/still_reported ledger",
@@ -111,10 +113,13 @@ TEST_CASE( "cartography:repair reports an applied/still_reported ledger",
     appendMapSpecItem( spec, "titles", Json::Value() );
     params["mapspec"] = spec;
     const Json::Value out = runOperator( "cartography:repair", params );
-    CHECK( out.isMember( "applied" ) );
-    CHECK( out["ledger"].isArray() );
-    CHECK( out.isMember( "quality_after" ) );
+    // Tool-identical contract: bounded loop with per-pass ledger.
+    CHECK( out.isMember( "repairs_applied" ) );
+    CHECK( out.isMember( "iterations" ) );
+    CHECK( out["repair_ledger"].isArray() );
+    CHECK( out.isMember( "quality" ) );
     CHECK( out["mapspec"].isObject() );
+    CHECK( out["iterations"].asInt() >= 0 );
 }
 
 TEST_CASE( "cartography:compose compiles a layout and names it",

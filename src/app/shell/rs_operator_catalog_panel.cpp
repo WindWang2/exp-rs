@@ -157,6 +157,7 @@ void RsOperatorCatalogPanel::applyFilter()
     // catalog order. Recent pinning is skipped while filtering so search
     // stays a pure name/description match.
     int shown = 0;
+    QStringList pinned;
     if ( needle.isEmpty() && modality.isEmpty() )
     {
         for ( const QString &recentId : std::as_const( m_recent ) )
@@ -172,6 +173,7 @@ void RsOperatorCatalogPanel::applyFilter()
                         m_list );
                     item->setData( Qt::UserRole, entry.id );
                     item->setToolTip( entry.description );
+                    pinned.append( entry.id );
                     ++shown;
                     break;
                 }
@@ -182,6 +184,8 @@ void RsOperatorCatalogPanel::applyFilter()
     {
         if ( shown >= kMaxVisibleRows )
             break;
+        if ( pinned.contains( entry.id ) )
+            continue; // already visible in the recent block — never twice
         if ( !needle.isEmpty() &&
              !entry.id.toLower().contains( needle ) &&
              !entry.displayName.toLower().contains( needle ) &&

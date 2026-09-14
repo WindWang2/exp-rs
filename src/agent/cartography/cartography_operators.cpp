@@ -30,6 +30,8 @@
 
 #include <QString>
 
+#include <algorithm>
+
 namespace sicnu::agent::cartography {
 
 namespace {
@@ -59,10 +61,14 @@ void requireMapSpec( const Json::Value &params )
                                "Missing required parameter: mapspec (object)" );
 }
 
-/// Shared pre-compile pass: v3 conditions resolve BEFORE composition and
-/// preflight (mirror of the compiler, so hidden items cannot produce false
-/// positives), then anchors/constraints resolve into concrete rects.
-Json::Value resolveCompositionPass( Json::Value spec )
+/// Shared pre-compile pass, IN PLACE on the caller's spec — the exact
+/// sequence the agent tools run: v3 conditions resolve BEFORE composition
+/// and preflight (hidden items cannot produce false positives), then
+/// anchors/constraints resolve into concrete rects. Returns the composition
+/// result JSON the tools echo; every downstream read (compile, preflight,
+/// digest, echo) sees the RESOLVED document, so digests and verdicts are
+/// identical across the tool and operator surfaces.
+Json::Value resolveCompositionPass( Json::Value &spec )
 {
     if ( spec.isObject() && spec.isMember( "condition_context" ) )
     {
@@ -190,8 +196,12 @@ class PreflightOperator final : public sicnu::operators::RSOperator
     {
         requireMapSpec( params );
         context.throwIfCancelled();
-        Json::Value out( Json::objectValue );
-        out["quality"] = preflightMapSpec( params["mapspec"] );
+        // Preflight evaluates the RESOLVED composition and echoes the resolved
+        // document (agent-tool contract: the report's `mapspec` member).
+        Json::Value spec = params["mapspec"];
+        resolveCompositionPass( spec );
+        Json::Value out = preflightMapSpec( spec );
+        out["mapspec"] = spec;
         return out;
     }
 };
@@ -262,17 +272,16 @@ class RepairOperator final : public sicnu::operators::RSOperator
 
     Json::Value schema() const override
     {
+        // Input contract matches the agent RepairTool verbatim (D10-3).
         Json::Value schema( Json::objectValue );
         schema["type"] = "object";
         Json::Value props( Json::objectValue );
         Json::Value mapspec( Json::objectValue );
         mapspec["type"] = "object";
         props["mapspec"] = mapspec;
-        Json::Value report( Json::objectValue );
-        report["type"] = "object";
-        report["description"] =
-            "Optional preflight report; when absent one is computed from the mapspec";
-        props["report"] = report;
+        Json::Value iterations( Json::objectValue );
+        iterations["type"] = "integer";
+        props["max_iterations"] = iterations;
         schema["properties"] = props;
         Json::Value required( Json::arrayValue );
         required.append( "mapspec" );
@@ -284,17 +293,41 @@ class RepairOperator final : public sicnu::operators::RSOperator
     {
         requireMapSpec( params );
         context.throwIfCancelled();
+        // Tool-identical loop: solve once before repairing, then repair +
+        // re-preflight up to max_iterations (default 3, clamped 1..10) with a
+        // per-pass ledger; stops when a pass applies nothing.
+        int maxIterations = params.isMember( "max_iterations" ) && params["max_iterations"].isInt()
+                                ? std::clamp( params["max_iterations"].asInt(), 1, 10 )
+                                : 3;
         Json::Value spec = params["mapspec"];
-        Json::Value report = params.isMember( "report" ) && params["report"].isObject()
-                                 ? params["report"]
-                                 : preflightMapSpec( spec );
-        Json::Value ledger( Json::arrayValue );
-        const int applied = repairMapSpecWithLedger( spec, report, &ledger );
+        resolveCompositionPass( spec );
+        int totalRepairs = 0;
+        int iterations = 0;
+        Json::Value quality = preflightMapSpec( spec );
+        Json::Value repairLedger( Json::arrayValue );
+        while ( iterations < maxIterations && !quality["passed"].asBool() )
+        {
+            Json::Value passLedger;
+            const int repairs = repairMapSpecWithLedger( spec, quality, &passLedger );
+            if ( repairs == 0 )
+                break;
+            totalRepairs += repairs;
+            for ( const auto &entry : passLedger )
+            {
+                Json::Value record = entry;
+                record["pass"] = iterations + 1;
+                repairLedger.append( record );
+            }
+            ++iterations;
+            context.throwIfCancelled();
+            quality = preflightMapSpec( spec );
+        }
         Json::Value out( Json::objectValue );
         out["mapspec"] = spec;
-        out["applied"] = applied;
-        out["ledger"] = ledger;
-        out["quality_after"] = preflightMapSpec( spec );
+        out["repairs_applied"] = totalRepairs;
+        out["iterations"] = iterations;
+        out["repair_ledger"] = repairLedger;
+        out["quality"] = quality;
         return out;
     }
 };
@@ -397,6 +430,13 @@ class ExportOperator final : public sicnu::operators::RSOperator
         Json::Value out = mapExportResultToJson( result );
         out["format"] = format;
         out["dpi"] = request.dpi;
+        if ( !request.pages.empty() )
+        {
+            Json::Value pagesJson( Json::arrayValue );
+            for ( const int page : request.pages )
+                pagesJson.append( page );
+            out["pages"] = pagesJson;
+        }
         const std::string outputPath = out["path"].asString();
         return withOutput( std::move( out ), outputPath.c_str() );
     }

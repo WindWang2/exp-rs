@@ -413,8 +413,9 @@ void VaChartWidget::paintBoxPlot( QPainter &painter, const QRectF &plot )
 
         painter.setPen( Qt::NoPen );
         painter.setBrush( dark ? Tokens::Dark::err : Tokens::Light::err );
-        for ( double o : box.outliers )
-            painter.drawEllipse( toPixel( cx, o, plot, bounds ), 1.8, 1.8 );
+        const int outliers = std::min<qsizetype>( box.outliers.size(), kMaxDrawnPoints );
+        for ( int oi = 0; oi < outliers; ++oi )
+            painter.drawEllipse( toPixel( cx, box.outliers.at( oi ), plot, bounds ), 1.8, 1.8 );
     }
 }
 
@@ -428,6 +429,8 @@ void VaChartWidget::paintMatrix( QPainter &painter, const QRectF &plot )
     const int cols = m_data.matrix.colLabels.size();
     if ( rows <= 0 || cols <= 0 || rows * cols > kMaxDrawnMatrixCells )
         return;
+    if ( m_data.matrix.cells.size() != rows * cols )
+        return; // malformed payload: render nothing rather than assert
     const qint64 maxCell = *std::max_element( m_data.matrix.cells.cbegin(), m_data.matrix.cells.cend() );
     const double cellW = plot.width() / cols;
     const double cellH = plot.height() / rows;

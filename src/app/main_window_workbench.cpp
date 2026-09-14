@@ -534,15 +534,19 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     // ── UI→agent context projection (Workbench 10.0, read-only) ───────
     // Registers the `workbench:context` spatial tool: the agent can read the
     // live selection/context; writes keep flowing through the existing
-    // command/tool authority. Re-registering over a previous shell instance
-    // is a no-op by name in the registry, so rebuild paths stay safe.
+    // command/tool authority. The provider re-derives its target through a
+    // QPointer on EVERY call: SpatialToolRegistry keeps the FIRST
+    // registration for a name, so a stale lambda would be a UAF trap if it
+    // captured raw `this` across any hypothetical in-process re-assembly.
     {
+        QPointer<QgisDesktopWindow> self( this );
         auto *contextTool = new sicnu::app::WorkbenchContextTool(
-            [this]() -> Json::Value {
-                if ( !m_selectionContext || !m_commandRegistry )
+            [self]() -> Json::Value {
+                if ( !self || !self->m_selectionContext || !self->m_commandRegistry )
                     return Json::Value();
                 return sicnu::app::workbenchContextToJson(
-                    m_selectionContext->snapshot(), m_commandRegistry->commandIds() );
+                    self->m_selectionContext->snapshot(),
+                    self->m_commandRegistry->commandIds() );
             } );
         sicnu::agent::spatial_tools::SpatialToolRegistry::instance().registerTool(
             sicnu::agent::spatial_tools::SpatialToolPtr{ contextTool } );
@@ -614,16 +618,16 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     m_operatorCatalogPanel->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
     addDockWidget( Qt::LeftDockWidgetArea, m_operatorCatalogPanel );
     m_operatorCatalogPanel->hide();
-    if ( m_sessionController )
-    {
-        connect( m_operatorCatalogPanel, &sicnu::app::RsOperatorCatalogPanel::operatorSelected,
-                 this, [this]( const QString &operatorId ) {
-                     if ( !m_sessionController )
-                         return;
-                     m_sessionController->openBareOperator( operatorId );
-                     m_operatorCatalogPanel->noteOperatorRun( operatorId );
-                 } );
-    }
+    // NOTE: the session controller is created AFTER this wiring point
+    // (setupRibbonAndTaskPanel) — the check must live inside the handler,
+    // never around the connect, or the catalog's open path stays dead.
+    connect( m_operatorCatalogPanel, &sicnu::app::RsOperatorCatalogPanel::operatorSelected,
+             this, [this]( const QString &operatorId ) {
+                 if ( !m_sessionController )
+                     return;
+                 m_sessionController->openBareOperator( operatorId );
+                 m_operatorCatalogPanel->noteOperatorRun( operatorId );
+             } );
     if ( m_windowMenu )
     {
         if ( QAction *action = m_commandRegistry->action( QStringLiteral( "workbench.operatorCatalog" ), true ) )

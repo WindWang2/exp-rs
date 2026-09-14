@@ -602,7 +602,8 @@ rule (WorkflowRun > ExperimentRun > Dataset > Model > Result > Asset > Layer,
 documented in the header and pinned by `test_object_identity`); ContextFacts
 gains hasExperiment/hasDataset/hasModel/hasWorkflowRun, and the
 `experiment.`/`dataset.`/`model.`/`workflowrun.` command-prefix families have
-unavailability reasons. The provenance target resolution (asset selection →
+unavailability reason cases reserved (the rule layer answers as soon as a
+family registers commands; none ship in this track). The provenance target resolution (asset selection →
 governance entity → layer source) collapsed into ONE resolver
 (`resolveSelectionAssetTargets`) shared by the provenance inspector, the agent
 context tool and future brushing consumers.

@@ -282,6 +282,14 @@ Json::Value CartographyDock::runOperator( const QString &operatorId, const Json:
             *error = tr( "%1 失败：%2" ).arg( operatorId, QString::fromUtf8( e.what() ) );
         return {};
     }
+    catch ( ... )
+    {
+        // A foreign exception (e.g. Json::LogicError from a malformed
+        // template) must not escape into the Qt event loop.
+        if ( error )
+            *error = tr( "%1 失败：未知异常" ).arg( operatorId );
+        return {};
+    }
 }
 
 void CartographyDock::showReport( const QString &heading, const Json::Value &payload )
@@ -380,8 +388,13 @@ void CartographyDock::runRepair()
     }
     adoptSpec( result.isMember( "mapspec" ) ? result["mapspec"] : spec );
     showReport( tr( "修复台账（applied / still_reported）" ), result );
-    emit statusMessage( tr( "修复完成：%1 项已应用。" )
-                            .arg( result.isMember( "applied" ) ? result["applied"].asInt() : 0 ) );
+    emit statusMessage( tr( "修复完成：%1 项已应用（%2 轮）。" )
+                            .arg( result.isMember( "repairs_applied" )
+                                      ? result["repairs_applied"].asInt()
+                                      : 0 )
+                            .arg( result.isMember( "iterations" )
+                                      ? result["iterations"].asInt()
+                                      : 0 ) );
 }
 
 void CartographyDock::runExport()
@@ -412,6 +425,11 @@ void CartographyDock::runExport()
         return;
     }
     showReport( tr( "导出证据（原子写入 + sha256）" ), result );
+    if ( !result.isObject() || !result.isMember( "path" ) || !result["path"].isString() )
+    {
+        emit statusMessage( tr( "导出返回缺少路径（见报告）。" ) );
+        return;
+    }
     const QString path = QString::fromStdString( result["path"].asString() );
     emit statusMessage( tr( "导出完成：%1" ).arg( path ) );
 }
