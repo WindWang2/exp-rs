@@ -356,3 +356,139 @@ TEST_CASE( "readChunk rejects invalid geometry with an empty result", "[d16][cub
         REQUIRE( cube->extractPixelSeries( 0, 16 ).empty() );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Slice 3: compositing policy contracts — cloud masking, WeightedMean,
+// 45-day gap guard, NoData exclusion.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+/// Variant of writeScene with an explicit nodata declaration.
+QString writeSceneNoData( const QDir &dir, const QDate &date, int w, int h,
+                          const std::vector<float> &values, float noDataValue )
+{
+    const QString path = dir.filePath(
+        QStringLiteral( "nd_%1.tif" ).arg( date.toString( QStringLiteral( "yyyyMMdd" ) ) ) );
+    GDALDriver *driver = GetGDALDriverManager()->GetDriverByName( "GTiff" );
+    GDALDataset *ds = driver->Create( path.toUtf8().constData(), w, h, 1, GDT_Float32, nullptr );
+    REQUIRE( ds != nullptr );
+    ds->GetRasterBand( 1 )->SetNoDataValue( noDataValue );
+    CPLErr err = ds->GetRasterBand( 1 )->RasterIO( GF_Write, 0, 0, w, h,
+                                                   const_cast<float *>( values.data() ), w, h,
+                                                   GDT_Float32, 0, 0, nullptr );
+    REQUIRE( err == CE_None );
+    GDALClose( ds );
+    return path;
+}
+} // namespace
+
+TEST_CASE( "Cloud mask and WeightedMean policy shape the composite", "[d16][cube][composite]" )
+{
+    GdalInit init;
+    QTemporaryDir tmp;
+    const QDir dir( tmp.path() );
+    const int w = 8, h = 8;
+
+    // Two scenes 10 days apart -> a single calendar node (span 10 < 16).
+    // Scene A (day 0, value 0.2): clear except one fully-clouded pixel.
+    // Scene B (day 10, value 0.6): half-clouded everywhere.
+    std::vector<float> a = plane( w, h, 0.2f );
+    std::vector<float> cloudA( static_cast<std::size_t>( w ) * h, 0.0f );
+    const int opaqueIdx = 3 * w + 5;
+    cloudA[opaqueIdx] = 1.0f;
+    std::vector<float> b = plane( w, h, 0.6f );
+    std::vector<float> cloudB = plane( w, h, 0.5f );
+    const auto sceneA = writeScene( dir, "c", kEpoch, w, h, a, cloudA );
+    const auto sceneB = writeScene( dir, "c", kEpoch.addDays( 10 ), w, h, b, cloudB );
+
+    // sigma = W/2 = 16; node day 0: gauss_A = 1, gauss_B = exp(-100/512).
+    const double gaussB = std::exp( -100.0 / ( 2.0 * 16.0 * 16.0 ) );
+    const double expectedMean = ( 1.0 * 0.2 + 0.5 * gaussB * 0.6 ) / ( 1.0 + 0.5 * gaussB );
+
+    SECTION( "WeightedMean blends by (1-cloud)*gauss weights" )
+    {
+        TemporalCubeConfig cfg;
+        cfg.strategy = sicnu::temporal::CompositingStrategy::WeightedMean;
+        auto cube = TemporalCube::open( { sceneA, sceneB }, cfg );
+        REQUIRE( cube != nullptr );
+        const auto series = cube->extractPixelSeries( 0, 0 );
+        REQUIRE( series.size() == 1 );
+        REQUIRE( series[0] == Approx( expectedMean ).margin( 1e-6 ) );
+        // The opaque A pixel drops out; B alone defines the weighted mean.
+        const auto opaque = cube->extractPixelSeries( 5, 3 );
+        REQUIRE( opaque[0] == Approx( 0.6 ).margin( 1e-6 ) );
+    }
+
+    SECTION( "BestPixel skips fully clouded candidates" )
+    {
+        auto cube = TemporalCube::open( { sceneA, sceneB }, TemporalCubeConfig{} );
+        REQUIRE( cube != nullptr );
+        // Clear pixel: Q_A = 1 beats Q_B = 0.5*gaussB.
+        const auto series = cube->extractPixelSeries( 0, 0 );
+        REQUIRE( series.size() == 1 );
+        REQUIRE( series[0] == Approx( 0.2 ).margin( 1e-6 ) );
+        // Opaque A pixel: Q_A = 0, the candidate is excluded, B wins.
+        const auto opaque = cube->extractPixelSeries( 5, 3 );
+        REQUIRE( opaque[0] == Approx( 0.6 ).margin( 1e-6 ) );
+    }
+}
+
+TEST_CASE( "Holes wider than 45 days yield NaN, narrower holes stay composed",
+           "[d16][cube][gap]" )
+{
+    GdalInit init;
+    QTemporaryDir tmp;
+    const QDir dir( tmp.path() );
+    const int w = 8, h = 8;
+
+    SECTION( "50-day hole: interior nodes are NaN, node at the scene stays" )
+    {
+        const std::vector<QString> scenes{
+            writeScene( dir, "g", kEpoch, w, h, plane( w, h, 0.3f ) ),
+            writeScene( dir, "g", kEpoch.addDays( 50 ), w, h, plane( w, h, 0.7f ) ) };
+        auto cube = TemporalCube::open( scenes, TemporalCubeConfig{} );
+        REQUIRE( cube != nullptr );
+        // Nodes: 0, 16, 32, 48 (kMax = floor(50/16) = 3).
+        const auto series = cube->extractPixelSeries( 0, 0 );
+        REQUIRE( series.size() == 4 );
+        REQUIRE( series[0] == Approx( 0.3 ).margin( 1e-6 ) );
+        REQUIRE( std::isnan( series[1] ) );
+        REQUIRE( std::isnan( series[2] ) );
+        REQUIRE( std::isnan( series[3] ) );
+    }
+
+    SECTION( "40-day hole: bracketing span 40 <= 45 composes" )
+    {
+        const std::vector<QString> scenes{
+            writeScene( dir, "g", kEpoch, w, h, plane( w, h, 0.3f ) ),
+            writeScene( dir, "g", kEpoch.addDays( 40 ), w, h, plane( w, h, 0.7f ) ) };
+        auto cube = TemporalCube::open( scenes, TemporalCubeConfig{} );
+        REQUIRE( cube != nullptr );
+        const auto series = cube->extractPixelSeries( 0, 0 );
+        REQUIRE( series.size() == 3 ); // nodes 0, 16, 32
+        REQUIRE( !std::isnan( series[1] ) );
+        REQUIRE( !std::isnan( series[2] ) );
+    }
+}
+
+TEST_CASE( "Declared NoData pixels are never compositing candidates",
+           "[d16][cube][nodata]" )
+{
+    GdalInit init;
+    QTemporaryDir tmp;
+    const QDir dir( tmp.path() );
+    const int w = 8, h = 8;
+
+    std::vector<float> v = plane( w, h, 0.4f );
+    v[2 * w + 2] = -9999.0f;
+    const auto scene = writeSceneNoData( dir, kEpoch, w, h, v, -9999.0f );
+
+    auto cube = TemporalCube::open( { scene }, TemporalCubeConfig{} );
+    REQUIRE( cube != nullptr );
+    const auto series = cube->extractPixelSeries( 2, 2 );
+    REQUIRE( series.size() == 1 ); // single scene at day 0 -> single node
+    REQUIRE( std::isnan( series[0] ) );
+    const auto ok = cube->extractPixelSeries( 0, 0 );
+    REQUIRE( ok[0] == Approx( 0.4 ).margin( 1e-6 ) );
+}
