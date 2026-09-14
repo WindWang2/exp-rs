@@ -8,4 +8,4 @@
 - [x] M5 WP-F 算子目录 + a11y/证据
 - [x] M6 对抗 review P0/P1 清零（4 P1 + 7 P2 全修，P3 修 6 受 10）
 - [x] M7 最终验证（26/26 套件绿，最终 HEAD）
-- [ ] M8 PR（不 merge）
+- [x] M8 PR 创建（未 merge）：https://github.com/WindWang2/exp-rs/pull/982

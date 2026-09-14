@@ -15,3 +15,6 @@
   - WP-C: va_data.h、va_source.{h,cpp}（RsScanPool + marshal + generation 取消）、
     va_chart_widget.{h,cpp}（6 族图表、token 配色、brushing 信号、CSV/JSON 导出）、
     va_workbench_panel.{h,cpp}（三图表 + 直方图→散点联动过滤）、workbench.visualAnalytics 命令
+
+- 2026-09-14 Track 完成：PR #982 创建（base master，head zcode/professional-workbench-visual-cartography-10）。
+  6 commits；69 文件 +6485/−89；26/26 套件绿；P0=0、P1/P2 清零。**PR 未 merge**（track 纪律）。
