@@ -8897,3 +8897,4 @@ sicnu_discover_tests(test_processing_catalog_ux)
 
 # ---- D14: geometric registration workbench (ADR 0159) ----
 sicnu_add_test(test_gcp_manager)
+sicnu_add_test(test_geometric_transform)
