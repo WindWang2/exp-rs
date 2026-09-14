@@ -9,6 +9,7 @@
 #include "processing/algorithms/temporal_smoothing.h"
 
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <vector>
 
@@ -167,4 +168,53 @@ TEST_CASE( "Whittaker treats NaN samples as absent and never as zero",
     const std::vector<float> w = { 1, 1, 0, 1, 1, 1, 1, 1 };
     const auto z2 = whittakerSmooth( y, w, 1e-6, 2 );
     REQUIRE( z2[2] == Approx( z[2] ).margin( 1e-6 ) );
+}
+
+// ---------------------------------------------------------------------------
+// Slice 2: robust IRLS — asymmetric negative cloud spikes must not pull the
+// fit down; the analytic sine is the independent truth (D16 §B).
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Robust Whittaker hugs the upper envelope under 30% negative spikes",
+           "[d16][whittaker]" )
+{
+    const int n = 365;
+    std::vector<float> truth( n );
+    std::vector<float> corrupted( n );
+    int spikeCount = 0;
+    for ( int i = 0; i < n; ++i )
+    {
+        const double t = static_cast<double>( i );
+        truth[i] = static_cast<float>( 0.5 + 0.3 * std::sin( 2.0 * M_PI * t / 365.0 ) );
+        // Deterministic ~30% spike mask with spike depth -0.3 .. -0.5
+        // (undetected cloud / shadow signature: only downward).
+        const std::uint32_t h = static_cast<std::uint32_t>( i ) * 2654435761u;
+        if ( h % 10u < 3u )
+        {
+            const double depth = 0.3 + 0.2 * static_cast<double>( ( h >> 8 ) % 5u ) / 4.0;
+            corrupted[i] = static_cast<float>( truth[i] - depth );
+            ++spikeCount;
+        }
+        else
+        {
+            corrupted[i] = truth[i];
+        }
+    }
+    REQUIRE( spikeCount > 100 ); // the corruption is really there
+
+    const auto robust = whittakerSmoothRobust( corrupted, {}, 100.0, 4 );
+    REQUIRE( robust.size() == corrupted.size() );
+    const double robustMae = mae( robust, truth );
+    INFO( "robust MAE = " << robustMae );
+    REQUIRE( robustMae < 0.02 );
+
+    // The plain smoother demonstrably suffers on the same data.
+    const auto plain = whittakerSmooth( corrupted, {}, 100.0, 2 );
+    const double plainMae = mae( plain, truth );
+    INFO( "plain MAE = " << plainMae );
+    REQUIRE( plainMae > robustMae );
+
+    // On clean data the robust iteration must not degrade the fit.
+    const auto cleanFit = whittakerSmoothRobust( truth, {}, 100.0, 4 );
+    REQUIRE( mae( cleanFit, truth ) < 0.005 );
 }
