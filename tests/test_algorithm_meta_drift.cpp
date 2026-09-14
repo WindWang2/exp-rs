@@ -38,7 +38,7 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
     const auto expectedCatalog =
         sicnu::processing::AlgorithmMetaStore::generateCatalog( descriptors );
 
-    // Baseline truth: exactly 29 algorithms declare a taskFamily in code
+    // Baseline truth: exactly 32 algorithms declare a taskFamily in code
     // (7 from the Platform 3.0/4.0 tracks; Foundation 5.0 added the raster
     // spatial / spectral detection / SAR / temporal-monitor / terrain-flow /
     // topographic-correction families; rs:detect|segment|embedding declared
@@ -46,7 +46,8 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
     // now exported like the rest; Scientific Processing 8.0 added
     // rs:sar_geocode, rs:sar_temporal_stats, rs:rasterize, rs:zonal_stats).
     // Platform 10.0 added rs:classify, rs:change, rs:regress (task adapters
-    // over the model execution seam).    REQUIRE( expectedCatalog.size() == 32 );
+    // over the model execution seam).
+    REQUIRE( expectedCatalog.size() == 32 );
 
     const QString metaDir =
         sicnu::processing::resolveRuntimeDataPath( QStringLiteral( "data/processing/algorithm_meta" ) );

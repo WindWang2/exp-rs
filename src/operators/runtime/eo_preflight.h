@@ -44,6 +44,8 @@ struct EoPreflightReport
 /// Throws RSOperatorError(ErrorCode::InvalidInputData) on an enforced
 /// mismatch; returns the report otherwise. Never inspects pixel data
 /// (metadata only, bounded).
-EoPreflightReport enforceEoPreflight( const ModelInfo &model, const std::string &rasterPath );
+EoPreflightReport enforceEoPreflight( const ModelInfo &model, const std::string &rasterPath,
+                                      const std::vector<int> &fedBands = {},
+                                      const ModelInputContract *feed = nullptr );
 
 } // namespace sicnu::operators::runtime

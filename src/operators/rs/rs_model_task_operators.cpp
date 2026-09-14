@@ -562,11 +562,12 @@ Json::Value RsChangeOperator::run( const Json::Value &params, RSOperatorContext 
     request.batchSizeOverride = std::max( 0, getInt( params, "batchCap", 0 ) );
 
     // Two-date feeds in declaration order; the manifest's multi-input
-    // contracts bind positionally (A -> inputs[0], B -> inputs[1]).
+    // contracts bind POSITIONALLY (A -> inputs[0], B -> inputs[1]) — the feed
+    // name stays empty so the engine's positional fallback applies regardless
+    // of what the manifest named its inputs.
     for ( const char *key : { "inputA", "inputB" } )
     {
       runtime::NamedRasterFeed feed;
-      feed.name = key;
       feed.paths.push_back( requireString( params, key ) );
       const char *bandsKey = key == std::string( "inputA" ) ? "bandsA" : "bandsB";
       if ( params.isMember( bandsKey ) )

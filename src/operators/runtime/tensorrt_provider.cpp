@@ -53,10 +53,24 @@ TrtLogger &trtLogger()
   return logger;
 }
 
+// TRT 8 deprecates and TRT 10 removes the destroy() members — route through
+// the API generation so the TU compiles on supported deployment hosts.
+template<typename T>
+inline void trtDelete( T *obj )
+{
+  if ( !obj )
+    return;
+#if NV_TENSORRT_MAJOR >= 10
+  delete obj;
+#else
+  obj->destroy();
+#endif
+}
+
 struct EngineDeleter
 {
-    void operator()( nvinfer1::ICudaEngine *e ) const { if ( e ) e->destroy(); }
-    void operator()( nvinfer1::IExecutionContext *c ) const { if ( c ) c->destroy(); }
+    void operator()( nvinfer1::ICudaEngine *e ) const { trtDelete( e ); }
+    void operator()( nvinfer1::IExecutionContext *c ) const { trtDelete( c ); }
 };
 
 class TensorRtRuntime final : public IModelRuntime
@@ -138,43 +152,86 @@ class TensorRtRuntime final : public IModelRuntime
 
     cv::Mat infer( const cv::Mat &nchwBlob ) override
     {
-      // Single-input, single-output contract: bindings 0/1 by index order.
+      // Single-input, single-output contract; the engine must declare both
+      // bindings statically (dynamic dims are refused, never guessed).
+      if ( mEngine->getNbBindings() != 2 )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "TensorRT engine must expose exactly 2 bindings (input, "
+                                 "output); got "
+                                 + std::to_string( mEngine->getNbBindings() ) );
       const int inputIndex = 0;
       const int outputIndex = 1;
+      auto dimsCount = []( nvinfer1::Dims dims ) -> std::int64_t {
+        std::int64_t n = 1;
+        for ( int i = 0; i < dims.nbDims; ++i )
+        {
+          if ( dims.d[i] <= 0 )
+            return -1; // dynamic dim: cannot size the transfer
+          n *= dims.d[i];
+        }
+        return n;
+      };
+      const std::int64_t engineInputElems = dimsCount( mContext->getBindingDimensions( inputIndex ) );
       const std::size_t inputElems = static_cast<std::size_t>( nchwBlob.total() ) * nchwBlob.channels();
+      if ( engineInputElems != static_cast<std::int64_t>( inputElems ) )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "fed blob size does not match the TensorRT engine input "
+                               "binding (engine expects "
+                                 + std::to_string( engineInputElems ) + " elements)" );
+      const std::int64_t outputElems = dimsCount( mContext->getBindingDimensions( outputIndex ) );
+      if ( outputElems <= 0 )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "TensorRT engine output binding has dynamic/invalid dims — "
+                                 "static output shapes are required" );
+      const std::size_t outputBytes = static_cast<std::size_t>( outputElems ) * sizeof( float );
+
       void *deviceInput = nullptr;
       void *deviceOutput = nullptr;
-      const std::size_t outputElems = [ & ] {
-        nvinfer1::Dims dims = mContext->getBindingDimensions( outputIndex );
-        std::size_t n = 1;
-        for ( int i = 0; i < dims.nbDims; ++i )
-          n *= static_cast<std::size_t>( std::max( 1, dims.d[i] ) );
-        return n;
-      }();
-      const std::size_t outputBytes = outputElems * sizeof( float );
-
-      if ( cudaMalloc( &deviceInput, inputElems * sizeof( float ) ) != cudaSuccess
-           || cudaMalloc( &deviceOutput, outputBytes ) != cudaSuccess )
+      if ( cudaMalloc( &deviceInput, inputElems * sizeof( float ) ) != cudaSuccess )
         throw RSOperatorError( ErrorCode::ComputationError,
-                               "TensorRT cudaMalloc failed (input/output bindings)" );
-      cudaMemcpyAsync( deviceInput, nchwBlob.ptr<const float>(),
-                       inputElems * sizeof( float ), cudaMemcpyHostToDevice, mStream );
-      void *bindings[2] = { deviceInput, deviceOutput };
-      const bool ok = mContext->enqueueV2( bindings, mStream, nullptr );
-      cudaStreamSynchronize( mStream );
+                               "TensorRT cudaMalloc failed (input binding)" );
+      if ( cudaMalloc( &deviceOutput, outputBytes ) != cudaSuccess )
+      {
+        cudaFree( deviceInput );
+        throw RSOperatorError( ErrorCode::ComputationError,
+                               "TensorRT cudaMalloc failed (output binding)" );
+      }
+      const bool copied = cudaMemcpyAsync( deviceInput, nchwBlob.ptr<const float>(),
+                                           inputElems * sizeof( float ), cudaMemcpyHostToDevice,
+                                           mStream )
+                           == cudaSuccess;
+      bool ok = false;
+      if ( copied )
+      {
+#if NV_TENSORRT_MAJOR >= 10
+        ok = mContext->setTensorAddress( mEngine->getIOTensorName( 0 ), deviceInput )
+             && mContext->setTensorAddress( mEngine->getIOTensorName( 1 ), deviceOutput )
+             && mContext->enqueueV3( mStream );
+#else
+        void *bindings[2] = { deviceInput, deviceOutput };
+        ok = mContext->enqueueV2( bindings, mStream, nullptr );
+#endif
+        cudaStreamSynchronize( mStream );
+      }
       cv::Mat out;
       if ( ok )
       {
+#if NV_TENSORRT_MAJOR >= 10
+        nvinfer1::Dims dims = mContext->getTensorShape( mEngine->getIOTensorName( 1 ) );
+#else
         nvinfer1::Dims dims = mContext->getBindingDimensions( outputIndex );
+#endif
         std::vector<int> shape( dims.d, dims.d + dims.nbDims );
         out.create( static_cast<int>( shape.size() ), shape.data(), CV_32F );
-        cudaMemcpy( out.ptr<float>(), deviceOutput, outputBytes, cudaMemcpyDeviceToHost );
+        const cudaError_t readback =
+          cudaMemcpy( out.ptr<float>(), deviceOutput, outputBytes, cudaMemcpyDeviceToHost );
+        ok = readback == cudaSuccess;
       }
       cudaFree( deviceInput );
       cudaFree( deviceOutput );
       if ( !ok )
         throw RSOperatorError( ErrorCode::RuntimeProviderFailed,
-                               "TensorRT enqueueV2 failed — see the runtime log" );
+                               "TensorRT inference failed — see the runtime log" );
       return out;
     }
 

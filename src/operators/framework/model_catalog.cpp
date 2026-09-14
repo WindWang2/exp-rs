@@ -927,6 +927,20 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     if ( !std::isnan( t ) && t <= 0.0 )
       markInvalid( "postprocess.calibration_temperature must be > 0 (got "
                      + std::to_string( t ) + ")" );
+    // Calibration only executes in the derived collapse (labels/mask/
+    // confidence). Declaring it with the raw probability stack — or with a
+    // head whose values are logits/distances, where pow() is meaningless or
+    // NaN-producing — is a declared knob that would do nothing or corrupt.
+    if ( !std::isnan( t ) )
+    {
+      if ( info.output.format.empty() || info.output.format == "probability" )
+        markInvalid( "postprocess.calibration_temperature executes on labels/mask/confidence "
+                     "products — declare an output.format or drop the calibration" );
+      for ( const ModelHeadContract &head : info.output.heads )
+        if ( head.confidence == "logit" || head.confidence == "distance" )
+          markInvalid( "postprocess.calibration_temperature requires probability-valued head "
+                       "semantics; head '" + head.name + "' declares '" + head.confidence + "'" );
+    }
     if ( const std::string morphologyError = info.postprocess.validateMorphology();
          !morphologyError.empty() )
       markInvalid( morphologyError );
@@ -1091,9 +1105,10 @@ std::string ModelPostprocessContract::validateMorphology() const
        && morphology != "close" )
     return "postprocess.morphology '" + morphology
            + "' is not part of the vocabulary (erode, dilate, open, close)";
-  if ( morphologyKernelPx < 3 || morphologyKernelPx % 2 == 0 )
-    return "postprocess.morphology_kernel_px must be an odd value >= 3 (got "
-             + std::to_string( morphologyKernelPx ) + ")";
+  if ( morphologyKernelPx < 3 || morphologyKernelPx % 2 == 0 || morphologyKernelPx > 65 )
+    return "postprocess.morphology_kernel_px must be an odd value in [3, 65] (got "
+             + std::to_string( morphologyKernelPx ) + ") — the streaming window memory scales "
+             "with the kernel edge";
   return {};
 }
 

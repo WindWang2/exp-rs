@@ -13,6 +13,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "operators/framework/model_catalog.h"
+#include "operators/framework/rs_operator_registry.h"
 #include "operators/runtime/model_execution_service.h"
 #include "operators/runtime/provenance_verify.h"
 #include "operators/runtime/tensorrt_provider.h"
@@ -733,21 +734,19 @@ TEST_CASE( "WP-B: rs:change feeds two dates through the multi-input seam",
         "output": {"classes": ["no_change", "change"]},
         "artifact": {"path": ")" + dir.filePath( QStringLiteral( "weights.bin" ) ).toStdString() + R"("}})" );
 
-  ModelExecutionRequest request;
-  request.modelReference = "siamese-change";
-  request.outputPath = output.toStdString();
-  request.requiredEoTask = "change_detection";
-  for ( const QString *path : { &before, &after } )
-  {
-    sicnu::operators::runtime::NamedRasterFeed feed;
-    feed.paths.push_back( path->toStdString() );
-    request.namedInputs.push_back( feed );
-  }
-
+  // Exercise the SHIPPED OPERATOR (not a hand-built request): the adapter
+  // binds feeds positionally, so it must work against a manifest whose input
+  // names differ from the parameter names ("before"/"after" vs inputA/B).
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "rs:change" );
+  REQUIRE( op );
+  Json::Value params( Json::objectValue );
+  params["inputA"] = before.toStdString();
+  params["inputB"] = after.toStdString();
+  params["model"] = "siamese-change";
+  params["output"] = output.toStdString();
   RSOperatorContext context;
-  const ModelExecutionResult result = sicnu::operators::runtime::runModelInference( request, context );
-  CHECK( result.payload["outBands"].asInt() == 2 );
-  CHECK( result.rasterStats.outBands == 2 );
+  const Json::Value payload = op->run( params, context );
+  CHECK( payload["outBands"].asInt() == 2 );
 
   // The change class wins on the right half (x >= 16).
   int w = 0, h = 0, type = 0;
@@ -905,42 +904,37 @@ TEST_CASE( "WP-D: calibration temperature shifts mask thresholds (single Bernoul
     return readBandAll( output, 1, &w, &h, &type );
   };
 
-  // Uncalibrated: the 0.9 block passes the 0.5 threshold -> 3x3 ones.
-  auto plain = runMask( dir.filePath( QStringLiteral( "mask-plain.tif" ) ),
-                        std::numeric_limits<double>::quiet_NaN() );
-  CHECK( plain[16 * 32 + 16] == 1.0f );
-  CHECK( plain[10 * 32 + 10] == 0.0f );
-
-  // T = 0.5 sharpens: 0.9^2 = 0.81 stays 1; 0.1^2 = 0.01 stays 0. No flip,
-  // but the CONFIDENCE of the block drops — use T on the boundary instead:
-  // a threshold at 0.85: sharpened block = 0.81 < 0.85 -> the block erases.
-  {
+  // The threshold 0.82 separates ALL THREE regimes at the block center
+  // (raw 0.9, sharpened 0.9^2 = 0.81, softened 0.9^(1/2) = 0.949): if the
+  // calibration were silently ignored, all three runs would look identical.
+  auto runMaskAt = [ & ]( const QString &output, double temperature, double threshold ) -> int {
     ModelInfo model;
     model.name = "maskblock";
     model.task = "segmentation";
     model.framework = "maskblockfw";
     model.readiness = ModelReadiness::Ready;
     model.output.format = "mask";
-    model.postprocess.maskThreshold = 0.75;
-    model.postprocess.calibrationTemperature = 0.5; // 0.9^2 = 0.81 >= 0.75 stays 1
+    model.postprocess.maskThreshold = threshold;
+    if ( !std::isnan( temperature ) )
+      model.postprocess.calibrationTemperature = temperature;
     RSOperatorContext context;
     TileInferenceEngine engine( model, ModelRuntimeRegistry::instance().acquire( model ) );
-    const QString out = dir.filePath( QStringLiteral( "mask-sharp.tif" ) );
-    engine.run( input.toStdString(), {}, out.toStdString(), context );
+    engine.run( input.toStdString(), {}, output.toStdString(), context );
     int w = 0, h = 0, type = 0;
-    const auto values = readBandAll( out, 1, &w, &h, &type );
-    CHECK( values[16 * 32 + 16] == 1.0f );
+    const auto values = readBandAll( output, 1, &w, &h, &type );
+    return static_cast<int>( values[16 * 32 + 16] );
+  };
 
-    // Softer threshold flip: T = 2 softens 0.9 -> 0.949, 0.1 -> 0.316; with a
-    // threshold of 0.9 the BACKGROUND now passes (deliberate calibration).
-    model.postprocess.calibrationTemperature = 2.0;
-    RSOperatorContext context2;
-    TileInferenceEngine engine2( model, ModelRuntimeRegistry::instance().acquire( model ) );
-    const QString out2 = dir.filePath( QStringLiteral( "mask-soft.tif" ) );
-    engine2.run( input.toStdString(), {}, out2.toStdString(), context2 );
-    const auto soft = readBandAll( out2, 1, &w, &h, &type );
-    CHECK( soft[16 * 32 + 16] == 1.0f ); // 0.949 >= 0.9
-  }
+  // Uncalibrated: 0.9 >= 0.82 -> the block passes.
+  CHECK( runMaskAt( dir.filePath( QStringLiteral( "mask-plain.tif" ) ),
+                    std::numeric_limits<double>::quiet_NaN(), 0.82 )
+         == 1 );
+  // T = 0.5 sharpens: 0.9^2 = 0.81 < 0.82 -> the block FLIPS OFF.
+  CHECK( runMaskAt( dir.filePath( QStringLiteral( "mask-sharp.tif" ) ), 0.5, 0.82 )
+         == 0 );
+  // T = 2 softens: 0.9^0.5 = 0.949 >= 0.82 -> stays on.
+  CHECK( runMaskAt( dir.filePath( QStringLiteral( "mask-soft.tif" ) ), 2.0, 0.82 )
+         == 1 );
 }
 
 TEST_CASE( "WP-D: morphology erode/dilate run on the published mask product",
@@ -1026,15 +1020,43 @@ TEST_CASE( "WP-C: optional deployment providers degrade typed when absent",
   const auto session = registry.acquire( model, &acquireError );
   CHECK( session == nullptr );
   CHECK( acquireError.find( model.framework ) != std::string::npos );
+
+  // The typed per-provider unavailability reason (the stub contract).
+  const std::string trtReason = sicnu::operators::runtime::tensorRTUnavailableReason();
+  const std::string ovReason = sicnu::operators::runtime::openVinoUnavailableReason();
+  if ( !sicnu::operators::runtime::tensorRTProviderAvailable() )
+    CHECK( trtReason.find( "without TensorRT" ) != std::string::npos );
+  if ( !sicnu::operators::runtime::openVinoProviderAvailable() )
+    CHECK( ovReason.find( "without OpenVINO" ) != std::string::npos );
 }
 
 TEST_CASE( "WP-C: the plugin provider seam registers and executes a late provider",
            "[eo10][providers]" )
 {
+  // The plugin seam IS ModelRuntimeRegistry::registerProvider: a plugin host
+  // calls exactly this API after startup. Prove it end-to-end with a provider
+  // no other test registers, acquired through a registered manifest.
+  Eo10ProviderGuard guard;
   auto &registry = sicnu::operators::runtime::ModelRuntimeRegistry::instance();
-  REQUIRE( registry.hasProvider( "eo10fw" ) ); // plugin-style late registration is
-  // the SAME seam: ModelRuntimeRegistry::registerProvider — exercised here
-  // through the suite's own providers; a plugin host calls the identical API.
+  REQUIRE_FALSE( registry.hasProvider( "eo10-plugin-fw" ) );
+  registry.registerProvider( "eo10-plugin-fw", []( const ModelInfo &, const sicnu::operators::runtime::ModelHardwareCapabilities &,
+                                                   std::string * ) -> sicnu::operators::runtime::ModelRuntimePtr {
+    return std::make_shared<ClassPlane3Runtime>();
+  } );
+  REQUIRE( registry.hasProvider( "eo10-plugin-fw" ) );
+
+  QTemporaryDir dir;
+  const RegisteredTaskModel registered( dir, "plugin-fw-model",
+    R"({"name": "plugin-fw-model", "task": "segmentation", "framework": "eo10-plugin-fw",
+        "output": {"classes": ["a", "b", "c"]},
+        "artifact": {"path": ")" + dir.filePath( QStringLiteral( "weights.bin" ) ).toStdString() + R"("}})" );
+  const auto entry = ModelCatalog::instance().find( "plugin-fw-model" );
+  REQUIRE( entry.has_value() );
+  std::string error;
+  const auto session = registry.acquire( *entry, &error );
+  // The late provider produced the session for a model referencing its
+  // framework — the identical call path a plugin host drives.
+  REQUIRE( session );
 }
 
 // ---------------------------------------------------------------------------

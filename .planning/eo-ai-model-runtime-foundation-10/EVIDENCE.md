@@ -58,3 +58,23 @@ explicitly marked not-executed. No online CI.
    code fix; rs:regress expectation: identity runtime maps 2 fed channels →
    2 output bands) → after fixes: **All tests passed (570 assertions in 21
    test cases)**.
+
+## Phase 7 review-fix verification (final code state)
+
+- `cmake --build build-dev --target <13 test targets> -j2` → exit 0.
+- Final matrix (QT_QPA_PLATFORM=offscreen): test_detection_nms_10 (16/5),
+  test_eo_platform_10 (576/21), test_model_runtime (100394/21),
+  test_model_runtime_8 (1770/14), test_model_runtime_9 (190/16),
+  test_model_tasks (1249/9), test_multimodal_inference (8324/8),
+  test_model_failure_matrix (126/16), test_model_catalog_v2 (383/23),
+  test_model_manifest7 (62/14), test_model_library_manifests (237/6),
+  test_algorithm_meta_drift (2696/1), test_capability_knowledge (1055/12),
+  test_toolbox_coverage (108/4), test_spatial_tools (139/16),
+  test_agent_tool_catalog (4169/9), test_harness_catalog (109/5) — ALL
+  "All tests passed".
+- test_capability_drift: 19/21 — remaining 2 failures proven byte-identical
+  on a master @ 7d78059d build of the SAME suite (assertions
+  `uncovered.empty()` tools-floor at :202/203 and `recipe_id != ...` at
+  :753/754) — pre-existing, OUT_OF_SCOPE (harness track).
+- NMS perf (Phase-5 evidence, Debug -O0): 100k disjoint dedup 304 ms; 50k
+  dense-cluster NMS 105 ms (dense ≈ 5e9 IoU compares at the budget).

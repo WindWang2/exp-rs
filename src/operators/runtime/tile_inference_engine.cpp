@@ -182,13 +182,21 @@ bool publishProvenanceSidecar( const QString &finalPath, const std::string &outp
 }
 
 /// Platform 10.0: sentinel-aware morphology on a published single-band
-/// Labels/Mask product. Runs as a bounded streaming pass over full-width row
-/// bands with kernel-radius halo (2x for the two-op open/close pair), so
-/// seams stay exact and memory stays O(W x rows). NoData pixels never leak
-/// into the min/max neighborhood — a kernel with no valid pixels stays NoData.
-/// Rewrites @p stagePath atomically (staged copy + rename).
-void applyMorphologyPass( const QString &stagePath, const std::string &morphology, int kernel )
+/// Labels/Mask product. Streaming pass over full-width row bands read with a
+/// 2*radius halo: BOTH morphological operations run over the FULL window
+/// (op2 at every core row consumes op1 rows within `radius`, which are exact
+/// because the window carries 2*radius of context), so band seams are exact
+/// for open/close as well as for single-op erode/dilate. NoData pixels never
+/// leak into the min/max neighborhood — a kernel with no valid pixels stays
+/// NoData. Rewrites @p stagePath atomically (staged copy + rename) and
+/// re-tallies the per-class pixel counts of the PUBLISHED product.
+/// Cancellation is polled per row band; memory is O(W x windowRows).
+void applyMorphologyPass( const QString &stagePath, const std::string &morphology, int kernel,
+                          std::vector<long long> &classPixelCounts,
+                          const std::function<bool()> &cancelled )
 {
+  if ( cancelled && cancelled() )
+    throw RSOperatorError( ErrorCode::Cancelled, "morphology pass cancelled before the scan" );
   GDALAllRegister();
   GDALDatasetH src = GDALOpen( stagePath.toUtf8().constData(), GA_ReadOnly );
   if ( !src )
@@ -202,9 +210,14 @@ void applyMorphologyPass( const QString &stagePath, const std::string &morpholog
   int hasNoData = 0;
   const double noData = GDALGetRasterNoDataValue( band, &hasNoData );
   const QString morphStage = stagePath + QStringLiteral( ".morph~" );
+  // Preserve the publication encoding of the stage (tiled + compressed) and
+  // its dataset metadata (SICNU_CLASS_PALETTE / SICNU_CLASS_NAMES / heads) —
+  // a morphology run must publish the same product a plain run would.
+  const char *createOptions[] = { "TILED=YES", "BLOCKXSIZE=256", "BLOCKYSIZE=256",
+                                  "COMPRESS=LZW", nullptr };
   GDALDriverH driver = GDALGetDriverByName( "GTiff" );
   GDALDatasetH dst = GDALCreate( driver, morphStage.toUtf8().constData(), width, height, 1,
-                                 dtype, nullptr );
+                                 dtype, const_cast<char **>( createOptions ) );
   if ( !dst )
   {
     GDALClose( src );
@@ -220,23 +233,35 @@ void applyMorphologyPass( const QString &stagePath, const std::string &morpholog
     GDALSetGeoTransform( dst, gt );
   if ( const char *wkt = GDALGetProjectionRef( src ); wkt && *wkt )
     GDALSetProjection( dst, wkt );
+  if ( CSLConstList meta = GDALGetMetadata( src, "" ); meta )
+  {
+    // Copy item-by-item: entries are "KEY=VALUE" strings in a const list.
+    for ( const char *const *entry = meta; entry && *entry; ++entry )
+    {
+      const std::string kv = *entry;
+      const std::string::size_type eq = kv.find( '=' );
+      if ( eq != std::string::npos && eq > 0 )
+        GDALSetMetadataItem( dst, kv.substr( 0, eq ).c_str(), kv.substr( eq + 1 ).c_str(), "" );
+    }
+  }
 
   const int radius = kernel / 2;
   const bool twoOp = morphology == "open" || morphology == "close";
-  const int halo = twoOp ? 2 * radius : radius;
+  const int halo = 2 * radius; // op2 needs op1 rows within radius of the core
   const int firstOp = morphology == "dilate" || morphology == "close" ? 1 : -1; // +1 dilate
   const int secondOp = -firstOp;
   const float sentinel = hasNoData ? static_cast<float>( noData )
                                    : std::numeric_limits<float>::quiet_NaN();
 
-  // Full-width row bands; bound the window to ~8M floats.
+  // Full-width row bands; bound the window to ~8M floats (kernel <= 65 is
+  // manifest-validated, so the 2*halo rows stay a small multiple of that).
   const std::int64_t maxWindowPixels = 8LL * 1024 * 1024;
   int rowsPerBand = std::max( 1, static_cast<int>( maxWindowPixels / std::max( 1, width ) ) );
   rowsPerBand = std::max( rowsPerBand, 2 * halo + 1 );
 
   std::vector<float> window;
   auto morphOp = [ & ]( std::vector<float> &data, int w, int h, int op ) {
-    // op +1: dilate (max), -1: erode (min); sentinel-aware in place.
+    // op +1: dilate (max), -1: erode (min); sentinel-aware, in place.
     std::vector<float> out( static_cast<std::size_t>( w ) * h, 0.0f );
     for ( int y = 0; y < h; ++y )
       for ( int x = 0; x < w; ++x )
@@ -272,6 +297,12 @@ void applyMorphologyPass( const QString &stagePath, const std::string &morpholog
 
   for ( int coreY = 0; coreY < height; coreY += rowsPerBand )
   {
+    if ( cancelled && cancelled() )
+    {
+      GDALClose( dst );
+      GDALClose( src );
+      throw RSOperatorError( ErrorCode::Cancelled, "morphology pass cancelled mid-scan" );
+    }
     const int coreH = std::min( rowsPerBand, height - coreY );
     const int winY = std::max( 0, coreY - halo );
     const int winH = std::min( height, coreY + coreH + halo ) - winY;
@@ -283,36 +314,39 @@ void applyMorphologyPass( const QString &stagePath, const std::string &morpholog
       GDALClose( src );
       throw RSOperatorError( ErrorCode::GdalError, "morphology pass failed to read a window" );
     }
+    // Both ops over the FULL window: op1 at core±radius rows is exact (they
+    // have radius context inside the 2*radius-halo window), so op2 at core
+    // rows consumes exact values. Band seams are exact; only window-edge
+    // rows — never written — are inexact.
+    morphOp( window, width, winH, firstOp );
     if ( twoOp )
-    {
-      // Inner region with halo=radius around the core: exact after op1, so
-      // op2 over it is exact for the core.
-      const int innerY = std::max( 0, coreY - radius ) - winY;
-      const int innerH = std::min( height, coreY + coreH + radius ) - std::max( 0, coreY - radius );
-      std::vector<float> inner( static_cast<std::size_t>( width ) * innerH, 0.0f );
-      std::copy( window.begin() + static_cast<std::size_t>( innerY ) * width,
-                 window.begin() + static_cast<std::size_t>( innerY + innerH ) * width,
-                 inner.begin() );
-      morphOp( inner, width, innerH, firstOp );
-      morphOp( inner, width, innerH, secondOp );
-      const int coreOffset = ( coreY - winY ) - innerY;
-      std::copy( inner.begin() + static_cast<std::size_t>( coreOffset ) * width,
-                 inner.begin() + static_cast<std::size_t>( coreOffset + coreH ) * width,
-                 window.begin() + static_cast<std::size_t>( coreY - winY ) * width );
-    }
-    else
-    {
-      morphOp( window, width, winH, firstOp );
-    }
+      morphOp( window, width, winH, secondOp );
+    const float *coreRows = window.data() + static_cast<std::size_t>( coreY - winY ) * width;
     if ( GDALRasterIO( dstBand, GF_Write, 0, coreY, width, coreH,
-                       window.data() + static_cast<std::size_t>( coreY - winY ) * width, width,
-                       coreH, GDT_Float32, 0, 0 ) != CE_None )
+                       const_cast<float *>( coreRows ), width, coreH, GDT_Float32, 0, 0 )
+         != CE_None )
     {
       GDALClose( dst );
       GDALClose( src );
       throw RSOperatorError( ErrorCode::FileNotWritable,
                              "morphology pass failed to write a window" );
     }
+    // Re-tally the per-class counts of the PUBLISHED product (pre-morphology
+    // tallies would misdescribe it).
+    for ( int y = 0; y < coreH; ++y )
+      for ( int x = 0; x < width; ++x )
+      {
+        const float v = coreRows[static_cast<std::size_t>( y ) * width + x];
+        if ( hasNoData && v == sentinel )
+          continue;
+        if ( v >= 0.0f && v == std::floor( v ) )
+        {
+          const std::size_t cls = static_cast<std::size_t>( v );
+          if ( classPixelCounts.size() <= cls )
+            classPixelCounts.resize( cls + 1, 0 );
+          classPixelCounts[cls]++;
+        }
+      }
   }
   GDALClose( dst );
   GDALClose( src );
@@ -934,12 +968,6 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   if ( !m_runtime )
     throw RSOperatorError( ErrorCode::ComputationError, "tile inference engine has no runtime session" );
 
-  // Platform 10.0: EO domain preflight — the manifest's `eo` section is
-  // enforced against the input raster BEFORE any tile is read (typed
-  // refusals; advisories recorded into the run stats for the sidecar).
-  if ( m_model.eo.declared )
-    m_lastEoPreflight = enforceEoPreflight( m_model, inputPath ).toJson();
-
   // Platform 9.0 (M3): a per-input preprocess override on a SINGLE-input
   // manifest is refused — run() executes the GLOBAL contract; silently
   // ignoring an override would feed the model un-normalized pixels (the
@@ -1015,6 +1043,20 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
       throw RSOperatorError( ErrorCode::InvalidInputData,
                              "postprocess.morphology executes on labels/mask products — "
                                "declare an output.format or drop the morphology contract" );
+    // Calibration executes only in the stitched derived collapse; the feather
+    // accumulator path would silently publish an uncalibrated product.
+    if ( !std::isnan( m_model.postprocess.calibrationTemperature ) )
+    {
+      const TileBlend resolvedBlend =
+        options.blend == TileBlend::Unset
+          ? ( m_model.tiling.blend == "feather" ? TileBlend::Feather : TileBlend::None )
+          : options.blend;
+      if ( resolvedBlend == TileBlend::Feather )
+        throw RSOperatorError( ErrorCode::InvalidInputData,
+                               "postprocess.calibration_temperature is not executed on the "
+                                 "feather-blended derived path — drop the blend contract or "
+                                 "the calibration (an uncalibrated product must not claim one)" );
+    }
     switch ( mode )
     {
       case RasterOutputMode::Labels:
@@ -1076,6 +1118,13 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     }
   }
   const int bandCount = static_cast<int>( bandList.size() );
+
+  // Platform 10.0: EO domain preflight — the manifest's `eo` section is
+  // enforced against the input raster BEFORE any tile is read, with the
+  // EFFECTIVE band selection so wavelength windows verify the physical bands
+  // actually fed (typed refusals; advisories recorded into the run stats).
+  if ( m_model.eo.declared )
+    m_lastEoPreflight = enforceEoPreflight( m_model, inputPath, bandList ).toJson();
 
   // Manifest dtype contract (#632/#705): input.dtype must match the raster's
   // actual GDAL type for EVERY band fed to the model (the engine always reads
@@ -2109,8 +2158,11 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
   // complete product, and a crash can only abandon the stage.
   if ( ( mode == RasterOutputMode::Labels || mode == RasterOutputMode::Mask )
        && !m_model.postprocess.morphology.empty() )
+  {
     applyMorphologyPass( stagePath, m_model.postprocess.morphology,
-                         m_model.postprocess.morphologyKernelPx );
+                         m_model.postprocess.morphologyKernelPx, stats.classPixelCounts,
+                         [ &context ] { return context.isCancelled(); } );
+  }
 
   // Atomic publish: only a fully written, closed raster is renamed onto the
   // caller's path (same directory — same volume). Windows rename does not
@@ -2234,10 +2286,21 @@ Json::Value TileInferenceEngine::runSceneClassification( const std::string &inpu
                              + " band roles but " + std::to_string( bandCount )
                              + " bands are fed (pass an explicit band list or fix the manifest)" );
 
+  // #646 discipline: the multimodal-only preprocess knobs are refused here
+  // exactly like the single-input tiled engine — never silently ignored.
+  if ( m_model.preprocess.pad > 0 || !std::isnan( m_model.preprocess.clampMin )
+       || !std::isnan( m_model.preprocess.clampMax ) )
+    throw RSOperatorError( ErrorCode::InvalidInputData,
+                           "preprocess.pad / clamp_min / clamp_max are executed by the "
+                             "multi-input engine; this scene-classification model must drop "
+                             "them from the manifest" );
+
   // The WHOLE scene is one window: bound it so a scene run can never turn
-  // into an unbounded allocation. Chips/resampled scenes are the contract;
-  // full rasters belong to rs:segment / rs:infer (tiled semantics).
+  // into an unbounded allocation (extent AND extent x bands — a hyperspectral
+  // chip allocates extent*bands floats). Chips/resampled scenes are the
+  // contract; full rasters belong to rs:segment / rs:infer (tiled semantics).
   constexpr long long kMaxScenePixels = 2048LL * 2048LL;
+  constexpr long long kMaxSceneFloats = 33554432LL; // 128 MiB of float32 samples
   if ( static_cast<long long>( rasterW ) * rasterH > kMaxScenePixels )
     throw RSOperatorError(
       ErrorCode::InvalidInputData,
@@ -2245,6 +2308,12 @@ Json::Value TileInferenceEngine::runSceneClassification( const std::string &inpu
         + std::to_string( rasterW ) + "x" + std::to_string( rasterH ) + " px which exceeds the "
         + std::to_string( kMaxScenePixels ) + " px scene bound — feed a chip or resampled scene, "
         "or use the tiled operators for full rasters" );
+  if ( static_cast<long long>( rasterW ) * rasterH * bandCount > kMaxSceneFloats )
+    throw RSOperatorError(
+      ErrorCode::InvalidInputData,
+      "scene window " + std::to_string( rasterW ) + "x" + std::to_string( rasterH ) + " x "
+        + std::to_string( bandCount ) + " bands exceeds the scene sample bound ("
+        + std::to_string( kMaxSceneFloats ) + " floats) — reduce the bands fed or the scene size" );
 
   // Read the scene window and preprocess with the SAME semantics as the tile
   // path: declared sentinels -> NaN, all-invalid tracking, nodata zero-fill,
@@ -2477,14 +2546,30 @@ Json::Value TileInferenceEngine::runSceneClassification( const std::string &inpu
                            "failed to write the classification artifact: "
                              + stagePath.toStdString() );
   }
+  // Same publish contract as the raster engines: the previous artifact is
+  // backed up first and restored when the rename fails — the caller's path
+  // ends with the NEW artifact or the OLD one, never nothing.
+  const QString backupPath = outFi.absoluteFilePath() + QStringLiteral( ".prev~" );
+  QFile::remove( backupPath );
+  const bool hadExisting = QFile::exists( outFi.absoluteFilePath() );
+  if ( hadExisting && !QFile::rename( outFi.absoluteFilePath(), backupPath ) )
+  {
+    stage.remove();
+    throw RSOperatorError( ErrorCode::FileNotWritable,
+                           "failed to back up the previous classification artifact: "
+                             + outFi.absoluteFilePath().toStdString() );
+  }
   QFile::remove( outFi.absoluteFilePath() ); // Windows rename does not overwrite
   if ( !QFile::rename( stagePath, outFi.absoluteFilePath() ) )
   {
     stage.remove();
+    if ( hadExisting )
+      QFile::rename( backupPath, outFi.absoluteFilePath() );
     throw RSOperatorError( ErrorCode::FileNotWritable,
                            "failed to publish the classification artifact: "
                              + outFi.absoluteFilePath().toStdString() );
   }
+  QFile::remove( backupPath );
 
   context.reportProgress( 1.0, "Scene classification: " + m_model.output.classes[static_cast<std::size_t>( best )] );
   return doc;
@@ -2608,21 +2693,6 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                              + " inputs but " + std::to_string( feeds.size() )
                              + " feeds were given" );
 
-  // Platform 10.0: EO domain preflight per feed — every input path the
-  // manifest's `eo` section constrains is enforced before any tile is read.
-  if ( m_model.eo.declared )
-  {
-    Json::Value perFeed( Json::arrayValue );
-    for ( const NamedRasterFeed &feed : feeds )
-      for ( const std::string &feedPath : feed.paths )
-      {
-        Json::Value entry( Json::objectValue );
-        entry["path"] = feedPath;
-        entry["report"] = enforceEoPreflight( m_model, feedPath ).toJson();
-        perFeed.append( entry );
-      }
-    m_lastEoPreflight = perFeed;
-  }
   std::vector<std::size_t> feedContract( feeds.size() );
   for ( std::size_t f = 0; f < feeds.size(); ++f )
   {
@@ -3722,6 +3792,26 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
         QFile::rename( backupPath, finalPath ); // restore the previous good product
       throw RSOperatorError( ErrorCode::FileNotWritable, provError );
     }
+  }
+
+  // Platform 10.0: EO domain preflight per feed — enforced against each
+  // feed's BOUND contract and ITS effective band selection, after the
+  // by-name/positional binding above, before any tile is read.
+  if ( m_model.eo.declared )
+  {
+    Json::Value perFeed( Json::arrayValue );
+    for ( std::size_t f = 0; f < feeds.size(); ++f )
+    {
+      const ModelInputContract &contract = m_model.inputs[feedContract[f]];
+      for ( const std::string &feedPath : feeds[f].paths )
+      {
+        Json::Value entry( Json::objectValue );
+        entry["path"] = feedPath;
+        entry["report"] = enforceEoPreflight( m_model, feedPath, feeds[f].bands, &contract ).toJson();
+        perFeed.append( entry );
+      }
+    }
+    m_lastEoPreflight = perFeed;
   }
   QFile::remove( backupPath );
   context.reportProgressForced( 1.0, "Tiled multi-input inference complete" );

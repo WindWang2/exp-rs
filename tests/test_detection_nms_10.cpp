@@ -180,20 +180,15 @@ TEST_CASE( "F-OPS-5: NMS honours a mid-pass cancel predicate with a typed Cancel
   auto field = syntheticField( 50000, 99u, 100000.0f, 60.0f );
 
   std::atomic<int> polls { 0 };
-  bool flipped = false;
-  bool cancelled = false;
   const std::function<bool()> predicate = [&]() {
-    const int n = ++polls;
-    if ( !flipped && n >= 8 )
-    {
-      flipped = true;
-      cancelled = true;
-    }
-    return cancelled;
+    // Flip LATE: poll 1 is the before-the-scan probe, every later poll is the
+    // per-candidate (or in-scan) checkpoint — so the abort below can only
+    // come from a MID-SCAN poll site, never from the pre-scan guard.
+    return ++polls >= 5000;
   };
-
+  const int pollsBefore = polls.load();
   REQUIRE_THROWS_AS( nonMaxSuppression( field, 0.45, predicate ), RSOperatorError );
-  REQUIRE( polls.load() >= 8 );
+  REQUIRE( polls.load() > pollsBefore + 1 ); // strictly mid-scan, not the pre-scan probe
   try
   {
     nonMaxSuppression( field, 0.45, predicate );
@@ -203,6 +198,24 @@ TEST_CASE( "F-OPS-5: NMS honours a mid-pass cancel predicate with a typed Cancel
   {
     REQUIRE( e.code() == sicnu::operators::ErrorCode::Cancelled );
   }
+}
+
+TEST_CASE( "F-OPS-5: empty input and pre-scan cancellation are typed no-crash paths",
+           "[detection][nms][fops5][cancel]" )
+{
+  // P0 regression: zero detections passing the confidence gate is a NORMAL
+  // outcome — dedup/NMS must return an empty kept set, never crash.
+  std::vector<DetectionBox> empty;
+  REQUIRE( nonMaxSuppression( empty, 0.45 ).empty() );
+  REQUIRE( nonMaxSuppression( empty, 0.45, [] { return false; } ).empty() );
+  dedupDetections( empty, 0.45 );
+  dedupDetections( empty, 0.45, [] { return false; } );
+  REQUIRE( empty.empty() );
+
+  // Pre-scan cancellation: the predicate is true BEFORE any scanning.
+  auto field = syntheticField( 100, 5u, 100.0f, 20.0f );
+  REQUIRE_THROWS_AS( nonMaxSuppression( field, 0.45, [] { return true; } ),
+                     RSOperatorError );
 }
 
 TEST_CASE( "F-OPS-5: dedup cancel overload keeps the exact-duplicate collapse contract",

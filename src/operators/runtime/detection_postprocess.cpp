@@ -63,6 +63,8 @@ std::uint64_t cellKey( int cx, int cy )
 /// never input-order dependent), floored at 1 px.
 double cellPitch( const std::vector<DetectionBox> &boxes )
 {
+  if ( boxes.empty() )
+    return 1.0; // unreachable via runNonMaxSuppression (empty early-return); defense in depth
   std::vector<float> sizes;
   sizes.reserve( boxes.size() );
   for ( const DetectionBox &b : boxes )
@@ -185,6 +187,8 @@ std::vector<DetectionBox> runNonMaxSuppression( const std::vector<DetectionBox> 
 
   if ( cancelled && cancelled() )
     throw RSOperatorError( ErrorCode::Cancelled, "detection NMS cancelled before the scan" );
+  if ( ordered.empty() )
+    return {}; // zero candidates is the NORMAL outcome of a high conf gate
 
   SpatialGrid grid( cellPitch( ordered ) );
   std::vector<DetectionBox> kept;
@@ -295,6 +299,12 @@ std::string decodeDetections( const cv::Mat &output, const DetectionDecodeContra
     box.y = y1;
     box.w = x2 - x1;
     box.h = y2 - y1;
+    // Non-finite geometry (NaN/Inf model output) must not reach the NMS sort
+    // (inconsistent comparator => UB): clamp propagates NaN and the w/h gate
+    // is false for NaN, so the drop happens here, explicitly.
+    if ( !std::isfinite( box.x ) || !std::isfinite( box.y ) || !std::isfinite( box.w )
+         || !std::isfinite( box.h ) )
+      continue;
     if ( box.w <= 0.0f || box.h <= 0.0f )
       continue;
 
@@ -329,6 +339,8 @@ void dedupDetections( std::vector<DetectionBox> &boxes, double iouThreshold,
   // removes those even below the NMS threshold... NMS already removes them
   // (IoU 1 > threshold), so the collapse is an O(n) pre-pass that keeps the
   // NMS input smaller; correctness does not depend on it.
+  if ( boxes.empty() )
+    return;
   std::set<std::tuple<int, int, int, int, int, float>> seen;
   std::vector<DetectionBox> collapsed;
   collapsed.reserve( boxes.size() );

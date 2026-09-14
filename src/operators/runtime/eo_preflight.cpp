@@ -55,7 +55,9 @@ Json::Value EoPreflightReport::toJson() const
   return out;
 }
 
-EoPreflightReport enforceEoPreflight( const ModelInfo &model, const std::string &rasterPath )
+EoPreflightReport enforceEoPreflight( const ModelInfo &model, const std::string &rasterPath,
+                                      const std::vector<int> &fedBands,
+                                      const ModelInputContract *feed )
 {
   EoPreflightReport report;
   if ( !model.eo.declared )
@@ -120,60 +122,66 @@ EoPreflightReport enforceEoPreflight( const ModelInfo &model, const std::string 
   }
 
   // 2) Per-band-role wavelength windows — refuse only when both sides declare.
+  // band_roles[i] maps to the i-th FED band (the caller's band selection,
+  // 1-based; empty = all bands in file order) — checking positions without
+  // the effective selection verified the wrong physical bands.
   if ( !model.eo.wavelengthsNm.empty() && !meta.bands.empty() )
   {
-    for ( const ModelInputContract &feed : model.inputs )
+    const ModelInputContract &contract = feed ? *feed
+                                              : ( model.inputs.empty() ? model.input
+                                                                       : model.inputs.front() );
+    for ( std::size_t roleIdx = 0; roleIdx < contract.bandRoles.size(); ++roleIdx )
     {
-      for ( std::size_t roleIdx = 0; roleIdx < feed.bandRoles.size(); ++roleIdx )
+      const std::string role = [&] {
+        std::string r = contract.bandRoles[roleIdx];
+        std::transform( r.begin(), r.end(), r.begin(),
+                        []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
+        return r;
+      }();
+      const auto windowIt = model.eo.wavelengthsNm.find( role );
+      if ( windowIt == model.eo.wavelengthsNm.end() )
+        continue;
+      const int physicalBand =
+        static_cast<int>( roleIdx ) < static_cast<int>( fedBands.size() )
+          ? fedBands[roleIdx]
+          : static_cast<int>( roleIdx ) + 1;
+      if ( physicalBand < 1 || std::size_t( physicalBand ) > meta.bands.size() )
       {
-        const std::string role = [&] {
-          std::string r = feed.bandRoles[roleIdx];
-          std::transform( r.begin(), r.end(), r.begin(),
-                          []( unsigned char c ) { return static_cast<char>( std::tolower( c ) ); } );
-          return r;
-        }();
-        const auto windowIt = model.eo.wavelengthsNm.find( role );
-        if ( windowIt == model.eo.wavelengthsNm.end() )
-          continue;
-        const std::size_t bandIdx = roleIdx; // band_roles[i] maps to input band i+1
-        if ( bandIdx >= meta.bands.size() )
-        {
-          report.advisories.push_back( "wavelength: role '" + role + "' maps to band "
-                                       + std::to_string( bandIdx + 1 ) + " but the input has only "
-                                       + std::to_string( meta.bands.size() ) + " bands" );
-          continue;
-        }
-        const sicnu::geo::BandInfo &band = meta.bands[bandIdx];
-        if ( !band.hasWavelength || band.wavelengthNm <= 0.0 )
-        {
-          report.advisories.push_back( "wavelength: role '" + role
-                                       + "' window " + describeWindow( windowIt->second )
-                                       + " unchecked — input band " + std::to_string( bandIdx + 1 )
-                                       + " declares no center wavelength" );
-          continue;
-        }
-        if ( band.wavelengthNm < windowIt->second.minNm
-             || band.wavelengthNm > windowIt->second.maxNm )
-          throw RSOperatorError(
-            ErrorCode::InvalidInputData,
-            "input band " + std::to_string( bandIdx + 1 ) + " (role '" + role + "') centers at "
-              + std::to_string( band.wavelengthNm ) + " nm, outside the model's declared "
-              "sensitivity window " + describeWindow( windowIt->second )
-              + " — the model would misread this band silently; use a sensor whose band matches "
-              "the manifest's eo.wavelengths_nm",
-            [&] {
-              Json::Value d;
-              d["role"] = role;
-              d["band"] = static_cast<Json::Int64>( bandIdx + 1 );
-              d["input_wavelength_nm"] = band.wavelengthNm;
-              d["window_min_nm"] = windowIt->second.minNm;
-              d["window_max_nm"] = windowIt->second.maxNm;
-              return d;
-            }() );
-        report.checks.push_back( "wavelength: role '" + role + "' at "
-                                 + std::to_string( band.wavelengthNm ) + " nm within "
-                                 + describeWindow( windowIt->second ) );
+        report.advisories.push_back( "wavelength: role '" + role + "' maps to band "
+                                     + std::to_string( physicalBand ) + " but the input has only "
+                                     + std::to_string( meta.bands.size() ) + " bands" );
+        continue;
       }
+      const sicnu::geo::BandInfo &band = meta.bands[std::size_t( physicalBand - 1 )];
+      if ( !band.hasWavelength || band.wavelengthNm <= 0.0 )
+      {
+        report.advisories.push_back( "wavelength: role '" + role
+                                     + "' window " + describeWindow( windowIt->second )
+                                     + " unchecked — input band " + std::to_string( physicalBand )
+                                     + " declares no center wavelength" );
+        continue;
+      }
+      if ( band.wavelengthNm < windowIt->second.minNm
+           || band.wavelengthNm > windowIt->second.maxNm )
+        throw RSOperatorError(
+          ErrorCode::InvalidInputData,
+          "input band " + std::to_string( physicalBand ) + " (role '" + role + "') centers at "
+            + std::to_string( band.wavelengthNm ) + " nm, outside the model's declared "
+            "sensitivity window " + describeWindow( windowIt->second )
+            + " — the model would misread this band silently; use a sensor whose band matches "
+            "the manifest's eo.wavelengths_nm",
+          [&] {
+            Json::Value d;
+            d["role"] = role;
+            d["band"] = physicalBand;
+            d["input_wavelength_nm"] = band.wavelengthNm;
+            d["window_min_nm"] = windowIt->second.minNm;
+            d["window_max_nm"] = windowIt->second.maxNm;
+            return d;
+          }() );
+      report.checks.push_back( "wavelength: role '" + role + "' at "
+                               + std::to_string( band.wavelengthNm ) + " nm within "
+                               + describeWindow( windowIt->second ) );
     }
   }
 

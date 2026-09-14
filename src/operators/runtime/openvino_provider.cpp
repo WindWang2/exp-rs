@@ -77,19 +77,30 @@ class OpenVinoRuntime final : public IModelRuntime
     {
       try
       {
-        // Bridge NCHW float32 into the declared input shape.
-        ov::Tensor input( ov::element::f32, mInputShape );
-        float *dst = input.data<float>();
+        // Bridge NCHW float32 into the declared input shape — the sizes MUST
+        // agree elementwise; a mismatch is a typed error, never an overflow.
         const std::size_t elems = nchwBlob.total() * nchwBlob.channels();
-        std::memcpy( dst, nchwBlob.ptr<const float>(), elems * sizeof( float ) );
+        std::size_t expected = 1;
+        for ( std::int64_t d : mInputShape )
+          expected *= static_cast<std::size_t>( d );
+        if ( elems != expected )
+          throw RSOperatorError( ErrorCode::InvalidInputData,
+                                 "fed blob size does not match the OpenVINO input shape ("
+                                   + std::to_string( expected ) + " elements expected)" );
+        ov::Tensor input( ov::element::f32, mInputShape );
+        std::memcpy( input.data<float>(), nchwBlob.ptr<const float>(), elems * sizeof( float ) );
         mInfer.set_tensor( mInputName, input );
         mInfer.infer();
         const ov::Tensor output = mInfer.get_tensor( mOutputName );
+        if ( output.get_element_type() != ov::element::f32 )
+          throw RSOperatorError( ErrorCode::ComputationError,
+                                 "OpenVINO output must be float32 (got "
+                                   + output.get_element_type().get_type_name() + ")" );
         ov::Shape shape = output.get_shape();
         std::vector<int> dims( shape.begin(), shape.end() );
         cv::Mat out( static_cast<int>( dims.size() ), dims.data(), CV_32F );
-        std::memcpy( out.ptr<float>(), output.data<const float>(),
-                     output.get_byte_size() );
+        const std::size_t outElems = static_cast<std::size_t>( out.total() ) * out.channels();
+        std::memcpy( out.ptr<float>(), output.data<const float>(), outElems * sizeof( float ) );
         return out;
       }
       catch ( const std::exception &e )
