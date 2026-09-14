@@ -20,7 +20,7 @@ enum class ProductType {
     Landsat,
     Sentinel2,
     Modis,
-    Cn  ///< Chinese satellite L1A families (ADR 0146/0147): GF, ZY-3, ZY-1 02C, HJ
+    Cn  ///< Chinese satellite L1A families (ADR 0157/0147): GF, ZY-3, ZY-1 02C, HJ
 };
 
 struct BandFile {

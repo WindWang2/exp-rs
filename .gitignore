@@ -139,6 +139,24 @@ vendor/
 !.planning/plugin-platform-9/
 !.planning/geospatial-data-fabric-9/
 !.planning/lab-content-expansion/
+# Complete whitelist for older tracks present on disk but previously missing (#970).
+!.planning/agent-rs-performance/
+!.planning/agent-rs-platform/
+!.planning/algorithm-foundation-5/
+!.planning/cartography-platform-8/
+!.planning/data-runtime-governance-4/
+!.planning/dataset-experiment-mlops-8/
+!.planning/display-perf-pipeline/
+!.planning/execution-cache/
+!.planning/execution-data-plane-3/
+!.planning/execution-plane-8/
+!.planning/execution-plane-runtime-7/
+!.planning/pi-spatial-scientist-harness-4/
+!.planning/professional-workbench-7/
+!.planning/professional-workbench-8/
+!.planning/professional-workbench-ux-6/
+!.planning/temporal-agent-contract/
+!.planning/whole-repo-line-review/
 # prompt-command-hygiene-review: track planning notes (markdown only; logs stay local).
 !.planning/prompt-command-hygiene-review/
 .planning/prompt-command-hygiene-review/*

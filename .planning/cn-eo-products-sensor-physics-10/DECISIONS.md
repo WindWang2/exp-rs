@@ -29,6 +29,6 @@
   sources would preserve the drift the track is chartered to remove.
 - D-08 (2026-09-13) Capability pins 111→115: the pinned count is a coverage
   floor, not a historical record; D-08 also repairs #956's inherited break.
-- D-09 (2026-09-13) Operator results keep legacy ADR 0146 keys verbatim
+- D-09 (2026-09-13) Operator results keep legacy ADR 0157 keys verbatim
   (productKind/bandSource/declared{}/missingDeclaredFields[]) with new
   provenance added alongside; courses and labs key on the old shape.

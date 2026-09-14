@@ -3,7 +3,7 @@
 ## Baseline
 
 - Branch `zcode/cn-eo-products-sensor-physics-10`, worktree off `origin/master` @ `7d78059d1a`
-  (PR #958 merge). ADR 0146 (#956) shipped GF-1/2/6, ZY-3, HJ-1A/1B CCD adapters; this track
+  (PR #958 merge). ADR 0157 (#956) shipped GF-1/2/6, ZY-3, HJ-1A/1B CCD adapters; this track
   turns that fixed set into a platform (ADR 0147, `docs/adr/0147-sensor-product-physics-platform.md`).
 
 ## Architecture
@@ -26,7 +26,7 @@
    validate → resolve constituents (sidecar, image, RPC `.rpb`, PMS sibling with declared
    role) → role map (registry) → optional calibration → stack (unchanged `stackToGeoTiff`
    contract) → stamp → provenance. New operator `rs:cn_product_import`; the three family
-   operators become thin adapters; result keys stay legacy-compatible (ADR 0146) with
+   operators become thin adapters; result keys stay legacy-compatible (ADR 0157) with
    provenance added alongside.
 4. **Optional declared calibration** — `apply_calibration=true` applies
    `radiance = DN × gain + bias` to every requested band and stamps
@@ -49,7 +49,7 @@
 
 ## Compatibility
 
-- ADR 0146 operator result keys preserved verbatim (`productKind`, `bandSource`,
+- ADR 0157 operator result keys preserved verbatim (`productKind`, `bandSource`,
   `bands[]`, `bandRoles[]`, `declared{}`, `missingDeclaredFields[]`, ...); new provenance
   keys are additive (`sensorProfile`, `sidecarGeneration`, `completeness`, `calibration{}`,
   `siblingImage/Role`, `bandWavelengthsNm[]`, ...).

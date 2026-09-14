@@ -9,7 +9,7 @@
   for the CN satellite families (ADR 0147): platform, instrument, sensor
   mode, band layout with physical roles, documented spectral ranges and
   centre wavelengths, nominal GSD, expected product constituents and the
-  declared calibration rule. Replaces the band-role-only tables of ADR 0146.
+  declared calibration rule. Replaces the band-role-only tables of ADR 0157.
 
   Policy: the loader is fail-closed — a missing/unparseable file or a schema
   violation is a structured error, never a silent "unknown". Unknown keys

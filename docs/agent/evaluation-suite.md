@@ -104,7 +104,7 @@ See `data/agent/evals/README.md` for the schema. Key properties:
 
 `tests/test_harness_lab_evals.cpp` grades the **teaching** contract the same
 way: deterministic, no model, typed assertions only. The lab copilot tutors;
-it must never do the lab for a student (ADR 0146).
+it must never do the lab for a student (ADR 0155).
 
 ### Must-refuse reverse cases (a single success is a P0)
 

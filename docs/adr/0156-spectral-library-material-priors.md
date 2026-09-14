@@ -1,4 +1,4 @@
-# ADR 0146: Built-in Spectral Library and the Material-Prior Contract
+# ADR 0156: Built-in Spectral Library and the Material-Prior Contract
 
 ## Context
 

@@ -597,7 +597,7 @@ ProductKind detectProductKind( const std::string &path )
        || upper.find( "MYD0" ) != std::string::npos )
     return ProductKind::ModisContainer;
 
-  // Chinese L1A families (ADR 0146) — claimed before the generic fallback.
+  // Chinese L1A families (ADR 0157) — claimed before the generic fallback.
   const CnProductIdentity identity = cnIdentifyProduct( path );
   if ( identity.supported )
   {

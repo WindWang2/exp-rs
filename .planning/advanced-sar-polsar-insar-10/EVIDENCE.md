@@ -21,7 +21,7 @@
 2. 轨道/zero-Doppler/forward-RD/真几何 gamma0 已由 Scientific Algorithms 7.0/8.0 交付
    （sar-domain.md §3-§4），本 Track 不得重做 geocoding；InSAR 链的 geocoding 步骤复用
    `rs:sar_geocode`。
-3. capability sidecar 走 ADR 0146 gen-meta 流程，`pi/knowledge/capability-sar.md` 是生成
+3. capability sidecar 走 ADR 0154 gen-meta 流程，`pi/knowledge/capability-sar.md` 是生成
    产物禁止手编。
 
 ### OUT_OF_SCOPE（范围外发现）

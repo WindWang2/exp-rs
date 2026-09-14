@@ -1,4 +1,4 @@
-# ADR 0146: Lab report schema (`sicnu.labreport.v1`) and the desktop lab recording surface
+# ADR 0152: Lab report schema (`sicnu.labreport.v1`) and the desktop lab recording surface
 
 Date: 2026-09-12. Status: Accepted. Relates to ADR 0130 (truthful states),
 0137 (run identity), 0138 (lineage/bundles), 0143 (workflow→experiment

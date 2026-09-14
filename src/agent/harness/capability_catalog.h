@@ -2,7 +2,7 @@
 #pragma once
 
 //
-// D8 capability knowledge layer (ADR 0146): typed per-operator capability
+// D8 capability knowledge layer (ADR 0154): typed per-operator capability
 // metadata for ALL 115 rs: operators, one sidecar per operator under
 // data/processing/algorithm_meta/capability/rs-<slug>.json.
 //

@@ -2,7 +2,7 @@
   geospatial/products/cn_product_adapters.cpp
   Remote Sensing I/O Foundation 5.0 — ProductAdapter implementations for the
   Chinese satellite families (GF-1/2/6 PMS/WFV, ZY-3 TLC/NAD/FWD/BWD,
-  HJ-1A/1B CCD), ADR 0146.
+  HJ-1A/1B CCD), ADR 0157.
   ---------------------------
   Begin                : 2026-09
   Copyright            : (C) 2026 SICNU GEO RS

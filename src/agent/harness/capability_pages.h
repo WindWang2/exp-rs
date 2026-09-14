@@ -2,7 +2,7 @@
 #pragma once
 
 //
-// D8 knowledge page renderer (ADR 0146): pi/knowledge/capability-*.md are
+// D8 knowledge page renderer (ADR 0154): pi/knowledge/capability-*.md are
 // GENERATED from the same sidecar JSON the query API serves. Hand-editing a
 // generated page is a defect — edit the sidecar and regenerate.
 //

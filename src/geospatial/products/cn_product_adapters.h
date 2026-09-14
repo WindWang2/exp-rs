@@ -3,7 +3,7 @@
   Sensor/Product Physics Platform 10.0 — ProductAdapter implementations for
   the Chinese satellite families (GF-1/2/6 PMS/WFV, GF-7 FWD/BWD,
   ZY-3 TLC/NAD/FWD/BWD, ZY-1 02C PMS/HRC, HJ-1A/1B CCD, HJ-2A/B CCD),
-  ADR 0146 + 0147.
+  ADR 0157 + 0147.
   ---------------------------
   Begin                : 2026-09
   Copyright            : (C) 2026 SICNU GEO RS

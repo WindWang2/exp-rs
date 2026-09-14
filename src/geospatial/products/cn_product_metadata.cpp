@@ -11,7 +11,7 @@
   directory; nothing is ever fetched from the network.
 
   The band→role vocabulary is data-driven from data/products/band_roles/*.json
-  (ADR 0146): the loader is fail-closed, a missing table is a structured
+  (ADR 0157): the loader is fail-closed, a missing table is a structured
   error — never a silent "unknown".
  ***************************************************************************/
 

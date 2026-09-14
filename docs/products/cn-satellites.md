@@ -1,6 +1,6 @@
 # Chinese Satellite Products (GF · ZY-3 · ZY-1 02C · HJ CCD)
 
-> Contract: ADR 0146 + ADR 0147 · Code: `src/geospatial/products/cn_product_metadata.*`
+> Contract: ADR 0157 + ADR 0147 · Code: `src/geospatial/products/cn_product_metadata.*`
 > (identity + CRESDA sidecar parsing), `src/geospatial/products/sensor_profile.*`
 > (sensor profile registry loader), `src/geospatial/products/cn_product_adapters.cpp`
 > (registry adapters), `src/operators/rs/rs_product_import_plan.*` (standardized

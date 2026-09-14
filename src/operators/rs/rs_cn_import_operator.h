@@ -1,5 +1,5 @@
 /***************************************************************************
- * rs_cn_import_operator.h — CN import metadata stamping (ADR 0146/0147).
+ * rs_cn_import_operator.h — CN import metadata stamping (ADR 0157/0147).
  *
  * Identification, resolution, role mapping, calibration and provenance moved
  * to the standardized import-plan service (rs_product_import_plan.*); this
@@ -128,7 +128,7 @@ inline bool writeCnImportMetadata( const QString &outputPath,
 }
 
 /// JSON summary of sidecar fields that were NOT declared (absence is
-/// absence — reported, never defaulted; ADR 0146 contract).
+/// absence — reported, never defaulted; ADR 0157 contract).
 inline Json::Value cnMissingDeclaredFields( const sicnu::geo::ProductMetadata &metadata )
 {
     Json::Value missing( Json::arrayValue );

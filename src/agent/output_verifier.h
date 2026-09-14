@@ -47,7 +47,7 @@ class SICNU_AGENT_EXPORT OutputVerifier
     static OutputVerification verifyVector( const QString &path );
 
     // --------------------------------------------------------------------
-    // Teaching grade mode (D4, ADR 0146).  Binary PASS/FAIL above is
+    // Teaching grade mode (D4, ADR 0150).  Binary PASS/FAIL above is
     // unchanged for non-teaching callers; the methods below never touch it.
     // --------------------------------------------------------------------
 

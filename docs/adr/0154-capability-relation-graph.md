@@ -1,4 +1,4 @@
-# ADR 0146: Capability Relation Graph & Operator Capability Catalog (D8)
+# ADR 0154: Capability Relation Graph & Operator Capability Catalog (D8)
 
 Status: Accepted · Date: 2026-09-13 · Owner: agent/harness
 Charter: D8 — RS Agent Capability Knowledge Layer (111 算子能力知识层)

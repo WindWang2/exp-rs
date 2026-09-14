@@ -57,7 +57,7 @@ New operators (`rs:` family, registered append-only in
    first/last event scene+day, argmax days; `rs:sar_temporal_stats` gains an
    additive `dates[]`/`timeSemantics` result echo with its fixed band order
    byte-identical.
-5. **Agent-facing knowledge**: 7 authored capability sidecars (ADR 0146 flow,
+5. **Agent-facing knowledge**: 7 authored capability sidecars (ADR 0154 flow,
    `gen-pages --check` zero diff), `data/agent/capabilities/sar.json` entries,
    `docs/processing/sar-domain.md` §6–§9 contract chapters.
 

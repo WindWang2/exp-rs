@@ -1481,7 +1481,7 @@ bool discoverProduct(const QString& path, ProductInfo* out,
             return discoverModis(abs, out, errorMessage);
     }
     // Chinese L1A families: recognized names outside the supported set must
-    // refuse with the concrete identity reason (ADR 0146), never the generic
+    // refuse with the concrete identity reason (ADR 0157), never the generic
     // "Unrecognized" fallback.
     {
         const sicnu::geo::CnProductIdentity identity = sicnu::geo::cnIdentifyProduct(abs.toStdString());

@@ -1,7 +1,7 @@
 # Offline Policy — local verification without a network
 
 * Status: in force (D10 verification-baseline-green)
-* Contract: [ADR 0146](../adr/0146-offline-degradation-contract.md)
+* Contract: [ADR 0153](../adr/0153-offline-degradation-contract.md)
 * Applies to: every transport-dependent test binary, the verification ladder,
   the READINESS report, and the teaching-lab build profile.
 
@@ -53,7 +53,7 @@ sentinel line; the human-readable detail goes to stderr as
 exercise the production remote-transport paths (probe, range cache, conditional
 validators) against `tests/support/http_range_server.cpp` — a range-capable
 HTTP fixture bound to `127.0.0.1`. They require **no internet access**; their
-historical `timeout` verdicts came from hostile proxy environments (see ADR 0146),
+historical `timeout` verdicts came from hostile proxy environments (see ADR 0153),
 not from the code under test. They are, therefore, the local substitute
 evidence for remote I/O: no path goes permanently unverified when a network is
 absent — the suites either run (loopback is enough) or skip with a reason.

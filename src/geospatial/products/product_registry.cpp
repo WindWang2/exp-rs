@@ -924,7 +924,7 @@ ProductAdapterRegistry::ProductAdapterRegistry()
   mAdapters.push_back( std::make_unique<Sentinel2Adapter>() );
   mAdapters.push_back( std::make_unique<Sentinel1Adapter>() );
   mAdapters.push_back( std::make_unique<ModisAdapter>() );
-  // Chinese satellite families (ADR 0146) — specific adapters before the
+  // Chinese satellite families (ADR 0157) — specific adapters before the
   // GenericRaster fallback.
   mAdapters.push_back( makeGaofenAdapter() );
   mAdapters.push_back( makeZy3Adapter() );

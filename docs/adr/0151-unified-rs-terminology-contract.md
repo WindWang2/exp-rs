@@ -1,4 +1,4 @@
-# ADR 0146 — Unified bilingual terminology contract (RS glossary as single source)
+# ADR 0151 — Unified bilingual terminology contract (RS glossary as single source)
 
 * Status: Accepted (D6 · Chinese i18n & RS Glossary)
 * Date: 2026-09-13

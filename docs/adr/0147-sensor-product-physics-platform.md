@@ -2,7 +2,7 @@
 
 ## Context
 
-ADR 0146 shipped GF-1/2/6, ZY-3 and HJ-1A/1B CCD as fixed-set adapters with
+ADR 0157 shipped GF-1/2/6, ZY-3 and HJ-1A/1B CCD as fixed-set adapters with
 data-driven band-role tables. Three structural limits remained:
 
 1. **Sensor truth was split.** `data/products/band_roles/*.json` carried
@@ -79,7 +79,7 @@ data-driven band-role tables. Three structural limits remained:
    no mixed-state output, no half-calibrated stacks.
 
 6. **Ambiguity refuses, order never decides.** Multi-image product
-   directories without a stem-paired image keep the ADR 0146 refusal; the
+   directories without a stem-paired image keep the ADR 0157 refusal; the
    plan layer reports it as a typed `FileNotFound` with the pairing rule in
    the message instead of picking an arbitrary sibling.
 
