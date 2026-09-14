@@ -293,6 +293,34 @@ sicnu_add_io_test(test_io_scale9)
 target_link_libraries(test_io_operators PRIVATE Qt6::Core sicnu_operators)
 sicnu_link_jsoncpp(test_io_operators)
 
+# fabric-10: data fabric / data cube suites. The object-store suite runs a
+# REAL /vsis3/ open against a loopback S3-shaped endpoint (header-only
+# fixture); both suites need the tests/ include for shared fixtures.
+sicnu_add_io_test(test_io_fabric_object_store)
+target_include_directories(test_io_fabric_object_store PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(WIN32)
+  target_link_libraries(test_io_fabric_object_store PRIVATE ws2_32)
+endif()
+sicnu_add_io_test(test_io_fabric_catalog)
+target_include_directories(test_io_fabric_catalog PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_sources(test_io_fabric_catalog PRIVATE support/http_stac_server.cpp support/http_range_server.cpp)
+sicnu_add_io_test(test_io_fabric_cube)
+target_include_directories(test_io_fabric_cube PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+sicnu_add_io_test(test_io_fabric_plan)
+target_include_directories(test_io_fabric_plan PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_sources(test_io_fabric_plan PRIVATE support/http_range_server.cpp)
+# The operator suite rides the operator chain (Qt + sicnu_operators), same
+# shape as test_io_operators.
+sicnu_add_io_test(test_io_fabric_scale)
+target_include_directories(test_io_fabric_scale PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+sicnu_add_io_test(test_io_fabric_operators)
+target_include_directories(test_io_fabric_operators PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(test_io_fabric_operators PRIVATE Qt6::Core sicnu_operators)
+sicnu_link_jsoncpp(test_io_fabric_operators)
+if(WIN32)
+  target_link_libraries(test_io_fabric_catalog PRIVATE ws2_32)
+endif()
+
 # Geospatial I/O benchmark harness (Phase 15): run manually —
 #   benchmark_io --out benchmarks/io-foundation-4.json
 add_executable(benchmark_io benchmark_io.cpp)
@@ -8298,6 +8326,14 @@ sicnu_add_header_probes(
   contracts/command_ref_scanner.h
   contracts/error_code_scanner.h
   contracts/graph_assembly.h
+  # fabric-10: data fabric / data cube module headers.
+  geospatial/fabric/object_store.h
+  geospatial/fabric/catalog_service.h
+  geospatial/fabric/virtual_cube.h
+  geospatial/fabric/chunk_plan.h
+  geospatial/fabric/query_planner.h
+  geospatial/fabric/prefetch.h
+  geospatial/fabric/mirror.h
 )
 
 # Trace chain (task F) + store fault contracts (task E), Verification

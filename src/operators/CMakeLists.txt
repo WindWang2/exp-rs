@@ -92,6 +92,8 @@ message(STATUS "OTB CLI operators enabled (runtime external tools)")
 list(APPEND SICNU_OPERATORS_SOURCES
     io/io_operators.cpp
     io/io_operators_init.cpp
+    io/io_fabric_operators.cpp
+    io/io_fabric_operators.h
 )
 message(STATUS "I/O operators enabled")
 

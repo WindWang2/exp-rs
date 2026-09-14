@@ -29,6 +29,45 @@ All notable changes to the `exp-rs` project will be documented in this file.
 - **Scientific contracts**: `docs/processing/temporal.md` gains the Platform 10.0
   per-operator rows and kernel notes; architecture in `docs/temporal/ARCHITECTURE_V3.md`;
   decision record in ADR 0148.
+## [Data Fabric 10.0] - 2026-09-13
+
+### Cloud-Native Data Fabric / Data Cube 10.0 (goal series)
+
+- **Object storage seam** (`fabric/object_store`): `s3://`/`gs://`/`az://`
+  profile registry over GDAL's own /vsi* stack (no SDK), credential injection
+  as an RAII window that restores prior config state exactly and wipes GDAL's
+  per-URL handle cache on close (signed contexts never linger), offline typed
+  refusals, and a REAL /vsis3/ loopback integration proof.
+- **Unified catalog service** (`fabric/catalog_service`): local STAC trees
+  (VSI walk + link-following, cycle-safe), remote STAC APIs and in-memory
+  records behind one `CatalogQuery` vocabulary (bbox/temporal/collections/ids/
+  cloud cover/platform/sensors/asset role), bounded pagination, cooperative
+  cancel, honest `unresolvable`/`clientFilteredOut`/`truncatedByCap` accounts.
+- **Virtual mosaic / time cube** (`fabric/virtual_cube`): many scene assets →
+  one logical grid with bounded-probe grid negotiation, deterministic
+  FirstWins overlap that lets declared NoData lose to later scenes, on-demand
+  window reads with per-asset provenance; cross-CRS is a typed refusal (no
+  hidden warp).
+- **Chunk plans** (`fabric/chunk_plan`): named dimensions (time/y/x/band),
+  u64 chunk counts with windowed materialization only (million-chunk plans
+  never materialize), temporal/spatial/band slicing for EO cubes, declared-
+  dtype byte estimates.
+- **Query planner** (`fabric/query_planner`): intent → five inspectable
+  stages with scene/chunk/bytes/memory/remote-call cost hints; streaming
+  top-K selection keeps memory O(page + selected scenes) — 100k-record plans
+  add < 2 MiB peak RSS (measured); bounded identity probes report
+  cacheability; execution honors byte budgets (reported skips, not crashes)
+  and typed cancellation.
+- **Cache 10.0** (`fabric/prefetch`, `fabric/mirror`): range-cache warming
+  driven by chunk plans with telemetry-measured bytes and mirror-hit skips;
+  an explicit token-keyed offline mirror (fail-closed on unprovable identity,
+  single-writer, atomic manifest) with corruption-degrading reads.
+- **Surfaces**: `io:catalog_search` / `io:cube_plan` / `io:cube_window` /
+  `io:cache_prefetch` operators; `data catalog search` and
+  `data cube plan|window` CLI commands; one shared JSON intent parser
+  (`fabricIntentFromJson`).
+- Evidence: six green suites (330 assertions) in `tests/test_io_fabric_*.cpp`;
+  decisions D-1001..D-1017 in `.planning/cloud-data-fabric-datacube-10/`.
 
 ## [Workbench 9.0] - 2026-09-12
 

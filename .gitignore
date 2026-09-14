@@ -147,6 +147,10 @@ vendor/
 !.planning/temporal-eo-phenology-change-10/
 .planning/temporal-eo-phenology-change-10/*
 !.planning/temporal-eo-phenology-change-10/*.md
+# cloud-data-fabric-datacube-10: track planning notes (markdown only; logs stay local).
+!.planning/cloud-data-fabric-datacube-10/
+.planning/cloud-data-fabric-datacube-10/*
+!.planning/cloud-data-fabric-datacube-10/*.md
 .zcode/
 
 # IDE / editor / OS artifacts

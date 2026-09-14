@@ -42,6 +42,14 @@ set(SICNU_GEOSPATIAL_SOURCES
     doctor/data_doctor.cpp
     multidim/multidim_view.cpp
     multidim/multidim_cube.cpp
+    # Cloud-Native Data Fabric / Data Cube 10.0
+    fabric/object_store.cpp
+    fabric/catalog_service.cpp
+    fabric/virtual_cube.cpp
+    fabric/chunk_plan.cpp
+    fabric/mirror.cpp
+    fabric/query_planner.cpp
+    fabric/prefetch.cpp
 )
 
 qt_add_library(sicnu_geospatial STATIC ${SICNU_GEOSPATIAL_SOURCES})
