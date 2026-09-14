@@ -126,3 +126,82 @@ TEST_CASE( "Deforestation intercept step is pinpointed exactly with significance
     REQUIRE( clean.valid );
     REQUIRE( clean.breakCount == 0 );
 }
+
+// ---------------------------------------------------------------------------
+// Slice 3: model selection bounds, NaN handling, degenerate refusals.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "maxBreaks and minSegmentSamples bound the model", "[d16][bfast]" )
+{
+    // Two steps: index 30 (−0.25) and index 62 (+0.20).
+    HarmonicSeries s0;
+    s0.slope = 0.0;
+    HarmonicSeries s1 = s0;
+    s1.intercept = s0.intercept - 0.25;
+    HarmonicSeries s2 = s1;
+    s2.intercept = s1.intercept + 0.20;
+
+    const auto t = fourYearAxis();
+    std::vector<float> y( t.size() );
+    for ( std::size_t i = 0; i < t.size(); ++i )
+        y[i] = static_cast<float>( ( i < 30 ? s0 : ( i < 62 ? s1 : s2 ) ).value( t[i] ) );
+
+    SECTION( "both breaks found when maxBreaks allows" )
+    {
+        const auto result = BreakpointDetector::detectHarmonicBreaks( y, t, 3, 2, 20 );
+        REQUIRE( result.valid );
+        REQUIRE( result.breakCount == 2 );
+        REQUIRE( result.breakpoints[0].index == 30 );
+        REQUIRE( result.breakpoints[1].index == 62 );
+    }
+
+    SECTION( "maxBreaks=1 keeps only the strongest change" )
+    {
+        const auto result = BreakpointDetector::detectHarmonicBreaks( y, t, 3, 1, 20 );
+        REQUIRE( result.valid );
+        REQUIRE( result.breakCount == 1 );
+        // The deeper step (|Δ| = 0.25 at index 30) is the RSS-dominant one.
+        REQUIRE( result.breakpoints[0].index == 30 );
+    }
+}
+
+TEST_CASE( "Constant series and NaN gaps are handled honestly", "[d16][bfast]" )
+{
+    const auto t = fourYearAxis();
+
+    SECTION( "constant series: perfect fit, no break invented" )
+    {
+        std::vector<float> y( t.size(), 0.42f );
+        const auto result = BreakpointDetector::detectHarmonicBreaks( y, t, 3, 3, 23 );
+        REQUIRE( result.valid );
+        REQUIRE( result.breakCount == 0 );
+        REQUIRE( result.overallRmse < 1e-6 );
+    }
+
+    SECTION( "NaN samples are absent, never zero" )
+    {
+        HarmonicSeries series;
+        series.slope = 0.0001;
+        std::vector<float> y( t.size() );
+        for ( std::size_t i = 0; i < t.size(); ++i )
+            y[i] = static_cast<float>( series.value( t[i] ) );
+        y[10] = kNan;
+        y[11] = kNan;
+        y[70] = kNan;
+        const auto result = BreakpointDetector::detectHarmonicBreaks( y, t, 3, 2, 23 );
+        REQUIRE( result.valid );
+        REQUIRE( result.breakCount == 0 );
+        // The NaN positions carry NaN residuals; finite positions fit.
+        REQUIRE( std::isnan( result.residuals[10] ) );
+        REQUIRE( std::isfinite( result.residuals[12] ) );
+    }
+
+    SECTION( "degenerate arguments are refused" )
+    {
+        std::vector<float> y( t.size(), 0.5f );
+        REQUIRE( !BreakpointDetector::detectHarmonicBreaks( y, t, 0, 2, 23 ).valid );
+        REQUIRE( !BreakpointDetector::detectHarmonicBreaks( y, t, 7, 2, 23 ).valid );
+        REQUIRE( !BreakpointDetector::detectHarmonicBreaks( y, t, 3, -1, 23 ).valid );
+        REQUIRE( !BreakpointDetector::detectHarmonicBreaks( y, {}, 3, 2, 23 ).valid );
+    }
+}

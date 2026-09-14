@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numeric>
 #include <vector>
 
@@ -22,6 +23,7 @@ namespace
 
 constexpr double kPeriod = 365.25;
 constexpr double kTinyRss = 1e-12;
+constexpr float kNanOutput = std::numeric_limits<float>::quiet_NaN();
 
 /// Continued fraction of the incomplete beta function (Lentz's algorithm).
 double betacf( double a, double b, double x )
@@ -202,14 +204,17 @@ BfastResult BreakpointDetector::detectHarmonicBreaks( const std::vector<float> &
          !( significanceAlpha > 0.0 && significanceAlpha < 1.0 ) )
         return result;
 
-    // Finite pairs, ascending time (NaN = absent).
+    // Finite pairs with their original positions, ascending time (NaN =
+    // absent; outputs map back to the original axis at the end).
     std::vector<double> t;
     std::vector<float> v;
+    std::vector<std::size_t> origin;
     for ( std::size_t i = 0; i < y.size(); ++i )
         if ( std::isfinite( y[i] ) && std::isfinite( tDays[i] ) )
         {
             t.push_back( tDays[i] );
             v.push_back( y[i] );
+            origin.push_back( i );
         }
     std::vector<std::size_t> order( t.size() );
     for ( std::size_t i = 0; i < order.size(); ++i )
@@ -218,10 +223,12 @@ BfastResult BreakpointDetector::detectHarmonicBreaks( const std::vector<float> &
                [&]( std::size_t a, std::size_t b ) { return t[a] < t[b]; } );
     std::vector<double> ts( t.size() );
     std::vector<float> ys( t.size() );
+    std::vector<std::size_t> originSorted( t.size() );
     for ( std::size_t i = 0; i < order.size(); ++i )
     {
         ts[i] = t[order[i]];
         ys[i] = v[order[i]];
+        originSorted[i] = origin[order[i]];
     }
     const std::size_t n = ts.size();
     const int p = 2 + 2 * harmonics;
@@ -380,10 +387,11 @@ BfastResult BreakpointDetector::detectHarmonicBreaks( const std::vector<float> &
         ( void )rssAtSplit;
     }
 
-    // Final per-segment decomposition.
-    result.fittedTrend.assign( n, 0.0f );
-    result.fittedHarmonics.assign( n, 0.0f );
-    result.residuals.assign( n, 0.0f );
+    // Final per-segment decomposition, mapped back onto the original axis
+    // (positions that were NaN keep NaN in every output plane).
+    result.fittedTrend.assign( y.size(), 0.0f );
+    result.fittedHarmonics.assign( y.size(), 0.0f );
+    result.residuals.assign( y.size(), 0.0f );
     double rss = 0.0;
     bool ok = true;
     for ( std::size_t seg = 0; seg + 1 < bounds.size() && ok; ++seg )
@@ -398,10 +406,23 @@ BfastResult BreakpointDetector::detectHarmonicBreaks( const std::vector<float> &
         rss += segRss;
         for ( std::size_t i = bounds[seg]; i < bounds[seg + 1]; ++i )
         {
-            result.fittedTrend[i] = static_cast<float>( trendValue( coef, ts[i] ) );
-            result.fittedHarmonics[i] = static_cast<float>( harmonicValue( coef, ts[i] ) );
-            result.residuals[i] = static_cast<float>(
-                static_cast<double>( ys[i] ) - result.fittedTrend[i] - result.fittedHarmonics[i] );
+            const std::size_t out = originSorted[i];
+            result.fittedTrend[out] = static_cast<float>( trendValue( coef, ts[i] ) );
+            result.fittedHarmonics[out] = static_cast<float>( harmonicValue( coef, ts[i] ) );
+            result.residuals[out] = static_cast<float>(
+                static_cast<double>( ys[i] ) - result.fittedTrend[out] -
+                result.fittedHarmonics[out] );
+        }
+    }
+    if ( ok )
+    {
+        for ( std::size_t i = 0; i < y.size(); ++i )
+        {
+            if ( std::isfinite( y[i] ) )
+                continue;
+            result.fittedTrend[i] = kNanOutput;
+            result.fittedHarmonics[i] = kNanOutput;
+            result.residuals[i] = kNanOutput;
         }
     }
     if ( !ok )
