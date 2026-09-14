@@ -252,3 +252,8 @@ data/labs/_tmp/
 !.planning/eo-ai-model-runtime-foundation-10/
 .planning/eo-ai-model-runtime-foundation-10/*
 !.planning/eo-ai-model-runtime-foundation-10/*.md
+
+# radiometric-spectral-workbench: track planning notes (markdown only; logs stay local).
+!.planning/radiometric-spectral-workbench/
+.planning/radiometric-spectral-workbench/*
+!.planning/radiometric-spectral-workbench/*.md
