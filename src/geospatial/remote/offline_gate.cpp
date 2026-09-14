@@ -4,6 +4,7 @@
 #include "offline_gate.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
@@ -14,7 +15,7 @@ namespace sicnu::geo::offline {
 
 namespace {
 
-bool g_offline = false;
+std::atomic<bool> g_offline{ false };
 
 constexpr const char *const kDenyExtension = ".__offline_blocked__";
 
@@ -37,12 +38,12 @@ bool envFlagEnabled( const char *name )
 
 void setEnabled( bool offline )
 {
-    g_offline = offline;
+    g_offline.store( offline );
 }
 
 bool enabled()
 {
-    return g_offline;
+    return g_offline.load();
 }
 
 bool enabledFromEnv()
@@ -101,6 +102,8 @@ std::string refusalMessage( const std::string &source )
 
 void applyGdalNetworkDeny()
 {
+    // Must run single-threaded at startup: GDAL global config is not synchronized.
+    // The g_offline flag itself is atomic and may be observed from worker threads.
     // An extension no real source can carry: GDAL treats every network /vsi*
     // path as non-existing without issuing a single request (measured against
     // GDAL 3.13: open fails in ~10 ms, no DNS, no TCP).

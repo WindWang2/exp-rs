@@ -42,6 +42,7 @@
 #include <gdal_priv.h>
 
 #include <cmath>
+#include <cstdlib>
 #include <functional>
 #include <set>
 #include <string>
@@ -63,8 +64,34 @@ const GdalInit s_gdalInit;
 /// from the process environment at call time).
 struct ScopedEnv
 {
-    ScopedEnv( const char *key, const char *value ) : key( key ) { setenv( key, value, 1 ); }
-    ~ScopedEnv() { unsetenv( key ); }
+    ScopedEnv( const char *key, const char *value ) : key( key )
+    {
+#ifdef _WIN32
+        // MSVC has no POSIX setenv/unsetenv; _putenv with an empty value
+        // removes the variable (documented CRT behavior).
+        if ( value )
+            ::_putenv_s( key, value );
+        else
+        {
+            const std::string entry = std::string( key ) + "=";
+            ::_putenv( entry.c_str() );
+        }
+#else
+        if ( value )
+            ::setenv( key, value, 1 );
+        else
+            ::unsetenv( key );
+#endif
+    }
+    ~ScopedEnv()
+    {
+#ifdef _WIN32
+        const std::string entry = std::string( key ) + "=";
+        ::_putenv( entry.c_str() );
+#else
+        ::unsetenv( key );
+#endif
+    }
     const char *key;
 };
 
