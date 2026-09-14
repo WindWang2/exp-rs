@@ -47,9 +47,10 @@ test_geometric_agent_tools|test_d14_geometric_registration_e2e" --output-on-fail
 - 编译并发恒为 `ninja -j2`（CMAKE_BUILD_PARALLEL_LEVEL=2）；测试恒 `ctest -j1`。
 - 内存/负载监测：62GB RAM、16 核宿主，全程 RSS 远低于 70% 红线，未触发 -j1 降级条件。
 - ccache 冷缓存导致 worktree 全量首编约 1.5h（QGIS vendor 树），属预期一次性成本。
-- 全量 `ninja -j2` 在 D14 范围内零失败；仓库级 `-k 100` 继续构建中，master 既有文件
-  `tests/test_io_operators.cpp:295`（GCC 16 对 GDAL `OSRImportFromWkt(char**)` 的严格转换）
-  为基线已知问题、与 D14 无关（该文件最后修改为 master 提交 75ffe89202，本分支未触碰）。
+- 全量 `ninja -j2 -k 100`：2547/2549 步成功，D14 范围内零失败。仅存 2 个失败对象均为
+  **master 既有文件**（本分支 diff 为空，最后修改为基线侧提交 75ffe89202）：
+  `tests/test_io_operators.cpp:295` 与 `tests/test_detection_nms_10.cpp` —— GCC 16 对
+  GDAL `OSRImportFromWkt(char**)` 的指针严格转换，属基线工具链兼容问题，非 D14 引入。
 
 ## 100 分制自评（达标线 ≥90）
 | 维度 | 自评 | 依据 |
