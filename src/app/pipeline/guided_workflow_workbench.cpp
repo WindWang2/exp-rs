@@ -75,6 +75,12 @@ bool GuidedWorkflowWidget::setUnderlyingWorkflow( const sicnu::workflow::Workflo
         m_loadError = QStringLiteral( "underlying workflow is not semantically valid" );
         return false;
     }
+    const auto dag = sicnu::workflow::WorkflowDagAnalyzer::analyzeDag( def );
+    if ( !dag.isAcyclic )
+    {
+        m_loadError = dag.errorMessage;
+        return false; // cyclic cards would silently be empty — fail closed
+    }
     m_workflow = def;
     rebuildCardsFromWorkflow();
     return true;
