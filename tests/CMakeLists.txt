@@ -8975,3 +8975,34 @@ sicnu_discover_tests(test_processing_catalog_ux)
     ${CMAKE_BINARY_DIR}
   )
   sicnu_discover_tests(test_d16_starfm)
+
+  # D16 Package G: timeline scrubber + temporal profile (offscreen Qt).
+  add_executable(test_timeline_scrubber_widget test_timeline_scrubber_widget.cpp)
+  target_link_libraries(test_timeline_scrubber_widget PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    sicnu_temporal_timeline
+  )
+  target_include_directories(test_timeline_scrubber_widget PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(test_timeline_scrubber_widget PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(test_timeline_scrubber_widget)
+
+  add_executable(test_temporal_profile_widget test_temporal_profile_widget.cpp)
+  target_link_libraries(test_temporal_profile_widget PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    sicnu_temporal_timeline
+  )
+  target_include_directories(test_temporal_profile_widget PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(test_temporal_profile_widget PROPERTIES AUTOMOC ON)
+  sicnu_discover_tests(test_temporal_profile_widget)
