@@ -8946,6 +8946,7 @@ foreach(_d15_g_test test_magic_wand_roi test_feature_scatter test_classification
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
+    Qt6::Test
     qgis_core
     qgis_gui
     GDAL::GDAL
