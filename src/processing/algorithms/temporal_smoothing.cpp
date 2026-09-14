@@ -117,6 +117,12 @@ std::vector<float> whittakerSmooth( const std::vector<float> &y, const std::vect
 
     const std::vector<double> weights = effectiveWeights( y, w );
 
+    // Documented contract: no finite sample -> no fit -> all-NaN (same size).
+    const bool anyFinite = std::any_of( weights.begin(), weights.end(),
+                                        []( double v ) { return v > 0.0; } );
+    if ( !anyFinite )
+        return std::vector<float>( n, kNan );
+
     // Assemble A = W + λDᵀD band entries (Eilers' pentadiagonal pattern).
     std::vector<double> diag( n, 0.0 );
     std::vector<double> subA( n, 0.0 );

@@ -218,3 +218,87 @@ TEST_CASE( "Robust Whittaker hugs the upper envelope under 30% negative spikes",
     const auto cleanFit = whittakerSmoothRobust( truth, {}, 100.0, 4 );
     REQUIRE( mae( cleanFit, truth ) < 0.005 );
 }
+
+// ---------------------------------------------------------------------------
+// Slice 3: Savitzky-Golay + degenerate-input guards.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Savitzky-Golay reproduces polynomials up to the fit degree",
+           "[d16][whittaker]" )
+{
+    std::vector<float> linear( 15 );
+    for ( int i = 0; i < 15; ++i )
+        linear[i] = static_cast<float>( 2.0 * i - 7.0 );
+    const auto z1 = savitzkyGolay( linear, 5, 2 );
+    REQUIRE( z1.size() == linear.size() );
+    REQUIRE( maxAbsDiff( z1, linear ) < 1e-4 );
+
+    std::vector<float> quad( 15 );
+    for ( int i = 0; i < 15; ++i )
+        quad[i] = static_cast<float>( 0.5 * i * i - 3.0 * i + 1.0 );
+    const auto z2 = savitzkyGolay( quad, 7, 2 );
+    REQUIRE( maxAbsDiff( z2, quad ) < 1e-3 );
+
+    // Cubic needs degree >= 3.
+    std::vector<float> cubic( 15 );
+    for ( int i = 0; i < 15; ++i )
+        cubic[i] = static_cast<float>( ( i - 7 ) * ( i - 7 ) * ( i - 7 ) * 0.05 );
+    const auto z3 = savitzkyGolay( cubic, 7, 3 );
+    REQUIRE( maxAbsDiff( z3, cubic ) < 1e-3 );
+
+    // Constant is invariant.
+    const std::vector<float> flat( 11, 4.2f );
+    REQUIRE( maxAbsDiff( savitzkyGolay( flat, 5, 3 ), flat ) < 1e-6 );
+}
+
+TEST_CASE( "Savitzky-Golay leaves positions without support as NaN",
+           "[d16][whittaker]" )
+{
+    std::vector<float> y( 9, 1.0f );
+    y[0] = kNan;
+    y[1] = kNan;
+    y[2] = kNan;
+    y[3] = kNan;
+    // Window 9, degree 4: position 0 has only 5 finite neighbors around it
+    // inside its shrunk window -> NaN. Interior stays 1.
+    const auto z = savitzkyGolay( y, 9, 4 );
+    REQUIRE( z.size() == y.size() );
+    REQUIRE( std::isnan( z[0] ) );
+    REQUIRE( z[8] == Approx( 1.0 ).margin( 1e-6 ) );
+    REQUIRE( z[5] == Approx( 1.0 ).margin( 1e-6 ) );
+}
+
+TEST_CASE( "Degenerate inputs are refused or NaN-filled without crashing",
+           "[d16][whittaker]" )
+{
+    const std::vector<float> y = { 1, 2, 3, 4, 5 };
+
+    // Unsupported difference order and bad lambda -> empty (documented).
+    REQUIRE( whittakerSmooth( y, {}, 10.0, 3 ).empty() );
+    REQUIRE( whittakerSmooth( y, {}, 10.0, 0 ).empty() );
+    REQUIRE( whittakerSmooth( y, {}, -1.0, 2 ).empty() );
+
+    // All-NaN series -> all-NaN, same size (no data, no fit).
+    const std::vector<float> holes( 9, kNan );
+    const auto zHoles = whittakerSmooth( holes, {}, 10.0, 2 );
+    REQUIRE( zHoles.size() == holes.size() );
+    for ( float v : zHoles )
+        REQUIRE( std::isnan( v ) );
+    const auto zRobustHoles = whittakerSmoothRobust( holes, {}, 10.0, 3 );
+    REQUIRE( zRobustHoles.size() == holes.size() );
+
+    // Whittaker on a flat series with huge lambda: exact, no blow-up.
+    const std::vector<float> flat( 21, 2.5f );
+    const auto zFlat = whittakerSmooth( flat, {}, 1e9, 2 );
+    REQUIRE( maxAbsDiff( zFlat, flat ) < 1e-4 );
+
+    // SG: even window / degree out of range / empty -> empty (documented).
+    REQUIRE( savitzkyGolay( y, 4, 2 ).empty() );
+    REQUIRE( savitzkyGolay( y, 5, 0 ).empty() );
+    REQUIRE( savitzkyGolay( y, 5, 5 ).empty() );
+    REQUIRE( savitzkyGolay( {}, 5, 2 ).empty() );
+
+    // SG on an all-flat singular-window series: no crash, finite output.
+    const auto zFlatSg = savitzkyGolay( flat, 5, 3 );
+    REQUIRE( zFlatSg.size() == flat.size() );
+}
