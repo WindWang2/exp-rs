@@ -73,10 +73,12 @@ defines the migration edge, keeping one direction of truth (V1 → V2).
 ### 3. Contract checker & repair engine — closed rule table
 
 Violations: CRS mismatch, resolution mismatch, radiometric-state mismatch,
-data-type mismatch, dimension mismatch. Repairs (shape-preserving,
+data-type mismatch (dimension mismatch is enumerated but not derivable from
+port facts today, so no rule fires for it). Repairs (shape-preserving,
 auto-inserted): `rs:reproject` (target CRS, bilinear), `rs:resample`
-(target resolution), `rs:radiometric_calibration` + `rs:atmospheric_correction`
-(DN → TOA/BOA chains), `rs:convert_dtype`, `rs:clip_to_extent`. Determinism:
+(target resolution, bilinear), `rs:radiometric_calibration` +
+`rs:atmospheric_correction` (DN → TOA/BOA chains), `rs:convert_dtype`.
+Inserted adapters are named `adapter_<edgeId>_<operator>`. Determinism:
 same workflow → byte-identical repaired workflow; inserted ids derived
 deterministically. **Repair invariant**: re-inspecting a repaired workflow
 yields an empty violation set (test-pinned). Unlike the 1.0 engine, the V2
@@ -149,8 +151,9 @@ compiler's rule table).
   (planning whitelist) and this ADR. The five seam paths that differ from
   the D17 brief are recorded in
   `.planning/workflow-pipeline-designer/DECISIONS.md` D1.
-- Test targets are self-contained (Catch2 v3 + `sicnu_test_main.cpp`),
-  offscreen-capable, `ctest -j1`-safe.
+- Test targets are self-contained (Catch2 v3 with its bundled main via
+  `Catch2::Catch2WithMain`, minimal Qt/jsoncpp links), offscreen-capable,
+  `ctest -j1`-safe.
 - The designer stack is sandbox-safe: pure value types, no network, no
   registry writes; artifacts land in caller-provided run directories.
 - Risk: divergence between IR 1.0 and 2.0 semantics is contained by the
