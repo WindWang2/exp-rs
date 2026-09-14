@@ -51,3 +51,55 @@ Bunch-Kaufman 实现复杂度高；增广系统 N≤数百，**部分主元 Dool
 
 ## D13 · 资源红线执行
 `ninja -j2` 固定；每轮构建前 `free -g` + `uptime` 采样，RSS>70%（≈43GB）或 load>24 即降级 `-j1`；ctest 恒 `-j1`；`QT_QPA_PLATFORM=offscreen`。
+
+## D14-5 · 测试目标更名 test_georef_dual_window_workbench
+仓库已存在 `tests/test_georef_dual_window.cpp`（覆盖 QGIS georeferencer 主窗口，
+tests/CMakeLists.txt:3287）。为不破坏既有覆盖，D14 的 UI 测试命名为
+`test_georef_dual_window_workbench`（仍是 D14 runbook 正则
+`test_georef_dual_window.*` 的匹配项），实现文件为
+`src/app/workbench/georef_dual_window.{h,cpp}`（规格书要求的落位不变）。
+
+## D14-6 · GS 逆变换公式按投影恒等式解释
+规格书 GS 公式 "MŜ_k = GS_k + g_k·(PAN_norm − GS_1)" 若按字面实现会在
+PAN == GS1 时输出 GS_k ≠ MS_k，破坏谱一致性。按 GS 投影恒等式
+MS_k = GS_k + Σ_j g_kj·GS_j，正确的替代式为
+**MŜ_k = MS_k^up + g_k1·(PAN_norm − GS_1)**（Aiazzi/Laben 标准 GS 模式 1）。
+测试用例 "PAN == GS1 ⇒ 融合 == 上采样 MS" 验证该解释。
+
+## D14-7 · lab06 RMSE 判分带
+D14 规格 lab06 负向用例要求 "RMSE = 2.5 px ⇒ 精准扣 35 分"。RMSE 桶（40 分）
+采用带状判分：≤0.8 → 40；≤1.5 → 25；≤3.0 → 5；>3.0 → 0。2.5 落入第三带
+（5/40）⇒ 总扣分 35（其余桶全满）。负向用例的 δ=40/√39 由解析构造使拟合
+RMSE 恰为 2.5（RMSE = δ·√39/16），规格公式见测试注释。
+
+## D14-8 · e2e 正向用例 GCP 数量必须 > P2 参数量
+P2 有 12 个参数；8 个 GCP 会欠定（最小范数解在节点间偏离解析映射）。正向
+用例改用 4×4=16 点过定网格，使拟合唯一且与解析后向映射逐像素一致
+（maxMapDeviation < 1e-2 px 的断言依据）。
+
+## D14-9 · TDD 循环形态（诚实记录）
+受限于 worktree 全量冷构建（ccache 冷、-j2 红线），以**包**为红-绿循环单元：
+每包先写接缝 + 失败断言（stub 阶段编译红），再实现转绿后提交；提交仍按包
+原子切分。四类一票否决反模式（同义反复/私有探测/横向大步/内部打桩）零发生。
+
+## D14-15 · 审查阶段补充决策（Phase 3 双轴审查落地）
+- **D3 修订**：solveLeastSquares 对秩亏系统（任一奇异值 < 1e-12·σmax）直接判失败，
+  不产出最小范数伪逆解——"伪逆截断"仅保留给 hull/几何语义明确处；实现从严于原记录，
+  本条为对齐说明。
+- **DLT 秩门禁**：dltHomography 要求非零奇异值个数达到 requiredRank（4 点对=8，
+  ≥5 点对=9，9 维齐次零空间与 4 点对补零行属固有），不足即判退化失败，杜绝
+  "κ 正常但 H 无意义"绕过 κ>1e14 门禁（Spec 审查 P1-2）。
+- **warpRaster 的 inverseCoordMap 为世界坐标进出**（像素→世界→用户映射→世界→像素，
+  GT 才有实际用途）；规格 Package E 的"像素坐标进出"文字按此解释（Spec 审查 P2-4）。
+- **简化检测子留痕**：matchImages 采用网格采样 + 简化 SIFT-like（2×2 cell×8 方向
+  梯度直方图，32 维）/ORB-like（9×9 强度斑，81 维）描述子，非完整尺度空间 SIFT；
+  detector 枚举选择描述子族（Spec 审查 P2-6）。
+- **退化三角形纵横比 = +∞**（对角诊断语义），空三角网（全共线）时指标为 0.0，
+  由凸包面积 0 语义覆盖共线诊断（Spec 审查 P1-1 的落地取舍）。
+- **GCP id 单调序号**：GeorefDualWindow 用 mNextGcpSerial 递增生成（删除后
+  size()+1 会撞号导致加点永久静默失败，Standards 审查 P0-1）。
+- **GeoTIFF 导出职责**：rectificationFinished 不伪造输出路径；warp 执行与产品
+  写出归 georeferencing session/任务管线（ADR 0020 executor seam），
+  窗口只负责拟合与 RMSE 报告（Standards 审查 P1-3）。
+- **inspectMisalignment 降采样护栏**：agent 传入栅格长边 >512px 时经 GDAL 读取期
+  重采样降采样，防 OOM（Standards 审查 P1-4）。
