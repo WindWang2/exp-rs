@@ -116,6 +116,8 @@ add_executable(sicnu_geo_rs
     shell/ribbon_controller.cpp
     shell/rs_job_runner.cpp
     shell/processing_job_adapter.cpp
+    shell/view_link_controller.cpp
+    shell/rs_operator_catalog_panel.cpp
     shell/rs_job_panel.cpp
 
     # Workbench 5.0 (workspace model, selection context, command surface)
@@ -123,6 +125,9 @@ add_executable(sicnu_geo_rs
     workbench/adapters.cpp
     workbench/selection_context.cpp
     workbench/workbench_state.cpp
+    # Workbench 10.0 (unified object identity, agent context projection)
+    workbench/object_identity.cpp
+    workbench/agent_context_tool.cpp
     workbench/command_registry.cpp
     workbench/plugin_command_defs.cpp
     workbench/command_defs.cpp
@@ -137,6 +142,12 @@ add_executable(sicnu_geo_rs
     workbench/temporal_workbench_panel.cpp
     workbench/dataset_experiment_panel.cpp
     workbench/model_workbench_panel.cpp
+    cartography/cartography_dock.cpp
+
+    # Workbench 10.0 — Visual Analytics component platform
+    visualanalytics/va_source.cpp
+    visualanalytics/va_chart_widget.cpp
+    visualanalytics/va_workbench_panel.cpp
     main_window_workbench.cpp
     workflow/pipeline_port_item.cpp
     workflow/pipeline_connection_item.cpp

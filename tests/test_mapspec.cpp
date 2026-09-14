@@ -8,6 +8,7 @@
 #include <json/json.h>
 
 #include "agent/cartography/cartography_tools.h"
+#include "agent/cartography/cartography_operators.h"
 #include "agent/cartography/chart_registry.h"
 #include "agent/cartography/registry.h"
 #include "agent/contracts/spatial_contracts.h"
@@ -33,6 +34,9 @@ int main( int argc, char *argv[] )
   qputenv( "SICNU_CARTOGRAPHY_DIR", SICNU_CARTOGRAPHY_DATA_DIR );
   QgsApplication application( argc, argv, true );
   QgsApplication::initQgis();
+  // Workbench 10.0: the cartography operator family rides the same harness
+  // (idempotent; Catch2 randomizes case order, so registration is up front).
+  sicnu::agent::cartography::initCartographyOperators();
   const int result = Catch::Session().run( argc, argv );
   QgsProject::instance()->clear();
   QgsApplication::exitQgis();

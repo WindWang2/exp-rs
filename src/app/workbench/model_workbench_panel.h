@@ -38,6 +38,9 @@ class ModelWorkbenchPanel : public QgsDockWidget
   signals:
     /// Emitted after a test-inference task was submitted through TaskCenter.
     void inferenceSubmitted( long taskId );
+    /// Workbench 10.0 unified selection source (shell → SelectionContext
+    /// selectedModelIds). Names are ModelCatalog names.
+    void modelSelectionChanged( const QStringList &modelNames );
 
   private slots:
     void reloadCatalog();

@@ -130,6 +130,10 @@ ContextFacts prerequisiteFacts( const SelectionContextSnapshot &s )
     facts.hasGovernanceAsset = assetSelected( s );
     facts.hasBrokenLayer = s.hasBroken;
     facts.hasInFlightTask = s.hasInFlightTask;
+    facts.hasExperiment = experimentSelected( s );
+    facts.hasDataset = datasetSelected( s );
+    facts.hasModel = modelSelected( s );
+    facts.hasWorkflowRun = workflowRunSelected( s );
     return facts;
 }
 
@@ -174,6 +178,39 @@ bool resultSelected( const SelectionContextSnapshot &s )
 bool assetSelected( const SelectionContextSnapshot &s )
 {
     return !s.selectedAssetIds.isEmpty();
+}
+
+bool experimentSelected( const SelectionContextSnapshot &s )
+{
+    return !s.selectedExperimentIds.isEmpty();
+}
+
+bool datasetSelected( const SelectionContextSnapshot &s )
+{
+    return !s.selectedDatasetIds.isEmpty();
+}
+
+bool modelSelected( const SelectionContextSnapshot &s )
+{
+    return !s.selectedModelIds.isEmpty();
+}
+
+bool workflowRunSelected( const SelectionContextSnapshot &s )
+{
+    return !s.selectedWorkflowRunIds.isEmpty();
+}
+
+QStringList selectedLayerIds( const SelectionContextSnapshot &s )
+{
+    QStringList ids;
+    if ( s.activeLayer )
+        ids.append( s.activeLayer->id() );
+    for ( QgsMapLayer *layer : s.selectedLayers )
+    {
+        if ( layer && !ids.contains( layer->id() ) )
+            ids.append( layer->id() );
+    }
+    return ids;
 }
 
 QString unavailabilityReason( const SelectionContextSnapshot &s, const QString &commandId )
@@ -232,6 +269,22 @@ QString unavailabilityReason( const SelectionContextSnapshot &s, const QString &
     else if ( commandId.startsWith( QStringLiteral( "asset." ) ) && !assetSelected( s ) )
     {
         return QObject::tr( "Data assets must be selected" );
+    }
+    else if ( commandId.startsWith( QStringLiteral( "experiment." ) ) && !experimentSelected( s ) )
+    {
+        return QObject::tr( "An experiment run must be selected" );
+    }
+    else if ( commandId.startsWith( QStringLiteral( "dataset." ) ) && !datasetSelected( s ) )
+    {
+        return QObject::tr( "A dataset must be selected" );
+    }
+    else if ( commandId.startsWith( QStringLiteral( "model." ) ) && !modelSelected( s ) )
+    {
+        return QObject::tr( "A model must be selected" );
+    }
+    else if ( commandId.startsWith( QStringLiteral( "workflowrun." ) ) && !workflowRunSelected( s ) )
+    {
+        return QObject::tr( "A workflow run must be selected" );
     }
     return QString();
 }
@@ -383,6 +436,38 @@ void SelectionContext::notifyGovernanceSelection( const QStringList &entityIds )
     if ( m_selectedResultIds == entityIds )
         return;
     m_selectedResultIds = entityIds;
+    scheduleRefresh();
+}
+
+void SelectionContext::notifyDatasetSelection( const QStringList &datasetIds )
+{
+    if ( m_selectedDatasetIds == datasetIds )
+        return;
+    m_selectedDatasetIds = datasetIds;
+    scheduleRefresh();
+}
+
+void SelectionContext::notifyExperimentSelection( const QStringList &runIds )
+{
+    if ( m_selectedExperimentIds == runIds )
+        return;
+    m_selectedExperimentIds = runIds;
+    scheduleRefresh();
+}
+
+void SelectionContext::notifyModelSelection( const QStringList &modelNames )
+{
+    if ( m_selectedModelIds == modelNames )
+        return;
+    m_selectedModelIds = modelNames;
+    scheduleRefresh();
+}
+
+void SelectionContext::notifyWorkflowSelection( const QStringList &runIds )
+{
+    if ( m_selectedWorkflowRunIds == runIds )
+        return;
+    m_selectedWorkflowRunIds = runIds;
     scheduleRefresh();
 }
 
@@ -564,6 +649,10 @@ SelectionContextSnapshot SelectionContext::computeSnapshot() const
 
     snap.selectedAssetIds = m_selectedAssetIds;
     snap.selectedResultIds = m_selectedResultIds;
+    snap.selectedDatasetIds = m_selectedDatasetIds;
+    snap.selectedExperimentIds = m_selectedExperimentIds;
+    snap.selectedModelIds = m_selectedModelIds;
+    snap.selectedWorkflowRunIds = m_selectedWorkflowRunIds;
     // Workbench 8.0: injected in-flight fact (shell binds TaskCenter).
     snap.hasInFlightTask = m_inFlightPredicate && m_inFlightPredicate();
     return snap;

@@ -44,12 +44,13 @@ TEST_CASE( "History states project truthfully for every lifecycle value",
   testApp();
   using sicnu::TaskStatus;
   using namespace sicnu::app;
-  CHECK( historyTaskStateText( TaskStatus::Queued ) == QStringLiteral( "排队中" ) );
-  CHECK( historyTaskStateText( TaskStatus::Running ) == QStringLiteral( "运行中" ) );
-  CHECK( historyTaskStateText( TaskStatus::WaitingResource ) == QStringLiteral( "等待资源" ) );
-  CHECK( historyTaskStateText( TaskStatus::Completed ) == QStringLiteral( "已完成" ) );
-  CHECK( historyTaskStateText( TaskStatus::Failed ) == QStringLiteral( "失败" ) );
-  CHECK( historyTaskStateText( TaskStatus::Canceled ) == QStringLiteral( "已取消" ) );
+  CHECK( historyTaskStateText( TaskStatus::Queued ) == QStringLiteral( "Queued" ) );
+  CHECK( historyTaskStateText( TaskStatus::Running ) == QStringLiteral( "Running" ) );
+  CHECK( historyTaskStateText( TaskStatus::WaitingResource )
+           == QStringLiteral( "Waiting for Resources" ) );
+  CHECK( historyTaskStateText( TaskStatus::Completed ) == QStringLiteral( "Finished" ) );
+  CHECK( historyTaskStateText( TaskStatus::Failed ) == QStringLiteral( "Failed" ) );
+  CHECK( historyTaskStateText( TaskStatus::Canceled ) == QStringLiteral( "Cancelled" ) );
   CHECK( historyTaskTerminal( TaskStatus::Running ) == false );
   CHECK( historyTaskTerminal( TaskStatus::Completed ) == true );
   CHECK( historyTaskTerminal( TaskStatus::Failed ) == true );
@@ -58,11 +59,11 @@ TEST_CASE( "History states project truthfully for every lifecycle value",
   // Interrupted workflow runs are resumable, terminal ones are not.
   using sicnu::workflow::WorkflowRunState;
   CHECK( historyRunStateText( WorkflowRunState::Interrupted )
-           .contains( QStringLiteral( "已中断" ) ) );
+           .contains( QStringLiteral( "Interrupted" ) ) );
   CHECK( historyRunResumable( WorkflowRunState::Interrupted ) );
   CHECK_FALSE( historyRunResumable( WorkflowRunState::Completed ) );
   CHECK_FALSE( historyRunResumable( WorkflowRunState::Failed ) );
-  CHECK( historyRunStateText( WorkflowRunState::Completed ) == QStringLiteral( "已完成" ) );
+  CHECK( historyRunStateText( WorkflowRunState::Completed ) == QStringLiteral( "Finished" ) );
 }
 
 TEST_CASE( "History model orders newest-first and keeps the visible surface bounded",

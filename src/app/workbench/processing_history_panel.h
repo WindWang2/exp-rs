@@ -62,6 +62,10 @@ class ProcessingHistoryPanel : public QgsDockWidget
     /// provenance inspector section shows the production chain (§B↔§C link).
     void inspectRequested( const QString &path );
     void resumeRunRequested( const QString &runId );
+    /// Workbench 10.0 unified selection source (shell → SelectionContext
+    /// selectedWorkflowRunIds). Carries the run ids of the selected
+    /// workflow-run rows only; a pure task selection emits an empty list.
+    void workflowRunSelectionChanged( const QStringList &runIds );
 
   private slots:
     void onContextMenu( const QPoint &pos );

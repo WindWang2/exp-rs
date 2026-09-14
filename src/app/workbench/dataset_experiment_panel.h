@@ -36,6 +36,13 @@ class DatasetExperimentPanel : public QgsDockWidget
   public:
     explicit DatasetExperimentPanel( QWidget *parent = nullptr );
 
+  signals:
+    /// Workbench 10.0 unified selection sources: the shell forwards these to
+    /// SelectionContext (experiment runs → selectedExperimentIds, datasets →
+    /// selectedDatasetIds). Ids are the stores' authoritative ids.
+    void experimentRunSelectionChanged( const QStringList &runIds );
+    void datasetSelectionChanged( const QString &datasetId );
+
   private slots:
     void openDatasetStore();
     void openExperimentStore();

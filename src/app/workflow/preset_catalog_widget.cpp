@@ -315,6 +315,110 @@ std::vector<PresetItemInfo> PresetCatalogWidget::builtinPresets()
     presets.push_back( p5 );
   }
 
+  // 6. Cartography: import → compose (MapSpec) → governed export (C-1)
+  {
+    PresetItemInfo p6;
+    p6.id = "preset_cartography_export";
+    p6.title = tr( "Analysis Result Map Composition and Export" );
+    p6.category = tr( "Cartography" );
+    p6.description = tr(
+      "Feeds an upstream raster through the cartography operators: compose a "
+      "templated map layout, preflight it and export with sha256 evidence." );
+
+    WorkflowDefinition wf;
+    wf.id = "cartography_export";
+    wf.title = "Map Composition & Export";
+
+    StepDef s1;
+    s1.id = "carto_import";
+    s1.title = "Input Raster";
+    s1.operatorId = "gdal:import";
+    s1.artifactOnSuccess = "carto_raster";
+    s1.uiMeta = { 100.0, 150.0 };
+
+    // Minimal MapSpec: every collection key present (validator contract),
+    // the map frame consumes the upstream artifact through the placeholder
+    // grammar (analysis result as MapSpec input).
+    Json::Value spec( Json::objectValue );
+    spec["schema_version"] = "1.0";
+    spec["kind"] = "map_spec";
+    spec["spec_version"] = 1;
+    spec["layout_name"] = "wb_pipeline_map";
+    Json::Value page( Json::objectValue );
+    page["width_mm"] = 297.0;
+    page["height_mm"] = 210.0;
+    page["orientation"] = "landscape";
+    spec["page"] = page;
+    Json::Value frame( Json::objectValue );
+    frame["id"] = "map.main";
+    Json::Value rect( Json::arrayValue );
+    rect.append( 14.0 );
+    rect.append( 16.0 );
+    rect.append( 195.0 );
+    rect.append( 140.0 );
+    frame["rect_mm"] = rect;
+    Json::Value frameLayers( Json::arrayValue );
+    frameLayers.append( "${carto_import.output}" );
+    frame["layers"] = frameLayers;
+    spec["map_frames"] = Json::Value( Json::arrayValue );
+    spec["map_frames"].append( frame );
+    for ( const char *collection : { "layers", "symbols", "legends", "north_arrows",
+                                     "scale_bars", "titles", "labels", "charts", "colorbars",
+                                     "inset_maps", "grids", "annotations", "source_notes",
+                                     "constraints" } )
+      spec[collection] = Json::Value( Json::arrayValue );
+
+    StepDef s2;
+    s2.id = "carto_compose";
+    s2.title = "Compose Map Layout";
+    s2.operatorId = "cartography:compose";
+    s2.artifactOnSuccess = "output"; // operator output["output"] = layout name
+    s2.uiMeta = { 400.0, 150.0 };
+    s2.params["mapspec"] = spec;
+
+    StepConnection c1;
+    c1.fromStepId = "carto_import";
+    c1.fromPort = "carto_raster";
+    c1.toPort = "mapspec";
+    s2.inputs.push_back( c1 );
+
+    StepDef s3;
+    s3.id = "carto_preflight";
+    s3.title = "Preflight Map";
+    s3.operatorId = "cartography:preflight";
+    s3.artifactOnSuccess = "quality_report";
+    s3.uiMeta = { 400.0, 270.0 };
+    s3.params["mapspec"] = spec;
+
+    StepConnection c2;
+    c2.fromStepId = "carto_compose";
+    c2.fromPort = "output";
+    c2.toPort = "mapspec";
+    s3.inputs.push_back( c2 );
+
+    StepDef s4;
+    s4.id = "carto_export";
+    s4.title = "Export Map";
+    s4.operatorId = "cartography:export";
+    s4.artifactOnSuccess = "map_file";
+    s4.uiMeta = { 700.0, 150.0 };
+    s4.uiMeta.portAddToMap["map_file"] = true;
+    s4.params["layout"] = "${carto_compose.output}";
+    s4.params["format"] = "png";
+    s4.params["directory"] = "output/maps";
+    s4.params["dpi"] = 300;
+
+    StepConnection c3;
+    c3.fromStepId = "carto_compose";
+    c3.fromPort = "output";
+    c3.toPort = "layout";
+    s4.inputs.push_back( c3 );
+
+    wf.steps = { s1, s2, s3, s4 };
+    p6.definition = wf;
+    presets.push_back( p6 );
+  }
+
   return presets;
 }
 

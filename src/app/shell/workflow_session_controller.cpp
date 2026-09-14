@@ -96,7 +96,70 @@ void WorkflowSessionController::bindCanvas( sicnu::workflow::gui::PipelineCanvas
              this, &WorkflowSessionController::runUpToNode );
     connect( this, &WorkflowSessionController::stepStatusChanged,
              m_canvas, &sicnu::workflow::gui::PipelineCanvasWidget::updateStepStatus );
+    // Workbench 10.0: node selection shows that step's parameter form in the
+    // TaskPanelHost — the editor's parameter inspector rides the existing
+    // single schema-form surface instead of building a second one.
+    connect( m_canvas, &sicnu::workflow::gui::PipelineCanvasWidget::nodeSelected,
+             this, &WorkflowSessionController::selectStep );
   }
+}
+
+void WorkflowSessionController::selectStep( const QString &stepId )
+{
+  if ( stepId.isEmpty() || m_activeSession.isEmpty() )
+    return;
+  const auto def = m_runtime.findDefinitionShared( m_runtime.state(
+                                                       m_activeSession.toStdString() )
+                                                       .definitionId );
+  if ( !def )
+    return;
+  const StepDef *step = findStep( def.get(), stepId.toStdString() );
+  if ( !step )
+    return;
+  // Same rendering path as openTool, scoped to the chosen step: gotoStep
+  // moves the session cursor, then the form is rebuilt from that step.
+  if ( !m_runtime.gotoStep( m_activeSession.toStdString(), stepId.toStdString() ) )
+    return;
+
+  m_activeStepId = stepId;
+  QString title = QString::fromStdString( step->title );
+  QString helpSummary;
+  Json::Value schema( Json::objectValue );
+  if ( step->kind == StepKind::Operator && !step->operatorId.empty() )
+  {
+    if ( auto op = RSOperatorRegistry::instance().create( step->operatorId ) )
+    {
+      schema = sicnu::app::applyEnumSourceAnnotations( op->schema() );
+      helpSummary = QString::fromStdString( op->description() );
+      if ( title.isEmpty() )
+        title = QString::fromStdString( op->displayName() );
+    }
+    else
+    {
+      helpSummary = tr( "Operator not registered: %1" ).arg( QString::fromStdString( step->operatorId ) );
+    }
+  }
+  if ( title.isEmpty() )
+    title = QString::fromStdString( step->id );
+
+  Json::Value currentParams;
+  try
+  {
+    const auto snap = m_runtime.state( m_activeSession.toStdString() );
+    if ( snap.paramsByStep.isObject() && snap.paramsByStep.isMember( stepId.toStdString() ) )
+      currentParams = snap.paramsByStep[stepId.toStdString()];
+  }
+  catch ( const std::exception & )
+  {
+    // Unknown session: still render the form from the definition itself.
+  }
+  const QString operatorHelpContext =
+      step->operatorId.empty() ? QString() : QString::fromStdString( step->operatorId );
+  m_panel->showTool( title, helpSummary, schema, operatorHelpContext );
+  if ( currentParams.isObject() && !currentParams.empty() )
+    m_panel->setFormValues( currentParams );
+  m_panel->setRasterLayerChoices( m_layerIds, m_layerNames );
+  emit statusMessage( tr( "已选择节点：%1" ).arg( title ) );
 }
 
 void WorkflowSessionController::setDataManager( sicnu::data::DataManager *dataManager )
@@ -210,6 +273,29 @@ QString WorkflowSessionController::openTool( const QString &definitionId )
 
   emit statusMessage( tr( "Opened tool: %1" ).arg( title ) );
   return m_activeSession;
+}
+
+QString WorkflowSessionController::openBareOperator( const QString &operatorId )
+{
+  if ( operatorId.isEmpty() || !m_panel )
+    return {};
+  auto op = RSOperatorRegistry::instance().create( operatorId.toStdString() );
+  if ( !op )
+  {
+    emit statusMessage( tr( "算子未注册：%1" ).arg( operatorId ) );
+    return {};
+  }
+  sicnu::workflow::WorkflowDefinition def;
+  def.id = QStringLiteral( "rsop.%1" ).arg( operatorId ).toStdString();
+  def.title = op->displayName();
+  sicnu::workflow::StepDef step;
+  step.id = "step1";
+  step.title = op->displayName();
+  step.operatorId = operatorId.toStdString();
+  step.artifactOnSuccess = "output";
+  def.steps.push_back( step );
+  m_runtime.registerDefinition( std::move( def ) );
+  return openTool( QString::fromStdString( def.id ) );
 }
 
 void WorkflowSessionController::setLayerChoices( const QStringList &ids, const QStringList &names )

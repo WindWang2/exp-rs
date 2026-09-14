@@ -113,7 +113,23 @@ ProcessingHistoryPanel::ProcessingHistoryPanel( QWidget *parent )
     connect( m_view, &QTableView::customContextMenuRequested, this,
              &ProcessingHistoryPanel::onContextMenu );
     connect( m_view->selectionModel(), &QItemSelectionModel::selectionChanged, this,
-             [this]( const QItemSelection &, const QItemSelection & ) { updateActionStates(); } );
+             [this]( const QItemSelection &, const QItemSelection & )
+             {
+                 updateActionStates();
+                 // Workbench 10.0 unified selection: workflow-run rows feed the
+                 // SelectionContext (selectedWorkflowRunIds); task rows clear it.
+                 QStringList runIds;
+                 const QModelIndexList rows = m_view->selectionModel()
+                                                  ? m_view->selectionModel()->selectedRows()
+                                                  : QModelIndexList();
+                 for ( const QModelIndex &row : rows )
+                 {
+                     if ( const auto *entry = m_model->entryAtRow( row.row() );
+                          entry && entry->kind == sicnu::app::HistoryEntry::Kind::WorkflowRun )
+                         runIds.append( entry->runId );
+                 }
+                 emit workflowRunSelectionChanged( runIds );
+             } );
     connect( m_view, &QTableView::doubleClicked, this,
              [this]( const QModelIndex & ) { openSelectedOutput(); } );
 

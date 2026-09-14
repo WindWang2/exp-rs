@@ -53,6 +53,13 @@ struct SelectionContextSnapshot
     bool activeModified = false;
     QStringList selectedAssetIds;        ///< Data Manager catalog selection
     QStringList selectedResultIds;       ///< governance Results selection
+    /// Workbench 10.0 unified object selection (same push-style sources as
+    /// above; ids are the owning stores' authoritative ids — see
+    /// object_identity.h).
+    QStringList selectedDatasetIds;      ///< DatasetStore dataset ids
+    QStringList selectedExperimentIds;   ///< ExperimentStore run ids
+    QStringList selectedModelIds;        ///< ModelCatalog model names
+    QStringList selectedWorkflowRunIds;  ///< WorkflowRunCoordinator run ids
     int layerCount = 0;                  ///< total layers on the active view
     /// Workbench 8.0: true while any non-terminal TaskCenter task exists
     /// (injected predicate — the pure layer never touches TaskCenter).
@@ -62,6 +69,13 @@ struct SelectionContextSnapshot
     bool hasGovernanceSelection() const
     {
         return !selectedAssetIds.isEmpty() || !selectedResultIds.isEmpty();
+    }
+    /// True when any catalog/domain object (beyond layers) is selected.
+    bool hasObjectSelection() const
+    {
+        return hasGovernanceSelection() || !selectedDatasetIds.isEmpty()
+               || !selectedExperimentIds.isEmpty() || !selectedModelIds.isEmpty()
+               || !selectedWorkflowRunIds.isEmpty();
     }
     /// The first selected vector layer, for edit-oriented commands.
     QgsVectorLayer *firstVectorLayer() const;
@@ -89,6 +103,11 @@ struct ContextFacts
     bool hasGovernanceAsset = false;
     bool hasBrokenLayer = false;
     bool hasInFlightTask = false; ///< a TaskCenter task is queued/running
+    /// Workbench 10.0 unified object selection facts.
+    bool hasExperiment = false;
+    bool hasDataset = false;
+    bool hasModel = false;
+    bool hasWorkflowRun = false;
 };
 ContextFacts prerequisiteFacts( const SelectionContextSnapshot &s );
 
@@ -109,6 +128,15 @@ bool layerSelected( const SelectionContextSnapshot &s );
 bool resultSelected( const SelectionContextSnapshot &s );
 /// A governed asset row is selected in the data manager.
 bool assetSelected( const SelectionContextSnapshot &s );
+/// Workbench 10.0 object-selection predicates (experiment/dataset/model/
+/// workflow-run selection lists non-empty).
+bool experimentSelected( const SelectionContextSnapshot &s );
+bool datasetSelected( const SelectionContextSnapshot &s );
+bool modelSelected( const SelectionContextSnapshot &s );
+bool workflowRunSelected( const SelectionContextSnapshot &s );
+/// Stable wire ids of the currently selected/active layers (QgsMapLayer::id),
+/// selection order with the active layer first. Bounded by the selection.
+QStringList selectedLayerIds( const SelectionContextSnapshot &s );
 /// Human-readable reason a command is unavailable (palette / tooltips).
 QString unavailabilityReason( const SelectionContextSnapshot &s, const QString &commandId );
 
@@ -150,6 +178,12 @@ class SelectionContext : public QObject
     /// panel signals to these — the context never includes panel types).
     void notifyAssetSelection( const QStringList &assetIds );
     void notifyGovernanceSelection( const QStringList &entityIds );
+    /// Workbench 10.0: dataset / experiment-run / model / workflow-run
+    /// selection pushes (same contract as the two above).
+    void notifyDatasetSelection( const QStringList &datasetIds );
+    void notifyExperimentSelection( const QStringList &runIds );
+    void notifyModelSelection( const QStringList &modelNames );
+    void notifyWorkflowSelection( const QStringList &runIds );
 
     /// Override the conservative SAR heuristic (product-token match).
     using SarPredicate = std::function<bool( QgsMapLayer * )>;
@@ -205,6 +239,10 @@ class SelectionContext : public QObject
     mutable bool m_cacheValid = false;
     QStringList m_selectedAssetIds;
     QStringList m_selectedResultIds;
+    QStringList m_selectedDatasetIds;
+    QStringList m_selectedExperimentIds;
+    QStringList m_selectedModelIds;
+    QStringList m_selectedWorkflowRunIds;
 };
 
 } // namespace sicnu::app

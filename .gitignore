@@ -171,6 +171,10 @@ vendor/
 !.planning/large-scale-execution-engine-10/
 .planning/large-scale-execution-engine-10/*
 !.planning/large-scale-execution-engine-10/*.md
+# professional-workbench-visual-cartography-10: track planning notes (markdown only).
+!.planning/professional-workbench-visual-cartography-10/
+.planning/professional-workbench-visual-cartography-10/*
+!.planning/professional-workbench-visual-cartography-10/*.md
 .zcode/
 
 # IDE / editor / OS artifacts

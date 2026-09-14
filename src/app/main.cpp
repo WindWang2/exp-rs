@@ -63,6 +63,7 @@
 #include "app/main_window.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "agent/mcp_server.h"
+#include "agent/cartography/cartography_operators.h"
 #include "agent/workspace_state.h"
 #include "processing/algorithms/temporal/temporal_workspace.h"
 #include "agent/interaction_tool_registry.h"
@@ -213,6 +214,10 @@ int main(int argc, char *argv[])
     // Initialize AlgorithmEngine facade (registers providers and tool paths)
     sicnu::AlgorithmEngine::instance().initialize();
     qDebug() << "AlgorithmEngine initialized with" << sicnu::processing::AtomicAlgorithmRegistry::instance().adapterCount() << "algorithms";
+
+    // Workbench 10.0 (C-1): the cartography engine becomes a workflow-node
+    // operator family — same registry, same dispatch as rs:/gdal:/io:.
+    sicnu::agent::cartography::initCartographyOperators();
 
     // ADR 0062: bridge the unified registry to JobEngine. Provider algorithms
     // (gdal:/otb:/native:) that the Agent already sees in the exported tool

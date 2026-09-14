@@ -542,6 +542,7 @@ qt_add_executable(test_mapspec
   test_platform7.cpp
   test_platform8.cpp
   test_platform9.cpp
+  test_cartography_operators_10.cpp
 )
 target_compile_definitions(test_mapspec PRIVATE
   SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
@@ -707,6 +708,7 @@ sicnu_discover_tests(test_workbench_shutdown_policy)
 add_executable(test_provenance_section
   test_provenance_section.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/inspector_host.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/provenance_section.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
@@ -8772,3 +8774,123 @@ target_compile_definitions(test_i18n PRIVATE
 )
 set_target_properties(test_i18n PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_i18n)
+
+# ── Workbench 10.0 — unified object identity + agent context projection ──
+add_executable(test_object_identity
+  test_object_identity.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_object_identity PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_object_identity PRIVATE jsoncpp)
+endif()
+target_include_directories(test_object_identity PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_object_identity PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_object_identity)
+
+add_executable(test_agent_workbench_context
+  test_agent_workbench_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/agent_context_tool.cpp
+)
+target_link_libraries(test_agent_workbench_context PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_agent
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_agent_workbench_context PRIVATE jsoncpp)
+endif()
+target_include_directories(test_agent_workbench_context PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_agent_workbench_context)
+set_target_properties(test_agent_workbench_context PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_agent_workbench_context)
+
+add_executable(test_visual_analytics
+  test_visual_analytics.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/visualanalytics/va_source.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/visualanalytics/va_chart_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
+)
+target_link_libraries(test_visual_analytics PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+)
+target_include_directories(test_visual_analytics PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/widgets
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_visual_analytics PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_visual_analytics)
+
+add_executable(test_view_link
+  test_view_link.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/view_link_controller.cpp
+)
+target_link_libraries(test_view_link PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  Sicnu::Geospatial
+  sicnu_qgis_display
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_view_link PRIVATE jsoncpp)
+endif()
+target_include_directories(test_view_link PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_view_link PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_view_link)
+
+add_executable(test_processing_catalog_ux
+  test_processing_catalog_ux.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/shell/rs_operator_catalog_panel.cpp
+)
+target_link_libraries(test_processing_catalog_ux PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_agent
+  sicnu_operators
+  sicnu_processing
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_processing_catalog_ux PRIVATE jsoncpp)
+endif()
+target_include_directories(test_processing_catalog_ux PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_processing_catalog_ux PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_processing_catalog_ux)

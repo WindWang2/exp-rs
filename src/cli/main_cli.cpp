@@ -1,4 +1,5 @@
 #include "rs_pipeline_runner.h"
+#include "agent/cartography/cartography_operators.h"
 #include "cli_commands.h"
 #include "help_cli_projections.h"
 
@@ -235,6 +236,10 @@ int main(int argc, char *argv[])
 
     // Initialize AlgorithmEngine facade (registers providers and tool paths)
     sicnu::AlgorithmEngine::instance().initialize();
+
+    // Workbench 10.0 (C-1): cartography compose/preflight/repair/export as
+    // pipeline operators — headless pipelines can declare map-export steps.
+    sicnu::agent::cartography::initCartographyOperators();
 
     // ADR 0062: bridge the unified registry to JobEngine so provider algorithms (gdal:/otb:/qgis:)
     // become executable when submitted as jobs.
