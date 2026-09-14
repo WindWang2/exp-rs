@@ -154,3 +154,91 @@ TEST_CASE( "Gilbert benchmark: tie-corrected variance, z and significance",
     const auto r3 = TrendAnalyzer::computeMannKendall( { 1, 2, 3 }, { 0, 1, 2 } );
     REQUIRE( r3.valid );
 }
+
+// ---------------------------------------------------------------------------
+// Slice 3: raster batch — time-major stack, NaN mask penetration.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "Raster trend batch matches the single-series path pixel-wise",
+           "[d16][trend]" )
+{
+    // 4x3 grid, 12 time steps, time-major [t][y*w + x] layout.
+    const int w = 4, h = 3, steps = 12;
+    std::vector<double> t( steps );
+    for ( int k = 0; k < steps; ++k )
+        t[k] = 16.0 * k;
+
+    std::vector<float> stack( static_cast<std::size_t>( steps ) * w * h );
+    const auto at = [&]( int k, int x, int yy ) -> float & {
+        return stack[static_cast<std::size_t>( k ) * w * h + static_cast<std::size_t>( yy ) * w + x];
+    };
+    for ( int k = 0; k < steps; ++k )
+        for ( int yy = 0; yy < h; ++yy )
+            for ( int x = 0; x < w; ++x )
+            {
+                const double tk = t[k];
+                float v = 0.0f;
+                if ( x == 0 )
+                    v = static_cast<float>( 0.2 + 0.01 * tk + 0.05 * std::sin( 2.0 * M_PI * tk / 365.25 ) );
+                else if ( x == 1 )
+                    v = static_cast<float>( 0.6 - 0.02 * tk + 0.05 * std::cos( 2.0 * M_PI * tk / 365.25 ) );
+                else if ( x == 2 )
+                    v = 0.5f; // flat: no significant trend either way
+                else
+                    v = ( yy == 2 && k >= 6 ) ? kNan : static_cast<float>( 0.3 + 0.005 * tk );
+                at( k, x, yy ) = v;
+            }
+    // Persistent NaN pixel column x=3, row 0: NaN at every step.
+    for ( int k = 0; k < steps; ++k )
+        at( k, 3, 0 ) = kNan;
+
+    std::vector<float> slope( static_cast<std::size_t>( w ) * h, 0.0f );
+    std::vector<float> pval = slope;
+    std::vector<float> zsc = slope;
+    TrendAnalyzer::computeRasterTrend( stack.data(), w, h, steps, t.data(),
+                                       slope.data(), pval.data(), zsc.data() );
+
+    // Per-pixel agreement with the single-series entry point.
+    for ( int yy = 0; yy < h; ++yy )
+        for ( int x = 0; x < w; ++x )
+        {
+            std::vector<float> series( steps );
+            std::vector<double> axis( steps );
+            bool anyNan = false;
+            for ( int k = 0; k < steps; ++k )
+            {
+                series[k] = at( k, x, yy );
+                axis[k] = t[k];
+                anyNan = anyNan || std::isnan( series[k] );
+            }
+            const auto single = TrendAnalyzer::computeMannKendall( series, axis );
+            const std::size_t px = static_cast<std::size_t>( yy ) * w + x;
+            if ( !single.valid )
+            {
+                INFO( "pixel " << x << "," << yy );
+                REQUIRE( std::isnan( slope[px] ) );
+                REQUIRE( std::isnan( pval[px] ) );
+                REQUIRE( std::isnan( zsc[px] ) );
+                continue;
+            }
+            INFO( "pixel " << x << "," << yy << " slope=" << slope[px] );
+            REQUIRE( slope[px] == Approx( single.senSlope ).margin( 1e-6 ) );
+            REQUIRE( pval[px] == Approx( single.pValue ).margin( 1e-6 ) );
+            REQUIRE( zsc[px] == Approx( single.zScore ).margin( 1e-5 ) );
+        }
+
+    // Directional spot checks: rising column 0 positive, falling column 1
+    // negative, and the permanently-NaN pixel stays NaN in every output.
+    REQUIRE( slope[0] > 0.0f );
+    REQUIRE( slope[static_cast<std::size_t>( 0 ) * w + 1] < 0.0f );
+    REQUIRE( std::isnan( slope[static_cast<std::size_t>( 0 ) * w + 3] ) );
+    REQUIRE( std::isnan( zsc[static_cast<std::size_t>( 0 ) * w + 3] ) );
+
+    // Argument guard: null outputs / zero steps are silent no-ops at worst;
+    // the seam contract rejects them up front.
+    TrendAnalyzer::computeRasterTrend( nullptr, w, h, steps, t.data(),
+                                       slope.data(), pval.data(), zsc.data() );
+    TrendAnalyzer::computeRasterTrend( stack.data(), w, h, 0, t.data(),
+                                       slope.data(), pval.data(), zsc.data() );
+    SUCCEED( "degenerate raster arguments handled without crash" );
+}
