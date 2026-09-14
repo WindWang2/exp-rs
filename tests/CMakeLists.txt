@@ -8894,3 +8894,23 @@ target_include_directories(test_processing_catalog_ux PRIVATE
 )
 set_target_properties(test_processing_catalog_ux PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_processing_catalog_ux)
+
+  # ---- D16 Temporal Phenology Timeline Studio ----------------------------
+  # Light-pattern tests: link sicnu_temporal_timeline (+ Sicnu::Geospatial,
+  # GDAL for runtime fixtures) — no qgis_core/sicnu_processing in the chain.
+  add_executable(test_virtual_cube_memory test_virtual_cube_memory.cpp)
+  target_link_libraries(test_virtual_cube_memory PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_temporal_timeline
+    Sicnu::Geospatial
+    GDAL::GDAL
+  )
+  target_include_directories(test_virtual_cube_memory PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  target_compile_definitions(test_virtual_cube_memory PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  )
+  sicnu_discover_tests(test_virtual_cube_memory)

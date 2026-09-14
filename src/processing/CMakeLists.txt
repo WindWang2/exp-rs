@@ -339,3 +339,23 @@ install(TARGETS sicnu_processing
     LIBRARY DESTINATION ${QGIS_LIB_SUBDIR}
     ARCHIVE DESTINATION ${QGIS_LIB_DIR}
 )
+
+# Temporal Phenology Timeline Studio (D16, ADR 0161): the D16 scientific
+# core as its own static library. Deliberately NOT part of sicnu_processing
+# (whose qgis_core PUBLIC link would force a heavy-chain build into every
+# D16 test) and deliberately NOT pulling qgis_core itself: links the Qt-free
+# geospatial foundation (RasterReader window contract) + Qt Core/Widgets +
+# GDAL + jsoncpp only. Production wiring into operators/app is the declared
+# follow-up integration (DECISIONS D-160-1).
+set(SICNU_TEMPORAL_TIMELINE_SOURCES
+    ${CMAKE_SOURCE_DIR}/src/core/temporal_cube.cpp
+)
+qt_add_library(sicnu_temporal_timeline STATIC ${SICNU_TEMPORAL_TIMELINE_SOURCES})
+target_include_directories(sicnu_temporal_timeline PUBLIC
+    ${CMAKE_SOURCE_DIR}/src
+)
+target_link_libraries(sicnu_temporal_timeline PUBLIC
+    Qt6::Core
+    Sicnu::Geospatial
+    GDAL::GDAL
+)
