@@ -129,6 +129,29 @@ TEST_CASE( "DFS cycle diagnosis closes the hand-traced 3-node loop", "[d17][work
     REQUIRE( elapsedUs < 1000 ); // sub-millisecond fail-fast on a 4-node graph
 }
 
+TEST_CASE( "Reported cycle path is a real closed walk of the graph", "[d17][workflow][dag]" )
+{
+    // Diamond pushes + a cycle: a->b, a->c, c->d, d->b, b->a. The 3-color
+    // DFS may gray b via a and re-reach it via d; the extracted path must
+    // still be a walk whose every consecutive pair is an edge (P1 pin).
+    const WorkflowDefinition def = graph(
+        { "a", "b", "c", "d" },
+        { { "a", "b" }, { "a", "c" }, { "c", "d" }, { "d", "b" }, { "b", "a" } } );
+
+    QVector<QString> cycle;
+    REQUIRE_FALSE( WorkflowDagAnalyzer::detectCycleDFS( def, cycle ) );
+    REQUIRE( cycle.size() >= 2 );
+    REQUIRE( cycle.first() == cycle.last() );
+    QHash<QPair<QString, QString>, bool> edges;
+    for ( const EdgeFact &e : def.edges )
+        edges.insert( qMakePair( e.sourceNodeId, e.targetNodeId ), true );
+    for ( int i = 1; i < cycle.size(); ++i )
+    {
+        INFO( "step " << cycle[i - 1].toStdString() << " -> " << cycle[i].toStdString() );
+        REQUIRE( edges.value( qMakePair( cycle[i - 1], cycle[i] ), false ) );
+    }
+}
+
 TEST_CASE( "Self-loop is diagnosed as a one-node cycle", "[d17][workflow][dag]" )
 {
     WorkflowDefinition def = graph( { "solo" }, {} );

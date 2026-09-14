@@ -78,8 +78,11 @@ bool WorkflowDagAnalyzer::detectCycleDFS( const WorkflowDefinition &def, QVector
                         outCyclePath.append( next );
                         return false;
                     }
-                    if ( color[next] == Color::White )
+                    if ( color[next] == Color::White && !onStack.contains( next ) )
                     {
+                        // Skip on-stack duplicates: a node pushed twice would
+                        // break the ancestor-chain invariant and could yield
+                        // a cycle path that is not a walk of the graph.
                         parent[next] = current;
                         stack.append( next );
                         onStack.insert( next );
