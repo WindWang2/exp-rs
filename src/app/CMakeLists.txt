@@ -140,6 +140,7 @@ add_executable(sicnu_geo_rs
     workbench/shutdown_policy.cpp
     workbench/temporal_scene_model.cpp
     workbench/temporal_workbench_panel.cpp
+    workbench/georef_dual_window.cpp
     workbench/dataset_experiment_panel.cpp
     workbench/model_workbench_panel.cpp
     cartography/cartography_dock.cpp
