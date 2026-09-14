@@ -55,8 +55,10 @@ void ViewLinkController::addView( sicnu::display::DisplayViewId viewId )
     m_views.append( viewId );
     if ( QgsMapCanvas *canvas = canvasFor( viewId ) )
     {
+        // Duplicate registration is already rejected above (m_views guard);
+        // Qt::UniqueConnection is illegal for lambdas.
         connect( canvas, &QgsMapCanvas::extentsChanged, this,
-                 [this, viewId] { onExtentChanged( viewId ); }, Qt::UniqueConnection );
+                 [this, viewId] { onExtentChanged( viewId ); } );
     }
 }
 

@@ -8449,6 +8449,8 @@ target_link_libraries(test_visual_analytics PRIVATE
 )
 target_include_directories(test_visual_analytics PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/widgets
   ${CMAKE_BINARY_DIR}
 )
 set_target_properties(test_visual_analytics PROPERTIES AUTOMOC ON)
@@ -8476,6 +8478,7 @@ if(TARGET jsoncpp)
 endif()
 target_include_directories(test_view_link PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
 set_target_properties(test_view_link PROPERTIES AUTOMOC ON)

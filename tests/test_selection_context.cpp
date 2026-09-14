@@ -317,9 +317,9 @@ TEST_CASE( "ContextRules: rs.* commands carry a deterministic raster reason",
   // reason case — rs.* used to fall through to an empty explanation.
   const auto none = snapshotWith( nullptr );
   REQUIRE( ContextRules::unavailabilityReason( none, QStringLiteral( "rs.bandMath" ) )
-               == QObject::tr( "需要选中栅格图层" ) );
+               == QObject::tr( "A raster layer must be selected" ) );
   REQUIRE( ContextRules::unavailabilityReason( none, QStringLiteral( "rs.pca" ) )
-               == QObject::tr( "需要选中栅格图层" ) );
+               == QObject::tr( "A raster layer must be selected" ) );
 
   QgsRasterLayer raster( QStringLiteral( "/tmp/dem.tif" ), QStringLiteral( "dem" ) );
   const auto rasterSnap = snapshotWith( &raster );
@@ -327,9 +327,9 @@ TEST_CASE( "ContextRules: rs.* commands carry a deterministic raster reason",
 
   // Unrelated families keep their reasons.
   REQUIRE( ContextRules::unavailabilityReason( none, QStringLiteral( "layer.properties" ) )
-               == QObject::tr( "需要选中图层" ) );
+               == QObject::tr( "A layer must be selected" ) );
   REQUIRE( ContextRules::unavailabilityReason( none, QStringLiteral( "sar.calibrate" ) )
-               == QObject::tr( "需要选中 SAR 数据" ) );
+               == QObject::tr( "SAR data must be selected" ) );
 }
 
 // ── Review L #1: edit commands carry reasons for every disabled state ──────
@@ -341,31 +341,31 @@ TEST_CASE( "ContextRules: layer edit commands explain every disabled state",
   const auto none = snapshotWith( nullptr );
 
   REQUIRE( ContextRules::unavailabilityReason( none, QStringLiteral( "layer.toggleEditing" ) )
-               == QObject::tr( "需要选中矢量图层" ) );
+               == QObject::tr( "A vector layer must be selected" ) );
   REQUIRE( ContextRules::unavailabilityReason( none, QStringLiteral( "layer.saveEdits" ) )
-               == QObject::tr( "需要选中矢量图层" ) );
+               == QObject::tr( "A vector layer must be selected" ) );
   REQUIRE( ContextRules::unavailabilityReason( none, QStringLiteral( "layer.attributeTable" ) )
-               == QObject::tr( "需要选中矢量图层" ) );
+               == QObject::tr( "A vector layer must be selected" ) );
 
   QgsRasterLayer raster( QStringLiteral( "/tmp/dem.tif" ), QStringLiteral( "dem" ) );
   const auto rasterSnap = snapshotWith( &raster );
   REQUIRE( ContextRules::unavailabilityReason( rasterSnap, QStringLiteral( "layer.toggleEditing" ) )
-               == QObject::tr( "需要选中矢量图层" ) );
+               == QObject::tr( "A vector layer must be selected" ) );
   REQUIRE( ContextRules::unavailabilityReason( rasterSnap, QStringLiteral( "layer.attributeTable" ) )
-               == QObject::tr( "需要选中矢量图层" ) );
+               == QObject::tr( "A vector layer must be selected" ) );
 
   QgsVectorLayer readOnly( QStringLiteral( "Point?crs=EPSG:4326" ),
                            QStringLiteral( "ro" ), QStringLiteral( "memory" ) );
   readOnly.setReadOnly( true );
   const auto roSnap = snapshotWith( &readOnly );
   REQUIRE( ContextRules::unavailabilityReason( roSnap, QStringLiteral( "layer.toggleEditing" ) )
-               == QObject::tr( "当前图层不可编辑" ) );
+               == QObject::tr( "The current layer is not editable" ) );
 
   QgsVectorLayer editable( QStringLiteral( "Point?crs=EPSG:4326" ),
                            QStringLiteral( "rw" ), QStringLiteral( "memory" ) );
   const auto rwSnap = snapshotWith( &editable );
   REQUIRE( ContextRules::unavailabilityReason( rwSnap, QStringLiteral( "layer.saveEdits" ) )
-               == QObject::tr( "请先开启编辑会话" ) );
+               == QObject::tr( "Start an editing session first" ) );
 }
 
 TEST_CASE( "SelectionContext: computeSnapshot avoids UAF on deleted layer while preserving address reuse (#849)",

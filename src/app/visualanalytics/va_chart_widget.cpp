@@ -21,7 +21,7 @@ namespace sicnu::app::va
 
 namespace
 {
-using SicnuUi::Tokens;
+namespace Tokens = SicnuUi::Tokens;
 
 /// Draw caps: a hostile payload must never stall the UI thread. Sources
 /// bound payloads upstream; these caps are the painter's own seatbelt.
@@ -33,10 +33,13 @@ constexpr int kMaxDrawnMatrixCells = 4096;
 /// QColor literals for theme roles). Both themes re-order for contrast.
 QVector<QColor> categoricalPalette( bool dark )
 {
+    // Eight categorical slots per theme, every slot an existing token (the
+    // Dark namespace declares no domain colors — accentHover/ok/inkSecondary
+    // stand in there).
     if ( dark )
         return { Tokens::Dark::accent, Tokens::Dark::mapSelect, Tokens::Dark::warn,
-                 Tokens::Dark::err, Tokens::Dark::ai, Tokens::Dark::veg,
-                 Tokens::Dark::water, Tokens::Dark::soil };
+                 Tokens::Dark::err, Tokens::Dark::ai, Tokens::Dark::accentHover,
+                 Tokens::Dark::ok, Tokens::Dark::inkSecondary };
     return { Tokens::Light::accent, Tokens::Light::mapSelect, Tokens::Light::warn,
              Tokens::Light::err, Tokens::Light::ai, Tokens::Light::veg,
              Tokens::Light::water, Tokens::Light::soil };
@@ -304,7 +307,8 @@ void VaChartWidget::paintHistogram( QPainter &painter, const QRectF &plot )
     const double bounds[4] = { b0, b1, b2, b3 };
     const QColor accent = dark ? Tokens::Dark::accent : Tokens::Light::accent;
 
-    const int bins = std::min( m_data.histogram.counts.size(), kMaxDrawnBars );
+    const int bins = static_cast<int>( std::min<qsizetype>( m_data.histogram.counts.size(),
+                                                            kMaxDrawnBars ) );
     if ( bins == 0 || m_data.histogram.binEdges.size() < 2 )
         return;
     const double binWidth =
@@ -330,7 +334,8 @@ void VaChartWidget::paintSeries( QPainter &painter, const QRectF &plot )
     const double bounds[4] = { b0, b1, b2, b3 };
     const QColor accent = dark ? Tokens::Dark::accent : Tokens::Light::accent;
 
-    const int n = std::min( { m_data.series.xs.size(), m_data.series.ys.size(), kMaxDrawnPoints } );
+    const int n = static_cast<int>( std::min<qsizetype>(
+        { m_data.series.xs.size(), m_data.series.ys.size(), kMaxDrawnPoints } ) );
     if ( n < 2 )
         return;
     QPolygonF poly;
@@ -356,7 +361,8 @@ void VaChartWidget::paintScatter( QPainter &painter, const QRectF &plot )
     const QColor inkSecondary = dark ? Tokens::Dark::inkSecondary : Tokens::Light::inkSecondary;
     const QVector<QColor> palette = categoricalPalette( dark );
 
-    const int n = std::min( { m_data.scatter.xs.size(), m_data.scatter.ys.size(), kMaxDrawnPoints } );
+    const int n = static_cast<int>( std::min<qsizetype>(
+        { m_data.scatter.xs.size(), m_data.scatter.ys.size(), kMaxDrawnPoints } ) );
     for ( int i = 0; i < n; ++i )
     {
         const int group = i < m_data.scatter.groups.size() ? m_data.scatter.groups.at( i ) : -1;
@@ -384,7 +390,8 @@ void VaChartWidget::paintBoxPlot( QPainter &painter, const QRectF &plot )
     const QColor accent = dark ? Tokens::Dark::accent : Tokens::Light::accent;
     const QColor inkPrimary = dark ? Tokens::Dark::inkPrimary : Tokens::Light::inkPrimary;
 
-    const int boxes = std::min( m_data.boxPlot.boxes.size(), kMaxDrawnBars );
+    const int boxes = static_cast<int>( std::min<qsizetype>( m_data.boxPlot.boxes.size(),
+                                                             kMaxDrawnBars ) );
     for ( int i = 0; i < boxes; ++i )
     {
         const VaBox &box = m_data.boxPlot.boxes.at( i );
@@ -452,7 +459,8 @@ void VaChartWidget::paintAreas( QPainter &painter, const QRectF &plot )
     double b0 = 0, b1 = 0, b2 = 0, b3 = 0;
     const QVector<QColor> palette = categoricalPalette( dark );
 
-    const int n = std::min( { m_data.areas.labels.size(), m_data.areas.values.size(), kMaxDrawnBars } );
+    const int n = static_cast<int>( std::min<qsizetype>(
+        { m_data.areas.labels.size(), m_data.areas.values.size(), kMaxDrawnBars } ) );
     if ( n == 0 )
         return;
     qint64 total = 0;
@@ -546,7 +554,8 @@ void VaChartWidget::mousePressEvent( QMouseEvent *event )
             const QRectF plot = plotRect();
             int best = -1;
             double bestDist = 64.0;
-            const int n = std::min( { m_data.scatter.xs.size(), m_data.scatter.ys.size(), kMaxDrawnPoints } );
+            const int n = static_cast<int>( std::min<qsizetype>(
+                { m_data.scatter.xs.size(), m_data.scatter.ys.size(), kMaxDrawnPoints } ) );
             for ( int i = 0; i < n; ++i )
             {
                 const QPointF p = toPixel( m_data.scatter.xs.at( i ), m_data.scatter.ys.at( i ), plot, b );
@@ -673,6 +682,8 @@ QString VaChartWidget::toCsv() const
 
 QString VaChartWidget::toJson() const
 {
+    if ( m_mode != Mode::Ready )
+        return QString();
     QJsonObject root;
     root[QStringLiteral( "kind" )] = static_cast<int>( m_data.kind );
     root[QStringLiteral( "generatedAt" )] =

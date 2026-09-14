@@ -9,9 +9,12 @@
 
 #include "app/shell/view_link_controller.h"
 
-#include <QApplication>
-#include <QTest>
+#include "data/data_manager.h"
 
+#include <QApplication>
+#include <QThread>
+
+#include <qgsapplication.h>
 #include <qgsmapcanvas.h>
 #include <qgsrectangle.h>
 #include <qgslayertree.h>
@@ -25,13 +28,17 @@ using sicnu::display::QgisDisplayManager;
 namespace
 {
 
+sicnu::data::DataManager &sharedDataManager()
+{
+    static sicnu::data::DataManager manager;
+    return manager;
+}
+
 struct DataManager
 {
     // The manager needs a DataManager for asset leases; views created with
     // explicit canvases/trees/stores never touch it in these tests.
-    QgisDisplayManager manager;
-
-    DataManager() = default;
+    QgisDisplayManager manager{ &sharedDataManager() };
 
     DisplayViewId createView( QgsMapCanvas &canvas, QgsLayerTree &tree,
                               QgsMapLayerStore &store )
@@ -51,11 +58,13 @@ struct DataManager
 
 int main( int argc, char *argv[] )
 {
-    if ( !QApplication::instance() )
-    {
-        static QApplication app( argc, argv ); // QT_QPA_PLATFORM=offscreen
-    }
+    // Mirror test_qgis_display_manager: a heap-held QgsApplication with GUI
+    // enabled (QT_QPA_PLATFORM=offscreen carries it); QgsMapCanvas aborts
+    // without the QGIS singletons.
+    static QgsApplication app( argc, argv, true );
+    QgsApplication::initQgis();
     const int result = Catch::Session().run( argc, argv );
+    QgsApplication::exitQgis();
     return result;
 }
 
@@ -88,7 +97,8 @@ TEST_CASE( "view link propagates extents across linked views",
 
     a.setExtent( QgsRectangle( 0, 0, 100, 100 ) );
     a.setExtent( QgsRectangle( 10, 10, 90, 90 ) );
-    QTest::qWait( 80 ); // throttle window (16 ms) + propagation
+    QThread::msleep( 80 ); // throttle window (16 ms) + propagation
+    QApplication::processEvents();
 
     CHECK( b.extent() == a.extent() );
     CHECK_FALSE( c.extent() == a.extent() );
@@ -97,7 +107,8 @@ TEST_CASE( "view link propagates extents across linked views",
     // Unlinking B stops its propagation; A still linked to nothing else.
     controller.setLinked( viewB, false );
     a.setExtent( QgsRectangle( 20, 20, 80, 80 ) );
-    QTest::qWait( 80 );
+    QThread::msleep( 80 );
+    QApplication::processEvents();
     CHECK_FALSE( b.extent() == a.extent() );
 }
 
@@ -121,8 +132,8 @@ TEST_CASE( "view link detaches removed views automatically",
     controller.setLinked( viewB, true );
 
     REQUIRE( data.manager.removeView( viewB ).operator bool() );
-    QVERIFY( !controller.views().contains( viewB ) );
-    QVERIFY( !controller.isLinked( viewB ) );
+    CHECK( !controller.views().contains( viewB ) );
+    CHECK( !controller.isLinked( viewB ) );
 }
 
 TEST_CASE( "view link rejects unknown views", "[view_link][workbench10]" )

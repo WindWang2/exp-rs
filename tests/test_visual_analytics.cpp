@@ -44,7 +44,10 @@ VaHistogram makeHistogram( int bins )
         histogram.binEdges.append( i * 1.0 );
     for ( int i = 0; i < bins; ++i )
         histogram.counts.append( i + 1 );
-    histogram.validCount = bins;
+    qint64 total = 0;
+    for ( qint64 c : histogram.counts )
+        total += c;
+    histogram.validCount = total;
     histogram.mean = 1.5;
     return histogram;
 }
@@ -81,7 +84,7 @@ TEST_CASE( "VaDataSource delivers ready payloads", "[visual_analytics][source]" 
     source.request( [payload]( const std::function<bool()> & ) { return payload; } );
     REQUIRE( readySpy.wait( 5000 ) );
     CHECK( failedSpy.isEmpty() );
-    CHECK( readySpy.first().first().value<VaData>().histogram.validCount == 8 );
+    CHECK( readySpy.first().first().value<VaData>().histogram.validCount == 36 );
     CHECK_FALSE( source.isBusy() );
 }
 

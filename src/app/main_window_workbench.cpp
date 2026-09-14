@@ -29,6 +29,7 @@
 #include "cartography/cartography_dock.h"
 #include "visualanalytics/va_workbench_panel.h"
 #include "shell/rs_operator_catalog_panel.h"
+#include "shell/workflow_session_controller.h"
 #include "workbench/agent_context_tool.h"
 #include "project_context.h"
 #include "dialogs/comparison_dialog.h"

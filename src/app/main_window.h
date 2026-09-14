@@ -136,7 +136,7 @@ class TemporalWorkbenchPanel;
 class DatasetExperimentPanel;
 class ModelWorkbenchPanel;
 class CartographyDock;
-namespace sicnu::app::va { class VaWorkbenchPanel; }
+namespace va { class VaWorkbenchPanel; }
 class RsOperatorCatalogPanel;
 class SelectionContext;
 class InspectorHost;

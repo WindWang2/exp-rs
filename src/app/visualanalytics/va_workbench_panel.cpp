@@ -16,6 +16,8 @@
 
 #include <qgsrasterlayer.h>
 
+#include "geospatial/raster/raster_reader.h"
+
 namespace sicnu::app::va
 {
 
