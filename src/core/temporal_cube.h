@@ -55,12 +55,25 @@ struct CalendarPoint
     QString isoDate;     ///< ISO-8601 date of the node
 };
 
+/// Compositing policy over the observations inside a node's window
+/// (both score Q_i = (1 − cloud_i)·exp(−(t_i − t_k)²/2σ_t²)):
+/// BestPixel takes the argmax-Q observation (lowest scene index on exact
+/// ties); WeightedMean takes the Q-weighted mean (NaN when ΣQ = 0).
+enum class CompositingStrategy
+{
+    BestPixel,
+    WeightedMean,
+};
+
 struct TemporalCubeConfig
 {
     QString epochIsoDate = "2020-01-01"; ///< calendar epoch t0 (grid origin)
     int cadenceDays = 16;                ///< regular composition step Δt (days)
     double maxWindowDays = 32.0;         ///< composition window half-width W (days)
     std::size_t maxMemoryBudgetBytes = 1024ull * 1024 * 1024; ///< tile-pool budget
+    /// D16 spec extension: the spec formulas define both policies; the
+    /// default is the spec's primary BestPixel form.
+    CompositingStrategy strategy = CompositingStrategy::BestPixel;
 };
 
 class TemporalCube
