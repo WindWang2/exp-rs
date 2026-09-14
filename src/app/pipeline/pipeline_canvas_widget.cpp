@@ -7,6 +7,7 @@
 #include "pipeline_scene.h"
 
 #include <algorithm>
+#include <QSet>
 
 namespace sicnu::app::pipeline {
 namespace {
@@ -67,6 +68,29 @@ sicnu::workflow::WorkflowDefinition PipelineCanvasWidget::exportWorkflow() const
             updated.canvasPosition = positions.value( node.nodeId );
         out.nodes.append( updated );
     }
+
+    // Wiring created on the canvas AFTER loadWorkflow must survive export:
+    // append scene connections whose (source, target, ports) tuple is not
+    // already in the document. Loaded edges keep their original ids.
+    using EdgeKey = QPair<QPair<QString, QString>, QPair<QString, QString>>;
+    QSet<EdgeKey> known;
+    for ( const sicnu::workflow::EdgeFact &edge : out.edges )
+        known.insert( qMakePair( qMakePair( edge.sourceNodeId, edge.sourcePortName ),
+                                 qMakePair( edge.targetNodeId, edge.targetPortName ) ) );
+    int synthesized = 0;
+    for ( QGraphicsItem *item : m_scene->items() )
+        if ( auto *connection = qgraphicsitem_cast<PipelineConnectionItem *>( item ) )
+        {
+            const EdgeKey key = qMakePair( qMakePair( connection->sourceNodeId, connection->sourcePortName ),
+                                           qMakePair( connection->targetNodeId, connection->targetPortName ) );
+            if ( known.contains( key ) )
+                continue;
+            known.insert( key );
+            out.edges.append( sicnu::workflow::EdgeFact{
+                QStringLiteral( "edge_canvas_%1" ).arg( ++synthesized ),
+                connection->sourceNodeId, connection->sourcePortName,
+                connection->targetNodeId, connection->targetPortName } );
+        }
     return out;
 }
 

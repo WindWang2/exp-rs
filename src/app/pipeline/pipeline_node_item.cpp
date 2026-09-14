@@ -54,11 +54,24 @@ QPointF PipelineNodeItem::outputPortScenePos( int index ) const
     return m_outputPorts[index]->sceneCenter();
 }
 
+QString PipelineNodeItem::inputPortName( int index ) const
+{
+    return index >= 0 && index < m_inputPorts.size() ? m_inputPorts[index]->portName : QString();
+}
+
+QString PipelineNodeItem::outputPortName( int index ) const
+{
+    return index >= 0 && index < m_outputPorts.size() ? m_outputPorts[index]->portName : QString();
+}
+
 QRectF PipelineNodeItem::boundingRect() const
 {
+    // Output ports sit AT x = kWidth with radius 5 and the selected pen is
+    // 2 px: the rect must cover them or DeviceCoordinateCache clips them.
     const qreal portRows = std::max( m_inputPorts.size(), m_outputPorts.size() );
     const qreal neededHeight = kPortInset + portRows * kPortSpacing + 8.0;
-    return QRectF( 0, 0, kWidth, std::max( kHeight, neededHeight ) );
+    constexpr qreal kMargin = 6.0;
+    return QRectF( -kMargin, -kMargin, kWidth + 2 * kMargin, std::max( kHeight, neededHeight ) + 2 * kMargin );
 }
 
 void PipelineNodeItem::paint( QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget )

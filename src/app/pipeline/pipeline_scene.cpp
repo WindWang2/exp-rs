@@ -29,7 +29,10 @@ void PipelineScene::mousePressEvent( QGraphicsSceneMouseEvent *event )
             {
                 if ( QLineF( node->outputPortScenePos( i ), pos ).length() <= kSnapRadiusPx )
                 {
-                    beginPendingConnection( node->nodeId(), QStringLiteral( "output" ), node->outputPortScenePos( i ) );
+                    // The wire references the port's REAL name — a literal
+                    // guess would produce a semantically invalid document.
+                    beginPendingConnection( node->nodeId(), node->outputPortName( i ),
+                                            node->outputPortScenePos( i ) );
                     event->accept();
                     return;
                 }
@@ -132,7 +135,6 @@ bool PipelineScene::finishPendingConnection( PipelinePortItem *target )
     m_pendingConnection->sourcePortName = m_pendingSourcePort;
     m_pendingConnection->targetNodeId = target->ownerNode ? target->ownerNode->nodeId() : QString();
     m_pendingConnection->targetPortName = target->portName;
-    m_connections.append( m_pendingConnection );
 
     const QString source = m_pendingSourceNode;
     const QString sourcePort = m_pendingSourcePort;
@@ -180,7 +182,6 @@ PipelineConnectionItem *PipelineScene::addConnection( const QString &sourceNodeI
     connection->targetNodeId = targetNodeId;
     connection->targetPortName = targetPort;
     addItem( connection );
-    m_connections.append( connection );
 
     // Keep the wire glued to both endpoints as nodes move.
     QPointer<PipelineConnectionItem> connectionRef( connection );

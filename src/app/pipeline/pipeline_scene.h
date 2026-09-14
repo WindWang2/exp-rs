@@ -63,7 +63,6 @@ class PipelineScene : public QGraphicsScene
 
   private:
     QHash<QString, QPointer<PipelineNodeItem>> m_nodes;
-    QVector<QPointer<PipelineConnectionItem>> m_connections;
     QPointer<PipelineConnectionItem> m_pendingConnection;
     QString m_pendingSourceNode;
     QString m_pendingSourcePort;

@@ -14,6 +14,7 @@
 #include "app/pipeline/pipeline_canvas_widget.h"
 #include "app/pipeline/pipeline_connection_item.h"
 #include "app/pipeline/pipeline_node_item.h"
+#include "app/pipeline/pipeline_port_item.h"
 #include "app/pipeline/pipeline_scene.h"
 #include "workflow/workflow_ir_v2.h"
 
@@ -119,9 +120,6 @@ TEST_CASE( "loadWorkflow projects nodes and edges; export reads positions back",
     const WorkflowDefinition exported = canvas.exportWorkflow();
     REQUIRE( exported.nodes.size() == 3 );
     REQUIRE( exported.edges.size() == 2 );
-    for ( int i = 0; i < 3; ++i )
-    {
-    }
     REQUIRE( exported.nodes == def.nodes ); // untouched positions round-trip
 
     // Moving an item updates the exported geometry, and nothing else.
@@ -194,6 +192,33 @@ TEST_CASE( "Pending connection commits through the snap seam", "[d17][workflow][
                                   source->outputPortScenePos( 0 ) );
     scene.cancelPendingConnection();
     REQUIRE( scene.items().size() == before );
+}
+
+TEST_CASE( "Interactive wiring created after load survives exportWorkflow", "[d17][workflow][ui]" )
+{
+    ensureApp();
+    PipelineCanvasWidget canvas;
+
+    WorkflowDefinition def;
+    def.workflowId = QStringLiteral( "wf-grow" );
+    def.nodes = { canvasNode( "a", 0, 0 ), canvasNode( "b", 260, 0 ) };
+    canvas.loadWorkflow( def ); // no edges yet
+
+    // Simulate the interactive commit path (as the scene's mouse flow does).
+    REQUIRE( canvas.scene()->nodeItem( "a" ) != nullptr );
+    canvas.scene()->beginPendingConnection( QStringLiteral( "a" ), QStringLiteral( "output" ),
+                                            canvas.scene()->nodeItem( "a" )->outputPortScenePos( 0 ) );
+    PipelinePortItem *target = canvas.scene()->portAtScenePos( canvas.scene()->nodeItem( "b" )->inputPortScenePos( 0 ) );
+    REQUIRE( target != nullptr );
+    REQUIRE( canvas.scene()->finishPendingConnection( target ) );
+
+    const WorkflowDefinition exported = canvas.exportWorkflow();
+    REQUIRE( exported.edges.size() == 1 );
+    REQUIRE( exported.edges[0].sourceNodeId == QStringLiteral( "a" ) );
+    REQUIRE( exported.edges[0].targetNodeId == QStringLiteral( "b" ) );
+    QString error;
+    REQUIRE( WorkflowIR::validateSemantics( exported, &error ) );
+    INFO( error.toStdString() );
 }
 
 TEST_CASE( "100-node load completes within the 50 ms budget offscreen", "[d17][workflow][ui]" )

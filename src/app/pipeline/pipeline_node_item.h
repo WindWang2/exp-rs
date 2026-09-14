@@ -30,6 +30,10 @@ class PipelineNodeItem : public QGraphicsObject
     /// center when @a fraction is omitted.
     QPointF inputPortScenePos( int index ) const;
     QPointF outputPortScenePos( int index ) const;
+    /// Port names by index — wiring must reference REAL port names, never
+    /// positional guesses.
+    QString inputPortName( int index ) const;
+    QString outputPortName( int index ) const;
     int inputPortCount() const { return m_inputPorts.size(); }
     int outputPortCount() const { return m_outputPorts.size(); }
 
