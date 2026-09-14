@@ -170,7 +170,12 @@ std::vector<int> ClassificationPostProcessor::applySieveFilter( std::span<const 
   {
     const ComponentMap map = labelComponents( out, width, height, connectivity );
     bool eliminatedAny = false;
-    std::map<int, int> rewriteTo; // small comp -> replacement class
+    // Immediate best-neighbour target per small component, then chain/cycle
+    // resolution: two adjacent small components must not swap classes (the
+    // naive simultaneous rewrite oscillates until the pass cap).  A target
+    // that is itself small is followed to its final large component or
+    // NoData; a cycle of small components collapses to its lowest class id.
+    std::map<int, int> targetComp; // small comp -> neighbour comp (-1 = NoData)
     for ( int comp = 0; comp < static_cast<int>( map.classOf.size() ); ++comp )
     {
       const int cls = map.classOf[comp];
@@ -180,7 +185,6 @@ std::vector<int> ClassificationPostProcessor::applySieveFilter( std::span<const 
         continue;
       int bestComp = -1;
       int64_t bestBorder = 0;
-      int bestClass = 0;
       for ( const auto &[pair, border] : map.borders )
       {
         if ( pair.first != comp && pair.second != comp )
@@ -190,20 +194,45 @@ std::vector<int> ClassificationPostProcessor::applySieveFilter( std::span<const 
           continue;
         const bool better = border > bestBorder
                             || ( border == bestBorder && bestComp >= 0
-                                 && ( map.classOf[other] < bestClass
-                                      || ( map.classOf[other] == bestClass && other < bestComp ) ) );
+                                 && ( map.classOf[other] < map.classOf[bestComp]
+                                      || ( map.classOf[other] == map.classOf[bestComp] && other < bestComp ) ) );
         if ( better )
         {
           bestBorder = border;
           bestComp = other;
-          bestClass = map.classOf[other];
         }
       }
-      rewriteTo[comp] = bestComp >= 0 ? bestClass : kNoData; // enclosed by NoData -> NoData
+      targetComp[comp] = bestComp; // -1 = fully enclosed by NoData
       eliminatedAny = true;
     }
     if ( !eliminatedAny )
       break;
+    std::map<int, int> rewriteTo; // small comp -> resolved class
+    for ( const auto &[comp, target] : targetComp )
+    {
+      std::vector<int> chain;
+      std::map<int, bool> onChain;
+      int cur = comp;
+      while ( targetComp.count( cur ) && !onChain[cur] )
+      {
+        onChain[cur] = true;
+        chain.push_back( cur );
+        const int next = targetComp[cur];
+        if ( next < 0 )
+          break;
+        cur = next;
+      }
+      if ( targetComp.count( cur ) && onChain[cur] && targetComp[cur] >= 0 && cur == comp )
+      {
+        // Full cycle back to the start: collapse to the lowest class id.
+        int lowest = std::numeric_limits<int>::max();
+        for ( const int c : chain )
+          lowest = std::min( lowest, map.classOf[c] );
+        rewriteTo[comp] = lowest;
+        continue;
+      }
+      rewriteTo[comp] = ( targetComp.count( cur ) && targetComp.at( cur ) < 0 ) ? kNoData : map.classOf[cur];
+    }
     for ( size_t i = 0; i < out.size(); ++i )
     {
       const auto it = rewriteTo.find( map.labels[i] );

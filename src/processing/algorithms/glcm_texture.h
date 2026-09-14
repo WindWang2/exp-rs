@@ -27,7 +27,7 @@ enum class GlcmDirection
 
 struct GlcmConfig
 {
-    int windowSize{ 5 }; ///< odd: 3, 5, 7, 9 (even values snap to the nearest odd)
+    int windowSize{ 5 }; ///< odd: 3, 5, 7, 9 (even values snap DOWN to the nearest odd)
     int stepDistance{ 1 };
     GlcmDirection direction{ GlcmDirection::Omnidirectional };
     int quantLevels{ 32 }; ///< equal-width bins over [minVal, maxVal]

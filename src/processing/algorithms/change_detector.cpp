@@ -25,10 +25,11 @@ namespace
     return out;
   }
 
-  // Symmetric Jacobi eigendecomposition for small dense matrices:
-  // eigenvalues ascending in @p eigenvalues, orthonormal column vectors in
-  // @p eigenvectors.  Deterministic (classic cyclic Jacobi sweeps).
-  bool jacobiEigen( std::vector<double> a, int n, std::vector<double> &eigenvalues,
+  // Symmetric Jacobi eigendecomposition for small dense matrices.
+  // Eigenvalues land on the diagonal in unsorted Jacobi order (callers
+  // select with min/max_element); @p eigenvectors holds the orthonormal
+  // column vectors.  Deterministic (cyclic Jacobi sweeps).
+  void jacobiEigen( std::vector<double> a, int n, std::vector<double> &eigenvalues,
                     std::vector<double> &eigenvectors )
   {
     eigenvectors.assign( static_cast<size_t>( n ) * n, 0.0 );
@@ -81,7 +82,6 @@ namespace
     eigenvalues.resize( n );
     for ( int i = 0; i < n; ++i )
       eigenvalues[i] = a[static_cast<size_t>( i ) * n + i];
-    return true;
   }
 } // namespace
 
@@ -108,7 +108,16 @@ std::vector<float> ChangeDetector::computeLogRatio( std::span<const float> t1, s
   const float eps = std::max( epsilon, 1e-12f );
   std::vector<float> out( t1.size() );
   for ( size_t i = 0; i < t1.size(); ++i )
-    out[i] = std::log( ( t2[i] + eps ) / ( t1[i] + eps ) );
+  {
+    const float a = t1[i] + eps;
+    const float b = t2[i] + eps;
+    // Domain guard: the operator is defined for positive shifted radiance;
+    // non-finite or non-positive arguments collapse to the neutral 0.
+    if ( !( a > 0.0f && b > 0.0f ) )
+      out[i] = 0.0f;
+    else
+      out[i] = std::log( b / a );
+  }
   return out;
 }
 

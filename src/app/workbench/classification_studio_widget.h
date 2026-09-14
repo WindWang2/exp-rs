@@ -6,7 +6,8 @@
 // wires class palette, algorithm dispatch and swipe comparison.
 //
 // Threading: UI objects are main-thread only; extraction runs synchronously
-// against the raster provider (bounded by maxPixels).
+// against the raster provider.  The BFS is bounded by maxPixels; the spectral
+// planes are materialized once per call (full layer read, all bands).
 #pragma once
 
 #include <QWidget>
@@ -79,10 +80,9 @@ class FeatureScatterWidget : public QWidget
     void rebuildImage() const;
 
     std::vector<float> mX, mY;
-    std::vector<int> mLabels;
+    std::vector<int> mLabels; // stored for class-aware consumers
     float mXMin = 0.0f, mXMax = 1.0f, mYMin = 0.0f, mYMax = 1.0f;
     int mBinsX = 200, mBinsY = 200;
-    QString mXLabel, mYLabel;
     mutable QImage mCache;
     mutable bool mDirty = true;
 };

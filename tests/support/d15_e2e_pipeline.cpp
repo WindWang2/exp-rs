@@ -260,18 +260,12 @@ bool ClassificationChangeE2ePipeline::runFullWorkflow( const E2ePipelineConfig &
   outOverallAccuracy = metrics.overallAccuracy;
   outKappa = metrics.cohensKappa;
 
-  // ---- Change detection: CVA magnitude, adaptive threshold.
-  std::vector<float> t1Plane( pixels * bands );
-  std::vector<float> t2Plane( pixels * bands );
-  for ( size_t p = 0; p < pixels * bands; ++p )
-  {
-    t1Plane[p] = t1.samples[p];
-    t2Plane[p] = t2.samples[p];
-  }
+  // ---- Change detection: CVA magnitude, adaptive threshold (samples are
+  // already band-sequential; no copy needed).
   // Alpha 4.0: unchanged-pixel magnitudes follow a chi(4) distribution; the
   // 1.5-sigma Gaussian heuristic sits inside its fat tail (~3% false alarms),
   // while 4 sigma clears it (P ~ 5e-6) for budgeted change footprints.
-  const auto cva = rs::processing::ChangeDetector::computeCva( t1Plane.data(), t2Plane.data(), w, h, bands, 4.0f );
+  const auto cva = rs::processing::ChangeDetector::computeCva( t1.samples.data(), t2.samples.data(), w, h, bands, 4.0f );
   std::vector<uint8_t> changeMask( pixels, 0 );
   for ( size_t p = 0; p < pixels; ++p )
     changeMask[p] = cva.binaryChangeMask[p] ? 1 : 0;

@@ -307,8 +307,8 @@ void FeatureScatterWidget::setData( std::span<const float> xFeatures,
     if ( mYMax <= mYMin )
       mYMax = mYMin + 1.0f;
   }
-  mXLabel = xLabel;
-  mYLabel = yLabel;
+  ( void ) xLabel; // axis labels are drawn by the host's chrome, not the thumbnail
+  ( void ) yLabel;
   mDirty = true;
   update();
 }
@@ -329,6 +329,8 @@ void FeatureScatterWidget::rebuildImage() const
   uint32_t maxCount = 1;
   for ( size_t i = 0; i < mX.size(); ++i )
   {
+    if ( !std::isfinite( mX[i] ) || !std::isfinite( mY[i] ) )
+      continue; // NaN/inf never reach the float->int bin cast (UB guard)
     const int bx = std::clamp( static_cast<int>( ( mX[i] - mXMin ) * sx ), 0, mBinsX - 1 );
     const int by = std::clamp( static_cast<int>( ( mYMax - mY[i] ) * sy ), 0, mBinsY - 1 ); // y flipped (screen)
     const uint32_t c = ++bins[static_cast<size_t>( by ) * mBinsX + bx];

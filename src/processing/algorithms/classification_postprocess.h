@@ -16,7 +16,7 @@ struct MorphologicalFilterConfig
 {
     int windowSize{ 3 };        // 3 or 5 (odd); even values snap to nearest odd
     int minSievePixelSize{ 4 }; // components smaller than this are eliminated
-    int connectivity{ 8 };      // 4 or 8 (other values snap to nearest)
+    int connectivity{ 8 };      // 4 or 8: any value other than 4 is treated as 8
     int noDataValue{ -1 };
 };
 
@@ -35,7 +35,9 @@ class ClassificationPostProcessor
     /// Removes connected components (4/8-connectivity) whose area is smaller
     /// than @p minPixelSize by reassigning them to the adjacent component
     /// sharing the longest orthogonal border (ties -> lowest class id; a
-    /// component fully enclosed by NoData becomes NoData).
+    /// component fully enclosed by NoData becomes NoData).  This seam's
+    /// NoData sentinel is the fixed label -1 (spec signature carries no
+    /// config); shift labels as the D15 pipeline does when 0 means nodata.
     static std::vector<int> applySieveFilter( std::span<const int> inClassification,
                                               int width,
                                               int height,

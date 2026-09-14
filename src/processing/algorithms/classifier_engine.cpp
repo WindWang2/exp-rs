@@ -244,11 +244,15 @@ namespace
             maxShift = std::max( maxShift, std::sqrt( shift ) );
             m_centers[c] = std::move( mean );
           }
-          // Reseed empty clusters at the farthest points.
+          // Reseed empty clusters at the farthest points; the convergence
+          // check is skipped for this iteration so reseeded centres get a
+          // full Lloyd pass before the loop may exit.
+          bool reseeded = false;
           for ( size_t c = 0; c < m_centers.size(); ++c )
           {
             if ( counts[c] > 0 )
               continue;
+            reseeded = true;
             size_t far = 0;
             double farDist = -1.0;
             for ( size_t i = 0; i < n; ++i )
@@ -264,7 +268,7 @@ namespace
             }
             m_centers[c] = pointToDouble( x, far, d );
           }
-          if ( maxShift < m_p.convergenceEpsilon )
+          if ( !reseeded && maxShift < m_p.convergenceEpsilon )
             break;
         }
         m_trained = true;
@@ -318,7 +322,17 @@ namespace
             if ( counts[c] >= static_cast<size_t>( minSize ) || m_centers.size() == 1 )
               kept.push_back( means[c] );
           if ( kept.empty() )
-            kept.push_back( means.front() );
+          {
+            // Every cluster undersized: fall back to the global mean rather
+            // than a zero vector accumulated from no points.
+            std::vector<double> global( d, 0.0 );
+            for ( size_t i = 0; i < n; ++i )
+              for ( size_t f = 0; f < d; ++f )
+                global[f] += x[i * d + f];
+            for ( size_t f = 0; f < d; ++f )
+              global[f] /= static_cast<double>( n );
+            kept.push_back( std::move( global ) );
+          }
           if ( kept.size() != m_centers.size() )
           {
             m_centers = std::move( kept );
@@ -326,10 +340,13 @@ namespace
           }
 
           // Split: max per-dimension sigma above theta_S with the canonical
-          // minimum cluster guard |S_k| >= 2(N_min + 1).
+          // minimum cluster guard |S_k| >= 2(N_min + 1), capped at
+          // kMaxClusters total.
           bool didSplit = false;
           for ( size_t c = 0; c < m_centers.size() && !didSplit; ++c )
           {
+            if ( m_centers.size() >= kMaxClusters )
+              break;
             if ( counts[c] < static_cast<size_t>( 2 * ( minSize + 1 ) ) )
               continue;
             std::vector<double> sigma( d, 0.0 );
@@ -1083,8 +1100,12 @@ namespace
               sum -= l[i * d + k] * tmp[k];
             tmp[i] = sum / l[i * d + i];
           }
-          for ( size_t i = 0; i < d; ++i )
+          // L^T X = Y needs back-substitution: x_i depends on x_k for
+          // k > i, so the row loop must run in DESCENDING order (ascending
+          // reads not-yet-computed entries and silently returns L^-1).
+          for ( size_t ii = d; ii-- > 0; )
           {
+            const size_t i = ii;
             double sum = tmp[i];
             for ( size_t k = i + 1; k < d; ++k )
               sum -= l[k * d + i] * inverse[k * d + c];

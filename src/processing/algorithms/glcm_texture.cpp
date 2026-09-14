@@ -53,8 +53,10 @@ namespace
     double t = ( static_cast<double>( v ) - config.minVal ) / span * config.quantLevels;
     if ( std::isnan( t ) )
       return 0;
-    int level = static_cast<int>( std::floor( t ) );
-    return std::clamp( level, 0, config.quantLevels - 1 );
+    // Clamp BEFORE the float->int conversion: t is unbounded for extreme
+    // inputs and [conv.fpint] makes an out-of-range cast undefined.
+    t = std::clamp( t, 0.0, static_cast<double>( config.quantLevels - 1 ) );
+    return static_cast<int>( std::floor( t ) );
   }
 
   // Normalized co-occurrence for one direction; nullopt when no pair fits
@@ -253,18 +255,20 @@ std::vector<float> GlcmTextureCalculator::computeTextureFeatureMap( const float 
   {
     for ( int x = 0; x < width; ++x )
     {
-      const int x0 = std::clamp( x - half, 0, width - 1 );
-      const int x1 = std::clamp( x + half, 0, width - 1 );
-      const int y0 = std::clamp( y - half, 0, height - 1 );
-      const int y1 = std::clamp( y + half, 0, height - 1 );
-      const int ww = x1 - x0 + 1;
-      const int wh = y1 - y0 + 1;
-      window.assign( static_cast<size_t>( ww ) * wh, 0.0f );
-      for ( int wy = 0; wy < wh; ++wy )
-        for ( int wx = 0; wx < ww; ++wx )
-          window[static_cast<size_t>( wy ) * ww + wx] =
-            rasterData[static_cast<size_t>( y0 + wy ) * width + ( x0 + wx )];
-      const GlcmHaralickMetrics m = computeForWindow( window, ww, wh, config );
+      // True clamp replication: the window is always the full odd square;
+      // out-of-range neighbours read their nearest edge pixel.
+      const int n = half * 2 + 1;
+      window.assign( static_cast<size_t>( n ) * n, 0.0f );
+      for ( int wy = 0; wy < n; ++wy )
+      {
+        const int sy = std::clamp( y - half + wy, 0, height - 1 );
+        for ( int wx = 0; wx < n; ++wx )
+        {
+          const int sx = std::clamp( x - half + wx, 0, width - 1 );
+          window[static_cast<size_t>( wy ) * n + wx] = rasterData[static_cast<size_t>( sy ) * width + sx];
+        }
+      }
+      const GlcmHaralickMetrics m = computeForWindow( window, n, n, config );
       map[static_cast<size_t>( y ) * width + x] = static_cast<float>( metricField( m, featureName ) );
     }
   }

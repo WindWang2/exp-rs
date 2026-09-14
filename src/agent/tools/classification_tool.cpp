@@ -231,16 +231,13 @@ QJsonObject ClassificationDiagnosisTool::execute( const QJsonObject &inputParame
   for ( int i = 0; i < matrixJson.size(); ++i )
     classes.push_back( i );
 
-  // Flatten the truth/prediction pairs through the canonical evaluator.
-  std::vector<int> truth, predicted;
+  // Build the vote matrix directly (matrix-native: no per-count sample
+  // expansion, which would be O(sum of counts) memory on agent input).
+  std::vector<std::vector<int64_t>> votes( classes.size(), std::vector<int64_t>( classes.size(), 0 ) );
   for ( size_t t = 0; t < matrix.size(); ++t )
     for ( size_t p = 0; p < matrix[t].size(); ++p )
-      for ( int repeat = 0; repeat < std::max( 0, matrix[t][p] ); ++repeat )
-      {
-        truth.push_back( static_cast<int>( t ) );
-        predicted.push_back( static_cast<int>( p ) );
-      }
-  const auto metrics = rs::processing::ConfusionMatrixEvaluator::compute( truth, predicted, classes );
+      votes[t][p] = std::max( 0, matrix[t][p] );
+  const auto metrics = rs::processing::ConfusionMatrixEvaluator::finalize( votes, classes );
   const double kappa = metrics.cohensKappa;
   const double overall = metrics.overallAccuracy;
   out.insert( QStringLiteral( "kappa" ), kappa );

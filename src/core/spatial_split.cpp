@@ -136,13 +136,15 @@ double SpatialAutocorrelationAuditor::computeMoransI( std::span<const SpatialSam
     mean += attributeValues[i];
   mean /= static_cast<double>( n );
 
-  double variance = 0.0;
+  // Spec-literal degeneracy guard: the ADR fixes the threshold on the
+  // unnormalized centered sum of squares.
+  double centeredSumSquares = 0.0;
   for ( size_t i = 0; i < n; ++i )
   {
     const double d = attributeValues[i] - mean;
-    variance += d * d;
+    centeredSumSquares += d * d;
   }
-  if ( variance < kVarianceEpsilon )
+  if ( centeredSumSquares < kVarianceEpsilon )
     return 0.0;
 
   // Ordered-pair sums: numerator = sum w_ij z_i z_j; S0 = sum w_ij.
@@ -165,7 +167,7 @@ double SpatialAutocorrelationAuditor::computeMoransI( std::span<const SpatialSam
 
   weightedProduct *= 2.0;
   s0 *= 2.0;
-  return ( static_cast<double>( n ) / s0 ) * ( weightedProduct / variance );
+  return ( static_cast<double>( n ) / s0 ) * ( weightedProduct / centeredSumSquares );
 }
 
 } // namespace rs::core

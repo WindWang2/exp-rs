@@ -9,6 +9,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <cmath>
 #include <cstdint>
 #include <numeric>
@@ -256,6 +257,36 @@ TEST_CASE( "ISODATA splits a fused bimodal cluster once", "[d15][classifier]" )
       best = std::min( best, std::hypot( c[0] - g[0], c[1] - g[1] ) );
     REQUIRE( best < 0.3 );
   }
+}
+
+TEST_CASE( "NormalBayes posterior matches the closed form for correlated covariances",
+           "[d15][classifier]" )
+{
+  // Hand-crafted 3-sample classes realize the EXACT sample covariance
+  // [[1,-0.5],[-0.5,1]] (off-diagonal mass forces a non-diagonal Cholesky
+  // factor, so a wrong triangular back-substitution order is observable):
+  //   offsets (1,0), (-1,1), (0,-1): sum 0, sum ddT/2 = [[1,-0.5],[-0.5,1]].
+  // Class 0 at the origin, class 1 shifted by (2,2); equal priors.
+  // For x = (2,2) = mu1: q1 = 0, q0 = (2,2) Sigma^-1 (2,2)' with
+  // Sigma^-1 = (1/0.75)[[1,0.5],[0.5,1]] -> q0 = 16.
+  // g0 = -0.5*ln(0.75) - 8, g1 = -0.5*ln(0.75); posterior
+  // p1 = 1 / (1 + e^8) = 0.99966458...
+  // (an ascending-order back substitution yields p1 ~ 0.997 — flagged).
+  std::vector<float> x = {
+    1.0f, 0.0f, -1.0f, 1.0f, 0.0f, -1.0f,          // class 0 offsets
+    3.0f, 2.0f, 1.0f, 3.0f, 2.0f, 1.0f,            // class 1 = same + (2,2)
+  };
+  std::vector<int> y = { 0, 0, 0, 1, 1, 1 };
+  ClassifierHyperparameters p;
+  auto nb = ClassifierEngine::create( ClassifierAlgorithm::NormalBayes, p );
+  nb->fit( x, y, 6, 2 );
+  REQUIRE( nb->isTrained() );
+
+  const std::vector<float> atClass1Mean = { 2.0f, 2.0f };
+  const auto probs = nb->predictProbabilities( atClass1Mean );
+  REQUIRE( probs.size() == 2 );
+  REQUIRE_THAT( probs[1], WithinAbs( 1.0 / ( 1.0 + std::exp( -8.0 ) ), 1e-6 ) );
+  REQUIRE( nb->predictOne( atClass1Mean ) == 1 );
 }
 
 TEST_CASE( "NormalBayes ridge survives a singular class covariance", "[d15][classifier]" )
