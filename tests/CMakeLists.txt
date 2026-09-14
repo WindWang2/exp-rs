@@ -8926,3 +8926,4 @@ target_include_directories(test_georef_dual_window_workbench PRIVATE
 )
 set_target_properties(test_georef_dual_window_workbench PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_georef_dual_window_workbench)
+sicnu_add_test(test_geometric_agent_tools)

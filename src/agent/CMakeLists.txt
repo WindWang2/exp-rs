@@ -108,6 +108,7 @@ add_library(sicnu_agent SHARED
   spatial_tools/governance_tools.cpp
   spatial_tools/governance_tools.h
   spatial_tools/spatial_tool.cpp
+  tools/geometric_tool.cpp
   spatial_tools/spatial_tool.h
   spatial_tools/raster_inspect_tool.cpp
   spatial_tools/raster_inspect_tool.h
