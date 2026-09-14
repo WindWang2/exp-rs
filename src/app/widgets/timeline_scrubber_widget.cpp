@@ -88,9 +88,10 @@ int TimelineScrubberWidget::indexAtX( int x ) const
 {
     if ( mDates.empty() )
         return -1;
-    const int usable = std::max( 1, width() - 2 * kSnapPixels );
-    const double fraction = static_cast<double>( std::clamp( x, kSnapPixels, width() - kSnapPixels ) - kSnapPixels ) /
-                            usable;
+    const int lo = std::min( kSnapPixels, std::max( 0, width() / 2 ) );
+    const int hi = std::max( lo, width() - lo );
+    const double fraction =
+        static_cast<double>( std::clamp( x, lo, hi ) - lo ) / std::max( 1, hi - lo );
     int index = static_cast<int>( std::lround( fraction * ( mDates.size() - 1 ) ) );
     index = std::clamp( index, 0, static_cast<int>( mDates.size() ) - 1 );
     // Snap-to-acquisition: within kSnapPixels of the nearest tick, commit

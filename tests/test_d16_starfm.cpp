@@ -174,3 +174,29 @@ TEST_CASE( "NaN inputs stay NaN, outputs stay physical, edges truncate",
         REQUIRE( out[4 * w + 4] <= 1.0f );
     }
 }
+
+TEST_CASE( "Fully heterogeneous window falls back to the coarse temporal change",
+           "[d16][starfm]" )
+{
+    // Center differs from every neighbor beyond the threshold: no candidate
+    // is admitted, so the documented fallback carries the coarse change.
+    const int w = 9, h = 9;
+    std::vector<float> fine0 = plane( w, h, 0.3f );
+    fine0[4 * w + 4] = 0.5f; // heterogeneous center
+    std::vector<float> coarse0 = fine0;
+    std::vector<float> coarseK( fine0.size() );
+    for ( std::size_t i = 0; i < fine0.size(); ++i )
+        coarseK[i] = fine0[i] + 0.1f;
+
+    StarfmOptions options;
+    options.windowRadius = 2;
+    options.spectralThreshold = 0.0f; // nothing homogeneous -> everything gated
+    const auto out = SpatiotemporalFilter::predictStarfm( fine0.data(), coarse0.data(),
+                                                          coarseK.data(), w, h, options );
+    INFO( "center=" << out[4 * w + 4] );
+    // Fallback: base value + mean coarse change (+0.1).
+    REQUIRE( out[4 * w + 4] == Approx( 0.6 ).margin( 1e-5 ) );
+
+    // Neighbors (homogeneous windows) predict exactly through the kernel.
+    REQUIRE( out[0] == Approx( 0.4 ).margin( 1e-5 ) );
+}

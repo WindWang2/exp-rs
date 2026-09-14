@@ -214,6 +214,10 @@ Json::Value TemporalSpatialTool::executeTool( const std::string &toolName,
 
     if ( toolName == "temporal:trend_inspect" )
     {
+        // Caveat (reported in the response): the plain Mann-Kendall test on
+        // a strongly seasonal series reads seasonality as significance —
+        // callers should deseasonalize (or request seasonal MK) for trend
+        // claims on such series.
         const std::size_t count = record->monthly.size();
         std::vector<float> values( count );
         std::vector<double> t( count );
@@ -231,6 +235,7 @@ Json::Value TemporalSpatialTool::executeTool( const std::string &toolName,
 
         Json::Value out;
         out["status"] = "success";
+        out["caveat"] = "plain Mann-Kendall on a seasonal series overstates significance";
         out["sen_slope_per_year"] = trend.senSlope * 365.25;
         out["z"] = trend.zScore;
         out["p_value"] = trend.pValue;
@@ -248,21 +253,29 @@ Json::Value TemporalSpatialTool::executeTool( const std::string &toolName,
         if ( years < 2 )
             return rejected( "climatology needs at least two years" );
 
-        // Per-calendar-month climatology across the ingested years.
+        // Per-calendar-month climatology across the ingested years. NaN
+        // months are skipped (never averaged in); a non-finite target month
+        // is a structured refusal, not a fabricated z.
         double mean[12] = { 0 };
         double m2[12] = { 0 };
+        int counted[12] = { 0 };
         for ( int y = 0; y < years; ++y )
             for ( int m = 0; m < 12; ++m )
             {
                 const double v = record->monthly[static_cast<std::size_t>( y * 12 + m )];
+                if ( !std::isfinite( v ) )
+                    continue;
                 mean[m] += v;
                 m2[m] += v * v;
+                ++counted[m];
             }
         double sigma[12] = { 0 };
         for ( int m = 0; m < 12; ++m )
         {
-            mean[m] /= years;
-            sigma[m] = std::sqrt( std::max( m2[m] / years - mean[m] * mean[m], 0.0 ) );
+            if ( counted[m] < 2 )
+                return rejected( "climatology needs at least two finite years for every month" );
+            mean[m] /= counted[m];
+            sigma[m] = std::sqrt( std::max( m2[m] / counted[m] - mean[m] * mean[m], 0.0 ) );
         }
 
         Json::Value zMonths( Json::arrayValue );
@@ -271,6 +284,8 @@ Json::Value TemporalSpatialTool::executeTool( const std::string &toolName,
         for ( int m = 0; m < 12; ++m )
         {
             const double v = record->monthly[static_cast<std::size_t>( offset * 12 + m )];
+            if ( !std::isfinite( v ) )
+                return rejected( "target year contains non-finite months" );
             const double z = sigma[m] > 1e-9 ? ( v - mean[m] ) / sigma[m] : 0.0;
             zMonths.append( z );
             if ( z <= -1.5 )

@@ -278,7 +278,6 @@ BfastResult BreakpointDetector::detectHarmonicBreaks( const std::vector<float> &
 
     // Greedy recursive splitting under F + BIC gates.
     std::vector<std::size_t> bounds{ 0, n }; // segment boundary indices
-    std::vector<double> rssAtSplit;          // bookkeeping aligned with candidates
 
     for ( int accepted = 0; accepted < maxBreaks; ++accepted )
     {
@@ -384,7 +383,6 @@ BfastResult BreakpointDetector::detectHarmonicBreaks( const std::vector<float> &
         bp.rssReduction = best.rssReduction;
         result.breakpoints.push_back( bp );
         result.breakCount = static_cast<int>( result.breakpoints.size() );
-        ( void )rssAtSplit;
     }
 
     // Final per-segment decomposition, mapped back onto the original axis
@@ -426,7 +424,14 @@ BfastResult BreakpointDetector::detectHarmonicBreaks( const std::vector<float> &
         }
     }
     if ( !ok )
-        return result;
+    {
+        result.breakpoints.clear();
+        result.breakCount = 0;
+        result.fittedTrend.assign( y.size(), kNanOutput );
+        result.fittedHarmonics.assign( y.size(), kNanOutput );
+        result.residuals.assign( y.size(), kNanOutput );
+        return result; // honest failure: no stale partial output
+    }
 
     result.overallRmse = std::sqrt( rss / static_cast<double>( n ) );
     result.valid = true;

@@ -367,8 +367,8 @@ target_link_libraries(sicnu_temporal_timeline PUBLIC
     Qt6::Gui
     Qt6::Widgets
     Sicnu::Geospatial
-    GDAL::GDAL
 )
+# GDAL arrives transitively (Sicnu::Geospatial PUBLIC-links GDAL::GDAL).
 # jsoncpp for the agent temporal tools (top-level canonical target, same
 # fallback pattern as sicnu_geospatial).
 if(TARGET jsoncpp)

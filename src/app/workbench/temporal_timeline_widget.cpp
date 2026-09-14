@@ -39,46 +39,19 @@ QRectF TemporalProfileWidget::plotRect() const
 
 QPointF TemporalProfileWidget::toPixel( double tDays, double value ) const
 {
-    double t0 = -kNaN;
-    double t1 = kNaN;
-    for ( double v : mRawT )
-    {
-        t0 = std::isfinite( t0 ) ? std::min( t0, v ) : v;
-        t1 = std::isfinite( t1 ) ? std::max( t1, v ) : v;
-    }
-    for ( double v : mSmoothT )
-    {
-        t0 = std::isfinite( t0 ) ? std::min( t0, v ) : v;
-        t1 = std::isfinite( t1 ) ? std::max( t1, v ) : v;
-    }
-    if ( mHasPhenology && std::isfinite( mSos ) && std::isfinite( mEos ) )
-    {
-        t0 = std::isfinite( t0 ) ? std::min( t0, mSos ) : mSos;
-        t1 = std::isfinite( t1 ) ? std::max( t1, mEos ) : mEos;
-    }
-    if ( !std::isfinite( t0 ) || !std::isfinite( t1 ) || t1 <= t0 )
+    // Axis ranges are cached (refreshed by the data setters) — hover path
+    // stays O(1) per event.
+    double t0 = mAxisT0;
+    double t1 = mAxisT1;
+    if ( !( t1 > t0 ) )
     {
         t0 = 0.0;
         t1 = 1.0;
     }
     const QRectF plot = plotRect();
     const double x = plot.left() + ( tDays - t0 ) / ( t1 - t0 ) * plot.width();
-    double v0 = 0.0;
-    double v1 = 1.0;
-    for ( std::size_t i = 0; i < mRawV.size() && i < mRawT.size(); ++i )
-    {
-        if ( !std::isfinite( mRawV[i] ) )
-            continue;
-        v0 = std::isfinite( v0 ) ? std::min<double>( v0, mRawV[i] ) : mRawV[i];
-        v1 = std::isfinite( v1 ) ? std::max<double>( v1, mRawV[i] ) : mRawV[i];
-    }
-    for ( std::size_t i = 0; i < mSmoothV.size() && i < mSmoothT.size(); ++i )
-    {
-        if ( !std::isfinite( mSmoothV[i] ) )
-            continue;
-        v0 = std::isfinite( v0 ) ? std::min<double>( v0, mSmoothV[i] ) : mSmoothV[i];
-        v1 = std::isfinite( v1 ) ? std::max<double>( v1, mSmoothV[i] ) : mSmoothV[i];
-    }
+    double v0 = mAxisV0;
+    double v1 = mAxisV1;
     if ( !( v1 > v0 ) )
     {
         v0 = 0.0;
@@ -87,6 +60,39 @@ QPointF TemporalProfileWidget::toPixel( double tDays, double value ) const
     const double pad = 0.1 * ( v1 - v0 );
     const double y = plot.bottom() - ( value - ( v0 - pad ) ) / ( ( v1 + pad ) - ( v0 - pad ) ) * plot.height();
     return QPointF( x, y );
+}
+
+void TemporalProfileWidget::refreshAxes()
+{
+    mAxisT0 = std::numeric_limits<double>::infinity();
+    mAxisT1 = -std::numeric_limits<double>::infinity();
+    mAxisV0 = std::numeric_limits<double>::infinity();
+    mAxisV1 = -std::numeric_limits<double>::infinity();
+    auto spanT = [&]( const std::vector<double> &t ) {
+        for ( double v : t )
+            if ( std::isfinite( v ) )
+            {
+                mAxisT0 = std::min( mAxisT0, v );
+                mAxisT1 = std::max( mAxisT1, v );
+            }
+    };
+    spanT( mRawT );
+    spanT( mSmoothT );
+    auto spanV = [&]( const std::vector<double> &t, const std::vector<float> &v ) {
+        for ( std::size_t i = 0; i < v.size() && i < t.size(); ++i )
+            if ( std::isfinite( t[i] ) && std::isfinite( v[i] ) )
+            {
+                mAxisV0 = std::min( mAxisV0, static_cast<double>( v[i] ) );
+                mAxisV1 = std::max( mAxisV1, static_cast<double>( v[i] ) );
+            }
+    };
+    spanV( mRawT, mRawV );
+    spanV( mSmoothT, mSmoothV );
+    if ( mHasPhenology && std::isfinite( mSos ) && std::isfinite( mEos ) )
+    {
+        mAxisT0 = std::min( mAxisT0, mSos );
+        mAxisT1 = std::max( mAxisT1, mEos );
+    }
 }
 
 void TemporalProfileWidget::rebuildBackground()
@@ -172,6 +178,7 @@ void TemporalProfileWidget::setRawObservations( const std::vector<double> &tDays
 {
     mRawT = tDays;
     mRawV = values;
+    refreshAxes();
     mBackgroundDirty = true;
     update();
 }
@@ -181,6 +188,7 @@ void TemporalProfileWidget::setSmoothedCurve( const std::vector<double> &tDays,
 {
     mSmoothT = tDays;
     mSmoothV = values;
+    refreshAxes();
     mBackgroundDirty = true;
     update();
 }
@@ -191,6 +199,7 @@ void TemporalProfileWidget::setPhenologyInterval( double sos, double pos, double
     mPos = pos;
     mEos = eos;
     mHasPhenology = std::isfinite( sos ) && std::isfinite( pos ) && std::isfinite( eos );
+    refreshAxes();
     mBackgroundDirty = true;
     update();
 }

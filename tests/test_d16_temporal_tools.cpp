@@ -8,6 +8,7 @@
 #include "agent/tools/temporal_tool.h"
 
 #include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -195,4 +196,27 @@ TEST_CASE( "Guards reject invalid inputs with structured reasons",
         REQUIRE( r["status"].asString() == "rejected" );
         REQUIRE( r["reason"].asString().find( "phenology" ) != std::string::npos );
     }
+}
+
+TEST_CASE( "Non-finite months are refused, never averaged into climatology",
+           "[d16][agent]" )
+{
+    TemporalSpatialTool::clearSeries();
+    auto series = fiveYearSeries();
+    series[3 * 12 + 6] = std::numeric_limits<float>::quiet_NaN(); // NaN in target year
+    TemporalSpatialTool::ingestSeries( "NDVI", 104.06, 30.67, 2021, series );
+
+    const Json::Value r = TemporalSpatialTool::executeTool( "temporal:anomaly_alert",
+                                                            pixelArgs( "NDVI", 2024 ) );
+    REQUIRE( r["status"].asString() == "rejected" );
+    REQUIRE( !r["reason"].asString().empty() );
+
+    // A NaN in a CLIMATOLOGY year (not the target) is skipped, not fatal.
+    auto series2 = fiveYearSeries();
+    series2[0 * 12 + 6] = std::numeric_limits<float>::quiet_NaN(); // 2021 July
+    TemporalSpatialTool::clearSeries();
+    TemporalSpatialTool::ingestSeries( "NDVI", 104.06, 30.67, 2021, series2 );
+    const Json::Value ok = TemporalSpatialTool::executeTool( "temporal:anomaly_alert",
+                                                             pixelArgs( "NDVI", 2024 ) );
+    REQUIRE( ok["status"].asString() == "success" );
 }

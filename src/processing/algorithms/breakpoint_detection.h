@@ -59,7 +59,10 @@ class BreakpointDetector
   public:
     /// Joint harmonic + piecewise-linear breakpoint detection.
     /// @param harmonics 1..6 sin/cos pairs (default 3), @param maxBreaks >= 0,
-    /// @param minSegmentSamples >= 8 on each side of every break.
+    /// @param minSegmentSamples >= 2 finite samples on each side of every
+    /// break. Magnitude is the fitted-level jump at the split point (the two
+    /// segments' intercept+trend+harmonic evaluations differ there); it equals
+    /// the pure intercept step only when the seasonality is harmonic-exact.
     static BfastResult detectHarmonicBreaks( const std::vector<float> &y,
                                              const std::vector<double> &tDays,
                                              int harmonics = 3,

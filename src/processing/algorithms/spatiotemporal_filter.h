@@ -42,9 +42,9 @@ namespace sicnu::temporal
 struct StarfmOptions
 {
     int windowRadius = 15;           ///< moving search window half-width (pixels)
-    int numClasses = 5;              ///< reserved class count (documentation parity)
+    int numClasses = 5;              ///< spec field, unused by this single-pair kernel
     float spectralThreshold = 0.05f; ///< homogeneous-candidate gate on |F − F_center|
-    float spatialWeightDecay = 1.0f; ///< geometric distance scale factor
+    float spatialWeightDecay = 1.0f; ///< geometric distance scale (<= 0 resets to 1)
 };
 
 class SpatiotemporalFilter

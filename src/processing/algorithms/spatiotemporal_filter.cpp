@@ -69,23 +69,28 @@ std::vector<float> SpatiotemporalFilter::predictStarfm( const float *fine0,
                     const double ck = coarseK[i];
                     if ( !std::isfinite( f ) || !std::isfinite( c0 ) || !std::isfinite( ck ) )
                         continue; // NaN candidates never contribute
-                    // Homogeneity gate: heterogeneous pixels do not leak
-                    // across the edge.
-                    if ( std::abs( f - fc ) > threshold )
-                        continue;
 
-                    const double s = std::abs( f - c0 ) + kEpsilonS;
-                    const double tDiff = std::abs( ck - c0 ) + kEpsilonT;
-                    const double dDist =
-                        ( std::sqrt( static_cast<double>( ( yy - cy ) * ( yy - cy ) +
-                                                       ( xx - cx ) * ( xx - cx ) ) ) +
-                          1.0 ) *
-                        decay;
-                    const double weight = 1.0 / ( s * tDiff * dDist );
-
-                    sumWeight += weight;
-                    sumWeighted += weight * ( ck + f - c0 );
-                    sumDelta += ck - c0;
+                    const double coarseDelta = ck - c0;
+                    if ( std::abs( f - fc ) <= threshold )
+                    {
+                        // Homogeneity gate: heterogeneous pixels do not leak
+                        // across the edge.
+                        const double s = std::abs( f - c0 ) + kEpsilonS;
+                        const double tDiff = std::abs( ck - c0 ) + kEpsilonT;
+                        const double dDist =
+                            ( std::sqrt( static_cast<double>( ( yy - cy ) * ( yy - cy ) +
+                                                           ( xx - cx ) * ( xx - cx ) ) ) +
+                              1.0 ) *
+                            decay;
+                        const double weight = 1.0 / ( s * tDiff * dDist );
+                        sumWeight += weight;
+                        sumWeighted += weight * ( ck + f - c0 );
+                    }
+                    // The fallback level accumulates coarse deltas over ALL
+                    // valid window cells (gate excluded — header contract:
+                    // "the center pixel's base value carries the coarse
+                    // temporal change").
+                    sumDelta += coarseDelta;
                     ++deltaCount;
                 }
             }
@@ -94,10 +99,11 @@ std::vector<float> SpatiotemporalFilter::predictStarfm( const float *fine0,
             if ( sumWeight > 1e-12 )
                 predicted = sumWeighted / sumWeight;
             else if ( deltaCount > 0 )
-                predicted = fc + sumDelta / deltaCount; // fallback: coarse change only
+                predicted = fc + sumDelta / deltaCount; // documented fallback
             else
-                predicted = fc; // nothing admitted: hold the base value
-            out[center] = std::min( 1.0f, std::max( 0.0f, static_cast<float>( predicted ) ) );
+                predicted = kNan; // nothing valid anywhere: undefined
+            if ( std::isfinite( predicted ) )
+                out[center] = std::min( 1.0f, std::max( 0.0f, static_cast<float>( predicted ) ) );
         }
     }
     return out;

@@ -492,3 +492,41 @@ TEST_CASE( "Declared NoData pixels are never compositing candidates",
     const auto ok = cube->extractPixelSeries( 0, 0 );
     REQUIRE( ok[0] == Approx( 0.4 ).margin( 1e-6 ) );
 }
+
+TEST_CASE( "A window with only fully-clouded observations yields NaN under both policies",
+           "[d16][cube][composite]" )
+{
+    GdalInit init;
+    QTemporaryDir tmp;
+    const QDir dir( tmp.path() );
+    const int w = 8, h = 8;
+
+    // One scene, fully opaque cloud on the left half; no other scene inside
+    // the +-32 day window of its node.
+    std::vector<float> v = plane( w, h, 0.5f );
+    std::vector<float> cloud = plane( w, h, 0.0f );
+    for ( int y = 0; y < h; ++y )
+        for ( int x = 0; x < 4; ++x )
+            cloud[static_cast<std::size_t>( y ) * w + x] = 1.0f;
+    const auto scene = writeScene( dir, "c", kEpoch, w, h, v, cloud );
+
+    for ( const auto strategy :
+          { sicnu::temporal::CompositingStrategy::BestPixel,
+            sicnu::temporal::CompositingStrategy::WeightedMean } )
+    {
+        TemporalCubeConfig cfg;
+        cfg.strategy = strategy;
+        auto cube = TemporalCube::open( { scene }, cfg );
+        REQUIRE( cube != nullptr );
+        const auto clouded = cube->extractPixelSeries( 1, 1 );
+        REQUIRE( clouded.size() == 1 );
+        INFO( "strategy=" << ( strategy == sicnu::temporal::CompositingStrategy::BestPixel ?
+                                   "BestPixel" :
+                                   "WeightedMean" ) );
+        // D-160-8(a): no valid (unmasked) observation in the window -> NaN,
+        // never the cloud-contaminated value.
+        REQUIRE( std::isnan( clouded[0] ) );
+        const auto clear = cube->extractPixelSeries( 6, 1 );
+        REQUIRE( clear[0] == Approx( 0.5 ).margin( 1e-6 ) );
+    }
+}

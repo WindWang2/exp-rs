@@ -194,8 +194,6 @@ PhenologyMetrics PhenologyExtractor::extractDynamicThreshold( const std::vector<
         {
             if ( tDays[i] > tDays[posIdx] )
                 break;
-            if ( crossed )
-                break;
             if ( i != prev && ratio( i ) >= thresholdFraction && ratio( prev ) < thresholdFraction )
             {
                 sos = crossingTime( tDays[prev], ratio( prev ), tDays[i], ratio( i ),
@@ -244,8 +242,10 @@ PhenologyMetrics PhenologyExtractor::extractDynamicThreshold( const std::vector<
     m.sos = sos;
     m.pos = tDays[posIdx];
     m.eos = eos;
-    // Year-wrapping seasons (winter wheat, southern hemisphere) gain a year.
-    m.los = ( doyOf( eos ) >= doyOf( sos ) ) ? ( eos - sos ) : ( eos + kYearDays - sos );
+    // On the absolute tDays axis sos < eos is enforced above, so the length
+    // of season is the plain difference. (The +365 wrap is a property of the
+    // day-of-year VIEW, not of this axis.)
+    m.los = eos - sos;
     m.baseVal = zMin;
     m.peakVal = zMax;
 
@@ -256,7 +256,6 @@ PhenologyMetrics PhenologyExtractor::extractDynamicThreshold( const std::vector<
     double integral = 0.0;
     double leftT = sos;
     double leftV = boundaryVal;
-    bool haveLeft = true;
     for ( std::size_t i : idx )
     {
         if ( tDays[i] < sos || tDays[i] > eos )
@@ -264,9 +263,8 @@ PhenologyMetrics PhenologyExtractor::extractDynamicThreshold( const std::vector<
         integral += 0.5 * ( static_cast<double>( y[i] ) + leftV ) * ( tDays[i] - leftT );
         leftT = tDays[i];
         leftV = y[i];
-        haveLeft = true;
     }
-    if ( haveLeft && leftT < eos )
+    if ( leftT < eos )
         integral += 0.5 * ( boundaryVal + leftV ) * ( eos - leftT );
     m.integral = integral;
     m.valid = m.sos < m.pos && m.pos < m.eos;
@@ -447,9 +445,7 @@ PhenologyExtractor::fitDoubleLogistic( const std::vector<float> &y,
     metrics.pos = bestT;
     metrics.baseVal = params.baseVal;
     metrics.peakVal = bestV;
-    metrics.los = metrics.eos - metrics.sos;
-    if ( metrics.los < 0.0 )
-        metrics.los += kYearDays;
+    metrics.los = metrics.eos - metrics.sos; // absolute axis: sos < eos enforced
 
     // Trapezoid integral of the fitted curve over [sos, eos] with exact
     // boundary values.
@@ -564,8 +560,8 @@ std::vector<PhenologyMetrics> PhenologyExtractor::extractMultiCycle(
     results.reserve( peaks.size() );
     for ( std::size_t p = 0; p < peaks.size(); ++p )
     {
-        // Segment: from the deepest valley left of the peak (or the start)
-        // to the deepest valley right of it (or the end). Neighbor selected
+        // Segment: from the nearest valley left of the peak (or the start)
+        // to the nearest valley right of it (or the end). Neighbor selected
         // peaks bound the search so segments never overlap.
         const std::size_t leftBound =
             p == 0 ? 0 : peaks[p - 1];

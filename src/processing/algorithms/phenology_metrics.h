@@ -18,8 +18,9 @@
   Threshold semantics (D16 §C): with the season's range normalized
   Ratio(t) = (z − z_min)/(z_max − z_min), SOS is the first rising crossing of
   thresholdFraction (linear interpolation between samples), POS the argmax,
-  EOS the first falling crossing after the peak. When the season wraps the
-  year (eos < sos), los gains one year: los = (eos + 365) − sos.
+  EOS the first falling crossing after the peak. Metrics live on the caller's
+  absolute tDays axis, where sos < eos is enforced, so los = eos − sos; the
+  familiar +365 wrap belongs to the day-of-year VIEW, not to this axis.
  ***************************************************************************/
 
 #ifndef SICNU_PROCESSING_ALGORITHMS_PHENOLOGY_METRICS_H
@@ -71,9 +72,9 @@ class PhenologyExtractor
                                                      int seasonEndDoy = 365 );
 
     /// Nonlinear least-squares fit (Levenberg–Marquardt, numeric Jacobian) of
-    /// the asymmetric double logistic; phenology from curvature extremes:
-    /// sos = τ1, eos = τ2, pos = argmax of the fitted curve. The pair's
-    /// metrics share the validity guard above.
+    /// the asymmetric double logistic; phenology from the logistic
+    /// inflections (maximum-slope points): sos = τ1, eos = τ2, pos = argmax
+    /// of the fitted curve. The pair's metrics share the validity guard above.
     static std::pair<DoubleLogisticParams, PhenologyMetrics>
     fitDoubleLogistic( const std::vector<float> &y, const std::vector<double> &tDays );
 

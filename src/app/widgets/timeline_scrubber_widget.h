@@ -41,7 +41,8 @@ class TimelineScrubberWidget : public QWidget
     void setCurrentIndex( int index );
     int currentIndex() const { return mCurrentIndex; }
 
-    /// Playback at @a framesPerSlice ms per slice for 1.0x (D16 §G).
+    /// Plays at kFramesPerSlice frames per slice for 1.0x (D16 §G: the
+    /// timer itself pulses every 16 ms).
     void play();
     void pause();
     void setPlaySpeed( float speedMultiplier );

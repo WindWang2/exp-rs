@@ -185,7 +185,7 @@ struct CrossingTruth
     double eos = 0.0;
     CrossingTruth( double mu, double sigma, double base, double amp, double f )
     {
-        const double edge = kScenesDays - 12.0; // t = 352, last year-1 node
+        const double edge = 22.0 * 16.0; // t = 352, the last year-1 node
         const double zmin = base + amp * std::exp( -0.5 * std::pow( ( edge - mu ) / sigma, 2 ) );
         const double zmax = base + amp;
         const double yCross = zmin + f * ( zmax - zmin );
@@ -194,7 +194,6 @@ struct CrossingTruth
         sos = mu - c;
         eos = mu + c;
     }
-    static constexpr double kScenesDays = 720.0;
 };
 
 std::size_t peakRssBytes()
@@ -258,7 +257,7 @@ TEST_CASE( "Full chain: cube -> smooth -> breaks -> phenology -> agent, no drift
     std::vector<float> spiked( series );
     for ( std::size_t i = 2; i < spiked.size(); i += 5 ) // isolated cloud hits
         spiked[i] -= 0.35f;
-    const auto smoothed = sicnu::temporal::whittakerSmoothRobust( spiked, {}, 10.0, 4 );
+    const auto smoothed = sicnu::temporal::d16::whittakerSmoothRobust( spiked, {}, 10.0, 4 );
     REQUIRE( smoothed.size() == series.size() );
     double mae = 0.0;
     for ( std::size_t i = 0; i < smoothed.size(); ++i )
@@ -267,7 +266,7 @@ TEST_CASE( "Full chain: cube -> smooth -> breaks -> phenology -> agent, no drift
     // Sampling floor: even the clean input smooths to ~0.026 MAE at this
     // geometry (16-day axis, sigma = 60 d season), so the honest robust
     // bound is 0.03 — while the plain smoother stays at 0.07+.
-    const auto plain = sicnu::temporal::whittakerSmooth( spiked, {}, 10.0, 2 );
+    const auto plain = sicnu::temporal::d16::whittakerSmooth( spiked, {}, 10.0, 2 );
     double plainMae = 0.0;
     for ( std::size_t i = 0; i < series.size(); ++i )
         plainMae += std::abs( plain[i] - series[i] );
@@ -390,7 +389,7 @@ TEST_CASE( "Lab08 auto-grading reaches the 100-point baseline", "[d16][e2e][lab0
         std::vector<float> spiked( series );
         for ( std::size_t i = 2; i < spiked.size(); i += 5 ) // isolated cloud hits
             spiked[i] -= 0.35f;
-        const auto smoothed = sicnu::temporal::whittakerSmoothRobust( spiked, {}, 10.0, 4 );
+        const auto smoothed = sicnu::temporal::d16::whittakerSmoothRobust( spiked, {}, 10.0, 4 );
         double mae = 0.0;
         for ( std::size_t i = 0; i < smoothed.size(); ++i )
             mae += std::abs( smoothed[i] - series[i] );

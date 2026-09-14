@@ -61,6 +61,7 @@ class TemporalProfileWidget : public QWidget
 
   private:
     void rebuildBackground();
+    void refreshAxes();
     QRectF plotRect() const;
     QPointF toPixel( double tDays, double value ) const;
 
@@ -78,6 +79,10 @@ class TemporalProfileWidget : public QWidget
 
     QPixmap mBackground;   // static chrome cache
     bool mBackgroundDirty = true;
+    double mAxisT0 = 0.0;  // cached axis ranges (refreshAxes)
+    double mAxisT1 = 0.0;
+    double mAxisV0 = 0.0;
+    double mAxisV1 = 0.0;
 };
 
 /// Workbench composite: profile on top, scrubber below.

@@ -19,6 +19,9 @@
 namespace sicnu::temporal
 {
 
+namespace d16
+{
+
 namespace
 {
 
@@ -189,15 +192,22 @@ std::vector<float> whittakerSmoothRobust( const std::vector<float> &y, const std
         if ( residuals.size() < 3 )
             break;
 
-        // σ̂ = 1.4826 · MAD (median absolute deviation from the median).
-        std::vector<double> sorted = residuals;
-        const std::size_t mid = sorted.size() / 2;
-        std::nth_element( sorted.begin(), sorted.begin() + mid, sorted.end() );
-        const double median = sorted[mid];
-        for ( double &r : sorted )
-            r = std::abs( r - median );
-        std::nth_element( sorted.begin(), sorted.begin() + mid, sorted.end() );
-        const double sigma = 1.4826 * sorted[mid];
+        // σ̂ = 1.4826 · MAD (median absolute deviation from the median;
+        // even counts take the mean of the two middle elements).
+        const auto medianOf = []( std::vector<double> values ) {
+            const std::size_t m = values.size() / 2;
+            std::nth_element( values.begin(), values.begin() + m, values.end() );
+            if ( values.size() % 2 == 1 )
+                return values[m];
+            const double upper = values[m];
+            const double lower = *std::max_element( values.begin(), values.begin() + m );
+            return 0.5 * ( lower + upper );
+        };
+        const double median = medianOf( residuals );
+        std::vector<double> absDev( residuals.size() );
+        for ( std::size_t i = 0; i < residuals.size(); ++i )
+            absDev[i] = std::abs( residuals[i] - median );
+        const double sigma = 1.4826 * medianOf( absDev );
         if ( !( sigma > kTiny ) )
             break; // exact fit already
 
@@ -320,4 +330,5 @@ std::vector<float> savitzkyGolay( const std::vector<float> &y, int windowSize, i
     return out;
 }
 
+} // namespace d16
 } // namespace sicnu::temporal

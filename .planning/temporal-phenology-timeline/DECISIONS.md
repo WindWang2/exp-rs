@@ -106,3 +106,47 @@ Acceptance runs `ctest -R "test_d16_|test_whittaker|test_bfast|test_phenology|te
 `test_bfast_harmonic_breaks` (D), `test_d16_temporal_trend` (E unit), `test_d16_starfm` (F),
 `test_timeline_scrubber_widget` + `test_temporal_profile_widget` (G), `test_temporal_agent_tools` (H),
 `test_d16_temporal_phenology_e2e` (I, includes Lab08 grading). All run under `QT_QPA_PLATFORM=offscreen`, `-j1`.
+
+## D-160-4 (revised in review) · Nested namespace for the D16 smoothing seam
+
+The original "never include both headers in one TU" rule could not prevent the
+link-time hazard: `whittakerSmoothRobust(y,w,λ,iters)` and
+`savitzkyGolay(y,window,degree)` had IDENTICAL signatures and mangled names in
+`temporal_fit.cpp` (shared sicnu_processing) and `temporal_smoothing.cpp`
+(static sicnu_temporal_timeline) — ELF interposition would silently bind one
+library's calls to the other implementation once both link together. All three
+D16 smoothing kernels now live in the nested namespace `sicnu::temporal::d16`
+(mangling-distinct, spec function names preserved); both headers may coexist
+in one translation unit.
+
+## D-160-11 · Spec-mandated namespaces retained (convention deviation noted)
+
+The D16 spec fixes `namespace sicnu::gui` (timeline widgets) and
+`namespace sicnu::agent` (temporal tools); repo convention would prefer
+`sicnu::app` and `sicnu::agent::spatial_tools`. The spec-mandated names are
+kept for this track; normalization is a mechanical follow-up before workbench
+wiring.
+
+## D-160-12 · Review remediation ledger (Phase 6)
+
+- P0: BestPixel admitted Q=0 (fully-clouded) observations via the −1 sentinel —
+  gate now requires q > 0 for both policies; all-clouded-window NaN test added.
+- P1: LOS cross-year double-count (+365 on the absolute axis) removed —
+  `los = eos − sos` always; header contract rewritten; cross-year test added.
+- P1: trend_analysis invalid path now NaN-fills every field per header contract.
+- P1: STARFM fallback now implements the documented two-level contract
+  (base + mean coarse delta of all valid window cells, else NaN); previously
+  unreachable dead branch removed.
+- P1: agent climatology skips non-finite months; non-finite target month is a
+  structured rejection (anti-hallucination contract).
+- P1: `std::clamp` UB in the scrubber at tiny widths guarded; TemporalCube
+  rejects complex pixel types at open and treats read failures as typed
+  non-contributions.
+- P2 (applied): rssAtSplit dead code, nearest-valley wording, MAD even-count
+  median, refit-failure hygiene (no stale partial output), profile axis-range
+  caching, CrossingTruth edge constant 708→352, GDAL PUBLIC redundancy, misc
+  comment/unit fixes, DECISIONS source-list drift.
+- P2 (accepted as-is): spec-mandated `numClasses` field kept (documented as
+  unused by the single-pair kernel); wall-clock redline tests kept with the
+  generous margins the spec prescribes; GilbertReference kept (the
+  42/124/3.6818 hand anchors carry independence).

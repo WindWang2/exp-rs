@@ -151,6 +151,10 @@ TEST_CASE( "Gilbert benchmark: tie-corrected variance, z and significance",
     const auto r2 = TrendAnalyzer::computeMannKendall( two, { 0, 1 } );
     REQUIRE( !r2.valid );
     REQUIRE( r2.sampleCount == 2 );
+    // Documented contract: underpowered tests are NaN-filled, never 0.
+    REQUIRE( std::isnan( r2.senSlope ) );
+    REQUIRE( std::isnan( r2.pValue ) );
+    REQUIRE( std::isnan( r2.zScore ) );
     const auto r3 = TrendAnalyzer::computeMannKendall( { 1, 2, 3 }, { 0, 1, 2 } );
     REQUIRE( r3.valid );
 }

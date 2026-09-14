@@ -50,6 +50,8 @@ struct ThresholdTruth
     }
 };
 
+constexpr double kPeriodDaysForTest = 365.0;
+
 std::vector<double> dailyAxis( int n = 365 )
 {
     std::vector<double> t( static_cast<std::size_t>( n ) );
@@ -272,4 +274,35 @@ TEST_CASE( "Multi-cycle refuses to fabricate cycles that are not in the data",
     // Flat data: no cycles at all.
     std::vector<float> flat( t.size(), 0.3f );
     REQUIRE( PhenologyExtractor::extractMultiCycle( flat, t, 2, 0.2 ).empty() );
+}
+
+TEST_CASE( "Cross-year season length is the plain axis difference",
+           "[d16][phenology]" )
+{
+    // One wide season peaking at t = 390 (doy 25 of year 2): the rising
+    // crossing sits in year 1 (doy ~283), the falling crossing in year 2
+    // (doy ~133). On the absolute axis los = eos - sos with NO +365 wrap.
+    const double base = 0.45, amp = 0.3, mu = 390.0, sigma = 60.0;
+    std::vector<double> t;
+    std::vector<float> y;
+    for ( int i = 0; i < 46; ++i )
+    {
+        const double day = 16.0 * i;
+        const double u = ( day - mu ) / sigma;
+        t.push_back( day );
+        y.push_back( static_cast<float>( base + amp * std::exp( -0.5 * u * u ) ) );
+    }
+
+    const auto m = PhenologyExtractor::extractDynamicThreshold( y, t, 0.2, 1, 365 );
+    REQUIRE( m.valid );
+    // Closed form: f = 0.2 crossing at mu -+ sigma*sqrt(-2 ln f); the far
+    // tails return to the baseline so zmin = base, zmax = base + amp.
+    const double c = sigma * std::sqrt( -2.0 * std::log( 0.2 ) );
+    INFO( "sos=" << m.sos << " eos=" << m.eos << " los=" << m.los );
+    REQUIRE( m.sos == Approx( mu - c ).margin( 2.5 ) );
+    REQUIRE( m.eos == Approx( mu + c ).margin( 2.5 ) );
+    REQUIRE( m.sos < kPeriodDaysForTest );
+    REQUIRE( m.eos > kPeriodDaysForTest ); // genuinely cross-year
+    REQUIRE( m.los == Approx( 2.0 * c ).margin( 3.0 ) );
+    REQUIRE( m.los == Approx( m.eos - m.sos ).margin( 1e-9 ) );
 }

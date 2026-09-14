@@ -28,7 +28,16 @@ MannKendallResult mannKendallImpl( const std::vector<double> &ts,
     const std::size_t n = ts.size();
     r.sampleCount = static_cast<int>( n );
     if ( n < 3 )
+    {
+        // Documented contract: an underpowered test is NaN-filled, never 0.
+        r.senSlope = std::numeric_limits<double>::quiet_NaN();
+        r.intercept = std::numeric_limits<double>::quiet_NaN();
+        r.tau = std::numeric_limits<double>::quiet_NaN();
+        r.zScore = std::numeric_limits<double>::quiet_NaN();
+        r.pValue = std::numeric_limits<double>::quiet_NaN();
+        r.tauVariance = std::numeric_limits<double>::quiet_NaN();
         return r;
+    }
 
     // S over strictly time-ordered pairs (ties contribute 0).
     long S = 0;
@@ -88,7 +97,12 @@ MannKendallResult mannKendallImpl( const std::vector<double> &ts,
                 slopes.push_back( ( static_cast<double>( ys[j] ) - ys[i] ) /
                                   ( ts[j] - ts[i] ) );
     if ( slopes.empty() )
+    {
+        r.senSlope = std::numeric_limits<double>::quiet_NaN();
+        r.intercept = std::numeric_limits<double>::quiet_NaN();
+        r.valid = false;
         return r; // no time-ordered pair: slope undefined
+    }
     std::sort( slopes.begin(), slopes.end() );
     const std::size_t m = slopes.size();
     r.senSlope = m % 2 == 1 ? slopes[m / 2] : 0.5 * ( slopes[m / 2 - 1] + slopes[m / 2] );
@@ -147,8 +161,10 @@ void TrendAnalyzer::computeRasterTrend( const float *inSeries, int width, int he
     std::sort( timeOrder.begin(), timeOrder.end(),
                [&]( std::size_t a, std::size_t b ) { return tDays[a] < tDays[b]; } );
 
-    // Time axis is shared by all pixels; per-pixel values are compacted in
-    // reused buffers so the whole raster pass allocates only twice.
+    // The time axis is shared by all pixels and compacted per-pixel values
+    // land in reused buffers; the O(n²) kernel internals still allocate
+    // their scratch per pixel (documented, deterministic — a full arena
+    // pass is a follow-up optimization, not a correctness item).
     std::vector<double> ts( timeOrder.size() );
     std::vector<float> ys( timeOrder.size() );
     for ( std::size_t i = 0; i < timeOrder.size(); ++i )

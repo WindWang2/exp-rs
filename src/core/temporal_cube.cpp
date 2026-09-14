@@ -291,7 +291,7 @@ class TemporalCubeImpl final : public TemporalCube
             const double sigma = std::max( mMaxWindowDays, 0.5 ) / 2.0;
             if ( mStrategy == CompositingStrategy::BestPixel )
             {
-                std::vector<float> bestQ( pixels, -1.0f );
+                std::vector<float> bestQ( pixels, 0.0f );
                 std::vector<float> bestV( pixels, nan );
                 for ( const SceneSource &scene : mScenes )
                 {
@@ -302,7 +302,9 @@ class TemporalCubeImpl final : public TemporalCube
                         std::exp( -( dt * dt ) / ( 2.0 * sigma * sigma ) );
                     readScenePlane( scene, window, [&]( std::size_t i, double value, double cloud ) {
                         const double q = ( 1.0 - cloud ) * gauss;
-                        if ( q > bestQ[i] )
+                        // Fully-clouded observations carry Q = 0: they are
+                        // NOT candidates (D-160-8) — same gate as WeightedMean.
+                        if ( q > bestQ[i] && q > 0.0 )
                         {
                             bestQ[i] = static_cast<float>( q );
                             bestV[i] = static_cast<float>( value );
@@ -310,7 +312,7 @@ class TemporalCubeImpl final : public TemporalCube
                     } );
                 }
                 for ( std::size_t i = 0; i < pixels; ++i )
-                    if ( bestQ[i] >= 0.0f )
+                    if ( bestQ[i] > 0.0f )
                         outPlane[i] = bestV[i];
             }
             else
@@ -351,7 +353,15 @@ class TemporalCubeImpl final : public TemporalCube
         std::vector<int> bands{ 1 };
         if ( scene.hasCloud )
             bands.push_back( 2 );
-        const std::vector<double> values = scene.reader.readWindow( bands, window );
+        std::vector<double> values;
+        try
+        {
+            values = scene.reader.readWindow( bands, window );
+        }
+        catch ( const std::exception & )
+        {
+            return; // typed read failure: this scene contributes no candidates
+        }
         const std::size_t pixels = static_cast<std::size_t>( window.width ) * window.height;
         const double *cloud = scene.hasCloud ? values.data() + pixels : nullptr;
         for ( std::size_t i = 0; i < pixels; ++i )
@@ -429,6 +439,11 @@ std::shared_ptr<TemporalCubeImpl> TemporalCubeImpl::open( const std::vector<QStr
             sicnu::geo::inspectRaster( path.toStdString() );
         if ( meta.width < 1 || meta.height < 1 || meta.bandCount < 1 )
             return refuse( QStringLiteral( "TemporalCube: scene '%1' has an empty raster grid" )
+                               .arg( path ) );
+        if ( !meta.bands.empty() && meta.bands.front().dtype.size() > 0 &&
+             meta.bands.front().dtype.front() == 'C' )
+            return refuse( QStringLiteral( "TemporalCube: scene '%1' carries complex pixels, "
+                                           "which have no radiometric compositing semantics" )
                                .arg( path ) );
 
         const QDate instant = sceneInstant( path, meta );

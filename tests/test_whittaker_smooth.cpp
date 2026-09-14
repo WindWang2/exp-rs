@@ -14,9 +14,7 @@
 #include <vector>
 
 using Catch::Approx;
-using sicnu::temporal::savitzkyGolay;
-using sicnu::temporal::whittakerSmooth;
-using sicnu::temporal::whittakerSmoothRobust;
+using namespace sicnu::temporal::d16;
 
 namespace
 {
