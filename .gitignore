@@ -252,3 +252,7 @@ data/labs/_tmp/
 !.planning/eo-ai-model-runtime-foundation-10/
 .planning/eo-ai-model-runtime-foundation-10/*
 !.planning/eo-ai-model-runtime-foundation-10/*.md
+# temporal-phenology-timeline: track planning notes (markdown only; logs stay local).
+!.planning/temporal-phenology-timeline/
+.planning/temporal-phenology-timeline/*
+!.planning/temporal-phenology-timeline/*.md
