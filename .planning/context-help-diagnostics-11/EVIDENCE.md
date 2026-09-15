@@ -48,3 +48,10 @@
 - P3-8 corpus 泄漏扫描补 keywords：已加。
 - P3-9 格式：JSON 首行缩进 + 文件尾换行 + agent 修复行并线已拆。
 - P3-2/P3-5/P3-6/P3-7/P3-10/P3-11/P3-12：记录为已知限制/disposition，不修（理由见 REVIEW_LOG）。
+
+## 终验（Phase 8，2026-09-16）
+
+- rebase origin/master（a5b11b7f10，无新提交，no-op）。
+- `git diff --check origin/master...HEAD` clean（EOF 规整后）；冲突标记扫描 0；secret 扫描仅命中规划文档的自描述文本。
+- R4 + R5：9/9 套件连续两遍 exit 0（每遍 17,255 断言）。
+- PR：https://github.com/WindWang2/exp-rs/pull/1018（不 merge，不等在线 CI）。
