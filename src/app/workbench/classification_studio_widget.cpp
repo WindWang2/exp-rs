@@ -404,6 +404,17 @@ void ClassificationStudioWidget::bindInputLayer( QgsRasterLayer *layer )
   mLayer = layer;
 }
 
+void ClassificationStudioWidget::setMissionInputRef( const sicnu::app::WorkbenchObjectRef &ref )
+{
+  mMissionInput = ref;
+}
+
+void ClassificationStudioWidget::setMissionResultRef( const sicnu::app::WorkbenchObjectRef &ref )
+{
+  mMissionResult = ref;
+}
+
+
 void ClassificationStudioWidget::setClassPalette( const std::vector<int> &classIds,
                                                   const std::vector<QString> &names,
                                                   const std::vector<uint32_t> &argbColors )
