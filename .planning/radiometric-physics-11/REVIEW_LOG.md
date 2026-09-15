@@ -96,6 +96,31 @@ kernels and the test oracles. Sources cited in the review: Ren et al. 2015
   instants (~0.05°) is real modeled physics | tolerance widened with an
   explanatory comment.
 
-## Round 2 — final adversarial review (subagent #2)
+## Round 2 — final adversarial review (subagent #2, full diff origin/master...HEAD)
 
-(pending — dispatched after the Phase 5/6 gates)
+Verified round-1 fixes independently (re-derived kernel values, re-ran all
+five suites green). New findings, all remediated in 2e78c5f11f:
+
+- subagent#2 | P2-1 | P2 | docs + rs:brdf_normalization agent metadata still
+  referenced the REMOVED `PairRegression` / `c = a/b` estimator |
+  **FIXED** — both now reference PairStatistics::fitCFactor and the
+  mean-preserving semantics.
+- subagent#2 | P2-2 | P2 | rs:brdf_normalization dropped the house
+  NoData-sentinel hygiene (finite sentinels would be multiplied, breaking
+  downstream nodata detection) | **FIXED** — per-band sentinels resolved
+  once and mapped to NaN before the kernel (rs_topographic_correction
+  pattern).
+- subagent#2 | P3-1 | P3 | scene-constant anisotropy factors recomputed per
+  pixel | **FIXED** — hoisted per band (bit-identical output).
+- subagent#2 | P3-2 | P3 | QA RAM estimate understated the BIP factor |
+  **FIXED** — band-aware estimateExecution override + honest nominal.
+- subagent#2 | P3-3 | P3 | identity provenance omitted lawful/satisfiable
+  keys present on all other plans | **FIXED** — schema-consistent.
+- subagent#2 | P3-4 | P3 | QA_RADSAT band receives its own (meaningless)
+  reflectance flag band | **DISCLOSED** — limitation added to metadata.
+- subagent#2 | P3-5 | P3 | E0 series used a 1-day-shifted phase vs the
+  fractionalYear convention | **FIXED** — series aligned to (n − 1); all
+  test bounds re-verified against the shift (≤ 0.06% E0 effect).
+
+Verdict received: P0 = 0, P1 = 0 → PASS for PR. Post-fix targeted suites
+re-run green (double gate below).
