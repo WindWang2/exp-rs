@@ -38,3 +38,17 @@
 - subdataset_inventory：netCDF 双变量 fixture（netCDF C 库直写，nc_enddef 后写入）；inventory count=2、kind=subdataset、投影 inspectSubdataset 宽4×高3；非 SDS 选择器拒绝（trust boundary）；driver 缺失 → WARN skip（repo 惯例）。
 - metadata_patch：白名单 validate-then-apply；数值/ISO-8601/band 范围预校验（7 类 refusal 全覆盖且 digest 不变——证明未触碰文件）；read-only chmod → OpenFailed；read-back 用独立只读 open；GTiff patch 后 canonical READ 路径（inspectRaster）反映全部值；manifest 连续性：patch 后 verifyDataset 仍 verified + patches[] 历史=1 + producer 保留。
 - 回归：test_io_operators（convert_format capability 路由后 130 assertions 全过）、test_io_multidim、test_io_canonical_metadata exit=0。
+
+## Phase 4–6（2026-09-16）
+- 新算子接线：io:subdatasets / io:metadata_patch / io:verify_dataset（宏注册 + 显式注册双路径）；convert_format capability 路由 + inputOpensAsRaster 双能力消歧。
+- test_io_gdal_matrix：宏↔编译真值对账、截断 COG typed 拒绝 + digest drift、垃圾字节拒绝、截断 GPKG typed failure（driver-gated）、40000² 逻辑 VRT 有界（budget=cells×sizeof(double)，整窗读 typed 拒绝）。
+- 全量回归（两次独立时点）：21 套件全绿。
+
+## Phase 7（2026-09-16）
+- 独立对抗 review（subagent #2）：0 P0 / 5 P1 / 3 P2 / 6 P3 + 2 nits；逐条 disposition 见 REVIEW_LOG.md；P1×5、P2×3、P3 可修项全部修复。
+- 修复后全量回归 21 套件全绿（见上）。
+
+## Phase 8（2026-09-16）
+- git diff --check origin/master...HEAD：clean；冲突标记扫描：clean；secret 扫描：clean。
+- Oracle 6 双验证：15 个关键套件连续两遍运行，两遍全绿（PASS1 15/15，PASS2 15/15）。
+- rebase origin/master @ a5b11b7f10：up to date（无新提交；fetch 多次 TLS 抖动重试后确认）。
