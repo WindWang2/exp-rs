@@ -95,6 +95,9 @@ Json::Value RsRadiometricQaOperator::metadata() const {
     meta["limitations"].append( "Flags describe the delivered values, not the sensor's full "
                                 "quality model; pair with QaMask on QA_PIXEL/SCL for the "
                                 "complete classification." );
+    meta["limitations"].append( "A QA_RADSAT band given via qa_radsat_band also receives its own "
+                                "reflectance-domain flag band; consumers should ignore the flag "
+                                "band of the QA band itself." );
     return meta;
 }
 
@@ -102,10 +105,31 @@ Json::Value RsRadiometricQaOperator::executionEstimate() const {
     Json::Value est( Json::objectValue );
     est["tileWidth"] = kTileDim;
     est["tileHeight"] = kTileDim;
-    // float tile + uint16 flag tile + optional single-band mask tile.
+    // float tile + uint16 flag tile + optional mask/qa tiles — disclosed as
+    // 5 float-tile equivalents (≈ 1.3 MiB at 256×256) for the nominal case.
     est["estimatedRamBytes"] = Json::Value::UInt64(
-        3ULL * sizeof( float ) * kTileDim * kTileDim );
+        5ULL * sizeof( float ) * kTileDim * kTileDim );
     return est;
+}
+
+Json::Value RsRadiometricQaOperator::estimateExecution( const Json::Value &params ) const {
+    if ( params.isObject() && params.isMember( "input" ) && params["input"].isString() )
+    {
+        GdalDatasetWrapper probe;
+        if ( probe.open( QString::fromStdString( params["input"].asString() ) )
+             && probe.bandCount() > 0 )
+        {
+            // BIP read tile scales with bandCount; flag + scratch tiles do not.
+            const std::uint64_t bands = static_cast<std::uint64_t>( probe.bandCount() );
+            const std::uint64_t ram = ( bands + 3ULL ) * kTileDim * kTileDim * sizeof( float );
+            Json::Value est( Json::objectValue );
+            est["tileWidth"] = Json::Value::UInt64( kTileDim );
+            est["tileHeight"] = Json::Value::UInt64( kTileDim );
+            est["estimatedRamBytes"] = Json::Value::UInt64( ram );
+            return est;
+        }
+    }
+    return executionEstimate();
 }
 
 Json::Value RsRadiometricQaOperator::run( const Json::Value &params, RSOperatorContext &context )

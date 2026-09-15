@@ -139,8 +139,9 @@ Json::Value RsBrdfNormalizationOperator::metadata() const {
     meta["workflowHints"].append( "Apply on surface reflectance before multi-date stacking; "
                                   "the output keeps the input radiometric state." );
     meta["limitations"].append( "Single-scene weights cannot be fitted from the scene itself; "
-                                "for angle-less data use the PairRegression c-factor API "
-                                "(two-date leveling) instead." );
+                                "for angle-less two-date leveling use the "
+                                "BrdfNormalization::PairStatistics::fitCFactor API "
+                                "(mean-preserving c = mean(ref)/mean(target))." );
     meta["limitations"].append( "Non-finite pixels pass through as NaN NoData." );
     return meta;
 }
@@ -232,7 +233,8 @@ Json::Value RsBrdfNormalizationOperator::run( const Json::Value &params, RSOpera
         throw RSOperatorError( ErrorCode::InvalidParameter, error.toStdString() );
 
     // Validate every band's geometry/weights up-front so a bad band refuses
-    // before any output is written.
+    // before any output is written (the factors are evaluated once more below,
+    // hoisted out of the pixel loop).
     const double relativeAzimuth = sunAzimuth - viewAzimuth;
     for ( int b = 0; b < bandCount; ++b )
     {
@@ -256,6 +258,22 @@ Json::Value RsBrdfNormalizationOperator::run( const Json::Value &params, RSOpera
                      + std::to_string( refViewZenith ) + "°" );
 
     // ---- Single-pass streaming normalize ----------------------------------
+    // Per-band NoData sentinels resolved once and mapped to NaN before the
+    // kernel (house streaming policy): multiplying a finite sentinel would
+    // destroy the exact value downstream nodata detection relies on.
+    std::vector<float> sentinels( bandCount, 0.0f );
+    std::vector<char> hasSentinel( bandCount, 0 );
+    for ( int b = 0; b < bandCount; ++b )
+    {
+        bool hasSentinelFlag = false;
+        const double nodata = ds.bandNoDataValue( b + 1, &hasSentinelFlag );
+        if ( hasSentinelFlag && std::isfinite( nodata ) )
+        {
+            sentinels[b] = static_cast<float>( nodata );
+            hasSentinel[b] = 1;
+        }
+    }
+
     GdalMultibandBlockStream reflStream( ds, bandCount, kTileDim, kTileDim );
     GdalStreamingOutput output( QString::fromStdString( outputPath ), width, height, bandCount,
                                 GDT_Float32, ds.geoTransform(), ds.projection() );
@@ -269,22 +287,40 @@ Json::Value RsBrdfNormalizationOperator::run( const Json::Value &params, RSOpera
     const size_t tilePixels = static_cast<size_t>( kTileDim ) * kTileDim;
     const int totalTiles = reflStream.tileCount();
     int tileIndex = 0;
+    // Scene-constant geometry: the anisotropy factors are identical for every
+    // pixel of a band, so the normalization reduces to one multiply by
+    // fRef/fObs per pixel (hoisted out of the loop; bit-identical output).
+    std::vector<double> ratio( bandCount, 0.0 );
+    for ( int b = 0; b < bandCount; ++b )
+    {
+        double fObs = 0.0, fRef = 0.0;
+        if ( !BrdfNormalization::anisotropyFactor( sunZenith, viewZenith, relativeAzimuth,
+                                                   fVol[b], fGeo[b], &fObs )
+             || !BrdfNormalization::anisotropyFactor( sunZenith, refViewZenith,
+                                                      refRelativeAzimuth, fVol[b], fGeo[b],
+                                                      &fRef ) )
+            throw RSOperatorError( ErrorCode::InvalidParameter,
+                                   "anisotropy factor evaluation failed for band "
+                                       + std::to_string( b + 1 ) );
+        ratio[b] = fRef / fObs;
+    }
     const bool ok = reflStream.forEach( [&]( const GdalBlockStream::Tile &tile, const float *bip ) {
         context.throwIfCancelled();
         for ( int b = 0; b < bandCount; ++b )
         {
+            const float sentinel = sentinels[b];
+            const double gain = ratio[b];
             for ( int y = 0; y < tile.height; ++y )
                 for ( int x = 0; x < tile.width; ++x )
                 {
                     const size_t idx = static_cast<size_t>( y ) * tile.width + x;
-                    const float v = bip[idx * bandCount + b];
-                    float o = kNaN;
-                    if ( !normalizeKernelDriven( v, sunZenith, viewZenith, relativeAzimuth,
-                                                 fVol[b], fGeo[b], &o, nullptr,
-                                                 sunZenith, refViewZenith,
-                                                 refRelativeAzimuth ) )
-                        o = kNaN; // per-pixel domain violation → NaN NoData
-                    outTile[idx] = o;
+                    float v = bip[idx * bandCount + b];
+                    if ( hasSentinel[b] && v == sentinel )
+                        v = kNaN;
+                    // rho_ref = rho_obs · f(G_ref)/f(G_obs); NaN in → NaN out.
+                    outTile[idx] = std::isfinite( v )
+                                       ? static_cast<float>( v * gain )
+                                       : kNaN;
                     if ( std::isfinite( v ) )
                         ++corrected[b];
                     else

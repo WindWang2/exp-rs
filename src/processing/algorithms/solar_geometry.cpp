@@ -36,10 +36,11 @@ double declinationRadians( double gamma )
            - 0.002697 * std::cos( 3.0 * gamma ) + 0.00148 * std::sin( 3.0 * gamma );
 }
 
-/// Spencer (1971) inverse-square factor series E₀ = d⁻² (perihelion ≈ 1.035).
+/// Spencer (1971) inverse-square factor series E₀ = d⁻² (perihelion ≈ 1.035),
+/// with the same (n − 1) day convention as fractionalYear().
 double inverseSquareSeries( int dayOfYear )
 {
-    const double g = 2.0 * kPi / 365.0 * dayOfYear;
+    const double g = 2.0 * kPi / 365.0 * ( dayOfYear - 1 );
     return 1.000110 + 0.034221 * std::cos( g ) + 0.001280 * std::sin( g )
            + 0.000719 * std::cos( 2.0 * g ) + 0.000077 * std::sin( 2.0 * g );
 }

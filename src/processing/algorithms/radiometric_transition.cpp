@@ -233,6 +233,8 @@ Plan plan( const QString &fromState, const QString &toState, const StepInputs &i
         p.provenance["schema"] = "exp_rs_radiometric_provenance/1";
         p.provenance["from"] = fromState.toStdString();
         p.provenance["to"] = toState.toStdString();
+        p.provenance["lawful"] = true;
+        p.provenance["satisfiable"] = true;
         p.provenance["steps"] = Json::Value( Json::arrayValue );
         p.provenance["numeric_scale_before"] = inputs.numericScale;
         p.provenance["numeric_scale_after"] = inputs.numericScale;

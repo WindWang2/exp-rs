@@ -53,3 +53,19 @@ Local evidence only; no online CI dependency. Each claim: command + exit code.
 - 419f32c5d3 operator E2E tests + QA mask buffer fix (real bug found pre-run:
   readBandWindow(float*) contract vs uint8 mask buffer)
 - `git fetch origin && git rebase origin/master` → up to date (origin/master still a5b11b7f10).
+
+## OUT_OF_SCOPE (recorded per GOAL Autonomy defaults #6)
+
+- **P0 (out of scope, pre-existing on master a5b11b7f10):** `src/agent/data_platform_tools.cpp`
+  does not compile on a fresh build (`BenchmarkService` used unqualified at :1184/:1221/:1265;
+  D19 regression introduced by the a5b11b7f10 merge; the main checkout's stale Sep-14 object
+  masked it). Already fixed on the parallel branch `origin/zcode/multimodal-registration-11`
+  (commits 23b326a485 / 08ebe07270, "master build-unblock — qualify D19 BenchmarkService").
+  This track does NOT carry the fix (avoids conflicting with that branch); the affected
+  library (sicnu_agent) is not a dependency of any radiometric-physics-11 test target, and
+  this track's `capability_catalog.cpp` object compiles cleanly. Regression gate uses the
+  non-agent suites; `test_spatial_contracts` (agent-harness suite, links sicnu_agent) is
+  therefore excluded from this track's regression run as not-executable here.
+- A foreign build process (test_edit_session/sicnu_geo_rs) was observed running in this
+  worktree's build-dev during Phase 6; all builds were serialized after it finished and the
+  targeted gates re-run clean.

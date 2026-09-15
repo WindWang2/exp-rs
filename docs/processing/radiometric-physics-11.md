@@ -140,10 +140,10 @@ Required angle metadata (typed refusal when absent): sun zenith/azimuth
 `SICNU_VIEW_*`). Kernel weights `f_vol`/`f_geo` are band-specific physical
 quantities — they must come from multi-angle fits or published per-biome
 values; a single scene cannot estimate them, and this module refuses to guess.
-For angle-less two-date comparisons the `PairRegression` c-factor API
-(OLS `y = a + b·x`, `c = a/b`, `ρ₂' = c·ρ₂`, Schott-style leveling) levels one
-date onto another with explicit validity conditions (minimum pairs, non-
-degenerate slope, positive domain).
+For angle-less two-date comparisons the `PairStatistics::fitCFactor` API
+levels one date onto another with the mean-preserving factor
+`c = mean(ref)/mean(target)` (exact identity `mean(c·target) = mean(ref)`)
+under explicit validity conditions (minimum usable pairs, positive means).
 
 Operator: `rs:brdf_normalization` (kernel-driven, single-pass streaming,
 bit-exact grade). The empirical pair path is a module API for now; a streaming
