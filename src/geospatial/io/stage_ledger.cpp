@@ -309,7 +309,9 @@ void finalizeAttached( const std::string &finalPath, const FinalizeManifestField
     // Digest + manifest bind to the STAGED bytes; the rename to the final
     // name does not change content. Writing the manifest as a staged sidecar
     // keeps it inside the group transaction (sidecars publish first).
-    const Json::Value manifestJson = buildFinalizeManifest( record.stagedPath, *manifest );
+    Json::Value manifestJson = buildFinalizeManifest( record.stagedPath, *manifest );
+    // The provenance path must name the FINAL dataset, not the staging name.
+    manifestJson["path_display"] = ResourceUri::parse( record.finalPath ).display();
     writeFinalizeManifest( record.stagedPath, manifestJson );
   }
 

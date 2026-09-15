@@ -294,10 +294,16 @@ MetadataPatchReport applyMetadataPatch( const std::string &path, const std::vect
                                  ? readBackBandField( verify->GetRasterBand( patch.band ), patch.field )
                                  : readBackDatasetField( verify, patch.field );
     // Numeric round-trips compare as doubles (formatting may differ); text
-    // compares verbatim.
+    // compares verbatim. An empty read-back is a mismatch — never a parse
+    // crash.
     bool equal;
-    if ( isNumericField( patch.field ) && !patch.value.empty() && actual.find_first_not_of( "-+.eE0123456789" ) == std::string::npos )
-      equal = std::stod( actual ) == std::stod( patch.value );
+    if ( isNumericField( patch.field ) && !actual.empty()
+         && actual.find_first_not_of( "-+.eE0123456789" ) == std::string::npos )
+    {
+      const double actualValue = std::stod( actual );
+      equal = std::isnan( actualValue ) ? std::isnan( std::stod( patch.value ) )
+                                        : actualValue == std::stod( patch.value );
+    }
     else
       equal = actual == patch.value;
     if ( !equal )
