@@ -124,6 +124,95 @@ std::vector<SeasonYearMetrics> phenologyCyclesPerYear(
   const std::vector<int> &doyOf, const std::vector<int> &yearOf,
   const std::vector<SeasonWindow> &windows, double crossingFraction );
 
+// --- Phenology 2.0: automatic multi-cycle candidates with quality flags
+//     (Temporal Intelligence 11.0) ---
+
+/// Quality / refusal flags for one proposed cycle. A cycle that fails any
+/// check reports valid=false with a stable @a refusalReason and NO metrics
+/// — the platform refuses to guess phenology from sparse or gapped windows
+/// (extends the phenologyCyclesPerYear no-guessing contract).
+struct PhenologyQualityFlags
+{
+  bool valid = false;
+  int sampleCount = 0;         ///< finite observations in the window
+  double coverage = 0.0;       ///< observed span / window span (0..1; detects
+                               ///  series-edge truncation)
+  double gapFraction = 0.0;    ///< largest observation gap / window span (0..1)
+  double amplitudeRatio = 0.0; ///< window amplitude / whole-series amplitude
+  const char *refusalReason = nullptr;  ///< null when valid; stable codes:
+                                        ///  "low_window_samples" |
+                                        ///  "coverage_gap" |
+                                        ///  "edge_truncated_window" |
+                                        ///  "below_amplitude_threshold" |
+                                        ///  "threshold_crossing_failed"
+};
+
+/// One automatic cycle: metrics and quality. The cycle's samples are
+/// selected as the TIME range between the midpoints to the adjacent peaks —
+/// a season that crosses the calendar-year boundary is one continuous
+/// range, not a wrapped doy window.
+struct PhenologyCycle
+{
+  int seasonYear = 0;    ///< harvest year = calendar year of the window END
+                         ///  (a Dec→May season counts toward the year it
+                         ///  ends in)
+  int cycleIndex = 0;    ///< 0-based within @a seasonYear (chronological by peak)
+  SeasonWindow window;   ///< reported doy metadata: first/last observed doy
+                         ///  of the cycle's samples (informational)
+  SeasonalMetrics metrics;  ///< meaningful only when quality.valid
+  PhenologyQualityFlags quality;
+};
+
+struct PhenologyMultiOptions
+{
+  int maxCyclesPerYear = 3;      ///< strongest peaks kept per calendar year (1..4)
+  double crossingFraction = 0.5; ///< phenologyThreshold crossing fraction
+  double trendLambda = 1e4;      ///< decomposition trend smoothing (Whittaker λ)
+  int seasonalWindow = 15;       ///< decomposition climatology smoothing (days)
+  int minValidPerSeason = 6;     ///< hard sample floor per window (kernel ≥ 3)
+  double minPeakFraction = 0.25; ///< peak must exceed min + this × seasonal range
+  int minCycleSpanDays = 45;     ///< adjacent peaks closer than this merge
+  double maxGapFraction = 0.5;   ///< refusal: largest gap above this share
+  double minCoverage = 0.5;      ///< refusal: observed span below this share
+  double minAmplitudeRatio = 0.1; ///< refusal: window amplitude below this share
+};
+
+struct PhenologyMultiResult
+{
+  std::vector<PhenologyCycle> cycles;  ///< ascending seasonYear, then cycleIndex
+  int cyclesPerYearMax = 0;  ///< max cycles observed in any season year
+                             ///  (1 single / 2 double / 3+ triple cropping;
+                             ///  never exceeds maxCyclesPerYear)
+  bool valid = false;  ///< true when the analysis RAN and proposed at least
+                       ///  one window (some may be quality-refused — check
+                       ///  per-cycle quality.valid); false = global refusal
+  const char *refusalReason = nullptr;  ///< stable codes when the analysis
+                                        ///  could not run at all:
+                                        ///  "insufficient_series" |
+                                        ///  "insufficient_valid_samples" |
+                                        ///  "degenerate_seasonal_component" |
+                                        ///  "edge_truncated_series" (peaks
+                                        ///  exist but every one sits at a
+                                        ///  series edge)
+};
+
+/// Automatic multi-cycle phenology (Phenology 2.0). Proposes cycle windows
+/// from the seasonal component (seasonalDecompose climatology): local maxima
+/// above a fraction of the seasonal range that dominate their ±
+/// minCycleSpanDays neighbourhood, merged by minimum cycle span, strongest
+/// @a maxCyclesPerYear per calendar year. Each interior peak's window is the
+/// TIME range between the midpoints to its adjacent peaks — a season that
+/// crosses the calendar-year boundary is one continuous range counted toward
+/// the harvest year (the year the window ends in); series-edge peaks are
+/// never scored (their seasons are truncated, not guessed). Every window is
+/// quality-gated (sample count, coverage, gap fraction, amplitude share) and
+/// refused — never guessed — when the gate fails. Composition of the
+/// existing decomposition + threshold kernels; no new fitting semantics.
+PhenologyMultiResult phenologyMultiCycle(
+  const std::vector<float> &y, const std::vector<double> &tDays,
+  const std::vector<int> &doyOf, const std::vector<int> &yearOf,
+  const PhenologyMultiOptions &options );
+
 /// Greedy piecewise-linear trend segmentation (BSFAST-lite): repeated OLS on
 /// segments, splitting at the point with the largest RSS reduction while the
 /// reduction ratio (reduction / segment RSS) exceeds @a minImprovement and

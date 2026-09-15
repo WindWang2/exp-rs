@@ -58,6 +58,12 @@ struct SeasonalTrendBreaksResult
   double r2 = 0.0;     ///< 1 − SSE/SST; NaN when SST == 0 or no fit
   int validCount = 0;  ///< finite observations
   int iterations = 0;  ///< refinement iterations actually run (diagnostic)
+  /// Per-segment model coefficients [intercept, t, sin1, cos1, ...] in the
+  /// shared detail::harmonicTrendDesignRow basis; empty when the segment has
+  /// no fit. Parallel to @a segments (Temporal Intelligence 11.0: exposes
+  /// the seasonal basis for break attribution / polar-form reporting
+  /// without a refit).
+  std::vector<std::vector<double>> segmentCoefficients;
 };
 
 /// Segment-level joint harmonic+trend fit. @a harmonics in 1..3 (design

@@ -1,0 +1,108 @@
+{
+  "capability" :
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" :
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" :
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "spectral",
+    "io" :
+    {
+      "inputs" : [],
+      "outputs" :
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "entries",
+          "required" : true
+        },
+        {
+          "data_kind" : "json",
+          "file_format" : "json",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" :
+      [
+        {
+          "name" : "libraryPath",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "materials",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "0.500000",
+          "name" : "nearDuplicateAngleDeg",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "sensor",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "wavelengthMax",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "wavelengthMin",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" :
+    [
+      "Near-duplicate detection reports pairs below the SAM threshold; it never removes entries by itself."
+    ],
+    "modality" :
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" :
+    [
+      "The source library must pass strict validation (loadValidated); sensor projection needs entries with wavelength grids."
+    ],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Subset a validated spectral library by material or wavelength window and optionally project it onto a sensor band grid; writes a library-format artifact with near-duplicate QA.",
+  "display_name" : "Library Select",
+  "id" : "rs:library_select",
+  "input" : "",
+  "output" : "",
+  "schema_version" : 2,
+  "tags" :
+  [
+    "spectral",
+    "library"
+  ]
+}

@@ -272,3 +272,7 @@ data/labs/_tmp/
 !.planning/unified-mission-workbench-d18/**
 !.planning/dataset-foundry-benchmark-d19/
 !.planning/dataset-foundry-benchmark-d19/**
+# temporal-intelligence-11 (F04): track planning notes (markdown only; logs stay local).
+!.planning/temporal-intelligence-11/
+.planning/temporal-intelligence-11/*
+!.planning/temporal-intelligence-11/*.md

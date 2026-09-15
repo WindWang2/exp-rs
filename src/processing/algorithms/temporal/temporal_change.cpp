@@ -3,6 +3,7 @@
 
 #include "temporal_fit.h"
 #include "temporal_linalg_detail.h"
+#include "temporal_design_detail.h"
 
 #include <algorithm>
 #include <cmath>
@@ -13,26 +14,29 @@ namespace sicnu::temporal
 
 namespace
 {
-constexpr double kPi = 3.14159265358979323846;
 constexpr double kNanD = std::numeric_limits<double>::quiet_NaN();
 constexpr float kNanF = std::numeric_limits<float>::quiet_NaN();
 
-/// Design row for [1, t, sin/cos(k·2πt/365.25)...]. Max 3 harmonics -> 8
-/// columns; the fixed-size array keeps the per-pixel loop allocation-free.
-constexpr int kMaxTerms = 1 + 1 + 2 * 3;
+using detail::kMaxTerms;
+using detail::harmonicTrendDesignRow;
 
-int designRow( double t, int harmonics, double *design )
+// Per-call fit scratch, reused across pixels/segments (Temporal Intelligence
+// 11.0 performance pass): the per-pixel loop used to heap-allocate the Gram,
+// dense copy and solution vectors on every fitSegment call. Reassigning the
+// buffers keeps the arithmetic (accumulation order, eliminations) EXACTLY
+// unchanged — the Gram/solution allocations go away; the solver still
+// receives copies of the compressed system (it takes them by value; making
+// that in-place is a recorded follow-up). thread_local keeps the kernel
+// single-threaded-contract safe (each thread reuses its own buffers).
+struct FitScratch
 {
-  design[0] = 1.0;
-  design[1] = t;
-  for ( int k = 1; k <= harmonics; ++k )
-  {
-    const double omega = 2.0 * kPi * k * t / 365.25;
-    design[2 + 2 * ( k - 1 )] = std::sin( omega );
-    design[3 + 2 * ( k - 1 )] = std::cos( omega );
-  }
-  return 2 + 2 * harmonics;
-}
+  std::vector<double> ata;
+  std::vector<double> atb;
+  std::vector<double> aDense;
+  std::vector<double> bDense;
+  std::vector<double> coef;
+};
+thread_local FitScratch tFitScratch;
 
 /// One weighted OLS fit of the harmonic+trend design on [a, b) of y/t.
 /// Returns false when the segment holds fewer valid samples than terms or
@@ -42,8 +46,11 @@ bool fitSegment( const std::vector<float> &y, const std::vector<double> &tDays,
                  std::vector<double> *coefOut, double *sseOut, int *validOut,
                  double *slopeOut, double *interceptOut )
 {
-  std::vector<double> ata( static_cast<size_t>( kMaxTerms ) * kMaxTerms, 0.0 );
-  std::vector<double> atb( kMaxTerms, 0.0 );
+  FitScratch &scratch = tFitScratch;
+  scratch.ata.assign( static_cast<size_t>( kMaxTerms ) * kMaxTerms, 0.0 );
+  scratch.atb.assign( kMaxTerms, 0.0 );
+  std::vector<double> &ata = scratch.ata;
+  std::vector<double> &atb = scratch.atb;
   double design[kMaxTerms];
   const int terms = 2 + 2 * harmonics;
   int valid = 0;
@@ -52,10 +59,10 @@ bool fitSegment( const std::vector<float> &y, const std::vector<double> &tDays,
     const double w = weights[i];
     if ( w <= 0.0 )
       continue;
-    const int m = designRow( tDays[i], harmonics, design );
+    const int m = harmonicTrendDesignRow( tDays[i], harmonics, design );
     for ( int r = 0; r < m; ++r )
     {
-      atb[r] += w * design[r] * y[i];
+      atb[static_cast<size_t>( r )] += w * design[r] * y[i];
       for ( int c = 0; c < m; ++c )
         ata[static_cast<size_t>( r ) * kMaxTerms + c] += w * design[r] * design[c];
     }
@@ -64,28 +71,32 @@ bool fitSegment( const std::vector<float> &y, const std::vector<double> &tDays,
   if ( valid < terms )
     return false;
   // solveSmallDense consumes dense n×n; compress the kMaxTerms-strided Gram.
-  std::vector<double> aDense( static_cast<size_t>( terms ) * terms, 0.0 );
-  std::vector<double> bDense( terms, 0.0 );
+  scratch.aDense.assign( static_cast<size_t>( terms ) * terms, 0.0 );
+  scratch.bDense.assign( terms, 0.0 );
   for ( int r = 0; r < terms; ++r )
   {
-    bDense[r] = atb[r];
+    scratch.bDense[static_cast<size_t>( r )] = atb[static_cast<size_t>( r )];
     for ( int c = 0; c < terms; ++c )
-      aDense[static_cast<size_t>( r ) * terms + c] =
+      scratch.aDense[static_cast<size_t>( r ) * terms + c] =
         ata[static_cast<size_t>( r ) * kMaxTerms + c];
   }
-  std::vector<double> coef;
-  if ( !detail::solveSmallDense( aDense, bDense, terms, &coef ) )
+  // solveSmallDense takes the system by value: passing the scratch buffers
+  // copies them (same values as before), while their capacity stays warm
+  // for the next per-pixel call.
+  if ( !detail::solveSmallDense( scratch.aDense, scratch.bDense, terms,
+                                 &scratch.coef ) )
     return false;
+  const std::vector<double> &coef = scratch.coef;
   double sse = 0.0;
   for ( int i = a; i < b; ++i )
   {
     const double w = weights[i];
     if ( w <= 0.0 )
       continue;
-    const int m = designRow( tDays[i], harmonics, design );
+    const int m = harmonicTrendDesignRow( tDays[i], harmonics, design );
     double v = 0.0;
     for ( int r = 0; r < m; ++r )
-      v += coef[r] * design[r];
+      v += coef[static_cast<size_t>( r )] * design[r];
     sse += w * ( y[i] - v ) * ( y[i] - v );
   }
   if ( coefOut )
@@ -101,16 +112,7 @@ bool fitSegment( const std::vector<float> &y, const std::vector<double> &tDays,
   return true;
 }
 
-/// Evaluates the fitted segment model at @a t.
-double evalCoefAt( const std::vector<double> &coef, double t, int harmonics )
-{
-  double design[kMaxTerms];
-  const int m = designRow( t, harmonics, design );
-  double v = 0.0;
-  for ( int r = 0; r < m; ++r )
-    v += coef[r] * design[r];
-  return v;
-}
+using detail::evalHarmonicTrend;
 } // namespace
 
 SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
@@ -177,7 +179,7 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
         if ( weights[i] <= 0.0 )
           continue;
         residual[static_cast<size_t>( i )] =
-          static_cast<float>( y[i] - evalCoefAt( coef, tDays[i], harm ) );
+          static_cast<float>( y[i] - evalHarmonicTrend( coef, tDays[i], harm ) );
       }
     }
     if ( !anyFit )
@@ -298,6 +300,7 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
   // are kept per segment so break magnitudes evaluate BOTH models AT the
   // break day (no differential-trend leak from adjacent fitted samples).
   std::vector<std::vector<double>> segCoefByIndex( segments.size() );
+  result.segmentCoefficients.assign( segments.size(), {} );
   double totalSse = 0.0;
   double totalSst = 0.0;
   long totalValidFinal = 0;
@@ -328,7 +331,7 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
         {
           if ( segWeights[i] <= 0.0 )
             continue;
-          absRes.push_back( std::abs( y[i] - evalCoefAt( coef, tDays[i], harm ) ) );
+          absRes.push_back( std::abs( y[i] - evalHarmonicTrend( coef, tDays[i], harm ) ) );
         }
         if ( absRes.empty() )
           break;
@@ -339,7 +342,7 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
         {
           if ( segWeights[i] <= 0.0 )
             continue;
-          const double r = std::abs( y[i] - evalCoefAt( coef, tDays[i], harm ) );
+          const double r = std::abs( y[i] - evalHarmonicTrend( coef, tDays[i], harm ) );
           segWeights[i] = r <= delta ? 1.0 : delta / r;
         }
         ok = fitSegment( y, tDays, seg.first, seg.second, harm, segWeights, &coef,
@@ -360,12 +363,13 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
       out.rmse = valid > 0 ? std::sqrt( std::max( 0.0, sse ) / valid ) : kNanD;
       out.validCount = valid;
       segCoefByIndex[static_cast<size_t>( segIndex )] = coef;
+      result.segmentCoefficients[static_cast<size_t>( segIndex )] = coef;
       for ( int i = seg.first; i < seg.second; ++i )
       {
         if ( weights[i] <= 0.0 )
           continue;
         result.fitted[static_cast<size_t>( i )] =
-          static_cast<float>( evalCoefAt( coef, tDays[i], harm ) );
+          static_cast<float>( evalHarmonicTrend( coef, tDays[i], harm ) );
       }
       totalSse += std::max( 0.0, sse );
       totalValidFinal += valid;
@@ -396,8 +400,8 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
     const std::vector<double> &coefR = segCoefByIndex[s];
     ev.magnitude =
       ( !coefL.empty() && !coefR.empty() )
-        ? std::abs( evalCoefAt( coefR, ev.breakDays, harm ) -
-                    evalCoefAt( coefL, ev.breakDays, harm ) )
+        ? std::abs( evalHarmonicTrend( coefR, ev.breakDays, harm ) -
+                    evalHarmonicTrend( coefL, ev.breakDays, harm ) )
         : kNanD;
     result.breaks.push_back( ev );
   }

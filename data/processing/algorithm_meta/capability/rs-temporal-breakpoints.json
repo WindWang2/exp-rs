@@ -1,97 +1,108 @@
 {
-  "capability": {
-    "applicability": {
-      "land_cover": [
-        "森林",
-        "农田",
-        "水体"
+  "capability" :
+  {
+    "applicability" :
+    {
+      "land_cover" :
+      [
+        "\u68ee\u6797",
+        "\u519c\u7530",
+        "\u6c34\u4f53"
       ],
-      "scenes": [
-        "森林扰动年份制图",
-        "土地利用转型检测"
+      "scenes" :
+      [
+        "\u68ee\u6797\u6270\u52a8\u5e74\u4efd\u5236\u56fe",
+        "\u571f\u5730\u5229\u7528\u8f6c\u578b\u68c0\u6d4b"
       ]
     },
-    "band_roles": {},
-    "crs": {
-      "requires_projected": false,
-      "requires_shared_grid": false
+    "band_roles" : {},
+    "crs" :
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
     },
-    "determinism": {
-      "cost_class": "O(tile × scenes × breaks)",
-      "grade": "bit_exact",
-      "large_raster_safe": true,
-      "memory_policy": "streaming",
-      "side_effects": false,
-      "stochastic": false
+    "determinism" :
+    {
+      "cost_class" : "O(tile \u00d7 scenes \u00d7 breaks)",
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
     },
-    "failure_modes": [
+    "failure_modes" :
+    [
       {
-        "code": "NOT_SUPPORTED",
-        "when": "时序过短无法建立稳定历史段",
-        "remedy": "建议 3 年以上周期观测"
+        "code" : "NOT_SUPPORTED",
+        "remedy" : "\u5efa\u8bae 3 \u5e74\u4ee5\u4e0a\u5468\u671f\u89c2\u6d4b",
+        "when" : "\u65f6\u5e8f\u8fc7\u77ed\u65e0\u6cd5\u5efa\u7acb\u7a33\u5b9a\u5386\u53f2\u6bb5"
       }
     ],
-    "family": "temporal",
-    "io": {
-      "inputs": [],
-      "outputs": [
+    "family" : "temporal",
+    "io" :
+    {
+      "inputs" : [],
+      "outputs" :
+      [
         {
-          "data_kind": "integer",
-          "name": "bands",
-          "required": true
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
         },
         {
-          "data_kind": "numeric",
-          "name": "brokenPixelFraction",
-          "required": true
+          "data_kind" : "numeric",
+          "name" : "brokenPixelFraction",
+          "required" : true
         },
         {
-          "data_kind": "integer",
-          "name": "maxBreaks",
-          "required": true
+          "data_kind" : "integer",
+          "name" : "maxBreaks",
+          "required" : true
         },
         {
-          "data_kind": "json",
-          "name": "memory",
-          "required": true
+          "data_kind" : "json",
+          "name" : "memory",
+          "required" : true
         },
         {
-          "data_kind": "raster",
-          "file_format": "tif",
-          "name": "output",
-          "required": true
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
         },
         {
-          "data_kind": "integer",
-          "name": "sceneCount",
-          "required": true
+          "data_kind" : "integer",
+          "name" : "sceneCount",
+          "required" : true
         },
         {
-          "data_kind": "string",
-          "name": "timeEnd",
-          "required": true
+          "data_kind" : "string",
+          "name" : "timeEnd",
+          "required" : true
         },
         {
-          "data_kind": "string",
-          "name": "timeStart",
-          "required": true
+          "data_kind" : "string",
+          "name" : "timeStart",
+          "required" : true
         }
       ],
-      "parameters": [
+      "parameters" :
+      [
         {
-          "default": "true",
-          "name": "apply_qa_masking",
-          "required": false,
-          "type": "boolean"
+          "default" : "true",
+          "name" : "apply_qa_masking",
+          "required" : false,
+          "type" : "boolean"
         },
         {
-          "default": "0",
-          "name": "band",
-          "required": false,
-          "type": "integer"
+          "default" : "0",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
         },
         {
-          "enum": [
+          "enum" :
+          [
             "blue",
             "green",
             "red",
@@ -100,94 +111,100 @@
             "swir1",
             "swir2"
           ],
-          "name": "band_role",
-          "required": false,
-          "type": "enum"
+          "name" : "band_role",
+          "required" : false,
+          "type" : "enum"
         },
         {
-          "name": "collection",
-          "required": false,
-          "type": "string"
+          "name" : "collection",
+          "required" : false,
+          "type" : "string"
         },
         {
-          "default": "keep_all",
-          "enum": [
+          "default" : "keep_all",
+          "enum" :
+          [
             "keep_all",
             "reject"
           ],
-          "name": "duplicate_policy",
-          "required": false,
-          "type": "enum"
+          "name" : "duplicate_policy",
+          "required" : false,
+          "type" : "enum"
         },
         {
-          "default": "2",
-          "name": "maxBreaks",
-          "required": false,
-          "type": "integer"
+          "default" : "2",
+          "name" : "maxBreaks",
+          "required" : false,
+          "type" : "integer"
         },
         {
-          "default": "0.100000",
-          "name": "minImprovement",
-          "required": false,
-          "type": "numeric"
+          "default" : "0.100000",
+          "name" : "minImprovement",
+          "required" : false,
+          "type" : "numeric"
         },
         {
-          "default": "90",
-          "name": "minSegmentDays",
-          "required": false,
-          "type": "numeric"
+          "default" : "90",
+          "name" : "minSegmentDays",
+          "required" : false,
+          "type" : "numeric"
         },
         {
-          "name": "output",
-          "required": true,
-          "type": "string"
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
         },
         {
-          "default": "true",
-          "name": "outputBreakDates",
-          "required": false,
-          "type": "boolean"
+          "default" : "true",
+          "name" : "outputBreakDates",
+          "required" : false,
+          "type" : "boolean"
         },
         {
-          "name": "scenes",
-          "required": false,
-          "type": "string"
+          "name" : "scenes",
+          "required" : false,
+          "type" : "string"
         },
         {
-          "default": "256",
-          "name": "tile_size",
-          "required": false,
-          "type": "integer"
+          "default" : "256",
+          "name" : "tile_size",
+          "required" : false,
+          "type" : "integer"
         }
       ]
     },
-    "limitations": [],
-    "modality": [
+    "limitations" : [],
+    "modality" :
+    [
       "optical"
     ],
-    "operator_group": "temporal",
-    "prerequisites": [],
-    "schema_version": 2,
-    "summary": "时序断点检测：逐像元分段线性趋势拟合检测结构性突变点（扰动、撂荒、洪泛），定位变化发生时间。",
-    "teaching_use": {
-      "concepts": [
-        "分段线性回归",
-        "结构断点",
-        "突变检测"
+    "operator_group" : "temporal",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "\u65f6\u5e8f\u65ad\u70b9\u68c0\u6d4b\uff1a\u9010\u50cf\u5143\u5206\u6bb5\u7ebf\u6027\u8d8b\u52bf\u62df\u5408\u68c0\u6d4b\u7ed3\u6784\u6027\u7a81\u53d8\u70b9\uff08\u6270\u52a8\u3001\u6482\u8352\u3001\u6d2a\u6cdb\uff09\uff0c\u5b9a\u4f4d\u53d8\u5316\u53d1\u751f\u65f6\u95f4\u3002",
+    "teaching_use" :
+    {
+      "concepts" :
+      [
+        "\u5206\u6bb5\u7ebf\u6027\u56de\u5f52",
+        "\u7ed3\u6784\u65ad\u70b9",
+        "\u7a81\u53d8\u68c0\u6d4b"
       ],
-      "courses": [
-        "遥感应用分析"
+      "courses" :
+      [
+        "\u9065\u611f\u5e94\u7528\u5206\u6790"
       ],
-      "exercise": "检测 2000–2024 NDVI 时序的断点年份并与采伐记录核对。"
+      "exercise" : "\u68c0\u6d4b 2000\u20132024 NDVI \u65f6\u5e8f\u7684\u65ad\u70b9\u5e74\u4efd\u5e76\u4e0e\u91c7\u4f10\u8bb0\u5f55\u6838\u5bf9\u3002"
     }
   },
-  "description": "Per-pixel piecewise-linear trend segmentation with break detection (BSFAST-lite): the series (real acquisition day offsets) is split greedily where an additional OLS segment reduces the residual sum of squares the most, while the relative RSS reduction exceeds minImprovement and both sides keep the minimum segment sample count (derived from minSegmentDays and the collection time span). Outputs the break count, break dates (day offsets from the first acquisition), one per-day slope per segment and the overall RMSE.",
-  "display_name": "Temporal Breakpoints",
-  "id": "rs:temporal_breakpoints",
-  "input": "",
-  "output": "raster",
-  "schema_version": 2,
-  "tags": [
+  "description" : "Per-pixel piecewise-linear trend segmentation with break detection (BSFAST-lite): the series (real acquisition day offsets) is split greedily where an additional OLS segment reduces the residual sum of squares the most, while the relative RSS reduction exceeds minImprovement and both sides keep the minimum segment sample count (derived from minSegmentDays and the collection time span). Outputs the break count, break dates (day offsets from the first acquisition), one per-day slope per segment and the overall RMSE.",
+  "display_name" : "Temporal Breakpoints",
+  "id" : "rs:temporal_breakpoints",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" :
+  [
     "temporal",
     "breakpoint",
     "change-detection"

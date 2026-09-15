@@ -1,0 +1,223 @@
+{
+  "capability" :
+  {
+    "applicability" :
+    {
+      "land_cover" :
+      [
+        "\u519c\u7530",
+        "\u679c\u56ed",
+        "\u8349\u5730"
+      ],
+      "scenes" :
+      [
+        "\u591a\u719f\u5236\u8bc6\u522b",
+        "\u8de8\u5e74\u4f5c\u7269\u7a97\u53e3",
+        "\u7269\u5019\u8d28\u91cf\u5206\u7ea7"
+      ]
+    },
+    "band_roles" : {},
+    "crs" :
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" :
+    {
+      "cost_class" : "O(tile \u00d7 scenes \u00d7 (decomposition + per-cycle thresholding)) \u2014 bounded by maxCyclesPerYear",
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" :
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u5404\u53c2\u6570\u5747\u5728 (0,1]\uff1b\u9608\u503c\u6309\u6570\u636e\u8d28\u91cf\u8c03\u6574",
+        "when" : "crossingFraction/maxGapFraction/minCoverage \u8d85\u8303\u56f4"
+      },
+      {
+        "code" : "NOT_SUPPORTED",
+        "remedy" : "refusal \u8ba1\u6570\u5e26\u5982\u5b9e\u8bb0\u5f55\uff1b\u5148\u7528 rs:temporal_gap_fill \u8865\u9f50\u518d\u8fd0\u884c",
+        "when" : "\u7a97\u53e3\u6837\u672c\u4e0d\u8db3/\u8986\u76d6\u4e0d\u8db3/\u95f4\u9699\u8fc7\u5927"
+      }
+    ],
+    "family" : "temporal",
+    "io" :
+    {
+      "inputs" : [],
+      "outputs" :
+      [
+        {
+          "data_kind" : "numeric",
+          "name" : "meanCyclesPerYear",
+          "required" : true
+        },
+        {
+          "data_kind" : "json",
+          "name" : "memory",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "pixelsWithAnyCycle",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "sceneCount",
+          "required" : true
+        }
+      ],
+      "parameters" :
+      [
+        {
+          "default" : "true",
+          "name" : "apply_qa_masking",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "default" : "0",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "enum" :
+          [
+            "blue",
+            "green",
+            "red",
+            "red_edge",
+            "nir",
+            "swir1",
+            "swir2",
+            "vv",
+            "vh"
+          ],
+          "name" : "band_role",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "collection",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "0.500000",
+          "name" : "crossingFraction",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "keep_all",
+          "enum" :
+          [
+            "keep_all",
+            "reject"
+          ],
+          "name" : "duplicate_policy",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "3",
+          "name" : "maxCyclesPerYear",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0.500000",
+          "name" : "maxGapFraction",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0.500000",
+          "name" : "minCoverage",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0.250000",
+          "name" : "minPeakFraction",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "6",
+          "name" : "minValidPerSeason",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "scenes",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "256",
+          "name" : "tile_size",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" :
+    [
+      "optical"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" :
+    [
+      "Common grid, acquisition times; >= ~2 full years for stable climatology; >= ~12 valid samples"
+    ],
+    "schema_version" : 2,
+    "summary" : "\u7269\u5019 2.0\uff1a\u81ea\u52a8\u591a\u5468\u671f\u5019\u9009\uff08\u5cf0\u503c\u68c0\u6d4b\uff09\u3001\u8de8\u5e74\u7a97\u53e3\u6309\u6536\u83b7\u5e74\u5f52\u5c5e\u3001\u9010\u7a97\u53e3\u8d28\u91cf\u65d7\u6807\uff1b\u4f4e\u8986\u76d6\u7a97\u53e3\u62d2\u7edd\u8f93\u51fa\u800c\u975e\u786c\u731c\u3002",
+    "teaching_use" :
+    {
+      "concepts" :
+      [
+        "\u81ea\u52a8\u5468\u671f\u5019\u9009",
+        "\u8de8\u5e74\uff08\u6536\u83b7\u5e74\uff09\u7a97\u53e3",
+        "\u8d28\u91cf\u65d7\u6807\u4e0e\u62d2\u7edd\u8bed\u4e49",
+        "\u591a\u719f\u5236\u6307\u6570"
+      ],
+      "courses" :
+      [
+        "\u519c\u4e1a\u9065\u611f",
+        "\u7269\u5019\u5b66"
+      ],
+      "exercise" : "\u5bf9\u6bd4\u534e\u5317\u51ac\u5c0f\u9ea6\u533a\uff08\u4e00\u5e74\u4e24\u719f\uff09\u4e0e\u4e1c\u5317\u5730\u533a\uff08\u4e00\u719f\uff09\u7684 cycle_count \u7a7a\u95f4\u683c\u5c40\u5e76\u6838\u5bf9\u7edf\u8ba1\u6570\u636e\u3002"
+    }
+  },
+  "description" : "Phenology 2.0 with automatic cycle candidates: per pixel, cycle windows are proposed from the pixel's own seasonal component (peaks of the seasonalDecompose climatology, at most maxCyclesPerYear per year, merged by minimum span), wrapped windows count toward the HARVEST year (year of the window end), and every window is quality-gated - sample count, coverage, largest-gap fraction, amplitude share. Refused windows carry no metrics (no low-sample guessing). Outputs per cycle index the median-of-seasons SOS/POS/EOS/LOS/amplitude plus a valid flag, the cycle count (cropping-system indicator), and the refusal count.",
+  "display_name" : "Temporal Phenology Multi (Auto Cycles + Quality Flags)",
+  "id" : "rs:temporal_phenology_multi",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" :
+  [
+    "temporal",
+    "phenology",
+    "multi-cropping",
+    "quality-flags"
+  ]
+}

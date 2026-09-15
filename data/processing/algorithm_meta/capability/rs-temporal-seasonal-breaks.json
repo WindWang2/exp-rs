@@ -1,0 +1,253 @@
+{
+  "capability" :
+  {
+    "applicability" :
+    {
+      "land_cover" :
+      [
+        "\u68ee\u6797",
+        "\u519c\u7530",
+        "\u704c\u8349\u5730"
+      ],
+      "scenes" :
+      [
+        "\u690d\u88ab\u7269\u5019\u7a81\u53d8\u76d1\u6d4b",
+        "\u4f5c\u7269\u5236\u5ea6\u8f6c\u6362\u8bc6\u522b",
+        "\u5e72\u6270\u4e0e\u6062\u590d\u5236\u56fe"
+      ]
+    },
+    "band_roles" : {},
+    "crs" :
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" :
+    {
+      "cost_class" : "O(tile \u00d7 scenes \u00d7 iterations \u00d7 terms\u00b2) segmentation + O(tile \u00d7 breaks \u00d7 scenes \u00d7 terms\u00b2) attribution (+ bootstrap_resamples \u00d7 that when compute_ci)",
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" :
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "harmonics 1-3\uff0calpha (0.001,0.5]\uff0cminImprovement (0,1]",
+        "when" : "harmonics/alpha/minImprovement \u8d85\u51fa\u5141\u8bb8\u8303\u56f4"
+      },
+      {
+        "code" : "NOT_SUPPORTED",
+        "remedy" : "\u5ef6\u957f\u65f6\u5e8f\u6216\u964d\u4f4e maxBreaks\uff1buntestable \u7528\u7c7b\u522b 4 \u5982\u5b9e\u6807\u8bb0",
+        "when" : "\u6709\u6548\u6837\u672c\u4e0d\u8db3\u6216\u5355\u4fa7\u5206\u6bb5\u8fc7\u77ed\u65e0\u6cd5\u5b8c\u6210\u5d4c\u5957\u68c0\u9a8c"
+      }
+    ],
+    "family" : "temporal",
+    "io" :
+    {
+      "inputs" : [],
+      "outputs" :
+      [
+        {
+          "data_kind" : "string",
+          "name" : "epochDate",
+          "required" : true
+        },
+        {
+          "data_kind" : "json",
+          "name" : "memory",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "pixelsWithBreaks",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "pixelsWithSeasonalBreaks",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "sceneCount",
+          "required" : true
+        }
+      ],
+      "parameters" :
+      [
+        {
+          "default" : "0.050000",
+          "name" : "alpha",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "true",
+          "name" : "apply_qa_masking",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "default" : "0",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "enum" :
+          [
+            "blue",
+            "green",
+            "red",
+            "red_edge",
+            "nir",
+            "swir1",
+            "swir2",
+            "vv",
+            "vh"
+          ],
+          "name" : "band_role",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "99",
+          "name" : "bootstrap_resamples",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "20260915",
+          "name" : "bootstrap_seed",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0.950000",
+          "name" : "ci_level",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "collection",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "false",
+          "name" : "compute_ci",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "default" : "keep_all",
+          "enum" :
+          [
+            "keep_all",
+            "reject"
+          ],
+          "name" : "duplicate_policy",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "2",
+          "name" : "harmonics",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "3",
+          "name" : "maxBreaks",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0.100000",
+          "name" : "minImprovement",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "90",
+          "name" : "minSegmentDays",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "false",
+          "name" : "robust",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "name" : "scenes",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "256",
+          "name" : "tile_size",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" :
+    [
+      "optical"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" :
+    [
+      "Common grid, acquisition times, consistent radiometric state; >= ~2 years for stable harmonics"
+    ],
+    "schema_version" : 2,
+    "summary" : "\u5b63\u8282\u5206\u91cf\u7a81\u53d8\u68c0\u6d4b\u4e0e\u5f52\u56e0\uff1a\u8054\u5408\u8c10\u6ce2+\u8d8b\u52bf\u5206\u6bb5\u540e\uff0c\u7528\u5d4c\u5957\u6a21\u578b F \u68c0\u9a8c\u533a\u5206\u8d8b\u52bf\u7a81\u53d8\u4e0e\u5b63\u8282\u5e45\u76f8\u7a81\u53d8\uff0c\u53ef\u9009 bootstrap \u7f6e\u4fe1\u533a\u95f4\u3002",
+    "teaching_use" :
+    {
+      "concepts" :
+      [
+        "\u5b63\u8282\u5206\u91cf\u7a81\u53d8",
+        "\u5d4c\u5957 F \u68c0\u9a8c",
+        "\u5f52\u56e0\uff08\u8d8b\u52bf vs \u5b63\u8282\uff09",
+        "bootstrap \u7f6e\u4fe1\u533a\u95f4"
+      ],
+      "courses" :
+      [
+        "\u690d\u7269\u9065\u611f",
+        "\u65f6\u95f4\u5e8f\u5217\u5206\u6790"
+      ],
+      "exercise" : "\u5bf9 2019-2024 NDVI \u65f6\u5e8f\u8fd0\u884c\u672c\u7b97\u5b50\uff0c\u533a\u5206\u704c\u6e89\u542f\u7528\uff08\u5b63\u8282\u7a81\u53d8\uff09\u4e0e\u91c7\u4f10\uff08\u8d8b\u52bf\u7a81\u53d8\uff09\u7a7a\u95f4\u5206\u5e03\u3002"
+    }
+  },
+  "description" : "Seasonal-component break detection with trend/seasonal attribution: segments each pixel with the shared joint harmonic+trend kernel, then tests every break with nested weighted-LS F comparisons \u2014 did the seasonal basis (harmonic sin/cos amplitude/phase) change beyond the trend change? Per break: attribution kind, day offset, fitted-level jump, seasonal coefficient shift, harmonic-1 amplitude/phase change, F statistic and p-value. BFAST-inspired seasonal-change testing - NOT full BFAST (no iterative alternation) and NOT CCDC (no L1 / online model update). Optional per-break bootstrap confidence intervals on the level jump (seeded, deterministic; refused - never fabricated - when too many refits fail).",
+  "display_name" : "Temporal Seasonal Breaks (Attribution + CI)",
+  "id" : "rs:temporal_seasonal_breaks",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" :
+  [
+    "temporal",
+    "change-detection",
+    "seasonal-component",
+    "attribution",
+    "uncertainty"
+  ]
+}

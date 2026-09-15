@@ -1,8 +1,8 @@
-<!-- 由 scripts/capability_knowledge_tool gen-pages 自动生成 — 手动编辑是缺陷（ADR 0146）。 修改请改对应 sidecar 后重新生成。 -->
+<!-- 由 scripts/capability_knowledge_tool gen-pages 自动生成 — 手动编辑是缺陷（ADR 0154）。 修改请改对应 sidecar 后重新生成。 -->
 
 # 光谱指数与波段运算（spectral）
 
-共 12 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 15 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:band_math
 
@@ -78,6 +78,15 @@
 - 适用课程：遥感数字图像处理
 - 典型练习：从 Sentinel-2 13 波段中抽取 B02/B03/B04/B08 做后续 NDVI 生产。
 
+## rs:library_select
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：entries（integer）、output（json）
+- 参数：libraryPath（string）、materials（string）、nearDuplicateAngleDeg（numeric）、output（string）、sensor（string）、wavelengthMax（numeric）、wavelengthMin（numeric）
+- 前置条件：The source library must pass strict validation (loadValidated); sensor projection needs entries with wavelength grids.
+- 局限：Near-duplicate detection reports pairs below the SAM threshold; it never removes entries by itself.
+
 ## rs:mndwi
 
 改进型归一化水体指数 MNDWI = (Green-SWIR)/(Green+SWIR)，对城镇背景中的水体更稳健。
@@ -97,6 +106,16 @@
 - 适用课程：遥感数字图像处理
 - 典型练习：在城市区比较 NDWI 与 MNDWI 的水体提取精度。
 - 可接上游：rs:atmospheric_correction
+
+## rs:mnf_inverse
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：input（raster）
+- 输出：output（raster）、spectrumOut（json）
+- 参数：components（integer）、errorOut（string）、output（string）、spectrumOut（string）、spectrumRef（string）、transform（string）
+- 前置条件：Requires the transform artifact written by rs:mnf (transformOut); the model is digest-verified on load.
+- 局限：Component subsets are a documented approximation: the dropped components' contribution is reported via errorOut / reconstructionError, never silently ignored.
 
 ## rs:ndbi
 
@@ -196,6 +215,16 @@
 - 适用课程：植物遥感
 - 典型练习：在荒漠草原区比较 NDVI 与 SAVI 对稀疏植被的敏感度。
 - 可接上游：rs:atmospheric_correction
+
+## rs:spectral_band_select
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输入：input（raster）
+- 输出：bands（integer）、output（raster）
+- 参数：bands（integer）、excludeRanges（json）、output（string）、wavelengthMax（numeric）、wavelengthMin（numeric）
+- 前置条件：wavelengthMin/Max and excludeRanges need WAVELENGTH band metadata; the explicit 'bands' mode does not.
+- 局限：Band selection renumbers bands; wavelength metadata of kept bands is preserved and normalized to nm.
 
 ## rs:spectral_derivative
 

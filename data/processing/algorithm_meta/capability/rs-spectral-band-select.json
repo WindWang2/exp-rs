@@ -1,0 +1,104 @@
+{
+  "capability" :
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" :
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" :
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "spectral",
+    "io" :
+    {
+      "inputs" :
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" :
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" :
+      [
+        {
+          "name" : "bands",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "excludeRanges",
+          "required" : false,
+          "type" : "json"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "wavelengthMax",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "wavelengthMin",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" :
+    [
+      "Band selection renumbers bands; wavelength metadata of kept bands is preserved and normalized to nm."
+    ],
+    "modality" :
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" :
+    [
+      "wavelengthMin/Max and excludeRanges need WAVELENGTH band metadata; the explicit 'bands' mode does not."
+    ],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Select or exclude raster bands by index or wavelength range; wavelength metadata is normalized to nm and propagated.",
+  "display_name" : "Spectral Band Select",
+  "id" : "rs:spectral_band_select",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" :
+  [
+    "spectral",
+    "preprocessing",
+    "bad-bands"
+  ]
+}

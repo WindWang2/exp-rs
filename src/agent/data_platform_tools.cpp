@@ -41,6 +41,7 @@ namespace sicnu::agent
 {
 
 using namespace sicnu::dataset;
+using namespace sicnu::experiment;
 
 namespace
 {

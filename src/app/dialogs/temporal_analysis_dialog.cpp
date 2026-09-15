@@ -16,6 +16,7 @@
 #include <QDateTime>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QGridLayout>
 #include <QGroupBox>
@@ -26,6 +27,7 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QStackedWidget>
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -50,6 +52,9 @@ const AlgorithmEntry kAlgorithms[] = {
     { "rs:temporal_trend", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "Linear trend (slope / intercept / R²)" ) },
     { "rs:temporal_anomaly", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "Time series anomalies (z-score / difference)" ) },
     { "rs:temporal_extract_series", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "Point/ROI time series extraction (CSV)" ) },
+    { "rs:temporal_seasonal_breaks", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "Seasonal-component breaks with attribution (+ optional CI)" ) },
+    { "rs:temporal_model_select", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "Model selection (harmonic order / breaks by AICc / BIC / CV)" ) },
+    { "rs:temporal_phenology_multi", QT_TRANSLATE_NOOP( "TemporalAnalysisDialog", "Phenology 2.0 (automatic cycles, cross-year, quality flags)" ) },
 };
 
 enum SceneColumns
@@ -267,6 +272,108 @@ void TemporalAnalysisDialog::setupUi()
     m_polygonEdit->setPlaceholderText( tr( "Vertex list x1,y1;x2,y2;x3,y3;... (closed ring; the bounding box is scanned only)" ) );
     SicnuDialogHelp::tip( m_polygonEdit, tr( "ROI statistics: mean/median/min/max/stddev/valid_count, exported as CSV per date." ) );
     grid->addWidget( m_polygonEdit, 1, 1 );
+    m_paramStack->addWidget( page );
+  }
+  // page: seasonal breaks (Temporal Intelligence 11.0)
+  {
+    auto *page = new QFrame( m_paramStack );
+    auto *lay = new QHBoxLayout( page );
+    lay->setContentsMargins( 0, 0, 0, 0 );
+    lay->addWidget( new QLabel( tr( "Harmonics:" ), page ) );
+    m_seasonalHarmonicsSpin = new QSpinBox( page );
+    m_seasonalHarmonicsSpin->setObjectName( QStringLiteral( "temporalSeasonalHarmonics" ) );
+    m_seasonalHarmonicsSpin->setRange( 1, 3 );
+    m_seasonalHarmonicsSpin->setValue( 2 );
+    SicnuDialogHelp::tip( m_seasonalHarmonicsSpin, tr( "Seasonal sin/cos pairs per segment (must match the segmentation basis)." ) );
+    lay->addWidget( m_seasonalHarmonicsSpin );
+    lay->addWidget( new QLabel( tr( "Max breaks:" ), page ) );
+    m_seasonalBreaksSpin = new QSpinBox( page );
+    m_seasonalBreaksSpin->setObjectName( QStringLiteral( "temporalSeasonalMaxBreaks" ) );
+    m_seasonalBreaksSpin->setRange( 0, 8 );
+    m_seasonalBreaksSpin->setValue( 3 );
+    lay->addWidget( m_seasonalBreaksSpin );
+    lay->addWidget( new QLabel( tr( "Alpha:" ), page ) );
+    m_seasonalAlphaSpin = new QDoubleSpinBox( page );
+    m_seasonalAlphaSpin->setObjectName( QStringLiteral( "temporalSeasonalAlpha" ) );
+    m_seasonalAlphaSpin->setRange( 0.001, 0.5 );
+    m_seasonalAlphaSpin->setSingleStep( 0.01 );
+    m_seasonalAlphaSpin->setValue( 0.05 );
+    SicnuDialogHelp::tip( m_seasonalAlphaSpin, tr( "Significance level for the nested F tests: each break is attributed to trend, seasonal, both, or neither." ) );
+    lay->addWidget( m_seasonalAlphaSpin );
+    m_seasonalCiCheck = new QCheckBox( tr( "Bootstrap CI" ), page );
+    m_seasonalCiCheck->setObjectName( QStringLiteral( "temporalSeasonalCi" ) );
+    SicnuDialogHelp::tip( m_seasonalCiCheck, tr( "Adds seeded residual-bootstrap confidence intervals on break magnitudes (slower; refused — NaN — when too few refits succeed)." ) );
+    lay->addWidget( m_seasonalCiCheck );
+    lay->addStretch();
+    m_paramStack->addWidget( page );
+  }
+  // page: model select (Temporal Intelligence 11.0)
+  {
+    auto *page = new QFrame( m_paramStack );
+    auto *lay = new QHBoxLayout( page );
+    lay->setContentsMargins( 0, 0, 0, 0 );
+    lay->addWidget( new QLabel( tr( "Max harmonics:" ), page ) );
+    m_selectHarmonicsSpin = new QSpinBox( page );
+    m_selectHarmonicsSpin->setObjectName( QStringLiteral( "temporalSelectHarmonics" ) );
+    m_selectHarmonicsSpin->setRange( 0, 3 );
+    m_selectHarmonicsSpin->setValue( 2 );
+    lay->addWidget( m_selectHarmonicsSpin );
+    lay->addWidget( new QLabel( tr( "Max breaks:" ), page ) );
+    m_selectBreaksSpin = new QSpinBox( page );
+    m_selectBreaksSpin->setObjectName( QStringLiteral( "temporalSelectBreaks" ) );
+    m_selectBreaksSpin->setRange( 0, 4 );
+    m_selectBreaksSpin->setValue( 2 );
+    lay->addWidget( m_selectBreaksSpin );
+    lay->addWidget( new QLabel( tr( "Penalty:" ), page ) );
+    m_selectPenaltyCombo = new QComboBox( page );
+    m_selectPenaltyCombo->setObjectName( QStringLiteral( "temporalSelectPenalty" ) );
+    m_selectPenaltyCombo->addItem( tr( "AICc" ), QStringLiteral( "aicc" ) );
+    m_selectPenaltyCombo->addItem( tr( "BIC" ), QStringLiteral( "bic" ) );
+    m_selectPenaltyCombo->addItem( tr( "Block CV" ), QStringLiteral( "block_cv" ) );
+    SicnuDialogHelp::tip( m_selectPenaltyCombo, tr( "AICc/BIC assume Gaussian residuals; Block CV refits on deterministic contiguous folds (slower). Ties resolve to the smallest model." ) );
+    lay->addWidget( m_selectPenaltyCombo );
+    lay->addWidget( new QLabel( tr( "CV folds:" ), page ) );
+    m_selectCvFoldsSpin = new QSpinBox( page );
+    m_selectCvFoldsSpin->setObjectName( QStringLiteral( "temporalSelectCvFolds" ) );
+    m_selectCvFoldsSpin->setRange( 2, 10 );
+    m_selectCvFoldsSpin->setValue( 4 );
+    lay->addWidget( m_selectCvFoldsSpin );
+    lay->addStretch();
+    m_paramStack->addWidget( page );
+  }
+  // page: phenology multi (Temporal Intelligence 11.0)
+  {
+    auto *page = new QFrame( m_paramStack );
+    auto *lay = new QHBoxLayout( page );
+    lay->setContentsMargins( 0, 0, 0, 0 );
+    lay->addWidget( new QLabel( tr( "Max cycles/yr:" ), page ) );
+    m_phenoCyclesSpin = new QSpinBox( page );
+    m_phenoCyclesSpin->setObjectName( QStringLiteral( "temporalPhenoCycles" ) );
+    m_phenoCyclesSpin->setRange( 1, 4 );
+    m_phenoCyclesSpin->setValue( 3 );
+    lay->addWidget( m_phenoCyclesSpin );
+    lay->addWidget( new QLabel( tr( "Crossing:" ), page ) );
+    m_phenoCrossingSpin = new QDoubleSpinBox( page );
+    m_phenoCrossingSpin->setObjectName( QStringLiteral( "temporalPhenoCrossing" ) );
+    m_phenoCrossingSpin->setRange( 0.01, 1.0 );
+    m_phenoCrossingSpin->setSingleStep( 0.05 );
+    m_phenoCrossingSpin->setValue( 0.5 );
+    lay->addWidget( m_phenoCrossingSpin );
+    lay->addWidget( new QLabel( tr( "Min valid/season:" ), page ) );
+    m_phenoMinValidSpin = new QSpinBox( page );
+    m_phenoMinValidSpin->setObjectName( QStringLiteral( "temporalPhenoMinValid" ) );
+    m_phenoMinValidSpin->setRange( 3, 100 );
+    m_phenoMinValidSpin->setValue( 6 );
+    SicnuDialogHelp::tip( m_phenoMinValidSpin, tr( "Windows below this sample count are refused (no metrics) instead of guessed; wrapped windows count toward the harvest year." ) );
+    lay->addWidget( m_phenoMinValidSpin );
+    lay->addWidget( new QLabel( tr( "Max gap fraction:" ), page ) );
+    m_phenoMaxGapSpin = new QDoubleSpinBox( page );
+    m_phenoMaxGapSpin->setObjectName( QStringLiteral( "temporalPhenoMaxGap" ) );
+    m_phenoMaxGapSpin->setRange( 0.05, 1.0 );
+    m_phenoMaxGapSpin->setSingleStep( 0.05 );
+    m_phenoMaxGapSpin->setValue( 0.5 );
+    lay->addWidget( m_phenoMaxGapSpin );
+    lay->addStretch();
     m_paramStack->addWidget( page );
   }
   paramLayout->addWidget( m_paramStack );
@@ -645,6 +752,27 @@ void TemporalAnalysisDialog::onRun()
   else if ( id == QLatin1String( "rs:temporal_anomaly" ) )
   {
     params["method"] = m_anomalyMethodCombo->currentData().toString().toStdString();
+  }
+  else if ( id == QLatin1String( "rs:temporal_seasonal_breaks" ) )
+  {
+    params["harmonics"] = m_seasonalHarmonicsSpin->value();
+    params["maxBreaks"] = m_seasonalBreaksSpin->value();
+    params["alpha"] = m_seasonalAlphaSpin->value();
+    params["compute_ci"] = m_seasonalCiCheck->isChecked();
+  }
+  else if ( id == QLatin1String( "rs:temporal_model_select" ) )
+  {
+    params["maxHarmonics"] = m_selectHarmonicsSpin->value();
+    params["maxBreaks"] = m_selectBreaksSpin->value();
+    params["penalty"] = m_selectPenaltyCombo->currentData().toString().toStdString();
+    params["cvFolds"] = m_selectCvFoldsSpin->value();
+  }
+  else if ( id == QLatin1String( "rs:temporal_phenology_multi" ) )
+  {
+    params["maxCyclesPerYear"] = m_phenoCyclesSpin->value();
+    params["crossingFraction"] = m_phenoCrossingSpin->value();
+    params["minValidPerSeason"] = m_phenoMinValidSpin->value();
+    params["maxGapFraction"] = m_phenoMaxGapSpin->value();
   }
   else if ( id == QLatin1String( "rs:temporal_extract_series" ) )
   {
