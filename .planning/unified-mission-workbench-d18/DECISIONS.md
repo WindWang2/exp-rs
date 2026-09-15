@@ -56,3 +56,28 @@
 ## D-M4 — Session MissionContext on main window
 
 **Decision.** `QgisDesktopWindow` owns `m_mission` value. `workbench:context` merges selection into `m_mission` and re-emits the session summary so Agent sees studio publishes + IR2 fingerprint.
+
+## D-M5 — MissionContext dual-write: sidecar + sibling XML (not DataProjectSerializer)
+
+**Context.** Sidecar `.mission.json` already existed. GOAL Phase J needs project save/reopen. Embedding inside `sicnuDataManager` risks coupling to Workspace Governance v3 downgrade guards.
+
+**Decision.** Dual-write on `QgsProject::writeProject` / `readProject`:
+1. **Primary:** `<stem>.mission.json` beside the project file.
+2. **Portable mirror:** sibling root element `sicnuMissionContext` (JSON text, version attr `1`) so `.qgs`/`.qgz` carry mission without the sidecar.
+On restore: prefer sidecar when present; else XML. Missing both = fresh mission (not an error).
+
+**Consequences.** DataProjectSerializer remains governance-only. Documented in mission_context_store.h.
+
+## D-W3 — IR 2.0 `WorkflowDocument` alias; full rename deferred
+
+**Context.** Engine 2.0 and IR 2.0 both use `sicnu::workflow::WorkflowDefinition` (~34 IR2 call-site files). Full rename is high churn.
+
+**Decision.** Add `using WorkflowDocument = WorkflowDefinition` in `workflow_ir_v2.h`. New D18 code (Ir2PipelineDesignerDock) uses the alias. Full type rename / namespace split remains deferred until a dedicated migration PR.
+
+## D-W4 — IR2 dock owns PipelineRunCoordinator + LabSpec lift
+
+**Decision.** `Ir2PipelineDesignerDock` constructs a child `PipelineRunCoordinator`, exposes Run/Cancel, and can `liftLabSpecToWorkflow` into the same document identity (`ActiveWorkflowRef.runner = pipeline_run_coordinator`). Default synthetic executor remains (D17); production operator binding is a later follow-up. Main window publishes `ObjectKind::WorkflowRun` on `pipelineRunFinished`.
+
+## D-I4 — Classification Result path upgrade
+
+**Decision.** Studio keeps provisional request ids only when no product path exists. `classificationProductReady` / `acceptProductPath`, classic `requestLoadToMainMap`, and reuse of existing `artifact_paths` / class-named layers publish path-backed Results via `publishMissionResultFromPath`.

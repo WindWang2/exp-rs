@@ -1,6 +1,6 @@
 # EVIDENCE — D18
 
-## Environment (2026-09-15 UTC / Asia/Shanghai UTC+8)
+## Environment (2026-09-15 Asia/Shanghai UTC+8)
 
 - Box: Linux agent workspace; `cmake` and `g++` **not installed**.
 - Builds/tests: **not executed** on this box. Sources and CMake/test targets added for the Windows/CI toolchain used by the repo.
@@ -10,7 +10,7 @@
 
 ```text
 git rev-parse HEAD / origin/master
-gh pr list / gh pr edit
+gh pr list / gh pr edit / git push
 code search / header reads under src/app, src/workflow, tests
 ```
 
@@ -28,18 +28,17 @@ ctest -R 'test_mission' -V
 
 ## Implementation landed (this continuation)
 
-- Mission publish helpers: `publishMissionObject` / `publishMissionResultFromPath` / `publishMissionLayer` / `setMissionActiveWorkflow`
-- D14 `GeorefDualWindow` menu + workbench + command; `rectificationFinished` → mission Result + optional map load
-- D15 `ClassificationStudioWidget` menu + workbench + command; selection → mission input ref; classificationRequested → Result id
-- D17 IR 2.0 production mount: `Ir2PipelineDesignerDock` + canvas sources + `workflow_ir_v2.cpp` in `sicnu_geo_rs` CMake (no Engine 2.0 header co-include)
-- Shared workflow identity: dock emits `ActiveWorkflowRef` into `m_mission`; `workbench:context` prefers session mission
-- E2E scenarios 1–5 strengthened (contract tests); honest not-executed without cmake/g++
+- Mission **dual-write** on project save/open: sidecar `.mission.json` + `sicnuMissionContext` XML (not inside DataProjectSerializer — D-M5)
+- IR2 designer dock: **PipelineRunCoordinator** Run/Cancel + **LabSpec** load via `labspec_workflow_lift`; shared `ActiveWorkflowRef`; WorkflowRun publish on completion
+- `WorkflowDocument` alias for IR 2.0 (full rename deferred — D-W3)
+- Classification: path products via `classificationProductReady` / classic `requestLoadToMainMap` / artifact_paths reuse — less provisional Results
+- Tests: XML dual-write + path-product upgrade + IR2 run identity contract (not executed)
 
 ## Not executed (toolchain absent)
 
 - `cmake` configure/build
 - `ctest -R mission`
-- GUI smoke of new menu actions
+- GUI smoke of new menu / Run / LabSpec actions
 
 ## Commits on branch (after seed)
 
@@ -51,7 +50,9 @@ ctest -R 'test_mission' -V
 | a6b0cab5 | feat(d18): workbench:context mission summary |
 | 862cfb09 | feat(d18): MissionContext sidecar save/load |
 | 9a07209a | docs(d18): record PR #991 |
-| (pending) | feat(d18): mount D14/D15/D17 + publish Result/workflow identity |
+| e6c8affb | feat(d18): mount D14/D15/D17 + publish Result/workflow identity |
+| a46941e5 | docs(d18): evidence, decisions, review log, PR body for mount slice |
+| (pending) | feat(d18): mission dual-write + IR2 PipelineRunCoordinator/LabSpec + classify path Results |
 
 ## PR
 

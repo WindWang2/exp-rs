@@ -2,11 +2,11 @@
 
 D18 Unified Mission Workbench continuation on draft PR #991:
 
-- Mission **publish** helpers (`publishMissionObject` / `publishMissionResultFromPath` / `setMissionActiveWorkflow`).
-- **D14** `GeorefDualWindow` mounted in Raster → Image Registration menu, WorkbenchHost (`georef-dual`), and `workbench.georefDual`; `rectificationFinished` publishes Result (+ optional map load).
-- **D15** `ClassificationStudioWidget` mounted in Analysis → Classification, WorkbenchHost (`classify-studio`), and `workbench.classifyStudio`; selection binds mission input; classification requests publish Result ids.
-- **D17** IR 2.0 designer production-wired: canvas stack + `workflow_ir_v2.cpp` + `Ir2PipelineDesignerDock` in `sicnu_geo_rs` CMake (separate TU from Engine 2.0 to avoid dual `WorkflowDefinition` clash). Shared workflow id/fingerprint flows into `m_mission` and `workbench:context`.
-- E2E scenarios 1–5 strengthened as headless MissionContext contracts.
+- MissionContext **dual-write** on project save/open: `<stem>.mission.json` sidecar + `sicnuMissionContext` project XML (sibling of governance block; **not** inside DataProjectSerializer).
+- **D17 IR2 dock** starts `PipelineRunCoordinator` (Run/Cancel) and can load Guided **LabSpec** into the same IR 2.0 document / `ActiveWorkflowRef`; publishes `WorkflowRun` on completion.
+- `WorkflowDocument` alias for IR 2.0 (full `WorkflowDefinition` rename deferred — large D17 surface).
+- **D15** classification Results are path-backed when products exist (`classificationProductReady`, classic load-to-map, artifact_paths / class-layer reuse); provisional ids only as fallback.
+- Prior mount slice retained: D14 dual / D15 studio / D17 canvas menus + publish helpers.
 
 ## Baseline SHA
 
@@ -15,31 +15,31 @@ D18 Unified Mission Workbench continuation on draft PR #991:
 
 ## Architecture
 
-MissionContext remains a value aggregate under `src/app/workbench/`. Main window owns session `m_mission`. Specialist UIs retained; new mounts are additive.
+MissionContext remains a value aggregate under `src/app/workbench/`. Main window owns session `m_mission`. Persistence is dual-write (sidecar primary on restore). Specialist UIs retained; IR2 dock owns its coordinator instance (no third scheduler).
 
 ## Authority / convergence decisions
 
-See `DECISIONS.md` (D-W1/W2, D-M1–M4, D-I1–I3). No third scheduler. IR 2.0 rename still deferred.
+See `DECISIONS.md` (D-W1–W4, D-M1–M5, D-I1–I4).
 
 ## Major deliverables
 
-- Audit + MissionContext (prior commits)
-- Publish helpers + D14/D15/D17 mounts (this continuation)
-- Tests: `test_mission_context`, `test_mission_e2e_scaffolding`
+- Audit + MissionContext + mounts (prior commits)
+- Project persist dual-write + IR2 run/LabSpec + classify path Results (this continuation)
+- Tests: `test_mission_context`, `test_mission_e2e_scaffolding` (extended contracts)
 
 ## D14–D17 integration findings
 
-- D14 dual / D15 studio / D17 IR2 canvas now menu-reachable.
-- Guided LabSpec lift + `PipelineRunCoordinator` start not yet production-wired (D-W2 follow-up).
-- Dual `WorkflowDefinition` type name remains (compile-safe via TU separation).
+- D14/D15/D17 menu-reachable (prior).
+- IR2 → PipelineRunCoordinator start path now wired; LabSpec lift available from dock.
+- Dual `WorkflowDefinition` name: alias `WorkflowDocument` introduced; rename still deferred.
 
 ## Compatibility
 
-Additive. Classic I2I/I2M/classification windows kept.
+Additive. Classic I2I/I2M/classification windows kept. Governance serializer unchanged.
 
 ## Tests
 
-- Catch2 targets extended for publish + E2E contracts.
+- Catch2 targets extended for dual-write, path-product upgrade, IR2 run identity.
 - **Local compile/ctest not executed on the agent box** (`cmake`/`g++` absent). See EVIDENCE.md.
 
 ## Performance / resource evidence
@@ -48,20 +48,20 @@ N/A for value-type / mount wiring; policy remains `-j2` / `CTEST_PARALLEL_LEVEL=
 
 ## Review findings
 
-See REVIEW_LOG.md. Mount P1 gaps cleared; no new P0.
+See REVIEW_LOG.md. Persist P1 cleared; no new P0.
 
 ## Known limitations
 
-- Mission not yet in Qgs project XML (`DataProjectSerializer` follow-up).
-- Classification studio Result is provisional until a path product exists (path publish API ready).
-- IR2 dock does not yet start `PipelineRunCoordinator`.
+- IR2 runs use D17 **synthetic** node executor until production operators are bound.
+- Full IR 2.0 type rename (`WorkflowDefinition` → `WorkflowDocument` across D17) still deferred.
+- Guided LabSpec **cards** UI (`GuidedWorkflowWidget`) not required for dock LabSpec load.
 - Full GUI E2E on toolchain host still pending.
 
 ## Follow-ups
 
-1. Persist MissionContext with project save/restore.
-2. Production-start PipelineRunCoordinator / Guided LabSpec from IR2 dock.
-3. Rename IR 2.0 `WorkflowDefinition` → `WorkflowDocument`.
+1. Bind real operators into PipelineRunCoordinator from the dock (replace synthetic executor).
+2. Dedicated IR 2.0 `WorkflowDocument` rename / namespace split PR.
+3. Optional Qgs custom-property mirror if XML+sidecar insufficient for some hosts.
 4. Run `ctest -R mission` on Qt6+cmake host.
 
 ## Evidence policy
