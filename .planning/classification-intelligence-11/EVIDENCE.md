@@ -68,3 +68,46 @@
   （仅本 track 的 make PID 25009/25012，按 /proc/cwd 验证归属），
   reconfigure 纳入新文件（RECONFIGURE_EXIT=0）后增量重启。
 
+### Phase 7 — 独立对抗审查（subagent #2，只读）
+
+- 结论：P0=0、P1=3、P2=6、P3 若干；逐条 disposition 见 REVIEW_LOG.md。
+- P1 全修：NB 空类序 save 自毁 / backend-save 失败 orphan 主模型 / 退化行
+  -1 哨兵契约披露（含概率栅格与 meanConfidence 语义）。
+- P2 修 6：指纹漂移门强制、fit 未知标签 fail-closed（+负测试）、
+  groupOverlap 去重语义、Fisher-Yates 跨平台确定性、unc rename 失败上报、
+  e2e 调试残留清理。P3 修 6，接受 3（disposition 记录）。
+
+### Phase 8 — 最终双验证（Oracle 4/6）
+
+同一二进制、同一命令、两遍连续运行，之间零代码改动：
+
+- Pass 1（审查修复 commit 395a1b96c3 之后）：18/18 suites EXIT=0
+  （test_class_order, test_uncertainty, test_feature_schema,
+  test_probability_calibration, test_spatial_cross_validation,
+  test_classification_object_postprocess, test_classification_studio_widget,
+  test_classifier_normalbayes, test_classifier_svm, test_classifier_mlp,
+  test_classifier_random_forest, test_feature_scaler, test_cross_validation,
+  test_stratified_split, test_accuracy_assessment, test_classification_pipeline,
+  test_classification_intelligence_e2e, test_classification_intelligence_scale）
+- Pass 2：18/18 suites EXIT=0（原样重跑）。
+- Oracle 5：`git diff --check origin/master...HEAD` → clean（修复 EVIDENCE
+  EOF 空行后复检 exit 0）；冲突标记扫描 0；secret 扫描 0；新增文件均为
+  源码/测试/文档/planning，无生成物。
+- `git rebase origin/master` → 已最新（origin/master=a5b11b7f10 无新提交）。
+- Oracle 1：合成空间泄漏被 audit 捕获（test_spatial_cross_validation）。
+- Oracle 2：类序契约机器可验证（test_class_order + 全后端列序锁定）。
+- Oracle 3：artifact 重放确定性（e2e replay 逐字节一致 + scale 不变式）。
+- Oracle 7：独立 review 完成，P0=0/P1=0（修复后），PR 创建且不 merge。
+
+### 资源记录
+
+- 构建全程 `-j2`（并行 track 共享主机，本 track 未超限）；测试 `-j1` +
+  `QT_QPA_PLATFORM=offscreen`；60s 采样 load1 ∈ [10,17]（多为同机其他
+  track 贡献），内存峰值 < 20 GiB / 64 GiB。
+- not-executed：sicnu_add_test 全栈族（test_classifier_engine、
+  test_classification_postprocess、test_d15 e2e、test_classification_agent_tools）
+  因 master 自带两处 GCC16 编译破坏（mission_context_store.cpp 缺 QDir
+  include；data_platform_tools.cpp 引用 sicnu::experiment::BenchmarkService
+  未限定——两文件与本 diff 零交集，`git diff origin/master...HEAD` 为空）
+  无法在本机构建；相关能力已由直链注册的替代套件覆盖（object_postprocess
+  直链 sicnu_processing；studio widget 直编 TU）。
