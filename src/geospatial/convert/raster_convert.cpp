@@ -308,31 +308,23 @@ int buildOverviews( const std::string &path, const std::vector<int> &levels,
   return static_cast<int>( effectiveLevels.size() );
 }
 
-TranslateResult makeCog( const std::string &inputPath, const std::string &targetPath,
-                         CogPreset preset, const std::vector<std::string> &extraCreationOptions,
-                         ConvertProgress *progress )
+namespace
+{
+
+/// Shared tail of makeCog/makeCogWithOptions: COG-driver translate into a
+/// staged file, COG-validate BEFORE publish, then atomic group publish.
+TranslateResult cogStagedPublish( const std::string &inputPath, const std::string &targetPath,
+                                  const std::vector<std::string> &creationOptions, ConvertProgress *progress )
 {
   if ( inputPath.empty() || targetPath.empty() )
     throw GeoError( ErrorCode::InvalidArgument, "makeCog: empty input or target path" );
 
   GdalDatasetGuard source( openRasterReadOnly( inputPath ) );
 
-  // Preset policy is dtype-aware: the first band decides lossless/lossy fit.
-  GDALRasterBandH firstBand = GDALGetRasterBand( source.get(), 1 );
-  if ( !firstBand )
-    throw GeoError( ErrorCode::InvalidArgument, "makeCog: input has no bands" );
-  const char *dtypeName = GDALGetDataTypeName( GDALGetRasterDataType( firstBand ) );
-  const CogPresetResult presetResult = cogPresetOptions( preset, dtypeName ? dtypeName : "" );
-
   std::vector<std::string> args;
   args.emplace_back( "-of" );
   args.emplace_back( "COG" );
-  for ( const std::string &option : presetResult.creationOptions )
-  {
-    args.emplace_back( "-co" );
-    args.emplace_back( option );
-  }
-  for ( const std::string &option : extraCreationOptions )
+  for ( const std::string &option : creationOptions )
   {
     args.emplace_back( "-co" );
     args.emplace_back( option );
@@ -370,8 +362,6 @@ TranslateResult makeCog( const std::string &inputPath, const std::string &target
       details["validation"] = report.checks;
       throw GeoError( ErrorCode::WriteFailed, "makeCog: staged output failed COG validation", details );
     }
-    for ( const std::string &warning : presetResult.warnings )
-      result.warnings.append( warning );
     finishStaged( stagedPath, targetPath, result );
     return result;
   }
@@ -380,6 +370,41 @@ TranslateResult makeCog( const std::string &inputPath, const std::string &target
     atomic_fs::discardStaged( stagedPath );
     throw;
   }
+}
+
+} // namespace
+
+TranslateResult makeCog( const std::string &inputPath, const std::string &targetPath,
+                         CogPreset preset, const std::vector<std::string> &extraCreationOptions,
+                         ConvertProgress *progress )
+{
+  if ( inputPath.empty() || targetPath.empty() )
+    throw GeoError( ErrorCode::InvalidArgument, "makeCog: empty input or target path" );
+
+  // Preset policy is dtype-aware: the first band decides lossless/lossy fit.
+  {
+    GdalDatasetGuard dtypeProbe( openRasterReadOnly( inputPath ) );
+    GDALRasterBandH firstBand = GDALGetRasterBand( dtypeProbe.get(), 1 );
+    if ( !firstBand )
+      throw GeoError( ErrorCode::InvalidArgument, "makeCog: input has no bands" );
+    const char *dtypeName = GDALGetDataTypeName( GDALGetRasterDataType( firstBand ) );
+    const CogPresetResult presetResult = cogPresetOptions( preset, dtypeName ? dtypeName : "" );
+
+    std::vector<std::string> creationOptions = presetResult.creationOptions;
+    for ( const std::string &option : extraCreationOptions )
+      creationOptions.push_back( option );
+    TranslateResult result = cogStagedPublish( inputPath, targetPath, creationOptions, progress );
+    for ( const std::string &warning : presetResult.warnings )
+      result.warnings.append( warning );
+    return result;
+  }
+}
+
+TranslateResult makeCogWithOptions( const std::string &inputPath, const std::string &targetPath,
+                                    const std::vector<std::string> &creationOptions,
+                                    ConvertProgress *progress )
+{
+  return cogStagedPublish( inputPath, targetPath, creationOptions, progress );
 }
 
 Json::Value vectorConvert( const std::string &inputPath, const std::string &targetPath,

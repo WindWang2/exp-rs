@@ -196,4 +196,58 @@ class IoDoctorOperator final : public IoOperatorBase
     Json::Value run( const Json::Value &params, RSOperatorContext &context ) override;
 };
 
+/**
+ * io:subdatasets (11.0) — bounded subdataset inventory (safe URIs, redacted
+ * display, classification) with optional selection projection into the
+ * canonical metadata model.
+ */
+class IoSubdatasetsOperator final : public IoOperatorBase
+{
+  public:
+    std::string name() const override { return "io:subdatasets"; }
+    std::string displayName() const override { return "Subdataset Inventory"; }
+    std::string description() const override;
+    std::string determinismGrade() const override { return "bit-exact"; }
+    RSOperatorMemoryPolicy memoryPolicy() const override { return RSOperatorMemoryPolicy::UnsupportedForLargeRaster; }
+    Json::Value schema() const override;
+    Json::Value metadata() const override;
+    Json::Value run( const Json::Value &params, RSOperatorContext &context ) override;
+};
+
+/**
+ * io:metadata_patch (11.0) — whitelist-validated metadata write-back with
+ * read-back verification and finalize-manifest continuity.
+ */
+class IoMetadataPatchOperator final : public IoOperatorBase
+{
+  public:
+    std::string name() const override { return "io:metadata_patch"; }
+    std::string displayName() const override { return "Patch Metadata"; }
+    std::string description() const override;
+    std::string determinismGrade() const override { return "bit-exact"; }
+    RSOperatorMemoryPolicy memoryPolicy() const override { return RSOperatorMemoryPolicy::UnsupportedForLargeRaster; }
+    Json::Value schema() const override;
+    Json::Value metadata() const override;
+    Json::Value run( const Json::Value &params, RSOperatorContext &context ) override;
+};
+
+/**
+ * io:verify_dataset (11.0) — independent integrity gate: recomputes the
+ * dataset digest against the finalize manifest and re-checks the declared
+ * shape. Fails closed when the manifest is absent (unless explicitly
+ * tolerated).
+ */
+class IoVerifyDatasetOperator final : public IoOperatorBase
+{
+  public:
+    std::string name() const override { return "io:verify_dataset"; }
+    std::string displayName() const override { return "Verify Dataset"; }
+    std::string description() const override;
+    std::string determinismGrade() const override { return "bit-exact"; }
+    RSOperatorMemoryPolicy memoryPolicy() const override { return RSOperatorMemoryPolicy::Streaming; }
+    Json::Value schema() const override;
+    Json::Value metadata() const override;
+    Json::Value run( const Json::Value &params, RSOperatorContext &context ) override;
+};
+
 } // namespace sicnu::operators::io

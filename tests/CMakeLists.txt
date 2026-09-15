@@ -300,6 +300,24 @@ sicnu_add_io_test(test_io_vector_interop)
 # 7.0 generalized grid classification & placement (rotated/flipped/GCP/RPC).
 sicnu_add_io_test(test_io_grid_descriptor)
 
+# 11.0 geospatial I/O interchange: boundary path guards, finalize manifest
+# (provenance digest sidecar), dataset staging ledger (attach/sweep).
+sicnu_add_io_test(test_io_param_guard)
+sicnu_add_io_test(test_io_finalize_manifest)
+sicnu_add_io_test(test_io_stage_ledger)
+# 11.0 explicit COG production options (blocksize/overviews/determinism).
+sicnu_add_io_test(test_io_cog_options)
+# 11.0 capability-gated vector interchange, subdataset inventory, metadata
+# write-back (validated, read-back verified, manifest continuity).
+sicnu_add_io_test(test_io_vector_interchange)
+sicnu_add_io_test(test_io_subdataset_inventory)
+find_library(NETCDF_LIBRARY NAMES netcdf)
+target_link_libraries(test_io_subdataset_inventory PRIVATE ${NETCDF_LIBRARY})
+sicnu_add_io_test(test_io_metadata_patch)
+# 11.0 GDAL version/capability matrix: feature detection, corrupt/truncated
+# negatives, huge logical datasets within bounded memory.
+sicnu_add_io_test(test_io_gdal_matrix)
+
 # io:* operator family suite — rides the operator chain (Qt + sicnu_operators).
 sicnu_add_io_test(test_io_operators)
 sicnu_add_io_test(test_io_catalog_query)

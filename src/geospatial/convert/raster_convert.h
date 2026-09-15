@@ -97,6 +97,15 @@ TranslateResult makeCog( const std::string &inputPath, const std::string &target
                          CogPreset preset, const std::vector<std::string> &extraCreationOptions = {},
                          ConvertProgress *progress = nullptr );
 
+/// COG production from a FULL, pre-merged creation-option list (11.0): the
+/// caller — typically io/cog_options' planner — owns preset selection and
+/// key merging, so overrides replace preset values instead of racing the
+/// first-match-wins driver lookup. Same staged + validated + atomic
+/// pipeline as makeCog.
+TranslateResult makeCogWithOptions( const std::string &inputPath, const std::string &targetPath,
+                                    const std::vector<std::string> &creationOptions,
+                                    ConvertProgress *progress = nullptr );
+
 /// Vector conversion (ogr2ogr semantics through GDALVectorTranslate): format,
 /// attribute filter, spatial clip box, target CRS. Atomic publish.
 Json::Value vectorConvert( const std::string &inputPath, const std::string &targetPath,

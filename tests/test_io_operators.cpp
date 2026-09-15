@@ -8,6 +8,10 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_registry.h"
+#include "geospatial/metadata/canonical_metadata.h"
+#include "geospatial/io/finalize_manifest.h"
+#include "geospatial/io/stage_ledger.h"
+#include "geospatial/io/vector_interchange.h"
 #include "geospatial/util/atomic_fs.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -89,11 +93,12 @@ std::string makeTinyGeoJson( const std::string &dir, const std::string &name )
 
 } // namespace
 
-TEST_CASE( "io: family registers all ten authoritative operators", "[io][operators][registry]" )
+TEST_CASE( "io: family registers all thirteen authoritative operators", "[io][operators][registry]" )
 {
   const sicnu::operators::RSOperatorRegistry &registry = sicnu::operators::RSOperatorRegistry::instance();
   for ( const char *id : { "io:translate", "io:warp", "io:reproject", "io:clip", "io:convert_format",
-                           "io:build_overviews", "io:make_cog", "io:vector_convert", "io:inspect", "io:doctor" } )
+                           "io:build_overviews", "io:make_cog", "io:vector_convert", "io:inspect", "io:doctor",
+                           "io:subdatasets", "io:metadata_patch", "io:verify_dataset" } )
   {
     INFO( "operator: " << id );
     CHECK( registry.hasOperator( std::string( id ) ) );
@@ -307,4 +312,295 @@ TEST_CASE( "io:reproject honours srcCrsOverride for CRS-less input (F-OPS-4)",
   CHECK( std::abs( gt[1] ) > 1.0 ); // pixel size in metres, not degrees-as-pixels
   CHECK( std::abs( gt[0] ) > 100000.0 ); // UTM 33N easting of lon~0 is ~166k
   GDALClose( dataset );
+}
+
+// --- #1001: io:clip must treat srcCrsOverride as a SOURCE declaration, ------
+// --- never as the clip target ----------------------------------------------
+
+TEST_CASE( "io:clip keeps the source grid for a CRS-less input with srcCrsOverride (#1001)",
+           "[io][operators][f-ops-4][1001]" )
+{
+  const std::string dir = scratch( "clip_crsless" );
+  const std::string raster = makeCrsLessRaster( dir, "crsless.tif" );
+  const std::string output = ( fs::path( dir ) / "clip.tif" ).string();
+
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "io:clip" );
+  REQUIRE( op );
+
+  sicnu::operators::RSOperatorContext context;
+  // Source pixels live on the (0,0)..(8,-8) grid declared EPSG:4326. A clip
+  // to [1,-6,6,-1] must SUBSET that grid — extent exactly the requested
+  // bounds, CRS exactly the override — and never reproject (the pre-fix code
+  // assigned the override to targetCrs AND left the grid tagged EPSG:4326
+  // only by accident of the declaration).
+  const Json::Value result = op->execute( [ & ] {
+    Json::Value params;
+    params["input"] = raster;
+    params["output"] = output;
+    params["srcCrsOverride"] = "EPSG:4326";
+    Json::Value bounds;
+    bounds.append( 1.0 );
+    bounds.append( -6.0 );
+    bounds.append( 6.0 );
+    bounds.append( -1.0 );
+    params["bounds"] = bounds;
+    return params;
+  }(), context );
+
+  CHECK( result["output"].asString() == output );
+
+  const sicnu::geo::RasterMetadata meta = sicnu::geo::inspectRaster( output );
+  CHECK( meta.crs.valid );
+  CHECK( meta.crs.authid == "EPSG:4326" );
+  // Independent oracle: the clip window, checked against the requested
+  // bounds (not against the implementation's own result JSON).
+  CHECK( meta.minX == Catch::Approx( 1.0 ).margin( 1e-9 ) );
+  CHECK( meta.maxX == Catch::Approx( 6.0 ).margin( 1e-9 ) );
+  CHECK( meta.minY == Catch::Approx( -6.0 ).margin( 1e-9 ) );
+  CHECK( meta.maxY == Catch::Approx( -1.0 ).margin( 1e-9 ) );
+}
+
+TEST_CASE( "io:clip refuses srcCrsOverride on an input that already has a CRS (#1001)",
+           "[io][operators][negative][1001]" )
+{
+  const std::string dir = scratch( "clip_override_conflict" );
+  const std::string raster = makeTinyRaster( dir, "geo.tif" ); // EPSG:4326 fixture
+  const std::string output = ( fs::path( dir ) / "clip.tif" ).string();
+
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "io:clip" );
+  REQUIRE( op );
+
+  sicnu::operators::RSOperatorContext context;
+  try
+  {
+    op->execute( [ & ] {
+      Json::Value params;
+      params["input"] = raster;
+      params["output"] = output;
+      params["srcCrsOverride"] = "EPSG:32648"; // contradicts the file CRS
+      Json::Value bounds;
+      bounds.append( 116.1 );
+      bounds.append( 30.9 );
+      bounds.append( 116.5 );
+      bounds.append( 30.5 );
+      params["bounds"] = bounds;
+      return params;
+    }(), context );
+    FAIL( "io:clip must refuse a contradictory srcCrsOverride" );
+  }
+  catch ( const sicnu::operators::RSOperatorError &error )
+  {
+    CHECK( error.code() == sicnu::operators::ErrorCode::InvalidParameter );
+    CHECK( error.details()["input_crs"].asString() == "EPSG:4326" );
+    CHECK( error.details()["srcCrsOverride"].asString() == "EPSG:32648" );
+  }
+  // Refusal is fail-closed BEFORE any output: nothing was published.
+  CHECK( !sicnu::geo::atomic_fs::fileExists( output ) );
+}
+
+TEST_CASE( "io:clip keeps the file CRS and applies bounds when no override is given",
+           "[io][operators][1001]" )
+{
+  const std::string dir = scratch( "clip_georef" );
+  const std::string raster = makeTinyRaster( dir, "geo.tif" ); // EPSG:4326, (116,31)..(116.08,30.92)
+  const std::string output = ( fs::path( dir ) / "clip.tif" ).string();
+
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "io:clip" );
+  REQUIRE( op );
+
+  sicnu::operators::RSOperatorContext context;
+  op->execute( [ & ] {
+    Json::Value params;
+    params["input"] = raster;
+    params["output"] = output;
+    Json::Value bounds;
+    bounds.append( 116.02 );
+    bounds.append( 30.94 );
+    bounds.append( 116.06 );
+    bounds.append( 30.98 );
+    params["bounds"] = bounds;
+    return params;
+  }(), context );
+
+  const sicnu::geo::RasterMetadata meta = sicnu::geo::inspectRaster( output );
+  CHECK( meta.crs.authid == "EPSG:4326" );
+  CHECK( meta.minX == Catch::Approx( 116.02 ).margin( 1e-6 ) );
+  CHECK( meta.maxX == Catch::Approx( 116.06 ).margin( 1e-6 ) );
+  CHECK( meta.minY == Catch::Approx( 30.94 ).margin( 1e-6 ) );
+  CHECK( meta.maxY == Catch::Approx( 30.98 ).margin( 1e-6 ) );
+}
+
+// --- 11.0 interchange operators ----------------------------------------------
+
+TEST_CASE( "io:verify_dataset verifies a manifest-bearing dataset and reports legacy absence",
+           "[io][operators][verify]" )
+{
+  const std::string dir = scratch( "verify_op" );
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "io:verify_dataset" );
+  REQUIRE( op );
+
+  // Build a dataset + manifest through the library seam.
+  const std::string staged = ( fs::path( dir ) / "out.4.5.tmp.tif" ).string();
+  {
+    ensureGdal();
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver );
+    GDALDatasetH dataset = GDALCreate( driver, staged.c_str(), 5, 5, 1, GDT_Byte, nullptr );
+    REQUIRE( dataset );
+    GDALClose( dataset );
+  }
+  sicnu::geo::io::StageRecord record;
+  record.runId = "run-verify-op";
+  record.producer = "test-harness";
+  record.finalPath = ( fs::path( dir ) / "out.tif" ).string();
+  record.stagedPath = staged;
+  record.driver = "GTiff";
+  record.width = 5;
+  record.height = 5;
+  record.bandCount = 1;
+  sicnu::geo::io::recordStaged( record );
+  sicnu::geo::io::FinalizeManifestFields fields;
+  fields.producer = "test-harness";
+  fields.driver = "GTiff";
+  fields.width = 5;
+  fields.height = 5;
+  fields.bandCount = 1;
+  fields.dtype = "Byte";
+  sicnu::geo::io::finalizeAttached( record.finalPath, &fields );
+
+  sicnu::operators::RSOperatorContext context;
+  {
+    const Json::Value result = op->execute( [ & ] {
+      Json::Value params;
+      params["input"] = record.finalPath;
+      return params;
+    }(), context );
+    CHECK( result["verified"].asBool() );
+    CHECK( result["manifest_present"].asBool() );
+    CHECK( result["digest_matched"].asBool() );
+  }
+  {
+    // Legacy dataset (exists, but written without a manifest): fail-closed.
+    const std::string legacy = ( fs::path( dir ) / "legacy.tif" ).string();
+    {
+      ensureGdal();
+      GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+      REQUIRE( driver );
+      GDALDatasetH dataset = GDALCreate( driver, legacy.c_str(), 3, 3, 1, GDT_Byte, nullptr );
+      REQUIRE( dataset );
+      GDALClose( dataset );
+    }
+    const Json::Value result = op->execute( [ & ] {
+      Json::Value params;
+      params["input"] = legacy;
+      return params;
+    }(), context );
+    CHECK_FALSE( result["verified"].asBool() );
+    CHECK( result["issues"][0]["code"].asString() == "manifest_missing" );
+  }
+  {
+    // Legacy tolerance flips the issue code but never the verdict.
+    const std::string legacy = ( fs::path( dir ) / "legacy.tif" ).string();
+    const Json::Value result = op->execute( [ & ] {
+      Json::Value params;
+      params["input"] = legacy;
+      params["allowMissingManifest"] = true;
+      return params;
+    }(), context );
+    CHECK_FALSE( result["verified"].asBool() );
+    CHECK( result["issues"][0]["code"].asString() == "manifest_missing_allowed" );
+  }
+}
+
+TEST_CASE( "io:metadata_patch refuses non-whitelist fields through the operator seam",
+           "[io][operators][patch]" )
+{
+  const std::string dir = scratch( "patch_op" );
+  const std::string raster = makeTinyRaster( dir, "grid.tif" );
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "io:metadata_patch" );
+  REQUIRE( op );
+
+  sicnu::operators::RSOperatorContext context;
+  try
+  {
+    op->execute( [ & ] {
+      Json::Value params;
+      params["input"] = raster;
+      Json::Value patches;
+      Json::Value entry;
+      entry["band"] = 1;
+      entry["field"] = "brightness"; // not in the whitelist
+      entry["value"] = "10";
+      patches.append( entry );
+      params["patches"] = patches;
+      return params;
+    }(), context );
+    FAIL( "non-whitelist field must be refused" );
+  }
+  catch ( const sicnu::operators::RSOperatorError &error )
+  {
+    CHECK( error.code() == sicnu::operators::ErrorCode::InvalidParameter );
+  }
+}
+
+TEST_CASE( "io:subdatasets refuses plain rasters through the operator seam",
+           "[io][operators][subdatasets]" )
+{
+  const std::string dir = scratch( "subdatasets_op" );
+  const std::string raster = makeTinyRaster( dir, "grid.tif" );
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "io:subdatasets" );
+  REQUIRE( op );
+
+  sicnu::operators::RSOperatorContext context;
+  try
+  {
+    op->execute( [ & ] {
+      Json::Value params;
+      params["input"] = raster;
+      return params;
+    }(), context );
+    FAIL( "plain rasters carry no SUBDATASETS domain" );
+  }
+  catch ( const sicnu::operators::RSOperatorError &error )
+  {
+    CHECK( error.code() == sicnu::operators::ErrorCode::InvalidParameter );
+  }
+}
+
+TEST_CASE( "dual-capability drivers route by input kind (netCDF raster export preserved)",
+           "[io][operators][routing]" )
+{
+  ensureGdal();
+  // The pre-11.0 hard-coded list sent netCDF to the raster kernel; the first
+  // capability gate sent it to the vector kernel and broke "GeoTIFF ->
+  // NetCDF raster export". Dual-capability drivers must route by the INPUT.
+  GDALDriverH nc = GDALGetDriverByName( "netCDF" );
+  if ( !nc )
+  {
+    WARN( "netCDF driver not available; routing proof skipped (profile stays honest)" );
+    return;
+  }
+  const sicnu::geo::io::VectorTargetCheck check = sicnu::geo::io::checkVectorWriteTarget( "netCDF" );
+  if ( !check.usable )
+  {
+    WARN( "netCDF not create-capable in this build; routing proof skipped" );
+    return;
+  }
+  CHECK( check.alsoRaster ); // the premise of the dual-capability hazard
+
+  const std::string dir = scratch( "convert_routing" );
+  const std::string src = makeTinyRaster( dir, "src.tif" );
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "io:convert_format" );
+  REQUIRE( op );
+  sicnu::operators::RSOperatorContext context;
+  const std::string out = ( fs::path( dir ) / "out.nc" ).string();
+  const Json::Value result = op->execute( [ & ] {
+    Json::Value params;
+    params["input"] = src;
+    params["output"] = out;
+    params["driver"] = "netCDF";
+    return params;
+  }(), context );
+  CHECK( result["output"].asString() == out );
+  CHECK( sicnu::geo::atomic_fs::fileExists( out ) );
 }
