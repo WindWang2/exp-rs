@@ -27,9 +27,115 @@ class QgsRasterLayer;
 class QComboBox;
 class QTableWidget;
 class QSlider;
+class QLabel;
 
 namespace rs::app
 {
+
+// ---------------------------------------------------------------------------
+// Classification & Object Intelligence 11.0 — studio diagnostics panels.
+//
+// All four panels are pure-data-driven painters: they receive POD vectors
+// (no analysis-layer types, no OpenCV), so hosts and tests feed them from
+// any source with hand-verifiable expectations. Panel data setters clamp
+// and ignore malformed input (mismatched lengths, non-finite values) —
+// rendering never throws.
+// ---------------------------------------------------------------------------
+
+/// Stacked per-class probability bar for one sample (class order = the
+/// caller's classIds order, the RsClassOrder contract).
+class RsProbabilityPanel : public QWidget
+{
+    Q_OBJECT
+  public:
+    explicit RsProbabilityPanel( QWidget *parent = nullptr );
+    ~RsProbabilityPanel() override = default;
+
+    void setProbabilityRow( const QVector<int> &classIds,
+                            const QVector<double> &probs,
+                            int predictedClass = -1 );
+    void clear();
+
+  protected:
+    void paintEvent( QPaintEvent *event ) override;
+
+  private:
+    QVector<int> mClassIds;
+    QVector<double> mProbs;
+    int mPredictedClass = -1;
+};
+
+/// Reliability diagram: per-bin mean confidence vs empirical accuracy.
+/// Two series (e.g. uncalibrated + calibrated) share one [0,1]² plot; the
+/// diagonal is the perfect-calibration reference.
+class RsReliabilityWidget : public QWidget
+{
+    Q_OBJECT
+  public:
+    explicit RsReliabilityWidget( QWidget *parent = nullptr );
+    ~RsReliabilityWidget() override = default;
+
+    void setSeries( const QVector<double> &binConfidence,
+                    const QVector<double> &binAccuracy,
+                    const QVector<int> &binCounts,
+                    bool calibrated );
+    void clear();
+
+  protected:
+    void paintEvent( QPaintEvent *event ) override;
+
+  private:
+    struct Series
+    {
+        QVector<double> confidence;
+        QVector<double> accuracy;
+        QVector<int> counts;
+    };
+    Series mRaw;
+    Series mCalibrated;
+};
+
+/// Top-k confusion pairs ("true → predicted") with count-proportional bars.
+class RsConfusionPairsWidget : public QWidget
+{
+    Q_OBJECT
+  public:
+    explicit RsConfusionPairsWidget( QWidget *parent = nullptr );
+    ~RsConfusionPairsWidget() override = default;
+
+    void setPairs( const QVector<int> &trueIds,
+                   const QVector<int> &predictedIds,
+                   const QVector<int> &counts );
+    void clear();
+
+  protected:
+    void paintEvent( QPaintEvent *event ) override;
+
+  private:
+    QVector<int> mTrueIds;
+    QVector<int> mPredictedIds;
+    QVector<int> mCounts;
+};
+
+/// Horizontal per-feature importance bars (RF-style mean decrease).
+class RsFeatureImportanceWidget : public QWidget
+{
+    Q_OBJECT
+  public:
+    explicit RsFeatureImportanceWidget( QWidget *parent = nullptr );
+    ~RsFeatureImportanceWidget() override = default;
+
+    void setImportances( const QVector<QString> &featureNames,
+                         const QVector<double> &importances );
+    void clear();
+
+  protected:
+    void paintEvent( QPaintEvent *event ) override;
+
+  private:
+    QVector<QString> mNames;
+    QVector<double> mImportances;
+};
 
 /// BFS spectral flood fill (normalized Euclidean distance in raw band
 /// units, Scale_k == 1) seeded at a pixel; returns the outline of the
@@ -90,13 +196,26 @@ class FeatureScatterWidget : public QWidget
 };
 
 /// Studio shell: palette table + algorithm dispatch + swipe slider + the
-/// magic wand.  Emits roiExtracted after a successful wand run.
+/// magic wand + F12 intelligence panels (probability / reliability /
+/// confusion pairs / feature importance).  Emits roiExtracted after a
+/// successful wand run.
 class ClassificationStudioWidget : public QWidget
 {
     Q_OBJECT
   public:
     explicit ClassificationStudioWidget( QWidget *parent = nullptr );
     ~ClassificationStudioWidget() override = default;
+
+    /// F12 diagnostics panel accessors (owned by this widget; never null
+    /// after construction).
+    RsProbabilityPanel *probabilityPanel() const { return mProbabilityPanel; }
+    RsReliabilityWidget *reliabilityWidget() const { return mReliabilityWidget; }
+    RsConfusionPairsWidget *confusionPairsWidget() const { return mConfusionPairsWidget; }
+    RsFeatureImportanceWidget *featureImportanceWidget() const { return mFeatureImportanceWidget; }
+
+    /// F12: mean best-class confidence summary line (clamped to [0,1];
+    /// non-finite input is ignored).
+    void setConfidenceSummary( double meanConfidence );
 
     void bindInputLayer( QgsRasterLayer *layer );
 
@@ -138,6 +257,11 @@ class ClassificationStudioWidget : public QWidget
     QTableWidget *mClassTable = nullptr;
     QComboBox *mAlgoCombo = nullptr;
     QSlider *mSwipeSlider = nullptr;
+    RsProbabilityPanel *mProbabilityPanel = nullptr;
+    RsReliabilityWidget *mReliabilityWidget = nullptr;
+    RsConfusionPairsWidget *mConfusionPairsWidget = nullptr;
+    RsFeatureImportanceWidget *mFeatureImportanceWidget = nullptr;
+    QLabel *mConfidenceLabel = nullptr;
     int mCurrentClassId = 0;
 };
 

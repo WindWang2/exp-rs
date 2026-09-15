@@ -1,5 +1,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
+#include <limits>
+
 #include <QFile>
 #include <QTemporaryDir>
 #include <opencv2/core.hpp>
@@ -55,4 +58,38 @@ TEST_CASE( "FeatureScaler: JSON round-trip", "[classify][scaler]" )
   for ( int i = 0; i < 5; ++i )
     for ( int j = 0; j < 2; ++j )
       REQUIRE( za.at<float>( i, j ) == Approx( zb.at<float>( i, j ) ).margin( 1e-5 ) );
+}
+
+// F12 hardening: non-finite training input fails the fit closed instead of
+// poisoning mean/stddev (NaN behaviour of cv::meanStdDev is undefined).
+TEST_CASE( "FeatureScaler: fit rejects NaN and Inf training values", "[classify][scaler][f12]" )
+{
+  const float nan = std::numeric_limits<float>::quiet_NaN();
+  const float inf = std::numeric_limits<float>::infinity();
+
+  cv::Mat bad( 10, 2, CV_32F );
+  for ( int i = 0; i < 10; ++i )
+    for ( int j = 0; j < 2; ++j )
+      bad.at<float>( i, j ) = static_cast<float>( i + j );
+  bad.at<float>( 3, 1 ) = nan;
+  RsFeatureScaler s;
+  REQUIRE( !s.fit( bad ) );
+  REQUIRE( !s.isFitted() );
+
+  bad.at<float>( 3, 1 ) = inf;
+  RsFeatureScaler s2;
+  REQUIRE( !s2.fit( bad ) );
+
+  // Finite input still fits, and the rejected scaler stays unusable.
+  cv::Mat good = bad.clone();
+  good.at<float>( 3, 1 ) = 4.0f;
+  RsFeatureScaler s3;
+  REQUIRE( s3.fit( good ) );
+  REQUIRE( s3.isFitted() );
+  // transform propagates non-finite positions as NaN (documented sentinel).
+  cv::Mat probe( 1, 2, CV_32F );
+  probe.at<float>( 0, 0 ) = 1.0f;
+  probe.at<float>( 0, 1 ) = nan;
+  const cv::Mat out = s3.transform( probe );
+  REQUIRE( std::isnan( out.at<float>( 0, 1 ) ) );
 }

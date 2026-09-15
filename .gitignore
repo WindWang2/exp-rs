@@ -272,3 +272,7 @@ data/labs/_tmp/
 !.planning/unified-mission-workbench-d18/**
 !.planning/dataset-foundry-benchmark-d19/
 !.planning/dataset-foundry-benchmark-d19/**
+# classification-intelligence-11: track planning notes (markdown only; logs stay local).
+!.planning/classification-intelligence-11/
+.planning/classification-intelligence-11/*
+!.planning/classification-intelligence-11/*.md

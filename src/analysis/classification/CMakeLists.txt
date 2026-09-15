@@ -7,6 +7,13 @@ target_sources(qgis_analysis PRIVATE
     # Classification v1.1 — viewport → pixel window (no OpenCV).
     rs_pixel_window.cpp
     rs_pixel_ignore_options.cpp
+    # Classification & Object Intelligence 11.0 — OpenCV-free contracts:
+    # class-order authority, probability calibration, uncertainty measures,
+    # named feature schema.
+    rs_class_order.cpp
+    rs_probability_calibration.cpp
+    rs_uncertainty.cpp
+    rs_feature_schema.cpp
 )
 target_include_directories(qgis_analysis PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -51,6 +58,9 @@ if(SICNU_HAS_OPENCV)
         rs_post_process.cpp
         # Classification workflow — project (.rscproj) JSON persistence.
         rs_classification_project.cpp
+        # Classification & Object Intelligence 11.0 — spatially aware
+        # k-fold CV (group / block / buffered folds) with leakage audit.
+        rs_spatial_cross_validation.cpp
     )
     target_link_libraries(qgis_analysis PUBLIC ${OpenCV_LIBS})
     target_include_directories(qgis_analysis PUBLIC ${OpenCV_INCLUDE_DIRS})

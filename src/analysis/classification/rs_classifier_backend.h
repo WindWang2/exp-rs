@@ -9,6 +9,7 @@
 #include "qgis_analysis_export.h"
 
 #include <QString>
+#include <QVector>
 
 #include <opencv2/core.hpp>
 
@@ -61,4 +62,28 @@ class QGIS_ANALYSIS_EXPORT RsClassifierBackend
     /// Hungarian-assignment table when this is set (ADR 0061 — replaces the
     /// former methodName == "KMeans" string branch).
     virtual bool needsLabelRemap() const { return false; }
+
+    // -- Classification & Object Intelligence 11.0 (additive, default no-op) --
+
+    /// Sorted ascending class ids defining the column order of probability
+    /// and decision-score matrices (RsClassOrder contract). Empty when the
+    /// backend does not expose a column order. A non-empty result is always
+    /// strictly ascending.
+    virtual QVector<int> classOrder() const { return {}; }
+
+    /// Raw per-class decision scores for each row of X: CV_32F NxK, column
+    /// k refers to classOrder()[k]. Semantics are backend-specific (SVM:
+    /// one-vs-rest margin distances, sign-normalised so larger = more
+    /// likely) and NOT probabilities — feed them through
+    /// RsProbabilityCalibrator to obtain calibrated probabilities.
+    /// Returns an empty Mat when unsupported (default).
+    virtual cv::Mat decisionScores( const cv::Mat & /*X*/ ) const { return cv::Mat(); }
+
+    /// True when decisionScores() is implemented for this backend.
+    virtual bool supportsDecisionScores() const { return false; }
+
+    /// Per-feature importance (mean decrease, backend-defined scale,
+    /// non-negative). Column order = training feature order. Empty when
+    /// unsupported (default).
+    virtual QVector<double> featureImportances() const { return {}; }
 };

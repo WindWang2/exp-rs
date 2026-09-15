@@ -1,12 +1,71 @@
-// rs_classifier_normalbayes.cpp — Phase 10A Task 10.8.
+// rs_classifier_normalbayes.cpp — Phase 10A Task 10.8 + F12 class order sidecar.
 
 #include "rs_classifier_normalbayes.h"
+#include "rs_class_order.h"
 #include "sicnu_logging.h"
+
+#include <QFile>
+#include <QJsonDocument>
+
+#include <algorithm>
+#include <vector>
 
 RsClassifierNormalBayes::RsClassifierNormalBayes()
 {
   m_clf = cv::ml::NormalBayesClassifier::create();
   SICNU_LOG_INFO( SicnuLogTags::Classification, "NormalBayes classifier initialized" );
+}
+
+bool RsClassifierNormalBayes::fit( const cv::Mat &X, const cv::Mat &y )
+{
+  mClassLabels.clear();
+  if ( !RsClassifierCvBackend<cv::ml::NormalBayesClassifier>::fit( X, y ) )
+    return false;
+  // OpenCV's predictProb columns follow the sorted distinct training labels;
+  // capture the order at fit time so it can be persisted and verified
+  // (RsClassOrder contract).
+  std::vector<int> ids( y.rows );
+  for ( int i = 0; i < y.rows; ++i )
+    ids[static_cast<size_t>( i )] = y.at<int>( i, 0 );
+  std::sort( ids.begin(), ids.end() );
+  ids.erase( std::unique( ids.begin(), ids.end() ), ids.end() );
+  mClassLabels = QVector<int>( ids.cbegin(), ids.cend() );
+  return true;
+}
+
+bool RsClassifierNormalBayes::save( const QString &path ) const
+{
+  if ( !RsClassifierCvBackend<cv::ml::NormalBayesClassifier>::save( path ) )
+    return false;
+  // Persist the probability column order alongside the model. Unlike the
+  // RF/MLP sidecars this is fail-closed: a save without the sidecar means
+  // the column-order guarantee is lost — and an EMPTY order must never be
+  // written either, because "[]" would make every subsequent load() of this
+  // model file fail validation (self-poisoning legacy round-trip).
+  if ( mClassLabels.isEmpty() )
+    return false;
+  QFile f( path + QStringLiteral( ".labels.json" ) );
+  if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+    return false;
+  f.write( RsClassOrder::toJson( mClassLabels ).toJson( QJsonDocument::Compact ) );
+  return true;
+}
+
+bool RsClassifierNormalBayes::load( const QString &path )
+{
+  mClassLabels.clear();
+  if ( !RsClassifierCvBackend<cv::ml::NormalBayesClassifier>::load( path ) )
+    return false;
+  QFile f( path + QStringLiteral( ".labels.json" ) );
+  if ( !f.exists() )
+    return true; // legacy model without a sidecar — classOrder() stays empty
+  if ( !f.open( QIODevice::ReadOnly ) )
+    return false;
+  QVector<int> order;
+  if ( !RsClassOrder::fromJson( QJsonDocument::fromJson( f.readAll() ), order ) )
+    return false;
+  mClassLabels = order;
+  return true;
 }
 
 cv::Mat RsClassifierNormalBayes::predictProbabilities( const cv::Mat &X ) const
