@@ -19,6 +19,8 @@ qt_add_library(sicnu_help STATIC
   help_search_index.h
   diagnostic_catalog.cpp
   diagnostic_catalog.h
+  error_diagnostics_bridge.cpp
+  error_diagnostics_bridge.h
   help_content_store.cpp
   help_content_store.h
   help_composition.cpp

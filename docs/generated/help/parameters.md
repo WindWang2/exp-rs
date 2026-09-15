@@ -104,6 +104,45 @@
 ### parameter.io.build_overviews.resampling
 
 
+### parameter.io.cache_prefetch.catalog
+
+
+### parameter.io.cache_prefetch.chunkWindow
+
+
+### parameter.io.cache_prefetch.maxBytes
+
+
+### parameter.io.cache_prefetch.mirrorDirectory
+
+
+### parameter.io.catalog_search.assetRole
+
+
+### parameter.io.catalog_search.bounds
+
+
+### parameter.io.catalog_search.catalog
+
+
+### parameter.io.catalog_search.cloudCoverMax
+
+
+### parameter.io.catalog_search.limit
+
+
+### parameter.io.catalog_search.maxItems
+
+
+### parameter.io.catalog_search.platform
+
+
+### parameter.io.catalog_search.temporalEndUtc
+
+
+### parameter.io.catalog_search.temporalStartUtc
+
+
 ### parameter.io.clip.bounds
 
 
@@ -131,10 +170,37 @@
 ### parameter.io.convert_format.output
 
 
+### parameter.io.cube_plan.catalog
+
+
+### parameter.io.cube_plan.executionBudgetBytes
+
+
+### parameter.io.cube_plan.sceneBudget
+
+
+### parameter.io.cube_window.bandIndex
+
+
+### parameter.io.cube_window.bandRole
+
+
+### parameter.io.cube_window.catalog
+
+
+### parameter.io.cube_window.mirrorDirectory
+
+
+### parameter.io.cube_window.output
+
+
 ### parameter.io.doctor.includeStatistics
 
 
 ### parameter.io.doctor.input
+
+
+### parameter.io.inspect.includeStatistics
 
 
 ### parameter.io.inspect.input
@@ -404,10 +470,37 @@
 ### parameter.rs.ace.input
 
 
+### parameter.rs.ace.libraryMaterials
+
+
+### parameter.rs.ace.libraryPath
+
+
 ### parameter.rs.ace.output
 
 
 ### parameter.rs.ace.target
+
+
+### parameter.rs.ace.targetRef
+
+
+### parameter.rs.align.categorical
+
+
+### parameter.rs.align.input
+
+
+### parameter.rs.align.output
+
+
+### parameter.rs.align.reference
+
+
+### parameter.rs.align.resampling
+
+
+### parameter.rs.align.warpMemoryLimitBytes
 
 
 ### parameter.rs.apply_mask.align_mask
@@ -531,6 +624,30 @@
 
 
 ### parameter.rs.band_ratio.redBand
+
+
+### parameter.rs.change.bandsA
+
+
+### parameter.rs.change.bandsB
+
+
+### parameter.rs.change.batchCap
+
+
+### parameter.rs.change.device
+
+
+### parameter.rs.change.inputA
+
+
+### parameter.rs.change.inputB
+
+
+### parameter.rs.change.model
+
+
+### parameter.rs.change.output
 
 
 ### parameter.rs.change_cva.after
@@ -753,6 +870,27 @@
 ### parameter.rs.change_sam.output
 
 
+### parameter.rs.classify.bands
+
+
+### parameter.rs.classify.batchCap
+
+
+### parameter.rs.classify.device
+
+
+### parameter.rs.classify.input
+
+
+### parameter.rs.classify.model
+
+
+### parameter.rs.classify.output
+
+
+### parameter.rs.classify.tta
+
+
 ### parameter.rs.cn_product_import.apply_calibration
 
 
@@ -870,6 +1008,9 @@
 ### parameter.rs.embedding.tta
 
 
+### parameter.rs.endmember_extraction.endmembersOut
+
+
 ### parameter.rs.endmember_extraction.input
 
 
@@ -892,6 +1033,9 @@
 
 
 ### parameter.rs.evi.red
+
+
+### parameter.rs.evi.scale
 
 
 ### parameter.rs.extract_bands.bands
@@ -984,6 +1128,9 @@
 ### parameter.rs.fusion_brovey.ms
 
 
+### parameter.rs.fusion_brovey.msWeights
+
+
 ### parameter.rs.fusion_brovey.output
 
 
@@ -1003,6 +1150,9 @@
 
 
 ### parameter.rs.fusion_gram_schmidt.ms
+
+
+### parameter.rs.fusion_gram_schmidt.msWeights
 
 
 ### parameter.rs.fusion_gram_schmidt.output
@@ -1026,6 +1176,9 @@
 ### parameter.rs.fusion_ihs.ms
 
 
+### parameter.rs.fusion_ihs.msWeights
+
+
 ### parameter.rs.fusion_ihs.output
 
 
@@ -1047,6 +1200,9 @@
 ### parameter.rs.fusion_linear.ms
 
 
+### parameter.rs.fusion_linear.msWeights
+
+
 ### parameter.rs.fusion_linear.output
 
 
@@ -1059,16 +1215,28 @@
 ### parameter.rs.fusion_linear.redIdx
 
 
-### parameter.rs.hj_import.apply_calibration
+### parameter.rs.fusion_pca.blueIdx
 
 
-### parameter.rs.hj_import.bands
+### parameter.rs.fusion_pca.greenIdx
 
 
-### parameter.rs.hj_import.input
+### parameter.rs.fusion_pca.ms
 
 
-### parameter.rs.hj_import.output
+### parameter.rs.fusion_pca.msWeights
+
+
+### parameter.rs.fusion_pca.output
+
+
+### parameter.rs.fusion_pca.pan
+
+
+### parameter.rs.fusion_pca.panWeight
+
+
+### parameter.rs.fusion_pca.redIdx
 
 
 ### parameter.rs.gaofen_import.apply_calibration
@@ -1083,25 +1251,16 @@
 ### parameter.rs.gaofen_import.output
 
 
-### parameter.rs.fusion_pca.blueIdx
+### parameter.rs.hj_import.apply_calibration
 
 
-### parameter.rs.fusion_pca.greenIdx
+### parameter.rs.hj_import.bands
 
 
-### parameter.rs.fusion_pca.ms
+### parameter.rs.hj_import.input
 
 
-### parameter.rs.fusion_pca.output
-
-
-### parameter.rs.fusion_pca.pan
-
-
-### parameter.rs.fusion_pca.panWeight
-
-
-### parameter.rs.fusion_pca.redIdx
+### parameter.rs.hj_import.output
 
 
 ### parameter.rs.image_enhancement.band1
@@ -1191,16 +1350,28 @@
 ### parameter.rs.infer.batchCap
 
 
+### parameter.rs.infer.blend
+
+
+### parameter.rs.infer.device
+
+
 ### parameter.rs.infer.input
 
 
 ### parameter.rs.infer.model
 
 
+### parameter.rs.infer.named_inputs
+
+
 ### parameter.rs.infer.output
 
 
 ### parameter.rs.infer.tta
+
+
+### parameter.rs.kmeans_classification.algorithm
 
 
 ### parameter.rs.kmeans_classification.bands
@@ -1239,6 +1410,27 @@
 ### parameter.rs.landsat_import.output
 
 
+### parameter.rs.library_select.libraryPath
+
+
+### parameter.rs.library_select.materials
+
+
+### parameter.rs.library_select.nearDuplicateAngleDeg
+
+
+### parameter.rs.library_select.output
+
+
+### parameter.rs.library_select.sensor
+
+
+### parameter.rs.library_select.wavelengthMax
+
+
+### parameter.rs.library_select.wavelengthMin
+
+
 ### parameter.rs.local_extrema.band
 
 
@@ -1263,10 +1455,19 @@
 ### parameter.rs.matched_filter.input
 
 
+### parameter.rs.matched_filter.libraryMaterials
+
+
+### parameter.rs.matched_filter.libraryPath
+
+
 ### parameter.rs.matched_filter.output
 
 
 ### parameter.rs.matched_filter.target
+
+
+### parameter.rs.matched_filter.targetRef
 
 
 ### parameter.rs.mndwi.green
@@ -1288,6 +1489,30 @@
 
 
 ### parameter.rs.mnf.output
+
+
+### parameter.rs.mnf.transformOut
+
+
+### parameter.rs.mnf_inverse.components
+
+
+### parameter.rs.mnf_inverse.errorOut
+
+
+### parameter.rs.mnf_inverse.input
+
+
+### parameter.rs.mnf_inverse.output
+
+
+### parameter.rs.mnf_inverse.spectrumOut
+
+
+### parameter.rs.mnf_inverse.spectrumRef
+
+
+### parameter.rs.mnf_inverse.transform
 
 
 ### parameter.rs.modis_georeference.dstCrs
@@ -1682,13 +1907,79 @@
 ### parameter.rs.radiometric_calibration.unit
 
 
+### parameter.rs.rasterize.allTouched
+
+
+### parameter.rs.rasterize.field
+
+
+### parameter.rs.rasterize.input
+
+
+### parameter.rs.rasterize.layer
+
+
+### parameter.rs.rasterize.output
+
+
+### parameter.rs.rasterize.value
+
+
+### parameter.rs.rasterize.vector
+
+
 ### parameter.rs.recode.input
+
+
+### parameter.rs.recode.map
 
 
 ### parameter.rs.recode.output
 
 
+### parameter.rs.recode.recode
+
+
 ### parameter.rs.recode.recode_map
+
+
+### parameter.rs.regress.bands
+
+
+### parameter.rs.regress.batchCap
+
+
+### parameter.rs.regress.device
+
+
+### parameter.rs.regress.input
+
+
+### parameter.rs.regress.model
+
+
+### parameter.rs.regress.output
+
+
+### parameter.rs.regress.tta
+
+
+### parameter.rs.resample.categorical
+
+
+### parameter.rs.resample.input
+
+
+### parameter.rs.resample.output
+
+
+### parameter.rs.resample.resampling
+
+
+### parameter.rs.resample.resolution
+
+
+### parameter.rs.resample.warpMemoryLimitBytes
 
 
 ### parameter.rs.rx_anomaly.input
@@ -1706,6 +1997,12 @@
 ### parameter.rs.sam_classify.input
 
 
+### parameter.rs.sam_classify.libraryMaterials
+
+
+### parameter.rs.sam_classify.libraryPath
+
+
 ### parameter.rs.sam_classify.metric
 
 
@@ -1713,6 +2010,9 @@
 
 
 ### parameter.rs.sam_classify.refs
+
+
+### parameter.rs.sam_classify.refsRef
 
 
 ### parameter.rs.sar_backscatter.band
@@ -1820,6 +2120,51 @@
 ### parameter.rs.sar_change.thresholdMethod
 
 
+### parameter.rs.sar_coregister.master
+
+
+### parameter.rs.sar_coregister.masterBand
+
+
+### parameter.rs.sar_coregister.minPeakRatio
+
+
+### parameter.rs.sar_coregister.output
+
+
+### parameter.rs.sar_coregister.patchSize
+
+
+### parameter.rs.sar_coregister.patchStride
+
+
+### parameter.rs.sar_coregister.reportOnly
+
+
+### parameter.rs.sar_coregister.searchRadius
+
+
+### parameter.rs.sar_coregister.slave
+
+
+### parameter.rs.sar_coregister.slaveBand
+
+
+### parameter.rs.sar_displacement.band
+
+
+### parameter.rs.sar_displacement.input
+
+
+### parameter.rs.sar_displacement.output
+
+
+### parameter.rs.sar_displacement.warnThreshold
+
+
+### parameter.rs.sar_displacement.wavelengthUm
+
+
 ### parameter.rs.sar_dualpol_features.domain
 
 
@@ -1836,6 +2181,87 @@
 
 
 ### parameter.rs.sar_dualpol_features.vv_band
+
+
+### parameter.rs.sar_geocode.band
+
+
+### parameter.rs.sar_geocode.dem
+
+
+### parameter.rs.sar_geocode.input
+
+
+### parameter.rs.sar_geocode.output
+
+
+### parameter.rs.sar_geocode.resampling
+
+
+### parameter.rs.sar_interferogram.coherenceOutput
+
+
+### parameter.rs.sar_interferogram.coherenceWindow
+
+
+### parameter.rs.sar_interferogram.flattenRamp
+
+
+### parameter.rs.sar_interferogram.master
+
+
+### parameter.rs.sar_interferogram.masterBand
+
+
+### parameter.rs.sar_interferogram.output
+
+
+### parameter.rs.sar_interferogram.slave
+
+
+### parameter.rs.sar_interferogram.slaveBand
+
+
+### parameter.rs.sar_phase_filter.alpha
+
+
+### parameter.rs.sar_phase_filter.band
+
+
+### parameter.rs.sar_phase_filter.input
+
+
+### parameter.rs.sar_phase_filter.output
+
+
+### parameter.rs.sar_phase_filter.window
+
+
+### parameter.rs.sar_polsar_decompose.assumeReciprocity
+
+
+### parameter.rs.sar_polsar_decompose.decomposition
+
+
+### parameter.rs.sar_polsar_decompose.hhBand
+
+
+### parameter.rs.sar_polsar_decompose.hvBand
+
+
+### parameter.rs.sar_polsar_decompose.input
+
+
+### parameter.rs.sar_polsar_decompose.output
+
+
+### parameter.rs.sar_polsar_decompose.vhBand
+
+
+### parameter.rs.sar_polsar_decompose.vvBand
+
+
+### parameter.rs.sar_polsar_decompose.windowSize
 
 
 ### parameter.rs.sar_ratio.bandA
@@ -1926,6 +2352,48 @@
 ### parameter.rs.sar_speckle.sensor
 
 
+### parameter.rs.sar_temporal_events.band
+
+
+### parameter.rs.sar_temporal_events.changeThresholdDb
+
+
+### parameter.rs.sar_temporal_events.dates
+
+
+### parameter.rs.sar_temporal_events.inputDomain
+
+
+### parameter.rs.sar_temporal_events.inputs
+
+
+### parameter.rs.sar_temporal_events.minValid
+
+
+### parameter.rs.sar_temporal_events.output
+
+
+### parameter.rs.sar_temporal_stats.band
+
+
+### parameter.rs.sar_temporal_stats.changeThresholdDb
+
+
+### parameter.rs.sar_temporal_stats.dates
+
+
+### parameter.rs.sar_temporal_stats.inputDomain
+
+
+### parameter.rs.sar_temporal_stats.inputs
+
+
+### parameter.rs.sar_temporal_stats.minValid
+
+
+### parameter.rs.sar_temporal_stats.output
+
+
 ### parameter.rs.sar_terrain_correction.band
 
 
@@ -1948,6 +2416,12 @@
 
 
 ### parameter.rs.sar_terrain_correction.input
+
+
+### parameter.rs.sar_terrain_correction.lookAzimuthDeg
+
+
+### parameter.rs.sar_terrain_correction.lookDirection
 
 
 ### parameter.rs.sar_terrain_correction.output
@@ -1977,6 +2451,12 @@
 ### parameter.rs.sar_terrain_flatten.input
 
 
+### parameter.rs.sar_terrain_flatten.lookAzimuthDeg
+
+
+### parameter.rs.sar_terrain_flatten.lookDirection
+
+
 ### parameter.rs.sar_terrain_flatten.output
 
 
@@ -1993,6 +2473,18 @@
 
 
 ### parameter.rs.sar_terrain_masks.incidence
+
+
+### parameter.rs.sar_terrain_masks.lookAzimuth
+
+
+### parameter.rs.sar_terrain_masks.lookAzimuthDeg
+
+
+### parameter.rs.sar_terrain_masks.lookDirection
+
+
+### parameter.rs.sar_terrain_masks.look_azimuth
 
 
 ### parameter.rs.sar_terrain_masks.output
@@ -2031,6 +2523,24 @@
 ### parameter.rs.sar_texture.windowSize
 
 
+### parameter.rs.sar_unwrap.band
+
+
+### parameter.rs.sar_unwrap.input
+
+
+### parameter.rs.sar_unwrap.output
+
+
+### parameter.rs.sar_unwrap.provider
+
+
+### parameter.rs.sar_unwrap.qualityBand
+
+
+### parameter.rs.sar_unwrap.qualityInput
+
+
 ### parameter.rs.savi.input
 
 
@@ -2041,6 +2551,9 @@
 
 
 ### parameter.rs.savi.red
+
+
+### parameter.rs.savi.scale
 
 
 ### parameter.rs.segment.bands
@@ -2106,6 +2619,24 @@
 ### parameter.rs.sieve.output
 
 
+### parameter.rs.spectral_band_select.bands
+
+
+### parameter.rs.spectral_band_select.excludeRanges
+
+
+### parameter.rs.spectral_band_select.input
+
+
+### parameter.rs.spectral_band_select.output
+
+
+### parameter.rs.spectral_band_select.wavelengthMax
+
+
+### parameter.rs.spectral_band_select.wavelengthMin
+
+
 ### parameter.rs.spectral_derivative.input
 
 
@@ -2151,6 +2682,9 @@
 ### parameter.rs.spectral_index.rededge
 
 
+### parameter.rs.spectral_index.scale
+
+
 ### parameter.rs.spectral_index.swir
 
 - 含义：短波红外波段（MNDWI/NDBI 需要，如 Sentinel-2 B11）。
@@ -2176,10 +2710,22 @@
 ### parameter.rs.spectral_unmixing.endmembers
 
 
+### parameter.rs.spectral_unmixing.endmembersRef
+
+
 ### parameter.rs.spectral_unmixing.errorOut
 
 
 ### parameter.rs.spectral_unmixing.input
+
+
+### parameter.rs.spectral_unmixing.libraryMaterials
+
+
+### parameter.rs.spectral_unmixing.libraryPath
+
+
+### parameter.rs.spectral_unmixing.method
 
 
 ### parameter.rs.spectral_unmixing.output
@@ -2404,6 +2950,39 @@
 ### parameter.rs.temporal_decompose.trend_lambda
 
 
+### parameter.rs.temporal_extract_regions.apply_qa_masking
+
+
+### parameter.rs.temporal_extract_regions.band
+
+
+### parameter.rs.temporal_extract_regions.band_role
+
+
+### parameter.rs.temporal_extract_regions.collection
+
+
+### parameter.rs.temporal_extract_regions.duplicate_policy
+
+
+### parameter.rs.temporal_extract_regions.max_regions
+
+
+### parameter.rs.temporal_extract_regions.median_budget_mb
+
+
+### parameter.rs.temporal_extract_regions.output
+
+
+### parameter.rs.temporal_extract_regions.regions
+
+
+### parameter.rs.temporal_extract_regions.regions_file
+
+
+### parameter.rs.temporal_extract_regions.scenes
+
+
 ### parameter.rs.temporal_extract_series.apply_qa_masking
 
 
@@ -2459,6 +3038,54 @@
 
 
 ### parameter.rs.temporal_gap_fill.tile_size
+
+
+### parameter.rs.temporal_harmonic_breaks.apply_qa_masking
+
+
+### parameter.rs.temporal_harmonic_breaks.band
+
+
+### parameter.rs.temporal_harmonic_breaks.band_role
+
+
+### parameter.rs.temporal_harmonic_breaks.collection
+
+
+### parameter.rs.temporal_harmonic_breaks.direction
+
+
+### parameter.rs.temporal_harmonic_breaks.duplicate_policy
+
+
+### parameter.rs.temporal_harmonic_breaks.harmonics
+
+
+### parameter.rs.temporal_harmonic_breaks.maxBreaks
+
+
+### parameter.rs.temporal_harmonic_breaks.minImprovement
+
+
+### parameter.rs.temporal_harmonic_breaks.minMagnitude
+
+
+### parameter.rs.temporal_harmonic_breaks.minSegmentDays
+
+
+### parameter.rs.temporal_harmonic_breaks.output
+
+
+### parameter.rs.temporal_harmonic_breaks.recoveryTolerance
+
+
+### parameter.rs.temporal_harmonic_breaks.robust
+
+
+### parameter.rs.temporal_harmonic_breaks.scenes
+
+
+### parameter.rs.temporal_harmonic_breaks.tile_size
 
 
 ### parameter.rs.temporal_harmonic_fit.apply_qa_masking
@@ -2551,6 +3178,9 @@
 ### parameter.rs.temporal_monitor.output
 
 
+### parameter.rs.temporal_monitor.scenes
+
+
 ### parameter.rs.temporal_monitor.tile_size
 
 
@@ -2569,6 +3199,9 @@
 ### parameter.rs.temporal_phenology.crossingFraction
 
 
+### parameter.rs.temporal_phenology.cycles
+
+
 ### parameter.rs.temporal_phenology.duplicate_policy
 
 
@@ -2581,6 +3214,12 @@
 ### parameter.rs.temporal_phenology.scenes
 
 
+### parameter.rs.temporal_phenology.season2EndDoy
+
+
+### parameter.rs.temporal_phenology.season2StartDoy
+
+
 ### parameter.rs.temporal_phenology.seasonEndDoy
 
 
@@ -2588,6 +3227,96 @@
 
 
 ### parameter.rs.temporal_phenology.tile_size
+
+
+### parameter.rs.temporal_region_features.apply_qa_masking
+
+
+### parameter.rs.temporal_region_features.band
+
+
+### parameter.rs.temporal_region_features.band_role
+
+
+### parameter.rs.temporal_region_features.change_harmonics
+
+
+### parameter.rs.temporal_region_features.collection
+
+
+### parameter.rs.temporal_region_features.cycles
+
+
+### parameter.rs.temporal_region_features.direction
+
+
+### parameter.rs.temporal_region_features.duplicate_policy
+
+
+### parameter.rs.temporal_region_features.max_regions
+
+
+### parameter.rs.temporal_region_features.output
+
+
+### parameter.rs.temporal_region_features.regions
+
+
+### parameter.rs.temporal_region_features.regions_file
+
+
+### parameter.rs.temporal_region_features.scenes
+
+
+### parameter.rs.temporal_region_features.seasonEndDoy
+
+
+### parameter.rs.temporal_region_features.seasonStartDoy
+
+
+### parameter.rs.temporal_region_features.sidecar_path
+
+
+### parameter.rs.temporal_region_features.trend_method
+
+
+### parameter.rs.temporal_regularize.apply_qa_masking
+
+
+### parameter.rs.temporal_regularize.band
+
+
+### parameter.rs.temporal_regularize.band_role
+
+
+### parameter.rs.temporal_regularize.cadence
+
+
+### parameter.rs.temporal_regularize.collection
+
+
+### parameter.rs.temporal_regularize.duplicate_policy
+
+
+### parameter.rs.temporal_regularize.lambda
+
+
+### parameter.rs.temporal_regularize.max_gap_nodes
+
+
+### parameter.rs.temporal_regularize.max_window_days
+
+
+### parameter.rs.temporal_regularize.method
+
+
+### parameter.rs.temporal_regularize.output
+
+
+### parameter.rs.temporal_regularize.scenes
+
+
+### parameter.rs.temporal_regularize.tile_size
 
 
 ### parameter.rs.temporal_sen_trend.alpha
@@ -2645,6 +3374,9 @@
 
 
 ### parameter.rs.temporal_smooth.output
+
+
+### parameter.rs.temporal_smooth.robust_iterations
 
 
 ### parameter.rs.temporal_smooth.scenes
@@ -2750,6 +3482,9 @@
 ### parameter.rs.terrain_flow.output
 
 
+### parameter.rs.terrain_flow.pour_points
+
+
 ### parameter.rs.terrain_flow.product
 
 
@@ -2780,18 +3515,6 @@
 ### parameter.rs.threshold_raster.thresholdMethod
 
 
-### parameter.rs.zy3_import.apply_calibration
-
-
-### parameter.rs.zy3_import.bands
-
-
-### parameter.rs.zy3_import.input
-
-
-### parameter.rs.zy3_import.output
-
-
 ### parameter.rs.topographic_correction.dem
 
 - 含义：与影像配准的 DEM。
@@ -2819,4 +3542,37 @@
 - 含义：太阳天顶角（0–90）。
 - 单位：度
 - ⚠ 天顶角/高度角混用是常见错误，确认元数据定义。
+
+### parameter.rs.zonal_stats.bands
+
+
+### parameter.rs.zonal_stats.input
+
+
+### parameter.rs.zonal_stats.layer
+
+
+### parameter.rs.zonal_stats.median
+
+
+### parameter.rs.zonal_stats.output
+
+
+### parameter.rs.zonal_stats.vector
+
+
+### parameter.rs.zonal_stats.zoneField
+
+
+### parameter.rs.zy3_import.apply_calibration
+
+
+### parameter.rs.zy3_import.bands
+
+
+### parameter.rs.zy3_import.input
+
+
+### parameter.rs.zy3_import.output
+
 

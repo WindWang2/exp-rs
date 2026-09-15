@@ -9,6 +9,8 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QFile>
+#include <QHash>
+#include <QSet>
 #include <QString>
 #include <QXmlStreamReader>
 
@@ -204,4 +206,181 @@ TEST_CASE( "audited modules wrap user-visible strings in tr()", "[i18n][sweep]" 
   }
   INFO( "unwrapped literals: " << offenders.join( QStringLiteral( "; " ) ).toStdString() );
   CHECK( offenders.isEmpty() );
+}
+
+// ── F20 i18n drift gates (work package E) ─────────────────────────────────
+//
+// #983 moved the dialog help catalog to QT_TRANSLATE_NOOP("SicnuDialogHelp", …)
+// storage, but the .ts was never regenerated, so the context had zero entries
+// and the strings silently stayed untranslated. These guards keep the NOOP
+// storage and the translation file in lockstep.
+
+namespace {
+
+using StringSet = QSet<QString>;
+
+/// QT_TRANSLATE_NOOP contexts in the scanned app/help sources.
+StringSet noopContexts( const QString &text )
+{
+  static const QRegularExpression re(
+      QStringLiteral( "QT_TRANSLATE_NOOP\\s*\\(\\s*\"([^\"]+)\"" ) );
+  StringSet out;
+  auto it = re.globalMatch( text );
+  while ( it.hasNext() )
+    out.insert( it.next().captured( 1 ) );
+  return out;
+}
+
+/// <context><name>X</name> names in the ts (lupdate output is stable).
+StringSet tsContextNames( const QString &ts )
+{
+  static const QRegularExpression re(
+      QStringLiteral( "<context>\\s*<name>([^<]*)</name>" ) );
+  StringSet names;
+  auto it = re.globalMatch( ts );
+  while ( it.hasNext() )
+    names.insert( it.next().captured( 1 ) );
+  return names;
+}
+
+/// Decode the XML entities lupdate emits in <source>/<translation> text.
+QString decodeEntities( QString text )
+{
+  text.replace( QStringLiteral( "&apos;" ), QChar( u'\'' ) );
+  text.replace( QStringLiteral( "&quot;" ), QChar( u'"' ) );
+  text.replace( QStringLiteral( "&lt;" ), QChar( u'<' ) );
+  text.replace( QStringLiteral( "&gt;" ), QChar( u'>' ) );
+  text.replace( QStringLiteral( "&amp;" ), QChar( u'&' ) );
+  return text;
+}
+
+/// messages of one context: <source> → <translation> (entity-decoded).
+QHash<QString, QPair<QString, int>> tsMessages( const QString &ts, const QString &context )
+{
+  QHash<QString, QPair<QString, int>> out;
+  static const QRegularExpression ctxRe(
+      QStringLiteral( "<context>\\s*<name>%1</name>(.*?)</context>" ).arg( QRegularExpression::escape( context ) ),
+      QRegularExpression::DotMatchesEverythingOption );
+  const auto ctx = ctxRe.match( ts );
+  if ( !ctx.hasMatch() )
+    return out;
+  static const QRegularExpression msgRe(
+      QStringLiteral( "<source>([^<]*)</source>\\s*<translation[^>]*>([^<]*)</translation>" ) );
+  auto it = msgRe.globalMatch( ctx.captured( 1 ) );
+  while ( it.hasNext() )
+  {
+    const auto m = it.next();
+    out.insert( decodeEntities( m.captured( 1 ) ),
+                { decodeEntities( m.captured( 2 ) ), 0 } );
+  }
+  return out;
+}
+
+/// source strings stored under one ts context → translation (may be empty).
+struct TsMessage
+{
+  QString source;
+  QString translation;
+  int placeholdersInSource = 0;
+  int placeholdersInTranslation = 0;
+};
+
+int countPlaceholders( const QString &text )
+{
+  static const QRegularExpression re( QStringLiteral( "%[1-9]" ) );
+  int n = 0;
+  auto it = re.globalMatch( text );
+  while ( it.hasNext() )
+  {
+    (void) it.next();
+    ++n;
+  }
+  return n;
+}
+
+} // namespace
+
+TEST_CASE( "every QT_TRANSLATE_NOOP context reaches the translation file",
+           "[i18n][noop]" )
+{
+  const QString ts = readSourceTreeFile( QStringLiteral( "resources/translations/sicnu_zh_CN.ts" ) );
+  REQUIRE( !ts.isEmpty() );
+
+  // every NOOP context in the app/help sources must exist in the ts
+  StringSet contexts;
+  const QStringList roots = { QStringLiteral( "src/app/dialogs/dialog_help_catalog.cpp" ),
+                              QStringLiteral( "src/app/dialogs/temporal_analysis_dialog.cpp" ),
+                              QStringLiteral( "src/app/classification/rs_classify_stepper_bar.cpp" ) };
+  for ( const QString &relative : roots )
+  {
+    const QString text = readSourceTreeFile( relative );
+    REQUIRE_FALSE( text.isEmpty() );
+    contexts |= noopContexts( text );
+  }
+  REQUIRE_FALSE( contexts.isEmpty() );
+
+  const StringSet known = tsContextNames( ts );
+  REQUIRE_FALSE( known.isEmpty() );
+  for ( const QString &context : contexts )
+  {
+    INFO( "NOOP context missing from ts: " << context.toStdString() );
+    CHECK( known.contains( context ) );
+  }
+}
+
+TEST_CASE( "SicnuDialogHelp NOOP strings all have non-empty translations",
+           "[i18n][noop]" )
+{
+  const QString ts = readSourceTreeFile( QStringLiteral( "resources/translations/sicnu_zh_CN.ts" ) );
+  REQUIRE( !ts.isEmpty() );
+
+  // collect the stored source strings from the catalog
+  const QString source = readSourceTreeFile( QStringLiteral( "src/app/dialogs/dialog_help_catalog.cpp" ) );
+  REQUIRE_FALSE( source.isEmpty() );
+  static const QRegularExpression noopRe(
+      QStringLiteral( "QT_TRANSLATE_NOOP\\s*\\(\\s*\"SicnuDialogHelp\"\\s*,\\s*((?:\"(?:[^\"\\\\]|\\\\.)*\"\\s*)+)" ) );
+  QStringList stored;
+  auto it = noopRe.globalMatch( source );
+  while ( it.hasNext() )
+  {
+    const QString literals = it.next().captured( 1 );
+    static const QRegularExpression litRe( QStringLiteral( "\"((?:[^\"\\\\]|\\\\.)*)\"" ) );
+    QString joined;
+    auto lit = litRe.globalMatch( literals );
+    while ( lit.hasNext() )
+      joined += lit.next().captured( 1 );
+    joined.replace( QStringLiteral( "\\n" ), QStringLiteral( "\n" ) );
+    joined.replace( QStringLiteral( "\\\"" ), QStringLiteral( "\"" ) );
+    if ( !joined.isEmpty() )
+      stored << joined;
+  }
+  REQUIRE( stored.size() >= 10 ); // scanner sanity: the catalog is NOOP'd
+
+  // ts messages under the context
+  QHash<QString, TsMessage> messages;
+  const auto ctx = tsMessages( ts, QStringLiteral( "SicnuDialogHelp" ) );
+  for ( auto contextIt = ctx.constBegin(); contextIt != ctx.constEnd(); ++contextIt )
+  {
+    TsMessage current;
+    current.source = contextIt.key();
+    current.translation = contextIt.value().first;
+    current.placeholdersInSource = countPlaceholders( current.source );
+    current.placeholdersInTranslation = countPlaceholders( current.translation );
+    messages.insert( current.source, current );
+  }
+  REQUIRE_FALSE( messages.isEmpty() );
+  INFO( "SicnuDialogHelp messages in ts: " << messages.size() );
+
+  for ( const QString &text : stored )
+  {
+    INFO( "NOOP string missing from ts: " << text.left( 60 ).toStdString() );
+    const bool present = messages.contains( text );
+    CHECK( present );
+    if ( !present )
+      continue;
+    const TsMessage &m = messages.value( text );
+    INFO( "empty or placeholder-drifted translation for: " << text.left( 60 ).toStdString() );
+    CHECK_FALSE( m.translation.trimmed().isEmpty() );
+    CHECK( m.placeholdersInSource == m.placeholdersInTranslation );
+  }
 }

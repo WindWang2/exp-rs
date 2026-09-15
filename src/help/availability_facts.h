@@ -28,6 +28,7 @@ namespace sicnu::help
 struct AvailabilityFact
 {
     QString label;      ///< 中文事实描述, e.g. "已选中栅格图层"
+    QString code;       ///< stable machine token, e.g. "raster.selected"
     bool satisfied = false;
 };
 
@@ -37,6 +38,9 @@ struct AvailabilityExplanation
     QString commandId;
     bool available = true;
     QList<AvailabilityFact> facts;
+    /// Stable machine token of the first unsatisfied fact ("raster.selected")
+    /// — empty when available or when no availability predicate applies.
+    QString reasonCode;
     QString suggestedCommandTitle; ///< 建议下一步的命令标题（可空）
     QString suggestedCommandId;    ///< its command id (for the action link)
     /// Legacy flat reason (ContextRules::unavailabilityReason) for status bars.

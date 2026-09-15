@@ -296,6 +296,10 @@ QToolButton *RibbonController::addCommandButton( GroupHost &group,
       tip += QStringLiteral( "\n⚠ %1" ).arg( reason );
     btn->setToolTip( tip );
     btn->setStatusTip( tip );
+    // F20 accessibility: the disabled reason must not live in the tooltip
+    // alone — expose it as the button's accessible description too.
+    btn->setAccessibleDescription(
+        action->isEnabled() ? QString() : reason );
   };
   syncFromAction();
   connect( action, &QAction::changed, btn, syncFromAction );

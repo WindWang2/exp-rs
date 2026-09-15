@@ -2,6 +2,55 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - Context Help, Diagnostics & UX Guidance 11.0 (zcode/context-help-diagnostics-11)
+
+- **Command census closed (A)**: the 10 registered commands without help
+  knowledge (`cartography.compose/export/preflight/repair`,
+  `workbench.cartography/visualAnalytics/operatorCatalog/classifyStudio/georefDual/ir2Pipeline`)
+  gained curated pages; `test_help_coverage` now extracts the command
+  vocabulary through the shared `contracts/CommandRefScanner` (one oracle
+  with `test_command_contract_9`) instead of a stale private prefix
+  whitelist that was blind to `workflow.*`/`cartography.*`.
+- **Diagnostics census closed (D)**: 12 harness codes without curated pages
+  (`IO_ERROR`, `COMPLEX_BANDS_REQUIRED`, `ACQUISITION_DATES_MISSING`,
+  `DATES_NOT_ASCENDING`, `UNWRAP_PROVIDER_UNAVAILABLE`, and the 7 ADR-0149
+  compiler codes) gained pages authored against `retryClassForCode` truth;
+  the census oracle now unions the runtime `allErrorCodes()` table with the
+  scanned constants; unknown `retry` values in diagnostics.json fail the
+  load (fail-closed) instead of silently degrading to Derived; the invalid
+  `"retryable"` value on `runtime_provider_failed` was corrected to
+  `manual`.
+- **Glossary resource partition**: the RS glossary moved from
+  `:/help/terms/…` to its own `:/terms/…` prefix — `HelpContentStore` loads
+  every JSON under `:/help` as a knowledge page and reported 307
+  "invalid id ''" content errors on master (`test_help_core` was red).
+- **Availability facts from the enabled-state truth (C)**:
+  `ContextRules::requirementFacts` is the single derivation behind
+  `unavailabilityReason()` and the structured facts (stable machine reason
+  codes like `raster.selected`); the hand-maintained 24-row adapter table —
+  which silently reported `workbench.obia` as available — is gone.
+- **Contextual guidance resolver (B)**: `ContextualHelpResolver`
+  (`src/app/help`, pure) composes detail topic + short tip + machine-readable
+  disabled reason + next step per (snapshot, focus command).
+- **GUI error diagnostics wiring (D)**: workflow run failures carrying a
+  curated machine code link to the diagnostic page (`helpId` property on the
+  failed panel → F1 opens it) via the new `ErrorDiagnosticsBridge`
+  (registry-driven code detection, no string guessing).
+- **Accessibility channels (F)**: disabled reasons surface on the status
+  tip, `disabledReason`/`disabledReasonCode` action properties, and ribbon
+  buttons' accessible description — the tooltip is no longer the only
+  carrier.
+- **i18n pipeline (E)**: `SicnuDialogHelp` (118 messages) fully translated
+  into `sicnu_zh_CN.ts`, completing #983; NOOP-context↔ts drift gates +
+  placeholder-parity checks added to `test_i18n`.
+- **Generated reference zero-diff gate (G)**: the committed
+  `docs/generated/help/*.md` pages are byte-compared against regeneration in
+  `test_help_coverage` (opt-in `SICNU_REGEN_HELP_DOCS=1` rewrite); the gate
+  exposed and the regen fixed a ~2k-line silent drift across all five pages.
+- **UX guidance corpus (H)**: `test_ux_guidance_corpus` pins the guidance
+  contract over canonical scenarios (known/unknown error codes, disabled
+  commands, empty workspace, missing model) incl. secret-shape scans.
+
 ## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)
 
 - **Regular-calendar normalization (T-2)**: `rs:temporal_regularize` re-casts irregular

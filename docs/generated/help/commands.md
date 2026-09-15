@@ -3,6 +3,37 @@
 > 本页由统一帮助系统 6.0 从命令注册表生成；请勿手工编辑。
 > 权威来源：CommandRegistry / data/help/commands.json。
 
+## command.app.commandPalette（command.app.commandPalette）
+
+- 用途：打开命令面板，按名称搜索并执行任意工作台命令。
+
+## command.cartography.compose（command.cartography.compose）
+
+- 用途：将 MapSpec 草稿编译为打印版面，并生成质量报告。
+- 前提：制图工作台中已有完成的 MapSpec 草稿
+- 建议下一步：编译后运行“预检地图版面”确认质量
+- 相关主题：command.cartography.preflight、workbench.layout
+
+## command.cartography.export（command.cartography.export）
+
+- 用途：以原子方式导出版面为 png/pdf/svg，并生成 sha256 证据。
+- 前提：版面已通过预检
+- 相关主题：command.cartography.preflight、workbench.layout
+
+## command.cartography.preflight（command.cartography.preflight）
+
+- 用途：对当前 MapSpec 草稿运行确定性预检，输出问题清单。
+- 前提：制图工作台中已有 MapSpec 草稿
+- 建议下一步：按预检报告执行“修复地图版面”
+- 相关主题：command.cartography.repair、command.cartography.compose
+
+## command.cartography.repair（command.cartography.repair）
+
+- 用途：对版面执行有界修复，并展示已应用/仍待处理的修复清单。
+- 前提：已运行过“预检地图版面”并存在问题项
+- 建议下一步：修复后再次预检，通过后执行导出
+- 相关主题：command.cartography.preflight、command.cartography.export
+
 ## command.layer.addRaster（command.layer.addRaster）
 
 - 用途：加载栅格数据（影像、DEM、分类结果等）到工程。
@@ -267,12 +298,37 @@
 - 前提：已选中 DEM 栅格
 - 相关主题：operator.rs.terrain_analysis
 
+## command.workbench.cartography（command.workbench.cartography）
+
+- 用途：打开制图工作台，从模板排版地图布局，并执行预检、修复与导出。
+- 前提：工程中已有可排版的图层
+- 建议下一步：在制图工作台完成排版后执行“预检地图版面”
+- 相关主题：command.cartography.compose、command.cartography.preflight、workbench.layout
+
 ## command.workbench.classify（command.workbench.classify）
 
 - 用途：打开监督/非监督分类工作区，完成样本采集、训练与分类全流程。
 - 前提：已加载待分类影像
 - 建议下一步：先采集或导入训练样本
 - 相关主题：workbench.classify、operator.rs.supervised_classification
+
+## command.workbench.classifyStudio（command.workbench.classifyStudio）
+
+- 用途：打开交互式分类/变化工作室（D15），绑定 MissionContext 的输入与结果引用。
+- 前提：已通过数据管理器或图层选择好待分类数据
+- 建议下一步：在工作室中完成训练样本选择与分类执行
+- 相关主题：workbench.classify、workbench.classification
+
+## command.workbench.datasetExperiment（command.workbench.datasetExperiment）
+
+- 用途：浏览数据集版本、样本、运行与指标对比。
+
+## command.workbench.georefDual（command.workbench.georefDual）
+
+- 用途：打开双画布联动的几何配准工作台（D14），采集 GCP 并将成果 Result 发布进 MissionContext。
+- 前提：工程中已有源影像与参考影像
+- 建议下一步：在双画布中采集 GCP 并求解变换
+- 相关主题：workbench.georef_i2i、workbench.georef_i2m
 
 ## command.workbench.georefI2I（command.workbench.georefI2I）
 
@@ -286,9 +342,75 @@
 - 前提：源影像已加载；工程地图已有地理参考
 - 相关主题：workbench.georef_i2m、concept.rs.rpc
 
+## command.workbench.ir2Pipeline（command.workbench.ir2Pipeline）
+
+- 用途：打开 IR 2.0 节点图工作流设计器（D17），与 MissionContext/Agent 共享工作流身份。
+- 前提：已有可编排的数据处理步骤构思
+- 建议下一步：从算子库拖入节点并连线，运行完整工作流
+- 相关主题：command.workflow.new、command.workflow.run、command.workbench.operatorCatalog
+
+## command.workbench.model（command.workbench.model）
+
+- 用途：查看模型目录、就绪状态并提交测试推理。
+
 ## command.workbench.obia（command.workbench.obia）
 
 - 用途：打开面向对象分类工作区：先分割成对象，再基于对象特征分类。
 - 前提：已加载影像
 - 相关主题：workbench.obia、operator.rs.obia_segment
+
+## command.workbench.operatorCatalog（command.workbench.operatorCatalog）
+
+- 用途：浏览与检索 rs: 算子目录：按名称/模态筛选，标记最近使用与收藏。
+- 建议下一步：找到目标算子后在工作台或工作流中调用它
+- 相关主题：command.workbench.visualAnalytics
+
+## command.workbench.processingHistory（command.workbench.processingHistory）
+
+- 用途：查看跨任务中心/工作流的统一处理历史与状态追踪。
+
+## command.workbench.temporal（command.workbench.temporal）
+
+- 用途：浏览时序集合、筛选日期并预览时相影像。
+
+## command.workbench.visualAnalytics（command.workbench.visualAnalytics）
+
+- 用途：打开可视化分析面板：有界采样的直方图、散点图与波段曲线，并支持联动筛选。
+- 前提：工程中已有栅格图层
+- 相关主题：workbench.map、command.workbench.operatorCatalog
+
+## command.workflow.new（command.workflow.new）
+
+- 用途：新建一个空的工作流画布，开始编排数据处理全流程。
+- 前提：当前工程未保存的修改已确认处理
+- 建议下一步：从算子库拖入第一个算子（例如“读取栅格”）
+- 相关主题：command.workflow.open、command.workflow.save、command.workflow.run
+
+## command.workflow.open（command.workflow.open）
+
+- 用途：打开一个已保存的工作流文件，继续编排或执行。
+- 前提：已知工作流文件位置
+- 建议下一步：点击“运行全流程”执行工作流
+- 相关主题：command.workflow.new、command.workflow.save、command.workflow.run
+
+## command.workflow.run（command.workflow.run）
+
+- 用途：按拓扑顺序执行画布上的全部算子，产出最终数据产品。
+- 前提：工作流参数已校验通过；输入数据已就绪
+- 建议下一步：在运行日志与诊断面板查看执行进度
+- 相关主题：command.workflow.stop、command.workflow.save
+
+## command.workflow.save（command.workflow.save）
+
+- 用途：把当前工作流（算子、连线与参数）保存为可复用文件。
+- 前提：画布上存在至少一个算子或连线
+- 建议下一步：需要再次使用时通过“打开工作流”载入
+- 相关主题：command.workflow.new、command.workflow.open、command.workflow.run
+
+## command.workflow.stop（command.workflow.stop）
+
+- 用途：停止正在运行的工作流，已完成的中间结果会被保留。
+- 前提：工作流正在运行
+- 建议下一步：修正参数后可再次“运行全流程”
+- 相关主题：command.workflow.run
 

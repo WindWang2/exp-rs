@@ -213,78 +213,117 @@ QStringList selectedLayerIds( const SelectionContextSnapshot &s )
     return ids;
 }
 
-QString unavailabilityReason( const SelectionContextSnapshot &s, const QString &commandId )
+QVector<RequirementFact> requirementFacts( const SelectionContextSnapshot &s, const QString &commandId )
 {
-    // Milestone E: deterministic reasons over prerequisiteFacts — an empty
-    // return means "available", a non-empty return is the user-facing
-    // explanation the palette / tooltips show. Every command id that DECLARES
-    // an availability predicate must have a case here (review L #1: the old
-    // chain had a dead layer.edit.* case while the real edit commands fell
-    // through to an empty explanation).
+    // Single derivation of availability requirements. The dispatch mirrors
+    // exactly the command families that DECLARE an availability predicate
+    // (command_defs.cpp); a command id with no case here has no predicate,
+    // so empty facts honestly mean "always available".
+    struct Spec
+    {
+        const char *code;
+        const char *label;
+        bool ( *predicate )( const SelectionContextSnapshot & );
+    };
+    QVector<Spec> specs;
+    const auto vectorRequirements = [&] {
+        specs.append( { "vector.selected", QT_TR_NOOP( "A vector layer must be selected" ), &vectorSelected } );
+    };
+    const auto rasterRequirements = [&] {
+        specs.append( { "raster.selected", QT_TR_NOOP( "A raster layer must be selected" ), &rasterSelected } );
+    };
+
     if ( commandId == QLatin1String( "layer.toggleEditing" ) )
     {
-        if ( !vectorSelected( s ) )
-            return QObject::tr( "A vector layer must be selected" );
-        if ( !editingAvailable( s ) )
-            return QObject::tr( "The current layer is not editable" );
+        vectorRequirements();
+        specs.append( { "vector.editable", QT_TR_NOOP( "The current layer is not editable" ), &editingAvailable } );
+    }
+    else if ( commandId == QLatin1String( "workbench.obia" ) )
+    {
+        // OBIA is a workbench command but DECLARES the raster predicate
+        // (command_defs.cpp); without this case its facts channel would be
+        // empty — reporting "available" while the shell disables it.
+        rasterRequirements();
     }
     else if ( commandId == QLatin1String( "layer.saveEdits" ) )
     {
-        if ( !vectorSelected( s ) )
-            return QObject::tr( "A vector layer must be selected" );
-        if ( !editingActive( s ) )
-            return QObject::tr( "Start an editing session first" );
+        vectorRequirements();
+        specs.append( { "editing.active", QT_TR_NOOP( "Start an editing session first" ), &editingActive } );
     }
     else if ( commandId == QLatin1String( "layer.attributeTable" ) )
     {
-        if ( !vectorSelected( s ) )
-            return QObject::tr( "A vector layer must be selected" );
+        vectorRequirements();
     }
-    else if ( commandId.startsWith( QStringLiteral( "layer.edit." ) ) )
+    else if ( commandId.startsWith( QLatin1String( "layer.edit." ) ) )
     {
         // Reserved edit-command family (no registrations yet).
-        if ( !vectorSelected( s ) )
-            return QObject::tr( "A vector layer must be selected" );
-        if ( !editingAvailable( s ) )
-            return QObject::tr( "The current layer is not editable" );
+        vectorRequirements();
+        specs.append( { "vector.editable", QT_TR_NOOP( "The current layer is not editable" ), &editingAvailable } );
     }
-    else if ( commandId.startsWith( QStringLiteral( "layer." ) ) && !layerSelected( s ) )
+    else if ( commandId.startsWith( QLatin1String( "layer." ) ) )
     {
-        return QObject::tr( "A layer must be selected" );
+        specs.append( { "layer.selected", QT_TR_NOOP( "A layer must be selected" ), &layerSelected } );
     }
-    else if ( ( commandId.startsWith( QStringLiteral( "raster." ) )
-                || commandId.startsWith( QStringLiteral( "rs." ) ) )
-              && !rasterSelected( s ) )
+    else if ( commandId == QLatin1String( "rs.speckle" ) )
     {
-        return QObject::tr( "A raster layer must be selected" );
+        // SAR speckle filtering is the one command with a compound predicate
+        // (raster AND SAR); spell out both rows so the disabled state always
+        // names the missing condition.
+        rasterRequirements();
+        specs.append( { "sar.selected", QT_TR_NOOP( "SAR data must be selected" ), &sarSelected } );
     }
-    else if ( commandId.startsWith( QStringLiteral( "sar." ) ) && !sarSelected( s ) )
+    else if ( commandId.startsWith( QLatin1String( "raster." ) )
+              || commandId.startsWith( QLatin1String( "rs." ) ) )
     {
-        return QObject::tr( "SAR data must be selected" );
+        rasterRequirements();
     }
-    else if ( commandId.startsWith( QStringLiteral( "result." ) ) && !resultSelected( s ) )
+    else if ( commandId.startsWith( QLatin1String( "sar." ) ) )
     {
-        return QObject::tr( "Governance results must be selected" );
+        specs.append( { "sar.selected", QT_TR_NOOP( "SAR data must be selected" ), &sarSelected } );
     }
-    else if ( commandId.startsWith( QStringLiteral( "asset." ) ) && !assetSelected( s ) )
+    else if ( commandId.startsWith( QLatin1String( "result." ) ) )
     {
-        return QObject::tr( "Data assets must be selected" );
+        specs.append( { "result.selected", QT_TR_NOOP( "Governance results must be selected" ), &resultSelected } );
     }
-    else if ( commandId.startsWith( QStringLiteral( "experiment." ) ) && !experimentSelected( s ) )
+    else if ( commandId.startsWith( QLatin1String( "asset." ) ) )
     {
-        return QObject::tr( "An experiment run must be selected" );
+        specs.append( { "asset.selected", QT_TR_NOOP( "Data assets must be selected" ), &assetSelected } );
     }
-    else if ( commandId.startsWith( QStringLiteral( "dataset." ) ) && !datasetSelected( s ) )
+    else if ( commandId.startsWith( QLatin1String( "experiment." ) ) )
     {
-        return QObject::tr( "A dataset must be selected" );
+        specs.append( { "experiment.selected", QT_TR_NOOP( "An experiment run must be selected" ), &experimentSelected } );
     }
-    else if ( commandId.startsWith( QStringLiteral( "model." ) ) && !modelSelected( s ) )
+    else if ( commandId.startsWith( QLatin1String( "dataset." ) ) )
     {
-        return QObject::tr( "A model must be selected" );
+        specs.append( { "dataset.selected", QT_TR_NOOP( "A dataset must be selected" ), &datasetSelected } );
     }
-    else if ( commandId.startsWith( QStringLiteral( "workflowrun." ) ) && !workflowRunSelected( s ) )
+    else if ( commandId.startsWith( QLatin1String( "model." ) ) )
     {
-        return QObject::tr( "A workflow run must be selected" );
+        specs.append( { "model.selected", QT_TR_NOOP( "A model must be selected" ), &modelSelected } );
+    }
+    else if ( commandId.startsWith( QLatin1String( "workflowrun." ) ) )
+    {
+        specs.append( { "workflowrun.selected", QT_TR_NOOP( "A workflow run must be selected" ), &workflowRunSelected } );
+    }
+
+    QVector<RequirementFact> facts;
+    facts.reserve( specs.size() );
+    for ( const Spec &spec : specs )
+        facts.append( { QString::fromUtf8( spec.code ), QObject::tr( spec.label ),
+                        spec.predicate( s ) } );
+    return facts;
+}
+
+QString unavailabilityReason( const SelectionContextSnapshot &s, const QString &commandId )
+{
+    // Milestone E: derived from requirementFacts — an empty return means
+    // "available", a non-empty return is the first unsatisfied requirement's
+    // label. Kept as the text projection so palette / tooltips and the
+    // structured facts channel always agree (review L #1).
+    const QVector<RequirementFact> facts = requirementFacts( s, commandId );
+    for ( const RequirementFact &fact : facts ) {
+        if ( !fact.satisfied )
+            return fact.label;
     }
     return QString();
 }
