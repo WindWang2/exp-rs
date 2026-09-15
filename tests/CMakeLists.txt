@@ -1728,6 +1728,9 @@ target_include_directories(test_surface_parity PRIVATE
   ${CMAKE_BINARY_DIR}
 )
 target_compile_definitions(test_surface_parity PRIVATE SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_definitions(test_surface_parity PRIVATE
+  SICNU_TEST_SURFACE_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
 sicnu_discover_tests(test_surface_parity)
 
 # Surface-11 protocol suite: progress relay, artifact_read, redaction,

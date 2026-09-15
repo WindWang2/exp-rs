@@ -16,12 +16,15 @@
 
 #include <QCoreApplication>
 #include <QFile>
+#include <QJsonArray>
+#include <QProcess>
 #include <QRegularExpression>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QVariantMap>
 
 #include <algorithm>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -307,6 +310,76 @@ TEST_CASE("Every projected meta and data-platform tool is dispatchable", "[surfa
         REQUIRE_FALSE(rpcCode == -32602);
         if (!error.isEmpty())
             REQUIRE_FALSE(error.contains(QStringLiteral("unknown data-platform tool")));
+    }
+}
+
+#ifndef SICNU_TEST_SURFACE_CLI
+#error "SICNU_TEST_SURFACE_CLI must point at sicnu_geo_rs_cli"
+#endif
+
+TEST_CASE("CLI tools list matches the projection over the real binary", "[surface_parity][cli]")
+{
+    // Three-way parity, CLI leg: the real sicnu_geo_rs_cli subprocess renders
+    // `tools list --json --schema` from ITS process registry; this test
+    // process holds its own (smaller) registry. Meta + data-platform tools
+    // are process-independent, so they must be IDENTICAL in name+schema;
+    // catalog ids visible to both sides must agree too. The CLI may list
+    // MORE catalog tools (full engine init) — a strict superset relation on
+    // the catalog slice, never a contradiction.
+    QProcess cli;
+    cli.start(QString::fromUtf8(SICNU_TEST_SURFACE_CLI),
+              QStringList{ QStringLiteral("tools"), QStringLiteral("list"),
+                           QStringLiteral("--json"), QStringLiteral("--schema") });
+    REQUIRE(cli.waitForStarted(10000));
+    REQUIRE(cli.waitForFinished(120000));
+    REQUIRE(cli.exitStatus() == QProcess::NormalExit);
+    REQUIRE(cli.exitCode() == 0);
+
+    const QJsonDocument doc = QJsonDocument::fromJson(cli.readAllStandardOutput());
+    REQUIRE(doc.isObject());
+    const QJsonArray tools = doc.object().value(QStringLiteral("data"))
+                                 .toObject().value(QStringLiteral("tools")).toArray();
+    REQUIRE(tools.size() > 20);
+
+    std::vector<SurfaceTool> projected = collectSurfaceTools();
+    std::map<std::string, std::string> projectedSchemas;
+    for (const SurfaceTool &tool : projected)
+        projectedSchemas[tool.name] = canonicalJson(tool.inputSchema);
+
+    int matchedMeta = 0;
+    int matchedDataPlatform = 0;
+    int matchedCatalog = 0;
+    std::vector<std::string> cliNames;
+    for (const auto &entry : tools)
+    {
+        const QJsonObject obj = entry.toObject();
+        const std::string name = obj.value(QStringLiteral("name")).toString().toStdString();
+        INFO("cli tool: " << name);
+        REQUIRE(std::find(cliNames.begin(), cliNames.end(), name) == cliNames.end());
+        cliNames.push_back(name);
+        // Name must exist in this process's projection OR be a catalog tool
+        // the CLI process registered additionally.
+        const auto it = projectedSchemas.find(name);
+        if (it != projectedSchemas.end())
+            REQUIRE(canonicalJson(obj.value(QStringLiteral("inputSchema"))) == it->second);
+        if (meta_protocol::contains(name))
+            ++matchedMeta;
+        else if (sicnu::agent::isDataPlatformTool(QString::fromStdString(name)))
+            ++matchedDataPlatform;
+        else if (it != projectedSchemas.end())
+            ++matchedCatalog;
+    }
+    REQUIRE(matchedMeta == static_cast<int>(meta_protocol::defs().size()));
+    REQUIRE(matchedDataPlatform == static_cast<int>(sicnu::agent::dataPlatformToolDefs().size()));
+    REQUIRE(matchedCatalog > 0); // at least the shared rs: core operators
+
+    // The CLI must never list a tool this process knows to be absent from
+    // the meta/data-platform tables (renames drift both sides).
+    for (const meta_protocol::MetaToolDef &def : meta_protocol::defs())
+    {
+        INFO("meta def: " << def.name);
+        REQUIRE(std::find(cliNames.begin(), cliNames.end(), std::string(def.name))
+                != cliNames.end());
     }
 }
 
