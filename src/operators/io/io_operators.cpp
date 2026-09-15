@@ -12,6 +12,8 @@
 #include "geospatial/cog/cog_presets.h"
 #include "geospatial/doctor/data_doctor.h"
 #include "geospatial/formats/format_profiles.h"
+#include "geospatial/io/cog_options.h"
+#include "geospatial/metadata/canonical_metadata.h"
 
 #include <atomic>
 #include <cstring>
@@ -383,11 +385,28 @@ Json::Value IoClipOperator::run( const Json::Value &params, RSOperatorContext &c
       throw RSOperatorError( ErrorCode::MissingRequiredParameter,
                              "bounds must be [minX,minY,maxX,maxY]" );
 
+    // F-OPS-4 follow-up (#1001): srcCrsOverride DECLARES the source CRS of a
+    // CRS-less input — it is never the clip target. Clipping keeps the source
+    // grid (near sampling, no reprojection). An override on an input that
+    // already carries a CRS is a contradiction (the caller would silently
+    // re-tag georeferenced pixels), so it is refused instead of guessed.
+    if ( meta.crs.valid && !srcOverride.empty() )
+    {
+      Json::Value details;
+      details["path"] = input;
+      details["input_crs"] = meta.crs.authid.empty() ? meta.crs.wkt : meta.crs.authid;
+      details["srcCrsOverride"] = srcOverride;
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "input already carries a CRS; srcCrsOverride would reinterpret it — "
+                             "remove the override or reproject explicitly with io:reproject",
+                             details );
+    }
+
     sicnu::geo::WarpOptions options;
     // Clipping is spatially lossless: keep the source grid via near sampling.
-    options.targetCrs = srcOverride.empty()
-                          ? ( meta.crs.authid.empty() ? meta.crs.wkt : meta.crs.authid )
-                          : srcOverride;
+    options.targetCrs = meta.crs.authid.empty() ? ( srcOverride.empty() ? meta.crs.wkt : srcOverride )
+                                                : meta.crs.authid;
+    options.sourceCrsOverride = srcOverride;
     options.resampling = "near";
     options.targetBounds = bounds;
     options.creationOptions = creationOptionsFrom( params );
@@ -538,6 +557,11 @@ Json::Value IoMakeCogOperator::schema() const
                                       "continuous_float", "sar" },
                                     "lossless_scientific" );
   params["creationOptions"] = makeStringParam( "creationOptions", "Extra COG creation options" );
+  params["blocksize"] = makeIntegerParam( "blocksize", "Tile blocksize override (power of two, 128..4096)" );
+  params["overviews"] = makeBooleanParam( "overviews", "Build overviews inside the COG (default true)" );
+  params["deterministic"] = makeBooleanParam(
+    "deterministic", "Deterministic byte output: NUM_THREADS=1 + pinned DEFLATE level" );
+  params["deflateLevel"] = makeIntegerParam( "deflateLevel", "DEFLATE level for deterministic mode (1..9, default 6)" );
   Json::Value outputs;
   outputs["output"] = makeOutputParam( "output", "Cloud Optimized GeoTIFF", "tif" );
   Json::Value root = makeRootSchema( "Make COG", description(), params, outputs );
@@ -577,12 +601,35 @@ Json::Value IoMakeCogOperator::run( const Json::Value &params, RSOperatorContext
     else if ( presetName == "sar" )
       preset = sicnu::geo::CogPreset::Sar;
 
+    // 11.0 explicit production options: the planner merges preset + caller
+    // knobs (blocksize / overviews / determinism / extras) by REPLACE, so
+    // overrides actually reach the COG driver (first-match-wins lookup makes
+    // appended duplicates dead letters), and every key's provenance is
+    // explained in the result.
+    const std::string input = params::requireString( params, "input" );
+    sicnu::geo::io::CogProductionOptions options;
+    options.preset = preset;
+    options.blocksize = params::getInt( params, "blocksize", 0 );
+    options.buildOverviews = params::getBool( params, "overviews", true );
+    options.deterministic = params::getBool( params, "deterministic", false );
+    options.deflateLevel = params::getInt( params, "deflateLevel", 6 );
+    options.extraCreationOptions = creationOptionsFrom( params );
+    // Preset fidelity policy is dtype-aware; the planner needs the dtype.
+    const sicnu::geo::RasterMetadata inputMeta = sicnu::geo::inspectRaster( input );
+    options.expectedDtypeName = inputMeta.bands.empty() ? std::string() : inputMeta.bands.front().dtype;
+
+    const sicnu::geo::io::CogProductionPlan plan = sicnu::geo::io::planCogProduction( options );
+
     ContextProgress progress( context );
-    const sicnu::geo::TranslateResult result = sicnu::geo::makeCog(
-      params::requireString( params, "input" ), params::requireString( params, "output" ), preset,
-      creationOptionsFrom( params ), &progress );
+    const sicnu::geo::TranslateResult result = sicnu::geo::makeCogWithOptions(
+      input, params::requireString( params, "output" ), plan.creationOptions, &progress );
+
+    // Deterministic mode implies reproducibility demands; record the plan so
+    // the produced COG is explainable (which knob came from where).
+    Json::Value cogResult = result.toJson();
+    cogResult["cog_plan"] = plan.toJson();
     context.reportProgressForced( 1.0, "COG creation complete" );
-    return result.toJson();
+    return cogResult;
   } );
 }
 

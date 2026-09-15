@@ -33,3 +33,12 @@
 
 ## D-007 | 新算子命名
 - 沿用 `io:` 前缀、snake_case：`io:subdatasets`、`io:metadata_patch`、`io:verify_dataset`。stage_ledger 本期只暴露 library API + sweep 经 io:doctor 类路径？——否则 surface 膨胀；候选 (a) io:stage_attach 算子 (b) 仅 library。选择 (a) 暂缓：P4 评估 CLI/agent 需求后决定，PR_BODY 如实声明 library-only（若不加算子）。
+
+## D-008 | manifest/ledger 集成面
+- 选择：RasterWriter/VectorWriter 不改（默认行为零漂移）；manifest 经 finalizeAttached 与算子级 opt-in 写出；ledger/manifest sidecar 命名 `<main>.sicnu-{stage-ledger,manifest}.json`；verifyDataset 缺 manifest = fail（allowMissingManifest 降级为 `manifest_missing_allowed` 仍不绿）。
+
+## D-009 | COG 选项覆盖语义与 makeCogWithOptions
+- 背景：GDAL driver 选项查找 first-match-wins，"-co 追加"无法覆盖 preset 值（io:make_cog 原 extras 对 preset key 是死信）。
+- 候选：(a) 保持追加并文档声明；(b) planner REPLACE 合并 + makeCogWithOptions 完整列表入口。
+- 选择：(b)。convert/ 最小 additive（preset 组装移调用侧 + 新入口函数），行为不变；scope 扩大理由记录（无 PR 占用 convert/）。
+- io:make_cog 新可选参数：blocksize/overviews/deterministic/deflateLevel；结果附 cog_plan 解释块。NoData/alpha 不做 planner 选项（declared-only，随源传递）。

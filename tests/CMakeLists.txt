@@ -305,6 +305,8 @@ sicnu_add_io_test(test_io_grid_descriptor)
 sicnu_add_io_test(test_io_param_guard)
 sicnu_add_io_test(test_io_finalize_manifest)
 sicnu_add_io_test(test_io_stage_ledger)
+# 11.0 explicit COG production options (blocksize/overviews/determinism).
+sicnu_add_io_test(test_io_cog_options)
 
 # io:* operator family suite — rides the operator chain (Qt + sicnu_operators).
 sicnu_add_io_test(test_io_operators)

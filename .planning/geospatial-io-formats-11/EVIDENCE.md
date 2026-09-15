@@ -25,3 +25,10 @@
 - 独立 oracle 记录：digest 用 FIPS 180-4 "abc" 向量（ba7816b…5ad）；字节翻转→digest_mismatch；形状漂移→shape_mismatch；crash 形态（无 journal/无 staged 文件/截断/spoof driver/形状谎报）全部 fail-closed。
 - ctest 说明：catch_discover_tests PRE_TEST 模式下 `ctest -R <新目标>` 在发现前无法过滤（0 匹配）；本 track gate 以直接运行测试二进制为准（同一断言集），全量回归用 `ctest`（不带 -R）或目录级。
 - DECISIONS 更新：D-004 已记录；D-008（writer 不动，manifest 经 finalizeAttached/算子级 opt-in 写出；checkTargetPath 对不存在本地路径按形状分类 + 目录必须已存在）将随 P2 commit 写入 DECISIONS.md。
+
+## Phase 2（2026-09-16）
+- #1001 修复：IoClipOperator srcCrsOverride 回归源声明语义（sourceCrsOverride 传递 + target=源网格）；已有 CRS 输入 + override → InvalidParameter 拒绝（fail-closed，输出不落盘）。独立 oracle：期望范围/CRS 由测试独立计算（Catch::Approx margin 1e-9），不复用实现输出。
+- cog_options 计划层：REPLACE 合并语义（COG driver first-match-wins，追加式 override 是死信——DECISIONS D-009）；deterministic=NUM_THREADS=1+LEVEL 固定，同栈双生成 sha256 相等（2140 assertions 含字節一致证明）；blocksize=256 经 validateCog+GDALGetBlockSize 双确认；OVERVIEWS=NONE 大图 → pre-publish 拒绝且无残留（fail-closed 语义验证）。
+- convert/raster_convert 増量：makeCogWithOptions（完整选项列表入口）；makeCog 行为不变（仅将 preset 组装移到调用侧，dtupe probe 多一次只读 open）。回归：test_io_roundtrip_matrix/test_io_fidelity/test_io_probe/test_adversarial_m3 全 exit=0。
+- docs/io/cog-guide.md：OVERVIEWS=ALL→AUTO 漂移修正 + 新选项层文档。
+- 资源记录：本 phase 一次构建观察到 load≈11.5（并发其他 track 构建所致），本 track 构建转 nice 15 + -j1（envelope 降档规则），内存 49GB 可用，未触 70% RSS 上限。

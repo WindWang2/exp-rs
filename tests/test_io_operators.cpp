@@ -8,6 +8,7 @@
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_registry.h"
+#include "geospatial/metadata/canonical_metadata.h"
 #include "geospatial/util/atomic_fs.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -307,4 +308,120 @@ TEST_CASE( "io:reproject honours srcCrsOverride for CRS-less input (F-OPS-4)",
   CHECK( std::abs( gt[1] ) > 1.0 ); // pixel size in metres, not degrees-as-pixels
   CHECK( std::abs( gt[0] ) > 100000.0 ); // UTM 33N easting of lon~0 is ~166k
   GDALClose( dataset );
+}
+
+// --- #1001: io:clip must treat srcCrsOverride as a SOURCE declaration, ------
+// --- never as the clip target ----------------------------------------------
+
+TEST_CASE( "io:clip keeps the source grid for a CRS-less input with srcCrsOverride (#1001)",
+           "[io][operators][f-ops-4][1001]" )
+{
+  const std::string dir = scratch( "clip_crsless" );
+  const std::string raster = makeCrsLessRaster( dir, "crsless.tif" );
+  const std::string output = ( fs::path( dir ) / "clip.tif" ).string();
+
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "io:clip" );
+  REQUIRE( op );
+
+  sicnu::operators::RSOperatorContext context;
+  // Source pixels live on the (0,0)..(8,-8) grid declared EPSG:4326. A clip
+  // to [1,-6,6,-1] must SUBSET that grid — extent exactly the requested
+  // bounds, CRS exactly the override — and never reproject (the pre-fix code
+  // assigned the override to targetCrs AND left the grid tagged EPSG:4326
+  // only by accident of the declaration).
+  const Json::Value result = op->execute( [ & ] {
+    Json::Value params;
+    params["input"] = raster;
+    params["output"] = output;
+    params["srcCrsOverride"] = "EPSG:4326";
+    Json::Value bounds;
+    bounds.append( 1.0 );
+    bounds.append( -6.0 );
+    bounds.append( 6.0 );
+    bounds.append( -1.0 );
+    params["bounds"] = bounds;
+    return params;
+  }(), context );
+
+  CHECK( result["output"].asString() == output );
+
+  const sicnu::geo::RasterMetadata meta = sicnu::geo::inspectRaster( output );
+  CHECK( meta.crs.valid );
+  CHECK( meta.crs.authid == "EPSG:4326" );
+  // Independent oracle: the clip window, checked against the requested
+  // bounds (not against the implementation's own result JSON).
+  CHECK( meta.minX == Catch::Approx( 1.0 ).margin( 1e-9 ) );
+  CHECK( meta.maxX == Catch::Approx( 6.0 ).margin( 1e-9 ) );
+  CHECK( meta.minY == Catch::Approx( -6.0 ).margin( 1e-9 ) );
+  CHECK( meta.maxY == Catch::Approx( -1.0 ).margin( 1e-9 ) );
+}
+
+TEST_CASE( "io:clip refuses srcCrsOverride on an input that already has a CRS (#1001)",
+           "[io][operators][negative][1001]" )
+{
+  const std::string dir = scratch( "clip_override_conflict" );
+  const std::string raster = makeTinyRaster( dir, "geo.tif" ); // EPSG:4326 fixture
+  const std::string output = ( fs::path( dir ) / "clip.tif" ).string();
+
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "io:clip" );
+  REQUIRE( op );
+
+  sicnu::operators::RSOperatorContext context;
+  try
+  {
+    op->execute( [ & ] {
+      Json::Value params;
+      params["input"] = raster;
+      params["output"] = output;
+      params["srcCrsOverride"] = "EPSG:32648"; // contradicts the file CRS
+      Json::Value bounds;
+      bounds.append( 116.1 );
+      bounds.append( 30.9 );
+      bounds.append( 116.5 );
+      bounds.append( 30.5 );
+      params["bounds"] = bounds;
+      return params;
+    }(), context );
+    FAIL( "io:clip must refuse a contradictory srcCrsOverride" );
+  }
+  catch ( const sicnu::operators::RSOperatorError &error )
+  {
+    CHECK( error.code() == sicnu::operators::ErrorCode::InvalidParameter );
+    CHECK( error.details()["input_crs"].asString() == "EPSG:4326" );
+    CHECK( error.details()["srcCrsOverride"].asString() == "EPSG:32648" );
+  }
+  // Refusal is fail-closed BEFORE any output: nothing was published.
+  CHECK( !sicnu::geo::atomic_fs::fileExists( output ) );
+}
+
+TEST_CASE( "io:clip keeps the file CRS and applies bounds when no override is given",
+           "[io][operators][1001]" )
+{
+  const std::string dir = scratch( "clip_georef" );
+  const std::string raster = makeTinyRaster( dir, "geo.tif" ); // EPSG:4326, (116,31)..(116.08,30.92)
+  const std::string output = ( fs::path( dir ) / "clip.tif" ).string();
+
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "io:clip" );
+  REQUIRE( op );
+
+  sicnu::operators::RSOperatorContext context;
+  op->execute( [ & ] {
+    Json::Value params;
+    params["input"] = raster;
+    params["output"] = output;
+    Json::Value bounds;
+    bounds.append( 116.02 );
+    bounds.append( 30.94 );
+    bounds.append( 116.06 );
+    bounds.append( 30.98 );
+    params["bounds"] = bounds;
+    return params;
+  }(), context );
+
+  const sicnu::geo::RasterMetadata meta = sicnu::geo::inspectRaster( output );
+  CHECK( meta.crs.authid == "EPSG:4326" );
+  CHECK( meta.minX == Catch::Approx( 116.02 ).margin( 1e-6 ) );
+  CHECK( meta.maxX == Catch::Approx( 116.06 ).margin( 1e-6 ) );
+  CHECK( meta.minY == Catch::Approx( 30.94 ).margin( 1e-6 ) );
+  CHECK( meta.maxY == Catch::Approx( 30.98 ).margin( 1e-6 ) );
 }

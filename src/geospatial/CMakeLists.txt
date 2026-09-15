@@ -55,6 +55,7 @@ set(SICNU_GEOSPATIAL_SOURCES
     io/param_guard.cpp
     io/finalize_manifest.cpp
     io/stage_ledger.cpp
+    io/cog_options.cpp
 )
 
 qt_add_library(sicnu_geospatial STATIC ${SICNU_GEOSPATIAL_SOURCES})
