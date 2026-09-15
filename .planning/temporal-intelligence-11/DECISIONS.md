@@ -80,9 +80,13 @@ sidecar schema version only bumps when the opt-in columns are on.
 
 `TemporalAnalysisDialog::kAlgorithms[]` + stacked parameter pages get the three new operators
 (the dialog is the app's temporal command surface, pre-dating D18). New strings via
-`QT_TRANSLATE_NOOP`/`tr()` + `SicnuDialogHelp::tip` per dialog conventions. One new agent spatial
-tool registered in `SpatialToolRegistry::registerBuiltinTools`. **No** D18 mission-context/mount
-files are touched.
+`QT_TRANSLATE_NOOP`/`tr()` + `SicnuDialogHelp::tip` per dialog conventions. **No** D18
+mission-context/mount files are touched. Revised: the originally planned bespoke
+`SpatialToolRegistry` entry is NOT added — the `REGISTER_RS_OPERATOR` seam already
+auto-surfaces every new operator to the CLI/MCP/agent command vocabulary
+(`RSOperatorRegistry::listSchemas()` → agent tools), and a hand-rolled parallel agent tool
+would be a second surface to keep in sync. D16's in-memory `temporal:*` catalog tools remain
+untouched.
 
 ## D-TI11-8 · Performance: scratch reuse with bit-exact arithmetic order; no SIMD this track
 

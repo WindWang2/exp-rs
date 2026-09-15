@@ -3,6 +3,7 @@
 
 #include "temporal_fit.h"
 #include "temporal_linalg_detail.h"
+#include "temporal_design_detail.h"
 
 #include <algorithm>
 #include <cmath>
@@ -13,26 +14,11 @@ namespace sicnu::temporal
 
 namespace
 {
-constexpr double kPi = 3.14159265358979323846;
 constexpr double kNanD = std::numeric_limits<double>::quiet_NaN();
 constexpr float kNanF = std::numeric_limits<float>::quiet_NaN();
 
-/// Design row for [1, t, sin/cos(k·2πt/365.25)...]. Max 3 harmonics -> 8
-/// columns; the fixed-size array keeps the per-pixel loop allocation-free.
-constexpr int kMaxTerms = 1 + 1 + 2 * 3;
-
-int designRow( double t, int harmonics, double *design )
-{
-  design[0] = 1.0;
-  design[1] = t;
-  for ( int k = 1; k <= harmonics; ++k )
-  {
-    const double omega = 2.0 * kPi * k * t / 365.25;
-    design[2 + 2 * ( k - 1 )] = std::sin( omega );
-    design[3 + 2 * ( k - 1 )] = std::cos( omega );
-  }
-  return 2 + 2 * harmonics;
-}
+using detail::kMaxTerms;
+using detail::harmonicTrendDesignRow;
 
 /// One weighted OLS fit of the harmonic+trend design on [a, b) of y/t.
 /// Returns false when the segment holds fewer valid samples than terms or
@@ -52,7 +38,7 @@ bool fitSegment( const std::vector<float> &y, const std::vector<double> &tDays,
     const double w = weights[i];
     if ( w <= 0.0 )
       continue;
-    const int m = designRow( tDays[i], harmonics, design );
+    const int m = harmonicTrendDesignRow( tDays[i], harmonics, design );
     for ( int r = 0; r < m; ++r )
     {
       atb[r] += w * design[r] * y[i];
@@ -82,7 +68,7 @@ bool fitSegment( const std::vector<float> &y, const std::vector<double> &tDays,
     const double w = weights[i];
     if ( w <= 0.0 )
       continue;
-    const int m = designRow( tDays[i], harmonics, design );
+    const int m = harmonicTrendDesignRow( tDays[i], harmonics, design );
     double v = 0.0;
     for ( int r = 0; r < m; ++r )
       v += coef[r] * design[r];
@@ -101,16 +87,7 @@ bool fitSegment( const std::vector<float> &y, const std::vector<double> &tDays,
   return true;
 }
 
-/// Evaluates the fitted segment model at @a t.
-double evalCoefAt( const std::vector<double> &coef, double t, int harmonics )
-{
-  double design[kMaxTerms];
-  const int m = designRow( t, harmonics, design );
-  double v = 0.0;
-  for ( int r = 0; r < m; ++r )
-    v += coef[r] * design[r];
-  return v;
-}
+using detail::evalHarmonicTrend;
 } // namespace
 
 SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
@@ -177,7 +154,7 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
         if ( weights[i] <= 0.0 )
           continue;
         residual[static_cast<size_t>( i )] =
-          static_cast<float>( y[i] - evalCoefAt( coef, tDays[i], harm ) );
+          static_cast<float>( y[i] - evalHarmonicTrend( coef, tDays[i], harm ) );
       }
     }
     if ( !anyFit )
@@ -298,6 +275,7 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
   // are kept per segment so break magnitudes evaluate BOTH models AT the
   // break day (no differential-trend leak from adjacent fitted samples).
   std::vector<std::vector<double>> segCoefByIndex( segments.size() );
+  result.segmentCoefficients.assign( segments.size(), {} );
   double totalSse = 0.0;
   double totalSst = 0.0;
   long totalValidFinal = 0;
@@ -328,7 +306,7 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
         {
           if ( segWeights[i] <= 0.0 )
             continue;
-          absRes.push_back( std::abs( y[i] - evalCoefAt( coef, tDays[i], harm ) ) );
+          absRes.push_back( std::abs( y[i] - evalHarmonicTrend( coef, tDays[i], harm ) ) );
         }
         if ( absRes.empty() )
           break;
@@ -339,7 +317,7 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
         {
           if ( segWeights[i] <= 0.0 )
             continue;
-          const double r = std::abs( y[i] - evalCoefAt( coef, tDays[i], harm ) );
+          const double r = std::abs( y[i] - evalHarmonicTrend( coef, tDays[i], harm ) );
           segWeights[i] = r <= delta ? 1.0 : delta / r;
         }
         ok = fitSegment( y, tDays, seg.first, seg.second, harm, segWeights, &coef,
@@ -360,12 +338,13 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
       out.rmse = valid > 0 ? std::sqrt( std::max( 0.0, sse ) / valid ) : kNanD;
       out.validCount = valid;
       segCoefByIndex[static_cast<size_t>( segIndex )] = coef;
+      result.segmentCoefficients[static_cast<size_t>( segIndex )] = coef;
       for ( int i = seg.first; i < seg.second; ++i )
       {
         if ( weights[i] <= 0.0 )
           continue;
         result.fitted[static_cast<size_t>( i )] =
-          static_cast<float>( evalCoefAt( coef, tDays[i], harm ) );
+          static_cast<float>( evalHarmonicTrend( coef, tDays[i], harm ) );
       }
       totalSse += std::max( 0.0, sse );
       totalValidFinal += valid;
@@ -396,8 +375,8 @@ SeasonalTrendBreaksResult fitSeasonalTrendBreaks( const std::vector<float> &y,
     const std::vector<double> &coefR = segCoefByIndex[s];
     ev.magnitude =
       ( !coefL.empty() && !coefR.empty() )
-        ? std::abs( evalCoefAt( coefR, ev.breakDays, harm ) -
-                    evalCoefAt( coefL, ev.breakDays, harm ) )
+        ? std::abs( evalHarmonicTrend( coefR, ev.breakDays, harm ) -
+                    evalHarmonicTrend( coefL, ev.breakDays, harm ) )
         : kNanD;
     result.breaks.push_back( ev );
   }

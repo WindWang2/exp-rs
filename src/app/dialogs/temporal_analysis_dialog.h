@@ -15,6 +15,8 @@
 
 class QCheckBox;
 class QComboBox;
+class QDoubleSpinBox;
+class QSpinBox;
 class QTableWidget;
 class QStackedWidget;
 class QLabel;
@@ -96,6 +98,19 @@ private:
     QCheckBox *m_medianCheck = nullptr;
     QLineEdit *m_pointEdit = nullptr;
     QLineEdit *m_polygonEdit = nullptr;
+    // Temporal Intelligence 11.0 additions
+    QSpinBox *m_seasonalHarmonicsSpin = nullptr;
+    QSpinBox *m_seasonalBreaksSpin = nullptr;
+    QDoubleSpinBox *m_seasonalAlphaSpin = nullptr;
+    QCheckBox *m_seasonalCiCheck = nullptr;
+    QSpinBox *m_selectHarmonicsSpin = nullptr;
+    QSpinBox *m_selectBreaksSpin = nullptr;
+    QComboBox *m_selectPenaltyCombo = nullptr;
+    QSpinBox *m_selectCvFoldsSpin = nullptr;
+    QSpinBox *m_phenoCyclesSpin = nullptr;
+    QDoubleSpinBox *m_phenoCrossingSpin = nullptr;
+    QSpinBox *m_phenoMinValidSpin = nullptr;
+    QDoubleSpinBox *m_phenoMaxGapSpin = nullptr;
     sicnu::data::DataManager *m_dataManager = nullptr;
     std::optional<sicnu::data::CollectionId> m_activeCollectionId;
     QStringList m_producedOutputs;

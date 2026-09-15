@@ -2,6 +2,38 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - Temporal Intelligence 11.0 (zcode/temporal-intelligence-11)
+
+- **Seasonal-component break attribution**: new `rs:temporal_seasonal_breaks` operator and
+  `temporal_selection` kernel — after the shared joint harmonic+trend segmentation, every
+  break is attributed with nested weighted-LS F tests: did the seasonal basis (harmonic
+  sin/cos amplitude/phase) change beyond the trend change? Per-break kind
+  (none/trend/seasonal/both/untestable), seasonal shift norm, harmonic-1 amplitude/phase
+  change, F statistic and p-value (closes the ADR 0148 seasonal-attribution debt; honest
+  naming: BFAST-inspired, not full BFAST/CCDC).
+- **Bounded per-segment model selection**: new `rs:temporal_model_select` operator —
+  {harmonic order} × {break budget} candidate grid scored by AICc / BIC / deterministic
+  contiguous-block CV with parsimony tie-breaking; per-pixel selected order/budget/params/
+  score bands plus selection histograms; degenerate pixels report a NaN refusal
+  (closes the ADR 0148 model-selection debt).
+- **Uncertainty & confidence**: new `temporal_uncertainty` kernel — analytic weighted-LS
+  coefficient CIs (diag((XᵀWX)⁻¹)·σ̂², normal quantile) and a seeded deterministic residual
+  bootstrap (fixed design, observed-time support only, bounded resamples, ≥60% success
+  floor) exposed as opt-in `compute_ci` bands on `rs:temporal_seasonal_breaks`; quality
+  weights propagate through the weighted fits.
+- **Phenology 2.0**: new `rs:temporal_phenology_multi` operator — automatic cycle
+  candidates from the pixel's own seasonal climatology (bounded peaks, min-span merge),
+  wrapped windows assigned to the HARVEST year, per-window quality flags
+  {sampleCount, coverage, gapFraction, amplitudeRatio} with refusal semantics (no
+  low-sample guessing), median-of-seasons day bands and a cropping-system cycle count.
+- **Break attribution exposed in the Time Series Analysis dialog** (three new algorithms
+  with parameter pages) and full capability knowledge sync (agent capabilities JSON,
+  capability catalog sidecars, family map, `docs/processing/temporal.md` rows).
+- **Deterministic synthetic corpus** (`tests/temporal_corpus.h`): closed-form scenario
+  builders (trend/seasonal/both breaks, double season, winter cross-year, missing, spikes,
+  no-change negative controls) with independent-oracle tests for the new kernels
+  (attribution separation, selection determinism/tie rules, CI coverage, refusal codes).
+
 ## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)
 
 - **Regular-calendar normalization (T-2)**: `rs:temporal_regularize` re-casts irregular

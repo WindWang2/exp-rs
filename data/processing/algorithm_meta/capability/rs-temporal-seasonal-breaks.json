@@ -1,0 +1,234 @@
+{
+  "capability": {
+    "applicability": {
+      "land_cover": [
+        "森林",
+        "农田",
+        "灌草地"
+      ],
+      "scenes": [
+        "植被物候突变监测",
+        "作物制度转换识别",
+        "干扰与恢复制图"
+      ]
+    },
+    "band_roles": {},
+    "crs": {
+      "requires_projected": false,
+      "requires_shared_grid": false
+    },
+    "determinism": {
+      "cost_class": "O(tile × scenes × iterations × terms²) (+ bootstrap_resamples × that when compute_ci)",
+      "grade": "bit_exact",
+      "large_raster_safe": true,
+      "memory_policy": "streaming",
+      "side_effects": false,
+      "stochastic": false
+    },
+    "failure_modes": [
+      {
+        "code": "INVALID_PARAMETER",
+        "when": "harmonics/alpha/minImprovement 超出允许范围",
+        "remedy": "harmonics 1-3，alpha (0.001,0.5]，minImprovement (0,1]"
+      },
+      {
+        "code": "NOT_SUPPORTED",
+        "when": "有效样本不足或单侧分段过短无法完成嵌套检验",
+        "remedy": "延长时序或降低 maxBreaks；untestable 用类别 4 如实标记"
+      }
+    ],
+    "family": "temporal",
+    "io": {
+      "inputs": [],
+      "outputs": [
+        {
+          "data_kind": "string",
+          "name": "epochDate",
+          "required": true
+        },
+        {
+          "data_kind": "json",
+          "name": "memory",
+          "required": true
+        },
+        {
+          "data_kind": "string",
+          "name": "method",
+          "required": true
+        },
+        {
+          "data_kind": "raster",
+          "name": "output",
+          "required": true,
+          "file_format": "tif"
+        },
+        {
+          "data_kind": "integer",
+          "name": "pixelsWithBreaks",
+          "required": true
+        },
+        {
+          "data_kind": "integer",
+          "name": "pixelsWithSeasonalBreaks",
+          "required": true
+        },
+        {
+          "data_kind": "integer",
+          "name": "sceneCount",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "apply_qa_masking",
+          "required": false,
+          "type": "boolean",
+          "default": "true"
+        },
+        {
+          "name": "band",
+          "required": false,
+          "type": "integer",
+          "default": "0"
+        },
+        {
+          "name": "band_role",
+          "required": false,
+          "type": "enum",
+          "enum": [
+            "blue",
+            "green",
+            "red",
+            "red_edge",
+            "nir",
+            "swir1",
+            "swir2",
+            "vv",
+            "vh"
+          ]
+        },
+        {
+          "name": "collection",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "duplicate_policy",
+          "required": false,
+          "type": "enum",
+          "default": "keep_all",
+          "enum": [
+            "keep_all",
+            "reject"
+          ]
+        },
+        {
+          "name": "harmonics",
+          "required": false,
+          "type": "integer",
+          "default": "2"
+        },
+        {
+          "name": "maxBreaks",
+          "required": false,
+          "type": "integer",
+          "default": "3"
+        },
+        {
+          "name": "minSegmentDays",
+          "required": false,
+          "type": "numeric",
+          "default": "90"
+        },
+        {
+          "name": "minImprovement",
+          "required": false,
+          "type": "numeric",
+          "default": "0.100000"
+        },
+        {
+          "name": "robust",
+          "required": false,
+          "type": "boolean",
+          "default": "false"
+        },
+        {
+          "name": "alpha",
+          "required": false,
+          "type": "numeric",
+          "default": "0.050000"
+        },
+        {
+          "name": "compute_ci",
+          "required": false,
+          "type": "boolean",
+          "default": "false"
+        },
+        {
+          "name": "ci_level",
+          "required": false,
+          "type": "numeric",
+          "default": "0.950000"
+        },
+        {
+          "name": "bootstrap_resamples",
+          "required": false,
+          "type": "integer",
+          "default": "99"
+        },
+        {
+          "name": "bootstrap_seed",
+          "required": false,
+          "type": "integer",
+          "default": "20260915"
+        },
+        {
+          "name": "tile_size",
+          "required": false,
+          "type": "integer",
+          "default": "256"
+        },
+        {
+          "name": "output",
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    "limitations": [],
+    "modality": [
+      "optical"
+    ],
+    "operator_group": "temporal",
+    "prerequisites": [
+      "Common grid, acquisition times, consistent radiometric state; >= ~2 years for stable harmonics"
+    ],
+    "schema_version": 2,
+    "summary": "季节分量突变检测与归因：联合谐波+趋势分段后，用嵌套模型 F 检验区分趋势突变与季节幅相突变，可选 bootstrap 置信区间。",
+    "teaching_use": {
+      "concepts": [
+        "季节分量突变",
+        "嵌套 F 检验",
+        "归因（趋势 vs 季节）",
+        "bootstrap 置信区间"
+      ],
+      "courses": [
+        "植物遥感",
+        "时间序列分析"
+      ],
+      "exercise": "对 2019-2024 NDVI 时序运行本算子，区分灌溉启用（季节突变）与采伐（趋势突变）空间分布。"
+    }
+  },
+  "description": "Seasonal-component break detection with trend/seasonal attribution: segments each pixel with the shared joint harmonic+trend kernel, then tests every break with nested weighted-LS F comparisons - did the seasonal basis (harmonic sin/cos amplitude/phase) change beyond the trend change? Per break: attribution kind (0=none,1=trend,2=seasonal,3=both,4=untestable), day offset, fitted-level jump, seasonal coefficient shift, harmonic-1 amplitude/phase change, F statistic and p-value. BFAST-inspired seasonal-change testing - NOT full BFAST (no iterative alternation) and NOT CCDC (no L1 / online model update). Optional per-break bootstrap confidence intervals on the level jump (seeded, deterministic; refused - never fabricated - when too many refits fail).",
+  "display_name": "Temporal Seasonal Breaks (Attribution + CI)",
+  "id": "rs:temporal_seasonal_breaks",
+  "input": "",
+  "output": "raster",
+  "schema_version": 2,
+  "tags": [
+    "temporal",
+    "change-detection",
+    "seasonal-component",
+    "uncertainty"
+  ]
+}

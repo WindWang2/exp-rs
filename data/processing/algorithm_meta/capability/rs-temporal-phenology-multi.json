@@ -1,0 +1,200 @@
+{
+  "capability": {
+    "applicability": {
+      "land_cover": [
+        "农田",
+        "果园",
+        "草地"
+      ],
+      "scenes": [
+        "多熟制识别",
+        "跨年作物窗口",
+        "物候质量分级"
+      ]
+    },
+    "band_roles": {},
+    "crs": {
+      "requires_projected": false,
+      "requires_shared_grid": false
+    },
+    "determinism": {
+      "cost_class": "O(tile × scenes × (decomposition + per-cycle thresholding)), bounded by maxCyclesPerYear",
+      "grade": "bit_exact",
+      "large_raster_safe": true,
+      "memory_policy": "streaming",
+      "side_effects": false,
+      "stochastic": false
+    },
+    "failure_modes": [
+      {
+        "code": "INVALID_PARAMETER",
+        "when": "crossingFraction/maxGapFraction/minCoverage 超范围",
+        "remedy": "各参数均在 (0,1]；阈值按数据质量调整"
+      },
+      {
+        "code": "NOT_SUPPORTED",
+        "when": "窗口样本不足/覆盖不足/间隙过大",
+        "remedy": "refusal 计数带如实记录；先用 rs:temporal_gap_fill 补齐再运行"
+      }
+    ],
+    "family": "temporal",
+    "io": {
+      "inputs": [],
+      "outputs": [
+        {
+          "data_kind": "numeric",
+          "name": "meanCyclesPerYear",
+          "required": true
+        },
+        {
+          "data_kind": "json",
+          "name": "memory",
+          "required": true
+        },
+        {
+          "data_kind": "raster",
+          "name": "output",
+          "required": true,
+          "file_format": "tif"
+        },
+        {
+          "data_kind": "integer",
+          "name": "pixelsWithAnyCycle",
+          "required": true
+        },
+        {
+          "data_kind": "integer",
+          "name": "sceneCount",
+          "required": true
+        }
+      ],
+      "parameters": [
+        {
+          "name": "apply_qa_masking",
+          "required": false,
+          "type": "boolean",
+          "default": "true"
+        },
+        {
+          "name": "band",
+          "required": false,
+          "type": "integer",
+          "default": "0"
+        },
+        {
+          "name": "band_role",
+          "required": false,
+          "type": "enum",
+          "enum": [
+            "blue",
+            "green",
+            "red",
+            "red_edge",
+            "nir",
+            "swir1",
+            "swir2",
+            "vv",
+            "vh"
+          ]
+        },
+        {
+          "name": "collection",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "duplicate_policy",
+          "required": false,
+          "type": "enum",
+          "default": "keep_all",
+          "enum": [
+            "keep_all",
+            "reject"
+          ]
+        },
+        {
+          "name": "maxCyclesPerYear",
+          "required": false,
+          "type": "integer",
+          "default": "3"
+        },
+        {
+          "name": "crossingFraction",
+          "required": false,
+          "type": "numeric",
+          "default": "0.500000"
+        },
+        {
+          "name": "minValidPerSeason",
+          "required": false,
+          "type": "integer",
+          "default": "6"
+        },
+        {
+          "name": "maxGapFraction",
+          "required": false,
+          "type": "numeric",
+          "default": "0.500000"
+        },
+        {
+          "name": "minCoverage",
+          "required": false,
+          "type": "numeric",
+          "default": "0.500000"
+        },
+        {
+          "name": "minPeakFraction",
+          "required": false,
+          "type": "numeric",
+          "default": "0.250000"
+        },
+        {
+          "name": "tile_size",
+          "required": false,
+          "type": "integer",
+          "default": "256"
+        },
+        {
+          "name": "output",
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    "limitations": [],
+    "modality": [
+      "optical"
+    ],
+    "operator_group": "temporal",
+    "prerequisites": [
+      "Common grid, acquisition times; >= ~2 full years for stable climatology; >= ~12 valid samples"
+    ],
+    "schema_version": 2,
+    "summary": "物候 2.0：自动多周期候选（峰值检测）、跨年窗口按收获年归属、逐窗口质量旗标；低覆盖窗口拒绝输出而非硬猜。",
+    "teaching_use": {
+      "concepts": [
+        "自动周期候选",
+        "跨年（收获年）窗口",
+        "质量旗标与拒绝语义",
+        "多熟制指数"
+      ],
+      "courses": [
+        "农业遥感",
+        "物候学"
+      ],
+      "exercise": "对比华北冬小麦区（一年两熟）与东北地区（一熟）的 cycle_count 空间格局并核对统计数据。"
+    }
+  },
+  "description": "Phenology 2.0 with automatic cycle candidates: per pixel, cycle windows are proposed from the pixel's own seasonal component (peaks of the seasonalDecompose climatology, at most maxCyclesPerYear per year, merged by minimum span), wrapped windows count toward the HARVEST year (year of the window end), and every window is quality-gated - sample count, coverage, largest-gap fraction, amplitude share. Refused windows carry no metrics (no low-sample guessing). Outputs per cycle index the median-of-seasons SOS/POS/EOS/LOS/amplitude plus a valid flag, the cycle count (cropping-system indicator), and the refusal count.",
+  "display_name": "Temporal Phenology Multi (Auto Cycles + Quality Flags)",
+  "id": "rs:temporal_phenology_multi",
+  "input": "",
+  "output": "raster",
+  "schema_version": 2,
+  "tags": [
+    "temporal",
+    "phenology",
+    "multi-cropping",
+    "quality-flags"
+  ]
+}
