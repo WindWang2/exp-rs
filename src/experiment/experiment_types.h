@@ -183,6 +183,12 @@ class ExperimentRun
     void setSplitManifestId( const QString &id ) { m_splitManifestId = id; }
     const QString &splitFingerprint() const { return m_splitFingerprint; }
     void setSplitFingerprint( const QString &fingerprint ) { m_splitFingerprint = fingerprint; }
+    /// Optional Benchmark Definition pin (D19). Empty = run not bound to a
+    /// formal benchmark (legacy / exploratory runs remain valid).
+    const QString &benchmarkDefinitionId() const { return m_benchmarkDefinitionId; }
+    void setBenchmarkDefinitionId( const QString &id ) { m_benchmarkDefinitionId = id; }
+    quint64 benchmarkDefinitionVersion() const { return m_benchmarkDefinitionVersion; }
+    void setBenchmarkDefinitionVersion( quint64 version ) { m_benchmarkDefinitionVersion = version; }
     /// Model identity: catalog "id@version" + content digest (ADR 0137).
     const QString &modelId() const { return m_modelId; }
     void setModelId( const QString &id ) { m_modelId = id; }
@@ -248,6 +254,8 @@ class ExperimentRun
     QString m_datasetFingerprint;
     QString m_splitManifestId;
     QString m_splitFingerprint;
+    QString m_benchmarkDefinitionId;
+    quint64 m_benchmarkDefinitionVersion = 0;
     QString m_modelId;
     QString m_modelDigest;
     quint64 m_seed = 0;
