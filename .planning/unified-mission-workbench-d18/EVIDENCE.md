@@ -52,7 +52,9 @@ ctest -R 'test_mission' -V
 | 9a07209a | docs(d18): record PR #991 |
 | e6c8affb | feat(d18): mount D14/D15/D17 + publish Result/workflow identity |
 | a46941e5 | docs(d18): evidence, decisions, review log, PR body for mount slice |
-| (pending) | feat(d18): mission dual-write + IR2 PipelineRunCoordinator/LabSpec + classify path Results |
+| 3544f4ad | feat(d18): dual-write MissionContext on project save/open |
+| c5773131 | feat(d18): IR2 PipelineRunCoordinator/LabSpec + path-backed classify Results |
+| ec7175d6 | docs(d18): evidence, decisions, review log, PR body for persist/run slice |
 
 ## PR
 
