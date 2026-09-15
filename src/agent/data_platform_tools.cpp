@@ -1181,7 +1181,7 @@ QVariantMap datasetSampleQuery( const QVariantMap &args )
 QVariantMap benchmarkList( const QVariantMap &args )
 {
     auto store = openExperimentStore( args );
-    BenchmarkService service( store.get() );
+    sicnu::experiment::BenchmarkService service( store.get() );
     const auto hydrated = service.hydrateFromStore();
     if ( !hydrated )
         fail( QStringLiteral( "benchmark hydrate failed: %1" )
@@ -1218,11 +1218,10 @@ QVariantMap benchmarkList( const QVariantMap &args )
 QVariantMap benchmarkInspect( const QVariantMap &args )
 {
     auto store = openExperimentStore( args );
-    BenchmarkService service( store.get() );
+    sicnu::experiment::BenchmarkService service( store.get() );
     (void) service.hydrateFromStore();
 
-    const QString resultId = args.value( QStringLiteral( "result" ) ).toString();
-    if ( !resultId.isEmpty() )
+    const QString resultId = args.value( QStringLiteral( "result" ) ).toString();    if ( !resultId.isEmpty() )
     {
         const auto result = service.resultById( resultId );
         if ( !result )
@@ -1248,7 +1247,7 @@ QVariantMap benchmarkInspect( const QVariantMap &args )
     {
         QJsonObject item;
         item.insert( QStringLiteral( "result_id" ), result.resultId() );
-        item.insert( QStringLiteral( "status" ), benchmarkRunStatusToString( result.status() ) );
+        item.insert( QStringLiteral( "status" ), sicnu::experiment::benchmarkRunStatusToString( result.status() ) );
         item.insert( QStringLiteral( "model_id" ), result.modelId() );
         item.insert( QStringLiteral( "seed" ), qint64( result.seed() ) );
         item.insert( QStringLiteral( "reproducibility_complete" ),
@@ -1262,7 +1261,7 @@ QVariantMap benchmarkInspect( const QVariantMap &args )
 QVariantMap benchmarkCompare( const QVariantMap &args )
 {
     auto store = openExperimentStore( args );
-    BenchmarkService service( store.get() );
+    sicnu::experiment::BenchmarkService service( store.get() );
     (void) service.hydrateFromStore();
     const QString a = args.value( QStringLiteral( "a" ) ).toString();
     const QString b = args.value( QStringLiteral( "b" ) ).toString();
