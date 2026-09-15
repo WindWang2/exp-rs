@@ -26,6 +26,11 @@
 #include "workbench/dataset_experiment_panel.h"
 #include "workbench/model_workbench_panel.h"
 #include "workbench/object_identity.h"
+#include "workbench/mission_context.h"
+
+#include <QJsonDocument>
+#include <memory>
+#include <string>
 #include "cartography/cartography_dock.h"
 #include "visualanalytics/va_workbench_panel.h"
 #include "shell/rs_operator_catalog_panel.h"
@@ -544,9 +549,28 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
             [self]() -> Json::Value {
                 if ( !self || !self->m_selectionContext || !self->m_commandRegistry )
                     return Json::Value();
-                return sicnu::app::workbenchContextToJson(
-                    self->m_selectionContext->snapshot(),
-                    self->m_commandRegistry->commandIds() );
+                const auto snap = self->m_selectionContext->snapshot();
+                Json::Value payload = sicnu::app::workbenchContextToJson(
+                    snap, self->m_commandRegistry->commandIds() );
+                // D18: bounded mission summary for Agent grounding (GOAL §9).
+                sicnu::app::MissionContext mission =
+                    sicnu::app::missionContextFromSelection( snap );
+                if ( self->m_temporalPanel )
+                    mission.temporal = self->m_temporalPanel->exportTemporalContext();
+                sicnu::app::ensureMissionId( mission );
+                const QJsonObject summary = sicnu::app::missionSummaryJson( mission );
+                const QByteArray bytes =
+                    QJsonDocument( summary ).toJson( QJsonDocument::Compact );
+                Json::Value missionJson;
+                Json::CharReaderBuilder builder;
+                std::string errs;
+                const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
+                if ( reader->parse( bytes.constData(), bytes.constData() + bytes.size(),
+                                    &missionJson, &errs ) )
+                {
+                    payload["mission"] = missionJson;
+                }
+                return payload;
             } );
         sicnu::agent::spatial_tools::SpatialToolRegistry::instance().registerTool(
             sicnu::agent::spatial_tools::SpatialToolPtr{ contextTool } );
