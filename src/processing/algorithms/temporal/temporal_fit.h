@@ -147,14 +147,18 @@ struct PhenologyQualityFlags
                                         ///  "threshold_crossing_failed"
 };
 
-/// One automatic cycle: window (circular doy), metrics and quality.
+/// One automatic cycle: metrics and quality. The cycle's samples are
+/// selected as the TIME range between the midpoints to the adjacent peaks —
+/// a season that crosses the calendar-year boundary is one continuous
+/// range, not a wrapped doy window.
 struct PhenologyCycle
 {
   int seasonYear = 0;    ///< harvest year = calendar year of the window END
-                         ///  (wrapped Dec→May windows count toward the year
-                         ///  they end in)
+                         ///  (a Dec→May season counts toward the year it
+                         ///  ends in)
   int cycleIndex = 0;    ///< 0-based within @a seasonYear (chronological by peak)
-  SeasonWindow window;   ///< circular doy window (start > end = wrapped)
+  SeasonWindow window;   ///< reported doy metadata: first/last observed doy
+                         ///  of the cycle's samples (informational)
   SeasonalMetrics metrics;  ///< meaningful only when quality.valid
   PhenologyQualityFlags quality;
 };
@@ -187,12 +191,15 @@ struct PhenologyMultiResult
 
 /// Automatic multi-cycle phenology (Phenology 2.0). Proposes cycle windows
 /// from the seasonal component (seasonalDecompose climatology): local maxima
-/// above a fraction of the seasonal range, merged by minimum cycle span,
-/// strongest @a maxCyclesPerYear per calendar year; window edges are the
-/// circular midpoints between adjacent peaks. Wrapped windows (start > end)
-/// are assigned to the harvest year (year of the window end). Every window
-/// is quality-gated (sample count, coverage, gap fraction, amplitude share)
-/// and refused — never guessed — when the gate fails. Composition of the
+/// above a fraction of the seasonal range that dominate their ±
+/// minCycleSpanDays neighbourhood, merged by minimum cycle span, strongest
+/// @a maxCyclesPerYear per calendar year. Each interior peak's window is the
+/// TIME range between the midpoints to its adjacent peaks — a season that
+/// crosses the calendar-year boundary is one continuous range counted toward
+/// the harvest year (the year the window ends in); series-edge peaks are
+/// never scored (their seasons are truncated, not guessed). Every window is
+/// quality-gated (sample count, coverage, gap fraction, amplitude share) and
+/// refused — never guessed — when the gate fails. Composition of the
 /// existing decomposition + threshold kernels; no new fitting semantics.
 PhenologyMultiResult phenologyMultiCycle(
   const std::vector<float> &y, const std::vector<double> &tDays,

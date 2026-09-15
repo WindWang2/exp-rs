@@ -1,0 +1,183 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "cost_class" : "O(scenes \u00d7 totalRegionWindowPixels) I/O + O(scenes \u00d7 regions) rows",
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "temporal",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "emptyCells",
+          "required" : true
+        },
+        {
+          "data_kind" : "boolean",
+          "name" : "medianEnabled",
+          "required" : true
+        },
+        {
+          "data_kind" : "table",
+          "file_format" : "csv",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "pointRegions",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "polygonRegions",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "regionCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "rowsWritten",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "sceneCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "timeEnd",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "timeStart",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "default" : "true",
+          "name" : "apply_qa_masking",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "default" : "0",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "enum" : 
+          [
+            "blue",
+            "green",
+            "red",
+            "red_edge",
+            "nir",
+            "swir1",
+            "swir2",
+            "vv",
+            "vh"
+          ],
+          "name" : "band_role",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "collection",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "keep_all",
+          "enum" : 
+          [
+            "keep_all",
+            "reject"
+          ],
+          "name" : "duplicate_policy",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "100000",
+          "name" : "max_regions",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "64",
+          "name" : "median_budget_mb",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "regions",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "regions_file",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "scenes",
+          "required" : false,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Extract per-date statistics for MANY points/polygons from a multi-date collection in one call. Regions arrive inline (regions: [{\"id\", \"point\": [x, y] | \"polygon\": [[x, y]...]}]) or as a JSON file. Per region and date the operator reports mean, min, max, population stddev, exact median and the valid-observation count, streamed as CSV rows (region_id,date,t_days,mean,min,max,stddev,median,valid_count). Points map to the pixel under the point; polygons rasterize inside their bounding box by pixel centers. Streaming by date keeps memory O(regions), independent of the raster size outside the region windows.",
+  "display_name" : "Temporal Extract Region Series (Batch Multi-ROI)",
+  "id" : "rs:temporal_extract_regions",
+  "input" : "",
+  "output" : "",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "temporal",
+    "zonal",
+    "time-series"
+  ]
+}

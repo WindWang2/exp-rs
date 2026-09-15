@@ -82,12 +82,15 @@ struct BreakAttributionResult
 };
 
 /// Attributes each break of an existing joint harmonic+trend segmentation.
-/// For break between segments L and R the nested tests are, on the union
-/// span: (1) shared-trend vs separate-trend (2 extra parameters) and
-/// (2) separate-trend vs fully separate trend+seasonal (2·harmonics extra
-/// parameters). Both are weighted-LS F comparisons (plain, unrobust refits —
-/// the test is self-consistent even when the segmentation used IRLS).
-/// Attribution kind combines both p-values at @a options.alpha.
+/// For the break between segments L and R, two nested F comparisons are run
+/// against the FULL separate model (separate intercept/slope AND separate
+/// seasonal sin/cos per side, evaluated on the union span): (1) freeing the
+/// TREND block (2 parameters) beyond free seasonals — a level/slope change;
+/// (2) freeing the SEASONAL block (2·harmonics parameters) beyond a free
+/// trend — an amplitude/phase change. The symmetric design keeps a pure
+/// level step from leaking into the seasonal verdict and vice versa. All
+/// fits are plain weighted-LS (self-consistent even when the segmentation
+/// used IRLS). Attribution kind combines both p-values at @a options.alpha.
 BreakAttributionResult attributeSeasonalTrendBreaks(
     const SeasonalTrendBreaksResult &fit, const std::vector<float> &y,
     const std::vector<double> &tDays, const BreakAttributionOptions &options );

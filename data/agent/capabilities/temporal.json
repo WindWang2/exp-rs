@@ -193,7 +193,7 @@
     "id": "rs:temporal_phenology_multi",
     "family": "temporal",
     "extends": "family:temporal",
-    "intents": ["temporal", "phenology", "quality"],
+    "intents": ["temporal", "phenology", "qa"],
     "temporal": { "min_scenes": 8, "requires_acquisition_time": true },
     "limitations": [
       "Cycle windows come from the seasonal climatology; low-coverage windows are refused (NaN), never guessed; day bands are median-of-seasons doy"
@@ -203,7 +203,7 @@
     "id": "rs:temporal_model_select",
     "family": "temporal",
     "extends": "family:temporal",
-    "intents": ["temporal", "quality"],
+    "intents": ["temporal", "qa"],
     "temporal": { "min_scenes": 4, "requires_acquisition_time": true },
     "limitations": [
       "Bounded candidate grid (not global optimum); block_cv refits per fold and is markedly slower; Gaussian-residual criteria"
@@ -213,7 +213,7 @@
     "id": "rs:temporal_seasonal_breaks",
     "family": "temporal",
     "extends": "family:temporal",
-    "intents": ["temporal", "change", "quality"],
+    "intents": ["temporal", "change", "qa"],
     "temporal": { "min_scenes": 4, "requires_acquisition_time": true },
     "limitations": [
       "Nested-F attribution is asymptotic (Gaussian residuals); greedy segmentation, not a global optimum; kind band is a nominal code 0..4"

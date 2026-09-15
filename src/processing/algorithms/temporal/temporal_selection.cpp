@@ -6,6 +6,7 @@
 #include "temporal_design_detail.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cmath>
 #include <limits>
 
@@ -19,16 +20,19 @@ using detail::kMaxTerms;
 using detail::harmonicTrendDesignRow;
 using detail::evalHarmonicTrend;
 
-/// Union-fit design width: [1, t, sin/cos(1..h), 1_R, t·1_R] with h <= 3.
-constexpr int kUnionTerms = 2 + 2 * 3 + 2;
+/// Union-fit design width: [1, t', sin/cos_L(1..h), sin/cos_R(1..h)] with
+/// h <= 3.
+constexpr int kUnionTerms = 2 + 4 * 3;
 
-/// Plain (weight-1-on-finite) harmonic+trend OLS over [a, b). Same Gram
-/// accumulation order as the shared segmentation's fitSegment so results
-/// agree with the wired operator path. Returns false when the segment holds
-/// fewer valid samples than terms or the system is singular.
+/// Plain (weight-1-on-finite) harmonic+trend OLS over [a, b). The design
+/// time axis is centered at @a tCenter (the break) so intercepts are levels
+/// AT the break — direct jump estimates, better conditioned, less
+/// level/seasonal confounding inside the test window. Returns false when
+/// the segment holds fewer valid samples than terms or the system is
+/// singular.
 bool fitPlain( const std::vector<float> &y, const std::vector<double> &tDays,
                int a, int b, int harmonics, std::vector<double> *coefOut,
-               double *sseOut, int *validOut )
+               double *sseOut, int *validOut, double tCenter )
 {
   std::vector<double> ata( static_cast<size_t>( kMaxTerms ) * kMaxTerms, 0.0 );
   std::vector<double> atb( kMaxTerms, 0.0 );
@@ -39,7 +43,8 @@ bool fitPlain( const std::vector<float> &y, const std::vector<double> &tDays,
   {
     if ( !std::isfinite( y[static_cast<size_t>( i )] ) )
       continue;
-    const int m = harmonicTrendDesignRow( tDays[static_cast<size_t>( i )], harmonics, design );
+    const int m = harmonicTrendDesignRow( tDays[static_cast<size_t>( i )] - tCenter,
+                                          harmonics, design );
     for ( int r = 0; r < m; ++r )
     {
       atb[static_cast<size_t>( r )] += design[r] * y[static_cast<size_t>( i )];
@@ -67,7 +72,8 @@ bool fitPlain( const std::vector<float> &y, const std::vector<double> &tDays,
   {
     if ( !std::isfinite( y[static_cast<size_t>( i )] ) )
       continue;
-    const int m = harmonicTrendDesignRow( tDays[static_cast<size_t>( i )], harmonics, design );
+    const int m = harmonicTrendDesignRow( tDays[static_cast<size_t>( i )] - tCenter,
+                                          harmonics, design );
     double v = 0.0;
     for ( int r = 0; r < m; ++r )
       v += coef[r] * design[r];
@@ -83,12 +89,96 @@ bool fitPlain( const std::vector<float> &y, const std::vector<double> &tDays,
   return true;
 }
 
-/// Constrained union fit over [l, r) at break @a b: seasonal sin/cos shared,
-/// intercept + slope separate per side (design [1, t, sin/cos..., 1_R, t·1_R]).
+/// Constrained union fit over [l, r) at break @a b: intercept + slope
+/// SHARED, seasonal sin/cos SEPARATE per side (design [1, t', sin/cos_L...,
+/// sin/cos_R...] with t' = t − @a tCenter, the break day). The symmetric
+/// complement of fitUnionTrendChange: together they let each model block
+/// (trend, seasonal) be tested against the FULL separate model, so a pure
+/// amplitude change does not leak into the trend verdict (and vice versa).
 /// Returns false when too few valid samples or singular.
+bool fitUnionSeasonalChange( const std::vector<float> &y,
+                             const std::vector<double> &tDays, int l, int r,
+                             int b, int harmonics, double *sseOut,
+                             int *validOut, double tCenter )
+{
+  double ata[static_cast<size_t>( kUnionTerms ) * kUnionTerms] = {};
+  double atb[kUnionTerms] = {};
+  double designL[kUnionTerms];
+  double designR[kUnionTerms];
+  const int m = 2 + 4 * harmonics;
+  int valid = 0;
+  for ( int i = l; i < r; ++i )
+  {
+    if ( !std::isfinite( y[static_cast<size_t>( i )] ) )
+      continue;
+    const double t = tDays[static_cast<size_t>( i )] - tCenter;
+    harmonicTrendDesignRow( t, harmonics, designL );
+    // Shared [1, t'] then this side's seasonal block.
+    designR[0] = designL[0];
+    designR[1] = designL[1];
+    for ( int c = 2; c < m; ++c )
+      designR[c] = 0.0;
+    const int dst = i >= b ? 2 + 2 * harmonics : 2;
+    for ( int c = 0; c < 2 * harmonics; ++c )
+      designR[dst + c] = designL[2 + c];
+    for ( int rr = 0; rr < m; ++rr )
+    {
+      atb[rr] += designR[rr] * y[static_cast<size_t>( i )];
+      for ( int c = 0; c < m; ++c )
+        ata[static_cast<size_t>( rr ) * kUnionTerms + c] += designR[rr] * designR[c];
+    }
+    ++valid;
+  }
+  if ( valid < m )
+    return false;
+  std::vector<double> aDense( static_cast<size_t>( m ) * m, 0.0 );
+  std::vector<double> bDense( m, 0.0 );
+  for ( int rr = 0; rr < m; ++rr )
+  {
+    bDense[static_cast<size_t>( rr )] = atb[rr];
+    for ( int c = 0; c < m; ++c )
+      aDense[static_cast<size_t>( rr ) * m + c] =
+        ata[static_cast<size_t>( rr ) * kUnionTerms + c];
+  }
+  std::vector<double> coef;
+  if ( !detail::solveSmallDense( aDense, bDense, m, &coef ) )
+    return false;
+  double sse = 0.0;
+  for ( int i = l; i < r; ++i )
+  {
+    if ( !std::isfinite( y[static_cast<size_t>( i )] ) )
+      continue;
+    const double t = tDays[static_cast<size_t>( i )] - tCenter;
+    harmonicTrendDesignRow( t, harmonics, designL );
+    designR[0] = designL[0];
+    designR[1] = designL[1];
+    for ( int c = 2; c < m; ++c )
+      designR[c] = 0.0;
+    const int dst = i >= b ? 2 + 2 * harmonics : 2;
+    for ( int c = 0; c < 2 * harmonics; ++c )
+      designR[dst + c] = designL[2 + c];
+    double v = 0.0;
+    for ( int rr = 0; rr < m; ++rr )
+      v += coef[static_cast<size_t>( rr )] * designR[rr];
+    const double d = y[static_cast<size_t>( i )] - v;
+    sse += d * d;
+  }
+  if ( sseOut )
+    *sseOut = sse;
+  if ( validOut )
+    *validOut = valid;
+  return true;
+}
+
+/// Constrained union fit over [l, r) at break @a b: seasonal sin/cos shared,
+/// intercept + slope SEPARATE per side (design [1, t', sin/cos..., 1_R,
+/// t'·1_R] with t' = t − @a tCenter). The symmetric complement of
+/// fitUnionSeasonalChange. Returns false when too few valid samples or
+/// singular.
 bool fitUnionTrendChange( const std::vector<float> &y,
                           const std::vector<double> &tDays, int l, int r, int b,
-                          int harmonics, double *sseOut, int *validOut )
+                          int harmonics, double *sseOut, int *validOut,
+                          double tCenter )
 {
   double ata[static_cast<size_t>( kUnionTerms ) * kUnionTerms] = {};
   double atb[kUnionTerms] = {};
@@ -101,7 +191,7 @@ bool fitUnionTrendChange( const std::vector<float> &y,
   {
     if ( !std::isfinite( y[static_cast<size_t>( i )] ) )
       continue;
-    const double t = tDays[static_cast<size_t>( i )];
+    const double t = tDays[static_cast<size_t>( i )] - tCenter;
     const int mRow = harmonicTrendDesignRow( t, harmonics, designL );
     for ( int c = 0; c < mRow; ++c )
       designR[c] = designL[c];
@@ -139,7 +229,7 @@ bool fitUnionTrendChange( const std::vector<float> &y,
   {
     if ( !std::isfinite( y[static_cast<size_t>( i )] ) )
       continue;
-    const double t = tDays[static_cast<size_t>( i )];
+    const double t = tDays[static_cast<size_t>( i )] - tCenter;
     const int mRow = harmonicTrendDesignRow( t, harmonics, designL );
     for ( int c = 0; c < mRow; ++c )
       designR[c] = designL[c];
@@ -303,32 +393,38 @@ BreakAttributionResult attributeSeasonalTrendBreaks(
       const int r = fit.segments[static_cast<size_t>( s )].endIndex;
       const int b = event.index;
       std::vector<double> coefL, coefR;
-      double sseL = 0.0, sseR = 0.0, sseShared = 0.0, sseTrend = 0.0, sseFull = 0.0;
-      int validL = 0, validR = 0, validShared = 0, validTrend = 0, validFull = 0;
-      const bool okL = fitPlain( y, tDays, l, b, harmonics, &coefL, &sseL, &validL );
-      const bool okR = fitPlain( y, tDays, b, r, harmonics, &coefR, &sseR, &validR );
+      double sseL = 0.0, sseR = 0.0, sseTrend = 0.0, sseTrendShared = 0.0, sseFull = 0.0;
+      int validL = 0, validR = 0, validTrend = 0, validSeasonShared = 0, validFull = 0;
+      // Center the design at the break day (intercepts = levels AT the
+      // break; better conditioned).
+      const double tCenter = tDays[static_cast<size_t>( b )];
+      const bool okL = fitPlain( y, tDays, l, b, harmonics, &coefL, &sseL, &validL, tCenter );
+      const bool okR = fitPlain( y, tDays, b, r, harmonics, &coefR, &sseR, &validR, tCenter );
       const int nUnion = validL + validR;
       const int dfFull = nUnion - ( 4 + 4 * harmonics );
-      const int dfTrend = nUnion - ( 4 + 2 * harmonics );
-      const bool okShared =
-        fitPlain( y, tDays, l, r, harmonics, nullptr, &sseShared, &validShared );
       const bool okTrend =
-        fitUnionTrendChange( y, tDays, l, r, b, harmonics, &sseTrend, &validTrend );
+        fitUnionTrendChange( y, tDays, l, r, b, harmonics, &sseTrend, &validTrend,
+                             tCenter );
+      const bool okSeasonShared =
+        fitUnionSeasonalChange( y, tDays, l, r, b, harmonics, &sseTrendShared,
+                                &validSeasonShared, tCenter );
       sseFull = sseL + sseR;
       validFull = nUnion;
-      if ( okL && okR && okShared && okTrend && dfFull >= 1 && dfTrend >= 1 )
+      if ( okL && okR && okTrend && okSeasonShared && dfFull >= 1 )
       {
-        // Trend-change test: shared seasonal + shared trend (terms) vs
-        // shared seasonal + separate intercept/slope (terms + 2).
+        // Symmetric nested tests against the FULL separate model (SSE_full,
+        // the smallest SSE): freeing the trend block (2 params: side
+        // intercept+slope) beyond free seasonals, and freeing the seasonal
+        // block (2·harmonics params) beyond a free trend. A pure level step
+        // moves only the first statistic; a pure amplitude/phase change
+        // moves only the second; a mixed break moves both.
         const double fTrend =
-          ( ( sseTrend - sseShared ) / 2.0 ) /
-          ( sseShared / static_cast<double>( dfTrend ) );
-        const double pTrend = fSurvival( fTrend, 2.0, static_cast<double>( dfTrend ) );
-        // Seasonal-change test: separate trend (terms + 2) vs fully
-        // separate trend+seasonal (2·terms) — 2·harmonics extra parameters.
+          ( ( sseTrendShared - sseFull ) / 2.0 ) /
+          ( sseFull / static_cast<double>( dfFull ) );
+        const double pTrend = fSurvival( fTrend, 2.0, static_cast<double>( dfFull ) );
         const double fSeasonal =
-          ( ( sseFull - sseTrend ) / ( 2.0 * harmonics ) ) /
-          ( sseTrend / static_cast<double>( dfFull ) );
+          ( ( sseTrend - sseFull ) / ( 2.0 * harmonics ) ) /
+          ( sseFull / static_cast<double>( dfFull ) );
         const double pSeasonal =
           fSurvival( fSeasonal, 2.0 * harmonics, static_cast<double>( dfFull ) );
         out.fStatistic = fSeasonal;
@@ -364,11 +460,11 @@ BreakAttributionResult attributeSeasonalTrendBreaks(
         }
         out.seasonalShift = std::sqrt( shift );
         // Reported trend magnitude: plain-fit level jump at the break day
-        // (matches the tests; the segmentation magnitude may differ when it
-        // ran with robust IRLS).
+        // (evaluated on the centered axis; the segmentation magnitude may
+        // differ when it ran with robust IRLS).
         out.trendMagnitude =
-          std::abs( evalHarmonicTrend( coefR, out.breakDays, harmonics ) -
-                    evalHarmonicTrend( coefL, out.breakDays, harmonics ) );
+          std::abs( evalHarmonicTrend( coefR, out.breakDays - tCenter, harmonics ) -
+                    evalHarmonicTrend( coefL, out.breakDays - tCenter, harmonics ) );
         ++result.testedCount;
         if ( out.kind == BreakKind::SeasonalOnly || out.kind == BreakKind::Both )
           ++result.seasonalCount;
@@ -584,7 +680,10 @@ ModelSelectionResult selectSeasonalTrendModel(
           score.fittable ? scoreFromRss( fit.rss, validTotal, score.paramCount,
                                          opts.penalty )
                          : kNanD;
-        if ( !std::isfinite( score.score ) )
+        // Only NaN disqualifies: a perfect fit legitimately scores -inf
+        // (RSS = 0 -> log-likelihood +inf) and wins ties by enumeration
+        // order.
+        if ( std::isnan( score.score ) )
           score.fittable = false;
       }
       result.candidates.push_back( score );

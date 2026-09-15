@@ -1,0 +1,108 @@
+{
+  "capability" : 
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "spectral",
+    "io" : 
+    {
+      "inputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
+        }
+      ],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "json",
+          "file_format" : "json",
+          "name" : "spectrumOut",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "components",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "errorOut",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "output",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "spectrumOut",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "spectrumRef",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "transform",
+          "required" : true,
+          "type" : "string"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Component subsets are a documented approximation: the dropped components' contribution is reported via errorOut / reconstructionError, never silently ignored."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : 
+    [
+      "Requires the transform artifact written by rs:mnf (transformOut); the model is digest-verified on load."
+    ],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Reconstruct band space from MNF components using the transform model artifact from rs:mnf (full inverse or a quantified component subset).",
+  "display_name" : "Inverse MNF",
+  "id" : "rs:mnf_inverse",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "mnf",
+    "hyperspectral",
+    "inverse-transform"
+  ]
+}

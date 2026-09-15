@@ -1,96 +1,104 @@
 {
-  "capability": {
-    "applicability": {
-      "land_cover": [
-        "农田",
-        "草地",
-        "森林"
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u519c\u7530",
+        "\u8349\u5730",
+        "\u68ee\u6797"
       ],
-      "scenes": [
-        "物候建模前的模型复杂度选择",
-        "谐波阶数论证",
-        "分区拟合诊断"
+      "scenes" : 
+      [
+        "\u7269\u5019\u5efa\u6a21\u524d\u7684\u6a21\u578b\u590d\u6742\u5ea6\u9009\u62e9",
+        "\u8c10\u6ce2\u9636\u6570\u8bba\u8bc1",
+        "\u5206\u533a\u62df\u5408\u8bca\u65ad"
       ]
     },
-    "band_roles": {},
-    "crs": {
-      "requires_projected": false,
-      "requires_shared_grid": false
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
     },
-    "determinism": {
-      "cost_class": "O(candidates × tile × scenes × iterations × terms²); × (cvFolds+1) for block_cv",
-      "grade": "bit_exact",
-      "large_raster_safe": true,
-      "memory_policy": "streaming",
-      "side_effects": false,
-      "stochastic": false
+    "determinism" : 
+    {
+      "cost_class" : "O(candidates \u00d7 tile \u00d7 scenes \u00d7 iterations \u00d7 terms\u00b2) \u2014 up to (maxHarmonics+1) \u00d7 (maxBreaks+1) fits per pixel; \u00d7 (cvFolds+1) for block_cv",
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
     },
-    "failure_modes": [
+    "failure_modes" : 
+    [
       {
-        "code": "INVALID_PARAMETER",
-        "when": "maxHarmonics/maxBreaks/cvFolds 超范围",
-        "remedy": "maxHarmonics 0-3，maxBreaks 0-4，cvFolds 2-10"
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "maxHarmonics 0-3\uff0cmaxBreaks 0-4\uff0ccvFolds 2-10",
+        "when" : "maxHarmonics/maxBreaks/cvFolds \u8d85\u8303\u56f4"
       },
       {
-        "code": "NOT_SUPPORTED",
-        "when": "样本不足或无候选可拟合",
-        "remedy": "输出 NaN 拒绝带（degraded），勿用其参与下游统计"
+        "code" : "NOT_SUPPORTED",
+        "remedy" : "\u8f93\u51fa NaN \u62d2\u7edd\u5e26\uff08degraded\uff09\uff0c\u52ff\u7528\u5176\u53c2\u4e0e\u4e0b\u6e38\u7edf\u8ba1",
+        "when" : "\u6837\u672c\u4e0d\u8db3\u6216\u65e0\u5019\u9009\u53ef\u62df\u5408"
       }
     ],
-    "family": "temporal",
-    "io": {
-      "inputs": [],
-      "outputs": [
+    "family" : "temporal",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
         {
-          "data_kind": "json",
-          "name": "memory",
-          "required": true
+          "data_kind" : "json",
+          "name" : "memory",
+          "required" : true
         },
         {
-          "data_kind": "raster",
-          "name": "output",
-          "required": true,
-          "file_format": "tif"
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
         },
         {
-          "data_kind": "json",
-          "name": "pixelsByBreaks",
-          "required": true
+          "data_kind" : "json",
+          "name" : "pixelsByBreaks",
+          "required" : true
         },
         {
-          "data_kind": "json",
-          "name": "pixelsByHarmonics",
-          "required": true
+          "data_kind" : "json",
+          "name" : "pixelsByHarmonics",
+          "required" : true
         },
         {
-          "data_kind": "integer",
-          "name": "pixelsFitted",
-          "required": true
+          "data_kind" : "integer",
+          "name" : "pixelsFitted",
+          "required" : true
         },
         {
-          "data_kind": "integer",
-          "name": "sceneCount",
-          "required": true
+          "data_kind" : "integer",
+          "name" : "sceneCount",
+          "required" : true
         }
       ],
-      "parameters": [
+      "parameters" : 
+      [
         {
-          "name": "apply_qa_masking",
-          "required": false,
-          "type": "boolean",
-          "default": "true"
+          "default" : "true",
+          "name" : "apply_qa_masking",
+          "required" : false,
+          "type" : "boolean"
         },
         {
-          "name": "band",
-          "required": false,
-          "type": "integer",
-          "default": "0"
+          "default" : "0",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
         },
         {
-          "name": "band_role",
-          "required": false,
-          "type": "enum",
-          "enum": [
+          "enum" : 
+          [
             "blue",
             "green",
             "red",
@@ -100,114 +108,130 @@
             "swir2",
             "vv",
             "vh"
-          ]
+          ],
+          "name" : "band_role",
+          "required" : false,
+          "type" : "enum"
         },
         {
-          "name": "collection",
-          "required": false,
-          "type": "string"
+          "name" : "collection",
+          "required" : false,
+          "type" : "string"
         },
         {
-          "name": "duplicate_policy",
-          "required": false,
-          "type": "enum",
-          "default": "keep_all",
-          "enum": [
+          "default" : "4",
+          "name" : "cvFolds",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "keep_all",
+          "enum" : 
+          [
             "keep_all",
             "reject"
-          ]
+          ],
+          "name" : "duplicate_policy",
+          "required" : false,
+          "type" : "enum"
         },
         {
-          "name": "maxHarmonics",
-          "required": false,
-          "type": "integer",
-          "default": "2"
+          "default" : "2",
+          "name" : "maxBreaks",
+          "required" : false,
+          "type" : "integer"
         },
         {
-          "name": "maxBreaks",
-          "required": false,
-          "type": "integer",
-          "default": "2"
+          "default" : "2",
+          "name" : "maxHarmonics",
+          "required" : false,
+          "type" : "integer"
         },
         {
-          "name": "minSegmentDays",
-          "required": false,
-          "type": "numeric",
-          "default": "90"
+          "default" : "0.100000",
+          "name" : "minImprovement",
+          "required" : false,
+          "type" : "numeric"
         },
         {
-          "name": "minImprovement",
-          "required": false,
-          "type": "numeric",
-          "default": "0.100000"
+          "default" : "90",
+          "name" : "minSegmentDays",
+          "required" : false,
+          "type" : "numeric"
         },
         {
-          "name": "penalty",
-          "required": false,
-          "type": "enum",
-          "default": "aicc",
-          "enum": [
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "aicc",
+          "enum" : 
+          [
             "aicc",
             "bic",
             "block_cv"
-          ]
+          ],
+          "name" : "penalty",
+          "required" : false,
+          "type" : "enum"
         },
         {
-          "name": "cvFolds",
-          "required": false,
-          "type": "integer",
-          "default": "4"
+          "default" : "false",
+          "name" : "robust",
+          "required" : false,
+          "type" : "boolean"
         },
         {
-          "name": "robust",
-          "required": false,
-          "type": "boolean",
-          "default": "false"
+          "name" : "scenes",
+          "required" : false,
+          "type" : "string"
         },
         {
-          "name": "tile_size",
-          "required": false,
-          "type": "integer",
-          "default": "256"
-        },
-        {
-          "name": "output",
-          "required": true,
-          "type": "string"
+          "default" : "256",
+          "name" : "tile_size",
+          "required" : false,
+          "type" : "integer"
         }
       ]
     },
-    "limitations": [],
-    "modality": [
+    "limitations" : [],
+    "modality" : 
+    [
       "optical"
     ],
-    "operator_group": "temporal",
-    "prerequisites": [
+    "operator_group" : "temporal",
+    "prerequisites" : 
+    [
       ">= 4 valid samples"
     ],
-    "schema_version": 2,
-    "summary": "逐像元有界模型选择：{谐波阶数} × {断点预算} 候选网格按 AICc/BIC/分块 CV 打分，平局取最小模型，退化像元如实拒绝。",
-    "teaching_use": {
-      "concepts": [
+    "schema_version" : 2,
+    "summary" : "\u9010\u50cf\u5143\u6709\u754c\u6a21\u578b\u9009\u62e9\uff1a{\u8c10\u6ce2\u9636\u6570} \u00d7 {\u65ad\u70b9\u9884\u7b97} \u5019\u9009\u7f51\u683c\u6309 AICc/BIC/\u5206\u5757 CV \u6253\u5206\uff0c\u5e73\u5c40\u53d6\u6700\u5c0f\u6a21\u578b\uff0c\u9000\u5316\u50cf\u5143\u5982\u5b9e\u62d2\u7edd\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
         "AICc/BIC",
-        "分块交叉验证",
-        "确定性平局规则",
-        "模型退化与拒绝"
+        "\u5206\u5757\u4ea4\u53c9\u9a8c\u8bc1",
+        "\u786e\u5b9a\u6027\u5e73\u5c40\u89c4\u5219",
+        "\u6a21\u578b\u9000\u5316\u4e0e\u62d2\u7edd"
       ],
-      "courses": [
-        "时间序列分析",
-        "统计方法"
+      "courses" : 
+      [
+        "\u65f6\u95f4\u5e8f\u5217\u5206\u6790",
+        "\u7edf\u8ba1\u65b9\u6cd5"
       ],
-      "exercise": "对农田与自然植被分区运行，比较 AICc 与 BIC 选择的谐波阶数分布并解释差异。"
+      "exercise" : "\u5bf9\u519c\u7530\u4e0e\u81ea\u7136\u690d\u88ab\u5206\u533a\u8fd0\u884c\uff0c\u6bd4\u8f83 AICc \u4e0e BIC \u9009\u62e9\u7684\u8c10\u6ce2\u9636\u6570\u5206\u5e03\u5e76\u89e3\u91ca\u5dee\u5f02\u3002"
     }
   },
-  "description": "Bounded per-segment model selection for seasonal-trend series: every pixel's candidate grid {harmonic order 0..maxHarmonics} x {break budget 0..maxBreaks} is scored with AICc, BIC, or deterministic contiguous-block cross-validation, and the winner (exact ties resolve to the smallest model) is reported with its parameter count, score, and segments actually fitted. An explicit, bounded, explainable selection - NOT CCDC (no L1, no online per-element model update). Degenerate pixels (too few valid samples, no fittable candidate) report NaN - a refusal, never a fabricated model.",
-  "display_name": "Temporal Model Select (Per-Segment Order + Breaks)",
-  "id": "rs:temporal_model_select",
-  "input": "",
-  "output": "raster",
-  "schema_version": 2,
-  "tags": [
+  "description" : "Bounded per-segment model selection for seasonal-trend series: every pixel's candidate grid {harmonic order 0..maxHarmonics} x {break budget 0..maxBreaks} is scored with AICc, BIC, or deterministic contiguous-block cross-validation, and the winner (exact ties resolve to the smallest model) is reported with its parameter count, score, and segments actually fitted. An explicit, bounded, explainable selection - NOT CCDC (no L1, no online per-element model update). Degenerate pixels (too few valid samples, no fittable candidate) report NaN - a refusal, never a fabricated model.",
+  "display_name" : "Temporal Model Select (Per-Segment Order + Breaks)",
+  "id" : "rs:temporal_model_select",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
+  [
     "temporal",
     "model-selection",
     "harmonic-model"

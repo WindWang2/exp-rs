@@ -17,6 +17,7 @@ using Catch::Approx;
 
 namespace
 {
+constexpr double kPi = 3.14159265358979323846;
 constexpr double kSigma = 0.01;
 } // namespace
 
@@ -66,12 +67,16 @@ TEST_CASE( "phenology multi: wrapped windows report the harvest year",
     if ( cycle.window.startDoy > cycle.window.endDoy )
     {
       sawWrapped = true;
-      // A valid wrapped cycle's seasonYear is the year of the window END:
-      // its metrics' POS must sit in the low-doy part of that year.
+      // A valid wrapped cycle's POS must sit inside the window's doy set
+      // (either the high-doy head or the low-doy tail around the year
+      // boundary — with 16-day sampling the sampled maximum can land on
+      // either side).
       if ( cycle.quality.valid )
       {
-        CHECK( cycle.metrics.pos >= 1 );
-        CHECK( cycle.metrics.pos <= cycle.window.endDoy + 30 );
+        const double pos = cycle.metrics.pos;
+        const bool inHead = pos >= cycle.window.startDoy;
+        const bool inTail = pos <= cycle.window.endDoy + 30;
+        CHECK( ( inHead || inTail ) );
       }
     }
   }
@@ -112,9 +117,11 @@ TEST_CASE( "phenology multi: single-season control yields one cycle per year",
       PhenologyMultiOptions{} );
   REQUIRE( result.valid );
   CHECK( result.cyclesPerYearMax == 1 );
+  // sin(2*PI*t/365.25) peaks at t = 365.25/4 -> doy ~92; the sampled
+  // maximum lands on the nearest 16-day sample.
   for ( const PhenologyCycle &cycle : result.cycles )
     if ( cycle.quality.valid )
-      CHECK( cycle.metrics.pos == Approx( 183.0 ).margin( 45.0 ) );
+      CHECK( cycle.metrics.pos == Approx( 92.0 ).margin( 45.0 ) );
 }
 
 TEST_CASE( "phenology multi: a long observation gap refuses instead of "

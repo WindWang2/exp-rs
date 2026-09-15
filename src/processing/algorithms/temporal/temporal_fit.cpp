@@ -964,6 +964,36 @@ PhenologyMultiResult phenologyMultiCycle(
     return result;
   }
 
+  // ±span dominance filter: a candidate must be the highest seasonal value
+  // within ±minCycleSpanDays (smoothing can leave small local maxima on the
+  // rising/falling limbs; adjacent-sample checks alone let them through).
+  {
+    std::vector<int> dominant;
+    for ( int p : peaks )
+    {
+      bool dominated = false;
+      for ( int q : validIdx )
+      {
+        if ( q == p || std::fabs( tDays[q] - tDays[p] ) > opts.minCycleSpanDays )
+          continue;
+        if ( decomp.seasonal[q] > decomp.seasonal[p] ||
+             ( decomp.seasonal[q] == decomp.seasonal[p] && q < p ) )
+        {
+          dominated = true;
+          break;
+        }
+      }
+      if ( !dominated )
+        dominant.push_back( p );
+    }
+    peaks = dominant;
+  }
+  if ( peaks.empty() )
+  {
+    result.refusalReason = "degenerate_seasonal_component";
+    return result;
+  }
+
   // Merge peaks closer than minCycleSpanDays (keep the higher peak; ties
   // keep the earlier).
   {
@@ -1017,40 +1047,45 @@ PhenologyMultiResult phenologyMultiCycle(
     peaks = keep;
   }
 
-  // Circular midpoint in 0-based doy space: forward midpoint from a to b
-  // (the climatology axis has 366 bins; midpoints are computed mod 366).
-  auto forwardDist = []( int a, int b ) {
-    return ( ( b - a ) % 366 + 366 ) % 366;
-  };
-  auto mid0 = [&]( int a, int b ) {
-    return ( a + forwardDist( a, b ) / 2 ) % 366;
-  };
-
-  // Window per peak from circular midpoints between adjacent peaks.
+  // Windows are TIME ranges between the midpoints to the adjacent peaks —
+  // the honest representation for seasons that can span the calendar-year
+  // boundary (a circular doy window cannot express a ~1-year season: the
+  // short arc between the two midpoint doys collapses it). A window is
+  // proposed only for peaks that have BOTH neighbours: an edge peak's
+  // season is truncated by the series boundary, and those samples stay
+  // unscored rather than producing a season with fabricated coverage. A
+  // single-peak series keeps one window spanning the whole series.
   struct ProposedWindow
   {
     int peakIdx = 0;
-    int start0 = 0;  // 0-based inclusive
-    int end0 = 0;    // 0-based inclusive
+    double tStart = 0.0;  ///< inclusive midpoint to the previous peak
+    double tEnd = 0.0;    ///< inclusive midpoint to the next peak
   };
   std::vector<ProposedWindow> proposals;
   proposals.reserve( peaks.size() );
-  for ( size_t k = 0; k < peaks.size(); ++k )
+  const int m = static_cast<int>( peaks.size() );
+  for ( int k = 0; k < m; ++k )
   {
-    const int cur0 = std::clamp( doyOf[peaks[k]], 1, 366 ) - 1;
-    const int prev0 = std::clamp( doyOf[peaks[( k + peaks.size() - 1 ) % peaks.size()]], 1, 366 ) - 1;
-    const int next0 = std::clamp( doyOf[peaks[( k + 1 ) % peaks.size()]], 1, 366 ) - 1;
+    const int cur = peaks[static_cast<size_t>( k )];
     ProposedWindow w;
-    w.peakIdx = peaks[k];
-    if ( peaks.size() == 1 )
+    w.peakIdx = cur;
+    if ( m == 1 )
     {
-      w.start0 = 0;
-      w.end0 = 365;
+      w.tStart = tDays.front();
+      w.tEnd = tDays.back();
+    }
+    else if ( k == 0 || k == m - 1 )
+    {
+      continue;  // edge peak: series-truncated season, never scored
     }
     else
     {
-      w.start0 = ( mid0( prev0, cur0 ) + 1 ) % 366;
-      w.end0 = mid0( cur0, next0 );
+      const int prev = peaks[static_cast<size_t>( k - 1 )];
+      const int next = peaks[static_cast<size_t>( k + 1 )];
+      w.tStart = 0.5 * ( tDays[static_cast<size_t>( prev )] +
+                         tDays[static_cast<size_t>( cur )] );
+      w.tEnd = 0.5 * ( tDays[static_cast<size_t>( cur )] +
+                       tDays[static_cast<size_t>( next )] );
     }
     proposals.push_back( w );
   }
@@ -1102,44 +1137,42 @@ PhenologyMultiResult phenologyMultiCycle(
   std::vector<GroupedCycle> grouped;
   for ( const ProposedWindow &w : proposals )
   {
-    const SeasonWindow window{ w.start0 + 1, w.end0 + 1 };
-    const bool wrapped = w.start0 > w.end0;
     const int peakI = w.peakIdx;
-    // Harvest year: calendar year of the window END. For wrapped windows the
-    // samples with doy >= startDoy sit in the year BEFORE the end year.
-    const int peakSeasonYear =
-      yearOf[peakI] + ( wrapped && doyOf[peakI] >= window.startDoy ? 1 : 0 );
 
-    // Collect this window's samples for that harvest year.
+    // Samples of this cycle: the time range between the adjacent-peak
+    // midpoints (no circularity — a season may cross the calendar-year
+    // boundary and still be one continuous range).
     std::vector<int> inWindow;
     for ( int i = 0; i < n; ++i )
     {
       if ( !std::isfinite( y[i] ) )
         continue;
-      const int d = std::clamp( doyOf[i], 1, 366 );
-      const bool inDoy =
-        wrapped ? ( d >= window.startDoy || d <= window.endDoy )
-                : ( d >= window.startDoy && d <= window.endDoy );
-      if ( !inDoy )
-        continue;
-      const int sampleYear =
-        wrapped && d >= window.startDoy ? yearOf[i] + 1 : yearOf[i];
-      if ( sampleYear != peakSeasonYear )
+      if ( tDays[i] < w.tStart || tDays[i] > w.tEnd )
         continue;
       inWindow.push_back( i );
     }
 
+    // Harvest year = calendar year of the window END: the last in-window
+    // sample sits within half a cycle of the window end, so under regular
+    // sampling its year IS the end year (the wrapped Dec-to-May season
+    // counts toward the year it ends in).
     GroupedCycle entry;
-    entry.seasonYear = peakSeasonYear;
+    entry.seasonYear =
+      inWindow.empty() ? yearOf[static_cast<size_t>( peakI ) ]
+                       : yearOf[static_cast<size_t>( inWindow.back() )];
     entry.peakT = tDays[peakI];
-    entry.cycle.seasonYear = peakSeasonYear;
-    entry.cycle.window = window;
+    entry.cycle.seasonYear = entry.seasonYear;
+    // Reported doy metadata: the window's first/last observed doy.
+    entry.cycle.window =
+      inWindow.empty()
+        ? SeasonWindow{ std::clamp( doyOf[static_cast<size_t>( peakI )], 1, 366 ),
+                        std::clamp( doyOf[static_cast<size_t>( peakI )], 1, 366 ) }
+        : SeasonWindow{ std::clamp( doyOf[static_cast<size_t>( inWindow.front() )], 1, 366 ),
+                        std::clamp( doyOf[static_cast<size_t>( inWindow.back() )], 1, 366 ) };
 
     PhenologyQualityFlags &q = entry.cycle.quality;
     q.sampleCount = static_cast<int>( inWindow.size() );
-    const int windowSpanDays = wrapped
-                                 ? ( 366 - window.startDoy + window.endDoy + 1 )
-                                 : ( window.endDoy - window.startDoy + 1 );
+    const double spanDays = std::max( 1e-9, w.tEnd - w.tStart );
     if ( q.sampleCount < opts.minValidPerSeason )
     {
       q.refusalReason = "low_window_samples";
@@ -1147,39 +1180,21 @@ PhenologyMultiResult phenologyMultiCycle(
       continue;
     }
 
-    // Window-relative phase (days since window start) per sample; the
-    // window's start time in t-space is estimated from the earliest sample
-    // (start estimate = t − phase) — exact under regular sampling.
-    auto phaseDays = [&]( int i ) {
-      const int d0 = std::clamp( doyOf[i], 1, 366 ) - 1;
-      return static_cast<double>( forwardDist( w.start0, d0 ) );
-    };
     std::vector<int> ordered = inWindow;
     std::sort( ordered.begin(), ordered.end(),
                [&]( int a, int b ) { return tDays[a] < tDays[b]; } );
-    double windowStartT = tDays[ordered.front()] - phaseDays( ordered.front() );
-    for ( int i : ordered )
-      windowStartT = std::min( windowStartT, tDays[i] - phaseDays( i ) );
     {
-      const double spanDays = static_cast<double>( windowSpanDays );
       double maxGap = 0.0;
       double prevT = 0.0;
       for ( size_t k = 0; k < ordered.size(); ++k )
       {
         const double t = tDays[ordered[k]];
-        if ( k == 0 )
-        {
-          maxGap = std::max( maxGap, t - windowStartT );  // head gap
-        }
-        else
-        {
-          maxGap = std::max( maxGap, t - prevT );  // interior gap
-        }
+        maxGap = std::max( maxGap, k == 0 ? t - w.tStart : t - prevT );
         prevT = t;
       }
-      maxGap = std::max( maxGap, windowStartT + spanDays - prevT );  // tail gap
+      maxGap = std::max( maxGap, w.tEnd - prevT );  // tail gap
       q.gapFraction = std::clamp( maxGap / spanDays, 0.0, 1.0 );
-      const double observedSpan = ( prevT - windowStartT ) + medianSpacing;
+      const double observedSpan = ( prevT - tDays[ordered.front()] ) + medianSpacing;
       q.coverage = std::clamp( observedSpan / spanDays, 0.0, 1.0 );
     }
 
@@ -1203,6 +1218,10 @@ PhenologyMultiResult phenologyMultiCycle(
       q.refusalReason = "below_amplitude_threshold";
     else
     {
+      // The sub-series is already cycle-scoped; pass the widest doy window
+      // so the threshold kernel scores every sample it receives (metrics
+      // are doy-reported; LOS runs on the real t axis, so seasons that
+      // cross the calendar-year boundary are handled naturally).
       std::vector<float> subY;
       std::vector<double> subT;
       std::vector<int> subDoy;
@@ -1216,7 +1235,7 @@ PhenologyMultiResult phenologyMultiCycle(
         subDoy.push_back( doyOf[i] );
       }
       entry.cycle.metrics = phenologyThreshold(
-        subY, subT, subDoy, window.startDoy, window.endDoy, opts.crossingFraction );
+        subY, subT, subDoy, 1, 366, opts.crossingFraction );
       if ( entry.cycle.metrics.valid )
         q.valid = true;
       else
