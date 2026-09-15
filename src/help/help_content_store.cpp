@@ -165,15 +165,23 @@ HelpDescriptor HelpContentStore::parseEntry( const Json::Value &entry, QStringLi
         info.whatHappened = readString( entry, "whatHappened" );
         info.whyItMatters = readString( entry, "whyItMatters" );
         info.severity = parseSeverity( readString( entry, "severity" ), sicnu::data::DiagnosticSeverity::Error );
+        // Absent or "derived" defers to the origin taxonomy at resolve time;
+        // any other value is a content bug — fail closed instead of silently
+        // degrading to Derived (a typo like "retryable" used to vanish here).
         const QString retry = readString( entry, "retry" );
-        if ( retry == QLatin1String( "none" ) )
+        if ( retry.isEmpty() || retry == QLatin1String( "derived" ) )
+            info.retrySense = RetrySense::Derived;
+        else if ( retry == QLatin1String( "none" ) )
             info.retrySense = RetrySense::None;
         else if ( retry == QLatin1String( "manual" ) )
             info.retrySense = RetrySense::Manual;
         else if ( retry == QLatin1String( "transient" ) )
             info.retrySense = RetrySense::Transient;
-        else
-            info.retrySense = RetrySense::Derived;
+        else {
+            errors << QStringLiteral( "%1: diagnostic entry %2 has unknown retry value '%3' (expected none|manual|transient|derived)" )
+                          .arg( context, d.id, retry );
+            return d;
+        }
         info.remediation = readStringList( entry, "remediation" );
         info.technicalNote = readString( entry, "technicalNote" );
         if ( d.title.isEmpty() )

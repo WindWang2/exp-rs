@@ -1,0 +1,176 @@
+[
+  {
+    "id": "command.workbench.cartography",
+    "purpose": "打开制图工作台，从模板排版地图布局，并执行预检、修复与导出。",
+    "prerequisites": [
+      "工程中已有可排版的图层"
+    ],
+    "suggestedNextAction": "在制图工作台完成排版后执行“预检地图版面”",
+    "related": [
+      "command.cartography.compose",
+      "command.cartography.preflight",
+      "workbench.layout"
+    ],
+    "keywords": [
+      "制图",
+      "排版",
+      "地图",
+      "cartography"
+    ]
+  },
+  {
+    "id": "command.workbench.visualAnalytics",
+    "purpose": "打开可视化分析面板：有界采样的直方图、散点图与波段曲线，并支持联动筛选。",
+    "prerequisites": [
+      "工程中已有栅格图层"
+    ],
+    "related": [
+      "workbench.map",
+      "command.workbench.operatorCatalog"
+    ],
+    "keywords": [
+      "可视化",
+      "直方图",
+      "散点",
+      "visual analytics"
+    ]
+  },
+  {
+    "id": "command.workbench.operatorCatalog",
+    "purpose": "浏览与检索 rs: 算子目录：按名称/模态筛选，标记最近使用与收藏。",
+    "suggestedNextAction": "找到目标算子后在工作台或工作流中调用它",
+    "related": [
+      "command.workbench.visualAnalytics"
+    ],
+    "keywords": [
+      "算子",
+      "目录",
+      "检索",
+      "operator catalog"
+    ]
+  },
+  {
+    "id": "command.cartography.compose",
+    "purpose": "将 MapSpec 草稿编译为打印版面，并生成质量报告。",
+    "prerequisites": [
+      "制图工作台中已有完成的 MapSpec 草稿"
+    ],
+    "suggestedNextAction": "编译后运行“预检地图版面”确认质量",
+    "related": [
+      "command.cartography.preflight",
+      "workbench.layout"
+    ],
+    "keywords": [
+      "制图",
+      "版面",
+      "编译",
+      "compose"
+    ]
+  },
+  {
+    "id": "command.cartography.preflight",
+    "purpose": "对当前 MapSpec 草稿运行确定性预检，输出问题清单。",
+    "prerequisites": [
+      "制图工作台中已有 MapSpec 草稿"
+    ],
+    "suggestedNextAction": "按预检报告执行“修复地图版面”",
+    "related": [
+      "command.cartography.repair",
+      "command.cartography.compose"
+    ],
+    "keywords": [
+      "制图",
+      "预检",
+      "preflight"
+    ]
+  },
+  {
+    "id": "command.cartography.repair",
+    "purpose": "对版面执行有界修复，并展示已应用/仍待处理的修复清单。",
+    "prerequisites": [
+      "已运行过“预检地图版面”并存在问题项"
+    ],
+    "suggestedNextAction": "修复后再次预检，通过后执行导出",
+    "related": [
+      "command.cartography.preflight",
+      "command.cartography.export"
+    ],
+    "keywords": [
+      "制图",
+      "修复",
+      "repair"
+    ]
+  },
+  {
+    "id": "command.cartography.export",
+    "purpose": "以原子方式导出版面为 png/pdf/svg，并生成 sha256 证据。",
+    "prerequisites": [
+      "版面已通过预检"
+    ],
+    "related": [
+      "command.cartography.preflight",
+      "workbench.layout"
+    ],
+    "keywords": [
+      "导出",
+      "制图",
+      "sha256",
+      "export"
+    ]
+  },
+  {
+    "id": "command.workbench.classifyStudio",
+    "purpose": "打开交互式分类/变化工作室（D15），绑定 MissionContext 的输入与结果引用。",
+    "prerequisites": [
+      "已通过数据管理器或图层选择好待分类数据"
+    ],
+    "suggestedNextAction": "在工作室中完成训练样本选择与分类执行",
+    "related": [
+      "workbench.classify",
+      "workbench.classification"
+    ],
+    "keywords": [
+      "分类",
+      "变化检测",
+      "工作室",
+      "studio"
+    ]
+  },
+  {
+    "id": "command.workbench.georefDual",
+    "purpose": "打开双画布联动的几何配准工作台（D14），采集 GCP 并将成果 Result 发布进 MissionContext。",
+    "prerequisites": [
+      "工程中已有源影像与参考影像"
+    ],
+    "suggestedNextAction": "在双画布中采集 GCP 并求解变换",
+    "related": [
+      "workbench.georef_i2i",
+      "workbench.georef_i2m"
+    ],
+    "keywords": [
+      "配准",
+      "GCP",
+      "双窗口",
+      "georef"
+    ]
+  },
+  {
+    "id": "command.workbench.ir2Pipeline",
+    "purpose": "打开 IR 2.0 节点图工作流设计器（D17），与 MissionContext/Agent 共享工作流身份。",
+    "prerequisites": [
+      "已有可编排的数据处理步骤构思"
+    ],
+    "suggestedNextAction": "从算子库拖入节点并连线，运行完整工作流",
+    "related": [
+      "command.workflow.new",
+      "command.workflow.run",
+      "command.workbench.operatorCatalog"
+    ],
+    "keywords": [
+      "工作流",
+      "设计器",
+      "节点",
+      "IR 2.0"
+    ]
+  }
+]

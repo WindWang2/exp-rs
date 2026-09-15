@@ -16,7 +16,7 @@ namespace sicnu::help
 namespace
 {
 
-const char *kGlossaryResource = ":/help/terms/rs_glossary.json";
+const char *kGlossaryResource = ":/terms/rs_glossary.json";
 
 const char *const kCategories[] = {
     "radiometric", "atmospheric", "geometric", "spectral",

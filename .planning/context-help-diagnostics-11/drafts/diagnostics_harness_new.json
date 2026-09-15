@@ -1,0 +1,252 @@
+[
+  {
+    "id": "diagnostic.harness.io_error",
+    "family": "harness",
+    "code": "IO_ERROR",
+    "title": "输入/输出错误",
+    "whatHappened": "文件系统层面的读取或写入失败（介质、权限、占用或路径问题）。",
+    "whyItMatters": "数据可能未完整写入，直接续跑可能读到损坏的中间结果。",
+    "severity": "error",
+    "retry": "transient",
+    "remediation": [
+      "确认目标磁盘可写、剩余空间充足且路径未被其他程序占用",
+      "检查文件权限与只读属性",
+      "排除外部占用后重试；反复失败时更换输出目录验证"
+    ],
+    "keywords": [
+      "IO",
+      "磁盘",
+      "权限",
+      "io error"
+    ],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.complex_bands_required",
+    "family": "harness",
+    "code": "COMPLEX_BANDS_REQUIRED",
+    "title": "需要复数波段输入",
+    "whatHappened": "该 SAR 处理要求复数（slc/复值）波段，而输入是实值或强度数据。",
+    "whyItMatters": "用强度数据替代复数数据会丢失相位信息，处理结果无效。",
+    "severity": "error",
+    "retry": "none",
+    "remediation": [
+      "改用 SLC/复数产品作为输入",
+      "确认波段选择包含复值波段而非振幅/强度波段"
+    ],
+    "keywords": [
+      "SAR",
+      "复数",
+      "SLC",
+      "complex bands"
+    ],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.acquisition_dates_missing",
+    "family": "harness",
+    "code": "ACQUISITION_DATES_MISSING",
+    "title": "缺少获取日期",
+    "whatHappened": "时序处理要求每个场景携带获取日期，输入集合中没有日期元数据。",
+    "whyItMatters": "没有时间轴就无法做时序排序、物候或变化分析，结果不可解释。",
+    "severity": "error",
+    "retry": "none",
+    "remediation": [
+      "为集合中的每个场景补充获取日期元数据",
+      "确认数据源导出时包含时间维度信息"
+    ],
+    "keywords": [
+      "时间序列",
+      "日期",
+      "元数据",
+      "acquisition date"
+    ],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.dates_not_ascending",
+    "family": "harness",
+    "code": "DATES_NOT_ASCENDING",
+    "title": "日期未按升序排列",
+    "whatHappened": "时序输入的场景日期不是严格递增序列。",
+    "whyItMatters": "时序模型（插值/趋势/突变）假设时间有序，乱序会产生错误的时间语义。",
+    "severity": "error",
+    "retry": "none",
+    "remediation": [
+      "按获取日期对场景重新排序后再运行",
+      "检查重复日期并去重"
+    ],
+    "keywords": [
+      "时序",
+      "排序",
+      "日期",
+      "ascending"
+    ],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.unwrap_provider_unavailable",
+    "family": "harness",
+    "code": "UNWRAP_PROVIDER_UNAVAILABLE",
+    "title": "相位解缠提供者不可用",
+    "whatHappened": "环境中的相位解缠外部工具（如 SNAPHU）未安装或不可调用。",
+    "whyItMatters": "InSAR 解缠步骤依赖外部提供者，缺失时无法继续产出解缠结果。",
+    "severity": "error",
+    "retry": "manual",
+    "remediation": [
+      "安装并配置相位解缠外部工具，确保其在 PATH 中可调用",
+      "在算子参数中选择可用的解缠提供者"
+    ],
+    "keywords": [
+      "InSAR",
+      "解缠",
+      "SNAPHU",
+      "provider"
+    ],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.wavelength_incompatible",
+    "family": "harness",
+    "code": "WAVELENGTH_INCOMPATIBLE",
+    "title": "波长不兼容",
+    "whatHappened": "编译期检查发现链路中相邻步骤的传感器波长/波段配置不兼容。",
+    "whyItMatters": "波长不一致会让辐射/相位类计算失去物理意义（如极化分解、干涉）。",
+    "severity": "error",
+    "retry": "none",
+    "remediation": [
+      "统一链路输入的传感器/波段配置",
+      "在算子参数中显式声明波长或波段映射"
+    ],
+    "keywords": [
+      "波长",
+      "编译",
+      "wavelength"
+    ],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.temporal_misalignment",
+    "family": "harness",
+    "code": "TEMPORAL_MISALIGNMENT",
+    "title": "时间基准不对齐",
+    "whatHappened": "编译期检查发现链路步骤间的时间基准/采样网格不一致。",
+    "whyItMatters": "时间不对齐会让时序合成与变化检测在错误的时间点上比较。",
+    "severity": "error",
+    "retry": "none",
+    "remediation": [
+      "统一各步骤的时间基准（如同一日历重采样）",
+      "插入时间对齐/重采样步骤后再串联"
+    ],
+    "keywords": [
+      "时间",
+      "对齐",
+      "temporal"
+    ],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.categorical_mismatch",
+    "family": "harness",
+    "code": "CATEGORICAL_MISMATCH",
+    "title": "类别体系不一致",
+    "whatHappened": "编译期检查发现上下游步骤的分类/编码体系不同（类别名或编码表不匹配）。",
+    "whyItMatters": "类别错位会让下游统计/融合把不同地物当成同一类，结论不可信。",
+    "severity": "error",
+    "retry": "none",
+    "remediation": [
+      "统一上下游的分类编码表或插入类别映射步骤",
+      "核对分类体系的类别名与数量"
+    ],
+    "keywords": [
+      "分类",
+      "类别",
+      "编码",
+      "categorical"
+    ],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.resource_over_budget",
+    "family": "harness",
+    "code": "RESOURCE_OVER_BUDGET",
+    "title": "资源超出预算",
+    "whatHappened": "编译期资源评估认为该链路的内存/规模需求超出允许预算。",
+    "whyItMatters": "预算是执行前拒绝（fail-closed），避免运行中途内存耗尽产生不可信结果。",
+    "severity": "error",
+    "retry": "none",
+    "remediation": [
+      "缩小处理范围（裁剪/降采样）或分块运行",
+      "调低算子的窗口/批次等资源参数"
+    ],
+    "keywords": [
+      "资源",
+      "预算",
+      "内存",
+      "budget"
+    ],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.output_path_collision",
+    "family": "harness",
+    "code": "OUTPUT_PATH_COLLISION",
+    "title": "输出路径冲突",
+    "whatHappened": "编译期发现多个步骤会写入同一个输出路径。",
+    "whyItMatters": "并行写同一文件会互相覆盖，产生不完整或混合的结果。",
+    "severity": "error",
+    "retry": "none",
+    "remediation": [
+      "为每个步骤指定独立的输出路径",
+      "确需复用路径时改为串行显式覆盖并注明"
+    ],
+    "keywords": [
+      "输出",
+      "路径",
+      "冲突",
+      "collision"
+    ],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.nondeterministic_chain",
+    "family": "harness",
+    "code": "NONDETERMINISTIC_CHAIN",
+    "title": "链路包含非确定性步骤",
+    "whatHappened": "编译期发现链路中存在未固定随机种子的非确定性算子。",
+    "whyItMatters": "非确定性会让结果不可复现，无法通过零漂移判分与审查。",
+    "severity": "error",
+    "retry": "none",
+    "remediation": [
+      "为非确定性算子显式固定随机种子",
+      "或改用确定性等价算子"
+    ],
+    "keywords": [
+      "确定性",
+      "种子",
+      "nondeterministic"
+    ],
+    "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.harness.fact_conflict",
+    "family": "harness",
+    "code": "FACT_CONFLICT",
+    "title": "事实冲突",
+    "whatHappened": "编译期发现两处声明的事实（如同一参数/角色/单位）相互矛盾。",
+    "whyItMatters": "矛盾的事实会让链路语义不可判定，任何一处取值都可能是错的。",
+    "severity": "error",
+    "retry": "none",
+    "remediation": [
+      "核对冲突的事实声明，保留正确的一处",
+      "为派生事实提供唯一的权威来源"
+    ],
+    "keywords": [
+      "事实",
+      "冲突",
+      "一致性",
+      "fact"
+    ],
+    "category": "错误与诊断"
+  }
+]
