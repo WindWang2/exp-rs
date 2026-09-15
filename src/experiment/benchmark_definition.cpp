@@ -26,6 +26,23 @@ QJsonObject MetricResult::toJson() const
     return json;
 }
 
+MetricResult MetricResult::fromJson( const QJsonObject &json )
+{
+    MetricResult metric;
+    metric.name = json.value( QStringLiteral( "name" ) ).toString();
+    metric.definitionVersion = json.value( QStringLiteral( "definition_version" ) ).toString();
+    metric.value = json.value( QStringLiteral( "value" ) ).toDouble();
+    metric.scope = json.value( QStringLiteral( "scope" ) ).toString();
+    metric.classCode = json.value( QStringLiteral( "class" ) ).toString();
+    metric.support = json.contains( QStringLiteral( "support" ) )
+                         ? json.value( QStringLiteral( "support" ) ).toInteger( -1 )
+                         : -1;
+    const QJsonArray warnings = json.value( QStringLiteral( "warnings" ) ).toArray();
+    for ( const QJsonValue &warning : warnings )
+        metric.warnings.append( warning.toString() );
+    return metric;
+}
+
 sicnu::data::Result<void> BenchmarkDefinition::validate() const
 {
     using Result = sicnu::data::Result<void>;

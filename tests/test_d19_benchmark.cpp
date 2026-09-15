@@ -7,9 +7,12 @@
 #include "experiment/benchmark_definition.h"
 #include "experiment/benchmark_runner.h"
 #include "experiment/benchmark_service.h"
+#include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
 
 #include <cmath>
+
+#include <QTemporaryDir>
 
 using namespace sicnu::experiment;
 using namespace sicnu::dataset;
@@ -167,8 +170,8 @@ TEST_CASE( "D19 benchmark compare and seed summary", "[d19][benchmark][compare]"
     other.setName( QStringLiteral( "changed" ) );
     CHECK( !service.publishDefinition( other ).has_value() );
 
-    service.recordResult( *a );
-    service.recordResult( *b );
+    REQUIRE( service.recordResult( *a ).has_value() );
+    REQUIRE( service.recordResult( *b ).has_value() );
     const auto summary =
         service.seedSummary( QStringLiteral( "bench-class-v1" ),
                              QStringList{ QStringLiteral( "overall_accuracy" ) } );
@@ -194,4 +197,43 @@ TEST_CASE( "D19 ExperimentRun carries optional benchmark pins",
     REQUIRE( parsed.has_value() );
     CHECK( parsed->benchmarkDefinitionId() == QStringLiteral( "bench-class-v1" ) );
     CHECK( parsed->benchmarkDefinitionVersion() == 1 );
+}
+
+TEST_CASE( "D19 BenchmarkService persists via ExperimentStore",
+           "[d19][benchmark][persist]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    ExperimentStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "exp.sqlite" ) ) ) );
+
+    BenchmarkService service( &store );
+    REQUIRE( service.publishDefinition( makeDefinition() ).has_value() );
+
+    BenchmarkRunRequest request;
+    request.definition = makeDefinition();
+    request.modelId = QStringLiteral( "model-a" );
+    request.modelDigest = QStringLiteral( "digest" );
+    request.softwareRevision = QStringLiteral( "rev" );
+    BenchmarkTruth truth;
+    truth.sampleId = QStringLiteral( "s1" );
+    truth.truthClass = QStringLiteral( "water" );
+    request.truths.append( truth );
+    BenchmarkPrediction pred;
+    pred.sampleId = QStringLiteral( "s1" );
+    pred.predictedClass = QStringLiteral( "water" );
+    request.predictions.append( pred );
+    const auto run = service.run( request );
+    REQUIRE( run.has_value() );
+    CHECK( run->status() == BenchmarkRunStatus::Completed );
+
+    // Cold service hydrates from the same store.
+    BenchmarkService cold( &store );
+    REQUIRE( cold.hydrateFromStore().has_value() );
+    const auto def = cold.definition( QStringLiteral( "bench-class-v1" ), 1 );
+    REQUIRE( def.has_value() );
+    CHECK( def->contentDigest() == makeDefinition().contentDigest() );
+    const auto results = cold.resultsFor( QStringLiteral( "bench-class-v1" ) );
+    REQUIRE( !results.isEmpty() );
+    CHECK( results.first().resultId() == run->resultId() );
 }

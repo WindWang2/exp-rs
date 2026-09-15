@@ -101,6 +101,7 @@ class BenchmarkResult
     void setProtocol( const EvaluationProtocol &protocol ) { m_protocol = protocol; }
 
     QJsonObject toJson() const;
+    static Result<BenchmarkResult> fromJson( const QJsonObject &json );
 
   private:
     QString m_resultId;

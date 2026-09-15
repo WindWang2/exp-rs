@@ -64,6 +64,68 @@ QJsonObject BenchmarkResult::toJson() const
     return json;
 }
 
+namespace
+{
+BenchmarkRunStatus statusFromString( const QString &text )
+{
+    if ( text == QLatin1String( "completed" ) )
+        return BenchmarkRunStatus::Completed;
+    if ( text == QLatin1String( "aborted" ) )
+        return BenchmarkRunStatus::Aborted;
+    return BenchmarkRunStatus::Failed;
+}
+} // namespace
+
+Result<BenchmarkResult> BenchmarkResult::fromJson( const QJsonObject &json )
+{
+    using ResultT = Result<BenchmarkResult>;
+    if ( json.value( QStringLiteral( "schema_version" ) ).toInt() !=
+         kBenchmarkResultSerializationVersion )
+    {
+        return ResultT::failure( Diagnostic{
+            QStringLiteral( "experiment.benchmark_result_version" ),
+            QStringLiteral( "unsupported benchmark result schema_version" ),
+            DiagnosticSeverity::Error,
+        } );
+    }
+    BenchmarkResult result;
+    result.setResultId( json.value( QStringLiteral( "result_id" ) ).toString() );
+    result.setBenchmarkId( json.value( QStringLiteral( "benchmark_id" ) ).toString() );
+    result.setBenchmarkVersion(
+        quint64( json.value( QStringLiteral( "benchmark_version" ) ).toInteger( 0 ) ) );
+    result.setDefinitionDigest( json.value( QStringLiteral( "definition_digest" ) ).toString() );
+    result.setStatus( statusFromString( json.value( QStringLiteral( "status" ) ).toString() ) );
+    result.setFailureCode( json.value( QStringLiteral( "failure_code" ) ).toString() );
+    result.setFailureMessage( json.value( QStringLiteral( "failure_message" ) ).toString() );
+    result.setDatasetVersionId( json.value( QStringLiteral( "dataset_version_id" ) ).toString() );
+    result.setSplitManifestId( json.value( QStringLiteral( "split_manifest_id" ) ).toString() );
+    result.setModelId( json.value( QStringLiteral( "model_id" ) ).toString() );
+    result.setModelDigest( json.value( QStringLiteral( "model_digest" ) ).toString() );
+    result.setSeed( quint64( json.value( QStringLiteral( "seed" ) ).toInteger( 0 ) ) );
+    result.setSoftwareRevision( json.value( QStringLiteral( "software_revision" ) ).toString() );
+    result.setExperimentRunId( json.value( QStringLiteral( "experiment_run_id" ) ).toString() );
+    result.setReproducibilityComplete(
+        json.value( QStringLiteral( "reproducibility_complete" ) ).toBool() );
+    for ( const QJsonValue &gap : json.value( QStringLiteral( "reproducibility_gaps" ) ).toArray() )
+        result.reproducibilityGaps().append( gap.toString() );
+    for ( const QJsonValue &metric : json.value( QStringLiteral( "metrics" ) ).toArray() )
+        result.metrics().append( MetricResult::fromJson( metric.toObject() ) );
+    result.setRawMetrics( json.value( QStringLiteral( "raw_metrics" ) ).toObject() );
+    const auto protocol =
+        EvaluationProtocol::fromJson( json.value( QStringLiteral( "protocol" ) ).toObject() );
+    if ( protocol )
+        result.setProtocol( protocol.value() );
+    if ( result.resultId().isEmpty() || result.benchmarkId().isEmpty() )
+    {
+        return ResultT::failure( Diagnostic{
+            QStringLiteral( "experiment.benchmark_result_invalid" ),
+            QStringLiteral( "result_id and benchmark_id are required" ),
+            DiagnosticSeverity::Error,
+        } );
+    }
+    return ResultT::success( result );
+}
+
 QVector<MetricResult> metricResultsFromConfusion( const ConfusionMatrix &matrix,
                                                   const QStringList &metricNames,
                                                   const QString &scope )

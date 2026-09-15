@@ -1,16 +1,66 @@
 // benchmark_service.cpp
 #include "benchmark_service.h"
 
+#include <QSet>
+
 namespace sicnu::experiment
 {
 
-namespace
-{
-QString defKey( const QString &id, quint64 version )
+QString BenchmarkService::defKey( const QString &id, quint64 version )
 {
     return id + QLatin1Char( '@' ) + QString::number( version );
 }
-} // namespace
+
+BenchmarkService::BenchmarkService( ExperimentStore *store )
+  : m_store( store )
+{
+}
+
+void BenchmarkService::setStore( ExperimentStore *store )
+{
+    m_store = store;
+}
+
+Result<void> BenchmarkService::hydrateFromStore( qint64 definitionLimit, qint64 resultLimit )
+{
+    using ResultT = Result<void>;
+    if ( !m_store || !m_store->isOpen() )
+        return ResultT::success();
+
+    const auto defs = m_store->listBenchmarkDefinitions( 0, definitionLimit );
+    if ( !defs )
+        return ResultT::failure( defs.diagnostics() );
+    for ( const BenchmarkDefinition &definition : defs.value().second )
+        m_definitions.insert( defKey( definition.benchmarkId(), definition.benchmarkVersion() ),
+                              definition );
+
+    // Results: page via listing each known definition id, plus any already cached.
+    QSet<QString> seenIds;
+    for ( auto it = m_definitions.constBegin(); it != m_definitions.constEnd(); ++it )
+        seenIds.insert( it.value().benchmarkId() );
+    qint64 remaining = resultLimit;
+    for ( const QString &benchmarkId : seenIds )
+    {
+        if ( remaining <= 0 )
+            break;
+        const QVector<BenchmarkResult> rows =
+            m_store->benchmarkResultsFor( benchmarkId, remaining );
+        for ( const BenchmarkResult &result : rows )
+        {
+            if ( m_resultIndex.contains( result.resultId() ) )
+            {
+                m_results[m_resultIndex.value( result.resultId() )] = result;
+            }
+            else
+            {
+                m_resultIndex.insert( result.resultId(), m_results.size() );
+                m_results.append( result );
+            }
+            --remaining;
+        }
+    }
+    return ResultT::success();
+}
 
 Result<void> BenchmarkService::publishDefinition( const BenchmarkDefinition &definition )
 {
@@ -32,7 +82,17 @@ Result<void> BenchmarkService::publishDefinition( const BenchmarkDefinition &def
                 DiagnosticSeverity::Error,
             } );
         }
-        return Result<void>::success(); // idempotent
+        // Still ensure store has it when bound (idempotent).
+        if ( m_store && m_store->isOpen() )
+            return m_store->saveBenchmarkDefinition( definition );
+        return Result<void>::success();
+    }
+
+    if ( m_store && m_store->isOpen() )
+    {
+        const auto written = m_store->saveBenchmarkDefinition( definition );
+        if ( !written )
+            return written;
     }
     m_definitions.insert( key, definition );
     return Result<void>::success();
@@ -42,13 +102,21 @@ std::optional<BenchmarkDefinition> BenchmarkService::definition( const QString &
                                                                  quint64 version ) const
 {
     const auto it = m_definitions.constFind( defKey( benchmarkId, version ) );
-    if ( it == m_definitions.constEnd() )
-        return std::nullopt;
-    return *it;
+    if ( it != m_definitions.constEnd() )
+        return *it;
+    if ( m_store && m_store->isOpen() )
+        return m_store->benchmarkDefinition( benchmarkId, version );
+    return std::nullopt;
 }
 
 QVector<BenchmarkDefinition> BenchmarkService::listDefinitions( qint64 limit ) const
 {
+    if ( m_definitions.isEmpty() && m_store && m_store->isOpen() )
+    {
+        const auto page = m_store->listBenchmarkDefinitions( 0, limit );
+        if ( page )
+            return page.value().second;
+    }
     QVector<BenchmarkDefinition> out;
     for ( auto it = m_definitions.constBegin(); it != m_definitions.constEnd(); ++it )
     {
@@ -63,19 +131,28 @@ Result<BenchmarkResult> BenchmarkService::run( const BenchmarkRunRequest &reques
 {
     auto result = BenchmarkRunner::run( request );
     if ( result )
-        recordResult( *result );
+    {
+        const auto recorded = recordResult( *result );
+        if ( !recorded )
+            return Result<BenchmarkResult>::failure( recorded.diagnostics() );
+    }
     return result;
 }
 
-void BenchmarkService::recordResult( const BenchmarkResult &result )
+Result<void> BenchmarkService::recordResult( const BenchmarkResult &result )
 {
     if ( m_resultIndex.contains( result.resultId() ) )
     {
         m_results[m_resultIndex.value( result.resultId() )] = result;
-        return;
     }
-    m_resultIndex.insert( result.resultId(), m_results.size() );
-    m_results.append( result );
+    else
+    {
+        m_resultIndex.insert( result.resultId(), m_results.size() );
+        m_results.append( result );
+    }
+    if ( m_store && m_store->isOpen() )
+        return m_store->saveBenchmarkResult( result );
+    return Result<void>::success();
 }
 
 QVector<BenchmarkResult> BenchmarkService::resultsFor( const QString &benchmarkId,
@@ -88,17 +165,29 @@ QVector<BenchmarkResult> BenchmarkService::resultsFor( const QString &benchmarkI
             continue;
         out.append( result );
         if ( out.size() >= limit )
-            break;
+            return out;
     }
+    if ( out.isEmpty() && m_store && m_store->isOpen() )
+        return m_store->benchmarkResultsFor( benchmarkId, limit );
     return out;
+}
+
+std::optional<BenchmarkResult> BenchmarkService::resultById( const QString &resultId ) const
+{
+    const auto it = m_resultIndex.constFind( resultId );
+    if ( it != m_resultIndex.constEnd() )
+        return m_results.at( *it );
+    if ( m_store && m_store->isOpen() )
+        return m_store->benchmarkResultById( resultId );
+    return std::nullopt;
 }
 
 BenchmarkComparison BenchmarkService::compare( const QString &resultIdA,
                                                const QString &resultIdB ) const
 {
-    const auto ia = m_resultIndex.constFind( resultIdA );
-    const auto ib = m_resultIndex.constFind( resultIdB );
-    if ( ia == m_resultIndex.constEnd() || ib == m_resultIndex.constEnd() )
+    const auto a = resultById( resultIdA );
+    const auto b = resultById( resultIdB );
+    if ( !a || !b )
     {
         BenchmarkComparison comparison;
         comparison.resultIdA = resultIdA;
@@ -106,18 +195,13 @@ BenchmarkComparison BenchmarkService::compare( const QString &resultIdA,
         comparison.reasons.append( QStringLiteral( "result id not found" ) );
         return comparison;
     }
-    return compareBenchmarkResults( m_results.at( *ia ), m_results.at( *ib ) );
+    return compareBenchmarkResults( *a, *b );
 }
 
 QVector<BenchmarkSeedSummary> BenchmarkService::seedSummary( const QString &benchmarkId,
                                                              const QStringList &metricNames ) const
 {
-    QVector<BenchmarkResult> subset;
-    for ( const BenchmarkResult &result : m_results )
-    {
-        if ( result.benchmarkId() == benchmarkId )
-            subset.append( result );
-    }
+    QVector<BenchmarkResult> subset = resultsFor( benchmarkId, 10000 );
     return summarizeAcrossSeeds( subset, metricNames );
 }
 

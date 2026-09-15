@@ -126,6 +126,7 @@ struct MetricResult
     QStringList warnings;
 
     QJsonObject toJson() const;
+    static MetricResult fromJson( const QJsonObject &json );
 };
 
 } // namespace sicnu::experiment
