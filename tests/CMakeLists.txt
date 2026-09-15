@@ -8820,6 +8820,7 @@ sicnu_discover_tests(test_object_identity)
 add_executable(test_mission_context
   test_mission_context.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
 )
@@ -8845,6 +8846,7 @@ sicnu_discover_tests(test_mission_context)
 add_executable(test_mission_e2e_scaffolding
   test_mission_e2e_scaffolding.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
 )

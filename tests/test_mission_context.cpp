@@ -7,6 +7,8 @@
 
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QFile>
+#include <QFileInfo>
 
 using sicnu::app::MissionContext;
 using sicnu::app::ObjectKind;
@@ -143,4 +145,35 @@ TEST_CASE( "ensureMissionId mints uuid when empty", "[d18][mission]" )
   const QString first = ctx.missionId;
   sicnu::app::ensureMissionId( ctx );
   REQUIRE( ctx.missionId == first );
+}
+
+#include "app/workbench/mission_context_store.h"
+
+#include <QTemporaryDir>
+
+TEST_CASE( "mission sidecar save/load round-trip", "[d18][mission][persist]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString project = dir.filePath( QStringLiteral( "demo.qgz" ) );
+  QFile touch( project );
+  REQUIRE( touch.open( QIODevice::WriteOnly ) );
+  touch.write( "x" );
+  touch.close();
+
+  MissionContext ctx;
+  ctx.missionName = QStringLiteral( "persist" );
+  ctx.assets.push_back( WorkbenchObjectRef{ ObjectKind::Asset, QStringLiteral( "a" ), QStringLiteral( "A" ) } );
+  QString err;
+  REQUIRE( sicnu::app::saveMissionContextToSidecar( project, ctx, &err ) );
+  REQUIRE( err.isEmpty() );
+  const QString side = sicnu::app::missionSidecarPathForProject( project );
+  REQUIRE( side.endsWith( QStringLiteral( ".mission.json" ) ) );
+  REQUIRE( QFileInfo::exists( side ) );
+
+  MissionContext loaded;
+  REQUIRE( sicnu::app::loadMissionContextFromSidecar( project, loaded, &err ) );
+  REQUIRE( loaded.missionName == QLatin1String( "persist" ) );
+  REQUIRE( loaded.assets.front().id == QLatin1String( "a" ) );
+  REQUIRE( !loaded.missionId.isEmpty() );
 }
