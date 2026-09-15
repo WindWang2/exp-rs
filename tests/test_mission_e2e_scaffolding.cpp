@@ -125,3 +125,24 @@ TEST_CASE( "scenario5_mission_mount_surface_ids_documented", "[d18][mission][e2e
   REQUIRE( surfaces.size() == 3 );
   SUCCEED( "mount surface ids recorded for E2E GUI follow-up on toolchain hosts" );
 }
+
+
+TEST_CASE( "scenario3b_pipeline_run_coordinator_identity", "[d18][mission][e2e]" )
+{
+  // IR2 dock Run binds ActiveWorkflowRef.runner to pipeline_run_coordinator and
+  // publishes a WorkflowRun ref on completion (headless contract).
+  MissionContext ctx = makeSeedMission();
+  ActiveWorkflowRef wf;
+  wf.workflowId = QStringLiteral( "wf-run" );
+  wf.schemaVersion = QStringLiteral( "2.0" );
+  wf.fingerprint = QStringLiteral( "fp-run" );
+  wf.runner = QStringLiteral( "pipeline_run_coordinator" );
+  sicnu::app::setMissionActiveWorkflow( ctx, wf );
+
+  WorkbenchObjectRef runRef{ ObjectKind::WorkflowRun, QStringLiteral( "ir2-run-wf-run-0" ),
+                             QStringLiteral( "IR2 run ok" ) };
+  sicnu::app::publishMissionObject( ctx, runRef );
+  REQUIRE( ctx.activeWorkflow.runner == QLatin1String( "pipeline_run_coordinator" ) );
+  REQUIRE( ctx.workflowRuns.size() == 1 );
+  REQUIRE( ctx.workflowRuns.front().kind == ObjectKind::WorkflowRun );
+}

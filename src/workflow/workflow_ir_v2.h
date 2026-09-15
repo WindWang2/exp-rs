@@ -111,6 +111,12 @@ struct WorkflowDefinition
     bool operator==( const WorkflowDefinition & ) const = default;
 };
 
+/// D-W3 / D18: preferred alias for the IR 2.0 document. Engine 2.0 also defines
+/// `WorkflowDefinition` in the same namespace (`workflow_types.h`, std::string
+/// based). Full rename of the IR 2.0 type is deferred (large D17 surface);
+/// new D18 code should use WorkflowDocument to make the layer explicit.
+using WorkflowDocument = WorkflowDefinition;
+
 /// The IR 2.0 seam: parsing, serialization, semantic validation, V1 lift.
 class WorkflowIR
 {

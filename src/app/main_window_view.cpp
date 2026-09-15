@@ -28,6 +28,7 @@
 #include <QMainWindow>
 #include <QVBoxLayout>
 #include <QFileInfo>
+#include <QJsonObject>
 #include <QStatusBar>
 
 
@@ -164,6 +165,13 @@ void QgisDesktopWindow::openClassificationWindow()
                  this, [this]( const QString &path ) {
                      if ( path.isEmpty() )
                          return;
+                     // D18: path products publish a non-provisional Result into MissionContext.
+                     const auto ref = publishStudioResultToMission(
+                         path, tr( "Classification product" ) );
+                     if ( m_classificationStudio && !ref.isNull() )
+                         m_classificationStudio->setMissionResultRef( ref );
+                     if ( !ref.isNull() )
+                         return; // publishStudioResultToMission already attempted map load
                      if ( loadDataLayer( path ) )
                      {
                          statusBar()->showMessage(
@@ -545,7 +553,49 @@ void QgisDesktopWindow::openClassificationStudio()
 
         connect( m_classificationStudio, &rs::app::ClassificationStudioWidget::classificationRequested,
                  this, [this]( int algoType ) {
-                     // Provisional Result identity until the studio emits a path-based product.
+                     // Prefer an existing path product (artifact_paths / input layer source)
+                     // so the Result is not provisional when a concrete path already exists.
+                     QString existingPath;
+                     const QJsonObject paths =
+                         m_mission.metadata.value( QStringLiteral( "artifact_paths" ) ).toObject();
+                     if ( !m_classificationStudio->missionResultRef().isNull() )
+                     {
+                         const QString rid = m_classificationStudio->missionResultRef().id;
+                         if ( paths.contains( rid ) )
+                             existingPath = paths.value( rid ).toString();
+                     }
+                     if ( existingPath.isEmpty() && m_mapCanvas && m_mapCanvas->currentLayer() )
+                     {
+                         if ( auto *rl = qobject_cast<QgsRasterLayer *>( m_mapCanvas->currentLayer() ) )
+                         {
+                             const QString src = rl->source();
+                             if ( !src.isEmpty() && ( src.endsWith( QLatin1String( ".tif" ), Qt::CaseInsensitive )
+                                                      || src.endsWith( QLatin1String( ".tiff" ), Qt::CaseInsensitive )
+                                                      || src.endsWith( QLatin1String( ".img" ), Qt::CaseInsensitive ) ) )
+                             {
+                                 // Only reuse when the layer name suggests a class product.
+                                 const QString nm = rl->name().toLower();
+                                 if ( nm.contains( QLatin1String( "class" ) )
+                                      || nm.contains( QLatin1String( "change" ) )
+                                      || nm.contains( QLatin1String( "predict" ) ) )
+                                     existingPath = src;
+                             }
+                         }
+                     }
+
+                     if ( !existingPath.isEmpty() )
+                     {
+                         const auto ref = publishStudioResultToMission(
+                             existingPath,
+                             tr( "Classification product (algo %1)" ).arg( algoType ) );
+                         m_classificationStudio->setMissionResultRef( ref );
+                         statusBar()->showMessage(
+                             tr( "Classification product path published: %1" ).arg( existingPath ),
+                             5000 );
+                         return;
+                     }
+
+                     // Provisional request id — upgraded when classificationProductReady fires.
                      const QString id = QStringLiteral( "classify-studio-%1-%2" )
                                             .arg( algoType )
                                             .arg( m_mission.results.size() );
@@ -558,8 +608,15 @@ void QgisDesktopWindow::openClassificationStudio()
                      if ( m_selectionContext )
                          m_selectionContext->notifyGovernanceSelection( QStringList{ id } );
                      statusBar()->showMessage(
-                         tr( "Classification requested — result id %1 recorded in mission" ).arg( id ),
+                         tr( "Classification requested — provisional id %1 (awaiting product path)" )
+                             .arg( id ),
                          4000 );
+                 } );
+        connect( m_classificationStudio, &rs::app::ClassificationStudioWidget::classificationProductReady,
+                 this, [this]( const QString &path, int algoType ) {
+                     const auto ref = publishStudioResultToMission(
+                         path, tr( "Classification product (algo %1)" ).arg( algoType ) );
+                     m_classificationStudio->setMissionResultRef( ref );
                  } );
     }
 
@@ -603,6 +660,35 @@ void QgisDesktopWindow::showIr2PipelineDesigner()
                              .arg( ref.workflowId )
                              .arg( ref.fingerprint.left( 8 ) ),
                          4000 );
+                 } );
+        connect( m_ir2PipelineDock, &sicnu::app::pipeline::Ir2PipelineDesignerDock::pipelineRunStarted,
+                 this, [this]( const QString &runDir ) {
+                     statusBar()->showMessage(
+                         tr( "PipelineRunCoordinator started: %1" ).arg( runDir ), 5000 );
+                 } );
+        connect( m_ir2PipelineDock, &sicnu::app::pipeline::Ir2PipelineDesignerDock::pipelineRunFinished,
+                 this, [this]( bool success, const QString &summary, const QString &checkpointPath ) {
+                     const auto wf = m_ir2PipelineDock->activeWorkflowRef();
+                     sicnu::app::setMissionActiveWorkflow( m_mission, wf );
+                     sicnu::app::WorkbenchObjectRef runRef;
+                     runRef.kind = sicnu::app::ObjectKind::WorkflowRun;
+                     runRef.id = QStringLiteral( "ir2-run-%1-%2" )
+                                     .arg( wf.workflowId.left( 8 ) )
+                                     .arg( m_mission.workflowRuns.size() );
+                     runRef.displayName = success ? tr( "IR2 run ok" ) : tr( "IR2 run failed" );
+                     sicnu::app::publishMissionObject( m_mission, runRef );
+                     if ( !checkpointPath.isEmpty() )
+                     {
+                         QJsonObject meta = m_mission.metadata;
+                         QJsonObject cps = meta.value( QStringLiteral( "ir2_checkpoints" ) ).toObject();
+                         cps.insert( runRef.id, checkpointPath );
+                         meta.insert( QStringLiteral( "ir2_checkpoints" ), cps );
+                         m_mission.metadata = meta;
+                     }
+                     statusBar()->showMessage(
+                         tr( "Pipeline run finished (%1): %2" )
+                             .arg( success ? tr( "success" ) : tr( "failed" ), summary ),
+                         6000 );
                  } );
         // Seed mission with the empty document identity immediately.
         sicnu::app::setMissionActiveWorkflow( m_mission, m_ir2PipelineDock->activeWorkflowRef() );

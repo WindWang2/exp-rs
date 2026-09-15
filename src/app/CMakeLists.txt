@@ -172,6 +172,7 @@ add_executable(sicnu_geo_rs
     pipeline/pipeline_scene.cpp
     pipeline/pipeline_canvas_widget.cpp
     pipeline/ir2_pipeline_designer_dock.cpp
+    pipeline/labspec_workflow_lift.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_ir_v2.cpp
     layer_tree_menu.cpp
     crs_presets.cpp

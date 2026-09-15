@@ -414,6 +414,15 @@ void ClassificationStudioWidget::setMissionResultRef( const sicnu::app::Workbenc
   mMissionResult = ref;
 }
 
+void ClassificationStudioWidget::acceptProductPath( const QString &path, int algoType )
+{
+  if ( path.isEmpty() )
+    return;
+  const int algo = algoType >= 0 ? algoType
+                                 : ( mAlgoCombo ? mAlgoCombo->itemData( mAlgoCombo->currentIndex() ).toInt()
+                                                : -1 );
+  emit classificationProductReady( path, algo );
+}
 
 void ClassificationStudioWidget::setClassPalette( const std::vector<int> &classIds,
                                                   const std::vector<QString> &names,
