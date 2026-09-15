@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaInfo>
+  <ProductID>10301234567</ProductID>
+  <SatelliteID>GF1</SatelliteID>
+  <SensorID>PMS1</SensorID>
+  <ModeID>PMS</ModeID>
+  <ProductLevel>L1A</ProductLevel>
+  <ReceiveDate>2023-05-12</ReceiveDate>
+  <ReceiveTime>11:03:22</ReceiveTime>
+  <OrbitID>09231</OrbitID>
+  <PixelSizeX>8.0</PixelSizeX>
+  <CloudPercent>12.5</CloudPercent>
+  <SunPosGeodetic>
+    <Azimuth>151.4</Azimuth>
+    <Elevation>62.8</Elevation>
+  </SunPosGeodetic>
+  <BandID>B1</BandID>
+  <BandID>B2</BandID>
+  <BandID>B3</BandID>
+  <BandID>B4</BandID>
+  <GainVal>0.0596,0.0575,0.0479,0.0553</GainVal>
+  <OffsetVal>-3.4587,-4.6871,-3.6525,-4.9167</OffsetVal>
+</MetaInfo>

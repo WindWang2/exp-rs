@@ -7,6 +7,8 @@
 
 #include "geospatial/formats/format_profiles.h"
 #include "geospatial/products/product_registry.h"
+#include "operators/framework/rs_operator_error.h"
+#include "operators/rs/rs_product_import_plan.h"
 #include "geospatial/probe/probe.h"
 
 #include <string>
@@ -174,6 +176,65 @@ class IoProductTool final : public SpatialTool
     }
 };
 
+/// Dry-run CN product import plan (ADR 0159): identity, sensor profile,
+/// declared bands with registry roles, constituent graph with budget-capped
+/// sha256 checksums, completeness verdict. Purely read-only — a dry run
+/// never writes. Consumes the same service as the operators/CLI/GUI, so the
+/// agent sees exactly what an import would resolve.
+class IoProductPlanTool final : public SpatialTool
+{
+  public:
+    std::string name() const override { return "io:product_plan"; }
+    std::string displayName() const override { return "Dry-run CN product import plan"; }
+    std::string description() const override
+    {
+      return "Read-only dry run of the standardized CN product import (GF/ZY/HJ/CBERS): "
+             "identity, sensor profile, band roles, constituent graph with sha256 "
+             "checksums, completeness verdict and warnings. Nothing is written. "
+             "Input: {path, hash_budget_bytes? (default 268435456)}.";
+    }
+    std::vector<std::string> tags() const override { return { "io", "product", "plan" }; }
+    Json::Value inputSchema() const override
+    {
+      Json::Value schema = pathSchema();
+      Json::Value budget( Json::objectValue );
+      budget["type"] = "integer";
+      budget["description"] = "per-file sha256 budget in bytes; larger files hash their "
+                              "declared prefix only (reported via digest_scope)";
+      schema["properties"]["hash_budget_bytes"] = budget;
+      return schema;
+    }
+    Json::Value outputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      return schema;
+    }
+    SpatialToolResult execute( const Json::Value &input ) override
+    {
+      SpatialToolResult failure;
+      const std::string path = requirePath( input, failure );
+      if ( path.empty() )
+        return failure;
+      qint64 hashBudget = 268435456;
+      if ( input.isMember( "hash_budget_bytes" ) && input["hash_budget_bytes"].isIntegral() )
+        hashBudget = input["hash_budget_bytes"].asInt64();
+      try
+      {
+        return SpatialToolResult::ok(
+          sicnu::operators::rs::dryRunCnProductImport( path, nullptr, hashBudget ).toJson() );
+      }
+      catch ( const sicnu::operators::RSOperatorError &error )
+      {
+        return SpatialToolResult::failure( error.what() );
+      }
+      catch ( const std::exception &error )
+      {
+        return SpatialToolResult::failure( error.what() );
+      }
+    }
+};
+
 } // namespace
 
 void registerIoTools()
@@ -182,6 +243,7 @@ void registerIoTools()
     SpatialToolRegistry::instance().registerTool( std::make_shared<IoProbeTool>() );
     SpatialToolRegistry::instance().registerTool( std::make_shared<IoCapabilitiesTool>() );
     SpatialToolRegistry::instance().registerTool( std::make_shared<IoProductTool>() );
+    SpatialToolRegistry::instance().registerTool( std::make_shared<IoProductPlanTool>() );
     return true;
   }();
   Q_UNUSED( registered );

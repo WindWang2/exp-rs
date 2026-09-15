@@ -1,13 +1,15 @@
-# Chinese Satellite Products (GF · ZY-3 · ZY-1 02C · HJ CCD)
+# Chinese Satellite Products (GF · GF-3/4/5 · ZY-3 · ZY-1 · HJ CCD · CBERS)
 
-> Contract: ADR 0157 + ADR 0147 · Code: `src/geospatial/products/cn_product_metadata.*`
-> (identity + CRESDA sidecar parsing), `src/geospatial/products/sensor_profile.*`
-> (sensor profile registry loader), `src/geospatial/products/cn_product_adapters.cpp`
-> (registry adapters), `src/operators/rs/rs_product_import_plan.*` (standardized
-> import plan service), `src/operators/rs/rs_cn_product_import_operator.*`
+> Contract: ADR 0157 + ADR 0147 + ADR 0159 · Code: `src/geospatial/products/cn_product_metadata.*`
+> (identity + sidecar parsing: CRESDA optical, CRESDA SAR, CBERS INPE),
+> `src/geospatial/products/sensor_profile.*` (registry loader + schema 2.0
+> validator), `src/geospatial/products/cn_product_adapters.cpp` (registry
+> adapters), `src/operators/rs/rs_product_import_plan.*` (standardized import
+> plan service + dry run), `src/operators/rs/rs_cn_product_import_operator.*`
 > (unified operator) and `rs_gaofen_import_operator.*` / `rs_zy3_import_operator.*` /
 > `rs_hj_import_operator.*` (family entry points).
-> Sensor truth: `data/products/sensor_profiles/{gaofen,zy3,zy1,hj}.json`.
+> Sensor truth: `data/products/sensor_profiles/{gaofen,zy3,zy1,hj,cbers}.json`
+> (schema 2.0; field contract in [SENSOR_SCHEMA.md](SENSOR_SCHEMA.md)).
 
 The mainstay data of Chinese undergraduate remote-sensing teaching is not
 Landsat — it is 高分 (GF-1/2/6), 资源三号 (ZY-3) and 环境减灾 (HJ-1A/1B CCD).
@@ -26,13 +28,35 @@ needed hand-typed band numbers and coefficients.
 | GF-7 | `gaofen_product` | FWD, BWD | per camera: B1–B4 (MS) + pan | stereo mapping pair; each camera's PAN/MS resolved from the sidecar shape |
 | ZY-3 | `zy3_product` | TLC/NAD/FWD/BWD | NAD MS B1–B4 (5.8 m); pan B1 (2.1 m); FWD/BWD pan (3.5 m) | CRESDA-style naming (`ZY3_NAD_…`, `ZY3_TLC_…`) |
 | ZY-1 02C | `zy1_product` | PMS, HRC | PMS: B1–B4 (10 m) + pan (5 m); HRC: pan (2.36 m) | `ZY1_02C_PMS_*`, `ZY1_02C_HRC_*` |
+| GF-3 | `gaofen3_sar_product` | SAR (mode from the sidecar) | single-polarization measurement band; HH/HV/VH/VV declared per sidecar | declared-metadata level (ADR 0159): identity/mode/polarizations/orbit/level/incidence; **no σ⁰ kernel** — numeric domain stays `digital_number`; unknown polarization tokens are reported, never guessed |
+| GF-4 | `gaofen4_product` | PMI | B1–B4 (50 m MS) + pan B1 (0.45–0.90 µm, 50 m) | geostationary; only PMI adapted — infrared payloads refused |
+| GF-5 | `gaofen5_product` | AHSI | 330-band hyperspectral axis (`band_axis`: B1..B150 VNIR, B151..B330 SWIR; 30 m) | per-band wavelengths are **not fabricated** — they are transported from the product's own declared metadata when present; bad bands come from the declared axis |
+| ZY-1 02B | `zy1_product` | CCD, HR | CCD B1–B4 (19.5 m); HR pan (2.36 m) | |
+| ZY-1 02D/02E | `zy1_product` | PMS, AHSI | PMS B1–B4 (10 m) + pan (2.5 m); AHSI 166-band axis (B1..B76 VNIR, B77..B166 SWIR, 30 m) | same hyperspectral transport policy as GF-5 |
+| CBERS-4 | `cbers_product` | MUX, WFI, PAN10 | MUX B1–B4 (20 m); WFI B1–B4 (64 m); PAN10 pan (10 m) | **INPE sidecar generation** (`cbers_inpe_metadata`), parsed by its own parser; unknown CBERS generations are refused, never guessed |
 | HJ-1A/1B | `hj_ccd_product` | CCD1/CCD2 | B1–B4 (30 m) | both satellites carry two identical CCD cameras |
 | HJ-2A/B | `hj_ccd_product` | CCD | B1–B4 (16 m) | 02 batch CCD; HSI/AIS refused |
 
-**Everything else is refused with a reason** — GF-3 (SAR), GF-4, GF-5,
-ZY-1 02B/02D/02E (AHSI), ZY-5, CBERS and HJ-1 IRS / HJ-2 HSI are *recognized*
-CN names that produce an `UnsupportedProduct` diagnosis, never a silent
+**Everything else is refused with a reason** — GF-4 infrared, GF-5
+VIMS/GMI/EMI/SATS, ZY-1 IRS, ZY-5, other CBERS missions/cameras, GF-1B/C/D,
+HJ-1C and HJ-2 HSI are *recognized* CN names that produce an
+`UnsupportedProduct` diagnosis naming the adapted subset, never a silent
 generic-raster fallback and never a best-effort guess.
+
+## Sidecar generations stay separate (CRESDA optical · CRESDA SAR · CBERS INPE)
+
+Every family is parsed by exactly one sidecar parser and the schema never
+mixes (ADR 0159):
+
+* **CRESDA optical** (legacy `<MetaInfo>` / current `<ProductMetaData>` /
+  `cresda_unknown_root` diagnostics) — GF optical families, ZY, HJ.
+* **CRESDA SAR** (GF-3) — the same generation detection plus polarization
+  parsing: canonical HH/HV/VH/VV tokens from the declared list; unknown
+  tokens land in `parseDiagnostics.polarization_unknown_tokens` (bounded).
+* **CBERS INPE** (`cbers_inpe_metadata`) — its own whitelist; a document
+  without satellite/sensor identity tags is a typed
+  "Unknown CBERS sidecar generation … refusing to guess" refusal.
+  Zenith-derived sun elevation carries its derivation, exactly like CRESDA.
 
 ## Sensor profile registry (single band-truth authority)
 
@@ -45,12 +69,24 @@ midpoint `wavelength_nm`, nominal `center_wavelength_nm` and `fwhm_nm` where
 a published source states them, verbatim `spectral_range_um`, per-band GSD).
 Pan/multispectral siblings are linked by `pan_variant`/`ms_variant`; the
 sidecar's declared shape (ModeID or 1-band inventory) picks the variant.
-The loader is fail-closed and version-gated; unknown registry keys are
-ignored but reported as forward-compatibility warnings. The former
-`band_roles/*.json` tables were folded into this registry (ADR 0147); the
-spectral-resampling grids of `data/spectral/sensors.json` remain the SRF
-authority for `Library::resampleTo` — midpoint vs centre are different
-documented quantities, both now carried explicitly.
+The loader is fail-closed and version-gated (schema versions {1, 2} are
+understood; anything else is a typed refusal). **Schema 2.0** (ADR 0159)
+adds strict per-field validation — required identity fields, closed
+modality/role vocabularies, finite positive physical quantities, band-id
+uniqueness, and the wavelength-agreement rule pinning `wavelength_nm` to the
+declared range (published centre when present, range midpoint otherwise) —
+plus the hyperspectral `band_axis` block (extent + ordering + bad-band ids;
+bands are always fully written out, never generated at runtime). The
+registry-wide validator `validateSensorProfiles()` reports dangling
+`pan_variant`/`ms_variant` links and duplicate keys, and
+`tests/test_sensor_schema.cpp` pins the committed registry to zero findings.
+Unknown registry keys are ignored but reported as forward-compatibility
+warnings. The former `band_roles/*.json` tables were folded into this
+registry (ADR 0147); the spectral-resampling grids of
+`data/spectral/sensors.json` remain the SRF authority for
+`Library::resampleTo` — midpoint vs centre are different documented
+quantities, both now carried explicitly. Field contract:
+[SENSOR_SCHEMA.md](SENSOR_SCHEMA.md).
 
 ## Sidecar generations (explicit, diagnosable)
 
@@ -167,6 +203,26 @@ never a partially calibrated stack, never a defaulted coefficient.
 | `BandID` (repeated) | `declaredBandIds` (TIFF band order) | per-band assets / stack |
 | `GainVal`/`OffsetVal`, `BandCalibration::Gain/Offset/Bias` | `bandCalibration[]` | `SICNU_CALIB_GAIN_<band>` / `SICNU_CALIB_BIAS_<band>` |
 
+## Dry run: plan the import before touching pixels
+
+`dryRunCnProductImport` (ADR 0159) runs identify → inspect → resolve →
+role-map purely read-only and reports the constituent graph: per constituent
+(sidecar / image / RPC / PMS sibling) presence, readability, byte size and a
+**sha256 checksum** — complete for files under the declared budget (default
+256 MiB) and an explicitly labelled prefix digest otherwise. Surfaces:
+
+| Surface | Entry |
+| --- | --- |
+| CLI | `sicnu_geo_rs_cli data product plan <path> [--hash-budget N]` |
+| Agent | `io:product_plan` tool (`{path, hash_budget_bytes?}`) |
+| GUI | 产品导入对话框（cn 族）预检摘要：状态栏逐成分状态与缺失项 |
+
+Cancellation is cooperative and leaves **zero half-products**: a cancel
+requested mid-stack removes the partial output before the typed
+`Cancelled` error propagates (the stack's own IO-failure cleanup cannot see
+exceptions thrown through the progress bridge — the plan service closes that
+gap). Read-only source directories and Chinese paths are covered by tests.
+
 ## Teaching flow (headless)
 
 ```
@@ -189,3 +245,18 @@ sidecar generation detection with unknown-element diagnostics, RPC/PMS-sibling
 constituent resolution, all four import operators (incl. unified
 `rs:cn_product_import`), Chinese-path encoding and the headless
 NDVI/classification chain.
+
+`tests/test_sensor_schema.cpp` — schema 2.0 strict rules (per-field types,
+units, vocabularies, range agreement), `band_axis` contracts, v1
+back-compatibility, cross-file reference integrity and the committed-registry
+drift gate (zero validator findings).
+
+`tests/test_cn_product_families11.cpp` — ADR 0159 families (GF-3 SAR parsing
++ unknown-token/unknown-generation refusals, GF-4 PMI pan/MS resolution, GF-5
+AHSI 330-band axis aggregation, ZY-1 02B/02D/02E modes, CBERS-4 INPE
+generation + unknown-root refusal) and the refined refusal reasons.
+
+`tests/test_product_import_plan11.cpp` — dry-run graph with independent
+digest oracles, budget-capped digests, cancellation (typed refusal and the
+zero-half-product contract), read-only sources, Chinese paths and the GF-3
+plan→execute chain with SAR metadata stamps.

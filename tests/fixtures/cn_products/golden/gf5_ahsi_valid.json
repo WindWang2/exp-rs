@@ -1,0 +1,23 @@
+{
+  "image_base": "GF5_AHSI_E113.5_N31.5_20230512_L1A0123456789",
+  "tiff_bands": 4,
+  "kind_name": "gaofen5_product",
+  "identity": { "satellite": "GF5", "sensor_mode": "AHSI", "sensor_key": "gf5_ahsi" },
+  "metadata": {
+    "product_id": "51230",
+    "platform": "GF5",
+    "sensor": "AHSI",
+    "sensor_mode": "AHSI",
+    "processing_level": "L1A",
+    "radiometric_state": "digital_number",
+    "acquisition_time": "2023-05-12T03:15:40.5",
+    "resolution_meters": 30.0,
+    "orbit_id": "10422",
+    "declared_band_ids": ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B9", "B10"],
+    "sidecar_generation": "cresda_current_metadata",
+    "sidecar_root": "productmetadata",
+    "unknown_top_level_contains": "unknownfutureelement"
+  },
+  "band_axis": { "count": 330, "ordering_contains": "SWIR" },
+  "measurement_assets": 1
+}

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ProductMetaData version="1.0">
+  <ProductID>51230</ProductID>
+  <SatelliteID>GF5</SatelliteID>
+  <SensorID>AHSI</SensorID>
+  <SensorMode>AHSI</SensorMode>
+  <ProductLevel>L1A</ProductLevel>
+  <CenterTime>2023-05-12 03:15:40.5</CenterTime>
+  <ImageGSD>30.0</ImageGSD>
+  <OrbitID>10422</OrbitID>
+  <Bands>1,2,3,4,5,6,7,8,9,10</Bands>
+  <UnknownFutureElement>reserved</UnknownFutureElement>
+</ProductMetaData>

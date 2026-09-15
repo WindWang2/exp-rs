@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+  <productid>CBERS4_MUX_20230415_0364_075_L1</productid>
+  <satellite>CBERS4</satellite>
+  <sensor>MUX</sensor>
+  <resolution>20.0</resolution>
+  <acquisitiondate>2023-04-15</acquisitiondate>
+  <acquisitiontime>13:45:30</acquisitiontime>
+  <orbit>1234</orbit>
+  <path>364</path>
+  <row>75</row>
+  <solarzenith>32.5</solarzenith>
+  <sunazimuth>154.2</sunazimuth>
+  <projection>UTM</projection>
+  <utmzone>22</utmzone>
+  <bands>1,2,3,4</bands>
+</metadata>

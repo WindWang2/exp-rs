@@ -2,6 +2,7 @@
 #include "product_import_dialog.h"
 
 #include <QDialogButtonBox>
+#include <QDir>
 #include <QFileDialog>
 #include <QGroupBox>
 #include <QHBoxLayout>
@@ -16,6 +17,8 @@
 
 #include "data/data_manager.h"
 #include "dialog_help_catalog.h"
+#include "operators/framework/rs_operator_error.h"
+#include "operators/rs/rs_product_import_plan.h"
 
 using sicnu::ChildCandidate;
 using sicnu::CollectionImportService;
@@ -238,10 +241,58 @@ bool ProductImportDialog::probe()
 
   m_preview = result.value();
   populatePreview();
-  m_statusLabel->setText(
-    tr( "Found %1 bands / grid groups; tick the bands to import." )
-      .arg( m_preview.children.size() ) );
+  QString status = tr( "Found %1 bands / grid groups; tick the bands to import." )
+                     .arg( m_preview.children.size() );
+  status += cnDryRunSummary();
+  m_statusLabel->setText( status );
   return true;
+}
+
+/// CN families: read-only dry-run preflight through the standardized import
+/// plan service (ADR 0159). Reports the constituent graph (sidecar / image /
+/// RPC / sibling, presence + readability + size) and the completeness
+/// verdict. The service is the single authority — this only renders it; a
+/// non-CN source simply contributes no branch.
+QString ProductImportDialog::cnDryRunSummary() const
+{
+  if ( m_productFamily != QLatin1String( "cn" ) )
+    return QString();
+  const QString source = m_pathEdit->text().trimmed();
+  if ( source.isEmpty() )
+    return QString();
+  try
+  {
+    const sicnu::operators::rs::ProductImportDryRun dryRun =
+      sicnu::operators::rs::dryRunCnProductImport( source.toStdString(), nullptr );
+    QStringList rows;
+    rows << tr( "CN preflight: %1" )
+              .arg( QString::fromLatin1(
+                sicnu::geo::productCompletenessName( dryRun.plan.completeness ) ) );
+    for ( const sicnu::operators::rs::ConstituentReport &constituent : dryRun.constituents )
+    {
+      const QString state = constituent.readable
+                              ? tr( "readable (%1 bytes)" ).arg( constituent.bytes )
+                              : constituent.exists ? tr( "unreadable" ) : tr( "missing" );
+      rows << QStringLiteral( "  %1: %2 — %3" )
+                  .arg( constituent.role,
+                        QDir::toNativeSeparators( constituent.path ), state );
+    }
+    for ( const QString &missing : dryRun.plan.missingConstituents )
+      rows << tr( "  missing: %1" ).arg( missing );
+    return QStringLiteral( "
+" ) + rows.join( QStringLiteral( "
+" ) );
+  }
+  catch ( const sicnu::operators::RSOperatorError &error )
+  {
+    return tr( "
+CN preflight unavailable: %1" ).arg( QString::fromUtf8( error.what() ) );
+  }
+  catch ( const std::exception &error )
+  {
+    return tr( "
+CN preflight unavailable: %1" ).arg( QString::fromUtf8( error.what() ) );
+  }
 }
 
 void ProductImportDialog::populatePreview()

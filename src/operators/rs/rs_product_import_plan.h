@@ -73,6 +73,44 @@ struct ProductImportPlan
 /// InvalidInputData when the sidecar/image cannot be resolved.
 ProductImportPlan planCnProductImport( const std::string &input, const char *familyFilter );
 
+/// One resolved constituent of a dry-run import (ADR 0159): presence,
+/// readability and verbatim content identity. Everything is opened READ-ONLY;
+/// a dry run never writes.
+struct ConstituentReport
+{
+    QString role;         ///< "sidecar" | "image" | "rpc" | "sibling_image"
+    QString path;
+    bool exists = false;
+    bool readable = false; ///< opened read-only and at least one block read
+    qint64 bytes = 0;      ///< full file size on disk
+    std::string sha256Hex; ///< lowercase hex digest (see digestScope)
+    bool hashComplete = false; ///< true only when the digest covers the WHOLE file
+    qint64 hashedBytes = 0;    ///< bytes actually hashed
+    QString digestScope;       ///< "file" or "first <N> bytes (declared budget cap)"
+    QString note;              ///< verbatim OS/driver reason when unreadable
+};
+
+/// Dry-run import: the full plan plus a per-constituent graph with checksums.
+/// Purely read-only over the source; never touches pixels, never writes.
+/// Files larger than @p hashBudgetBytes are hashed over their declared
+/// prefix only — the report says so explicitly (digestScope/hashedBytes)
+/// instead of claiming a whole-file digest. @p context (optional) receives
+/// progress and is honoured as a cancellation checkpoint between files.
+struct ProductImportDryRun
+{
+    ProductImportPlan plan;
+    std::vector<ConstituentReport> constituents;
+    QString checksumAlgorithm = QStringLiteral( "sha256" );
+    qint64 hashBudgetBytes = 0;
+
+    /// Stable inspect payload: { plan, constituents[], checksum{} }.
+    Json::Value toJson() const;
+};
+
+ProductImportDryRun dryRunCnProductImport( const std::string &input, const char *familyFilter,
+                                           qint64 hashBudgetBytes = 268435456 /* 256 MiB */,
+                                           RSOperatorContext *context = nullptr );
+
 /// Whether declared-coefficient calibration can be applied to the requested
 /// bands (radiance = DN × gain + bias). Applicable only when every requested
 /// band declares BOTH gain and bias; a requested-but-not-applicable decision
