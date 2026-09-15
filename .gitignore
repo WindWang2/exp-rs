@@ -272,3 +272,6 @@ data/labs/_tmp/
 !.planning/unified-mission-workbench-d18/**
 !.planning/dataset-foundry-benchmark-d19/
 !.planning/dataset-foundry-benchmark-d19/**
+# deployment-packaging-11 (F19): track planning notes (markdown only).
+!.planning/deployment-packaging-11/
+!.planning/deployment-packaging-11/**
