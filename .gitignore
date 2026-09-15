@@ -272,3 +272,8 @@ data/labs/_tmp/
 !.planning/unified-mission-workbench-d18/**
 !.planning/dataset-foundry-benchmark-d19/
 !.planning/dataset-foundry-benchmark-d19/**
+
+# scientific-contract-verification-11: track planning notes (markdown only; logs stay local).
+!.planning/scientific-contract-verification-11/
+.planning/scientific-contract-verification-11/*
+!.planning/scientific-contract-verification-11/*.md

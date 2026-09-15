@@ -13,6 +13,7 @@ add_library( sicnu_contracts STATIC
     error_code_scanner.cpp
     graph_assembly.cpp
     scientific_contract.cpp
+    determinism_census.cpp
 )
 
 target_include_directories( sicnu_contracts PUBLIC ${CMAKE_SOURCE_DIR}/src )

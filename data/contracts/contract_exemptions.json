@@ -1,0 +1,89 @@
+{
+  "schema" : "exp.contract_exemptions.v1",
+  "note" : [
+    "Census 2.0 (Platform 11.0): first-party REGISTERED operators whose",
+    "scientific semantics are deliberately recorded as an exemption instead",
+    "of a full scientific contract. An exemption is a reviewed claim that the",
+    "operator is a thin adapter over an upstream numeric core; the adapter's",
+    "own surface facts (parameters, determinism stamp, sidecar knowledge)",
+    "remain bound by their existing authorities and drift gates. Every entry",
+    "must carry a reason and an evidence anchor."
+  ],
+  "exemptions" : [
+    {
+      "operatorId" : "otb:bundle_to_perfect_sensor",
+      "reason" : "Thin adapter over OTB's sensor-fusion numeric core; scientific semantics owned by upstream OTB, adapter adds only typed errors/cancel/IO.",
+      "evidence" : "src/operators/otb/otb_bundle_to_perfect_sensor_operator.h + review:scientific-contract-verification-11/D-1"
+    },
+    {
+      "operatorId" : "otb:compute_images_statistics",
+      "reason" : "Thin adapter over OTB statistics kernel; upstream-owned numerics.",
+      "evidence" : "src/operators/otb/otb_compute_images_statistics_operator.h + review:scientific-contract-verification-11/D-1"
+    },
+    {
+      "operatorId" : "otb:meanshift_segmentation",
+      "reason" : "Thin adapter over OTB mean-shift segmentation application; upstream-owned numerics.",
+      "evidence" : "src/operators/otb/otb_segmentation_operator.h + review:scientific-contract-verification-11/D-1"
+    },
+    {
+      "operatorId" : "otb:svm_classification",
+      "reason" : "Thin adapter over OTB SVM classifier; upstream-owned numerics.",
+      "evidence" : "src/operators/otb/otb_svm_classification_operator.h + review:scientific-contract-verification-11/D-1"
+    },
+    {
+      "operatorId" : "opencv:gaussian_blur",
+      "reason" : "Thin adapter over OpenCV filter core; upstream-owned numerics; adapter facts live in the live schema + capability sidecar.",
+      "evidence" : "src/operators/opencv/opencv_filter_operators.h + review:scientific-contract-verification-11/D-1"
+    },
+    {
+      "operatorId" : "opencv:mean_blur",
+      "reason" : "Thin adapter over OpenCV filter core; upstream-owned numerics.",
+      "evidence" : "src/operators/opencv/opencv_filter_operators.h + review:scientific-contract-verification-11/D-1"
+    },
+    {
+      "operatorId" : "opencv:median_blur",
+      "reason" : "Thin adapter over OpenCV filter core; upstream-owned numerics.",
+      "evidence" : "src/operators/opencv/opencv_filter_operators.h + review:scientific-contract-verification-11/D-1"
+    },
+    {
+      "operatorId" : "opencv:sobel",
+      "reason" : "Thin adapter over OpenCV gradient core; upstream-owned numerics.",
+      "evidence" : "src/operators/opencv/opencv_filter_operators.h + review:scientific-contract-verification-11/D-1"
+    },
+    {
+      "operatorId" : "opencv:laplacian",
+      "reason" : "Thin adapter over OpenCV gradient core; upstream-owned numerics.",
+      "evidence" : "src/operators/opencv/opencv_filter_operators.h + review:scientific-contract-verification-11/D-1"
+    },
+    {
+      "operatorId" : "opencv:canny",
+      "reason" : "Thin adapter over OpenCV edge-detection core; upstream-owned numerics.",
+      "evidence" : "src/operators/opencv/opencv_filter_operators.h + review:scientific-contract-verification-11/D-1"
+    },
+    {
+      "operatorId" : "gdal:clip",
+      "reason" : "Thin adapter over GDALWarp cutline/extent cropping; CRS/NoData/resampling semantics owned by upstream GDAL; grid facts live in the live schema.",
+      "evidence" : "src/operators/gdal/gdal_clip_operator.h + review:scientific-contract-verification-11/D-1"
+    },
+    {
+      "operatorId" : "gdal:reproject",
+      "reason" : "Thin adapter over GDALWarp reprojection; upstream-owned warp numerics.",
+      "evidence" : "src/operators/gdal/gdal_reproject_operator.h + review:scientific-contract-verification-11/D-1"
+    },
+    {
+      "operatorId" : "gdal:orthorectification",
+      "reason" : "Thin adapter over GDAL RPC/GCP transformer with optional DEM; elevation-dependent numerics owned by upstream GDAL.",
+      "evidence" : "src/operators/gdal/gdal_orthorectification_operator.h + review:scientific-contract-verification-11/D-1"
+    },
+    {
+      "operatorId" : "gdal:pansharpen",
+      "reason" : "Thin adapter over the external gdal_pansharpen.py utility (subprocess); fusion numerics owned by upstream GDAL.",
+      "evidence" : "src/operators/gdal/gdal_pansharpen_operator.h + review:scientific-contract-verification-11/D-1"
+    },
+    {
+      "operatorId" : "gdal:polygonize",
+      "reason" : "Thin adapter over GDALPolygonize; vectorization semantics owned by upstream GDAL.",
+      "evidence" : "src/operators/gdal/gdal_polygonize_operator.h + review:scientific-contract-verification-11/D-1"
+    }
+  ]
+}
