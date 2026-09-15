@@ -54,9 +54,12 @@ contribution.
      layer).
    - GF-4: geostationary semantics carried as declared passthrough
      (sub-satellite point when the sidecar declares one).
-   - GF-5/ZY-1 02D/02E AHSI: hyperspectral registry entries + GDAL
-     subdataset inventory; a missing HDF5 driver at runtime is a typed
-     refusal, not a silent unknown.
+   - GF-5/ZY-1 02D/02E AHSI: hyperspectral registry entries with the band
+     axis aggregated into one measurement asset. This track adapts
+     TIFF-backed AHSI packages (sidecar XML + measurement raster, the
+     CRESDA-style layout); HDF5-backed distributions and their GDAL
+     subdataset inventory are an explicit follow-up — a missing measurement
+     raster reports as `missingConstituents`, never as a guessed import.
    - CBERS: an explicit third sidecar generation (`cbers_inpe_*`) with its
      own parser function; CRESDA and INPE schemas never mix. Unknown
      variants stay refused with a concrete reason.

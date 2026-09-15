@@ -15,3 +15,14 @@
 
 - "sensor_profiles v2 直接重写 4 个 JSON 为 v2" vs "additive"：选 additive（D-01）——避免与未来并发 PR 的 registry 文件冲突、保持 diff 最小；v2 验证规则严格于 v1。
 - "高光谱波长运行时公式生成" vs "落盘展开"：选落盘（D-02）——prompt Oracle #2 要求物理量有来源；公式属于生成工具，不属于运行时。
+
+## Review-round dispositions (Phase 7, independent review)
+
+- D-11 (2026-09-16) **AHSI subdataset inventory 收窄为 follow-up**：本 track 适配
+  TIFF-backed AHSI 包（CRESDA 式 sidecar+TIFF 布局）；HDF5 分发及其 GDAL
+  subdataset inventory 明确记为后续工作（ADR 0159 决议 4 已改写，CAPABILITY_MATRIX
+  标 degraded/follow-up，适配器注记指明缺失成分），不再宣称未实现的 HDF 路径。
+- D-12 (2026-09-16) **严格 JSON 类型是 v2 加载即拒绝语义**：present-but-wrong-typed
+  字段（如 `"wavelength_nm": "485"`、`"satellite": 42`）= 指名道姓的 GeoError；
+  jsoncpp LogicError 在 parseSensorEntry 边界统一转 typed GeoError，
+  validateSensorProfiles 保持 report-not-throw 契约。

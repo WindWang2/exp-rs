@@ -262,8 +262,13 @@ QString ProductImportDialog::cnDryRunSummary() const
     return QString();
   try
   {
+    // Bounded preflight budget: the dialog runs on the UI thread, so the
+    // inline hashing is capped far below the CLI/agent default (the summary
+    // labels the scope, so a capped digest is never mistaken for a full one).
+    const qint64 kDialogPreflightHashBudget = 8 * 1024 * 1024;
     const sicnu::operators::rs::ProductImportDryRun dryRun =
-      sicnu::operators::rs::dryRunCnProductImport( source.toStdString(), nullptr );
+      sicnu::operators::rs::dryRunCnProductImport( source.toStdString(), nullptr,
+                                                   kDialogPreflightHashBudget );
     QStringList rows;
     rows << tr( "CN preflight: %1" )
               .arg( QString::fromLatin1(
@@ -279,19 +284,16 @@ QString ProductImportDialog::cnDryRunSummary() const
     }
     for ( const QString &missing : dryRun.plan.missingConstituents )
       rows << tr( "  missing: %1" ).arg( missing );
-    return QStringLiteral( "
-" ) + rows.join( QStringLiteral( "
-" ) );
+    const QString newline = QStringLiteral( "\n" );
+    return newline + rows.join( newline );
   }
   catch ( const sicnu::operators::RSOperatorError &error )
   {
-    return tr( "
-CN preflight unavailable: %1" ).arg( QString::fromUtf8( error.what() ) );
+    return tr( "\nCN preflight unavailable: %1" ).arg( QString::fromUtf8( error.what() ) );
   }
   catch ( const std::exception &error )
   {
-    return tr( "
-CN preflight unavailable: %1" ).arg( QString::fromUtf8( error.what() ) );
+    return tr( "\nCN preflight unavailable: %1" ).arg( QString::fromUtf8( error.what() ) );
   }
 }
 

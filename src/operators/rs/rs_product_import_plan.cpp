@@ -543,10 +543,16 @@ Json::Value executeCnProductImport( const ProductImportPlan &plan,
             throw RSOperatorError( ErrorCode::ComputationError,
                                    "Cannot reopen stacked GeoTIFF to apply declared calibration" );
         }
+        // Zero-half-product (ADR 0159): a cancel thrown mid-calibration must
+        // not leave a file that mixes DN and radiance rows (nor leak the
+        // GA_Update handle, which would lock the partial output on Windows).
+        bool calibrationClosed = false;
+        bool transformFailed = false;
+        try
+        {
         const int bandCount = GDALGetRasterCount( dataset );
         constexpr int kChunk = 4096;
         std::vector<double> chunk( static_cast<std::size_t>( kChunk ), 0.0 );
-        bool transformFailed = false;
         for ( int index = 1; index <= bandCount && index <= requestedBands.size() && !transformFailed;
               ++index )
         {
@@ -591,6 +597,15 @@ Json::Value executeCnProductImport( const ProductImportPlan &plan,
             }
         }
         GDALClose( dataset );
+        calibrationClosed = true;
+        }
+        catch ( ... )
+        {
+            if ( !calibrationClosed )
+                GDALClose( dataset );
+            QFile::remove( QString::fromStdString( outputPath ) );
+            throw;
+        }
         if ( transformFailed )
         {
             // Never leave a half-scaled stack behind: the file now mixes DN

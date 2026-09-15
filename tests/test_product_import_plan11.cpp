@@ -133,7 +133,7 @@ TEST_CASE("plan11: dry-run resolves the constituent graph with complete checksum
     REQUIRE(tmp.isValid());
     const QString image = writeGf1Product(tmp.path());
 
-    const auto dryRun = sicnu::operators::rs::dryRunCnProductImport(image.toStdString().c_str() ? image.toStdString() : std::string(), nullptr);
+    const auto dryRun = sicnu::operators::rs::dryRunCnProductImport(image.toStdString(), nullptr);
     REQUIRE(dryRun.checksumAlgorithm == QStringLiteral("sha256"));
     REQUIRE(dryRun.hashBudgetBytes == 268435456);
     REQUIRE(dryRun.plan.identity.kindName == "gaofen_product");
@@ -238,12 +238,51 @@ TEST_CASE("plan11: cancelling mid-stack leaves no half-product on disk",
             cancelFlag = true;
     });
 
-    const auto plan = sicnu::operators::rs::planCnProductImport(image.toStdString().c_str() ? image.toStdString() : std::string(), nullptr);
+    const auto plan = sicnu::operators::rs::planCnProductImport(image.toStdString(), nullptr);
     bool threw = false;
     try {
         (void)sicnu::operators::rs::executeCnProductImport(plan, output.toStdString(),
                                                            plan.bandNames,
                                                            /*applyCalibration=*/false, context);
+    } catch (const sicnu::operators::RSOperatorError &error) {
+        threw = true;
+        REQUIRE(error.code() == sicnu::operators::ErrorCode::Cancelled);
+    }
+    REQUIRE(threw);
+    REQUIRE_FALSE(QFile::exists(output));
+}
+
+TEST_CASE("plan11: cancelling mid-calibration leaves no half-calibrated product",
+          "[plan11][cancel][zero-half-product][calibration]")
+{
+    ensureApp();
+    qunsetenv("SICNU_DATA_DIR");
+    QTemporaryDir tmp;
+    REQUIRE(tmp.isValid());
+    // GF-1 fixture with declared GainVal/OffsetVal on every band: calibration
+    // is applicable, so the calibration loop actually runs.
+    const QString image = writeGf1Product(tmp.path(), /*withRpc=*/false, /*bands=*/4);
+    const QString output = tmp.path() + "/calibration-cancelled.tif";
+
+    std::atomic<bool> cancelFlag{false};
+    sicnu::operators::RSOperatorContext context;
+    context.setCancelFlag(&cancelFlag);
+    // Flip the flag once stacking has finished (progress >= 0.9 passes the
+    // stack bridge range): the cancel then fires inside the calibration
+    // loop's per-line checkpoint — the path that used to strand a file
+    // mixing DN and radiance rows.
+    context.setProgressCallback([&](double progress, const std::string &) {
+        if (progress >= 0.92)
+            cancelFlag = true;
+    });
+
+    const auto plan = sicnu::operators::rs::planCnProductImport(image.toStdString(), nullptr);
+    REQUIRE(sicnu::operators::rs::evaluateCalibration(plan, true, plan.bandNames).applicable);
+    bool threw = false;
+    try {
+        (void)sicnu::operators::rs::executeCnProductImport(plan, output.toStdString(),
+                                                           plan.bandNames,
+                                                           /*applyCalibration=*/true, context);
     } catch (const sicnu::operators::RSOperatorError &error) {
         threw = true;
         REQUIRE(error.code() == sicnu::operators::ErrorCode::Cancelled);
@@ -280,13 +319,13 @@ TEST_CASE("plan11: read-only sources import cleanly and stay untouched",
     // Dry run: read-only over read-only sources; the missing calibration is
     // a declared-field report, not a verdict degradation.
     const auto dryRun =
-        sicnu::operators::rs::dryRunCnProductImport(image.toStdString().c_str() ? image.toStdString() : std::string(), nullptr);
+        sicnu::operators::rs::dryRunCnProductImport(image.toStdString(), nullptr);
     for (const auto &constituent : dryRun.constituents)
         REQUIRE(constituent.readable);
 
     // Full import: output lands beside the sources but nothing rewrites them.
     const QString output = tmp.filePath("readonly-stack.tif");
-    const auto plan = sicnu::operators::rs::planCnProductImport(image.toStdString().c_str() ? image.toStdString() : std::string(), nullptr);
+    const auto plan = sicnu::operators::rs::planCnProductImport(image.toStdString(), nullptr);
     sicnu::operators::RSOperatorContext context;
     const Json::Value result = sicnu::operators::rs::executeCnProductImport(
         plan, output.toStdString(), {}, /*applyCalibration=*/true, context);
@@ -319,14 +358,14 @@ TEST_CASE("plan11: Chinese paths work end to end through the plan service",
     REQUIRE(QDir().mkpath(dir));
     const QString image = writeGf1Product(dir);
 
-    const auto dryRun = sicnu::operators::rs::dryRunCnProductImport(image.toStdString().c_str() ? image.toStdString() : std::string(), nullptr);
+    const auto dryRun = sicnu::operators::rs::dryRunCnProductImport(image.toStdString(), nullptr);
     REQUIRE(dryRun.plan.identity.supported);
     REQUIRE(dryRun.constituents.size() == 3);
     for (const auto &constituent : dryRun.constituents)
         REQUIRE(constituent.readable);
 
     const QString output = dir + QStringLiteral("/叠加结果.tif");
-    const auto plan = sicnu::operators::rs::planCnProductImport(image.toStdString().c_str() ? image.toStdString() : std::string(), nullptr);
+    const auto plan = sicnu::operators::rs::planCnProductImport(image.toStdString(), nullptr);
     sicnu::operators::RSOperatorContext context;
     const Json::Value result =
         sicnu::operators::rs::executeCnProductImport(plan, output.toStdString(), {}, false, context);

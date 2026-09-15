@@ -106,10 +106,10 @@
         {
           "band": "B1",
           "role": "panchromatic",
-          "wavelength_nm": 620.0,
-          "spectral_range_um": "0.51-0.73",
+          "wavelength_nm": 680.0,
+          "spectral_range_um": "0.51-0.85",
           "gsd_m": 10.0,
-          "note": "panchromatic 10 m"
+          "note": "panchromatic 10 m (published CBERS-4 PAN10M range 510-850 nm)"
         }
       ]
     }

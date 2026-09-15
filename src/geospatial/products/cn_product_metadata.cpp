@@ -438,6 +438,13 @@ bool unsupportedFamilyReason( const std::string &upper, std::string &reason )
     reason = "only GF-7 FWD/BWD camera products are adapted; other GF-7 products are not";
     return true;
   }
+  // GF-3 dash-form names ("GF3-...") match no adapted pattern; they stay
+  // recognized-but-refused like the other unadapted variants.
+  if ( pathHas( "GF3-" ) )
+  {
+    reason = "GF-3 dash-form names are not adapted; use the CRESDA GF3_ naming";
+    return true;
+  }
   // GF-3 SAR and the GF-4 PMI / GF-5 AHSI sub-modes are adapted (patterns
   // above); remaining GF-4/GF-5 payloads stay recognized-but-refused.
   if ( pathHas( "GF4_" ) || pathHas( "GF4-" ) )
@@ -1293,7 +1300,17 @@ ProductMetadata parseCbersInpeXml( const std::string &xmlPath, const CnProductId
   if ( bandIdIt != scan.listValues.end() )
   {
     for ( const std::string &band : bandIdIt->second )
-      product.declaredBandIds.push_back( band );
+    {
+      // Numeric <BandID> entries normalize to the canonical "B<n>" ids, the
+      // same contract as the comma-list path below (otherwise BandID-style
+      // INPE sidecars would silently lose every band-role match).
+      char *endChar = nullptr;
+      const long index = std::strtol( trimText( band ).c_str(), &endChar, 10 );
+      if ( endChar && *endChar == '\0' && index > 0 )
+        product.declaredBandIds.push_back( "B" + std::to_string( index ) );
+      else
+        product.declaredBandIds.push_back( band );
+    }
   }
   if ( product.declaredBandIds.empty() )
   {

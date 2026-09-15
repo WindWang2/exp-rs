@@ -236,8 +236,14 @@ bool parseSpectralRangeUm( const std::string &text, double &lowNm, double &highN
     return false;
   try
   {
-    const double lowUm = std::stod( text.substr( 0, dash ) );
-    const double highUm = std::stod( text.substr( dash + 1 ) );
+    std::size_t consumed = 0;
+    const double lowUm = std::stod( text.substr( 0, dash ), &consumed );
+    if ( consumed != dash )
+      return false;
+    const std::string highText = text.substr( dash + 1 );
+    const double highUm = std::stod( highText, &consumed );
+    if ( consumed != highText.size() )
+      return false;
     if ( !std::isfinite( lowUm ) || !std::isfinite( highUm ) || highUm <= lowUm )
       return false;
     lowNm = lowUm * 1000.0;
@@ -256,6 +262,15 @@ void validateStrictBandV2( const std::string &sensorKey, const SensorBandProfile
                            const Json::Value &bandJson, std::set<std::string> &seenBandIds )
 {
   const std::string where = sensorKey + "/" + band.band;
+  // Strict JSON typing: a present-but-non-numeric physical field is a named
+  // refusal — the parse layer would otherwise treat it as silently absent.
+  for ( const char *field : { "wavelength_nm", "center_wavelength_nm", "fwhm_nm", "gsd_m" } )
+  {
+    if ( bandJson.isMember( field ) && !bandJson[ field ].isNumeric() )
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "Sensor profile entry " + where + " declares \"" + field +
+                        "\" with a non-numeric JSON type" );
+  }
   const std::string idLower = lowerAscii( band.band );
   if ( !seenBandIds.insert( idLower ).second )
     throw GeoError( ErrorCode::InvalidArgument,
@@ -322,13 +337,40 @@ void validateStrictEntryV2( const std::string &sensorKey, const std::string &fam
                             const Json::Value &entry, SensorProfileRecord &record )
 {
   const std::string where = sensorKey + " in " + familyFile;
+
+  // Strict JSON typing first: a wrongly-typed field is a named refusal, not
+  // a silently-absent value (the v2 contract the schema document promises).
   for ( const char *field : { "satellite", "instrument", "sensor_mode", "calibration_rule" } )
   {
+    if ( entry.isMember( field ) && !entry[ field ].isString() )
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "Sensor profile entry " + where + " declares \"" + field +
+                        "\" with a non-string JSON type" );
     const std::string value = entry.get( field, Json::Value() ).asString();
     if ( value.empty() )
       throw GeoError( ErrorCode::InvalidArgument,
                       "Sensor profile entry " + where + " declares an empty \"" + field + "\"" );
   }
+  if ( !entry.isMember( "modality" ) || !entry[ "modality" ].isString() )
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "Sensor profile entry " + where +
+                      " must declare a string \"modality\" (schema 2.0 has no default)" );
+  if ( entry.isMember( "gsd_m" ) )
+  {
+    double gsd = 0.0;
+    if ( !positivePhysical( entry[ "gsd_m" ], gsd ) )
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "Sensor profile entry " + where +
+                        " declares gsd_m with a non-numeric or non-positive value" );
+  }
+  for ( const char *field : { "pan_variant", "ms_variant" } )
+  {
+    if ( entry.isMember( field ) && !entry[ field ].isString() )
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "Sensor profile entry " + where + " declares \"" + field +
+                        "\" with a non-string JSON type" );
+  }
+
   const std::string modality = record.modality;
   if ( !modalityVocabulary().count( modality ) )
     throw GeoError( ErrorCode::InvalidArgument,
@@ -365,7 +407,10 @@ void validateStrictEntryV2( const std::string &sensorKey, const std::string &fam
     throw GeoError( ErrorCode::InvalidArgument,
                     "Sensor profile entry " + where + " declares a non-object band_axis" );
   const Json::Value count = axis["count"];
-  if ( !count.isIntegral() || count.asInt() <= 0 )
+  // jsoncpp reports any real within int range as isIntegral(); a fractional
+  // count must not silently truncate.
+  if ( !count.isIntegral() || count.asInt() <= 0 ||
+       ( count.isDouble() && count.asDouble() != static_cast<double>( count.asInt() ) ) )
     throw GeoError( ErrorCode::InvalidArgument,
                     "Sensor profile entry " + where + " declares band_axis.count that is not a positive integer" );
   if ( count.asInt() != static_cast<int>( record.bands.size() ) )
@@ -402,9 +447,10 @@ void validateStrictEntryV2( const std::string &sensorKey, const std::string &fam
   }
 }
 
-SensorProfileRecord parseSensorEntry( const std::string &sensorKey, const std::string &familyFile,
-                                      int fileVersion, const std::string &source,
-                                      const Json::Value &entry )
+SensorProfileRecord parseSensorEntryImpl( const std::string &sensorKey,
+                                          const std::string &familyFile,
+                                          int fileVersion, const std::string &source,
+                                          const Json::Value &entry )
 {
   if ( !entry.isObject() )
     throw GeoError( ErrorCode::InvalidArgument,
@@ -505,6 +551,25 @@ SensorProfileRecord parseSensorEntry( const std::string &sensorKey, const std::s
   if ( fileVersion >= 2 )
     validateStrictEntryV2( sensorKey, familyFile, entry, record );
   return record;
+}
+
+/// Fail-closed boundary: a wrongly-typed JSON field must surface as the
+/// loader's typed GeoError (so the validator reports it as a finding),
+/// never as a jsoncpp LogicError escaping the report-not-throw contract.
+SensorProfileRecord parseSensorEntry( const std::string &sensorKey, const std::string &familyFile,
+                                      int fileVersion, const std::string &source,
+                                      const Json::Value &entry )
+{
+  try
+  {
+    return parseSensorEntryImpl( sensorKey, familyFile, fileVersion, source, entry );
+  }
+  catch ( const Json::Exception &error )
+  {
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "Sensor profile entry " + sensorKey + " in " + familyFile +
+                      " violates the JSON field contract: " + error.what() );
+  }
 }
 
 } // namespace
@@ -704,7 +769,9 @@ std::vector<SensorProfileValidationIssue> validateSensorProfiles()
     const Json::Value &json = *entry.second.front().second;
     for ( const char *variant : { "pan_variant", "ms_variant" } )
     {
-      const std::string target = json.get( variant, Json::Value() ).asString();
+      if ( !json.isMember( variant ) || !json[ variant ].isString() )
+        continue; // wrongly-typed fields are already reported by pass 1
+      const std::string target = json[ variant ].asString();
       if ( target.empty() )
         continue;
       if ( !entriesByKey.count( target ) )

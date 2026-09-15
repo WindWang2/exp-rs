@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "source": "CRESDA/Gaofen published product specifications (GF-1/2/6/7). wavelength_nm prefers the published nominal band centre when documented (GF-1/GF-2 PMS centres match data/spectral/sensors.json 'gf-pms'); otherwise it is the spectral-range midpoint. center_wavelength_nm and fwhm_nm are stated only where a nominal band centre/FWHM is published. A range width is never a FWHM. GF-7 uses the published dual-line PMS camera layout (PAN 0.45-0.90 um; MS B1-B4).",
+  "source": "CRESDA/Gaofen published product specifications (GF-1/2/6/7 optical; GF-3 SAR; GF-4 PMI geostationary) and GF-5 AHSI published payload specifications (330-band VNIR/SWIR axis). wavelength_nm prefers the published nominal band centre when documented; otherwise it is the spectral-range midpoint. AHSI per-band centres/FWHM are not stored: they come from each batch's published spectral response table. A range width is never a FWHM.",
   "sensors": {
     "gf1_pms": {
       "satellite": "GF1",

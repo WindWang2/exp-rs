@@ -81,7 +81,7 @@ struct ConstituentReport
     QString role;         ///< "sidecar" | "image" | "rpc" | "sibling_image"
     QString path;
     bool exists = false;
-    bool readable = false; ///< opened read-only and at least one block read
+    bool readable = false; ///< opened read-only (an empty file reads as readable)
     qint64 bytes = 0;      ///< full file size on disk
     std::string sha256Hex; ///< lowercase hex digest (see digestScope)
     bool hashComplete = false; ///< true only when the digest covers the WHOLE file

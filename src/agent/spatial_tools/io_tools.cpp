@@ -217,8 +217,14 @@ class IoProductPlanTool final : public SpatialTool
       if ( path.empty() )
         return failure;
       qint64 hashBudget = 268435456;
-      if ( input.isMember( "hash_budget_bytes" ) && input["hash_budget_bytes"].isIntegral() )
+      if ( input.isMember( "hash_budget_bytes" ) )
+      {
+        // A zero/negative budget would certify nothing while looking like a
+        // checksum report — refuse it instead.
+        if ( !input["hash_budget_bytes"].isIntegral() || input["hash_budget_bytes"].asInt64() <= 0 )
+          return SpatialToolResult::failure( "hash_budget_bytes must be a positive integer" );
         hashBudget = input["hash_budget_bytes"].asInt64();
+      }
       try
       {
         return SpatialToolResult::ok(

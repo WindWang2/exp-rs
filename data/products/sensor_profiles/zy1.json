@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "source": "ZY-1 02C published product specifications (CRESDA). wavelength_nm is the documented spectral-range midpoint; FWHM is not published here and therefore not stated.",
+  "source": "ZY-1 02C published product specifications (CRESDA) and ZY-1 02B/02D/02E published payload specifications (02B CCD/HR; 02D/02E PMS and AHSI 166-band VNIR/SWIR axis). wavelength_nm is the documented spectral-range midpoint; AHSI per-band centres/FWHM are not stored: they come from each batch's published spectral response table. FWHM is not published here and therefore not stated.",
   "sensors": {
     "zy1_02c_pms": {
       "satellite": "ZY1_02C",

@@ -1909,11 +1909,20 @@ int commandData( QStringList args, const CliIO &io )
                 // ADR 0159 dry-run: constituent graph + budget-capped sha256,
                 // purely read-only over the source product.
                 qint64 hashBudget = 268435456;
+                bool budgetInvalid = false;
                 for ( int i = 0; i + 1 < args.size(); ++i )
                 {
                     if ( args[i] == "--hash-budget" )
-                        hashBudget = args[i + 1].toLongLong();
+                    {
+                        bool parsedOk = false;
+                        hashBudget = args[i + 1].toLongLong( &parsedOk );
+                        budgetInvalid |= !parsedOk || hashBudget <= 0;
+                    }
                 }
+                if ( budgetInvalid )
+                    return io.finish( false, "data", {},
+                                      exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                      {}, "--hash-budget must be a positive integer" );
                 try
                 {
                     const auto dryRun = operators::rs::dryRunCnProductImport( stdPath, nullptr, hashBudget );

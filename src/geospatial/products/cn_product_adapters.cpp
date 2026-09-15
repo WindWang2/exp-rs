@@ -140,7 +140,26 @@ ProductAssets enumerateCnProduct( const std::string &path, ProductKind kind,
   const std::string sidecarPath = cnLocateSidecarXml( path );
   const std::string tiffPath = cnLocateImageTiff( path, sidecarPath );
   if ( tiffPath.empty() )
-    result.missingConstituents.push_back( "measurement TIFF beside the sidecar" );
+  {
+    // Hyperspectral packages are only adapted TIFF-backed so far (ADR 0159
+    // D-11): say so instead of implying an HDF5 product is merely missing a
+    // TIFF sibling.
+    const CnBandRoleTable noteTable = [&] {
+      try
+      {
+        return cnBandRoleTable( sensorKey );
+      }
+      catch ( const GeoError & )
+      {
+        return CnBandRoleTable{};
+      }
+    }();
+    result.missingConstituents.push_back(
+      noteTable.hasBandAxis
+        ? "measurement raster (TIFF-backed hyperspectral packages only; "
+          "HDF5-backed distributions are a declared follow-up)"
+        : "measurement TIFF beside the sidecar" );
+  }
 
   if ( metadata.declaredBandIds.empty() )
   {

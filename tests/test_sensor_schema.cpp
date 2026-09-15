@@ -176,6 +176,43 @@ TEST_CASE( "sensor_schema: v2 entries enforce strict field rules", "[cn][registr
            "bands": [ { "band": "B1", "role": "blue", "spectral_range_um": "0.45-0.52",
                         "wavelength_nm": 600.0 } ] })json",
       "range midpoint" },
+    { "string-typed wavelength",
+      R"json({
+        "satellite": "GF1", "instrument": "PMS", "sensor_mode": "PMS", "modality": "optical",
+        "calibration_rule": "r = DN * g + b",
+        "bands": [ { "band": "B1", "role": "blue", "wavelength_nm": "485" } ]
+      })json",
+      "non-numeric JSON type" },
+    { "string-typed band gsd",
+      R"json({
+        "satellite": "GF1", "instrument": "PMS", "sensor_mode": "PMS", "modality": "optical",
+        "calibration_rule": "r = DN * g + b",
+        "bands": [ { "band": "B1", "role": "blue", "gsd_m": "8" } ]
+      })json",
+      "non-numeric JSON type" },
+    { "number-typed satellite",
+      R"json({
+        "satellite": 42, "instrument": "PMS", "sensor_mode": "PMS", "modality": "optical",
+        "calibration_rule": "r = DN * g + b",
+        "bands": [ { "band": "B1", "role": "blue" } ]
+      })json",
+      "non-string JSON type" },
+    { "missing modality",
+      R"json({
+        "satellite": "GF1", "instrument": "PMS", "sensor_mode": "PMS",
+        "calibration_rule": "r = DN * g + b",
+        "bands": [ { "band": "B1", "role": "blue" } ]
+      })json",
+      "must declare a string \"modality\"" },
+    { "wrong-typed pan_variant",
+      R"json({
+        "satellite": "GF1", "instrument": "PMS", "sensor_mode": "PMS", "modality": "optical",
+        "calibration_rule": "r = DN * g + b", "pan_variant": ["gf_test_pan"],
+        "bands": [ { "band": "B1", "role": "blue" } ]
+      })json",
+      // pan_variant is read during parse (before the strict pass), so the
+      // typed JSON-contract refusal fires rather than the v2 field check.
+      "violates the JSON field contract" },
     { "wavelength disagrees with centre",
       R"json({ "satellite": "GF1", "instrument": "PMS", "sensor_mode": "PMS", "modality": "optical",
            "calibration_rule": "r = DN * g + b",
