@@ -27,6 +27,11 @@
 #include "workbench/model_workbench_panel.h"
 #include "workbench/object_identity.h"
 #include "workbench/mission_context.h"
+// F11 unblocking include (pre-existing master break): this TU constructs and
+// dereferences rs::app::GeorefDualWindow but relied on a transitive include
+// that no longer exists after the D14/D17 merges — the TU has not compiled
+// since. See .planning/qgis-editing-annotation-11/EVIDENCE.md OUT_OF_SCOPE.
+#include "workbench/georef_dual_window.h"
 
 #include <QJsonDocument>
 #include <memory>
@@ -610,6 +615,9 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
             } );
         sicnu::agent::spatial_tools::SpatialToolRegistry::instance().registerTool(
             sicnu::agent::spatial_tools::SpatialToolPtr{ contextTool } );
+    }
+
+);
     }
 
     // ── Cartography bridge (Workbench 10.0, C-1) ──────────────────────
