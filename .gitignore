@@ -272,3 +272,8 @@ data/labs/_tmp/
 !.planning/unified-mission-workbench-d18/**
 !.planning/dataset-foundry-benchmark-d19/
 !.planning/dataset-foundry-benchmark-d19/**
+
+# advanced-insar-platform-11: track planning notes (markdown only; logs stay local).
+!.planning/advanced-insar-platform-11/
+.planning/advanced-insar-platform-11/*
+!.planning/advanced-insar-platform-11/*.md
