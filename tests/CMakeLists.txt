@@ -9429,3 +9429,7 @@ sicnu_link_jsoncpp(test_mutation_kill_11)
 sicnu_add_test(test_verification_failure_11)
 target_link_libraries(test_verification_failure_11 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_verification_failure_11)
+
+sicnu_add_test(test_contract_cross_surface_11)
+target_link_libraries(test_contract_cross_surface_11 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_contract_cross_surface_11)

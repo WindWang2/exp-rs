@@ -101,6 +101,16 @@ LANES: dict[str, dict] = {
             ("scientific_contract_10", "test_scientific_contract_10", "test", 300),
             ("drift_projection_10", "test_drift_projection_10", "test", 300),
             ("science_verification_10", "test_science_verification_10", "test", 300),
+            # Verification Platform 11.0 (F09 census 2.0 + determinism
+            # truth + metamorphic/reference/failure lanes):
+            ("contract_census_11", "test_contract_census_11", "test", 300),
+            ("contract_determinism_11", "test_contract_determinism_11", "test", 600),
+            ("metamorphic_11", "test_verification_metamorphic_11", "test", 300),
+            ("numeric_reference_11", "test_verification_numeric_reference_11",
+             "test", 300),
+            ("mutation_kill_11", "test_mutation_kill_11", "test", 300),
+            ("failure_11", "test_verification_failure_11", "test", 300),
+            ("cross_surface_11", "test_contract_cross_surface_11", "test", 300),
         ],
     },
     "L3": {
@@ -132,7 +142,11 @@ LANES: dict[str, dict] = {
         "description": "concurrency stress, POSIX fault injection, worker host",
         "items": [
             ("concurrency_stress", "test_concurrency_stress", "test", 600),
-            ("fault_injection_posix", "test_fault_injection", "test", 300),
+            # Capability-aware (Platform 11.0): POSIX-only fault injection is
+            # skipped with an explicit host reason on non-POSIX hosts instead
+            # of a misleading not-built/failed verdict.
+            ("fault_injection_posix", "test_fault_injection", "test", 300,
+             {"posix": True}),
             ("worker_host", "test_worker_host", "test", 600),
         ],
     },
@@ -179,21 +193,56 @@ LANE_ORDER = ["L0", "L1", "L2", "L3", "L4", "L5", "LS", "L6", "L7", "L8"]
 
 def find_binary(build_dir: Path, name: str) -> Path | None:
     """Locate a test/bench executable in the build tree (tests/ first, then
-    the build root and per-module dirs — matches the tree's output layouts)."""
-    candidates = [
-        build_dir / "tests" / name,
-        build_dir / name,
-        build_dir / "tests" / "support" / name,
-        # multi-config generators (Visual Studio / Xcode) nest per-config dirs
-        build_dir / "tests" / "Release" / name,
-        build_dir / "tests" / "Debug" / name,
-        build_dir / "Release" / name,
-        build_dir / "Debug" / name,
-    ]
+    the build root and per-module dirs — matches the tree's output layouts).
+    Capability-aware (Platform 11.0): on Windows executables carry .exe, so
+    both spellings are probed; a bare name that exists only as a directory
+    entry never counts."""
+    stems = [name]
+    exe_suffix = ".exe" if os.name == "nt" else ""
+    if exe_suffix and not name.endswith(exe_suffix):
+        stems.append(name + exe_suffix)
+    candidates = []
+    for stem in stems:
+        candidates += [
+            build_dir / "tests" / stem,
+            build_dir / stem,
+            build_dir / "tests" / "support" / stem,
+            # multi-config generators (Visual Studio / Xcode) nest per-config dirs
+            build_dir / "tests" / "Release" / stem,
+            build_dir / "tests" / "Debug" / stem,
+            build_dir / "Release" / stem,
+            build_dir / "Debug" / stem,
+        ]
     for cand in candidates:
         if cand.is_file() and os.access(cand, os.X_OK):
             return cand
     return None
+
+
+def host_capabilities() -> dict:
+    """Capability declarations for the executing host (Platform 11.0):
+    reported verbatim in the results JSON and consulted by per-item
+    `requires` clauses so an unsupported item is skipped with an explicit
+    host reason, never mis-reported as failed."""
+    is_posix = os.name == "posix"
+    return {
+        "platform": sys.platform,
+        "os_name": os.name,
+        "cpus": os.cpu_count(),
+        "posix": is_posix,
+        "exe_suffix": ".exe" if os.name == "nt" else "",
+    }
+
+
+def item_requirements_met(requires: dict | None, host: dict) -> tuple[bool, str]:
+    if not requires:
+        return True, ""
+    for key, wanted in requires.items():
+        if key not in host:
+            return False, f"unknown capability '{key}'"
+        if bool(host[key]) != bool(wanted):
+            return False, f"host {key}={host[key]} but item requires {wanted}"
+    return True, ""
 
 
 def build_target(build_dir: Path, target: str, jobs: int) -> tuple[str, str]:
@@ -351,8 +400,11 @@ def main() -> int:
             spec = LANES[lane]
             opt = " (optional)" if spec.get("optional") else ""
             print(f"{lane} {spec['title']}{opt}: {spec['description']}")
-            for label, name, kind, _ in spec["items"]:
-                print(f"    - {label}: {name} [{kind}]")
+            for item_spec in spec["items"]:
+                label, name, kind = item_spec[:3]
+                req = item_spec[4] if len(item_spec) > 4 else None
+                tag = f" [requires {req}]" if req else ""
+                print(f"    - {label}: {name} [{kind}]{tag}")
         return 0
 
     build_dir = Path(args.build_dir).resolve()
@@ -381,7 +433,7 @@ def main() -> int:
         "schema": SCHEMA,
         "started_utc": datetime.now(timezone.utc).isoformat(),
         "build_dir": str(build_dir),
-        "host": {"platform": sys.platform, "cpus": os.cpu_count()},
+        "host": host_capabilities(),
         "lanes": {},
     }
     overall_ok = True
@@ -394,10 +446,19 @@ def main() -> int:
         lane_result = {"title": spec["title"], "items": []}
         lane_ok = True
         print(f"\n=== {lane} {spec['title']} — {spec['description']} ===")
-        for label, name, kind, timeout_s in spec["items"]:
+        for item_spec in spec["items"]:
+            label, name, kind, timeout_s = item_spec[:4]
+            requires: dict | None = item_spec[4] if len(item_spec) > 4 else None
             timeout = timeout_s * args.timeout_scale
             item = {"lane": lane, "label": label, "name": name, "kind": kind,
                     "timeout_s": timeout}
+            allowed, why = item_requirements_met(requires, results["host"])
+            if not allowed:
+                item.update(status="skipped",
+                            detail=f"host capability: {why}")
+                print(f"  [skipped] {label} ({why})")
+                lane_result["items"].append(item)
+                continue
             prior = state.get(f"{lane}:{label}")
             if args.resume and prior and prior.get("status") == "passed":
                 # A recorded pass is only reusable for the SAME binary and
