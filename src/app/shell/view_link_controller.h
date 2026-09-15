@@ -39,6 +39,8 @@
 
 #include "display/qgis_display_manager.h"
 
+#include <qgscoordinatereferencesystem.h>
+
 class QgsMapCanvas;
 class QgsPointXY;
 class QgsRectangle;
@@ -147,6 +149,12 @@ class ViewLinkController : public QObject
         /// Previous extents in the view's own CRS, newest first.
         QVector<QgsRectangle> history;
         QPointer<QgsVertexMarker> marker;
+        /// WKT cache: generating WKT per pointer move is too expensive; the
+        /// cache is keyed by CRS equality (cheap), so a project CRS change
+        /// invalidates it naturally.
+        QgsCoordinateReferenceSystem cachedCrs;
+        QString cachedCrsWkt;
+        bool crsCacheValid = false;
     };
 
     ViewRecord *recordFor( sicnu::display::DisplayViewId viewId );

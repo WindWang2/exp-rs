@@ -75,6 +75,23 @@ one setup call, command handler lambdas). #991 merged so the old read-only
 rule no longer applies, but #1008/#1009 own no main_window files, so the
 conflict surface stays small.
 
+D3-REVISION (implementation finding). The display-manager seam of D3 turned
+out unnecessary: vendored QGIS exposes `QgsLayerTreeNode::visibilityChanged`
+(and `QgsMapLayer::opacityChanged`), and QgisDisplayManager::setLayerVisible
+drives setItemVisibilityChecked through the view-local tree — so observing
+the tree IS observing the manager's own writes (one truth, zero manager
+changes). VaLayerLinkController therefore connects per-view tree roots
+(auto-disconnecting, destroyed-pruned registries) and mutates peers ONLY
+through manager.setLayerVisible / QgsMapLayer::setOpacity. src/app/display
+ends up untouched, shrinking the conflict surface with open PRs to CMake
+appends.
+
+D12. The hub is a SELECTION/brush bus, not a hover firehose: cursor hover
+flows through ViewLinkController::cursorMoved + VaCursorProbe (signals),
+while the hub carries brush/pick/region events with identity. Publishing
+every pointer move to the hub would flood the bounded history and evict
+selection events — the split keeps the history diagnostic-meaningful.
+
 D11. **Cross-CRS known answers use an independent truth**: tests compute the
 expected transformed point/rect with a directly-constructed
 QgsCoordinateTransform from EPSG:4326 ↔ EPSG:3857 with hand-computed values

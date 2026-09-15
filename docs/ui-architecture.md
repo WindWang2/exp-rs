@@ -664,12 +664,20 @@ the SAME `workflow:preflight` engine agents use and projects error-severity
 findings onto node failure badges with the repairable hint; no second
 validator exists.
 
-## 33. N-view link (goal §C)
+## 33. N-view link (goal §C; extended 11.0)
 
 `ViewLinkController` (src/app/shell/) links registered Display Views
-(QgisDisplayManager authority): per-view toggles, throttled extent fan-out
-with CRS transform, unlink and viewAboutToBeRemoved detach. The dual 1x2
-split-canvas sync keeps its dedicated controller — a different surface.
+(QgisDisplayManager authority): named link groups (group-scoped, throttled
+extent fan-out with fail-closed CRS transforms), bounded per-view viewport
+history with step-back undo, cross-CRS cursor crosshair link
+(`cursorMoved`/`cursorLeft` for charts) and viewAboutToBeRemoved detach.
+The dual 1x2 split-canvas sync keeps its dedicated controller — a different
+surface. Layer visibility/opacity sync across views is
+`VaLayerLinkController`, keyed by catalog AssetId (never names); hover
+sampling is `VaCursorProbe` (async, stale-generation drops). The full
+contract lives in docs/workbench/visual-analytics-linking.md; the
+process-level selection bus is `VaSelectionHub` (typed events, origin +
+generation, echo suppression).
 
 ## 34. rs: operator catalog (goal §F)
 
@@ -685,6 +693,9 @@ with its own recent/favorites.
 `test_object_identity` · `test_agent_workbench_context` ·
 `test_cartography_operators_10` (inside the test_mapspec harness) ·
 `test_visual_analytics` · `test_view_link` · `test_processing_catalog_ux` ·
+plus the 11.0 linked-visual gates inside `test_view_link` (groups, undo,
+cross-CRS cursor known answer, layer visibility link, probe) and
+`test_visual_analytics` (hub echo/generation/bounds, brushing filter) ·
 plus the wb5–9 regression suites this track extends
 (`test_selection_context`, `test_provenance_section`,
 `test_command_registry`, `test_mapspec`, `test_pipeline_scene`,

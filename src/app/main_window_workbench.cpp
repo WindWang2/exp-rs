@@ -62,7 +62,9 @@
 #include <QStatusBar>
 #include <QStackedWidget>
 
+#include <qgsmapcanvas.h>
 #include <qgsproject.h>
+#include <qgspointxy.h>
 #include <qgsrasterlayer.h>
 #include <qgsmaplayer.h>
 
@@ -687,7 +689,12 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
         },
         m_vaSelectionHub,
         [this]() -> QgsMapCanvas * {
-            return m_activeViewHost ? m_activeViewHost->mapCanvas() : nullptr;
+            // The pick marker belongs on the view the user is actually
+            // looking at (display-manager active view), not always the main.
+            if ( !m_projectContext )
+                return nullptr;
+            auto &display = m_projectContext->displayManager();
+            return display.mapCanvas( display.activeViewId() );
         },
         [this]() -> QgsRasterLayer * {
             if ( !m_selectionContext )

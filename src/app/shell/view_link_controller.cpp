@@ -395,10 +395,20 @@ void ViewLinkController::onCursorMoved( sicnu::display::DisplayViewId sourceId,
     ++mStats.cursorEvents;
     if ( point.isEmpty() )
         return;
-    QString crsWkt;
-    if ( QgsMapCanvas *canvas = canvasFor( sourceId ) )
-        crsWkt = canvas->mapSettings().destinationCrs().toWkt( Qgis::CrsWktVariant::Preferred );
-    emit cursorMoved( sourceId, point, crsWkt );
+    ViewRecord *record = recordFor( sourceId );
+    QgsMapCanvas *canvas = canvasFor( sourceId );
+    if ( !record || !canvas )
+        return;
+    // WKT is cached per CRS: WKT generation on every pointer move would be
+    // a needless PROJ/string cost on the hottest path in this controller.
+    const QgsCoordinateReferenceSystem crs = canvas->mapSettings().destinationCrs();
+    if ( !record->crsCacheValid || !( record->cachedCrs == crs ) )
+    {
+        record->cachedCrs = crs;
+        record->cachedCrsWkt = crs.toWkt( Qgis::CrsWktVariant::Preferred );
+        record->crsCacheValid = true;
+    }
+    emit cursorMoved( sourceId, point, record->cachedCrsWkt );
     if ( !mCursorSync )
         return;
     propagateCursorFrom( sourceId, point );
