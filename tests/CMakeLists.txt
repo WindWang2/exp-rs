@@ -9409,3 +9409,23 @@ sicnu_discover_tests(test_d15_classification_change_e2e TIMEOUT 600 TEST_PREFIX 
 sicnu_add_test(test_contract_determinism_11)
 target_link_libraries(test_contract_determinism_11 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_contract_determinism_11)
+
+# Verification Platform 11.0 (F09 packages C/D/E): metamorphic oracle
+# relations with sensitivity controls, independent numeric references,
+# oracle mutation-kill discrimination, and the failure/cancel/atomic lane
+# (append-only block).
+sicnu_add_test(test_verification_metamorphic_11)
+target_link_libraries(test_verification_metamorphic_11 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_verification_metamorphic_11)
+
+sicnu_add_test(test_verification_numeric_reference_11)
+target_link_libraries(test_verification_numeric_reference_11 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_verification_numeric_reference_11)
+
+sicnu_add_test(test_mutation_kill_11)
+target_link_libraries(test_mutation_kill_11 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_mutation_kill_11)
+
+sicnu_add_test(test_verification_failure_11)
+target_link_libraries(test_verification_failure_11 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_verification_failure_11)
