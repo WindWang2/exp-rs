@@ -54,6 +54,17 @@ class DiskTileStore
     /// spill between producer and consumer in the same run). Prefer read()
     /// for restart/reuse paths.
     static TilePayload readProvisional( const ScratchLease &lease );
+
+    /// Path-based write for restart protocols (Execution 11.0): same framing
+    /// as write(), but to a caller-managed deterministic layout —
+    /// `<finalPath>.part` → fsync(best-effort) → atomic rename to @p
+    /// finalPath. No lease, no registry accounting (ResumableTileRun owns
+    /// its budgeting); the tmp file is removed on failure.
+    static void writeFile( const std::string &finalPath, const TilePayload &payload );
+
+    /// Path-based read: the restart/reuse half of writeFile — full header +
+    /// payload digest + size validation, ChunkCorruptTile on any mismatch.
+    static TilePayload readFile( const std::string &finalPath );
 };
 
 /// In-flight write-bytes limiter (disk writer backpressure).

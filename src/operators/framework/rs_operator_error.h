@@ -37,6 +37,9 @@ enum class ErrorCode : int {
     FileNotWritable,
     DirectoryNotFound,
     InvalidInputData,
+    CorruptArtifactData,  ///< persisted tile/scratch/checkpoint bytes failed
+                          ///< digest or framing validation (execution 11.0,
+                          ///< append-only): recompute or fail, never trust
 
     // Library-specific errors (3000-3999)
     GdalError = 3000,
@@ -58,6 +61,9 @@ enum class ErrorCode : int {
     PolicyRefused = 4102,           ///< capability/policy refusal (plugin platform 9.0,
                                     ///< append-only): the capability declaration refuses
                                     ///< this operation; nothing ran
+    ResourceBudgetExceeded = 4103,  ///< execution budget (RAM/scratch/write-in-flight)
+                                    ///< exhausted and no degradation step remains
+                                    ///< (execution 11.0, append-only)
 
     Unknown = 9999
 };

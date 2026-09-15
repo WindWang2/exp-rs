@@ -96,6 +96,7 @@ enum class Counter : uint8_t
     TaskAutoRetries,
     ArtifactsRegistered,
     ArtifactsReclaimed,
+    ResourceLeaksDetected, ///< execution 11.0: governor teardowns with live leases
     _Count
 };
 

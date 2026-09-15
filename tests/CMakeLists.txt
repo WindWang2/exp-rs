@@ -9393,3 +9393,23 @@ target_compile_definitions(test_d15_classification_change_e2e PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 sicnu_discover_tests(test_d15_classification_change_e2e TIMEOUT 600 TEST_PREFIX "test_d15_classification_change_e2e::")
+
+# Execution Runtime Convergence 11.0 — authority gate, unified chunk contract,
+# crash-safe resume, resource governor, worker lease, per-chunk telemetry,
+# adoption kit, scale/fault matrix (all link the world via sicnu_add_test).
+sicnu_add_test(test_execution_authority_11 TIMEOUT 300)
+target_link_libraries(test_execution_authority_11 PRIVATE sicnu_runtime)
+sicnu_add_test(test_chunk_contract_11 TIMEOUT 120)
+target_link_libraries(test_chunk_contract_11 PRIVATE sicnu_runtime)
+sicnu_add_test(test_chunk_resume_11 TIMEOUT 300)
+target_link_libraries(test_chunk_resume_11 PRIVATE sicnu_runtime)
+sicnu_add_test(test_execution_governor_11 TIMEOUT 180)
+target_link_libraries(test_execution_governor_11 PRIVATE sicnu_runtime)
+sicnu_add_test(test_worker_lease_11 TIMEOUT 120)
+target_link_libraries(test_worker_lease_11 PRIVATE sicnu_runtime)
+sicnu_add_test(test_execution_telemetry_11 TIMEOUT 180)
+target_link_libraries(test_execution_telemetry_11 PRIVATE sicnu_runtime)
+sicnu_add_test(test_chunk_adoption_11 TIMEOUT 300)
+target_link_libraries(test_chunk_adoption_11 PRIVATE sicnu_runtime)
+sicnu_add_test(test_execution_scale_fault_11 TIMEOUT 600)
+target_link_libraries(test_execution_scale_fault_11 PRIVATE sicnu_runtime)

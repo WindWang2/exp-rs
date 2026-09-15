@@ -15,11 +15,15 @@ add_library(sicnu_runtime SHARED
     chunk/scratch_registry.cpp
     chunk/disk_tile_store.cpp
     chunk/tile_checkpoint.cpp
+    chunk/tile_run_contract.cpp
+    chunk/resumable_tile_run.cpp
+    exec/execution_governor.cpp
     gpu/gpu_plane.cpp
     observability/execution_telemetry.cpp
     observability/fault_registry.cpp
     observability/trace.cpp
     observability/diagnostic_report.cpp
+    worker/worker_lease.cpp
 )
 target_include_directories(sicnu_runtime PUBLIC ${CMAKE_SOURCE_DIR}/src)
 set_target_properties(sicnu_runtime PROPERTIES

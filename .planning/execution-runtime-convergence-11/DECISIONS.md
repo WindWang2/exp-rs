@@ -18,3 +18,6 @@
 | D-014 | 新测试命名 `test_{chunk,execution}_*_11.cpp`，落在 GOAL primary scope 的 tests/*execution*、tests/*chunk* 模式内。 | 命名规则沿用仓库 `<域>_<主题>_<track#>` 先例，冲突最小。 |
 | D-015 | 子进程崩溃恢复测试用测试二进制自重执行（env 开关 + `_Exit`），不用 fork（Windows 无 fork）。 | hermetic、跨平台；tests/helper_external_process.cpp 先例存在。 |
 | D-016 | Windows 下 fsync no-op 是既有事实；resume 原子性边界声明为 rename。不试图引入 Windows FlushFileBuffers 大改。 | 与 scratch_registry/tile_checkpoint 既有契约一致（"rename is the atomicity boundary"）；改 fsync 行为跨平台风险大且超出本 track 可验证范围。已知限制记 PR_BODY。 |
+| D-017 | Catch2 以 `FETCHCONTENT_SOURCE_DIR_CATCH2=C:/deps/catch2-src`（git clone v3.7.1 fa43b774，与本仓库 FetchContent 声明的同 tag）离线提供。 | FetchContent 内嵌 gitclone 在 cmd/vcvars 环境下失败 3 次；直接 git clone 可用。属构建环境供给，不改仓库依赖声明。 |
+| D-018 | 实现层提交粒度：一或两个综合 feat commit（src+tests+注册）+ docs commits。 | tests/CMakeLists.txt 为共享 append-only 文件，多 WP 的注册行交织，按 hunk 拆分在非交互环境高风险破坏 bisect 可构建性；仓库先例（D13 #1008 单 feat commit）支持。 |
+| D-019 | 供 fused_chain 与 adoption kit 复用同一 ChunkCancelBridge/runWithChunkErrorTranslation（chunk_error_bridge.h），fused_chain 是参照消费者。 | 消除"同功能换名字再写一遍"；桥单一事实源。 |

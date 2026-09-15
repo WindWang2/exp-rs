@@ -42,6 +42,7 @@ set(SICNU_OPERATORS_SOURCES
     framework/asset_index_pipeline.cpp
     framework/model_catalog.cpp
     framework/artifact_digest.cpp
+    framework/chunked_run.cpp
 )
 
 # OpenCV-based operators (only when OpenCV imgproc is available)
