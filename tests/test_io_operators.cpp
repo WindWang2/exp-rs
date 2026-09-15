@@ -292,7 +292,10 @@ TEST_CASE( "io:reproject honours srcCrsOverride for CRS-less input (F-OPS-4)",
   REQUIRE( outputWkt != nullptr );
   REQUIRE( std::string( outputWkt ).size() > 0 );
   OGRSpatialReferenceH outputSrs = OSRNewSpatialReference( nullptr );
-  REQUIRE( OSRImportFromWkt( const_cast<char **>( &outputWkt ), &outputSrs ) == OGRERR_NONE );
+  // OSRImportFromWkt(hSRS, char**) — args were previously swapped, yielding
+  // void**→char** under -fpermissive. Prefer OSRSetFromUserInput so the
+  // const WKT from GDALGetProjectionRef needs no mutable/const_cast dance.
+  REQUIRE( OSRSetFromUserInput( outputSrs, outputWkt ) == OGRERR_NONE );
   const bool sameCrs = OSRIsSame( outputSrs, target ) != 0;
   OSRDestroySpatialReference( outputSrs );
   OSRDestroySpatialReference( target );
