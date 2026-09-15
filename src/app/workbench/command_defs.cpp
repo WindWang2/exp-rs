@@ -684,7 +684,7 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
     }
     {
         RS_CMD( d, "view.linkVisibility", QObject::tr( "Link Layer Visibility" ),
-                QObject::tr( "Toggles layer visibility/opacity sync by asset across views." ),
+                QObject::tr( "Toggles layer visibility sync by asset across views." ),
                 "link_visibility", QObject::tr( "View" ) );
         d.checkable = true;
         d.availability = [window]( const SelectionContextSnapshot & ) {
@@ -704,10 +704,12 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         RS_CMD( d, "view.linkUndo", QObject::tr( "Previous Viewport" ),
                 QObject::tr( "Restores the active view's previous viewport (undoes one pan/zoom)." ),
                 "link_undo", QObject::tr( "View" ) );
+        // History includes the CURRENT viewport as its newest entry, so
+        // stepping back needs at least two recorded viewports.
         d.availability = [window]( const SelectionContextSnapshot & ) {
             auto *controller = window->viewLinkController();
             return controller && !controller->activeView().isNull()
-                   && controller->historyCount( controller->activeView() ) > 0;
+                   && controller->historyCount( controller->activeView() ) > 1;
         };
         d.handler = [window] {
             if ( auto *controller = window->viewLinkController() )

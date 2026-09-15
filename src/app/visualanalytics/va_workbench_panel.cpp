@@ -12,8 +12,11 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 
+#include <QUuid>
+
 #include <algorithm>
 #include <cmath>
+#include <atomic>
 
 #include <qgscoordinatereferencesystem.h>
 #include <qgscoordinatetransform.h>
@@ -36,9 +39,10 @@ constexpr int kScatterThumb = 256;      // scatter source window
 constexpr int kMaxScatterPoints = 4096; // payload cap
 constexpr int kHistogramBins = 64;
 
-/// This surface's hub origin token. Its own events are never re-consumed
-/// (the hub's echo guard only covers same-dispatch re-entry).
-constexpr const char *kOrigin = "va.panel";
+/// This surface's hub origin token PREFIX, made unique per instance: two
+/// panels must never consume (or be echo-suppressed against) each other.
+constexpr const char *kOrigin = "va.panel#";
+std::atomic<int> s_instanceCounter { 0 };
 
 /// Runs on the pool thread: opens through the geospatial contract and reads
 /// a Nearest-overview thumbnail of @p bands sized to fit @p size (the SAME
@@ -86,7 +90,8 @@ VaWorkbenchPanel::VaWorkbenchPanel( RasterPathProvider provider,
     , m_canvasProvider( std::move( canvasProvider ) )
     , m_rasterLayerProvider( std::move( rasterLayerProvider ) )
     , m_hub( hub )
-    , m_origin( QStringLiteral( kOrigin ) )
+    , m_origin( QStringLiteral( kOrigin )
+                + QString::number( s_instanceCounter.fetch_add( 1 ) + 1 ) )
     , m_probe( [this]() -> QgsRasterLayer * {
         return m_rasterLayerProvider ? m_rasterLayerProvider() : nullptr;
     } )
@@ -207,6 +212,7 @@ void VaWorkbenchPanel::buildUi()
     connect( &m_scatterSource, &VaDataSource::ready, this,
              [this]( const VaData &data ) {
                  m_lastScatter = data;
+                 m_displayedScatter = data;
                  m_scatterChart->setData( data );
              } );
     connect( &m_scatterSource, &VaDataSource::failed, m_scatterChart,
@@ -285,6 +291,7 @@ void VaWorkbenchPanel::applyScatterRangeFilter( double x0, double x1,
     if ( m_lastScatter.kind != VaChartKind::Scatter )
         return;
     const VaData filtered = filterScatterByXRange( m_lastScatter, m_filterMin, m_filterMax );
+    m_displayedScatter = filtered;
     m_scatterChart->setData( filtered );
     m_statusLabel->setText(
       tr( "联动过滤：散点限制在直方图范围 [%1, %2]，共 %3 点。" )
@@ -295,24 +302,19 @@ void VaWorkbenchPanel::applyScatterRangeFilter( double x0, double x1,
 
 void VaWorkbenchPanel::showPickMarker( int index )
 {
-    // Resolve the pick to a map location from the payload's own geometry —
-    // geotransform arithmetic, no re-scan, no I/O.
-    if ( index < 0 || m_lastScatter.kind != VaChartKind::Scatter
-         || !m_lastScatter.scatter.hasGeometry
-         || index >= m_lastScatter.scatter.cols.size()
-         || index >= m_lastScatter.scatter.rows.size()
-         || m_lastScatter.scatter.geotransform.size() != 6 )
+    // Resolve the pick to a map location from the payload the widget is
+    // CURRENTLY SHOWING (post-brush-filter) — geotransform arithmetic, no
+    // re-scan, no I/O. Resolving against the raw snapshot would place the
+    // marker at the wrong point after any filter.
+    double rx = 0, ry = 0;
+    if ( m_displayedScatter.kind != VaChartKind::Scatter
+         || !scatterPickToMapPoint( m_displayedScatter.scatter, index, &rx, &ry ) )
     {
         return;
     }
     QgsMapCanvas *canvas = m_canvasProvider ? m_canvasProvider() : nullptr;
     if ( !canvas )
         return;
-    const QVector<double> &gt = m_lastScatter.scatter.geotransform;
-    const qint64 col = m_lastScatter.scatter.cols.at( index );
-    const qint64 row = m_lastScatter.scatter.rows.at( index );
-    const double rx = gt.at( 0 ) + col * gt.at( 1 ) + row * gt.at( 2 );
-    const double ry = gt.at( 3 ) + col * gt.at( 4 ) + row * gt.at( 5 );
 
     QgsPointXY canvasPoint( rx, ry );
     const QgsCoordinateReferenceSystem rasterCrs( m_lastScatter.scatter.crsWkt );

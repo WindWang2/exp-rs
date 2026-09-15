@@ -482,7 +482,7 @@ private:
     QAction *m_secondaryViewAction = nullptr;
     QAction *m_dualViewportSyncAction = nullptr;
     class RsDualViewportSyncController *m_dualViewportSync = nullptr;
-    /// Linked Visual Analytics 11.0 (created in setupWorkbenchPanels).
+    /// Linked Visual Analytics 11.0 (created with the workbench panels).
     sicnu::app::va::VaSelectionHub *m_vaSelectionHub = nullptr;
     sicnu::app::ViewLinkController *m_viewLinkController = nullptr;
     sicnu::app::VaLayerLinkController *m_layerLinkController = nullptr;

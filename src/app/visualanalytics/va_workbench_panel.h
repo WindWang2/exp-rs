@@ -82,7 +82,8 @@ class VaWorkbenchPanel : public QgsDockWidget
     CanvasProvider m_canvasProvider;
     RasterLayerProvider m_rasterLayerProvider;
     QPointer<VaSelectionHub> m_hub;
-    /// This panel's hub origin token — its own broadcasts never re-consumed.
+    /// This panel's hub origin token (per-instance) — its own broadcasts
+    /// are never re-consumed by itself.
     QString m_origin;
 
     QComboBox *m_bandA = nullptr;
@@ -100,8 +101,13 @@ class VaWorkbenchPanel : public QgsDockWidget
     VaCursorProbe m_probe;
 
     /// Bounded payloads kept for linked filtering (scatter re-projection is
-    /// client-side over this snapshot, never a rescan).
+    /// client-side over this snapshot, never a rescan). m_lastScatter is the
+    /// newest FULL payload from the source; m_displayedScatter is what the
+    /// widget currently shows (possibly brush-filtered) — picks MUST resolve
+    /// against the displayed payload or a post-filter index maps to the
+    /// wrong point.
     VaData m_lastScatter;
+    VaData m_displayedScatter;
     double m_filterMin = 0;
     double m_filterMax = 0;
     bool m_hasFilter = false;

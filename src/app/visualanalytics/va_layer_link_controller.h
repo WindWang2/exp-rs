@@ -15,8 +15,9 @@
  * the resulting echo signals inert — no feedback loop.
  *
  * Lifecycle: per-view root-tree connections auto-disconnect when either
- * endpoint dies; tracked node/layer sets use QPointer and are pruned on
- * tree structural changes; viewAboutToBeRemoved detaches the view.
+ * endpoint dies; tracked node/layer registries are raw-pointer sets pruned
+ * by each object's destroyed() signal; viewAboutToBeRemoved detaches the
+ * view.
  ***************************************************************************/
 #pragma once
 

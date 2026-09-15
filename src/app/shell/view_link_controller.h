@@ -149,6 +149,11 @@ class ViewLinkController : public QObject
         /// Previous extents in the view's own CRS, newest first.
         QVector<QgsRectangle> history;
         QPointer<QgsVertexMarker> marker;
+        /// Per-canvas connections from addView — disconnected in removeView
+        /// so a remove/re-add cycle on a living canvas never double-connects.
+        QMetaObject::Connection extentConn;
+        QMetaObject::Connection cursorConn;
+        bool filterInstalled = false;
         /// WKT cache: generating WKT per pointer move is too expensive; the
         /// cache is keyed by CRS equality (cheap), so a project CRS change
         /// invalidates it naturally.

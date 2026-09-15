@@ -89,26 +89,46 @@ void ViewLinkController::addView( sicnu::display::DisplayViewId viewId )
         return;
     if ( m_displayManager && !m_displayManager->view( viewId ) )
         return;
-    m_views.append( ViewRecord{ viewId, QString(), {}, {} } );
+    m_views.append( ViewRecord{} );
+    ViewRecord &record = m_views.last();
+    record.id = viewId;
     if ( QgsMapCanvas *canvas = canvasFor( viewId ) )
     {
         // Duplicate registration is already rejected above (recordFor guard);
-        // Qt::UniqueConnection is illegal for lambdas.
-        connect( canvas, &QgsMapCanvas::extentsChanged, this,
-                 [this, viewId] { onExtentChanged( viewId ); } );
-        connect( canvas, &QgsMapCanvas::xyCoordinates, this,
-                 [this, viewId]( const QgsPointXY &p ) { onCursorMoved( viewId, p ); } );
+        // Qt::UniqueConnection is illegal for lambdas — the connections are
+        // stored in the record and dropped by removeView instead.
+        record.extentConn = connect( canvas, &QgsMapCanvas::extentsChanged, this,
+                                     [this, viewId] { onExtentChanged( viewId ); } );
+        record.cursorConn =
+          connect( canvas, &QgsMapCanvas::xyCoordinates, this,
+                   [this, viewId]( const QgsPointXY &p ) { onCursorMoved( viewId, p ); } );
         canvas->installEventFilter( this );
+        record.filterInstalled = true;
     }
 }
 
 void ViewLinkController::removeView( sicnu::display::DisplayViewId viewId )
 {
-    if ( QgsMapCanvas *canvas = canvasFor( viewId ) )
-        canvas->removeEventFilter( this );
-    m_views.removeIf( [&viewId]( const ViewRecord &record ) {
-        return record.id == viewId;
-    } );
+    for ( int i = 0; i < m_views.size(); ++i )
+    {
+        ViewRecord &record = m_views[i];
+        if ( record.id != viewId )
+            continue;
+        // Drop the per-canvas wiring BEFORE the record: a remove/re-add
+        // cycle on a still-living canvas must never leave a second set of
+        // connections behind (doubled propagation + doubled cursor signals).
+        if ( record.extentConn )
+            QObject::disconnect( record.extentConn );
+        if ( record.cursorConn )
+            QObject::disconnect( record.cursorConn );
+        if ( record.filterInstalled )
+        {
+            if ( QgsMapCanvas *canvas = canvasFor( viewId ) )
+                canvas->removeEventFilter( this );
+        }
+        m_views.removeAt( i );
+        break;
+    }
 }
 
 void ViewLinkController::onViewAboutToBeRemoved( sicnu::display::DisplayViewId viewId )

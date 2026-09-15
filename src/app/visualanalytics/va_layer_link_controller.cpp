@@ -247,7 +247,7 @@ void VaLayerLinkController::syncVisibilityToPeers( const QString &assetId, bool 
             if ( resolved.assetId != assetId )
                 continue;
             if ( layerNode->itemVisibilityChecked() == visible )
-                continue;
+                continue; // already coherent — not a sync
             if ( resolved.layerId.isEmpty() )
             {
                 ++mStats.skippedUnidentifiable;
@@ -256,9 +256,13 @@ void VaLayerLinkController::syncVisibilityToPeers( const QString &assetId, bool 
             const auto layerId = DisplayLayerId::fromString( resolved.layerId );
             if ( !layerId )
                 continue;
+            // The manager is the mutation authority; its typed result is the
+            // truth about whether the peer actually moved.
             mApplying = true;
-            m_displayManager->setLayerVisible( *layerId, visible );
+            const auto result = m_displayManager->setLayerVisible( *layerId, visible );
             mApplying = false;
+            if ( !result )
+                continue; // failed mutation is not a sync
             ++mStats.visibilitySyncs;
         }
     }

@@ -155,4 +155,25 @@ inline VaData filterScatterByXRange( const VaData &scatterData, double x0, doubl
     return filtered;
 }
 
+/// Pure pick helper (11.0): resolves a chart pick index against the payload
+/// the widget is CURRENTLY SHOWING (post-filter) to a raster-CRS map point
+/// via the payload's own geotransform. False when the index or geometry is
+/// missing — never guesses. Pointers may be null.
+inline bool scatterPickToMapPoint( const VaScatter &displayed, int index,
+                                   double *rx, double *ry )
+{
+    if ( index < 0 || !displayed.hasGeometry || displayed.geotransform.size() != 6 )
+        return false;
+    if ( index >= displayed.cols.size() || index >= displayed.rows.size() )
+        return false;
+    const QVector<double> &gt = displayed.geotransform;
+    const qint64 col = displayed.cols.at( index );
+    const qint64 row = displayed.rows.at( index );
+    if ( rx )
+        *rx = gt.at( 0 ) + col * gt.at( 1 ) + row * gt.at( 2 );
+    if ( ry )
+        *ry = gt.at( 3 ) + col * gt.at( 4 ) + row * gt.at( 5 );
+    return true;
+}
+
 } // namespace sicnu::app::va

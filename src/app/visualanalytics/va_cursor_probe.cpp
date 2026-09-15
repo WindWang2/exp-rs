@@ -56,6 +56,7 @@ void VaCursorProbe::request( const QgsPointXY &point, const QString &crsWkt, int
     if ( m_pending.valid )
         ++m_stats.coalesced;
     m_pending = PendingPoint{ true, point.x(), point.y(), crsWkt, band };
+    ++m_stats.requests;
     const qint64 now = QDateTime::currentMSecsSinceEpoch();
     const qint64 sinceStart = m_lastStartMs == 0 ? kDwellThrottleMs : now - m_lastStartMs;
     if ( m_busy.load( std::memory_order_acquire ) )
@@ -113,7 +114,6 @@ void VaCursorProbe::startPending()
     m_generation.store( generation, std::memory_order_relaxed );
     m_busy.store( true, std::memory_order_release );
     m_lastStartMs = QDateTime::currentMSecsSinceEpoch();
-    ++m_stats.requests;
 
     const auto stale = [this, generation]() {
         return RsScanPool::instance().isStale( generation, this );
@@ -138,6 +138,14 @@ void VaCursorProbe::startPending()
               else if ( !meta.hasGeotransform )
               {
                   message = QStringLiteral( "栅格没有地理变换，无法定位像素。" );
+              }
+              else if ( meta.geotransform[2] != 0.0 || meta.geotransform[4] != 0.0 )
+              {
+                  // Fail closed: the inverse below assumes a north-up
+                  // affine; a rotated raster would silently sample the
+                  // WRONG pixel (a wrong value is the one thing this probe
+                  // must never deliver).
+                  message = QStringLiteral( "旋转栅格不支持光标采样。" );
               }
               else
               {

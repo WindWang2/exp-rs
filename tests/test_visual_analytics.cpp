@@ -199,14 +199,16 @@ TEST_CASE( "VaSelectionHub stamps generations and drops echoes",
     subject.x0 = 1.0;
     subject.x1 = 2.0;
 
-    // A subscriber that echoes the event straight back with the same origin
-    // must NOT loop the hub (Oracle 1: no infinite feedback).
+    // A subscriber that re-publishes with the EVENT'S OWN origin is the
+    // exact echo case: same (origin, generation) re-entering the dispatch —
+    // it must be dropped, never re-broadcast (Oracle 1: no feedback loop).
     quint64 echoGeneration = 0;
     QObject echoGuard;
-    QObject::connect( &hub, &VaSelectionHub::selectionPublished, &echoGuard,
-                      [&]( const VaSelectionEvent &event ) {
-                          echoGeneration = hub.publish( event.subject, event.origin );
-                      } );
+    const QMetaObject::Connection echoConn =
+      QObject::connect( &hub, &VaSelectionHub::selectionPublished, &echoGuard,
+                        [&]( const VaSelectionEvent &event ) {
+                            echoGeneration = hub.publish( event.subject, event.origin );
+                        } );
 
     const quint64 gen = hub.publish( subject, QStringLiteral( "va.panel" ) );
     CHECK( gen != 0 );
@@ -214,15 +216,55 @@ TEST_CASE( "VaSelectionHub stamps generations and drops echoes",
     CHECK( hub.stats().suppressedEchoes == 1 );
     CHECK( publishedSpy.count() == 1 ); // one broadcast, not two
 
-    // A different surface re-publishing is fresh intent, not an echo.
-    hub.publish( subject, QStringLiteral( "map.main" ) );
-    CHECK( publishedSpy.count() == 2 );
-    CHECK( hub.stats().suppressedEchoes == 1 );
+    // A DIFFERENT surface re-publishing during the dispatch is fresh intent:
+    // it passes the guard, takes a new generation, and its own echo is then
+    // suppressed (one level deep — no cascade).
+    QObject::disconnect( echoConn );
+    QObject::connect( &hub, &VaSelectionHub::selectionPublished, &echoGuard,
+                      [&]( const VaSelectionEvent &event ) {
+                          hub.publish( event.subject, QStringLiteral( "chart.echo" ) );
+                      } );
+    const quint64 cross = hub.publish( subject, QStringLiteral( "map.main" ) );
+    CHECK( cross != 0 );
+    CHECK( publishedSpy.count() == 3 ); // map.main + its one cross-surface echo
+    CHECK( hub.stats().suppressedEchoes == 2 ); // event-origin echo + echo-of-echo
 
-    // Generations are strictly monotonic.
+    // Generations remain strictly monotonic across everything.
     const quint64 first = hub.publish( subject, QStringLiteral( "va.panel" ) );
     const quint64 second = hub.publish( subject, QStringLiteral( "va.panel" ) );
-    CHECK( second == first + 1 );
+    CHECK( second > first );
+}
+
+TEST_CASE( "VaSelectionHub restores outer dispatch context after nested relay",
+           "[visual_analytics][hub]" )
+{
+    ensureApp();
+    VaSelectionHub hub;
+    QSignalSpy publishedSpy( &hub, &VaSelectionHub::selectionPublished );
+
+    VaSelectionSubject subject;
+    subject.kind = VaSelectionKind::ChartCategory;
+    subject.chartId = QStringLiteral( "rsVaProfile" );
+
+    // Subscriber 1 relays every event to the "relay" surface (a nested
+    // cross-origin dispatch that OVERWRITES the hub's dispatch context).
+    QObject::connect( &hub, &VaSelectionHub::selectionPublished, &hub,
+                      [&]( const VaSelectionEvent &event ) {
+                          hub.publish( event.subject, QStringLiteral( "relay" ) );
+                      } );
+    // Subscriber 2 echoes each event under its own origin — for the OUTER
+    // dispatch this must STILL be suppressed after the nested relay unwound
+    // (the outer context has to be restored, or A↔B relay pairs loop).
+    QObject::connect( &hub, &VaSelectionHub::selectionPublished, &hub,
+                      [&]( const VaSelectionEvent &event ) {
+                          hub.publish( event.subject, event.origin );
+                      } );
+
+    hub.publish( subject, QStringLiteral( "map.main" ) );
+    // map.main → relay (fresh, 1) → relay echo (dropped); map.main echo
+    // (dropped AFTER the nested unwind — this is the regression).
+    CHECK( publishedSpy.count() == 2 );
+    CHECK( hub.stats().suppressedEchoes == 2 );
 }
 
 TEST_CASE( "VaSelectionHub rejects invalid subjects and clamps text",
@@ -329,4 +371,37 @@ TEST_CASE( "Scatter brush filter keeps values and geometry consistent",
     histogramPayload.kind = VaChartKind::Histogram;
     CHECK( filterScatterByXRange( histogramPayload, 0.0, 1.0 ).kind
            == VaChartKind::Histogram );
+}
+
+TEST_CASE( "Scatter pick resolves against the DISPLAYED payload",
+           "[visual_analytics][brush][pick]" )
+{
+    // gt = (0,1,0,0,0,-1): map point of (col,row) is (col, -row).
+    VaData payload;
+    payload.kind = VaChartKind::Scatter;
+    for ( int i = 0; i < 5; ++i )
+    {
+        payload.scatter.xs.append( i * 1.0 );
+        payload.scatter.ys.append( -i * 1.0 );
+        payload.scatter.cols.append( i * 10 );
+        payload.scatter.rows.append( i * 10 );
+        payload.scatter.hasGeometry = true;
+        payload.scatter.geotransform = { 0, 1, 0, 0, 0, -1 };
+    }
+
+    // After a brush to [2,4], the widget shows the compaction; picking its
+    // FIRST visible point (index 0) must land on the point with value 2 →
+    // pixel (20,20) → map (20,-20) — NOT on the raw payload's index 0.
+    const VaData displayed = filterScatterByXRange( payload, 2.0, 4.0 );
+    REQUIRE( displayed.scatter.xs.size() == 3 );
+    double rx = 0, ry = 0;
+    REQUIRE( scatterPickToMapPoint( displayed.scatter, 0, &rx, &ry ) );
+    CHECK( rx == 20.0 );
+    CHECK( ry == -20.0 );
+
+    // Honest refusals: unknown index and missing geometry never guess.
+    CHECK_FALSE( scatterPickToMapPoint( displayed.scatter, 99, &rx, &ry ) );
+    VaScatter noGeometry = displayed.scatter;
+    noGeometry.hasGeometry = false;
+    CHECK_FALSE( scatterPickToMapPoint( noGeometry, 0, &rx, &ry ) );
 }

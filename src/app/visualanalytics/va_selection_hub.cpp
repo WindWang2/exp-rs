@@ -69,12 +69,14 @@ bool VaSelectionHub::isValidSubject( const VaSelectionSubject &subject )
 
 quint64 VaSelectionHub::publish( const VaSelectionSubject &subject, const QString &origin )
 {
-    // Loop suppression first: a subscriber slot re-publishing the very
-    // event it is handling is an echo, whatever it carries. Compare on the
-    // dispatched (origin, generation) pair — cross-surface republication
-    // with a different origin (or a later generation) is fresh intent.
-    if ( m_dispatchDepth > 0 && origin == m_dispatchOrigin
-         && m_dispatchGeneration != 0 )
+    // Loop suppression: a subscriber slot re-publishing under the ORIGIN
+    // whose dispatch is on the stack is an echo of that dispatch — dropped
+    // and counted. Cross-surface republication (a different origin) is
+    // fresh intent. The outer dispatch context is saved and restored around
+    // nested cross-origin dispatches, so after an inner relay unwinds, the
+    // outer origin's echo protection is intact (no A↔B relay loop can
+    // recurse unboundedly).
+    if ( m_dispatchDepth > 0 && origin == m_dispatchOrigin )
     {
         ++m_stats.suppressedEchoes;
         return 0;
@@ -98,7 +100,11 @@ quint64 VaSelectionHub::publish( const VaSelectionSubject &subject, const QStrin
 
     // Direct connections dispatch inline; the depth guard makes the echo
     // check above reentrancy-proof. Queued connections deliver later and
-    // cannot re-enter this frame at all.
+    // cannot re-enter this frame at all. Nested cross-origin dispatches
+    // overwrite (and on return restore) the context below, so suppression
+    // stays scoped to the origin actually on the stack.
+    const QString prevOrigin = m_dispatchOrigin;
+    const quint64 prevGeneration = m_dispatchGeneration;
     ++m_dispatchDepth;
     m_dispatchOrigin = event.origin;
     m_dispatchGeneration = event.generation;
@@ -108,6 +114,11 @@ quint64 VaSelectionHub::publish( const VaSelectionSubject &subject, const QStrin
     {
         m_dispatchOrigin.clear();
         m_dispatchGeneration = 0;
+    }
+    else
+    {
+        m_dispatchOrigin = prevOrigin;
+        m_dispatchGeneration = prevGeneration;
     }
     return event.generation;
 }

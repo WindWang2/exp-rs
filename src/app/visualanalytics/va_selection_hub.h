@@ -15,9 +15,11 @@
  *     hub-assigned monotonic GENERATION, so consumers can tell echoes
  *     from fresh intent and async workers can drop stale generations;
  *   * loop suppression: a publish re-entering during a dispatch with the
- *     same (origin, generation) pair is an echo of that dispatch — it is
- *     counted and dropped, never re-broadcast (Oracle 1: no feedback
- *     loops). Cross-surface republication is new intent and passes.
+ *     SAME ORIGIN as the dispatch on the stack is an echo of that dispatch
+ *     — it is counted and dropped, never re-broadcast (Oracle 1: no
+ *     feedback loops). Cross-surface republication is new intent and
+ *     passes; nested cross-origin dispatches restore the outer context on
+ *     return, so A↔B relay pairs cannot recurse unboundedly.
  *
  * The hub is a GUI-thread object (like SelectionContext). History is a
  * bounded ring (diagnostics only — consumers must never treat it as

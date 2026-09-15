@@ -41,18 +41,6 @@ class VaCursorProbe : public QObject
     /// into the newest pending point.
     static constexpr int kDwellThrottleMs = 120;
 
-    /// One finished sample. `ok` is false for NoData, outside-extent and
-    /// open/read failures — @p message says which, honestly.
-    struct Sample
-    {
-        QgsPointXY point; ///< map point in the RASTER's CRS (crs of the sampled layer)
-        int band = 0;     ///< 1-based band that was sampled
-        double value = 0;
-        bool ok = false;
-        bool noData = false; ///< true when inside the raster but NoData
-        QString message;
-    };
-
     explicit VaCursorProbe( RasterProvider provider, QObject *parent = nullptr );
     ~VaCursorProbe() override;
 
@@ -70,7 +58,8 @@ class VaCursorProbe : public QObject
     /// Testing instrumentation.
     struct Stats
     {
-        quint64 requests = 0;      ///< accepted (post-throttle) requests
+        quint64 requests = 0;      ///< accepted requests (newest-wins folds
+                                   ///< into the pending one do not count)
         quint64 coalesced = 0;     ///< pointer moves folded into a pending one
         quint64 staleDrops = 0;    ///< finished results dropped as stale
         quint64 delivered = 0;     ///< samples actually delivered
@@ -79,8 +68,12 @@ class VaCursorProbe : public QObject
     void resetStats() { m_stats = Stats{}; }
 
   signals:
-    /// Delivered on the GUI thread, newest-generation only. The sample's
-    /// point coordinates are in the raster's own CRS.
+    /// One finished sample for the newest generation, delivered on the GUI
+    /// thread. `ok` is true only for a real value; `noData` marks an
+    /// in-raster NoData hit; `message` carries the honest reason otherwise
+    /// (outside extent, rotated geotransform, open/read failure, unbuildable
+    /// CRS transform). Requests accepted before the latest generation are
+    /// never delivered.
     void sampled( bool ok, double value, int band, bool noData, const QString &message );
 
   private:
