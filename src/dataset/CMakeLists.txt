@@ -45,6 +45,14 @@ qt_add_library(sicnu_dataset STATIC
   split.h
   wkt.cpp
   wkt.h
+  feature_table.cpp
+  feature_table.h
+  sample_catalog.cpp
+  sample_catalog.h
+  dataset_qa_report.cpp
+  dataset_qa_report.h
+  foundry_service.cpp
+  foundry_service.h
 )
 
 add_library(Sicnu::dataset ALIAS sicnu_dataset)
