@@ -633,7 +633,7 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
         sources.snapping = snappingController;
         auto *editStateTool = new RsEditAgentTool( sources );
         sicnu::agent::spatial_tools::SpatialToolRegistry::instance().registerTool(
-            sicnu::agent::spatial_tools::SpatialToolPtr{ editStateTool } 
+            sicnu::agent::spatial_tools::SpatialToolPtr{ editStateTool }
 );
     }
 
