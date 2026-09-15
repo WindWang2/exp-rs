@@ -42,11 +42,11 @@ struct DataPlatformToolDef
     QList<DataPlatformToolInput> inputs;
 };
 
-/// Tool catalog for tools/list discovery (dataset:/experiment:/reproducibility:).
+/// Tool catalog for tools/list discovery (dataset:/experiment:/reproducibility:/benchmark:).
 const QList<DataPlatformToolDef> &dataPlatformToolDefs();
 
 /// True when @p toolId belongs to this surface ("dataset:x", "experiment:x",
-/// "reproducibility:x").
+/// "reproducibility:x", "benchmark:x").
 bool isDataPlatformTool( const QString &toolId );
 
 /// Dispatches one tool call. Errors are thrown as std::runtime_error with a

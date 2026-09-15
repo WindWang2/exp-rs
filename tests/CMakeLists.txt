@@ -2363,6 +2363,9 @@ target_link_libraries(test_d19_dataset_foundry PRIVATE Sicnu::dataset SQLite::SQ
 sicnu_add_test(test_d19_benchmark TIMEOUT 180)
 target_link_libraries(test_d19_benchmark PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
 
+sicnu_add_test(test_d19_foundry_benchmark_chain TIMEOUT 180)
+target_link_libraries(test_d19_foundry_benchmark_chain PRIVATE Sicnu::experiment Sicnu::dataset SQLite::SQLite3)
+
 # Foundation 5.0 experiment/run identity, metrics, comparison, lineage and
 # reproduction bundle (ADR 0137/0138, goal §23-§31/§51).
 sicnu_add_test(test_experiment_evaluation TIMEOUT 180)
