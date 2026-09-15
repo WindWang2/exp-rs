@@ -4,6 +4,7 @@
 
 #include <QDate>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 

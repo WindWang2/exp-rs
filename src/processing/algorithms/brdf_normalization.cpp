@@ -5,6 +5,7 @@
 
 #include "solar_geometry.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 

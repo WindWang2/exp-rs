@@ -15,6 +15,8 @@
 #include "processing/gdal/gdal_multiband_block_stream.h"
 #include "data/raster_grid_compat.h"
 
+#include <QStringList>
+
 #include <gdal.h>
 
 #include <algorithm>
