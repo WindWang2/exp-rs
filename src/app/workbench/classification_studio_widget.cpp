@@ -439,7 +439,7 @@ void RsProbabilityPanel::paintEvent( QPaintEvent *event )
   painter.fillRect( rect(), QColor( 12, 12, 16 ) );
   if ( mClassIds.isEmpty() )
     return;
-  const int rowH = std::max( 12, height() / std::max( 1, mClassIds.size() ) );
+  const int rowH = std::max( 12, height() / std::max( 1, static_cast<int>( mClassIds.size() ) ) );
   int y = 0;
   for ( int i = 0; i < mClassIds.size(); ++i )
   {
@@ -574,7 +574,7 @@ void RsConfusionPairsWidget::paintEvent( QPaintEvent *event )
   int maxCount = 1;
   for ( int c : mCounts )
     maxCount = std::max( maxCount, c );
-  const int rowH = std::max( 12, height() / std::max( 1, mCounts.size() ) );
+  const int rowH = std::max( 12, height() / std::max( 1, static_cast<int>( mCounts.size() ) ) );
   int y = 0;
   for ( int i = 0; i < mCounts.size(); ++i )
   {
@@ -637,7 +637,7 @@ void RsFeatureImportanceWidget::paintEvent( QPaintEvent *event )
     maxV = std::max( maxV, v );
   if ( maxV <= 0.0 )
     maxV = 1.0;
-  const int rowH = std::max( 12, height() / std::max( 1, mImportances.size() ) );
+  const int rowH = std::max( 12, height() / std::max( 1, static_cast<int>( mImportances.size() ) ) );
   int y = 0;
   for ( int i = 0; i < mImportances.size(); ++i )
   {

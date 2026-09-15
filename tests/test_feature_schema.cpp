@@ -5,6 +5,7 @@
 
 #include "rs_feature_schema.h"
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 

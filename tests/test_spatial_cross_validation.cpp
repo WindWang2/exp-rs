@@ -66,7 +66,8 @@ TEST_CASE( "groupFolds: atomic groups, balanced partition, full coverage",
     const auto folds = RsSpatialCrossValidation::groupFolds( groupIds, 3 );
     REQUIRE( folds.size() == 3 );
 
-    std::multiset<int> seen;
+    std::multiset<int> seenAsTest;
+    std::multiset<int> seenAsTrain;
     for ( const auto &fold : folds )
     {
         REQUIRE( !fold.testIndices.empty() );
@@ -76,16 +77,19 @@ TEST_CASE( "groupFolds: atomic groups, balanced partition, full coverage",
         for ( int idx : fold.testIndices )
         {
             REQUIRE( groupIds[idx] == testGroup );
-            seen.insert( idx );
+            seenAsTest.insert( idx );
         }
         // Train never contains a test row.
         for ( int idx : fold.trainIndices )
         {
             REQUIRE( groupIds[idx] != testGroup );
-            seen.insert( idx );
+            seenAsTrain.insert( idx );
         }
     }
-    REQUIRE( seen.size() == groupIds.size() ); // every row exactly once overall
+    // Across the k folds every row is tested exactly once and every row is
+    // trained on exactly k-1 times.
+    REQUIRE( seenAsTest.size() == groupIds.size() );
+    REQUIRE( seenAsTrain.size() == groupIds.size() * ( folds.size() - 1 ) );
     // Balance-first: largest group (1, size 5) is alone in its fold.
     int foldOfSize5 = -1;
     for ( int j = 0; j < static_cast<int>( folds.size() ); ++j )
@@ -131,7 +135,7 @@ TEST_CASE( "bufferedBlockFolds: excluded buffer enforces the isolation invariant
            "[classify][spatialcv]" )
 {
     LeakFixture fx( 10 );
-    const double buffer = 20.0;
+    const double buffer = 55.0;
     const auto folds =
       RsSpatialCrossValidation::bufferedBlockFolds( fx.coords, fx.X.rows, 2, 2, buffer );
     REQUIRE( folds.size() == 4 );
@@ -156,13 +160,16 @@ TEST_CASE( "bufferedBlockFolds: excluded buffer enforces the isolation invariant
             }
         }
     }
-    // With buffer 20 and cluster centres 50 apart, some training rows must
-    // have been excluded in at least one fold (edge clusters are 48+ from
-    // the far cluster but ~50±2 from neighbours — some rows fall inside).
+    // Clusters sit ~50 apart (nearest edges ≈ 48), so a 55 buffer must
+    // absorb the neighbouring clusters' train rows while the diagonal
+    // cluster (≈ 70 away) stays in every fold.
     int excludedTotal = 0;
     for ( const auto &fold : folds )
         excludedTotal += fold.excludedBuffer.size();
     REQUIRE( excludedTotal > 0 );
+    // But the fold never starves: the diagonal cluster is retained.
+    for ( const auto &fold : folds )
+        REQUIRE( !fold.trainIndices.isEmpty() );
 }
 
 TEST_CASE( "F12 Oracle 1 — synthetic spatial leak is caught: random folds "

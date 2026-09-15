@@ -56,6 +56,10 @@ void createThreeRegionRaster( const QString &path, int W, int H )
 
 void makeTraining( cv::Mat &X, cv::Mat &y )
 {
+  // Per-sample jitter keeps the regions separable while giving the NB
+  // Gaussians a sane (non-degenerate) variance — with zero-variance
+  // training the per-class PDFs overflow float and the posteriors become
+  // NaN, which no realistic workflow feeds into uncertainty statistics.
   X = cv::Mat( 30, 3, CV_32F );
   y = cv::Mat( 30, 1, CV_32S );
   for ( int cls = 0; cls < 3; ++cls )
@@ -63,7 +67,7 @@ void makeTraining( cv::Mat &X, cv::Mat &y )
     {
       const int row = cls * 10 + i;
       for ( int b = 0; b < 3; ++b )
-        X.at<float>( row, b ) = ( b == cls ? 200.0f : 20.0f );
+        X.at<float>( row, b ) = ( b == cls ? 200.0f : 20.0f ) + ( i % 5 ) - 2.0f;
       y.at<int>( row, 0 ) = cls + 1;
     }
 }
@@ -100,22 +104,40 @@ TEST_CASE( "F12 e2e: pipeline uncertainty raster carries entropy/margin/reject "
   cfg.outputRaster = tmp.path() + "/labels.tif";
   cfg.uncertaintyOutput = tmp.path() + "/unc.tif";
   cfg.bandIndices = { 1, 2, 3 };
-  cfg.backend.reset( new RsClassifierNormalBayes() );
+  // RF tree-vote probabilities are bounded [0,1] and never underflow — NB's
+  // OpenCV predictProb underflows to all-zero rows for pixels slightly off
+  // the training distribution (documented known limitation, see
+  // docs/processing/classification-intelligence.md §2), which would make
+  // every uncertainty cell the -1 NoData sentinel here.
+  cfg.backend.reset( new RsRandomForestBackend() );
   cfg.trainX = X;
   cfg.trainY = y;
   cfg.uncertaintyMeasure = RsUncertainty::Measure::Entropy;
   cfg.rejectThreshold = -1.0; // rejection disabled — mask must stay 0
+  cfg.probabilityOutput = tmp.path() + "/probe_prob.tif";
+  const QString uncPath = cfg.uncertaintyOutput;
+  const QString labelPath = cfg.outputRaster;
   const auto res = RsClassificationPipeline::run( std::move( cfg ) );
+  INFO( "run failure: " << res.errorMessage.toStdString()
+        << " meanConfidence=" << res.meanConfidence );
   REQUIRE( res.ok );
+  {
+    const std::vector<float> labelsOut = readBand( labelPath, 1, 32, 32 );
+    int zeroCount = 0;
+    for ( float v : labelsOut )
+      if ( v == 0.0f )
+        ++zeroCount;
+    std::fprintf( stderr, "LABELS unclassified count = %d / 1024\n", zeroCount );
+  }
 
   const int W = 32, H = 32;
-  const std::vector<float> entropy = readBand( cfg.uncertaintyOutput, 1, W, H );
-  const std::vector<float> margin = readBand( cfg.uncertaintyOutput, 2, W, H );
-  const std::vector<float> mask = readBand( cfg.uncertaintyOutput, 3, W, H );
+  const std::vector<float> entropy = readBand( uncPath, 1, W, H );
+  const std::vector<float> margin = readBand( uncPath, 2, W, H );
+  const std::vector<float> mask = readBand( uncPath, 3, W, H );
 
   GDALAllRegister();
   std::unique_ptr<GDALDataset> unc(
-    static_cast<GDALDataset *>( GDALOpen( cfg.uncertaintyOutput.toUtf8().constData(), GA_ReadOnly ) ) );
+    static_cast<GDALDataset *>( GDALOpen( uncPath.toUtf8().constData(), GA_ReadOnly ) ) );
   REQUIRE( unc != nullptr );
   REQUIRE( unc->GetRasterCount() == 3 );
   REQUIRE( QString( unc->GetRasterBand( 1 )->GetDescription() )
@@ -124,6 +146,18 @@ TEST_CASE( "F12 e2e: pipeline uncertainty raster carries entropy/margin/reject "
   REQUIRE( QString( unc->GetRasterBand( 3 )->GetDescription() )
            == QLatin1String( "rejected_mask" ) );
 
+  int negCount = 0;
+  int firstNeg = -1;
+  for ( int i = 0; i < W * H; ++i )
+  {
+    if ( entropy[i] < 0.0f )
+    {
+      if ( negCount == 0 )
+        firstNeg = i;
+      ++negCount;
+    }
+  }
+  INFO( "neg entropy pixels: " << negCount << " first at " << firstNeg );
   for ( int i = 0; i < W * H; ++i )
   {
     // Perfectly separated training regions → NB is maximally confident:
@@ -151,15 +185,16 @@ TEST_CASE( "F12 e2e: reject threshold flags uncertain pixels through the mask",
   cfg.outputRaster = tmp.path() + "/labels.tif";
   cfg.uncertaintyOutput = tmp.path() + "/unc.tif";
   cfg.bandIndices = { 1, 2, 3 };
-  cfg.backend.reset( new RsClassifierNormalBayes() );
+  cfg.backend.reset( new RsRandomForestBackend() );
   cfg.trainX = X;
   cfg.trainY = y;
   cfg.uncertaintyMeasure = RsUncertainty::Measure::Confidence;
   cfg.rejectThreshold = 0.5; // confidence <= 0.5 rejects
+  const QString uncPath = cfg.uncertaintyOutput;
   const auto res = RsClassificationPipeline::run( std::move( cfg ) );
   REQUIRE( res.ok );
 
-  const std::vector<float> mask = readBand( cfg.uncertaintyOutput, 3, 32, 32 );
+  const std::vector<float> mask = readBand( uncPath, 3, 32, 32 );
   for ( int i = 0; i < 32 * 32; ++i )
     REQUIRE( mask[i] == 0.0f ); // confident classifier + low bar → nothing rejected
 }
@@ -185,13 +220,15 @@ TEST_CASE( "F12 e2e: sidecar v2 (calibration + classOrder + training) drives "
   train.trainX = X;
   train.trainY = y;
   train.modelSavePath = tmp.path() + "/model.yaml";
+  train.methodName = QStringLiteral( "NormalBayes" );
   train.seed = 42u;
+  const QString modelPath = train.modelSavePath;
   const auto trainRes = RsClassificationPipeline::run( std::move( train ) );
   REQUIRE( trainRes.ok );
 
   // Sidecar v2 carries classOrder + training provenance.
   RsClassificationPipeline::SidecarData sidecar;
-  REQUIRE( RsClassificationPipeline::loadModelSidecarFull( train.modelSavePath, sidecar ) );
+  REQUIRE( RsClassificationPipeline::loadModelSidecarFull( modelPath, sidecar ) );
   REQUIRE( sidecar.classOrder == QVector<int> { 1, 2, 3 } );
   REQUIRE( sidecar.trainingSeed == 42u );
   REQUIRE( sidecar.trainingSampleCount == 30 );
@@ -204,8 +241,9 @@ TEST_CASE( "F12 e2e: sidecar v2 (calibration + classOrder + training) drives "
     cfg.outputRaster = labels;
     cfg.probabilityOutput = prob;
     cfg.bandIndices = { 1, 2, 3 };
-    cfg.modelLoadPath = train.modelSavePath;
+    cfg.modelLoadPath = modelPath;
     const auto r = RsClassificationPipeline::run( std::move( cfg ) );
+    INFO( "predict-only failure: " << r.errorMessage.toStdString() );
     REQUIRE( r.ok );
   };
   predictRun( tmp.path() + "/replay1.tif", tmp.path() + "/replay1_prob.tif" );

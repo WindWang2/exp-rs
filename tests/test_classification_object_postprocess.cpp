@@ -99,7 +99,7 @@ TEST_CASE( "run: smoothing adopts a segment with a strict class-border majority"
     TieMap m;
     ObjectPostProcessConfig cfg;
     cfg.smoothingIterations = 1;
-    std::vector<int> out;
+    std::vector<int> out( TieMap::W * TieMap::H, -1 );
     const auto result = ClassificationObjectPostProcessor::run(
       m.labels, m.segments, TieMap::W, TieMap::H, cfg, out );
     REQUIRE( result.ok );
@@ -132,7 +132,7 @@ TEST_CASE( "run: min-area rule merges a small segment into its longest-border "
                                 1, 1, 2, 2 };
     ObjectPostProcessConfig cfg;
     cfg.minSegmentArea = 5;
-    std::vector<int> out;
+    std::vector<int> out( W * H, -1 );
     const auto result = ClassificationObjectPostProcessor::run(
       labels, segments, W, H, cfg, out );
     REQUIRE( result.ok );
@@ -161,7 +161,7 @@ TEST_CASE( "run: NoData segments and labels never absorb or merge",
     ObjectPostProcessConfig cfg;
     cfg.minSegmentArea = 1;   // would merge everything below 1 px (none)
     cfg.smoothingIterations = 3;
-    std::vector<int> out;
+    std::vector<int> out( W * H, -1 );
     const auto result = ClassificationObjectPostProcessor::run(
       labels, segments, W, H, cfg, out );
     REQUIRE( result.ok );

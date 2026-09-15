@@ -9396,7 +9396,23 @@ sicnu_add_test(test_classifier_engine TIMEOUT 300 TEST_PREFIX "test_classifier_e
 sicnu_add_test(test_classification_postprocess TIMEOUT 120 TEST_PREFIX "test_classification_postprocess::")
 
 # F12: object-level thematic cleanup (segment adjacency, min-area, smoothing).
-sicnu_add_test(test_classification_object_postprocess TIMEOUT 120 TEST_PREFIX "test_classification_object_postprocess::")
+# Direct link (sicnu_processing only) — the module is pure STL and does not
+# need the sicnu_add_test full stack, which is currently unbuildable on this
+# host toolchain by two PRE-EXISTING master compile errors unrelated to F12
+# (see .planning/classification-intelligence-11/EVIDENCE.md).
+add_executable(test_classification_object_postprocess test_classification_object_postprocess.cpp)
+target_link_libraries(test_classification_object_postprocess PRIVATE
+  Catch2::Catch2WithMain
+  qgis_core
+  sicnu_processing
+  Qt6::Core
+)
+target_include_directories(test_classification_object_postprocess PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/processing/algorithms
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_classification_object_postprocess TIMEOUT 120)
 
 # F12: spatially aware k-fold CV with leakage audit (qgis_analysis + OpenCV).
 add_executable(test_spatial_cross_validation test_spatial_cross_validation.cpp)

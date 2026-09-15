@@ -187,6 +187,7 @@ TEST_CASE( "Reliability widget ignores mismatched series and renders both",
            "[f12][studio]" )
 {
   ensureQgisApplication();
+  const double nan = std::numeric_limits<double>::quiet_NaN();
   RsReliabilityWidget w;
   // Length mismatch: shorter series wins; non-finite rows drop.
   w.setSeries( { 0.1, 0.5, 0.9 }, { 0.1 }, { 10, 10, 10 }, false );

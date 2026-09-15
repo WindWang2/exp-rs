@@ -44,7 +44,27 @@
 
 ## Phase 记录
 
-（各 Phase 的命令、exit、git status --porcelain 随做随记于此。）
+### Phase 1–6 实现 commits（bootstrap 构建期间的代码级完成）
 
-### Phase 1
-- ☐ 待填
+| Phase | Commit | 内容 |
+|---|---|---|
+| 0 | 27903d29a9 | planning 落盘 + .gitignore 白名单 |
+| 1 | d1f3bfb20e | rs_class_order / rs_probability_calibration / rs_uncertainty / rs_feature_schema + 4 测试 |
+| 2 | d5f6d245e2 | backend additive seam + SVM OvR opt-in + NB 类序旁车 + pipeline uncertainty/校准/sidecar v2 |
+| 3 | 85f5c9b615 | rs_spatial_cross_validation + classification_object_postprocess + 2 测试 |
+| 4 | d778267bf9 | studio 4 面板 + rs:supervised_classification 参数 + docs/processing/classification-intelligence.md |
+| 5/6 | 37ec0ea6c2 | scaler fail-closed + e2e + 100k scale 测试 + CHANGELOG |
+
+- `git status --porcelain` 每次 commit 后 = clean。
+- `git diff origin/master...HEAD --check` → exit 0（commit 后复检）。
+
+### 构建/测试 gate（构建中持续更新）
+
+- 共享主机事实：同机存在 5 个并行 track 的 worktree 构建
+  （radiometric-physics-11 / multimodal-registration-11 / mosaic-fusion-11 /
+  qgis-editing-annotation-11 / 本 track）→ 系统 load 与本 track 的 -j2 无关；
+  本 track 严格遵守 -j2。
+- bootstrap 构建（旧 configure 图，基线可编译性）在 38% 处被主 agent 终止
+  （仅本 track 的 make PID 25009/25012，按 /proc/cwd 验证归属），
+  reconfigure 纳入新文件（RECONFIGURE_EXIT=0）后增量重启。
+
