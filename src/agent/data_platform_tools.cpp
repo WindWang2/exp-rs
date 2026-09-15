@@ -41,6 +41,10 @@ namespace sicnu::agent
 {
 
 using namespace sicnu::dataset;
+// Pre-existing master break (D19): BenchmarkService is used unqualified below
+// but sicnu::experiment was never imported — the file never compiled on this
+// host since the D19 merge. Minimal unblocking fix (F13 track).
+using sicnu::experiment::BenchmarkService;
 
 namespace
 {

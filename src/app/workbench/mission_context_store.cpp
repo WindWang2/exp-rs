@@ -2,6 +2,7 @@
 
 #include <QDomDocument>
 #include <QDomElement>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>

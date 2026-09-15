@@ -9201,6 +9201,33 @@ set_target_properties(test_georef_dual_window_workbench PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_georef_dual_window_workbench)
 sicnu_add_test(test_geometric_agent_tools)
 sicnu_add_test(test_d14_geometric_registration_e2e)
+# ---- F13: multimodal registration & geometric accuracy ----
+sicnu_add_test(test_registration_fft)
+sicnu_add_test(test_multimodal_matcher)
+sicnu_add_test(test_model_selector)
+sicnu_add_test(test_rpc_bias_model)
+sicnu_add_test(test_stack_registrator)
+sicnu_add_test(test_registration_quality)
+sicnu_add_test(test_registration_operators)
+sicnu_add_test(test_registration_e2e)
+# F13 #1005 fail-closed pick transform (app source compiled in).
+add_executable(test_georef_crs_pick_failclosed
+  test_georef_crs_pick_failclosed.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer/rs_georef_crs_pick.cpp
+)
+target_link_libraries(test_georef_crs_pick_failclosed PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+)
+target_include_directories(test_georef_crs_pick_failclosed PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/georeferencer
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_georef_crs_pick_failclosed PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_georef_crs_pick_failclosed)
 # =============================================================================
 # D17 — workflow pipeline designer (ADR 0162)
 # =============================================================================
