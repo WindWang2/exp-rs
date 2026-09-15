@@ -2,6 +2,7 @@
 #include "main_window.h"
 
 #include "data_project_serializer.h"
+#include "workbench/mission_context_store.h"
 #include "active_view_host.h"
 #include "layer_tree_menu.h"
 #include "project_context.h"
@@ -343,7 +344,38 @@ void QgisDesktopWindow::onProjectRead(const QDomDocument &doc)
     }
     updateEditingUI(activeVl);
 
-    statusBar()->showMessage(tr("Project loaded"), 3000);
+    // D18: restore MissionContext (sidecar preferred, XML dual-write fallback).
+    {
+        const QString projectPath = QgsProject::instance()->fileName();
+        bool missionLoaded = false;
+        QString missionErr;
+        sicnu::app::MissionContext restored;
+        if ( sicnu::app::restoreMissionContextWithProject( projectPath, doc, restored,
+                                                           &missionLoaded, &missionErr ) )
+        {
+            if ( missionLoaded )
+            {
+                m_mission = restored;
+                sicnu::app::ensureMissionId( m_mission );
+                if ( m_mission.projectRef.isEmpty() && !projectPath.isEmpty() )
+                    m_mission.projectRef = projectPath;
+                statusBar()->showMessage(
+                    tr( "Project loaded · mission %1 restored" )
+                        .arg( m_mission.missionId.left( 8 ) ),
+                    4000 );
+            }
+            else
+            {
+                statusBar()->showMessage( tr( "Project loaded" ), 3000 );
+            }
+        }
+        else
+        {
+            statusBar()->showMessage( tr( "Project loaded" ), 3000 );
+            if ( !missionErr.isEmpty() )
+                qWarning( "mission restore: %s", qPrintable( missionErr ) );
+        }
+    }
 }
 
 void QgisDesktopWindow::onProjectWrite(QDomDocument &doc)
@@ -360,6 +392,24 @@ void QgisDesktopWindow::onProjectWrite(QDomDocument &doc)
                 tr( "The project could not include the SICNU data catalog:\n%1" )
                     .arg( formatProjectDiagnostics(
                         written.diagnostics() ) ) );
+        }
+    }
+
+    // D18: dual-write MissionContext (sidecar + sicnuMissionContext XML).
+    // Not inside DataProjectSerializer (governance v3 downgrade risk) — see D-M5.
+    {
+        const QString projectPath = QgsProject::instance()->fileName();
+        if ( m_mission.projectRef.isEmpty() && !projectPath.isEmpty() )
+            m_mission.projectRef = projectPath;
+        sicnu::app::ensureMissionId( m_mission );
+        QString missionErr;
+        if ( !sicnu::app::persistMissionContextWithProject( projectPath, doc, m_mission,
+                                                            &missionErr ) )
+        {
+            QMessageBox::warning(
+                this, tr( "Mission Context" ),
+                tr( "Project saved, but MissionContext persistence failed:\n%1" )
+                    .arg( missionErr ) );
         }
     }
     statusBar()->showMessage(tr("Project saved"), 2000);

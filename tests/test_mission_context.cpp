@@ -211,3 +211,67 @@ TEST_CASE( "mission_context set active workflow shared identity", "[d18][mission
   REQUIRE( ctx.activeWorkflow.workflowId == QLatin1String( "wf-ir2" ) );
   REQUIRE( ctx.activeWorkflow.fingerprint == QLatin1String( "deadbeef" ) );
 }
+
+
+#include <QDomDocument>
+
+TEST_CASE( "mission XML dual-write round-trip beside sidecar", "[d18][mission][persist]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString project = dir.filePath( QStringLiteral( "demo.qgs" ) );
+  QFile touch( project );
+  REQUIRE( touch.open( QIODevice::WriteOnly ) );
+  touch.write( "<qgis/>" );
+  touch.close();
+
+  MissionContext ctx;
+  ctx.missionName = QStringLiteral( "dual" );
+  ctx.activeWorkflow.workflowId = QStringLiteral( "wf-xml" );
+  ctx.activeWorkflow.schemaVersion = QStringLiteral( "2.0" );
+  ctx.activeWorkflow.runner = QStringLiteral( "pipeline_run_coordinator" );
+
+  QDomDocument doc;
+  REQUIRE( doc.setContent( QStringLiteral( "<qgis></qgis>" ) ) );
+  QString err;
+  REQUIRE( sicnu::app::persistMissionContextWithProject( project, doc, ctx, &err ) );
+  REQUIRE( err.isEmpty() );
+  REQUIRE( QFileInfo::exists( sicnu::app::missionSidecarPathForProject( project ) ) );
+  REQUIRE( !doc.documentElement().firstChildElement( QStringLiteral( "sicnuMissionContext" ) ).isNull() );
+
+  // Sidecar preference: delete XML-equivalent by loading via restore helper.
+  MissionContext loaded;
+  bool loadedFlag = false;
+  REQUIRE( sicnu::app::restoreMissionContextWithProject( project, doc, loaded, &loadedFlag, &err ) );
+  REQUIRE( loadedFlag );
+  REQUIRE( loaded.missionName == QLatin1String( "dual" ) );
+  REQUIRE( loaded.activeWorkflow.workflowId == QLatin1String( "wf-xml" ) );
+
+  // XML-only path: remove sidecar and restore from document.
+  REQUIRE( QFile::remove( sicnu::app::missionSidecarPathForProject( project ) ) );
+  MissionContext fromXml;
+  loadedFlag = false;
+  REQUIRE( sicnu::app::restoreMissionContextWithProject( project, doc, fromXml, &loadedFlag, &err ) );
+  REQUIRE( loadedFlag );
+  REQUIRE( fromXml.missionName == QLatin1String( "dual" ) );
+}
+
+TEST_CASE( "classification path product upgrades provisional result", "[d18][mission]" )
+{
+  MissionContext ctx;
+  sicnu::app::ensureMissionId( ctx );
+  // Provisional request id (studio without path).
+  WorkbenchObjectRef provisional{ ObjectKind::Result, QStringLiteral( "classify-studio-0-0" ),
+                                  QStringLiteral( "provisional" ) };
+  sicnu::app::publishMissionObject( ctx, provisional );
+  REQUIRE( ctx.results.size() == 1 );
+
+  // Path product lands — stable path-backed Result supersedes provisional identity for Agent.
+  const auto product = sicnu::app::publishMissionResultFromPath(
+    ctx, QStringLiteral( "/tmp/e2e/class_product.tif" ), QStringLiteral( "class-product" ) );
+  REQUIRE( !product.isNull() );
+  REQUIRE( product.id != provisional.id );
+  REQUIRE( ctx.results.size() == 2 );
+  REQUIRE( ctx.metadata.value( QStringLiteral( "artifact_paths" ) ).toObject().contains( product.id ) );
+  REQUIRE( ctx.selection.resultIds.contains( product.id ) );
+}

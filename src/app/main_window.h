@@ -585,7 +585,7 @@ private:
     /// D17 IR 2.0 designer (production); separate from Engine 2.0 PipelineEditorDock.
     sicnu::app::pipeline::Ir2PipelineDesignerDock *m_ir2PipelineDock = nullptr;
 
-    /// D18 mission session (persisted via sidecar on project save follow-up).
+    /// D18 mission session (persisted via sidecar + sicnuMissionContext XML on project save).
     sicnu::app::MissionContext m_mission;
 
     // OBIA window (lazy-constructed) — Phase 10B Task 10B.5

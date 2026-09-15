@@ -8829,6 +8829,7 @@ target_link_libraries(test_mission_context PRIVATE
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  Qt6::Xml
   qgis_core
   qgis_gui
   sicnu_data
