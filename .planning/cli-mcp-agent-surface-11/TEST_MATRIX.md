@@ -17,4 +17,8 @@
 | T11 | redaction known-answer（bearer/api_key/password/PEM） | 独立正则 oracle | `ctest -R test_surface_redaction`（或并入 protocol） | 待测 | EVIDENCE P4 |
 | T12 | E2E 真 stdio：initialize→tools/list→schema→run→progress→cancel→artifact，×2 | surface_mcp_host 子进程 + 真管道 | `ctest -R test_surface_e2e -j1` | 待测 | EVIDENCE P6 |
 | T13 | 既有回归：test_mcp_server / test_agent_tool_catalog / test_cli_commands_json / test_help_coverage | master 基线行为不变 | `ctest -R "test_mcp_server|test_agent_tool_catalog|test_cli_commands_json|test_help_coverage" -j1` | 待测 | EVIDENCE P5 |
+| T15 | Pi 默认桥接类别无 stale family | 正则提取 TS 源文本默认表 ⊆ surfaceFamilies() | test_surface_parity | 待测 | EVIDENCE P5 |
+| T16 | 投影线性规模 + MCP 分页 500 clamp 游标走页 | 2000 注入 custom tools 精确计数 | test_surface_parity | 待测 | EVIDENCE P5 |
+| T17 | CLI 真实二进制 tools list 与投影三方 parity（meta/dataPlatform 全等 + schema 字节相等） | popen/QProcess 实测 | test_surface_parity | 待测 | EVIDENCE P5 |
+| T18 | artifact_read 相对路径 `..\/..` 逃逸被拒（resolved-path 沙箱） | 沙箱内负样本 | test_surface_protocol | 待测 | EVIDENCE P4 |
 | T14 | drift/生成物零 diff；`git diff --check` clean | git | Phase 8 | 待测 | EVIDENCE P8 |
