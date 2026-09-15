@@ -55,6 +55,7 @@ ctest -R 'test_mission' -V
 | 3544f4ad | feat(d18): dual-write MissionContext on project save/open |
 | c5773131 | feat(d18): IR2 PipelineRunCoordinator/LabSpec + path-backed classify Results |
 | ec7175d6 | docs(d18): evidence, decisions, review log, PR body for persist/run slice |
+| 59f0533e | docs(d18): fill evidence commit ledger SHAs for persist/run slice |
 
 ## PR
 
