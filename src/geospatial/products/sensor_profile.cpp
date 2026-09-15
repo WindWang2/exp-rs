@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -64,7 +65,11 @@ bool readFileText( const std::string &path, std::string &out )
   return true;
 }
 
-constexpr int kRegistrySchemaVersion = 1;
+// Schema 2.0 (ADR 0159): v1 stays readable with its historical rules; v2
+// files get strict per-field validation. Every supported version is listed
+// here — a file with any other version is a typed refusal (fail-closed gate).
+const std::set<int> kSupportedSchemaVersions = { 1, 2 };
+constexpr double kMidpointToleranceNm = 0.5; ///< midpoint/centre rounding slack
 constexpr int kMaxWalkUpHops = 8;
 constexpr std::size_t kMaxFamilyFiles = 32;
 
@@ -137,6 +142,8 @@ std::string familyFileFor( const std::string &sensorKey )
     return "zy1.json";
   if ( sensorKey.rfind( "hj", 0 ) == 0 )
     return "hj.json";
+  if ( sensorKey.rfind( "cbers", 0 ) == 0 )
+    return "cbers.json";
   return std::string();
 }
 
@@ -183,6 +190,218 @@ void collectStringList( const Json::Value &value, std::vector<std::string> &out 
   }
 }
 
+// ─── Schema 2.0 strict rules ────────────────────────────────────────────────
+// Physical quantities must be finite and positive; roles must come from the
+// ADR 0065 vocabulary (mirrors src/data/band_role.h; this Qt-free loader
+// keeps its own literal set — the registry drift test pins the two together
+// through the shared on-disk strings); band ids are unique per entry;
+// wavelength values agree with the declared spectral range (published centre
+// when present, otherwise the documented range midpoint within rounding
+// slack). Every rule violation is a typed GeoError naming the entry, the
+// band and the offending value — never a silent default.
+
+const std::set<std::string> &bandRoleVocabulary()
+{
+  static const std::set<std::string> kVocabulary = {
+    "coastal", "blue", "green", "red", "red_edge", "nir", "narrow_nir",
+    "swir1", "swir2", "cirrus", "panchromatic", "thermal", "qa",
+    "scene_classification", "unknown",
+  };
+  return kVocabulary;
+}
+
+const std::set<std::string> &modalityVocabulary()
+{
+  static const std::set<std::string> kModalities = { "optical", "sar", "thermal", "hyperspectral" };
+  return kModalities;
+}
+
+bool positivePhysical( const Json::Value &value, double &out )
+{
+  if ( !value.isNumeric() || !value.isDouble() )
+    return false;
+  const double number = value.asDouble();
+  if ( !std::isfinite( number ) || number <= 0.0 )
+    return false;
+  out = number;
+  return true;
+}
+
+/// Parses "0.45-0.52" into a nanometre interval. False on any other shape
+/// (verbatim passthrough fields are not guessed).
+bool parseSpectralRangeUm( const std::string &text, double &lowNm, double &highNm )
+{
+  const std::size_t dash = text.find( '-' );
+  if ( dash == std::string::npos || dash == 0 || dash + 1 >= text.size() )
+    return false;
+  try
+  {
+    const double lowUm = std::stod( text.substr( 0, dash ) );
+    const double highUm = std::stod( text.substr( dash + 1 ) );
+    if ( !std::isfinite( lowUm ) || !std::isfinite( highUm ) || highUm <= lowUm )
+      return false;
+    lowNm = lowUm * 1000.0;
+    highNm = highUm * 1000.0;
+    return true;
+  }
+  catch ( const std::exception & )
+  {
+    return false;
+  }
+}
+
+/// v2 strict validation of one parsed band. Throws GeoError naming the
+/// entry/band/rule on the first violation.
+void validateStrictBandV2( const std::string &sensorKey, const SensorBandProfile &band,
+                           const Json::Value &bandJson, std::set<std::string> &seenBandIds )
+{
+  const std::string where = sensorKey + "/" + band.band;
+  const std::string idLower = lowerAscii( band.band );
+  if ( !seenBandIds.insert( idLower ).second )
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "Sensor profile entry " + sensorKey + " declares duplicate band id \"" +
+                      band.band + "\" (case-insensitive)" );
+
+  if ( !bandRoleVocabulary().count( band.role ) )
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "Sensor profile entry " + where + " declares role \"" + band.role +
+                      "\" outside the ADR 0065 vocabulary" );
+
+  auto checkPositive = [ & ] ( const char *field, bool has, double value ) {
+    if ( has && ( !std::isfinite( value ) || value <= 0.0 ) )
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "Sensor profile entry " + where + " declares " + field + " = " +
+                        std::to_string( value ) + "; physical quantities must be finite and > 0" );
+  };
+  checkPositive( "wavelength_nm", band.hasWavelengthNm, band.wavelengthNm );
+  checkPositive( "center_wavelength_nm", band.hasCenterWavelengthNm, band.centerWavelengthNm );
+  checkPositive( "fwhm_nm", band.hasFwhmNm, band.fwhmNm );
+  checkPositive( "gsd_m", band.hasGsdM, band.gsdM );
+
+  // Spectral-range agreement: the declared midpoint (or centre) must sit on
+  // the verbatim range. This is the drift gate that keeps "range width is
+  // never a FWHM" and midpoint-vs-centre semantics honest.
+  const std::string rangeText = bandJson.get( "spectral_range_um", Json::Value() ).asString();
+  if ( !rangeText.empty() )
+  {
+    double lowNm = 0.0;
+    double highNm = 0.0;
+    if ( !parseSpectralRangeUm( rangeText, lowNm, highNm ) )
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "Sensor profile entry " + where + " declares unparseable spectral_range_um \"" +
+                        rangeText + "\" (expected \"0.45-0.52\")" );
+    if ( band.hasCenterWavelengthNm &&
+         ( band.centerWavelengthNm < lowNm || band.centerWavelengthNm > highNm ) )
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "Sensor profile entry " + where + ": center_wavelength_nm " +
+                        std::to_string( band.centerWavelengthNm ) +
+                        " nm lies outside the declared spectral range " + rangeText + " um" );
+    if ( band.hasFwhmNm && band.fwhmNm > ( highNm - lowNm ) )
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "Sensor profile entry " + where + ": fwhm_nm " + std::to_string( band.fwhmNm ) +
+                        " nm exceeds the declared range width — a range width is never a FWHM" );
+    if ( band.hasWavelengthNm )
+    {
+      const double reference = band.hasCenterWavelengthNm ? band.centerWavelengthNm
+                                                          : ( lowNm + highNm ) / 2.0;
+      if ( std::fabs( band.wavelengthNm - reference ) > kMidpointToleranceNm )
+        throw GeoError( ErrorCode::InvalidArgument,
+                        "Sensor profile entry " + where + ": wavelength_nm " +
+                          std::to_string( band.wavelengthNm ) + " nm disagrees with the " +
+                          ( band.hasCenterWavelengthNm ? std::string( "declared centre " )
+                                                       : std::string( "range midpoint " ) ) +
+                          std::to_string( reference ) + " nm (tolerance " +
+                          std::to_string( kMidpointToleranceNm ) + " nm)" );
+    }
+  }
+}
+
+/// v2 strict validation + band_axis parsing for one entry. Throws GeoError
+/// naming the entry/rule on the first violation.
+void validateStrictEntryV2( const std::string &sensorKey, const std::string &familyFile,
+                            const Json::Value &entry, SensorProfileRecord &record )
+{
+  const std::string where = sensorKey + " in " + familyFile;
+  for ( const char *field : { "satellite", "instrument", "sensor_mode", "calibration_rule" } )
+  {
+    const std::string value = entry.get( field, Json::Value() ).asString();
+    if ( value.empty() )
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "Sensor profile entry " + where + " declares an empty \"" + field + "\"" );
+  }
+  const std::string modality = record.modality;
+  if ( !modalityVocabulary().count( modality ) )
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "Sensor profile entry " + where + " declares modality \"" + modality +
+                      "\" outside the documented vocabulary (optical/sar/thermal/hyperspectral)" );
+  if ( record.hasGsdM && ( !std::isfinite( record.gsdM ) || record.gsdM <= 0.0 ) )
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "Sensor profile entry " + where + " declares gsd_m = " +
+                      std::to_string( record.gsdM ) + "; physical quantities must be finite and > 0" );
+  for ( const std::string &constituent : record.constituents )
+  {
+    if ( constituent.empty() )
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "Sensor profile entry " + where + " declares an empty constituent" );
+  }
+  if ( !record.panVariant.empty() && lowerAscii( record.panVariant ) == lowerAscii( sensorKey ) )
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "Sensor profile entry " + where + ": pan_variant points at itself" );
+  if ( !record.msVariant.empty() && lowerAscii( record.msVariant ) == lowerAscii( sensorKey ) )
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "Sensor profile entry " + where + ": ms_variant points at itself" );
+
+  std::set<std::string> seenBandIds;
+  for ( std::size_t i = 0; i < record.bands.size() && i < static_cast<std::size_t>( entry["bands"].size() ); ++i )
+    validateStrictBandV2( sensorKey, record.bands[i], entry["bands"][static_cast<Json::ArrayIndex>( i )],
+                          seenBandIds );
+
+  // band_axis (v2, optional): extent/ordering/bad-band flags about the
+  // fully-written-out bands array. Never a runtime band generator.
+  const Json::Value axis = entry["band_axis"];
+  if ( axis.isNull() )
+    return;
+  if ( !axis.isObject() )
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "Sensor profile entry " + where + " declares a non-object band_axis" );
+  const Json::Value count = axis["count"];
+  if ( !count.isIntegral() || count.asInt() <= 0 )
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "Sensor profile entry " + where + " declares band_axis.count that is not a positive integer" );
+  if ( count.asInt() != static_cast<int>( record.bands.size() ) )
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "Sensor profile entry " + where + ": band_axis.count " +
+                      std::to_string( count.asInt() ) + " != declared bands " +
+                      std::to_string( record.bands.size() ) );
+  record.hasBandAxis = true;
+  record.bandAxisCount = count.asInt();
+  record.bandAxisOrdering = axis.get( "ordering", Json::Value() ).asString();
+  const Json::Value badBands = axis["bad_bands"];
+  if ( badBands.isNull() )
+    return;
+  if ( !badBands.isArray() )
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "Sensor profile entry " + where + " declares a non-array band_axis.bad_bands" );
+  for ( const Json::Value &bad : badBands )
+  {
+    const std::string badId = bad.asString();
+    int index = -1;
+    for ( std::size_t i = 0; i < record.bands.size(); ++i )
+    {
+      if ( lowerAscii( record.bands[i].band ) == lowerAscii( badId ) )
+      {
+        index = static_cast<int>( i );
+        break;
+      }
+    }
+    if ( index < 0 )
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "Sensor profile entry " + where + ": band_axis.bad_bands names \"" + badId +
+                        "\" which is not in the declared band layout" );
+    record.badBandIndices.push_back( index );
+  }
+}
+
 SensorProfileRecord parseSensorEntry( const std::string &sensorKey, const std::string &familyFile,
                                       int fileVersion, const std::string &source,
                                       const Json::Value &entry )
@@ -191,10 +410,11 @@ SensorProfileRecord parseSensorEntry( const std::string &sensorKey, const std::s
     throw GeoError( ErrorCode::InvalidArgument,
                     "Sensor profile entry " + sensorKey + " in " + familyFile + " is not an object" );
 
-  // Forward compatibility: keys outside the v1 schema are ignored but named.
+  // Forward compatibility: keys outside the schema are ignored but named.
   static const std::set<std::string> kKnownSensorKeys = {
     "satellite", "instrument", "sensor_mode", "modality", "gsd_m", "pan_variant",
     "ms_variant", "constituents", "calibration_rule", "qa_vocabulary", "bands",
+    "band_axis", // v2
   };
   static const std::set<std::string> kKnownBandKeys = {
     "band", "role", "role_reason", "wavelength_nm", "center_wavelength_nm", "fwhm_nm",
@@ -281,6 +501,9 @@ SensorProfileRecord parseSensorEntry( const std::string &sensorKey, const std::s
     }
     record.bands.push_back( std::move( spec ) );
   }
+
+  if ( fileVersion >= 2 )
+    validateStrictEntryV2( sensorKey, familyFile, entry, record );
   return record;
 }
 
@@ -359,11 +582,11 @@ SensorProfileRecord loadSensorProfile( const std::string &sensorKey )
   if ( !version.isIntegral() )
     throw GeoError( ErrorCode::InvalidArgument,
                     "Sensor profile registry " + familyFile + " does not declare an integer version" );
-  if ( version.asInt() != kRegistrySchemaVersion )
+  if ( !kSupportedSchemaVersions.count( version.asInt() ) )
     throw GeoError( ErrorCode::InvalidArgument,
                     "Sensor profile registry " + familyFile + " has version " +
-                      std::to_string( version.asInt() ) + "; this build understands version " +
-                      std::to_string( kRegistrySchemaVersion ) );
+                      std::to_string( version.asInt() ) + "; this build understands versions 1–" +
+                      std::to_string( *kSupportedSchemaVersions.rbegin() ) );
 
   const Json::Value &sensors = json["sensors"];
   if ( !sensors.isObject() || !sensors.isMember( sensorKey ) )
@@ -385,6 +608,111 @@ bool hasSensorProfile( const std::string &sensorKey )
   {
     return false;
   }
+}
+
+std::vector<SensorProfileValidationIssue> validateSensorProfiles()
+{
+  std::vector<SensorProfileValidationIssue> issues;
+  auto addIssue = [ & ] ( const std::string &file, const std::string &sensorKey,
+                          const std::string &band, const std::string &message ) {
+    issues.push_back( { file, sensorKey, band, message } );
+  };
+
+  const std::string dir = sensorProfileDir();
+  if ( dir.empty() )
+  {
+    addIssue( "", "", "", "sensor profile registry directory not found" );
+    return issues;
+  }
+
+  // Pass 1 — per-file, per-entry validation under the file's declared
+  // version rules (the same code paths the loader enforces, reported
+  // instead of thrown so one bad entry never hides the others).
+  std::map<std::string, std::vector<std::pair<std::string, const Json::Value *>>> entriesByKey;
+  std::error_code ec;
+  int visited = 0;
+  for ( fs::directory_iterator it( fs::u8path( dir ), ec ), end;
+        !ec && it != end && visited < kMaxFamilyFiles; it.increment( ec ) )
+  {
+    ++visited;
+    std::error_code entryEc;
+    if ( !it->is_regular_file( entryEc ) || entryEc )
+      continue;
+    const std::u8string u8 = it->path().generic_u8string();
+    const std::string path( reinterpret_cast<const char *>( u8.data() ), u8.size() );
+    const std::string name = path.substr( path.find_last_of( "/\\" ) + 1 );
+    if ( name.size() < 6 || name.substr( name.size() - 5 ) != ".json" )
+      continue;
+
+    const Json::Value *json = nullptr;
+    try
+    {
+      json = &familyJson( name );
+    }
+    catch ( const GeoError &error )
+    {
+      addIssue( name, "", "", error.what() );
+      continue;
+    }
+    const Json::Value version = ( *json )["version"];
+    if ( !version.isIntegral() )
+    {
+      addIssue( name, "", "", "does not declare an integer version" );
+      continue;
+    }
+    if ( !kSupportedSchemaVersions.count( version.asInt() ) )
+    {
+      addIssue( name, "", "",
+                "version " + std::to_string( version.asInt() ) + " is not a supported schema version" );
+      continue;
+    }
+    if ( version.asInt() >= 2 && json->get( "source", Json::Value() ).asString().empty() )
+      addIssue( name, "", "", "v2 files must carry a non-empty \"source\" provenance note" );
+
+    const Json::Value &sensors = ( *json )["sensors"];
+    if ( !sensors.isObject() || sensors.empty() )
+    {
+      addIssue( name, "", "", "no non-empty \"sensors\" object" );
+      continue;
+    }
+    for ( const std::string &key : sensors.getMemberNames() )
+    {
+      auto &slot = entriesByKey[key];
+      slot.emplace_back( name, &sensors[key] );
+      if ( slot.size() > 1 )
+        addIssue( name, key, "", "sensor key redeclared in " + slot.front().first );
+      try
+      {
+        parseSensorEntry( key, name, version.asInt(),
+                          json->get( "source", Json::Value() ).asString(), sensors[key] );
+      }
+      catch ( const GeoError &error )
+      {
+        addIssue( name, key, "", error.what() );
+      }
+    }
+  }
+
+  // Pass 2 — registry-wide cross-references: pan/ms sibling links must
+  // resolve to declared keys (any file). A dangling link would make the
+  // runtime pan/MS shape resolution silently lose its refinement path.
+  for ( const auto &entry : entriesByKey )
+  {
+    if ( entry.second.size() != 1 )
+      continue; // duplicates already reported; skip to avoid cascades
+    const std::string &file = entry.second.front().first;
+    const Json::Value &json = *entry.second.front().second;
+    for ( const char *variant : { "pan_variant", "ms_variant" } )
+    {
+      const std::string target = json.get( variant, Json::Value() ).asString();
+      if ( target.empty() )
+        continue;
+      if ( !entriesByKey.count( target ) )
+        addIssue( file, entry.first, "",
+                  std::string( variant ) + " \"" + target + "\" does not resolve to a declared sensor key" );
+    }
+  }
+  return issues;
 }
 
 } // namespace sicnu::geo
