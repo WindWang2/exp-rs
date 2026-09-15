@@ -9407,3 +9407,10 @@ if(Python_EXECUTABLE)
             "${CMAKE_SOURCE_DIR}/tests/fixtures/bundle_manifest/conformance.py"
             "--script" "${CMAKE_SOURCE_DIR}/scripts/verify_bundle_manifest.py")
 endif()
+
+# Deployment 11.0 (F19): environment self-check suite. Qt-free (geospatial
+# doctor layer + offline gate) — the io-test link set, not the fat one.
+sicnu_add_io_test(test_env_doctor)
+target_compile_definitions(test_env_doctor PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)

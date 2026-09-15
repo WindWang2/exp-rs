@@ -31,6 +31,7 @@
 #include <json/json.h>
 
 #include <string>
+#include <vector>
 
 namespace sicnu::geo::envcheck
 {
@@ -44,6 +45,14 @@ struct EnvCheckOptions
     /// Current working directory actually used for cwd-relative probes
     /// (std::filesystem::current_path when left empty).
     std::string currentDir;
+    /// Drivers the deployment contract requires. Empty = the built-in lab set
+    /// (GTiff, GPKG, GeoJSON, ESRI Shapefile, MEM, VRT); tests and future
+    /// bundle profiles may declare a different closure.
+    std::vector< std::string > requiredDrivers;
+    /// Directories to scan for proj.db. Empty = the built-in env/GDAL-relative
+    /// /system scan. Injected candidates are listed in the finding's `probed`
+    /// detail either way.
+    std::vector< std::string > projDataCandidates;
 };
 
 struct EnvFinding

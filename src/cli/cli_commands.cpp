@@ -3,6 +3,8 @@
  ***************************************************************************/
 #include "cli_commands.h"
 
+#include "cli_env_doctor.h"
+
 #include <cpl_vsi.h>
 
 #include "geospatial/doctor/data_doctor.h"
@@ -2257,7 +2259,9 @@ bool isCliCommand( const QString &firstArg )
                                            // Foundation 5.0/7.0 dataset-experiment surface.
                                            "dataset", "experiment", "reproduce",
                                            // D4 teaching auto-grader (ADR 0150).
-                                           "lab" };
+                                           "lab",
+                                           // Deployment 11.0 (F19): first-run env self-check.
+                                           "env-doctor" };
     return kCommands.contains( firstArg );
 }
 
@@ -2295,6 +2299,8 @@ int dispatchCliCommand( const QStringList &arguments, const CliIO &io )
         return commandReproduce( std::move( args ), io );
     if ( command == "lab" )
         return commandLab( std::move( args ), io );
+    if ( command == "env-doctor" )
+        return commandEnvDoctor( std::move( args ), io );
     if ( command == "catalog" )
     {
         // catalog export <dir> — the legacy --export-catalog surface.

@@ -127,7 +127,7 @@ void addSeverity( EnvDoctorReport &report, const char *severity )
     ++report.okCount;
 }
 
-void emit( EnvDoctorReport &report, const char *severity, const char *checkId,
+void emitFinding( EnvDoctorReport &report, const char *severity, const char *checkId,
            const std::string &message, const Json::Value &detail = Json::Value(),
            const char *diagnostic = "" )
 {
@@ -158,7 +158,7 @@ std::string platformName()
 
 const char *kRequiredDrivers[] = { "GTiff", "GPKG", "GeoJSON", "ESRI Shapefile", "MEM", "VRT" };
 
-void checkGdal( EnvDoctorReport &report )
+void checkGdal( EnvDoctorReport &report, const EnvCheckOptions &options )
 {
   ensureGdalRegistered();
   const char *release = GDALVersionInfo( "RELEASE_NAME" );
@@ -166,33 +166,43 @@ void checkGdal( EnvDoctorReport &report )
   Json::Value detail;
   detail["release"] = release ? release : "";
   detail["full"] = versionFull ? versionFull : "";
-  emit( report, "ok", "gdal.version",
+  emitFinding( report, "ok", "gdal.version",
         std::string( "GDAL " ) + ( release ? release : "unknown" ), detail );
 
   const int registered = GDALGetDriverCount();
   if ( registered <= 0 )
   {
-    emit( report, "error", "gdal.drivers", "GDAL driver registry is empty",
+    emitFinding( report, "error", "gdal.drivers", "GDAL driver registry is empty",
           Json::Value(), "diagnostic.env.gdal_drivers_empty" );
     return;
   }
   Json::Value countDetail;
   countDetail["registered"] = registered;
-  emit( report, "ok", "gdal.drivers",
+  emitFinding( report, "ok", "gdal.drivers",
         std::to_string( registered ) + " GDAL drivers registered", countDetail );
 
   // Required-for-the-labs driver set: every absence is named (Oracle 3 —
   // diagnosis points at the specific missing driver). C API on purpose: no
   // gdal_priv.h surface in the Qt-free layer.
-  std::vector< std::string > missing;
-  for ( const char *name : kRequiredDrivers )
+  std::vector< std::string > required;
+  if ( options.requiredDrivers.empty() )
   {
-    if ( !GDALGetDriverByName( name ) )
-      missing.emplace_back( name );
+    for ( const char *name : kRequiredDrivers )
+      required.emplace_back( name );
+  }
+  else
+  {
+    required = options.requiredDrivers;
+  }
+  std::vector< std::string > missing;
+  for ( const auto &name : required )
+  {
+    if ( !GDALGetDriverByName( name.c_str() ) )
+      missing.push_back( name );
   }
   if ( missing.empty() )
   {
-    emit( report, "ok", "gdal.drivers.required", "required GDAL drivers present" );
+    emitFinding( report, "ok", "gdal.drivers.required", "required GDAL drivers present" );
   }
   else
   {
@@ -201,7 +211,7 @@ void checkGdal( EnvDoctorReport &report )
     for ( const auto &m : missing )
       list.append( m );
     md["missing"] = list;
-    emit( report, "error", "gdal.drivers.required",
+    emitFinding( report, "error", "gdal.drivers.required",
           "missing required GDAL driver(s): " + joinStrings( missing, ", " ),
           md, "diagnostic.env.gdal_driver_missing" );
   }
@@ -213,27 +223,27 @@ void checkGdal( EnvDoctorReport &report )
   {
     // GDAL >= 3 auto-locates its data directory relative to the shared
     // library; absence of the env var is only an info when drivers register.
-    emit( report, "info", "gdal.data_dir",
+    emitFinding( report, "info", "gdal.data_dir",
           "GDAL_DATA not set (GDAL auto-location in effect)" );
   }
   else if ( !dirExists( gdalData ) )
   {
-    emit( report, "error", "gdal.data_dir", "GDAL_DATA set but missing: " + gdalData,
+    emitFinding( report, "error", "gdal.data_dir", "GDAL_DATA set but missing: " + gdalData,
           dd, "diagnostic.env.gdal_data_missing" );
   }
   else
   {
-    emit( report, "ok", "gdal.data_dir", "GDAL_DATA resolved: " + gdalData, dd );
+    emitFinding( report, "ok", "gdal.data_dir", "GDAL_DATA resolved: " + gdalData, dd );
   }
 }
 
 // ----------------------------------------------------------------- PROJ probes
 
-void checkProj( EnvDoctorReport &report )
+void checkProj( EnvDoctorReport &report, const EnvCheckOptions &options )
 {
   // Candidate scan names every probed path so a missing proj.db is a pointer,
   // not a guess (Oracle 3).
-  std::vector< std::string > candidates;
+  std::vector< std::string > candidates = options.projDataCandidates;
   for ( const char *name : { "PROJ_DATA", "PROJ_LIB" } )
   {
     const std::string v = envOrEmpty( name );
@@ -272,7 +282,7 @@ void checkProj( EnvDoctorReport &report )
   pd["probed"] = probed;
   if ( projDb.empty() )
   {
-    emit( report, "error", "proj.db",
+    emitFinding( report, "error", "proj.db",
           "proj.db not found (probed " + std::to_string( probedPaths.size() )
             + " candidates: " + joinStrings( probedPaths, ", " ) + ")",
           pd, "diagnostic.env.proj_db_missing" );
@@ -281,7 +291,7 @@ void checkProj( EnvDoctorReport &report )
   else
   {
     pd["resolved"] = projDb;
-    emit( report, "ok", "proj.db", "proj.db resolved: " + projDb, pd );
+    emitFinding( report, "ok", "proj.db", "proj.db resolved: " + projDb, pd );
   }
 
   // Operational CRS resolve: this is what grading actually needs (EPSG
@@ -295,7 +305,7 @@ void checkProj( EnvDoctorReport &report )
   }
   if ( err != OGRERR_NONE )
   {
-    emit( report, "error", "proj.crs.resolve",
+    emitFinding( report, "error", "proj.crs.resolve",
           "EPSG:4326 import failed (PROJ database unusable in this process)",
           Json::Value(), "diagnostic.env.proj_db_unusable" );
     return;
@@ -305,9 +315,9 @@ void checkProj( EnvDoctorReport &report )
   if ( exported )
     CPLFree( wkt );
   if ( exported )
-    emit( report, "ok", "proj.crs.resolve", "EPSG:4326 roundtrip through PROJ OK" );
+    emitFinding( report, "ok", "proj.crs.resolve", "EPSG:4326 roundtrip through PROJ OK" );
   else
-    emit( report, "error", "proj.crs.resolve",
+    emitFinding( report, "error", "proj.crs.resolve",
           "EPSG:4326 imported but WKT export failed", Json::Value(),
           "diagnostic.env.proj_db_unusable" );
 }
@@ -359,12 +369,12 @@ void checkRuntimeData( EnvDoctorReport &report, const EnvCheckOptions &options )
     if ( dirExists( envDataDir ) )
     {
       rd["source"] = "env";
-      emit( report, "ok", "runtime.data.dir",
+      emitFinding( report, "ok", "runtime.data.dir",
             "SICNU_DATA_DIR resolved: " + envDataDir, rd );
     }
     else
     {
-      emit( report, "warning", "runtime.data.dir",
+      emitFinding( report, "warning", "runtime.data.dir",
             "SICNU_DATA_DIR is set but missing: " + envDataDir, rd,
             "diagnostic.env.data_dir_missing" );
     }
@@ -377,12 +387,12 @@ void checkRuntimeData( EnvDoctorReport &report, const EnvCheckOptions &options )
     {
       rd["resolved_root"] = markerRoot;
       rd["source"] = "marker-walk from " + root;
-      emit( report, "ok", "runtime.data.dir",
+      emitFinding( report, "ok", "runtime.data.dir",
             "runtime data located (" + rd["source"].asString() + ")", rd );
       return;
     }
   }
-  emit( report, "warning", "runtime.data.dir",
+  emitFinding( report, "warning", "runtime.data.dir",
         "runtime data tree not located (set SICNU_DATA_DIR; probed exe/cwd walks)",
         rd, "diagnostic.env.data_dir_unresolved" );
 }
@@ -395,7 +405,7 @@ void checkFilesystem( EnvDoctorReport &report )
   const std::filesystem::path temp = std::filesystem::temp_directory_path( ec );
   if ( ec )
   {
-    emit( report, "error", "fs.temp", "system temp directory cannot be resolved",
+    emitFinding( report, "error", "fs.temp", "system temp directory cannot be resolved",
           Json::Value(), "diagnostic.env.temp_unresolved" );
     return;
   }
@@ -405,13 +415,13 @@ void checkFilesystem( EnvDoctorReport &report )
   td["path"] = temp.string();
   if ( failure.empty() )
   {
-    emit( report, "ok", "fs.temp", "temp directory writable", td );
+    emitFinding( report, "ok", "fs.temp", "temp directory writable", td );
   }
   else
   {
     td["probe"] = probed;
     td["error"] = failure;
-    emit( report, "error", "fs.temp", "temp directory not writable: " + failure,
+    emitFinding( report, "error", "fs.temp", "temp directory not writable: " + failure,
           td, "diagnostic.env.temp_not_writable" );
   }
 
@@ -427,12 +437,12 @@ void checkFilesystem( EnvDoctorReport &report )
   ud["path"] = unicodeDir.string();
   if ( unicodeFailure.empty() )
   {
-    emit( report, "ok", "fs.unicode", "unicode path roundtrip OK", ud );
+    emitFinding( report, "ok", "fs.unicode", "unicode path roundtrip OK", ud );
   }
   else
   {
     ud["error"] = unicodeFailure;
-    emit( report, "error", "fs.unicode", "unicode path roundtrip failed: " + unicodeFailure,
+    emitFinding( report, "error", "fs.unicode", "unicode path roundtrip failed: " + unicodeFailure,
           ud, "diagnostic.env.unicode_path_failed" );
   }
   std::filesystem::remove_all( unicodeDir, ec );
@@ -451,9 +461,9 @@ void checkOfflineState( EnvDoctorReport &report )
   const char *deny = CPLGetConfigOption( "CPL_VSIL_CURL_ALLOWED_EXTENSIONS", nullptr );
   od["gdal_network_deny"] = deny != nullptr;
   if ( engaged )
-    emit( report, "info", "offline.state", "offline gate engaged (remote opens refused)", od );
+    emitFinding( report, "info", "offline.state", "offline gate engaged (remote opens refused)", od );
   else
-    emit( report, "info", "offline.state", "offline gate not engaged (online mode)", od );
+    emitFinding( report, "info", "offline.state", "offline gate not engaged (online mode)", od );
 }
 
 } // namespace
@@ -504,8 +514,8 @@ EnvDoctorReport runEnvironmentDoctor( const EnvCheckOptions &options )
   EnvDoctorReport report;
   report.platform = platformName();
   report.checks = Json::Value( Json::arrayValue );
-  checkGdal( report );
-  checkProj( report );
+  checkGdal( report, options );
+  checkProj( report, options );
   checkRuntimeData( report, options );
   checkFilesystem( report );
   checkOfflineState( report );
