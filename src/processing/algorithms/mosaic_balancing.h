@@ -32,11 +32,6 @@ struct BalanceGain {
     double bias = 0.0;
 
     double apply( double v ) const { return gain * v + bias; }
-    BalanceGain composedWith( const BalanceGain &outer ) const
-    {
-        // apply this first, then outer: outer(this(v))
-        return { outer.gain * gain, outer.gain * bias + outer.bias };
-    }
 };
 
 struct SceneBalance {

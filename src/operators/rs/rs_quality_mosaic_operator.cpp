@@ -301,7 +301,13 @@ Json::Value RsQualityMosaicOperator::schema() const {
     outputs["height"] = makeIntegerParam("height", "Output height", 0);
     outputs["bandCount"] = makeIntegerParam("bandCount", "Mosaicked data bands", 0);
     outputs["inputCount"] = makeIntegerParam("inputCount", "Inputs mosaicked", 0);
-    outputs["rejectedInputs"] = makeIntegerParam("rejectedInputs", "Rejected input indices", 0);
+    {
+        Json::Value rej = makeStringParam("rejectedInputs", "Rejected input indices (array)", "");
+        rej["type"] = "array";
+        rej["items"] = Json::Value(Json::objectValue);
+        rej["items"]["type"] = "integer";
+        outputs["rejectedInputs"] = rej;
+    }
     outputs["seamCount"] = makeIntegerParam("seamCount", "Computed seamlines", 0);
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
@@ -923,10 +929,19 @@ Json::Value RsQualityMosaicOperator::run(const Json::Value& params, RSOperatorCo
                                 ::rs::mosaic::blendValue(
                                     canvasV, applied[static_cast<size_t>( b )], s );
                         }
-                        if ( s > winnerWeight[tileIdx] )
+                        // Provenance = dominant contributor: the previous
+                        // dominant weight decays by (1-s); the incoming scene
+                        // takes over when its weight exceeds the decayed one.
+                        const float decayed =
+                            winnerWeight[tileIdx] * static_cast<float>( 1.0 - s );
+                        if ( s > decayed )
                         {
                             provOut[tileIdx] = static_cast<float>( sceneIdx ) + 1.0f;
                             winnerWeight[tileIdx] = static_cast<float>( s );
+                        }
+                        else
+                        {
+                            winnerWeight[tileIdx] = decayed;
                         }
                         ++contribution[static_cast<size_t>( sceneIdx )];
                     }
