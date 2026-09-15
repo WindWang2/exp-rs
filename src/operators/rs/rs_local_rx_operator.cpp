@@ -9,6 +9,7 @@
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/spectral_local_rx.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
+#include "processing/gdal/gdal_multiband_block_stream.h"
 
 #include <gdal.h>
 

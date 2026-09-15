@@ -6,8 +6,10 @@
 
 #include <QApplication>
 #include <QFile>
-#include <QSignalSpy>
 #include <QTemporaryDir>
+
+#include <utility>
+#include <vector>
 
 #include "app/widgets/spectral_workbench_panel.h"
 #include "processing/algorithms/spectral_table.h"
@@ -64,16 +66,19 @@ TEST_CASE("Workbench panel loads a validated table and links selection", "[spect
 
     // Selection linkage: programmatic selection emits the signal with the
     // row identity the host would use for map/profile sync.
-    QSignalSpy spy(&panel, &SpectralWorkbenchPanel::spectrumSelected);
-    panel.selectSpectrum(1);
-    REQUIRE(spy.count() == 1);
-    CHECK(spy.first().at(0).toString() == QStringLiteral("green"));
-    CHECK(spy.first().at(1).toInt() == 1);
+    std::vector<std::pair<QString, int>> selections;
+    QObject::connect( &panel, &SpectralWorkbenchPanel::spectrumSelected,
+                      [&selections]( const QString &label, int index )
+                      { selections.emplace_back( label, index ); } );
+    panel.selectSpectrum( 1 );
+    REQUIRE( selections.size() == 1 );
+    CHECK( selections.front().first == QStringLiteral( "green" ) );
+    CHECK( selections.front().second == 1 );
 
     // Out-of-range selection clamps instead of crashing.
-    panel.selectSpectrum(99);
-    REQUIRE(spy.count() == 2);
-    CHECK(spy.last().at(1).toInt() == 1);
+    panel.selectSpectrum( 99 );
+    REQUIRE( selections.size() == 2 );
+    CHECK( selections.back().second == 1 );
 }
 
 TEST_CASE("Workbench panel refuses broken artifacts fail-closed", "[spectral11][widget]")

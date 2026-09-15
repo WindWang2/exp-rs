@@ -67,7 +67,7 @@ TEST_CASE( "Sparse unmixing at 1024 bands matches the closed form", "[scale][spa
     for ( size_t i = 0; i < pixels.size(); ++i )
         pixels[i] = static_cast<float>( rng.next() * 1.2 - 0.1 );
 
-    Config config;
+    SpectralSparseUnmixing::Config config;
     config.lambda = 0.1;
     config.tolerance = 1e-10;
     config.maxIterations = 5000;
@@ -127,7 +127,7 @@ TEST_CASE( "Sparse unmixing accepts a 1024-band, 256-atom dictionary", "[scale][
                 static_cast<float>( dictionary[static_cast<size_t>( a ) * bands + b] / norm );
     }
 
-    Config config;
+    SpectralSparseUnmixing::Config config;
     config.lambda = 0.01;
     Dictionary prepared;
     QString err;
@@ -176,7 +176,7 @@ TEST_CASE( "Diagonal local RX at 1024 bands matches the reference and is determi
                                         + sign * amplitude[static_cast<size_t>( b )] );
         }
 
-    Config config;
+    SpectralLocalRx::Config config;
     config.outerWindow = 5;
     config.innerWindow = 3;
     config.covarianceMode = CovarianceMode::Diagonal;
@@ -254,7 +254,7 @@ TEST_CASE( "Full covariance mode refuses absurd band counts instead of thrashing
     const int width = 3;
     const int height = 3;
     std::vector<float> pixels( static_cast<size_t>( width ) * height * bands, 0.5f );
-    Config config;
+    SpectralLocalRx::Config config;
     config.outerWindow = 3;
     config.innerWindow = 1;
     config.covarianceMode = CovarianceMode::Full;
