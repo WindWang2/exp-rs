@@ -156,6 +156,35 @@ ProductAssets enumerateCnProduct( const std::string &path, ProductKind kind,
     }
     result.notes["bands"] = "sidecar declares no BandID inventory";
   }
+  else if ( table.hasBandAxis || metadata.declaredBandIds.size() > 64 )
+  {
+    // Hyperspectral axis (ADR 0159): hundreds of declared bands aggregate
+    // into ONE measurement asset carrying the axis description — a
+    // per-band asset row would bury the report, not inform it.
+    if ( !tiffPath.empty() )
+    {
+      ProductAsset asset;
+      asset.path = tiffPath;
+      asset.role = "measurement";
+      asset.nativeBandName = baseNameOf( tiffPath );
+      result.assets.push_back( std::move( asset ) );
+    }
+    Json::Value axis( Json::objectValue );
+    axis["count"] = table.hasBandAxis ? table.bandAxisCount
+                                      : static_cast<int>( metadata.declaredBandIds.size() );
+    axis["declared_bands"] = static_cast<int>( metadata.declaredBandIds.size() );
+    if ( !table.bandAxisOrdering.empty() )
+      axis["ordering"] = table.bandAxisOrdering;
+    if ( !table.badBandIds.empty() )
+    {
+      Json::Value bad( Json::arrayValue );
+      for ( const std::string &badId : table.badBandIds )
+        bad.append( badId );
+      axis["bad_bands"] = bad;
+    }
+    result.notes["band_axis"] = axis;
+    result.notes["bands"] = "hyperspectral band axis aggregated into one measurement asset";
+  }
   else
   {
     for ( std::size_t i = 0; i < metadata.declaredBandIds.size(); ++i )
@@ -276,6 +305,26 @@ class CnAdapter final : public ProductAdapter
 std::unique_ptr<ProductAdapter> makeGaofenAdapter()
 {
   return std::make_unique<CnAdapter>( ProductKind::GaofenProduct, "gaofen_product" );
+}
+
+std::unique_ptr<ProductAdapter> makeGaofen3Adapter()
+{
+  return std::make_unique<CnAdapter>( ProductKind::Gaofen3SarProduct, "gaofen3_sar_product" );
+}
+
+std::unique_ptr<ProductAdapter> makeGaofen4Adapter()
+{
+  return std::make_unique<CnAdapter>( ProductKind::Gaofen4Product, "gaofen4_product" );
+}
+
+std::unique_ptr<ProductAdapter> makeGaofen5Adapter()
+{
+  return std::make_unique<CnAdapter>( ProductKind::Gaofen5Product, "gaofen5_product" );
+}
+
+std::unique_ptr<ProductAdapter> makeCbersAdapter()
+{
+  return std::make_unique<CnAdapter>( ProductKind::CbersProduct, "cbers_product" );
 }
 
 std::unique_ptr<ProductAdapter> makeZy3Adapter()

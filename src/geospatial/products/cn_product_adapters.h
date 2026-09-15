@@ -23,9 +23,13 @@ namespace sicnu::geo
 /// ProductAdapterRegistry (first-match ordering keeps them ahead of the
 /// GenericRaster fallback).
 std::unique_ptr<ProductAdapter> makeGaofenAdapter();
+std::unique_ptr<ProductAdapter> makeGaofen3Adapter();
+std::unique_ptr<ProductAdapter> makeGaofen4Adapter();
+std::unique_ptr<ProductAdapter> makeGaofen5Adapter();
 std::unique_ptr<ProductAdapter> makeZy3Adapter();
 std::unique_ptr<ProductAdapter> makeZy1Adapter();
 std::unique_ptr<ProductAdapter> makeHjAdapter();
+std::unique_ptr<ProductAdapter> makeCbersAdapter();
 
 } // namespace sicnu::geo
 

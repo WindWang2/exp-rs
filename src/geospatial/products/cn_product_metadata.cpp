@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <iterator>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -124,7 +125,9 @@ std::vector<std::string> listDirectoryBounded( const std::string &dir, int maxEn
 
 bool readFileText( const std::string &path, std::string &out )
 {
-  std::ifstream in( path, std::ios::binary );
+  // Open through the wide-char filesystem path: a narrow std::ifstream on
+  // Windows cannot address product directories with non-ANSI (Chinese) names.
+  std::ifstream in( fs::u8path( path ), std::ios::binary );
   if ( !in.is_open() )
     return false;
   std::ostringstream buffer;
@@ -387,6 +390,21 @@ const FamilyPattern kSupportedPatterns[] = {
   { "HJ1B-CCD", "HJ1B", "CCD", "hj_ccd", "hj_ccd_product" },
   { "HJ2A-CCD", "HJ2A", "CCD", "hj2_ccd", "hj_ccd_product" },
   { "HJ2B-CCD", "HJ2B", "CCD", "hj2_ccd", "hj_ccd_product" },
+  // ADR 0159 families: GF-3 SAR, GF-4 PMI, GF-5 AHSI, ZY-1 02B/02D/02E,
+  // CBERS-4 (INPE generation). Sensor keys mirror
+  // data/products/sensor_profiles/*.json (schema 2.0).
+  { "GF3_", "GF3", "SAR", "gf3", "gaofen3_sar_product" },
+  { "GF4_PMI", "GF4", "PMI", "gf4_pmi", "gaofen4_product" },
+  { "GF5_AHSI", "GF5", "AHSI", "gf5_ahsi", "gaofen5_product" },
+  { "ZY1_02B_CCD", "ZY1_02B", "CCD", "zy1_02b_ccd", "zy1_product" },
+  { "ZY1_02B_HR", "ZY1_02B", "HR", "zy1_02b_hr", "zy1_product" },
+  { "ZY1_02D_PMS", "ZY1_02D", "PMS", "zy1_02d_pms", "zy1_product" },
+  { "ZY1_02D_AHSI", "ZY1_02D", "AHSI", "zy1_02d_ahsi", "zy1_product" },
+  { "ZY1_02E_PMS", "ZY1_02E", "PMS", "zy1_02e_pms", "zy1_product" },
+  { "ZY1_02E_AHSI", "ZY1_02E", "AHSI", "zy1_02e_ahsi", "zy1_product" },
+  { "CBERS4_MUX", "CBERS4", "MUX", "cbers4_mux", "cbers_product" },
+  { "CBERS4_WFI", "CBERS4", "WFI", "cbers4_wfi", "cbers_product" },
+  { "CBERS4_PAN10", "CBERS4", "PAN10", "cbers4_pan10", "cbers_product" },
 };
 
 /// Reasons for CN-family names we deliberately refuse (DECISIONS D-01:
@@ -420,20 +438,16 @@ bool unsupportedFamilyReason( const std::string &upper, std::string &reason )
     reason = "only GF-7 FWD/BWD camera products are adapted; other GF-7 products are not";
     return true;
   }
-  if ( pathHas( "GF3_" ) || pathHas( "GF3-" ) )
-  {
-    reason = "Gaofen-3 (GF-3) is a SAR mission; only the GF optical families "
-             "GF-1/2/6 PMS/WFV and GF-7 FWD/BWD are adapted";
-    return true;
-  }
+  // GF-3 SAR and the GF-4 PMI / GF-5 AHSI sub-modes are adapted (patterns
+  // above); remaining GF-4/GF-5 payloads stay recognized-but-refused.
   if ( pathHas( "GF4_" ) || pathHas( "GF4-" ) )
   {
-    reason = "Gaofen-4 (GF-4) geostationary products are not adapted";
+    reason = "only GF-4 PMI products are adapted; GF-4 infrared/other payloads are not";
     return true;
   }
   if ( pathHas( "GF5_" ) || pathHas( "GF5-" ) )
   {
-    reason = "Gaofen-5 (GF-5) hyperspectral/AHSI products are not adapted";
+    reason = "only GF-5 AHSI hyperspectral products are adapted; VIMS/GMI/EMI/SATS payloads are not";
     return true;
   }
   // ZY-1 02C PMS/HRC is supported (checked above); the rest of the ZY-1
@@ -441,8 +455,8 @@ bool unsupportedFamilyReason( const std::string &upper, std::string &reason )
   if ( base.rfind( "ZY1", 0 ) == 0 || base.rfind( "ZY5", 0 ) == 0 ||
        upper.find( "ZY1_" ) != std::string::npos || upper.find( "ZY5_" ) != std::string::npos )
   {
-    reason = "only ZY-3 TLC/NAD/FWD/BWD and ZY-1 02C PMS/HRC products are adapted; "
-             "ZY-1 02B/02D/02E (AHSI) and ZY-5 are not";
+    reason = "only ZY-3 TLC/NAD/FWD/BWD; ZY-1 02C PMS/HRC, 02B CCD/HR and "
+             "02D/02E PMS/AHSI are adapted; other ZY-1 payloads (IRS) and ZY-5 are not";
     return true;
   }
   // HJ-2 (02 batch) CCD is supported (checked above); HJ-2 HSI/AIS stay refused.
@@ -458,9 +472,11 @@ bool unsupportedFamilyReason( const std::string &upper, std::string &reason )
     reason = "HJ-1A/1B IRS infrared camera products are not adapted; only CCD";
     return true;
   }
-  if ( base.rfind( "CBERS", 0 ) == 0 || upper.find( "CBERS_" ) != std::string::npos )
+  if ( base.rfind( "CBERS", 0 ) == 0 || upper.find( "CBERS_" ) != std::string::npos ||
+       upper.find( "CBERS4_" ) != std::string::npos || upper.find( "CBERS-" ) != std::string::npos )
   {
-    reason = "CBERS products are not adapted";
+    reason = "only CBERS-4 MUX/WFI/PAN10 products are adapted (INPE sidecar generation); "
+             "other CBERS missions and cameras are not";
     return true;
   }
   return false;
@@ -899,6 +915,420 @@ ProductMetadata parseCresdaXml( const std::string &xmlPath, const CnProductIdent
   return product;
 }
 
+// ─── GF-3 SAR sidecar parsing (ADR 0159) ────────────────────────────────────
+// Declared-metadata level only: identity, mode, polarizations, imaging time,
+// resolution, orbit, level and incidence angle. Numeric-domain stays
+// digital_number; sigma0 calibration constants are NOT invented here. The
+// polarization vocabulary is the four published SAR channels; anything else
+// is reported in parseDiagnostics, never silently dropped.
+
+/// Splits a declared polarization list ("HH/HV", "HH,HV", "HH HV") into the
+/// canonical uppercase channel tokens. Unknown tokens are returned separately
+/// so the caller can report them (bounded) — nothing is guessed away.
+void splitPolarizations( const std::string &text, std::vector<std::string> &channels,
+                         std::vector<std::string> &unknownTokens )
+{
+  static const char *kKnown[] = { "HH", "HV", "VH", "VV" };
+  std::string current;
+  auto flush = [ & ] {
+    if ( current.empty() )
+      return;
+    const std::string token = upperAscii( trimText( current ) );
+    current.clear();
+    if ( token.empty() )
+      return;
+    const bool known = std::find_if( std::begin( kKnown ), std::end( kKnown ),
+                                     [ & ] ( const char *k ) { return token == k; } ) !=
+                       std::end( kKnown );
+    const bool alreadyListed =
+      std::find( channels.begin(), channels.end(), token ) != channels.end();
+    if ( known && !alreadyListed )
+      channels.push_back( token );
+    else if ( !known && unknownTokens.size() < 8 &&
+              std::find( unknownTokens.begin(), unknownTokens.end(), token ) == unknownTokens.end() )
+      unknownTokens.push_back( token );
+  };
+  for ( const char c : text )
+  {
+    if ( c == ',' || c == '/' || c == ';' || c == '|' || c == '+' || c == ' ' || c == '\t' )
+      flush();
+    else
+      current += c;
+  }
+  flush();
+}
+
+ProductMetadata parseCresdaSarXml( const std::string &xmlPath, const CnProductIdentity &identity )
+{
+  const XmlPathScan scan = scanXmlPaths( xmlPath, {
+                                                    "productid",
+                                                    "satelliteid",
+                                                    "sensorid",
+                                                    "sensormode",
+                                                    "modeid",
+                                                    "productlevel",
+                                                    "receivetimedate",
+                                                    "receivedate",
+                                                    "receivetime",
+                                                    "centertime",
+                                                    "starttime",
+                                                    "stopdate",
+                                                    "stoptime",
+                                                    "orbitid",
+                                                    "orbitdirection",
+                                                    "pixelsizex",
+                                                    "pixelsizey",
+                                                    "groundresolution",
+                                                    "resolution",
+                                                    "imagegsd",
+                                                    "polarizations",
+                                                    "polarizationmode",
+                                                    "polarizationmodes",
+                                                    "polarization",
+                                                    "polmode",
+                                                    "incidenceangle",
+                                                    "beammode",
+                                                    "mapprojection",
+                                                    "mapzone",
+                                                  } );
+
+  if ( !looksLikeCresdaXml( scan ) )
+  {
+    Json::Value details;
+    details["xml"] = xmlPath;
+    throw GeoError( ErrorCode::UnsupportedProduct,
+                    "Sidecar does not declare a CRESDA product (no SatelliteID/ProductID)", details );
+  }
+
+  ProductMetadata product;
+  product.modality = "sar";
+  product.productId = scanText( scan, "productid" );
+  product.platform = upperAscii( scanText( scan, "satelliteid" ) );
+  if ( product.platform.empty() )
+    product.platform = identity.satellite;
+  product.sensor = scanText( scan, "sensorid" );
+  product.sensorMode = scanText( scan, "sensormode" );
+  if ( product.sensorMode.empty() )
+    product.sensorMode = scanText( scan, "modeid" );
+  if ( product.sensorMode.empty() )
+    product.sensorMode = identity.sensorMode;
+
+  product.processingLevel = scanText( scan, "productlevel" );
+  if ( product.processingLevel.empty() )
+  {
+    const std::string upperId = upperAscii( product.productId );
+    if ( upperId.find( "L1A" ) != std::string::npos )
+      product.processingLevel = "L1A";
+  }
+  // SAR L1A pixels are complex-derived detected/SLC samples — the product
+  // layer only ever stamps digital_number; radiometric terrain/sigma0 steps
+  // belong to the SAR kernels and restate the domain themselves.
+  if ( upperAscii( product.processingLevel ).find( "L1" ) != std::string::npos )
+    product.radiometricState = "digital_number";
+
+  product.acquisitionTime = normalizeAcquisitionTime( std::string(), scanText( scan, "centertime" ) );
+  if ( product.acquisitionTime.empty() )
+    product.acquisitionTime = normalizeAcquisitionTime( scanText( scan, "receivedate" ),
+                                                        scanText( scan, "receivetime" ) );
+  if ( product.acquisitionTime.empty() )
+    product.acquisitionTime = normalizeAcquisitionTime( scanText( scan, "receivetimedate" ), std::string() );
+  if ( product.acquisitionTime.empty() )
+    product.acquisitionTime = normalizeAcquisitionTime( std::string(), scanText( scan, "starttime" ) );
+
+  for ( const char *sizeTag : { "pixelsizex", "imagegsd", "groundresolution", "resolution" } )
+  {
+    const std::string sizeText = scanText( scan, sizeTag );
+    double parsed = 0.0;
+    if ( !sizeText.empty() && parseDouble( sizeText, parsed ) && parsed > 0.0 )
+    {
+      product.resolutionMeters = parsed;
+      product.hasResolution = true;
+      break;
+    }
+  }
+
+  // Declared polarizations, canonical tokens; unknown declared tokens are
+  // reported (bounded) in parseDiagnostics — never dropped, never guessed.
+  std::vector<std::string> unknownTokens;
+  for ( const char *tag : { "polarizations", "polarizationmodes", "polarizationmode", "polmode",
+                            "polarization" } )
+  {
+    const auto listIt = scan.listValues.find( tag );
+    if ( listIt == scan.listValues.end() )
+      continue;
+    for ( const std::string &declared : listIt->second )
+      splitPolarizations( declared, product.polarizations, unknownTokens );
+    if ( !product.polarizations.empty() )
+      break;
+  }
+
+  product.orbitId = scanText( scan, "orbitid" );
+  product.orbitDirection = upperAscii( scanText( scan, "orbitdirection" ) );
+  if ( product.orbitDirection != "ASCENDING" && product.orbitDirection != "DESCENDING" )
+    product.orbitDirection.clear();
+
+  const std::string mapProjection = scanText( scan, "mapprojection" );
+  if ( !mapProjection.empty() )
+  {
+    product.crsHint = mapProjection;
+    const std::string mapZone = scanText( scan, "mapzone" );
+    if ( !mapZone.empty() )
+      product.crsHint += " zone " + mapZone;
+  }
+
+  product.extra.emplace_back( "parsed_sidecar", baseNameOf( xmlPath ) );
+  const std::string modeId = upperAscii( scanText( scan, "modeid" ) );
+  if ( !modeId.empty() && product.extra.size() < 16 )
+    product.extra.emplace_back( "mode_id", modeId );
+  const std::string incidence = scanText( scan, "incidenceangle" );
+  if ( !incidence.empty() && product.extra.size() < 16 )
+    product.extra.emplace_back( "incidence_angle_deg", incidence );
+  const std::string beamMode = scanText( scan, "beammode" );
+  if ( !beamMode.empty() && product.extra.size() < 16 )
+    product.extra.emplace_back( "beam_mode", beamMode );
+
+  product.parseDiagnostics["generation"] = cresdaGeneration( scan.rootElement );
+  product.parseDiagnostics["root_element"] = scan.rootElement;
+  product.parseDiagnostics["sidecar"] = baseNameOf( xmlPath );
+  product.parseDiagnostics["unknown_top_level_elements"] = unknownTopLevelReport( scan );
+  if ( !unknownTokens.empty() )
+  {
+    Json::Value tokens( Json::arrayValue );
+    for ( const std::string &token : unknownTokens )
+      tokens.append( token );
+    product.parseDiagnostics["polarization_unknown_tokens"] = tokens;
+  }
+  return product;
+}
+
+// ─── CBERS INPE sidecar parsing (ADR 0159) ──────────────────────────────────
+// Third sidecar generation: CBERS products distributed in the INPE metadata
+// format. The schema never mixes with CRESDA: unknown roots are a typed
+// refusal (this generation is not documented well enough in-repo to be
+// lenient), declared fields are transported verbatim.
+
+ProductMetadata parseCbersInpeXml( const std::string &xmlPath, const CnProductIdentity &identity )
+{
+  const XmlPathScan scan = scanXmlPaths( xmlPath, {
+                                                    "productid",
+                                                    "identifier",
+                                                    "satellite",
+                                                    "satelliteid",
+                                                    "sensor",
+                                                    "sensorid",
+                                                    "instrument",
+                                                    "productlevel",
+                                                    "acquisitiondate",
+                                                    "acquisitiontime",
+                                                    "date",
+                                                    "receivedate",
+                                                    "receivetime",
+                                                    "centertime",
+                                                    "orbit",
+                                                    "orbitid",
+                                                    "path",
+                                                    "row",
+                                                    "resolution",
+                                                    "pixelsizex",
+                                                    "groundresolution",
+                                                    "imagegsd",
+                                                    "sunelevation",
+                                                    "sunzenith",
+                                                    "sunazimuth",
+                                                    "solarzenith",
+                                                    "solarazimuth",
+                                                    "projection",
+                                                    "mapprojection",
+                                                    "datum",
+                                                    "utmzone",
+                                                    "zone",
+                                                    "bands",
+                                                    "bandorder",
+                                                    "bandid",
+                                                    "cloudpercent",
+                                                    "cloudcoveragepercentage",
+                                                  } );
+
+  // Format guard: an INPE-metadata product declares at least one identity
+  // tag. Anything else is an unknown CBERS sidecar generation — refused,
+  // never guessed into CN semantics.
+  const bool declaresIdentity =
+    !scanText( scan, "satellite" ).empty() || !scanText( scan, "satelliteid" ).empty() ||
+    !scanText( scan, "sensor" ).empty() || !scanText( scan, "sensorid" ).empty() ||
+    !scanText( scan, "productid" ).empty() || !scanText( scan, "identifier" ).empty();
+  if ( !declaresIdentity )
+  {
+    Json::Value details;
+    details["xml"] = xmlPath;
+    details["root_element"] = scan.rootElement;
+    throw GeoError( ErrorCode::UnsupportedProduct,
+                    "Unknown CBERS sidecar generation (no satellite/sensor identity tags); "
+                    "refusing to guess",
+                    details );
+  }
+
+  ProductMetadata product;
+  product.modality = "optical";
+  product.productId = scanText( scan, "productid" );
+  if ( product.productId.empty() )
+    product.productId = scanText( scan, "identifier" );
+  product.platform = upperAscii( scanText( scan, "satellite" ) );
+  if ( product.platform.empty() )
+    product.platform = upperAscii( scanText( scan, "satelliteid" ) );
+  if ( product.platform.empty() )
+    product.platform = identity.satellite;
+  product.sensor = scanText( scan, "sensor" );
+  if ( product.sensor.empty() )
+    product.sensor = scanText( scan, "sensorid" );
+  if ( product.sensor.empty() )
+    product.sensor = scanText( scan, "instrument" );
+  product.sensorMode = product.sensor.empty() ? identity.sensorMode : product.sensor;
+  product.processingLevel = scanText( scan, "productlevel" );
+  if ( product.processingLevel.empty() &&
+       upperAscii( product.productId ).find( "L1" ) != std::string::npos )
+    product.processingLevel = "L1";
+  if ( upperAscii( product.processingLevel ).find( "L1" ) != std::string::npos )
+    product.radiometricState = "digital_number";
+
+  product.acquisitionTime = normalizeAcquisitionTime( scanText( scan, "acquisitiondate" ),
+                                                      scanText( scan, "acquisitiontime" ) );
+  if ( product.acquisitionTime.empty() )
+    product.acquisitionTime = normalizeAcquisitionTime( scanText( scan, "date" ), std::string() );
+  if ( product.acquisitionTime.empty() )
+    product.acquisitionTime = normalizeAcquisitionTime( scanText( scan, "receivedate" ),
+                                                        scanText( scan, "receivetime" ) );
+  if ( product.acquisitionTime.empty() )
+    product.acquisitionTime = normalizeAcquisitionTime( std::string(), scanText( scan, "centertime" ) );
+
+  for ( const char *sizeTag : { "resolution", "pixelsizex", "imagegsd", "groundresolution" } )
+  {
+    const std::string sizeText = scanText( scan, sizeTag );
+    double parsed = 0.0;
+    if ( !sizeText.empty() && parseDouble( sizeText, parsed ) && parsed > 0.0 )
+    {
+      product.resolutionMeters = parsed;
+      product.hasResolution = true;
+      break;
+    }
+  }
+
+  const std::string cloud = scanText( scan, "cloudpercent" ).empty()
+                              ? scanText( scan, "cloudcoveragepercentage" )
+                              : scanText( scan, "cloudpercent" );
+  if ( !cloud.empty() )
+  {
+    double parsed = 0.0;
+    if ( parseDouble( cloud, parsed ) )
+    {
+      product.cloudCover = parsed;
+      product.hasCloudCover = true;
+    }
+  }
+
+  // Sun geometry: elevation declared directly, or derived from the zenith
+  // with the derivation reported (same policy as the CRESDA optical parser).
+  std::string sunElevation = scanText( scan, "sunelevation" );
+  std::string sunElevationSource;
+  if ( sunElevation.empty() )
+  {
+    const std::string zenithText = scanText( scan, "solarzenith" ).empty()
+                                     ? scanText( scan, "sunzenith" )
+                                     : scanText( scan, "solarzenith" );
+    double zenith = 0.0;
+    if ( !zenithText.empty() && parseDouble( zenithText, zenith ) )
+    {
+      sunElevation = std::to_string( 90.0 - zenith );
+      sunElevationSource = "derived as 90 - declared solar zenith";
+    }
+  }
+  if ( !sunElevation.empty() )
+  {
+    double parsed = 0.0;
+    if ( parseDouble( sunElevation, parsed ) )
+    {
+      product.sunElevationDeg = parsed;
+      product.hasSunElevation = true;
+      if ( !sunElevationSource.empty() )
+      {
+        product.sunElevationSource = sunElevationSource;
+        putExtraOrThrow( product, "sun_elevation_source", sunElevationSource );
+      }
+    }
+  }
+  const std::string sunAzimuth = scanText( scan, "sunazimuth" ).empty()
+                                   ? scanText( scan, "solarazimuth" )
+                                   : scanText( scan, "sunazimuth" );
+  if ( !sunAzimuth.empty() )
+  {
+    double parsed = 0.0;
+    if ( parseDouble( sunAzimuth, parsed ) )
+    {
+      product.sunAzimuthDeg = parsed;
+      product.hasSunAzimuth = true;
+    }
+  }
+
+  const std::string projection = scanText( scan, "projection" ).empty()
+                                   ? scanText( scan, "mapprojection" )
+                                   : scanText( scan, "projection" );
+  if ( !projection.empty() )
+  {
+    product.crsHint = projection;
+    const std::string zone = scanText( scan, "utmzone" ).empty() ? scanText( scan, "zone" )
+                                                                 : scanText( scan, "utmzone" );
+    if ( !zone.empty() )
+      product.crsHint += " zone " + zone;
+  }
+
+  product.orbitId = scanText( scan, "orbit" ).empty() ? scanText( scan, "orbitid" )
+                                                      : scanText( scan, "orbit" );
+  const std::string pathText = scanText( scan, "path" );
+  const std::string rowText = scanText( scan, "row" );
+  if ( !pathText.empty() && !rowText.empty() && product.extra.size() < 16 )
+    product.extra.emplace_back( "path_row", pathText + "/" + rowText );
+
+  // Declared band inventory (comma list or repeated <BandID>), same
+  // normalization as the CRESDA optical parser.
+  const auto bandIdIt = scan.listValues.find( "bandid" );
+  if ( bandIdIt != scan.listValues.end() )
+  {
+    for ( const std::string &band : bandIdIt->second )
+      product.declaredBandIds.push_back( band );
+  }
+  if ( product.declaredBandIds.empty() )
+  {
+    for ( const char *tag : { "bands", "bandorder" } )
+    {
+      const std::string bandsText = scanText( scan, tag );
+      if ( bandsText.empty() )
+        continue;
+      std::istringstream stream( bandsText );
+      std::string item;
+      while ( std::getline( stream, item, ',' ) )
+      {
+        const std::string trimmed = trimText( item );
+        if ( trimmed.empty() )
+          continue;
+        char *endChar = nullptr;
+        const long index = std::strtol( trimmed.c_str(), &endChar, 10 );
+        if ( endChar && *endChar == '\0' && index > 0 )
+          product.declaredBandIds.push_back( "B" + std::to_string( index ) );
+        else
+          product.declaredBandIds.push_back( trimmed );
+      }
+      if ( !product.declaredBandIds.empty() )
+        break;
+    }
+  }
+
+  product.extra.emplace_back( "parsed_sidecar", baseNameOf( xmlPath ) );
+  product.parseDiagnostics["generation"] = "cbers_inpe_metadata";
+  product.parseDiagnostics["root_element"] = scan.rootElement;
+  product.parseDiagnostics["sidecar"] = baseNameOf( xmlPath );
+  product.parseDiagnostics["unknown_top_level_elements"] = unknownTopLevelReport( scan );
+  return product;
+}
+
 // ─── Sensor profile registry projection ─────────────────────────────────────
 // Since ADR 0147 the band→role truth lives in data/products/sensor_profiles/
 // (loaded by sensor_profile.cpp); this projects a profile onto the
@@ -930,6 +1360,14 @@ CnBandRoleTable profileToBandRoleTable( const SensorProfileRecord &profile )
       spec.wavelengthNm = band.wavelengthNm;
     }
     table.bands.push_back( std::move( spec ) );
+  }
+  table.hasBandAxis = profile.hasBandAxis;
+  table.bandAxisCount = profile.bandAxisCount;
+  table.bandAxisOrdering = profile.bandAxisOrdering;
+  for ( const int index : profile.badBandIndices )
+  {
+    if ( index >= 0 && index < static_cast<int>( profile.bands.size() ) )
+      table.badBandIds.push_back( profile.bands[static_cast<std::size_t>( index )].band );
   }
   return table;
 }
@@ -1148,6 +1586,11 @@ ProductMetadata readCnProductMetadata( const std::string &path, const CnProductI
     throw GeoError( ErrorCode::OpenFailed,
                     "No L1A sidecar XML found beside/inside the CN product path", details );
   }
+  // One sidecar generation per parser; the schema never mixes (ADR 0159).
+  if ( identity.kindName == "gaofen3_sar_product" )
+    return parseCresdaSarXml( xmlPath, identity );
+  if ( identity.kindName == "cbers_product" )
+    return parseCbersInpeXml( xmlPath, identity );
   return parseCresdaXml( xmlPath, identity );
 }
 

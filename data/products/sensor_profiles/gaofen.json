@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "source": "CRESDA/Gaofen published product specifications (GF-1/2/6/7). wavelength_nm prefers the published nominal band centre when documented (GF-1/GF-2 PMS centres match data/spectral/sensors.json 'gf-pms'); otherwise it is the spectral-range midpoint. center_wavelength_nm and fwhm_nm are stated only where a nominal band centre/FWHM is published. A range width is never a FWHM. GF-7 uses the published dual-line PMS camera layout (PAN 0.45-0.90 um; MS B1-B4).",
   "sensors": {
     "gf1_pms": {
@@ -9,14 +9,51 @@
       "modality": "optical",
       "gsd_m": 8.0,
       "pan_variant": "gf1_pms_pan",
-      "constituents": [ "sidecar_xml", "image_tiff", "rpc_rpb" ],
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff",
+        "rpc_rpb"
+      ],
       "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients; most batches publish per-date tables separately)",
       "qa_vocabulary": [],
       "bands": [
-        { "band": "B1", "role": "blue", "wavelength_nm": 485.0, "center_wavelength_nm": 485.0, "fwhm_nm": 70.0, "spectral_range_um": "0.45-0.52", "gsd_m": 8.0, "note": "multispectral 8 m" },
-        { "band": "B2", "role": "green", "wavelength_nm": 565.0, "center_wavelength_nm": 565.0, "fwhm_nm": 70.0, "spectral_range_um": "0.52-0.59", "gsd_m": 8.0 },
-        { "band": "B3", "role": "red", "wavelength_nm": 660.0, "center_wavelength_nm": 660.0, "fwhm_nm": 60.0, "spectral_range_um": "0.63-0.69", "gsd_m": 8.0 },
-        { "band": "B4", "role": "nir", "wavelength_nm": 830.0, "center_wavelength_nm": 830.0, "fwhm_nm": 120.0, "spectral_range_um": "0.77-0.89", "gsd_m": 8.0 }
+        {
+          "band": "B1",
+          "role": "blue",
+          "wavelength_nm": 485.0,
+          "center_wavelength_nm": 485.0,
+          "fwhm_nm": 70.0,
+          "spectral_range_um": "0.45-0.52",
+          "gsd_m": 8.0,
+          "note": "multispectral 8 m"
+        },
+        {
+          "band": "B2",
+          "role": "green",
+          "wavelength_nm": 565.0,
+          "center_wavelength_nm": 565.0,
+          "fwhm_nm": 70.0,
+          "spectral_range_um": "0.52-0.59",
+          "gsd_m": 8.0
+        },
+        {
+          "band": "B3",
+          "role": "red",
+          "wavelength_nm": 660.0,
+          "center_wavelength_nm": 660.0,
+          "fwhm_nm": 60.0,
+          "spectral_range_um": "0.63-0.69",
+          "gsd_m": 8.0
+        },
+        {
+          "band": "B4",
+          "role": "nir",
+          "wavelength_nm": 830.0,
+          "center_wavelength_nm": 830.0,
+          "fwhm_nm": 120.0,
+          "spectral_range_um": "0.77-0.89",
+          "gsd_m": 8.0
+        }
       ]
     },
     "gf1_pms_pan": {
@@ -26,11 +63,22 @@
       "modality": "optical",
       "gsd_m": 2.0,
       "ms_variant": "gf1_pms",
-      "constituents": [ "sidecar_xml", "image_tiff", "rpc_rpb" ],
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff",
+        "rpc_rpb"
+      ],
       "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
       "qa_vocabulary": [],
       "bands": [
-        { "band": "B1", "role": "panchromatic", "wavelength_nm": 675.0, "spectral_range_um": "0.45-0.90", "gsd_m": 2.0, "note": "panchromatic 2 m" }
+        {
+          "band": "B1",
+          "role": "panchromatic",
+          "wavelength_nm": 675.0,
+          "spectral_range_um": "0.45-0.90",
+          "gsd_m": 2.0,
+          "note": "panchromatic 2 m"
+        }
       ]
     },
     "gf1_wfv": {
@@ -39,14 +87,42 @@
       "sensor_mode": "WFV",
       "modality": "optical",
       "gsd_m": 16.0,
-      "constituents": [ "sidecar_xml", "image_tiff" ],
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff"
+      ],
       "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
       "qa_vocabulary": [],
       "bands": [
-        { "band": "B1", "role": "blue", "wavelength_nm": 485.0, "spectral_range_um": "0.45-0.52", "gsd_m": 16.0, "note": "16 m wide-field" },
-        { "band": "B2", "role": "green", "wavelength_nm": 560.0, "spectral_range_um": "0.52-0.60", "gsd_m": 16.0 },
-        { "band": "B3", "role": "red", "wavelength_nm": 660.0, "spectral_range_um": "0.63-0.69", "gsd_m": 16.0 },
-        { "band": "B4", "role": "nir", "wavelength_nm": 825.0, "spectral_range_um": "0.76-0.89", "gsd_m": 16.0 }
+        {
+          "band": "B1",
+          "role": "blue",
+          "wavelength_nm": 485.0,
+          "spectral_range_um": "0.45-0.52",
+          "gsd_m": 16.0,
+          "note": "16 m wide-field"
+        },
+        {
+          "band": "B2",
+          "role": "green",
+          "wavelength_nm": 560.0,
+          "spectral_range_um": "0.52-0.60",
+          "gsd_m": 16.0
+        },
+        {
+          "band": "B3",
+          "role": "red",
+          "wavelength_nm": 660.0,
+          "spectral_range_um": "0.63-0.69",
+          "gsd_m": 16.0
+        },
+        {
+          "band": "B4",
+          "role": "nir",
+          "wavelength_nm": 825.0,
+          "spectral_range_um": "0.76-0.89",
+          "gsd_m": 16.0
+        }
       ]
     },
     "gf2_pms": {
@@ -56,14 +132,51 @@
       "modality": "optical",
       "gsd_m": 4.0,
       "pan_variant": "gf2_pms_pan",
-      "constituents": [ "sidecar_xml", "image_tiff", "rpc_rpb" ],
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff",
+        "rpc_rpb"
+      ],
       "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
       "qa_vocabulary": [],
       "bands": [
-        { "band": "B1", "role": "blue", "wavelength_nm": 485.0, "center_wavelength_nm": 485.0, "fwhm_nm": 70.0, "spectral_range_um": "0.45-0.52", "gsd_m": 4.0, "note": "multispectral 4 m class" },
-        { "band": "B2", "role": "green", "wavelength_nm": 565.0, "center_wavelength_nm": 565.0, "fwhm_nm": 70.0, "spectral_range_um": "0.52-0.59", "gsd_m": 4.0 },
-        { "band": "B3", "role": "red", "wavelength_nm": 660.0, "center_wavelength_nm": 660.0, "fwhm_nm": 60.0, "spectral_range_um": "0.63-0.69", "gsd_m": 4.0 },
-        { "band": "B4", "role": "nir", "wavelength_nm": 830.0, "center_wavelength_nm": 830.0, "fwhm_nm": 120.0, "spectral_range_um": "0.77-0.89", "gsd_m": 4.0 }
+        {
+          "band": "B1",
+          "role": "blue",
+          "wavelength_nm": 485.0,
+          "center_wavelength_nm": 485.0,
+          "fwhm_nm": 70.0,
+          "spectral_range_um": "0.45-0.52",
+          "gsd_m": 4.0,
+          "note": "multispectral 4 m class"
+        },
+        {
+          "band": "B2",
+          "role": "green",
+          "wavelength_nm": 565.0,
+          "center_wavelength_nm": 565.0,
+          "fwhm_nm": 70.0,
+          "spectral_range_um": "0.52-0.59",
+          "gsd_m": 4.0
+        },
+        {
+          "band": "B3",
+          "role": "red",
+          "wavelength_nm": 660.0,
+          "center_wavelength_nm": 660.0,
+          "fwhm_nm": 60.0,
+          "spectral_range_um": "0.63-0.69",
+          "gsd_m": 4.0
+        },
+        {
+          "band": "B4",
+          "role": "nir",
+          "wavelength_nm": 830.0,
+          "center_wavelength_nm": 830.0,
+          "fwhm_nm": 120.0,
+          "spectral_range_um": "0.77-0.89",
+          "gsd_m": 4.0
+        }
       ]
     },
     "gf2_pms_pan": {
@@ -73,11 +186,22 @@
       "modality": "optical",
       "gsd_m": 1.0,
       "ms_variant": "gf2_pms",
-      "constituents": [ "sidecar_xml", "image_tiff", "rpc_rpb" ],
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff",
+        "rpc_rpb"
+      ],
       "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
       "qa_vocabulary": [],
       "bands": [
-        { "band": "B1", "role": "panchromatic", "wavelength_nm": 675.0, "spectral_range_um": "0.45-0.90", "gsd_m": 1.0, "note": "panchromatic 1 m class" }
+        {
+          "band": "B1",
+          "role": "panchromatic",
+          "wavelength_nm": 675.0,
+          "spectral_range_um": "0.45-0.90",
+          "gsd_m": 1.0,
+          "note": "panchromatic 1 m class"
+        }
       ]
     },
     "gf6_pms": {
@@ -87,14 +211,43 @@
       "modality": "optical",
       "gsd_m": 8.0,
       "pan_variant": "gf6_pms_pan",
-      "constituents": [ "sidecar_xml", "image_tiff", "rpc_rpb" ],
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff",
+        "rpc_rpb"
+      ],
       "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
       "qa_vocabulary": [],
       "bands": [
-        { "band": "B1", "role": "blue", "wavelength_nm": 485.0, "spectral_range_um": "0.45-0.52", "gsd_m": 8.0, "note": "multispectral 8 m" },
-        { "band": "B2", "role": "green", "wavelength_nm": 560.0, "spectral_range_um": "0.52-0.60", "gsd_m": 8.0 },
-        { "band": "B3", "role": "red", "wavelength_nm": 630.0, "spectral_range_um": "0.60-0.66", "gsd_m": 8.0 },
-        { "band": "B4", "role": "nir", "wavelength_nm": 830.0, "spectral_range_um": "0.76-0.90", "gsd_m": 8.0 }
+        {
+          "band": "B1",
+          "role": "blue",
+          "wavelength_nm": 485.0,
+          "spectral_range_um": "0.45-0.52",
+          "gsd_m": 8.0,
+          "note": "multispectral 8 m"
+        },
+        {
+          "band": "B2",
+          "role": "green",
+          "wavelength_nm": 560.0,
+          "spectral_range_um": "0.52-0.60",
+          "gsd_m": 8.0
+        },
+        {
+          "band": "B3",
+          "role": "red",
+          "wavelength_nm": 630.0,
+          "spectral_range_um": "0.60-0.66",
+          "gsd_m": 8.0
+        },
+        {
+          "band": "B4",
+          "role": "nir",
+          "wavelength_nm": 830.0,
+          "spectral_range_um": "0.76-0.90",
+          "gsd_m": 8.0
+        }
       ]
     },
     "gf6_pms_pan": {
@@ -104,11 +257,22 @@
       "modality": "optical",
       "gsd_m": 2.0,
       "ms_variant": "gf6_pms",
-      "constituents": [ "sidecar_xml", "image_tiff", "rpc_rpb" ],
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff",
+        "rpc_rpb"
+      ],
       "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
       "qa_vocabulary": [],
       "bands": [
-        { "band": "B1", "role": "panchromatic", "wavelength_nm": 675.0, "spectral_range_um": "0.45-0.90", "gsd_m": 2.0, "note": "panchromatic 2 m" }
+        {
+          "band": "B1",
+          "role": "panchromatic",
+          "wavelength_nm": 675.0,
+          "spectral_range_um": "0.45-0.90",
+          "gsd_m": 2.0,
+          "note": "panchromatic 2 m"
+        }
       ]
     },
     "gf6_wfv": {
@@ -117,20 +281,79 @@
       "sensor_mode": "WFV",
       "modality": "optical",
       "gsd_m": 16.0,
-      "constituents": [ "sidecar_xml", "image_tiff" ],
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff"
+      ],
       "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
       "qa_vocabulary": [],
       "bands": [
-        { "band": "B1", "role": "blue", "wavelength_nm": 485.0, "spectral_range_um": "0.45-0.52", "gsd_m": 16.0, "note": "MS1" },
-        { "band": "B2", "role": "green", "wavelength_nm": 555.0, "spectral_range_um": "0.52-0.59", "gsd_m": 16.0, "note": "MS2" },
-        { "band": "B3", "role": "red", "wavelength_nm": 660.0, "spectral_range_um": "0.63-0.69", "gsd_m": 16.0, "note": "MS3" },
-        { "band": "B4", "role": "nir", "wavelength_nm": 830.0, "spectral_range_um": "0.77-0.89", "gsd_m": 16.0, "note": "MS4" },
-        { "band": "B5", "role": "red_edge", "wavelength_nm": 710.0, "spectral_range_um": "0.69-0.73", "gsd_m": 16.0, "note": "MS5 red edge 1" },
-        { "band": "B6", "role": "red_edge", "wavelength_nm": 750.0, "spectral_range_um": "0.73-0.77", "gsd_m": 16.0, "note": "MS6 red edge 2" },
-        { "band": "B7", "role": "unknown", "wavelength_nm": 425.0, "spectral_range_um": "0.40-0.45", "gsd_m": 16.0,
-          "role_reason": "violet band: no canonical role in the ADR 0065 vocabulary", "note": "MS7 violet" },
-        { "band": "B8", "role": "unknown", "wavelength_nm": 610.0, "spectral_range_um": "0.59-0.63", "gsd_m": 16.0,
-          "role_reason": "yellow band: no canonical role in the ADR 0065 vocabulary", "note": "MS8 yellow" }
+        {
+          "band": "B1",
+          "role": "blue",
+          "wavelength_nm": 485.0,
+          "spectral_range_um": "0.45-0.52",
+          "gsd_m": 16.0,
+          "note": "MS1"
+        },
+        {
+          "band": "B2",
+          "role": "green",
+          "wavelength_nm": 555.0,
+          "spectral_range_um": "0.52-0.59",
+          "gsd_m": 16.0,
+          "note": "MS2"
+        },
+        {
+          "band": "B3",
+          "role": "red",
+          "wavelength_nm": 660.0,
+          "spectral_range_um": "0.63-0.69",
+          "gsd_m": 16.0,
+          "note": "MS3"
+        },
+        {
+          "band": "B4",
+          "role": "nir",
+          "wavelength_nm": 830.0,
+          "spectral_range_um": "0.77-0.89",
+          "gsd_m": 16.0,
+          "note": "MS4"
+        },
+        {
+          "band": "B5",
+          "role": "red_edge",
+          "wavelength_nm": 710.0,
+          "spectral_range_um": "0.69-0.73",
+          "gsd_m": 16.0,
+          "note": "MS5 red edge 1"
+        },
+        {
+          "band": "B6",
+          "role": "red_edge",
+          "wavelength_nm": 750.0,
+          "spectral_range_um": "0.73-0.77",
+          "gsd_m": 16.0,
+          "note": "MS6 red edge 2"
+        },
+        {
+          "band": "B7",
+          "role": "unknown",
+          "wavelength_nm": 425.0,
+          "spectral_range_um": "0.40-0.45",
+          "gsd_m": 16.0,
+          "role_reason": "violet band: no canonical role in the ADR 0065 vocabulary",
+          "note": "MS7 violet"
+        },
+        {
+          "band": "B8",
+          "role": "unknown",
+          "wavelength_nm": 610.0,
+          "spectral_range_um": "0.59-0.63",
+          "gsd_m": 16.0,
+          "role_reason": "yellow band: no canonical role in the ADR 0065 vocabulary",
+          "note": "MS8 yellow"
+        }
       ]
     },
     "gf7_fwd": {
@@ -139,14 +362,39 @@
       "sensor_mode": "FWD",
       "modality": "optical",
       "pan_variant": "gf7_fwd_pan",
-      "constituents": [ "sidecar_xml", "image_tiff", "rpc_rpb" ],
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff",
+        "rpc_rpb"
+      ],
       "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
       "qa_vocabulary": [],
       "bands": [
-        { "band": "B1", "role": "blue", "wavelength_nm": 485.0, "spectral_range_um": "0.45-0.52", "note": "forward camera multispectral" },
-        { "band": "B2", "role": "green", "wavelength_nm": 555.0, "spectral_range_um": "0.52-0.59" },
-        { "band": "B3", "role": "red", "wavelength_nm": 660.0, "spectral_range_um": "0.63-0.69" },
-        { "band": "B4", "role": "nir", "wavelength_nm": 830.0, "spectral_range_um": "0.77-0.89" }
+        {
+          "band": "B1",
+          "role": "blue",
+          "wavelength_nm": 485.0,
+          "spectral_range_um": "0.45-0.52",
+          "note": "forward camera multispectral"
+        },
+        {
+          "band": "B2",
+          "role": "green",
+          "wavelength_nm": 555.0,
+          "spectral_range_um": "0.52-0.59"
+        },
+        {
+          "band": "B3",
+          "role": "red",
+          "wavelength_nm": 660.0,
+          "spectral_range_um": "0.63-0.69"
+        },
+        {
+          "band": "B4",
+          "role": "nir",
+          "wavelength_nm": 830.0,
+          "spectral_range_um": "0.77-0.89"
+        }
       ]
     },
     "gf7_fwd_pan": {
@@ -155,11 +403,21 @@
       "sensor_mode": "FWD-PAN",
       "modality": "optical",
       "ms_variant": "gf7_fwd",
-      "constituents": [ "sidecar_xml", "image_tiff", "rpc_rpb" ],
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff",
+        "rpc_rpb"
+      ],
       "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
       "qa_vocabulary": [],
       "bands": [
-        { "band": "B1", "role": "panchromatic", "wavelength_nm": 675.0, "spectral_range_um": "0.45-0.90", "note": "forward camera panchromatic; stereo pair with BWD" }
+        {
+          "band": "B1",
+          "role": "panchromatic",
+          "wavelength_nm": 675.0,
+          "spectral_range_um": "0.45-0.90",
+          "note": "forward camera panchromatic; stereo pair with BWD"
+        }
       ]
     },
     "gf7_bwd": {
@@ -168,14 +426,39 @@
       "sensor_mode": "BWD",
       "modality": "optical",
       "pan_variant": "gf7_bwd_pan",
-      "constituents": [ "sidecar_xml", "image_tiff", "rpc_rpb" ],
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff",
+        "rpc_rpb"
+      ],
       "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
       "qa_vocabulary": [],
       "bands": [
-        { "band": "B1", "role": "blue", "wavelength_nm": 485.0, "spectral_range_um": "0.45-0.52", "note": "backward camera multispectral" },
-        { "band": "B2", "role": "green", "wavelength_nm": 555.0, "spectral_range_um": "0.52-0.59" },
-        { "band": "B3", "role": "red", "wavelength_nm": 660.0, "spectral_range_um": "0.63-0.69" },
-        { "band": "B4", "role": "nir", "wavelength_nm": 830.0, "spectral_range_um": "0.77-0.89" }
+        {
+          "band": "B1",
+          "role": "blue",
+          "wavelength_nm": 485.0,
+          "spectral_range_um": "0.45-0.52",
+          "note": "backward camera multispectral"
+        },
+        {
+          "band": "B2",
+          "role": "green",
+          "wavelength_nm": 555.0,
+          "spectral_range_um": "0.52-0.59"
+        },
+        {
+          "band": "B3",
+          "role": "red",
+          "wavelength_nm": 660.0,
+          "spectral_range_um": "0.63-0.69"
+        },
+        {
+          "band": "B4",
+          "role": "nir",
+          "wavelength_nm": 830.0,
+          "spectral_range_um": "0.77-0.89"
+        }
       ]
     },
     "gf7_bwd_pan": {
@@ -184,12 +467,1781 @@
       "sensor_mode": "BWD-PAN",
       "modality": "optical",
       "ms_variant": "gf7_bwd",
-      "constituents": [ "sidecar_xml", "image_tiff", "rpc_rpb" ],
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff",
+        "rpc_rpb"
+      ],
       "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
       "qa_vocabulary": [],
       "bands": [
-        { "band": "B1", "role": "panchromatic", "wavelength_nm": 675.0, "spectral_range_um": "0.45-0.90", "note": "backward camera panchromatic; stereo pair with FWD" }
+        {
+          "band": "B1",
+          "role": "panchromatic",
+          "wavelength_nm": 675.0,
+          "spectral_range_um": "0.45-0.90",
+          "note": "backward camera panchromatic; stereo pair with FWD"
+        }
       ]
+    },
+    "gf3": {
+      "satellite": "GF3",
+      "instrument": "SAR",
+      "sensor_mode": "SAR",
+      "modality": "sar",
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff",
+        "rpc_rpb"
+      ],
+      "calibration_rule": "declared L1A coefficients are transported verbatim; radiometric SAR calibration to sigma0 uses published per-mode constants and stays out of the product layer (digital_number domain)",
+      "qa_vocabulary": [],
+      "bands": [
+        {
+          "band": "B1",
+          "role": "unknown",
+          "role_reason": "SAR intensity band: the polarization (HH/HV/VH/VV) is declared by the sidecar, not encoded in the band axis",
+          "note": "single-polarization measurement TIFF; polarization comes from the sidecar"
+        }
+      ]
+    },
+    "gf4_pmi": {
+      "satellite": "GF4",
+      "instrument": "PMI",
+      "sensor_mode": "PMI",
+      "modality": "optical",
+      "gsd_m": 50.0,
+      "pan_variant": "gf4_pmi_pan",
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff"
+      ],
+      "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
+      "qa_vocabulary": [],
+      "bands": [
+        {
+          "band": "B1",
+          "role": "blue",
+          "wavelength_nm": 485.0,
+          "spectral_range_um": "0.45-0.52",
+          "gsd_m": 50.0,
+          "note": "geostationary 50 m multispectral"
+        },
+        {
+          "band": "B2",
+          "role": "green",
+          "wavelength_nm": 560.0,
+          "spectral_range_um": "0.52-0.60",
+          "gsd_m": 50.0
+        },
+        {
+          "band": "B3",
+          "role": "red",
+          "wavelength_nm": 660.0,
+          "spectral_range_um": "0.63-0.69",
+          "gsd_m": 50.0
+        },
+        {
+          "band": "B4",
+          "role": "nir",
+          "wavelength_nm": 830.0,
+          "spectral_range_um": "0.76-0.90",
+          "gsd_m": 50.0
+        }
+      ]
+    },
+    "gf4_pmi_pan": {
+      "satellite": "GF4",
+      "instrument": "PMI",
+      "sensor_mode": "PMI-PAN",
+      "modality": "optical",
+      "gsd_m": 50.0,
+      "ms_variant": "gf4_pmi",
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff"
+      ],
+      "calibration_rule": "radiance = DN * GainVal + OffsetVal (declared CRESDA L1A coefficients)",
+      "qa_vocabulary": [],
+      "bands": [
+        {
+          "band": "B1",
+          "role": "panchromatic",
+          "wavelength_nm": 675.0,
+          "spectral_range_um": "0.45-0.90",
+          "gsd_m": 50.0,
+          "note": "geostationary panchromatic"
+        }
+      ]
+    },
+    "gf5_ahsi": {
+      "satellite": "GF5",
+      "instrument": "AHSI",
+      "sensor_mode": "AHSI",
+      "modality": "hyperspectral",
+      "gsd_m": 30.0,
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff"
+      ],
+      "calibration_rule": "radiance = DN * gain + offset (declared coefficients transported verbatim; per-band response constants come from the batch table)",
+      "qa_vocabulary": [],
+      "bands": [
+        {
+          "band": "B1",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B2",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B3",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B4",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B5",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B6",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B7",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B8",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B9",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B10",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B11",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B12",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B13",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B14",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B15",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B16",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B17",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B18",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B19",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B20",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B21",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B22",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B23",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B24",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B25",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B26",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B27",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B28",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B29",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B30",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B31",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B32",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B33",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B34",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B35",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B36",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B37",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B38",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B39",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B40",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B41",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B42",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B43",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B44",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B45",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B46",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B47",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B48",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B49",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B50",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B51",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B52",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B53",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B54",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B55",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B56",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B57",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B58",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B59",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B60",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B61",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B62",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B63",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B64",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B65",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B66",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B67",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B68",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B69",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B70",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B71",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B72",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B73",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B74",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B75",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B76",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B77",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B78",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B79",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B80",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B81",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B82",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B83",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B84",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B85",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B86",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B87",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B88",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B89",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B90",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B91",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B92",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B93",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B94",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B95",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B96",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B97",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B98",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B99",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B100",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B101",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B102",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B103",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B104",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B105",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B106",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B107",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B108",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B109",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B110",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B111",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B112",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B113",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B114",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B115",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B116",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B117",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B118",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B119",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B120",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B121",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B122",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B123",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B124",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B125",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B126",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B127",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B128",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B129",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B130",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B131",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B132",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B133",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B134",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B135",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B136",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B137",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B138",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B139",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B140",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B141",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B142",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B143",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B144",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B145",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B146",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B147",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B148",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B149",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B150",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B151",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B152",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B153",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B154",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B155",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B156",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B157",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B158",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B159",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B160",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B161",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B162",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B163",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B164",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B165",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B166",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B167",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B168",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B169",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B170",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B171",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B172",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B173",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B174",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B175",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B176",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B177",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B178",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B179",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B180",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B181",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B182",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B183",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B184",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B185",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B186",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B187",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B188",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B189",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B190",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B191",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B192",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B193",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B194",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B195",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B196",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B197",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B198",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B199",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B200",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B201",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B202",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B203",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B204",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B205",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B206",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B207",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B208",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B209",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B210",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B211",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B212",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B213",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B214",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B215",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B216",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B217",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B218",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B219",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B220",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B221",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B222",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B223",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B224",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B225",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B226",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B227",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B228",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B229",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B230",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B231",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B232",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B233",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B234",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B235",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B236",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B237",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B238",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B239",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B240",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B241",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B242",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B243",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B244",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B245",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B246",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B247",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B248",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B249",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B250",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B251",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B252",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B253",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B254",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B255",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B256",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B257",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B258",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B259",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B260",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B261",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B262",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B263",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B264",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B265",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B266",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B267",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B268",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B269",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B270",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B271",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B272",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B273",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B274",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B275",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B276",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B277",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B278",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B279",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B280",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B281",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B282",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B283",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B284",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B285",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B286",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B287",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B288",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B289",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B290",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B291",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B292",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B293",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B294",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B295",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B296",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B297",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B298",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B299",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B300",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B301",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B302",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B303",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B304",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B305",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B306",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B307",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B308",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B309",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B310",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B311",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B312",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B313",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B314",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B315",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B316",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B317",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B318",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B319",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B320",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B321",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B322",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B323",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B324",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B325",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B326",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B327",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B328",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B329",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        },
+        {
+          "band": "B330",
+          "role": "unknown",
+          "role_reason": "AHSI band axis: per-band centre wavelengths/FWHM come from the batch's published spectral response table and are transported from the product's own metadata when declared; the registry does not fabricate them"
+        }
+      ],
+      "band_axis": {
+        "count": 330,
+        "ordering": "B1..B150 VNIR ascending wavelength (0.40-1.0 um); B151..B330 SWIR ascending wavelength (1.0-2.5 um)"
+      }
     }
   }
 }

@@ -48,6 +48,9 @@ struct CnBandSpec
 };
 
 /// Band-role view of a sensor profile (registry-backed since ADR 0147).
+/// Hyperspectral entries (v2 `band_axis`) carry the axis description so the
+/// import path can aggregate hundreds of declared bands into one measurement
+/// asset with an explicit axis, instead of one asset row per band.
 struct CnBandRoleTable
 {
     std::string sensorKey;     ///< "gf1_pms", "gf6_wfv", "zy3_nad_ms", ...
@@ -55,6 +58,10 @@ struct CnBandRoleTable
     std::string sensorMode;    ///< "PMS", "WFV", "NAD", "CCD", ...
     std::string source;        ///< provenance note carried by the registry
     std::vector<CnBandSpec> bands;
+    bool hasBandAxis = false;              ///< v2 band_axis declared
+    int bandAxisCount = 0;                 ///< == bands.size() when declared
+    std::string bandAxisOrdering;          ///< declared ordering, verbatim
+    std::vector<std::string> badBandIds;   ///< flagged/dead band ids
 };
 
 /// Loads the band-role view of a sensor profile. Throws GeoError(OpenFailed)

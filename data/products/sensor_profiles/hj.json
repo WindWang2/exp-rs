@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "source": "HJ-1A/1B CCD and HJ-2A/B CCD published product specifications. wavelength_nm is the documented spectral-range midpoint (aligned with CRESDA ranges); FWHM is not published here and therefore not stated.",
   "sensors": {
     "hj_ccd": {
