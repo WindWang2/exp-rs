@@ -69,3 +69,40 @@ Local evidence only; no online CI dependency. Each claim: command + exit code.
 - A foreign build process (test_edit_session/sicnu_geo_rs) was observed running in this
   worktree's build-dev during Phase 6; all builds were serialized after it finished and the
   targeted gates re-run clean.
+
+## Phase 5/6/7 — test evidence (local only, no online CI)
+
+Build entry: `cmake --preset dev-default` + offline knobs
+(`-DSICNU_LAB_SKIP_PYTHON_BINDINGS=ON -DFETCHCONTENT_SOURCE_DIR_CATCH2=…`,
+host-network workaround, exit 0). Final target build:
+`cmake --build build-dev --target test_solar_geometry test_radiometric_transition
+test_atmospheric_provider test_brdf_normalization test_radiometric_qa -j2` → exit 0.
+
+Double gate (Oracle #5, after the final rebase, consecutive runs):
+
+```
+ctest -R "test_solar_geometry::|test_radiometric_transition::|test_atmospheric_provider::|test_brdf_normalization::|test_radiometric_qa::" -j1
+PASS 1: 100% tests passed out of 49
+PASS 2: 100% tests passed out of 49
+```
+
+Regression (master's neighboring suites, run directly, QT_QPA_PLATFORM=offscreen):
+
+```
+test_atmospheric:             All tests passed (37486 assertions in 40 test cases)
+test_radiometric_calibration: All tests passed (195688 assertions in 27 test cases)
+test_topographic_correction:  All tests passed (496 assertions in 7 test cases)
+test_qa_mask:                 All tests passed (117 assertions in 8 test cases)
+test_satellite_products:      All tests passed (479 assertions in 20 test cases)
+```
+
+not-executed (with reason): `test_spatial_contracts` — links `sicnu_agent`, which does not
+compile on a fresh master checkout for a reason unrelated to this diff (see OUT_OF_SCOPE);
+this track's changes do not depend on it and its exclusion is not used to claim any
+radiometric capability.
+
+Hygiene: `git diff --check origin/master...HEAD` → exit 0; conflict-marker scan clean
+(the `src/native/README.md` grep hit is a pre-existing Markdown setext underline, not a
+conflict marker, and is not in this diff); secret scan hits are GOAL-checklist text only;
+zero generated artifacts/build outputs in the diff (43 files, +5437/−0 lines before the
+final planning-artifact commits).
