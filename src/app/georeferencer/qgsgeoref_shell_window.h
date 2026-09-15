@@ -3,6 +3,7 @@
 #include <QMainWindow>
 #include <QPointer>
 #include <memory>
+#include <optional>
 
 #include "qgsgcppoint.h"
 #include "qgspointxy.h"
@@ -217,9 +218,13 @@ class QgsGeorefShellWindow : public QMainWindow
     void updateApplyEnabled();
     /// Keep Add-GCP tools armed on both canvases (no shared QAction on tools).
     void rearmAddPointTools();
-    /// Convert canvas map pick into the raster layer's CRS (avoids CRS mix-ups).
-    QgsPointXY mapPickToLayerCrs( QgsMapCanvas *canvas, QgsRasterLayer *layer,
-                                  const QgsPointXY &canvasMapPt ) const;
+    /// Convert canvas map pick into the raster layer's CRS. Fails closed
+    /// (#1005): when the canvas/layer pair or either CRS is invalid, or the
+    /// transform throws, returns std::nullopt instead of the untransformed
+    /// canvas coordinate — callers must not commit a silently wrong GCP.
+    /// Delegates to rsGeorefTransformPickBetweenCrs().
+    std::optional<QgsPointXY> mapPickToLayerCrs( QgsMapCanvas *canvas, QgsRasterLayer *layer,
+                                                 const QgsPointXY &canvasMapPt ) const;
     /// Push source/dest raster paths into GCP table for col/row display.
     void updateGcpTableRasterPaths();
     /// Main app map canvas for I2M "from map" pick (may be null in tests).

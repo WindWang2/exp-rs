@@ -1,4 +1,5 @@
 #include "qgsgeoref_shell_window.h"
+#include "rs_georef_crs_pick.h"
 #include "rs_georef_flowchart_widget.h"
 #include <QMainWindow>
 
@@ -805,29 +806,19 @@ void QgsGeorefShellWindow::rearmAddPointTools()
     mDstCanvas->setMapTool( mAddPointToolDst );
 }
 
-QgsPointXY QgsGeorefShellWindow::mapPickToLayerCrs( QgsMapCanvas *canvas, QgsRasterLayer *layer,
-                                                     const QgsPointXY &canvasMapPt ) const
+std::optional<QgsPointXY> QgsGeorefShellWindow::mapPickToLayerCrs( QgsMapCanvas *canvas, QgsRasterLayer *layer,
+                                                                    const QgsPointXY &canvasMapPt ) const
 {
   if ( !canvas || !layer || !layer->isValid() )
-    return canvasMapPt;
+    return std::nullopt;
 
   const QgsCoordinateReferenceSystem canvasCrs = canvas->mapSettings().destinationCrs();
   const QgsCoordinateReferenceSystem layerCrs = layer->crs();
-  if ( !canvasCrs.isValid() || !layerCrs.isValid() || canvasCrs == layerCrs )
-    return canvasMapPt;
-
-  try
-  {
-    const QgsCoordinateTransform ct(
-      canvasCrs, layerCrs,
-      QgsProject::instance() ? QgsProject::instance()->transformContext()
-                             : QgsCoordinateTransformContext() );
-    return ct.transform( canvasMapPt );
-  }
-  catch ( ... )
-  {
-    return canvasMapPt;
-  }
+  return rsGeorefTransformPickBetweenCrs(
+    canvasCrs, layerCrs,
+    QgsProject::instance() ? QgsProject::instance()->transformContext()
+                           : QgsCoordinateTransformContext(),
+    canvasMapPt );
 }
 
 void QgsGeorefShellWindow::updateGcpTableRasterPaths()
@@ -1844,15 +1835,23 @@ void QgsGeorefShellWindow::commitGcpPair( const QgsPointXY &sourceMap, const Qgs
 void QgsGeorefShellWindow::onSourcePointPicked( const QgsPointXY &sourceMap )
 {
   // Normalize into the source layer CRS so stored map coords match the image.
-  const QgsPointXY layerMap = mapPickToLayerCrs( mSrcCanvas, mSrcRaster, sourceMap );
-  if ( usesMapCoordsDialogForGcp() )
+  const std::optional<QgsPointXY> layerMap = mapPickToLayerCrs( mSrcCanvas, mSrcRaster, sourceMap );
+  if ( !layerMap.has_value() )
   {
-    // QGIS-style I2M: dialog for typed map X/Y or pick from main window map.
-    showCoordDialog( layerMap );
+    // Fail closed (#1005): never turn an untransformable pick into a GCP.
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "Cannot map the picked point into the layer CRS — GCP not added" ), 6000 );
     rearmAddPointTools();
     return;
   }
-  beginPendingSourcePick( layerMap );
+  if ( usesMapCoordsDialogForGcp() )
+  {
+    // QGIS-style I2M: dialog for typed map X/Y or pick from main window map.
+    showCoordDialog( *layerMap );
+    rearmAddPointTools();
+    return;
+  }
+  beginPendingSourcePick( *layerMap );
 }
 
 void QgsGeorefShellWindow::onDestPointPicked( const QgsPointXY &destMap )
@@ -1865,9 +1864,16 @@ void QgsGeorefShellWindow::onDestPointPicked( const QgsPointXY &destMap )
     return;
   }
   // Normalize REF/Map pick into the destination raster CRS when available.
-  const QgsPointXY layerMap = mapPickToLayerCrs( mDstCanvas, mDstRaster, destMap );
+  const std::optional<QgsPointXY> layerMap = mapPickToLayerCrs( mDstCanvas, mDstRaster, destMap );
+  if ( !layerMap.has_value() )
+  {
+    if ( statusBar() )
+      statusBar()->showMessage( tr( "Cannot map the picked point into the layer CRS — GCP not added" ), 6000 );
+    rearmAddPointTools();
+    return;
+  }
   const QgsPointXY src = mPendingSource;
-  commitGcpPair( src, layerMap );
+  commitGcpPair( src, *layerMap );
 }
 
 QgsMapCanvas *QgsGeorefShellWindow::mainApplicationMapCanvas() const

@@ -8,6 +8,7 @@
 #include "temporal_workspace_tools.h"
 #include "raster_inspect_tool.h"
 #include "vector_inspect_tool.h"
+#include "geometric_spatial_tool.h"
 #include "workspace_tools.h"
 #include "governance_tools.h"
 #include "sample_tools.h"
@@ -224,6 +225,8 @@ void SpatialToolRegistry::registerBuiltinTools()
   static const std::vector<SpatialToolPtr> kBuiltinTools = {
     std::make_shared<RasterInspectTool>(),
     std::make_shared<VectorInspectTool>(),
+    // F13: geometric registration surface (D14 tool finally cataloged).
+    std::make_shared<GeometricSpatialTool>(),
     std::make_shared<ModelCatalogTool>(),
     std::make_shared<TemporalCreateCollectionTool>(),
     std::make_shared<TemporalDescribeCollectionTool>(),

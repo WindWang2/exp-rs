@@ -1,0 +1,74 @@
+[
+ {
+  "id": "family:geometric",
+  "kind": "family_default",
+  "family": "geometric",
+  "modality": [
+   "optical",
+   "sar",
+   "thermal"
+  ],
+  "resource": {
+   "cost_class": "medium",
+   "large_raster_safe": true
+  },
+  "side_effects": false,
+  "verification": {
+   "expected_kind": "raster",
+   "checks": [
+    "existence",
+    "opens",
+    "crs_present",
+    "dimensions"
+   ]
+  },
+  "limitations": [
+   "Registration products inherit upstream georeferencing uncertainty; verify against the reference grid, not the source grid",
+   "Cross-modal matching evidence depends on scene structure; refusals are expected on flat or structure-free scenes"
+  ]
+ },
+ {
+  "id": "rs:register_images",
+  "family": "geometric",
+  "extends": "family:geometric",
+  "intents": [
+   "preprocess",
+   "accuracy"
+  ],
+  "modality": [
+   "optical",
+   "sar"
+  ],
+  "limitations": [
+   "Refusals write no output; low_confidence outputs are flagged and need review before geometric use",
+   "Coverage is measured over the full source extent: partial-overlap scenes score lower by design",
+   "Band 1 only; window-based matcher, not a general keypoint detector"
+  ]
+ },
+ {
+  "id": "rs:stack_register",
+  "family": "geometric",
+  "extends": "family:geometric",
+  "intents": [
+   "preprocess",
+   "accuracy"
+  ],
+  "modality": [
+   "optical",
+   "sar"
+  ],
+  "limitations": [
+   "Global translation adjustment only; per-pair affine stays in rs:register_images and no bundle adjustment is performed",
+   "Disconnected scenes are reported, not solved; large edge residuals mean the pair graph disagrees with itself"
+  ]
+ },
+ {
+  "id": "spatial:geometric_registration",
+  "family": "geometric",
+  "extends": "family:geometric",
+  "surface": "spatial_tool",
+  "limitations": [
+   "Read-only evidence surface: multimodal tie points, model-selection evidence, and stack adjustment; products are written by the rs: operators"
+  ]
+ }
+]
