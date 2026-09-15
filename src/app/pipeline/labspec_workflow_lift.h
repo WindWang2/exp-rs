@@ -1,4 +1,4 @@
-// src/app/pipeline/labspec_workflow_lift.h — LabSpec 1.0 -> WorkflowDefinition 2.0 (D17)
+// src/app/pipeline/labspec_workflow_lift.h — LabSpec 1.0 -> WorkflowDocument 2.0 (D17)
 #pragma once
 
 //
@@ -6,7 +6,7 @@
 // runner: operator-bound steps become lab-step nodes wired in document
 // order; UI-verb / manual steps attach their guidance to the nearest
 // operator step (forward when none seen yet). Lab projections land in
-// WorkflowDefinition.metadata["labSteps"][nodeId].
+// WorkflowDocument.metadata["labSteps"][nodeId].
 //
 
 #include "../widgets/lab_spec_loader.h"
@@ -14,6 +14,6 @@
 
 namespace sicnu::app::pipeline {
 
-sicnu::workflow::WorkflowDefinition liftLabSpecToWorkflow( const lab::LabSpec &spec );
+sicnu::workflow::WorkflowDocument liftLabSpecToWorkflow( const lab::LabSpec &spec );
 
 } // namespace sicnu::app::pipeline

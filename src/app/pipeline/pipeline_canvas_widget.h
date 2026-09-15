@@ -1,4 +1,4 @@
-// src/app/pipeline/pipeline_canvas_widget.h — node-graph view over WorkflowDefinition (D17)
+// src/app/pipeline/pipeline_canvas_widget.h — node-graph view over WorkflowDocument (D17)
 #pragma once
 
 #include <QGraphicsView>
@@ -9,7 +9,7 @@ namespace sicnu::app::pipeline {
 
 class PipelineScene;
 
-/// The designer canvas: QGraphicsView bound to WorkflowDefinition 2.0.
+/// The designer canvas: QGraphicsView bound to WorkflowDocument 2.0.
 /// loadWorkflow projects the document onto graphics items; exportWorkflow
 /// projects item geometry back. The document is the single source of truth.
 /// Zoom is clamped to [0.2, 3.0]; rendering uses DeviceCoordinateCache +
@@ -22,8 +22,8 @@ class PipelineCanvasWidget : public QGraphicsView
     explicit PipelineCanvasWidget( QWidget *parent = nullptr );
     ~PipelineCanvasWidget() override;
 
-    void loadWorkflow( const sicnu::workflow::WorkflowDefinition &def );
-    sicnu::workflow::WorkflowDefinition exportWorkflow() const;
+    void loadWorkflow( const sicnu::workflow::WorkflowDocument &def );
+    sicnu::workflow::WorkflowDocument exportWorkflow() const;
 
     void setZoomLevel( qreal factor ); // clamped to [0.2, 3.0]
     qreal zoomLevel() const;
@@ -39,7 +39,7 @@ class PipelineCanvasWidget : public QGraphicsView
 
   private:
     PipelineScene *m_scene = nullptr;
-    sicnu::workflow::WorkflowDefinition m_lastLoaded;
+    sicnu::workflow::WorkflowDocument m_lastLoaded;
 };
 
 } // namespace sicnu::app::pipeline

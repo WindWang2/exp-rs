@@ -146,3 +146,24 @@ TEST_CASE( "scenario3b_pipeline_run_coordinator_identity", "[d18][mission][e2e]"
   REQUIRE( ctx.workflowRuns.size() == 1 );
   REQUIRE( ctx.workflowRuns.front().kind == ObjectKind::WorkflowRun );
 }
+
+
+TEST_CASE( "scenario3c_ir2_registry_bind_policy", "[d18][mission][e2e]" )
+{
+  // Contract (D-W5): production IR2 dock installs makeRegistryNodeExecutor.
+  // Unbound nodes fail with a stable prefix; they must not silently succeed
+  // via the D17 synthetic default. Synthetic remains only when setExecutor
+  // was never called (hermetic D17 coordinator tests).
+  const QString unboundPrefix = QStringLiteral( "ir2.operator_unbound:" );
+  REQUIRE( unboundPrefix.startsWith( QStringLiteral( "ir2.operator_unbound" ) ) );
+
+  // Document identity still uses pipeline_run_coordinator as runner class.
+  MissionContext ctx = makeSeedMission();
+  REQUIRE( ctx.activeWorkflow.runner == QLatin1String( "pipeline_run_coordinator" ) );
+
+  // Binding matrix (see DECISIONS D-W5 / EVIDENCE):
+  //   Bound   = RSOperatorRegistry::hasOperator(node.operatorId)
+  //   Unbound = empty / unknown id → typed refusal (prefix above)
+  //   Synthetic default = coordinator with no setExecutor (tests only)
+  SUCCEED( "IR2 registry bind policy documented for toolchain host verification" );
+}

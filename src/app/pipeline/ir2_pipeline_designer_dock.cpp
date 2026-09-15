@@ -1,6 +1,8 @@
 #include "app/pipeline/ir2_pipeline_designer_dock.h"
 #include "app/pipeline/labspec_workflow_lift.h"
 
+#include "workflow/ir2_registry_node_executor.h"
+
 #include "widgets/lab_spec_loader.h"
 
 #include <QDir>
@@ -20,6 +22,10 @@ Ir2PipelineDesignerDock::Ir2PipelineDesignerDock( QWidget *parent )
     : QDockWidget( parent )
     , m_coordinator( new sicnu::workflow::PipelineRunCoordinator( this ) )
 {
+    // D18: bind RSOperatorRegistry (typed refusal when unbound). Do not leave
+    // the D17 synthetic default active on the production dock path.
+    m_coordinator->setExecutor( sicnu::workflow::makeRegistryNodeExecutor() );
+
     setObjectName( QStringLiteral( "Ir2PipelineDesignerDock" ) );
     setWindowTitle( tr( "Workflow Designer (IR 2.0)" ) );
     setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea | Qt::BottomDockWidgetArea );
@@ -51,7 +57,7 @@ Ir2PipelineDesignerDock::Ir2PipelineDesignerDock( QWidget *parent )
     m_runStatusLabel = new QLabel( host );
     m_runStatusLabel->setObjectName( QStringLiteral( "ir2RunStatus" ) );
     m_runStatusLabel->setWordWrap( true );
-    m_runStatusLabel->setText( tr( "Idle — Run starts PipelineRunCoordinator on this document." ) );
+    m_runStatusLabel->setText( tr( "Idle — Run uses PipelineRunCoordinator + operator registry (unbound nodes refuse)." ) );
     layout->addWidget( m_runStatusLabel );
 
     m_canvas = new PipelineCanvasWidget( host );

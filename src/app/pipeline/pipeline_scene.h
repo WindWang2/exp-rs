@@ -16,7 +16,7 @@ class PipelineConnectionItem;
 
 /// Owns node/port/connection graphics and the interactive wiring state.
 /// The document itself stays OUTSIDE the scene: the canvas widget projects
-/// WorkflowDefinition -> items and items -> WorkflowDefinition.
+/// WorkflowDocument -> items and items -> WorkflowDocument.
 class PipelineScene : public QGraphicsScene
 {
     Q_OBJECT

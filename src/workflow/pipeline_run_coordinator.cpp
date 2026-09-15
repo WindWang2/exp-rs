@@ -126,8 +126,9 @@ QString atomicWriteJson( const QString &path, const QJsonObject &document )
     return path;
 }
 
-/// Deterministic default executor: derives a small artifact whose content is
-/// a function of the node signature — same node + same inputs => same bytes.
+/// Deterministic default executor (D17 hermetic tests): artifact bytes are a
+/// function of the node signature. Production IR2 dock installs
+/// makeRegistryNodeExecutor() instead — see ir2_registry_node_executor.h.
 NodeExecutionResult syntheticExecute( const NodeFact &node, const QHash<QString, QString> &inputArtifacts,
                                       const QString &runDirectory )
 {
@@ -180,7 +181,7 @@ QString executionStateString( ExecutionState state )
 
 struct PipelineRunCoordinator::RunState
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     QString runDirectory;
     QString runId;
     QString checkpointPath;
@@ -241,7 +242,7 @@ QMap<QString, NodeStatusSnapshot> PipelineRunCoordinator::getAllStatuses() const
     return map;
 }
 
-bool PipelineRunCoordinator::startRun( const WorkflowDefinition &def, const QString &runDirectory, QString *outError )
+bool PipelineRunCoordinator::startRun( const WorkflowDocument &def, const QString &runDirectory, QString *outError )
 {
     auto fail = [outError]( const QString &message ) {
         if ( outError )
@@ -635,7 +636,7 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
     // (Succeeded) parents release their children immediately, otherwise a
     // fully-cached prefix would stall the resumed frontier. Document order
     // of the checkpoint array is irrelevant.
-    const WorkflowDefinition &resumedDef = m_state->def;
+    const WorkflowDocument &resumedDef = m_state->def;
     for ( const NodeFact &node : resumedDef.nodes )
     {
         int parents = 0;

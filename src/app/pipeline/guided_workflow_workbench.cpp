@@ -12,7 +12,7 @@
 
 namespace sicnu::app::workbench {
 namespace {
-// Lab projections live in WorkflowDefinition.metadata["labSteps"][nodeId].
+// Lab projections live in WorkflowDocument.metadata["labSteps"][nodeId].
 constexpr const char *kLabStepsKey = "labSteps";
 constexpr const char *kStepFlag = "is_lab_step";
 constexpr const char *kStepTitle = "title";
@@ -42,7 +42,7 @@ class DepthGuard
     bool m_active;
 };
 
-QJsonObject labStepEntry( const sicnu::workflow::WorkflowDefinition &def, const QString &nodeId )
+QJsonObject labStepEntry( const sicnu::workflow::WorkflowDocument &def, const QString &nodeId )
 {
     return def.metadata.value( QLatin1String( kLabStepsKey ) ).toObject().value( nodeId ).toObject();
 }
@@ -64,11 +64,11 @@ bool GuidedWorkflowWidget::loadLabSpec( const QString &labSpecJsonPath )
         m_loadError = error.toString();
         return false;
     }
-    // Shared LabSpec -> WorkflowDefinition lift (also used by the E2E runner).
+    // Shared LabSpec -> WorkflowDocument lift (also used by the E2E runner).
     return setUnderlyingWorkflow( sicnu::app::pipeline::liftLabSpecToWorkflow( spec ) );
 }
 
-bool GuidedWorkflowWidget::setUnderlyingWorkflow( const sicnu::workflow::WorkflowDefinition &def )
+bool GuidedWorkflowWidget::setUnderlyingWorkflow( const sicnu::workflow::WorkflowDocument &def )
 {
     if ( !sicnu::workflow::WorkflowIR::validateSemantics( def ) )
     {
