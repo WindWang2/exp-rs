@@ -27,6 +27,7 @@
 
 #include "local_worker_host.h"
 #include "runtime/observability/execution_telemetry.h"
+#include "runtime/worker/worker_lease.h"
 #include "worker_process_guard.h"
 #include "worker_process_io.h"
 
@@ -70,6 +71,12 @@ struct WorkerPoolHealthSnapshot
     qint64 totalTimeouts = 0;
     qint64 totalCancels = 0;
     qint64 totalRecycles = 0;
+    /// CUMULATIVE quarantine episodes from the lease/poison tracker
+    /// (execution 11.0): each worker whose consecutive-failure streak hit
+    /// the threshold counts once; it is retired on its next idle scan and
+    /// never reused (a gauge of live-quarantined workers is not meaningful
+    /// — quarantined workers do not stay in the pool).
+    qint64 quarantinedWorkers = 0;
     bool healthy() const { return configuredMax <= 0 || aliveWorkers <= configuredMax; }
 };
 
@@ -122,6 +129,9 @@ class LocalWorkerPool
         qint64 startedMs = 0;
         qint64 lastUsedMs = 0;
         qint64 jobsDone = 0;
+        /// Lease-tracker identity (execution 11.0): "worker-<n>", stable for
+        /// the process lifetime; liveness/poison verdicts key on it.
+        std::string leaseId;
         // QProcess affinity: the thread that spawned the process and the
         // only thread that may drive it (acquire/run/release).
         Qt::HANDLE ownerThread = nullptr;
@@ -180,6 +190,11 @@ class LocalWorkerPool
 
     LocalWorkerPoolConfig m_config;
     bool m_running = false;
+
+    /// Lease/poison policy state (execution 11.0 WP-E): pure tracker, no
+    /// scheduling authority — the pool consults verdicts at reuse/release.
+    sicnu::runtime::worker::WorkerLeaseTracker m_leases;
+    std::uint64_t m_nextLeaseId = 1;
 
     mutable std::mutex m_mutex;
     std::condition_variable m_idleChanged;

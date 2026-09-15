@@ -277,7 +277,11 @@ TEST_CASE( "Execution cache hit/miss/self-heal stays correct at thousands of ent
     // SICNU_ARTIFACT_CACHE=1 the store would put 3000 junk objects into the
     // developer's real pool and evict entries there.
     const bool hadPoolEnv = std::getenv( "SICNU_ARTIFACT_CACHE" ) != nullptr;
+#if defined( _WIN32 )
+    _putenv_s( "SICNU_ARTIFACT_CACHE", "" ); // MSVC has no unsetenv
+#else
     unsetenv( "SICNU_ARTIFACT_CACHE" );
+#endif
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
     auto &cache = sicnu::data::ExecutionResultCache::instance();

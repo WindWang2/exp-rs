@@ -18,6 +18,7 @@ const char* errorCodeToString(ErrorCode code) noexcept {
         case ErrorCode::FileNotWritable: return "FileNotWritable";
         case ErrorCode::DirectoryNotFound: return "DirectoryNotFound";
         case ErrorCode::InvalidInputData: return "InvalidInputData";
+        case ErrorCode::CorruptArtifactData: return "CorruptArtifactData";
         case ErrorCode::GdalError: return "GdalError";
         case ErrorCode::OpenCvError: return "OpenCvError";
         case ErrorCode::OtbError: return "OtbError";
@@ -31,6 +32,7 @@ const char* errorCodeToString(ErrorCode code) noexcept {
         case ErrorCode::DeviceUnavailable: return "DeviceUnavailable";
         case ErrorCode::RuntimeProviderFailed: return "RuntimeProviderFailed";
         case ErrorCode::PolicyRefused: return "PolicyRefused";
+        case ErrorCode::ResourceBudgetExceeded: return "ResourceBudgetExceeded";
         case ErrorCode::Unknown: return "Unknown";
     }
     return "Unknown";

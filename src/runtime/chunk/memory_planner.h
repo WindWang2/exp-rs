@@ -89,16 +89,34 @@ struct TileMemoryPlan
                                 || action == Action::ReduceConcurrency; }
 };
 
-/// Peak-RAM model: (stageCount+1) source-to-consumer queue stages, each
-/// holding queueCapacity tiles per input, plus one tile in the consumer and
-/// the pass-1 global state. Every product saturates on overflow.
+/// Peak-RAM model (execution 11.0, closes F-A-13; review R2-P1 hardened):
+/// an UPPER BOUND under the pipeline/graph thread contract, safe to wire as
+/// a hard admission gate. With S = stageCount transform/join nodes (so S+1
+/// queue stages) and I = max(inputCount, 1) concurrent input streams:
 ///
-/// HONESTY NOTE (F-A-13): this is a heuristic working-set model, not a
-/// strict upper bound — it omits each stage thread's in-hand tile (a linear
-/// chain's true peak is ≈ (S+1)·cap + S + 1, the model gives (S+1)·cap + 1)
-/// and applies the join width to every stage. Good enough for advisory
-/// preflight planning; before wiring it as a HARD admission gate, extend
-/// the model with the per-stage in-hand term.
+///   queue slots   ≤ (S+1) · queueCapacity · I   (each queue holds ≤ cap
+///                                                 tiles per input stream)
+///   in-hand tiles ≤ (2S + 2) · I                 (producer + S stage
+///                                                 threads + consumer; a
+///                                                 stage holds up to TWO
+///                                                 tiles transiently — its
+///                                                 moved-in input plus the
+///                                                 freshly built output the
+///                                                 StageFn contract invites
+///                                                 (std::move leaves the
+///                                                 source owning its buffer
+///                                                 until reassigned); a
+///                                                 join additionally holds
+///                                                 one tile per input, so I
+///                                                 applies throughout)
+///   + 1 writer-drain tile, + global state.
+///
+/// The in-hand term previously missing (F-A-13) made the 10.0 estimate an
+/// under-count; the first 11.0 fix counted one tile per thread and STILL
+/// under-counted the stage input/output overlap (review R2-P1). This model
+/// deliberately over-estimates join width across non-join stages
+/// (conservative direction: refusing is safe, under-admitting memory is
+/// not). Every product saturates on overflow.
 std::uint64_t tileStreamPeakBytes( const TileMemoryRequest &request, std::uint32_t queueCapacity );
 
 /// Plans the working set per the contract ladder (see TileMemoryPlan).
@@ -117,11 +135,19 @@ inline std::uint64_t tileStreamPeakBytes( const TileMemoryRequest &request,
         saturatingMul( saturatingMul( bufferWidth, bufferHeight ), request.bands ),
         request.bytesPerSample );
     const std::uint64_t stages = static_cast<std::uint64_t>( request.stageCount ) + 1;
-    const std::uint64_t inFlight = saturatingMul(
-        saturatingMul( stages, queueCapacity ), std::max<std::uint64_t>( request.inputCount, 1 ) );
-    // +1 tile resident in the consumer / writer slot.
-    return saturatingAdd( saturatingAdd( saturatingMul( inFlight, perTile ), perTile ),
-                          request.globalStateBytes );
+    const std::uint64_t inputs = std::max<std::uint64_t>( request.inputCount, 1 );
+    // Queue slots: (S+1) queues × capacity × I input streams.
+    const std::uint64_t queuedTiles =
+        saturatingMul( saturatingMul( stages, queueCapacity ), inputs );
+    // In-hand tiles: producer + S stages + consumer; stages transiently hold
+    // input AND freshly built output (2 each — review R2-P1), joins hold one
+    // per input (I throughout). F-A-13: this term was missing entirely.
+    const std::uint64_t inHandTiles =
+        saturatingMul( 2ull * request.stageCount + 2, inputs );
+    // +1 drain tile in the writer slot.
+    const std::uint64_t tiles = saturatingAdd( saturatingAdd( queuedTiles, inHandTiles ),
+                                               std::uint64_t{ 1 } );
+    return saturatingAdd( saturatingMul( tiles, perTile ), request.globalStateBytes );
 }
 
 inline TileMemoryPlan planTileMemory( const TileMemoryRequest &request )

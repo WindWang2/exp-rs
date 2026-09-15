@@ -1867,5 +1867,52 @@
       "workbench.plugin_manager"
     ],
     "category": "错误与诊断"
+  },
+  {
+    "id": "diagnostic.operator.corrupt_artifact_data",
+    "family": "operator",
+    "code": "CorruptArtifactData",
+    "title": "持久化工件损坏（摘要/框架校验失败）",
+    "whatHappened": "已落盘的 tile/scratch/checkpoint 字节未通过摘要或框架校验（幻数、版本、长度、FNV 摘要任一不符）。",
+    "whyItMatters": "损坏的中间态绝不能被静默复用：执行底座选择重算该 tile 或类型化失败，而不是信任可疑字节。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "无需人工干预时重跑：可恢复的 tile 会自动重算（自愈）",
+      "若在恢复日志中反复出现，检查磁盘/文件系统健康与是否有外部程序修改中间目录",
+      "确认中间态目录未被备份/同步工具在运行期间改写"
+    ],
+    "keywords": [
+      "corrupt",
+      "digest",
+      "artifact",
+      "损坏",
+      "摘要",
+      "校验"
+    ]
+  },
+  {
+    "id": "diagnostic.operator.resource_budget_exceeded",
+    "family": "operator",
+    "code": "ResourceBudgetExceeded",
+    "title": "执行资源预算耗尽（无可用降级步骤）",
+    "whatHappened": "tile 工作集的 RAM/scratch/在途写预算在该形状下无法容纳，且降级阶梯（降并发→溢写）已无路可走。",
+    "whyItMatters": "这是执行前的类型化拒绝（fail-closed），不是执行到一半的 std::bad_alloc 或磁盘写满：没有任何 tile 被部分写出。",
+    "severity": "error",
+    "retry": "derived",
+    "remediation": [
+      "缩小 tile 尺寸或 halo，或降低 bands（payload 变小）",
+      "提高 RAM / scratch 预算（若有配置面）",
+      "开启/扩大 scratch 溢写（external-memory 算子）",
+      "换用更小的分块规模重试"
+    ],
+    "keywords": [
+      "budget",
+      "memory",
+      "scratch",
+      "预算",
+      "内存",
+      "溢出"
+    ]
   }
 ]

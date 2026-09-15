@@ -4,6 +4,7 @@
 // tests/test_fused_chain.cpp against the real operators).
 #include "fused_chain.h"
 
+#include "operators/framework/chunk_error_bridge.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
 #include "runtime/chunk/chunk_pipeline.h"
@@ -296,7 +297,13 @@ void runPipeline( const FusedChainPlan &plan,
                   GdalStreamingOutput &output )
 {
     using namespace sicnu::runtime::chunk;
-    std::atomic<bool> cancelFlag{ false };
+
+    // Cooperative cancellation bridge (operators/framework/chunk_error_bridge.h):
+    // the pipeline polls the context's own flag between tiles, and every body
+    // below polls isCancelled() so callback-based contexts stop at the same
+    // between-tiles granularity.
+    const sicnu::operators::ChunkCancelBridge cancelBridge( context );
+    auto throwIfContextCancelled = [&cancelBridge]() { cancelBridge.throwIfCancelled(); };
 
     // Producer: read the head stage's bands per tile, apply the operator's
     // nodata conditioning, and hand over a band-major buffer. The grid and
@@ -304,8 +311,9 @@ void runPipeline( const FusedChainPlan &plan,
     // would make a second fused run start where the previous one ended
     // (silently writing zero tiles).
     const auto grid = buildTileGrid( width, height, kFusedTileDim, kFusedTileDim, 0, 1 );
-    auto producer = [&source, &plan, width, height, grid, next = 0](
+    auto producer = [&source, &plan, &throwIfContextCancelled, width, height, grid, next = 0](
                         TilePayload &out ) mutable -> bool {
+        throwIfContextCancelled();
         if ( next >= static_cast<int>( grid.size() ) )
             return false;
         const TileSpec &t = grid[static_cast<size_t>( next++ )];
@@ -347,7 +355,8 @@ void runPipeline( const FusedChainPlan &plan,
     stages.reserve( plan.stages.size() );
     for ( const FusedStage &stage : plan.stages )
     {
-        stages.push_back( [&stage]( TilePayload &&p ) -> TilePayload {
+        stages.push_back( [&stage, &throwIfContextCancelled]( TilePayload &&p ) -> TilePayload {
+            throwIfContextCancelled();
             const int w = p.spec.width;
             const int h = p.spec.height;
             const size_t planeSize = static_cast<size_t>( w ) * h;
@@ -369,7 +378,8 @@ void runPipeline( const FusedChainPlan &plan,
 
     // Consumer: write the tail planes onto the output raster.
     const int tailDtype = plan.stages.back().tailOutputDtype;
-    auto consumer = [&output, tailDtype]( TilePayload &&p ) -> bool {
+    auto consumer = [&output, tailDtype, &throwIfContextCancelled]( TilePayload &&p ) -> bool {
+        throwIfContextCancelled();
         GdalBlockStream::Tile tile;
         tile.index = p.spec.index;
         tile.totalTiles = p.spec.totalTiles;
@@ -406,10 +416,14 @@ void runPipeline( const FusedChainPlan &plan,
     ChunkPipeline::Config cfg;
     cfg.queueCapacity = 2;
     ChunkPipeline pipeline( producer, std::move( stages ), consumer, cfg );
+    cancelBridge.wire( pipeline );
     pipeline.setProgressCallback( [&context]( double p ) {
         context.reportProgress( 0.05 + 0.9 * p, "fused chain" );
     } );
-    pipeline.run();
+    // Typed error envelope: the chunk family maps onto RSOperatorError codes
+    // (Cancelled etc.) so callers key off the operator contract, not the
+    // runtime's exception types.
+    sicnu::operators::runWithChunkErrorTranslation( [&pipeline] { pipeline.run(); } );
 }
 
 } // namespace

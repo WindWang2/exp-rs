@@ -2,10 +2,18 @@
 #include "disk_tile_store.h"
 
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <string>
+#include <system_error>
 #include <vector>
+
+#if !defined( _WIN32 )
+#include <fcntl.h>
+#include <unistd.h>
+#endif
 
 namespace sicnu::runtime::chunk
 {
@@ -132,6 +140,55 @@ TilePayload decode( TileFileHeader header, std::vector<char> payloadBytes,
         std::memcpy( buffer->data(), payloadBytes.data(), payloadBytes.size() );
     return TilePayload{ spec, std::move( buffer ) };
 }
+
+/// Durability helper for writeFile: fsync where available; a no-op on
+/// Windows where rename remains the atomicity boundary (same contract as
+/// scratch_registry's fsyncPath).
+void fsyncBestEffort( const std::string &path, bool directory = false )
+{
+#if !defined( _WIN32 )
+    const int flags = directory ? ( O_RDONLY | O_DIRECTORY ) : O_RDONLY;
+    const int fd = ::open( path.c_str(), flags );
+    if ( fd >= 0 )
+    {
+        ::fsync( fd );
+        ::close( fd );
+    }
+#else
+    (void)path;
+    (void)directory;
+#endif
+}
+
+/// Shared read path for read()/readFile(): full fail-closed validation.
+TilePayload readFileImpl( const std::string &path )
+{
+    TileFileHeader header{};
+    std::ifstream in( path, std::ios::binary );
+    if ( !in )
+        throw ChunkCorruptTile( path );
+    in.read( reinterpret_cast<char *>( &header ), sizeof( header ) );
+    if ( static_cast<std::size_t>( in.gcount() ) != sizeof( header ) )
+        throw ChunkCorruptTile( path );
+    validateHeader( header, path );
+    // The stored payload size must match the actual trailing bytes, so the
+    // allocation below is bounded by the real file, never by a hostile
+    // header field.
+    {
+        std::error_code sizeEc;
+        const auto fileSize = std::filesystem::file_size( path, sizeEc );
+        if ( sizeEc || fileSize != sizeof( TileFileHeader ) + header.payloadBytes )
+            throw ChunkCorruptTile( path );
+    }
+    std::vector<char> payloadBytes( static_cast<std::size_t>( header.payloadBytes ) );
+    if ( !payloadBytes.empty() )
+    {
+        in.read( payloadBytes.data(), static_cast<std::streamsize>( payloadBytes.size() ) );
+        if ( static_cast<std::size_t>( in.gcount() ) != payloadBytes.size() )
+            throw ChunkCorruptTile( path );
+    }
+    return decode( header, std::move( payloadBytes ), path );
+}
 } // namespace
 
 void DiskTileStore::write( const ScratchLease &lease, const TilePayload &payload )
@@ -142,15 +199,21 @@ void DiskTileStore::write( const ScratchLease &lease, const TilePayload &payload
     const std::size_t bytes = payload.pixels->size() * sizeof( float );
     const TileFileHeader header = makeHeader( payload, bytes, fnv1a( data, bytes ) );
 
-    std::ofstream out( lease.path(), std::ios::binary | std::ios::trunc );
-    if ( !out )
-        throw std::runtime_error( "disk tile write: cannot open " + lease.path() );
-    out.write( reinterpret_cast<const char *>( &header ), sizeof( header ) );
-    if ( bytes )
-        out.write( reinterpret_cast<const char *>( data ), static_cast<std::streamsize>( bytes ) );
-    out.flush();
-    if ( !out )
-        throw std::runtime_error( "disk tile write: short write on " + lease.path() );
+    {
+        std::ofstream out( lease.path(), std::ios::binary | std::ios::trunc );
+        if ( !out )
+            throw std::runtime_error( "disk tile write: cannot open " + lease.path() );
+        out.write( reinterpret_cast<const char *>( &header ), sizeof( header ) );
+        if ( bytes )
+            out.write( reinterpret_cast<const char *>( data ),
+                       static_cast<std::streamsize>( bytes ) );
+        out.flush();
+        if ( !out )
+            throw std::runtime_error( "disk tile write: short write on " + lease.path() );
+        // Scope exit closes the stream BEFORE finalize: Windows cannot rename
+        // a file that is still open (verified: std::filesystem::rename on an
+        // open ofstream fails with a sharing violation on MSVC).
+    }
     lease.sealDigest();
     lease.finalize();
 }
@@ -159,59 +222,67 @@ TilePayload DiskTileStore::read( const ScratchLease &lease )
 {
     if ( !lease.isValid() )
         throw ChunkCorruptTile( "<null lease>" );
-    TileFileHeader header{};
-    std::ifstream in( lease.finalPath(), std::ios::binary );
-    if ( !in )
-        throw ChunkCorruptTile( lease.finalPath() );
-    in.read( reinterpret_cast<char *>( &header ), sizeof( header ) );
-    if ( static_cast<std::size_t>( in.gcount() ) != sizeof( header ) )
-        throw ChunkCorruptTile( lease.finalPath() );
-    validateHeader( header, lease.finalPath() );
-    // The stored payload size must match the actual trailing bytes, so the
-    // allocation below is bounded by the real file, never by a hostile
-    // header field.
-    {
-        std::error_code sizeEc;
-        const auto fileSize = std::filesystem::file_size( lease.finalPath(), sizeEc );
-        if ( sizeEc || fileSize != sizeof( TileFileHeader ) + header.payloadBytes )
-            throw ChunkCorruptTile( lease.finalPath() );
-    }
-    std::vector<char> payloadBytes( static_cast<std::size_t>( header.payloadBytes ) );
-    if ( !payloadBytes.empty() )
-    {
-        in.read( payloadBytes.data(), static_cast<std::streamsize>( payloadBytes.size() ) );
-        if ( static_cast<std::size_t>( in.gcount() ) != payloadBytes.size() )
-            throw ChunkCorruptTile( lease.finalPath() );
-    }
-    return decode( header, std::move( payloadBytes ), lease.finalPath() );
+    return readFileImpl( lease.finalPath() );
 }
 
 TilePayload DiskTileStore::readProvisional( const ScratchLease &lease )
 {
     if ( !lease.isValid() )
         throw ChunkCorruptTile( "<null lease>" );
-    TileFileHeader header{};
-    std::ifstream in( lease.path(), std::ios::binary );
-    if ( !in )
-        throw ChunkCorruptTile( lease.path() );
-    in.read( reinterpret_cast<char *>( &header ), sizeof( header ) );
-    if ( static_cast<std::size_t>( in.gcount() ) != sizeof( header ) )
-        throw ChunkCorruptTile( lease.path() );
-    validateHeader( header, lease.path() );
+    return readFileImpl( lease.path() );
+}
+
+void DiskTileStore::writeFile( const std::string &finalPath, const TilePayload &payload )
+{
+    if ( finalPath.empty() || !payload.pixels )
+        throw std::runtime_error( "disk tile write: empty path or null payload" );
+    const auto *data = payload.pixels->data();
+    const std::size_t bytes = payload.pixels->size() * sizeof( float );
+    const TileFileHeader header = makeHeader( payload, bytes, fnv1a( data, bytes ) );
+
+    const std::string tmpPath = finalPath + ".part";
     {
-        std::error_code sizeEc;
-        const auto fileSize = std::filesystem::file_size( lease.path(), sizeEc );
-        if ( sizeEc || fileSize != sizeof( TileFileHeader ) + header.payloadBytes )
-            throw ChunkCorruptTile( lease.path() );
+        std::ofstream out( tmpPath, std::ios::binary | std::ios::trunc );
+        if ( !out )
+            throw std::runtime_error( "disk tile write: cannot open " + tmpPath );
+        out.write( reinterpret_cast<const char *>( &header ), sizeof( header ) );
+        if ( bytes )
+            out.write( reinterpret_cast<const char *>( data ),
+                       static_cast<std::streamsize>( bytes ) );
+        out.flush();
+        if ( !out )
+        {
+            out.close();
+            std::error_code removeEc;
+            std::filesystem::remove( tmpPath, removeEc );
+            throw std::runtime_error( "disk tile write: short write on " + tmpPath );
+        }
     }
-    std::vector<char> payloadBytes( static_cast<std::size_t>( header.payloadBytes ) );
-    if ( !payloadBytes.empty() )
+    fsyncBestEffort( tmpPath );
+    std::error_code renameEc;
+    // Rename is the atomicity boundary (Windows fsync is best-effort; the
+    // same contract as ScratchLease::finalize / TileCheckpointWriter::save).
+    std::filesystem::rename( tmpPath, finalPath, renameEc );
+    if ( renameEc )
     {
-        in.read( payloadBytes.data(), static_cast<std::streamsize>( payloadBytes.size() ) );
-        if ( static_cast<std::size_t>( in.gcount() ) != payloadBytes.size() )
-            throw ChunkCorruptTile( lease.path() );
+        std::error_code removeEc;
+        std::filesystem::remove( tmpPath, removeEc );
+        throw std::runtime_error( "disk tile write: rename failed on " + finalPath + " ("
+                                  + renameEc.message() + ")" );
     }
-    return decode( header, std::move( payloadBytes ), lease.path() );
+    // Durability of the rename itself: flush the PARENT DIRECTORY entry (not
+    // the file — that was fsynced above) so a committed tile cannot vanish
+    // under the journal on power loss (POSIX; no-op on Windows).
+    std::error_code parentEc;
+    const auto parent = std::filesystem::path( finalPath ).parent_path();
+    fsyncBestEffort( parent.empty() ? std::string( "." ) : parent.generic_string(),
+                     /*directory=*/true );
+    (void)parentEc;
+}
+
+TilePayload DiskTileStore::readFile( const std::string &finalPath )
+{
+    return readFileImpl( finalPath );
 }
 
 } // namespace sicnu::runtime::chunk

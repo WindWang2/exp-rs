@@ -52,6 +52,7 @@ const char *counterName( Counter counter )
     case Counter::TaskAutoRetries: return "task_auto_retries";
     case Counter::ArtifactsRegistered: return "artifacts_registered";
     case Counter::ArtifactsReclaimed: return "artifacts_reclaimed";
+    case Counter::ResourceLeaksDetected: return "resource_leaks_detected";
     case Counter::_Count: break;
     }
     return "unknown";
