@@ -269,6 +269,7 @@ const std::map<std::string, std::string> &familyMap()
     { "rs:majority_filter", "raster_spatial" },
     { "rs:morphology", "raster_spatial" },
     { "rs:mosaic", "raster_spatial" },
+    { "rs:quality_mosaic", "raster_spatial" },
     { "rs:proximity", "raster_spatial" },
     { "rs:rasterize", "raster_spatial" },
     { "rs:recode", "raster_spatial" },

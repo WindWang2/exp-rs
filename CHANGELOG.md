@@ -4,6 +4,32 @@ All notable changes to the `exp-rs` project will be documented in this file.
 
 ## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)
 
+## [Unreleased] - F15 Mosaic, Fusion & Quality Composite 11.0 (zcode/mosaic-fusion-11)
+
+- **Quality mosaic operator (E/A/G)**: `rs:quality_mosaic` — streaming 512²-window
+  production mosaic with a deterministic scene/grid plan (union extent, placement,
+  mixed-CRS diagnostics with fail-closed actionable errors), robust inter-scene
+  radiometric balancing, DP seamline placement, feather blending, quality-score
+  compositing, a dominant-source provenance band, tiled+deflate atomic output with
+  optional overviews and an atomically written JSON report.
+- **Radiometric balancing (B)**: `mosaic_balancing` — overlap-graph BFS from a
+  reference scene, three-pass streaming robust gain/bias fit (LSQ → residual-MAD
+  trim → inlier refit), gain clamp + bias-sigma anomaly gates, fail/drop policy.
+- **Seamline (C)**: `mosaic_seamline` — cost surface (radiometric |Δ|, gradient
+  disagreement, cloud penalty, edge-distance pull), deterministic DP min-cost path
+  (3-connected, smaller-index tie-break), binned builder bounding seam memory to
+  ≤512×512 cells regardless of scene size.
+- **Blending (D)**: `mosaic_blend` — feather ramp with unit-sum weights and per-pixel
+  NoData fallback (no cracks, no double boundaries); windowed Laplacian multiband
+  blending kernel with halo clamp and exact constant-input reconstruction.
+- **Quality scoring (E)**: `mosaic_quality` — cloud/quality/time/view scoring with
+  renormalized weights, clamped out-of-range inputs, deterministic composite order.
+- **Fusion quality (F)**: `fusion_quality_report` — Q index, RASE, per-band mean/std
+  distortion ratios, ERGAS/CC/RMSE/SSIM, configurable spectral-distortion guard,
+  streaming accumulator, fixed-schema JSON artifact with atomic writes;
+  `rs:image_fusion` gains the `hpf` method and an optional `qualityReport` output.
+- **New docs**: `docs/processing/mosaic_fusion.md`, ADR 0163.
+
 - **Regular-calendar normalization (T-2)**: `rs:temporal_regularize` re-casts irregular
   acquisitions onto a configurable calendar (`16d`-style or monthly, anchored on the
   collection epoch) with nearest / window_mean / linear / whittaker-on-grid methods,

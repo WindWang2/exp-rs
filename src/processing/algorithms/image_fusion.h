@@ -14,6 +14,10 @@
 #include <QString>
 #include <QVector>
 
+namespace rs::fusion {
+struct FusionQualityReport;
+}
+
 class ImageFusion
 {
   public:
@@ -76,6 +80,9 @@ class ImageFusion
         int blueIdx = 2;
         int tileWidth = 512;
         int tileHeight = 512;
+        // Optional: write a fusion-quality JSON report comparing the fused
+        // output with the resampled MS reference (F15, ADR 0163).
+        QString qualityReportPath;
     };
 
     /**
@@ -85,10 +92,18 @@ class ImageFusion
     static bool processNativeFusion(const QString &panPath, const QString &msPath,
                                     const QString &outputPath,
                                     const NativeFusionParams &params,
-                                    QString *errorMessage = nullptr);
+                                    QString *errorMessage = nullptr,
+                                    rs::fusion::FusionQualityReport *qualityReport = nullptr);
 
   private:
     /// Histogram-match src to ref (match mean and stddev).
     static void histogramMatch( float *data, size_t n,
                                 const float *ref, size_t refN, float nodata );
+
+    /// Pre-F15 fusion path (kept verbatim); the public wrapper adds the
+    /// optional quality-report pass on top.
+    static bool processNativeFusionImpl(const QString &panPath, const QString &msPath,
+                                        const QString &outputPath,
+                                        const NativeFusionParams &params,
+                                        QString *errorMessage);
 };
