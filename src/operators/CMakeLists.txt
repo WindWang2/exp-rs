@@ -175,6 +175,9 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_spectral_band_select_operator.cpp
     rs/rs_library_select_operator.cpp
     rs/rs_mosaic_operator.cpp
+    # F15 mosaic-fusion-11 (ADR 0163): quality mosaic with seamlines,
+    # balancing, blending and provenance.
+    rs/rs_quality_mosaic_operator.cpp
     rs/rs_temporal_collection_input.cpp
     rs/rs_temporal_output.cpp
     rs/rs_temporal_summary_operator.cpp

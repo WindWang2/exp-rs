@@ -526,6 +526,18 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             rows.push_back( c );
         }
         {
+            // F15 mosaic-fusion-11 (ADR 0163): quality mosaic — co-registered
+            // scenes only; fail-closed on CRS/pixel-grid mismatch; provenance
+            // band traces the dominant contributing input per pixel.
+            ScientificContract c = baseRecord();
+            c.operatorId = "rs:quality_mosaic";
+            c.inputDomain = "any";
+            c.outputDomain = "any";
+            c.timeAlignment = "not_applicable"; // input is an array of scenes
+            c.evidence = "family:mosaic + schema read";
+            rows.push_back( c );
+        }
+        {
             ScientificContract c = baseRecord();
             c.operatorId = "rs:extract_bands";
             c.inputDomain = "any";

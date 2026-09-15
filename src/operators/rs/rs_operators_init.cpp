@@ -61,6 +61,7 @@
 #include "rs_spectral_band_select_operator.h"
 #include "rs_library_select_operator.h"
 #include "rs_mosaic_operator.h"
+#include "rs_quality_mosaic_operator.h"
 #include "rs_temporal_summary_operator.h"
 #include "rs_temporal_composite_operator.h"
 #include "rs_temporal_index_operator.h"
@@ -196,6 +197,7 @@ REGISTER_RS_OPERATOR(RsMnfInverseOperator, "rs:mnf_inverse")
 REGISTER_RS_OPERATOR(RsSpectralBandSelectOperator, "rs:spectral_band_select")
 REGISTER_RS_OPERATOR(RsLibrarySelectOperator, "rs:library_select")
 REGISTER_RS_OPERATOR(RsMosaicOperator, "rs:mosaic")
+REGISTER_RS_OPERATOR(RsQualityMosaicOperator, "rs:quality_mosaic")
 REGISTER_RS_OPERATOR(RsTemporalSummaryOperator, "rs:temporal_summary")
 REGISTER_RS_OPERATOR(RsTemporalCompositeOperator, "rs:temporal_composite")
 REGISTER_RS_OPERATOR(RsTemporalIndexSeriesOperator, "rs:temporal_index_series")
@@ -360,6 +362,7 @@ void initBuiltinRsOperators() {
   add( "rs:spectral_band_select", [] { return std::make_unique<RsSpectralBandSelectOperator>(); } );
   add( "rs:library_select", [] { return std::make_unique<RsLibrarySelectOperator>(); } );
   add( "rs:mosaic", [] { return std::make_unique<RsMosaicOperator>(); } );
+  add( "rs:quality_mosaic", [] { return std::make_unique<RsQualityMosaicOperator>(); } );
   add( "rs:temporal_summary", [] { return std::make_unique<RsTemporalSummaryOperator>(); } );
   add( "rs:temporal_composite", [] { return std::make_unique<RsTemporalCompositeOperator>(); } );
   add( "rs:temporal_index_series", [] { return std::make_unique<RsTemporalIndexSeriesOperator>(); } );

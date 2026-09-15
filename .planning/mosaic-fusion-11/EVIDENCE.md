@@ -17,6 +17,10 @@
 | 0 | `git rev-parse origin/master` | 0 | `a5b11b7f10fa010c1c060864fb427d777ba9a4aa` |
 | 0 | `git worktree add ...` | 0 | 分支创建成功 |
 | 0 | `git check-ignore -v .planning/mosaic-fusion-11/GOAL.md` | 0 | `.gitignore:119:.planning/*`（按 #1008 先例 `git add -f` 跟踪） |
+| 0 | `cmake --preset dev-default` | 1 | 首次失败：pybind11/Catch2 FetchContent 网络克隆 TLS 抖动 |
+| 0 | `cmake -DFETCHCONTENT_SOURCE_DIR_CATCH2=<main>/_deps/catch2-src -DFETCHCONTENT_SOURCE_DIR_PYBIND11=<main>/_deps/pybind11-src -S . -B build-dev` | 0 | 复用主仓库缓存源（Catch2 v3.7.1 与 pin 一致）；无网络依赖 |
+| 1 | `cmake --build build-dev --target <8 个 F15 test targets> -j2` | 0 | 全部构建成功（含 qgis_core ~1054 对象全量编译） |
+| 1 | `ctest -R "test_mosaic_plan::\|test_mosaic_balancing::\|test_mosaic_seamline::\|test_mosaic_blend::\|test_mosaic_quality::\|test_fusion_quality_report::\|test_mosaic_scale::\|test_quality_mosaic_operator::" -j1` | 0 | **52/52 通过**（经 4 轮 oracle 缺陷修复，见 ledger） |
 
 ## OUT_OF_SCOPE
 
