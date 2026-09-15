@@ -8894,3 +8894,194 @@ target_include_directories(test_processing_catalog_ux PRIVATE
 )
 set_target_properties(test_processing_catalog_ux PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_processing_catalog_ux)
+
+  # ---- D16 Temporal Phenology Timeline Studio ----------------------------
+  # Light-pattern tests: link sicnu_temporal_timeline (+ Sicnu::Geospatial,
+  # GDAL for runtime fixtures) — no qgis_core/sicnu_processing in the chain.
+  add_executable(test_virtual_cube_memory test_virtual_cube_memory.cpp)
+  target_link_libraries(test_virtual_cube_memory PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_temporal_timeline
+    Sicnu::Geospatial
+    GDAL::GDAL
+  )
+  target_include_directories(test_virtual_cube_memory PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  target_compile_definitions(test_virtual_cube_memory PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    CMAKE_BINARY_DIR="${CMAKE_BINARY_DIR}"
+  )
+  # D16 acceptance gate registers the whole binary under its target
+  # name (ctest -R test_d16_|... matches verbatim, -j1, headless).
+  add_test(NAME test_virtual_cube_memory COMMAND test_virtual_cube_memory)
+  set_tests_properties(test_virtual_cube_memory PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 600)
+
+  add_executable(test_whittaker_smooth test_whittaker_smooth.cpp)
+  target_link_libraries(test_whittaker_smooth PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_temporal_timeline
+  )
+  target_include_directories(test_whittaker_smooth PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  # D16 acceptance gate registers the whole binary under its target
+  # name (ctest -R test_d16_|... matches verbatim, -j1, headless).
+  add_test(NAME test_whittaker_smooth COMMAND test_whittaker_smooth)
+  set_tests_properties(test_whittaker_smooth PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 600)
+
+  add_executable(test_phenology_extraction test_phenology_extraction.cpp)
+  target_link_libraries(test_phenology_extraction PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_temporal_timeline
+  )
+  target_include_directories(test_phenology_extraction PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  # D16 acceptance gate registers the whole binary under its target
+  # name (ctest -R test_d16_|... matches verbatim, -j1, headless).
+  add_test(NAME test_phenology_extraction COMMAND test_phenology_extraction)
+  set_tests_properties(test_phenology_extraction PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 600)
+
+  add_executable(test_bfast_harmonic_breaks test_bfast_harmonic_breaks.cpp)
+  target_link_libraries(test_bfast_harmonic_breaks PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_temporal_timeline
+  )
+  target_include_directories(test_bfast_harmonic_breaks PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  # D16 acceptance gate registers the whole binary under its target
+  # name (ctest -R test_d16_|... matches verbatim, -j1, headless).
+  add_test(NAME test_bfast_harmonic_breaks COMMAND test_bfast_harmonic_breaks)
+  set_tests_properties(test_bfast_harmonic_breaks PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 600)
+
+  add_executable(test_d16_temporal_trend test_d16_temporal_trend.cpp)
+  target_link_libraries(test_d16_temporal_trend PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_temporal_timeline
+  )
+  target_include_directories(test_d16_temporal_trend PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  # D16 acceptance gate registers the whole binary under its target
+  # name (ctest -R test_d16_|... matches verbatim, -j1, headless).
+  add_test(NAME test_d16_temporal_trend COMMAND test_d16_temporal_trend)
+  set_tests_properties(test_d16_temporal_trend PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 600)
+
+  add_executable(test_d16_starfm test_d16_starfm.cpp)
+  target_link_libraries(test_d16_starfm PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_temporal_timeline
+  )
+  target_include_directories(test_d16_starfm PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  # D16 acceptance gate registers the whole binary under its target
+  # name (ctest -R test_d16_|... matches verbatim, -j1, headless).
+  add_test(NAME test_d16_starfm COMMAND test_d16_starfm)
+  set_tests_properties(test_d16_starfm PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 600)
+
+  # D16 Package G: timeline scrubber + temporal profile (offscreen Qt).
+  # Spec file name kept (test_timeline_scrubber_widget.cpp); the target
+  # carries the test_d16_ prefix so the acceptance filter gates it.
+  add_executable(test_d16_timeline_scrubber_widget test_timeline_scrubber_widget.cpp)
+  target_link_libraries(test_d16_timeline_scrubber_widget PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    sicnu_temporal_timeline
+  )
+  target_include_directories(test_d16_timeline_scrubber_widget PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(test_d16_timeline_scrubber_widget PROPERTIES AUTOMOC ON)
+  add_test(NAME test_d16_timeline_scrubber_widget COMMAND test_d16_timeline_scrubber_widget)
+  set_tests_properties(test_d16_timeline_scrubber_widget PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 600)
+
+  add_executable(test_d16_temporal_profile_widget test_temporal_profile_widget.cpp)
+  target_link_libraries(test_d16_temporal_profile_widget PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    sicnu_temporal_timeline
+  )
+  target_include_directories(test_d16_temporal_profile_widget PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  set_target_properties(test_d16_temporal_profile_widget PROPERTIES AUTOMOC ON)
+  add_test(NAME test_d16_temporal_profile_widget COMMAND test_d16_temporal_profile_widget)
+  set_tests_properties(test_d16_temporal_profile_widget PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 600)
+
+  add_executable(test_d16_temporal_tools test_d16_temporal_tools.cpp)
+  target_link_libraries(test_d16_temporal_tools PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_temporal_timeline
+  )
+  target_include_directories(test_d16_temporal_tools PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_d16_temporal_tools)
+  # D16 acceptance gate registers the whole binary under its target
+  # name (ctest -R test_d16_|... matches verbatim, -j1, headless).
+  add_test(NAME test_d16_temporal_tools COMMAND test_d16_temporal_tools)
+  set_tests_properties(test_d16_temporal_tools PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 600)
+
+  add_executable(test_d16_temporal_phenology_e2e test_d16_temporal_phenology_e2e.cpp)
+  target_link_libraries(test_d16_temporal_phenology_e2e PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    sicnu_temporal_timeline
+  )
+  target_include_directories(test_d16_temporal_phenology_e2e PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  target_compile_definitions(test_d16_temporal_phenology_e2e PRIVATE
+    CMAKE_BINARY_DIR="${CMAKE_BINARY_DIR}"
+  )
+  sicnu_link_jsoncpp(test_d16_temporal_phenology_e2e)
+  # D16 acceptance gate registers the whole binary under its target
+  # name (ctest -R test_d16_|... matches verbatim, -j1, headless).
+  add_test(NAME test_d16_temporal_phenology_e2e COMMAND test_d16_temporal_phenology_e2e)
+  set_tests_properties(test_d16_temporal_phenology_e2e PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 600)
