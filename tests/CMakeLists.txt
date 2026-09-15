@@ -8816,6 +8816,61 @@ target_include_directories(test_object_identity PRIVATE
 set_target_properties(test_object_identity PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_object_identity)
 
+# D18 — MissionContext (Qt Core only + selection_context / object_identity)
+add_executable(test_mission_context
+  test_mission_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+)
+target_link_libraries(test_mission_context PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Xml
+  qgis_core
+  qgis_gui
+  sicnu_data
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_mission_context PRIVATE jsoncpp)
+endif()
+target_include_directories(test_mission_context PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_mission_context PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_mission_context)
+
+add_executable(test_mission_e2e_scaffolding
+  test_mission_e2e_scaffolding.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/mission_context_store.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/object_identity.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+)
+target_link_libraries(test_mission_e2e_scaffolding PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_mission_e2e_scaffolding PRIVATE jsoncpp)
+endif()
+target_include_directories(test_mission_e2e_scaffolding PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_mission_e2e_scaffolding PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_mission_e2e_scaffolding)
+
+
 add_executable(test_agent_workbench_context
   test_agent_workbench_context.cpp
   ${CMAKE_SOURCE_DIR}/src/app/workbench/agent_context_tool.cpp
@@ -9196,6 +9251,12 @@ sicnu_add_d17_test(test_workflow_cost_estimator
   SOURCES ${D17_ENGINE_SOURCES}
     ${CMAKE_SOURCE_DIR}/src/workflow/plan_optimizer.cpp
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_cost_estimator.cpp
+)
+
+# --- D18: IR2 port→param mapping (hermetic; no operators registry link)
+sicnu_add_d17_test(test_ir2_port_param_mapping
+  SOURCES ${CMAKE_SOURCE_DIR}/src/workflow/ir2_port_param_mapping.cpp
+  LIBS jsoncpp
 )
 
 # --- Package E: run coordinator + checkpoints

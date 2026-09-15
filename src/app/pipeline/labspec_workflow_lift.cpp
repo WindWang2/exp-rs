@@ -1,4 +1,4 @@
-// src/app/pipeline/labspec_workflow_lift.cpp — LabSpec -> WorkflowDefinition lift (D17)
+// src/app/pipeline/labspec_workflow_lift.cpp — LabSpec -> WorkflowDocument lift (D17)
 #include "labspec_workflow_lift.h"
 
 #include <QJsonArray>
@@ -10,7 +10,7 @@ namespace sicnu::app::pipeline {
 using sicnu::workflow::EdgeFact;
 using sicnu::workflow::NodeFact;
 using sicnu::workflow::PortFact;
-using sicnu::workflow::WorkflowDefinition;
+using sicnu::workflow::WorkflowDocument;
 
 namespace {
 /// jsoncpp -> QJson for LabSpec parameter objects (both trees are ordered;
@@ -47,9 +47,9 @@ constexpr const char *kStepTitle = "title";
 constexpr const char *kStepGuidance = "guidance";
 } // namespace
 
-WorkflowDefinition liftLabSpecToWorkflow( const lab::LabSpec &spec )
+WorkflowDocument liftLabSpecToWorkflow( const lab::LabSpec &spec )
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.workflowId = spec.id;
     def.name = spec.titleZh.isEmpty() ? spec.title : spec.titleZh;
     def.description = spec.objective;

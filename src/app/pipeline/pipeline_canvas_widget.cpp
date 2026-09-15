@@ -31,7 +31,7 @@ PipelineCanvasWidget::PipelineCanvasWidget( QWidget *parent )
 
 PipelineCanvasWidget::~PipelineCanvasWidget() = default;
 
-void PipelineCanvasWidget::loadWorkflow( const sicnu::workflow::WorkflowDefinition &def )
+void PipelineCanvasWidget::loadWorkflow( const sicnu::workflow::WorkflowDocument &def )
 {
     m_lastLoaded = def;
     m_scene->clear();
@@ -49,11 +49,11 @@ void PipelineCanvasWidget::loadWorkflow( const sicnu::workflow::WorkflowDefiniti
         m_scene->addConnection( edge.sourceNodeId, edge.sourcePortName, edge.targetNodeId, edge.targetPortName );
 }
 
-sicnu::workflow::WorkflowDefinition PipelineCanvasWidget::exportWorkflow() const
+sicnu::workflow::WorkflowDocument PipelineCanvasWidget::exportWorkflow() const
 {
     // The document stays the source of truth: port facts and edges come from
     // the loaded document; only node positions are read back from the items.
-    sicnu::workflow::WorkflowDefinition out = m_lastLoaded;
+    sicnu::workflow::WorkflowDocument out = m_lastLoaded;
 
     QHash<QString, QPointF> positions;
     for ( QGraphicsItem *item : m_scene->items() )

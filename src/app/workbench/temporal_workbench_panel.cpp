@@ -11,6 +11,7 @@
 #include <QComboBox>
 #include <limits>
 #include <QDateEdit>
+#include <QDateTime>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QKeyEvent>
@@ -501,6 +502,38 @@ QString TemporalWorkbenchPanel::selectedScenePath( int *sceneIndexOut ) const
     if ( sceneIndexOut )
         *sceneIndexOut = current.isValid() ? m_model->sceneIndexAtRow( current.row() ) : -1;
     return scene ? scene->path : QString();
+}
+
+
+TemporalContext TemporalWorkbenchPanel::exportTemporalContext() const
+{
+    TemporalContext ctx;
+    if ( m_collectionCombo )
+        ctx.collectionId = m_collectionCombo->currentData().toString();
+    if ( m_fromEdit && m_fromEdit->date().isValid() && m_fromEdit->date().year() > 1970 )
+        ctx.startIso = m_fromEdit->date().toString( Qt::ISODate );
+    if ( m_toEdit && m_toEdit->date().isValid() && m_toEdit->date().year() > 1970 )
+        ctx.endIso = m_toEdit->date().toString( Qt::ISODate );
+
+    // Prefer the selected scene's acquisition identity when the model exposes one.
+    const QModelIndex current =
+        m_view && m_view->selectionModel() ? m_view->currentIndex() : QModelIndex();
+    const sicnu::temporal::TemporalSceneRef *scene =
+        ( current.isValid() && m_model ) ? m_model->sceneAtRow( current.row() ) : nullptr;
+    if ( scene )
+    {
+        if ( !scene->assetId.isEmpty() )
+            ctx.activeAcquisitionId = scene->assetId;
+        else if ( !scene->path.isEmpty() )
+            ctx.activeAcquisitionId = scene->path; // honest path-as-id until asset publish
+        if ( scene->time.valid )
+        {
+            const QDateTime dt = QDateTime::fromMSecsSinceEpoch( scene->time.epochMillis, Qt::UTC );
+            if ( ctx.startIso.isEmpty() )
+                ctx.startIso = dt.date().toString( Qt::ISODate );
+        }
+    }
+    return ctx;
 }
 
 } // namespace sicnu::app

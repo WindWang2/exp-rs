@@ -15,7 +15,10 @@
 #include <QDate>
 #include <QJsonParseError>
 
+#include <functional>
+
 #include "temporal_scene_model.h"
+#include "app/workbench/mission_context.h"
 
 class QComboBox;
 class QDateEdit;
@@ -77,6 +80,11 @@ class TemporalWorkbenchPanel : public QgsDockWidget
 
     /// Re-reads the collection list from the DataManager (metadata only).
     void refreshCollections();
+
+    /// D18: project current collection / filter window / selection into a
+    /// TemporalContext value (ids + ISO dates only — no widget pointers).
+    TemporalContext exportTemporalContext() const;
+
 
   signals:
     /// Current-timestep quick preview: shell loads the scene path on the map.

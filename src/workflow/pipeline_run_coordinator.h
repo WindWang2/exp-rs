@@ -68,8 +68,9 @@ struct NodeExecutionResult
     QString errorMessage;
 };
 
-/// Inputs: parent nodeId -> artifact path. The run directory is where the
-/// executor writes artifacts.
+/// Inputs: IR2 target port name -> artifact path (D-W6; prefer explicit port
+/// names over source-node-id keys). The run directory is where the executor
+/// writes artifacts.
 using NodeExecutor = std::function<NodeExecutionResult(
     const NodeFact &node, const QHash<QString, QString> &inputArtifacts, const QString &runDirectory )>;
 
@@ -86,7 +87,7 @@ class PipelineRunCoordinator : public QObject
 
     /// Validates + schedules a run. Fails closed on cyclic documents or an
     /// already-running coordinator. Persists an initial checkpoint.
-    bool startRun( const WorkflowDefinition &def, const QString &runDirectory, QString *outError = nullptr );
+    bool startRun( const WorkflowDocument &def, const QString &runDirectory, QString *outError = nullptr );
 
     /// Cooperative cancel: queued nodes -> Cancelled, running nodes drain
     /// and are marked Cancelled; pipelineCompleted(false) follows.

@@ -11,7 +11,7 @@ namespace sicnu::app::pipeline {
 
 /// One operator node: a rounded rect with typed input (left) and output
 /// (right) ports. Draggable; reports moves so the owning scene can keep the
-/// WorkflowDefinition projection in sync. lifecycle note: the scene owns
+/// WorkflowDocument projection in sync. lifecycle note: the scene owns
 /// nodes; connections hold QPointer-weak references to their endpoints and
 /// self-destruct when either endpoint dies.
 class PipelineNodeItem : public QGraphicsObject

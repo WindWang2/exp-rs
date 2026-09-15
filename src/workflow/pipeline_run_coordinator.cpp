@@ -126,8 +126,9 @@ QString atomicWriteJson( const QString &path, const QJsonObject &document )
     return path;
 }
 
-/// Deterministic default executor: derives a small artifact whose content is
-/// a function of the node signature — same node + same inputs => same bytes.
+/// Deterministic default executor (D17 hermetic tests): artifact bytes are a
+/// function of the node signature. Production IR2 dock installs
+/// makeRegistryNodeExecutor() instead — see ir2_registry_node_executor.h.
 NodeExecutionResult syntheticExecute( const NodeFact &node, const QHash<QString, QString> &inputArtifacts,
                                       const QString &runDirectory )
 {
@@ -143,10 +144,12 @@ NodeExecutionResult syntheticExecute( const NodeFact &node, const QHash<QString,
     }
     QByteArray payload;
     payload += QStringLiteral( "d17-node %1 op %2\n" ).arg( node.nodeId, node.operatorId ).toUtf8();
-    QStringList parents = inputArtifacts.keys();
-    std::sort( parents.begin(), parents.end() );
-    for ( const QString &parent : parents )
-        payload += QStringLiteral( "in %1\n" ).arg( inputArtifacts.value( parent ) ).toUtf8();
+    QStringList ports = inputArtifacts.keys();
+    std::sort( ports.begin(), ports.end() );
+    for ( const QString &port : ports )
+        payload += QStringLiteral( "in %1=%2\n" )
+                       .arg( port, inputArtifacts.value( port ) )
+                       .toUtf8();
     file.write( payload );
     file.close();
     result.success = true;
@@ -180,7 +183,7 @@ QString executionStateString( ExecutionState state )
 
 struct PipelineRunCoordinator::RunState
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     QString runDirectory;
     QString runId;
     QString checkpointPath;
@@ -241,7 +244,7 @@ QMap<QString, NodeStatusSnapshot> PipelineRunCoordinator::getAllStatuses() const
     return map;
 }
 
-bool PipelineRunCoordinator::startRun( const WorkflowDefinition &def, const QString &runDirectory, QString *outError )
+bool PipelineRunCoordinator::startRun( const WorkflowDocument &def, const QString &runDirectory, QString *outError )
 {
     auto fail = [outError]( const QString &message ) {
         if ( outError )
@@ -392,10 +395,13 @@ void PipelineRunCoordinator::dispatchReadyNodes()
 
         // Capture for the worker lambda (values, no coordinator access).
         const NodeFact node = *m_state->def.findNode( nodeId );
+        // D-W6: key by target port name (explicit IR2 port→param mapping).
+        // Single-source invariant guarantees one edge per input port.
         QHash<QString, QString> inputArtifacts;
         for ( const EdgeFact &edge : m_state->def.edges )
             if ( edge.targetNodeId == nodeId )
-                inputArtifacts.insert( edge.sourceNodeId, m_state->statuses.value( edge.sourceNodeId ).outputArtifactPath );
+                inputArtifacts.insert( edge.targetPortName,
+                                       m_state->statuses.value( edge.sourceNodeId ).outputArtifactPath );
         const QString runDirectory = m_state->runDirectory;
         QPointer<PipelineRunCoordinator> self( this );
         // The executor is copied into the worker: no shared mutable state
@@ -635,7 +641,7 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
     // (Succeeded) parents release their children immediately, otherwise a
     // fully-cached prefix would stall the resumed frontier. Document order
     // of the checkpoint array is irrelevant.
-    const WorkflowDefinition &resumedDef = m_state->def;
+    const WorkflowDocument &resumedDef = m_state->def;
     for ( const NodeFact &node : resumedDef.nodes )
     {
         int parents = 0;

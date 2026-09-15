@@ -21,6 +21,8 @@
 #include <span>
 #include <vector>
 
+#include "app/workbench/mission_context.h"
+
 class QgsRasterLayer;
 class QComboBox;
 class QTableWidget;
@@ -97,6 +99,21 @@ class ClassificationStudioWidget : public QWidget
     ~ClassificationStudioWidget() override = default;
 
     void bindInputLayer( QgsRasterLayer *layer );
+
+    /// D18: record the mission-level input as a typed ref (no live ownership).
+    /// The live QgsRasterLayer binding remains for interactive tools.
+    void setMissionInputRef( const sicnu::app::WorkbenchObjectRef &ref );
+    sicnu::app::WorkbenchObjectRef missionInputRef() const { return mMissionInput; }
+
+    /// Last published classification/change result id (Result/Asset), if any.
+    void setMissionResultRef( const sicnu::app::WorkbenchObjectRef &ref );
+    sicnu::app::WorkbenchObjectRef missionResultRef() const { return mMissionResult; }
+
+    /// When a concrete product path exists (classic classify export, pipeline
+    /// output, or user-provided path), accept it so MissionContext can publish
+    /// a path-backed Result instead of a provisional request id.
+    void acceptProductPath( const QString &path, int algoType = -1 );
+
     void setClassPalette( const std::vector<int> &classIds,
                           const std::vector<QString> &names,
                           const std::vector<uint32_t> &argbColors );
@@ -109,10 +126,14 @@ class ClassificationStudioWidget : public QWidget
   signals:
     void roiExtracted( int classId, const QPolygonF &polygon );
     void classificationRequested( int algoType );
+    /// Emitted when a concrete product path is available (path non-empty).
+    void classificationProductReady( const QString &path, int algoType );
     void swipeOffsetChanged( float splitRatio );
 
   private:
     QPointer<QgsRasterLayer> mLayer;
+    sicnu::app::WorkbenchObjectRef mMissionInput;
+    sicnu::app::WorkbenchObjectRef mMissionResult;
     RsRoiMagicWandTool *mWand = nullptr;
     QTableWidget *mClassTable = nullptr;
     QComboBox *mAlgoCombo = nullptr;

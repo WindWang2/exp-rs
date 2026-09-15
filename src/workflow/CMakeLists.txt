@@ -32,6 +32,8 @@ set(SICNU_WORKFLOW_CORE_SOURCES
   plan_optimizer.cpp
   workflow_cost_estimator.cpp
   pipeline_run_coordinator.cpp
+  ir2_port_param_mapping.cpp
+  ir2_registry_node_executor.cpp
 )
 set(SICNU_WORKFLOW_RUNTIME_SOURCES
   workflow_runtime.cpp
