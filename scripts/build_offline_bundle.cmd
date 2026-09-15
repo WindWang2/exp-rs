@@ -147,12 +147,17 @@ copy /Y "%REPO_ROOT%\packaging\bundle\labs\lab1\lab1_ndvi.pipeline.json" "%BUNDL
 copy /Y "%REPO_ROOT%\packaging\bundle\labs\lab1\INSTRUCTIONS-zh.md" "%BUNDLE%\labs\lab1\" >nul || exit /b 1
 
 echo == copying one-click scripts and docs ==
-for %%F in (RUN.cmd GENERATE_SAMPLES.cmd GRADE_ALL.cmd VERIFY.cmd VERIFY.ps1 README-zh.md) do (
+rem VERIFY.sh + tools/verify_bundle_manifest.py ship on Windows bundles too:
+rem schema /2 requires them and a Linux grader machine may verify the same
+rem bundle (the in-bundle Linux check reuses the shipped python verifier).
+for %%F in (RUN.cmd GENERATE_SAMPLES.cmd GRADE_ALL.cmd VERIFY.cmd VERIFY.ps1 VERIFY.sh README-zh.md) do (
   copy /Y "%REPO_ROOT%\packaging\bundle\%%F" "%BUNDLE%\%%F" >nul || exit /b 1
 )
+mkdir "%BUNDLE%\tools" 2>nul
+copy /Y "%SCRIPT_DIR%verify_bundle_manifest.py" "%BUNDLE%\tools\verify_bundle_manifest.py" >nul || exit /b 1
 
 echo == writing manifest ==
-powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%bundle_manifest.ps1" -Bundle "%BUNDLE%" -Version "%VERSION%" -MaxMb %MAX_MB% || exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%bundle_manifest.ps1" -Bundle "%BUNDLE%" -Version "%VERSION%" -MaxMb %MAX_MB% -Schema 2 || exit /b 1
 
 call "%SCRIPT_DIR%build_offline_bundle.cmd" --verify "%BUNDLE%"
 exit /b %errorlevel%

@@ -9393,3 +9393,17 @@ target_compile_definitions(test_d15_classification_change_e2e PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 sicnu_discover_tests(test_d15_classification_change_e2e TIMEOUT 600 TEST_PREFIX "test_d15_classification_change_e2e::")
+
+# deployment-packaging-11 (F19): bundle manifest conformance. Drives the
+# canonical verifier (scripts/verify_bundle_manifest.py) as a subprocess
+# against independently synthesized golden bundles — valid /1 and /2, tamper,
+# missing, extra, unsafe path, empty required prefix, ceiling breach, future
+# major refusal, min_reader_schema, symlink escape — plus the PS twin lane
+# when pwsh exists. Python-only on purpose: no C++ tree rebuild is needed to
+# hold the packaging contract, and the verifier is a standalone artifact.
+if(Python_EXECUTABLE)
+  add_test(NAME bundle_manifest_conformance
+    COMMAND "${Python_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tests/fixtures/bundle_manifest/conformance.py"
+            "--script" "${CMAKE_SOURCE_DIR}/scripts/verify_bundle_manifest.py")
+endif()

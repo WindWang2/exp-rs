@@ -1,6 +1,8 @@
 # bundle_manifest.ps1 - manifest writer/verifier for the offline classroom
-# bundle (goal D7). Contract: packaging/OFFLINE_BUNDLE.md. Twin of the Python
-# block inside scripts/build_offline_bundle.sh.
+# bundle (goal D7; schema /2 added by deployment-packaging-11/F19). Contract:
+# packaging/OFFLINE_BUNDLE.md. Twin of scripts/verify_bundle_manifest.py (the
+# canonical POSIX/tests verifier) and of the writer block inside
+# scripts/build_offline_bundle.sh.
 #
 # Windows PowerShell 5.1 constraints honored here (no pwsh dependency):
 #   * System.IO.Path.GetRelativePath does not exist on .NET Framework -
@@ -8,15 +10,27 @@
 #   * a function's return value shares the output stream with Write-Output,
 #     so Test-Bundle reports its verdict through $script:BUNDLE_VERDICT
 #     instead of `return` (a multi-element return is always truthy).
+#
+# Schemas: writes /2 by default (-Schema 1 for the legacy shape). Verifying
+# accepts both /1 and /2 and refuses any other major with exit 2 (a newer
+# bundle must never half-verify). The POSIX verifier's escaping-symlink rule
+# is intentionally not mirrored: Windows builders ship dereferenced files
+# (robocopy default), so a bundle-side symlink is a POSIX-shaped anomaly.
 param(
   [Parameter(Mandatory = $false)] [string] $Bundle,
   [Parameter(Mandatory = $false)] [string] $Version,
   [Parameter(Mandatory = $false)] [int] $MaxMb = 250,
+  [Parameter(Mandatory = $false)] [ValidateSet("1", "2")] [string] $Schema = "2",
+  [Parameter(Mandatory = $false)] [hashtable] $Components,
+  [Parameter(Mandatory = $false)] [hashtable] $BuildOptions,
   [Parameter(Mandatory = $false)] [string] $Verify
 )
 
 $ErrorActionPreference = "Stop"
 $script:BUNDLE_VERDICT = $false
+$script:VERIFY_EXIT = 1
+
+$script:SUPPORTED_SCHEMAS = @("sicnu.offline_bundle/1", "sicnu.offline_bundle/2")
 
 # Substring-based relative path (PS 5.1 has no [IO.Path]::GetRelativePath).
 function Get-RelPath([string] $root, [string] $fullName) {
@@ -49,12 +63,18 @@ function Test-Bundle([string] $root) {
   $root = (Get-Item -LiteralPath $root).FullName
   $manifestPath = Join-Path $root "manifest.json"
   if (-not (Test-Path -LiteralPath $manifestPath)) {
-    Write-Output "BUNDLE VERIFY FAIL $root (no manifest.json)"; return
+    Write-Output "cannot verify: no manifest.json under $root"
+    $script:VERIFY_EXIT = 2
+    return
   }
   $m = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
-  if ($m.schema -ne "sicnu.offline_bundle/1") {
-    Write-Output "BUNDLE VERIFY FAIL $root (bad manifest schema: $($m.schema))"; return
+  if ($script:SUPPORTED_SCHEMAS -notcontains $m.schema) {
+    Write-Output ("cannot verify: unsupported manifest schema: '{0}' (this reader supports {1})" -f `
+      $m.schema, ($script:SUPPORTED_SCHEMAS -join " / "))
+    $script:VERIFY_EXIT = 2
+    return
   }
+  $script:VERIFY_EXIT = 1
   $bad = @(); $total = [long] 0; $count = 0
   $listed = @{}
   foreach ($f in $m.files) { $listed[$f.path] = $true }
@@ -94,6 +114,22 @@ function Test-Bundle([string] $root) {
       $bad += "required missing: $req"
     }
   }
+  # /2 declared-provenance sections: shape-checked only (structure, never
+  # content) — the values are builder declarations, not derived facts.
+  if ($m.schema -eq "sicnu.offline_bundle/2") {
+    foreach ($key in @("components", "build_options", "compat")) {
+      $section = $m.$key
+      if ($null -ne $section -and $section.GetType().Name -ne "PSCustomObject") {
+        $bad += "$key must be an object"
+      }
+    }
+    if ($null -ne $m.compat -and $null -ne $m.compat.min_reader_schema) {
+      if ($m.compat.min_reader_schema -gt 2) {
+        $bad += ("compat.min_reader_schema {0} exceeds this reader's newest schema (2)" -f `
+          $m.compat.min_reader_schema)
+      }
+    }
+  }
   $mb = [math]::Round($total / 1MB, 1)
   $verdict = "PASS"; if ($bad.Count -gt 0 -or $mb -gt $m.size_ceiling_mb) { $verdict = "FAIL" }
   Write-Output "BUNDLE VERIFY $verdict $root ($count files, $mb MB / ceiling $($m.size_ceiling_mb) MB)"
@@ -104,7 +140,8 @@ function Test-Bundle([string] $root) {
 
 if ($Verify -ne "") {
   Test-Bundle $Verify
-  if ($script:BUNDLE_VERDICT) { exit 0 } else { exit 1 }
+  if (-not $script:BUNDLE_VERDICT) { exit $script:VERIFY_EXIT }
+  exit 0
 }
 
 if ($Bundle -eq "" -or $Version -eq "") {
@@ -115,17 +152,27 @@ $required = @("bin/", "data/samples/", "data/labs/grading/", "data/fonts/",
               "data/runtime/proj/", "labs/lab1/",
               "RUN.cmd", "GENERATE_SAMPLES.cmd", "GRADE_ALL.cmd", "VERIFY.cmd",
               "VERIFY.ps1", "README-zh.md", "manifest.json")
+$schemaString = "sicnu.offline_bundle/$Schema"
+if ($Schema -eq "2") {
+  # /2 ships the in-bundle Linux verifier and its canonical engine.
+  $required = $required + @("VERIFY.sh", "tools/verify_bundle_manifest.py")
+}
 $files = Get-ManifestFiles $Bundle
 $manifest = [ordered] @{
-  schema = "sicnu.offline_bundle/1"
+  schema = $schemaString
   bundle_version = $Version
   created_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:sszzz")
   size_ceiling_mb = $MaxMb
   required = $required
   files = $files
 }
+if ($Schema -eq "2") {
+  if ($Components) { $manifest.components = $Components }
+  if ($BuildOptions) { $manifest.build_options = $BuildOptions }
+  $manifest.compat = [ordered] @{ min_reader_schema = 1; bundle_kind = "lab-cli" }
+}
 $path = Join-Path $Bundle "manifest.json"
 $json = $manifest | ConvertTo-Json -Depth 4
 [System.IO.File]::WriteAllText($path, $json, (New-Object System.Text.UTF8Encoding($false)))
-Write-Output "manifest: $($files.Count) files"
+Write-Output "manifest: $($files.Count) files (schema $schemaString)"
 exit 0
