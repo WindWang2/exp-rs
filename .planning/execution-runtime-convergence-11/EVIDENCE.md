@@ -94,3 +94,10 @@
 - `test_diagnostics_contract_9` 捕获本 track 两个新错误码缺 curated page → 已在 `data/help/diagnostics.json` 追加两条 operator 家族页面（+47 行 append-only），**operator 家族 0 残留**。
 - 该套件其余 7 个失败全部是 harness 家族码（CATEGORICAL_MISMATCH / FACT_CONFLICT 等，来自 master 的 src/agent/harness/harness_error.cpp，D18/mission track 产物）——pre-existing，本 diff 零重叠（对照：本 diff 未新增任何 harness 码，agent 目录仅 1 个 build-unblock 文件）。
 - `test_scientific_contract_10`（`rs:change` 缺合约记录）与 `test_help_coverage`（workbench.* help 缺失、rs_glossary id 空）失败：实体均在 master 上，来自 D15/D18/visual-cartography 合并；本 diff 对 src/contracts、rs_operators_init、help 数据零改动（`git diff --name-only | grep -c` = 0）。pre-existing 记录。
+
+## 终态（2026-09-16）
+
+- 分支 `zcode/execution-runtime-convergence-11` 已推送（不 force）；**PR #1009 已创建（OPEN, MERGEABLE, 未 merge）**；不等待线上 CI。
+- HEAD = 5123444dca977b3be6e50c76a4c820cfb2205f87；origin/master = a5b11b7f（自基线未动，无需 rebase）。
+- `git diff --check origin/master...HEAD` exit 0；冲突标记 0；diff 57+ 文件无二进制/生成物；工作树干净（仅被忽略的 .planning 非 md 本地日志）。
+- Oracle 状态：1 ✅（架构网+行为）2 ✅（真实崩溃零重算+漂移拒绝）3 ✅（队列/scratch/遥测硬上限+故障测试）4 ✅（证据在案）5 ✅（#991/#992 已合并，本 diff 不触碰其他 open PR 文件）6 ✅（diff check/标记/secret/生成物）7 ✅（14 套件连续两遍原样全绿）8 ✅（两轮独立 review，P0=P1=0，PR 已创建未 merge）。
