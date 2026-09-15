@@ -66,6 +66,12 @@ add_library(sicnu_processing SHARED
     algorithms/mnf_transform.cpp
     algorithms/spectral_roi.cpp
     algorithms/satellite_products.cpp
+    algorithms/gcp_manager.cpp
+    algorithms/geometric_transform.cpp
+    algorithms/tps_interpolator.cpp
+    algorithms/feature_matcher.cpp
+    algorithms/resampler.cpp
+    algorithms/pansharpening.cpp
 
     # Temporal (multi-date) remote sensing core: time semantics, collection
     # model, scientific preflight, bounded streaming reader, stable stats.

@@ -9085,3 +9085,36 @@ sicnu_discover_tests(test_processing_catalog_ux)
   set_tests_properties(test_d16_temporal_phenology_e2e PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
     TIMEOUT 600)
+# ---- D14: geometric registration workbench (ADR 0159) ----
+sicnu_add_test(test_gcp_manager)
+sicnu_add_test(test_geometric_transform)
+sicnu_add_test(test_tps_interpolator)
+sicnu_add_test(test_feature_matcher)
+sicnu_add_test(test_resampler)
+sicnu_add_test(test_pansharpening)
+
+# D14 Package G: dual-window georeferencing workbench (app sources compiled in).
+add_executable(test_georef_dual_window_workbench
+  test_georef_dual_window_workbench.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/georef_dual_window.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/map_tools/swipe_map_tool.cpp
+)
+target_link_libraries(test_georef_dual_window_workbench PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+  sicnu_processing
+)
+target_include_directories(test_georef_dual_window_workbench PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_georef_dual_window_workbench PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_georef_dual_window_workbench)
+sicnu_add_test(test_geometric_agent_tools)
+sicnu_add_test(test_d14_geometric_registration_e2e)

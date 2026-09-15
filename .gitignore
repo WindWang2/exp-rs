@@ -193,6 +193,10 @@ vendor/
 !.planning/professional-workbench-visual-cartography-10/
 .planning/professional-workbench-visual-cartography-10/*
 !.planning/professional-workbench-visual-cartography-10/*.md
+# geometric-registration-workbench (D14): track planning notes (markdown only).
+!.planning/geometric-registration-workbench/
+.planning/geometric-registration-workbench/*
+!.planning/geometric-registration-workbench/*.md
 .zcode/
 
 # IDE / editor / OS artifacts
