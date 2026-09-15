@@ -135,16 +135,6 @@ TEST_CASE( "index answers matches brute force at the 100k logical scale",
     }
 }
 
-// Local approx helper to keep the include surface small.
-namespace
-{
-struct Catch2Approx
-{
-    explicit Catch2Approx( double v ) : value( v ) {}
-    bool operator==( double other ) const { return std::fabs( other - value ) < 1e-9; }
-    double value;
-};
-} // namespace
 
 TEST_CASE( "attach fails closed above the feature cap and honors the env override",
            "[editing][index][f11][negative][scale]" )

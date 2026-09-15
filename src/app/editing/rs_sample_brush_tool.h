@@ -78,5 +78,6 @@ class RsSampleBrushTool : public QgsMapTool
     QVector<QgsGeometry> mStamps;
     QgsGeometry mCombined;   // coalesced head of the stroke (cap pressure)
     int mCoalescedCount = 0; // stamps already merged into mCombined
+    int mRubberStamps = 0;   // stamps currently drawn in the rubber band
     QgsRubberBand *mRubber = nullptr;
 };

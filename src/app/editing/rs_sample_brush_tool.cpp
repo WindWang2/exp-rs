@@ -119,6 +119,7 @@ void RsSampleBrushTool::canvasPressEvent( QgsMapMouseEvent *e )
     mStamps.clear();
     mCombined = QgsGeometry();
     mCoalescedCount = 0;
+    mRubberStamps = 0;
     mRubber->reset( Qgis::GeometryType::Polygon );
     mRubber->show();
 
@@ -127,6 +128,7 @@ void RsSampleBrushTool::canvasPressEvent( QgsMapMouseEvent *e )
     if ( !disc.isNull() )
     {
         mStamps.append( disc );
+        mRubberStamps = 1;
         mRubber->addGeometry( disc, mLayer.data() );
     }
 }
@@ -144,7 +146,11 @@ void RsSampleBrushTool::canvasMoveEvent( QgsMapMouseEvent *e )
     if ( disc.isNull() )
         return;
     mStamps.append( disc );
-    mRubber->addGeometry( disc, mLayer.data() );
+    if ( mRubberStamps < kMaxStampsPerStroke )
+    {
+        mRubber->addGeometry( disc, mLayer.data() );
+        ++mRubberStamps;
+    }
 
     if ( mStamps.size() >= kMaxStampsPerStroke )
     {
@@ -167,6 +173,7 @@ void RsSampleBrushTool::cancelStroke()
     mStamps.clear();
     mCombined = QgsGeometry();
     mCoalescedCount = 0;
+    mRubberStamps = 0;
     if ( mRubber )
     {
         mRubber->reset( Qgis::GeometryType::Polygon );

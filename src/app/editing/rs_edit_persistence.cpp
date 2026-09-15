@@ -1,6 +1,7 @@
 // rs_edit_persistence.cpp — see rs_edit_persistence.h.
 #include "rs_edit_persistence.h"
 
+#include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
 
@@ -88,10 +89,11 @@ RsEditPersistence::ExportResult RsEditPersistence::exportLayer( QgsVectorLayer *
     // Atomic write: temp file in the target's directory (same filesystem),
     // then rename over the target only after the writer succeeded.
     const QFileInfo targetInfo( targetPath );
-    const QString tempPath = QStringLiteral( "%1/%2.tmp-%3" )
+    const QString tempPath = QStringLiteral( "%1/%2.tmp-%3-%4" )
                                .arg( targetInfo.absolutePath(),
                                      targetInfo.fileName() )
-                               .arg( QCoreApplication::applicationPid() );
+                               .arg( QCoreApplication::applicationPid() )
+                               .arg( QDateTime::currentMSecsSinceEpoch() );
 
     QgsVectorFileWriter::SaveVectorOptions options;
     options.driverName = driver;
@@ -123,15 +125,21 @@ RsEditPersistence::ExportResult RsEditPersistence::exportLayer( QgsVectorLayer *
         return result;
     }
 
-    // Rename may need to replace an existing target.
-    if ( QFile::exists( targetPath ) && !QFile::remove( targetPath ) )
+    // POSIX rename(2) replaces an existing target atomically — no window
+    // where the previous good export is already gone. Qt may refuse the
+    // replacement on platforms without that guarantee, so removal is a
+    // FALLBACK only (documented: atomic on POSIX).
+    if ( !QFile::rename( written, targetPath ) && QFile::exists( targetPath ) )
     {
-        removeTemp( tempPath );
-        removeTemp( written );
-        result.error = QStringLiteral( "could not replace existing target file" );
-        return result;
+        if ( !QFile::remove( targetPath ) || !QFile::rename( written, targetPath ) )
+        {
+            removeTemp( tempPath );
+            removeTemp( written );
+            result.error = QStringLiteral( "could not replace existing target file" );
+            return result;
+        }
     }
-    if ( !QFile::rename( written, targetPath ) )
+    else if ( !QFile::exists( targetPath ) )
     {
         removeTemp( tempPath );
         removeTemp( written );

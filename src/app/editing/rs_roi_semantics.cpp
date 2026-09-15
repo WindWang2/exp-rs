@@ -198,8 +198,8 @@ RsRoiStatsResult RsRoiSemantics::bandStatsPreview(
             return result;
         }
 
+        // Pass 1: location (min/max/mean) over valid pixels.
         double sum = 0.0;
-        double sumSq = 0.0;
         double minV = 0.0;
         double maxV = 0.0;
         qlonglong valid = 0;
@@ -231,7 +231,6 @@ RsRoiStatsResult RsRoiSemantics::bandStatsPreview(
                 maxV = std::max( maxV, v );
             }
             sum += v;
-            sumSq += v * v;
             ++valid;
         }
 
@@ -241,9 +240,28 @@ RsRoiStatsResult RsRoiSemantics::bandStatsPreview(
         {
             stats.min = minV;
             stats.max = maxV;
-            stats.mean = sum / valid;
-            const double variance = std::max( 0.0, sumSq / valid - stats.mean * stats.mean );
-            stats.stddev = std::sqrt( variance );
+            const double mean = sum / valid;
+
+            // Pass 2: central moments. The naive sumSq/n - mean^2 shortcut
+            // catastrophically cancels on satellite DN grids (mean ~1e4-1e5,
+            // spread ~1) — the block is already in memory, so a second pass
+            // over the same index set is the numerically honest choice.
+            double centralSumSq = 0.0;
+            for ( auto it = windowIndices.constBegin(); it != windowIndices.constEnd(); ++it )
+            {
+                const quint64 idx = *it;
+                const int localRow = static_cast<int>( idx / win.width );
+                const int localCol = static_cast<int>( idx % win.width );
+                if ( block->isNoData( localRow, localCol ) )
+                    continue;
+                const double v = block->value( localRow, localCol );
+                if ( std::isnan( v ) )
+                    continue;
+                const double d = v - mean;
+                centralSumSq += d * d;
+            }
+            stats.mean = mean;
+            stats.stddev = std::sqrt( std::max( 0.0, centralSumSq / valid ) );
         }
         result.validPixelCount = validMaskCount < 0 ? valid : std::min( result.validPixelCount, valid );
         validMaskCount = result.validPixelCount;

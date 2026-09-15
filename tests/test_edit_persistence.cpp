@@ -125,27 +125,21 @@ TEST_CASE( "GPKG export round-trips via a fresh layer read",
     const RsEditPersistence::ExportResult result =
       RsEditPersistence::exportLayerToGpkg( layer, target, QStringLiteral( "samples" ) );
     INFO( "GPKG export error: " << result.error.toStdString() );
-    if ( result.ok )
+    // The GPKG driver is present in this build profile; a regression in
+    // exportLayerToGpkg must FAIL this test, not slip through an else branch.
+    REQUIRE( result.ok );
     {
-        // GPKG writer succeeded (GDAL driver present): the file must be a
-        // valid SQLite/GPKG container (magic bytes = "SQLite format 3").
+        // Valid SQLite/GPKG container (magic bytes = "SQLite format 3").
         QFile file( target );
         REQUIRE( file.open( QIODevice::ReadOnly ) );
         const QByteArray magic = file.read( 15 );
         CHECK( magic.startsWith( "SQLite format 3" ) );
         CHECK( countFeatures( layer ) == 3 );
     }
-    else
-    {
-        // GPKG driver unavailable in this profile: fail-closed with a
-        // reason, no file left behind.
-        CHECK_FALSE( result.error.isEmpty() );
-        CHECK_FALSE( QFile::exists( target ) );
-    }
     delete layer;
 }
 
-TEST_CASE( "failed export preserves the previous target and cleans temp files",
+TEST_CASE( "pre-IO rejection preserves the previous target byte-identically",
            "[editing][persistence][f11][negative]" )
 {
     PersistFixture fx;
@@ -161,7 +155,8 @@ TEST_CASE( "failed export preserves the previous target and cleans temp files",
         file.write( previous );
     }
 
-    // Invalid source layer → writer refuses; target must be untouched.
+    // Invalid source layer → refused in exportLayer's validity gate, before
+    // any temp file or writer exists; the target must be untouched.
     QgsVectorLayer broken( QStringLiteral( "not-a-valid-uri" ),
                            QStringLiteral( "broken" ), QStringLiteral( "memory" ) );
     REQUIRE_FALSE( broken.isValid() );
@@ -178,6 +173,33 @@ TEST_CASE( "failed export preserves the previous target and cleans temp files",
 
     const QFileInfoList entries = QDir( dir.path() ).entryInfoList( QStringList() << QStringLiteral( "*.tmp-*" ) );
     CHECK( entries.isEmpty() );
+}
+
+TEST_CASE( "writer failure inside an unwritable directory fails closed and leaves no temp residue",
+           "[editing][persistence][f11][negative]" )
+{
+    PersistFixture fx;
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    // A read-only directory forces a genuine writer-side failure
+    // (ErrCreateDataSource), i.e. the failure paths AFTER exportLayer's
+    // validity gate are exercised.
+    const QString roDirPath = dir.filePath( QStringLiteral( "ro" ) );
+    REQUIRE( QDir( dir.path() ).mkpath( QStringLiteral( "ro" ) ) );
+    QFile::setPermissions( roDirPath, QFile::ReadOwner | QFile::ExeOwner );
+
+    QgsVectorLayer *layer = makeSampleLayer( QStringLiteral( "src" ) );
+    const RsEditPersistence::ExportResult result =
+      RsEditPersistence::exportLayer( layer, roDirPath + QStringLiteral( "/samples.geojson" ),
+                                      QStringLiteral( "samples" ) );
+    CHECK_FALSE( result.ok );
+    CHECK_FALSE( result.error.isEmpty() );
+    CHECK_FALSE( QFile::exists( roDirPath + QStringLiteral( "/samples.geojson" ) ) );
+    const QFileInfoList entries = QDir( roDirPath ).entryInfoList( QStringList() << QStringLiteral( "*.tmp-*" ) );
+    CHECK( entries.isEmpty() );
+    QFile::setPermissions( roDirPath, QFile::WriteOwner | QFile::ReadOwner | QFile::ExeOwner );
+    delete layer;
 }
 
 TEST_CASE( "unsupported suffixes are refused before any IO",

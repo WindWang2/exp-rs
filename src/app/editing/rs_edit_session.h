@@ -115,7 +115,9 @@ class RsEditSession : public QObject
     /// Emitted whenever any tracked fact changed (coalesced per event).
     void stateChanged();
     void layerStateChanged( const QString &layerId );
-    /// After a commit attempt: ok=false carries the collected error.
+    /// Emitted after a commit ATTEMPT on an attached, alive layer
+    /// (pre-flight refusals like "not attached"/"layer destroyed" return
+    /// false without emitting). ok=false carries the collected error.
     void commitFinished( const QString &layerId, bool ok, const QString &error );
 
   private:

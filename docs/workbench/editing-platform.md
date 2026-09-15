@@ -102,9 +102,11 @@ if this document and the tests disagree, that is a bug.
 
 * `exportLayer(layer, targetPath, layerName)` — suffix decides the driver
   (`.gpkg` → GPKG, `.geojson` → GeoJSON); anything else is refused.
-* Writes go to `<target>.tmp-<pid>` and atomically rename over the target;
-  every failure path removes the temp file and leaves any previous target
-  byte-identical. Paths are QString (Unicode-safe).
+* Writes go to `<target>.tmp-<pid>-<msecs>` and rename over the target —
+  atomic on POSIX (rename(2) replaces); platforms without atomic
+  replacement fall back to remove+rename. Every failure path removes the
+  temp file and leaves any previous target byte-identical. Paths are
+  QString (Unicode-safe).
 * `commitReported(layers, errors)` commits dirty layers with per-layer
   error strings (never discards commit results).
 
@@ -112,6 +114,10 @@ if this document and the tests disagree, that is a bug.
 
 * Legacy `main_window_vector.cpp` dialogs are not yet routed through the
   session (migration follow-up).
+* The workbench-mounted session starts EMPTY: layers are attached as
+  edit sessions begin (mount wiring for `MapToolManager` start/stop is a
+  follow-up). Until then the agent surface reports `layers: []` in a
+  fresh app run; the facts contract itself is fully exercised by tests.
 * No OGR provider plugins in the current build profile: file-based
   re-open tests degrade to format-level oracles; GPKG round-trip via
   `QgsVectorLayer` re-open requires a provider build.

@@ -258,22 +258,6 @@ TEST_CASE( "CRS transform of the ROI is applied and fail-closed",
           << " extent: " << layer.extent().toString().toStdString()
           << " roi bbox: " << roi.boundingBox().toString().toStdString()
           << " crs auth: " << layer.crs().authid().toStdString() );
-    // Replicate the internal pipeline step by step to expose the divergence.
-    {
-        QgsGeometry probe = roi;
-        QgsCoordinateTransform t( wgs84, layer.crs(), QgsProject::instance()->transformContext() );
-        try
-        {
-            probe.transform( t );
-            INFO( "probe transformed bbox: " << probe.boundingBox().toString().toStdString() );
-            INFO( "probe intersect extent: " << probe.boundingBox().intersect( layer.extent() ).toString().toStdString()
-                  << " width=" << probe.boundingBox().intersect( layer.extent() ).width() );
-        }
-        catch ( const QgsCsException &e )
-        {
-            INFO( "probe transform threw" );
-        }
-    }
     CHECK( transformed.ok );
     CHECK( transformed.pixelCount > 0 );
 

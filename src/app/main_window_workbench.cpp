@@ -27,10 +27,12 @@
 #include "workbench/model_workbench_panel.h"
 #include "workbench/object_identity.h"
 #include "workbench/mission_context.h"
-// F11 unblocking include (pre-existing master break): this TU constructs and
-// dereferences rs::app::GeorefDualWindow but relied on a transitive include
-// that no longer exists after the D14/D17 merges — the TU has not compiled
-// since. See .planning/qgis-editing-annotation-11/EVIDENCE.md OUT_OF_SCOPE.
+// F11 unblocking include (pre-existing master break): this TU dereferences
+// the rs::app::GeorefDualWindow returned by openGeorefDualWindow() (passes
+// it to addDockWidget and reads members) but relied on a transitive include
+// that no longer exists after the D14/D17 merges — compiling this TU on
+// pristine master fails with incomplete-type errors. See
+// .planning/qgis-editing-annotation-11/EVIDENCE.md OUT_OF_SCOPE.
 #include "workbench/georef_dual_window.h"
 #include "editing/rs_edit_agent_tool.h"
 #include "editing/rs_edit_session.h"
@@ -633,8 +635,7 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
         sources.snapping = snappingController;
         auto *editStateTool = new RsEditAgentTool( sources );
         sicnu::agent::spatial_tools::SpatialToolRegistry::instance().registerTool(
-            sicnu::agent::spatial_tools::SpatialToolPtr{ editStateTool }
-);
+          sicnu::agent::spatial_tools::SpatialToolPtr{ editStateTool } );
     }
 
     // ── Cartography bridge (Workbench 10.0, C-1) ──────────────────────

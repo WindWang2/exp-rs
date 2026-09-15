@@ -226,6 +226,35 @@ TEST_CASE( "brush refuses without target layer / non-editable layer / lock",
     }
 }
 
+TEST_CASE( "brush refuses a single-part target layer explicitly",
+           "[editing][brush][f11][negative]" )
+{
+    ensureApp();
+    ToolFixture base;
+    // Single-part polygon layer: a multipart stroke would only fail later
+    // at commit — the tool must refuse up front, by name.
+    QgsVectorLayer layer( QStringLiteral( "Polygon?crs=EPSG:4326&field=class:int" ),
+                          QStringLiteral( "single" ), QStringLiteral( "memory" ) );
+    REQUIRE( layer.startEditing() );
+    REQUIRE( base.session.attachLayer( &layer ).isEmpty() );
+
+    RsSampleBrushTool tool( &base.canvas );
+    tool.setTargetLayer( &layer );
+    tool.setSession( &base.session );
+    tool.setRadius( 10.0 );
+    QSignalSpy refused( &tool, &RsSampleBrushTool::strokeRefused );
+
+    // Two disjoint discs (60 units apart, r=10) combine into a MULTIPART
+    // stroke — exactly the case a single-part layer must refuse.
+    firePress( &base.canvas, &tool, 100, 100 );
+    fireMove( &base.canvas, &tool, 160, 100 );
+    fireRelease( &base.canvas, &tool, 160, 100 );
+
+    REQUIRE( refused.count() == 1 );
+    CHECK( refused.first().at( 0 ).toString().contains( QStringLiteral( "single-part" ) ) );
+    CHECK( liveCount( &layer ) == 0 );
+}
+
 TEST_CASE( "erase stroke removes exactly the intersecting samples; single undo restores",
            "[editing][erase][f11][oracle1]" )
 {

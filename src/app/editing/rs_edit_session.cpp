@@ -90,10 +90,11 @@ QString RsEditSession::detachLayer( const QString &layerId, bool rollbackDirty )
         return QString();
     if ( QgsVectorLayer *layer = it->layer.data() )
     {
-        if ( rollbackDirty && layer->isEditable() && layer->isModified() )
+        if ( rollbackDirty && layer->isEditable() )
         {
             // Default deleteBuffer=true: discards changes AND exits edit mode,
-            // leaving the layer in a consistent non-editing state.
+            // leaving the layer in a consistent non-editing state (the header
+            // contract — also for clean layers).
             layer->rollBack();
         }
     }

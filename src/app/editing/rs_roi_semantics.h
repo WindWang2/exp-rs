@@ -43,7 +43,10 @@ struct RsRoiStatsResult
     bool ok = false;
     QString error;                 // fail-closed reason when ok == false
     qlonglong pixelCount = 0;      // covered pixels inside the raster extent
-    qlonglong validPixelCount = 0; // covered pixels that carry data (band 1 mask)
+    /// Covered pixels that carry data; when several bands are requested this
+    /// is the running MINIMUM of per-band valid counts (band-intersection
+    /// mask), never a sum.
+    qlonglong validPixelCount = 0;
     QVector<RsRoiBandStats> bands;
 };
 
