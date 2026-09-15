@@ -1,27 +1,27 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u68ee\u6797",
         "\u519c\u7530",
         "\u6c34\u4f53"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u68ee\u6797\u6270\u52a8\u5e74\u4efd\u5236\u56fe",
         "\u571f\u5730\u5229\u7528\u8f6c\u578b\u68c0\u6d4b"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "cost_class" : "O(tile \u00d7 scenes \u00d7 breaks)",
       "grade" : "bit_exact",
@@ -30,7 +30,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "NOT_SUPPORTED",
@@ -39,10 +39,10 @@
       }
     ],
     "family" : "temporal",
-    "io" : 
+    "io" :
     {
       "inputs" : [],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "integer",
@@ -86,7 +86,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "true",
@@ -101,7 +101,7 @@
           "type" : "integer"
         },
         {
-          "enum" : 
+          "enum" :
           [
             "blue",
             "green",
@@ -122,7 +122,7 @@
         },
         {
           "default" : "keep_all",
-          "enum" : 
+          "enum" :
           [
             "keep_all",
             "reject"
@@ -174,7 +174,7 @@
       ]
     },
     "limitations" : [],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
@@ -182,15 +182,15 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u65f6\u5e8f\u65ad\u70b9\u68c0\u6d4b\uff1a\u9010\u50cf\u5143\u5206\u6bb5\u7ebf\u6027\u8d8b\u52bf\u62df\u5408\u68c0\u6d4b\u7ed3\u6784\u6027\u7a81\u53d8\u70b9\uff08\u6270\u52a8\u3001\u6482\u8352\u3001\u6d2a\u6cdb\uff09\uff0c\u5b9a\u4f4d\u53d8\u5316\u53d1\u751f\u65f6\u95f4\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "\u5206\u6bb5\u7ebf\u6027\u56de\u5f52",
         "\u7ed3\u6784\u65ad\u70b9",
         "\u7a81\u53d8\u68c0\u6d4b"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9065\u611f\u5e94\u7528\u5206\u6790"
       ],
@@ -203,7 +203,7 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "temporal",
     "breakpoint",

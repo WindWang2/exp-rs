@@ -1,15 +1,15 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u519c\u7530",
         "\u8349\u5730",
         "\u68ee\u6797"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u7269\u5019\u5efa\u6a21\u524d\u7684\u6a21\u578b\u590d\u6742\u5ea6\u9009\u62e9",
         "\u8c10\u6ce2\u9636\u6570\u8bba\u8bc1",
@@ -17,12 +17,12 @@
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "cost_class" : "O(candidates \u00d7 tile \u00d7 scenes \u00d7 iterations \u00d7 terms\u00b2) \u2014 up to (maxHarmonics+1) \u00d7 (maxBreaks+1) fits per pixel; \u00d7 (cvFolds+1) for block_cv",
       "grade" : "bit_exact",
@@ -31,7 +31,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -45,10 +45,10 @@
       }
     ],
     "family" : "temporal",
-    "io" : 
+    "io" :
     {
       "inputs" : [],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "json",
@@ -82,7 +82,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "true",
@@ -97,7 +97,7 @@
           "type" : "integer"
         },
         {
-          "enum" : 
+          "enum" :
           [
             "blue",
             "green",
@@ -126,7 +126,7 @@
         },
         {
           "default" : "keep_all",
-          "enum" : 
+          "enum" :
           [
             "keep_all",
             "reject"
@@ -166,7 +166,7 @@
         },
         {
           "default" : "aicc",
-          "enum" : 
+          "enum" :
           [
             "aicc",
             "bic",
@@ -196,27 +196,27 @@
       ]
     },
     "limitations" : [],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
     "operator_group" : "temporal",
-    "prerequisites" : 
+    "prerequisites" :
     [
       ">= 4 valid samples"
     ],
     "schema_version" : 2,
     "summary" : "\u9010\u50cf\u5143\u6709\u754c\u6a21\u578b\u9009\u62e9\uff1a{\u8c10\u6ce2\u9636\u6570} \u00d7 {\u65ad\u70b9\u9884\u7b97} \u5019\u9009\u7f51\u683c\u6309 AICc/BIC/\u5206\u5757 CV \u6253\u5206\uff0c\u5e73\u5c40\u53d6\u6700\u5c0f\u6a21\u578b\uff0c\u9000\u5316\u50cf\u5143\u5982\u5b9e\u62d2\u7edd\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "AICc/BIC",
         "\u5206\u5757\u4ea4\u53c9\u9a8c\u8bc1",
         "\u786e\u5b9a\u6027\u5e73\u5c40\u89c4\u5219",
         "\u6a21\u578b\u9000\u5316\u4e0e\u62d2\u7edd"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u65f6\u95f4\u5e8f\u5217\u5206\u6790",
         "\u7edf\u8ba1\u65b9\u6cd5"
@@ -230,7 +230,7 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "temporal",
     "model-selection",

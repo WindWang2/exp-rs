@@ -1,14 +1,14 @@
 {
-  "capability" : 
+  "capability" :
   {
     "applicability" : {},
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "cost_class" : "O(tile \u00d7 scenes + tile \u00d7 calendarPoints)",
       "grade" : "bit_exact",
@@ -19,10 +19,10 @@
     },
     "failure_modes" : [],
     "family" : "temporal",
-    "io" : 
+    "io" :
     {
       "inputs" : [],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "integer",
@@ -71,7 +71,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "true",
@@ -86,7 +86,7 @@
           "type" : "integer"
         },
         {
-          "enum" : 
+          "enum" :
           [
             "blue",
             "green",
@@ -115,7 +115,7 @@
         },
         {
           "default" : "keep_all",
-          "enum" : 
+          "enum" :
           [
             "keep_all",
             "reject"
@@ -144,7 +144,7 @@
         },
         {
           "default" : "linear",
-          "enum" : 
+          "enum" :
           [
             "nearest",
             "window_mean",
@@ -174,7 +174,7 @@
       ]
     },
     "limitations" : [],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
@@ -190,7 +190,7 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "temporal",
     "resampling",

@@ -1,33 +1,33 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u690d\u88ab",
         "\u519c\u7530",
         "\u6797\u5730",
         "\u8349\u5730"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u690d\u88ab\u957f\u52bf\u76d1\u6d4b",
         "\u519c\u4f5c\u7269\u4f30\u4ea7\u9884\u5904\u7406",
         "\u751f\u6001\u53d8\u5316\u76d1\u6d4b"
       ]
     },
-    "band_roles" : 
+    "band_roles" :
     {
       "nir" : 1,
       "red" : 1
     },
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -35,7 +35,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "BAND_ROLE_UNRESOLVED",
@@ -49,9 +49,9 @@
       }
     ],
     "family" : "spectral",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -59,7 +59,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "integer",
@@ -82,7 +82,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "4",
@@ -103,11 +103,11 @@
         }
       ]
     },
-    "limitations" : 
+    "limitations" :
     [
       "Band numbers are resolved from SICNU_BAND_ROLE when omitted."
     ],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
@@ -115,15 +115,15 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u5f52\u4e00\u5316\u690d\u88ab\u6307\u6570 NDVI = (NIR-Red)/(NIR+Red)\uff0c\u6700\u5e38\u7528\u7684\u690d\u88ab\u6d3b\u529b\u4e0e\u8986\u76d6\u5ea6\u6307\u6807\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "NDVI",
         "\u690d\u88ab\u6307\u6570",
         "\u7ea2\u8fb9"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406",
         "\u690d\u7269\u9065\u611f"
@@ -137,7 +137,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "spectral",
     "ndvi",

@@ -1,31 +1,31 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u6c34\u4f53",
         "\u57ce\u5e02\u6c34\u4f53",
         "\u6e7f\u5730"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u57ce\u5e02\u6c34\u4f53\u63d0\u53d6",
         "\u7ec6\u5c0f\u6c34\u4f53\u8bc6\u522b"
       ]
     },
-    "band_roles" : 
+    "band_roles" :
     {
       "green" : 1,
       "swir" : 1
     },
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -33,7 +33,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "BAND_ROLE_UNRESOLVED",
@@ -42,9 +42,9 @@
       }
     ],
     "family" : "spectral",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -52,7 +52,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "integer",
@@ -75,7 +75,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "2",
@@ -96,11 +96,11 @@
         }
       ]
     },
-    "limitations" : 
+    "limitations" :
     [
       "Band numbers are resolved from SICNU_BAND_ROLE when omitted."
     ],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
@@ -108,14 +108,14 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u6539\u8fdb\u578b\u5f52\u4e00\u5316\u6c34\u4f53\u6307\u6570 MNDWI = (Green-SWIR)/(Green+SWIR)\uff0c\u5bf9\u57ce\u9547\u80cc\u666f\u4e2d\u7684\u6c34\u4f53\u66f4\u7a33\u5065\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "MNDWI",
         "\u77ed\u6ce2\u7ea2\u5916"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
@@ -128,7 +128,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "spectral",
     "mndwi",

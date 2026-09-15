@@ -1,26 +1,26 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u77ff\u7269",
         "\u690d\u88ab"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u5149\u8c31\u5f62\u6001\u53d8\u5316\u8bc6\u522b",
         "\u5149\u7167\u4e0d\u4e00\u81f4\u573a\u666f\u7684\u53d8\u5316\u68c0\u6d4b"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : true
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -28,7 +28,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -37,9 +37,9 @@
       }
     ],
     "family" : "change",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -52,7 +52,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "numeric",
@@ -75,7 +75,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "name" : "output",
@@ -85,25 +85,25 @@
       ]
     },
     "limitations" : [],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
     "operator_group" : "temporal",
-    "prerequisites" : 
+    "prerequisites" :
     [
       "Before and after rasters must have equal band count and dimensions."
     ],
     "schema_version" : 2,
     "summary" : "\u5149\u8c31\u89d2\u53d8\u5316\u68c0\u6d4b\uff1a\u4ee5\u4e24\u671f\u5149\u8c31\u5411\u91cf\u7684\u5939\u89d2\u5ea6\u91cf\u5149\u8c31\u5f62\u6001\u53d8\u5316\uff0c\u5bf9\u4eae\u5ea6\u5dee\u5f02\u4e0d\u654f\u611f\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "\u5149\u8c31\u89d2",
         "\u5f62\u6001\u53d8\u5316"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9ad8\u5149\u8c31\u9065\u611f"
       ],
@@ -116,7 +116,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "change-detection",
     "sam",

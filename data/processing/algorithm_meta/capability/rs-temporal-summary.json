@@ -1,25 +1,25 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u4efb\u610f\u5730\u7269"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u65f6\u5e8f\u6570\u636e\u8d28\u91cf\u4f53\u68c0",
         "\u53d8\u5316\u68c0\u6d4b\u524d\u7684\u6982\u8981\u7edf\u8ba1"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "cost_class" : "O(tile \u00d7 scenes)",
       "grade" : "bit_exact",
@@ -28,7 +28,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "GRID_MISMATCH",
@@ -37,10 +37,10 @@
       }
     ],
     "family" : "temporal",
-    "io" : 
+    "io" :
     {
       "inputs" : [],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "raster",
@@ -59,7 +59,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "true",
@@ -74,7 +74,7 @@
           "type" : "integer"
         },
         {
-          "enum" : 
+          "enum" :
           [
             "blue",
             "green",
@@ -95,7 +95,7 @@
         },
         {
           "default" : "keep_all",
-          "enum" : 
+          "enum" :
           [
             "keep_all",
             "reject"
@@ -129,7 +129,7 @@
       ]
     },
     "limitations" : [],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
@@ -137,14 +137,14 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u65f6\u5e8f\u6458\u8981\u7edf\u8ba1\uff1a\u5bf9\u65f6\u5e8f\u7acb\u65b9\u4f53\u6309\u50cf\u5143\u8f93\u51fa\u6700\u5c0f/\u6700\u5927/\u5747\u503c/\u65b9\u5dee\u7b49\u6982\u8981\u56fe\u5c42\uff0c\u7528\u4e8e\u5feb\u901f\u4f53\u68c0\u65f6\u5e8f\u6570\u636e\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "\u65f6\u5e8f\u7edf\u8ba1\u91cf",
         "\u6570\u636e\u6982\u8981"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
@@ -157,7 +157,7 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "temporal",
     "time-series",

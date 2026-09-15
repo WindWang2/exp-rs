@@ -1,14 +1,14 @@
 {
-  "capability" : 
+  "capability" :
   {
     "applicability" : {},
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -18,10 +18,10 @@
     },
     "failure_modes" : [],
     "family" : "spectral",
-    "io" : 
+    "io" :
     {
       "inputs" : [],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "integer",
@@ -35,7 +35,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "name" : "libraryPath",
@@ -77,16 +77,16 @@
         }
       ]
     },
-    "limitations" : 
+    "limitations" :
     [
       "Near-duplicate detection reports pairs below the SAM threshold; it never removes entries by itself."
     ],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
     "operator_group" : "spectral",
-    "prerequisites" : 
+    "prerequisites" :
     [
       "The source library must pass strict validation (loadValidated); sensor projection needs entries with wavelength grids."
     ],
@@ -100,7 +100,7 @@
   "input" : "",
   "output" : "",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "spectral",
     "library"

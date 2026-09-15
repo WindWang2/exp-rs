@@ -1,27 +1,27 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u77ff\u7269",
         "\u690d\u88ab",
         "\u571f\u58e4"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u7aef\u5143\u5149\u8c31\u5e93\u6784\u5efa",
         "\u89e3\u6df7\u524d\u7684\u7aef\u5143\u4f30\u8ba1"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -29,7 +29,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -38,9 +38,9 @@
       }
     ],
     "family" : "hyperspectral",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -48,7 +48,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "array" : true,
@@ -65,7 +65,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "name" : "endmembersOut",
@@ -86,11 +86,11 @@
         }
       ]
     },
-    "limitations" : 
+    "limitations" :
     [
       "PPI finds pixels at the data hull; it assumes endmembers are present as pure pixels in the scene."
     ],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
@@ -98,15 +98,15 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u7aef\u5143\u63d0\u53d6\uff1a\u7528 PPI\uff08\u50cf\u5143\u7eaf\u5ea6\u6307\u6570\uff09\u4ece\u5f71\u50cf\u4e2d\u62bd\u53d6\u6570\u636e\u4e91\u89d2\u70b9\u5904\u7684\u7eaf\u51c0\u5730\u7269\u5149\u8c31\uff0c\u662f\u5149\u8c31\u89e3\u6df7\u7684\u524d\u7f6e\u6b65\u9aa4\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "\u7aef\u5143",
         "\u7eaf\u50cf\u5143",
         "\u5355\u5f62"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9ad8\u5149\u8c31\u9065\u611f"
       ],
@@ -119,7 +119,7 @@
   "input" : "raster",
   "output" : "",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "endmember",
     "hyperspectral",

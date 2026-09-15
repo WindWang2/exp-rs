@@ -1,27 +1,27 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u690d\u88ab",
         "\u6c34\u4f53",
         "\u57ce\u5e02"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "NDVI/NDWI \u65f6\u5e8f\u7acb\u65b9\u4f53\u751f\u4ea7",
         "\u957f\u65f6\u5e8f\u53d8\u5316\u68c0\u6d4b\u8f93\u5165"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "cost_class" : "O(tile \u00d7 scenes)",
       "grade" : "bit_exact",
@@ -30,7 +30,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "BAND_ROLE_UNRESOLVED",
@@ -44,10 +44,10 @@
       }
     ],
     "family" : "temporal",
-    "io" : 
+    "io" :
     {
       "inputs" : [],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "raster",
@@ -61,7 +61,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "true",
@@ -81,7 +81,7 @@
         },
         {
           "default" : "keep_all",
-          "enum" : 
+          "enum" :
           [
             "keep_all",
             "reject"
@@ -92,7 +92,7 @@
         },
         {
           "default" : "NDVI",
-          "enum" : 
+          "enum" :
           [
             "NDVI",
             "EVI",
@@ -128,7 +128,7 @@
       ]
     },
     "limitations" : [],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
@@ -136,14 +136,14 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u65f6\u5e8f\u6307\u6570\u751f\u4ea7\uff1a\u5bf9\u591a\u671f\u5f71\u50cf\u9010\u671f\u8ba1\u7b97\u5149\u8c31\u6307\u6570\u5e76\u5806\u53e0\u4e3a\u65f6\u5e8f\u7acb\u65b9\u4f53\uff0c\u662f\u65f6\u5e8f\u5206\u6790\u7684\u6807\u51c6\u8f93\u5165\u51c6\u5907\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "\u6307\u6570\u65f6\u5e8f",
         "\u65f6\u5e8f\u7acb\u65b9\u4f53"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
@@ -156,7 +156,7 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "temporal",
     "spectral-index",

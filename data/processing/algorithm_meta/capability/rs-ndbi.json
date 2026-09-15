@@ -1,30 +1,30 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u57ce\u5e02",
         "\u4e0d\u900f\u6c34\u9762"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u57ce\u5e02\u6269\u5f20\u76d1\u6d4b",
         "\u4e0d\u900f\u6c34\u9762\u5236\u56fe"
       ]
     },
-    "band_roles" : 
+    "band_roles" :
     {
       "nir" : 1,
       "swir" : 1
     },
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -32,7 +32,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "BAND_ROLE_UNRESOLVED",
@@ -41,9 +41,9 @@
       }
     ],
     "family" : "spectral",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -51,7 +51,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "integer",
@@ -74,7 +74,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "4",
@@ -95,11 +95,11 @@
         }
       ]
     },
-    "limitations" : 
+    "limitations" :
     [
       "Band numbers are resolved from SICNU_BAND_ROLE when omitted."
     ],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
@@ -107,14 +107,14 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u5f52\u4e00\u5316\u5efa\u7b51\u6307\u6570 NDBI = (SWIR-NIR)/(SWIR+NIR)\uff0c\u7a81\u51fa\u4e0d\u900f\u6c34\u9762\u4e0e\u5efa\u7b51\u4fe1\u606f\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "NDBI",
         "\u4e0d\u900f\u6c34\u9762"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u57ce\u5e02\u9065\u611f"
       ],
@@ -127,7 +127,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "spectral",
     "ndbi",

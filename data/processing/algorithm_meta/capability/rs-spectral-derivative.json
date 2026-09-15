@@ -1,27 +1,27 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u690d\u88ab",
         "\u77ff\u7269",
         "\u6c34\u4f53"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u7ea2\u8fb9\u4f4d\u7f6e\u5206\u6790",
         "\u4f5c\u7269\u80c1\u8feb\u63a2\u6d4b"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -29,7 +29,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "NOT_SUPPORTED",
@@ -38,9 +38,9 @@
       }
     ],
     "family" : "spectral",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -48,7 +48,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "integer",
@@ -66,7 +66,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "1",
@@ -86,31 +86,31 @@
         }
       ]
     },
-    "limitations" : 
+    "limitations" :
     [
       "Output band count shrinks by the derivative order (B\u22121 / B\u22122); output band b carries the midpoint wavelength of its input pair.",
       "NaN pixels propagate to every output derivative that touches them."
     ],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
     "operator_group" : "spectral",
-    "prerequisites" : 
+    "prerequisites" :
     [
       "Bands must carry WAVELENGTH metadata (nm) or an explicit 'wavelengths' parameter; the axis must be strictly ascending in band order."
     ],
     "schema_version" : 2,
     "summary" : "\u5149\u8c31\u5bfc\u6570\u8fd0\u7b97\uff1a\u6cbf\u6ce2\u6bb5\u7ef4\u8ba1\u7b97\u4e00\u9636/\u4e8c\u9636\u5bfc\u6570\uff0c\u7a81\u51fa\u7ea2\u8fb9\u7b49\u5438\u6536\u7279\u5f81\u7ec6\u8282\uff0c\u9762\u5411\u9ad8\u5149\u8c31\u4e0e\u591a\u5149\u8c31\u7cbe\u7ec6\u5206\u6790\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "\u5149\u8c31\u5bfc\u6570",
         "\u7ea2\u8fb9",
         "\u5438\u6536\u7279\u5f81"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9ad8\u5149\u8c31\u9065\u611f"
       ],
@@ -125,7 +125,7 @@
   "notes" : "Finite differences along the wavelength axis; second order is the first derivative applied twice along the successive midpoint axes (honest irregular-spacing form). Bit-exact grade.",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "spectral",
     "derivative",

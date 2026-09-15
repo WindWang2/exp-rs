@@ -1,30 +1,30 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u519c\u7530",
         "\u690d\u88ab\uff08SAR\uff09"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u96f7\u8fbe\u690d\u88ab\u6307\u6570\u751f\u4ea7",
         "SAR \u5206\u7c7b\u7279\u5f81\u5de5\u7a0b"
       ]
     },
-    "band_roles" : 
+    "band_roles" :
     {
       "vh" : 1,
       "vv" : 1
     },
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -32,7 +32,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "POLARIZATION_MISMATCH",
@@ -41,9 +41,9 @@
       }
     ],
     "family" : "sar",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -51,7 +51,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "string",
@@ -64,11 +64,11 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "auto",
-          "enum" : 
+          "enum" :
           [
             "auto",
             "linear",
@@ -80,7 +80,7 @@
         },
         {
           "default" : "rvi",
-          "enum" : 
+          "enum" :
           [
             "ratio",
             "normalized_difference",
@@ -111,30 +111,30 @@
         }
       ]
     },
-    "limitations" : 
+    "limitations" :
     [
       "rvi is the dual-pol Sentinel-1 approximation 4VH/(VV+VH), NOT the quad-pol RVI (needs a second cross-pol channel this platform does not model).",
       "Nonpositive linear-power values are outside the SAR domain and yield NaN, never clamped."
     ],
-    "modality" : 
+    "modality" :
     [
       "sar"
     ],
     "operator_group" : "sar",
-    "prerequisites" : 
+    "prerequisites" :
     [
       "Input should be radiometrically calibrated backscatter (rs:sar_calibrate)."
     ],
     "schema_version" : 2,
     "summary" : "\u53cc\u6781\u5316\u7279\u5f81\u63d0\u53d6\uff1a\u4ece VV/VH \u53cc\u901a\u9053\u8ba1\u7b97\u6bd4\u503c\u3001\u6781\u5316\u5206\u89e3\u91cf\u7b49\u7279\u5f81\uff0c\u670d\u52a1\u4f5c\u7269\u5206\u7c7b\u4e0e\u5730\u8868\u7c7b\u578b\u8bc6\u522b\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "\u6781\u5316\u6bd4",
         "\u53cc\u6781\u5316\u5206\u89e3"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u5fae\u6ce2\u9065\u611f"
       ],
@@ -149,7 +149,7 @@
   "notes" : "Tile-streamed element-wise features on linear power; dB inputs are converted before the kernel so the output domain is independent of the input domain; bit-exact grade.",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "sar",
     "dual-pol",

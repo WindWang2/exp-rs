@@ -1,26 +1,26 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u519c\u7530",
         "\u68ee\u6797"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u53d8\u5316\u65b9\u5411\u5224\u8bfb",
         "\u690d\u88ab\u9000\u5316 vs \u6062\u590d\u533a\u5206"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : true
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -28,7 +28,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -37,9 +37,9 @@
       }
     ],
     "family" : "change",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -52,7 +52,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "integer",
@@ -80,7 +80,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "1",
@@ -108,7 +108,7 @@
         },
         {
           "default" : "angle",
-          "enum" : 
+          "enum" :
           [
             "angle",
             "quadrant"
@@ -125,25 +125,25 @@
       ]
     },
     "limitations" : [],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
     "operator_group" : "temporal",
-    "prerequisites" : 
+    "prerequisites" :
     [
       "Before and after rasters must be co-registered with identical dimensions."
     ],
     "schema_version" : 2,
     "summary" : "CVA \u89d2\u5ea6\u53d8\u4f53\uff1a\u5728\u53d8\u5316\u5f3a\u5ea6\u4e4b\u5916\u8f93\u51fa\u53d8\u5316\u65b9\u5411\u89d2\uff0c\u533a\u5206\u53d8\u5316\u7c7b\u578b\uff08\u589e/\u51cf\u3001\u7c7b\u578b\u8f6c\u6362\u65b9\u5411\uff09\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "\u53d8\u5316\u65b9\u5411",
         "CVA \u89d2\u5ea6"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
@@ -156,7 +156,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "change-detection",
     "cva",

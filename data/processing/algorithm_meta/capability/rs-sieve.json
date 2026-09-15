@@ -1,25 +1,25 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u4efb\u610f\u5730\u7269"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u5206\u7c7b\u56fe\u53bb\u566a",
         "\u7ec6\u788e\u6591\u5757\u6e05\u7406"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -27,7 +27,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -36,9 +36,9 @@
       }
     ],
     "family" : "raster_spatial",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -46,7 +46,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "raster",
@@ -54,7 +54,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "1",
@@ -64,7 +64,7 @@
         },
         {
           "default" : "8",
-          "enum" : 
+          "enum" :
           [
             "4",
             "8"
@@ -87,7 +87,7 @@
       ]
     },
     "limitations" : [],
-    "modality" : 
+    "modality" :
     [
       "optical",
       "sar",
@@ -98,14 +98,14 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u7b5b\u9664\uff08sieve\uff09\uff1a\u79fb\u9664\u5c0f\u4e8e\u6307\u5b9a\u50cf\u5143\u6570\u7684\u5b64\u7acb\u6591\u5757\uff0c\u538b\u5236\u6912\u76d0\u566a\u58f0\uff0c\u4fdd\u6301\u5927\u7c7b\u6591\u5757\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "\u6591\u5757\u7b5b\u9664",
         "\u6700\u5c0f\u56fe\u6591"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
@@ -120,7 +120,7 @@
   "notes" : "Removes foreground components smaller than min_area_pixels; reports removedPixels. FullRaster contract.",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "raster_spatial"
   ],

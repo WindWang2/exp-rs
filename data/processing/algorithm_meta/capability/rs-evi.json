@@ -1,31 +1,31 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u68ee\u6797",
         "\u5bc6\u96c6\u519c\u7530"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u9ad8\u751f\u7269\u91cf\u533a\u690d\u88ab\u76d1\u6d4b",
         "\u68ee\u6797\u84c4\u79ef\u91cf\u76f8\u5173\u7814\u7a76"
       ]
     },
-    "band_roles" : 
+    "band_roles" :
     {
       "blue" : 1,
       "nir" : 1,
       "red" : 1
     },
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -33,7 +33,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "BAND_ROLE_UNRESOLVED",
@@ -42,9 +42,9 @@
       }
     ],
     "family" : "spectral",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -52,7 +52,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "integer",
@@ -75,7 +75,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "1",
@@ -107,11 +107,11 @@
         }
       ]
     },
-    "limitations" : 
+    "limitations" :
     [
       "Band numbers are resolved from SICNU_BAND_ROLE when omitted."
     ],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
@@ -119,15 +119,15 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u589e\u5f3a\u578b\u690d\u88ab\u6307\u6570 EVI\uff0c\u5728\u9ad8\u751f\u7269\u91cf\u533a\u6bd4 NDVI \u9971\u548c\u66f4\u6162\uff0c\u5e76\u5f15\u5165\u84dd\u6ce2\u6bb5\u6821\u6b63\u5927\u6c14\u4e0e\u571f\u58e4\u80cc\u666f\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "EVI",
         "\u9971\u548c\u6548\u5e94",
         "\u571f\u58e4\u80cc\u666f\u6821\u6b63"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u690d\u7269\u9065\u611f"
       ],
@@ -140,7 +140,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "spectral",
     "evi",

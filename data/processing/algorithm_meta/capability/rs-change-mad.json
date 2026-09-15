@@ -1,26 +1,26 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u57ce\u5e02",
         "\u519c\u7530"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u8f90\u5c04\u5dee\u5f02\u8f83\u5927\u65f6\u7684\u7a33\u5065\u53d8\u5316\u68c0\u6d4b",
         "\u591a\u6ce2\u6bb5\u7edf\u8ba1\u53d8\u5316\u68c0\u6d4b"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : true
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -28,7 +28,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "GRID_MISMATCH",
@@ -42,15 +42,15 @@
       }
     ],
     "family" : "change",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
           "grid_relation" : "same-grid",
           "name" : "after",
-          "radiometric_state" : 
+          "radiometric_state" :
           [
             "digital_number",
             "radiance",
@@ -63,7 +63,7 @@
           "data_kind" : "raster",
           "grid_relation" : "same-grid",
           "name" : "before",
-          "radiometric_state" : 
+          "radiometric_state" :
           [
             "digital_number",
             "radiance",
@@ -73,7 +73,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "numeric",
@@ -96,7 +96,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "0",
@@ -124,26 +124,26 @@
       ]
     },
     "limitations" : [],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
     "operator_group" : "temporal",
-    "prerequisites" : 
+    "prerequisites" :
     [
       "Before and after rasters must be co-registered and same size (grid compatibility is preflighted)."
     ],
     "schema_version" : 2,
     "summary" : "MAD \u53d8\u5316\u68c0\u6d4b\uff08\u591a\u5143\u53d8\u5316\u68c0\u6d4b\uff09\uff1a\u5bf9\u4e24\u671f\u591a\u6ce2\u6bb5\u505a\u5178\u578b\u76f8\u5173\u53d8\u6362\u540e\u53d6\u65b9\u5dee\u4e0d\u53d8\u5206\u91cf\uff0c\u81ea\u52a8\u7a81\u51fa\u771f\u5b9e\u53d8\u5316\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "\u5178\u578b\u76f8\u5173",
         "MAD \u53d8\u91cf",
         "\u65b9\u5dee\u4e0d\u53d8"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406",
         "\u7edf\u8ba1\u65b9\u6cd5"
@@ -157,7 +157,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "change-detection",
     "temporal"

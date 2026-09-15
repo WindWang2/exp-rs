@@ -1,27 +1,27 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u77ff\u7269",
         "\u690d\u88ab",
         "\u76ee\u6807\u5149\u8c31"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u77ff\u7269\u586b\u56fe",
         "\u5df2\u77e5\u7aef\u5143\u7684\u76ee\u6807\u8bc6\u522b"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -29,7 +29,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -38,9 +38,9 @@
       }
     ],
     "family" : "classification",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -48,7 +48,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "integer",
@@ -66,7 +66,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "name" : "angleOut",
@@ -91,7 +91,7 @@
         },
         {
           "default" : "sam",
-          "enum" : 
+          "enum" :
           [
             "sam",
             "sid"
@@ -117,31 +117,31 @@
         }
       ]
     },
-    "limitations" : 
+    "limitations" :
     [
       "SID requires non-negative reflectance-like spectra (a zero or negative band invalidates the pair)."
     ],
-    "modality" : 
+    "modality" :
     [
       "optical",
       "sar",
       "multimodal"
     ],
     "operator_group" : "classification",
-    "prerequisites" : 
+    "prerequisites" :
     [
       "Reference spectra must use the same band order and units as the input raster."
     ],
     "schema_version" : 2,
     "summary" : "\u5149\u8c31\u89d2\u5236\u56fe\uff08SAM\uff09\u5206\u7c7b\uff1a\u4ee5\u5149\u8c31\u5411\u91cf\u5939\u89d2\u5ea6\u91cf\u76f8\u4f3c\u5ea6\uff0c\u5bf9\u5149\u7167\u5dee\u5f02\u4e0d\u654f\u611f\uff0c\u9002\u5408\u77ff\u7269/\u76ee\u6807\u7cbe\u7ec6\u5206\u7c7b\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "\u5149\u8c31\u89d2",
         "\u7aef\u5143\u5149\u8c31"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9ad8\u5149\u8c31\u9065\u611f"
       ],
@@ -154,7 +154,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "classification",
     "hyperspectral",

@@ -1,14 +1,14 @@
 {
-  "capability" : 
+  "capability" :
   {
     "applicability" : {},
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -18,9 +18,9 @@
     },
     "failure_modes" : [],
     "family" : "spectral",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -28,7 +28,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "integer",
@@ -41,7 +41,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "name" : "bands",
@@ -72,16 +72,16 @@
         }
       ]
     },
-    "limitations" : 
+    "limitations" :
     [
       "Band selection renumbers bands; wavelength metadata of kept bands is preserved and normalized to nm."
     ],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
     "operator_group" : "spectral",
-    "prerequisites" : 
+    "prerequisites" :
     [
       "wavelengthMin/Max and excludeRanges need WAVELENGTH band metadata; the explicit 'bands' mode does not."
     ],
@@ -95,7 +95,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "spectral",
     "preprocessing",

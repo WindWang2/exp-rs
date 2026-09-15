@@ -1,26 +1,26 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u77ff\u7269",
         "\u4eba\u5de5\u76ee\u6807"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u9ad8\u5149\u8c31\u76ee\u6807\u68c0\u6d4b",
         "\u5c0f\u76ee\u6807\u641c\u7d22"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -28,7 +28,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -37,9 +37,9 @@
       }
     ],
     "family" : "hyperspectral",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -47,7 +47,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "raster",
@@ -55,7 +55,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "name" : "libraryMaterials",
@@ -84,30 +84,30 @@
         }
       ]
     },
-    "limitations" : 
+    "limitations" :
     [
       "Pixels with degenerate whitened norm (no variance along any direction) score NaN."
     ],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
     "operator_group" : "spectral",
-    "prerequisites" : 
+    "prerequisites" :
     [
       "'target' must have one finite value per input band."
     ],
     "schema_version" : 2,
     "summary" : "\u81ea\u9002\u5e94\u76f8\u5e72\u4f30\u8ba1\uff08ACE\uff09\u76ee\u6807\u68c0\u6d4b\uff1a\u5728\u767d\u5316\u7a7a\u95f4\u5ea6\u91cf\u76ee\u6807\u5149\u8c31\u5339\u914d\u5ea6\uff0c\u5bf9\u566a\u58f0\u4e0e\u80cc\u666f\u53d8\u5316\u7a33\u5065\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "ACE",
         "\u76ee\u6807\u68c0\u6d4b",
         "\u767d\u5316"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9ad8\u5149\u8c31\u9065\u611f"
       ],
@@ -122,7 +122,7 @@
   "notes" : "Three-pass streaming detection sharing the matched filter's background pipeline; scores in [0,1] (1 = whitened spectrum parallel to the target); bit-exact grade.",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "spectral",
     "detection",

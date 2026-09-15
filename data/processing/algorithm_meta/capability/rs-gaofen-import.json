@@ -1,25 +1,25 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u4efb\u610f\u5730\u7269"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u9ad8\u5206\u7cfb\u5217\u6570\u636e\u5904\u7406\u5165\u53e3",
         "\u56fd\u5185\u6559\u5b66\u6570\u636e\u6807\u51c6\u5316\u5bfc\u5165"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -27,7 +27,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "DATASET_NOT_FOUND",
@@ -41,10 +41,10 @@
       }
     ],
     "family" : "io",
-    "io" : 
+    "io" :
     {
       "inputs" : [],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "integer",
@@ -63,7 +63,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "false",
@@ -89,28 +89,28 @@
       ]
     },
     "limitations" : [],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
     "operator_group" : "data-formats",
-    "prerequisites" : 
+    "prerequisites" :
     [
       "Product directory with CRESDA sidecar XML and TIFF (offline)",
       "\u79bb\u7ebf\u53ef\u7528\uff1a\u4ec5\u89e3\u6790\u4ea7\u54c1\u81ea\u5e26\u6587\u4ef6\uff1b\u5927\u90e8\u5206\u6279\u6b21\u9700\u53e6\u67e5\u53d1\u5e03\u5b9a\u6807\u8868\u505a TOA \u8f6c\u6362\u3002"
     ],
     "schema_version" : 2,
     "summary" : "\u9ad8\u5206\u6570\u636e\u5bfc\u5165\uff1a\u8bfb\u53d6 GF-1/2/6 PMS/WFV \u4e0e GF-7 FWD/BWD L1A \u4ea7\u54c1\u5305\uff08CRESDA sidecar XML + TIFF\uff09\uff0c\u81ea\u52a8\u89e3\u6790\u5143\u6570\u636e\u3001\u6620\u5c04\u6ce2\u6bb5\u89d2\u8272\u5e76\u6807\u6ce8\u592a\u9633\u51e0\u4f55\u4e0e\u5b9a\u6807\u7cfb\u6570\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "CRESDA \u4ea7\u54c1\u7ed3\u6784",
         "\u6ce2\u6bb5\u89d2\u8272",
         "\u8f90\u5c04\u5b9a\u6807\u58f0\u660e",
         "\u592a\u9633\u51e0\u4f55"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9065\u611f\u6570\u636e\u5904\u7406"
       ],
@@ -123,7 +123,7 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "gaofen",
     "cn-satellite",

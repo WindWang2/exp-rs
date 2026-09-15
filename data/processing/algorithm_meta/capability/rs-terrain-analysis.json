@@ -1,27 +1,27 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u5c71\u5730",
         "\u4e18\u9675",
         "\u6cb3\u8c37"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u5730\u5f62\u56e0\u5b50\u5236\u56fe",
         "\u6ed1\u5761/\u6c34\u571f\u6d41\u5931\u5206\u6790\u7684\u57fa\u7840\u56fe\u5c42"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -29,7 +29,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -43,9 +43,9 @@
       }
     ],
     "family" : "terrain",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -53,7 +53,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "integer",
@@ -76,7 +76,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "30",
@@ -97,7 +97,7 @@
         },
         {
           "default" : "slope",
-          "enum" : 
+          "enum" :
           [
             "slope",
             "aspect",
@@ -136,26 +136,26 @@
       ]
     },
     "limitations" : [],
-    "modality" : 
+    "modality" :
     [
       "dem"
     ],
     "operator_group" : "terrain",
-    "prerequisites" : 
+    "prerequisites" :
     [
       "\u5efa\u8bae\u4f7f\u7528\u6295\u5f71\u5750\u6807\u7cfb\uff08\u7c73\u5236\uff09\u7684 DEM\u3002"
     ],
     "schema_version" : 2,
     "summary" : "\u5730\u5f62\u53c2\u6570\u5206\u6790\uff1a\u7531 DEM \u8ba1\u7b97\u5761\u5ea6\u3001\u5761\u5411\u3001\u5c71\u4f53\u9634\u5f71\u7b49\u5730\u5f62\u56e0\u5b50\uff0c\u662f\u6240\u6709\u5730\u5f62\u5b9a\u91cf\u5316\u5206\u6790\u7684\u5165\u53e3\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "\u5761\u5ea6",
         "\u5761\u5411",
         "\u5c71\u4f53\u9634\u5f71"
       ],
-      "courses" : 
+      "courses" :
       [
         "GIS \u539f\u7406",
         "\u5730\u5f62\u5206\u6790"
@@ -169,7 +169,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "terrain",
     "dem",

@@ -1,25 +1,25 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u4efb\u610f\u5730\u7269\uff08SAR\uff09"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "SAR \u4e0e\u5149\u5b66\u6570\u636e\u8054\u5408\u5206\u6790\u524d\u7684\u6b63\u5c04\u5316",
         "\u591a\u65f6\u76f8 SAR \u53e0\u52a0"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -27,7 +27,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "DATASET_NOT_FOUND",
@@ -41,9 +41,9 @@
       }
     ],
     "family" : "sar",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -56,7 +56,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "raster",
@@ -64,7 +64,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "1",
@@ -79,7 +79,7 @@
         },
         {
           "default" : "bilinear",
-          "enum" : 
+          "enum" :
           [
             "bilinear",
             "nearest"
@@ -90,18 +90,18 @@
         }
       ]
     },
-    "limitations" : 
+    "limitations" :
     [
       "gamma0 applies the per-pixel radiometric-terrain factor sin(thetaL)/sin(theta0) (Ulander 1996, Small 2011 eq. 5) from REAL geometry - distinct from the constant-geometry plane-fit model of rs:sar_terrain_flatten.",
       "Rotated DEM grids are refused (terrain-family north-up contract).",
       "No antenna pattern or fading-noise correction is applied."
     ],
-    "modality" : 
+    "modality" :
     [
       "sar"
     ],
     "operator_group" : "sar",
-    "prerequisites" : 
+    "prerequisites" :
     [
       "The SAR scene must declare the orbit contract (SICNU_SAR_ORBIT_STATES, SICNU_SAR_AZIMUTH_START_UTC, SICNU_SAR_PRF, SICNU_SAR_RANGE_WINDOW, SICNU_SAR_RANGE_RATE) - missing declarations are typed refusals, never approximations.",
       "Calibrate first: rs:sar_calibrate -> rs:sar_geocode.",
@@ -110,15 +110,15 @@
     ],
     "schema_version" : 2,
     "summary" : "SAR \u5730\u7406\u7f16\u7801\uff08Range-Doppler \u6b63\u5c04\u6821\u6b63\uff09\uff1a\u628a SAR \u5f71\u50cf\u4ece\u659c\u8ddd/\u5730\u8ddd\u5750\u6807\u7cfb\u91cd\u6295\u5f71\u5230\u5730\u56fe\u5750\u6807\u7cfb\uff0c\u5e76\u505a\u5730\u5f62\u8f90\u5c04\u6821\u6b63\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "Range-Doppler",
         "\u6b63\u5c04\u6821\u6b63",
         "\u5730\u7406\u7f16\u7801"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u5fae\u6ce2\u9065\u611f"
       ],
@@ -132,7 +132,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "sar",
     "geocoding",

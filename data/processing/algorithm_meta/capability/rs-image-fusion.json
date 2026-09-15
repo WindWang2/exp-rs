@@ -1,27 +1,27 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u57ce\u5e02",
         "\u519c\u7530",
         "\u6d77\u5cb8\u5e26"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u591a\u5149\u8c31\u5f71\u50cf\u7a7a\u95f4\u5206\u8fa8\u7387\u63d0\u5347",
         "\u53d8\u5316\u68c0\u6d4b\u524d\u7684\u53cc\u65f6\u76f8\u914d\u51c6\u878d\u5408"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -29,7 +29,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "GRID_MISMATCH",
@@ -43,9 +43,9 @@
       }
     ],
     "family" : "optical",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -58,7 +58,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "integer",
@@ -76,7 +76,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "2",
@@ -92,7 +92,7 @@
         },
         {
           "default" : "linear",
-          "enum" : 
+          "enum" :
           [
             "linear",
             "brovey",
@@ -128,32 +128,32 @@
         }
       ]
     },
-    "limitations" : 
+    "limitations" :
     [
       "IHS requires exactly 3 MS bands mapped to R/G/B."
     ],
-    "modality" : 
+    "modality" :
     [
       "multimodal",
       "optical"
     ],
     "operator_group" : "enhancement",
-    "prerequisites" : 
+    "prerequisites" :
     [
       "Pan and MS rasters must be co-registered.",
       "\u5168\u8272\u4e0e\u591a\u5149\u8c31\u8f93\u5165\u5fc5\u987b\u51e0\u4f55\u914d\u51c6\u4e14\u4f4d\u4e8e\u540c\u4e00\u7f51\u683c\uff08ADR 0098\uff09\u3002"
     ],
     "schema_version" : 2,
     "summary" : "\u901a\u7528\u5168\u8272\u9510\u5316\uff08pansharpening\uff09\u5165\u53e3\uff1a\u628a\u9ad8\u5206\u8fa8\u7387\u5168\u8272\u6ce2\u6bb5\u4e0e\u591a\u5149\u8c31\u6ce2\u6bb5\u878d\u5408\uff0c\u6309 method \u9009\u62e9 Brovey/IHS/GS/PCA \u7b49\u65b9\u6cd5\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "\u5168\u8272\u9510\u5316",
         "\u7a7a\u95f4\u5206\u8fa8\u7387",
         "\u5149\u8c31\u4fdd\u771f"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
@@ -166,7 +166,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "fusion",
     "pan-sharpening",

@@ -1,14 +1,14 @@
 {
-  "capability" : 
+  "capability" :
   {
     "applicability" : {},
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -18,9 +18,9 @@
     },
     "failure_modes" : [],
     "family" : "spectral",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -28,7 +28,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "raster",
@@ -42,7 +42,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "name" : "components",
@@ -76,16 +76,16 @@
         }
       ]
     },
-    "limitations" : 
+    "limitations" :
     [
       "Component subsets are a documented approximation: the dropped components' contribution is reported via errorOut / reconstructionError, never silently ignored."
     ],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
     "operator_group" : "spectral",
-    "prerequisites" : 
+    "prerequisites" :
     [
       "Requires the transform artifact written by rs:mnf (transformOut); the model is digest-verified on load."
     ],
@@ -99,7 +99,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "mnf",
     "hyperspectral",

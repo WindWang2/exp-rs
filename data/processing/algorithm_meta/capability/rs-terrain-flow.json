@@ -1,15 +1,15 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u6d41\u57df",
         "\u6cb3\u8c37",
         "\u5c71\u5730"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u6d41\u57df\u5212\u5206",
         "\u6cb3\u7f51\u63d0\u53d6",
@@ -17,12 +17,12 @@
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -30,7 +30,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -44,9 +44,9 @@
       }
     ],
     "family" : "terrain",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -54,7 +54,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "raster",
@@ -67,7 +67,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "-9999",
@@ -87,7 +87,7 @@
         },
         {
           "default" : "flow_accumulation",
-          "enum" : 
+          "enum" :
           [
             "fill",
             "flow_direction",
@@ -100,31 +100,31 @@
         }
       ]
     },
-    "limitations" : 
+    "limitations" :
     [
       "Filled flats are sinks (direction 0); no flat-resolution routing is attempted (documented debt for a future epsilon-gradient variant).",
       "Full-frame memory: the DEM and two working frames are resident; the estimate states the linear bound."
     ],
-    "modality" : 
+    "modality" :
     [
       "dem"
     ],
     "operator_group" : "terrain",
-    "prerequisites" : 
+    "prerequisites" :
     [
       "Projected DEM recommended; routing is cell-based (orthogonal 1, diagonal sqrt(2))."
     ],
     "schema_version" : 2,
     "summary" : "\u5730\u5f62\u6c34\u6587\u5206\u6790\uff1a\u7531 DEM \u8ba1\u7b97\u6d41\u5411\u3001\u6c47\u6d41\u7d2f\u79ef\u5e76\u63d0\u53d6\u6c47\u6c34\u533a/\u6cb3\u7f51\uff0c\u670d\u52a1\u6d41\u57df\u5efa\u6a21\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "D8 \u6d41\u5411",
         "\u6c47\u6d41\u7d2f\u79ef",
         "\u6d41\u57df"
       ],
-      "courses" : 
+      "courses" :
       [
         "GIS \u539f\u7406",
         "\u6c34\u6587\u5efa\u6a21"
@@ -140,7 +140,7 @@
   "notes" : "Priority-flood filling (NoData cells are barriers, never routed across); D8 codes are the ESRI powers of two with 0 = sink; accumulation counts include the cell itself. Full-frame kernel contract (O(N log N)).",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "terrain",
     "hydrology",

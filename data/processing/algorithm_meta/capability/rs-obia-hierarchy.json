@@ -1,26 +1,26 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u57ce\u5e02",
         "\u6d41\u57df"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u591a\u5c3a\u5ea6\u5206\u6790",
         "\u5730\u5757\u2192\u533a\u57df\u805a\u5408\u7edf\u8ba1"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -28,7 +28,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "DATASET_NOT_FOUND",
@@ -37,9 +37,9 @@
       }
     ],
     "family" : "obia",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -62,7 +62,7 @@
           "required" : false
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "integer",
@@ -80,7 +80,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "name" : "classColors",
@@ -107,7 +107,7 @@
         },
         {
           "default" : "svm",
-          "enum" : 
+          "enum" :
           [
             "svm",
             "normal_bayes",
@@ -223,7 +223,7 @@
       ]
     },
     "limitations" : [],
-    "modality" : 
+    "modality" :
     [
       "optical",
       "sar"
@@ -232,14 +232,14 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u5bf9\u8c61\u5c42\u7ea7\u7ba1\u7406\uff1a\u6784\u5efa/\u67e5\u8be2\u591a\u5c3a\u5ea6\u5bf9\u8c61\u5c42\u7ea7\uff08\u7236-\u5b50\u5bf9\u8c61\u5173\u7cfb\uff09\uff0c\u652f\u6301\u8de8\u5c3a\u5ea6\u805a\u5408\u5206\u6790\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "\u5bf9\u8c61\u5c42\u7ea7",
         "\u5c3a\u5ea6"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9762\u5411\u5bf9\u8c61\u9065\u611f"
       ],
@@ -252,7 +252,7 @@
   "input" : "raster",
   "output" : "",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "obia",
     "hierarchy",

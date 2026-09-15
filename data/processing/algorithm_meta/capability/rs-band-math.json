@@ -1,25 +1,25 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u4efb\u610f\u5730\u7269"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u81ea\u5b9a\u4e49\u6307\u6570\u6784\u5efa",
         "\u6559\u5b66\u6f14\u793a\u6ce2\u6bb5\u8fd0\u7b97"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -27,7 +27,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -41,9 +41,9 @@
       }
     ],
     "family" : "spectral",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -51,7 +51,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "string",
@@ -75,7 +75,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "name" : "expression",
@@ -89,11 +89,11 @@
         }
       ]
     },
-    "limitations" : 
+    "limitations" :
     [
       "Expression uses 1-based band references (b1, b2, ...)."
     ],
-    "modality" : 
+    "modality" :
     [
       "optical",
       "sar",
@@ -104,14 +104,14 @@
     "prerequisites" : [],
     "schema_version" : 2,
     "summary" : "\u4efb\u610f\u6ce2\u6bb5\u4ee3\u6570\u8868\u8fbe\u5f0f\u8ba1\u7b97\u5668\uff1a\u4ee5\u8868\u8fbe\u5f0f\u5f62\u5f0f\u7ec4\u5408\u591a\u4e2a\u6ce2\u6bb5\u505a\u52a0\u51cf\u4e58\u9664\u4e0e\u51fd\u6570\u8fd0\u7b97\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "\u6ce2\u6bb5\u4ee3\u6570",
         "\u8868\u8fbe\u5f0f\u6c42\u503c"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
@@ -124,7 +124,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "band-math",
     "spectral",

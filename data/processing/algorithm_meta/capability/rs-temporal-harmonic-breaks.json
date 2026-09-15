@@ -1,14 +1,14 @@
 {
-  "capability" : 
+  "capability" :
   {
     "applicability" : {},
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "cost_class" : "O(tile \u00d7 scenes \u00d7 iterations + tile \u00d7 segments \u00d7 scenes \u00d7 terms\u00b2)",
       "grade" : "bit_exact",
@@ -19,10 +19,10 @@
     },
     "failure_modes" : [],
     "family" : "temporal",
-    "io" : 
+    "io" :
     {
       "inputs" : [],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "string",
@@ -56,7 +56,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "true",
@@ -71,7 +71,7 @@
           "type" : "integer"
         },
         {
-          "enum" : 
+          "enum" :
           [
             "blue",
             "green",
@@ -94,7 +94,7 @@
         },
         {
           "default" : "none",
-          "enum" : 
+          "enum" :
           [
             "none",
             "decrease",
@@ -106,7 +106,7 @@
         },
         {
           "default" : "keep_all",
-          "enum" : 
+          "enum" :
           [
             "keep_all",
             "reject"
@@ -176,7 +176,7 @@
       ]
     },
     "limitations" : [],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
@@ -192,7 +192,7 @@
   "input" : "",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "temporal",
     "change-detection",

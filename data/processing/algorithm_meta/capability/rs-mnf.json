@@ -1,25 +1,25 @@
 {
-  "capability" : 
+  "capability" :
   {
-    "applicability" : 
+    "applicability" :
     {
-      "land_cover" : 
+      "land_cover" :
       [
         "\u4efb\u610f\u5730\u7269\uff08\u9ad8\u5149\u8c31\uff09"
       ],
-      "scenes" : 
+      "scenes" :
       [
         "\u9ad8\u5149\u8c31\u6570\u636e\u964d\u7ef4",
         "\u53bb\u566a\u540e\u7684\u6ce2\u6bb5\u7cbe\u7b80"
       ]
     },
     "band_roles" : {},
-    "crs" : 
+    "crs" :
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
-    "determinism" : 
+    "determinism" :
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -27,7 +27,7 @@
       "side_effects" : false,
       "stochastic" : false
     },
-    "failure_modes" : 
+    "failure_modes" :
     [
       {
         "code" : "INSUFFICIENT_MEMORY",
@@ -36,9 +36,9 @@
       }
     ],
     "family" : "hyperspectral",
-    "io" : 
+    "io" :
     {
-      "inputs" : 
+      "inputs" :
       [
         {
           "data_kind" : "raster",
@@ -46,7 +46,7 @@
           "required" : true
         }
       ],
-      "outputs" : 
+      "outputs" :
       [
         {
           "data_kind" : "integer",
@@ -60,7 +60,7 @@
           "required" : true
         }
       ],
-      "parameters" : 
+      "parameters" :
       [
         {
           "default" : "0",
@@ -80,30 +80,30 @@
         }
       ]
     },
-    "limitations" : 
+    "limitations" :
     [
       "A numerically singular noise covariance (e.g. constant bands, too few valid pixels) is a typed refusal, not a degraded fit."
     ],
-    "modality" : 
+    "modality" :
     [
       "optical"
     ],
     "operator_group" : "spectral",
-    "prerequisites" : 
+    "prerequisites" :
     [
       "Input should be calibrated reflectance/radiance; wavelength metadata is not required for MNF itself."
     ],
     "schema_version" : 2,
     "summary" : "MNF \u6700\u5c0f\u566a\u58f0\u5206\u79bb\u53d8\u6362\uff1a\u6309\u4fe1\u566a\u6bd4\u6392\u5e8f\u7684\u6b63\u4ea4\u53d8\u6362\uff0c\u5148\u767d\u5316\u566a\u58f0\u518d\u505a PCA\uff0c\u662f\u9ad8\u5149\u8c31\u53bb\u566a\u4e0e\u964d\u7ef4\u7684\u6807\u51c6\u8d77\u70b9\u3002",
-    "teaching_use" : 
+    "teaching_use" :
     {
-      "concepts" : 
+      "concepts" :
       [
         "MNF",
         "\u4fe1\u566a\u6bd4",
         "\u566a\u58f0\u767d\u5316"
       ],
-      "courses" : 
+      "courses" :
       [
         "\u9ad8\u5149\u8c31\u9065\u611f"
       ],
@@ -116,7 +116,7 @@
   "input" : "raster",
   "output" : "raster",
   "schema_version" : 2,
-  "tags" : 
+  "tags" :
   [
     "mnf",
     "hyperspectral",
