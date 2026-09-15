@@ -75,3 +75,22 @@
 测试驱动的实现修复（本 track 内，随实现 commit）：
 - ResumableTileRun 现创建 statePath 父目录（此前首个 appendCommit 因目录缺失失败）。
 - identity key 分隔符 `-`（review R1-P0）后所有路径/断言复核通过。
+
+## Phase 8 验证（2026-09-16）
+
+| 套件/命令 | exit | 结果 |
+|---|---|---|
+| test_worker_host（池 lease 接线回归，需 sicnu_worker.exe） | 0 | 61 断言 / 13 cases PASS |
+| test_fused_chain（取消桥回归） | 0 | 44 / 4 PASS |
+| test_external_memory_10（写作用域修复后） | 0 | 50 / 8 PASS |
+| test_large_scale_execution_10 | 0 | 6218 / 5 PASS |
+| test_job_engine | 0 | 446 / 34 PASS |
+| **opt-in 规模门** SICNU_SCALE_11=1（100k 真实 tile：37,000 提交后硬停→恢复，reuse≥37k，kernel<total+1000） | 0 | 90 断言 / 4 cases PASS；wall 14m57s（记录值，非门） |
+
+测试驱动修复（已随实现 commit）：DiskTileStore::write(lease) 的 ofstream 现于 finalize 前关闭作用域——纯 STD 对照 repro 证明 MSVC 下打开中的文件 rename 必败（sharing violation），该缺陷在 master 上即存在且使 test_external_memory_10 在 Windows 必红。
+
+## Drift gate 闭环（2026-09-16）
+
+- `test_diagnostics_contract_9` 捕获本 track 两个新错误码缺 curated page → 已在 `data/help/diagnostics.json` 追加两条 operator 家族页面（+47 行 append-only），**operator 家族 0 残留**。
+- 该套件其余 7 个失败全部是 harness 家族码（CATEGORICAL_MISMATCH / FACT_CONFLICT 等，来自 master 的 src/agent/harness/harness_error.cpp，D18/mission track 产物）——pre-existing，本 diff 零重叠（对照：本 diff 未新增任何 harness 码，agent 目录仅 1 个 build-unblock 文件）。
+- `test_scientific_contract_10`（`rs:change` 缺合约记录）与 `test_help_coverage`（workbench.* help 缺失、rs_glossary id 空）失败：实体均在 master 上，来自 D15/D18/visual-cartography 合并；本 diff 对 src/contracts、rs_operators_init、help 数据零改动（`git diff --name-only | grep -c` = 0）。pre-existing 记录。
