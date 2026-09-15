@@ -314,6 +314,9 @@ sicnu_add_io_test(test_io_subdataset_inventory)
 find_library(NETCDF_LIBRARY NAMES netcdf)
 target_link_libraries(test_io_subdataset_inventory PRIVATE ${NETCDF_LIBRARY})
 sicnu_add_io_test(test_io_metadata_patch)
+# 11.0 GDAL version/capability matrix: feature detection, corrupt/truncated
+# negatives, huge logical datasets within bounded memory.
+sicnu_add_io_test(test_io_gdal_matrix)
 
 # io:* operator family suite — rides the operator chain (Qt + sicnu_operators).
 sicnu_add_io_test(test_io_operators)

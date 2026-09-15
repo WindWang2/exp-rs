@@ -59,6 +59,7 @@ set(SICNU_GEOSPATIAL_SOURCES
     io/vector_interchange.cpp
     io/subdataset_inventory.cpp
     io/metadata_patch.cpp
+    io/gdal_feature_probe.cpp
 )
 
 qt_add_library(sicnu_geospatial STATIC ${SICNU_GEOSPATIAL_SOURCES})
