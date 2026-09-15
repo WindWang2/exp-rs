@@ -28,3 +28,16 @@
 | When | Command | CPU/RSS/load | Notes |
 | --- | --- | --- | --- |
 | (to be filled during builds) | | | |
+
+## Measured (2026-09-16, build + suite)
+
+- Full fresh-build compile of qgis_core/qgis_gui/qgis_analysis + 10 test binaries at `-j2`
+  (Unix Makefiles), alongside a concurrent track's build on the same host (their cc1plus count 9–15).
+- Sampled load averages at poll points: 15.5–21.0 (16 cores, ≈1.0–1.3×; below the 1.5× -j1 trigger);
+  host memory ≤19% used of 62 GB. The 60 s periodic sampling was not-executed for detached builds —
+  recorded once here per the envelope, cap kept at `-j2`.
+- Targeted suite wall time: 12.3 s for all 10 binaries (offscreen, -j1); `test_edit_index` (100k
+  build + brute-force oracles) is the long pole at ~8.4 s.
+- Logical-scale gates (no wall-clock assertions): index 100k features vs brute-force subset; brush
+  ≤2048 stamps/stroke with coalescing; ROI preview ≤4M px fail-closed; state refresh O(1) per event
+  (incremental featureCount, no recount on 100k layers).

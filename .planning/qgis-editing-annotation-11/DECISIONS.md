@@ -43,3 +43,20 @@ Follow `tests/test_roi_tool_polygon.cpp:20-58` precedent: one heap QApplication 
 
 ## D14 — ADR
 This track records its authority model in `docs/adr/0163-editing-session-authority.md` (next free number, audited) and the user-facing contract in `docs/workbench/editing-platform.md` (new dir — GOAL-specified deliverable path).
+
+## D15 — Commit granularity (execution reality)
+Phases 1–4 were implemented while a multi-hour full-stack build ran (fresh build-dev; qgis_core/gui/
+analysis at -j2). Compile fixes surfaced per-package but verification ran over the whole suite at
+once. The diff is therefore committed as: (1) the two 1-line master-unblock fixes, (2) the platform
+implementation (all `src/app/editing` sources + tests + CMake + provider prefix + workbench mount),
+(3) docs, (4) planning artifacts. Phase-to-file mapping lives in EVIDENCE.md §Phases; per-phase
+execution order is preserved in `.goal-loop-ledger.md`.
+
+## D16 — Pre-existing master breaks: fix 1-liners, document the rest
+Three baseline compile breaks were found (never compiled locally since the D17/D19 merges):
+(a) `data_platform_tools.cpp` missing `using sicnu::experiment::*` → FIXED (2 lines, unblocks
+`sicnu_agent`, which the `editing:state` tests link); (b) `main_window_workbench.cpp` missing
+`georef_dual_window.h` include → FIXED (1 line + comment; unblocks this track's integration TU);
+(c) `WorkflowDefinition` redefinition across `workflow_ir_v2.h`/`workflow_types.h` → NOT FIXED:
+repair spans 14+ workflow-domain files (rename/redesign) = the forbidden cross-track 大修;
+documented as P0 out-of-scope with reproduction evidence (pristine master TUs fail identically).

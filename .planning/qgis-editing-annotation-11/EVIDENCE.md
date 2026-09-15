@@ -18,27 +18,43 @@ Local evidence only. No online CI is triggered, awaited, or cited. Every claim m
 
 ## Phase 1 — EditSession authority
 
-(filled below as work completes)
+- Files: `src/app/editing/rs_edit_session.{h,cpp}`, `rs_edit_command_guard.h`, `tests/test_edit_session.cpp`.
+- Configure (fresh build-dev, offline box): `cmake --preset dev-default -DFETCHCONTENT_SOURCE_DIR_CATCH2=/home/kevin/projects/rs-studio/main/build-dev/_deps/catch2-src` → exit 0 (network clone of Catch2 fails: TLS unexpected EOF; reused already-populated dep source).
+- Build: `cmake --build build-dev --target test_edit_session sicnu_geo_rs -j2` (long: full qgis_core/gui/analysis compile at -j2 under concurrent-track load ~15-21; logs /tmp/build_f11*.log).
+- Test: `ctest -R "^test_edit_session$" -j1` → **15 cases / 120 assertions, all passed** (first green 2026-09-16 ~01:43).
 
 ## Phase 2 — snapping/validity + brush/erase/annotation
 
-(filled)
+- Files: `rs_snapping_controller.*`, `rs_geometry_validity.*`, `rs_sample_brush_tool.*`, `rs_sample_erase_tool.*`, `rs_annotation_controller.*` + `tests/test_edit_{snapping,validity,sample_tools,annotation}.cpp`.
+- Compile fixes discovered by the build: QPointer members need complete types in headers; `QgsGeometry::combine` is an instance method here (fold instead of static union); `QgsPointLocator::Match::type()` returns the legacy local enum; canvas events are protected in base (declared public in our tools, mirroring `rs_roi_tool_*`).
+- Test-drive contract: event positions are derived from map coordinates via `QgsMapToPixel::transform` (this fork's map→screen op) — immune to y-flip and device pixel ratio; erase test data corrected to map (100,100)→(300,300).
 
 ## Phase 3 — ROI semantics + large-editing
 
-(filled)
+- Files: `rs_roi_semantics.*`, `rs_edit_index.*` + `tests/test_edit_{roi_semantics,index}.cpp`; `qgis_analysis` added to `sicnu_geo_rs` link (one line) — `RsPixelRasterizer` is the only membership oracle.
+- Boundary honesty: GDAL's inside test is boundary-sensitive; the known-answer ROI encloses (never touches) pixel centers — 42 px for cols {4..9} × rows {2..8}. makeValid of an INVALID bow-tie has a meaningless signed input area (0 by shoelace); the repaired hand-truth is 50 m².
 
 ## Phase 4 — agent surface + persistence + integration
 
-(filled)
+- Files: `rs_edit_agent_tool.*`, `rs_edit_persistence.*` + `tests/test_edit_{agent_state,persistence}.cpp`; `spatial_tool_provider.cpp` (+4/-1: `editing:` prefix → group `editing`); `main_window_workbench.cpp` (+19: session+snapping+`editing:state` mount next to `WorkbenchContextTool`).
+- Persistence: `QgsVectorFileWriter` GeoJSON driver REWRITES the requested filename — atomic rename now follows the writer's `newFilename` out-param, verified by the temp-residue/failure-preservation tests.
+- Contract fix found by tests: brush strokes are MULTIPART — single-part target layers are refused explicitly (previously such layers only failed at commit: "geometry type is not compatible"). Docs updated.
+- Integration compile evidence: `main_window_workbench.cpp` (with the F11 mount) compiled standalone with the app's exact flags → TU_EXIT=0, 0 errors (app TARGET link blocked by the pre-existing workflow break, see OUT_OF_SCOPE).
 
 ## Phase 5 — hardening
 
-(filled)
+- Failure matrix additions pinned by tests: commit rejection with empty error list (setAllowCommit) → explicit fallback message; writer success without file → explicit error; invalid raster CRS → refused; unsupported export suffix → refused pre-IO; nearestNeighbor k-boundary extra entry tolerated in oracle; empty seed lists don't pollute undo depth.
+- Resource: stroke cap 2048 stamps with coalescing; index attach cap 100k (env `RS_EDIT_INDEX_MAX_FEATURES` verified via qputenv round-trip); ROI preview budget 4M px fail-closed (verified refusal path with 10 px budget).
 
 ## Phase 6 — E2E + docs
 
-(filled)
+- `tests/test_editing_e2e.cpp`: full composed chain (canvas+session+brush→validity→ROI stats→label→undo/redo→commit→GeoJSON export with class=3→layer removal mid-session→project clear→agent facts after lifecycle) → passed.
+- Docs: `docs/adr/0163-editing-session-authority.md`, `docs/workbench/editing-platform.md`, CHANGELOG section.
+
+### Targeted suite results (first full-green run, 2026-09-16)
+
+`ctest --test-dir build-dev -R "test_edit" -j1` (env `QT_QPA_PLATFORM=offscreen`) → **100% tests passed, 10/10**:
+test_edit_session, test_edit_snapping, test_edit_validity, test_edit_sample_tools, test_edit_annotation, test_edit_roi_semantics, test_edit_index, test_edit_agent_state, test_edit_persistence, test_editing_e2e.
 
 ## Phase 7 — review
 
@@ -54,6 +70,19 @@ Local evidence only. No online CI is triggered, awaited, or cited. Every claim m
 - PR #1008 business files — untouched.
 - Legacy `main_window_vector.cpp` dialog-flow migration onto the session — follow-up.
 - Vendored QGIS cleanups — none.
+- **P0 (out of scope, pre-existing on master a5b11b7f10): `sicnu_geo_rs` app target does not compile.**
+  `src/workflow/workflow_ir_v2.h:97` and `src/workflow/workflow_types.h:47` both define
+  `struct sicnu::workflow::WorkflowDefinition` → any TU whose include chain sees both fails
+  (redefinition). Verified NOT caused by this diff: `g++` of the pristine `origin/master`
+  `main_window_view.cpp` / `main_window_workbench.cpp` with this build's exact flags fails with the
+  identical errors (/tmp/mwv_err.log, /tmp/mww_orig_err.log). The main repo's build-dev predates the
+  D17/D19 merges (Aug 29), so this has never been compiled locally. Repair = renaming/reshaping a
+  workflow-domain type across 14+ files — explicitly out of scope for this track; recorded here and
+  at the top of PR_BODY.md. Two SMALLER unblocking breaks in the same class WERE fixed in this diff
+  (1-line each, see commit `fix(agent/workbench)`): missing `using sicnu::experiment::*` in
+  `data_platform_tools.cpp` and missing `georef_dual_window.h` include in `main_window_workbench.cpp`.
+- Not-executed: 60 s-interval CPU/RSS sampling during long builds (detached nohup process; sampled
+  load averages at poll points instead: 15.5–21 on 16 cores, memory ≤19%; hard cap -j2 held).
 
 ## Budget ledger (phase → tool calls / files touched / clock)
 
