@@ -6641,6 +6641,76 @@ target_include_directories(test_cn_products PRIVATE
 sicnu_link_jsoncpp(test_cn_products)
 sicnu_discover_tests(test_cn_products)
 
+# CN sensor registry schema 2.0 (ADR 0159) — strict field validation,
+# band_axis contracts, registry-wide validator and the committed-data drift
+# gate. Qt-free; fixtures are handwritten minimal registry JSON.
+sicnu_add_io_test(test_sensor_schema)
+
+# ADR 0159 CN product families (GF-3 SAR, GF-4 PMI, GF-5 AHSI, ZY-1
+# 02B/02D/02E, CBERS-4 INPE generation) — identity, sidecar generation
+# separation, declared-metadata parsing, hyperspectral band-axis aggregation,
+# refined refusals. Synthetic fixtures only.
+add_executable(test_cn_product_families11 test_cn_product_families11.cpp)
+target_link_libraries(test_cn_product_families11 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  sicnu_geospatial
+  GDAL::GDAL
+)
+target_include_directories(test_cn_product_families11 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_cn_product_families11 PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_link_jsoncpp(test_cn_product_families11)
+sicnu_discover_tests(test_cn_product_families11)
+
+# ADR 0159 import-plan hardening — dry-run constituent graph with checksums,
+# cooperative cancellation (zero-half-product), read-only sources, Chinese
+# paths, and the GF-3 SAR family through plan→execute. Synthetic fixtures.
+add_executable(test_product_import_plan11 test_product_import_plan11.cpp)
+target_link_libraries(test_product_import_plan11 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  sicnu_geospatial
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_product_import_plan11 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_link_jsoncpp(test_product_import_plan11)
+sicnu_discover_tests(test_product_import_plan11)
+
+# ADR 0159 CN product fixture corpus — sidecar XML fixtures + golden
+# metadata + manifest drift gate. TIFFs are synthesized at runtime.
+add_executable(test_cn_product_fixtures test_cn_product_fixtures.cpp)
+target_link_libraries(test_cn_product_fixtures PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Test
+  qgis_core
+  sicnu_geospatial
+  GDAL::GDAL
+)
+target_include_directories(test_cn_product_fixtures PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_cn_product_fixtures PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_link_jsoncpp(test_cn_product_fixtures)
+sicnu_discover_tests(test_cn_product_fixtures)
+
 # Product import dialog tests - probe-preview-commit transaction (headless;
 # Landsat + Sentinel-2 fixtures, sensor-agnostic dialog).
 add_executable(test_product_import_dialog
@@ -6662,6 +6732,7 @@ target_link_libraries(test_product_import_dialog PRIVATE
   qgis_gui
   sicnu_processing
   sicnu_data
+  sicnu_operators
 )
 target_include_directories(test_product_import_dialog PRIVATE
   ${CMAKE_SOURCE_DIR}/src

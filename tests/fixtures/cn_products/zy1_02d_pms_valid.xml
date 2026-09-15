@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaInfo>
+  <ProductID>21230</ProductID>
+  <SatelliteID>ZY1_02D</SatelliteID>
+  <SensorID>PMS</SensorID>
+  <ModeID>PMS</ModeID>
+  <ProductLevel>L1A</ProductLevel>
+  <ReceiveDate>2021-05-01</ReceiveDate>
+  <ReceiveTime>04:22:10</ReceiveTime>
+  <OrbitID>00417</OrbitID>
+  <PixelSizeX>10.0</PixelSizeX>
+  <SolarZenith>28.4</SolarZenith>
+  <SolarAzimuth>143.9</SolarAzimuth>
+  <BandID>B1</BandID>
+  <BandID>B2</BandID>
+  <BandID>B3</BandID>
+  <BandID>B4</BandID>
+</MetaInfo>

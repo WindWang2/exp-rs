@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "source": "ZY-3 published product specifications. wavelength_nm is the documented spectral-range midpoint; FWHM is not published here and therefore not stated.",
   "sensors": {
     "zy3_nad_ms": {

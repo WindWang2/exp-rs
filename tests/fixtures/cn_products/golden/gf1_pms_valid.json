@@ -1,0 +1,42 @@
+{
+  "image_base": "GF1_PMS_E113.5_N23.5_20230512_L1A0123456789-MSS1",
+  "tiff_bands": 4,
+  "kind_name": "gaofen_product",
+  "identity": {
+    "satellite": "GF1",
+    "sensor_mode": "PMS",
+    "sensor_key": "gf1_pms"
+  },
+  "metadata": {
+    "product_id": "10301234567",
+    "platform": "GF1",
+    "sensor": "PMS1",
+    "sensor_mode": "PMS1",
+    "processing_level": "L1A",
+    "radiometric_state": "digital_number",
+    "acquisition_time": "2023-05-12T11:03:22",
+    "resolution_meters": 8.0,
+    "sun_elevation_deg": 62.8,
+    "sun_elevation_source": "",
+    "sun_azimuth_deg": 151.4,
+    "cloud_cover": 12.5,
+    "orbit_id": "09231",
+    "declared_band_ids": [
+      "B1",
+      "B2",
+      "B3",
+      "B4"
+    ],
+    "calibration_band_count": 4,
+    "polarizations": [],
+    "orbit_direction": "",
+    "sidecar_generation": "cresda_legacy_metainfo",
+    "sidecar_root": "metainfo"
+  },
+  "band_roles": {
+    "B1": "blue",
+    "B2": "green",
+    "B3": "red",
+    "B4": "nir"
+  }
+}

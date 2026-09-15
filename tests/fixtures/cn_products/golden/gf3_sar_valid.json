@@ -1,0 +1,25 @@
+{
+  "image_base": "GF3_QPS_E113.9_N22.2_20221121_L1A00000012345-HH",
+  "tiff_bands": 1,
+  "kind_name": "gaofen3_sar_product",
+  "identity": { "satellite": "GF3", "sensor_mode": "SAR", "sensor_key": "gf3" },
+  "metadata": {
+    "product_id": "31887",
+    "platform": "GF3",
+    "sensor": "SAR",
+    "sensor_mode": "QPS",
+    "processing_level": "L1A",
+    "radiometric_state": "digital_number",
+    "acquisition_time": "2022-11-21T10:23:45",
+    "resolution_meters": 3.0,
+    "orbit_id": "08871",
+    "declared_band_ids": [],
+    "polarizations": ["HH", "HV"],
+    "orbit_direction": "DESCENDING",
+    "incidence_angle_deg": "31.47",
+    "beam_mode": "QPS1",
+    "sidecar_generation": "cresda_legacy_metainfo",
+    "sidecar_root": "metainfo"
+  },
+  "band_roles": {}
+}

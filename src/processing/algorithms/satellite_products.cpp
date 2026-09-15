@@ -1605,6 +1605,11 @@ bool stackToGeoTiff(const ProductInfo& product,
     constexpr int kBlockRows = 256;
     std::vector<float> buffer;
 
+    // Cancellation (ADR 0159): the progress bridge may throw (cooperative
+    // cancel). Every error RETURN below removes the partial output, so an
+    // exception must not escape with the half-stacked file (and its open
+    // GDAL handle) behind — close and remove, then rethrow.
+    try {
     for (int i = 0; i < selected.size(); ++i) {
         if (progress)
             progress(static_cast<double>(i) / selected.size(),
@@ -1685,6 +1690,11 @@ bool stackToGeoTiff(const ProductInfo& product,
                 sicnu::data::bandRoleToString(selected[i].role).toUtf8();
             GDALSetMetadataItem(dstBand, "SICNU_BAND_ROLE", roleId.constData(), nullptr);
         }
+    }
+    } catch (...) {
+        GDALClose(outDs);
+        QFile::remove(outputPath);
+        throw;
     }
 
     // Product-level metadata

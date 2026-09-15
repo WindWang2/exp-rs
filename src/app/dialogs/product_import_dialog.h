@@ -83,6 +83,10 @@ class ProductImportDialog : public QDialog
 
   private:
     void setupUi();
+    /// CN families: read-only dry-run preflight summary (ADR 0159) rendered
+    /// in the status label; empty for other families. Consumes the
+    /// standardized import-plan service — no product logic lives here.
+    QString cnDryRunSummary() const;
     /// Populates the preview tree from `m_preview`, checking all rows.
     void populatePreview();
     /// The indices into `m_preview.children` that are currently checked.

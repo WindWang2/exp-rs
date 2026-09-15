@@ -272,3 +272,8 @@ data/labs/_tmp/
 !.planning/unified-mission-workbench-d18/**
 !.planning/dataset-foundry-benchmark-d19/
 !.planning/dataset-foundry-benchmark-d19/**
+
+# cn-eo-product-physics-11: track planning notes (markdown only; logs stay local).
+!.planning/cn-eo-product-physics-11/
+.planning/cn-eo-product-physics-11/*
+!.planning/cn-eo-product-physics-11/*.md

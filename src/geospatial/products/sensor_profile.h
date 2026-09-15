@@ -67,6 +67,14 @@ struct SensorProfileRecord
     std::string familyFile;                ///< registry file the entry came from
     std::vector<std::string> unknownKeys;  ///< forward-compat report (ignored keys)
     std::vector<SensorBandProfile> bands;
+    /// v2 `band_axis` declaration (hyperspectral band axes): the bands array
+    /// stays the per-band truth and is written out in full; the axis block
+    /// only describes extent/ordering/bad-band flags for consumers. Absent
+    /// for v1 entries and for optical layouts.
+    bool hasBandAxis = false;
+    int bandAxisCount = 0;                 ///< declared axis extent (== bands.size())
+    std::string bandAxisOrdering;          ///< declared ordering note, verbatim
+    std::vector<int> badBandIndices;       ///< 0-based indices of flagged/dead bands
 
     /// Case-insensitive band lookup; nullptr when the band is not in the layout.
     const SensorBandProfile *findBand( const std::string &bandId ) const;
@@ -85,11 +93,35 @@ std::vector<std::string> sensorProfileKeys( std::vector<std::string> *warnings =
 
 /// Loads the profile for a sensor key. Throws GeoError(OpenFailed) when the
 /// registry directory/file is missing and GeoError(InvalidArgument) when the
-/// file does not declare the key or violates the v1 schema.
+/// file does not declare the key or violates the declared version's schema.
+/// v2 files get the strict per-field rules (types, finite positive physical
+/// quantities with declared units, role vocabulary, pan/ms reference
+/// integrity, band-id uniqueness); v1 files keep the historical rules.
 SensorProfileRecord loadSensorProfile( const std::string &sensorKey );
 
 /// True when the registry declares @p sensorKey (non-throwing discovery).
 bool hasSensorProfile( const std::string &sensorKey );
+
+/// One validator finding. @p file/@p sensorKey/@p band locate the entry
+/// (band empty for entry/file-level findings); @p message names the violated
+/// rule and the offending value. Never a throw — validation reports, the
+/// loader refuses.
+struct SensorProfileValidationIssue
+{
+    std::string file;      ///< registry file name ("gaofen.json")
+    std::string sensorKey; ///< entry key ("" for file-level findings)
+    std::string band;      ///< band id ("" for non-band findings)
+    std::string message;
+};
+
+/// Validates every registry file in sensorProfileDir() under the rules of
+/// its declared version (v1 files get the historical rules; v2 files the
+/// strict rules) plus the registry-wide cross-references (pan_variant /
+/// ms_variant must resolve to declared keys). Returns all findings; an
+/// empty vector means the registry is clean. Unreadable/unparseable files
+/// are reported as findings, never thrown — validation is a diagnostic over
+/// the whole registry, not a single-entry load.
+std::vector<SensorProfileValidationIssue> validateSensorProfiles();
 
 } // namespace sicnu::geo
 

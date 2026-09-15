@@ -927,9 +927,13 @@ ProductAdapterRegistry::ProductAdapterRegistry()
   // Chinese satellite families (ADR 0157) — specific adapters before the
   // GenericRaster fallback.
   mAdapters.push_back( makeGaofenAdapter() );
+  mAdapters.push_back( makeGaofen3Adapter() );
+  mAdapters.push_back( makeGaofen4Adapter() );
+  mAdapters.push_back( makeGaofen5Adapter() );
   mAdapters.push_back( makeZy3Adapter() );
   mAdapters.push_back( makeZy1Adapter() );
   mAdapters.push_back( makeHjAdapter() );
+  mAdapters.push_back( makeCbersAdapter() );
   mAdapters.push_back( std::make_unique<GenericRasterAdapter>() );
 }
 

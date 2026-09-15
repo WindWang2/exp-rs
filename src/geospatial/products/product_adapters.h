@@ -96,10 +96,14 @@ enum class ProductKind
     Sentinel2Safe,
     Sentinel1Safe,
     ModisContainer,
-    GaofenProduct, ///< GF-1/2/6 PMS/WFV + GF-7 FWD/BWD L1A (CRESDA sidecar XML + TIFF)
+    GaofenProduct,     ///< GF-1/2/6 PMS/WFV + GF-7 FWD/BWD L1A (CRESDA sidecar XML + TIFF)
+    Gaofen3SarProduct, ///< GF-3 SAR L1A, declared-metadata level (ADR 0159)
+    Gaofen4Product,    ///< GF-4 PMI geostationary L1A (ADR 0159)
+    Gaofen5Product,    ///< GF-5 AHSI hyperspectral L1A (ADR 0159)
     Zy3Product,    ///< ZY-3 TLC/NAD/FWD/BWD L1A
-    Zy1Product,    ///< ZY-1 02C PMS/HRC L1A
+    Zy1Product,    ///< ZY-1 02C PMS/HRC + 02B CCD/HR + 02D/02E PMS/AHSI L1A
     HjCcdProduct,  ///< HJ-1A/1B CCD + HJ-2A/B CCD L1A
+    CbersProduct,  ///< CBERS-4 MUX/WFI/PAN10, INPE sidecar generation (ADR 0159)
     GenericRaster
 };
 

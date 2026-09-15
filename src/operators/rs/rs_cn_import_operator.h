@@ -55,6 +55,22 @@ inline bool writeCnImportMetadata( const QString &outputPath,
         GDALSetMetadataItem( dataset, "SICNU_SENSOR_MODE", metadata.sensorMode.c_str(), nullptr );
     if ( !metadata.orbitId.empty() )
         GDALSetMetadataItem( dataset, "SICNU_ORBIT_ID", metadata.orbitId.c_str(), nullptr );
+    // SAR declared semantics (ADR 0159): polarizations and orbit direction
+    // are transportable product facts — stamped when declared, absent when
+    // not, never defaulted.
+    if ( !metadata.polarizations.empty() )
+    {
+        QString polarizations;
+        for ( const std::string &channel : metadata.polarizations )
+        {
+            if ( !polarizations.isEmpty() )
+                polarizations += QLatin1Char( ',' );
+            polarizations += QString::fromStdString( channel );
+        }
+        GDALSetMetadataItem( dataset, "SICNU_POLARIZATIONS", polarizations.toUtf8().constData(), nullptr );
+    }
+    if ( !metadata.orbitDirection.empty() )
+        GDALSetMetadataItem( dataset, "SICNU_ORBIT_DIRECTION", metadata.orbitDirection.c_str(), nullptr );
     if ( metadata.hasSunElevation )
     {
         const QByteArray elevation = QByteArray::number( metadata.sunElevationDeg, 'f', 4 );
