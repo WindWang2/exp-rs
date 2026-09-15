@@ -654,7 +654,7 @@ IrAnalysis analyzeWorkflowIr( WorkflowIr &ir, const IrAnalysisInput &input )
   normalizeWorkflowIr( ir );
   const std::string fingerprint = workflowIrFingerprint( ir );
 
-  AnalysisBuilder builder( Json::Value( Json::arrayValue ) );
+  AnalysisBuilder builder( (Json::Value( Json::arrayValue )) );
   Json::Value factsEcho( Json::objectValue );
   Json::Value statusEcho( Json::objectValue );
   Json::Value conflicts( Json::arrayValue );

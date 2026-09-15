@@ -12,6 +12,7 @@
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
+#include <QJsonDocument>
 #include <QSignalSpy>
 #include <QTimer>
 
