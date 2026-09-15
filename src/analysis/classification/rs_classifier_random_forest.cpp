@@ -61,10 +61,10 @@ QVector<double> RsRandomForestBackend::featureImportances() const
     return importances;
   try
   {
-    // RTrees::getFeatureImportance() is non-const in the OpenCV API but is
+    // RTrees::getVarImportance() is non-const in the OpenCV API but is
     // logically const (reads trained-tree statistics); mirror the
     // const_cast pattern already used by the save() boilerplate above.
-    cv::Mat imp = const_cast<cv::Ptr<cv::ml::RTrees> &>( m_clf )->getFeatureImportance();
+    cv::Mat imp = const_cast<cv::Ptr<cv::ml::RTrees> &>( m_clf )->getVarImportance();
     if ( imp.empty() )
       return importances;
     importances.reserve( imp.cols );
