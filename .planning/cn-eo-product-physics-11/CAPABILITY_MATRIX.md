@@ -24,7 +24,7 @@ Before = 基线 a5b11b7f；After = 本 track 交付后。状态：implemented / 
 
 | 能力 | Before | After |
 |---|---|---|
-| 字段类型/单位 guard | 松散（tests 保底） | v2 逐字段严格验证 + 生成式 validator | 
+| 字段类型/单位 guard | 松散（tests 保底） | v2 逐字段严格验证 + 生成式 validator |
 | unknown key forward-compat | ignored+reported | 保持 + validator 汇总报告 |
 | pan/ms 交叉引用 | 运行时解析 | validator 静态校验 + drift test |
 | 高光谱 band axis | 无 | `band_axis` 描述块 + 落盘波段展开 |
