@@ -9,6 +9,8 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "geospatial/metadata/canonical_metadata.h"
+#include "geospatial/io/finalize_manifest.h"
+#include "geospatial/io/stage_ledger.h"
 #include "geospatial/util/atomic_fs.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -90,11 +92,12 @@ std::string makeTinyGeoJson( const std::string &dir, const std::string &name )
 
 } // namespace
 
-TEST_CASE( "io: family registers all ten authoritative operators", "[io][operators][registry]" )
+TEST_CASE( "io: family registers all thirteen authoritative operators", "[io][operators][registry]" )
 {
   const sicnu::operators::RSOperatorRegistry &registry = sicnu::operators::RSOperatorRegistry::instance();
   for ( const char *id : { "io:translate", "io:warp", "io:reproject", "io:clip", "io:convert_format",
-                           "io:build_overviews", "io:make_cog", "io:vector_convert", "io:inspect", "io:doctor" } )
+                           "io:build_overviews", "io:make_cog", "io:vector_convert", "io:inspect", "io:doctor",
+                           "io:subdatasets", "io:metadata_patch", "io:verify_dataset" } )
   {
     INFO( "operator: " << id );
     CHECK( registry.hasOperator( std::string( id ) ) );
@@ -424,4 +427,141 @@ TEST_CASE( "io:clip keeps the file CRS and applies bounds when no override is gi
   CHECK( meta.maxX == Catch::Approx( 116.06 ).margin( 1e-6 ) );
   CHECK( meta.minY == Catch::Approx( 30.94 ).margin( 1e-6 ) );
   CHECK( meta.maxY == Catch::Approx( 30.98 ).margin( 1e-6 ) );
+}
+
+// --- 11.0 interchange operators ----------------------------------------------
+
+TEST_CASE( "io:verify_dataset verifies a manifest-bearing dataset and reports legacy absence",
+           "[io][operators][verify]" )
+{
+  const std::string dir = scratch( "verify_op" );
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "io:verify_dataset" );
+  REQUIRE( op );
+
+  // Build a dataset + manifest through the library seam.
+  const std::string staged = ( fs::path( dir ) / "out.4.5.tmp.tif" ).string();
+  {
+    ensureGdal();
+    GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver );
+    GDALDatasetH dataset = GDALCreate( driver, staged.c_str(), 5, 5, 1, GDT_Byte, nullptr );
+    REQUIRE( dataset );
+    GDALClose( dataset );
+  }
+  sicnu::geo::io::StageRecord record;
+  record.runId = "run-verify-op";
+  record.producer = "test-harness";
+  record.finalPath = ( fs::path( dir ) / "out.tif" ).string();
+  record.stagedPath = staged;
+  record.driver = "GTiff";
+  record.width = 5;
+  record.height = 5;
+  record.bandCount = 1;
+  sicnu::geo::io::recordStaged( record );
+  sicnu::geo::io::FinalizeManifestFields fields;
+  fields.producer = "test-harness";
+  fields.driver = "GTiff";
+  fields.width = 5;
+  fields.height = 5;
+  fields.bandCount = 1;
+  fields.dtype = "Byte";
+  sicnu::geo::io::finalizeAttached( record.finalPath, &fields );
+
+  sicnu::operators::RSOperatorContext context;
+  {
+    const Json::Value result = op->execute( [ & ] {
+      Json::Value params;
+      params["input"] = record.finalPath;
+      return params;
+    }(), context );
+    CHECK( result["verified"].asBool() );
+    CHECK( result["manifest_present"].asBool() );
+    CHECK( result["digest_matched"].asBool() );
+  }
+  {
+    // Legacy dataset (exists, but written without a manifest): fail-closed.
+    const std::string legacy = ( fs::path( dir ) / "legacy.tif" ).string();
+    {
+      ensureGdal();
+      GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+      REQUIRE( driver );
+      GDALDatasetH dataset = GDALCreate( driver, legacy.c_str(), 3, 3, 1, GDT_Byte, nullptr );
+      REQUIRE( dataset );
+      GDALClose( dataset );
+    }
+    const Json::Value result = op->execute( [ & ] {
+      Json::Value params;
+      params["input"] = legacy;
+      return params;
+    }(), context );
+    CHECK_FALSE( result["verified"].asBool() );
+    CHECK( result["issues"][0]["code"].asString() == "manifest_missing" );
+  }
+  {
+    // Legacy tolerance flips the issue code but never the verdict.
+    const std::string legacy = ( fs::path( dir ) / "legacy.tif" ).string();
+    const Json::Value result = op->execute( [ & ] {
+      Json::Value params;
+      params["input"] = legacy;
+      params["allowMissingManifest"] = true;
+      return params;
+    }(), context );
+    CHECK_FALSE( result["verified"].asBool() );
+    CHECK( result["issues"][0]["code"].asString() == "manifest_missing_allowed" );
+  }
+}
+
+TEST_CASE( "io:metadata_patch refuses non-whitelist fields through the operator seam",
+           "[io][operators][patch]" )
+{
+  const std::string dir = scratch( "patch_op" );
+  const std::string raster = makeTinyRaster( dir, "grid.tif" );
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "io:metadata_patch" );
+  REQUIRE( op );
+
+  sicnu::operators::RSOperatorContext context;
+  try
+  {
+    op->execute( [ & ] {
+      Json::Value params;
+      params["input"] = raster;
+      Json::Value patches;
+      Json::Value entry;
+      entry["band"] = 1;
+      entry["field"] = "brightness"; // not in the whitelist
+      entry["value"] = "10";
+      patches.append( entry );
+      params["patches"] = patches;
+      return params;
+    }(), context );
+    FAIL( "non-whitelist field must be refused" );
+  }
+  catch ( const sicnu::operators::RSOperatorError &error )
+  {
+    CHECK( error.code() == sicnu::operators::ErrorCode::InvalidParameter );
+  }
+}
+
+TEST_CASE( "io:subdatasets refuses plain rasters through the operator seam",
+           "[io][operators][subdatasets]" )
+{
+  const std::string dir = scratch( "subdatasets_op" );
+  const std::string raster = makeTinyRaster( dir, "grid.tif" );
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "io:subdatasets" );
+  REQUIRE( op );
+
+  sicnu::operators::RSOperatorContext context;
+  try
+  {
+    op->execute( [ & ] {
+      Json::Value params;
+      params["input"] = raster;
+      return params;
+    }(), context );
+    FAIL( "plain rasters carry no SUBDATASETS domain" );
+  }
+  catch ( const sicnu::operators::RSOperatorError &error )
+  {
+    CHECK( error.code() == sicnu::operators::ErrorCode::InvalidParameter );
+  }
 }

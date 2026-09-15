@@ -8,7 +8,7 @@ every surface:
 | Surface | Entry points |
 |---|---|
 | C++ (headless-safe) | `sicnu::geo::*` in `src/geospatial` |
-| RSOperators | `io:translate`, `io:warp`, `io:reproject`, `io:clip`, `io:convert_format`, `io:build_overviews`, `io:make_cog`, `io:vector_convert`, `io:inspect`, `io:doctor` |
+| RSOperators | `io:translate`, `io:warp`, `io:reproject`, `io:clip`, `io:convert_format`, `io:build_overviews`, `io:make_cog`, `io:vector_convert`, `io:inspect`, `io:doctor`, `io:subdatasets`, `io:metadata_patch`, `io:verify_dataset` |
 | CLI | `sicnu_geo_rs_cli data inspect <ds> [--stats]`, `data doctor <ds> [--stats]`, `data probe <ds>`, `data capabilities <ds>`, `data product describe <path>`, `data stac <item.json>` |
 | MCP / agent | the `io:` algorithm namespace plus the `io:probe`, `io:capabilities`, `io:product` tools |
 
@@ -29,6 +29,10 @@ Guides:
 7. **[foundation-5-audit.md](foundation-5-audit.md)** — the 5.0 gap analysis:
    how data enters exp-rs, the baseline matrix and the work items this
    foundation answers.
+8. **[interchange-11.md](interchange-11.md)** — 11.0 additions: finalize
+   manifests, staging ledger (attach/sweep), explicit COG production options,
+   capability-gated vector routing, subdataset inventory and validated
+   metadata write-back.
 
 ## Foundation 5.0 additions (ADR 0134–0141)
 

@@ -13,6 +13,10 @@
 #include "geospatial/doctor/data_doctor.h"
 #include "geospatial/formats/format_profiles.h"
 #include "geospatial/io/cog_options.h"
+#include "geospatial/io/finalize_manifest.h"
+#include "geospatial/io/metadata_patch.h"
+#include "geospatial/io/stage_ledger.h"
+#include "geospatial/io/subdataset_inventory.h"
 #include "geospatial/io/vector_interchange.h"
 #include "geospatial/metadata/canonical_metadata.h"
 
@@ -784,6 +788,177 @@ Json::Value IoDoctorOperator::run( const Json::Value &params, RSOperatorContext 
     options.includeStatistics = params::getBool( params, "includeStatistics", false );
     const sicnu::geo::DoctorReport report = sicnu::geo::runDoctor( params::requireString( params, "input" ), options );
     context.reportProgressForced( 1.0, "doctor complete" );
+    return report.toJson();
+  } );
+}
+
+
+// --- 11.0 interchange surface ------------------------------------------------
+
+std::string IoSubdatasetsOperator::description() const
+{
+  return "Enumerate HDF/NetCDF/VRT subdatasets (bounded, classified, redacted) and optionally project "
+         "one selected subdataset into the canonical metadata model.";
+}
+
+Json::Value IoSubdatasetsOperator::schema() const
+{
+  using namespace sicnu::operators::schema;
+  Json::Value params;
+  params["input"] = makeRasterParam( "input", "Multidimensional source (HDF/NetCDF/VRT)" );
+  params["select"] = makeIntegerParam( "select", "1-based subdataset index: project this entry instead of listing" );
+  params["maxEntries"] = makeIntegerParam( "maxEntries", "Inventory cap (1..64, default 64)" );
+  Json::Value outputs;
+  outputs["entries"] = makeOutputParam( "entries", "Subdataset entries (list mode)", "" );
+  outputs["metadata"] = makeOutputParam( "metadata", "Canonical metadata of the selected subdataset", "" );
+  Json::Value root = makeRootSchema( "Subdataset Inventory", description(), params, outputs );
+  root["required"] = makeRequired( { "input" } );
+  stampDeterminismGrade( root, determinismGrade() );
+  return root;
+}
+
+Json::Value IoSubdatasetsOperator::metadata() const
+{
+  Json::Value meta;
+  meta["provider"] = "geospatial-io-foundation";
+  meta["purpose"] = "Subdataset inventory and selection with safe URIs";
+  meta["limitations"] = "Inventory is capped at 64 entries; truncation is reported, never silent.";
+  meta["tags"] = Json::Value( Json::arrayValue );
+  meta["tags"].append( "io" );
+  meta["tags"].append( "multidim" );
+  return meta;
+}
+
+Json::Value IoSubdatasetsOperator::run( const Json::Value &params, RSOperatorContext &context )
+{
+  return guarded( [ & ] {
+    const std::string input = params::requireString( params, "input" );
+    const int select = params::getInt( params, "select", 0 );
+    if ( select == 0 )
+    {
+      const int maxEntries = params::getInt( params, "maxEntries", sicnu::geo::io::kMaxSubdatasetEntries );
+      const sicnu::geo::io::SubdatasetInventory inventory = sicnu::geo::io::inventorySubdatasets( input, maxEntries );
+      context.reportProgressForced( 1.0, "inventory complete" );
+      return inventory.toJson();
+    }
+    const sicnu::geo::io::SubdatasetInventory inventory =
+      sicnu::geo::io::inventorySubdatasets( input, sicnu::geo::io::kMaxSubdatasetEntries );
+    if ( select < 1 || select > static_cast<int>( inventory.entries.size() ) )
+    {
+      Json::Value details;
+      details["select"] = select;
+      details["count"] = static_cast<Json::UInt64>( inventory.entries.size() );
+      throw RSOperatorError( ErrorCode::InvalidParameter, "subdataset selection out of range", details );
+    }
+    const sicnu::geo::RasterMetadata meta =
+      sicnu::geo::io::inspectSubdataset( inventory.entries[static_cast<std::size_t>( select ) - 1].name );
+    Json::Value result = meta.toJson();
+    result["selected_index"] = select;
+    context.reportProgressForced( 1.0, "projection complete" );
+    return result;
+  } );
+}
+
+std::string IoMetadataPatchOperator::description() const
+{
+  return "Whitelist-validated metadata write-back (scale/offset/unit/nodata/role/wavelength/fwhm/color/"
+         "SICNU_* stamps): validate-then-apply, update-capability gate, read-back verification, and "
+         "finalize-manifest digest continuity.";
+}
+
+Json::Value IoMetadataPatchOperator::schema() const
+{
+  using namespace sicnu::operators::schema;
+  Json::Value params;
+  params["input"] = makeRasterParam( "input", "Target dataset (update-capable driver required)" );
+  params["patches"] = makeStringParam( "patches", "Array of {band, field, value} (band 0 = dataset stamp)" );
+  Json::Value outputs;
+  outputs["report"] = makeOutputParam( "report", "Applied fields and manifest status", "" );
+  Json::Value root = makeRootSchema( "Patch Metadata", description(), params, outputs );
+  root["required"] = makeRequired( { "input", "patches" } );
+  stampDeterminismGrade( root, determinismGrade() );
+  return root;
+}
+
+Json::Value IoMetadataPatchOperator::metadata() const
+{
+  Json::Value meta;
+  meta["provider"] = "geospatial-io-foundation";
+  meta["purpose"] = "Declared metadata correction on existing datasets";
+  meta["limitations"] = "Whitelist fields only; drivers without update support are refused (never a full "
+                        "rewrite); verify with io:verify_dataset.";
+  meta["tags"] = Json::Value( Json::arrayValue );
+  meta["tags"].append( "io" );
+  meta["tags"].append( "metadata" );
+  return meta;
+}
+
+Json::Value IoMetadataPatchOperator::run( const Json::Value &params, RSOperatorContext &context )
+{
+  return guarded( [ & ] {
+    const std::string input = params::requireString( params, "input" );
+    const Json::Value &patchParams = params["patches"];
+    if ( !patchParams.isArray() || patchParams.empty() )
+      throw RSOperatorError( ErrorCode::InvalidParameter, "patches must be a non-empty array" );
+    std::vector<sicnu::geo::io::MetadataPatch> patches;
+    for ( const Json::Value &entry : patchParams )
+    {
+      if ( !entry.isObject() || !entry.isMember( "field" ) || !entry.isMember( "value" ) )
+        throw RSOperatorError( ErrorCode::InvalidParameter, "each patch needs field and value" );
+      sicnu::geo::io::MetadataPatch patch;
+      patch.band = entry.get( "band", 0 ).asInt();
+      patch.field = entry["field"].asString();
+      patch.value = entry["value"].asString();
+      patches.push_back( patch );
+    }
+    const sicnu::geo::io::MetadataPatchReport report = sicnu::geo::io::applyMetadataPatch( input, patches );
+    context.reportProgressForced( 1.0, "patch complete" );
+    return report.toJson();
+  } );
+}
+
+std::string IoVerifyDatasetOperator::description() const
+{
+  return "Independent dataset integrity check: recompute the streamed SHA-256 against the finalize "
+         "manifest sidecar and re-check the declared shape. Fails closed when the manifest is absent "
+         "unless allowMissingManifest is set (absence is then reported, never green-washed).";
+}
+
+Json::Value IoVerifyDatasetOperator::schema() const
+{
+  using namespace sicnu::operators::schema;
+  Json::Value params;
+  params["input"] = makeRasterParam( "input", "Dataset to verify" );
+  params["allowMissingManifest"] = makeBooleanParam( "allowMissingManifest",
+                                                     "Legacy tolerance: report absence instead of failing hard" );
+  Json::Value outputs;
+  outputs["verified"] = makeOutputParam( "verified", "Verification report", "" );
+  Json::Value root = makeRootSchema( "Verify Dataset", description(), params, outputs );
+  root["required"] = makeRequired( { "input" } );
+  stampDeterminismGrade( root, determinismGrade() );
+  return root;
+}
+
+Json::Value IoVerifyDatasetOperator::metadata() const
+{
+  Json::Value meta;
+  meta["provider"] = "geospatial-io-foundation";
+  meta["purpose"] = "Digest/shape integrity verification against finalize manifests";
+  meta["limitations"] = "Requires a finalize manifest; datasets written without one verify only as "
+                        "explicitly-tolerated legacy.";
+  meta["tags"] = Json::Value( Json::arrayValue );
+  meta["tags"].append( "io" );
+  meta["tags"].append( "provenance" );
+  return meta;
+}
+
+Json::Value IoVerifyDatasetOperator::run( const Json::Value &params, RSOperatorContext &context )
+{
+  return guarded( [ & ] {
+    const bool allowMissing = params::getBool( params, "allowMissingManifest", false );
+    const sicnu::geo::io::ManifestVerifyReport report =
+      sicnu::geo::io::verifyDataset( params::requireString( params, "input" ), allowMissing );
+    context.reportProgressForced( 1.0, "verification complete" );
     return report.toJson();
   } );
 }
