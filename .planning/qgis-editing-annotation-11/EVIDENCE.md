@@ -60,9 +60,23 @@ test_edit_session, test_edit_snapping, test_edit_validity, test_edit_sample_tool
 
 (filled)
 
-## Phase 8 — final verification + PR
+## Phase 8 — final verification + PR (2026-09-16)
 
-(filled)
+- Rebase: `git fetch origin` hit transient TLS failures on github HTTPS; local `origin/master`
+  unchanged at the baseline `a5b11b7f10`, so `git rebase origin/master` → "up to date" (branch is a
+  linear child of the baseline).
+- **Oracle O6 double-run (post-remediation, final code):**
+  - RUN 1: `ctest -R "test_edit" -j1` (offscreen) → 100% tests passed, 10/10, 9.34 s
+  - RUN 2: same command → 100% tests passed, 10/10, 9.28 s
+- Hygiene: `git diff --check origin/master...HEAD` → clean (exit 0); conflict-marker scan → 0 files;
+  planning whitelist confirmed (`git check-ignore` → not ignored).
+- Review remediation batch re-verified by the double-run above (REVIEW_LOG Round 1: P0=0,
+  P1 2/2 fixed, P2 3 fixed + 1 documented, P3 6 fixed + 2 dispositioned).
+- App-target status (honest): `sicnu_geo_rs` link is blocked on the baseline by the pre-existing
+  `WorkflowDefinition` redefinition (see OUT_OF_SCOPE; pristine master TUs fail identically). This
+  track's integration TU (`main_window_workbench.cpp` with the F11 mount) compiles standalone with
+  the app's exact flags (TU_EXIT=0, 0 errors); every `test_edit_*` target builds and passes.
+- PR created from `.planning/qgis-editing-annotation-11/PR_BODY.md`; not merged; no CI awaited.
 
 ## OUT_OF_SCOPE
 
