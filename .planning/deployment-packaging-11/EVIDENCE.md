@@ -100,7 +100,7 @@ or an explicit `not-executed` with the blocking condition. Nothing else.
 
 ## Phase 4 — packaging surfaces + docs
 
-- `scripts/windows/_env.cmd`: hardwired `C:\Users\wangj.KEVIN\...` default →
+- `scripts/windows/_env.cmd`: hardwired `C:\Users\<redacted-user>\...` default →
   `%SICNU_WORKSPACES%`-relative fallback + loud warning when missing.
 - `scripts/build_offline_bundle.cmd`: `--schema {1,2}` (default 2),
   `--check-runtime` (runs bundled `env-doctor`, fail-closed), copies
