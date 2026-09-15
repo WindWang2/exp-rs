@@ -42,6 +42,9 @@
 #include "rs_feature_normalize_operator.h"
 #include "rs_feature_select_operator.h"
 #include "rs_topographic_correction_operator.h"
+#include "rs_solar_geometry_operator.h"
+#include "rs_brdf_normalization_operator.h"
+#include "rs_radiometric_qa_operator.h"
 #include "rs_spectral_derivative_operator.h"
 #include "rs_spectral_detection_operators.h"
 #include "rs_sar_dualpol_operator.h"
@@ -163,6 +166,9 @@ REGISTER_RS_OPERATOR(RsFeatureNormalizeOperator, "rs:feature_normalize")
 REGISTER_RS_OPERATOR(RsFeatureSelectOperator, "rs:feature_select")
 REGISTER_RS_OPERATOR(RsTerrainAnalysisOperator, "rs:terrain_analysis")
 REGISTER_RS_OPERATOR(RsTopographicCorrectionOperator, "rs:topographic_correction")
+REGISTER_RS_OPERATOR(RsSolarGeometryOperator, "rs:solar_geometry")
+REGISTER_RS_OPERATOR(RsBrdfNormalizationOperator, "rs:brdf_normalization")
+REGISTER_RS_OPERATOR(RsRadiometricQaOperator, "rs:radiometric_qa")
 REGISTER_RS_OPERATOR(RsSpectralDerivativeOperator, "rs:spectral_derivative")
 REGISTER_RS_OPERATOR(RsMatchedFilterOperator, "rs:matched_filter")
 REGISTER_RS_OPERATOR(RsAceOperator, "rs:ace")
@@ -327,6 +333,9 @@ void initBuiltinRsOperators() {
   add( "rs:feature_select", [] { return std::make_unique<RsFeatureSelectOperator>(); } );
   add( "rs:terrain_analysis", [] { return std::make_unique<RsTerrainAnalysisOperator>(); } );
   add( "rs:topographic_correction", [] { return std::make_unique<RsTopographicCorrectionOperator>(); } );
+  add( "rs:solar_geometry", [] { return std::make_unique<RsSolarGeometryOperator>(); } );
+  add( "rs:brdf_normalization", [] { return std::make_unique<RsBrdfNormalizationOperator>(); } );
+  add( "rs:radiometric_qa", [] { return std::make_unique<RsRadiometricQaOperator>(); } );
   add( "rs:spectral_derivative", [] { return std::make_unique<RsSpectralDerivativeOperator>(); } );
   add( "rs:matched_filter", [] { return std::make_unique<RsMatchedFilterOperator>(); } );
   add( "rs:ace", [] { return std::make_unique<RsAceOperator>(); } );
