@@ -72,12 +72,33 @@ On restore: prefer sidecar when present; else XML. Missing both = fresh mission 
 
 **Context.** Engine 2.0 and IR 2.0 both use `sicnu::workflow::WorkflowDefinition` (~34 IR2 call-site files). Full rename is high churn.
 
-**Decision.** Add `using WorkflowDocument = WorkflowDefinition` in `workflow_ir_v2.h`. New D18 code (Ir2PipelineDesignerDock) uses the alias. Full type rename / namespace split remains deferred until a dedicated migration PR.
+**Decision.** Add `using WorkflowDocument = WorkflowDefinition` in `workflow_ir_v2.h`. IR2 surface call sites use the alias (D-W3b). Full struct rename / namespace split remains deferred until a dedicated migration PR.
 
 ## D-W4 — IR2 dock owns PipelineRunCoordinator + LabSpec lift
 
-**Decision.** `Ir2PipelineDesignerDock` constructs a child `PipelineRunCoordinator`, exposes Run/Cancel, and can `liftLabSpecToWorkflow` into the same document identity (`ActiveWorkflowRef.runner = pipeline_run_coordinator`). Default synthetic executor remains (D17); production operator binding is a later follow-up. Main window publishes `ObjectKind::WorkflowRun` on `pipelineRunFinished`.
+**Decision.** `Ir2PipelineDesignerDock` constructs a child `PipelineRunCoordinator`, exposes Run/Cancel, and can `liftLabSpecToWorkflow` into the same document identity (`ActiveWorkflowRef.runner = pipeline_run_coordinator`). Installs `makeRegistryNodeExecutor()` (D-W5). Main window publishes `ObjectKind::WorkflowRun` on `pipelineRunFinished`.
 
 ## D-I4 — Classification Result path upgrade
 
 **Decision.** Studio keeps provisional request ids only when no product path exists. `classificationProductReady` / `acceptProductPath`, classic `requestLoadToMainMap`, and reuse of existing `artifact_paths` / class-named layers publish path-backed Results via `publishMissionResultFromPath`.
+
+
+## D-W5 — IR2 NodeExecutor binds RSOperatorRegistry (typed unbound refusal)
+
+**Context.** D17 `PipelineRunCoordinator` defaulted to a synthetic node executor so designer/checkpoint tests stayed hermetic. D18 dock was starting runs with that default — production-looking success without operators.
+
+**Decision.**
+1. Add `makeRegistryNodeExecutor()` in `ir2_registry_node_executor.*` (extends existing `NodeExecutor` + `RSOperatorRegistry`; no new scheduler).
+2. `Ir2PipelineDesignerDock` always `setExecutor(makeRegistryNodeExecutor())`.
+3. **Bound:** `node.operatorId` present in `RSOperatorRegistry` → create/execute with QJson params + parent artifacts (`input` / `output` defaults under the run directory).
+4. **Unbound:** empty or unknown `operatorId` → fail with `ir2.operator_unbound:…` (never synthetic success on the dock path).
+5. **Synthetic retained** only as coordinator default when `setExecutor` was never called (D17 hermetic tests) and via `makeSyntheticNodeExecutor()` for explicit test installs.
+
+**Remaining non-production paths (documented, not silent).**
+- Designer/LabSpec nodes whose `operatorId` is missing from the process registry (teaching placeholders, typos, not-yet-linked operator TUs) refuse — they are **not** synthetic.
+- Operator runtime failures use `ir2.operator_failed:…` (params/IO/compute); that is honest execution-plane feedback, not a bind gap.
+- Full ExecutionPlane / TaskCenter bridge remains Engine 2.0 `WorkflowRunCoordinator` (D-W1); IR2 stays on `PipelineRunCoordinator`.
+
+## D-W3b — WorkflowDocument call-site rename on IR2 surface
+
+**Decision.** Advance D-W3: IR2 app surface (`pipeline_canvas_widget`, `labspec_workflow_lift`, `guided_workflow_workbench`, `PipelineRunCoordinator::startRun` param) uses the `WorkflowDocument` alias. Struct name in `workflow_ir_v2.h` and Engine 2.0 `WorkflowDefinition` remain unchanged (no cross-TU clash fix beyond the alias).

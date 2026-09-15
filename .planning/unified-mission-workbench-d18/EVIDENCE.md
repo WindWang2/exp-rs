@@ -16,7 +16,7 @@ code search / header reads under src/app, src/workflow, tests
 
 ## Build evidence policy
 
-Per GOAL §18: no online CI dependency. When a machine with Qt6+cmake is available:
+Per GOAL section 18: no online CI dependency. When a machine with Qt6+cmake is available:
 
 ```bash
 export CMAKE_BUILD_PARALLEL_LEVEL=2
@@ -26,19 +26,30 @@ cmake --build <build> --target test_mission_context test_mission_e2e_scaffolding
 ctest -R 'test_mission' -V
 ```
 
-## Implementation landed (this continuation)
+## Implementation landed (operator-bind continuation)
 
-- Mission **dual-write** on project save/open: sidecar `.mission.json` + `sicnuMissionContext` XML (not inside DataProjectSerializer — D-M5)
-- IR2 designer dock: **PipelineRunCoordinator** Run/Cancel + **LabSpec** load via `labspec_workflow_lift`; shared `ActiveWorkflowRef`; WorkflowRun publish on completion
-- `WorkflowDocument` alias for IR 2.0 (full rename deferred — D-W3)
-- Classification: path products via `classificationProductReady` / classic `requestLoadToMainMap` / artifact_paths reuse — less provisional Results
-- Tests: XML dual-write + path-product upgrade + IR2 run identity contract (not executed)
+- **IR2 registry NodeExecutor** (`ir2_registry_node_executor.*`): `makeRegistryNodeExecutor` + `makeSyntheticNodeExecutor` + `classifyIr2OperatorBinding`
+- **Ir2PipelineDesignerDock** installs registry executor (no silent synthetic on Run)
+- **Typed refusal** `ir2.operator_unbound:…` when `operatorId` empty/unknown; `ir2.operator_failed:…` on operator exceptions
+- **WorkflowDocument** alias advanced on IR2 surface (canvas / LabSpec lift / guided / `startRun` param) — Engine 2.0 untouched
+- Tests: `scenario3c_ir2_registry_bind_policy` contract (not executed)
+
+### Bound vs still synthetic / unbound
+
+| Path | Behavior |
+|------|----------|
+| Dock Run + `node.operatorId` in `RSOperatorRegistry` | **Bound** — real `RSOperator::execute` |
+| Dock Run + empty/unknown `operatorId` | **Unbound refusal** (not synthetic) |
+| Coordinator with no `setExecutor` (D17 unit tests) | **Synthetic default** (hermetic) |
+| Explicit `makeSyntheticNodeExecutor()` | **Synthetic** (tests only) |
+
+Examples of registry IDs that bind when their TU is linked into the process: `rs:spectral_index`, `rs:ndvi`, `gdal:reproject`, `opencv:gaussian_blur`, LabSpec-lifted operator steps whose id matches a registered factory. Designer placeholders / typos / not-linked operator packs remain unbound refusals — documented, not synthetic success.
 
 ## Not executed (toolchain absent)
 
 - `cmake` configure/build
 - `ctest -R mission`
-- GUI smoke of new menu / Run / LabSpec actions
+- GUI smoke of Run with real operators / unbound refusal
 
 ## Commits on branch (after seed)
 
@@ -56,6 +67,9 @@ ctest -R 'test_mission' -V
 | c5773131 | feat(d18): IR2 PipelineRunCoordinator/LabSpec + path-backed classify Results |
 | ec7175d6 | docs(d18): evidence, decisions, review log, PR body for persist/run slice |
 | 59f0533e | docs(d18): fill evidence commit ledger SHAs for persist/run slice |
+| e1700670 | docs(d18): note tip SHA 59f0533e in evidence ledger |
+| a640a677 | feat(d18): bind IR2 dock to RSOperatorRegistry NodeExecutor |
+| *(pending)* | docs(d18): evidence/decisions/PR for operator-bind slice |
 
 ## PR
 

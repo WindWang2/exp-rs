@@ -1,32 +1,31 @@
-# REVIEW_LOG — D18 persist + IR2 run + classify path slice
+# REVIEW_LOG — D18 IR2 operator-bind + WorkflowDocument surface
 
-Independent review of MissionContext dual-write, IR2 PipelineRunCoordinator mount, classification path Results.
+Independent review of registry NodeExecutor bind and IR2 WorkflowDocument call-site rename.
 
 ## Architecture
-- Sidecar + sibling XML dual-write; **not** inside `sicnuDataManager` — OK (avoids v3 governance coupling).
-- IR2 dock owns `PipelineRunCoordinator` child; LabSpec lift reuses D17 helper — OK (no third scheduler).
-- `WorkflowDocument` alias only; Engine 2.0 type untouched — OK (D-W3).
+- Extends D17 `NodeExecutor` + existing `RSOperatorRegistry` — OK (no third scheduler / framework).
+- Dock installs registry executor at construction — OK (synthetic default no longer production path).
+- Unbound = typed refusal prefix `ir2.operator_unbound:` — OK (honest fail-closed).
+- `WorkflowDocument` alias on IR2 surface only; Engine 2.0 type untouched — OK (D-W3b).
 
 ## Lifecycle
-- Coordinator parented to dock; cancel on UI — OK.
-- Project read restores mission after DataProjectSerializer — OK.
+- Executor is a copied `std::function` into workers (same as D17) — OK.
+- Operator execute may throw `RSOperatorError` → mapped to `ir2.operator_failed` — OK.
 
 ## Workflow / Agent
-- ActiveWorkflowRef.runner remains `pipeline_run_coordinator`; run completion publishes WorkflowRun — OK.
-- Default synthetic node executor still used (D17) — known limitation for real operators.
+- ActiveWorkflowRef.runner remains `pipeline_run_coordinator` — OK.
+- Bound operators still run inside PipelineRunCoordinator, not TaskCenter — intentional (D-W1).
 
 ## Tests
-- Dual-write + path-product + IR2 run identity contracts added.
+- Contract case `scenario3c_ir2_registry_bind_policy` added.
 - **Not executed** on agent box (no cmake/g++). Honest EVIDENCE.md.
 
 ## Findings disposition
 | ID | Sev | Finding | Disposition |
 |----|-----|---------|-------------|
-| R1 | P2 | IR 2.0 / Engine 2.0 same C++ type name | Alias added; full rename deferred (D-W3) |
-| R2 | P2 | PipelineRunCoordinator used synthetic executor | Acceptable for designer smoke; operator bind follow-up |
-| R3 | P2 | Classification Result provisional without path | **Cleared when path products exist** (D-I4) |
+| R2 | P2 | Synthetic executor on dock Run | **Cleared** (D-W5 registry bind) |
+| R7 | P2 | Unbound nodes previously succeeded synthetically | **Cleared** (typed refusal) |
+| R1 | P2 | Dual WorkflowDefinition name | Alias call sites advanced; struct rename deferred |
 | R4 | P2 | Builds not run on this box | Honest EVIDENCE.md |
-| R5 | P1 | Mission not in project save path | **Cleared** (D-M5 dual-write) |
-| R6 | P2 | Guided LabSpec / PipelineRunCoordinator not production-started | **Cleared** for start path (D-W4); guided cards UI still optional |
 
 No new P0.
