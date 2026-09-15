@@ -128,8 +128,12 @@ void RsSampleEraseTool::canvasPressEvent( QgsMapMouseEvent *e )
 
 void RsSampleEraseTool::canvasMoveEvent( QgsMapMouseEvent *e )
 {
-    if ( !e || !mStroking )
+    if ( !e || !mStroking || !mLayer )
+    {
+        if ( mStroking && !mLayer )
+            cancelStroke();
         return;
+    }
     const QgsPointXY layerPoint = toLayerCoordinates( mLayer.data(), toMapCoordinates( e->pos() ) );
     const QgsGeometry disc = discAt( layerPoint );
     if ( disc.isNull() )
@@ -165,8 +169,16 @@ void RsSampleEraseTool::finishStroke()
 {
     mStroking = false;
     mStamps.clear();
-    mRubber->reset( Qgis::GeometryType::Polygon );
-    mRubber->hide();
+    if ( mRubber )
+    {
+        mRubber->reset( Qgis::GeometryType::Polygon );
+        mRubber->hide();
+    }
+    if ( !mLayer )
+    {
+        mHitIds.clear();
+        return;
+    }
 
     if ( mHitIds.isEmpty() )
     {

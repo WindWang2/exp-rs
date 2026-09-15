@@ -133,8 +133,12 @@ void RsSampleBrushTool::canvasPressEvent( QgsMapMouseEvent *e )
 
 void RsSampleBrushTool::canvasMoveEvent( QgsMapMouseEvent *e )
 {
-    if ( !e || !mStroking )
+    if ( !e || !mStroking || !mLayer )
+    {
+        if ( mStroking && !mLayer )
+            cancelStroke();
         return;
+    }
     const QgsPointXY layerPoint = toLayerCoordinates( mLayer.data(), toMapCoordinates( e->pos() ) );
     const QgsGeometry disc = discAt( layerPoint );
     if ( disc.isNull() )
@@ -172,6 +176,11 @@ void RsSampleBrushTool::cancelStroke()
 
 void RsSampleBrushTool::finishStroke()
 {
+    if ( !mLayer )
+    {
+        cancelStroke();
+        return;
+    }
     const QgsGeometry stroke = mergeStamps( mCombined, mStamps );
     mStamps.clear();
     mCombined = QgsGeometry();
