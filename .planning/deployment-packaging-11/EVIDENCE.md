@@ -145,3 +145,54 @@ or an explicit `not-executed` with the blocking condition. Nothing else.
   (2026-08-29 23:26, master just before the Aug-30 build) — the new-mtime set
   (913 commits, 3555 files incl. non-sources) is a strict superset of
   anything stale, so no object can be reused across an actual source change.
+
+## Phase 6 — validation (local evidence only)
+
+Build (decision D1): copied tree + mtime normalization + reconfigure → make
+-j2 built `sicnu_geo_rs_cli`, `tools/sicnu_generate_samples`,
+`test_env_doctor`. qgis_core fully rebuilt (master drift touched a core-wide
+header; 1054 TUs), total ≈ 1700+ TUs, wall ≈ 2 h, RSS peak ≈ 7.4 GB (host had
+a concurrent track build; envelope RSS trigger never hit). Compile fixes
+found and fixed in this track's own files only (exit_codes include,
+listSeparator(), catch2 include, Json size(), findCheck derefs) — commits
+recorded. `data_platform_tools.cpp` (PR #1009's file, untouched here) fails
+to compile on this host's GCC 16.2.1 — **pre-existing master failure**,
+recorded in OUT_OF_SCOPE.
+
+Validation battery (`/tmp/validate_f19.sh`, log /tmp/validate.log):
+
+| Step | Result |
+| --- | --- |
+| V1 test_env_doctor (Catch2) | exit 0 — 92 assertions, 8 cases |
+| V2 conformance suite | exit 0 — 14 checks, 0 failed |
+| V3 CLI env-doctor text healthy | exit 0, 13 checks, verdict healthy |
+| V4 CLI env-doctor --json | exp.env.report.v1 + verdict + per-check keys |
+| V5 Oracle 3 (CLI, PROJ_DATA bogus) | exit 2, verdict broken, diagnostic.env.proj_db_unusable, injected path in probed[], json assertions PASS |
+| V7 Oracle F: SICNU_OFFLINE=1 | engaged=true + gdal_network_deny=true reported |
+| V8 Oracle 1+2: offline_smoke.sh | exit 0 — bundle build → canonical verify → in-bundle VERIFY.sh → dependency report (schema asserted) → re-assemble+re-verify (deps covered by manifest) → env-doctor verdict line → lab1 offline pipeline → single grade (RSS baseline) → 61-row batch isolation + RSS ≤1.25× |
+
+Cleanroom (T15): pristine bundle (`sicnu-lab-cleanrun`, 753 files 124.9 MB /
+ceiling 250) → `cleanroom_smoke --mode env-starve` exit 0: shipped verifier
+PASS and env-doctor healthy under `env -i` (no proxy vars, PATH=bundle only,
+SICNU_OFFLINE=1); runtime data resolved from the bundle's own layout.
+Defect found & fixed: `env -i` requires `-u` options before assignments.
+
+Tamper evidence (Oracle 1): recorded in Phase 1 (dry bundle + in-bundle
+VERIFY.sh exit 1 naming the file) and in the conformance suite (dedicated
+tamper scenarios).
+
+Known behaviors recorded:
+- GDAL_SKIP does not unregister drivers on this GDAL 3.13 → the CLI-level
+  negative uses PROJ_DATA (operational proj.crs.resolve error, verdict
+  broken); the driver-absence negative is covered at module level through
+  injected requiredDrivers (tests/test_env_doctor.cpp).
+- PROJ's own one-line stderr trace ("Cannot find proj.db") accompanies the
+  typed finding when the operational resolve fails; CPL-level noise is
+  silenced, the PROJ logger is not reachable through OSR and the trace is
+  truthful context.
+- `ctest -R <any>` triggers dynamic discovery of every registered test
+  binary; with a partially built tree unrelated binaries (e.g. test_crs,
+  exit 127) break discovery — pre-existing repo property; the conformance
+  suite is run directly (its ctest registration is correct for full builds).
+- A post-run bundle flags its own runtime outputs as unlisted (integrity
+  contract); cleanroom documented to target pristine bundles.

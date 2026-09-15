@@ -17,6 +17,10 @@
 #
 # Prereq: a built bundle (scripts/build_offline_bundle.sh --build-dir ...),
 # i.e. this tool verifies DEPLOYED state, it does not build anything.
+# NOTE: point this at a PRISTINE bundle — the integrity contract covers every
+# file at shipping time, so a bundle that already ran labs (outputs/ written)
+# will flag those runtime artifacts as unlisted, by design. Re-assemble a
+# fresh one if in doubt.
 #
 # usage: scripts/cleanroom/cleanroom_smoke.sh --bundle <dir> [--mode ...]
 set -eu
@@ -51,7 +55,7 @@ if [ "$mode" = "env-starve" ]; then
   echo "== cleanroom smoke: env-starve mode (no proxy vars, minimal env) =="
 
   # 1. integrity via the SHIPPED verifier only (no repo access in PATH).
-  env -i PATH=/usr/bin:/bin $proxy_hygiene \
+  env -i $proxy_hygiene PATH=/usr/bin:/bin \
     QT_QPA_PLATFORM=offscreen SICNU_OFFLINE=1 \
     /bin/sh "$bundle_abs/VERIFY.sh" > /tmp/cleanroom-verify.log 2>&1 \
     || { cat /tmp/cleanroom-verify.log; fail "in-bundle verify failed"; }
@@ -60,8 +64,8 @@ if [ "$mode" = "env-starve" ]; then
   # 2. environment self-check through the shipped CLI, still env-starved.
   cli="$bundle_abs/bin/sicnu_geo_rs_cli"
   [ -x "$cli" ] || fail "bundle has no bin/sicnu_geo_rs_cli (build it first)"
-  env -i PATH=/usr/bin:/bin $proxy_hygiene \
-    HOME=/tmp QT_QPA_PLATFORM=offscreen SICNU_OFFLINE=1 \
+  env -i $proxy_hygiene PATH=/usr/bin:/bin HOME=/tmp \
+    QT_QPA_PLATFORM=offscreen SICNU_OFFLINE=1 \
     "$cli" env-doctor > /tmp/cleanroom-env.log 2>&1
   rc=$?
   cat /tmp/cleanroom-env.log
