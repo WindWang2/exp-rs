@@ -196,3 +196,18 @@ Known behaviors recorded:
   suite is run directly (its ctest registration is correct for full builds).
 - A post-run bundle flags its own runtime outputs as unlisted (integrity
   contract); cleanroom documented to target pristine bundles.
+
+## Phase 8 — final double validation + PR
+
+- `git fetch origin --prune` → origin/master still `a5b11b7f10`; rebase → up-to-date, 10
+  track commits, no conflicts. (First fetch attempt of the session hit a sandbox TLS
+  flake — `unexpected eof`; later fetches clean.)
+- Oracle 6 double run: `/tmp/validate_f19.sh` twice consecutively — **both runs fully
+  green** (V1..V8 identical results: test_env_doctor 92 assertions; conformance 14/14;
+  CLI healthy text/json; Oracle-3 negative exit 2 + broken verdict + named diagnostic +
+  probed paths; offline state; offline smoke end-to-end exit 0).
+- Presence assertions: every `.agents/skills/<name>/SKILL.md` referenced from GOAL.md and
+  the agent docs exists (loop output empty); `git diff --check origin/master...HEAD` exit
+  0; zero added conflict markers; `.planning` tracks markdown only; no secrets (the one
+  username mention is redacted to `<redacted-user>` in the audit notes).
+- PR_BODY.md completed; push + `gh pr create` follow (report in the final session message).
