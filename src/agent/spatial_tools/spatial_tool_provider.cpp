@@ -34,8 +34,10 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
           || spatial->name().rfind( "run:", 0 ) == 0 || spatial->name().rfind( "collection:", 0 ) == 0 );
     // Harness 4.0 namespaces (error taxonomy, manifests, preflight, plans).
     const bool isHarness = ( spatial->name().rfind( "harness:", 0 ) == 0 );
+    // Editing platform 11.0: read-only editing facts join the catalog (F11).
+    const bool isEditing = ( spatial->name().rfind( "editing:", 0 ) == 0 );
     if ( !isSpatial && !isTemporal && !isCartography && !isSymbology && !isWorkflow &&
-         !isWorkspaceCommand && !isGovernance && !isHarness )
+         !isWorkspaceCommand && !isGovernance && !isHarness && !isEditing )
       continue;
 
     AgentTool tool;
@@ -49,6 +51,7 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
                  : isWorkspaceCommand ? "workspace"
                  : isGovernance      ? "governance"
                  : isHarness         ? "harness"
+                 : isEditing         ? "editing"
                                       : "spatial";
     tool.description = spatial->description();
     tool.tags = spatial->tags();

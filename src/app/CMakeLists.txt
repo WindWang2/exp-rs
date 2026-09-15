@@ -289,6 +289,18 @@ add_executable(sicnu_geo_rs
     qgspointmarkeritem.cpp
     qgspointrotationitem.cpp
 
+    # Editing platform (F11): session authority over vector edit state
+    editing/rs_edit_session.cpp
+    editing/rs_snapping_controller.cpp
+    editing/rs_geometry_validity.cpp
+    editing/rs_sample_brush_tool.cpp
+    editing/rs_sample_erase_tool.cpp
+    editing/rs_annotation_controller.cpp
+    editing/rs_roi_semantics.cpp
+    editing/rs_edit_index.cpp
+    editing/rs_edit_agent_tool.cpp
+    editing/rs_edit_persistence.cpp
+
     # Vector editing infrastructure
     qgsfeatureaction.cpp
     qgsguivectorlayertools.cpp
@@ -376,6 +388,7 @@ target_link_libraries(sicnu_geo_rs PRIVATE
     qgis_core
     qgis_gui
     qgis_native
+    qgis_analysis
     qgis_app_georef
     Sicnu::qgis_display
     Sicnu::session_map

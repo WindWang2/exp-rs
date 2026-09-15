@@ -2,6 +2,46 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - QGIS Editing, Annotation & ROI Platform 11.0 (zcode/qgis-editing-annotation-11)
+
+- **Editing session authority (A)**: `RsEditSession` (`src/app/editing/`) — aggregated
+  per-layer edit facts (editing/modified/locked/undo-redo depth/feature & selection
+  counts, O(1) incremental `featureCount`), undo/redo delegation, commit/rollback that
+  **reports** failures instead of discarding `commitChanges()`'s result, session locks
+  that never block save paths, and project-removal-safe lifecycle (`layerWillBeRemoved`
+  drops tracking before the layer dies).
+- **Sample brush & erase tools (B)**: `RsSampleBrushTool` / `RsSampleEraseTool` —
+  disc-stamp painting on polygon sample layers; one stroke = one edit command (single
+  undo step); stamps coalesce beyond a bounded cap; radius in layer CRS units; erase is
+  whole-feature; refusal contract for locked/uneditable/unattached targets.
+- **Annotation surface (B)**: `RsAnnotationController` — first app-level consumer of the
+  vendored annotation toolset: project-owned single `QgsAnnotationLayer` (reused on
+  reopen), programmatic point-text/marker items, interactive create/modify/select tools.
+- **Snapping & validity (C)**: `RsSnappingController` (single writer of the canvas
+  `QgsSnappingUtils` config: vertex/segment, tolerance, units, intersection snapping) and
+  `RsGeometryValidity` (structured issue report + `makeValid` **preview**; repairs are
+  never applied implicitly).
+- **ROI ↔ raster semantics (D)**: `RsRoiSemantics` — fail-closed ROI→raster CRS
+  transform, windowed center-of-pixel footprint via `RsPixelRasterizer`, NoData-aware
+  `pixelCount`/`validPixelCount`, cancelable per-band stats previews with a fail-closed
+  pixel budget, edit-command-wrapped class-label write-back.
+- **Large-editing index (E)**: `RsEditIndex` — `QgsSpatialIndex` bulk-build (bounded,
+  cancelable, env-overridable cap) kept consistent incrementally across
+  add/delete/geometry-change (incl. undo), `intersects/nearest/bounds/selectionBounds`
+  queries with no layer scans and no UI rebuilds.
+- **Agent facts surface (F)**: read-only `editing:state` spatial tool (catalog group
+  `editing`) exposing session/snapping facts through `SpatialToolRegistry` and the
+  `SpatialToolProvider`; no agent write path exists by design.
+- **Atomic persistence (G)**: `RsEditPersistence` — GeoJSON/GPKG export via
+  `QgsVectorFileWriter` into a temp file atomically renamed over the target, failure-path
+  temp cleanup, suffix-based driver selection (refuses unknown formats), and
+  `commitReported` per-layer error collection.
+- **Interaction tests (H)**: offscreen Catch2 suites `test_edit_session`,
+  `test_edit_snapping`, `test_edit_validity`, `test_edit_sample_tools`,
+  `test_edit_annotation`, `test_edit_roi_semantics`, `test_edit_index` (100k-feature
+  logical scale vs brute-force oracles), `test_edit_agent_state`,
+  `test_edit_persistence`, and the composed `test_editing_e2e`.
+
 ## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)
 
 - **Regular-calendar normalization (T-2)**: `rs:temporal_regularize` re-casts irregular
