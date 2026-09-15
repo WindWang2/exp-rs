@@ -69,6 +69,10 @@ add_library(sicnu_processing SHARED
     algorithms/spectral_anomaly.cpp
     algorithms/spectral_resampling.cpp
     algorithms/endmember_extraction.cpp
+    algorithms/spectral_local_rx.cpp
+    algorithms/spectral_sparse_unmixing.cpp
+    algorithms/spectral_hybrid_similarity.cpp
+    algorithms/endmember_analysis.cpp
     algorithms/spectral_library.cpp
     algorithms/spectral_table.cpp
     algorithms/spectral_wavelength.cpp

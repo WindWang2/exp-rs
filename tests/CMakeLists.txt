@@ -5401,6 +5401,120 @@ if(TARGET sicnu_operators)
   sicnu_link_jsoncpp(test_endmember_extraction)
   sicnu_discover_tests(test_endmember_extraction)
 
+  # Spectral Intelligence 11.0: dual-window local RX (kernel known answers).
+  add_executable(test_spectral_local_rx test_spectral_local_rx.cpp)
+  target_link_libraries(test_spectral_local_rx PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    sicnu_processing
+  )
+  target_include_directories(test_spectral_local_rx PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_spectral_local_rx)
+  sicnu_discover_tests(test_spectral_local_rx)
+
+  # Spectral Intelligence 11.0: sparse (L1/non-negative) unmixing closed forms.
+  add_executable(test_spectral_sparse_unmixing test_spectral_sparse_unmixing.cpp)
+  target_link_libraries(test_spectral_sparse_unmixing PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    sicnu_processing
+  )
+  target_include_directories(test_spectral_sparse_unmixing PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_spectral_sparse_unmixing)
+  sicnu_discover_tests(test_spectral_sparse_unmixing)
+
+  # Spectral Intelligence 11.0: SID-SAM hybrid similarity closed forms.
+  add_executable(test_spectral_hybrid_similarity test_spectral_hybrid_similarity.cpp)
+  target_link_libraries(test_spectral_hybrid_similarity PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    sicnu_processing
+  )
+  target_include_directories(test_spectral_hybrid_similarity PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_spectral_hybrid_similarity)
+  sicnu_discover_tests(test_spectral_hybrid_similarity)
+
+  # Spectral Intelligence 11.0: endmember analysis (reduction, angle matrix,
+  # sensor projection on the master resampling seam).
+  add_executable(test_endmember_analysis test_endmember_analysis.cpp)
+  target_link_libraries(test_endmember_analysis PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    sicnu_processing
+  )
+  target_include_directories(test_endmember_analysis PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_endmember_analysis)
+  sicnu_discover_tests(test_endmember_analysis)
+
+  # Spectral Intelligence 11.0: 256-1024 band scale evidence (closed forms,
+  # determinism, memory-bound refusals; wall-clock is never a gate).
+  add_executable(test_spectral_scale test_spectral_scale.cpp)
+  target_link_libraries(test_spectral_scale PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    sicnu_processing
+  )
+  target_include_directories(test_spectral_scale PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_spectral_scale)
+
+  # Spectral Intelligence 11.0: end-to-end artifact chain over the registry
+  # (PPI table -> endmember analysis -> sparse unmixing; local RX; hybrid
+  # similarity) with provenance custody assertions at every hop.
+  add_executable(test_spectral_pipeline_11 test_spectral_pipeline_11.cpp)
+  target_link_libraries(test_spectral_pipeline_11 PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    qgis_core
+    sicnu_processing
+    sicnu_operators
+    GDAL::GDAL
+  )
+  target_include_directories(test_spectral_pipeline_11 PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_spectral_pipeline_11)
+  sicnu_discover_tests(test_spectral_pipeline_11)
+
+  # Spectral Workbench 11 panel: offscreen widget test (compiles the widget
+  # TU directly, mirroring the test_spectral_profile_widget pattern).
+  add_executable(test_spectral_workbench_panel test_spectral_workbench_panel.cpp
+    ${CMAKE_SOURCE_DIR}/src/app/widgets/spectral_workbench_panel.cpp
+  )
+  target_link_libraries(test_spectral_workbench_panel PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    qgis_core
+    sicnu_processing
+  )
+  target_include_directories(test_spectral_workbench_panel PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(test_spectral_workbench_panel)
+
   # Spectral library domain tests - JSON round-trip, malformed input.
   add_executable(test_spectral_library test_spectral_library.cpp)
   target_link_libraries(test_spectral_library PRIVATE
