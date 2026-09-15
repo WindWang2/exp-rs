@@ -68,8 +68,9 @@ struct NodeExecutionResult
     QString errorMessage;
 };
 
-/// Inputs: parent nodeId -> artifact path. The run directory is where the
-/// executor writes artifacts.
+/// Inputs: IR2 target port name -> artifact path (D-W6; prefer explicit port
+/// names over source-node-id keys). The run directory is where the executor
+/// writes artifacts.
 using NodeExecutor = std::function<NodeExecutionResult(
     const NodeFact &node, const QHash<QString, QString> &inputArtifacts, const QString &runDirectory )>;
 

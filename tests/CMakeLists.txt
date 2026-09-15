@@ -9253,6 +9253,12 @@ sicnu_add_d17_test(test_workflow_cost_estimator
     ${CMAKE_SOURCE_DIR}/src/workflow/workflow_cost_estimator.cpp
 )
 
+# --- D18: IR2 port→param mapping (hermetic; no operators registry link)
+sicnu_add_d17_test(test_ir2_port_param_mapping
+  SOURCES ${CMAKE_SOURCE_DIR}/src/workflow/ir2_port_param_mapping.cpp
+  LIBS jsoncpp
+)
+
 # --- Package E: run coordinator + checkpoints
 sicnu_add_d17_test(test_workflow_checkpoint_cache
   SOURCES ${D17_ENGINE_SOURCES}

@@ -161,9 +161,10 @@ TEST_CASE( "scenario3c_ir2_registry_bind_policy", "[d18][mission][e2e]" )
   MissionContext ctx = makeSeedMission();
   REQUIRE( ctx.activeWorkflow.runner == QLatin1String( "pipeline_run_coordinator" ) );
 
-  // Binding matrix (see DECISIONS D-W5 / EVIDENCE):
+  // Binding matrix (see DECISIONS D-W5 / D-W6 / EVIDENCE):
   //   Bound   = RSOperatorRegistry::hasOperator(node.operatorId)
-  //   Unbound = empty / unknown id → typed refusal (prefix above)
+  //   Unbound = empty / unknown id → typed refusal (prefix above) BEFORE port map
+  //   Multi-input = targetPortName → params[portName] (test_ir2_port_param_mapping)
   //   Synthetic default = coordinator with no setExecutor (tests only)
-  SUCCEED( "IR2 registry bind policy documented for toolchain host verification" );
+  SUCCEED( "IR2 registry bind + port→param policy documented for toolchain host verification" );
 }
