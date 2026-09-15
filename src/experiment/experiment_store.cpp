@@ -186,6 +186,27 @@ bool ExperimentStore::open( const QString &dbPath, QString *errorOut )
              " ON model_promotions(model_id, created_ms)",
              errorOut ) ||
          !m_impl->exec(
+             "CREATE TABLE IF NOT EXISTS benchmark_definitions("
+             "benchmark_id TEXT NOT NULL, benchmark_version INTEGER NOT NULL,"
+             "content_digest TEXT NOT NULL DEFAULT '',"
+             "json TEXT NOT NULL, created_ms INTEGER NOT NULL,"
+             "PRIMARY KEY(benchmark_id, benchmark_version))",
+             errorOut ) ||
+         !m_impl->exec(
+             "CREATE INDEX IF NOT EXISTS idx_benchmark_defs_created"
+             " ON benchmark_definitions(created_ms)",
+             errorOut ) ||
+         !m_impl->exec(
+             "CREATE TABLE IF NOT EXISTS benchmark_results("
+             "result_id TEXT PRIMARY KEY, benchmark_id TEXT NOT NULL,"
+             "benchmark_version INTEGER NOT NULL DEFAULT 0,"
+             "json TEXT NOT NULL, created_ms INTEGER NOT NULL)",
+             errorOut ) ||
+         !m_impl->exec(
+             "CREATE INDEX IF NOT EXISTS idx_benchmark_results_bench"
+             " ON benchmark_results(benchmark_id, created_ms)",
+             errorOut ) ||
+         !m_impl->exec(
              "CREATE INDEX IF NOT EXISTS idx_exp_lineage_from"
              " ON experiment_lineage(from_kind, from_id)",
              errorOut ) ||
@@ -1015,6 +1036,206 @@ QVector<PromotionRecord> ExperimentStore::promotionsForModel( const QString &mod
             records.append( record.value() );
     }
     return records;
+}
+
+
+// --- benchmark definitions / results (D19) --------------------------------------
+
+sicnu::data::Result<void> ExperimentStore::saveBenchmarkDefinition(
+    const BenchmarkDefinition &definition )
+{
+    using ResultT = sicnu::data::Result<void>;
+    if ( !m_impl )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
+                                            QStringLiteral( "store is not open" ) ) );
+    QMutexLocker lock( &m_impl->mutex );
+    if ( isReadOnly() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_read_only" ),
+                                            QStringLiteral( "store is read-only" ) ) );
+    const auto validated = definition.validate();
+    if ( !validated )
+        return ResultT::failure( validated.diagnostics() );
+
+    const QString digest = definition.contentDigest();
+    const QString json = jsonToText( definition.toJson() );
+    {
+        Stmt existing( m_impl->db, QStringLiteral(
+            "SELECT content_digest, json FROM benchmark_definitions"
+            " WHERE benchmark_id=? AND benchmark_version=?" ) );
+        if ( !existing )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                                existing.error( m_impl->db ) ) );
+        existing.bind( 1, definition.benchmarkId() );
+        existing.bind( 2, qint64( definition.benchmarkVersion() ) );
+        if ( existing.stepRow() )
+        {
+            if ( existing.text( 0 ) == digest && existing.text( 1 ) == json )
+                return ResultT::success();
+            return ResultT::failure( storeDiag(
+                QStringLiteral( "experiment.benchmark_conflict" ),
+                QStringLiteral( "benchmark %1@%2 already published with different content" )
+                    .arg( definition.benchmarkId() )
+                    .arg( definition.benchmarkVersion() ) ) );
+        }
+    }
+    Stmt insert( m_impl->db, QStringLiteral(
+        "INSERT INTO benchmark_definitions(benchmark_id, benchmark_version,"
+        " content_digest, json, created_ms) VALUES(?,?,?,?,?)" ) );
+    if ( !insert )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                            insert.error( m_impl->db ) ) );
+    insert.bind( 1, definition.benchmarkId() );
+    insert.bind( 2, qint64( definition.benchmarkVersion() ) );
+    insert.bind( 3, digest );
+    insert.bind( 4, json );
+    insert.bind( 5, QDateTime::currentMSecsSinceEpoch() );
+    if ( !insert.step() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            insert.error( m_impl->db ) ) );
+    return ResultT::success();
+}
+
+std::optional<BenchmarkDefinition> ExperimentStore::benchmarkDefinition(
+    const QString &benchmarkId, quint64 version ) const
+{
+    if ( !m_impl )
+        return std::nullopt;
+    QMutexLocker lock( &m_impl->mutex );
+    Stmt stmt( m_impl->db, QStringLiteral(
+        "SELECT json FROM benchmark_definitions"
+        " WHERE benchmark_id=? AND benchmark_version=?" ) );
+    if ( !stmt )
+        return std::nullopt;
+    stmt.bind( 1, benchmarkId );
+    stmt.bind( 2, qint64( version ) );
+    if ( !stmt.stepRow() )
+        return std::nullopt;
+    const auto parsed = BenchmarkDefinition::fromJson( textToJson( stmt.text( 0 ) ) );
+    return parsed ? std::optional<BenchmarkDefinition>( parsed.value() ) : std::nullopt;
+}
+
+sicnu::data::Result<QPair<qint64, QVector<BenchmarkDefinition>>>
+ExperimentStore::listBenchmarkDefinitions( qint64 offset, qint64 limit ) const
+{
+    using ResultT = sicnu::data::Result<QPair<qint64, QVector<BenchmarkDefinition>>>;
+    if ( !m_impl )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
+                                            QStringLiteral( "store is not open" ) ) );
+    limit = qBound<qint64>( qint64( 1 ), limit, kMaxPageSize );
+    offset = qMax<qint64>( 0, offset );
+    QMutexLocker lock( &m_impl->mutex );
+    qint64 total = 0;
+    {
+        Stmt count( m_impl->db, QStringLiteral( "SELECT COUNT(*) FROM benchmark_definitions" ) );
+        if ( !count )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                                count.error( m_impl->db ) ) );
+        if ( count.stepRow() )
+            total = count.i64( 0 );
+    }
+    Stmt stmt( m_impl->db, QStringLiteral(
+        "SELECT json FROM benchmark_definitions"
+        " ORDER BY created_ms, benchmark_id, benchmark_version LIMIT ? OFFSET ?" ) );
+    if ( !stmt )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                            stmt.error( m_impl->db ) ) );
+    stmt.bind( 1, limit );
+    stmt.bind( 2, offset );
+    QVector<BenchmarkDefinition> rows;
+    while ( stmt.stepRow() )
+    {
+        auto parsed = BenchmarkDefinition::fromJson( textToJson( stmt.text( 0 ) ) );
+        if ( parsed )
+            rows.append( parsed.value() );
+    }
+    return ResultT::success( qMakePair( total, rows ) );
+}
+
+sicnu::data::Result<void> ExperimentStore::saveBenchmarkResult( const BenchmarkResult &result )
+{
+    using ResultT = sicnu::data::Result<void>;
+    if ( !m_impl )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_closed" ),
+                                            QStringLiteral( "store is not open" ) ) );
+    QMutexLocker lock( &m_impl->mutex );
+    if ( isReadOnly() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_read_only" ),
+                                            QStringLiteral( "store is read-only" ) ) );
+    if ( result.resultId().isEmpty() || result.benchmarkId().isEmpty() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.benchmark_result_invalid" ),
+                                            QStringLiteral( "result_id and benchmark_id required" ) ) );
+
+    const QString json = jsonToText( result.toJson() );
+    {
+        Stmt existing( m_impl->db,
+                       QStringLiteral( "SELECT json FROM benchmark_results WHERE result_id=?" ) );
+        if ( !existing )
+            return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                                existing.error( m_impl->db ) ) );
+        existing.bind( 1, result.resultId() );
+        if ( existing.stepRow() )
+        {
+            if ( existing.text( 0 ) == json )
+                return ResultT::success();
+            return ResultT::failure( storeDiag(
+                QStringLiteral( "experiment.conflict" ),
+                QStringLiteral( "benchmark result %1 exists with different content" )
+                    .arg( result.resultId() ) ) );
+        }
+    }
+    Stmt insert( m_impl->db, QStringLiteral(
+        "INSERT INTO benchmark_results(result_id, benchmark_id, benchmark_version,"
+        " json, created_ms) VALUES(?,?,?,?,?)" ) );
+    if ( !insert )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_query_failed" ),
+                                            insert.error( m_impl->db ) ) );
+    insert.bind( 1, result.resultId() );
+    insert.bind( 2, result.benchmarkId() );
+    insert.bind( 3, qint64( result.benchmarkVersion() ) );
+    insert.bind( 4, json );
+    insert.bind( 5, QDateTime::currentMSecsSinceEpoch() );
+    if ( !insert.step() )
+        return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
+                                            insert.error( m_impl->db ) ) );
+    return ResultT::success();
+}
+
+std::optional<BenchmarkResult> ExperimentStore::benchmarkResultById( const QString &resultId ) const
+{
+    if ( !m_impl )
+        return std::nullopt;
+    QMutexLocker lock( &m_impl->mutex );
+    Stmt stmt( m_impl->db, QStringLiteral( "SELECT json FROM benchmark_results WHERE result_id=?" ) );
+    if ( !stmt )
+        return std::nullopt;
+    stmt.bind( 1, resultId );
+    if ( !stmt.stepRow() )
+        return std::nullopt;
+    const auto parsed = BenchmarkResult::fromJson( textToJson( stmt.text( 0 ) ) );
+    return parsed ? std::optional<BenchmarkResult>( parsed.value() ) : std::nullopt;
+}
+
+QVector<BenchmarkResult> ExperimentStore::benchmarkResultsFor( const QString &benchmarkId,
+                                                               qint64 limit ) const
+{
+    QVector<BenchmarkResult> rows;
+    if ( !m_impl )
+        return rows;
+    QMutexLocker lock( &m_impl->mutex );
+    Stmt stmt( m_impl->db, QStringLiteral(
+        "SELECT json FROM benchmark_results WHERE benchmark_id=?"
+        " ORDER BY created_ms, result_id LIMIT ?" ) );
+    if ( !stmt )
+        return rows;
+    stmt.bind( 1, benchmarkId );
+    stmt.bind( 2, qBound<qint64>( qint64( 1 ), limit, qint64( 10000 ) ) );
+    while ( stmt.stepRow() )
+    {
+        const auto parsed = BenchmarkResult::fromJson( textToJson( stmt.text( 0 ) ) );
+        if ( parsed )
+            rows.append( parsed.value() );
+    }
+    return rows;
 }
 
 } // namespace sicnu::experiment

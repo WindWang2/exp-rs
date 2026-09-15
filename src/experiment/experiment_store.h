@@ -4,6 +4,8 @@
 // queries, mutex-guarded single connection.
 #pragma once
 
+#include "benchmark_definition.h"
+#include "benchmark_runner.h"
 #include "evaluation.h"
 #include "experiment_types.h"
 
@@ -95,6 +97,21 @@ class ExperimentStore
     /// Promotion evidence for one model catalog id (ascending creation order).
     QVector<PromotionRecord> promotionsForModel( const QString &modelId,
                                                  qint64 limit = 100 ) const;
+
+    // --- benchmark definitions / results (D19; additive tables, schema stays v1) ---
+    /// Persist a published BenchmarkDefinition. Same id@version with different
+    /// contentDigest is a conflict; identical content is idempotent.
+    sicnu::data::Result<void> saveBenchmarkDefinition( const BenchmarkDefinition &definition );
+    std::optional<BenchmarkDefinition> benchmarkDefinition( const QString &benchmarkId,
+                                                            quint64 version ) const;
+    sicnu::data::Result<QPair<qint64, QVector<BenchmarkDefinition>>> listBenchmarkDefinitions(
+        qint64 offset = 0, qint64 limit = kMaxPageSize ) const;
+
+    /// Persist a BenchmarkResult by result_id (conflict on different content).
+    sicnu::data::Result<void> saveBenchmarkResult( const BenchmarkResult &result );
+    std::optional<BenchmarkResult> benchmarkResultById( const QString &resultId ) const;
+    QVector<BenchmarkResult> benchmarkResultsFor( const QString &benchmarkId,
+                                                  qint64 limit = 100 ) const;
 
   private:
     /// The real upsert path; `upsertRun()` wraps it with the unified-trace

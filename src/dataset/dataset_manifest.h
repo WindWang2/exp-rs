@@ -19,6 +19,7 @@
 
 #include "../data/data_asset.h" // sicnu::data::SpatialExtent reuse
 #include "../data/data_result.h"
+#include "dataset_types.h"
 
 #include <QDateTime>
 #include <QJsonObject>
@@ -111,6 +112,10 @@ class DatasetManifest
     void setParentVersionId( const QString &id ) { m_parentVersionId = id; }
     bool isRootVersion() const { return m_parentVersionId.isEmpty(); }
 
+    // -- scientific role (D19) -----------------------------------------------
+    DatasetRole role() const { return m_role; }
+    void setRole( DatasetRole role ) { m_role = role; }
+
     // -- header --------------------------------------------------------------
     const QString &name() const { return m_name; }
     void setName( const QString &name ) { m_name = name; }
@@ -168,6 +173,7 @@ class DatasetManifest
     QString m_datasetId;
     QString m_versionId;
     QString m_parentVersionId;
+    DatasetRole m_role = DatasetRole::Unspecified;
     QString m_name;
     QString m_description;
     QDateTime m_createdAtUtc;

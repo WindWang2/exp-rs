@@ -114,7 +114,7 @@ const std::vector<std::string> kSpatialToolPrefixes = {
   "cartography:", "workflow:", "style:", "template:", "solution:",
 };
 const std::vector<std::string> kDataPlatformPrefixes = {
-  "dataset:", "experiment:", "reproducibility:",
+  "dataset:", "experiment:", "reproducibility:", "benchmark:",
 };
 const std::set<std::string> kModelToolIds = { "spatial:list_models", "spatial:select_model" };
 

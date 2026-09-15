@@ -3,14 +3,21 @@
 #include "data_platform_tools.h"
 
 #include "dataset/annotation.h"
+#include "dataset/dataset_qa_report.h"
+#include "dataset/dataset_quality.h"
 #include "dataset/dataset_store.h"
 #include "dataset/dataset_types.h"
 #include "dataset/dataset_version.h"
+#include "dataset/foundry_service.h"
 #include "dataset/label_schema.h"
 #include "dataset/leakage_audit.h"
 #include "dataset/sample.h"
+#include "dataset/sample_catalog.h"
 #include "dataset/split.h"
 #include "dataset/wkt.h"
+#include "experiment/benchmark_compare.h"
+#include "experiment/benchmark_definition.h"
+#include "experiment/benchmark_service.h"
 #include "experiment/comparison_ext.h"
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
@@ -988,6 +995,259 @@ QVariantMap reproducibilityValidate( const QVariantMap &args )
     return toVariant( data );
 }
 
+
+// --- D19 foundry / catalog / QA / benchmark ---------------------------------
+
+constexpr qint64 kMaxCatalogScan = 10000;
+
+QVector<SampleCatalogRow> loadCatalogRows( DatasetStore &store, const DatasetVersionId &versionId,
+                                           qint64 maxRows = kMaxCatalogScan )
+{
+    QVector<SampleCatalogRow> rows;
+    qint64 offset = 0;
+    while ( static_cast<qint64>( rows.size() ) < maxRows )
+    {
+        const auto page = store.samplesPage( versionId, offset, DatasetStore::kMaxPageSize );
+        if ( !page || page.value().second.isEmpty() )
+            break;
+        for ( const SampleRecord &sample : page.value().second )
+        {
+            SampleCatalogRow row;
+            row.sampleId = sample.sampleId();
+            row.kind = sample.kind();
+            row.groupId = sample.groupId();
+            const QJsonObject prov = sample.provenance();
+            row.sensor = prov.value( QStringLiteral( "sensor" ) ).toString();
+            row.region = prov.value( QStringLiteral( "region" ) ).toString();
+            row.modality = prov.value( QStringLiteral( "modality" ) ).toString();
+            row.year = prov.value( QStringLiteral( "year" ) ).toInt();
+            row.quality = prov.value( QStringLiteral( "quality" ) ).toString();
+            const QVector<AnnotationRecord> tips =
+                store.annotationsOfSample( sample.sampleId(), /*limit=*/1 );
+            if ( !tips.isEmpty() )
+            {
+                row.labelSource = tips.first().sourceType();
+                row.hasPseudoLabel =
+                    tips.first().sourceType() == AnnotationSourceType::Pseudo ||
+                    tips.first().sourceType() == AnnotationSourceType::Weak ||
+                    tips.first().sourceType() == AnnotationSourceType::ModelAssisted;
+                row.classCode = tips.first().classCode();
+            }
+            rows.append( row );
+            if ( static_cast<qint64>( rows.size() ) >= maxRows )
+                break;
+        }
+        offset += page.value().second.size();
+    }
+    return rows;
+}
+
+QVariantMap datasetQa( const QVariantMap &args )
+{
+    auto store = openDatasetStore( args );
+    const auto versionId = parseVersionId( args );
+    const auto record = store->versionById( versionId );
+    if ( !record )
+        fail( QStringLiteral( "dataset version not found: %1" ).arg( versionId.toString() ) );
+
+    DatasetFoundryService foundry( store.get() );
+    DatasetQaInputs inputs;
+    inputs.datasetVersionId = versionId.toString();
+    inputs.versionFrozen = record->status() == DatasetVersionStatus::Committed ||
+                           record->status() == DatasetVersionStatus::Deprecated;
+    inputs.provenanceComplete = !record->fingerprint().isEmpty();
+
+    const QVector<SampleCatalogRow> catalogRows = loadCatalogRows( *store, versionId );
+    inputs.catalogSummary = foundry.summarizeSamples( catalogRows );
+
+    QVector<CompositionRow> compositionRows;
+    compositionRows.reserve( catalogRows.size() );
+    for ( const SampleCatalogRow &row : catalogRows )
+    {
+        CompositionRow c;
+        c.classCode = row.classCode;
+        c.sensor = row.sensor;
+        c.region = row.region;
+        c.modality = row.modality;
+        c.year = row.year;
+        compositionRows.append( c );
+    }
+    inputs.composition = computeComposition( compositionRows );
+    inputs.imbalances = imbalanceFindings( inputs.composition );
+
+    const QString splitId = args.value( QStringLiteral( "split_manifest_id" ) ).toString();
+    if ( !splitId.isEmpty() )
+    {
+        inputs.splitManifestId = splitId;
+        if ( const auto leakage = store->latestLeakageReport( splitId ) )
+            inputs.leakage = leakage;
+    }
+
+    const DatasetQaReport report = foundry.runQa( inputs );
+    return toVariant( report.toJson() );
+}
+
+QVariantMap datasetSampleQuery( const QVariantMap &args )
+{
+    auto store = openDatasetStore( args );
+    const auto versionId = parseVersionId( args );
+    DatasetFoundryService foundry( store.get() );
+    const QVector<SampleCatalogRow> rows = loadCatalogRows( *store, versionId );
+
+    SampleCatalogFilter filter;
+    auto fillList = [&]( const char *key, QStringList &target ) {
+        const QVariant value = args.value( QLatin1String( key ) );
+        if ( value.canConvert<QStringList>() )
+            target = value.toStringList();
+        else if ( !value.toString().isEmpty() )
+            target = value.toString().split( QLatin1Char( ',' ), Qt::SkipEmptyParts );
+    };
+    fillList( "class", filter.classCodes );
+    fillList( "sensor", filter.sensors );
+    fillList( "region", filter.regions );
+    fillList( "modality", filter.modalities );
+    fillList( "split_role", filter.splitRoles );
+    fillList( "quality", filter.qualities );
+    if ( args.contains( QStringLiteral( "pseudo" ) ) )
+        filter.pseudoLabelsOnly = args.value( QStringLiteral( "pseudo" ) ).toBool();
+    if ( args.contains( QStringLiteral( "year" ) ) )
+    {
+        bool ok = false;
+        const int year = args.value( QStringLiteral( "year" ) ).toInt( &ok );
+        if ( ok )
+            filter.years.append( year );
+    }
+
+    const int limit = pageLimit( args.value( QStringLiteral( "limit" ) ) );
+    const qint64 cursor = pageCursor( args.value( QStringLiteral( "cursor" ) ) );
+    const SampleCatalogPage page = foundry.querySamples( rows, filter, cursor, limit );
+    const SampleCatalogSummary summary = foundry.summarizeSamples( rows, filter );
+
+    QJsonArray items;
+    for ( const SampleCatalogRow &row : page.rows )
+    {
+        QJsonObject item;
+        item.insert( QStringLiteral( "sample_id" ), row.sampleId );
+        item.insert( QStringLiteral( "kind" ), sampleKindToString( row.kind ) );
+        item.insert( QStringLiteral( "class" ), row.classCode );
+        item.insert( QStringLiteral( "sensor" ), row.sensor );
+        item.insert( QStringLiteral( "region" ), row.region );
+        item.insert( QStringLiteral( "modality" ), row.modality );
+        item.insert( QStringLiteral( "year" ), row.year );
+        item.insert( QStringLiteral( "split_role" ), row.splitRole );
+        item.insert( QStringLiteral( "quality" ), row.quality );
+        item.insert( QStringLiteral( "label_source" ),
+                     annotationSourceTypeToString( row.labelSource ) );
+        item.insert( QStringLiteral( "pseudo" ), row.hasPseudoLabel );
+        items.append( item );
+    }
+    QJsonObject byClass;
+    for ( auto it = summary.byClass.constBegin(); it != summary.byClass.constEnd(); ++it )
+        byClass.insert( it.key(), it.value() );
+    QJsonObject data;
+    data.insert( QStringLiteral( "version" ), versionId.toString() );
+    data.insert( QStringLiteral( "items" ), items );
+    data.insert( QStringLiteral( "matched" ), page.totalMatched );
+    data.insert( QStringLiteral( "scanned" ), qint64( rows.size() ) );
+    data.insert( QStringLiteral( "scan_capped" ), qint64( rows.size() ) >= kMaxCatalogScan );
+    data.insert( QStringLiteral( "summary_by_class" ), byClass );
+    data.insert( QStringLiteral( "pseudo_label_count" ), summary.pseudoLabelCount );
+    return finishPage( data, page.totalMatched, cursor, limit );
+}
+
+QVariantMap benchmarkList( const QVariantMap &args )
+{
+    auto store = openExperimentStore( args );
+    BenchmarkService service( store.get() );
+    const auto hydrated = service.hydrateFromStore();
+    if ( !hydrated )
+        fail( QStringLiteral( "benchmark hydrate failed: %1" )
+                  .arg( hydrated.diagnostics().isEmpty()
+                            ? QStringLiteral( "unknown" )
+                            : hydrated.diagnostics().first().message ) );
+    const int limit = pageLimit( args.value( QStringLiteral( "limit" ) ) );
+    const qint64 cursor = pageCursor( args.value( QStringLiteral( "cursor" ) ) );
+    const auto page = store->listBenchmarkDefinitions( cursor, limit );
+    if ( !page )
+        fail( QStringLiteral( "benchmark list failed" ) );
+    QJsonArray rows;
+    for ( const auto &definition : page.value().second )
+    {
+        QJsonObject item;
+        item.insert( QStringLiteral( "benchmark_id" ), definition.benchmarkId() );
+        item.insert( QStringLiteral( "benchmark_version" ),
+                     qint64( definition.benchmarkVersion() ) );
+        item.insert( QStringLiteral( "name" ), definition.name() );
+        item.insert( QStringLiteral( "task_family" ),
+                     benchmarkTaskFamilyToString( definition.taskFamily() ) );
+        item.insert( QStringLiteral( "dataset_version_id" ), definition.datasetVersionId() );
+        item.insert( QStringLiteral( "split_manifest_id" ), definition.splitManifestId() );
+        item.insert( QStringLiteral( "content_digest" ), definition.contentDigest() );
+        item.insert( QStringLiteral( "refuse_pseudo_labels_in_test" ),
+                     definition.refusePseudoLabelsInTest() );
+        rows.append( item );
+    }
+    QJsonObject data;
+    data.insert( QStringLiteral( "benchmarks" ), rows );
+    return finishPage( data, page.value().first, cursor, limit );
+}
+
+QVariantMap benchmarkInspect( const QVariantMap &args )
+{
+    auto store = openExperimentStore( args );
+    BenchmarkService service( store.get() );
+    (void) service.hydrateFromStore();
+
+    const QString resultId = args.value( QStringLiteral( "result" ) ).toString();
+    if ( !resultId.isEmpty() )
+    {
+        const auto result = service.resultById( resultId );
+        if ( !result )
+            fail( QStringLiteral( "benchmark result not found: %1" ).arg( resultId ) );
+        return toVariant( result->toJson() );
+    }
+
+    const QString benchmarkId = args.value( QStringLiteral( "benchmark" ) ).toString();
+    if ( benchmarkId.isEmpty() )
+        fail( QStringLiteral( "benchmark or result is required" ) );
+    bool ok = false;
+    const quint64 version =
+        quint64( args.value( QStringLiteral( "benchmark_version" ) ).toULongLong( &ok ) );
+    const quint64 useVersion = ok && version > 0 ? version : 1;
+    const auto definition = service.definition( benchmarkId, useVersion );
+    if ( !definition )
+        fail( QStringLiteral( "benchmark definition not found: %1@%2" )
+                  .arg( benchmarkId )
+                  .arg( useVersion ) );
+    QJsonObject data = definition->toJson();
+    QJsonArray results;
+    for ( const auto &result : service.resultsFor( benchmarkId, pageLimit( args.value( QStringLiteral( "limit" ) ) ) ) )
+    {
+        QJsonObject item;
+        item.insert( QStringLiteral( "result_id" ), result.resultId() );
+        item.insert( QStringLiteral( "status" ), benchmarkRunStatusToString( result.status() ) );
+        item.insert( QStringLiteral( "model_id" ), result.modelId() );
+        item.insert( QStringLiteral( "seed" ), qint64( result.seed() ) );
+        item.insert( QStringLiteral( "reproducibility_complete" ),
+                     result.reproducibilityComplete() );
+        results.append( item );
+    }
+    data.insert( QStringLiteral( "results" ), results );
+    return toVariant( data );
+}
+
+QVariantMap benchmarkCompare( const QVariantMap &args )
+{
+    auto store = openExperimentStore( args );
+    BenchmarkService service( store.get() );
+    (void) service.hydrateFromStore();
+    const QString a = args.value( QStringLiteral( "a" ) ).toString();
+    const QString b = args.value( QStringLiteral( "b" ) ).toString();
+    if ( a.isEmpty() || b.isEmpty() )
+        fail( QStringLiteral( "a and b result ids are required" ) );
+    return toVariant( service.compare( a, b ).toJson() );
+}
+
 } // namespace
 
 const QList<DataPlatformToolDef> &dataPlatformToolDefs()
@@ -1041,6 +1301,53 @@ const QList<DataPlatformToolDef> &dataPlatformToolDefs()
             { "distance_threshold", "number", "Center-distance threshold in CRS units (0=off)", false },
             { "overlap_fraction_threshold", "number", "Window overlap fraction threshold", false },
             { "buffer_distance", "number", "Buffer-expansion distance for buffer_overlap", false } } },
+        { "dataset:qa",
+          "Structured Dataset QA report (PASS/WARN/FAIL/UNKNOWN categories) via DatasetFoundryService.",
+          { { "dataset_db", "string", "Path to the dataset store database", true },
+            { "version", "string", "Dataset version id", true },
+            { "split_manifest_id", "string", "Optional split id to include leakage category", false } } },
+        { "dataset:sample_query",
+          "Bounded sample catalog query/summary (filters + pagination; scan capped).",
+          { { "dataset_db", "string", "Path to the dataset store database", true },
+            { "version", "string", "Dataset version id", true },
+            { "class", "string", "Comma-separated class codes", false },
+            { "sensor", "string", "Comma-separated sensors", false },
+            { "region", "string", "Comma-separated regions", false },
+            { "modality", "string", "Comma-separated modalities", false },
+            { "year", "integer", "Filter year", false },
+            { "split_role", "string", "Comma-separated split roles", false },
+            { "quality", "string", "Comma-separated quality buckets", false },
+            { "pseudo", "boolean", "Filter pseudo/weak/model-assisted labels", false },
+            { "limit", "integer", "Page size 1-500 (default 50)", false },
+            { "cursor", "integer", "Offset from previous next_cursor", false } } },
+        { "dataset:versions",
+          "Alias of dataset:version — list versions of one dataset (GOAL naming).",
+          { { "dataset_db", "string", "Path to the dataset store database", true },
+            { "dataset", "string", "Dataset id", true } } },
+        { "dataset:splits",
+          "Alias of dataset:split_inspect — inspect or list split manifests (GOAL naming).",
+          { { "dataset_db", "string", "Path to the dataset store database", true },
+            { "split_manifest_id", "string", "Split manifest id", false },
+            { "version", "string", "Dataset version id (list its manifests)", false },
+            { "limit", "integer", "Assignment page size 1-500 (omit = no assignments)", false },
+            { "cursor", "integer", "Assignment page offset", false } } },
+        { "benchmark:list",
+          "List persisted BenchmarkDefinition records in the experiment store (paginated).",
+          { { "experiment_db", "string", "Path to the experiment store database", true },
+            { "limit", "integer", "Page size 1-500 (default 50)", false },
+            { "cursor", "integer", "Offset from previous next_cursor", false } } },
+        { "benchmark:inspect",
+          "Inspect one BenchmarkDefinition (+ recent results) or one BenchmarkResult by id.",
+          { { "experiment_db", "string", "Path to the experiment store database", true },
+            { "benchmark", "string", "Benchmark id", false },
+            { "benchmark_version", "integer", "Benchmark version (default 1)", false },
+            { "result", "string", "Result id (takes precedence)", false },
+            { "limit", "integer", "Max result summaries when inspecting a definition", false } } },
+        { "benchmark:compare",
+          "Structured metric deltas between two persisted BenchmarkResult ids.",
+          { { "experiment_db", "string", "Path to the experiment store database", true },
+            { "a", "string", "First result id", true },
+            { "b", "string", "Second result id", true } } },
         { "experiment:list",
           "List experiments in the authoritative experiment store (paginated).",
           { { "experiment_db", "string", "Path to the experiment store database", true },
@@ -1083,7 +1390,8 @@ bool isDataPlatformTool( const QString &toolId )
 {
     return toolId.startsWith( QLatin1String( "dataset:" ) ) ||
            toolId.startsWith( QLatin1String( "experiment:" ) ) ||
-           toolId.startsWith( QLatin1String( "reproducibility:" ) );
+           toolId.startsWith( QLatin1String( "reproducibility:" ) ) ||
+           toolId.startsWith( QLatin1String( "benchmark:" ) );
 }
 
 QVariantMap handleDataPlatformTool( const QString &toolId, const QVariantMap &arguments )
@@ -1106,6 +1414,20 @@ QVariantMap handleDataPlatformTool( const QString &toolId, const QVariantMap &ar
         return splitInspect( arguments );
     if ( toolId == QLatin1String( "dataset:leakage_audit" ) )
         return leakageAudit( arguments );
+    if ( toolId == QLatin1String( "dataset:qa" ) )
+        return datasetQa( arguments );
+    if ( toolId == QLatin1String( "dataset:sample_query" ) )
+        return datasetSampleQuery( arguments );
+    if ( toolId == QLatin1String( "dataset:versions" ) )
+        return datasetVersionList( arguments );
+    if ( toolId == QLatin1String( "dataset:splits" ) )
+        return splitInspect( arguments );
+    if ( toolId == QLatin1String( "benchmark:list" ) )
+        return benchmarkList( arguments );
+    if ( toolId == QLatin1String( "benchmark:inspect" ) )
+        return benchmarkInspect( arguments );
+    if ( toolId == QLatin1String( "benchmark:compare" ) )
+        return benchmarkCompare( arguments );
     if ( toolId == QLatin1String( "experiment:list" ) )
         return experimentList( arguments );
     if ( toolId == QLatin1String( "experiment:inspect" ) )

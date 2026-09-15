@@ -32,6 +32,14 @@ qt_add_library(sicnu_experiment STATIC
   lineage.h
   reproduction_bundle.cpp
   reproduction_bundle.h
+  benchmark_definition.cpp
+  benchmark_definition.h
+  benchmark_runner.cpp
+  benchmark_runner.h
+  benchmark_compare.cpp
+  benchmark_compare.h
+  benchmark_service.cpp
+  benchmark_service.h
 )
 
 add_library(Sicnu::experiment ALIAS sicnu_experiment)

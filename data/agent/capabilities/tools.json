@@ -397,6 +397,67 @@
     "surface": "data_platform_tool"
   },
   {
+    "id": "dataset:qa",
+    "family": "dataset",
+    "extends": "family:dataset",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "dataset:sample_query",
+    "family": "dataset",
+    "extends": "family:dataset",
+    "surface": "data_platform_tool",
+    "limitations": [
+      "Returns a bounded page/summary; sample scan is capped so million-row catalogs never enter LLM context"
+    ]
+  },
+  {
+    "id": "dataset:versions",
+    "family": "dataset",
+    "extends": "family:dataset",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "dataset:splits",
+    "family": "dataset",
+    "extends": "family:dataset",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "family:benchmark",
+    "kind": "family_default",
+    "family": "benchmark",
+    "surface": "data_platform_tool",
+    "side_effects": false,
+    "verification": {
+      "expected_kind": "json",
+      "checks": [
+        "existence"
+      ]
+    },
+    "limitations": [
+      "Benchmark tools read ExperimentStore-persisted definitions/results; they do not execute models"
+    ]
+  },
+  {
+    "id": "benchmark:list",
+    "family": "benchmark",
+    "extends": "family:benchmark",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "benchmark:inspect",
+    "family": "benchmark",
+    "extends": "family:benchmark",
+    "surface": "data_platform_tool"
+  },
+  {
+    "id": "benchmark:compare",
+    "family": "benchmark",
+    "extends": "family:benchmark",
+    "surface": "data_platform_tool"
+  },
+  {
     "id": "family:experiment",
     "kind": "family_default",
     "family": "experiment",

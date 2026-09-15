@@ -190,6 +190,50 @@ enum class LeakageKind
 QString leakageKindToString( LeakageKind kind );
 std::optional<LeakageKind> leakageKindFromString( const QString &text );
 
+/// Scientific role of a dataset version (D19 GOAL §5). One versioned model
+/// with typed roles — not five unrelated dataset implementations. Default
+/// Unspecified preserves fingerprint stability for pre-D19 manifests.
+enum class DatasetRole
+{
+    Unspecified,
+    Source,
+    Derived,
+    Training,
+    Benchmark,
+    Evaluation,
+};
+
+QString datasetRoleToString( DatasetRole role );
+std::optional<DatasetRole> datasetRoleFromString( const QString &text );
+
+/// Honest multi-state audit outcome (D19 GOAL §10/§16). Never collapse to a
+/// lone boolean "independent" / "clean" claim.
+enum class AuditVerdict
+{
+    Pass,
+    Warn,
+    Fail,
+    Unknown,
+};
+
+QString auditVerdictToString( AuditVerdict verdict );
+std::optional<AuditVerdict> auditVerdictFromString( const QString &text );
+
+/// Extensible benchmark task family (D19 GOAL §17).
+enum class BenchmarkTaskFamily
+{
+    Classification,
+    Segmentation,
+    ChangeDetection,
+    ObjectDetection,
+    Regression,
+    TemporalPrediction,
+    SpectralMatching,
+};
+
+QString benchmarkTaskFamilyToString( BenchmarkTaskFamily family );
+std::optional<BenchmarkTaskFamily> benchmarkTaskFamilyFromString( const QString &text );
+
 /// Run status lifecycle (goal §22). Terminal states are Failed/Completed/
 /// Cancelled; transitions are validated by the experiment store. States are
 /// truthful: a run that died with the process stays Interrupted (never

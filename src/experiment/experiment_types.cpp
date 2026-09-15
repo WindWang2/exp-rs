@@ -371,6 +371,12 @@ QJsonObject ExperimentRun::toJson() const
     json.insert( QStringLiteral( "dataset_fingerprint" ), m_datasetFingerprint );
     json.insert( QStringLiteral( "split_manifest_id" ), m_splitManifestId );
     json.insert( QStringLiteral( "split_fingerprint" ), m_splitFingerprint );
+    if ( !m_benchmarkDefinitionId.isEmpty() )
+    {
+        json.insert( QStringLiteral( "benchmark_definition_id" ), m_benchmarkDefinitionId );
+        json.insert( QStringLiteral( "benchmark_definition_version" ),
+                     qint64( m_benchmarkDefinitionVersion ) );
+    }
     if ( !m_modelId.isEmpty() )
         json.insert( QStringLiteral( "model_id" ), m_modelId );
     if ( !m_modelDigest.isEmpty() )
@@ -444,6 +450,10 @@ Result<ExperimentRun> ExperimentRun::fromJson( const QJsonObject &json )
     run.m_datasetFingerprint = json.value( QStringLiteral( "dataset_fingerprint" ) ).toString();
     run.m_splitManifestId = json.value( QStringLiteral( "split_manifest_id" ) ).toString();
     run.m_splitFingerprint = json.value( QStringLiteral( "split_fingerprint" ) ).toString();
+    run.m_benchmarkDefinitionId =
+        json.value( QStringLiteral( "benchmark_definition_id" ) ).toString();
+    run.m_benchmarkDefinitionVersion = quint64( qMax<qint64>(
+        0, json.value( QStringLiteral( "benchmark_definition_version" ) ).toInteger() ) );
     run.m_modelId = json.value( QStringLiteral( "model_id" ) ).toString();
     run.m_modelDigest = json.value( QStringLiteral( "model_digest" ) ).toString();
     {

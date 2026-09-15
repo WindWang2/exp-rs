@@ -211,6 +211,44 @@ const Vocabulary<RunStatus> &runStatusVocabulary()
     return vocabulary;
 }
 
+const Vocabulary<DatasetRole> &datasetRoleVocabulary()
+{
+    static const Vocabulary<DatasetRole> vocabulary( {
+        { DatasetRole::Unspecified, "unspecified" },
+        { DatasetRole::Source, "source" },
+        { DatasetRole::Derived, "derived" },
+        { DatasetRole::Training, "training" },
+        { DatasetRole::Benchmark, "benchmark" },
+        { DatasetRole::Evaluation, "evaluation" },
+    } );
+    return vocabulary;
+}
+
+const Vocabulary<AuditVerdict> &auditVerdictVocabulary()
+{
+    static const Vocabulary<AuditVerdict> vocabulary( {
+        { AuditVerdict::Pass, "pass" },
+        { AuditVerdict::Warn, "warn" },
+        { AuditVerdict::Fail, "fail" },
+        { AuditVerdict::Unknown, "unknown" },
+    } );
+    return vocabulary;
+}
+
+const Vocabulary<BenchmarkTaskFamily> &benchmarkTaskFamilyVocabulary()
+{
+    static const Vocabulary<BenchmarkTaskFamily> vocabulary( {
+        { BenchmarkTaskFamily::Classification, "classification" },
+        { BenchmarkTaskFamily::Segmentation, "segmentation" },
+        { BenchmarkTaskFamily::ChangeDetection, "change_detection" },
+        { BenchmarkTaskFamily::ObjectDetection, "object_detection" },
+        { BenchmarkTaskFamily::Regression, "regression" },
+        { BenchmarkTaskFamily::TemporalPrediction, "temporal_prediction" },
+        { BenchmarkTaskFamily::SpectralMatching, "spectral_matching" },
+    } );
+    return vocabulary;
+}
+
 const Vocabulary<ReproductionLevel> &reproductionLevelVocabulary()
 {
     static const Vocabulary<ReproductionLevel> vocabulary( {
@@ -352,6 +390,36 @@ QString reproductionLevelToString( ReproductionLevel level )
 std::optional<ReproductionLevel> reproductionLevelFromString( const QString &text )
 {
     return reproductionLevelVocabulary().fromString( text );
+}
+
+QString datasetRoleToString( DatasetRole role )
+{
+    return datasetRoleVocabulary().toString( role );
+}
+
+std::optional<DatasetRole> datasetRoleFromString( const QString &text )
+{
+    return datasetRoleVocabulary().fromString( text );
+}
+
+QString auditVerdictToString( AuditVerdict verdict )
+{
+    return auditVerdictVocabulary().toString( verdict );
+}
+
+std::optional<AuditVerdict> auditVerdictFromString( const QString &text )
+{
+    return auditVerdictVocabulary().fromString( text );
+}
+
+QString benchmarkTaskFamilyToString( BenchmarkTaskFamily family )
+{
+    return benchmarkTaskFamilyVocabulary().toString( family );
+}
+
+std::optional<BenchmarkTaskFamily> benchmarkTaskFamilyFromString( const QString &text )
+{
+    return benchmarkTaskFamilyVocabulary().fromString( text );
 }
 
 } // namespace sicnu::dataset

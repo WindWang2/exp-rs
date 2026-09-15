@@ -90,6 +90,8 @@ QJsonObject DatasetManifest::toJson() const
     json.insert( QStringLiteral( "version_id" ), m_versionId );
     if ( !m_parentVersionId.isEmpty() )
         json.insert( QStringLiteral( "parent_version_id" ), m_parentVersionId );
+    if ( m_role != DatasetRole::Unspecified )
+        json.insert( QStringLiteral( "role" ), datasetRoleToString( m_role ) );
     if ( !m_name.isEmpty() )
         json.insert( QStringLiteral( "name" ), m_name );
     if ( !m_description.isEmpty() )
@@ -220,6 +222,20 @@ sicnu::data::Result<DatasetManifest> DatasetManifest::fromJson( const QJsonObjec
             QUuid::fromString( manifest.m_parentVersionId ).toString( QUuid::WithoutBraces );
     }
 
+    const QString roleText = json.value( QStringLiteral( "role" ) ).toString();
+    if ( !roleText.isEmpty() )
+    {
+        const auto role = datasetRoleFromString( roleText );
+        if ( !role )
+        {
+            return Result::failure( Diagnostic{
+                QStringLiteral( "dataset.manifest_invalid" ),
+                QStringLiteral( "unknown dataset role: %1" ).arg( roleText ),
+                DiagnosticSeverity::Error,
+            } );
+        }
+        manifest.m_role = *role;
+    }
     manifest.m_name = json.value( QStringLiteral( "name" ) ).toString();
     manifest.m_description = json.value( QStringLiteral( "description" ) ).toString();
     const QString createdAt = json.value( QStringLiteral( "created_at_utc" ) ).toString();
