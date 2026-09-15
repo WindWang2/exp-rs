@@ -168,6 +168,7 @@ void FusionQualityAccumulator::addWindow( const float *x, const float *y, int w,
             band_.syy += yv * yv;
             band_.sxy += xv * yv;
             band_.mse += ( xv - yv ) * ( xv - yv );
+            band_.maxY = std::max( band_.maxY, std::abs( yv ) );
             ++band_.n;
         }
     }
@@ -244,9 +245,16 @@ FusionQualityReport FusionQualityAccumulator::finalize( int bandCount, int width
             ergasTermSum += ( rmse / my ) * ( rmse / my );
             ++ergasBands;
         }
-        // Pearson CC from the accumulated moments.
+        // Pearson CC from the accumulated moments. Zero-variance inputs
+        // (constant bands) make CC undefined: treat exact agreement as CC=1
+        // and any disagreement as CC=0 so degenerate rasters are judged
+        // honestly instead of tripping the guard.
         const double denom = std::sqrt( vx * vy );
-        ccSum += denom > 1e-300 ? cov / denom : 0.0;
+        if ( denom > 1e-300 )
+            ccSum += cov / denom;
+        else
+            ccSum += std::sqrt( acc.mse / acc.n ) <= 1e-9 * ( 1.0 + std::abs( my ) ) ? 1.0
+                                                                                    : 0.0;
     }
 
     const double bandCountD = static_cast<double>( bandCount );
@@ -370,6 +378,12 @@ bool writeTextFileAtomic( const std::string &path, const std::string &content,
     file.flush();
     file.close();
 
+    // POSIX ::rename replaces the target atomically (no reader-visible gap).
+    if ( file.rename( qPath ) )
+        return true;
+    // Windows-style fallback: rename cannot replace an existing file there,
+    // so remove it first (a brief non-atomic window is unavoidable on that
+    // platform and only when the target already existed).
     if ( QFile::exists( qPath ) && !QFile::remove( qPath ) )
     {
         if ( errorMessage )

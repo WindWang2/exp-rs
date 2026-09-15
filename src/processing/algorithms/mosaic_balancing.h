@@ -7,12 +7,15 @@
 // kept strictly separate from this module).
 //
 // Method (D-005): for every overlap pair in the MosaicPlan, fit a robust
-// linear model y ≈ α·x + β on the overlap samples — x = parent scene raw
-// values, y = parent-corrected values of the already-chained scene — using a
-// three-pass streaming estimator (least squares → residual MAD → inlier
-// refit). Scenes are then chained from the reference scene by BFS through
-// the overlap graph, each scene inheriting (α, β) composed with its parent's
-// correction. Scenes whose cumulative gain leaves [minGain, maxGain], or
+// linear model y ≈ α·x + β on the overlap samples — x = child scene raw
+// values, y = parent-corrected values of the already-chained parent — so the
+// fitted (α, β) IS the child's cumulative correction (no extra composition).
+// The fit is seeded by least-median-of-squares over a deterministic strided
+// subsample (tolerates clustered cloud contamination) and refined by up to
+// two residual-MAD inlier refits; clean overlaps converge after one
+// refinement. Scenes are chained from the reference scene by BFS through the
+// overlap graph. Scenes whose cumulative gain leaves [minGain, maxGain],
+// whose bias exceeds maxAbsBiasSigma × (|meanY| + stdY) of the overlap, or
 // which cannot reach the reference through the overlap graph, are rejected
 // (fail-closed by default, droppable by policy).
 //
@@ -48,7 +51,7 @@ struct BalancingOptions {
     int referenceScene = -1;   // -1 = auto: largest eligible pixel count, tie -> lowest index
     double minGain = 0.5;      // cumulative gain clamp (per band)
     double maxGain = 2.0;
-    double maxAbsBiasSigma = 3.0; // |bias| limit in units of the parent-corrected overlap std
+    double maxAbsBiasSigma = 3.0; // |bias| limit in units of (|overlap mean| + overlap std)
     double inlierK = 2.5;         // inlier threshold in residual MAD units
     int64_t minOverlapPixels = 64;
     int windowSize = 256;         // sampling window edge (memory bound)

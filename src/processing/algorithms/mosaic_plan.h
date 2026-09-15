@@ -56,8 +56,8 @@ struct ScenePlanEntry {
 };
 
 struct OverlapPair {
-    int a = -1;          // composite order index (a < b)
-    int b = -1;
+    int a = -1;          // scene painted before b in composite order
+    int b = -1;          // (NOT numeric scene-index order — use min/max when keying)
     int64_t pixels = 0;  // overlap area in plan-grid pixels
 };
 
@@ -65,6 +65,7 @@ struct PlanDiagnostics {
     std::vector<int> rotated;         // input-order scene indices
     std::vector<int> crsMismatch;
     std::vector<int> pixelSizeMismatch;
+    std::vector<int> yDirectionMismatch; // mirrored / south-up vs north-up
     std::vector<int> subPixelOffset;
     std::vector<std::string> warnings; // actionable, one per condition class
 };

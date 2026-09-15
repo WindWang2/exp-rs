@@ -344,8 +344,8 @@ bool RadiometricBalancer::balance( const MosaicPlan &plan, OverlapSampler &sampl
                 double g = 0, b0 = 0;
                 if ( static_cast<int64_t>( acc.n ) < options.minOverlapPixels || !acc.solve( &g, &b0 ) )
                     continue; // unusable overlap for this band: leave identity, 0 support
-                // Robust seed: Theil-Sen survives clustered contamination
-                // (e.g. cloud blocks) that tilts the plain LSQ.
+                // Robust seed: least-median-of-squares survives clustered
+                // contamination (e.g. cloud blocks) that tilts the plain LSQ.
                 lmsSeed( sample, &g, &b0 );
 
                 {
@@ -417,9 +417,12 @@ bool RadiometricBalancer::balance( const MosaicPlan &plan, OverlapSampler &sampl
                         double rg = 0, rb = 0;
                         if ( inlier.solve( &rg, &rb ) && rg > 0.0 )
                         {
+                            const bool converged = ( inlier.n == acc.n );
                             g = rg;
                             b0 = rb;
                             inlierSupport = inlier.n;
+                            if ( converged )
+                                break; // clean overlap: refit == LSQ, no second pass needed
                         }
                         else
                             break;

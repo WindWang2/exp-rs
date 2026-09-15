@@ -51,8 +51,9 @@ class QualityScorer {
     static QualityScore score( const SceneQualityInput &input, const QualityWeights &weights,
                                const QualityOptions &options );
 
-    /// Ordering by score descending; ties break by lower priority first then
-    /// lower input index (deterministic, documented).
+    /// Ordering by score descending; ties break by higher priority first
+    /// (same "higher wins" convention as MosaicPlanner) then lower input
+    /// index — deterministic and documented.
     static std::vector<int> compositeOrder( const std::vector<QualityScore> &scores,
                                             const std::vector<int> &priorities );
 };

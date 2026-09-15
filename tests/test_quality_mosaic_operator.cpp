@@ -317,6 +317,35 @@ TEST_CASE( "QualityMosaic: misaligned cloud mask is rejected",
     CHECK( threw );
 }
 
+TEST_CASE( "QualityMosaic: higher priority wins contested pixels on score ties",
+           "[processing][mosaic][operator]" )
+{
+    Fixture fx = Fixture::make();
+    Json::Value params( Json::objectValue );
+    params["inputs"] = Json::Value( Json::arrayValue );
+    Json::Value aSpec( Json::objectValue );
+    aSpec["path"] = fx.pathA.toStdString();
+    aSpec["priority"] = 1;
+    params["inputs"].append( aSpec );
+    Json::Value bSpec( Json::objectValue );
+    bSpec["path"] = fx.pathB.toStdString();
+    bSpec["priority"] = 9;
+    params["inputs"].append( bSpec );
+    params["output"] = fx.pathOut.toStdString();
+    Json::Value seam( Json::objectValue );
+    seam["enabled"] = false;
+    params["seamline"] = seam;
+
+    REQUIRE( runOperator( params ).isMember( "output" ) );
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( fx.pathOut ) );
+    std::vector<float> prov( static_cast<size_t>( 40 ) * 24 );
+    REQUIRE( out.readBandWindow( 2, 0, 0, 40, 24, prov.data() ) );
+    // Contested overlap pixel: scene B (priority 9) must dominate scene A.
+    const size_t probe = static_cast<size_t>( 12 ) * 40 + 20;
+    CHECK( prov[probe] == 2.0f );
+}
+
 TEST_CASE( "QualityMosaic: seamline disabled falls back to deterministic order",
            "[processing][mosaic][operator]" )
 {

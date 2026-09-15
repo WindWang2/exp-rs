@@ -105,9 +105,9 @@ class GdalOverlapSampler : public ::rs::mosaic::OverlapSampler
 {
   public:
     GdalOverlapSampler( std::vector<GdalDatasetWrapper> *datasets,
-                        const std::vector<float> &nodata,
+                        const std::vector<std::vector<float>> &nodataPerBand,
                         const std::vector<::rs::mosaic::ScenePlanEntry> *planEntries )
-        : datasets_( datasets ), nodata_( nodata ), entries_( planEntries )
+        : datasets_( datasets ), nodataPerBand_( nodataPerBand ), entries_( planEntries )
     {
     }
 
@@ -131,7 +131,10 @@ class GdalOverlapSampler : public ::rs::mosaic::OverlapSampler
         if ( !ds.readBandWindow( band + 1, static_cast<int>( sx0 - pl.offsetX ),
                                  static_cast<int>( sy0 - pl.offsetY ), rw, rh, buf.data() ) )
             return false;
-        const float nd = nodata_[static_cast<size_t>( scene )];
+        float nd = std::numeric_limits<float>::quiet_NaN();
+        if ( band >= 0 &&
+             band < static_cast<int>( nodataPerBand_[static_cast<size_t>( scene )].size() ) )
+            nd = nodataPerBand_[static_cast<size_t>( scene )][static_cast<size_t>( band )];
         const bool hasNd = !std::isnan( nd );
         for ( int r = 0; r < rh; ++r )
         {
@@ -149,7 +152,7 @@ class GdalOverlapSampler : public ::rs::mosaic::OverlapSampler
 
   private:
     std::vector<GdalDatasetWrapper> *datasets_;
-    const std::vector<float> &nodata_;
+    const std::vector<std::vector<float>> &nodataPerBand_;
     const std::vector<::rs::mosaic::ScenePlanEntry> *entries_;
 };
 
@@ -351,8 +354,16 @@ Json::Value RsQualityMosaicOperator::estimateExecution(const Json::Value& params
         || params["inputs"].empty())
         return executionEstimate();
     ensureGdalInit();
+    // Refine the static bound with the actual input count: peak working set
+    // is dominated by per-scene tile windows plus the bounded seam-cell grid.
+    const int n = static_cast<int>(params["inputs"].size());
+    const std::uint64_t perScene =
+        static_cast<std::uint64_t>(kTileSize) * kTileSize * sizeof(float) * 2;
+    const std::uint64_t total = 32ull * 1024 * 1024 + static_cast<std::uint64_t>(n) * perScene;
     Json::Value est = executionEstimate();
     est["basis"] = "dynamic";
+    est["inputCount"] = n;
+    est["estimatedRamBytes"] = static_cast<Json::UInt64>(total);
     return est;
 }
 
@@ -497,6 +508,10 @@ Json::Value RsQualityMosaicOperator::run(const Json::Value& params, RSOperatorCo
     std::vector<::rs::mosaic::SceneEntry> scenes( static_cast<size_t>( inputCount ) );
     std::vector<float> nodataPerScene( static_cast<size_t>( inputCount ),
                                        std::numeric_limits<float>::quiet_NaN() );
+    // Per-band declared NoData (multi-sensor stacks may use different
+    // sentinels per band); band 0 of this vector mirrors band 1 for the
+    // sampler's band-0 seam/balancing reads.
+    std::vector<std::vector<float>> nodataPerBand( static_cast<size_t>( inputCount ) );
     int minBands = std::numeric_limits<int>::max();
 
     for ( int i = 0; i < inputCount; ++i )
@@ -521,6 +536,17 @@ Json::Value RsQualityMosaicOperator::run(const Json::Value& params, RSOperatorCo
         se.nodata = hasNd ? static_cast<float>( nd ) : 0.0f;
         nodataPerScene[static_cast<size_t>( i )] =
             hasNd ? static_cast<float>( nd ) : std::numeric_limits<float>::quiet_NaN();
+        nodataPerBand[static_cast<size_t>( i )].assign(
+            static_cast<size_t>( std::max( 1, se.bandCount ) ),
+            std::numeric_limits<float>::quiet_NaN() );
+        for ( int b = 1; b <= se.bandCount; ++b )
+        {
+            bool bandHasNd = false;
+            const double bandNd = ds.bandNoDataValue( b, &bandHasNd );
+            nodataPerBand[static_cast<size_t>( i )][static_cast<size_t>( b - 1 )] =
+                bandHasNd ? static_cast<float>( bandNd )
+                          : std::numeric_limits<float>::quiet_NaN();
+        }
         minBands = std::min( minBands, se.bandCount );
         context.throwIfCancelled();
     }
@@ -565,7 +591,7 @@ Json::Value RsQualityMosaicOperator::run(const Json::Value& params, RSOperatorCo
                                    "x" + std::to_string( plan.height ) + ")" );
 
     // ---- Samplers & sidecars ----------------------------------------------------
-    GdalOverlapSampler sampler( &datasets, nodataPerScene, &plan.scenes );
+    GdalOverlapSampler sampler( &datasets, nodataPerBand, &plan.scenes );
     std::vector<CloudMaskSidecar> cloudMasks( static_cast<size_t>( inputCount ) );
     std::vector<bool> hasCloudMask( static_cast<size_t>( inputCount ), false );
     for ( int i = 0; i < inputCount; ++i )
@@ -625,8 +651,15 @@ Json::Value RsQualityMosaicOperator::run(const Json::Value& params, RSOperatorCo
 
     // paintOrder: worst painted first, best painted last (best scene wins
     // contested pixels through seam decisions and final fills).
+    // User priority breaks score ties: higher priority is painted later, so
+    // it wins contested pixels (same convention as the plan's composite
+    // order).
+    std::vector<int> priorities;
+    priorities.reserve( static_cast<size_t>( inputCount ) );
+    for ( int i = 0; i < inputCount; ++i )
+        priorities.push_back( specs[static_cast<size_t>( i )].priority );
     std::vector<int> paintOrder =
-        ::rs::mosaic::QualityScorer::compositeOrder( scores, std::vector<int>() );
+        ::rs::mosaic::QualityScorer::compositeOrder( scores, priorities );
     std::reverse( paintOrder.begin(), paintOrder.end() );
 
     // ---- Seam decisions (Package C) -------------------------------------------------
@@ -999,14 +1032,20 @@ Json::Value RsQualityMosaicOperator::run(const Json::Value& params, RSOperatorCo
     outDs = nullptr;
     outputGuard.armed = false;
 
-    if ( QFile::exists( finalPath ) && !QFile::remove( finalPath ) )
-        throw RSOperatorError( ErrorCode::FileNotWritable,
-                               "Cannot replace existing output: " + outputPath );
+    // POSIX ::rename replaces the target atomically; the explicit
+    // remove-then-rename fallback below only runs where rename cannot
+    // replace (Windows), accepting that platform's brief window.
     if ( !QFile::rename( partPath, finalPath ) )
     {
-        QFile::remove( partPath );
-        throw RSOperatorError( ErrorCode::FileNotWritable,
-                               "Cannot publish mosaic output to " + outputPath );
+        if ( QFile::exists( finalPath ) && !QFile::remove( finalPath ) )
+            throw RSOperatorError( ErrorCode::FileNotWritable,
+                                   "Cannot replace existing output: " + outputPath );
+        if ( !QFile::rename( partPath, finalPath ) )
+        {
+            QFile::remove( partPath );
+            throw RSOperatorError( ErrorCode::FileNotWritable,
+                                   "Cannot publish mosaic output to " + outputPath );
+        }
     }
 
     // ---- Result & report ---------------------------------------------------------------

@@ -32,8 +32,6 @@ QualityScore QualityScorer::score( const SceneQualityInput &input, const Quality
     if ( input.hasTime )
     {
         const double t = std::abs( input.timeDays );
-        if ( t < 0.0 )
-            result.clamped = true;
         const double scaled = t / std::max( 1e-9, options.timeScaleDays );
         sTime = std::clamp( 1.0 - scaled, 0.0, 1.0 );
         result.clamped |= ( t > options.timeScaleDays );
@@ -82,7 +80,7 @@ std::vector<int> QualityScorer::compositeOrder( const std::vector<QualityScore> 
         const int pa = a < static_cast<int>( priorities.size() ) ? priorities[a] : 0;
         const int pb = b < static_cast<int>( priorities.size() ) ? priorities[b] : 0;
         if ( pa != pb )
-            return pa < pb;
+            return pa > pb; // higher priority wins (same convention as the plan)
         return a < b;
     } );
     return order;

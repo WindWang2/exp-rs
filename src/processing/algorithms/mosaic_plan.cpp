@@ -201,6 +201,8 @@ MosaicPlanner::build( const std::vector<SceneEntry> &scenes, const Options &opti
 
         // Y-axis orientation must agree with the reference grid (mirroring guard).
         const bool yDirMatch = ( gt[5] * refPxY > 0 ) || rotated; // rotated already flagged
+        if ( !yDirMatch )
+            plan.diagnostics.yDirectionMismatch.push_back( static_cast<int>( i ) );
         e.gridEligible = !rotated && e.crsMatchesPlan && sizeMatch && yDirMatch;
     }
 
@@ -319,6 +321,11 @@ MosaicPlanner::build( const std::vector<SceneEntry> &scenes, const Options &opti
         plan.diagnostics.warnings.push_back(
             "pixel size mismatch for input(s) [" + nameList( plan.diagnostics.pixelSizeMismatch ) +
             "]; resample to the reference resolution before mosaicking" );
+    if ( !plan.diagnostics.yDirectionMismatch.empty() )
+        plan.diagnostics.warnings.push_back(
+            "Y-axis orientation mismatch (mirrored/south-up raster) for input(s) [" +
+            nameList( plan.diagnostics.yDirectionMismatch ) +
+            "]; flip/reproject to the reference orientation before mosaicking" );
     if ( !plan.diagnostics.subPixelOffset.empty() )
         plan.diagnostics.warnings.push_back(
             "sub-pixel grid offset for input(s) [" + nameList( plan.diagnostics.subPixelOffset ) +

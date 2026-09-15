@@ -1507,15 +1507,18 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                     for ( int cc = 0; cc < tw; ++cc )
                     {
                         const size_t i = static_cast<size_t>( rr ) * tw + cc;
-                        if ( panBuf[i] == nodata || std::isnan( panBuf[i] ) )
+                        // Center sample comes from the halo (this branch never
+                        // fills panBuf — the halo already covers every pixel).
+                        const int bx = xOff + cc - hx0;
+                        const int by = yOff + rr - hy0;
+                        const float center = halo[static_cast<size_t>( by ) * hw + bx];
+                        if ( center == nodata || std::isnan( center ) )
                         {
                             for ( int b = 0; b < nMsBands; ++b )
                                 outBuf[b][i] = nodata;
                             continue;
                         }
                         // 3x3 box mean from the halo with edge normalization.
-                        const int bx = xOff + cc - hx0;
-                        const int by = yOff + rr - hy0;
                         double sum = 0.0;
                         int cnt = 0;
                         for ( int dy = -1; dy <= 1; ++dy )
@@ -1540,7 +1543,7 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                             continue;
                         }
                         const float highPass =
-                            panBuf[i] - static_cast<float>( sum / cnt );
+                            center - static_cast<float>( sum / cnt );
 
                         for ( int b = 0; b < nMsBands; ++b )
                         {

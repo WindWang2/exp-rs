@@ -59,7 +59,11 @@ Json::Value RsImageFusionOperator::schema() const {
     outputs["method"] = makeStringParam("method", "Applied method", "");
     outputs["bands"] = makeIntegerParam("bands", "Number of output bands", 0);
     outputs["qualityReport"] = makeStringParam("qualityReport", "Written quality report path", "");
-    outputs["qualityPassed"] = makeStringParam("qualityPassed", "Distortion-guard verdict", "");
+    {
+        Json::Value qp = makeStringParam("qualityPassed", "Distortion-guard verdict", "");
+        qp["type"] = "boolean";
+        outputs["qualityPassed"] = qp;
+    }
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
     root["required"] = makeRequired({"pan", "ms", "output"});

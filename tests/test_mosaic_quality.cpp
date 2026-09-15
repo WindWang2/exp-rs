@@ -97,9 +97,9 @@ TEST_CASE( "Quality: ordering is score-descending with deterministic ties",
     const auto order = QualityScorer::compositeOrder( scores, priorities );
     REQUIRE( order.size() == 4 );
     CHECK( order[0] == 1 ); // 0.9 first
-    // Tie 0.5 between scenes 0 (priority 9) and 2 (priority 1): lower
-    // priority first.
-    CHECK( order[1] == 2 );
-    CHECK( order[2] == 0 );
+    // Tie 0.5 between scenes 0 (priority 9) and 2 (priority 1): higher
+    // priority wins (plan convention).
+    CHECK( order[1] == 0 );
+    CHECK( order[2] == 2 );
     CHECK( order[3] == 3 );
 }
