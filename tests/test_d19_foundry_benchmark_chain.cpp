@@ -389,3 +389,104 @@ TEST_CASE( "D19 chain refuses pseudo labels on protected test via runner",
     CHECK( result->status() == BenchmarkRunStatus::Failed );
     CHECK( result->failureCode() == QStringLiteral( "experiment.benchmark_pseudo_in_test" ) );
 }
+
+TEST_CASE( "D19 hermetic LeaveOne*/Temporal configs pin as benchmark modes",
+           "[d19][e2e][split][leaveone][hermetic]" )
+{
+    // Scientific modes are configuration over existing SplitMethod — not a
+    // second split engine (DECISIONS D5 / SPLIT_MODEL).
+    auto makeInputs = []( int n ) {
+        QVector<SplitInput> inputs;
+        for ( int i = 0; i < n; ++i )
+        {
+            SplitInput input;
+            input.sampleId = QStringLiteral( "x-%1" ).arg( i );
+            input.groupId = ( i < n / 2 ) ? QStringLiteral( "region-a" )
+                                          : QStringLiteral( "region-b" );
+            input.classCode =
+                ( i % 2 == 0 ) ? QStringLiteral( "water" ) : QStringLiteral( "land" );
+            input.year = 2023 + ( i % 3 );
+            input.timeMs = 1700000000000LL + ( i * 86400000LL );
+            input.sceneId = QStringLiteral( "scene-%1" ).arg( i % 4 );
+            inputs.append( input );
+        }
+        return inputs;
+    };
+    const QVector<SplitInput> inputs = makeInputs( 24 );
+    const QString versionId = QStringLiteral( "11111111-1111-4111-8111-111111111111" );
+
+    SplitConfig loro;
+    loro.method = SplitMethod::LeaveOneRegionOut;
+    loro.seed = 11;
+    loro.regionKey = QStringLiteral( "region" );
+    const auto loroManifest = SplitEngine::generate( loro, versionId, inputs );
+    REQUIRE( loroManifest.has_value() );
+    CHECK( SplitEngine::methodUsesFolds( loroManifest->config().method ) );
+    const auto fold0 = loroManifest->materializeFold( 0 );
+    REQUIRE( fold0.has_value() );
+    CHECK( !fold0->isEmpty() );
+
+    SplitConfig loyo;
+    loyo.method = SplitMethod::LeaveOneYearOut;
+    loyo.seed = 11;
+    const auto loyoManifest = SplitEngine::generate( loyo, versionId, inputs );
+    REQUIRE( loyoManifest.has_value() );
+    CHECK( loyoManifest->config().method == SplitMethod::LeaveOneYearOut );
+
+    SplitConfig temporal;
+    temporal.method = SplitMethod::Temporal;
+    temporal.seed = 11;
+    temporal.trainRatio = 0.5;
+    temporal.validationRatio = 0.25;
+    temporal.testRatio = 0.25;
+    const auto temporalManifest = SplitEngine::generate( temporal, versionId, inputs );
+    REQUIRE( temporalManifest.has_value() );
+    CHECK( temporalManifest->config().method == SplitMethod::Temporal );
+
+    auto pinMode = [&]( const SplitManifest &split, const QString &modeName,
+                        const QString &benchId ) {
+        BenchmarkDefinition def;
+        def.setBenchmarkId( benchId );
+        def.setBenchmarkVersion( 1 );
+        def.setName( modeName );
+        def.setTaskFamily( BenchmarkTaskFamily::Classification );
+        def.setDatasetVersionId( versionId );
+        def.setSplitManifestId( split.manifestId() );
+        def.setLabelSchemaId( QStringLiteral( "lc" ) );
+        def.setLabelSchemaVersion( 1 );
+        def.metricNames() = QStringList{ QStringLiteral( "overall_accuracy" ) };
+        def.protocol().setDatasetVersionId( versionId );
+        def.protocol().setSplitManifestId( split.manifestId() );
+        def.protocol().setSubset(
+            SplitEngine::methodUsesFolds( split.config().method )
+                ? QStringLiteral( "fold:0" )
+                : QStringLiteral( "test" ) );
+        def.setRefusePseudoLabelsInTest( true );
+        def.forbiddenLeakage() =
+            QStringList{ leakageKindToString( LeakageKind::ExactDuplicate ),
+                         leakageKindToString( LeakageKind::TemporalFutureLeakage ) };
+        def.metadata().insert( QStringLiteral( "benchmark_mode" ), modeName );
+        def.metadata().insert( QStringLiteral( "split_method" ),
+                               splitMethodToString( split.config().method ) );
+        REQUIRE( def.validate().has_value() );
+        const auto roundTrip = BenchmarkDefinition::fromJson( def.toJson() );
+        REQUIRE( roundTrip.has_value() );
+        CHECK( roundTrip->metadata().value( QStringLiteral( "split_method" ) ).toString() ==
+               splitMethodToString( split.config().method ) );
+        CHECK( roundTrip->forbiddenLeakage().contains(
+            leakageKindToString( LeakageKind::ExactDuplicate ) ) );
+        return def.contentDigest();
+    };
+
+    const QString d1 =
+        pinMode( *loroManifest, QStringLiteral( "cross-region" ),
+                 QStringLiteral( "bench-loro" ) );
+    const QString d2 =
+        pinMode( *loyoManifest, QStringLiteral( "cross-year" ),
+                 QStringLiteral( "bench-loyo" ) );
+    const QString d3 =
+        pinMode( *temporalManifest, QStringLiteral( "temporal-holdout" ),
+                 QStringLiteral( "bench-temporal" ) );
+    CHECK( d1 != d2 );
+    CHECK( d2 != d3 );
+}

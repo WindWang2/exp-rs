@@ -2356,7 +2356,7 @@ endif()
 
 
 # D19 Dataset Foundry: role/catalog/feature join/QA report/foundry service.
-sicnu_add_test(test_d19_dataset_foundry TIMEOUT 180)
+sicnu_add_test(test_d19_dataset_foundry TIMEOUT 300)
 target_link_libraries(test_d19_dataset_foundry PRIVATE Sicnu::dataset SQLite::SQLite3)
 
 # D19 Scientific Benchmark Definition + headless runner + compare/service.

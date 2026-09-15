@@ -214,3 +214,181 @@ TEST_CASE( "D19 FoundryService inspects committed versions", "[d19][foundry][ser
     CHECK( inspect->value( QStringLiteral( "status" ) ).toString() == QStringLiteral( "committed" ) );
     CHECK( inspect->value( QStringLiteral( "sample_count" ) ).toInteger() == 0 );
 }
+
+TEST_CASE( "D19 sample catalog scale stress stays page-bounded (100k)",
+           "[d19][foundry][catalog][scale][hermetic]" )
+{
+    // Target toward 100k logical samples. 1M QString-heavy rows is too heavy
+    // for this shared authoring box (~4 GiB available RAM alongside other
+    // agents); N=100000 proves paging/filter/summary without materializing
+    // an unbounded result page. Page hard-cap remains 500.
+    constexpr int kCatalogScaleN = 100000;
+    QVector<SampleCatalogRow> rows;
+    rows.reserve( kCatalogScaleN );
+    for ( int i = 0; i < kCatalogScaleN; ++i )
+    {
+        SampleCatalogRow row;
+        row.sampleId = QStringLiteral( "scale-%1" ).arg( i );
+        row.classCode =
+            ( i % 4 == 0 ) ? QStringLiteral( "water" ) : QStringLiteral( "land" );
+        row.sensor = ( i % 3 == 0 ) ? QStringLiteral( "S2" ) : QStringLiteral( "GF" );
+        row.region = ( i % 2 == 0 ) ? QStringLiteral( "A" ) : QStringLiteral( "B" );
+        row.modality = QStringLiteral( "optical" );
+        row.year = 2020 + ( i % 5 );
+        row.splitRole =
+            ( i % 10 == 0 ) ? QStringLiteral( "test" ) : QStringLiteral( "train" );
+        row.hasPseudoLabel = ( i % 17 == 0 );
+        rows.append( row );
+    }
+    REQUIRE( rows.size() == kCatalogScaleN );
+
+    SampleCatalogFilter filter;
+    filter.classCodes = QStringList{ QStringLiteral( "water" ) };
+    filter.regions = QStringList{ QStringLiteral( "A" ) };
+    filter.pseudoLabelsOnly = false;
+
+    // Oversize limit must clamp to hard bound 500.
+    const SampleCatalogPage page = querySampleCatalog( rows, filter, 0, 10000 );
+    CHECK( page.limit == 500 );
+    CHECK( page.rows.size() <= 500 );
+    CHECK( page.rows.size() == page.limit );
+    CHECK( page.totalMatched > page.limit );
+    for ( const SampleCatalogRow &row : page.rows )
+    {
+        CHECK( row.classCode == QStringLiteral( "water" ) );
+        CHECK( row.region == QStringLiteral( "A" ) );
+        CHECK( !row.hasPseudoLabel );
+    }
+
+    // Deep page still bounded; offset past end yields empty rows with count.
+    const SampleCatalogPage deep = querySampleCatalog( rows, filter, 50000, 50 );
+    CHECK( deep.limit == 50 );
+    CHECK( deep.rows.size() <= 50 );
+    CHECK( deep.totalMatched == page.totalMatched );
+
+    const SampleCatalogSummary summary = summarizeSampleCatalog( rows, filter );
+    CHECK( summary.total == page.totalMatched );
+    CHECK( summary.byRegion.value( QStringLiteral( "A" ) ) == summary.total );
+    CHECK( summary.pseudoLabelCount == 0 );
+}
+
+TEST_CASE( "D19 version evolution Source→Derived→Benchmark keeps lineage",
+           "[d19][foundry][version][hermetic]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    DatasetStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "evolve.sqlite" ) ) ) );
+
+    const QString datasetId = DatasetId::generate().toString();
+    REQUIRE( store.createDataset( DatasetId::fromString( datasetId ).value(),
+                                  QStringLiteral( "D19 evolve" ) )
+                 .has_value() );
+
+    auto commitWithRole = [&]( DatasetRole role, const QString &parentId,
+                               const QString &name ) -> QString {
+        const QString versionId = DatasetVersionId::generate().toString();
+        DatasetManifest manifest = makeManifest( datasetId, versionId );
+        manifest.setName( name );
+        manifest.setRole( role );
+        if ( !parentId.isEmpty() )
+            manifest.setParentVersionId( parentId );
+        REQUIRE( store.createDraftVersion( manifest ).has_value() );
+        REQUIRE( store.stageVersion( DatasetVersionId::fromString( versionId ).value() )
+                     .has_value() );
+        REQUIRE( store.commitVersion( DatasetVersionId::fromString( versionId ).value() )
+                     .has_value() );
+        return versionId;
+    };
+
+    const QString v1 = commitWithRole( DatasetRole::Source, QString(),
+                                       QStringLiteral( "v1-source" ) );
+    const QString v2 = commitWithRole( DatasetRole::Derived, v1,
+                                       QStringLiteral( "v2-derived" ) );
+    const QString v3 = commitWithRole( DatasetRole::Benchmark, v2,
+                                       QStringLiteral( "v3-benchmark" ) );
+
+    // createDerivedVersion from frozen v1 still works (role inherited until
+    // a role-retargeted draft is used for scientific evolution).
+    const auto forked =
+        store.createDerivedVersion( DatasetVersionId::fromString( v1 ).value(),
+                                    QStringLiteral( "fork" ) );
+    REQUIRE( forked.has_value() );
+    CHECK( forked->parentVersionId() == v1 );
+    CHECK( forked->status() == DatasetVersionStatus::Draft );
+
+    DatasetFoundryService foundry( &store );
+    const auto lineage =
+        foundry.versionLineage( DatasetVersionId::fromString( v3 ).value() );
+    REQUIRE( lineage.has_value() );
+    REQUIRE( lineage->size() == 3 );
+    CHECK( lineage->at( 0 ).versionId() == v3 );
+    CHECK( lineage->at( 1 ).versionId() == v2 );
+    CHECK( lineage->at( 2 ).versionId() == v1 );
+
+    const auto i1 =
+        foundry.inspectVersion( DatasetVersionId::fromString( v1 ).value() );
+    const auto i2 =
+        foundry.inspectVersion( DatasetVersionId::fromString( v2 ).value() );
+    const auto i3 =
+        foundry.inspectVersion( DatasetVersionId::fromString( v3 ).value() );
+    REQUIRE( i1.has_value() );
+    REQUIRE( i2.has_value() );
+    REQUIRE( i3.has_value() );
+    CHECK( i1->value( QStringLiteral( "role" ) ).toString() == QStringLiteral( "source" ) );
+    CHECK( i2->value( QStringLiteral( "role" ) ).toString() == QStringLiteral( "derived" ) );
+    CHECK( i3->value( QStringLiteral( "role" ) ).toString() ==
+           QStringLiteral( "benchmark" ) );
+    CHECK( i1->value( QStringLiteral( "status" ) ).toString() ==
+           QStringLiteral( "committed" ) );
+}
+
+TEST_CASE( "D19 QA refuses clean claim when leakage findings are errors",
+           "[d19][foundry][leakage][hermetic]" )
+{
+    DatasetQaInputs inputs;
+    inputs.datasetVersionId = QStringLiteral( "v-leak" );
+    inputs.versionFrozen = true;
+    inputs.provenanceComplete = true;
+    inputs.composition.sampleCount = 4;
+    inputs.catalogSummary.total = 4;
+    inputs.catalogSummary.pseudoLabelCount = 0;
+
+    LeakageReport dirty;
+    dirty.setAuditedChecks( QStringList{ leakageKindToString( LeakageKind::ExactDuplicate ),
+                                         leakageKindToString( LeakageKind::OverlappingPatch ) } );
+    LeakageFinding finding;
+    finding.kind = LeakageKind::ExactDuplicate;
+    finding.severity = DiagnosticSeverity::Error;
+    finding.sampleA = QStringLiteral( "train-1" );
+    finding.sampleB = QStringLiteral( "test-9" );
+    dirty.findings().append( finding );
+    inputs.leakage = dirty;
+
+    const DatasetQaReport failReport = buildDatasetQaReport( inputs );
+    CHECK( failReport.overallVerdict() == AuditVerdict::Fail );
+    bool sawLeakFail = false;
+    for ( const DatasetQaCategory &category : failReport.categories() )
+    {
+        if ( category.name == QLatin1String( "leakage" ) )
+        {
+            sawLeakFail = true;
+            CHECK( category.verdict == AuditVerdict::Fail );
+        }
+    }
+    CHECK( sawLeakFail );
+
+    // Audited + empty findings → Pass on leakage (honest clean claim).
+    LeakageReport clean;
+    clean.setAuditedChecks( dirty.auditedChecks() );
+    inputs.leakage = clean;
+    const DatasetQaReport passReport = buildDatasetQaReport( inputs );
+    AuditVerdict leakVerdict = AuditVerdict::Unknown;
+    for ( const DatasetQaCategory &category : passReport.categories() )
+    {
+        if ( category.name == QLatin1String( "leakage" ) )
+            leakVerdict = category.verdict;
+    }
+    CHECK( leakVerdict == AuditVerdict::Pass );
+    CHECK( passReport.overallVerdict() != AuditVerdict::Fail );
+}
