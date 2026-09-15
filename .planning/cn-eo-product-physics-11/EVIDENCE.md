@@ -29,3 +29,18 @@
 ## OUT_OF_SCOPE
 
 （Phase 2+ 发现时补充）
+
+## 终验（Phase 8，2026-09-16）
+
+- rebase origin/master（a5b11b7f）→ up to date，无冲突。
+- 新并发 PR 复查：#1009/#1010/#1011 与本 track 无业务文件交集（仅 append-only integration 文件）。
+- `git diff --check origin/master...HEAD` → clean（修复 CAPABILITY_MATRIX 一处行尾空白后）。
+- 冲突标记扫描 / secret 扫描 → clean。
+- 9 套件连续两遍全绿（每遍 4,011 assertions）：
+  sensor_schema 123/7 · families11 768/9 · fixtures 282/3 · plan11 220/7 · cn_products 1378/29 ·
+  io_products 38/4 · io_product_registry 46/8 · satellite 479/20 · import_dialog 73/7。
+- 运行环境量（与 diff 无关，已对照）：PROJ_DATA 必须指向宿主 proj.db
+  （`C:/Users/wangj.KEVIN/projects/exp-rs-win/build-win/vcpkg_installed/x64-windows/share/proj`），
+  Qt/QCA/keychain bin 须在 PATH（与 repo 测试 harness SicnuTestEnv 的注入一致）。
+- 独立 review（subagent #2，只读）verdict P0=1 P1=4 P2=4 P3=5 → 全部处置（详见 REVIEW_LOG.md），
+  修复后两遍复验通过。subagent #1 名额未使用（Phase 0 审计由主 agent 完成）。
