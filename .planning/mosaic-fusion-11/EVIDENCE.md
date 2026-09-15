@@ -25,6 +25,8 @@
 | 7 | 对抗 review 后全套 clean-rebuild 重跑 | 0 | **83/83**（含新增 priority-provenance 用例；stale-artifact stack-smash 经一致重建排除） |
 | 7 | `git diff origin/master...HEAD --check` / 冲突标记 / secret 扫描 | 0 | CLEAN |
 | 8 | **Oracle 6 双验证**（同命令连续两遍） | 0 | **RUN 1 = 83/83，RUN 2 = 83/83** |
+| 8+ | `EXP_MOSAIC_SCALE_E2E=1` opt-in 重量级 E2E | 0 | All tests passed（3 断言） |
+| 8+ | `./test_perf_fusion`（融合基准+正确性回归） | 0 | 12135 assertions passed |
 
 ## OUT_OF_SCOPE
 
