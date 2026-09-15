@@ -13,7 +13,9 @@
 #include "geospatial/doctor/env_doctor.h"
 #include "geospatial/remote/offline_gate.h"
 
-#include <catch2/catch.hpp>
+using namespace sicnu::geo::envcheck;
+
+#include <catch2/catch_test_macros.hpp>
 
 #include <cpl_conv.h>
 
@@ -60,7 +62,7 @@ std::set< std::string > curatedDiagnosticIds()
 
 void requireCountsConsistent( const sicnu::geo::envcheck::EnvDoctorReport &report )
 {
-  REQUIRE( ( int )report.checks.size ==
+  REQUIRE( ( int )report.checks.size() ==
            report.okCount + report.infoCount + report.warningCount + report.errorCount );
   REQUIRE( severityCount( report, "ok" ) == report.okCount );
   REQUIRE( severityCount( report, "info" ) == report.infoCount );
@@ -122,19 +124,19 @@ TEST_CASE( "env doctor healthy-host report is well-formed and self-consistent",
   // A normal dev/deployment host resolves proj.db and can write its temp.
   const Json::Value *proj = findCheck( report, "proj.db" );
   REQUIRE( proj != nullptr );
-  if ( proj["severity"].asString() == "ok" )
+  if ( (*proj)["severity"].asString() == "ok" )
   {
-    REQUIRE( proj["detail"].isMember( "resolved" ) );
+    REQUIRE( (*proj)["detail"].isMember( "resolved" ) );
     // The candidate list names every probed path (Oracle 3 pointer, even on
     // the healthy path).
-    REQUIRE( proj["detail"]["probed"].isArray() );
-    REQUIRE( proj["detail"]["probed"].size() >= 1 );
+    REQUIRE( (*proj)["detail"]["probed"].isArray() );
+    REQUIRE( (*proj)["detail"]["probed"].size() >= 1 );
   }
 
   const Json::Value *temp = findCheck( report, "fs.temp" );
   REQUIRE( temp != nullptr );
-  if ( temp["severity"].asString() == "ok" )
-    REQUIRE( temp["detail"]["path"].asString().size() > 0 );
+  if ( (*temp)["severity"].asString() == "ok" )
+    REQUIRE( (*temp)["detail"]["path"].asString().size() > 0 );
 }
 
 TEST_CASE( "env doctor names a missing required driver verbatim",
@@ -147,9 +149,9 @@ TEST_CASE( "env doctor names a missing required driver verbatim",
 
   const Json::Value *drivers = findCheck( report, "gdal.drivers.required" );
   REQUIRE( drivers != nullptr );
-  REQUIRE( drivers["severity"].asString() == "error" );
-  REQUIRE( drivers["message"].asString().find( "NoSuchDriver_F19XYZ" ) != std::string::npos );
-  REQUIRE( drivers["diagnostic"].asString() == "diagnostic.env.gdal_driver_missing" );
+  REQUIRE( (*drivers)["severity"].asString() == "error" );
+  REQUIRE( (*drivers)["message"].asString().find( "NoSuchDriver_F19XYZ" ) != std::string::npos );
+  REQUIRE( (*drivers)["diagnostic"].asString() == "diagnostic.env.gdal_driver_missing" );
   REQUIRE( report.errorCount >= 1 );
   REQUIRE( std::string( report.worst() ) == "error" );
 }
@@ -163,7 +165,7 @@ TEST_CASE( "env doctor full required-driver set passes on a complete host",
   const Json::Value *drivers = findCheck( report, "gdal.drivers.required" );
   REQUIRE( drivers != nullptr );
   // Host-dependent only by GDAL build completeness: Arch GDAL carries all six.
-  REQUIRE( drivers["severity"].asString() == "ok" );
+  REQUIRE( (*drivers)["severity"].asString() == "ok" );
 }
 
 TEST_CASE( "env doctor probed paths list injected PROJ candidates",
@@ -177,7 +179,7 @@ TEST_CASE( "env doctor probed paths list injected PROJ candidates",
   const Json::Value *proj = findCheck( report, "proj.db" );
   REQUIRE( proj != nullptr );
   bool listedInjected = false;
-  for ( const Json::Value &probed : proj["detail"]["probed"] )
+  for ( const Json::Value &probed : (*proj)["detail"]["probed"] )
   {
     if ( probed.asString().find( "/nonexistent-f19/中文目录" ) == 0 )
       listedInjected = true;
@@ -193,14 +195,14 @@ TEST_CASE( "env doctor unicode roundtrip probe runs and cleans up",
   sicnu::geo::envcheck::EnvDoctorReport report = runEnvironmentDoctor();
   const Json::Value *unicode = findCheck( report, "fs.unicode" );
   REQUIRE( unicode != nullptr );
-  const std::string severity = unicode["severity"].asString();
+  const std::string severity = (*unicode)["severity"].asString();
   REQUIRE( ( severity == "ok" || severity == "error" ) );
   if ( severity == "ok" )
   {
-    REQUIRE( unicode["detail"]["path"].asString().find( "\xE4\xB8\xAD\xE6\x96\x87" )
+    REQUIRE( (*unicode)["detail"]["path"].asString().find( "\xE4\xB8\xAD\xE6\x96\x87" )
              != std::string::npos );
     // cleanup: no probe residue in temp
-    const std::string path = unicode["detail"]["path"].asString();
+    const std::string path = (*unicode)["detail"]["path"].asString();
     REQUIRE( !std::filesystem::exists( std::filesystem::path( path ) ) );
   }
 }
@@ -217,8 +219,8 @@ TEST_CASE( "env doctor runtime data resolution walks to a fixture marker",
   sicnu::geo::envcheck::EnvDoctorReport report = runEnvironmentDoctor( options );
   const Json::Value *data = findCheck( report, "runtime.data.dir" );
   REQUIRE( data != nullptr );
-  REQUIRE( data["severity"].asString() == "ok" );
-  std::filesystem::path resolvedRoot = data["detail"]["resolved_root"].asString();
+  REQUIRE( (*data)["severity"].asString() == "ok" );
+  std::filesystem::path resolvedRoot = (*data)["detail"]["resolved_root"].asString();
   REQUIRE( resolvedRoot.filename() == "sicnu-envcheck-fixture-f19" );
   std::filesystem::remove_all( fixture.parent_path() );
 }
@@ -235,9 +237,9 @@ TEST_CASE( "env doctor reports a missing SICNU_DATA_DIR as warning with pointer"
 
   const Json::Value *data = findCheck( report, "runtime.data.dir" );
   REQUIRE( data != nullptr );
-  REQUIRE( data["severity"].asString() == "warning" );
-  REQUIRE( data["message"].asString().find( "/nonexistent-f19/数据目录" ) != std::string::npos );
-  REQUIRE( data["diagnostic"].asString() == "diagnostic.env.data_dir_missing" );
+  REQUIRE( (*data)["severity"].asString() == "warning" );
+  REQUIRE( (*data)["message"].asString().find( "/nonexistent-f19/数据目录" ) != std::string::npos );
+  REQUIRE( (*data)["diagnostic"].asString() == "diagnostic.env.data_dir_missing" );
 }
 
 TEST_CASE( "env doctor reports offline gate state without toggling it",
@@ -248,8 +250,8 @@ TEST_CASE( "env doctor reports offline gate state without toggling it",
   sicnu::geo::envcheck::EnvDoctorReport online = runEnvironmentDoctor();
   const Json::Value *onlineState = findCheck( online, "offline.state" );
   REQUIRE( onlineState != nullptr );
-  REQUIRE( onlineState["detail"]["engaged"].asBool() == false );
-  REQUIRE( onlineState["detail"]["gdal_network_deny"].asBool() == false );
+  REQUIRE( (*onlineState)["detail"]["engaged"].asBool() == false );
+  REQUIRE( (*onlineState)["detail"]["gdal_network_deny"].asBool() == false );
 
   // Engaged (gate + deny): the report reflects, never mutates.
   sicnu::geo::offline::setEnabled( true );
@@ -257,8 +259,8 @@ TEST_CASE( "env doctor reports offline gate state without toggling it",
   sicnu::geo::envcheck::EnvDoctorReport offline = runEnvironmentDoctor();
   const Json::Value *offlineState = findCheck( offline, "offline.state" );
   REQUIRE( offlineState != nullptr );
-  REQUIRE( offlineState["detail"]["engaged"].asBool() == true );
-  REQUIRE( offlineState["detail"]["gdal_network_deny"].asBool() == true );
+  REQUIRE( (*offlineState)["detail"]["engaged"].asBool() == true );
+  REQUIRE( (*offlineState)["detail"]["gdal_network_deny"].asBool() == true );
 
   // Restore global state for other tests.
   sicnu::geo::offline::clearGdalNetworkDeny();

@@ -11,6 +11,8 @@
 
 #include "geospatial/doctor/env_doctor.h"
 
+#include "exprs/exit_codes.h"
+
 #include <QCoreApplication>
 #include <QDir>
 #include <QLibrary>
@@ -96,7 +98,7 @@ int commandEnvDoctor( QStringList args, const CliIO &io )
         const QString qtPluginPath = qEnvironmentVariable( "QT_PLUGIN_PATH" );
         if ( !qtPluginPath.isEmpty() )
         {
-            const QStringList parts = qtPluginPath.split( QDir::listSeparator, Qt::SkipEmptyParts );
+            const QStringList parts = qtPluginPath.split( QDir::listSeparator(), Qt::SkipEmptyParts );
             for ( const QString &p : parts )
                 candidates.push_back( QDir( p ).absoluteFilePath( QStringLiteral( "platforms" ) ) );
         }
