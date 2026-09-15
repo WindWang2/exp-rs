@@ -181,10 +181,17 @@ TEST_CASE("Surface projection invariants", "[surface_parity]")
         REQUIRE_FALSE(tool.name.empty());
         REQUIRE_FALSE(tool.description.empty());
         REQUIRE(tool.family == surfaceToolFamily(tool.name));
-        // Schema shape: object root with typed properties.
+        // Schema shape: our own meta/data-platform tables guarantee
+        // {"type":"object"} with a properties object. Catalog-sourced schemas
+        // are passed through exactly as the owning domain registered them
+        // (master behavior; Pi normalizes defensively) — only a JSON object
+        // root is required here.
         REQUIRE(tool.inputSchema.isObject());
-        REQUIRE(tool.inputSchema["type"].asString() == "object");
-        REQUIRE(tool.inputSchema["properties"].isObject());
+        if (tool.source != SurfaceToolSource::Catalog)
+        {
+            REQUIRE(tool.inputSchema["type"].asString() == "object");
+            REQUIRE(tool.inputSchema["properties"].isObject());
+        }
         // Unique names.
         REQUIRE(std::find(seen.begin(), seen.end(), tool.name) == seen.end());
         seen.push_back(tool.name);
@@ -361,7 +368,7 @@ TEST_CASE("CLI tools list matches the projection over the real binary", "[surfac
         // the CLI process registered additionally.
         const auto it = projectedSchemas.find(name);
         if (it != projectedSchemas.end())
-            REQUIRE(canonicalJson(obj.value(QStringLiteral("inputSchema"))) == it->second);
+            REQUIRE(canonicalJson(obj.value(QStringLiteral("input_schema")).toVariant()) == it->second);
         if (meta_protocol::contains(name))
             ++matchedMeta;
         else if (sicnu::agent::isDataPlatformTool(QString::fromStdString(name)))

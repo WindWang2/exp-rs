@@ -1203,8 +1203,11 @@ QVariantMap McpServer::handleArtifactRead(const QVariantMap &arguments)
     if (QFileInfo(rawPath).isRelative() && !workspace.isEmpty())
         resolved = QDir(workspace).filePath(rawPath);
 
+    // With no sandbox configured (env unset) every path is allowed — the
+    // same policy as validateWorkspacePaths, which returns early instead of
+    // letting absolutePathOutsideWorkspace treat an empty root as the cwd.
     QString detail;
-    if (absolutePathOutsideWorkspace(resolved, workspace, &detail))
+    if (!workspace.isEmpty() && absolutePathOutsideWorkspace(resolved, workspace, &detail))
         throw McpToolError(
             QStringLiteral("artifact_read path rejected: %1").arg(detail));
 

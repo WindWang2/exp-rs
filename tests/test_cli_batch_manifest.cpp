@@ -175,10 +175,12 @@ TEST_CASE( "Run: interpolation, unknown operators, exit aggregation (continue)",
 
     const Outcome outcome = runManifest( normalized, options, silentCallbacks() );
     REQUIRE( outcome.records.size() == 3 );
-    // interp/missing_var fail on validation (6) BEFORE the adapter lookup;
-    // unknown_op fails on the adapter (5). Worst exit surfaces.
+    // interp: ${scene} RESOLVES via --var, so it reaches the adapter lookup
+    // and fails with 5 (unknown operator); missing_var fails on validation
+    // (6) before the adapter; unknown_op fails on the adapter (5). Worst
+    // exit surfaces.
     REQUIRE( outcome.records[0].status == "failed" );
-    REQUIRE( outcome.records[0].exitCode == 6 );
+    REQUIRE( outcome.records[0].exitCode == 5 );
     REQUIRE( outcome.records[1].status == "failed" );
     REQUIRE( outcome.records[1].exitCode == 6 );
     REQUIRE( outcome.records[1].error == "unknown variable ${nope}" );
