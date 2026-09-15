@@ -33,3 +33,17 @@
 3. 若 #1008 在本 track 期间合入：重新 `git fetch && git log origin/master` 审计，把新增 master 面纳入 rebase 事实；不保留旧假设。
 4. 新出现的并发 PR：提交/Phase 边界时复查 `gh pr list`，同样处理。
 5. Open issues #1001–#1007：逐条 dedupe —— 均非 product 领域（dataset/workflow/georef/io:clip），不实施、不修复、不重复实现（证据见 BASELINE.md）。
+
+## 更新（2026-09-16，Phase 8 rebase 前复查）
+
+启动时新出现的并发 PR（均在 a5b11b7f 之上，MERGEABLE）：
+- #1009 `zcode/execution-runtime-convergence-11`
+- #1010 `zcode/mosaic-fusion-11`
+- #1011 `zcode/classification-intelligence-11`
+
+文件级交集核查（`git diff --name-only a5b11b7f..<branch>`）：三者均**不触碰**本 track
+primary scope（`src/geospatial/products/**`、`data/products/**`、产品算子、对话框、
+`docs/products/**`）；仅共享 integration 文件 `CHANGELOG.md`、`tests/CMakeLists.txt`
+（classification 另有 `.gitignore` whitelist 段）——全部 append-only 接线，按 runbook
+第 5 条在合并窗口手工并段即可，无业务冲突面。#1008 仍 CONFLICTING（其自身与 master
+冲突），继续 read-only，无新增交集。
