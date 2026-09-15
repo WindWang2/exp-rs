@@ -16,6 +16,8 @@
 #include <QTableWidget>
 #include <QTemporaryDir>
 
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <vector>
 

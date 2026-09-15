@@ -50,6 +50,8 @@ using namespace params;
 namespace {
 
 const std::vector<std::string> s_methods = {"svm", "normal_bayes", "rf", "mlp", "knn", "min_distance", "mahalanobis"};
+// F12 — measures driving the rejected mask of the uncertainty raster.
+const std::vector<std::string> s_uncertaintyMeasures = {"entropy", "margin", "confidence"};
 
 /// Map a failed pipeline run back onto the operator's stable error codes.
 [[noreturn]] void throwPipelineError(const RsClassificationPipelineResult& res,
@@ -122,6 +124,23 @@ Json::Value RsSupervisedClassificationOperator::schema() const {
         "Requires a classifier supporting probabilities (normal_bayes, rf, mlp)",
         "");
     props["probabilityOutput"]["required"] = false;
+    props["uncertaintyOutput"] = makeStringParam(
+        "uncertaintyOutput",
+        "Optional 3-band uncertainty raster (Float32; band 1 = normalised entropy "
+        "[0,1], band 2 = margin [0,1], band 3 = rejected mask {0,1}; NoData -1). "
+        "Requires a probability-capable classifier (normal_bayes, rf, mlp)",
+        "");
+    props["uncertaintyOutput"]["required"] = false;
+    props["uncertaintyMeasure"] = makeEnumParam(
+        "uncertaintyMeasure",
+        "Measure driving the rejected mask band (entropy: reject when >= threshold; "
+        "margin/confidence: reject when <= threshold)",
+        s_uncertaintyMeasures, "entropy");
+    props["rejectThreshold"] = makeNumberParam(
+        "rejectThreshold",
+        "Rejection threshold for the uncertainty mask (< 0 = no rejection). Same "
+        "unit as the chosen measure (normalised entropy / margin / confidence)",
+        -1.0);
     props["maxSamplesPerClass"] = makeIntegerParam(
         "maxSamplesPerClass", "Cap training samples per class (0 = unlimited)", 5000);
     props["seed"] = makeIntegerParam(
@@ -165,6 +184,8 @@ Json::Value RsSupervisedClassificationOperator::schema() const {
         "imbalanceWarnings", "Class-imbalance warnings (classes under 10% of the largest)", "");
     outputs["meanConfidence"] = makeNumberParam(
         "meanConfidence", "Mean best-class probability over valid pixels (probabilityOutput only)", 0.0);
+    outputs["uncertaintyOutput"] = makeStringParam(
+        "uncertaintyOutput", "Echo of the uncertainty raster path (when requested)", "");
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
     root["required"] = makeRequired({"input", "output"});
@@ -217,6 +238,14 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
                               "Probability outputs require a classifier that supports probabilities (normal_bayes, rf, mlp); "
                               "SVM does not support them");
     }
+    // F12 — uncertainty raster parameters (all default-off).
+    const std::string uncertaintyOutput = getString(params, "uncertaintyOutput", "");
+    const std::string uncertaintyMeasureStr = getEnum(params, "uncertaintyMeasure", s_uncertaintyMeasures, "entropy");
+    const double rejectThreshold = getDouble(params, "rejectThreshold", -1.0);
+    if (!uncertaintyOutput.empty() && method != "normal_bayes" && method != "rf" && method != "mlp") {
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "uncertaintyOutput requires a probability-capable classifier (normal_bayes, rf, mlp)");
+    }
 
     // Parameter completeness first (stable error codes for Agent/tests)
     if (!predictOnly && trainingPath.empty()) {
@@ -258,6 +287,13 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
     cfg.testSplit = testSplit;
     cfg.seed = seed;
     cfg.probabilityOutput = QString::fromStdString( probabilityOutput );
+    cfg.uncertaintyOutput = QString::fromStdString( uncertaintyOutput );
+    cfg.uncertaintyMeasure = uncertaintyMeasureStr == "margin"
+                                 ? RsUncertainty::Measure::Margin
+                                 : uncertaintyMeasureStr == "confidence"
+                                     ? RsUncertainty::Measure::Confidence
+                                     : RsUncertainty::Measure::Entropy;
+    cfg.rejectThreshold = rejectThreshold;
 
     if (predictOnly) {
         cfg.modelLoadPath = QString::fromStdString(modelIn);
@@ -302,6 +338,8 @@ Json::Value RsSupervisedClassificationOperator::run(const Json::Value& params,
         result["probabilityOutput"] = probabilityOutput;
         result["meanConfidence"] = res.meanConfidence;
     }
+    if (!uncertaintyOutput.empty())
+        result["uncertaintyOutput"] = uncertaintyOutput;
     if ( !res.trainSamplesByClass.isEmpty() )
     {
         // Per-class training sample counts + class-imbalance warnings
