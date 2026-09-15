@@ -16,3 +16,10 @@
 
 | Phase | 命令 | -j | 时长 | RSS 峰值 | 备注 |
 |---|---|---|---|---|---|
+
+| Phase | 命令 | -j | 时长 | RSS 峰值 | 备注 |
+|---|---|---|---|---|---|
+| 1 configure#1 | cmake -S -B -G Ninja (vcpkg) | 2 | ~6 min | — | 失败:Catch2 网络克隆 |
+| 1 configure#2 | +FETCHCONTENT_SOURCE_DIR_CATCH2 | 2 | ~5 min | — | exit 0 |
+| 1 冷构建 | ninja sicnu_geospatial 等5目标 | 2 | >60 min | cl.exe ×2 140–430 MB | src/core(qgis_core) 为大头,~900+ obj |
+| 1 快反馈 | ninja test_sensor_schema | 2 | ~2 min | — | 修3处编译/环境问题后全绿 |
