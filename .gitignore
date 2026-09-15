@@ -272,3 +272,8 @@ data/labs/_tmp/
 !.planning/unified-mission-workbench-d18/**
 !.planning/dataset-foundry-benchmark-d19/
 !.planning/dataset-foundry-benchmark-d19/**
+
+# cartography-production-11: track planning notes (markdown only; logs stay local).
+!.planning/cartography-production-11/
+.planning/cartography-production-11/*
+!.planning/cartography-production-11/*.md
