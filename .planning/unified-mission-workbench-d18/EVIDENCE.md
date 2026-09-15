@@ -39,3 +39,18 @@ ctest -R test_mission_context -V
 
 - `cmake` configure/build
 - `ctest -R mission`
+
+## Commits on branch (after seed)
+
+| SHA | Message |
+|-----|---------|
+| 733388cd | docs(d18): Phase A audit |
+| 5e05bf25 | feat(d18): MissionContext value type |
+| d7a678a2 | feat(d18): bind MissionContext into studios |
+| a6b0cab5 | feat(d18): workbench:context mission summary |
+| 862cfb09 | feat(d18): MissionContext sidecar save/load |
+
+## PR
+
+- Draft: https://github.com/WindWang2/exp-rs/pull/991
+- Not merged (per GOAL).
