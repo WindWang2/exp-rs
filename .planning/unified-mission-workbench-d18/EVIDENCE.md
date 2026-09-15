@@ -80,6 +80,7 @@ ctest -R 'test_mission|test_ir2_port_param' -V
 
 - Draft: https://github.com/WindWang2/exp-rs/pull/991
 - Not merged (per GOAL).
-- Tip SHA after port-map push: `6d8cdb0f`
 
-Tip SHA after port-map push: .
+- Tip SHA after port-map push: `96b4566f`
+
+Tip SHA after port-map push: `96b4566f`.
