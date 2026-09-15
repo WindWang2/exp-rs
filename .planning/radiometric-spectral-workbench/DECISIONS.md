@@ -73,3 +73,15 @@ guessing.
 Lab02/Lab08 JSON extend the existing Labspec + grading schema (ADR 0146/0150); new checks
 reuse the established check kinds. No new grading engine code unless a check kind is
 genuinely missing (then it is added next to the existing ones and covered by the E2E).
+
+## D-09 (added during Phase 2) Lab rubric grading lives in the D13 E2E
+
+The mission's Lab02/Lab08 100-point rubrics (20/30/30/20 and 40/40/20) are
+computed by `test_d13_radiometric_spectral_e2e.cpp` directly from the D13
+kernel outputs, so the grading loop is executable evidence rather than prose.
+The shipped lab JSONs are validated for consistency (ids, NDVI band params,
+step tables) instead of extended with check kinds the data-driven engine does
+not ship. Uncalibrated-DN contract: the grader applies a flat −30 state-
+preflight penalty, subsuming the 20-point range deduction (one root cause),
+landing at exactly 70 with an improvement directive naming
+`rs:radiometric_calibration`.

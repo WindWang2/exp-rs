@@ -10,9 +10,10 @@
 
 | Check | Result |
 |-------|--------|
-| Configure succeeds | (filled at baseline run) |
-| `ninja -j2 sicnu_processing qgis_analysis sicnu_agent` | (filled at baseline run) |
-| Existing kernel tests green (`test_spectral_unmixing`, `test_spectral_library`, `test_radiometric_calibration`) | (filled at baseline run) |
+| Configure succeeds | YES (`build-dev`, Ninja Release + ccache→raise-compiler-stack launcher) |
+| `ninja -j2` core/processing/agent/analysis targets | YES (after ICE retry + disk-pressure recovery) |
+| Existing kernel tests green at gate | YES — `test_spectral_unmixing`, `test_spectral_library`, `test_radiometric_calibration`, `test_spectral_indices`, `test_spectral_profile_widget` all exit 0 with D13 changes applied (regression-neutral) |
+| Pre-existing master failures (not D13) | `test_capability_drift`/`test_capability_knowledge`: 4 failures each, reproduced byte-identical at base commit `007e70cf` |
 
 Baseline policy: only the targets touched by D13 are built/run (the full tree is 10k+
 edges; the epic budget builds what it owns plus dependencies). Master is assumed green —
