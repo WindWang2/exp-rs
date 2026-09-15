@@ -9415,6 +9415,42 @@ target_include_directories(test_spatial_cross_validation PRIVATE
 )
 sicnu_discover_tests(test_spatial_cross_validation)
 
+# F12: end-to-end chains (uncertainty raster semantics, sidecar v2 replay,
+# v1 compatibility, imbalanced classes).
+add_executable(test_classification_intelligence_e2e test_classification_intelligence_e2e.cpp)
+target_link_libraries(test_classification_intelligence_e2e PRIVATE
+  Catch2::Catch2WithMain
+  qgis_core
+  qgis_analysis
+  GDAL::GDAL
+  ${OpenCV_LIBS}
+)
+target_include_directories(test_classification_intelligence_e2e PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${OpenCV_INCLUDE_DIRS}
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_classification_intelligence_e2e TIMEOUT 300)
+
+# F12: bounded logical-scale evidence (100k samples; invariants only).
+add_executable(test_classification_intelligence_scale test_classification_intelligence_scale.cpp)
+target_link_libraries(test_classification_intelligence_scale PRIVATE
+  Catch2::Catch2WithMain
+  qgis_core
+  qgis_analysis
+  ${OpenCV_LIBS}
+)
+target_include_directories(test_classification_intelligence_scale PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${OpenCV_INCLUDE_DIRS}
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_classification_intelligence_scale RUN_SERIAL TIMEOUT 600)
+
 # Packages E/F: pixel change detection + accuracy assessment.
 sicnu_add_test(test_change_detector TIMEOUT 120 TEST_PREFIX "test_change_detector::")
 sicnu_add_test(test_confusion_matrix TIMEOUT 120 TEST_PREFIX "test_confusion_matrix::")
