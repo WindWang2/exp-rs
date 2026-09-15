@@ -192,7 +192,8 @@ DatasetQaReport buildDatasetQaReport( const DatasetQaInputs &inputs )
             category.verdict = AuditVerdict::Warn;
             category.summary = QStringLiteral( "label QA warnings present" );
         }
-        else if ( inputs.labelFindings.isEmpty() && inputs.composition.sampleCount == 0 )
+        else if ( !inputs.labelsAudited
+                  || ( inputs.labelFindings.isEmpty() && inputs.composition.sampleCount == 0 ) )
         {
             category.verdict = AuditVerdict::Unknown;
             category.summary = QStringLiteral( "label QA not run" );

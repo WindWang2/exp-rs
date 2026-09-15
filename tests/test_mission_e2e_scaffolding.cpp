@@ -6,10 +6,12 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "app/workbench/mission_context.h"
+#include "workflow/ir2_registry_node_executor.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 
 using sicnu::app::ActiveWorkflowRef;
 using sicnu::app::MissionContext;
@@ -117,13 +119,22 @@ TEST_CASE( "scenario2_temporal_change_mission_scaffold", "[d18][mission][e2e][sc
 
 TEST_CASE( "scenario5_mission_mount_surface_ids_documented", "[d18][mission][e2e][scaffold]" )
 {
+  // Production IDs from main_window_workbench.cpp / command_defs.cpp — keep in sync.
   const QStringList surfaces = {
     QStringLiteral( "georef-dual" ),
     QStringLiteral( "classify-studio" ),
     QStringLiteral( "workbench.ir2Pipeline" ),
   };
   REQUIRE( surfaces.size() == 3 );
-  SUCCEED( "mount surface ids recorded for E2E GUI follow-up on toolchain hosts" );
+  REQUIRE( QSet<QString>( surfaces.begin(), surfaces.end() ).size() == surfaces.size() );
+  for ( const QString &id : surfaces )
+  {
+    REQUIRE( !id.trimmed().isEmpty() );
+    REQUIRE( !id.contains( QLatin1Char( ' ' ) ) );
+  }
+  REQUIRE( surfaces.contains( QStringLiteral( "georef-dual" ) ) );
+  REQUIRE( surfaces.contains( QStringLiteral( "classify-studio" ) ) );
+  REQUIRE( surfaces.contains( QStringLiteral( "workbench.ir2Pipeline" ) ) );
 }
 
 
@@ -152,19 +163,38 @@ TEST_CASE( "scenario3c_ir2_registry_bind_policy", "[d18][mission][e2e]" )
 {
   // Contract (D-W5): production IR2 dock installs makeRegistryNodeExecutor.
   // Unbound nodes fail with a stable prefix; they must not silently succeed
-  // via the D17 synthetic default. Synthetic remains only when setExecutor
-  // was never called (hermetic D17 coordinator tests).
-  const QString unboundPrefix = QStringLiteral( "ir2.operator_unbound:" );
-  REQUIRE( unboundPrefix.startsWith( QStringLiteral( "ir2.operator_unbound" ) ) );
+  // via the D17 synthetic default. Exercise the header-inline refusal helper
+  // (same path makeRegistryNodeExecutor uses before port→param mapping).
+  using sicnu::workflow::Ir2OperatorBinding;
+  using sicnu::workflow::NodeExecutionResult;
+  using sicnu::workflow::NodeFact;
+  using sicnu::workflow::kIr2OperatorUnboundPrefix;
+  using sicnu::workflow::makeIr2UnboundRefusal;
 
-  // Document identity still uses pipeline_run_coordinator as runner class.
+  REQUIRE( QLatin1String( kIr2OperatorUnboundPrefix )
+             == QLatin1String( "ir2.operator_unbound:" ) );
+
+  NodeFact emptyNode;
+  emptyNode.nodeId = QStringLiteral( "orphan" );
+  emptyNode.operatorId.clear();
+  const NodeExecutionResult emptyRefusal =
+      makeIr2UnboundRefusal( emptyNode, Ir2OperatorBinding::UnboundEmpty );
+  REQUIRE_FALSE( emptyRefusal.success );
+  REQUIRE( emptyRefusal.artifactPath.isEmpty() );
+  REQUIRE( emptyRefusal.errorMessage.startsWith( QLatin1String( kIr2OperatorUnboundPrefix ) ) );
+  REQUIRE( emptyRefusal.errorMessage.contains( QStringLiteral( "empty operatorId" ) ) );
+
+  NodeFact unknownNode;
+  unknownNode.nodeId = QStringLiteral( "typo" );
+  unknownNode.operatorId = QStringLiteral( "rs:definitely_not_registered_d18_e2e" );
+  const NodeExecutionResult unknownRefusal =
+      makeIr2UnboundRefusal( unknownNode, Ir2OperatorBinding::UnboundUnknown );
+  REQUIRE_FALSE( unknownRefusal.success );
+  REQUIRE( unknownRefusal.artifactPath.isEmpty() );
+  REQUIRE( unknownRefusal.errorMessage.startsWith( QLatin1String( kIr2OperatorUnboundPrefix ) ) );
+  REQUIRE( unknownRefusal.errorMessage.contains( QStringLiteral( "no registry binding" ) ) );
+
+  // Mission runner identity remains pipeline_run_coordinator for IR2 dock Run.
   MissionContext ctx = makeSeedMission();
   REQUIRE( ctx.activeWorkflow.runner == QLatin1String( "pipeline_run_coordinator" ) );
-
-  // Binding matrix (see DECISIONS D-W5 / D-W6 / EVIDENCE):
-  //   Bound   = RSOperatorRegistry::hasOperator(node.operatorId)
-  //   Unbound = empty / unknown id → typed refusal (prefix above) BEFORE port map
-  //   Multi-input = targetPortName → params[portName] (test_ir2_port_param_mapping)
-  //   Synthetic default = coordinator with no setExecutor (tests only)
-  SUCCEED( "IR2 registry bind + port→param policy documented for toolchain host verification" );
 }

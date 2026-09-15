@@ -1056,9 +1056,26 @@ QVariantMap datasetQa( const QVariantMap &args )
     inputs.versionFrozen = record->status() == DatasetVersionStatus::Committed ||
                            record->status() == DatasetVersionStatus::Deprecated;
     inputs.provenanceComplete = !record->fingerprint().isEmpty();
+    // Label QA is a separate audit; do not claim Pass from empty findings.
+    inputs.labelsAudited = false;
 
     const QVector<SampleCatalogRow> catalogRows = loadCatalogRows( *store, versionId );
     inputs.catalogSummary = foundry.summarizeSamples( catalogRows );
+
+    // Identity uniqueness over the scanned evidence (honest for the scan window).
+    {
+        QHash<QString, int> idCounts;
+        idCounts.reserve( catalogRows.size() );
+        for ( const SampleCatalogRow &row : catalogRows )
+            ++idCounts[row.sampleId];
+        qint64 duplicates = 0;
+        for ( auto it = idCounts.constBegin(); it != idCounts.constEnd(); ++it )
+        {
+            if ( it.value() > 1 )
+                duplicates += static_cast<qint64>( it.value() - 1 );
+        }
+        inputs.duplicateSampleIds = duplicates;
+    }
 
     QVector<CompositionRow> compositionRows;
     compositionRows.reserve( catalogRows.size() );
@@ -1084,7 +1101,13 @@ QVariantMap datasetQa( const QVariantMap &args )
     }
 
     const DatasetQaReport report = foundry.runQa( inputs );
-    return toVariant( report.toJson() );
+    QJsonObject json = report.toJson();
+    const qint64 scanned = static_cast<qint64>( catalogRows.size() );
+    const qint64 sampleCount = store->sampleCount( versionId );
+    json.insert( QStringLiteral( "scanned" ), scanned );
+    json.insert( QStringLiteral( "scan_capped" ), scanned >= kMaxCatalogScan );
+    json.insert( QStringLiteral( "sample_count" ), sampleCount );
+    return toVariant( json );
 }
 
 QVariantMap datasetSampleQuery( const QVariantMap &args )

@@ -43,6 +43,10 @@ bool readMissionContextFromProjectXml( const QDomDocument &document, MissionCont
 
 /// Project save path helper: write sidecar (when path non-empty) AND XML.
 /// Sidecar failure is reported but XML is still attempted (and vice versa).
+/// Returns true only when at least one channel's *this* write succeeded — never
+/// via stale sidecar existence. A failed sidecar write removes a leftover
+/// .mission.json when possible so restore cannot prefer stale over fresh XML;
+/// if the stale file cannot be removed, returns false even if XML wrote.
 bool persistMissionContextWithProject( const QString &projectFilePath, QDomDocument &document,
                                        const MissionContext &ctx, QString *error = nullptr );
 

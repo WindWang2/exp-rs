@@ -126,6 +126,35 @@ TEST_CASE( "D19 feature set join refuses ambiguous and stale pins", "[d19][found
     CHECK( stale.findings.first().status == FeatureJoinStatus::StaleInputVersion );
 }
 
+TEST_CASE( "D19 FeatureSet MissingRequiredColumn yields Fail not Unknown",
+           "[d19][foundry][features][995]" )
+{
+    FeatureSet set;
+    set.setFeatureSetId( QStringLiteral( "fs-req" ) );
+    set.setInputDatasetVersionId( QStringLiteral( "version-a" ) );
+    set.setProducer( QStringLiteral( "rs:test" ) );
+    FeatureColumn ndvi;
+    ndvi.name = QStringLiteral( "ndvi_mean" );
+    ndvi.dtype = QStringLiteral( "float64" );
+    ndvi.required = true;
+    set.columns().append( ndvi );
+    REQUIRE( set.validate().has_value() );
+
+    FeatureRow row;
+    row.sampleId = QStringLiteral( "s1" );
+    // deliberately omit required ndvi_mean
+    row.values.insert( QStringLiteral( "other" ), 1.0 );
+
+    const auto join = joinFeaturesBySampleId( set, QVector<FeatureRow>{ row },
+                                              QStringList{ QStringLiteral( "s1" ) },
+                                              QStringLiteral( "version-a" ) );
+    CHECK( join.matched == 0 );
+    CHECK( join.missingRequiredColumns == 1 );
+    CHECK( join.verdict == AuditVerdict::Fail );
+    REQUIRE( !join.findings.isEmpty() );
+    CHECK( join.findings.first().status == FeatureJoinStatus::MissingRequiredColumn );
+}
+
 TEST_CASE( "D19 sample catalog pages and summaries stay bounded", "[d19][foundry][catalog]" )
 {
     QVector<SampleCatalogRow> rows;
@@ -159,6 +188,36 @@ TEST_CASE( "D19 sample catalog pages and summaries stay bounded", "[d19][foundry
     CHECK( summary.total == 1000 );
     CHECK( summary.pseudoLabelCount > 0 );
     CHECK( summary.byClass.value( QStringLiteral( "water" ) ) == 500 );
+}
+
+TEST_CASE( "D19 QA labels stay Unknown unless labelsAudited",
+           "[d19][foundry][qa][996]" )
+{
+    DatasetQaInputs inputs;
+    inputs.datasetVersionId = QStringLiteral( "v-labels" );
+    inputs.versionFrozen = true;
+    inputs.provenanceComplete = true;
+    inputs.composition.sampleCount = 5;
+    inputs.catalogSummary.total = 5;
+    inputs.duplicateSampleIds = 0;
+    // labelsAudited defaults false — must not Pass as "label QA clean".
+    const DatasetQaReport report = buildDatasetQaReport( inputs );
+    AuditVerdict labels = AuditVerdict::Pass;
+    for ( const DatasetQaCategory &category : report.categories() )
+    {
+        if ( category.name == QLatin1String( "labels" ) )
+            labels = category.verdict;
+    }
+    CHECK( labels == AuditVerdict::Unknown );
+
+    inputs.labelsAudited = true;
+    const DatasetQaReport audited = buildDatasetQaReport( inputs );
+    for ( const DatasetQaCategory &category : audited.categories() )
+    {
+        if ( category.name == QLatin1String( "labels" ) )
+            labels = category.verdict;
+    }
+    CHECK( labels == AuditVerdict::Pass );
 }
 
 TEST_CASE( "D19 QA report uses PASS/WARN/FAIL/UNKNOWN categories", "[d19][foundry][qa]" )

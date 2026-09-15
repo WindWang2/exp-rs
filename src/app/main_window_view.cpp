@@ -553,8 +553,10 @@ void QgisDesktopWindow::openClassificationStudio()
 
         connect( m_classificationStudio, &rs::app::ClassificationStudioWidget::classificationRequested,
                  this, [this]( int algoType ) {
-                     // Prefer an existing path product (artifact_paths / input layer source)
-                     // so the Result is not provisional when a concrete path already exists.
+                     // Prefer a previously recorded mission product path only
+                     // (artifact_paths for an existing Result ref). Never treat the
+                     // active map layer as a classification product via name heuristics
+                     // — input stacks named *class*/*change*/*predict* must not become Results.
                      QString existingPath;
                      const QJsonObject paths =
                          m_mission.metadata.value( QStringLiteral( "artifact_paths" ) ).toObject();
@@ -563,24 +565,6 @@ void QgisDesktopWindow::openClassificationStudio()
                          const QString rid = m_classificationStudio->missionResultRef().id;
                          if ( paths.contains( rid ) )
                              existingPath = paths.value( rid ).toString();
-                     }
-                     if ( existingPath.isEmpty() && m_mapCanvas && m_mapCanvas->currentLayer() )
-                     {
-                         if ( auto *rl = qobject_cast<QgsRasterLayer *>( m_mapCanvas->currentLayer() ) )
-                         {
-                             const QString src = rl->source();
-                             if ( !src.isEmpty() && ( src.endsWith( QLatin1String( ".tif" ), Qt::CaseInsensitive )
-                                                      || src.endsWith( QLatin1String( ".tiff" ), Qt::CaseInsensitive )
-                                                      || src.endsWith( QLatin1String( ".img" ), Qt::CaseInsensitive ) ) )
-                             {
-                                 // Only reuse when the layer name suggests a class product.
-                                 const QString nm = rl->name().toLower();
-                                 if ( nm.contains( QLatin1String( "class" ) )
-                                      || nm.contains( QLatin1String( "change" ) )
-                                      || nm.contains( QLatin1String( "predict" ) ) )
-                                     existingPath = src;
-                             }
-                         }
                      }
 
                      if ( !existingPath.isEmpty() )
