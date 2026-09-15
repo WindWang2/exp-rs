@@ -46,12 +46,6 @@ QStringList codeCandidates( const QString &message )
 
 } // namespace
 
-ErrorDiagnosticsBridge::ErrorDiagnosticsBridge( const HelpRegistry &registry )
-    : m_registry( registry )
-    , m_catalog( registry )
-{
-}
-
 QString ErrorDiagnosticsBridge::helpIdForCode( DiagnosticFamily family, const QString &code ) const
 {
     const QHash<QString, QHash<QString, QString>> table = curatedCodes( m_registry );

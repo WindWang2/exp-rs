@@ -33,8 +33,6 @@ QString suggestedActionFor( const QString &commandId )
     };
     if ( commandId.startsWith( QLatin1String( "rs." ) ) )
         return QStringLiteral( "layer.addRaster" );
-    if ( commandId == QLatin1String( "workbench.obia" ) )
-        return QStringLiteral( "layer.addRaster" );
     return suggestions.value( commandId );
 }
 
@@ -60,7 +58,6 @@ QStringList AvailabilityFactsAdapter::coveredCommandIds()
         QStringLiteral( "rs.ortho" ),           QStringLiteral( "rs.terrain" ),
         QStringLiteral( "rs.fusion" ),          QStringLiteral( "rs.temporal" ),
         QStringLiteral( "rs.speckle" ),         QStringLiteral( "rs.extractBands" ),
-        QStringLiteral( "workbench.obia" ),
     };
 }
 

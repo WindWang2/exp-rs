@@ -23,7 +23,10 @@ namespace sicnu::help
 class ErrorDiagnosticsBridge
 {
   public:
-    explicit ErrorDiagnosticsBridge( const HelpRegistry &registry );
+    explicit ErrorDiagnosticsBridge( const HelpRegistry &registry )
+        : m_registry( registry )
+        , m_catalog( registry )
+    {}
 
     /// The registry the bridge resolves against.
     const HelpRegistry &registry() const { return m_registry; }
@@ -40,6 +43,11 @@ class ErrorDiagnosticsBridge
   private:
     const HelpRegistry &m_registry;
     DiagnosticCatalog m_catalog;
+
+  public:
+    /// The catalog is exposed for callers that want the honest fallback page
+    /// for codes the message carries without a curated page.
+    const DiagnosticCatalog &catalog() const { return m_catalog; }
 };
 
 } // namespace sicnu::help

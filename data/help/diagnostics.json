@@ -1843,7 +1843,7 @@
       "身份"
     ]
   },
-{
+  {
     "id": "diagnostic.harness.io_error",
     "family": "harness",
     "code": "IO_ERROR",
@@ -1865,7 +1865,7 @@
     ],
     "category": "错误与诊断"
   },
-{
+  {
     "id": "diagnostic.harness.complex_bands_required",
     "family": "harness",
     "code": "COMPLEX_BANDS_REQUIRED",
@@ -1886,7 +1886,7 @@
     ],
     "category": "错误与诊断"
   },
-{
+  {
     "id": "diagnostic.harness.acquisition_dates_missing",
     "family": "harness",
     "code": "ACQUISITION_DATES_MISSING",
@@ -1907,7 +1907,7 @@
     ],
     "category": "错误与诊断"
   },
-{
+  {
     "id": "diagnostic.harness.dates_not_ascending",
     "family": "harness",
     "code": "DATES_NOT_ASCENDING",
@@ -1928,7 +1928,7 @@
     ],
     "category": "错误与诊断"
   },
-{
+  {
     "id": "diagnostic.harness.unwrap_provider_unavailable",
     "family": "harness",
     "code": "UNWRAP_PROVIDER_UNAVAILABLE",
@@ -1949,7 +1949,7 @@
     ],
     "category": "错误与诊断"
   },
-{
+  {
     "id": "diagnostic.harness.wavelength_incompatible",
     "family": "harness",
     "code": "WAVELENGTH_INCOMPATIBLE",
@@ -1969,7 +1969,7 @@
     ],
     "category": "错误与诊断"
   },
-{
+  {
     "id": "diagnostic.harness.temporal_misalignment",
     "family": "harness",
     "code": "TEMPORAL_MISALIGNMENT",
@@ -1989,7 +1989,7 @@
     ],
     "category": "错误与诊断"
   },
-{
+  {
     "id": "diagnostic.harness.categorical_mismatch",
     "family": "harness",
     "code": "CATEGORICAL_MISMATCH",
@@ -2010,7 +2010,7 @@
     ],
     "category": "错误与诊断"
   },
-{
+  {
     "id": "diagnostic.harness.resource_over_budget",
     "family": "harness",
     "code": "RESOURCE_OVER_BUDGET",
@@ -2031,7 +2031,7 @@
     ],
     "category": "错误与诊断"
   },
-{
+  {
     "id": "diagnostic.harness.output_path_collision",
     "family": "harness",
     "code": "OUTPUT_PATH_COLLISION",
@@ -2052,7 +2052,7 @@
     ],
     "category": "错误与诊断"
   },
-{
+  {
     "id": "diagnostic.harness.nondeterministic_chain",
     "family": "harness",
     "code": "NONDETERMINISTIC_CHAIN",
@@ -2072,7 +2072,7 @@
     ],
     "category": "错误与诊断"
   },
-{
+  {
     "id": "diagnostic.harness.fact_conflict",
     "family": "harness",
     "code": "FACT_CONFLICT",

@@ -17631,7 +17631,11 @@ The median filter suppresses salt-and-pepper noise while preserving edges remark
     </message>
 </context>
 <context>
-    <name>WorkflowSessionController</name>
+    <name>WorkflowSessionController</name>    <message>
+        <source>Diagnostic help: press F1 for guidance (topic %1)</source>
+        <translation>诊断帮助：按 F1 查看处置建议（主题 %1）</translation>
+    </message>
+
     <message>
         <source>Workflow definition not found: %1</source>
         <translation>未找到工作流定义：%1</translation>

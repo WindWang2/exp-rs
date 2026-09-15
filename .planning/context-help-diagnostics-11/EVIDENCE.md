@@ -36,3 +36,15 @@
 - R1（修复 3 处编译/数据问题前）：test_i18n 1 case 红（XML 解析方式缺陷）；test_help_coverage 2 case 红（①composition dangling: policy_refused→workbench.plugin_manager 引用未注册主题——master 上即存在的数据缺陷，因 master 无法构建该套件而从未暴露；②zero-diff 全 5 页漂移）；test_ux_guidance_corpus 1 case 红（workbench.obia facts 盲区——即本 track 要修的缺陷，已在 requirementFacts 修复）；其余 6 套件绿。
 - 修复：①policy_refused related 改指 command.workbench.operatorCatalog；②SICNU_REGEN_HELP_DOCS=1 再生 5 页（+1945/-117，证实提交物漂移）；③obia 案例入 requirementFacts；④i18n gate 改用 lupdate 稳定输出的正则提取 + 实体解码。
 - R2：**9/9 套件全绿**，合计 17,032 断言（明细见 TEST_MATRIX）。资源：build -j2（并行 track 同机构建，load 4-7），test 串行 offscreen；全套件墙钟 < 3 分钟。
+
+## Review #2 处置（对抗 review，P0=0 P1=1 P2=2 P3=12）
+
+- P1-1（obia 谓词错位）：**接受并修复**。撤销 requirementFacts 的 obia 特例、coveredCommandIds 行、adapter suggested 行；corpus 场景翻转为"无谓词命令诚实可用"正向断言；DECISIONS D3/CAPABILITY_MATRIX 已更正错误声称。（commit: review 修复 commit）
+- P2-1（未知 retry 空壳页）：**接受**。错误分支清空 d.id，条目真正丢弃。
+- P2-2（withDiagnosticLink 中文硬编码+裸 id）：**接受**。提示模板改为 tr(英文源) 于成员函数调用点（WorkflowSessionController 上下文），ts 补 zh 译文。
+- P3-1 bridge 死成员：m_catalog 私有成员保留但补公开 catalog() 访问器（语义：供调用方取 fallback 页），文档化。
+- P3-3 helpId 成功路径残留：接受，成功分支清除属性。
+- P3-4 注释路径漂移：已改。
+- P3-8 corpus 泄漏扫描补 keywords：已加。
+- P3-9 格式：JSON 首行缩进 + 文件尾换行 + agent 修复行并线已拆。
+- P3-2/P3-5/P3-6/P3-7/P3-10/P3-11/P3-12：记录为已知限制/disposition，不修（理由见 REVIEW_LOG）。

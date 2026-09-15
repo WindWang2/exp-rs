@@ -238,13 +238,6 @@ QVector<RequirementFact> requirementFacts( const SelectionContextSnapshot &s, co
         vectorRequirements();
         specs.append( { "vector.editable", QT_TR_NOOP( "The current layer is not editable" ), &editingAvailable } );
     }
-    else if ( commandId == QLatin1String( "workbench.obia" ) )
-    {
-        // OBIA is a workbench command but DECLARES the raster predicate
-        // (command_defs.cpp); without this case its facts channel would be
-        // empty — reporting "available" while the shell disables it.
-        rasterRequirements();
-    }
     else if ( commandId == QLatin1String( "layer.saveEdits" ) )
     {
         vectorRequirements();

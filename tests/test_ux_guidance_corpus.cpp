@@ -129,19 +129,23 @@ TEST_CASE( "corpus: rs.spectralIndex disabled over empty workspace explains and 
     checkNoLeak( QStringList{ g.shortTip, g.unavailableReason }, "rs.spectralIndex disabled" );
 }
 
-// ── scenario: OBIA command (facts-channel regression for the old static table)
+// ── scenario: command without an availability predicate ────────────────────
 
-TEST_CASE( "corpus: workbench.obia disabled over empty workspace is not silently available",
+TEST_CASE( "corpus: workbench.obia declares no predicate, so facts report available",
            "[ux-corpus][availability]" )
 {
     composed();
+    // OBIA opens its own window and declares no availability predicate in
+    // command_defs.cpp — empty facts must honestly mean "available", never a
+    // fabricated reason.
     const ContextualGuidance g = ContextualHelpResolver::resolve(
         emptyWorkspace(), nullptr, QStringLiteral( "workbench.obia" ) );
 
-    CHECK_FALSE( g.available );
-    CHECK_FALSE( g.unavailableReason.isEmpty() );
-    CHECK( g.unavailableReasonCode == QStringLiteral( "raster.selected" ) );
-    checkNoLeak( QStringList{ g.unavailableReason }, "workbench.obia disabled" );
+    CHECK( g.available );
+    CHECK( g.unavailableReason.isEmpty() );
+    CHECK( g.unavailableReasonCode.isEmpty() );
+    CHECK( g.detailHelpId == QStringLiteral( "command.workbench.obia" ) );
+    checkNoLeak( QStringList{ g.shortTip }, "workbench.obia available" );
 }
 
 // ── scenario: disabled command yields topic + machine reason ───────────────
@@ -219,9 +223,9 @@ TEST_CASE( "corpus: every diagnostic page stays free of secret-shaped text",
     for ( const HelpDescriptor *d : globalHelpRegistry().all() ) {
         if ( d->kind != HelpKind::Diagnostic || !d->diagnostic.has_value() )
             continue;
-        checkNoLeak( QStringList{ d->title, d->summary, d->diagnostic->whatHappened,
-                                  d->diagnostic->whyItMatters, d->diagnostic->technicalNote }
-                         << d->diagnostic->remediation,
-                     d->id.toUtf8().constData() );
+        QStringList texts{ d->title, d->summary, d->diagnostic->whatHappened,
+                           d->diagnostic->whyItMatters, d->diagnostic->technicalNote };
+        texts << d->keywords << d->diagnostic->remediation;
+        checkNoLeak( texts, d->id.toUtf8().constData() );
     }
 }

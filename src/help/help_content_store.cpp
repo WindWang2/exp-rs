@@ -180,6 +180,9 @@ HelpDescriptor HelpContentStore::parseEntry( const Json::Value &entry, QStringLi
         else {
             errors << QStringLiteral( "%1: diagnostic entry %2 has unknown retry value '%3' (expected none|manual|transient|derived)" )
                           .arg( context, d.id, retry );
+            // drop the entry entirely — a descriptor without a diagnostic
+            // payload would register as an empty shell page
+            d.id.clear();
             return d;
         }
         info.remediation = readStringList( entry, "remediation" );

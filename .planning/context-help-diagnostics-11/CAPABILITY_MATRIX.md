@@ -5,7 +5,7 @@
 | 命令→帮助知识 census | 双扫描器漂移（workflow 前缀漏扫）；10 命令疑似无页 | 单一共享 scanner（contracts/command_ref_scanner）；全命令页 + 反向孤儿 gate |
 | harness 错误码→诊断页 | 7 新码无 curated 页（gate 红） | 全码 curated（按 retryClassForCode 真值填 retry），census 绿 |
 | retry 字段语义 | 未知值静默降级 Derived | 未知值加载期报错（fail-visible）；数据修正 |
-| disabled reason 机器可读 | 静态 24 条 facts 表；表外空 facts 误报 available | ContextRules 派生全覆盖，facts↔enabled 零漂移，中文 label |
+| disabled reason 机器可读 | 静态 24 条 facts 表（与谓词集恰好一致）+ 独立 reason 文本 | requirementFacts 单一派生（facts=reason 同源）+ 机器 reason code；表删除后无双维护 |
 | GUI 错误→帮助 | 无接线（仅 agent lab） | 任务失败路径单点接线：code→whatHappened+remediation+helpId 指引 |
 | 生成 reference gate | 无（仅内存两次相等） | zero-diff：重生成 vs docs/generated/help 逐字节 gate |
 | i18n | SicnuDialogHelp NOOP 未入 ts；presenter 骨架硬编码中文未 tr() | NOOP 上下文→ts drift gate；骨架文案 en 源 + zh_CN ts；lupdate 范围一致 |

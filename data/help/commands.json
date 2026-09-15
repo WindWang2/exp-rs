@@ -866,7 +866,7 @@
       "stop workflow"
     ]
   },
-{
+  {
     "id": "command.workbench.cartography",
     "purpose": "打开制图工作台，从模板排版地图布局，并执行预检、修复与导出。",
     "prerequisites": [
@@ -885,7 +885,7 @@
       "cartography"
     ]
   },
-{
+  {
     "id": "command.workbench.visualAnalytics",
     "purpose": "打开可视化分析面板：有界采样的直方图、散点图与波段曲线，并支持联动筛选。",
     "prerequisites": [
@@ -902,7 +902,7 @@
       "visual analytics"
     ]
   },
-{
+  {
     "id": "command.workbench.operatorCatalog",
     "purpose": "浏览与检索 rs: 算子目录：按名称/模态筛选，标记最近使用与收藏。",
     "suggestedNextAction": "找到目标算子后在工作台或工作流中调用它",
@@ -916,7 +916,7 @@
       "operator catalog"
     ]
   },
-{
+  {
     "id": "command.cartography.compose",
     "purpose": "将 MapSpec 草稿编译为打印版面，并生成质量报告。",
     "prerequisites": [
@@ -934,7 +934,7 @@
       "compose"
     ]
   },
-{
+  {
     "id": "command.cartography.preflight",
     "purpose": "对当前 MapSpec 草稿运行确定性预检，输出问题清单。",
     "prerequisites": [
@@ -951,7 +951,7 @@
       "preflight"
     ]
   },
-{
+  {
     "id": "command.cartography.repair",
     "purpose": "对版面执行有界修复，并展示已应用/仍待处理的修复清单。",
     "prerequisites": [
@@ -968,7 +968,7 @@
       "repair"
     ]
   },
-{
+  {
     "id": "command.cartography.export",
     "purpose": "以原子方式导出版面为 png/pdf/svg，并生成 sha256 证据。",
     "prerequisites": [
@@ -985,7 +985,7 @@
       "export"
     ]
   },
-{
+  {
     "id": "command.workbench.classifyStudio",
     "purpose": "打开交互式分类/变化工作室（D15），绑定 MissionContext 的输入与结果引用。",
     "prerequisites": [
@@ -1003,7 +1003,7 @@
       "studio"
     ]
   },
-{
+  {
     "id": "command.workbench.georefDual",
     "purpose": "打开双画布联动的几何配准工作台（D14），采集 GCP 并将成果 Result 发布进 MissionContext。",
     "prerequisites": [
@@ -1021,7 +1021,7 @@
       "georef"
     ]
   },
-{
+  {
     "id": "command.workbench.ir2Pipeline",
     "purpose": "打开 IR 2.0 节点图工作流设计器（D17），与 MissionContext/Agent 共享工作流身份。",
     "prerequisites": [

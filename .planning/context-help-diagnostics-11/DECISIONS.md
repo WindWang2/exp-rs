@@ -20,7 +20,8 @@
 
 - 背景：AvailabilityFactsAdapter 用静态 24 条需求表，表外命令 explain() 空 facts → 误报 available。
 - 候选：(a) 继续扩静态表；(b) adapter 直接调用 ContextRules::unavailabilityReason（已有纯函数、按命令 id 分派）派生 facts。
-- 决定：**(b)**。ContextRules 是 enabled 状态的既有真值（CommandRegistry 也用它），adapter 从它派生 facts 保证 facts↔enabled 永不漂移；静态表删除。中文 label 在 ContextRules reason 已是中文，facts 层去掉英文 label 重建中文短语。
+- 决定：**(b)**。ContextRules 是 enabled 状态的既有真值（CommandRegistry 也用它），adapter 从它派生 facts 保证 facts↔enabled 永不漂移；静态表删除。
+- 更正（review #2 P1-1）：此前审计误判"静态表缺 workbench.obia"。实际 obia 在 command_defs.cpp **无** d.availability 谓词、恒可用（第 474 行命中属于 rasterTool lambda 定义）；旧 24 行表恰好完备。review 曾短暂给 obia 加 raster 特例，已按 review 撤销——facts 只镜像真实声明的谓词；corpus 对应场景改为正向断言"无谓词命令诚实报告可用"。requirementFacts 的真正价值是消除表↔reason 双维护与提供机器 reason code。
 - 状态：已执行（Phase 2 commit）。
 
 ## D4. GUI 错误路径接入 DiagnosticCatalog 的最小接触面

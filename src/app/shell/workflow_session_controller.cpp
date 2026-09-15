@@ -36,7 +36,8 @@ namespace
 // resolves to a curated diagnostics page, pin that topic on the panel (F1
 // over the failed panel opens it) and append the link to the shown text.
 // Messages without a curated code stay untouched — no guessing.
-QString withDiagnosticLink( QWidget *panel, const QString &error )
+QString withDiagnosticLink( QWidget *panel, const QString &error,
+                            const QString &hintTemplate )
 {
     if ( error.isEmpty() )
         return error;
@@ -46,7 +47,7 @@ QString withDiagnosticLink( QWidget *panel, const QString &error )
         return error;
     if ( panel )
         panel->setProperty( "helpId", helpId );
-    return QStringLiteral( "%1\n诊断帮助：%2（按 F1 查看处置建议）" ).arg( error, helpId );
+    return QStringLiteral( "%1\n%2" ).arg( error, hintTemplate.arg( helpId ) );
 }
 } // namespace
 
@@ -599,7 +600,8 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
     }
     else
     {
-      error = withDiagnosticLink( m_panel, error );
+      error = withDiagnosticLink( m_panel, error,
+                                   tr( "Diagnostic help: press F1 for guidance (topic %1)" ) );
     }
     emit stepStatusChanged( targetStepId, "failed" );
     if ( isPipelineJob )
@@ -690,6 +692,10 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
     }
     return;
   }
+
+  // clear a failure-pinned diagnostic topic so F1 no longer opens it
+  if ( m_panel )
+    m_panel->setProperty( "helpId", {} );
 
   const QString msg = outputPath.isEmpty()
                         ? tr( "Run Succeeded" )

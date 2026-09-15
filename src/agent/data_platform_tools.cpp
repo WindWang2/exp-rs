@@ -1221,7 +1221,8 @@ QVariantMap benchmarkInspect( const QVariantMap &args )
     sicnu::experiment::BenchmarkService service( store.get() );
     (void) service.hydrateFromStore();
 
-    const QString resultId = args.value( QStringLiteral( "result" ) ).toString();    if ( !resultId.isEmpty() )
+    const QString resultId = args.value( QStringLiteral( "result" ) ).toString();
+    if ( !resultId.isEmpty() )
     {
         const auto result = service.resultById( resultId );
         if ( !result )
