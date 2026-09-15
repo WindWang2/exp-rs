@@ -71,3 +71,42 @@
 - MCP resources/prompts 恒空 stub、notifications/tools/list_changed=false 保持
   （DECISIONS D-013/D-014，docs 已注明）。
 - legacy CLI flag parser 双格式保留（不重写，CAPABILITY_MATRIX 记录）。
+
+## Phase 6（本机实测，2026-09-16）
+
+构建：configure exit 0（dev-default + ccache + SKIP_PYTHON_BINDINGS + 本地 FETCHCONTENT 源）；
+全目标链 `cmake --build build-dev -j2 --target sicnu_agent sicnu_geo_rs_cli test_surface_parity
+test_surface_protocol test_cli_batch_manifest surface_mcp_host test_surface_e2e` exit 0。
+
+| 套件 | 命令（QT_QPA_PLATFORM=offscreen, build-dev/ 下） | exit | 结果 |
+|---|---|---|---|
+| test_cli_batch_manifest | `./tests/test_cli_batch_manifest` | 0 | 10/10 cases, 90 assertions |
+| test_surface_parity | `./tests/test_surface_parity` | 0 | 8/8 cases, 4227 assertions |
+| test_surface_protocol | `./tests/test_surface_protocol` | 0 | 10/10 cases, 69 assertions |
+| test_surface_e2e | `./tests/test_surface_e2e` | 0 | 1 case（场景×2）, 4502 assertions |
+| test_agent_tool_catalog（回归） | `./tests/test_agent_tool_catalog` | 0 | 9/9, 4540 assertions |
+| test_cli_commands_json（回归） | `./tests/test_cli_commands_json` | 0 | 9/9, 53 assertions |
+| test_mcp_server（回归） | `./tests/test_mcp_server` | 0 | 4348/4349 — 1 个 pre-existing 失败（见下） |
+| test_help_coverage（回归） | `./tests/test_help_coverage` | 0 | 6/8 — workbench.* 缺失为 pre-existing（见下） |
+
+### Pre-existing 失败对照（与本 diff 无关的证明）
+
+1. `McpServer run_workflow rejects malformed pipelines`（test_mcp_server:1156）：
+   期望抛错含 "Invalid pipeline" — 该文本在 mcp_server.cpp 的 run_workflow 路径**不存在**
+   （唯一出现处是 src/cli/rs_pipeline_runner.cpp:531 的 CLI 路径）。本 track 对 run_workflow /
+   validateWorkspacePaths / pipeline 解析的 diff 行数 = 0（`git diff origin/master...HEAD` 逐行
+   核对），故行为与 master 完全一致 → master 在本机即失败。
+2. `test_help_coverage` 的 workbench.* knowledge 缺失：open PR #1009 的 PR_BODY 已将
+   “test_help_coverage（workbench.* help 缺失）”列为 master 既有失败；本 diff 不触碰
+   src/help/**、data/help/** 或 workbench 域。
+
+## 修复记录（suite 首轮发现）
+
+- **P1（已修）**：artifact_read 在 SICNU_MCP_WORKSPACE 未设置时误拒绝对路径 —
+  absolutePathOutsideWorkspace 将空 root 视为 cwd；改为 env 未设置时跳过检查（与
+  validateWorkspacePaths 同策略），负路径测试补齐。
+- **P2（已修）**：collectSurfaceTools() 曾每次调用 initializeDefaults()，会清空运行时
+  custom tools — 已删除（catalog 单例构造函数已自初始化），投影变为严格只读；scale 测试
+  证明 custom tools 现在被保留。
+- 测试 oracle 修正 4 处（CLI snake_case 键、QJsonValue::toVariant、noop 终态进度=冻结值、
+  切片 "llo su"）——oracle 对齐真实契约，非放宽。
