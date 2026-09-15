@@ -161,13 +161,23 @@ const char *kRequiredDrivers[] = { "GTiff", "GPKG", "GeoJSON", "ESRI Shapefile",
 void checkGdal( EnvDoctorReport &report, const EnvCheckOptions &options )
 {
   ensureGdalRegistered();
-  const char *release = GDALVersionInfo( "RELEASE_NAME" );
+  // GDALVersionInfo("RELEASE_NAME") is not reliable across builds (observed
+  // returning garbage on GDAL 3.13); the "--version" string is the stable
+  // surface. Release = the token right after the leading "GDAL ".
   const char *versionFull = GDALVersionInfo( "--version" );
+  const std::string full( versionFull ? versionFull : "" );
+  std::string release;
+  if ( full.rfind( "GDAL ", 0 ) == 0 )
+  {
+    const std::string rest = full.substr( 5 );
+    const std::string::size_type space = rest.find( ' ' );
+    release = space == std::string::npos ? rest : rest.substr( 0, space );
+  }
   Json::Value detail;
-  detail["release"] = release ? release : "";
-  detail["full"] = versionFull ? versionFull : "";
-  emitFinding( report, "ok", "gdal.version",
-        std::string( "GDAL " ) + ( release ? release : "unknown" ), detail );
+  detail["release"] = release;
+  detail["full"] = full;
+  emitFinding( report, "ok", "gdal.version", "GDAL " + ( release.empty() ? full : release ),
+               detail );
 
   const int registered = GDALGetDriverCount();
   if ( registered <= 0 )
@@ -311,7 +321,11 @@ void checkProj( EnvDoctorReport &report, const EnvCheckOptions &options )
     return;
   }
   char *wkt = nullptr;
-  const bool exported = srs.exportToWkt( &wkt ) == OGRERR_NONE && wkt != nullptr;
+  bool exported = false;
+  {
+    QuietCplErrors quiet;
+    exported = srs.exportToWkt( &wkt ) == OGRERR_NONE && wkt != nullptr;
+  }
   if ( exported )
     CPLFree( wkt );
   if ( exported )

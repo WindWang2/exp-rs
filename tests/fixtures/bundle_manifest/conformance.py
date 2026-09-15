@@ -271,6 +271,7 @@ def main():
     parser.add_argument("--script", required=True,
                         help="path to scripts/verify_bundle_manifest.py")
     ns = parser.parse_args()
+    ns.script = os.path.abspath(ns.script)  # subprocesses run from elsewhere
     work = tempfile.mkdtemp(prefix="bundle-conformance-")
     try:
         for scenario in (scenario_valid, scenario_tamper, scenario_missing,

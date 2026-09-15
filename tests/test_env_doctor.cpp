@@ -210,9 +210,11 @@ TEST_CASE( "env doctor unicode roundtrip probe runs and cleans up",
 TEST_CASE( "env doctor runtime data resolution walks to a fixture marker",
            "[env_doctor][f19]" )
 {
-  std::filesystem::path fixture =
-    std::filesystem::temp_directory_path() / "sicnu-envcheck-fixture-f19" / "deep" / "deeper";
-  std::filesystem::create_directories( fixture / "data" );
+  std::filesystem::path root =
+    std::filesystem::temp_directory_path() / "sicnu-envcheck-fixture-f19";
+  std::filesystem::remove_all( root ); // residue from a failed previous run
+  std::filesystem::create_directories( root / "data" );
+  std::filesystem::path fixture = root / "deep" / "deeper";
 
   sicnu::geo::envcheck::EnvCheckOptions options;
   options.currentDir = fixture.string();
@@ -222,7 +224,8 @@ TEST_CASE( "env doctor runtime data resolution walks to a fixture marker",
   REQUIRE( (*data)["severity"].asString() == "ok" );
   std::filesystem::path resolvedRoot = (*data)["detail"]["resolved_root"].asString();
   REQUIRE( resolvedRoot.filename() == "sicnu-envcheck-fixture-f19" );
-  std::filesystem::remove_all( fixture.parent_path() );
+  std::filesystem::remove_all( root ); // pass-path cleanup (failure path is
+                                       // covered by the next run's pre-clean)
 }
 
 TEST_CASE( "env doctor reports a missing SICNU_DATA_DIR as warning with pointer",

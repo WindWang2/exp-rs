@@ -75,6 +75,8 @@ def read_elf_needed(path):
         idx = sections.index(dyn)
         off = idx * e_shentsize
         strtab_idx, = struct.unpack_from("<I", raw, off + 6)
+        if strtab_idx >= len(sections):
+            return None, "section link out of range"
         _, _, str_off, str_size = sections[strtab_idx]
         with open(path, "rb") as fh:
             fh.seek(str_off)
@@ -101,7 +103,7 @@ def read_elf_needed(path):
             if tag == 1:  # DT_NEEDED
                 needed.append(cstr(strtab, val))
         return needed, "elf"
-    except (OSError, struct.error) as exc:
+    except (OSError, struct.error, IndexError) as exc:
         return None, "parse error: %s" % exc
 
 
