@@ -100,6 +100,8 @@ VectorTargetCheck checkVectorWriteTarget( const std::string &driver )
     return check;
   }
 
+  const char *rasterCap = GDALGetMetadataItem( handle, GDAL_DCAP_RASTER, nullptr );
+  check.alsoRaster = rasterCap && rasterCap[0];
   check.usable = true;
   if ( const FormatProfile *profile = certifiedVectorProfile( driver ) )
   {
@@ -107,6 +109,17 @@ VectorTargetCheck checkVectorWriteTarget( const std::string &driver )
     check.profileId = profile->id;
   }
   return check;
+}
+
+bool inputOpensAsRaster( const std::string &source )
+{
+  ensureGdalRegistered();
+  CPLErrorStateBackuper errorBackuper( CPLQuietErrorHandler );
+  GDALDatasetH probe = GDALOpenEx( source.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
+  if ( !probe )
+    return false;
+  GDALClose( probe );
+  return true;
 }
 
 Json::Value vectorInterchangeCapabilities()
@@ -134,6 +147,7 @@ Json::Value vectorInterchangeCapabilities()
     const VectorTargetCheck check = checkVectorWriteTarget( driver );
     Json::Value entry = check.toJson();
     entry["driver"] = driver;
+    entry["also_raster"] = check.alsoRaster;
     entries.append( entry );
   }
   report["drivers"] = entries;

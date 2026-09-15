@@ -32,6 +32,9 @@ struct VectorTargetCheck
 {
     bool usable = false;
     bool certifiedProfile = false; ///< backed by a FormatRegistry vector profile
+    /// Driver is ALSO raster-capable (DCAP_RASTER): netCDF/PDF/MBTiles/...
+    /// Routing for such drivers must consult the input's kind.
+    bool alsoRaster = false;
     std::string profileId;         ///< canonical profile id when certified
     std::string reasonCode;        ///< set when !usable
     std::string message;
@@ -46,6 +49,11 @@ VectorTargetCheck checkVectorWriteTarget( const std::string &driver );
 /// driver the registry knows (plus the canonical interchange set) — present?
 /// create-capable? certified? Redacted, bounded.
 Json::Value vectorInterchangeCapabilities();
+
+/// True when `source` opens read-only as a RASTER dataset (header-only
+/// detection; the handle is closed immediately, no pixel reads). Used to
+/// route dual-capability drivers (netCDF, PDF, ...) by the input's kind.
+bool inputOpensAsRaster( const std::string &source );
 
 } // namespace sicnu::geo::io
 

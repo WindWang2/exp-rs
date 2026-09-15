@@ -31,6 +31,10 @@ namespace
 /// refuse foreign versions instead of guessing (InvalidMetadata).
 constexpr int kManifestSchemaVersion = 1;
 
+/// A manifest is a small JSON sidecar; anything bigger is a planted file,
+/// not provenance (memory-DoS guard for the read path).
+constexpr std::uintmax_t kMaxManifestBytes = 16ull * 1024ull * 1024ull;
+
 constexpr std::size_t kDigestChunkBytes = 1024 * 1024;
 
 std::int64_t nowEpochNanos()
@@ -128,6 +132,8 @@ Json::Value readFinalizeManifest( const std::string &mainPath )
   const std::string manifestPath = finalizeManifestPath( mainPath );
   if ( !atomic_fs::fileExists( manifestPath ) )
     throw GeoError( ErrorCode::NotFound, "finalize manifest missing for " + mainPath );
+  if ( atomic_fs::fileSize( manifestPath ) > kMaxManifestBytes )
+    throw GeoError( ErrorCode::InvalidMetadata, "finalize manifest exceeds the size cap; refusing to read" );
   std::ifstream file( manifestPath, std::ios::binary );
   if ( !file )
     throw GeoError( ErrorCode::IoError, "manifest: cannot open " + manifestPath );
@@ -140,10 +146,12 @@ Json::Value readFinalizeManifest( const std::string &mainPath )
     details["parse_error"] = error;
     throw GeoError( ErrorCode::InvalidMetadata, "finalize manifest is not valid JSON", details );
   }
-  if ( !manifest.isObject() || manifest["schema_version"].asInt() != kManifestSchemaVersion )
+  if ( !manifest.isObject() || !manifest["schema_version"].isInt()
+       || manifest["schema_version"].asInt() != kManifestSchemaVersion )
   {
     Json::Value details;
-    details["found_version"] = manifest["schema_version"].asInt();
+    if ( manifest["schema_version"].isInt() )
+      details["found_version"] = manifest["schema_version"].asInt();
     details["expected_version"] = kManifestSchemaVersion;
     throw GeoError( ErrorCode::InvalidMetadata, "finalize manifest schema version mismatch", details );
   }
@@ -201,6 +209,12 @@ ManifestVerifyReport verifyDataset( const std::string &mainPath, bool allowMissi
       addIssue( "manifest_missing", "finalize manifest absent; integrity is unverifiable" );
     else
       addIssue( "manifest_invalid", error.what() );
+  }
+  catch ( const std::exception & )
+  {
+    // Foreign-typed JSON values (jsoncpp LogicError etc.) are a malformed
+    // manifest from the caller's point of view — never an escaping throw.
+    addIssue( "manifest_invalid", "finalize manifest is malformed (foreign JSON types)" );
   }
 
   const std::string declaredDigest = manifest["dataset_sha256"].asString();

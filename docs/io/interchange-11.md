@@ -48,7 +48,9 @@ driver/shape. After a crash:
   journal removed.
 * `sweepOrphans(directory, remove)` reports `".tmp"` staging files, their
   sidecars and stale ledgers/manifests with redacted display paths; removal
-  is explicit opt-in (`remove=true`).
+  is explicit opt-in (`remove=true`). A transaction whose ledger is readable
+  AND whose staged file still exists is reported as `live_staged` and is
+  NEVER swept — an attachable transaction survives any sweep.
 
 This is a library seam for the execution/agent runtime — it is NOT a
 scheduler, and chunk-level resume stays in `src/runtime/chunk` (G01 domain).
@@ -101,6 +103,15 @@ reason, remote write targets are a typed refusal (`remote_write_offline_policy`)
 read-only projection kinds (`vrt://`, STAC) cannot be write targets, output
 directories must already exist (no implicit directory creation), and every
 error surface carries the credential-redacted `display()` form.
+
+## Republishing a manifest-bearing dataset
+
+An existing `<name>.sicnu-manifest.json` describes the bytes that were
+published WITH it. Overwriting the dataset through a pipeline that does not
+write a fresh manifest (e.g. a plain `io:translate` onto the same path)
+leaves the old sidecar in place, and `io:verify_dataset` will then report a
+digest mismatch — fail-closed by design. Republish through a manifest-aware
+path (or remove the stale sidecar) when provenance matters.
 
 ## Tests
 

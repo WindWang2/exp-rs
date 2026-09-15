@@ -251,7 +251,7 @@ TEST_CASE( "discardAttached removes staging and journal", "[io][ledger][discard]
 
 TEST_CASE( "sweepOrphans finds, reports and (opt-in) removes staging leftovers", "[io][ledger][sweep]" )
 {
-  SECTION( "dry run reports without deleting" )
+  SECTION( "dry run reports without deleting; a live transaction is reported, not condemned" )
   {
     const std::string dir = scratch( "sweep-dry" );
     const std::string staged = makeStagedRaster( dir, "out.11.22.tmp.tif" );
@@ -262,25 +262,29 @@ TEST_CASE( "sweepOrphans finds, reports and (opt-in) removes staging leftovers",
     recordStaged( stale );
 
     const std::vector<StrayStaging> strays = sweepOrphans( dir, /*remove=*/false );
-    // staged main + TWO stale ledgers (out.tif and older.tif mains are absent).
+    INFO( "count=" << strays.size() );
+    // staged main + LIVE ledger (staged file alive) + stale ledger.
     CHECK( strays.size() == 3 );
     bool sawStagedFile = false;
+    bool sawLive = false;
     bool sawStaleLedger = false;
     for ( const StrayStaging &stray : strays )
     {
       sawStagedFile |= stray.kind == "staged_file";
+      sawLive |= stray.kind == "live_staged";
       sawStaleLedger |= stray.kind == "stale_ledger";
       CHECK( !stray.removed );
       CHECK( stray.display.find( dir ) != std::string::npos ); // local paths display as themselves
     }
     CHECK( sawStagedFile );
+    CHECK( sawLive );
     CHECK( sawStaleLedger );
     // Nothing deleted.
     CHECK( atomic_fs::fileExists( staged ) );
     CHECK( atomic_fs::fileExists( stageLedgerPath( record.finalPath ) ) );
   }
 
-  SECTION( "remove=true consumes the leftovers" )
+  SECTION( "remove=true consumes the leftovers but never a live transaction" )
   {
     const std::string dir = scratch( "sweep-remove" );
     const std::string staged = makeStagedRaster( dir, "out.11.22.tmp.tif" );
@@ -288,15 +292,25 @@ TEST_CASE( "sweepOrphans finds, reports and (opt-in) removes staging leftovers",
     recordStaged( record );
 
     const std::vector<StrayStaging> strays = sweepOrphans( dir, /*remove=*/true );
-    // staged main + its stale ledger (this section journals one target only).
+    // staged main + its ledger (live: the staged file still exists) — an
+    // ATTACHABLE transaction is never swept, review F6.
     REQUIRE( strays.size() == 2 );
     for ( const StrayStaging &stray : strays )
-      CHECK( stray.removed );
-    CHECK( !atomic_fs::fileExists( staged ) );
-    CHECK( !atomic_fs::fileExists( stageLedgerPath( record.finalPath ) ) );
+      CHECK_FALSE( stray.removed ); // claimed by a live ledger on both counts
+    CHECK( atomic_fs::fileExists( staged ) );
+    CHECK( atomic_fs::fileExists( stageLedgerPath( record.finalPath ) ) );
+    CHECK( readStageLedger( record.finalPath ).state == "staged" );
+    // ... and the transaction is still attachable after the sweep.
+    CHECK( attachExisting( record.finalPath ).attachable );
 
-    // Idempotent: second sweep is empty.
-    CHECK( sweepOrphans( dir, true ).empty() );
+    // Once the staged file disappears (externally), the ledger becomes
+    // genuinely stale and remove=true consumes it.
+    atomic_fs::removeFileQuiet( staged );
+    const std::vector<StrayStaging> second = sweepOrphans( dir, /*remove=*/true );
+    REQUIRE( second.size() == 1 );
+    CHECK( second.front().kind == "stale_ledger" );
+    CHECK( second.front().removed );
+    CHECK( !atomic_fs::fileExists( stageLedgerPath( record.finalPath ) ) );
   }
 
   SECTION( "healthy published dataset + manifest is never swept" )
@@ -317,6 +331,27 @@ TEST_CASE( "sweepOrphans finds, reports and (opt-in) removes staging leftovers",
     CHECK( atomic_fs::fileExists( record.finalPath ) );
     CHECK( atomic_fs::fileExists( record.finalPath + ".sicnu-manifest.json" ) );
   }
+}
+
+TEST_CASE( "recordStaged refuses a staged path outside the target directory", "[io][ledger][negative]" )
+{
+  const std::string dir = scratch( "foreign-dir" );
+  const std::string otherDir = scratch( "foreign-other" );
+  const std::string staged = makeStagedRaster( otherDir, "out.1.2.tmp.tif" );
+  StageRecord record = journal( dir, "out.tif", staged ); // staged lives in another directory
+  try
+  {
+    recordStaged( record );
+    FAIL( "a foreign-directory staged path must be refused" );
+  }
+  catch ( const GeoError &error )
+  {
+    CHECK( error.code() == ErrorCode::InvalidArgument );
+  }
+  // The same transaction with the staged file next to the target is legal.
+  record.stagedPath = dir + "/out.1.2.tmp.tif";
+  recordStaged( record );
+  CHECK( atomic_fs::fileExists( stageLedgerPath( record.finalPath ) ) );
 }
 
 TEST_CASE( "staging ledger tolerates Unicode target names", "[io][ledger][unicode]" )

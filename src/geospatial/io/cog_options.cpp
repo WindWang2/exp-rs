@@ -120,6 +120,9 @@ CogProductionPlan planCogProduction( const CogProductionOptions &settings )
     optionsArray.append( optionEntry( "OVERVIEWS", "AUTO", "preset",
                                       "driver-chosen overview stack, tiled per the COG spec" ) );
   }
+  plan.explanation["overviews"]["mode"] = settings.buildOverviews ? "AUTO" : "NONE";
+  plan.explanation["overviews"]["levels_hint"] = "driver-chosen under AUTO; build explicitly with "
+                                                 "io:build_overviews after publish for custom levels";
 
   // 3) Determinism: pin worker count (and DEFLATE level where DEFLATE).
   if ( settings.deterministic )

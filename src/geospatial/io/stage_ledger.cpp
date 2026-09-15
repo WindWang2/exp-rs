@@ -37,6 +37,9 @@ namespace
 
 constexpr int kLedgerSchemaVersion = 1;
 
+/// A ledger is a small JSON sidecar; anything bigger is planted (F8 guard).
+constexpr std::uintmax_t kMaxLedgerBytes = 16ull * 1024ull * 1024ull;
+
 std::int64_t nowEpochNanos()
 {
   const auto now = std::chrono::system_clock::now().time_since_epoch();
@@ -127,6 +130,10 @@ StageRecord stageRecordFromJson( const Json::Value &json )
 {
   if ( !json.isObject() )
     throw GeoError( ErrorCode::InvalidMetadata, "stage ledger entry is not a JSON object" );
+  if ( !json["schema_version"].isInt() )
+    throw GeoError( ErrorCode::InvalidMetadata, "stage ledger schema_version has a foreign type" );
+  if ( !json["run_id"].isString() || !json["final_path"].isString() || !json["staged_path"].isString() )
+    throw GeoError( ErrorCode::InvalidMetadata, "stage ledger identity fields have foreign types" );
   if ( json["schema_version"].asInt() != kLedgerSchemaVersion )
   {
     Json::Value details;
@@ -168,6 +175,16 @@ void recordStaged( const StageRecord &record )
     throw GeoError( ErrorCode::InvalidArgument, "stage ledger: run_id is required" );
   if ( record.finalPath.empty() || record.stagedPath.empty() )
     throw GeoError( ErrorCode::InvalidArgument, "stage ledger: final and staged paths are required" );
+  // Invariant (review F7): staging lives NEXT TO the target — the atomic
+  // publish is a same-directory rename, and a foreign-directory "staged"
+  // path would let a journal rename an arbitrary file onto the target.
+  {
+    const fs::path finalParent = fs::u8path( record.finalPath ).parent_path().lexically_normal();
+    const fs::path stagedParent = fs::u8path( record.stagedPath ).parent_path().lexically_normal();
+    if ( finalParent != stagedParent )
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "stage ledger: staged path must live in the target's directory" );
+  }
   StageRecord journaled = record;
   journaled.state = "staged";
   journaled.updatedAtUtc = instantToUtcString( nowEpochNanos() );
@@ -179,6 +196,8 @@ StageRecord readStageLedger( const std::string &finalPath )
   const std::string ledgerPath = stageLedgerPath( finalPath );
   if ( !atomic_fs::fileExists( ledgerPath ) )
     throw GeoError( ErrorCode::NotFound, "stage ledger missing for " + finalPath );
+  if ( atomic_fs::fileSize( ledgerPath ) > kMaxLedgerBytes )
+    throw GeoError( ErrorCode::InvalidMetadata, "stage ledger exceeds the size cap; refusing to read" );
   std::ifstream file( ledgerPath, std::ios::binary );
   if ( !file )
     throw GeoError( ErrorCode::IoError, "stage ledger: cannot open " + ledgerPath );
@@ -230,6 +249,11 @@ AttachCheck attachExisting( const std::string &finalPath )
   {
     const bool missing = error.code() == ErrorCode::NotFound;
     issues.push_back( AttachIssue{ missing ? "ledger_missing" : "ledger_invalid", error.what() } );
+    return attachCheckFrom( record, issues );
+  }
+  catch ( const std::exception & )
+  {
+    issues.push_back( AttachIssue{ "ledger_invalid", "stage ledger is malformed (foreign JSON types)" } );
     return attachCheckFrom( record, issues );
   }
 
@@ -398,7 +422,11 @@ std::vector<StrayStaging> sweepOrphans( const std::string &directory, bool remov
     }
   }
 
-  // Pass 3: ledger/manifest sidecars whose dataset main file is gone.
+  // Pass 3: ledger/manifest sidecars whose dataset main file is gone. A
+  // ledger that still describes an OPEN transaction with a LIVING staged
+  // file is a LIVE transaction (another process may be mid-run): it is
+  // reported as such and never swept.
+  std::set<std::string> liveStagedPaths;
   static const char *kOurSuffixes[] = { kStageLedgerSuffix, kFinalizeManifestSuffix };
   for ( const fs::directory_entry &entry : fs::directory_iterator( fs::u8path( directory ) ) )
   {
@@ -412,14 +440,43 @@ std::vector<StrayStaging> sweepOrphans( const std::string &directory, bool remov
     {
       if ( !endsWith( name, suffix ) )
         continue;
+      if ( suffix != kStageLedgerSuffix )
+      {
+        const std::string mainPath = directory + "/" + name.substr( 0, name.size() - std::strlen( suffix ) );
+        if ( atomic_fs::fileExists( mainPath ) || reported.count( directory + "/" + name ) )
+          break; // healthy sidecar (or already reported as staged sidecar)
+        reported.insert( directory + "/" + name );
+        StrayStaging stray;
+        stray.path = directory + "/" + name;
+        stray.display = ResourceUri::parse( stray.path ).display();
+        stray.kind = "stale_manifest";
+        strays.push_back( stray );
+        break;
+      }
+      // Ledger: staleness requires the staged file to be gone too. A ledger
+      // whose staged file still lives is a transaction in flight.
       const std::string mainPath = directory + "/" + name.substr( 0, name.size() - std::strlen( suffix ) );
       if ( atomic_fs::fileExists( mainPath ) || reported.count( directory + "/" + name ) )
-        break; // healthy sidecar (or already reported as staged sidecar)
+        break;
       reported.insert( directory + "/" + name );
       StrayStaging stray;
       stray.path = directory + "/" + name;
       stray.display = ResourceUri::parse( stray.path ).display();
-      stray.kind = suffix == kStageLedgerSuffix ? "stale_ledger" : "stale_manifest";
+      try
+      {
+        const StageRecord live = readStageLedger( mainPath );
+        if ( live.state == "staged" && atomic_fs::fileExists( live.stagedPath ) )
+        {
+          liveStagedPaths.insert( live.stagedPath );
+          stray.kind = "live_staged";
+        }
+        else
+          stray.kind = "stale_ledger";
+      }
+      catch ( const GeoError & )
+      {
+        stray.kind = "stale_ledger"; // unreadable ledger protects nothing
+      }
       strays.push_back( stray );
       break;
     }
@@ -429,9 +486,15 @@ std::vector<StrayStaging> sweepOrphans( const std::string &directory, bool remov
   {
     for ( StrayStaging &stray : strays )
     {
+      if ( stray.kind == "live_staged"
+           || ( stray.kind == "staged_file" && liveStagedPaths.count( stray.path ) ) )
+      {
+        stray.removed = false; // a living transaction is never swept
+        continue;
+      }
       if ( stray.kind == "staged_file" )
         atomic_fs::discardStaged( stray.path ); // removes the sidecar family too
-      else
+      else if ( stray.kind != "live_staged" )
         atomic_fs::removeFileQuiet( stray.path );
       stray.removed = !atomic_fs::fileExists( stray.path );
     }

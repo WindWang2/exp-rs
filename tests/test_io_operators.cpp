@@ -11,6 +11,7 @@
 #include "geospatial/metadata/canonical_metadata.h"
 #include "geospatial/io/finalize_manifest.h"
 #include "geospatial/io/stage_ledger.h"
+#include "geospatial/io/vector_interchange.h"
 #include "geospatial/util/atomic_fs.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -564,4 +565,42 @@ TEST_CASE( "io:subdatasets refuses plain rasters through the operator seam",
   {
     CHECK( error.code() == sicnu::operators::ErrorCode::InvalidParameter );
   }
+}
+
+TEST_CASE( "dual-capability drivers route by input kind (netCDF raster export preserved)",
+           "[io][operators][routing]" )
+{
+  ensureGdal();
+  // The pre-11.0 hard-coded list sent netCDF to the raster kernel; the first
+  // capability gate sent it to the vector kernel and broke "GeoTIFF ->
+  // NetCDF raster export". Dual-capability drivers must route by the INPUT.
+  GDALDriverH nc = GDALGetDriverByName( "netCDF" );
+  if ( !nc )
+  {
+    WARN( "netCDF driver not available; routing proof skipped (profile stays honest)" );
+    return;
+  }
+  const sicnu::geo::io::VectorTargetCheck check = sicnu::geo::io::checkVectorWriteTarget( "netCDF" );
+  if ( !check.usable )
+  {
+    WARN( "netCDF not create-capable in this build; routing proof skipped" );
+    return;
+  }
+  CHECK( check.alsoRaster ); // the premise of the dual-capability hazard
+
+  const std::string dir = scratch( "convert_routing" );
+  const std::string src = makeTinyRaster( dir, "src.tif" );
+  auto op = sicnu::operators::RSOperatorRegistry::instance().create( "io:convert_format" );
+  REQUIRE( op );
+  sicnu::operators::RSOperatorContext context;
+  const std::string out = ( fs::path( dir ) / "out.nc" ).string();
+  const Json::Value result = op->execute( [ & ] {
+    Json::Value params;
+    params["input"] = src;
+    params["output"] = out;
+    params["driver"] = "netCDF";
+    return params;
+  }(), context );
+  CHECK( result["output"].asString() == out );
+  CHECK( sicnu::geo::atomic_fs::fileExists( out ) );
 }

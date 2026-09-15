@@ -221,9 +221,10 @@ MetadataPatchReport applyMetadataPatch( const std::string &path, const std::vect
     if ( isNumericField( patch.field ) )
     {
       std::size_t consumed = 0;
+      double numeric = 0;
       try
       {
-        std::stod( patch.value, &consumed );
+        numeric = std::stod( patch.value, &consumed );
       }
       catch ( const std::exception & )
       {
@@ -231,7 +232,14 @@ MetadataPatchReport applyMetadataPatch( const std::string &path, const std::vect
       }
       if ( consumed != patch.value.size() )
         throw GeoError( ErrorCode::InvalidArgument, "patch: trailing characters in numeric value" );
+      // Phase-1 legality: NaN is only a nodata value — refuse here so a bad
+      // batch can never reach the open-for-update phase.
+      if ( std::isnan( numeric ) && patch.field != "nodata" )
+        throw GeoError( ErrorCode::InvalidArgument, "patch: NaN is only legal for the nodata field" );
     }
+    if ( patch.field == "color_interpretation" && patch.value != "Undefined"
+         && GDALGetColorInterpretationByName( patch.value.c_str() ) == GCI_Undefined )
+      throw GeoError( ErrorCode::InvalidArgument, "patch: unknown color interpretation '" + patch.value + "'" );
     if ( patch.field == "acquisition_time" )
     {
       if ( !parseIso8601Instant( patch.value ).ok )
@@ -254,20 +262,27 @@ MetadataPatchReport applyMetadataPatch( const std::string &path, const std::vect
     throw GeoError( ErrorCode::OpenFailed, "patch: cannot open dataset for update", details );
   }
 
-  for ( const MetadataPatch &patch : patches )
+  try
   {
-    if ( patch.band > 0 )
+    for ( const MetadataPatch &patch : patches )
     {
-      GDALRasterBand *band = dataset->GetRasterBand( patch.band );
-      if ( !band )
+      if ( patch.band > 0 )
       {
-        GDALClose( dataset );
-        throw GeoError( ErrorCode::WriteFailed, "patch: band vanished during transaction" );
+        GDALRasterBand *band = dataset->GetRasterBand( patch.band );
+        if ( !band )
+          throw GeoError( ErrorCode::WriteFailed, "patch: band vanished during transaction" );
+        applyBandPatch( band, patch );
       }
-      applyBandPatch( band, patch );
+      else
+        applyDatasetPatch( dataset, patch );
     }
-    else
-      applyDatasetPatch( dataset, patch );
+  }
+  catch ( ... )
+  {
+    // The contract promises a closed dataset on every failure path — never
+    // a leaked handle.
+    GDALClose( dataset );
+    throw;
   }
   // Flush errors must fail the transaction.
   if ( dataset->FlushCache() != CE_None )
@@ -349,16 +364,32 @@ MetadataPatchReport applyMetadataPatch( const std::string &path, const std::vect
       patchFields.append( field );
     patchEntry["fields"] = patchFields;
     history.append( patchEntry );
+    const bool hadStamp = manifest.isMember( "finalized_utc" );
+    const Json::Value originalStamp = manifest["finalized_utc"];
     manifest = refreshed;
+    if ( hadStamp )
+      manifest["finalized_utc"] = originalStamp; // publish time survives the patch
     manifest["patches"] = history;
     writeFinalizeManifest( path, manifest );
     report.manifestUpdated = true;
   }
-  catch ( const GeoError & )
+  catch ( const GeoError &error )
   {
-    // No manifest (manifest_missing): nothing to refresh — patches still
-    // succeeded. Any other manifest error surfaces the same way.
-    report.warnings.push_back( "no finalize manifest present; digest provenance not refreshed" );
+    // Absent manifest: nothing to refresh — patches still succeeded. Any
+    // other manifest problem leaves the OLD digest in place, which
+    // verifyDataset will report as a digest mismatch (fail-closed), so name
+    // the situation honestly.
+    if ( error.code() == ErrorCode::NotFound )
+      report.warnings.push_back( "no finalize manifest present; digest provenance not refreshed" );
+    else
+      report.warnings.push_back( "finalize manifest present but unreadable; stale digest kept and will "
+                                 "report as a mismatch — verify with io:verify_dataset" );
+  }
+  catch ( const std::exception & )
+  {
+    // Foreign-typed JSON values must never escape past an applied patch.
+    report.warnings.push_back( "finalize manifest malformed; stale digest kept and will report as a "
+                                "mismatch — verify with io:verify_dataset" );
   }
 
   report.applied = true;

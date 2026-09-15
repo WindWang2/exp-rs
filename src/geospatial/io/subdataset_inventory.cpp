@@ -35,7 +35,11 @@ Json::Value entryToJson( const SubdatasetEntry &entry )
 {
   Json::Value json;
   json["index"] = entry.index;
-  json["name"] = entry.name; // GDAL SDS names carry no credentials (local payload path)
+  // A remote SDS name embeds the full connection string (possibly
+  // credentials or signed query values): only the redacted display form
+  // crosses the JSON boundary. Selection stays index-based.
+  if ( !entry.remoteSource )
+    json["name"] = entry.name;
   json["description"] = entry.description;
   json["display"] = entry.display;
   json["kind"] = entry.kind;
@@ -54,7 +58,8 @@ Json::Value SubdatasetEntry::toJson() const
 Json::Value SubdatasetInventory::toJson() const
 {
   Json::Value json;
-  json["source"] = source;
+  if ( !ResourceUri::parse( source ).isRemote() )
+    json["source"] = source;
   json["source_display"] = sourceDisplay;
   json["count"] = static_cast<Json::ArrayIndex>( entries.size() );
   json["truncated"] = truncated;
@@ -128,6 +133,7 @@ SubdatasetInventory inventorySubdatasets( const std::string &source, int maxEntr
     entry.kind = resourceKindName( uri.kind );
     entry.display = uri.display();
     entry.embeddedLocalPath = uri.embeddedLocalPath();
+    entry.remoteSource = uri.isRemote();
     inventory.entries.push_back( entry );
   }
 

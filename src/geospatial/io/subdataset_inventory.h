@@ -43,7 +43,8 @@ struct SubdatasetEntry
     std::string display;          ///< redacted display form of the name
     std::string kind;             ///< ResourceUri kind name for the selector
     std::string embeddedLocalPath; ///< embedded local payload when present
-    Json::Value toJson() const;
+    bool remoteSource = false;    ///< true when the selector embeds a remote URL
+    Json::Value toJson() const;   ///< omits `name` for remote selectors (credentials)
 };
 
 struct SubdatasetInventory
