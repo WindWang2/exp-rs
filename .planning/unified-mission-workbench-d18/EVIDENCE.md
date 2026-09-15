@@ -74,10 +74,10 @@ ctest -R 'test_mission|test_ir2_port_param' -V
 | a640a677 | feat(d18): bind IR2 dock to RSOperatorRegistry NodeExecutor |
 | 9fbf0789 | docs(d18): evidence, decisions, review, PR body for operator-bind |
 | a4d26573 | feat(d18): multi-input IR2 port→param mapping |
-| (pending) | docs(d18): evidence, decisions, review, PR body for port-map |
+| 8ef925a9 | docs(d18): evidence, decisions, review, PR body for port-map |
 
 ## PR
 
 - Draft: https://github.com/WindWang2/exp-rs/pull/991
 - Not merged (per GOAL).
-- Tip SHA: filled after push.
+- Tip SHA after port-map docs: `8ef925a9` (includes docs commit).
