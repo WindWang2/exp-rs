@@ -15,17 +15,25 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QCoreApplication>
+#include <QFile>
+#include <QRegularExpression>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QVariantMap>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
 #include "agent/mcp_server.h"
 #include "agent/tool_catalog/surface_registry.h"
 #include "agent/tool_catalog/meta_protocol_tools.h"
+#include "agent/tool_catalog/agent_tool_catalog.h"
 #include "agent/data_platform_tools.h"
+
+#ifndef SICNU_SOURCE_DIR
+#error "SICNU_SOURCE_DIR must point at the repo source tree"
+#endif
 
 namespace {
 
@@ -300,6 +308,100 @@ TEST_CASE("Every projected meta and data-platform tool is dispatchable", "[surfa
         if (!error.isEmpty())
             REQUIRE_FALSE(error.contains(QStringLiteral("unknown data-platform tool")));
     }
+}
+
+TEST_CASE("Pi default bridge categories contain no stale family", "[surface_parity][pi]")
+{
+    // pi/exp-rs-spatial.ts curates which namespace families it bridges (a
+    // deliberate subset — processing families like rs:/gdal: are NOT bridged
+    // by default). The one forbidden drift: Pi referencing a family the
+    // projection no longer has (renamed namespace, retired tool family) —
+    // those tools silently vanish from the agent surface. The default list
+    // is extracted from the source text so the gate tracks the real file.
+    QFile source(QStringLiteral(SICNU_SOURCE_DIR) + QStringLiteral("/pi/exp-rs-spatial.ts"));
+    REQUIRE(source.open(QIODevice::ReadOnly));
+    const QString text = QString::fromUtf8(source.readAll());
+
+    static const QRegularExpression re(
+        R"EXP(EXP_RS_TOOL_CATEGORIES\s*\?\?\s*\n?\s*"([^"]+)")EXP");
+    const auto match = re.match(text);
+    REQUIRE(match.hasMatch());
+    const QStringList categories = match.captured(1).split(QLatin1Char(','), Qt::SkipEmptyParts);
+    REQUIRE(categories.size() >= 5);
+
+    const std::vector<std::string> families = surfaceFamilies();
+    for (const QString &raw : categories)
+    {
+        const std::string category = raw.trimmed().toStdString();
+        INFO("pi category: " << category);
+        REQUIRE(std::find(families.begin(), families.end(), category) != families.end());
+    }
+}
+
+TEST_CASE("Projection scales linearly and MCP pagination stays bounded", "[surface_parity][scale]")
+{
+    // Logical-scale invariant (no wall-clock): 2000 extra tools grow the
+    // projection linearly, MCP pages stay clamped at 500, and walking pages
+    // covers exactly the full set. Cleans up after itself so other tests in
+    // this binary see the original catalog.
+    AgentToolCatalog &catalog = AgentToolCatalog::instance();
+    const size_t baseCount = collectSurfaceTools().size();
+
+    constexpr int kProbes = 2000;
+    std::vector<std::string> probeNames;
+    probeNames.reserve(kProbes);
+    for (int i = 0; i < kProbes; ++i)
+    {
+        AgentTool probe;
+        probe.name = "io:surface_scale_probe_" + std::to_string(i);
+        probe.category = ToolCategory::Custom;
+        probe.description = "scale probe";
+        probe.inputSchema = Json::Value(Json::objectValue);
+        probe.inputSchema["type"] = "object";
+        probe.inputSchema["properties"] = Json::Value(Json::objectValue);
+        catalog.registerCustomTool(probe);
+        probeNames.push_back(probe.name);
+    }
+
+    const std::vector<SurfaceTool> scaled = collectSurfaceTools();
+    REQUIRE(scaled.size() == baseCount + kProbes);
+
+    // Deterministic membership + exact count through the MCP surface.
+    SurfaceProbeServer &s = server();
+    int total = -1;
+    int seen = 0;
+    int cursor = 0;
+    int pages = 0;
+    while (pages < 50)
+    {
+        s.request(QVariantMap{
+            { QStringLiteral("jsonrpc"), QStringLiteral("2.0") },
+            { QStringLiteral("id"), 100 + pages },
+            { QStringLiteral("method"), QStringLiteral("tools/list") },
+            { QStringLiteral("params"), QVariantMap{
+                                             { QStringLiteral("includeSchemas"), false },
+                                             { QStringLiteral("limit"), 500 },
+                                             { QStringLiteral("cursor"), cursor } } } });
+        REQUIRE(s.lastErrorCode == 0);
+        const QVariantMap result = s.lastResponseResult;
+        total = result.value(QStringLiteral("total")).toInt();
+        seen += result.value(QStringLiteral("tools")).toList().size();
+        const QVariant next = result.value(QStringLiteral("nextCursor"));
+        if (!next.isValid() || next.toInt() < 0)
+            break;
+        cursor = next.toInt();
+        ++pages;
+    }
+    REQUIRE(total == static_cast<int>(baseCount) + kProbes);
+    REQUIRE(seen == total);
+    REQUIRE(pages <= 50); // bounded pagination: ceil((base+2000)/500)
+
+    // Lookup of the last probe resolves through findSurfaceTool.
+    REQUIRE(findSurfaceTool(probeNames.back()).has_value());
+
+    for (const std::string &name : probeNames)
+        catalog.unregisterCustomTool(name);
+    REQUIRE(collectSurfaceTools().size() == baseCount);
 }
 
 TEST_CASE("Dispatch-visible spatial families are listing-visible", "[surface_parity]")

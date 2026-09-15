@@ -72,3 +72,18 @@ D-013 **不实现 notifications/tools/list_changed**：catalog 运行时突变�
 D-014 **CHANGELOG/.gitignore/tests/CMakeLists.txt 最后 integration commit**：三处均为 open
 PR #1008/#1009 触碰的共享文件；append-only、最小 diff、推迟到 Phase 8 前一次性提交，
 降低 rebase 冲突面。
+
+D-015 **Pi parity gate = 反向漂移检查（修订 D-012 的初版设想）**：pi/exp-rs-spatial.ts 的
+`EXP_RS_TOOL_CATEGORIES` 默认表是对 surface 家族的**有策展子集**（rs:/gdal:/dataset: 等默认
+不桥接——LLM 上下文预算，刻意行为）。因此 gate 只断言：Pi 引用的每个 family 必须仍存在于
+collectSurfaceTools() 的 family 集合（改名/退役 → gate 失败）；不强制反向完备。默认表从
+TS 源文本正则提取（SICNU_SOURCE_DIR 注入路径），gate 跟随真实文件。
+
+D-016 **initialize 协商即单版本规范行为（修订 D-008）**：实测 master 已是“响应我方支持的
+最新版本”（非 echo）——这正符合 MCP 规范（客户端不兼容则自行断开）。本 build 只支持
+"2024-11-05"，故响应恒为该版本；交付物为负路径测试（客户端发 "1999-09-09" 也不崩溃、
+得到合法版本响应）+ docs 明示，而非改动握手代码。
+
+D-017 **scale gate 是逻辑规模不变式**：2000 个注入 custom tools → 投影线性增长断言 +
+MCP 分页 clamp 500 + 游标走页覆盖全集 + 概念性 O(total/500) 页数上界。无 wall-clock
+断言（Operating envelope：不把时间当 correctness gate）。
