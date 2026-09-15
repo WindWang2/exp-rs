@@ -3,10 +3,14 @@ rem build_offline_bundle.cmd - assemble the offline classroom bundle (goal D7).
 rem
 rem Usage:
 rem   scripts\build_offline_bundle.cmd --build-dir <dir> [--out <dir>] [--version <v>]
-rem                                    [--max-mb <n>] [--skip-samples] [--verify <bundle>]
+rem                                    [--max-mb <n>] [--schema {1,2}] [--skip-samples]
+rem                                    [--check-runtime] [--verify <bundle>]
 rem
 rem Windows twin of build_offline_bundle.sh (same steps, same manifest contract,
-rem see packaging/OFFLINE_BUNDLE.md). Fully local; never touches the network.
+rem see packaging/OFFLINE_BUNDLE.md). Schema /2 default: --schema 1 for legacy
+rem writers. --check-runtime additionally runs the bundled CLI's env-doctor
+rem (fail-closed) so a broken DLL/plugin/PROJ closure is caught at build time.
+rem Fully local; never touches the network.
 setlocal enabledelayedexpansion
 set "SCRIPT_DIR=%~dp0"
 set "REPO_ROOT=%SCRIPT_DIR%..\"
@@ -17,6 +21,8 @@ set "OUT_DIR="
 set "VERSION="
 set "MAX_MB=250"
 set "SKIP_SAMPLES=0"
+set "SCHEMA=2"
+set "CHECK_RUNTIME=0"
 set "VERIFY_PATH="
 
 :parse
@@ -26,6 +32,8 @@ if /I "%~1"=="--out"          ( set "OUT_DIR=%~2"     & shift & shift & goto :pa
 if /I "%~1"=="--version"      ( set "VERSION=%~2"     & shift & shift & goto :parse )
 if /I "%~1"=="--max-mb"       ( set "MAX_MB=%~2"      & shift & shift & goto :parse )
 if /I "%~1"=="--skip-samples" ( set "SKIP_SAMPLES=1"  & shift & goto :parse )
+if /I "%~1"=="--schema"       ( set "SCHEMA=%~2"      & shift & shift & goto :parse )
+if /I "%~1"=="--check-runtime" ( set "CHECK_RUNTIME=1" & shift & goto :parse )
 if /I "%~1"=="--verify"       ( set "VERIFY_PATH=%~2" & shift & shift & goto :parse )
 if /I "%~1"=="-h"             ( goto :usage )
 if /I "%~1"=="--help"         ( goto :usage )
@@ -157,7 +165,19 @@ mkdir "%BUNDLE%\tools" 2>nul
 copy /Y "%SCRIPT_DIR%verify_bundle_manifest.py" "%BUNDLE%\tools\verify_bundle_manifest.py" >nul || exit /b 1
 
 echo == writing manifest ==
-powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%bundle_manifest.ps1" -Bundle "%BUNDLE%" -Version "%VERSION%" -MaxMb %MAX_MB% -Schema 2 || exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%bundle_manifest.ps1" -Bundle "%BUNDLE%" -Version "%VERSION%" -MaxMb %MAX_MB% -Schema %SCHEMA% -ComponentsFromBin "%BUNDLE%\bin" || exit /b 1
+
+rem F19: optional first-run environment self-check through the SHIPPED CLI —
+rem proves the bundle's own runtime (DLL closure, plugins, PROJ data) on this
+rem machine before it leaves the build machine. Fail-closed when requested.
+if "%CHECK_RUNTIME%"=="1" (
+  echo == runtime self-check ^(bundled env-doctor^) ==
+  "%BUNDLE%\bin\sicnu_geo_rs_cli.exe" env-doctor
+  if errorlevel 1 (
+    echo build_offline_bundle: --check-runtime failed ^(see env-doctor findings above^)
+    exit /b 1
+  )
+)
 
 call "%SCRIPT_DIR%build_offline_bundle.cmd" --verify "%BUNDLE%"
 exit /b %errorlevel%

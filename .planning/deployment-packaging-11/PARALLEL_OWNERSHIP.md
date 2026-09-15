@@ -39,3 +39,12 @@ No scientific algorithm code is modified.
 
 All seven are scientific-domain defects (io/workflow/dataset/georef/agent). None overlap
 packaging/deployment. Evidence for "no silent update check" (F): `grep -rin "update.*check\|check.*update\|autoUpdate" src/` → no hits in packaging/release paths (re-verified in EVIDENCE).
+
+## Update (Phase 5, 2026-09-16)
+
+- New concurrent LOCAL track appeared on this host after Phase 0:
+  `exp-rs-geospatial-io-formats-11` (worktree present; building while this
+  track builds — host load explained; both builds at -j2 on 16 cores).
+  Its remote branch was not in the Phase 0 origin list. Before the final
+  rebase/push, re-check `gh pr list` for its PR and re-audit file overlap.
+- PR #1009/#1008 states unchanged so far; re-audit at Phase 8 rebase.

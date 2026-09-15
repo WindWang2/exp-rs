@@ -2,6 +2,62 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - Deployment / Offline Packaging 11.0 (deployment-packaging-11)
+
+- **Canonical bundle verifier** (`scripts/verify_bundle_manifest.py`): single
+  verify authority for the offline bundle (dev host, tests, and the shipped
+  in-bundle copy); accepts `sicnu.offline_bundle/1` and `/2`, refuses newer
+  majors with a typed exit-2 refusal naming the supported versions, flags
+  escaping symlinks, and validates the `/2` declared-provenance sections.
+- **Manifest schema `/2`** (additive; `/1` stays valid): optional
+  `components` (resolved Qt/GDAL/PROJ/GEOS/QGIS/python versions with
+  declared source), `build_options` (allowlisted configure options from the
+  build tree's CMakeCache), `compat` (`min_reader_schema`, `bundle_kind`);
+  `required` gains the in-bundle Linux verifier (`VERIFY.sh`,
+  `tools/verify_bundle_manifest.py`).
+- **In-bundle Linux integrity** (`packaging/bundle/VERIFY.sh`): the target
+  machine verifies the bundle with the same canonical rules as the builder,
+  without repo access — previously a Windows-only capability.
+- **Manifest conformance gate** (`tests/fixtures/bundle_manifest/
+  conformance.py`, ctest `bundle_manifest_conformance`): independently
+  synthesized golden bundles (valid /1 and /2, tamper, missing, extra,
+  unsafe path, empty required prefix, ceiling breach, future major,
+  min_reader_schema, symlink escape) driven from another cwd; PowerShell
+  twin lane executes where pwsh exists.
+- **First-run environment self-check** (`sicnu_geo_rs_cli env-doctor`,
+  `docs/deployment/env-doctor.md`): report-only probes for GDAL
+  version/required drivers, proj.db candidate scan + operational EPSG:4326
+  roundtrip, runtime data resolution, temp writability, Chinese-path
+  roundtrip, offline-gate state, Qt version/platform plugins, SSL runtime
+  availability; `exp.env.report.v1` envelope with exit contract
+  0 healthy / 2 degraded-broken; findings map to 12 new curated
+  `diagnostic.env.*` help entries.
+- **Windows offline**: `build_offline_bundle.cmd --check-runtime` runs the
+  bundled CLI's env-doctor fail-closed before shipping; the manifest writer
+  collects component versions from shipped DLL version resources
+  (`-ComponentsFromBin`); `VERIFY.ps1` accepts /1+/2, refuses newer majors,
+  and gains `-Runtime`; `scripts/windows/_env.cmd` replaces a
+  hardwired user-profile `vcpkg_installed` default with a
+  `SICNU_WORKSPACES`-relative fallback plus a loud warning.
+- **AppImage reproducibility**: linuxdeploy + Qt plugin pinned to
+  `1-alpha-20240109` with SHA256 verification via
+  `packaging/appimage_toolchain.sh` (fail-closed while hashes are
+  `PENDING` in `packaging/appimage-tool-checksums.txt`; `--tools-dir`
+  pre-provisioning verified against the same file); full dereferenced PROJ
+  share instead of proj.db only; AppDir payload gets a verified /2 manifest
+  (bundle_kind `appimage-payload`); build parallelism envelope-compliant.
+- **Dependency inventory** (`scripts/report_bundle_dependencies.py`):
+  stdlib ELF parser writes `dependencies.json` (shipped / host /
+  unresolved closure per shipped binary) into the bundle before the
+  manifest hashes it; Windows twin via dumpbin-optional PowerShell.
+- **Clean-machine simulation** (`scripts/cleanroom/cleanroom_smoke.sh`):
+  env-starve mode (`env -i`, no proxy vars, bundle-only PATH, shipped
+  verifier + env-doctor) and container mode (docker/podman, `--network=none`).
+- **Migration guidance** (`docs/deployment/MIGRATION.md`): side-by-side
+  bundle upgrades, verify-first discipline, rollback by directory, no
+  auto-update by design; manifest compat negotiation is the machine-level
+  contract.
+
 ## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)
 
 - **Regular-calendar normalization (T-2)**: `rs:temporal_regularize` re-casts irregular

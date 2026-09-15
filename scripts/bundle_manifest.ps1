@@ -23,6 +23,7 @@ param(
   [Parameter(Mandatory = $false)] [ValidateSet("1", "2")] [string] $Schema = "2",
   [Parameter(Mandatory = $false)] [hashtable] $Components,
   [Parameter(Mandatory = $false)] [hashtable] $BuildOptions,
+  [Parameter(Mandatory = $false)] [string] $ComponentsFromBin,
   [Parameter(Mandatory = $false)] [string] $Verify
 )
 
@@ -157,6 +158,33 @@ if ($Schema -eq "2") {
   # /2 ships the in-bundle Linux verifier and its canonical engine.
   $required = $required + @("VERIFY.sh", "tools/verify_bundle_manifest.py")
 }
+# F19: collect runtime component versions from the shipped DLLs' version
+# resources (best-effort — a missing DLL simply omits its entry; the version
+# strings are the files' own declarations, never derived facts).
+function Get-ComponentsFromBin([string] $binDir) {
+  $known = @{ "qt6core.dll" = "qt"; "qgis_core.dll" = "qgis"; "gdal.dll" = "gdal";
+              "proj.dll" = "proj"; "geos_c.dll" = "geos"; "sqlite3.dll" = "sqlite" }
+  $components = [ordered] @{}
+  foreach ($dll in (Get-ChildItem -LiteralPath $binDir -Filter *.dll -ErrorAction SilentlyContinue)) {
+    $base = $dll.Name.ToLowerInvariant()
+    if ($known.ContainsKey($base) -and -not $components.Contains($known[$base])) {
+      $version = $dll.VersionInfo.FileVersion
+      if ($version) {
+        $components[$known[$base]] = [ordered] @{ version = $version; source = "dll_version_resource" }
+      }
+    }
+  }
+  return $components
+}
+
+if ($ComponentsFromBin -ne "") {
+  $fromBin = Get-ComponentsFromBin $ComponentsFromBin
+  if ($Components) {
+    foreach ($k in $Components.Keys) { $fromBin[$k] = $Components[$k] }
+  }
+  $Components = $fromBin
+}
+
 $files = Get-ManifestFiles $Bundle
 $manifest = [ordered] @{
   schema = $schemaString
