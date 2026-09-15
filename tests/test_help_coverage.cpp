@@ -331,8 +331,17 @@ TEST_CASE( "Committed reference pages match regeneration byte-for-byte (zero-dif
     const QString dir = QStringLiteral( CMAKE_SOURCE_DIR "/docs/generated/help" );
     const bool regen = qEnvironmentVariableIsEmpty( "SICNU_REGEN_HELP_DOCS" ) ? false : true;
 
+    // Both sides are normalized to a single trailing newline so the gate
+    // stays byte-exact about CONTENT while tolerating the writer's blank
+    // EOF lines (git diff --check flags those in committed pages).
+    const auto normalized = []( QString text ) {
+        while ( text.endsWith( u'\n' ) )
+            text.chop( 1 );
+        return text + u'\n';
+    };
+
     for ( const Page &page : pages ) {
-        const QString generated = page.generate( globalHelpRegistry() );
+        const QString generated = normalized( page.generate( globalHelpRegistry() ) );
         const QString path = dir + QLatin1Char( '/' ) + QLatin1String( page.file );
 
         if ( regen ) {
@@ -345,9 +354,9 @@ TEST_CASE( "Committed reference pages match regeneration byte-for-byte (zero-dif
         }
 
         QFile in( path );
-        INFO( "missing committed page: " << path.toStdString() );
+        INFO( "cannot open committed page: " << path.toStdString() );
         REQUIRE( in.open( QIODevice::ReadOnly ) );
-        const QString committed = QString::fromUtf8( in.readAll() );
+        const QString committed = normalized( QString::fromUtf8( in.readAll() ) );
         if ( committed != generated ) {
             // first divergent line, so the drift is actionable without reruns
             const QStringList a = committed.split( QLatin1Char( '\n' ) );
