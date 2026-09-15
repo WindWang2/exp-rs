@@ -26,9 +26,25 @@
 - **不修（记录）**：`test_capability_drift` 在 master 上已红：preprocess.json 重复 id（rs:gaofen/zy3/hj_import ×2）、uncovered io:catalog_search/io:cache_prefetch/io:cube_plan/io:cube_window、rs:mnf_inverse、rs:library_select、rs:spectral_band_select、cartography:diff_templates/explain/export、recipe drift（harness.optical_ndvi_landsat）。本 track 已为新增表面（geometric.json）补齐 knowledge，使 uncovered 列表不因本 track 恶化。
 - **不修（记录）**：`test_mission_context` / `test_mission_e2e_scaffolding` 链接失败（target 源清单缺 workbench_host.cpp）。
 
-## 测试证据（targeted，QT_QPA_PLATFORM=offscreen，-j1 串行）
+## 测试证据（targeted，QT_QPA_PLATFORM=offscreen，逐二进制串行）
 
-（待 Phase 8 双遍验证后填终值；中间轮次见 .goal-loop-ledger.md）
+Phase 8 双遍验证（rebase origin/master @ a5b11b7f10 后，同一命令原样连续两遍）：
+- Pass 1：20/20 exit=0（10 个新 F13 套件 + 10 个 D14/geometric 回归套件）
+- Pass 2：20/20 exit=0
+覆盖：test_registration_fft、test_multimodal_matcher、test_model_selector、test_rpc_bias_model、
+test_stack_registrator、test_registration_quality、test_registration_operators、test_registration_e2e、
+test_georef_crs_pick_failclosed、test_geometric_agent_tools；回归：test_gcp_manager、
+test_geometric_transform、test_tps_interpolator、test_feature_matcher、test_resampler、
+test_pansharpening、test_d14_geometric_registration_e2e、test_rpc_gcp_refine、
+test_rpc_transformer、test_rpc_golden。
+中间开发轮次的失败→修复记录见 .goal-loop-ledger.md 与 REVIEW_LOG.md。
+
+## Phase 8 卫生检查
+
+- `git diff --check origin/master...HEAD`：clean（GOAL.md 尾随 markdown 硬换行空格已清理）。
+- 冲突标记扫描（src/tests/docs/data/planning）：无。
+- secret 扫描（diff 全文 keyword+pattern）：无真实密钥命中。
+- `git status --porcelain`：clean（工作区无未跟踪生成物）。
 
 ## OUT_OF_SCOPE
 
