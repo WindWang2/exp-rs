@@ -240,7 +240,7 @@ TEST_CASE( "census scanner recovers a synthetic registration tree",
           << "public:\n"
           << "    std::string determinismGrade() const override { return \"bit-exact\"; }\n"
           << "};\n"
-          << "class DemoDerived : public DemoBase {\n"
+          << "class DemoDerived final : public DemoBase {\n"
           << "public:\n"
           << "    std::string name() const override { return \"demo:derived\"; }\n"
           << "};\n"
@@ -250,6 +250,11 @@ TEST_CASE( "census scanner recovers a synthetic registration tree",
           << "    std::string determinismGrade() const override { return \"tolerance\"; }\n"
           << "    sicnu::operators::RSOperatorDeterminism determinism() const override\n"
           << "    { return sicnu::operators::RSOperatorDeterminism::Tolerance; }\n"
+          << "};\n"
+          << "class DemoExport final : public sicnu::operators::RSOperator {\n"
+          << "public:\n"
+          << "    std::string name() const override { return \"demo:export\"; }\n"
+          << "    std::string determinismGrade() const override { return \"tolerance\"; }\n"
           << "};\n";
     }
     {
@@ -257,17 +262,19 @@ TEST_CASE( "census scanner recovers a synthetic registration tree",
         c << "#include \"demo_ops.h\"\n"
           << "#include \"operators/framework/rs_operator_registry.h\"\n"
           << "REGISTER_RS_OPERATOR( DemoDerived, \"demo:derived\" )\n"
-          << "REGISTER_RS_OPERATOR( DemoTolerance, \"demo:tol\" )\n";
+          << "REGISTER_RS_OPERATOR( DemoTolerance, \"demo:tol\" )\n"
+          << "REGISTER_RS_OPERATOR( DemoExport, \"demo:export\" )\n";
     }
 
     const auto scan = scanDeterminismOverrides( root.string() );
     REQUIRE( scan.count( "demo:derived" ) == 1 );
     REQUIRE( scan.count( "demo:tol" ) == 1 );
+    REQUIRE( scan.count( "demo:export" ) == 1 );
 
     const auto &derived = scan.at( "demo:derived" );
     CHECK( derived.gradeOverride );
     CHECK( derived.gradeLiteral == "bit-exact" );
-    CHECK( derived.baseDepth == 1 ); // inherited from DemoBase
+    CHECK( derived.baseDepth == 1 ); // inherited through the namespaced base
     CHECK_FALSE( derived.runtimeOverride );
 
     const auto &tol = scan.at( "demo:tol" );
@@ -276,6 +283,13 @@ TEST_CASE( "census scanner recovers a synthetic registration tree",
     CHECK( tol.runtimeOverride );
     CHECK( tol.runtimeLiteral == "Tolerance" );
     CHECK( tol.baseDepth == 0 );
+
+    // A trailing-`final` class with an export-style qualified base is still
+    // resolved to ITS name (not "final") with its own override.
+    const auto &exp = scan.at( "demo:export" );
+    CHECK( exp.gradeOverride );
+    CHECK( exp.gradeLiteral == "tolerance" );
+    CHECK( exp.baseDepth == 0 );
 
     fs::remove_all( root );
 }

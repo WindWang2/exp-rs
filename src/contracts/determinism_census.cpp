@@ -170,9 +170,13 @@ std::map<std::string, ClassSlice> scanClassSlices(
     if ( !std::filesystem::exists( root, ec ) )
         return slices;
 
-    // Match `class Name [: bases] {` then cut the body at the next `^};`.
+    // Match `class [Export] Name [final] [: bases] {` then cut the body at
+    // the next line-start `};`. The tree styles include export macros and
+    // trailing `final` (`class IoTranslateOperator final : public ...`), so
+    // the NAME is taken from the trailing token group and `final` itself is
+    // never accepted as a class name.
     static const std::regex declRe(
-        R"re(\bclass\s+(?:[A-Z][A-Z_0-9]*\s+)?(\w+)\s*(?::\s*([^{]+))?\{)re" );
+        R"re(\bclass\s+((?:\w+\s+)*)(\w+)\s*(?::\s*([^{]+))?\{)re" );
 
     std::filesystem::recursive_directory_iterator it(
         root, std::filesystem::directory_options::skip_permission_denied, ec );
@@ -206,7 +210,18 @@ std::map<std::string, ClassSlice> scanClassSlices(
         for ( auto mit = std::sregex_iterator( text.begin(), text.end(), declRe );
               mit != std::sregex_iterator(); ++mit )
         {
-            const std::string name = ( *mit )[1].str();
+            std::string name = ( *mit )[2].str();
+            if ( name == "final" )
+            {
+                // Trailing `final`: the real name is the last prefix token
+                // ("class Foo final : ...").
+                const std::string prefix = ( *mit )[1].str();
+                const auto last = prefix.rfind_last_of( " \t" );
+                name = prefix.substr(
+                    last == std::string::npos ? 0 : last + 1 );
+                while ( !name.empty() && ( name.back() == ' ' || name.back() == '\t' ) )
+                    name.pop_back();
+            }
             if ( !classNames.count( name ) || slices.count( name ) )
                 continue;
             ClassSlice slice;
@@ -218,14 +233,28 @@ std::map<std::string, ClassSlice> scanClassSlices(
                 slice.body = text.substr( bodyStart );
             else
                 slice.body = text.substr( bodyStart, close - bodyStart );
-            const std::string basesText = ( *mit )[2].str();
-            static const std::regex baseNameRe( R"re(\b(\w+)\b)re" );
-            for ( auto bit = std::sregex_iterator( basesText.begin(), basesText.end(), baseNameRe );
-                  bit != std::sregex_iterator(); ++bit )
+            const std::string basesText = ( *mit )[3].str();
+            // Each comma-separated base clause is a possibly-qualified name
+            // ("public sicnu::operators::RSOperator") — the BASE is its last
+            // identifier token; access specifiers are dropped.
+            static const std::regex baseTokenRe( R"re(\b(\w+)\b)re" );
+            std::stringstream basesStream( basesText );
+            std::string clause;
+            while ( std::getline( basesStream, clause, ',' ) )
             {
-                const std::string b = ( *bit )[1].str();
-                if ( b != "public" && b != "private" && b != "protected" )
-                    slice.bases.push_back( b );
+                std::string base;
+                for ( auto bit = std::sregex_iterator( clause.begin(), clause.end(),
+                                                       baseTokenRe );
+                      bit != std::sregex_iterator(); ++bit )
+                {
+                    const std::string tok = ( *bit )[1].str();
+                    if ( tok == "public" || tok == "private" || tok == "protected"
+                         || tok == "virtual" )
+                        continue;
+                    base = tok; // keep the LAST identifier (namespace-qualified)
+                }
+                if ( !base.empty() )
+                    slice.bases.push_back( std::move( base ) );
             }
             slices.emplace( name, std::move( slice ) );
         }
