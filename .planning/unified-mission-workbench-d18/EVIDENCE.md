@@ -22,34 +22,37 @@ Per GOAL section 18: no online CI dependency. When a machine with Qt6+cmake is a
 export CMAKE_BUILD_PARALLEL_LEVEL=2
 export CTEST_PARALLEL_LEVEL=1
 export QT_QPA_PLATFORM=offscreen
-cmake --build <build> --target test_mission_context test_mission_e2e_scaffolding sicnu_geo_rs -j2
-ctest -R 'test_mission' -V
+cmake --build <build> --target test_mission_context test_mission_e2e_scaffolding test_ir2_port_param_mapping sicnu_geo_rs -j2
+ctest -R 'test_mission|test_ir2_port_param' -V
 ```
 
-## Implementation landed (operator-bind continuation)
+## Implementation landed (port→param mapping continuation)
 
-- **IR2 registry NodeExecutor** (`ir2_registry_node_executor.*`): `makeRegistryNodeExecutor` + `makeSyntheticNodeExecutor` + `classifyIr2OperatorBinding`
-- **Ir2PipelineDesignerDock** installs registry executor (no silent synthetic on Run)
-- **Typed refusal** `ir2.operator_unbound:…` when `operatorId` empty/unknown; `ir2.operator_failed:…` on operator exceptions
-- **WorkflowDocument** alias advanced on IR2 surface (canvas / LabSpec lift / guided / `startRun` param) — Engine 2.0 untouched
-- Tests: `scenario3c_ir2_registry_bind_policy` contract (not executed)
+- **D-W6 multi-input mapping** (`ir2_port_param_mapping.*`): `applyIr2InputPortMapping` — explicit IR2 target port names → operator params; `ir2_input_artifacts` port→path; primary `input` alias rules; legacy sourceNodeId order-only zip fallback
+- **Coordinator** keys `inputArtifacts` by `EdgeFact.targetPortName` (prefer names over order-only)
+- **Registry executor** uses the helper; unbound refusal still **before** mapping
+- Tests: `test_ir2_port_param_mapping` (mapping + unbound refuse helper); `scenario3c` contract updated (not executed)
 
 ### Bound vs still synthetic / unbound
 
 | Path | Behavior |
 |------|----------|
-| Dock Run + `node.operatorId` in `RSOperatorRegistry` | **Bound** — real `RSOperator::execute` |
-| Dock Run + empty/unknown `operatorId` | **Unbound refusal** (not synthetic) |
+| Dock Run + `node.operatorId` in `RSOperatorRegistry` | **Bound** — real `RSOperator::execute` with port→param map |
+| Dock Run + empty/unknown `operatorId` | **Unbound refusal** (not synthetic; before mapping) |
 | Coordinator with no `setExecutor` (D17 unit tests) | **Synthetic default** (hermetic) |
 | Explicit `makeSyntheticNodeExecutor()` | **Synthetic** (tests only) |
 
-Examples of registry IDs that bind when their TU is linked into the process: `rs:spectral_index`, `rs:ndvi`, `gdal:reproject`, `opencv:gaussian_blur`, LabSpec-lifted operator steps whose id matches a registered factory. Designer placeholders / typos / not-linked operator packs remain unbound refusals — documented, not synthetic success.
+### Mapping limitations (honest)
+
+- Port names should match operator param ids; no schema-driven rename.
+- Legacy node-id keys use deterministic order-only zip — prefer port names.
+- cmake/ctest **not executed** on this box.
 
 ## Not executed (toolchain absent)
 
 - `cmake` configure/build
-- `ctest -R mission`
-- GUI smoke of Run with real operators / unbound refusal
+- `ctest -R mission|ir2_port`
+- GUI smoke of Run with multi-input / unbound refusal
 
 ## Commits on branch (after seed)
 
@@ -70,9 +73,11 @@ Examples of registry IDs that bind when their TU is linked into the process: `rs
 | e1700670 | docs(d18): note tip SHA 59f0533e in evidence ledger |
 | a640a677 | feat(d18): bind IR2 dock to RSOperatorRegistry NodeExecutor |
 | 9fbf0789 | docs(d18): evidence, decisions, review, PR body for operator-bind |
+| a4d26573 | feat(d18): multi-input IR2 port→param mapping |
+| (pending) | docs(d18): evidence, decisions, review, PR body for port-map |
 
 ## PR
 
 - Draft: https://github.com/WindWang2/exp-rs/pull/991
 - Not merged (per GOAL).
-Tip SHA after operator-bind push: `69958a27` (includes tip-note commit).
+- Tip SHA: filled after push.

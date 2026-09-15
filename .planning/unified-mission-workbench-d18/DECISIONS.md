@@ -102,3 +102,20 @@ On restore: prefer sidecar when present; else XML. Missing both = fresh mission 
 ## D-W3b — WorkflowDocument call-site rename on IR2 surface
 
 **Decision.** Advance D-W3: IR2 app surface (`pipeline_canvas_widget`, `labspec_workflow_lift`, `guided_workflow_workbench`, `PipelineRunCoordinator::startRun` param) uses the `WorkflowDocument` alias. Struct name in `workflow_ir_v2.h` and Engine 2.0 `WorkflowDefinition` remain unchanged (no cross-TU clash fix beyond the alias).
+
+
+## D-W6 — Multi-input IR2 port→param mapping (prefer explicit names)
+
+**Context.** D-W5 registry executor only filled primary `params["input"]` from a sorted parent-node-id map and dumped `ir2_input_artifacts` keyed by source node id. Multi-input operators (`reference`, `dem`, `mask`, `inputA`/`inputB`, …) could not bind inbound edges by IR2 port name.
+
+**Decision.**
+1. `PipelineRunCoordinator` keys `inputArtifacts` by **target port name** (IR2 `EdgeFact.targetPortName`), not source node id. Single-source invariant ⇒ one edge per input port.
+2. Pure helper `applyIr2InputPortMapping` (hermetic TU) maps each bound port → `params[portName]` when unset; writes `params["ir2_input_artifacts"]` as port→path; aliases primary `input` from port `"input"`, else first declared bound port, else lexicographic first port.
+3. Explicit `node.parameters` always win (never overwritten).
+4. Legacy source-node-id keys: order-only zip onto declared input ports (sorted keys × declaration order) — documented fallback, not preferred.
+5. Unbound refusal (`makeIr2UnboundRefusal` / `ir2.operator_unbound:`) still runs **before** mapping; mapping cannot invent success.
+
+**Limitations (honest).**
+- Does **not** introspect `RSOperator::schema()` to rename ports to differently named params; designers should name IR2 input ports to match operator param ids (`input`, `reference`, `dem`, …).
+- Order-only legacy zip is deterministic but ambiguous when fan-in count ≠ declared port count.
+- Full ExecutionPlane/TaskCenter bridge remains Engine 2.0 (D-W1).
