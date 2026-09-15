@@ -40,10 +40,15 @@ spatial tool registry). closes #986 if the tracker issue exists.
 
 - `ninja -j2` build of `qgis_core/qgis_gui/sicnu_core/sicnu_spectral_analysis/
   sicnu_processing/sicnu_agent` + all 12 touched/new test targets: GREEN.
-- `ctest -R "test_radiometric|test_spectral|test_fast_6s|test_continuum|test_d13" -j1`
-  with `QT_QPA_PLATFORM=offscreen`: **(N/N green — filled at gate)**.
-- Legacy suites touching the same files re-run green (no behavior change to existing
-  namespaces): **(list — filled at gate)**.
+- All 11 D13-created or D13-touched suites exit 0 (6 new + 5 legacy regression):
+  `test_radiometric_state`, `test_fast_6s_atmospheric`, `test_continuum_removal`,
+  `test_spectral_unmixing_fcls`, `test_spectral_agent_tools`,
+  `test_d13_radiometric_spectral_e2e`, `test_radiometric_calibration`,
+  `test_spectral_indices`, `test_spectral_library`, `test_spectral_unmixing`,
+  `test_spectral_profile_widget`.
+- Registry spot-checks (`test_capability_drift`, `test_capability_knowledge`) show a
+  failure profile byte-identical to `origin/master` at the base commit (pre-existing
+  capability-data duplicates and catalog skew; reproduced with D13 sources stashed).
 
 ### Two-axis review (2 read-only subagents, ≤3 cap honored)
 
