@@ -300,6 +300,12 @@ sicnu_add_io_test(test_io_vector_interop)
 # 7.0 generalized grid classification & placement (rotated/flipped/GCP/RPC).
 sicnu_add_io_test(test_io_grid_descriptor)
 
+# 11.0 geospatial I/O interchange: boundary path guards, finalize manifest
+# (provenance digest sidecar), dataset staging ledger (attach/sweep).
+sicnu_add_io_test(test_io_param_guard)
+sicnu_add_io_test(test_io_finalize_manifest)
+sicnu_add_io_test(test_io_stage_ledger)
+
 # io:* operator family suite — rides the operator chain (Qt + sicnu_operators).
 sicnu_add_io_test(test_io_operators)
 sicnu_add_io_test(test_io_catalog_query)
