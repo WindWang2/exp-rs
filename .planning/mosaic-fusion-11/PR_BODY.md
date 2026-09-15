@@ -77,8 +77,22 @@ Details: `.planning/mosaic-fusion-11/PARALLEL_OWNERSHIP.md`.
 | `test_mosaic_scale` | memory-vs-window bound via counting sampler, 100k-tile logical seam bound, mid-stream failure, opt-in heavy run |
 | regression | `test_mosaic`, `test_pansharpening`, `test_image_fusion` (incl. new HPF known-answer + report verdict tests) |
 
-(final exit codes recorded in `.planning/mosaic-fusion-11/TEST_MATRIX.md` and
-`EVIDENCE.md` before submission)
+Final gate (local, clean consistent rebuild): **83/83 tests passed, run twice
+consecutively** (Oracle: identical results both runs). Exit codes and evidence
+trail: `.planning/mosaic-fusion-11/{TEST_MATRIX,EVIDENCE,REVIEW_LOG}.md`.
+
+`git diff --check origin/master...HEAD` clean; no conflict markers; secret
+scan clean.
+
+### Known blocked-by-master regressions (documented, out of scope)
+
+`test_pansharpening` / `test_capability_drift` / `test_capability_knowledge`
+/ `test_rs_operators` cannot be built in this worktree because
+`origin/master@a5b11b7f10` (#1000) itself breaks the `sicnu_agent` build
+(`data_platform_tools.cpp` references `BenchmarkService` without its
+namespace; file is byte-identical to origin/master — proof in
+`EVIDENCE.md` → OUT_OF_SCOPE). This track's registration consistency is
+covered by the registry/catalog/contract edits plus the F15 suites.
 
 ## Known limitations / follow-ups
 
@@ -93,5 +107,10 @@ Details: `.planning/mosaic-fusion-11/PARALLEL_OWNERSHIP.md`.
 
 ## Review
 
-Full-diff adversarial review with dispositions:
-`.planning/mosaic-fusion-11/REVIEW_LOG.md` (P0=0, P1=0 at submission).
+- Round 1: main-agent full-diff review → 3 findings fixed (`e8b54fa7cd`).
+- Round 2: independent read-only adversarial subagent over the complete
+  diff → 14 findings, all dispositioned: **1 P0 fixed** (HPF pan-center
+  sample), **3 P1** (2 fixed with regressions, 1 rejected with evidence —
+  reviewer arithmetic), **5 P2** fixed/mitigated+documented, **5 P3** fixed.
+  Final: **P0 = 0, P1 = 0**. Full log:
+  `.planning/mosaic-fusion-11/REVIEW_LOG.md`.

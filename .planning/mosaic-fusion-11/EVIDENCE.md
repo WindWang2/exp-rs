@@ -21,6 +21,10 @@
 | 0 | `cmake -DFETCHCONTENT_SOURCE_DIR_CATCH2=<main>/_deps/catch2-src -DFETCHCONTENT_SOURCE_DIR_PYBIND11=<main>/_deps/pybind11-src -S . -B build-dev` | 0 | 复用主仓库缓存源（Catch2 v3.7.1 与 pin 一致）；无网络依赖 |
 | 1 | `cmake --build build-dev --target <8 个 F15 test targets> -j2` | 0 | 全部构建成功（含 qgis_core ~1054 对象全量编译） |
 | 1 | `ctest -R "test_mosaic_plan::\|test_mosaic_balancing::\|test_mosaic_seamline::\|test_mosaic_blend::\|test_mosaic_quality::\|test_fusion_quality_report::\|test_mosaic_scale::\|test_quality_mosaic_operator::" -j1` | 0 | **52/52 通过**（经 4 轮 oracle 缺陷修复，见 ledger） |
+| 4 | 回归：`ctest -R "Mosaic merge\|RsMosaicOperator\|Brovey:\|IHS:\|PCA Fusion\|Gram-Schmidt:\|ImageFusion processNativeFusion"` + F15 全套 | 0 | 82/82（发现并修复 HPF pan center 缺陷 + CC 退化语义） |
+| 7 | 对抗 review 后全套 clean-rebuild 重跑 | 0 | **83/83**（含新增 priority-provenance 用例；stale-artifact stack-smash 经一致重建排除） |
+| 7 | `git diff origin/master...HEAD --check` / 冲突标记 / secret 扫描 | 0 | CLEAN |
+| 8 | **Oracle 6 双验证**（同命令连续两遍） | 0 | **RUN 1 = 83/83，RUN 2 = 83/83** |
 
 ## OUT_OF_SCOPE
 
