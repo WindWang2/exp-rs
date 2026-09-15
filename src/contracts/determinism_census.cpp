@@ -94,6 +94,12 @@ struct RegistrationSite
 /// Registration sites across the two shapes this tree uses:
 ///   REGISTER_RS_OPERATOR( ClassName, "prefix:id" )
 ///   add( "prefix:id", [] { return std::make_unique<ClassName>(); } );
+/// Registration sites across the two shapes this tree uses:
+///   REGISTER_RS_OPERATOR( ClassName, "prefix:id" )
+///   add( "prefix:id", [] { return std::make_unique<ClassName>(); } );
+/// Only first-party family prefixes count — documentation comments quote the
+/// macro with placeholder ids ("my:operator"), which must never enter the
+/// census.
 std::vector<RegistrationSite> scanRegistrationSites( const std::string &sourceRoot )
 {
     std::vector<RegistrationSite> sites;
@@ -101,6 +107,14 @@ std::vector<RegistrationSite> scanRegistrationSites( const std::string &sourceRo
         R"re(REGISTER_RS_OPERATOR\s*\(\s*(\w+)\s*,\s*"([^"]+)"\s*\))re" );
     static const std::regex addRe(
         R"re(add\(\s*"([^"]+)"\s*,\s*\[\s*\]\s*\{\s*return\s+std::make_unique<\s*(\w+)\s*>\s*\(\s*\))re" );
+    static const std::set<std::string> kFirstPartyFamilies = { "rs", "gdal", "io",
+                                                               "otb", "opencv",
+                                                               "cartography" };
+    const auto firstPartyId = [ & ]( const std::string &id ) {
+        const auto colon = id.find( ':' );
+        return colon != std::string::npos
+               && kFirstPartyFamilies.count( id.substr( 0, colon ) ) > 0;
+    };
 
     // The macro-use text ("REGISTER_RS_OPERATOR") appears only at use sites;
     // the lambda `add(` sites carry "registerOperator" inside the wrapper.
@@ -114,6 +128,8 @@ std::vector<RegistrationSite> scanRegistrationSites( const std::string &sourceRo
         for ( auto it = std::sregex_iterator( text.begin(), text.end(), macroRe );
               it != std::sregex_iterator(); ++it )
         {
+            if ( !firstPartyId( ( *it )[2].str() ) )
+                continue;
             RegistrationSite s;
             s.className = ( *it )[1].str();
             s.operatorId = ( *it )[2].str();
@@ -123,6 +139,8 @@ std::vector<RegistrationSite> scanRegistrationSites( const std::string &sourceRo
         for ( auto it = std::sregex_iterator( text.begin(), text.end(), addRe );
               it != std::sregex_iterator(); ++it )
         {
+            if ( !firstPartyId( ( *it )[1].str() ) )
+                continue;
             RegistrationSite s;
             s.operatorId = ( *it )[1].str();
             s.className = ( *it )[2].str();

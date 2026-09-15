@@ -26,6 +26,11 @@ public:
     {
         return "Threshold a raster into a binary mask (manual/Otsu/percentile/statistical).";
     }
+    /// Published with the Platform 11.0 determinism census: every threshold
+    /// strategy (manual/Otsu/percentile/statistical) is a deterministic
+    /// function of the input histogram; replay byte-identical
+    /// (test_contract_determinism_11).
+    std::string determinismGrade() const override { return "bit-exact"; }
     RSOperatorMemoryPolicy memoryPolicy() const override { return RSOperatorMemoryPolicy::Streaming; }
     Json::Value schema() const override;
     Json::Value metadata() const override;

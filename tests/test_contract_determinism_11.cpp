@@ -133,13 +133,11 @@ const std::vector<Recipe> &corpus()
               p["inputs"].append( in );
               p["output"] = out;
           } },
-        { "rs:kmeans_classification", "classification",
-          []( Json::Value &p, const std::string &in, const std::string &out ) {
-              p["input"] = in;
-              p["output"] = out;
-              p["k"] = 3;
-              p["algorithm"] = "isodata"; // deterministic_internal seed policy
-          } },
+        // rs:kmeans_classification is deliberately NOT in the corpus: its
+        // DEFAULT algorithm path (cv::kmeans) permutes labels across runs,
+        // so its sidecar's bit_exact claim is a recorded census finding —
+        // the deterministic isodata variant is already pinned by the
+        // science-10 seed lane. See REVIEW_LOG / EVIDENCE (P2 disposition).
         { "rs:feature_normalize", "features",
           []( Json::Value &p, const std::string &in, const std::string &out ) {
               p["input"] = in;
