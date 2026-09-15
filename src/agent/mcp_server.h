@@ -17,6 +17,7 @@ class WorkflowExperimentMonitor;
 #include "processing/framework/execution_id.h"
 #include "processing/framework/task_center.h"
 #include "processing/framework/tool_call_dispatcher.h"
+#include "tool_catalog/surface_progress.h"
 
 namespace sicnu::data
 {
@@ -101,6 +102,11 @@ public:
 
 private slots:
     void onLineRead(const QString &line);
+    /// Surface-11 progress relay: projects TaskCenter task updates into MCP
+    /// notifications/progress for calls that subscribed via
+    /// arguments._meta.progressToken. Rate-limited; exactly one terminal
+    /// notification per task.
+    void onTaskUpdated(const sicnu::AlgorithmTaskInfo &info);
 
 protected:
     void handleRequest(const QVariantMap &request);
@@ -165,6 +171,11 @@ protected:
     QVariantMap handleResumeWorkflow(const QString &runId);
     QVariantMap handleSpatialToolCall(const QString &toolId, const QVariantMap &parameters);
 
+    /// Surface-11 large-result handle (meta tool `artifact_read`): bounded
+    /// slice of a file artifact — offset/length clamped to kMaxArtifactChunk,
+    /// sha256 digest, nextOffset cursor, workspace-sandbox enforced.
+    QVariantMap handleArtifactRead(const QVariantMap &arguments);
+
 private:
     /// Set by the initialize handshake; gates other requests with -32002.
     bool m_initialized = false;
@@ -188,6 +199,15 @@ private:
     /// id; entries are removed when consumed by notifications/cancelled and
     /// the map is bounded (#644).
     QHash<QString, long> m_cancelledRequestTasks;
+    /// Surface-11: taskId → progress subscription for tools/call requests
+    /// carrying arguments._meta.progressToken. Entries are removed on the
+    /// terminal notification; the map is bounded like m_cancelledRequestTasks.
+    struct ProgressSubscription
+    {
+        QVariant progressToken;
+        sicnu::agent::tool_catalog::progress::RateLimiter limiter;
+    };
+    QHash<long, ProgressSubscription> m_progressSubscriptions;
     /// Opt-in auto-recording of tracked workflow runs into the ExperimentStore
     /// (goal 8.0 §A). Created lazily by run_workflow when experiment recording
     /// arguments arrive; inert (and null) otherwise.
