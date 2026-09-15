@@ -276,13 +276,16 @@ FeatureJoinResult joinFeaturesBySampleId( const FeatureSet &featureSet,
             }
         }
         if ( missingRequired )
+        {
+            ++result.missingRequiredColumns;
             continue;
+        }
 
         result.joined.append( row );
         ++result.matched;
     }
 
-    if ( result.ambiguous > 0 )
+    if ( result.ambiguous > 0 || result.missingRequiredColumns > 0 )
         result.verdict = AuditVerdict::Fail;
     else if ( result.missing > 0 )
         result.verdict = AuditVerdict::Warn;

@@ -123,13 +123,15 @@ struct FeatureJoinResult
     qint64 matched = 0;
     qint64 missing = 0;
     qint64 ambiguous = 0;
+    qint64 missingRequiredColumns = 0; ///< rows skipped for MissingRequiredColumn
     QVector<FeatureJoinFinding> findings; ///< bounded; truncated when large
     QVector<FeatureRow> joined;           ///< only successful matches
 };
 
 /// Join @p rows onto @p expectedSampleIds using @p featureSet.sampleKey().
 /// Duplicate sample keys in the feature table → AmbiguousKey (refused for
-/// those ids). Sample ids with no row → MissingKey. When
+/// those ids). Sample ids with no row → MissingKey. Required column gaps →
+/// MissingRequiredColumn and Fail (not Unknown). When
 /// @p expectedInputVersionId is non-empty and disagrees with the FeatureSet
 /// input pin, the whole join fails with StaleInputVersion (Fail).
 FeatureJoinResult joinFeaturesBySampleId( const FeatureSet &featureSet,

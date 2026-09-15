@@ -55,6 +55,11 @@
 #include "processing/framework/algorithm_meta_store.h"
 #include "operators/framework/rs_operator_error.h"
 #include <csignal>
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "workflow/workflow_definition.h"
 #include "workflow/workflow_checkpoint.h"

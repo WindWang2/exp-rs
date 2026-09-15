@@ -66,6 +66,9 @@ struct DatasetQaInputs
     bool provenanceComplete = false; ///< caller asserts source assets + digests present
     bool versionFrozen = false;      ///< committed/deprecated
     qint64 duplicateSampleIds = 0;
+    /// When false, labels category stays Unknown even if composition is non-empty
+    /// (empty findings must not imply "label QA clean").
+    bool labelsAudited = false;
 };
 
 /// Build a structured QA report from caller-assembled evidence. Does not I/O.

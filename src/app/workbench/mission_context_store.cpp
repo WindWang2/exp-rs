@@ -171,32 +171,60 @@ bool persistMissionContextWithProject( const QString &projectFilePath, QDomDocum
                                        const MissionContext &ctx, QString *error )
 {
     QStringList problems;
+    bool sideWriteOk = false;
+    bool xmlWriteOk = false;
+
     if ( !projectFilePath.isEmpty() )
     {
         QString sideErr;
-        if ( !saveMissionContextToSidecar( projectFilePath, ctx, &sideErr ) )
+        if ( saveMissionContextToSidecar( projectFilePath, ctx, &sideErr ) )
+        {
+            sideWriteOk = true;
+        }
+        else
+        {
             problems.append( QStringLiteral( "sidecar: %1" ).arg( sideErr ) );
+            // Restore prefers an existing sidecar over XML. A failed write that
+            // leaves a prior .mission.json in place would shadow the XML channel
+            // on the next open — remove the stale file so a successful XML write
+            // is not silently discarded. If removal also fails, refuse success.
+            const QString side = missionSidecarPathForProject( projectFilePath );
+            if ( QFileInfo::exists( side ) )
+            {
+                if ( !QFile::remove( side ) )
+                {
+                    problems.append(
+                        QStringLiteral( "sidecar: failed write left irremovable stale file: %1" )
+                            .arg( side ) );
+                    if ( error )
+                        *error = problems.join( QStringLiteral( "; " ) );
+                    // Still attempt XML so the in-memory document stays consistent,
+                    // but do not claim persist success while stale sidecar remains.
+                    QString xmlErr;
+                    if ( writeMissionContextToProjectXml( document, ctx, &xmlErr ) )
+                        xmlWriteOk = true;
+                    else
+                        problems.append( QStringLiteral( "xml: %1" ).arg( xmlErr ) );
+                    if ( error )
+                        *error = problems.join( QStringLiteral( "; " ) );
+                    return false;
+                }
+            }
+        }
     }
+
     QString xmlErr;
-    if ( !writeMissionContextToProjectXml( document, ctx, &xmlErr ) )
+    if ( writeMissionContextToProjectXml( document, ctx, &xmlErr ) )
+        xmlWriteOk = true;
+    else
         problems.append( QStringLiteral( "xml: %1" ).arg( xmlErr ) );
 
-    if ( !problems.isEmpty() )
-    {
-        if ( error )
-            *error = problems.join( QStringLiteral( "; " ) );
-        // Success if at least one channel wrote.
-        const bool sideOk =
-            projectFilePath.isEmpty()
-                ? false
-                : QFileInfo::exists( missionSidecarPathForProject( projectFilePath ) );
-        QDomElement root = document.documentElement();
-        const bool xmlOk =
-            !root.isNull()
-            && !root.firstChildElement( QString::fromLatin1( kXmlElement ) ).isNull();
-        return sideOk || xmlOk;
-    }
-    return true;
+    if ( !problems.isEmpty() && error )
+        *error = problems.join( QStringLiteral( "; " ) );
+
+    // Success only when at least one channel's *this* write succeeded — never
+    // infer success from QFileInfo::exists() (stale sidecar after QSaveFile fail).
+    return sideWriteOk || xmlWriteOk;
 }
 
 bool restoreMissionContextWithProject( const QString &projectFilePath, const QDomDocument &document,

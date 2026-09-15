@@ -275,3 +275,52 @@ TEST_CASE( "classification path product upgrades provisional result", "[d18][mis
   REQUIRE( ctx.metadata.value( QStringLiteral( "artifact_paths" ) ).toObject().contains( product.id ) );
   REQUIRE( ctx.selection.resultIds.contains( product.id ) );
 }
+
+TEST_CASE( "persist refuses success when sidecar write fails and stale sidecar remains",
+           "[d18][mission][persist][994]" )
+{
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString project = dir.filePath( QStringLiteral( "demo.qgs" ) );
+  {
+    QFile touch( project );
+    REQUIRE( touch.open( QIODevice::WriteOnly ) );
+    touch.write( "<qgis/>" );
+  }
+
+  MissionContext stale;
+  stale.missionName = QStringLiteral( "stale-sidecar" );
+  QDomDocument doc;
+  REQUIRE( doc.setContent( QStringLiteral( "<qgis></qgis>" ) ) );
+  QString err;
+  REQUIRE( sicnu::app::persistMissionContextWithProject( project, doc, stale, &err ) );
+  const QString side = sicnu::app::missionSidecarPathForProject( project );
+  REQUIRE( QFileInfo::exists( side ) );
+
+  // Freeze the directory so QSaveFile cannot replace the sidecar and QFile::remove
+  // cannot clear it either — mirrors the false-success + restore-shadow hazard.
+  const QFileDevice::Permissions prior = QFile::permissions( dir.path() );
+  REQUIRE( QFile::setPermissions(
+    dir.path(),
+    QFileDevice::ReadOwner | QFileDevice::ExeOwner | QFileDevice::ReadUser
+      | QFileDevice::ExeUser | QFileDevice::ReadGroup | QFileDevice::ExeGroup
+      | QFileDevice::ReadOther | QFileDevice::ExeOther ) );
+
+  MissionContext newer;
+  newer.missionName = QStringLiteral( "fresh-in-xml" );
+  QDomDocument doc2;
+  REQUIRE( doc2.setContent( QStringLiteral( "<qgis></qgis>" ) ) );
+  err.clear();
+  const bool ok = sicnu::app::persistMissionContextWithProject( project, doc2, newer, &err );
+
+  REQUIRE( QFile::setPermissions( dir.path(), prior ) );
+
+  REQUIRE_FALSE( ok );
+  REQUIRE( err.contains( QStringLiteral( "sidecar" ) ) );
+  REQUIRE( QFileInfo::exists( side ) );
+
+  MissionContext loaded;
+  QString loadErr;
+  REQUIRE( sicnu::app::loadMissionContextFromSidecar( project, loaded, &loadErr ) );
+  REQUIRE( loaded.missionName == QLatin1String( "stale-sidecar" ) );
+}

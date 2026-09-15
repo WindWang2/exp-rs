@@ -325,6 +325,23 @@ TEST_CASE( "D19 hermetic foundry→benchmark→experiment chain",
     qaArgs.insert( QStringLiteral( "split_manifest_id" ), fx.splitId );
     auto qaTool = sicnu::agent::handleDataPlatformTool( QStringLiteral( "dataset:qa" ), qaArgs );
     CHECK( qaTool.contains( QStringLiteral( "overall" ) ) );
+    CHECK( qaTool.contains( QStringLiteral( "scanned" ) ) );
+    CHECK( qaTool.contains( QStringLiteral( "scan_capped" ) ) );
+    CHECK( qaTool.contains( QStringLiteral( "sample_count" ) ) );
+    CHECK( qaTool.value( QStringLiteral( "sample_count" ) ).toLongLong() >= 1 );
+    // Labels must not claim Pass when the agent façade did not run label QA.
+    bool sawLabelsUnknown = false;
+    const QVariantList cats = qaTool.value( QStringLiteral( "categories" ) ).toList();
+    for ( const QVariant &c : cats )
+    {
+        const QVariantMap cat = c.toMap();
+        if ( cat.value( QStringLiteral( "name" ) ).toString() == QLatin1String( "labels" ) )
+        {
+            sawLabelsUnknown =
+                cat.value( QStringLiteral( "verdict" ) ).toString() == QLatin1String( "unknown" );
+        }
+    }
+    CHECK( sawLabelsUnknown );
 
     QVariantMap sampleArgs = qaArgs;
     sampleArgs.insert( QStringLiteral( "limit" ), 10 );
