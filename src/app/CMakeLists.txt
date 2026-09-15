@@ -127,6 +127,8 @@ add_executable(sicnu_geo_rs
     workbench/workbench_state.cpp
     # Workbench 10.0 (unified object identity, agent context projection)
     workbench/object_identity.cpp
+    # D15 classification-change-studio studio seam
+    workbench/classification_studio_widget.cpp
     workbench/agent_context_tool.cpp
     workbench/command_registry.cpp
     workbench/plugin_command_defs.cpp

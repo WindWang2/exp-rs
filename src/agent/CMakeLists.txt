@@ -2,6 +2,9 @@
 add_library(sicnu_agent SHARED
   output_verifier.cpp
   output_verifier.h
+  # D15 classification-change-studio: agent diagnosis seam
+  tools/classification_tool.cpp
+  tools/classification_tool.h
   data_platform_tools.cpp
   data_platform_tools.h
   workspace_snapshot.cpp

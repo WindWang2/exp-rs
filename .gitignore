@@ -264,3 +264,7 @@ data/labs/_tmp/
 !.planning/workflow-pipeline-designer/
 .planning/workflow-pipeline-designer/*
 !.planning/workflow-pipeline-designer/*.md
+# classification-change-studio (D15): track planning notes (markdown only; logs stay local).
+!.planning/classification-change-studio/
+.planning/classification-change-studio/*
+!.planning/classification-change-studio/*.md
