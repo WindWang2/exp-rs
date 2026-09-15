@@ -27,6 +27,7 @@
 | 8 | **Oracle 6 双验证**（同命令连续两遍） | 0 | **RUN 1 = 83/83，RUN 2 = 83/83** |
 | 8+ | `EXP_MOSAIC_SCALE_E2E=1` opt-in 重量级 E2E | 0 | All tests passed（3 断言） |
 | 8+ | `./test_perf_fusion`（融合基准+正确性回归） | 0 | 12135 assertions passed |
+| 8+ | 新增 test_quality_mosaic_registration（registry 工厂路径接线，替代被 master 阻塞的 test_rs_operators 对本算子的覆盖） | 0 | 全套 **84/84** |
 
 ## OUT_OF_SCOPE
 

@@ -9439,6 +9439,25 @@ foreach(_f15_test
   sicnu_discover_tests(${_f15_test} TEST_PREFIX "${_f15_test}::")
 endforeach()
 
+# F15: rs:quality_mosaic registry-path wiring test.
+add_executable(test_quality_mosaic_registration test_quality_mosaic_registration.cpp)
+target_link_libraries(test_quality_mosaic_registration PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_quality_mosaic_registration PRIVATE jsoncpp)
+endif()
+target_include_directories(test_quality_mosaic_registration PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_quality_mosaic_registration TEST_PREFIX "test_quality_mosaic_registration::")
+
 # F15: rs:quality_mosaic operator E2E (GDAL fixtures, provenance, report).
 add_executable(test_quality_mosaic_operator test_quality_mosaic_operator.cpp)
 target_link_libraries(test_quality_mosaic_operator PRIVATE

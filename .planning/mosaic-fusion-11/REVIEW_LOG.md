@@ -37,6 +37,6 @@
 
 - P0 = 0，P1 = 0（F1/F3/F4 已修复并有回归覆盖；F2 有据驳回）。
 - P2 全部 fixed/mitigated+documented；P3 全部 fixed。
-- 修复后全量 suite：**83/83 passed**（clean rebuild；ctest 用例级选择，-j1，offscreen）。
+- 修复后全量 suite：**84/84 passed**（追加 registry 接线回归 test_quality_mosaic_registration）（clean rebuild；ctest 用例级选择，-j1，offscreen）。
 - 既有套件 test_pansharpening / test_capability_* 因 master #1000 的 pre-existing
   sicnu_agent 编译失败无法在本 worktree 构建（对照证明见 EVIDENCE.md P0 out-of-scope 节）。
