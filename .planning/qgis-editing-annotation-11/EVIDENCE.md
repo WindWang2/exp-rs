@@ -77,6 +77,11 @@ test_edit_session, test_edit_snapping, test_edit_validity, test_edit_sample_tool
   track's integration TU (`main_window_workbench.cpp` with the F11 mount) compiles standalone with
   the app's exact flags (TU_EXIT=0, 0 errors); every `test_edit_*` target builds and passes.
 - PR created from `.planning/qgis-editing-annotation-11/PR_BODY.md`; not merged; no CI awaited.
+- Push/PR network note: github git/api endpoints dropped TLS handshakes for ~1 h (curl to the bare
+  host still worked; EOF on push/ls-remote/api). A detached retry loop pushed successfully on
+  recovery at 06:54:56 and `gh pr create` completed → **https://github.com/WindWang2/exp-rs/pull/1013**.
+  Full log: /tmp/f11_push.log (also mirrored in the ledger). Force-push was never used; the branch
+  landed as a linear child of the baseline.
 
 ## OUT_OF_SCOPE
 
