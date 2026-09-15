@@ -1,0 +1,208 @@
+{
+  "version": "2.0",
+  "workflowId": "wf-band-001",
+  "name": "Band split and merge",
+  "description": "two indices stacked",
+  "metadata": {},
+  "nodes": [
+    {
+      "nodeId": "split_src",
+      "operatorId": "rs:import_raster",
+      "displayName": "Multispectral source",
+      "parameters": {},
+      "canvasPosition": {
+        "x": 0,
+        "y": 0
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "portName": "nir",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": false
+        },
+        {
+          "portName": "red",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "split_ndvi",
+      "operatorId": "rs:spectral_index",
+      "displayName": "NDVI",
+      "parameters": {
+        "index": "NDVI"
+      },
+      "canvasPosition": {
+        "x": 220,
+        "y": 0
+      },
+      "inputPorts": [
+        {
+          "portName": "nir",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": true
+        },
+        {
+          "portName": "red",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "Index",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "split_ndwi",
+      "operatorId": "rs:spectral_index",
+      "displayName": "NDWI",
+      "parameters": {
+        "index": "NDWI"
+      },
+      "canvasPosition": {
+        "x": 220,
+        "y": 160
+      },
+      "inputPorts": [
+        {
+          "portName": "nir",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": true
+        },
+        {
+          "portName": "green",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": false
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "Index",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "split_merge",
+      "operatorId": "rs:stack_bands",
+      "displayName": "Stack indices",
+      "parameters": {},
+      "canvasPosition": {
+        "x": 440,
+        "y": 80
+      },
+      "inputPorts": [
+        {
+          "portName": "band_a",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "Index",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": true
+        },
+        {
+          "portName": "band_b",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "Index",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "Index",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 2,
+          "isRequired": false
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "b_e1",
+      "sourceNodeId": "split_src",
+      "sourcePortName": "nir",
+      "targetNodeId": "split_ndvi",
+      "targetPortName": "nir"
+    },
+    {
+      "edgeId": "b_e2",
+      "sourceNodeId": "split_src",
+      "sourcePortName": "red",
+      "targetNodeId": "split_ndvi",
+      "targetPortName": "red"
+    },
+    {
+      "edgeId": "b_e3",
+      "sourceNodeId": "split_ndvi",
+      "sourcePortName": "output",
+      "targetNodeId": "split_merge",
+      "targetPortName": "band_a"
+    },
+    {
+      "edgeId": "b_e4",
+      "sourceNodeId": "split_ndwi",
+      "sourcePortName": "output",
+      "targetNodeId": "split_merge",
+      "targetPortName": "band_b"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "kind": "workflow_ir",
+  "schema_version": "1.0",
+  "nodes": [
+    {
+      "id": "bad_node",
+      "operator": "rs:spectral_index",
+      "inputs": [
+        {
+          "node": "ghost_upstream",
+          "output": "output",
+          "as": "input"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "artifact": {
+            "kind": "raster"
+          }
+        }
+      ]
+    }
+  ],
+  "outputs": []
+}

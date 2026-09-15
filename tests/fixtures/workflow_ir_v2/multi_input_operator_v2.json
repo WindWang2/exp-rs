@@ -1,0 +1,119 @@
+{
+  "version": "2.0",
+  "workflowId": "wf-fuse-001",
+  "name": "Pansharpen fusion",
+  "description": "pan + ms -> fusion",
+  "metadata": {},
+  "nodes": [
+    {
+      "nodeId": "fuse_pan",
+      "operatorId": "rs:import_raster",
+      "displayName": "Panchromatic",
+      "parameters": {
+        "band": "pan"
+      },
+      "canvasPosition": {
+        "x": 0,
+        "y": 0
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "DN",
+          "resolutionX": 2.5,
+          "resolutionY": 2.5,
+          "bandCount": 1,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "fuse_ms",
+      "operatorId": "rs:import_raster",
+      "displayName": "Multispectral",
+      "parameters": {
+        "band": "ms"
+      },
+      "canvasPosition": {
+        "x": 0,
+        "y": 160
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "DN",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 4,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "fuse_op",
+      "operatorId": "rs:gs_fusion",
+      "displayName": "Gram-Schmidt fusion",
+      "parameters": {},
+      "canvasPosition": {
+        "x": 220,
+        "y": 80
+      },
+      "inputPorts": [
+        {
+          "portName": "pan",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "DN",
+          "resolutionX": 2.5,
+          "resolutionY": 2.5,
+          "bandCount": 1,
+          "isRequired": true
+        },
+        {
+          "portName": "ms",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "DN",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 4,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "DN",
+          "resolutionX": 2.5,
+          "resolutionY": 2.5,
+          "bandCount": 4,
+          "isRequired": false
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "m_e1",
+      "sourceNodeId": "fuse_pan",
+      "sourcePortName": "output",
+      "targetNodeId": "fuse_op",
+      "targetPortName": "pan"
+    },
+    {
+      "edgeId": "m_e2",
+      "sourceNodeId": "fuse_ms",
+      "sourcePortName": "output",
+      "targetNodeId": "fuse_op",
+      "targetPortName": "ms"
+    }
+  ]
+}

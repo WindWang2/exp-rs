@@ -1,0 +1,206 @@
+{
+  "version": "2.0",
+  "workflowId": "wf-fan-001",
+  "name": "Wide fanout",
+  "description": "one source, four consumers",
+  "metadata": {},
+  "nodes": [
+    {
+      "nodeId": "fan_src",
+      "operatorId": "rs:import_raster",
+      "displayName": "Fan source",
+      "parameters": {},
+      "canvasPosition": {
+        "x": 0,
+        "y": 0
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "fan_c1",
+      "operatorId": "rs:spatial_filter",
+      "displayName": "Consumer 1",
+      "parameters": {
+        "kernel": "mean"
+      },
+      "canvasPosition": {
+        "x": 220,
+        "y": 0
+      },
+      "inputPorts": [
+        {
+          "portName": "input",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "fan_c2",
+      "operatorId": "rs:spatial_filter",
+      "displayName": "Consumer 2",
+      "parameters": {
+        "kernel": "mean"
+      },
+      "canvasPosition": {
+        "x": 220,
+        "y": 140
+      },
+      "inputPorts": [
+        {
+          "portName": "input",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "fan_c3",
+      "operatorId": "rs:spatial_filter",
+      "displayName": "Consumer 3",
+      "parameters": {
+        "kernel": "mean"
+      },
+      "canvasPosition": {
+        "x": 220,
+        "y": 280
+      },
+      "inputPorts": [
+        {
+          "portName": "input",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "fan_c4",
+      "operatorId": "rs:spatial_filter",
+      "displayName": "Consumer 4",
+      "parameters": {
+        "kernel": "mean"
+      },
+      "canvasPosition": {
+        "x": 220,
+        "y": 420
+      },
+      "inputPorts": [
+        {
+          "portName": "input",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:4326",
+          "radiometricState": "BOA",
+          "resolutionX": 30.0,
+          "resolutionY": 30.0,
+          "bandCount": 1,
+          "isRequired": false
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "f_e1",
+      "sourceNodeId": "fan_src",
+      "sourcePortName": "output",
+      "targetNodeId": "fan_c1",
+      "targetPortName": "input"
+    },
+    {
+      "edgeId": "f_e2",
+      "sourceNodeId": "fan_src",
+      "sourcePortName": "output",
+      "targetNodeId": "fan_c2",
+      "targetPortName": "input"
+    },
+    {
+      "edgeId": "f_e3",
+      "sourceNodeId": "fan_src",
+      "sourcePortName": "output",
+      "targetNodeId": "fan_c3",
+      "targetPortName": "input"
+    },
+    {
+      "edgeId": "f_e4",
+      "sourceNodeId": "fan_src",
+      "sourcePortName": "output",
+      "targetNodeId": "fan_c4",
+      "targetPortName": "input"
+    }
+  ]
+}

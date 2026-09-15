@@ -1,0 +1,79 @@
+{
+  "kind": "workflow_ir",
+  "schema_version": "1.0",
+  "ir_id": "wir-abc123",
+  "goal": "NDVI over GF-1 scene",
+  "intent": "spectral_index",
+  "inputs": [
+    {
+      "name": "scene",
+      "reference": "asset-gf1-001",
+      "artifact": {
+        "kind": "raster",
+        "crs": "EPSG:32649",
+        "numeric_domain": "dn"
+      }
+    }
+  ],
+  "nodes": [
+    {
+      "id": "v1_import",
+      "operator": "rs:import_raster",
+      "params": {
+        "sensor": "GF-1"
+      },
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "output",
+          "artifact": {
+            "kind": "raster",
+            "crs": "EPSG:32649",
+            "numeric_domain": "dn",
+            "resolution_m": 10.0,
+            "bands": 4
+          }
+        }
+      ]
+    },
+    {
+      "id": "v1_ndvi",
+      "operator": "rs:spectral_index",
+      "params": {
+        "index": "NDVI"
+      },
+      "inputs": [
+        {
+          "node": "v1_import",
+          "output": "output",
+          "as": "input"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output",
+          "artifact": {
+            "kind": "raster",
+            "crs": "EPSG:32649",
+            "numeric_domain": "index",
+            "resolution_m": 10.0,
+            "bands": 1
+          }
+        }
+      ]
+    }
+  ],
+  "outputs": [
+    {
+      "name": "ndvi_map",
+      "node": "v1_ndvi",
+      "port": "output",
+      "kind": "raster",
+      "semantic": "NDVI map"
+    }
+  ],
+  "expectations": {
+    "max_ram_mb": 4096,
+    "deterministic": true
+  }
+}

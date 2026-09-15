@@ -1,0 +1,178 @@
+{
+  "version": "2.0",
+  "workflowId": "wf-postcls-001",
+  "name": "Post-classification chain",
+  "description": "classify->sieve->recode->stats",
+  "metadata": {},
+  "nodes": [
+    {
+      "nodeId": "pc_classify",
+      "operatorId": "rs:random_forest_classify",
+      "displayName": "Classify",
+      "parameters": {
+        "trees": 100
+      },
+      "canvasPosition": {
+        "x": 0,
+        "y": 0
+      },
+      "inputPorts": [
+        {
+          "portName": "input",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "BOA",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 4,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "Categorical",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 1,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "pc_sieve",
+      "operatorId": "rs:majority_filter",
+      "displayName": "Sieve",
+      "parameters": {
+        "min_size": 3
+      },
+      "canvasPosition": {
+        "x": 220,
+        "y": 0
+      },
+      "inputPorts": [
+        {
+          "portName": "input",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "Categorical",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 1,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "Categorical",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 1,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "pc_recode",
+      "operatorId": "rs:recode",
+      "displayName": "Recode classes",
+      "parameters": {
+        "table": [
+          1,
+          2,
+          3
+        ]
+      },
+      "canvasPosition": {
+        "x": 440,
+        "y": 0
+      },
+      "inputPorts": [
+        {
+          "portName": "input",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "Categorical",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 1,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "Categorical",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 1,
+          "isRequired": false
+        }
+      ]
+    },
+    {
+      "nodeId": "pc_stats",
+      "operatorId": "rs:zonal_stats",
+      "displayName": "Area stats",
+      "parameters": {},
+      "canvasPosition": {
+        "x": 660,
+        "y": 0
+      },
+      "inputPorts": [
+        {
+          "portName": "input",
+          "dataType": "Raster",
+          "crs": "EPSG:32649",
+          "radiometricState": "Categorical",
+          "resolutionX": 10.0,
+          "resolutionY": 10.0,
+          "bandCount": 1,
+          "isRequired": true
+        }
+      ],
+      "outputPorts": [
+        {
+          "portName": "output",
+          "dataType": "Table",
+          "crs": "*",
+          "radiometricState": "None",
+          "resolutionX": 0.0,
+          "resolutionY": 0.0,
+          "bandCount": 0,
+          "isRequired": false
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "edgeId": "p_e1",
+      "sourceNodeId": "pc_classify",
+      "sourcePortName": "output",
+      "targetNodeId": "pc_sieve",
+      "targetPortName": "input"
+    },
+    {
+      "edgeId": "p_e2",
+      "sourceNodeId": "pc_sieve",
+      "sourcePortName": "output",
+      "targetNodeId": "pc_recode",
+      "targetPortName": "input"
+    },
+    {
+      "edgeId": "p_e3",
+      "sourceNodeId": "pc_recode",
+      "sourcePortName": "output",
+      "targetNodeId": "pc_stats",
+      "targetPortName": "input"
+    }
+  ]
+}

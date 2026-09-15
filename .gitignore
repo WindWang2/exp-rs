@@ -260,3 +260,7 @@ data/labs/_tmp/
 !.planning/temporal-phenology-timeline/
 .planning/temporal-phenology-timeline/*
 !.planning/temporal-phenology-timeline/*.md
+# workflow-pipeline-designer (D17): track planning notes (markdown only; logs stay local).
+!.planning/workflow-pipeline-designer/
+.planning/workflow-pipeline-designer/*
+!.planning/workflow-pipeline-designer/*.md
