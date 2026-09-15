@@ -41,6 +41,8 @@ set(SICNU_GEOSPATIAL_SOURCES
     products/cn_product_metadata.cpp
     products/cn_product_adapters.cpp
     doctor/data_doctor.cpp
+    doctor/env_doctor.cpp
+    doctor/env_doctor.h
     multidim/multidim_view.cpp
     multidim/multidim_cube.cpp
     # Cloud-Native Data Fabric / Data Cube 10.0
