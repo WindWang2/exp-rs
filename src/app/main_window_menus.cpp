@@ -380,6 +380,10 @@ void QgisDesktopWindow::setupMenu()
                              tr( "Image to Map (I2M)..." ),
                              this, &QgisDesktopWindow::openGeorefImageToMap ),
          tr( "Source image + main-project map picking; RPC Physical supported." ) );
+    tip( regMenu->addAction( ic( "coregistr_tion" ),
+                             tr( "Dual-Window Geometric Registration..." ),
+                             this, &QgisDesktopWindow::openGeorefDualWindow ),
+         tr( "D14 linked dual-canvas GCP registration with residual arrows; publishes Result into MissionContext." ) );
     preprocessMenu->addSeparator();
 
     tip( preprocessMenu->addAction( ic( "mos_ic" ), tr( "Mosaic..." ),
@@ -440,10 +444,16 @@ void QgisDesktopWindow::setupMenu()
     tip( analysisMenu->addAction( ic( "veget_tion_index" ), tr( "Time Series Analysis..." ),
                                       this, &QgisDesktopWindow::openTemporalAnalysisDialog ),
          tr( "Multitemporal statistics / compositing / index time series / trends / anomalies / point and ROI series (with scientific prechecks)." ) );
+    tip( analysisMenu->addAction( ic( "model_builder" ), tr( "Workflow Designer (IR 2.0)..." ),
+                                  this, &QgisDesktopWindow::showIr2PipelineDesigner ),
+         tr( "D17 node-graph designer (Workflow IR 2.0); shares workflow id/fingerprint with MissionContext/Agent." ) );
 
     analysisMenu->addSeparator();
     QMenu *classifyMenu = makeMenu( analysisMenu->addMenu( tr( "Classification" ) ) );
     setMenuIcon( classifyMenu, ic( "su_ervised" ) );
+    tip( classifyMenu->addAction( ic( "su_ervised" ), tr( "Classification / Change Studio..." ),
+                                  this, &QgisDesktopWindow::openClassificationStudio ),
+         tr( "D15 interactive studio (magic wand, density scatter); binds MissionContext input/result refs." ) );
 #ifdef SICNU_HAS_CLASSIFY
     tip( classifyMenu->addAction( ic( "su_ervised" ), tr( "Supervised Classification (pixel level)..." ),
                                   this, &QgisDesktopWindow::openClassificationWindow ),

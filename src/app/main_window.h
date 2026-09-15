@@ -36,6 +36,7 @@ class SecondaryMapViewWidget;
 class QPainter;
 
 #include "display/qgis_display_manager.h"
+#include "app/workbench/mission_context.h"
 class QTextBrowser;
 class LayerTreeMenuProvider;
 class QgsBrowserDockWidget;
@@ -45,6 +46,14 @@ class RsRoiSpectrumTool;
 class QgsGeoreferencerMainWindow;
 class QgsGeorefImageToMapWindow;
 class QgsClassificationMainWindow;
+namespace rs::app {
+class GeorefDualWindow;
+class ClassificationStudioWidget;
+}
+namespace sicnu::app::pipeline {
+class Ir2PipelineDesignerDock;
+}
+
 class QgsAdvancedDigitizingDockWidget;
 class QgsMessageBar;
 class QgsMapToolSelect;
@@ -324,6 +333,21 @@ public:
     void openGeoreferencer(); ///< Compatibility alias → openGeorefImageToImage()
     void openGeorefImageToImage();
     void openGeorefImageToMap();
+    /** D14 dual-window geometric registration workbench (MissionContext-aware). */
+    void openGeorefDualWindow();
+    /** D15 classification / change studio widget (MissionContext-aware). */
+    void openClassificationStudio();
+    /** D17 IR 2.0 pipeline designer dock (production mount). */
+    void showIr2PipelineDesigner();
+
+    /// Live mission session aggregate (value; no QObject pointers).
+    const sicnu::app::MissionContext &missionContext() const { return m_mission; }
+    sicnu::app::MissionContext &missionContext() { return m_mission; }
+
+    /// Publish a studio output into the mission and optionally load it as a layer.
+    /// Returns the published Result ref (null if path empty).
+    sicnu::app::WorkbenchObjectRef publishStudioResultToMission( const QString &path,
+                                                                 const QString &displayName = {} );
     /** Show / raise the Data Manager catalog dock (left, tabified with Layers). */
     void showDataManagerPanel();
 
@@ -550,9 +574,19 @@ private:
     // Image Registration windows (lazy-constructed singletons)
     QgsGeoreferencerMainWindow *m_georefI2I = nullptr;
     QgsGeorefImageToMapWindow *m_georefI2M = nullptr;
+    rs::app::GeorefDualWindow *m_georefDual = nullptr;
 
     // Classification window (lazy-constructed) — Phase 10A Task 10.2
     QgsClassificationMainWindow *m_classifyWindow = nullptr;
+    /// D15 studio shell hosted in a lightweight QMainWindow wrapper.
+    QMainWindow *m_classificationStudioWindow = nullptr;
+    rs::app::ClassificationStudioWidget *m_classificationStudio = nullptr;
+
+    /// D17 IR 2.0 designer (production); separate from Engine 2.0 PipelineEditorDock.
+    sicnu::app::pipeline::Ir2PipelineDesignerDock *m_ir2PipelineDock = nullptr;
+
+    /// D18 mission session (persisted via sidecar on project save follow-up).
+    sicnu::app::MissionContext m_mission;
 
     // OBIA window (lazy-constructed) — Phase 10B Task 10B.5
     QMainWindow *m_obiaWindow = nullptr;

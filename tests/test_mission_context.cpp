@@ -177,3 +177,37 @@ TEST_CASE( "mission sidecar save/load round-trip", "[d18][mission][persist]" )
   REQUIRE( loaded.assets.front().id == QLatin1String( "a" ) );
   REQUIRE( !loaded.missionId.isEmpty() );
 }
+
+TEST_CASE( "mission_context publish result from path is stable and idempotent", "[d18][mission]" )
+{
+  MissionContext ctx;
+  sicnu::app::ensureMissionId( ctx );
+  const auto a = sicnu::app::publishMissionResultFromPath(
+    ctx, QStringLiteral( "/tmp/aligned.tif" ), QStringLiteral( "aligned" ) );
+  REQUIRE( !a.isNull() );
+  REQUIRE( a.kind == ObjectKind::Result );
+  REQUIRE( a.id.startsWith( QLatin1String( "result-" ) ) );
+  REQUIRE( ctx.results.size() == 1 );
+  REQUIRE( ctx.selection.resultIds.contains( a.id ) );
+  REQUIRE( ctx.metadata.value( QStringLiteral( "artifact_paths" ) ).toObject().contains( a.id ) );
+
+  const auto b = sicnu::app::publishMissionResultFromPath(
+    ctx, QStringLiteral( "/tmp/aligned.tif" ), QStringLiteral( "aligned-again" ) );
+  REQUIRE( b.id == a.id );
+  REQUIRE( ctx.results.size() == 1 );
+  REQUIRE( ctx.results.front().displayName == QLatin1String( "aligned-again" ) );
+}
+
+TEST_CASE( "mission_context set active workflow shared identity", "[d18][mission]" )
+{
+  MissionContext ctx;
+  sicnu::app::ActiveWorkflowRef wf;
+  wf.workflowId = QStringLiteral( "wf-ir2" );
+  wf.schemaVersion = QStringLiteral( "2.0" );
+  wf.fingerprint = QStringLiteral( "deadbeef" );
+  wf.runner = QStringLiteral( "pipeline_run_coordinator" );
+  sicnu::app::setMissionActiveWorkflow( ctx, wf );
+  REQUIRE( !ctx.missionId.isEmpty() );
+  REQUIRE( ctx.activeWorkflow.workflowId == QLatin1String( "wf-ir2" ) );
+  REQUIRE( ctx.activeWorkflow.fingerprint == QLatin1String( "deadbeef" ) );
+}

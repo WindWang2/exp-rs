@@ -162,6 +162,17 @@ add_executable(sicnu_geo_rs
     workflow/pipeline_canvas_widget.cpp
     workflow/preset_catalog_widget.cpp
     workflow/pipeline_editor_dock.cpp
+
+    # D17 IR 2.0 designer stack — production mount (D18). Lives under
+    # app/pipeline/* and only includes workflow_ir_v2.h (not Engine 2.0
+    # workflow_definition.h) to avoid the dual WorkflowDefinition name clash.
+    pipeline/pipeline_port_item.cpp
+    pipeline/pipeline_connection_item.cpp
+    pipeline/pipeline_node_item.cpp
+    pipeline/pipeline_scene.cpp
+    pipeline/pipeline_canvas_widget.cpp
+    pipeline/ir2_pipeline_designer_dock.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_ir_v2.cpp
     layer_tree_menu.cpp
     crs_presets.cpp
     log_panel.cpp

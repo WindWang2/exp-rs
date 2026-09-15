@@ -424,6 +424,37 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         registry->registerCommand( d );
     }
     {
+        RS_CMD( d, "workbench.georefDual", QObject::tr( "Dual-Window Geometric Registration..." ),
+                QObject::tr( "D14 linked dual-canvas GCP registration; publishes Result into MissionContext." ),
+                "coregistr_tion", QObject::tr( "Workspace" ) );
+        d.handler = [window] {
+            if ( sicnu::app::WorkbenchHost *host = window->workbenchHost() )
+                host->activate( QStringLiteral( "georef-dual" ) );
+            else
+                window->openGeorefDualWindow();
+        };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "workbench.classifyStudio", QObject::tr( "Classification / Change Studio..." ),
+                QObject::tr( "D15 interactive studio; binds MissionContext input/result refs." ),
+                "su_ervised", QObject::tr( "Workspace" ) );
+        d.handler = [window] {
+            if ( sicnu::app::WorkbenchHost *host = window->workbenchHost() )
+                host->activate( QStringLiteral( "classify-studio" ) );
+            else
+                window->openClassificationStudio();
+        };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "workbench.ir2Pipeline", QObject::tr( "Workflow Designer (IR 2.0)..." ),
+                QObject::tr( "D17 IR 2.0 node-graph designer; shares workflow identity with MissionContext/Agent." ),
+                "model_builder", QObject::tr( "Workspace" ) );
+        d.handler = [window] { window->showIr2PipelineDesigner(); };
+        registry->registerCommand( d );
+    }
+    {
         RS_CMD( d, "workbench.obia", QObject::tr( "Object-Based Classification (OBIA)..." ),
                 QObject::tr( "Segmentation + object features + object-based classification." ),
                 "seg_ent_tion", QObject::tr( "Workspace" ) );

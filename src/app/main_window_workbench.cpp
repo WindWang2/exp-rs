@@ -255,6 +255,36 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
         m_workbenchHost->registerWorkbench( bench );
     }
 
+    {
+        auto *bench = new sicnu::app::ExternalWindowWorkbench(
+            QStringLiteral( "georef-dual" ), tr( "Dual-Window Geometric Registration" ),
+            QStringLiteral( "coregistr_tion" ),
+            [this] { openGeorefDualWindow(); }, m_workbenchHost );
+        bench->setWindowGetter( [this]() -> QWidget * { return m_georefDual; } );
+        bench->setCloseFn( [this] {
+            if ( !m_georefDual )
+                return true;
+            m_georefDual->close();
+            return !m_georefDual->isVisible();
+        } );
+        m_workbenchHost->registerWorkbench( bench );
+    }
+
+    {
+        auto *bench = new sicnu::app::ExternalWindowWorkbench(
+            QStringLiteral( "classify-studio" ), tr( "Classification / Change Studio" ),
+            QStringLiteral( "su_ervised" ),
+            [this] { openClassificationStudio(); }, m_workbenchHost );
+        bench->setWindowGetter( [this]() -> QWidget * { return m_classificationStudioWindow; } );
+        bench->setCloseFn( [this] {
+            if ( !m_classificationStudioWindow )
+                return true;
+            m_classificationStudioWindow->close();
+            return !m_classificationStudioWindow->isVisible();
+        } );
+        m_workbenchHost->registerWorkbench( bench );
+    }
+
     // The OBIA window exposes no dirty/in-flight state yet — the bench still
     // gains lifetime tracking and close delegation (#813 baseline).
     {
@@ -553,11 +583,17 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
                 Json::Value payload = sicnu::app::workbenchContextToJson(
                     snap, self->m_commandRegistry->commandIds() );
                 // D18: bounded mission summary for Agent grounding (GOAL §9).
+                // Prefer the live session mission (studio publishes + IR2 identity),
+                // then overlay the current selection projection.
                 sicnu::app::MissionContext mission =
-                    sicnu::app::missionContextFromSelection( snap );
+                    sicnu::app::missionContextFromSelection( snap, self->m_mission );
                 if ( self->m_temporalPanel )
                     mission.temporal = self->m_temporalPanel->exportTemporalContext();
-                sicnu::app::ensureMissionId( mission );
+                if ( !self->m_mission.activeWorkflow.isNull() )
+                    mission.activeWorkflow = self->m_mission.activeWorkflow;
+                self->m_mission = mission;
+                sicnu::app::ensureMissionId( self->m_mission );
+                mission = self->m_mission;
                 const QJsonObject summary = sicnu::app::missionSummaryJson( mission );
                 const QByteArray bytes =
                     QJsonDocument( summary ).toJson( QJsonDocument::Compact );

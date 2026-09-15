@@ -406,4 +406,98 @@ void ensureMissionId( MissionContext &ctx )
         ctx.missionId = QUuid::createUuid().toString( QUuid::WithoutBraces );
 }
 
+namespace {
+
+QVector<WorkbenchObjectRef> *listForKind( MissionContext &ctx, ObjectKind kind )
+{
+    switch ( kind )
+    {
+        case ObjectKind::Layer:
+            return &ctx.layers;
+        case ObjectKind::Asset:
+            return &ctx.assets;
+        case ObjectKind::Result:
+            return &ctx.results;
+        case ObjectKind::Dataset:
+            return &ctx.datasets;
+        case ObjectKind::ExperimentRun:
+            return &ctx.experiments;
+        case ObjectKind::Model:
+            return &ctx.models;
+        case ObjectKind::WorkflowRun:
+            return &ctx.workflowRuns;
+        case ObjectKind::None:
+            break;
+    }
+    return nullptr;
+}
+
+} // namespace
+
+void publishMissionObject( MissionContext &ctx, const WorkbenchObjectRef &ref )
+{
+    if ( ref.isNull() )
+        return;
+    ensureMissionId( ctx );
+    QVector<WorkbenchObjectRef> *list = listForKind( ctx, ref.kind );
+    if ( !list )
+        return;
+    for ( auto &existing : *list )
+    {
+        if ( existing.kind == ref.kind && existing.id == ref.id )
+        {
+            if ( !ref.displayName.isEmpty() )
+                existing.displayName = ref.displayName;
+            return;
+        }
+    }
+    list->push_back( ref );
+
+    // Keep selection projection coherent for Agent summaries.
+    if ( ref.kind == ObjectKind::Result && !ctx.selection.resultIds.contains( ref.id ) )
+        ctx.selection.resultIds.append( ref.id );
+    if ( ref.kind == ObjectKind::Layer && !ctx.selection.layerIds.contains( ref.id ) )
+        ctx.selection.layerIds.append( ref.id );
+    if ( ref.kind == ObjectKind::WorkflowRun && !ctx.selection.workflowRunIds.contains( ref.id ) )
+        ctx.selection.workflowRunIds.append( ref.id );
+}
+
+WorkbenchObjectRef publishMissionResultFromPath( MissionContext &ctx, const QString &path,
+                                                 const QString &displayName, const QString &resultId )
+{
+    WorkbenchObjectRef ref;
+    if ( path.isEmpty() && resultId.isEmpty() )
+        return ref;
+
+    ref.kind = ObjectKind::Result;
+    if ( !resultId.isEmpty() )
+        ref.id = resultId;
+    else
+    {
+        const QByteArray digest = QCryptographicHash::hash( path.toUtf8(), QCryptographicHash::Sha256 );
+        ref.id = QStringLiteral( "result-" ) + QString::fromLatin1( digest.toHex().left( 16 ) );
+    }
+    ref.displayName = displayName.isEmpty() ? path.section( QLatin1Char( '/' ), -1 ) : displayName;
+    publishMissionObject( ctx, ref );
+
+    QJsonObject paths = ctx.metadata.value( QStringLiteral( "artifact_paths" ) ).toObject();
+    if ( !path.isEmpty() )
+        paths.insert( ref.id, path );
+    ctx.metadata.insert( QStringLiteral( "artifact_paths" ), paths );
+    return ref;
+}
+
+void publishMissionLayer( MissionContext &ctx, const WorkbenchObjectRef &layerRef )
+{
+    if ( layerRef.isNull() || layerRef.kind != ObjectKind::Layer )
+        return;
+    publishMissionObject( ctx, layerRef );
+}
+
+void setMissionActiveWorkflow( MissionContext &ctx, const ActiveWorkflowRef &workflow )
+{
+    ensureMissionId( ctx );
+    ctx.activeWorkflow = workflow;
+}
+
 } // namespace sicnu::app

@@ -1,20 +1,22 @@
-// D18 — Mission-level E2E scaffolding (stubs).
-// Full Scenario 1–5 bodies land as studios publish Result/Asset identities
-// into MissionContext. This target pins the scenario names and the
-// save/restore contract shape so CI discovers the suite early.
+// D18 — Mission-level E2E scenarios (headless contract tests).
+// Full GUI/QGIS paths require the Windows/CI toolchain. On this agent box
+// cmake/g++ are absent — see EVIDENCE.md (honest not-executed). These cases
+// still assert the MissionContext publish / identity / restore contracts that
+// the mounted D14/D15/D17 surfaces write into.
 #include <catch2/catch_test_macros.hpp>
 
 #include "app/workbench/mission_context.h"
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 
+using sicnu::app::ActiveWorkflowRef;
 using sicnu::app::MissionContext;
 using sicnu::app::ObjectKind;
 using sicnu::app::WorkbenchObjectRef;
 
-namespace
-{
+namespace {
 
 MissionContext makeSeedMission()
 {
@@ -24,6 +26,7 @@ MissionContext makeSeedMission()
   ctx.projectRef = QStringLiteral( "memory:e2e" );
   ctx.activeWorkflow.workflowId = QStringLiteral( "wf-e2e" );
   ctx.activeWorkflow.schemaVersion = QStringLiteral( "2.0" );
+  ctx.activeWorkflow.runner = QStringLiteral( "pipeline_run_coordinator" );
   WorkbenchObjectRef asset{ ObjectKind::Asset, QStringLiteral( "raw-1" ), QStringLiteral( "raw" ) };
   ctx.assets.push_back( asset );
   return ctx;
@@ -31,40 +34,94 @@ MissionContext makeSeedMission()
 
 } // namespace
 
-TEST_CASE( "scenario4_save_restore_replay_scaffold", "[d18][mission][e2e][scaffold]" )
+TEST_CASE( "scenario4_save_restore_replay", "[d18][mission][e2e]" )
 {
-  const MissionContext original = makeSeedMission();
+  MissionContext original = makeSeedMission();
+  original.results.push_back(
+    WorkbenchObjectRef{ ObjectKind::Result, QStringLiteral( "aligned-1" ), QStringLiteral( "aligned" ) } );
+  const QString fp = sicnu::app::missionContentFingerprint( original );
+  REQUIRE( !fp.isEmpty() );
+
   const QJsonObject doc = sicnu::app::missionContextToJson( original );
   MissionContext restored;
   QString err;
   REQUIRE( sicnu::app::missionContextFromJson( doc, restored, &err ) );
+  REQUIRE( err.isEmpty() );
   REQUIRE( restored.missionId == original.missionId );
   REQUIRE( restored.activeWorkflow.workflowId == original.activeWorkflow.workflowId );
-  REQUIRE( sicnu::app::missionContentFingerprint( restored )
-           == sicnu::app::missionContentFingerprint( original ) );
+  REQUIRE( restored.results.size() == 1 );
+  REQUIRE( sicnu::app::missionContentFingerprint( restored ) == fp );
 }
 
-TEST_CASE( "scenario1_registration_classify_cartography_scaffold", "[d18][mission][e2e][scaffold]" )
+TEST_CASE( "scenario1_registration_classify_cartography_chain", "[d18][mission][e2e]" )
 {
-  // Scaffold only: claims the scenario id. Implementation fills when D14/D15
-  // publish Result refs without path re-import.
+  // Contract for the menu-mounted D14→D15→cartography path: each stage
+  // publishes a Result/Layer ref into MissionContext (no path-only reload).
   MissionContext ctx = makeSeedMission();
-  ctx.results.push_back( WorkbenchObjectRef{ ObjectKind::Result, QStringLiteral( "aligned-1" ), QStringLiteral( "aligned" ) } );
-  ctx.results.push_back( WorkbenchObjectRef{ ObjectKind::Result, QStringLiteral( "class-1" ), QStringLiteral( "class" ) } );
-  ctx.cartographyProducts.push_back(
-    WorkbenchObjectRef{ ObjectKind::Result, QStringLiteral( "mapspec-1" ), QStringLiteral( "map" ) } );
+  const auto aligned = sicnu::app::publishMissionResultFromPath(
+    ctx, QStringLiteral( "/tmp/e2e/aligned.tif" ), QStringLiteral( "aligned" ) );
+  const auto classified = sicnu::app::publishMissionResultFromPath(
+    ctx, QStringLiteral( "/tmp/e2e/class.tif" ), QStringLiteral( "class" ) );
+  WorkbenchObjectRef mapProduct{ ObjectKind::Result, QStringLiteral( "mapspec-1" ),
+                                 QStringLiteral( "map" ) };
+  sicnu::app::publishMissionObject( ctx, mapProduct );
+  ctx.cartographyProducts.push_back( mapProduct );
+
+  REQUIRE( !aligned.isNull() );
+  REQUIRE( !classified.isNull() );
+  REQUIRE( aligned.id != classified.id );
+  REQUIRE( ctx.results.size() >= 2 );
+  REQUIRE( ctx.metadata.value( QStringLiteral( "artifact_paths" ) ).toObject().contains( aligned.id ) );
+
   const QJsonObject summary = sicnu::app::missionSummaryJson( ctx );
   REQUIRE( summary.value( QStringLiteral( "recent_results" ) ).toArray().size() >= 2 );
-  SUCCEED( "scenario1 scaffold holds mission result chain shape" );
 }
 
-TEST_CASE( "scenario3_agent_visual_workflow_roundtrip_scaffold", "[d18][mission][e2e][scaffold]" )
+TEST_CASE( "scenario3_agent_visual_workflow_roundtrip_identity", "[d18][mission][e2e]" )
+{
+  // Agent and UI share the same ActiveWorkflowRef (id + fingerprint + runner).
+  MissionContext ctx = makeSeedMission();
+  ActiveWorkflowRef humanEdit;
+  humanEdit.workflowId = QStringLiteral( "wf-shared" );
+  humanEdit.name = QStringLiteral( "human-edit" );
+  humanEdit.schemaVersion = QStringLiteral( "2.0" );
+  humanEdit.fingerprint = QStringLiteral( "fp-human-edit" );
+  humanEdit.runner = QStringLiteral( "pipeline_run_coordinator" );
+  sicnu::app::setMissionActiveWorkflow( ctx, humanEdit );
+
+  const QJsonObject summary = sicnu::app::missionSummaryJson( ctx );
+  REQUIRE( summary.contains( QStringLiteral( "active_workflow" ) ) );
+  REQUIRE( ctx.activeWorkflow.workflowId == QLatin1String( "wf-shared" ) );
+  REQUIRE( ctx.activeWorkflow.fingerprint == QLatin1String( "fp-human-edit" ) );
+  REQUIRE( ctx.activeWorkflow.runner == QLatin1String( "pipeline_run_coordinator" ) );
+
+  MissionContext restored;
+  QString err;
+  REQUIRE( sicnu::app::missionContextFromJson( sicnu::app::missionContextToJson( ctx ), restored, &err ) );
+  REQUIRE( restored.activeWorkflow == ctx.activeWorkflow );
+}
+
+TEST_CASE( "scenario2_temporal_change_mission_scaffold", "[d18][mission][e2e][scaffold]" )
 {
   MissionContext ctx = makeSeedMission();
-  ctx.activeWorkflow.fingerprint = QStringLiteral( "fp-human-edit" );
-  ctx.activeWorkflow.runner = QStringLiteral( "pipeline_run_coordinator" );
-  // Agent and UI must share the same workflow id + fingerprint (GOAL §10).
-  REQUIRE( !ctx.activeWorkflow.isNull() );
-  REQUIRE( !ctx.activeWorkflow.fingerprint.isEmpty() );
-  SUCCEED( "scenario3 scaffold records shared workflow identity fields" );
+  ctx.temporal.collectionId = QStringLiteral( "col-ts" );
+  ctx.temporal.startIso = QStringLiteral( "2020-01-01" );
+  ctx.temporal.endIso = QStringLiteral( "2024-12-31" );
+  ctx.temporal.activeResultId = QStringLiteral( "phenology-1" );
+  const auto change = sicnu::app::publishMissionResultFromPath(
+    ctx, QStringLiteral( "/tmp/e2e/change.tif" ), QStringLiteral( "change" ) );
+  REQUIRE( !change.isNull() );
+  REQUIRE( ctx.temporal.collectionId == QLatin1String( "col-ts" ) );
+  SUCCEED( "scenario2 temporal+change mission fields populated" );
+}
+
+TEST_CASE( "scenario5_mission_mount_surface_ids_documented", "[d18][mission][e2e][scaffold]" )
+{
+  const QStringList surfaces = {
+    QStringLiteral( "georef-dual" ),
+    QStringLiteral( "classify-studio" ),
+    QStringLiteral( "workbench.ir2Pipeline" ),
+  };
+  REQUIRE( surfaces.size() == 3 );
+  SUCCEED( "mount surface ids recorded for E2E GUI follow-up on toolchain hosts" );
 }

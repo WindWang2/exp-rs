@@ -159,4 +159,21 @@ MissionContext missionContextFromSelection( const SelectionContextSnapshot &snap
 /// Ensure missionId is non-empty (generates a UUID string when missing).
 void ensureMissionId( MissionContext &ctx );
 
+/// Upsert a typed ref into the matching mission list (by kind+id). Updates
+/// displayName when the id already exists. Does nothing for null refs.
+void publishMissionObject( MissionContext &ctx, const WorkbenchObjectRef &ref );
+
+/// Convenience: publish a Result whose id is a stable hash of @p path (or an
+/// explicit @p resultId). Path is recorded in metadata["artifact_paths"][id].
+WorkbenchObjectRef publishMissionResultFromPath( MissionContext &ctx,
+                                                 const QString &path,
+                                                 const QString &displayName = {},
+                                                 const QString &resultId = {} );
+
+/// Convenience: publish a Layer ref (typically QgsMapLayer::id()).
+void publishMissionLayer( MissionContext &ctx, const WorkbenchObjectRef &layerRef );
+
+/// Replace active workflow handle (IR 2.0 / Engine) — shared Agent↔UI identity.
+void setMissionActiveWorkflow( MissionContext &ctx, const ActiveWorkflowRef &workflow );
+
 } // namespace sicnu::app
