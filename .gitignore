@@ -272,3 +272,8 @@ data/labs/_tmp/
 !.planning/unified-mission-workbench-d18/**
 !.planning/dataset-foundry-benchmark-d19/
 !.planning/dataset-foundry-benchmark-d19/**
+# qgis-editing-annotation-11 (F11): track planning notes.
+!.planning/qgis-editing-annotation-11/
+!.planning/qgis-editing-annotation-11/**
+# F11 goal-loop process ledger (local-only process artifact).
+/.goal-loop-ledger.md
