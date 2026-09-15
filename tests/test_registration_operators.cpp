@@ -55,7 +55,9 @@ void writeTiff(const QString& path, int dim,
     GDALDataset* ds = driver->Create(path.toUtf8().constData(), dim, dim, 1, GDT_Float32,
                                      nullptr);
     REQUIRE(ds != nullptr);
-    double gt[6] = {0.0, 1.0, 0.0, 0.0, 0.0, -1.0};
+    // Realistic non-unit, y-flipping geotransform (10 m/px UTM-style): the
+    // operator must keep the warp consistent under such grids.
+    double gt[6] = {450000.0, 10.0, 0.0, 5000000.0, 0.0, -10.0};
     ds->SetGeoTransform(gt);
     ds->SetProjection("EPSG:32633");
     std::vector<float> buffer(static_cast<std::size_t>(dim) * dim, 0.0f);
@@ -115,6 +117,42 @@ TEST_CASE("rs:register_images recovers a shifted pair and writes output + report
     REQUIRE(result["inlierCount"].asInt() >= 8);
     REQUIRE(result["rmsePx"].asDouble() < 2.0);
     REQUIRE(QFile::exists(outPath));
+
+    // Content oracle: the registered output must match the reference content
+    // (both derive from the same texture; a pixel-space vs world-space mix-up
+    // in the warp shows up here as a gross misalignment).
+    {
+        GDALAllRegister();
+        GDALDataset* out = static_cast<GDALDataset*>(
+            GDALOpen(outPath.toUtf8().constData(), GA_ReadOnly));
+        REQUIRE(out != nullptr);
+        std::vector<float> outBuf(static_cast<size_t>(kDim) * kDim, 0.0f);
+        REQUIRE(out->GetRasterBand(1)->RasterIO(GF_Read, 0, 0, kDim, kDim, outBuf.data(), kDim,
+                                                kDim, GDT_Float32, 0, 0)
+                == CE_None);
+        GDALClose(out);
+        std::vector<float> refBuf(static_cast<size_t>(kDim) * kDim, 0.0f);
+        for (int y = 0; y < kDim; ++y)
+            for (int x = 0; x < kDim; ++x)
+                refBuf[static_cast<size_t>(y) * kDim + x] = texture(x - 4, y - 6);
+        double mad = 0.0, validFrac = 0.0;
+        size_t valid = 0;
+        double acc = 0.0;
+        for (int y = 4; y < kDim - 4; ++y)
+            for (int x = 4; x < kDim - 4; ++x) {
+                const size_t idx = static_cast<size_t>(y) * kDim + x;
+                if (std::isnan(outBuf[idx]) || std::isnan(refBuf[idx]))
+                    continue;
+                if (outBuf[idx] < -9990.f)
+                    continue; // warp NoData sentinel at out-of-source borders
+                acc += std::abs(static_cast<double>(outBuf[idx]) - static_cast<double>(refBuf[idx]));
+                ++valid;
+            }
+        validFrac = valid;
+        mad = valid > 0 ? acc / static_cast<double>(valid) : 1e9;
+        REQUIRE(validFrac > 0.9 * (kDim - 8) * (kDim - 8));
+        REQUIRE(mad < 3.0);
+    }
 
     // Output grid must equal the reference grid (dim × dim GeoTIFF).
     GDALAllRegister();

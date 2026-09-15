@@ -47,5 +47,9 @@ GOAL prompt 生成时假设 D14 之后需要"跨模态自动匹配、层级优�
 ## D-013 测试真值独立性
 所有新 known-answer 测试使用手算/解析真值（已知单应、已知平移、手算 MI 上界、手算 CE90 分位数），不复用被测实现；复用既有 `warper_test_helpers.h` 的合成 RPC fixture（其真值已手推导出）。SAR-like fixture 用乘性 Gamma 斑点 + 辐射单调变换 + 结构遮挡，真值变换已知。
 
+## D-015 RpcBiasModel 与 qgsrpcgcptransformer 的集成边界
+候选：(a) qgis_analysis 链接 sicnu_processing 让 transformer 消费 RpcBiasModel；(b) 在 analysis 内复制 affine 拟合数学；(c) transformer 维持既有 constant-median 精化（11.6 语义，test_rpc_gcp_refine 钉死），RpcBiasModel（constant→affine CV + 高度敏感性）作为 processing 层权威实现交付，transformer 集成列为 follow-up。
+选 (c)：(a) 造成层级反转（analysis 是 vendored 低层，且 qgis_analysis 是 STATIC，PUBLIC 依赖传播会扰动全仓 link 顺序）；(b) 违反单一真值原则。既有 constant 行为已由测试钉死且与新模型 constant 路径一致（同为 median + 改进门限）。
+
 ## D-014 网络抖动
 启动时 `git fetch`/GraphQL 多次 EOF；策略：关键只读命令重试 ≤3 次；PR 创建阶段若 push 连续失败，记录 EVIDENCE 并稍后重试（终态仍要求 PR 创建成功）。

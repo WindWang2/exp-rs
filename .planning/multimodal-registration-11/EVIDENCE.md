@@ -12,9 +12,23 @@
 - 资源基线：16 核 / 64 GiB / load 3.23（启动时）。build `-j2` 上限执行。
 - worktree 创建：`git worktree add ../exp-rs-multimodal-registration-11 -b zcode/multimodal-registration-11 origin/master` → exit 0 @ a5b11b7f10。
 
-## Build 基线（Phase 1 前配置/构建记录）
+## Build 基线（Phase 1）
 
-（待填：configure preset exit code、build 时长、并行级别、CPU/RSS 采样、基线 targeted tests 结果）
+- preset 实名 `dev-default`（GOAL 写的 build-dev 是 binaryDir）。`cmake --preset dev-default` exit 0。
+- FetchContent 网络克隆 pybind11/catch2 反复 TLS EOF → 用 `-DFETCHCONTENT_SOURCE_DIR_PYBIND11/CATCH2` 指向主仓库 build-dev/_deps 缓存绕开网络。
+- 全量 `all` 构建遇 master 预存编译缺陷（见 OUT_OF_SCOPE），后改为 targeted targets 构建：`cmake --build build-dev -j2 --target sicnu_processing sicnu_operators sicnu_agent qgis_app_georef + 13 个测试可执行`，exit 0。
+- 资源：构建期间 load 13-17（阈值 24=1.5×16 核，维持 -j2），RSS 峰值 ~13.5/64 GiB。同主机有 3+ 个并行 track 在同时构建（load 主要来源，非本 track）。
+
+## OUT_OF_SCOPE 补充（预存缺陷处置）
+
+- **P0-blocker（已做最小修复，1 行）**：`src/app/workbench/mission_context_store.cpp` 缺 `#include <QDir>`（D18 引入；主仓库 build-dev 无该 .o，独立 g++ -std=c++20 语法检查复现）。不做修复则全树 `all` 无法构建，阻塞所有并行 track。
+- **P0-blocker（已做最小修复，1 行）**：`src/agent/data_platform_tools.cpp` 使用未限定 `BenchmarkService`（D19 引入；主仓库 .o 日期早于 D19 commit，即本机从未编译成功）。补 `using sicnu::experiment::BenchmarkService;`，否则 sicnu_agent（本 track 依赖）无法编译。
+- **不修（记录）**：`test_capability_drift` 在 master 上已红：preprocess.json 重复 id（rs:gaofen/zy3/hj_import ×2）、uncovered io:catalog_search/io:cache_prefetch/io:cube_plan/io:cube_window、rs:mnf_inverse、rs:library_select、rs:spectral_band_select、cartography:diff_templates/explain/export、recipe drift（harness.optical_ndvi_landsat）。本 track 已为新增表面（geometric.json）补齐 knowledge，使 uncovered 列表不因本 track 恶化。
+- **不修（记录）**：`test_mission_context` / `test_mission_e2e_scaffolding` 链接失败（target 源清单缺 workbench_host.cpp）。
+
+## 测试证据（targeted，QT_QPA_PLATFORM=offscreen，-j1 串行）
+
+（待 Phase 8 双遍验证后填终值；中间轮次见 .goal-loop-ledger.md）
 
 ## OUT_OF_SCOPE
 

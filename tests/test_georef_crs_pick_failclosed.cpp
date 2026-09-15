@@ -59,8 +59,9 @@ TEST_CASE("georef pick: same CRS is the exact identity, not a failure", "[f13][i
     REQUIRE(out->y() == Approx(48.2082).margin(1e-12));
 }
 
-TEST_CASE("georef pick: invalid CRS refuses instead of returning the raw point", "[f13][issue1005]"
-          "[negative]")
+TEST_CASE("georef pick: CRS validity semantics — unreferenced layer passes through, "
+          "invalid canvas refuses",
+          "[f13][issue1005][negative]")
 {
     qgisEnv();
     const auto valid = QgsCoordinateReferenceSystem(QStringLiteral("EPSG:4326"));
@@ -68,15 +69,18 @@ TEST_CASE("georef pick: invalid CRS refuses instead of returning the raw point",
     REQUIRE_FALSE(invalid.isValid());
 
     const QgsPointXY raw(16.3738, 48.2082);
-    // Invalid destination CRS: the pre-#1005 code returned `raw` here.
+    // An invalid LAYER CRS means "this raster has no CRS": canvas picks are
+    // raw image coordinates — the georeferencing workflow itself. This
+    // pass-through is preserved semantics, not the #1005 failure.
+    const auto out =
+        rsGeorefTransformPickBetweenCrs(valid, invalid, QgsCoordinateTransformContext(), raw);
+    REQUIRE(out.has_value());
+    REQUIRE(out->x() == Approx(16.3738).margin(1e-12));
+
+    // Invalid CANVAS CRS with a valid layer CRS is uninterpretable: the
+    // pre-#1005 code returned `raw` here; fail closed now.
     REQUIRE_FALSE(
-        rsGeorefTransformPickBetweenCrs(valid, invalid,
-                                                      QgsCoordinateTransformContext(), raw)
-            .has_value());
-    // Invalid source CRS likewise.
-    REQUIRE_FALSE(
-        rsGeorefTransformPickBetweenCrs(invalid, valid,
-                                                      QgsCoordinateTransformContext(), raw)
+        rsGeorefTransformPickBetweenCrs(invalid, valid, QgsCoordinateTransformContext(), raw)
             .has_value());
 }
 

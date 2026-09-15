@@ -90,7 +90,9 @@ QJsonObject GeometricTool::parameterSchema() const
 
     QJsonObject gcps;
     gcps.insert("type", QStringLiteral("array"));
-    gcps.insert("description", QStringLiteral("GCP objects with id, residual_x, residual_y."));
+    gcps.insert("description", QStringLiteral(
+        "audit_residuals: {id, residual_x, residual_y[, residual_total]}. "
+        "select_model: {source_x, source_y, target_x, target_y}."));
     QJsonObject gcpItem;
     gcpItem.insert("type", QStringLiteral("object"));
     QJsonObject gcpProps;

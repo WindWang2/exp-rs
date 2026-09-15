@@ -43,8 +43,8 @@ enum class RegistrationStatus {
 //   low_consensus         consensus (inlier) ratio below 0.5 — a minority of
 //                         candidates agree on one transform
 //   degenerate_geometry   fit aborted: collinear/degenerate control geometry
-//   model_not_justified   model selector rejected a more complex model
-//                         (held-out evidence did not improve)
+//   model_not_justified   RPC bias layer kept the simpler model (held-out
+//                         evidence did not justify the affine upgrade)
 //   cancelled             cooperative cancellation observed
 //   cap_exhausted         bounded queue/cap hit before completion
 //   io_error              input rasters could not be read

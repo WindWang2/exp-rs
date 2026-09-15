@@ -223,10 +223,11 @@ bool RegistrationQuality::writeReportAtomic(const QString& filePath, const QJson
     if (filePath.isEmpty())
         return false;
     const QJsonDocument json(doc);
+    const QByteArray payload = json.toJson(QJsonDocument::Indented);
     QSaveFile file(filePath);
     if (!file.open(QIODevice::WriteOnly))
         return false;
-    if (file.write(json.toJson(QJsonDocument::Indented)) < 0) {
+    if (file.write(payload) != payload.size()) { // detect short writes too
         file.cancelWriting();
         return false;
     }

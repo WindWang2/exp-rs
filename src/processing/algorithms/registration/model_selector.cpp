@@ -134,6 +134,7 @@ ModelSelectionReport ModelSelector::select(const Pts& sourcePts, const Pts& targ
     int feasibleCount = 0;
     bool countLimited = true;
     bool anySolverFail = false;
+    bool anyIllConditioned = false;
     std::optional<CandidateModel> selected;
     double selectedCvRmse = std::numeric_limits<double>::infinity();
 
@@ -168,6 +169,8 @@ ModelSelectionReport ModelSelector::select(const Pts& sourcePts, const Pts& targ
                     trainT.push_back(targetPts[i]);
                 }
             }
+            if (testS.empty())
+                continue; // empty held-out split: nothing to evaluate (P1 #2)
             if (static_cast<int>(trainS.size()) < minPointsFor(model))
                 continue; // skipped fold
             const FitAdapter foldFit = FitAdapter::fit(model, trainS, trainT, options.tpsLambda);
@@ -186,6 +189,11 @@ ModelSelectionReport ModelSelector::select(const Pts& sourcePts, const Pts& targ
             continue;
         }
         ev.cvRmse = cvAcc / static_cast<double>(usedFolds);
+        if (!std::isfinite(ev.cvRmse)) {
+            ev.rejectedReason = QStringLiteral("degenerate_geometry");
+            report.evidence.push_back(std::move(ev));
+            continue;
+        }
 
         // --- full fit + feasibility gates -------------------------------
         const FitAdapter full = FitAdapter::fit(model, sourcePts, targetPts, options.tpsLambda);
@@ -200,6 +208,7 @@ ModelSelectionReport ModelSelector::select(const Pts& sourcePts, const Pts& targ
             ev.conditionNumber = full.transform.conditionNumber;
             if (ev.conditionNumber > options.maxConditionNumber) {
                 ev.rejectedReason = QStringLiteral("ill_conditioned");
+                anyIllConditioned = true;
                 report.evidence.push_back(std::move(ev));
                 continue;
             }
@@ -221,8 +230,10 @@ ModelSelectionReport ModelSelector::select(const Pts& sourcePts, const Pts& targ
 
     if (feasibleCount == 0) {
         report.status = RegistrationStatus::Refused;
-        report.reason = countLimited || !anySolverFail ? QStringLiteral("too_few_matches")
-                                                       : QStringLiteral("degenerate_geometry");
+        report.reason = countLimited            ? QStringLiteral("too_few_matches")
+                        : anySolverFail         ? QStringLiteral("degenerate_geometry")
+                        : anyIllConditioned     ? QStringLiteral("ill_conditioned")
+                                                : QStringLiteral("too_few_matches");
         return report;
     }
 

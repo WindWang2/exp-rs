@@ -420,8 +420,8 @@ double MultimodalMatcher::estimateScratchMiB(int srcWidth, int srcHeight, int ds
 {
     const int side = std::max(16, std::min(256, options.windowSize));
     const std::size_t padded = nextPowerOfTwo(static_cast<std::size_t>(side));
-    // Two FFT input buffers + one cross-surface, complex<double> = 16 B.
-    const double fftMiB = 3.0 * static_cast<double>(padded * padded) * 16.0 / (1024.0 * 1024.0);
+    // Two FFT input buffers + cross-surface + magnitude surface, 16 B each.
+    const double fftMiB = 4.0 * static_cast<double>(padded * padded) * 16.0 / (1024.0 * 1024.0);
     // Pyramid copies: geometric series bounded by 2x the level-0 size.
     const double pyrMiB = (static_cast<double>(srcWidth) * srcHeight
                            + static_cast<double>(dstWidth) * dstHeight)
@@ -499,10 +499,14 @@ MultimodalMatchReport MultimodalMatcher::matchImages(const float* srcData, int s
         const FloatLevel& dstL = dstPyr[static_cast<std::size_t>(level)];
         // Coarse levels use half-size windows: window density (not size) is
         // what beats periodic-texture sidelobes in the per-level median.
+        int minDim = std::min(srcL.width, srcL.height);
         int win = level == 0 ? windowSize
-                             : std::max(32, std::min(windowSize / 2,
-                                                     std::min(srcL.width, srcL.height) - 2));
-        win = std::min(win, std::min(srcL.width, srcL.height));
+                             : std::max(32, std::min(windowSize / 2, minDim - 2));
+        win = std::min(win, minDim);
+        // A window as large as the image side leaves an empty center range;
+        // shrink it below the side so at least one cell can be placed.
+        if (win >= minDim)
+            win = minDim - 2;
         if (win < 16)
             break;
         const int halfL = win / 2;

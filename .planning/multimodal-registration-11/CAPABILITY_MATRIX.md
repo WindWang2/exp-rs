@@ -8,7 +8,8 @@
 | 金字塔 coarse-to-fine | not-supported（单 octave） | implemented：层数/窗口自适应，逐级过滤 + 终筛 RANSAC |
 | 空间覆盖约束匹配 | not-supported | implemented：网格 coverage 配额（每格最多 N 对，空格拒绝） |
 | 模型选择（translation→…→TPS，证据驱动） | 部分（仅静态决策树） | implemented：k-fold CV + ≥10% 改进 + κ 门限 + per-model 证据表 |
-| RPC bias 精化 | 部分（常数中位数平移） | implemented：constant/affine CV 选择 + 高度敏感性 + 残差诊断（向后兼容，默认行为不变） |
+| RPC bias 精化（processing 层 / headless） | 部分（常数中位数平移） | implemented：`RpcBiasModel` constant/affine CV 选择 + 高度敏感性 + 残差诊断 |
+| RPC bias affine（交互式 georeferencer transformer 内） | not-supported | not-supported（D-015：层级反转代价 > 收益；follow-up，见 PR_BODY） |
 | 多景 stack registration | not-supported | implemented：reference 选择 + pair graph + 全局平移/仿射 LS + 闭环 drift + per-pair 置信 |
 | bundle block adjustment（RPC 系数求解） | not-supported | not-supported（D-008，明确拒绝并文档化） |
 | 质量产品 | 部分（RMSE/残差散点） | implemented：CE90 经验分位数 + 残差矢量场网格 + 局部置信度 + JSON report（atomic 写出） |

@@ -49,12 +49,17 @@ void appendObservation(std::vector<sicnu::registration::StackPairObservation>& o
                        const QJsonObject& obj)
 {
     sicnu::registration::StackPairObservation o;
-    o.fromId = obj.value(QStringLiteral("fromId")).toString();
-    o.toId = obj.value(QStringLiteral("toId")).toString();
+    // Both spellings are accepted: the operator documents camelCase while
+    // the agent tool surfaces snake_case (P3 review finding).
+    o.fromId = obj.value(QStringLiteral("fromId")).toString(
+        obj.value(QStringLiteral("from_id")).toString());
+    o.toId = obj.value(QStringLiteral("toId")).toString(
+        obj.value(QStringLiteral("to_id")).toString());
     o.tx = obj.value(QStringLiteral("tx")).toDouble();
     o.ty = obj.value(QStringLiteral("ty")).toDouble();
     o.confidence = obj.value(QStringLiteral("confidence")).toDouble(1.0);
-    o.inlierCount = obj.value(QStringLiteral("inlierCount")).toInt(1);
+    o.inlierCount = obj.value(QStringLiteral("inlierCount")).toInt(
+        obj.value(QStringLiteral("inlier_count")).toInt(1));
     if (!o.fromId.isEmpty() && !o.toId.isEmpty())
         obs.push_back(o);
 }

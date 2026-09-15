@@ -286,6 +286,33 @@ TEST_CASE("multimodal: NoData windows are skipped, valid ones carry the match",
     REQUIRE(oy == Catch::Approx(kDy).margin(0.5));
 }
 
+TEST_CASE("multimodal: scratch-memory cap refuses with cap_exhausted", "[f13][matcher][negative]")
+{
+    const auto src = makeScene(kDim);
+    MultimodalMatchOptions opt;
+    opt.bounds.maxWorkingMiB = 0.5; // far below the ~4.2 MiB closed form
+    const auto rep =
+        MultimodalMatcher::matchImages(src.data(), kDim, kDim, src.data(), kDim, kDim, opt);
+    REQUIRE(rep.status == RegistrationStatus::Refused);
+    REQUIRE(rep.reason == QStringLiteral("cap_exhausted"));
+}
+
+TEST_CASE("multimodal: maxMatches caps the returned tie set", "[f13][matcher]")
+{
+    const auto src = makeScene(kDim);
+    std::vector<float> dst(static_cast<std::size_t>(kDim) * kDim);
+    for (int y = 0; y < kDim; ++y)
+        for (int x = 0; x < kDim; ++x)
+            dst[static_cast<std::size_t>(y) * kDim + x] = sampleShifted(src, kDim, 3.0, 4.0, x, y);
+    MultimodalMatchOptions opt;
+    opt.metric = MatchMetric::PhaseCorrelation;
+    opt.bounds.maxMatches = 12;
+    const auto rep =
+        MultimodalMatcher::matchImages(src.data(), kDim, kDim, dst.data(), kDim, kDim, opt);
+    REQUIRE(rep.status == RegistrationStatus::Success);
+    REQUIRE(rep.points.size() <= 12);
+}
+
 TEST_CASE("multimodal: cancellation is observed and reported", "[f13][matcher][negative]")
 {
     const auto src = makeScene(kDim);
@@ -301,9 +328,9 @@ TEST_CASE("multimodal: cancellation is observed and reported", "[f13][matcher][n
 TEST_CASE("multimodal: scratch estimate is a deterministic closed form", "[f13][matcher]")
 {
     MultimodalMatchOptions opt;
-    // 512² pair, window 64: fft = 3·64²·16 B; pyramid ≤ 2×(512²+512²)·4 B.
+    // 512² pair, window 64: fft = 4·64²·16 B; pyramid ≤ 2×(512²+512²)·4 B.
     const double miB = MultimodalMatcher::estimateScratchMiB(512, 512, 512, 512, opt);
-    REQUIRE(miB == Catch::Approx(3.0 * 64 * 64 * 16.0 / (1024 * 1024)
+    REQUIRE(miB == Catch::Approx(4.0 * 64 * 64 * 16.0 / (1024 * 1024)
                                  + (512.0 * 512 + 512.0 * 512) * 4.0 * 2.0 / (1024 * 1024))
                          .epsilon(1e-9));
 }

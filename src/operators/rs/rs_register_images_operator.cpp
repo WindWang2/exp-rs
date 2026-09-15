@@ -46,12 +46,14 @@ std::unique_ptr<GDALDataset, DatasetCloser> openReadOnly(const std::string& path
         static_cast<GDALDataset*>(GDALOpen(path.c_str(), GA_ReadOnly)));
 }
 
-/// Bounded band-1 reader with the dataset's geotransform.
+/// Bounded band-1 reader with the dataset's geotransform. Reports the RAW
+/// raster dims alongside the decimated buffer dims so callers can rescale
+/// geotransforms for the buffer grid.
 bool readBand1Bounded(GDALDataset* dataset, int maxDim, int& width, int& height,
-                      std::vector<float>& buffer, double geoTransform[6])
+                      std::vector<float>& buffer, double geoTransform[6], int& rawW, int& rawH)
 {
-    const int rawW = dataset->GetRasterXSize();
-    const int rawH = dataset->GetRasterYSize();
+    rawW = dataset->GetRasterXSize();
+    rawH = dataset->GetRasterYSize();
     const int longest = std::max(rawW, rawH);
     width = longest > maxDim ? std::max(1, rawW * maxDim / longest) : rawW;
     height = longest > maxDim ? std::max(1, rawH * maxDim / longest) : rawH;
@@ -132,8 +134,9 @@ Json::Value RsRegisterImagesOperator::executionEstimate() const
     Json::Value est(Json::objectValue);
     est["tileWidth"] = 0;
     est["tileHeight"] = 0;
-    // maxDim default 1024: three Float32 buffers + FFT scratch, bounded.
-    est["estimatedRamBytes"] = 3.0 * 1024 * 1024 * 4.0 + 4.0 * 1024 * 1024;
+    // Three Float32 buffers at the maxDim cap + FFT scratch, bounded.
+    const double dim = 1024.0;
+    est["estimatedRamBytes"] = 3.0 * dim * dim * 4.0 + 4.0 * 1024 * 1024;
     est["temporaryDiskBytes"] = 0;
     return est;
 }
@@ -161,11 +164,12 @@ Json::Value RsRegisterImagesOperator::run(const Json::Value& p, RSOperatorContex
                               "Failed to open source or reference raster with GDAL");
 
     int srcW = 0, srcH = 0, refW = 0, refH = 0;
-    double srcGt[6] = {0, 1, 0, 0, 0, 1};
     double refGt[6] = {0, 1, 0, 0, 0, 1};
     std::vector<float> srcData, refData;
-    if (!readBand1Bounded(src.get(), maxDim, srcW, srcH, srcData, srcGt)
-        || !readBand1Bounded(ref.get(), maxDim, refW, refH, refData, refGt))
+    int rawSrcW = 0, rawSrcH = 0, rawRefW = 0, rawRefH = 0;
+    double srcGtUnused[6] = {0, 1, 0, 0, 0, 1};
+    if (!readBand1Bounded(src.get(), maxDim, srcW, srcH, srcData, srcGtUnused, rawSrcW, rawSrcH)
+        || !readBand1Bounded(ref.get(), maxDim, refW, refH, refData, refGt, rawRefW, rawRefH))
         throw RSOperatorError(ErrorCode::ComputationError,
                               "Failed to read band 1 of source or reference raster");
     const std::string refProjection = [&] {
@@ -207,6 +211,9 @@ Json::Value RsRegisterImagesOperator::run(const Json::Value& p, RSOperatorContex
         fitSrc.emplace_back(pt.srcX, pt.srcY);
         fitDst.emplace_back(pt.dstX, pt.dstY);
     }
+    if (fitSrc.size() < 3)
+        throw RSOperatorError(ErrorCode::ComputationError,
+                              "Fewer than three consensus inliers; no output written");
     const auto transform =
         ::rs::algorithms::GeometricTransform::solve(::rs::algorithms::TransformModel::Affine, fitSrc,
                                                   fitDst);
@@ -214,16 +221,29 @@ Json::Value RsRegisterImagesOperator::run(const Json::Value& p, RSOperatorContex
         throw RSOperatorError(ErrorCode::ComputationError,
                               "Post-consensus affine fit failed; no output written");
 
+    // The fitted affine lives in DECIMATED-BUFFER pixel space (the same space
+    // the matcher used). The warp therefore runs with identity geotransforms —
+    // buffer pixel in, buffer pixel out — and the output file carries the
+    // DECIMATION-AWARE reference geotransform so world coordinates stay exact
+    // (P0 review finding: mixing pixel-space fits with world-space gts
+    // silently warped products; buffer-pixel space keeps one frame).
+    double refGtBuf[6] = {refGt[0], refGt[1] * static_cast<double>(rawRefW) / refW, refGt[2],
+                          refGt[3], refGt[5] * static_cast<double>(rawRefH) / refH, refGt[4]};
+    const double identityGt[6] = {0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
+
     std::vector<float> outData(static_cast<std::size_t>(refW) * refH, 0.0f);
     ::rs::algorithms::WarpOptions warp;
     warp.method = parseResampling(resampling);
-    if (!::rs::algorithms::Resampler::warpRaster(srcData.data(), srcW, srcH, srcGt, outData.data(),
-                                               refW, refH, refGt,
-                                               [&transform](double x, double y) {
-                                                   return ::rs::algorithms::GeometricTransform::
-                                                       applyBackward(transform, x, y);
-                                               },
-                                               warp))
+    // The product keeps the source radiometry: no [0,1] clamping (the
+    // WarpOptions default range is for normalized rasters only).
+    warp.clampRange = false;
+    if (!::rs::algorithms::Resampler::warpRaster(srcData.data(), srcW, srcH, identityGt,
+                                                 outData.data(), refW, refH, identityGt,
+                                                 [&transform](double x, double y) {
+                                                     return ::rs::algorithms::GeometricTransform::
+                                                         applyBackward(transform, x, y);
+                                                 },
+                                                 warp))
         throw RSOperatorError(ErrorCode::ComputationError, "Warp failed; no output written");
 
     // Write output GeoTIFF on the reference grid.
@@ -236,7 +256,7 @@ Json::Value RsRegisterImagesOperator::run(const Json::Value& p, RSOperatorContex
     if (!outDs)
         throw RSOperatorError(ErrorCode::ComputationError,
                               "Cannot create output raster: " + outputPath);
-    outDs->SetGeoTransform(refGt);
+    outDs->SetGeoTransform(refGtBuf);
     if (!refProjection.empty())
         outDs->SetProjection(refProjection.c_str());
     if (outDs->GetRasterBand(1)->RasterIO(GF_Write, 0, 0, refW, refH, outData.data(), refW, refH,
@@ -248,10 +268,12 @@ Json::Value RsRegisterImagesOperator::run(const Json::Value& p, RSOperatorContex
     GDALClose(outDs);
 
     context.reportProgress(0.9, "Quality report");
+    // Points live in the decimated SOURCE pixel grid; the quality products
+    // must anchor to that extent (P2 review finding).
     const auto quality = sicnu::registration::RegistrationQuality::evaluate(
-        match.points, refW, refH, match.coverageRatio);
+        match.points, srcW, srcH, match.coverageRatio);
     const auto field =
-        sicnu::registration::RegistrationQuality::residualField(match.points, refW, refH, 8);
+        sicnu::registration::RegistrationQuality::residualField(match.points, srcW, srcH, 8);
 
     if (!reportPath.empty()) {
         const QJsonObject doc = sicnu::registration::RegistrationQuality::toJson(

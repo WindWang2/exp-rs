@@ -3,9 +3,10 @@
 //
 // Products:
 //   - Accuracy stats: radial RMSE plus CE90. CE90 is the empirical 90th
-//     percentile of radial residuals (no distribution assumption, DECISIONS
-//     D-009); with fewer than kMinCe90Samples points it is flagged degraded
-//     and a Rayleigh reference value 2.146·σ is reported alongside.
+//     percentile (nearest-rank) of radial residuals (no distribution
+//     assumption, DECISIONS D-009); with fewer than
+//     RegistrationQualityOptions::ce90MinSamples points it is flagged
+//     degraded and a Rayleigh reference value 2.146·σ is reported alongside.
 //   - Residual vector field: source-extent grid of mean residual vectors —
 //     the reviewer-facing "which way and how strongly is each region off".
 //   - Local confidence: per-point trust in [0,1] combining match score,

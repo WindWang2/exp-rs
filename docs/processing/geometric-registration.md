@@ -2,9 +2,11 @@
 
 Scope: `src/processing/algorithms/registration/` (namespace `sicnu::registration`), the
 `rs:register_images` / `rs:stack_register` operators, the `spatial:geometric_registration`
-agent tool surface, and the RPC bias layer consumed by
-`src/analysis/georeferencing/qgsrpcgcptransformer`. Builds on the D14 capabilities documented
-in ADR 0159 (GCP management, closed-form transforms, TPS, RANSAC matching, resampling).
+agent tool surface, and the RPC bias layer (`RpcBiasModel`; consuming it from
+`src/analysis/georeferencing/qgsrpcgcptransformer` is a documented follow-up — the
+transformer keeps its D14 constant-median refinement). Builds on the D14 capabilities
+documented in ADR 0159 (GCP management, closed-form transforms, TPS, RANSAC matching,
+resampling).
 
 ## Refusal semantics (read this first)
 
@@ -19,8 +21,9 @@ Every registration product carries a `RegistrationStatus`:
 
 Stable reason codes (snake_case, surfaced verbatim by UI/agents):
 `too_few_matches`, `flat_region`, `low_peak_snr`, `insufficient_coverage`,
-`low_consensus`, `degenerate_geometry`, `ill_conditioned`, `model_not_justified`,
-`cancelled`, `cap_exhausted`, `io_error`.
+`low_consensus`, `degenerate_geometry`, `ill_conditioned`, `model_not_justified`
+(RPC bias layer), `cancelled`, `cap_exhausted`. (`io_error` is reserved for
+operator-level I/O failures and is not emitted by the processing layer.)
 
 ## Cross-modal matching (`MultimodalMatcher`)
 
@@ -79,6 +82,8 @@ planning notes).
 - **Operators** (headless pipelines / CLI): `rs:register_images` (match → affine fit →
   reverse-mapped warp into the reference grid → GeoTIFF + optional quality sidecar;
   refusal throws and writes nothing), `rs:stack_register` (adjustment + sidecar).
+  Error-path note: the output raster is written before the sidecar; a sidecar failure
+  leaves the raster in place and reports the error (no silent partial sidecar).
 - **Agent tool** `spatial:geometric_registration`: actions `audit_residuals`,
   `recommend_model`, `inspect_misalignment` (D14), plus `multimodal_register`,
   `select_model`, `stack_register` (F13). Refusals travel inside `data.status`/`data.reason`

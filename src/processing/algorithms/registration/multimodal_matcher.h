@@ -21,9 +21,11 @@
 //
 // Failure semantics (contract, see registration_types.h): structural
 // shortfalls produce status=Refused (reason codes too_few_matches,
-// flat_region, cancelled, resource_exhausted); evidence shortfalls produce
-// status=LowConfidence (low_peak_snr, insufficient_coverage). A successful
-// report always carries a consensus homography and per-point scores.
+// flat_region, low_peak_snr, cancelled, cap_exhausted); evidence shortfalls
+// produce status=LowConfidence (insufficient_coverage, low_consensus). A
+// successful report always carries a consensus homography and per-point
+// scores; LowConfidence reports carry the homography and residuals too —
+// they are flagged for review, not discarded.
 #pragma once
 
 #include "registration_types.h"
@@ -73,8 +75,9 @@ struct MultimodalMatchReport {
     QString reason; // snake_case code from registration_types.h; empty on Success
     std::vector<RegistrationPoint> points;
     std::vector<PyramidStageEvidence> stages;
-    // Consensus homography (row-major, dst <- src) over inlier points;
-    // identity when status != Success.
+    // Consensus homography (row-major, dst <- src) over inlier points.
+    // Identity on Refused; populated on LowConfidence so a reviewer can
+    // inspect the flagged geometry.
     std::vector<double> consensusHomography = {1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0};
     int inlierCount{0};
     double inlierRatio{0.0};

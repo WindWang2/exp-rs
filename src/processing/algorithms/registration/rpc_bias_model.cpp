@@ -97,9 +97,10 @@ bool fitAffine(const std::vector<RpcBiasSample>& s, std::array<double, 6>& out, 
     std::array<double, 3> wa{}, wb{};
     if (!solve3x3(A, bx, wa) || !solve3x3(A, by, wb))
         return false;
-    // Report coefficients in raw (uncentered) ground coordinates. Basis
-    // order is {x, y, 1}: bias(x,y) = w0 + w1·(x-cx) + w2·(y-cy)
-    //   = (w2 - w0·cx - w1·cy) + w0·x + w1·y
+    // Report coefficients in raw (uncentered) ground coordinates. The solve
+    // basis is {x, y, 1} (row = {x, y, 1}), i.e. bias(x',y') = w0·x' + w1·y' + w2
+    // with x' = x-cx, y' = y-cy; un-centering gives
+    //   bias(x,y) = (w2 - w0·cx - w1·cy) + w0·x + w1·y
     out = {wa[2] - wa[0] * cx - wa[1] * cy, wa[0], wa[1], wb[2] - wb[0] * cx - wb[1] * cy,
            wb[0], wb[1]};
     return true;
