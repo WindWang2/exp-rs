@@ -49,3 +49,15 @@
 ## D10. Minimal shared-file changes
 
 **Choice:** Prefer new files; append-only edits to CMakeLists / vocabulary / manifest serialization. Isolate unavoidable shared edits in dedicated commits.
+
+## D11. BenchmarkService persistence rides ExperimentStore
+
+**Choice:** Add additive `benchmark_definitions` / `benchmark_results` tables to ExperimentStore (CREATE IF NOT EXISTS on open; schema_version stays `"1"` so existing DBs are not forced read-only). `BenchmarkService` optionally binds an `ExperimentStore*` and persists on publish/record; `hydrateFromStore()` cold-loads.
+
+**Why:** GOAL asked to persist beyond process-local *if* a natural MLOps store exists. ExperimentStore already owns MetricRecord / promotion / lineage for evaluation evidence — benchmarks are the same family. A second SQLite database would fracture authority.
+
+## D12. Agent tools extend data_platform_tools (not SpatialTool GUI)
+
+**Choice:** Add thin MCP handlers `dataset:qa`, `dataset:sample_query`, GOAL aliases `dataset:versions`/`dataset:splits`, and `benchmark:list|inspect|compare` on the existing `data_platform_tools` surface. Register capability knowledge entries. Do not touch Workbench/MissionContext.
+
+**Why:** Reuses open-store-by-path + bounded page patterns already used by Platform 7.0; keeps D18 UI ownership clean.
