@@ -47,7 +47,10 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
     // rs:sar_geocode, rs:sar_temporal_stats, rs:rasterize, rs:zonal_stats).
     // Platform 10.0 added rs:classify, rs:change, rs:regress (task adapters
     // over the model execution seam).
-    REQUIRE( expectedCatalog.size() == 32 );
+    // Spectral Intelligence 11.0 added rs:local_rx_anomaly (anomaly-detection),
+    // rs:sparse_unmixing (unmixing), rs:spectral_similarity (classification),
+    // rs:endmember_analysis (endmember-analysis).
+    REQUIRE( expectedCatalog.size() == 36 );
 
     const QString metaDir =
         sicnu::processing::resolveRuntimeDataPath( QStringLiteral( "data/processing/algorithm_meta" ) );
@@ -124,7 +127,7 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
         std::string exportErr;
         const int written = sicnu::processing::AlgorithmMetaStore::exportCatalog(
             tempDir.path().toStdString(), descriptors, &exportErr );
-        REQUIRE( written == 32 );
+        REQUIRE( written == 36 );
         REQUIRE( exportErr.empty() );
 
         const QDir tempQDir( tempDir.path() );

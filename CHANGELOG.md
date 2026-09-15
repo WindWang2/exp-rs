@@ -2,6 +2,31 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - Spectral Intelligence 11 (zcode/spectral-intelligence-11)
+
+- **Local dual-window RX (A)**: `rs:local_rx_anomaly` — Reed–Xiaoli distance to the LOCAL
+  background (outer window minus inner guard, clamped raster edges, scaled diagonal
+  loading, full/diagonal covariance modes) with a per-pixel background-sample quality
+  plane; statistically under-sampled windows stay NaN (unscored), never faked
+  (`src/processing/algorithms/spectral_local_rx.*`, ADR 0163).
+- **Sparse unmixing (B)**: `rs:sparse_unmixing` — FISTA solver for
+  min ½‖x−Ea‖² + λ‖a‖₁ s.t. a ≥ 0 with the FCLS-convention sum-to-one penalty;
+  overcomplete dictionaries (atoms > bands, cap 2048), fail-closed near-collinear
+  refusals, honest per-pixel convergence/iteration diagnostics
+  (`src/processing/algorithms/spectral_sparse_unmixing.*`).
+- **SID-SAM hybrid similarity (C)**: `rs:spectral_similarity` — bounded
+  `product_normalized` (sam′·sid′ ∈ [0,1]) and classic `SID·tanθ` forms over the
+  master SAM/SID kernels, with a wavelength-comparability guard (disjoint grids
+  refuse) (`src/processing/algorithms/spectral_hybrid_similarity.*`).
+- **Endmember analysis (D)**: `rs:endmember_analysis` — average-link spectral-angle
+  clustering with PPI-ranked representatives, pairwise SAM matrix, Gaussian-SRF
+  sensor projection with mandatory wavelength metadata and coverage flags; output is
+  a derived `exp-rs:spectral-table` carrying inherited license/citation and fresh
+  digests (`src/processing/algorithms/endmember_analysis.*`).
+- **Workbench panel (F)**: `SpectralWorkbenchPanel` — independent dock consuming
+  spectral-table artifacts: spectra list, SAM matrix view, provenance/digest/license
+  status, `spectrumSelected` linkage seam (no D18/profile-widget files touched).
+
 ## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)
 
 - **Regular-calendar normalization (T-2)**: `rs:temporal_regularize` re-casts irregular

@@ -9,6 +9,10 @@
 #include "rs_sam_classify_operator.h"
 #include "rs_spectral_unmixing_operator.h"
 #include "rs_rx_anomaly_operator.h"
+#include "rs_local_rx_operator.h"
+#include "rs_sparse_unmixing_operator.h"
+#include "rs_spectral_similarity_operator.h"
+#include "rs_endmember_analysis_operator.h"
 #include "rs_continuum_removal_operator.h"
 #include "rs_spectral_resample_operator.h"
 #include "rs_endmember_extraction_operator.h"
@@ -121,6 +125,12 @@ REGISTER_RS_OPERATOR(RsImageEnhancementOperator, "rs:image_enhancement")
 REGISTER_RS_OPERATOR(RsSamClassifyOperator, "rs:sam_classify")
 REGISTER_RS_OPERATOR(RsSpectralUnmixingOperator, "rs:spectral_unmixing")
 REGISTER_RS_OPERATOR(RsRxAnomalyOperator, "rs:rx_anomaly")
+// Spectral Intelligence 11.0: local RX, sparse unmixing, hybrid similarity,
+// endmember analysis.
+REGISTER_RS_OPERATOR(RsLocalRxOperator, "rs:local_rx_anomaly")
+REGISTER_RS_OPERATOR(RsSparseUnmixingOperator, "rs:sparse_unmixing")
+REGISTER_RS_OPERATOR(RsSpectralSimilarityOperator, "rs:spectral_similarity")
+REGISTER_RS_OPERATOR(RsEndmemberAnalysisOperator, "rs:endmember_analysis")
 REGISTER_RS_OPERATOR(RsContinuumRemovalOperator, "rs:continuum_removal")
 REGISTER_RS_OPERATOR(RsSpectralResampleOperator, "rs:spectral_resample")
 REGISTER_RS_OPERATOR(RsEndmemberExtractionOperator, "rs:endmember_extraction")
@@ -285,6 +295,12 @@ void initBuiltinRsOperators() {
   add( "rs:sam_classify", [] { return std::make_unique<RsSamClassifyOperator>(); } );
   add( "rs:spectral_unmixing", [] { return std::make_unique<RsSpectralUnmixingOperator>(); } );
   add( "rs:rx_anomaly", [] { return std::make_unique<RsRxAnomalyOperator>(); } );
+  // Spectral Intelligence 11.0: local RX, sparse unmixing, hybrid similarity,
+  // endmember analysis.
+  add( "rs:local_rx_anomaly", [] { return std::make_unique<RsLocalRxOperator>(); } );
+  add( "rs:sparse_unmixing", [] { return std::make_unique<RsSparseUnmixingOperator>(); } );
+  add( "rs:spectral_similarity", [] { return std::make_unique<RsSpectralSimilarityOperator>(); } );
+  add( "rs:endmember_analysis", [] { return std::make_unique<RsEndmemberAnalysisOperator>(); } );
   add( "rs:continuum_removal", [] { return std::make_unique<RsContinuumRemovalOperator>(); } );
   add( "rs:spectral_resample", [] { return std::make_unique<RsSpectralResampleOperator>(); } );
   add( "rs:endmember_extraction", [] { return std::make_unique<RsEndmemberExtractionOperator>(); } );
