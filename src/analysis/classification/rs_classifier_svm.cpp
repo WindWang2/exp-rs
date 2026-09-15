@@ -170,8 +170,12 @@ bool RsClassifierSvm::save( const QString &path ) const
     }
     catch ( const cv::Exception &e )
     {
+      // Leave no partial ensemble behind: an old model reloaded from the
+      // fragments plus the new main YAML would be a silently mismatched pair.
       qWarning() << "SvmBackend::save — OvR model error:" << e.what();
       QFile::remove( path + QStringLiteral( ".ovr.json" ) );
+      for ( int prev = 0; prev <= c; ++prev )
+        QFile::remove( path + QStringLiteral( ".ovr%1.yaml" ).arg( prev ) );
       return false;
     }
   }

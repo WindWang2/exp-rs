@@ -139,6 +139,12 @@ TEST_CASE( "Platt fit fails closed on degenerate calibration sets", "[classify][
   scores = { 1.0f, 2.0f };
   const std::vector<int> twoLabels = { 1, 2 };
   REQUIRE( !RsProbabilityCalibrator::fitPlatt( scores, 2, { 1, 1 }, twoLabels, 100, model ) );
+
+  // Label outside the class order is fail-closed, not silently negative.
+  scores = { 1.0f, 2.0f };
+  const std::vector<int> unknownLabel = { 1, 7 };
+  REQUIRE( !RsProbabilityCalibrator::fitPlatt( scores, 2, { 1, 2 }, unknownLabel, 100, model ) );
+  REQUIRE( !RsProbabilityCalibrator::fitIsotonic( scores, 2, { 1, 2 }, unknownLabel, model ) );
 }
 
 TEST_CASE( "Isotonic: PAV pools a violating sequence into a monotone one", "[classify][calibration]" )

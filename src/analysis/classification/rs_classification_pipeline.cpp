@@ -141,6 +141,7 @@ bool RsClassificationPipeline::saveModelSidecarV2( const QString &modelPath,
     root.insert( QStringLiteral( "calibration" ), data.calibration.toJson() );
   if ( !data.featureSchema.isEmpty() )
     root.insert( QStringLiteral( "featureSchema" ), data.featureSchema.toJson() );
+  if ( data.trainingSampleCount > 0 )
   {
     QJsonObject training;
     training.insert( QStringLiteral( "seed" ), static_cast<int>( data.trainingSeed ) );
@@ -648,6 +649,11 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   {
     if ( !config.backend->save( config.modelSavePath ) )
     {
+      // The backend may have overwritten/rewritten the main YAML before its
+      // internal sidecars failed — remove the main file so a stale sidecar
+      // can never pair with a new model (same invariant as the sidecar
+      // failure branch below).
+      QFile::remove( config.modelSavePath );
       result.error = RsClassificationPipelineResult::Error::ModelSaveFailed;
       result.errorMessage = QStringLiteral( "Failed to save classifier model: %1" )
                               .arg( config.modelSavePath );
@@ -1189,20 +1195,35 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
           float best = 0.0f;
           for ( int c = 0; c < probs.cols; ++c )
             best = std::max( best, probs.at<float>( static_cast<int>( i ), c ) );
+          // A degenerate posterior row (non-finite / unnormalised — e.g. an
+          // NB likelihood vector that underflowed to all zeros) is NoData in
+          // EVERY probability-derived output: the -1 sentinel in the
+          // uncertainty bands AND the probability raster, and it is excluded
+          // from meanConfidence. Reporting a fabricated 0.0 confidence would
+          // be indistinguishable from a genuine zero-probability pixel.
+          const float *probRow = probs.ptr<float>( static_cast<int>( i ) );
+          const std::span<const float> rowSpan( probRow, static_cast<size_t>( probs.cols ) );
+          double h = 0.0;
+          double mOut = 0.0;
+          const bool rowWellFormed =
+            !probs.empty() && RsUncertainty::entropy( rowSpan, h ) &&
+            RsUncertainty::margin( rowSpan, mOut );
           if ( writeProb )
           {
-            probBuf[static_cast<size_t>( p )] = best;
-            confidenceSum += best;
-            ++confidenceCount;
+            if ( rowWellFormed )
+            {
+              probBuf[static_cast<size_t>( p )] = best;
+              confidenceSum += best;
+              ++confidenceCount;
+            }
+            else
+            {
+              probBuf[static_cast<size_t>( p )] = -1.0f;
+            }
           }
           if ( writeUnc )
           {
-            const float *row = probs.ptr<float>( static_cast<int>( i ) );
-            const std::span<const float> rowSpan( row, static_cast<size_t>( probs.cols ) );
-            double h = 0.0;
-            double mOut = 0.0;
-            if ( RsUncertainty::entropy( rowSpan, h ) &&
-                 RsUncertainty::margin( rowSpan, mOut ) )
+            if ( rowWellFormed )
             {
               // Band 1: entropy normalised to [0,1] by log2(K);
               // band 2: top1−top2 margin; band 3: reject mask.
@@ -1333,7 +1354,15 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   if ( writeUnc )
   {
     QFile::remove( config.uncertaintyOutput );
-    QFile::rename( tempUncPath, config.uncertaintyOutput );
+    if ( !QFile::rename( tempUncPath, config.uncertaintyOutput ) )
+    {
+      QFile::remove( tempUncPath );
+      result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
+      result.errorMessage =
+        QStringLiteral( "Failed to finalize uncertainty raster: %1" )
+          .arg( config.uncertaintyOutput );
+      return result;
+    }
   }
 
   result.totalPixels = outW * outH;

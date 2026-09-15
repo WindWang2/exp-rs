@@ -46,7 +46,9 @@ margin → 概率必须经校准器（下节）；禁止在调用方手工 sigmo
   （`N×K`）+ 真标签；不改变任何后端训练行为。
 - Platt：逐类 1-D 逻辑回归 `p = 1/(1+exp(A·s+B))`，Newton 迭代
   （默认 maxIter=100），Platt(1999) 热启动；梯度范数 < 1e-10 收敛；
-  Hessian 奇异加 ridge。
+  **每次 Newton 解都在 2×2 Hessian 上加 1e-10 ridge**（完全可分分数会把
+  权重推向无穷，奇异时再加倍），maxIter 耗尽时参数仍有限则接受该
+  确定性估计，非有限则失败。
 - isotonic：逐类 PAV（池聚 violator），应用 = knot 中点间单调分段线性
   插值，端点截断。
 - **多类 = one-vs-rest**；`apply()` 逐行归一化到和 1；isotonic 可能整行
@@ -83,7 +85,11 @@ margin → 概率必须经校准器（下节）；禁止在调用方手工 sigmo
 - `uncertaintyOutput`：3 波段 Float32 GTiff
   （band 1 = 归一化熵，band 2 = margin，band 3 = rejected mask {0,1}；
   波段描述符 `normalised_entropy` / `margin` / `rejected_mask`；
-  NoData = −1 于 ignored 像素）。
+  NoData = −1 于 ignored 像素；**退化概率行（非有限/不归一，如 NB
+  似然下溢为全零的行）三波段同样写 −1，且概率栅格同行写 −1、
+  `meanConfidence` 统计排除该像素**——NB 的 OpenCV `predictProb`
+  对偏离训练分布的像素可能下溢为全零似然（历史 ADR 0094 概率栅格
+  会将其静默报告为置信 0；本行为改为显式 NoData）。
 - `uncertaintyMeasure`：mask 驱动度量（默认 entropy）。
 - `rejectThreshold < 0` = 关（默认）；mask 全 0。
 - **标签图永不因 rejection 改写**（D-006）；拒绝语义只在 mask 波段。

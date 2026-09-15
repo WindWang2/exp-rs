@@ -98,9 +98,8 @@ TEST_CASE( "Scale: isotonic calibration on 100k scores stays monotone and "
     const double p = 1.0 / ( 1.0 + std::exp( -s ) );
     const bool positive = ( i % 10 == 0 ) ? ( p <= 0.5 ) : ( p > 0.5 );
     scores.push_back( s );
-    labels.push_back( positive ? 2 : 1 );
     scores.push_back( -s ); // column 2 = class 2's score is the mirrored one
-    labels[i] = positive ? 2 : 1;
+    labels.push_back( positive ? 2 : 1 );
   }
 
   RsCalibrationModel model;

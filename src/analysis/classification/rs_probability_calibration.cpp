@@ -271,6 +271,11 @@ bool RsProbabilityCalibrator::fitPlatt( std::span<const float> rawScores,
     return false;
   if ( static_cast<int>( rawScores.size() ) != static_cast<size_t>( sampleCount ) * k )
     return false;
+  for ( int i = 0; i < sampleCount; ++i )
+  {
+    if ( RsClassOrder::columnOf( classIds, labels[i] ) < 0 )
+      return false;
+  }
 
   RsCalibrationModel model;
   model.method = RsCalibrationModel::Method::Platt;
@@ -375,6 +380,11 @@ bool RsProbabilityCalibrator::fitIsotonic( std::span<const float> rawScores,
     return false;
   if ( static_cast<int>( rawScores.size() ) != static_cast<size_t>( sampleCount ) * k )
     return false;
+  for ( int i = 0; i < sampleCount; ++i )
+  {
+    if ( RsClassOrder::columnOf( classIds, labels[i] ) < 0 )
+      return false;
+  }
 
   RsCalibrationModel model;
   model.method = RsCalibrationModel::Method::Isotonic;

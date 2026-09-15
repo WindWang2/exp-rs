@@ -161,9 +161,10 @@ bool RsFeatureSchema::fromJson( const QJsonObject &obj )
     mDescriptors.append( d );
   }
   // Fingerprint recorded in the document must match the descriptors — this
-  // is the drift gate (a tampered/reordered document is rejected).
+  // is the drift gate (a tampered, reordered, or fingerprint-stripped
+  // document is rejected: the field is mandatory and fail-closed).
   const QString recorded = obj.value( QStringLiteral( "fingerprint" ) ).toString();
-  if ( !recorded.isEmpty() && recorded != fingerprint() )
+  if ( recorded != fingerprint() )
   {
     mDescriptors.clear();
     return false;

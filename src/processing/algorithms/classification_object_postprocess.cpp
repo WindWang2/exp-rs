@@ -105,7 +105,9 @@ ClassificationObjectPostProcessor::applyMinAreaRule( const SegmentTable &table,
   // Union-find over merged segments with path compression.
   std::unordered_map<int, int> parent;
   std::function<int( int )> find = [&]( int x ) -> int {
-    while ( parent[x] != x )
+    // All queried ids are seeded into parent above; the count guard keeps a
+    // future key-set drift from silently inserting a bogus root 0.
+    while ( parent.count( x ) && parent[x] != x )
     {
       parent[x] = parent[parent[x]];
       x = parent[x];

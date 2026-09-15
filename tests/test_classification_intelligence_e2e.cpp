@@ -116,19 +116,10 @@ TEST_CASE( "F12 e2e: pipeline uncertainty raster carries entropy/margin/reject "
   cfg.rejectThreshold = -1.0; // rejection disabled — mask must stay 0
   cfg.probabilityOutput = tmp.path() + "/probe_prob.tif";
   const QString uncPath = cfg.uncertaintyOutput;
-  const QString labelPath = cfg.outputRaster;
   const auto res = RsClassificationPipeline::run( std::move( cfg ) );
   INFO( "run failure: " << res.errorMessage.toStdString()
         << " meanConfidence=" << res.meanConfidence );
   REQUIRE( res.ok );
-  {
-    const std::vector<float> labelsOut = readBand( labelPath, 1, 32, 32 );
-    int zeroCount = 0;
-    for ( float v : labelsOut )
-      if ( v == 0.0f )
-        ++zeroCount;
-    std::fprintf( stderr, "LABELS unclassified count = %d / 1024\n", zeroCount );
-  }
 
   const int W = 32, H = 32;
   const std::vector<float> entropy = readBand( uncPath, 1, W, H );
@@ -146,18 +137,6 @@ TEST_CASE( "F12 e2e: pipeline uncertainty raster carries entropy/margin/reject "
   REQUIRE( QString( unc->GetRasterBand( 3 )->GetDescription() )
            == QLatin1String( "rejected_mask" ) );
 
-  int negCount = 0;
-  int firstNeg = -1;
-  for ( int i = 0; i < W * H; ++i )
-  {
-    if ( entropy[i] < 0.0f )
-    {
-      if ( negCount == 0 )
-        firstNeg = i;
-      ++negCount;
-    }
-  }
-  INFO( "neg entropy pixels: " << negCount << " first at " << firstNeg );
   for ( int i = 0; i < W * H; ++i )
   {
     // Perfectly separated training regions → NB is maximally confident:

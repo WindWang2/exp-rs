@@ -87,8 +87,10 @@ struct QGIS_ANALYSIS_EXPORT RsClassificationPipelineResult
     /// Per-class training sample counts (classId -> samples), from the raw
     /// extraction (before any holdout split). Empty in predict-only mode.
     QHash<int, int> trainSamplesByClass;
-    /// Mean best-class probability over valid pixels when a probability
-    /// output was requested (0.0 when none written).
+    /// Mean best-class probability over valid pixels with a well-formed
+    /// posterior row when a probability output was requested (0.0 when none
+    /// written; degenerate rows — e.g. NB likelihood underflow to all zeros —
+    /// are excluded and written as NoData -1 in the probability raster).
     double meanConfidence = 0.0;
     /// Confusion matrix + Kappa + per-class P/R/F1, populated when
     /// Config.testX / testY are non-empty. KMeans uses Hungarian-remapped

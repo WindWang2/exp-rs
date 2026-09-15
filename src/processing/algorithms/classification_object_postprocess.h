@@ -53,10 +53,8 @@ class ClassificationObjectPostProcessor
     };
 
     /// segment id -> (majority class, area). Segment ids <= 0 are NoData and
-    /// excluded from the table. A pixel with label -1 never contributes a
-    /// class vote (but counts towards area only when its segment has other
-    /// valid pixels... no — area counts every pixel of the segment in the
-    /// segment raster; class votes come from label != -1 pixels only).
+    /// excluded from the table. Area counts every pixel of the segment in the
+    /// segment raster; class votes come from label != -1 pixels only.
     using SegmentTable = std::unordered_map<int, SegmentNode>;
 
     /// adjacency[a][b] = shared border pixel count between segments a and b.
@@ -96,12 +94,9 @@ class ClassificationObjectPostProcessor
     static Adjacency buildAdjacency( std::span<const int> segments,
                                      int width, int height, int connectivity );
 
-    /// Min-area merge: returns the final segment-id → class table (merged
-    /// donors are absent or carry their absorbing class; the paint step only
-    /// consults the target segment of each pixel, so absent donors are fine
-    /// when the absorber shares every pixel — donors disappear only when
-    /// their pixels are re-segmented, which never happens here, so merged
-    /// donors KEEP an entry equal to the absorbing class).
+    /// Min-area merge: returns the final segment-id → class table. Every
+    /// original segment id keeps an entry — merged donors carry the class of
+    /// their absorbing group, so the paint step can resolve every pixel.
     static std::unordered_map<int, int> applyMinAreaRule( const SegmentTable &table,
                                                           const Adjacency &adjacency,
                                                           int minSegmentArea,

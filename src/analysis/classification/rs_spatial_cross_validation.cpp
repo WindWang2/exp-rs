@@ -10,6 +10,7 @@
 #include <limits>
 #include <numeric>
 #include <random>
+#include <utility>
 
 namespace
 {
@@ -210,7 +211,14 @@ RsSpatialCrossValidation::randomFolds( const cv::Mat &y, int k, unsigned int see
   for ( int c : classes )
   {
     QVector<int> rows = byClass[c];
-    std::shuffle( rows.begin(), rows.end(), rng );
+    // Hand-rolled Fisher-Yates: std::shuffle's permutation is
+    // implementation-defined, so the fold assignment would not replay
+    // across standard libraries.
+    for ( int i = static_cast<int>( rows.size() ) - 1; i > 0; --i )
+    {
+      const int j = static_cast<int>( rng() % static_cast<unsigned int>( i + 1 ) );
+      std::swap( rows[i], rows[j] );
+    }
     for ( int j = 0; j < rows.size(); ++j )
       shuffling[j % k].append( rows[j] );
   }
@@ -330,12 +338,14 @@ RsSpatialCrossValidation::evaluate( const cv::Mat &X,
       QSet<int> trainGroups;
       for ( int t : fold.trainIndices )
         trainGroups.insert( groupIds[static_cast<size_t>( t )] );
+      QSet<int> overlapGroups;
       for ( int s : fold.testIndices )
       {
         const int g = groupIds[static_cast<size_t>( s )];
         if ( trainGroups.contains( g ) )
-          ++audit.groupOverlap;
+          overlapGroups.insert( g );
       }
+      audit.groupOverlap = overlapGroups.size();
     }
     result.audit.folds.append( audit );
   }

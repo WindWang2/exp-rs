@@ -38,9 +38,12 @@ bool RsClassifierNormalBayes::save( const QString &path ) const
   if ( !RsClassifierCvBackend<cv::ml::NormalBayesClassifier>::save( path ) )
     return false;
   // Persist the probability column order alongside the model. Unlike the
-  // RF/MLP sidecars this is fail-closed: the sidecar did not exist for older
-  // models, so a new save without it means an unwritable location — the
-  // caller must know rather than silently lose the column-order guarantee.
+  // RF/MLP sidecars this is fail-closed: a save without the sidecar means
+  // the column-order guarantee is lost — and an EMPTY order must never be
+  // written either, because "[]" would make every subsequent load() of this
+  // model file fail validation (self-poisoning legacy round-trip).
+  if ( mClassLabels.isEmpty() )
+    return false;
   QFile f( path + QStringLiteral( ".labels.json" ) );
   if ( !f.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
     return false;

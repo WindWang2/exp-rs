@@ -89,9 +89,9 @@ class QGIS_ANALYSIS_EXPORT RsSpatialCrossValidation
       bool ok() const { return errorMessage.isEmpty(); }
     };
 
-    /// Group folds: each group is one atomic unit; groups are assigned to
-    /// \a k folds round-robin in descending size order (deterministic,
-    /// balance-first, tie-break by ascending group id). Needs >= k distinct
+    /// Group folds: each group is one atomic unit. Groups are greedily
+    /// assigned to the currently smallest fold in descending-size order
+    /// (deterministic; ties by ascending group id). Needs >= k distinct
     /// groups.
     static QVector<Fold> groupFolds( const std::vector<int> &groupIds, int k );
 
