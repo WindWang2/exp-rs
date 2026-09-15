@@ -7,6 +7,8 @@
 #include "main_window.h"
 #include "workflow/pipeline_editor_dock.h"
 #include "shell/workflow_session_controller.h"
+#include "shell/view_link_controller.h"
+#include "visualanalytics/va_layer_link_controller.h"
 #include "workbench_host.h"
 #include "cartography/cartography_dock.h"
 #include "visualanalytics/va_workbench_panel.h"
@@ -617,6 +619,139 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
         d.handler = [window] {
             if ( auto *controller = window->sessionController() )
                 controller->stopWorkflow();
+        };
+        registry->registerCommand( d );
+    }
+
+    // ── Linked Visual Analytics 11.0 — view link family ───────────────
+    // Sync toggles project onto the shell-owned controllers (checked state
+    // follows the live flags); undo/uncouple operate on the display
+    // manager's active view. Everything degrades to "unavailable" when the
+    // link controllers do not exist (headless facade).
+    {
+        RS_CMD( d, "view.linkCenter", QObject::tr( "Link View Centers" ),
+                QObject::tr( "Toggles linked center/extent propagation between views." ),
+                "link_center", QObject::tr( "View" ) );
+        d.checkable = true;
+        d.availability = [window]( const SelectionContextSnapshot & ) {
+            return window->viewLinkController() != nullptr;
+        };
+        d.checkedState = [window]( const SelectionContextSnapshot & ) {
+            auto *controller = window->viewLinkController();
+            return controller && controller->centerSyncEnabled();
+        };
+        d.handler = [window] {
+            if ( auto *controller = window->viewLinkController() )
+                controller->setCenterSync( !controller->centerSyncEnabled() );
+        };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "view.linkScale", QObject::tr( "Link View Scales" ),
+                QObject::tr( "Toggles scale sync between linked views." ),
+                "link_scale", QObject::tr( "View" ) );
+        d.checkable = true;
+        d.availability = [window]( const SelectionContextSnapshot & ) {
+            return window->viewLinkController() != nullptr;
+        };
+        d.checkedState = [window]( const SelectionContextSnapshot & ) {
+            auto *controller = window->viewLinkController();
+            return controller && controller->scaleSyncEnabled();
+        };
+        d.handler = [window] {
+            if ( auto *controller = window->viewLinkController() )
+                controller->setScaleSync( !controller->scaleSyncEnabled() );
+        };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "view.linkCursor", QObject::tr( "Link Cursors" ),
+                QObject::tr( "Toggles the cross-CRS cursor crosshair between linked views." ),
+                "link_cursor", QObject::tr( "View" ) );
+        d.checkable = true;
+        d.availability = [window]( const SelectionContextSnapshot & ) {
+            return window->viewLinkController() != nullptr;
+        };
+        d.checkedState = [window]( const SelectionContextSnapshot & ) {
+            auto *controller = window->viewLinkController();
+            return controller && controller->cursorSyncEnabled();
+        };
+        d.handler = [window] {
+            if ( auto *controller = window->viewLinkController() )
+                controller->setCursorSync( !controller->cursorSyncEnabled() );
+        };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "view.linkVisibility", QObject::tr( "Link Layer Visibility" ),
+                QObject::tr( "Toggles layer visibility/opacity sync by asset across views." ),
+                "link_visibility", QObject::tr( "View" ) );
+        d.checkable = true;
+        d.availability = [window]( const SelectionContextSnapshot & ) {
+            return window->layerLinkController() != nullptr;
+        };
+        d.checkedState = [window]( const SelectionContextSnapshot & ) {
+            auto *controller = window->layerLinkController();
+            return controller && controller->visibilitySyncEnabled();
+        };
+        d.handler = [window] {
+            if ( auto *controller = window->layerLinkController() )
+                controller->setVisibilitySync( !controller->visibilitySyncEnabled() );
+        };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "view.linkUndo", QObject::tr( "Previous Viewport" ),
+                QObject::tr( "Restores the active view's previous viewport (undoes one pan/zoom)." ),
+                "link_undo", QObject::tr( "View" ) );
+        d.availability = [window]( const SelectionContextSnapshot & ) {
+            auto *controller = window->viewLinkController();
+            return controller && !controller->activeView().isNull()
+                   && controller->historyCount( controller->activeView() ) > 0;
+        };
+        d.handler = [window] {
+            if ( auto *controller = window->viewLinkController() )
+                controller->restoreActiveViewport();
+        };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "view.linkGroupStatus", QObject::tr( "Active View Linked" ),
+                QObject::tr( "Toggles the active view's membership in the default link group." ),
+                "link_group", QObject::tr( "View" ) );
+        d.checkable = true;
+        d.availability = [window]( const SelectionContextSnapshot & ) {
+            auto *controller = window->viewLinkController();
+            return controller && !controller->activeView().isNull();
+        };
+        d.checkedState = [window]( const SelectionContextSnapshot & ) {
+            auto *controller = window->viewLinkController();
+            return controller && controller->isLinked( controller->activeView() );
+        };
+        d.handler = [window] {
+            auto *controller = window->viewLinkController();
+            if ( !controller || controller->activeView().isNull() )
+                return;
+            controller->setLinked( controller->activeView(),
+                                   !controller->isLinked( controller->activeView() ) );
+        };
+        registry->registerCommand( d );
+    }
+    {
+        RS_CMD( d, "view.linkUnlinkAll", QObject::tr( "Unlink All Views" ),
+                QObject::tr( "Removes every view from every link group." ),
+                "link_unlink_all", QObject::tr( "View" ) );
+        d.availability = [window]( const SelectionContextSnapshot & ) {
+            auto *controller = window->viewLinkController();
+            return controller && !controller->views().isEmpty();
+        };
+        d.handler = [window] {
+            if ( auto *controller = window->viewLinkController() )
+            {
+                const auto views = controller->views();
+                for ( const auto &viewId : views )
+                    controller->setLinkGroup( viewId, QString() );
+            }
         };
         registry->registerCommand( d );
     }

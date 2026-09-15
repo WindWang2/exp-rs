@@ -154,6 +154,10 @@ add_executable(sicnu_geo_rs
     visualanalytics/va_source.cpp
     visualanalytics/va_chart_widget.cpp
     visualanalytics/va_workbench_panel.cpp
+    # Linked Visual Analytics 11.0 — selection hub, cursor probe, layer link
+    visualanalytics/va_selection_hub.cpp
+    visualanalytics/va_cursor_probe.cpp
+    visualanalytics/va_layer_link_controller.cpp
     main_window_workbench.cpp
     workflow/pipeline_port_item.cpp
     workflow/pipeline_connection_item.cpp

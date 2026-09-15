@@ -2,6 +2,8 @@
 #include "main_window.h"
 #include "active_view_host.h"
 #include "project_context.h"
+#include "shell/view_link_controller.h"
+#include "visualanalytics/va_layer_link_controller.h"
 #include "shell/rs_session_map_workspace.h"
 #include "shell/secondary_map_view_widget.h"
 #include "shell/rs_dual_viewport_sync_controller.h"
@@ -83,6 +85,16 @@ bool bindSessionSecondaryView( sicnu::app::ProjectContext *ctx,
 }
 } // namespace
 
+void QgisDesktopWindow::registerLinkedVisualView( sicnu::display::DisplayViewId viewId )
+{
+    if ( viewId.isNull() )
+        return;
+    if ( m_viewLinkController )
+        m_viewLinkController->addView( viewId );
+    if ( m_layerLinkController )
+        m_layerLinkController->addView( viewId );
+}
+
 void QgisDesktopWindow::openGeorefImageToImage()
 {
     if ( !m_georefI2I )
@@ -105,10 +117,12 @@ void QgisDesktopWindow::openGeorefImageToImage()
 
         if ( m_projectContext )
         {
-            ( void ) bindSessionSecondaryView(
-                m_projectContext.get(), m_georefI2I->srcSessionMap(), m_georefI2ISrcViewId );
-            ( void ) bindSessionSecondaryView(
-                m_projectContext.get(), m_georefI2I->dstSessionMap(), m_georefI2IDstViewId );
+            if ( bindSessionSecondaryView(
+                     m_projectContext.get(), m_georefI2I->srcSessionMap(), m_georefI2ISrcViewId ) )
+                registerLinkedVisualView( m_georefI2ISrcViewId );
+            if ( bindSessionSecondaryView(
+                     m_projectContext.get(), m_georefI2I->dstSessionMap(), m_georefI2IDstViewId ) )
+                registerLinkedVisualView( m_georefI2IDstViewId );
         }
     }
     m_georefI2I->show();
@@ -138,8 +152,9 @@ void QgisDesktopWindow::openGeorefImageToMap()
 
         if ( m_projectContext )
         {
-            ( void ) bindSessionSecondaryView(
-                m_projectContext.get(), m_georefI2M->srcSessionMap(), m_georefI2MSrcViewId );
+            if ( bindSessionSecondaryView(
+                     m_projectContext.get(), m_georefI2M->srcSessionMap(), m_georefI2MSrcViewId ) )
+                registerLinkedVisualView( m_georefI2MSrcViewId );
         }
     }
     m_georefI2M->show();
@@ -193,6 +208,10 @@ void QgisDesktopWindow::openClassificationWindow()
             statusBar()->showMessage(
                 tr( "Classification session not registered as a display view (using session-local layer stack)" ), 4000 );
         }
+        else
+        {
+            registerLinkedVisualView( m_classifyViewId );
+        }
     }
     m_classifyWindow->show();
     m_classifyWindow->raise();
@@ -240,6 +259,10 @@ void QgisDesktopWindow::openObiaWindow()
         {
             statusBar()->showMessage(
                 tr( "OBIA session not registered as a display view (using session-local layer stack)" ), 4000 );
+        }
+        else
+        {
+            registerLinkedVisualView( m_obiaViewId );
         }
         m_obiaWindow = obia;
     }
@@ -322,6 +345,9 @@ void QgisDesktopWindow::openSecondaryMapView()
         }
         m_secondaryViewId = created.value();
         m_secondaryMapView->setViewId( m_secondaryViewId );
+        // Linked Visual Analytics 11.0: join the new view to the link
+        // authorities (extent/cursor groups + layer visibility link).
+        registerLinkedVisualView( m_secondaryViewId );
     }
 
     m_secondaryMapView->show();

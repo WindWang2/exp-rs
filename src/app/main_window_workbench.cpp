@@ -33,6 +33,9 @@
 #include <string>
 #include "cartography/cartography_dock.h"
 #include "visualanalytics/va_workbench_panel.h"
+#include "visualanalytics/va_selection_hub.h"
+#include "shell/view_link_controller.h"
+#include "visualanalytics/va_layer_link_controller.h"
 #include "shell/rs_operator_catalog_panel.h"
 #include "shell/workflow_session_controller.h"
 #include "workbench/agent_context_tool.h"
@@ -649,9 +652,30 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
             m_windowMenu->addAction( action );
     }
 
+    // ── Linked Visual Analytics 11.0 ──────────────────────────────────
+    // Process-level selection hub + N-view extent/cursor link + cross-view
+    // layer visibility/opacity link, all over the display manager's view
+    // authority. The main view registers here; secondary/session views
+    // register where they are created (openSecondaryMapView & co).
+    if ( m_projectContext )
+    {
+        m_vaSelectionHub = new sicnu::app::va::VaSelectionHub( this );
+        m_viewLinkController = new sicnu::app::ViewLinkController(
+            &m_projectContext->displayManager(), this );
+        m_layerLinkController = new sicnu::app::VaLayerLinkController(
+            &m_projectContext->displayManager(), this );
+        const auto mainViewId = m_projectContext->mainViewId();
+        if ( !mainViewId.isNull() )
+        {
+            m_viewLinkController->addView( mainViewId );
+            m_layerLinkController->addView( mainViewId );
+        }
+    }
+
     // ── Visual Analytics workbench (Workbench 10.0) ───────────────────
     // Typed chart hosts over bounded, cancellable sampling jobs; inputs
-    // follow the unified selection's raster.
+    // follow the unified selection's raster. 11.0: the panel joins the
+    // selection hub (brushing) and the view link's cursor channel.
     m_vaPanel = new sicnu::app::va::VaWorkbenchPanel(
         [this]() -> QString {
             if ( !m_selectionContext )
@@ -661,7 +685,32 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
                 return raster->source();
             return QString();
         },
+        m_vaSelectionHub,
+        [this]() -> QgsMapCanvas * {
+            return m_activeViewHost ? m_activeViewHost->mapCanvas() : nullptr;
+        },
+        [this]() -> QgsRasterLayer * {
+            if ( !m_selectionContext )
+                return nullptr;
+            return m_selectionContext->snapshot().firstRasterLayer();
+        },
         this );
+    if ( m_viewLinkController && m_vaPanel )
+    {
+        connect( m_viewLinkController, &sicnu::app::ViewLinkController::cursorMoved,
+                 m_vaPanel,
+                 [this]( sicnu::display::DisplayViewId viewId, const QgsPointXY &point,
+                         const QString &crsWkt ) {
+                     if ( m_vaPanel )
+                         m_vaPanel->onViewCursorMoved( viewId.toString(), point.x(),
+                                                       point.y(), crsWkt );
+                 } );
+        connect( m_viewLinkController, &sicnu::app::ViewLinkController::cursorLeft,
+                 m_vaPanel, [this]( sicnu::display::DisplayViewId viewId ) {
+                     if ( m_vaPanel )
+                         m_vaPanel->onViewCursorLeft( viewId.toString() );
+                 } );
+    }
     m_vaPanel->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
     addDockWidget( Qt::RightDockWidgetArea, m_vaPanel );
     m_vaPanel->hide();

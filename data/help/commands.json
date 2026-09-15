@@ -865,5 +865,127 @@
       "取消执行",
       "stop workflow"
     ]
+  },
+  {
+    "id": "command.view.linkCenter",
+    "purpose": "在多个地图视图之间同步平移/缩放的中心与范围，一图移动、组内视图跟随。",
+    "prerequisites": [
+      "已打开至少一个副视图或会话视图"
+    ],
+    "suggestedNextAction": "用“活动视图联动”把当前视图加入联动组",
+    "related": [
+      "command.view.linkScale",
+      "command.view.linkGroupStatus"
+    ],
+    "keywords": [
+      "联动",
+      "范围",
+      "视图同步",
+      "link extent"
+    ]
+  },
+  {
+    "id": "command.view.linkScale",
+    "purpose": "在联动视图之间同步显示比例，保证判读比例一致。",
+    "prerequisites": [
+      "已打开至少一个副视图或会话视图"
+    ],
+    "suggestedNextAction": "先用“联动视图中心”打开范围联动",
+    "related": [
+      "command.view.linkCenter",
+      "command.view.linkCursor"
+    ],
+    "keywords": [
+      "比例尺",
+      "联动",
+      "缩放",
+      "scale sync"
+    ]
+  },
+  {
+    "id": "command.view.linkCursor",
+    "purpose": "在联动视图之间同步光标十字丝，跨 CRS 自动换算坐标。",
+    "prerequisites": [
+      "至少两个视图已联动"
+    ],
+    "suggestedNextAction": "在任一联动视图内移动鼠标观察十字丝",
+    "related": [
+      "command.view.linkCenter",
+      "command.workbench.visualAnalytics"
+    ],
+    "keywords": [
+      "光标",
+      "十字丝",
+      "crosshair",
+      "坐标换算"
+    ]
+  },
+  {
+    "id": "command.view.linkVisibility",
+    "purpose": "按资产身份在不同视图之间同步图层可见性与透明度（同名不同源的图层不会误联）。",
+    "prerequisites": [
+      "同一资产已加载到多个视图"
+    ],
+    "suggestedNextAction": "在图层树中切换可见性，观察其他视图同步",
+    "related": [
+      "command.view.linkCenter"
+    ],
+    "keywords": [
+      "图层",
+      "可见性",
+      "透明度",
+      "visibility"
+    ]
+  },
+  {
+    "id": "command.view.linkUndo",
+    "purpose": "撤销活动视图上一次平移/缩放，回到上一个范围。",
+    "prerequisites": [
+      "活动视图已有范围历史"
+    ],
+    "suggestedNextAction": "连续执行可逐步回退；重新平移可产生新历史",
+    "related": [
+      "command.view.linkGroupStatus"
+    ],
+    "keywords": [
+      "撤销",
+      "返回上一视图",
+      "undo",
+      "viewport history"
+    ]
+  },
+  {
+    "id": "command.view.linkGroupStatus",
+    "purpose": "把活动视图加入/移出默认联动组。",
+    "prerequisites": [
+      "存在活动视图"
+    ],
+    "suggestedNextAction": "移动当前视图，检查联动组内视图是否跟随",
+    "related": [
+      "command.view.linkCenter",
+      "command.view.linkUnlinkAll"
+    ],
+    "keywords": [
+      "联动组",
+      "活动视图",
+      "link group"
+    ]
+  },
+  {
+    "id": "command.view.linkUnlinkAll",
+    "purpose": "把所有视图移出所有联动组，恢复各自独立浏览。",
+    "prerequisites": [
+      "存在已联动视图"
+    ],
+    "suggestedNextAction": "需要再次联动时重新勾选联动命令",
+    "related": [
+      "command.view.linkGroupStatus",
+      "command.view.linkCenter"
+    ],
+    "keywords": [
+      "解除联动",
+      "独立浏览",
+      "unlink"
+    ]
   }
 ]
