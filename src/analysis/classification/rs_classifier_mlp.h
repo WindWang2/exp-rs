@@ -25,6 +25,8 @@ class QGIS_ANALYSIS_EXPORT RsMlpBackend : public RsClassifierCvBackend<cv::ml::A
     bool save( const QString &path ) const override;
     bool load( const QString &path ) override;
     bool supportsProbabilities() const override { return true; }
+    /// F12: ascending training class ids — probability column order.
+    QVector<int> classOrder() const override;
     QString name() const override { return QStringLiteral( "Neural Network (MLP)" ); }
 
   private:

@@ -27,8 +27,11 @@
 #include "rs_classifier_backend.h"
 #include "rs_accuracy_assessment.h"
 #include "rs_feature_scaler.h"
+#include "rs_feature_schema.h"
 #include "rs_pixel_ignore_options.h"
 #include "rs_pixel_window.h"
+#include "rs_probability_calibration.h"
+#include "rs_uncertainty.h"
 
 #include <QColor>
 #include <QHash>
@@ -161,6 +164,41 @@ class QGIS_ANALYSIS_EXPORT RsClassificationPipeline
 
         /// Deterministic pseudo-random seed for data splitting and subsampling.
         unsigned int seed = 42u;
+
+        // -- Classification & Object Intelligence 11.0 (additive; every
+        //    field defaults to "off" so existing callers see zero change) --
+
+        /// Optional per-pixel uncertainty raster: Float32, 3 bands
+        /// (1 = normalised entropy [0,1], 2 = margin [0,1],
+        ///  3 = rejected mask {0,1}). NoData = -1 on ignored pixels.
+        /// Requires a probability-capable backend (same gate as
+        /// probabilityOutput). Labels in the class raster are NOT changed
+        /// by rejection — band 3 carries the mask (DECISIONS D-006).
+        QString uncertaintyOutput;
+
+        /// Measure driving band 3 / rejection (default entropy).
+        RsUncertainty::Measure uncertaintyMeasure = RsUncertainty::Measure::Entropy;
+
+        /// Reject threshold for band 3. Negative (default) disables
+        /// rejection: band 3 is written as all-zero for valid pixels.
+        /// Direction per measure: entropy ≥ threshold rejects; margin and
+        /// confidence ≤ threshold reject (RsUncertainty::isRejected).
+        double rejectThreshold = -1.0;
+
+        /// Explicit calibration model applied to the probability output
+        /// (and confidence statistics) during prediction. When empty and
+        /// applySidecarCalibration is set, the sidecar's calibration section
+        /// is used in predict-only mode instead.
+        RsCalibrationModel calibrationModel;
+
+        /// Predict-only mode: apply a calibration section stored in the
+        /// model sidecar (v2). No effect in training mode.
+        bool applySidecarCalibration = false;
+
+        /// Optional typed feature schema persisted into the v2 sidecar
+        /// (names + kinds + sources + fingerprint) for provenance and
+        /// drift checking on reload.
+        RsFeatureSchema featureSchema;
     };
 
     /// Run the full pipeline synchronously on the caller's thread.
@@ -210,4 +248,33 @@ class QGIS_ANALYSIS_EXPORT RsClassificationPipeline
       QHash<int, int> dummy;
       return loadModelSidecar( modelPath, methodName, scaler, classColors, bandIndices, accuracy, dummy );
     }
+
+    // -- Classification & Object Intelligence 11.0: sidecar v2 ------------
+
+    /// Full sidecar content: the v1 sections plus the F12 additions.
+    /// Sections absent from a v1 file stay at their default (empty).
+    struct SidecarData
+    {
+      QString methodName;
+      RsFeatureScaler scaler;
+      QHash<int, QColor> classColors;
+      QVector<int> bandIndices;                     ///< 1-based (v1 meaning)
+      RsAccuracyAssessment::Result accuracy;
+      QHash<int, int> kmeansRemap;
+      QVector<int> classOrder;                      ///< probability column order
+      RsCalibrationModel calibration;               ///< valid() when stored
+      RsFeatureSchema featureSchema;                ///< empty when not stored
+      unsigned int trainingSeed = 42u;
+      int trainingSampleCount = 0;
+      bool hasCalibration = false;
+    };
+
+    /// Write the superset sidecar from \a data (version 2). Returns false
+    /// when the file cannot be written.
+    static bool saveModelSidecarV2( const QString &modelPath, const SidecarData &data );
+
+    /// Read the sidecar (versions 1 and 2). Returns false when missing,
+    /// malformed, or an unsupported version. v1 files leave the F12
+    /// sections at their defaults.
+    static bool loadModelSidecarFull( const QString &modelPath, SidecarData &out );
 };

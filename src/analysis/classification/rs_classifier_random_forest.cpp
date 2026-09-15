@@ -45,6 +45,43 @@ bool RsRandomForestBackend::fit( const cv::Mat &X, const cv::Mat &y )
   return true;
 }
 
+QVector<int> RsRandomForestBackend::classOrder() const
+{
+  QVector<int> order;
+  order.reserve( static_cast<int>( mClassLabels.total() ) );
+  for ( int i = 0; i < mClassLabels.rows; ++i )
+    order.append( mClassLabels.at<int>( i, 0 ) );
+  return order;
+}
+
+QVector<double> RsRandomForestBackend::featureImportances() const
+{
+  QVector<double> importances;
+  if ( !m_clf || !m_clf->isTrained() )
+    return importances;
+  try
+  {
+    // RTrees::getFeatureImportance() is non-const in the OpenCV API but is
+    // logically const (reads trained-tree statistics); mirror the
+    // const_cast pattern already used by the save() boilerplate above.
+    cv::Mat imp = const_cast<cv::Ptr<cv::ml::RTrees> &>( m_clf )->getFeatureImportance();
+    if ( imp.empty() )
+      return importances;
+    importances.reserve( imp.cols );
+    for ( int i = 0; i < imp.cols; ++i )
+    {
+      const double v = std::max( 0.0, static_cast<double>( imp.at<float>( 0, i ) ) );
+      importances.append( v );
+    }
+  }
+  catch ( const cv::Exception &e )
+  {
+    qWarning() << "RsRandomForestBackend::featureImportances — error:" << e.what();
+    importances.clear();
+  }
+  return importances;
+}
+
 cv::Mat RsRandomForestBackend::predictProbabilities( const cv::Mat &X ) const
 {
   cv::Mat probs;
