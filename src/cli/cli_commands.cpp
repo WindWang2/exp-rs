@@ -2,6 +2,7 @@
  * src/cli/cli_commands.cpp
  ***************************************************************************/
 #include "cli_commands.h"
+#include "cli_tool_commands.h"
 
 #include <cpl_vsi.h>
 
@@ -2257,7 +2258,9 @@ bool isCliCommand( const QString &firstArg )
                                            // Foundation 5.0/7.0 dataset-experiment surface.
                                            "dataset", "experiment", "reproduce",
                                            // D4 teaching auto-grader (ADR 0150).
-                                           "lab" };
+                                           "lab",
+                                           // Surface-11: union discovery + batch manifests.
+                                           "tools", "batch" };
     return kCommands.contains( firstArg );
 }
 
@@ -2295,6 +2298,10 @@ int dispatchCliCommand( const QStringList &arguments, const CliIO &io )
         return commandReproduce( std::move( args ), io );
     if ( command == "lab" )
         return commandLab( std::move( args ), io );
+    if ( command == "tools" )
+        return commandTools( std::move( args ), io );
+    if ( command == "batch" )
+        return commandBatch( std::move( args ), io );
     if ( command == "catalog" )
     {
         // catalog export <dir> — the legacy --export-catalog surface.
