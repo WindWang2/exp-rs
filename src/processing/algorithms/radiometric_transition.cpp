@@ -166,7 +166,7 @@ Json::Value edgeProvenance( const QString &step, const StepInputs &in )
     }
     else if ( step == kStepRadianceToToaReflectance )
     {
-        e["formula"] = "rho = pi*L*d^-2/(ESUN*cos(sunZenith))";
+        e["formula"] = "rho = pi*L*d^2/(ESUN*cos(sunZenith))";
         e["esun"] = in.esun;
     }
     else if ( step == kStepRadianceToBrightnessTemperature && in.coeffs )
@@ -239,20 +239,10 @@ Plan plan( const QString &fromState, const QString &toState, const StepInputs &i
         return p;
     }
 
-    if ( !isLawfulEdge( fromState, toState ) )
-    {
-        // Find whether any chain exists at all (it cannot: the DAG is a tree
-        // over these five nodes, so an absent direct edge implies an absent
-        // path — verified by the chain table below).
-        p.explanation = QStringLiteral( "radiometric_transition: %1 → %2 is not a lawful "
-                                       "conversion (radiometric corrections only move forward "
-                                       "along DN → radiance → TOA → surface; brightness "
-                                       "temperature is terminal)" )
-                            .arg( fromState, toState );
-        return p;
-    }
-
     // Shortest lawful chains (the DAG makes each reachable pair unique).
+    // The table itself decides lawfulness: multi-edge conversions (DN → BT,
+    // DN/L → surface) are lawful without a direct edge, so the direct-edge
+    // predicate must not gate here.
     QStringList chain;
     if ( fromState == kRadiometricStateDigitalNumber )
     {
@@ -279,7 +269,15 @@ Plan plan( const QString &fromState, const QString &toState, const StepInputs &i
     {
         chain = { kStepToaToSurfaceReflectance };
     }
-    Q_ASSERT( !chain.isEmpty() && "lawful edge without a chain" );
+    if ( chain.isEmpty() )
+    {
+        p.explanation = QStringLiteral( "radiometric_transition: %1 → %2 is not a lawful "
+                                       "conversion (radiometric corrections only move forward "
+                                       "along DN → radiance → TOA → surface; brightness "
+                                       "temperature is terminal)" )
+                            .arg( fromState, toState );
+        return p;
+    }
 
     p.lawful = true;
     p.steps = chain;

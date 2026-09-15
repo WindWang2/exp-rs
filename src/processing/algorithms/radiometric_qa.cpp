@@ -24,7 +24,8 @@ size_t flagIndex( uint16_t flag )
 
 double Summary::fraction( uint16_t flag ) const
 {
-    if ( pixels == 0 )
+    // Single-bit flag words only; FlagNone (0) has no index.
+    if ( pixels == 0 || flag == 0 || ( flag & ( flag - 1 ) ) != 0 )
         return 0.0;
     return static_cast<double>( counts[flagIndex( flag )] ) / static_cast<double>( pixels );
 }

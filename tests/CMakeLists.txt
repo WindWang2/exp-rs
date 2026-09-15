@@ -1086,7 +1086,7 @@ target_include_directories(test_solar_geometry PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_solar_geometry)
+sicnu_discover_tests(test_solar_geometry TEST_PREFIX "test_solar_geometry::")
 
 # Radiometric transition authority tests (radiometric-physics-11)
 add_executable(test_radiometric_transition test_radiometric_transition.cpp)
@@ -1100,7 +1100,7 @@ target_include_directories(test_radiometric_transition PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_radiometric_transition)
+sicnu_discover_tests(test_radiometric_transition TEST_PREFIX "test_radiometric_transition::")
 
 # Atmospheric provider seam tests (radiometric-physics-11)
 add_executable(test_atmospheric_provider test_atmospheric_provider.cpp)
@@ -1114,7 +1114,7 @@ target_include_directories(test_atmospheric_provider PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_atmospheric_provider)
+sicnu_discover_tests(test_atmospheric_provider TEST_PREFIX "test_atmospheric_provider::")
 
 # BRDF normalization tests (radiometric-physics-11)
 add_executable(test_brdf_normalization test_brdf_normalization.cpp)
@@ -1131,7 +1131,7 @@ target_include_directories(test_brdf_normalization PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_brdf_normalization)
+sicnu_discover_tests(test_brdf_normalization TEST_PREFIX "test_brdf_normalization::")
 
 # Radiometric QA flag tests (radiometric-physics-11)
 add_executable(test_radiometric_qa test_radiometric_qa.cpp)
@@ -1148,7 +1148,7 @@ target_include_directories(test_radiometric_qa PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
 )
-sicnu_discover_tests(test_radiometric_qa)
+sicnu_discover_tests(test_radiometric_qa TEST_PREFIX "test_radiometric_qa::")
 
 # Band math tests
 add_executable(test_band_math test_band_math.cpp)

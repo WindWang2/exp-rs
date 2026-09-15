@@ -106,12 +106,15 @@ TEST_CASE( "DOS1 known answer: (rho - dark + 0.01)", "[provider]" )
     REQUIRE( p->toSurfaceReflectance( toa.data(), out.data(), toa.size(), aux ) );
 
     // Hand-computed Chavez algebra, independent of any production call:
-    // 0.20 → 0.11, 0.50 → 0.41, dark level → 0.01, NaN → NaN, negative → NaN.
+    // 0.20 → 0.11, 0.50 → 0.41, dark level → 0.01, NaN → NaN.
+    // A negative result (ρ − dark + 0.01 < 0) passes through FINITE — the
+    // house kernel does not clip; RadiometricQa::FlagNegative is the
+    // mechanism that reports it downstream.
     CHECK( out[0] == Catch::Approx( 0.11f ).epsilon( 1e-6 ) );
     CHECK( out[1] == Catch::Approx( 0.41f ).epsilon( 1e-6 ) );
     CHECK( out[2] == Catch::Approx( 0.01f ).epsilon( 1e-6 ) );
     CHECK( std::isnan( out[3] ) );
-    CHECK( std::isnan( out[4] ) ); // rho − dark + 0.01 < 0 → NaN (domain violation)
+    CHECK( out[4] == Catch::Approx( -0.11f ).epsilon( 1e-6 ) );
 }
 
 TEST_CASE( "DOS2 known answer: (rho - dark + 0.01) / T", "[provider]" )
@@ -181,7 +184,9 @@ TEST_CASE( "a custom provider plugs into the seam unmodified", "[provider]" )
     Requirements req;
     req.needsAod = true;
     req.needsSunGeometry = true;
-    StubProvider stub( QStringLiteral( "test-lut-6s" ), req );
+    // Registry is non-owning: the stub must live for the whole process, so
+    // it is a function-local static (the registry is never unregistered).
+    static StubProvider stub( QStringLiteral( "test-lut-6s" ), req );
     REQUIRE( registerProvider( &stub ) );
 
     CorrectionInputs aux;

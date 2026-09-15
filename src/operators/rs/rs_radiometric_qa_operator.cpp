@@ -140,11 +140,15 @@ Json::Value RsRadiometricQaOperator::run( const Json::Value &params, RSOperatorC
                                "qa_radsat_band " + std::to_string( qaBand )
                                    + " exceeds the input band count " + std::to_string( bandCount ) );
 
-    // Per-band saturation bit masks (uint16); default all zero = disabled.
+    // Per-band saturation bit masks (uint16). Explicit "b1,b2,..." wins;
+    // a QA band WITHOUT masks defaults to the Landsat QA_RADSAT convention
+    // (bit b−1 for band b, bands beyond 16 disabled) — never a silent no-op.
     std::vector<uint16_t> radsatBits( bandCount, 0 );
+    bool bitsExplicit = false;
     if ( qaBand > 0 && params.isMember( "qa_radsat_bits" ) && params["qa_radsat_bits"].isString()
          && !params["qa_radsat_bits"].asString().empty() )
     {
+        bitsExplicit = true;
         const QStringList tokens =
             QString::fromStdString( params["qa_radsat_bits"].asString() )
                 .split( ',', Qt::SkipEmptyParts );
@@ -160,6 +164,11 @@ Json::Value RsRadiometricQaOperator::run( const Json::Value &params, RSOperatorC
                                        "qa_radsat_bits entries must be integers in [0, 65535]" );
             radsatBits[b] = static_cast<uint16_t>( v );
         }
+    }
+    else if ( qaBand > 0 )
+    {
+        for ( int b = 0; b < bandCount && b < 16; ++b )
+            radsatBits[b] = static_cast<uint16_t>( 1u << b );
     }
 
     GdalDatasetWrapper maskDs;
@@ -220,7 +229,12 @@ Json::Value RsRadiometricQaOperator::run( const Json::Value &params, RSOperatorC
             if ( qaBand > 0 && radsatBits[b] != 0 )
             {
                 for ( size_t i = 0; i < n; ++i )
-                    qaWords[i] = static_cast<uint16_t>( bip[i * bandCount + ( qaBand - 1 )] );
+                {
+                    const float q = bip[i * bandCount + ( qaBand - 1 )];
+                    qaWords[i] = ( q >= 0.0f && q <= 65535.0f )
+                                     ? static_cast<uint16_t>( q )
+                                     : 0u; // out-of-range QA word: no bits claimed
+                }
                 RadiometricQa::addSaturationBits( outFlags.data(), qaWords.data(), n,
                                                   radsatBits[b] );
             }
@@ -229,7 +243,7 @@ Json::Value RsRadiometricQaOperator::run( const Json::Value &params, RSOperatorC
                 flagged += outFlags[i] != 0 ? 1 : 0;
             flaggedTotals[b] += flagged;
             pixelTotals[b] += n;
-            if ( !output.writeTile( b + 1, tile, outFlags.data() ) )
+            if ( !output.writeTileRaw( b + 1, tile, outFlags.data(), GDT_UInt16 ) )
                 return false;
         }
         ++tileIndex;
@@ -255,6 +269,15 @@ Json::Value RsRadiometricQaOperator::run( const Json::Value &params, RSOperatorC
     result["width"] = width;
     result["height"] = height;
     result["mask_flag"] = maskToken;
+    if ( qaBand > 0 )
+    {
+        result["qa_radsat_band"] = qaBand;
+        result["qa_radsat_bits_explicit"] = bitsExplicit;
+        Json::Value bits( Json::arrayValue );
+        for ( int b = 0; b < bandCount; ++b )
+            bits.append( Json::UInt( radsatBits[b] ) );
+        result["qa_radsat_bits_applied"] = bits;
+    }
     Json::Value bands( Json::objectValue );
     for ( int b = 0; b < bandCount; ++b )
     {

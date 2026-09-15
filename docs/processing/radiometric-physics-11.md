@@ -42,7 +42,8 @@ position):
   frame as the topographic-correction illumination cosine.
 - Earth-sun inverse-square factor `E₀ = d⁻²`: the Spencer radius-vector series
   (perihelion ≈ Jan 3 → 1.0351, aphelion ≈ Jul 4 → 0.9661); `d = 1/√E₀` in AU.
-  `E₀` is the multiplier in the ESUN TOA form `ρ = π·L·E₀/(ESUN·cos θz)`.
+  `d²` = 1/E₀ multiplies radiance in the ESUN TOA form
+  `ρ = π·L·d²/(ESUN·cos θz)` (equivalently `E₀` divides: `ρ = π·L/(E₀·ESUN·cos θz)`).
 
 Fail-closed: invalid date/time, latitude outside [−90, 90], longitude outside
 [−180, 180], or any non-finite input refuses with a typed message; `acos`/
@@ -64,7 +65,7 @@ required inputs:
 |---|---|
 | `dn_to_radiance` | `hasRadiance` MTL coefficients (`radiance_coefficients`) |
 | `dn_to_toa_reflectance` | Landsat: `hasReflectance` + real sun elevation (`reflectance_coefficients`, `sun_elevation`); S2/generic: loaded quantification scale/offset (`reflectance_coefficients`) |
-| `radiance_to_toa_reflectance` | ESUN > 0 (`esun`) + usable sun elevation (`sun_elevation`) — the `ρ = π·L·E₀/(ESUN·cos θz)` path |
+| `radiance_to_toa_reflectance` | ESUN > 0 (`esun`) + usable sun elevation (`sun_elevation`) — the `ρ = π·L·d²/(ESUN·cos θz)` path |
 | `radiance_to_brightness_temperature` | `K1 > 0`, `K2 > 0` (`thermal_constants`) |
 | `toa_to_surface_reflectance` | a named atmospheric provider (`atmospheric_provider`) |
 
@@ -122,12 +123,14 @@ Kernel pair (Lucht, Schaaf & Strahler 2000; MODIS BRDF/Albedo ATBD):
 - Ross-Thick volumetric: `k_vol = ((π/2 − ξ)cos ξ + sin ξ)/(cos θs + cos θv) − π/4`
   with `cos ξ = cos θs cos θv + sin θs sin θv cos Δφ`. Special value
   `k_vol(0,0,·) = 0`.
-- Li-Sparse-Reciprocal geometric with `(h/b) = 2`: overlap integral
+- Li-Sparse-Reciprocal geometric with `(h/b) = 2, (b/r) = 1`: overlap integral
   `O = (t − sin t cos t)(sec θs + sec θv)/π`,
   `cos t = 2√(D² + tan²θs tan²θv sin²Δφ)/(sec θs + sec θv)`,
-  `D² = tan²θs + tan²θv − 2 tan θs tan θv cos Δφ`,
-  `k_geo = O − sec θs − sec θv + (D + D′)/2`,
-  `D′ = √(D² + 4 tan²θs tan²θv sin²Δφ)`. Special value `k_geo(0,0,·) = −1`.
+  `D² = tan²θs + tan²θv − 2 tan θs tan θv cos Δφ`, and the canonical closing
+  term `k_geo = O − sec θs − sec θv + ½(1 + cos ξ)·sec θs·sec θv`.
+  Special value `k_geo(0,0,·) = 0` — both kernels vanish at nadir sun + nadir
+  view, which is why `f_iso` is the nadir BRF in the MODIS literature; the
+  geometric kernel peaks positively at the hotspot.
 - Anisotropy factor `f = 1 + f_vol·k_vol + f_geo·k_geo > 0` (nonphysical
   factor ⇒ typed refusal); normalization is `ρ_ref = ρ_obs·f(G_ref)/f(G_obs)`
   with reference geometry nadir-view/unchanged-sun by default.

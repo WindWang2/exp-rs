@@ -19,7 +19,7 @@
 //               │                                │
 //               └──────────────▶ └──▶ brightness_temperature
 //
-//      radiance→TOA is the ESUN path (ρ = π·L·E₀/(ESUN·cos θz)); the DN→TOA
+//      radiance→TOA is the ESUN path (ρ = π·L·d²/(ESUN·cos θz) = π·L/(E₀·ESUN·cos θz)); the DN→TOA
 //      edge is the direct coefficient/quantification path. Identity is
 //      lawful. Every inversion (SR→TOA, TOA→DN, …) and unit-jumping shortcut
 //      (DN→SR, DN→BT, L→SR, TOA→BT, any→BT except via radiance) is unlawful:

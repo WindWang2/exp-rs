@@ -223,20 +223,21 @@ TEST_CASE( "thermal branch requires K1/K2 and skips unlawful shortcuts", "[trans
 
     // Category errors: reflectance can never become temperature, and
     // surface reflectance / brightness temperature are terminal states.
+    // (DN → surface and radiance → surface ARE lawful — two-edge chains —
+    // and are covered by the TOA→surface / full-chain cases above.)
     for ( const auto &pair : { std::make_pair( QStringLiteral( "toa_reflectance" ),
                                                QStringLiteral( "brightness_temperature" ) ),
                                std::make_pair( QStringLiteral( "surface_reflectance" ),
                                                QStringLiteral( "toa_reflectance" ) ),
                                std::make_pair( QStringLiteral( "brightness_temperature" ),
                                                QStringLiteral( "radiance" ) ),
-                               std::make_pair( QStringLiteral( "digital_number" ),
-                                               QStringLiteral( "surface_reflectance" ) ),
-                               std::make_pair( QStringLiteral( "radiance" ),
+                               std::make_pair( QStringLiteral( "brightness_temperature" ),
                                                QStringLiteral( "surface_reflectance" ) ) } )
     {
         in.coeffs = &c;
         const Plan p = plan( pair.first, pair.second, in );
-        INFO( pair.first << " -> " << pair.second << ": " << p.explanation );
+        INFO( pair.first.toStdString() << " -> " << pair.second.toStdString() << ": "
+              << p.explanation.toStdString() );
         CHECK_FALSE( p.lawful );
         CHECK( p.steps.isEmpty() );
         CHECK( p.missing.isEmpty() ); // unlawful ≠ missing inputs

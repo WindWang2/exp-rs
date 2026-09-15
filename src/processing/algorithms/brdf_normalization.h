@@ -24,14 +24,13 @@
 //     inventing weights. Weight domain: finite; the factor denominator is
 //     checked to stay positive (a nonphysical 1 + Σf·k ≤ 0 refuses).
 //
-//   * Empirical pair normalization (c-factor; Schott et al. 1988-style
-//     two-date leveling) — for one date pair of the same sensor/grid, the
-//     OLS y = a + b·x over paired clear pixels (x = date-2, y = date-1
-//     reflectance) yields c = a/b and the correction rho₂' = c·rho₂, which
-//     levels date 2 onto date 1's radiometry without any angles. Validity
-//     conditions, enforced here: ≥ minimum usable pairs, non-degenerate
-//     slope |b| ≥ 1e-6 (flat regression ⇒ no signal; typed refusal like the
-//     C-correction contract), a ≥ 0 in the usable domain.
+//   * Empirical pair normalization (mean-preserving c-factor leveling) —
+//     for one date pair of the same sensor/grid, c is the ratio of the clear-
+//     sample means, c = mean(ref) / mean(target) (y over x), and the
+//     correction rho₂' = c·rho₂ levels date 2 onto date 1's mean radiometry
+//     without any angles. Mean preservation is exact by construction:
+//     mean(c·x) = mean(y). Validity conditions, enforced here: ≥ minimum
+//     usable positive finite pairs, positive target mean, positive c.
 //
 // Angle conventions (platform-wide): zeniths from vertical in degrees
 // [0,90), azimuths [0,360) from north clockwise, Δφ = sun azimuth − view
@@ -55,9 +54,15 @@ namespace BrdfNormalization
 /// Symmetric in (θs, θv); 0 exactly at nadir sun + nadir view.
 double rossThick( double sunZenithDeg, double viewZenithDeg, double relativeAzimuthDeg );
 
-/// Li-Sparse-Reciprocal geometric kernel k_geo with the standard (h/b) = 2
-/// crown shape, degrees in, unitless out. Symmetric in (θs, θv); −1 exactly
-/// at nadir sun + nadir view.
+/// Li-Sparse-Reciprocal geometric kernel k_geo with the standard (h/b) = 2,
+/// (b/r) = 1 crown shape (Lucht, Schaaf & Strahler 2000):
+///
+///   k_geo = O(theta_s, theta_v, phi) - sec(theta_s) - sec(theta_v)
+///           + 0.5 * (1 + cos(xi)) * sec(theta_s) * sec(theta_v)
+///
+/// (O = the mutual-overlap integral, xi the phase angle). Symmetric in
+/// (theta_s, theta_v); 0 exactly at nadir sun + nadir view — both kernels
+/// vanish there, which is why f_iso is the nadir BRF in the MODIS literature.
 double liSparseReciprocal( double sunZenithDeg, double viewZenithDeg,
                            double relativeAzimuthDeg );
 
@@ -84,29 +89,30 @@ bool normalizeKernelDriven( float value, double sunZenithDeg, double viewZenithD
                             double refSunZenithDeg = -1.0, double refViewZenithDeg = 0.0,
                             double refRelativeAzimuthDeg = 0.0 );
 
-/// Pair-sample accumulator for the empirical (c-factor) method. Collects
-/// clear paired pixels; add() refuses non-finite or non-positive pairs.
-class PairRegression
+/// Pair-sample accumulator for the empirical c-factor. Collects clear
+/// paired pixels; add() refuses non-finite or non-positive pairs (the
+/// reflectance domain — a multiplicative leveling must not mix signs).
+class PairStatistics
 {
   public:
     void add( double date2Value, double date1Value );
     size_t count() const { return m_count; }
 
-    /**
-     * Fits c = a/b from OLS y = a + b·x over the accumulated pairs.
-     * @param minPairs  minimum usable pairs (caller policy; the house
-     *                  operator passes 30).
-     * @return false (typed message, *c untouched) when count < minPairs, the
-     *         slope is degenerate (|b| < 1e-6), a < 0, or c ≤ 0.
-     */
+    /// Mean-preserving leveling factor c = mean(y)/mean(x) = Σy/Σx over the
+    /// accumulated pairs (y = reference date-1, x = target date-2).
+    /// @param minPairs  minimum usable pairs (caller policy; the house
+    ///                  operator passes 30).
+    /// @return false (typed message, *c untouched) when count < max(minPairs, 2),
+    ///         Σx ≤ 0 or non-finite, or c ≤ 0.
     bool fitCFactor( size_t minPairs, double *c, QString *errorMessage = nullptr ) const;
 
   private:
     size_t m_count = 0;
-    double m_sx = 0.0, m_sy = 0.0, m_sxx = 0.0, m_sxy = 0.0;
+    double m_sx = 0.0, m_sy = 0.0;
 };
 
-/// Empirical pair normalization: rho₂' = c·rho₂ (NaN passes through).
+/// Empirical pair normalization: rho₂' = c·rho₂ with the mean-preserving
+/// c from PairStatistics::fitCFactor (NaN passes through).
 float applyPairNormalization( float date2Value, double cFactor );
 
 } // namespace BrdfNormalization

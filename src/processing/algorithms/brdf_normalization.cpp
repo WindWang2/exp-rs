@@ -16,7 +16,6 @@ namespace
 {
 constexpr double kPi = 3.14159265358979323846;
 constexpr double kDegToRad = kPi / 180.0;
-constexpr double kDegenerateSlope = 1e-6;
 
 bool finite( double v )
 {
@@ -53,15 +52,17 @@ double liSparseReciprocal( double sunZenithDeg, double viewZenithDeg,
 {
     const double tanSun = std::tan( sunZenithDeg * kDegToRad );
     const double tanView = std::tan( viewZenithDeg * kDegToRad );
-    const double secSun = 1.0 / std::cos( sunZenithDeg * kDegToRad );
-    const double secView = 1.0 / std::cos( viewZenithDeg * kDegToRad );
+    const double cosSun = std::cos( sunZenithDeg * kDegToRad );
+    const double cosView = std::cos( viewZenithDeg * kDegToRad );
+    const double secSun = 1.0 / cosSun;
+    const double secView = 1.0 / cosView;
     const double cosDelta = std::cos( relativeAzimuthDeg * kDegToRad );
     const double sinDelta = std::sin( relativeAzimuthDeg * kDegToRad );
 
     const double d2 = tanSun * tanSun + tanView * tanView - 2.0 * tanSun * tanView * cosDelta;
-    const double d = std::sqrt( std::max( d2, 0.0 ) );
 
-    // Overlap: (h/b) = 2 (Lucht et al. 2000 standard crown-relative height).
+    // Overlap: (h/b) = 2, (b/r) = 1 (Lucht et al. 2000 standard crown shape;
+    // b/r = 1 keeps the prime angles equal to the observed ones).
     const double cosT = 2.0 * std::sqrt( std::max( d2 + tanSun * tanSun * tanView * tanView
                                                        * sinDelta * sinDelta,
                                                    0.0 ) )
@@ -69,10 +70,11 @@ double liSparseReciprocal( double sunZenithDeg, double viewZenithDeg,
     const double t = std::acos( std::clamp( cosT, -1.0, 1.0 ) );
     const double overlap = ( t - std::sin( t ) * std::cos( t ) ) / kPi * ( secSun + secView );
 
-    const double dPrime = std::sqrt( std::max(
-        d2 + 4.0 * tanSun * tanSun * tanView * tanView * sinDelta * sinDelta, 0.0 ) );
+    const double cosXi = cosSun * cosView
+                         + std::sin( sunZenithDeg * kDegToRad )
+                               * std::sin( viewZenithDeg * kDegToRad ) * cosDelta;
 
-    return overlap - secSun - secView + 0.5 * ( d + dPrime );
+    return overlap - secSun - secView + 0.5 * ( 1.0 + cosXi ) * secSun * secView;
 }
 
 bool anisotropyFactor( double sunZenithDeg, double viewZenithDeg, double relativeAzimuthDeg,
@@ -144,7 +146,7 @@ bool normalizeKernelDriven( float value, double sunZenithDeg, double viewZenithD
     return true;
 }
 
-void PairRegression::add( double date2Value, double date1Value )
+void PairStatistics::add( double date2Value, double date1Value )
 {
     if ( !finite( date2Value ) || !finite( date1Value ) || date2Value <= 0.0
          || date1Value <= 0.0 )
@@ -152,11 +154,9 @@ void PairRegression::add( double date2Value, double date1Value )
     ++m_count;
     m_sx += date2Value;
     m_sy += date1Value;
-    m_sxx += date2Value * date2Value;
-    m_sxy += date2Value * date1Value;
 }
 
-bool PairRegression::fitCFactor( size_t minPairs, double *c, QString *errorMessage ) const
+bool PairStatistics::fitCFactor( size_t minPairs, double *c, QString *errorMessage ) const
 {
     if ( !c )
     {
@@ -164,7 +164,7 @@ bool PairRegression::fitCFactor( size_t minPairs, double *c, QString *errorMessa
             *errorMessage = QStringLiteral( "brdf: null output pointer" );
         return false;
     }
-    if ( m_count < minPairs || m_count < 2 )
+    if ( m_count < std::max( minPairs, size_t{ 2 } ) )
     {
         if ( errorMessage )
             *errorMessage = QStringLiteral( "brdf: only %1 usable pairs (need ≥ %2)" )
@@ -172,26 +172,17 @@ bool PairRegression::fitCFactor( size_t minPairs, double *c, QString *errorMessa
                                 .arg( std::max( minPairs, size_t{ 2 } ) );
         return false;
     }
-    const double n = static_cast<double>( m_count );
-    const double b = ( n * m_sxy - m_sx * m_sy ) / ( n * m_sxx - m_sx * m_sx );
-    if ( !finite( b ) || std::abs( b ) < kDegenerateSlope )
+    if ( !finite( m_sx ) || m_sx <= 0.0 )
     {
         if ( errorMessage )
-            *errorMessage = QStringLiteral( "brdf: degenerate regression slope %1 — the pair "
-                                            "sample carries no radiometric signal" )
-                                .arg( b );
+            *errorMessage = QStringLiteral( "brdf: unusable target mean (Σx = %1)" ).arg( m_sx );
         return false;
     }
-    const double meanX = m_sx / n;
-    const double meanY = m_sy / n;
-    const double a = meanY - b * meanX;
-    const double cValue = a / b;
-    if ( !finite( cValue ) || a < 0.0 || cValue <= 0.0 )
+    const double cValue = m_sy / m_sx; // = mean(y)/mean(x), mean-preserving
+    if ( !finite( cValue ) || cValue <= 0.0 )
     {
         if ( errorMessage )
-            *errorMessage = QStringLiteral( "brdf: unusable c-factor (a = %1, c = %2)" )
-                                .arg( a )
-                                .arg( cValue );
+            *errorMessage = QStringLiteral( "brdf: unusable c-factor (c = %1)" ).arg( cValue );
         return false;
     }
     *c = cValue;

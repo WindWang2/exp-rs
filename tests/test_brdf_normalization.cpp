@@ -1,18 +1,18 @@
 // test_brdf_normalization.cpp — radiometric-physics-11 work package E.
 //
 // Independent-oracle policy:
-//  * Published special values: k_vol = 0 and k_geo = −1 exactly at nadir sun
-//    + nadir view (Lucht et al. 2000 kernel definitions); both kernels are
-//    reciprocal (symmetric under sun↔view swap); k_vol is at its hotspot
-//    (ξ = 0) maximum for f_vol > 0.
-//  * Hand-computed reference values: worked numerically from the published
-//    formulas in the comments with degrees→radians done by hand (30° =
-//    0.5236 rad, sin/cos from standard tables), e.g.
-//    k_vol(30°,0°,Δφ) : ξ = 30°, ((π/2−0.5236)·0.8660+0.5)/1.8660 − 0.7854
-//    = 0.7539 − 0.7854 = −0.0315.
-//  * An exact linear-algebra anchor for the c-factor: pairs generated as
-//    y = a + b·x must give back c = a/b and correction = c·x leveling the
-//    means (that is the estimator's definition, so it is an identity oracle).
+//  * Published special values: k_vol = 0 and k_geo = 0 exactly at nadir sun
+//    + nadir view (Lucht et al. 2000 kernel definitions — this is why f_iso
+//    is the nadir BRF in the MODIS literature); both kernels are reciprocal
+//    (symmetric under sun↔view swap); the geometric kernel is positive at
+//    the hotspot and negative at large phase angles.
+//  * Scripted/hand reference values: k_vol(30°,0°,·) = −0.03151 and the
+//    k_geo references below were computed with an independent scripted
+//    implementation of the published formulas (outside this codebase's
+//    production code), plus in-comment hand derivations.
+//  * An exact identity anchor for the c-factor: the leveling factor is
+//    DEFINED as c = mean(y)/mean(x), so mean(c·x) = mean(y) must hold
+//    exactly, and for pairs generated as y = k·x it must give c = k.
 //
 // Negative tests: nonphysical zeniths, nonphysical weights (factor ≤ 0),
 // too-few pairs, degenerate slopes, null outputs, NaN pass-through.
@@ -36,8 +36,14 @@ constexpr double kNaN = std::numeric_limits<double>::quiet_NaN();
 
 TEST_CASE( "kernel special values at nadir sun + nadir view", "[brdf]" )
 {
+    // Both kernels vanish at nadir sun + nadir view (MODIS convention: f_iso
+    // is the nadir BRF).
     CHECK( rossThick( 0.0, 0.0, 0.0 ) == Catch::Approx( 0.0 ).margin( 1e-12 ) );
-    CHECK( liSparseReciprocal( 0.0, 0.0, 0.0 ) == Catch::Approx( -1.0 ).margin( 1e-12 ) );
+    CHECK( liSparseReciprocal( 0.0, 0.0, 0.0 ) == Catch::Approx( 0.0 ).margin( 1e-12 ) );
+    // The geometric kernel peaks positively at the hotspot (shadowing theory)
+    // and is negative at large phase angles.
+    CHECK( liSparseReciprocal( 45.0, 45.0, 0.0 ) > 0.0 );
+    CHECK( liSparseReciprocal( 45.0, 45.0, 180.0 ) < 0.0 );
 }
 
 TEST_CASE( "kernels are reciprocal under sun/view swap", "[brdf]" )
@@ -65,17 +71,24 @@ TEST_CASE( "hand-computed kernel reference values", "[brdf]" )
     //   = (1.04720·0.86603 + 0.50000)/1.86603 − 0.78540 = −0.03151
     CHECK( rossThick( 30.0, 0.0, 0.0 ) == Catch::Approx( -0.03151 ).margin( 1e-4 ) );
 
-    // k_vol(40°, 30°, 0°): cosξ = 0.76604·0.86603 + 0.64279·0.5 = 0.98481,
-    //   ξ = 0.17453; numerator (1.57080−0.17453)·0.98481 + 0.17365 = 1.54879;
-    //   denominator 0.76604 + 0.86603 = 1.63207 → 0.94918 − 0.78540 = 0.16378
-    CHECK( rossThick( 40.0, 30.0, 0.0 ) == Catch::Approx( 0.16378 ).margin( 1e-4 ) );
+    // k_vol(40°, 30°, 0°): independent reference (scripted implementation of
+    //   the published formula, computed outside the production code):
+    //   cos ξ = 0.98481, ξ = 0.17453 → 0.16352
+    CHECK( rossThick( 40.0, 30.0, 0.0 ) == Catch::Approx( 0.16352 ).margin( 1e-4 ) );
 
-    // k_geo(30°, 0°, ·): tan30° = 0.57735, sec30° = 1.15470, sec0° = 1;
-    //   D = 0.57735, D' = 0.57735; cos t = 2·0.57735/2.15470 = 0.53583,
-    //   t = 1.00685; O = (1.00685 − sin t·cos t)·2.15470/π
-    //   = (1.00685 − 0.84357)·0.68583 = 0.11194;
-    //   k_geo = 0.11194 − 1.15470 − 1 + 0.57735 = −0.46541
-    CHECK( liSparseReciprocal( 30.0, 0.0, 0.0 ) == Catch::Approx( -0.46541 ).margin( 1e-4 ) );
+    // k_geo(30°, 0°, ·): D = tan30° = 0.57735; cos t = 2·0.57735/2.15470 =
+    //   0.53583, t = 1.00685, O = (1.00685 − 0.45273)·2.15470/π = 0.38007;
+    //   cos ξ = cos30° = 0.86603 → last term 0.5·1.86603·1.15470 = 1.07736;
+    //   k_geo = 0.38007 − 1.15470 − 1 + 1.07736 = −0.69822 (independent
+    //   scripted reference −0.698222)
+    CHECK( liSparseReciprocal( 30.0, 0.0, 0.0 ) == Catch::Approx( -0.69822 ).margin( 1e-4 ) );
+
+    // k_geo(45°, 45°, 0°) at the hotspot: cos ξ = 1, D = 0, cos t = 0 →
+    //   t = π/2, O = sec45° = 1.41421, last term 2·sec45°² /2·(1+1)·... =
+    //   2.0; k_geo = 1.41421 − 1.41421 − 1.41421 + 2.0 = 0.58579 (independent
+    //   scripted reference 0.585786 — positive at the hotspot, as shadowing
+    //   physics requires).
+    CHECK( liSparseReciprocal( 45.0, 45.0, 0.0 ) == Catch::Approx( 0.58579 ).margin( 1e-4 ) );
 
     // Hotspot: at ξ = 0 with equal zeniths k_vol is maximal along φ.
     const double hotspot = rossThick( 45.0, 45.0, 0.0 );
@@ -97,9 +110,13 @@ TEST_CASE( "anisotropy factor refuses nonphysical geometry and weights", "[brdf]
     CHECK_FALSE( anisotropyFactor( 30.0, 0.0, kNaN, 0.3, 0.6, &f, &err ) );
     CHECK_FALSE( anisotropyFactor( 30.0, 0.0, 0.0, kNaN, 0.6, &f, &err ) );
 
-    // Weights negative enough to flip the factor nonphysical must refuse.
-    CHECK_FALSE( anisotropyFactor( 60.0, 60.0, 180.0, 100.0, -1000.0, &f, &err ) );
+    // Weights that flip the factor nonphysical must refuse: at (60°,60°,180°)
+    // k_vol ≈ 0.612, k_geo = −3 exactly (cos ξ = −0.5, t = 0), so
+    // f = 1 + 0·0.612 + 10·(−3) < 0.
+    CHECK_FALSE( anisotropyFactor( 60.0, 60.0, 180.0, 0.0, 10.0, &f, &err ) );
     CHECK_FALSE( err.isEmpty() );
+    CHECK( anisotropyFactor( 60.0, 60.0, 180.0, 100.0, -1000.0, &f, &err ) );
+    CHECK( f > 0.0 ); // those weights keep the factor positive (k_geo < 0 helps)
 }
 
 TEST_CASE( "kernel-driven normalization identity and ratio semantics", "[brdf]" )
@@ -135,68 +152,71 @@ TEST_CASE( "kernel-driven normalization identity and ratio semantics", "[brdf]" 
     CHECK_FALSE( normalizeKernelDriven( 0.5f, 40.0, 30.0, 60.0, 0.3, 0.5, nullptr, &err ) );
 }
 
-TEST_CASE( "c-factor recovers a/b exactly from linear pairs", "[brdf]" )
+TEST_CASE( "c-factor equals the mean ratio and preserves means exactly", "[brdf]" )
 {
-    // Pairs generated as y = a + b·x: the OLS fit must return exactly c = a/b,
-    // and the leveling correction must map the date-2 mean onto date-1 mean.
-    const double a = 0.02, b = 0.9;
-    PairRegression reg;
+    // Pairs generated as y = k·x (pure gain difference): the leveling factor
+    // must return exactly c = k, and mean(c·x) = mean(y) holds by definition.
+    const double k = 1.25;
+    PairStatistics reg;
     double x = 0.05;
     for ( int i = 0; i < 200; ++i )
     {
-        reg.add( x, a + b * x );
+        reg.add( x, k * x );
         x += 0.0035;
     }
     double c = 0.0;
     REQUIRE( reg.count() == 200 );
     REQUIRE( reg.fitCFactor( 30, &c ) );
-    CHECK( c == Catch::Approx( a / b ).margin( 1e-9 ) );
+    CHECK( c == Catch::Approx( k ).margin( 1e-12 ) );
 
-    // Identity oracle: mean(c·x) equals mean(y) for the OLS line.
+    // Identity oracle: mean(c·x) equals mean(y), recomputed independently.
     double sx = 0.0, sy = 0.0;
     double x2 = 0.05;
     for ( int i = 0; i < 200; ++i )
     {
         sx += x2;
-        sy += a + b * x2;
+        sy += k * x2;
         x2 += 0.0035;
     }
-    CHECK( c * ( sx / 200.0 ) == Catch::Approx( sy / 200.0 ).margin( 1e-9 ) );
+    CHECK( c * ( sx / 200.0 ) == Catch::Approx( sy / 200.0 ).margin( 1e-12 ) );
 
     // Application: rho2' = c·rho2, NaN passes through.
-    CHECK( applyPairNormalization( 0.4f, c ) == Catch::Approx( 0.4f * a / b ).epsilon( 1e-6 ) );
+    CHECK( applyPairNormalization( 0.4f, c ) == Catch::Approx( 0.4f * k ).epsilon( 1e-6 ) );
     CHECK( std::isnan(
         applyPairNormalization( std::numeric_limits<float>::quiet_NaN(), c ) ) );
 }
 
-TEST_CASE( "c-factor refuses weak samples and degenerate fits", "[brdf]" )
+TEST_CASE( "c-factor refuses weak samples and unusable statistics", "[brdf]" )
 {
     double c = 0.0;
     QString err;
 
-    PairRegression tooFew;
+    PairStatistics tooFew;
     tooFew.add( 0.1, 0.12 );
     tooFew.add( 0.2, 0.21 );
     CHECK_FALSE( tooFew.fitCFactor( 30, &c, &err ) );
     CHECK( err.contains( QLatin1String( "pairs" ) ) );
-    CHECK_FALSE( tooFew.fitCFactor( 1, &c, &err ) ); // absolute floor of 2 pairs
+    // The absolute floor is 2 pairs: with minPairs = 1 the fit succeeds.
+    CHECK( tooFew.fitCFactor( 1, &c ) );
+    CHECK( c == Catch::Approx( ( 0.12 + 0.21 ) / ( 0.1 + 0.2 ) ).margin( 1e-12 ) );
 
-    // Vertical-line sample (all x equal): zero slope → degenerate refusal.
-    PairRegression vertical;
-    for ( int i = 0; i < 50; ++i )
-        vertical.add( 0.3, 0.3 + 0.01 * i );
-    CHECK_FALSE( vertical.fitCFactor( 30, &c, &err ) );
-    CHECK( err.contains( QLatin1String( "degenerate" ) ) );
-
-    // Non-positive samples are never usable pairs.
-    PairRegression withJunk;
+    // Non-positive samples are never usable pairs (signs cannot be leveled
+    // multiplicatively).
+    PairStatistics withJunk;
     for ( int i = 0; i < 40; ++i )
         withJunk.add( 0.1 + 0.01 * i, 0.11 + 0.01 * i );
     withJunk.add( -0.5, 0.3 );          // ignored
     withJunk.add( std::numeric_limits<double>::quiet_NaN(), 0.3 ); // ignored
     CHECK( withJunk.count() == 40 );
     REQUIRE( withJunk.fitCFactor( 30, &c ) );
+    // x: 0.1..0.49 (mean 0.295), y: 0.11..0.50 (mean 0.305) → c = 61/59.
+    CHECK( c == Catch::Approx( 0.305 / 0.295 ).margin( 1e-12 ) );
     CHECK( c > 0.0 );
+
+    // A target mean that is non-positive (impossible via add()'s domain
+    // guard, but the guard keeps the accumulator internally consistent).
+    PairStatistics empty;
+    CHECK_FALSE( empty.fitCFactor( 30, &c, &err ) );
 }
 
 // ---------------------------------------------------------------------------

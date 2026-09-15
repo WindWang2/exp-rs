@@ -17,16 +17,17 @@
 // refused with the missing items named. Callers that want image-space
 // behaviour explicitly ask for "dos1"/"dos2"/"quac".
 //
-// Thread-safety: registration is idempotent and happens at start-up; the
-// registry is mutex-guarded and returned pointers stay valid for the
-// process lifetime (providers are never unregistered).
+// Ownership & lifetime: the registry is NON-OWNING — the caller keeps the
+// provider alive for the process lifetime (typically a function-local static
+// or a leaked start-up allocation). Registration is idempotent and happens
+// at start-up under a mutex; returned pointers stay valid because providers
+// are never unregistered.
 #pragma once
 
 #include <QString>
 #include <QStringList>
 
 #include <cstddef>
-#include <mutex>
 
 namespace AtmosphericProvider
 {
@@ -79,7 +80,8 @@ class SurfaceReflectanceProvider
     virtual Requirements requirements() const = 0;
 
     /// One-band TOA reflectance → surface reflectance. NaN pixels propagate
-    /// as NaN; domain violations inside the buffer yield NaN (never throw).
+    /// as NaN; negative results pass through FINITE (the house Chavez kernel
+    /// does not clip — RadiometricQa::FlagNegative reports them downstream).
     /// Implementations must refuse (return false + typed message) when
     /// requirements are unmet — the registry has already validated them, so
     /// a false return from a live provider means a degenerate value.
@@ -100,8 +102,9 @@ class SurfaceReflectanceProvider
 // Registry
 // -------------------------------------------------------------------------
 
-/// Registers @p provider (takes ownership). Duplicate ids are refused
-/// (returns false, leaves the existing registration untouched).
+/// Registers @p provider WITHOUT taking ownership — the caller must keep it
+/// alive for the process lifetime. Duplicate ids are refused (returns false,
+/// leaves the existing registration untouched).
 bool registerProvider( SurfaceReflectanceProvider *provider );
 
 /// Idempotent installation of the built-ins ("dos1", "dos2", "quac"

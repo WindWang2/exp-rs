@@ -66,8 +66,9 @@ int dayOfYear( const QDate &date );
 
 /**
  * Spencer (1971) inverse-square earth-sun factor E₀ = d⁻² for @p dayOfYear
- * (1..366) — the multiplier in the ESUN form of TOA reflectance:
- * ρ = π·L·E₀ / (ESUN·cos θz). Range ≈ [0.9661, 1.0351] (aphelion/perihelion).
+ * (1..366) — the divisor in the ESUN form of TOA reflectance:
+ * ρ = π·L·d² / (ESUN·cos θz) = π·L / (E₀·ESUN·cos θz).
+ * Range ≈ [0.9661, 1.0351] (aphelion/perihelion).
  * @return false when @p dayOfYear is outside 1..366 (typed refusal, *out untouched).
  */
 bool earthSunFactor( int dayOfYear, double *inverseSquareFactor,

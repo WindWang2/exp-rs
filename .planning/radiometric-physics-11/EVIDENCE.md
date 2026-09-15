@@ -28,3 +28,28 @@ Local evidence only; no online CI dependency. Each claim: command + exit code.
 ## Phase gates
 
 (appended per phase as work completes)
+
+## Phase 0/1 (2026-09-15, continued)
+
+- `cmake --preset dev-default` attempt 1/2 failed: FetchContent git clones (pybind11,
+  Catch2) hit repeated host TLS EOFs. Resolution: attempt 3 with the repo's own offline
+  knob `-DSICNU_LAB_SKIP_PYTHON_BINDINGS=ON` (D10) + `-DFETCHCONTENT_SOURCE_DIR_CATCH2`
+  pointed at the main checkout's already-populated `_deps/catch2-src` → "Generating done".
+  No repository files changed by this.
+- First full build started: `cmake --build build-dev --target test_solar_geometry -j2`
+  (pulls qgis_core → sicnu_processing → sicnu_operators chain). Resource sampling in
+  /tmp/build_monitor.log: load ≤ ~14.7 on 16 cores (< the 1.5× threshold), cc1plus RSS
+  ~0.6–1 GB each (< 70% of 62 GiB) → kept `-j2`.
+
+## Phase commits
+
+- b635553c22 phase 0 planning track
+- 301cff2cdd solar geometry module + tests
+- f795569873 transition authority + provider seam
+- ab78e75c5e BRDF normalization + QA flags
+- b06d32d1f0 three operators
+- 9d7989d69e integration registration (CMake/registry/capability catalog/docs/CHANGELOG)
+- 01d9ddfa71 include fixes
+- 419f32c5d3 operator E2E tests + QA mask buffer fix (real bug found pre-run:
+  readBandWindow(float*) contract vs uint8 mask buffer)
+- `git fetch origin && git rebase origin/master` → up to date (origin/master still a5b11b7f10).

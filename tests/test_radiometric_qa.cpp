@@ -112,8 +112,8 @@ TEST_CASE( "linear uncertainty propagation matches hand-computed algebra", "[qa]
 {
     // y = 2.0·x + 0.5 with σ_gain = 0.05, σ_bias = 0.01, σx given per pixel.
     // x = 1.0, σx = 0.1:  σy = sqrt((2·0.1)² + (1·0.05)² + 0.01²)
-    //                          = sqrt(0.04 + 0.0025 + 0.0001) = 0.20760
-    // x = 2.0, σx = 0  :  σy = sqrt(0 + 0.01 + 0.0001)   = 0.10050
+    //                          = sqrt(0.04 + 0.0025 + 0.0001) = 0.20640
+    // x = 2.0, σx = 0  :  σy = sqrt(0 + 0.01 + 0.0001)  = 0.10050
     // x = NaN          :  σy = NaN (input has no defined uncertainty)
     const std::vector<float> x = { 1.0f, 2.0f, kNaN };
     const std::vector<float> sx = { 0.1f, 0.0f, 0.0f };
@@ -121,14 +121,20 @@ TEST_CASE( "linear uncertainty propagation matches hand-computed algebra", "[qa]
 
     REQUIRE( propagateLinearUncertainty( x.data(), sx.data(), x.size(), 2.0, 0.05, 0.01,
                                          sy.data() ) );
-    CHECK( sy[0] == Catch::Approx( 0.20760 ).margin( 1e-5 ) );
+    CHECK( sy[0] == Catch::Approx( 0.20640 ).margin( 1e-5 ) );
     CHECK( sy[1] == Catch::Approx( 0.10050 ).margin( 1e-5 ) );
     CHECK( std::isnan( sy[2] ) );
 
-    // Zero uncertainties collapse to the pure gain-scaled input error.
+    // With no input uncertainty and zero gain/bias sigmas the output
+    // uncertainty is exactly zero (nothing left to propagate).
     std::vector<float> sy2( 1 );
     REQUIRE( propagateLinearUncertainty( x.data(), nullptr, 1, 3.0, 0.0, 0.0, sy2.data() ) );
-    CHECK( sy2[0] == Catch::Approx( 3.0 ).margin( 1e-6 ) );
+    CHECK( sy2[0] == Catch::Approx( 0.0 ).margin( 1e-12 ) );
+
+    // Pure gain-scaled input error with g = 3, σx = 2 → σy = 6.
+    const std::vector<float> sx2 = { 2.0f };
+    REQUIRE( propagateLinearUncertainty( x.data(), sx2.data(), 1, 3.0, 0.0, 0.0, sy2.data() ) );
+    CHECK( sy2[0] == Catch::Approx( 6.0 ).margin( 1e-6 ) );
 }
 
 TEST_CASE( "uncertainty propagation refuses bad arguments", "[qa]" )
@@ -239,7 +245,7 @@ TEST_CASE( "rs:radiometric_qa E2E: flags, mask propagation and summary",
     CHECK( at( b1, 2, 1 ) == RadiometricQa::FlagNegative );
     CHECK( at( b1, 3, 1 ) == RadiometricQa::FlagOverRange );
     CHECK( at( b1, 5, 5 ) == RadiometricQa::FlagNone );
-    CHECK( at( b2, 4, 2 ) == RadiometricQa::FlagSaturated );
+    CHECK( at( b2, 4, 2 ) == ( RadiometricQa::FlagSaturated | RadiometricQa::FlagOverRange ) );
     CHECK( at( b2, 9, 7 ) == RadiometricQa::FlagCloud );
 }
 

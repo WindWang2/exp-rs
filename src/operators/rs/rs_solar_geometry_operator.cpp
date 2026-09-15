@@ -71,8 +71,9 @@ Json::Value RsSolarGeometryOperator::metadata() const {
     meta["workflowHints"].append( "Run once per scene before radiometric calibration or "
                                   "rs:brdf_normalization; with write_metadata=true the stamped "
                                   "keys are picked up automatically." );
-    meta["limitations"].append( "Below-horizon suns are reported (sun_above_horizon=false) but "
-                                "not stamped as usable calibration geometry." );
+    meta["limitations"].append( "Below-horizon suns are still stamped for traceability; "
+                                "downstream operators refuse to calibrate with them "
+                                "(sun_above_horizon=false and elevation <= 0 in the record)." );
     meta["limitations"].append( "In-place metadata update requires a writable raster; read-only "
                                 "sources are refused with a typed error." );
     return meta;
@@ -91,8 +92,12 @@ Json::Value RsSolarGeometryOperator::run( const Json::Value &params, RSOperatorC
 
     const std::string dateStr = requireString( params, "date" );
     const std::string timeStr = requireString( params, "utc_time" );
-    const double latitude = getDouble( params, "latitude", 999.0 );
-    const double longitude = getDouble( params, "longitude", 999.0 );
+    if ( !hasNumber( params, "latitude" ) )
+        throw RSOperatorError( ErrorCode::MissingRequiredParameter, "latitude is required" );
+    if ( !hasNumber( params, "longitude" ) )
+        throw RSOperatorError( ErrorCode::MissingRequiredParameter, "longitude is required" );
+    const double latitude = getDouble( params, "latitude", 0.0 );
+    const double longitude = getDouble( params, "longitude", 0.0 );
     const bool writeMetadata = getBool( params, "write_metadata", false );
     const bool hasInput = params.isMember( "input" ) && params["input"].isString()
                           && !params["input"].asString().empty();

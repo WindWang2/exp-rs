@@ -71,8 +71,17 @@ bool resolveWeights( const Json::Value &params, const std::string &key, int band
     if ( v.isArray() && static_cast<int>( v.size() ) == bandCount )
     {
         out->clear();
-        for ( const auto &entry : v )
+        for ( const Json::Value &entry : v )
+        {
+            if ( !entry.isNumeric() )
+            {
+                if ( errorMessage )
+                    *errorMessage = QStringLiteral( "%1: array entries must be numbers" )
+                                        .arg( QString::fromStdString( key ) );
+                return false;
+            }
             out->push_back( entry.asDouble() );
+        }
         return true;
     }
     if ( errorMessage )
@@ -140,10 +149,30 @@ Json::Value RsBrdfNormalizationOperator::executionEstimate() const {
     Json::Value est( Json::objectValue );
     est["tileWidth"] = kTileDim;
     est["tileHeight"] = kTileDim;
-    // BIP tile + out tile, floats.
+    // BIP tile (bandCount×) + out tile — conservative nominal 4-band stack.
     est["estimatedRamBytes"] = Json::Value::UInt64(
-        2ULL * kTileDim * kTileDim * sizeof( float ) );
+        5ULL * kTileDim * kTileDim * sizeof( float ) );
     return est;
+}
+
+Json::Value RsBrdfNormalizationOperator::estimateExecution( const Json::Value &params ) const {
+    if ( params.isObject() && params.isMember( "input" ) && params["input"].isString() )
+    {
+        GdalDatasetWrapper probe;
+        if ( probe.open( QString::fromStdString( params["input"].asString() ) )
+             && probe.bandCount() > 0 )
+        {
+            const std::uint64_t bands = static_cast<std::uint64_t>( probe.bandCount() );
+            // BIP read tile scales with bandCount; the per-band out tile does not.
+            const std::uint64_t ram = ( bands + 1ULL ) * kTileDim * kTileDim * sizeof( float );
+            Json::Value est( Json::objectValue );
+            est["tileWidth"] = Json::Value::UInt64( kTileDim );
+            est["tileHeight"] = Json::Value::UInt64( kTileDim );
+            est["estimatedRamBytes"] = Json::Value::UInt64( ram );
+            return est;
+        }
+    }
+    return executionEstimate();
 }
 
 Json::Value RsBrdfNormalizationOperator::run( const Json::Value &params, RSOperatorContext &context )
@@ -168,8 +197,8 @@ Json::Value RsBrdfNormalizationOperator::run( const Json::Value &params, RSOpera
     // ---- Angle resolution: parameters first, SICNU_* metadata fallback ----
     // A missing angle is a typed refusal (GOAL Oracle 2), never a default.
     const auto resolveAngle = [&]( const std::string &key, const char *metaKey ) -> double {
-        if ( params.isMember( key ) && params[key].isNumeric() && params[key].asDouble() >= 0.0 )
-            return params[key].asDouble();
+        if ( params.isMember( key ) && params[key].isNumeric() )
+            return params[key].asDouble(); // provided: validators range-check it
         double v = -1.0;
         if ( readAngleMetadata( ds, metaKey, &v ) )
             return v;

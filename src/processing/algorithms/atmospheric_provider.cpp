@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <cmath>
 #include <map>
-#include <memory>
+#include <mutex>
 
 namespace AtmosphericProvider
 {
@@ -122,9 +122,11 @@ std::mutex &registryMutex()
     return m;
 }
 
-std::map<QString, std::unique_ptr<SurfaceReflectanceProvider>> &registryMap()
+// Non-owning registry: providers keep process-lifetime ownership on their
+// registrant's side (see atmospheric_provider.h). Raw pointers are stable.
+std::map<QString, SurfaceReflectanceProvider *> &registryMap()
 {
-    static std::map<QString, std::unique_ptr<SurfaceReflectanceProvider>> m;
+    static std::map<QString, SurfaceReflectanceProvider *> m;
     return m;
 }
 } // namespace
@@ -155,17 +157,19 @@ bool registerProvider( SurfaceReflectanceProvider *providerPtr )
     if ( !providerPtr || providerPtr->id().isEmpty() )
         return false;
     std::lock_guard<std::mutex> lock( registryMutex() );
-    return registryMap()
-        .emplace( providerPtr->id(), std::unique_ptr<SurfaceReflectanceProvider>( providerPtr ) )
-        .second;
+    return registryMap().emplace( providerPtr->id(), providerPtr ).second;
 }
 
 void ensureBuiltinProviders()
 {
+    // Deliberately leaked (never destroyed) statics: process-lifetime
+    // ownership sits here, the registry holds non-owning pointers.
+    static Dos1Provider s_dos1;
+    static Dos2Provider s_dos2;
+    static QuacProvider s_quac;
     static const bool installed = [] {
-        const bool ok = registerProvider( new Dos1Provider() )
-                        && registerProvider( new Dos2Provider() )
-                        && registerProvider( new QuacProvider() );
+        const bool ok = registerProvider( &s_dos1 ) && registerProvider( &s_dos2 )
+                        && registerProvider( &s_quac );
         Q_ASSERT( ok );
         return ok;
     }();
@@ -188,16 +192,17 @@ const SurfaceReflectanceProvider *provider( const QString &id )
     ensureBuiltinProviders(); // never called with the registry lock held
     std::lock_guard<std::mutex> lock( registryMutex() );
     const auto it = registryMap().find( id );
-    return it == registryMap().end() ? nullptr : it->second.get();
+    return it == registryMap().end() ? nullptr : it->second;
 }
 
 bool checkRequirements( const Requirements &requirements, const CorrectionInputs &aux,
                         QString *errorMessage )
 {
     QStringList missing;
-    if ( requirements.needsSunGeometry && ( !aux.hasSunGeometry || !finite( aux.sunElevationDeg )
-                                           || aux.sunElevationDeg <= 0.0
-                                           || aux.sunElevationDeg > 90.0 || !finite( aux.sunAzimuthDeg ) ) )
+    if ( requirements.needsSunGeometry
+         && ( !aux.hasSunGeometry || !finite( aux.sunElevationDeg ) || aux.sunElevationDeg <= 0.0
+              || aux.sunElevationDeg > 90.0 || !finite( aux.sunAzimuthDeg ) || aux.sunAzimuthDeg < 0.0
+              || aux.sunAzimuthDeg >= 360.0 ) )
         missing.append( QStringLiteral( "sun geometry (elevation/azimuth)" ) );
     if ( requirements.needsDarkLevel
          && ( !std::isfinite( aux.toaDarkLevel ) || aux.toaDarkLevel < 0.0f ) )

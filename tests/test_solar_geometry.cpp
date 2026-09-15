@@ -57,12 +57,14 @@ QTime utcAtHourAngle( const QDate &date, double targetHaDeg, double eotMinutes )
     const double tst = 4.0 * ( targetHaDeg + 180.0 );
     const double hours = ( tst - eotMinutes ) / 60.0;
     int h = static_cast<int>( std::floor( hours ) );
-    const int m = static_cast<int>( std::floor( ( hours - h ) * 60.0 ) );
+    const double minutes = ( hours - h ) * 60.0;
+    const int m = static_cast<int>( std::floor( minutes ) );
+    const int sec = static_cast<int>( std::floor( ( minutes - m ) * 60.0 ) );
     if ( h < 0 )
         h = 0;
     if ( h > 23 )
         h = 23;
-    return QTime( h, m );
+    return QTime( h, m, sec );
 }
 
 } // namespace
@@ -86,10 +88,11 @@ TEST_CASE( "earth-sun factor matches published perihelion/aphelion", "[solar]" )
     CHECK( e0 > 0.9645 );
     CHECK( e0 < 0.9685 );
 
-    // Equinox days: factor within 0.7% of unity.
+    // Equinox days: factor within 1.2% of unity (independent scripted
+    // reference E0(80) = 1.00732 — d is still slightly above 1 in March).
     REQUIRE( earthSunFactor( 80, &e0 ) );
-    CHECK( e0 > 0.9930 );
-    CHECK( e0 < 1.0070 );
+    CHECK( e0 > 0.9900 );
+    CHECK( e0 < 1.0120 );
 
     // Distance form is exactly 1/sqrt(E0) and inside the physical envelope.
     double d = 0.0;
@@ -137,7 +140,9 @@ TEST_CASE( "declination agrees with Cooper's formula within 1 degree", "[solar]"
         REQUIRE( solarPosition( d, QTime( 12, 0 ), 0.0, 0.0, &p ) );
         INFO( "day " << n << " spencer=" << p.declinationDeg
                      << " cooper=" << cooperDeclinationDeg( n ) );
-        CHECK( std::abs( p.declinationDeg - cooperDeclinationDeg( n ) ) < 1.0 );
+        // Independent scripted calibration: max |Spencer − Cooper| ≈ 1.39°
+        // across the year (Cooper's simple sinusoid lags the Fourier series).
+        CHECK( std::abs( p.declinationDeg - cooperDeclinationDeg( n ) ) < 1.5 );
     }
 }
 
@@ -197,9 +202,9 @@ TEST_CASE( "solar noon elevation identity 90 - |lat - decl|", "[solar]" )
                                 utcAtHourAngle( QDate( 2023, 6, 21 ), 0.0, eot ),
                                 c.lat, 0.0, &p ) );
         INFO( c.name << " hourAngle=" << p.hourAngleDeg );
-        CHECK( std::abs( p.hourAngleDeg ) < 0.05 );
+        CHECK( std::abs( p.hourAngleDeg ) < 0.02 ); // second-resolution placement
         CHECK( p.elevationDeg == Catch::Approx( 90.0 - std::abs( c.lat - noonDecl ) )
-                                   .margin( 0.05 ) );
+                                   .margin( 0.02 ) );
     }
 }
 
@@ -214,9 +219,13 @@ TEST_CASE( "east/west mirror symmetry about solar noon", "[solar]" )
     REQUIRE( solarPosition( date, utcAtHourAngle( date, -30.0, eot ), 40.0, 0.0, &am ) );
     REQUIRE( solarPosition( date, utcAtHourAngle( date, +30.0, eot ), 40.0, 0.0, &pm ) );
 
-    // Same zenith; azimuths mirrored around due south (180°): am + pm = 360°.
-    CHECK( am.zenithDeg == Catch::Approx( pm.zenithDeg ).margin( 1e-6 ) );
-    CHECK( am.azimuthDeg + pm.azimuthDeg == Catch::Approx( 360.0 ).margin( 0.1 ) );
+    // Nearly equal zenith; azimuths mirrored around due south (180°):
+    // am + pm = 360°. The zeniths are not EXACTLY equal at ±30° hour angle
+    // because the declination itself drifts between the two instants
+    // (~0.05° over 4 hours near the equinox) — that drift is part of the
+    // modeled physics, so the tolerance covers it rather than symmetrizing.
+    CHECK( am.zenithDeg == Catch::Approx( pm.zenithDeg ).margin( 0.15 ) );
+    CHECK( am.azimuthDeg + pm.azimuthDeg == Catch::Approx( 360.0 ).margin( 0.2 ) );
     CHECK( am.azimuthDeg < 180.0 );
     CHECK( pm.azimuthDeg > 180.0 );
 }
@@ -240,16 +249,15 @@ TEST_CASE( "London solstice reference position", "[solar]" )
 
 TEST_CASE( "longitude drives the hour angle (UTC-based solar time)", "[solar]" )
 {
-    // At 12:00 UTC the sun crosses the meridian at longitude ≈ −EoT/4; 15°
-    // of longitude shifts the hour angle by 60° (4 min per degree).
+    // time_offset = EoT + 4·longitude: 30° of longitude = 120 minutes of
+    // solar time = 30° of hour angle (4 minutes of time per degree). EoT is
+    // common-mode and cancels between the two instants. tst grows with
+    // longitude, so the eastern site has the larger hour angle at fixed UTC.
     SunPosition west, east;
     REQUIRE( solarPosition( QDate( 2023, 4, 10 ), QTime( 12, 0 ), 30.0, -15.0, &west ) );
     REQUIRE( solarPosition( QDate( 2023, 4, 10 ), QTime( 12, 0 ), 30.0, +15.0, &east ) );
-    CHECK( west.hourAngleDeg > east.hourAngleDeg ); // west of the meridian: earlier solar time
-    // The hour-angle difference between ±15° must be 120° (8 min of EoT is
-    // common-mode and cancels).
-    CHECK( ( west.hourAngleDeg - east.hourAngleDeg )
-           == Catch::Approx( 120.0 ).margin( 1e-6 ) );
+    CHECK( west.hourAngleDeg < east.hourAngleDeg );
+    CHECK( ( east.hourAngleDeg - west.hourAngleDeg ) == Catch::Approx( 30.0 ).margin( 1e-6 ) );
 }
 
 TEST_CASE( "geometry validators refuse non-physical angles", "[solar]" )
@@ -323,7 +331,9 @@ TEST_CASE( "rs:solar_geometry computes and reports the London reference", "[sola
     CHECK( result["sun_elevation"].asDouble() < 63.0 );
     CHECK( result["sun_azimuth"].asDouble() == Catch::Approx( 180.0 ).margin( 3.0 ) );
     CHECK( result["declination"].asDouble() == Catch::Approx( 23.44 ).margin( 0.6 ) );
-    CHECK( result["earth_sun_factor"].asDouble() > 1.03 );
+    // June 21 sits near aphelion: E0 = d⁻² ≈ 0.9673 (independent reference).
+    CHECK( result["earth_sun_factor"].asDouble() > 0.9650 );
+    CHECK( result["earth_sun_factor"].asDouble() < 0.9690 );
     CHECK( result["metadata_written"].asBool() == false );
 }
 
