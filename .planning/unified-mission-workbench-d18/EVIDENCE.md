@@ -75,3 +75,4 @@ Examples of registry IDs that bind when their TU is linked into the process: `rs
 
 - Draft: https://github.com/WindWang2/exp-rs/pull/991
 - Not merged (per GOAL).
+Tip: ce529a5e (ce529a5e6e30448b1cd55fd76dbd17864e78a980)
