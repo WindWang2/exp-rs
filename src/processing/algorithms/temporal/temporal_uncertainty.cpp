@@ -91,8 +91,8 @@ AnalyticCiResult harmonicTrendCoefficientCi(
     const double w =
       weights.empty() ? ( std::isfinite( y[static_cast<size_t>( i )] ) ? 1.0 : 0.0 )
                       : weights[static_cast<size_t>( i )];
-    if ( w <= 0.0 || !std::isfinite( y[static_cast<size_t>( i )] ) )
-      continue;
+    if ( !( w > 0.0 ) || !std::isfinite( y[static_cast<size_t>( i )] ) )
+      continue;  // rejects w <= 0 AND NaN weights (NaN > 0 is false)
     const int m = harmonicTrendDesignRow( tDays[static_cast<size_t>( i )],
                                           harmonicsClamped, design );
     for ( int r = 0; r < m; ++r )
@@ -158,7 +158,7 @@ AnalyticCiResult harmonicTrendCoefficientCi(
     const double w =
       weights.empty() ? ( std::isfinite( y[static_cast<size_t>( i )] ) ? 1.0 : 0.0 )
                       : weights[static_cast<size_t>( i )];
-    if ( w <= 0.0 || !std::isfinite( y[static_cast<size_t>( i )] ) )
+    if ( !( w > 0.0 ) || !std::isfinite( y[static_cast<size_t>( i )] ) )
       continue;
     const int m = harmonicTrendDesignRow( tDays[static_cast<size_t>( i )],
                                           harmonicsClamped, design );
@@ -202,9 +202,12 @@ BootstrapCi residualBootstrapCi(
 {
   BootstrapCi result;
   const int n = static_cast<int>( y.size() );
+  result.lower = kNanD;
+  result.upper = kNanD;
+  result.estimate = kNanD;
   if ( n == 0 || fitted.size() != y.size() || !statistic )
   {
-    result.refusalReason = "low_success_rate";
+    result.refusalReason = "invalid_input";
     return result;
   }
 
@@ -221,7 +224,7 @@ BootstrapCi residualBootstrapCi(
   }
   if ( residuals.empty() )
   {
-    result.refusalReason = "low_success_rate";
+    result.refusalReason = "invalid_input";
     return result;
   }
   double mean = 0.0;
@@ -234,7 +237,7 @@ BootstrapCi residualBootstrapCi(
   result.estimate = statistic( y );
   if ( !std::isfinite( result.estimate ) )
   {
-    result.refusalReason = "low_success_rate";
+    result.refusalReason = "invalid_input";
     return result;
   }
 
@@ -278,6 +281,8 @@ BootstrapCi residualBootstrapCi(
   if ( rate < opts.minSuccessRate || successes < 2 )
   {
     result.successes = successes;
+    result.lower = kNanD;
+    result.upper = kNanD;
     result.refusalReason = "low_success_rate";
     return result;
   }

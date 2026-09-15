@@ -1089,6 +1089,14 @@ PhenologyMultiResult phenologyMultiCycle(
     }
     proposals.push_back( w );
   }
+  if ( proposals.empty() )
+  {
+    // Every peak sits at a series edge (or the single peak spans the whole
+    // series but produced no scoreable window): honest refusal, not a
+    // silent empty result.
+    result.refusalReason = "edge_truncated_series";
+    return result;
+  }
 
   // Series amplitude for the amplitude-ratio flag.
   float yMin = 0.0f;
@@ -1260,6 +1268,15 @@ PhenologyMultiResult phenologyMultiCycle(
     {
       lastYear = entry.seasonYear;
       cycleIndex = 0;
+    }
+    // Harvest-year cap: cycle indices beyond maxCyclesPerYear are not
+    // scored (the per-calendar-year PEAK cap cannot see harvest-year
+    // boundary effects, so this is the authoritative bound — reported
+    // counts can never exceed maxCyclesPerYear).
+    if ( cycleIndex >= opts.maxCyclesPerYear )
+    {
+      ++cycleIndex;
+      continue;
     }
     entry.cycle.cycleIndex = cycleIndex;
     ++cycleIndex;

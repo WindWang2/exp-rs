@@ -1,4 +1,4 @@
-<!-- 由 scripts/capability_knowledge_tool gen-pages 自动生成 — 手动编辑是缺陷（ADR 0146）。 修改请改对应 sidecar 后重新生成。 -->
+<!-- 由 scripts/capability_knowledge_tool gen-pages 自动生成 — 手动编辑是缺陷（ADR 0154）。 修改请改对应 sidecar 后重新生成。 -->
 
 # 高光谱分析（hyperspectral）
 
@@ -12,7 +12,7 @@
 - 模态：optical
 - 输入：input（raster）
 - 输出：output（raster）
-- 参数：output（string）、target（numeric）
+- 参数：libraryMaterials（string）、libraryPath（string）、output（string）、target（string）、targetRef（string）
 - 前置条件：'target' must have one finite value per input band.
 - 局限：Pixels with degenerate whitened norm (no variance along any direction) score NaN.
 - 适用地物：矿物、人工目标
@@ -49,7 +49,7 @@
 - 模态：optical
 - 输入：input（raster）
 - 输出：endmembers（string）、indices（string）
-- 参数：nEndmembers（integer）、projections（integer）
+- 参数：endmembersOut（string）、nEndmembers（integer）、projections（integer）
 - 局限：PPI finds pixels at the data hull; it assumes endmembers are present as pure pixels in the scene.
 - 适用地物：矿物、植被、土壤
 - 适用场景：端元光谱库构建、解混前的端元估计
@@ -67,7 +67,7 @@
 - 模态：optical
 - 输入：input（raster）
 - 输出：output（raster）
-- 参数：output（string）、target（numeric）
+- 参数：libraryMaterials（string）、libraryPath（string）、output（string）、target（string）、targetRef（string）
 - 前置条件：'target' must have one finite value per input band.
 - 局限：Background statistics come from the input scene itself; a separate background raster is a future extension.
 - 适用地物：矿物、植被胁迫目标
@@ -86,8 +86,9 @@ MNF 最小噪声分离变换：按信噪比排序的正交变换，先白化噪�
 - 模态：optical
 - 输入：input（raster）
 - 输出：numComponents（integer）、output（raster）
-- 参数：numComponents（integer）、output（string）
+- 参数：numComponents（integer）、output（string）、transformOut（string）
 - 前置条件：Input should be calibrated reflectance/radiance; wavelength metadata is not required for MNF itself.
+- 局限：A numerically singular noise covariance (e.g. constant bands, too few valid pixels) is a typed refusal, not a degraded fit.
 - 适用地物：任意地物（高光谱）
 - 适用场景：高光谱数据降维、去噪后的波段精简
 - 失败模式：
@@ -141,7 +142,7 @@ RX 异常检测（Reed-Xiaoli）：以背景统计检测与局部背景显著不
 - 模态：optical
 - 输入：input（raster）
 - 输出：endmembers（integer）、meanError（numeric）、output（raster）
-- 参数：bands（integer）、endmembers（string）、errorOut（string）、output（string）
+- 参数：bands（integer）、endmembers（string）、endmembersRef（string）、errorOut（string）、libraryMaterials（string）、libraryPath（string）、method（enum）、output（string）
 - 前置条件：Endmembers must use the same band order and units as the input raster.；需要端元光谱（rs:endmember_extraction 或外部库）。
 - 局限：Abundances are least-squares estimates clipped to [0,1] and renormalized to unit sum (approximate fully constrained unmixing).
 - 适用地物：矿物、稀疏植被、城市混合区

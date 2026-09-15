@@ -302,7 +302,7 @@ Json::Value RsTemporalModelSelectOperator::run( const Json::Value &params,
       static_cast<size_t>( std::min( tileSize, height ) );
   constexpr size_t kMaxSeriesBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
   const size_t tileFloatsPerPixel =
-    2 * static_cast<size_t>( sceneCount ) + 5;
+    3 * static_cast<size_t>( sceneCount ) + 5;
   if ( tileFloatsPerPixel * maxTilePixels * sizeof( float ) > kMaxSeriesBytes )
     throw RSOperatorError(
         ErrorCode::InvalidParameter,

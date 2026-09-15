@@ -47,11 +47,18 @@ struct AttributedBreak
 {
   int index = 0;                  ///< segment boundary (first sample of new segment)
   double breakDays = 0.0;         ///< day offset of the break sample
-  double trendMagnitude = 0.0;    ///< |fitL(tBreak) − fitR(tBreak)| (NaN when untestable)
+  double trendMagnitude = 0.0;    ///< segmentation level jump |fitL−fitR|
+                                  ///  (always reported from the input fit;
+                                  ///  replaced by the plain-fit jump when
+                                  ///  the nested tests run — i.e. it is
+                                  ///  NaN only when the segmentation gave
+                                  ///  NaN)
   double seasonalShift = 0.0;     ///< L2 norm of the sin/cos coefficient change (NaN untestable)
   double amplitudeChange1 = 0.0;  ///< harmonic-1 amplitude change, output units (NaN when < 1 harmonic)
   double phaseChange1 = 0.0;      ///< harmonic-1 phase change, wrapped to (−π, π] radians
-  double fStatistic = 0.0;        ///< seasonal-change F statistic (NaN when untestable)
+  double fStatistic = 0.0;        ///< SEASONAL-change F statistic (the
+                                  ///  trend-change F is used internally for
+                                  ///  the kind verdict; NaN when untestable)
   double pValue = 0.0;            ///< F-test p-value (NaN when untestable)
   BreakKind kind = BreakKind::Untestable;
 };

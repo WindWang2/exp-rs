@@ -181,12 +181,19 @@ struct PhenologyMultiResult
 {
   std::vector<PhenologyCycle> cycles;  ///< ascending seasonYear, then cycleIndex
   int cyclesPerYearMax = 0;  ///< max cycles observed in any season year
-                             ///  (1 single / 2 double / 3+ triple cropping)
-  bool valid = false;
-  const char *refusalReason = nullptr;  ///< null when valid; stable codes:
+                             ///  (1 single / 2 double / 3+ triple cropping;
+                             ///  never exceeds maxCyclesPerYear)
+  bool valid = false;  ///< true when the analysis RAN and proposed at least
+                       ///  one window (some may be quality-refused — check
+                       ///  per-cycle quality.valid); false = global refusal
+  const char *refusalReason = nullptr;  ///< stable codes when the analysis
+                                        ///  could not run at all:
                                         ///  "insufficient_series" |
                                         ///  "insufficient_valid_samples" |
-                                        ///  "degenerate_seasonal_component"
+                                        ///  "degenerate_seasonal_component" |
+                                        ///  "edge_truncated_series" (peaks
+                                        ///  exist but every one sits at a
+                                        ///  series edge)
 };
 
 /// Automatic multi-cycle phenology (Phenology 2.0). Proposes cycle windows

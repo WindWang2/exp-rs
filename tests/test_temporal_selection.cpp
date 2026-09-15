@@ -29,6 +29,7 @@ using temporal_corpus::Scenario;
 namespace
 {
 constexpr double kSigma = 0.03;
+constexpr double kPiRef = 3.14159265358979323846;
 constexpr double kAlpha = 0.05;
 
 BreakAttributionResult attribute( const Scenario &scenario )
@@ -264,6 +265,37 @@ TEST_CASE( "model selection: deterministic — identical inputs, identical "
     CHECK( first.selectedHarmonics == second.selectedHarmonics );
     if ( penalty == SelectionPenalty::BlockCv && first.selected )
       CHECK( first.selectedScore >= 0.0 );  // CV score is an MSE
+  }
+}
+
+TEST_CASE( "model selection: reported scores match an independent AICc "
+           "recomputation from the reported RSS",
+           "[temporal][selection][model]" )
+{
+  const Scenario scenario = temporal_corpus::harmonicOrder2( 96, 0.5, 0.4, 0.2, kSigma, 20260937u );
+  ModelSelectionOptions options;
+  options.maxHarmonics = 3;
+  options.maxBreaks = 0;
+  options.penalty = SelectionPenalty::AICc;
+  const ModelSelectionResult result =
+    selectSeasonalTrendModel( scenario.y, scenario.grid.tDays, options );
+  REQUIRE( result.selected );
+  // Independent recomputation: logL = -n/2 (ln(2*pi*RSS/n) + 1);
+  // AICc = 2K - 2 logL + 2K(K+1)/(n-K-1), K = params.
+  int n = 0;
+  for ( float v : scenario.y )
+    if ( std::isfinite( v ) )
+      ++n;
+  for ( const auto &candidate : result.candidates )
+  {
+    if ( !candidate.fittable )
+      continue;
+    const double logL =
+      -0.5 * n * ( std::log( 2.0 * kPiRef * candidate.rss / n ) + 1.0 );
+    const double k = static_cast<double>( candidate.paramCount );
+    const double aicc =
+      2.0 * k - 2.0 * logL + 2.0 * k * ( k + 1.0 ) / ( n - k - 1.0 );
+    CHECK( candidate.score == Approx( aicc ).epsilon( 1e-9 ) );
   }
 }
 

@@ -94,6 +94,35 @@ TEST_CASE( "phenology multi: wrapped windows report the harvest year",
   CHECK( validWinter >= 2 );
 }
 
+TEST_CASE( "phenology multi: a December-peaking season counts toward the "
+           "NEXT year (harvest-year rule)",
+           "[temporal][phenology2][crossyear]" )
+{
+  // Peak at doy ~360 (late December 2021): the season window ends in 2022,
+  // so the cycle must be reported under seasonYear 2022 — with its POS
+  // still at doy ~360 — proving the harvest-year assignment rather than a
+  // calendar-year grouping.
+  const temporal_corpus::Scenario scenario =
+    temporal_corpus::decemberPeak( 3, 0.2, 0.7, kSigma, 20260936u );
+  const PhenologyMultiResult result = phenologyMultiCycle(
+      scenario.y, scenario.grid.tDays, scenario.grid.doyOf, scenario.grid.yearOf,
+      PhenologyMultiOptions{} );
+  REQUIRE( result.valid );
+  REQUIRE( !result.cycles.empty() );
+  bool saw2022 = false;
+  for ( const PhenologyCycle &cycle : result.cycles )
+  {
+    if ( cycle.seasonYear != 2022 || !cycle.quality.valid )
+      continue;
+    saw2022 = true;
+    // The window's first observed doy sits in the SECOND half of 2021
+    // (window spans the year boundary), and the peak is at doy ~360.
+    CHECK( cycle.window.startDoy > 180 );
+    CHECK( cycle.metrics.pos == Approx( 360.0 ).margin( 45.0 ) );
+  }
+  CHECK( saw2022 );
+}
+
 TEST_CASE( "phenology multi: single-season control yields one cycle per year",
            "[temporal][phenology2]" )
 {

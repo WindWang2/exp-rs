@@ -329,7 +329,7 @@ Json::Value RsTemporalPhenologyMultiOperator::run( const Json::Value &params,
       static_cast<size_t>( std::min( tileSize, height ) );
   constexpr size_t kMaxSeriesBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
   const size_t tileFloatsPerPixel =
-    2 * static_cast<size_t>( sceneCount ) + 4 * static_cast<size_t>( maxCycles ) + 2;
+    2 * static_cast<size_t>( sceneCount ) + 6 * static_cast<size_t>( maxCycles ) + 2;
   if ( tileFloatsPerPixel * maxTilePixels * sizeof( float ) > kMaxSeriesBytes )
     throw RSOperatorError(
         ErrorCode::InvalidParameter,

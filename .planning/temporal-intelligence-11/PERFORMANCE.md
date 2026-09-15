@@ -16,7 +16,7 @@
 
 ## Memory bounds
 
-- New kernels: O(T) per series + O(k²) Gram; scratch reuse (G) removes per-pixel allocations; no T×H×W materialization anywhere (TemporalTileReader contract).
+- New kernels: O(T) per series + O(k²) Gram; scratch reuse (G) removes per-pixel Gram/solution allocations; note: `detail::solveSmallDense` still receives the compressed system by value (2 solver-side copies per fit remain — in-place elimination is a recorded follow-up). No T×H×W materialization anywhere (TemporalTileReader contract).
 - Bootstrap CI: O(B·k) coefficient storage or streaming quantiles — B capped; per-pixel loop reuses scratch.
 
 ## Benchmark policy

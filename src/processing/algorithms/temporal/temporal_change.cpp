@@ -24,7 +24,9 @@ using detail::harmonicTrendDesignRow;
 // 11.0 performance pass): the per-pixel loop used to heap-allocate the Gram,
 // dense copy and solution vectors on every fitSegment call. Reassigning the
 // buffers keeps the arithmetic (accumulation order, eliminations) EXACTLY
-// unchanged — only the allocations go away. thread_local keeps the kernel
+// unchanged — the Gram/solution allocations go away; the solver still
+// receives copies of the compressed system (it takes them by value; making
+// that in-place is a recorded follow-up). thread_local keeps the kernel
 // single-threaded-contract safe (each thread reuses its own buffers).
 struct FitScratch
 {

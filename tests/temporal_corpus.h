@@ -4,8 +4,10 @@
 //
 // Oracle independence: every scenario's expectation is derivable from the
 // closed-form generator below, never from the code under test. The only
-// randomness is fixed-seed mt19937 noise/masking (Box–Muller, no
-// implementation-defined distributions), so assertions are stable per seed.
+// randomness is fixed-seed mt19937 noise/masking (Box–Muller); the engine
+// is standard-pinned, the uniform mapping is not (implementation-defined
+// per the C standard) — seeds reproduce on one toolchain, which is the
+// determinism these tests assert.
 //
 // Grid convention: synthetic 365-day years (no leap days); day offsets
 // tDays = cadence·i; the harmonic period used by both truth and model is the
@@ -263,6 +265,31 @@ inline Scenario winterCrossYear( int years, double base, double amp,
     // cos(2π(t−14)/365.25) peaks at day 14 → doy ≈ 15 of the grid year.
     s.y[i] = static_cast<float>(
       base + amp * std::cos( 2.0 * kPi * ( t - 14.0 ) / kHarmonicPeriod ) +
+      sigma * gauss() );
+  }
+  return s;
+}
+
+/// Single season peaking in LATE DECEMBER (peak doy ~360): the season's
+/// window end falls in the NEXT calendar year, so the harvest-year rule
+/// (seasonYear = year of window end) is observably different from the
+/// peak's own calendar year.
+inline Scenario decemberPeak( int years, double base, double amp, double sigma,
+                              uint32_t seed )
+{
+  Scenario s;
+  s.name = "december_peak";
+  s.grid = makeGrid( years * 23 );
+  s.expectedCyclesPerYear = 1;
+  s.peakDoy1 = 360;
+  s.y.resize( s.grid.tDays.size() );
+  Gaussian gauss( seed );
+  for ( size_t i = 0; i < s.y.size(); ++i )
+  {
+    const double t = s.grid.tDays[i];
+    // cos peaks where t ≡ 359 (mod 365.25) → late December.
+    s.y[i] = static_cast<float>(
+      base + amp * std::cos( 2.0 * kPi * ( t - 359.0 ) / kHarmonicPeriod ) +
       sigma * gauss() );
   }
   return s;

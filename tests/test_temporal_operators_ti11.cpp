@@ -245,23 +245,25 @@ TEST_CASE( "seasonal_breaks: seasonal-kind vs trend-kind pixels are separated "
     CHECK( std::isfinite( mags[0][1] ) );
 }
 
-TEST_CASE( "seasonal_breaks: compute_ci produces finite bounds or refusal, "
-           "deterministically",
+TEST_CASE( "seasonal_breaks: compute_ci produces per-break finite bounds or "
+           "refusal, deterministically",
            "[temporal][operators][ti11][seasonal_breaks][ci]" )
 {
     ensureApp();
     Fixture fx;
-    const int n = 60;
-    const int kBreak = 30;
+    const int n = 72;
+    // TWO genuine steps (samples 24 and 48): both break slots carry real
+    // jumps, so per-break CI slots must be finite AND mutually distinct —
+    // a copy of break 1's interval into slot 2 would fail this.
     const Stack stack = writeStack(
         fx, n,
         [&]( int i ) {
-            return static_cast<float>(
-                5.0 + ( i < kBreak ? 0.0 : 1.5 ) + jitter( i ) );
+            const double step = i < 24 ? 0.0 : ( i < 48 ? 1.2 : 2.6 );
+            return static_cast<float>( 5.0 + step + jitter( i ) );
         },
         [&]( int i ) {
-            return static_cast<float>(
-                5.0 + ( i < kBreak ? 0.0 : 1.5 ) + jitter( i ) );
+            const double step = i < 24 ? 0.0 : ( i < 48 ? 1.2 : 2.6 );
+            return static_cast<float>( 5.0 + step + jitter( i ) );
         } );
 
     Json::Value params;
@@ -281,17 +283,26 @@ TEST_CASE( "seasonal_breaks: compute_ci produces finite bounds or refusal, "
     REQUIRE( bandCount( out ) == 1 + 5 * 2 + 2 * 2 + 2 + 1 );
     // CI bands come after the five per-break metric groups:
     // mag_ci_lo_1, mag_ci_lo_2, mag_ci_hi_1, mag_ci_hi_2.
-    const std::vector<float> lo = readBand( out, 12 );  // mag_ci_lo_1
-    const std::vector<float> hi = readBand( out, 14 );  // mag_ci_hi_1
-    // Either a valid interval (lo <= hi) or the documented NaN refusal —
-    // never a fabricated inverted interval.
-    for ( float v : { lo[0], hi[0], lo[1], hi[1] } )
+    const std::vector<float> counts = readBand( out, 1 );
+    const std::vector<float> lo1 = readBand( out, 12 );
+    const std::vector<float> lo2 = readBand( out, 13 );
+    const std::vector<float> hi1 = readBand( out, 14 );
+    const std::vector<float> hi2 = readBand( out, 15 );
+
+    for ( int p = 0; p < 2; ++p )
     {
-        if ( std::isfinite( v ) )
+        INFO( "pixel " << p << " breaks=" << counts[p] );
+        REQUIRE( counts[p] >= 1.0f );
+        CHECK( std::isfinite( lo1[p] ) );
+        CHECK( std::isfinite( hi1[p] ) );
+        CHECK( lo1[p] <= hi1[p] );
+        if ( counts[p] >= 2.0f )
         {
-            CHECK( lo[0] <= hi[0] );
-            CHECK( lo[1] <= hi[1] );
-            break;
+            // Per-break intervals: finite and NOT copies of slot 1.
+            CHECK( std::isfinite( lo2[p] ) );
+            CHECK( std::isfinite( hi2[p] ) );
+            CHECK( lo2[p] <= hi2[p] );
+            CHECK( lo2[p] != lo1[p] );
         }
     }
 }

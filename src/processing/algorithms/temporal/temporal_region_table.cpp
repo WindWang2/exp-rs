@@ -14,10 +14,11 @@ namespace
 {
 constexpr float kNanF = std::numeric_limits<float>::quiet_NaN();
 
-/// Even-odd ray casting on a map point against one polygon. Textual twin of
-/// the kernel in rs_temporal_extract_series_operator.cpp (hoisting it into a
-/// shared detail header is a recorded follow-up): keep the two in sync so
-/// both surfaces implement one membership rule.
+/// Even-odd ray casting on a map point against one polygon. THE single
+/// point-in-polygon authority for the temporal operators: since Temporal
+/// Intelligence 11.0, rs:temporal_extract_series selects its ROI samples
+/// through buildRegionGeometry below, so this is the only implementation
+/// (do not grow a second copy).
 bool pointInPolygon( double px, double py,
                      const std::vector<std::array<double, 2>> &poly )
 {

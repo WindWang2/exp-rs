@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <vector>
 
@@ -148,7 +149,8 @@ Json::Value RsTemporalSeasonalBreaksOperator::schema() const
       "Attribution GeoTIFF: breaks_count, break_kind_k "
       "(0=none,1=trend,2=seasonal,3=both,4=untestable), break_day_k, "
       "break_mag_k, break_seasonal_shift_k, break_pvalue_k, "
-      "[mag_ci_lo_k, mag_ci_hi_k when compute_ci], rmse, r2, valid_count",
+      "[mag_ci_lo_1..k then mag_ci_hi_1..k when compute_ci], rmse, r2, "
+      "valid_count",
       "tif" );
 
   Json::Value outputs( Json::objectValue );
@@ -370,7 +372,7 @@ Json::Value RsTemporalSeasonalBreaksOperator::run( const Json::Value &params,
       static_cast<size_t>( std::min( tileSize, width ) ) *
       static_cast<size_t>( std::min( tileSize, height ) );
   constexpr size_t kMaxSeriesBytes = 2ULL * 1024ULL * 1024ULL * 1024ULL;
-  const size_t tileFloatsPerPixel = 2 * static_cast<size_t>( sceneCount ) +
+  const size_t tileFloatsPerPixel = 3 * static_cast<size_t>( sceneCount ) +
                                     5 * static_cast<size_t>( maxBreaks ) +
                                     ( computeCi ? 2 * static_cast<size_t>( maxBreaks ) : 0 ) + 5;
   if ( tileFloatsPerPixel * maxTilePixels * sizeof( float ) > kMaxSeriesBytes )
@@ -405,12 +407,19 @@ Json::Value RsTemporalSeasonalBreaksOperator::run( const Json::Value &params,
   bootstrapOptions.resamples = bootstrapResamples;
   bootstrapOptions.ciLevel = ciLevel;
   bootstrapOptions.seed = static_cast<std::uint32_t>( bootstrapSeed );
-  const auto magnitudeStatistic = [&]( const std::vector<float> &resampled ) {
-    const temporal::SeasonalTrendBreaksResult r = temporal::fitSeasonalTrendBreaks(
-        resampled, tDays, harmonics, maxBreaks, minSegment, minImprovement, robust );
-    if ( r.breaks.empty() )
-      return std::numeric_limits<double>::quiet_NaN();
-    return r.breaks.front().magnitude;
+  // Per-break statistic: the level jump of the refit's break that is
+  // CHRONOLOGICALLY k-th (same ordinal as the point estimate being
+  // intervalled). NaN when the refit finds fewer breaks.
+  const auto magnitudeStatisticFor = [&, harmonics, maxBreaks]( int k )
+      -> std::function<double( const std::vector<float> & )> {
+    return [&, harmonics, maxBreaks, k]( const std::vector<float> &resampled ) {
+      const temporal::SeasonalTrendBreaksResult r = temporal::fitSeasonalTrendBreaks(
+          resampled, tDays, harmonics, maxBreaks, minSegment, minImprovement,
+          robust );
+      if ( k >= static_cast<int>( r.breaks.size() ) )
+        return std::numeric_limits<double>::quiet_NaN();
+      return r.breaks[static_cast<size_t>( k )].magnitude;
+    };
   };
 
   for ( int t = 0; t < tiles; ++t )
@@ -454,6 +463,38 @@ Json::Value RsTemporalSeasonalBreaksOperator::run( const Json::Value &params,
         if ( seasonal )
           ++pixelsWithSeasonalBreaks;
       }
+      // Per-break bootstrap CIs, computed ONCE per pixel before the band
+      // loop (break j gets the ordinal-j statistic and its own pixel-scoped
+      // deterministic seed; no redundant refits for absent breaks).
+      std::vector<float> ciLoPerBreak, ciHiPerBreak;
+      if ( computeCi && !fit.breaks.empty() )
+      {
+        ciLoPerBreak.assign(
+            fit.breaks.size(), std::numeric_limits<float>::quiet_NaN() );
+        ciHiPerBreak.assign(
+            fit.breaks.size(), std::numeric_limits<float>::quiet_NaN() );
+        for ( int j = 0; j < static_cast<int>( fit.breaks.size() ); ++j )
+        {
+          // Deterministic (pixel, break)-scoped stream: seed + linear pixel
+          // index x (tile-local) + break ordinal — identical across reruns,
+          // decorrelated within a tile.
+          temporal::BootstrapOptions pixelOptions = bootstrapOptions;
+          pixelOptions.seed =
+            bootstrapOptions.seed +
+            static_cast<std::uint32_t>( i * static_cast<size_t>( maxBreaks + 1 ) +
+                                        static_cast<size_t>( j ) + 1 );
+          const temporal::BootstrapCi ci = temporal::residualBootstrapCi(
+              pixSeries, fit.fitted, magnitudeStatisticFor( j ), pixelOptions );
+          if ( ci.valid )
+          {
+            ciLoPerBreak[static_cast<size_t>( j )] =
+              static_cast<float>( ci.lower );
+            ciHiPerBreak[static_cast<size_t>( j )] =
+              static_cast<float>( ci.upper );
+          }
+        }
+      }
+
       for ( int j = 0; j < maxBreaks; ++j )
       {
         const bool has = j < static_cast<int>( fit.breaks.size() );
@@ -470,27 +511,14 @@ Json::Value RsTemporalSeasonalBreaksOperator::run( const Json::Value &params,
               : nan;
         pvalueBufs[static_cast<size_t>( j ) * tilePixels + i] =
           has ? static_cast<float>( attribution.breaks[static_cast<size_t>( j )].pValue ) : nan;
-        if ( computeCi && has )
+        if ( computeCi )
         {
-          // Pixel-scoped deterministic seed (documented: seed + linear
-          // pixel index) so resamples decorrelate across pixels while
-          // reruns stay identical.
-          temporal::BootstrapOptions pixelOptions = bootstrapOptions;
-          pixelOptions.seed =
-            bootstrapOptions.seed + static_cast<std::uint32_t>( i + 1 );
-          const temporal::BootstrapCi ci = temporal::residualBootstrapCi(
-              pixSeries, fit.fitted, magnitudeStatistic, pixelOptions );
-          const float nan = std::numeric_limits<float>::quiet_NaN();
+          const bool hasCi =
+            has && j < static_cast<int>( ciLoPerBreak.size() );
           ciLoBufs[static_cast<size_t>( j ) * tilePixels + i] =
-            ci.valid ? static_cast<float>( ci.lower ) : nan;
+            hasCi ? ciLoPerBreak[static_cast<size_t>( j )] : nan;
           ciHiBufs[static_cast<size_t>( j ) * tilePixels + i] =
-            ci.valid ? static_cast<float>( ci.upper ) : nan;
-        }
-        else if ( computeCi )
-        {
-          const float nan = std::numeric_limits<float>::quiet_NaN();
-          ciLoBufs[static_cast<size_t>( j ) * tilePixels + i] = nan;
-          ciHiBufs[static_cast<size_t>( j ) * tilePixels + i] = nan;
+            hasCi ? ciHiPerBreak[static_cast<size_t>( j )] : nan;
         }
       }
       rmseBuf[i] = std::isfinite( fit.rmse )

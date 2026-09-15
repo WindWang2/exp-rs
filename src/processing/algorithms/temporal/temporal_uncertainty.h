@@ -70,12 +70,16 @@ struct BootstrapOptions
 struct BootstrapCi
 {
   double estimate = 0.0;  ///< statistic on the original data (NaN when invalid)
-  double lower = 0.0;
-  double upper = 0.0;
+  double lower = 0.0;  ///< NaN unless valid (set by the kernel)
+  double upper = 0.0;  ///< NaN unless valid (set by the kernel)
   int successes = 0;
   bool valid = false;
-  const char *refusalReason = nullptr;  ///< null when valid; "low_success_rate"
-                                        ///  when too many refits failed
+  const char *refusalReason = nullptr;  ///< null when valid; stable codes:
+                                        ///  "low_success_rate" (too many
+                                        ///  failed refits) |
+                                        ///  "invalid_input" (size mismatch,
+                                        ///  no residuals, non-finite
+                                        ///  estimate)
 };
 
 /// Percentile-interval residual bootstrap for a scalar statistic.
