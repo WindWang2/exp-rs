@@ -15,8 +15,13 @@
 - [x] Agent summary JSON helper (`missionSummaryJson`)
 
 ## Slice 3 — Workflow document identity in mission
-- [ ] Attach IR 2.0 workflowId + fingerprint when designer opens (partial: ActiveWorkflowRef fields exist)
-- [x] Stub E2E scenario scaffolding (save/restore + scenario1/3 names)
+- [x] ActiveWorkflowRef fields + IR2 dock fills them
+- [x] E2E scenarios (contract-strength)
 
-## Slice 4+ — Mount gaps / publish Results / cartography / full E2E
-- Deferred after Slice 1–3 PR
+## Slice 4 — Mount gaps / publish Results
+- [x] Menu/workbench/command mount D14 dual + D15 studio
+- [x] Publish Result/Layer into MissionContext
+- [x] D17 IR2 production CMake + designer dock
+- [ ] DataProjectSerializer / Qgs project XML persistence
+- [ ] Guided LabSpec + PipelineRunCoordinator production start
+- [ ] Rename IR 2.0 WorkflowDefinition → WorkflowDocument

@@ -44,3 +44,15 @@
 ## D-B1 — No online CI; toolchain may be absent
 
 **Decision.** If cmake/Qt missing on the agent box, still land sources + CMake/test wiring; record non-execution in `EVIDENCE.md`. Do not wait on GitHub Actions.
+
+## D-I3 — Menu-mount D14 dual / D15 studio; keep classic windows
+
+**Decision.** Add menu + WorkbenchHost + CommandRegistry entries for `GeorefDualWindow` and `ClassificationStudioWidget` without removing classic I2I/I2M/classification windows. Studio outputs publish via `publishMissionResultFromPath` / Result refs; path load remains a convenience side effect.
+
+## D-W2 — Production-wire IR 2.0 canvas as separate dock TU
+
+**Decision.** Add `app/pipeline/*` canvas + `workflow_ir_v2.cpp` + `Ir2PipelineDesignerDock` to `sicnu_geo_rs`. Do **not** include Engine 2.0 `workflow_definition.h` in those TUs (D-W1 name clash). Guided LabSpec lift / PipelineRunCoordinator remain optional follow-ups (extra deps: lab_spec_loader, dag analyzer, plan_optimizer).
+
+## D-M4 — Session MissionContext on main window
+
+**Decision.** `QgisDesktopWindow` owns `m_mission` value. `workbench:context` merges selection into `m_mission` and re-emits the session summary so Agent sees studio publishes + IR2 fingerprint.

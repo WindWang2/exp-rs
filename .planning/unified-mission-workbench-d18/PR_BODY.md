@@ -1,12 +1,12 @@
 ## Summary
 
-D18 first coherent slice of the Unified Remote-Sensing Mission Workbench:
+D18 Unified Mission Workbench continuation on draft PR #991:
 
-- Deep re-analysis of master after D14–D17 merges (audit docs under `.planning/unified-mission-workbench-d18/`).
-- Explicit workflow authority / conversion graph (IR 1.0 → AgentPlan → Engine 2.0; IR 1.0 → IR 2.0 designer; dual coordinators documented).
-- New serializable **MissionContext** (typed `WorkbenchObjectRef`s, spatial/temporal/map/selection/active-workflow handles — **no live QObject/QGIS pointers**).
-- First studio integrations: classification studio mission input/result refs; temporal panel `exportTemporalContext`; `workbench:context` Agent payload gains bounded `mission` summary.
-- Unit tests + E2E scenario scaffolding targets wired in CMake.
+- Mission **publish** helpers (`publishMissionObject` / `publishMissionResultFromPath` / `setMissionActiveWorkflow`).
+- **D14** `GeorefDualWindow` mounted in Raster → Image Registration menu, WorkbenchHost (`georef-dual`), and `workbench.georefDual`; `rectificationFinished` publishes Result (+ optional map load).
+- **D15** `ClassificationStudioWidget` mounted in Analysis → Classification, WorkbenchHost (`classify-studio`), and `workbench.classifyStudio`; selection binds mission input; classification requests publish Result ids.
+- **D17** IR 2.0 designer production-wired: canvas stack + `workflow_ir_v2.cpp` + `Ir2PipelineDesignerDock` in `sicnu_geo_rs` CMake (separate TU from Engine 2.0 to avoid dual `WorkflowDefinition` clash). Shared workflow id/fingerprint flows into `m_mission` and `workbench:context`.
+- E2E scenarios 1–5 strengthened as headless MissionContext contracts.
 
 ## Baseline SHA
 
@@ -15,57 +15,55 @@ D18 first coherent slice of the Unified Remote-Sensing Mission Workbench:
 
 ## Architecture
 
-MissionContext sits beside Workbench 10 object identity as a project-level scientific session aggregate. Existing authorities (DataManager, DatasetStore, ExperimentStore, TaskCenter, WorkflowRunCoordinator) remain owners of identity and execution.
+MissionContext remains a value aggregate under `src/app/workbench/`. Main window owns session `m_mission`. Specialist UIs retained; new mounts are additive.
 
 ## Authority / convergence decisions
 
-See `DECISIONS.md` (D-W1, D-M1–M3, D-I1–I2). IR 2.0 rename deferred; no third scheduler.
+See `DECISIONS.md` (D-W1/W2, D-M1–M4, D-I1–I3). No third scheduler. IR 2.0 rename still deferred.
 
 ## Major deliverables
 
-- Audit: BASELINE, AUDIT_WORKFLOW, AUDIT_D14_D17, AUTHORITY_MAP, DECISIONS, …
-- `src/app/workbench/mission_context.{h,cpp}`
+- Audit + MissionContext (prior commits)
+- Publish helpers + D14/D15/D17 mounts (this continuation)
 - Tests: `test_mission_context`, `test_mission_e2e_scaffolding`
-- Studio/Agent hooks as above
 
 ## D14–D17 integration findings
 
-- D17 pipeline UI compiled in tests only (not production app CMake).
-- D14 `GeorefDualWindow` / D15 `ClassificationStudioWidget` compiled but not menu-mounted (classic windows still used).
-- Dual `WorkflowDefinition` type name in `sicnu::workflow` (Engine 2.0 vs IR 2.0) — compile-safe only while TUs do not co-include.
+- D14 dual / D15 studio / D17 IR2 canvas now menu-reachable.
+- Guided LabSpec lift + `PipelineRunCoordinator` start not yet production-wired (D-W2 follow-up).
+- Dual `WorkflowDefinition` type name remains (compile-safe via TU separation).
 
 ## Compatibility
 
-Additive. Specialist UIs retained. No parallel framework.
+Additive. Classic I2I/I2M/classification windows kept.
 
 ## Tests
 
-- Added Catch2 targets for MissionContext round-trip / fingerprint / selection builder / E2E scaffolds.
+- Catch2 targets extended for publish + E2E contracts.
 - **Local compile/ctest not executed on the agent box** (`cmake`/`g++` absent). See EVIDENCE.md.
 
 ## Performance / resource evidence
 
-N/A for value-type serialization; policy remains `-j2` / `CTEST_PARALLEL_LEVEL=1` when toolchain available.
+N/A for value-type / mount wiring; policy remains `-j2` / `CTEST_PARALLEL_LEVEL=1` when toolchain available.
 
 ## Review findings
 
-See REVIEW_LOG.md. No new P0. Pre-existing mount gaps tracked as follow-ups.
+See REVIEW_LOG.md. Mount P1 gaps cleared; no new P0.
 
 ## Known limitations
 
-- Mission not yet persisted into Qgs project XML (`DataProjectSerializer` follow-up).
-- IR 2.0 designer not production-wired; ActiveWorkflowRef not yet filled from canvas open.
-- Full E2E scenarios 1–5 not green end-to-end (scaffolds only).
-- Studio outputs still often path-based rather than Result/Asset publish.
+- Mission not yet in Qgs project XML (`DataProjectSerializer` follow-up).
+- Classification studio Result is provisional until a path product exists (path publish API ready).
+- IR2 dock does not yet start `PipelineRunCoordinator`.
+- Full GUI E2E on toolchain host still pending.
 
 ## Follow-ups
 
-1. Production-wire `src/app/pipeline/*` and share workflow fingerprint with Agent.
-2. Menu-mount or bridge D14 dual-window / D15 studio onto MissionContext.
+1. Persist MissionContext with project save/restore.
+2. Production-start PipelineRunCoordinator / Guided LabSpec from IR2 dock.
 3. Rename IR 2.0 `WorkflowDefinition` → `WorkflowDocument`.
-4. Persist MissionContext with project save/restore.
-5. Implement full mission E2E scenarios 1–5.
+4. Run `ctest -R mission` on Qt6+cmake host.
 
 ## Evidence policy
 
-Local evidence only; no online CI dependency (GOAL §18).
+Local evidence only; no online CI dependency (GOAL §18). Draft PR — **do not merge** until toolchain evidence lands.

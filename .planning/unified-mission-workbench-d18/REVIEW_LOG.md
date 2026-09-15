@@ -1,30 +1,31 @@
-# REVIEW_LOG — D18 first slice
+# REVIEW_LOG — D18 mount slice
 
-Independent review of branch delta vs origin/master (first coherent slice).
+Independent review of D14/D15/D17 mount + publish continuation.
 
 ## Architecture
-- MissionContext is a value aggregate; no God-object QObject — OK.
-- Reuses WorkbenchObjectRef — OK.
-- Dual WorkflowDefinition name remains (pre-existing D17) — tracked as P2 follow-up rename, not introduced here.
+- Mission publish helpers are pure value ops — OK.
+- IR2 designer dock is a separate TU from Engine 2.0 pipeline dock — OK (avoids WorkflowDefinition clash).
+- Classic georef/classify windows retained — OK (D-I3).
 
 ## Lifecycle
-- No new QObject ownership in MissionContext.
-- workbench:context provider uses QPointer self — preserved; mission summary built per call.
+- Dual window / studio host use WA_DeleteOnClose=false singletons like I2I — OK.
+- Ir2PipelineDesignerDock is a QDockWidget child of main window — OK.
 
 ## Workflow / Agent
-- Agent summary is bounded (missionSummaryJson caps).
-- Agent still does not share a live IR 2.0 document pointer with the designer (ActiveWorkflowRef fields only) — known limitation.
+- ActiveWorkflowRef filled from IR2 dock into m_mission; workbench:context prefers session mission — OK.
+- PipelineRunCoordinator still not started from the dock (identity only this slice) — known limitation.
 
 ## Tests
-- Unit + E2E scaffolds added; **not executed** on agent box (no cmake/g++).
-- Scaffolds are intentionally thin (not vacuous success-only): scenario4 asserts fingerprint equality after restore.
+- Publish unit tests + E2E scenarios 1–5 contract tests added.
+- **Not executed** on agent box (no cmake/g++). Honest EVIDENCE.md.
 
 ## Findings disposition
 | ID | Sev | Finding | Disposition |
 |----|-----|---------|-------------|
 | R1 | P2 | IR 2.0 / Engine 2.0 same C++ type name | Deferred rename (D-W1) |
-| R2 | P1 | D17 `src/app/pipeline/*` not in app CMake | Documented; follow-up |
-| R3 | P1 | D14 dual-window / D15 studio unmounted from menus | Documented; follow-up |
+| R2 | P2 | Guided LabSpec / PipelineRunCoordinator not in production yet | Documented D-W2 follow-up |
+| R3 | P2 | Classification studio Result is provisional id until path product exists | Acceptable; path publish API ready |
 | R4 | P2 | Builds not run on this box | Honest EVIDENCE.md |
+| R5 | P1 | D14/D15/D17 previously unmounted | **Cleared** this slice (menus/commands/workbench) |
 
-No P0 introduced by this slice. Pre-existing P1 mount gaps remain out of slice scope for the draft PR but are scheduled.
+No new P0. Pre-existing dual WorkflowDefinition name remains P2.
