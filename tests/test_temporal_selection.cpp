@@ -22,31 +22,28 @@ constexpr double kAlpha = 0.05;
 
 struct AttributionSummary
 {
+  /// A break near @a sample classified exactly @a kind.
   bool hasBreakNear( int sample, int tolerance, BreakKind kind ) const
   {
     for ( const auto &b : result.breaks )
-      if ( std::abs( b.index - sample ) <= tolerance &&
-           ( kind == b.kind ||
-             ( kind == BreakKind::SeasonalOnly &&
-               b.kind == BreakKind::Both ) ||
-             ( kind == BreakKind::TrendOnly && b.kind == BreakKind::Both ) ) )
+      if ( std::abs( b.index - sample ) <= tolerance && b.kind == kind )
         return true;
     return false;
   }
-  bool hasOppositeNear( int sample, int tolerance ) const
+  /// Any break near @a sample in the given "wrong" kinds.
+  bool hasAnyNear( int sample, int tolerance,
+                   std::initializer_list<BreakKind> wrong ) const
   {
     for ( const auto &b : result.breaks )
     {
       if ( std::abs( b.index - sample ) > tolerance )
         continue;
-      if ( kind_ == BreakKind::SeasonalOnly && b.kind == BreakKind::TrendOnly )
-        return true;
-      if ( kind_ == BreakKind::TrendOnly && b.kind == BreakKind::SeasonalOnly )
-        return true;
+      for ( BreakKind k : wrong )
+        if ( b.kind == k )
+          return true;
     }
     return false;
   }
-  BreakKind kind_ = BreakKind::None;
   BreakAttributionResult result;
 };
 
@@ -58,7 +55,6 @@ AttributionSummary attribute( const Scenario &scenario )
   options.harmonics = 2;
   options.alpha = kAlpha;
   AttributionSummary summary;
-  summary.kind_ = BreakKind::None;
   summary.result = attributeSeasonalTrendBreaks( fit, scenario.y,
                                                  scenario.grid.tDays, options );
   return summary;
@@ -74,9 +70,10 @@ TEST_CASE( "attribution: a pure level step is attributed to the trend, not "
   const AttributionSummary summary = attribute( scenario );
   REQUIRE( summary.result.testedCount >= 1 );
   REQUIRE( summary.hasBreakNear( 46, 5, BreakKind::TrendOnly ) );
-  // The hallmark of a TREND break: no seasonal-only attribution anywhere
-  // near the truth.
-  CHECK( !summary.hasOppositeNear( 46, 5 ) );
+  // The hallmark of a TREND break: no seasonal attribution anywhere near
+  // the truth.
+  CHECK( !summary.hasAnyNear( 46, 5,
+                              { BreakKind::SeasonalOnly, BreakKind::Both } ) );
   // The seasonal shift statistic near the true break is small relative to
   // the step: the seasonal basis did not move.
   for ( const auto &b : summary.result.breaks )
@@ -93,7 +90,8 @@ TEST_CASE( "attribution: an amplitude jump is attributed to the seasonal "
   const AttributionSummary summary = attribute( scenario );
   REQUIRE( summary.result.testedCount >= 1 );
   REQUIRE( summary.hasBreakNear( 46, 5, BreakKind::SeasonalOnly ) );
-  CHECK( !summary.hasOppositeNear( 46, 5 ) );
+  CHECK( !summary.hasAnyNear( 46, 5,
+                              { BreakKind::TrendOnly, BreakKind::Both } ) );
   // The seasonal basis demonstrably moved.
   for ( const auto &b : summary.result.breaks )
     if ( std::abs( b.index - 46 ) <= 5 &&
@@ -114,6 +112,7 @@ TEST_CASE( "attribution: a phase shift is attributed to the seasonal "
   const AttributionSummary summary = attribute( scenario );
   REQUIRE( summary.result.testedCount >= 1 );
   REQUIRE( summary.hasBreakNear( 46, 5, BreakKind::SeasonalOnly ) );
+  CHECK( !summary.hasAnyNear( 46, 5, { BreakKind::TrendOnly } ) );
 }
 
 TEST_CASE( "attribution: a step plus amplitude change is attributed to both",

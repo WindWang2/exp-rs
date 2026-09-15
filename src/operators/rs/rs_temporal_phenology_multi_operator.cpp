@@ -264,16 +264,20 @@ Json::Value RsTemporalPhenologyMultiOperator::run( const Json::Value &params,
         "Analysis band resolved by positional fallback for at least one scene; "
         "pass 'band' or 'bands' to pin it." );
 
-  // doy/year axes from the acquisition instants (UTC), as the phenology
+  // doy/year axes from the REAL UTC acquisition instants (0 when a time is
+  // invalid — preflight blocks those before we get here), as the phenology
   // kernels expect.
   std::vector<double> tDays( sceneCount );
-  std::vector<int> doyOf( sceneCount );
-  std::vector<int> yearOf( sceneCount );
+  std::vector<int> doyOf( sceneCount, 0 );
+  std::vector<int> yearOf( sceneCount, 0 );
   for ( int s = 0; s < sceneCount; ++s )
   {
     tDays[s] = reader.sceneDayOffset( s );
-    const QDateTime instant = prepared.collection.scenes().at( s ).time.toUtc();
-    const QDate date = instant.date();
+    const auto &scene = reader.scene( s );
+    const QDate date =
+      scene.time.valid
+        ? QDateTime::fromMSecsSinceEpoch( scene.time.epochMillis, QTimeZone::utc() ).date()
+        : QDate();
     doyOf[s] = date.isValid() ? date.dayOfYear() : 0;
     yearOf[s] = date.isValid() ? date.year() : 0;
   }

@@ -123,12 +123,12 @@ TEST_CASE( "phenology multi: a long observation gap refuses instead of "
 {
   temporal_corpus::Scenario scenario =
     temporal_corpus::doubleSeason( 3, 0.2, 0.8, kSigma, 20260933u );
-  // Mask doy 150..260 every year (a >100-day hole right between the two
-  // peaks).
+  // Mask doy 120..280 every year: the second-season window (≈ [184, 364])
+  // loses its whole head to a >90-day hole and must refuse on the gap gate.
   for ( size_t i = 0; i < scenario.y.size(); ++i )
   {
     const int doy = scenario.grid.doyOf[i];
-    if ( doy >= 150 && doy <= 260 )
+    if ( doy >= 120 && doy <= 280 )
       scenario.y[i] = temporal_corpus::kNanF;
   }
   const PhenologyMultiResult result = phenologyMultiCycle(

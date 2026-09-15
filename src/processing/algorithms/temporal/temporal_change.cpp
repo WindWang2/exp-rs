@@ -20,6 +20,22 @@ constexpr float kNanF = std::numeric_limits<float>::quiet_NaN();
 using detail::kMaxTerms;
 using detail::harmonicTrendDesignRow;
 
+// Per-call fit scratch, reused across pixels/segments (Temporal Intelligence
+// 11.0 performance pass): the per-pixel loop used to heap-allocate the Gram,
+// dense copy and solution vectors on every fitSegment call. Reassigning the
+// buffers keeps the arithmetic (accumulation order, eliminations) EXACTLY
+// unchanged — only the allocations go away. thread_local keeps the kernel
+// single-threaded-contract safe (each thread reuses its own buffers).
+struct FitScratch
+{
+  std::vector<double> ata;
+  std::vector<double> atb;
+  std::vector<double> aDense;
+  std::vector<double> bDense;
+  std::vector<double> coef;
+};
+thread_local FitScratch tFitScratch;
+
 /// One weighted OLS fit of the harmonic+trend design on [a, b) of y/t.
 /// Returns false when the segment holds fewer valid samples than terms or
 /// the system is singular (underdetermined segment).
@@ -28,8 +44,11 @@ bool fitSegment( const std::vector<float> &y, const std::vector<double> &tDays,
                  std::vector<double> *coefOut, double *sseOut, int *validOut,
                  double *slopeOut, double *interceptOut )
 {
-  std::vector<double> ata( static_cast<size_t>( kMaxTerms ) * kMaxTerms, 0.0 );
-  std::vector<double> atb( kMaxTerms, 0.0 );
+  FitScratch &scratch = tFitScratch;
+  scratch.ata.assign( static_cast<size_t>( kMaxTerms ) * kMaxTerms, 0.0 );
+  scratch.atb.assign( kMaxTerms, 0.0 );
+  std::vector<double> &ata = scratch.ata;
+  std::vector<double> &atb = scratch.atb;
   double design[kMaxTerms];
   const int terms = 2 + 2 * harmonics;
   int valid = 0;
@@ -41,7 +60,7 @@ bool fitSegment( const std::vector<float> &y, const std::vector<double> &tDays,
     const int m = harmonicTrendDesignRow( tDays[i], harmonics, design );
     for ( int r = 0; r < m; ++r )
     {
-      atb[r] += w * design[r] * y[i];
+      atb[static_cast<size_t>( r )] += w * design[r] * y[i];
       for ( int c = 0; c < m; ++c )
         ata[static_cast<size_t>( r ) * kMaxTerms + c] += w * design[r] * design[c];
     }
@@ -50,18 +69,22 @@ bool fitSegment( const std::vector<float> &y, const std::vector<double> &tDays,
   if ( valid < terms )
     return false;
   // solveSmallDense consumes dense n×n; compress the kMaxTerms-strided Gram.
-  std::vector<double> aDense( static_cast<size_t>( terms ) * terms, 0.0 );
-  std::vector<double> bDense( terms, 0.0 );
+  scratch.aDense.assign( static_cast<size_t>( terms ) * terms, 0.0 );
+  scratch.bDense.assign( terms, 0.0 );
   for ( int r = 0; r < terms; ++r )
   {
-    bDense[r] = atb[r];
+    scratch.bDense[static_cast<size_t>( r )] = atb[static_cast<size_t>( r )];
     for ( int c = 0; c < terms; ++c )
-      aDense[static_cast<size_t>( r ) * terms + c] =
+      scratch.aDense[static_cast<size_t>( r ) * terms + c] =
         ata[static_cast<size_t>( r ) * kMaxTerms + c];
   }
-  std::vector<double> coef;
-  if ( !detail::solveSmallDense( aDense, bDense, terms, &coef ) )
+  // solveSmallDense takes the system by value: passing the scratch buffers
+  // copies them (same values as before), while their capacity stays warm
+  // for the next per-pixel call.
+  if ( !detail::solveSmallDense( scratch.aDense, scratch.bDense, terms,
+                                 &scratch.coef ) )
     return false;
+  const std::vector<double> &coef = scratch.coef;
   double sse = 0.0;
   for ( int i = a; i < b; ++i )
   {
@@ -71,7 +94,7 @@ bool fitSegment( const std::vector<float> &y, const std::vector<double> &tDays,
     const int m = harmonicTrendDesignRow( tDays[i], harmonics, design );
     double v = 0.0;
     for ( int r = 0; r < m; ++r )
-      v += coef[r] * design[r];
+      v += coef[static_cast<size_t>( r )] * design[r];
     sse += w * ( y[i] - v ) * ( y[i] - v );
   }
   if ( coefOut )

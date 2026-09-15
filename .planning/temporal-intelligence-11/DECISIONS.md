@@ -71,10 +71,15 @@ no low-sample guessing (continues temporal_fit's `valid=false` convention).
 
 `temporal_region_table::buildRegionGeometry` becomes the only point-in-polygon-membership
 implementation for temporal operators; `rs:temporal_extract_series`'s separate polygon scan is
-rewired onto it (behavior-preserving; pixel-center even-odd semantics unchanged, rotation still
-rejected). `rs:temporal_region_features` gains opt-in `seasonal_breaks=true` columns
-(attribution/magnitude/CI) reusing the new kernel; disabled by default → default CSV byte-identical,
-sidecar schema version only bumps when the opt-in columns are on.
+rewired onto it (behavior-preserving; pixel-center even-odd semantics unchanged — verified by
+reading both implementations before the swap; the bbox window may be up to one pixel wider on
+each edge but membership offsets define the output, so results are identical). The planned
+opt-in `seasonal_breaks` columns on `rs:temporal_region_features` are **descoped to a
+follow-up**: the per-region attribution loop needs a per-region series gather that the
+current date-outermost streaming does not retain, so a correct version is a schema-affecting
+change (sidecar version bump) beyond a minimal append. Package E's deliverable (shared
+membership authority, batch region tables, cancellable, memory bounded) is delivered by the
+rewiring + the pre-existing kernels; per-region break columns recorded as PR_BODY follow-up.
 
 ## D-TI11-7 · UI via existing seams only
 

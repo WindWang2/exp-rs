@@ -219,10 +219,15 @@ HarmonicFitResult harmonicFit( const std::vector<float> &y,
   for ( int i = 0; i < n; ++i )
     weights[i] = std::isfinite( y[i] ) ? 1.0 : 0.0;
 
+  // Scratch reused across IRLS iterations (Temporal Intelligence 11.0
+  // performance pass): same accumulation order, no per-iteration allocation.
+  std::vector<double> ata( static_cast<size_t>( terms ) * terms, 0.0 );
+  std::vector<double> atb( terms, 0.0 );
+  std::vector<float> fitted( n, kNan );
   for ( int iteration = 0; iteration < ( robust ? 4 : 1 ); ++iteration )
   {
-    std::vector<double> ata( static_cast<size_t>( terms ) * terms, 0.0 );
-    std::vector<double> atb( terms, 0.0 );
+    ata.assign( static_cast<size_t>( terms ) * terms, 0.0 );
+    atb.assign( terms, 0.0 );
     int valid = 0;
     for ( int i = 0; i < n; ++i )
     {
@@ -238,7 +243,7 @@ HarmonicFitResult harmonicFit( const std::vector<float> &y,
       }
       for ( int r = 0; r < terms; ++r )
       {
-        atb[r] += weights[i] * design[r] * y[i];
+        atb[static_cast<size_t>( r )] += weights[i] * design[r] * y[i];
         for ( int c = 0; c < terms; ++c )
           ata[static_cast<size_t>( r ) * terms + c] +=
             weights[i] * design[r] * design[c];
@@ -255,7 +260,7 @@ HarmonicFitResult harmonicFit( const std::vector<float> &y,
     double sse = 0.0;
     double mean = 0.0;
     int count = 0;
-    std::vector<float> fitted( n, kNan );
+    fitted.assign( n, kNan );
     for ( int i = 0; i < n; ++i )
     {
       if ( weights[i] <= 0.0 )

@@ -250,7 +250,7 @@ Json::Value RsTemporalSeasonalBreaksOperator::run( const Json::Value &params,
   const bool computeCi = getBool( params, "compute_ci", false );
   const double ciLevel = getDouble( params, "ci_level", 0.95 );
   const int bootstrapResamples = std::clamp( getInt( params, "bootstrap_resamples", 99 ), 9, 999 );
-  const long bootstrapSeed = static_cast<long>( getDouble( params, "bootstrap_seed", 20260915.0 ) );
+  const int bootstrapSeed = getInt( params, "bootstrap_seed", 20260915 );
 
   const bool applyQaMasking = getBool( params, "apply_qa_masking", true );
   const int tileSize = std::clamp( getInt( params, "tile_size", kDefaultTileSize ), 16, 4096 );
@@ -404,7 +404,7 @@ Json::Value RsTemporalSeasonalBreaksOperator::run( const Json::Value &params,
   temporal::BootstrapOptions bootstrapOptions;
   bootstrapOptions.resamples = bootstrapResamples;
   bootstrapOptions.ciLevel = ciLevel;
-  bootstrapOptions.seed = static_cast<std::uint32_t>( bootstrapSeed & 0xFFFFFFFFL );
+  bootstrapOptions.seed = static_cast<std::uint32_t>( bootstrapSeed );
   const auto magnitudeStatistic = [&]( const std::vector<float> &resampled ) {
     const temporal::SeasonalTrendBreaksResult r = temporal::fitSeasonalTrendBreaks(
         resampled, tDays, harmonics, maxBreaks, minSegment, minImprovement, robust );

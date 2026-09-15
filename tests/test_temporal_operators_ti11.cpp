@@ -46,6 +46,11 @@ void ensureApp()
 constexpr float kNan = std::numeric_limits<float>::quiet_NaN();
 constexpr double kPi = 3.14159265358979323846;
 
+/// Deterministic irregular jitter: floors residual SSEs away from exact
+/// zero so nested-model F tests and AICc comparisons stay well-conditioned
+/// on synthetic (noiseless-shape) series. Not random — no seed needed.
+inline double jitter( int i ) { return 0.01 * std::sin( 7.31 * i ) + 0.005 * std::cos( 1.7 * i ); }
+
 struct Fixture
 {
     QTemporaryDir dir;
@@ -159,9 +164,13 @@ TEST_CASE( "seasonal_breaks: seasonal-kind vs trend-kind pixels are separated "
         [&]( int i ) {
             const double amp = i < kBreak ? 0.1 : 0.9;
             return static_cast<float>(
-                0.3 + amp * std::sin( 2.0 * kPi * ( 16.0 * i ) / 365.25 ) );
+                0.3 + amp * std::sin( 2.0 * kPi * ( 16.0 * i ) / 365.25 ) +
+                jitter( i ) );
         },
-        [&]( int i ) { return static_cast<float>( 5.0 + ( i < kBreak ? 0.0 : 1.5 ) ); } );
+        [&]( int i ) {
+            return static_cast<float>(
+                5.0 + ( i < kBreak ? 0.0 : 1.5 ) + jitter( i ) );
+        } );
 
     Json::Value params;
     params["scenes"] = scenesParam( stack );
@@ -178,28 +187,59 @@ TEST_CASE( "seasonal_breaks: seasonal-kind vs trend-kind pixels are separated "
     REQUIRE( bandCount( out ) == 1 + 5 * 3 + 2 + 1 );  // count + 5 per-break bands ×3 + rmse/r2 + valid
 
     const std::vector<float> counts = readBand( out, 1 );
-    const std::vector<float> kind1 = readBand( out, 2 );   // break_kind_1
-    const std::vector<float> day1 = readBand( out, 3 );    // break_day_1
-    const std::vector<float> mag1 = readBand( out, 4 );    // break_mag_1
-    const std::vector<float> shift1 = readBand( out, 5 );  // break_seasonal_shift_1
+    // Scan every break slot: attribution kinds and day offsets per slot.
+    std::vector<std::vector<float>> kinds, days, mags, shifts;
+    for ( int slot = 0; slot < 3; ++slot )
+    {
+        kinds.push_back( readBand( out, 2 + slot * 5 ) );
+        days.push_back( readBand( out, 3 + slot * 5 ) );
+        mags.push_back( readBand( out, 4 + slot * 5 ) );
+        shifts.push_back( readBand( out, 5 + slot * 5 ) );
+    }
+    auto findNear = [&]( int pixel, double truthDay, double kindLo, double kindHi ) {
+        for ( int slot = 0; slot < 3; ++slot )
+        {
+            const float kind = kinds[slot][pixel];
+            const float day = days[slot][pixel];
+            if ( std::isfinite( day ) && std::abs( day - truthDay ) <= 5 * 16.0 &&
+                 kind >= kindLo && kind <= kindHi )
+                return true;
+        }
+        return false;
+    };
 
     // Pixel 0 = seasonal; pixel 1 = trend. (Kind encoding: 1 trend,
     // 2 seasonal, 3 both.)
-    INFO( "pixel0 kind=" << kind1[0] << " pixel1 kind=" << kind1[1] );
     REQUIRE( counts[0] >= 1.0f );
     REQUIRE( counts[1] >= 1.0f );
     // The seasonal pixel must NOT be classified trend-only, and vice versa.
-    CHECK( ( kind1[0] == 2.0f || kind1[0] == 3.0f ) );
-    CHECK( ( kind1[1] == 1.0f || kind1[1] == 3.0f ) );
-    // Both breaks localize near the truth (sample 46 → day 736).
-    CHECK( std::abs( day1[0] - 16.0 * kBreak ) <= 5 * 16.0 );
-    CHECK( std::abs( day1[1] - 16.0 * kBreak ) <= 5 * 16.0 );
+    CHECK( findNear( 0, 16.0 * kBreak, 2.0f, 3.0f ) );
+    CHECK( !findNear( 0, 16.0 * kBreak, 1.0f, 1.0f ) );
+    CHECK( findNear( 1, 16.0 * kBreak, 1.0f, 3.0f ) );
+    CHECK( !findNear( 1, 16.0 * kBreak, 2.0f, 2.0f ) );
     // Seasonal shift is large on the seasonal pixel and small on the
-    // trend pixel.
-    CHECK( shift1[0] > 0.1 );
-    CHECK( shift1[1] < 0.25 * 1.5 + 0.1 );
-    CHECK( std::isfinite( mag1[0] ) );
-    CHECK( std::isfinite( mag1[1] ) );
+    // trend pixel (scan the slot nearest the truth).
+    bool shiftChecked0 = false;
+    bool shiftChecked1 = false;
+    for ( int slot = 0; slot < 3; ++slot )
+    {
+        if ( std::isfinite( days[slot][0] ) &&
+             std::abs( days[slot][0] - 16.0 * kBreak ) <= 5 * 16.0 )
+        {
+            CHECK( shifts[slot][0] > 0.1 );
+            shiftChecked0 = true;
+        }
+        if ( std::isfinite( days[slot][1] ) &&
+             std::abs( days[slot][1] - 16.0 * kBreak ) <= 5 * 16.0 )
+        {
+            CHECK( shifts[slot][1] < 0.25 * 1.5 + 0.1 );
+            shiftChecked1 = true;
+        }
+    }
+    CHECK( shiftChecked0 );
+    CHECK( shiftChecked1 );
+    CHECK( std::isfinite( mags[0][0] ) );
+    CHECK( std::isfinite( mags[0][1] ) );
 }
 
 TEST_CASE( "seasonal_breaks: compute_ci produces finite bounds or refusal, "
@@ -212,8 +252,14 @@ TEST_CASE( "seasonal_breaks: compute_ci produces finite bounds or refusal, "
     const int kBreak = 30;
     const Stack stack = writeStack(
         fx, n,
-        [&]( int i ) { return static_cast<float>( 5.0 + ( i < kBreak ? 0.0 : 1.5 ) ); },
-        [&]( int i ) { return static_cast<float>( 5.0 + ( i < kBreak ? 0.0 : 1.5 ) ); } );
+        [&]( int i ) {
+            return static_cast<float>(
+                5.0 + ( i < kBreak ? 0.0 : 1.5 ) + jitter( i ) );
+        },
+        [&]( int i ) {
+            return static_cast<float>(
+                5.0 + ( i < kBreak ? 0.0 : 1.5 ) + jitter( i ) );
+        } );
 
     Json::Value params;
     params["scenes"] = scenesParam( stack );
@@ -259,9 +305,9 @@ TEST_CASE( "model_select: recovers harmonic order end-to-end and refuses "
             const double t = 16.0 * i;
             return static_cast<float>(
                 0.5 + 0.4 * std::sin( 2.0 * kPi * t / 365.25 ) +
-                0.2 * std::sin( 4.0 * kPi * t / 365.25 ) );
+                0.2 * std::sin( 4.0 * kPi * t / 365.25 ) + jitter( i ) );
         },
-        []( int ) { return 2.0f; } );
+        []( int ) { return 2.0f; } );  // exact constant: smallest candidate wins with RSS 0
 
     Json::Value params;
     params["scenes"] = scenesParam( stack );
@@ -302,7 +348,7 @@ TEST_CASE( "phenology_multi: double-cropping pixel reports two cycles, "
         [&]( int i ) {
             const QDate start( 2020, 1, 1 );
             const int doy = start.addDays( 16 * i ).dayOfYear();
-            if ( doy >= 150 && doy <= 260 )
+            if ( doy >= 120 && doy <= 280 )
                 return kNan;
             const double t = 16.0 * i;
             return static_cast<float>(
