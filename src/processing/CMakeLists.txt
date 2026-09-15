@@ -82,6 +82,17 @@ add_library(sicnu_processing SHARED
     algorithms/resampler.cpp
     algorithms/pansharpening.cpp
 
+    # F13 multimodal registration & geometric accuracy: contract + FFT layer
+    # (deterministic, no third-party FFT dependency) + cross-modal matcher +
+    # evidence-driven model selection + RPC bias refinement + stack adjustment.
+    algorithms/registration/registration_types.cpp
+    algorithms/registration/fft2d.cpp
+    algorithms/registration/multimodal_matcher.cpp
+    algorithms/registration/model_selector.cpp
+    algorithms/registration/rpc_bias_model.cpp
+    algorithms/registration/stack_registrator.cpp
+    algorithms/registration/registration_quality.cpp
+
     # Temporal (multi-date) remote sensing core: time semantics, collection
     # model, scientific preflight, bounded streaming reader, stable stats.
     algorithms/temporal/temporal_time.cpp
