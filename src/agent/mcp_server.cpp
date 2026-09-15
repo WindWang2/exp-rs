@@ -1193,18 +1193,20 @@ QVariantMap McpServer::handleArtifactRead(const QVariantMap &arguments)
     if (rawPath.isEmpty())
         throw McpToolError(QStringLiteral("artifact_read requires 'path'"));
 
-    // Same containment rule as every other path-taking tool: when the
-    // workspace sandbox is set, absolute paths outside it are rejected.
+    // Resolve relative arguments against the workspace root FIRST, then run
+    // the containment check on the resolved path: canonicalization inside
+    // absolutePathOutsideWorkspace must see the joined path or a crafted
+    // "../" segment would escape the sandbox.
     const QString workspace = QProcessEnvironment::systemEnvironment().value(
         QStringLiteral("SICNU_MCP_WORKSPACE"));
-    QString detail;
-    if (absolutePathOutsideWorkspace(rawPath, workspace, &detail))
-        throw McpToolError(
-            QStringLiteral("artifact_read path rejected: %1").arg(detail));
-
     QString resolved = rawPath;
     if (QFileInfo(rawPath).isRelative() && !workspace.isEmpty())
         resolved = QDir(workspace).filePath(rawPath);
+
+    QString detail;
+    if (absolutePathOutsideWorkspace(resolved, workspace, &detail))
+        throw McpToolError(
+            QStringLiteral("artifact_read path rejected: %1").arg(detail));
 
     QFileInfo info(resolved);
     if (info.isDir())

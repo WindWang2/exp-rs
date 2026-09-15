@@ -368,6 +368,15 @@ TEST_CASE("artifact_read enforces the workspace sandbox", "[surface][artifact]")
                     QVariantMap{ { QStringLiteral("path"), QStringLiteral("/etc/hostname") } });
     REQUIRE(result.value(QStringLiteral("isError")).toBool());
 
+    // Relative escape (".." beyond the sandbox root): rejected — the
+    // containment check must run on the RESOLVED path.
+    result = s.call(QStringLiteral("artifact_read"),
+                    QVariantMap{ { QStringLiteral("path"), QStringLiteral("../../etc/hostname") } });
+    REQUIRE(result.value(QStringLiteral("isError")).toBool());
+    REQUIRE(result.value(QStringLiteral("content")).toList().value(0).toMap()
+                .value(QStringLiteral("text")).toString()
+                .contains(QStringLiteral("rejected")));
+
     qunsetenv("SICNU_MCP_WORKSPACE");
 }
 
