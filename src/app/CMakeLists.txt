@@ -225,6 +225,7 @@ add_executable(sicnu_geo_rs
     widgets/rs_result_summary.cpp
     widgets/rs_toolbar_flow_host.cpp
     widgets/spectral_profile_widget.cpp
+    widgets/spectral_workbench_panel.cpp
     widgets/band_role_combo.cpp
     widgets/raster_layer_combo.cpp
     widgets/resolution_widget.cpp
