@@ -13,6 +13,7 @@
 #include "geospatial/doctor/data_doctor.h"
 #include "geospatial/formats/format_profiles.h"
 #include "geospatial/io/cog_options.h"
+#include "geospatial/io/vector_interchange.h"
 #include "geospatial/metadata/canonical_metadata.h"
 
 #include <atomic>
@@ -463,14 +464,25 @@ Json::Value IoConvertFormatOperator::run( const Json::Value &params, RSOperatorC
     const std::string input = params::requireString( params, "input" );
     const std::string output = params::requireString( params, "output" );
     const std::string driver = params::getString( params, "driver", "GTiff" );
-    // Vector path: a vector driver name. Raster otherwise.
-    if ( driver == "GPKG" || driver == "GeoJSON" || driver == "ESRI Shapefile" || driver == "FlatGeobuf"
-         || driver == "CSV" )
+    // Vector routing is capability-based (11.0): a vector driver that can
+    // create datasets goes through the streaming reader→writer contract —
+    // no hard-coded name list, so GeoParquet/CSV/whatever this GDAL build
+    // supports route correctly, and a non-create-capable driver falls
+    // through to the raster kernel where its refusal names the reason.
+    const sicnu::geo::io::VectorTargetCheck vectorTarget = sicnu::geo::io::checkVectorWriteTarget( driver );
+    if ( vectorTarget.usable )
     {
       ContextProgress progress( context );
       Json::Value result = sicnu::geo::vectorConvert( input, output, driver, "", "", "", {}, &progress );
       context.reportProgressForced( 1.0, "conversion complete" );
       return result;
+    }
+    if ( vectorTarget.reasonCode != "not_vector" )
+    {
+      // A declared vector driver that cannot receive writes fails here with
+      // the typed reason — never silently re-routed into the raster kernel.
+      Json::Value details = vectorTarget.toJson();
+      throw RSOperatorError( ErrorCode::InvalidParameter, vectorTarget.message, details );
     }
     sicnu::geo::TranslateOptions options;
     options.outputFormat = driver;

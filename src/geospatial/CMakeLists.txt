@@ -56,6 +56,9 @@ set(SICNU_GEOSPATIAL_SOURCES
     io/finalize_manifest.cpp
     io/stage_ledger.cpp
     io/cog_options.cpp
+    io/vector_interchange.cpp
+    io/subdataset_inventory.cpp
+    io/metadata_patch.cpp
 )
 
 qt_add_library(sicnu_geospatial STATIC ${SICNU_GEOSPATIAL_SOURCES})

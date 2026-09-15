@@ -32,3 +32,9 @@
 - convert/raster_convert 増量：makeCogWithOptions（完整选项列表入口）；makeCog 行为不变（仅将 preset 组装移到调用侧，dtupe probe 多一次只读 open）。回归：test_io_roundtrip_matrix/test_io_fidelity/test_io_probe/test_adversarial_m3 全 exit=0。
 - docs/io/cog-guide.md：OVERVIEWS=ALL→AUTO 漂移修正 + 新选项层文档。
 - 资源记录：本 phase 一次构建观察到 load≈11.5（并发其他 track 构建所致），本 track 构建转 nice 15 + -j1（envelope 降档规则），内存 49GB 可用，未触 70% RSS 上限。
+
+## Phase 3（2026-09-16）
+- vector_interchange：DCAP_VECTOR+DCAP_CREATE capability 路由（替换硬编码名单）；capability 报告与 GDAL 运行时元数据逐项交叉核对（测试遍历报告断言 usable⇒DCAP 实况成立）。
+- subdataset_inventory：netCDF 双变量 fixture（netCDF C 库直写，nc_enddef 后写入）；inventory count=2、kind=subdataset、投影 inspectSubdataset 宽4×高3；非 SDS 选择器拒绝（trust boundary）；driver 缺失 → WARN skip（repo 惯例）。
+- metadata_patch：白名单 validate-then-apply；数值/ISO-8601/band 范围预校验（7 类 refusal 全覆盖且 digest 不变——证明未触碰文件）；read-only chmod → OpenFailed；read-back 用独立只读 open；GTiff patch 后 canonical READ 路径（inspectRaster）反映全部值；manifest 连续性：patch 后 verifyDataset 仍 verified + patches[] 历史=1 + producer 保留。
+- 回归：test_io_operators（convert_format capability 路由后 130 assertions 全过）、test_io_multidim、test_io_canonical_metadata exit=0。
