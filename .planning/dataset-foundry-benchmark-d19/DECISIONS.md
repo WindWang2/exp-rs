@@ -61,3 +61,15 @@
 **Choice:** Add thin MCP handlers `dataset:qa`, `dataset:sample_query`, GOAL aliases `dataset:versions`/`dataset:splits`, and `benchmark:list|inspect|compare` on the existing `data_platform_tools` surface. Register capability knowledge entries. Do not touch Workbench/MissionContext.
 
 **Why:** Reuses open-store-by-path + bounded page patterns already used by Platform 7.0; keeps D18 UI ownership clean.
+
+## D13. Catalog scale evidence uses N=100k (not 1M) on constrained boxes
+
+**Choice:** Hermetic SampleCatalog stress targets **100000** logical rows with page hard-cap 500. Document and skip 1M when shared-box MemAvailable is only a few GiB.
+
+**Why:** GOAL asks bounded paging toward 100k+ without OOM. 100k proves filter/page/summary stay page-bounded; 1M mainly stresses allocator/RAM on the authoring host without changing the 500-row API contract.
+
+## D14. Scientific benchmark modes are SplitMethod + metadata pins
+
+**Choice:** Cross-region / cross-year / temporal holdout are `LeaveOneRegionOut` / `LeaveOneYearOut` / `Temporal` configs stored as SplitManifests and recorded on `BenchmarkDefinition.metadata` (`benchmark_mode`, `split_method`) plus `forbiddenLeakage`. No second split/leakage engine.
+
+**Why:** Reaffirms D5 for hermetic E2E cheapness; matches SPLIT_MODEL.md.

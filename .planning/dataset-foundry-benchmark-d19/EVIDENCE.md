@@ -24,7 +24,7 @@ No online CI dependency. Tests and CMake wiring were added for execution on a ma
 - `ExperimentRun` optional `benchmark_definition_id` / version pins
 - Tests: `test_d19_dataset_foundry`, `test_d19_benchmark`
 
-### Slice 2 (this continuation)
+### Slice 2 (prior continuation)
 - **Persist BenchmarkService** via ExperimentStore additive tables
   (`benchmark_definitions`, `benchmark_results`) + `BenchmarkResult::fromJson`
 - **Agent tool wrappers** on `data_platform_tools`:
@@ -34,14 +34,37 @@ No online CI dependency. Tests and CMake wiring were added for execution on a ma
 - **Hermetic E2E** `test_d19_foundry_benchmark_chain` (foundry→QA→features→benchmark→experiment pins→agent tools; no Qt GUI)
 - Persistence unit coverage in `test_d19_benchmark` (`[d19][benchmark][persist]`)
 
+### Slice 3 (this continuation — review hardening)
+- **Hermetic SampleCatalog scale stress** at **N=100000** logical rows:
+  filter + page (hard cap 500) + deep offset + filtered summary
+  (`[d19][foundry][catalog][scale][hermetic]`). **1M not used** on this box
+  (~4 GiB MemAvailable shared with other agents; QString-heavy 1M rows risk
+  OOM without proving a stronger paging contract than 100k).
+- **Version evolution** Source→Derived→Benchmark lineage via FoundryService
+  (`[d19][foundry][version][hermetic]`); `createDerivedVersion` still forks
+  committed parents.
+- **Leakage refusal**: Error findings → QA overall Fail; audited empty →
+  leakage Pass (`[d19][foundry][leakage][hermetic]`).
+- **LeaveOneRegionOut / LeaveOneYearOut / Temporal** as benchmark-mode config
+  pins (metadata + `forbiddenLeakage`; no second split engine)
+  (`[d19][e2e][split][leaveone][hermetic]`).
+- CMake: `test_d19_dataset_foundry` TIMEOUT 300 for scale case.
+
 ## Scale notes
 
-Catalog test exercises 1000 logical rows with page limit 50 (bounded). Agent `dataset:sample_query` scans at most 10k rows per call. 100k+/1M stress remains for a toolchain-capable follow-up.
+| Contract | Actual N / bound | Notes |
+|----------|------------------|-------|
+| Catalog unit (slice 1) | 1000 rows, page 50 | smoke |
+| Catalog scale stress (slice 3) | **100000** rows, page clamp 500 | hermetic; authored |
+| Agent `dataset:sample_query` | scan cap 10k | unchanged |
+| 1M catalog | **not attempted** | box RAM headroom ~4 GiB; unnecessary for hard page-cap proof |
+
+Compile/ctest of the 100k case remains **not-executed** here (no g++/cmake).
 
 ## cmake/ctest
 
 **not-executed** on this authoring box (`g++`/`cmake` absent). CMake entries:
 
-- `test_d19_dataset_foundry`
+- `test_d19_dataset_foundry` (TIMEOUT 300)
 - `test_d19_benchmark`
 - `test_d19_foundry_benchmark_chain`
