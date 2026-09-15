@@ -268,3 +268,5 @@ data/labs/_tmp/
 !.planning/classification-change-studio/
 .planning/classification-change-studio/*
 !.planning/classification-change-studio/*.md
+!.planning/dataset-foundry-benchmark-d19/
+!.planning/dataset-foundry-benchmark-d19/**
