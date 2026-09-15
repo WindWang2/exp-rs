@@ -1,6 +1,15 @@
 # Scientific Execution Runtime Convergence 11.0
 
 > **Local evidence only; no online CI dependency.**
+>
+> **P0 (out of scope, minimal build-unblocks included):** `origin/master@a5b11b7f`
+> 在本机 MSVC 环境**不能完整编译** agent/workflow 目标——`src/workflow/pipeline_run_coordinator.cpp`
+> 的 Win32 分支缺 `<fcntl.h>`（`_O_WRONLY/_O_BINARY`，PR #991 产物）、
+> `src/agent/data_platform_tools.cpp` 无限定使用 `BenchmarkService`（PR #992/D19 产物）、
+> `tests/test_large_scale_execution_10.cpp` 的 POSIX `unsetenv` 无 MSVC 守护。
+> 本 PR 包含三处最小 build-unblock（共 ~10 行），否则任何链接 sicnu_agent/sicnu_workflow
+> 的测试无法构建；域 track 可自行以更合适方式重做这些修复。另：`DiskTileStore::write(lease)`
+> 在 Windows 必败（ofstream 未关闭即 rename；纯 STD 对照 repro 证明），修复随本 PR 落地。
 
 ## Baseline & dedupe
 
@@ -36,9 +45,30 @@
 - 旧 API 零破坏：新类型全部 additive；错误码 append-only；TileCheckpoint v1 格式不变；ChunkPipeline 唯一行为变化是 consumer-abort 从静默成功改为抛 `ChunkConsumerAborted`（:ChunkCancelled 子类）——这是缺陷修复（fail-open→fail-closed），唯一生产消费者 fused_chain 从不返回 false。
 - LocalWorkerPool 新增 lease/poison 判定：连续 3 次 operator 级失败才隔离（默认阈值），成功清零；fail-loud 契约不变。
 
-## Local tests
+## Local tests（本机 MSVC/Ninja dev-default，QT_QPA_PLATFORM=offscreen，连续两轮原样重跑均全绿）
 
-（Phase 8 回填：每套件命令与 exit code，连续两遍。）
+| 套件 | assertions/cases | 两轮 exit |
+|---|---|---|
+| test_execution_authority_11 | 17 / 4 | 0 / 0 |
+| test_chunk_contract_11 | 42 / 7 | 0 / 0 |
+| test_chunk_resume_11（REAL 子进程 `_Exit(70)` 崩溃恢复） | 47 / 8 | 0 / 0 |
+| test_execution_governor_11 | 75 / 5 | 0 / 0 |
+| test_worker_lease_11 | 33 / 5 | 0 / 0 |
+| test_execution_telemetry_11 | 10 / 3 | 0 / 0 |
+| test_chunk_adoption_11 | 27 / 6 | 0 / 0 |
+| test_execution_scale_fault_11 | 86 / 4 | 0 / 0 |
+| test_chunk_graph（回归） | 354 / 30 | 0 / 0 |
+| test_fused_chain（回归） | 44 / 4 | 0 / 0 |
+| test_external_memory_10（回归，写作用域修复后转绿） | 50 / 8 | 0 / 0 |
+| test_large_scale_execution_10（回归） | 6218 / 5 | 0 / 0 |
+| test_job_engine（回归） | 446 / 34 | 0 / 0 |
+| test_worker_host（回归，含池 lease 接线） | 61 / 13 | 0 / 0 |
+| opt-in 规模门 SICNU_SCALE_11=1（100k tile journal 往返，37k 提交后硬停→恢复） | 90 / 4 | 0（单跑，15min） |
+
+pre-existing（对照：本 diff 对这些子系统零文件重叠，实体均在 master）：
+`test_scientific_contract_10`（rs:change 缺合约）、`test_help_coverage`（workbench.* help 缺失）、
+`test_diagnostics_contract_9` 的 7 个 harness 家族码（mission track 产物）——
+本 track 的新错误码 curated page 已闭环（operator 家族 0 残留）。
 
 ## 资源证据
 
