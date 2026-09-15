@@ -54,10 +54,6 @@ def _validate_v2_sections(manifest, findings):
             if min_reader is not None:
                 if not isinstance(min_reader, int) or isinstance(min_reader, bool) or min_reader < 1:
                     findings.append("compat.min_reader_schema must be a positive integer")
-                elif min_reader > 2:
-                    findings.append(
-                        "compat.min_reader_schema %s exceeds this reader's newest schema (2)"
-                        % min_reader)
             kind = compat.get("bundle_kind")
             if kind is not None and not isinstance(kind, str):
                 findings.append("compat.bundle_kind must be a string")
@@ -90,6 +86,19 @@ def verify_bundle(root):
              % (schema, " / ".join(SUPPORTED_SCHEMAS))],
             "", 0, 0)
     is_v2 = schema in V2_SCHEMAS
+    if is_v2:
+        compat = manifest.get("compat")
+        if isinstance(compat, dict):
+            min_reader = compat.get("min_reader_schema")
+            if isinstance(min_reader, int) and not isinstance(min_reader, bool) \
+                    and min_reader > 2:
+                # The bundle's semantics need a newer reader than this is:
+                # cannot-verify (exit 2), never a half-verification.
+                return VerifyResult(
+                    False,
+                    ["compat.min_reader_schema %s exceeds this reader's newest schema (2)"
+                     % min_reader],
+                    "", 0, 0)
 
     bad = []
     listed = set()
@@ -139,7 +148,20 @@ def verify_bundle(root):
             bad.append("sha256 mismatch %s" % rel)
 
     # files[] must cover EVERY regular file: re-walk and flag unlisted ones.
-    for base, _dirs, names in os.walk(root):
+    # A symlinked directory is pruned and flagged rather than silently skipped
+    # (os.walk does not descend into it, so its contents would otherwise be
+    # neither hashed nor reported) or followed (hashing outside content).
+    for base, dirs, names in os.walk(root):
+        for name in dirs:
+            joined = os.path.join(base, name)
+            if os.path.islink(joined):
+                rel = os.path.relpath(joined, root).replace(os.sep, "/")
+                resolved = os.path.realpath(joined)
+                if resolved.startswith(root + os.sep):
+                    bad.append("unlisted symlinked directory: %s" % rel)
+                else:
+                    bad.append("symlink escapes bundle: %s -> %s" % (rel, resolved))
+                dirs.remove(name)
         for name in names:
             rel = os.path.relpath(os.path.join(base, name), root).replace(os.sep, "/")
             if rel != "manifest.json" and rel not in listed:

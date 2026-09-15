@@ -39,9 +39,13 @@ if ($supportedSchemas -notcontains $m.schema) {
   exit 2
 }
 if ($m.schema -eq "sicnu.offline_bundle/2" -and $null -ne $m.compat -and $null -ne $m.compat.min_reader_schema) {
-  if ($m.compat.min_reader_schema -gt 2) {
-    Write-Output ("cannot verify: manifest requires reader schema {0}, this reader is 2" -f `
-      $m.compat.min_reader_schema)
+  $mr = $m.compat.min_reader_schema
+  if (($mr -isnot [int] -and $mr -isnot [long]) -or $mr -lt 1) {
+    Write-Output "cannot verify: compat.min_reader_schema must be a positive integer"
+    exit 2
+  }
+  if ($mr -gt 2) {
+    Write-Output ("cannot verify: manifest requires reader schema {0}, this reader is 2" -f $mr)
     exit 2
   }
 }
@@ -56,7 +60,10 @@ foreach ($f in $m.files) {
   if ([IO.Path]::IsPathRooted($rel) -or $rel.StartsWith("..") -or $rel -eq "manifest.json") {
     $bad += "unsafe manifest path: $rel"; continue
   }
-  $p = Join-Path $Root ($rel -replace "/", "\")
+  $p = [IO.Path]::GetFullPath((Join-Path $Root ($rel -replace "/", "\")))
+  if (-not $p.StartsWith($Root + '\', [StringComparison]::OrdinalIgnoreCase)) {
+    $bad += "unsafe manifest path: $rel"; continue
+  }
   if (-not (Test-Path -LiteralPath $p)) { $bad += "missing $rel"; continue }
   $len = (Get-Item -LiteralPath $p).Length; $total += $len
   if ($len -ne $f.bytes) { $bad += "size mismatch ${rel}: $len != $($f.bytes)"; continue }
@@ -87,10 +94,16 @@ foreach ($req in $m.required) {
   }
 }
 
+$ceiling = $m.size_ceiling_mb
+if ($null -eq $ceiling -or $ceiling -isnot [int] -or $ceiling -lt 0) {
+  $bad += "size_ceiling_mb must be a non-negative integer"
+  $ceiling = 250
+}
 $mb = [math]::Round($total / 1MB, 1)
-$verdict = "PASS"; if ($bad.Count -gt 0 -or $mb -gt $m.size_ceiling_mb) { $verdict = "FAIL" }
-Write-Output "BUNDLE VERIFY $verdict $Root ($count files, $mb MB / ceiling $($m.size_ceiling_mb) MB)"
+$verdict = "PASS"; if ($bad.Count -gt 0 -or $mb -gt $ceiling) { $verdict = "FAIL" }
+Write-Output "BUNDLE VERIFY $verdict $Root ($count files, $mb MB / ceiling $ceiling MB)"
 foreach ($b in $bad) { Write-Output "  $b" }
+if ($mb -gt $ceiling) { Write-Output "  size $mb MB exceeds ceiling $ceiling MB" }
 if ($verdict -ne "PASS") { exit 1 }
 
 # -Runtime: first-run environment self-check through the shipped CLI
@@ -102,12 +115,20 @@ if ($Runtime) {
     Write-Output "RUNTIME CHECK: skipped (bin\sicnu_geo_rs_cli.exe not present in this bundle)"
     exit 0
   }
-  & $cli env-doctor
-  $runtimeExit = $LASTEXITCODE
-  if ($runtimeExit -ne 0) {
-    Write-Output "RUNTIME CHECK: issues found (env-doctor exit $runtimeExit; 0=healthy, 2=degraded/broken)"
+  # Bundle-local runtime data, exactly like RUN.cmd — the doctor must judge
+  # the bundle's own closure, not whatever the host happens to have.
+  $env:PROJ_DATA = Join-Path $Root "data\runtime\proj"
+  $env:GDAL_DATA = Join-Path $Root "data\runtime\gdal"
+  $json = & $cli env-doctor --json | Out-String
+  $report = $null
+  try { $report = $json | ConvertFrom-Json } catch { }
+  if ($null -eq $report) {
+    Write-Output "RUNTIME CHECK: FAIL (env-doctor produced no JSON envelope)"
     exit 1
   }
-  Write-Output "RUNTIME CHECK: healthy"
+  $verdict = $report.data.verdict
+  Write-Output ("RUNTIME CHECK: {0}" -f $verdict)
+  if ($verdict -eq "broken") { exit 1 }   # fail-closed on errors only;
+  exit 0                                   # degraded is reported, not fatal
 }
 exit 0

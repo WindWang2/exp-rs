@@ -75,6 +75,11 @@ struct EnvDoctorReport
     int warningCount = 0;
     int errorCount = 0;
 
+    /// Single append point for severity bookkeeping — used by the geospatial
+    /// probes and the Qt/CLI layer alike so the counters cannot drift.
+    void append( const char *severity, const char *checkId, const std::string &message,
+                 const Json::Value &detail = Json::Value(), const char *diagnostic = "" );
+
     Json::Value toJson() const;
     /// "error" | "warning" | "info" | "ok" by worst finding present.
     const char *worst() const;

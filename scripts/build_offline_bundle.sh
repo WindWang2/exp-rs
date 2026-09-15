@@ -134,6 +134,16 @@ else
   echo "note: gdal data dir not found via gdal-config — data/runtime/gdal skipped"
 fi
 
+echo "== dependency inventory (shipped vs host closure) =="
+# Written BEFORE the manifest so it is hashed like any other payload file.
+# Best-effort: an inventory failure warns and continues (the manifest does
+# not depend on it), never blocks the classroom bundle.
+if python3 "$script_dir/report_bundle_dependencies.py" --bundle "$bundle"; then
+  :
+else
+  echo "note: dependency report failed (dependencies.json absent from this bundle)" >&2
+fi
+
 echo "== probing build/host components for the manifest =="
 comp_args=""
 probe_component() { # probe_component <name> <command...>  (first line only,

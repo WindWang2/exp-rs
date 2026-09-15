@@ -164,6 +164,10 @@ for %%F in (RUN.cmd GENERATE_SAMPLES.cmd GRADE_ALL.cmd VERIFY.cmd VERIFY.ps1 VER
 mkdir "%BUNDLE%\tools" 2>nul
 copy /Y "%SCRIPT_DIR%verify_bundle_manifest.py" "%BUNDLE%\tools\verify_bundle_manifest.py" >nul || exit /b 1
 
+echo == dependency inventory ^(dumpbin optional; best-effort^) ==
+rem Written before the manifest so it is hashed like any other payload file.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%windows\bundle_dependency_report.ps1" -Bundle "%BUNDLE%" || echo note: dependency report failed ^(dependencies.json absent^)
+
 echo == writing manifest ==
 powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%bundle_manifest.ps1" -Bundle "%BUNDLE%" -Version "%VERSION%" -MaxMb %MAX_MB% -Schema %SCHEMA% -ComponentsFromBin "%BUNDLE%\bin" || exit /b 1
 
@@ -172,9 +176,12 @@ rem proves the bundle's own runtime (DLL closure, plugins, PROJ data) on this
 rem machine before it leaves the build machine. Fail-closed when requested.
 if "%CHECK_RUNTIME%"=="1" (
   echo == runtime self-check ^(bundled env-doctor^) ==
-  "%BUNDLE%\bin\sicnu_geo_rs_cli.exe" env-doctor
+  rem Bundle-local runtime data, mirroring RUN.cmd, so the doctor judges the
+  rem bundle's own closure. Gate is fail-closed on "broken" only; "degraded"
+  rem is reported but does not block shipping.
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:PROJ_DATA='%BUNDLE%\data\runtime\proj'; $env:GDAL_DATA='%BUNDLE%\data\runtime\gdal'; $r = & '%BUNDLE%\bin\sicnu_geo_rs_cli.exe' env-doctor --json | ConvertFrom-Json; Write-Output ('RUNTIME CHECK: ' + $r.data.verdict); if ($r.data.verdict -eq 'broken') { exit 1 }"
   if errorlevel 1 (
-    echo build_offline_bundle: --check-runtime failed ^(see env-doctor findings above^)
+    echo build_offline_bundle: --check-runtime failed ^(env-doctor verdict broken^)
     exit /b 1
   )
 )
@@ -184,5 +191,5 @@ exit /b %errorlevel%
 
 :verify
 if not exist "%VERIFY_PATH%\manifest.json" ( echo build_offline_bundle: no manifest.json under %VERIFY_PATH% & exit /b 1 )
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%SCRIPT_DIR%bundle_manifest.ps1' -Verify '%VERIFY_PATH%'"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%bundle_manifest.ps1" -Verify "%VERIFY_PATH%"
 exit /b %errorlevel%

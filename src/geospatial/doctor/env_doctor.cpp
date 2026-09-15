@@ -73,9 +73,34 @@ std::string currentProcessId()
 #endif
 }
 
+/// UTF-8 rendering of a path for JSON/log output — never converts through the
+/// ANSI code page (Windows), never throws (falls back to the native string).
+std::string u8PathString( const std::filesystem::path &path )
+{
+  try
+  {
+    const std::u8string u8 = path.generic_u8string();
+    return std::string( reinterpret_cast< const char * >( u8.data() ), u8.size() );
+  }
+  catch ( ... )
+  {
+    try
+    {
+      return path.string();
+    }
+    catch ( ... )
+    {
+      return std::string();
+    }
+  }
+}
+
 /// Writes a unique scratch file under @p dir and deletes it. Returns empty on
 /// success, else a failure description. Every failure path still removes the
-/// file it created (failure cleanup).
+/// file it created (failure cleanup). Streams are opened from the
+/// std::filesystem::path directly so Windows uses the wide API — the probe
+/// exercises the FILESYSTEM, not the ANSI code page; JSON details carry the
+/// UTF-8 form via u8PathString().
 std::string probeWritable( const std::filesystem::path &dir, std::string &probedPath )
 {
   std::error_code ec;
@@ -83,62 +108,45 @@ std::string probeWritable( const std::filesystem::path &dir, std::string &probed
     return "cannot create directory: " + ec.message();
   const std::filesystem::path file =
     dir / ( "sicnu-envcheck-" + currentProcessId() + ".tmp" );
-  probedPath = file.string();
+  probedPath = u8PathString( file );
   if ( std::filesystem::exists( file, ec ) )
   {
     std::filesystem::remove( file, ec );
     ec.clear();
   }
-  std::FILE *f = std::fopen( probedPath.c_str(), "w+b" );
-  if ( !f )
-    return "cannot create file: " + probedPath;
-  const char *payload = "sicnu";
-  if ( std::fwrite( payload, 1, 5, f ) != 5 )
   {
-    std::fclose( f );
-    std::remove( probedPath.c_str() );
-    return "cannot write file: " + probedPath;
+    std::ofstream out( file, std::ios::binary );
+    if ( !out )
+      return "cannot create file: " + probedPath;
+    const char *payload = "sicnu";
+    out.write( payload, 5 );
+    if ( !out )
+    {
+      out.close();
+      std::filesystem::remove( file, ec );
+      return "cannot write file: " + probedPath;
+    }
   }
-  std::fclose( f );
   {
-    std::ifstream in( probedPath, std::ios::binary );
+    std::ifstream in( file, std::ios::binary );
     char buf[6] = { 0 };
     in.read( buf, 5 );
-    if ( !in || std::string( buf, buf + 5 ) != payload )
+    if ( !in || std::string( buf, buf + 5 ) != "sicnu" )
     {
-      std::remove( probedPath.c_str() );
+      std::filesystem::remove( file, ec );
       return "write-then-read mismatch: " + probedPath;
     }
   }
-  if ( std::remove( probedPath.c_str() ) != 0 )
+  if ( !std::filesystem::remove( file, ec ) || ec )
     return "cannot delete probe file: " + probedPath;
   return std::string();
-}
-
-void addSeverity( EnvDoctorReport &report, const char *severity )
-{
-  if ( std::strcmp( severity, "error" ) == 0 )
-    ++report.errorCount;
-  else if ( std::strcmp( severity, "warning" ) == 0 )
-    ++report.warningCount;
-  else if ( std::strcmp( severity, "info" ) == 0 )
-    ++report.infoCount;
-  else
-    ++report.okCount;
 }
 
 void emitFinding( EnvDoctorReport &report, const char *severity, const char *checkId,
            const std::string &message, const Json::Value &detail = Json::Value(),
            const char *diagnostic = "" )
 {
-  EnvFinding finding;
-  finding.check = checkId;
-  finding.severity = severity;
-  finding.message = message;
-  finding.detail = detail;
-  finding.diagnostic = diagnostic;
-  addSeverity( report, severity );
-  report.checks.append( finding.toJson() );
+  report.append( severity, checkId, message, detail, diagnostic );
 }
 
 std::string platformName()
@@ -254,6 +262,16 @@ void checkProj( EnvDoctorReport &report, const EnvCheckOptions &options )
   // Candidate scan names every probed path so a missing proj.db is a pointer,
   // not a guess (Oracle 3).
   std::vector< std::string > candidates = options.projDataCandidates;
+  // Exe-relative layouts first: the offline bundle ships data/runtime/proj
+  // next to bin/, install layouts use share/proj. ApplicationDir is passed
+  // in options precisely so a bundle-local database wins.
+  if ( !options.applicationDir.empty() )
+  {
+    namespace fs = std::filesystem;
+    const fs::path appDir( options.applicationDir );
+    candidates.push_back( ( appDir / "../data/runtime/proj" ).string() );
+    candidates.push_back( ( appDir / "../share/proj" ).string() );
+  }
   for ( const char *name : { "PROJ_DATA", "PROJ_LIB" } )
   {
     const std::string v = envOrEmpty( name );
@@ -481,6 +499,27 @@ void checkOfflineState( EnvDoctorReport &report )
 }
 
 } // namespace
+
+void EnvDoctorReport::append( const char *severity, const char *checkId,
+                              const std::string &message, const Json::Value &detail,
+                              const char *diagnostic )
+{
+  EnvFinding finding;
+  finding.check = checkId;
+  finding.severity = severity;
+  finding.message = message;
+  finding.detail = detail;
+  finding.diagnostic = diagnostic;
+  if ( std::strcmp( severity, "error" ) == 0 )
+    ++errorCount;
+  else if ( std::strcmp( severity, "warning" ) == 0 )
+    ++warningCount;
+  else if ( std::strcmp( severity, "info" ) == 0 )
+    ++infoCount;
+  else
+    ++okCount;
+  checks.append( finding.toJson() );
+}
 
 Json::Value EnvFinding::toJson() const
 {

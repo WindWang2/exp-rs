@@ -89,10 +89,19 @@ optional declared-provenance sections:
 ```
 
 - `components` records resolved dependency versions the bundle was built
-  against (`source` states where the fact came from — always `"host"` today;
-  keys are omitted when unresolvable, never fabricated). The per-file
-  shipped-vs-host library closure travels separately in
-  `dependencies.json` (a bundle file, hashed like any other).
+  against (`source` states where the fact came from — `"host"` for versions
+  probed on the build host, `"dll_version_resource"` for versions read from
+  the shipped DLLs' version resources on Windows; keys are omitted when
+  unresolvable, never fabricated). The per-file shipped-vs-host library
+  closure travels separately in `dependencies.json`
+  (schema `exp.bundle.deps.v1`), written by both builders before the
+  manifest and therefore hashed by it: status vocabulary is
+  `shipped` (provided by this bundle), `host`/`system` (resolved by the
+  deployment machine's loader — POSIX and Windows respectively),
+  `unresolved` (neither — the actionable class), plus
+  `unparsed`/`skipped` rows when a file's import table could not be read.
+  Both builders treat the report as best-effort: a failed inventory omits
+  the file rather than shipping an unverified bundle.
 - `build_options` records allowlisted configure options from the build tree's
   `CMakeCache.txt` (`CMAKE_BUILD_TYPE`, `CMAKE_GENERATOR`, `ENABLE_TESTS`,
   `SICNU_*`).
@@ -119,7 +128,8 @@ suite (`tests/fixtures/bundle_manifest/conformance.py`, which drives it as a
 subprocess from a different cwd with independently computed digests).
 `scripts/bundle_manifest.ps1` (`Test-Bundle`) mirrors the same rules for
 Windows hosts where python3 is not a runtime assumption; the conformance
-suite exercises the PS lane too when pwsh is available. Exit codes: 0
+suite runs a tamper expectation through the PS twin when pwsh is available
+(the full scenario matrix executes on the canonical reader on every host). Exit codes: 0
 verified · 1 verified-and-failed · 2 cannot verify (missing/invalid manifest
 or unsupported schema).
 

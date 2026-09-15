@@ -64,10 +64,10 @@ if [ "$mode" = "env-starve" ]; then
   # 2. environment self-check through the shipped CLI, still env-starved.
   cli="$bundle_abs/bin/sicnu_geo_rs_cli"
   [ -x "$cli" ] || fail "bundle has no bin/sicnu_geo_rs_cli (build it first)"
+  rc=0
   env -i $proxy_hygiene PATH=/usr/bin:/bin HOME=/tmp \
     QT_QPA_PLATFORM=offscreen SICNU_OFFLINE=1 \
-    "$cli" env-doctor > /tmp/cleanroom-env.log 2>&1
-  rc=$?
+    "$cli" env-doctor > /tmp/cleanroom-env.log 2>&1 || rc=$?
   cat /tmp/cleanroom-env.log
   # exit 0 healthy; 2 means degraded/broken findings were reported — the
   # cleanroom harness REPORTS the verdict; it fails only when the doctor

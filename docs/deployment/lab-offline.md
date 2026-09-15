@@ -115,7 +115,10 @@ F19：包内自带 Linux 完整性校验（目标机器无需源码仓库）：
 
 依赖审计：`scripts/report_bundle_dependencies.py --bundle <bundle>` 产出
 `dependencies.json`（包内每个 ELF 的直接依赖 → shipped / host / unresolved），
-先于清单写入，因此同样被 manifest 哈希覆盖。升级/回滚流程见
+打包时先于清单写入，因此同样被 manifest 哈希覆盖。**已知限制**：Linux 便携包
+当前不带 `libsicnu_*` 共享库（Debug 产物体积远超上限），CLI 经构建树 RPATH 在
+开发机可用；`unresolved` 条目会逐个点名哪些库在异机缺失 —— 生产部署请用
+Release 构建产物或 AppImage 路径。升级/回滚流程见
 `docs/deployment/MIGRATION.md`；清洁环境模拟见
 `scripts/cleanroom/cleanroom_smoke.sh`。
 

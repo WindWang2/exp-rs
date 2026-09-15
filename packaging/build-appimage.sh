@@ -125,7 +125,11 @@ else
 fi
 
 # F19: canonical payload manifest — same schema family as the offline lab
-# bundle, verified by the same canonical verifier before packaging.
+# bundle, verified by the same canonical verifier before packaging. NOTE: the
+# manifest is a PRE-PACKAGING snapshot of the DESTDIR payload (usr/ prefix,
+# required accordingly); linuxdeploy later adds AppRun/scaffolding that is not
+# in the manifest — the shipped AppImage is NOT self-verifying by design
+# (unlike the offline lab bundle, which ships a verifier covering itself).
 echo "=== writing + verifying AppDir payload manifest ==="
 gdal_ver="$(gdal-config --version 2>/dev/null || true)"
 proj_ver="$(pkg-config --modversion proj 2>/dev/null || true)"
@@ -153,7 +157,7 @@ manifest = {
     "bundle_version": "appimage-payload",
     "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
     "size_ceiling_mb": ceiling,
-    "required": ["bin/", "share/proj/", "share/sicnu_geo_rs/"],
+    "required": ["usr/bin/", "usr/share/proj/", "usr/share/sicnu_geo_rs/"],
     "files": files,
     "components": components,
     "compat": {"min_reader_schema": 1, "bundle_kind": "appimage-payload"},

@@ -32,10 +32,14 @@ D3. **Canonical verifier: `scripts/verify_bundle_manifest.py`, Python 3 stdlib o
     still pin the expected verdicts for any pwsh-capable host.
 
 D4. **env-doctor lives in `src/geospatial/doctor/` (Qt-free core) + `src/cli/` (Qt checks).**
-    `sicnu_geospatial` is the established Qt-free layer (GDAL+jsoncpp only) and already owns
-    `doctor/data_doctor.h` with `gdalCapabilityMatrix()` — env_doctor reuses that for GDAL
-    version/driver facts instead of duplicating. Qt-dependent checks (qVersion, platform
-    plugin discovery, SSL library probe via QLibrary) live in the CLI wrapper. Scope
+    `sicnu_geospatial` is the established Qt-free layer (GDAL+jsoncpp only) and owns
+    `doctor/data_doctor.h`. env_doctor reads GDAL facts through the GDAL C API directly
+    (GDALVersionInfo/GDALGetDriverCount/GDALGetDriverByName) rather than reusing
+    `gdalCapabilityMatrix()`: that function returns a full per-profile capability matrix
+    (create/copy/open flags for every profile), which is richer — and heavier — than the
+    doctor's targeted version/driver-presence probes. (Amended during review: the original
+    text wrongly claimed reuse.) Qt-dependent checks (qVersion, platform plugin discovery,
+    SSL library probe via QLibrary) live in the CLI wrapper. Scope
     extension beyond the primary write list is justified because package E provably does not
     exist on master (BASELINE gap E) and cannot be implemented from scripts alone (it must
     report the runtime-resolved state of the process that will do the work). Rejected:
@@ -49,9 +53,12 @@ D5. **env-doctor checks PROJ operationally, not just by file presence.**
     include/link surface to the Qt-free geospatial lib that today reaches PROJ only through
     GDAL; OSR gives the same operational guarantee through the existing link closure.
 
-D6. **Exit contract for `env-doctor`:** healthy=0, degraded (≥1 warning, no error)=1, broken
-    (≥1 error)=2, usage=invalid-input, mapped through the existing `exprs::ExitCode`
-    vocabulary via `CliIO::finish` conventions. Human text by default; `--json` emits the
+D6. **Exit contract for `env-doctor`:** healthy=0; degraded (≥1 warning, no error) and
+    broken (≥1 error) both map to `ValidationFailure`=2, with `data.verdict`
+    ("degraded"/"broken") carrying the distinction (1 is deliberately not used — it is the
+    bundle-verify "verified-and-failed" convention and a degraded environment is not a
+    command failure); malformed arguments=invalid-input. Amended during review to match
+    the shipped implementation (the original D6 text recorded degraded=1). Human text by default; `--json` emits the
     same envelope the other CLI 3.0 commands use. Findings map 1:1 to new
     `diagnostic.env.*` entries in `data/help/diagnostics.json` (appended; existing 104
     entries untouched) so prose never invents codes (DiagnosticCatalog rule).

@@ -35,13 +35,15 @@ $systemDlls = @(
 )
 
 function Resolve-Dumpbin {
-  $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
-  if (Test-Path -LiteralPath $vswhere) {
-    $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
-    if ($vsPath) {
-      $candidate = Get-ChildItem -Path (Join-Path $vsPath "VC\Tools\MSVC") -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-      if ($candidate) { return $candidate.FullName }
+  if (${env:ProgramFiles(x86)}) {
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path -LiteralPath $vswhere) {
+      $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+      if ($vsPath) {
+        $candidate = Get-ChildItem -Path (Join-Path $vsPath "VC\Tools\MSVC") -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
+          Select-Object -First 1
+        if ($candidate) { return $candidate.FullName }
+      }
     }
   }
   $onPath = Get-Command dumpbin.exe -ErrorAction SilentlyContinue
@@ -87,34 +89,35 @@ ForEach-Object {
   $rel = "bin/" + $_.Name
   $result = Get-Imports $dumpbin $_.FullName
   if ($null -eq $result.imports) {
-    $entries += [ordered] @{ file = $rel; status = "skipped"; reason = $result.reason }
+    $entries += [ordered] @{ file = $rel; status = "unparsed"; reason = $result.reason }
     $skipped++
     return
   }
   foreach ($dep in $result.imports) {
     $status = "unresolved"
     if ($shipped.ContainsKey($dep)) { $status = "shipped" }
-    elseif ($systemDlls -contains $dep) { $status = "system" }
+    elseif ($systemDlls -contains $dep) { $status = "host" }
     $entries += [ordered] @{ file = $rel; dependency = $dep; status = $status }
   }
 }
 
-$counts = @{ shipped = 0; system = 0; unresolved = 0; skipped = 0 }
+$counts = @{ shipped = 0; host = 0; unresolved = 0; unparsed = 0 }
 foreach ($e in $entries) { $counts[$e.status]++ }
 
 $report = [ordered] @{
   schema = "exp.bundle.deps.v1"
   bundle = (Split-Path -Leaf $Bundle)
   tool = if ($dumpbin -ne "") { "dumpbin" } else { "none" }
-  note = "shipped=provided by this bundle; system=Windows system DLL; " +
-         "unresolved=not provided and not a system DLL (deployment machines " +
-         "will fail to load); skipped=import table unreadable (no dumpbin)"
+  note = "shipped=provided by this bundle; host=resolved by the deployment " +
+         "machine loader (Windows system DLLs included); unresolved=not " +
+         "provided and not a system DLL (deployment machines will fail to " +
+         "load); unparsed=import table unreadable (no dumpbin)"
   counts = $counts
   dependencies = $entries
 }
 $outPath = if ($Out -ne "") { $Out } else { Join-Path $Bundle "dependencies.json" }
 $json = $report | ConvertTo-Json -Depth 4
 [System.IO.File]::WriteAllText($outPath, $json, (New-Object System.Text.UTF8Encoding($false)))
-Write-Output ("dependencies: {0} shipped, {1} system, {2} unresolved, {3} skipped -> {4}" -f `
-  $counts.shipped, $counts.system, $counts.unresolved, $counts.skipped, $outPath)
+Write-Output ("dependencies: {0} shipped, {1} host, {2} unresolved, {3} unparsed -> {4}" -f `
+  $counts.shipped, $counts.host, $counts.unresolved, $counts.unparsed, $outPath)
 exit 0

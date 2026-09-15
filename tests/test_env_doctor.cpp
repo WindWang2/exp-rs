@@ -13,6 +13,10 @@
 #include "geospatial/doctor/env_doctor.h"
 #include "geospatial/remote/offline_gate.h"
 
+#include <gdal.h>
+
+#include "geospatial/gdal_guard.h"
+
 using namespace sicnu::geo::envcheck;
 
 #include <catch2/catch_test_macros.hpp>
@@ -164,8 +168,24 @@ TEST_CASE( "env doctor full required-driver set passes on a complete host",
   sicnu::geo::envcheck::EnvDoctorReport report = runEnvironmentDoctor( options );
   const Json::Value *drivers = findCheck( report, "gdal.drivers.required" );
   REQUIRE( drivers != nullptr );
-  // Host-dependent only by GDAL build completeness: Arch GDAL carries all six.
-  REQUIRE( (*drivers)["severity"].asString() == "ok" );
+  // Host-tolerant oracle: recompute the expected absence set independently
+  // through the GDAL C API — the check must agree with reality, whichever
+  // drivers this host's build carries.
+  ensureGdalRegistered();
+  std::set< std::string > independentlyMissing;
+  for ( const char *name : { "GTiff", "GPKG", "GeoJSON", "ESRI Shapefile", "MEM", "VRT" } )
+    if ( !GDALGetDriverByName( name ) )
+      independentlyMissing.insert( name );
+  if ( independentlyMissing.empty() )
+  {
+    REQUIRE( (*drivers)["severity"].asString() == "ok" );
+  }
+  else
+  {
+    REQUIRE( (*drivers)["severity"].asString() == "error" );
+    for ( const auto &name : independentlyMissing )
+      REQUIRE( (*drivers)["message"].asString().find( name ) != std::string::npos );
+  }
 }
 
 TEST_CASE( "env doctor probed paths list injected PROJ candidates",

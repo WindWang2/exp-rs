@@ -86,7 +86,12 @@ function Test-Bundle([string] $root) {
     if ([IO.Path]::IsPathRooted($rel) -or $rel.StartsWith("..") -or $rel -eq "manifest.json") {
       $bad += "unsafe manifest path: $rel"; continue
     }
-    $p = Join-Path $root ($rel -replace "/", "\")
+    # Normalized containment (mirrors the canonical verifier's normpath rule):
+    # an embedded .. (e.g. data/../../outside.txt) must not resolve outside.
+    $p = [IO.Path]::GetFullPath((Join-Path $root ($rel -replace "/", "\")))
+    if (-not $p.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) {
+      $bad += "unsafe manifest path: $rel"; continue
+    }
     if (-not (Test-Path -LiteralPath $p)) { $bad += "missing $rel"; continue }
     $len = (Get-Item -LiteralPath $p).Length; $total += $len
     if ($len -ne $f.bytes) { $bad += "size mismatch ${rel}: $len != $($f.bytes)"; continue }
@@ -125,17 +130,27 @@ function Test-Bundle([string] $root) {
       }
     }
     if ($null -ne $m.compat -and $null -ne $m.compat.min_reader_schema) {
-      if ($m.compat.min_reader_schema -gt 2) {
-        $bad += ("compat.min_reader_schema {0} exceeds this reader's newest schema (2)" -f `
-          $m.compat.min_reader_schema)
+      $mr = $m.compat.min_reader_schema
+      if (($mr -isnot [int] -and $mr -isnot [long]) -or $mr -lt 1) {
+        $bad += "compat.min_reader_schema must be a positive integer"
+      } elseif ($mr -gt 2) {
+        Write-Output ("cannot verify: manifest requires reader schema {0}, this reader is 2" -f $mr)
+        $script:BUNDLE_VERDICT = $false
+        $script:VERIFY_EXIT = 2
+        return
       }
     }
   }
+  $ceiling = $m.size_ceiling_mb
+  if ($null -eq $ceiling -or $ceiling -isnot [int] -or $ceiling -lt 0) {
+    $bad += "size_ceiling_mb must be a non-negative integer"
+    $ceiling = 250
+  }
   $mb = [math]::Round($total / 1MB, 1)
-  $verdict = "PASS"; if ($bad.Count -gt 0 -or $mb -gt $m.size_ceiling_mb) { $verdict = "FAIL" }
-  Write-Output "BUNDLE VERIFY $verdict $root ($count files, $mb MB / ceiling $($m.size_ceiling_mb) MB)"
+  $verdict = "PASS"; if ($bad.Count -gt 0 -or $mb -gt $ceiling) { $verdict = "FAIL" }
+  Write-Output "BUNDLE VERIFY $verdict $root ($count files, $mb MB / ceiling $ceiling MB)"
   foreach ($b in $bad) { Write-Output "  $b" }
-  if ($mb -gt $m.size_ceiling_mb) { Write-Output "  size $mb MB exceeds ceiling $($m.size_ceiling_mb) MB" }
+  if ($mb -gt $ceiling) { Write-Output "  size $mb MB exceeds ceiling $ceiling MB" }
   $script:BUNDLE_VERDICT = ($verdict -eq "PASS")
 }
 

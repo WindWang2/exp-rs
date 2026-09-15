@@ -71,10 +71,10 @@ def read_elf_needed(path):
         dyn = next((s for s in sections if s[1] == 6), None)
         if dyn is None:
             return [], "static"
-        # sh_link lives right after sh_type at offset +6 (32-bit word)
+        # sh_link: Elf64_Shdr offset 0x28, Elf32_Shdr offset 0x18
         idx = sections.index(dyn)
         off = idx * e_shentsize
-        strtab_idx, = struct.unpack_from("<I", raw, off + 6)
+        strtab_idx, = struct.unpack_from("<I", raw, off + (0x28 if is64 else 0x18))
         if strtab_idx >= len(sections):
             return None, "section link out of range"
         _, _, str_off, str_size = sections[strtab_idx]

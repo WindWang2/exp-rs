@@ -7,10 +7,10 @@
 # scripts/verify_bundle_manifest.py as a subprocess with the harness cwd set
 # outside the bundle (the "verify in another directory" requirement).
 #
-# The PowerShell twin (scripts/bundle_manifest.ps1 Test-Bundle) is exercised
-# against the identical expectations when pwsh is available; on hosts without
-# pwsh the PS lane prints a not-executed line and is skipped (it is the only
-# skipped lane — the canonical lane always runs).
+# The PowerShell twin (scripts/bundle_manifest.ps1 Test-Bundle) runs a
+# tamper expectation through the same fixture builder when pwsh is available;
+# on hosts without pwsh that lane prints a not-executed line and is skipped
+# (the canonical lane itself always runs the full scenario matrix).
 #
 # Exit 0 = every executed lane passed.
 import argparse
@@ -213,8 +213,8 @@ def scenario_min_reader(script, work):
     with open(manifest_path, "w", encoding="utf-8") as fh:
         json.dump(manifest, fh)
     rc, out = run_verifier(script, root, work)
-    check("min_reader_schema beyond this reader fails",
-          rc == 1 and "min_reader_schema 3" in out, out)
+    check("min_reader_schema beyond this reader refuses (exit 2)",
+          rc == 2 and "min_reader_schema 3" in out, out)
 
 
 def scenario_missing_manifest(script, work):
@@ -232,7 +232,11 @@ def scenario_symlink_escape(script, work):
     with open(outside, "wb") as fh:
         fh.write(b"secret")
     link = os.path.join(root, "tools", "leak")
-    os.symlink(outside, link)
+    try:
+        os.symlink(outside, link)
+    except OSError:
+        print("  not-executed: symlink unavailable on this host")
+        return
     # Add the link to files[] with the TARGET's true digest: reading the link
     # reads outside the bundle — this must be flagged, not silently hashed.
     manifest_path = os.path.join(root, "manifest.json")
