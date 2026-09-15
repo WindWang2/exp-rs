@@ -69,7 +69,7 @@ Examples of registry IDs that bind when their TU is linked into the process: `rs
 | 59f0533e | docs(d18): fill evidence commit ledger SHAs for persist/run slice |
 | e1700670 | docs(d18): note tip SHA 59f0533e in evidence ledger |
 | a640a677 | feat(d18): bind IR2 dock to RSOperatorRegistry NodeExecutor |
-| *(pending)* | docs(d18): evidence/decisions/PR for operator-bind slice |
+| 9fbf0789 | docs(d18): evidence, decisions, review, PR body for operator-bind |
 
 ## PR
 
