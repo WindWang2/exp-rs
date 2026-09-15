@@ -139,3 +139,45 @@ namespace RadiometricCalibration
                      QString *errorMessage = nullptr,
                      const std::function<void(double, const QString &)> &progress = {});
 } // namespace RadiometricCalibration
+
+// ─── D13 · typed calibration seam (Day 13 / ADR 0158) ─────────────────────
+// The D13 workbench consumes calibration through this strongly-typed seam;
+// the legacy RadiometricCalibration namespace above stays authoritative for
+// metadata parsing and the file-processing operators.
+namespace exp_radiometric
+{
+    /// Per-band calibration coefficients and geometry for one scene.
+    struct SensorCalibrationParams
+    {
+        double radianceGain = 1.0;     ///< L = gain * DN + bias
+        double radianceBias = 0.0;
+        double reflMult = 1.0;         ///< rho = (reflMult * DN + reflAdd) / sin(elev)
+        double reflAdd = 0.0;
+        double k1 = 0.0;               ///< Thermal constant K1 (W·m^-2·sr^-1·µm^-1)
+        double k2 = 0.0;               ///< Thermal constant K2 (K)
+        double sunElevationDeg = 90.0; ///< Solar elevation in degrees
+        double esun = 0.0;             ///< Solar exoatmospheric spectral irradiance
+        double earthSunDistAu = 1.0;   ///< Earth-Sun distance in AU
+    };
+
+    /// Buffer kernels DN → Radiance → {TOA reflectance, brightness temperature}.
+    /// NoData pixels (== @p noData) pass through untouched; non-finite
+    /// intermediates produce NaN rather than Inf or silent zeros.
+    class RadiometricCalibrator
+    {
+      public:
+        /// L = radianceGain * DN + radianceBias.
+        static bool dnToRadiance( const float *dn, float *radiance, size_t count,
+                                  const SensorCalibrationParams &params, float noData = -9999.0f );
+
+        /// Radiance path when @p esun > 0: rho = pi·L·d² / (ESUN·sin θe);
+        /// otherwise the Landsat coefficient path (reflMult/reflAdd).
+        static bool dnToToaReflectance( const float *dn, float *toa, size_t count,
+                                        const SensorCalibrationParams &params, float noData = -9999.0f );
+
+        /// Planck inverse: T = K2 / ln(K1/L + 1), Kelvin. L <= 0 → NoData.
+        /// Requires k1 > 0 and k2 > 0.
+        static bool radianceToBrightnessTemperature( const float *radiance, float *btKelvin, size_t count,
+                                                     double k1, double k2, float noData = -9999.0f );
+    };
+} // namespace exp_radiometric

@@ -38,3 +38,17 @@ add_subdirectory(classification)
 # Phase 10B — OBIA segmentation data model + feature extraction
 add_subdirectory(segmentation)
 
+# ─── D13 · Radiometric Spectral Workbench ─────────────────────────────────
+# 6S-style LUT atmospheric correction and hyperspectral continuum removal:
+# pure analytic std-only kernels (headers carry no Qt), built C++20.
+add_library(sicnu_spectral_analysis STATIC
+    atmospheric/fast_6s_lookup.cpp
+    hyperspectral/continuum_removal.cpp
+)
+target_include_directories(sicnu_spectral_analysis PUBLIC
+    ${CMAKE_SOURCE_DIR}/src
+)
+target_compile_features(sicnu_spectral_analysis PUBLIC cxx_std_20)
+set_target_properties(sicnu_spectral_analysis PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+

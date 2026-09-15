@@ -853,3 +853,102 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
 }
 
 } // namespace RadiometricCalibration
+
+// ─── D13 · typed calibration seam (Day 13 / ADR 0158) ─────────────────────
+namespace exp_radiometric
+{
+  namespace
+  {
+    constexpr double kPi = 3.14159265358979323846;
+
+    bool buffersValid( const float *in, const float *out, size_t count )
+    {
+      return in != nullptr && out != nullptr && count > 0;
+    }
+  } // namespace
+
+  bool RadiometricCalibrator::dnToRadiance( const float *dn, float *radiance, size_t count,
+                                            const SensorCalibrationParams &params, float noData )
+  {
+    if ( !buffersValid( dn, radiance, count ) )
+      return false;
+
+    for ( size_t i = 0; i < count; ++i )
+    {
+      const float value = dn[i];
+      if ( value == noData )
+      {
+        radiance[i] = noData;
+        continue;
+      }
+      radiance[i] = static_cast<float>( params.radianceGain * value + params.radianceBias );
+    }
+    return true;
+  }
+
+  bool RadiometricCalibrator::dnToToaReflectance( const float *dn, float *toa, size_t count,
+                                                  const SensorCalibrationParams &params, float noData )
+  {
+    if ( !buffersValid( dn, toa, count ) )
+      return false;
+
+    const double sinElevation = std::sin( params.sunElevationDeg * kPi / 180.0 );
+    if ( sinElevation <= 0.0 )
+      return false; // sun below/before horizon: geometry is unphysical, fail closed
+
+    const bool useRadiancePath = params.esun > 0.0;
+    const double d2 = params.earthSunDistAu * params.earthSunDistAu;
+
+    for ( size_t i = 0; i < count; ++i )
+    {
+      const float value = dn[i];
+      if ( value == noData )
+      {
+        toa[i] = noData;
+        continue;
+      }
+
+      double rho;
+      if ( useRadiancePath )
+      {
+        const double radiance = params.radianceGain * value + params.radianceBias;
+        rho = kPi * radiance * d2 / ( params.esun * sinElevation );
+      }
+      else
+      {
+        rho = ( params.reflMult * value + params.reflAdd ) / sinElevation;
+      }
+      toa[i] = std::isfinite( rho ) ? static_cast<float>( rho )
+                                    : std::numeric_limits<float>::quiet_NaN();
+    }
+    return true;
+  }
+
+  bool RadiometricCalibrator::radianceToBrightnessTemperature( const float *radiance, float *btKelvin,
+                                                               size_t count, double k1, double k2,
+                                                               float noData )
+  {
+    if ( !buffersValid( radiance, btKelvin, count ) )
+      return false;
+    if ( k1 <= 0.0 || k2 <= 0.0 )
+      return false; // sensor thermal constants missing: refuse instead of garbage
+
+    for ( size_t i = 0; i < count; ++i )
+    {
+      const float value = radiance[i];
+      if ( value == noData )
+      {
+        btKelvin[i] = noData;
+        continue;
+      }
+      if ( !( value > 0.0f ) || !std::isfinite( value ) )
+      {
+        // Non-physical radiance (<= 0 or NaN): NoData sentinel, never Inf/NaN(T).
+        btKelvin[i] = noData;
+        continue;
+      }
+      btKelvin[i] = static_cast<float>( k2 / std::log( k1 / value + 1.0 ) );
+    }
+    return true;
+  }
+} // namespace exp_radiometric

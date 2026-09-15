@@ -64,3 +64,46 @@ namespace SpectralUnmixing
                     const float *endmembers, int nEndmembers,
                     UnmixResult *result, QString *errorMessage = nullptr );
 } // namespace SpectralUnmixing
+
+// ─── D13 · typed unmixing seam (Day 13) ───────────────────────────────────
+// The D13 workbench drives unmixing through this seam. It delegates the
+// proven penalty-augmented Lawson–Hanson FCLS kernel of the legacy namespace
+// above (one solver, no duplication) and adds endmember extraction plus an
+// explicit sum-to-one QA metric.
+namespace exp_spectral
+{
+    enum class EndmemberExtractionMethod
+    {
+        PixelPurityIndex = 0,   ///< PPI: random skewers projection (delegated kernel)
+        VertexComponentAnalysis ///< VCA: sequential orthogonal projection onto simplex vertices
+    };
+
+    struct UnmixingResult
+    {
+        std::vector<float> abundances;           ///< Pixel-major abundance fractions [p * nEndmembers + e]
+        std::vector<float> reconstructionError;  ///< Per-pixel RMSE: ||y - M·f|| / sqrt(bands)
+        double meanSumConstraintViolation = 0.0; ///< QA: mean |sum(f) - 1.0| across pixels
+    };
+
+    class SpectralUnmixing
+    {
+      public:
+        /// Extracts @p endmemberCount pure pixel spectra from an image cube.
+        /// PPI votes on random skewer projection extremes; VCA walks the
+        /// simplex vertices by sequential orthogonal projection. Both return
+        /// the original pixel spectra at the selected indices, are seeded and
+        /// reproducible (PPI/VCA are deterministic for a given input; @p seed
+        /// is reserved for tie-breaking and stays part of the seam contract).
+        static bool extractEndmembers( const float *pixels, size_t pixelCount, int bandCount,
+                                       int endmemberCount, EndmemberExtractionMethod method,
+                                       std::vector<float> *outEndmembers, unsigned int seed = 42 );
+
+        /// Fully Constrained Least Squares unmixing: (1) f_i >= 0 (ANC),
+        /// (2) sum(f_i) = 1 (ASC, penalty-augmented NNLS, ~1e-6 relative).
+        /// Rank-deficient or zero-norm endmember sets fail closed with a
+        /// named message before any pixel is processed.
+        static bool unmixFcls( const float *pixels, size_t pixelCount, int bandCount,
+                               const float *endmembers, int endmemberCount,
+                               UnmixingResult *result, QString *errorMessage = nullptr );
+    };
+} // namespace exp_spectral

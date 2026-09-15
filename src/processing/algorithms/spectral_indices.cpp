@@ -437,3 +437,131 @@ bool bui(const float *swir, const float *nir, const float *red, float *out, size
 }
 
 } // namespace SpectralIndices
+
+// ─── D13 · typed index seam (Day 13) ───────────────────────────────────────
+namespace exp_spectral
+{
+  namespace
+  {
+    constexpr float kDenominatorEpsilon = 1e-7f;
+    constexpr float kScaleFactor = 10000.0f;
+
+    // Per-pixel NoData/NaN scan for two-band ratio indices.
+    template <typename Fn>
+    bool ratioKernel( const float *a, const float *b, float *out, size_t count, float noData, Fn fn )
+    {
+      if ( a == nullptr || b == nullptr || out == nullptr || count == 0 )
+        return false;
+      for ( size_t i = 0; i < count; ++i )
+      {
+        if ( a[i] == noData || b[i] == noData || !std::isfinite( a[i] ) || !std::isfinite( b[i] ) )
+        {
+          out[i] = noData;
+          continue;
+        }
+        const double num = fn( a[i], b[i] );
+        const double den = a[i] + b[i];
+        out[i] = std::abs( den ) < kDenominatorEpsilon
+                   ? std::numeric_limits<float>::quiet_NaN()
+                   : static_cast<float>( num / den );
+      }
+      return true;
+    }
+
+    // Per-pixel kernel for the additive-constant indices (EVI/SAVI/EVI2):
+    // applies the scale guard, then guards the full denominator expression.
+    template <typename Fn>
+    bool constantKernel( const float **bands, const size_t bandCount, float *out, size_t count,
+                         bool isScaled, float noData, Fn fn )
+    {
+      if ( out == nullptr || count == 0 )
+        return false;
+      for ( size_t b = 0; b < bandCount; ++b )
+        if ( bands[b] == nullptr )
+          return false;
+
+      const double scale = isScaled ? 1.0 : 1.0 / kScaleFactor;
+      for ( size_t i = 0; i < count; ++i )
+      {
+        bool masked = false;
+        double values[3] = { 0.0, 0.0, 0.0 };
+        for ( size_t b = 0; b < bandCount; ++b )
+        {
+          const float v = bands[b][i];
+          if ( v == noData || !std::isfinite( v ) )
+          {
+            masked = true;
+            break;
+          }
+          values[b] = v * scale;
+        }
+        if ( masked )
+        {
+          out[i] = noData;
+          continue;
+        }
+        out[i] = static_cast<float>( fn( values[0], values[1], values[2] ) );
+        if ( !std::isfinite( out[i] ) )
+          out[i] = std::numeric_limits<float>::quiet_NaN();
+      }
+      return true;
+    }
+  } // namespace
+
+  bool SpectralIndices::ndvi( const float *nir, const float *red, float *out, size_t count, float noData )
+  {
+    return ratioKernel( nir, red, out, count, noData,
+                        []( double n, double r ) { return n - r; } );
+  }
+
+  bool SpectralIndices::mndwi( const float *green, const float *swir, float *out, size_t count, float noData )
+  {
+    return ratioKernel( green, swir, out, count, noData,
+                        []( double g, double s ) { return g - s; } );
+  }
+
+  bool SpectralIndices::ndbi( const float *swir, const float *nir, float *out, size_t count, float noData )
+  {
+    return ratioKernel( swir, nir, out, count, noData,
+                        []( double s, double n ) { return s - n; } );
+  }
+
+  bool SpectralIndices::evi( const float *nir, const float *red, const float *blue, float *out,
+                             size_t count, bool isScaled, float noData )
+  {
+    const float *bands[3] = { nir, red, blue };
+    return constantKernel(
+      bands, 3, out, count, isScaled, noData,
+      []( double n, double r, double b ) {
+        const double den = n + 6.0 * r - 7.5 * b + 1.0;
+        return std::abs( den ) < 1e-12 ? std::numeric_limits<double>::quiet_NaN()
+                                       : 2.5 * ( n - r ) / den;
+      } );
+  }
+
+  bool SpectralIndices::evi2( const float *nir, const float *red, float *out, size_t count,
+                              bool isScaled, float noData )
+  {
+    const float *bands[2] = { nir, red };
+    return constantKernel(
+      bands, 2, out, count, isScaled, noData,
+      []( double n, double r, double ) {
+        const double den = n + 2.4 * r + 1.0;
+        return std::abs( den ) < 1e-12 ? std::numeric_limits<double>::quiet_NaN()
+                                       : 2.5 * ( n - r ) / den;
+      } );
+  }
+
+  bool SpectralIndices::savi( const float *nir, const float *red, float *out, size_t count,
+                              float L, bool isScaled, float noData )
+  {
+    const float *bands[2] = { nir, red };
+    return constantKernel(
+      bands, 2, out, count, isScaled, noData,
+      [L]( double n, double r, double ) {
+        const double den = n + r + L;
+        return std::abs( den ) < 1e-12 ? std::numeric_limits<double>::quiet_NaN()
+                                       : ( n - r ) / den * ( 1.0 + L );
+      } );
+  }
+} // namespace exp_spectral

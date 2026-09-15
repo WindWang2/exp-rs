@@ -2711,6 +2711,7 @@ sicnu_discover_tests(test_progress_dialog)
 # Spectral profile widget tests
 add_executable(test_spectral_profile_widget test_spectral_profile_widget.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/spectral_profile_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/band_composite_palette.cpp
   ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
 )
 target_link_libraries(test_spectral_profile_widget PRIVATE
@@ -2718,6 +2719,8 @@ target_link_libraries(test_spectral_profile_widget PRIVATE
   Qt6::Core
   Qt6::Gui
   Qt6::Widgets
+  Qt6::Test
+  Qt6::Concurrent
   qgis_core
   qgis_gui
   sicnu_processing
@@ -2725,6 +2728,7 @@ target_link_libraries(test_spectral_profile_widget PRIVATE
 )
 target_include_directories(test_spectral_profile_widget PRIVATE
   ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
   ${CMAKE_BINARY_DIR}
 )
 sicnu_discover_tests(test_spectral_profile_widget)
@@ -5379,6 +5383,7 @@ if(TARGET sicnu_operators)
   target_link_libraries(test_spectral_library PRIVATE
     Catch2::Catch2WithMain
     Qt6::Core
+    sicnu_core
     sicnu_processing
   )
   target_include_directories(test_spectral_library PRIVATE
@@ -8894,3 +8899,114 @@ target_include_directories(test_processing_catalog_ux PRIVATE
 )
 set_target_properties(test_processing_catalog_ux PROPERTIES AUTOMOC ON)
 sicnu_discover_tests(test_processing_catalog_ux)
+
+# ─── D13 · Radiometric Spectral Workbench ──────────────────────────────────
+# Radiometric unit FSM (ADR 0158): transition law against the hand-written
+# ADR truth table, preflight exception blocking, custom-property/GDAL
+# metadata round-trip, fail-safe DN default.
+qt_add_executable(test_radiometric_state
+  test_radiometric_state.cpp
+)
+target_link_libraries(test_radiometric_state PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  qgis_core
+  sicnu_core
+)
+target_include_directories(test_radiometric_state PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_radiometric_state)
+
+# 6S-style LUT atmospheric correction: closed-form inversion truth, physics
+# invariants, DOS2 hand-worked arithmetic, sentinel discipline.
+qt_add_executable(test_fast_6s_atmospheric
+  test_fast_6s_atmospheric.cpp
+)
+target_link_libraries(test_fast_6s_atmospheric PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_spectral_analysis
+)
+target_include_directories(test_fast_6s_atmospheric PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_fast_6s_atmospheric)
+
+# Hyperspectral continuum removal: Gaussian closed-form truths (depth, FWHM,
+# area), hull-vertex normalization, multi-trough isolation, invalid-grid guards.
+qt_add_executable(test_continuum_removal
+  test_continuum_removal.cpp
+)
+target_link_libraries(test_continuum_removal PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_spectral_analysis
+)
+target_include_directories(test_continuum_removal PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+)
+sicnu_discover_tests(test_continuum_removal)
+
+# FCLS unmixing + endmember extraction (D13): synthetic mixture ground truth,
+# simplex feasibility, degenerate refusals, PPI/VCA set recovery.
+qt_add_executable(test_spectral_unmixing_fcls
+  test_spectral_unmixing_fcls.cpp
+)
+target_link_libraries(test_spectral_unmixing_fcls PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  sicnu_processing
+)
+target_include_directories(test_spectral_unmixing_fcls PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spectral_unmixing_fcls)
+
+# Agent spectral tools (D13): BOA physics audit laws, wavelength-driven band
+# selection refusal, spectral inspect extraction + library match.
+qt_add_executable(test_spectral_agent_tools
+  test_spectral_agent_tools.cpp
+)
+target_link_libraries(test_spectral_agent_tools PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  qgis_core
+  sicnu_agent
+  sicnu_processing
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_spectral_agent_tools PRIVATE jsoncpp)
+endif()
+target_include_directories(test_spectral_agent_tools PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_spectral_agent_tools PROPERTIES AUTOMOC ON)
+sicnu_discover_tests(test_spectral_agent_tools)
+
+# D13 end-to-end integration: DN→calibration→6S→BOA→indices→continuum→FCLS→
+# library, plus the Lab02/Lab08 100-point rubric grading and the uncalibrated
+# DN injection penalty contract (exactly −30).
+qt_add_executable(test_d13_radiometric_spectral_e2e
+  test_d13_radiometric_spectral_e2e.cpp
+)
+target_link_libraries(test_d13_radiometric_spectral_e2e PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+  sicnu_core
+  sicnu_processing
+  sicnu_spectral_analysis
+  GDAL::GDAL
+)
+target_include_directories(test_d13_radiometric_spectral_e2e PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_d13_radiometric_spectral_e2e PROPERTIES AUTOMOC ON)
+target_compile_definitions(test_d13_radiometric_spectral_e2e PRIVATE
+  SICNU_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_d13_radiometric_spectral_e2e)

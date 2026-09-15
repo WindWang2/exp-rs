@@ -207,6 +207,8 @@ add_executable(sicnu_geo_rs
     widgets/rs_result_summary.cpp
     widgets/rs_toolbar_flow_host.cpp
     widgets/spectral_profile_widget.cpp
+    # D13 · Radiometric Spectral Workbench: RGB composite palette (exp_gui)
+    widgets/band_composite_palette.cpp
     widgets/band_role_combo.cpp
     widgets/raster_layer_combo.cpp
     widgets/resolution_widget.cpp

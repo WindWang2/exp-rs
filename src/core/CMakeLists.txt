@@ -2924,6 +2924,10 @@ install(TARGETS qgis_core
 ############################################################
 add_library(sicnu_core SHARED
   plugin_host.cpp
+  # D13 · Radiometric Spectral Workbench: typed radiometric unit FSM (ADR 0158)
+  radiometric_state.cpp
+  # D13 · standard spectral library with SAM retrieval + Gaussian SRF resampling
+  spectral_library.cpp
 )
 
 target_include_directories(sicnu_core PUBLIC

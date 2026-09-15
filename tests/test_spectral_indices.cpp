@@ -302,3 +302,87 @@ TEST_CASE("BUI composes NDBI − NDVI", "[spectral][bui]")
     REQUIRE(SpectralIndices::bui(swir.data(), nir.data(), red.data(), out.data(), 1));
     REQUIRE(std::isnan(out[0]));
 }
+
+// ─── D13 · exp_spectral::SpectralIndices seam ─────────────────────────────
+// Independent truths: vegetation endmember reflectances (NIR 0.60, Red 0.10,
+// Blue 0.05, Green 0.30, SWIR 0.10) pushed through hand-computed formulas.
+#include <cmath>
+#include <limits>
+
+#include "processing/algorithms/spectral_indices.h"
+
+namespace
+{
+constexpr float kNoData = -9999.0f;
+}
+
+TEST_CASE("D13 indices vegetation analytical truths", "[spectral][indices][d13]")
+{
+    const float nir = 0.60f, red = 0.10f, blue = 0.05f;
+    float ndviVal = 0.0f, eviVal = 0.0f, saviVal = 0.0f, evi2Val = 0.0f;
+    float green = 0.30f, swir = 0.10f;
+    float mndwiVal = 0.0f, ndbiVal = 0.0f;
+
+    REQUIRE(exp_spectral::SpectralIndices::ndvi(&nir, &red, &ndviVal, 1));
+    REQUIRE(exp_spectral::SpectralIndices::evi(&nir, &red, &blue, &eviVal, 1, true));
+    REQUIRE(exp_spectral::SpectralIndices::savi(&nir, &red, &saviVal, 1, 0.5f, true));
+    REQUIRE(exp_spectral::SpectralIndices::evi2(&nir, &red, &evi2Val, 1, true));
+    REQUIRE(exp_spectral::SpectralIndices::mndwi(&green, &swir, &mndwiVal, 1));
+    REQUIRE(exp_spectral::SpectralIndices::ndbi(&swir, &nir, &ndbiVal, 1));
+
+    // (0.6-0.1)/(0.6+0.1) = 5/7
+    REQUIRE_THAT(ndviVal, Catch::Matchers::WithinRel(0.71428571f, 1e-6f));
+    // 2.5·0.5/(0.6+0.6-0.375+1) = 1.25/1.825 = 50/73
+    REQUIRE_THAT(eviVal, Catch::Matchers::WithinRel(0.68493151f, 1e-6f));
+    // (0.5/1.2)·1.5 = 0.625
+    REQUIRE_THAT(saviVal, Catch::Matchers::WithinRel(0.62500000f, 1e-6f));
+    // 2.5·0.5/(0.6+0.24+1) = 1.25/1.84
+    REQUIRE_THAT(evi2Val, Catch::Matchers::WithinRel(0.67934783f, 1e-6f));
+    // (0.3-0.1)/(0.3+0.1) = 0.5
+    REQUIRE_THAT(mndwiVal, Catch::Matchers::WithinRel(0.5f, 1e-6f));
+    // (0.1-0.6)/(0.1+0.6) = -5/7
+    REQUIRE_THAT(ndbiVal, Catch::Matchers::WithinRel(-0.71428571f, 1e-6f));
+}
+
+TEST_CASE("D13 indices zero-division yields NaN, never Inf", "[spectral][indices][d13]")
+{
+    const float zero = 0.0f, nir = 0.6f;
+    float out = 7.0f;
+    REQUIRE(exp_spectral::SpectralIndices::ndvi(&zero, &zero, &out, 1));
+    REQUIRE(std::isnan(out));
+
+    REQUIRE(exp_spectral::SpectralIndices::mndwi(&zero, &zero, &out, 1));
+    REQUIRE(std::isnan(out));
+    REQUIRE(exp_spectral::SpectralIndices::ndbi(&zero, &zero, &out, 1));
+    REQUIRE(std::isnan(out));
+
+    // Unphysical negative reflectance stays finite (no Inf escape).
+    const float red = -0.1f;
+    REQUIRE(exp_spectral::SpectralIndices::ndvi(&nir, &red, &out, 1));
+    REQUIRE(std::isfinite(out));
+}
+
+TEST_CASE("D13 indices scale guard and NoData sentinel", "[spectral][indices][d13]")
+{
+    // Integer-scaled reflectance (×10⁴): EVI with isScaled=false must match
+    // the unit-reflectance EVI of the divided values exactly.
+    const float dnNir = 6000.0f, dnRed = 1000.0f, dnBlue = 500.0f;
+    const float nir = 0.60f, red = 0.10f, blue = 0.05f;
+    float eviDn = 0.0f, eviUnit = 0.0f;
+    REQUIRE(exp_spectral::SpectralIndices::evi(&dnNir, &dnRed, &dnBlue, &eviDn, 1, false));
+    REQUIRE(exp_spectral::SpectralIndices::evi(&nir, &red, &blue, &eviUnit, 1, true));
+    REQUIRE_THAT(eviDn, Catch::Matchers::WithinRel(eviUnit, 1e-5f));
+
+    float saviDn = 0.0f, saviUnit = 0.0f;
+    REQUIRE(exp_spectral::SpectralIndices::savi(&dnNir, &dnRed, &saviDn, 1, 0.5f, false));
+    REQUIRE(exp_spectral::SpectralIndices::savi(&nir, &red, &saviUnit, 1, 0.5f, true));
+    REQUIRE_THAT(saviDn, Catch::Matchers::WithinRel(saviUnit, 1e-5f));
+
+    // NoData passes through untouched (sentinel sits at index 0 of the NIR
+    // band; count 1 reads exactly that element).
+    float out = 0.0f;
+    const float dnNoData = -9999.0f;
+    const float blueOk = 500.0f;
+    REQUIRE(exp_spectral::SpectralIndices::evi(&dnNoData, &dnNir, &blueOk, &out, 1, false));
+    REQUIRE(out == kNoData);
+}

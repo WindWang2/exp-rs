@@ -956,3 +956,104 @@ TEST_CASE("toBrightnessTemperature maps non-positive radiance to NaN, not 0 K (#
     REQUIRE(std::isfinite(out[0]));
     REQUIRE(std::isnan(out[1]));
 }
+
+// ─── D13 · exp_radiometric typed calibration seam ─────────────────────────
+// Independent truths: USGS Landsat 8 Calibration Handbook (TIRS Band 10
+// constants; OLI reflectance rescaling) and hand-worked closed forms.
+
+TEST_CASE("Planck Thermal Inversion vs USGS Handbook", "[radiometric][planck]")
+{
+    // TIRS Band 10: L = 10.0 W·m^-2·sr^-1·µm^-1, K1 = 774.8853, K2 = 1321.0789
+    // Closed form: T = 1321.0789 / ln(774.8853/10 + 1) = 302.79469 K (exact).
+    // The mission contract states 302.79274; the 1e-5 relative tolerance
+    // (±0.00303 K) covers both values — asserted at the mission number.
+    float radiance = 10.0f;
+    float bt = 0.0f;
+    exp_radiometric::RadiometricCalibrator::radianceToBrightnessTemperature(
+      &radiance, &bt, 1, 774.8853, 1321.0789);
+    REQUIRE_THAT(bt, Catch::Matchers::WithinRel(302.79274f, 1e-5f));
+}
+
+TEST_CASE("Planck Thermal Inversion Kelvin scale and sentinel discipline", "[radiometric][planck]")
+{
+    // Non-physical radiances never produce Kelvin-scale garbage.
+    const float radiance[] = {-1.0f, 0.0f, -9999.0f, 5.0f};
+    float bt[4] = {0.f, 0.f, 0.f, 0.f};
+    REQUIRE(exp_radiometric::RadiometricCalibrator::radianceToBrightnessTemperature(
+      radiance, bt, 4, 774.8853, 1321.0789));
+    REQUIRE(bt[0] == -9999.0f); // L <= 0 → NoData sentinel
+    REQUIRE(bt[1] == -9999.0f); // L == 0 → NoData sentinel
+    REQUIRE(bt[2] == -9999.0f); // NoData passes through untouched
+    REQUIRE(bt[3] > 0.0f);      // valid radiance → positive Kelvin
+
+    // Missing thermal constants refuse instead of producing garbage.
+    float out1 = 0.f;
+    REQUIRE_FALSE(exp_radiometric::RadiometricCalibrator::radianceToBrightnessTemperature(
+      radiance, &out1, 1, 0.0, 1321.0789));
+    REQUIRE_FALSE(exp_radiometric::RadiometricCalibrator::radianceToBrightnessTemperature(
+      radiance, &out1, 1, 774.8853, 0.0));
+}
+
+TEST_CASE("TOA Reflectance OLI coefficient formula vs handbook arithmetic", "[radiometric][toa]")
+{
+    // OLI Band 4: DN = 25000, M_rho = 0.00002, A_rho = -0.1, elevation 45°:
+    // rho = (0.5 - 0.1)/sin(45°) = 0.4/0.70710678 = 0.56568542
+    exp_radiometric::SensorCalibrationParams p;
+    p.reflMult = 0.00002;
+    p.reflAdd = -0.1;
+    p.sunElevationDeg = 45.0;
+    const float dn = 25000.0f;
+    float toa = 0.0f;
+    REQUIRE(exp_radiometric::RadiometricCalibrator::dnToToaReflectance(&dn, &toa, 1, p));
+    REQUIRE_THAT(toa, Catch::Matchers::WithinRel(0.56568542f, 1e-5f));
+}
+
+TEST_CASE("TOA Reflectance radiance path with ESUN and earth-sun distance", "[radiometric][toa]")
+{
+    // Hand-worked: L = 10, esun = 100·pi, d = 1, elevation 90°:
+    // rho = pi·10·1 / (100·pi·1) = 0.1
+    exp_radiometric::SensorCalibrationParams p;
+    p.radianceGain = 0.1; // DN 100 → L = 10
+    p.esun = 100.0 * 3.14159265358979323846;
+    p.sunElevationDeg = 90.0;
+    p.earthSunDistAu = 1.0;
+    const float dn = 100.0f;
+    float toa = 0.0f;
+    REQUIRE(exp_radiometric::RadiometricCalibrator::dnToToaReflectance(&dn, &toa, 1, p));
+    REQUIRE_THAT(toa, WithinAbs(0.1f, 1e-6f));
+
+    // Earth-Sun distance enters squared: d = 0.98329 (perihelion) shrinks by d².
+    p.earthSunDistAu = 0.98329;
+    REQUIRE(exp_radiometric::RadiometricCalibrator::dnToToaReflectance(&dn, &toa, 1, p));
+    REQUIRE_THAT(toa, WithinAbs(0.1f * 0.98329 * 0.98329, 1e-6f));
+}
+
+TEST_CASE("DN to Radiance gain/bias and sentinel passthrough", "[radiometric][radcal]")
+{
+    exp_radiometric::SensorCalibrationParams p;
+    p.radianceGain = 0.1;
+    p.radianceBias = -0.5;
+    const float dn[] = {100.0f, 50.0f, -9999.0f, 0.0f};
+    float rad[4] = {0.f, 0.f, 0.f, 0.f};
+    REQUIRE(exp_radiometric::RadiometricCalibrator::dnToRadiance(dn, rad, 4, p));
+    REQUIRE_THAT(rad[0], WithinAbs(9.5f, 1e-6f));     // 0.1·100 - 0.5
+    REQUIRE_THAT(rad[1], WithinAbs(4.5f, 1e-6f));     // 0.1·50 - 0.5
+    REQUIRE(rad[2] == -9999.0f);                      // NoData passthrough
+    REQUIRE_THAT(rad[3], WithinAbs(-0.5f, 1e-6f));    // bias-only pixel kept (caller QA decides)
+
+    REQUIRE_FALSE(exp_radiometric::RadiometricCalibrator::dnToRadiance(nullptr, rad, 1, p));
+    REQUIRE_FALSE(exp_radiometric::RadiometricCalibrator::dnToRadiance(dn, nullptr, 1, p));
+    REQUIRE_FALSE(exp_radiometric::RadiometricCalibrator::dnToRadiance(dn, rad, 0, p));
+}
+
+TEST_CASE("TOA Reflectance fails closed for unphysical sun geometry", "[radiometric][toa]")
+{
+    exp_radiometric::SensorCalibrationParams p;
+    p.sunElevationDeg = -10.0; // sun below horizon
+    const float dn = 100.0f;
+    float toa = 0.0f;
+    REQUIRE_FALSE(exp_radiometric::RadiometricCalibrator::dnToToaReflectance(&dn, &toa, 1, p));
+
+    p.sunElevationDeg = 0.0; // grazing: sin = 0 → division by zero guard
+    REQUIRE_FALSE(exp_radiometric::RadiometricCalibrator::dnToToaReflectance(&dn, &toa, 1, p));
+}
