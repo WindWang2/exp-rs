@@ -41,6 +41,11 @@ namespace sicnu::agent
 {
 
 using namespace sicnu::dataset;
+// Master build-unblock (P0, out of scope; same minimal fix PR #1009 carries):
+// the D19 benchmark tool paths reference sicnu::experiment::BenchmarkService /
+// benchmarkRunStatusToString unqualified, which GCC rejects (master
+// a5b11b7f10 does not compile sicnu_agent without this line).
+using namespace sicnu::experiment;
 
 namespace
 {
