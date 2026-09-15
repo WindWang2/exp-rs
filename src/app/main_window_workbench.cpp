@@ -32,6 +32,9 @@
 // that no longer exists after the D14/D17 merges — the TU has not compiled
 // since. See .planning/qgis-editing-annotation-11/EVIDENCE.md OUT_OF_SCOPE.
 #include "workbench/georef_dual_window.h"
+#include "editing/rs_edit_agent_tool.h"
+#include "editing/rs_edit_session.h"
+#include "editing/rs_snapping_controller.h"
 
 #include <QJsonDocument>
 #include <memory>
@@ -617,6 +620,20 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
             sicnu::agent::spatial_tools::SpatialToolPtr{ contextTool } );
     }
 
+    // ── Editing platform 11.0 (F11, read-only agent surface) ──────────
+    // One edit session per window, parented to it; the `editing:state`
+    // spatial tool exposes session/snapping FACTS to the agent. No write
+    // path is exposed here — layer writes keep flowing through the
+    // existing map tools and their undo stacks.
+    {
+        auto *editSession = new RsEditSession( this );
+        auto *snappingController = new RsSnappingController( m_mapCanvas, editSession );
+        RsEditAgentTool::Sources sources;
+        sources.session = editSession;
+        sources.snapping = snappingController;
+        auto *editStateTool = new RsEditAgentTool( sources );
+        sicnu::agent::spatial_tools::SpatialToolRegistry::instance().registerTool(
+            sicnu::agent::spatial_tools::SpatialToolPtr{ editStateTool } 
 );
     }
 
