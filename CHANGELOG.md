@@ -2,6 +2,38 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Radiometric Physics 11.0] - 2026-09-15 (zcode/radiometric-physics-11)
+
+- **Solar-earth geometry (`SolarGeometry`)**: sun zenith/elevation/azimuth, declination,
+  equation of time, earth-sun distance and the inverse-square `E₀` factor from acquisition
+  date/UTC time/scene centre (Spencer 1971 / NOAA closed forms, no refraction), with
+  fail-closed input validation. New `rs:solar_geometry` operator stamps
+  `SICNU_SUN_*` / `SICNU_EARTH_SUN_*` dataset metadata for downstream calibration.
+- **Transition authority (`RadiometricTransition`)**: lawful-conversion planning over the
+  ADR 0114 `SICNU_RADIOMETRIC_STATE` vocabulary — the DN→radiance→TOA→surface DAG plus the
+  thermal branch, each edge bound to its required inputs (MTL coefficients, real sun
+  elevation, ESUN, K1/K2, atmospheric provider) with stable missing-input tokens and a
+  versioned `exp_rs_radiometric_provenance/1` record. Inversions and unit-jumping shortcuts
+  refuse.
+- **Atmospheric provider seam (`AtmosphericProvider`)**: registry + provider interface with
+  declarative auxiliary-input requirements; built-in `dos1`/`dos2`/`quac` adapters over the
+  house kernels; unregistered provider ids are typed refusals naming the alternatives, never
+  silent fallbacks. (LUT/6S-class providers plug in without platform changes.)
+- **BRDF normalization (`BrdfNormalization`)**: Ross-Thick + Li-Sparse-Reciprocal kernels,
+  anisotropy-factor normalization to nadir reference geometry with per-band caller-provided
+  weights, plus the empirical two-date c-factor pair leveling with explicit validity
+  conditions. New streaming `rs:brdf_normalization` operator (kernel-driven) requires sun/view
+  angles from parameters or `SICNU_*` metadata; the output keeps the input radiometric state.
+- **Radiometric QA flags (`RadiometricQa`)**: frozen uint16 flag vocabulary (saturation,
+  negative, over-range, non-finite, cloud/shadow/snow propagation, QA_RADSAT bits, invalid
+  angles), union-only propagation, per-band summaries, and linear gain/bias uncertainty
+  propagation. New streaming `rs:radiometric_qa` operator writes uint16 flag bands with
+  schema `exp_rs_radiometric_qa_flags/1`.
+- **Tests**: five new Catch2 executables (`test_solar_geometry`, `test_radiometric_transition`,
+  `test_atmospheric_provider`, `test_brdf_normalization`, `test_radiometric_qa`) with
+  independent closed-form oracles and negative/failure coverage. Domain doc:
+  `docs/processing/radiometric-physics-11.md`.
+
 ## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)
 
 - **Regular-calendar normalization (T-2)**: `rs:temporal_regularize` re-casts irregular

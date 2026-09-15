@@ -54,6 +54,11 @@ add_library(sicnu_processing SHARED
     algorithms/band_math_simd.cpp
     algorithms/atmospheric_correction.cpp
     algorithms/radiometric_calibration.cpp
+    algorithms/solar_geometry.cpp
+    algorithms/radiometric_transition.cpp
+    algorithms/atmospheric_provider.cpp
+    algorithms/brdf_normalization.cpp
+    algorithms/radiometric_qa.cpp
     algorithms/change_detection.cpp
     algorithms/post_classification.cpp
     algorithms/qa_mask.cpp

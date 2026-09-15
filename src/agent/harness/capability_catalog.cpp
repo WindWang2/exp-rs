@@ -176,6 +176,9 @@ const std::map<std::string, std::string> &familyMap()
     { "rs:image_fusion", "optical" },
     { "rs:qa_mask", "optical" },
     { "rs:radiometric_calibration", "optical" },
+    { "rs:solar_geometry", "optical" },
+    { "rs:brdf_normalization", "optical" },
+    { "rs:radiometric_qa", "optical" },
     { "rs:topographic_correction", "optical" },
     // spectral: indices, band algebra, derivatives
     { "rs:band_math", "spectral" },

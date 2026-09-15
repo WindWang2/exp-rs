@@ -149,6 +149,9 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_apply_mask_operator.cpp
     rs/rs_terrain_analysis_operator.cpp
     rs/rs_topographic_correction_operator.cpp
+    rs/rs_solar_geometry_operator.cpp
+    rs/rs_brdf_normalization_operator.cpp
+    rs/rs_radiometric_qa_operator.cpp
     rs/rs_spectral_derivative_operator.cpp
     rs/rs_spectral_detection_operators.cpp
     rs/rs_sar_dualpol_operator.cpp
