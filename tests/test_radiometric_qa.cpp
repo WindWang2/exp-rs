@@ -143,3 +143,129 @@ TEST_CASE( "uncertainty propagation refuses bad arguments", "[qa]" )
     CHECK_FALSE( propagateLinearUncertainty( x.data(), nullptr, 1, -1.0, 0, -0.5, sy.data(), &err ) );
     CHECK( err.contains( QLatin1String( "uncertainty" ) ) );
 }
+
+// ---------------------------------------------------------------------------
+// Operator E2E (rs:radiometric_qa): flag-band generation, mask propagation,
+// grid-mismatch refusal, summary fractions.
+// ---------------------------------------------------------------------------
+
+#include <QTemporaryDir>
+
+#include <json/json.h>
+
+#include "operators/framework/rs_operator_context.h"
+#include "operators/framework/rs_operator_error.h"
+#include "operators/framework/rs_operator_registry.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
+#include "synthetic_raster_builder.h"
+
+TEST_CASE( "rs:radiometric_qa E2E: flags, mask propagation and summary",
+           "[qa][operator][e2e]" )
+{
+    using namespace sicnu::operators;
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString reflPath = dir.filePath( "refl.tif" );
+    const QString maskPath = dir.filePath( "mask.tif" );
+    const QString outPath = dir.filePath( "qa.tif" );
+
+    constexpr int kW = 10;
+    constexpr int kH = 8;
+    sicnu::testing::RsSyntheticRasterBuilder refl( kW, kH, 2 );
+    refl.withCrs( "EPSG:32650" );
+    refl.withGeoTransform( 0.0, 30.0, 240.0, -30.0 );
+    // Band 1: clean except one negative + one over-range pixel.
+    for ( int y = 0; y < kH; ++y )
+        for ( int x = 0; x < kW; ++x )
+            refl.withPixel( 1, x, y, 0.35f );
+    refl.withPixel( 1, 2, 1, -0.05f );
+    refl.withPixel( 1, 3, 1, 1.40f );
+    // Band 2: clean except one saturated pixel (level 2.0).
+    for ( int y = 0; y < kH; ++y )
+        for ( int x = 0; x < kW; ++x )
+            refl.withPixel( 2, x, y, 0.60f );
+    refl.withPixel( 2, 4, 2, 2.50f );
+    REQUIRE( !refl.writeToDisk( reflPath ).isEmpty() );
+
+    sicnu::testing::RsSyntheticRasterBuilder mask( kW, kH, 1, GDT_Byte );
+    mask.withCrs( "EPSG:32650" );
+    mask.withGeoTransform( 0.0, 30.0, 240.0, -30.0 );
+    for ( int y = 0; y < kH; ++y )
+        for ( int x = 0; x < kW; ++x )
+            mask.withPixel( 1, x, y, 0.0f );
+    mask.withPixel( 1, 0, 0, 1.0f );
+    mask.withPixel( 1, 9, 7, 1.0f );
+    REQUIRE( !mask.writeToDisk( maskPath ).isEmpty() );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:radiometric_qa" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["input"] = reflPath.toStdString();
+    params["output"] = outPath.toStdString();
+    params["saturation_level"] = 2.0;
+    params["cloud_mask"] = maskPath.toStdString();
+    params["mask_flag"] = "cloud";
+
+    RSOperatorContext context;
+    Json::Value result;
+    REQUIRE_NOTHROW( result = op->run( params, context ) );
+    REQUIRE( result["bandCount"].asInt() == 2 );
+    CHECK( result["bands"]["band_1"]["flagged_pixels"].asUInt64() == 4 ); // neg+over+2 cloud
+    CHECK( result["bands"]["band_2"]["flagged_pixels"].asUInt64() == 3 ); // sat + 2 cloud
+    CHECK( result["bands"]["band_1"]["flagged_fraction"].asDouble()
+           == Catch::Approx( 4.0 / ( kW * kH ) ) );
+
+    GdalDatasetWrapper outDs;
+    REQUIRE( outDs.open( outPath ) );
+    REQUIRE( outDs.bandCount() == 2 );
+    // Read the uint16 flag bands directly through GDAL.
+    GDALAllRegister();
+    GDALDatasetH ds = GDALOpen( outPath.toUtf8().constData(), GA_ReadOnly );
+    REQUIRE( ds != nullptr );
+    const auto readBand = [&]( int band, std::vector<uint16_t> &buf ) {
+        buf.assign( static_cast<size_t>( kW ) * kH, 0 );
+        return GDALRasterIO( GDALGetRasterBand( ds, band ), GF_Read, 0, 0, kW, kH,
+                             buf.data(), kW, kH, GDT_UInt16, 0, 0 ) == CE_None;
+    };
+    std::vector<uint16_t> b1, b2;
+    REQUIRE( readBand( 1, b1 ) );
+    REQUIRE( readBand( 2, b2 ) );
+    GDALClose( ds );
+
+    const auto at = []( const std::vector<uint16_t> &v, int x, int y ) {
+        return v[static_cast<size_t>( y ) * kW + x];
+    };
+    CHECK( at( b1, 0, 0 ) == RadiometricQa::FlagCloud );
+    CHECK( at( b1, 2, 1 ) == RadiometricQa::FlagNegative );
+    CHECK( at( b1, 3, 1 ) == RadiometricQa::FlagOverRange );
+    CHECK( at( b1, 5, 5 ) == RadiometricQa::FlagNone );
+    CHECK( at( b2, 4, 2 ) == RadiometricQa::FlagSaturated );
+    CHECK( at( b2, 9, 7 ) == RadiometricQa::FlagCloud );
+}
+
+TEST_CASE( "rs:radiometric_qa refuses mismatched mask grids", "[qa][operator][e2e]" )
+{
+    using namespace sicnu::operators;
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString reflPath = dir.filePath( "refl.tif" );
+    const QString maskPath = dir.filePath( "mask.tif" );
+
+    sicnu::testing::RsSyntheticRasterBuilder refl( 8, 8, 1 );
+    refl.withCrs( "EPSG:32650" );
+    refl.withGeoTransform( 0.0, 30.0, 240.0, -30.0 );
+    REQUIRE( !refl.writeToDisk( reflPath ).isEmpty() );
+
+    sicnu::testing::RsSyntheticRasterBuilder mask( 8, 8, 1 );
+    mask.withCrs( "EPSG:4326" ); // different CRS → blocking refusal
+    REQUIRE( !mask.writeToDisk( maskPath ).isEmpty() );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:radiometric_qa" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["input"] = reflPath.toStdString();
+    params["output"] = dir.filePath( "qa.tif" ).toStdString();
+    params["cloud_mask"] = maskPath.toStdString();
+    RSOperatorContext context;
+    REQUIRE_THROWS_AS( op->run( params, context ), RSOperatorError );
+}

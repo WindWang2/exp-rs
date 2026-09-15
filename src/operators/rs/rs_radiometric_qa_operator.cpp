@@ -192,6 +192,8 @@ Json::Value RsRadiometricQaOperator::run( const Json::Value &params, RSOperatorC
     const size_t tilePixels = static_cast<size_t>( kTileDim ) * kTileDim;
     std::vector<uint16_t> outFlags( tilePixels ), qaWords( tilePixels, 0 );
     std::vector<float> srcTile( tilePixels );
+    // readBandWindow delivers floats; keep a float mask tile and quantize.
+    std::vector<float> maskTileF( hasCloudMask ? tilePixels : size_t{ 0 }, 0.0f );
     std::vector<uint8_t> maskTile( hasCloudMask ? tilePixels : size_t{ 0 }, 0 );
     std::vector<uint64_t> flaggedTotals( bandCount, 0 ), pixelTotals( bandCount, 0 );
     const int totalTiles = reflStream.tileCount();
@@ -201,8 +203,11 @@ Json::Value RsRadiometricQaOperator::run( const Json::Value &params, RSOperatorC
         const size_t n = static_cast<size_t>( tile.width ) * tile.height;
         if ( hasCloudMask
              && !maskDs.readBandWindow( 1, tile.xOffset, tile.yOffset, tile.width, tile.height,
-                                        maskTile.data() ) )
+                                        maskTileF.data() ) )
             return false;
+        if ( hasCloudMask )
+            for ( size_t i = 0; i < static_cast<size_t>( tile.width ) * tile.height; ++i )
+                maskTile[i] = maskTileF[i] != 0.0f ? 1u : 0u;
 
         for ( int b = 0; b < bandCount; ++b )
         {

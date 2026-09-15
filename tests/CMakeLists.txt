@@ -1078,7 +1078,10 @@ target_link_libraries(test_solar_geometry PRIVATE
   Qt6::Core
   qgis_core
   sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
 )
+sicnu_link_jsoncpp(test_solar_geometry)
 target_include_directories(test_solar_geometry PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
@@ -1120,7 +1123,10 @@ target_link_libraries(test_brdf_normalization PRIVATE
   Qt6::Core
   qgis_core
   sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
 )
+sicnu_link_jsoncpp(test_brdf_normalization)
 target_include_directories(test_brdf_normalization PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}
@@ -1134,7 +1140,10 @@ target_link_libraries(test_radiometric_qa PRIVATE
   Qt6::Core
   qgis_core
   sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
 )
+sicnu_link_jsoncpp(test_radiometric_qa)
 target_include_directories(test_radiometric_qa PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_BINARY_DIR}

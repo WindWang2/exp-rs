@@ -19,10 +19,20 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QDate>
+#include <QTemporaryDir>
 #include <QTime>
+
+#include <json/json.h>
+
+#include <gdal_priv.h>
 
 #include <cmath>
 #include <limits>
+
+#include "operators/framework/rs_operator_context.h"
+#include "operators/framework/rs_operator_error.h"
+#include "operators/framework/rs_operator_registry.h"
+#include "synthetic_raster_builder.h"
 
 using namespace SolarGeometry;
 
@@ -287,4 +297,105 @@ TEST_CASE( "solarPosition fail-closed refusals", "[solar]" )
 
     CHECK_FALSE( solarPosition( QDate( 2023, 6, 21 ), QTime( 12, 0 ), 0.0, 0.0, nullptr, &err ) );
     CHECK_FALSE( err.isEmpty() );
+}
+
+// ---------------------------------------------------------------------------
+// Operator E2E (rs:solar_geometry): registry wiring, result schema, metadata
+// stamping and typed refusals. The math itself is pinned above by the
+// independent oracles; here we prove the operator surface.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "rs:solar_geometry computes and reports the London reference", "[solar][operator][e2e]" )
+{
+    auto op = sicnu::operators::RSOperatorRegistry::instance().create( "rs:solar_geometry" );
+    REQUIRE( op != nullptr );
+
+    Json::Value params( Json::objectValue );
+    params["date"] = "2023-06-21";
+    params["utc_time"] = "12:00";
+    params["latitude"] = 51.5;
+    params["longitude"] = 0.0;
+
+    sicnu::operators::RSOperatorContext context;
+    Json::Value result;
+    REQUIRE_NOTHROW( result = op->run( params, context ) );
+    CHECK( result["sun_elevation"].asDouble() > 61.0 );
+    CHECK( result["sun_elevation"].asDouble() < 63.0 );
+    CHECK( result["sun_azimuth"].asDouble() == Catch::Approx( 180.0 ).margin( 3.0 ) );
+    CHECK( result["declination"].asDouble() == Catch::Approx( 23.44 ).margin( 0.6 ) );
+    CHECK( result["earth_sun_factor"].asDouble() > 1.03 );
+    CHECK( result["metadata_written"].asBool() == false );
+}
+
+TEST_CASE( "rs:solar_geometry stamps SICNU_* metadata on a writable raster",
+           "[solar][operator][e2e]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString rasterPath = dir.filePath( "scene.tif" );
+    sicnu::testing::RsSyntheticRasterBuilder builder( 4, 3, 1 );
+    REQUIRE( !builder.writeToDisk( rasterPath ).isEmpty() );
+
+    auto op = sicnu::operators::RSOperatorRegistry::instance().create( "rs:solar_geometry" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["date"] = "2023-06-21";
+    params["utc_time"] = "12:00:00";
+    params["latitude"] = 51.5;
+    params["longitude"] = 0.0;
+    params["input"] = rasterPath.toStdString();
+    params["write_metadata"] = true;
+
+    sicnu::operators::RSOperatorContext context;
+    Json::Value result;
+    REQUIRE_NOTHROW( result = op->run( params, context ) );
+    CHECK( result["metadata_written"].asBool() );
+
+    // Read the stamped keys back through GDAL.
+    GDALAllRegister();
+    GDALDatasetH ds = GDALOpen( rasterPath.toUtf8().constData(), GA_ReadOnly );
+    REQUIRE( ds != nullptr );
+    const auto item = [&]( const char *key ) {
+        const char *v = GDALGetMetadataItem( ds, key, nullptr );
+        return v ? QString::fromUtf8( v ).toDouble() : std::numeric_limits<double>::quiet_NaN();
+    };
+    const double zenith = item( "SICNU_SUN_ZENITH" );
+    const double azimuth = item( "SICNU_SUN_AZIMUTH" );
+    const double elevation = item( "SICNU_SUN_ELEVATION" );
+    const double factor = item( "SICNU_EARTH_SUN_FACTOR" );
+    const double distance = item( "SICNU_EARTH_SUN_DISTANCE_AU" );
+    GDALClose( ds );
+
+    CHECK( zenith == Catch::Approx( 90.0 - result["sun_elevation"].asDouble() ).margin( 1e-9 ) );
+    CHECK( azimuth == Catch::Approx( result["sun_azimuth"].asDouble() ).margin( 1e-9 ) );
+    CHECK( elevation == Catch::Approx( result["sun_elevation"].asDouble() ).margin( 1e-9 ) );
+    CHECK( factor == Catch::Approx( result["earth_sun_factor"].asDouble() ).margin( 1e-9 ) );
+    CHECK( distance > 1.015 );
+    CHECK( distance < 1.018 );
+}
+
+TEST_CASE( "rs:solar_geometry typed refusals", "[solar][operator][e2e]" )
+{
+    auto op = sicnu::operators::RSOperatorRegistry::instance().create( "rs:solar_geometry" );
+    REQUIRE( op != nullptr );
+    sicnu::operators::RSOperatorContext context;
+
+    Json::Value params( Json::objectValue );
+    params["date"] = "2023-02-30"; // nonexistent date
+    params["utc_time"] = "12:00";
+    params["latitude"] = 0.0;
+    params["longitude"] = 0.0;
+    REQUIRE_THROWS_AS( op->run( params, context ), sicnu::operators::RSOperatorError );
+
+    params["date"] = "2023-06-21";
+    params["latitude"] = 91.0; // out of range
+    REQUIRE_THROWS_AS( op->run( params, context ), sicnu::operators::RSOperatorError );
+
+    params["latitude"] = 0.0;
+    params["utc_time"] = "25:99"; // invalid time
+    REQUIRE_THROWS_AS( op->run( params, context ), sicnu::operators::RSOperatorError );
+
+    params["utc_time"] = "12:00";
+    params["write_metadata"] = true; // requires 'input'
+    REQUIRE_THROWS_AS( op->run( params, context ), sicnu::operators::RSOperatorError );
 }

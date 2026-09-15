@@ -18,6 +18,7 @@
 // too-few pairs, degenerate slopes, null outputs, NaN pass-through.
 
 #include "processing/algorithms/brdf_normalization.h"
+#include "processing/algorithms/satellite_products.h"
 
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -196,4 +197,154 @@ TEST_CASE( "c-factor refuses weak samples and degenerate fits", "[brdf]" )
     CHECK( withJunk.count() == 40 );
     REQUIRE( withJunk.fitCFactor( 30, &c ) );
     CHECK( c > 0.0 );
+}
+
+// ---------------------------------------------------------------------------
+// Operator E2E (rs:brdf_normalization): constant scene, ratio semantics,
+// state preservation, angle-refusal contract.
+// ---------------------------------------------------------------------------
+
+#include <QTemporaryDir>
+
+#include <json/json.h>
+
+#include <gdal.h>
+
+#include "operators/framework/rs_operator_context.h"
+#include "operators/framework/rs_operator_error.h"
+#include "operators/framework/rs_operator_registry.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
+#include "synthetic_raster_builder.h"
+
+namespace
+{
+/// Stamps a dataset metadata key on an existing raster (GA_Update, the same
+/// in-place pattern the solar operator uses).
+bool stampMetadata( const QString &path, const char *key, double value )
+{
+    GDALAllRegister();
+    GDALDatasetH ds = GDALOpen( path.toUtf8().constData(), GA_Update );
+    if ( !ds )
+        return false;
+    GDALSetMetadataItem( ds, key, QString::number( value, 'g', 10 ).toUtf8().constData(),
+                         nullptr );
+    GDALClose( ds );
+    return true;
+}
+} // namespace
+
+TEST_CASE( "rs:brdf_normalization E2E: constant scene maps by the kernel ratio",
+           "[brdf][operator][e2e]" )
+{
+    using namespace sicnu::operators;
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString reflPath = dir.filePath( "refl.tif" );
+    const QString outPath = dir.filePath( "normalized.tif" );
+
+    constexpr int kW = 16;
+    constexpr int kH = 12;
+    constexpr float kValue = 0.42f;
+    sicnu::testing::RsSyntheticRasterBuilder builder( kW, kH, 2 );
+    builder.withCrs( "EPSG:32650" );
+    builder.withGeoTransform( 0.0, 30.0, 540.0, -30.0 );
+    for ( int y = 0; y < kH; ++y )
+        for ( int x = 0; x < kW; ++x )
+        {
+            builder.withPixel( 1, x, y, kValue );
+            builder.withPixel( 2, x, y, kValue * 0.5f );
+        }
+    REQUIRE( !builder.writeToDisk( reflPath ).isEmpty() );
+    // Angles come from metadata (the solar-stamp path); weights from params.
+    REQUIRE( stampMetadata( reflPath, "SICNU_SUN_ZENITH", 35.0 ) );
+    REQUIRE( stampMetadata( reflPath, "SICNU_SUN_AZIMUTH", 150.0 ) );
+    REQUIRE( stampMetadata( reflPath, "SICNU_VIEW_ZENITH", 20.0 ) );
+    REQUIRE( stampMetadata( reflPath, "SICNU_VIEW_AZIMUTH", 100.0 ) );
+    {
+        // Write the radiometric-state string through GDAL directly.
+        GDALAllRegister();
+        GDALDatasetH ds = GDALOpen( reflPath.toUtf8().constData(), GA_Update );
+        REQUIRE( ds != nullptr );
+        GDALSetMetadataItem( ds, SatelliteProducts::kRadiometricStateKey,
+                             SatelliteProducts::kRadiometricStateSurfaceReflectance, nullptr );
+        GDALClose( ds );
+    }
+
+    auto op = RSOperatorRegistry::instance().create( "rs:brdf_normalization" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["input"] = reflPath.toStdString();
+    params["output"] = outPath.toStdString();
+    params["f_vol"] = 0.3;
+    params["f_geo"] = 0.5;
+
+    RSOperatorContext context;
+    Json::Value result;
+    REQUIRE_NOTHROW( result = op->run( params, context ) );
+    REQUIRE( result["bandCount"].asInt() == 2 );
+    CHECK( result["relative_azimuth"].asDouble() == Catch::Approx( 50.0 ) );
+
+    // Expected: value·f(ref)/f(obs) with ref = (sun 35°, view 0°, Δφ 0),
+    // computed through the independently-pinned kernel functions.
+    GdalDatasetWrapper outDs;
+    REQUIRE( outDs.open( outPath ) );
+    std::vector<float> pixels( static_cast<size_t>( kW ) * kH );
+    REQUIRE( outDs.readBandWindow( 1, 0, 0, kW, kH, pixels.data() ) );
+
+    const double fObs = 1.0 + 0.3 * rossThick( 35.0, 20.0, 50.0 )
+                        + 0.5 * liSparseReciprocal( 35.0, 20.0, 50.0 );
+    const double fRef = 1.0 + 0.3 * rossThick( 35.0, 0.0, 0.0 )
+                        + 0.5 * liSparseReciprocal( 35.0, 0.0, 0.0 );
+    for ( const float v : pixels )
+        CHECK( v == Catch::Approx( kValue * fRef / fObs ).epsilon( 1e-5 ) );
+
+    // The radiometric state must be preserved (normalization keeps units).
+    GDALDatasetH ds = GDALOpen( outPath.toUtf8().constData(), GA_ReadOnly );
+    REQUIRE( ds != nullptr );
+    const char *state =
+        GDALGetMetadataItem( ds, SatelliteProducts::kRadiometricStateKey, nullptr );
+    REQUIRE( state != nullptr );
+    CHECK( QString::fromUtf8( state )
+           == QLatin1String( SatelliteProducts::kRadiometricStateSurfaceReflectance ) );
+    GDALClose( ds );
+}
+
+TEST_CASE( "rs:brdf_normalization refuses missing angles with typed errors",
+           "[brdf][operator][e2e]" )
+{
+    using namespace sicnu::operators;
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString reflPath = dir.filePath( "refl.tif" );
+    sicnu::testing::RsSyntheticRasterBuilder builder( 8, 8, 1 );
+    builder.withPixel( 1, 0, 0, 0.5f );
+    REQUIRE( !builder.writeToDisk( reflPath ).isEmpty() );
+
+    auto op = RSOperatorRegistry::instance().create( "rs:brdf_normalization" );
+    REQUIRE( op != nullptr );
+    Json::Value params( Json::objectValue );
+    params["input"] = reflPath.toStdString();
+    params["output"] = dir.filePath( "out.tif" ).toStdString();
+    params["f_vol"] = 0.3;
+    params["f_geo"] = 0.5;
+    // No angles anywhere: the refusal must name the missing angle metadata.
+    RSOperatorContext context;
+    try
+    {
+        (void)op->run( params, context );
+        FAIL( "expected RSOperatorError" );
+    }
+    catch ( const RSOperatorError &e )
+    {
+        const std::string msg = e.what();
+        INFO( msg );
+        CHECK( msg.find( "SICNU_SUN_ZENITH" ) != std::string::npos );
+    }
+
+    // Below-horizon sun (zenith > 90) is refused, not clamped.
+    params["sun_zenith"] = 95.0;
+    params["sun_azimuth"] = 150.0;
+    params["view_zenith"] = 0.0;
+    params["view_azimuth"] = 0.0;
+    REQUIRE_THROWS_AS( op->run( params, context ), RSOperatorError );
 }
