@@ -350,14 +350,10 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     if ( kmeansRemap.isEmpty() )
       kmeansRemap = sidecarRemap;
 
-    // F12: calibration resolution — explicit config model wins; otherwise
-    // an opt-in sidecar calibration section is applied in predict-only mode.
-    if ( config.calibrationModel.isValid() )
-    {
-      appliedCalibration = config.calibrationModel;
-      hasAppliedCalibration = true;
-    }
-    else if ( config.applySidecarCalibration && sidecarData.hasCalibration )
+    // F12: predict-only opt-in for a calibration section stored in the v2
+    // sidecar (the explicit config model is resolved after this block and
+    // takes precedence).
+    if ( config.applySidecarCalibration && sidecarData.hasCalibration )
     {
       appliedCalibration = sidecarData.calibration;
       hasAppliedCalibration = true;
@@ -410,6 +406,14 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     result.error = RsClassificationPipelineResult::Error::NoBackend;
     result.errorMessage = QStringLiteral( "No classifier backend supplied" );
     return result;
+  }
+
+  // F12: explicit calibration applies in both modes (the caller owns the
+  // calibration set); the sidecar calibration section is predict-only.
+  if ( config.calibrationModel.isValid() )
+  {
+    appliedCalibration = config.calibrationModel;
+    hasAppliedCalibration = true;
   }
 
   // Auto-extract training data from vector polygons when specified and trainX is empty

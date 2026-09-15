@@ -345,7 +345,9 @@ bool RsProbabilityCalibrator::fitPlatt( std::span<const float> rawScores,
     }
     if ( !converged )
     {
-      // Parameter drift check: unconverged fits must not ship silently.
+      // maxIter exhausted without hitting the gradient tolerance: the fit
+      // is still a deterministic estimate, but the parameters must be
+      // finite to be usable — anything else is a hard failure.
       if ( !std::isfinite( a ) || !std::isfinite( b ) )
         return false;
     }

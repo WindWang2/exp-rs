@@ -296,17 +296,14 @@ ClassificationObjectPostProcessor::run( std::span<const int> labels,
 
   const Adjacency adjacency = buildAdjacency( segments, width, height, config.connectivity );
 
-  std::unordered_map<int, int> classes;
-  classes.reserve( table.size() );
-  for ( const auto &[seg, node] : table )
-    classes[seg] = node.majorityClass;
-
   int merged = 0;
-  classes = applyMinAreaRule( classes, adjacency, config.minSegmentArea, &merged );
+  const std::unordered_map<int, int> mergedClasses =
+    applyMinAreaRule( table, adjacency, config.minSegmentArea, &merged );
   result.stats.mergedSegments = merged;
 
   int changed = 0;
-  classes = applySmoothing( classes, adjacency, config.smoothingIterations, &changed );
+  const std::unordered_map<int, int> finalClasses =
+    applySmoothing( mergedClasses, adjacency, config.smoothingIterations, &changed );
   result.stats.smoothedSegments = changed;
 
   // Paint: every pixel receives its segment's final class; NoData segments
@@ -314,8 +311,8 @@ ClassificationObjectPostProcessor::run( std::span<const int> labels,
   for ( size_t i = 0; i < cells; ++i )
   {
     const int seg = segments[i];
-    auto it = classes.find( seg );
-    outLabels[i] = ( it != classes.end() && it->second >= 0 ) ? it->second : -1;
+    auto it = finalClasses.find( seg );
+    outLabels[i] = ( it != finalClasses.end() && it->second >= 0 ) ? it->second : -1;
   }
 
   result.ok = true;
