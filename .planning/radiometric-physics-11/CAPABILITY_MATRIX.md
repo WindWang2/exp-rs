@@ -13,4 +13,3 @@
 | Radiometric QA flags | **not-supported** (binary masks only) | **implemented** (`RadiometricQa` flag vocabulary + propagation + summary) |
 | Operator surface for new modules | n/a | `rs:solar_geometry`, `rs:brdf_normalization`, `rs:radiometric_qa` |
 | Known-answer tests (closed-form, independent oracle) | partial (calibration/topographic) | extended: solar geometry, BRDF kernels, transitions, provider refusal, QA flags |
-
