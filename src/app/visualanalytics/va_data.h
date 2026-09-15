@@ -61,6 +61,18 @@ struct VaScatter
     QString xLabel = QStringLiteral( "x" );
     QString yLabel = QStringLiteral( "y" );
     bool truncated = false;
+
+    // ── Linked-visual 11.0: optional per-point raster geometry ────────
+    // Parallel to xs/ys; empty (or hasGeometry false) when the producer
+    // does not carry geometry. Consumers (brush filters!) MUST keep these
+    // arrays consistent with xs/ys. With them a picked point resolves to a
+    // map location through geotransform arithmetic — no re-scan, no I/O.
+    QVector<qint64> cols;      ///< full-resolution pixel column per point
+    QVector<qint64> rows;      ///< full-resolution pixel row per point
+    bool hasGeometry = false;
+    QVector<double> geotransform; ///< GDAL order, size 6 when hasGeometry
+    QString crsWkt;               ///< raster CRS when hasGeometry
+    QString sourcePath;           ///< provenance: sampled raster path
 };
 
 struct VaBox
@@ -110,5 +122,37 @@ struct VaData
     VaMatrix matrix;
     VaAreas areas;
 };
+
+/// Pure brushing helper (11.0): compacts a Scatter-kind payload to the points
+/// with @p x0 <= x <= @p x1, keeping the parallel geometry arrays (cols/rows)
+/// consistent with xs/ys. Non-scatter payloads are returned unchanged. No
+/// rescan, no I/O — callers apply this to their bounded snapshot.
+inline VaData filterScatterByXRange( const VaData &scatterData, double x0, double x1 )
+{
+    if ( scatterData.kind != VaChartKind::Scatter )
+        return scatterData;
+    VaData filtered = scatterData;
+    filtered.scatter.xs.clear();
+    filtered.scatter.ys.clear();
+    filtered.scatter.groups.clear();
+    filtered.scatter.cols.clear();
+    filtered.scatter.rows.clear();
+    const VaScatter &source = scatterData.scatter;
+    for ( int i = 0; i < source.xs.size(); ++i )
+    {
+        const double v = source.xs.at( i );
+        if ( v < x0 || v > x1 )
+            continue;
+        filtered.scatter.xs.append( v );
+        filtered.scatter.ys.append( source.ys.at( i ) );
+        if ( i < source.groups.size() )
+            filtered.scatter.groups.append( source.groups.at( i ) );
+        if ( i < source.cols.size() )
+            filtered.scatter.cols.append( source.cols.at( i ) );
+        if ( i < source.rows.size() )
+            filtered.scatter.rows.append( source.rows.at( i ) );
+    }
+    return filtered;
+}
 
 } // namespace sicnu::app::va

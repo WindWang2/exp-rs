@@ -4,6 +4,7 @@
 #include "va_workbench_panel.h"
 
 #include "va_chart_widget.h"
+#include "va_selection_hub.h"
 
 #include <QComboBox>
 #include <QHBoxLayout>
@@ -14,7 +15,13 @@
 #include <algorithm>
 #include <cmath>
 
+#include <qgscoordinatereferencesystem.h>
+#include <qgscoordinatetransform.h>
+#include <qgsexception.h>
+#include <qgsmapcanvas.h>
+#include <qgsproject.h>
 #include <qgsrasterlayer.h>
+#include <qgsvertexmarker.h>
 
 #include "geospatial/raster/raster_reader.h"
 
@@ -28,6 +35,10 @@ constexpr int kThumbSize = 512;         // histogram/profile source window
 constexpr int kScatterThumb = 256;      // scatter source window
 constexpr int kMaxScatterPoints = 4096; // payload cap
 constexpr int kHistogramBins = 64;
+
+/// This surface's hub origin token. Its own events are never re-consumed
+/// (the hub's echo guard only covers same-dispatch re-entry).
+constexpr const char *kOrigin = "va.panel";
 
 /// Runs on the pool thread: opens through the geospatial contract and reads
 /// a Nearest-overview thumbnail of @p bands sized to fit @p size (the SAME
@@ -65,9 +76,20 @@ bool isNoData( double v, const sicnu::geo::BandInfo &band )
 
 } // namespace
 
-VaWorkbenchPanel::VaWorkbenchPanel( RasterPathProvider provider, QWidget *parent )
+VaWorkbenchPanel::VaWorkbenchPanel( RasterPathProvider provider,
+                                    VaSelectionHub *hub,
+                                    CanvasProvider canvasProvider,
+                                    RasterLayerProvider rasterLayerProvider,
+                                    QWidget *parent )
     : QgsDockWidget( parent )
     , m_provider( std::move( provider ) )
+    , m_canvasProvider( std::move( canvasProvider ) )
+    , m_rasterLayerProvider( std::move( rasterLayerProvider ) )
+    , m_hub( hub )
+    , m_origin( QStringLiteral( kOrigin ) )
+    , m_probe( [this]() -> QgsRasterLayer * {
+        return m_rasterLayerProvider ? m_rasterLayerProvider() : nullptr;
+    } )
 {
     setObjectName( QStringLiteral( "rsVaWorkbenchDock" ) );
     setWindowTitle( tr( "可视化分析" ) );
@@ -103,6 +125,11 @@ void VaWorkbenchPanel::buildUi()
     m_statusLabel->setWordWrap( true );
     layout->addWidget( m_statusLabel );
 
+    m_cursorLabel = new QLabel( tr( "光标：—" ), central );
+    m_cursorLabel->setObjectName( QStringLiteral( "rsVaCursor" ) );
+    m_cursorLabel->setWordWrap( true );
+    layout->addWidget( m_cursorLabel );
+
     m_histogramChart = new VaChartWidget( central );
     m_histogramChart->setObjectName( QStringLiteral( "rsVaHistogram" ) );
     m_scatterChart = new VaChartWidget( central );
@@ -119,37 +146,54 @@ void VaWorkbenchPanel::buildUi()
     connect( m_bandB, &QComboBox::currentIndexChanged, this,
              [this]( int ) { requestScatter(); } );
 
-    // Linked filtering: a histogram range filters the scatter view.
+    // ── Linked brushing (11.0): charts publish typed events; the panel
+    // applies them locally AND routes them through the hub for everyone else.
     connect( m_histogramChart, &VaChartWidget::rangeSelected, this,
              [this]( double x0, double x1 ) {
-                 m_filterMin = x0;
-                 m_filterMax = x1;
-                 m_hasFilter = true;
-                 if ( m_lastScatter.kind == VaChartKind::Scatter )
-                 {
-                     VaData filtered = m_lastScatter;
-                     filtered.scatter.xs.clear();
-                     filtered.scatter.ys.clear();
-                     filtered.scatter.groups.clear();
-                     for ( int i = 0; i < m_lastScatter.scatter.xs.size(); ++i )
-                     {
-                         const double v = m_lastScatter.scatter.xs.at( i );
-                         if ( v >= m_filterMin && v <= m_filterMax )
-                         {
-                             filtered.scatter.xs.append( v );
-                             filtered.scatter.ys.append( m_lastScatter.scatter.ys.at( i ) );
-                             if ( i < m_lastScatter.scatter.groups.size() )
-                                 filtered.scatter.groups.append(
-                                     m_lastScatter.scatter.groups.at( i ) );
-                         }
-                     }
-                     m_scatterChart->setData( filtered );
-                     m_statusLabel->setText(
-                         tr( "联动过滤：散点限制在直方图范围 [%1, %2]，共 %3 点。" )
-                             .arg( x0, 0, 'g', 4 )
-                             .arg( x1, 0, 'g', 4 )
-                             .arg( filtered.scatter.xs.size() ) );
-                 }
+                 applyScatterRangeFilter( x0, x1, m_histogramChart->objectName() );
+                 VaSelectionSubject subject;
+                 subject.kind = VaSelectionKind::ChartRange;
+                 subject.chartId = m_histogramChart->objectName();
+                 subject.x0 = x0;
+                 subject.x1 = x1;
+                 publishToHub( subject );
+             } );
+    connect( m_scatterChart, &VaChartWidget::pointSelected, this,
+             [this]( int index ) {
+                 VaSelectionSubject subject;
+                 subject.kind = VaSelectionKind::ChartPoint;
+                 subject.chartId = m_scatterChart->objectName();
+                 subject.index = index;
+                 publishToHub( subject );
+                 showPickMarker( index );
+             } );
+    connect( m_profileChart, &VaChartWidget::categorySelected, this,
+             [this]( int index ) {
+                 VaSelectionSubject subject;
+                 subject.kind = VaSelectionKind::ChartCategory;
+                 subject.chartId = m_profileChart->objectName();
+                 subject.index = index;
+                 publishToHub( subject );
+                 m_statusLabel->setText(
+                   tr( "联动：选中波段 %1。" ).arg( index + 1 ) );
+             } );
+
+    // ── Hub consumption: other surfaces' brush events drive this panel.
+    if ( m_hub )
+        connect( m_hub, &VaSelectionHub::selectionPublished, this,
+                 [this]( const VaSelectionEvent &event ) { consumeHubEvent( event ); } );
+
+    // ── Cursor probe readout (async, stale-generation-dropped).
+    connect( &m_probe, &VaCursorProbe::sampled, this,
+             [this]( bool ok, double value, int band, bool noData, const QString &message ) {
+                 if ( ok )
+                     m_cursorLabel->setText( tr( "光标采样：波段 %1 = %2" )
+                                               .arg( band )
+                                               .arg( value, 0, 'g', 6 ) );
+                 else if ( noData )
+                     m_cursorLabel->setText( tr( "光标采样：NoData（%1）" ).arg( message ) );
+                 else
+                     m_cursorLabel->setText( tr( "光标采样不可用：%1" ).arg( message ) );
              } );
 
     connect( &m_histogramSource, &VaDataSource::ready, m_histogramChart,
@@ -194,6 +238,127 @@ void VaWorkbenchPanel::buildUi()
              [this]( const QString &message ) { m_profileChart->setError( message ); } );
 
     setWidget( central );
+}
+
+void VaWorkbenchPanel::publishToHub( const VaSelectionSubject &subject )
+{
+    if ( m_hub )
+        m_hub->publish( subject, m_origin );
+}
+
+void VaWorkbenchPanel::consumeHubEvent( const VaSelectionEvent &event )
+{
+    // Own broadcasts were already applied locally — never re-consumed.
+    if ( event.origin == m_origin )
+        return;
+    switch ( event.subject.kind )
+    {
+        case VaSelectionKind::ChartRange:
+            applyScatterRangeFilter( event.subject.x0, event.subject.x1,
+                                     event.subject.chartId );
+            break;
+        case VaSelectionKind::ChartCategory:
+            m_statusLabel->setText(
+              tr( "联动（%1）：选中类别 %2。" )
+                .arg( event.origin, event.subject.chartId ) );
+            break;
+        case VaSelectionKind::Pixel:
+            // External pixel picks cannot be resolved to OUR raster
+            // honestly (the subject carries no path) — readout only.
+            m_cursorLabel->setText(
+              tr( "联动像素：row %1, col %2" )
+                .arg( event.subject.row )
+                .arg( event.subject.column ) );
+            break;
+        default:
+            break;
+    }
+}
+
+void VaWorkbenchPanel::applyScatterRangeFilter( double x0, double x1,
+                                                const QString &originChartId )
+{
+    Q_UNUSED( originChartId );
+    m_filterMin = x0;
+    m_filterMax = x1;
+    m_hasFilter = true;
+    if ( m_lastScatter.kind != VaChartKind::Scatter )
+        return;
+    const VaData filtered = filterScatterByXRange( m_lastScatter, m_filterMin, m_filterMax );
+    m_scatterChart->setData( filtered );
+    m_statusLabel->setText(
+      tr( "联动过滤：散点限制在直方图范围 [%1, %2]，共 %3 点。" )
+        .arg( x0, 0, 'g', 4 )
+        .arg( x1, 0, 'g', 4 )
+        .arg( filtered.scatter.xs.size() ) );
+}
+
+void VaWorkbenchPanel::showPickMarker( int index )
+{
+    // Resolve the pick to a map location from the payload's own geometry —
+    // geotransform arithmetic, no re-scan, no I/O.
+    if ( index < 0 || m_lastScatter.kind != VaChartKind::Scatter
+         || !m_lastScatter.scatter.hasGeometry
+         || index >= m_lastScatter.scatter.cols.size()
+         || index >= m_lastScatter.scatter.rows.size()
+         || m_lastScatter.scatter.geotransform.size() != 6 )
+    {
+        return;
+    }
+    QgsMapCanvas *canvas = m_canvasProvider ? m_canvasProvider() : nullptr;
+    if ( !canvas )
+        return;
+    const QVector<double> &gt = m_lastScatter.scatter.geotransform;
+    const qint64 col = m_lastScatter.scatter.cols.at( index );
+    const qint64 row = m_lastScatter.scatter.rows.at( index );
+    const double rx = gt.at( 0 ) + col * gt.at( 1 ) + row * gt.at( 2 );
+    const double ry = gt.at( 3 ) + col * gt.at( 4 ) + row * gt.at( 5 );
+
+    QgsPointXY canvasPoint( rx, ry );
+    const QgsCoordinateReferenceSystem rasterCrs( m_lastScatter.scatter.crsWkt );
+    const QgsCoordinateReferenceSystem canvasCrs =
+      canvas->mapSettings().destinationCrs();
+    if ( rasterCrs.isValid() && canvasCrs.isValid() && rasterCrs != canvasCrs )
+    {
+        try
+        {
+            QgsCoordinateTransform ct( rasterCrs, canvasCrs, QgsProject::instance() );
+            canvasPoint = ct.transform( canvasPoint );
+        }
+        catch ( const QgsCsException & )
+        {
+            // Fail closed: no marker instead of a wrong location.
+            return;
+        }
+    }
+    if ( m_markerCanvas != canvas )
+    {
+        m_pickMarker = nullptr; // old marker died with its old canvas
+        m_markerCanvas = canvas;
+    }
+    if ( !m_pickMarker )
+    {
+        auto *created = new QgsVertexMarker( canvas );
+        created->setIconType( QgsVertexMarker::ICON_BOX );
+        m_pickMarker = created;
+    }
+    m_pickMarker->setCenter( canvasPoint );
+    m_pickMarker->show();
+}
+
+void VaWorkbenchPanel::onViewCursorMoved( const QString &viewId, double x, double y,
+                                          const QString &crsWkt )
+{
+    Q_UNUSED( viewId );
+    m_cursorLabel->setText( tr( "光标：%1, %2" ).arg( x, 0, 'g', 6 ).arg( y, 0, 'g', 6 ) );
+    const int band = m_bandA->currentData().isValid() ? m_bandA->currentData().toInt() : 1;
+    m_probe.request( QgsPointXY( x, y ), crsWkt, band );
+}
+
+void VaWorkbenchPanel::onViewCursorLeft( const QString &viewId )
+{
+    Q_UNUSED( viewId );
+    m_cursorLabel->setText( tr( "光标：—" ) );
 }
 
 void VaWorkbenchPanel::refreshCharts()
@@ -360,6 +525,13 @@ void VaWorkbenchPanel::requestScatter()
                 const double b = values.at( static_cast<size_t>( total + i ) );
                 if ( isNoData( a, infoA ) || isNoData( b, infoB ) )
                     continue;
+                // Full-resolution pixel geometry for the picked point (11.0):
+                // thumbnail index → nearest full-res pixel. Pure arithmetic;
+                // the map resolution happens on pick via the geotransform.
+                const qint64 tx = i % tw;
+                const qint64 ty = i / tw;
+                scatter.cols.append( tx * meta.width / std::max( 1, tw ) );
+                scatter.rows.append( ty * meta.height / std::max( 1, th ) );
                 scatter.xs.append( a );
                 scatter.ys.append( b );
                 scatter.groups.append( -1 );
@@ -367,6 +539,14 @@ void VaWorkbenchPanel::requestScatter()
             scatter.truncated = total > static_cast<qint64>( kMaxScatterPoints );
             if ( scatter.xs.isEmpty() )
                 throw std::runtime_error( "no valid pixel pairs (all NoData or empty)" );
+            if ( meta.hasGeotransform )
+            {
+                scatter.hasGeometry = true;
+                for ( double g : meta.geotransform )
+                    scatter.geotransform.append( g );
+                scatter.crsWkt = QString::fromStdString( meta.crs.wkt );
+                scatter.sourcePath = QString::fromUtf8( pathUtf8 );
+            }
 
             VaData data;
             data.kind = VaChartKind::Scatter;
