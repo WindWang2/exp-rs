@@ -41,6 +41,43 @@ Append-only. Every capability claim links to a command + exit code from this wor
   `rs:temporal_region_features` (D-TI11-6) — needs per-region series retention; recorded as
   PR_BODY follow-up.
 
+## Phase 7-8: independent review + final double-run validation
+
+- Independent adversarial review (read-only subagent, full diff): 13 findings
+  (1×P0, 1×P1, 6×P2, 5×P3) — all dispositioned in REVIEW_LOG.md; fixes in commit e3bf3f99.
+- `git fetch origin && git rebase origin/master` after remediation: up to date
+  (no upstream movement since branch creation; HEAD = e3bf3f99 lineage).
+- `git diff --check origin/master...HEAD`: clean after stripping jsoncpp trailing
+  whitespace from the regenerated capability sidecars (tool canonical output preserved;
+  guard tests parse JSON).
+- Conflict-marker scan over the diff: none. Secret-pattern scan over the diff: none.
+
+### Double-run validation (identical commands, consecutive runs, both rounds logged)
+
+| Suite | Round 1 | Round 2 |
+|---|---|---|
+| test_temporal_selection (new, T1/T2) | exit 0 — 118 assertions / 13 cases | exit 0 — identical |
+| test_temporal_uncertainty (new, T3/T4) | exit 0 — 48 / 8 | exit 0 — identical |
+| test_temporal_phenology_multi (new, T5) | exit 0 — 66 / 8 | exit 0 — identical |
+| test_temporal_operators_ti11 (new, T7 E2E) | exit 0 — 431 / 4 | exit 0 — identical |
+| test_temporal_change (regression) | exit 0 — 54 / 6 | exit 0 — identical |
+| test_temporal_fit (regression) | exit 0 — 162 / 23 | exit 0 — identical |
+| test_temporal_algorithms (regression, T8 bit-exact anchors) | exit 0 — 791 / 32 | exit 0 — identical |
+| test_temporal_regions (regression) | exit 0 — 46 / 4 | exit 0 — identical |
+| test_temporal_operators_10 (regression incl. extract_series) | exit 0 — 418 / 7 | exit 0 — identical |
+| test_capability_knowledge (drift, T10) | exit 0 — 1210 / 12 | exit 0 (post-whitespace re-run) — identical |
+| test_capability_drift (drift, T10) | 3 failures | same 3 failures |
+
+- The 3 test_capability_drift failures (cartography spatial tools uncovered;
+  io:/mnf/spectral operators uncovered; a recipe-seeding check) are **pre-existing master
+  debt proven by control experiment**: with this branch's data/ changes stashed (master
+  data state) the same suite fails 4 (one more — my branch repairs the duplicate-entry
+  and missing-sidecar drift). None of the failures reference temporal.
+- test_help_coverage (pre-existing, control-verified by failure content): 12 failures in
+  `workflow.new/open/save/run` command knowledge, `rs_glossary.json: invalid id ''`, and the
+  same composition errors — no temporal reference anywhere. Owned by other surfaces;
+  recorded OUT_OF_SCOPE.
+
 ## not-executed items (with reason)
 
 - SIMD kernels (package G): not adopted — the temporal fits are ≤15×15 small-matrix bound;
