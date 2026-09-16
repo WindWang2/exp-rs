@@ -193,6 +193,38 @@ All notable changes to the `exp-rs` project will be documented in this file.
   `std::optional<QgsPointXY>`; invalid/throwing CRS transforms refuse the GCP pick instead
   of silently storing canvas coordinates.
 - **Docs**: `docs/processing/geometric-registration.md`, ADR 0160.
+## [Geospatial I/O, COG & Interchange 11.0] - 2026-09-16
+
+- **Finalize manifests** (`io/finalize_manifest`): streamed SHA-256 digest +
+  provenance sidecar published inside the atomic group transaction;
+  `io:verify_dataset` recomputes digest/shape and fails closed on tampering
+  or missing manifests (legacy tolerance reported, never green-washed).
+- **Staging ledger** (`io/stage_ledger`): dataset-level resume seam — journal,
+  attach-existing trust boundary (driver/shape vs declaration), finalize or
+  discard, and an explicit-opt-in orphan sweep with redacted display paths.
+- **Explicit COG options** (`io/cog_options`): blocksize / overview policy /
+  deterministic mode (NUM_THREADS=1 + pinned DEFLATE level; byte-identical
+  within one GDAL/libtiff build) merged with REPLACE semantics — the COG
+  driver's first-match-wins lookup makes appended `-co` overrides dead
+  letters; every key's provenance explained in the result `cog_plan`.
+  `docs/io/cog-guide.md` OVERVIEWS drift corrected (ALL → AUTO).
+- **Capability-gated vector interchange** (`io/vector_interchange`):
+  `io:convert_format` routes by `DCAP_VECTOR`+`DCAP_CREATE` instead of a
+  hard-coded name list; declared-but-unwritable vector drivers get typed
+  refusals.
+- **Subdataset inventory** (`io:subdatasets`): bounded, redacted, classified
+  HDF/NetCDF/VRT inventory with selection projection into the canonical
+  metadata model.
+- **Metadata write-back** (`io:metadata_patch`): whitelist-validated patches
+  (scale/offset/unit/nodata/role/wavelength/fwhm/color + SICNU_* stamps),
+  validate-then-apply, update-capability gate, fresh read-only back-check,
+  finalize-manifest refresh with patch history.
+- **Boundary path guards** (`io/param_guard`): operator paths classified via
+  ResourceUri; remote writes and read-only projection targets refused;
+  missing target directories refused; redacted error surfaces.
+- **io:clip fix (#1001)**: `srcCrsOverride` is a source declaration again
+  (reaches the warp as `-s_srs`); an override on an input that already
+  carries a CRS is refused instead of silently re-tagging pixels.
 
 ## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)
 

@@ -12,6 +12,14 @@
 #include "geospatial/cog/cog_presets.h"
 #include "geospatial/doctor/data_doctor.h"
 #include "geospatial/formats/format_profiles.h"
+#include "geospatial/io/cog_options.h"
+#include "geospatial/io/param_guard.h"
+#include "geospatial/io/finalize_manifest.h"
+#include "geospatial/io/metadata_patch.h"
+#include "geospatial/io/stage_ledger.h"
+#include "geospatial/io/subdataset_inventory.h"
+#include "geospatial/io/vector_interchange.h"
+#include "geospatial/metadata/canonical_metadata.h"
 
 #include <atomic>
 #include <cstring>
@@ -184,8 +192,9 @@ Json::Value IoTranslateOperator::run( const Json::Value &params, RSOperatorConte
 
     ContextProgress progress( context );
     const sicnu::geo::TranslateResult result =
-      sicnu::geo::translateRaster( params::requireString( params, "input" ),
-                                   params::requireString( params, "output" ), options, &progress );
+      sicnu::geo::translateRaster( sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw,
+                                   sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).raw,
+                                   options, &progress );
     context.reportProgressForced( 1.0, "translate complete" );
     return result.toJson();
   } );
@@ -254,8 +263,9 @@ Json::Value IoWarpOperator::run( const Json::Value &params, RSOperatorContext &c
 
     ContextProgress progress( context );
     const sicnu::geo::TranslateResult result =
-      sicnu::geo::warpRaster( params::requireString( params, "input" ),
-                              params::requireString( params, "output" ), options, &progress );
+      sicnu::geo::warpRaster( sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw,
+                              sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).raw,
+                              options, &progress );
     context.reportProgressForced( 1.0, "warp complete" );
     return result.toJson();
   } );
@@ -301,7 +311,7 @@ Json::Value IoReprojectOperator::metadata() const
 Json::Value IoReprojectOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
   return guarded( [ & ] {
-    const std::string input = params::requireString( params, "input" );
+    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw;
     const sicnu::geo::RasterMetadata meta = sicnu::geo::inspectRaster( input );
     if ( !meta.crs.valid && params::getString( params, "srcCrsOverride" ).empty() )
     {
@@ -321,7 +331,8 @@ Json::Value IoReprojectOperator::run( const Json::Value &params, RSOperatorConte
     options.creationOptions = { "COMPRESS=LZW", "TILED=YES" };
     ContextProgress progress( context );
     const sicnu::geo::TranslateResult result =
-      sicnu::geo::warpRaster( input, params::requireString( params, "output" ), options, &progress );
+      sicnu::geo::warpRaster( input, sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).raw,
+                              options, &progress );
     context.reportProgressForced( 1.0, "reproject complete" );
     return result.toJson();
   } );
@@ -363,13 +374,14 @@ Json::Value IoClipOperator::metadata() const
 Json::Value IoClipOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
   return guarded( [ & ] {
-    const std::string input = params::requireString( params, "input" );
+    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw;
     const std::string srcOverride = params::getString( params, "srcCrsOverride" );
     const sicnu::geo::RasterMetadata meta = sicnu::geo::inspectRaster( input );
     if ( !meta.crs.valid && srcOverride.empty() )
     {
       Json::Value details;
-      details["path"] = input;
+      details["path"] = sicnu::geo::ResourceUri::parse( input ).display(); // redacted
+
       throw RSOperatorError( ErrorCode::InvalidParameter,
                              "input raster carries no CRS; declare srcCrsOverride to clip anyway", details );
     }
@@ -383,11 +395,29 @@ Json::Value IoClipOperator::run( const Json::Value &params, RSOperatorContext &c
       throw RSOperatorError( ErrorCode::MissingRequiredParameter,
                              "bounds must be [minX,minY,maxX,maxY]" );
 
+    // F-OPS-4 follow-up (#1001): srcCrsOverride DECLARES the source CRS of a
+    // CRS-less input — it is never the clip target. Clipping keeps the source
+    // grid (near sampling, no reprojection). An override on an input that
+    // already carries a CRS is a contradiction (the caller would silently
+    // re-tag georeferenced pixels), so it is refused instead of guessed.
+    if ( meta.crs.valid && !srcOverride.empty() )
+    {
+      Json::Value details;
+      details["path"] = sicnu::geo::ResourceUri::parse( input ).display(); // redacted
+
+      details["input_crs"] = meta.crs.authid.empty() ? meta.crs.wkt : meta.crs.authid;
+      details["srcCrsOverride"] = srcOverride;
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "input already carries a CRS; srcCrsOverride would reinterpret it — "
+                             "remove the override or reproject explicitly with io:reproject",
+                             details );
+    }
+
     sicnu::geo::WarpOptions options;
     // Clipping is spatially lossless: keep the source grid via near sampling.
-    options.targetCrs = srcOverride.empty()
-                          ? ( meta.crs.authid.empty() ? meta.crs.wkt : meta.crs.authid )
-                          : srcOverride;
+    options.targetCrs = meta.crs.authid.empty() ? ( srcOverride.empty() ? meta.crs.wkt : srcOverride )
+                                                : meta.crs.authid;
+    options.sourceCrsOverride = srcOverride;
     options.resampling = "near";
     options.targetBounds = bounds;
     options.creationOptions = creationOptionsFrom( params );
@@ -395,8 +425,8 @@ Json::Value IoClipOperator::run( const Json::Value &params, RSOperatorContext &c
       options.creationOptions = { "COMPRESS=LZW", "TILED=YES" };
 
     ContextProgress progress( context );
-    const sicnu::geo::TranslateResult result = sicnu::geo::warpRaster( input, params::requireString( params, "output" ),
-                                                                       options, &progress );
+    const sicnu::geo::TranslateResult result = sicnu::geo::warpRaster(
+      input, sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).raw, options, &progress );
     context.reportProgressForced( 1.0, "clip complete" );
     return result.toJson();
   } );
@@ -441,17 +471,36 @@ Json::Value IoConvertFormatOperator::metadata() const
 Json::Value IoConvertFormatOperator::run( const Json::Value &params, RSOperatorContext &context )
 {
   return guarded( [ & ] {
-    const std::string input = params::requireString( params, "input" );
-    const std::string output = params::requireString( params, "output" );
+    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw;
+    const std::string output = sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).raw;
     const std::string driver = params::getString( params, "driver", "GTiff" );
-    // Vector path: a vector driver name. Raster otherwise.
-    if ( driver == "GPKG" || driver == "GeoJSON" || driver == "ESRI Shapefile" || driver == "FlatGeobuf"
-         || driver == "CSV" )
+    // Vector routing is capability-based (11.0): a vector driver that can
+    // create datasets goes through the streaming reader→writer contract —
+    // no hard-coded name list, so GeoParquet/CSV/whatever this GDAL build
+    // supports route correctly, and a non-create-capable driver falls
+    // through to the raster kernel where its refusal names the reason.
+    const sicnu::geo::io::VectorTargetCheck vectorTarget = sicnu::geo::io::checkVectorWriteTarget( driver );
+    // Routing: a vector-capable driver normally goes to the vector kernel —
+    // EXCEPT dual-capability drivers (netCDF, PDF, MBTiles, ... carry both
+    // DCAP_RASTER and DCAP_VECTOR), where the INPUT's kind decides: a raster
+    // input keeps the raster kernel (preserves e.g. "GeoTIFF → NetCDF raster
+    // export"), a non-raster input takes the vector kernel.
+    bool routeVector = false;
+    if ( vectorTarget.usable )
+      routeVector = vectorTarget.alsoRaster ? !sicnu::geo::io::inputOpensAsRaster( input ) : true;
+    if ( routeVector )
     {
       ContextProgress progress( context );
       Json::Value result = sicnu::geo::vectorConvert( input, output, driver, "", "", "", {}, &progress );
       context.reportProgressForced( 1.0, "conversion complete" );
       return result;
+    }
+    if ( !vectorTarget.usable && vectorTarget.reasonCode != "not_vector" )
+    {
+      // A declared vector driver that cannot receive writes fails here with
+      // the typed reason — never silently re-routed into the raster kernel.
+      Json::Value details = vectorTarget.toJson();
+      throw RSOperatorError( ErrorCode::InvalidParameter, vectorTarget.message, details );
     }
     sicnu::geo::TranslateOptions options;
     options.outputFormat = driver;
@@ -510,10 +559,11 @@ Json::Value IoBuildOverviewsOperator::run( const Json::Value &params, RSOperator
         levels.push_back( level );
     }
     ContextProgress progress( context );
-    const int built = sicnu::geo::buildOverviews( params::requireString( params, "input" ), levels,
+    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw;
+    const int built = sicnu::geo::buildOverviews( input, levels,
                                                   params::getString( params, "resampling", "GAUSS" ), &progress );
     Json::Value result;
-    result["input"] = params::requireString( params, "input" );
+    result["input"] = input;
     result["levels_built"] = built;
     context.reportProgressForced( 1.0, "overviews complete" );
     return result;
@@ -538,6 +588,11 @@ Json::Value IoMakeCogOperator::schema() const
                                       "continuous_float", "sar" },
                                     "lossless_scientific" );
   params["creationOptions"] = makeStringParam( "creationOptions", "Extra COG creation options" );
+  params["blocksize"] = makeIntegerParam( "blocksize", "Tile blocksize override (power of two, 128..4096)" );
+  params["overviews"] = makeBooleanParam( "overviews", "Build overviews inside the COG (default true)" );
+  params["deterministic"] = makeBooleanParam(
+    "deterministic", "Deterministic byte output: NUM_THREADS=1 + pinned DEFLATE level" );
+  params["deflateLevel"] = makeIntegerParam( "deflateLevel", "DEFLATE level for deterministic mode (1..9, default 6)" );
   Json::Value outputs;
   outputs["output"] = makeOutputParam( "output", "Cloud Optimized GeoTIFF", "tif" );
   Json::Value root = makeRootSchema( "Make COG", description(), params, outputs );
@@ -577,12 +632,36 @@ Json::Value IoMakeCogOperator::run( const Json::Value &params, RSOperatorContext
     else if ( presetName == "sar" )
       preset = sicnu::geo::CogPreset::Sar;
 
+    // 11.0 explicit production options: the planner merges preset + caller
+    // knobs (blocksize / overviews / determinism / extras) by REPLACE, so
+    // overrides actually reach the COG driver (first-match-wins lookup makes
+    // appended duplicates dead letters), and every key's provenance is
+    // explained in the result.
+    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw;
+    sicnu::geo::io::CogProductionOptions options;
+    options.preset = preset;
+    options.blocksize = params::getInt( params, "blocksize", 0 );
+    options.buildOverviews = params::getBool( params, "overviews", true );
+    options.deterministic = params::getBool( params, "deterministic", false );
+    options.deflateLevel = params::getInt( params, "deflateLevel", 6 );
+    options.extraCreationOptions = creationOptionsFrom( params );
+    // Preset fidelity policy is dtype-aware; the planner needs the dtype.
+    const sicnu::geo::RasterMetadata inputMeta = sicnu::geo::inspectRaster( input );
+    options.expectedDtypeName = inputMeta.bands.empty() ? std::string() : inputMeta.bands.front().dtype;
+
+    const sicnu::geo::io::CogProductionPlan plan = sicnu::geo::io::planCogProduction( options );
+
     ContextProgress progress( context );
-    const sicnu::geo::TranslateResult result = sicnu::geo::makeCog(
-      params::requireString( params, "input" ), params::requireString( params, "output" ), preset,
-      creationOptionsFrom( params ), &progress );
+    const sicnu::geo::TranslateResult result = sicnu::geo::makeCogWithOptions(
+      input, sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).raw, plan.creationOptions,
+      &progress );
+
+    // Deterministic mode implies reproducibility demands; record the plan so
+    // the produced COG is explainable (which knob came from where).
+    Json::Value cogResult = result.toJson();
+    cogResult["cog_plan"] = plan.toJson();
     context.reportProgressForced( 1.0, "COG creation complete" );
-    return result.toJson();
+    return cogResult;
   } );
 }
 
@@ -634,7 +713,8 @@ Json::Value IoVectorConvertOperator::run( const Json::Value &params, RSOperatorC
     }
     ContextProgress progress( context );
     Json::Value result = sicnu::geo::vectorConvert(
-      params::requireString( params, "input" ), params::requireString( params, "output" ),
+      sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw,
+      sicnu::geo::io::checkTargetPath( params::requireString( params, "output" ) ).raw,
       params::getString( params, "driver", "GPKG" ), params::getString( params, "layer" ),
       params::getString( params, "targetCrs" ), params::getString( params, "where" ), clipBounds, &progress );
     context.reportProgressForced( 1.0, "vector conversion complete" );
@@ -682,7 +762,7 @@ Json::Value IoInspectOperator::run( const Json::Value &params, RSOperatorContext
   return guarded( [ & ] {
     sicnu::geo::InspectOptions options;
     options.includeStatistics = params::getBool( params, "includeStatistics", false );
-    Json::Value result = sicnu::geo::runInspect( params::requireString( params, "input" ), options );
+    Json::Value result = sicnu::geo::runInspect( sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw, options );
     context.reportProgressForced( 1.0, "inspect complete" );
     return result;
   } );
@@ -723,8 +803,188 @@ Json::Value IoDoctorOperator::run( const Json::Value &params, RSOperatorContext 
   return guarded( [ & ] {
     sicnu::geo::InspectOptions options;
     options.includeStatistics = params::getBool( params, "includeStatistics", false );
-    const sicnu::geo::DoctorReport report = sicnu::geo::runDoctor( params::requireString( params, "input" ), options );
+    const sicnu::geo::DoctorReport report =
+      sicnu::geo::runDoctor( sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw, options );
     context.reportProgressForced( 1.0, "doctor complete" );
+    return report.toJson();
+  } );
+}
+
+
+// --- 11.0 interchange surface ------------------------------------------------
+
+std::string IoSubdatasetsOperator::description() const
+{
+  return "Enumerate HDF/NetCDF/VRT subdatasets (bounded, classified, redacted) and optionally project "
+         "one selected subdataset into the canonical metadata model.";
+}
+
+Json::Value IoSubdatasetsOperator::schema() const
+{
+  using namespace sicnu::operators::schema;
+  Json::Value params;
+  params["input"] = makeRasterParam( "input", "Multidimensional source (HDF/NetCDF/VRT)" );
+  params["select"] = makeIntegerParam( "select", "1-based subdataset index: project this entry instead of listing" );
+  params["maxEntries"] = makeIntegerParam( "maxEntries", "Inventory cap (1..64, default 64)" );
+  Json::Value outputs;
+  outputs["entries"] = makeOutputParam( "entries", "Subdataset entries (list mode)", "" );
+  outputs["metadata"] = makeOutputParam( "metadata", "Canonical metadata of the selected subdataset", "" );
+  Json::Value root = makeRootSchema( "Subdataset Inventory", description(), params, outputs );
+  root["required"] = makeRequired( { "input" } );
+  stampDeterminismGrade( root, determinismGrade() );
+  return root;
+}
+
+Json::Value IoSubdatasetsOperator::metadata() const
+{
+  Json::Value meta;
+  meta["provider"] = "geospatial-io-foundation";
+  meta["purpose"] = "Subdataset inventory and selection with safe URIs";
+  meta["limitations"] = "Inventory is capped at 64 entries; truncation is reported, never silent.";
+  meta["tags"] = Json::Value( Json::arrayValue );
+  meta["tags"].append( "io" );
+  meta["tags"].append( "multidim" );
+  return meta;
+}
+
+Json::Value IoSubdatasetsOperator::run( const Json::Value &params, RSOperatorContext &context )
+{
+  return guarded( [ & ] {
+    const std::string input = sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw;
+    const int select = params::getInt( params, "select", 0 );
+    if ( select == 0 )
+    {
+      const int maxEntries = params::getInt( params, "maxEntries", sicnu::geo::io::kMaxSubdatasetEntries );
+      const sicnu::geo::io::SubdatasetInventory inventory = sicnu::geo::io::inventorySubdatasets( input, maxEntries );
+      context.reportProgressForced( 1.0, "inventory complete" );
+      return inventory.toJson();
+    }
+    const sicnu::geo::io::SubdatasetInventory inventory =
+      sicnu::geo::io::inventorySubdatasets( input, sicnu::geo::io::kMaxSubdatasetEntries );
+    if ( select < 1 || select > static_cast<int>( inventory.entries.size() ) )
+    {
+      Json::Value details;
+      details["select"] = select;
+      details["count"] = static_cast<Json::UInt64>( inventory.entries.size() );
+      throw RSOperatorError( ErrorCode::InvalidParameter, "subdataset selection out of range", details );
+    }
+    const sicnu::geo::RasterMetadata meta =
+      sicnu::geo::io::inspectSubdataset( inventory.entries[static_cast<std::size_t>( select ) - 1].name );
+    Json::Value result = meta.toJson();
+    result["selected_index"] = select;
+    context.reportProgressForced( 1.0, "projection complete" );
+    return result;
+  } );
+}
+
+std::string IoMetadataPatchOperator::description() const
+{
+  return "Whitelist-validated metadata write-back (scale/offset/unit/nodata/role/wavelength/fwhm/color/"
+         "SICNU_* stamps): validate-then-apply, update-capability gate, read-back verification, and "
+         "finalize-manifest digest continuity.";
+}
+
+Json::Value IoMetadataPatchOperator::schema() const
+{
+  using namespace sicnu::operators::schema;
+  Json::Value params;
+  params["input"] = makeRasterParam( "input", "Target dataset (update-capable driver required)" );
+  params["patches"] = makeStringParam( "patches", "Array of {band, field, value} (band 0 = dataset stamp)" );
+  Json::Value outputs;
+  outputs["report"] = makeOutputParam( "report", "Applied fields and manifest status", "" );
+  Json::Value root = makeRootSchema( "Patch Metadata", description(), params, outputs );
+  root["required"] = makeRequired( { "input", "patches" } );
+  stampDeterminismGrade( root, determinismGrade() );
+  return root;
+}
+
+Json::Value IoMetadataPatchOperator::metadata() const
+{
+  Json::Value meta;
+  meta["provider"] = "geospatial-io-foundation";
+  meta["purpose"] = "Declared metadata correction on existing datasets";
+  meta["limitations"] = "Whitelist fields only; drivers without update support are refused (never a full "
+                        "rewrite); verify with io:verify_dataset.";
+  meta["tags"] = Json::Value( Json::arrayValue );
+  meta["tags"].append( "io" );
+  meta["tags"].append( "metadata" );
+  return meta;
+}
+
+Json::Value IoMetadataPatchOperator::run( const Json::Value &params, RSOperatorContext &context )
+{
+  return guarded( [ & ] {
+    const std::string input = sicnu::geo::io::checkTargetPath( params::requireString( params, "input" ) ).raw;
+    const Json::Value &patchParams = params["patches"];
+    if ( !patchParams.isArray() || patchParams.empty() )
+      throw RSOperatorError( ErrorCode::InvalidParameter, "patches must be a non-empty array" );
+    std::vector<sicnu::geo::io::MetadataPatch> patches;
+    for ( const Json::Value &entry : patchParams )
+    {
+      if ( !entry.isObject() || !entry.isMember( "field" ) || !entry.isMember( "value" ) )
+        throw RSOperatorError( ErrorCode::InvalidParameter, "each patch needs field and value" );
+      if ( !entry["field"].isString() || !entry["value"].isString() )
+        throw RSOperatorError( ErrorCode::InvalidParameter, "patch field and value must be strings" );
+      sicnu::geo::io::MetadataPatch patch;
+      if ( entry.isMember( "band" ) )
+      {
+        if ( !entry["band"].isInt() )
+          throw RSOperatorError( ErrorCode::InvalidParameter, "patch band must be an integer" );
+        patch.band = entry["band"].asInt();
+      }
+      patch.field = entry["field"].asString();
+      patch.value = entry["value"].asString();
+      patches.push_back( patch );
+    }
+    const sicnu::geo::io::MetadataPatchReport report = sicnu::geo::io::applyMetadataPatch( input, patches );
+    context.reportProgressForced( 1.0, "patch complete" );
+    return report.toJson();
+  } );
+}
+
+std::string IoVerifyDatasetOperator::description() const
+{
+  return "Independent dataset integrity check: recompute the streamed SHA-256 against the finalize "
+         "manifest sidecar and re-check the declared shape. Fails closed when the manifest is absent "
+         "unless allowMissingManifest is set (absence is then reported, never green-washed).";
+}
+
+Json::Value IoVerifyDatasetOperator::schema() const
+{
+  using namespace sicnu::operators::schema;
+  Json::Value params;
+  params["input"] = makeRasterParam( "input", "Dataset to verify" );
+  params["allowMissingManifest"] = makeBooleanParam( "allowMissingManifest",
+                                                     "Legacy tolerance: report absence instead of failing hard" );
+  Json::Value outputs;
+  outputs["verified"] = makeOutputParam( "verified", "Verification report", "" );
+  Json::Value root = makeRootSchema( "Verify Dataset", description(), params, outputs );
+  root["required"] = makeRequired( { "input" } );
+  stampDeterminismGrade( root, determinismGrade() );
+  return root;
+}
+
+Json::Value IoVerifyDatasetOperator::metadata() const
+{
+  Json::Value meta;
+  meta["provider"] = "geospatial-io-foundation";
+  meta["purpose"] = "Digest/shape integrity verification against finalize manifests";
+  meta["limitations"] = "Requires a finalize manifest; datasets written without one verify only as "
+                        "explicitly-tolerated legacy.";
+  meta["tags"] = Json::Value( Json::arrayValue );
+  meta["tags"].append( "io" );
+  meta["tags"].append( "provenance" );
+  return meta;
+}
+
+Json::Value IoVerifyDatasetOperator::run( const Json::Value &params, RSOperatorContext &context )
+{
+  return guarded( [ & ] {
+    const bool allowMissing = params::getBool( params, "allowMissingManifest", false );
+    const sicnu::geo::io::ManifestVerifyReport report =
+      sicnu::geo::io::verifyDataset( sicnu::geo::io::checkSourcePath( params::requireString( params, "input" ) ).raw,
+                                     allowMissing );
+    context.reportProgressForced( 1.0, "verification complete" );
     return report.toJson();
   } );
 }

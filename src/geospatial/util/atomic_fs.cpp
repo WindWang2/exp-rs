@@ -245,7 +245,11 @@ std::vector<std::string> sidecarsFor( const std::string &mainPath )
   // Shapefile-family sidecars share the .shp stem (X.shp → X.shx/X.dbf/...);
   // everything else (world files, PAM, ESRI XML) appends to the full name.
   static const char *kReplacedSuffixes[] = { ".shx", ".dbf", ".prj", ".qpj", ".cpg", ".sbn", ".sbx", ".qix" };
-  static const char *kAppendedSuffixes[] = { ".shp.xml", ".tfw", ".aux", ".aux.xml", ".jpw", ".jgw" };
+  // ".sicnu-manifest.json" (io/finalize_manifest.h) joins the appended
+  // family so the finalize manifest rides the group transaction:
+  // published sidecar-first, cleaned by discardStaged, swept with the group.
+  static const char *kAppendedSuffixes[] = { ".shp.xml", ".tfw", ".aux", ".aux.xml", ".jpw", ".jgw",
+                                             ".sicnu-manifest.json" };
 
   std::string stem = mainPath;
   static const char *kMainExtensions[] = { ".shp", ".gpkg", ".tif", ".nc" };

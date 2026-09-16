@@ -303,3 +303,6 @@ data/labs/_tmp/
 !.planning/multimodal-registration-11/
 .planning/multimodal-registration-11/*
 !.planning/multimodal-registration-11/*.md
+# geospatial-io-formats-11: track planning notes (markdown only).
+!.planning/geospatial-io-formats-11/
+!.planning/geospatial-io-formats-11/**

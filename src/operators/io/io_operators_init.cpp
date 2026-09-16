@@ -25,6 +25,9 @@ REGISTER_RS_OPERATOR( IoMakeCogOperator, "io:make_cog" )
 REGISTER_RS_OPERATOR( IoVectorConvertOperator, "io:vector_convert" )
 REGISTER_RS_OPERATOR( IoInspectOperator, "io:inspect" )
 REGISTER_RS_OPERATOR( IoDoctorOperator, "io:doctor" )
+REGISTER_RS_OPERATOR( IoSubdatasetsOperator, "io:subdatasets" )
+REGISTER_RS_OPERATOR( IoMetadataPatchOperator, "io:metadata_patch" )
+REGISTER_RS_OPERATOR( IoVerifyDatasetOperator, "io:verify_dataset" )
 
 void initBuiltinIoOperators()
 {
@@ -52,6 +55,9 @@ void initBuiltinIoOperators()
   add( "io:cube_plan", [] { return std::make_unique<IoCubePlanOperator>(); } );
   add( "io:cube_window", [] { return std::make_unique<IoCubeWindowOperator>(); } );
   add( "io:cache_prefetch", [] { return std::make_unique<IoCachePrefetchOperator>(); } );
+  add( "io:subdatasets", [] { return std::make_unique<IoSubdatasetsOperator>(); } );
+  add( "io:metadata_patch", [] { return std::make_unique<IoMetadataPatchOperator>(); } );
+  add( "io:verify_dataset", [] { return std::make_unique<IoVerifyDatasetOperator>(); } );
 }
 
 } // namespace sicnu::operators::io
