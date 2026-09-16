@@ -46,7 +46,11 @@ std::vector<IntentSignals> signalTable()
                      { "帮我做", "帮我跑", "帮我算", "帮我执行", "帮我完成", "帮我生成",
                        "帮我交", "替我", "直接给", "直接发", "运行第", "执行第", "跑第",
                        "做完", "代做", "参考答案", "完整参数", "run step", "do it for me",
-                       "ignore previous", "give me the result", "finished result" } } );
+                       "ignore previous", "give me the result", "finished result",
+                       // English execute verbs (teaching-lab-platform-11):
+                       // an explicit execution request must route to the
+                       // teacher surface even without the Chinese markers.
+                       "execute", "run the lab", "run every step" } } );
   for ( auto &entry : table )
     for ( auto &signal : entry.signals )
       signal = lowered( signal );

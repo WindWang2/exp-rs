@@ -1,0 +1,58 @@
+{
+  "schema_version": "sicnu.lab.rules/1",
+  "lab_id": "cartographic_mapping",
+  "title": "实验11 制图交付物判分（labspec cartographic_mapping：MapSpec 文档 + 导出页）",
+  "artifact": { "kind": "file" },
+  "passing_score": 60,
+  "assertions": [
+    {
+      "id": "layout.mapspec",
+      "kind": "file_check",
+      "weight": 50,
+      "severity": "blocking",
+      "params": {
+        "exists": true,
+        "mapspec": { "max_problems": 0 },
+        "preflight": {
+          "max_problems": 0,
+          "forbidden_codes": [
+            "MAP_MISSING_TITLE",
+            "MAP_MISSING_LEGEND",
+            "MAP_MISSING_SCALE_BAR",
+            "MAP_MISSING_NORTH_ARROW"
+          ]
+        }
+      },
+      "derivation": "K4（lab11 intent）：MapSpec v5 文档通过平台 validateMapSpec 零问题（结构验证），且 preflight 规则目录零命中标题/图例/比例尺/指北针缺失。两条链都直接调用平台实现（sicnu::agent::validateMapSpec 与 cartography preflightMapSpec），不复制第二份验证逻辑。"
+    },
+    {
+      "id": "export.page_geometry",
+      "kind": "file_check",
+      "weight": 35,
+      "severity": "normal",
+      "params": {
+        "exists": true,
+        "path": "carto_export_reference.png",
+        "png": {
+          "page_width_mm": 297,
+          "page_height_mm": 210,
+          "dpi": 200,
+          "size_tolerance": 0.05
+        }
+      },
+      "derivation": "K5（lab11 intent）：导出 PNG 存在且页面为 A4 横向（297x210 mm @ 200 dpi，像素尺寸容差 ±5% -> 2339x1654 px 为标称值）。file_check 解析 PNG IHDR，按 dpi 反推页面毫米数。"
+    },
+    {
+      "id": "export.present",
+      "kind": "file_check",
+      "weight": 15,
+      "severity": "normal",
+      "params": {
+        "exists": true,
+        "path": "carto_export_reference.png",
+        "min_bytes": 1000
+      },
+      "derivation": "K5（lab11 intent）：导出文件存在且非空（>= 1000 字节，排除损坏的零块文件）。"
+    }
+  ]
+}

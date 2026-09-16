@@ -245,6 +245,120 @@
       "expected_failures": [
         "area.changed_interval"
       ]
+    },
+    {
+      "lab_id": "temporal_analysis",
+      "fixture": "temporal_wrong_bandcount.tif",
+      "error_class": "one epoch missing (band_layout blocking + every epoch-12 zone bound fires)",
+      "expected_score_band": [
+        25,
+        34
+      ],
+      "expected_failures": [
+        "layout.stack"
+      ]
+    },
+    {
+      "lab_id": "temporal_analysis",
+      "fixture": "temporal_wrong_season_inverted.tif",
+      "error_class": "seasonal term sign-flipped (crop + disturbance bounds break)",
+      "expected_score_band": [
+        40,
+        50
+      ],
+      "expected_failures": [
+        "crops.summer",
+        "crops.winter",
+        "disturb.summer",
+        "disturb.drop"
+      ]
+    },
+    {
+      "lab_id": "temporal_analysis",
+      "fixture": "temporal_wrong_zones_swapped.tif",
+      "error_class": "class curves painted for the wrong zones",
+      "expected_score_band": [
+        50,
+        59
+      ],
+      "expected_failures": [
+        "zones.evergreen",
+        "zones.water",
+        "disturb.drop"
+      ]
+    },
+    {
+      "lab_id": "sar_processing",
+      "fixture": "sar_change_wrong_inverted.tif",
+      "error_class": "change mask inverted",
+      "expected_score_band": [
+        10,
+        18
+      ],
+      "expected_failures": [
+        "detect.hit",
+        "detect.false_alarm"
+      ]
+    },
+    {
+      "lab_id": "sar_processing",
+      "fixture": "sar_change_wrong_allmarked.tif",
+      "error_class": "everything marked as change",
+      "expected_score_band": [
+        55,
+        59
+      ],
+      "expected_failures": [
+        "detect.false_alarm"
+      ]
+    },
+    {
+      "lab_id": "sar_processing",
+      "fixture": "sar_change_wrong_shifted.tif",
+      "error_class": "detection block shifted 30 px (hit 25% < 65%)",
+      "expected_score_band": [
+        50,
+        59
+      ],
+      "expected_failures": [
+        "detect.hit"
+      ]
+    },
+    {
+      "lab_id": "hyperspectral_analysis",
+      "fixture": "hsi_labels_wrong_allwater.tif",
+      "error_class": "every pixel labelled water (zone accuracy fails; the all-zero label map still carries no NoData)",
+      "expected_score_band": [
+        25,
+        35
+      ],
+      "expected_failures": [
+        "labels.zone_accuracy"
+      ]
+    },
+    {
+      "lab_id": "hyperspectral_analysis",
+      "fixture": "hsi_labels_wrong_shifted.tif",
+      "error_class": "labels shifted half a stripe",
+      "expected_score_band": [
+        25,
+        35
+      ],
+      "expected_failures": [
+        "labels.zone_accuracy"
+      ]
+    },
+    {
+      "lab_id": "cartographic_mapping",
+      "fixture": "carto_mapspec_wrong_nolegend.mapspec.json",
+      "error_class": "mapspec without a legend (preflight MAP_MISSING_LEGEND)",
+      "expected_score_band": [
+        45,
+        55
+      ],
+      "expected_failures": [
+        "layout.mapspec"
+      ]
     }
   ]
 }
