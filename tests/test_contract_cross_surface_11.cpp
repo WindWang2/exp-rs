@@ -60,8 +60,8 @@ bool readJsonFile( const std::string &path, Json::Value &out )
     std::ifstream in( path, std::ios::binary );
     if ( !in )
         return false;
-    std::string text( std::istreambuf_iterator<char>( in ),
-                      std::istreambuf_iterator<char>() );
+    std::string text{ std::istreambuf_iterator<char>( in ),
+                      std::istreambuf_iterator<char>() };
     if ( text.empty() )
         return false;
     Json::CharReaderBuilder b;

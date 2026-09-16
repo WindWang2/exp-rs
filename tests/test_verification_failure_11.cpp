@@ -227,7 +227,7 @@ TEST_CASE( "F5: read-only output location is a typed write refusal with no parti
     auto op = create( "io:translate" );
     Json::Value p;
     p["input"] = raster.toStdString();
-    p["output"] = readOnlyDir + QStringLiteral( "/f5_out.tif" );
+    p["output"] = ( readOnlyDir + QStringLiteral( "/f5_out.tif" ) ).toStdString();
     const std::string code = expectTypedFailure( op.get(), p );
     INFO( "typed refusal: " << code );
     CHECK( ( code == "FileNotWritable" || code == "GdalError"
