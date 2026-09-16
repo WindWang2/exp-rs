@@ -352,11 +352,13 @@ VirtualCube VirtualCube::build( const std::vector<AssetRecord> &assets, const Vi
     if ( entry.hasGrid )
     {
       // Facts recorded by the offline index (or anything already known):
-      // participate in negotiation with zero IO.
+      // participate in negotiation with zero IO. entry.resY carries the
+      // RAW geotransform[5] (negative for north-up); comparisons use the
+      // positive magnitude (D-1005 conventions).
       AssetNativeGrid native;
       native.ok = true;
       native.resX = entry.resX;
-      native.resY = entry.resY;
+      native.resY = positiveScale( entry.resY );
       native.minX = entry.assetMinX;
       native.minY = entry.assetMinY;
       native.maxX = entry.assetMaxX;
@@ -381,8 +383,11 @@ VirtualCube VirtualCube::build( const std::vector<AssetRecord> &assets, const Vi
       if ( native.ok )
       {
         entry.hasGrid = true;
-        entry.resX = native.resX;
-        entry.resY = native.resY;
+        // RAW geotransform scales (resY negative for north-up): the one
+        // spelling every gt reconstruction shares (probe and offline-index
+        // facts agree — the read path rebuilds geotransforms from these).
+        entry.resX = reader.metadata().geotransform[1];
+        entry.resY = reader.metadata().geotransform[5];
         entry.assetMinX = native.minX;
         entry.assetMinY = native.minY;
         entry.assetMaxX = native.maxX;
