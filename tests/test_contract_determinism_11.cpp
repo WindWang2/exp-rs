@@ -46,6 +46,7 @@
 #include <string>
 #include <vector>
 
+using namespace sicnu::contracts;
 using namespace sicnu::operators;
 using sicnu::testing::compareRastersBitExact;
 
