@@ -450,6 +450,7 @@ void ViewLinkController::hideAllMarkers()
     }
 }
 
+
 void ViewLinkController::propagateCursorFrom( sicnu::display::DisplayViewId sourceId,
                                               const QgsPointXY &point )
 {
@@ -490,7 +491,9 @@ void ViewLinkController::propagateCursorFrom( sicnu::display::DisplayViewId sour
         if ( !mCursorMarkers )
             continue;
         // The marker is a canvas child: the canvas destroys it with itself,
-        // and the QPointer catches any intermediate teardown.
+        // and this record is removed on viewAboutToBeRemoved — the only
+        // dangling window is between manager removal and record cleanup,
+        // which is synchronous.
         if ( !peer.marker )
         {
             auto *created = new QgsVertexMarker( target );

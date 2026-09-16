@@ -40,11 +40,11 @@
 #include "display/qgis_display_manager.h"
 
 #include <qgscoordinatereferencesystem.h>
+#include <qgsvertexmarker.h>
 
 class QgsMapCanvas;
 class QgsPointXY;
 class QgsRectangle;
-class QgsVertexMarker;
 
 namespace sicnu::app
 {
@@ -141,6 +141,10 @@ class ViewLinkController : public QObject
   private slots:
     void onViewAboutToBeRemoved( sicnu::display::DisplayViewId viewId );
 
+  protected:
+    /// Mouse-Leave tracking on registered canvases (clears the cursor link).
+    bool eventFilter( QObject *watched, QEvent *event ) override;
+
   private:
     struct ViewRecord
     {
@@ -148,7 +152,11 @@ class ViewLinkController : public QObject
         QString group;
         /// Previous extents in the view's own CRS, newest first.
         QVector<QgsRectangle> history;
-        QPointer<QgsVertexMarker> marker;
+        /// Crosshair marker — a CHILD of the view's canvas, so it dies with
+        /// the canvas. Raw pointer on purpose: QgsVertexMarker is a
+        /// QGraphicsItem, not a QObject; it is only ever dereferenced behind
+        /// a live canvasFor() lookup of the owning view.
+        QgsVertexMarker *marker = nullptr;
         /// Per-canvas connections from addView — disconnected in removeView
         /// so a remove/re-add cycle on a living canvas never double-connects.
         QMetaObject::Connection extentConn;
