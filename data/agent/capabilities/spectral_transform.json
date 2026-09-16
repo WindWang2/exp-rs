@@ -91,5 +91,57 @@
       "checks": ["existence", "opens", "dimensions", "finite_fraction", "nodata_fraction"]
     },
     "limitations": ["ACE cosine similarity assumes the target signature shares the scene radiometric domain"]
+  },
+  {
+    "id": "rs:local_rx_anomaly",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "dimensions", "finite_fraction", "nodata_fraction", "uncertainty"]
+    },
+    "limitations": [
+      "Local RX flags statistical outliers against a windowed background, not materials — confirm anomalies spectrally",
+      "Windows with fewer valid background samples than the minimum stay unscored (NaN) and are counted in unscoredPixels",
+      "Full covariance mode costs O(window * bands^2) per pixel; prefer covariance=diagonal above ~256 bands"
+    ]
+  },
+  {
+    "id": "rs:sparse_unmixing",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "dimensions", "finite_fraction", "nodata_fraction"]
+    },
+    "limitations": [
+      "L1 + non-negative abundances are sparse but not constrained to sum to one unless sumToOnePenalty is set (penalty, not hard constraint)",
+      "Near-duplicate atoms below collinearAngleDegrees refuse: an L1 split across near-identical atoms is not interpretable",
+      "Non-converged pixels are reported honestly via convergedFraction; raise maxIterations if the fraction is low"
+    ]
+  },
+  {
+    "id": "rs:spectral_similarity",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "verification": {
+      "expected_kind": "raster",
+      "checks": ["existence", "opens", "dimensions", "finite_fraction", "nodata_fraction"]
+    },
+    "limitations": [
+      "product_normalized is bounded in [0,1]; classic_tan is unbounded and explodes for near-orthogonal spectra",
+      "References with negative or zero-norm bands leave pixels unlabelled (-9999), never forced into a class"
+    ]
+  },
+  {
+    "id": "rs:endmember_analysis",
+    "family": "spectral_transform",
+    "extends": "family:spectral_transform",
+    "artifacts": { "output": { "kind": "table", "dtype": "float32" } },
+    "limitations": [
+      "Reduction caps at 512 input rows; angle-matrix embed caps at 64 rows",
+      "Sensor projection reflects the reduced native-space set — angles change under resampling by design",
+      "License/citation follow the input table; measured inputs keep their license story"
+    ]
   }
 ]

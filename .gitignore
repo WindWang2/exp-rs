@@ -316,3 +316,7 @@ data/labs/_tmp/
 !.planning/deployment-packaging-11/**
 !.planning/cli-mcp-agent-surface-11/
 !.planning/cli-mcp-agent-surface-11/**
+
+# spectral-intelligence-11: track planning notes (markdown only).
+!.planning/spectral-intelligence-11/
+!.planning/spectral-intelligence-11/**

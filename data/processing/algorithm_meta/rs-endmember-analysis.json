@@ -1,0 +1,12 @@
+{
+  "id" : "rs:endmember_analysis",
+  "input" : "",
+  "output" : "",
+  "tags" : 
+  [
+    "spectral",
+    "endmember",
+    "library"
+  ],
+  "task" : "endmember-analysis"
+}

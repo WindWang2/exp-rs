@@ -42,6 +42,7 @@ class LayerTreeMenuProvider;
 class QgsBrowserDockWidget;
 class QgsBrowserGuiModel;
 class SpectralProfileWidget;
+class SpectralWorkbenchPanel;
 class RsRoiSpectrumTool;
 class QgsGeoreferencerMainWindow;
 class QgsGeorefImageToMapWindow;
@@ -555,6 +556,10 @@ private:
 
     // Histogram stretch display
     class HistogramStretchWidget *m_histogramStretch = nullptr;
+
+    // Spectral Workbench 11 (endmember/table panel; independent dock)
+    class SpectralWorkbenchPanel *m_spectralWorkbench = nullptr;
+    QgsDockWidget *m_spectralWorkbenchDock = nullptr;
 
     // Status bar widgets (session meta)
     QLabel *m_readyLabel = nullptr;

@@ -21,6 +21,7 @@
 #include "agent/agent_copilot_dock_widget.h"
 #include "agent/workspace_state.h"
 #include "widgets/spectral_profile_widget.h"
+#include "widgets/spectral_workbench_panel.h"
 #include "widgets/guided_workflow_widget.h"
 #include "widgets/histogram_stretch_widget.h"
 #include "widgets/rs_toolbar_flow_host.h"
@@ -273,6 +274,17 @@ void QgisDesktopWindow::setupDockWidgets()
     tabifyDockWidget( m_spectralDock, m_histogramStretchDock );
     m_histogramStretchDock->hide();
 
+    // Spectral Workbench 11 (endmember/table panel; independent dock, hidden
+    // by default — the artifact path is loaded inside the panel).
+    m_spectralWorkbenchDock = new QgsDockWidget( tr( "Spectral Workbench 11" ), this );
+    m_spectralWorkbenchDock->setObjectName( "spectralWorkbenchDock" );
+    m_spectralWorkbenchDock->setAllowedAreas( Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea );
+    m_spectralWorkbench = new SpectralWorkbenchPanel( m_spectralWorkbenchDock );
+    m_spectralWorkbenchDock->setWidget( m_spectralWorkbench );
+    addDockWidget( Qt::RightDockWidgetArea, m_spectralWorkbenchDock );
+    tabifyDockWidget( m_histogramStretchDock, m_spectralWorkbenchDock );
+    m_spectralWorkbenchDock->hide();
+
     // Log Panel (Bottom, tabified)
     m_logDock = new LogPanel(this);
     m_logDock->setObjectName("logDock");
@@ -308,6 +320,8 @@ void QgisDesktopWindow::setupDockWidgets()
         m_windowMenu->addAction(m_identifyDock->toggleViewAction());
         m_windowMenu->addAction(m_spectralDock->toggleViewAction());
         m_windowMenu->addAction(m_histogramStretchDock->toggleViewAction());
+        if ( m_spectralWorkbenchDock )
+            m_windowMenu->addAction( m_spectralWorkbenchDock->toggleViewAction() );
         m_windowMenu->addAction(m_logDock->toggleViewAction());
         if ( m_jobPanel )
           m_windowMenu->addAction( m_jobPanel->toggleViewAction() );

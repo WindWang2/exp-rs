@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:sar_interferogram",
+  "input" : "raster",
+  "notes" : "Base chain only: interferogram + coherence. No topographic phase removal, no atmospheric correction, no PSI/SBAS \u2014 requests beyond the base chain must not be claimed (sar_insar.h honesty scope).",
+  "output" : "raster",
+  "tags" : 
+  [
+    "sar",
+    "insar",
+    "interferometry"
+  ],
+  "task" : "sar-insar"
+}

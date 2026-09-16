@@ -122,6 +122,10 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_spectral_reference_input.cpp
     rs/rs_spectral_unmixing_operator.cpp
     rs/rs_rx_anomaly_operator.cpp
+    rs/rs_local_rx_operator.cpp
+    rs/rs_sparse_unmixing_operator.cpp
+    rs/rs_spectral_similarity_operator.cpp
+    rs/rs_endmember_analysis_operator.cpp
     rs/rs_continuum_removal_operator.cpp
     rs/rs_spectral_resample_operator.cpp
     rs/rs_endmember_extraction_operator.cpp

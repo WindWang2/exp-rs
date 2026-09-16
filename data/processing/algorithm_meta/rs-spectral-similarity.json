@@ -1,0 +1,12 @@
+{
+  "id" : "rs:spectral_similarity",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "spectral",
+    "hyperspectral",
+    "similarity"
+  ],
+  "task" : "classification"
+}

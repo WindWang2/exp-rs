@@ -1,0 +1,13 @@
+{
+  "gpu" : false,
+  "id" : "rs:sar_coregister",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "sar",
+    "insar",
+    "coregistration"
+  ],
+  "task" : "sar-insar"
+}
