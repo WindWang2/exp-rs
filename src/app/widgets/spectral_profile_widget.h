@@ -138,3 +138,89 @@ private:
     /// raw value range. Both drawLine() and drawAxes() must agree on it.
     void plotRange( double *vMin, double *vMax ) const;
 };
+
+// ─── D13 · exp_gui spectral workbench seam ─────────────────────────────────
+// Namespaced D13 widgets (the legacy global SpectralProfileWidget above keeps
+// its exact behavior for existing call sites):
+//  - async, non-blocking profile sampling on a worker thread (queued result);
+//  - QPointer lifecycle guard — destroying the layer clears the widget;
+//  - 60 FPS QPainter rendering with crosshair tracking (no QtCharts);
+//  - featureSelected(wavelength, depth) where depth is the relative depth
+//    inside the current plot range.
+#include <atomic>
+
+#include <QFutureWatcher>
+#include <QtConcurrent/QtConcurrentRun>
+
+namespace exp_gui
+{
+
+    class SpectralProfileWidget : public QWidget
+    {
+        Q_OBJECT
+
+      public:
+        /// Worker-thread payload landed back through the QFutureWatcher.
+        struct ProfileSample
+        {
+            QVector<double> values;
+            QVector<double> wavelengths;
+            QString layerName;
+            bool ok = false;
+        };
+
+      public:
+        explicit SpectralProfileWidget( QWidget *parent = nullptr );
+        ~SpectralProfileWidget() override;
+
+        /// Starts an ASYNC band sampling for @p point (layer CRS coordinates)
+        /// on @p layer. The widget clears immediately and re-populates via a
+        /// queued GUI-thread callback when the worker finishes. Destroying
+        /// @p layer mid-flight (QPointer guard) yields an empty profile.
+        void setProfile( const QgsPointXY &point, QgsRasterLayer *layer );
+
+        /// Synchronously display a precomputed spectrum (also the worker
+        /// landing seam). Empty @p values clears the widget.
+        void setSpectrum( const QVector<double> &values,
+                          const QVector<double> &wavelengths = {},
+                          const QVector<QString> &labels = {},
+                          const QString &layerName = QString() );
+
+        void clear();
+        bool hasData() const noexcept { return m_hasData; }
+        bool isSampling() const noexcept { return m_sampling; }
+        QVector<double> currentValues() const { return m_values; }
+        QVector<double> currentWavelengths() const { return m_wavelengths; }
+
+      signals:
+        /// Crosshair tracking: @p wavelength at the cursor, @p depth is the
+        /// sample's relative depth inside the current plot range [0, 1].
+        void featureSelected( double wavelength, double depth );
+        void inspectionPointChanged( const QgsPointXY &point );
+        /// Emitted (queued) after an async profile lands.
+        void profileReady();
+
+      protected:
+        void paintEvent( QPaintEvent *event ) override;
+        void mouseMoveEvent( QMouseEvent *event ) override;
+
+      private:
+        QVector<double> sampleBands( const QString &sourcePath, const QgsPointXY &point,
+                                     int bandCount, QVector<double> *wavelengths );
+
+        QPointer<QgsRasterLayer> m_observedLayer;
+        QgsPointXY m_point;
+        QVector<double> m_values;
+        QVector<double> m_wavelengths;
+        QVector<QString> m_labels;
+        QString m_layerName;
+        bool m_hasData = false;
+        std::atomic<bool> m_sampling{ false };
+        double m_minValue = 0.0;
+        double m_maxValue = 0.0;
+        int m_hoverIndex = -1;
+        QFutureWatcher<ProfileSample> m_sampler;
+        QMetaObject::Connection m_layerDestroyedConnection;
+    };
+
+} // namespace exp_gui

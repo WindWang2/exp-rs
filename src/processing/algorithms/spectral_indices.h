@@ -126,3 +126,42 @@ namespace SpectralIndices
     bool baiUnit(const float *red, const float *nir, float *out, size_t count);
     bool baiDn(const float *red, const float *nir, float *out, size_t count);
 }
+
+// ─── D13 · typed index seam (Day 13) ───────────────────────────────────────
+// The D13 workbench computes indices through this seam: NoData sentinel
+// passthrough, NaN (never Inf) on degenerate denominators, and an explicit
+// scale guard for the additive-constant indices.
+namespace exp_spectral
+{
+    class SpectralIndices
+    {
+      public:
+        /// NDVI = (NIR - Red) / (NIR + Red) ∈ [-1, 1]; |denominator| < 1e-7 → NaN.
+        static bool ndvi( const float *nir, const float *red, float *out, size_t count,
+                          float noData = -9999.0f );
+
+        /// EVI = 2.5·(NIR - Red) / (NIR + 6·Red - 7.5·Blue + 1). With
+        /// @p isScaled == false the inputs are integer-scaled reflectance
+        /// (×10⁴) and are divided by 10⁴ first so the +1 constant stays
+        /// physically meaningful.
+        static bool evi( const float *nir, const float *red, const float *blue, float *out, size_t count,
+                         bool isScaled = true, float noData = -9999.0f );
+
+        /// SAVI = (NIR - Red) / (NIR + Red + L)·(1 + L), L = 0.5 default;
+        /// same scale guard as EVI.
+        static bool savi( const float *nir, const float *red, float *out, size_t count,
+                          float L = 0.5f, bool isScaled = true, float noData = -9999.0f );
+
+        /// MNDWI = (Green - SWIR) / (Green + SWIR) ∈ [-1, 1].
+        static bool mndwi( const float *green, const float *swir, float *out, size_t count,
+                           float noData = -9999.0f );
+
+        /// NDBI = (SWIR - NIR) / (SWIR + NIR) ∈ [-1, 1].
+        static bool ndbi( const float *swir, const float *nir, float *out, size_t count,
+                          float noData = -9999.0f );
+
+        /// EVI2 = 2.5·(NIR - Red) / (NIR + 2.4·Red + 1); same scale guard.
+        static bool evi2( const float *nir, const float *red, float *out, size_t count,
+                          bool isScaled = true, float noData = -9999.0f );
+    };
+} // namespace exp_spectral

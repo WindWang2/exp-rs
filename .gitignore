@@ -276,3 +276,8 @@ data/labs/_tmp/
 !.planning/execution-runtime-convergence-11/
 .planning/execution-runtime-convergence-11/*
 !.planning/execution-runtime-convergence-11/*.md
+
+# radiometric-spectral-workbench: track planning notes (markdown only; logs stay local).
+!.planning/radiometric-spectral-workbench/
+.planning/radiometric-spectral-workbench/*
+!.planning/radiometric-spectral-workbench/*.md

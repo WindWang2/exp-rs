@@ -1,6 +1,7 @@
 // src/processing/algorithms/spectral_unmixing.cpp — linear spectral unmixing
 #include "spectral_unmixing.h"
 #include "processing/algorithms/primitives/dense_linalg.h"
+#include "processing/algorithms/endmember_extraction.h"
 
 #include <algorithm>
 #include <cmath>
@@ -511,3 +512,174 @@ bool unmixFcls( const float *pixels, size_t count, int bands,
 }
 
 } // namespace SpectralUnmixing
+
+// ─── D13 · typed unmixing seam (Day 13) ───────────────────────────────────
+namespace exp_spectral
+{
+  bool SpectralUnmixing::extractEndmembers( const float *pixels, size_t pixelCount, int bandCount,
+                                            int endmemberCount, EndmemberExtractionMethod method,
+                                            std::vector<float> *outEndmembers, unsigned int seed )
+  {
+    Q_UNUSED( seed ); // both extractors below are deterministic; seed reserved at the seam
+    if ( outEndmembers == nullptr )
+      return false;
+    outEndmembers->clear();
+    if ( pixels == nullptr || pixelCount == 0 || bandCount <= 0 ||
+         endmemberCount <= 0 || static_cast<size_t>( endmemberCount ) > pixelCount )
+      return false;
+
+    if ( method == EndmemberExtractionMethod::PixelPurityIndex )
+    {
+      // Delegate to the proven seeded PPI kernel (legacy namespace).
+      EndmemberExtraction::EndmemberResult ppi;
+      if ( !EndmemberExtraction::pixelPurityIndex( pixels, pixelCount, bandCount,
+                                                   endmemberCount, 256, &ppi ) )
+        return false;
+      outEndmembers->resize( ppi.endmembers.size() );
+      std::copy( ppi.endmembers.begin(), ppi.endmembers.end(), outEndmembers->begin() );
+      return true;
+    }
+
+    // Vertex Component Analysis (sequential simplex growing, Nascimento–Dias
+    // spirit): each step takes the pixel farthest from the AFFINE HULL of the
+    // endmembers found so far (first pick: farthest from the mean; later
+    // picks: farthest from the hull through the first pick), and returns the
+    // ORIGINAL pixel spectra at those indices. Measuring against the affine
+    // hull — not the mean-relative linear span — is what lets a noiseless
+    // p-endmember mixture cube (which spans exactly p−1 affine dimensions)
+    // still expose its p-th vertex instead of collapsing to zero residual.
+    const size_t B = static_cast<size_t>( bandCount );
+    std::vector<double> mean( B, 0.0 );
+    for ( size_t p = 0; p < pixelCount; ++p )
+      for ( size_t b = 0; b < B; ++b )
+        mean[b] += pixels[p * B + b];
+    for ( size_t b = 0; b < B; ++b )
+      mean[b] /= static_cast<double>( pixelCount );
+
+    // Orthonormal basis Q of the hull directions already "used up"
+    // (differences relative to the first chosen pixel).
+    std::vector<std::vector<double>> basis;
+    basis.reserve( static_cast<size_t>( endmemberCount ) );
+    std::vector<size_t> chosen;
+    chosen.reserve( static_cast<size_t>( endmemberCount ) );
+
+    for ( int k = 0; k < endmemberCount; ++k )
+    {
+      double bestNorm = -1.0;
+      size_t bestPixel = 0;
+      std::vector<double> bestDir( B, 0.0 );
+      bool haveCandidate = false;
+
+      // Reference point: the mean for the first pick, the first chosen
+      // endmember afterwards (hull origin).
+      const bool useMean = ( k == 0 );
+      const float *referencePixel = useMean ? nullptr : pixels + chosen[0] * B;
+
+      for ( size_t p = 0; p < pixelCount; ++p )
+      {
+        if ( std::find( chosen.begin(), chosen.end(), p ) != chosen.end() )
+          continue;
+        // Project (x - reference) onto the orthogonal complement of span(Q).
+        std::vector<double> dir( B );
+        for ( size_t b = 0; b < B; ++b )
+        {
+          const double refValue = useMean ? mean[b] : static_cast<double>( referencePixel[b] );
+          dir[b] = pixels[p * B + b] - refValue;
+        }
+        for ( const std::vector<double> &q : basis )
+        {
+          double dot = 0.0;
+          for ( size_t b = 0; b < B; ++b )
+            dot += dir[b] * q[b];
+          for ( size_t b = 0; b < B; ++b )
+            dir[b] -= dot * q[b];
+        }
+        double norm2 = 0.0;
+        for ( size_t b = 0; b < B; ++b )
+          norm2 += dir[b] * dir[b];
+        if ( norm2 > bestNorm )
+        {
+          bestNorm = norm2;
+          bestPixel = p;
+          bestDir = std::move( dir );
+          haveCandidate = true;
+        }
+      }
+      if ( !haveCandidate || !( bestNorm > 1e-12 ) )
+        return false; // every remaining pixel lies on the endmember hull:
+                      // the cube carries fewer vertices than requested
+
+      const size_t chosenPixel = bestPixel;
+      chosen.push_back( chosenPixel );
+      if ( k == 0 )
+        continue; // no hull direction exists yet; the second pick anchors it
+
+      // Gram-Schmidt the new hull direction (relative to the anchor) into the
+      // orthonormal basis.
+      std::vector<double> q = bestDir;
+      for ( const std::vector<double> &existing : basis )
+      {
+        double dot = 0.0;
+        for ( size_t b = 0; b < B; ++b )
+          dot += q[b] * existing[b];
+        for ( size_t b = 0; b < B; ++b )
+          q[b] -= dot * existing[b];
+      }
+      double norm = 0.0;
+      for ( size_t b = 0; b < B; ++b )
+        norm += q[b] * q[b];
+      norm = std::sqrt( norm );
+      if ( !( norm > 1e-12 ) )
+        return false; // collapsed hull direction: degenerate cube
+      for ( size_t b = 0; b < B; ++b )
+        q[b] /= norm;
+      basis.push_back( std::move( q ) );
+    }
+
+    // Emit the original spectra at the selected pure-pixel indices.
+    outEndmembers->resize( static_cast<size_t>( endmemberCount ) * B );
+    for ( int k = 0; k < endmemberCount; ++k )
+    {
+      const size_t src = chosen[static_cast<size_t>( k )] * B;
+      std::copy( pixels + src, pixels + src + B, outEndmembers->begin() + static_cast<size_t>( k ) * B );
+    }
+    return true;
+  }
+
+  bool SpectralUnmixing::unmixFcls( const float *pixels, size_t pixelCount, int bandCount,
+                                    const float *endmembers, int endmemberCount,
+                                    UnmixingResult *result, QString *errorMessage )
+  {
+    if ( result == nullptr )
+    {
+      if ( errorMessage )
+        *errorMessage = QStringLiteral( "result sink must not be null" );
+      return false;
+    }
+
+    // Delegate to the proven penalty-augmented Lawson–Hanson kernel.
+    ::SpectralUnmixing::UnmixResult legacy;
+    if ( !::SpectralUnmixing::unmixFcls( pixels, pixelCount, bandCount, endmembers,
+                                         endmemberCount, &legacy, errorMessage ) )
+      return false;
+
+    result->abundances = std::move( legacy.abundances );
+    result->reconstructionError = std::move( legacy.reconstructionError );
+
+    // QA metric: mean |sum(f) - 1| — measured, not assumed.
+    double violation = 0.0;
+    if ( pixelCount > 0 )
+    {
+      for ( size_t p = 0; p < pixelCount; ++p )
+      {
+        double sum = 0.0;
+        for ( int e = 0; e < endmemberCount; ++e )
+          sum += result->abundances[p * static_cast<size_t>( endmemberCount ) + static_cast<size_t>( e )];
+        violation += std::abs( sum - 1.0 );
+      }
+      violation /= static_cast<double>( pixelCount );
+    }
+    result->meanSumConstraintViolation = violation;
+    return true;
+  }
+} // namespace exp_spectral

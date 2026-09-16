@@ -7,6 +7,7 @@
 #include "temporal_collection_tools.h"
 #include "temporal_workspace_tools.h"
 #include "raster_inspect_tool.h"
+#include "spectral_spatial_tools.h"
 #include "vector_inspect_tool.h"
 #include "workspace_tools.h"
 #include "governance_tools.h"
@@ -223,6 +224,9 @@ void SpatialToolRegistry::registerBuiltinTools()
 {
   static const std::vector<SpatialToolPtr> kBuiltinTools = {
     std::make_shared<RasterInspectTool>(),
+    // D13 · Radiometric Spectral Workbench: agent spectral tools.
+    std::make_shared<exp_agent::SpectralInspectTool>(),
+    std::make_shared<exp_agent::ValidateBoaPhysicsTool>(),
     std::make_shared<VectorInspectTool>(),
     std::make_shared<ModelCatalogTool>(),
     std::make_shared<TemporalCreateCollectionTool>(),

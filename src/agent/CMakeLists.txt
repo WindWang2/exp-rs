@@ -115,6 +115,9 @@ add_library(sicnu_agent SHARED
   spatial_tools/spatial_tool.h
   spatial_tools/raster_inspect_tool.cpp
   spatial_tools/raster_inspect_tool.h
+  # D13 · Radiometric Spectral Workbench: agent spectral tools
+  spatial_tools/spectral_spatial_tools.cpp
+  spatial_tools/spectral_spatial_tools.h
   spatial_tools/vector_inspect_tool.cpp
   spatial_tools/vector_inspect_tool.h
   spatial_tools/model_catalog_tool.cpp

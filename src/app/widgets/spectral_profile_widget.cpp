@@ -586,3 +586,317 @@ void SpectralProfileWidget::drawAxes( QPainter &painter, const QRect &chartRect 
     painter.drawText( 0, 0, yTitle );
     painter.restore();
 }
+
+// ─── D13 · exp_gui spectral workbench seam ─────────────────────────────────
+#include <QMouseEvent>
+#include <QPolygonF>
+
+namespace exp_gui
+{
+  namespace
+  {
+    const QMargins kChartMargins{ 56, 18, 18, 34 };
+
+    /// Worker-side band sampling: opens its OWN GDAL handle (GDAL datasets
+    /// must never be shared across threads) and reads one pixel across all
+    /// bands plus the WAVELENGTH metadata (nm) per band. Free function — no
+    /// QObject participation on the worker thread.
+    QVector<double> sampleBandsGdal( const QString &sourcePath, const QgsPointXY &point,
+                                     int bandCount, QVector<double> *wavelengths )
+    {
+      QVector<double> values;
+      wavelengths->clear();
+      if ( bandCount <= 0 )
+        return values;
+      values.resize( bandCount );
+      wavelengths->resize( bandCount );
+
+      GDALDatasetH dataset = GDALOpenEx( sourcePath.toUtf8().constData(),
+                                         GDAL_OF_RASTER | GDAL_OF_READONLY, nullptr, nullptr, nullptr );
+      if ( !dataset )
+        return QVector<double>();
+
+      double geotransform[6] = { 0, 1, 0, 0, 0, 1 };
+      GDALGetGeoTransform( dataset, geotransform );
+      // North-up affine inverse (world file convention, gt[2] = gt[4] = 0).
+      const double col = ( point.x() - geotransform[0] ) / geotransform[1];
+      const double row = ( point.y() - geotransform[3] ) / geotransform[5];
+      const bool inRaster = col >= 0 && row >= 0 && col < GDALGetRasterXSize( dataset ) &&
+                            row < GDALGetRasterYSize( dataset );
+
+      for ( int b = 1; b <= bandCount; ++b )
+      {
+        GDALRasterBandH band = GDALGetRasterBand( dataset, b );
+        double pixel[1] = { 0.0 };
+        double value = std::numeric_limits<double>::quiet_NaN();
+        int hasNoData = false;
+        if ( inRaster &&
+             GDALRasterIO( band, GF_Read, static_cast<int>( col ), static_cast<int>( row ), 1, 1,
+                           pixel, 1, 1, GDT_Float64, 0, 0 ) == CE_None )
+        {
+          const double sentinel = GDALGetRasterNoDataValue( band, &hasNoData );
+          const bool masked = hasNoData && pixel[0] == sentinel;
+          if ( !masked && std::isfinite( pixel[0] ) )
+            value = pixel[0];
+        }
+        values[b - 1] = value;
+
+        const char *wl = GDALGetMetadataItem( band, "WAVELENGTH", nullptr );
+        bool ok = false;
+        const double wlValue = wl ? QString::fromUtf8( wl ).toDouble( &ok ) : 0.0;
+        ( *wavelengths )[b - 1] = ( ok && wlValue > 0.0 ) ? wlValue : 0.0;
+      }
+      GDALClose( dataset );
+      return values;
+    }
+  } // namespace
+
+  SpectralProfileWidget::SpectralProfileWidget( QWidget *parent )
+    : QWidget( parent )
+  {
+    setMouseTracking( true ); // crosshair tracking without button press
+    setMinimumSize( 320, 220 );
+    connect( &m_sampler, &QFutureWatcher<ProfileSample>::finished, this, [this] {
+      m_sampling = false;
+      if ( m_sampler.isCanceled() )
+      {
+        update();
+        return;
+      }
+      // finished() implies the future is done: the result is available.
+      const ProfileSample sample = m_sampler.result();
+      if ( sample.ok )
+      {
+        setSpectrum( sample.values, sample.wavelengths, {}, m_layerName );
+        emit profileReady();
+      }
+      update();
+    } );
+  }
+
+  SpectralProfileWidget::~SpectralProfileWidget() = default;
+
+  void SpectralProfileWidget::setProfile( const QgsPointXY &point, QgsRasterLayer *layer )
+  {
+    if ( !layer || !layer->isValid() )
+    {
+      clear();
+      return;
+    }
+    if ( m_sampling )
+      return; // one in-flight sampling: the widget keeps showing its current profile
+
+    if ( m_observedLayer != layer )
+    {
+      // Lifecycle guard: when the layer dies (user removed it from the
+      // project) the widget resets itself instead of touching a dead layer.
+      if ( m_layerDestroyedConnection )
+        disconnect( m_layerDestroyedConnection );
+      m_layerDestroyedConnection =
+        connect( layer, &QObject::destroyed, this, [this]( QObject * ) {
+          m_observedLayer.clear();
+          m_sampler.cancel();
+          clear();
+        } );
+      m_observedLayer = layer;
+    }
+    m_point = point;
+    m_layerName = layer->name();
+
+    clear();
+    emit inspectionPointChanged( point );
+
+    m_sampling = true;
+    const QString sourcePath = layer->source();
+    const int bandCount = layer->bandCount();
+    const QString layerName = m_layerName;
+    const QPointer<SpectralProfileWidget> self( this );
+    m_sampler.setFuture( QtConcurrent::run( [self, sourcePath, point, bandCount, layerName]() -> ProfileSample {
+      ProfileSample sample;
+      if ( !self )
+        return sample; // widget died mid-flight: nothing to land on
+      sample.values = sampleBandsGdal( sourcePath, point, bandCount, &sample.wavelengths );
+      sample.ok = !sample.values.isEmpty();
+      sample.layerName = layerName;
+      return sample;
+    } ) );
+  }
+
+  void SpectralProfileWidget::setSpectrum( const QVector<double> &values,
+                                           const QVector<double> &wavelengths,
+                                           const QVector<QString> &labels, const QString &layerName )
+  {
+    if ( values.isEmpty() )
+    {
+      clear();
+      return;
+    }
+    m_values = values;
+    m_wavelengths = wavelengths;
+    m_wavelengths.resize( m_values.size() );
+    m_labels = labels;
+    m_layerName = layerName;
+    m_hasData = false;
+    m_minValue = std::numeric_limits<double>::infinity();
+    m_maxValue = -std::numeric_limits<double>::infinity();
+    for ( double v : m_values )
+    {
+      if ( std::isnan( v ) )
+        continue;
+      m_hasData = true;
+      m_minValue = std::min( m_minValue, v );
+      m_maxValue = std::max( m_maxValue, v );
+    }
+    if ( m_minValue >= m_maxValue )
+      m_maxValue = m_minValue + 1.0;
+    m_hoverIndex = -1;
+    update();
+  }
+
+  void SpectralProfileWidget::clear()
+  {
+    m_values.clear();
+    m_wavelengths.clear();
+    m_labels.clear();
+    m_hasData = false;
+    m_minValue = m_maxValue = 0.0;
+    m_hoverIndex = -1;
+    update();
+  }
+
+  void SpectralProfileWidget::paintEvent( QPaintEvent * )
+  {
+    QPainter painter( this );
+    painter.setRenderHint( QPainter::Antialiasing, true );
+
+    const QRect chart = rect().marginsRemoved( kChartMargins );
+    painter.fillRect( chart, QColor( 25, 28, 34 ) );
+    painter.setPen( QColor( 90, 98, 110 ) );
+    painter.drawRect( chart );
+
+    if ( !m_hasData )
+    {
+      painter.setPen( QColor( 128, 136, 148 ) );
+      painter.drawText( rect(), Qt::AlignCenter, tr( "Click the map to inspect a spectral profile" ) );
+      return;
+    }
+
+    // Wavelength-scaled X axis when every band carries WAVELENGTH metadata,
+    // otherwise a plain band-index axis (same rule as the legacy widget).
+    const int n = m_values.size();
+    bool useWavelengths = m_wavelengths.size() == n;
+    for ( int i = 0; useWavelengths && i < n; ++i )
+      useWavelengths = m_wavelengths[i] > 0.0;
+    const double wlMin = useWavelengths ? m_wavelengths.front() : 0.0;
+    const double wlMax = useWavelengths ? m_wavelengths.back() : static_cast<double>( n - 1 );
+
+    auto xPos = [&]( int i ) -> double {
+      const double t = useWavelengths && wlMax > wlMin
+                         ? ( m_wavelengths[i] - wlMin ) / ( wlMax - wlMin )
+                         : ( n > 1 ? static_cast<double>( i ) / ( n - 1 ) : 0.0 );
+      return chart.left() + t * chart.width();
+    };
+    auto yPos = [&]( double v ) -> double {
+      return chart.bottom() - ( v - m_minValue ) / ( m_maxValue - m_minValue ) * chart.height();
+    };
+
+    painter.setPen( QColor( 128, 136, 148 ) );
+    painter.drawText( QRect( chart.left(), chart.bottom() + 4, chart.width(), 16 ),
+                      Qt::AlignHCenter,
+                      useWavelengths ? tr( "wavelength (nm)" ) : tr( "band" ) );
+    painter.drawText( QRect( chart.left(), chart.bottom() + 4, 60, 16 ), Qt::AlignLeft,
+                      QString::number( useWavelengths ? wlMin : 0.0, 'f', 0 ) );
+    painter.drawText( QRect( chart.right() - 60, chart.bottom() + 4, 60, 16 ), Qt::AlignRight,
+                      QString::number( useWavelengths ? wlMax : n - 1.0, 'f', 0 ) );
+
+    QPolygonF line;
+    line.reserve( n );
+    for ( int i = 0; i < n; ++i )
+    {
+      if ( std::isnan( m_values[i] ) )
+        continue;
+      line << QPointF( xPos( i ), yPos( m_values[i] ) );
+    }
+    QPen pen( QColor( 92, 200, 245 ), 1.6 );
+    painter.setPen( pen );
+    painter.drawPolyline( line );
+
+    // Crosshair at the hover sample.
+    if ( m_hoverIndex >= 0 && m_hoverIndex < n && !std::isnan( m_values[m_hoverIndex] ) )
+    {
+      const QPointF p( xPos( m_hoverIndex ), yPos( m_values[m_hoverIndex] ) );
+      QPen cross( QColor( 250, 200, 90 ), 1.0, Qt::DashLine );
+      painter.setPen( cross );
+      painter.drawLine( QPointF( p.x(), chart.top() ), QPointF( p.x(), chart.bottom() ) );
+      painter.drawEllipse( p, 3.0, 3.0 );
+    }
+  }
+
+  void SpectralProfileWidget::mouseMoveEvent( QMouseEvent *event )
+  {
+    if ( !m_hasData || m_values.isEmpty() )
+    {
+      event->ignore();
+      return;
+    }
+    const QRect chart = rect().marginsRemoved( kChartMargins );
+    const int n = m_values.size();
+    bool useWavelengths = m_wavelengths.size() == n;
+    for ( int i = 0; useWavelengths && i < n; ++i )
+      useWavelengths = m_wavelengths[i] > 0.0;
+    const double wlMin = useWavelengths ? m_wavelengths.front() : 0.0;
+    const double wlMax = useWavelengths ? m_wavelengths.back() : static_cast<double>( n - 1 );
+
+    int best = -1;
+    double bestDistance = std::numeric_limits<double>::infinity();
+    for ( int i = 0; i < n; ++i )
+    {
+      if ( std::isnan( m_values[i] ) )
+        continue;
+      const double w = useWavelengths ? m_wavelengths[i] : static_cast<double>( i );
+      const double t = wlMax > wlMin ? ( w - wlMin ) / ( wlMax - wlMin ) : 0.0;
+      const double distance = std::abs( chart.left() + t * chart.width() - event->position().x() );
+      if ( distance < bestDistance )
+      {
+        bestDistance = distance;
+        best = i;
+      }
+    }
+    if ( best != m_hoverIndex )
+    {
+      m_hoverIndex = best;
+      update(); // O(1) work per frame — comfortably inside the 60 FPS budget
+    }
+    if ( best >= 0 )
+    {
+      // The crosshair is a continuous readout: report the spectrum at the
+      // CURSOR (linear interpolation between the bracketing samples, clamped
+      // into the chart), not the nearest band index — snapping would emit a
+      // boundary sample whenever the cursor sits beside the chart midpoint.
+      const double tCursor = chart.width() > 0
+                               ? std::clamp( ( event->position().x() - chart.left() )
+                                               / static_cast<double>( chart.width() ),
+                                             0.0, 1.0 )
+                               : 0.0;
+      const double wavelength = useWavelengths
+                                  ? wlMin + tCursor * ( wlMax - wlMin )
+                                  : tCursor * static_cast<double>( n - 1 );
+      double valueCursor = m_values[best];
+      if ( n >= 2 )
+      {
+        const double pos = tCursor * static_cast<double>( n - 1 );
+        const int i0 = static_cast<int>( std::floor( pos ) );
+        const int i1 = std::min( i0 + 1, n - 1 );
+        const double frac = pos - static_cast<double>( i0 );
+        if ( i0 >= 0 && i1 < n && !std::isnan( m_values[i0] ) && !std::isnan( m_values[i1] ) )
+          valueCursor = m_values[i0] + frac * ( m_values[i1] - m_values[i0] );
+      }
+      const double depth = m_maxValue > m_minValue
+                             ? std::clamp( ( m_maxValue - valueCursor ) / ( m_maxValue - m_minValue ),
+                                           0.0, 1.0 )
+                             : 0.0;
+      emit featureSelected( wavelength, depth );
+    }
+    event->accept();
+  }
+} // namespace exp_gui
