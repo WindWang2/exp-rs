@@ -177,6 +177,10 @@ vendor/
 !.planning/hyperspectral-spectral-intelligence-10/
 .planning/hyperspectral-spectral-intelligence-10/*
 !.planning/hyperspectral-spectral-intelligence-10/*.md
+# radiometric-physics-11: track planning notes (markdown only; logs stay local).
+!.planning/radiometric-physics-11/
+.planning/radiometric-physics-11/*
+!.planning/radiometric-physics-11/*.md
 # cn-eo-products-sensor-physics-10: track planning notes (markdown only; logs stay local).
 !.planning/cn-eo-products-sensor-physics-10/
 .planning/cn-eo-products-sensor-physics-10/*

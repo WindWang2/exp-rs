@@ -27,6 +27,7 @@ model: same values, one owner).
 
 | Family | Operators | Determinism grade | Key refusals |
 |---|---|---|---|
+| Optical | `rs:solar_geometry`, `rs:brdf_normalization`, `rs:radiometric_qa` (radiometric-physics-11) | bit-exact (single-threaded, fixed order) | invalid date/time or lat/lon; missing sun/view angles (metadata or parameters, never defaults); nonphysical BRDF weights; cloud-mask grid mismatch; unknown atmospheric provider ids (radiometric-physics-11, see [radiometric-physics-11.md](radiometric-physics-11.md)) |
 | Optical | `rs:topographic_correction` | bit-exact (single-threaded, fixed order) | grid mismatch; degenerate C-regression (|b| < 1e-6); sun geometry out of range |
 | Optical | `rs:spectral_index` + GNDVI/NDMI/MSAVI/ARVI/EVI2/BAI/UI/BUI | bit-exact (streaming element-wise) | band out of range (existing) |
 | Spectral | `rs:spectral_derivative` | bit-exact | missing/non-ascending wavelength axis (index-space derivatives are refused) |
