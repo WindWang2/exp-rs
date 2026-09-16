@@ -33,4 +33,14 @@ No wall-clock numbers are used as correctness gates. Scale evidence:
 
 ## Host observations (recorded during builds)
 
-- (to be appended per build: command, -j level, peak RSS %, load, duration)
+- 2026-09-15 configure: `cmake --preset dev-default -G Ninja -DSICNU_LAB_SKIP_PYTHON_BINDINGS=ON
+  -DFETCHCONTENT_SOURCE_DIR_CATCH2=<main-repo cache>` (first configure failed on a Catch2
+  git-clone TLS error; reused the main repo's populated _deps source). Exit 0.
+- 2026-09-15/16 cold build (`ninja -j2`, targets: 7 terrain suites + sicnu_geo_rs_cli +
+  capability_knowledge_tool): ~1900 ninja steps, wall ≈ 2.5 h shared with concurrent tracks
+  (host load 12–14 of 16 cores throughout; memory peak ≈ 20/62 GiB). -j2 cap held; no -j1
+  degradation was needed.
+- 2026-09-16 scale run: `SICNU_TERRAIN_SCALE_TESTS=ON ./tests/test_terrain_hydrology
+  "*hermetic scale*"` → 2048² (4.19 M cells) fill+D∞+accumulation+monotonicity in 6.99 s,
+  ≈ 10 float frames ≈ 170 MB RSS budget by the frame model (not wall-clock gated; the
+  gate is the mass/monotonicity invariant).

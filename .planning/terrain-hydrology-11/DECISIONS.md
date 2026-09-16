@@ -94,14 +94,16 @@ authority for LoS math).
 
 ## D8 — Surface integration minimality
 
-Extend `rs:terrain_flow` + `rs:terrain_analysis` products (same operator id →
-no new registry entries for those); add exactly two new operators
-(`rs:terrain_viewshed`, `rs:terrain_solar`) because their parameter families
-(observer geometry, sun track) don't fit the existing product enums without
-making required-parameter semantics murky. New operators get generated v2
-capability sidecars via `capability_knowledge_tool gen-meta` so
-test_capability_knowledge stays green without pin edits (coverage set equality,
-monotone floor unchanged).
+Extend `rs:terrain_flow` (hydrology products). New operators: three, not two —
+`rs:terrain_viewshed`, `rs:terrain_solar`, and `rs:terrain_landform`. The third
+addition is deliberate: `rs:terrain_analysis` is hard-wired to the tiled
+3×3-halo streaming path (GdalBlockStream); its schema, memory policy and
+halo semantics are wrong for full-frame landform kernels (integral images,
+line-of-sight sweeps), and forking the execution model inside one operator
+would trade a small registration cost for a much larger correctness surface.
+New operators get generated v2 capability sidecars via
+`capability_knowledge_tool gen-meta` so test_capability_knowledge stays green
+without pin edits (coverage set equality, monotone floor unchanged).
 
 ## D9 — Large-DEM path
 

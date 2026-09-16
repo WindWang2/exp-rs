@@ -1,4 +1,4 @@
-<!-- 由 scripts/capability_knowledge_tool gen-pages 自动生成 — 手动编辑是缺陷（ADR 0146）。 修改请改对应 sidecar 后重新生成。 -->
+<!-- 由 scripts/capability_knowledge_tool gen-pages 自动生成 — 手动编辑是缺陷（ADR 0154）。 修改请改对应 sidecar 后重新生成。 -->
 
 # 雷达 SAR 处理（sar）
 
@@ -191,9 +191,9 @@ InSAR 相位滤波：对复干涉图做 Goldstein-Werner 空间自适应滤波�
 - 模态：sar
 - 输入：input（raster）
 - 输出：bands（string）、output（raster）
-- 参数：decomposition（enum）、hhBand（numeric）、hvBand（numeric）、output（string）、vhBand（numeric）、vvBand（numeric）、windowSize（numeric）
+- 参数：assumeReciprocity（numeric）、decomposition（enum）、hhBand（numeric）、hvBand（numeric）、output（string）、vhBand（numeric）、vvBand（numeric）、windowSize（numeric）
 - 前置条件：Complex CFloat32 HH/HV/VV (reciprocal) channels from a full-pol SLC product; calibrated scattering amplitudes.；必须为 CFloat32 复 HH/HV/VV 全极化通道；dual-pol/detected 输入被拒绝（POLARIZATION_MISMATCH）。
-- 局限：Dual-pol detected inputs are refused — no quad-pol approximation from dual-pol data.；Single-look ensembles are rank 1: H is identically 0 and anisotropy is NaN — use windowSize > 1 for H/A/alpha.；Freeman-Durden/Yamaguchi powers may clamp negative residuals to 0 (documented SPAN break near the noise floor).；单视集合秩为 1：H 恒为 0、anisotropy 为 NaN——用 windowSize>1 的窗口平均获得有效 H/A/α，代价是有效分辨率下降。；Freeman-Durden/Yamaguchi 负残差被钳制为 0（噪声底附近 SPAN 不严格守恒）。
+- 局限：Dual-pol detected inputs are refused — no quad-pol approximation from dual-pol data.；Single-look ensembles are rank 1: H is identically 0 and anisotropy is NaN — use windowSize > 1 for H/A/alpha.；Freeman-Durden/Yamaguchi powers may clamp negative residuals to 0 (documented SPAN break near the noise floor).；Cost is O(windowSize^2) per pixel: windowSize=101 is a deliberately expensive ensemble — use the smallest window that decorrelates the speckle.；单视集合秩为 1：H 恒为 0、anisotropy 为 NaN——用 windowSize>1 的窗口平均获得有效 H/A/α，代价是有效分辨率下降。；Freeman-Durden/Yamaguchi 负残差被钳制为 0（噪声底附近 SPAN 不严格守恒）。
 - 适用地物：农田、森林、城市（SAR）
 - 适用场景：机制识别与分类输入、地表覆盖制图
 - 失败模式：
