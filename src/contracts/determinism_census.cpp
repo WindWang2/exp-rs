@@ -23,6 +23,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace sicnu::contracts {
 
@@ -172,14 +173,19 @@ struct ClassSlice
     std::string file;
     std::string body;
     std::vector<std::string> bases;
+    bool isHeader = false;
 };
 
-/// Locate class declaration slices for @p classNames across src/**. Only
-/// files whose text mentions at least one wanted name are read.
-std::map<std::string, ClassSlice> scanClassSlices(
+/// Locate class declaration slices for @p classNames across src/**. A class
+/// may have several textual candidates (a comment can quote a declaration —
+/// even this file's own documentation once did); ALL candidates are kept and
+/// the resolver prefers one whose body actually carries an override, then
+/// header files, then the first seen. Only files whose text mentions at
+/// least one wanted name are read.
+std::map<std::string, std::vector<ClassSlice>> scanClassSlices(
     const std::string &sourceRoot, const std::set<std::string> &classNames )
 {
-    std::map<std::string, ClassSlice> slices;
+    std::map<std::string, std::vector<ClassSlice>> slices;
     if ( classNames.empty() )
         return slices;
 
@@ -190,9 +196,8 @@ std::map<std::string, ClassSlice> scanClassSlices(
 
     // Match `class [Export] Name [final] [: bases] {` then cut the body at
     // the next line-start `};`. The tree styles include export macros and
-    // trailing `final` (`class IoTranslateOperator final : public ...`), so
-    // the NAME is taken from the trailing token group and `final` itself is
-    // never accepted as a class name.
+    // trailing `final` markers, so the NAME is taken from the trailing token
+    // group and `final` itself is never accepted as a class name.
     static const std::regex declRe(
         R"re(\bclass\s+((?:\w+\s+)*)(\w+)\s*(?::\s*([^{]+))?\{)re" );
 
@@ -242,10 +247,11 @@ std::map<std::string, ClassSlice> scanClassSlices(
                 name = last == std::string::npos ? prefix
                                                  : prefix.substr( last + 1 );
             }
-            if ( !classNames.count( name ) || slices.count( name ) )
+            if ( !classNames.count( name ) )
                 continue;
             ClassSlice slice;
             slice.file = rel;
+            slice.isHeader = ( ext != ".cpp" );
             const size_t bodyStart = static_cast<size_t>( ( *mit ).position() )
                                      + static_cast<size_t>( ( *mit ).length() ) - 1;
             const size_t close = text.find( "\n};", bodyStart );
@@ -276,7 +282,7 @@ std::map<std::string, ClassSlice> scanClassSlices(
                 if ( !base.empty() )
                     slice.bases.push_back( std::move( base ) );
             }
-            slices.emplace( name, std::move( slice ) );
+            slices[name].push_back( std::move( slice ) );
         }
         it.increment( ec );
     }
@@ -314,16 +320,32 @@ OverrideFacts factsInBody( const std::string &body )
     return f;
 }
 
+/// Pick the best candidate slice for a class: one whose body actually
+/// carries an override beats a header candidate beats the first seen.
+/// (Comments can quote declarations; the quoted text must not shadow the
+/// real declaration.)
+const ClassSlice *bestSlice( const std::vector<ClassSlice> &candidates )
+{
+    const ClassSlice *best = nullptr;
+    for ( const ClassSlice &c : candidates )
+    {
+        if ( factsInBody( c.body ).found )
+            return &c;
+        if ( !best || ( !best->isHeader && c.isHeader ) )
+            best = &c;
+    }
+    return best;
+}
+
 /// Resolve the effective override for @p className through its (bounded)
 /// inheritance chain.
 DeterminismOverrideInfo resolveOverrides( const std::string &className,
-                                          const ClassSlice &slice,
-                                          const std::map<std::string, ClassSlice> &all,
+                                          const std::vector<ClassSlice> &candidates,
+                                          const std::map<std::string, std::vector<ClassSlice>> &all,
                                           std::string &note )
 {
     DeterminismOverrideInfo info;
     info.operatorClass = className;
-    info.file = slice.file;
     info.classFound = true;
 
     std::string current = className;
@@ -336,7 +358,16 @@ DeterminismOverrideInfo resolveOverrides( const std::string &className,
                 note += "ancestor '" + current + "' not in scan; ";
             break;
         }
-        const OverrideFacts f = factsInBody( it->second.body );
+        const ClassSlice *slice = bestSlice( it->second );
+        if ( !slice )
+        {
+            if ( depth > 0 )
+                note += "ancestor '" + current + "' has no usable slice; ";
+            break;
+        }
+        if ( depth == 0 )
+            info.file = slice->file;
+        const OverrideFacts f = factsInBody( slice->body );
         if ( f.gradeOverride && !info.gradeOverride )
         {
             info.gradeOverride = true;
@@ -350,13 +381,109 @@ DeterminismOverrideInfo resolveOverrides( const std::string &className,
         }
         if ( info.gradeOverride && info.runtimeOverride )
             break;
-        if ( it->second.bases.empty() )
+        if ( slice->bases.empty() )
             break;
-        current = it->second.bases.front();
+        current = slice->bases.front();
     }
     if ( !info.gradeOverride && !info.runtimeOverride )
         note += "no explicit override up the scanned chain (framework default applies)";
     return info;
+}
+
+/// Direct schema stamps: some operators stamp a literal into their schema
+/// WITHOUT overriding determinismGrade() — `stampDeterminismGrade( root,
+/// "bit-exact" )` inside `<CLASS>::schema()`. Each stamp is attributed to
+/// the nearest PRECEDING `CLASS::schema() const` definition in the same
+/// file, so the census records the class-level fact behind the published
+/// stamp instead of misreading it as a framework default.
+std::map<std::string, std::string> scanDirectSchemaStamps( const std::string &sourceRoot )
+{
+    std::map<std::string, std::string> stamps;
+    static const std::regex schemaFnRe( R"re((\w+)::schema\(\)\s*const)re" );
+    static const std::regex stampRe(
+        R"re(stampDeterminismGrade\s*\(\s*[^,)]+\s*,\s*"([^"]+)")re" );
+    for ( const std::string &path : filesContainingAny( sourceRoot, { "stampDeterminismGrade" } ) )
+    {
+        const std::string text = readFile( path );
+        if ( text.empty() )
+            continue;
+        std::vector<std::pair<size_t, std::string>> schemaFns;
+        for ( auto it = std::sregex_iterator( text.begin(), text.end(), schemaFnRe );
+              it != std::sregex_iterator(); ++it )
+            schemaFns.emplace_back( static_cast<size_t>( ( *it ).position() ),
+                                    ( *it )[1].str() );
+        for ( auto it = std::sregex_iterator( text.begin(), text.end(), stampRe );
+              it != std::sregex_iterator(); ++it )
+        {
+            const size_t pos = static_cast<size_t>( ( *it ).position() );
+            const std::string *owner = nullptr;
+            for ( const auto &[fnPos, fnClass] : schemaFns )
+            {
+                if ( fnPos > pos )
+                    break;
+                owner = &fnClass;
+            }
+            if ( owner )
+                stamps.emplace( *owner, ( *it )[1].str() );
+        }
+    }
+    return stamps;
+}
+
+/// Macro-generated operator classes (SICNU_DECLARE_SPATIAL_OP /
+/// SICNU_DECLARE_WINDOW_OP): there is no literal `class <Name>` anywhere, so
+/// the facts come from the macro BODY, attributed per registered class.
+std::map<std::string, ClassSlice> scanMacroClassBodies( const std::string &sourceRoot )
+{
+    std::map<std::string, ClassSlice> bodies;
+    static const std::regex useRe(
+        R"re(SICNU_DECLARE_(SPATIAL|WINDOW)_OP\s*\(\s*(\w+)\s*,)re" );
+    static const std::regex defRe(
+        R"re(#define\s+(SICNU_DECLARE_(?:SPATIAL|WINDOW)_OP)\s*\([^\n]*\\\n((?:[^\n]*\\\n)*)[^\n]*\n)re" );
+    std::map<std::string, std::string> macroBodies;
+    std::vector<std::string> files;
+    std::error_code ec;
+    const std::filesystem::path root = std::filesystem::path( sourceRoot ) / "src";
+    if ( !std::filesystem::exists( root, ec ) )
+        return bodies;
+    std::filesystem::recursive_directory_iterator it(
+        root, std::filesystem::directory_options::skip_permission_denied, ec );
+    std::filesystem::recursive_directory_iterator end;
+    while ( !ec && it != end )
+    {
+        std::error_code fileEc;
+        const std::filesystem::path &p = it->path();
+        const std::string ext = p.extension().string();
+        if ( it->is_regular_file( fileEc )
+             && ( ext == ".h" || ext == ".hpp" || ext == ".cpp" ) )
+            files.push_back( p.string() );
+        it.increment( ec );
+    }
+    std::sort( files.begin(), files.end() );
+    for ( const std::string &path : files )
+    {
+        const std::string text = readFile( path );
+        if ( text.empty() )
+            continue;
+        std::smatch m;
+        if ( std::regex_search( text, m, defRe ) )
+            macroBodies.emplace( m[1].str(), m[2].str() );
+        for ( auto uit = std::sregex_iterator( text.begin(), text.end(), useRe );
+              uit != std::sregex_iterator(); ++uit )
+        {
+            const std::string macro = "SICNU_DECLARE_" + ( *uit )[1].str() + "_OP";
+            const auto body = macroBodies.find( macro );
+            if ( body == macroBodies.end() )
+                continue;
+            ClassSlice slice;
+            slice.file = std::filesystem::proximate(
+                path, std::filesystem::path( sourceRoot ) / "src" ).string();
+            slice.body = body->second;
+            slice.isHeader = true;
+            bodies.emplace( ( *uit )[2].str(), std::move( slice ) );
+        }
+    }
+    return bodies;
 }
 
 std::string slugForSidecar( const std::string &operatorId )
@@ -391,33 +518,46 @@ std::map<std::string, DeterminismOverrideInfo> scanDeterminismOverrides(
         classNames.insert( s.className );
     // The framework bases participate in every chain resolution.
     classNames.insert( "RSOperator" );
-    const std::map<std::string, ClassSlice> slices = scanClassSlices( sourceRoot, classNames );
+    const auto slices = scanClassSlices( sourceRoot, classNames );
+    const auto macroBodies = scanMacroClassBodies( sourceRoot );
 
     std::map<std::string, DeterminismOverrideInfo> result;
-    std::set<std::string> idsSeenMoreThanOnce;
     for ( const RegistrationSite &s : sites )
     {
         if ( result.count( s.operatorId ) )
-        {
-            idsSeenMoreThanOnce.insert( s.operatorId );
-            continue; // first (sorted) registration wins; extra ones noted
-        }
+            continue; // first (sorted) registration wins; extras are noise
         DeterminismOverrideInfo info;
         info.operatorId = s.operatorId;
         info.file = s.file;
         const auto cls = slices.find( s.className );
-        if ( cls == slices.end() )
-        {
-            info.operatorClass = s.className;
-            info.note = "class declaration not located in src scan";
-        }
-        else
+        const auto macro = macroBodies.find( s.className );
+        if ( cls != slices.end() )
         {
             std::string note;
             info = resolveOverrides( s.className, cls->second, slices, note );
             info.operatorId = s.operatorId;
             if ( !note.empty() )
                 info.note = note;
+        }
+        else if ( macro != macroBodies.end() )
+        {
+            // Macro-generated class: the facts are the macro body's.
+            info.operatorClass = s.className;
+            info.classFound = true;
+            info.file = macro->second.file;
+            const OverrideFacts f = factsInBody( macro->second.body );
+            info.gradeOverride = f.gradeOverride;
+            info.gradeLiteral = f.gradeLiteral;
+            info.runtimeOverride = f.runtimeOverride;
+            info.runtimeLiteral = f.runtimeLiteral;
+            if ( !info.gradeOverride && !info.runtimeOverride )
+                info.note = "class generated by " + macro->first
+                            + " (no override in the macro body)";
+        }
+        else
+        {
+            info.operatorClass = s.className;
+            info.note = "class declaration not located in src scan";
         }
         result.emplace( s.operatorId, std::move( info ) );
     }
@@ -462,6 +602,7 @@ DeterminismCensus buildDeterminismCensus( const std::string &sourceRoot )
 {
     DeterminismCensus census;
     const auto overrides = scanDeterminismOverrides( sourceRoot );
+    const auto directStamps = scanDirectSchemaStamps( sourceRoot );
     std::string exemptionError;
     const auto exemptions = loadContractExemptions( sourceRoot, exemptionError );
     if ( !exemptionError.empty() )
@@ -473,7 +614,19 @@ DeterminismCensus buildDeterminismCensus( const std::string &sourceRoot )
         e.operatorId = id;
         e.prefix = prefixOf( id );
         e.source = info;
-        e.schemaGrade = info.gradeOverride ? info.gradeLiteral : std::string();
+        // The published grade fact is the class override when present;
+        // otherwise a DIRECT schema stamp (`stampDeterminismGrade( root,
+        // "..." )` inside the class's schema()) explains the published
+        // value. Neither present → the schema publishes nothing (unproven).
+        e.schemaGrade = info.gradeOverride
+                          ? info.gradeLiteral
+                          : ( info.classFound
+                                  ? ( [&] -> std::string {
+                                        const auto it = directStamps.find( info.operatorClass );
+                                        return it == directStamps.end() ? std::string()
+                                                                        : it->second;
+                                    }() )
+                                  : std::string() );
         // Runtime grade: the scanned literal, or the framework default
         // (RSOperator::determinism() == BitExact, rs_operator.h L170).
         if ( info.runtimeOverride )

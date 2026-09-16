@@ -30,6 +30,8 @@ const std::vector<std::string> kNumericDomains = {
     "sigma0",      // SAR linear-power backscatter coefficient
     "gamma0",      // SAR linear-power gamma coefficient
     "beta0",       // SAR linear-power beta coefficient
+    "phase",       // SAR interferometric phase (radians; unwrapped unless declared)
+    "displacement",// line-of-sight ground displacement (meters; + toward sensor)
     "db",          // decibel-scaled (any of the above)
     "index",       // normalized spectral index (typically [-1,1])
     "probability", // score in [0,1]
@@ -880,6 +882,23 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.atomicPublication = "json_result_only";
             c.provenance = "output_metadata";
             c.evidence = "family:model-runtime + schema read";
+            rows.push_back( c );
+        }
+
+        // --- InSAR displacement (Advanced SAR 10.0 package C, D-009) --------
+        // Registered but never given its record — caught by the 11.0 census
+        // coverage gate (contract-or-exemption over every live id).
+        {
+            ScientificContract c = sarFamily();
+            c.operatorId = "rs:sar_displacement";
+            c.inputDomain = "phase";
+            c.outputDomain = "displacement";
+            c.noDataPolicy = "propagate";
+            c.evidence = "family:sar + schema read (rs_sar_displacement_operator.h: "
+                         "d_los = -lambda*phi/(4pi), typed refusal on missing "
+                         "wavelength, honest Itoh-discontinuity warning gate)";
+            c.note = "consumes UNWRAPPED phase; wrapped input is warnable, not "
+                     "detectable (D-009 honesty gate)";
             rows.push_back( c );
         }
 
