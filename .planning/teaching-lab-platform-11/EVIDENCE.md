@@ -71,3 +71,17 @@ Format: `UTC | phase | command | exit | artifact/notes`
    WITHOUT PROJ data in the generator's first run, producing CRS-less rasters (caught by
    the corpus contract). The generator now hard-fails without PROJ and the committed
    fixtures carry EPSG:4326 (regeneration re-verified with GDAL_DATA/PROJ_LIB set).
+
+## Phase 8 double verification (final)
+
+Two back-to-back full-matrix runs after the review remediation and final
+rebase — ALL GREEN both times:
+
+run 1: data_pack 164 / grader_kernels 131 / grading 542 / batch 49 /
+batch_v2 95 / report 339 / report_cli 62 / injection 93 / self_check 95 /
+offline_e2e 78 / scale 1665 / evals 561 — all "All tests passed".
+run 2: identical, all "All tests passed".
+
+Hygiene gates: git diff --check clean; no conflict markers; secret scan
+clean; gen_lab_packs.py --check zero-diff. 1000-submission scale evidence:
+green (9819 assertions). Total track assertion count per full run: 3974.
