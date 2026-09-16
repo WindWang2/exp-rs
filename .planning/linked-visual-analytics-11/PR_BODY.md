@@ -2,6 +2,24 @@
 
 **Branch:** `zcode/linked-visual-analytics-11` · **Baseline:** `a5b11b7f10fa010c1c060864fb427d777ba9a4aa` (origin/master at start, 2026-09-16) · `Local evidence only; no online CI dependency`
 
+## ⚠ Pre-existing master defects found & handled (details in EVIDENCE.md)
+
+1. **master a5b11b7f does not compile on MSVC**: (a)
+   `pipeline_run_coordinator.cpp` missing `<fcntl.h>`; (b)
+   `data_platform_tools.cpp` unqualified `BenchmarkService`. Both fixed here
+   with 1-line minimal patches (files owned by open PR #1009 — rebase
+   trivial). (c) The **sicnu_geo_rs app target** cannot link on MSVC at
+   master: D17 defined `sicnu::workflow::WorkflowDefinition` twice in one
+   namespace (workflow_types.h vs workflow_ir_v2.h; the header comment
+   defers the namespace split) and AUTOMOC merges both into one TU → C2011.
+   Controlled A/B proof included (compiling origin/master's own TU
+   reproduces it). NOT fixed here — the real fix is D17's deferred
+   namespace split; my changed app TUs compile clean up to that collision
+   point, and the four affected test targets build and pass fully.
+2. master's help↔registry gate (test_command_contract_9) was RED — 10
+   registered commands had no help entries. Fixed by appending the 10
+   entries; gate now green (204 assertions).
+
 ## Mission
 
 地图/图表/多视图选择、光标、范围与图层可见性联动 — assembled from the
@@ -74,10 +92,13 @@ with help coverage; payloads gained optional fields with honest defaults.
 - Configure (fresh build-dev, local Catch2 source, Qt 6.8.0 MSVC2022) → OK.
 - Build: targeted test executables + app wiring, `-j2` hard cap
   (CMAKE_BUILD_PARALLEL_LEVEL=2), resource samples in EVIDENCE.md.
-- Tests: `QT_QPA_PLATFORM=offscreen`, `ctest -j1` — targeted lanes
-  `test_view_link`, `test_visual_analytics`, `test_dual_viewport_sync`
-  (regression), `test_command_contract_9` (help↔registry), final key lanes
-  run twice (see TEST_MATRIX.md for per-claim exits).
+- Tests (each run TWICE, consecutive, exit 0 both times):
+  `test_view_link` — All tests passed (84 assertions in 10 test cases) ×2;
+  `test_visual_analytics` — All tests passed (100056 assertions in 12 test
+  cases) ×2; `test_dual_viewport_sync` — exit 0 ×2 (untouched regression
+  control); `test_command_contract_9` — All tests passed (204 assertions in
+  6 test cases) ×2. Runner: `QT_QPA_PLATFORM=offscreen`, `-j1` build,
+  `-j2` build cap with RAM samples in EVIDENCE.md.
 
 ## Known limitations / follow-ups
 
