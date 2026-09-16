@@ -7,6 +7,9 @@ explainable 100-point transcript instead of a binary verdict.
 
 ```
 sicnu_geo_rs_cli lab --lab <id|.rules.json> --grade <artifact> [--out report.json] [--max-bytes <n>]
+sicnu_geo_rs_cli lab --lab <id> --batch <dir> [--csv g.csv] [--roster r.csv] [--json s.json] [--html s.html] [--max-submissions <n>]
+sicnu_geo_rs_cli lab --report --experiment-db <db> --experiment <id> --report-out <base> [--grade transcript.json]
+sicnu_geo_rs_cli lab --self-check [--pack-root <root>] [--lab-id <id>]
 ```
 
 Exit codes: **0** pass · **1** fail · **2** usage (bad flags, unknown lab,
@@ -71,6 +74,21 @@ materializes the whole raster.
 | `change_area_interval` | **band**, **value**, **min_px**, **max_px** | changed-pixel count outside the known interval (inclusive threshold, closed-form area) |
 | `crs_grid` | **epsg**, **width**, **height**, **pixel_size_x/y**, band_count?, pixel_size_tolerance? | CRS/grid/band-count incompatibility — usually `blocking` |
 
+### Grader 2.0 kernels (11.0)
+
+The kernels below run their OWN windowed streaming pass (per-assertion byte
+budget) and may open aux rasters (zones / truth) resolved relative to the
+rules file — the same policy as the classification truth walk.
+
+| kind | params (required **bold**) | fails when |
+|---|---|---|
+| `zone_stats` | **band**, **zones**:{path}, **stat** (`mean`\|`enl`\|`fisher`); mean: **bounds**:[{zone, band?, min?, max?}], zone_deltas?:[{zone, below_zone, min_delta}]; enl: **reference**:{path}, **enl_min_ratio**, max_relative_mean_shift?; fisher: **compare_zone**, **min_fisher**, zones_nodata? | any declared (band, zone) mean outside its bounds, a delta below its floor, the ENL ratio under the floor, or Fisher separability under the floor |
+| `band_layout` | band_count? \| **min_valid_fraction**? \| expected_valid_pixels?:{band:n}; bands? | band count, per-band valid fraction or exact valid-pixel count violated (stack integrity, NoData holes) |
+| `spatial_agreement` | **band**, **truth**:{path}, truth_nodata?, and EXACTLY ONE mode: zone_expected:[{zone,label}]+**min_accuracy** \| truth_positive+artifact_positive+**min_hit_rate**(+max_false_alarm_rate) \| **tolerance**+**max_exceed_fraction** | POSITION-SENSITIVE: per-zone label accuracy, binary hit / false-alarm rates, or the fraction of |artifact−truth|>tolerance pixels outside its bound — right-area-wrong-place finally scores below the pass line |
+| `series_separation` | **zones**:{path}, **x**:[≥2 axis values], bounds?/separations?:[{zone, below_zone, min_delta}] | per-zone least-squares slope over the declared axis outside bounds, or slope separation below the floor |
+| `spectral_signature` | **bands**, **references**:[{name?, spectrum}], zones?:{path}, zone_reference?, sam_max_mean_degrees?/sam_max_degrees? | mean/max SAM spectral angle of pixel spectra vs the declared reference exceeds the bound |
+| `file_check` (artifact `kind: "file"`) | exists? \| min_bytes?/max_bytes? \| png:{page_width_mm, page_height_mm, dpi, size_tolerance} \| mapspec:{max_problems} \| preflight:{max_problems, forbidden_codes?}; path? (sibling file) | the submitted FILE is absent, mis-sized, the PNG page geometry (parsed from IHDR vs the declared dpi) does not match, or the MapSpec fails the platform's validateMapSpec / preflight catalog |
+
 ## Report and determinism
 
 The transcript is `{schema: "sicnu.lab.grade/1", digest, generated_utc, report}`.
@@ -90,19 +108,55 @@ fire. `ctest -R lab_grading` asserts the whole corpus contract.
 
 ## Known limits (by design)
 
-- **Statistics, not pixel diffs**: assertions grade the distribution of the
-  answer (ranges, moments, histogram shape, class agreement, area intervals,
-  calibration identity), not the geographic position of each pixel. A change
-  mask with the right area in the wrong place, or an NDVI scene with its
-  biomes spatially swapped, still scores 100 — labs that care about placement
-  need a position-sensitive kernel (future work, ADR 0150 alternative
-  "pixel-diff grading" was rejected as brittle).
+- **Position sensitivity is opt-in per kernel**: the classic value kernels
+  grade the distribution of the answer (ranges, moments, histogram shape,
+  calibration identity). Since 11.0, `spatial_agreement` grades placement
+  against a truth raster (hit/false-alarm, per-zone accuracy, continuous
+  |diff|), and `zone_stats`/`series_separation` grade zone-joined behaviour.
+  Full per-pixel diff grading stays rejected (ADR 0150: brittle).
 - **Unlabelled truth+prediction pairs** (both outside the legend) count as
   agreement in OA and as their own marginal column; exclude such values via
   `nodata_class` / declared NoData instead of relying on that column.
 - **NoData matching** compares stored values against the declared sentinel at
   storage precision; declare sentinels that are representable in the band
   dtype (−9999, 0, 255 all are).
+
+## Batch classroom 2.0 (`--batch`)
+
+`lab --batch <dir>` still streams one submission at a time (memory bounded by
+the largest artifact, CSV flushed per row). Since 11.0 it also accepts:
+
+- `--roster <csv>` — `student_id,display_name` (UTF-8, BOM tolerated, `#`
+  comments). Submitters absent from the roster are flagged `unknown`;
+  roster students without a submission are listed as missing. No score is
+  ever invented or withheld for roster mismatches — the teacher judges.
+- identity — every submission is hashed (streaming sha256); identical content
+  from two files is graded per file but flagged `duplicate_of` in the
+  summaries. The machine never enforces a plagiarism policy.
+- `--max-submissions <n>` — caps runaway input; the CSV keeps every row
+  written. Exit code 1 signals isolated/cancelled/capped runs.
+- `--json <s.json>` / `--html <s.html>` — deterministic summaries
+  (`sicnu.lab.batch-summary/1`; rows sorted by student_id; NO wall-clock
+  values, so identical submissions regrade to byte-identical summaries).
+  Both are written atomically (tmp + rename).
+
+## Headless reproducibility report (`--report`)
+
+`lab --report --experiment-db <db> --experiment <id> --report-out <base>`
+exports the D5 `sicnu.labreport.v1` projection (runs, operation trail,
+lineage slice, replay readiness, redacted environment) as
+`<base>.json/.md/.html` — the exact documents the GUI produces, from the same
+builder. With `--grade transcript.json` (a `lab --grade --out` document) the
+report embeds the RECORDED grade: `gradingRef` is the transcript's digest,
+so the inline copy is verifiable against the original, never orphaned.
+
+## Environment self-check (`--self-check`)
+
+`lab --self-check` prints a deterministic `sicnu.lab.self-check/1` diagnostic:
+offline-gate state (and what a remote open would return), EPSG:4326 authority
+sanity, lab data pack verification (see `docs/labs/DATA_PACKS.md`), and a
+parse check of every grading rules file THROUGH the real grading seam. Exit 0
+only when nothing failed; degraded regenerable inputs are reported honestly.
 
 ## Extending
 

@@ -41,6 +41,10 @@ namespace sicnu::agent
 {
 
 using namespace sicnu::dataset;
+// master build-unblock (MSVC): benchmarkList et al. use sicnu::experiment
+// names but D19 landed no using-directive for them (same local fix as the
+// execution-runtime track; out-of-scope, recorded in track EVIDENCE).
+using namespace sicnu::experiment;
 
 namespace
 {
