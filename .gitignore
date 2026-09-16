@@ -290,3 +290,8 @@ data/labs/_tmp/
 !.planning/cn-eo-product-physics-11/
 .planning/cn-eo-product-physics-11/*
 !.planning/cn-eo-product-physics-11/*.md
+# qgis-editing-annotation-11 (F11): track planning notes.
+!.planning/qgis-editing-annotation-11/
+!.planning/qgis-editing-annotation-11/**
+# F11 goal-loop process ledger (local-only process artifact).
+/.goal-loop-ledger.md

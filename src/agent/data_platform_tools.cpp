@@ -45,6 +45,12 @@ using namespace sicnu::dataset;
 // compiled only where another header leaked the directive; make it explicit
 // so the file builds on every platform (build-unblock, execution 11.0).
 using namespace sicnu::experiment;
+// F11 unblocking fix (pre-existing master break, D19 merge): this TU was
+// never compiled locally after the D19 merge; the unqualified names below
+// resolve into sicnu::experiment only via these declarations. See
+// .planning/qgis-editing-annotation-11/EVIDENCE.md OUT_OF_SCOPE.
+using sicnu::experiment::BenchmarkService;
+using sicnu::experiment::benchmarkRunStatusToString;
 
 namespace
 {

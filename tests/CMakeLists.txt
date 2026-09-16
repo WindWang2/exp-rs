@@ -9819,3 +9819,253 @@ target_compile_definitions(test_d13_radiometric_spectral_e2e PRIVATE
   SICNU_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
 sicnu_discover_tests(test_d13_radiometric_spectral_e2e)
+# F11 qgis-editing-annotation-11: editing platform tests. App TUs under test
+# are compiled into the binaries (test_view_link / D15 pattern); only core is
+# linked for the session suite, gui for the canvas-driven suites.
+add_executable(test_edit_session
+  test_edit_session.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_edit_session.cpp
+)
+target_link_libraries(test_edit_session PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+)
+target_include_directories(test_edit_session PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_edit_session PROPERTIES AUTOMOC ON)
+# D16 acceptance-gate registration: whole binary under its target name
+# (ctest -R "^test_edit_session$" matches verbatim, -j1, headless).
+add_test(NAME test_edit_session COMMAND test_edit_session)
+set_tests_properties(test_edit_session PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 120)
+
+# F11 Phase 2: snapping / validity / sample tools / annotation.
+add_executable(test_edit_snapping
+  test_edit_snapping.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_snapping_controller.cpp
+)
+target_link_libraries(test_edit_snapping PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_edit_snapping PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_edit_snapping PROPERTIES AUTOMOC ON)
+add_test(NAME test_edit_snapping COMMAND test_edit_snapping)
+set_tests_properties(test_edit_snapping PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 120)
+
+add_executable(test_edit_validity
+  test_edit_validity.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_geometry_validity.cpp
+)
+target_link_libraries(test_edit_validity PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+)
+target_include_directories(test_edit_validity PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_edit_validity PROPERTIES AUTOMOC ON)
+add_test(NAME test_edit_validity COMMAND test_edit_validity)
+set_tests_properties(test_edit_validity PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 120)
+
+add_executable(test_edit_sample_tools
+  test_edit_sample_tools.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_edit_session.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_sample_brush_tool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_sample_erase_tool.cpp
+)
+target_link_libraries(test_edit_sample_tools PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  Qt6::Test
+)
+target_include_directories(test_edit_sample_tools PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_edit_sample_tools PROPERTIES AUTOMOC ON)
+add_test(NAME test_edit_sample_tools COMMAND test_edit_sample_tools)
+set_tests_properties(test_edit_sample_tools PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 120)
+
+add_executable(test_edit_annotation
+  test_edit_annotation.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_annotation_controller.cpp
+)
+target_link_libraries(test_edit_annotation PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_edit_annotation PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/gui
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_edit_annotation PROPERTIES AUTOMOC ON)
+add_test(NAME test_edit_annotation COMMAND test_edit_annotation)
+set_tests_properties(test_edit_annotation PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 120)
+
+# F11 Phase 3: ROI semantics (windowed footprint/stats via qgis_analysis
+# RsPixelRasterizer) + maintained spatial index.
+add_executable(test_edit_roi_semantics
+  test_edit_roi_semantics.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_edit_session.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_roi_semantics.cpp
+  ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
+)
+target_link_libraries(test_edit_roi_semantics PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+  qgis_analysis
+  GDAL::GDAL
+)
+target_include_directories(test_edit_roi_semantics PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_edit_roi_semantics PROPERTIES AUTOMOC ON)
+add_test(NAME test_edit_roi_semantics COMMAND test_edit_roi_semantics)
+set_tests_properties(test_edit_roi_semantics PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 300)
+
+add_executable(test_edit_index
+  test_edit_index.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_edit_index.cpp
+)
+target_link_libraries(test_edit_index PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+)
+target_include_directories(test_edit_index PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_edit_index PROPERTIES AUTOMOC ON)
+add_test(NAME test_edit_index COMMAND test_edit_index)
+set_tests_properties(test_edit_index PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 600)
+
+# F11 Phase 4: agent facts surface + persistence/interchange.
+add_executable(test_edit_agent_state
+  test_edit_agent_state.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_edit_session.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_edit_agent_tool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_snapping_controller.cpp
+)
+target_link_libraries(test_edit_agent_state PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_agent
+)
+sicnu_link_jsoncpp(test_edit_agent_state)
+target_include_directories(test_edit_agent_state PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_edit_agent_state PROPERTIES AUTOMOC ON)
+add_test(NAME test_edit_agent_state COMMAND test_edit_agent_state)
+set_tests_properties(test_edit_agent_state PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 120)
+
+add_executable(test_edit_persistence
+  test_edit_persistence.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_edit_persistence.cpp
+)
+target_link_libraries(test_edit_persistence PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+)
+target_include_directories(test_edit_persistence PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_edit_persistence PROPERTIES AUTOMOC ON)
+add_test(NAME test_edit_persistence COMMAND test_edit_persistence)
+set_tests_properties(test_edit_persistence PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 300)
+
+# F11 Phase 6: offscreen interaction E2E over the composed editing platform.
+add_executable(test_editing_e2e
+  test_editing_e2e.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_edit_session.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_edit_agent_tool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_snapping_controller.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_geometry_validity.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_roi_semantics.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_sample_brush_tool.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/editing/rs_edit_persistence.cpp
+  ${CMAKE_SOURCE_DIR}/src/processing/gdal/gdal_dataset_wrapper.cpp
+)
+target_link_libraries(test_editing_e2e PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  Qt6::Test
+  qgis_analysis
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_editing_e2e)
+target_include_directories(test_editing_e2e PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+set_target_properties(test_editing_e2e PROPERTIES AUTOMOC ON)
+add_test(NAME test_editing_e2e COMMAND test_editing_e2e)
+set_tests_properties(test_editing_e2e PROPERTIES
+  ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+  TIMEOUT 600)
