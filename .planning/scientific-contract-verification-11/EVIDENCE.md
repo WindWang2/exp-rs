@@ -59,6 +59,21 @@
 - master 预存测试失败 5 项（见 Ladder 分类）+ fuzz_ipc 本机超时。
 - `data/agent/capabilities/tools.json` 混入 13 个非算子的 cartography agent-tool id —— 已在 cross-surface gate 中按精确清单 allowlist + 计数约束（增长会失败），修复属 agent-knowledge track。
 
+## Final double validation（Phase 8，Oracle-4/6）
+
+- **Run 1 / Run 2**（连续两遍，结果逐套一致）：
+  scientific_contract_10 1480 · census_11 770 · determinism_11 138 ·
+  metamorphic_11 1122 · numeric_reference_11 234 · mutation_kill_11 42 ·
+  failure_11 32 · cross_surface_11 361 · science_verification_10 1187 ·
+  known_answer_corpus 105 —— 全部 RUN_EXIT:0。
+- **Ladder 两遍判定一致**：L0 ok / L1 ok / L2 = 15 passed + 5 non-passing
+  （4 项 master 预存 + fuzz_ipc host limitation），两遍清单逐项相同。
+- `git diff origin/master...HEAD --check`：444 行尾部空格全部位于
+  GOAL.md 逐字存档（markdown 硬换行语法，刻意保留原文）；代码零违例。
+- 冲突标记扫描：无。secret 扫描：无命中（仅无关 identifier "token"）。
+- Review 后修复未改变任何门结果：两遍全套 + 两遍 ladder 均在
+  remediation commit 17818353 之后执行。
+
 ## Phase 预算注记
 
 Phase 2–3 实际消耗超过规划包线 1.5×，原因：两个 master 预存 MSVC 编译缺陷（P0-1/P0-2）使本地验证平台完全阻塞，修复+全量重建（-j2 下 ~4h）消耗了大量轮次；GOAL 规定记录后继续。
