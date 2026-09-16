@@ -100,6 +100,9 @@ TEST_CASE( "Manifest parsing rejects contract violations", "[cli_batch]" )
         { R"( {"version": 2, "tasks": []} )", "version" },
         { R"( {"policy": {"on_error": "explode"}, "tasks": []} )", "on_error" },
         { R"( {"policy": {"typo": true}, "tasks": []} )", "policy key" },
+        { R"( {"policy": {"on_error": {"x":1}}, "tasks": []} )", "must be a string" },
+        { R"( {"polcy": {"on_error": "fail-fast"}, "tasks": [ {"id":"a","operator":"rs:x"} ]} )", "unknown manifest key" },
+        { R"( {"varibles": {"a": 1}, "tasks": [ {"id":"a","operator":"rs:x"} ]} )", "unknown manifest key" },
         { R"( {"variables": "x", "tasks": []} )", "variables" },
         { R"( {"tasks": [ {"id":"a","operator":""} ]} )", "operator" },
         { R"( {"tasks": [ {"operator":"rs:x"} ]} )", "id" },
@@ -306,10 +309,11 @@ TEST_CASE( "Errors in the index are redacted", "[cli_batch]" )
 {
     using namespace sicnu::cli::batch;
 
-    // An unknown operator whose id itself carries a credential shape: the
-    // index must not echo it back verbatim.
+    // The unknown-operator error echoes the operator id back into the
+    // record; give the id a credential shape and require the secret to be
+    // gone from the index (this FAILS if redaction is removed).
     const Json::Value manifest = parseJsonText( R"( {
-        "tasks": [ {"id":"leak","operator":"rs:__x__","params_file":"/nonexistent/params.json"} ] } )" );
+        "tasks": [ {"id":"leak","operator":"rs:probe?password=hunter2"} ] } )" );
     Json::Value normalized;
     std::string error;
     REQUIRE( parseManifestDocument( manifest, normalized, &error ) );
@@ -320,10 +324,14 @@ TEST_CASE( "Errors in the index are redacted", "[cli_batch]" )
     options.resultIndexPath = index;
     const Outcome outcome = runManifest( normalized, options, silentCallbacks() );
     REQUIRE( outcome.records[0].status == "failed" );
+    REQUIRE( outcome.records[0].exitCode == 5 );
 
     std::ifstream in( index, std::ios::binary );
     std::stringstream buffer;
     buffer << in.rdbuf();
-    REQUIRE_THAT( buffer.str(), Catch::Matchers::ContainsSubstring( "cannot open params_file" ) );
+    const std::string text = buffer.str();
+    REQUIRE_THAT( text, Catch::Matchers::ContainsSubstring( "unknown operator" ) );
+    REQUIRE_THAT( text, Catch::Matchers::ContainsSubstring( "[REDACTED]" ) );
+    REQUIRE_FALSE( text.find( "hunter2" ) != std::string::npos );
     std::remove( index.c_str() );
 }

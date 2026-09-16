@@ -151,6 +151,16 @@ const std::vector<MetaToolDef> &table()
         // Surface-11 (E): large-result handle. Tool results never inline raw
         // arrays beyond the bounded envelope; agents read file artifacts
         // through this paged, digested reader instead.
+        // Surface-11 parity fix: get_tool_help was always dispatchable via
+        // tools/call but absent from every tools/list — the exact drift the
+        // union projection exists to eliminate. Appended (wire order of the
+        // pre-existing rows is unchanged).
+        { "get_tool_help",
+          "Get bounded help for a tool: char-capped summary, key parameters, "
+          "and related diagnostics from the shared help knowledge base. Covers "
+          "processing operators (pass e.g. 'rs:spectral_index'); protocol and "
+          "data-platform tools report their own descriptions via tools/list.",
+          { { "tool_id", "string", "Tool id to look up help for, e.g. 'rs:spectral_index'.", true } } },
         { "artifact_read",
           "Read a bounded slice of a file artifact (raster sidecar, JSON result, "
           "CSV, log) produced by a tool execution. Returns the slice plus the "

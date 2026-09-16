@@ -5,8 +5,9 @@
 - MCP 单行输入上限：4MiB（master 既有 kMaxMcpLine，保持）。
 - MCP tools/list 分页 clamp：1..500（既有）。
 - surface 投影内存：O(工具数)（当前全集 ~ 数百量级），每次调用重建，无缓存放大。
-- progress 通知速率：有界（阈值触发 + 终态必发），防 NDJSON 洪泛；测量：protocol 测试断言
-  通知数 ≤ 进度回调数（上界不变式，非 wall-clock）。
+- progress 通知速率：有界（5 点阈值 + 状态变化必发 + 终态恰一次），防 NDJSON 洪泛；
+  验证：RateLimiter 单元测试（每次发射均可归因于阈值跨越/状态变化/终态三者之一，
+  否则 return false）；线上断言为 token 回显 + [0,1] 界（wall-clock 上界不作 gate）。
 - artifact_read 单次读上限 256KiB；总响应受 512KiB 信封 cap 约束。
 - batch result index：逐行流式写出，无全量驻留；队列上限 = manifest 任务数（输入有界）。
 - cancel map 上限 1024（master 既有），本 track 不放大。

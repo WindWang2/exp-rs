@@ -3,6 +3,7 @@
 #include "cli_tool_commands.h"
 
 #include "agent/tool_catalog/surface_registry.h"
+#include "agent/tool_catalog/surface_redaction.h"
 #include "cli_batch_runner.h"
 #include "exprs/exit_codes.h"
 
@@ -227,7 +228,7 @@ int commandBatchRun( QStringList args, const CliIO &io )
         Json::Value line( Json::objectValue );
         line["index"] = record.index;
         line["id"] = record.id;
-        line["operator"] = record.operatorId;
+        line["operator"] = sicnu::agent::tool_catalog::redaction::redactText( record.operatorId );
         line["status"] = record.status;
         line["exit_code"] = record.exitCode;
         if ( !record.error.empty() )
@@ -245,10 +246,13 @@ int commandBatchRun( QStringList args, const CliIO &io )
     counts["cancelled"] = countsCancelled;
     data["counts"] = counts;
     data["cancelled"] = outcome.cancelled;
-    if ( flags.jsonLines )
-        data["records"] = records;
-    else if ( flags.json )
-        data["records"] = records;
+    data["records"] = records; // present in every --json envelope
+
+    if ( !flags.json && !flags.quiet )
+    {
+        for ( const batch::TaskRecord &record : outcome.records )
+            std::cout << record.id << "\t" << record.status << "\t" << record.error << "\n";
+    }
 
     const int exitCode = outcome.exitCode;
     const std::string message = exitCode == 0
@@ -283,12 +287,25 @@ int commandBatchValidate( QStringList args, const CliIO &io )
     Json::Value data( Json::objectValue );
     data["manifest"] = path.toStdString();
     data["tasks"] = static_cast<Json::ArrayIndex>( outcome.records.size() );
-    int unknownOperators = 0;
+    int worst = 0;
+    Json::Value problems( Json::arrayValue );
     for ( const batch::TaskRecord &record : outcome.records )
-        if ( record.exitCode == 5 ) // MissingDependency
-            ++unknownOperators;
-    data["unknown_operators"] = unknownOperators;
-    return io.finish( true, "batch", data, 0 );
+    {
+        if ( record.exitCode == 0 )
+            continue;
+        worst = std::max( worst, record.exitCode );
+        Json::Value problem( Json::objectValue );
+        problem["id"] = record.id;
+        problem["exit_code"] = record.exitCode;
+        problem["error"] = record.error;
+        problems.append( problem );
+    }
+    data["problems"] = problems;
+    // validate must NOT report green when the dry run already found failures
+    // (unknown variables, unreadable params_file, missing adapters).
+    const bool ok = worst == 0;
+    return io.finish( ok, "batch", data, worst,
+                      {}, ok ? std::string() : "manifest dry-run found failures" );
 }
 
 } // namespace

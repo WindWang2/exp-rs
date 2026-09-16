@@ -113,6 +113,22 @@ void registerNoopOperator()
     }
 }
 
+/// Hermetic fixtures: created by the test itself, never assumed to exist
+/// (a fresh machine must pass without manual setup).
+void ensureFixtures()
+{
+    {
+        QFile known(QStringLiteral("/tmp/surface11_known.txt"));
+        if (known.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            known.write("hello surface artifact\n");
+    }
+    {
+        QFile big(QStringLiteral("/tmp/surface11_big.txt"));
+        if (big.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            big.write(QByteArray(300000, 'A'));
+    }
+}
+
 /// The tools/call result payload rides content[0].text as compact JSON.
 QJsonObject payloadOf(const QVariantMap &callResult)
 {
@@ -252,6 +268,7 @@ TEST_CASE("initialize answers its supported version for any request", "[surface]
 // ---------------------------------------------------------------------------
 TEST_CASE("artifact_read returns bounded slices with digests", "[surface][artifact]")
 {
+    ensureFixtures();
     ProtocolServer &s = server();
 
     const QString path = QStringLiteral("/tmp/surface11_known.txt");
@@ -310,6 +327,7 @@ TEST_CASE("artifact_read returns bounded slices with digests", "[surface][artifa
 
 TEST_CASE("artifact_read clamps to the 256 KiB chunk cap", "[surface][artifact]")
 {
+    ensureFixtures();
     ProtocolServer &s = server();
     const QString path = QStringLiteral("/tmp/surface11_big.txt"); // 300000 bytes of 'A'
 
@@ -364,9 +382,12 @@ TEST_CASE("artifact_read rejects non-UTF-8 slices in text mode", "[surface][arti
 TEST_CASE("artifact_read enforces the workspace sandbox", "[surface][artifact]")
 {
     ProtocolServer &s = server();
+    ensureFixtures();
     qputenv("SICNU_MCP_WORKSPACE", "/tmp/surface11_sandbox");
     QDir::root().mkpath(QStringLiteral("/tmp/surface11_sandbox"));
-    QFile::copy(QStringLiteral("/tmp/surface11_known.txt"), QStringLiteral("/tmp/surface11_sandbox/in.txt"));
+    QFile::remove(QStringLiteral("/tmp/surface11_sandbox/in.txt")); // copy() never overwrites
+    REQUIRE(QFile::copy(QStringLiteral("/tmp/surface11_known.txt"),
+                        QStringLiteral("/tmp/surface11_sandbox/in.txt")));
 
     // Inside the sandbox: allowed (relative resolution against the root).
     QVariantMap result = s.call(QStringLiteral("artifact_read"),

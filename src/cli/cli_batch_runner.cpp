@@ -20,6 +20,15 @@ namespace {
 
 using sicnu::agent::tool_catalog::redaction::redactText;
 
+namespace {
+/// Single redaction boundary: every TaskRecord::error passes through here so
+/// the result index AND the CLI envelope carry only redacted text.
+void setError( TaskRecord &record, std::string message )
+{
+    record.error = redactText( std::move( message ) );
+}
+} // namespace
+
 bool validTaskId( const std::string &id )
 {
     if ( id.empty() || id.size() > 64 )
@@ -109,11 +118,14 @@ void writeResultIndex( const std::string &path, const std::vector<TaskRecord> &r
             Json::Value line( Json::objectValue );
             line["index"] = record.index;
             line["id"] = record.id;
-            line["operator"] = record.operatorId;
+            // The operator id is caller input echoed back — through the same
+            // redaction boundary as error text (a crafted id can carry a
+            // credential shape; legit ids pass through unchanged).
+            line["operator"] = redactText( record.operatorId );
             line["status"] = record.status;
             line["exit_code"] = record.exitCode;
             if ( !record.error.empty() )
-                line["error"] = redactText( record.error );
+                line["error"] = record.error; // redacted at setError()
             line["duration_ms"] = static_cast<Json::Int64>( record.durationMs );
             Json::StreamWriterBuilder builder;
             builder["indentation"] = "";
@@ -163,6 +175,13 @@ bool parseManifestDocument( const Json::Value &document, Json::Value &normalized
     }
     else if ( root.isMember( "tasks" ) )
     {
+        // Strict root contract: a typo'd top-level key ({"polcy": …}) must
+        // not silently drop its payload.
+        for ( const std::string &key : root.getMemberNames() )
+        {
+            if ( key != "version" && key != "variables" && key != "policy" && key != "tasks" )
+                return fail( "unknown manifest key: " + key );
+        }
         if ( !root["tasks"].isArray() )
             return fail( "manifest 'tasks' must be an array" );
         tasks = root["tasks"];
@@ -191,6 +210,8 @@ bool parseManifestDocument( const Json::Value &document, Json::Value &normalized
         }
         if ( inPolicy.isMember( "on_error" ) )
         {
+            if ( !inPolicy["on_error"].isString() )
+                return fail( "policy.on_error must be a string" );
             const std::string on = inPolicy["on_error"].asString();
             if ( on != "continue" && on != "fail-fast" )
                 return fail( "policy.on_error must be 'continue' or 'fail-fast'" );
@@ -390,7 +411,7 @@ Outcome runManifest( const Json::Value &normalized, const Options &options,
             {
                 record.status = "failed";
                 record.exitCode = 6; // InvalidInput
-                record.error = "cannot open params_file: " + task["params_file"].asString();
+                setError( record, "cannot open params_file: " + task["params_file"].asString() );
                 outcome.records.push_back( record );
                 if ( failFast )
                     stop = true;
@@ -403,7 +424,7 @@ Outcome runManifest( const Json::Value &normalized, const Options &options,
             {
                 record.status = "failed";
                 record.exitCode = 6;
-                record.error = "params_file is not a JSON object: " + task["params_file"].asString();
+                setError( record, "params_file is not a JSON object: " + task["params_file"].asString() );
                 outcome.records.push_back( record );
                 if ( failFast )
                     stop = true;
@@ -422,7 +443,7 @@ Outcome runManifest( const Json::Value &normalized, const Options &options,
         {
             record.status = "failed";
             record.exitCode = 6; // InvalidInput
-            record.error = "unknown variable ${" + missingVariable + "}";
+            setError( record, "unknown variable ${" + missingVariable + "}" );
             outcome.records.push_back( record );
             if ( failFast )
                 stop = true;
@@ -435,7 +456,7 @@ Outcome runManifest( const Json::Value &normalized, const Options &options,
         {
             record.status = "failed";
             record.exitCode = 5; // MissingDependency
-            record.error = "unknown operator: " + record.operatorId;
+            setError( record, "unknown operator: " + record.operatorId );
             outcome.records.push_back( record );
             if ( failFast )
                 stop = true;
@@ -466,14 +487,14 @@ Outcome runManifest( const Json::Value &normalized, const Options &options,
             {
                 record.status = "failed";
                 record.exitCode = 3; // ExecutionFailure
-                record.error = result["error"].isString() ? result["error"].asString()
-                                                          : "execution failed";
+                setError( record, result["error"].isString() ? result["error"].asString()
+                                                             : "execution failed" );
             }
             else if ( callbacks.isCancelled && callbacks.isCancelled() )
             {
                 outcome.cancelled = true;
                 record.status = "cancelled";
-                record.error = "cancelled after execute";
+                setError( record, "cancelled after execute" );
             }
             else
             {
@@ -486,20 +507,20 @@ Outcome runManifest( const Json::Value &normalized, const Options &options,
             {
                 outcome.cancelled = true;
                 record.status = "cancelled";
-                record.error = error.message();
+                setError( record, error.message() );
             }
             else
             {
                 record.status = "failed";
                 record.exitCode = 3; // ExecutionFailure
-                record.error = error.message();
+                setError( record, error.message() );
             }
         }
         catch ( const std::exception &error )
         {
             record.status = "failed";
             record.exitCode = 3; // ExecutionFailure
-            record.error = std::string( "operator threw: " ) + error.what();
+            setError( record, std::string( "operator threw: " ) + error.what() );
         }
         record.durationMs = std::chrono::duration_cast<std::chrono::milliseconds>(
                                 std::chrono::steady_clock::now() - started )

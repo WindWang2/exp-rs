@@ -33,6 +33,11 @@ struct Wire
 
     void start()
     {
+        // Hermetic environment: a globally exported SICNU_MCP_WORKSPACE would
+        // reject the artifact leg of the scenario.
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.remove(QStringLiteral("SICNU_MCP_WORKSPACE"));
+        process.setProcessEnvironment(env);
         process.start(QString::fromUtf8(SICNU_TEST_SURFACE_HOST), QStringList{});
         REQUIRE(process.waitForStarted(10000));
     }

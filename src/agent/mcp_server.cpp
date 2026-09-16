@@ -973,7 +973,15 @@ void McpServer::handleRequest(const QVariantMap &request)
                                 progressToken,
                                 sicnu::agent::tool_catalog::progress::RateLimiter( 5.0 ) } );
                         while ( m_progressSubscriptions.size() > 256 )
-                            m_progressSubscriptions.erase( m_progressSubscriptions.begin() );
+                        {
+                            // Evict some OTHER entry — QHash order is
+                            // arbitrary and begin() may be the newest caller.
+                            auto victim = m_progressSubscriptions.begin();
+                            if ( victim.key() == executionId->taskId()
+                                 && m_progressSubscriptions.size() > 1 )
+                                victim = std::next( victim );
+                            m_progressSubscriptions.erase( victim );
+                        }
                     }
                 }
             }
@@ -1171,7 +1179,7 @@ void McpServer::onTaskUpdated(const sicnu::AlgorithmTaskInfo &info)
     // total}. Progress is TaskCenter's 0..100 projected onto total=1.0.
     QVariantMap params;
     params[QStringLiteral( "progressToken" )] = it->progressToken;
-    params[QStringLiteral( "progress" )] = progress / 100.0;
+    params[QStringLiteral( "progress" )] = qBound( 0.0, progress / 100.0, 1.0 );
     params[QStringLiteral( "total" )] = 1.0;
     sendNotification( QStringLiteral( "notifications/progress" ), params );
 
