@@ -4,12 +4,18 @@
     "applicability" :
     {
       "land_cover" :
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
       [
         "\u690d\u88ab",
         "\u6c34\u4f53",
         "\u519c\u7530"
       ],
       "scenes" :
+      "scenes" : 
       [
         "\u8015\u5730\u6482\u8352\u9884\u8b66",
         "\u88f8\u571f\u5f00\u53d1\u884c\u4e3a\u76d1\u6d4b"
@@ -17,11 +23,13 @@
     },
     "band_roles" : {},
     "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
     "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -30,6 +38,7 @@
       "stochastic" : false
     },
     "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -42,6 +51,10 @@
     {
       "inputs" : [],
       "outputs" :
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
       [
         {
           "data_kind" : "string",
@@ -60,6 +73,7 @@
         }
       ],
       "parameters" :
+      "parameters" : 
       [
         {
           "default" : "true",
@@ -104,6 +118,7 @@
         {
           "default" : "cusum",
           "enum" :
+          "enum" : 
           [
             "cusum",
             "ewma",
@@ -138,16 +153,19 @@
       ]
     },
     "limitations" :
+    "limitations" : 
     [
       "seasonal_mk is O(sum n_m^2) pairs per pixel; the max_pairwork guard refuses unbounded collections instead of degrading.",
       "argmax bands are 0-based scene indices; scene dates travel in the collection metadata."
     ],
     "modality" :
+    "modality" : 
     [
       "optical"
     ],
     "operator_group" : "temporal",
     "prerequisites" :
+    "prerequisites" : 
     [
       "Common grid, acquisition times, consistent radiometric state (temporal preflight)."
     ],
@@ -156,12 +174,16 @@
     "teaching_use" :
     {
       "concepts" :
+    "teaching_use" : 
+    {
+      "concepts" : 
       [
         "\u6ed1\u52a8\u7a97\u53e3",
         "\u72b6\u6001\u76d1\u6d4b",
         "\u9608\u503c\u544a\u8b66"
       ],
       "courses" :
+      "courses" : 
       [
         "\u9065\u611f\u5e94\u7528\u5206\u6790"
       ],
@@ -177,6 +199,7 @@
   "output" : "raster",
   "schema_version" : 2,
   "tags" :
+  "tags" : 
   [
     "temporal",
     "cusum",

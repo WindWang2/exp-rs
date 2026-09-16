@@ -16,7 +16,7 @@ Professional remote sensing analysis platform built on the QGIS engine. Pure C++
 - **Mosaic:** Raster mosaic with nodata handling
 - **Image Enhancement:** Contrast stretch, spatial filtering, speckle filtering (SAR)
 - **Image Fusion:** Brovey, IHS, PCA pan-sharpening
-- **Terrain Analysis:** Slope, aspect, hillshade, roughness, TRI, TPI
+- **Terrain Analysis:** Slope, aspect, hillshade, roughness, TRI, TPI; hydrology (depression fill, flat resolution, D8/D∞ flow, accumulation, stream network with Strahler orders, watershed, outlets), viewshed/horizon (single & cumulative observers, curvature/refraction), solar terrain (shadow duration, hillshade series), landform (multiscale TPI, Weiss classes, geomorphons)
 - **Classification:** NormalBayes, SVM, K-Means with cross-validation; held-out accuracy (kappa, confusion matrix), per-class metrics, class-imbalance warnings, model metadata sidecar
 - **Hyperspectral:** MNF, PCA, SAM/SID classification, spectral unmixing, endmember extraction (PPI), RX anomaly detection, spectral resampling, continuum removal
 - **OBIA:** Object-based image analysis with OTB MeanShift segmentation

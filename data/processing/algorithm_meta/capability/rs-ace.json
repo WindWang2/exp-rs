@@ -4,11 +4,17 @@
     "applicability" :
     {
       "land_cover" :
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
       [
         "\u77ff\u7269",
         "\u4eba\u5de5\u76ee\u6807"
       ],
       "scenes" :
+      "scenes" : 
       [
         "\u9ad8\u5149\u8c31\u76ee\u6807\u68c0\u6d4b",
         "\u5c0f\u76ee\u6807\u641c\u7d22"
@@ -16,11 +22,13 @@
     },
     "band_roles" : {},
     "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
     "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -29,6 +37,7 @@
       "stochastic" : false
     },
     "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -40,6 +49,9 @@
     "io" :
     {
       "inputs" :
+    "io" : 
+    {
+      "inputs" : 
       [
         {
           "data_kind" : "raster",
@@ -48,6 +60,7 @@
         }
       ],
       "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "raster",
@@ -56,6 +69,7 @@
         }
       ],
       "parameters" :
+      "parameters" : 
       [
         {
           "name" : "libraryMaterials",
@@ -89,11 +103,17 @@
       "Pixels with degenerate whitened norm (no variance along any direction) score NaN."
     ],
     "modality" :
+    "limitations" : 
+    [
+      "Pixels with degenerate whitened norm (no variance along any direction) score NaN."
+    ],
+    "modality" : 
     [
       "optical"
     ],
     "operator_group" : "spectral",
     "prerequisites" :
+    "prerequisites" : 
     [
       "'target' must have one finite value per input band."
     ],
@@ -102,12 +122,16 @@
     "teaching_use" :
     {
       "concepts" :
+    "teaching_use" : 
+    {
+      "concepts" : 
       [
         "ACE",
         "\u76ee\u6807\u68c0\u6d4b",
         "\u767d\u5316"
       ],
       "courses" :
+      "courses" : 
       [
         "\u9ad8\u5149\u8c31\u9065\u611f"
       ],
@@ -123,6 +147,7 @@
   "output" : "raster",
   "schema_version" : 2,
   "tags" :
+  "tags" : 
   [
     "spectral",
     "detection",

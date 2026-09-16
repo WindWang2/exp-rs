@@ -320,3 +320,6 @@ data/labs/_tmp/
 # spectral-intelligence-11: track planning notes (markdown only).
 !.planning/spectral-intelligence-11/
 !.planning/spectral-intelligence-11/**
+# terrain-hydrology-11 (F16): track planning notes (markdown only; logs stay local).
+!.planning/terrain-hydrology-11/
+!.planning/terrain-hydrology-11/**

@@ -4,11 +4,17 @@
     "applicability" :
     {
       "land_cover" :
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
       [
         "\u77ff\u7269",
         "\u690d\u88ab\u80c1\u8feb\u76ee\u6807"
       ],
       "scenes" :
+      "scenes" : 
       [
         "\u77ff\u7269\u5f02\u5e38\u63a2\u6d4b",
         "\u80a5\u6599/\u80c1\u8feb\u9ad8\u5149\u8c31\u8bc6\u522b"
@@ -16,11 +22,13 @@
     },
     "band_roles" : {},
     "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
     "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -29,6 +37,7 @@
       "stochastic" : false
     },
     "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "NOT_SUPPORTED",
@@ -40,6 +49,9 @@
     "io" :
     {
       "inputs" :
+    "io" : 
+    {
+      "inputs" : 
       [
         {
           "data_kind" : "raster",
@@ -48,6 +60,7 @@
         }
       ],
       "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "raster",
@@ -56,6 +69,7 @@
         }
       ],
       "parameters" :
+      "parameters" : 
       [
         {
           "name" : "libraryMaterials",
@@ -89,11 +103,17 @@
       "Background statistics come from the input scene itself; a separate background raster is a future extension."
     ],
     "modality" :
+    "limitations" : 
+    [
+      "Background statistics come from the input scene itself; a separate background raster is a future extension."
+    ],
+    "modality" : 
     [
       "optical"
     ],
     "operator_group" : "spectral",
     "prerequisites" :
+    "prerequisites" : 
     [
       "'target' must have one finite value per input band."
     ],
@@ -102,11 +122,15 @@
     "teaching_use" :
     {
       "concepts" :
+    "teaching_use" : 
+    {
+      "concepts" : 
       [
         "\u5339\u914d\u6ee4\u6ce2",
         "\u80cc\u666f\u534f\u65b9\u5dee"
       ],
       "courses" :
+      "courses" : 
       [
         "\u9ad8\u5149\u8c31\u9065\u611f"
       ],
@@ -122,6 +146,7 @@
   "output" : "raster",
   "schema_version" : 2,
   "tags" :
+  "tags" : 
   [
     "spectral",
     "detection",

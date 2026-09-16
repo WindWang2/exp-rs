@@ -4,12 +4,18 @@
     "applicability" :
     {
       "land_cover" :
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
       [
         "\u77ff\u7269",
         "\u690d\u88ab",
         "\u571f\u58e4"
       ],
       "scenes" :
+      "scenes" : 
       [
         "\u7aef\u5143\u5149\u8c31\u5e93\u6784\u5efa",
         "\u89e3\u6df7\u524d\u7684\u7aef\u5143\u4f30\u8ba1"
@@ -17,11 +23,13 @@
     },
     "band_roles" : {},
     "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
     "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : true,
@@ -30,6 +38,7 @@
       "stochastic" : false
     },
     "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -41,6 +50,9 @@
     "io" :
     {
       "inputs" :
+    "io" : 
+    {
+      "inputs" : 
       [
         {
           "data_kind" : "raster",
@@ -49,6 +61,7 @@
         }
       ],
       "outputs" :
+      "outputs" : 
       [
         {
           "array" : true,
@@ -66,6 +79,7 @@
         }
       ],
       "parameters" :
+      "parameters" : 
       [
         {
           "name" : "endmembersOut",
@@ -91,6 +105,11 @@
       "PPI finds pixels at the data hull; it assumes endmembers are present as pure pixels in the scene."
     ],
     "modality" :
+    "limitations" : 
+    [
+      "PPI finds pixels at the data hull; it assumes endmembers are present as pure pixels in the scene."
+    ],
+    "modality" : 
     [
       "optical"
     ],
@@ -101,12 +120,16 @@
     "teaching_use" :
     {
       "concepts" :
+    "teaching_use" : 
+    {
+      "concepts" : 
       [
         "\u7aef\u5143",
         "\u7eaf\u50cf\u5143",
         "\u5355\u5f62"
       ],
       "courses" :
+      "courses" : 
       [
         "\u9ad8\u5149\u8c31\u9065\u611f"
       ],
@@ -120,6 +143,7 @@
   "output" : "",
   "schema_version" : 2,
   "tags" :
+  "tags" : 
   [
     "endmember",
     "hyperspectral",

@@ -4,12 +4,18 @@
     "applicability" :
     {
       "land_cover" :
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
       [
         "\u6d41\u57df",
         "\u6cb3\u8c37",
         "\u5c71\u5730"
       ],
       "scenes" :
+      "scenes" : 
       [
         "\u6d41\u57df\u5212\u5206",
         "\u6cb3\u7f51\u63d0\u53d6",
@@ -18,11 +24,13 @@
     },
     "band_roles" : {},
     "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
     "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -40,6 +48,21 @@
       {
         "code" : "INSUFFICIENT_MEMORY",
         "remedy" : "\u5206\u5e45\u5904\u7406\u6216\u91cd\u91c7\u6837\u964d\u4f4e\u5206\u8fa8\u7387",
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u63d0\u9ad8 threshold \u6216\u4f7f\u7528\u9ed8\u8ba4\u503c 50",
+        "when" : "threshold \u5c0f\u4e8e 1\uff08\u7d2f\u79ef\u8ba1\u6570\u4e3a\u81ea\u5305\u542b\u8ba1\u6570\uff09"
+      },
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u4ee5 'col,row' \u5206\u53f7\u5206\u9694\u7ed9\u51fa\u6d41\u57df\u51fa\u53e3",
+        "when" : "product=watershed \u7f3a\u5c11 pour_points \u6216\u683c\u5f0f\u975e\u6cd5"
+      },
+      {
+        "code" : "INSUFFICIENT_MEMORY",
+        "remedy" : "\u5206\u5e45\u5904\u7406\u3001\u91cd\u91c7\u6837\u964d\u4f4e\u5206\u8fa8\u7387\uff0c\u6216\u5728\u9884\u7b97\u5185\u63d0\u9ad8 SICNU_TERRAIN_MAX_CELLS",
         "when" : "\u5927\u533a\u57df\u9ad8\u5206\u8fa8\u7387 DEM \u6d41\u5411\u8ba1\u7b97\u5185\u5b58\u8d85\u9650"
       }
     ],
@@ -47,6 +70,9 @@
     "io" :
     {
       "inputs" :
+    "io" : 
+    {
+      "inputs" : 
       [
         {
           "data_kind" : "raster",
@@ -55,6 +81,7 @@
         }
       ],
       "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "raster",
@@ -88,11 +115,47 @@
         {
           "default" : "flow_accumulation",
           "enum" :
+      "parameters" : 
+      [
+        {
+          "default" : "false",
+          "enum" : 
+          [
+            "false",
+            "true"
+          ],
+          "name" : "include_segments",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "-9999",
+          "name" : "nodata",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "pour_points",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "flow_accumulation",
+          "enum" : 
           [
             "fill",
             "flow_direction",
             "flow_accumulation",
-            "watershed"
+            "watershed",
+            "flat_resolve",
+            "flow_direction_inf",
+            "stream_network",
+            "outlets"
           ],
           "name" : "product",
           "required" : true,
@@ -106,11 +169,27 @@
       "Full-frame memory: the DEM and two working frames are resident; the estimate states the linear bound."
     ],
     "modality" :
+        },
+        {
+          "default" : "50",
+          "name" : "threshold",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "stream_network/directions run on the filled surface of this run; D\u221e accumulation uses the single steepest-facet receiver (no fraction splitting, documented follow-up).",
+      "Full-frame memory: the DEM and two working frames are resident; the estimate states the linear bound."
+    ],
+    "modality" : 
     [
       "dem"
     ],
     "operator_group" : "terrain",
     "prerequisites" :
+    "prerequisites" : 
     [
       "Projected DEM recommended; routing is cell-based (orthogonal 1, diagonal sqrt(2))."
     ],
@@ -125,11 +204,24 @@
         "\u6d41\u57df"
       ],
       "courses" :
+    "summary" : "\u5730\u5f62\u6c34\u6587\u5206\u6790\uff1a\u586b\u6d3c\u4e0e\u5e73\u5730\u89e3\u6790\u3001D8/D\u221e \u6d41\u5411\u3001\u6c47\u6d41\u7d2f\u79ef\u3001\u6cb3\u7f51\u63d0\u53d6\uff08Strahler \u7ea7\u5e8f\uff09\u3001\u6d41\u57df\u5212\u5206\u4e0e\u51fa\u53e3\u8bc6\u522b\uff0c\u670d\u52a1\u6d41\u57df\u5efa\u6a21\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "D8 \u6d41\u5411",
+        "D\u221e \u6d41\u5411",
+        "\u6c47\u6d41\u7d2f\u79ef",
+        "Strahler \u6cb3\u6d41\u7ea7\u5e8f",
+        "\u6d41\u57df"
+      ],
+      "courses" : 
       [
         "GIS \u539f\u7406",
         "\u6c34\u6587\u5efa\u6a21"
       ],
       "exercise" : "\u4ece DEM \u586b\u6d3c\u540e\u63d0\u53d6\u7814\u7a76\u533a\u4e3b\u6cb3\u7f51\u5e76\u4e0e\u771f\u5b9e\u6c34\u7cfb\u5bf9\u6bd4\u3002"
+      "exercise" : "\u4ece DEM \u586b\u6d3c\u5e76\u89e3\u6790\u5e73\u5730\u540e\u63d0\u53d6\u7814\u7a76\u533a\u4e3b\u6cb3\u7f51\uff08\u542b\u7ea7\u5e8f\uff09\u5e76\u4e0e\u771f\u5b9e\u6c34\u7cfb\u5bf9\u6bd4\u3002"
     }
   },
   "description" : "Depression filling (priority-flood), D8 flow directions, and drainage accumulation over a DEM.",
@@ -141,6 +233,10 @@
   "output" : "raster",
   "schema_version" : 2,
   "tags" :
+  "notes" : "Priority-flood filling (NoData cells are barriers, never routed across); D8 codes are the ESRI powers of two with 0 = sink; accumulation counts include the cell itself. flat_resolve adds epsilon-gradient flat resolution; flow_direction_inf is D\u221e (Tarboton) in degrees clockwise from north; stream_network thresholds accumulation and assigns Strahler orders; outlets lists D8 direction-0 cells. Full-frame kernel contract (O(N log N)).",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" : 
   [
     "terrain",
     "hydrology",

@@ -175,6 +175,9 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_zonal_stats_operator.cpp
     rs/rs_temporal_monitor_operator.cpp
     rs/rs_terrain_flow_operator.cpp
+    rs/rs_terrain_viewshed_operator.cpp
+    rs/rs_terrain_solar_operator.cpp
+    rs/rs_terrain_landform_operator.cpp
     rs/rs_grid_operators.cpp
     rs/rs_raster_spatial_operators.cpp
     rs/rs_pca_operator.cpp

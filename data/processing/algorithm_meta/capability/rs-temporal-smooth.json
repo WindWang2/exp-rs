@@ -4,11 +4,17 @@
     "applicability" :
     {
       "land_cover" :
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
       [
         "\u690d\u88ab",
         "\u519c\u7530"
       ],
       "scenes" :
+      "scenes" : 
       [
         "\u7269\u5019\u66f2\u7ebf\u6574\u5f62",
         "\u65f6\u5e8f\u5f02\u5e38\u68c0\u6d4b\u524d\u7684\u5e73\u6ed1"
@@ -16,11 +22,13 @@
     },
     "band_roles" : {},
     "crs" :
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
     "determinism" :
+    "determinism" : 
     {
       "cost_class" : "O(tile \u00d7 scenes \u00d7 window\u00b2)",
       "grade" : "tolerance",
@@ -30,6 +38,7 @@
       "stochastic" : false
     },
     "failure_modes" :
+    "failure_modes" : 
     [
       {
         "code" : "INVALID_PARAMETER",
@@ -42,6 +51,10 @@
     {
       "inputs" : [],
       "outputs" :
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
       [
         {
           "data_kind" : "integer",
@@ -81,6 +94,7 @@
         }
       ],
       "parameters" :
+      "parameters" : 
       [
         {
           "default" : "true",
@@ -96,6 +110,7 @@
         },
         {
           "enum" :
+          "enum" : 
           [
             "blue",
             "green",
@@ -125,6 +140,7 @@
         {
           "default" : "keep_all",
           "enum" :
+          "enum" : 
           [
             "keep_all",
             "reject"
@@ -142,6 +158,7 @@
         {
           "default" : "savitzky_golay",
           "enum" :
+          "enum" : 
           [
             "savitzky_golay",
             "whittaker",
@@ -190,6 +207,7 @@
     },
     "limitations" : [],
     "modality" :
+    "modality" : 
     [
       "optical"
     ],
@@ -200,11 +218,15 @@
     "teaching_use" :
     {
       "concepts" :
+    "teaching_use" : 
+    {
+      "concepts" : 
       [
         "Savitzky-Golay",
         "\u65f6\u5e8f\u5e73\u6ed1"
       ],
       "courses" :
+      "courses" : 
       [
         "\u9065\u611f\u5e94\u7528\u5206\u6790"
       ],
@@ -218,6 +240,7 @@
   "output" : "raster",
   "schema_version" : 2,
   "tags" :
+  "tags" : 
   [
     "temporal",
     "smoothing",

@@ -59,6 +59,9 @@
 #include "rs_zonal_stats_operator.h"
 #include "rs_temporal_monitor_operator.h"
 #include "rs_terrain_flow_operator.h"
+#include "rs_terrain_viewshed_operator.h"
+#include "rs_terrain_solar_operator.h"
+#include "rs_terrain_landform_operator.h"
 #include "rs_grid_operators.h"
 #include "rs_raster_spatial_operators.h"
 #include "rs_terrain_analysis_operator.h"
@@ -203,6 +206,9 @@ REGISTER_RS_OPERATOR(RsSarTemporalEventsOperator, "rs:sar_temporal_events")
 REGISTER_RS_OPERATOR(RsZonalStatsOperator, "rs:zonal_stats")
 REGISTER_RS_OPERATOR(RsTemporalMonitorOperator, "rs:temporal_monitor")
 REGISTER_RS_OPERATOR(RsTerrainFlowOperator, "rs:terrain_flow")
+REGISTER_RS_OPERATOR(RsTerrainViewshedOperator, "rs:terrain_viewshed")
+REGISTER_RS_OPERATOR(RsTerrainSolarOperator, "rs:terrain_solar")
+REGISTER_RS_OPERATOR(RsTerrainLandformOperator, "rs:terrain_landform")
 REGISTER_RS_OPERATOR(RsResampleOperator, "rs:resample")
 REGISTER_RS_OPERATOR(RsAlignOperator, "rs:align")
 REGISTER_RS_OPERATOR(RsMorphologyOperator, "rs:morphology")
@@ -383,6 +389,9 @@ void initBuiltinRsOperators() {
   add( "rs:zonal_stats", [] { return std::make_unique<RsZonalStatsOperator>(); } );
   add( "rs:temporal_monitor", [] { return std::make_unique<RsTemporalMonitorOperator>(); } );
   add( "rs:terrain_flow", [] { return std::make_unique<RsTerrainFlowOperator>(); } );
+add( "rs:terrain_viewshed", [] { return std::make_unique<RsTerrainViewshedOperator>(); } );
+add( "rs:terrain_solar", [] { return std::make_unique<RsTerrainSolarOperator>(); } );
+add( "rs:terrain_landform", [] { return std::make_unique<RsTerrainLandformOperator>(); } );
   add( "rs:resample", [] { return std::make_unique<RsResampleOperator>(); } );
   add( "rs:align", [] { return std::make_unique<RsAlignOperator>(); } );
   add( "rs:morphology", [] { return std::make_unique<RsMorphologyOperator>(); } );

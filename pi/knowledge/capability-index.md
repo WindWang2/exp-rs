@@ -11,6 +11,8 @@
 | 雷达 SAR 处理（sar） | 19 | [capability-sar.md](capability-sar.md) |
 | 地形分析（terrain） | 2 | [capability-terrain.md](capability-terrain.md) |
 | 时序分析（temporal） | 21 | [capability-temporal.md](capability-temporal.md) |
+| 地形分析（terrain） | 5 | [capability-terrain.md](capability-terrain.md) |
+| 时序分析（temporal） | 18 | [capability-temporal.md](capability-temporal.md) |
 | 分类与机器学习（classification） | 12 | [capability-classification.md](capability-classification.md) |
 | 变化检测（change） | 11 | [capability-change.md](capability-change.md) |
 | 面向对象影像分析（obia） | 7 | [capability-obia.md](capability-obia.md) |

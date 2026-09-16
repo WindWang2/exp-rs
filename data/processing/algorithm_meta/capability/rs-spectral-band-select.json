@@ -4,11 +4,28 @@
     "applicability" : {},
     "band_roles" : {},
     "crs" :
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u4efb\u610f\u5149\u5b66\u573a\u666f"
+      ],
+      "scenes" : 
+      [
+        "\u574f\u6ce2\u6bb5\u5254\u9664",
+        "\u6ce2\u6bb5\u5b50\u96c6"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
     {
       "requires_projected" : false,
       "requires_shared_grid" : false
     },
     "determinism" :
+    "determinism" : 
     {
       "grade" : "bit_exact",
       "large_raster_safe" : false,
@@ -21,6 +38,18 @@
     "io" :
     {
       "inputs" :
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u68c0\u67e5\u6ce2\u6bb5\u6570\u4e0e\u6ce2\u957f\u8303\u56f4",
+        "when" : "\u6ce2\u6bb5\u7d22\u5f15\u8d8a\u754c\u6216\u6ce2\u957f\u7a97\u53e3\u4e3a\u7a7a"
+      }
+    ],
+    "family" : "spectral",
+    "io" : 
+    {
+      "inputs" : 
       [
         {
           "data_kind" : "raster",
@@ -29,6 +58,7 @@
         }
       ],
       "outputs" :
+      "outputs" : 
       [
         {
           "data_kind" : "integer",
@@ -42,6 +72,7 @@
         }
       ],
       "parameters" :
+      "parameters" : 
       [
         {
           "name" : "bands",
@@ -77,17 +108,37 @@
       "Band selection renumbers bands; wavelength metadata of kept bands is preserved and normalized to nm."
     ],
     "modality" :
+    "limitations" : 
+    [
+      "Band selection renumbers bands; wavelength metadata of kept bands is preserved and normalized to nm."
+    ],
+    "modality" : 
     [
       "optical"
     ],
     "operator_group" : "spectral",
     "prerequisites" :
+    "prerequisites" : 
     [
       "wavelengthMin/Max and excludeRanges need WAVELENGTH band metadata; the explicit 'bands' mode does not."
     ],
     "schema_version" : 2,
     "summary" : "",
     "teaching_use" : {}
+    "summary" : "\u6309\u7d22\u5f15\u6216\u6ce2\u957f\u8303\u56f4\u9009\u62e9/\u5254\u9664\u6ce2\u6bb5\uff08\u574f\u6ce2\u6bb5\u5254\u9664\u4e0e\u5b50\u96c6\u63d0\u53d6\uff09\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u574f\u6ce2\u6bb5",
+        "\u6ce2\u957f\u9009\u62e9"
+      ],
+      "courses" : 
+      [
+        "\u9ad8\u5149\u8c31\u9065\u611f"
+      ],
+      "exercise" : "\u5254\u9664\u6c34\u6c7d\u5438\u6536\u6ce2\u6bb5\u540e\u91cd\u8dd1\u5206\u7c7b\u5bf9\u6bd4\u7cbe\u5ea6\u3002"
+    }
   },
   "description" : "Select or exclude raster bands by index or wavelength range; wavelength metadata is normalized to nm and propagated.",
   "display_name" : "Spectral Band Select",
@@ -96,6 +147,7 @@
   "output" : "raster",
   "schema_version" : 2,
   "tags" :
+  "tags" : 
   [
     "spectral",
     "preprocessing",

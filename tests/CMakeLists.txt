@@ -1570,6 +1570,111 @@ target_include_directories(test_terrain_foundation5 PRIVATE
 )
 sicnu_discover_tests(test_terrain_foundation5)
 
+# Terrain hydrology 11.0: epsilon flat resolution, D∞ flow, outlets,
+# threshold/Strahler stream networks + link vectorization.
+add_executable(test_terrain_hydrology test_terrain_hydrology.cpp)
+target_link_libraries(test_terrain_hydrology PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_terrain_hydrology PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_terrain_hydrology)
+
+# Terrain visibility 11.0: R3 viewshed, curvature/refraction, cumulative
+# observers, horizon profiles.
+add_executable(test_terrain_viewshed test_terrain_viewshed.cpp)
+target_link_libraries(test_terrain_viewshed PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_terrain_viewshed PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_terrain_viewshed)
+
+# Terrain solar 11.0: parallel-ray shadow duration + low-precision solar
+# position (tabulated astronomy oracle).
+add_executable(test_terrain_solar test_terrain_solar.cpp)
+target_link_libraries(test_terrain_solar PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_terrain_solar PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_terrain_solar)
+
+# Terrain landform 11.0: multiscale TPI, Weiss classes, geomorphon patterns.
+add_executable(test_terrain_landform test_terrain_landform.cpp)
+target_link_libraries(test_terrain_landform PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_terrain_landform PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_terrain_landform)
+
+# Terrain analytics E2E 11.0: new products through the operator registry,
+# cancellation, and the fail-closed cell budget.
+add_executable(test_terrain_analytics_e2e test_terrain_analytics_e2e.cpp)
+target_link_libraries(test_terrain_analytics_e2e PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_terrain_analytics_e2e)
+target_include_directories(test_terrain_analytics_e2e PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_terrain_analytics_e2e)
+
+# Terrain agent tools 11.0: spatial:terrain_profile / viewshed inspect
+# JSON contracts, Unicode paths, error codes.
+add_executable(test_terrain_agent_tools test_terrain_agent_tools.cpp)
+target_link_libraries(test_terrain_agent_tools PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_agent
+  GDAL::GDAL
+)
+sicnu_link_jsoncpp(test_terrain_agent_tools)
+target_include_directories(test_terrain_agent_tools PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_terrain_agent_tools)
+
 # Scientific Algorithms 9.0 (M0): regression tests for the verified
 # scientific defects #848/#853/#854/#855/#856/#873 (old-code-fails form).
 add_executable(test_scientific_defects_9 test_scientific_defects_9.cpp)

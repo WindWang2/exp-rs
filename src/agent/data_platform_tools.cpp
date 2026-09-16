@@ -60,6 +60,8 @@ using sicnu::experiment::BenchmarkService;
 // the D19 benchmark tool paths reference sicnu::experiment::BenchmarkService /
 // benchmarkRunStatusToString unqualified, which GCC rejects (master
 // a5b11b7f10 does not compile sicnu_agent without this line).
+// Master build repair (pre-existing, D19 merge): unqualified names below
+// resolve into sicnu::experiment only with this using-directive restored.
 using namespace sicnu::experiment;
 
 namespace
