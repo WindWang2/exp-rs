@@ -32,3 +32,4 @@
 - **验证状态（如实）**：
   - 已验证：12 个新/改源文件 + 4 个测试文件经 `ninja -t commands` 提取命令逐个编译通过（12/12 OK）；`node --test pi/test/scientific_workflow_compiler_11.test.mjs` = 5 tests / 3 pass / 0 fail / 2 skip（宿主无法 exec fake MCP server，pre-existing）；`git diff --check origin/master...HEAD` 干净；无冲突标记/secret；pre-existing master Windows 缺陷已修复并独立 commit（12f00a9d，且该文件在其后一次构建中编译通过——watchdog 日志 [2/1064] 显示 pipeline_run_coordinator.obj 重建成功仅剩 warning）。
   - 未验证（not-executed，原因：构建循环按用户指示停止）：4 个 *_11 测试目标的完整链接与 ctest 运行、eval corpus runner、既有 harness 回归套件。PR 合并前需在可调度资源上补跑；PR_BODY 如实标注。
+- 2026-09-16 | git push + gh pr create | 0 | PR #1029 创建（base=master, head=zcode/scientific-workflow-compiler-11），未 merge，不等待在线 CI
