@@ -908,18 +908,22 @@ const std::map<std::string, ScientificContract> &scientificContracts()
         // read of its own header. ------------------------------------------------
         {
             // Model-task operators (rs_model_task_operators.h, D19 family):
+            // each runs a single forward pass over ONE scene window and
+            // publishes a TYPED JSON artifact (exp-rs-classification/1 etc.),
+            // not a raster — review F-03 corrected the first-draft record.
             for ( const char *id : { "rs:classify", "rs:regress", "rs:change" } )
             {
                 ScientificContract c = baseRecord();
                 c.operatorId = id;
                 c.inputDomain = "features";
-                c.outputDomain = id == std::string( "rs:classify" ) ? "classes"
-                                                                    : "features";
-                c.cancellationGranularity = "tile_level";
+                c.outputDomain = "none";
+                c.cancellationGranularity = "operator_level";
                 c.atomicPublication = "staged_rename";
                 c.provenance = "output_metadata";
                 c.evidence = "family:model-runtime + schema read "
-                             "(rs_model_task_operators.h)";
+                             "(rs_model_task_operators.h: single-pass, typed JSON "
+                             "artifact exp-rs-classification/1 family)";
+                c.note = "product is a typed JSON artifact, not a categorical raster";
                 rows.push_back( c );
             }
             {
@@ -932,10 +936,11 @@ const std::map<std::string, ScientificContract> &scientificContracts()
                 ScientificContract c = baseRecord();
                 c.operatorId = "rs:library_select";
                 c.inputDomain = "none";
-                c.outputDomain = "none";
-                c.atomicPublication = "json_result_only";
+                c.outputDomain = "table"; // subset library artifact (JSON)
+                c.atomicPublication = "direct_write"; // subset.save; atomicity unverified
                 c.evidence = "family:spectral-tools + schema read "
-                             "(rs_library_select_operator.h)";
+                             "(rs_library_select_operator.h: requires output, "
+                             "persists the subset library via subset.save)";
                 rows.push_back( c );
             }
             {
@@ -950,18 +955,25 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             {
                 ScientificContract c = indexFamily();
                 c.operatorId = "rs:spectral_band_select";
+                c.outputDomain = "any"; // subset COPY — input domain passes through
+                c.wavelengthPolicy = "srf_or_center";
                 c.evidence = "family:spectral-tools + schema read "
-                             "(rs_spectral_band_select_operator.h: subset copy)";
+                             "(rs_spectral_band_select_operator.h: select/exclude "
+                             "bands producing the same bands; wavelength-metadata mode "
+                             "requires srf_or_center)";
                 rows.push_back( c );
             }
             // SAR / InSAR family (Advanced SAR 10.0 package C headers):
             {
                 ScientificContract c = sarFamily();
                 c.operatorId = "rs:sar_coregister";
-                c.outputDomain = "none";
-                c.atomicPublication = "json_result_only"; // shift estimate
+                c.inputDomain = "amplitude";
+                c.outputDomain = "amplitude"; // resampled complex slave (CFloat32)
                 c.evidence = "family:sar + schema read (rs_sar_coregister_operator.h: "
-                             "residual global-shift estimate between same-grid scenes)";
+                             "residual global-shift estimate + resampled slave raster; "
+                             "reportOnly=1 limits the run to the shift JSON)";
+                c.note = "writes the resampled complex slave unless reportOnly=1; "
+                         "streaming output stages before publish";
                 rows.push_back( c );
             }
             for ( const char *id : { "rs:sar_interferogram", "rs:sar_phase_filter",

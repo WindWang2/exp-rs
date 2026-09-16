@@ -371,7 +371,7 @@ TEST_CASE( "M6: mosaic over disjoint tiles is order-insensitive", "[metamorphic1
     sicnu::testing::RsSyntheticRasterBuilder right( 8, 16, 1, GDT_Float32 );
     right.withCheckerboard( 1, 2, 0.1f, 0.9f )
         .withCrs( QStringLiteral( "EPSG:4326" ) )
-        .withGeoTransform( 8.0, 1.0, 16.0, 1.0 );
+        .withGeoTransform( 8.0, 1.0, 16.0, -1.0 ); // north-up like the left tile
     const auto rl = left.writeToDisk( dir.filePath( QStringLiteral( "m6_left.tif" ) ) );
     const auto rr = right.writeToDisk( dir.filePath( QStringLiteral( "m6_right.tif" ) ) );
 

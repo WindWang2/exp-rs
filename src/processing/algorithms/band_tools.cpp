@@ -61,6 +61,10 @@ bool BandTools::processBandRatioFile( const QString &sourcePath, const QString &
                              src.geoTransform(), src.projection() );
     if ( !dst.isOpen() )
         return fail( errorMessage, QStringLiteral( "无法创建输出栅格。" ) );
+    // Publish the masked-hole semantics (Platform 11.0 M4/F-18): masked
+    // pixels are NaN AND the band declares it, so metadata-driven consumers
+    // see the hole instead of an undeclared gap.
+    dst.setBandNoDataValue( 1, std::numeric_limits<float>::quiet_NaN() );
 
     GdalMultibandBlockStream stream( src, pair, kTileDim, kTileDim );
     std::vector<float> numerator( static_cast<size_t>( kTileDim ) * kTileDim );

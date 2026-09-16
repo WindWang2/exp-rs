@@ -89,6 +89,11 @@ int main( int argc, char **argv )
             std::cerr << "exactly one of --census-out / --census-check is required\n";
             return 2;
         }
+        if ( !outPath.empty() || !checkPath.empty() )
+        {
+            std::cerr << "--census-* and --out/--check are mutually exclusive\n";
+            return 2;
+        }
         const auto census = sicnu::contracts::buildDeterminismCensus( sourceRoot );
         const std::string expected = canonicalJson(
             sicnu::contracts::determinismCensusToJson( census ) );

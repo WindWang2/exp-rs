@@ -166,43 +166,6 @@ TEST_CASE( "help operator ids resolve in the live registry", "[crosssurface11]" 
     }
 }
 
-/// Implementation-existence check for AGENT TOOL ids: data/agent/
-/// capabilities/tools.json is the tool catalog, whose ids are dispatched by
-/// several registration shapes in src/agent (SpatialTool subclasses, tool
-/// tables, the harness taxonomy). The honest mechanical binding here is
-/// implementation existence: each catalog id must appear as a quoted
-/// literal somewhere under src/agent, or the knowledge entry is a phantom.
-std::set<std::string> agentToolSurfaceIds()
-{
-    std::set<std::string> ids;
-    static const std::regex nameRe(
-        R"re(name\(\)\s*const\s*(?:override)?\s*\{\s*return\s*"([a-z0-9_]+:[a-z0-9_]+)")re" );
-    static const std::regex quotedIdRe( R"re("(?:[a-z0-9_]+):([a-z0-9_]+)")re" );
-    std::error_code ec;
-    const fs::path root = fs::path( sourceRoot() ) / "src" / "agent";
-    REQUIRE( fs::exists( root ) );
-    std::filesystem::recursive_directory_iterator it(
-        root, fs::directory_options::skip_permission_denied, ec );
-    std::filesystem::recursive_directory_iterator end;
-    while ( !ec && it != end )
-    {
-        std::error_code fileEc;
-        const auto &p = it->path();
-        const auto ext = p.extension().string();
-        if ( it->is_regular_file( fileEc ) && ( ext == ".h" || ext == ".cpp" ) )
-        {
-            std::ifstream in( p.string(), std::ios::binary );
-            const std::string text{ std::istreambuf_iterator<char>( in ),
-                                    std::istreambuf_iterator<char>() };
-            for ( auto mit = std::sregex_iterator( text.begin(), text.end(), nameRe );
-                  mit != std::sregex_iterator(); ++mit )
-                ids.insert( ( *mit )[1].str() );
-        }
-        it.increment( ec );
-    }
-    return ids;
-}
-
 bool toolIdImplementedInAgentSources( const std::string &id )
 {
     std::error_code ec;

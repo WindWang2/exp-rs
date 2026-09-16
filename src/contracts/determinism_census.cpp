@@ -134,7 +134,7 @@ std::vector<RegistrationSite> scanRegistrationSites( const std::string &sourceRo
             RegistrationSite s;
             s.className = ( *it )[1].str();
             s.operatorId = ( *it )[2].str();
-            s.file = std::filesystem::proximate( path, std::filesystem::path( sourceRoot ) / "src" ).string();
+            s.file = std::filesystem::proximate( path, std::filesystem::path( sourceRoot ) / "src" ).generic_string();
             sites.push_back( std::move( s ) );
         }
         for ( auto it = std::sregex_iterator( text.begin(), text.end(), addRe );
@@ -145,7 +145,7 @@ std::vector<RegistrationSite> scanRegistrationSites( const std::string &sourceRo
             RegistrationSite s;
             s.operatorId = ( *it )[1].str();
             s.className = ( *it )[2].str();
-            s.file = std::filesystem::proximate( path, std::filesystem::path( sourceRoot ) / "src" ).string();
+            s.file = std::filesystem::proximate( path, std::filesystem::path( sourceRoot ) / "src" ).generic_string();
             sites.push_back( std::move( s ) );
         }
     }
@@ -199,7 +199,7 @@ std::map<std::string, std::vector<ClassSlice>> scanClassSlices(
     // trailing `final` markers, so the NAME is taken from the trailing token
     // group and `final` itself is never accepted as a class name.
     static const std::regex declRe(
-        R"re(\bclass\s+((?:\w+\s+)*)(\w+)\s*(?::\s*([^{]+))?\{)re" );
+        R"re(\bclass\s+((?:\w+\s+)*)(\w+)\s*(?::\s*([^{;]+))?\{)re" );
 
     std::filesystem::recursive_directory_iterator it(
         root, std::filesystem::directory_options::skip_permission_denied, ec );
@@ -229,7 +229,7 @@ std::map<std::string, std::vector<ClassSlice>> scanClassSlices(
             continue;
         }
         const std::string rel = std::filesystem::proximate(
-            p, std::filesystem::path( sourceRoot ) / "src" ).string();
+            p, std::filesystem::path( sourceRoot ) / "src" ).generic_string();
         for ( auto mit = std::sregex_iterator( text.begin(), text.end(), declRe );
               mit != std::sregex_iterator(); ++mit )
         {
@@ -477,7 +477,7 @@ std::map<std::string, ClassSlice> scanMacroClassBodies( const std::string &sourc
                 continue;
             ClassSlice slice;
             slice.file = std::filesystem::proximate(
-                path, std::filesystem::path( sourceRoot ) / "src" ).string();
+                path, std::filesystem::path( sourceRoot ) / "src" ).generic_string();
             slice.body = body->second;
             slice.isHeader = true;
             bodies.emplace( ( *uit )[2].str(), std::move( slice ) );
@@ -599,7 +599,11 @@ std::map<std::string, ContractExemption> loadContractExemptions(
                                        / "data" / "contracts" / "contract_exemptions.json";
     Json::Value doc;
     if ( !readJsonFile( path.string(), doc ) )
-        return out; // absent = no exemptions; gates decide whether that is ok
+    {
+        if ( std::filesystem::exists( path ) )
+            error = "contract_exemptions.json exists but cannot be parsed";
+        return out; // absent = no exemptions; malformed = loud error
+    }
     if ( doc["schema"].asString() != "exp.contract_exemptions.v1" )
     {
         error = "contract_exemptions.json: schema must be exp.contract_exemptions.v1";

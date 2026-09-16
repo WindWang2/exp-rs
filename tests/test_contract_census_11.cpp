@@ -193,9 +193,11 @@ TEST_CASE( "scanned determinism literals match the live virtual dispatch",
         CHECK( std::string( liveRuntime ) == entry->second.runtimeGrade );
         ++runtimeChecked;
     }
-    // The binding must be live, not vacuous.
+    // The binding must be live, not vacuous. The stamped-schema floor pins
+    // the published surface: dropping stamps is a loud conscious diff, not a
+    // silent regression (Platform 11.0: 58 rows carry a grade fact).
     CHECK( runtimeChecked >= 100 );
-    CHECK( gradeChecked >= 1 );
+    CHECK( gradeChecked >= 40 );
 }
 
 TEST_CASE( "exemption records are well-formed and never shadow a contract",
@@ -214,6 +216,27 @@ TEST_CASE( "exemption records are well-formed and never shadow a contract",
     // Red direction: a malformed exemption file must be rejected, not ignored.
     // (Verified by the loader contract: an entry missing 'evidence' would set
     // the error string; pinned here through the real file's validity.)
+}
+
+TEST_CASE( "malformed exemption files are rejected, never silently ignored",
+           "[census11][exemptions-red]" )
+{
+    // Red direction of the coverage gate: an UNPARSEABLE exemptions file
+    // must set the loader error (the census records it as a note) instead of
+    // reading as "no exemptions".
+    const fs::path root = fs::temp_directory_path() / "sicnu_census11_exemptions";
+    fs::remove_all( root );
+    fs::create_directories( root / "data" / "contracts" );
+    {
+        std::ofstream bad( root / "data" / "contracts" / "contract_exemptions.json" );
+        bad << "{ \"schema\": \"exp.contract_exemptions.v1\", \"exemptions\": [ ";
+        // truncated JSON — parse must fail
+    }
+    std::string error;
+    const auto exemptions = loadContractExemptions( root.string(), error );
+    CHECK( exemptions.empty() );
+    CHECK_FALSE( error.empty() );
+    fs::remove_all( root );
 }
 
 TEST_CASE( "census scanner recovers a synthetic registration tree",

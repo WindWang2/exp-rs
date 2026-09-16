@@ -712,7 +712,11 @@ std::vector<OperatorScanResult> OperatorParamScanner::scanAll() const
             out.push_back( std::move( r ) );
             continue;
         }
-        std::string src = readFile( file );
+        // Platform-portable snapshot paths: the graph snapshot byte-compares
+        // across hosts, so recorded file paths always use generic separators.
+        const std::string genericFile =
+            std::filesystem::path( file ).generic_string();
+        std::string src = readFile( genericFile );
         if ( src.empty() )
         {
             // Loud bound: an unopenable non-empty file must not silently
