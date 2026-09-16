@@ -313,6 +313,205 @@
           }
         }
       ]
+    },
+    {
+      "case_id": "workflow-compiler/temporal-calendar-range-conflict-is-typed",
+      "category": "workflow_compiler",
+      "description": "Compiler & grounding 11: observed acquisitions outside the declared expectations.temporal date range are a typed TEMPORAL_CALENDAR_CONFLICT error, never silently tolerated",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "metadata": {
+          "SICNU_RADIOMETRIC_STATE": "surface_reflectance",
+          "SICNU_ACQUISITION_DATE": "2024-05-20T10:31:00Z"
+        }
+      },
+      "steps": [
+        {
+          "tool": "harness:compile_workflow",
+          "input": {
+            "ir": {
+              "kind": "workflow_ir",
+              "schema_version": "1.0",
+              "goal": "NDVI restricted to the summer window",
+              "intent": "ndvi",
+              "inputs": [
+                {
+                  "name": "primary",
+                  "ref": "$fixture"
+                }
+              ],
+              "nodes": [
+                {
+                  "id": "ndvi",
+                  "operator": "rs:spectral_index",
+                  "params": {
+                    "index": "NDVI"
+                  },
+                  "inputs": [
+                    {
+                      "input": "primary"
+                    }
+                  ]
+                }
+              ],
+              "expectations": {
+                "output_dir": "$tmp/compiler-out",
+                "temporal": {
+                  "date_range": {
+                    "start": "2024-06-01",
+                    "end": "2024-09-01"
+                  }
+                }
+              }
+            }
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "verdict",
+                "equals": "blocked"
+              },
+              {
+                "path": "analysis.issues",
+                "contains": "TEMPORAL_CALENDAR_CONFLICT"
+              }
+            ]
+          }
+        },
+        {
+          "tool": "harness:probe_facts",
+          "input": {
+            "ref": "$fixture",
+            "scopes": [
+              "temporal"
+            ]
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "facts.temporal_facts.count",
+                "equals": 1
+              },
+              {
+                "path": "facts.temporal_facts.regularity",
+                "equals": "single"
+              },
+              {
+                "path": "facts.fact_status.acquisition_time",
+                "equals": "observed"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "workflow-compiler/numeric-domain-chain-dn-vs-reflectance-is-typed",
+      "category": "workflow_compiler",
+      "description": "Compiler & grounding 11: a DN input beside a surface-reflectance input into one consumer is a typed NUMERIC_DOMAIN_CHAIN error (mixed radiometric chains)",
+      "fixture": {
+        "kind": "raster",
+        "width": 8,
+        "height": 8,
+        "bands": [
+          "red",
+          "nir"
+        ],
+        "metadata": {
+          "SICNU_RADIOMETRIC_STATE": "dn"
+        }
+      },
+      "steps": [
+        {
+          "tool": "harness:compile_workflow",
+          "input": {
+            "ir": {
+              "kind": "workflow_ir",
+              "schema_version": "1.0",
+              "goal": "Bitemporal difference across mixed radiometric chains",
+              "intent": "change",
+              "inputs": [
+                {
+                  "name": "t1",
+                  "ref": "$fixture"
+                },
+                {
+                  "name": "t2",
+                  "ref": "declared-reflectance"
+                }
+              ],
+              "nodes": [
+                {
+                  "id": "diff",
+                  "operator": "rs:change_difference",
+                  "inputs": [
+                    {
+                      "input": "t1",
+                      "as": "after"
+                    },
+                    {
+                      "input": "t2",
+                      "as": "before"
+                    }
+                  ]
+                }
+              ],
+              "expectations": {
+                "output_dir": "$tmp/compiler-out"
+              }
+            },
+            "input_facts": {
+              "t2": {
+                "kind": "dataset_understanding",
+                "source_kind": "raster",
+                "path": "declared-reflectance.tif",
+                "crs": {
+                  "authid": "EPSG:32650"
+                },
+                "crs_authid": "EPSG:32650",
+                "size": [
+                  8,
+                  8
+                ],
+                "pixel_size": {
+                  "x": 30.0,
+                  "y": 30.0
+                },
+                "band_roles": [
+                  "red",
+                  "nir"
+                ],
+                "band_count": 2,
+                "radiometric_state": "surface_reflectance",
+                "fact_status": {
+                  "radiometric_state": "observed"
+                }
+              }
+            }
+          },
+          "expect": {
+            "success": true,
+            "asserts": [
+              {
+                "path": "verdict",
+                "equals": "blocked"
+              },
+              {
+                "path": "analysis.issues",
+                "contains": "NUMERIC_DOMAIN_CHAIN"
+              }
+            ]
+          }
+        }
+      ]
     }
   ]
 }

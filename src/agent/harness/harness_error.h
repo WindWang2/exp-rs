@@ -69,6 +69,12 @@ inline constexpr const char *kResourceOverBudget = "RESOURCE_OVER_BUDGET";
 inline constexpr const char *kOutputPathCollision = "OUTPUT_PATH_COLLISION";
 inline constexpr const char *kNondeterministicChain = "NONDETERMINISTIC_CHAIN";
 inline constexpr const char *kFactConflict = "FACT_CONFLICT";
+/// Compiler & Grounding 11.0: fact model 2.0 / analysis 2.0 codes
+/// (append-only, same table).
+inline constexpr const char *kTemporalCalendarConflict = "TEMPORAL_CALENDAR_CONFLICT";
+inline constexpr const char *kNumericDomainChain = "NUMERIC_DOMAIN_CHAIN";
+inline constexpr const char *kBandIdentityMismatch = "BAND_IDENTITY_MISMATCH";
+inline constexpr const char *kOutputIdentityMismatch = "OUTPUT_IDENTITY_MISMATCH";
 } // namespace error_codes
 
 /// Retry policy class for an error code.

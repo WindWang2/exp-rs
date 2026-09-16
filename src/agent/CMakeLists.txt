@@ -34,7 +34,15 @@ add_library(sicnu_agent SHARED
   contracts/spatial_contracts.cpp
   contracts/spatial_contracts.h
   harness/band_facts.cpp
+  harness/workflow_facts.cpp
+  harness/grounding_probes.cpp
+  harness/provenance_projection.cpp
+  harness/workflow_explain.cpp
   harness/band_facts.h
+  harness/workflow_facts.h
+  harness/grounding_probes.h
+  harness/provenance_projection.h
+  harness/workflow_explain.h
   harness/workflow_ir.cpp
   harness/workflow_ir.h
   harness/workflow_analysis.cpp

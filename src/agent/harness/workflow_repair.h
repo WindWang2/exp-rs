@@ -95,4 +95,48 @@ struct IrCompileFixResult
 /// verdict; a repair pass never claims success its own re-analysis contradicts.
 IrCompileFixResult analyzeRepairAnalyze( WorkflowIr ir, const IrAnalysisInput &input );
 
+/// Repair 2.0 (compiler & grounding 11): a PREPARED DECISION — one rule's
+/// full action plan with risk/evidence/cost so a caller (Pi or human) can
+/// approve in one step. `autoApplicable` mirrors the risk-class contract:
+/// only shape_preserving repairs with sufficient facts are ever true.
+struct IrPreparedDecision
+{
+    std::string ruleId;
+    std::string issueCode;
+    std::string riskClass;        ///< repair_risk::*
+    std::string operatorId;       ///< the operator to insert ("" = choice only)
+    bool autoApplicable = false;
+    int costRank = 0;             ///< closed per-rule convention (see decisionCostRank)
+    int evidenceRank = 0;         ///< count of facts the rule could use
+    std::string consumerNode;     ///< where the repair wires in ("" = document level)
+    std::string insertedNode;     ///< the applied repair's node id (applied only)
+    Json::Value params{Json::objectValue}; ///< exact parameters for the wiring
+    Json::Value factsUsed{Json::objectValue};
+    Json::Value missingFacts{Json::arrayValue};
+    std::string why;              ///< EN one-liner (from the refusal when present)
+    std::string whyZh;            ///< zh-CN one-liner (closed template per rule)
+
+    Json::Value toJson() const;
+};
+
+/// The whole prepared-decision plan for one compile pass, in the
+/// deterministic order: risk class (shape_preserving, radiometric,
+/// science_changing), then cost ascending, then evidence descending, then
+/// ruleId/consumerNode. Same inputs -> same order, always.
+struct IrRepairPlan
+{
+    std::vector<IrPreparedDecision> decisions;
+    Json::Value toJson() const;
+};
+
+/// The closed per-rule cost convention (1 = cheapest wiring, 9 = replace the
+/// dataset). Purely a documented ordering device — never a wall-clock claim.
+int decisionCostRank( const std::string &ruleId );
+
+/// Builds the prepared-decision plan from the SAME repair pass the compiler
+/// already ran (applied repairs -> auto-applicable decisions; refusals ->
+/// prepared decisions awaiting the caller). Pure: reads records, mutates
+/// nothing.
+IrRepairPlan planPreparedDecisions( const IrRepairOutcome &outcome );
+
 } // namespace sicnu::agent::harness

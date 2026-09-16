@@ -9059,6 +9059,24 @@ sicnu_link_jsoncpp(test_workflow_analysis)
 sicnu_add_test(test_workflow_repair)
 sicnu_link_jsoncpp(test_workflow_repair)
 
+# Fact model 2.0 (compiler & grounding 11): temporal cadence/regularity,
+# unit-aware resolution, quality masks, product/model/resource facts.
+sicnu_add_test(test_workflow_facts_11)
+sicnu_link_jsoncpp(test_workflow_facts_11)
+
+# Analysis 2.0 (compiler & grounding 11): temporal calendar, numeric-domain
+# chain, band identity, output identity.
+sicnu_add_test(test_workflow_analysis_11)
+sicnu_link_jsoncpp(test_workflow_analysis_11)
+
+# Bounded grounding probes (compiler & grounding 11).
+sicnu_add_test(test_grounding_probes_11)
+sicnu_link_jsoncpp(test_grounding_probes_11)
+
+# Provenance projection + prepared decisions + explain (compiler & grounding 11).
+sicnu_add_test(test_provenance_projection_11)
+sicnu_link_jsoncpp(test_provenance_projection_11)
+
 # Harness session checkpoint/resume with stale invalidation + budgeted
 # deterministic tool shortlist.
 sicnu_add_test(test_context_checkpoint)

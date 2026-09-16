@@ -269,6 +269,8 @@ void SpatialToolRegistry::registerBuiltinTools()
   harness::registerHarnessTools();
   // Harness 4.0 grounding: data:understand + revision-stamped harness:context.
   harness::registerGroundingTools();
+  // Compiler & grounding 11.0: bounded fact/model probe surfaces.
+  harness::registerGroundingProbeTools();
   // Harness 4.0 plan lifecycle: scientific preflight, plan compile, execute,
   // run status with automatic verification and map confirmation.
   harness::registerPlanTools();

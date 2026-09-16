@@ -348,3 +348,7 @@ data/labs/_tmp/
 !.planning/linked-visual-analytics-11/
 .planning/linked-visual-analytics-11/*
 !.planning/linked-visual-analytics-11/*.md
+# scientific-workflow-compiler-11: track planning notes (markdown only; logs stay local).
+!.planning/scientific-workflow-compiler-11/
+.planning/scientific-workflow-compiler-11/*
+!.planning/scientific-workflow-compiler-11/*.md

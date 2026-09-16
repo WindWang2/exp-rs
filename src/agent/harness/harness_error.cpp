@@ -93,6 +93,11 @@ const struct Entry {
     { "NETWORK_INVERSION_RANK_DEFICIENT", { "validation", RetryClass::None } },
     { "NETWORK_INVERSION_PAIR_LIMIT",  { "validation", RetryClass::None } },
     { "NETWORK_INVERSION_EPOCH_LIMIT", { "validation", RetryClass::None } },
+    // Compiler & Grounding 11.0: fact model 2.0 / analysis 2.0 (append-only).
+    { "TEMPORAL_CALENDAR_CONFLICT", { "validation", RetryClass::None } },
+    { "NUMERIC_DOMAIN_CHAIN",    { "validation", RetryClass::None } },
+    { "BAND_IDENTITY_MISMATCH",  { "validation", RetryClass::None } },
+    { "OUTPUT_IDENTITY_MISMATCH", { "validation", RetryClass::None } },
 };
 const Entry *kEntriesEnd = kEntries + sizeof( kEntries ) / sizeof( kEntries[0] );
 

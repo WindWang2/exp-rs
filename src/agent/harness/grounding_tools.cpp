@@ -18,6 +18,15 @@ namespace sicnu::agent::harness {
 
 using namespace sicnu::agent::spatial_tools;
 
+QString understandingCacheKeyFor( const QString &path, long long revision )
+{
+  if ( revision > 0 )
+    return path + QStringLiteral( "|r" ) + QString::number( revision );
+  const QFileInfo info( path );
+  return path + QStringLiteral( "|f" ) + QString::number( info.size() ) + QStringLiteral( "|" ) +
+         QString::number( info.lastModified().toMSecsSinceEpoch() );
+}
+
 namespace {
 
 Json::Value objectSchema( Json::Value properties, Json::Value required )
@@ -143,11 +152,7 @@ bool suggestsOptical( const Json::Value &inspect )
 /// be a cache miss.
 QString understandingCacheKey( const QString &path, long long revision )
 {
-  if ( revision > 0 )
-    return path + QStringLiteral( "|r" ) + QString::number( revision );
-  const QFileInfo info( path );
-  return path + QStringLiteral( "|f" ) + QString::number( info.size() ) + QStringLiteral( "|" ) +
-         QString::number( info.lastModified().toMSecsSinceEpoch() );
+  return understandingCacheKeyFor( path, revision );
 }
 
 /// Harness 8.0: bounded typed projection of a DatasetUnderstanding document
