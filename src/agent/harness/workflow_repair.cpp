@@ -343,6 +343,9 @@ IrRepairOutcome planRepairs( const WorkflowIr &ir, const IrAnalysis &analysis,
       record.risk = repair_risk::kShapePreserving;
       record.factsUsed["target_crs"] = referenceCrs;
       record.factsUsed["slot"] = edge.input;
+      record.params["targetCrs"] = referenceCrs;
+      record.params["output"] =
+        outputDir + "/" + outcome.ir.irId + "_" + newId + ".tif";
       outcome.repairs.push_back( std::move( record ) );
       outcome.changed = true;
       continue;
@@ -452,6 +455,8 @@ IrRepairOutcome planRepairs( const WorkflowIr &ir, const IrAnalysis &analysis,
         record.risk = repair_risk::kShapePreserving;
         record.factsUsed["reference_slot"] = referenceSlot;
         record.factsUsed["aligned_slot"] = edge.input;
+        record.params["output"] = outputDir + "/" + outcome.ir.irId + "_" + newId + ".tif";
+        record.params["reference"] = referenceSlot;
         outcome.repairs.push_back( std::move( record ) );
         outcome.changed = true;
       }
@@ -611,6 +616,161 @@ IrCompileFixResult analyzeRepairAnalyze( WorkflowIr ir, const IrAnalysisInput &i
   result.refusals = outcome.refusals;
   result.analysis = analyzeWorkflowIr( result.ir, input );
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Repair 2.0: prepared decisions (compiler & grounding 11)
+// ---------------------------------------------------------------------------
+
+namespace {
+
+/// Closed zh-CN one-liner per rule (decision documents must be readable by
+/// the student without opening the ledger). Drift-pinned by tests.
+std::string ruleWhyZh( const std::string &ruleId )
+{
+  if ( ruleId == kRuleReproject )
+    return "自动修复：将非参考输入重投影到参考 CRS（仅改变几何形态，不改科学含义）";
+  if ( ruleId == kRuleAlign )
+    return "自动修复：将非参考输入重采样对齐到参考网格（仅改变几何形态）";
+  if ( ruleId == kRuleCalibrateToa )
+    return "待决策：辐射定标会改变像素语义（DN→TOA 反射率），需确认后手动接线";
+  if ( ruleId == kRuleSarCalibrate )
+    return "待决策：SAR 定标系数必须来自实测元数据，不能默认生成";
+  if ( ruleId == kRuleQaMask )
+    return "待决策：应用质量掩膜会改变参与计算像元集合，需明确选择";
+  if ( ruleId == kRuleGapFill )
+    return "待决策：时间插值填补会改变样本，需要明确同意";
+  if ( ruleId == kRuleSelectDataset )
+    return "待决策：缺少必需物理波段或数值域不可自动转换，需要更换数据或方法";
+  return "修复规则 " + ruleId + " 需要处理";
+}
+
+} // namespace
+
+int decisionCostRank( const std::string &ruleId )
+{
+  // Closed convention: how invasive the wiring is. Documented ordering
+  // device only — never a wall-clock claim.
+  if ( ruleId == kRuleAlign )
+    return 1;
+  if ( ruleId == kRuleReproject )
+    return 2;
+  if ( ruleId == kRuleQaMask )
+    return 3;
+  if ( ruleId == kRuleCalibrateToa || ruleId == kRuleSarCalibrate )
+    return 4;
+  if ( ruleId == kRuleGapFill )
+    return 6;
+  if ( ruleId == kRuleSelectDataset )
+    return 7;
+  return 9; // unknown rule: last
+}
+
+Json::Value IrPreparedDecision::toJson() const
+{
+  Json::Value doc( Json::objectValue );
+  doc["rule_id"] = ruleId;
+  if ( !issueCode.empty() )
+    doc["issue_code"] = issueCode;
+  doc["risk_class"] = riskClass;
+  if ( !operatorId.empty() )
+    doc["operator_id"] = operatorId;
+  doc["auto_applicable"] = autoApplicable;
+  doc["cost_rank"] = costRank;
+  doc["evidence_rank"] = evidenceRank;
+  if ( !consumerNode.empty() )
+    doc["consumer_node"] = consumerNode;
+  if ( !insertedNode.empty() )
+    doc["inserted_node"] = insertedNode;
+  if ( params.isObject() && !params.empty() )
+    doc["params"] = params;
+  if ( factsUsed.isObject() && !factsUsed.empty() )
+    doc["facts_used"] = factsUsed;
+  if ( missingFacts.isArray() && !missingFacts.empty() )
+    doc["missing_facts"] = missingFacts;
+  if ( !why.empty() )
+    doc["why"] = why;
+  if ( !whyZh.empty() )
+    doc["why_zh"] = whyZh;
+  return doc;
+}
+
+Json::Value IrRepairPlan::toJson() const
+{
+  Json::Value doc( Json::objectValue );
+  Json::Value list( Json::arrayValue );
+  for ( const IrPreparedDecision &decision : decisions )
+    list.append( decision.toJson() );
+  doc["decisions"] = list;
+  return doc;
+}
+
+IrRepairPlan planPreparedDecisions( const IrRepairOutcome &outcome )
+{
+  IrRepairPlan plan;
+
+  for ( const IrRepairRecord &record : outcome.repairs )
+  {
+    IrPreparedDecision decision;
+    decision.ruleId = record.ruleId;
+    decision.issueCode = record.issueCode;
+    decision.riskClass = record.risk;
+    for ( const IrRepairRuleSpec &spec : repairRuleTable() )
+      if ( spec.ruleId == record.ruleId )
+        decision.operatorId = spec.operatorId;
+    decision.autoApplicable = record.risk == repair_risk::kShapePreserving;
+    decision.costRank = decisionCostRank( record.ruleId );
+    decision.evidenceRank = record.factsUsed.isObject()
+                              ? static_cast<int>( record.factsUsed.size() )
+                              : 0;
+    decision.insertedNode = record.insertedNode;
+    decision.params = record.params;
+    decision.factsUsed = record.factsUsed;
+    decision.whyZh = ruleWhyZh( record.ruleId );
+    plan.decisions.push_back( std::move( decision ) );
+  }
+
+  for ( const IrRefusal &refusal : outcome.refusals )
+  {
+    IrPreparedDecision decision;
+    decision.ruleId = refusal.ruleId;
+    decision.issueCode = refusal.issueCode;
+    for ( const IrRepairRuleSpec &spec : repairRuleTable() )
+      if ( spec.ruleId == refusal.ruleId )
+      {
+        decision.riskClass = spec.riskClass;
+        decision.operatorId = spec.operatorId;
+      }
+    decision.autoApplicable = false; // refusals are NEVER auto-inserted
+    decision.costRank = decisionCostRank( refusal.ruleId );
+    decision.evidenceRank = 0; // no usable facts — that is why it was refused
+    decision.missingFacts = refusal.missingFacts;
+    decision.why = refusal.why;
+    decision.whyZh = ruleWhyZh( refusal.ruleId );
+    plan.decisions.push_back( std::move( decision ) );
+  }
+
+  std::stable_sort(
+    plan.decisions.begin(), plan.decisions.end(),
+    []( const IrPreparedDecision &a, const IrPreparedDecision &b ) {
+      auto riskOrder = []( const std::string &risk ) {
+        if ( risk == repair_risk::kShapePreserving )
+          return 0;
+        if ( risk == repair_risk::kRadiometric )
+          return 1;
+        return 2;
+      };
+      if ( riskOrder( a.riskClass ) != riskOrder( b.riskClass ) )
+        return riskOrder( a.riskClass ) < riskOrder( b.riskClass );
+      if ( a.costRank != b.costRank )
+        return a.costRank < b.costRank;
+      if ( a.evidenceRank != b.evidenceRank )
+        return a.evidenceRank > b.evidenceRank;
+      if ( a.ruleId != b.ruleId )
+        return a.ruleId < b.ruleId;
+      return a.consumerNode < b.consumerNode;
+    } );
+  return plan;
 }
 
 } // namespace sicnu::agent::harness
