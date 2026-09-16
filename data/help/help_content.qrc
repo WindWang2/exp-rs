@@ -12,6 +12,11 @@
     <file>operators/terrain.json</file>
     <file>operators/classify.json</file>
     <file>operators/data_io.json</file>
-    <file alias="terms/rs_glossary.json">../terms/rs_glossary.json</file>
+  </qresource>
+  <!-- The glossary lives under its own prefix: HelpContentStore loads every
+       JSON under :/help as a knowledge page, and glossary terms are not pages
+       (TerminologyProvider derives concept.term.* descriptors itself). -->
+  <qresource prefix="/terms">
+    <file alias="rs_glossary.json">../terms/rs_glossary.json</file>
   </qresource>
 </RCC>

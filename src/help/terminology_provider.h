@@ -50,7 +50,7 @@ class TerminologyProvider
     /// Parses one glossary JSON document (array of term objects).
     static LoadResult loadFromJson( const QByteArray &text, const QString &context );
     static LoadResult loadFromFile( const QString &path );
-    /// Reads ":/help/terms/rs_glossary.json" (embedded via help_content.qrc).
+    /// Reads ":/terms/rs_glossary.json" (embedded via help_content.qrc).
     static LoadResult loadFromResources();
 
     /// Derives concept.term.* descriptors and appends them to @p out.

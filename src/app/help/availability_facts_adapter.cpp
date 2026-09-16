@@ -1,5 +1,14 @@
 /***************************************************************************
  * availability_facts_adapter.cpp — fact composition over ContextRules
+ *
+ * F20 (work package C): the facts channel derives from the SAME source as
+ * the enabled state — ContextRules::requirementFacts, the single derivation
+ * behind ContextRules::unavailabilityReason and the CommandRegistry
+ * availability predicates. Every command that declares a predicate therefore
+ * gets structured facts (with stable machine codes), and a disabled command
+ * can never report empty facts (= silently "available") again. The old
+ * hand-maintained 24-row table missed workbench.obia entirely and drifted
+ * from the predicate definitions.
  ***************************************************************************/
 #include "app/help/availability_facts_adapter.h"
 
@@ -12,69 +21,11 @@ namespace sicnu::app
 namespace
 {
 
-const QVector<AvailabilityFactsAdapter::Requirement> &requirementsFor( const QString &commandId )
-{
-    using R = AvailabilityFactsAdapter::Requirement;
-    static const QVector<R> layerSelected = {
-        { "layer selected", &ContextRules::layerSelected },
-    };
-    static const QVector<R> vectorSelected = {
-        { "layer selected", &ContextRules::layerSelected },
-        { "layer is vector data", &ContextRules::vectorSelected },
-    };
-    static const QVector<R> editingAvailable = {
-        { "layer selected", &ContextRules::layerSelected },
-        { "layer is vector data", &ContextRules::vectorSelected },
-        { "layer supports editing sessions", &ContextRules::editingAvailable },
-    };
-    static const QVector<R> editingActive = {
-        { "layer selected", &ContextRules::layerSelected },
-        { "layer is vector data", &ContextRules::vectorSelected },
-        { "Editing session enabled", &ContextRules::editingActive },
-    };
-    static const QVector<R> rasterSelected = {
-        { "raster layer selected", &ContextRules::rasterSelected },
-    };
-    static const QVector<R> sarRasterSelected = {
-        { "raster layer selected", &ContextRules::rasterSelected },
-        { "data is SAR imagery", &ContextRules::sarSelected },
-    };
-    static const QVector<R> none;
-
-    static const QHash<QString, QVector<R>> table = {
-        { QStringLiteral( "layer.properties" ), layerSelected },
-        { QStringLiteral( "layer.remove" ), layerSelected },
-        { QStringLiteral( "layer.zoomTo" ), layerSelected },
-        { QStringLiteral( "layer.toggleEditing" ), editingAvailable },
-        { QStringLiteral( "layer.saveEdits" ), editingActive },
-        { QStringLiteral( "layer.attributeTable" ), vectorSelected },
-        { QStringLiteral( "rs.bandMath" ), rasterSelected },
-        { QStringLiteral( "rs.spectralIndex" ), rasterSelected },
-        { QStringLiteral( "rs.contrastStretch" ), rasterSelected },
-        { QStringLiteral( "rs.spatialFilter" ), rasterSelected },
-        { QStringLiteral( "rs.pca" ), rasterSelected },
-        { QStringLiteral( "rs.bandRatio" ), rasterSelected },
-        { QStringLiteral( "rs.mosaic" ), rasterSelected },
-        { QStringLiteral( "rs.changeDetection" ), rasterSelected },
-        { QStringLiteral( "rs.atmospheric" ), rasterSelected },
-        { QStringLiteral( "rs.qaMask" ), rasterSelected },
-        { QStringLiteral( "rs.applyMask" ), rasterSelected },
-        { QStringLiteral( "rs.radiometric" ), rasterSelected },
-        { QStringLiteral( "rs.ortho" ), rasterSelected },
-        { QStringLiteral( "rs.terrain" ), rasterSelected },
-        { QStringLiteral( "rs.fusion" ), rasterSelected },
-        { QStringLiteral( "rs.temporal" ), rasterSelected },
-        { QStringLiteral( "rs.speckle" ), sarRasterSelected },
-        { QStringLiteral( "rs.extractBands" ), rasterSelected },
-    };
-
-    const auto it = table.constFind( commandId );
-    return it == table.constEnd() ? none : it.value();
-}
-
+/// Natural unblocking command for the common failure mode per command
+/// family. Deliberately small: ContextRules::suggestedNextAction covers the
+/// workspace-level guidance; this table only names the direct antidote.
 QString suggestedActionFor( const QString &commandId )
 {
-    // The natural unblocking command for the common failure mode per family.
     static const QHash<QString, QString> suggestions = {
         { QStringLiteral( "layer.saveEdits" ), QStringLiteral( "layer.toggleEditing" ) },
         { QStringLiteral( "layer.attributeTable" ), QStringLiteral( "layer.addVector" ) },
@@ -89,22 +40,24 @@ QString suggestedActionFor( const QString &commandId )
 
 QStringList AvailabilityFactsAdapter::coveredCommandIds()
 {
-    // Command ids that have fact rows. Kept in one place so the drift test
-    // (test_help_coverage) can verify each id exists in the shell command
-    // table; new availability-gated commands must add their rows here.
+    // Command ids whose availability derives from requirementFacts rows (the
+    // exact-command and family cases in ContextRules). Kept in one place so
+    // the drift test (test_help_coverage) can verify each id exists in the
+    // shell command table; must stay in sync with the d.availability
+    // declarations in command_defs.cpp.
     return {
-        QStringLiteral( "layer.properties" ),  QStringLiteral( "layer.remove" ),
-        QStringLiteral( "layer.zoomTo" ),      QStringLiteral( "layer.toggleEditing" ),
-        QStringLiteral( "layer.saveEdits" ),   QStringLiteral( "layer.attributeTable" ),
-        QStringLiteral( "rs.bandMath" ),       QStringLiteral( "rs.spectralIndex" ),
+        QStringLiteral( "layer.properties" ),   QStringLiteral( "layer.remove" ),
+        QStringLiteral( "layer.zoomTo" ),       QStringLiteral( "layer.toggleEditing" ),
+        QStringLiteral( "layer.saveEdits" ),    QStringLiteral( "layer.attributeTable" ),
+        QStringLiteral( "rs.bandMath" ),        QStringLiteral( "rs.spectralIndex" ),
         QStringLiteral( "rs.contrastStretch" ), QStringLiteral( "rs.spatialFilter" ),
-        QStringLiteral( "rs.pca" ),            QStringLiteral( "rs.bandRatio" ),
-        QStringLiteral( "rs.mosaic" ),         QStringLiteral( "rs.changeDetection" ),
-        QStringLiteral( "rs.atmospheric" ),    QStringLiteral( "rs.qaMask" ),
-        QStringLiteral( "rs.applyMask" ),      QStringLiteral( "rs.radiometric" ),
-        QStringLiteral( "rs.ortho" ),          QStringLiteral( "rs.terrain" ),
-        QStringLiteral( "rs.fusion" ),         QStringLiteral( "rs.temporal" ),
-        QStringLiteral( "rs.speckle" ),        QStringLiteral( "rs.extractBands" ),
+        QStringLiteral( "rs.pca" ),             QStringLiteral( "rs.bandRatio" ),
+        QStringLiteral( "rs.mosaic" ),          QStringLiteral( "rs.changeDetection" ),
+        QStringLiteral( "rs.atmospheric" ),     QStringLiteral( "rs.qaMask" ),
+        QStringLiteral( "rs.applyMask" ),       QStringLiteral( "rs.radiometric" ),
+        QStringLiteral( "rs.ortho" ),           QStringLiteral( "rs.terrain" ),
+        QStringLiteral( "rs.fusion" ),          QStringLiteral( "rs.temporal" ),
+        QStringLiteral( "rs.speckle" ),         QStringLiteral( "rs.extractBands" ),
     };
 }
 
@@ -114,11 +67,16 @@ sicnu::help::AvailabilityExplanation AvailabilityFactsAdapter::explain(
     sicnu::help::AvailabilityExplanation explanation;
     explanation.commandId = commandId;
 
-    for ( const Requirement &requirement : requirementsFor( commandId ) ) {
+    const QVector<ContextRules::RequirementFact> rows =
+        ContextRules::requirementFacts( snapshot, commandId );
+    for ( const ContextRules::RequirementFact &row : rows ) {
         sicnu::help::AvailabilityFact fact;
-        fact.label = QString::fromUtf8( requirement.label );
-        fact.satisfied = requirement.predicate( snapshot );
+        fact.code = row.code;
+        fact.label = row.label;
+        fact.satisfied = row.satisfied;
         explanation.facts.append( fact );
+        if ( !fact.satisfied && explanation.reasonCode.isEmpty() )
+            explanation.reasonCode = fact.code;
     }
     explanation.available = std::all_of( explanation.facts.cbegin(), explanation.facts.cend(),
                                          []( const sicnu::help::AvailabilityFact &f ) {
@@ -126,8 +84,9 @@ sicnu::help::AvailabilityExplanation AvailabilityFactsAdapter::explain(
                                          } );
 
     if ( !explanation.available ) {
-        explanation.suggestedCommandId = suggestedActionFor( commandId );
+        // same derivation as unavailabilityReason — identical text by design
         explanation.flatReason = ContextRules::unavailabilityReason( snapshot, commandId );
+        explanation.suggestedCommandId = suggestedActionFor( commandId );
         // suggested title resolved by the caller from the command registry —
         // keep only the id here to avoid a registry dependency.
     }

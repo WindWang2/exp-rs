@@ -8700,7 +8700,26 @@ target_include_directories(test_help_coverage PRIVATE
 target_compile_definitions(test_help_coverage PRIVATE
     CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
-target_link_libraries(test_help_coverage PRIVATE Sicnu::help Sicnu::help_adapters Sicnu::help_gui)
+target_link_libraries(test_help_coverage PRIVATE Sicnu::help Sicnu::help_adapters Sicnu::help_gui sicnu_contracts)
+
+# F20 UX guidance corpus: scenario table over the live help registry +
+# diagnostics catalog + contextual resolver. Same shape as test_help_coverage
+# (help_gui pulls the app-side adapter; the shell trio is compiled in).
+sicnu_add_test(test_ux_guidance_corpus)
+target_sources(test_ux_guidance_corpus PRIVATE
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+  ${CMAKE_SOURCE_DIR}/data/help/help_content.qrc
+)
+target_include_directories(test_ux_guidance_corpus PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_ux_guidance_corpus PRIVATE
+    CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_link_libraries(test_ux_guidance_corpus PRIVATE Sicnu::help Sicnu::help_adapters Sicnu::help_gui)
 
 # =============================================================================
 # Verification / Observability / Performance Engineering 7.0

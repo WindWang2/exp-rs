@@ -19,11 +19,37 @@
 #include "workflow/pipeline_node_item.h"
 #include "workflow/pipeline_port_item.h"
 
+#include "help/error_diagnostics_bridge.h"
+#include "help/help_registry.h"
+
+#include <QWidget>
+
 #include <exception>
 #include <string>
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+namespace
+{
+// F20 (error diagnostics): when a failure message carries a machine code that
+// resolves to a curated diagnostics page, pin that topic on the panel (F1
+// over the failed panel opens it) and append the link to the shown text.
+// Messages without a curated code stay untouched — no guessing.
+QString withDiagnosticLink( QWidget *panel, const QString &error,
+                            const QString &hintTemplate )
+{
+    if ( error.isEmpty() )
+        return error;
+    const sicnu::help::ErrorDiagnosticsBridge bridge( sicnu::help::globalHelpRegistry() );
+    const QString helpId = bridge.helpIdFromMessage( error );
+    if ( helpId.isEmpty() )
+        return error;
+    if ( panel )
+        panel->setProperty( "helpId", helpId );
+    return QStringLiteral( "%1\n%2" ).arg( error, hintTemplate.arg( helpId ) );
+}
+} // namespace
 
 using sicnu::jobs::JobRequest;
 using sicnu::operators::RSOperatorRegistry;
@@ -572,6 +598,11 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
       else
         error = tr( "Run Failed" );
     }
+    else
+    {
+      error = withDiagnosticLink( m_panel, error,
+                                   tr( "Diagnostic help: press F1 for guidance (topic %1)" ) );
+    }
     emit stepStatusChanged( targetStepId, "failed" );
     if ( isPipelineJob )
     {
@@ -661,6 +692,10 @@ void WorkflowSessionController::onTaskUpdated( const sicnu::AlgorithmTaskInfo &i
     }
     return;
   }
+
+  // clear a failure-pinned diagnostic topic so F1 no longer opens it
+  if ( m_panel )
+    m_panel->setProperty( "helpId", {} );
 
   const QString msg = outputPath.isEmpty()
                         ? tr( "Run Succeeded" )

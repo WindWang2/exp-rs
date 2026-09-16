@@ -86,6 +86,20 @@ struct SelectionContextSnapshot
 /// Pure availability rules — no widget access, fully unit-testable.
 namespace ContextRules
 {
+/// One requirement row a command's availability derives from: a stable
+/// machine code, the translatable user-facing label and the predicate result.
+/// requirementFacts() is the SINGLE derivation — unavailabilityReason() and
+/// the help layer's availability facts both project it, so the reason text
+/// and the structured facts can never drift apart.
+struct RequirementFact
+{
+    QString code;
+    QString label;
+    bool satisfied = false;
+};
+QVector<RequirementFact> requirementFacts( const SelectionContextSnapshot &s,
+                                           const QString &commandId );
+
 /// Structured projection of the facts availability derives from (Milestone E).
 /// Help/Hint surfaces consume these instead of re-deriving context state, and
 /// unavailabilityReason() is expressed over exactly these facts so a disabled

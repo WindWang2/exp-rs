@@ -190,9 +190,17 @@ TEST_CASE( "Catalog census: every harness code has a curated page "
     const auto catalog = catalogByFamily();
     const auto &harnessPages = catalog.at( "harness" );
 
+    // Census source = union of the scanned constants AND the runtime table
+    // (allErrorCodes). The .h scan alone was blind to codes that only live in
+    // the runtime table (e.g. IO_ERROR and the SAR codes) — a known code
+    // without a page must not hide behind a scanner blind spot.
     std::set<std::string> codes;
     for ( const auto &[var, code] : report.harnessCodes )
         codes.insert( code );
+    for ( const std::string &code : sicnu::agent::harness::allErrorCodes() )
+        codes.insert( code );
+    REQUIRE( codes.size() >= 35 );
+
     const auto missing = missingCodes( codes, harnessPages );
     for ( const auto &code : missing )
     {

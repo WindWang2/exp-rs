@@ -17631,7 +17631,11 @@ The median filter suppresses salt-and-pepper noise while preserving edges remark
     </message>
 </context>
 <context>
-    <name>WorkflowSessionController</name>
+    <name>WorkflowSessionController</name>    <message>
+        <source>Diagnostic help: press F1 for guidance (topic %1)</source>
+        <translation>诊断帮助：按 F1 查看处置建议（主题 %1）</translation>
+    </message>
+
     <message>
         <source>Workflow definition not found: %1</source>
         <translation>未找到工作流定义：%1</translation>
@@ -19111,6 +19115,911 @@ Pick a preset template on the right or build a pipeline with the toolbar</source
     <message>
         <source>No matching preset pipeline template</source>
         <translation>无匹配的预设流程模板</translation>
+    </message>
+</context>
+<context>
+    <name>SicnuDialogHelp</name>
+    <message>
+        <source>Help</source>
+        <translation>帮助</translation>
+    </message>
+    <message>
+        <source>Function Description</source>
+        <translation>功能说明</translation>
+    </message>
+    <message>
+        <source>Fill in inputs, parameters and output paths on the dialog&apos;s tabs, then run.Hover widgets for more hints; press &apos;Help&apos; for the full explanation (if available).</source>
+        <translation>在对话框各标签页中填写输入、参数与输出路径后运行。悬停控件可查看提示；按“帮助”查看完整说明（如有）。</translation>
+    </message>
+    <message>
+        <source>Tip: hover over any widget to see its explanation;Menu Help → What&apos;s This? (Shift+F1), then click a widget;The GDAL / OTB algorithms in the toolbox have their own help and command previews.</source>
+        <translation>提示：悬停任意控件可查看说明；菜单“帮助 → 这是什么？”（Shift+F1）后点击控件可查看说明；工具箱中的 GDAL / OTB 算法自带帮助与命令预览。</translation>
+    </message>
+    <message>
+        <source>Spectral indices: NDVI / EVI / SAVI / NDWI / NDBI / MNDWI</source>
+        <translation>光谱指数：NDVI / EVI / SAVI / NDWI / NDBI / MNDWI</translation>
+    </message>
+    <message>
+        <source>[Index]
+• NDVI = (NIR−Red)/(NIR+Red): vegetation vigour, −1 to 1
+• EVI: enhanced vegetation index; needs NIR/Red/Blue and suppresses atmosphere and soil
+• SAVI: soil-adjusted vegetation index; better for sparse vegetation
+• NDWI = (Green−NIR)/(Green+NIR): water / moisture
+• NDBI = (SWIR−NIR)/(SWIR+NIR): built-up areas
+• MNDWI = (Green−SWIR)/(Green+SWIR): modified water index
+[Bands] Map NIR / Red / Green / Blue / SWIR per sensor (band numbers start at 1).Pre-filled in the common Landsat / Sentinel order; verify against your actual data.
+[Output] Single-band float GeoTIFF. The path is required before running.</source>
+        <translation>【指数 Index】
+• NDVI = (NIR−Red)/(NIR+Red)：植被长势，−1～1
+• EVI：增强植被指数，需 NIR/Red/Blue，抑制大气与土壤
+• SAVI：土壤调节植被指数，稀疏植被更好
+• NDWI = (Green−NIR)/(Green+NIR)：水体/湿润
+• NDBI = (SWIR−NIR)/(SWIR+NIR)：建成区
+• MNDWI = (Green−SWIR)/(Green+SWIR)：改进水体指数
+【波段】按传感器映射 NIR/Red/Green/Blue/SWIR（波段号从 1 起）。默认按 Landsat/Sentinel 常见顺序预填，请按实际数据核对。
+【输出】单波段浮点 GeoTIFF。运行前必须填写路径。</translation>
+    </message>
+    <message>
+        <source>DEM terrain analysis: slope / aspect / hillshade, etc.</source>
+        <translation>DEM 地形分析：坡度 / 坡向 / 山体阴影等</translation>
+    </message>
+    <message>
+        <source>[DEM layer] Elevation raster; units should match the CRS (a metric projection is more reliable).
+[Analysis type]
+• Slope: slope (degrees)
+• Aspect: aspect (degrees; north = 0, clockwise)
+• Hillshade: hillshade (needs solar azimuth / elevation)
+• Roughness / TRI / TPI: roughness and topographic position indices
+[Cell Size] Ground resolution (map units); usually estimated automatically once a layer is chosen.
+[Solar azimuth / elevation] Hillshade only: azimuth 0–360° (north = 0), elevation 0–90°.
+[Output] Single-band result GeoTIFF.</source>
+        <translation>【DEM 图层】高程栅格，单位应与 CRS 一致（米制投影更可靠）。
+【分析类型】
+• Slope：坡度（度）
+• Aspect：坡向（度，北为 0 顺时针）
+• Hillshade：山体阴影（需太阳方位/高度）
+• Roughness / TRI / TPI：粗糙度与地形位置指数
+【像元大小 Cell Size】地面分辨率（地图单位），选图层后常自动估算。
+【太阳方位/高度】仅 Hillshade：方位 0–360°（北为 0），高度 0–90°。
+【输出】单波段结果 GeoTIFF。</translation>
+    </message>
+    <message>
+        <source>Extract a Single Band from a Multiband Raster</source>
+        <translation>从多波段栅格提取单一波段</translation>
+    </message>
+    <message>
+        <source>[Raster layer] A project raster with more than 1 band.
+[Band] Band number / name to save separately.
+[Output] A single-band GeoTIFF for single-band analysis or combination with other data.</source>
+        <translation>【栅格图层】工程中波段数&gt;1 的栅格。
+【波段】要单独保存的波段号/名称。
+【输出】单波段 GeoTIFF，便于单波段分析或与其它数据组合。</translation>
+    </message>
+    <message>
+        <source>Time series analysis: multitemporal statistics / compositing / index time series / trends / anomalies / series extraction</source>
+        <translation>时间序列分析：多时相统计 / 合成 / 指数时序 / 趋势 / 异常 / 序列提取</translation>
+    </message>
+    <message>
+        <source>[Epoch scenes] Add multiple epoch rasters; acquisition times are parsed from product metadata or file names and can be edited.
+[Precheck] Checks before running: time completeness, duplicate epochs, grid consistency (CRS / resolution / origin, no implicit resampling),Band-role resolvability, radiometric state and scale/offset consistency, QA band availability.
+[Analysis] Time series statistics (Welford mean/variance), best-pixel compositing (quality score + observation count), index time series (same kernel as single scenes),Linear trends (real time intervals), anomalies (z-score / difference), point and ROI series (CSV).
+[Memory] Processes in streaming tiles; working memory is independent of the date count, so tens to hundreds of epochs are safe.</source>
+        <translation>【时相场景】添加多期栅格；获取时间自动从产品元数据或文件名解析，可手动修改。
+【预检】运行前检查：时间完整性、重复时相、网格一致性（CRS/分辨率/原点，不做隐式重采样）、波段角色可解析性、辐射状态与 scale/offset 一致性、QA 波段可用性。
+【分析】时序统计（Welford 均值/方差）、最佳像元合成（质量分+观测数）、指数时序（与单景同一内核）、线性趋势（真实时间间隔）、异常（z-score/差值）、点与 ROI 序列（CSV）。
+【内存】按分块流式处理，工作内存与日期数无关，可安全处理数十至上百时相。</translation>
+    </message>
+    <message>
+        <source>Mosaic multiple rasters into a continuous image</source>
+        <translation>多景栅格镶嵌为连续影像</translation>
+    </message>
+    <message>
+        <source>[Input list] At least 2 raster files; projections should match, and the engine merges overlaps with its default strategy.
+[Add / Remove] Manage the files taking part in the mosaic.
+[Output] The mosaicked GeoTIFF. Watch disk and memory for large images.</source>
+        <translation>【输入列表】至少 2 个栅格文件；投影宜一致，重叠区由引擎按默认策略合并。
+【添加/移除】管理参与镶嵌的文件。
+【输出】镶嵌后的 GeoTIFF。大图注意磁盘与内存。</translation>
+    </message>
+    <message>
+        <source>Atmospheric Correction / DN to Radiance</source>
+        <translation>大气校正 / DN 转辐射</translation>
+    </message>
+    <message>
+        <source>[Method]
+• DN to Radiance: L = gain×DN + bias, requires sensor gain/offset
+• DOS1: dark object subtraction estimating path radiance
+• DOS2: DOS1 plus transmittance; needs the airmass
+• QUAC: fast all-band atmospheric correction from image statistics; outputs approximate surface reflectance [0,1] with no external parameters
+[Band] Band number to process (QUAC processes all bands and ignores this).
+[Gain / Bias] Radiometric calibration coefficients (from metadata or the product handbook; ignored by QUAC).
+[Airmass] DOS2 only: the airmass, usually ≥ 1.
+[Output] The corrected raster.</source>
+        <translation>【方法】
+• DN to Radiance：L = gain×DN + bias，需传感器增益/偏置
+• DOS1：暗目标减法，估算路径辐射
+• DOS2：在 DOS1 上考虑透过率，需气团(Airmass)
+• QUAC：基于图像统计的全波段快速大气校正，输出近似地表反射率[0,1]，无需外部参数
+【波段】处理的波段号（QUAC 自动处理全部波段，此项忽略）。
+【Gain / Bias】辐射定标系数（元数据或产品手册，QUAC 忽略）。
+【Airmass】仅 DOS2：气团，通常≥1。
+【输出】校正后栅格。</translation>
+    </message>
+    <message>
+        <source>Contrast stretching to improve display and downstream analysis</source>
+        <translation>对比度拉伸，改善显示与后续分析</translation>
+    </message>
+    <message>
+        <source>[Method]
+• Linear: min–max linear stretch to the output range
+• Percentage Clip: clips Clip% at both tails before stretching, suppressing extremes
+• Std Dev: stretch to mean±K×std dev
+• Histogram Equalization: enhances global contrast
+[Clip %] Percent clip only; 1–2% is typical.
+[Std Dev K] Std-dev method only; 2 is typical.
+[Output] Stretched multiband GeoTIFF (band by band over the input).</source>
+        <translation>【方法】
+• Linear：按最小–最大线性拉伸到输出范围
+• Percentage Clip：两端各裁剪 Clip% 后拉伸，抑制极端值
+• Std Dev：以均值±K×标准差拉伸
+• Histogram Equalization：直方图均衡，增强全局对比
+【Clip %】仅百分比裁剪，常用 1–2%。
+【Std Dev K】仅标准差法，常用 2。
+【输出】拉伸后多波段 GeoTIFF（按输入波段逐一处理）。</translation>
+    </message>
+    <message>
+        <source>Pansharpening / Image Fusion</source>
+        <translation>全色锐化 / 影像融合</translation>
+    </message>
+    <message>
+        <source>[Panchromatic] High spatial resolution single band.
+[Multispectral] Lower resolution multiband. Both must cover roughly the same extent and be registered.
+[Method]
+• Linear Weighted: weighted fusion with adjustable Pan Weight and per-band weights
+• Brovey: ratio-based fusion, fast
+• IHS: requires RGB bands
+• PCA: principal component substitution
+• OTB BundleToPerfectSensor / GDAL pansharpen: external toolchains
+[Pan Weight] Panchromatic share in the linear method, 0–1.
+[RGB Bands] IHS only: red / green / blue band numbers within the multispectral image.
+[Output] The sharpened multispectral GeoTIFF.</source>
+        <translation>【全色 Panchromatic】高空间分辨率单波段。
+【多光谱 Multispectral】低分辨率多波段。两者需大致同范围、已配准。
+【方法】
+• Linear Weighted：加权融合，可调 Pan Weight 与分波段权重
+• Brovey：比值融合，快速
+• IHS：需指定 RGB 波段
+• PCA：主成分替换
+• OTB BundleToPerfectSensor / GDAL Pansharpen：外部工具链
+【Pan Weight】线性法中全色占比 0–1。
+【RGB 波段】仅 IHS：多光谱中的红/绿/蓝波段号。
+【输出】锐化后的多光谱 GeoTIFF。</translation>
+    </message>
+    <message>
+        <source>Two-Date Change Detection</source>
+        <translation>双时相变化检测</translation>
+    </message>
+    <message>
+        <source>[Earlier / later images] Must be geometrically aligned (same projection, ideally same resolution); registration can be done first.
+[Band] The band used in the computation for each epoch (usually the same-named band or the same index).
+[Method]
+• Difference: later − earlier
+• Normalized Difference: (later − earlier)/(later + earlier)
+• Change Mask: binary change mask where the difference exceeds the threshold
+[Threshold] Change Mask only: the change threshold (same scale as the DN).
+[Output] Difference or mask GeoTIFF.</source>
+        <translation>【前期/后期影像】须几何对齐（同投影、同分辨率更佳），可先做配准。
+【波段】各时相参与计算的波段（常用同名波段或同一指数）。
+【方法】
+• Difference：后−前
+• Normalized Difference：(后−前)/(后+前)
+• Change Mask：差值超过阈值的二值变化掩膜
+【Threshold】仅 Change Mask：变化阈值（与 DN 量纲一致）。
+【输出】差值或掩膜 GeoTIFF。</translation>
+    </message>
+    <message>
+        <source>SAR Speckle Filtering</source>
+        <translation>SAR 斑点滤波</translation>
+    </message>
+    <message>
+        <source>[Filter] Lee / Frost / Kuan / Gamma-MAP; all suppress speckle with different edge preservation.
+[Window] 3×3 / 5×5 / 7×7; larger values smooth more and keep less detail.
+[Noise Variance] Noise variance estimate for Lee / Kuan / Gamma-MAP; adjust per sensor.
+[Damping] Frost only: the damping factor; larger values smooth more.
+[Output] The filtered raster (band count preserved).</source>
+        <translation>【滤波器】Lee / Frost / Kuan / Gamma-MAP，均抑制相干斑、保边缘能力不同。
+【窗口 Window】3×3 / 5×5 / 7×7，越大越平滑、细节越少。
+【Noise Variance】Lee/Kuan/Gamma-MAP 噪声方差估计，依传感器调整。
+【Damping】仅 Frost：阻尼因子，越大平滑越强。
+【输出】滤波后栅格（保留波段数）。</translation>
+    </message>
+    <message>
+        <source>Band ratio or IHS transform</source>
+        <translation>波段比值或 IHS 变换</translation>
+    </message>
+    <message>
+        <source>[Mode]
+• Band Ratio: numerator / denominator, highlighting spectral differences of specific features
+• IHS Transform: converts RGB into intensity-hue-saturation space
+[Numerator / Denominator] Numerator and denominator bands of the ratio.
+[R/G/B] The three input bands of the IHS transform.
+[Output] Single-band ratio or multiband IHS result.</source>
+        <translation>【模式】
+• Band Ratio：分子/分母，突出特定地物光谱差异
+• IHS Transform：将 RGB 转到强度-色调-饱和度空间
+【Numerator / Denominator】比值法的分子、分母波段。
+【R/G/B】IHS 的输入三波段。
+【输出】比值单波段或 IHS 多波段结果。</translation>
+    </message>
+    <message>
+        <source>Principal Component Analysis (PCA)</source>
+        <translation>主成分分析 (PCA)</translation>
+    </message>
+    <message>
+        <source>[Components] Number of output components, ≤ the input band count.
+The first components usually contain most of the variance; used for decorrelation, dimensionality reduction and visual enhancement.
+[Output] Multiband PCA GeoTIFF (bands = PC1, PC2, ...).</source>
+        <translation>【Components】输出主成分个数，≤输入波段数。
+前几个主成分通常包含大部分方差，用于去相关、降维与目视增强。
+【输出】多波段主成分 GeoTIFF（波段=PC1, PC2…）。</translation>
+    </message>
+    <message>
+        <source>Spatial Convolution Filtering</source>
+        <translation>空间卷积滤波</translation>
+    </message>
+    <message>
+        <source>[Filter]
+• Mean / Gaussian / Median: smooth noise (median preserves edges better)
+• Sobel / Laplacian: edge enhancement
+[Kernel Size] Convolution kernel 3×3 or 5×5.
+[Output] The filtered raster.</source>
+        <translation>【滤波器】
+• Mean / Gaussian / Median：平滑噪声（中值保边缘更好）
+• Sobel / Laplacian：边缘增强
+【Kernel Size】卷积核 3×3 或 5×5。
+【输出】滤波后栅格。</translation>
+    </message>
+    <message>
+        <source>Combined Image Enhancement Panel</source>
+        <translation>影像增强综合面板</translation>
+    </message>
+    <message>
+        <source>[Method] Switches within the same dialog: contrast stretch / spatial filtering / band ratio · IHS / SAR speckle filtering.
+Each sub-page&apos;s parameters match the corresponding standalone menu tool; see the hover descriptions.
+[Output] Enhanced result GeoTIFF.</source>
+        <translation>【Method】在同一对话框切换：对比度拉伸 / 空间滤波 / 波段比值·IHS / SAR 斑点滤波。
+各子页参数与对应独立菜单工具一致；详见悬停说明。
+【输出】增强结果 GeoTIFF。</translation>
+    </message>
+    <message>
+        <source>Band Math Expression</source>
+        <translation>波段运算表达式</translation>
+    </message>
+    <message>
+        <source>[Expression] Arithmetic expression; bands are b1, b2, ... (starting at 1).
+Examples: (b1-b2)/(b1+b2) is an NDVI-style operation; b1*0.0001 rescales.
+Supports + − * / and parentheses.
+[Output] Single-band computation result.</source>
+        <translation>【Expression】算术表达式，波段用 b1,b2…（从 1 起）。
+示例：(b1-b2)/(b1+b2) 为 NDVI 类运算；b1*0.0001 缩放。
+支持 + − * / 与括号。
+【输出】单波段计算结果。</translation>
+    </message>
+    <message>
+        <source>Apply Mask: set obscured pixels to NoData with a binary / QA mask</source>
+        <translation>应用掩膜：用二值/QA 掩膜将遮挡像元设为 NoData</translation>
+    </message>
+    <message>
+        <source>[Input Layer] The multiband product raster to process.
+[Mask Layer] A binary or quality mask raster (1 / non-zero = obscured or invalid, 0 = clear and valid).
+[Auto-align grid] If the mask and input raster differ in resolution or extent, nearest-neighbour resampling aligns them automatically.
+[Output NoData] Replacement value for obscured pixels (metadata NoData by default, or custom e.g. -9999).
+[Output] The masked multiband GeoTIFF.</source>
+        <translation>【输入图层 Input Layer】待处理的多波段产品栅格。
+【掩膜图层 Mask Layer】二值或质检掩膜栅格（1/非 0 为遮挡/无效，0 为清晰有效）。
+【自动对齐网格】若掩膜与输入栅格分辨率或范围不完全一致，自动采用最邻近重采样对齐。
+【输出 NoData】指定遮挡像元的替换值（默认元数据 NoData 或自定义如 -9999）。
+【输出 Output】掩膜处理后的多波段 GeoTIFF。</translation>
+    </message>
+    <message>
+        <source>Radiometric Calibration: DN to radiance / TOA reflectance / brightness temperature</source>
+        <translation>辐射定标：DN 转换为辐射亮度 / TOA 反射率 / 亮温</translation>
+    </message>
+    <message>
+        <source>[Physical quantity]
+• Radiance: W/(m²·sr·µm), computed from gain and offset
+• TOA Reflectance: dimensionless reflectance [0, 1], corrected with the solar elevation and sun–earth distance
+• Brightness Temperature: Kelvin temperature (K) of thermal infrared bands
+[Band] Tick &apos;process all bands&apos; or choose a specific band.
+[Metadata file] Auto-detect or manually choose a Landsat MTL text or Sentinel-2 MTD XML to extract calibration gain/offset and the sun elevation.
+[Output] Calibrated float GeoTIFF.</source>
+        <translation>【物理量 Unit】
+• Radiance（辐射亮度）：W/(m²·sr·µm)，由增益与偏置计算
+• TOA Reflectance（大气表观反射率）：无量纲反射率 [0, 1]，结合太阳高度角与日地距离校正
+• Brightness Temperature（亮温）：热红外波段开尔文温度 (K)
+【波段】可勾选「处理所有波段」或选择特定波段。
+【元数据文件】自动探测或手动指定 Landsat MTL 文本或 Sentinel-2 MTD XML，提取定标增益/偏置与太阳仰角。
+【输出】定标后的浮点 GeoTIFF。</translation>
+    </message>
+    <message>
+        <source>Generate QA Mask: extract cloud, cloud shadow, snow or water</source>
+        <translation>生成 QA 掩膜：提取云、云阴影、雪或水体</translation>
+    </message>
+    <message>
+        <source>[Quality source]
+• Auto: identify the QA band automatically from sensor metadata
+• Landsat QA_PIXEL: parses the Landsat 8/9 quality assessment bitmask
+• Sentinel-2 SCL: parses the Scene Classification Layer
+• Generic Bitmask: bitwise-AND extraction with a generic integer mask
+[Mask category] Cloud and cloud shadow, cloud only, shadow only, snow/ice, water, or all invalid pixels.
+[Bit mask value] Generic bitmask mode only: the integer value used in the test.
+[Output] Single-band binary mask GeoTIFF (1 = obscured / invalid, 0 = clear and valid).</source>
+        <translation>【质量源 Source】
+• Auto：根据传感器元数据自动识别 QA 波段
+• Landsat QA_PIXEL：解析 Landsat 8/9 质量评估位掩膜
+• Sentinel-2 SCL：解析场景分类图（Scene Classification Layer）
+• Generic Bitmask：通用整数位掩膜按位与提取
+【掩膜类别 Category】云与云阴影、纯云、云阴影、冰雪、水体或全部无效像元。
+【位掩膜值】仅通用位掩膜模式：指定参与判定的整数值。
+【输出】单波段二值掩膜 GeoTIFF（1=遮挡/无效，0=有效清晰）。</translation>
+    </message>
+    <message>
+        <source>Post-classification change detection: two-date classification comparison and transition matrix</source>
+        <translation>分类后变化检测：双时相分类图对比与转移矩阵</translation>
+    </message>
+    <message>
+        <source>[Earlier / later layers] Single-band classification rasters of the same area at two epochs (pixel values are integer class ids).
+[Num Classes] Number of classes used to build the transition matrix (0 = auto-detect the maximum class id).
+[Transition Matrix] Rows are earlier classes, columns later classes; summarises class flows and area transitions.
+[Output] A change-type map GeoTIFF (pixel value encoded as earlier-id × base + later-id) plus a detailed statistics report.</source>
+        <translation>【前/后期图层】同一区域两个时相的单波段分类栅格（像元值为整数类别 ID）。
+【类别数 Num Classes】用于生成转移矩阵的类别数量（0 为自动探测最大类别号）。
+【转移矩阵 Transition Matrix】行表示前期类别，列表示后期类别，统计地类流向与面积转移。
+【输出】变化类型分布图 GeoTIFF（像元值编码为 前期ID×基数 + 后期ID）及详细统计报告。</translation>
+    </message>
+    <message>
+        <source>Orthorectification: geometric orthorectification based on RPC / GCPs and a DEM</source>
+        <translation>正射校正：基于 RPC/GCP 与 DEM 进行几何正射校正</translation>
+    </message>
+    <message>
+        <source>[Geometry model] Detects the rational polynomial coefficients (RPC) or ground control points (GCPs) carried by the input raster automatically.
+[Target CRS] The projected CRS of the orthorectification output (a metric projection such as UTM is recommended).
+[DEM terrain correction] Specify an elevation raster to remove terrain-induced geometric distortion; a reference elevation can be given when none is provided.
+[Resampling] Bilinear (smooth, continuous) / Nearest (preserves pixel values) / Cubic / Lanczos.
+[Cell Size] Target resolution (map units); 0 infers it automatically from the sensor resolution.
+[Output] The orthorectified GeoTIFF.</source>
+        <translation>【几何模型】自动探测输入栅格携带的有理多项式系数 (RPC) 或地面控制点 (GCPs)。
+【目标坐标系 Target CRS】正射校正输出的投影坐标系（建议米制投影如 UTM）。
+【DEM 地形校正】指定高程栅格以消除地形起伏引起的几何畸变；未提供时可指定参考高程。
+【重采样 Resampling】Bilinear（双线性，平滑连续）/ Nearest（保像元值）/ Cubic / Lanczos。
+【像元大小 Cell Size】目标分辨率（地图单位），0 为按传感器分辨率自动推算。
+【输出】正射校正后的 GeoTIFF。</translation>
+    </message>
+    <message>
+        <source>Batch processing: one algorithm over many files</source>
+        <translation>批量处理：同一算法处理多文件</translation>
+    </message>
+    <message>
+        <source>[Algorithm] Choose an algorithm from the processing registry (GDAL / OTB / built-in, etc.).
+[Input Files] Add / Remove manage the list of files to process.
+[Output Directory] All results are written here (file names derived from the inputs).
+[Run Batch] Executes in order; a progress bar and status line provide feedback.
+Suits repeatable pipelines; validate complex parameters on a single file in the toolbox first.</source>
+        <translation>【Algorithm】从处理注册表选择算法（GDAL/OTB/内置等）。
+【Input Files】Add/Remove 管理待处理文件列表。
+【Output Directory】所有结果写入该目录（按输入名派生文件名）。
+【Run Batch】顺序执行；进度条与状态行反馈。
+适合重复流水线；复杂参数请先在工具箱单文件验证。</translation>
+    </message>
+    <message>
+        <source>Preferences: theme, CRS, logging and external tool paths</source>
+        <translation>首选项：主题、CRS、日志与外部工具路径</translation>
+    </message>
+    <message>
+        <source>[Theme] Light / dark interface theme.
+[Default CRS] Default CRS for new projects.
+[Log to file / Log File] Whether to write a log file, and its path.
+[GDAL Path / OTB Path] External executable directories used by the CLI wrapper algorithms.
+Some options take full effect only after a restart.</source>
+        <translation>【Theme】浅色/深色界面主题。
+【Default CRS】新建工程默认坐标系。
+【Log to file / Log File】是否写日志文件及路径。
+【GDAL Path / OTB Path】外部可执行文件目录，供 CLI 包装算法使用。
+部分选项保存后需重启才完全生效。</translation>
+    </message>
+    <message>
+        <source>STAC Catalog Search and Asset Loading</source>
+        <translation>STAC 目录检索与资产加载</translation>
+    </message>
+    <message>
+        <source>[Endpoint] STAC API root URL, e.g. Element84 Earth Search.
+[Collection] Dataset ID, e.g. sentinel-2-l2a.
+[Datetime] Time filter (ISO interval or instant, as supported by the catalog).
+【BBox】min_lon,min_lat,max_lon,max_lat。
+[Search] Searches items; the table shows ID / collection / time / asset count.
+[Load Selected Asset] Loads the selected assets into the project (network and permissions required).</source>
+        <translation>【Endpoint】STAC API 根 URL，如 Element84 Earth Search。
+【Collection】数据集 ID，如 sentinel-2-l2a。
+【Datetime】时间过滤（ISO 区间或时刻，视目录支持）。
+【BBox】min_lon,min_lat,max_lon,max_lat。
+【Search】检索要素；表格显示 ID/集合/时间/资产数。
+【Load Selected Asset】将选中项资产加载到工程（需网络与权限）。</translation>
+    </message>
+    <message>
+        <source>Side-by-side visual layer comparison</source>
+        <translation>左右图层目视对比</translation>
+    </message>
+    <message>
+        <source>[Left / Right Layer] Raster layers from the project.
+[Load] Loads into the comparison view to inspect registration, change or classification differences.
+Complements the main window&apos;s swipe: this tool is a side-by-side comparison.</source>
+        <translation>【Left / Right Layer】工程中的栅格图层。
+【Load】加载到对比视图，便于检查配准、变化或分类差异。
+与主窗口「卷帘 Swipe」互补：本工具为并排对照。</translation>
+    </message>
+    <message>
+        <source>Common CRS Presets</source>
+        <translation>常用坐标系预设</translation>
+    </message>
+    <message>
+        <source>[Search] Filter by name or EPSG.
+[Tree list] Browse presets in groups.
+[Details] EPSG, name and WKT summary of the selection.
+Double-click or OK applies the CRS to the project / caller.</source>
+        <translation>【搜索】按名称或 EPSG 过滤。
+【树形列表】分组浏览预设。
+【详情】选中项的 EPSG、名称与 WKT 摘要。
+双击或确定将 CRS 应用到工程/调用方。</translation>
+    </message>
+    <message>
+        <source>Processing Algorithm Dialog (Toolbox)</source>
+        <translation>处理算法对话框（工具箱）</translation>
+    </message>
+    <message>
+        <source>[Parameter table] Hover any parameter label for its description; required fields are validated before running.
+[Advanced] Advanced parameters are collapsed by default.
+[Load result layers] Joins the layer tree automatically when finished.
+[Command] Live preview of the GDAL / OTB / generic CLI call; copy it to a terminal.
+The help page shows the algorithm shortHelp; it complements the RS-specific dialogs behind the menu entries.</source>
+        <translation>【参数表】每个参数标签悬停可见说明；必填项运行前校验。
+【Advanced】高级参数默认折叠。
+【Load result layers】完成后自动加入图层树。
+【调用命令】GDAL/OTB/通用 CLI 实时预览，可复制到终端。
+帮助页含算法 shortHelp；与菜单入口的 RS 专用对话框互补。</translation>
+    </message>
+    <message>
+        <source>SIFT Auto-Matching GCP Generation</source>
+        <translation>SIFT 自动匹配生成 GCP</translation>
+    </message>
+    <message>
+        <source>[Contrast] Feature contrast threshold; larger values give fewer but steadier points.
+[Max Matches] Upper bound on the number of matched pairs kept.
+[Min Inlier] Minimum RANSAC inlier ratio.
+[RANSAC Threshold] Pixel tolerance.
+[Max Image Side] Maximum edge length to scale to before matching (speed-up).
+Even after importing results into the GCP table, inspect outliers visually.</source>
+        <translation>【Contrast】特征对比度阈值，越大点越少越稳。
+【Max Matches】保留匹配对数上限。
+【Min Inlier】RANSAC 内点比例下限。
+【RANSAC 阈值】像素容差。
+【Max Image Side】匹配前缩放到的最大边长（加速）。
+结果导入 GCP 表后仍应目视检查离群点。</translation>
+    </message>
+    <message>
+        <source>GCP Target Coordinate Input</source>
+        <translation>GCP 目标坐标输入</translation>
+    </message>
+    <message>
+        <source>Enter or pick control point target coordinates from the map, pairing them with source pixel positions.In I2I two-canvas mode, points are usually picked on both sides directly; this form is rarely used.</source>
+        <translation>输入或从地图拾取控制点目标坐标，与源像素位置配对。I2I 双画布模式通常直接在两侧点选，较少使用本表单。</translation>
+    </message>
+    <message>
+        <source>Image to Image Registration</source>
+        <translation>Image 2 Image 配准</translation>
+    </message>
+    <message>
+        <source>[Canvases] left = source (Warp), right = reference (Base); Add / Move / Delete GCP need both sides open.
+[Open] A file or a main project layer.
+[Sync zoom] Off by default; do not force sync with different CRSs or when checking row/column on the same scene.
+[SIFT] Auto-matches GCPs (OpenCV).
+[Correction parameters] The panel on the right: transform / resampling / RMS / CRS / output (see &apos;Parameter Description&apos;).
+[GCP table] Row/column and residuals; right-click to locate / enable-disable / delete.
+[Task] Tracks warp progress after running and loads the result.</source>
+        <translation>【画布】左=源 (Warp)，右=参考 (Base)；两侧打开后才可 Add/Move/Delete GCP。
+【打开】文件或主工程图层。
+【Sync zoom】默认关闭；不同 CRS 或同景检查行列时勿强行同步。
+【SIFT】自动匹配 GCP（OpenCV）。
+【校正参数】右侧面板：变换/重采样/RMS/CRS/输出（点「参数说明」）。
+【GCP 表】行列号、残差；右键定位/启停/删除。
+【任务】运行后跟踪 warp 进度与加载结果。</translation>
+    </message>
+    <message>
+        <source>Image to Map Registration</source>
+        <translation>Image 2 Map 配准</translation>
+    </message>
+    <message>
+        <source>[Source] A file or project layer; [Base] a visible main project map layer.
+[Transform] Includes RPC Physical (needs RPC metadata, optional DEM).
+The rest is similar to I2I: the GCP table, correction parameters and task list.</source>
+        <translation>【源】文件或工程图层；【Base】主工程地图可见图层。
+【变换】含 RPC Physical（需 RPC 元数据，可选 DEM）。
+其余与 I2I 类似：GCP 表、校正参数、任务列表。</translation>
+    </message>
+    <message>
+        <source>Geometric correction parameters (panel on the right)</source>
+        <translation>几何校正参数（右侧面板）</translation>
+    </message>
+    <message>
+        <source>[Transform] Linear / Helmert ≥ 2 points; polynomial 1/2/3 about 3/6/10 points; TPS / projective / RPC.
+Minimum / actual points / DOF: DOF = actual − minimum; residual assessment needs DOF &gt; 0; at DOF = 0 residuals carry no statistical meaning.
+[Resampling] Nearest preserves classes; Bilinear / Cubic for continuous imagery; cell size auto; the background value fills gaps.
+[RMS] In source pixel units; scatter plus X / Y / total / maximum residuals.
+[CRS] The target CRS determines the output and the fit; in I2I it usually follows the reference.
+[Output] A path is required before running. [DEM] RPC only.</source>
+        <translation>【坐标变换】Linear/Helmert≥2 点；多项式 1/2/3 约 3/6/10 点；TPS/Projective/RPC。
+最少点数/实际点数/DOF：DOF=实际−最少，&gt;0 才能用残差评估；DOF=0 残差无统计意义。
+【重采样】Nearest 保类别；Bilinear/Cubic 连续影像；像元大小 auto；背景值填充空洞。
+【RMS】源像元单位；散点与 X/Y/Total/最大残差。
+【坐标系】目标 CRS 决定输出与拟合；I2I 常跟参考。
+【输出】必填路径后才能运行。【DEM】仅 RPC。</translation>
+    </message>
+    <message>
+        <source>GCP Table</source>
+        <translation>GCP 控制点表</translation>
+    </message>
+    <message>
+        <source>Columns: map coordinates, pixel column/row on both sides, residuals ΔX/ΔY/RMS, enabled state.
+Right-click: locate, enable / disable, edit, delete. Delete removes the selection.
+For same-scene registration, &apos;col src / row src&apos; should be close to &apos;col ref / row ref&apos;.</source>
+        <translation>列：地图坐标、两侧像元列/行、残差 ΔX/ΔY/RMS、启用状态。
+右键：定位、启用/禁用、编辑、删除。Delete 删除选中。
+同景配准「列源/行源」应接近「列参/行参」。</translation>
+    </message>
+    <message>
+        <source>Correction Task List</source>
+        <translation>校正任务列表</translation>
+    </message>
+    <message>
+        <source>Shows progress after running; can be cancelled; results load into the project when finished.</source>
+        <translation>运行后显示进度；可取消；完成后加载结果到工程。</translation>
+    </message>
+    <message>
+        <source>Pixel-Level Supervised Classification</source>
+        <translation>像元级监督分类</translation>
+    </message>
+    <message>
+        <source>[Workflow] Load image → define classes → collect ROIs → set algorithm / bands / ignored values → train and classify → accuracy assessment.
+[ROI Tools] Collect training samples with point / rectangle / polygon / freehand / magic wand.
+[Setup bar] Algorithm, bands, training ratio, NoData / ignored values, output path; preview / cross-validation / apply.
+[Accuracy] OA, Kappa, confusion matrix, producer&apos;s / user&apos;s accuracy.</source>
+        <translation>【流程】加载影像 → 定义类别 → 采集 ROI → 设置算法/波段/忽略值 → 训练分类 → 精度评价。
+【ROI 工具】点/矩形/多边形/自由手/魔棒采集训练样本。
+【设置栏】算法、波段、训练比例、NoData/忽略值、输出路径；预览/交叉验证/应用。
+【精度】OA、Kappa、混淆矩阵、制图/用户精度。</translation>
+    </message>
+    <message>
+        <source>Classifier Setup Bar Parameters</source>
+        <translation>分类设置栏参数</translation>
+    </message>
+    <message>
+        <source>[Algorithm] Normal Bayes / SVM / K-means (RF / Mahalanobis / UNet placeholders).
+[Bands] Comma-separated, e.g. 1,2,3.
+[Training ratio] Stratified training share; the rest is a holdout for accuracy.
+[Output] Classification result GeoTIFF.
+[Use source NoData] Metadata NoData values are ignored.
+[Ignored values] Extra DN list (e.g. 0-fill edges).
+[Matching] Ignore the whole pixel if any band is ignored (default), or only when all bands are ignored.
+[Preview] Current viewport only. [Cross-Validation] K-fold evaluation. [Apply] Full-image classification.</source>
+        <translation>【算法】NormalBayes / SVM / K-Means（RF/马氏/UNet 占位）。
+【波段】逗号分隔如 1,2,3。
+【训练比例】分层抽样训练占比，其余 holdout 测精度。
+【输出】分类结果 GeoTIFF。
+【使用源 NoData】元数据 NoData 不参与。
+【忽略值】额外 DN 列表（如 0 边缘）。
+【匹配】任一波段忽略则整像素忽略（默认），或全部波段才忽略。
+【预览】仅当前视口。【交叉验证】K 折评估。【应用】全图分类。</translation>
+    </message>
+    <message>
+        <source>Object-Based Classification (OBIA)</source>
+        <translation>面向对象分类 (OBIA)</translation>
+    </message>
+    <message>
+        <source>[Load Raster] Loads the image to segment.
+[Segments Kernel] Smoothing kernel size 3–21; larger values give coarser objects.
+[Bins] Quantization levels (built-in segmentation fallback), 2–128.
+[Min region] Minimum object pixel count; suppresses small patches.
+[Segment] Runs segmentation. [Classifier] Normal Bayes / SVM / K-means.
+[Classify] Object-level classification. [Export] Export results.
+[Classes table] Class ID / name / color. Suits high-resolution imagery.</source>
+        <translation>【Load Raster】加载待分割影像。
+【Segments 核】平滑核大小 3–21，越大对象越粗。
+【Bins】量化级数（内置分割回退），2–128。
+【Min region】最小对象像元数，抑制碎斑。
+【Segment】运行分割。【Classifier】NormalBayes/SVM/KMeans。
+【Classify】对象级分类。【Export】导出结果。
+【Classes 表】类别 ID/名称/颜色。适合高分影像。</translation>
+    </message>
+    <message>
+        <source>OBIA Class Table</source>
+        <translation>OBIA 类别表</translation>
+    </message>
+    <message>
+        <source>[Columns] ID / name / color.
+[ID] Corresponds to the classification raster pixel value, starting at 1; not directly editable.
+[Right-click] Edit name, change color, insert / delete classes.
+[Assign] Assigns the current class to the objects selected on the canvas.</source>
+        <translation>【列】ID / 名称 / 颜色。
+【ID】对应分类栅格像元值，从 1 起，不可直接编辑。
+【右键】编辑名称、更改颜色、插入/删除类别。
+【Assign】把当前类别赋给画布上选中的对象。</translation>
+    </message>
+    <message>
+        <source>OBIA Object List</source>
+        <translation>OBIA 对象列表</translation>
+    </message>
+    <message>
+        <source>[Columns] ID / pixel count / class.
+[Right-click] Locate the object on the canvas, assign the current class, copy the ID.
+Refills from the current level when switching levels; segmentation must be done first.</source>
+        <translation>【列】ID / 像元数 / 类别。
+【右键】在画布定位对象、赋为当前类别、复制 ID。
+层级切换时按当前层重新填充；需先完成分割。</translation>
+    </message>
+    <message>
+        <source>OBIA Object Info</source>
+        <translation>OBIA 对象信息</translation>
+    </message>
+    <message>
+        <source>Shows shape, spectral and hierarchy statistics of the object selected on the canvas (read-only HTML).
+Use the &apos;Select Objects&apos; map tool to click objects on the canvas and refresh.</source>
+        <translation>展示画布上选中对象的形状、光谱与层级统计（只读 HTML）。
+使用「选择对象」地图工具在画布点选对象即可刷新。</translation>
+    </message>
+    <message>
+        <source>Task Center (OBIA task list)</source>
+        <translation>任务中心（OBIA 任务列表）</translation>
+    </message>
+    <message>
+        <source>[Columns] Title / status / progress / load checkbox.
+[Right-click] View details and log, stop, pause/resume, retry, load outputs into the main view, copy info.
+[Load checkbox] Loads outputs into the main program automatically after the task succeeds.
+[Status colors] blue = running, green = finished, red = failed, grey = queued / cancelled.</source>
+        <translation>【列】标题 / 状态 / 进度 / 加载勾选。
+【右键】查看详情与日志、停止、暂停/恢复、重试、加载输出到主图、复制信息。
+【加载勾选】任务成功后自动把输出加载到主程序。
+【状态色】蓝=运行中、绿=完成、红=失败、灰=排队/已取消。</translation>
+    </message>
+    <message>
+        <source>Data Management</source>
+        <translation>数据管理</translation>
+    </message>
+    <message>
+        <source>[Tree] Project data assets and collections; the color bar on the left shows status (green = available, red = unavailable).
+[Right-click] Add to display, promote to project persistent, unload, view properties, copy source path.
+[Double-click] Same as &apos;Add to Display&apos;. The meta information inspector is below.</source>
+        <translation>【树】工程数据资产与集合；左侧色条表示状态（绿=可用，红=不可用）。
+【右键】添加到显示、提升为工程持久、卸载、查看属性、复制源路径。
+【双击】等同于「添加到显示」。下方为元信息检视器。</translation>
+    </message>
+    <message>
+        <source>Classification Accuracy Assessment</source>
+        <translation>分类精度评价</translation>
+    </message>
+    <message>
+        <source>[OA] Overall accuracy. [Kappa] Agreement coefficient.
+[Confusion matrix] Rows = truth, columns = prediction.
+[Producer&apos;s accuracy] Share of a class&apos;s true samples classified correctly (recall).
+[User&apos;s accuracy] Share of a class&apos;s predictions that are correct (precision).
+[F1] Harmonic mean of producer&apos;s and user&apos;s accuracy. [Export CSV] Saves the report.</source>
+        <translation>【OA】总体精度。【Kappa】一致性系数。
+【混淆矩阵】行=真实，列=预测。
+【制图精度】某类真实被正确分出的比例（召回）。
+【用户精度】某类预测中正确的比例（精确率）。
+【F1】制图与用户精度调和平均。【导出 CSV】保存报告。</translation>
+    </message>
+    <message>
+        <source>Post-Classification</source>
+        <translation>分类后处理</translation>
+    </message>
+    <message>
+        <source>[Vectorize] Converts the classification raster into vector polygons.
+[Filter] Filters small patches by minimum area.
+[Merge] Merges small patches into adjacent major classes.
+[Output] Exports the processed raster / vector.</source>
+        <translation>【矢量化】把分类栅格转为矢量面。
+【过滤】按最小面积过滤碎斑。
+【合并】小图斑合并到相邻主类。
+【输出】导出处理后栅格/矢量。</translation>
+    </message>
+    <message>
+        <source>Load Trained Classifier</source>
+        <translation>加载已训练分类器</translation>
+    </message>
+    <message>
+        <source>Loads a previously saved classifier model file from disk.
+Once loaded, the classification can be applied to new images directly, without retraining.</source>
+        <translation>从磁盘加载先前保存的分类器模型文件。
+加载后可直接对新影像应用分类，无需重新训练。</translation>
+    </message>
+    <message>
+        <source>Class Merging</source>
+        <translation>类别合并</translation>
+    </message>
+    <message>
+        <source>Merges several fine classes into one coarse class, updating the class table and classified results.
+Executes the merge after source and target classes are chosen.</source>
+        <translation>把多个细类合并为一个粗类，更新类别表与已分类结果。
+选择源类别与目标类别后执行合并。</translation>
+    </message>
+    <message>
+        <source>Geometric Correction - Template Matching</source>
+        <translation>几何校正 - 模板匹配</translation>
+    </message>
+    <message>
+        <source>[Template] Drag a rectangle around the reference template area on the source image.
+[Search] Auto-matches conjugate points on the image to correct, generating GCPs.
+[Correlation threshold] Controls match confidence; too low invites mismatches, too high misses points.</source>
+        <translation>【模板】在源影像框选参考模板区域。
+【搜索】在待校正影像上自动匹配同名点，生成 GCP。
+【相关阈值】控制匹配可信度；过低易误配，过高漏点。</translation>
+    </message>
+    <message>
+        <source>Import Landsat Product</source>
+        <translation>导入 Landsat 产品</translation>
+    </message>
+    <message>
+        <source>[Scene directory] An extracted directory containing *_MTL.txt.
+[Probe] Parses the MTL and lists sub-items (grid groups) and bands.
+[Preview tree] Tick the bands to import; multispectral bands by default.
+[Import] Composites as selected and loads into the project.</source>
+        <translation>【场景目录】含 *_MTL.txt 的解压目录。
+【探测】解析 MTL，列出子项（网格组）与波段。
+【预览树】勾选需导入的波段；默认多光谱波段。
+【导入】按选择合成并加载到工程。</translation>
+    </message>
+    <message>
+        <source>Vector Digitizing Edit Tools</source>
+        <translation>矢量数字化编辑工具</translation>
+    </message>
+    <message>
+        <source>[Select] Select features with a rectangle. [Add Feature] Draw a new feature.
+[Node Tool] Edit vertices. [Move / Rotate] Transform the whole feature.
+[Reshape] Modify boundaries. [Split] Split features. [Offset] Offset lines.
+[Simplify] Thins vertices. [Reverse] Reverses line direction.
+[Add Ring / Fill Ring] Handles holes inside polygons. [Delete Part] Removes one part of a multipart feature.</source>
+        <translation>【选择】矩形框选要素。【添加要素】绘制新要素。
+【节点】编辑顶点。【移动/旋转】整体变换。
+【重塑】修改边界。【分割】切分要素。【偏移】偏移线。
+【简化】抽稀顶点。【反转】反转线方向。
+【添加环/填充环】处理面内空洞。【删除部件】移除多部件之一。</translation>
+    </message>
+    <message>
+        <source>Main Window — SICNU GEO RS</source>
+        <translation>主窗口 SICNU GEO RS</translation>
+    </message>
+    <message>
+        <source>[Menu layout]
+• Project: open/save, import, STAC, layouts and reports
+• Edit: feature editing; digitizing tools live in the &apos;Edit → Digitizing&apos; submenu
+• View: zoom, pan, identify, measure, compare / swipe
+• Layer: add/remove rasters and vectors, project CRS
+• Raster: preprocessing (incl. image registration), image enhancement, bands and transforms
+• Analysis: spectral indices, change detection, fusion, terrain, classification (thematic)
+• Vector: geometry processing, overlay, spatial selection, attributes and projection
+• Processing: toolbox / history / batch
+• Settings / Window / Help
+Hover menu items and dialog widgets for parameter explanations; Shift+F1 is &apos;What&apos;s This?&apos;.</source>
+        <translation>【菜单布局】
+• 工程：打开/保存、导入、STAC、布局与报告
+• 编辑：要素编辑；数字化工具在「编辑→数字化」子菜单
+• 视图：缩放、平移、识别、量测、对比/卷帘
+• 图层：添加/移除栅格与矢量、工程 CRS
+• 栅格：预处理（含影像配准）、影像增强、波段与变换
+• 分析：光谱指数、变化检测、融合、地形、分类（专题）
+• 矢量：几何处理、叠加、空间选择、属性与投影
+• 处理：工具箱 / 历史 / 批量
+• 设置 / 窗口 / 帮助
+悬停菜单项与对话框控件查看参数说明；Shift+F1 为「这是什么」。</translation>
+    </message>
+    <message>
+        <source>Swipe Comparison Tool</source>
+        <translation>卷帘对比工具</translation>
+    </message>
+    <message>
+        <source>Drag the divider on the map to compare the layers above and below, checking registration or change.</source>
+        <translation>在地图上拖动分割线对比上下图层，检查配准或变化。</translation>
+    </message>
+    <message>
+        <source>Import Sentinel-2 Product: detect and import L1C / L2A SAFE directories</source>
+        <translation>导入 Sentinel-2 产品：探测与导入 L1C / L2A SAFE 目录</translation>
+    </message>
+    <message>
+        <source>[Product directory] An extracted Sentinel-2 .SAFE folder or a directory containing MTD_MSIL*.xml.
+[Probe] Parses the metadata XML, identifying the 10 m/20 m/60 m resolution grid groups and the SCL quality band.
+[Band selection] Tick the multispectral bands or derived indices to import in the candidate tree.
+[Import] Loads the selected bands into the data manager automatically and registers them as a dataset collection.</source>
+        <translation>【产品目录】解压后的 Sentinel-2 .SAFE 文件夹或包含 MTD_MSIL*.xml 的目录。
+【探测 Probe】解析元数据 XML，识别 10m/20m/60m 分辨率网格组与 SCL 质检波段。
+【波段选择】在候选树中勾选需要导入的多光谱波段或衍生指数。
+【导入】自动将选中波段加载到数据管理器并注册为数据集集合。</translation>
+    </message>
+    <message>
+        <source>Import MODIS Product: detect and import HDF / GeoTIFF tiles</source>
+        <translation>导入 MODIS 产品：探测与导入 HDF / GeoTIFF 瓦片</translation>
+    </message>
+    <message>
+        <source>[Product path] A MODIS HDF4 scientific dataset file (e.g. MOD09GA, MOD13Q1) or an extracted tile directory.
+[Tile] Auto-identify or specify the hXXvYY sinusoidal grid number.
+[Probe] Parses the internal subdataset band list and scale factors.
+[Import] Imports the selected surface reflectance / vegetation index bands into the project.</source>
+        <translation>【产品路径】MODIS HDF4 科学数据集文件（如 MOD09GA、MOD13Q1）或解压瓦片目录。
+【瓦片坐标 Tile】自动识别或指定 hXXvYY 正弦投影（Sinusoidal）网格编号。
+【探测】解析内部子数据集（Subdatasets）波段列表与比例因子 (Scale Factor)。
+【导入】将选中的地表反射率/植被指数波段导入工程。</translation>
+    </message>
+    <message>
+        <source>Satellite product import: detect Landsat / Sentinel-2 / MODIS packages</source>
+        <translation>卫星产品导入：探测 Landsat / Sentinel-2 / MODIS 数据包</translation>
+    </message>
+    <message>
+        <source>[Product directory] Choose a product folder containing standard sensor metadata.
+[Probe] Reads the metadata and analyses grid resolution, band names and wavelength ranges.
+[Preview tree] Shows bands grouped by resolution and purpose; tick to import into the project.</source>
+        <translation>【产品目录】选择包含传感器标准元数据的产品文件夹。
+【探测 Probe】读取元数据，分析网格分辨率、波段名称与波长范围。
+【预览树】按分辨率与用途分组展示波段，勾选后导入工程。</translation>
+    </message>
+    <message>
+        <source>Import Chinese satellite product: detect GF / ZY-3 / ZY-1 02C / HJ CCD packages</source>
+        <translation>导入国产卫星产品：自动识别 GF / ZY-3 / ZY-1 02C / HJ CCD 数据包</translation>
+    </message>
+    <message>
+        <source>[Product directory] A Chinese satellite L1A product directory, CRESDA sidecar XML or image TIFF.
+[Probe] Parses the CRESDA sidecar: band roles and wavelengths come from the sensor profile registry, the sidecar generation and unknown elements are reported.
+[Preview tree] Shows the declared band inventory with roles; the PMS panchromatic sibling and RPC document appear as constituents.
+[Import] Stacks the selected bands with sun geometry and declared calibration metadata; provenance covers identity, sensor profile and completeness.</source>
+        <translation>【产品目录】国产卫星 L1A 产品目录，支持 CRESDA 随附 XML 或影像 TIFF。
+【探测】解析 CRESDA 随附文件：波段角色与中心波长来自传感器廓线注册表，同时报告随附文件代次与未知元素。
+【预览树】按角色展示声明的波段清单；PMS 全色同源产品与 RPC 文件作为组成项显示。
+【导入】以太阳几何与声明的定标元数据堆叠所选波段；溯源覆盖身份、传感器廓线与完整性。</translation>
+    </message>
+    <message>
+        <source>Spectral library matching and management: SAM / SID spectral angle matching</source>
+        <translation>光谱库匹配与管理：SAM / SID 光谱角匹配</translation>
+    </message>
+    <message>
+        <source>[Spectral library file] Choose a USGS / ASTER format library or a JSON spectral library exported by this project.
+[Matching algorithm]
+• SAM (Spectral Angle Mapper): spectral angle in high-dimensional space; smaller is more similar
+• SID (Spectral Information Divergence): spectral information divergence
+[Match] Ranks library reference spectra by similarity against the pixel spectrum collected on the current canvas.
+[Export / Save] Saves the current pixel spectrum to the spectral library with a custom name and class.</source>
+        <translation>【光谱库文件】选择 USGS / ASTER 格式或本工程导出的 JSON 光谱特征库。
+【匹配算法 Algorithm】
+• SAM (Spectral Angle Mapper)：计算高维空间光谱角夹角，越小越相似
+• SID (Spectral Information Divergence)：光谱信息散度
+【匹配 Match】对当前画布采集的像元光谱曲线与库内标准地物进行相似度排序。
+【导出/追加 Save】将当前像元光谱曲线以自定义名称和类别保存至光谱库。</translation>
+    </message>
+    <message>
+        <source>Task Center: asynchronous task progress monitoring and result management</source>
+        <translation>任务中心：异步任务进度监控与结果管理</translation>
+    </message>
+    <message>
+        <source>[Task list] Shows the state of running and queued algorithm tasks with live progress bars and elapsed time.
+[Actions] Right-click to pause, resume, cancel or retry a task; view the live log output.
+[Auto-load] When ticked, artifacts are loaded into map layers automatically after the task succeeds.</source>
+        <translation>【任务列表】展示当前后台运行及排队的算法任务状态、实时进度条与耗时。
+【操作】右键可暂停、恢复、取消或重试任务；查看实时日志输出。
+【自动加载】勾选后任务执行成功自动将产物加载到地图图层中。</translation>
+    </message>
+    <message>
+        <source>Print Layout / Map Output</source>
+        <translation>打印布局 / 出图</translation>
+    </message>
+    <message>
+        <source>Design map frames, legends and scale bars, and export map products.</source>
+        <translation>设计图框、图例、比例尺与导出地图产品。</translation>
     </message>
 </context>
 </TS>

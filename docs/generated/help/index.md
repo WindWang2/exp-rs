@@ -1,9 +1,14 @@
 # 帮助索引（自动生成）
 
-> 共 1176 个主题。
+> 共 1819 个主题。
 
 ## 未分类
 
+- `command.app.commandPalette` — command.app.commandPalette
+- `command.cartography.compose` — command.cartography.compose
+- `command.cartography.export` — command.cartography.export
+- `command.cartography.preflight` — command.cartography.preflight
+- `command.cartography.repair` — command.cartography.repair
 - `command.layer.addRaster` — command.layer.addRaster
 - `command.layer.addVector` — command.layer.addVector
 - `command.layer.attributeTable` — command.layer.attributeTable
@@ -49,10 +54,25 @@
 - `command.rs.spectralIndex` — command.rs.spectralIndex
 - `command.rs.temporal` — command.rs.temporal
 - `command.rs.terrain` — command.rs.terrain
+- `command.workbench.cartography` — command.workbench.cartography
 - `command.workbench.classify` — command.workbench.classify
+- `command.workbench.classifyStudio` — command.workbench.classifyStudio
+- `command.workbench.datasetExperiment` — command.workbench.datasetExperiment
+- `command.workbench.georefDual` — command.workbench.georefDual
 - `command.workbench.georefI2I` — command.workbench.georefI2I
 - `command.workbench.georefI2M` — command.workbench.georefI2M
+- `command.workbench.ir2Pipeline` — command.workbench.ir2Pipeline
+- `command.workbench.model` — command.workbench.model
 - `command.workbench.obia` — command.workbench.obia
+- `command.workbench.operatorCatalog` — command.workbench.operatorCatalog
+- `command.workbench.processingHistory` — command.workbench.processingHistory
+- `command.workbench.temporal` — command.workbench.temporal
+- `command.workbench.visualAnalytics` — command.workbench.visualAnalytics
+- `command.workflow.new` — command.workflow.new
+- `command.workflow.open` — command.workflow.open
+- `command.workflow.run` — command.workflow.run
+- `command.workflow.save` — command.workflow.save
+- `command.workflow.stop` — command.workflow.stop
 - `diagnostic.dataset.label.conflict` — 标注冲突
 - `diagnostic.dataset.label.duplicate_annotation` — 重复标注
 - `diagnostic.dataset.label.empty` — 样本缺少标签
@@ -102,7 +122,9 @@
 - `diagnostic.harness.entity_ambiguous` — 实体引用不唯一
 - `diagnostic.harness.execution_failed` — 执行失败
 - `diagnostic.harness.grid_mismatch` — 格网不一致
+- `diagnostic.harness.identity_mismatch` — 身份钉扎不一致
 - `diagnostic.harness.insufficient_memory` — 内存不足
+- `diagnostic.harness.intent_ambiguous` — 科学意图不明确
 - `diagnostic.harness.invalid_parameter` — 参数不合法
 - `diagnostic.harness.invalid_plan` — 计划不合法
 - `diagnostic.harness.invalid_radiometry` — 辐射状态不符合要求
@@ -123,6 +145,7 @@
 - `diagnostic.operator.already_running` — 算子已在运行
 - `diagnostic.operator.cancelled` — 算子已取消
 - `diagnostic.operator.computation_error` — 计算错误
+- `diagnostic.operator.device_unavailable` — 推理设备不可用
 - `diagnostic.operator.directory_not_found` — 目录不存在
 - `diagnostic.operator.external_process_failed` — 外部进程失败
 - `diagnostic.operator.external_process_timeout` — 外部进程超时
@@ -139,6 +162,7 @@
 - `diagnostic.operator.otb_error` — OTB 错误
 - `diagnostic.operator.out_of_range` — 参数超出范围
 - `diagnostic.operator.qgis_processing_error` — QGIS 处理错误
+- `diagnostic.operator.runtime_provider_failed` — 运行时提供者失败
 - `diagnostic.operator.type_mismatch` — 参数类型不匹配
 - `diagnostic.operator.unknown` — 未知算子错误
 - `diagnostic.preflight.align_to_reference` — 未对齐参考格网
@@ -189,9 +213,332 @@
 
 - `concept.rs.topographic_effects` — 地形效应
 
+## 术语表
+
+- `concept.term.6s_model` — 6S 辐射传输模型（6S model）
+- `concept.term.absorption` — 吸收（absorption）
+- `concept.term.absorption_feature` — 吸收特征（absorption feature）
+- `concept.term.accuracy_assessment` — 精度评价（accuracy assessment）
+- `concept.term.active_remote_sensing` — 主动遥感（active remote sensing）
+- `concept.term.adjacency_effect` — 邻近效应（adjacency effect）
+- `concept.term.aerosol` — 气溶胶（aerosol）
+- `concept.term.aerosol_optical_thickness` — 气溶胶光学厚度（aerosol optical thickness）
+- `concept.term.albedo` — 反照率（albedo）
+- `concept.term.annotation` — 标注（annotation）
+- `concept.term.aspect` — 坡向（aspect）
+- `concept.term.atmospheric_correction` — 大气校正（atmospheric correction）
+- `concept.term.atmospheric_transmittance` — 大气透过率（atmospheric transmittance）
+- `concept.term.atmospheric_turbulence` — 大气湍流（atmospheric turbulence）
+- `concept.term.atmospheric_window` — 大气窗口（atmospheric window）
+- `concept.term.azimuth_resolution` — 方位向分辨率（azimuth resolution）
+- `concept.term.backscatter` — 后向散射（backscatter）
+- `concept.term.band_math` — 波段运算（band math）
+- `concept.term.band_ratio` — 波段比值（band ratio）
+- `concept.term.band_selection` — 波段选择（band selection）
+- `concept.term.base_map` — 底图（base map）
+- `concept.term.beer_lambert_law` — 比尔–朗伯定律（Beer–Lambert law）
+- `concept.term.bilinear_interpolation` — 双线性内插（bilinear interpolation）
+- `concept.term.bistatic_sar` — 双站合成孔径雷达（bistatic SAR）
+- `concept.term.bitemporal_analysis` — 双时相分析（bitemporal analysis）
+- `concept.term.blackbody` — 黑体（blackbody）
+- `concept.term.brdf` — 双向反射分布函数（BRDF）
+- `concept.term.brightness_temperature` — 亮度温度（brightness temperature）
+- `concept.term.canopy_height_model` — 冠层高度模型（canopy height model）
+- `concept.term.cartographic_generalization` — 制图综合（cartographic generalization）
+- `concept.term.cartographic_visualization` — 制图可视化（cartographic visualization）
+- `concept.term.ccdc` — 连续变化检测与分类（CCDC）
+- `concept.term.change_detection` — 变化检测（change detection）
+- `concept.term.change_magnitude` — 变化幅度（change magnitude）
+- `concept.term.change_matrix` — 变化转移矩阵（change matrix）
+- `concept.term.change_vector_analysis` — 变化向量分析（change vector analysis）
+- `concept.term.choropleth_map` — 分级统计图（choropleth map）
+- `concept.term.cirrus_detection` — 卷云检测（cirrus detection）
+- `concept.term.class_merging` — 类别合并（class merging）
+- `concept.term.class_separability` — 类别可分性（class separability）
+- `concept.term.classification_scheme` — 分类体系（classification scheme）
+- `concept.term.classifier` — 分类器（classifier）
+- `concept.term.cloud_free_composite` — 无云合成影像（cloud-free composite）
+- `concept.term.cloud_masking` — 云掩膜（cloud masking）
+- `concept.term.co_registration` — 相对配准（co-registration）
+- `concept.term.color_composite` — 彩色合成（color composite）
+- `concept.term.color_ramp` — 色带（color ramp）
+- `concept.term.color_space` — 色彩空间（color space）
+- `concept.term.confusion_matrix` — 混淆矩阵（confusion matrix）
+- `concept.term.contextual_feature` — 上下文特征（contextual feature）
+- `concept.term.continuum_removal` — 连续统去除（continuum removal）
+- `concept.term.contour_line` — 等高线（contour line）
+- `concept.term.coordinate_reference_system` — 坐标参考系统（coordinate reference system）
+- `concept.term.corner_reflector` — 角反射器（corner reflector）
+- `concept.term.crop_stress_detection` — 作物胁迫监测（crop stress detection）
+- `concept.term.cubic_convolution` — 三次卷积内插（cubic convolution）
+- `concept.term.curvature` — 曲率（curvature）
+- `concept.term.cut_and_fill` — 填挖方分析（cut and fill）
+- `concept.term.dark_object_subtraction` — 暗目标减除法（dark object subtraction）
+- `concept.term.datum` — 大地基准（datum）
+- `concept.term.decision_tree` — 决策树（decision tree）
+- `concept.term.deforestation_monitoring` — 毁林监测（deforestation monitoring）
+- `concept.term.deformation_measurement` — 地表形变测量（deformation measurement）
+- `concept.term.density_slicing` — 密度分割（density slicing）
+- `concept.term.differential_insar` — 差分干涉测量（differential InSAR）
+- `concept.term.digital_elevation_model` — 数字高程模型（digital elevation model）
+- `concept.term.digital_number` — 像元灰度值（digital number）
+- `concept.term.digital_surface_model` — 数字表面模型（digital surface model）
+- `concept.term.digital_terrain_model` — 数字地形模型（digital terrain model）
+- `concept.term.dimensionality_reduction` — 降维（dimensionality reduction）
+- `concept.term.disturbance_map` — 扰动分布图（disturbance map）
+- `concept.term.edge_detection` — 边缘检测（edge detection）
+- `concept.term.elevation_profile` — 高程剖面（elevation profile）
+- `concept.term.emissivity` — 发射率（emissivity）
+- `concept.term.empirical_line_method` — 经验线性法（empirical line method）
+- `concept.term.endmember` — 端元（endmember）
+- `concept.term.ephemeris` — 星历数据（ephemeris）
+- `concept.term.epoch` — 时相（epoch）
+- `concept.term.evi` — 增强型植被指数（EVI）
+- `concept.term.false_color_composite` — 假彩色合成（false color composite）
+- `concept.term.feature_selection` — 特征选择（feature selection）
+- `concept.term.feature_space` — 特征空间（feature space）
+- `concept.term.flow_accumulation` — 汇流累积量（flow accumulation）
+- `concept.term.flow_direction` — 水流方向（flow direction）
+- `concept.term.footprint` — 覆盖范围（footprint）
+- `concept.term.foreshortening` — 透视收缩（foreshortening）
+- `concept.term.forest_disturbance` — 森林扰动（forest disturbance）
+- `concept.term.fuzzy_classification` — 模糊分类（fuzzy classification）
+- `concept.term.gain_and_loss_map` — 增减图（gain and loss map）
+- `concept.term.gain_and_offset` — 增益与偏置（gain and offset）
+- `concept.term.gap_filling` — 缺失填补（gap filling）
+- `concept.term.generalization_capability` — 泛化能力（generalization capability）
+- `concept.term.geometric_correction` — 几何校正（geometric correction）
+- `concept.term.geometric_distortion` — 几何畸变（geometric distortion）
+- `concept.term.georeferencing` — 地理配准（georeferencing）
+- `concept.term.geostationary_orbit` — 地球静止轨道（geostationary orbit）
+- `concept.term.glcm` — 灰度共生矩阵（GLCM）
+- `concept.term.graticule` — 经纬网（graticule）
+- `concept.term.ground_control_point` — 地面控制点（ground control point）
+- `concept.term.ground_range` — 地距（ground range）
+- `concept.term.ground_sampling_distance` — 地面采样距离（ground sampling distance）
+- `concept.term.haze` — 霾（haze）
+- `concept.term.hierarchical_segmentation` — 分级分割（hierarchical segmentation）
+- `concept.term.hillshade` — 山体阴影（hillshade）
+- `concept.term.hillshade_blending` — 山体阴影融合（hillshade blending）
+- `concept.term.histogram_matching` — 直方图匹配（histogram matching）
+- `concept.term.hyperspectral_data_cube` — 高光谱数据立方体（hyperspectral data cube）
+- `concept.term.hyperspectral_imagery` — 高光谱影像（hyperspectral imagery）
+- `concept.term.hypsometric_curve` — 高程面积曲线（hypsometric curve）
+- `concept.term.illumination_correction` — 光照校正（illumination correction）
+- `concept.term.image_classification` — 影像分类（image classification）
+- `concept.term.image_differencing` — 影像差值法（image differencing）
+- `concept.term.image_fusion` — 影像融合（image fusion）
+- `concept.term.image_object` — 影像对象（image object）
+- `concept.term.image_ratioing` — 影像比值法（image ratioing）
+- `concept.term.image_registration` — 影像配准（image registration）
+- `concept.term.image_segmentation` — 影像分割（image segmentation）
+- `concept.term.imaging_spectrometer` — 成像光谱仪（imaging spectrometer）
+- `concept.term.incidence_angle` — 入射角（incidence angle）
+- `concept.term.interferogram` — 干涉图（interferogram）
+- `concept.term.interferometric_coherence` — 干涉相干性（interferometric coherence）
+- `concept.term.interferometric_sar` — 合成孔径雷达干涉测量（interferometric SAR）
+- `concept.term.irradiance` — 辐照度（irradiance）
+- `concept.term.isodata` — 迭代自组织数据分析（ISODATA）
+- `concept.term.k_means` — K 均值聚类（K-means）
+- `concept.term.k_nearest_neighbours` — K 近邻分类（k-nearest neighbours）
+- `concept.term.kappa_coefficient` — Kappa 系数（kappa coefficient）
+- `concept.term.labeling` — 注记（labeling）
+- `concept.term.lag_effect` — 滞后效应（lag effect）
+- `concept.term.lambertian_surface` — 朗伯面（Lambertian surface）
+- `concept.term.land_cover_change` — 土地覆盖变化（land cover change）
+- `concept.term.landform_classification` — 地貌分类（landform classification）
+- `concept.term.landtrendr` — LandTrendr 时序分割（LandTrendr）
+- `concept.term.large_scale_map` — 大比例尺地图（large-scale map）
+- `concept.term.layover` — 叠掩（layover）
+- `concept.term.lee_filter` — Lee 滤波（Lee filter）
+- `concept.term.legend` — 图例（legend）
+- `concept.term.library_matching` — 光谱库匹配（library matching）
+- `concept.term.lidar` — 激光雷达（LiDAR）
+- `concept.term.los_displacement` — 视线向形变（LOS displacement）
+- `concept.term.majority_filter` — 多数滤波（majority filter）
+- `concept.term.map_algebra` — 地图代数（map algebra）
+- `concept.term.map_grid` — 地图格网（map grid）
+- `concept.term.map_layout` — 地图版面（map layout）
+- `concept.term.map_projection` — 地图投影（map projection）
+- `concept.term.map_scale` — 地图比例尺（map scale）
+- `concept.term.maximum_likelihood_classification` — 最大似然分类（maximum likelihood classification）
+- `concept.term.maximum_value_composite` — 最大值合成（maximum value composite）
+- `concept.term.mean_shift_segmentation` — 均值漂移分割（mean-shift segmentation）
+- `concept.term.microwave_remote_sensing` — 微波遥感（microwave remote sensing）
+- `concept.term.mie_scattering` — 米氏散射（Mie scattering）
+- `concept.term.mineral_mapping` — 矿物填图（mineral mapping）
+- `concept.term.minimum_distance_classification` — 最小距离分类（minimum distance classification）
+- `concept.term.minimum_noise_fraction` — 最小噪声分数变换（minimum noise fraction）
+- `concept.term.mixed_pixel` — 混合像元（mixed pixel）
+- `concept.term.morphological_operation` — 形态学运算（morphological operation）
+- `concept.term.mosaic` — 影像镶嵌（mosaic）
+- `concept.term.mosaic_color_balancing` — 镶嵌色彩平衡（mosaic color balancing）
+- `concept.term.mosaic_feathering` — 镶嵌羽化（mosaic feathering）
+- `concept.term.msavi` — 修正土壤调节植被指数（MSAVI）
+- `concept.term.multiresolution_segmentation` — 多尺度分割（multiresolution segmentation）
+- `concept.term.multispectral_imagery` — 多光谱影像（multispectral imagery）
+- `concept.term.n_d_visualization` — n 维可视化（n-D visualization）
+- `concept.term.nadir` — 天底点（nadir）
+- `concept.term.nbr` — 归一化燃烧指数（NBR）
+- `concept.term.ndbi` — 归一化建筑指数（NDBI）
+- `concept.term.ndvi` — 归一化植被指数（NDVI）
+- `concept.term.ndwi` — 归一化水体指数（NDWI）
+- `concept.term.nearest_neighbour_resampling` — 最近邻重采样（nearest-neighbour resampling）
+- `concept.term.neural_network_classifier` — 神经网络分类器（neural network classifier）
+- `concept.term.nir` — 近红外波段（NIR）
+- `concept.term.non_lambertian_surface` — 非朗伯面（non-Lambertian surface）
+- `concept.term.non_selective_scattering` — 非选择性散射（non-selective scattering）
+- `concept.term.north_arrow` — 指北针（north arrow）
+- `concept.term.object_based_change_detection` — 对象级变化检测（object-based change detection）
+- `concept.term.object_based_image_analysis` — 面向对象影像分析（object-based image analysis）
+- `concept.term.object_feature` — 对象特征（object feature）
+- `concept.term.off_nadir_viewing` — 侧视成像（off-nadir viewing）
+- `concept.term.orthophoto` — 正射影像（orthophoto）
+- `concept.term.orthorectification` — 正射校正（orthorectification）
+- `concept.term.overall_accuracy` — 总体精度（overall accuracy）
+- `concept.term.ozone` — 臭氧（ozone）
+- `concept.term.panchromatic_imagery` — 全色影像（panchromatic imagery）
+- `concept.term.pansharpening` — 全色锐化（pansharpening）
+- `concept.term.parallax` — 视差（parallax）
+- `concept.term.passive_remote_sensing` — 被动遥感（passive remote sensing）
+- `concept.term.path_radiance` — 程辐射（path radiance）
+- `concept.term.phase_unwrapping` — 相位解缠（phase unwrapping）
+- `concept.term.phenological_metrics` — 物候参数（phenological metrics）
+- `concept.term.phenology` — 物候（phenology）
+- `concept.term.pixel_purity_index` — 像元纯度指数（pixel purity index）
+- `concept.term.planck_s_law` — 普朗克定律（Planck's law）
+- `concept.term.point_cloud` — 点云（point cloud）
+- `concept.term.polarimetric_decomposition` — 极化分解（polarimetric decomposition）
+- `concept.term.polarimetric_sar` — 极化合成孔径雷达（polarimetric SAR）
+- `concept.term.post_classification_comparison` — 分类后比较（post-classification comparison）
+- `concept.term.principal_component_analysis` — 主成分分析（principal component analysis）
+- `concept.term.producer_s_accuracy` — 制图精度（producer's accuracy）
+- `concept.term.pushbroom_scanner` — 推帚式扫描仪（pushbroom scanner）
+- `concept.term.qa_band` — 质量评估波段（QA band）
+- `concept.term.quantization` — 量化（quantization）
+- `concept.term.radar_cross_section` — 雷达截面积（radar cross section）
+- `concept.term.radar_shadow` — 雷达阴影（radar shadow）
+- `concept.term.radiance` — 辐射亮度（radiance）
+- `concept.term.radiative_transfer_equation` — 辐射传输方程（radiative transfer equation）
+- `concept.term.radiometric_calibration` — 辐射定标（radiometric calibration）
+- `concept.term.radiometric_correction` — 辐射校正（radiometric correction）
+- `concept.term.radiometric_normalization` — 辐射归一化（radiometric normalization）
+- `concept.term.radiometric_resolution` — 辐射分辨率（radiometric resolution）
+- `concept.term.random_forest` — 随机森林（random forest）
+- `concept.term.range_resolution` — 距离向分辨率（range resolution）
+- `concept.term.rayleigh_scattering` — 瑞利散射（Rayleigh scattering）
+- `concept.term.red_edge` — 红边（red edge）
+- `concept.term.red_edge_position` — 红边位置（red-edge position）
+- `concept.term.reference_data` — 参考数据（reference data）
+- `concept.term.reflectance` — 反射率（reflectance）
+- `concept.term.relief_displacement` — 投影差（relief displacement）
+- `concept.term.resampling` — 重采样（resampling）
+- `concept.term.revisit_period` — 重访周期（revisit period）
+- `concept.term.rpc` — 有理多项式系数模型（RPC）
+- `concept.term.rule_based_classification` — 规则分类（rule-based classification）
+- `concept.term.sar_calibration` — SAR 定标（SAR calibration）
+- `concept.term.savi` — 土壤调节植被指数（SAVI）
+- `concept.term.scale_bar` — 比例尺条（scale bar）
+- `concept.term.scale_parameter` — 尺度参数（scale parameter）
+- `concept.term.scattering` — 散射（scattering）
+- `concept.term.seamline` — 镶嵌线（seamline）
+- `concept.term.seasonal_trend_analysis` — 季节趋势分析（seasonal trend analysis）
+- `concept.term.segmentation_parameter_optimization` — 分割参数优化（segmentation parameter optimization）
+- `concept.term.semantic_segmentation` — 语义分割（semantic segmentation）
+- `concept.term.sensor_calibration` — 传感器定标（sensor calibration）
+- `concept.term.sensor_model` — 传感器模型（sensor model）
+- `concept.term.sensor_noise` — 传感器噪声（sensor noise）
+- `concept.term.shape_and_compactness` — 形状与紧致度权重（shape and compactness）
+- `concept.term.sigma_nought` — 归一化后向散射系数（sigma nought）
+- `concept.term.sky_diffuse_irradiance` — 天空散射辐照度（sky diffuse irradiance）
+- `concept.term.slant_range` — 斜距（slant range）
+- `concept.term.slope` — 坡度（slope）
+- `concept.term.slow_onset_change` — 缓变（slow onset change）
+- `concept.term.small_scale_map` — 小比例尺地图（small-scale map）
+- `concept.term.snr` — 信噪比（SNR）
+- `concept.term.solar_irradiance` — 太阳辐照度（solar irradiance）
+- `concept.term.spatial_resolution` — 空间分辨率（spatial resolution）
+- `concept.term.speckle` — 相干斑点（speckle）
+- `concept.term.speckle_filtering` — 斑点滤波（speckle filtering）
+- `concept.term.spectral_angle_mapper` — 光谱角制图（spectral angle mapper）
+- `concept.term.spectral_band` — 光谱波段（spectral band）
+- `concept.term.spectral_derivatives` — 光谱导数（spectral derivatives）
+- `concept.term.spectral_feature_fitting` — 光谱特征拟合（spectral feature fitting）
+- `concept.term.spectral_heterogeneity` — 光谱异质性（spectral heterogeneity）
+- `concept.term.spectral_index` — 光谱指数（spectral index）
+- `concept.term.spectral_library` — 光谱库（spectral library）
+- `concept.term.spectral_mixture_analysis` — 光谱混合分析（spectral mixture analysis）
+- `concept.term.spectral_resolution` — 光谱分辨率（spectral resolution）
+- `concept.term.spectral_signature` — 光谱特征曲线（spectral signature）
+- `concept.term.spectral_smoothing` — 光谱平滑（spectral smoothing）
+- `concept.term.spectral_subset` — 光谱子集（spectral subset）
+- `concept.term.spectral_unmixing` — 光谱解混（spectral unmixing）
+- `concept.term.standard_false_color_composite` — 标准假彩色合成（standard false color composite）
+- `concept.term.stefan_boltzmann_law` — 斯特藩–玻尔兹曼定律（Stefan–Boltzmann law）
+- `concept.term.stereo_mapping` — 立体测图（stereo mapping）
+- `concept.term.stratified_sampling` — 分层采样（stratified sampling）
+- `concept.term.stream_order` — 河流分级（stream order）
+- `concept.term.sun_glint` — 太阳耀光（sun glint）
+- `concept.term.sun_synchronous_orbit` — 太阳同步轨道（sun-synchronous orbit）
+- `concept.term.supervised_classification` — 监督分类（supervised classification）
+- `concept.term.support_vector_machine` — 支持向量机（support vector machine）
+- `concept.term.surface_reflectance` — 地表反射率（surface reflectance）
+- `concept.term.swath_width` — 幅宽（swath width）
+- `concept.term.swir` — 短波红外波段（SWIR）
+- `concept.term.symbolization` — 符号化（symbolization）
+- `concept.term.symbology` — 符号系统（symbology）
+- `concept.term.synthetic_aperture_radar` — 合成孔径雷达（synthetic aperture radar）
+- `concept.term.temporal_compositing` — 时序合成（temporal compositing）
+- `concept.term.temporal_interpolation` — 时间插值（temporal interpolation）
+- `concept.term.temporal_resolution` — 时间分辨率（temporal resolution）
+- `concept.term.terrain_roughness` — 地形粗糙度（terrain roughness）
+- `concept.term.texture_feature` — 纹理特征（texture feature）
+- `concept.term.thematic_map` — 专题地图（thematic map）
+- `concept.term.thematic_overlay` — 专题叠加（thematic overlay）
+- `concept.term.thermal_inertia` — 热惯量（thermal inertia）
+- `concept.term.thermal_radiation` — 热辐射（thermal radiation）
+- `concept.term.threshold_segmentation` — 阈值分割（threshold segmentation）
+- `concept.term.time_series_analysis` — 时间序列分析（time series analysis）
+- `concept.term.time_series_smoothing` — 时序平滑（time series smoothing）
+- `concept.term.tin` — 不规则三角网（TIN）
+- `concept.term.toa_reflectance` — 大气顶层反射率（TOA reflectance）
+- `concept.term.topographic_correction` — 地形校正（topographic correction）
+- `concept.term.topographic_wetness_index` — 地形湿度指数（topographic wetness index）
+- `concept.term.training_sample` — 训练样本（training sample）
+- `concept.term.true_color_composite` — 真彩色合成（true color composite）
+- `concept.term.unsupervised_classification` — 非监督分类（unsupervised classification）
+- `concept.term.urban_expansion` — 城市扩张（urban expansion）
+- `concept.term.user_s_accuracy` — 用户精度（user's accuracy）
+- `concept.term.utm` — 通用横轴墨卡托投影（UTM）
+- `concept.term.validation_sample` — 验证样本（validation sample）
+- `concept.term.vegetation_index` — 植被指数（vegetation index）
+- `concept.term.vicarious_calibration` — 替代定标（vicarious calibration）
+- `concept.term.viewshed` — 可视域（viewshed）
+- `concept.term.visual_hierarchy` — 视觉层次（visual hierarchy）
+- `concept.term.vnir` — 可见光—近红外波段（VNIR）
+- `concept.term.water_body_extraction` — 水体提取（water body extraction）
+- `concept.term.water_vapor` — 水汽（water vapor）
+- `concept.term.water_vapor_retrieval` — 水汽反演（water vapor retrieval）
+- `concept.term.watershed_delineation` — 流域划分（watershed delineation）
+- `concept.term.whiskbroom_scanner` — 摆扫式扫描仪（whiskbroom scanner）
+- `concept.term.wien_s_displacement_law` — 维恩位移定律（Wien's displacement law）
+
 ## 错误与诊断
 
+- `diagnostic.harness.acquisition_dates_missing` — 缺少获取日期
+- `diagnostic.harness.categorical_mismatch` — 类别体系不一致
+- `diagnostic.harness.complex_bands_required` — 需要复数波段输入
 - `diagnostic.harness.dataset_not_found` — 数据集未找到
+- `diagnostic.harness.dates_not_ascending` — 日期未按升序排列
+- `diagnostic.harness.fact_conflict` — 事实冲突
+- `diagnostic.harness.io_error` — 输入/输出错误
+- `diagnostic.harness.nondeterministic_chain` — 链路包含非确定性步骤
+- `diagnostic.harness.output_path_collision` — 输出路径冲突
+- `diagnostic.harness.resource_over_budget` — 资源超出预算
+- `diagnostic.harness.temporal_misalignment` — 时间基准不对齐
+- `diagnostic.harness.unwrap_provider_unavailable` — 相位解缠提供者不可用
+- `diagnostic.harness.wavelength_incompatible` — 波长不兼容
+- `diagnostic.operator.policy_refused` — 算子被策略拒绝执行
 
 ## gdal-geometry
 
@@ -237,6 +584,7 @@
 - `parameter.rs.fusion_brovey.blueIdx` — blueIdx
 - `parameter.rs.fusion_brovey.greenIdx` — greenIdx
 - `parameter.rs.fusion_brovey.ms` — ms
+- `parameter.rs.fusion_brovey.msWeights` — msWeights
 - `parameter.rs.fusion_brovey.output` — output
 - `parameter.rs.fusion_brovey.pan` — pan
 - `parameter.rs.fusion_brovey.panWeight` — panWeight
@@ -244,6 +592,7 @@
 - `parameter.rs.fusion_gram_schmidt.blueIdx` — blueIdx
 - `parameter.rs.fusion_gram_schmidt.greenIdx` — greenIdx
 - `parameter.rs.fusion_gram_schmidt.ms` — ms
+- `parameter.rs.fusion_gram_schmidt.msWeights` — msWeights
 - `parameter.rs.fusion_gram_schmidt.output` — output
 - `parameter.rs.fusion_gram_schmidt.pan` — pan
 - `parameter.rs.fusion_gram_schmidt.panWeight` — panWeight
@@ -251,6 +600,7 @@
 - `parameter.rs.fusion_ihs.blueIdx` — blueIdx
 - `parameter.rs.fusion_ihs.greenIdx` — greenIdx
 - `parameter.rs.fusion_ihs.ms` — ms
+- `parameter.rs.fusion_ihs.msWeights` — msWeights
 - `parameter.rs.fusion_ihs.output` — output
 - `parameter.rs.fusion_ihs.pan` — pan
 - `parameter.rs.fusion_ihs.panWeight` — panWeight
@@ -258,6 +608,7 @@
 - `parameter.rs.fusion_linear.blueIdx` — blueIdx
 - `parameter.rs.fusion_linear.greenIdx` — greenIdx
 - `parameter.rs.fusion_linear.ms` — ms
+- `parameter.rs.fusion_linear.msWeights` — msWeights
 - `parameter.rs.fusion_linear.output` — output
 - `parameter.rs.fusion_linear.pan` — pan
 - `parameter.rs.fusion_linear.panWeight` — panWeight
@@ -265,6 +616,7 @@
 - `parameter.rs.fusion_pca.blueIdx` — blueIdx
 - `parameter.rs.fusion_pca.greenIdx` — greenIdx
 - `parameter.rs.fusion_pca.ms` — ms
+- `parameter.rs.fusion_pca.msWeights` — msWeights
 - `parameter.rs.fusion_pca.output` — output
 - `parameter.rs.fusion_pca.pan` — pan
 - `parameter.rs.fusion_pca.panWeight` — panWeight
@@ -282,8 +634,12 @@
 ## io
 
 - `operator.io.build_overviews` — Build Overviews
+- `operator.io.cache_prefetch` — Prefetch Cache
+- `operator.io.catalog_search` — Search Catalog
 - `operator.io.clip` — Clip Raster
 - `operator.io.convert_format` — Convert Format
+- `operator.io.cube_plan` — Plan Data Cube
+- `operator.io.cube_window` — Read Cube Window
 - `operator.io.doctor` — Data Doctor
 - `operator.io.inspect` — Inspect Dataset
 - `operator.io.make_cog` — Make COG
@@ -294,6 +650,19 @@
 - `parameter.io.build_overviews.input` — input
 - `parameter.io.build_overviews.levels` — levels
 - `parameter.io.build_overviews.resampling` — resampling
+- `parameter.io.cache_prefetch.catalog` — catalog
+- `parameter.io.cache_prefetch.chunkWindow` — chunkWindow
+- `parameter.io.cache_prefetch.maxBytes` — maxBytes
+- `parameter.io.cache_prefetch.mirrorDirectory` — mirrorDirectory
+- `parameter.io.catalog_search.assetRole` — assetRole
+- `parameter.io.catalog_search.bounds` — bounds
+- `parameter.io.catalog_search.catalog` — catalog
+- `parameter.io.catalog_search.cloudCoverMax` — cloudCoverMax
+- `parameter.io.catalog_search.limit` — limit
+- `parameter.io.catalog_search.maxItems` — maxItems
+- `parameter.io.catalog_search.platform` — platform
+- `parameter.io.catalog_search.temporalEndUtc` — temporalEndUtc
+- `parameter.io.catalog_search.temporalStartUtc` — temporalStartUtc
 - `parameter.io.clip.bounds` — bounds
 - `parameter.io.clip.creationOptions` — creationOptions
 - `parameter.io.clip.input` — input
@@ -303,8 +672,17 @@
 - `parameter.io.convert_format.driver` — driver
 - `parameter.io.convert_format.input` — input
 - `parameter.io.convert_format.output` — output
+- `parameter.io.cube_plan.catalog` — catalog
+- `parameter.io.cube_plan.executionBudgetBytes` — executionBudgetBytes
+- `parameter.io.cube_plan.sceneBudget` — sceneBudget
+- `parameter.io.cube_window.bandIndex` — bandIndex
+- `parameter.io.cube_window.bandRole` — bandRole
+- `parameter.io.cube_window.catalog` — catalog
+- `parameter.io.cube_window.mirrorDirectory` — mirrorDirectory
+- `parameter.io.cube_window.output` — output
 - `parameter.io.doctor.includeStatistics` — includeStatistics
 - `parameter.io.doctor.input` — input
+- `parameter.io.inspect.includeStatistics` — includeStatistics
 - `parameter.io.inspect.input` — input
 - `parameter.io.make_cog.creationOptions` — creationOptions
 - `parameter.io.make_cog.input` — input
@@ -418,24 +796,31 @@
 - `operator.rs.band_math` — Band Math
 - `operator.rs.endmember_extraction` — Endmember Extraction (PPI)
 - `operator.rs.evi` — Enhanced Vegetation Index (EVI)
+- `operator.rs.library_select` — Library Select
 - `operator.rs.matched_filter` — Matched Filter
 - `operator.rs.mndwi` — Modified Normalized Difference Water Index (MNDWI)
 - `operator.rs.mnf` — MNF (Minimum Noise Fraction)
+- `operator.rs.mnf_inverse` — Inverse MNF
 - `operator.rs.ndbi` — Normalized Difference Built-up Index (NDBI)
 - `operator.rs.ndvi` — Normalized Difference Vegetation Index (NDVI)
 - `operator.rs.ndwi` — Normalized Difference Water Index (NDWI)
 - `operator.rs.rx_anomaly` — RX Anomaly Detection
 - `operator.rs.savi` — Soil-Adjusted Vegetation Index (SAVI)
+- `operator.rs.spectral_band_select` — Spectral Band Select
 - `operator.rs.spectral_derivative` — Spectral Derivative
 - `operator.rs.spectral_index` — Spectral Index
 - `operator.rs.spectral_resample` — Spectral Resampling
 - `operator.rs.spectral_unmixing` — Linear Spectral Unmixing
 - `parameter.rs.ace.input` — input
+- `parameter.rs.ace.libraryMaterials` — libraryMaterials
+- `parameter.rs.ace.libraryPath` — libraryPath
 - `parameter.rs.ace.output` — output
 - `parameter.rs.ace.target` — target
+- `parameter.rs.ace.targetRef` — targetRef
 - `parameter.rs.band_math.expression` — expression
 - `parameter.rs.band_math.input` — input
 - `parameter.rs.band_math.output` — output
+- `parameter.rs.endmember_extraction.endmembersOut` — endmembersOut
 - `parameter.rs.endmember_extraction.input` — input
 - `parameter.rs.endmember_extraction.nEndmembers` — nEndmembers
 - `parameter.rs.endmember_extraction.projections` — projections
@@ -444,9 +829,20 @@
 - `parameter.rs.evi.nir` — nir
 - `parameter.rs.evi.output` — output
 - `parameter.rs.evi.red` — red
+- `parameter.rs.evi.scale` — scale
+- `parameter.rs.library_select.libraryPath` — libraryPath
+- `parameter.rs.library_select.materials` — materials
+- `parameter.rs.library_select.nearDuplicateAngleDeg` — nearDuplicateAngleDeg
+- `parameter.rs.library_select.output` — output
+- `parameter.rs.library_select.sensor` — sensor
+- `parameter.rs.library_select.wavelengthMax` — wavelengthMax
+- `parameter.rs.library_select.wavelengthMin` — wavelengthMin
 - `parameter.rs.matched_filter.input` — input
+- `parameter.rs.matched_filter.libraryMaterials` — libraryMaterials
+- `parameter.rs.matched_filter.libraryPath` — libraryPath
 - `parameter.rs.matched_filter.output` — output
 - `parameter.rs.matched_filter.target` — target
+- `parameter.rs.matched_filter.targetRef` — targetRef
 - `parameter.rs.mndwi.green` — green
 - `parameter.rs.mndwi.input` — input
 - `parameter.rs.mndwi.output` — output
@@ -454,6 +850,14 @@
 - `parameter.rs.mnf.input` — input
 - `parameter.rs.mnf.numComponents` — numComponents
 - `parameter.rs.mnf.output` — output
+- `parameter.rs.mnf.transformOut` — transformOut
+- `parameter.rs.mnf_inverse.components` — components
+- `parameter.rs.mnf_inverse.errorOut` — errorOut
+- `parameter.rs.mnf_inverse.input` — input
+- `parameter.rs.mnf_inverse.output` — output
+- `parameter.rs.mnf_inverse.spectrumOut` — spectrumOut
+- `parameter.rs.mnf_inverse.spectrumRef` — spectrumRef
+- `parameter.rs.mnf_inverse.transform` — transform
 - `parameter.rs.ndbi.input` — input
 - `parameter.rs.ndbi.nir` — nir
 - `parameter.rs.ndbi.output` — output
@@ -472,6 +876,13 @@
 - `parameter.rs.savi.nir` — nir
 - `parameter.rs.savi.output` — output
 - `parameter.rs.savi.red` — red
+- `parameter.rs.savi.scale` — scale
+- `parameter.rs.spectral_band_select.bands` — bands
+- `parameter.rs.spectral_band_select.excludeRanges` — excludeRanges
+- `parameter.rs.spectral_band_select.input` — input
+- `parameter.rs.spectral_band_select.output` — output
+- `parameter.rs.spectral_band_select.wavelengthMax` — wavelengthMax
+- `parameter.rs.spectral_band_select.wavelengthMin` — wavelengthMin
 - `parameter.rs.spectral_derivative.input` — input
 - `parameter.rs.spectral_derivative.order` — order
 - `parameter.rs.spectral_derivative.output` — output
@@ -485,6 +896,7 @@
 - `parameter.rs.spectral_index.postfire` — postfire
 - `parameter.rs.spectral_index.red` — red
 - `parameter.rs.spectral_index.rededge` — rededge
+- `parameter.rs.spectral_index.scale` — scale
 - `parameter.rs.spectral_index.swir` — swir
 - `parameter.rs.spectral_index.swir2` — swir2
 - `parameter.rs.spectral_resample.input` — input
@@ -493,9 +905,30 @@
 - `parameter.rs.spectral_resample.wavelengths` — wavelengths
 - `parameter.rs.spectral_unmixing.bands` — bands
 - `parameter.rs.spectral_unmixing.endmembers` — endmembers
+- `parameter.rs.spectral_unmixing.endmembersRef` — endmembersRef
 - `parameter.rs.spectral_unmixing.errorOut` — errorOut
 - `parameter.rs.spectral_unmixing.input` — input
+- `parameter.rs.spectral_unmixing.libraryMaterials` — libraryMaterials
+- `parameter.rs.spectral_unmixing.libraryPath` — libraryPath
+- `parameter.rs.spectral_unmixing.method` — method
 - `parameter.rs.spectral_unmixing.output` — output
+
+## raster
+
+- `operator.rs.align` — Align Raster To Reference
+- `operator.rs.resample` — Resample Raster
+- `parameter.rs.align.categorical` — categorical
+- `parameter.rs.align.input` — input
+- `parameter.rs.align.output` — output
+- `parameter.rs.align.reference` — reference
+- `parameter.rs.align.resampling` — resampling
+- `parameter.rs.align.warpMemoryLimitBytes` — warpMemoryLimitBytes
+- `parameter.rs.resample.categorical` — categorical
+- `parameter.rs.resample.input` — input
+- `parameter.rs.resample.output` — output
+- `parameter.rs.resample.resampling` — resampling
+- `parameter.rs.resample.resolution` — resolution
+- `parameter.rs.resample.warpMemoryLimitBytes` — warpMemoryLimitBytes
 
 ## qa
 
@@ -610,6 +1043,72 @@
 - `parameter.rs.pca.numComponents` — numComponents
 - `parameter.rs.pca.output` — output
 
+## ml
+
+- `operator.rs.change` — Change Detection (Model)
+- `operator.rs.classify` — Scene Classification (Model)
+- `operator.rs.detect` — Object Detection (Model)
+- `operator.rs.embedding` — Feature Embedding (Model)
+- `operator.rs.infer` — On-Device Inference (ONNX)
+- `operator.rs.regress` — Continuous Regression (Model)
+- `operator.rs.segment` — Semantic Segmentation (Model)
+- `parameter.rs.change.bandsA` — bandsA
+- `parameter.rs.change.bandsB` — bandsB
+- `parameter.rs.change.batchCap` — batchCap
+- `parameter.rs.change.device` — device
+- `parameter.rs.change.inputA` — inputA
+- `parameter.rs.change.inputB` — inputB
+- `parameter.rs.change.model` — model
+- `parameter.rs.change.output` — output
+- `parameter.rs.classify.bands` — bands
+- `parameter.rs.classify.batchCap` — batchCap
+- `parameter.rs.classify.device` — device
+- `parameter.rs.classify.input` — input
+- `parameter.rs.classify.model` — model
+- `parameter.rs.classify.output` — output
+- `parameter.rs.classify.tta` — tta
+- `parameter.rs.detect.bands` — bands
+- `parameter.rs.detect.batchCap` — batchCap
+- `parameter.rs.detect.conf` — conf
+- `parameter.rs.detect.device` — device
+- `parameter.rs.detect.input` — input
+- `parameter.rs.detect.model` — model
+- `parameter.rs.detect.nms_iou` — nms_iou
+- `parameter.rs.detect.output` — output
+- `parameter.rs.detect.tta` — tta
+- `parameter.rs.embedding.aggregate` — aggregate
+- `parameter.rs.embedding.bands` — bands
+- `parameter.rs.embedding.batchCap` — batchCap
+- `parameter.rs.embedding.device` — device
+- `parameter.rs.embedding.input` — input
+- `parameter.rs.embedding.model` — model
+- `parameter.rs.embedding.output` — output
+- `parameter.rs.embedding.tta` — tta
+- `parameter.rs.infer.bands` — bands
+- `parameter.rs.infer.batchCap` — batchCap
+- `parameter.rs.infer.blend` — blend
+- `parameter.rs.infer.device` — device
+- `parameter.rs.infer.input` — input
+- `parameter.rs.infer.model` — model
+- `parameter.rs.infer.named_inputs` — named_inputs
+- `parameter.rs.infer.output` — output
+- `parameter.rs.infer.tta` — tta
+- `parameter.rs.regress.bands` — bands
+- `parameter.rs.regress.batchCap` — batchCap
+- `parameter.rs.regress.device` — device
+- `parameter.rs.regress.input` — input
+- `parameter.rs.regress.model` — model
+- `parameter.rs.regress.output` — output
+- `parameter.rs.regress.tta` — tta
+- `parameter.rs.segment.bands` — bands
+- `parameter.rs.segment.batchCap` — batchCap
+- `parameter.rs.segment.device` — device
+- `parameter.rs.segment.format` — format
+- `parameter.rs.segment.input` — input
+- `parameter.rs.segment.model` — model
+- `parameter.rs.segment.output` — output
+- `parameter.rs.segment.tta` — tta
+
 ## temporal
 
 - `operator.rs.change_cva` — Change Vector Analysis
@@ -626,12 +1125,16 @@
 - `operator.rs.temporal_breakpoints` — Temporal Breakpoints
 - `operator.rs.temporal_composite` — Best Pixel Composite
 - `operator.rs.temporal_decompose` — Temporal Decomposition
+- `operator.rs.temporal_extract_regions` — Temporal Extract Region Series (Batch Multi-ROI)
 - `operator.rs.temporal_extract_series` — Extract Temporal Series
 - `operator.rs.temporal_gap_fill` — Temporal Gap Fill
+- `operator.rs.temporal_harmonic_breaks` — Temporal Harmonic Breaks (Joint Seasonal-Trend Change)
 - `operator.rs.temporal_harmonic_fit` — Temporal Harmonic Fit
 - `operator.rs.temporal_index_series` — Temporal Index Series
 - `operator.rs.temporal_monitor` — Temporal Monitor
 - `operator.rs.temporal_phenology` — Temporal Phenology Metrics
+- `operator.rs.temporal_region_features` — Temporal Region Features (ML Table)
+- `operator.rs.temporal_regularize` — Temporal Regularize (Regular Calendar)
 - `operator.rs.temporal_sen_trend` — Temporal Sen Trend
 - `operator.rs.temporal_smooth` — Temporal Smoothing
 - `operator.rs.temporal_summary` — Temporal Summary
@@ -753,6 +1256,17 @@
 - `parameter.rs.temporal_decompose.seasonal_window_days` — seasonal_window_days
 - `parameter.rs.temporal_decompose.tile_size` — tile_size
 - `parameter.rs.temporal_decompose.trend_lambda` — trend_lambda
+- `parameter.rs.temporal_extract_regions.apply_qa_masking` — apply_qa_masking
+- `parameter.rs.temporal_extract_regions.band` — band
+- `parameter.rs.temporal_extract_regions.band_role` — band_role
+- `parameter.rs.temporal_extract_regions.collection` — collection
+- `parameter.rs.temporal_extract_regions.duplicate_policy` — duplicate_policy
+- `parameter.rs.temporal_extract_regions.max_regions` — max_regions
+- `parameter.rs.temporal_extract_regions.median_budget_mb` — median_budget_mb
+- `parameter.rs.temporal_extract_regions.output` — output
+- `parameter.rs.temporal_extract_regions.regions` — regions
+- `parameter.rs.temporal_extract_regions.regions_file` — regions_file
+- `parameter.rs.temporal_extract_regions.scenes` — scenes
 - `parameter.rs.temporal_extract_series.apply_qa_masking` — apply_qa_masking
 - `parameter.rs.temporal_extract_series.band` — band
 - `parameter.rs.temporal_extract_series.band_role` — band_role
@@ -772,6 +1286,22 @@
 - `parameter.rs.temporal_gap_fill.output` — output
 - `parameter.rs.temporal_gap_fill.scenes` — scenes
 - `parameter.rs.temporal_gap_fill.tile_size` — tile_size
+- `parameter.rs.temporal_harmonic_breaks.apply_qa_masking` — apply_qa_masking
+- `parameter.rs.temporal_harmonic_breaks.band` — band
+- `parameter.rs.temporal_harmonic_breaks.band_role` — band_role
+- `parameter.rs.temporal_harmonic_breaks.collection` — collection
+- `parameter.rs.temporal_harmonic_breaks.direction` — direction
+- `parameter.rs.temporal_harmonic_breaks.duplicate_policy` — duplicate_policy
+- `parameter.rs.temporal_harmonic_breaks.harmonics` — harmonics
+- `parameter.rs.temporal_harmonic_breaks.maxBreaks` — maxBreaks
+- `parameter.rs.temporal_harmonic_breaks.minImprovement` — minImprovement
+- `parameter.rs.temporal_harmonic_breaks.minMagnitude` — minMagnitude
+- `parameter.rs.temporal_harmonic_breaks.minSegmentDays` — minSegmentDays
+- `parameter.rs.temporal_harmonic_breaks.output` — output
+- `parameter.rs.temporal_harmonic_breaks.recoveryTolerance` — recoveryTolerance
+- `parameter.rs.temporal_harmonic_breaks.robust` — robust
+- `parameter.rs.temporal_harmonic_breaks.scenes` — scenes
+- `parameter.rs.temporal_harmonic_breaks.tile_size` — tile_size
 - `parameter.rs.temporal_harmonic_fit.apply_qa_masking` — apply_qa_masking
 - `parameter.rs.temporal_harmonic_fit.band` — band
 - `parameter.rs.temporal_harmonic_fit.band_role` — band_role
@@ -802,19 +1332,53 @@
 - `parameter.rs.temporal_monitor.method` — method
 - `parameter.rs.temporal_monitor.min_observations` — min_observations
 - `parameter.rs.temporal_monitor.output` — output
+- `parameter.rs.temporal_monitor.scenes` — scenes
 - `parameter.rs.temporal_monitor.tile_size` — tile_size
 - `parameter.rs.temporal_phenology.apply_qa_masking` — apply_qa_masking
 - `parameter.rs.temporal_phenology.band` — band
 - `parameter.rs.temporal_phenology.band_role` — band_role
 - `parameter.rs.temporal_phenology.collection` — collection
 - `parameter.rs.temporal_phenology.crossingFraction` — crossingFraction
+- `parameter.rs.temporal_phenology.cycles` — cycles
 - `parameter.rs.temporal_phenology.duplicate_policy` — duplicate_policy
 - `parameter.rs.temporal_phenology.minValidPerSeason` — minValidPerSeason
 - `parameter.rs.temporal_phenology.output` — output
 - `parameter.rs.temporal_phenology.scenes` — scenes
+- `parameter.rs.temporal_phenology.season2EndDoy` — season2EndDoy
+- `parameter.rs.temporal_phenology.season2StartDoy` — season2StartDoy
 - `parameter.rs.temporal_phenology.seasonEndDoy` — seasonEndDoy
 - `parameter.rs.temporal_phenology.seasonStartDoy` — seasonStartDoy
 - `parameter.rs.temporal_phenology.tile_size` — tile_size
+- `parameter.rs.temporal_region_features.apply_qa_masking` — apply_qa_masking
+- `parameter.rs.temporal_region_features.band` — band
+- `parameter.rs.temporal_region_features.band_role` — band_role
+- `parameter.rs.temporal_region_features.change_harmonics` — change_harmonics
+- `parameter.rs.temporal_region_features.collection` — collection
+- `parameter.rs.temporal_region_features.cycles` — cycles
+- `parameter.rs.temporal_region_features.direction` — direction
+- `parameter.rs.temporal_region_features.duplicate_policy` — duplicate_policy
+- `parameter.rs.temporal_region_features.max_regions` — max_regions
+- `parameter.rs.temporal_region_features.output` — output
+- `parameter.rs.temporal_region_features.regions` — regions
+- `parameter.rs.temporal_region_features.regions_file` — regions_file
+- `parameter.rs.temporal_region_features.scenes` — scenes
+- `parameter.rs.temporal_region_features.seasonEndDoy` — seasonEndDoy
+- `parameter.rs.temporal_region_features.seasonStartDoy` — seasonStartDoy
+- `parameter.rs.temporal_region_features.sidecar_path` — sidecar_path
+- `parameter.rs.temporal_region_features.trend_method` — trend_method
+- `parameter.rs.temporal_regularize.apply_qa_masking` — apply_qa_masking
+- `parameter.rs.temporal_regularize.band` — band
+- `parameter.rs.temporal_regularize.band_role` — band_role
+- `parameter.rs.temporal_regularize.cadence` — cadence
+- `parameter.rs.temporal_regularize.collection` — collection
+- `parameter.rs.temporal_regularize.duplicate_policy` — duplicate_policy
+- `parameter.rs.temporal_regularize.lambda` — lambda
+- `parameter.rs.temporal_regularize.max_gap_nodes` — max_gap_nodes
+- `parameter.rs.temporal_regularize.max_window_days` — max_window_days
+- `parameter.rs.temporal_regularize.method` — method
+- `parameter.rs.temporal_regularize.output` — output
+- `parameter.rs.temporal_regularize.scenes` — scenes
+- `parameter.rs.temporal_regularize.tile_size` — tile_size
 - `parameter.rs.temporal_sen_trend.alpha` — alpha
 - `parameter.rs.temporal_sen_trend.apply_qa_masking` — apply_qa_masking
 - `parameter.rs.temporal_sen_trend.band` — band
@@ -834,6 +1398,7 @@
 - `parameter.rs.temporal_smooth.method` — method
 - `parameter.rs.temporal_smooth.moving_average_window` — moving_average_window
 - `parameter.rs.temporal_smooth.output` — output
+- `parameter.rs.temporal_smooth.robust_iterations` — robust_iterations
 - `parameter.rs.temporal_smooth.scenes` — scenes
 - `parameter.rs.temporal_smooth.tile_size` — tile_size
 - `parameter.rs.temporal_smooth.window` — window
@@ -854,6 +1419,49 @@
 - `parameter.rs.temporal_trend.output` — output
 - `parameter.rs.temporal_trend.scenes` — scenes
 - `parameter.rs.temporal_trend.tile_size` — tile_size
+
+## data-formats
+
+- `operator.rs.cn_product_import` — Chinese Satellite Product Import
+- `operator.rs.gaofen_import` — Gaofen Product Import
+- `operator.rs.hj_import` — Huanjing CCD Product Import
+- `operator.rs.landsat_import` — Landsat Product Import
+- `operator.rs.modis_georeference` — MODIS Georeference
+- `operator.rs.modis_import` — MODIS Product Import
+- `operator.rs.sentinel2_import` — Sentinel-2 Product Import
+- `operator.rs.zy3_import` — Ziyuan-3 Product Import
+- `parameter.rs.cn_product_import.apply_calibration` — apply_calibration
+- `parameter.rs.cn_product_import.bands` — bands
+- `parameter.rs.cn_product_import.input` — input
+- `parameter.rs.cn_product_import.output` — output
+- `parameter.rs.gaofen_import.apply_calibration` — apply_calibration
+- `parameter.rs.gaofen_import.bands` — bands
+- `parameter.rs.gaofen_import.input` — input
+- `parameter.rs.gaofen_import.output` — output
+- `parameter.rs.hj_import.apply_calibration` — apply_calibration
+- `parameter.rs.hj_import.bands` — bands
+- `parameter.rs.hj_import.input` — input
+- `parameter.rs.hj_import.output` — output
+- `parameter.rs.landsat_import.bands` — bands
+- `parameter.rs.landsat_import.input` — input
+- `parameter.rs.landsat_import.output` — output
+- `parameter.rs.modis_georeference.dstCrs` — dstCrs
+- `parameter.rs.modis_georeference.input` — input
+- `parameter.rs.modis_georeference.output` — output
+- `parameter.rs.modis_georeference.resampling` — resampling
+- `parameter.rs.modis_georeference.tileH` — tileH
+- `parameter.rs.modis_georeference.tileV` — tileV
+- `parameter.rs.modis_import.bands` — bands
+- `parameter.rs.modis_import.input` — input
+- `parameter.rs.modis_import.output` — output
+- `parameter.rs.sentinel2_import.bands` — bands
+- `parameter.rs.sentinel2_import.input` — input
+- `parameter.rs.sentinel2_import.output` — output
+- `parameter.rs.sentinel2_import.resolution` — resolution
+- `parameter.rs.zy3_import.apply_calibration` — apply_calibration
+- `parameter.rs.zy3_import.bands` — bands
+- `parameter.rs.zy3_import.input` — input
+- `parameter.rs.zy3_import.output` — output
 
 ## raster_spatial
 
@@ -903,44 +1511,6 @@
 - `parameter.rs.continuum_removal.input` — input
 - `parameter.rs.continuum_removal.output` — output
 
-## ml
-
-- `operator.rs.detect` — Object Detection (Model)
-- `operator.rs.embedding` — Feature Embedding (Model)
-- `operator.rs.infer` — On-Device Inference (ONNX)
-- `operator.rs.segment` — Semantic Segmentation (Model)
-- `parameter.rs.detect.bands` — bands
-- `parameter.rs.detect.batchCap` — batchCap
-- `parameter.rs.detect.conf` — conf
-- `parameter.rs.detect.device` — device
-- `parameter.rs.detect.input` — input
-- `parameter.rs.detect.model` — model
-- `parameter.rs.detect.nms_iou` — nms_iou
-- `parameter.rs.detect.output` — output
-- `parameter.rs.detect.tta` — tta
-- `parameter.rs.embedding.aggregate` — aggregate
-- `parameter.rs.embedding.bands` — bands
-- `parameter.rs.embedding.batchCap` — batchCap
-- `parameter.rs.embedding.device` — device
-- `parameter.rs.embedding.input` — input
-- `parameter.rs.embedding.model` — model
-- `parameter.rs.embedding.output` — output
-- `parameter.rs.embedding.tta` — tta
-- `parameter.rs.infer.bands` — bands
-- `parameter.rs.infer.batchCap` — batchCap
-- `parameter.rs.infer.input` — input
-- `parameter.rs.infer.model` — model
-- `parameter.rs.infer.output` — output
-- `parameter.rs.infer.tta` — tta
-- `parameter.rs.segment.bands` — bands
-- `parameter.rs.segment.batchCap` — batchCap
-- `parameter.rs.segment.device` — device
-- `parameter.rs.segment.format` — format
-- `parameter.rs.segment.input` — input
-- `parameter.rs.segment.model` — model
-- `parameter.rs.segment.output` — output
-- `parameter.rs.segment.tta` — tta
-
 ## features
 
 - `operator.rs.feature_normalize` — Feature Normalization
@@ -969,6 +1539,7 @@
 - `operator.rs.recode` — Class Recode
 - `operator.rs.sam_classify` — Spectral Angle Mapper (SAM) Classification
 - `operator.rs.supervised_classification` — Supervised Classification
+- `parameter.rs.kmeans_classification.algorithm` — algorithm
 - `parameter.rs.kmeans_classification.bands` — bands
 - `parameter.rs.kmeans_classification.input` — input
 - `parameter.rs.kmeans_classification.k` — k
@@ -979,14 +1550,19 @@
 - `parameter.rs.majority_filter.kernel` — kernel
 - `parameter.rs.majority_filter.output` — output
 - `parameter.rs.recode.input` — input
+- `parameter.rs.recode.map` — map
 - `parameter.rs.recode.output` — output
+- `parameter.rs.recode.recode` — recode
 - `parameter.rs.recode.recode_map` — recode_map
 - `parameter.rs.sam_classify.angleOut` — angleOut
 - `parameter.rs.sam_classify.bands` — bands
 - `parameter.rs.sam_classify.input` — input
+- `parameter.rs.sam_classify.libraryMaterials` — libraryMaterials
+- `parameter.rs.sam_classify.libraryPath` — libraryPath
 - `parameter.rs.sam_classify.metric` — metric
 - `parameter.rs.sam_classify.output` — output
 - `parameter.rs.sam_classify.refs` — refs
+- `parameter.rs.sam_classify.refsRef` — refsRef
 - `parameter.rs.supervised_classification.bands` — bands
 - `parameter.rs.supervised_classification.classField` — classField
 - `parameter.rs.supervised_classification.input` — input
@@ -1000,29 +1576,6 @@
 - `parameter.rs.supervised_classification.seed` — seed
 - `parameter.rs.supervised_classification.testSplit` — testSplit
 - `parameter.rs.supervised_classification.training` — training
-
-## data-formats
-
-- `operator.rs.landsat_import` — Landsat Product Import
-- `operator.rs.modis_georeference` — MODIS Georeference
-- `operator.rs.modis_import` — MODIS Product Import
-- `operator.rs.sentinel2_import` — Sentinel-2 Product Import
-- `parameter.rs.landsat_import.bands` — bands
-- `parameter.rs.landsat_import.input` — input
-- `parameter.rs.landsat_import.output` — output
-- `parameter.rs.modis_georeference.dstCrs` — dstCrs
-- `parameter.rs.modis_georeference.input` — input
-- `parameter.rs.modis_georeference.output` — output
-- `parameter.rs.modis_georeference.resampling` — resampling
-- `parameter.rs.modis_georeference.tileH` — tileH
-- `parameter.rs.modis_georeference.tileV` — tileV
-- `parameter.rs.modis_import.bands` — bands
-- `parameter.rs.modis_import.input` — input
-- `parameter.rs.modis_import.output` — output
-- `parameter.rs.sentinel2_import.bands` — bands
-- `parameter.rs.sentinel2_import.input` — input
-- `parameter.rs.sentinel2_import.output` — output
-- `parameter.rs.sentinel2_import.resolution` — resolution
 
 ## composition
 
@@ -1127,18 +1680,46 @@
 - `parameter.rs.post_classification_change.class_labels` — class_labels
 - `parameter.rs.post_classification_change.output` — output
 
+## raster-vector
+
+- `operator.rs.rasterize` — Rasterize Vector
+- `operator.rs.zonal_stats` — Zonal Statistics
+- `parameter.rs.rasterize.allTouched` — allTouched
+- `parameter.rs.rasterize.field` — field
+- `parameter.rs.rasterize.input` — input
+- `parameter.rs.rasterize.layer` — layer
+- `parameter.rs.rasterize.output` — output
+- `parameter.rs.rasterize.value` — value
+- `parameter.rs.rasterize.vector` — vector
+- `parameter.rs.zonal_stats.bands` — bands
+- `parameter.rs.zonal_stats.input` — input
+- `parameter.rs.zonal_stats.layer` — layer
+- `parameter.rs.zonal_stats.median` — median
+- `parameter.rs.zonal_stats.output` — output
+- `parameter.rs.zonal_stats.vector` — vector
+- `parameter.rs.zonal_stats.zoneField` — zoneField
+
 ## sar
 
 - `operator.rs.sar_backscatter` — SAR Backscatter Conversion
 - `operator.rs.sar_calibrate` — SAR Radiometric Calibration
 - `operator.rs.sar_change` — SAR Change Detection
+- `operator.rs.sar_coregister` — SAR Coregistration
+- `operator.rs.sar_displacement` — InSAR LOS Displacement
 - `operator.rs.sar_dualpol_features` — SAR Dual-Pol Features
+- `operator.rs.sar_geocode` — SAR Range-Doppler Geocode
+- `operator.rs.sar_interferogram` — SAR Interferogram
+- `operator.rs.sar_phase_filter` — InSAR Phase Filter
+- `operator.rs.sar_polsar_decompose` — PolSAR Decomposition
 - `operator.rs.sar_ratio` — SAR Ratio / Log-Ratio
 - `operator.rs.sar_speckle` — SAR Speckle Filter
+- `operator.rs.sar_temporal_events` — SAR Temporal Events
+- `operator.rs.sar_temporal_stats` — SAR Temporal Statistics
 - `operator.rs.sar_terrain_correction` — SAR Terrain Correction
 - `operator.rs.sar_terrain_flatten` — SAR Terrain Flattening
 - `operator.rs.sar_terrain_masks` — SAR Terrain Masks
 - `operator.rs.sar_texture` — SAR GLCM Texture
+- `operator.rs.sar_unwrap` — InSAR Phase Unwrap
 - `parameter.rs.sar_backscatter.band` — band
 - `parameter.rs.sar_backscatter.fromCalibration` — fromCalibration
 - `parameter.rs.sar_backscatter.incidenceDeg` — incidenceDeg
@@ -1174,12 +1755,54 @@
 - `parameter.rs.sar_change.statisticalK` — statisticalK
 - `parameter.rs.sar_change.threshold` — threshold
 - `parameter.rs.sar_change.thresholdMethod` — thresholdMethod
+- `parameter.rs.sar_coregister.master` — master
+- `parameter.rs.sar_coregister.masterBand` — masterBand
+- `parameter.rs.sar_coregister.minPeakRatio` — minPeakRatio
+- `parameter.rs.sar_coregister.output` — output
+- `parameter.rs.sar_coregister.patchSize` — patchSize
+- `parameter.rs.sar_coregister.patchStride` — patchStride
+- `parameter.rs.sar_coregister.reportOnly` — reportOnly
+- `parameter.rs.sar_coregister.searchRadius` — searchRadius
+- `parameter.rs.sar_coregister.slave` — slave
+- `parameter.rs.sar_coregister.slaveBand` — slaveBand
+- `parameter.rs.sar_displacement.band` — band
+- `parameter.rs.sar_displacement.input` — input
+- `parameter.rs.sar_displacement.output` — output
+- `parameter.rs.sar_displacement.warnThreshold` — warnThreshold
+- `parameter.rs.sar_displacement.wavelengthUm` — wavelengthUm
 - `parameter.rs.sar_dualpol_features.domain` — domain
 - `parameter.rs.sar_dualpol_features.feature` — feature
 - `parameter.rs.sar_dualpol_features.input` — input
 - `parameter.rs.sar_dualpol_features.output` — output
 - `parameter.rs.sar_dualpol_features.vh_band` — vh_band
 - `parameter.rs.sar_dualpol_features.vv_band` — vv_band
+- `parameter.rs.sar_geocode.band` — band
+- `parameter.rs.sar_geocode.dem` — dem
+- `parameter.rs.sar_geocode.input` — input
+- `parameter.rs.sar_geocode.output` — output
+- `parameter.rs.sar_geocode.resampling` — resampling
+- `parameter.rs.sar_interferogram.coherenceOutput` — coherenceOutput
+- `parameter.rs.sar_interferogram.coherenceWindow` — coherenceWindow
+- `parameter.rs.sar_interferogram.flattenRamp` — flattenRamp
+- `parameter.rs.sar_interferogram.master` — master
+- `parameter.rs.sar_interferogram.masterBand` — masterBand
+- `parameter.rs.sar_interferogram.output` — output
+- `parameter.rs.sar_interferogram.slave` — slave
+- `parameter.rs.sar_interferogram.slaveBand` — slaveBand
+- `parameter.rs.sar_phase_filter.alpha` — alpha
+- `parameter.rs.sar_phase_filter.band` — band
+- `parameter.rs.sar_phase_filter.input` — input
+- `parameter.rs.sar_phase_filter.output` — output
+- `parameter.rs.sar_phase_filter.window` — window
+- `parameter.rs.sar_polsar_decompose.assumeReciprocity` — assumeReciprocity
+- `parameter.rs.sar_polsar_decompose.decomposition` — decomposition
+- `parameter.rs.sar_polsar_decompose.hhBand` — hhBand
+- `parameter.rs.sar_polsar_decompose.hvBand` — hvBand
+- `parameter.rs.sar_polsar_decompose.input` — input
+- `parameter.rs.sar_polsar_decompose.output` — output
+- `parameter.rs.sar_polsar_decompose.vhBand` — vhBand
+- `parameter.rs.sar_polsar_decompose.vvBand` — vvBand
+- `parameter.rs.sar_polsar_decompose.windowSize` — windowSize
 - `parameter.rs.sar_ratio.bandA` — bandA
 - `parameter.rs.sar_ratio.bandB` — bandB
 - `parameter.rs.sar_ratio.inputA` — inputA
@@ -1201,6 +1824,20 @@
 - `parameter.rs.sar_speckle.output` — output
 - `parameter.rs.sar_speckle.polarizations` — polarizations
 - `parameter.rs.sar_speckle.sensor` — sensor
+- `parameter.rs.sar_temporal_events.band` — band
+- `parameter.rs.sar_temporal_events.changeThresholdDb` — changeThresholdDb
+- `parameter.rs.sar_temporal_events.dates` — dates
+- `parameter.rs.sar_temporal_events.inputDomain` — inputDomain
+- `parameter.rs.sar_temporal_events.inputs` — inputs
+- `parameter.rs.sar_temporal_events.minValid` — minValid
+- `parameter.rs.sar_temporal_events.output` — output
+- `parameter.rs.sar_temporal_stats.band` — band
+- `parameter.rs.sar_temporal_stats.changeThresholdDb` — changeThresholdDb
+- `parameter.rs.sar_temporal_stats.dates` — dates
+- `parameter.rs.sar_temporal_stats.inputDomain` — inputDomain
+- `parameter.rs.sar_temporal_stats.inputs` — inputs
+- `parameter.rs.sar_temporal_stats.minValid` — minValid
+- `parameter.rs.sar_temporal_stats.output` — output
 - `parameter.rs.sar_terrain_correction.band` — band
 - `parameter.rs.sar_terrain_correction.dem` — dem
 - `parameter.rs.sar_terrain_correction.demUnit` — demUnit
@@ -1209,6 +1846,8 @@
 - `parameter.rs.sar_terrain_correction.headingDeg` — headingDeg
 - `parameter.rs.sar_terrain_correction.incidenceDeg` — incidenceDeg
 - `parameter.rs.sar_terrain_correction.input` — input
+- `parameter.rs.sar_terrain_correction.lookAzimuthDeg` — lookAzimuthDeg
+- `parameter.rs.sar_terrain_correction.lookDirection` — lookDirection
 - `parameter.rs.sar_terrain_correction.output` — output
 - `parameter.rs.sar_terrain_correction.polarizations` — polarizations
 - `parameter.rs.sar_terrain_correction.sensor` — sensor
@@ -1218,12 +1857,18 @@
 - `parameter.rs.sar_terrain_flatten.headingDeg` — headingDeg
 - `parameter.rs.sar_terrain_flatten.incidenceDeg` — incidenceDeg
 - `parameter.rs.sar_terrain_flatten.input` — input
+- `parameter.rs.sar_terrain_flatten.lookAzimuthDeg` — lookAzimuthDeg
+- `parameter.rs.sar_terrain_flatten.lookDirection` — lookDirection
 - `parameter.rs.sar_terrain_flatten.output` — output
 - `parameter.rs.sar_terrain_flatten.polarizations` — polarizations
 - `parameter.rs.sar_terrain_flatten.sensor` — sensor
 - `parameter.rs.sar_terrain_masks.dem` — dem
 - `parameter.rs.sar_terrain_masks.heading` — heading
 - `parameter.rs.sar_terrain_masks.incidence` — incidence
+- `parameter.rs.sar_terrain_masks.lookAzimuth` — lookAzimuth
+- `parameter.rs.sar_terrain_masks.lookAzimuthDeg` — lookAzimuthDeg
+- `parameter.rs.sar_terrain_masks.lookDirection` — lookDirection
+- `parameter.rs.sar_terrain_masks.look_azimuth` — look_azimuth
 - `parameter.rs.sar_terrain_masks.output` — output
 - `parameter.rs.sar_terrain_masks.product` — product
 - `parameter.rs.sar_texture.band` — band
@@ -1236,6 +1881,12 @@
 - `parameter.rs.sar_texture.quantLevels` — quantLevels
 - `parameter.rs.sar_texture.sensor` — sensor
 - `parameter.rs.sar_texture.windowSize` — windowSize
+- `parameter.rs.sar_unwrap.band` — band
+- `parameter.rs.sar_unwrap.input` — input
+- `parameter.rs.sar_unwrap.output` — output
+- `parameter.rs.sar_unwrap.provider` — provider
+- `parameter.rs.sar_unwrap.qualityBand` — qualityBand
+- `parameter.rs.sar_unwrap.qualityInput` — qualityInput
 
 ## terrain
 
@@ -1252,6 +1903,7 @@
 - `parameter.rs.terrain_flow.input` — input
 - `parameter.rs.terrain_flow.nodata` — nodata
 - `parameter.rs.terrain_flow.output` — output
+- `parameter.rs.terrain_flow.pour_points` — pour_points
 - `parameter.rs.terrain_flow.product` — product
 
 ## masking

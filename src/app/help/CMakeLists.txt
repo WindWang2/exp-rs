@@ -16,6 +16,8 @@ qt_add_library(sicnu_help_gui STATIC
   command_help_source.h
   availability_facts_adapter.cpp
   availability_facts_adapter.h
+  contextual_help_resolver.cpp
+  contextual_help_resolver.h
   workbench_guidance.cpp
   workbench_guidance.h
 )

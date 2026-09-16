@@ -19,6 +19,7 @@
  ***************************************************************************/
 
 #include "app/help/availability_facts_adapter.h"
+#include "contracts/command_ref_scanner.h"
 #include "help/adapters/operator_help_source.h"
 #include "help/command_help_provider.h"
 #include "help/diagnostic_catalog.h"
@@ -59,47 +60,30 @@ const CompositionReport &composed()
     return report;
 }
 
-/// Command ids as registered by the shell (source scan; see file header).
+/// Command ids as registered by the shell — extracted with the SHARED
+/// contracts scanner (the same oracle as test_command_contract_9). This test
+/// used to keep its own prefix whitelist, which had already gone stale
+/// (workflow.*/cartography.* families were invisible to it), so the two
+/// command censuses could disagree. One scanner, one truth.
 QStringList scanShellCommandIds()
 {
-    // Command registrations live in command_defs.cpp (RS_CMD/base idioms)
-    // and in main_window_workbench.cpp (.id = assignments); scan both so
-    // workbench-window commands (e.g. app.commandPalette) are covered.
-    QStringList texts;
-    QFile commandDefs( QStringLiteral(
-        CMAKE_SOURCE_DIR "/src/app/workbench/command_defs.cpp" ) );
-    if ( commandDefs.open( QIODevice::ReadOnly ) )
-        texts << QString::fromUtf8( commandDefs.readAll() );
+    const auto readFile = []( const QString &relative ) {
+        QFile f( QStringLiteral( CMAKE_SOURCE_DIR "/" ) + relative );
+        return f.open( QIODevice::ReadOnly )
+                   ? QString::fromUtf8( f.readAll() ).toStdString()
+                   : std::string();
+    };
+
+    sicnu::contracts::CommandRefScanner scanner;
+    sicnu::contracts::CommandRefReport report;
+    scanner.scanRegistered( readFile( QStringLiteral( "src/app/workbench/command_defs.cpp" ) ),
+                            QStringLiteral( "command_defs.cpp" ).toStdString(), report );
+    scanner.scanRegistered( readFile( QStringLiteral( "src/app/main_window_workbench.cpp" ) ),
+                            QStringLiteral( "main_window_workbench.cpp" ).toStdString(), report );
 
     QStringList ids;
-    QRegularExpression re( QStringLiteral( "\"((?:project|layer|map|workbench|rs|app)\\.[A-Za-z0-9_.]+)\"" ) );
-    for ( const QString &text : texts ) {
-        auto it = re.globalMatch( text );
-        while ( it.hasNext() ) {
-            const auto match = it.next();
-            const QString id = match.captured( 1 );
-            if ( !ids.contains( id ) )
-                ids << id;
-        }
-    }
-
-    // main_window_workbench.cpp registers window-level commands through
-    // `X.id = QStringLiteral( "…" )` assignments (e.g. app.commandPalette);
-    // other "workbench.*" strings there are help contexts, not commands.
-    QFile workbenchWindow( QStringLiteral(
-        CMAKE_SOURCE_DIR "/src/app/main_window_workbench.cpp" ) );
-    if ( workbenchWindow.open( QIODevice::ReadOnly ) ) {
-        const QString windowText = QString::fromUtf8( workbenchWindow.readAll() );
-        QRegularExpression idAssign( QStringLiteral(
-            R"re(\.id\s*=\s*QStringLiteral\s*\(\s*"((?:project|layer|map|workbench|rs|app)\.[A-Za-z0-9_.]+)")re" ) );
-        auto it = idAssign.globalMatch( windowText );
-        while ( it.hasNext() ) {
-            const auto match = it.next();
-            const QString id = match.captured( 1 );
-            if ( !ids.contains( id ) )
-                ids << id;
-        }
-    }
+    for ( const std::string &id : report.registeredIds )
+        ids << QString::fromStdString( id );
     return ids;
 }
 
@@ -219,52 +203,33 @@ TEST_CASE( "Harness and operator error codes all resolve to diagnostics", "[help
     composed();
     DiagnosticCatalog catalog( globalHelpRegistry() );
 
-    // HarnessError stable taxonomy: every code needs a curated descriptor
-    // whose retry sense agrees with (or defers to) the origin taxonomy.
-    // The wire strings must stay identical to
-    // sicnu::agent::harness::error_codes (drift-checked in test_help_diagnostics
-    // via isKnownErrorCode and here by exact spelling).
-    const std::pair<const char *, std::string> harnessCodes[] = {
-        { "DATASET_NOT_FOUND", "DATASET_NOT_FOUND" },
-        { "BAND_ROLE_UNRESOLVED", "BAND_ROLE_UNRESOLVED" },
-        { "CRS_MISMATCH", "CRS_MISMATCH" },
-        { "GRID_MISMATCH", "GRID_MISMATCH" },
-        { "INVALID_RADIOMETRY", "INVALID_RADIOMETRY" },
-        { "INSUFFICIENT_MEMORY", "INSUFFICIENT_MEMORY" },
-        { "MODEL_INCOMPATIBLE", "MODEL_INCOMPATIBLE" },
-        { "MODEL_NOT_READY", "MODEL_NOT_READY" },
-        { "EXECUTION_FAILED", "EXECUTION_FAILED" },
-        { "CANCELLED", "CANCELLED" },
-        { "OUTPUT_INVALID", "OUTPUT_INVALID" },
-        { "MAP_PREFLIGHT_FAILED", "MAP_PREFLIGHT_FAILED" },
-        { "PREFLIGHT_BLOCKED", "PREFLIGHT_BLOCKED" },
-        { "ENTITY_AMBIGUOUS", "ENTITY_AMBIGUOUS" },
-        { "INVALID_PLAN", "INVALID_PLAN" },
-        { "INVALID_PARAMETER", "INVALID_PARAMETER" },
-        { "TRANSIENT_FAILURE", "TRANSIENT_FAILURE" },
-        { "PATH_OUTSIDE_WORKSPACE", "PATH_OUTSIDE_WORKSPACE" },
-        { "WORKFLOW_NOT_FOUND", "WORKFLOW_NOT_FOUND" },
-        { "TOOL_NOT_FOUND", "TOOL_NOT_FOUND" },
-        { "TIME_ORDER_INVALID", "TIME_ORDER_INVALID" },
-        { "MODALITY_MISMATCH", "MODALITY_MISMATCH" },
-        { "POLARIZATION_MISMATCH", "POLARIZATION_MISMATCH" },
-        { "CALIBRATION_MISMATCH", "CALIBRATION_MISMATCH" },
-        { "TRAINING_INVALID", "TRAINING_INVALID" },
-        { "NOT_SUPPORTED", "NOT_SUPPORTED" }
-    };
-    for ( const auto &code : harnessCodes ) {
-        const HelpDescriptor *d = catalog.find( DiagnosticFamily::Harness,
-                                                QString::fromLatin1( code.second.c_str() ) );
-        INFO( "harness code: " << code.second );
+    // HarnessError stable taxonomy: the census source is the RUNTIME table
+    // (allErrorCodes), not a hand-copied literal list — the old list had
+    // already drifted (missing INTENT_AMBIGUOUS, IDENTITY_MISMATCH and the
+    // seven compiler codes). Codes without a curated page must be explicitly
+    // allow-listed here, mirroring test_diagnostics_contract_9.
+    const std::vector<std::string> harnessCodes = sicnu::agent::harness::allErrorCodes();
+    REQUIRE( harnessCodes.size() >= 30 );
+
+    // Contract refusal, explained in-band by the lab copilot; no curated page
+    // by design (same entry as kAllowedHarnessCodesWithoutPage there).
+    const QStringList kAllowedWithoutPage = { QStringLiteral( "TEACHING_REFUSAL" ) };
+
+    for ( const std::string &code : harnessCodes ) {
+        const QString qcode = QString::fromStdString( code );
+        INFO( "harness code: " << code );
+        if ( kAllowedWithoutPage.contains( qcode ) )
+            continue;
+        const HelpDescriptor *d = catalog.find( DiagnosticFamily::Harness, qcode );
         REQUIRE( d != nullptr );
         REQUIRE( d->diagnostic.has_value() );
         CHECK_FALSE( d->diagnostic->remediation.isEmpty() );
-        CHECK( d->diagnostic->originCode == QString::fromLatin1( code.second.c_str() ) );
+        CHECK( d->diagnostic->originCode == qcode );
 
         // retry drift: curated sense must match the origin retry class
         using sicnu::agent::harness::RetryClass;
         using sicnu::agent::harness::retryClassForCode;
-        const RetryClass origin = retryClassForCode( code.second );
+        const RetryClass origin = retryClassForCode( code );
         if ( d->diagnostic->retrySense != RetrySense::Derived ) {
             switch ( origin ) {
             case RetryClass::None:
@@ -344,4 +309,65 @@ TEST_CASE( "Generated Markdown reference is complete", "[help][markdown-generati
     // deterministic output (committed pages under docs/generated/help can be
     // diffed byte-for-byte)
     CHECK( operators == HelpMarkdownWriter::operatorReference( globalHelpRegistry() ) );
+}
+
+TEST_CASE( "Committed reference pages match regeneration byte-for-byte (zero-diff)",
+           "[help][markdown-generation][drift]" )
+{
+    composed();
+    struct Page
+    {
+        const char *file;
+        QString ( *generate )( const HelpRegistry & );
+    };
+    const Page pages[] = {
+        { "commands.md", HelpMarkdownWriter::commandReference },
+        { "operators.md", HelpMarkdownWriter::operatorReference },
+        { "parameters.md", HelpMarkdownWriter::parameterReference },
+        { "diagnostics.md", HelpMarkdownWriter::diagnosticReference },
+        { "index.md", HelpMarkdownWriter::index },
+    };
+
+    const QString dir = QStringLiteral( CMAKE_SOURCE_DIR "/docs/generated/help" );
+    const bool regen = qEnvironmentVariableIsEmpty( "SICNU_REGEN_HELP_DOCS" ) ? false : true;
+
+    // Both sides are normalized to a single trailing newline so the gate
+    // stays byte-exact about CONTENT while tolerating the writer's blank
+    // EOF lines (git diff --check flags those in committed pages).
+    const auto normalized = []( QString text ) {
+        while ( text.endsWith( u'\n' ) )
+            text.chop( 1 );
+        return text + u'\n';
+    };
+
+    for ( const Page &page : pages ) {
+        const QString generated = normalized( page.generate( globalHelpRegistry() ) );
+        const QString path = dir + QLatin1Char( '/' ) + QLatin1String( page.file );
+
+        if ( regen ) {
+            // opt-in maintenance mode: SICNU_REGEN_HELP_DOCS=1 rewrites the
+            // committed pages (plain build/test runs NEVER write the repo)
+            QFile out( path );
+            REQUIRE( out.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+            out.write( generated.toUtf8() );
+            continue;
+        }
+
+        QFile in( path );
+        INFO( "cannot open committed page: " << path.toStdString() );
+        REQUIRE( in.open( QIODevice::ReadOnly ) );
+        const QString committed = normalized( QString::fromUtf8( in.readAll() ) );
+        if ( committed != generated ) {
+            // first divergent line, so the drift is actionable without reruns
+            const QStringList a = committed.split( QLatin1Char( '\n' ) );
+            const QStringList b = generated.split( QLatin1Char( '\n' ) );
+            int line = 0;
+            while ( line < a.size() && line < b.size() && a.at( line ) == b.at( line ) )
+                ++line;
+            INFO( "page drifts at line " << ( line + 1 ) << " of " << page.file );
+            INFO( "committed: " << ( line < a.size() ? a.at( line ) : QString() ).left( 120 ).toStdString() );
+            INFO( "generated: " << ( line < b.size() ? b.at( line ) : QString() ).left( 120 ).toStdString() );
+        }
+        CHECK( committed == generated );
+    }
 }

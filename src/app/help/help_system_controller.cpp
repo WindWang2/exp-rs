@@ -115,7 +115,11 @@ void HelpSystemController::attachCommandRegistry(
     }
 
     // While a command is unavailable, its tooltip explains why (facts view).
-    // When it becomes available again the bound tooltip is restored.
+    // When it becomes available again the bound tooltip is restored. The
+    // reason ALSO travels on two non-tooltip channels — the status tip and
+    // the disabledReason/disabledReasonCode properties — so the explanation
+    // is never carried by the tooltip alone (F20 accessibility contract:
+    // screen readers and the status bar surface the same reason).
     CommandRegistry *registryPointer = &commandRegistry;
     auto refreshAvailability = [this, registryPointer, snapshotProvider]() {
         CommandRegistry &registry = *registryPointer;
@@ -129,6 +133,10 @@ void HelpSystemController::attachCommandRegistry(
             const QString boundTooltip = d ? sicnu::help::HelpPresenter::tooltip( *d ) : action->toolTip();
             if ( action->isEnabled() ) {
                 action->setToolTip( boundTooltip );
+                if ( d )
+                    action->setStatusTip( sicnu::help::HelpPresenter::statusTip( *d ) );
+                action->setProperty( "disabledReason", {} );
+                action->setProperty( "disabledReasonCode", {} );
                 continue;
             }
             const sicnu::help::AvailabilityExplanation explanation =
@@ -137,6 +145,9 @@ void HelpSystemController::attachCommandRegistry(
             if ( !explanation.toConciseLine().isEmpty() )
                 tooltip += QStringLiteral( "\n⛔ %1" ).arg( explanation.toConciseLine() );
             action->setToolTip( tooltip );
+            action->setStatusTip( explanation.flatReason );
+            action->setProperty( "disabledReason", explanation.flatReason );
+            action->setProperty( "disabledReasonCode", explanation.reasonCode );
         }
     };
     connect( &commandRegistry, &CommandRegistry::availabilityChanged, this, refreshAvailability );

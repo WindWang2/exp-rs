@@ -25,6 +25,8 @@
 #include <catch2/catch_approx.hpp>
 
 #include <QElapsedTimer>
+#include <QFile>
+#include <QTemporaryDir>
 #include <QUrl>
 #include <QVector>
 
@@ -257,6 +259,55 @@ TEST_CASE( "Content store parses and validates JSON knowledge", "[help][content]
   CHECK( result.descriptors > 100 ); // shipped content: commands+operators+diagnostics+concepts+workbenches
 }
 
+TEST_CASE( "Content store rejects unknown retry values (fail-closed)", "[help][content]" )
+{
+  // F20: a typo'd retry sense used to silently degrade to Derived, so the
+  // retry-sense drift checks were bypassed for exactly the pages that had a
+  // typo. Unknown values must now surface as a load error.
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString path = dir.path() + QStringLiteral( "/diag.json" );
+  {
+    QFile f( path );
+    REQUIRE( f.open( QIODevice::WriteOnly ) );
+    f.write( R"json([{
+      "id": "diagnostic.harness.sample_failure",
+      "family": "harness",
+      "code": "SAMPLE_FAILURE",
+      "title": "样例失败",
+      "whatHappened": "发生了样例错误。",
+      "whyItMatters": "会阻断后续步骤。",
+      "severity": "error",
+      "retry": "retryable",
+      "remediation": [ "检查输入" ]
+    }])json" );
+  }
+  const HelpContentStore::LoadResult result = HelpContentStore::loadFromDirectory( dir.path() );
+  INFO( "errors: " << result.errors.join( QStringLiteral( "; " ) ).toStdString() );
+  REQUIRE_FALSE( result.errors.isEmpty() );
+  CHECK( result.errors.first().contains( QStringLiteral( "retry" ) ) );
+
+  // the valid vocabulary still loads cleanly
+  {
+    QFile f( path );
+    REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    f.write( R"json([{
+      "id": "diagnostic.harness.sample_failure",
+      "family": "harness",
+      "code": "SAMPLE_FAILURE",
+      "title": "样例失败",
+      "whatHappened": "发生了样例错误。",
+      "whyItMatters": "会阻断后续步骤。",
+      "severity": "error",
+      "retry": "transient",
+      "remediation": [ "检查输入" ]
+    }])json" );
+  }
+  const HelpContentStore::LoadResult ok = HelpContentStore::loadFromDirectory( dir.path() );
+  INFO( "errors: " << ok.errors.join( QStringLiteral( "; " ) ).toStdString() );
+  CHECK( ok.errors.isEmpty() );
+}
+
 TEST_CASE( "Provider composition merges registry facts with knowledge", "[help][provider]" )
 {
   HelpRegistry knowledge;
@@ -317,9 +368,9 @@ TEST_CASE( "Availability explanation presentation", "[help][availability]" )
   AvailabilityExplanation explanation;
   explanation.commandId = QStringLiteral( "layer.saveEdits" );
   explanation.available = false;
-  explanation.facts << AvailabilityFact{ QStringLiteral( "已选中图层" ), true };
-  explanation.facts << AvailabilityFact{ QStringLiteral( "已选中矢量图层" ), true };
-  explanation.facts << AvailabilityFact{ QStringLiteral( "编辑会话未开启" ), false };
+  explanation.facts << AvailabilityFact{ QStringLiteral( "已选中图层" ), QStringLiteral( "layer.selected" ), true };
+  explanation.facts << AvailabilityFact{ QStringLiteral( "已选中矢量图层" ), QStringLiteral( "vector.selected" ), true };
+  explanation.facts << AvailabilityFact{ QStringLiteral( "编辑会话未开启" ), QStringLiteral( "editing.active" ), false };
   explanation.suggestedCommandTitle = QStringLiteral( "切换编辑" );
   explanation.suggestedCommandId = QStringLiteral( "layer.toggleEditing" );
 
