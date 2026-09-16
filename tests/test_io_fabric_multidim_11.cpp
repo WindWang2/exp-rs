@@ -238,3 +238,92 @@ TEST_CASE( "million-chunk multidim plans stay bounded (u64 math, no full materia
   // Beyond the end: typed refusal, never a wrap-around.
   REQUIRE_THROWS_AS( plan.materializeChunks( total, 3 ), GeoError );
 }
+
+TEST_CASE( "multidim spatial slices map post-slice offsets to SOURCE pixels (review P0)",
+           "[io][fabric][multidim][wp_e][spatial]" )
+{
+  // A descriptor with a declared geotransform (JSON-symmetric construction
+  // — no store needed for PLANNING known-answers).
+  MultidimCubeDescriptor descriptor;
+  descriptor.path = "virtual://geo";
+  descriptor.variable = "v";
+  descriptor.dtype = "Float32";
+  descriptor.hasGeoTransform = true;
+  descriptor.geotransform = { 10.0, 2.0, 0.0, 40.0, 0.0, -2.0 };   // 16×16 @2m, origin (10,40)
+  const char *names[4] = { "time", "band", "y", "x" };
+  const std::int64_t sizes[4] = { 4, 2, 16, 16 };
+  for ( int i = 0; i < 4; ++i )
+  {
+    MultidimCubeAxis axis;
+    axis.name = names[i];
+    axis.size = sizes[i];
+    descriptor.dimensionNames.push_back( names[i] );
+    descriptor.axes.push_back( axis );
+  }
+
+  CubeChunkShape shape;
+  shape.y = 4;
+  shape.x = 4;
+  CubeSlice slice;
+  slice.hasSpatialSlice = true;
+  slice.minX = 16.0;   // pixel x = (16-10)/2 = 3
+  slice.minY = 28.0;   // pixel y = (40-28)/2 = 6
+  slice.maxX = 24.0;   // pixel x end = 7
+  slice.maxY = 36.0;   // pixel y end = 10
+
+  const CubeChunkPlan plan = CubeChunkPlan::forMultidimDescriptor( descriptor, shape, slice );
+  CHECK( plan.spatialSliced() );
+  CHECK( plan.chunkCountTotal() == 4 * 1 * 1 * 1 );   // time(4)×band(2/2=1)×y 1×x 1
+
+  // The post-slice chunk offsets map to SOURCE pixels [6..10)×[3..7):
+  // the selection IS the offset mapping.
+  const auto &selection = plan.multidimSelection();
+  REQUIRE( selection.count( "y" ) == 1 );
+  REQUIRE( selection.count( "x" ) == 1 );
+  REQUIRE( selection.at( "y" ).size() == 4 );
+  REQUIRE( selection.at( "x" ).size() == 4 );
+  // gt = {10,2,0,40,0,-2}: world y 28..36 maps to rows (40-36)/2=2 .. (40-28)/2=6
+  CHECK( selection.at( "y" ).front() == 2 );   // source row of slice origin
+  CHECK( selection.at( "x" ).front() == 3 );   // source col of slice origin
+  CHECK( selection.at( "y" ).back() == 5 );
+  CHECK( selection.at( "x" ).back() == 6 );
+  // Execution maps post-slice offset 0 → source 6/3 (not 0/0).
+  const std::vector<CubeChunkRequest> first = plan.materializeChunks( 0, 1 );
+  REQUIRE( first.size() == 1 );
+}
+
+TEST_CASE( "time-less multidim stores plan real chunks; time slices refuse (review P1)",
+           "[io][fabric][multidim][wp_e][negative]" )
+{
+  // A [band, y, x] store: NO temporal axis. The plan must chunk the real
+  // dims — a phantom zero-size time dim multiplied everything to zero.
+  MultidimCubeDescriptor descriptor;
+  descriptor.path = "virtual://notime";
+  descriptor.variable = "v";
+  descriptor.dtype = "Float32";
+  const char *names[3] = { "band", "y", "x" };
+  const std::int64_t sizes[3] = { 3, 16, 16 };
+  for ( int i = 0; i < 3; ++i )
+  {
+    MultidimCubeAxis axis;
+    axis.name = names[i];
+    axis.size = sizes[i];
+    descriptor.dimensionNames.push_back( names[i] );
+    descriptor.axes.push_back( axis );
+  }
+  CubeChunkShape shape;
+  shape.y = 8;
+  shape.x = 8;
+  shape.perDimension["band"] = 2;
+  const CubeChunkPlan plan =
+    CubeChunkPlan::forMultidimDescriptor( descriptor, shape, {} );
+  CHECK( plan.chunkCountTotal() == 2 * 2 * 2 );   // band(2/2)×y(16/8)×x(16/8)
+  CHECK( plan.dims().size() == 3 );               // band, y, x — NO time dim
+
+  // A time slice on a time-less store is a typed refusal (never ignored).
+  CubeSlice slice;
+  slice.timeStartUtc = "2026-01-01T00:00:00Z";
+  slice.timeEndUtc = "2026-01-02T00:00:00Z";
+  REQUIRE_THROWS_AS( CubeChunkPlan::forMultidimDescriptor( descriptor, shape, slice ),
+                     GeoError );
+}

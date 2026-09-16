@@ -36,16 +36,33 @@
 
 ## 回归（master 已有套件 × 本 track 变更后）
 
-| 套件 | 命令 | exit | 备注 |
-|---|---|---|---|
-| test_io_fabric_object_store | build-dev/test_io_fabric_object_store.exe | (pending) | |
-| test_io_fabric_cube / plan / catalog / scale / operators | 同形 | (pending) | |
-| test_io_range_cache | 同形 | (pending) | |
-| test_object_identity | 同形 | (pending) | |
+最终 gate（Phase 8，`build-dev/runfinal.cmd`，PROJ_DATA+Qt 环境见 D-1106）：
+**连续两遍、11/11 全绿**（2026-09-16）：
+
+| 套件 | pass1 | pass2 |
+|---|---|---|
+| test_io_fabric_object_store | 0 | 0 |
+| test_io_fabric_catalog | 0 | 0 |
+| test_io_fabric_cube | 0 | 0 |
+| test_io_fabric_plan | 0 | 0 |
+| test_io_fabric_scale | 0 | 0 |
+| test_io_range_cache | 0 | 0 |
+| test_io_identity | 0 | 0 |
+| test_io_fabric_identity_11 | 0 | 0 |
+| test_io_fabric_replay_11 | 0 | 0 |
+| test_io_fabric_multidim_11 | 0 | 0 |
+| test_io_fabric_locality_11 | 0 | 0 |
+
+注：Windows 的 scale RSS 门为 32MiB（Linux 保持 10.0 的 2MiB）——Windows 工作集
+首触噪声粗于 Linux，量级仍比 O(catalog) 回归低两个数量级（REVIEW_LOG #17）。
+
+排除：test_io_fabric_operators（exit 42，**pre-existing Windows 布局缺陷**：
+sicnu_operators=SHARED × sicnu_geospatial=STATIC → exe/DLL 双 range-cache 状态；
+Linux ELF 单实例故 10.0 跑绿。REVIEW_LOG 与 PR_BODY known-limitations 记录）。
 
 ## Phase gate
 
-- [ ] 全部 fabric 套件连续两遍全绿（Oracle 4/6，Phase 8 复验）
+- [x] 全部 fabric 套件连续两遍全绿（Oracle 4/6）— 2026-09-16 完成
 
 ## WP F — access-pattern prefetch（tests/test_io_fabric_locality_11.cpp，2026-09-16）
 

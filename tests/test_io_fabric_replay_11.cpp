@@ -132,6 +132,7 @@ TEST_CASE( "forced-offline replay resolves windows from the mirror with ZERO net
   // --- Online phase: plan (identity probes included), mirror 4 chunks,
   // and capture the online window values as the replay oracle.
   std::vector<double> onlineWindow;
+  std::vector<double> onlineWindowEdge;
   {
     ScopedObjectStoreCredentials window( "/vsis3/", credentials );
     const FabricPlan plan = planFabric( cubeIntent( "/vsis3/eo-bucket/scene.tif" ) );
@@ -151,6 +152,11 @@ TEST_CASE( "forced-offline replay resolves windows from the mirror with ZERO net
       plan.selectedAssets(), plan.grid(), OverlapPolicy::FirstWins, {} );
     onlineWindow = onlineCube.readWindow( 0, 0, 64, 64 ).values;
     REQUIRE( onlineWindow.size() == 64 * 64 );
+    // A NON-origin chunk too (review R13): the (64,0) chunk covers the
+    // 96-wide grid's x ∈ [64,96) — 32 wide. Origin-only oracles hid the
+    // scatter-basis class of defects.
+    onlineWindowEdge = onlineCube.readWindow( 64, 0, 32, 64 ).values;
+    REQUIRE( onlineWindowEdge.size() == 32 * 64 );
   }
 
   // The offline index recorded the asset (token + grid facts).
@@ -192,6 +198,23 @@ TEST_CASE( "forced-offline replay resolves windows from the mirror with ZERO net
   CHECK( !replay.provenance.front().mirrorHit.empty() );   // served from the mirror
   REQUIRE( replay.values.size() == onlineWindow.size() );
   CHECK( replay.values == onlineWindow );                  // byte-equal replay
+
+  // The non-origin chunk replays byte-equal TOO — the scatter basis is the
+  // ASSET-pixel window, so chunks at (64,0) contribute where they stand.
+  // The (64,0) chunk of a 96-wide grid is 32 wide and 64 tall (rectangle).
+  {
+    std::ifstream man( mirrorDir + "/manifest.json" );
+    std::string manText( ( std::istreambuf_iterator<char>( man ) ),
+                         std::istreambuf_iterator<char>() );
+    WARN( "manifest: " << manText );
+  }
+  const VirtualCubeWindowResult replayEdge =
+    offlineCube.readWindow( 64, 0, 32, 64, readOptions );
+  REQUIRE( replayEdge.provenance.size() == 1 );
+  CHECK( replayEdge.provenance.front().contributed );
+  CHECK( !replayEdge.provenance.front().mirrorHit.empty() );
+  REQUIRE( replayEdge.values.size() == onlineWindowEdge.size() );
+  CHECK( replayEdge.values == onlineWindowEdge );
 
   CHECK( server.requestCount() == requestsBeforeOffline ); // ORACLE 1: zero requests
 }
@@ -263,30 +286,40 @@ TEST_CASE( "offline misses are honest, corrupted chunks are misses, expiry is co
     mirrorDir, "/vsis3/eo-bucket/scene.tif", anyWindow, "band1", /*maxAgeSeconds=*/0 );
   CHECK( unexpired.hit );
 
-  // Corruption: truncate one mirrored chunk to zero bytes — the size check
-  // must turn it into a miss, never a false hit.
-  std::string corruptTarget;
-  for ( const auto &entry : std::filesystem::directory_iterator( mirrorDir + "/chunks" ) )
-  {
-    if ( entry.file_size() > 0 )
-    {
-      corruptTarget = entry.path().string();
-      break;
-    }
-  }
-  REQUIRE( !corruptTarget.empty() );
+  // Corruption: truncate the chunk THE QUERY TARGETS (derived from the
+  // resolve itself — deterministic, not directory-order luck). The size
+  // check (and the sha256 the manifest records) must turn it into a miss,
+  // never a false hit.
+  const MirrorArtifactHit beforeCorruption = resolveMirrorArtifact(
+    mirrorDir, "/vsis3/eo-bucket/scene.tif", anyWindow, "band1", 0 );
+  REQUIRE( beforeCorruption.hit );
+  const std::string corruptTarget = beforeCorruption.file;
   std::filesystem::resize_file( corruptTarget, 0 );
   const MirrorArtifactHit corrupt = resolveMirrorArtifact(
     mirrorDir, "/vsis3/eo-bucket/scene.tif", anyWindow, "band1", 0 );
-  if ( corrupt.chunkKey + ".tif" == std::filesystem::path( corruptTarget ).filename().string() )
+  CHECK( !corrupt.hit );
+  CHECK( !corrupt.skippedCorrupt.empty() );
+
+  // Same-size tamper: flip bytes in the MIDDLE of a DIFFERENT chunk — the
+  // size check passes, so only the recorded sha256 can refuse it.
+  const RasterWindow otherWindow { 64, 0, 32, 64 };
+  const MirrorArtifactHit tamperTarget = resolveMirrorArtifact(
+    mirrorDir, "/vsis3/eo-bucket/scene.tif", otherWindow, "band1", 0 );
+  REQUIRE( tamperTarget.hit );
   {
-    CHECK( !corrupt.hit );
-    CHECK( !corrupt.skippedCorrupt.empty() );
+    std::fstream tamper( tamperTarget.file,
+                         std::ios::binary | std::ios::in | std::ios::out );
+    REQUIRE( tamper.is_open() );
+    tamper.seekp( 200 );
+    char flip = 0;
+    tamper.read( &flip, 1 );
+    tamper.seekp( 200 );
+    tamper.put( static_cast<char>( flip ^ 0xFF ) );
   }
-  else
-  {
-    CHECK( corrupt.hit );   // a different (uncorrupted) chunk still hits
-  }
+  const MirrorArtifactHit tampered = resolveMirrorArtifact(
+    mirrorDir, "/vsis3/eo-bucket/scene.tif", otherWindow, "band1", 0 );
+  CHECK( !tampered.hit );
+  CHECK( tampered.skippedCorrupt.find( "sha256" ) != std::string::npos );
 
   // Forced offline + a corrupted mirror = honest per-asset failure (the
   // window is answered NoData and the provenance says why), and still

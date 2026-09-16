@@ -582,6 +582,20 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
 
     try
     {
+      // CRS contract (D-1005) hoisted ABOVE the mirror branch (review R13):
+      // a known-CRS asset that differs from the grid is refused identically
+      // online and offline — a mirror hit must not smuggle a misaligned
+      // raster past the guard the online path enforces.
+      if ( mGrid.crs.valid && !entry.epsgAuthid.empty() &&
+           entry.epsgAuthid != mGrid.crs.authid )
+      {
+        provenance.failed = true;
+        provenance.errorText = "asset CRS " + entry.epsgAuthid + " differs from grid CRS " +
+                               mGrid.crs.authid + " (reproject upstream — io:warp/io:reproject)";
+        result.provenance.push_back( std::move( provenance ) );
+        continue;
+      }
+
       // --- Mirror-first (11.0, D-1103): when the mirror's offline index can
       // resolve this window, the remote asset is NEVER opened — a full-hit
       // replay performs zero network work (the 10.0 ordering defect: the
@@ -609,16 +623,26 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
           {
             RasterReader mirrored = RasterReader::open( hit.file );
             const RasterMetadata &mirroredMeta = mirrored.metadata();
-            RasterWindow chunkWindow { 0, 0,
-                                       std::min( mapped.window.width, mirroredMeta.width ),
-                                       std::min( mapped.window.height, mirroredMeta.height ) };
+            // The chunk file holds pixels of the ASSET window mapped.window
+            // at its own (0,0) (review R13): read chunk-locally, but bound
+            // the scatter by the ASSET-pixel window (offsets preserved,
+            // extent clamped to the buffer) so the world→source indices
+            // index the buffer correctly for EVERY chunk, not just the
+            // origin one.
+            const int chunkWidth =
+              std::min( mapped.window.width, mirroredMeta.width );
+            const int chunkHeight =
+              std::min( mapped.window.height, mirroredMeta.height );
             const std::vector<double> chunkValues =
-              mirrored.readWindow( { 1 }, chunkWindow, options.maxWindowBytes );
+              mirrored.readWindow( { 1 }, { 0, 0, chunkWidth, chunkHeight },
+                                   options.maxWindowBytes );
             const BandInfo &bandInfo = mirroredMeta.bands[0];
             provenance.mirrorHit = hit.file;
-            provenance.sourceWindow = chunkWindow;
-            provenance.contributed =
-              scatterInto( chunkValues, chunkWindow, bandInfo, facts.geotransform );
+            provenance.sourceWindow = mapped.window;
+            provenance.contributed = scatterInto(
+              chunkValues,
+              RasterWindow { mapped.window.xOff, mapped.window.yOff, chunkWidth, chunkHeight },
+              bandInfo, facts.geotransform );
             result.provenance.push_back( std::move( provenance ) );
             continue;
           }
@@ -630,7 +654,9 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
       RasterReader reader = RasterReader::open( fabricCachedPath( entry.record.path ) );
       const RasterMetadata &metadata = reader.metadata();
 
-      // CRS contract (D-1005): the cube is not a warp engine.
+      // CRS contract (D-1005): the cube is not a warp engine (the
+      // entry-facts guard above already refuses recorded-CRS mismatches;
+      // this open-side check still covers unrecorded/undeclared shapes).
       if ( mGrid.crs.valid && !metadata.crs.authid.empty() &&
            metadata.crs.authid != mGrid.crs.authid )
       {
@@ -767,9 +793,11 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
         sourceHasNoData = bandInfo.hasNoData;
         sourceNoDataIsNaN = bandInfo.noDataIsNaN;
         sourceNoDataValue = bandInfo.noDataValue;
-        // Provenance reports the bytes ACTUALLY read (the mirrored raster
-        // may pad to block boundaries).
-        provenance.sourceWindow = readWindow;
+        // The scatter maps world → ASSET pixels; the chunk buffer is
+        // chunk-local. Bound the scatter by the chunk's ASSET-pixel window
+        // (review R13): origin-only chunks worked by accident before.
+        readWindow = RasterWindow { sourceWindow.xOff, sourceWindow.yOff,
+                                    readWindow.width, readWindow.height };
       }
 
       if ( !noDataSet )

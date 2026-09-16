@@ -809,7 +809,8 @@ std::vector<unsigned char> fetchRangeVsi( const std::string &vsiPath, std::uint6
   if ( handle == nullptr )
     throw GeoError( ErrorCode::NetworkError,
                     "range_cache: object open failed: " + ResourceUri::parse( vsiPath ).display() );
-  if ( handle->Seek( static_cast<long>( start ), SEEK_SET ) != 0 )
+  if ( handle->Seek( start, SEEK_SET ) != 0 )   // vsi_l_offset: 64-bit — a
+                                                // long cast truncates ≥2 GiB
     throw GeoError( ErrorCode::IoError,
                     "range_cache: object seek failed: " + ResourceUri::parse( vsiPath ).display() );
   std::vector<unsigned char> bytes( static_cast<std::size_t>( endExclusive - start ) );
@@ -1559,8 +1560,11 @@ void RemoteRangeCache::invalidateResource( const std::string &url )
   if ( !vsiPath.empty() )
   {
     // Object entries are keyed per creating principal: invalidate under the
-    // CURRENT context, and (when one is set) the shared context too.
+    // CURRENT context, and when a context is set also the SHARED (no
+    // window) entry — a context-less open may have created one first.
     g_store->invalidate( objectResourceKey( vsiPath, currentRangeCacheCredentialContext() ) );
+    if ( !currentRangeCacheCredentialContext().empty() )
+      g_store->invalidate( objectResourceKey( vsiPath, std::string() ) );
     return;
   }
   g_store->invalidate( resourceKey( requestUrl ) );

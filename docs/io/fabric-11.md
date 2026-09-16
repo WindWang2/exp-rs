@@ -13,8 +13,9 @@ Local evidence only — 全部证据为本地可复现命令（`.planning/cloud-
   （强 ETag ⇒ `ri1:v1:` token；弱/`null`/无 ⇒ "" fail-closed）；其余拼写原样委托
   `assetIdentityToken`。**同一对象经任何对象拼写收敛到同一 token**；http(s) URL 身份保持
   8.0 basis（无端点知识时 URL 与 bucket/key 拼写不能证明字节等同——诚实边界）。
-* ETag/version 捕获：`probeObjectStoreIdentity` 经 VSI 栈 HEAD（GDAL 签名，D-1003 序列化）；
-  GCS generation / Azure etag 以同样的 header 通道进入 facts。
+* ETag/version 捕获：`probeObjectStoreIdentity` 经 VSI 栈 HEAD（GDAL 签名，D-1003 序列化）
+  捕获 `ETag` 与 `Content-Length`；GCS generation / Azure etag 字段化为 follow-up
+  （当前通道已就绪，字段未单列）。
 
 凭据从不进入 token、指纹、缓存键或日志（既有 8.0 规则，全部新增路径再验证）。
 

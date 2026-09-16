@@ -355,7 +355,12 @@ CubeChunkPlan CubeChunkPlan::forMultidimDescriptor( const MultidimCubeDescriptor
       {
         const InstantParse instant = parseIso8601Instant( axis.instantsUtc[i] );
         if ( !instant.ok )
-          continue;   // an unresolvable label cannot prove membership
+          // An axis label that claims to be temporal but does not parse is
+          // a data defect, not a filter criterion: a silent drop would
+          // shrink the plan behind the caller's back (review R13 P2).
+          throw GeoError( ErrorCode::InvalidArgument,
+                          "time axis label does not parse as an instant: " +
+                            axis.instantsUtc[i] );
         if ( instant.epochNanos >= startNanos && instant.epochNanos < endNanos )
           selectedTime.push_back( static_cast<std::int64_t>( i ) );
       }
@@ -397,7 +402,26 @@ CubeChunkPlan CubeChunkPlan::forMultidimDescriptor( const MultidimCubeDescriptor
     xSize = sx1 - sx0;
     ySize = sy1 - sy0;
     plan.mSpatialSliced = true;
+    // P0 fix (review R13): the source offsets ARE the y/x selection — the
+    // plan records them so execution maps post-slice chunk offsets back to
+    // source pixels instead of silently anchoring at the origin.
+    std::vector<std::int64_t> ySelection, xSelection;
+    ySelection.reserve( static_cast<std::size_t>( ySize ) );
+    xSelection.reserve( static_cast<std::size_t>( xSize ) );
+    for ( std::int64_t k = yOffset; k < yOffset + ySize; ++k )
+      ySelection.push_back( k );
+    for ( std::int64_t k = xOffset; k < xOffset + xSize; ++k )
+      xSelection.push_back( k );
+    plan.mMultidimSelection["y"] = ySelection;
+    plan.mMultidimSelection["x"] = xSelection;
   }
+
+  // A time slice on a store WITHOUT a temporal axis is silently ignored
+  // otherwise — the exact silent-misbehavior class this track removes.
+  if ( wantsTimeSlice && timeIndex == dimCount )
+    throw GeoError( ErrorCode::Unsupported,
+                    "time slice needs a temporal axis (TEMPORAL type or named \"time\") — "
+                    "the descriptor carries none" );
 
   const auto addDim = [ & ]( const std::string &name, std::int64_t size, std::int64_t chunk ) {
     CubeChunkDim dim;
@@ -435,7 +459,11 @@ CubeChunkPlan CubeChunkPlan::forMultidimDescriptor( const MultidimCubeDescriptor
     addDim( axis.name, size, chunkFor( axis.name ) );
   }
 
-  addDim( "time", timeSize, timeChunk );
+  // The time dim exists ONLY when the descriptor has a temporal axis — a
+  // phantom zero-size "time" dim would multiply the plan to zero chunks
+  // (the silent-zero class of D-1104, review R13 P1).
+  if ( timeIndex != dimCount )
+    addDim( "time", timeSize, timeChunk );
   addDim( "y", ySize, yChunk );
   addDim( "x", xSize, xChunk );
   plan.mBytesPerCell = bytesPerCellOf( descriptor.dtype );

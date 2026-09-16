@@ -2170,12 +2170,19 @@ int commandData( QStringList args, const CliIO &io )
                 }
                 std::string mirrorDir;
                 std::uint64_t maxBytes = 0;
+                bool maxBytesParsed = true;
                 for ( int i = 0; i + 1 < args.size(); ++i )
                 {
                     if ( args[i] == QStringLiteral( "-o" ) || args[i] == QStringLiteral( "--output" ) )
                         mirrorDir = args[i + 1].toStdString();
                     else if ( args[i] == QStringLiteral( "--max-bytes" ) )
-                        maxBytes = args[i + 1].toULongLong();
+                    {
+                        maxBytes = args[i + 1].toULongLong( &maxBytesParsed );
+                        if ( !maxBytesParsed )
+                            return io.finish( false, "data", {},
+                                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                              {}, "--max-bytes needs an integer" );
+                    }
                 }
                 if ( mirrorDir.empty() )
                     return io.finish( false, "data", {},

@@ -65,9 +65,39 @@ Data Fabric 10.0 留下四个已声明的缺口：s3/gs/az 对象路径不被 ra
   vcpkg 依赖链下目标冲突，CONFIG 为唯一稳定形态（vcpkg 官方建议）。
 - 全部新 API additive；无既有签名变更。
 
-## Local tests
+## Local tests（两遍原样重跑，11/11 全绿；QT_QPA_PLATFORM=offscreen，-j1）
 
-（Phase 8 完成两遍复验后填写终表 — 见 TEST_MATRIX.md 的运行记录）
+| 套件 | 断言/case | pass1 | pass2 |
+|---|---|---|---|
+| test_io_fabric_identity_11（新，WP A/B） | 66/5 | 0 | 0 |
+| test_io_fabric_replay_11（新，WP C，Oracle 1） | 47/2 | 0 | 0 |
+| test_io_fabric_multidim_11（新，WP D/E，Oracle 3） | 69/5 | 0 | 0 |
+| test_io_fabric_locality_11（新，WP F） | 20/2 | 0 | 0 |
+| test_io_fabric_object_store（回归） | — | 0 | 0 |
+| test_io_fabric_catalog（回归） | — | 0 | 0 |
+| test_io_fabric_cube（回归） | — | 0 | 0 |
+| test_io_fabric_plan（回归） | — | 0 | 0 |
+| test_io_fabric_scale（回归；Windows RSS 门 32MiB） | — | 0 | 0 |
+| test_io_range_cache（回归） | — | 0 | 0 |
+| test_io_identity（回归） | — | 0 | 0 |
+
+pre-existing / 排除：
+- test_io_fabric_operators（exit 42）：**pre-existing Windows 布局缺陷** — sicnu_operators
+  为 SHARED 而 sicnu_geospatial 为 STATIC，exe 与 DLL 各持 range-cache 静态状态
+  （Linux ELF 符号绑定单实例，故 10.0 跑绿）。非本 track 回归；修复属 build 布局变更，
+  影响所有消费者，留予平台 track。
+- 真实公有云端点（AWS/GCS/Azure）访问 not-executed（与 10.0 相同边界；loopback S3 为本仓
+  云端证据标准）。
+- 兼容窄角注记：catalog 记录路径现按 canonical（'/'）拼写；10.0 在 Windows 本地 STAC 树
+  以反斜杠路径物化的 v1 mirror chunk 的 legacy 键回退可能失配（新写入不受影响）。
+
+## Review findings 与处置
+
+两轮独立对抗 review（subagent #2 全 diff）：**P0=1、P1=4、P2=5、P3=8** → 全部处置：
+P0/P1/P2 修复（multidim 空间切片偏移丢失、≥2GiB Seek 截断、非原点 chunk scatter 基、
+无时间轴零计划、CRS 守卫提升、sha256 强制校验、FinalFlushGuard、instant 拒绝、
+确定性损坏注入、镜像 NoData 传播等）；P3 5 修复 / 3 accepted+documented。
+**修复后 P0=0、P1=0**，全量 gate 两遍重跑全绿。逐条见 `.planning/cloud-data-fabric-11/REVIEW_LOG.md`。
 
 ## Known limitations
 

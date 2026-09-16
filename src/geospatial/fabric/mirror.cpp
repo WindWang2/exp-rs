@@ -393,7 +393,10 @@ MirrorArtifactHit resolveMirrorArtifact( const std::string &mirrorDirectory,
 
   // Integrity: the file must carry the manifest's declared size (a
   // truncated/tampered chunk is a miss — the caller falls back to the
-  // origin path and the corruption stays visible in skippedCorrupt).
+  // origin path and the corruption stays visible in skippedCorrupt). When
+  // the manifest records a sha256 (11.0 writes), the payload must PROVE
+  // itself — chunks are bounded (chunk plan windows), so the full hash per
+  // hit is the honest cost of offline replay.
   VSIStatBufL statBuffer;
   if ( VSIStatL( file.c_str(), &statBuffer ) != 0 )
     return result;
@@ -404,6 +407,15 @@ MirrorArtifactHit resolveMirrorArtifact( const std::string &mirrorDirectory,
   {
     result.skippedCorrupt = "chunk size mismatch: " + file;
     return result;
+  }
+  if ( chunk.isObject() && chunk["sha256"].isString() )
+  {
+    const std::string digest = fileSha256Hex( file );
+    if ( digest.empty() || digest != chunk["sha256"].asString() )
+    {
+      result.skippedCorrupt = "chunk sha256 mismatch: " + file;
+      return result;
+    }
   }
 
   result.hit = true;
@@ -482,7 +494,8 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
       return std::uint64_t { 0 };
     const std::vector<CubeChunkRequest> first = plan.materializeChunks( 0, 1 );
     return ( first.empty() ? 0 : first.front().estimatedBytes ) * total;
-  }();  std::uint64_t bytesWritten = 0;       ///< real file bytes (report truth)
+  }();
+  std::uint64_t bytesWritten = 0;       ///< real file bytes (report truth)
   std::uint64_t logicalWritten = 0;     ///< declared chunk estimates (budget basis)
   std::size_t pendingManifestWrites = 0;
   // Identity tokens are cached per walk (a local token hashes ≤ 8 MiB —
@@ -515,6 +528,16 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
     invalidateManifestSnapshot( mirrorDirectory );
     pendingManifestWrites = 0;
   };
+  // Review R13 P2: the final flush must survive mid-walk exceptions — a
+  // throw (unreadable source, write failure) would otherwise abandon up to
+  // 31 pending entries. The guard publishes whatever was written; a flush
+  // failure during unwinding is swallowed (the atomic publish keeps the
+  // file consistent either way).
+  struct FinalFlushGuard
+  {
+    std::function<void()> flush;
+    ~FinalFlushGuard() { try { flush(); } catch ( ... ) {} }
+  } finalFlushGuard{ [ & ] { flushManifest( manifest, /*force=*/true ); } };
 
   std::size_t chunkWindow = options.chunkWindow == 0 ? 64 : options.chunkWindow;
   for ( std::uint64_t begin = 0; begin < total; begin += chunkWindow )
@@ -676,8 +699,18 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
       const std::string target = mirrorDirectory + "/" + kMirrorChunkDir + "/" + key + ".tif";
       std::uint64_t written = 0;
       atomic_fs::writeFileAtomic( target, [ & ]( const std::string &stagedPath ) {
+        // The chunk carries the SOURCE band's NoData declaration (review
+        // R13): offline replay's NoData semantics then match the online
+        // read exactly — declared-NoData source pixels lose FirstWins the
+        // same way they do online.
+        RasterBandSpec chunkBand;
+        chunkBand.dtype = metadata.bands[0].dtype;
+        chunkBand.description = metadata.bands[0].description;
+        chunkBand.hasNoData = metadata.bands[0].hasNoData;
+        chunkBand.noDataValue = metadata.bands[0].noDataValue;
+        chunkBand.noDataIsNaN = metadata.bands[0].noDataIsNaN;
         RasterWriter writer = RasterWriter::create(
-          stagedPath, sourceWindow.width, sourceWindow.height, { RasterBandSpec {} },
+          stagedPath, sourceWindow.width, sourceWindow.height, { chunkBand },
           { "GTiff", { "TILED=YES", "BLOCKXSIZE=64", "BLOCKYSIZE=64" }, true } );
         // Real georeferencing: the chunk sits at its source extent in the
         // asset's own grid (a plain pixel grid would make mirrored chunks

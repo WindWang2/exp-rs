@@ -244,6 +244,12 @@ CanonicalObjectKey canonicalObjectKey( const std::string &resource )
     const std::size_t slash = remainder.find( '/' );
     if ( slash == std::string::npos || slash == 0 || slash + 1 > remainder.size() )
       return result; // malformed VSI object path (needs <bucket>/<key>)
+    // The same refusals as the scheme branch: VSI object keys carry no
+    // userinfo/query/fragment shapes (review R13).
+    if ( remainder.find( '@' ) != std::string::npos ||
+         remainder.find( '?' ) != std::string::npos ||
+         remainder.find( '#' ) != std::string::npos )
+      return result;
     result.scheme = profile.scheme == "s3a" || profile.scheme == "s3c" ? "s3" : profile.scheme;
     result.provider = profile.provider;
     result.bucket = remainder.substr( 0, slash );

@@ -771,15 +771,20 @@ std::vector<FabricChunkOutcome> executeMultidimChunks( const FabricPlan &plan,
             FabricChunkOutcome outcome;
             outcome.index = request.index;
 
-            // Odometer over every non-spatial dim of this chunk (the three
-            // trailing dims are time/y/x).
-            const std::size_t leadingDims = dims.size() - 3;
-            std::vector<std::size_t> step( leadingDims + 1, 0 );   // per-dim step in chunk
-            std::vector<std::size_t> span( leadingDims + 1, 0 );
+            // Layout: [...middles, (time), y, x] — the time dim exists only
+            // when the descriptor has a temporal axis (review R13 P1: a
+            // [band,y,x] store plans without a phantom time dim).
+            const bool hasTimeDim =
+              dims.size() >= 3 && dims[dims.size() - 3].name == "time";
+            const std::size_t spatialCount = hasTimeDim ? 3 : 2;
+            const std::size_t leadingDims = dims.size() - spatialCount;
+            std::vector<std::size_t> step( leadingDims + ( hasTimeDim ? 1 : 0 ), 0 );
+            std::vector<std::size_t> span( leadingDims + ( hasTimeDim ? 1 : 0 ), 0 );
             for ( std::size_t d = 0; d < leadingDims; ++d )
                 span[d] = static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[d], 1 ) );
-            span[leadingDims] =
-              static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[leadingDims], 1 ) );
+            if ( hasTimeDim )
+              span[leadingDims] =
+                static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[leadingDims], 1 ) );
             bool overflowed = false;
             while ( !overflowed )
             {
@@ -791,17 +796,18 @@ std::vector<FabricChunkOutcome> executeMultidimChunks( const FabricPlan &plan,
                       { dims[d].name,
                         sourceIndexOf( dims[d].name, request.dimOffsets[d] +
                                                        static_cast<std::int64_t>( step[d] ) ) } );
-                dimSlices.push_back(
-                  { "time",
-                    sourceIndexOf( "time", request.dimOffsets[leadingDims] +
-                                             static_cast<std::int64_t>( step[leadingDims] ) ) } );
+                if ( hasTimeDim )
+                    dimSlices.push_back(
+                      { "time",
+                        sourceIndexOf( "time", request.dimOffsets[leadingDims] +
+                                                 static_cast<std::int64_t>( step[leadingDims] ) ) } );
 
                 const std::int64_t ySource =
-                  sourceIndexOf( "y", request.dimOffsets[leadingDims + 1] );
+                  sourceIndexOf( "y", request.dimOffsets[leadingDims + ( hasTimeDim ? 1 : 0 )] );
                 const std::int64_t xSource =
-                  sourceIndexOf( "x", request.dimOffsets[leadingDims + 2] );
+                  sourceIndexOf( "x", request.dimOffsets[leadingDims + ( hasTimeDim ? 2 : 1 )] );
                 const std::size_t rows =
-                  static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[leadingDims + 1], 1 ) );
+                  static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[leadingDims + ( hasTimeDim ? 1 : 0 )], 1 ) );
                 const std::size_t cols =
                   static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[leadingDims + 2], 1 ) );
 
@@ -848,12 +854,10 @@ std::vector<FabricChunkOutcome> executeMultidimChunks( const FabricPlan &plan,
                 if ( !carried )
                     overflowed = true;
             }
-            if ( outcome.skippedBudget && budgetBreached )
-            {
-                // The remainder of the enumeration stays skipped (counted).
-                recordOutcome( std::move( outcome ) );
-                continue;
-            }
+            // Review R13: a chunk whose combinations were cut short by the
+            // budget is a SKIPPED chunk — never half-ok.
+            if ( outcome.skippedBudget )
+                outcome.ok = false;
             recordOutcome( std::move( outcome ) );
         }
     }
