@@ -85,7 +85,10 @@ LANES: dict[str, dict] = {
             ("fuzz_data", "test_contract_fuzz_data", "test", 180),
             ("known_answer_corpus", "test_known_answer_corpus", "test", 180),
             ("portability_contract", "test_portability_contract", "test", 180),
-            ("fuzz_ipc", "test_contract_fuzz_ipc", "test", 420),
+            # Worker-IPC splitting fuzz: pathologically slow on Windows
+            # named-pipe emulation; 900s is the honest upper bound before the
+            # host-limitation classification kicks in.
+            ("fuzz_ipc", "test_contract_fuzz_ipc", "test", 900),
             ("known_answer_corpus_8", "test_known_answer_corpus_8", "test", 180),
             # Contract Platform 9.0 (unified contract projection guards):
             # implementation↔schema equality, command/help/action reference
