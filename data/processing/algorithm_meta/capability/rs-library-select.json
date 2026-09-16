@@ -1,0 +1,138 @@
+{
+  "capability" : 
+  {
+    "applicability" : 
+    {
+      "land_cover" : 
+      [
+        "\u77ff\u7269/\u6750\u6599\u6837\u533a"
+      ],
+      "scenes" : 
+      [
+        "\u5149\u8c31\u5e93\u6784\u5efa",
+        "\u7aef\u5143\u7b5b\u9009"
+      ]
+    },
+    "band_roles" : {},
+    "crs" : 
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" : 
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : 
+    [
+      {
+        "code" : "INVALID_PARAMETER",
+        "remedy" : "\u63d0\u4f9b data/spectral \u683c\u5f0f\u7684\u5df2\u9a8c\u8bc1\u5149\u8c31\u5e93",
+        "when" : "libraryPath \u7f3a\u5931\u6216\u683c\u5f0f\u975e\u6cd5"
+      }
+    ],
+    "family" : "spectral",
+    "io" : 
+    {
+      "inputs" : [],
+      "outputs" : 
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "entries",
+          "required" : true
+        },
+        {
+          "data_kind" : "json",
+          "file_format" : "json",
+          "name" : "output",
+          "required" : true
+        }
+      ],
+      "parameters" : 
+      [
+        {
+          "name" : "libraryPath",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "materials",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "0.500000",
+          "name" : "nearDuplicateAngleDeg",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "sensor",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "wavelengthMax",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "wavelengthMin",
+          "required" : false,
+          "type" : "numeric"
+        }
+      ]
+    },
+    "limitations" : 
+    [
+      "Near-duplicate detection reports pairs below the SAM threshold; it never removes entries by itself."
+    ],
+    "modality" : 
+    [
+      "optical"
+    ],
+    "operator_group" : "spectral",
+    "prerequisites" : 
+    [
+      "The source library must pass strict validation (loadValidated); sensor projection needs entries with wavelength grids."
+    ],
+    "schema_version" : 2,
+    "summary" : "\u5149\u8c31\u5e93\u68c0\u7d22\u4e0e\u5b50\u96c6\uff1a\u6309\u6750\u6599\u6216\u6ce2\u957f\u7a97\u53e3\u7b5b\u9009\u7ecf\u9a8c\u5e93\u6761\u76ee\uff0c\u53ef\u6295\u5f71\u5230\u4f20\u611f\u5668\u6ce2\u6bb5\u7f51\u683c\u3002",
+    "teaching_use" : 
+    {
+      "concepts" : 
+      [
+        "\u5149\u8c31\u5e93",
+        "SAM \u5339\u914d"
+      ],
+      "courses" : 
+      [
+        "\u9ad8\u5149\u8c31\u9065\u611f"
+      ],
+      "exercise" : "\u4ece\u5149\u8c31\u5e93\u4e2d\u7b5b\u9009\u7814\u7a76\u533a\u7aef\u5143\u5e76\u6295\u5f71\u5230\u4f20\u611f\u5668\u6ce2\u6bb5\u3002"
+    }
+  },
+  "description" : "Subset a validated spectral library by material or wavelength window and optionally project it onto a sensor band grid; writes a library-format artifact with near-duplicate QA.",
+  "display_name" : "Library Select",
+  "id" : "rs:library_select",
+  "input" : "",
+  "output" : "",
+  "schema_version" : 2,
+  "tags" : 
+  [
+    "spectral",
+    "library"
+  ]
+}

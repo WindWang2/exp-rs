@@ -46,8 +46,10 @@ model: same values, one owner).
   reuse the #612 degrees→metres cell-size conversion inline (three copies);
   consolidation into one shared helper is tracked debt.
 - Full range-Doppler RTC is not approximated — see sar-domain.md §3.
-- Filled-flat routing in `rs:terrain_flow` is a sink (direction 0); no
-  epsilon-gradient flat resolution.
+- Filled flats used to be permanent sinks; epsilon-gradient flat resolution
+  now exists as the `flat_resolve` product (opt-in, byte-compat when unused)
+  and `flow_direction_inf` carries D∞ routing — contracts in
+  terrain-analytics.md.
 - `rs:temporal_monitor` CUSUM/EWMA standardize against the full series
   (retrospective monitoring); a baseline-window variant is future work.
 - ISODATA and logistic-regression classifiers are documented deferrals;

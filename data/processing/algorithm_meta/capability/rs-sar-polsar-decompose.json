@@ -69,6 +69,12 @@
       "parameters" : 
       [
         {
+          "default" : "1",
+          "name" : "assumeReciprocity",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
           "default" : "h_alpha",
           "enum" : 
           [

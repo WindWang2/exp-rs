@@ -2,6 +2,41 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - Terrain Hydrology & Visibility 11.0 (zcode/terrain-hydrology-11)
+
+- **Flat resolution (A)**: `rs:terrain_flow product=flat_resolve` — epsilon-gradient
+  priority-flood (epsilon scaled from the DEM relief, monotone, byte-compat with
+  `fill` when unused); closes the documented filled-flat sink debt.
+- **D∞ flow (B)**: `product=flow_direction_inf` — Tarboton steepest-facet descent,
+  degrees clockwise from north, exact gradient azimuth on planar surfaces,
+  single-receiver accumulation with exact mass identity.
+- **Stream network (C)**: `product=stream_network` — threshold extraction + Strahler
+  orders with connectivity stats and optional Strahler-link polylines in map
+  coordinates; `product=outlets` lists sinks/rim outflows as a mask + JSON.
+- **Viewshed/horizon (D)**: new `rs:terrain_viewshed` (products `viewshed`,
+  `cumulative`) — deterministic ring-sweep R3 viewshed with observer/target
+  heights, radius, and pairwise-exact Earth-curvature/refraction correction
+  (refused on geographic CRS); NoData is opaque.
+- **Solar terrain (E)**: new `rs:terrain_solar` (products `shadow_duration`,
+  `hillshade_series`) — exact parallel-ray shadow duration over a weighted sun
+  track (explicit or generated from date/latitude via the declared ±1° solar
+  position); hillshade series reuses the existing hillshade kernel per band.
+- **Landform (F)**: new `rs:terrain_landform` (products `tpi_multiscale`,
+  `landform_class`, `geomorphon`) — square-window multiscale TPI, Weiss (2001)
+  six-class terrain position, and J&S geomorphon ternary patterns with the
+  unambiguous v1 form subset.
+- **Surface (G)**: Terrain dialog routes the new product families to their
+  domain operators (observer/threshold/date-latitude fields per product);
+  agent tools `spatial:terrain_profile` and `spatial:terrain_viewshed_inspect`
+  registered as read-only built-ins.
+- **Resource model**: full-frame terrain operators fail closed above
+  `SICNU_TERRAIN_MAX_CELLS` (2²⁸ cells default) with honest per-frame memory
+  estimates; cancellation surfaces as `Cancelled` with no partial output files.
+- Contracts: `docs/processing/terrain-analytics.md`; known-answer/E2E suites
+  `test_terrain_hydrology`, `test_terrain_viewshed`, `test_terrain_solar`,
+  `test_terrain_landform`, `test_terrain_analytics_e2e` with independent
+  closed-form oracles.
+
 ## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)
 
 - **Regular-calendar normalization (T-2)**: `rs:temporal_regularize` re-casts irregular
