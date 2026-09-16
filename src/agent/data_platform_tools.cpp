@@ -72,6 +72,8 @@ using namespace sicnu::experiment;
 // P0 host-portability unblock (Platform 11.0): the D19 benchmark tools use
 // BenchmarkService unqualified, which MSVC rejects (undeclared identifier);
 // ExperimentStore is already reached through its experiment/ includes.
+// MSVC: BenchmarkService is used unqualified below and no transitively
+// included header re-exports it — a pre-existing master build break.
 using sicnu::experiment::BenchmarkService;
 
 namespace

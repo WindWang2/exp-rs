@@ -344,3 +344,7 @@ data/labs/_tmp/
 !.planning/scientific-contract-verification-11/
 .planning/scientific-contract-verification-11/*
 !.planning/scientific-contract-verification-11/*.md
+# linked-visual-analytics-11: track planning notes (markdown only; logs stay local).
+!.planning/linked-visual-analytics-11/
+.planning/linked-visual-analytics-11/*
+!.planning/linked-visual-analytics-11/*.md

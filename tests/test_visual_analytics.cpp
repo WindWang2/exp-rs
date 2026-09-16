@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "app/visualanalytics/va_chart_widget.h"
+#include "app/visualanalytics/va_selection_hub.h"
 #include "app/visualanalytics/va_source.h"
 
 #include <QApplication>
@@ -19,6 +20,7 @@
 #include <QThread>
 
 #include <atomic>
+#include <limits>
 
 using namespace sicnu::app::va;
 
@@ -179,4 +181,230 @@ TEST_CASE( "VaChartWidget states and exports", "[visual_analytics][chart]" )
         chart.setError( QStringLiteral( "boom" ) );
         CHECK( chart.toCsv().isEmpty() );
     }
+}
+
+// ── Linked Visual Analytics 11.0 — selection hub + brushing contract ────
+
+TEST_CASE( "VaSelectionHub stamps generations and drops echoes",
+           "[visual_analytics][hub]" )
+{
+    ensureApp();
+    VaSelectionHub hub;
+
+    QSignalSpy publishedSpy( &hub, &VaSelectionHub::selectionPublished );
+
+    VaSelectionSubject subject;
+    subject.kind = VaSelectionKind::ChartRange;
+    subject.chartId = QStringLiteral( "rsVaHistogram" );
+    subject.x0 = 1.0;
+    subject.x1 = 2.0;
+
+    // A subscriber that re-publishes with the EVENT'S OWN origin is the
+    // exact echo case: same (origin, generation) re-entering the dispatch —
+    // it must be dropped, never re-broadcast (Oracle 1: no feedback loop).
+    quint64 echoGeneration = 0;
+    QObject echoGuard;
+    const QMetaObject::Connection echoConn =
+      QObject::connect( &hub, &VaSelectionHub::selectionPublished, &echoGuard,
+                        [&]( const VaSelectionEvent &event ) {
+                            echoGeneration = hub.publish( event.subject, event.origin );
+                        } );
+
+    const quint64 gen = hub.publish( subject, QStringLiteral( "va.panel" ) );
+    CHECK( gen != 0 );
+    CHECK( echoGeneration == 0 ); // echo suppressed, no new generation issued
+    CHECK( hub.stats().suppressedEchoes == 1 );
+    CHECK( publishedSpy.count() == 1 ); // one broadcast, not two
+
+    // A DIFFERENT surface re-publishing during the dispatch is fresh intent:
+    // it passes the guard, takes a new generation, and its own echo is then
+    // suppressed (one level deep — no cascade).
+    QObject::disconnect( echoConn );
+    QObject::connect( &hub, &VaSelectionHub::selectionPublished, &echoGuard,
+                      [&]( const VaSelectionEvent &event ) {
+                          hub.publish( event.subject, QStringLiteral( "chart.echo" ) );
+                      } );
+    const quint64 cross = hub.publish( subject, QStringLiteral( "map.main" ) );
+    CHECK( cross != 0 );
+    CHECK( publishedSpy.count() == 3 ); // map.main + its one cross-surface echo
+    CHECK( hub.stats().suppressedEchoes == 2 ); // event-origin echo + echo-of-echo
+
+    // Generations remain strictly monotonic across everything.
+    const quint64 first = hub.publish( subject, QStringLiteral( "va.panel" ) );
+    const quint64 second = hub.publish( subject, QStringLiteral( "va.panel" ) );
+    CHECK( second > first );
+}
+
+TEST_CASE( "VaSelectionHub restores outer dispatch context after nested relay",
+           "[visual_analytics][hub]" )
+{
+    ensureApp();
+    VaSelectionHub hub;
+    QSignalSpy publishedSpy( &hub, &VaSelectionHub::selectionPublished );
+
+    VaSelectionSubject subject;
+    subject.kind = VaSelectionKind::ChartCategory;
+    subject.chartId = QStringLiteral( "rsVaProfile" );
+
+    // Subscriber 1 relays every event to the "relay" surface (a nested
+    // cross-origin dispatch that OVERWRITES the hub's dispatch context).
+    QObject::connect( &hub, &VaSelectionHub::selectionPublished, &hub,
+                      [&]( const VaSelectionEvent &event ) {
+                          hub.publish( event.subject, QStringLiteral( "relay" ) );
+                      } );
+    // Subscriber 2 echoes each event under its own origin — for the OUTER
+    // dispatch this must STILL be suppressed after the nested relay unwound
+    // (the outer context has to be restored, or A↔B relay pairs loop).
+    QObject::connect( &hub, &VaSelectionHub::selectionPublished, &hub,
+                      [&]( const VaSelectionEvent &event ) {
+                          hub.publish( event.subject, event.origin );
+                      } );
+
+    hub.publish( subject, QStringLiteral( "map.main" ) );
+    // map.main → relay (fresh, new generation) → the two subscribers inside
+    // the relay dispatch both echo "relay" (dropped ×2); back in the OUTER
+    // dispatch, the map.main echo is STILL dropped (context restored — this
+    // is the regression). Two events broadcast, three echoes absorbed,
+    // and the cascade stops at one level: no A↔B relay loop.
+    CHECK( publishedSpy.count() == 2 );
+    CHECK( hub.stats().suppressedEchoes == 3 );
+}
+
+TEST_CASE( "VaSelectionHub rejects invalid subjects and clamps text",
+           "[visual_analytics][hub]" )
+{
+    ensureApp();
+    VaSelectionHub hub;
+
+    VaSelectionSubject nan;
+    nan.kind = VaSelectionKind::ViewPoint;
+    nan.x0 = std::numeric_limits<double>::quiet_NaN();
+    CHECK( hub.publish( nan, QStringLiteral( "map.main" ) ) == 0 );
+    CHECK( hub.stats().rejected == 1 );
+
+    VaSelectionSubject inverted;
+    inverted.kind = VaSelectionKind::ChartRange;
+    inverted.x0 = 5.0;
+    inverted.x1 = 1.0; // inverted range
+    CHECK( hub.publish( inverted, QStringLiteral( "va.panel" ) ) == 0 );
+
+    VaSelectionSubject longText;
+    longText.kind = VaSelectionKind::Layer;
+    longText.assetId = QString( 4096, QLatin1Char( 'a' ) );
+    const quint64 gen = hub.publish( longText, QStringLiteral( "va.panel" ) );
+    CHECK( gen != 0 );
+    CHECK( hub.history().first().subject.assetId.size()
+           == VaSelectionHub::kMaxTextChars );
+}
+
+TEST_CASE( "VaSelectionHub history stays bounded", "[visual_analytics][hub]" )
+{
+    ensureApp();
+    VaSelectionHub hub;
+
+    VaSelectionSubject subject;
+    subject.kind = VaSelectionKind::ChartPoint;
+    subject.chartId = QStringLiteral( "rsVaScatter" );
+    for ( int i = 0; i < 100; ++i )
+        hub.publish( subject, QStringLiteral( "va.panel" ) );
+    CHECK( hub.history().size() == VaSelectionHub::kHistoryCapacity );
+    CHECK( hub.stats().published == 100 );
+}
+
+TEST_CASE( "VaSelectionHub absorbs 100k logical selection events without growth",
+           "[visual_analytics][hub][scale]" )
+{
+    ensureApp();
+    VaSelectionHub hub;
+
+    qint64 received = 0;
+    QObject consumer;
+    QObject::connect( &hub, &VaSelectionHub::selectionPublished, &consumer,
+                      [&]( const VaSelectionEvent & ) { ++received; } );
+
+    VaSelectionSubject subject;
+    subject.kind = VaSelectionKind::Pixel;
+    subject.layerId = QStringLiteral( "layer-a" );
+    subject.assetId = QStringLiteral( "asset-a" );
+    constexpr int kLogicalEvents = 100000;
+    for ( int i = 0; i < kLogicalEvents; ++i )
+    {
+        subject.row = i;
+        subject.column = i % 251;
+        REQUIRE( hub.publish( subject, QStringLiteral( "map.main" ) ) != 0 );
+    }
+    CHECK( received == kLogicalEvents );
+    // Diagnostics history is a bounded ring — never 100k entries.
+    CHECK( hub.history().size() == VaSelectionHub::kHistoryCapacity );
+    CHECK( hub.stats().published == kLogicalEvents );
+}
+
+TEST_CASE( "Scatter brush filter keeps values and geometry consistent",
+           "[visual_analytics][brush]" )
+{
+    VaData payload;
+    payload.kind = VaChartKind::Scatter;
+    // Independent truth: exactly three points fall inside [2.0, 4.0].
+    const std::vector<double> xs = { 1.0, 2.0, 3.0, 4.0, 5.0 };
+    const std::vector<double> ys = { 10.0, 20.0, 30.0, 40.0, 50.0 };
+    for ( size_t i = 0; i < xs.size(); ++i )
+    {
+        payload.scatter.xs.append( xs[i] );
+        payload.scatter.ys.append( ys[i] );
+        payload.scatter.groups.append( -1 );
+        payload.scatter.cols.append( static_cast<qint64>( i ) * 3 );
+        payload.scatter.rows.append( static_cast<qint64>( i ) * 7 );
+    }
+    payload.scatter.hasGeometry = true;
+    payload.scatter.geotransform = { 0, 1, 0, 0, 0, -1 };
+
+    const VaData filtered = filterScatterByXRange( payload, 2.0, 4.0 );
+    REQUIRE( filtered.scatter.xs.size() == 3 );
+    CHECK( filtered.scatter.xs == QVector<double>{ 2.0, 3.0, 4.0 } );
+    CHECK( filtered.scatter.ys == QVector<double>{ 20.0, 30.0, 40.0 } );
+    // Geometry stays parallel to the kept points (chart→map picks stay true).
+    REQUIRE( filtered.scatter.cols.size() == 3 );
+    REQUIRE( filtered.scatter.rows.size() == 3 );
+    CHECK( filtered.scatter.cols == QVector<qint64>{ 3, 6, 9 } );
+    CHECK( filtered.scatter.rows == QVector<qint64>{ 7, 14, 21 } );
+
+    // Out-of-range brushes keep everything; non-scatter payloads pass through.
+    CHECK( filterScatterByXRange( payload, -100.0, 100.0 ).scatter.xs.size() == 5 );
+    VaData histogramPayload;
+    histogramPayload.kind = VaChartKind::Histogram;
+    CHECK( filterScatterByXRange( histogramPayload, 0.0, 1.0 ).kind
+           == VaChartKind::Histogram );
+}
+
+TEST_CASE( "Scatter pick resolves against the DISPLAYED payload",
+           "[visual_analytics][brush][pick]" )
+{
+    // gt = (0,1,0,0,0,-1): map point of (col,row) is (col, -row).
+    VaData payload;
+    payload.kind = VaChartKind::Scatter;
+    for ( int i = 0; i < 5; ++i )
+    {
+        payload.scatter.xs.append( i * 1.0 );
+        payload.scatter.ys.append( -i * 1.0 );
+        payload.scatter.cols.append( i * 10 );
+        payload.scatter.rows.append( i * 10 );
+        payload.scatter.hasGeometry = true;
+        payload.scatter.geotransform = { 0, 1, 0, 0, 0, -1 };
+    }
+
+    // After a brush to [2,4], the widget shows the compaction; picking its
+    // FIRST visible point (index 0) must land on the point with value 2 →
+    // pixel (20,20) → map (20,-20) — NOT on the raw payload's index 0.
+    const VaData displayed = filterScatterByXRange( payload, 2.0, 4.0 );
+    REQUIRE( displayed.scatter.xs.size() == 3 );
+    double rx = 0, ry = 0;
+    REQUIRE( scatterPickToMapPoint( displayed.scatter, 0, &rx, &ry ) );
+    CHECK( rx == 20.0 );
+    CHECK( ry == -20.0 );
+
+    // Honest refusals: unknown index and missing geometry never guess.
+    CHECK_FALSE( scatterPickToMapPoint( displayed.scatter, 99, &rx, &ry ) );
+    VaScatter noGeometry = displayed.scatter;
+    noGeometry.hasGeometry = false;
+    CHECK_FALSE( scatterPickToMapPoint( noGeometry, 0, &rx, &ry ) );
 }

@@ -9860,6 +9860,7 @@ add_executable(test_visual_analytics
   test_visual_analytics.cpp
   ${CMAKE_SOURCE_DIR}/src/app/visualanalytics/va_source.cpp
   ${CMAKE_SOURCE_DIR}/src/app/visualanalytics/va_chart_widget.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/visualanalytics/va_selection_hub.cpp
   ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
 )
 target_link_libraries(test_visual_analytics PRIVATE
@@ -9881,6 +9882,9 @@ sicnu_discover_tests(test_visual_analytics)
 add_executable(test_view_link
   test_view_link.cpp
   ${CMAKE_SOURCE_DIR}/src/app/shell/view_link_controller.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/visualanalytics/va_cursor_probe.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/visualanalytics/va_layer_link_controller.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/widgets/rs_scan_pool.cpp
 )
 target_link_libraries(test_view_link PRIVATE
   Catch2::Catch2
@@ -9899,6 +9903,7 @@ endif()
 target_include_directories(test_view_link PRIVATE
   ${CMAKE_SOURCE_DIR}/src
   ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_SOURCE_DIR}/src/app/widgets
   ${CMAKE_BINARY_DIR}
 )
 set_target_properties(test_view_link PROPERTIES AUTOMOC ON)

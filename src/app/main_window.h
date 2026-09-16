@@ -146,7 +146,13 @@ class TemporalWorkbenchPanel;
 class DatasetExperimentPanel;
 class ModelWorkbenchPanel;
 class CartographyDock;
-namespace va { class VaWorkbenchPanel; }
+namespace va
+{
+class VaWorkbenchPanel;
+class VaSelectionHub;
+} // namespace va
+class ViewLinkController;
+class VaLayerLinkController;
 class RsOperatorCatalogPanel;
 class SelectionContext;
 class InspectorHost;
@@ -211,6 +217,13 @@ public:
     void showCartographyDock();
     /** Workbench 10.0: Visual Analytics surface (typed charts + linked filtering). */
     void showVisualAnalyticsPanel();
+    /** Linked Visual Analytics 11.0: the shell-owned process-level selection
+     * hub (null until setupWorkbenchPanels ran; tests/facades may see null). */
+    sicnu::app::va::VaSelectionHub *vaSelectionHub() const { return m_vaSelectionHub; }
+    /** Linked Visual Analytics 11.0: N-view extent/cursor link authority. */
+    sicnu::app::ViewLinkController *viewLinkController() const { return m_viewLinkController; }
+    /** Linked Visual Analytics 11.0: cross-view layer visibility/opacity link. */
+    sicnu::app::VaLayerLinkController *layerLinkController() const { return m_layerLinkController; }
     /** Workbench 10.0: rs: operator catalog (search/recent/favorites/modality). */
     void showOperatorCatalog();
     sicnu::app::CartographyDock *cartographyDock() const { return m_cartographyDock; }
@@ -362,6 +375,9 @@ public:
     void toggleSecondaryMapView( bool on );
     void openSecondaryMapView();
     void closeSecondaryMapView();
+    /** Linked Visual Analytics 11.0: registers any display view (main,
+     * secondary, session) with the link controllers. Safe before setup. */
+    void registerLinkedVisualView( sicnu::display::DisplayViewId viewId );
     void activateMainMapView();
     void activateSecondaryMapView();
     void syncMainLayersToSecondaryView();
@@ -467,6 +483,10 @@ private:
     QAction *m_secondaryViewAction = nullptr;
     QAction *m_dualViewportSyncAction = nullptr;
     class RsDualViewportSyncController *m_dualViewportSync = nullptr;
+    /// Linked Visual Analytics 11.0 (created with the workbench panels).
+    sicnu::app::va::VaSelectionHub *m_vaSelectionHub = nullptr;
+    sicnu::app::ViewLinkController *m_viewLinkController = nullptr;
+    sicnu::app::VaLayerLinkController *m_layerLinkController = nullptr;
     QgsProjectionSelectionWidget *m_crsSelector = nullptr;
     LayerTreeMenuProvider *m_layerTreeMenuProvider = nullptr;
     QgsProcessingToolboxTreeView *m_toolboxView = nullptr;
