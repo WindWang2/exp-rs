@@ -19,6 +19,10 @@
 #include <atomic>
 
 #ifdef Q_OS_WIN
+// _O_WRONLY/_O_BINARY for fsyncFile's Win32 branch live in fcntl.h (MSVC);
+// the POSIX branch below needs the same header for its own flags.
+// Build-unblock for master breakage (see open PR #1009's identical fix).
+#include <fcntl.h>
 #include <io.h>
 #include <windows.h>
 #else

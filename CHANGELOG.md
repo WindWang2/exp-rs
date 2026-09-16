@@ -1,5 +1,52 @@
 # Changelog
 
+## [Cartography Production 11.0] - zcode/cartography-production-11
+
+- **Governed production chain**: `cartography:produce` (agent tool +
+  RSOperator + GUI produce button) orchestrates upgrade → validate →
+  compose → bounded repair → export → manifest over the SAME engine free
+  functions; typed refusal codes; atomic publish with full rollback on
+  failure/cancel; cooperative cancel per stage and per atlas page.
+- **Export manifests**: `<base>.<format>.manifest.json` sidecar written
+  atomically next to every delivery — per-page sha256/bytes, compose-time
+  structural digest, template/component/binding provenance, and an honest
+  (digest-excluded) environment block. `readExportManifest` re-verifies a
+  delivery from disk alone.
+- **Atlas delivery**: `exportMapAtlas` iterates `QgsLayoutAtlas` features —
+  per-feature pages named by the filename expression (sanitized), coverage
+  extents and feature ids recorded per page, 512-page runaway guard,
+  cancellable at page boundaries; closes the previously unbacked
+  atlas-guide export claim. png-only; pdf/svg atlas layouts stay static
+  all-pages exports (manifest mode "single").
+- **Series planner** (`planSeries`): single-page template + table/vector
+  series definition → multi-page MapSpec v6 with per-page `variables`,
+  `series_row` provenance, per-page extents, `{{name}}`/`{{page_number}}`
+  token substitution, optional index page; id-clone/remap for pages >= 1;
+  10-page materialized cap directs larger products to the atlas path.
+- **MapSpec v6**: `pages[].variables` / `series_row` / `crs` and the
+  "index" page role (strict superset; `upgradeMapSpec` bumps idempotently).
+- **Template governance**: `descriptor_version` + idempotent v1→v2 load
+  migration (required_furniture derived from slot roles); `deprecated` /
+  `replaced_by` lifecycle stamped into drafts; `required_furniture`
+  contract enforced by preflight `MAP_REQUIRED_FURNITURE_MISSING` with
+  repair routed into the add_* furniture fixes.
+- **New preflight rules (append-only)**: `MAP_TINY_FONT_PRINT` (7pt floor
+  at declared print dpi >= 300), `MAP_ALIGNMENT_DEVIATION` (near-column x
+  drift), `MAP_WHITESPACE_IMBALANCE` (one-sided margins) — each with a
+  bounded, ledger-logged repair.
+- **Map-anchored annotations**: `annotations[]` may declare `map_ref` +
+  `anchor` ([x,y] map coordinates) and a styled leader line compiles to
+  the projected page point (locator-connector geometry contract).
+- **Production render-hazard guard**: `UNSAFE_LEGEND_AUTO_UPDATE` refuses a
+  delivery whose DECLARED auto-update legend mirrors an empty layer set
+  (this QGIS build loops forever in `QgsLayoutItemLegend::paint` for that
+  configuration); fires before repair so the refusal names the author's
+  declaration.
+- **Async cartography GUI**: the CartographyDock submits every action as a
+  TaskCenter job (registry dispatch identical to workflow nodes) with
+  progress mirroring, busy gating and a Stop action; new "produce" button
+  runs the full production chain.
+
 All notable changes to the `exp-rs` project will be documented in this file.
 
 ## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)

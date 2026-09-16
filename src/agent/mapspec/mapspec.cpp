@@ -1023,13 +1023,44 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
           problems.push_back( "every page needs positive width_mm/height_mm" );
           continue;
         }
-        // v3: page roles and feature-gated pages.
+        // v3: page roles and feature-gated pages. v6: the "index" role for
+        // materialized series index pages.
         if ( pageEntry.isMember( "role" ) )
         {
           const std::string role = pageEntry["role"].isString() ? pageEntry["role"].asString() : "";
-          if ( role != "cover" && role != "map" && role != "report" && role != "appendix" )
-            problems.push_back( "page.role must be cover|map|report|appendix" );
+          if ( role != "cover" && role != "map" && role != "report" && role != "appendix" &&
+               role != "index" )
+            problems.push_back( "page.role must be cover|map|report|appendix|index" );
         }
+        // v6: series/production page metadata (variables + planner
+        // provenance + provenance-only CRS label).
+        if ( pageEntry.isMember( "variables" ) )
+        {
+          const Json::Value &variables = pageEntry["variables"];
+          if ( !variables.isObject() || variables.size() > 32 )
+            problems.push_back( "page.variables must be an object with at most 32 members" );
+          else
+          {
+            for ( const auto &name : variables.getMemberNames() )
+            {
+              const Json::Value &value = variables[name];
+              if ( !value.isString() && !value.isNumeric() && !value.isBool() &&
+                   !value.isNull() )
+              {
+                problems.push_back( "page.variables['" + name + "'] must be scalar" );
+                break;
+              }
+            }
+          }
+        }
+        if ( pageEntry.isMember( "series_row" ) &&
+             ( !pageEntry["series_row"].isObject() ||
+               ( pageEntry["series_row"].isMember( "index" ) &&
+                 !pageEntry["series_row"]["index"].isIntegral() ) ) )
+          problems.push_back( "page.series_row must be an object with an integer index" );
+        if ( pageEntry.isMember( "crs" ) &&
+             ( !pageEntry["crs"].isString() || pageEntry["crs"].asString().empty() ) )
+          problems.push_back( "page.crs must be a non-empty string" );
         // Platform 9.0: master furniture — item ids repeated onto this page.
         if ( pageEntry.isMember( "furniture" ) )
         {

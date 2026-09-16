@@ -146,6 +146,10 @@ add_library(sicnu_agent SHARED
   cartography/design_tokens.h
   cartography/export.cpp
   cartography/export.h
+  cartography/export_manifest.cpp
+  cartography/export_manifest.h
+  cartography/produce.cpp
+  cartography/produce.h
   cartography/quality.cpp
   cartography/quality.h
   cartography/registry.cpp
@@ -168,6 +172,8 @@ add_library(sicnu_agent SHARED
   mapspec/mapspec_compiler.h
   mapspec/mapspec_conditions.cpp
   mapspec/mapspec_conditions.h
+  mapspec/series_planner.cpp
+  mapspec/series_planner.h
   layout_tools/layout_service.cpp
   layout_tools/layout_service.h
   layout_tools/layout_tools.cpp

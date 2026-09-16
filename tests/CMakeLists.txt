@@ -586,6 +586,39 @@ target_include_directories(test_mapspec PRIVATE
 )
 sicnu_discover_tests(test_mapspec)
 
+# Cartography Production 11.0: export manifest contract, produce chain,
+# atlas delivery, series planning, template governance. Standalone target so
+# the 11.0 surface evolves without touching the platform aggregate suites.
+qt_add_executable(test_cartography_production_11
+  test_cartography_production_11.cpp
+)
+target_compile_definitions(test_cartography_production_11 PRIVATE
+  SICNU_CARTOGRAPHY_DATA_DIR="${CMAKE_SOURCE_DIR}/data/cartography"
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_link_libraries(test_cartography_production_11 PRIVATE
+  Catch2::Catch2
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_data
+  sicnu_agent
+  sicnu_operators
+  sicnu_workflow
+  sicnu_processing
+  sicnu_task_center
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_cartography_production_11 PRIVATE jsoncpp)
+endif()
+target_include_directories(test_cartography_production_11 PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_cartography_production_11)
+
 # D3 lab content expansion track: lab-chain integrity tests (pipeline JSON ->
 # operator registry resolution, LabSpec artifact consistency, lab11 MapSpec
 # validate + compliance preflight + offscreen compile). Standalone target so

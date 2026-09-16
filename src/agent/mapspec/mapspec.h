@@ -63,7 +63,13 @@ namespace sicnu::agent::mapspec {
 //       mode/layer/field/expression fields, bounded inline data, square
 //       matrices). v5 is a strict superset of v4: every new field is
 //       optional.
-inline constexpr int kMapSpecCurrentVersion = 5;
+//   6 — cartography production 11.0: series/production metadata. Page
+//       entries gain `variables` (≤32 scalar members: the page's declared
+//       data context, substituted by the series planner before compile),
+//       `series_row` (planner provenance: index, feature_id?, title?) and
+//       `crs` (provenance-only label); `page.role` accepts "index". v6 is a
+//       strict superset of v5: every new field is optional.
+inline constexpr int kMapSpecCurrentVersion = 6;
 
 /// Ordered item collection names of a MapSpec document.
 /// (inline constexpr: Windows DLL builds cannot auto-export extern data

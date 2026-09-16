@@ -214,4 +214,20 @@ CompositionResult resolveComposition( Json::Value &spec, double marginDefaultMm 
 CompositionResult resolveCompositionScoped( Json::Value &spec, double marginDefaultMm,
                                             const std::vector<std::string> &focusItemIds );
 
+/// The canonical pre-compile pass shared by every surface (agent tools,
+/// RSOperators, produce, tests): v3 conditions resolve in place BEFORE
+/// composition and preflight (hidden items cannot produce false positives),
+/// then anchors/constraints resolve into concrete rects using the spec's
+/// resolved token set spacing.margin_mm as the default. Returns the
+/// composition result JSON. Every downstream reader (compile, preflight,
+/// digest) sees the RESOLVED document, so digests and verdicts stay
+/// identical across surfaces.
+Json::Value resolveCompositionPass( Json::Value &spec );
+
+/// The canonical compose-provenance extraction shared by every surface:
+/// {template?, template_provenance?, components: [{id, variant?}]} read off
+/// the (resolved) spec's declared template and per-item source_component
+/// references. Deterministic; empty components array when none.
+Json::Value composeProvenance( const Json::Value &spec );
+
 } // namespace sicnu::agent::cartography

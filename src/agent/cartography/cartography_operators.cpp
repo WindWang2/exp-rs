@@ -15,6 +15,7 @@
 #include "composition.h"
 #include "design_tokens.h"
 #include "export.h"
+#include "produce.h"
 #include "quality.h"
 
 #include "operators/framework/rs_operator.h"
@@ -61,25 +62,9 @@ void requireMapSpec( const Json::Value &params )
                                "Missing required parameter: mapspec (object)" );
 }
 
-/// Shared pre-compile pass, IN PLACE on the caller's spec — the exact
-/// sequence the agent tools run: v3 conditions resolve BEFORE composition
-/// and preflight (hidden items cannot produce false positives), then
-/// anchors/constraints resolve into concrete rects. Returns the composition
-/// result JSON the tools echo; every downstream read (compile, preflight,
-/// digest, echo) sees the RESOLVED document, so digests and verdicts are
-/// identical across the tool and operator surfaces.
-Json::Value resolveCompositionPass( Json::Value &spec )
-{
-    if ( spec.isObject() && spec.isMember( "condition_context" ) )
-    {
-        std::vector<std::string> conditionErrors;
-        mapspec::resolveMapSpecConditions( spec, spec["condition_context"], &conditionErrors );
-    }
-    const double marginDefault =
-        tokenNumber( resolveTokenSet( spec ), "spacing.margin_mm", 12.0 );
-    return resolveComposition( spec, marginDefault ).toJson();
-}
-
+/// Shared pre-compile pass: conditions + composition resolve IN PLACE —
+/// `resolveCompositionPass` (composition.h) is the single engine-level
+/// implementation the agent tools run; see it for the resolution contract.
 /// The export/compose compose-family output contract: an object whose
 /// "output" key carries the delivered artifact so downstream workflow steps
 /// can reference it through the placeholder grammar (same shape rs:*
@@ -442,6 +427,114 @@ class ExportOperator final : public sicnu::operators::RSOperator
     }
 };
 
+class ProduceOperator final : public sicnu::operators::RSOperator
+{
+  public:
+    std::string name() const override { return "cartography:produce"; }
+    std::string displayName() const override { return "Produce Finished Map Delivery"; }
+    std::string group() const override { return "cartography"; }
+    std::string description() const override
+    {
+        return "One-call governed production: upgrade → validate → compose → bounded repair "
+               "→ export (single or atlas) → manifest sidecar, with atomic publish (a failed "
+               "or cancelled delivery leaves the directory untouched). \"output\" is the "
+               "manifest path (or the artifact when the manifest is disabled) — "
+               "workflow-chainable.";
+    }
+    std::string determinismGrade() const override { return "bit_exact"; }
+    RSOperatorMemoryPolicy memoryPolicy() const override
+    {
+        return RSOperatorMemoryPolicy::UnsupportedForLargeRaster;
+    }
+
+    Json::Value schema() const override
+    {
+        Json::Value schema( Json::objectValue );
+        schema["type"] = "object";
+        Json::Value props( Json::objectValue );
+        Json::Value mapspec( Json::objectValue );
+        mapspec["type"] = "object";
+        props["mapspec"] = mapspec;
+        props["directory"]["type"] = "string";
+        props["format"]["type"] = "string";
+        Json::Value formats( Json::arrayValue );
+        formats.append( "png" );
+        formats.append( "pdf" );
+        formats.append( "svg" );
+        props["format"]["enum"] = formats;
+        props["file_name"]["type"] = "string";
+        props["dpi"]["type"] = "number";
+        props["write_manifest"]["type"] = "boolean";
+        props["require_preflight_pass"]["type"] = "boolean";
+        props["max_repair_iterations"]["type"] = "integer";
+        schema["properties"] = props;
+        Json::Value required( Json::arrayValue );
+        required.append( "mapspec" );
+        required.append( "directory" );
+        schema["required"] = required;
+        return schema;
+    }
+
+    Json::Value run( const Json::Value &params, RSOperatorContext &context ) override
+    {
+        requireQgisHost();
+        context.throwIfCancelled();
+        if ( !params.isMember( "mapspec" ) || !params["mapspec"].isObject() )
+            throw RSOperatorError( ErrorCode::MissingRequiredParameter,
+                                   "Missing required parameter: mapspec (object)" );
+        if ( !params.isMember( "directory" ) || !params["directory"].isString() ||
+             params["directory"].asString().empty() )
+            throw RSOperatorError( ErrorCode::MissingRequiredParameter,
+                                   "Missing required parameter: directory (non-empty string)" );
+
+        ProduceRequest request;
+        request.mapspec = params["mapspec"];
+        request.directory = params["directory"].asString();
+        if ( params.isMember( "format" ) && params["format"].isString() )
+            request.format = params["format"].asString();
+        if ( params.isMember( "file_name" ) && params["file_name"].isString() )
+            request.file_name = params["file_name"].asString();
+        if ( params.isMember( "dpi" ) && params["dpi"].isNumeric() )
+            request.dpi = params["dpi"].asDouble();
+        if ( params.isMember( "write_manifest" ) && params["write_manifest"].isBool() )
+            request.write_manifest = params["write_manifest"].asBool();
+        if ( params.isMember( "require_preflight_pass" ) &&
+             params["require_preflight_pass"].isBool() )
+            request.require_preflight_pass = params["require_preflight_pass"].asBool();
+        if ( params.isMember( "max_repair_iterations" ) &&
+             params["max_repair_iterations"].isInt() )
+            request.max_repair_iterations = params["max_repair_iterations"].asInt();
+
+        // Progress rides the operator's own reporting seam; cooperative
+        // cancellation polls the context on every stage/page boundary.
+        ProduceReporter reporter = [ &context ]( const char *stage, double progress,
+                                                 const std::string &detail ) {
+            context.reportProgress( progress, std::string( stage ) + ": " + detail );
+            return !context.isCancelled();
+        };
+
+        context.reportProgress( 0.05, "produce: starting" );
+        const ProduceResult result = produceMap( request, reporter );
+        if ( !result.ok )
+        {
+            const ErrorCode code =
+              result.cancelled()
+                ? ErrorCode::Cancelled
+                : ( result.error_code == "EXPORT_FAILED" ||
+                        result.error_code == "COMPILE_FAILED" ||
+                        result.error_code == "MANIFEST_FAILED"
+                      ? ErrorCode::QgisProcessingError
+                      : ErrorCode::InvalidInputData );
+            throw RSOperatorError( code, result.error, produceResultToJson( result ) );
+        }
+
+        Json::Value out = produceResultToJson( result );
+        const std::string delivered =
+          out.isMember( "output" ) ? out["output"].asString() : std::string();
+        return withOutput( std::move( out ), delivered.c_str() );
+    }
+};
+
 } // namespace
 
 void initCartographyOperators()
@@ -460,6 +553,7 @@ void initCartographyOperators()
     add( "cartography:validate", [] { return std::make_unique<ValidateOperator>(); } );
     add( "cartography:repair", [] { return std::make_unique<RepairOperator>(); } );
     add( "cartography:export", [] { return std::make_unique<ExportOperator>(); } );
+    add( "cartography:produce", [] { return std::make_unique<ProduceOperator>(); } );
 }
 
 } // namespace sicnu::agent::cartography

@@ -1,4 +1,4 @@
-# MapSpec Reference (versioned; current: 5.0)
+# MapSpec Reference (versioned; current: 6.0)
 
 A MapSpec is a versioned JSON document describing a map product as semantic
 collections. It compiles to a `QgsPrintLayout` through `MapSpecCompiler`;
@@ -18,7 +18,7 @@ QGIS Layout stays the authoritative renderer (ADR 0127, 0131).
   "generated_by": "exp-rs",       // envelope (contracts)
   "generated_at": "…",            // envelope timestamp
   "kind": "map_spec",             // required
-  "spec_version": 5,              // required integer, ≤ 5
+  "spec_version": 6,              // required integer, <= 6
   "layout_name": "my-map",        // required; join key for the layout
   "template": "land-cover-a4l",   // optional provenance
   "page": {                       // required, positive sizes
@@ -165,6 +165,12 @@ a `qgis_type` marker (documented divergence).
 ## Platform 8.0 notes
 
 - **spec_version 5** (strict superset of v4): the envelope may declare an
+- **spec_version 6** (strict superset of v5; Production 11.0): page entries
+  gain `variables` (at most 32 scalar members — the page's data context,
+  tokens in `{{name}}` form substituted by the series planner before
+  compile), `series_row` (`{index, feature_id?, title?}` planner
+  provenance) and `crs` (provenance-only label); `page.role` accepts
+  "index". See migration-mapspec-v6.md and production.md.
   `output` block (formats `png`/`pdf`, dpi 72..1200, optional dir). It is
   validated and surfaced through `cartography:compose` /
   `confirmMapOutput`, but compilation never auto-exports — delivery stays an

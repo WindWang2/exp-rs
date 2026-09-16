@@ -1484,6 +1484,7 @@ TEST_CASE( "P7 solver: upgradeMapSpec re-stamps v3 documents to current",
   const Json::Value upgraded = upgradeMapSpec( spec );
   REQUIRE( upgraded["spec_version"].asInt() == kMapSpecCurrentVersion );
   // Platform 8.0 bumped the current spec to 5 (additive output/binding
-  // surface); the constant moves only with a strict-superset version.
-  REQUIRE( kMapSpecCurrentVersion == 5 );
+  // surface); Production 11.0 to 6 (page.variables/series_row/index role).
+  // The constant moves only with a strict-superset version — both qualify.
+  REQUIRE( kMapSpecCurrentVersion == 6 );
 }

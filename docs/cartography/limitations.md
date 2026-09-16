@@ -91,6 +91,25 @@ honest QGIS/toolchain boundaries.
   through the style tooling; unresolved style ids are reported (advisory),
   never fatal to the compile.
 
+## Production 11.0 status
+
+- **Atlas delivery is real**: `cartography:produce` iterates the coverage
+  features and writes one atomic page per feature plus a manifest (see
+  production.md). The delivery is png-only on this QGIS build — pdf/svg on
+  an atlas layout behave like `cartography:export` (one static all-pages
+  document, recorded honestly as mode "single").
+- **Export evidence is durable**: the manifest sidecar carries per-page
+  sha256/bytes and the compose-time structural digest; the environment
+  block documents the producing host but is excluded from the manifest
+  digest. PDF metadata/vector settings beyond QGIS's defaults (font
+  embedding policy, ICC color spaces) remain QGIS-native configuration.
+- **Series materialization is capped at 10 pages** (the document pages[]
+  cap): larger feature-driven products belong to the atlas delivery path,
+  and the planner says so instead of truncating.
+- **GUI actions run on TaskCenter**, not the GUI thread; the dock mirrors
+  progress and offers cooperative cancel. The dock preview still renders
+  page 0 only — multi-page inspection stays a follow-up.
+
 ## Deferred (Platform 5.0)
 
 - Per-glyph text measurement, word-wrap-aware overflow (single-line

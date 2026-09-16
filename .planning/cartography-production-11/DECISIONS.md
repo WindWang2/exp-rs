@@ -24,7 +24,10 @@ descriptor 增加 `descriptor_version`（缺省=1），`upgradeTemplateDescripto
 master a5b11b7f `BenchmarkService` 无限定使用（sicnu::experiment）无 using-directive → sicnu_agent 编译失败（#1009 已证并同款修复）。本 track 需构建 sicnu_agent → 添加 `using namespace sicnu::experiment;`（含注释），PR_BODY 顶部声明 OUT_OF_SCOPE build-unblock + dedupe #1009。备选：等 #1009 merge —— 违背"不等待"，否决。
 
 ## D-008 新 preflight 规则码 append-only
-新增：`MAP_ALIGNMENT_DEVIATION`（对齐容差）、`MAP_WHITESPACE_IMBALANCE`（页留白均衡）、`MAP_TINY_FONT_PRINT`（dpi 感知印刷下限，非替代既有 MAP_TINY_FONT）、`MAP_LEGEND_TRUNCATION`（图例内容超界）。全部 advisory/repairable 分类遵循既有分类学；repair 动作有界并写台账。备选：复用旧码加参数 —— 破坏既有 report 消费者，否决。
+新增：`MAP_ALIGNMENT_DEVIATION`（同集合同页同宽条目 x 漂移 0.5–3mm；repair 吸附到 peer）、`MAP_WHITESPACE_IMBALANCE`（页内容左右留白比 >2.5×；repair 平移整块内容）、`MAP_TINY_FONT_PRINT`（声明 output.dpi≥300 时注记类文字 <7pt；repair 提到 7pt）、`MAP_REQUIRED_FURNITURE_MISSING`（模板治理契约，见 D-006/D-014）。**原计划的 `MAP_LEGEND_TRUNCATION` 取消**：与既有 `MAP_LEGEND_DENSITY`（图例矩形容量检查）语义重复，避免双码同义。全部规则有界（对齐检查 100 条上限）、repair 走既有台账机制。备选：复用旧码加参数 —— 破坏既有 report 消费者，否决。
+
+## D-014（追加）模板治理契约进 preflight
+`instantiateTemplate` 把模板的 `required_furniture` 盖章进草稿（`spec.template_required_furniture`），lifecycle 盖章为 `spec.template_lifecycle`（仅告警不拒绝）；preflight 新规则逐 role 用 semantic_role 前缀核对（title.→title 等，registry.cpp 单一映射表 `requiredFurnitureRolePrefix`）。v1 模板在 catalog 载入时自动迁移 v2（从 slot roles 派生 required_furniture），保证旧语料获得同等执行面。
 
 ## D-009 series 生成器为纯函数 + 独立文件
 `series_planner`（Qt-free 核心 + 薄 QGIS 读层）：输入 MapSpec 模板 + series 定义（vector layer（feature/region）、显式表（time/region）），输出 N 页多页 MapSpec（页变量/extent/标题/页码/可选索引页）。输出仍是 MapSpec v5（不新造文档格式）；数量上限默认 512 页（可参数化但钳制），防失控。备选：直接驱动 QgsLayoutAtlas 而不物化多页 —— 两者并存：atlas 走 QGIS 原生迭代（运行时），series 走物化（可审计/可 diff），分别服务不同 WP-B 需求。

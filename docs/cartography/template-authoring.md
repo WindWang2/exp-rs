@@ -129,3 +129,41 @@ near-duplicate files:
   ones; results are deterministic (score desc, id asc).
 - `cartography:list_templates` accepts `medium`/`purpose`/`keyword` and
   routes through the same search, keeping responses inside the token budget.
+
+## Production 11.0 — governance (`descriptor_version`, lifecycle, required furniture)
+
+Descriptors gain a governance surface alongside composition:
+
+```json
+{
+  "id": "my-template",
+  "descriptor_version": 2,
+  "deprecated": true,
+  "replaced_by": "my-template-v2",
+  "required_furniture": [
+    { "role": "title", "label": "主标题" },
+    { "role": "legend" },
+    { "role": "scale_bar" },
+    { "role": "data_source" }
+  ]
+}
+```
+
+- **Versioning & migration** — `descriptor_version` (absent = 1). The
+  catalog migrates v1 descriptors to v2 at load (`upgradeTemplateDescriptor`,
+  idempotent): v2 stamps the version and derives `required_furniture` from
+  the declared slot roles (`title.main` → title, `legend.primary` → legend,
+  `scalebar.primary` → scale_bar, `north_arrow.primary` → north_arrow,
+  `source.primary` → data_source, `map.primary` → map) when none are
+  declared. Unknown future versions load verbatim and surface a problem.
+- **Lifecycle** — `deprecated` + `replaced_by` are knowledge, not locks:
+  instantiation stamps `template_lifecycle` into the draft so agents and
+  the GUI can see the deprecation and its successor, and the catalog keeps
+  serving the template.
+- **Contract enforcement** — `required_furniture` (closed role vocabulary
+  title|legend|scale_bar|north_arrow|data_source|map, ≤16 entries) is
+  stamped into the draft as `template_required_furniture`. Preflight
+  reports `MAP_REQUIRED_FURNITURE_MISSING` per missing role (semantic-role
+  prefix check) and bounded repair routes into the existing
+  `add_title`/`add_legend`/`add_scale_bar`/`add_north_arrow`/
+  `add_source_note` repairs.

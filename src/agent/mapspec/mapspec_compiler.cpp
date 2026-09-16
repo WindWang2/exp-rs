@@ -697,6 +697,124 @@ QgsPrintLayout *MapSpecCompiler::compile( const Json::Value &specIn, QString *er
     props["text"] = annotation.get( "text", "" );
     applyTokenTextStyle( props, annotation, tokens, "annotation", 8.0 );
     compileTextItem( layout, "label", annotation["id"].asString(), props, tokens );
+
+    // Production 11.0: map-anchored callout. Declaring `map_ref` (a map
+    // frame) + `anchor` ([x, y] map coordinates) ties the annotation to
+    // the map context: a leader polyline runs from the annotation rect
+    // edge to the projected anchor (linear extent→page mapping, clamped
+    // to the frame — the locator connector's geometry contract). The
+    // declared leader style carries color/stroke/dash with conservative
+    // defaults.
+    if ( annotation.isMember( "map_ref" ) && annotation["map_ref"].isString() &&
+         annotation.isMember( "anchor" ) && annotation["anchor"].isArray() &&
+         annotation["anchor"].size() == 2 && annotation["anchor"][0].isNumeric() &&
+         annotation["anchor"][1].isNumeric() && annotation.isMember( "rect_mm" ) &&
+         annotation["rect_mm"].isArray() && annotation["rect_mm"].size() == 4 )
+    {
+      const std::string anchorMapRef = annotation["map_ref"].asString();
+      Json::Value frameRect;
+      Json::Value frameExtent;
+      for ( const auto &candidate : itemsOf( "map_frames" ) )
+      {
+        if ( candidate.isObject() && candidate.isMember( "id" ) &&
+             candidate["id"].asString() == anchorMapRef )
+        {
+          if ( candidate.isMember( "rect_mm" ) && candidate["rect_mm"].isArray() &&
+               candidate["rect_mm"].size() == 4 )
+            frameRect = candidate["rect_mm"];
+          if ( candidate.isMember( "extent" ) && candidate["extent"].isArray() &&
+               candidate["extent"].size() == 4 )
+            frameExtent = candidate["extent"];
+        }
+      }
+      const Json::Value annotationRect = annotation["rect_mm"];
+      if ( frameRect.isArray() && frameRect.size() == 4 && frameExtent.isArray() &&
+           frameExtent.size() == 4 )
+      {
+        const double mapX = annotation["anchor"][0].asDouble();
+        const double mapY = annotation["anchor"][1].asDouble();
+        const double extentW = frameExtent[2].asDouble() - frameExtent[0].asDouble();
+        const double extentH = frameExtent[3].asDouble() - frameExtent[1].asDouble();
+        if ( extentW > 1e-12 && extentH > 1e-12 )
+        {
+          // Same north-up page mapping the locator connector uses: page-y
+          // grows as map-y decreases.
+          double anchorX = frameRect[0].asDouble() +
+                           ( mapX - frameExtent[0].asDouble() ) / extentW *
+                             frameRect[2].asDouble();
+          double anchorY = frameRect[1].asDouble() +
+                           ( frameExtent[3].asDouble() - mapY ) / extentH *
+                             frameRect[3].asDouble();
+          anchorX = std::max( frameRect[0].asDouble(),
+                              std::min( anchorX, frameRect[0].asDouble() +
+                                                   frameRect[2].asDouble() ) );
+          anchorY = std::max( frameRect[1].asDouble(),
+                              std::min( anchorY, frameRect[1].asDouble() +
+                                                   frameRect[3].asDouble() ) );
+          const Json::Value &rect = annotationRect;
+          const double centerX = rect[0].asDouble() + rect[2].asDouble() / 2.0;
+          const double centerY = rect[1].asDouble() + rect[3].asDouble() / 2.0;
+          const double dx = anchorX - centerX;
+          const double dy = anchorY - centerY;
+          const double denomX = std::abs( dx ) > 1e-9 ? std::abs( dx ) : 1e-9;
+          const double denomY = std::abs( dy ) > 1e-9 ? std::abs( dy ) : 1e-9;
+          const double scale = std::min( rect[2].asDouble() / 2.0 / denomX,
+                                         rect[3].asDouble() / 2.0 / denomY );
+          const bool leavesAnnotation = std::abs( dx ) > 1e-9 || std::abs( dy ) > 1e-9;
+          const bool anchorInsideRect =
+            anchorX >= rect[0].asDouble() &&
+            anchorX <= rect[0].asDouble() + rect[2].asDouble() &&
+            anchorY >= rect[1].asDouble() &&
+            anchorY <= rect[1].asDouble() + rect[3].asDouble();
+          if ( leavesAnnotation && !anchorInsideRect )
+          {
+            const Json::Value &leader = annotation.isMember( "leader" ) &&
+                                            annotation["leader"].isObject()
+                                          ? annotation["leader"]
+                                          : Json::Value( Json::objectValue );
+            Json::Value points( Json::arrayValue );
+            Json::Value start( Json::arrayValue );
+            start.append( centerX + dx * scale );
+            start.append( centerY + dy * scale );
+            Json::Value end( Json::arrayValue );
+            end.append( anchorX );
+            end.append( anchorY );
+            points.append( start );
+            points.append( end );
+            Json::Value lineProps( Json::objectValue );
+            lineProps["points"] = points;
+            lineProps["color"] = leader.isMember( "color" ) && leader["color"].isString()
+                                   ? leader["color"]
+                                   : Json::Value( "#333333" );
+            lineProps["width_mm"] = leader.isMember( "stroke_mm" ) &&
+                                        leader["stroke_mm"].isNumeric()
+                                      ? leader["stroke_mm"]
+                                      : Json::Value( 0.4 );
+            lineProps["line_style"] =
+              leader.isMember( "style" ) && leader["style"].isString() &&
+                  leader["style"].asString() == "dash"
+                ? Json::Value( "dash" )
+                : Json::Value( "solid" );
+            QgsLayoutItem *leaderItem = compileItem(
+              layout, "line", annotation["id"].asString() + "-anchor-line", lineProps,
+              &itemError );
+            if ( !leaderItem )
+            {
+              // Same contract as the locator connector: a declared
+              // relationship graphic that cannot materialize is a compile
+              // failure, never a silently absent feature.
+              if ( error )
+                *error = QStringLiteral( "annotation '%1': leader line: %2" )
+                           .arg( QString::fromStdString( annotation["id"].asString() ),
+                                 itemError );
+              LayoutService::instance().deleteLayout(
+                QString::fromStdString( spec["layout_name"].asString() ) );
+              return nullptr;
+            }
+          }
+        }
+      }
+    }
   }
 
   // --- legends / scale bars / north arrows (link to map frames) -------------

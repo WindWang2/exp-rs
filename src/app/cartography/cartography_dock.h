@@ -65,6 +65,11 @@ class CartographyDock : public QgsDockWidget
     void runRepair();
     /// Runs cartography:export with the selected format/directory/dpi.
     void runExport();
+    /// Production 11.0: runs cartography:produce on the current spec
+    /// (compose → bounded repair → export → manifest, atomic publish).
+    void runProduce();
+    /// Cancels the running cartography job (TaskCenter cooperative cancel).
+    void cancelRunningJob();
 
   signals:
     /// Status-line friendly progress/feedback (the shell routes to the bar).
@@ -75,9 +80,16 @@ class CartographyDock : public QgsDockWidget
     void reloadTemplates();
     /// Template draft from current inputs (empty Json on unknown template).
     Json::Value buildDraft( QString *error ) const;
-    /// Runs one of the cartography:* operators; typed errors become *error.
-    Json::Value runOperator( const QString &operatorId, const Json::Value &params,
-                             QString *error );
+    /// Submits one of the cartography:* operators to TaskCenter (the same
+    /// registry dispatch a workflow node takes) and reports progress/busy
+    /// state. `onDone` runs on the GUI thread with the operator result (or
+    /// an empty value and a typed error). Returns false when busy or
+    /// rejected.
+    bool submitOperatorJob( const QString &operatorId, const Json::Value &params,
+                            const std::function<void( const Json::Value &, const QString & )>
+                              &onDone );
+    /// Disables the action buttons while a job runs.
+    void setBusy( bool busy );
     /// Renders page 0 of the named compiled layout into the preview label.
     void updatePreview( const QString &layoutName );
     void showReport( const QString &heading, const Json::Value &payload );
@@ -94,6 +106,8 @@ class CartographyDock : public QgsDockWidget
     QPushButton *m_preflightBtn = nullptr;
     QPushButton *m_repairBtn = nullptr;
     QPushButton *m_exportBtn = nullptr;
+    QPushButton *m_produceBtn = nullptr;
+    QPushButton *m_stopBtn = nullptr;
     QComboBox *m_formatCombo = nullptr;
     QSpinBox *m_dpiSpin = nullptr;
     QLineEdit *m_directoryEdit = nullptr;
@@ -102,6 +116,10 @@ class CartographyDock : public QgsDockWidget
 
     Json::Value m_currentSpec;
     QString m_composedLayoutName;
+    /// TaskCenter task id of the running job (-1 when idle). The dock runs
+    /// one cartography job at a time — the operators already guard shared
+    /// layout state, and a queue of UI clicks is not production.
+    long m_runningTaskId = -1;
 };
 
 } // namespace sicnu::app
