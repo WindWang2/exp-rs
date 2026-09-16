@@ -987,5 +987,165 @@
       "独立浏览",
       "unlink"
     ]
+  },
+  {
+    "id": "command.workbench.visualAnalytics",
+    "purpose": "打开可视化分析工作台：有界抽样的直方图、散点与波段曲线，并支持图表间联动刷选。",
+    "prerequisites": [
+      "当前选择包含栅格图层"
+    ],
+    "suggestedNextAction": "刷新图表后拖选直方图范围过滤散点",
+    "related": [
+      "command.view.linkCursor",
+      "command.workbench.cartography"
+    ],
+    "keywords": [
+      "可视化分析",
+      "直方图",
+      "散点",
+      "visual analytics"
+    ]
+  },
+  {
+    "id": "command.workbench.operatorCatalog",
+    "purpose": "打开 rs: 算子目录：按名称/模态搜索算子，管理最近使用与收藏。",
+    "prerequisites": [],
+    "suggestedNextAction": "选择一个算子以创建单步工作流",
+    "related": [
+      "command.workflow.new"
+    ],
+    "keywords": [
+      "算子目录",
+      "搜索",
+      "operator catalog"
+    ]
+  },
+  {
+    "id": "command.workbench.cartography",
+    "purpose": "打开制图工作台：模板草拟、操作符派发与导出证明。",
+    "prerequisites": [
+      "地图窗口存在可选图层"
+    ],
+    "suggestedNextAction": "从模板草拟开始编排地图版面",
+    "related": [
+      "command.cartography.compose"
+    ],
+    "keywords": [
+      "制图",
+      "模板",
+      "cartography"
+    ]
+  },
+  {
+    "id": "command.workbench.classifyStudio",
+    "purpose": "打开分类/变化检测工作台会话窗口。",
+    "prerequisites": [
+      "存在分类或变化检测输入数据"
+    ],
+    "suggestedNextAction": "选择影像并启动分类流程",
+    "related": [
+      "command.layer.addRaster"
+    ],
+    "keywords": [
+      "分类",
+      "变化检测",
+      "classification"
+    ]
+  },
+  {
+    "id": "command.workbench.georefDual",
+    "purpose": "打开双窗口影像配准（Image to Map / Image to Image）。",
+    "prerequisites": [
+      "已准备参考图或目标影像"
+    ],
+    "suggestedNextAction": "在源/目标窗口间刺点并求解变换",
+    "related": [
+      "command.workbench.classifyStudio"
+    ],
+    "keywords": [
+      "配准",
+      "几何校正",
+      "georeference"
+    ]
+  },
+  {
+    "id": "command.workbench.ir2Pipeline",
+    "purpose": "打开 IR 2.0 流水线设计器，编排任务节点。",
+    "prerequisites": [],
+    "suggestedNextAction": "从算子目录拖入节点开始编排",
+    "related": [
+      "command.workbench.operatorCatalog"
+    ],
+    "keywords": [
+      "流水线",
+      "设计器",
+      "pipeline designer"
+    ]
+  },
+  {
+    "id": "command.cartography.compose",
+    "purpose": "把草拟的 MapSpec 编译为带质量报告的打印版面。",
+    "prerequisites": [
+      "制图工作台存在有效模板草稿"
+    ],
+    "suggestedNextAction": "检查质量报告后执行预检",
+    "related": [
+      "command.cartography.preflight"
+    ],
+    "keywords": [
+      "排版",
+      "编译",
+      "compose"
+    ]
+  },
+  {
+    "id": "command.cartography.preflight",
+    "purpose": "对当前 MapSpec 执行出图前预检并列出修复建议。",
+    "prerequisites": [
+      "已存在编译后的版面草稿"
+    ],
+    "suggestedNextAction": "按建议修复后再次预检",
+    "related": [
+      "command.cartography.compose",
+      "command.cartography.repair"
+    ],
+    "keywords": [
+      "预检",
+      "质量",
+      "preflight"
+    ]
+  },
+  {
+    "id": "command.cartography.repair",
+    "purpose": "按预检建议自动修复 MapSpec 的常见问题。",
+    "prerequisites": [
+      "预检产生了可修复项"
+    ],
+    "suggestedNextAction": "修复后重新预检并导出",
+    "related": [
+      "command.cartography.preflight",
+      "command.cartography.export"
+    ],
+    "keywords": [
+      "修复",
+      "repair",
+      "自动修复"
+    ]
+  },
+  {
+    "id": "command.cartography.export",
+    "purpose": "以受控 DPI 导出版面并记录 sha256 证据。",
+    "prerequisites": [
+      "预检通过"
+    ],
+    "suggestedNextAction": "保存导出证明用于追溯",
+    "related": [
+      "command.cartography.preflight"
+    ],
+    "keywords": [
+      "导出",
+      "出图",
+      "export"
+    ]
   }
 ]
