@@ -1230,10 +1230,11 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
   }
 
   // --- Production 11.0: whitespace balance -----------------------------------
-  // Per declared page: one-sided content (one horizontal margin more than
-  // 2.5× the other, and the dominant margin non-trivial) reads as a
-  // mis-centered sheet. Repair shifts the whole content block by half the
-  // difference — relative geometry untouched.
+  // Per declared page: one-sided FURNITURE (one horizontal margin more
+  // than 3x the other, above 35% of the page width and above 12 mm) reads
+  // as a mis-centered sheet. Frames/insets are excluded from measurement
+  // and from the shift, so the repair converges. Repair shifts the whole
+  // movable block by half the difference — relative geometry untouched.
   {
     const int pageCount =
       spec.isMember( "pages" ) && spec["pages"].isArray()
@@ -1254,8 +1255,11 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
       {
         const char *collection = mapspec::kCollections[c];
         const std::string collectionName( collection );
+        // Measured set == movable set (the repair excludes frames/insets):
+        // measuring immovable items would make the repair non-convergent.
         if ( collectionName == "constraints" || collectionName == "layers" ||
-             collectionName == "symbols" )
+             collectionName == "symbols" || collectionName == "map_frames" ||
+             collectionName == "inset_maps" )
           continue;
         if ( !spec.isMember( collection ) || !spec[collection].isArray() )
           continue;
@@ -2078,7 +2082,8 @@ Json::Value preflightRuleCatalog()
     { "MAP_ALIGNMENT_DEVIATION", "warning", true,
       "Same-width items drift 0.5-3 mm on x (near-column misalignment); repair snaps to the peer." },
     { "MAP_WHITESPACE_IMBALANCE", "warning", true,
-      "One-sided content: one horizontal margin exceeds 2.5x the other; repair re-centers the block." },
+      "One-sided furniture block: one horizontal margin exceeds 3x the other, 35% of the "
+      "page width and 12 mm; repair re-centers the block (frames/insets excluded)." },
     { "MAP_TITLE_OVERFLOW", "warning", true, "Title text likely overflows its rect." },
     { "MAP_SOURCE_NOTE_CLIPPING", "warning", true, "Source-note text likely clipped." },
     { "MAP_TEXT_OVERFLOW", "warning", true, "Label/annotation text likely overflows its rect." },

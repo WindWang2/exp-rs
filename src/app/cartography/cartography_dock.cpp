@@ -301,9 +301,12 @@ bool CartographyDock::submitOperatorJob(
     m_runningTaskId = taskId;
     setBusy( true );
 
+    auto *lifetime = new QObject( this );
     // Progress reflection: TaskCenter owns the authoritative progress feed
     // (its task panel renders it); the dock mirrors a compact status line.
-    connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, this,
+    // Both connections ride the per-job lifetime object so stale handlers
+    // disappear with the job.
+    connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, lifetime,
              [ this ]( const sicnu::AlgorithmTaskInfo &info ) {
                  if ( info.taskId != m_runningTaskId )
                      return;
@@ -314,7 +317,6 @@ bool CartographyDock::submitOperatorJob(
                                                                   100.0 ) ) );
              } );
 
-    auto *lifetime = new QObject( this );
     connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, lifetime,
              [ this, lifetime, operatorId, onDone ]( const sicnu::AlgorithmTaskInfo &info ) {
                  if ( info.taskId != m_runningTaskId )

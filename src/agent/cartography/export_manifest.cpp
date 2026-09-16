@@ -170,6 +170,9 @@ bool writeExportManifest( const std::string &directory, const std::string &base_
         return fail( QStringLiteral( "manifest sidecar needs a bare base name and format" ) );
     if ( manifest.empty() )
         return fail( QStringLiteral( "refusing to write a manifest with zero pages" ) );
+    if ( static_cast<int>( manifest.pages.size() ) > kMaxManifestPages )
+        return fail( QStringLiteral( "manifest pages exceed the %1-entry bound" )
+                       .arg( kMaxManifestPages ) );
 
     QDir dir( QString::fromStdString( directory ) );
     if ( !dir.exists() && !dir.mkpath( "." ) )

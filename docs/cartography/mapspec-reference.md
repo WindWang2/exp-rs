@@ -165,16 +165,18 @@ a `qgis_type` marker (documented divergence).
 ## Platform 8.0 notes
 
 - **spec_version 5** (strict superset of v4): the envelope may declare an
-- **spec_version 6** (strict superset of v5; Production 11.0): page entries
-  gain `variables` (at most 32 scalar members — the page's data context,
-  tokens in `{{name}}` form substituted by the series planner before
-  compile), `series_row` (`{index, feature_id?, title?}` planner
-  provenance) and `crs` (provenance-only label); `page.role` accepts
-  "index". See migration-mapspec-v6.md and production.md.
   `output` block (formats `png`/`pdf`, dpi 72..1200, optional dir). It is
   validated and surfaced through `cartography:compose` /
   `confirmMapOutput`, but compilation never auto-exports — delivery stays an
   explicit governed action. `upgradeMapSpec` re-stamps v≤4 documents to 5.
+- **spec_version 6** (strict superset of v5; Production 11.0): the body
+  `page` and/or page entries gain `variables` (at most 32 scalar members —
+  the page's data context, tokens in `{{name}}` form substituted by the
+  series planner before compile), `series_row` (`{index, feature_id?,
+  title?}` planner provenance) and `crs` (provenance-only label);
+  `page.role` accepts "index". Physical page 0's metadata lives on the
+  body `page` (pages[k] is physical page k+1). See migration-mapspec-v6.md
+  and production.md.
 - **Typed bindings**: per-item `binding` objects are shape-validated
   (non-empty string `mode`; string `layer`/`field`/`expression`
   fields; object `params`; `data` bounded at 256 entries; square

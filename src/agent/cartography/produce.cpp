@@ -251,6 +251,15 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
             "layout atlas is enabled but has no coverage layer; declare "
             "page.atlas.coverage_layer and re-compose" ) );
 
+    // Repair-added furniture can itself introduce the render hazard (the
+    // add_legend repair links to the main map frame): re-check AFTER the
+    // quality/structural gates so those refusals keep their codes, and so
+    // produce refuses instead of hanging the executor in legend paint.
+    const std::string postRepairHazard = legendAutoUpdateHazard( working );
+    if ( !postRepairHazard.empty() )
+        return refused( "UNSAFE_LEGEND_AUTO_UPDATE",
+                        QString::fromStdString( postRepairHazard ) );
+
     const bool atlasMode = request.format == "png" && layout->atlas() &&
                            layout->atlas()->enabled() &&
                            layout->atlas()->coverageLayer() != nullptr;
@@ -315,7 +324,14 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
         if ( request.write_manifest )
         {
             if ( !report( reporter, "manifest", 0.9, "writing manifest" ) )
-                return refused( "PRODUCE_CANCELLED", QStringLiteral( "cancelled before manifest" ) );
+            {
+                // The pages were already delivered: a cancel at the last
+                // commit step rolls them back like any other failure.
+                for ( const QString &path : deliveredPaths )
+                    QFile::remove( path );
+                return refused( "PRODUCE_CANCELLED",
+                                QStringLiteral( "cancelled before manifest" ) );
+            }
             std::string manifestError;
             if ( !writeExportManifest( request.directory, baseName.toStdString(), "png", manifest,
                                        &manifestError ) )
@@ -359,7 +375,10 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
     if ( request.write_manifest )
     {
         if ( !report( reporter, "manifest", 0.9, "writing manifest" ) )
+        {
+            rollbackArtifacts( result, QString() );
             return refused( "PRODUCE_CANCELLED", QStringLiteral( "cancelled before manifest" ) );
+        }
         ExportManifest manifest;
         manifest.layout_name = working["layout_name"].asString();
         manifest.format = request.format;
@@ -388,6 +407,7 @@ ProduceResult produceMap( const ProduceRequest &request, const ProduceReporter &
             ProduceResult failed =
               refused( "MANIFEST_FAILED", QString::fromStdString( manifestError ) );
             rollbackArtifacts( result, QString() );
+            failed.artifact_path.clear();
             return failed;
         }
         result.manifest = manifest.toJson();

@@ -30,6 +30,7 @@
 #include <qgsgeometry.h>
 #include <qgspointxy.h>
 #include <qgslayoutatlas.h>
+#include <qgslayoutpagecollection.h>
 #include <qgsprintlayout.h>
 #include <qgsproject.h>
 #include <qgsvectorlayer.h>
@@ -332,11 +333,12 @@ TEST_CASE( "produce single-mode delivers artifact + manifest and rolls back on c
     QgsVectorLayer *basemap = new QgsVectorLayer(
       QStringLiteral( "Point?crs=EPSG:4326" ), QStringLiteral( "cp11-basemap" ),
       QStringLiteral( "memory" ) );
-    QgsProject::instance()->addMapLayer( basemap );
+    const QString basemapId = QgsProject::instance()->addMapLayer( basemap )->id();
     struct LayerCleanup
     {
-        ~LayerCleanup() { QgsProject::instance()->removeMapLayer( QStringLiteral( "cp11-basemap" ) ); }
-    } cleanup;
+        QString id;
+        ~LayerCleanup() { QgsProject::instance()->removeMapLayer( id ); }
+    } cleanup{ basemapId };
 
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
@@ -421,11 +423,18 @@ TEST_CASE( "produce require_preflight_pass refuses a document with non-repairabl
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
 
-    Json::Value spec = frameSpec( "produce-strict-map" );
-    // An atlas enabled without a coverage layer is MAP_ATLAS_INCOMPLETE: a
-    // non-repairable preflight ERROR validation tolerates — bounded repair
-    // cannot fix it, so strict production must refuse.
-    spec["page"]["atlas"] = parse( R"({ "enabled": true })" );
+    // A document with NO map frame is MAP_MISSING_MAP: a non-repairable
+    // preflight ERROR validation tolerates — bounded repair cannot fix it,
+    // so strict production must refuse. The declared legend is taken out
+    // of auto-update (columns > 1) so the render-hazard gate stays quiet
+    // and the preflight refusal keeps its code.
+    Json::Value spec = makeMapSpec( "produce-strict-map", Json::Value() );
+    Json::Value legend( Json::objectValue );
+    legend["id"] = "legend-safe";
+    legend["title"] = "Legend";
+    legend["columns"] = 2;
+    legend["rect_mm"] = parse( R"([230, 30, 55, 80])" );
+    appendMapSpecItem( spec, "legends", legend );
 
     ProduceRequest strict;
     strict.mapspec = spec;
@@ -497,18 +506,23 @@ TEST_CASE( "series planner materializes multi-page specs with variables and exte
     const Json::Value spec = planSeries( tmpl, definition, &problems );
     REQUIRE( !spec.isNull() );
     CHECK( problems.empty() );
-    // 2 content pages + index page.
+    // Engine page convention: physical page 0 is the body; pages[k] is
+    // physical page k+1. 3 rows (2 content + index) → 2 pages entries.
     REQUIRE( spec["pages"].isArray() );
-    CHECK( spec["pages"].size() == 3 );
+    CHECK( spec["pages"].size() == 2 );
     CHECK( spec["spec_version"].asInt() == kMapSpecCurrentVersion );
-    CHECK( spec["pages"][0]["variables"]["region"].asString() == "North Basin" );
-    CHECK( spec["pages"][0]["series_row"]["index"].asInt() == 0 );
-    CHECK( spec["pages"][2]["role"].asString() == "index" );
+    // Row 0's metadata rides on the body `page`.
+    CHECK( spec["page"]["variables"]["region"].asString() == "North Basin" );
+    CHECK( spec["page"]["series_row"]["index"].asInt() == 0 );
+    CHECK( spec["pages"][0]["variables"]["region"].asString() == "South Basin" );
+    CHECK( spec["pages"][0]["series_row"]["index"].asInt() == 1 );
+    CHECK( spec["pages"][1]["role"].asString() == "index" );
 
-    // Page 0 keeps template ids; page 1 gets -p1 clones.
+    // Page 0 keeps template ids (mutated in place); pages k clone -p<k>.
     CHECK( spec["map_frames"][0]["id"].asString() == "map-1" );
     CHECK( spec["map_frames"][1]["id"].asString() == "map-1-p1" );
     CHECK( spec["map_frames"][1]["page"].asInt() == 1 );
+    CHECK( spec["map_frames"][2]["id"].asString() == "map-1-p2" );
     // The row extent landed on page 0's frame; the token substitutions ran.
     CHECK( spec["map_frames"][0]["extent"][0].asDouble() == Catch::Approx( 100.0 ) );
     CHECK( spec["titles"][0]["text"].asString() == "North Basin" );
@@ -516,6 +530,8 @@ TEST_CASE( "series planner materializes multi-page specs with variables and exte
     CHECK( spec["titles"][2]["text"].asString() == "Index" );
     CHECK( spec["labels"][0]["text"].asString() == "1 / 3" );
     CHECK( spec["labels"][1]["text"].asString() == "2 / 3" );
+    CHECK( spec["labels"][2]["text"].asString() == "3 / 3" );
+    CHECK( spec["labels"][3]["page"].asInt() == 2 );
 
     // The materialized document validates clean (v6 surface included).
     const std::vector<std::string> validationProblems = validateMapSpec( spec );
@@ -843,8 +859,16 @@ TEST_CASE( "atlas count contract: updateFeatures refreshes, count does not",
 TEST_CASE( "atlas requests refuse typed failures before any write", "[cp11][atlas]" )
 {
     // Atlas enabled, coverage missing → typed refusal, empty directory.
+    // The declared columns>1 legend keeps the repair pass from adding an
+    // auto-update one (which would trip UNSAFE_LEGEND_AUTO_UPDATE first).
     Json::Value noCoverage = frameSpec( "produce-atlas-map-b" );
     noCoverage["page"]["atlas"] = parse( R"({ "enabled": true })" );
+    Json::Value legend( Json::objectValue );
+    legend["id"] = "legend-safe-b";
+    legend["title"] = "Legend";
+    legend["columns"] = 2;
+    legend["rect_mm"] = parse( R"([230, 30, 55, 80])" );
+    appendMapSpecItem( noCoverage, "legends", legend );
     QTemporaryDir dir;
     REQUIRE( dir.isValid() );
     ProduceRequest request;
@@ -869,7 +893,17 @@ TEST_CASE( "atlas production is cancellable on a page boundary and leaves nothin
     REQUIRE( dir.isValid() );
 
     ProduceRequest request;
-    request.mapspec = atlasSpec( "produce-atlas-map-c", QStringLiteral( "atlas-cities-c" ) );
+    Json::Value spec = atlasSpec( "produce-atlas-map-c", QStringLiteral( "atlas-cities-c" ) );
+    // Declared columns>1 legend: repair has nothing to add, so the
+    // post-repair hazard check stays quiet and the page-boundary cancel is
+    // what fires.
+    Json::Value legend( Json::objectValue );
+    legend["id"] = "legend-safe-c";
+    legend["title"] = "Legend";
+    legend["columns"] = 2;
+    legend["rect_mm"] = parse( R"([230, 30, 55, 80])" );
+    appendMapSpecItem( spec, "legends", legend );
+    request.mapspec = spec;
     request.format = "png";
     request.dpi = 72.0;
     request.directory = dir.path().toStdString();
@@ -1059,4 +1093,90 @@ TEST_CASE( "every shipped template survives instantiate→produce (corpus smoke)
         WARN( "corpus degradation: " << degradation );
     CHECK( failures.empty() );
     CHECK( delivered > 0 );
+}
+
+TEST_CASE( "materialized series compiles to exactly N physical pages (no render)",
+           "[cp11][series]" )
+{
+    // The P0 review finding regression test: pages[k] is physical page
+    // k+1, so a 3-row series must compile to exactly 3 physical pages —
+    // never an extra trailing blank.
+    Json::Value tmpl = frameSpec( "series-compile-map" );
+    Json::Value title( Json::objectValue );
+    title["id"] = "title-1";
+    title["semantic_role"] = "title.main";
+    title["text"] = "{{region}}";
+    Json::Value titleRect( Json::arrayValue );
+    titleRect.append( 12 );
+    titleRect.append( 6 );
+    titleRect.append( 200 );
+    titleRect.append( 14 );
+    title["rect_mm"] = titleRect;
+    tmpl["titles"].append( title );
+
+    Json::Value definition( Json::objectValue );
+    definition["type"] = "table";
+    definition["rows"] = parse( R"([
+      { "title": "A", "variables": { "region": "A" } },
+      { "title": "B", "variables": { "region": "B" } },
+      { "title": "C", "variables": { "region": "C" } }
+    ])" );
+    std::vector<std::string> problems;
+    const Json::Value spec = planSeries( tmpl, definition, &problems );
+    REQUIRE( !spec.isNull() );
+    REQUIRE( validateMapSpec( spec ).empty() );
+
+    QString compileError;
+    QgsPrintLayout *layout = MapSpecCompiler::compile( spec, &compileError );
+    REQUIRE( layout != nullptr );
+    CHECK( layout->pageCollection()->pageCount() == 3 );
+}
+
+TEST_CASE( "vector series source refuses bad definitions with problems",
+           "[cp11][series]" )
+{
+    std::vector<std::string> problems;
+    const Json::Value unknownLayer =
+      planSeries( frameSpec( "series-vector-x" ),
+                  parse( R"({ "type": "vector", "layer": "no-such-layer" })" ), &problems );
+    CHECK( unknownLayer.isNull() );
+    REQUIRE( !problems.empty() );
+
+    problems.clear();
+    const Json::Value notVector = planSeries(
+      frameSpec( "series-vector-y" ),
+      parse( R"({ "type": "vector", "layer": "no-such-layer", "filter": "(((" })" ),
+      &problems );
+    CHECK( notVector.isNull() );
+    CHECK( !problems.empty() );
+}
+
+TEST_CASE( "whitespace repair converges (frames excluded from measurement)",
+           "[cp11][preflight11]" )
+{
+    Json::Value lopsided = frameSpec( "lopsided-converge" );
+    lopsided["map_frames"][0]["rect_mm"] = parse( R"([2, 24, 185, 160])" );
+    Json::Value title( Json::objectValue );
+    title["id"] = "title-1";
+    title["semantic_role"] = "title.main";
+    title["text"] = "T";
+    title["rect_mm"] = parse( R"([2, 6, 100, 12])" );
+    lopsided["titles"].append( title );
+
+    Json::Value repaired = lopsided;
+    int iterations = 0;
+    for ( ; iterations < 10; ++iterations )
+    {
+        const Json::Value report = preflightMapSpec( repaired );
+        if ( report["passed"].asBool() )
+            break;
+        int applied = repairMapSpecWithLedger( repaired, report, nullptr );
+        if ( applied == 0 )
+            break;
+    }
+    const Json::Value finalReport = preflightMapSpec( repaired );
+    for ( const auto &item : finalReport["issues"] )
+        CHECK( item["code"].asString() != "MAP_WHITESPACE_IMBALANCE" );
+    // Bounded convergence: the movable block actually moved toward center.
+    CHECK( repaired["titles"][0]["rect_mm"][0].asDouble() > 2.0 );
 }

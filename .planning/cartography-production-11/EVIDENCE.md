@@ -36,3 +36,12 @@
 - 规则收敛修复: MAP_WHITESPACE_IMBALANCE 阈值收紧（band > 3×对侧 且 > 35% 页宽）——master "quality-good" fixture（左置地图+宽右带）误报消除。
 - v6 版本 pin 更新: test_platform7 kMapSpecCurrentVersion==5→6（测试自身注释声明"strict-superset 才动"——v6 符合）。
 - 计划内迭代: series 基集合清空（页0重复克隆缺陷）、UNSAFE_LEGEND_AUTO_UPDATE 护栏前置到 repair 之前、atlas count() 时序（updateFeatures 显式刷新）。
+
+
+## Review 修复与最终双验证（2026-09-16 傍晚）
+
+- 对抗审查（subagent #2）：P0=1/P1=3/P2=6/P3=5 → P0/P1 全修，P2 修5 disposition1，P3 修2 disposition3（REVIEW_LOG.md 全表）。
+- 修复后门序：repair → require_preflight_pass → atlas 结构检查 → UNSAFE_LEGEND_AUTO_UPDATE（声明+repair 后重查）→ export。
+- **双验证（Oracle 6）**：[cp11] RUN1/RUN2 = 19|15 passed|4 skipped|0 failed；test_mapspec ~[visual] RUN1/RUN2 = 213|211|2 failed（宿主 rename，两次一致）。
+- **宿主 rename 预存在的 stash 对照**：git stash → 纯 a5b11b7f 重建 → 同用例同错 → pop。证据：baseline1.txt。
+- OUT_OF_SCOPE（最终）：issues #1001–#1007（非制图域）；master [visual] 渲染挂死 + %TEMP% rename 失败（宿主状态，已对照证明，渲染门 opt-in 机制交付）。

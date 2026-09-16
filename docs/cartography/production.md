@@ -112,7 +112,7 @@ beginRender/next 迭代，逐页 temp→校验(sha256)→rename 原子写入：
 |---|---|---|
 | `MAP_TINY_FONT_PRINT` | 声明 print 交付（output.dpi≥300）时注记类文字 <7pt | 提到 7pt |
 | `MAP_ALIGNMENT_DEVIATION` | 同集合同页同宽条目 x 漂移 0.5–3mm | 吸附到 peer |
-| `MAP_WHITESPACE_IMBALANCE` | 左右留白比 >2.5× 且大侧 >12mm | 平移整块内容 |
+| `MAP_WHITESPACE_IMBALANCE` | 一侧留白 >3× 对侧、>35% 页宽且 >12mm（仅计可移动家具，frame/inset 除外） | 平移整块内容 |
 | `MAP_REQUIRED_FURNITURE_MISSING` | 模板契约缺家具 | add_* 家具修复 |
 
 （原计划 `MAP_LEGEND_TRUNCATION` 与既有 `MAP_LEGEND_DENSITY` 语义重复，未

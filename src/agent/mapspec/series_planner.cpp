@@ -123,13 +123,81 @@ void appendTextSubstitution( Json::Value &clone, const std::string &collection,
                                       pageTotal, unknownTokens );
 }
 
-/// Deep-copies the template's items to page `pageIndex`, applying the row's
-/// substitutions and extent. `idMap` translates every cloned id (empty for
-/// page 0 where ids are kept); reference members are remapped through it.
-void appendPageItems( Json::Value &spec, const Json::Value &templateSpec, int pageIndex,
-                      const SeriesRow &row, int pageTotal,
-                      const std::map<std::string, std::string> &idMap,
-                      std::vector<std::string> *problems )
+/// Applies one row to one template item. `inPlace` mutates page 0's own
+/// item (engine convention: physical page 0 comes from the document body
+/// and `pages[k]` is physical page k+1); the clone path appends a
+/// `-p<pageIndex>` copy with references remapped to its page siblings.
+void applyRowToItem( Json::Value &spec, const char *collection, int indexInCollection,
+                     const Json::Value &item, int pageIndex, const SeriesRow &row,
+                     int pageTotal, const std::map<std::string, std::string> &idMap,
+                     std::set<std::string> *unknownTokens )
+{
+    if ( !item.isObject() )
+        return;
+    Json::Value clone = item;
+    if ( !clone.isMember( "id" ) || !clone["id"].isString() )
+        return; // validateMapSpec owns the malformed-item report
+    const std::string oldId = clone["id"].asString();
+    const std::string newId =
+      pageIndex == 0 ? oldId : oldId + "-p" + std::to_string( pageIndex );
+    clone["id"] = newId;
+    if ( pageIndex != 0 )
+        clone["page"] = pageIndex;
+
+    // Per-row extent lands on the page's map frame.
+    if ( std::string( collection ) == "map_frames" && row.extent.isArray() &&
+         row.extent.size() == 4 )
+        clone["extent"] = row.extent;
+
+    if ( isTextCollection( collection ) )
+        appendTextSubstitution( clone, collection, row, pageIndex, pageTotal, unknownTokens );
+
+    // Reference remapping (clones reference their page siblings).
+    if ( pageIndex != 0 )
+    {
+        if ( clone.isMember( "map_ref" ) && clone["map_ref"].isString() )
+        {
+            const auto it = idMap.find( clone["map_ref"].asString() );
+            if ( it != idMap.end() )
+                clone["map_ref"] = it->second;
+        }
+        if ( clone.isMember( "locator" ) && clone["locator"].isObject() &&
+             clone["locator"].isMember( "target" ) && clone["locator"]["target"].isString() )
+        {
+            const auto it = idMap.find( clone["locator"]["target"].asString() );
+            if ( it != idMap.end() )
+                clone["locator"]["target"] = it->second;
+        }
+        if ( std::string( collection ) == "constraints" && clone.isMember( "items" ) &&
+             clone["items"].isArray() )
+        {
+            Json::Value remapped( Json::arrayValue );
+            for ( const auto &reference : clone["items"] )
+            {
+                if ( !reference.isString() )
+                {
+                    remapped.append( reference );
+                    continue;
+                }
+                const auto it = idMap.find( reference.asString() );
+                remapped.append( it != idMap.end() ? it->second : reference );
+            }
+            clone["items"] = remapped;
+        }
+    }
+
+    if ( pageIndex == 0 )
+        spec[collection][indexInCollection] = clone;
+    else
+        spec[collection].append( clone );
+}
+
+/// Applies one row to a whole page: page 0 mutates the document's own items
+/// in place; pages k ≥ 1 append clones.
+void applyRowToPage( Json::Value &spec, const Json::Value &templateSpec, int pageIndex,
+                     const SeriesRow &row, int pageTotal,
+                     const std::map<std::string, std::string> &idMap,
+                     std::vector<std::string> *problems )
 {
     std::set<std::string> unknownTokens;
     for ( int c = 0; c < kCollectionCount; ++c )
@@ -137,64 +205,10 @@ void appendPageItems( Json::Value &spec, const Json::Value &templateSpec, int pa
         const char *collection = kCollections[c];
         if ( !templateSpec.isMember( collection ) || !templateSpec[collection].isArray() )
             continue;
-        for ( const auto &item : templateSpec[collection] )
-        {
-            if ( !item.isObject() )
-                continue;
-            Json::Value clone = item;
-            if ( !clone.isMember( "id" ) || !clone["id"].isString() )
-                continue; // validateMapSpec owns the malformed-item report
-            const std::string oldId = clone["id"].asString();
-            const std::string newId =
-              pageIndex == 0 ? oldId : oldId + "-p" + std::to_string( pageIndex );
-            clone["id"] = newId;
-            clone["page"] = pageIndex;
-
-            // Per-row extent lands on the page's map frame.
-            if ( collection == std::string( "map_frames" ) && row.extent.isArray() &&
-                 row.extent.size() == 4 )
-                clone["extent"] = row.extent;
-
-            if ( isTextCollection( collection ) )
-                appendTextSubstitution( clone, collection, row, pageIndex, pageTotal,
-                                        &unknownTokens );
-
-            // Reference remapping (clones reference their page siblings).
-            if ( pageIndex != 0 )
-            {
-                if ( clone.isMember( "map_ref" ) && clone["map_ref"].isString() )
-                {
-                    const auto it = idMap.find( clone["map_ref"].asString() );
-                    if ( it != idMap.end() )
-                        clone["map_ref"] = it->second;
-                }
-                if ( clone.isMember( "locator" ) && clone["locator"].isObject() &&
-                     clone["locator"].isMember( "target" ) &&
-                     clone["locator"]["target"].isString() )
-                {
-                    const auto it = idMap.find( clone["locator"]["target"].asString() );
-                    if ( it != idMap.end() )
-                        clone["locator"]["target"] = it->second;
-                }
-                if ( collection == std::string( "constraints" ) &&
-                     clone.isMember( "items" ) && clone["items"].isArray() )
-                {
-                    Json::Value remapped( Json::arrayValue );
-                    for ( const auto &reference : clone["items"] )
-                    {
-                        if ( !reference.isString() )
-                        {
-                            remapped.append( reference );
-                            continue;
-                        }
-                        const auto it = idMap.find( reference.asString() );
-                        remapped.append( it != idMap.end() ? it->second : reference );
-                    }
-                    clone["items"] = remapped;
-                }
-            }
-            spec[collection].append( clone );
-        }
+        const int count = static_cast<int>( templateSpec[collection].size() );
+        for ( int i = 0; i < count; ++i )
+            applyRowToItem( spec, collection, i, templateSpec[collection][i], pageIndex, row,
+                            pageTotal, idMap, &unknownTokens );
     }
     for ( const std::string &token : unknownTokens )
         addProblem( problems, "page " + std::to_string( pageIndex + 1 ) + ": unknown token {{" +
@@ -208,7 +222,9 @@ Json::Value buildIndexText( const std::vector<SeriesRow> &rows, const std::strin
     for ( size_t index = 0; index < rows.size(); ++index )
     {
         const std::string label =
-          rows[index].title.empty() ? std::string( "Page " ) : rows[index].title;
+          rows[index].title.empty()
+            ? "Page " + std::to_string( index + 1 )
+            : rows[index].title;
         text.append( std::to_string( index + 1 ) ).append( ". " ).append( label );
         if ( index + 1 < rows.size() )
             text.append( "\n" );
@@ -487,16 +503,14 @@ Json::Value planSeriesPages( const Json::Value &template_spec,
     }
 
     Json::Value spec = base;
-    // The page clones are appended fresh from `base` for EVERY page
-    // (including page 0, which keeps the template ids): drop the base
-    // collections first or page 0 would exist twice (original + unmodified
-    // clone).
-    for ( int c = 0; c < kCollectionCount; ++c )
-        spec[kCollections[c]] = Json::Value( Json::arrayValue );
     const int pageTotal = static_cast<int>( rows.size() );
 
-    // Page 0 keeps the template's item ids; pages k ≥ 1 clone every item
-    // with a `-p<k>` suffix and remap the id references to their siblings.
+    // Engine page convention: physical page 0 is the document body
+    // (`spec["page"]` + un-suffixed items); each `pages[k]` entry is the
+    // ADDITIONAL physical page k+1 (see MapSpecCompiler and
+    // expandMasterFurniture). The series therefore applies row 0 in place
+    // and materializes pages[] entries only for k ≥ 1 — a 1-row series
+    // stays a plain single-page document with no pages array at all.
     std::map<std::string, std::string> idMap;
     if ( pageTotal > 1 )
     {
@@ -517,8 +531,27 @@ Json::Value planSeriesPages( const Json::Value &template_spec,
         }
     }
 
+    // Row 0: mutate the document body in place; its series metadata rides
+    // on `page` (validated by the v6 surface).
+    applyRowToPage( spec, base, 0, rows[0], pageTotal, std::map<std::string, std::string>(),
+                    problems );
+    if ( !spec.isMember( "page" ) || !spec["page"].isObject() )
+        spec["page"] = Json::Value( Json::objectValue );
+    if ( rows[0].variables.isObject() )
+        spec["page"]["variables"] = rows[0].variables;
+    Json::Value rowProvenance( Json::objectValue );
+    rowProvenance["index"] = 0;
+    if ( !rows[0].feature_id.empty() )
+        rowProvenance["feature_id"] = rows[0].feature_id;
+    if ( !rows[0].title.empty() )
+        rowProvenance["title"] = rows[0].title;
+    spec["page"]["series_row"] = rowProvenance;
+    if ( !rows[0].crs.empty() )
+        spec["page"]["crs"] = rows[0].crs;
+
+    // Rows 1..N-1: cloned pages.
     Json::Value pages( Json::arrayValue );
-    for ( int k = 0; k < pageTotal; ++k )
+    for ( int k = 1; k < pageTotal; ++k )
     {
         Json::Value pageEntry( Json::objectValue );
         if ( base.isMember( "page" ) && base["page"].isObject() )
@@ -546,10 +579,8 @@ Json::Value planSeriesPages( const Json::Value &template_spec,
 
         // This page's reference map: oldId → oldId-p<k>.
         std::map<std::string, std::string> pageMap;
-        if ( k > 0 )
         {
             const std::string keySuffix = "@p" + std::to_string( k );
-            const std::string idSuffix = "-p" + std::to_string( k );
             for ( const auto &entry : idMap )
                 if ( entry.first.size() > keySuffix.size() && entry.first.compare(
                        entry.first.size() - keySuffix.size(), keySuffix.size(),
@@ -557,9 +588,10 @@ Json::Value planSeriesPages( const Json::Value &template_spec,
                     pageMap[entry.first.substr( 0, entry.first.size() - keySuffix.size() )] =
                       entry.second;
         }
-        appendPageItems( spec, base, k, rows[k], pageTotal, pageMap, problems );
+        applyRowToPage( spec, base, k, rows[k], pageTotal, pageMap, problems );
     }
-    spec["pages"] = pages;
+    if ( !pages.empty() )
+        spec["pages"] = pages;
     return spec;
 }
 
@@ -629,7 +661,10 @@ Json::Value planSeries( const Json::Value &template_spec, const Json::Value &def
         indexEntry["role"] = "index";
         Json::Value label( Json::objectValue );
         label["id"] = "series-index";
-        label["page"] = spec["pages"].size() - 1;
+        // Engine page convention: pages[k] is physical page k+1, so the
+        // last pages entry (the index row) renders on physical page
+        // pages.size().
+        label["page"] = spec["pages"].size();
         Json::Value rect( Json::arrayValue );
         rect.append( 20.0 );
         rect.append( 30.0 );

@@ -1003,6 +1003,43 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
     }
   }
 
+  // --- v6: series/production metadata on the document body page -------------
+  // The series planner stamps row 0's metadata onto `page` (physical page
+  // 0 comes from the body; pages[k] is physical page k+1).
+  const auto validatePageVariables = [ &problems ]( const Json::Value &variables,
+                                                    const char *where ) {
+      if ( !variables.isObject() || variables.size() > 32 )
+      {
+          problems.push_back( std::string( where ) +
+                              ".variables must be an object with at most 32 members" );
+          return;
+      }
+      for ( const auto &name : variables.getMemberNames() )
+      {
+          const Json::Value &value = variables[name];
+          if ( !value.isString() && !value.isNumeric() && !value.isBool() && !value.isNull() )
+          {
+              problems.push_back( std::string( where ) + ".variables['" + name +
+                                  "'] must be scalar" );
+              break;
+          }
+      }
+  };
+  if ( spec.isMember( "page" ) && spec["page"].isObject() )
+  {
+      const Json::Value &bodyPage = spec["page"];
+      if ( bodyPage.isMember( "variables" ) )
+          validatePageVariables( bodyPage["variables"], "page" );
+      if ( bodyPage.isMember( "series_row" ) &&
+           ( !bodyPage["series_row"].isObject() ||
+             ( bodyPage["series_row"].isMember( "index" ) &&
+               !bodyPage["series_row"]["index"].isIntegral() ) ) )
+          problems.push_back( "page.series_row must be an object with an integer index" );
+      if ( bodyPage.isMember( "crs" ) &&
+           ( !bodyPage["crs"].isString() || bodyPage["crs"].asString().empty() ) )
+          problems.push_back( "page.crs must be a non-empty string" );
+  }
+
   // --- v2: pages + item page indices ----------------------------------------
   if ( spec.isMember( "pages" ) )
   {
@@ -1035,24 +1072,7 @@ std::vector<std::string> validateMapSpec( const Json::Value &spec )
         // v6: series/production page metadata (variables + planner
         // provenance + provenance-only CRS label).
         if ( pageEntry.isMember( "variables" ) )
-        {
-          const Json::Value &variables = pageEntry["variables"];
-          if ( !variables.isObject() || variables.size() > 32 )
-            problems.push_back( "page.variables must be an object with at most 32 members" );
-          else
-          {
-            for ( const auto &name : variables.getMemberNames() )
-            {
-              const Json::Value &value = variables[name];
-              if ( !value.isString() && !value.isNumeric() && !value.isBool() &&
-                   !value.isNull() )
-              {
-                problems.push_back( "page.variables['" + name + "'] must be scalar" );
-                break;
-              }
-            }
-          }
-        }
+          validatePageVariables( pageEntry["variables"], "page" );
         if ( pageEntry.isMember( "series_row" ) &&
              ( !pageEntry["series_row"].isObject() ||
                ( pageEntry["series_row"].isMember( "index" ) &&

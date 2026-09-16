@@ -101,8 +101,12 @@ honest QGIS/toolchain boundaries.
 - **Export evidence is durable**: the manifest sidecar carries per-page
   sha256/bytes and the compose-time structural digest; the environment
   block documents the producing host but is excluded from the manifest
-  digest. PDF metadata/vector settings beyond QGIS's defaults (font
-  embedding policy, ICC color spaces) remain QGIS-native configuration.
+  digest. Delivery names that already exist are REPLACED (the rename is
+  the commit point) — a later-stage rollback therefore removes the
+  replaced file rather than restoring the pre-call bytes; no partial
+  files are ever left behind. PDF metadata/vector settings beyond QGIS's
+  defaults (font embedding policy, ICC color spaces) remain QGIS-native
+  configuration.
 - **Series materialization is capped at 10 pages** (the document pages[]
   cap): larger feature-driven products belong to the atlas delivery path,
   and the planner says so instead of truncating.

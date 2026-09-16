@@ -331,7 +331,7 @@ MapAtlasExportResult exportMapAtlas( QgsPrintLayout *layout, const MapAtlasExpor
                                    "everything or the coverage layer is empty)" );
     return result;
   }
-  const int maxPages = std::max( 1, request.max_pages );
+  const int maxPages = std::clamp( request.max_pages, 1, kMaxAtlasExportPages );
   if ( featureCount > maxPages )
   {
     result.error = QStringLiteral( "layout atlas would deliver %1 pages, above the %2-page "
