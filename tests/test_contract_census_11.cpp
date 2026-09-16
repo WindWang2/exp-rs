@@ -267,17 +267,17 @@ TEST_CASE( "census scanner recovers a synthetic registration tree",
     }
 
     const auto scan = scanDeterminismOverrides( root.string() );
-    REQUIRE( scan.count( "demo:derived" ) == 1 );
-    REQUIRE( scan.count( "demo:tol" ) == 1 );
-    REQUIRE( scan.count( "demo:export" ) == 1 );
+    REQUIRE( scan.count( "io:demo_derived" ) == 1 );
+    REQUIRE( scan.count( "io:demo_tol" ) == 1 );
+    REQUIRE( scan.count( "io:demo_export" ) == 1 );
 
-    const auto &derived = scan.at( "demo:derived" );
+    const auto &derived = scan.at( "io:demo_derived" );
     CHECK( derived.gradeOverride );
     CHECK( derived.gradeLiteral == "bit-exact" );
     CHECK( derived.baseDepth == 1 ); // inherited through the namespaced base
     CHECK_FALSE( derived.runtimeOverride );
 
-    const auto &tol = scan.at( "demo:tol" );
+    const auto &tol = scan.at( "io:demo_tol" );
     CHECK( tol.gradeOverride );
     CHECK( tol.gradeLiteral == "tolerance" );
     CHECK( tol.runtimeOverride );
@@ -286,7 +286,7 @@ TEST_CASE( "census scanner recovers a synthetic registration tree",
 
     // A trailing-`final` class with an export-style qualified base is still
     // resolved to ITS name (not "final") with its own override.
-    const auto &exp = scan.at( "demo:export" );
+    const auto &exp = scan.at( "io:demo_export" );
     CHECK( exp.gradeOverride );
     CHECK( exp.gradeLiteral == "tolerance" );
     CHECK( exp.baseDepth == 0 );

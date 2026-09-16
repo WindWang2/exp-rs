@@ -231,14 +231,16 @@ std::map<std::string, ClassSlice> scanClassSlices(
             std::string name = ( *mit )[2].str();
             if ( name == "final" )
             {
-                // Trailing `final`: the real name is the last prefix token
-                // ("class Foo final : ...").
-                const std::string prefix = ( *mit )[1].str();
-                const auto last = prefix.find_last_of( " \t" );
-                name = prefix.substr(
-                    last == std::string::npos ? 0 : last + 1 );
-                while ( !name.empty() && ( name.back() == ' ' || name.back() == '\t' ) )
-                    name.pop_back();
+                // Trailing `final`: the real name is the last token of the
+                // prefix ("class Foo final : ..." → group1 = "Foo ").
+                std::string prefix = ( *mit )[1].str();
+                while ( !prefix.empty()
+                        && ( prefix.back() == ' ' || prefix.back() == '\t'
+                             || prefix.back() == '\r' || prefix.back() == '\n' ) )
+                    prefix.pop_back();
+                const auto last = prefix.find_last_of( " \t\r\n" );
+                name = last == std::string::npos ? prefix
+                                                 : prefix.substr( last + 1 );
             }
             if ( !classNames.count( name ) || slices.count( name ) )
                 continue;
