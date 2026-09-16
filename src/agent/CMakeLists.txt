@@ -131,6 +131,8 @@ add_library(sicnu_agent SHARED
   spatial_tools/result_assessment_tool.h
   spatial_tools/capability_tools.cpp
     spatial_tools/io_tools.cpp
+    spatial_tools/terrain_spatial_tools.cpp
+    spatial_tools/terrain_spatial_tools.h
   spatial_tools/capability_tools.h
   spatial_tools/workflow_preflight_tool.cpp
   spatial_tools/workflow_preflight_tool.h

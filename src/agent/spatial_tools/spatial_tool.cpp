@@ -14,6 +14,7 @@
 #include "result_assessment_tool.h"
 #include "capability_tools.h"
 #include "io_tools.h"
+#include "terrain_spatial_tools.h"
 #include "workflow_preflight_tool.h"
 #include "../cartography/cartography_tools.h"
 #include "../symbology/symbology_tools.h"
@@ -249,6 +250,7 @@ void SpatialToolRegistry::registerBuiltinTools()
   registerCapabilityTools();
   // Foundation 5.0: read-only io: probe/capabilities/product surfaces.
   registerIoTools();
+  registerTerrainTools();
   registerWorkflowPreflightTool();
   cartography::registerCartographyTools();
   symbology::registerSymbologyTools();
