@@ -68,6 +68,11 @@ const struct Entry {
     { "OUTPUT_PATH_COLLISION",   { "validation", RetryClass::None } },
     { "NONDETERMINISTIC_CHAIN",  { "validation", RetryClass::None } },
     { "FACT_CONFLICT",           { "validation", RetryClass::None } },
+    // Compiler & Grounding 11.0: fact model 2.0 / analysis 2.0 (append-only).
+    { "TEMPORAL_CALENDAR_CONFLICT", { "validation", RetryClass::None } },
+    { "NUMERIC_DOMAIN_CHAIN",    { "validation", RetryClass::None } },
+    { "BAND_IDENTITY_MISMATCH",  { "validation", RetryClass::None } },
+    { "OUTPUT_IDENTITY_MISMATCH", { "validation", RetryClass::None } },
 };
 const Entry *kEntriesEnd = kEntries + sizeof( kEntries ) / sizeof( kEntries[0] );
 

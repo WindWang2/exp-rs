@@ -3,6 +3,7 @@
 
 #include "band_facts.h"
 #include "capability_catalog.h"
+#include "workflow_facts.h"
 #include "capability_knowledge.h"
 #include "capability_relations.h"
 #include "operators/framework/rs_operator.h"
@@ -98,6 +99,39 @@ bool statusIsFact( const Json::Value &factStatus, const std::string &key )
   // decides the severity, but only real facts may ground errors.
   const std::string status = factStatus.get( key, "" ).asString();
   return status == "observed" || status == "declared" || status == "derived";
+}
+
+/// Analysis 2.0 numeric-domain chain compatibility. Closed table:
+///   ""      — compatible or not decidable (no cross-pair rule)
+///   "error" — quantity/scale mismatch (DN vs radiance scale, dB vs linear)
+///   "warn"  — same quantity family but different calibration semantics
+///             (TOA vs surface reflectance), or derived vs continuous
+std::string domainChainConflict( const std::string &a, const std::string &b )
+{
+  if ( a.empty() || b.empty() || a == b )
+    return "";
+  const auto ordered = []( std::string x, std::string y ) {
+    if ( x > y )
+      std::swap( x, y );
+    return std::make_pair( x, y );
+  };
+  // Closed pair table (mirrored): hard errors are quantity/scale nonsense;
+  // warns are same-quantity different-calibration mixes.
+  const std::string dn = artifact_facts::kDomainDn;
+  const std::string db = artifact_facts::kDomainDb;
+  const std::string power = artifact_facts::kDomainLinearPower;
+  const std::string sr = artifact_facts::kDomainSurfaceReflectance;
+  const std::string toa = artifact_facts::kDomainToa;
+  const std::string index = artifact_facts::kDomainIndex;
+  const auto pair = ordered( a, b );
+  if ( pair == ordered( dn, sr ) || pair == ordered( dn, toa ) || pair == ordered( dn, index ) ||
+       pair == ordered( dn, db ) || pair == ordered( dn, power ) ||
+       pair == ordered( db, power ) )
+    return "error";
+  if ( pair == ordered( toa, sr ) || pair == ordered( index, sr ) ||
+       pair == ordered( index, toa ) )
+    return "warn";
+  return "";
 }
 
 std::string domainStatus( const Json::Value &factStatus )
@@ -1363,6 +1397,111 @@ IrAnalysis analyzeWorkflowIr( WorkflowIr &ir, const IrAnalysisInput &input )
                                                 : "operator tolerates independent grids" );
         }
       }
+
+      // Analysis 2.0: numeric-domain chain across sibling inputs. Domains
+      // come from the SAME effective facts the per-edge check saw (producer
+      // declared outputs flow through the port map), so a DN producer
+      // feeding a node alongside a reflectance producer is caught even when
+      // neither input carries an explicit numeric_domain key.
+      {
+        std::vector<std::string> domains;
+        for ( const Json::Value &sibling : siblingFacts )
+          domains.push_back( deriveNumericDomain( sibling ) );
+        bool domainChecked = false;
+        for ( size_t i = 0; i < domains.size(); ++i )
+        {
+          if ( domains[i].empty() )
+            continue;
+          for ( size_t j = i + 1; j < domains.size(); ++j )
+          {
+            if ( domains[j].empty() )
+              continue;
+            const std::string conflict = domainChainConflict( domains[i], domains[j] );
+            if ( conflict.empty() )
+              continue;
+            domainChecked = true;
+            Json::Value details = emptyObject();
+            details["domain_a"] = domains[i];
+            details["domain_b"] = domains[j];
+            if ( conflict == "error" )
+            {
+              builder.fail( "numeric_domain_chain", error_codes::kNumericDomainChain,
+                            node.id, "",
+                            node.operatorId + " receives inputs from different radiometric "
+                            "chains (" + domains[i] + " vs " + domains[j] + ")",
+                            false, details );
+            }
+            else
+            {
+              // Same-quantity mixes degrade to a warning regardless of fact
+              // backing — the decision belongs to the caller.
+              builder.warn( "numeric_domain_chain", error_codes::kNumericDomainChain,
+                            node.id, "",
+                            node.operatorId + " mixes calibration semantics (" + domains[i] +
+                              " vs " + domains[j] + ")",
+                            details );
+            }
+          }
+        }
+        if ( !domainChecked )
+          builder.skip( "numeric_domain_chain",
+                        "fewer than two decidable sibling domains" );
+      }
+
+      // Analysis 2.0: band identity across sibling inputs — the same source
+      // wired into two ports of a node whose contract demands distinct role
+      // coverage (e.g. red + nir) usually means one slot was duplicated.
+      {
+        const Json::Value demand =
+          entry.isMember( "band_roles" ) && entry["band_roles"].isObject()
+            ? entry["band_roles"]
+            : Json::Value();
+        std::vector<std::string> distinctRoles;
+        if ( demand.isObject() )
+        {
+          for ( const std::string &role : demand.getMemberNames() )
+            if ( demand[role].asInt() > 0 )
+              distinctRoles.push_back( role );
+        }
+        if ( distinctRoles.size() >= 2 && node.inputs.size() >= 2 )
+        {
+          std::set<std::string> sources;
+          bool duplicated = false;
+          Json::Value details = emptyObject();
+          for ( const IrNodeInput &sibling : node.inputs )
+          {
+            const std::string source =
+              !sibling.node.empty() ? "node:" + sibling.node + ":" + sibling.output
+                                    : "slot:" + sibling.input;
+            if ( !sources.insert( source ).second )
+              duplicated = true;
+          }
+          if ( duplicated )
+          {
+            Json::Value roleList( Json::arrayValue );
+            for ( const std::string &role : distinctRoles )
+              roleList.append( role );
+            details["required_roles"] = roleList;
+            details["distinct_inputs"] = static_cast<Json::Int>( sources.size() );
+            details["wired_inputs"] = static_cast<Json::Int>( node.inputs.size() );
+            builder.warn( "band_identity", error_codes::kBandIdentityMismatch, node.id, "",
+                          node.operatorId + " demands distinct band roles but the same "
+                          "source feeds more than one input port",
+                          details );
+          }
+          else
+          {
+            builder.pass( "band_identity" );
+          }
+        }
+        else
+        {
+          builder.skip( "band_identity",
+                        distinctRoles.size() < 2
+                          ? "contract does not demand distinct roles"
+                          : "fewer than two input ports" );
+        }
+      }
     }
 
     // c13: model compatibility (Model Execution Seam operators).
@@ -1428,6 +1567,161 @@ IrAnalysis analyzeWorkflowIr( WorkflowIr &ir, const IrAnalysisInput &input )
                       "no model contract recorded for '" + modelId + "' — run spatial:select_model" );
       }
     }
+  }
+
+  // Analysis 2.0: declared temporal calendar vs observed cadence facts.
+  // The document may declare a temporal contract in expectations.temporal
+  // (closed sub-keys: require_regular, cadence_days, date_range{start,end});
+  // a contract with NO observable dates degrades to skip — never a faked
+  // pass, never a fabricated failure.
+  {
+    const Json::Value temporalContract =
+      ir.expectations.isObject() && ir.expectations.isMember( "temporal" ) &&
+          ir.expectations["temporal"].isObject()
+        ? ir.expectations["temporal"]
+        : Json::Value();
+    if ( !temporalContract.isObject() || temporalContract.empty() )
+    {
+      builder.skip( "temporal_calendar", "no declared temporal contract" );
+    }
+    else
+    {
+      // Collect per-slot cadence facts (the merged slot facts carry any
+      // folded collection dates; single scenes contribute their one time).
+      std::vector<wfacts::TemporalCadenceFacts> cadences;
+      for ( const IrInputSlot &slot : ir.inputs )
+      {
+        const auto factsIt = env.slotFacts.find( slot.name );
+        if ( factsIt == env.slotFacts.end() )
+          continue;
+        cadences.push_back( wfacts::temporalCadenceFromUnderstanding( factsIt->second ) );
+      }
+      bool calendarChecked = false;
+      for ( const wfacts::TemporalCadenceFacts &cadence : cadences )
+      {
+        if ( cadence.count == 0 )
+          continue;
+        calendarChecked = true;
+        if ( temporalContract.isMember( "date_range" ) &&
+             temporalContract["date_range"].isObject() )
+        {
+          const Json::Value &range = temporalContract["date_range"];
+          const wfacts::ParsedInstant start =
+            wfacts::parseInstant( range.get( "start", "" ).asString() );
+          const wfacts::ParsedInstant end =
+            wfacts::parseInstant( range.get( "end", "" ).asString() );
+          const wfacts::ParsedInstant first =
+            wfacts::parseInstant( cadence.first );
+          const wfacts::ParsedInstant last = wfacts::parseInstant( cadence.last );
+          if ( start.ok && first.ok && first.epochSeconds < start.epochSeconds )
+          {
+            Json::Value details = emptyObject();
+            details["declared_start"] = range.get( "start", "" ).asString();
+            details["observed_first"] = cadence.first;
+            builder.fail( "temporal_calendar", error_codes::kTemporalCalendarConflict, "", "",
+                          "Observed acquisitions begin before the declared date range",
+                          false, details );
+          }
+          if ( end.ok && last.ok && last.epochSeconds > end.epochSeconds )
+          {
+            Json::Value details = emptyObject();
+            details["declared_end"] = range.get( "end", "" ).asString();
+            details["observed_last"] = cadence.last;
+            builder.fail( "temporal_calendar", error_codes::kTemporalCalendarConflict, "", "",
+                          "Observed acquisitions extend past the declared date range",
+                          false, details );
+          }
+        }
+        if ( temporalContract.isMember( "require_regular" ) &&
+             temporalContract["require_regular"].asBool() && cadence.count >= 2 &&
+             cadence.regularity == wfacts::regularity::kIrregular )
+        {
+          Json::Value details = emptyObject();
+          details["regularity"] = cadence.regularity;
+          details["gap_deviations"] = cadence.gapDeviations;
+          builder.fail( "temporal_calendar", error_codes::kTemporalCalendarConflict, "", "",
+                        "The plan requires a regular acquisition calendar; the observed "
+                        "series is irregular",
+                        false, details );
+        }
+        if ( temporalContract.isMember( "cadence_days" ) &&
+             temporalContract["cadence_days"].isNumeric() && cadence.count >= 2 )
+        {
+          const double declared = temporalContract["cadence_days"].asDouble();
+          const double tolerance = std::max( 1.0, 0.25 * declared );
+          if ( std::abs( cadence.cadenceDays - declared ) > tolerance )
+          {
+            Json::Value details = emptyObject();
+            details["declared_cadence_days"] = declared;
+            details["observed_cadence_days"] = cadence.cadenceDays;
+            details["cadence_label"] = cadence.cadenceLabel;
+            builder.fail( "temporal_calendar", error_codes::kTemporalCalendarConflict, "", "",
+                          "Observed acquisition cadence deviates from the declared "
+                          "calendar",
+                          false, details );
+          }
+        }
+      }
+      if ( !calendarChecked )
+        builder.skip( "temporal_calendar",
+                      "declared temporal contract but no observable acquisition dates" );
+      else
+        builder.pass( "temporal_calendar" );
+    }
+  }
+
+  // Analysis 2.0: output identity — each declared output must agree with the
+  // producing port's artifact kind, and one port must not back two outputs.
+  {
+    bool identityChecked = false;
+    std::set<std::string> seenPorts;
+    for ( const IrOutputDecl &output : ir.outputs )
+    {
+      const IrNode *producer = nullptr;
+      for ( const IrNode &candidate : ir.nodes )
+        if ( candidate.id == output.node )
+          producer = &candidate;
+      if ( !producer )
+        continue; // structural validation already flags dangling outputs
+      const std::string portName = output.port.empty() ? "output" : output.port;
+      const std::string portKey = output.node + ":" + portName;
+      if ( !seenPorts.insert( portKey ).second )
+      {
+        Json::Value details = emptyObject();
+        details["node"] = output.node;
+        details["port"] = portName;
+        builder.warn( "output_identity", error_codes::kOutputIdentityMismatch, output.node, "",
+                      "Two declared outputs reference the same producing port",
+                      details );
+        identityChecked = true;
+        continue;
+      }
+      for ( const IrPort &port : producer->outputs )
+      {
+        if ( port.name != portName )
+          continue;
+        const std::string artifactKind = port.artifact.get( "kind", "" ).asString();
+        if ( output.kind.empty() || artifactKind.empty() )
+          continue;
+        identityChecked = true;
+        if ( output.kind != artifactKind )
+        {
+          Json::Value details = emptyObject();
+          details["declared_kind"] = output.kind;
+          details["artifact_kind"] = artifactKind;
+          details["node"] = output.node;
+          details["port"] = portName;
+          builder.fail( "output_identity", error_codes::kOutputIdentityMismatch, output.node,
+                        "", "Declared output kind disagrees with the producing artifact ("
+                          + output.kind + " vs " + artifactKind + ")",
+                        false, details );
+        }
+      }
+    }
+    if ( !identityChecked )
+      builder.skip( "output_identity", "no declared output kinds to compare" );
+    else
+      builder.pass( "output_identity" );
   }
 
   // c14: non-deterministic chains.
