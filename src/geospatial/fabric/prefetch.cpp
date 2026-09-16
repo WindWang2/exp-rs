@@ -9,6 +9,7 @@
 
 #include "geospatial/fabric/mirror.h"
 #include "geospatial/fabric/object_store.h"
+#include "geospatial/fabric/object_store.h"
 #include "geospatial/identity/asset_identity.h"
 #include "geospatial/remote/range_cache.h"
 #include "geospatial/raster/raster_reader.h"
@@ -144,7 +145,7 @@ PrefetchReport prefetchChunksImpl( const VirtualCube &cube, const CubeChunkPlan 
                     }
                     else
                     {
-                        identity = assetIdentityToken( record.path, AssetIdentityOptions{} );
+                        identity = fabricAssetIdentity( record.path, AssetIdentityOptions{} );
                         identities[record.id] = identity;
                     }
                     if ( identity.provable() )

@@ -9,6 +9,10 @@
 
 #include "geospatial/remote/offline_gate.h"
 #include "geospatial/remote/range_cache.h"
+#include "geospatial/remote/remote_identity_token.h"
+#include "geospatial/remote/remote_source_validator.h"
+#include "geospatial/remote/vsi_object_identity.h"
+#include "geospatial/util/sha256.h"
 
 #include <cpl_conv.h>
 
@@ -225,19 +229,169 @@ ObjectStoreResolution resolveObjectStore( const std::string &rawUri )
   return resolution;
 }
 
+CanonicalObjectKey canonicalObjectKey( const std::string &resource )
+{
+  CanonicalObjectKey result;
+  const std::string trimmed = lowerAscii( resource );
+
+  // Direct VSI spelling: "/vsis3/bucket/key".
+  for ( const ObjectStoreProfile &profile : objectStoreProfiles() )
+  {
+    const std::string prefix = lowerAscii( profile.vsiPrefix );
+    if ( trimmed.rfind( prefix, 0 ) != 0 )
+      continue;
+    const std::string remainder = resource.substr( prefix.size() );
+    const std::size_t slash = remainder.find( '/' );
+    if ( slash == std::string::npos || slash == 0 || slash + 1 > remainder.size() )
+      return result; // malformed VSI object path (needs <bucket>/<key>)
+    result.scheme = profile.scheme == "s3a" || profile.scheme == "s3c" ? "s3" : profile.scheme;
+    result.provider = profile.provider;
+    result.bucket = remainder.substr( 0, slash );
+    result.key = remainder.substr( slash + 1 );
+    result.canonical = result.scheme + "://" + result.bucket + "/" + result.key;
+    result.valid = !result.key.empty();
+    return result;
+  }
+
+  // Scheme spelling: "s3://bucket/key" (same manual parse discipline as
+  // resolveObjectStore — ResourceUri's classifier only knows http/https).
+  const std::size_t schemeEnd = trimmed.find( "://" );
+  if ( schemeEnd == std::string::npos || schemeEnd == 0 )
+    return result;
+  const ObjectStoreProfile profile = findObjectStoreProfile( trimmed.substr( 0, schemeEnd ) );
+  if ( profile.scheme.empty() )
+    return result;
+  const std::string authority = resource.substr( schemeEnd + 3 );
+  if ( authority.find( '@' ) != std::string::npos || authority.find( '?' ) != std::string::npos ||
+       authority.find( '#' ) != std::string::npos )
+    return result; // credential/query/fragment shapes are never object keys
+  const std::size_t slash = authority.find( '/' );
+  if ( slash == std::string::npos || slash == 0 || slash + 1 > authority.size() )
+    return result;
+  result.scheme = profile.scheme == "s3a" || profile.scheme == "s3c" ? "s3" : profile.scheme;
+  result.provider = profile.provider;
+  result.bucket = authority.substr( 0, slash );
+  result.key = authority.substr( slash + 1 );
+  result.canonical = result.scheme + "://" + result.bucket + "/" + result.key;
+  result.valid = !result.key.empty();
+  return result;
+}
+
+bool isObjectStoreVsiPath( const std::string &fetchablePath )
+{
+  const std::string lowered = lowerAscii( fetchablePath );
+  for ( const ObjectStoreProfile &profile : objectStoreProfiles() )
+    if ( lowered.rfind( lowerAscii( profile.vsiPrefix ), 0 ) == 0 )
+      return true;
+  return false;
+}
+
+ObjectStoreIdentityFacts probeObjectStoreIdentity( const std::string &resource )
+{
+  // Accept every object-store spelling: resolve scheme spellings to their
+  // VSI form (the profile table is the one mapping authority).
+  std::string vsiPath = resource;
+  if ( !isObjectStoreVsiPath( vsiPath ) )
+  {
+    try
+    {
+      vsiPath = resolveObjectStore( resource ).vsiPath;
+    }
+    catch ( const GeoError & )
+    {
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "identity probe needs an object-store resource: " +
+                        ResourceUri::parse( resource ).display() );
+    }
+  }
+  // The VSI-stack HEAD lives in the transport layer (remote/) — the same
+  // probe the range cache uses for object entries; one implementation, no
+  // duplicated header parsing.
+  const VsiObjectIdentityFacts remoteFacts = probeVsiObjectIdentity( vsiPath );
+  ObjectStoreIdentityFacts facts;
+  facts.probed = remoteFacts.probed;
+  facts.etag = remoteFacts.etag;
+  facts.sizeBytes = remoteFacts.sizeBytes;
+  facts.hasSize = remoteFacts.hasSize;
+  facts.errorText = remoteFacts.errorText;
+  return facts;
+}
+
+std::string objectStoreIdentityToken( const std::string &canonicalObjectKey,
+                                      const ObjectStoreIdentityFacts &facts )
+{
+  if ( !facts.provable() )
+    return std::string();
+  // Assemble the 8.0 remote-identity basis verbatim over the canonical
+  // object key (remoteIdentityTokenFromIdentity owns the field tagging,
+  // the strong-ETag gate and the injectivity rules — no second builder).
+  RemoteSourceIdentity identity;
+  identity.state = RemoteSourceState::Fresh;
+  identity.validator.etag = facts.etag;
+  identity.hasSize = facts.hasSize;
+  identity.sizeBytes = facts.sizeBytes;
+  return remoteIdentityTokenFromIdentity( canonicalObjectKey, identity );
+}
+
+AssetIdentity fabricAssetIdentity( const std::string &resource,
+                                   const AssetIdentityOptions &options )
+{
+  const CanonicalObjectKey objectKey = canonicalObjectKey( resource );
+  if ( objectKey.valid )
+  {
+    AssetIdentity identity;
+    identity.resourceKind = objectKey.provider;
+    identity.token = objectStoreIdentityToken( objectKey.canonical,
+                                               probeObjectStoreIdentity( resource ) );
+    if ( !identity.token.empty() )
+      identity.strength = "etag";
+    return identity; // unprovable object stores stay "" — never fall through
+  }
+  return assetIdentityToken( resource, options );
+}
+
+std::string objectStoreCredentialContext( const std::string &vsiPrefix,
+                                          const ObjectStoreCredentials &credentials )
+{
+  // Field-tagged basis over the NON-secret shape only. The secret access
+  // key is deliberately absent: the fingerprint separates PRINCIPALS, it
+  // never becomes a credential itself.
+  Sha256 basis;
+  basis.update( "fabric-credctx:v1\n" );
+  basis.update( "prefix=" + sha256Hex( vsiPrefix ) + "\n" );
+  basis.update( "endpoint=" + sha256Hex( credentials.endpoint ) + "\n" );
+  basis.update( "keyid=" + sha256Hex( credentials.accessKeyId ) + "\n" );
+  basis.update( std::string( "session=" ) + ( credentials.sessionToken.empty() ? "0" : "1" ) + "\n" );
+  basis.update( std::string( "anonymous=" ) + ( credentials.anonymous ? "1" : "0" ) + "\n" );
+  // 16 hex chars (64 bits) — collision separation for cache keys, not a
+  // security boundary (a principal is free to share its own cache anyway).
+  return toHex( basis.finalize() ).substr( 0, 16 );
+}
+
 std::string fabricCachedPath( const std::string &fetchablePath )
 {
   if ( !RemoteRangeCache::installed() )
     return fetchablePath;
   const ResourceUri uri = ResourceUri::parse( fetchablePath );
-  // The range cache's contract is http(s) (validators, conditional GETs,
-  // its fallback path all speak URLs). Local paths are never wrapped;
-  // s3/gs/az VSI spellings pass UNWRAPPED too — their cachedPath
-  // composition is not URL-shaped (a known 10.0 limitation: S3-block
-  // caching keys are a follow-up; GDAL's own block cache applies there).
-  if ( uri.kind != ResourceKind::RemoteHttp )
+  // The cache's contract is http(s) URLs and object-store VSI paths (the
+  // handler speaks both: URL requests go through its http fetcher,
+  // object-store payloads through the VSI stack under the live credential
+  // window — DECISIONS D-1102). Scheme spellings ("s3://b/k") canonicalize
+  // to their VSI form first so s3/s3a/s3c converge on ONE cached resource;
+  // local paths and unknown spellings are never wrapped.
+  if ( uri.kind == ResourceKind::RemoteHttp )
+    return RemoteRangeCache::cachedPath( fetchablePath );
+  if ( isObjectStoreVsiPath( fetchablePath ) )
+    return RemoteRangeCache::cachedPath( fetchablePath );
+  try
+  {
+    const ObjectStoreResolution resolution = resolveObjectStore( fetchablePath );
+    return RemoteRangeCache::cachedPath( resolution.vsiPath );
+  }
+  catch ( const GeoError & )
+  {
     return fetchablePath;
-  return RemoteRangeCache::cachedPath( fetchablePath );
+  }
 }
 
 ScopedObjectStoreCredentials::ScopedObjectStoreCredentials(
@@ -313,6 +467,12 @@ ScopedObjectStoreCredentials::ScopedObjectStoreCredentials(
   }
 
   gActiveCredentialWindows.fetch_add( 1 );
+  // 11.0 (D-1102): entries created while this window is open carry its
+  // principal fingerprint in their cache key — blocks fetched under one
+  // account are never served to another. The fingerprint is a non-secret
+  // shape hash; nothing credential-shaped ever leaves this call.
+  mOwnContext = objectStoreCredentialContext( vsiPrefix, credentials );
+  setRangeCacheCredentialContext( mOwnContext );
 }
 
 ScopedObjectStoreCredentials::~ScopedObjectStoreCredentials()
@@ -328,9 +488,16 @@ ScopedObjectStoreCredentials::~ScopedObjectStoreCredentials()
   // without this wipe, a LATER window for the same URL would silently reuse
   // the PREVIOUS window's signed context — credentials lingering past their
   // scope. The cache is GDAL-side metadata only; our /vsirangecache/ blocks
-  // live in a separate handler and are untouched.
+  // live in a separate handler and are separated per principal by the
+  // credential-context key component (D-1102), never shared across windows.
   if ( !mSetKeys.empty() )
     VSICurlClearCache();
+  // Drop OUR fingerprint only (nested/overlapping windows are outside the
+  // D-1003 contract, but clearing unconditionally would yank a live
+  // sibling's context out from under it).
+  const std::string current = currentRangeCacheCredentialContext();
+  if ( !mOwnContext.empty() && current == mOwnContext )
+    setRangeCacheCredentialContext( std::string() );
   gActiveCredentialWindows.fetch_sub( 1 );
 }
 

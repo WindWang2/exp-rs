@@ -30,6 +30,7 @@
 #define SICNU_GEOSPATIAL_FABRIC_OBJECT_STORE_H
 
 #include "geospatial/common.h"
+#include "geospatial/identity/asset_identity.h"
 #include "geospatial/util/resource_uri.h"
 
 #include <json/json.h>
@@ -110,6 +111,81 @@ struct ObjectStoreResolution
 /// non-object-store inputs and unknown schemes; never hits the network.
 ObjectStoreResolution resolveObjectStore( const std::string &rawUri );
 
+/// Canonical, credential-free object key (11.0, DECISIONS D-1101). The ONE
+/// identity spelling of an object within a provider family: every accepted
+/// spelling ("s3://b/k", "s3a://b/k", "s3c://b/k", "/vsis3/b/k")
+/// canonicalizes to "<canonical-scheme>://<bucket>/<key>". Pure string work —
+/// never touches the network and never carries credentials (userinfo, query
+/// and fragment shapes are refused with valid=false, mirroring
+/// resolveObjectStore's refusals).
+struct CanonicalObjectKey
+{
+    std::string scheme;    ///< canonical scheme ("s3" for s3/s3a/s3c)
+    std::string provider;  ///< "aws" | "s3-compatible" | "gcs" | "azure"
+    std::string bucket;    ///< as written (bucket identity is provider-caseful)
+    std::string key;       ///< object key, verbatim bytes, no leading slash
+    std::string canonical; ///< "<scheme>://<bucket>/<key>"
+    bool valid = false;    ///< false: not an object-store spelling / malformed
+};
+
+/// Canonicalizes an object-store resource. Total function: valid=false for
+/// anything resolveObjectStore would refuse; never throws, never networks.
+CanonicalObjectKey canonicalObjectKey( const std::string &resource );
+
+/// True when the resource carries an object-store VSI prefix from a
+/// registered profile ("/vsis3/…", "/vsigs/…", "/vsiaz/…"). Pure check.
+bool isObjectStoreVsiPath( const std::string &fetchablePath );
+
+/// Identity facts of one object-store resource, captured through the VSI
+/// stack (WP A): GDAL signs the request and honors the ambient credential
+/// window (D-1003 serialization applies, same as every /vsi* open). The
+/// ETag is what makes an object PROVABLE; absent/weak ⇒ unprovable
+/// (fail-closed — mirrors and caches must not key on it).
+struct ObjectStoreIdentityFacts
+{
+    bool probed = false;            ///< the store answered the metadata probe
+    std::string etag;               ///< strong ETag ("" when absent/weak)
+    std::uintmax_t sizeBytes = 0;
+    bool hasSize = false;
+    std::string errorText;          ///< typed text when !probed
+
+    bool provable() const { return probed && !etag.empty(); }
+};
+
+/// Probes identity facts (HEAD-equivalent) for an object-store resource.
+/// Accepts every object-store spelling (VSI or scheme — resolved through
+/// the profile table). Offline/unreachable stores yield probed=false (never
+/// a guess); network failures fold into errorText, never throw. Non-
+/// object-store inputs throw GeoError(InvalidArgument).
+ObjectStoreIdentityFacts probeObjectStoreIdentity( const std::string &resource );
+
+/// The 11.0 object-store identity token: the SAME ri1:v1 basis the 8.0
+/// remote tokens use, with the URL component replaced by the credential-
+/// free canonical object key (DECISIONS D-1101 — every spelling of the same
+/// object converges to one token; http(s)-URL identities keep their 8.0
+/// basis because a URL and its bucket/key spelling cannot prove byte
+/// equality without endpoint knowledge). Returns "" when the facts are not
+/// provable (fail-closed).
+std::string objectStoreIdentityToken( const std::string &canonicalObjectKey,
+                                      const ObjectStoreIdentityFacts &facts );
+
+/// The fabric's ONE identity entry point (WP A): object-store spellings
+/// ("s3://b/k", "/vsis3/b/k", …) take the canonical-object-key identity;
+/// everything else delegates to assetIdentityToken unchanged. Fabric
+/// callers MUST use this (never assetIdentityToken directly) so cache and
+/// mirror keys are spelling-stable.
+AssetIdentity fabricAssetIdentity( const std::string &resource,
+                                   const AssetIdentityOptions &options = {} );
+
+/// Credential-context fingerprint for cache/identity separation (WP B,
+/// D-1102): a short SHA-256 prefix over the credential window's NON-secret
+/// shape (prefix + endpoint + access key id + token presence + anonymous
+/// flag). Two windows fingerprint the same ONLY when they address the same
+/// store as the same principal. The secret access key NEVER enters the
+/// fingerprint, any cache key, or any log.
+std::string objectStoreCredentialContext( const std::string &vsiPrefix,
+                                          const ObjectStoreCredentials &credentials );
+
 /// Maps any fetchable path (VSI or plain URL) to the /vsirangecache/
 /// spelling when the cache is installed; returns the input unchanged
 /// otherwise. Pure string mapping — the cache owns all semantics.
@@ -145,6 +221,9 @@ class ScopedObjectStoreCredentials
   private:
     std::string mPrefix;
     std::vector<FabricInstalledConfigKey> mSetKeys;   ///< exact restore journal
+    std::string mOwnContext;                          ///< cache-context fingerprint
+                                                      ///< this window installed
+                                                      ///< (D-1102)
 };
 
 /// Diagnostic count of currently-open credential windows (tests observe

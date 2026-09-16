@@ -78,6 +78,12 @@ enum class OverlapPolicy
 struct VirtualCubeBuildOptions
 {
     int probeLimit = 256;       ///< hard cap on metadata opens (bounds IO)
+    /// 11.0 (D-1103): when set, the build consults the mirror's OFFLINE
+    /// index (fabric/mirror) for identity tokens and grid facts BEFORE any
+    /// open: assets the index knows are indexed without a single network
+    /// touch — an offline replay builds and reads with zero probes. Facts
+    /// from the index are provenance-flagged (fromMirrorIndex).
+    std::string mirrorDirectory;
 };
 
 const char *overlapPolicyName( OverlapPolicy policy );
@@ -105,7 +111,13 @@ struct VirtualCubeReadOptions
     /// Optional mirror directory: when a chunk mirror hit exists for the
     /// asset's identity token, read the mirrored local file instead of the
     /// remote path (fabric/mirror contract). "" disables mirror preference.
+    /// 11.0 (D-1103): with the mirror's offline index, a hit is resolved
+    /// BEFORE the remote asset is opened — a full-hit replay performs zero
+    /// network work (the 10.0 ordering bug, fixed).
     std::string mirrorDirectory;
+    /// 11.0: mirror hits materialized longer ago than this many seconds are
+    /// treated as misses (0 = no expiry — the default keeps 10.0 semantics).
+    std::uint64_t maxMirrorAgeSeconds = 0;
     /// Byte budget per source window read (RasterReader::readWindow budget;
     /// a breach is a per-asset failure recorded in provenance, not a global
     /// abort — one fat asset cannot kill a mosaic window).
@@ -160,6 +172,9 @@ struct VirtualCubeAssetIndexEntry
     double resX = 0.0, resY = 0.0;
     double assetMinX = 0.0, assetMinY = 0.0, assetMaxX = 0.0, assetMaxY = 0.0;
     std::string epsgAuthid;       ///< "EPSG:xxxx" when the asset declares one
+    /// 11.0 (D-1103): the facts above came from the mirror's OFFLINE index
+    /// (zero network); token + grid are exactly what materialization saw.
+    bool fromMirrorIndex = false;
 };
 
 /// Maps a world extent onto an asset's pixel window (north-up grids),

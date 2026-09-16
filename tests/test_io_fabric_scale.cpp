@@ -25,6 +25,10 @@
 #ifdef __linux__
 #include <sys/resource.h>
 #endif
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#endif
 
 using namespace sicnu::geo;
 
@@ -41,14 +45,21 @@ std::string scratchDir( const char *name )
   return path;
 }
 
-/// Peak RSS in bytes (Linux /proc self; 0 = unsupported platform — the
-/// memory assertions then degrade to structural checks and say so).
+/// Peak RSS in bytes (Linux getrusage, Windows GetProcessMemoryInfo; 0 =
+/// unsupported platform — the memory assertions then degrade to structural
+/// checks and say so).
 std::uint64_t peakRssBytes()
 {
-#ifdef __linux__
+#if defined( __linux__ )
   struct rusage usage;
   getrusage( RUSAGE_SELF, &usage );
   return static_cast<std::uint64_t>( usage.ru_maxrss ) * 1024ull;
+#elif defined( _WIN32 )
+  PROCESS_MEMORY_COUNTERS counters;
+  counters.cb = sizeof( counters );
+  if ( !GetProcessMemoryInfo( GetCurrentProcess(), &counters, sizeof( counters ) ) )
+    return 0;
+  return static_cast<std::uint64_t>( counters.PeakWorkingSetSize );
 #else
   return 0;
 #endif
@@ -152,11 +163,18 @@ TEST_CASE( "planning over a 100k-record catalog adds O(selected) memory, not O(c
   {
     // The planner's own footprint over the walk: bounded by the selector
     // (8 records + plan scaffolding). A full extra copy of the catalog
-    // would show as >= catalogSize records. Bound: 3x ONE scene record's
-    // plan overhead stays far below 1% of the catalog footprint — assert
-    // the plan stage added < 2 MB of peak RSS beyond the input baseline.
+    // would show as >= catalogSize records. Linux working-set deltas are
+    // tight (2 MiB bound, the calibrated 10.0 gate); Windows first-touch
+    // allocator noise is coarse, so the bound loosens to 32 MiB — still an
+    // order of magnitude under any O(catalog) copy (100k records parse to
+    // hundreds of MiB), which is the regression this gate exists to catch.
+#if defined( _WIN32 )
+    const std::uint64_t planBudget = 32ull * 1024 * 1024;
+#else
+    const std::uint64_t planBudget = 2ull * 1024 * 1024;
+#endif
     const std::uint64_t planDelta = afterPlan - beforePlan;
-    CHECK( planDelta < 2ull * 1024 * 1024 );
+    CHECK( planDelta < planBudget );
   }
 }
 

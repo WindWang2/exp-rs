@@ -22,8 +22,10 @@
 
 #include "geospatial/gdal_guard.h"
 #include "geospatial/remote/http_fetch.h"
+#include "geospatial/remote/offline_gate.h"
 #include "geospatial/remote/range_cache_disk.h"
 #include "geospatial/remote/remote_source_validator.h"
+#include "geospatial/remote/vsi_object_identity.h"
 #include "geospatial/util/gdal_compat.h"
 #include "geospatial/util/resource_uri.h"
 
@@ -65,9 +67,21 @@ inline VSIVirtualHandleUniquePtr openReadonlyVsi( const char *path )
 
 constexpr int kMaxGenerationRestarts = 8;
 
-/// Splits a cache-path/URL into the underlying remote request URL.
-bool underlyingUrl( const std::string &path, std::string &requestUrl, std::string &reason )
+bool startsWithHttpScheme( const std::string &text )
 {
+  return text.rfind( "http://", 0 ) == 0 || text.rfind( "https://", 0 ) == 0;
+}
+
+/// Splits a cache-path/URL into the underlying remote request URL.
+/// \a vsiPathOut (when non-null) receives the payload VSI spelling for
+/// network-VSI payloads ("/vsis3/bucket/key"), "" otherwise — the 11.0
+/// object-store mode (D-1102) reads through that spelling instead of the
+/// http fetcher.
+bool underlyingUrl( const std::string &path, std::string &requestUrl, std::string &reason,
+                    std::string *vsiPathOut = nullptr )
+{
+  if ( vsiPathOut != nullptr )
+    vsiPathOut->clear();
   std::string payload = path;
   if ( payload.rfind( kRangeCachePrefix, 0 ) == 0 )
     payload = payload.substr( std::strlen( kRangeCachePrefix ) );
@@ -82,6 +96,17 @@ bool underlyingUrl( const std::string &path, std::string &requestUrl, std::strin
     reason = uri.display();
     return false;
   }
+  if ( uri.kind == ResourceKind::VsiRemote && !startsWithHttpScheme( uri.remoteUrl() ) )
+  {
+    // Object-store (and any other network-VSI) payload: the FULL spelling
+    // is both the request identity and the handle GDAL opens — remoteUrl()
+    // would drop the /vsis3//vsigs//vsiaz prefix and compose an unopenable
+    // path (the 10.0 M-R2 defect, restated).
+    requestUrl = payload;
+    if ( vsiPathOut != nullptr )
+      *vsiPathOut = payload;
+    return true;
+  }
   requestUrl = uri.kind == ResourceKind::RemoteHttp ? uri.canonical() : uri.remoteUrl();
   return true;
 }
@@ -90,6 +115,21 @@ std::string resourceKey( const std::string &requestUrl )
 {
   const ResourceUri uri = ResourceUri::parse( requestUrl );
   return uri.kind == ResourceKind::RemoteHttp ? uri.canonical() : uri.remoteUrl();
+}
+
+/// 11.0 object-entry key (D-1102): canonical VSI spelling + the creating
+/// window's credential-context fingerprint. Spellings canonicalize through
+/// the fabric (s3a/s3c → /vsis3/) BEFORE wrapping, so one object has one
+/// key per principal; the fingerprint keeps different accounts' (or a
+/// session's vs. anonymous) blocks from ever being served to each other.
+/// Neither component carries a secret.
+std::string objectResourceKey( const std::string &vsiPath, const std::string &credentialContext )
+{
+  const ResourceUri uri = ResourceUri::parse( vsiPath );
+  std::string key = uri.canonical();
+  if ( !credentialContext.empty() )
+    key += "|" + credentialContext;
+  return key;
 }
 
 /// Validator option set derived from the cache config.
@@ -122,7 +162,8 @@ struct TouchEntry
 
 struct ResourceEntry
 {
-  std::string requestUrl;             // canonical remote http(s) URL
+  std::string requestUrl;             // canonical remote http(s) URL (object
+                                      // entries: canonical VSI spelling)
   RemoteSourceIdentity identity;
   std::uint64_t generation = 0;       // bumped on invalidation (drops blocks)
   std::unordered_map<std::uint64_t, std::list<CachedBlock>::iterator> blocks;
@@ -130,6 +171,12 @@ struct ResourceEntry
   std::mutex fetchMutex;
   std::uint64_t sizeBytes = 0;
   bool hasSize = false;
+  // 11.0 object-store mode (D-1102): the payload is a network VSI object —
+  // fetched through the VSI stack under the live credential window (GDAL
+  // signs), with the fallback re-opening that same spelling.
+  bool vsiObject = false;
+  std::string vsiPath;                // original "/vsis3/…" spelling
+  std::string credentialContext;      // creating window's principal fingerprint
 };
 
 class CacheStore
@@ -237,6 +284,29 @@ class CacheStore
       // A fresh probe describes the CURRENT origin state: always refresh the
       // stored identity (an invalidated entry keeps its old validators
       // otherwise, and every future revalidation sees a phantom mismatch).
+      entry->identity = identity;
+      entry->hasSize = identity.hasSize;
+      entry->sizeBytes = identity.sizeBytes;
+      return entry;
+    }
+
+    /// 11.0 object-entry creator (D-1102): identical discipline to
+    /// getOrCreateResource plus the VSI spelling and creating principal.
+    std::shared_ptr<ResourceEntry> getOrCreateVsiObject( const std::string &key,
+                                                         const std::string &vsiPath,
+                                                         const std::string &credentialContext,
+                                                         const RemoteSourceIdentity &identity )
+    {
+      std::lock_guard<std::mutex> lock( mMutex );
+      auto &entry = mResources[key];
+      if ( !entry )
+      {
+        entry = std::make_shared<ResourceEntry>();
+        entry->requestUrl = identity.url;   // redacted display form
+        entry->vsiObject = true;
+        entry->vsiPath = vsiPath;
+        entry->credentialContext = credentialContext;
+      }
       entry->identity = identity;
       entry->hasSize = identity.hasSize;
       entry->sizeBytes = identity.sizeBytes;
@@ -706,6 +776,52 @@ std::vector<unsigned char> fetchRange( const std::string &requestUrl, std::uint6
   throw GeoError( ErrorCode::Unsupported, "range_cache: origin answer does not cover the requested range" );
 }
 
+/// Builds the entry identity of an object probe from VSI-stack HEAD facts.
+/// probed=false maps to Offline (the store never answered — nothing to
+/// cache against); probed with no usable validator keeps Unknown so
+/// revalidation treats it as inconclusive rather than "changed".
+RemoteSourceIdentity vsiObjectIdentity( const std::string &vsiPath,
+                                        const VsiObjectIdentityFacts &facts )
+{
+  RemoteSourceIdentity identity;
+  identity.url = ResourceUri::parse( vsiPath ).display();   // redacted form
+  identity.state = facts.probed ? RemoteSourceState::Fresh : RemoteSourceState::Offline;
+  identity.validator.etag = facts.etag;
+  identity.hasSize = facts.hasSize;
+  identity.sizeBytes = facts.sizeBytes;
+  return identity;
+}
+
+/// Ranged fetch of [start,end) from a network VSI object: open + seek +
+/// read — GDAL signs every request and honors the ambient credential
+/// window (the D-1003 serialization covers this exactly like any other
+/// /vsi* open). The handle is opened per fetch: a cached handle would keep
+/// serving its object version across invalidations, defeating generation
+/// discipline. Short answers are EOF-honest exactly like the http path.
+std::vector<unsigned char> fetchRangeVsi( const std::string &vsiPath, std::uint64_t start,
+                                          std::uint64_t endExclusive )
+{
+  // Same offline contract as the http fetcher: a forced-offline process
+  // never dispatches an origin read.
+  if ( offline::enabled() && offline::isRemoteTarget( vsiPath ) )
+    throw GeoError( ErrorCode::NetworkError, offline::refusalMessage( vsiPath ) );
+  VSIVirtualHandleUniquePtr handle = openReadonlyVsi( vsiPath.c_str() );
+  if ( handle == nullptr )
+    throw GeoError( ErrorCode::NetworkError,
+                    "range_cache: object open failed: " + ResourceUri::parse( vsiPath ).display() );
+  if ( handle->Seek( static_cast<long>( start ), SEEK_SET ) != 0 )
+    throw GeoError( ErrorCode::IoError,
+                    "range_cache: object seek failed: " + ResourceUri::parse( vsiPath ).display() );
+  std::vector<unsigned char> bytes( static_cast<std::size_t>( endExclusive - start ) );
+  const std::size_t got = handle->Read( bytes.data(), 1, bytes.size() );
+  if ( got == 0 && start != 0 )
+    throw GeoError( ErrorCode::NetworkError,
+                    "range_cache: object read refused the range: " +
+                      ResourceUri::parse( vsiPath ).display() );
+  bytes.resize( got );
+  return bytes;
+}
+
 // ---------------------------------------------------------------------------
 // RangeCacheHandle — the VSIVirtualHandle readers see.
 // ---------------------------------------------------------------------------
@@ -994,7 +1110,9 @@ class RangeCacheHandle final : public VSIVirtualHandle
           ~InFlightAdmission() { cache.completeFetch( bytes, cap ); }
         } admission( cache, fetchEnd - fetchStart, config.maxConcurrentFetchBytes );
 
-        bytes = fetchRange( mEntry->requestUrl, fetchStart, fetchEnd, config );
+        bytes = mEntry->vsiObject
+                  ? fetchRangeVsi( mEntry->vsiPath, fetchStart, fetchEnd )
+                  : fetchRange( mEntry->requestUrl, fetchStart, fetchEnd, config );
         cache.coalescedFetches.fetch_add( 1 );
         cache.bytesFetched.fetch_add( bytes.size() );
       }
@@ -1045,8 +1163,15 @@ class RangeCacheHandle final : public VSIVirtualHandle
     {
       if ( !mFallback )
       {
-        const std::string vsicurl = "/vsicurl/" + mEntry->requestUrl;
-        mFallback = openReadonlyVsi( vsicurl.c_str() );
+        // Object entries re-open their own VSI spelling — GDAL signs the
+        // fallback read under the live credential window. An http fallback
+        // for an object path would be an UNAUTHENTICATED request (and for
+        // "bucket/key" payloads not even a valid one) — that composition
+        // is exactly what 10.0's M-R2 refused.
+        if ( mEntry->vsiObject )
+          mFallback = openReadonlyVsi( mEntry->vsiPath.c_str() );
+        else
+          mFallback = openReadonlyVsi( ( std::string( "/vsicurl/" ) + mEntry->requestUrl ).c_str() );
       }
       return mFallback.get();
     }
@@ -1085,15 +1210,20 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
       }
       std::string requestUrl;
       std::string reason;
-      if ( !underlyingUrl( pszFilename, requestUrl, reason ) )
+      std::string vsiPath;
+      if ( !underlyingUrl( pszFilename, requestUrl, reason, &vsiPath ) )
       {
         CPLError( CE_Failure, CPLE_AppDefined, "vsirangecache: not a remote http(s) resource: %s",
                   reason.c_str() );
         return nullptr;
       }
+      const bool vsiObject = !vsiPath.empty();
 
       CacheStore &cache = store();
-      const std::string key = resourceKey( requestUrl );
+      const std::string credentialContext = vsiObject ? currentRangeCacheCredentialContext()
+                                                      : std::string();
+      const std::string key =
+        vsiObject ? objectResourceKey( vsiPath, credentialContext ) : resourceKey( requestUrl );
 
       // One config snapshot per open, taken under the store lock (P1
       // remediation discipline): updateConfig() swaps the config under the
@@ -1107,44 +1237,82 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
       std::shared_ptr<ResourceEntry> entry = cache.findResource( key );
       if ( entry != nullptr && config.stalePolicy == RangeCacheStalePolicy::RevalidateOnOpen )
       {
-        // Revalidate against the ENTRY'S stored validators — a fresh probe
-        // would always compare equal to itself and never see a change.
-        cache.revalidations.fetch_add( 1 );
-        RemoteSourceValidator validator = RemoteSourceValidator::fromIdentity(
-          cache.snapshotIdentity( entry ), requestUrl );
-        const RevalidationResult result = validator.revalidate( validatorOptions( config ) );
-        if ( result.outcome == RevalidationOutcome::Changed )
+        if ( vsiObject )
         {
-          cache.invalidate( key );
-          entry = cache.probeNewEntry( requestUrl, validatorOptions( config ) );
-          if ( entry == nullptr )
-            return nullptr;
+          // Object entries revalidate through the same VSI-stack HEAD that
+          // created them: a strong-ETag mismatch drops the blocks, an
+          // unprovable answer (offline, weak) is inconclusive and keeps
+          // serving — the caller's declared trust level.
+          const VsiObjectIdentityFacts facts = probeVsiObjectIdentity( vsiPath );
+          if ( facts.provable() && entry->identity.validator.hasStrongEtag() &&
+               facts.etag != entry->identity.validator.etag )
+          {
+            cache.invalidate( key );
+            entry = cache.getOrCreateVsiObject( key, vsiPath, credentialContext,
+                                                vsiObjectIdentity( vsiPath, facts ) );
+          }
+          else if ( facts.hasSize )
+            cache.updateEntrySize( entry, facts.sizeBytes );
         }
-        else if ( result.outcome == RevalidationOutcome::Unchanged )
+        else
         {
-          // Only refresh the size when the revalidation answer actually
-          // carried one: an Unchanged verdict never implies a known size
-          // (a 304 has no entity headers), and writing a fabricated size 0
-          // would collapse every later read to EOF.
-          if ( validator.identity().hasSize )
-            cache.updateEntrySize( entry, validator.identity().sizeBytes );
+          // Revalidate against the ENTRY'S stored validators — a fresh probe
+          // would always compare equal to itself and never see a change.
+          cache.revalidations.fetch_add( 1 );
+          RemoteSourceValidator validator = RemoteSourceValidator::fromIdentity(
+            cache.snapshotIdentity( entry ), requestUrl );
+          const RevalidationResult result = validator.revalidate( validatorOptions( config ) );
+          if ( result.outcome == RevalidationOutcome::Changed )
+          {
+            cache.invalidate( key );
+            entry = cache.probeNewEntry( requestUrl, validatorOptions( config ) );
+            if ( entry == nullptr )
+              return nullptr;
+          }
+          else if ( result.outcome == RevalidationOutcome::Unchanged )
+          {
+            // Only refresh the size when the revalidation answer actually
+            // carried one: an Unchanged verdict never implies a known size
+            // (a 304 has no entity headers), and writing a fabricated size 0
+            // would collapse every later read to EOF.
+            if ( validator.identity().hasSize )
+              cache.updateEntrySize( entry, validator.identity().sizeBytes );
+          }
+          // Inconclusive (offline, size-only origins): keep serving — this is
+          // the caller's declared trust level, and the revalidation attempt is
+          // visible in telemetry.
         }
-        // Inconclusive (offline, size-only origins): keep serving — this is
-        // the caller's declared trust level, and the revalidation attempt is
-        // visible in telemetry.
       }
       if ( entry == nullptr )
       {
-        entry = cache.probeNewEntry( requestUrl, validatorOptions( config ) );
-        if ( entry == nullptr )
+        if ( vsiObject )
         {
-          // Missing (ENOENT) or unreachable: a quiet null like any local
-          // filesystem would answer for a path that does not exist — GDAL's
-          // speculative sibling opens depend on this staying silent, and the
-          // probe's own CPL error text must not leak into the caller's open.
-          CPLErrorReset();
-          errno = ENOENT;
-          return nullptr;
+          const VsiObjectIdentityFacts facts = probeVsiObjectIdentity( vsiPath );
+          // The store never answered (offline gate, refused auth): nothing
+          // to cache against — a quiet miss, exactly like the http path.
+          if ( !facts.probed )
+          {
+            CPLErrorReset();
+            errno = ENOENT;
+            return nullptr;
+          }
+          entry = cache.getOrCreateVsiObject( key, vsiPath, credentialContext,
+                                              vsiObjectIdentity( vsiPath, facts ) );
+        }
+        else
+        {
+          entry = cache.probeNewEntry( requestUrl, validatorOptions( config ) );
+          if ( entry == nullptr )
+          {
+            // Missing (ENOENT) or unreachable: a quiet null like any local
+            // filesystem would answer for a path that does not exist — GDAL's
+            // speculative sibling opens depend on this staying silent, and
+            // the probe's own CPL error text must not leak into the caller's
+            // open.
+            CPLErrorReset();
+            errno = ENOENT;
+            return nullptr;
+          }
         }
       }
 
@@ -1160,9 +1328,14 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
       std::memset( pStatBuf, 0, sizeof( VSIStatBufL ) );
       std::string requestUrl;
       std::string reason;
-      if ( !underlyingUrl( pszFilename, requestUrl, reason ) )
+      std::string vsiPath;
+      if ( !underlyingUrl( pszFilename, requestUrl, reason, &vsiPath ) )
         return -1;
-      const std::string key = resourceKey( requestUrl );
+      const bool vsiObject = !vsiPath.empty();
+      const std::string key = vsiObject
+                                ? objectResourceKey( vsiPath,
+                                                     currentRangeCacheCredentialContext() )
+                                : resourceKey( requestUrl );
       CacheStore &cache = store();
       // Config and entry size under the store lock (P1 remediation
       // discipline): updateConfig() / updateEntrySize() write these fields
@@ -1176,29 +1349,50 @@ class RangeCacheFilesystemHandler final : public VSIFilesystemHandler
       if ( entry == nullptr || !haveSize )
       {
         // A bounded identity probe (never a download) to learn the size.
-        RemoteSourceValidator validator =
-          RemoteSourceValidator::probe( requestUrl, validatorOptions( config ) );
-        const RemoteSourceIdentity &identity = validator.identity();
-        // Gone / unusable / unreachable: a quiet stat miss — speculative
-        // sibling probes (\.aux, \.ovr, …) are normal GDAL behavior and
-        // must stay silent, never pollute the CPL error state.
-        if ( identity.state == RemoteSourceState::Offline ||
-             ( identity.state == RemoteSourceState::Unknown && !identity.hasSize ) )
+        if ( vsiObject )
         {
-          CPLErrorReset();
-          errno = ENOENT;
-          return -1;
+          const VsiObjectIdentityFacts facts = probeVsiObjectIdentity( vsiPath );
+          // Unreachable / gone: a quiet stat miss — speculative sibling
+          // probes stay silent, never pollute the CPL error state.
+          if ( !facts.probed || !facts.hasSize )
+          {
+            CPLErrorReset();
+            errno = ENOENT;
+            return -1;
+          }
+          entry = cache.getOrCreateVsiObject( key, vsiPath,
+                                              currentRangeCacheCredentialContext(),
+                                              vsiObjectIdentity( vsiPath, facts ) );
+          haveSize = true;
+          sizeBytes = facts.sizeBytes;
         }
-        entry = cache.getOrCreateResource( key, requestUrl, identity );
-        haveSize = identity.hasSize;
-        sizeBytes = identity.sizeBytes;
+        else
+        {
+          RemoteSourceValidator validator =
+            RemoteSourceValidator::probe( requestUrl, validatorOptions( config ) );
+          const RemoteSourceIdentity &identity = validator.identity();
+          // Gone / unusable / unreachable: a quiet stat miss — speculative
+          // sibling probes (\.aux, \.ovr, …) are normal GDAL behavior and
+          // must stay silent, never pollute the CPL error state.
+          if ( identity.state == RemoteSourceState::Offline ||
+               ( identity.state == RemoteSourceState::Unknown && !identity.hasSize ) )
+          {
+            CPLErrorReset();
+            errno = ENOENT;
+            return -1;
+          }
+          entry = cache.getOrCreateResource( key, requestUrl, identity );
+          haveSize = identity.hasSize;
+          sizeBytes = identity.sizeBytes;
+        }
       }
       if ( !haveSize )
       {
         // Range-ignoring oversized origin: learn the size from the
         // underlying handle (open + Seek END — no content transfer).
-        VSIVirtualHandleUniquePtr underlying =
-          openReadonlyVsi( ( std::string( "/vsicurl/" ) + requestUrl ).c_str() );
+        const std::string underlyingSpelling =
+          vsiObject ? vsiPath : std::string( "/vsicurl/" ) + requestUrl;
+        VSIVirtualHandleUniquePtr underlying = openReadonlyVsi( underlyingSpelling.c_str() );
         if ( underlying == nullptr )
         {
           errno = ENOENT;
@@ -1359,8 +1553,16 @@ void RemoteRangeCache::invalidateResource( const std::string &url )
     return;
   std::string requestUrl;
   std::string reason;
-  if ( !underlyingUrl( url, requestUrl, reason ) )
+  std::string vsiPath;
+  if ( !underlyingUrl( url, requestUrl, reason, &vsiPath ) )
     throw GeoError( ErrorCode::InvalidArgument, "RemoteRangeCache: not a remote resource: " + reason );
+  if ( !vsiPath.empty() )
+  {
+    // Object entries are keyed per creating principal: invalidate under the
+    // CURRENT context, and (when one is set) the shared context too.
+    g_store->invalidate( objectResourceKey( vsiPath, currentRangeCacheCredentialContext() ) );
+    return;
+  }
   g_store->invalidate( resourceKey( requestUrl ) );
 }
 
@@ -1417,6 +1619,28 @@ std::string RemoteRangeCache::cachedPath( const std::string &url )
 bool RemoteRangeCache::isCachePath( const std::string &path )
 {
   return path.rfind( kRangeCachePrefix, 0 ) == 0;
+}
+
+// --- 11.0 credential separation context (DECISIONS D-1102) -----------------
+
+namespace
+{
+
+std::mutex g_contextMutex;
+std::string g_credentialContext;
+
+} // namespace
+
+void setRangeCacheCredentialContext( const std::string &fingerprint )
+{
+  std::lock_guard<std::mutex> lock( g_contextMutex );
+  g_credentialContext = fingerprint;
+}
+
+std::string currentRangeCacheCredentialContext()
+{
+  std::lock_guard<std::mutex> lock( g_contextMutex );
+  return g_credentialContext;
 }
 
 } // namespace sicnu::geo

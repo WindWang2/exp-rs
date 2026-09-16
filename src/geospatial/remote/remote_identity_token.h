@@ -70,6 +70,14 @@ std::string remoteIdentityTokenFromIdentity( const std::string &url,
 std::string remoteIdentityBasis( const std::string &url,
                                  const RemoteIdentityTokenOptions &options = {} );
 
+/// 11.0: the credential-free identity URL form behind every token basis
+/// ("scheme://host/path[?non-credential-query]", host lowercased; VSI
+/// spellings resolve their embedded URL; non-http inputs canonicalize
+/// through ResourceUri). Pure string work — no probe, no network. This is
+/// the stable key surfaces like the offline mirror index key http(s)
+/// assets by.
+std::string remoteIdentityUrlBasis( const std::string &url );
+
 } // namespace sicnu::geo
 
 #endif // SICNU_GEOSPATIAL_REMOTE_IDENTITY_TOKEN_H
