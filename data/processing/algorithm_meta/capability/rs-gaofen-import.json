@@ -1,114 +1,130 @@
 {
-  "capability": {
-    "applicability": {
-      "land_cover": [
-        "任意地物"
+  "capability" :
+  {
+    "applicability" :
+    {
+      "land_cover" :
+      [
+        "\u4efb\u610f\u5730\u7269"
       ],
-      "scenes": [
-        "高分系列数据处理入口",
-        "国内教学数据标准化导入"
+      "scenes" :
+      [
+        "\u9ad8\u5206\u7cfb\u5217\u6570\u636e\u5904\u7406\u5165\u53e3",
+        "\u56fd\u5185\u6559\u5b66\u6570\u636e\u6807\u51c6\u5316\u5bfc\u5165"
       ]
     },
-    "band_roles": {},
-    "crs": {
-      "requires_projected": false,
-      "requires_shared_grid": false
+    "band_roles" : {},
+    "crs" :
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
     },
-    "determinism": {
-      "grade": "bit_exact",
-      "large_raster_safe": false,
-      "memory_policy": "full_raster",
-      "side_effects": false,
-      "stochastic": false
+    "determinism" :
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
     },
-    "failure_modes": [
+    "failure_modes" :
+    [
       {
-        "code": "DATASET_NOT_FOUND",
-        "when": "产品目录缺少 sidecar XML 或测量 TIFF",
-        "remedy": "检查 CRESDA 产品包的 -MSS1.xml/-PAN1.xml 与同名 TIFF"
+        "code" : "DATASET_NOT_FOUND",
+        "remedy" : "\u68c0\u67e5 CRESDA \u4ea7\u54c1\u5305\u7684 -MSS1.xml/-PAN1.xml \u4e0e\u540c\u540d TIFF",
+        "when" : "\u4ea7\u54c1\u76ee\u5f55\u7f3a\u5c11 sidecar XML \u6216\u6d4b\u91cf TIFF"
       },
       {
-        "code": "NOT_SUPPORTED",
-        "when": "输入为 GF-3/GF-4/GF-5 等未适配家族",
-        "remedy": "查看诊断原因；SAR/高光谱产品暂不支持"
+        "code" : "NOT_SUPPORTED",
+        "remedy" : "\u67e5\u770b\u8bca\u65ad\u539f\u56e0\uff1bSAR/\u9ad8\u5149\u8c31\u4ea7\u54c1\u6682\u4e0d\u652f\u6301",
+        "when" : "\u8f93\u5165\u4e3a GF-3/GF-4/GF-5 \u7b49\u672a\u9002\u914d\u5bb6\u65cf"
       }
     ],
-    "family": "io",
-    "io": {
-      "inputs": [],
-      "outputs": [
+    "family" : "io",
+    "io" :
+    {
+      "inputs" : [],
+      "outputs" :
+      [
         {
-          "data_kind": "integer",
-          "name": "bandCount",
-          "required": true
+          "data_kind" : "integer",
+          "name" : "bandCount",
+          "required" : true
         },
         {
-          "data_kind": "raster",
-          "file_format": "tif",
-          "name": "output",
-          "required": true
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
         },
         {
-          "data_kind": "string",
-          "name": "productId",
-          "required": true
+          "data_kind" : "string",
+          "name" : "productId",
+          "required" : true
         }
       ],
-      "parameters": [
+      "parameters" :
+      [
         {
-          "default": "false",
-          "name": "apply_calibration",
-          "required": false,
-          "type": "boolean"
+          "default" : "false",
+          "name" : "apply_calibration",
+          "required" : false,
+          "type" : "boolean"
         },
         {
-          "name": "bands",
-          "required": false,
-          "type": "string"
+          "name" : "bands",
+          "required" : false,
+          "type" : "string"
         },
         {
-          "name": "input",
-          "required": true,
-          "type": "string"
+          "name" : "input",
+          "required" : true,
+          "type" : "string"
         },
         {
-          "name": "output",
-          "required": true,
-          "type": "string"
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
         }
       ]
     },
-    "limitations": [],
-    "modality": [
+    "limitations" : [],
+    "modality" :
+    [
       "optical"
     ],
-    "operator_group": "data-formats",
-    "prerequisites": [
+    "operator_group" : "data-formats",
+    "prerequisites" :
+    [
       "Product directory with CRESDA sidecar XML and TIFF (offline)",
-      "离线可用：仅解析产品自带文件；大部分批次需另查发布定标表做 TOA 转换。"
+      "\u79bb\u7ebf\u53ef\u7528\uff1a\u4ec5\u89e3\u6790\u4ea7\u54c1\u81ea\u5e26\u6587\u4ef6\uff1b\u5927\u90e8\u5206\u6279\u6b21\u9700\u53e6\u67e5\u53d1\u5e03\u5b9a\u6807\u8868\u505a TOA \u8f6c\u6362\u3002"
     ],
-    "schema_version": 2,
-    "summary": "高分数据导入：读取 GF-1/2/6 PMS/WFV 与 GF-7 FWD/BWD L1A 产品包（CRESDA sidecar XML + TIFF），自动解析元数据、映射波段角色并标注太阳几何与定标系数。",
-    "teaching_use": {
-      "concepts": [
-        "CRESDA 产品结构",
-        "波段角色",
-        "辐射定标声明",
-        "太阳几何"
+    "schema_version" : 2,
+    "summary" : "\u9ad8\u5206\u6570\u636e\u5bfc\u5165\uff1a\u8bfb\u53d6 GF-1/2/6 PMS/WFV \u4e0e GF-7 FWD/BWD L1A \u4ea7\u54c1\u5305\uff08CRESDA sidecar XML + TIFF\uff09\uff0c\u81ea\u52a8\u89e3\u6790\u5143\u6570\u636e\u3001\u6620\u5c04\u6ce2\u6bb5\u89d2\u8272\u5e76\u6807\u6ce8\u592a\u9633\u51e0\u4f55\u4e0e\u5b9a\u6807\u7cfb\u6570\u3002",
+    "teaching_use" :
+    {
+      "concepts" :
+      [
+        "CRESDA \u4ea7\u54c1\u7ed3\u6784",
+        "\u6ce2\u6bb5\u89d2\u8272",
+        "\u8f90\u5c04\u5b9a\u6807\u58f0\u660e",
+        "\u592a\u9633\u51e0\u4f55"
       ],
-      "courses": [
-        "遥感数据处理"
+      "courses" :
+      [
+        "\u9065\u611f\u6570\u636e\u5904\u7406"
       ],
-      "exercise": "导入 GF-1 WFV 四波段影像并直接计算 NDVI（波段角色自动解析）。"
+      "exercise" : "\u5bfc\u5165 GF-1 WFV \u56db\u6ce2\u6bb5\u5f71\u50cf\u5e76\u76f4\u63a5\u8ba1\u7b97 NDVI\uff08\u6ce2\u6bb5\u89d2\u8272\u81ea\u52a8\u89e3\u6790\uff09\u3002"
     }
   },
-  "description": "Import a Gaofen-1/2/6 L1A product (PMS/WFV) into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.",
-  "display_name": "Gaofen Product Import",
-  "id": "rs:gaofen_import",
-  "input": "",
-  "output": "raster",
-  "schema_version": 2,
-  "tags": [
+  "description" : "Import a Gaofen-1/2/6 or GF-7 L1A product (PMS/WFV, FWD/BWD) into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.",
+  "display_name" : "Gaofen Product Import",
+  "id" : "rs:gaofen_import",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" :
+  [
     "gaofen",
     "cn-satellite",
     "import",

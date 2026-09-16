@@ -198,6 +198,9 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_temporal_regularize_operator.cpp
     rs/rs_temporal_harmonic_breaks_operator.cpp
     rs/rs_temporal_region_features_operator.cpp
+    rs/rs_temporal_seasonal_breaks_operator.cpp
+    rs/rs_temporal_model_select_operator.cpp
+    rs/rs_temporal_phenology_multi_operator.cpp
     rs/rs_landsat_import_operator.cpp
     rs/rs_product_import_plan.cpp
     rs/rs_cn_product_import_operator.cpp

@@ -1,4 +1,4 @@
-<!-- 由 scripts/capability_knowledge_tool gen-pages 自动生成 — 手动编辑是缺陷（ADR 0146）。 修改请改对应 sidecar 后重新生成。 -->
+<!-- 由 scripts/capability_knowledge_tool gen-pages 自动生成 — 手动编辑是缺陷（ADR 0154）。 修改请改对应 sidecar 后重新生成。 -->
 
 # 分类与机器学习（classification）
 
@@ -171,7 +171,7 @@ K-Means 非监督分类：按光谱聚类自动划分地物类别，无需训练
 - 模态：optical、sar、multimodal
 - 输入：input（raster）
 - 输出：bands（integer）、classes（integer）、output（raster）
-- 参数：angleOut（string）、bands（integer）、metric（enum）、output（string）、refs（string）
+- 参数：angleOut（string）、bands（integer）、libraryMaterials（string）、libraryPath（string）、metric（enum）、output（string）、refs（string）、refsRef（string）
 - 前置条件：Reference spectra must use the same band order and units as the input raster.
 - 局限：SID requires non-negative reflectance-like spectra (a zero or negative band invalidates the pair).
 - 适用地物：矿物、植被、目标光谱

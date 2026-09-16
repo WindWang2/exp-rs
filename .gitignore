@@ -295,3 +295,7 @@ data/labs/_tmp/
 !.planning/qgis-editing-annotation-11/**
 # F11 goal-loop process ledger (local-only process artifact).
 /.goal-loop-ledger.md
+# temporal-intelligence-11 (F04): track planning notes (markdown only; logs stay local).
+!.planning/temporal-intelligence-11/
+.planning/temporal-intelligence-11/*
+!.planning/temporal-intelligence-11/*.md

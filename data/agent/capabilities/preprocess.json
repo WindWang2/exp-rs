@@ -3,12 +3,26 @@
     "id": "family:preprocess",
     "kind": "family_default",
     "family": "preprocess",
-    "modality": ["optical", "sar", "thermal", "dem"],
-    "resource": { "cost_class": "light", "large_raster_safe": true },
+    "modality": [
+      "optical",
+      "sar",
+      "thermal",
+      "dem"
+    ],
+    "resource": {
+      "cost_class": "light",
+      "large_raster_safe": true
+    },
     "side_effects": false,
     "verification": {
       "expected_kind": "raster",
-      "checks": ["existence", "opens", "crs_present", "dimensions", "finite_fraction"]
+      "checks": [
+        "existence",
+        "opens",
+        "crs_present",
+        "dimensions",
+        "finite_fraction"
+      ]
     },
     "limitations": [
       "Preparation products inherit upstream radiometric uncertainty",
@@ -19,61 +33,135 @@
     "id": "rs:atmospheric_correction",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "modality": ["optical"],
-    "radiometric": { "acceptable": ["dn", "toa"], "warn": ["surface_reflectance"] },
-    "limitations": ["Empirical/physically-guided correction; quality depends on scene content"]
+    "intents": [
+      "preprocess"
+    ],
+    "modality": [
+      "optical"
+    ],
+    "radiometric": {
+      "acceptable": [
+        "dn",
+        "toa"
+      ],
+      "warn": [
+        "surface_reflectance"
+      ]
+    },
+    "limitations": [
+      "Empirical/physically-guided correction; quality depends on scene content"
+    ]
   },
   {
     "id": "rs:atmospheric_dos1",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "modality": ["optical"],
-    "radiometric": { "acceptable": ["dn", "toa"] },
-    "limitations": ["Dark-object subtraction assumes the scene contains true dark targets"]
+    "intents": [
+      "preprocess"
+    ],
+    "modality": [
+      "optical"
+    ],
+    "radiometric": {
+      "acceptable": [
+        "dn",
+        "toa"
+      ]
+    },
+    "limitations": [
+      "Dark-object subtraction assumes the scene contains true dark targets"
+    ]
   },
   {
     "id": "rs:atmospheric_dos2",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "modality": ["optical"],
-    "radiometric": { "acceptable": ["dn", "toa"] },
-    "limitations": ["Dark-object subtraction assumes the scene contains true dark targets"]
+    "intents": [
+      "preprocess"
+    ],
+    "modality": [
+      "optical"
+    ],
+    "radiometric": {
+      "acceptable": [
+        "dn",
+        "toa"
+      ]
+    },
+    "limitations": [
+      "Dark-object subtraction assumes the scene contains true dark targets"
+    ]
   },
   {
     "id": "rs:atmospheric_quac",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "modality": ["optical"],
-    "radiometric": { "acceptable": ["dn", "toa"] },
-    "limitations": ["QUAC assumes the scene contains at least one dark, spectrally diverse land cover"]
+    "intents": [
+      "preprocess"
+    ],
+    "modality": [
+      "optical"
+    ],
+    "radiometric": {
+      "acceptable": [
+        "dn",
+        "toa"
+      ]
+    },
+    "limitations": [
+      "QUAC assumes the scene contains at least one dark, spectrally diverse land cover"
+    ]
   },
   {
     "id": "rs:dn_to_radiance",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "modality": ["optical", "thermal"],
-    "radiometric": { "acceptable": ["dn"] },
-    "limitations": ["Requires sensor-specific gain/offset; unit metadata must match the actual product"]
+    "intents": [
+      "preprocess"
+    ],
+    "modality": [
+      "optical",
+      "thermal"
+    ],
+    "radiometric": {
+      "acceptable": [
+        "dn"
+      ]
+    },
+    "limitations": [
+      "Requires sensor-specific gain/offset; unit metadata must match the actual product"
+    ]
   },
   {
     "id": "rs:radiometric_calibration",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "modality": ["optical", "thermal"],
-    "radiometric": { "acceptable": ["dn"], "warn": ["toa"] },
-    "limitations": ["Gain/offset tables are sensor- and product-specific"]
+    "intents": [
+      "preprocess"
+    ],
+    "modality": [
+      "optical",
+      "thermal"
+    ],
+    "radiometric": {
+      "acceptable": [
+        "dn"
+      ],
+      "warn": [
+        "toa"
+      ]
+    },
+    "limitations": [
+      "Gain/offset tables are sensor- and product-specific"
+    ]
   },
   {
     "id": "rs:contrast_stretch",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["preprocess"],
+    "intents": [
+      "preprocess"
+    ],
     "limitations": [
       "Display-oriented stretch destroys radiometric linearity — never feed stretched products into index or change science"
     ]
@@ -82,7 +170,9 @@
     "id": "rs:image_enhancement",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["preprocess"],
+    "intents": [
+      "preprocess"
+    ],
     "limitations": [
       "Enhancement is cartographic, not scientific — downstream index/change results on enhanced inputs are not comparable"
     ]
@@ -91,8 +181,13 @@
     "id": "rs:resample",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "resource": { "cost_class": "medium", "large_raster_safe": true },
+    "intents": [
+      "preprocess"
+    ],
+    "resource": {
+      "cost_class": "medium",
+      "large_raster_safe": true
+    },
     "limitations": [
       "Categorical rasters must resample with exact-pick kernels; bilinear/cubic invents classes"
     ]
@@ -101,8 +196,13 @@
     "id": "rs:align",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "resource": { "cost_class": "medium", "large_raster_safe": true },
+    "intents": [
+      "preprocess"
+    ],
+    "resource": {
+      "cost_class": "medium",
+      "large_raster_safe": true
+    },
     "limitations": [
       "Aligns to the declared reference grid; a wrong reference silently resamples the science away"
     ]
@@ -111,84 +211,86 @@
     "id": "rs:mosaic",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "resource": { "cost_class": "medium", "large_raster_safe": true },
-    "limitations": ["Seamline/feathering choices change downstream statistics near scene edges"]
+    "intents": [
+      "preprocess"
+    ],
+    "resource": {
+      "cost_class": "medium",
+      "large_raster_safe": true
+    },
+    "limitations": [
+      "Seamline/feathering choices change downstream statistics near scene edges"
+    ]
   },
   {
     "id": "rs:extract_bands",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "limitations": ["Band selection is by index — verify roles against the selection"]
+    "limitations": [
+      "Band selection is by index — verify roles against the selection"
+    ]
   },
   {
     "id": "rs:apply_mask",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["qa", "preprocess"],
-    "band_roles": { "mask": 1 },
-    "limitations": ["Masked pixels become NoData; coverage fractions drop accordingly"]
+    "intents": [
+      "qa",
+      "preprocess"
+    ],
+    "band_roles": {
+      "mask": 1
+    },
+    "limitations": [
+      "Masked pixels become NoData; coverage fractions drop accordingly"
+    ]
   },
   {
     "id": "rs:qa_mask",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["qa"],
-    "modality": ["optical"],
-    "artifacts": { "output": { "kind": "raster", "dtype": "uint8" } },
-    "limitations": ["Bit-decoding is product-specific (QA band layout must match the sensor)"]
+    "intents": [
+      "qa"
+    ],
+    "modality": [
+      "optical"
+    ],
+    "artifacts": {
+      "output": {
+        "kind": "raster",
+        "dtype": "uint8"
+      }
+    },
+    "limitations": [
+      "Bit-decoding is product-specific (QA band layout must match the sensor)"
+    ]
   },
   {
     "id": "rs:landsat_import",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "modality": ["optical", "thermal"],
-    "side_effects": true,
-    "limitations": ["Writes derived products beside the source archive"]
-  },
-  {
-    "id": "rs:gaofen_import",
-    "family": "preprocess",
-    "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "modality": ["optical"],
+    "intents": [
+      "preprocess"
+    ],
+    "modality": [
+      "optical",
+      "thermal"
+    ],
     "side_effects": true,
     "limitations": [
-      "Writes derived products beside the source archive",
-      "GF-3/GF-4/GF-5 names are refused with a typed reason (supported: GF-1/2/6 PMS/WFV, GF-7 FWD/BWD)"
-    ]
-  },
-  {
-    "id": "rs:zy3_import",
-    "family": "preprocess",
-    "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "modality": ["optical"],
-    "side_effects": true,
-    "limitations": [
-      "Writes derived products beside the source archive",
-      "Supported: ZY-3 TLC/NAD/FWD/BWD (pan and multispectral inventories)"
-    ]
-  },
-  {
-    "id": "rs:hj_import",
-    "family": "preprocess",
-    "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "modality": ["optical"],
-    "side_effects": true,
-    "limitations": [
-      "Writes derived products beside the source archive",
-      "Supported: HJ-1A/1B CCD and HJ-2A/B CCD; HJ IRS/HSI are refused with a typed reason"
+      "Writes derived products beside the source archive"
     ]
   },
   {
     "id": "rs:cn_product_import",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "modality": ["optical"],
+    "intents": [
+      "preprocess"
+    ],
+    "modality": [
+      "optical"
+    ],
     "side_effects": true,
     "limitations": [
       "Writes derived products beside the source archive",
@@ -200,62 +302,62 @@
     "id": "rs:sentinel2_import",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "modality": ["optical"],
+    "intents": [
+      "preprocess"
+    ],
+    "modality": [
+      "optical"
+    ],
     "side_effects": true,
-    "limitations": ["Writes derived products beside the source archive"]
+    "limitations": [
+      "Writes derived products beside the source archive"
+    ]
   },
   {
     "id": "rs:modis_import",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "modality": ["optical", "thermal"],
+    "intents": [
+      "preprocess"
+    ],
+    "modality": [
+      "optical",
+      "thermal"
+    ],
     "side_effects": true,
-    "limitations": ["MODIS sinusoidal products need explicit reprojection intent afterwards"]
+    "limitations": [
+      "MODIS sinusoidal products need explicit reprojection intent afterwards"
+    ]
   },
   {
     "id": "rs:modis_georeference",
     "family": "preprocess",
     "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "modality": ["optical", "thermal"],
+    "intents": [
+      "preprocess"
+    ],
+    "modality": [
+      "optical",
+      "thermal"
+    ],
     "side_effects": true,
-    "limitations": ["Sinusoidal-to-target CRS step; check the resampling kernel for categorical layers"]
+    "limitations": [
+      "Sinusoidal-to-target CRS step; check the resampling kernel for categorical layers"
+    ]
   },
   {
     "id": "gdal:orthorectification",
     "family": "preprocess",
     "extends": "family:io",
-    "intents": ["preprocess"],
-    "resource": { "cost_class": "heavy", "large_raster_safe": true },
-    "limitations": ["Requires a DEM and RPC/TIMING geometry; wrong DEM datum shifts the product"]
-  },
-  {
-    "id": "rs:gaofen_import",
-    "family": "preprocess",
-    "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "modality": ["optical"],
-    "side_effects": true,
-    "limitations": ["CRESDA/HJ L1A products need the sidecar XML next to the TIFFs"]
-  },
-  {
-    "id": "rs:zy3_import",
-    "family": "preprocess",
-    "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "modality": ["optical"],
-    "side_effects": true,
-    "limitations": ["CRESDA/HJ L1A products need the sidecar XML next to the TIFFs"]
-  },
-  {
-    "id": "rs:hj_import",
-    "family": "preprocess",
-    "extends": "family:preprocess",
-    "intents": ["preprocess"],
-    "modality": ["optical"],
-    "side_effects": true,
-    "limitations": ["CRESDA/HJ L1A products need the sidecar XML next to the TIFFs"]
+    "intents": [
+      "preprocess"
+    ],
+    "resource": {
+      "cost_class": "heavy",
+      "large_raster_safe": true
+    },
+    "limitations": [
+      "Requires a DEM and RPC/TIMING geometry; wrong DEM datum shifts the product"
+    ]
   }
 ]

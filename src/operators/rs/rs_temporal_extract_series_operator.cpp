@@ -7,6 +7,7 @@
 #include "operators/framework/rs_schema.h"
 #include "operators/rs/rs_temporal_collection_input.h"
 #include "processing/algorithms/temporal/temporal_stats.h"
+#include "processing/algorithms/temporal/temporal_region_table.h"
 #include "processing/algorithms/temporal/temporal_stream.h"
 #include "processing/framework/resource_estimation.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
@@ -37,21 +38,9 @@ struct MapPoint
   double y = 0.0;
 };
 
-/// Even-odd ray casting on pixel centers (map coordinates).
-bool pointInPolygon( double px, double py, const std::vector<MapPoint> &poly )
-{
-  bool inside = false;
-  const size_t n = poly.size();
-  for ( size_t i = 0, j = n - 1; i < n; j = i++ )
-  {
-    const double xi = poly[i].x, yi = poly[i].y;
-    const double xj = poly[j].x, yj = poly[j].y;
-    if ( ( yi > py ) != ( yj > py ) &&
-         px < ( xj - xi ) * ( py - yi ) / ( yj - yi ) + xi )
-      inside = !inside;
-  }
-  return inside;
-}
+// Pixel membership is owned by temporal_region_table::buildRegionGeometry
+// (single point-in-polygon authority; even-odd pixel-center rule — the
+// exact semantics this operator previously implemented inline).
 
 /// Map -> pixel for a north-up affine geotransform (rotation is rejected by
 /// preflight's same-grid check).
@@ -89,7 +78,6 @@ std::vector<MapPoint> parsePolygon( const Json::Value &polygonJson )
   return poly;
 }
 } // namespace
-
 std::string RsTemporalExtractSeriesOperator::description() const
 {
   return "Extract a time series at a point or inside a polygon ROI from a "
@@ -274,31 +262,26 @@ Json::Value RsTemporalExtractSeriesOperator::run( const Json::Value &params,
   }
   else
   {
-    // ROI: bounding box window only (goal §26).
-    double minX = std::numeric_limits<double>::infinity();
-    double minY = std::numeric_limits<double>::infinity();
-    double maxX = -std::numeric_limits<double>::infinity();
-    double maxY = -std::numeric_limits<double>::infinity();
+    // ROI: bounding box window only (goal §26). Membership comes from the
+    // shared region-geometry kernel (buildRegionGeometry) — the same
+    // point-in-polygon authority as rs:temporal_extract_regions.
+    temporal::RegionRef roi;
+    roi.id = QStringLiteral( "roi" );
+    roi.isPoint = false;
+    roi.polygon.reserve( polygon.size() );
     for ( const MapPoint &p : polygon )
-    {
-      minX = std::min( minX, p.x );
-      minY = std::min( minY, p.y );
-      maxX = std::max( maxX, p.x );
-      maxY = std::max( maxY, p.y );
-    }
-    int col0 = 0, row0 = 0, col1 = 0, row1 = 0;
-    if ( !mapToPixel( gt, minX, maxY, &col0, &row0 ) ||
-         !mapToPixel( gt, maxX, minY, &col1, &row1 ) )
-      throw RSOperatorError( ErrorCode::InvalidInputData, "raster has no usable geotransform" );
-    col0 = std::max( 0, col0 );
-    row0 = std::max( 0, row0 );
-    col1 = std::min( width - 1, col1 );
-    row1 = std::min( height - 1, row1 );
-    const int winW = col1 - col0 + 1;
-    const int winH = row1 - row0 + 1;
-    if ( winW <= 0 || winH <= 0 )
+      roi.polygon.push_back( { p.x, p.y } );
+
+    temporal::RegionGeometry geo;
+    QString geoError;
+    if ( !temporal::buildRegionGeometry( roi, 0, gt, width, height, &geo, &geoError ) )
       throw RSOperatorError( ErrorCode::InvalidInputData,
-                             "polygon does not intersect the raster extent" );
+                             "polygon does not intersect the raster extent: " +
+                                 geoError.toStdString() );
+    const int col0 = geo.xOff;
+    const int row0 = geo.yOff;
+    const int winW = geo.w;
+    const int winH = geo.h;
 
     // ROI memory contract: the bbox window is streamed in row bands (never a
     // scene-sized allocation) and the exact per-date median materializes at
@@ -314,21 +297,9 @@ Json::Value RsTemporalExtractSeriesOperator::run( const Json::Value &params,
               "instead of in-memory ROI statistics" );
 
     std::vector<std::uint8_t> inside( static_cast<size_t>( winW ) * winH, 0 );
-    std::uint64_t roiPixels = 0;
-    for ( int r = 0; r < winH; ++r )
-    {
-      context.throwIfCancelled();
-      const double py = gt[3] + ( row0 + r + 0.5 ) * gt[5];
-      for ( int c = 0; c < winW; ++c )
-      {
-        const double px = gt[0] + ( col0 + c + 0.5 ) * gt[1];
-        if ( pointInPolygon( px, py, polygon ) )
-        {
-          inside[static_cast<size_t>( r ) * winW + c] = 1;
-          ++roiPixels;
-        }
-      }
-    }
+    for ( int offset : geo.insideOffsets )
+      inside[static_cast<size_t>( offset )] = 1;
+    const std::uint64_t roiPixels = geo.insideCount();
     if ( roiPixels == 0 )
       throw RSOperatorError( ErrorCode::InvalidInputData,
                              "polygon covers no pixel center inside the raster" );

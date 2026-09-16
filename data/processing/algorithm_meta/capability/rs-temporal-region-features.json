@@ -1,0 +1,210 @@
+{
+  "capability" :
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" :
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" :
+    {
+      "cost_class" : "O(scenes \u00d7 totalRegionWindowPixels) I/O + O(regions \u00d7 (scenes\u00b2 + model))",
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "temporal",
+    "io" :
+    {
+      "inputs" : [],
+      "outputs" :
+      [
+        {
+          "data_kind" : "integer",
+          "name" : "featureCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "table",
+          "file_format" : "csv",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "regionCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "sceneCount",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "schema",
+          "required" : true
+        },
+        {
+          "data_kind" : "string",
+          "name" : "sidecar",
+          "required" : true
+        }
+      ],
+      "parameters" :
+      [
+        {
+          "default" : "true",
+          "name" : "apply_qa_masking",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "default" : "0",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "enum" :
+          [
+            "blue",
+            "green",
+            "red",
+            "red_edge",
+            "nir",
+            "swir1",
+            "swir2",
+            "vv",
+            "vh"
+          ],
+          "name" : "band_role",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "2",
+          "name" : "change_harmonics",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "collection",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "1",
+          "name" : "cycles",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "none",
+          "enum" :
+          [
+            "none",
+            "decrease",
+            "increase"
+          ],
+          "name" : "direction",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "keep_all",
+          "enum" :
+          [
+            "keep_all",
+            "reject"
+          ],
+          "name" : "duplicate_policy",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "100000",
+          "name" : "max_regions",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "name" : "regions",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "regions_file",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "name" : "scenes",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "366",
+          "name" : "seasonEndDoy",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "1",
+          "name" : "seasonStartDoy",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "name" : "sidecar_path",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "sen",
+          "enum" :
+          [
+            "sen",
+            "ols"
+          ],
+          "name" : "trend_method",
+          "required" : false,
+          "type" : "enum"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" :
+    [
+      "optical"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Compute a typed per-region temporal feature table for ML / agent consumption: series quality (valid_fraction), distribution (mean/stddev/min/max), robust trend (Sen slope + Mann-Kendall p, or OLS), anomalies (most recent z-score, max |z|), change (break count, first break day, max magnitude from the joint harmonic+trend segmentation; optional disturbance onset and recovery), and multi-cycle phenology (per-cycle median across years of SOS/POS/EOS/LOS/amplitude/integral). Output is one CSV row per region with a versioned JSON schema sidecar (exp_rs_temporal_region_features/1) so label tables join by region_id.",
+  "display_name" : "Temporal Region Features (ML Table)",
+  "id" : "rs:temporal_region_features",
+  "input" : "",
+  "output" : "",
+  "schema_version" : 2,
+  "tags" :
+  [
+    "temporal",
+    "features",
+    "machine-learning",
+    "phenology"
+  ]
+}

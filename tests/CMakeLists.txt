@@ -5262,6 +5262,80 @@ if(TARGET sicnu_operators)
   sicnu_link_jsoncpp(test_temporal_change)
   sicnu_discover_tests(test_temporal_change)
 
+  # Temporal Intelligence 11.0: attribution/model-selection, uncertainty and
+  # phenology-2.0 kernels over the shared synthetic corpus helper.
+  add_executable(test_temporal_selection test_temporal_selection.cpp)
+  target_link_libraries(test_temporal_selection PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    Sicnu::data
+    sicnu_processing
+    GDAL::GDAL
+  )
+  target_include_directories(test_temporal_selection PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/processing/algorithms/temporal
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_temporal_selection)
+  sicnu_discover_tests(test_temporal_selection)
+
+  add_executable(test_temporal_uncertainty test_temporal_uncertainty.cpp)
+  target_link_libraries(test_temporal_uncertainty PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    Sicnu::data
+    sicnu_processing
+    GDAL::GDAL
+  )
+  target_include_directories(test_temporal_uncertainty PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/processing/algorithms/temporal
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_temporal_uncertainty)
+  sicnu_discover_tests(test_temporal_uncertainty)
+
+  add_executable(test_temporal_phenology_multi test_temporal_phenology_multi.cpp)
+  target_link_libraries(test_temporal_phenology_multi PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    Sicnu::data
+    sicnu_processing
+    GDAL::GDAL
+  )
+  target_include_directories(test_temporal_phenology_multi PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/processing/algorithms/temporal
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_temporal_phenology_multi)
+  sicnu_discover_tests(test_temporal_phenology_multi)
+
+  add_executable(test_temporal_operators_ti11 test_temporal_operators_ti11.cpp)
+  target_link_libraries(test_temporal_operators_ti11 PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    Sicnu::data
+    sicnu_processing
+    sicnu_operators
+    GDAL::GDAL
+  )
+  target_include_directories(test_temporal_operators_ti11 PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/processing/algorithms/temporal
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_link_jsoncpp(test_temporal_operators_ti11)
+  sicnu_discover_tests(test_temporal_operators_ti11)
+
   add_executable(test_temporal_regions test_temporal_regions.cpp)
   target_link_libraries(test_temporal_regions PRIVATE
     Catch2::Catch2WithMain

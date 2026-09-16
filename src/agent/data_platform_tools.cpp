@@ -51,6 +51,7 @@ using namespace sicnu::experiment;
 // .planning/qgis-editing-annotation-11/EVIDENCE.md OUT_OF_SCOPE.
 using sicnu::experiment::BenchmarkService;
 using sicnu::experiment::benchmarkRunStatusToString;
+using namespace sicnu::experiment;
 
 namespace
 {

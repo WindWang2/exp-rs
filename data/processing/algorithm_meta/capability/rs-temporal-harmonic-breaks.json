@@ -1,0 +1,202 @@
+{
+  "capability" :
+  {
+    "applicability" : {},
+    "band_roles" : {},
+    "crs" :
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
+    },
+    "determinism" :
+    {
+      "cost_class" : "O(tile \u00d7 scenes \u00d7 iterations + tile \u00d7 segments \u00d7 scenes \u00d7 terms\u00b2)",
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
+    },
+    "failure_modes" : [],
+    "family" : "temporal",
+    "io" :
+    {
+      "inputs" : [],
+      "outputs" :
+      [
+        {
+          "data_kind" : "string",
+          "name" : "epochDate",
+          "required" : true
+        },
+        {
+          "data_kind" : "numeric",
+          "name" : "meanBreakMagnitude",
+          "required" : true
+        },
+        {
+          "data_kind" : "json",
+          "name" : "memory",
+          "required" : true
+        },
+        {
+          "data_kind" : "raster",
+          "file_format" : "tif",
+          "name" : "output",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "pixelsWithBreaks",
+          "required" : true
+        },
+        {
+          "data_kind" : "integer",
+          "name" : "sceneCount",
+          "required" : true
+        }
+      ],
+      "parameters" :
+      [
+        {
+          "default" : "true",
+          "name" : "apply_qa_masking",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "default" : "0",
+          "name" : "band",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "enum" :
+          [
+            "blue",
+            "green",
+            "red",
+            "red_edge",
+            "nir",
+            "swir1",
+            "swir2",
+            "vv",
+            "vh"
+          ],
+          "name" : "band_role",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "name" : "collection",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "none",
+          "enum" :
+          [
+            "none",
+            "decrease",
+            "increase"
+          ],
+          "name" : "direction",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "keep_all",
+          "enum" :
+          [
+            "keep_all",
+            "reject"
+          ],
+          "name" : "duplicate_policy",
+          "required" : false,
+          "type" : "enum"
+        },
+        {
+          "default" : "2",
+          "name" : "harmonics",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "3",
+          "name" : "maxBreaks",
+          "required" : false,
+          "type" : "integer"
+        },
+        {
+          "default" : "0.100000",
+          "name" : "minImprovement",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "0",
+          "name" : "minMagnitude",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "90",
+          "name" : "minSegmentDays",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
+        },
+        {
+          "default" : "0",
+          "name" : "recoveryTolerance",
+          "required" : false,
+          "type" : "numeric"
+        },
+        {
+          "default" : "false",
+          "name" : "robust",
+          "required" : false,
+          "type" : "boolean"
+        },
+        {
+          "name" : "scenes",
+          "required" : false,
+          "type" : "string"
+        },
+        {
+          "default" : "256",
+          "name" : "tile_size",
+          "required" : false,
+          "type" : "integer"
+        }
+      ]
+    },
+    "limitations" : [],
+    "modality" :
+    [
+      "optical"
+    ],
+    "operator_group" : "temporal",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "",
+    "teaching_use" : {}
+  },
+  "description" : "Joint seasonal-trend change segmentation: each segment models a linear trend PLUS seasonal harmonics (sin/cos of 2*PI*k*t/365.25), and breaks are detected as trend changes of the seasonality-adjusted residual, greedily, while each split lowers the residual RSS by more than minImprovement and both sides keep the minimum segment length. Greedy BFAST/CCDC-inspired method - NOT the full BFAST (no iterative season/trend alternation) or CCDC (no L1 / per-segment model selection). Outputs per pixel: break count, per-break calendar day offsets and fitted-level jump magnitudes, first/last segment slopes, overall RMSE/R2; with a declared disturbance direction, the first onset day and its recovery length (days; negative when never recovered).",
+  "display_name" : "Temporal Harmonic Breaks (Joint Seasonal-Trend Change)",
+  "id" : "rs:temporal_harmonic_breaks",
+  "input" : "",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" :
+  [
+    "temporal",
+    "change-detection",
+    "harmonic-model",
+    "segmentation"
+  ]
+}

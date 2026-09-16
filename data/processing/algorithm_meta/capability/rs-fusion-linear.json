@@ -1,130 +1,147 @@
 {
-  "capability": {
-    "applicability": {
-      "land_cover": [
-        "农田",
-        "城市"
+  "capability" :
+  {
+    "applicability" :
+    {
+      "land_cover" :
+      [
+        "\u519c\u7530",
+        "\u57ce\u5e02"
       ],
-      "scenes": [
-        "批量业务化融合生产",
-        "融合参数敏感性实验"
+      "scenes" :
+      [
+        "\u6279\u91cf\u4e1a\u52a1\u5316\u878d\u5408\u751f\u4ea7",
+        "\u878d\u5408\u53c2\u6570\u654f\u611f\u6027\u5b9e\u9a8c"
       ]
     },
-    "band_roles": {},
-    "crs": {
-      "requires_projected": false,
-      "requires_shared_grid": false
+    "band_roles" : {},
+    "crs" :
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
     },
-    "determinism": {
-      "grade": "bit_exact",
-      "large_raster_safe": true,
-      "memory_policy": "streaming",
-      "side_effects": false,
-      "stochastic": false
+    "determinism" :
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : true,
+      "memory_policy" : "streaming",
+      "side_effects" : false,
+      "stochastic" : false
     },
-    "failure_modes": [
+    "failure_modes" :
+    [
       {
-        "code": "GRID_MISMATCH",
-        "when": "输入网格不一致",
-        "remedy": "先用 rs:align 统一网格"
+        "code" : "GRID_MISMATCH",
+        "remedy" : "\u5148\u7528 rs:align \u7edf\u4e00\u7f51\u683c",
+        "when" : "\u8f93\u5165\u7f51\u683c\u4e0d\u4e00\u81f4"
       }
     ],
-    "family": "optical",
-    "io": {
-      "inputs": [
+    "family" : "optical",
+    "io" :
+    {
+      "inputs" :
+      [
         {
-          "data_kind": "raster",
-          "name": "ms",
-          "required": true
+          "data_kind" : "raster",
+          "name" : "ms",
+          "required" : true
         },
         {
-          "data_kind": "raster",
-          "name": "pan",
-          "required": true
+          "data_kind" : "raster",
+          "name" : "pan",
+          "required" : true
         }
       ],
-      "outputs": [
+      "outputs" :
+      [
         {
-          "data_kind": "integer",
-          "name": "bands",
-          "required": true
+          "data_kind" : "integer",
+          "name" : "bands",
+          "required" : true
         },
         {
-          "data_kind": "string",
-          "name": "method",
-          "required": true
+          "data_kind" : "string",
+          "name" : "method",
+          "required" : true
         },
         {
-          "data_kind": "raster",
-          "name": "output",
-          "required": true
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
         }
       ],
-      "parameters": [
+      "parameters" :
+      [
         {
-          "default": "2",
-          "name": "blueIdx",
-          "required": false,
-          "type": "integer"
+          "default" : "2",
+          "name" : "blueIdx",
+          "required" : false,
+          "type" : "integer"
         },
         {
-          "default": "1",
-          "name": "greenIdx",
-          "required": false,
-          "type": "integer"
+          "default" : "1",
+          "name" : "greenIdx",
+          "required" : false,
+          "type" : "integer"
         },
         {
-          "name": "msWeights",
-          "required": false,
-          "type": "numeric"
+          "name" : "msWeights",
+          "required" : false,
+          "type" : "numeric"
         },
         {
-          "name": "output",
-          "required": true,
-          "type": "string"
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
         },
         {
-          "default": "0.500000",
-          "name": "panWeight",
-          "required": false,
-          "type": "numeric"
+          "default" : "0.500000",
+          "name" : "panWeight",
+          "required" : false,
+          "type" : "numeric"
         },
         {
-          "default": "0",
-          "name": "redIdx",
-          "required": false,
-          "type": "integer"
+          "default" : "0",
+          "name" : "redIdx",
+          "required" : false,
+          "type" : "integer"
         }
       ]
     },
-    "limitations": [],
-    "modality": [
+    "limitations" : [],
+    "modality" :
+    [
       "multimodal",
       "optical"
     ],
-    "operator_group": "fusion",
-    "prerequisites": [
+    "operator_group" : "fusion",
+    "prerequisites" :
+    [
       "Pan and MS rasters must be co-registered."
     ],
-    "schema_version": 2,
-    "summary": "线性全色锐化：以线性加权方式注入全色细节，参数可控、行为可预期。",
-    "teaching_use": {
-      "concepts": [
-        "线性加权融合"
+    "schema_version" : 2,
+    "summary" : "\u7ebf\u6027\u5168\u8272\u9510\u5316\uff1a\u4ee5\u7ebf\u6027\u52a0\u6743\u65b9\u5f0f\u6ce8\u5165\u5168\u8272\u7ec6\u8282\uff0c\u53c2\u6570\u53ef\u63a7\u3001\u884c\u4e3a\u53ef\u9884\u671f\u3002",
+    "teaching_use" :
+    {
+      "concepts" :
+      [
+        "\u7ebf\u6027\u52a0\u6743\u878d\u5408"
       ],
-      "courses": [
-        "遥感数字图像处理"
+      "courses" :
+      [
+        "\u9065\u611f\u6570\u5b57\u56fe\u50cf\u5904\u7406"
       ],
-      "exercise": "扫描不同加权系数，观察空间细节与光谱失真的权衡。"
+      "exercise" : "\u626b\u63cf\u4e0d\u540c\u52a0\u6743\u7cfb\u6570\uff0c\u89c2\u5bdf\u7a7a\u95f4\u7ec6\u8282\u4e0e\u5149\u8c31\u5931\u771f\u7684\u6743\u8861\u3002"
     }
   },
-  "description": "Linear pan-sharpening fusion.",
-  "display_name": "Fusion Linear",
-  "id": "rs:fusion_linear",
-  "input": "raster",
-  "output": "raster",
-  "schema_version": 2,
-  "tags": [
+  "description" : "Linear pan-sharpening fusion.",
+  "display_name" : "Fusion Linear",
+  "id" : "rs:fusion_linear",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" :
+  [
     "fusion",
     "pan-sharpening",
     "enhancement"

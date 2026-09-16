@@ -104,6 +104,8 @@ add_library(sicnu_processing SHARED
     algorithms/temporal/temporal_gapfill.cpp
     algorithms/temporal/temporal_calendar.cpp
     algorithms/temporal/temporal_change.cpp
+    algorithms/temporal/temporal_selection.cpp
+    algorithms/temporal/temporal_uncertainty.cpp
     algorithms/temporal/temporal_region_table.cpp
     algorithms/temporal/temporal_preflight.cpp
     algorithms/temporal/temporal_stream.cpp

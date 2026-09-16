@@ -1,8 +1,8 @@
-<!-- 由 scripts/capability_knowledge_tool gen-pages 自动生成 — 手动编辑是缺陷（ADR 0146）。 修改请改对应 sidecar 后重新生成。 -->
+<!-- 由 scripts/capability_knowledge_tool gen-pages 自动生成 — 手动编辑是缺陷（ADR 0154）。 修改请改对应 sidecar 后重新生成。 -->
 
 # 时序分析（temporal）
 
-共 14 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
+共 21 个算子。数据源：`data/processing/algorithm_meta/capability/`，本页为生成产物。
 
 ## rs:temporal_anomaly
 
@@ -71,6 +71,13 @@
 - 适用课程：遥感应用分析、时间统计
 - 典型练习：分解 5 年月度 NDVI 时序并解读趋势项的城市绿地变化。
 
+## rs:temporal_extract_regions
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：emptyCells（integer）、medianEnabled（boolean）、output（table）、pointRegions（integer）、polygonRegions（integer）、regionCount（integer）、rowsWritten（integer）、sceneCount（integer）、timeEnd（string）、timeStart（string）
+- 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、duplicate_policy（enum）、max_regions（integer）、median_budget_mb（numeric）、output（string）、regions（string）、regions_file（string）、scenes（string）
+
 ## rs:temporal_extract_series
 
 从影像集合中按 ROI 或像元抽取时序曲线，输出点/区时序表，用于时序建模输入与教学演示。
@@ -104,6 +111,13 @@
 - 适用课程：遥感数字图像处理
 - 典型练习：对含云 NDVI 时序执行线性插值并检查插值段与实测段的吻合度。
 - 可接下游：rs:temporal_phenology
+
+## rs:temporal_harmonic_breaks
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：epochDate（string）、meanBreakMagnitude（numeric）、memory（json）、output（raster）、pixelsWithBreaks（integer）、sceneCount（integer）
+- 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、direction（enum）、duplicate_policy（enum）、harmonics（integer）、maxBreaks（integer）、minImprovement（numeric）、minMagnitude（numeric）、minSegmentDays（numeric）、output（string）、recoveryTolerance（numeric）、robust（boolean）、scenes（string）、tile_size（integer）
 
 ## rs:temporal_harmonic_fit
 
@@ -139,6 +153,24 @@
 - 典型练习：生成 5 年 16 天合成的 NDVI 时序立方体供趋势分析。
 - 可接下游：rs:temporal_trend、rs:temporal_phenology
 
+## rs:temporal_model_select
+
+逐像元有界模型选择：{谐波阶数} × {断点预算} 候选网格按 AICc/BIC/分块 CV 打分，平局取最小模型，退化像元如实拒绝。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：memory（json）、output（raster）、pixelsByBreaks（json）、pixelsByHarmonics（json）、pixelsFitted（integer）、sceneCount（integer）
+- 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、cvFolds（integer）、duplicate_policy（enum）、maxBreaks（integer）、maxHarmonics（integer）、minImprovement（numeric）、minSegmentDays（numeric）、output（string）、penalty（enum）、robust（boolean）、scenes（string）、tile_size（integer）
+- 前置条件：>= 4 valid samples
+- 适用地物：农田、草地、森林
+- 适用场景：物候建模前的模型复杂度选择、谐波阶数论证、分区拟合诊断
+- 失败模式：
+  - `INVALID_PARAMETER` — maxHarmonics/maxBreaks/cvFolds 超范围。处置：maxHarmonics 0-3，maxBreaks 0-4，cvFolds 2-10
+  - `NOT_SUPPORTED` — 样本不足或无候选可拟合。处置：输出 NaN 拒绝带（degraded），勿用其参与下游统计
+- 教学概念：AICc/BIC、分块交叉验证、确定性平局规则、模型退化与拒绝
+- 适用课程：时间序列分析、统计方法
+- 典型练习：对农田与自然植被分区运行，比较 AICc 与 BIC 选择的谐波阶数分布并解释差异。
+
 ## rs:temporal_monitor
 
 时序监测任务算子：以滑动窗口对最新观测做状态评估（继续/警戒/告警），面向业务化持续监测场景。
@@ -146,7 +178,7 @@
 - 确定性：逐位一致（bit_exact）
 - 模态：optical
 - 输出：method（string）、output（raster）、sceneCount（integer）
-- 参数：apply_qa_masking（boolean）、band（integer）、band_role（string）、collection（string）、drift（numeric）、lambda（numeric）、max_pairwork（integer）、method（enum）、min_observations（integer）、output（string）、tile_size（integer）
+- 参数：apply_qa_masking（boolean）、band（integer）、band_role（string）、collection（string）、drift（numeric）、lambda（numeric）、max_pairwork（integer）、method（enum）、min_observations（integer）、output（string）、scenes（string）、tile_size（integer）
 - 前置条件：Common grid, acquisition times, consistent radiometric state (temporal preflight).
 - 局限：seasonal_mk is O(sum n_m^2) pairs per pixel; the max_pairwork guard refuses unbounded collections instead of degrading.；argmax bands are 0-based scene indices; scene dates travel in the collection metadata.
 - 适用地物：植被、水体、农田
@@ -165,7 +197,7 @@
 - 模态：optical
 - 波段角色要求：nir×1、red×1
 - 输出：bands（integer）、memory（json）、metrics（string）、output（raster）、sceneCount（integer）、timeEnd（string）、timeStart（string）、validPixelFraction（numeric）
-- 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、crossingFraction（numeric）、duplicate_policy（enum）、minValidPerSeason（integer）、output（string）、scenes（string）、seasonEndDoy（integer）、seasonStartDoy（integer）、tile_size（integer）
+- 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、crossingFraction（numeric）、cycles（integer）、duplicate_policy（enum）、minValidPerSeason（integer）、output（string）、scenes（string）、season2EndDoy（integer）、season2StartDoy（integer）、seasonEndDoy（integer）、seasonStartDoy（integer）、tile_size（integer）
 - 前置条件：建议先用 rs:temporal_smooth / rs:temporal_harmonic_fit 重构时序。
 - 适用地物：农田、草地、落叶林
 - 适用场景：作物生育期监测、物候对气候响应研究
@@ -175,6 +207,56 @@
 - 适用课程：植物遥感、农业气象
 - 典型练习：提取研究区小麦 SOS/EOS 图并分析海拔梯度上的推迟效应。
 - 可接上游：rs:temporal_index_series、rs:temporal_gap_fill、rs:temporal_smooth
+
+## rs:temporal_phenology_multi
+
+物候 2.0：自动多周期候选（峰值检测）、跨年窗口按收获年归属、逐窗口质量旗标；低覆盖窗口拒绝输出而非硬猜。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：meanCyclesPerYear（numeric）、memory（json）、output（raster）、pixelsWithAnyCycle（integer）、sceneCount（integer）
+- 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、crossingFraction（numeric）、duplicate_policy（enum）、maxCyclesPerYear（integer）、maxGapFraction（numeric）、minCoverage（numeric）、minPeakFraction（numeric）、minValidPerSeason（integer）、output（string）、scenes（string）、tile_size（integer）
+- 前置条件：Common grid, acquisition times; >= ~2 full years for stable climatology; >= ~12 valid samples
+- 适用地物：农田、果园、草地
+- 适用场景：多熟制识别、跨年作物窗口、物候质量分级
+- 失败模式：
+  - `INVALID_PARAMETER` — crossingFraction/maxGapFraction/minCoverage 超范围。处置：各参数均在 (0,1]；阈值按数据质量调整
+  - `NOT_SUPPORTED` — 窗口样本不足/覆盖不足/间隙过大。处置：refusal 计数带如实记录；先用 rs:temporal_gap_fill 补齐再运行
+- 教学概念：自动周期候选、跨年（收获年）窗口、质量旗标与拒绝语义、多熟制指数
+- 适用课程：农业遥感、物候学
+- 典型练习：对比华北冬小麦区（一年两熟）与东北地区（一熟）的 cycle_count 空间格局并核对统计数据。
+
+## rs:temporal_region_features
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：featureCount（integer）、output（table）、regionCount（integer）、sceneCount（integer）、schema（string）、sidecar（string）
+- 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、change_harmonics（integer）、collection（string）、cycles（integer）、direction（enum）、duplicate_policy（enum）、max_regions（integer）、output（string）、regions（string）、regions_file（string）、scenes（string）、seasonEndDoy（integer）、seasonStartDoy（integer）、sidecar_path（string）、trend_method（enum）
+
+## rs:temporal_regularize
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：bands（integer）、cadenceDays（numeric）、calendarEnd（string）、calendarPoints（integer）、calendarStart（string）、filledFraction（numeric）、memory（json）、output（raster）、sceneCount（integer）
+- 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、cadence（string）、collection（string）、duplicate_policy（enum）、lambda（numeric）、max_gap_nodes（integer）、max_window_days（numeric）、method（enum）、output（string）、scenes（string）、tile_size（integer）
+
+## rs:temporal_seasonal_breaks
+
+季节分量突变检测与归因：联合谐波+趋势分段后，用嵌套模型 F 检验区分趋势突变与季节幅相突变，可选 bootstrap 置信区间。
+
+- 确定性：逐位一致（bit_exact）
+- 模态：optical
+- 输出：epochDate（string）、memory（json）、output（raster）、pixelsWithBreaks（integer）、pixelsWithSeasonalBreaks（integer）、sceneCount（integer）
+- 参数：alpha（numeric）、apply_qa_masking（boolean）、band（integer）、band_role（enum）、bootstrap_resamples（integer）、bootstrap_seed（integer）、ci_level（numeric）、collection（string）、compute_ci（boolean）、duplicate_policy（enum）、harmonics（integer）、maxBreaks（integer）、minImprovement（numeric）、minSegmentDays（numeric）、output（string）、robust（boolean）、scenes（string）、tile_size（integer）
+- 前置条件：Common grid, acquisition times, consistent radiometric state; >= ~2 years for stable harmonics
+- 适用地物：森林、农田、灌草地
+- 适用场景：植被物候突变监测、作物制度转换识别、干扰与恢复制图
+- 失败模式：
+  - `INVALID_PARAMETER` — harmonics/alpha/minImprovement 超出允许范围。处置：harmonics 1-3，alpha (0.001,0.5]，minImprovement (0,1]
+  - `NOT_SUPPORTED` — 有效样本不足或单侧分段过短无法完成嵌套检验。处置：延长时序或降低 maxBreaks；untestable 用类别 4 如实标记
+- 教学概念：季节分量突变、嵌套 F 检验、归因（趋势 vs 季节）、bootstrap 置信区间
+- 适用课程：植物遥感、时间序列分析
+- 典型练习：对 2019-2024 NDVI 时序运行本算子，区分灌溉启用（季节突变）与采伐（趋势突变）空间分布。
 
 ## rs:temporal_sen_trend
 
@@ -199,7 +281,7 @@ Theil-Sen 稳健趋势 + Mann-Kendall 检验：对含噪声时序估计稳健斜
 - 确定性：容差级（并行执行与串行结果在 1e-6 相对容差内一致）
 - 模态：optical
 - 输出：bands（integer）、memory（json）、method（string）、output（raster）、sceneCount（integer）、timeEnd（string）、timeStart（string）
-- 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、degree（integer）、duplicate_policy（enum）、lambda（numeric）、method（enum）、moving_average_window（integer）、output（string）、scenes（string）、tile_size（integer）、window（integer）
+- 参数：apply_qa_masking（boolean）、band（integer）、band_role（enum）、collection（string）、degree（integer）、duplicate_policy（enum）、lambda（numeric）、method（enum）、moving_average_window（integer）、output（string）、robust_iterations（integer）、scenes（string）、tile_size（integer）、window（integer）
 - 适用地物：植被、农田
 - 适用场景：物候曲线整形、时序异常检测前的平滑
 - 失败模式：

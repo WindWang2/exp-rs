@@ -20,6 +20,7 @@
 
 #ifdef Q_OS_WIN
 #include <fcntl.h> // _O_WRONLY/_O_BINARY (io.h alone does not define them)
+#include <fcntl.h>
 #include <io.h>
 #include <windows.h>
 #else

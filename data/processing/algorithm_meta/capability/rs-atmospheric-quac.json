@@ -1,95 +1,111 @@
 {
-  "capability": {
-    "applicability": {
-      "land_cover": [
-        "植被",
-        "土壤",
-        "城市"
+  "capability" :
+  {
+    "applicability" :
+    {
+      "land_cover" :
+      [
+        "\u690d\u88ab",
+        "\u571f\u58e4",
+        "\u57ce\u5e02"
       ],
-      "scenes": [
-        "批量存档影像的快速定量预处理",
-        "缺少传感器定标参数时的兜底校正"
+      "scenes" :
+      [
+        "\u6279\u91cf\u5b58\u6863\u5f71\u50cf\u7684\u5feb\u901f\u5b9a\u91cf\u9884\u5904\u7406",
+        "\u7f3a\u5c11\u4f20\u611f\u5668\u5b9a\u6807\u53c2\u6570\u65f6\u7684\u515c\u5e95\u6821\u6b63"
       ]
     },
-    "band_roles": {},
-    "crs": {
-      "requires_projected": false,
-      "requires_shared_grid": false
+    "band_roles" : {},
+    "crs" :
+    {
+      "requires_projected" : false,
+      "requires_shared_grid" : false
     },
-    "determinism": {
-      "grade": "bit_exact",
-      "large_raster_safe": false,
-      "memory_policy": "full_raster",
-      "side_effects": false,
-      "stochastic": false
+    "determinism" :
+    {
+      "grade" : "bit_exact",
+      "large_raster_safe" : false,
+      "memory_policy" : "full_raster",
+      "side_effects" : false,
+      "stochastic" : false
     },
-    "failure_modes": [
+    "failure_modes" :
+    [
       {
-        "code": "NOT_SUPPORTED",
-        "when": "影像波段配置超出 QUAC 支持范围",
-        "remedy": "改用 rs:atmospheric_dos1 / rs:atmospheric_dos2"
+        "code" : "NOT_SUPPORTED",
+        "remedy" : "\u6539\u7528 rs:atmospheric_dos1 / rs:atmospheric_dos2",
+        "when" : "\u5f71\u50cf\u6ce2\u6bb5\u914d\u7f6e\u8d85\u51fa QUAC \u652f\u6301\u8303\u56f4"
       }
     ],
-    "family": "optical",
-    "io": {
-      "inputs": [
+    "family" : "optical",
+    "io" :
+    {
+      "inputs" :
+      [
         {
-          "data_kind": "raster",
-          "name": "input",
-          "required": true
+          "data_kind" : "raster",
+          "name" : "input",
+          "required" : true
         }
       ],
-      "outputs": [
+      "outputs" :
+      [
         {
-          "data_kind": "integer",
-          "name": "band",
-          "required": true
+          "data_kind" : "integer",
+          "name" : "band",
+          "required" : true
         },
         {
-          "data_kind": "string",
-          "name": "method",
-          "required": true
+          "data_kind" : "string",
+          "name" : "method",
+          "required" : true
         },
         {
-          "data_kind": "raster",
-          "name": "output",
-          "required": true
+          "data_kind" : "raster",
+          "name" : "output",
+          "required" : true
         }
       ],
-      "parameters": [
+      "parameters" :
+      [
         {
-          "name": "output",
-          "required": true,
-          "type": "string"
+          "name" : "output",
+          "required" : true,
+          "type" : "string"
         }
       ]
     },
-    "limitations": [],
-    "modality": [
+    "limitations" : [],
+    "modality" :
+    [
       "optical"
     ],
-    "operator_group": "radiometric",
-    "prerequisites": [],
-    "schema_version": 2,
-    "summary": "QUAC 快速大气校正：从影像自身统计自动估计平均地表反射率与大气参数，近似精度、零配置。",
-    "teaching_use": {
-      "concepts": [
-        "经验大气校正",
-        "辐射传输"
+    "operator_group" : "radiometric",
+    "prerequisites" : [],
+    "schema_version" : 2,
+    "summary" : "QUAC \u5feb\u901f\u5927\u6c14\u6821\u6b63\uff1a\u4ece\u5f71\u50cf\u81ea\u8eab\u7edf\u8ba1\u81ea\u52a8\u4f30\u8ba1\u5e73\u5747\u5730\u8868\u53cd\u5c04\u7387\u4e0e\u5927\u6c14\u53c2\u6570\uff0c\u8fd1\u4f3c\u7cbe\u5ea6\u3001\u96f6\u914d\u7f6e\u3002",
+    "teaching_use" :
+    {
+      "concepts" :
+      [
+        "\u7ecf\u9a8c\u5927\u6c14\u6821\u6b63",
+        "\u8f90\u5c04\u4f20\u8f93"
       ],
-      "courses": [
-        "定量遥感基础"
+      "courses" :
+      [
+        "\u5b9a\u91cf\u9065\u611f\u57fa\u7840"
       ],
-      "exercise": "对 MODIS 与 Sentinel-2 影像各执行 QUAC，检查反射率量纲一致性。"
+      "exercise" : "\u5bf9 MODIS \u4e0e Sentinel-2 \u5f71\u50cf\u5404\u6267\u884c QUAC\uff0c\u68c0\u67e5\u53cd\u5c04\u7387\u91cf\u7eb2\u4e00\u81f4\u6027\u3002"
     }
   },
-  "description": "Quick Atmospheric Correction (QUAC) multi-band scene-statistics surface reflectance retrieval.",
-  "display_name": "Atmospheric Correction QUAC",
-  "id": "rs:atmospheric_quac",
-  "input": "raster",
-  "output": "raster",
-  "schema_version": 2,
-  "tags": [
+  "description" : "Quick Atmospheric Correction (QUAC) multi-band scene-statistics surface reflectance retrieval.",
+  "display_name" : "Atmospheric Correction QUAC",
+  "id" : "rs:atmospheric_quac",
+  "input" : "raster",
+  "output" : "raster",
+  "schema_version" : 2,
+  "tags" :
+  [
     "atmospheric",
     "quac",
     "multispectral",
