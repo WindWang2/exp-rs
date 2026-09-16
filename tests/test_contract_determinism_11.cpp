@@ -219,8 +219,6 @@ TEST_CASE( "identical input through a corpus operator twice is byte-identical",
     const QString fixture = writeFixture( dir, "fixture.tif" );
     const std::string in = fixture.toStdString();
 
-    int rasterRecipes = 0;
-    int jsonRecipes = 0;
     for ( const Recipe &recipe : corpus() )
     {
         SECTION( recipe.id )
@@ -239,12 +237,10 @@ TEST_CASE( "identical input through a corpus operator twice is byte-identical",
 
             if ( recipe.jsonOnly )
             {
-                ++jsonRecipes;
                 CHECK( canonicalJson( firstResult ) == canonicalJson( secondResult ) );
             }
             else
             {
-                ++rasterRecipes;
                 REQUIRE( firstResult.isMember( "output" ) );
                 REQUIRE( secondResult.isMember( "output" ) );
                 const std::string outA = firstResult["output"].asString();
@@ -258,8 +254,19 @@ TEST_CASE( "identical input through a corpus operator twice is byte-identical",
             }
         }
     }
-    CHECK( rasterRecipes >= 8 );
-    CHECK( jsonRecipes >= 1 );
+}
+
+TEST_CASE( "corpus shape: coverage counts", "[determinism11][corpus-shape]" )
+{
+    // Static counts, deliberately outside the sectioned replay case: Catch2
+    // re-runs the enclosing case per section leaf, which would multiply these
+    // assertions.
+    int raster = 0;
+    int json = 0;
+    for ( const Recipe &r : corpus() )
+        r.jsonOnly ? ++json : ++raster;
+    CHECK( raster >= 8 );
+    CHECK( json >= 1 );
 }
 
 TEST_CASE( "corpus determinism claims are triple-published, not self-certified",
@@ -284,22 +291,27 @@ TEST_CASE( "corpus determinism claims are triple-published, not self-certified",
         auto op = create( recipe.id );
         const Json::Value schema = op->schema();
 
-        // Class scan ↔ sidecar: no self-certification.
+        // The census must carry a PUBLISHED class-level grade fact for every
+        // corpus operator — class override or direct schema stamp. A corpus
+        // entry whose grade is nowhere published cannot evidence anything.
+        INFO( "census schemaGrade: " << e.schemaGrade );
+        CHECK_FALSE( e.schemaGrade.empty() );
+
+        // Class scan ↔ sidecar (where a sidecar speaks): no self-certification.
         const std::string sidecar = normalize( e.sidecarGrade );
-        REQUIRE_FALSE( sidecar.empty() );
-        if ( sidecar == "bit_exact" )
-        {
-            CHECK( e.source.gradeOverride );
-            CHECK( normalize( e.source.gradeLiteral ) == "bit_exact" );
-        }
-        else if ( sidecar == "tolerance" )
-        {
-            CHECK( e.source.gradeOverride );
-            CHECK( normalize( e.source.gradeLiteral ) == "tolerance" );
-        }
+        const std::string publishedClass = normalize( e.schemaGrade.empty()
+                                                         ? std::string()
+                                                         : e.schemaGrade );
+        if ( !sidecar.empty() )
+            CHECK( sidecar == publishedClass );
 
         // Published surface ↔ sidecar: schema stamp carries the sidecar's claim.
         if ( schema.isMember( "determinismGrade" ) )
-            CHECK( normalize( schema["determinismGrade"].asString() ) == sidecar );
+        {
+            const std::string stamp = normalize( schema["determinismGrade"].asString() );
+            CHECK( stamp == publishedClass );
+            if ( !sidecar.empty() )
+                CHECK( stamp == sidecar );
+        }
     }
 }

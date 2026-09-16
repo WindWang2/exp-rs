@@ -191,8 +191,8 @@ TEST_CASE( "io:translate band subsetting is an analytic pixel copy",
     p["input"] = in.toStdString();
     p["output"] = dir.filePath( QStringLiteral( "copy_out.tif" ) ).toStdString();
     p["bands"] = Json::Value( Json::arrayValue );
-    p["bands"].append( 3 );
-    p["bands"].append( 1 );
+    p["bands"].append( "3" );
+    p["bands"].append( "1" );
     runOrThrow( op.get(), p );
 
     const auto out3 = readBand( dir.filePath( QStringLiteral( "copy_out.tif" ) ), 1 );

@@ -318,6 +318,8 @@ TEST_CASE( "M4: NoData drilling is monotone (valid pixels stable, holes stay hol
                 // The hole must not silently become a finite trusted value.
                 const bool holeInvalid = std::isnan( vb[i] ) || vb[i] == nd2
                                          || vb[i] == -9999.0f;
+                INFO( "hole pixel (" << x << "," << y << ") value " << vb[i]
+                      << " outNoData " << nd2 );
                 CHECK( holeInvalid );
             }
             else

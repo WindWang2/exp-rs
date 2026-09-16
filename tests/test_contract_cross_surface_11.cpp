@@ -27,6 +27,7 @@
 #include "contracts/determinism_census.h"
 #include "contracts/scientific_contract.h"
 
+#include "agent/cartography/cartography_operators.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/rs/rs_operators_init.h"
 
@@ -74,6 +75,9 @@ bool readJsonFile( const std::string &path, Json::Value &out )
 std::set<std::string> liveIds()
 {
     sicnu::operators::rs::initBuiltinRsOperators();
+    // The cartography agents register through the agent-library seam after
+    // the registry's call_once chain (cartography_operators.h).
+    sicnu::agent::cartography::initCartographyOperators();
     std::set<std::string> ids;
     for ( const std::string &id :
           sicnu::operators::RSOperatorRegistry::instance().operatorNames() )
@@ -107,25 +111,58 @@ std::vector<std::string> helpOperatorFiles()
 }
 } // namespace
 
+/// Collect the operator ids a help document exposes. Two committed shapes
+/// exist: an object keyed "operator.<family>.<name>", and a plain array of
+/// topics whose keys/ids may embed the operator id.
+void collectHelpIds( const Json::Value &doc, std::set<std::string> &out )
+{
+    if ( doc.isObject() )
+    {
+        for ( const auto &key : doc.getMemberNames() )
+        {
+            std::string id;
+            if ( helpKeyToOperatorId( key, id ) )
+            {
+                out.insert( id );
+                continue;
+            }
+            // Array-shaped files carry the "operator.<family>.<name>" token
+            // as the VALUE of an "id" member.
+            if ( doc[key].isString() && helpKeyToOperatorId( doc[key].asString(), id ) )
+                out.insert( id );
+            else if ( doc[key].isObject() || doc[key].isArray() )
+                collectHelpIds( doc[key], out );
+        }
+    }
+    else if ( doc.isArray() )
+    {
+        for ( const Json::Value &item : doc )
+            collectHelpIds( item, out );
+    }
+    else if ( doc.isString() )
+    {
+        std::string id;
+        if ( helpKeyToOperatorId( doc.asString(), id ) )
+            out.insert( id );
+    }
+}
+
 TEST_CASE( "help operator ids resolve in the live registry", "[crosssurface11]" )
 {
     const auto live = liveIds();
-    int checked = 0;
+    std::set<std::string> helpIds;
     for ( const std::string &file : helpOperatorFiles() )
     {
         Json::Value doc;
         REQUIRE( readJsonFile( file, doc ) );
-        for ( const auto &key : doc.getMemberNames() )
-        {
-            std::string id;
-            if ( !helpKeyToOperatorId( key, id ) )
-                continue;
-            INFO( "help id: " << id << " (" << file << ")" );
-            CHECK( live.count( id ) == 1 );
-            ++checked;
-        }
+        collectHelpIds( doc, helpIds );
     }
-    CHECK( checked >= 100 ); // live binding, not a vacuous directory scan
+    CHECK( helpIds.size() >= 100 ); // live binding, not a vacuous directory scan
+    for ( const std::string &id : helpIds )
+    {
+        INFO( "help id: " << id );
+        CHECK( live.count( id ) == 1 );
+    }
 }
 
 TEST_CASE( "agent capability knowledge ids resolve in the live registry",
@@ -148,6 +185,8 @@ TEST_CASE( "agent capability knowledge ids resolve in the live registry",
                 continue;
             const std::string id = item["id"].asString();
             if ( id.find( ':' ) == std::string::npos )
+                continue; // family-less pseudo-entries
+            if ( id.rfind( "family:", 0 ) == 0 )
                 continue; // family_default pseudo-entries
             INFO( "agent capability id: " << id << " (" << entry.path().string() << ")" );
             CHECK( live.count( id ) == 1 );
@@ -165,12 +204,7 @@ TEST_CASE( "help coverage of the live rs: surface is monotone", "[crosssurface11
     {
         Json::Value doc;
         REQUIRE( readJsonFile( file, doc ) );
-        for ( const auto &key : doc.getMemberNames() )
-        {
-            std::string id;
-            if ( helpKeyToOperatorId( key, id ) )
-                helpIds.insert( id );
-        }
+        collectHelpIds( doc, helpIds );
     }
 
     std::vector<std::string> missing;
