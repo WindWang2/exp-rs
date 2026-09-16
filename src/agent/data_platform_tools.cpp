@@ -41,6 +41,10 @@ namespace sicnu::agent
 {
 
 using namespace sicnu::dataset;
+// P0 host-portability unblock (Platform 11.0): the D19 benchmark tools use
+// BenchmarkService unqualified, which MSVC rejects (undeclared identifier);
+// ExperimentStore is already reached through its experiment/ includes.
+using sicnu::experiment::BenchmarkService;
 
 namespace
 {
