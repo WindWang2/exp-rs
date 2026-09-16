@@ -31,3 +31,11 @@ load average 不可测（Git Bash）→ 按 GOAL 记 not-executed，-j2 恒定�
 ## D-8 planning 文件入库方式
 
 沿用 10.0 D-7：`.gitignore` 追加三行白名单 + `git add -f .planning/scientific-contract-verification-11/*.md`（`.git/info/exclude` 共享 git dir 的 `.planning/` 条目会压过白名单，故用 -f）。
+
+## D-9 P0 host-portability 修复越出 write scope 的裁决（commit 042428ca）
+
+**事实**：`src/workflow/pipeline_run_coordinator.cpp`（c5d4aafe/#991 引入）在 Q_OS_WIN 分支使用 `_O_WRONLY|_O_BINARY`，但 `<fcntl.h>` 只在 `!Q_OS_WIN` 分支 include → 本机 MSVC 14.38/SDK 22621 无法编译该 TU。`origin/master` 现状即坏（`git diff origin/master` 证实非本 track 引入；两次全量构建均停在同一 TU）。**每个测试可执行文件经 sicnu_workflow_runtime PUBLIC sicnu_workflow 传递依赖它 → 整个本地验证平台被阻塞。**
+
+**候选**：(1) 不修，全 track not-executed —— 违反 Oracle-4/6，不可接受；(2) 只在 PR_BODY 记录 —— 同样导致零本地证据；(3) 最小 1 行 include 修复（`<fcntl.h>` 移入 Q_OS_WIN 分支），全额记录。
+
+**选 (3)**：这是与 #993 同类的 host-portability 修复；虽然该文件属于 open PR #1009 的 changed files（read-only 约定），但 1 行 include 的 rebase 冲突风险接近零且可平凡重放。PR_BODY 顶部 P0 通告 + REVIEW_LOG disposition 已登记。

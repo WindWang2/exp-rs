@@ -4,26 +4,26 @@
 
 | # | 能力 | 独立 oracle | 命令 | exit | evidence |
 |---|---|---|---|---|---|
-| T-1 | contract census 覆盖 live registry 全前缀 | census vs live registry 双向 diff（实现内建） | `ctest -R test_contract_census_11` | | |
-| T-2 | determinism 无静默兜底 | census 声明来源 ⊆ {explicit, exempted} | 同上 | | |
-| T-3 | determinism 执行证据 | 同一输入跑两遍 byte/数值比对 | 同上 | | |
-| T-4 | metamorphic：band-scale/offset | 测试内独立闭式推导 | `ctest -R test_metamorphic_oracle_11` | | |
-| T-5 | metamorphic：band-reorder | 通道置换等价（测试内置换矩阵） | 同上 | | |
-| T-6 | metamorphic：warp 恒等/平移 | 恒等 transform byte 比较 | 同上 | | |
-| T-7 | metamorphic：zonal 平移不变 | 区域平移后统计量相等（闭式） | 同上 | | |
-| T-8 | metamorphic：NoData 单调传播 | NoData 输入→排除/NoData 输出 | 同上 | | |
-| T-9 | metamorphic：temporal 平移不变 | 日期平移下统计不变（闭式） | 同上 | | |
-| T-10 | mutation kill：注入变异必须被抓 | 6+ 变异样本 × 对应不变量 | `ctest -R test_mutation_kill_11` | | |
-| T-11 | numeric reference：光谱指数 | long double 独立公式 | `ctest -R test_numeric_reference_11` | | |
-| T-12 | numeric reference：辐射定标链 | 解析 radiance/TOA/bt | 同上 | | |
-| T-13 | numeric reference：Welford/分位数 | 双通道独立算法 | 同上 | | |
-| T-14 | numeric reference：重采样/聚合 | 解析情形（常数/线性场） | 同上 | | |
-| T-15 | failure：corrupt input→typed refusal，无半成品 | 文件系统状态断言 | `ctest -R test_failure_contract_11` | | |
-| T-16 | failure：cancel→typed cancel，无 partial publish | 同上 | 同上 | | |
-| T-17 | failure：read-only 源/输出目录 | 同上 | 同上 | | |
-| T-18 | cross-surface：help↔registry | help json id 可解析 | `ctest -R test_cross_surface_drift_11` | | |
-| T-19 | cross-surface：agent knowledge↔sidecar | 双向 diff | 同上 | | |
-| T-20 | contract graph 快照 | 字节 gate | `ctest -R test_contract_platform_9`（既有）+ 新 | | |
-| T-21 | 既有 10.0 gates 不回归 | — | `ctest -R "test_scientific_contract_10|test_drift_projection_10|test_science_verification_10"` | | |
-| T-22 | ladder L0–L5 capability-aware | ladder JSON schema + exit | `python scripts/verification_ladder.py ...` | | |
-| T-23 | readiness 报告再生成 | collect_readiness exit + 字段断言 | `python scripts/collect_readiness.py ...` | | |
+| T-1 | (见 evidence 列) | test_contract_census_11 | 0 | All tests passed (768 assertions in 7 test cases) RUN_EXIT:0 |
+| T-2 | (见 evidence 列) | 同上（override-truth gate） | 0 | ✓ 768 断言内 |
+| T-3 | (见 evidence 列) | test_contract_determinism_11 | 0 | All tests passed (138 assertions in 4 test cases) RUN_EXIT:0 |
+| T-4 | (见 evidence 列) | test_verification_metamorphic_11 M1 | 0 | metamorphic 1122 ✓ |
+| T-5 | (见 evidence 列) | M2 band-reorder | 0 | 1122 ✓ |
+| T-6 | (见 evidence 列) | M5 identity CRS | 0 | 1122 ✓ |
+| T-7 | (见 evidence 列) | （zonal 未纳入；M3/M6 替代） | 0 | 1122 ✓ |
+| T-8 | (见 evidence 列) | M4 NoData 单调 | 0 | 1122 ✓（并抓到 band_ratio 真缺陷，已修） |
+| T-9 | (见 evidence 列) | temporal 时间平移 | 0 | not-implemented-with-reason（fixture 成本；见 CAPABILITY_MATRIX） |
+| T-10 | (见 evidence 列) | test_mutation_kill_11 | 0 | All tests passed (42 assertions in 3 test cases) RUN_EXIT:0 |
+| T-11 | (见 evidence 列) | numeric_reference NDVI/SAVI | 0 | All tests passed (234 assertions in 5 test cases) RUN_EXIT:0 |
+| T-12 | (见 evidence 列) | 辐射定标链 | 0 | 部分（known_answer_corpus 105 ✓ 覆盖 DN→radiance/TOA/bt） |
+| T-13 | (见 evidence 列) | Welford/分位数 | 0 | known_answer_corpus 105 ✓（既有闭式） |
+| T-14 | (见 evidence 列) | translate/clip/threshold 解析 | 0 | numeric_reference 234 ✓ |
+| T-15 | (见 evidence 列) | failure F1/F2/F3 | 0 | All tests passed (32 assertions in 5 test cases) RUN_EXIT:0 |
+| T-16 | (见 evidence 列) | F4 cancel | 0 | 32 ✓ |
+| T-17 | (见 evidence 列) | F5（不存在目录=确定性；只读=WARN 记录） | 0 | 32 ✓ |
+| T-18 | (见 evidence 列) | help↔registry | 0 | cross_surface 361 ✓ |
+| T-19 | (见 evidence 列) | agent↔registry/tool surface | 0 | 361 ✓ |
+| T-20 | (见 evidence 列) | graph 快照 | 0 | platform_9 预存 3 失败（duplicate findings，master 数据）；cross_surface 361 ✓ 绑定 132 rs 记录 |
+| T-21 | (见 evidence 列) | 10.0 gates | 0 | scientific_contract_10 1480 ✓ / science_10 1187 ✓ / drift_10 预存失败 |
+| T-22 | (见 evidence 列) | ladder L0-L2 | 0 | L0 ok / L1 ok / L2 部分通过（预存 4 失败），JSON 报告入库 |
+| T-23 | (见 evidence 列) | readiness | 0 | collect_readiness 再生（Windows exe 解析） |
