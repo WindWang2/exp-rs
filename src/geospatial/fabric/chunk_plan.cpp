@@ -84,6 +84,17 @@ void CubeSlice::validate() const
   }
   if ( hasSpatialSlice && ( minX >= maxX || minY >= maxY ) )
     throw GeoError( ErrorCode::InvalidArgument, "slice spatial bounds cross" );
+  // 11.0: explicit dimension ranges are half-open and shape-checked here
+  // (bounds against a concrete axis are checked at plan time).
+  for ( const auto &entry : dimensionRanges )
+  {
+    const auto &[ begin, end ] = entry.second;
+    if ( entry.first.empty() )
+      throw GeoError( ErrorCode::InvalidArgument, "slice dimension range names an empty axis" );
+    if ( begin < 0 || begin >= end )
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "slice dimension range must satisfy 0 <= begin < end: " + entry.first );
+  }
 }
 
 Json::Value CubeChunkRequest::toJson() const
@@ -255,52 +266,163 @@ CubeChunkPlan CubeChunkPlan::forMultidimDescriptor( const MultidimCubeDescriptor
                                                     const CubeSlice &slice )
 {
   slice.validate();
-  if ( !slice.timeStartUtc.empty() || !slice.timeEndUtc.empty() || slice.hasSpatialSlice ||
-       !slice.bandRoles.empty() || !slice.bandIndices.empty() )
+  if ( !slice.bandRoles.empty() || !slice.bandIndices.empty() )
     throw GeoError( ErrorCode::Unsupported,
-                    "multidim chunk plans chunk whole dimensions in 10.0 — "
-                    "CubeSlice narrowing is EO-cube only" );
+                    "multidim stores carry no band roles — use CubeSlice::dimensionRanges "
+                    "with the axis name (e.g. \"band\") instead" );
+
   CubeChunkPlan plan;
   plan.mIsEo = false;
-  plan.mTimeSliced = false;
-  plan.mSpatialSliced = false;
-  plan.mBandSliced = false;
+  plan.mMultidimDescriptor = descriptor;
 
-  // Map the descriptor's dimensions: time = TEMPORAL type or named "time";
-  // the two trailing spatial dims map to y/x; everything else keeps its
-  // name with whole-extent chunking (slice support stays time/spatial).
+  // Map the descriptor's dimensions: time = TEMPORAL type or named "time"
+  // (at most one); the two trailing NON-TIME dims map to y/x; everything
+  // else keeps its name. A trailing time axis cannot satisfy the y/x
+  // mapping — that is a typed refusal, never a silently-zero plan (11.0).
+  const std::size_t dimCount = descriptor.dimensionNames.size();
+  std::size_t timeIndex = dimCount;
+  for ( std::size_t i = 0; i < dimCount; ++i )
+  {
+    const MultidimCubeAxis &axis = descriptor.axes[i];
+    if ( axis.type == "TEMPORAL" || axis.name == "time" )
+    {
+      timeIndex = i;
+      break;
+    }
+  }
+  if ( dimCount >= 1 && timeIndex != dimCount && timeIndex + 2 >= dimCount )
+    throw GeoError( ErrorCode::Unsupported,
+                    "multidim descriptor maps no y/x pair: the time axis is trailing "
+                    "(descriptor dims must end with two spatial dimensions)" );
+  if ( dimCount < 3 )
+    throw GeoError( ErrorCode::Unsupported,
+                    "multidim descriptor needs at least 3 dimensions (…, y, x)" );
+
   std::int64_t timeSize = 0;
   std::int64_t timeChunk = shape.time > 0 ? shape.time : 1;
   std::int64_t ySize = 0, xSize = 0;
   std::int64_t yChunk = shape.y > 0 ? shape.y : 256;
   std::int64_t xChunk = shape.x > 0 ? shape.x : 256;
-  const std::size_t dimCount = descriptor.dimensionNames.size();
-  for ( std::size_t i = 0; i < dimCount; ++i )
+  // 11.0 per-name chunk shapes: middle dims honor shape.perDimension[name];
+  // the historical whole-extent fallback stays shape.x (10.0 behavior).
+  const auto chunkFor = [ &shape ]( const std::string &name ) {
+    const auto it = shape.perDimension.find( name );
+    if ( it != shape.perDimension.end() )
+    {
+      if ( it->second <= 0 )
+        throw GeoError( ErrorCode::InvalidArgument,
+                        "per-dimension chunk shape must be positive: " + name );
+      return it->second;
+    }
+    return ( shape.x > 0 ? shape.x : 256 );
+  };
+
+  const std::size_t yIndex = dimCount - 2;
+  const std::size_t xIndex = dimCount - 1;
+  ySize = descriptor.axes[yIndex].size;
+  xSize = descriptor.axes[xIndex].size;
+
+  // --- Time slicing (11.0): instant-window over the descriptor's resolved
+  // instants. A bounded (truncated) axis capture cannot prove membership —
+  // typed refusal, absence is not evidence. Unresolvable instants refuse.
+  std::vector<std::int64_t> selectedTime;
+  const bool wantsTimeSlice = !slice.timeStartUtc.empty() || !slice.timeEndUtc.empty();
+  if ( timeIndex != dimCount )
   {
-    const MultidimCubeAxis &axis = descriptor.axes[i];
-    const bool isTime = axis.type == "TEMPORAL" || axis.name == "time";
-    if ( isTime )
+    const MultidimCubeAxis &axis = descriptor.axes[timeIndex];
+    timeSize = axis.size;
+    if ( wantsTimeSlice )
     {
-      timeSize = axis.size;
-      continue;
+      if ( !axis.instantsResolved || axis.instantsUtc.empty() )
+        throw GeoError( ErrorCode::Unsupported,
+                        "time slice needs resolved axis instants: " + axis.name );
+      if ( axis.valuesBounded || axis.stringValuesBounded ||
+           axis.instantsUtc.size() < static_cast<std::size_t>( axis.size ) )
+        throw GeoError( ErrorCode::Unsupported,
+                        "time axis capture is bounded — cannot slice reliably: " + axis.name );
+      const std::int64_t startNanos =
+        slice.timeStartUtc.empty()
+          ? std::numeric_limits<std::int64_t>::min()
+          : parseIso8601Instant( slice.timeStartUtc ).epochNanos;
+      const std::int64_t endNanos =
+        slice.timeEndUtc.empty()
+          ? std::numeric_limits<std::int64_t>::max()
+          : parseIso8601Instant( slice.timeEndUtc ).epochNanos;
+      if ( ( !slice.timeStartUtc.empty() && !parseIso8601Instant( slice.timeStartUtc ).ok ) ||
+           ( !slice.timeEndUtc.empty() && !parseIso8601Instant( slice.timeEndUtc ).ok ) )
+        throw GeoError( ErrorCode::InvalidArgument, "unparseable time slice bound" );
+      for ( std::size_t i = 0; i < axis.instantsUtc.size(); ++i )
+      {
+        const InstantParse instant = parseIso8601Instant( axis.instantsUtc[i] );
+        if ( !instant.ok )
+          // An axis label that claims to be temporal but does not parse is
+          // a data defect, not a filter criterion: a silent drop would
+          // shrink the plan behind the caller's back (review R13 P2).
+          throw GeoError( ErrorCode::InvalidArgument,
+                          "time axis label does not parse as an instant: " +
+                            axis.instantsUtc[i] );
+        if ( instant.epochNanos >= startNanos && instant.epochNanos < endNanos )
+          selectedTime.push_back( static_cast<std::int64_t>( i ) );
+      }
+      if ( static_cast<std::int64_t>( selectedTime.size() ) != timeSize )
+      {
+        plan.mTimeSliced = true;
+        timeSize = static_cast<std::int64_t>( selectedTime.size() );
+        plan.mMultidimSelection["time"] = selectedTime;
+      }
     }
-    if ( i + 2 == dimCount )
-    {
-      ySize = axis.size;
-      continue;
-    }
-    if ( i + 1 == dimCount )
-    {
-      xSize = axis.size;
-      continue;
-    }
-    CubeChunkDim dim;
-    dim.name = axis.name;
-    dim.size = axis.size;
-    dim.chunk = shape.x > 0 ? shape.x : 256;   // whole-extent chunking fallback
-    dim.count = dim.size > 0 ? chunkCount( dim.size, dim.chunk ) : 0;
-    plan.mDims.push_back( dim );
   }
+
+  // --- Spatial slicing (11.0): bbox → pixel window through the descriptor's
+  // geotransform (same sign-safe mapping as the cube read path).
+  std::int64_t yOffset = 0, xOffset = 0;
+  if ( slice.hasSpatialSlice )
+  {
+    if ( !descriptor.hasGeoTransform || descriptor.geotransform.size() != 6 )
+      throw GeoError( ErrorCode::Unsupported,
+                      "spatial slice needs a declared geotransform on the descriptor" );
+    const std::vector<double> &gt = descriptor.geotransform;
+    const double srcX0 = ( slice.minX - gt[0] ) / gt[1];
+    const double srcX1 = ( slice.maxX - gt[0] ) / gt[1];
+    const double srcY0 = ( slice.maxY - gt[3] ) / gt[5];
+    const double srcY1 = ( slice.minY - gt[3] ) / gt[5];
+    std::int64_t sx0 = static_cast<std::int64_t>( std::floor( std::min( srcX0, srcX1 ) ) );
+    std::int64_t sy0 = static_cast<std::int64_t>( std::floor( std::min( srcY0, srcY1 ) ) );
+    std::int64_t sx1 = static_cast<std::int64_t>( std::ceil( std::max( srcX0, srcX1 ) ) );
+    std::int64_t sy1 = static_cast<std::int64_t>( std::ceil( std::max( srcY0, srcY1 ) ) );
+    sx0 = std::max<std::int64_t>( sx0, 0 );
+    sy0 = std::max<std::int64_t>( sy0, 0 );
+    sx1 = std::min<std::int64_t>( sx1, xSize );
+    sy1 = std::min<std::int64_t>( sy1, ySize );
+    if ( sx1 <= sx0 || sy1 <= sy0 )
+      throw GeoError( ErrorCode::InvalidArgument,
+                      "spatial slice misses the descriptor's raster extent" );
+    xOffset = sx0;
+    yOffset = sy0;
+    xSize = sx1 - sx0;
+    ySize = sy1 - sy0;
+    plan.mSpatialSliced = true;
+    // P0 fix (review R13): the source offsets ARE the y/x selection — the
+    // plan records them so execution maps post-slice chunk offsets back to
+    // source pixels instead of silently anchoring at the origin.
+    std::vector<std::int64_t> ySelection, xSelection;
+    ySelection.reserve( static_cast<std::size_t>( ySize ) );
+    xSelection.reserve( static_cast<std::size_t>( xSize ) );
+    for ( std::int64_t k = yOffset; k < yOffset + ySize; ++k )
+      ySelection.push_back( k );
+    for ( std::int64_t k = xOffset; k < xOffset + xSize; ++k )
+      xSelection.push_back( k );
+    plan.mMultidimSelection["y"] = ySelection;
+    plan.mMultidimSelection["x"] = xSelection;
+  }
+
+  // A time slice on a store WITHOUT a temporal axis is silently ignored
+  // otherwise — the exact silent-misbehavior class this track removes.
+  if ( wantsTimeSlice && timeIndex == dimCount )
+    throw GeoError( ErrorCode::Unsupported,
+                    "time slice needs a temporal axis (TEMPORAL type or named \"time\") — "
+                    "the descriptor carries none" );
+
   const auto addDim = [ & ]( const std::string &name, std::int64_t size, std::int64_t chunk ) {
     CubeChunkDim dim;
     dim.name = name;
@@ -309,7 +431,39 @@ CubeChunkPlan CubeChunkPlan::forMultidimDescriptor( const MultidimCubeDescriptor
     dim.count = size > 0 ? chunkCount( size, chunk ) : 0;
     plan.mDims.push_back( dim );
   };
-  addDim( "time", timeSize, timeChunk );
+
+  // Middle dims in declaration order (skipping time): apply explicit
+  // dimensionRanges (bounds-checked against the axis) or keep whole.
+  for ( std::size_t i = 0; i < dimCount; ++i )
+  {
+    if ( i == timeIndex || i == yIndex || i == xIndex )
+      continue;
+    const MultidimCubeAxis &axis = descriptor.axes[i];
+    std::int64_t size = axis.size;
+    const auto range = slice.dimensionRanges.find( axis.name );
+    if ( range != slice.dimensionRanges.end() )
+    {
+      const auto [ begin, end ] = range->second;
+      if ( begin < 0 || end > axis.size || begin >= end )
+        throw GeoError( ErrorCode::InvalidArgument,
+                        "dimension range [" + std::to_string( begin ) + "," +
+                          std::to_string( end ) + ") out of bounds for axis " + axis.name );
+      size = end - begin;
+      plan.mBandSliced = true;   // "a slice narrowed a non-spatial dim"
+      std::vector<std::int64_t> selection;
+      selection.reserve( static_cast<std::size_t>( size ) );
+      for ( std::int64_t k = begin; k < end; ++k )
+        selection.push_back( k );
+      plan.mMultidimSelection[axis.name] = selection;
+    }
+    addDim( axis.name, size, chunkFor( axis.name ) );
+  }
+
+  // The time dim exists ONLY when the descriptor has a temporal axis — a
+  // phantom zero-size "time" dim would multiply the plan to zero chunks
+  // (the silent-zero class of D-1104, review R13 P1).
+  if ( timeIndex != dimCount )
+    addDim( "time", timeSize, timeChunk );
   addDim( "y", ySize, yChunk );
   addDim( "x", xSize, xChunk );
   plan.mBytesPerCell = bytesPerCellOf( descriptor.dtype );

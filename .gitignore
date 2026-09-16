@@ -323,3 +323,7 @@ data/labs/_tmp/
 # terrain-hydrology-11 (F16): track planning notes (markdown only; logs stay local).
 !.planning/terrain-hydrology-11/
 !.planning/terrain-hydrology-11/**
+# cloud-data-fabric-11: track planning notes (markdown only; logs stay local).
+!.planning/cloud-data-fabric-11/
+.planning/cloud-data-fabric-11/*
+!.planning/cloud-data-fabric-11/*.md

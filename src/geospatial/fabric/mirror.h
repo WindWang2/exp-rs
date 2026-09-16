@@ -62,6 +62,9 @@ struct MirrorOptions
     std::size_t chunkWindow = 64;
     /// GeoTIFF creation: block size for mirrored chunks (tiles 256×256).
     int blockSize = 256;
+    /// Per-chunk read budget through the source reader (11.0; the previous
+    /// hard-coded 256 MiB — same default, now declared).
+    std::size_t maxChunkReadBytes = 256ull * 1024 * 1024;
 };
 
 struct MirrorChunkOutcome
@@ -81,6 +84,9 @@ struct MirrorChunkOutcome
 struct MirrorReport
 {
     std::vector<MirrorChunkOutcome> chunks;
+    /// 11.0: outcomes past the retained window are dropped from the vector
+    /// and counted (bounded report — D-1008 doctrine, same as prefetch).
+    std::uint64_t outcomesDropped = 0;
     std::uint64_t bytesWritten = 0;
     std::uint64_t mirrored = 0, alreadyPresent = 0, skippedUnprovable = 0;
     std::uint64_t skippedBudget = 0, skippedCancel = 0, failed = 0;
@@ -117,6 +123,64 @@ MirrorReport mirrorChunks( const VirtualCube &cube, const CubeChunkPlan &plan,
 /// entry (typed accumulation in `skippedCorrupt`, never a throw).
 std::string resolveMirrorHit( const std::string &mirrorDirectory, const std::string &token,
                               const std::string &chunkKey, std::string *skippedCorrupt = nullptr );
+
+// --- 11.0 offline replay (DECISIONS D-1103) --------------------------------
+//
+// A mirror is only worth its name when a LATER PROCESS can resolve a hit
+// with ZERO network probing. The v2 manifest therefore carries an INDEX
+// keyed by each asset's credential-free canonical key (object-store
+// canonical key, credential-stripped identity URL, or canonical local
+// path) → {token, assetId, grid facts, written time}. Materialization
+// fills it; the lookups below read it — all pure local work.
+
+/// The index key of an asset (pure string work; never a credential):
+/// object-store spellings canonicalize through the profile table, http(s)
+/// URLs through the credential-stripped identity URL, local paths through
+/// ResourceUri canonicalization.
+std::string fabricMirrorIndexKey( const std::string &assetPath );
+
+/// Per-asset facts recorded in the offline index (grid facts make OFFLINE
+/// cube builds and window mapping possible without opening the asset).
+struct MirrorIndexAssetFacts
+{
+    bool found = false;
+    std::string token;          ///< "" when the asset mirrored unprovable
+    std::string assetId;
+    bool hasGrid = false;
+    int rasterWidth = 0, rasterHeight = 0;
+    double resX = 0.0, resY = 0.0;      ///< geotransform-derived scales
+    double assetMinX = 0.0, assetMinY = 0.0, assetMaxX = 0.0, assetMaxY = 0.0;
+    std::string epsgAuthid;
+    std::string writtenUtc;             ///< materialization time (expiry basis)
+};
+
+/// Looks an asset up in the mirror's offline index. Total function: found
+/// = false covers absent/corrupt entries (corrupt text lands in
+/// `skippedCorrupt` when provided) — never a throw.
+bool lookupMirrorAsset( const std::string &mirrorDirectory, const std::string &assetPath,
+                        MirrorIndexAssetFacts &facts, std::string *skippedCorrupt = nullptr );
+
+/// Resolves a chunk artifact OFFLINE: index key of \a assetPath → token →
+/// chunk key for (token, \a sourceWindow, \a bandSelector) → local file.
+/// The v2 chunk key uses the index-key path basis; the 10.0 raw-path key
+/// is tried as a fallback so v1 manifests keep resolving. \a maxAgeSeconds
+/// > 0 expires chunks materialized longer ago (writtenUtc basis; an
+/// expired hit reports expired=true with file=""). Never touches network.
+struct MirrorArtifactHit
+{
+    bool hit = false;
+    bool expired = false;
+    std::string token;
+    std::string chunkKey;
+    std::string file;                   ///< local chunk path ("" when no hit)
+    std::uint64_t bytes = 0;
+    std::string skippedCorrupt;
+};
+MirrorArtifactHit resolveMirrorArtifact( const std::string &mirrorDirectory,
+                                         const std::string &assetPath,
+                                         const RasterWindow &sourceWindow,
+                                         const std::string &bandSelector,
+                                         std::uint64_t maxAgeSeconds = 0 );
 
 /// Mirror stats from the manifest (entries, bytes; honest zeros when the
 /// mirror directory does not exist — never a guessed inventory).

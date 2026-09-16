@@ -125,4 +125,9 @@ std::string remoteIdentityTokenFromIdentity( const std::string &url,
   return std::string( kRemoteIdentityTokenPrefix ) + ":v1:" + sha256Hex( basis );
 }
 
+std::string remoteIdentityUrlBasis( const std::string &url )
+{
+  return identityUrl( url );
+}
+
 } // namespace sicnu::geo

@@ -146,6 +146,18 @@ class RemoteRangeCache
     static bool isCachePath( const std::string &path );
 };
 
+/// 11.0 credential separation (DECISIONS D-1102): while a fingerprint is
+/// set, every cache entry CREATED carries it in its resource key, so
+/// blocks fetched under one principal are never served to another (the
+/// fingerprint is a non-secret shape hash — object_store's
+/// objectStoreCredentialContext() builds it; a secret never enters).
+/// Entries created while the fingerprint is "" (no window) are shared.
+/// Thread contract: ScopedObjectStoreCredentials windows are already
+/// process-serialized (D-1003); a stale fingerprint on an unrelated
+/// thread's http(s) read only adds key entropy, never merges principals.
+void setRangeCacheCredentialContext( const std::string &fingerprint );
+std::string currentRangeCacheCredentialContext();
+
 } // namespace sicnu::geo
 
 #endif // SICNU_GEOSPATIAL_RANGE_CACHE_H

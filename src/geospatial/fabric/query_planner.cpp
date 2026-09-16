@@ -9,6 +9,7 @@
 #include "geospatial/fabric/query_planner.h"
 
 #include "geospatial/fabric/object_store.h"
+#include "geospatial/multidim/multidim_view.h"
 #include "geospatial/identity/asset_identity.h"
 #include "geospatial/raster/raster_reader.h"
 #include "geospatial/util/time_normalization.h"
@@ -131,12 +132,35 @@ class TopKSelector
 
 void FabricIntent::validate() const
 {
-    if ( catalogUri.empty() && records.empty() )
+    // 11.0: three source shapes — catalog, in-memory records, or a multidim
+    // store. A multidim source is exclusive with the other two (the store
+    // replaces the catalog stage; its variable names the cube).
+    if ( !multidimPath.empty() )
+    {
+        if ( !catalogUri.empty() || !records.empty() )
+            throw GeoError( ErrorCode::InvalidArgument,
+                            "fabric intent takes one source — multidimPath excludes "
+                            "catalogUri/records" );
+        if ( multidimVariable.empty() )
+            throw GeoError( ErrorCode::InvalidArgument,
+                            "multidim source needs a variable name" );
+    }
+    if ( multidimPath.empty() && catalogUri.empty() && records.empty() )
         throw GeoError( ErrorCode::InvalidArgument,
-                        "fabric intent needs a catalogUri or in-memory records" );
+                        "fabric intent needs a catalogUri, in-memory records, or a "
+                        "multidim store" );
     if ( !catalogUri.empty() && !records.empty() )
         throw GeoError( ErrorCode::InvalidArgument,
                         "fabric intent takes one source — catalogUri or records, not both" );
+    if ( !multidimPath.empty() )
+    {
+        query.validate();   // filter vocabulary stays shape-valid even if unused
+        if ( sceneBudget < 1 )
+            throw GeoError( ErrorCode::InvalidArgument, "sceneBudget must be >= 1" );
+        if ( executionBudgetBytes == 0 )
+            throw GeoError( ErrorCode::InvalidArgument, "executionBudgetBytes must be positive" );
+        return;   // grid negotiation/window semantics do not apply to a store
+    }
     query.validate();
     if ( sceneBudget < 1 )
         throw GeoError( ErrorCode::InvalidArgument, "sceneBudget must be >= 1" );
@@ -209,6 +233,59 @@ FabricPlan planFabric( FabricIntent intent, const FabricPlanOptions &options,
                        const CancelToken &cancel )
 {
     intent.validate();
+
+    // --- 11.0: multidim source — the store IS the source. No catalog walk,
+    // no asset selection, no grid negotiation: the descriptor's own dims
+    // and the declared slice define the chunk space (WP D/E).
+    if ( !intent.multidimPath.empty() )
+    {
+        FabricPlan plan;
+        plan.mIntent = std::move( intent );
+
+        const MultidimView view = MultidimView::open( plan.mIntent.multidimPath );
+        const MultidimCubeDescriptor descriptor =
+          describeCube( view, plan.mIntent.multidimVariable );
+
+        FabricPlanStage openStage;
+        openStage.name = "store_open";
+        openStage.status = "planned";
+        openStage.inputs = 1;
+        openStage.outputs = 1;
+        Json::Value openDetails;
+        openDetails["path"] = ResourceUri::parse( descriptor.path ).display();
+        openDetails["variable"] = descriptor.variable;
+        openDetails["driver"] = descriptor.driver;
+        openDetails["dimensions"] = static_cast<Json::UInt64>( descriptor.dimensionNames.size() );
+        openStage.details = openDetails;
+        plan.mStages.push_back( std::move( openStage ) );
+
+        plan.mChunkPlan =
+          CubeChunkPlan::forMultidimDescriptor( descriptor, plan.mIntent.chunkShape,
+                                                plan.mIntent.slice );
+        FabricPlanStage chunkStage;
+        chunkStage.name = "chunk_planning";
+        chunkStage.status = "planned";
+        chunkStage.inputs = 1;
+        chunkStage.outputs = 1;
+        Json::Value chunkDetails;
+        chunkDetails["chunkCountTotal"] =
+          static_cast<Json::UInt64>( plan.mChunkPlan.chunkCountTotal() );
+        chunkDetails["timeSliced"] = plan.mChunkPlan.timeSliced();
+        chunkDetails["spatialSliced"] = plan.mChunkPlan.spatialSliced();
+        chunkStage.details = chunkDetails;
+        plan.mStages.push_back( std::move( chunkStage ) );
+
+        plan.mCost.chunks = plan.mChunkPlan.chunkCountTotal();
+        if ( plan.mChunkPlan.chunkCountTotal() > 0 )
+        {
+            const std::vector<CubeChunkRequest> first = plan.mChunkPlan.materializeChunks( 0, 1 );
+            if ( !first.empty() )
+                plan.mCost.estimatedBytes =
+                  first.front().estimatedBytes * plan.mChunkPlan.chunkCountTotal();
+        }
+        plan.mCost.bytesUnknown = plan.mCost.estimatedBytes == 0;
+        return plan;
+    }
 
     FabricPlan plan;
     // The records path consumes the caller's vector (single owner; the plan
@@ -377,7 +454,7 @@ FabricPlan planFabric( FabricIntent intent, const FabricPlanOptions &options,
         try
         {
             const AssetIdentity identity =
-              assetIdentityToken( record.path, AssetIdentityOptions{} );
+              fabricAssetIdentity( record.path, AssetIdentityOptions{} );
             if ( identity.provable() )
                 ++plan.mCost.cacheableAssets;
             else
@@ -542,6 +619,11 @@ FabricIntent fabricIntentFromJson( const Json::Value &json )
         intent.chunkShape.y = shapeJson.get( "y", 256 ).asInt64();
         intent.chunkShape.x = shapeJson.get( "x", 256 ).asInt64();
         intent.chunkShape.band = shapeJson.get( "band", 1 ).asInt64();
+        // 11.0: per-name chunk sizes for extra named dimensions (multidim).
+        const Json::Value &perDim = shapeJson["perDimension"];
+        if ( perDim.isObject() )
+            for ( const std::string &name : perDim.getMemberNames() )
+                intent.chunkShape.perDimension[name] = perDim[name].asInt64();
     }
 
     const Json::Value &sliceJson = json["slice"];
@@ -560,6 +642,30 @@ FabricIntent fabricIntentFromJson( const Json::Value &json )
         }
         for ( const Json::Value &role : sliceJson["bandRoles"] )
             intent.slice.bandRoles.push_back( role.asString() );
+        // 11.0: explicit named-dimension ranges — "dimensionRanges":
+        // {"band": [begin,end], "level": [begin,end]} (half-open).
+        const Json::Value &ranges = sliceJson["dimensionRanges"];
+        if ( ranges.isObject() )
+            for ( const std::string &name : ranges.getMemberNames() )
+            {
+                const Json::Value &pair = ranges[name];
+                if ( !pair.isArray() || pair.size() != 2 )
+                    throw GeoError( ErrorCode::InvalidArgument,
+                                    "slice dimensionRanges[" + name + "] must be [begin,end]" );
+                intent.slice.dimensionRanges[name] =
+                  { pair[0].asInt64(), pair[1].asInt64() };
+            }
+    }
+
+    // 11.0: multidim source vocabulary — "multidim": {"path": …, "variable": …}.
+    const Json::Value &multidimJson = json["multidim"];
+    if ( multidimJson.isObject() )
+    {
+        intent.multidimPath = multidimJson.get( "path", "" ).asString();
+        intent.multidimVariable = multidimJson.get( "variable", "" ).asString();
+        if ( intent.multidimPath.empty() || intent.multidimVariable.empty() )
+            throw GeoError( ErrorCode::InvalidArgument,
+                            "multidim source needs both path and variable" );
     }
 
     const Json::Value &windowJson = json["window"];
@@ -595,6 +701,171 @@ VirtualCube cubeOverSingleAsset( const AssetRecord &record, const VirtualCubeGri
 {
     return VirtualCube::build( { record }, grid, OverlapPolicy::FirstWins, {},
                                VirtualCubeBuildOptions {}, CancelToken{} );
+}
+
+/// 11.0 (WP D/E): multidim chunk execution. Every chunk's non-spatial
+/// extents are enumerated per source index (chunks may span several along
+/// a dim with chunk size > 1); each combination materializes exactly one
+/// 2-D window through readSliceWindow — the SAME single read path as every
+/// other multidim read (no duplicated slicing machinery). Sliced dims map
+/// their post-slice offsets back to source axis indices through the plan's
+/// multidimSelection(); unsliced dims use the offset directly.
+std::vector<FabricChunkOutcome> executeMultidimChunks( const FabricPlan &plan,
+                                                       const VirtualCubeReadOptions &options,
+                                                       std::size_t chunkWindow,
+                                                       const std::function<void( const CubeChunkRequest &,
+                                                                                 const VirtualCubeWindowResult & )> &sink,
+                                                       FabricExecutionReport &report,
+                                                       const CancelToken &cancel )
+{
+    const CubeChunkPlan &chunkPlan = plan.chunkPlan();
+    const MultidimCubeDescriptor descriptor = chunkPlan.multidimDescriptor();
+    const auto &selection = chunkPlan.multidimSelection();
+    const auto &dims = chunkPlan.dims();
+    if ( dims.size() < 3 )
+        throw GeoError( ErrorCode::InvalidArgument,
+                        "multidim chunk plan without y/x tail cannot execute" );
+
+    MultidimView view = MultidimView::open( descriptor.path );
+    const std::size_t maxCells = 64ull * 1024 * 1024;
+
+    const auto sourceIndexOf = [ &selection ]( const std::string &name, std::int64_t offset ) {
+        const auto it = selection.find( name );
+        if ( it == selection.end() )
+            return offset;
+        if ( offset < 0 || offset >= static_cast<std::int64_t>( it->second.size() ) )
+            throw GeoError( ErrorCode::InvalidArgument,
+                            "chunk offset beyond the sliced axis: " + name );
+        return it->second[static_cast<std::size_t>( offset )];
+    };
+
+    std::vector<FabricChunkOutcome> outcomes;
+    const std::uint64_t total = chunkPlan.chunkCountTotal();
+    outcomes.reserve( std::min<std::uint64_t>( total, 1024 ) );
+    std::uint64_t outcomesDropped = 0;
+    std::uint64_t bytesSpent = 0;
+    std::uint64_t settled = 0;
+    bool budgetBreached = false;
+    bool cancelled = false;
+    const auto recordOutcome = [ & ]( FabricChunkOutcome outcome ) {
+      if ( outcomes.size() < 1024 )
+        outcomes.push_back( std::move( outcome ) );
+      else
+        ++outcomesDropped;
+      ++settled;
+    };
+
+    for ( std::uint64_t begin = 0; begin < total && !cancelled; begin += chunkWindow )
+    {
+        if ( cancel.cancelled() )
+            throw GeoError( ErrorCode::Cancelled, "chunk execution cancelled" );
+        const std::vector<CubeChunkRequest> requests =
+          chunkPlan.materializeChunks( begin, chunkWindow );
+        for ( const CubeChunkRequest &request : requests )
+        {
+            if ( cancel.cancelled() )
+            {
+                cancelled = true;
+                break;
+            }
+            FabricChunkOutcome outcome;
+            outcome.index = request.index;
+
+            // Layout: [...middles, (time), y, x] — the time dim exists only
+            // when the descriptor has a temporal axis (review R13 P1: a
+            // [band,y,x] store plans without a phantom time dim).
+            const bool hasTimeDim =
+              dims.size() >= 3 && dims[dims.size() - 3].name == "time";
+            const std::size_t spatialCount = hasTimeDim ? 3 : 2;
+            const std::size_t leadingDims = dims.size() - spatialCount;
+            std::vector<std::size_t> step( leadingDims + ( hasTimeDim ? 1 : 0 ), 0 );
+            std::vector<std::size_t> span( leadingDims + ( hasTimeDim ? 1 : 0 ), 0 );
+            for ( std::size_t d = 0; d < leadingDims; ++d )
+                span[d] = static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[d], 1 ) );
+            if ( hasTimeDim )
+              span[leadingDims] =
+                static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[leadingDims], 1 ) );
+            bool overflowed = false;
+            while ( !overflowed )
+            {
+                // Resolve this combination's source indices.
+                std::vector<std::pair<std::string, std::int64_t>> dimSlices;
+                dimSlices.reserve( leadingDims + 1 );
+                for ( std::size_t d = 0; d < leadingDims; ++d )
+                    dimSlices.push_back(
+                      { dims[d].name,
+                        sourceIndexOf( dims[d].name, request.dimOffsets[d] +
+                                                       static_cast<std::int64_t>( step[d] ) ) } );
+                if ( hasTimeDim )
+                    dimSlices.push_back(
+                      { "time",
+                        sourceIndexOf( "time", request.dimOffsets[leadingDims] +
+                                                 static_cast<std::int64_t>( step[leadingDims] ) ) } );
+
+                const std::int64_t ySource =
+                  sourceIndexOf( "y", request.dimOffsets[leadingDims + ( hasTimeDim ? 1 : 0 )] );
+                const std::int64_t xSource =
+                  sourceIndexOf( "x", request.dimOffsets[leadingDims + ( hasTimeDim ? 2 : 1 )] );
+                const std::size_t rows =
+                  static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[leadingDims + ( hasTimeDim ? 1 : 0 )], 1 ) );
+                const std::size_t cols =
+                  static_cast<std::size_t>( std::max<std::int64_t>( request.dimSizes[leadingDims + 2], 1 ) );
+
+                const std::uint64_t windowBytes = static_cast<std::uint64_t>( rows ) * cols * 8;
+                if ( bytesSpent + windowBytes > plan.intent().executionBudgetBytes )
+                {
+                    outcome.skippedBudget = true;
+                    budgetBreached = true;
+                    break;
+                }
+
+                const MultidimGrid grid = view.readSliceWindow(
+                  descriptor.variable, dimSlices,
+                  ySource, xSource, rows, cols, maxCells );
+
+                VirtualCubeWindowResult window;
+                window.width = static_cast<int>( grid.cols );
+                window.height = static_cast<int>( grid.rows );
+                window.values = std::move( grid.values );
+                window.gridNoData = grid.hasNoData && !grid.noDataIsNaN
+                                      ? grid.noDataValue : -9999.0;
+                window.noDataIsNaN = grid.noDataIsNaN;
+
+                bytesSpent += windowBytes;
+                report.bytesRead += windowBytes;
+                report.chunksExecuted += 1;
+                report.assetsConsulted += 1;
+                outcome.ok = true;
+                outcome.bytesRead = windowBytes;
+                if ( sink )
+                    sink( request, window );
+
+                // Odometer advance (last leading dim fastest).
+                bool carried = false;
+                for ( std::size_t d = leadingDims + 1; d-- > 0; )
+                {
+                    if ( ++step[d] < span[d] )
+                    {
+                        carried = true;
+                        break;
+                    }
+                    step[d] = 0;
+                }
+                if ( !carried )
+                    overflowed = true;
+            }
+            // Review R13: a chunk whose combinations were cut short by the
+            // budget is a SKIPPED chunk — never half-ok.
+            if ( outcome.skippedBudget )
+                outcome.ok = false;
+            recordOutcome( std::move( outcome ) );
+        }
+    }
+    report.budgetBreached = budgetBreached;
+    report.outcomesDropped = outcomesDropped;
+    if ( cancelled )
+        report.cancelledRemaining = total > settled ? total - settled : 0;
+    return outcomes;
 }
 
 /// Chunk grid extent → grid pixel rect (clamped; ok=false when empty).
@@ -658,6 +929,11 @@ std::vector<FabricChunkOutcome> executeChunks( const FabricPlan &plan,
                                                const CancelToken &cancel )
 {
     const FabricIntent &intent = plan.intent();
+
+    // 11.0: multidim plans execute through the multidim reader (WP D/E).
+    if ( !plan.chunkPlan().isEo() && !plan.chunkPlan().multidimDescriptor().path.empty() )
+        return executeMultidimChunks( plan, options, chunkWindow, sink, report, cancel );
+
     if ( plan.selectedAssets().empty() )
         throw GeoError( ErrorCode::InvalidArgument, "plan selected no assets" );
     if ( chunkWindow == 0 || chunkWindow > 4096 )

@@ -34,7 +34,9 @@
 #include <json/json.h>
 
 #include <cstdint>
+#include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace sicnu::geo
@@ -47,6 +49,10 @@ struct CubeChunkShape
     std::int64_t y = 256;
     std::int64_t x = 256;
     std::int64_t band = 1;
+    /// 11.0: per-name chunk override for EXTRA named dimensions (multidim
+    /// stores). A dimension not named here keeps the whole-extent default.
+    /// Non-positive values are refused (validated with the base fields).
+    std::map<std::string, std::int64_t> perDimension;
 
     Json::Value toJson() const;
 };
@@ -64,6 +70,11 @@ struct CubeSlice
     std::vector<std::string> bandRoles;
     /// Band selection by explicit 1-based source band index (empty = all).
     std::vector<int> bandIndices;
+    /// 11.0: explicit [begin,end) range over an EXTRA named dimension
+    /// (multidim stores — e.g. "level", "band"). Half-open, bounds-checked
+    /// against the axis size at plan time; begin<0 / empty range refused.
+    /// Time/y/x are addressed by their own fields, never by this map.
+    std::map<std::string, std::pair<std::int64_t, std::int64_t>> dimensionRanges;
 
     void validate() const;          ///< throws GeoError(InvalidArgument)
 };
@@ -121,9 +132,12 @@ class CubeChunkPlan
 
     /// Plans a multidim descriptor (its own dimension names; the time axis
     /// is the TEMPORAL-typed axis or an axis named "time"; the two trailing
-    /// dims map to y/x). A non-default CubeSlice is a typed refusal here —
-    /// slice narrowing for multidim stores is a follow-up (EO cubes carry
-    /// it in 10.0).
+    /// non-time dims map to y/x — a trailing time axis is a typed refusal,
+    /// never a silently-zero plan). 11.0 slices: time (descriptor instants,
+    /// bounded-capture axes refuse), spatial bbox (geotransform), and
+    /// explicit dimensionRanges over any named axis (incl. "band");
+    /// bandRoles/bandIndices stay EO-only (use dimensionRanges here).
+    /// Non-default slices narrow counts BEFORE the u64 total is computed.
     static CubeChunkPlan forMultidimDescriptor( const MultidimCubeDescriptor &descriptor,
                                                 const CubeChunkShape &shape,
                                                 const CubeSlice &slice = {} );
@@ -137,6 +151,18 @@ class CubeChunkPlan
     bool timeSliced() const { return mTimeSliced; }
     bool spatialSliced() const { return mSpatialSliced; }
     bool bandSliced() const { return mBandSliced; }
+
+    /// 11.0: the descriptor a MULTIDIM plan was built from (empty when EO).
+    const MultidimCubeDescriptor &multidimDescriptor() const { return mMultidimDescriptor; }
+    /// 11.0: per-named-dimension POST-SLICE index → SOURCE index mapping
+    /// for sliced multidim dimensions (only sliced dims appear). Chunk
+    /// dimOffsets address post-slice space; execution maps back to source
+    /// axis indices through this (time uses the same mapping; y/x windows
+    /// are contiguous so their offset maps directly).
+    const std::map<std::string, std::vector<std::int64_t>> &multidimSelection() const
+    {
+      return mMultidimSelection;
+    }
 
     /// The ONLY enumeration surface: chunks [begin, begin+maxCount) of the
     /// fixed total order. Throws GeoError(InvalidArgument) when begin ≥
@@ -160,6 +186,10 @@ class CubeChunkPlan
     VirtualCubeGrid mGrid;                        ///< valid() only for EO plans
     bool mIsEo = false;
     double mBytesPerCell = 0.0;                   ///< dtype fact (0 unknown)
+    // 11.0 multidim specifics (empty for EO plans):
+    MultidimCubeDescriptor mMultidimDescriptor;   ///< the planned store
+    /// post-slice index → source axis index per sliced dimension
+    std::map<std::string, std::vector<std::int64_t>> mMultidimSelection;
 };
 
 } // namespace sicnu::geo

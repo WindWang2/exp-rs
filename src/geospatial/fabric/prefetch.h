@@ -90,6 +90,44 @@ PrefetchReport prefetchChunks( const VirtualCube &cube, const CubeChunkPlan &pla
                                const PrefetchOptions &options = {},
                                const CancelToken &cancel = {} );
 
+// --- 11.0 (WP F, DECISIONS D-1107): access-pattern-driven prefetch ----------
+
+/// One grid window of a declared access pattern (grid pixel coordinates —
+/// the same space readWindow addresses).
+struct AccessWindow
+{
+    int x = 0, y = 0, w = 0, h = 0;
+};
+
+/// Access-pattern-driven prefetch: the caller declares the window SEQUENCE
+/// it is about to read (a viewer trajectory, a tile queue, a model's scan
+/// order); the planner maps each window onto the intersecting assets'
+/// source pixels, MERGES overlapping/adjacent reads per asset, orders the
+/// merged reads by locality (asset selection order, then ascending y/x —
+/// sequential bytes on object storage), skips mirror hits, and warms the
+/// cache under budget/cancel. Report semantics as prefetchChunks, with
+/// `mergedReads` naming how many reads the merge produced.
+struct PrefetchLocalityReport
+{
+    std::uint64_t mergedReads = 0;      ///< reads after per-asset merging
+    std::uint64_t declaredWindows = 0;  ///< access pattern size (input)
+    std::uint64_t bytesPulled = 0;
+    std::uint64_t warmed = 0, cacheHits = 0, mirrorHits = 0;
+    std::uint64_t skippedBudget = 0, skippedCancel = 0, failed = 0;
+    bool budgetExhausted = false;
+    std::uint64_t outcomesDropped = 0;
+
+    Json::Value toJson() const;
+};
+
+/// Requires the range cache installed and a valid cube grid (typed
+/// refusals as prefetchChunks). Memory is O(merged reads) with the
+/// outcome window capped at 1024 (D-1008 doctrine).
+PrefetchLocalityReport prefetchAccessPattern( const VirtualCube &cube,
+                                              const std::vector<AccessWindow> &pattern,
+                                              const PrefetchOptions &options = {},
+                                              const CancelToken &cancel = {} );
+
 } // namespace sicnu::geo
 
 #endif // SICNU_GEOSPATIAL_FABRIC_PREFETCH_H

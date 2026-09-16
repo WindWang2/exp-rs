@@ -92,11 +92,9 @@ PrefetchReport prefetchChunksImpl( const VirtualCube &cube, const CubeChunkPlan 
         byId[entry.record.id] = entry.record;
     // Identity probes per ASSET (not per chunk) when a mirror was declared.
     std::map<std::string, AssetIdentity> identities;
-    ( void )identities.size();
 
     const std::uint64_t total = plan.chunkCountTotal();
     const std::size_t chunkWindow = options.chunkWindow == 0 ? 64 : options.chunkWindow;
-    bool budgetExhausted = false;
     for ( std::uint64_t begin = 0; begin < total; begin += chunkWindow )
     {
         if ( cancel.cancelled() )
@@ -128,10 +126,39 @@ PrefetchReport prefetchChunksImpl( const VirtualCube &cube, const CubeChunkPlan 
             }
             const AssetRecord &record = assetIt->second;
 
+            // Budget BEFORE any open: an exhausted walk must not keep
+            // paying metadata opens for chunks it will only skip.
+            if ( budget > 0 && pulled >= budget )
+            {
+                outcome.status = "skipped-budget";
+                ++report.skippedBudget;
+                report.budgetExhausted = true;
+                recordOutcome( std::move( outcome ) );
+                continue;
+            }
+
+            // ONE open per chunk: the same reader answers the mirror lookup
+            // and the warm read (the 10.0 walk opened twice per chunk when
+            // a mirror was declared — 2M metadata opens per million chunks).
+            RasterReader reader;
+            const RasterMetadata *metadata = nullptr;
+            try
+            {
+                reader = RasterReader::open( fabricCachedPath( record.path ) );
+                metadata = &reader.metadata();
+            }
+            catch ( const GeoError &error )
+            {
+                outcome.status = "failed";
+                outcome.errorText = error.what();
+                ++report.failed;
+                recordOutcome( std::move( outcome ) );
+                continue;
+            }
+
             // Mirror first: a token-keyed hit means the chunk is already local.
             // (The identity check runs only when a mirror was declared; the
-            // whole probe sits inside the per-chunk failure budget — one dead
-            // asset cannot void the walk.)
+            // probe is best-effort — one dead asset cannot void the walk.)
             if ( !options.mirrorDirectory.empty() )
             {
                 try
@@ -144,24 +171,31 @@ PrefetchReport prefetchChunksImpl( const VirtualCube &cube, const CubeChunkPlan 
                     }
                     else
                     {
-                        identity = assetIdentityToken( record.path, AssetIdentityOptions{} );
+                        identity = fabricAssetIdentity( record.path, AssetIdentityOptions{} );
                         identities[record.id] = identity;
                     }
                     if ( identity.provable() )
                     {
-                        std::string skippedCorrupt;
-                        RasterReader probeReader =
-                          RasterReader::open( fabricCachedPath( record.path ) );
                         const VirtualCubeSourceWindow mapped = virtualCubeSourceWindow(
-                          probeReader.metadata(), request.minX, request.minY, request.maxX,
-                          request.maxY );
+                          *metadata, request.minX, request.minY, request.maxX, request.maxY );
                         if ( mapped.ok )
                         {
-                            const std::string key = fabricChunkMirrorKey(
-                              identity.token, record.path, mapped.window, "band1" );
-                            const std::string hit =
+                            // 11.0 key basis + 10.0 legacy key: both spellings resolve.
+                            const std::string indexKey = fabricMirrorIndexKey( record.path );
+                            std::string skippedCorrupt;
+                            std::string key = fabricChunkMirrorKey(
+                              identity.token, indexKey, mapped.window, "band1" );
+                            std::string hit =
                               resolveMirrorHit( options.mirrorDirectory, identity.token, key,
                                                 &skippedCorrupt );
+                            if ( hit.empty() )
+                            {
+                                const std::string legacyKey = fabricChunkMirrorKey(
+                                  identity.token, record.path, mapped.window, "band1" );
+                                if ( legacyKey != key )
+                                  hit = resolveMirrorHit( options.mirrorDirectory, identity.token,
+                                                          legacyKey, &skippedCorrupt );
+                            }
                             if ( !hit.empty() )
                             {
                                 outcome.status = "mirror-hit";
@@ -172,27 +206,17 @@ PrefetchReport prefetchChunksImpl( const VirtualCube &cube, const CubeChunkPlan 
                         }
                     }
                 }
-                catch ( const GeoError &error )
+                catch ( const GeoError & )
                 {
                     // Mirror probing is best-effort: fall through to the
                     // normal read path (which has its own per-chunk handling).
                 }
             }
 
-            if ( budget > 0 && pulled >= budget )
-            {
-                outcome.status = "skipped-budget";
-                ++report.skippedBudget;
-                report.budgetExhausted = true;
-                recordOutcome( std::move( outcome ) );
-                continue;
-            }
-
             try
             {
-                RasterReader reader = RasterReader::open( fabricCachedPath( record.path ) );
                 const VirtualCubeSourceWindow mapped = virtualCubeSourceWindow(
-                  reader.metadata(), request.minX, request.minY, request.maxX, request.maxY );
+                  *metadata, request.minX, request.minY, request.maxX, request.maxY );
                 if ( !mapped.ok )
                 {
                     outcome.status = "failed";
@@ -256,6 +280,250 @@ PrefetchReport prefetchChunks( const VirtualCube &cube, const CubeChunkPlan &pla
                                const PrefetchOptions &options, const CancelToken &cancel )
 {
     return prefetchChunksImpl( cube, plan, options, cancel );
+}
+
+// --- 11.0 (WP F, D-1107): access-pattern-driven prefetch --------------------
+
+Json::Value PrefetchLocalityReport::toJson() const
+{
+    Json::Value json;
+    json["declaredWindows"] = static_cast<Json::UInt64>( declaredWindows );
+    json["mergedReads"] = static_cast<Json::UInt64>( mergedReads );
+    json["bytesPulled"] = static_cast<Json::UInt64>( bytesPulled );
+    json["warmed"] = static_cast<Json::UInt64>( warmed );
+    json["cacheHits"] = static_cast<Json::UInt64>( cacheHits );
+    json["mirrorHits"] = static_cast<Json::UInt64>( mirrorHits );
+    json["skippedBudget"] = static_cast<Json::UInt64>( skippedBudget );
+    json["skippedCancel"] = static_cast<Json::UInt64>( skippedCancel );
+    json["failed"] = static_cast<Json::UInt64>( failed );
+    json["budgetExhausted"] = budgetExhausted;
+    json["outcomesDropped"] = static_cast<Json::UInt64>( outcomesDropped );
+    return json;
+}
+
+namespace
+{
+
+/// One merged read: an asset's source window that covers (a superset of)
+/// the declared pattern's touches.
+struct MergedRead
+{
+    std::size_t assetIndex = 0;
+    int xOff = 0, yOff = 0, x1 = 0, y1 = 0;   // source pixel rect, half-open
+};
+
+/// A touching-or-overlapping merge on the integer grid: two rects merge
+/// when their expanded-by-one forms intersect (adjacency counts — sequential
+/// device reads like their windows touching).
+bool rectsTouchOrOverlap( const MergedRead &a, const MergedRead &b )
+{
+    return a.xOff <= b.x1 + 1 && b.xOff <= a.x1 + 1 && a.yOff <= b.y1 + 1 &&
+           b.yOff <= a.y1 + 1;
+}
+
+void mergeRect( MergedRead &a, const MergedRead &b )
+{
+    a.xOff = std::min( a.xOff, b.xOff );
+    a.yOff = std::min( a.yOff, b.yOff );
+    a.x1 = std::max( a.x1, b.x1 );
+    a.y1 = std::max( a.y1, b.y1 );
+}
+
+} // namespace
+
+PrefetchLocalityReport prefetchAccessPattern( const VirtualCube &cube,
+                                              const std::vector<AccessWindow> &pattern,
+                                              const PrefetchOptions &options,
+                                              const CancelToken &cancel )
+{
+    if ( !RemoteRangeCache::installed() )
+        throw GeoError( ErrorCode::InvalidArgument,
+                        "prefetch needs the range cache installed (/vsirangecache/)" );
+    if ( !cube.grid().valid() )
+        throw GeoError( ErrorCode::InvalidArgument, "cube grid is invalid — cannot prefetch" );
+
+    PrefetchLocalityReport report;
+    report.declaredWindows = pattern.size();
+
+    // Map every declared window onto the intersecting assets (recorded
+    // index facts only — no opens). Windows OUTSIDE the cube grid are
+    // declared input, not errors: the mapping simply finds no asset.
+    std::vector<MergedRead> reads;
+    for ( std::size_t assetIndex = 0; assetIndex < cube.assets().size(); ++assetIndex )
+    {
+        const VirtualCubeAssetIndexEntry &entry = cube.assets()[assetIndex];
+        if ( !entry.hasGrid )
+            continue;   // no recorded grid facts — nothing to map without an open
+        for ( const AccessWindow &window : pattern )
+        {
+            if ( window.w <= 0 || window.h <= 0 )
+                continue;
+            const double minX = cube.grid().minX + window.x * cube.grid().scaleX;
+            const double maxX = cube.grid().minX + ( window.x + window.w ) * cube.grid().scaleX;
+            const double maxY = cube.grid().maxY - window.y * cube.grid().scaleY;
+            const double minY = cube.grid().maxY - ( window.y + window.h ) * cube.grid().scaleY;
+            if ( !entry.record.hasBbox || entry.record.maxX <= minX ||
+                 entry.record.minX >= maxX || entry.record.maxY <= minY ||
+                 entry.record.minY >= maxY )
+                continue;   // declared bbox never intersects: not consulted
+            RasterMetadata facts;
+            facts.width = entry.rasterWidth;
+            facts.height = entry.rasterHeight;
+            facts.hasGeotransform = true;
+            facts.geotransform = { entry.assetMinX, entry.resX, 0.0,
+                                   entry.assetMaxY, 0.0, entry.resY };
+            const VirtualCubeSourceWindow mapped =
+              virtualCubeSourceWindow( facts, minX, minY, maxX, maxY );
+            if ( !mapped.ok )
+                continue;
+            MergedRead read;
+            read.assetIndex = assetIndex;
+            read.xOff = mapped.window.xOff;
+            read.yOff = mapped.window.yOff;
+            read.x1 = mapped.window.xOff + mapped.window.width - 1;
+            read.y1 = mapped.window.yOff + mapped.window.height - 1;
+            reads.push_back( read );
+        }
+    }
+
+    // Locality order: asset (selection order), then ascending y/x. Merge
+    // touching/overlapping rects of the SAME asset (single pass over the
+    // sorted touches; n = pattern size, bounded by the caller's queue).
+    std::stable_sort( reads.begin(), reads.end(),
+                      [ & ]( const MergedRead &a, const MergedRead &b ) {
+                          if ( a.assetIndex != b.assetIndex )
+                              return a.assetIndex < b.assetIndex;
+                          if ( a.yOff != b.yOff )
+                              return a.yOff < b.yOff;
+                          return a.xOff < b.xOff;
+                      } );
+    std::vector<MergedRead> merged;
+    for ( const MergedRead &read : reads )
+    {
+        bool absorbed = false;
+        for ( MergedRead &open : merged )
+        {
+            if ( open.assetIndex == read.assetIndex && rectsTouchOrOverlap( open, read ) )
+            {
+                mergeRect( open, read );
+                absorbed = true;
+                break;
+            }
+        }
+        if ( !absorbed )
+            merged.push_back( read );
+    }
+    report.mergedReads = merged.size();
+
+    // Walk the merged reads: mirror skip, budget, warm read through the
+    // cache spelling. One open per read; identity probes once per asset.
+    std::uint64_t pulled = 0;
+    const std::uint64_t budget = options.maxBytes;
+    std::map<std::size_t, std::string> tokenByAsset;
+    for ( std::size_t r = 0; r < merged.size(); ++r )
+    {
+        if ( cancel.cancelled() )
+        {
+            report.skippedCancel += merged.size() - r;
+            break;
+        }
+        const MergedRead &read = merged[r];
+        const VirtualCubeAssetIndexEntry &entry = cube.assets()[read.assetIndex];
+
+        const int width = read.x1 - read.xOff + 1;
+        const int height = read.y1 - read.yOff + 1;
+        const RasterWindow window { read.xOff, read.yOff, width, height };
+
+        // Budget BEFORE the open, against the read's declared estimate
+        // (grid cells × 8 bytes — the same unit executeWindow uses). A
+        // read that cannot fit the remaining budget is skipped honestly;
+        // one fat read never blows the budget after the fact.
+        const std::uint64_t estimate =
+          static_cast<std::uint64_t>( width ) * height * 8;
+        if ( budget > 0 && pulled + estimate > budget )
+        {
+            ++report.skippedBudget;
+            report.budgetExhausted = true;
+            continue;
+        }
+
+        // Mirror coordination: a hit means the bytes are already local.
+        if ( !options.mirrorDirectory.empty() )
+        {
+            try
+            {
+                std::string token;
+                const auto tokenIt = tokenByAsset.find( read.assetIndex );
+                if ( tokenIt != tokenByAsset.end() )
+                    token = tokenIt->second;
+                else
+                {
+                    // Offline index FIRST (zero network — the mirror knows
+                    // the token it materialized under); probe only on an
+                    // index miss.
+                    MirrorIndexAssetFacts indexFacts;
+                    if ( lookupMirrorAsset( options.mirrorDirectory, entry.record.path,
+                                            indexFacts ) )
+                        token = indexFacts.token;
+                    if ( token.empty() )
+                        token = fabricAssetIdentity( entry.record.path,
+                                                     AssetIdentityOptions{} ).token;
+                    tokenByAsset[read.assetIndex] = token;
+                }
+                if ( !token.empty() )
+                {
+                    const std::string indexKey = fabricMirrorIndexKey( entry.record.path );
+                    std::string skippedCorrupt;
+                    std::string key =
+                      fabricChunkMirrorKey( token, indexKey, window, "band1" );
+                    std::string hit =
+                      resolveMirrorHit( options.mirrorDirectory, token, key, &skippedCorrupt );
+                    if ( hit.empty() )
+                    {
+                        const std::string legacyKey =
+                          fabricChunkMirrorKey( token, entry.record.path, window, "band1" );
+                        if ( legacyKey != key )
+                            hit = resolveMirrorHit( options.mirrorDirectory, token, legacyKey,
+                                                    &skippedCorrupt );
+                    }
+                    if ( !hit.empty() )
+                    {
+                        ++report.mirrorHits;
+                        continue;
+                    }
+                }
+            }
+            catch ( const GeoError & )
+            {
+                // best-effort: fall through to the warm read
+            }
+        }
+
+        try
+        {
+            RasterReader reader = RasterReader::open( fabricCachedPath( entry.record.path ) );
+            const std::uintmax_t telemetryBefore =
+              RemoteRangeCache::telemetryJson()["bytes_fetched"].asUInt64();
+            ( void )reader.readWindow( { 1 }, window,
+                                       options.maxChunkBytes ? options.maxChunkBytes
+                                                             : 16ull * 1024 * 1024 );
+            const std::uintmax_t telemetryAfter =
+              RemoteRangeCache::telemetryJson()["bytes_fetched"].asUInt64();
+            const std::uint64_t chunkBytes =
+              static_cast<std::uint64_t>( telemetryAfter - telemetryBefore );
+            pulled += chunkBytes;
+            report.bytesPulled += chunkBytes;
+            if ( chunkBytes == 0 )
+                ++report.cacheHits;
+            else
+                ++report.warmed;
+        }
+        catch ( const GeoError & )
+        {
+            ++report.failed;   // a failed warm is honest, never walk-aborting
+        }
+    }
+    return report;
 }
 
 } // namespace sicnu::geo

@@ -289,6 +289,11 @@ ItemVerdict recordForItem( const StacClient &client, const StacItem &item,
   {
     return ItemVerdict::Unresolvable;   // a path we cannot fetch is not a record
   }
+  // 11.0 (Windows portability): a record's path is its IDENTITY spelling —
+  // separator-normalized ('/') so a href resolved on a backslash filesystem
+  // does not fork every consumer keyed on the STAC href shape (matching
+  // ResourceUri::canonical's contract).
+  resolved = ResourceUri::parse( resolved ).canonical();
   recordOut = assetRecordFromStacItem( item, resolved );
   enrichRecord( recordOut, item, *qualifying );
   // The service-layer temporal/bbox checks ride on the record (one truth).

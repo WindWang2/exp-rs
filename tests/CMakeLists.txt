@@ -334,14 +334,46 @@ target_include_directories(test_io_fabric_object_store PRIVATE ${CMAKE_CURRENT_S
 if(WIN32)
   target_link_libraries(test_io_fabric_object_store PRIVATE ws2_32)
 endif()
+# fabric-11 (cloud-data-fabric-11): canonical object identity + VSI-object
+# range cache + offline mirror replay. Same loopback-S3 fixture shape.
+sicnu_add_io_test(test_io_fabric_identity_11)
+target_include_directories(test_io_fabric_identity_11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(WIN32)
+  target_link_libraries(test_io_fabric_identity_11 PRIVATE ws2_32)
+endif()
+sicnu_add_io_test(test_io_fabric_replay_11)
+target_include_directories(test_io_fabric_replay_11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+if(WIN32)
+  target_link_libraries(test_io_fabric_replay_11 PRIVATE ws2_32)
+endif()
+# 11.0 multidim planning/execution (netCDF-authored oracle, driver-gated).
+sicnu_add_io_test(test_io_fabric_multidim_11)
+target_include_directories(test_io_fabric_multidim_11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+find_library(NETCDF_LIBRARY_11 NAMES netcdf)
+target_link_libraries(test_io_fabric_multidim_11 PRIVATE ${NETCDF_LIBRARY_11})
+# 11.0 access-pattern-driven prefetch (WP F).
+sicnu_add_io_test(test_io_fabric_locality_11)
+target_include_directories(test_io_fabric_locality_11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_sources(test_io_fabric_locality_11 PRIVATE support/http_range_server.cpp)
+if(WIN32)
+  target_link_libraries(test_io_fabric_locality_11 PRIVATE ws2_32)
+endif()
 sicnu_add_io_test(test_io_fabric_catalog)
 target_include_directories(test_io_fabric_catalog PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_sources(test_io_fabric_catalog PRIVATE support/http_stac_server.cpp support/http_range_server.cpp)
+if(WIN32)
+  # 11.0: the loopback fixtures need winsock explicitly (the targets relied
+  # on a transitive ws2_32 in the tracks that built them before).
+  target_link_libraries(test_io_fabric_catalog PRIVATE ws2_32)
+endif()
 sicnu_add_io_test(test_io_fabric_cube)
 target_include_directories(test_io_fabric_cube PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 sicnu_add_io_test(test_io_fabric_plan)
 target_include_directories(test_io_fabric_plan PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_sources(test_io_fabric_plan PRIVATE support/http_range_server.cpp)
+if(WIN32)
+  target_link_libraries(test_io_fabric_plan PRIVATE ws2_32)
+endif()
 # The operator suite rides the operator chain (Qt + sicnu_operators), same
 # shape as test_io_operators.
 sicnu_add_io_test(test_io_fabric_scale)
