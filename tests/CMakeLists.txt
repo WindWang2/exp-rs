@@ -10286,3 +10286,23 @@ add_test(NAME test_editing_e2e COMMAND test_editing_e2e)
 set_tests_properties(test_editing_e2e PROPERTIES
   ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
   TIMEOUT 600)
+# deployment-packaging-11 (F19): bundle manifest conformance. Drives the
+# canonical verifier (scripts/verify_bundle_manifest.py) as a subprocess
+# against independently synthesized golden bundles — valid /1 and /2, tamper,
+# missing, extra, unsafe path, empty required prefix, ceiling breach, future
+# major refusal, min_reader_schema, symlink escape — plus the PS twin lane
+# when pwsh exists. Python-only on purpose: no C++ tree rebuild is needed to
+# hold the packaging contract, and the verifier is a standalone artifact.
+if(Python_EXECUTABLE)
+  add_test(NAME bundle_manifest_conformance
+    COMMAND "${Python_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tests/fixtures/bundle_manifest/conformance.py"
+            "--script" "${CMAKE_SOURCE_DIR}/scripts/verify_bundle_manifest.py")
+endif()
+
+# Deployment 11.0 (F19): environment self-check suite. Qt-free (geospatial
+# doctor layer + offline gate) — the io-test link set, not the fat one.
+sicnu_add_io_test(test_env_doctor)
+target_compile_definitions(test_env_doctor PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)

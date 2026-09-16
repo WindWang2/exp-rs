@@ -1,0 +1,12 @@
+# SHA256 checksums for the pinned AppImage toolchain artifacts.
+# Pins (F19 baseline, 2026-09):
+#   linuxdeploy            https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20240109/linuxdeploy-x86_64.AppImage
+#   linuxdeploy-plugin-qt  https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/1-alpha-20240109/linuxdeploy-plugin-qt-x86_64.AppImage
+#
+# Record-once provenance (requires network on the recording machine):
+#   curl -fL -o linuxdeploy-x86_64.AppImage '<linuxdeploy url>'
+#   sha256sum linuxdeploy-x86_64.AppImage  ->  replace the PENDING line below
+# The build FAILS CLOSED while entries are PENDING: unverified bootstrap
+# artifacts must never enter the AppImage.
+PENDING  linuxdeploy-x86_64.AppImage
+PENDING  linuxdeploy-plugin-qt-x86_64.AppImage

@@ -47,12 +47,23 @@ if not defined SICNU_NINJA (
 if not defined SICNU_NINJA for %%N in (ninja.exe) do set "SICNU_NINJA=%%~$PATH:N"
 
 rem --- dependency locations: wb7 defaults, all overridable -------------------
+rem F19: the vcpkg_installed fallback was once hardwired to one developer's
+rem user profile (a portability defect). It now derives from %SICNU_WORKSPACES%
+rem (default %USERPROFILE%\projects) + a repo/workspace layout, and the script
+rem says so loudly when the fallback is used — the value is a GUESS, the
+rem caller is expected to set SICNU_VCPKG_INSTALLED on any real machine.
 if not defined SICNU_QT_DIR            set "SICNU_QT_DIR=C:\deps\Qt\6.8.0\msvc2022_64"
 if not defined SICNU_VCPKG             set "SICNU_VCPKG=C:\deps\vcpkg"
-if not defined SICNU_VCPKG_INSTALLED   set "SICNU_VCPKG_INSTALLED=C:\Users\wangj.KEVIN\projects\exp-rs-win\build-win\vcpkg_installed"
+if not defined SICNU_WORKSPACES        set "SICNU_WORKSPACES=%USERPROFILE%\projects"
+if not defined SICNU_VCPKG_INSTALLED   set "SICNU_VCPKG_INSTALLED=%SICNU_WORKSPACES%\exp-rs-win\build-win\vcpkg_installed"
 if not defined SICNU_WINFLEXBISON      set "SICNU_WINFLEXBISON=C:\deps\winflexbison"
 if not defined SICNU_QCA_DIR           set "SICNU_QCA_DIR=C:\deps\qca-install"
 if not defined SICNU_KEYCHAIN_DIR      set "SICNU_KEYCHAIN_DIR=C:\deps\kc-install"
+if not exist "!SICNU_VCPKG_INSTALLED!" (
+  echo _env.cmd: warning: SICNU_VCPKG_INSTALLED fallback does not exist:
+  echo   !SICNU_VCPKG_INSTALLED!
+  echo   set SICNU_VCPKG_INSTALLED to the configure-time vcpkg_installed tree.
+)
 
 rem --- resource bounds (hard) -------------------------------------------------
 set "CMAKE_BUILD_PARALLEL_LEVEL=2"

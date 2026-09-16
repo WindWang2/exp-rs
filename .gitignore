@@ -311,3 +311,6 @@ data/labs/_tmp/
 # geospatial-io-formats-11: track planning notes (markdown only).
 !.planning/geospatial-io-formats-11/
 !.planning/geospatial-io-formats-11/**
+# deployment-packaging-11 (F19): track planning notes (markdown only).
+!.planning/deployment-packaging-11/
+!.planning/deployment-packaging-11/**

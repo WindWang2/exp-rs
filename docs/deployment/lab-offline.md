@@ -27,11 +27,25 @@ QGIS/GDAL 运行时 DLL 闭包）、确定性示例数据、批改规则、流�
 默认体积上限 250 MB，超限构建失败，可用 `--max-mb` 显式放宽）。`QGIS_BIN` 为必填
 （指向 QGIS/vcpkg 安装的 bin 目录）。
 
+F19 增强：清单默认写入 `sicnu.offline_bundle/2` —— 新增 `components`（构建所用的
+Qt/GDAL/PROJ/QGIS 版本，来自 DLL 版本资源）、`build_options`（构建配置选项）、
+`compat`（manifest 兼容性声明），并把包内 Linux 校验器
+（`VERIFY.sh` + `tools/verify_bundle_manifest.py`）纳入必需清单。旧 `/1` 清单仍可
+被所有校验器接受；任何更新的主版本号都会被拒绝并给出支持版本说明（exit 2）。
+可选 `--check-runtime`：打包后立即运行包内 CLI 的 `env-doctor`（见
+`docs/deployment/env-doctor.md`），在本机提前暴露 DLL/插件/PROJ 闭包问题。
+
 拷贝整个目录（或压缩后）到每台机房机器 / U 盘。在目标机器上校验完整性（离线可用，
 无需源码仓库）：
 
 ```bat
 D:\sicnu-lab-<version>\VERIFY.cmd
+```
+
+Windows 追加首启环境自检（完整性通过后再跑包内 `env-doctor`）：
+
+```bat
+powershell -NoProfile -ExecutionPolicy Bypass -File D:\sicnu-lab-<version>\VERIFY.ps1 -Runtime
 ```
 
 ## 3. 机房：5 分钟跑完实验 1
@@ -90,6 +104,23 @@ export SICNU_LAB_RULES_DIR="$PWD/data/labs/grading"   # 包内则为 <bundle>/da
 sicnu_geo_rs_cli --offline --pipeline labs/lab1/lab1_ndvi.pipeline.json
 sicnu_geo_rs_cli --offline lab --lab ndvi_basics --batch submissions/ --csv grades.csv
 ```
+
+F19：包内自带 Linux 完整性校验（目标机器无需源码仓库）：
+
+```sh
+/sicnu-lab-<version>/VERIFY.sh                                  # 完整性
+/sicnu-lab-<version>/bin/sicnu_geo_rs_cli env-doctor            # 环境自检（文本）
+/sicnu-lab-<version>/bin/sicnu_geo_rs_cli env-doctor --json     # 机器可读
+```
+
+依赖审计：`scripts/report_bundle_dependencies.py --bundle <bundle>` 产出
+`dependencies.json`（包内每个 ELF 的直接依赖 → shipped / host / unresolved），
+打包时先于清单写入，因此同样被 manifest 哈希覆盖。**已知限制**：Linux 便携包
+当前不带 `libsicnu_*` 共享库（Debug 产物体积远超上限），CLI 经构建树 RPATH 在
+开发机可用；`unresolved` 条目会逐个点名哪些库在异机缺失 —— 生产部署请用
+Release 构建产物或 AppImage 路径。升级/回滚流程见
+`docs/deployment/MIGRATION.md`；清洁环境模拟见
+`scripts/cleanroom/cleanroom_smoke.sh`。
 
 ## 8. 测试
 

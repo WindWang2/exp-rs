@@ -3,10 +3,14 @@ rem build_offline_bundle.cmd - assemble the offline classroom bundle (goal D7).
 rem
 rem Usage:
 rem   scripts\build_offline_bundle.cmd --build-dir <dir> [--out <dir>] [--version <v>]
-rem                                    [--max-mb <n>] [--skip-samples] [--verify <bundle>]
+rem                                    [--max-mb <n>] [--schema {1,2}] [--skip-samples]
+rem                                    [--check-runtime] [--verify <bundle>]
 rem
 rem Windows twin of build_offline_bundle.sh (same steps, same manifest contract,
-rem see packaging/OFFLINE_BUNDLE.md). Fully local; never touches the network.
+rem see packaging/OFFLINE_BUNDLE.md). Schema /2 default: --schema 1 for legacy
+rem writers. --check-runtime additionally runs the bundled CLI's env-doctor
+rem (fail-closed) so a broken DLL/plugin/PROJ closure is caught at build time.
+rem Fully local; never touches the network.
 setlocal enabledelayedexpansion
 set "SCRIPT_DIR=%~dp0"
 set "REPO_ROOT=%SCRIPT_DIR%..\"
@@ -17,6 +21,8 @@ set "OUT_DIR="
 set "VERSION="
 set "MAX_MB=250"
 set "SKIP_SAMPLES=0"
+set "SCHEMA=2"
+set "CHECK_RUNTIME=0"
 set "VERIFY_PATH="
 
 :parse
@@ -26,6 +32,8 @@ if /I "%~1"=="--out"          ( set "OUT_DIR=%~2"     & shift & shift & goto :pa
 if /I "%~1"=="--version"      ( set "VERSION=%~2"     & shift & shift & goto :parse )
 if /I "%~1"=="--max-mb"       ( set "MAX_MB=%~2"      & shift & shift & goto :parse )
 if /I "%~1"=="--skip-samples" ( set "SKIP_SAMPLES=1"  & shift & goto :parse )
+if /I "%~1"=="--schema"       ( set "SCHEMA=%~2"      & shift & shift & goto :parse )
+if /I "%~1"=="--check-runtime" ( set "CHECK_RUNTIME=1" & shift & goto :parse )
 if /I "%~1"=="--verify"       ( set "VERIFY_PATH=%~2" & shift & shift & goto :parse )
 if /I "%~1"=="-h"             ( goto :usage )
 if /I "%~1"=="--help"         ( goto :usage )
@@ -147,17 +155,41 @@ copy /Y "%REPO_ROOT%\packaging\bundle\labs\lab1\lab1_ndvi.pipeline.json" "%BUNDL
 copy /Y "%REPO_ROOT%\packaging\bundle\labs\lab1\INSTRUCTIONS-zh.md" "%BUNDLE%\labs\lab1\" >nul || exit /b 1
 
 echo == copying one-click scripts and docs ==
-for %%F in (RUN.cmd GENERATE_SAMPLES.cmd GRADE_ALL.cmd VERIFY.cmd VERIFY.ps1 README-zh.md) do (
+rem VERIFY.sh + tools/verify_bundle_manifest.py ship on Windows bundles too:
+rem schema /2 requires them and a Linux grader machine may verify the same
+rem bundle (the in-bundle Linux check reuses the shipped python verifier).
+for %%F in (RUN.cmd GENERATE_SAMPLES.cmd GRADE_ALL.cmd VERIFY.cmd VERIFY.ps1 VERIFY.sh README-zh.md) do (
   copy /Y "%REPO_ROOT%\packaging\bundle\%%F" "%BUNDLE%\%%F" >nul || exit /b 1
 )
+mkdir "%BUNDLE%\tools" 2>nul
+copy /Y "%SCRIPT_DIR%verify_bundle_manifest.py" "%BUNDLE%\tools\verify_bundle_manifest.py" >nul || exit /b 1
+
+echo == dependency inventory ^(dumpbin optional; best-effort^) ==
+rem Written before the manifest so it is hashed like any other payload file.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%windows\bundle_dependency_report.ps1" -Bundle "%BUNDLE%" || echo note: dependency report failed ^(dependencies.json absent^)
 
 echo == writing manifest ==
-powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%bundle_manifest.ps1" -Bundle "%BUNDLE%" -Version "%VERSION%" -MaxMb %MAX_MB% || exit /b 1
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%bundle_manifest.ps1" -Bundle "%BUNDLE%" -Version "%VERSION%" -MaxMb %MAX_MB% -Schema %SCHEMA% -ComponentsFromBin "%BUNDLE%\bin" || exit /b 1
+
+rem F19: optional first-run environment self-check through the SHIPPED CLI —
+rem proves the bundle's own runtime (DLL closure, plugins, PROJ data) on this
+rem machine before it leaves the build machine. Fail-closed when requested.
+if "%CHECK_RUNTIME%"=="1" (
+  echo == runtime self-check ^(bundled env-doctor^) ==
+  rem Bundle-local runtime data, mirroring RUN.cmd, so the doctor judges the
+  rem bundle's own closure. Gate is fail-closed on "broken" only; "degraded"
+  rem is reported but does not block shipping.
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "$env:PROJ_DATA='%BUNDLE%\data\runtime\proj'; $env:GDAL_DATA='%BUNDLE%\data\runtime\gdal'; $r = & '%BUNDLE%\bin\sicnu_geo_rs_cli.exe' env-doctor --json | ConvertFrom-Json; Write-Output ('RUNTIME CHECK: ' + $r.data.verdict); if ($r.data.verdict -eq 'broken') { exit 1 }"
+  if errorlevel 1 (
+    echo build_offline_bundle: --check-runtime failed ^(env-doctor verdict broken^)
+    exit /b 1
+  )
+)
 
 call "%SCRIPT_DIR%build_offline_bundle.cmd" --verify "%BUNDLE%"
 exit /b %errorlevel%
 
 :verify
 if not exist "%VERIFY_PATH%\manifest.json" ( echo build_offline_bundle: no manifest.json under %VERIFY_PATH% & exit /b 1 )
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%SCRIPT_DIR%bundle_manifest.ps1' -Verify '%VERIFY_PATH%'"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%bundle_manifest.ps1" -Verify "%VERIFY_PATH%"
 exit /b %errorlevel%

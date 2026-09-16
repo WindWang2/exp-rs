@@ -71,6 +71,26 @@ bundle_dir=$(ls -d "$out_root"/sicnu-lab-* | tail -1)
 echo "== [2/5] manifest verify =="
 "$script_dir/build_offline_bundle.sh" --verify "$bundle_dir" || fail "manifest verify failed"
 
+echo "== [2b/5] F19: in-bundle VERIFY.sh + dependency coverage + env-doctor =="
+sh "$bundle_dir/VERIFY.sh" || fail "shipped in-bundle verifier failed"
+# The builder writes dependencies.json BEFORE the manifest, so the manifest
+# must cover it — assert the fact, not re-derive it.
+[ -f "$bundle_dir/dependencies.json" ] || fail "builder did not produce dependencies.json"
+grep -q '"schema": "exp.bundle.deps.v1"' "$bundle_dir/dependencies.json" \
+  || fail "dependencies.json schema missing"
+python3 - "$bundle_dir" <<'PY' || fail "dependencies.json not covered by the manifest"
+import json, sys
+root = sys.argv[1]
+m = json.load(open(root + "/manifest.json"))
+assert any(f["path"] == "dependencies.json" for f in m["files"]), "not in files[]"
+print("   dependencies.json covered by manifest")
+PY
+"$bundle_dir/bin/sicnu_geo_rs_cli" env-doctor > "$out_root/env-doctor.log" 2>&1
+env_rc=$?
+grep -q "^ENV DOCTOR " "$out_root/env-doctor.log" \
+  || fail "env-doctor produced no verdict line"
+echo "   env-doctor verdict: $(tail -1 "$out_root/env-doctor.log") (exit $env_rc)"
+
 echo "== [3/5] lab 1 from inside the bundle (offline pipeline + grade) =="
 export SICNU_LAB_RULES_DIR="$bundle_dir/data/labs/grading"
 export PROJ_DATA="$bundle_dir/data/runtime/proj"

@@ -1,13 +1,19 @@
 #!/bin/sh
-# build_offline_bundle.sh — assemble the offline classroom bundle (goal D7).
+# build_offline_bundle.sh — assemble the offline classroom bundle (goal D7,
+# extended by deployment-packaging-11/F19).
 #
 # usage:
 #   scripts/build_offline_bundle.sh --build-dir <dir> [--out <dir>] [--version <v>]
-#                                   [--max-mb <n>] [--skip-samples] [--verify <bundle>]
+#                                   [--max-mb <n>] [--schema {1,2}] [--skip-samples]
+#                                   [--verify <bundle>]
 #
 # Assembles packaging/OFFLINE_BUNDLE.md's layout from a built tree, writes
-# manifest.json (per-file sha256), and verifies it. Fully local — never
-# touches the network. Windows twin: scripts/build_offline_bundle.cmd.
+# manifest.json (per-file sha256; schema /2 by default with components,
+# build_options and compat provenance; --schema 1 for the legacy shape), and
+# verifies it through the canonical verifier (scripts/verify_bundle_manifest.py
+# — the single verify authority on POSIX/tests; the Windows twin mirrors it
+# in PS). Fully local — never touches the network. Windows twin:
+# scripts/build_offline_bundle.cmd.
 set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -17,10 +23,11 @@ build_dir=""
 out_dir=""
 version=""
 max_mb=250
+schema=2
 skip_samples=0
 verify_path=""
 
-usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 die() { echo "build_offline_bundle: $*" >&2; exit 1; }
 
 while [ $# -gt 0 ]; do
@@ -29,67 +36,22 @@ while [ $# -gt 0 ]; do
     --out)       [ $# -ge 2 ] || usage; out_dir=$2; shift 2 ;;
     --version)   [ $# -ge 2 ] || usage; version=$2; shift 2 ;;
     --max-mb)    [ $# -ge 2 ] || usage; max_mb=$2; shift 2 ;;
+    --schema)    [ $# -ge 2 ] || usage; schema=$2; shift 2 ;;
     --skip-samples) skip_samples=1; shift ;;
     --verify)    [ $# -ge 2 ] || usage; verify_path=$2; shift 2 ;;
     -h|--help)   usage ;;
     *) die "unknown option: $1 (see --help)" ;;
   esac
 done
-
-sha256_of() { sha256sum "$1" | cut -d' ' -f1; }
+[ "$schema" = "1" ] || [ "$schema" = "2" ] || die "--schema must be 1 or 2"
 
 # ---------------------------------------------------------------- verify mode
+# Delegates to the canonical verifier — the same rules run on the dev host,
+# inside the shipped bundle (tools/verify_bundle_manifest.py) and in tests.
 if [ -n "$verify_path" ]; then
-  [ -f "$verify_path/manifest.json" ] || die "no manifest.json under $verify_path"
-  python3 - "$verify_path" <<'PY'
-import hashlib, json, os, sys
-root = sys.argv[1]
-m = json.load(open(os.path.join(root, "manifest.json")))
-assert m.get("schema") == "sicnu.offline_bundle/1", "bad manifest schema"
-bad, total = [], 0
-listed = set()
-for f in m.get("files", []):
-    rel = f["path"]
-    # The manifest is completeness, not authenticity: reject entries that
-    # could read outside the bundle or point at the manifest itself.
-    p = os.path.normpath(os.path.join(root, rel))
-    if os.path.isabs(rel) or rel.startswith("..") or not p.startswith(root + os.sep):
-        bad.append(f"unsafe manifest path: {rel}"); continue
-    if rel == "manifest.json":
-        bad.append("manifest.json must not appear in files[]"); continue
-    listed.add(rel)
-    if not os.path.isfile(p):
-        bad.append(f"missing {rel}"); continue
-    b = os.path.getsize(p); total += b
-    if b != f["bytes"]:
-        bad.append(f"size mismatch {rel}: {b} != {f['bytes']}"); continue
-    h = hashlib.sha256(open(p, "rb").read()).hexdigest()
-    if h != f["sha256"]:
-        bad.append(f"sha256 mismatch {rel}")
-# files[] must cover EVERY regular file: re-walk and flag unlisted ones.
-extra = []
-for base, _dirs, names in os.walk(root):
-    for n in names:
-        rel = os.path.relpath(os.path.join(base, n), root).replace(os.sep, "/")
-        if rel != "manifest.json" and rel not in listed:
-            extra.append(f"unlisted file: {rel}")
-bad.extend(extra)
-for req in m.get("required", []):
-    if req.endswith("/"):
-        if not any(f["path"].startswith(req) for f in m.get("files", [])):
-            bad.append(f"required prefix empty: {req}")
-    elif not os.path.exists(os.path.join(root, req)):
-        bad.append(f"required missing: {req}")
-ceiling = int(m.get("size_ceiling_mb", 250))
-mb = total / (1024 * 1024)
-over = mb > ceiling
-print(f"BUNDLE VERIFY {'FAIL' if (bad or over) else 'PASS'} {root} "
-      f"({len(m.get('files', []))} files, {mb:.1f} MB / ceiling {ceiling} MB)")
-for b in bad: print("  " + b)
-if over: print(f"  size {mb:.1f} MB exceeds ceiling {ceiling} MB")
-sys.exit(1 if (bad or over) else 0)
-PY
-  exit $?
+  [ -f "$script_dir/verify_bundle_manifest.py" ] || \
+    die "canonical verifier missing: $script_dir/verify_bundle_manifest.py"
+  exec python3 "$script_dir/verify_bundle_manifest.py" "$verify_path"
 fi
 
 # --------------------------------------------------------------- assemble mode
@@ -145,9 +107,12 @@ cp "$repo_root/packaging/bundle/labs/lab1/lab1_ndvi.pipeline.json" "$bundle/labs
 cp "$repo_root/packaging/bundle/labs/lab1/INSTRUCTIONS-zh.md" "$bundle/labs/lab1/"
 
 echo "== copying one-click scripts and docs =="
-for f in RUN.cmd GENERATE_SAMPLES.cmd GRADE_ALL.cmd VERIFY.cmd VERIFY.ps1 README-zh.md; do
+for f in RUN.cmd GENERATE_SAMPLES.cmd GRADE_ALL.cmd VERIFY.cmd VERIFY.ps1 VERIFY.sh README-zh.md; do
+  [ -f "$repo_root/packaging/bundle/$f" ] || die "bundle template missing: $f"
   cp "$repo_root/packaging/bundle/$f" "$bundle/"
 done
+mkdir -p "$bundle/tools"
+cp "$script_dir/verify_bundle_manifest.py" "$bundle/tools/verify_bundle_manifest.py"
 
 echo "== runtime data (PROJ/GDAL grids & databases; grading needs proj.db) =="
 mkdir -p "$bundle/data/runtime"
@@ -157,20 +122,58 @@ for c in /usr/share/proj "${gdal_data%/gdal}/proj" /usr/share/QGIS/share/proj; d
   [ -f "$c/proj.db" ] && proj_share=$c && break
 done
 if [ -n "$proj_share" ]; then
-  cp -R "$proj_share" "$bundle/data/runtime/proj"
+  # -L dereferences symlinks: the shipped tree must be self-contained so the
+  # verifier's escaping-symlink rule can never trip on host-absolute links.
+  cp -RL "$proj_share" "$bundle/data/runtime/proj"
 else
   die "proj.db not found (looked in /usr/share/proj et al.) — install proj-data; without it offline grading cannot identify EPSG authorities"
 fi
 if [ -n "$gdal_data" ] && [ -d "$gdal_data" ]; then
-  cp -R "$gdal_data" "$bundle/data/runtime/gdal"
+  cp -RL "$gdal_data" "$bundle/data/runtime/gdal"
 else
   echo "note: gdal data dir not found via gdal-config — data/runtime/gdal skipped"
 fi
 
+echo "== dependency inventory (shipped vs host closure) =="
+# Written BEFORE the manifest so it is hashed like any other payload file.
+# Best-effort: an inventory failure warns and continues (the manifest does
+# not depend on it), never blocks the classroom bundle.
+if python3 "$script_dir/report_bundle_dependencies.py" --bundle "$bundle"; then
+  :
+else
+  echo "note: dependency report failed (dependencies.json absent from this bundle)" >&2
+fi
+
+echo "== probing build/host components for the manifest =="
+comp_args=""
+probe_component() { # probe_component <name> <command...>  (first line only,
+  name=$1; shift                #  best-effort: unresolved components are omitted)
+  v=$( { timeout 60 "$@" 2>/dev/null || true; } | head -1 )
+  [ -n "$v" ] && comp_args="$comp_args $name=$v" || true
+}
+probe_component gdal gdal-config --version
+probe_component proj pkg-config --modversion proj
+probe_component geos pkg-config --modversion geos
+qt_version=$({ qmake6 -query QT_VERSION 2>/dev/null || qmake -query QT_VERSION 2>/dev/null || true; })
+[ -n "$qt_version" ] && comp_args="$comp_args qt=$qt_version"
+py_version=$(python3 -V 2>/dev/null | cut -d' ' -f2)
+[ -n "$py_version" ] && comp_args="$comp_args python=$py_version"
+qgis_version=$( { timeout 60 qgis --version 2>/dev/null || true; } | head -1 | cut -d' ' -f2 | sed 's/-.*//')
+[ -n "$qgis_version" ] && comp_args="$comp_args qgis=$qgis_version"
+# The shipped-library closure (shipped vs host-required) is reported by
+# scripts/report_bundle_dependencies.py into dependencies.json — a bundle
+# file like any other, hashed by this manifest.
+
 echo "== writing manifest =="
-python3 - "$bundle" "$version" "$max_mb" <<'PY'
+BUNDLE_BUILD_DIR="$build_dir" python3 - "$bundle" "$version" "$max_mb" "$schema" $comp_args <<'PY'
 import hashlib, json, os, sys, datetime
 bundle, version, ceiling = sys.argv[1], sys.argv[2], int(sys.argv[3])
+schema = sys.argv[4]
+components = {}
+for arg in sys.argv[5:]:
+    name, _, ver = arg.partition("=")
+    if name and ver:
+        components[name] = {"version": ver, "source": "host"}
 files = []
 for base, _dirs, names in os.walk(bundle):
     for n in names:
@@ -181,18 +184,47 @@ for base, _dirs, names in os.walk(bundle):
         files.append({"path": rel, "bytes": os.path.getsize(p),
                       "sha256": hashlib.sha256(open(p, "rb").read()).hexdigest()})
 files.sort(key=lambda f: f["path"])
+required = ["bin/", "data/samples/", "data/labs/grading/", "data/fonts/",
+            "data/runtime/proj/", "labs/lab1/", "RUN.cmd",
+            "GENERATE_SAMPLES.cmd", "GRADE_ALL.cmd", "VERIFY.cmd",
+            "VERIFY.ps1", "README-zh.md", "manifest.json"]
 manifest = {"schema": "sicnu.offline_bundle/1", "bundle_version": version,
             "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
             "size_ceiling_mb": ceiling,
-            "required": ["bin/", "data/samples/", "data/labs/grading/", "data/fonts/",
-                         "data/runtime/proj/", "labs/lab1/", "RUN.cmd",
-                         "GENERATE_SAMPLES.cmd", "GRADE_ALL.cmd", "VERIFY.cmd",
-                         "VERIFY.ps1", "README-zh.md", "manifest.json"],
+            "required": required,
             "files": files}
+if schema == "2":
+    # /2 adds the in-bundle Linux verifier to required and records declared
+    # provenance: resolved component versions and the build tree's configure
+    # options (allowlisted keys only, from CMakeCache.txt when present).
+    required = required + ["VERIFY.sh", "tools/verify_bundle_manifest.py"]
+    build_options = {}
+    cache = os.path.join(os.environ.get("BUNDLE_BUILD_DIR", ""), "CMakeCache.txt")
+    allow = ("CMAKE_BUILD_TYPE", "CMAKE_GENERATOR", "ENABLE_TESTS")
+    if os.path.isfile(cache):
+        with open(cache, "r", encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                if ":" not in line or "=" not in line:
+                    continue
+                key_part, _, value = line.partition("=")
+                key = key_part.partition(":")[0]
+                if key in allow or key.startswith("SICNU_"):
+                    build_options[key] = value.strip()
+    manifest = {
+        "schema": "sicnu.offline_bundle/2",
+        "bundle_version": version,
+        "created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        "size_ceiling_mb": ceiling,
+        "required": required,
+        "files": files,
+        "components": components,
+        "build_options": build_options,
+        "compat": {"min_reader_schema": 1, "bundle_kind": "lab-cli"},
+    }
 with open(os.path.join(bundle, "manifest.json"), "w", encoding="utf-8") as fh:
     json.dump(manifest, fh, ensure_ascii=False, indent=2)
     fh.write("\n")
-print(f"manifest: {len(files)} files")
+print(f"manifest: {len(files)} files (schema {manifest['schema']})")
 PY
 
 "$script_dir/build_offline_bundle.sh" --verify "$bundle"
