@@ -54,3 +54,24 @@
 ## D-010 测试命名与注册
 
 - 新测试：`tests/test_workflow_facts_11.cpp`、`tests/test_grounding_probes_11.cpp`、`tests/test_workflow_analysis_11.cpp`、`tests/test_workflow_repair_11.cpp`（扩展）、`tests/test_provenance_projection_11.cpp`、`tests/test_workflow_explain_11.cpp`；CMake 注册 append-only 到 tests/CMakeLists.txt（integration commit）。
+
+## D-011 帮助目录不新增 concept 条目
+
+- 背景：`data/help/concepts.json` 有 schema/i18n 测试约束（#959 修复线）。
+- 选择：本 track 不动帮助 catalog；agent-facing 文档即工具 schema 的 description 字段 + ADR 0163。理由：最小接线，避免与并行 help 相关修复冲突。
+
+## D-012 pi 行为测试的宿主限制处理
+
+- 背景：`fake_mcp_server.mjs` 靠 shebang 被 spawn，Windows 直接 exec .mjs → `spawn EFTYPE`。master 上现存的 `pi/test/no_drift.test.mjs` 行为段在本机同样失败（pre-existing，非本 diff 引入）。
+- 选择：新测试 `scientific_workflow_compiler_11.test.mjs` 用 canary 判定 spawn 能力，失败则 `t.skip("host cannot exec the fake MCP server...")` 并打印原因；静态守护（无 per-tool fork、schema 常量锚、知识页预算）无条件运行。Linux CI 上行为段会正常执行。
+
+## D-013 probe 以独立 SpatialTool 注册而非挂在 grounding_tools 内
+
+- 背景：probe 需要被 agent/corpus 调用（surface 一致）。
+- 选择：`grounding_probes.cpp` 自带 `registerGroundingProbeTools()`，在 `spatial_tool.cpp` 注册序列中 `registerGroundingTools()` 之后追加一行；taxonomy overrides 追加两条。理由：不动 grounding_tools 的注册函数体（最小 diff），probe 工具与 probe API 同文件（一个实现）。
+
+## D-014 collection descriptor grounding 放在 planner 而非 entity_resolver
+
+- 背景：compile_workflow 对未预计算 slot 走 spatial:understand；collection descriptor 是 JSON 文档会失败。
+- 候选：a) 改 spatial:understand 支持 .json；b) planner 的 grounding 循环里对 understand 失败的 slot 尝试 descriptor grounding。
+- 选择：b。理由：a 会改变公共 grounding 工具的语义面（影响所有调用方）；b 只影响编译路径，anti-hallucination 不变（仍走唯一 resolver），失败即无合成。
