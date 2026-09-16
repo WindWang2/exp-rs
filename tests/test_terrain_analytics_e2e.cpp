@@ -429,6 +429,19 @@ TEST_CASE( "terrain operators surface Cancelled and leave no partial output",
     REQUIRE_THROWS_AS( op->run( params, context ), RSOperatorError );
     INFO( "A pre-cancelled run must not leave an output file" );
     REQUIRE_FALSE( QFile::exists( dir.filePath( "cancelled.tif" ) ) );
+
+    // The rs:terrain_flow kernels surface cancellation the same way.
+    auto flow = RSOperatorRegistry::instance().create( "rs:terrain_flow" );
+    REQUIRE( flow != nullptr );
+    RSOperatorContext flowContext;
+    flowContext.setCancelFlag( &cancelled );
+    Json::Value flat( Json::objectValue );
+    flat["input"] = demPath.toStdString();
+    flat["output"] = dir.filePath( "cancelled_flat.tif" ).toStdString();
+    flat["product"] = "flat_resolve";
+    REQUIRE_THROWS_AS( flow->run( flat, flowContext ), RSOperatorError );
+    INFO( "Pre-cancelled flat_resolve must not leave an output file" );
+    REQUIRE_FALSE( QFile::exists( dir.filePath( "cancelled_flat.tif" ) ) );
 }
 
 TEST_CASE( "terrain cell-budget guard refuses oversized grids fail-closed",

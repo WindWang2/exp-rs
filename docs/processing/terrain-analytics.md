@@ -16,15 +16,15 @@ surface. All kernels: deterministic, NoData barriers, fail-closed cell budget
 | `flow_accumulation` | Self-inclusive drainage counts via topological peel; NoData cells carry the sentinel (#783). |
 | `watershed` | Pour-point reverse-BFS basin labels (first point wins ties). |
 | `flat_resolve` | Epsilon-gradient flat resolution: every valid cell gains a strictly descending path (steps ≥ `flatEpsilon` = max(relief·2⁻²⁰, 1e-6)); monotone non-decreasing vs the input; byte-equal to `fill` when no flats/depressions exist. Result JSON: `flatEpsilon`, `raisedCells`. |
-| `flow_direction_inf` | D∞ (Tarboton 1997): steepest descent on the 8 triangular facets, restricted to each facet wedge; degrees clockwise from north; −1 = undecided (pit/unresolved flat); NoData passthrough. On planar surfaces the exact gradient azimuth is reproduced. Result JSON adds `undecidedCells`. |
-| `stream_network` | Threshold extraction (`threshold` ≥ 1, self-inclusive counts) + Strahler orders over the D8 graph. Output raster: order per stream cell, 0 elsewhere. Result JSON: `streamCells`, `maxStrahlerOrder`, optional `segments` (Strahler links from heads/junctions to the next junction, GDAL pixel-centre map coordinates, capped at 200 with `segmentsTruncated`). |
-| `outlets` | Valid cells with D8 direction 0 (interior sinks, rim outflows). Output: 0/1 mask. Result JSON: `outletCount`, `outlets` (capped at 1000, `outletsTruncated`). Run on `flat_resolve` output semantics: outlets are computed from the fill of this run; interior flats report as outlets unless resolved. |
+| `flow_direction_inf` | D∞ (Tarboton 1997): steepest descent on the 8 triangular facets, restricted to each facet wedge; degrees clockwise from north; −1 = undecided (pit/unresolved flat); NoData passthrough. On planar surfaces the exact gradient azimuth is reproduced. Result JSON adds `undecidedCells` (count of −1 cells, NoData excluded). |
+| `stream_network` | Threshold extraction (`threshold` ≥ 1, self-inclusive counts) + Strahler orders over the D8 graph. Output raster: order per stream cell, 0 elsewhere, NoData cells carry the sentinel. Result JSON: `streamCells`, `maxStrahlerOrder`, optional `segments` (Strahler links from heads/junctions to the next junction, GDAL pixel-centre map coordinates, capped at 200 with `segmentsTruncated`). |
+| `outlets` | Valid cells with D8 direction 0 (interior sinks, rim outflows). Output: 0/1 mask; NoData cells carry the sentinel. Result JSON: `outletCount`, `outlets` (capped at 1000, `outletsTruncated`). Outlets are computed from the fill of this run; interior flats report as outlets unless resolved (run `flat_resolve` first for true basin outlets). |
 
 ## Visibility — `rs:terrain_viewshed`
 
 | Product | Contract |
 |---|---|
-| `viewshed` | Ring-sweep R3-family viewshed (deterministic permissive merge): byte raster 1/0, 255 = NoData. Observer/target heights in metres, `radius` in map units (0 = full frame). Result JSON: `visibleCells`, `visibleFraction`. |
+| `viewshed` | Ring-sweep R3-family viewshed (deterministic permissive merge): byte raster 1/0, 255 = NoData. Exactly one observer (`observer`); use `cumulative` for several. Observer/target heights in metres, `radius` in map units (0 = full frame). Result JSON: `visibleCells`, `analysedCells` (non-NoData), `visibleFraction` (denominator = analysed cells). |
 | `cumulative` | Per-observer viewshed runs accumulated: uint16 counts, 65535 = NoData, max 64 observers. |
 
 Curvature/refraction: elevations are lowered by `(1−k)·d²/(2·R_earth)` (standard

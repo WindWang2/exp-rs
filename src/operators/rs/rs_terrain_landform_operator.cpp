@@ -17,6 +17,7 @@
 #include <gdal.h>
 
 #include <array>
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -123,8 +124,9 @@ Json::Value RsTerrainLandformOperator::metadata() const {
     meta["workflowHints"].append( "Start with geomorphon for a form map, then "
                                   "tpi_multiscale to tune scale pairs for "
                                   "landform_class." );
-    meta["limitations"].append( "Full-frame memory (≈ 12 bytes/cell per scale "
-                                "pass); capped by SICNU_TERRAIN_MAX_CELLS." );
+    meta["limitations"].append( "Full-frame memory: peak ≈ 24 + 8·scales bytes/"
+                                "cell (integral images + retained per-scale TPI); "
+                                "capped by SICNU_TERRAIN_MAX_CELLS." );
     meta["limitations"].append( "Square TPI windows; geomorphon uses nearest-cell "
                                 "line-of-sight scans." );
     meta["deterministic"] = true;
@@ -141,6 +143,27 @@ Json::Value RsTerrainLandformOperator::executionEstimate() const {
 }
 
 Json::Value RsTerrainLandformOperator::estimateExecution( const Json::Value &params ) const {
+    // Peak working set: transient integral-image triple (~24 B/cell) plus the
+    // retained per-scale TPI/stdTPI pair (8 B/cell × scale count) — the
+    // scales dominate, so the estimate must track the parsed radii.
+    std::uint64_t bytesPerCell = 48ULL; // default "3,8,21" anchor
+    if ( params.isObject() && params.isMember( "radii" ) && params["radii"].isString() )
+    {
+        try
+        {
+            const std::string text = params["radii"].asString();
+            std::size_t count = 1;
+            for ( const char c : text )
+                if ( c == ',' || c == ';' || c == ' ' )
+                    ++count;
+            count = std::clamp( count, std::size_t{ 1 }, kMaxScales );
+            bytesPerCell = 24ULL + 8ULL * count;
+        }
+        catch ( ... )
+        {
+            // fall through to the anchor
+        }
+    }
     if ( params.isObject() && params.isMember( "input" ) && params["input"].isString() )
     {
         GdalDatasetWrapper probe;
@@ -149,7 +172,7 @@ Json::Value RsTerrainLandformOperator::estimateExecution( const Json::Value &par
             std::optional<std::uint64_t> ram = sicnu::processing::checkedMulN(
                 { static_cast<std::uint64_t>( std::max( 1, probe.width() ) ),
                   static_cast<std::uint64_t>( std::max( 1, probe.height() ) ),
-                  48ULL } );
+                  bytesPerCell } );
             if ( ram )
             {
                 Json::Value est( Json::objectValue );
@@ -161,7 +184,12 @@ Json::Value RsTerrainLandformOperator::estimateExecution( const Json::Value &par
             }
         }
     }
-    return executionEstimate();
+    Json::Value est( Json::objectValue );
+    est["tileWidth"] = 0;
+    est["tileHeight"] = 0;
+    est["estimatedRamBytes"] = Json::Value::UInt64(
+        bytesPerCell * 4096ULL * 4096ULL );
+    return est;
 }
 
 Json::Value RsTerrainLandformOperator::run( const Json::Value &params,

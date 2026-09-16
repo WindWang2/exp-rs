@@ -43,8 +43,9 @@ TEST_CASE( "shadowDuration: fraction tracks the weighted sun track",
            "[terrain][solar]" )
 {
     // Same wall, two equally weighted samples: sun due east at 45°
-    // (shadow cols ≥ 3) and due east at 90° (vertical: no shadow at all).
-    // Expected fraction: 0.5 on cols ≥ 3, 0 on cols ≤ 2.
+    // (shadow falls west of the wall: cols 0,1) and due east at 89°
+    // (nearly vertical: shadow length 0.17 cells — nothing shadowed).
+    // Expected fraction: 0.5 on cols ≤ 1, 0 elsewhere.
     Grid g = plane( 11, 1, 0.0, 0.0, 0.0 );
     g.at( 2, 0 ) = 10.0f;
     std::vector<SunSample> track = { { 90.0, 45.0, 1.0 }, { 90.0, 89.0, 1.0 } };

@@ -165,8 +165,9 @@ bool resolveFlats( const float *dem, float *filled, int width, int height,
     const std::size_t n = static_cast<std::size_t>( width ) * height;
 
     // Relief-scaled epsilon: increments must survive float32 addition at the
-    // DEM's own magnitude (2⁻²⁰ keeps them ≥ 2⁶ ulp above absorption), with an
-    // absolute floor for constant/tiny DEMs.
+    // DEM's own magnitude (2⁻²⁰ relief keeps them ≥ 2³ ulp above absorption
+    // at the largest elevations, and better lower down), with an absolute
+    // floor for constant/tiny DEMs.
     double zmin = std::numeric_limits<double>::infinity();
     double zmax = -std::numeric_limits<double>::infinity();
     std::size_t tick = 0;

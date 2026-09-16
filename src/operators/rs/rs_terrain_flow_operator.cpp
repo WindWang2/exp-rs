@@ -270,7 +270,10 @@ Json::Value RsTerrainFlowOperator::run( const Json::Value &params, RSOperatorCon
         if ( !TerrainHydrology::resolveFlats( filled.data(), resolved.data(), width,
                                               height, nodata, &report,
                                               [&context] { return context.isCancelled(); } ) )
+        {
+            context.throwIfCancelled(); // cancelled() hooks exit false first
             throw RSOperatorError( ErrorCode::ComputationError, "Flat resolution failed" );
+        }
         result["flatEpsilon"] = report.epsilon;
         result["raisedCells"] = static_cast<Json::UInt64>( report.raisedCells );
         if ( product == "flat_resolve" )
@@ -284,11 +287,19 @@ Json::Value RsTerrainFlowOperator::run( const Json::Value &params, RSOperatorCon
             if ( !TerrainHydrology::flowDirectionInf( resolved.data(), angles.data(), width,
                                                       height, nodata,
                                                       [&context] { return context.isCancelled(); } ) )
+            {
+                context.throwIfCancelled(); // cancelled() hooks exit false first
                 throw RSOperatorError( ErrorCode::ComputationError,
                                        "D-infinity routing failed" );
+            }
             Json::UInt64 undecided = 0;
-            for ( const float a : angles )
-                undecided += a < 0.0f ? 1 : 0;
+            for ( std::size_t i = 0; i < n; ++i )
+            {
+                const float a = angles[i];
+                // Count only true -1 cells (pits / un-resolved flats);
+                // NoData passthrough must not inflate the stat.
+                undecided += ( a < 0.0f && a != nodata && !std::isnan( a ) ) ? 1 : 0;
+            }
             result["undecidedCells"] = undecided;
             productData = std::move( angles );
         }
@@ -312,6 +323,12 @@ Json::Value RsTerrainFlowOperator::run( const Json::Value &params, RSOperatorCon
                                                static_cast<float>( threshold ), &net ) )
             throw RSOperatorError( ErrorCode::ComputationError, "Stream network failed" );
         productData.assign( n, 0.0f );
+        // NoData cells carry the sentinel (#783 spirit): masked areas must
+        // stay distinguishable from genuine non-stream cells.
+        if ( hasNodata )
+            for ( std::size_t i = 0; i < n; ++i )
+                if ( ( filled[i] == nodata || std::isnan( filled[i] ) ) )
+                    productData[i] = nodata;
         Json::UInt64 streamCells = 0;
         int maxOrder = 0;
         for ( std::size_t i = 0; i < n; ++i )
@@ -363,6 +380,10 @@ Json::Value RsTerrainFlowOperator::run( const Json::Value &params, RSOperatorCon
     {
         context.reportProgress( 0.8, "Detecting outlets" );
         productData.assign( n, 0.0f );
+        if ( hasNodata )
+            for ( std::size_t i = 0; i < n; ++i )
+                if ( ( filled[i] == nodata || std::isnan( filled[i] ) ) )
+                    productData[i] = nodata;
         const auto outlets = TerrainHydrology::detectOutlets( filled.data(), dir.data(),
                                                               width, height, nodata );
         Json::Value outletList( Json::arrayValue );

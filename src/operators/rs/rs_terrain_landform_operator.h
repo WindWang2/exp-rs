@@ -16,8 +16,8 @@ namespace sicnu::operators::rs {
  *   landform_class  byte raster of Weiss (2001) classes (0 plains … 5 peak,
  *                   255 NoData)
  *   geomorphon      byte raster of geomorphon form classes 0–6 (255 NoData);
- *                   the packed ternary pattern rides in the JSON result
- *                   histogram
+ *                   the form histogram rides in the JSON result (the packed
+ *                   ternary pattern is computed in-kernel but not exported)
  *
  * Full-frame kernels (integral images / line-of-sight scans); capped by
  * SICNU_TERRAIN_MAX_CELLS.

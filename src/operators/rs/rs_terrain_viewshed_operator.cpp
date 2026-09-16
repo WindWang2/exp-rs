@@ -304,6 +304,11 @@ Json::Value RsTerrainViewshedOperator::run( const Json::Value &params,
     }
     if ( observers.empty() )
         throw RSOperatorError( ErrorCode::InvalidParameter, "parsed to no observers" );
+    if ( product == "viewshed" && observers.size() > 1 )
+        throw RSOperatorError(
+            ErrorCode::InvalidParameter,
+            "product=viewshed takes exactly one observer; use product=cumulative "
+            "for multiple observers" );
 
     const auto cancelledHook = [&context] { return context.isCancelled(); };
     context.reportProgress( 0.3, "Computing viewshed" );
@@ -338,11 +343,22 @@ Json::Value RsTerrainViewshedOperator::run( const Json::Value &params,
                                    "on NoData?)" );
         }
         Json::UInt64 visibleCount = 0;
-        for ( const std::uint8_t v : visible )
-            visibleCount += v ? 1 : 0;
+        Json::UInt64 analysed = 0;
+        for ( std::size_t i = 0; i < n; ++i )
+        {
+            if ( visible[i] == 255 )
+                continue; // NoData marker
+            ++analysed;
+            visibleCount += visible[i] ? 1 : 0;
+        }
         result["visibleCells"] = visibleCount;
+        // Denominator = analysed (non-NoData) cells, matching the
+        // spatial:terrain_viewshed_inspect agent tool.
         result["visibleFraction"] =
-            static_cast<double>( visibleCount ) / static_cast<double>( n );
+            analysed > 0 ? static_cast<double>( visibleCount )
+                               / static_cast<double>( analysed )
+                         : 0.0;
+        result["analysedCells"] = analysed;
         out.setNoDataValue( 255.0 );
         writeOk = out.writeTileRaw(
             1, GdalBlockStream::Tile{ 0, 0, width, height, 0, width, height, 0, 1 },

@@ -54,7 +54,7 @@
 - 输出：output（raster）、product（string）
 - 参数：flat_radius（numeric）、flat_slope_deg（numeric）、flat_thresh_deg（numeric）、inner_radius（numeric）、nodata（numeric）、outer_radius（numeric）、output（string）、product（enum）、radii（string）、search_radius（numeric）
 - 前置条件：Projected (metric) DEM recommended; radii are in cells.
-- 局限：Full-frame memory (≈ 12 bytes/cell per scale pass); capped by SICNU_TERRAIN_MAX_CELLS.；Square TPI windows; geomorphon uses nearest-cell line-of-sight scans.
+- 局限：Full-frame memory: peak ≈ 24 + 8·scales bytes/cell (integral images + retained per-scale TPI); capped by SICNU_TERRAIN_MAX_CELLS.；Square TPI windows; geomorphon uses nearest-cell line-of-sight scans.；Full-frame memory (≈ 12 bytes/cell per scale pass); capped by SICNU_TERRAIN_MAX_CELLS.
 - 适用地物：山地、丘陵、河谷
 - 适用场景：地貌形态制图、多尺度地形位置分区、坡面单元划分
 - 失败模式：

@@ -143,8 +143,9 @@
     },
     "limitations" : 
     [
-      "Full-frame memory (\u2248 12 bytes/cell per scale pass); capped by SICNU_TERRAIN_MAX_CELLS.",
-      "Square TPI windows; geomorphon uses nearest-cell line-of-sight scans."
+      "Full-frame memory: peak \u2248 24 + 8\u00b7scales bytes/cell (integral images + retained per-scale TPI); capped by SICNU_TERRAIN_MAX_CELLS.",
+      "Square TPI windows; geomorphon uses nearest-cell line-of-sight scans.",
+      "Full-frame memory (\u2248 12 bytes/cell per scale pass); capped by SICNU_TERRAIN_MAX_CELLS."
     ],
     "modality" : 
     [

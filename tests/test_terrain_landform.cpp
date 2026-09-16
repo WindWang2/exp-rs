@@ -78,8 +78,8 @@ TEST_CASE( "Weiss classes: crest is upper slope/peak, flanks middle",
     std::vector<std::uint8_t> classes;
     REQUIRE( landformClasses( g.z.data(), w, h, kNo, 1.0, 1.0, params, &classes ) );
     const int y = 4;
-    // Col 19 (one cell off the crest): stdTPI_outer ≈ 2.15 > 1σ,
-    // stdTPI_inner ≈ 0.45 ≤ 1σ → upper slope (4), hand-derived.
+    // Col 19 (one cell off the crest): stdTPI_outer ≈ 1.29 > 1σ,
+    // stdTPI_inner ≈ 0.39 ≤ 1σ → upper slope (4), hand-derived.
     const std::uint8_t upper = classes[y * w + 19];
     CHECK( upper == 4 );
     // Col 16: hand-derived stdTPI_outer ≈ 0.32 (∈ ±1σ), stdTPI_inner = 0

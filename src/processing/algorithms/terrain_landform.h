@@ -25,9 +25,10 @@
 //     base-3 over the fixed direction order N, NE, E, SE, S, SW, W, NW.
 //     Form classes (v1, unambiguous subset — full 10-class J&S table is a
 //     documented follow-up):
-//       0 flat (all directions 0)              3 ridge (one − arc, no +)
-//       1 peak (all −1: surroundings lower)    4 valley (one + arc, no −)
-//       2 pit  (all +1: surroundings higher)   5 slope (one + and one − arc)
+//       0 flat (all directions 0)              3 ridge (− arcs only, no +)
+//       1 peak (all −1: surroundings lower)    4 valley (+ arcs only, no −)
+//       2 pit  (all +1: surroundings higher)   5 slope (exactly one + and
+//                                                        one − arc)
 //       6 other (everything else: shoulder/spur/hollow/footslope patterns)
 //     Sign convention: +1 means terrain HIGHER than the centre along that
 //     direction, so a pit cell is all +1 and a peak cell all −1.

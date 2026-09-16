@@ -10,8 +10,8 @@
 //     with elevation ≤ 0 (night) or weight ≤ 0 are excluded from both
 //     numerator and denominator. Curvature is NOT applied to shadows (v1,
 //     documented limitation; viewshed carries the pairwise-exact model).
-//   * sunPositionDeg: low-precision solar position (Cooper 1981 declination
-//     ± the standard hour-angle formula) from local SOLAR time — caller
+//   * sunPositionDeg: low-precision solar position (Spencer 1971 declination
+//     series + the standard hour-angle formula) from local SOLAR time — caller
 //     supplies solar (not civil) time, sidestepping equation-of-time and
 //     timezone errors. Declared accuracy ≈ ±0.5° declination, ±1° position;
 //     it generates sun tracks, it is not an ephemeris.
