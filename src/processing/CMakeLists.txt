@@ -46,6 +46,10 @@ add_library(sicnu_processing SHARED
     algorithms/sar/sar_temporal_events.cpp
     algorithms/temporal/temporal_monitoring.cpp
     algorithms/terrain_flow.cpp
+    algorithms/terrain_hydrology.cpp
+    algorithms/terrain_viewshed.cpp
+    algorithms/terrain_solar.cpp
+    algorithms/terrain_landform.cpp
 
     algorithms/spectral_indices.cpp
     algorithms/spectral_classification.cpp
