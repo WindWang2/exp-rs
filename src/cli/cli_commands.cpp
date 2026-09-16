@@ -2,6 +2,7 @@
  * src/cli/cli_commands.cpp
  ***************************************************************************/
 #include "cli_commands.h"
+#include "cli_tool_commands.h"
 
 #include "cli_env_doctor.h"
 
@@ -2293,6 +2294,8 @@ bool isCliCommand( const QString &firstArg )
                                            "lab",
                                            // Deployment 11.0 (F19): first-run env self-check.
                                            "env-doctor" };
+                                           // Surface-11: union discovery + batch manifests.
+                                           "tools", "batch" };
     return kCommands.contains( firstArg );
 }
 
@@ -2332,6 +2335,10 @@ int dispatchCliCommand( const QStringList &arguments, const CliIO &io )
         return commandLab( std::move( args ), io );
     if ( command == "env-doctor" )
         return commandEnvDoctor( std::move( args ), io );
+    if ( command == "tools" )
+        return commandTools( std::move( args ), io );
+    if ( command == "batch" )
+        return commandBatch( std::move( args ), io );
     if ( command == "catalog" )
     {
         // catalog export <dir> — the legacy --export-catalog surface.

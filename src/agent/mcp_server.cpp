@@ -29,6 +29,10 @@
 #include "interaction_tool_registry.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
 #include "agent/tool_catalog/agent_tool.h"
+#include "agent/tool_catalog/meta_protocol_tools.h"
+#include "agent/tool_catalog/surface_registry.h"
+#include "agent/tool_catalog/surface_progress.h"
+#include "agent/tool_catalog/surface_redaction.h"
 #include "agent/spatial_tools/spatial_tool.h"
 #include "agent/data_platform_tools.h"
 
@@ -40,6 +44,11 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QDebug>
+#include <QFile>
+#include <QFileInfo>
+#include <QDir>
+#include <QCryptographicHash>
+#include <QStringDecoder>
 #include <qgis.h>
 #include <json/json.h>
 
@@ -115,56 +124,9 @@ QString mcpDataTypeToString( Qgis::DataType type ) {
 
 bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
 {
-    if (isCustomTools)
-        *isCustomTools = false;
-
-    QString checkId = id;
-    if (checkId.startsWith(QStringLiteral("processing:"))) {
-        checkId = checkId.mid(11);
-    }
-
-    static const QStringList kAllowed = {
-        QStringLiteral("rs:"),
-        QStringLiteral("gdal:"),
-        QStringLiteral("gdal_tools:"),
-        QStringLiteral("io:"),     // geospatial I/O foundation: convert/inspect/doctor (Foundation 4.0)
-        QStringLiteral("otb:"),
-        QStringLiteral("otb_tools:"),
-        QStringLiteral("qgis:"),
-        QStringLiteral("qgis_algorithms:"),
-        QStringLiteral("opencv:"), // operator surface uses opencv: filters
-        QStringLiteral("view:"),   // agent interaction view tools
-        QStringLiteral("roi:"),    // agent interaction roi tools
-        QStringLiteral("canvas:"), // agent interaction canvas tools
-        QStringLiteral("layer:"),  // agent interaction layer tools
-        QStringLiteral("raster:"), // agent raster display tools
-        QStringLiteral("data:"),   // data manager tools
-        QStringLiteral("spatial:"), // spatial inspection/catalog tools (ADR 0122)
-        QStringLiteral("layout:"),  // cartographic layout tools (Layout Studio)
-        QStringLiteral("temporal:"), // temporal collection discovery/preflight tools
-        QStringLiteral("cartography:"), // MapSpec compose/preflight/repair, components, charts (ADR 0127/0128)
-        QStringLiteral("symbology:"),   // structured symbology apply/rollback (ADR 0128)
-        QStringLiteral("workflow:"),    // static workflow preflight (ADR 0128)
-        QStringLiteral("workbench:"),   // workbench context projection (read-only, 10.0)
-        QStringLiteral("workspace:"),   // workspace command/undo tools (ADR 0128)
-        QStringLiteral("project:"),     // workspace governance summary/search/health (Platform 3.0)
-        QStringLiteral("asset:"),       // governed asset inspect/validate/relink (Platform 3.0)
-        QStringLiteral("collection:"),  // governed datasets + smart collections (Platform 3.0)
-        QStringLiteral("lineage:"),     // transitive lineage queries (Platform 3.0)
-        QStringLiteral("result:"),      // governed result records (Platform 3.0)
-        QStringLiteral("run:"),         // workflow run comparison (Platform 3.0)
-        QStringLiteral("harness:"),     // Harness 4.0: taxonomy/manifest/preflight/plan/verify/recipe
-    };
-    for (const QString &prefix : kAllowed) {
-        if (checkId.startsWith(prefix))
-            return true;
-    }
-    if (id.startsWith(QStringLiteral("custom_tools:"))) {
-        if (isCustomTools)
-            *isCustomTools = true;
-        return false;
-    }
-    return false;
+    // Policy moved verbatim to tool_catalog/surface_registry.cpp so the CLI
+    // and the surface projection enforce the SAME allow-prefix set.
+    return sicnu::agent::tool_catalog::surfaceIdAllowed(id, isCustomTools);
 }
 
 /// Resolve a path for workspace checks. Relative paths are allowed without check.
@@ -296,179 +258,11 @@ bool collectOutsideWorkspace(const QVariant &value, const QString &workspaceRoot
 }
 
 // ---------------------------------------------------------------------------
-// Meta-tool catalog for tools/list. Tool names, descriptions, and inputSchema
-// are the client protocol contract (ADR 0022): the table below mirrors the
-// previous construction — same names, descriptions, property types, and
-// required-input sets.
+// Meta-tool catalog for tools/list: the table moved verbatim to
+// tool_catalog/meta_protocol_tools.{h,cpp} so the surface projection (CLI
+// `tools`, get_tool_schema fallback) consumes the SAME table. tools/list
+// below renders it through collectSurfaceTools() — the union projection.
 // ---------------------------------------------------------------------------
-struct MetaToolSchemaInput {
-    const char *name;
-    const char *type;
-    const char *description;
-    bool required;
-};
-
-struct MetaToolDef {
-    const char *name;
-    const char *description;
-    QList<MetaToolSchemaInput> inputs;
-};
-
-const MetaToolDef kMetaTools[] = {
-    { "list_algorithms",
-      "List available remote sensing and GIS processing algorithms (canonical "
-      "catalog: rs: operators + provider algorithms). Compact discovery layer — "
-      "id, name, group, tags, outputs, memory policy. Paginated: pass "
-      "cursor=nextCursor until it is -1. Use get_algorithm_schema for the full "
-      "parameter schema of a specific algorithm.",
-      { { "limit", "integer", "Page size (1-500, default 50).", false },
-        { "cursor", "integer", "Offset from the previous page's nextCursor (default 0).", false } } },
-    { "search_algorithms",
-      "Search/filter the canonical algorithm catalog by group, tag, purpose text, "
-      "input or output type, or large-raster safety. Returns the same compact "
-      "entries as list_algorithms.",
-      { { "query", "string", "Free-text filter matched against id, name, group and purpose (case-insensitive). Empty = no text filter.", false },
-        { "group", "string", "Exact group filter (e.g. 'spectral', 'change detection'). Optional.", false },
-        { "input_type", "string", "Input data type filter (Raster/Vector/Table/Numeric/Integer/String/Boolean/Json). Optional.", false },
-        { "output_type", "string", "Output data type filter (Raster/Vector/Table/Numeric/Integer/String/Boolean/Json). Optional.", false },
-        { "large_raster_safe", "boolean", "When true, only streaming/multipass operators. Optional.", false },
-        { "limit", "integer", "Page size (1-500, default 50).", false },
-        { "cursor", "integer", "Offset from the previous page's nextCursor (default 0).", false } } },
-    { "get_algorithm_schema",
-      "Get the detailed input parameter JSON Schema, real output ports, and agent "
-      "metadata for a specific algorithm.",
-      { { "algorithm_id", "string", "Unique ID of the algorithm, e.g., 'rs:spectral_index'", true } } },
-    { "preflight_algorithm",
-      "Validate parameters and dataset compatibility WITHOUT executing: schema "
-      "validation, raster dataset probes (size/bands/CRS/radiometric state), "
-      "same-grid/CRS/band/radiometric checks, and a dynamic resource (RAM) "
-      "estimate. Use before execute_algorithm to plan a run.",
-      { { "algorithm_id", "string", "ID of the algorithm to preflight", true },
-        { "parameters", "object", "Planned parameter name-value pairs", false } } },
-    { "execute_algorithm",
-      "Asynchronously run a processing algorithm with the specified parameters.",
-      { { "algorithm_id", "string", "ID of the algorithm to execute", true },
-        { "parameters", "object", "Parameter name-value pairs for the algorithm", false } } },
-    { "get_execution_status",
-      "Get progress, execution status, results, and the committed asset id of an "
-      "ongoing or completed algorithm execution.",
-      { { "execution_id", "string", "The execution ID returned by execute_algorithm", true } } },
-    { "cancel_execution",
-      "Cancel an actively running algorithm execution.",
-      { { "execution_id", "string", "The execution ID of the run to cancel", true } } },
-    { "list_operators",
-      "List registered RSOperator algorithms (legacy Agent surface: rs:/opencv:/gdal:/otb:). "
-      "Paginated: pass cursor=nextCursor until it is -1.",
-      { { "limit", "integer", "Page size (1-500, default 50).", false },
-        { "cursor", "integer", "Offset from the previous page's nextCursor (default 0).", false } } },
-    { "get_operator_schema",
-      "Get JSON Schema and metadata for an RSOperator (e.g. 'rs:spectral_index').",
-      { { "operator_id", "string", "Operator id, e.g. 'rs:spectral_index'", true } } },
-    { "execute_operator",
-      "Asynchronously run an RSOperator with JSON parameters. Returns execution_id.",
-      { { "operator_id", "string", "Operator id to execute", true },
-        { "parameters", "object", "JSON parameter object", false } } },
-    { "list_layers",
-      "List all raster and vector layers loaded in the current QGIS project.",
-      {} },
-    { "describe_dataset",
-      "Get detailed layer metadata, including spatial extent, coordinate reference system (CRS), and band/field details.",
-      { { "layer_id", "string", "Name or ID of the layer to describe", true } } },
-    { "get_lineage",
-      "Query a Data Manager asset's processing provenance and lineage: the "
-      "deriving algorithm + parameters when the asset was produced, its input "
-      "assets (derivedFrom), and any assets derived from it (derivedOutputsOf).",
-      { { "asset_id", "string", "Data Manager asset id (UUID) to query", true } } },
-    { "list_interaction_tools",
-      "List all interactive GIS tools (view controls, layer navigation, canvas ROI).",
-      {} },
-    { "get_interaction_schema",
-      "Get JSON Schema and parameters for an interaction tool (e.g. 'view:set_extent', 'roi:set').",
-      { { "tool_name", "string", "Interaction tool name (e.g. 'view:get_state', 'view:set_extent', 'roi:set')", true } } },
-    { "list_tools",
-      "List all unified agent tools (Processing algorithms, Interaction/Canvas tools, Data tools). "
-      "Returns category, name, and description per tool; input schemas are omitted by default "
-      "(pull a candidate's full schema via get_tool_schema). Pass compact=false to embed every schema.",
-      { { "category", "string", "Optional category filter: 'Processing', 'Interaction', 'Data', 'Custom'.", false },
-        { "compact", "boolean", "Set false to embed per-entry input schemas (default: omitted).", false },
-        { "limit", "integer", "Max entries per page (offset pagination). 0 = all. Optional.", false },
-        { "cursor", "integer", "Offset of the first entry to return; pass nextCursor from the previous page. Optional.", false } } },
-    { "search_tools",
-      "Search unified agent tools by free text (e.g. 'show raster', 'roi', 'spectral'), group, tag, "
-      "input/output type, or capability facets (task family, modality, band roles, temporal, "
-      "deterministic, large-raster safety, GPU, memory policy, cost class). Ranked by relevance; "
-      "pull a candidate's full schema via get_tool_schema.",
-      { { "query", "string", "Free-text filter matched against name, group, purpose, tags, and description.", false },
-        { "group", "string", "Exact or substring group filter. Optional.", false },
-        { "tag", "string", "Tag filter. Optional.", false },
-        { "input_type", "string", "Input data type filter. Optional.", false },
-        { "output_type", "string", "Output data type filter. Optional.", false },
-        { "task", "string", "Task-family facet, e.g. 'classification', 'temporal', 'inference'. Optional.", false },
-        { "modality", "string", "Modality facet (matched against the tool's rs-contract dataKind/group), e.g. 'optical'. Optional.", false },
-        { "band_roles", "string", "Comma-separated band roles ('red,nir'); matches when any port declares any role. Optional.", false },
-        { "temporal", "boolean", "Temporal-capability facet (task family or group carries temporal). Optional.", false },
-        { "deterministic", "boolean", "Determinism facet (same inputs imply same outputs). Optional.", false },
-        { "gpu", "boolean", "GPU-acceleration-capable facet. Optional.", false },
-        { "memory_policy", "string", "Exact memory-policy facet: 'streaming', 'multipass_streaming', 'full_raster', ... Optional.", false },
-        { "cost_class", "string", "Cost-class facet substring, e.g. 'O(tile)'. Optional.", false },
-        { "large_raster_safe", "boolean", "Restrict to streaming/multipass tools safe for large rasters. Optional.", false },
-        { "compact", "boolean", "Set false to embed per-entry input schemas (default: omitted).", false },
-        { "limit", "integer", "Max entries per page (offset pagination). 0 = all. Optional.", false },
-        { "cursor", "integer", "Offset of the first entry to return; pass nextCursor from the previous page. Optional.", false } } },
-    { "get_tool_schema",
-      "Get parameter JSON Schema and metadata for any registered tool in the unified Agent Tool Catalog.",
-      { { "tool_id", "string", "Unique ID of the tool, e.g. 'rs:spectral_index', 'canvas:draw_roi', 'data:list_layers'", true } } },
-    { "run_workflow",
-      "Submit an agent-generated spatial workflow (DAG) as pipeline JSON and execute it "
-      "through the Task Center: steps reference registered operators (e.g. "
-      "'rs:spectral_index'), connections declare the execution order, and upstream "
-      "outputs flow into downstream inputs. Returns the pipeline id and one "
-      "execution_id per step — poll them with get_execution_status or use "
-      "get_workflow_status for the aggregate view.",
-      { { "pipeline", "object", "Pipeline definition: {id, name, steps: [{id, title, operator, params, inputs: [{fromStepId, fromPort, toPort}]}]}. A JSON string is also accepted.", true },
-        { "auto_load", "boolean", "Auto-load finished outputs as layers (headless MCP default false).", false },
-        { "experiment_db", "string", "Optional. Path of an ExperimentStore database; when set, this run is auto-recorded into it as a truthful experiment run (created/running/completed/failed/cancelled/interrupted) through the authoritative workflow lifecycle. Requires experiment_id. Recording binds to THIS submission only.", false },
-        { "experiment_id", "string", "Target experiment id for auto-recording (created if missing). Required with experiment_db.", false },
-        { "experiment_name", "string", "Name used when auto-recording creates the experiment. Optional.", false },
-        { "experiment_objective", "string", "Research question recorded for the experiment. Optional.", false },
-        { "dataset_db", "string", "Optional DatasetStore path for pin verification (dataset fingerprint/split fingerprint auto-fill).", false },
-        { "dataset_version", "string", "Optional dataset version id pin (must exist in dataset_db when provided).", false },
-        { "split_manifest", "string", "Optional split manifest id pin.", false },
-        { "model_id", "string", "Optional model id pin.", false },
-        { "model_digest", "string", "Optional model content digest pin.", false },
-        { "seed", "integer", "Optional seed pin (non-negative).", false } } },
-    { "get_workflow_status",
-      "Get the aggregate status of a workflow submitted with run_workflow: overall "
-      "state plus per-step execution ids, statuses, and progress.",
-      { { "pipeline_id", "integer", "Pipeline id returned by run_workflow.", true } } },
-    { "resume_workflow",
-      "Resume an interrupted workflow run from its last checkpoint: steps that "
-      "already completed are skipped and the run continues from the first "
-      "non-terminal step. The run_id comes from get_workflow_status "
-      "(run_state = interrupted) after a crash or cancellation. Returns the new "
-      "pipeline id for status polling.",
-      { { "run_id", "string", "Workflow run id of the interrupted run.", true } } },
-};
-
-QVariantMap metaToolInputSchema(const MetaToolDef &def)
-{
-    QVariantMap schema;
-    schema[QStringLiteral("type")] = QStringLiteral("object");
-    QVariantMap properties;
-    QStringList required;
-    for (const MetaToolSchemaInput &input : def.inputs) {
-        QVariantMap prop;
-        prop[QStringLiteral("type")] = QString::fromUtf8(input.type);
-        prop[QStringLiteral("description")] = QString::fromUtf8(input.description);
-        properties[QString::fromUtf8(input.name)] = prop;
-        if (input.required)
-            required.append(QString::fromUtf8(input.name));
-    }
-    schema[QStringLiteral("properties")] = properties;
-    if (!required.isEmpty())
-        schema[QStringLiteral("required")] = required;
-    return schema;
-}
 
 /// MCP response envelope for a TaskCenter task: mcpStatusForTask shape plus
 /// the execution/algorithm identity echoed from the caller's execution id.
@@ -655,6 +449,12 @@ McpServer::McpServer(QObject *parent)
     mDispatcher.setInteractionActionHandler([](const std::string &name, const Json::Value &args) {
         return sicnu::agent::InteractionToolRegistry::instance().execute(name, args);
     });
+    // Surface-11 progress relay: TaskCenter is the execution authority; the
+    // server only projects its updates into notifications/progress for
+    // subscribed calls. Signal delivery outside TaskCenter's mutex is a
+    // documented invariant, so reading the snapshot here is safe.
+    connect(&sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated,
+            this, &McpServer::onTaskUpdated);
 }
 
 void McpServer::flushExperimentRecording()
@@ -749,8 +549,12 @@ void McpServer::handleRequest(const QVariantMap &request)
     if (method == QStringLiteral("initialize"))
     {
         QVariantMap result;
-        // MCP spec: server responds with latest version it supports, not echo.
+        // MCP spec version negotiation: the server responds with the latest
+        // version IT supports (not an echo); a client that cannot handle it
+        // disconnects. This build speaks exactly one version, so the
+        // response is that version regardless of the request.
         static const QString kSupportedVersion = QStringLiteral("2024-11-05");
+        Q_UNUSED(params.value(QStringLiteral("protocolVersion")))
         result[QStringLiteral("protocolVersion")] = kSupportedVersion;
         m_initialized = true;
 
@@ -845,64 +649,16 @@ void McpServer::handleRequest(const QVariantMap &request)
 
         QVariantMap result;
         QVariantList tools;
-        for (const MetaToolDef &def : kMetaTools) {
+        // The union projection (meta protocol tools + data-platform tools +
+        // AgentToolCatalog, in that deterministic order) — the SAME source the
+        // CLI `tools` command and the get_tool_schema fallback render. Allow-
+        // prefix and headless-GUI filtering live inside the projection now.
+        for (const auto &surfaceTool : sicnu::agent::tool_catalog::collectSurfaceTools()) {
             QVariantMap tool;
-            tool[QStringLiteral("name")] = QString::fromUtf8(def.name);
-            tool[QStringLiteral("description")] = QString::fromUtf8(def.description);
+            tool[QStringLiteral("name")] = QString::fromStdString(surfaceTool.name);
+            tool[QStringLiteral("description")] = QString::fromStdString(surfaceTool.description);
             if (includeSchemas)
-                tool[QStringLiteral("inputSchema")] = metaToolInputSchema(def);
-            tools.append(tool);
-        }
-        // Dataset/Experiment platform 7.0 surface (dataset:/experiment:/
-        // reproducibility:) — thin tools over the authoritative stores.
-        for (const auto &def : sicnu::agent::dataPlatformToolDefs()) {
-            QVariantMap tool;
-            tool[QStringLiteral("name")] = QString::fromUtf8(def.name);
-            tool[QStringLiteral("description")] = QString::fromUtf8(def.description);
-            if (includeSchemas) {
-                QVariantMap schema;
-                schema[QStringLiteral("type")] = QStringLiteral("object");
-                QVariantMap properties;
-                QStringList requiredInputs;
-                for (const auto &input : def.inputs) {
-                    QVariantMap prop;
-                    prop[QStringLiteral("type")] = QString::fromUtf8(input.type);
-                    prop[QStringLiteral("description")] = QString::fromUtf8(input.description);
-                    properties[QString::fromUtf8(input.name)] = prop;
-                    if (input.required)
-                        requiredInputs.append(QString::fromUtf8(input.name));
-                }
-                schema[QStringLiteral("properties")] = properties;
-                if (!requiredInputs.isEmpty())
-                    schema[QStringLiteral("required")] = requiredInputs;
-                tool[QStringLiteral("inputSchema")] = schema;
-            }
-            tools.append(tool);
-        }
-        // ADR 0122: also expose the unified Agent Tool Catalog (algorithms,
-        // interaction, data, spatial tools) so harness-side bridges (e.g. the
-        // Pi extension) enumerate one surface. Only tools that tools/call can
-        // actually dispatch are listed, and GUI-only interaction tools hidden
-        // in headless mode stay hidden here too (same rule as
-        // handleListTools).
-        const bool headlessNoGui = sicnu::agent::InteractionToolRegistry::instance().toolCount() == 0
-            || sicnu::agent::InteractionToolRegistry::instance().findTool("view:get_state") == std::nullopt;
-        for (const auto &catalogTool : sicnu::agent::tool_catalog::AgentToolCatalog::instance().listTools()) {
-            const QString id = QString::fromStdString(catalogTool.name);
-            if (!idHasAllowedPrefix(id, nullptr))
-                continue;
-            if (headlessNoGui && catalogTool.category == sicnu::agent::tool_catalog::ToolCategory::Interaction
-                && (id.startsWith(QStringLiteral("view:")) || id.startsWith(QStringLiteral("roi:"))
-                    || id.startsWith(QStringLiteral("canvas:")) || id.startsWith(QStringLiteral("layer:"))
-                    || id.startsWith(QStringLiteral("raster:")))
-                && !sicnu::agent::InteractionToolRegistry::instance().hasTool(catalogTool.name)) {
-                continue;
-            }
-            QVariantMap tool;
-            tool[QStringLiteral("name")] = id;
-            tool[QStringLiteral("description")] = QString::fromStdString(catalogTool.description);
-            if (includeSchemas)
-                tool[QStringLiteral("inputSchema")] = sicnu::processing::jsonValueToVariant(catalogTool.inputSchema);
+                tool[QStringLiteral("inputSchema")] = sicnu::processing::jsonValueToVariant(surfaceTool.inputSchema);
             tools.append(tool);
         }
         // The listing is deterministically ordered (meta tools first, then
@@ -1141,6 +897,10 @@ void McpServer::handleRequest(const QVariantMap &request)
                     throw std::runtime_error("Invalid or missing run_id");
                 resultData = handleResumeWorkflow(runId);
             }
+            else if (toolName == QStringLiteral("artifact_read"))
+            {
+                resultData = handleArtifactRead(arguments);
+            }
             else if (toolName.startsWith(QStringLiteral("spatial:")) ||
                      toolName.startsWith(QStringLiteral("layout:")) ||
                      toolName.startsWith(QStringLiteral("cartography:")) ||
@@ -1197,6 +957,32 @@ void McpServer::handleRequest(const QVariantMap &request)
                     m_cancelledRequestTasks.insert( id.toString(), executionId->taskId() );
                     while ( m_cancelledRequestTasks.size() > 1024 )
                         m_cancelledRequestTasks.erase( m_cancelledRequestTasks.begin() );
+
+                    // Surface-11 progress subscription: a client requesting
+                    // _meta.progressToken (MCP 2024-11-05) receives
+                    // notifications/progress for this task instead of having
+                    // to poll get_execution_status. Bounded like the cancel
+                    // map; unsubscribed on the terminal notification.
+                    const QVariant progressToken = params.value( QStringLiteral( "_meta" ) ).toMap()
+                                                       .value( QStringLiteral( "progressToken" ) );
+                    if ( progressToken.isValid() && !progressToken.isNull() )
+                    {
+                        m_progressSubscriptions.insert(
+                            executionId->taskId(),
+                            ProgressSubscription{
+                                progressToken,
+                                sicnu::agent::tool_catalog::progress::RateLimiter( 5.0 ) } );
+                        while ( m_progressSubscriptions.size() > 256 )
+                        {
+                            // Evict some OTHER entry — QHash order is
+                            // arbitrary and begin() may be the newest caller.
+                            auto victim = m_progressSubscriptions.begin();
+                            if ( victim.key() == executionId->taskId()
+                                 && m_progressSubscriptions.size() > 1 )
+                                victim = std::next( victim );
+                            m_progressSubscriptions.erase( victim );
+                        }
+                    }
                 }
             }
 
@@ -1243,10 +1029,13 @@ void McpServer::sendToolErrorResult(const QVariant &id, const QString &message,
     // MCP-spec failure surface (#620): a tools/call execution error is a
     // RESULT object with isError:true, never a JSON-RPC error response
     // (those are transport/protocol faults). The structured code/category
-    // let agent runtimes classify (retry vs re-plan vs abort).
+    // let agent runtimes classify (retry vs re-plan vs abort). Error text is
+    // redacted at the protocol boundary: exception messages can embed
+    // credential-shaped strings from arguments or environment (Surface-11 G).
+    const QString redacted = sicnu::agent::tool_catalog::redaction::redact( message );
     QVariantMap contentObj;
     contentObj[QStringLiteral("type")] = QStringLiteral("text");
-    contentObj[QStringLiteral("text")] = message;
+    contentObj[QStringLiteral("text")] = redacted;
     QVariantList contentList;
     contentList.append(contentObj);
 
@@ -1346,6 +1135,182 @@ void McpServer::sendNotification(const QString &method, const QVariantMap &param
 
     QJsonDocument doc = QJsonDocument::fromVariant(notification);
     std::cout << doc.toJson(QJsonDocument::Compact).constData() << std::endl;
+}
+
+void McpServer::onTaskUpdated(const sicnu::AlgorithmTaskInfo &info)
+{
+    auto it = m_progressSubscriptions.find( info.taskId );
+    if ( it == m_progressSubscriptions.end() )
+        return;
+
+    // ADR 0022 status vocabulary; empty label while still active.
+    QString state;
+    bool terminal = false;
+    switch ( info.status )
+    {
+        case sicnu::TaskStatus::Completed:
+            state = QStringLiteral( "completed" );
+            terminal = true;
+            break;
+        case sicnu::TaskStatus::Failed:
+            state = QStringLiteral( "failed" );
+            terminal = true;
+            break;
+        case sicnu::TaskStatus::Canceled:
+            state = QStringLiteral( "canceled" );
+            terminal = true;
+            break;
+        case sicnu::TaskStatus::Cancelling:
+            state = QStringLiteral( "cancelling" );
+            break;
+        case sicnu::TaskStatus::WaitingResource:
+            state = QStringLiteral( "waiting_resource" );
+            break;
+        default:
+            state = QStringLiteral( "running" );
+            break;
+    }
+
+    const double progress = info.progressPercentage;
+    if ( !it->limiter.shouldEmit( progress, terminal, state.toStdString() ) )
+        return;
+
+    // MCP 2024-11-05 notifications/progress: {progressToken, progress,
+    // total}. Progress is TaskCenter's 0..100 projected onto total=1.0.
+    QVariantMap params;
+    params[QStringLiteral( "progressToken" )] = it->progressToken;
+    params[QStringLiteral( "progress" )] = qBound( 0.0, progress / 100.0, 1.0 );
+    params[QStringLiteral( "total" )] = 1.0;
+    sendNotification( QStringLiteral( "notifications/progress" ), params );
+
+    if ( terminal )
+        m_progressSubscriptions.erase( it );
+}
+
+QVariantMap McpServer::handleArtifactRead(const QVariantMap &arguments)
+{
+    // Bounded artifact reader (Surface-11 E): tool results stay under the
+    // payload cap by referencing files; this is the retrieval contract that
+    // makes such references actionable. Hard bounds: one read returns at
+    // most kMaxArtifactChunk raw bytes (≤ the 512 KiB result envelope even
+    // after base64 inflation); the sha256 covers the WHOLE file so a cursor
+    // walk can verify it never changed underneath.
+    constexpr qint64 kMaxArtifactChunk = 256 * 1024;
+
+    const QString rawPath = arguments.value(QStringLiteral("path")).toString().trimmed();
+    if (rawPath.isEmpty())
+        throw McpToolError(QStringLiteral("artifact_read requires 'path'"));
+
+    // Resolve relative arguments against the workspace root FIRST, then run
+    // the containment check on the resolved path: canonicalization inside
+    // absolutePathOutsideWorkspace must see the joined path or a crafted
+    // "../" segment would escape the sandbox.
+    const QString workspace = QProcessEnvironment::systemEnvironment().value(
+        QStringLiteral("SICNU_MCP_WORKSPACE"));
+    QString resolved = rawPath;
+    if (QFileInfo(rawPath).isRelative() && !workspace.isEmpty())
+        resolved = QDir(workspace).filePath(rawPath);
+
+    // With no sandbox configured (env unset) every path is allowed — the
+    // same policy as validateWorkspacePaths, which returns early instead of
+    // letting absolutePathOutsideWorkspace treat an empty root as the cwd.
+    QString detail;
+    if (!workspace.isEmpty() && absolutePathOutsideWorkspace(resolved, workspace, &detail))
+        throw McpToolError(
+            QStringLiteral("artifact_read path rejected: %1").arg(detail));
+
+    QFileInfo info(resolved);
+    if (info.isDir())
+        throw McpToolError(QStringLiteral("artifact_read: '%1' is a directory").arg(resolved));
+    if (!info.exists())
+        throw McpToolError(QStringLiteral("artifact_read: file not found: %1").arg(resolved));
+    const qint64 sizeBytes = info.size();
+
+    bool offsetOk = false;
+    const qint64 offset = qMax<qint64>(0, arguments.value(QStringLiteral("offset")).toLongLong(&offsetOk));
+    if (arguments.contains(QStringLiteral("offset")) && !offsetOk)
+        throw McpToolError(QStringLiteral("artifact_read: 'offset' must be an integer"));
+    if (offset > sizeBytes)
+        throw McpToolError(QStringLiteral("artifact_read: offset %1 beyond file size %2")
+                               .arg(offset).arg(sizeBytes));
+
+    qint64 length = kMaxArtifactChunk;
+    if (arguments.contains(QStringLiteral("length")))
+    {
+        bool lengthOk = false;
+        length = arguments.value(QStringLiteral("length")).toLongLong(&lengthOk);
+        if (!lengthOk || length <= 0)
+            throw McpToolError(QStringLiteral("artifact_read: 'length' must be a positive integer"));
+        length = qMin(length, kMaxArtifactChunk);
+    }
+    const qint64 readable = qMin(length, sizeBytes - offset);
+
+    const QString encoding = arguments.value(QStringLiteral("encoding")).toString().trimmed()
+                                 .toLower();
+    if (!encoding.isEmpty() && encoding != QStringLiteral("text")
+        && encoding != QStringLiteral("base64"))
+        throw McpToolError(QStringLiteral("artifact_read: encoding must be 'text' or 'base64'"));
+
+    QFile file(resolved);
+    if (!file.open(QIODevice::ReadOnly))
+        throw McpToolError(QStringLiteral("artifact_read: cannot open '%1': %2")
+                               .arg(resolved, file.errorString()));
+
+    // One streaming pass: hash the whole file, keep [offset, offset+readable).
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    QByteArray slice;
+    slice.reserve(static_cast<int>(qMin<qint64>(readable, kMaxArtifactChunk)));
+    QByteArray buffer( 1024 * 1024, Qt::Uninitialized ); // QIODevice::read needs a writable char*
+    qint64 pos = 0;
+    while ( pos < sizeBytes )
+    {
+        const qint64 want = qMin<qint64>( buffer.size(), sizeBytes - pos );
+        const qint64 chunk = file.read( buffer.data(), want );
+        if ( chunk < 0 )
+            throw McpToolError(QStringLiteral("artifact_read: read failed at %1: %2")
+                                   .arg(pos).arg(file.errorString()));
+        if ( chunk == 0 )
+            break;
+        hash.addData( buffer.constData(), static_cast<int>( chunk ) );
+        if ( pos + chunk > offset && slice.size() < readable )
+        {
+            const qint64 from = qMax<qint64>( 0, offset - pos );
+            const qint64 take = qMin<qint64>( chunk - from, readable - slice.size() );
+            if ( take > 0 )
+                slice.append( buffer.constData() + from, static_cast<int>( take ) );
+        }
+        pos += chunk;
+    }
+
+    QVariantMap result;
+    result[QStringLiteral("path")] = resolved;
+    result[QStringLiteral("size_bytes")] = sizeBytes;
+    result[QStringLiteral("offset")] = offset;
+    result[QStringLiteral("length")] = slice.size();
+    result[QStringLiteral("encoding")] = encoding.isEmpty() ? QStringLiteral("text") : encoding;
+    result[QStringLiteral("sha256")] = QString::fromLatin1(hash.result().toHex());
+    const bool truncated = offset + slice.size() < sizeBytes;
+    result[QStringLiteral("truncated")] = truncated;
+    if (truncated)
+        result[QStringLiteral("next_offset")] = offset + slice.size();
+
+    if (encoding == QStringLiteral("base64"))
+    {
+        result[QStringLiteral("content")] = QString::fromLatin1(slice.toBase64());
+    }
+    else
+    {
+        // Text mode must be lossless: a binary slice would silently corrupt
+        // under lossy UTF-8 conversion, so reject it and point at base64.
+        QStringDecoder decoder(QStringConverter::Utf8);
+        const QString text = decoder(slice);
+        if (decoder.hasError())
+            throw McpToolError(
+                QStringLiteral("artifact_read: slice is not valid UTF-8; re-read with "
+                               "encoding='base64'"));
+        result[QStringLiteral("content")] = text;
+    }
+    return result;
 }
 
 // MCP Handlers implementation
@@ -2421,6 +2386,21 @@ QVariantMap McpServer::handleGetToolSchema(const QString &toolId)
     using namespace sicnu::agent::tool_catalog;
     auto tool = AgentToolCatalog::instance().findTool(toolId.toStdString());
     if (!tool) {
+        // Union-projection fallback: meta protocol tools and data-platform
+        // tools are dispatchable via tools/call but are not catalog entries;
+        // their schemas come from the same tables tools/list renders.
+        // Parity rule: every name tools/list exposes MUST resolve here.
+        auto surface = findSurfaceTool(toolId.toStdString());
+        if (surface && surface->source != SurfaceToolSource::Catalog) {
+            QVariantMap metaResult;
+            metaResult[QStringLiteral("category")] = surface->source == SurfaceToolSource::MetaProtocol
+                ? QStringLiteral("Meta") : QStringLiteral("Data");
+            metaResult[QStringLiteral("name")] = QString::fromStdString(surface->name);
+            metaResult[QStringLiteral("displayName")] = QString::fromStdString(surface->name);
+            metaResult[QStringLiteral("description")] = QString::fromStdString(surface->description);
+            metaResult[QStringLiteral("schema")] = sicnu::processing::jsonValueToVariant(surface->inputSchema);
+            return metaResult;
+        }
         throw std::runtime_error(QStringLiteral("Unknown tool: %1").arg(toolId).toStdString());
     }
 

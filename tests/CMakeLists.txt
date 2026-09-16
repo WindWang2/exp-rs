@@ -1794,6 +1794,119 @@ target_include_directories(test_mcp_server PRIVATE
 )
 sicnu_discover_tests(test_mcp_server)
 
+# Surface-11 discovery parity gate: union projection vs MCP tools/list vs
+# dispatch tables. Compiles mcp_server.cpp in-process (same pattern as
+# test_mcp_server) so both sides share one registry state.
+add_executable(test_surface_parity test_surface_parity.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_surface_parity PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  GDAL::GDAL
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_surface_parity PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_surface_parity PRIVATE jsoncpp)
+endif()
+target_include_directories(test_surface_parity PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_surface_parity PRIVATE SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_definitions(test_surface_parity PRIVATE
+  SICNU_TEST_SURFACE_CLI="$<TARGET_FILE:sicnu_geo_rs_cli>"
+)
+sicnu_discover_tests(test_surface_parity)
+
+# Surface-11 protocol suite: progress relay, artifact_read, redaction,
+# initialize negatives. Same in-process mcp_server.cpp pattern.
+add_executable(test_surface_protocol test_surface_protocol.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(test_surface_protocol PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  GDAL::GDAL
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(test_surface_protocol PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(test_surface_protocol PRIVATE jsoncpp)
+endif()
+target_include_directories(test_surface_protocol PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_surface_protocol PRIVATE SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+sicnu_discover_tests(test_surface_protocol)
+
+# Surface-11 WP-H: real stdio E2E. The host binary speaks the wire protocol
+# through the same mcp_server.cpp the desktop binary hosts; the test spawns
+# it and drives the full agent loop twice.
+add_executable(surface_mcp_host surface_mcp_host_main.cpp ../src/agent/mcp_server.cpp ../src/app/shell/processing_job_adapter.cpp)
+target_link_libraries(surface_mcp_host PRIVATE
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  qgis_core
+  qgis_gui
+  sicnu_processing
+  sicnu_task_center
+  sicnu_data
+  sicnu_agent
+  Sicnu::experiment
+  Sicnu::experiment_bridge
+  GDAL::GDAL
+)
+if(TARGET sicnu_operators)
+  target_link_libraries(surface_mcp_host PRIVATE sicnu_operators)
+endif()
+if(TARGET jsoncpp)
+  target_link_libraries(surface_mcp_host PRIVATE jsoncpp)
+endif()
+target_include_directories(surface_mcp_host PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/app
+  ${CMAKE_BINARY_DIR}
+)
+
+add_executable(test_surface_e2e test_surface_e2e.cpp)
+target_link_libraries(test_surface_e2e PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+)
+target_compile_definitions(test_surface_e2e PRIVATE
+  SICNU_TEST_SURFACE_HOST="$<TARGET_FILE:surface_mcp_host>"
+  SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_include_directories(test_surface_e2e PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_surface_e2e)
+
 # Agent Tool Catalog tests
 add_executable(test_agent_tool_catalog test_agent_tool_catalog.cpp)
 target_link_libraries(test_agent_tool_catalog PRIVATE
@@ -8455,6 +8568,10 @@ target_link_libraries(test_exprs_workflow_schema PRIVATE sicnu_sdk)
 
 # popen()/WEXITSTATUS CLI-spawn fixture is POSIX-only.
 if(NOT WIN32)
+# Surface-11: batch manifest runner (unit level, no CLI binary needed).
+sicnu_add_test(test_cli_batch_manifest)
+target_link_libraries(test_cli_batch_manifest PRIVATE sicnu_cli_batch sicnu_sdk)
+
 sicnu_add_test(test_cli_commands_json)
 target_link_libraries(test_cli_commands_json PRIVATE sicnu_sdk sicnu_plugins_framework)
 # 8.0: data identity / data cache check tests drive the CLI against an

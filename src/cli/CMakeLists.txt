@@ -10,6 +10,8 @@ add_executable(sicnu_geo_rs_cli
     main_cli.cpp
     cli_commands.cpp
     cli_env_doctor.cpp
+    cli_tool_commands.cpp
+    cli_tool_commands.h
     cli_dataset_commands.cpp
     cli_lab_commands.cpp
     cli_project_ops.cpp
@@ -29,6 +31,28 @@ target_include_directories(sicnu_lab_batch PUBLIC
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}
 )
+
+# Surface-11 batch manifest runner: a small static lib so
+# test_cli_batch_manifest can drive the runner without the CLI executable.
+add_library(sicnu_cli_batch STATIC
+    cli_batch_runner.cpp
+    cli_batch_runner.h
+)
+target_include_directories(sicnu_cli_batch PUBLIC
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+)
+target_link_libraries(sicnu_cli_batch PUBLIC
+    Qt6::Core
+    sicnu_agent
+    sicnu_operators
+    sicnu_processing
+)
+if(TARGET jsoncpp)
+    target_link_libraries(sicnu_cli_batch PUBLIC jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+    target_link_libraries(sicnu_cli_batch PUBLIC ${JSONCPP_LIBRARIES})
+endif()
 target_link_libraries(sicnu_lab_batch PUBLIC
     Qt6::Core
     sicnu_agent
@@ -86,6 +110,7 @@ target_link_libraries(sicnu_geo_rs_cli PRIVATE
     Qt6::Core
     Sicnu::data
     sicnu_lab_batch
+    sicnu_cli_batch
     Sicnu::dataset
     Sicnu::experiment
     Sicnu::experiment_bridge

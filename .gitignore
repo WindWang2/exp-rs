@@ -314,3 +314,5 @@ data/labs/_tmp/
 # deployment-packaging-11 (F19): track planning notes (markdown only).
 !.planning/deployment-packaging-11/
 !.planning/deployment-packaging-11/**
+!.planning/cli-mcp-agent-surface-11/
+!.planning/cli-mcp-agent-surface-11/**

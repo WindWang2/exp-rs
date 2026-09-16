@@ -359,6 +359,33 @@ All notable changes to the `exp-rs` project will be documented in this file.
   bundle upgrades, verify-first discipline, rollback by directory, no
   auto-update by design; manifest compat negotiation is the machine-level
   contract.
+## [Unreleased] - CLI, MCP & Agent Surface Convergence 11.0 (zcode/cli-mcp-agent-surface-11)
+
+- **Union surface projection**: `AgentToolCatalog` + meta protocol tools + data-platform
+  tools converge into one discovery projection (`tool_catalog/surface_registry.h`);
+  MCP `tools/list`, the new CLI `tools list|search|schema` command, and the
+  `get_tool_schema` fallback (now resolves meta/data-platform ids that previously
+  answered "Unknown tool") all render the same source; the allow-prefix policy moved
+  verbatim out of mcp_server.cpp so listing and dispatch can no longer drift apart
+  (gated by `tests/test_surface_parity`, incl. a real-binary CLI leg and a stale
+  Pi-category check).
+- **MCP progress notifications**: `tools/call` with `params._meta.progressToken`
+  (MCP 2024-11-05) now receives `notifications/progress` relayed from TaskCenter —
+  rate-limited (5-point threshold + state changes), exactly one terminal notification
+  per task, zero notifications without a token (previous behavior preserved).
+- **`artifact_read` meta tool**: bounded reader for file artifacts (256 KiB slices,
+  whole-file sha256, nextOffset cursor, workspace sandbox on the resolved path,
+  UTF-8 rejection -> base64), so large results stay referenced instead of inlined.
+- **CLI batch manifests**: `sicnu_geo_rs_cli batch run|validate` — JSON/JSONL
+  manifests (version/variables/policy/tasks), strict parsing (unknown keys fail),
+  `${var}` interpolation with `--var` overrides, fail-fast/continue policy, SIGINT
+  cancel (exit 4 + skipped tail), atomic NDJSON result index (tmp+rename),
+  exprs::ExitCode aggregation, redacted error/operator echoes.
+- **Redaction at the protocol boundary**: credential-shaped text (bearer tokens,
+  PEM blocks, key/password assignments, connection-URL passwords) is scrubbed from
+  MCP tool error results and batch records/index.
+- **Docs**: `docs/agents/surface-contracts.md` — discovery parity, bounded results,
+  progress/cancel, batch manifest, and redaction contracts for MCP/CLI/Pi authors.
 
 ## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)
 

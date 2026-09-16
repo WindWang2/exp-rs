@@ -108,6 +108,16 @@ add_library(sicnu_agent SHARED
   tool_catalog/data_tool_provider.h
   tool_catalog/agent_tool_catalog.cpp
   tool_catalog/agent_tool_catalog.h
+  # Surface-11: one union projection consumed by MCP tools/list, the CLI
+  # `tools` command, and get_tool_schema fallback (discovery parity seam).
+  tool_catalog/meta_protocol_tools.cpp
+  tool_catalog/meta_protocol_tools.h
+  tool_catalog/surface_registry.cpp
+  tool_catalog/surface_registry.h
+  tool_catalog/surface_progress.cpp
+  tool_catalog/surface_progress.h
+  tool_catalog/surface_redaction.cpp
+  tool_catalog/surface_redaction.h
   spatial_tools/governance_tools.cpp
   spatial_tools/governance_tools.h
   spatial_tools/spatial_tool.cpp
