@@ -19,6 +19,7 @@
 #include <atomic>
 
 #ifdef Q_OS_WIN
+#include <fcntl.h>
 #include <io.h>
 #include <windows.h>
 #else
