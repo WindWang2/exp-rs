@@ -283,16 +283,10 @@ TEST_CASE( "ChunkPipeline consumer abort cancels the stream", "[chunk][pipeline]
         cfg );
     pipeline.setCancelFlag( &cancel );
 
-    // Consumer abort is a cooperative cancel, not an error: run() returns
-    // normally (or throws ChunkCancelled depending on the race window) and
-    // must always terminate.
-    try
-    {
-        pipeline.run();
-    }
-    catch ( const ChunkCancelled & )
-    {
-    }
+    // Consumer abort is fail-closed (11.0 convergence): run() must throw
+    // ChunkConsumerAborted (a ChunkCancelled subtype) — a stalled or failing
+    // sink can never be misread as a completed stream.
+    REQUIRE_THROWS_AS( pipeline.run(), ChunkConsumerAborted );
     REQUIRE( pipeline.completedTiles() <= 1 );
 }
 

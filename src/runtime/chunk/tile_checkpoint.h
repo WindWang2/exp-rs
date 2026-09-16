@@ -75,6 +75,24 @@ class TileCheckpointWriter
 /// Match the scratch-store digest family: corruption tripwire, not crypto.
 std::uint64_t tileCheckpointHash( const void *data, std::size_t size );
 
+/// Incremental form of the same family (execution 11.0): fold bytes starting
+/// from tileCheckpointHashInit(). tileCheckpointHash(a) equals folding ALL of
+/// a's bytes from init — one family, one constant set.
+inline constexpr std::uint64_t tileCheckpointHashInit()
+{
+    return 1469598103934665603ull;
+}
+inline std::uint64_t tileCheckpointHashStep( std::uint64_t hash, const void *data, std::size_t size )
+{
+    const auto *bytes = static_cast<const std::uint8_t *>( data );
+    for ( std::size_t i = 0; i < size; ++i )
+    {
+        hash ^= bytes[i];
+        hash *= 1099511628211ull;
+    }
+    return hash;
+}
+
 /// Convenience: hash of params+inputs (canonical bytes the caller decides —
 /// e.g. the RFC 8785 canonical parameter JSON + fingerprint hex).
 inline std::uint64_t tileCheckpointInputIdentity( const std::string &canonicalInputs )

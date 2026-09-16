@@ -56,6 +56,19 @@ struct TilePayload
 struct ChunkCancelled : std::runtime_error
 {
     explicit ChunkCancelled() : std::runtime_error( "chunk pipeline cancelled" ) {}
+    explicit ChunkCancelled( const char *message ) : std::runtime_error( message ) {}
+};
+
+/// Raised when the consumer returns false (deliberate early stop). This is a
+/// cancellable terminal state, NOT a success: run() throws it so a stalled or
+/// failing sink can never be misread as a completed stream (the same contract
+/// ChunkGraph already enforces for sink aborts).
+struct ChunkConsumerAborted : ChunkCancelled
+{
+    explicit ChunkConsumerAborted()
+        : ChunkCancelled( "chunk pipeline aborted by consumer" )
+    {
+    }
 };
 
 class ChunkPipeline
@@ -70,6 +83,13 @@ class ChunkPipeline
     {
         size_t queueCapacity = 2; ///< per-queue bound; 2 keeps a stage busy while
                                   ///< its downstream stage processes one tile
+        /// Per-chunk telemetry sampling (execution 11.0, WP-F): every
+        /// telemetrySampleRate-th tile emits queue-wait / stage-duration /
+        /// chunk-progress events; the tiles_processed COUNTER is exact (an
+        /// atomic increment, no memory cost). 0 disables event emission.
+        /// Bound: total events ≤ tiles/rate + O(stages) — telemetry can
+        /// never outgrow the pipeline's own bounded memory.
+        std::uint32_t telemetrySampleRate = 16;
     };
 
     ChunkPipeline( ProducerFn producer, std::vector<StageFn> stages, ConsumerFn consumer );
@@ -82,7 +102,8 @@ class ChunkPipeline
 
     /// Runs the pipeline to completion. Throws the first stage error
     /// (rethrows std::exception_ptr rethrowably), ChunkCancelled on cancel,
-    /// or returns normally when the consumer finished the stream.
+    /// ChunkConsumerAborted when the consumer returns false, or returns
+    /// normally when the consumer finished the stream.
     void run();
 
     /// Tiles that left the final queue (for tests / diagnostics).

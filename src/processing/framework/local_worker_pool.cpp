@@ -164,12 +164,18 @@ std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::takeIdleWorkerLocked(
         const bool lifetimeExhausted = worker->jobsDone >= m_config.maxJobsPerWorker
                                        || idleMs > m_config.idleRecycleAfter.count();
         const bool processAlive = worker->process->state() == QProcess::Running;
-        if ( !ownedHealthy && owned && !lifetimeExhausted && processAlive )
+        // Execution 11.0 WP-E: a lease-quarantined worker (consecutive
+        // failure streak) is never reused — it recycles exactly like a
+        // lifetime-exhausted one, on the next idle scan.
+        const bool quarantined =
+            m_leases.verdict( worker->leaseId )
+            == sicnu::runtime::worker::WorkerHealth::Quarantined;
+        if ( !ownedHealthy && owned && !lifetimeExhausted && processAlive && !quarantined )
         {
             ownedHealthy = std::move( worker );
             continue;
         }
-        if ( owned && ( lifetimeExhausted || !processAlive ) )
+        if ( owned && ( lifetimeExhausted || !processAlive || quarantined ) )
         {
             // Recycle: accounting applied now, teardown after unlock.
             ++m_totalRecycles;
@@ -206,6 +212,11 @@ std::unique_ptr<LocalWorkerPool::Worker> LocalWorkerPool::spawnWorker()
 {
     auto worker = std::make_unique<Worker>();
     worker->ownerThread = QThread::currentThreadId();
+    {
+        std::lock_guard<std::mutex> lock( m_mutex );
+        worker->leaseId = "worker-" + std::to_string( m_nextLeaseId++ );
+    }
+    m_leases.onLiveness( worker->leaseId ); // spawn-time health check renews
     worker->process = std::make_unique<QProcess>();
     worker->process->setProgram( m_config.workerProgram );
     worker->process->setArguments(
@@ -370,6 +381,17 @@ LocalWorkerPool::Outcome LocalWorkerPool::runOnWorker(
             const std::string diagnostics = diagnosticsSuffix( worker.diagnostics );
             if ( softTimedOut )
             {
+                // Execution 11.0 WP-E: lease expiry is a second, independent
+                // liveness verdict — silence past the lease TTL escalates
+                // exactly like the hang window (whichever fires first).
+                if ( m_leases.verdict( worker.leaseId )
+                     == sicnu::runtime::worker::WorkerHealth::Expired )
+                {
+                    worker.guard.terminateTree( *worker.process );
+                    worker.diagnostics.drain( *worker.process );
+                    *errorMessage = "worker timeout: lease expired (no liveness frames)";
+                    return Outcome::TimedOut;
+                }
                 if ( hangWindow.count() > 0 && !cancelRequested
                      && std::chrono::steady_clock::now() - lastFrameAt > hangWindow )
                 {
@@ -406,6 +428,7 @@ LocalWorkerPool::Outcome LocalWorkerPool::runOnWorker(
         }
         const std::string op = frame["op"].asString();
         lastFrameAt = std::chrono::steady_clock::now(); // any frame = alive
+        m_leases.onLiveness( worker.leaseId );          // lease renewal (11.0)
         if ( op == "progress" )
         {
             if ( onProgress )
@@ -584,6 +607,7 @@ Json::Value LocalWorkerPool::run( const std::string &algorithmId, const Json::Va
         Json::Value payload;
         std::string errorMessage;
         bool cancelAcked = false;
+        m_leases.onJobStart( worker->leaseId );
         const Outcome outcome = runOnWorker( *worker, jobId, algorithmId, params, isCancelled,
                                              onProgress, &payload, &errorMessage, &cancelAcked );
         if ( report )
@@ -601,6 +625,7 @@ Json::Value LocalWorkerPool::run( const std::string &algorithmId, const Json::Va
         {
             case Outcome::Result:
                 worker->jobsDone++;
+                m_leases.onJobOutcome( worker->leaseId, /*succeeded=*/true );
                 if ( report )
                     report->stderrTail = worker->diagnostics.tail();
                 worker->diagnostics = WorkerDiagnosticsRing {};
@@ -610,6 +635,7 @@ Json::Value LocalWorkerPool::run( const std::string &algorithmId, const Json::Va
                 return payload;
             case Outcome::Cancelled:
             {
+                m_leases.onJobOutcome( worker->leaseId, /*succeeded=*/false );
                 std::lock_guard<std::mutex> lock( m_mutex );
                 ++m_totalCancels;
             }
@@ -619,6 +645,7 @@ Json::Value LocalWorkerPool::run( const std::string &algorithmId, const Json::Va
                 throw std::runtime_error( errorMessage );
             case Outcome::Crashed:
             {
+                m_leases.onJobOutcome( worker->leaseId, /*succeeded=*/false );
                 std::lock_guard<std::mutex> lock( m_mutex );
                 ++m_totalCrashes;
             }
@@ -632,6 +659,7 @@ Json::Value LocalWorkerPool::run( const std::string &algorithmId, const Json::Va
                 throw std::runtime_error( errorMessage );
             case Outcome::TimedOut:
             {
+                m_leases.onJobOutcome( worker->leaseId, /*succeeded=*/false );
                 std::lock_guard<std::mutex> lock( m_mutex );
                 ++m_totalTimeouts;
             }
@@ -644,7 +672,10 @@ Json::Value LocalWorkerPool::run( const std::string &algorithmId, const Json::Va
                 throw std::runtime_error( errorMessage );
             case Outcome::ProtocolError:
                 // Operator-level error: the worker process answered and stays
-                // in sync — keep it warm.
+                // in sync — keep it warm, but the failure feeds the poison
+                // streak (execution 11.0): a worker whose operators fail
+                // REPEATEDLY gets quarantined at its next idle scan.
+                m_leases.onJobOutcome( worker->leaseId, /*succeeded=*/false );
                 if ( report )
                     report->stderrTail = worker->diagnostics.tail();
                 worker->diagnostics = WorkerDiagnosticsRing {};
@@ -664,6 +695,7 @@ WorkerPoolHealthSnapshot LocalWorkerPool::health() const
     snapshot.aliveWorkers = m_alive;
     snapshot.idleWorkers = static_cast<int>( m_idle.size() );
     snapshot.totalRuns = m_totalRuns;
+    snapshot.quarantinedWorkers = static_cast<qint64>( m_leases.stats().quarantines );
     snapshot.totalCrashes = m_totalCrashes;
     snapshot.totalTimeouts = m_totalTimeouts;
     snapshot.totalCancels = m_totalCancels;

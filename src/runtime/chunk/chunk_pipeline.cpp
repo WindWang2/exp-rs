@@ -1,8 +1,24 @@
 // chunk_pipeline.cpp — see chunk_pipeline.h for the contract.
 #include "chunk_pipeline.h"
 
+#include "runtime/observability/execution_telemetry.h"
+
+#include <chrono>
+#include <cstdint>
+#include <string>
+
 namespace sicnu::runtime::chunk
 {
+
+namespace
+{
+using Clock = std::chrono::steady_clock;
+
+std::int64_t nanosBetween( Clock::time_point begin, Clock::time_point end )
+{
+    return std::chrono::duration_cast<std::chrono::nanoseconds>( end - begin ).count();
+}
+} // namespace
 namespace
 {
 void validateBuffer( const TilePayload &p, const char *where )
@@ -65,14 +81,29 @@ void ChunkPipeline::run()
     std::vector<std::thread> threads;
     threads.reserve( m_stages.size() + 2 );
 
+    // Per-chunk telemetry (WP-F): sampled events, exact counter. Disabled
+    // telemetry makes each record* a no-op (one relaxed atomic load).
+    auto &telemetry = observability::ExecutionTelemetry::instance();
+    const std::uint32_t sampleRate = m_config.telemetrySampleRate;
+    auto sampled = [sampleRate]( std::uint64_t n ) {
+        return sampleRate > 0 && ( n == 1 || n % sampleRate == 0 );
+    };
+
     // Producer thread.
     threads.emplace_back( [&] {
         threadBody( [&] {
+            std::uint64_t produced = 0;
             while ( !cancelled() )
             {
                 TilePayload p;
+                const Clock::time_point t0 = Clock::now();
                 if ( !m_producer( p ) )
                     break;
+                const std::int64_t produceNanos = nanosBetween( t0, Clock::now() );
+                ++produced;
+                if ( sampled( produced ) )
+                    telemetry.recordSimple( observability::EventKind::ExecutionEnd, -1,
+                                            produceNanos, "chunk.producer" );
                 validateBuffer( p, "chunk producer" );
                 if ( !queues.front()->push( std::move( p ) ) )
                     return; // downstream died or cancelled
@@ -88,6 +119,8 @@ void ChunkPipeline::run()
             threadBody( [&] {
                 BoundedChunkQueue<TilePayload> &in = *queues[i];
                 BoundedChunkQueue<TilePayload> &out = *queues[i + 1];
+                const std::string subject = "chunk.stage" + std::to_string( i );
+                std::uint64_t processed = 0;
                 TilePayload p;
                 while ( in.pop( p ) )
                 {
@@ -96,8 +129,14 @@ void ChunkPipeline::run()
                         cancelAll();
                         return;
                     }
+                    const Clock::time_point t0 = Clock::now();
                     TilePayload result = m_stages[i]( std::move( p ) );
+                    const std::int64_t stageNanos = nanosBetween( t0, Clock::now() );
                     p = TilePayload{}; // release consumed buffers promptly
+                    ++processed;
+                    if ( sampled( processed ) )
+                        telemetry.recordSimple( observability::EventKind::ExecutionEnd, -1,
+                                                stageNanos, subject );
                     if ( result.pixels )
                     {
                         validateBuffer( result, "chunk stage" );
@@ -116,9 +155,19 @@ void ChunkPipeline::run()
     threads.emplace_back( [&] {
         threadBody( [&] {
             BoundedChunkQueue<TilePayload> &in = *queues.back();
+            std::uint64_t received = 0;
             TilePayload p;
-            while ( in.pop( p ) )
+            while ( true )
             {
+                const Clock::time_point w0 = Clock::now();
+                const bool got = in.pop( p );
+                const std::int64_t queueWaitNanos = nanosBetween( w0, Clock::now() );
+                if ( !got )
+                    break;
+                ++received;
+                if ( sampled( received ) )
+                    telemetry.recordSimple( observability::EventKind::QueueWait, -1,
+                                            queueWaitNanos, "chunk.consumer" );
                 if ( cancelled() )
                 {
                     cancelAll();
@@ -128,12 +177,19 @@ void ChunkPipeline::run()
                 const bool keepGoing = m_consumer( std::move( p ) );
                 p = TilePayload{};
                 const size_t done = m_completedTiles.fetch_add( 1 ) + 1;
+                telemetry.increment( observability::Counter::TilesProcessed );
                 if ( m_progress && total > 0 )
                     m_progress( static_cast<double>( done ) / total );
+                if ( sampled( received ) )
+                    telemetry.recordSimple( observability::EventKind::ChunkProgress, -1,
+                                            static_cast<std::int64_t>( done ),
+                                            "chunk.tiles" );
                 if ( !keepGoing )
                 {
-                    cancelAll();
-                    return;
+                    // Fail-closed: a consumer that stops early is a terminal
+                    // abort state, never a normal return (threadBody stores
+                    // this as the first error and cancels every queue).
+                    throw ChunkConsumerAborted();
                 }
             }
         } );

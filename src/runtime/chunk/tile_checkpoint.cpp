@@ -80,14 +80,7 @@ void fsyncPath( const std::string &path, bool directory )
 
 std::uint64_t tileCheckpointHash( const void *data, std::size_t size )
 {
-    const auto *bytes = static_cast<const std::uint8_t *>( data );
-    std::uint64_t hash = 1469598103934665603ull;
-    for ( std::size_t i = 0; i < size; ++i )
-    {
-        hash ^= bytes[i];
-        hash *= 1099511628211ull;
-    }
-    return hash;
+    return tileCheckpointHashStep( tileCheckpointHashInit(), data, size );
 }
 
 bool TileCheckpointWriter::save( const std::string &path, const TileCheckpoint &checkpoint )

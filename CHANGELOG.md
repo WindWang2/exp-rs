@@ -2,6 +2,54 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - Execution Runtime Convergence 11.0 (zcode/execution-runtime-convergence-11)
+
+- **Authority convergence (WP-A)**: ChunkPipeline consumer-abort is now
+  fail-closed (`ChunkConsumerAborted`, a `ChunkCancelled` subtype) instead of
+  a silent success return; the fused chain's dead cancel flag is wired
+  through the new `ChunkCancelBridge` (flag AND callback contexts) with the
+  chunk family translated onto typed `RSOperatorError` codes; a source-scan
+  architecture gate (`test_execution_authority_11`) freezes every
+  scheduler-forming construct (std::thread/jthread, QThreadPool,
+  QtConcurrent::, std::async, QThread::create, pthread_create, CreateThread)
+  to an audited 36-file allowlist — a second scheduler now fails tests.
+- **Unified TileRun contract (WP-B)**: `runtime/chunk/tile_run_contract.h` —
+  operator-independent chunk invocation identity (operator + input +
+  partition digest over tagged canonical fields, independent FNV-1a oracle
+  vectors), O(1) `tileSpecAt`, determinism grade, cancellation source, and
+  the error-envelope bridge `operators/framework/chunk_error_bridge.h`
+  (Cancelled / CorruptArtifactData 2005 / ResourceBudgetExceeded 4103 /
+  ComputationError).
+- **Crash-safe resume (WP-C)**: `runtime/chunk/resumable_tile_run.h` —
+  append-only commit journal + TileCheckpoint + run-level PUBLISHED marker;
+  committed tiles replay from digest-verified disk state (zero kernel
+  re-runs), torn journal tails truncate, mid-file corruption fails closed,
+  corrupt tiles self-heal, identity drift wipes stale state; verified
+  against REAL child-process hard kills (exit 70) with byte-equal output and
+  exactly-once publication.
+- **Resource governance (WP-D)**: memory planner is now a true upper bound
+  (in-hand term (2S+2)·I incl. the stage input/output overlap — randomized
+  occupancy-simulation oracle); `runtime/exec/execution_governor.h` unifies
+  RAM admission + budgeted scratch leases + write-in-flight backpressure
+  with leak detection emitting the first production `exp.diag.v1` report.
+- **Worker lease & poison (WP-E)**: `runtime/worker/worker_lease.h`
+  (injectable-clock policy): job-held silence past TTL expires (enforced in
+  the pool's read loop), consecutive operator failures quarantine a worker
+  (never reused; idle-scan recycle), bounded takeover ladder; the pool keeps
+  its fail-loud no-auto-retry contract.
+- **Per-chunk observability (WP-F)**: ChunkPipeline/ResumableTileRun emit
+  the previously-dead telemetry vocabulary — queue-wait / chunk-progress /
+  stage-duration spans sampled at tiles/rate+O(1), exact `tiles_processed`
+  / cache-hit counters, `RunResumed` events.
+- **Adoption kit (WP-G)**: `operators/framework/chunked_run.h` — one call
+  gives an operator bounded memory, cancellation, progress, typed errors,
+  crash-safe resume and exactly-once publication (Resumable & Pipeline
+  modes, byte-equal contract); synthetic reference adopter + guide
+  (docs/execution/ADOPTION_GUIDE.md).
+- **Scale & fault matrix (WP-H)**: 10^6-logical-tile arithmetic (no
+  materialization), seeded cancel storms, intermittent crash-resets to
+  exactly-once completion, opt-in 100k-tile journal round-trip
+  (SICNU_SCALE_11=1).
 ## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)
 
 - **Regular-calendar normalization (T-2)**: `rs:temporal_regularize` re-casts irregular

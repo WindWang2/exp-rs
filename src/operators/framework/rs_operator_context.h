@@ -84,6 +84,14 @@ public:
     void setCancelFlag(std::atomic<bool>* flag);
 
     /**
+     * Returns the cancellation flag pointer previously set (nullptr when the
+     * context uses a callback instead, or nothing at all). Lets execution
+     * substrates (chunk pipeline / tile runs) poll the SAME flag the operator
+     * polls instead of mirroring it (execution 11.0 convergence).
+     */
+    const std::atomic<bool>* cancelFlag() const { return m_cancelFlag; }
+
+    /**
      * Sets a cooperative cancellation callback (e.g. an external JobEngine /
      * TaskCenter cancel predicate). Polled by isCancelled()/throwIfCancelled()
      * from the operator's thread; mutually exclusive with a flag — the flag

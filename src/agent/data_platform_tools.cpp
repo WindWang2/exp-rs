@@ -41,6 +41,10 @@ namespace sicnu::agent
 {
 
 using namespace sicnu::dataset;
+// D19 benchmark tool wrappers call BenchmarkService unqualified and the TU
+// compiled only where another header leaked the directive; make it explicit
+// so the file builds on every platform (build-unblock, execution 11.0).
+using namespace sicnu::experiment;
 
 namespace
 {
