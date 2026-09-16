@@ -579,10 +579,6 @@ TEST_CASE( "rs:sar_pair_network builds, filters, and refuses through the "
 
     Json::Value params( Json::objectValue );
     params["scenes"] = scenes;
-    Json::Value pairs( Json::arrayValue );
-    pairs.append( 0 );
-    pairs.append( 1 );
-    (void)pairs;
 
     RSOperatorContext ctx;
     Json::Value result = runOperator( "rs:sar_pair_network", params, ctx );

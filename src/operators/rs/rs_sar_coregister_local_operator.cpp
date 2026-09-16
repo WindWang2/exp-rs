@@ -182,9 +182,9 @@ Json::Value RsSarCoregisterLocalOperator::run( const Json::Value &params,
     const int width = master.width();
     const int height = master.height();
     const uint64_t wh = static_cast<uint64_t>( width ) * height;
-    // Both magnitude planes enter the NCC and the warp materializes the
-    // aligned slave: 2 × 16 + 8 B/px — the honest plane budget.
-    const uint64_t planeBytes = 40ULL * wh;
+    // Three complex planes materialize (master + slave for the NCC, the
+    // warp destination): 3 × 16 B/px — the honest plane budget.
+    const uint64_t planeBytes = 48ULL * wh;
     if ( planeBytes > kPlaneBudgetBytes )
         throw RSOperatorError(
             ErrorCode::InvalidInputData,
@@ -238,12 +238,21 @@ Json::Value RsSarCoregisterLocalOperator::run( const Json::Value &params,
     context.reportProgress( 0.95, "Warping slave" );
 
     // Optional offset-field product (3 bands: dx, dy, confidence at the
-    // lattice-node resolution).
+    // lattice-node resolution). Its geotransform maps NODE CENTERS: pixel
+    // (col,row) is the lattice node at (col·stride + patchSize/2,
+    // row·stride + patchSize/2) in master pixel space — stamping the
+    // master's own transform would mislocate every offset.
     if ( !offsetPath.empty() )
     {
+        const auto &mgt = master.geoTransform();
+        const double nodeOriginPx =
+            field.patchSize / 2.0 - field.patchStride / 2.0;
+        const std::array<double, 6> nodeGt{
+            mgt[0] + nodeOriginPx * mgt[1], mgt[1] * field.patchStride, 0.0,
+            mgt[3] + nodeOriginPx * mgt[5], 0.0, mgt[5] * field.patchStride };
         GdalStreamingOutput offsets( QString::fromStdString( offsetPath ), field.latticeCols,
                                      field.latticeRows, 3, GDT_Float32,
-                                     master.geoTransform(), master.projection() );
+                                     nodeGt, master.projection() );
         if ( !offsets.isOpen() )
         {
             out.abandon();

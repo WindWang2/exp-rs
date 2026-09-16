@@ -28,8 +28,10 @@
 //      median convention). This removes single-patch speckle outliers;
 //      deformation gradients stronger than the lattice spacing should
 //      disable it (medianRadius = 0) rather than be smoothed away.
-//   4. warpComplexByOffsetField: dst(x,y) = src(x − dx(x,y), y − dy(x,y))
-//      with dx/dy bilinearly interpolated over the lattice NODE CENTERS
+//   4. warpComplexByOffsetField: dst(x,y) = src(x + dx(x,y), y + dy(x,y))
+//      — the NEGATED application of the content-displacement field, per
+//      the function contract below — with dx/dy bilinearly interpolated
+//      over the lattice NODE CENTERS
 //      (px + patchSize/2, py + patchSize/2), edge-clamped; unconfident
 //      nodes contribute the global shift. Only actually-tapped neighbors
 //      are read (zero weights never touch out-of-range corners — the

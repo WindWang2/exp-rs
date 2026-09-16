@@ -249,8 +249,10 @@ Json::Value RsSarNetworkInversionOperator::run( const Json::Value &params,
     if ( !problem.isValid() )
         throw RSOperatorError( ErrorCode::InvalidParameter,
                                "NETWORK_INVERSION_RANK_DEFICIENT: the pair/epoch contract "
-                               "is invalid (masters must precede slaves; counts consistent; "
-                               "weights > 0)" );
+                               "is invalid (each master index must EXCEED its slave index — "
+                               "note this is index-reversed relative to rs:sar_pair_network "
+                               "output, whose master is the EARLIER scene; counts "
+                               "consistent; weights > 0)" );
 
     // --- Displacement rasters: same grid, readable band 1 ---------------
     ensureGdalInit();
@@ -396,6 +398,9 @@ Json::Value RsSarNetworkInversionOperator::run( const Json::Value &params,
 
             for ( int y = 0; y < th; ++y )
             {
+                // Row-level cancellation: a 256-wide tile row carries up to
+                // 65k back-substitutions against a 200-epoch factorization.
+                context.throwIfCancelled();
                 for ( int x = 0; x < tw; ++x )
                 {
                     const size_t idx = static_cast<size_t>( y ) * tw + x;

@@ -159,8 +159,9 @@ Json::Value RsSarUnwrapOperator::run( const Json::Value &params, RSOperatorConte
         const int extHeight = extDs.height();
         const uint64_t extWh = static_cast<uint64_t>( extWidth ) * extHeight;
         // Wrapped plane (8 B/px) + provider staging planes (2 × 4 B/px) +
-        // the adapter's float copy (4 B/px).
-        if ( 20ULL * extWh > kPlaneBudgetBytes )
+        // the adapter float copy (4 B/px) + the result double plane
+        // (8 B/px) handed back from the adapter.
+        if ( 28ULL * extWh > kPlaneBudgetBytes )
             throw RSOperatorError(
                 ErrorCode::InvalidInputData,
                 "MEMORY_BUDGET_EXCEEDED: the wrapped plane plus provider staging "

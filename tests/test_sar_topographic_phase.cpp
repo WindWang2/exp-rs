@@ -205,8 +205,6 @@ TEST_CASE( "Topographic phase off-nadir matches the independent scan+bisect "
     ground.latDeg = 20.0;
     ground.lonDeg = kPhase0 * 180.0 / M_PI;
 
-    double prevPhase = 0.0;
-    (void)prevPhase; // superseded: sensitivity is pinned by the oracle equality
     for ( const double height : { 0.0, 100.0, 500.0 } )
     {
         ground.heightM = height;

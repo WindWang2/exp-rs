@@ -18,7 +18,8 @@
 // mid-time position (height 0, radial LOS). This is a SCREENING metric —
 // one number per pair for graph construction — not a per-pixel product;
 // per-pixel baselines come from pairBaselineAtGround. Both orbits must
-// bracket the master mid-time (else BASELINE_NO_ZERO_DOPPLER_* / refusal).
+// bracket the master mid-time (else BASELINE_STATE_INTERPOLATION_FAILED
+// refusal).
 //
 // STRATEGIES: AllPairs (every eligible pair) and Consecutive (each scene
 // to its temporal successor only — the minimal connected chain when every

@@ -71,6 +71,8 @@ const struct Entry {
     // Advanced InSAR 11.0 (append-only): pair truth, DEM/orbit topographic
     // phase, local co-registration, external unwrap providers, pair
     // networks, small-baseline network inversion.
+    { "GRID_CRS_MISSING",        { "validation", RetryClass::None } },
+    { "DEM_CRS_MISMATCH",        { "validation", RetryClass::None } },
     { "SCENE_TRUTH_INVALID",     { "validation", RetryClass::None } },
     { "ORBIT_SEGMENT_INVALID",   { "validation", RetryClass::None } },
     { "ORBIT_EPOCH_MISMATCH",    { "validation", RetryClass::None } },

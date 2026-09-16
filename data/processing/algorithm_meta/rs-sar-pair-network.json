@@ -2,7 +2,7 @@
   "gpu" : false,
   "id" : "rs:sar_pair_network",
   "input" : "",
-  "output" : "raster",
+  "output" : "",
   "tags" : 
   [
     "sar",

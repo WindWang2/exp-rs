@@ -175,7 +175,8 @@ TEST_CASE( "Unconfident patches degrade to the global model instead of "
         for ( int x = 96; x < 160; ++x )
             master[static_cast<size_t>( y ) * kW + x] = { 1.0f, 0.0f };
 
-    // Slave = master shifted by a GLOBAL dy = −1 everywhere.
+    // Slave = master sampled at y − 1 everywhere, i.e. content
+    // displacement dy = +1 (the warp applies the negated field).
     std::vector<std::complex<float>> slave( static_cast<size_t>( kW ) * kH );
     const std::complex<float> nan{ std::numeric_limits<float>::quiet_NaN(),
                                    std::numeric_limits<float>::quiet_NaN() };

@@ -455,6 +455,10 @@ Json::Value RsSarRemoveTopographicPhaseOperator::run( const Json::Value &params,
             // failures stay NaN and are counted).
             for ( int y = 0; y < th; ++y )
             {
+                // Row-level cancellation: a 256-wide tile row costs up to
+                // 512 zero-Doppler solves — far too long to stay blind to
+                // a cancel request.
+                context.throwIfCancelled();
                 for ( int x = 0; x < tw; ++x )
                 {
                     const size_t idx = static_cast<size_t>( y ) * tw + x;
@@ -510,6 +514,9 @@ Json::Value RsSarRemoveTopographicPhaseOperator::run( const Json::Value &params,
                 {
                     residual[i] = { std::numeric_limits<float>::quiet_NaN(),
                                     std::numeric_limits<float>::quiet_NaN() };
+                    // The diagnostics raster must not carry a stale value
+                    // where no phase was computable.
+                    topoFloat[i] = std::numeric_limits<float>::quiet_NaN();
                     continue;
                 }
                 residual[i] = slc[i] * std::polar( 1.0f, static_cast<float>( -phase ) );

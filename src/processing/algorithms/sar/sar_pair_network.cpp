@@ -54,8 +54,8 @@ bool screeningBaseline( const InSarSceneTruth &master, const InSarSceneTruth &sl
                          .arg( tMid );
         return false;
     }
-    double sx = 0.0, sy = 0.0, sz = 0.0;
-    if ( !interpolateState( slave.orbit, tMid, &sx, &sy, &sz, &mvx, &mvy, &mvz ) )
+    double sx = 0.0, sy = 0.0, sz = 0.0, svx = 0.0, svy = 0.0, svz = 0.0;
+    if ( !interpolateState( slave.orbit, tMid, &sx, &sy, &sz, &svx, &svy, &svz ) )
     {
         if ( error )
             *error = QStringLiteral( "BASELINE_STATE_INTERPOLATION_FAILED: slave orbit "

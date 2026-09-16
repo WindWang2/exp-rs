@@ -361,7 +361,9 @@ DEM/orbit, atmospheric correction, PSI/SBAS time-series analysis.
    confident neighbors for speckle-outlier rejection (disable with
    `medianRadius=0` for deformation gradients stronger than the lattice
    spacing), bilinear interpolation over the lattice node centers, and
-   bilinear complex resampling dst(x,y) = src(x − dx, y − dy). No
+   bilinear complex resampling dst(x,y) = src(x + dx, y + dy) — the
+   negated application of the content-displacement offsets (the NCC says
+   where the slave content came from). No
    affine/polynomial warp, no DEM-based refinement — `rs:sar_coregister`
    remains the global single-shift special case.
 2. **Honest coverage**: unconfident patches stay visible (flagged, not
@@ -423,8 +425,6 @@ DEM/orbit, atmospheric correction, PSI/SBAS time-series analysis.
    displacement (relative to the reference epoch), OLS linear velocity,
    and the fit RMS residual. Missing pairs drop their row; epoch
    connectivity is per pixel — only the reference component solves, other
-   components stay NaN and their rows are dropped (counted). Weights are
-   a
    a per-pair STACK property (e.g. mean coherence²); a per-pixel scalar
    weight is mathematically inert and not an input. Distinct missing-data
    patterns are factorized once and cached (≤ `maxPatterns`, else

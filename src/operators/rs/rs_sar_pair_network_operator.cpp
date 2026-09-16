@@ -110,7 +110,10 @@ void writeJsonSidecar( const QString &path, const std::string &content )
                                    + path.toStdString() );
     }
     tmp.close();
-    if ( !QFile::rename( tmpPath, path ) )
+    // Windows: QFile::rename refuses to replace an existing target —
+    // remove-then-rename keeps re-publishing the same sidecar working.
+    if ( ( !QFile::exists( path ) || QFile::remove( path ) )
+         && !QFile::rename( tmpPath, path ) )
     {
         QFile::remove( tmpPath );
         throw RSOperatorError( ErrorCode::FileNotWritable,
@@ -147,7 +150,7 @@ Json::Value RsSarPairNetworkOperator::schema() const {
                                            "table + component map", "json" );
 
     Json::Value outputs( Json::objectValue );
-    outputs["outputFile"] = makeRasterParam( "outputFile", "Pair network JSON" );
+    outputs["outputFile"] = makeOutputParam( "outputFile", "Pair network JSON", "json" );
     Json::Value root = makeRootSchema( displayName(), description(), props, outputs );
     root["required"] = makeRequired( { "scenes" } );
     return root;
