@@ -1,146 +1,130 @@
 {
-  "capability" : 
-  {
-    "applicability" : 
-    {
-      "land_cover" : 
-      [
-        "\u4efb\u610f\u5730\u7269"
+  "capability": {
+    "applicability": {
+      "land_cover": [
+        "任意地物"
       ],
-      "scenes" : 
-      [
-        "\u4e0d\u786e\u5b9a\u4ea7\u54c1\u5bb6\u65cf\u65f6\u7684\u7edf\u4e00\u5165\u53e3",
-        "Agent \u81ea\u52a8\u5316\u6570\u636e\u51c6\u5907"
+      "scenes": [
+        "不确定产品家族时的统一入口",
+        "Agent 自动化数据准备"
       ]
     },
-    "band_roles" : {},
-    "crs" : 
-    {
-      "requires_projected" : false,
-      "requires_shared_grid" : false
+    "band_roles": {},
+    "crs": {
+      "requires_projected": false,
+      "requires_shared_grid": false
     },
-    "determinism" : 
-    {
-      "grade" : "bit_exact",
-      "large_raster_safe" : false,
-      "memory_policy" : "full_raster",
-      "side_effects" : false,
-      "stochastic" : false
+    "determinism": {
+      "grade": "bit_exact",
+      "large_raster_safe": false,
+      "memory_policy": "full_raster",
+      "side_effects": false,
+      "stochastic": false
     },
-    "failure_modes" : 
-    [
+    "failure_modes": [
       {
-        "code" : "DATASET_NOT_FOUND",
-        "remedy" : "\u6309\u7ed3\u679c\u4e2d missingConstituents \u8865\u9f50\u4ea7\u54c1\u6587\u4ef6",
-        "when" : "\u65e0\u6cd5\u89e3\u6790 sidecar/TIFF \u7ec4\u6210"
+        "code": "DATASET_NOT_FOUND",
+        "when": "无法解析 sidecar/TIFF 组成",
+        "remedy": "按结果中 missingConstituents 补齐产品文件"
       },
       {
-        "code" : "NOT_SUPPORTED",
-        "remedy" : "\u7ed3\u679c\u643a\u5e26\u5177\u4f53\u539f\u56e0\uff1b\u4e0d\u56de\u9000\u5230\u901a\u7528\u6805\u683c\u8bfb\u53d6",
-        "when" : "\u4ea7\u54c1\u5bb6\u65cf\u672a\u88ab\u9002\u914d"
+        "code": "NOT_SUPPORTED",
+        "when": "产品家族未被适配",
+        "remedy": "结果携带具体原因；不回退到通用栅格读取"
       },
       {
-        "code" : "INVALID_PARAMETER",
-        "remedy" : "\u67e5\u770b bandsMissingCoefficients\uff1b\u6539\u7528\u53d1\u5e03\u5b9a\u6807\u8868\u6216\u4e0d\u5b9a\u6807",
-        "when" : "apply_calibration=true \u4f46\u90e8\u5206\u6ce2\u6bb5\u7f3a\u5b9a\u6807\u7cfb\u6570"
+        "code": "INVALID_PARAMETER",
+        "when": "apply_calibration=true 但部分波段缺定标系数",
+        "remedy": "查看 bandsMissingCoefficients；改用发布定标表或不定标"
       }
     ],
-    "family" : "io",
-    "io" : 
-    {
-      "inputs" : [],
-      "outputs" : 
-      [
+    "family": "io",
+    "io": {
+      "inputs": [],
+      "outputs": [
         {
-          "data_kind" : "integer",
-          "name" : "bandCount",
-          "required" : true
+          "data_kind": "integer",
+          "name": "bandCount",
+          "required": true
         },
         {
-          "data_kind" : "string",
-          "name" : "completeness",
-          "required" : true
+          "data_kind": "string",
+          "name": "completeness",
+          "required": true
         },
         {
-          "data_kind" : "raster",
-          "file_format" : "tif",
-          "name" : "output",
-          "required" : true
+          "data_kind": "raster",
+          "file_format": "tif",
+          "name": "output",
+          "required": true
         },
         {
-          "data_kind" : "string",
-          "name" : "productId",
-          "required" : true
+          "data_kind": "string",
+          "name": "productId",
+          "required": true
         },
         {
-          "data_kind" : "string",
-          "name" : "sensorKey",
-          "required" : true
+          "data_kind": "string",
+          "name": "sensorKey",
+          "required": true
         }
       ],
-      "parameters" : 
-      [
+      "parameters": [
         {
-          "default" : "false",
-          "name" : "apply_calibration",
-          "required" : false,
-          "type" : "boolean"
+          "default": "false",
+          "name": "apply_calibration",
+          "required": false,
+          "type": "boolean"
         },
         {
-          "name" : "bands",
-          "required" : false,
-          "type" : "string"
+          "name": "bands",
+          "required": false,
+          "type": "string"
         },
         {
-          "name" : "input",
-          "required" : true,
-          "type" : "string"
+          "name": "input",
+          "required": true,
+          "type": "string"
         },
         {
-          "name" : "output",
-          "required" : true,
-          "type" : "string"
+          "name": "output",
+          "required": true,
+          "type": "string"
         }
       ]
     },
-    "limitations" : [],
-    "modality" : 
-    [
+    "limitations": [],
+    "modality": [
       "optical"
     ],
-    "operator_group" : "data-formats",
-    "prerequisites" : 
-    [
+    "operator_group": "data-formats",
+    "prerequisites": [
       "Product directory with CRESDA sidecar XML and TIFF (offline)",
-      "\u79bb\u7ebf\u53ef\u7528\uff1a\u4ec5\u89e3\u6790\u4ea7\u54c1\u81ea\u5e26\u6587\u4ef6\uff1b\u4f20\u611f\u5668\u753b\u50cf\u6765\u81ea data/products/sensor_profiles\u3002"
+      "离线可用：仅解析产品自带文件；传感器画像来自 data/products/sensor_profiles。"
     ],
-    "schema_version" : 2,
-    "summary" : "\u56fd\u4ea7\u536b\u661f\u4ea7\u54c1\u7edf\u4e00\u5bfc\u5165\uff1a\u81ea\u52a8\u8bc6\u522b GF-1/2/6/7\u3001ZY-3\u3001ZY-1 02C\u3001HJ-1/2 CCD \u5bb6\u65cf\uff0c\u8d70\u6807\u51c6\u5316\u5bfc\u5165\u8ba1\u5212\uff08\u8bc6\u522b\u2192\u68c0\u67e5\u2192\u6821\u9a8c\u2192\u7ec4\u6210\u89e3\u6790\u2192\u89d2\u8272\u6620\u5c04\u2192\u53ef\u9009\u5b9a\u6807\u2192\u5806\u6808\u2192\u6eaf\u6e90\uff09\u3002",
-    "teaching_use" : 
-    {
-      "concepts" : 
-      [
-        "\u4ea7\u54c1\u8bc6\u522b",
-        "sidecar \u4e16\u4ee3\u68c0\u6d4b",
-        "\u4f20\u611f\u5668\u753b\u50cf",
-        "\u53ef\u9009\u5b9a\u6807",
-        "\u5bfc\u5165\u6eaf\u6e90"
+    "schema_version": 2,
+    "summary": "国产卫星产品统一导入：自动识别 GF-1/2/6/7、ZY-3、ZY-1 02C、HJ-1/2 CCD 家族，走标准化导入计划（识别→检查→校验→组成解析→角色映射→可选定标→堆栈→溯源）。",
+    "teaching_use": {
+      "concepts": [
+        "产品识别",
+        "sidecar 世代检测",
+        "传感器画像",
+        "可选定标",
+        "导入溯源"
       ],
-      "courses" : 
-      [
-        "\u9065\u611f\u6570\u636e\u5904\u7406"
+      "courses": [
+        "遥感数据处理"
       ],
-      "exercise" : "\u5bf9\u6df7\u5408\u76ee\u5f55\u4e2d\u7684\u56fd\u4ea7\u4ea7\u54c1\u7edf\u4e00\u8c03\u7528\u5bfc\u5165\uff0c\u4ece\u7ed3\u679c\u5224\u65ad\u5b8c\u6574\u6027\u4e0e\u7f3a\u5931\u58f0\u660e\u5b57\u6bb5\u3002"
+      "exercise": "对混合目录中的国产产品统一调用导入，从结果判断完整性与缺失声明字段。"
     }
   },
-  "description" : "Import any supported Chinese satellite L1A product (GF-1/2/6/7, ZY-3, ZY-1 02C, HJ-1/2 CCD) into a multi-band GeoTIFF with band roles, sensor profile, sidecar generation, sun geometry, optional declared calibration and full provenance.",
-  "display_name" : "Chinese Satellite Product Import",
-  "id" : "rs:cn_product_import",
-  "input" : "",
-  "output" : "raster",
-  "schema_version" : 2,
-  "tags" : 
-  [
+  "description": "Import any supported Chinese satellite L1A product (GF-1/2/6/7, ZY-3, ZY-1 02C, HJ-1/2 CCD) into a multi-band GeoTIFF with band roles, sensor profile, sidecar generation, sun geometry, optional declared calibration and full provenance.",
+  "display_name": "Chinese Satellite Product Import",
+  "id": "rs:cn_product_import",
+  "input": "",
+  "output": "raster",
+  "schema_version": 2,
+  "tags": [
     "cn-satellite",
     "gaofen",
     "zy3",

@@ -1,128 +1,112 @@
 {
-  "capability" : 
-  {
-    "applicability" : 
-    {
-      "land_cover" : 
-      [
-        "\u4efb\u610f\u5730\u7269"
+  "capability": {
+    "applicability": {
+      "land_cover": [
+        "任意地物"
       ],
-      "scenes" : 
-      [
-        "\u8d44\u6e90\u4e09\u53f7\u7acb\u4f53\u6d4b\u7ed8\u6570\u636e\u5904\u7406",
-        "\u6559\u5b66\u7acb\u4f53\u89c2\u5bdf\u6570\u636e\u51c6\u5907"
+      "scenes": [
+        "资源三号立体测绘数据处理",
+        "教学立体观察数据准备"
       ]
     },
-    "band_roles" : {},
-    "crs" : 
-    {
-      "requires_projected" : false,
-      "requires_shared_grid" : false
+    "band_roles": {},
+    "crs": {
+      "requires_projected": false,
+      "requires_shared_grid": false
     },
-    "determinism" : 
-    {
-      "grade" : "bit_exact",
-      "large_raster_safe" : false,
-      "memory_policy" : "full_raster",
-      "side_effects" : false,
-      "stochastic" : false
+    "determinism": {
+      "grade": "bit_exact",
+      "large_raster_safe": false,
+      "memory_policy": "full_raster",
+      "side_effects": false,
+      "stochastic": false
     },
-    "failure_modes" : 
-    [
+    "failure_modes": [
       {
-        "code" : "DATASET_NOT_FOUND",
-        "remedy" : "\u68c0\u67e5 ZY3_NAD/TLC/FWD/BWD \u547d\u540d\u4ea7\u54c1\u5305\u5b8c\u6574\u6027",
-        "when" : "sidecar XML \u6216 TIFF \u7f3a\u5931"
+        "code": "DATASET_NOT_FOUND",
+        "when": "sidecar XML 或 TIFF 缺失",
+        "remedy": "检查 ZY3_NAD/TLC/FWD/BWD 命名产品包完整性"
       },
       {
-        "code" : "NOT_SUPPORTED",
-        "remedy" : "\u9ad8\u5149\u8c31\u4ea7\u54c1\u6682\u4e0d\u652f\u6301",
-        "when" : "ZY-1 02D/02E AHSI \u9ad8\u5149\u8c31\u5bb6\u65cf\u4e0d\u652f\u6301"
+        "code": "NOT_SUPPORTED",
+        "when": "ZY-1 02D/02E AHSI 高光谱家族不支持",
+        "remedy": "高光谱产品暂不支持"
       }
     ],
-    "family" : "io",
-    "io" : 
-    {
-      "inputs" : [],
-      "outputs" : 
-      [
+    "family": "io",
+    "io": {
+      "inputs": [],
+      "outputs": [
         {
-          "data_kind" : "integer",
-          "name" : "bandCount",
-          "required" : true
+          "data_kind": "integer",
+          "name": "bandCount",
+          "required": true
         },
         {
-          "data_kind" : "raster",
-          "file_format" : "tif",
-          "name" : "output",
-          "required" : true
+          "data_kind": "raster",
+          "file_format": "tif",
+          "name": "output",
+          "required": true
         },
         {
-          "data_kind" : "string",
-          "name" : "productId",
-          "required" : true
+          "data_kind": "string",
+          "name": "productId",
+          "required": true
         }
       ],
-      "parameters" : 
-      [
+      "parameters": [
         {
-          "default" : "false",
-          "name" : "apply_calibration",
-          "required" : false,
-          "type" : "boolean"
+          "default": "false",
+          "name": "apply_calibration",
+          "required": false,
+          "type": "boolean"
         },
         {
-          "name" : "bands",
-          "required" : false,
-          "type" : "string"
+          "name": "bands",
+          "required": false,
+          "type": "string"
         },
         {
-          "name" : "input",
-          "required" : true,
-          "type" : "string"
+          "name": "input",
+          "required": true,
+          "type": "string"
         },
         {
-          "name" : "output",
-          "required" : true,
-          "type" : "string"
+          "name": "output",
+          "required": true,
+          "type": "string"
         }
       ]
     },
-    "limitations" : [],
-    "modality" : 
-    [
+    "limitations": [],
+    "modality": [
       "optical"
     ],
-    "operator_group" : "data-formats",
-    "prerequisites" : 
-    [
+    "operator_group": "data-formats",
+    "prerequisites": [
       "Product directory with CRESDA sidecar XML and TIFF (offline)"
     ],
-    "schema_version" : 2,
-    "summary" : "\u8d44\u6e90\u4e09\u53f7\u6570\u636e\u5bfc\u5165\uff1a\u8bfb\u53d6 ZY-3 TLC/NAD/FWD/BWD L1A \u4ea7\u54c1\uff0c\u81ea\u52a8\u533a\u5206\u5168\u8272/\u591a\u5149\u8c31\uff08\u6309\u58f0\u660e\u6ce2\u6bb5\u6e05\u5355\uff09\uff0c\u6620\u5c04\u6ce2\u6bb5\u89d2\u8272\u5e76\u6807\u6ce8\u5143\u6570\u636e\u3002",
-    "teaching_use" : 
-    {
-      "concepts" : 
-      [
-        "ZY-3 \u4ea7\u54c1\u7ed3\u6784",
-        "\u5168\u8272/\u591a\u5149\u8c31\u533a\u5206",
-        "\u6ce2\u6bb5\u89d2\u8272"
+    "schema_version": 2,
+    "summary": "资源三号数据导入：读取 ZY-3 TLC/NAD/FWD/BWD L1A 产品，自动区分全色/多光谱（按声明波段清单），映射波段角色并标注元数据。",
+    "teaching_use": {
+      "concepts": [
+        "ZY-3 产品结构",
+        "全色/多光谱区分",
+        "波段角色"
       ],
-      "courses" : 
-      [
-        "\u9065\u611f\u6570\u636e\u5904\u7406"
+      "courses": [
+        "遥感数据处理"
       ],
-      "exercise" : "\u5bfc\u5165 ZY-3 NAD \u591a\u5149\u8c31\u56db\u6ce2\u6bb5\u5e76\u8f93\u51fa\u89d2\u8272\u6807\u6ce8\u7684\u591a\u6ce2\u6bb5 GeoTIFF\u3002"
+      "exercise": "导入 ZY-3 NAD 多光谱四波段并输出角色标注的多波段 GeoTIFF。"
     }
   },
-  "description" : "Import a Ziyuan-3 L1A product (TLC/NAD/FWD/BWD) into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.",
-  "display_name" : "Ziyuan-3 Product Import",
-  "id" : "rs:zy3_import",
-  "input" : "",
-  "output" : "raster",
-  "schema_version" : 2,
-  "tags" : 
-  [
+  "description": "Import a Ziyuan-3 L1A product (TLC/NAD/FWD/BWD) into a multi-band GeoTIFF with band roles, sun geometry and declared calibration metadata.",
+  "display_name": "Ziyuan-3 Product Import",
+  "id": "rs:zy3_import",
+  "input": "",
+  "output": "raster",
+  "schema_version": 2,
+  "tags": [
     "zy3",
     "cn-satellite",
     "import",
