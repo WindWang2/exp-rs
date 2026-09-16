@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <atomic>
 
+#include <fcntl.h>
 #ifdef Q_OS_WIN
 #include <io.h>
 #include <windows.h>
