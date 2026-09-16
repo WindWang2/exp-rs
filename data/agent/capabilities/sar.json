@@ -318,7 +318,7 @@
     "limitations": [
       "Reference unwrapper is quality-guided flood fill: not residue-aware, not a global optimum",
       "Single-scale plane unwrap behind a 2 GiB budget; larger AOIs are refused",
-      "provider != builtin is refused (UNWRAP_PROVIDER_UNAVAILABLE), never silently substituted"
+      "External providers run a generic executable contract (providerBin/providerArgs); a missing binary is UNWRAP_PROVIDER_UNAVAILABLE, never a silent builtin fallback"
     ]
   },
   {
@@ -391,6 +391,114 @@
     "limitations": [
       "Every scene needs an acquisition date (dates parameter or SICNU_SAR_ACQUISITION_UTC); missing dates are refused",
       "Irregular revisit intervals are the norm: all time quantities are floating day offsets since scene 0"
+    ]
+  },
+  {
+    "id": "rs:sar_remove_topographic_phase",
+    "family": "sar",
+    "extends": "family:sar",
+    "modality": [
+      "sar"
+    ],
+    "resource": {
+      "cost_class": "heavy",
+      "large_raster_safe": true
+    },
+    "verification": {
+      "expected_kind": "raster",
+      "checks": [
+        "existence",
+        "opens",
+        "crs_matches",
+        "dimensions",
+        "finite_fraction"
+      ]
+    },
+    "limitations": [
+      "Rigorous range-difference geometry: both scene orbit states are required (typed refusal otherwise)",
+      "DEM must share the interferogram CRS, be north-up, fully cover it, and carry ellipsoidal heights",
+      "Height sensitivity degenerates near zero perpendicular baseline"
+    ]
+  },
+  {
+    "id": "rs:sar_coregister_local",
+    "family": "sar",
+    "extends": "family:sar",
+    "modality": [
+      "sar"
+    ],
+    "intents": [
+      "sar",
+      "preprocess"
+    ],
+    "resource": {
+      "cost_class": "heavy",
+      "large_raster_safe": false
+    },
+    "verification": {
+      "expected_kind": "raster",
+      "checks": [
+        "existence",
+        "opens",
+        "dimensions",
+        "finite_fraction"
+      ]
+    },
+    "limitations": [
+      "Translation-field model: no affine/polynomial warp, no DEM-based coregistration",
+      "Both planes materialized behind a 2 GiB budget; unconfident lattice nodes fall back to the global shift"
+    ]
+  },
+  {
+    "id": "rs:sar_pair_network",
+    "family": "sar",
+    "extends": "family:sar",
+    "modality": [
+      "sar"
+    ],
+    "intents": [
+      "sar",
+      "temporal"
+    ],
+    "verification": {
+      "expected_kind": "json",
+      "checks": [
+        "existence"
+      ]
+    },
+    "limitations": [
+      "Screening B⊥ is evaluated at each master's orbit mid-time nadir — a graph metric, not a per-pixel baseline",
+      "Wavelength disagreement and invalid orbit metadata are typed refusals; disconnected graphs refuse unless allowDisconnected is set",
+      "Bounded scale: 512 scenes, 65536 pairs"
+    ]
+  },
+  {
+    "id": "rs:sar_network_inversion",
+    "family": "sar",
+    "extends": "family:sar",
+    "modality": [
+      "sar"
+    ],
+    "intents": [
+      "sar",
+      "temporal"
+    ],
+    "resource": {
+      "cost_class": "heavy",
+      "large_raster_safe": true
+    },
+    "verification": {
+      "expected_kind": "raster",
+      "checks": [
+        "existence",
+        "opens",
+        "dimensions",
+        "finite_fraction"
+      ]
+    },
+    "limitations": [
+      "Linear small-baseline model: atmospheric phase stays in the epoch displacements — NOT PSI (no PS selection, no APS separation)",
+      "Bounded scale: 64 pairs (pattern-mask bound), 200 epochs, 128 missing-data patterns (typed refusals beyond)"
     ]
   }
 ]

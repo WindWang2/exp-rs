@@ -15,6 +15,7 @@
 #include "processing/algorithms/sar/sar_complex.h"
 #include "processing/algorithms/sar/sar_insar.h"
 #include "processing/algorithms/sar/sar_metadata.h"
+#include "processing/algorithms/sar/sar_unwrap_provider.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
 
@@ -53,6 +54,20 @@ Json::Value RsSarUnwrapOperator::schema() const {
                                          "reference), or the name of an external tool — any "
                                          "unregistered name is refused, never approximated",
                                          "builtin" );
+    props["providerBin"] = makeStringParam( "providerBin",
+                                            "External provider binary path (highest "
+                                            "discovery priority; then "
+                                            "SICNU_SAR_UNWRAP_<PROVIDER>_BIN, then PATH)" );
+    props["providerArgs"] = makeStringParam(
+        "providerArgs",
+        "JSON array of the external provider's command-line template tokens; the "
+        "placeholders {input} {output} {width} {height} are substituted (required for "
+        "external providers; the tool must write a raw Float32 plane of exactly "
+        "width*height samples to {output})" );
+    props["providerTimeoutSec"] =
+        makeNumberParam( "providerTimeoutSec", "External provider process timeout "
+                                               "(seconds; the process is killed beyond it)",
+                         600.0 );
 
     Json::Value outputs( Json::objectValue );
     outputs["output"] = makeRasterParam( "output", "Output unwrapped phase raster path" );
@@ -113,10 +128,138 @@ Json::Value RsSarUnwrapOperator::run( const Json::Value &params, RSOperatorConte
     const int qualityBand = getInt( params, "qualityBand", 1 );
     const std::string provider = getString( params, "provider", std::string( "builtin" ) );
     if ( provider != "builtin" )
-        throw RSOperatorError(
-            ErrorCode::ComputationError,
-            "UNWRAP_PROVIDER_UNAVAILABLE: no unwrapping provider named '" + provider
-                + "' is registered — the built-in reference is never silently substituted" );
+    {
+        // External provider path (Advanced InSAR 11.0, package D; D-004):
+        // the wrapped plane is staged for the process adapter; the built-in
+        // is never silently substituted and every failure is typed.
+        const std::string providerBin = getString( params, "providerBin", std::string() );
+        const double timeoutSec = getDouble( params, "providerTimeoutSec", 600.0 );
+        if ( !params.isMember( "providerArgs" ) || !params["providerArgs"].isArray()
+             || params["providerArgs"].empty() )
+            throw RSOperatorError(
+                ErrorCode::InvalidParameter,
+                "UNWRAP_PROVIDER_FAILED: external provider '" + provider
+                    + "' needs providerArgs (a JSON array of command-line template "
+                      "tokens with {input}/{output}/{width}/{height})" );
+
+        ensureGdalInit();
+        GdalDatasetWrapper extDs;
+        if ( !extDs.open( QString::fromStdString( inputPath ) ) )
+            throw RSOperatorError( ErrorCode::GdalError,
+                                   "Failed to open input raster: " + inputPath );
+        if ( extDs.width() <= 0 || extDs.height() <= 0 )
+            throw RSOperatorError( ErrorCode::InvalidInputData,
+                                   "Input raster is empty: " + inputPath );
+        QString complexError;
+        if ( !sicnu::sar::validateComplexBands( extDs, { band }, &complexError ) )
+            throw RSOperatorError( ErrorCode::InvalidInputData,
+                                   "COMPLEX_BANDS_REQUIRED: "
+                                       + complexError.toStdString() );
+        const int extWidth = extDs.width();
+        const int extHeight = extDs.height();
+        const uint64_t extWh = static_cast<uint64_t>( extWidth ) * extHeight;
+        // Wrapped plane (8 B/px) + provider staging planes (2 × 4 B/px) +
+        // the adapter float copy (4 B/px) + the result double plane
+        // (8 B/px) handed back from the adapter.
+        if ( 28ULL * extWh > kPlaneBudgetBytes )
+            throw RSOperatorError(
+                ErrorCode::InvalidInputData,
+                "MEMORY_BUDGET_EXCEEDED: the wrapped plane plus provider staging "
+                "exceeds the 2 GiB budget for " + std::to_string( extWidth ) + "x"
+                    + std::to_string( extHeight ) + " — use a smaller AOI" );
+
+        std::vector<double> wrappedExt( static_cast<size_t>( extWh ),
+                                        std::numeric_limits<double>::quiet_NaN() );
+        {
+            sicnu::sar::ComplexBandTileStream stream( extDs, { band }, 256, 256, 0 );
+            std::vector<std::complex<float>> buf(
+                static_cast<size_t>( stream.bandCount() ) * 256 * 256 );
+            for ( int i = 0; i < stream.tileCount(); ++i )
+            {
+                context.throwIfCancelled();
+                const sicnu::sar::ComplexTile &tile = stream.tile( i );
+                if ( !stream.readTile( i, buf.data() ) )
+                    throw RSOperatorError( ErrorCode::GdalError,
+                                           "Failed to read interferogram tile" );
+                for ( int y = 0; y < tile.height; ++y )
+                    for ( int x = 0; x < tile.width; ++x )
+                        wrappedExt[static_cast<size_t>( tile.yOffset + y ) * extWidth
+                                   + tile.xOffset + x] =
+                            sicnu::sar::interferogramPhase(
+                                buf[static_cast<size_t>( y ) * tile.bufferWidth + x],
+                                { 1.0f, 0.0f } );
+            }
+        }
+
+        sicnu::sar::UnwrapProviderRequest request;
+        request.providerName = QString::fromStdString( provider );
+        request.binPath = QString::fromStdString( providerBin );
+        for ( const Json::Value &token : params["providerArgs"] )
+        {
+            if ( !token.isString() )
+                throw RSOperatorError( ErrorCode::InvalidParameter,
+                                       "providerArgs tokens must be strings" );
+            request.argsTemplate.emplace_back(
+                QString::fromStdString( token.asString() ) );
+        }
+        request.timeoutMs = static_cast<int>( timeoutSec * 1000.0 );
+        request.workDir = QString::fromStdString( context.workDir() );
+        request.cancelQuery = [ &context ] { return context.isCancelled(); };
+        request.wrapped = wrappedExt.data();
+        request.w = extWidth;
+        request.h = extHeight;
+
+        sicnu::sar::UnwrapProviderResult providerResult;
+        QString providerError;
+        const sicnu::sar::UnwrapProviderStatus status = sicnu::sar::runExternalUnwrapProvider(
+            request, &providerResult, &providerError );
+        switch ( status )
+        {
+            case sicnu::sar::UnwrapProviderStatus::Ok:
+                break;
+            case sicnu::sar::UnwrapProviderStatus::Cancelled:
+                throw RSOperatorError( ErrorCode::Cancelled, providerError.toStdString() );
+            case sicnu::sar::UnwrapProviderStatus::Unavailable:
+            case sicnu::sar::UnwrapProviderStatus::Failed:
+            case sicnu::sar::UnwrapProviderStatus::Timeout:
+            case sicnu::sar::UnwrapProviderStatus::InvalidOutput:
+                throw RSOperatorError( ErrorCode::ComputationError,
+                                       providerError.toStdString() );
+        }
+
+        GdalStreamingOutput extOut( QString::fromStdString( outputPath ), extWidth,
+                                    extHeight, 1, GDT_Float32, extDs.geoTransform(),
+                                    extDs.projection() );
+        if ( !extOut.isOpen() )
+            throw RSOperatorError( ErrorCode::FileNotWritable,
+                                   "Failed to create output raster: " + outputPath );
+        extOut.setMetadataItem( sicnu::sar::kModalityKey, "sar" );
+        extOut.setMetadataItem( "SICNU_SAR_INSAR_PRODUCT", "unwrapped_phase" );
+        extOut.setMetadataItem( "SICNU_SAR_INSAR_UNWRAP_PROVIDER", provider.c_str() );
+        extOut.setBandNoDataValue( 1, std::numeric_limits<double>::quiet_NaN() );
+        std::vector<float> extFloat( static_cast<size_t>( extWh ) );
+        for ( size_t i = 0; i < extWh; ++i )
+            extFloat[i] = static_cast<float>( providerResult.unwrapped[i] );
+        if ( !extOut.writeTile(
+                 1, GdalBlockStream::Tile{ 0, 0, extWidth, extHeight, 0, extWidth,
+                                           extHeight, 0, 1, extWidth, extHeight },
+                 extFloat.data() )
+             || !extOut.closeWithError() )
+        {
+            extOut.abandon();
+            throw RSOperatorError( ErrorCode::GdalError,
+                                   "Failed to write the provider unwrapped phase" );
+        }
+
+        Json::Value extJson;
+        extJson["output"] = outputPath;
+        extJson["provider"] = provider;
+        extJson["commandLine"] = providerResult.commandLine.toStdString();
+        extJson["unwrappedPixels"] = Json::Value::Int64( providerResult.validCount );
+        extJson["totalPixels"] = Json::Value::Int64( static_cast<long long>( extWh ) );
+        context.reportProgress( 1.0, "External unwrap complete" );
+        return extJson;
+    }
 
     ensureGdalInit();
 

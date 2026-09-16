@@ -172,6 +172,10 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_sar_displacement_operator.cpp
     rs/rs_sar_coregister_operator.cpp
     rs/rs_sar_temporal_events_operator.cpp
+    rs/rs_sar_remove_topographic_phase_operator.cpp
+    rs/rs_sar_coregister_local_operator.cpp
+    rs/rs_sar_pair_network_operator.cpp
+    rs/rs_sar_network_inversion_operator.cpp
     rs/rs_zonal_stats_operator.cpp
     rs/rs_temporal_monitor_operator.cpp
     rs/rs_terrain_flow_operator.cpp

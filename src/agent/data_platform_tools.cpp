@@ -1271,6 +1271,8 @@ QVariantMap benchmarkInspect( const QVariantMap &args )
         QJsonObject item;
         item.insert( QStringLiteral( "result_id" ), result.resultId() );
         item.insert( QStringLiteral( "status" ), sicnu::experiment::benchmarkRunStatusToString( result.status() ) );
+        item.insert( QStringLiteral( "status" ),
+                     sicnu::experiment::benchmarkRunStatusToString( result.status() ) );
         item.insert( QStringLiteral( "model_id" ), result.modelId() );
         item.insert( QStringLiteral( "seed" ), qint64( result.seed() ) );
         item.insert( QStringLiteral( "reproducibility_complete" ),

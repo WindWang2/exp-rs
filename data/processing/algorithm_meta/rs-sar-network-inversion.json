@@ -1,0 +1,12 @@
+{
+  "gpu" : false,
+  "id" : "rs:sar_network_inversion",
+  "input" : "",
+  "output" : "raster",
+  "tags" : 
+  [
+    "sar",
+    "insar"
+  ],
+  "task" : "sar-insar"
+}

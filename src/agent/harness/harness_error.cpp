@@ -68,6 +68,31 @@ const struct Entry {
     { "OUTPUT_PATH_COLLISION",   { "validation", RetryClass::None } },
     { "NONDETERMINISTIC_CHAIN",  { "validation", RetryClass::None } },
     { "FACT_CONFLICT",           { "validation", RetryClass::None } },
+    // Advanced InSAR 11.0 (append-only): pair truth, DEM/orbit topographic
+    // phase, local co-registration, external unwrap providers, pair
+    // networks, small-baseline network inversion.
+    { "GRID_CRS_MISSING",        { "validation", RetryClass::None } },
+    { "DEM_CRS_MISMATCH",        { "validation", RetryClass::None } },
+    { "SCENE_TRUTH_INVALID",     { "validation", RetryClass::None } },
+    { "ORBIT_SEGMENT_INVALID",   { "validation", RetryClass::None } },
+    { "ORBIT_EPOCH_MISMATCH",    { "validation", RetryClass::None } },
+    { "WAVELENGTH_INCOMPATIBLE", { "validation", RetryClass::None } },
+    { "BASELINE_NO_ZERO_DOPPLER_MASTER", { "validation", RetryClass::None } },
+    { "BASELINE_NO_ZERO_DOPPLER_SLAVE",  { "validation", RetryClass::None } },
+    { "BASELINE_STATE_INTERPOLATION_FAILED", { "runtime", RetryClass::Manual } },
+    { "DEM_GRID_UNSUPPORTED",    { "validation", RetryClass::None } },
+    { "DEM_EXTENT_INSUFFICIENT", { "validation", RetryClass::None } },
+    { "TOPO_PHASE_METADATA_MISSING", { "validation", RetryClass::None } },
+    { "TOPO_PHASE_ORBIT_COVERAGE",   { "validation", RetryClass::None } },
+    { "COREGISTRATION_FAILED",   { "validation", RetryClass::None } },
+    { "PAIR_GRAPH_DISCONNECTED", { "validation", RetryClass::None } },
+    { "UNWRAP_PROVIDER_FAILED",  { "environment", RetryClass::Manual } },
+    { "UNWRAP_PROVIDER_TIMEOUT", { "environment", RetryClass::Manual } },
+    { "UNWRAP_PROVIDER_INVALID_OUTPUT", { "runtime", RetryClass::None } },
+    { "NETWORK_INVERSION_PATTERN_BLOWUP", { "validation", RetryClass::None } },
+    { "NETWORK_INVERSION_RANK_DEFICIENT", { "validation", RetryClass::None } },
+    { "NETWORK_INVERSION_PAIR_LIMIT",  { "validation", RetryClass::None } },
+    { "NETWORK_INVERSION_EPOCH_LIMIT", { "validation", RetryClass::None } },
 };
 const Entry *kEntriesEnd = kEntries + sizeof( kEntries ) / sizeof( kEntries[0] );
 

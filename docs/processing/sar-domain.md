@@ -292,3 +292,152 @@ DEM/orbit, atmospheric correction, PSI/SBAS time-series analysis.
 5. Evidence: `tests/test_sar_temporal_events.cpp` (grammar, day
    arithmetic, hand-computed events with holes), `test_sar_platform10.cpp`
    (registry E2E dating an event at day 24; the stats dates echo).
+
+## 10. Pair-level InSAR input truth (`sar/sar_baseline.h`, Advanced InSAR
+   11.0, package A)
+
+1. **Versioned scene truth** (`InSarSceneTruth`, `kInSarTruthVersion = 1`):
+   absolute acquisition UTC (the `SICNU_SAR_ACQUISITION_UTC` contract,
+   §9), radar wavelength in µm (`SICNU_SAR_WAVELENGTH_UM`), the orbit
+   segment (§3 `SICNU_SAR_ORBIT_STATES`), and the optional absolute anchor
+   of the orbit time base (`azimuthStartUtcSec`). Unset fields are quiet
+   NaN — never zero, which is a valid time.
+2. **Pair truth** (`buildPairTruth`): validates both scenes, refuses
+   wavelength disagreement beyond 1e-9 relative
+   (`WAVELENGTH_INCOMPATIBLE` — interferometric phase is only defined
+   between co-nominal radars), computes the signed temporal baseline
+   (floating days), and — when both absolute anchors exist — refuses
+   disjoint orbit windows (`ORBIT_EPOCH_MISMATCH`) because such
+   acquisitions cannot share an imaged area.
+3. **Per-ground-point baseline** (`pairBaselineAtGround`): zero-Doppler
+   crossings of BOTH orbits at the point (§3 authority), sensor
+   interpolation at the crossings, LOS ground→master-sensor, then the
+   §3 `interferometricBaseline` (B∥/B⊥/|Δr|). No crossing = typed refusal
+   (`BASELINE_NO_ZERO_DOPPLER_*`), never a guessed baseline.
+   `heightAmbiguityM` = λ·r·sinθ/(2·B⊥) is the honest sensitivity metric.
+4. Evidence: `tests/test_sar_baseline.cpp` — analytic equatorial
+   translated-orbit closed forms for t₁/t₂/r₁/r₂/B∥/B⊥ derived
+   independently of the implementation's numerics.
+
+## 11. Rigorous DEM/orbit topographic phase (`rs:sar_remove_topographic_phase`,
+   Advanced InSAR 11.0, package B; DECISIONS D-002)
+
+1. **Chain**: per interferogram pixel — map center → WGS84 geodetic (GDAL/
+   OSR authority), DEM height bilinear at that map location, zero-Doppler
+   ranges of BOTH orbits at the ground point, φ_topo =
+   wrap(−4π(r_master − r_slave)/λ). Removal rotates the complex sample by
+   e^{−iφ_topo}: amplitude preserved, φ_residual = wrap(φ_ifg − φ_topo).
+   This is the true range-difference phase — NOT the B⊥ approximation
+   (degenerate at nadir, needs per-pixel θ) and NOT the §8 flat-earth
+   ramp fit.
+2. **Sign conventions** (pinned by tests): φ carries a MINUS vs range
+   difference (two-way phase); r_master leads (s_master·conj(s_slave)
+   convention); swapping master/slave negates φ_topo. Heights are metres
+   ABOVE THE WGS84 ELLIPSOID — geoid-attached DEMs must be converted
+   upstream (the data cannot declare its vertical datum reliably).
+3. **Fail-closed preflights**: wavelength from `wavelengthUm` or
+   `SICNU_SAR_WAVELENGTH_UM` else `TOPO_PHASE_METADATA_MISSING`; orbit
+   strings parsed and validated (`ORBIT_SEGMENT_INVALID`); interferogram
+   CRS/geotransform required (`GRID_CRS_MISSING`); DEM same CRS
+   (`DEM_CRS_MISMATCH`), north-up axis-aligned grids only
+   (`DEM_GRID_UNSUPPORTED`), full coverage of the interferogram extent
+   (`DEM_EXTENT_INSUFFICIENT`); not one computable pixel →
+   `TOPO_PHASE_ORBIT_COVERAGE`. Invalid DEM samples stay NaN through the
+   product — never interpolated into plausible phases.
+4. Streaming: O(tile) memory; two zero-Doppler solves per pixel
+   (§3 authority, O(orbit states) each). Cancel-safe via the context
+   probe.
+5. Evidence: `tests/test_sar_topographic_phase.cpp` (analytic equator
+   oracle + independent scan/bisect oracle off-nadir + swap antisymmetry +
+   removal/NaN semantics), `test_sar_platform11.cpp` (operator E2E:
+   interferogram CONSTRUCTED from the analytic forward model → residual
+   < 0.02 rad; no-wavelength and CRS-mismatch refusals).
+
+## 12. Local offset-field co-registration (`rs:sar_coregister_local`,
+   Advanced InSAR 11.0, package C; DECISIONS D-003)
+
+1. **Model**: a TRANSLATION FIELD — per-patch magnitude NCC on a lattice
+   (parabolic sub-pixel, the §8 confidence rules), 3×3 median over
+   confident neighbors for speckle-outlier rejection (disable with
+   `medianRadius=0` for deformation gradients stronger than the lattice
+   spacing), bilinear interpolation over the lattice node centers, and
+   bilinear complex resampling dst(x,y) = src(x + dx, y + dy) — the
+   negated application of the content-displacement offsets (the NCC says
+   where the slave content came from). No
+   affine/polynomial warp, no DEM-based refinement — `rs:sar_coregister`
+   remains the global single-shift special case.
+2. **Honest coverage**: unconfident patches stay visible (flagged, not
+   dropped) and fall back to the global shift model downstream; the
+   fallback is counted (`confidentPatches` / `totalPatches`). Flat /
+   decorrelated patches have no meaningful NCC peak and must NOT invent
+   offsets.
+3. Products: aligned slave (CFloat32) + optional 3-band offset field
+   (dx, dy, confidence = peakRatio; 0 where unconfident). Both planes
+   materialized behind the 2 GiB budget (`MEMORY_BUDGET_EXCEEDED`).
+4. Evidence: `tests/test_sar_coregistration.cpp` (piecewise-shift known
+   answers ±0.25 px, warp reconstruction, flat-region degradation),
+   `test_sar_platform11.cpp` (registry E2E).
+
+## 13. External unwrap providers (`rs:sar_unwrap` `provider` seam, Advanced
+   InSAR 11.0, package D; DECISIONS D-004)
+
+1. The BUILT-IN reference (§8.3) is untouched and stays the default.
+   `provider=<name>` runs a GENERIC external-executable contract — no
+   third-party code, no new dependency, SNAPHU slots in as a process:
+   binary discovery = `providerBin` → `SICNU_SAR_UNWRAP_<NAME>_BIN` →
+   PATH; `providerArgs` is a command-line template with {input} {output}
+   {width} {height}; the tool must write a raw Float32 plane of exactly
+   width·height samples.
+2. Data contract: the wrapped phase is staged as raw Float32 (NaN pixels
+   written as 0.0 and the input validity mask RE-APPLIED to the output —
+   masked pixels never adopt the tool's guess); all scratch lives in a
+   per-call temporary directory and is removed on EVERY exit path.
+3. Typed failures: `UNWRAP_PROVIDER_UNAVAILABLE` (no binary — never a
+   silent builtin fallback), `UNWRAP_PROVIDER_FAILED` (non-zero/abnormal
+   exit; stderr tail attached), `UNWRAP_PROVIDER_TIMEOUT` (process
+   killed), `UNWRAP_PROVIDER_INVALID_OUTPUT` (missing/short/non-finite
+   output). Cancellation kills the process and surfaces `CANCELLED`.
+4. Evidence: `tests/test_sar_unwrap_provider.cpp` + the deterministic
+   fake provider (`tests/support/sar_fake_unwrap_provider.cpp`: ok / crash
+   / truncated / NaN / hang modes), `test_sar_platform11.cpp` (registry
+   E2E echo + missing-binary refusal).
+
+## 14. Pair networks and small-baseline linear inversion
+   (`rs:sar_pair_network`, `rs:sar_network_inversion`, Advanced InSAR 11.0,
+   packages E–F; DECISIONS D-005/D-006)
+
+1. **Pair network**: scene truths (§10) sorted by acquisition UTC, paired
+   `all_pairs` or `consecutive`, filtered by |Δt| and the |B⊥| screening
+   metric (evaluated at the master's orbit mid-time nadir — a graph
+   metric, not a per-pixel product). Union-find connectivity + reference
+   selection. Fail-closed (Oracle 2): invalid truth / wavelength
+   disagreement / disjoint absolute windows are typed refusals; a
+   disconnected graph refuses (`PAIR_GRAPH_DISCONNECTED`) unless
+   `allowDisconnected=true` returns the component map explicitly. Bounds:
+   512 scenes, 65536 pairs. **Phase-closure QA** (`sar_phase_closure`): for three interferograms
+   formed from one consistent same-grid SLC stack the wrapped closure
+   arg(I_ab·I_bc·I_ca) is identically 0 — a consistency check of the
+   PRODUCTS. It does NOT detect deformation (per-scene phase is
+   common-mode); a misaligned resampling between the three interferograms
+   breaks the identity.
+2. **Network inversion**: SBAS-style LINEAR solve of min Σ w_i(d_i −
+   (Gu)_i)² per pixel (G = pair-graph incidence), producing per-epoch
+   displacement (relative to the reference epoch), OLS linear velocity,
+   and the fit RMS residual. Missing pairs drop their row; epoch
+   connectivity is per pixel — only the reference component solves, other
+   a per-pair STACK property (e.g. mean coherence²); a per-pixel scalar
+   weight is mathematically inert and not an input. Distinct missing-data
+   patterns are factorized once and cached (≤ `maxPatterns`, else
+   `NETWORK_INVERSION_PATTERN_BLOWUP`); rank-deficient systems refuse
+   (`NETWORK_INVERSION_RANK_DEFICIENT`), never pseudo-inverted. Bounds:
+   64 pairs (the u64 pattern mask), 200 epochs.
+3. **Honest scope**: atmospheric phase stays in the epoch displacements;
+   no PS selection; no APS separation — this is NOT PSI and no surface
+   may present it as PSI.
+4. Evidence: `tests/test_sar_pair_network.cpp` (constraint filtering,
+   connectivity, per-branch typed refusals), `test_sar_phase_closure.cpp`
+   (the algebraic identity, including with per-scene phase injection),
+   `test_sar_network_inversion.cpp` (constructed-truth recovery, missing
+   data, weights, pattern bounds), `test_sar_platform11.cpp` (registry
+   E2E: 1 mm/year velocity recovered exactly; intersect vs perpixel
+   semantics).

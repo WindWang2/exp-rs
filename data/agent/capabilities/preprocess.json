@@ -359,5 +359,8 @@
     "limitations": [
       "Requires a DEM and RPC/TIMING geometry; wrong DEM datum shifts the product"
     ]
+    "intents": ["preprocess"],
+    "resource": { "cost_class": "heavy", "large_raster_safe": true },
+    "limitations": ["Requires a DEM and RPC/TIMING geometry; wrong DEM datum shifts the product"]
   }
 ]

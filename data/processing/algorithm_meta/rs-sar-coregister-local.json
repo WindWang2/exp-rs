@@ -1,0 +1,12 @@
+{
+  "gpu" : false,
+  "id" : "rs:sar_coregister_local",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "sar",
+    "insar"
+  ],
+  "task" : "sar-insar"
+}

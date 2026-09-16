@@ -46,6 +46,13 @@ add_library(sicnu_processing SHARED
     algorithms/sar/sar_hermitian3.cpp
     algorithms/sar/sar_polsar.cpp
     algorithms/sar/sar_insar.cpp
+    algorithms/sar/sar_baseline.cpp
+    algorithms/sar/sar_topographic_phase.cpp
+    algorithms/sar/sar_coregistration.cpp
+    algorithms/sar/sar_phase_closure.cpp
+    algorithms/sar/sar_unwrap_provider.cpp
+    algorithms/sar/sar_pair_network.cpp
+    algorithms/sar/sar_network_inversion.cpp
     algorithms/sar/sar_temporal_events.cpp
     algorithms/temporal/temporal_monitoring.cpp
     algorithms/terrain_flow.cpp

@@ -45,12 +45,16 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
     // tasks without shipped sidecars at the Foundation 5.0 baseline and are
     // now exported like the rest; Scientific Processing 8.0 added
     // rs:sar_geocode, rs:sar_temporal_stats, rs:rasterize, rs:zonal_stats).
+    // Advanced InSAR 11.0 added rs:sar_remove_topographic_phase,
+    // rs:sar_coregister_local, rs:sar_pair_network, rs:sar_network_inversion.
     // Platform 10.0 added rs:classify, rs:change, rs:regress (task adapters
     // over the model execution seam).
     // Spectral Intelligence 11.0 added rs:local_rx_anomaly (anomaly-detection),
     // rs:sparse_unmixing (unmixing), rs:spectral_similarity (classification),
     // rs:endmember_analysis (endmember-analysis); also reconciles upstream drift (D14 SAR operators rs:sar_coregister/displacement/interferogram/phase_filter had no sidecars; D16 temporal sidecars for operators that no longer declare task families removed).
     REQUIRE( expectedCatalog.size() == 43 );
+    REQUIRE( expectedCatalog.size() == 43 ); // 39 at the a5b11b7f baseline + 4 Advanced InSAR 11.0
+    // rs:sar_coregister_local, rs:sar_pair_network, rs:sar_network_inversion)
 
     const QString metaDir =
         sicnu::processing::resolveRuntimeDataPath( QStringLiteral( "data/processing/algorithm_meta" ) );

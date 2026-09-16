@@ -17,13 +17,19 @@ namespace sicnu::operators::rs {
  * 2π branches exactly like any greedy unwrapper.
  *
  * The `provider` parameter (default "builtin") is the external-provider
- * seam: any other value is a typed refusal (UNWRAP_PROVIDER_UNAVAILABLE) —
- * the built-in never masquerades as a named external tool.
+ * seam (Advanced InSAR 11.0, package D; D-004): an external name runs a
+ * generic executable contract (providerBin / SICNU_SAR_UNWRAP_<NAME>_BIN /
+ * PATH discovery, providerArgs template with {input}{output}{width}
+ * {height}, process timeout + cancellation, scratch-only staging). A
+ * missing binary is UNWRAP_PROVIDER_UNAVAILABLE; crashes / timeouts / bad
+ * output are UNWRAP_PROVIDER_FAILED / _TIMEOUT / _INVALID_OUTPUT — the
+ * built-in is never silently substituted and no half-products survive a
+ * failure.
  *
- * Memory: the unwrapper is deliberately single-scale (tiling breaks global
- * phase connectivity). The whole phase/quality planes are materialized
- * behind a fixed 2 GiB budget; larger rasters are refused with
- * MEMORY_BUDGET_EXCEEDED (use a smaller AOI or an external provider).
+ * Memory: the built-in unwrapper is deliberately single-scale (tiling
+ * breaks global phase connectivity). The whole phase/quality planes are
+ * materialized behind a fixed 2 GiB budget; larger rasters are refused
+ * with MEMORY_BUDGET_EXCEEDED (use a smaller AOI or an external provider).
  */
 class RsSarUnwrapOperator : public RSOperator {
 public:

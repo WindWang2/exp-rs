@@ -1531,6 +1531,159 @@ target_include_directories(test_sar_insar PRIVATE
 )
 sicnu_discover_tests(test_sar_insar)
 
+# InSAR pair-level input truth (Advanced InSAR 11.0, package A): scene
+# truth validation, wavelength/temporal consistency, per-ground-point
+# baseline against an analytic translated-orbit oracle.
+add_executable(test_sar_baseline test_sar_baseline.cpp)
+target_link_libraries(test_sar_baseline PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_sar_baseline PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_sar_baseline)
+
+# DEM/orbit topographic phase (Advanced InSAR 11.0, package B): analytic
+# equator oracle + independent scan/bisect oracle off-nadir, removal
+# semantics, typed refusals.
+add_executable(test_sar_topographic_phase test_sar_topographic_phase.cpp)
+target_link_libraries(test_sar_topographic_phase PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_sar_topographic_phase PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_sar_topographic_phase)
+
+# Local offset-field co-registration (Advanced InSAR 11.0, package C):
+# piecewise-shift known answers, warp reconstruction, honest degradation.
+add_executable(test_sar_coregistration test_sar_coregistration.cpp)
+target_link_libraries(test_sar_coregistration PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_sar_coregistration PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_sar_coregistration)
+
+# Phase closure QA (Advanced InSAR 11.0, package E): the algebraic
+# identity closure == 0, inconsistency detection, NaN bookkeeping.
+add_executable(test_sar_phase_closure test_sar_phase_closure.cpp)
+target_link_libraries(test_sar_phase_closure PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_sar_phase_closure PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_sar_phase_closure)
+
+# External unwrap provider adapter (Advanced InSAR 11.0, package D): the
+# fake provider executable mirrors the process contract; every failure
+# branch is a typed refusal with no scratch left behind.
+add_executable(sar_fake_unwrap_provider support/sar_fake_unwrap_provider.cpp)
+target_include_directories(sar_fake_unwrap_provider PRIVATE ${CMAKE_BINARY_DIR})
+
+add_executable(test_sar_unwrap_provider test_sar_unwrap_provider.cpp)
+target_link_libraries(test_sar_unwrap_provider PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_sar_unwrap_provider PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_sar_unwrap_provider PRIVATE
+  FAKE_PROVIDER_PATH="$<TARGET_FILE:sar_fake_unwrap_provider>"
+)
+add_dependencies(test_sar_unwrap_provider sar_fake_unwrap_provider)
+sicnu_discover_tests(test_sar_unwrap_provider)
+
+# Pair network (Advanced InSAR 11.0, package E): constraint filtering,
+# connectivity, fail-closed metadata semantics.
+add_executable(test_sar_pair_network test_sar_pair_network.cpp)
+target_link_libraries(test_sar_pair_network PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_sar_pair_network PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_sar_pair_network)
+
+# Small-baseline linear network inversion (Advanced InSAR 11.0, package
+# F): constructed-truth recovery, missing-data degradation, weights,
+# pattern bounds.
+add_executable(test_sar_network_inversion test_sar_network_inversion.cpp)
+target_link_libraries(test_sar_network_inversion PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_sar_network_inversion PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_sar_network_inversion)
+
+# Advanced InSAR 11.0 operator E2E (package H): analytic DEM/orbit topo
+# removal, external provider, pair network, network inversion, local
+# co-registration through the registry.
+add_executable(test_sar_platform11 test_sar_platform11.cpp)
+target_link_libraries(test_sar_platform11 PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+target_include_directories(test_sar_platform11 PRIVATE
+  ${CMAKE_SOURCE_DIR}
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_sar_platform11 PRIVATE
+  FAKE_PROVIDER_PATH="$<TARGET_FILE:sar_fake_unwrap_provider>"
+)
+add_dependencies(test_sar_platform11 sar_fake_unwrap_provider)
+sicnu_discover_tests(test_sar_platform11)
+
 # Multi-temporal SAR event dating (Advanced SAR 10.0, package D): ISO 8601
 # contract, irregular-interval day arithmetic, event kernel known answers.
 add_executable(test_sar_temporal_events test_sar_temporal_events.cpp)

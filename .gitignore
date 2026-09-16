@@ -327,3 +327,8 @@ data/labs/_tmp/
 !.planning/cloud-data-fabric-11/
 .planning/cloud-data-fabric-11/*
 !.planning/cloud-data-fabric-11/*.md
+
+# advanced-insar-platform-11: track planning notes (markdown only; logs stay local).
+!.planning/advanced-insar-platform-11/
+.planning/advanced-insar-platform-11/*
+!.planning/advanced-insar-platform-11/*.md
