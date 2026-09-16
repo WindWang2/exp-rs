@@ -16,6 +16,8 @@
 #include "geospatial/stac/stac_mapper.h"
 // Cloud-Native Data Fabric / Data Cube 10.0 (additive surfaces).
 #include "geospatial/fabric/catalog_service.h"
+#include "geospatial/fabric/mirror.h"
+#include "geospatial/fabric/prefetch.h"
 #include "geospatial/fabric/query_planner.h"
 #include "geospatial/raster/raster_writer.h"
 #include "geospatial/util/atomic_fs.h"
@@ -1819,6 +1821,74 @@ int commandData( QStringList args, const CliIO &io )
     // a grammar token must never swallow the positional path, so only the
     // bare token changes meaning (a real cache target is a URL and never
     // equals these words; anything else keeps parsing exactly as before).
+    // 11.0 (D-1012 delivered): `data cache prefetch <spec.json> [--max-bytes N]`
+    // — plan a chunk walk through the ONE shared intent parser and warm the
+    // range cache along it. Cache install/uninstall are RAII-scoped here so
+    // the process never leaks a handler on any exit path.
+    if ( sub == QStringLiteral( "cache" ) && args.size() >= 2 &&
+         args.first() == QStringLiteral( "prefetch" ) )
+    {
+        args.removeFirst();   // "prefetch" — the rest is <spec.json> + flags
+        const std::string specPath = args.takeFirst().toStdString();
+        std::string specText;
+        if ( !cliReadFileUtf8( specPath, specText ) )
+            return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                              {}, "cannot read prefetch spec: " + specPath );
+        Json::Value spec;
+        {
+            Json::CharReaderBuilder builder;
+            std::string errors;
+            std::stringstream specStream( specText );
+            if ( !Json::parseFromStream( builder, specStream, &spec, &errors ) )
+                return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                  {}, "invalid prefetch spec JSON: " + errors );
+        }
+        std::uint64_t maxBytes = 0;   // 0 = the plan's declared estimate
+        for ( int i = 0; i + 1 < args.size(); ++i )
+        {
+            if ( args[i] == QStringLiteral( "--max-bytes" ) )
+            {
+                bool parsed = false;
+                const std::uint64_t value = args[i + 1].toULongLong( &parsed );
+                if ( !parsed )
+                    return io.finish( false, "data", {},
+                                      exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                      {}, "--max-bytes needs an integer" );
+                maxBytes = value;
+                args.removeAt( i );
+                args.removeAt( i );
+                break;
+            }
+        }
+        try
+        {
+            sicnu::geo::FabricIntent intent = sicnu::geo::fabricIntentFromJson( spec );
+            sicnu::geo::CancelToken cancel;
+            const sicnu::geo::FabricPlan plan = sicnu::geo::planFabric( intent, {}, cancel );
+            sicnu::geo::PrefetchOptions options;
+            options.maxBytes = maxBytes;
+            struct CacheGuard
+            {
+                ~CacheGuard() { sicnu::geo::RemoteRangeCache::uninstall(); }
+            } cacheGuard;
+            sicnu::geo::RemoteRangeCache::install();
+            const Json::Value before = sicnu::geo::RemoteRangeCache::telemetryJson();
+            const sicnu::geo::PrefetchReport report =
+              sicnu::geo::prefetchChunks( plan, options, cancel );
+            const Json::Value after = sicnu::geo::RemoteRangeCache::telemetryJson();
+            Json::Value out = report.toJson();
+            out["chunks_planned"] = static_cast<Json::UInt64>( plan.cost().chunks );
+            out["telemetry_before"]["bytes_fetched"] = before["bytes_fetched"];
+            out["telemetry_after"]["bytes_fetched"] = after["bytes_fetched"];
+            return io.finish( true, "data", out, 0 );
+        }
+        catch ( const sicnu::geo::GeoError &error )
+        {
+            return io.finish( false, "data", error.toJson(),
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                              {}, error.what() );
+        }
+    }
     if ( sub == QStringLiteral( "cache" ) && args.size() == 1 &&
          ( args.first() == QStringLiteral( "status" ) ||
            args.first() == QStringLiteral( "clear" ) ) )
@@ -2025,11 +2095,22 @@ int commandData( QStringList args, const CliIO &io )
                 sicnu::geo::executeWindow( plan, readOptions, report, cancel );
             const std::string output = outputArg.toStdString();
             sicnu::geo::atomic_fs::writeFileAtomic( output, [ & ]( const std::string &staged ) {
+                // Band parity with the io:cube_window operator (A-R3): the
+                // band declares the window's NoData (uncovered cells are NOT
+                // valid data) and keeps Float64 precision.
+                sicnu::geo::RasterBandSpec band;
+                band.dtype = "Float64";
+                band.hasNoData = true;
+                band.noDataIsNaN = window.noDataIsNaN;
+                band.noDataValue = window.noDataIsNaN ? 0.0 : window.gridNoData;
                 sicnu::geo::RasterWriter writer = sicnu::geo::RasterWriter::create(
-                    staged, window.width, window.height, { sicnu::geo::RasterBandSpec {} },
+                    staged, window.width, window.height, { band },
                     { "GTiff", { "TILED=YES", "BLOCKXSIZE=64", "BLOCKYSIZE=64" }, true } );
                 const sicnu::geo::VirtualCubeGrid &grid = plan.grid();
-                writer.setCrs( sicnu::geo::Crs::fromAuthid( grid.crs.authid ) );
+                // A-R6: a derived grid may legally carry no CRS — publish
+                // without a CRS label instead of throwing after the read.
+                if ( grid.crs.valid && !grid.crs.authid.empty() )
+                    writer.setCrs( sicnu::geo::Crs::fromAuthid( grid.crs.authid ) );
                 writer.setGeotransform(
                     { grid.minX, grid.scaleX, 0.0, grid.maxY, 0.0, -grid.scaleY } );
                 writer.writeWindow( 1, { 0, 0, window.width, window.height },
@@ -2040,6 +2121,7 @@ int commandData( QStringList args, const CliIO &io )
             out["output"] = output;
             out["width"] = window.width;
             out["height"] = window.height;
+            out["gridNoData"] = window.gridNoData;
             out["provenance"] = window.provenanceJson();
             out["report"] = report.toJson();
             return io.finish( true, "data", out, 0 );
@@ -2047,6 +2129,83 @@ int commandData( QStringList args, const CliIO &io )
         // Data Fabric 8.0: bounded remote-identity probe/revalidate. Offline
         // or weak identities are honest outcomes (exit stays 0 with the
         // state in the payload) — only caller-contract violations fail.
+        // 11.0: offline mirror surfaces — the mirrorChunks/resolve path
+        // becomes operable from the shell (D-1103 surface parity).
+        //   data mirror materialize <spec.json> -o <dir> [--max-bytes N]
+        //   data mirror stats <dir>
+        if ( sub == "mirror" )
+        {
+            const QString sub2 = stdPath.c_str();
+            if ( sub2 == "stats" )
+            {
+                if ( args.isEmpty() )
+                    return io.finish( false, "data", {},
+                                      exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                      {}, "data mirror stats needs a mirror directory" );
+                const std::string mirrorDir = args.takeFirst().toStdString();
+                Json::Value out = sicnu::geo::mirrorStatsJson( mirrorDir );
+                return io.finish( true, "data", out, 0 );
+            }
+            if ( sub2 == "materialize" )
+            {
+                if ( args.isEmpty() )
+                    return io.finish( false, "data", {},
+                                      exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                      {}, "data mirror materialize needs a spec JSON path" );
+                const std::string specPath = args.takeFirst().toStdString();
+                std::string specText;
+                if ( !cliReadFileUtf8( specPath, specText ) )
+                    return io.finish( false, "data", {},
+                                      exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                      {}, "cannot read mirror spec: " + specPath );
+                Json::Value spec;
+                {
+                    Json::CharReaderBuilder builder;
+                    std::string errors;
+                    std::stringstream specStream( specText );
+                    if ( !Json::parseFromStream( builder, specStream, &spec, &errors ) )
+                        return io.finish( false, "data", {},
+                                          exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                          {}, "invalid mirror spec JSON: " + errors );
+                }
+                std::string mirrorDir;
+                std::uint64_t maxBytes = 0;
+                for ( int i = 0; i + 1 < args.size(); ++i )
+                {
+                    if ( args[i] == QStringLiteral( "-o" ) || args[i] == QStringLiteral( "--output" ) )
+                        mirrorDir = args[i + 1].toStdString();
+                    else if ( args[i] == QStringLiteral( "--max-bytes" ) )
+                        maxBytes = args[i + 1].toULongLong();
+                }
+                if ( mirrorDir.empty() )
+                    return io.finish( false, "data", {},
+                                      exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                      {}, "data mirror materialize needs -o <mirror dir>" );
+                try
+                {
+                    sicnu::geo::FabricIntent intent = sicnu::geo::fabricIntentFromJson( spec );
+                    sicnu::geo::CancelToken cancel;
+                    const sicnu::geo::FabricPlan plan = sicnu::geo::planFabric( intent, {}, cancel );
+                    sicnu::geo::MirrorOptions options;
+                    options.mirrorDirectory = mirrorDir;
+                    options.maxBytes = maxBytes;
+                    const sicnu::geo::MirrorReport report =
+                      sicnu::geo::mirrorChunks( plan, options, cancel );
+                    Json::Value out = report.toJson();
+                    out["mirror"] = mirrorDir;
+                    return io.finish( true, "data", out, 0 );
+                }
+                catch ( const sicnu::geo::GeoError &error )
+                {
+                    return io.finish( false, "data", error.toJson(),
+                                      exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                      {}, error.what() );
+                }
+            }
+            return io.finish( false, "data", {},
+                              exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                              {}, "usage: data mirror materialize|stats …" );
+        }
         if ( sub == "identity" )
         {
             sicnu::geo::RemoteValidatorOptions identityOptions;

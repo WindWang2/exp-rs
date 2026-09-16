@@ -328,6 +328,11 @@ target_include_directories(test_io_fabric_replay_11 PRIVATE ${CMAKE_CURRENT_SOUR
 if(WIN32)
   target_link_libraries(test_io_fabric_replay_11 PRIVATE ws2_32)
 endif()
+# 11.0 multidim planning/execution (netCDF-authored oracle, driver-gated).
+sicnu_add_io_test(test_io_fabric_multidim_11)
+target_include_directories(test_io_fabric_multidim_11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+find_library(NETCDF_LIBRARY_11 NAMES netcdf)
+target_link_libraries(test_io_fabric_multidim_11 PRIVATE ${NETCDF_LIBRARY_11})
 sicnu_add_io_test(test_io_fabric_catalog)
 target_include_directories(test_io_fabric_catalog PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_sources(test_io_fabric_catalog PRIVATE support/http_stac_server.cpp support/http_range_server.cpp)

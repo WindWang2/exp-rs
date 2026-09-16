@@ -59,6 +59,13 @@ struct FabricIntent
     /// In-memory alternative to catalogUri (planner runs the records
     /// backend — same filters, same selection policy).
     std::vector<AssetRecord> records;
+    /// 11.0: a MULTIDIM source (MDArray store path + the cube variable).
+    /// When multidimPath is set the catalog/selection/grid stages are
+    /// skipped (the store IS the source): planning reads the descriptor,
+    /// execution walks the multidim chunks. Mutually exclusive with
+    /// catalogUri and records.
+    std::string multidimPath;
+    std::string multidimVariable;
 
     CatalogQuery query;             ///< filter vocabulary (validated up front)
     /// Maximum selected scenes (the plan's O(selected) size bound).
