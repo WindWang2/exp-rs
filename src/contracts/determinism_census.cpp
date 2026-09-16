@@ -518,7 +518,34 @@ std::map<std::string, DeterminismOverrideInfo> scanDeterminismOverrides(
         classNames.insert( s.className );
     // The framework bases participate in every chain resolution.
     classNames.insert( "RSOperator" );
-    const auto slices = scanClassSlices( sourceRoot, classNames );
+    auto slices = scanClassSlices( sourceRoot, classNames );
+    // Inheritance chains whose bases are not themselves registered operator
+    // classes (e.g. a family base declared in a header): iteratively pull
+    // the missing ancestors into the scan, bounded.
+    for ( int round = 0; round < 3; ++round )
+    {
+        std::set<std::string> missing;
+        for ( const auto &entry : slices )
+        {
+            if ( !classNames.count( entry.first ) )
+                continue;
+            const ClassSlice *best = bestSlice( entry.second );
+            if ( !best )
+                continue;
+            for ( const std::string &base : best->bases )
+                if ( !slices.count( base ) )
+                    missing.insert( base );
+        }
+        if ( missing.empty() )
+            break;
+        classNames.insert( missing.begin(), missing.end() );
+        auto extra = scanClassSlices( sourceRoot, missing );
+        for ( const auto &found : extra )
+        {
+            for ( const ClassSlice &slice : found.second )
+                slices[found.first].push_back( slice );
+        }
+    }
     const auto macroBodies = scanMacroClassBodies( sourceRoot );
 
     std::map<std::string, DeterminismOverrideInfo> result;

@@ -228,5 +228,5 @@ TEST_CASE( "committed contract graph snapshot mirrors the live surface",
                     "contract_inventory --out (conscious contract update)" );
         ++contractsInGraph;
     }
-    CHECK( contractsInGraph >= 134 ); // 115 rs: + 14 io: + 5 cartography:
+    CHECK( contractsInGraph >= 151 ); // 132 rs: + 14 io: + 5 cartography:
 }

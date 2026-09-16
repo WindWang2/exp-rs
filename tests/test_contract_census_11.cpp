@@ -154,54 +154,48 @@ TEST_CASE( "scanned determinism literals match the live virtual dispatch",
            "[census11][determinism]" )
 {
     ensureLiveRegistry();
-    const auto scan = scanDeterminismOverrides( sourceRoot() );
-    REQUIRE_FALSE( scan.empty() );
+    const auto census = buildDeterminismCensus( sourceRoot() );
+    std::map<std::string, DeterminismCensusEntry> byId;
+    for ( const DeterminismCensusEntry &e : census.entries )
+        byId[e.operatorId] = e;
+    REQUIRE_FALSE( byId.empty() );
 
     int gradeChecked = 0;
     int runtimeChecked = 0;
-    int unpublished = 0;
     for ( const std::string &id : RSOperatorRegistry::instance().operatorNames() )
     {
-        const auto it = scan.find( id );
-        REQUIRE( it != scan.end() );
+        const auto entry = byId.find( id );
+        REQUIRE( entry != byId.end() );
         auto op = liveOperator( id );
         REQUIRE( op != nullptr );
 
-        INFO( "operator: " << id << " (class " << it->second.operatorClass << ")" );
-        // The published schema stamp must equal the scanned class literal —
-        // the stamp IS determinismGrade(), so a divergence means the scan
-        // (or the schema surface) is lying about the class fact.
+        INFO( "operator: " << id << " (class " << entry->second.source.operatorClass
+              << ")" );
+        // The published schema stamp must equal the census's class-level
+        // grade fact: the override literal, or a direct
+        // stampDeterminismGrade("...") literal inside the class's schema().
+        // No scanned fact → the schema publishes nothing (unproven default).
+        // A divergence means the scan (or the schema surface) is lying.
         const Json::Value schema = op->schema();
         if ( schema.isMember( "determinismGrade" ) )
         {
             const std::string published = normalize( schema["determinismGrade"].asString() );
-            if ( it->second.gradeOverride )
-                CHECK( published == normalize( it->second.gradeLiteral ) );
-            else
-                CHECK( published == "tolerance" ); // the framework default passes through
+            const std::string scanned = normalize(
+                entry->second.schemaGrade.empty() ? std::string( "tolerance" )
+                                                  : entry->second.schemaGrade );
+            CHECK( published == scanned );
             ++gradeChecked;
-        }
-        else
-        {
-            ++unpublished;
         }
 
         // The runtime determinism() dispatch must match the scanned literal
         // (or the framework default BitExact when not overridden).
         const char *liveRuntime = determinismGradeName( op->determinism() );
-        std::string scannedRuntime = "bit_exact";
-        if ( it->second.runtimeOverride )
-            scannedRuntime = it->second.runtimeLiteral == "Tolerance" ? "tolerance" : "bit_exact";
-        CHECK( std::string( liveRuntime ) == scannedRuntime );
+        CHECK( std::string( liveRuntime ) == entry->second.runtimeGrade );
         ++runtimeChecked;
     }
     // The binding must be live, not vacuous.
     CHECK( runtimeChecked >= 100 );
     CHECK( gradeChecked >= 1 );
-    // Platform 11.0 starts from the 10.0-recorded debt (~80+ unpublished);
-    // the census may shrink it but must never silently claim it vanished.
-    INFO( "operators without a published schema stamp: " << unpublished );
-    CHECK( unpublished >= 0 );
 }
 
 TEST_CASE( "exemption records are well-formed and never shadow a contract",
@@ -242,18 +236,18 @@ TEST_CASE( "census scanner recovers a synthetic registration tree",
           << "};\n"
           << "class DemoDerived final : public DemoBase {\n"
           << "public:\n"
-          << "    std::string name() const override { return \"demo:derived\"; }\n"
+          << "    std::string name() const override { return \"io:demo_derived\"; }\n"
           << "};\n"
           << "class DemoTolerance : public sicnu::operators::RSOperator {\n"
           << "public:\n"
-          << "    std::string name() const override { return \"demo:tol\"; }\n"
+          << "    std::string name() const override { return \"io:demo_tol\"; }\n"
           << "    std::string determinismGrade() const override { return \"tolerance\"; }\n"
           << "    sicnu::operators::RSOperatorDeterminism determinism() const override\n"
           << "    { return sicnu::operators::RSOperatorDeterminism::Tolerance; }\n"
           << "};\n"
           << "class DemoExport final : public sicnu::operators::RSOperator {\n"
           << "public:\n"
-          << "    std::string name() const override { return \"demo:export\"; }\n"
+          << "    std::string name() const override { return \"io:demo_export\"; }\n"
           << "    std::string determinismGrade() const override { return \"tolerance\"; }\n"
           << "};\n";
     }
@@ -261,9 +255,9 @@ TEST_CASE( "census scanner recovers a synthetic registration tree",
         std::ofstream c( root / "src" / "demo" / "demo_ops_init.cpp" );
         c << "#include \"demo_ops.h\"\n"
           << "#include \"operators/framework/rs_operator_registry.h\"\n"
-          << "REGISTER_RS_OPERATOR( DemoDerived, \"demo:derived\" )\n"
-          << "REGISTER_RS_OPERATOR( DemoTolerance, \"demo:tol\" )\n"
-          << "REGISTER_RS_OPERATOR( DemoExport, \"demo:export\" )\n";
+          << "REGISTER_RS_OPERATOR( DemoDerived, \"io:demo_derived\" )\n"
+          << "REGISTER_RS_OPERATOR( DemoTolerance, \"io:demo_tol\" )\n"
+          << "REGISTER_RS_OPERATOR( DemoExport, \"io:demo_export\" )\n";
     }
 
     const auto scan = scanDeterminismOverrides( root.string() );

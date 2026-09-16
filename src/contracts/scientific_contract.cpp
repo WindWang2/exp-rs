@@ -902,6 +902,120 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             rows.push_back( c );
         }
 
+        // --- Census coverage sweep (Platform 11.0): 17 registered rs:
+        // operators that predate their records — each caught live by the
+        // census contract-or-exemption gate, each declared from a schema
+        // read of its own header. ------------------------------------------------
+        {
+            // Model-task operators (rs_model_task_operators.h, D19 family):
+            for ( const char *id : { "rs:classify", "rs:regress", "rs:change" } )
+            {
+                ScientificContract c = baseRecord();
+                c.operatorId = id;
+                c.inputDomain = "features";
+                c.outputDomain = id == std::string( "rs:classify" ) ? "classes"
+                                                                    : "features";
+                c.cancellationGranularity = "tile_level";
+                c.atomicPublication = "staged_rename";
+                c.provenance = "output_metadata";
+                c.evidence = "family:model-runtime + schema read "
+                             "(rs_model_task_operators.h)";
+                rows.push_back( c );
+            }
+            {
+                ScientificContract c = importFamily();
+                c.operatorId = "rs:cn_product_import";
+                c.evidence = "family:import + schema read (rs_cn_product_import_operator.h)";
+                rows.push_back( c );
+            }
+            {
+                ScientificContract c = baseRecord();
+                c.operatorId = "rs:library_select";
+                c.inputDomain = "none";
+                c.outputDomain = "none";
+                c.atomicPublication = "json_result_only";
+                c.evidence = "family:spectral-tools + schema read "
+                             "(rs_library_select_operator.h)";
+                rows.push_back( c );
+            }
+            {
+                ScientificContract c = indexFamily();
+                c.operatorId = "rs:mnf_inverse";
+                c.inputDomain = "features";
+                c.outputDomain = "reflectance";
+                c.evidence = "family:spectral-transform + schema read "
+                             "(rs_mnf_inverse_operator.h: inverse MNF back-projection)";
+                rows.push_back( c );
+            }
+            {
+                ScientificContract c = indexFamily();
+                c.operatorId = "rs:spectral_band_select";
+                c.evidence = "family:spectral-tools + schema read "
+                             "(rs_spectral_band_select_operator.h: subset copy)";
+                rows.push_back( c );
+            }
+            // SAR / InSAR family (Advanced SAR 10.0 package C headers):
+            {
+                ScientificContract c = sarFamily();
+                c.operatorId = "rs:sar_coregister";
+                c.outputDomain = "none";
+                c.atomicPublication = "json_result_only"; // shift estimate
+                c.evidence = "family:sar + schema read (rs_sar_coregister_operator.h: "
+                             "residual global-shift estimate between same-grid scenes)";
+                rows.push_back( c );
+            }
+            for ( const char *id : { "rs:sar_interferogram", "rs:sar_phase_filter",
+                                     "rs:sar_unwrap" } )
+            {
+                ScientificContract c = sarFamily();
+                c.operatorId = id;
+                c.inputDomain = "phase";
+                c.outputDomain = "phase";
+                c.timeAlignment = "stack_dates";
+                c.evidence = "family:sar + schema read (InSAR chain: interferogram "
+                             "s1*conj(s2) + coherence, Goldstein-Werner filtering, "
+                             "quality-guided flood-fill unwrap)";
+                rows.push_back( c );
+            }
+            {
+                ScientificContract c = sarFamily();
+                c.operatorId = "rs:sar_polsar_decompose";
+                c.inputDomain = "amplitude";
+                c.outputDomain = "features";
+                c.evidence = "family:sar + schema read (rs_sar_polsar_decompose_operator.h: "
+                             "Pauli / H-A-alpha / Freeman-Durden components)";
+                rows.push_back( c );
+            }
+            {
+                ScientificContract c = sarFamily();
+                c.operatorId = "rs:sar_temporal_events";
+                c.inputDomain = "amplitude";
+                c.outputDomain = "features";
+                c.timeAlignment = "stack_dates";
+                c.evidence = "family:sar + schema read (rs_sar_temporal_events_operator.h: "
+                             "per-pixel change-event dating across N co-registered scenes)";
+                rows.push_back( c );
+            }
+            // Temporal family (Temporal Platform 10.0 operators):
+            for ( const char *id : { "rs:temporal_extract_regions",
+                                     "rs:temporal_harmonic_breaks",
+                                     "rs:temporal_region_features",
+                                     "rs:temporal_regularize" } )
+            {
+                ScientificContract c = temporalFamily();
+                c.operatorId = id;
+                c.outputDomain = id == std::string( "rs:temporal_extract_regions" )
+                                       || id == std::string( "rs:temporal_region_features" )
+                                     ? "table"
+                                     : "features";
+                if ( id == std::string( "rs:temporal_regularize" ) )
+                    c.provenance = "output_metadata"; // valid_count + filled_count bands
+                c.evidence = "family:temporal + schema read (Temporal Platform 10.0: "
+                             "CHANGELOG [Unreleased] operators; headers read)";
+                rows.push_back( c );
+            }
+        }
+
         // --- I/O foundation (census 2.0: first-party io: operators) ---------
         for ( const char *id : { "io:translate", "io:convert_format" } )
         {
