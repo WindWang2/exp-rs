@@ -1,27 +1,27 @@
 {
  "schema": "exp.readiness.report.v1",
- "generated_utc": "2026-09-13T19:46:19.589011+00:00",
- "git_sha": "7cca494625c40f3c97646584ca0e9296a7f9b349",
- "build_dir": "/home/kevin/projects/rs-studio/exp-rs-scientific-contract-verification-10/build-ci-fast",
+ "generated_utc": "2026-09-16T07:02:56.302663+00:00",
+ "git_sha": "d2868c7445f496c1742f04c94d23bc6e14bda3ec",
+ "build_dir": "C:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\build-dev",
  "host": {
-  "platform": "linux"
+  "platform": "win32"
  },
  "counts": {
-  "compiled": 23,
-  "passed": 20,
-  "failed": 0,
-  "not_built": 16,
-  "skipped": 3,
-  "timeout": 0,
+  "compiled": 26,
+  "passed": 21,
+  "failed": 5,
+  "not_built": 19,
+  "skipped": 0,
+  "timeout": 1,
   "no_evidence": 0
  },
- "overall": "insufficient-evidence",
+ "overall": "attention",
  "principle": "not-run is never pass; every capability names its evidence",
  "capabilities": [
   {
    "capability": "header-self-containment",
    "artifact": "sicnu_header_probes",
-   "compiled_here": true,
+   "compiled_here": false,
    "executed_status": "passed"
   },
   {
@@ -76,13 +76,13 @@
    "capability": "fuzz-worker-ipc-splits",
    "artifact": "test_contract_fuzz_ipc",
    "compiled_here": true,
-   "executed_status": "passed"
+   "executed_status": "timeout"
   },
   {
    "capability": "fuzz-operator-schemas",
    "artifact": "test_contract_fuzz_ops",
-   "compiled_here": true,
-   "executed_status": "skipped"
+   "compiled_here": false,
+   "executed_status": "not_built"
   },
   {
    "capability": "known-answer-corpus-8",
@@ -135,8 +135,8 @@
   {
    "capability": "io-raster-contract",
    "artifact": "test_io_raster_contract",
-   "compiled_here": true,
-   "executed_status": "skipped"
+   "compiled_here": false,
+   "executed_status": "not_built"
   },
   {
    "capability": "io-grid-descriptor",
@@ -153,8 +153,8 @@
   {
    "capability": "portable-fault-matrix",
    "artifact": "test_fault_matrix",
-   "compiled_here": true,
-   "executed_status": "skipped"
+   "compiled_here": false,
+   "executed_status": "not_built"
   },
   {
    "capability": "sdk-ipc-contract",
@@ -202,25 +202,25 @@
    "capability": "contract-graph",
    "artifact": "test_contract_platform_9",
    "compiled_here": true,
-   "executed_status": "passed"
+   "executed_status": "failed"
   },
   {
    "capability": "contract-operator-projection",
    "artifact": "test_contract_projection_9",
    "compiled_here": true,
-   "executed_status": "passed"
+   "executed_status": "failed"
   },
   {
    "capability": "contract-command-reference",
    "artifact": "test_command_contract_9",
    "compiled_here": true,
-   "executed_status": "passed"
+   "executed_status": "failed"
   },
   {
    "capability": "contract-diagnostics-census",
    "artifact": "test_diagnostics_contract_9",
    "compiled_here": true,
-   "executed_status": "passed"
+   "executed_status": "failed"
   },
   {
    "capability": "contract-capability-floors",
@@ -244,11 +244,53 @@
    "capability": "drift-projection-10",
    "artifact": "test_drift_projection_10",
    "compiled_here": true,
-   "executed_status": "passed"
+   "executed_status": "failed"
   },
   {
    "capability": "science-verification-10",
    "artifact": "test_science_verification_10",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "contract-census-11",
+   "artifact": "test_contract_census_11",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "contract-determinism-11",
+   "artifact": "test_contract_determinism_11",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "metamorphic-11",
+   "artifact": "test_verification_metamorphic_11",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "numeric-reference-11",
+   "artifact": "test_verification_numeric_reference_11",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "mutation-kill-11",
+   "artifact": "test_mutation_kill_11",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "failure-contract-11",
+   "artifact": "test_verification_failure_11",
+   "compiled_here": true,
+   "executed_status": "passed"
+  },
+  {
+   "capability": "cross-surface-11",
+   "artifact": "test_contract_cross_surface_11",
    "compiled_here": true,
    "executed_status": "passed"
   }
@@ -259,5 +301,5 @@
   "macOS: GDAL 3.13 ladder exercised via PR #834 evidence; NOT executed on this host.",
   "Optional-feature omissions (OTB, Python worker, ONNX Runtime) follow the CMake option surface of this build tree; absent targets are reported as not-built, never as passing."
  ],
- "ladder_run_utc": "2026-09-13T19:45:36.579370+00:00"
+ "ladder_run_utc": "2026-09-16T07:00:59.196754+00:00"
 }
