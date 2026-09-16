@@ -7,7 +7,7 @@
       "operatorId" : "cartography:compose",
       "prefix" : "cartography:",
       "runtimeGrade" : "bit_exact",
-      "schemaGrade" : "bit_exact",
+      "schemaGrade" : "bit-exact",
       "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
@@ -16,8 +16,8 @@
         "baseDepth" : 0,
         "class" : "ComposeOperator",
         "classFound" : true,
-        "file" : "agent\\cartography\\cartography_operators.cpp",
-        "gradeLiteral" : "bit_exact",
+        "file" : "agent/cartography/cartography_operators.cpp",
+        "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
       }
@@ -28,7 +28,7 @@
       "operatorId" : "cartography:export",
       "prefix" : "cartography:",
       "runtimeGrade" : "bit_exact",
-      "schemaGrade" : "bit_exact",
+      "schemaGrade" : "bit-exact",
       "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
@@ -37,8 +37,8 @@
         "baseDepth" : 0,
         "class" : "ExportOperator",
         "classFound" : true,
-        "file" : "agent\\cartography\\cartography_operators.cpp",
-        "gradeLiteral" : "bit_exact",
+        "file" : "agent/cartography/cartography_operators.cpp",
+        "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
       }
@@ -49,7 +49,7 @@
       "operatorId" : "cartography:preflight",
       "prefix" : "cartography:",
       "runtimeGrade" : "bit_exact",
-      "schemaGrade" : "bit_exact",
+      "schemaGrade" : "bit-exact",
       "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
@@ -58,8 +58,8 @@
         "baseDepth" : 0,
         "class" : "PreflightOperator",
         "classFound" : true,
-        "file" : "agent\\cartography\\cartography_operators.cpp",
-        "gradeLiteral" : "bit_exact",
+        "file" : "agent/cartography/cartography_operators.cpp",
+        "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
       }
@@ -70,7 +70,7 @@
       "operatorId" : "cartography:repair",
       "prefix" : "cartography:",
       "runtimeGrade" : "bit_exact",
-      "schemaGrade" : "bit_exact",
+      "schemaGrade" : "bit-exact",
       "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
@@ -79,8 +79,8 @@
         "baseDepth" : 0,
         "class" : "RepairOperator",
         "classFound" : true,
-        "file" : "agent\\cartography\\cartography_operators.cpp",
-        "gradeLiteral" : "bit_exact",
+        "file" : "agent/cartography/cartography_operators.cpp",
+        "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
       }
@@ -91,7 +91,7 @@
       "operatorId" : "cartography:validate",
       "prefix" : "cartography:",
       "runtimeGrade" : "bit_exact",
-      "schemaGrade" : "bit_exact",
+      "schemaGrade" : "bit-exact",
       "seedPolicy" : "none",
       "sidecarGrade" : "",
       "sidecarStochastic" : "",
@@ -100,8 +100,8 @@
         "baseDepth" : 0,
         "class" : "ValidateOperator",
         "classFound" : true,
-        "file" : "agent\\cartography\\cartography_operators.cpp",
-        "gradeLiteral" : "bit_exact",
+        "file" : "agent/cartography/cartography_operators.cpp",
+        "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
       }
@@ -122,7 +122,7 @@
         "baseDepth" : 0,
         "class" : "GdalClipOperator",
         "classFound" : true,
-        "file" : "operators\\gdal\\gdal_clip_operator.h",
+        "file" : "operators/gdal/gdal_clip_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -144,7 +144,7 @@
         "baseDepth" : 0,
         "class" : "GdalOrthorectificationOperator",
         "classFound" : true,
-        "file" : "operators\\gdal\\gdal_orthorectification_operator.h",
+        "file" : "operators/gdal/gdal_orthorectification_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -166,7 +166,7 @@
         "baseDepth" : 0,
         "class" : "GdalPanSharpenOperator",
         "classFound" : true,
-        "file" : "operators\\gdal\\gdal_pansharpen_operator.h",
+        "file" : "operators/gdal/gdal_pansharpen_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -188,7 +188,7 @@
         "baseDepth" : 0,
         "class" : "GdalPolygonizeOperator",
         "classFound" : true,
-        "file" : "operators\\gdal\\gdal_polygonize_operator.h",
+        "file" : "operators/gdal/gdal_polygonize_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -210,7 +210,7 @@
         "baseDepth" : 0,
         "class" : "GdalReprojectOperator",
         "classFound" : true,
-        "file" : "operators\\gdal\\gdal_reproject_operator.h",
+        "file" : "operators/gdal/gdal_reproject_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -231,7 +231,7 @@
         "baseDepth" : 0,
         "class" : "IoBuildOverviewsOperator",
         "classFound" : true,
-        "file" : "operators\\io\\io_operators.h",
+        "file" : "operators/io/io_operators.h",
         "gradeLiteral" : "tolerance",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -252,7 +252,7 @@
         "baseDepth" : 0,
         "class" : "IoCachePrefetchOperator",
         "classFound" : true,
-        "file" : "operators\\io\\io_fabric_operators.h",
+        "file" : "operators/io/io_fabric_operators.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -273,7 +273,7 @@
         "baseDepth" : 0,
         "class" : "IoCatalogSearchOperator",
         "classFound" : true,
-        "file" : "operators\\io\\io_fabric_operators.h",
+        "file" : "operators/io/io_fabric_operators.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -294,7 +294,7 @@
         "baseDepth" : 0,
         "class" : "IoClipOperator",
         "classFound" : true,
-        "file" : "operators\\io\\io_operators.h",
+        "file" : "operators/io/io_operators.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -315,7 +315,7 @@
         "baseDepth" : 0,
         "class" : "IoConvertFormatOperator",
         "classFound" : true,
-        "file" : "operators\\io\\io_operators.h",
+        "file" : "operators/io/io_operators.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -336,7 +336,7 @@
         "baseDepth" : 0,
         "class" : "IoCubePlanOperator",
         "classFound" : true,
-        "file" : "operators\\io\\io_fabric_operators.h",
+        "file" : "operators/io/io_fabric_operators.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -357,7 +357,7 @@
         "baseDepth" : 0,
         "class" : "IoCubeWindowOperator",
         "classFound" : true,
-        "file" : "operators\\io\\io_fabric_operators.h",
+        "file" : "operators/io/io_fabric_operators.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -378,7 +378,7 @@
         "baseDepth" : 0,
         "class" : "IoDoctorOperator",
         "classFound" : true,
-        "file" : "operators\\io\\io_operators.h",
+        "file" : "operators/io/io_operators.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -399,7 +399,7 @@
         "baseDepth" : 0,
         "class" : "IoInspectOperator",
         "classFound" : true,
-        "file" : "operators\\io\\io_operators.h",
+        "file" : "operators/io/io_operators.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -420,7 +420,7 @@
         "baseDepth" : 0,
         "class" : "IoMakeCogOperator",
         "classFound" : true,
-        "file" : "operators\\io\\io_operators.h",
+        "file" : "operators/io/io_operators.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -441,7 +441,7 @@
         "baseDepth" : 0,
         "class" : "IoReprojectOperator",
         "classFound" : true,
-        "file" : "operators\\io\\io_operators.h",
+        "file" : "operators/io/io_operators.h",
         "gradeLiteral" : "tolerance",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -462,7 +462,7 @@
         "baseDepth" : 0,
         "class" : "IoTranslateOperator",
         "classFound" : true,
-        "file" : "operators\\io\\io_operators.h",
+        "file" : "operators/io/io_operators.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -483,7 +483,7 @@
         "baseDepth" : 0,
         "class" : "IoVectorConvertOperator",
         "classFound" : true,
-        "file" : "operators\\io\\io_operators.h",
+        "file" : "operators/io/io_operators.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -504,7 +504,7 @@
         "baseDepth" : 0,
         "class" : "IoWarpOperator",
         "classFound" : true,
-        "file" : "operators\\io\\io_operators.h",
+        "file" : "operators/io/io_operators.h",
         "gradeLiteral" : "tolerance",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -526,7 +526,7 @@
         "baseDepth" : 0,
         "class" : "OpenCvCannyOperator",
         "classFound" : true,
-        "file" : "operators\\opencv\\opencv_filter_operators.h",
+        "file" : "operators/opencv/opencv_filter_operators.h",
         "gradeOverride" : false,
         "note" : "ancestor 'OpenCvOperatorBase' not in scan; no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -548,7 +548,7 @@
         "baseDepth" : 0,
         "class" : "OpenCvGaussianBlurOperator",
         "classFound" : true,
-        "file" : "operators\\opencv\\opencv_filter_operators.h",
+        "file" : "operators/opencv/opencv_filter_operators.h",
         "gradeOverride" : false,
         "note" : "ancestor 'OpenCvOperatorBase' not in scan; no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -570,7 +570,7 @@
         "baseDepth" : 0,
         "class" : "OpenCvLaplacianOperator",
         "classFound" : true,
-        "file" : "operators\\opencv\\opencv_filter_operators.h",
+        "file" : "operators/opencv/opencv_filter_operators.h",
         "gradeOverride" : false,
         "note" : "ancestor 'OpenCvOperatorBase' not in scan; no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -592,7 +592,7 @@
         "baseDepth" : 0,
         "class" : "OpenCvMeanBlurOperator",
         "classFound" : true,
-        "file" : "operators\\opencv\\opencv_filter_operators.h",
+        "file" : "operators/opencv/opencv_filter_operators.h",
         "gradeOverride" : false,
         "note" : "ancestor 'OpenCvOperatorBase' not in scan; no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -614,7 +614,7 @@
         "baseDepth" : 0,
         "class" : "OpenCvMedianBlurOperator",
         "classFound" : true,
-        "file" : "operators\\opencv\\opencv_filter_operators.h",
+        "file" : "operators/opencv/opencv_filter_operators.h",
         "gradeOverride" : false,
         "note" : "ancestor 'OpenCvOperatorBase' not in scan; no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -636,7 +636,7 @@
         "baseDepth" : 0,
         "class" : "OpenCvSobelOperator",
         "classFound" : true,
-        "file" : "operators\\opencv\\opencv_filter_operators.h",
+        "file" : "operators/opencv/opencv_filter_operators.h",
         "gradeOverride" : false,
         "note" : "ancestor 'OpenCvOperatorBase' not in scan; no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -658,7 +658,7 @@
         "baseDepth" : 0,
         "class" : "OtbBundleToPerfectSensorOperator",
         "classFound" : true,
-        "file" : "operators\\otb\\otb_bundle_to_perfect_sensor_operator.h",
+        "file" : "operators/otb/otb_bundle_to_perfect_sensor_operator.h",
         "gradeOverride" : false,
         "note" : "ancestor 'OtbOperatorBase' not in scan; no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -680,7 +680,7 @@
         "baseDepth" : 0,
         "class" : "OtbComputeImagesStatisticsOperator",
         "classFound" : true,
-        "file" : "operators\\otb\\otb_compute_images_statistics_operator.h",
+        "file" : "operators/otb/otb_compute_images_statistics_operator.h",
         "gradeOverride" : false,
         "note" : "ancestor 'OtbOperatorBase' not in scan; no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -702,7 +702,7 @@
         "baseDepth" : 0,
         "class" : "OtbSegmentationOperator",
         "classFound" : true,
-        "file" : "operators\\otb\\otb_segmentation_operator.h",
+        "file" : "operators/otb/otb_segmentation_operator.h",
         "gradeOverride" : false,
         "note" : "ancestor 'OtbOperatorBase' not in scan; no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -724,7 +724,7 @@
         "baseDepth" : 0,
         "class" : "OtbSvmClassificationOperator",
         "classFound" : true,
-        "file" : "operators\\otb\\otb_svm_classification_operator.h",
+        "file" : "operators/otb/otb_svm_classification_operator.h",
         "gradeOverride" : false,
         "note" : "ancestor 'OtbOperatorBase' not in scan; no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -745,7 +745,7 @@
         "baseDepth" : 0,
         "class" : "RsAceOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_spectral_detection_operators.h",
+        "file" : "operators/rs/rs_spectral_detection_operators.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -766,7 +766,7 @@
         "baseDepth" : 0,
         "class" : "RsAlignOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_grid_operators.h",
+        "file" : "operators/rs/rs_grid_operators.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -787,7 +787,7 @@
         "baseDepth" : 0,
         "class" : "RsApplyMaskOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_apply_mask_operator.h",
+        "file" : "operators/rs/rs_apply_mask_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -808,7 +808,7 @@
         "baseDepth" : 0,
         "class" : "RsAtmosphericCorrectionOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_atmospheric_correction_operator.h",
+        "file" : "operators/rs/rs_atmospheric_correction_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -829,7 +829,7 @@
         "baseDepth" : 0,
         "class" : "RsAtmosphericDos1Operator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_atmospheric_aliases.h",
+        "file" : "operators/rs/rs_atmospheric_aliases.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -850,7 +850,7 @@
         "baseDepth" : 0,
         "class" : "RsAtmosphericDos2Operator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_atmospheric_aliases.h",
+        "file" : "operators/rs/rs_atmospheric_aliases.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -871,7 +871,7 @@
         "baseDepth" : 0,
         "class" : "RsAtmosphericQuacOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_atmospheric_aliases.h",
+        "file" : "operators/rs/rs_atmospheric_aliases.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -892,7 +892,7 @@
         "baseDepth" : 0,
         "class" : "RsBandMathOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_band_math_operator.h",
+        "file" : "operators/rs/rs_band_math_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -913,7 +913,7 @@
         "baseDepth" : 0,
         "class" : "RsBandRatioOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_band_tools_operators.h",
+        "file" : "operators/rs/rs_band_tools_operators.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -934,7 +934,7 @@
         "baseDepth" : 0,
         "class" : "RsChangeOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_model_task_operators.h",
+        "file" : "operators/rs/rs_model_task_operators.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -955,7 +955,7 @@
         "baseDepth" : 0,
         "class" : "RsChangeCvaOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_change_primitives.h",
+        "file" : "operators/rs/rs_change_primitives.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -976,7 +976,7 @@
         "baseDepth" : 0,
         "class" : "RsChangeCvaAngleOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_change_primitives.h",
+        "file" : "operators/rs/rs_change_primitives.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -997,7 +997,7 @@
         "baseDepth" : 0,
         "class" : "RsChangeDetectionOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_change_detection_operator.h",
+        "file" : "operators/rs/rs_change_detection_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1018,7 +1018,7 @@
         "baseDepth" : 0,
         "class" : "RsChangeDifferenceOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_change_primitives.h",
+        "file" : "operators/rs/rs_change_primitives.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1039,7 +1039,7 @@
         "baseDepth" : 0,
         "class" : "RsChangeIrMadOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_change_primitives.h",
+        "file" : "operators/rs/rs_change_primitives.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1060,7 +1060,7 @@
         "baseDepth" : 0,
         "class" : "RsChangeLogRatioOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_change_primitives.h",
+        "file" : "operators/rs/rs_change_primitives.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1081,7 +1081,7 @@
         "baseDepth" : 0,
         "class" : "RsChangeMadOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_change_primitives.h",
+        "file" : "operators/rs/rs_change_primitives.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1102,7 +1102,7 @@
         "baseDepth" : 0,
         "class" : "RsChangeNormalizedDifferenceOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_change_primitives.h",
+        "file" : "operators/rs/rs_change_primitives.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1123,7 +1123,7 @@
         "baseDepth" : 0,
         "class" : "RsChangeRatioOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_change_primitives.h",
+        "file" : "operators/rs/rs_change_primitives.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1144,7 +1144,7 @@
         "baseDepth" : 0,
         "class" : "RsChangeSamOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_change_primitives.h",
+        "file" : "operators/rs/rs_change_primitives.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1165,7 +1165,7 @@
         "baseDepth" : 0,
         "class" : "RsClassifyOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_model_task_operators.h",
+        "file" : "operators/rs/rs_model_task_operators.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1186,7 +1186,7 @@
         "baseDepth" : 0,
         "class" : "RsCnProductImportOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_cn_product_import_operator.h",
+        "file" : "operators/rs/rs_cn_product_import_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1207,7 +1207,7 @@
         "baseDepth" : 0,
         "class" : "RsConnectedComponentsOperator",
         "classFound" : false,
-        "file" : "operators\\rs\\rs_operators_init.cpp",
+        "file" : "operators/rs/rs_operators_init.cpp",
         "gradeOverride" : false,
         "note" : "class declaration not located in src scan",
         "runtimeOverride" : false
@@ -1228,7 +1228,7 @@
         "baseDepth" : 0,
         "class" : "RsContinuumRemovalOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_continuum_removal_operator.h",
+        "file" : "operators/rs/rs_continuum_removal_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1249,7 +1249,7 @@
         "baseDepth" : 0,
         "class" : "RsContrastStretchOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_band_tools_operators.h",
+        "file" : "operators/rs/rs_band_tools_operators.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1270,7 +1270,7 @@
         "baseDepth" : 0,
         "class" : "RsDetectOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_model_task_operators.h",
+        "file" : "operators/rs/rs_model_task_operators.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1291,7 +1291,7 @@
         "baseDepth" : 0,
         "class" : "RsDnToRadianceOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_atmospheric_aliases.h",
+        "file" : "operators/rs/rs_atmospheric_aliases.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1312,7 +1312,7 @@
         "baseDepth" : 0,
         "class" : "RsEmbeddingOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_model_task_operators.h",
+        "file" : "operators/rs/rs_model_task_operators.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1333,7 +1333,7 @@
         "baseDepth" : 0,
         "class" : "RsEndmemberExtractionOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_endmember_extraction_operator.h",
+        "file" : "operators/rs/rs_endmember_extraction_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1354,7 +1354,7 @@
         "baseDepth" : 0,
         "class" : "RsEviOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_spectral_index_aliases.h",
+        "file" : "operators/rs/rs_spectral_index_aliases.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -1375,7 +1375,7 @@
         "baseDepth" : 0,
         "class" : "RsExtractBandsOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_band_tools_operators.h",
+        "file" : "operators/rs/rs_band_tools_operators.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1396,7 +1396,7 @@
         "baseDepth" : 0,
         "class" : "RsFeatureNormalizeOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_feature_normalize_operator.h",
+        "file" : "operators/rs/rs_feature_normalize_operator.h",
         "gradeLiteral" : "tolerance",
         "gradeOverride" : true,
         "runtimeLiteral" : "Tolerance",
@@ -1418,7 +1418,7 @@
         "baseDepth" : 0,
         "class" : "RsFeatureSelectOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_feature_select_operator.h",
+        "file" : "operators/rs/rs_feature_select_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -1439,7 +1439,7 @@
         "baseDepth" : 0,
         "class" : "RsFeatureStackOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_feature_stack_operator.h",
+        "file" : "operators/rs/rs_feature_stack_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -1460,7 +1460,7 @@
         "baseDepth" : 0,
         "class" : "RsFillHolesOperator",
         "classFound" : false,
-        "file" : "operators\\rs\\rs_operators_init.cpp",
+        "file" : "operators/rs/rs_operators_init.cpp",
         "gradeOverride" : false,
         "note" : "class declaration not located in src scan",
         "runtimeOverride" : false
@@ -1481,7 +1481,7 @@
         "baseDepth" : 0,
         "class" : "RsFocalStatsOperator",
         "classFound" : false,
-        "file" : "operators\\rs\\rs_operators_init.cpp",
+        "file" : "operators/rs/rs_operators_init.cpp",
         "gradeOverride" : false,
         "note" : "class declaration not located in src scan",
         "runtimeOverride" : false
@@ -1502,7 +1502,7 @@
         "baseDepth" : 0,
         "class" : "RsFusionBroveyOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_fusion_aliases.h",
+        "file" : "operators/rs/rs_fusion_aliases.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1523,7 +1523,7 @@
         "baseDepth" : 0,
         "class" : "RsFusionGramSchmidtOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_fusion_aliases.h",
+        "file" : "operators/rs/rs_fusion_aliases.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1544,7 +1544,7 @@
         "baseDepth" : 0,
         "class" : "RsFusionIhsOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_fusion_aliases.h",
+        "file" : "operators/rs/rs_fusion_aliases.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1565,7 +1565,7 @@
         "baseDepth" : 0,
         "class" : "RsFusionLinearOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_fusion_aliases.h",
+        "file" : "operators/rs/rs_fusion_aliases.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1586,7 +1586,7 @@
         "baseDepth" : 0,
         "class" : "RsFusionPcaOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_fusion_aliases.h",
+        "file" : "operators/rs/rs_fusion_aliases.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1607,7 +1607,7 @@
         "baseDepth" : 0,
         "class" : "RsGaofenImportOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_gaofen_import_operator.h",
+        "file" : "operators/rs/rs_gaofen_import_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1628,7 +1628,7 @@
         "baseDepth" : 0,
         "class" : "RsHjImportOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_hj_import_operator.h",
+        "file" : "operators/rs/rs_hj_import_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1649,7 +1649,7 @@
         "baseDepth" : 0,
         "class" : "RsImageEnhancementOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_image_enhancement_operator.h",
+        "file" : "operators/rs/rs_image_enhancement_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1670,7 +1670,7 @@
         "baseDepth" : 0,
         "class" : "RsImageFusionOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_image_fusion_operator.h",
+        "file" : "operators/rs/rs_image_fusion_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1691,7 +1691,7 @@
         "baseDepth" : 0,
         "class" : "RsInferenceOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_inference_operator.h",
+        "file" : "operators/rs/rs_inference_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1712,7 +1712,7 @@
         "baseDepth" : 0,
         "class" : "RsKmeansOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_kmeans_operator.h",
+        "file" : "operators/rs/rs_kmeans_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1733,7 +1733,7 @@
         "baseDepth" : 0,
         "class" : "RsLandsatImportOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_landsat_import_operator.h",
+        "file" : "operators/rs/rs_landsat_import_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1754,7 +1754,7 @@
         "baseDepth" : 0,
         "class" : "RsLibrarySelectOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_library_select_operator.h",
+        "file" : "operators/rs/rs_library_select_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1775,7 +1775,7 @@
         "baseDepth" : 0,
         "class" : "RsLocalExtremaOperator",
         "classFound" : false,
-        "file" : "operators\\rs\\rs_operators_init.cpp",
+        "file" : "operators/rs/rs_operators_init.cpp",
         "gradeOverride" : false,
         "note" : "class declaration not located in src scan",
         "runtimeOverride" : false
@@ -1796,7 +1796,7 @@
         "baseDepth" : 0,
         "class" : "RsMajorityFilterOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_majority_filter_operator.h",
+        "file" : "operators/rs/rs_majority_filter_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -1817,7 +1817,7 @@
         "baseDepth" : 0,
         "class" : "RsMatchedFilterOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_spectral_detection_operators.h",
+        "file" : "operators/rs/rs_spectral_detection_operators.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1838,7 +1838,7 @@
         "baseDepth" : 0,
         "class" : "RsMndwiOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_spectral_index_aliases.h",
+        "file" : "operators/rs/rs_spectral_index_aliases.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -1859,7 +1859,7 @@
         "baseDepth" : 0,
         "class" : "RsMnfOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_mnf_operator.h",
+        "file" : "operators/rs/rs_mnf_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1880,7 +1880,7 @@
         "baseDepth" : 0,
         "class" : "RsMnfInverseOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_mnf_inverse_operator.h",
+        "file" : "operators/rs/rs_mnf_inverse_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1901,7 +1901,7 @@
         "baseDepth" : 0,
         "class" : "RsModisGeoreferenceOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_modis_georeference_operator.h",
+        "file" : "operators/rs/rs_modis_georeference_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1922,7 +1922,7 @@
         "baseDepth" : 0,
         "class" : "RsModisImportOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_modis_import_operator.h",
+        "file" : "operators/rs/rs_modis_import_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -1943,7 +1943,7 @@
         "baseDepth" : 0,
         "class" : "RsMorphologyOperator",
         "classFound" : false,
-        "file" : "operators\\rs\\rs_operators_init.cpp",
+        "file" : "operators/rs/rs_operators_init.cpp",
         "gradeOverride" : false,
         "note" : "class declaration not located in src scan",
         "runtimeOverride" : false
@@ -1964,7 +1964,7 @@
         "baseDepth" : 0,
         "class" : "RsMosaicOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_mosaic_operator.h",
+        "file" : "operators/rs/rs_mosaic_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -1985,7 +1985,7 @@
         "baseDepth" : 0,
         "class" : "RsNdbiOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_spectral_index_aliases.h",
+        "file" : "operators/rs/rs_spectral_index_aliases.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -2006,7 +2006,7 @@
         "baseDepth" : 0,
         "class" : "RsNdviOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_spectral_index_aliases.h",
+        "file" : "operators/rs/rs_spectral_index_aliases.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -2027,7 +2027,7 @@
         "baseDepth" : 0,
         "class" : "RsNdwiOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_spectral_index_aliases.h",
+        "file" : "operators/rs/rs_spectral_index_aliases.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -2048,7 +2048,7 @@
         "baseDepth" : 0,
         "class" : "RsObiaClassifyOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_obia_classify_operator.h",
+        "file" : "operators/rs/rs_obia_classify_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2069,7 +2069,7 @@
         "baseDepth" : 0,
         "class" : "RsObiaFeaturesOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_obia_features_operator.h",
+        "file" : "operators/rs/rs_obia_features_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2090,7 +2090,7 @@
         "baseDepth" : 0,
         "class" : "RsObiaHierarchyOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_obia_hierarchy_operator.h",
+        "file" : "operators/rs/rs_obia_hierarchy_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2111,7 +2111,7 @@
         "baseDepth" : 0,
         "class" : "RsObiaLabelOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_obia_label_operator.h",
+        "file" : "operators/rs/rs_obia_label_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2132,7 +2132,7 @@
         "baseDepth" : 0,
         "class" : "RsObiaSegmentOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_obia_segment_operator.h",
+        "file" : "operators/rs/rs_obia_segment_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2153,7 +2153,7 @@
         "baseDepth" : 0,
         "class" : "RsPcaOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_pca_operator.h",
+        "file" : "operators/rs/rs_pca_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2174,7 +2174,7 @@
         "baseDepth" : 0,
         "class" : "RsPostClassificationChangeOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_post_classification_change_operator.h",
+        "file" : "operators/rs/rs_post_classification_change_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2195,7 +2195,7 @@
         "baseDepth" : 0,
         "class" : "RsProximityOperator",
         "classFound" : false,
-        "file" : "operators\\rs\\rs_operators_init.cpp",
+        "file" : "operators/rs/rs_operators_init.cpp",
         "gradeOverride" : false,
         "note" : "class declaration not located in src scan",
         "runtimeOverride" : false
@@ -2216,7 +2216,7 @@
         "baseDepth" : 0,
         "class" : "RsQaMaskOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_qa_mask_operator.h",
+        "file" : "operators/rs/rs_qa_mask_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -2237,7 +2237,7 @@
         "baseDepth" : 0,
         "class" : "RsRadiometricCalibrationOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_radiometric_calibration_operator.h",
+        "file" : "operators/rs/rs_radiometric_calibration_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2258,7 +2258,7 @@
         "baseDepth" : 0,
         "class" : "RsRasterizeOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_rasterize_operator.h",
+        "file" : "operators/rs/rs_rasterize_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2279,7 +2279,7 @@
         "baseDepth" : 0,
         "class" : "RsRecodeOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_recode_operator.h",
+        "file" : "operators/rs/rs_recode_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -2300,7 +2300,7 @@
         "baseDepth" : 0,
         "class" : "RsRegressOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_model_task_operators.h",
+        "file" : "operators/rs/rs_model_task_operators.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2321,7 +2321,7 @@
         "baseDepth" : 0,
         "class" : "RsResampleOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_grid_operators.h",
+        "file" : "operators/rs/rs_grid_operators.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2342,7 +2342,7 @@
         "baseDepth" : 0,
         "class" : "RsRxAnomalyOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_rx_anomaly_operator.h",
+        "file" : "operators/rs/rs_rx_anomaly_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2363,7 +2363,7 @@
         "baseDepth" : 0,
         "class" : "RsSamClassifyOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sam_classify_operator.h",
+        "file" : "operators/rs/rs_sam_classify_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2384,7 +2384,7 @@
         "baseDepth" : 0,
         "class" : "RsSarBackscatterOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_backscatter_operator.h",
+        "file" : "operators/rs/rs_sar_backscatter_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -2405,7 +2405,7 @@
         "baseDepth" : 0,
         "class" : "RsSarCalibrateOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_calibrate_operator.h",
+        "file" : "operators/rs/rs_sar_calibrate_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -2426,7 +2426,7 @@
         "baseDepth" : 0,
         "class" : "RsSarChangeOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_change_operator.h",
+        "file" : "operators/rs/rs_sar_change_operator.h",
         "gradeLiteral" : "tolerance",
         "gradeOverride" : true,
         "runtimeLiteral" : "Tolerance",
@@ -2448,7 +2448,7 @@
         "baseDepth" : 0,
         "class" : "RsSarCoregisterOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_coregister_operator.h",
+        "file" : "operators/rs/rs_sar_coregister_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2469,7 +2469,7 @@
         "baseDepth" : 0,
         "class" : "RsSarDisplacementOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_displacement_operator.h",
+        "file" : "operators/rs/rs_sar_displacement_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2490,7 +2490,7 @@
         "baseDepth" : 0,
         "class" : "RsSarDualPolOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_dualpol_operator.h",
+        "file" : "operators/rs/rs_sar_dualpol_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2511,7 +2511,7 @@
         "baseDepth" : 0,
         "class" : "RsSarGeocodeOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_geocode_operator.h",
+        "file" : "operators/rs/rs_sar_geocode_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2532,7 +2532,7 @@
         "baseDepth" : 0,
         "class" : "RsSarInterferogramOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_interferogram_operator.h",
+        "file" : "operators/rs/rs_sar_interferogram_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2553,7 +2553,7 @@
         "baseDepth" : 0,
         "class" : "RsSarPhaseFilterOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_phase_filter_operator.h",
+        "file" : "operators/rs/rs_sar_phase_filter_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2574,7 +2574,7 @@
         "baseDepth" : 0,
         "class" : "RsSarPolsarDecomposeOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_polsar_decompose_operator.h",
+        "file" : "operators/rs/rs_sar_polsar_decompose_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2595,7 +2595,7 @@
         "baseDepth" : 0,
         "class" : "RsSarRatioOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_ratio_operator.h",
+        "file" : "operators/rs/rs_sar_ratio_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -2616,7 +2616,7 @@
         "baseDepth" : 0,
         "class" : "RsSarSpeckleOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_speckle_operator.h",
+        "file" : "operators/rs/rs_sar_speckle_operator.h",
         "gradeLiteral" : "tolerance",
         "gradeOverride" : true,
         "runtimeLiteral" : "Tolerance",
@@ -2638,7 +2638,7 @@
         "baseDepth" : 0,
         "class" : "RsSarTemporalEventsOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_temporal_events_operator.h",
+        "file" : "operators/rs/rs_sar_temporal_events_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2659,7 +2659,7 @@
         "baseDepth" : 0,
         "class" : "RsSarTemporalStatsOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_temporal_stats_operator.h",
+        "file" : "operators/rs/rs_sar_temporal_stats_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2680,7 +2680,7 @@
         "baseDepth" : 0,
         "class" : "RsSarTerrainCorrectionOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_terrain_correction_operator.h",
+        "file" : "operators/rs/rs_sar_terrain_correction_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -2701,7 +2701,7 @@
         "baseDepth" : 0,
         "class" : "RsSarTerrainFlattenOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_terrain_flatten_operator.h",
+        "file" : "operators/rs/rs_sar_terrain_flatten_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -2722,7 +2722,7 @@
         "baseDepth" : 0,
         "class" : "RsSarTerrainMasksOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_terrain_masks_operator.h",
+        "file" : "operators/rs/rs_sar_terrain_masks_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2743,7 +2743,7 @@
         "baseDepth" : 0,
         "class" : "RsSarTextureOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_texture_operator.h",
+        "file" : "operators/rs/rs_sar_texture_operator.h",
         "gradeLiteral" : "tolerance",
         "gradeOverride" : true,
         "runtimeLiteral" : "Tolerance",
@@ -2765,7 +2765,7 @@
         "baseDepth" : 0,
         "class" : "RsSarUnwrapOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sar_unwrap_operator.h",
+        "file" : "operators/rs/rs_sar_unwrap_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2786,7 +2786,7 @@
         "baseDepth" : 0,
         "class" : "RsSaviOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_spectral_index_aliases.h",
+        "file" : "operators/rs/rs_spectral_index_aliases.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -2807,7 +2807,7 @@
         "baseDepth" : 0,
         "class" : "RsSegmentOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_model_task_operators.h",
+        "file" : "operators/rs/rs_model_task_operators.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2828,7 +2828,7 @@
         "baseDepth" : 0,
         "class" : "RsSegmentStatsOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_segment_stats_operator.h",
+        "file" : "operators/rs/rs_segment_stats_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2849,7 +2849,7 @@
         "baseDepth" : 0,
         "class" : "RsSentinel2ImportOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_sentinel2_import_operator.h",
+        "file" : "operators/rs/rs_sentinel2_import_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2870,7 +2870,7 @@
         "baseDepth" : 0,
         "class" : "RsSieveOperator",
         "classFound" : false,
-        "file" : "operators\\rs\\rs_operators_init.cpp",
+        "file" : "operators/rs/rs_operators_init.cpp",
         "gradeOverride" : false,
         "note" : "class declaration not located in src scan",
         "runtimeOverride" : false
@@ -2891,7 +2891,7 @@
         "baseDepth" : 0,
         "class" : "RsSpectralBandSelectOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_spectral_band_select_operator.h",
+        "file" : "operators/rs/rs_spectral_band_select_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2912,7 +2912,7 @@
         "baseDepth" : 0,
         "class" : "RsSpectralDerivativeOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_spectral_derivative_operator.h",
+        "file" : "operators/rs/rs_spectral_derivative_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2933,7 +2933,7 @@
         "baseDepth" : 0,
         "class" : "RsSpectralIndexOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_spectral_index_operator.h",
+        "file" : "operators/rs/rs_spectral_index_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -2954,7 +2954,7 @@
         "baseDepth" : 0,
         "class" : "RsSpectralResampleOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_spectral_resample_operator.h",
+        "file" : "operators/rs/rs_spectral_resample_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2975,7 +2975,7 @@
         "baseDepth" : 0,
         "class" : "RsSpectralUnmixingOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_spectral_unmixing_operator.h",
+        "file" : "operators/rs/rs_spectral_unmixing_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -2996,7 +2996,7 @@
         "baseDepth" : 0,
         "class" : "RsSupervisedClassificationOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_supervised_classification_operator.h",
+        "file" : "operators/rs/rs_supervised_classification_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -3017,7 +3017,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalAnomalyOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_anomaly_operator.h",
+        "file" : "operators/rs/rs_temporal_anomaly_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -3038,7 +3038,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalBreakpointsOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_breakpoints_operator.h",
+        "file" : "operators/rs/rs_temporal_breakpoints_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -3059,7 +3059,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalCompositeOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_composite_operator.h",
+        "file" : "operators/rs/rs_temporal_composite_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -3080,7 +3080,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalDecomposeOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_decompose_operator.h",
+        "file" : "operators/rs/rs_temporal_decompose_operator.h",
         "gradeLiteral" : "tolerance",
         "gradeOverride" : true,
         "runtimeLiteral" : "Tolerance",
@@ -3102,7 +3102,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalExtractRegionsOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_extract_regions_operator.h",
+        "file" : "operators/rs/rs_temporal_extract_regions_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -3123,7 +3123,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalExtractSeriesOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_extract_series_operator.h",
+        "file" : "operators/rs/rs_temporal_extract_series_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -3144,7 +3144,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalGapFillOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_gap_fill_operator.h",
+        "file" : "operators/rs/rs_temporal_gap_fill_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -3165,7 +3165,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalHarmonicBreaksOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_harmonic_breaks_operator.h",
+        "file" : "operators/rs/rs_temporal_harmonic_breaks_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -3186,7 +3186,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalHarmonicFitOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_harmonic_fit_operator.h",
+        "file" : "operators/rs/rs_temporal_harmonic_fit_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -3207,7 +3207,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalIndexSeriesOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_index_operator.h",
+        "file" : "operators/rs/rs_temporal_index_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -3228,7 +3228,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalMonitorOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_monitor_operator.h",
+        "file" : "operators/rs/rs_temporal_monitor_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -3249,7 +3249,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalPhenologyOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_phenology_operator.h",
+        "file" : "operators/rs/rs_temporal_phenology_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -3270,7 +3270,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalRegionFeaturesOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_region_features_operator.h",
+        "file" : "operators/rs/rs_temporal_region_features_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -3291,7 +3291,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalRegularizeOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_regularize_operator.h",
+        "file" : "operators/rs/rs_temporal_regularize_operator.h",
         "gradeLiteral" : "tolerance",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -3312,7 +3312,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalSenTrendOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_sen_trend_operator.h",
+        "file" : "operators/rs/rs_temporal_sen_trend_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -3333,7 +3333,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalSmoothOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_smooth_operator.h",
+        "file" : "operators/rs/rs_temporal_smooth_operator.h",
         "gradeLiteral" : "tolerance",
         "gradeOverride" : true,
         "runtimeLiteral" : "Tolerance",
@@ -3355,7 +3355,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalSummaryOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_summary_operator.h",
+        "file" : "operators/rs/rs_temporal_summary_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -3376,7 +3376,7 @@
         "baseDepth" : 0,
         "class" : "RsTemporalTrendOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_temporal_trend_operator.h",
+        "file" : "operators/rs/rs_temporal_trend_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -3397,7 +3397,7 @@
         "baseDepth" : 0,
         "class" : "RsTerrainAnalysisOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_terrain_analysis_operator.h",
+        "file" : "operators/rs/rs_terrain_analysis_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -3418,7 +3418,7 @@
         "baseDepth" : 0,
         "class" : "RsTerrainFlowOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_terrain_flow_operator.h",
+        "file" : "operators/rs/rs_terrain_flow_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -3439,7 +3439,7 @@
         "baseDepth" : 0,
         "class" : "RsThresholdRasterOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_threshold_raster_operator.h",
+        "file" : "operators/rs/rs_threshold_raster_operator.h",
         "gradeLiteral" : "bit-exact",
         "gradeOverride" : true,
         "runtimeOverride" : false
@@ -3460,7 +3460,7 @@
         "baseDepth" : 0,
         "class" : "RsTopographicCorrectionOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_topographic_correction_operator.h",
+        "file" : "operators/rs/rs_topographic_correction_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -3481,7 +3481,7 @@
         "baseDepth" : 0,
         "class" : "RsZonalStatsOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_zonal_stats_operator.h",
+        "file" : "operators/rs/rs_zonal_stats_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false
@@ -3502,7 +3502,7 @@
         "baseDepth" : 0,
         "class" : "RsZy3ImportOperator",
         "classFound" : true,
-        "file" : "operators\\rs\\rs_zy3_import_operator.h",
+        "file" : "operators/rs/rs_zy3_import_operator.h",
         "gradeOverride" : false,
         "note" : "no explicit override up the scanned chain (framework default applies)",
         "runtimeOverride" : false

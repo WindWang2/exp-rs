@@ -8986,7 +8986,7 @@
     {
       "attributes" : 
       [
-        "family:model-runtime + schema read (rs_model_task_operators.h)"
+        "family:model-runtime + schema read (rs_model_task_operators.h: single-pass, typed JSON artifact exp-rs-classification/1 family)"
       ],
       "id" : "rs:change",
       "kind" : "scientific_contract",
@@ -9085,7 +9085,7 @@
     {
       "attributes" : 
       [
-        "family:model-runtime + schema read (rs_model_task_operators.h)"
+        "family:model-runtime + schema read (rs_model_task_operators.h: single-pass, typed JSON artifact exp-rs-classification/1 family)"
       ],
       "id" : "rs:classify",
       "kind" : "scientific_contract",
@@ -9337,7 +9337,7 @@
     {
       "attributes" : 
       [
-        "family:spectral-tools + schema read (rs_library_select_operator.h)"
+        "family:spectral-tools + schema read (rs_library_select_operator.h: requires output, persists the subset library via subset.save)"
       ],
       "id" : "rs:library_select",
       "kind" : "scientific_contract",
@@ -9571,7 +9571,7 @@
     {
       "attributes" : 
       [
-        "family:model-runtime + schema read (rs_model_task_operators.h)"
+        "family:model-runtime + schema read (rs_model_task_operators.h: single-pass, typed JSON artifact exp-rs-classification/1 family)"
       ],
       "id" : "rs:regress",
       "kind" : "scientific_contract",
@@ -9634,7 +9634,7 @@
     {
       "attributes" : 
       [
-        "family:sar + schema read (rs_sar_coregister_operator.h: residual global-shift estimate between same-grid scenes)"
+        "family:sar + schema read (rs_sar_coregister_operator.h: residual global-shift estimate + resampled slave raster; reportOnly=1 limits the run to the shift JSON)"
       ],
       "id" : "rs:sar_coregister",
       "kind" : "scientific_contract",
@@ -9823,7 +9823,7 @@
     {
       "attributes" : 
       [
-        "family:spectral-tools + schema read (rs_spectral_band_select_operator.h: subset copy)"
+        "family:spectral-tools + schema read (rs_spectral_band_select_operator.h: select/exclude bands producing the same bands; wavelength-metadata mode requires srf_or_center)"
       ],
       "id" : "rs:spectral_band_select",
       "kind" : "scientific_contract",
