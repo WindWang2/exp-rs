@@ -5,8 +5,15 @@
 #include "capability_knowledge.h"
 #include "context_ledger.h"
 #include "entity_resolver.h"
+#include "provenance_projection.h"
 #include "recipe_catalog.h"
+#include "workflow_facts.h"
 #include "../spatial_tools/spatial_tool.h"
+
+#include <QFile>
+#include <QFileInfo>
+
+#include <json/reader.h>
 
 #include <algorithm>
 #include <map>
@@ -31,6 +38,50 @@ Json::Value objectSchema( Json::Value properties, Json::Value required )
 SpatialToolPtr findTool( const std::string &name )
 {
   return SpatialToolRegistry::instance().find( name ).value_or( nullptr );
+}
+
+/// Compiler & grounding 11.0: grounds a temporal collection descriptor (the
+/// JSON sidecar temporal:create_collection writes) into a collection
+/// understanding — the descriptors are documents, not GDAL datasets, so
+/// spatial:understand cannot answer them. Anti-hallucination holds: the ref
+/// must resolve through the ONE resolver and the file must parse as a
+/// bounded descriptor; anything else is no synthesis (false).
+bool collectionUnderstandingForRef( const std::string &ref, Json::Value &understanding )
+{
+  HarnessError resolveError;
+  const std::optional<ResolvedDataset> resolved =
+    resolveDatasetRef( QString::fromStdString( ref ), &resolveError );
+  if ( !resolved )
+    return false;
+  const QFileInfo info( resolved->path );
+  if ( !info.exists() || info.suffix().compare( QLatin1String( "json" ),
+                                                Qt::CaseInsensitive ) != 0 )
+    return false;
+  QFile file( resolved->path );
+  if ( !file.open( QIODevice::ReadOnly ) )
+    return false;
+  const QByteArray bytes = file.read( 256 * 1024 );
+  file.close();
+  Json::Value doc;
+  Json::Reader reader;
+  if ( !reader.parse( std::string( bytes.constData(),
+                                   static_cast<size_t>( bytes.size() ) ), doc ) )
+    return false;
+  const Json::Value dates = wfacts::temporalDatesFromCollectionDescriptor( doc );
+  if ( dates.isNull() )
+    return false;
+  understanding = Json::Value( Json::objectValue );
+  understanding["source_kind"] = "collection";
+  understanding["path"] = resolved->path.toStdString();
+  understanding["dates"] = dates;
+  if ( doc.isMember( "name" ) && doc["name"].isString() )
+    understanding["display_name"] = doc["name"];
+  Json::Value status( Json::objectValue );
+  status["source_kind"] = "observed";
+  status["path"] = "observed";
+  status["dates"] = "observed";
+  understanding["fact_status"] = status;
+  return true;
 }
 
 } // namespace
@@ -517,8 +568,25 @@ CompiledWorkflow compileWorkflow( const CompileWorkflowRequest &request, Harness
         raw["workflow_ir"] = provenance;
         plan.raw = raw;
 
+        // Compiler & grounding 11.0: the canonical compiler projection
+        // rides the engine JSON's metadata (engine parsers ignore unknown
+        // root keys) — facts, checks, repairs and refusals in one auditable
+        // block with a stable digest.
+        Json::Value workflowDoc;
+        Json::Reader docReader;
+        if ( docReader.parse( workflowJson, workflowDoc ) )
+        {
+          const Json::Value block = projection::compilerProjection(
+            result.ir, result.analysis, result.repairs, result.refusals );
+          Json::StreamWriterBuilder compact;
+          compact["indentation"] = "";
+          result.workflowJson =
+            Json::writeString( compact, projection::attachToWorkflowJson( workflowDoc, block ) );
+        }
+        else
+          result.workflowJson = workflowJson;
+
         result.plan = plan;
-        result.workflowJson = workflowJson;
         result.stages.push_back(
           stageReport( "lower", "ok", "IR lowered to AgentPlan v2 and engine JSON" ) );
       }
@@ -687,6 +755,15 @@ class CompileWorkflowTool final : public SpatialTool
           const SpatialToolResult result = understand->execute( understandInput );
           if ( result.success && result.output.isMember( "dataset_understanding" ) )
             request.inputFacts[ name ] = result.output["dataset_understanding"];
+          else
+          {
+            // Compiler & grounding 11.0: a temporal collection descriptor is
+            // a JSON document, not a GDAL dataset — ground its dates as
+            // collection facts instead of failing the slot.
+            Json::Value collectionFacts;
+            if ( collectionUnderstandingForRef( slot["ref"].asString(), collectionFacts ) )
+              request.inputFacts[ name ] = collectionFacts;
+          }
         }
       }
 
