@@ -41,6 +41,9 @@ namespace sicnu::agent
 {
 
 using namespace sicnu::dataset;
+// MSVC: BenchmarkService is used unqualified below and no transitively
+// included header re-exports it — a pre-existing master build break.
+using sicnu::experiment::BenchmarkService;
 
 namespace
 {
