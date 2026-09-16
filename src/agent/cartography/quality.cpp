@@ -73,6 +73,25 @@ double declaredMargin( const Json::Value &spec )
   return 0.0;
 }
 
+/// Declared PRINT delivery dpi (output.dpi >= 300); 0 when the delivery is
+/// undeclared or screen-class.
+double declaredPrintDpi( const Json::Value &spec )
+{
+  if ( spec.isMember( "output" ) && spec["output"].isObject() &&
+       spec["output"].isMember( "dpi" ) && spec["output"]["dpi"].isNumeric() )
+  {
+    const double dpi = spec["output"]["dpi"].asDouble();
+    return dpi >= 300.0 ? dpi : 0.0;
+  }
+  return 0.0;
+}
+
+/// Item's declared page index (absent = 0).
+int itemPage( const Json::Value &item )
+{
+  return item.isMember( "page" ) && item["page"].isIntegral() ? item["page"].asInt() : 0;
+}
+
 /// Deterministic overflow verdict: estimated single-line text width vs the
 /// item rect (5% tolerance). Returns 0 when clean, else the needed width.
 double overflowAmountMm( const Json::Value &item, const char *collection )
@@ -250,6 +269,7 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
   const double pageH = spec["page"]["height_mm"].asDouble();
   const std::string mapRef = mainMapRef( spec );
   const double margin = declaredMargin( spec );
+  const double printDpi = declaredPrintDpi( spec );
 
   const auto hasNonEmpty = [ &spec ]( const char *collection ) {
     return spec.isMember( collection ) && spec[collection].isArray() && !spec[collection].empty();
@@ -319,6 +339,56 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
   if ( !hasNonEmpty( "source_notes" ) )
     issues.push_back( issue( "MAP_MISSING_SOURCE_NOTE", "warning", "No data-source note.", true,
                              "", "add_source_note" ) );
+
+  // --- Production 11.0: template governance contract ------------------------
+  // The instantiated draft carries its template's required_furniture
+  // contract; every declared role must be honorable by a semantic_role
+  // prefix in the finished document. Repairable roles route into the same
+  // furniture-adding repairs the MAP_MISSING_* rules use.
+  if ( spec.isMember( "template_required_furniture" ) &&
+       spec["template_required_furniture"].isArray() )
+  {
+    std::set<std::string> declaredRoles;
+    for ( int c = 0; c < mapspec::kCollectionCount; ++c )
+    {
+      const char *collection = mapspec::kCollections[c];
+      if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+        continue;
+      for ( const auto &item : spec[collection] )
+        if ( item.isObject() && item.isMember( "semantic_role" ) &&
+             item["semantic_role"].isString() )
+          declaredRoles.insert( item["semantic_role"].asString() );
+    }
+    for ( const auto &entry : spec["template_required_furniture"] )
+    {
+      if ( !entry.isObject() || !entry.isMember( "role" ) || !entry["role"].isString() )
+        continue;
+      const std::string role = entry["role"].asString();
+      const std::string prefix = requiredFurnitureRolePrefix( role );
+      if ( prefix.empty() )
+        continue;
+      bool present = false;
+      for ( const auto &declared : declaredRoles )
+        if ( declared.rfind( prefix, 0 ) == 0 )
+          present = true;
+      if ( present )
+        continue;
+      const std::string label =
+        entry.isMember( "label" ) && entry["label"].isString() ? entry["label"].asString() : role;
+      const char *action = role == "title"         ? "add_title"
+                           : role == "legend"      ? "add_legend"
+                           : role == "scale_bar"   ? "add_scale_bar"
+                           : role == "north_arrow" ? "add_north_arrow"
+                           : role == "data_source" ? "add_source_note"
+                                                   : nullptr;
+      Json::Value arguments( Json::objectValue );
+      arguments["role"] = role;
+      issues.push_back( makeIssue(
+        "MAP_REQUIRED_FURNITURE_MISSING", "warning",
+        "Template contract requires '" + label + "' furniture (role " + role + ").",
+        action != nullptr, "", action ? makeRepairSuggestion( action, arguments ) : Json::Value() ) );
+    }
+  }
 
   // --- Platform 7.0: declarative layer visibility & reference checks --------
   {
@@ -487,6 +557,18 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
         issues.push_back( issue( "MAP_TINY_FONT", "warning",
                                  id + ": font below 6 pt is unreadable at export size", true, id,
                                  "bump_font" ) );
+      // Production 11.0: print readability. A declared print delivery
+      // (output.dpi >= 300) needs >= 7 pt on annotation-class text; the
+      // screen floor stays MAP_TINY_FONT's 6 pt.
+      if ( printDpi > 0.0 && ( collectionName == "labels" || collectionName == "annotations" ) &&
+           item.isMember( "font" ) && item["font"].isObject() &&
+           item["font"].isMember( "size_pt" ) && item["font"]["size_pt"].isNumeric() &&
+           item["font"]["size_pt"].asDouble() < 7.0 )
+        issues.push_back( issue( "MAP_TINY_FONT_PRINT", "warning",
+                                 id + ": font below 7 pt is marginal for a print delivery "
+                                      "at " +
+                                   std::to_string( static_cast<int>( printDpi ) ) + " dpi",
+                                 true, id, "bump_font_print" ) );
 
       // --- text overflow (title / source-note clipping / labels) -----------
       const double overflow = overflowAmountMm( item, collection );
@@ -1076,6 +1158,163 @@ Json::Value preflightMapSpec( const Json::Value &specIn, const Json::Value &comp
           false, chartItem["id"].asString(), nullptr ) );
     }
 
+  // --- Production 11.0: alignment drift --------------------------------------
+  // Near-aligned but not aligned: same collection, same page, same width
+  // (±0.5 mm), |Δx| in (0.5, 3.0] mm — the classic "almost a column" drift
+  // a reader perceives as sloppiness. Reported once per drifting item
+  // (against its left-most peer); repair snaps the item to the peer.
+  {
+    constexpr double kAlignBandLow = 0.5;
+    constexpr double kAlignBandHigh = 3.0;
+    constexpr int kMaxAlignmentIssues = 100;
+    int alignmentIssues = 0;
+    std::set<std::string> reported;
+    for ( int c = 0; c < mapspec::kCollectionCount && alignmentIssues < kMaxAlignmentIssues; ++c )
+    {
+      const char *collection = mapspec::kCollections[c];
+      const std::string collectionName( collection );
+      // Content collections only: constraints reference items, layers carry
+      // no geometry, symbols are renderer knowledge.
+      if ( collectionName == "constraints" || collectionName == "layers" ||
+           collectionName == "symbols" )
+        continue;
+      if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+        continue;
+      const Json::Value &items = spec[collection];
+      for ( Json::ArrayIndex i = 0; i < items.size() && alignmentIssues < kMaxAlignmentIssues; ++i )
+      {
+        const Json::Value &a = items[i];
+        if ( !a.isObject() || !a.isMember( "id" ) || !a["id"].isString() ||
+             !a.isMember( "rect_mm" ) || !a["rect_mm"].isArray() || a["rect_mm"].size() != 4 ||
+             !a["rect_mm"][2].isNumeric() || a["rect_mm"][2].asDouble() <= 0 )
+          continue;
+        for ( Json::ArrayIndex j = i + 1; j < items.size(); ++j )
+        {
+          const Json::Value &b = items[j];
+          if ( !b.isObject() || !b.isMember( "id" ) || !b["id"].isString() ||
+               !b.isMember( "rect_mm" ) || !b["rect_mm"].isArray() || b["rect_mm"].size() != 4 ||
+               !b["rect_mm"][2].isNumeric() || b["rect_mm"][2].asDouble() <= 0 )
+            continue;
+          if ( itemPage( a ) != itemPage( b ) )
+            continue;
+          if ( std::fabs( a["rect_mm"][2].asDouble() - b["rect_mm"][2].asDouble() ) > 0.5 )
+            continue;
+          const double dx = std::fabs( a["rect_mm"][0].asDouble() - b["rect_mm"][0].asDouble() );
+          if ( !( dx > kAlignBandLow && dx <= kAlignBandHigh ) )
+            continue;
+          const std::string leftId =
+            a["rect_mm"][0].asDouble() < b["rect_mm"][0].asDouble() ? a["id"].asString()
+                                                                    : b["id"].asString();
+          const std::string driftId =
+            a["rect_mm"][0].asDouble() < b["rect_mm"][0].asDouble() ? b["id"].asString()
+                                                                    : a["id"].asString();
+          const double alignedX =
+            std::min( a["rect_mm"][0].asDouble(), b["rect_mm"][0].asDouble() );
+          if ( reported.insert( driftId ).second )
+          {
+            Json::Value arguments( Json::objectValue );
+            arguments["peer"] = leftId;
+            arguments["x"] = alignedX;
+            issues.push_back( makeIssue(
+              "MAP_ALIGNMENT_DEVIATION", "warning",
+              driftId + ": x drifts " + std::to_string( dx ).substr( 0, 4 ) +
+                "mm from '" + leftId + "' at the same width — near-column misalignment",
+              true, driftId, makeRepairSuggestion( "snap_align", arguments ) ) );
+            ++alignmentIssues;
+            if ( alignmentIssues >= kMaxAlignmentIssues )
+              break;
+          }
+        }
+      }
+    }
+  }
+
+  // --- Production 11.0: whitespace balance -----------------------------------
+  // Per declared page: one-sided FURNITURE (one horizontal margin more
+  // than 3x the other, above 35% of the page width and above 12 mm) reads
+  // as a mis-centered sheet. Frames/insets are excluded from measurement
+  // and from the shift, so the repair converges. Repair shifts the whole
+  // movable block by half the difference — relative geometry untouched.
+  {
+    const int pageCount =
+      spec.isMember( "pages" ) && spec["pages"].isArray()
+        ? std::max( 1, static_cast<int>( spec["pages"].size() ) )
+        : 1;
+    for ( int page = 0; page < std::min( pageCount, 10 ); ++page )
+    {
+      double pageWidth = pageW;
+      if ( spec.isMember( "pages" ) && spec["pages"].isArray() &&
+           page < static_cast<int>( spec["pages"].size() ) &&
+           spec["pages"][page].isMember( "width_mm" ) &&
+           spec["pages"][page]["width_mm"].isNumeric() )
+        pageWidth = spec["pages"][page]["width_mm"].asDouble();
+      bool any = false;
+      double minX = 0.0;
+      double maxX = 0.0;
+      for ( int c = 0; c < mapspec::kCollectionCount; ++c )
+      {
+        const char *collection = mapspec::kCollections[c];
+        const std::string collectionName( collection );
+        // Measured set == movable set (the repair excludes frames/insets):
+        // measuring immovable items would make the repair non-convergent.
+        if ( collectionName == "constraints" || collectionName == "layers" ||
+             collectionName == "symbols" || collectionName == "map_frames" ||
+             collectionName == "inset_maps" )
+          continue;
+        if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+          continue;
+        for ( const auto &item : spec[collection] )
+        {
+          if ( !item.isObject() || !item.isMember( "rect_mm" ) ||
+               !item["rect_mm"].isArray() || item["rect_mm"].size() != 4 ||
+               !item["rect_mm"][2].isNumeric() || !item["rect_mm"][3].isNumeric() ||
+               item["rect_mm"][2].asDouble() <= 0 || item["rect_mm"][3].asDouble() <= 0 )
+            continue;
+          if ( itemPage( item ) != page )
+            continue;
+          const double x = item["rect_mm"][0].asDouble();
+          const double right = x + item["rect_mm"][2].asDouble();
+          if ( !any )
+          {
+            minX = x;
+            maxX = right;
+            any = true;
+          }
+          else
+          {
+            minX = std::min( minX, x );
+            maxX = std::max( maxX, right );
+          }
+        }
+      }
+      if ( !any )
+        continue;
+      const double left = minX;
+      const double right = pageWidth - maxX;
+      if ( left < 0 || right < 0 )
+        continue; // off-page content is MAP_OFF_PAGE's business
+      const double smaller = std::min( left, right );
+      const double larger = std::max( left, right );
+      // A left-anchored map with a wide right band is legitimate
+      // cartography: fire only on a content block that hugs one edge so
+      // hard the empty band dominates the sheet (>= 35% of the page width
+      // AND > 3x the opposite margin).
+      if ( smaller <= 1e-6 || larger <= 12.0 || larger <= 3.0 * smaller ||
+           larger <= 0.35 * pageWidth )
+        continue;
+      const double delta = ( larger - smaller ) / 2.0 * ( right > left ? 1.0 : -1.0 );
+      Json::Value arguments( Json::objectValue );
+      arguments["page"] = page;
+      arguments["delta_mm"] = delta;
+      issues.push_back( makeIssue(
+        "MAP_WHITESPACE_IMBALANCE", "warning",
+        "page " + std::to_string( page + 1 ) + ": content sits " +
+          std::to_string( smaller ).substr( 0, 5 ) + "mm from one edge and " +
+          std::to_string( larger ).substr( 0, 5 ) + "mm from the other — re-center the block",
+        true, "", makeRepairSuggestion( "balance_whitespace", arguments ) ) );
+    }
+  }
+
   // --- merge compiled-layout findings (layout:preflight report) ---------------
   if ( compiledReport.isObject() && compiledReport.isMember( "issues" ) &&
        compiledReport["issues"].isArray() )
@@ -1220,61 +1459,116 @@ int repairMapSpecInternal( Json::Value &spec, const Json::Value &report )
     const std::string code = item.get( "code", "" ).asString();
     const Json::Value &action = item.get( "suggested_action", Json::Value() );
 
+    // Production 11.0: the five furniture-adding repairs, shared by the
+    // MAP_MISSING_* rules and the template-governance rule.
+    const auto addFurniture = [ &spec, &mapRef, pageW, pageH ]( const char *which ) {
+      if ( std::string( which ) == "title" )
+      {
+        Json::Value title( Json::objectValue );
+        title["semantic_role"] = "title.main";
+        title["text"] = "地图标题";
+        title["rect_mm"] = rect( 12, 6, 200, 14 );
+        title["font"] = Json::Value( Json::objectValue );
+        title["font"]["size_pt"] = 18;
+        mapspec::appendMapSpecItem( spec, "titles", title );
+        return true;
+      }
+      if ( std::string( which ) == "legend" )
+      {
+        Json::Value legend( Json::objectValue );
+        legend["semantic_role"] = "legend.primary";
+        legend["title"] = "图例";
+        legend["rect_mm"] = rect( pageW - 80, 30, 66, 80 );
+        if ( !mapRef.empty() )
+          legend["map_ref"] = mapRef;
+        mapspec::appendMapSpecItem( spec, "legends", legend );
+        return true;
+      }
+      if ( std::string( which ) == "scale_bar" )
+      {
+        Json::Value scaleBar( Json::objectValue );
+        scaleBar["semantic_role"] = "scalebar.primary";
+        scaleBar["style"] = "Single Box";
+        scaleBar["units"] = "km";
+        scaleBar["rect_mm"] = rect( 14, pageH - 20, 60, 8 );
+        if ( !mapRef.empty() )
+          scaleBar["map_ref"] = mapRef;
+        mapspec::appendMapSpecItem( spec, "scale_bars", scaleBar );
+        return true;
+      }
+      if ( std::string( which ) == "north_arrow" )
+      {
+        Json::Value arrow( Json::objectValue );
+        arrow["semantic_role"] = "north_arrow.primary";
+        arrow["rect_mm"] = rect( pageW - 16, 6, 12, 12 );
+        if ( !mapRef.empty() )
+          arrow["map_ref"] = mapRef;
+        mapspec::appendMapSpecItem( spec, "north_arrows", arrow );
+        return true;
+      }
+      if ( std::string( which ) == "source_note" )
+      {
+        Json::Value note( Json::objectValue );
+        note["semantic_role"] = "source.primary";
+        note["text"] = "数据来源: SICNU GEO RS / exp-rs";
+        note["rect_mm"] = rect( pageW - 130, pageH - 16, 116, 8 );
+        note["font"] = Json::Value( Json::objectValue );
+        note["font"]["size_pt"] = 7;
+        mapspec::appendMapSpecItem( spec, "source_notes", note );
+        return true;
+      }
+      return false;
+    };
+
     if ( code == "MAP_MISSING_TITLE" && action.isMember( "action" ) &&
          action["action"].asString() == "add_title" )
     {
-      Json::Value title( Json::objectValue );
-      title["semantic_role"] = "title.main";
-      title["text"] = "地图标题";
-      title["rect_mm"] = rect( 12, 6, 200, 14 );
-      title["font"] = Json::Value( Json::objectValue );
-      title["font"]["size_pt"] = 18;
-      mapspec::appendMapSpecItem( spec, "titles", title );
-      ++applied;
+      applied += addFurniture( "title" ) ? 1 : 0;
     }
     else if ( code == "MAP_MISSING_LEGEND" )
-    {
-      Json::Value legend( Json::objectValue );
-      legend["semantic_role"] = "legend.primary";
-      legend["title"] = "图例";
-      legend["rect_mm"] = rect( pageW - 80, 30, 66, 80 );
-      if ( !mapRef.empty() )
-        legend["map_ref"] = mapRef;
-      mapspec::appendMapSpecItem( spec, "legends", legend );
-      ++applied;
-    }
+      applied += addFurniture( "legend" ) ? 1 : 0;
     else if ( code == "MAP_MISSING_SCALE_BAR" )
-    {
-      Json::Value scaleBar( Json::objectValue );
-      scaleBar["semantic_role"] = "scalebar.primary";
-      scaleBar["style"] = "Single Box";
-      scaleBar["units"] = "km";
-      scaleBar["rect_mm"] = rect( 14, pageH - 20, 60, 8 );
-      if ( !mapRef.empty() )
-        scaleBar["map_ref"] = mapRef;
-      mapspec::appendMapSpecItem( spec, "scale_bars", scaleBar );
-      ++applied;
-    }
+      applied += addFurniture( "scale_bar" ) ? 1 : 0;
     else if ( code == "MAP_MISSING_NORTH_ARROW" )
-    {
-      Json::Value arrow( Json::objectValue );
-      arrow["semantic_role"] = "north_arrow.primary";
-      arrow["rect_mm"] = rect( pageW - 16, 6, 12, 12 );
-      if ( !mapRef.empty() )
-        arrow["map_ref"] = mapRef;
-      mapspec::appendMapSpecItem( spec, "north_arrows", arrow );
-      ++applied;
-    }
+      applied += addFurniture( "north_arrow" ) ? 1 : 0;
     else if ( code == "MAP_MISSING_SOURCE_NOTE" )
+      applied += addFurniture( "source_note" ) ? 1 : 0;
+    else if ( code == "MAP_REQUIRED_FURNITURE_MISSING" )
     {
-      Json::Value note( Json::objectValue );
-      note["semantic_role"] = "source.primary";
-      note["text"] = "数据来源: SICNU GEO RS / exp-rs";
-      note["rect_mm"] = rect( pageW - 130, pageH - 16, 116, 8 );
-      note["font"] = Json::Value( Json::objectValue );
-      note["font"]["size_pt"] = 7;
-      mapspec::appendMapSpecItem( spec, "source_notes", note );
-      ++applied;
+      // The role travels in the suggestion arguments; only the roles with
+      // an existing furniture repair are actionable.
+      const std::string role = action.isMember( "arguments" ) &&
+                                   action["arguments"].isObject() &&
+                                   action["arguments"].isMember( "role" ) &&
+                                   action["arguments"]["role"].isString()
+                                 ? action["arguments"]["role"].asString()
+                                 : std::string();
+      const std::string prefix = requiredFurnitureRolePrefix( role );
+      // Re-check: another repair in this pass may already have added it.
+      bool present = false;
+      for ( int c = 0; c < mapspec::kCollectionCount && !present; ++c )
+      {
+        const char *collection = mapspec::kCollections[c];
+        if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+          continue;
+        for ( const auto &candidate : spec[collection] )
+          if ( candidate.isObject() && candidate.isMember( "semantic_role" ) &&
+               candidate["semantic_role"].isString() &&
+               candidate["semantic_role"].asString().rfind( prefix, 0 ) == 0 )
+          {
+            present = true;
+            break;
+          }
+      }
+      if ( present )
+        continue;
+      const char *which = role == "title"         ? "title"
+                          : role == "legend"      ? "legend"
+                          : role == "scale_bar"   ? "scale_bar"
+                          : role == "north_arrow" ? "north_arrow"
+                          : role == "data_source" ? "source_note"
+                                                  : nullptr;
+      applied += which && addFurniture( which ) ? 1 : 0;
     }
     else if ( code == "MAP_OFF_PAGE" || code == "MAP_INVALID_RECT" )
     {
@@ -1306,6 +1600,68 @@ int repairMapSpecInternal( Json::Value &spec, const Json::Value &report )
       if ( !foundItem.isMember( "font" ) || !foundItem["font"].isObject() )
         foundItem["font"] = Json::Value( Json::objectValue );
       foundItem["font"]["size_pt"] = 8;
+      ++applied;
+    }
+    else if ( code == "MAP_TINY_FONT_PRINT" )
+    {
+      const std::string id = item.get( "item_id", "" ).asString();
+      ItemRef found = findItemMutable( spec, id );
+      if ( !found.item )
+        continue;
+      Json::Value &foundItem = *found.item;
+      if ( !foundItem.isMember( "font" ) || !foundItem["font"].isObject() )
+        foundItem["font"] = Json::Value( Json::objectValue );
+      foundItem["font"]["size_pt"] = 7;
+      ++applied;
+    }
+    else if ( code == "MAP_ALIGNMENT_DEVIATION" )
+    {
+      const std::string id = item.get( "item_id", "" ).asString();
+      const double alignedX = action.isMember( "arguments" ) &&
+                                  action["arguments"].isObject() &&
+                                  action["arguments"].isMember( "x" ) &&
+                                  action["arguments"]["x"].isNumeric()
+                                ? action["arguments"]["x"].asDouble()
+                                : 0.0;
+      ItemRef found = findItemMutable( spec, id );
+      if ( !found.item || !found.item->isMember( "rect_mm" ) ||
+           ( *found.item )["rect_mm"].size() != 4 )
+        continue;
+      ( *found.item )["rect_mm"][0] = alignedX;
+      ++applied;
+    }
+    else if ( code == "MAP_WHITESPACE_IMBALANCE" )
+    {
+      if ( !action.isMember( "arguments" ) || !action["arguments"].isObject() ||
+           !action["arguments"].isMember( "delta_mm" ) ||
+           !action["arguments"]["delta_mm"].isNumeric() ||
+           !action["arguments"].isMember( "page" ) || !action["arguments"]["page"].isIntegral() )
+        continue;
+      const double delta = action["arguments"]["delta_mm"].asDouble();
+      const int page = action["arguments"]["page"].asInt();
+      // Shift the whole content block of that page — every rect-bearing
+      // item except frames/insets stays in the same relative arrangement.
+      for ( int c = 0; c < mapspec::kCollectionCount; ++c )
+      {
+        const char *collection = mapspec::kCollections[c];
+        const std::string collectionName( collection );
+        if ( collectionName == "constraints" || collectionName == "layers" ||
+             collectionName == "symbols" || collectionName == "map_frames" ||
+             collectionName == "inset_maps" )
+          continue;
+        if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+          continue;
+        for ( auto &candidate : spec[collection] )
+        {
+          if ( !candidate.isObject() || !candidate.isMember( "rect_mm" ) ||
+               !candidate["rect_mm"].isArray() || candidate["rect_mm"].size() != 4 ||
+               !candidate["rect_mm"][0].isNumeric() )
+            continue;
+          if ( itemPage( candidate ) != page )
+            continue;
+          candidate["rect_mm"][0] = candidate["rect_mm"][0].asDouble() + delta;
+        }
+      }
       ++applied;
     }
     else if ( code == "MAP_TITLE_OVERFLOW" || code == "MAP_SOURCE_NOTE_CLIPPING" ||
@@ -1721,6 +2077,13 @@ Json::Value preflightRuleCatalog()
     { "MAP_OFF_PAGE", "error", true, "Item rect exceeds the page bounds." },
     { "MAP_MARGIN_VIOLATION", "warning", true, "Item violates a declared page.margin_mm." },
     { "MAP_TINY_FONT", "warning", true, "Font below 6 pt." },
+    { "MAP_TINY_FONT_PRINT", "warning", true,
+      "Annotation-class font below 7 pt on a declared print delivery (output.dpi >= 300)." },
+    { "MAP_ALIGNMENT_DEVIATION", "warning", true,
+      "Same-width items drift 0.5-3 mm on x (near-column misalignment); repair snaps to the peer." },
+    { "MAP_WHITESPACE_IMBALANCE", "warning", true,
+      "One-sided furniture block: one horizontal margin exceeds 3x the other, 35% of the "
+      "page width and 12 mm; repair re-centers the block (frames/insets excluded)." },
     { "MAP_TITLE_OVERFLOW", "warning", true, "Title text likely overflows its rect." },
     { "MAP_SOURCE_NOTE_CLIPPING", "warning", true, "Source-note text likely clipped." },
     { "MAP_TEXT_OVERFLOW", "warning", true, "Label/annotation text likely overflows its rect." },
@@ -1754,6 +2117,9 @@ Json::Value preflightRuleCatalog()
       "Declarative layer is referenced by no map frame or inset." },
     { "MAP_LEGEND_MISMATCH", "warning", false,
       "Explicit legend classes do not all appear in the referenced style's classes." },
+    { "MAP_REQUIRED_FURNITURE_MISSING", "warning", true,
+      "Template governance contract declares required furniture the document lacks; "
+      "repair routes into the matching add_* furniture repair." },
     { "MAP_NODATA_LEGEND", "warning", true,
       "A legend referencing a style that declares raster.nodata carries no nodata "
       "mention; repair stamps legend.nodata from the style." },

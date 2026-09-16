@@ -62,6 +62,9 @@ using sicnu::experiment::BenchmarkService;
 // a5b11b7f10 does not compile sicnu_agent without this line).
 // Master build repair (pre-existing, D19 merge): unqualified names below
 // resolve into sicnu::experiment only with this using-directive restored.
+// D19 benchmark tool wrappers (benchmarkList et al) call BenchmarkService
+// unqualified; it lives in sicnu::experiment and no using-directive covers
+// it, so the TU fails to compile without this (build-unblock; see PR #1009).
 using namespace sicnu::experiment;
 
 namespace

@@ -117,6 +117,52 @@ Json::Value compactTemplateSummary( const Json::Value &descriptor );
 /// the diff is evidence for the agent, never a full-document dump.
 Json::Value diffTemplates( const Json::Value &before, const Json::Value &after );
 
+//
+// Template governance (Cartography Production 11.0).
+//
+// Descriptors now carry a governance surface alongside the composition
+// surface: a `descriptor_version` with a real migration path (the analog
+// of upgradeMapSpec the catalog never had), a lifecycle (`deprecated`,
+// `replaced_by`) and a `required_furniture` contract that instantiates
+// into the draft and is enforced by preflight.
+//
+
+/// Current descriptor governance schema. v2 = v1 + governance members
+/// (descriptor_version, required_furniture, deprecated/replaced_by);
+/// every member is optional, so v2 is a strict superset of v1.
+inline constexpr int kTemplateDescriptorVersion = 2;
+
+/// The closed required_furniture role vocabulary, mapped onto the
+/// semantic_role prefixes templates/components stamp ("title" →
+/// "title.", "scale_bar" → "scalebar.", …).
+bool isRequiredFurnitureRole( const std::string &role );
+
+/// required_furniture role → the semantic_role prefix it enforces
+/// ("title" → "title.", "scale_bar" → "scalebar.", "data_source" →
+/// "source."). Empty for unknown roles.
+std::string requiredFurnitureRolePrefix( const std::string &role );
+
+/// Governance-surface validation: descriptor_version (absent = 1),
+/// lifecycle shape, required_furniture entries ({role, label?}, ≤16).
+/// Empty returned vector = valid.
+std::vector<std::string> validateTemplateGovernance( const Json::Value &descriptor );
+
+/// Migrates a descriptor to kTemplateDescriptorVersion. v1 → v2 stamps the
+/// version and derives `required_furniture` from the declared slot roles
+/// (title.main → title, legend.primary → legend, scalebar.primary →
+/// scale_bar, north_arrow.primary → north_arrow, source.primary →
+/// data_source, map.primary → map) when the descriptor declares none.
+/// Idempotent: v2 descriptors pass through unchanged; unknown/future
+/// versions come back verbatim with a problem. Malformed input is returned
+/// unchanged.
+Json::Value upgradeTemplateDescriptor( const Json::Value &descriptor,
+                                       std::vector<std::string> *problems = nullptr );
+
+/// Lifecycle projection of a descriptor: {deprecated: bool,
+/// replaced_by: string|null}. Replaced-by chains are NOT followed here —
+/// the catalog loader reports broken chains as load problems.
+Json::Value templateLifecycle( const Json::Value &descriptor );
+
 class ComponentRegistry
 {
   public:

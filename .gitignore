@@ -332,3 +332,8 @@ data/labs/_tmp/
 !.planning/advanced-insar-platform-11/
 .planning/advanced-insar-platform-11/*
 !.planning/advanced-insar-platform-11/*.md
+
+# cartography-production-11: track planning notes (markdown only; logs stay local).
+!.planning/cartography-production-11/
+.planning/cartography-production-11/*
+!.planning/cartography-production-11/*.md

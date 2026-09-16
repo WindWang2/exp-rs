@@ -635,7 +635,19 @@ void TemplateRegistry::ensureLoadedLocked() const
       // problem surfaces through loadProblems() like every other registry.
       for ( const auto &facetProblem : validateTemplateFacets( resolved ) )
         mLoadProblems << QString::fromStdString( facetProblem );
-      mTemplates.insert( qkey, resolved );
+      // Production 11.0: normalize every loaded descriptor to the current
+      // governance schema (v1 catalogs migrate at load; problems surface
+      // through loadProblems()) and validate the governance surface.
+      std::vector<std::string> governanceProblems;
+      Json::Value governed =
+        upgradeTemplateDescriptor( resolved, &governanceProblems );
+      if ( governed.isNull() )
+        governed = resolved;
+      for ( const auto &governanceProblem : governanceProblems )
+        mLoadProblems << QString::fromStdString( governanceProblem );
+      for ( const auto &governanceProblem : validateTemplateGovernance( governed ) )
+        mLoadProblems << QString::fromStdString( governanceProblem );
+      mTemplates.insert( qkey, governed.isNull() ? resolved : governed );
     }
   }
 }
@@ -1576,6 +1588,180 @@ Json::Value diffTemplates( const Json::Value &before, const Json::Value &after )
   return out;
 }
 
+//
+// Template governance (Cartography Production 11.0).
+//
+
+bool isRequiredFurnitureRole( const std::string &role )
+{
+  static const std::set<std::string> kRoles = { "title",   "legend",     "scale_bar",
+                                                "north_arrow", "data_source", "map" };
+  return kRoles.count( role ) > 0;
+}
+
+/// required_furniture role → the semantic_role prefix it enforces.
+std::string requiredFurnitureRolePrefix( const std::string &role )
+{
+  if ( role == "title" )
+    return "title.";
+  if ( role == "legend" )
+    return "legend.";
+  if ( role == "scale_bar" )
+    return "scalebar.";
+  if ( role == "north_arrow" )
+    return "north_arrow.";
+  if ( role == "data_source" )
+    return "source.";
+  if ( role == "map" )
+    return "map.";
+  return std::string();
+}
+
+std::vector<std::string> validateTemplateGovernance( const Json::Value &descriptor )
+{
+  std::vector<std::string> problems;
+  if ( !descriptor.isObject() )
+  {
+    problems.push_back( "template descriptor must be an object" );
+    return problems;
+  }
+  if ( descriptor.isMember( "descriptor_version" ) &&
+       ( !descriptor["descriptor_version"].isIntegral() ||
+         descriptor["descriptor_version"].asInt() < 1 ||
+         descriptor["descriptor_version"].asInt() > kTemplateDescriptorVersion ) )
+    problems.push_back( "descriptor_version must be 1.." +
+                        std::to_string( kTemplateDescriptorVersion ) );
+  if ( descriptor.isMember( "deprecated" ) && !descriptor["deprecated"].isBool() )
+    problems.push_back( "deprecated must be a boolean" );
+  if ( descriptor.isMember( "replaced_by" ) &&
+       ( !descriptor["replaced_by"].isString() || descriptor["replaced_by"].asString().empty() ) )
+    problems.push_back( "replaced_by must be a non-empty template id" );
+  if ( descriptor.isMember( "replaced_by" ) &&
+       ( !descriptor.isMember( "deprecated" ) || !descriptor["deprecated"].asBool() ) )
+    problems.push_back( "replaced_by only makes sense on a deprecated descriptor" );
+  if ( descriptor.isMember( "required_furniture" ) )
+  {
+    const Json::Value &required = descriptor["required_furniture"];
+    if ( !required.isArray() )
+      problems.push_back( "required_furniture must be an array" );
+    else if ( static_cast<int>( required.size() ) > 16 )
+      problems.push_back( "required_furniture exceeds the 16-entry budget" );
+    else
+    {
+      std::set<std::string> seen;
+      for ( const auto &entry : required )
+      {
+        if ( !entry.isObject() || !entry.isMember( "role" ) || !entry["role"].isString() )
+        {
+          problems.push_back( "required_furniture entries need a role string" );
+          continue;
+        }
+        const std::string role = entry["role"].asString();
+        if ( !isRequiredFurnitureRole( role ) )
+          problems.push_back( "required_furniture role '" + role + "' is outside the "
+                              "title|legend|scale_bar|north_arrow|data_source|map vocabulary" );
+        else if ( !seen.insert( role ).second )
+          problems.push_back( "required_furniture repeats role '" + role + "'" );
+        if ( entry.isMember( "label" ) && !entry["label"].isString() )
+          problems.push_back( "required_furniture label must be a string" );
+      }
+    }
+  }
+  return problems;
+}
+
+Json::Value upgradeTemplateDescriptor( const Json::Value &descriptor,
+                                       std::vector<std::string> *problems )
+{
+  const auto fail = [ problems ]( const std::string &message ) {
+    if ( problems )
+      problems->push_back( message );
+    return Json::Value( Json::nullValue );
+  };
+  if ( !descriptor.isObject() )
+    return fail( "template descriptor must be an object" );
+  int version = 1;
+  if ( descriptor.isMember( "descriptor_version" ) )
+  {
+    if ( !descriptor["descriptor_version"].isIntegral() )
+      return fail( "descriptor_version must be an integer" );
+    version = descriptor["descriptor_version"].asInt();
+    if ( version > kTemplateDescriptorVersion )
+    {
+      // Future descriptor: pass through verbatim — never downgrade.
+      if ( problems )
+        problems->push_back( "descriptor_version " + std::to_string( version ) +
+                             " is newer than supported " +
+                             std::to_string( kTemplateDescriptorVersion ) +
+                             "; descriptor kept verbatim" );
+      return descriptor;
+    }
+  }
+  if ( version >= kTemplateDescriptorVersion )
+    return descriptor; // already current (idempotent)
+
+  Json::Value upgraded = descriptor;
+  // v1 → v2: stamp the governance version; a v1 descriptor without
+  // required_furniture derives the contract from its declared slot roles,
+  // so loading a legacy catalog yields v2 documents with the SAME
+  // enforcement surface a hand-authored v2 descriptor has.
+  Json::Value required( Json::arrayValue );
+  const Json::Value slotList = descriptor.isMember( "slots" ) &&
+                                   descriptor["slots"].isArray()
+                                 ? descriptor["slots"]
+                                 : Json::Value( Json::arrayValue );
+  for ( const auto &slot : slotList )
+  {
+    if ( !slot.isObject() || !slot.isMember( "role" ) || !slot["role"].isString() )
+      continue;
+    const std::string semanticRole = slot["role"].asString();
+    std::string governanceRole;
+    if ( semanticRole.rfind( "title.", 0 ) == 0 )
+      governanceRole = "title";
+    else if ( semanticRole.rfind( "legend.", 0 ) == 0 )
+      governanceRole = "legend";
+    else if ( semanticRole.rfind( "scalebar.", 0 ) == 0 )
+      governanceRole = "scale_bar";
+    else if ( semanticRole.rfind( "north_arrow.", 0 ) == 0 )
+      governanceRole = "north_arrow";
+    else if ( semanticRole.rfind( "source.", 0 ) == 0 )
+      governanceRole = "data_source";
+    else if ( semanticRole.rfind( "map.", 0 ) == 0 )
+      governanceRole = "map";
+    if ( governanceRole.empty() )
+      continue;
+    bool present = false;
+    for ( const auto &entry : required )
+      if ( entry.isObject() && entry.isMember( "role" ) && entry["role"].isString() &&
+           entry["role"].asString() == governanceRole )
+        present = true;
+    if ( present )
+      continue;
+    Json::Value entry( Json::objectValue );
+    entry["role"] = governanceRole;
+    entry["derived"] = true;
+    required.append( entry );
+  }
+  if ( !descriptor.isMember( "required_furniture" ) && !required.empty() )
+    upgraded["required_furniture"] = required;
+  upgraded["descriptor_version"] = kTemplateDescriptorVersion;
+  return upgraded;
+}
+
+Json::Value templateLifecycle( const Json::Value &descriptor )
+{
+  Json::Value lifecycle( Json::objectValue );
+  lifecycle["deprecated"] =
+    descriptor.isMember( "deprecated" ) && descriptor["deprecated"].isBool()
+      ? descriptor["deprecated"].asBool()
+      : false;
+  lifecycle["replaced_by"] =
+    descriptor.isMember( "replaced_by" ) && descriptor["replaced_by"].isString()
+      ? Json::Value( descriptor["replaced_by"] )
+      : Json::Value( Json::nullValue );
+  return lifecycle;
+}
+
 Json::Value TemplateRegistry::instantiateTemplate( const QString &id, const Json::Value &params,
                                                    QString *error ) const
 {
@@ -1605,6 +1791,14 @@ Json::Value TemplateRegistry::instantiateTemplate( const QString &id, const Json
        tmpl["inheritance"].isMember( "parents" ) )
     provenance["parents"] = tmpl["inheritance"]["parents"];
   spec["template_provenance"] = provenance;
+  // Production 11.0: governance travels with the draft — the lifecycle is
+  // surfaced (never refused: deprecation is knowledge, not a lock) and the
+  // required_furniture contract is stamped so preflight can enforce it
+  // against the finished document.
+  spec["template_lifecycle"] = templateLifecycle( tmpl );
+  if ( tmpl.isMember( "required_furniture" ) && tmpl["required_furniture"].isArray() &&
+       !tmpl["required_furniture"].empty() )
+    spec["template_required_furniture"] = tmpl["required_furniture"];
   // Template style (token set + medium) travels into the draft.
   if ( tmpl.isMember( "style" ) && tmpl["style"].isObject() )
     spec["style"] = tmpl["style"];

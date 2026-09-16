@@ -58,11 +58,26 @@ completeness (enabled ⇒ coverage layer set, sort key present).
 2. `solution:instantiate` with the coverage layer bound → MapSpec draft
    (template `atlas-series-a4l` / `report-atlas-appendix-a4l` already carry
    the atlas block).
-3. `cartography:compose` — the compiler attaches coverage/filter/sort/margin.
+3. `cartography:compose` — the compiler attaches coverage/filter/sort/margin
+   and marks the map frames atlas-driven.
 4. `cartography:preflight` — `MAP_ATLAS_INCOMPLETE` catches the missing
    coverage layer before export.
-5. `layout:export` with the atlas enabled exports per-feature pages named by
-   `filename_expression`.
+5. `cartography:produce {directory}` — the atlas delivery: produce iterates
+   the coverage features and writes one atomic page per feature named by
+   `filename_expression` (sanitized into a safe file stem), each verified by
+   SHA-256, plus `<base>.png.manifest.json` recording every page's
+   feature id, label, coverage-CRS extent and digest. Pages are
+   cancellable at every page boundary; a failed or cancelled delivery
+   leaves the directory untouched. **png only**: a pdf/svg request exports
+   the layout as one static all-pages document (mode `single` in the
+   manifest) instead of pretending per-feature semantics.
+6. Re-verify any delivery from the manifest alone: recompute each page's
+   hash from disk and compare (`readExportManifest` reports digest drift).
+
+Note: before Production 11.0, `cartography:export` never iterated the
+atlas — the per-feature export claimed here earlier had no backing code.
+The delivery path above (`exportMapAtlas` behind `cartography:produce`) is
+the sanctioned implementation.
 
 ## Testing
 

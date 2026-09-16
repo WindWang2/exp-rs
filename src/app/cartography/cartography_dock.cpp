@@ -1,14 +1,18 @@
 /***************************************************************************
  * cartography_dock.cpp — desktop surface over the cartography operator family
+ *
+ * Production 11.0: every action runs as a TaskCenter job (the SAME
+ * registry dispatch a workflow node takes) — no operator executes on the
+ * GUI thread anymore. The dock keeps its no-engine rule: it drafts specs,
+ * submits cartography:* operators, and renders their structured reports.
  ***************************************************************************/
 #include "cartography_dock.h"
 
 #include "agent/cartography/registry.h"
 
-#include "operators/framework/rs_operator.h"
-#include "operators/framework/rs_operator_context.h"
-#include "operators/framework/rs_operator_error.h"
-#include "operators/framework/rs_operator_registry.h"
+#include "../shell/rs_job_runner.h"
+
+#include <processing/framework/task_center.h>
 
 #include <QComboBox>
 #include <QDir>
@@ -132,12 +136,23 @@ void CartographyDock::buildUi()
     m_exportBtn = new QPushButton( tr( "导出" ), central );
     m_exportBtn->setObjectName( QStringLiteral( "rsCartographyExport" ) );
     m_exportBtn->setAccessibleName( tr( "导出" ) );
+    m_produceBtn = new QPushButton( tr( "生产导出" ), central );
+    m_produceBtn->setObjectName( QStringLiteral( "rsCartographyProduce" ) );
+    m_produceBtn->setAccessibleName( tr( "生产导出（排版→修复→导出→清单）" ) );
+    m_produceBtn->setToolTip(
+      tr( "一次完成：排版 → 有界修复 → 导出（含图集）→ 清单 sidecar；原子发布。" ) );
+    m_stopBtn = new QPushButton( tr( "停止" ), central );
+    m_stopBtn->setObjectName( QStringLiteral( "rsCartographyStop" ) );
+    m_stopBtn->setAccessibleName( tr( "停止当前制图任务" ) );
+    m_stopBtn->setEnabled( false );
     exportRow->addWidget( m_formatCombo );
     exportRow->addWidget( new QLabel( tr( "DPI：" ), central ) );
     exportRow->addWidget( m_dpiSpin );
     exportRow->addWidget( m_directoryEdit, 1 );
     exportRow->addWidget( browseBtn );
     exportRow->addWidget( m_exportBtn );
+    exportRow->addWidget( m_produceBtn );
+    exportRow->addWidget( m_stopBtn );
     layout->addLayout( exportRow );
 
     connect( browseBtn, &QPushButton::clicked, this, [this] {
@@ -172,7 +187,8 @@ void CartographyDock::buildUi()
     connect( m_preflightBtn, &QPushButton::clicked, this, &CartographyDock::runPreflight );
     connect( m_repairBtn, &QPushButton::clicked, this, &CartographyDock::runRepair );
     connect( m_exportBtn, &QPushButton::clicked, this, &CartographyDock::runExport );
-
+    connect( m_produceBtn, &QPushButton::clicked, this, &CartographyDock::runProduce );
+    connect( m_stopBtn, &QPushButton::clicked, this, &CartographyDock::cancelRunningJob );
     setWidget( central );
 }
 
@@ -249,47 +265,94 @@ Json::Value CartographyDock::buildDraft( QString *error ) const
     return draft;
 }
 
-Json::Value CartographyDock::runOperator( const QString &operatorId, const Json::Value &params,
-                                          QString *error )
+bool CartographyDock::submitOperatorJob(
+  const QString &operatorId, const Json::Value &params,
+  const std::function<void( const Json::Value &, const QString & )> &onDone )
 {
+    if ( m_runningTaskId >= 0 )
+    {
+        emit statusMessage( tr( "已有一个制图任务在执行（可点「停止」取消）。" ) );
+        return false;
+    }
     auto op = sicnu::operators::RSOperatorRegistry::instance().create( operatorId.toStdString() );
     if ( !op )
     {
-        if ( error )
-            *error = tr( "算子未注册：%1（应用启动时应完成 cartography 算子族注册）" ).arg( operatorId );
-        return {};
+        emit statusMessage(
+          tr( "算子未注册：%1（应用启动时应完成 cartography 算子族注册）" ).arg( operatorId ) );
+        return false;
     }
-    sicnu::operators::RSOperatorContext context;
-    try
+
+    // Registry dispatch: the JobEngine resolves algorithmId through
+    // RSOperatorRegistry and runs op->run(params, ctx) on a worker with
+    // TaskCenter-owned cancel/progress wiring — the identical path a
+    // workflow node takes. The dock adds no execution semantics.
+    sicnu::jobs::JobRequest request;
+    request.algorithmId = operatorId.toStdString();
+    request.title = operatorId.toStdString();
+    request.source = "ui";
+    request.params = params;
+
+    const long taskId = sicnu::TaskCenter::instance().submitJob( request );
+    if ( taskId <= 0 )
     {
-        return op->run( params, context );
+        emit statusMessage( tr( "%1 提交 TaskCenter 失败。" ).arg( operatorId ) );
+        return false;
     }
-    catch ( const sicnu::operators::RSOperatorError &e )
-    {
-        if ( error )
-            *error = tr( "%1 失败：%2" )
-                         .arg( operatorId, QString::fromStdString( e.message() ) );
-        if ( !e.details().isNull() && m_reportView )
-        {
-            QString heading = tr( "%1 结构化错误" ).arg( operatorId );
-            m_reportView->setPlainText( heading + "\n" + prettyJson( e.details() ) );
-        }
-        return {};
-    }
-    catch ( const std::exception &e )
-    {
-        if ( error )
-            *error = tr( "%1 失败：%2" ).arg( operatorId, QString::fromUtf8( e.what() ) );
-        return {};
-    }
-    catch ( ... )
-    {
-        // A foreign exception (e.g. Json::LogicError from a malformed
-        // template) must not escape into the Qt event loop.
-        if ( error )
-            *error = tr( "%1 失败：未知异常" ).arg( operatorId );
-        return {};
-    }
+    m_runningTaskId = taskId;
+    setBusy( true );
+
+    auto *lifetime = new QObject( this );
+    // Progress reflection: TaskCenter owns the authoritative progress feed
+    // (its task panel renders it); the dock mirrors a compact status line.
+    // Both connections ride the per-job lifetime object so stale handlers
+    // disappear with the job.
+    connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, lifetime,
+             [ this ]( const sicnu::AlgorithmTaskInfo &info ) {
+                 if ( info.taskId != m_runningTaskId )
+                     return;
+                 if ( info.status == sicnu::TaskStatus::Running &&
+                      info.progressPercentage >= 0.0 )
+                     emit statusMessage( tr( "制图任务进行中：%1%" )
+                                           .arg( static_cast<int>( info.progressPercentage *
+                                                                  100.0 ) ) );
+             } );
+
+    connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, lifetime,
+             [ this, lifetime, operatorId, onDone ]( const sicnu::AlgorithmTaskInfo &info ) {
+                 if ( info.taskId != m_runningTaskId )
+                     return;
+                 if ( info.status != sicnu::TaskStatus::Completed &&
+                      info.status != sicnu::TaskStatus::Failed &&
+                      info.status != sicnu::TaskStatus::Canceled )
+                     return;
+                 m_runningTaskId = -1;
+                 setBusy( false );
+                 lifetime->deleteLater();
+                 if ( info.status == sicnu::TaskStatus::Completed )
+                 {
+                     onDone( info.resultPayload, QString() );
+                     return;
+                 }
+                 const QString message = info.errorMessage.isEmpty()
+                                           ? tr( "%1 任务异常终止。" ).arg( operatorId )
+                                           : info.errorMessage;
+                 if ( !info.resultPayload.isNull() && m_reportView )
+                     showReport( tr( "%1 结构化错误" ).arg( operatorId ), info.resultPayload );
+                 onDone( {}, message );
+             } );
+    emit statusMessage( tr( "%1 已提交后台任务（#%2）。" ).arg( operatorId ).arg( taskId ) );
+    return true;
+}
+
+void CartographyDock::setBusy( bool busy )
+{
+    m_composeBtn->setEnabled( !busy );
+    m_preflightBtn->setEnabled( !busy );
+    m_repairBtn->setEnabled( !busy );
+    m_exportBtn->setEnabled( !busy );
+    m_produceBtn->setEnabled( !busy );
+    m_stopBtn->setEnabled( busy );
+    m_templateCombo->setEnabled( !busy );
 }
 
 void CartographyDock::showReport( const QString &heading, const Json::Value &payload )
@@ -318,24 +381,29 @@ void CartographyDock::runCompose()
     }
     Json::Value params( Json::objectValue );
     params["mapspec"] = draft;
-    Json::Value result = runOperator( QStringLiteral( "cartography:compose" ), params, &error );
-    if ( !error.isEmpty() )
-    {
-        emit statusMessage( error );
-        return;
-    }
-    adoptSpec( result.isMember( "mapspec" ) ? result["mapspec"] : draft );
-    const bool compiled = result.isMember( "compiled" ) && result["compiled"].asBool();
-    showReport( compiled ? tr( "排版完成（结构化摘要）" ) : tr( "排版未通过" ), result );
-    if ( compiled )
-    {
-        updatePreview( m_composedLayoutName );
-        emit statusMessage( tr( "排版完成：布局 %1 已生成。" ).arg( m_composedLayoutName ) );
-    }
-    else
-    {
-        emit statusMessage( tr( "排版失败：见质量报告。" ) );
-    }
+    const bool submitted = submitOperatorJob(
+      QStringLiteral( "cartography:compose" ), params,
+      [ this, draft ]( const Json::Value &result, const QString &jobError ) {
+          if ( !jobError.isEmpty() )
+          {
+              emit statusMessage( jobError );
+              return;
+          }
+          adoptSpec( result.isMember( "mapspec" ) ? result["mapspec"] : draft );
+          const bool compiled = result.isMember( "compiled" ) && result["compiled"].asBool();
+          showReport( compiled ? tr( "排版完成（结构化摘要）" ) : tr( "排版未通过" ), result );
+          if ( compiled )
+          {
+              updatePreview( m_composedLayoutName );
+              emit statusMessage( tr( "排版完成：布局 %1 已生成。" ).arg( m_composedLayoutName ) );
+          }
+          else
+          {
+              emit statusMessage( tr( "排版失败：见质量报告。" ) );
+          }
+      } );
+    if ( submitted )
+        m_reportView->setPlainText( tr( "排版任务已提交。" ) );
 }
 
 void CartographyDock::runPreflight()
@@ -351,17 +419,19 @@ void CartographyDock::runPreflight()
             return;
         }
     }
-    QString error;
     Json::Value params( Json::objectValue );
     params["mapspec"] = spec;
-    const Json::Value result = runOperator( QStringLiteral( "cartography:preflight" ), params, &error );
-    if ( !error.isEmpty() )
-    {
-        emit statusMessage( error );
-        return;
-    }
-    showReport( tr( "检查报告" ), result );
-    emit statusMessage( tr( "检查完成：见质量报告。" ) );
+    submitOperatorJob(
+      QStringLiteral( "cartography:preflight" ), params,
+      [ this ]( const Json::Value &result, const QString &jobError ) {
+          if ( !jobError.isEmpty() )
+          {
+              emit statusMessage( jobError );
+              return;
+          }
+          showReport( tr( "检查报告" ), result );
+          emit statusMessage( tr( "检查完成：见质量报告。" ) );
+      } );
 }
 
 void CartographyDock::runRepair()
@@ -379,22 +449,24 @@ void CartographyDock::runRepair()
     }
     Json::Value params( Json::objectValue );
     params["mapspec"] = spec;
-    QString error;
-    const Json::Value result = runOperator( QStringLiteral( "cartography:repair" ), params, &error );
-    if ( !error.isEmpty() )
-    {
-        emit statusMessage( error );
-        return;
-    }
-    adoptSpec( result.isMember( "mapspec" ) ? result["mapspec"] : spec );
-    showReport( tr( "修复台账（applied / still_reported）" ), result );
-    emit statusMessage( tr( "修复完成：%1 项已应用（%2 轮）。" )
-                            .arg( result.isMember( "repairs_applied" )
-                                      ? result["repairs_applied"].asInt()
-                                      : 0 )
-                            .arg( result.isMember( "iterations" )
-                                      ? result["iterations"].asInt()
-                                      : 0 ) );
+    submitOperatorJob(
+      QStringLiteral( "cartography:repair" ), params,
+      [ this, spec ]( const Json::Value &result, const QString &jobError ) {
+          if ( !jobError.isEmpty() )
+          {
+              emit statusMessage( jobError );
+              return;
+          }
+          adoptSpec( result.isMember( "mapspec" ) ? result["mapspec"] : spec );
+          showReport( tr( "修复台账（applied / still_reported）" ), result );
+          emit statusMessage( tr( "修复完成：%1 项已应用（%2 轮）。" )
+                                  .arg( result.isMember( "repairs_applied" )
+                                            ? result["repairs_applied"].asInt()
+                                            : 0 )
+                                  .arg( result.isMember( "iterations" )
+                                            ? result["iterations"].asInt()
+                                            : 0 ) );
+      } );
 }
 
 void CartographyDock::runExport()
@@ -417,21 +489,81 @@ void CartographyDock::runExport()
     params["format"] = m_formatCombo->currentText().toStdString();
     params["directory"] = directory.toStdString();
     params["dpi"] = m_dpiSpin->value();
-    QString error;
-    const Json::Value result = runOperator( QStringLiteral( "cartography:export" ), params, &error );
-    if ( !error.isEmpty() )
+    submitOperatorJob(
+      QStringLiteral( "cartography:export" ), params,
+      [ this ]( const Json::Value &result, const QString &jobError ) {
+          if ( !jobError.isEmpty() )
+          {
+              emit statusMessage( jobError );
+              return;
+          }
+          showReport( tr( "导出证据（原子写入 + sha256）" ), result );
+          if ( !result.isObject() || !result.isMember( "path" ) || !result["path"].isString() )
+          {
+              emit statusMessage( tr( "导出返回缺少路径（见报告）。" ) );
+              return;
+          }
+          emit statusMessage( tr( "导出完成：%1" )
+                                  .arg( QString::fromStdString( result["path"].asString() ) ) );
+      } );
+}
+
+void CartographyDock::runProduce()
+{
+    Json::Value spec = m_currentSpec;
+    if ( spec.isNull() || spec.empty() )
     {
-        emit statusMessage( error );
+        QString error;
+        spec = buildDraft( &error );
+        if ( !error.isEmpty() )
+        {
+            emit statusMessage( error );
+            return;
+        }
+    }
+    const QString directory =
+        m_directoryEdit->text().trimmed().isEmpty() && m_workDir ? m_workDir()
+                                                                 : m_directoryEdit->text().trimmed();
+    if ( directory.isEmpty() )
+    {
+        emit statusMessage( tr( "请选择导出目录。" ) );
         return;
     }
-    showReport( tr( "导出证据（原子写入 + sha256）" ), result );
-    if ( !result.isObject() || !result.isMember( "path" ) || !result["path"].isString() )
-    {
-        emit statusMessage( tr( "导出返回缺少路径（见报告）。" ) );
+    Json::Value params( Json::objectValue );
+    params["mapspec"] = spec;
+    params["directory"] = directory.toStdString();
+    params["format"] = m_formatCombo->currentText().toStdString();
+    params["dpi"] = m_dpiSpin->value();
+    params["write_manifest"] = true;
+    submitOperatorJob(
+      QStringLiteral( "cartography:produce" ), params,
+      [ this ]( const Json::Value &result, const QString &jobError ) {
+          if ( !jobError.isEmpty() )
+          {
+              emit statusMessage( jobError );
+              return;
+          }
+          if ( result.isMember( "mapspec" ) )
+              adoptSpec( result["mapspec"] );
+          showReport( tr( "生产交付（原子发布 + 清单）" ), result );
+          const QString delivered =
+            result.isMember( "output" ) && result["output"].isString()
+              ? QString::fromStdString( result["output"].asString() )
+              : QString();
+          const int pages = result.isMember( "page_count" ) ? result["page_count"].asInt() : 0;
+          emit statusMessage( tr( "生产完成：%1（%2 页）" ).arg( delivered ).arg( pages ) );
+      } );
+}
+
+void CartographyDock::cancelRunningJob()
+{
+    if ( m_runningTaskId < 0 )
         return;
-    }
-    const QString path = QString::fromStdString( result["path"].asString() );
-    emit statusMessage( tr( "导出完成：%1" ).arg( path ) );
+    const long taskId = m_runningTaskId;
+    if ( sicnu::TaskCenter::instance().cancelTask( taskId ) )
+        emit statusMessage( tr( "已请求取消任务 #%1。" ).arg( taskId ) );
+    else
+        emit statusMessage( tr( "任务 #%1 无法取消（可能已结束）。" ).arg( taskId ) );
 }
 
 void CartographyDock::updatePreview( const QString &layoutName )

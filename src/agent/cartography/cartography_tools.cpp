@@ -11,6 +11,7 @@
 #include "composition.h"
 #include "design_tokens.h"
 #include "export.h"
+#include "produce.h"
 #include "quality.h"
 #include "registry.h"
 #include "solution_registry.h"
@@ -369,15 +370,9 @@ class ComposeTool final : public SpatialTool
       // resolve into concrete rects; the resolved document is echoed back so
       // agents see the geometry they got.
       Json::Value spec = input["mapspec"];
-      // Mirror the compiler: v3 conditions resolve BEFORE composition and
-      // preflight so hidden items cannot produce false positives.
-      if ( spec.isObject() && spec.isMember( "condition_context" ) )
-      {
-        std::vector<std::string> conditionErrors;
-        mapspec::resolveMapSpecConditions( spec, spec["condition_context"], &conditionErrors );
-      }
-      const double marginDefault = tokenNumber( resolveTokenSet( spec ), "spacing.margin_mm", 12.0 );
-      const Json::Value composition = resolveComposition( spec, marginDefault ).toJson();
+      // The canonical pre-compile pass (conditions → composition), shared
+      // with the RSOperators and produce so verdicts stay identical.
+      const Json::Value composition = resolveCompositionPass( spec );
 
       QString error;
       QgsPrintLayout *layout = mapspec::MapSpecCompiler::compile( spec, &error );
@@ -401,43 +396,7 @@ class ComposeTool final : public SpatialTool
       // confirmation and workbench listings can identify the composition
       // without a new metadata vocabulary.
       out["structural_digest"] = structuralDigest( spec );
-      out["provenance"] = [ &spec ] {
-        Json::Value provenance( Json::objectValue );
-        if ( spec.isMember( "template" ) && spec["template"].isString() )
-          provenance["template"] = spec["template"];
-        // Platform 9.0: structured template lineage (id + version + parents)
-        // stamped by instantiateTemplate rides along when present.
-        if ( spec.isMember( "template_provenance" ) &&
-             spec["template_provenance"].isObject() )
-          provenance["template_provenance"] = spec["template_provenance"];
-        Json::Value components( Json::arrayValue );
-        for ( int c = 0; c < mapspec::kCollectionCount; ++c )
-        {
-          const char *collection = mapspec::kCollections[c];
-          if ( !spec.isMember( collection ) || !spec[collection].isArray() )
-            continue;
-          for ( const auto &item : spec[collection] )
-          {
-            if ( !item.isObject() || !item.isMember( "source_component" ) )
-              continue;
-            const Json::Value &ref = item["source_component"];
-            const std::string componentId =
-              ref.isString() ? ref.asString()
-                             : ref.isObject() && ref.isMember( "id" ) && ref["id"].isString()
-                                   ? ref["id"].asString()
-                                   : std::string();
-            if ( componentId.empty() )
-              continue;
-            Json::Value entry( Json::objectValue );
-            entry["id"] = componentId;
-            if ( ref.isObject() && ref.isMember( "variant" ) && ref["variant"].isString() )
-              entry["variant"] = ref["variant"];
-            components.append( entry );
-          }
-        }
-        provenance["components"] = components;
-        return provenance;
-      }();
+      out["provenance"] = composeProvenance( spec );
       if ( spec.isMember( "output" ) && spec["output"].isObject() )
         out["declared_output"] = spec["output"];
       return SpatialToolResult::ok( out );
@@ -1959,6 +1918,105 @@ class ExplainTool final : public SpatialTool
     }
 };
 
+/// Production 11.0: one-call governed production chain — the agent-facing
+/// surface of the SAME chain the produce operator runs (shared produceMap
+/// engine; tools and operators never diverge).
+class ProduceTool final : public SpatialTool
+{
+  public:
+    std::string name() const override { return "cartography:produce"; }
+    std::string displayName() const override { return "Produce finished map delivery"; }
+    std::string description() const override
+    {
+      return "One-call production: upgrade → validate → compose → bounded repair → export "
+             "(single or atlas) → manifest sidecar. Atomic publish: a failed or cancelled "
+             "delivery leaves the directory untouched. Input: {mapspec, directory, format?, "
+             "file_name?, dpi?, write_manifest?, require_preflight_pass?, "
+             "max_repair_iterations?} → {ok, mode, page_count, artifact, manifest, quality, "
+             "structural_digest, provenance}.";
+    }
+    std::vector<std::string> tags() const override
+    {
+      return { "cartography", "produce", "atlas", "reproducibility", "mapspec" };
+    }
+    Json::Value inputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      Json::Value props( Json::objectValue );
+      Json::Value mapspecProp( Json::objectValue );
+      mapspecProp["type"] = "object";
+      props["mapspec"] = mapspecProp;
+      props["directory"]["type"] = "string";
+      props["format"]["type"] = "string";
+      Json::Value formats( Json::arrayValue );
+      formats.append( "png" );
+      formats.append( "pdf" );
+      formats.append( "svg" );
+      props["format"]["enum"] = formats;
+      props["file_name"]["type"] = "string";
+      props["dpi"]["type"] = "number";
+      props["write_manifest"]["type"] = "boolean";
+      props["require_preflight_pass"]["type"] = "boolean";
+      props["max_repair_iterations"]["type"] = "integer";
+      schema["properties"] = props;
+      Json::Value required( Json::arrayValue );
+      required.append( "mapspec" );
+      required.append( "directory" );
+      schema["required"] = required;
+      return schema;
+    }
+    Json::Value outputSchema() const override
+    {
+      Json::Value schema( Json::objectValue );
+      schema["type"] = "object";
+      schema["properties"]["ok"] = Json::Value( Json::objectValue );
+      schema["properties"]["mode"] = Json::Value( Json::objectValue );
+      schema["properties"]["page_count"] = Json::Value( Json::objectValue );
+      schema["properties"]["artifact"] = Json::Value( Json::objectValue );
+      schema["properties"]["manifest"] = Json::Value( Json::objectValue );
+      schema["properties"]["structural_digest"] = Json::Value( Json::objectValue );
+      return schema;
+    }
+    SpatialToolResult execute( const Json::Value &input ) override
+    {
+      if ( !input.isMember( "mapspec" ) || !input["mapspec"].isObject() )
+        return SpatialToolResult::failure( "Missing required parameter: mapspec (object)",
+                                           "INVALID_PARAMETER", "validation" );
+      if ( !input.isMember( "directory" ) || !input["directory"].isString() ||
+           input["directory"].asString().empty() )
+        return SpatialToolResult::failure( "Missing required parameter: directory (string)",
+                                           "INVALID_PARAMETER", "validation" );
+
+      ProduceRequest request;
+      request.mapspec = input["mapspec"];
+      request.directory = input["directory"].asString();
+      if ( input.isMember( "format" ) && input["format"].isString() )
+        request.format = input["format"].asString();
+      if ( input.isMember( "file_name" ) && input["file_name"].isString() )
+        request.file_name = input["file_name"].asString();
+      if ( input.isMember( "dpi" ) && input["dpi"].isNumeric() )
+        request.dpi = input["dpi"].asDouble();
+      if ( input.isMember( "write_manifest" ) && input["write_manifest"].isBool() )
+        request.write_manifest = input["write_manifest"].asBool();
+      if ( input.isMember( "require_preflight_pass" ) &&
+           input["require_preflight_pass"].isBool() )
+        request.require_preflight_pass = input["require_preflight_pass"].asBool();
+      if ( input.isMember( "max_repair_iterations" ) &&
+           input["max_repair_iterations"].isInt() )
+        request.max_repair_iterations = input["max_repair_iterations"].asInt();
+
+      const ProduceResult result = produceMap( request, {} );
+      Json::Value out = produceResultToJson( result );
+      if ( !result.ok )
+        return SpatialToolResult::failure( result.error,
+                                           result.error_code.empty() ? "PRODUCE_FAILED"
+                                                                     : result.error_code,
+                                           result.cancelled() ? "cancelled" : "runtime" );
+      return SpatialToolResult::ok( out );
+    }
+};
+
 } // namespace
 
 void registerCartographyTools()
@@ -1994,6 +2052,8 @@ void registerCartographyTools()
     // Platform 9.0: governed export + bounded explain.
     registry.registerTool( std::make_shared<ExportTool>() );
     registry.registerTool( std::make_shared<ExplainTool>() );
+    // Production 11.0: one-call governed production.
+    registry.registerTool( std::make_shared<ProduceTool>() );
     return true;
   }();
   Q_UNUSED( registered );

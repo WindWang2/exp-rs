@@ -2,6 +2,8 @@
 #include "composition.h"
 
 #include "../mapspec/mapspec.h"
+#include "../mapspec/mapspec_conditions.h"
+#include "design_tokens.h"
 #include "typography.h"
 
 #include <algorithm>
@@ -1892,6 +1894,84 @@ CompositionResult resolveCompositionScoped( Json::Value &spec, double marginDefa
   solver.applySofts();
   solver.finalize( result );
   return result;
+}
+
+Json::Value resolveCompositionPass( Json::Value &spec )
+{
+  if ( spec.isObject() && spec.isMember( "condition_context" ) )
+  {
+    std::vector<std::string> conditionErrors;
+    sicnu::agent::mapspec::resolveMapSpecConditions( spec, spec["condition_context"],
+                                                     &conditionErrors );
+  }
+  const double marginDefault = tokenNumber( resolveTokenSet( spec ), "spacing.margin_mm", 12.0 );
+  return resolveComposition( spec, marginDefault ).toJson();
+}
+
+Json::Value composeProvenance( const Json::Value &spec )
+{
+  Json::Value provenance( Json::objectValue );
+  if ( spec.isMember( "template" ) && spec["template"].isString() )
+    provenance["template"] = spec["template"];
+  // Platform 9.0: structured template lineage (id + version + parents)
+  // stamped by instantiateTemplate rides along when present.
+  if ( spec.isMember( "template_provenance" ) && spec["template_provenance"].isObject() )
+    provenance["template_provenance"] = spec["template_provenance"];
+  Json::Value components( Json::arrayValue );
+  for ( int c = 0; c < sicnu::agent::mapspec::kCollectionCount; ++c )
+  {
+    const char *collection = sicnu::agent::mapspec::kCollections[c];
+    if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+      continue;
+    for ( const auto &item : spec[collection] )
+    {
+      if ( !item.isObject() || !item.isMember( "source_component" ) )
+        continue;
+      const Json::Value &ref = item["source_component"];
+      const std::string componentId =
+        ref.isString() ? ref.asString()
+                       : ref.isObject() && ref.isMember( "id" ) && ref["id"].isString()
+                             ? ref["id"].asString()
+                             : std::string();
+      if ( componentId.empty() )
+        continue;
+      Json::Value entry( Json::objectValue );
+      entry["id"] = componentId;
+      if ( ref.isObject() && ref.isMember( "variant" ) && ref["variant"].isString() )
+        entry["variant"] = ref["variant"];
+      components.append( entry );
+    }
+  }
+  provenance["components"] = components;
+  // Production 11.0: data-driven provenance — every item that declares a
+  // `binding` (charts, dynamic labels, tables) contributes the binding's
+  // identifying members so the delivered map can name its data context.
+  // Bounded: at most 64 entries, members mode/layer/field/expression only.
+  Json::Value bindings( Json::arrayValue );
+  for ( int c = 0; c < sicnu::agent::mapspec::kCollectionCount && bindings.size() < 64; ++c )
+  {
+    const char *collection = sicnu::agent::mapspec::kCollections[c];
+    if ( !spec.isMember( collection ) || !spec[collection].isArray() )
+      continue;
+    for ( const auto &item : spec[collection] )
+    {
+      if ( bindings.size() >= 64 )
+        break;
+      if ( !item.isObject() || !item.isMember( "id" ) || !item["id"].isString() ||
+           !item.isMember( "binding" ) || !item["binding"].isObject() )
+        continue;
+      const Json::Value &binding = item["binding"];
+      Json::Value entry( Json::objectValue );
+      entry["id"] = item["id"];
+      entry["collection"] = collection;
+      for ( const char *member : { "mode", "layer", "field", "expression" } )
+        if ( binding.isMember( member ) && binding[member].isString() )
+          entry[member] = binding[member];
+      bindings.append( entry );
+    }
+  }
+  provenance["bindings"] = bindings;
+  return provenance;
 }
 
 } // namespace sicnu::agent::cartography
