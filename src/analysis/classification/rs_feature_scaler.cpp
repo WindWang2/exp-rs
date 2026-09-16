@@ -16,6 +16,20 @@ bool RsFeatureScaler::fit( const cv::Mat &trainX, Method method )
   if ( trainX.empty() || trainX.type() != CV_32F || trainX.cols < 1 )
     return false;
 
+  // F12 hardening — fail closed on non-finite training values. NoData/NaN
+  // cells that slipped past the caller would silently poison mean/stddev
+  // (cv::meanStdDev is undefined on NaN), so the scaler refuses the fit
+  // instead of producing a corrupted normalisation.
+  for ( int i = 0; i < trainX.rows; ++i )
+  {
+    const float *row = trainX.ptr<float>( i );
+    for ( int j = 0; j < trainX.cols; ++j )
+    {
+      if ( !std::isfinite( row[j] ) )
+        return false;
+    }
+  }
+
   const int B = trainX.cols;
   mMean.resize( B );
   mStd.resize( B );

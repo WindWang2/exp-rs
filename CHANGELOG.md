@@ -103,6 +103,53 @@ All notable changes to the `exp-rs` project will be documented in this file.
 - **Scientific contracts**: `docs/processing/temporal.md` gains the Platform 10.0
   per-operator rows and kernel notes; architecture in `docs/temporal/ARCHITECTURE_V3.md`;
   decision record in ADR 0148.
+## [Unreleased] - Classification & Object Intelligence 11.0 (F12)
+
+- **Class-order authority (`RsClassOrder`)**: every probability / decision-score
+  matrix column k refers to the k-th strictly ascending training class id;
+  the order is serialised as a bare JSON array (the RF/MLP companion-file
+  format) and embedded in model sidecars. NormalBayes gains a fail-closed
+  `.labels.json` sidecar (legacy sidecar-less models still load).
+- **Calibration (`RsProbabilityCalibrator`)**: per-class Platt scaling
+  (deterministic Newton) and isotonic regression (PAV), fitted outside the
+  classifier on a held-out calibration set, one-vs-rest with row
+  normalisation, fail-closed on degenerate input, JSON round-trip.
+- **Reliability metrics (`RsCalibrationMetrics`)**: multiclass Brier,
+  confidence-ECE, reliability bins and log-loss.
+- **SVM one-vs-rest decision scores (opt-in)**: `RsClassifierSvm(true)`
+  trains K binary C_SVC models at fit time; `decisionScores()` returns
+  sign-calibrated margins (`classOrder()` columns). Plain `RsClassifierSvm`
+  behaviour and cost are unchanged.
+- **Uncertainty (`RsUncertainty`)**: entropy / margin / confidence /
+  ensemble-disagreement definitions locked by tests, with a per-measure
+  reject-direction policy.
+- **Pipeline uncertainty raster**: `uncertaintyOutput` writes a 3-band
+  Float32 GTiff (normalised entropy, margin, rejected mask; NoData -1),
+  `rejectThreshold` + `uncertaintyMeasure` drive the mask; hard labels are
+  never rewritten by rejection. `calibrationModel` (explicit) or the
+  sidecar calibration section (opt-in) is applied to confidence statistics.
+- **Model sidecar v2**: adds `classOrder`, `calibration`, `featureSchema`
+  and `training{seed, trainSamples}` sections; v1 files stay readable.
+- **Spatial CV 2.0 (`RsSpatialCrossValidation`)**: group / block /
+  buffered-block folds with a per-fold leakage audit (min retained
+  train-test distance + group overlap); a synthetic spatial leak is caught
+  by construction in tests. No dataset-platform dependency.
+- **Feature schema (`RsFeatureSchema`/`RsFeatureAssembler`)**: named typed
+  feature columns with a deterministic FNV-1a fingerprint and a NaN/NoData
+  sentinel contract with per-column valid counts.
+- **Object-level cleanup (`ClassificationObjectPostProcessor`)**: segment
+  adjacency graph, per-segment majority vote (tie -> lowest class id),
+  deterministic min-area merge and iterative strict-majority smoothing;
+  NoData never absorbs.
+- **Scaler hardening**: `RsFeatureScaler::fit` fails closed on non-finite
+  training values.
+- **Studio 11**: probability, reliability, confusion-pair and feature-
+  importance panels (pure-data painters) plus a mean-confidence summary in
+  the classification studio workbench.
+- **`rs:supervised_classification`**: optional `uncertaintyOutput`,
+  `uncertaintyMeasure`, `rejectThreshold` parameters.
+- Contracts and definitions: `docs/processing/classification-intelligence.md`.
+
 ## [Data Fabric 10.0] - 2026-09-13
 
 ### Cloud-Native Data Fabric / Data Cube 10.0 (goal series)

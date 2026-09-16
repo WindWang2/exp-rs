@@ -5,6 +5,7 @@
 
 #include "rs_classification_pipeline.h"
 
+#include "rs_class_order.h"
 #include "rs_classification_split.h"
 #include "rs_classifier_backend_factory.h"
 #include "rs_classification_utils.h"
@@ -34,7 +35,11 @@ namespace
 {
 
 /// ADR 0019 decision 3 — superset sidecar format version.
-constexpr int kSidecarVersion = 1;
+/// Version 2 (F12) adds the optional classOrder / calibration /
+/// featureSchema / training sections; version 1 files remain readable.
+constexpr int kSidecarVersion = 2;
+/// Version the F12 sections started at — readers accept both.
+constexpr int kSidecarVersionV1 = 1;
 
 bool reportProgress( const RsClassificationPipeline::Progress &progress,
                      double fraction, const QString &message )
@@ -59,47 +64,60 @@ bool RsClassificationPipeline::saveModelSidecar( const QString &modelPath,
                                                  const RsAccuracyAssessment::Result &accuracy,
                                                  const QHash<int, int> &kmeansRemap )
 {
+  SidecarData data;
+  data.methodName = methodName;
+  data.scaler = scaler;
+  data.classColors = classColors;
+  data.bandIndices = bandIndices;
+  data.accuracy = accuracy;
+  data.kmeansRemap = kmeansRemap;
+  return saveModelSidecarV2( modelPath, data );
+}
+
+bool RsClassificationPipeline::saveModelSidecarV2( const QString &modelPath,
+                                                   const SidecarData &data )
+{
   QJsonObject root;
   root.insert( QStringLiteral( "version" ), kSidecarVersion );
-  root.insert( QStringLiteral( "method" ), methodName );
-  if ( scaler.isFitted() )
-    root.insert( QStringLiteral( "scaler" ), scaler.toJson() );
-  if ( !classColors.isEmpty() )
+  root.insert( QStringLiteral( "method" ), data.methodName );
+  if ( data.scaler.isFitted() )
+    root.insert( QStringLiteral( "scaler" ), data.scaler.toJson() );
+  if ( !data.classColors.isEmpty() )
   {
-    QList<int> ids = classColors.keys();
+    QList<int> ids = data.classColors.keys();
     std::sort( ids.begin(), ids.end() );
     QJsonArray classes;
     for ( int id : ids )
     {
       QJsonObject c;
       c.insert( QStringLiteral( "id" ), id );
-      c.insert( QStringLiteral( "color" ), classColors.value( id ).name() );
+      c.insert( QStringLiteral( "color" ), data.classColors.value( id ).name() );
       classes.append( c );
     }
     root.insert( QStringLiteral( "classes" ), classes );
   }
   // Feature schema: the 1-based training bands. Used to validate the target
   // raster's band count when the model is applied elsewhere.
-  if ( !bandIndices.isEmpty() )
+  if ( !data.bandIndices.isEmpty() )
   {
     QJsonArray features;
-    for ( int b : bandIndices )
+    for ( int b : data.bandIndices )
       features.append( b );
     root.insert( QStringLiteral( "features" ), features );
   }
   // Holdout validation metrics (overall accuracy / kappa / per-class P-R-F1).
-  if ( !accuracy.classIds.isEmpty() )
+  if ( !data.accuracy.classIds.isEmpty() )
   {
     QJsonObject validation;
-    validation.insert( QStringLiteral( "overallAccuracy" ), accuracy.overallAccuracy );
-    validation.insert( QStringLiteral( "kappa" ), accuracy.kappa );
+    validation.insert( QStringLiteral( "overallAccuracy" ), data.accuracy.overallAccuracy );
+    validation.insert( QStringLiteral( "kappa" ), data.accuracy.kappa );
     QJsonObject perClass;
-    for ( int id : accuracy.classIds )
+    for ( int id : data.accuracy.classIds )
     {
       QJsonObject c;
-      c.insert( QStringLiteral( "producerAccuracy" ), accuracy.producerAcc.value( id, 0.0 ) );
-      c.insert( QStringLiteral( "userAccuracy" ), accuracy.userAcc.value( id, 0.0 ) );
-      c.insert( QStringLiteral( "f1" ), accuracy.f1.value( id, 0.0 ) );
+      c.insert( QStringLiteral( "producerAccuracy" ), data.accuracy.producerAcc.value( id, 0.0 ) );
+      c.insert( QStringLiteral( "userAccuracy" ), data.accuracy.userAcc.value( id, 0.0 ) );
+      c.insert( QStringLiteral( "f1" ), data.accuracy.f1.value( id, 0.0 ) );
       perClass.insert( QString::number( id ), c );
     }
     validation.insert( QStringLiteral( "perClass" ), perClass );
@@ -108,12 +126,27 @@ bool RsClassificationPipeline::saveModelSidecar( const QString &modelPath,
 
   // Cluster-to-class remap table for backends that need label remapping
   // (KMeans). Persisted so predict-only mode produces correct class IDs (#410).
-  if ( !kmeansRemap.isEmpty() )
+  if ( !data.kmeansRemap.isEmpty() )
   {
     QJsonObject remapObj;
-    for ( auto it = kmeansRemap.constBegin(); it != kmeansRemap.constEnd(); ++it )
+    for ( auto it = data.kmeansRemap.constBegin(); it != data.kmeansRemap.constEnd(); ++it )
       remapObj.insert( QString::number( it.key() ), it.value() );
     root.insert( QStringLiteral( "clusterRemap" ), remapObj );
+  }
+
+  // -- F12 v2 sections (all optional; written only when populated) --------
+  if ( !data.classOrder.isEmpty() )
+    root.insert( QStringLiteral( "classOrder" ), RsClassOrder::toJsonArray( data.classOrder ) );
+  if ( data.calibration.isValid() )
+    root.insert( QStringLiteral( "calibration" ), data.calibration.toJson() );
+  if ( !data.featureSchema.isEmpty() )
+    root.insert( QStringLiteral( "featureSchema" ), data.featureSchema.toJson() );
+  if ( data.trainingSampleCount > 0 )
+  {
+    QJsonObject training;
+    training.insert( QStringLiteral( "seed" ), static_cast<int>( data.trainingSeed ) );
+    training.insert( QStringLiteral( "trainSamples" ), data.trainingSampleCount );
+    root.insert( QStringLiteral( "training" ), training );
   }
 
   QFile f( sidecarPathForModel( modelPath ) );
@@ -138,6 +171,23 @@ bool RsClassificationPipeline::loadModelSidecar( const QString &modelPath,
   accuracy = RsAccuracyAssessment::Result();
   kmeansRemap.clear();
 
+  SidecarData data;
+  if ( !loadModelSidecarFull( modelPath, data ) )
+    return false;
+  methodName = data.methodName;
+  scaler = data.scaler;
+  classColors = data.classColors;
+  bandIndices = data.bandIndices;
+  accuracy = data.accuracy;
+  kmeansRemap = data.kmeansRemap;
+  return true;
+}
+
+bool RsClassificationPipeline::loadModelSidecarFull( const QString &modelPath,
+                                                     SidecarData &out )
+{
+  out = SidecarData();
+
   QFile f( sidecarPathForModel( modelPath ) );
   if ( !f.open( QIODevice::ReadOnly ) )
     return false;
@@ -145,13 +195,14 @@ bool RsClassificationPipeline::loadModelSidecar( const QString &modelPath,
   if ( !doc.isObject() )
     return false;
   const QJsonObject root = doc.object();
-  if ( root.value( QStringLiteral( "version" ) ).toInt() != kSidecarVersion )
+  const int version = root.value( QStringLiteral( "version" ) ).toInt();
+  if ( version != kSidecarVersion && version != kSidecarVersionV1 )
     return false;
 
-  methodName = root.value( QStringLiteral( "method" ) ).toString();
+  out.methodName = root.value( QStringLiteral( "method" ) ).toString();
 
   const QJsonValue scalerVal = root.value( QStringLiteral( "scaler" ) );
-  if ( scalerVal.isObject() && !scaler.fromJson( scalerVal.toObject() ) )
+  if ( scalerVal.isObject() && !out.scaler.fromJson( scalerVal.toObject() ) )
     return false;
 
   for ( const QJsonValue &v : root.value( QStringLiteral( "classes" ) ).toArray() )
@@ -159,36 +210,66 @@ bool RsClassificationPipeline::loadModelSidecar( const QString &modelPath,
     const QJsonObject c = v.toObject();
     const QColor color( c.value( QStringLiteral( "color" ) ).toString() );
     if ( color.isValid() )
-      classColors.insert( c.value( QStringLiteral( "id" ) ).toInt(), color );
+      out.classColors.insert( c.value( QStringLiteral( "id" ) ).toInt(), color );
   }
 
   for ( const QJsonValue &v : root.value( QStringLiteral( "features" ) ).toArray() )
   {
     if ( v.isDouble() )
-      bandIndices.append( v.toInt() );
+      out.bandIndices.append( v.toInt() );
   }
 
   const QJsonObject validation = root.value( QStringLiteral( "validation" ) ).toObject();
   if ( !validation.isEmpty() )
   {
-    accuracy.overallAccuracy = validation.value( QStringLiteral( "overallAccuracy" ) ).toDouble();
-    accuracy.kappa = validation.value( QStringLiteral( "kappa" ) ).toDouble();
+    out.accuracy.overallAccuracy = validation.value( QStringLiteral( "overallAccuracy" ) ).toDouble();
+    out.accuracy.kappa = validation.value( QStringLiteral( "kappa" ) ).toDouble();
     const QJsonObject perClass = validation.value( QStringLiteral( "perClass" ) ).toObject();
     for ( auto it = perClass.constBegin(); it != perClass.constEnd(); ++it )
     {
       const int id = it.key().toInt();
       const QJsonObject c = it.value().toObject();
-      accuracy.classIds.append( id );
-      accuracy.producerAcc.insert( id, c.value( QStringLiteral( "producerAccuracy" ) ).toDouble() );
-      accuracy.userAcc.insert( id, c.value( QStringLiteral( "userAccuracy" ) ).toDouble() );
-      accuracy.f1.insert( id, c.value( QStringLiteral( "f1" ) ).toDouble() );
+      out.accuracy.classIds.append( id );
+      out.accuracy.producerAcc.insert( id, c.value( QStringLiteral( "producerAccuracy" ) ).toDouble() );
+      out.accuracy.userAcc.insert( id, c.value( QStringLiteral( "userAccuracy" ) ).toDouble() );
+      out.accuracy.f1.insert( id, c.value( QStringLiteral( "f1" ) ).toDouble() );
     }
-    std::sort( accuracy.classIds.begin(), accuracy.classIds.end() );
+    std::sort( out.accuracy.classIds.begin(), out.accuracy.classIds.end() );
   }
 
   const QJsonObject remapObj = root.value( QStringLiteral( "clusterRemap" ) ).toObject();
   for ( auto it = remapObj.constBegin(); it != remapObj.constEnd(); ++it )
-    kmeansRemap.insert( it.key().toInt(), it.value().toInt() );
+    out.kmeansRemap.insert( it.key().toInt(), it.value().toInt() );
+
+  if ( version < kSidecarVersion )
+    return true; // v1 file: F12 sections absent by definition
+
+  // -- F12 v2 sections (tolerated absent) ---------------------------------
+  RsClassOrder::fromJsonArray( root.value( QStringLiteral( "classOrder" ) ).toArray(),
+                               out.classOrder );
+  // An absent section leaves classOrder empty; a malformed one is rejected.
+  if ( root.contains( QStringLiteral( "classOrder" ) ) && out.classOrder.isEmpty() )
+    return false;
+
+  const QJsonValue calVal = root.value( QStringLiteral( "calibration" ) );
+  if ( calVal.isObject() )
+  {
+    if ( !out.calibration.fromJson( calVal.toObject() ) )
+      return false;
+    out.hasCalibration = out.calibration.isValid();
+  }
+
+  const QJsonValue schemaVal = root.value( QStringLiteral( "featureSchema" ) );
+  if ( schemaVal.isObject() && !out.featureSchema.fromJson( schemaVal.toObject() ) )
+    return false;
+
+  const QJsonObject training = root.value( QStringLiteral( "training" ) ).toObject();
+  if ( !training.isEmpty() )
+  {
+    out.trainingSeed = static_cast<unsigned int>(
+      training.value( QStringLiteral( "seed" ) ).toInt( 42 ) );
+    out.trainingSampleCount = training.value( QStringLiteral( "trainSamples" ) ).toInt( 0 );
+  }
 
   return true;
 }
@@ -209,6 +290,10 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   timer.start();
 
   QHash<int, int> kmeansRemap;
+  // F12: calibration resolved for the predict path (explicit config model
+  // wins over the sidecar section).
+  RsCalibrationModel appliedCalibration;
+  bool hasAppliedCalibration = false;
 
   // Predict-only mode: auto-load model and sidecar when modelLoadPath is specified
   if ( config.trainX.empty() && !config.modelLoadPath.isEmpty() )
@@ -222,10 +307,10 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     const QString sidecarPath = sidecarPathForModel( config.modelLoadPath );
     const bool sidecarExists = !config.modelLoadPath.isEmpty() && QFile::exists( sidecarPath );
 
+    SidecarData sidecarData;
     if ( sidecarExists )
     {
-      if ( !loadModelSidecar( config.modelLoadPath, sidecarMethod, sidecarScaler,
-                              sidecarColors, sidecarFeatures, sidecarAccuracy, sidecarRemap ) )
+      if ( !loadModelSidecarFull( config.modelLoadPath, sidecarData ) )
       {
         result.ok = false;
         result.error = RsClassificationPipelineResult::Error::ModelSidecarMissing;
@@ -233,6 +318,12 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
                                 .arg( config.modelLoadPath );
         return result;
       }
+      sidecarMethod = sidecarData.methodName;
+      sidecarScaler = sidecarData.scaler;
+      sidecarColors = sidecarData.classColors;
+      sidecarFeatures = sidecarData.bandIndices;
+      sidecarAccuracy = sidecarData.accuracy;
+      sidecarRemap = sidecarData.kmeansRemap;
     }
     else if ( !config.backend )
     {
@@ -259,6 +350,15 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
       config.bandIndices = sidecarFeatures;
     if ( kmeansRemap.isEmpty() )
       kmeansRemap = sidecarRemap;
+
+    // F12: predict-only opt-in for a calibration section stored in the v2
+    // sidecar (the explicit config model is resolved after this block and
+    // takes precedence).
+    if ( config.applySidecarCalibration && sidecarData.hasCalibration )
+    {
+      appliedCalibration = sidecarData.calibration;
+      hasAppliedCalibration = true;
+    }
 
     // Model compatibility check: the target raster's band selection must match
     // the model's training feature schema (when the sidecar records one).
@@ -307,6 +407,14 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     result.error = RsClassificationPipelineResult::Error::NoBackend;
     result.errorMessage = QStringLiteral( "No classifier backend supplied" );
     return result;
+  }
+
+  // F12: explicit calibration applies in both modes (the caller owns the
+  // calibration set); the sidecar calibration section is predict-only.
+  if ( config.calibrationModel.isValid() )
+  {
+    appliedCalibration = config.calibrationModel;
+    hasAppliedCalibration = true;
   }
 
   // Auto-extract training data from vector polygons when specified and trainX is empty
@@ -541,6 +649,11 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   {
     if ( !config.backend->save( config.modelSavePath ) )
     {
+      // The backend may have overwritten/rewritten the main YAML before its
+      // internal sidecars failed — remove the main file so a stale sidecar
+      // can never pair with a new model (same invariant as the sidecar
+      // failure branch below).
+      QFile::remove( config.modelSavePath );
       result.error = RsClassificationPipelineResult::Error::ModelSaveFailed;
       result.errorMessage = QStringLiteral( "Failed to save classifier model: %1" )
                               .arg( config.modelSavePath );
@@ -550,9 +663,22 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     SICNU_LOG_INFO( SicnuLogTags::Classification,
                     QString( "Classifier model saved: %1" )
                       .arg( config.modelSavePath ) );
-    if ( !saveModelSidecar( config.modelSavePath, config.methodName,
-                            config.scaler, config.classColors,
-                            config.bandIndices, result.accuracy, kmeansRemap ) )
+    // F12 sidecar v2: persist class order, calibration (when configured),
+    // the typed feature schema and training provenance next to the model.
+    SidecarData sidecarOut;
+    sidecarOut.methodName = config.methodName;
+    sidecarOut.scaler = config.scaler;
+    sidecarOut.classColors = config.classColors;
+    sidecarOut.bandIndices = config.bandIndices;
+    sidecarOut.accuracy = result.accuracy;
+    sidecarOut.kmeansRemap = kmeansRemap;
+    sidecarOut.classOrder = config.backend->classOrder();
+    sidecarOut.calibration = config.calibrationModel;
+    sidecarOut.hasCalibration = config.calibrationModel.isValid();
+    sidecarOut.featureSchema = config.featureSchema;
+    sidecarOut.trainingSeed = config.seed;
+    sidecarOut.trainingSampleCount = config.trainX.rows;
+    if ( !saveModelSidecarV2( config.modelSavePath, sidecarOut ) )
     {
       QFile::remove( config.modelSavePath );
       result.error = RsClassificationPipelineResult::Error::SidecarSaveFailed;
@@ -660,6 +786,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   }
   const QString tempOutputPath = config.outputRaster + QStringLiteral( ".tmp~%1" ).arg( reinterpret_cast<quintptr>( &config ) );
   const QString tempProbPath = config.probabilityOutput.isEmpty() ? QString() : config.probabilityOutput + QStringLiteral( ".tmp~%1" ).arg( reinterpret_cast<quintptr>( &config ) );
+  const QString tempUncPath = config.uncertaintyOutput.isEmpty() ? QString() : config.uncertaintyOutput + QStringLiteral( ".tmp~%1" ).arg( reinterpret_cast<quintptr>( &config ) );
 
   char **papsz = nullptr;
   for ( const QString &o : config.creationOptions )
@@ -717,8 +844,14 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     dstDs->GetRasterBand( 1 )->SetNoDataValue( unclassified );
 
   // Optional per-pixel best-class probability raster (Float32, NoData -1).
+  // F12: optional 3-band uncertainty raster (entropy / margin / reject mask).
+  // Both need a probability-capable backend.
+  const bool writeProb = !config.probabilityOutput.isEmpty();
+  const bool writeUnc = !config.uncertaintyOutput.isEmpty();
+  const bool needProbs = writeProb || writeUnc;
   GDALDataset *probDs = nullptr;
-  if ( !config.probabilityOutput.isEmpty() )
+  GDALDataset *uncDs = nullptr;
+  if ( needProbs )
   {
     if ( !config.backend || !config.backend->supportsProbabilities() )
     {
@@ -729,33 +862,77 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
       result.error = RsClassificationPipelineResult::Error::PredictionFailed;
       result.errorMessage = QStringLiteral(
         "The selected classifier does not support probability outputs "
-        "(use NormalBayes / MLP)" );
+        "(use NormalBayes / MLP / RandomForest)" );
       return result;
     }
-    probDs = drv->Create(
-      tempProbPath.toUtf8().constData(), outW, outH, 1,
-      GDT_Float32, papsz );
-    if ( !probDs && papsz )
+    if ( writeProb )
     {
       probDs = drv->Create(
         tempProbPath.toUtf8().constData(), outW, outH, 1,
-        GDT_Float32, nullptr );
+        GDT_Float32, papsz );
+      if ( !probDs && papsz )
+      {
+        probDs = drv->Create(
+          tempProbPath.toUtf8().constData(), outW, outH, 1,
+          GDT_Float32, nullptr );
+      }
+      if ( !probDs )
+      {
+        CSLDestroy( papsz );
+        GDALClose( srcDs );
+        GDALClose( dstDs );
+        QFile::remove( tempOutputPath );
+        result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
+        result.errorMessage = QStringLiteral( "Cannot create probability output: %1" )
+                                .arg( config.probabilityOutput );
+        return result;
+      }
+      probDs->SetGeoTransform( outGt );
+      if ( proj && *proj )
+        probDs->SetProjection( proj );
+      probDs->GetRasterBand( 1 )->SetNoDataValue( -1.0 );
     }
-    if ( !probDs )
+    if ( writeUnc )
     {
-      CSLDestroy( papsz );
-      GDALClose( srcDs );
-      GDALClose( dstDs );
-      QFile::remove( tempOutputPath );
-      result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
-      result.errorMessage = QStringLiteral( "Cannot create probability output: %1" )
-                              .arg( config.probabilityOutput );
-      return result;
+      uncDs = drv->Create(
+        tempUncPath.toUtf8().constData(), outW, outH, 3,
+        GDT_Float32, papsz );
+      if ( !uncDs && papsz )
+      {
+        uncDs = drv->Create(
+          tempUncPath.toUtf8().constData(), outW, outH, 3,
+          GDT_Float32, nullptr );
+      }
+      if ( !uncDs )
+      {
+        CSLDestroy( papsz );
+        GDALClose( srcDs );
+        GDALClose( dstDs );
+        if ( probDs )
+        {
+          GDALClose( probDs );
+          probDs = nullptr;
+        }
+        QFile::remove( tempOutputPath );
+        if ( !tempProbPath.isEmpty() )
+          QFile::remove( tempProbPath );
+        result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
+        result.errorMessage = QStringLiteral( "Cannot create uncertainty output: %1" )
+                                .arg( config.uncertaintyOutput );
+        return result;
+      }
+      uncDs->SetGeoTransform( outGt );
+      if ( proj && *proj )
+        uncDs->SetProjection( proj );
+      static const char *kUncBandNames[] = {
+        "normalised_entropy", "margin", "rejected_mask"
+      };
+      for ( int b = 1; b <= 3; ++b )
+      {
+        uncDs->GetRasterBand( b )->SetNoDataValue( -1.0 );
+        uncDs->GetRasterBand( b )->SetDescription( kUncBandNames[b - 1] );
+      }
     }
-    probDs->SetGeoTransform( outGt );
-    if ( proj && *proj )
-      probDs->SetProjection( proj );
-    probDs->GetRasterBand( 1 )->SetNoDataValue( -1.0 );
   }
   CSLDestroy( papsz );
   papsz = nullptr;
@@ -770,7 +947,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
                        bandHasNodata, bandNodata );
 
   // Every failure past this point removes the partially-written temporary output.
-  const auto failWithPartialOutput = [&result, &srcDs, &dstDs, &probDs, &tempOutputPath, &tempProbPath](
+  const auto failWithPartialOutput = [&result, &srcDs, &dstDs, &probDs, &uncDs, &tempOutputPath, &tempProbPath, &tempUncPath](
     RsClassificationPipelineResult::Error error, const QString &message )
   {
     if ( srcDs )
@@ -788,9 +965,16 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
       GDALClose( probDs );
       probDs = nullptr;
     }
+    if ( uncDs )
+    {
+      GDALClose( uncDs );
+      uncDs = nullptr;
+    }
     QFile::remove( tempOutputPath );
     if ( !tempProbPath.isEmpty() )
       QFile::remove( tempProbPath );
+    if ( !tempUncPath.isEmpty() )
+      QFile::remove( tempUncPath );
     result.error = error;
     result.errorMessage = message;
     return result;
@@ -810,9 +994,13 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   std::vector<uint8_t> pixelNodata( static_cast<size_t>( kTileSize ) * kTileSize );
   // Probability write buffer (Float32; -1 = ignored pixel) + confidence mean.
   std::vector<float> probBuf( static_cast<size_t>( kTileSize ) * kTileSize, -1.0f );
+  // F12 uncertainty write buffers (Float32; -1 = ignored pixel).
+  std::vector<float> uncEntropyBuf( static_cast<size_t>( kTileSize ) * kTileSize, -1.0f );
+  std::vector<float> uncMarginBuf( static_cast<size_t>( kTileSize ) * kTileSize, -1.0f );
+  std::vector<float> uncRejectBuf( static_cast<size_t>( kTileSize ) * kTileSize, -1.0f );
   double confidenceSum = 0.0;
   uint64_t confidenceCount = 0;
-  const bool writeProb = !config.probabilityOutput.isEmpty();
+  const bool applyCalibration = hasAppliedCalibration;
 
   for ( int ty = y0; ty < y1; ty += kTileSize )
   {
@@ -892,7 +1080,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
 
         try
         {
-          if ( writeProb )
+          if ( needProbs )
           {
             if ( !config.backend->predictWithProbabilities( Xc, pred, probs ) )
             {
@@ -929,7 +1117,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
         }
 
         // Per-pixel best-class probability (confidence) when requested.
-        if ( writeProb )
+        if ( needProbs )
         {
           if ( probs.empty() || probs.rows < static_cast<int>( validIndices.size() ) )
           {
@@ -938,12 +1126,52 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
               QStringLiteral( "Classifier returned no probability output at tile (%1,%2)" )
                 .arg( tx ).arg( ty ) );
           }
+          // F12: apply the calibration model to the probability matrix used
+          // for confidence/uncertainty statistics. Hard labels are NOT
+          // re-decided (documented semantics, DECISIONS D-006/D-007).
+          if ( applyCalibration )
+          {
+            if ( appliedCalibration.classIds.size() != probs.cols )
+            {
+              return failWithPartialOutput(
+                RsClassificationPipelineResult::Error::PredictionFailed,
+                QStringLiteral(
+                  "Calibration model has %1 classes but the backend produced "
+                  "%2 probability columns at tile (%3,%4)" )
+                  .arg( appliedCalibration.classIds.size() )
+                  .arg( probs.cols ).arg( tx ).arg( ty ) );
+            }
+            std::vector<float> raw(
+              static_cast<size_t>( probs.rows ) * static_cast<size_t>( probs.cols ) );
+            for ( int r = 0; r < probs.rows; ++r )
+            {
+              const float *row = probs.ptr<float>( r );
+              std::memcpy( raw.data() + static_cast<size_t>( r ) * probs.cols, row,
+                           static_cast<size_t>( probs.cols ) * sizeof( float ) );
+            }
+            std::vector<float> calibrated;
+            if ( !RsProbabilityCalibrator::apply( appliedCalibration, raw, probs.rows, calibrated ) )
+            {
+              return failWithPartialOutput(
+                RsClassificationPipelineResult::Error::PredictionFailed,
+                QStringLiteral( "Calibration application failed at tile (%1,%2)" )
+                  .arg( tx ).arg( ty ) );
+            }
+            cv::Mat calibratedMat( probs.rows, probs.cols, CV_32F, calibrated.data() );
+            probs = calibratedMat.clone();
+          }
         }
       }
 
       if ( writeProb )
       {
         std::fill( probBuf.begin(), probBuf.begin() + npx, -1.0f );
+      }
+      if ( writeUnc )
+      {
+        std::fill( uncEntropyBuf.begin(), uncEntropyBuf.begin() + npx, -1.0f );
+        std::fill( uncMarginBuf.begin(), uncMarginBuf.begin() + npx, -1.0f );
+        std::fill( uncRejectBuf.begin(), uncRejectBuf.begin() + npx, -1.0f );
       }
 
       for ( int p = 0; p < npx; ++p )
@@ -962,14 +1190,65 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
         if ( v < 0 )
           v = unclassified;
         outBuf[static_cast<size_t>( p )] = static_cast<int32_t>( v );
-        if ( writeProb )
+        if ( needProbs )
         {
           float best = 0.0f;
           for ( int c = 0; c < probs.cols; ++c )
             best = std::max( best, probs.at<float>( static_cast<int>( i ), c ) );
-          probBuf[static_cast<size_t>( p )] = best;
-          confidenceSum += best;
-          ++confidenceCount;
+          // A degenerate posterior row (non-finite / unnormalised — e.g. an
+          // NB likelihood vector that underflowed to all zeros) is NoData in
+          // EVERY probability-derived output: the -1 sentinel in the
+          // uncertainty bands AND the probability raster, and it is excluded
+          // from meanConfidence. Reporting a fabricated 0.0 confidence would
+          // be indistinguishable from a genuine zero-probability pixel.
+          const float *probRow = probs.ptr<float>( static_cast<int>( i ) );
+          const std::span<const float> rowSpan( probRow, static_cast<size_t>( probs.cols ) );
+          double h = 0.0;
+          double mOut = 0.0;
+          const bool rowWellFormed =
+            !probs.empty() && RsUncertainty::entropy( rowSpan, h ) &&
+            RsUncertainty::margin( rowSpan, mOut );
+          if ( writeProb )
+          {
+            if ( rowWellFormed )
+            {
+              probBuf[static_cast<size_t>( p )] = best;
+              confidenceSum += best;
+              ++confidenceCount;
+            }
+            else
+            {
+              probBuf[static_cast<size_t>( p )] = -1.0f;
+            }
+          }
+          if ( writeUnc )
+          {
+            if ( rowWellFormed )
+            {
+              // Band 1: entropy normalised to [0,1] by log2(K);
+              // band 2: top1−top2 margin; band 3: reject mask.
+              const double normalized = RsUncertainty::normalizeEntropy( h, probs.cols );
+              double measureValue = normalized;
+              if ( config.uncertaintyMeasure == RsUncertainty::Measure::Margin )
+                measureValue = mOut;
+              else if ( config.uncertaintyMeasure == RsUncertainty::Measure::Confidence )
+                measureValue = static_cast<double>( best );
+              const bool rejected = config.rejectThreshold >= 0.0 &&
+                                    RsUncertainty::isRejected( config.uncertaintyMeasure,
+                                                               measureValue, config.rejectThreshold );
+              uncEntropyBuf[static_cast<size_t>( p )] = static_cast<float>( normalized );
+              uncMarginBuf[static_cast<size_t>( p )] = static_cast<float>( mOut );
+              uncRejectBuf[static_cast<size_t>( p )] = rejected ? 1.0f : 0.0f;
+            }
+            else
+            {
+              // Malformed probability row (non-finite / unnormalised): write
+              // the documented NoData sentinel instead of a bogus value.
+              uncEntropyBuf[static_cast<size_t>( p )] = -1.0f;
+              uncMarginBuf[static_cast<size_t>( p )] = -1.0f;
+              uncRejectBuf[static_cast<size_t>( p )] = -1.0f;
+            }
+          }
         }
       }
       // Destination offsets are relative to the crop window origin.
@@ -999,6 +1278,23 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
               .arg( dstX ).arg( dstY ) );
         }
       }
+      if ( writeUnc )
+      {
+        float *uncBufs[3] = { uncEntropyBuf.data(), uncMarginBuf.data(), uncRejectBuf.data() };
+        for ( int b = 1; b <= 3; ++b )
+        {
+          const CPLErr uwErr = uncDs->GetRasterBand( b )->RasterIO(
+            GF_Write, dstX, dstY, tw, th, uncBufs[b - 1],
+            tw, th, GDT_Float32, 0, 0 );
+          if ( uwErr != CE_None )
+          {
+            return failWithPartialOutput(
+              RsClassificationPipelineResult::Error::GdalWriteFailed,
+              QStringLiteral( "Failed to write uncertainty band %1 tile at (%2,%3)" )
+                .arg( b ).arg( dstX ).arg( dstY ) );
+          }
+        }
+      }
 
       ++doneTiles;
       if ( !reportProgress( progress,
@@ -1014,6 +1310,7 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
 
   const CPLErr flushDst = dstDs->FlushCache( true );
   const CPLErr flushProb = probDs ? probDs->FlushCache( true ) : CE_None;
+  const CPLErr flushUnc = uncDs ? uncDs->FlushCache( true ) : CE_None;
 
   GDALClose( srcDs );
   srcDs = nullptr;
@@ -1024,8 +1321,13 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     GDALClose( probDs );
     probDs = nullptr;
   }
+  if ( uncDs )
+  {
+    GDALClose( uncDs );
+    uncDs = nullptr;
+  }
 
-  if ( flushDst != CE_None || flushProb != CE_None )
+  if ( flushDst != CE_None || flushProb != CE_None || flushUnc != CE_None )
   {
     return failWithPartialOutput(
       RsClassificationPipelineResult::Error::GdalWriteFailed,
@@ -1038,14 +1340,29 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
     QFile::remove( tempOutputPath );
     if ( !tempProbPath.isEmpty() )
       QFile::remove( tempProbPath );
+    if ( !tempUncPath.isEmpty() )
+      QFile::remove( tempUncPath );
     result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
     result.errorMessage = QStringLiteral( "Failed to finalize output raster: %1" ).arg( config.outputRaster );
     return result;
   }
-  if ( !config.probabilityOutput.isEmpty() )
+  if ( writeProb )
   {
     QFile::remove( config.probabilityOutput );
     QFile::rename( tempProbPath, config.probabilityOutput );
+  }
+  if ( writeUnc )
+  {
+    QFile::remove( config.uncertaintyOutput );
+    if ( !QFile::rename( tempUncPath, config.uncertaintyOutput ) )
+    {
+      QFile::remove( tempUncPath );
+      result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
+      result.errorMessage =
+        QStringLiteral( "Failed to finalize uncertainty raster: %1" )
+          .arg( config.uncertaintyOutput );
+      return result;
+    }
   }
 
   result.totalPixels = outW * outH;

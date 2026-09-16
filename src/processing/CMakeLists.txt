@@ -7,6 +7,9 @@ add_library(sicnu_processing SHARED
     algorithms/glcm_texture.cpp
     algorithms/classifier_engine.cpp
     algorithms/classification_postprocess.cpp
+    # F12 object-level thematic cleanup: segment adjacency graph,
+    # min-area merge and iterative adjacency smoothing.
+    algorithms/classification_object_postprocess.cpp
     algorithms/change_detector.cpp
     algorithms/confusion_matrix.cpp
     tools/tool_path_manager.cpp

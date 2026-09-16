@@ -286,3 +286,15 @@ bool RsMlpBackend::load( const QString &path )
     mClassLabels.at<int>( i, 0 ) = arr[i].toInt();
   return true;
 }
+
+// F12 — RsClassOrder accessor: ascending training class ids captured at
+// fit() (one-hot column order). Empty when unfitted or for legacy loads
+// without the labels sidecar.
+QVector<int> RsMlpBackend::classOrder() const
+{
+  QVector<int> order;
+  order.reserve( static_cast<int>( mClassLabels.total() ) );
+  for ( int i = 0; i < mClassLabels.rows; ++i )
+    order.append( mClassLabels.at<int>( i, 0 ) );
+  return order;
+}

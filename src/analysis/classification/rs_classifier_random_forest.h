@@ -9,6 +9,8 @@
 #include "qgis_analysis_export.h"
 #include "rs_classifier_cv_backend.h"
 
+#include <QVector>
+
 #include <opencv2/ml.hpp>
 
 class QGIS_ANALYSIS_EXPORT RsRandomForestBackend : public RsClassifierCvBackend<cv::ml::RTrees>
@@ -23,7 +25,13 @@ class QGIS_ANALYSIS_EXPORT RsRandomForestBackend : public RsClassifierCvBackend<
     bool save( const QString &path ) const override;
     bool load( const QString &path ) override;
     bool supportsProbabilities() const override { return true; }
+    /// F12: ascending training class ids — probability column order.
+    QVector<int> classOrder() const override;
+    /// F12: RTrees per-feature importance (training feature order,
+    /// non-negative, unnormalised sum ≈ 1). Empty when unfitted.
+    QVector<double> featureImportances() const override;
     QString name() const override { return QStringLiteral( "RandomForest (随机森林)" ); }
+
 
   private:
     /// Distinct training class IDs in sorted order. RTrees::getVotes reports

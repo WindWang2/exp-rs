@@ -281,3 +281,7 @@ data/labs/_tmp/
 !.planning/radiometric-spectral-workbench/
 .planning/radiometric-spectral-workbench/*
 !.planning/radiometric-spectral-workbench/*.md
+# classification-intelligence-11: track planning notes (markdown only; logs stay local).
+!.planning/classification-intelligence-11/
+.planning/classification-intelligence-11/*
+!.planning/classification-intelligence-11/*.md

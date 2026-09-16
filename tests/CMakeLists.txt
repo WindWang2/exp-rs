@@ -4724,6 +4724,68 @@ sicnu_add_test(test_layout_tools)
   sicnu_discover_tests(test_classification_pipeline)
 endif()
 
+# Classification & Object Intelligence 11.0 — OpenCV-free contract tests
+# (class order, probability calibration, uncertainty, feature schema).
+add_executable(test_class_order test_class_order.cpp)
+target_link_libraries(test_class_order PRIVATE
+  Catch2::Catch2WithMain
+  qgis_core
+  qgis_analysis
+  Qt6::Core
+)
+target_include_directories(test_class_order PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_class_order)
+
+add_executable(test_probability_calibration test_probability_calibration.cpp)
+target_link_libraries(test_probability_calibration PRIVATE
+  Catch2::Catch2WithMain
+  qgis_core
+  qgis_analysis
+  Qt6::Core
+)
+target_include_directories(test_probability_calibration PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_probability_calibration)
+
+add_executable(test_uncertainty test_uncertainty.cpp)
+target_link_libraries(test_uncertainty PRIVATE
+  Catch2::Catch2WithMain
+  qgis_core
+  qgis_analysis
+  Qt6::Core
+)
+target_include_directories(test_uncertainty PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_uncertainty)
+
+add_executable(test_feature_schema test_feature_schema.cpp)
+target_link_libraries(test_feature_schema PRIVATE
+  Catch2::Catch2WithMain
+  qgis_core
+  qgis_analysis
+  Qt6::Core
+)
+target_include_directories(test_feature_schema PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_feature_schema)
+
 # Phase 10B.1 — Segment data model + feature extraction tests
 add_executable(test_segment_features test_segment_features.cpp)
 target_link_libraries(test_segment_features PRIVATE
@@ -9337,6 +9399,78 @@ sicnu_add_test(test_classifier_engine TIMEOUT 300 TEST_PREFIX "test_classifier_e
 
 # Package D: post-classification morphology.
 sicnu_add_test(test_classification_postprocess TIMEOUT 120 TEST_PREFIX "test_classification_postprocess::")
+
+# F12: object-level thematic cleanup (segment adjacency, min-area, smoothing).
+# Direct link (sicnu_processing only) — the module is pure STL and does not
+# need the sicnu_add_test full stack, which is currently unbuildable on this
+# host toolchain by two PRE-EXISTING master compile errors unrelated to F12
+# (see .planning/classification-intelligence-11/EVIDENCE.md).
+add_executable(test_classification_object_postprocess test_classification_object_postprocess.cpp)
+target_link_libraries(test_classification_object_postprocess PRIVATE
+  Catch2::Catch2WithMain
+  qgis_core
+  sicnu_processing
+  Qt6::Core
+)
+target_include_directories(test_classification_object_postprocess PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/processing/algorithms
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_classification_object_postprocess TIMEOUT 120)
+
+# F12: spatially aware k-fold CV with leakage audit (qgis_analysis + OpenCV).
+add_executable(test_spatial_cross_validation test_spatial_cross_validation.cpp)
+target_link_libraries(test_spatial_cross_validation PRIVATE
+  Catch2::Catch2WithMain
+  qgis_core
+  qgis_analysis
+  ${OpenCV_LIBS}
+)
+target_include_directories(test_spatial_cross_validation PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${OpenCV_INCLUDE_DIRS}
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_spatial_cross_validation)
+
+# F12: end-to-end chains (uncertainty raster semantics, sidecar v2 replay,
+# v1 compatibility, imbalanced classes).
+add_executable(test_classification_intelligence_e2e test_classification_intelligence_e2e.cpp)
+target_link_libraries(test_classification_intelligence_e2e PRIVATE
+  Catch2::Catch2WithMain
+  qgis_core
+  qgis_analysis
+  GDAL::GDAL
+  ${OpenCV_LIBS}
+)
+target_include_directories(test_classification_intelligence_e2e PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${OpenCV_INCLUDE_DIRS}
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_classification_intelligence_e2e TIMEOUT 300)
+
+# F12: bounded logical-scale evidence (100k samples; invariants only).
+add_executable(test_classification_intelligence_scale test_classification_intelligence_scale.cpp)
+target_link_libraries(test_classification_intelligence_scale PRIVATE
+  Catch2::Catch2WithMain
+  qgis_core
+  qgis_analysis
+  ${OpenCV_LIBS}
+)
+target_include_directories(test_classification_intelligence_scale PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/analysis
+  ${CMAKE_SOURCE_DIR}/src/analysis/classification
+  ${OpenCV_INCLUDE_DIRS}
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_classification_intelligence_scale RUN_SERIAL TIMEOUT 600)
 
 # Packages E/F: pixel change detection + accuracy assessment.
 sicnu_add_test(test_change_detector TIMEOUT 120 TEST_PREFIX "test_change_detector::")
