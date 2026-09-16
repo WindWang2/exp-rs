@@ -1,0 +1,378 @@
+{
+  "schema_version": "sicnu.lab-pack/1",
+  "lab_id": "grading_corpus",
+  "pack_version": "1.0.0",
+  "license": "generated-in-repo (synthetic teaching data, no third-party rights)",
+  "declared_offline_bytes": 1541867,
+  "notes": "fixtures regenerate via tests/fixtures/lab/generate_fixtures.py (osgeo host)",
+  "inputs": [
+    {
+      "path": "tests/fixtures/lab/carto_export_reference.png",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "137758e5cf6139c48896e873573eea9c0398255e59eae68a344df5337335402e",
+      "bytes": 51520,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/carto_export_wrong_a5.png",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "bed3e44386643d3ba0a29eb55079eade55f2a23f9be37eff5271aff5ccaaee4e",
+      "bytes": 27309,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/carto_mapspec_reference.mapspec.json",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "f2ea6415bdf3abc5e366ed726f867aee6a19b7bfb927683182ae67108122d16d",
+      "bytes": 2048,
+      "sensor_truth": "MapSpec v5 document fixture (corpus input)"
+    },
+    {
+      "path": "tests/fixtures/lab/carto_mapspec_wrong_nolegend.mapspec.json",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "f92b9e411bf1c52798ec596e5fee314c3b727074ec33741107caec60c636844d",
+      "bytes": 1823,
+      "sensor_truth": "MapSpec v5 document fixture (corpus input)"
+    },
+    {
+      "path": "tests/fixtures/lab/change_detect_reference.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "0a0df090c259e20d6a760e2d9fe9dfe29a25de083ad72e8426a8673aa9c3ab1e",
+      "bytes": 16770,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/change_detect_wrong_all_nodata.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "073fa7b4003ec8dfadf507fb814c0c7a7f2d4bd819f3fd8801a0c71d1cf8053f",
+      "bytes": 16770,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/change_detect_wrong_inverted.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "4aa144b7a469293b3b95f0542515782cd3c7b0c6ce83931a3bfd0507c1aa635f",
+      "bytes": 16770,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/change_detect_wrong_over_detect.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "d1de1bd36ad54791eb49dec99749eabdcf29d2e8d4ac9fdfc49612670635a461",
+      "bytes": 16770,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/change_detect_wrong_under_detect.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "f1f4fe0add0818af2532786c52759ab9ee96a3d0d1437f4a408baacd4dbd9e66",
+      "bytes": 16770,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/hsi_labels_reference.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "71c0f6d8955a7e4296857bfbbfa6322bd41d714122c8ab11febd402655925d86",
+      "bytes": 65950,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/hsi_labels_wrong_allwater.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "8701a6520ba0f8b8a8de1a2532e62eee544c9227a452a33e91598fed4d182354",
+      "bytes": 65950,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/hsi_labels_wrong_shifted.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "207b05a40e62e957f005ed4d664522cddbead926fab2be873922f2019d5c9065",
+      "bytes": 65950,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/hsi_zones.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "77f9fc0b106d9c62dde1319bca483d83ce107c778f6fab36f5fa49d32cde6cb2",
+      "bytes": 65950,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/landcover_reference.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "a9be4f13a4469b73a9c463ed4eb645b8a08da92d92e587b96c8835a0a405888b",
+      "bytes": 1402,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/landcover_truth.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "a9be4f13a4469b73a9c463ed4eb645b8a08da92d92e587b96c8835a0a405888b",
+      "bytes": 1402,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/landcover_wrong_all_veg.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "d723f0d1a24d25b33ef10987133cef3637522c90e5b163bb0f3d8de30ae13433",
+      "bytes": 1402,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/landcover_wrong_shifted_labels.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "0d24327a245a543d7e1e0401037a701b05cd1f952b7c1e0a3f218931582561c3",
+      "bytes": 1402,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/landcover_wrong_unmasked.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "3700b0f106ff66a9caf17bde3ef793e674ae8c5c82317f878f5bd7a23cdf2f18",
+      "bytes": 1402,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/ndvi_bandpair_reference.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "4dddcbfd23043b63f7527b367881b0e178d1d87b57fdefed98f15ce3df8a653d",
+      "bytes": 2718,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/ndvi_bandpair_wrong_gain_mismatch.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "5cef7a500b650de3c77d762ccf4027c3680e55b763076c7f46f6dd23a3d62c27",
+      "bytes": 2734,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/ndvi_bandpair_wrong_swapped.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "f3dc3c9288be582872aa2119121e8e5042bd9be4a5fec57ac0e7891548b48636",
+      "bytes": 2718,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/ndvi_basics_reference.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "9884fbb53d3a059bcdd3867be5c5d6a5a2a22d313bccda042e32746fb53bbb17",
+      "bytes": 65968,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/ndvi_basics_wrong_all_nodata.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "ec67edd52db7120626f2f373c078aa4e6f6d3f3642013b60478b64e64984c769",
+      "bytes": 65968,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/ndvi_basics_wrong_stretch.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "544f1e0c2422ac16e1620f3fd6232953a954f8b7c2ef0d241d1a8c768915aaf5",
+      "bytes": 65968,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/ndvi_basics_wrong_swapped_bands.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "5a00749cd892e191845494ab6b1d28d8fee8a84c10da79920d522e0ee3495643",
+      "bytes": 65968,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/ndvi_basics_wrong_unmasked.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "8d6079f1022fe34950d8f70f22fc52c8b32ddbd542ad96d4c304a34a6d1fbd9a",
+      "bytes": 65968,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/planck_temperature_reference.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "8b66d07656a266433b0bbcb1fefe9a8715dad1e28cebef50c77f748307db49ae",
+      "bytes": 65968,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/planck_temperature_wrong_celsius.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "7ba0a22d5e300f20c05f1e9c93bf98206bcf54ee9f20137538324930e448d960",
+      "bytes": 65968,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/planck_temperature_wrong_dn_inverted.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "44eebe18767a7226f324ca04009c2a13ce59967c99dd0c5adaf732ee51740c70",
+      "bytes": 65968,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/planck_temperature_wrong_gain.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "6a61a8f8af4758c486fce6d8de218d5f66675492e1fa34ab878de9de93ce2882",
+      "bytes": 65968,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/reference_corpus.json",
+      "role": "aux",
+      "provenance": "committed-fixture",
+      "sha256": "3570e8dc911f40972dc838e887be9d9f0ec1b504a510934a245dc0bac3c4966c",
+      "bytes": 1502,
+      "sensor_truth": "corpus manifest (declared expected scores)"
+    },
+    {
+      "path": "tests/fixtures/lab/sar_change_groundtruth.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "e1d5dc0761ac00cb831c31932c7deeece1f511ab09f54debbc5f9d9ee8ff4bbc",
+      "bytes": 65950,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/sar_change_reference.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "e1d5dc0761ac00cb831c31932c7deeece1f511ab09f54debbc5f9d9ee8ff4bbc",
+      "bytes": 65950,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/sar_change_wrong_allmarked.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "56793a9269143bf3636f55a8ac4eea7223f0e449f7ad1ed307b5e6cb69aec83b",
+      "bytes": 65950,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/sar_change_wrong_inverted.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "eb755091276c1ec373eaaed1f559756d36c9a104f1079abef52fec59e1b81486",
+      "bytes": 65950,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/sar_change_wrong_shifted.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "309242427a002a3744909f45ae50112e086351eaaf18a25c57905ed2caef14e4",
+      "bytes": 65950,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/temporal_series_reference.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "79f6c4a197337513d9a803dd164006e201946177931ef2bf06068d47d197bb81",
+      "bytes": 20036,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/temporal_wrong_bandcount.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "cc40765d8599e65fbacee1b6aee0b8a3bc638b451a333214100911798dd06406",
+      "bytes": 18916,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/temporal_wrong_season_inverted.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "772d86608c3cfbd659d7961891bbf47789c75e74a1ce04e1272535948cf50b71",
+      "bytes": 19428,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/temporal_wrong_zones_swapped.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "53f06b36204e69ccaa3e239d65564263a3a7f3210bc3ff041b8864dd2015134b",
+      "bytes": 19844,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/temporal_zones.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "aec84b10cefbbc1d4f894384e06352b845601eeed7b9fff49cc05227d9363398",
+      "bytes": 65950,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/terrain_slope_reference.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "c0715184907f8ed64329c204e8034de941eecf5a665b12bafefae49f96d717c7",
+      "bytes": 4474,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/terrain_slope_wrong_axis.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "76cbe2c075e1b09152c3fd89cdd4113bcd614f44f27312e92249f2d61c694ccf",
+      "bytes": 4474,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/terrain_slope_wrong_degrees.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "3117ace962887e0d4e096212ca5549bf9060284f9c2541f9c87b506b972d9eaa",
+      "bytes": 4474,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/terrain_slope_wrong_filled_border.tif",
+      "role": "fixture",
+      "provenance": "committed-fixture",
+      "sha256": "1852eb292fa2f946d540af1abc783a3c7b2d1767218985d2b5b73736cd008216",
+      "bytes": 4474,
+      "sensor_truth": "closed-form deterministic scene (no RNG, no timestamps)"
+    },
+    {
+      "path": "tests/fixtures/lab/wrong_answer_corpus.json",
+      "role": "aux",
+      "provenance": "committed-fixture",
+      "sha256": "efad2b51ac1017f71f6a8e9000c80a967c7ac9531a74e606f7367bab68c7e282",
+      "bytes": 9303,
+      "sensor_truth": "corpus manifest (declared expected scores)"
+    }
+  ]
+}

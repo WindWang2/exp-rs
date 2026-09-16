@@ -1,0 +1,31 @@
+{
+  "schema_version": "sicnu.lab-pack/1",
+  "lab_id": "hyperspectral_analysis",
+  "pack_version": "1.0.0",
+  "license": "generated-in-repo (synthetic teaching data, no third-party rights)",
+  "declared_offline_bytes": 962,
+  "inputs": [
+    {
+      "path": "data/labs/_tmp/hyperspectral/hsi_scene.tif",
+      "role": "sample",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py hyperspectral --out data/labs/_tmp --seed 42",
+      "sensor_truth": "hyperspectral scene 256x256 with N bands in the VNIR range, reflectance [0,1]; hsi_zones.tif carries the class-truth codes used by grading"
+    },
+    {
+      "path": "data/labs/_tmp/hyperspectral/hsi_zones.tif",
+      "role": "truth",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py hyperspectral --out data/labs/_tmp --seed 42",
+      "sensor_truth": "hyperspectral scene 256x256 with N bands in the VNIR range, reflectance [0,1]; hsi_zones.tif carries the class-truth codes used by grading"
+    },
+    {
+      "path": "data/labs/spectral-library/lab10_sicnu_library.json",
+      "role": "aux",
+      "provenance": "committed-fixture",
+      "sha256": "e05cd7aaea68f76225fdd6bc0c06057d1c645764e90224b733f1768266908e07",
+      "bytes": 962,
+      "sensor_truth": "SICNU spectral library (ADR 0081) — class endmembers"
+    }
+  ]
+}

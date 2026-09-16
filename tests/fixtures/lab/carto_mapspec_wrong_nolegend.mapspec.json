@@ -1,0 +1,93 @@
+{
+    "annotations": [
+    ],
+    "charts": [
+    ],
+    "colorbars": [
+    ],
+    "constraints": [
+    ],
+    "description": "Grading fixture: compliant thematic map (A4 landscape).",
+    "grids": [
+    ],
+    "inset_maps": [
+    ],
+    "kind": "map_spec",
+    "labels": [
+    ],
+    "layers": [
+    ],
+    "layout_name": "lab11_grading_fixture",
+    "map_frames": [
+        {
+            "extent": [
+                102.5,
+                30.244,
+                102.756,
+                30.5
+            ],
+            "id": "map-1",
+            "layers": [
+                "lab11_thematic_mask"
+            ],
+            "rect_mm": [
+                15,
+                28,
+                185,
+                160
+            ]
+        }
+    ],
+    "north_arrows": [
+        {
+            "id": "north-arrow-1",
+            "map_ref": "map-1"
+        }
+    ],
+    "output": {
+        "dir": "fixtures/cartographic",
+        "dpi": 200,
+        "formats": [
+            "png"
+        ]
+    },
+    "page": {
+        "height_mm": 210,
+        "width_mm": 297
+    },
+    "scale_bars": [
+        {
+            "id": "scale-bar-1",
+            "map_ref": "map-1"
+        }
+    ],
+    "schema_version": "1.0",
+    "source_notes": [
+        {
+            "id": "source-note-1",
+            "rect_mm": [
+                15,
+                194,
+                265,
+                8
+            ],
+            "text": "Data: teaching synthesis (2024); mapping: SICNU GEO RS"
+        }
+    ],
+    "spec_version": 5,
+    "symbols": [
+    ],
+    "titles": [
+        {
+            "id": "title-1",
+            "rect_mm": [
+                15,
+                8,
+                185,
+                16
+            ],
+            "semantic_role": "title.main",
+            "text": "Grading fixture thematic map"
+        }
+    ]
+}

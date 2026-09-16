@@ -1,0 +1,15 @@
+{
+  "schema_version": "sicnu.lab-pack/1",
+  "lab_id": "lab11_obia_classification",
+  "pack_version": "1.0.0",
+  "license": "generated-in-repo (synthetic teaching data, no third-party rights)",
+  "inputs": [
+    {
+      "path": "data/samples/landsat_sample.tif",
+      "role": "sample",
+      "provenance": "generated-samples",
+      "generator": "sicnu_generate_samples <data-dir>",
+      "sensor_truth": "synthetic 7-band Landsat-like (OLI band order); GDAL bands 1..7 = coastal/blue/green/red/nir/swir1/swir2; 256x256; fixed-seed surface model"
+    }
+  ]
+}

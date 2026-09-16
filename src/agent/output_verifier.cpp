@@ -1,5 +1,7 @@
 #include "output_verifier.h"
 
+#include "lab_grader_kernels.h"
+
 #include "core/qgsdatasourceresolver.h"
 #include "data/asset_types.h"
 #include "experiment/evaluation.h"
@@ -339,6 +341,9 @@ static const char *const kKnownKinds[] =
 {
   "range", "mean_sigma", "gain_invariance", "nodata_ratio", "histogram_shape",
   "classification_kappa", "confusion_marginals", "change_area_interval", "crs_grid",
+  // grader 2.0 (teaching-lab-platform-11): zone/position/temporal/spectral/file
+  "zone_stats", "band_layout", "spatial_agreement", "series_separation",
+  "spectral_signature", "file_check",
 };
 
 struct LabAssertion
@@ -356,6 +361,7 @@ struct LabRuleSet
   QString labId;
   QString title;
   QString path;
+  QString artifactKind = QStringLiteral( "raster" ); // "raster" | "file"
   double passingScore = 60.0;
   std::vector<LabAssertion> assertions;
 };
@@ -578,10 +584,16 @@ bool parseRulesImpl( const QString &path, LabRuleSet *rules, QString *error )
   }
 
   const Json::Value artifact = root.get( "artifact", Json::Value() );
-  if ( !artifact.isObject() || artifact.get( "kind", Json::Value() ).asString() != "raster" )
   {
-    *error = QStringLiteral( "%1: artifact.kind must be \"raster\"" ).arg( path );
-    return false;
+    const QString kind = artifact.isObject()
+                           ? QString::fromStdString( artifact.get( "kind", Json::Value() ).asString() )
+                           : QString();
+    if ( kind != QLatin1String( "raster" ) && kind != QLatin1String( "file" ) )
+    {
+      *error = QStringLiteral( "%1: artifact.kind must be \"raster\" or \"file\"" ).arg( path );
+      return false;
+    }
+    rules->artifactKind = kind;
   }
 
   if ( root.isMember( "passing_score" ) )
@@ -854,6 +866,17 @@ bool parseRulesImpl( const QString &path, LabRuleSet *rules, QString *error )
         p.fail( "band_count must be >= 1" );
       if ( p.number( params, "pixel_size_tolerance" ) < 0.0 )
         p.fail( "pixel_size_tolerance must be >= 0" );
+    }
+
+    // grader 2.0 kernels validate their own params (teaching-lab-platform-11).
+    if ( p.ok() && ( isLabRasterKernelKind( a.kind ) || isLabFileKernelKind( a.kind ) ) )
+    {
+      QString kernelError;
+      if ( !validateLabKernelParams( a.kind, params, &kernelError ) )
+        p.fail( kernelError );
+      if ( !labKernelKindsMatchArtifactMode( rules->artifactKind, a.kind ) )
+        p.fail( QStringLiteral( "kind \"%1\" does not match artifact.kind \"%2\"" )
+                  .arg( a.kind, rules->artifactKind ) );
     }
 
     if ( !p.ok() )
@@ -2182,8 +2205,15 @@ OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &
     }
     result.artifactPath = QFileInfo( artifactPath ).absoluteFilePath();
 
+    // grader 2.0: rules declare their artifact mode. "file" rules grade
+    // non-raster submissions (documents, exports) through file_check kernels
+    // and never open a raster; "raster" rules keep the D4 path verbatim.
+    const bool fileMode = rules.artifactKind == QLatin1String( "file" );
+    std::map<QString, LabKernelOutcome> kernelOutcomes;
+
     std::unique_ptr<RasterReader> reader;
     const RasterMetadata *meta = nullptr;
+    if ( !fileMode )
     try
     {
         reader = std::make_unique<RasterReader>( RasterReader::open( artifactPath.toUtf8().constData() ) );
@@ -2194,12 +2224,15 @@ OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &
         result.errorClass = QStringLiteral( "artifact" );
         return result;
     }
-    meta = &reader->metadata();
-    if ( meta->bandCount <= 0 )
+    if ( !fileMode )
     {
-        result.error = QStringLiteral( "Artifact has zero bands" );
-        result.errorClass = QStringLiteral( "artifact" );
-        return result;
+        meta = &reader->metadata();
+        if ( meta->bandCount <= 0 )
+        {
+            result.error = QStringLiteral( "Artifact has zero bands" );
+            result.errorClass = QStringLiteral( "artifact" );
+            return result;
+        }
     }
 
     // ---- per-assertion states ---------------------------------------------
@@ -2211,6 +2244,26 @@ OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &
     ctx.meta = meta;
     ctx.maxBytes = options.maxBytes;
 
+    // ---- file-mode grading (file_check kernels, no raster) -----------------
+    if ( fileMode )
+    {
+        std::vector<LabKernelSpec> fileSpecs;
+        for ( const LabAssertion &a : rules.assertions )
+            fileSpecs.push_back( LabKernelSpec{ a.id, a.kind, a.params } );
+        QString usageError;
+        if ( !runLabFileChecks( result.artifactPath, fileSpecs,
+                                QFileInfo( rules.path ).absolutePath(), kernelOutcomes,
+                                &usageError ) )
+        {
+            result.error = usageError;
+            result.errorClass = QStringLiteral( "usage" );
+            return result;
+        }
+    }
+
+    std::map<QString, FinalOutcome> classificationForced;
+    if ( !fileMode )
+    {
     // ---- single content walk (feeds every value kernel in one streaming
     // pass under the byte budget) --------------------------------------------
     ContentWalk walk( *reader, rules, ctx, states );
@@ -2222,7 +2275,6 @@ OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &
     }
 
     // ---- classification paired walks (truth rasters / inline grids) --------
-    std::map<QString, FinalOutcome> classificationForced;
     QString usageError;
     if ( !runClassificationWalks( *reader, rules, QFileInfo( rules.path ).absolutePath(),
                                   options.maxBytes, states, classificationForced, ctx,
@@ -2241,6 +2293,25 @@ OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &
         return result;
     }
 
+    // ---- grader 2.0 kernel walks (zone/position/temporal/spectral) ---------
+    std::vector<LabKernelSpec> kernelSpecs;
+    for ( const LabAssertion &a : rules.assertions )
+        if ( isLabRasterKernelKind( a.kind ) )
+            kernelSpecs.push_back( LabKernelSpec{ a.id, a.kind, a.params } );
+    if ( !kernelSpecs.empty() )
+    {
+        bool kernelUsage = false;
+        if ( !runLabKernelWalks( *reader, kernelSpecs, QFileInfo( rules.path ).absolutePath(),
+                                 options.maxBytes, kernelOutcomes, &kernelUsage, &ctx.error ) )
+        {
+            result.error = ctx.error;
+            result.errorClass = kernelUsage ? QStringLiteral( "usage" )
+                                            : QStringLiteral( "artifact" );
+            return result;
+        }
+    }
+    }
+
     // ---- finalize: evidence, deductions, score ------------------------------
     double score = 100.0;
     bool capped = false;
@@ -2248,8 +2319,18 @@ OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &
     {
         const AssertionState &st = states[a.id];
         const auto forced = classificationForced.find( a.id );
+        const auto kernel = kernelOutcomes.find( a.id );
         FinalOutcome outcome;
-        if ( forced != classificationForced.end() )
+        if ( kernel != kernelOutcomes.end() )
+        {
+            outcome.passed = kernel->second.passed;
+            outcome.hasDelta = kernel->second.hasDelta;
+            outcome.delta = kernel->second.delta;
+            outcome.message = kernel->second.message;
+            outcome.observed = kernel->second.observed;
+            outcome.expected = kernel->second.expected;
+        }
+        else if ( forced != classificationForced.end() )
             outcome = forced->second;
         else if ( a.kind == QLatin1String( "classification_kappa" )
                   || a.kind == QLatin1String( "confusion_marginals" ) )
@@ -2294,6 +2375,13 @@ OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &
 
     // ---- summary ------------------------------------------------------------
     Json::Value summary;
+    if ( fileMode )
+    {
+        summary["artifact_bytes"] =
+          static_cast<Json::Int64>( QFileInfo( result.artifactPath ).size() );
+    }
+    else
+    {
     summary["width"] = meta->width;
     summary["height"] = meta->height;
     summary["band_count"] = meta->bandCount;
@@ -2320,6 +2408,7 @@ OutputVerifier::LabGradeResult OutputVerifier::gradeForTeaching( const QString &
                                                / static_cast<double>( st.totalPixels ) );
         }
         break;
+    }
     }
     result.summary = summary;
 

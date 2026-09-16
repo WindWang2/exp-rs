@@ -9643,6 +9643,68 @@ sicnu_add_test(test_lab_batch TIMEOUT 300)
 sicnu_link_jsoncpp(test_lab_batch)
 target_link_libraries(test_lab_batch PRIVATE sicnu_lab_batch)
 
+# teaching-lab-platform-11: sicnu.lab-pack/1 data pack contract (load + verify).
+sicnu_add_test(test_lab_data_pack TIMEOUT 300)
+sicnu_link_jsoncpp(test_lab_data_pack)
+
+# teaching-lab-platform-11: batch classroom v2 (identity, roster, caps, cancel,
+# deterministic summaries).
+sicnu_add_test(test_lab_batch_v2 TIMEOUT 300)
+sicnu_link_jsoncpp(test_lab_batch_v2)
+target_link_libraries(test_lab_batch_v2 PRIVATE sicnu_lab_batch)
+
+# teaching-lab-platform-11: headless sicnu.labreport.v1 export (`lab --report`)
+# and the recorded grade embedding seam.
+sicnu_add_test(test_lab_report_cli TIMEOUT 300)
+sicnu_link_jsoncpp(test_lab_report_cli)
+target_link_libraries(test_lab_report_cli PRIVATE sicnu_lab_report)
+
+# teaching-lab-platform-11: systematic prompt-injection / answer-leak corpus.
+sicnu_add_test(test_harness_lab_injection TIMEOUT 300)
+sicnu_link_jsoncpp(test_harness_lab_injection)
+
+# teaching-lab-platform-11: `lab --self-check` environment diagnostics.
+sicnu_add_test(test_lab_self_check TIMEOUT 300)
+sicnu_link_jsoncpp(test_lab_self_check)
+target_link_libraries(test_lab_self_check PRIVATE sicnu_lab_self_check)
+
+# teaching-lab-platform-11: grader 2.0 kernel unit tests (independent
+# in-test arithmetic oracle over raw-GDAL-written scenes).
+sicnu_add_test(test_lab_grader_kernels TIMEOUT 300)
+sicnu_link_jsoncpp(test_lab_grader_kernels)
+target_link_libraries(test_lab_grader_kernels PRIVATE GDAL::GDAL ZLIB::ZLIB)
+
+# teaching-lab-platform-11: classroom scale (bounded daily gate; the
+# 1000-submission evidence run is opt-in via SICNU_LAB_SCALE_1000=1).
+sicnu_add_test(test_lab_scale TIMEOUT 600)
+sicnu_link_jsoncpp(test_lab_scale)
+target_link_libraries(test_lab_scale PRIVATE GDAL::GDAL sicnu_lab_batch)
+
+# teaching-lab-platform-11: offline classroom chain (gate + grade + batch +
+# self-check + report) — the zero-network oracle.
+sicnu_add_test(test_lab_offline_e2e TIMEOUT 300)
+sicnu_link_jsoncpp(test_lab_offline_e2e)
+target_link_libraries(test_lab_offline_e2e PRIVATE
+  GDAL::GDAL
+  sicnu_lab_batch
+  sicnu_lab_report
+  sicnu_lab_self_check
+)
+
+# teaching-lab-platform-11: deterministic grading fixture generator for the
+# labspec labs (committed products under tests/fixtures/lab; osgeo-free
+# regeneration path). Not a test — a corpus maintenance tool.
+add_executable(lab_grading_fixture_gen EXCLUDE_FROM_ALL lab_grading_fixture_gen.cpp)
+target_link_libraries(lab_grading_fixture_gen PRIVATE
+  Qt6::Core
+  GDAL::GDAL
+  ZLIB::ZLIB
+)
+target_include_directories(lab_grading_fixture_gen PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+
 # D8 capability knowledge layer: generator tool (data-driven sidecars +
 # generated pi/knowledge pages) and the drift/coverage/composition guard.
 add_executable(capability_knowledge_tool

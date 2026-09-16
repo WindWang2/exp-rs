@@ -2,11 +2,55 @@
   "schema_version": "sicnu.lab.corpus/1",
   "description": "Reference corpus: canonical correct products. The grader MUST return the declared score. Bands are derived from the closed forms in the rules files, never tuned.",
   "references": [
-    { "lab_id": "ndvi_basics", "fixture": "ndvi_basics_reference.tif", "expected_score": 100 },
-    { "lab_id": "ndvi_bandpair", "fixture": "ndvi_bandpair_reference.tif", "expected_score": 100 },
-    { "lab_id": "terrain_slope", "fixture": "terrain_slope_reference.tif", "expected_score": 100 },
-    { "lab_id": "planck_temperature", "fixture": "planck_temperature_reference.tif", "expected_score": 100 },
-    { "lab_id": "landcover_classify", "fixture": "landcover_reference.tif", "expected_score": 100 },
-    { "lab_id": "change_detect", "fixture": "change_detect_reference.tif", "expected_score": 100 }
+    {
+      "lab_id": "ndvi_basics",
+      "fixture": "ndvi_basics_reference.tif",
+      "expected_score": 100
+    },
+    {
+      "lab_id": "ndvi_bandpair",
+      "fixture": "ndvi_bandpair_reference.tif",
+      "expected_score": 100
+    },
+    {
+      "lab_id": "terrain_slope",
+      "fixture": "terrain_slope_reference.tif",
+      "expected_score": 100
+    },
+    {
+      "lab_id": "planck_temperature",
+      "fixture": "planck_temperature_reference.tif",
+      "expected_score": 100
+    },
+    {
+      "lab_id": "landcover_classify",
+      "fixture": "landcover_reference.tif",
+      "expected_score": 100
+    },
+    {
+      "lab_id": "change_detect",
+      "fixture": "change_detect_reference.tif",
+      "expected_score": 100
+    },
+    {
+      "lab_id": "temporal_analysis",
+      "fixture": "temporal_series_reference.tif",
+      "expected_score": 100
+    },
+    {
+      "lab_id": "sar_processing",
+      "fixture": "sar_change_reference.tif",
+      "expected_score": 100
+    },
+    {
+      "lab_id": "hyperspectral_analysis",
+      "fixture": "hsi_labels_reference.tif",
+      "expected_score": 100
+    },
+    {
+      "lab_id": "cartographic_mapping",
+      "fixture": "carto_mapspec_reference.mapspec.json",
+      "expected_score": 100
+    }
   ]
 }

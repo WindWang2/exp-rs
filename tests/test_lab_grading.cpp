@@ -140,7 +140,8 @@ std::string writeConstantTif( const QDir &dir, const std::string &name, int widt
 TEST_CASE( "lab_grading.reference corpus scores exactly its declared score", "[lab_grading][corpus]" )
 {
     const Json::Value corpus = readJson( std::string( fixturesDir() ) + "/reference_corpus.json" );
-    REQUIRE( corpus["references"].size() == 6 );
+    // 6 classic grading labs + 4 labspec labs (teaching-lab-platform-11).
+    REQUIRE( corpus["references"].size() == 10 );
     for ( const auto &entry : corpus["references"] )
     {
         const auto result = grade( entry["lab_id"].asString(), fixturePath( entry["fixture"].asString().c_str() ) );

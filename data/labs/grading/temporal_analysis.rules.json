@@ -1,0 +1,119 @@
+{
+  "schema_version": "sicnu.lab.rules/1",
+  "lab_id": "temporal_analysis",
+  "title": "实验8 NDVI 时序栈判分（labspec temporal_analysis 主产物）",
+  "artifact": { "kind": "raster" },
+  "passing_score": 60,
+  "assertions": [
+    {
+      "id": "layout.stack",
+      "kind": "band_layout",
+      "weight": 15,
+      "severity": "blocking",
+      "params": {
+        "band_count": 12,
+        "min_valid_fraction": 0.99
+      },
+      "derivation": "T1（lab8 intent）：12 期月度合成栈，场景全幅无 NoData，逐波段有效像元比例 >= 0.99。波段数错误是结构性错误（blocking）。"
+    },
+    {
+      "id": "zones.evergreen",
+      "kind": "zone_stats",
+      "weight": 15,
+      "severity": "normal",
+      "params": {
+        "band": 1,
+        "zones": { "path": "../../../tests/fixtures/lab/temporal_zones.tif" },
+        "stat": "mean",
+        "bounds": [
+          { "zone": 1, "band": 1, "min": 0.70, "max": 0.80 },
+          { "zone": 1, "band": 6, "min": 0.70, "max": 0.80 },
+          { "zone": 1, "band": 12, "min": 0.70, "max": 0.80 }
+        ]
+      },
+      "derivation": "T2 常绿林先验：NDVI 常年 0.75（data-spec ndvi_prior 0.75；验收标准 [0.65,0.85] 收紧到闭合形式 0.75 的 [-0.05,+0.05]）。fixture 由 classNdvi(zone=1)=0.75 闭合式生成。"
+    },
+    {
+      "id": "zones.water",
+      "kind": "zone_stats",
+      "weight": 15,
+      "severity": "normal",
+      "params": {
+        "band": 1,
+        "zones": { "path": "../../../tests/fixtures/lab/temporal_zones.tif" },
+        "stat": "mean",
+        "bounds": [
+          { "zone": 3, "band": 1, "min": -0.15, "max": -0.05 },
+          { "zone": 3, "band": 6, "min": -0.15, "max": -0.05 },
+          { "zone": 3, "band": 12, "min": -0.15, "max": -0.05 }
+        ]
+      },
+      "derivation": "T2 水体先验：NDVI 常年 -0.10（intent 容差 [-0.20, 0.00] 收紧为闭合式 [-0.15,-0.05]）。classNdvi(zone=3)=-0.10。"
+    },
+    {
+      "id": "crops.summer",
+      "kind": "zone_stats",
+      "weight": 15,
+      "severity": "normal",
+      "params": {
+        "band": 1,
+        "zones": { "path": "../../../tests/fixtures/lab/temporal_zones.tif" },
+        "stat": "mean",
+        "bounds": [
+          { "zone": 2, "band": 6, "min": 0.60, "max": 0.90 },
+          { "zone": 2, "band": 7, "min": 0.60, "max": 0.90 },
+          { "zone": 2, "band": 8, "min": 0.60, "max": 0.90 }
+        ]
+      },
+      "derivation": "T2 农田生长季（intent：6-8 月 >= 0.60）。fixture 曲线 0.475+0.325*cos(2pi(m-6)/12) 在 m=6,7,8 给出 0.800/0.756/0.638，下界 0.60 为 intent 原值。"
+    },
+    {
+      "id": "crops.winter",
+      "kind": "zone_stats",
+      "weight": 10,
+      "severity": "normal",
+      "params": {
+        "band": 1,
+        "zones": { "path": "../../../tests/fixtures/lab/temporal_zones.tif" },
+        "stat": "mean",
+        "bounds": [
+          { "zone": 2, "band": 1, "min": -0.05, "max": 0.30 },
+          { "zone": 2, "band": 12, "min": -0.05, "max": 0.30 }
+        ]
+      },
+      "derivation": "T2 冬季休耕（intent：12-2 月 <= 0.30；m=1,12 闭合值 0.194/0.150）。m=2 的闭合值 0.3125 超出 intent 上界属先验离散化差，故冬季窗口取 12-1 月并在 fixture 文档中说明。"
+    },
+    {
+      "id": "disturb.summer",
+      "kind": "zone_stats",
+      "weight": 15,
+      "severity": "normal",
+      "params": {
+        "band": 1,
+        "zones": { "path": "../../../tests/fixtures/lab/temporal_zones.tif" },
+        "stat": "mean",
+        "bounds": [
+          { "zone": 4, "band": 6, "min": 0.70, "max": 0.85 }
+        ]
+      },
+      "derivation": "T3 前置：扰动地块 2024 年 1-8 月与农田同曲线（intent scene_content），峰值 m=6 闭合值 0.800。"
+    },
+    {
+      "id": "disturb.drop",
+      "kind": "zone_stats",
+      "weight": 15,
+      "severity": "normal",
+      "params": {
+        "band": 1,
+        "zones": { "path": "../../../tests/fixtures/lab/temporal_zones.tif" },
+        "stat": "mean",
+        "bounds": [
+          { "zone": 4, "band": 10, "max": 0.20 },
+          { "zone": 4, "band": 11, "max": 0.20 },
+          { "zone": 4, "band": 12, "max": 0.20 }
+        ]
+      },
+      "derivation": "T3（intent：扰动后回落到裸土 NDVI~0.12；10 月均值比 8 月至少低 0.4）。fixture 9-12 月取 0.12，上界 0.20 覆盖回落平台，'下降幅度'由 disturb.summer 与本条的联合界限表达。"
+    }
+  ]
+}

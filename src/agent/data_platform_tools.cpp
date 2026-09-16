@@ -65,6 +65,9 @@ using sicnu::experiment::BenchmarkService;
 // D19 benchmark tool wrappers (benchmarkList et al) call BenchmarkService
 // unqualified; it lives in sicnu::experiment and no using-directive covers
 // it, so the TU fails to compile without this (build-unblock; see PR #1009).
+// master build-unblock (MSVC): benchmarkList et al. use sicnu::experiment
+// names but D19 landed no using-directive for them (same local fix as the
+// execution-runtime track; out-of-scope, recorded in track EVIDENCE).
 using namespace sicnu::experiment;
 
 namespace

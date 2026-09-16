@@ -2,6 +2,12 @@
 add_library(sicnu_agent SHARED
   output_verifier.cpp
   output_verifier.h
+  # teaching-lab-platform-11: sicnu.lab-pack/1 data pack contract
+  lab_data_pack.cpp
+  lab_data_pack.h
+  # teaching-lab-platform-11: grader 2.0 assertion kernels
+  lab_grader_kernels.cpp
+  lab_grader_kernels.h
   # D15 classification-change-studio: agent diagnosis seam
   tools/classification_tool.cpp
   tools/classification_tool.h
@@ -83,6 +89,9 @@ add_library(sicnu_agent SHARED
   harness/lab_copilot.h
   harness/lab_tools.cpp
   harness/lab_tools.h
+  # teaching-lab-platform-11: adversarial prompt-injection / leak corpus
+  harness/lab_injection_corpus.cpp
+  harness/lab_injection_corpus.h
   harness/agent_plan.cpp
   harness/agent_plan.h
   harness/scientific_preflight.cpp

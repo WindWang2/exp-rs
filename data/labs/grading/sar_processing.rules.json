@@ -1,0 +1,52 @@
+{
+  "schema_version": "sicnu.lab.rules/1",
+  "lab_id": "sar_processing",
+  "title": "实验9 SAR 变化检测掩膜判分（labspec sar_processing 主产物）",
+  "artifact": { "kind": "raster" },
+  "passing_score": 60,
+  "assertions": [
+    {
+      "id": "detect.hit",
+      "kind": "spatial_agreement",
+      "weight": 45,
+      "severity": "blocking",
+      "params": {
+        "band": 1,
+        "truth": { "path": "../../../tests/fixtures/lab/sar_change_groundtruth.tif" },
+        "truth_positive": 1,
+        "artifact_positive": 1,
+        "min_hit_rate": 0.65
+      },
+      "derivation": "S3（lab9 intent）：植入变化区检出率 >= 65%。fixture 植入区 = 128,128 起 40x40 = 1600 像元（先验 1600/65536 ~ 2.4%）。位置敏感判分：面积正确但位置错误时检出率为 0，直接暴露。漏检属结构性失能（blocking）。"
+    },
+    {
+      "id": "detect.false_alarm",
+      "kind": "spatial_agreement",
+      "weight": 41,
+      "severity": "normal",
+      "params": {
+        "band": 1,
+        "truth": { "path": "../../../tests/fixtures/lab/sar_change_groundtruth.tif" },
+        "truth_positive": 1,
+        "artifact_positive": 1,
+        "max_false_alarm_rate": 0.02
+      },
+      "derivation": "S3（lab9 intent）：区外虚警率 <= 2%。全集非变化像元 65536-1600 = 63936；全标记掩膜的虚警率 100%，故意放宽的掩膜是最常见的教学失败模式。"
+    },
+    {
+      "id": "grid.mask",
+      "kind": "crs_grid",
+      "weight": 14,
+      "severity": "blocking",
+      "params": {
+        "epsg": 4326,
+        "width": 256,
+        "height": 256,
+        "pixel_size_x": 0.001,
+        "pixel_size_y": 0.001,
+        "band_count": 1
+      },
+      "derivation": "S3 前置：掩膜与源影像同网格（data-spec grid；crs_grid 是 ADR 0150 既有 kernel）。"
+    }
+  ]
+}

@@ -520,6 +520,47 @@ All notable changes to the `exp-rs` project will be documented in this file.
   Float64 band, guarded CRS).
 - **Mirror/report hardening**: bounded MirrorReport outcomes, unified budget
   basis, manifest throttling with unconditional final flush, per-chunk sha256.
+## [Unreleased] - Teaching Lab, Grading & Reproducibility Platform 11.0 (zcode/teaching-lab-platform-11)
+
+- **Grader 2.0 kernels**: `zone_stats` (per-zone(/band) mean bounds, cross-zone
+  deltas, ENL ratio vs a reference raster, Fisher separability), `band_layout`
+  (band count, per-band valid fractions, exact valid-pixel counts),
+  `spatial_agreement` (position-sensitive: binary hit/false-alarm rates,
+  per-zone label accuracy, continuous |diff| tolerance), `series_separation`
+  (per-zone slope over a declared axis), `spectral_signature` (SAM angle vs
+  declared references) and file-mode `file_check` (PNG page geometry, MapSpec
+  structural validation + cartography preflight) — all through the unchanged
+  `OutputVerifier::gradeArtifact` seam (ADR 0150) with the same evidence,
+  determinism and byte-budget contracts.
+- **Executable rules for labspec labs 8-11**: `temporal_analysis`, `sar_processing`,
+  `hyperspectral_analysis` and file-mode `cartographic_mapping` implement the
+  D3 grading intents (weights sum 100, derivations quote the intent tolerances).
+- **Deterministic grading fixtures**: closed-form committed scenes for the new
+  labs (`tests/lab_grading_fixture_gen.cpp` is the osgeo-free regeneration
+  tool); reference + wrong-answer corpus entries extend the known-answer
+  machinery in `test_lab_grading`.
+- **Batch classroom 2.0**: `lab --batch` gains `--roster` (student_id,display_name
+  cross-check), sha256 submission identity with `duplicate_of` flags,
+  `--max-submissions` caps, a cancel probe, and deterministic JSON/HTML
+  summaries (`sicnu.lab.batch-summary/1`, atomic writes, no wall clock).
+- **Headless lab report**: `lab --report --experiment-db <db> --experiment <id>
+  --report-out <base>` exports the recorded `sicnu.labreport.v1` projection as
+  json/md/html and embeds a `lab --grade --out` transcript as the RECORDED
+  grade variant (gradingRef = transcript digest). The grade seam of the D5
+  report is finally reachable without the GUI.
+- **`lab --self-check`**: offline classroom environment diagnostics — offline
+  gate state, EPSG:4326 authority sanity, lab data pack verification and
+  rules-parsing through the real grading seam; typed `sicnu.lab.self-check/1`
+  document, deterministic bytes.
+- **Lab data pack contract** (`sicnu.lab-pack/1`): per-lab deployment manifests
+  (`data/labs/packs/*.pack.json`, 17 packs incl. the grading corpus) with
+  sha256-pinned committed fixtures, presence/size checks for regenerable
+  inputs, license + sensor-truth declarations; drift guards keep packs in sync
+  (`gen_lab_packs.py --check`).
+- **Injection/leak corpus** (`lab_injection_corpus`): systematic adversarial
+  prompt regression for the teaching copilot — teacher-surface attacks must
+  produce the typed TEACHING_REFUSAL; leak attempts must never expose fixture
+  solution values.
 
 ## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)
 

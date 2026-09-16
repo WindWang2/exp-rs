@@ -1,0 +1,101 @@
+{
+  "schema_version": "sicnu.lab-pack/1",
+  "lab_id": "temporal_analysis",
+  "pack_version": "1.0.0",
+  "license": "generated-in-repo (synthetic teaching data, no third-party rights)",
+  "notes": "inputs regenerate via scripts/gen_lab_fixtures.py; sizes drift with toolchain (soft)",
+  "inputs": [
+    {
+      "path": "data/labs/_tmp/temporal/scene_2024-01-15.tif",
+      "role": "sample",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py temporal --out data/labs/_tmp --seed 42",
+      "sensor_truth": "12 monthly 256x256 float32 scenes, red=band3 nir=band4, reflectance [0,1] quantised to 1/255, SICNU_ACQUISITION_DATE per scene; zones.tif codes 1=evergreen 2=cropland 3=water 4=disturbance"
+    },
+    {
+      "path": "data/labs/_tmp/temporal/scene_2024-02-15.tif",
+      "role": "sample",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py temporal --out data/labs/_tmp --seed 42",
+      "sensor_truth": "12 monthly 256x256 float32 scenes, red=band3 nir=band4, reflectance [0,1] quantised to 1/255, SICNU_ACQUISITION_DATE per scene; zones.tif codes 1=evergreen 2=cropland 3=water 4=disturbance"
+    },
+    {
+      "path": "data/labs/_tmp/temporal/scene_2024-03-15.tif",
+      "role": "sample",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py temporal --out data/labs/_tmp --seed 42",
+      "sensor_truth": "12 monthly 256x256 float32 scenes, red=band3 nir=band4, reflectance [0,1] quantised to 1/255, SICNU_ACQUISITION_DATE per scene; zones.tif codes 1=evergreen 2=cropland 3=water 4=disturbance"
+    },
+    {
+      "path": "data/labs/_tmp/temporal/scene_2024-04-15.tif",
+      "role": "sample",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py temporal --out data/labs/_tmp --seed 42",
+      "sensor_truth": "12 monthly 256x256 float32 scenes, red=band3 nir=band4, reflectance [0,1] quantised to 1/255, SICNU_ACQUISITION_DATE per scene; zones.tif codes 1=evergreen 2=cropland 3=water 4=disturbance"
+    },
+    {
+      "path": "data/labs/_tmp/temporal/scene_2024-05-15.tif",
+      "role": "sample",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py temporal --out data/labs/_tmp --seed 42",
+      "sensor_truth": "12 monthly 256x256 float32 scenes, red=band3 nir=band4, reflectance [0,1] quantised to 1/255, SICNU_ACQUISITION_DATE per scene; zones.tif codes 1=evergreen 2=cropland 3=water 4=disturbance"
+    },
+    {
+      "path": "data/labs/_tmp/temporal/scene_2024-06-15.tif",
+      "role": "sample",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py temporal --out data/labs/_tmp --seed 42",
+      "sensor_truth": "12 monthly 256x256 float32 scenes, red=band3 nir=band4, reflectance [0,1] quantised to 1/255, SICNU_ACQUISITION_DATE per scene; zones.tif codes 1=evergreen 2=cropland 3=water 4=disturbance"
+    },
+    {
+      "path": "data/labs/_tmp/temporal/scene_2024-07-15.tif",
+      "role": "sample",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py temporal --out data/labs/_tmp --seed 42",
+      "sensor_truth": "12 monthly 256x256 float32 scenes, red=band3 nir=band4, reflectance [0,1] quantised to 1/255, SICNU_ACQUISITION_DATE per scene; zones.tif codes 1=evergreen 2=cropland 3=water 4=disturbance"
+    },
+    {
+      "path": "data/labs/_tmp/temporal/scene_2024-08-15.tif",
+      "role": "sample",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py temporal --out data/labs/_tmp --seed 42",
+      "sensor_truth": "12 monthly 256x256 float32 scenes, red=band3 nir=band4, reflectance [0,1] quantised to 1/255, SICNU_ACQUISITION_DATE per scene; zones.tif codes 1=evergreen 2=cropland 3=water 4=disturbance"
+    },
+    {
+      "path": "data/labs/_tmp/temporal/scene_2024-09-15.tif",
+      "role": "sample",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py temporal --out data/labs/_tmp --seed 42",
+      "sensor_truth": "12 monthly 256x256 float32 scenes, red=band3 nir=band4, reflectance [0,1] quantised to 1/255, SICNU_ACQUISITION_DATE per scene; zones.tif codes 1=evergreen 2=cropland 3=water 4=disturbance"
+    },
+    {
+      "path": "data/labs/_tmp/temporal/scene_2024-10-15.tif",
+      "role": "sample",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py temporal --out data/labs/_tmp --seed 42",
+      "sensor_truth": "12 monthly 256x256 float32 scenes, red=band3 nir=band4, reflectance [0,1] quantised to 1/255, SICNU_ACQUISITION_DATE per scene; zones.tif codes 1=evergreen 2=cropland 3=water 4=disturbance"
+    },
+    {
+      "path": "data/labs/_tmp/temporal/scene_2024-11-15.tif",
+      "role": "sample",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py temporal --out data/labs/_tmp --seed 42",
+      "sensor_truth": "12 monthly 256x256 float32 scenes, red=band3 nir=band4, reflectance [0,1] quantised to 1/255, SICNU_ACQUISITION_DATE per scene; zones.tif codes 1=evergreen 2=cropland 3=water 4=disturbance"
+    },
+    {
+      "path": "data/labs/_tmp/temporal/scene_2024-12-15.tif",
+      "role": "sample",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py temporal --out data/labs/_tmp --seed 42",
+      "sensor_truth": "12 monthly 256x256 float32 scenes, red=band3 nir=band4, reflectance [0,1] quantised to 1/255, SICNU_ACQUISITION_DATE per scene; zones.tif codes 1=evergreen 2=cropland 3=water 4=disturbance"
+    },
+    {
+      "path": "data/labs/_tmp/temporal/zones.tif",
+      "role": "truth",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py temporal --out data/labs/_tmp --seed 42",
+      "sensor_truth": "12 monthly 256x256 float32 scenes, red=band3 nir=band4, reflectance [0,1] quantised to 1/255, SICNU_ACQUISITION_DATE per scene; zones.tif codes 1=evergreen 2=cropland 3=water 4=disturbance",
+      "notes": "grading aux; not in the student chain"
+    }
+  ]
+}
