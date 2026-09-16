@@ -210,6 +210,8 @@ list(APPEND SICNU_OPERATORS_SOURCES
     rs/rs_sentinel2_import_operator.cpp
     rs/rs_modis_import_operator.cpp
     rs/rs_modis_georeference_operator.cpp
+    rs/rs_register_images_operator.cpp
+    rs/rs_stack_register_operator.cpp
     rs/rs_operators_init.cpp
 )
 

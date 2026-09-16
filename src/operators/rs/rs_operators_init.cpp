@@ -90,6 +90,8 @@
 #include "rs_zy3_import_operator.h"
 #include "rs_hj_import_operator.h"
 #include "rs_modis_georeference_operator.h"
+#include "rs_register_images_operator.h"
+#include "rs_stack_register_operator.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "processing/framework/atomic_algorithm_registry.h"
 
@@ -229,6 +231,9 @@ REGISTER_RS_OPERATOR(RsGaofenImportOperator, "rs:gaofen_import")
 REGISTER_RS_OPERATOR(RsZy3ImportOperator, "rs:zy3_import")
 REGISTER_RS_OPERATOR(RsHjImportOperator, "rs:hj_import")
 REGISTER_RS_OPERATOR(RsModisGeoreferenceOperator, "rs:modis_georeference")
+// F13: multimodal registration & stack adjustment (ADR 0160).
+REGISTER_RS_OPERATOR(RsRegisterImagesOperator, "rs:register_images")
+REGISTER_RS_OPERATOR(RsStackRegisterOperator, "rs:stack_register")
 
 #ifdef SICNU_HAS_OPENCV
 REGISTER_RS_OPERATOR(RsKmeansOperator, "rs:kmeans_classification")
@@ -390,6 +395,9 @@ void initBuiltinRsOperators() {
   add( "rs:zy3_import", [] { return std::make_unique<RsZy3ImportOperator>(); } );
   add( "rs:hj_import", [] { return std::make_unique<RsHjImportOperator>(); } );
   add( "rs:modis_georeference", [] { return std::make_unique<RsModisGeoreferenceOperator>(); } );
+  // F13: multimodal registration & geometric accuracy (ADR 0160).
+  add( "rs:register_images", [] { return std::make_unique<RsRegisterImagesOperator>(); } );
+  add( "rs:stack_register", [] { return std::make_unique<RsStackRegisterOperator>(); } );
 #ifdef SICNU_HAS_OPENCV
   add( "rs:kmeans_classification", [] { return std::make_unique<RsKmeansOperator>(); } );
   add( "rs:supervised_classification", [] { return std::make_unique<RsSupervisedClassificationOperator>(); } );

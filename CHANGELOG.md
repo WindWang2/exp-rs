@@ -164,6 +164,35 @@ All notable changes to the `exp-rs` project will be documented in this file.
   builders (trend/seasonal/both breaks, double season, winter cross-year, missing, spikes,
   no-change negative controls) with independent-oracle tests for the new kernels
   (attribution separation, selection determinism/tie rules, CI coverage, refusal codes).
+## [Unreleased] - Multimodal Registration 11.0 (zcode/multimodal-registration-11)
+
+- **Cross-modal matching (`sicnu::registration::MultimodalMatcher`)**: deterministic FFT
+  phase correlation + normalized mutual information / NCC metrics, NaN-aware [1,2,1]/4
+  pyramid with coarse-to-fine offset propagation, per-window metric fallback, RANSAC
+  consensus, full-extent coverage gating (clustered matches cannot rate high), and explicit
+  refusal semantics (`too_few_matches`, `flat_region`, `low_peak_snr`, `insufficient_coverage`,
+  `low_consensus`, `cancelled`, `cap_exhausted`).
+- **Evidence-driven model selection (`ModelSelector`)**: Translation→Similarity→Affine→
+  Projective→Poly2→Poly3→TPS ladder adopted only on ≥10% k-fold held-out RMSE improvement
+  with the κ gate; full per-candidate evidence table returned.
+- **RPC bias refinement (`RpcBiasModel`)**: robust median constant or 6-parameter affine
+  ground bias, promoted on held-out evidence (≥6 samples), plus height-sensitivity
+  statistics; preserves ADR 0057 semantics (GDAL RPC coefficients untouched).
+- **Stack registration (`StackRegistrator`)**: global translation least squares over a
+  weighted pair graph (≤256 scenes), reference suggestion, disconnected-scene reporting,
+  loop-closure drift via post-adjustment edge residuals.
+- **Quality products (`RegistrationQuality`)**: empirical CE90 (degraded flag below 20
+  samples, Rayleigh reference alongside), residual vector field, per-point local confidence
+  capped by coverage, `exp_rs_registration_quality/1` atomic JSON sidecar.
+- **Operators**: `rs:register_images` (match→fit→warp→GeoTIFF+report; refusal writes
+  nothing) and `rs:stack_register` (adjustment + `exp_rs_stack_registration/1` sidecar).
+- **Agent surface**: the D14 `spatial:geometric_registration` tool is finally registered in
+  `SpatialToolRegistry` (via `GeometricSpatialTool`) with three new actions —
+  `multimodal_register`, `select_model`, `stack_register`.
+- **#1005 (fail-closed georef picks)**: `QgsGeorefShellWindow::mapPickToLayerCrs` returns
+  `std::optional<QgsPointXY>`; invalid/throwing CRS transforms refuse the GCP pick instead
+  of silently storing canvas coordinates.
+- **Docs**: `docs/processing/geometric-registration.md`, ADR 0160.
 
 ## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)
 

@@ -9,6 +9,7 @@
 #include "raster_inspect_tool.h"
 #include "spectral_spatial_tools.h"
 #include "vector_inspect_tool.h"
+#include "geometric_spatial_tool.h"
 #include "workspace_tools.h"
 #include "governance_tools.h"
 #include "sample_tools.h"
@@ -228,6 +229,8 @@ void SpatialToolRegistry::registerBuiltinTools()
     std::make_shared<exp_agent::SpectralInspectTool>(),
     std::make_shared<exp_agent::ValidateBoaPhysicsTool>(),
     std::make_shared<VectorInspectTool>(),
+    // F13: geometric registration surface (D14 tool finally cataloged).
+    std::make_shared<GeometricSpatialTool>(),
     std::make_shared<ModelCatalogTool>(),
     std::make_shared<TemporalCreateCollectionTool>(),
     std::make_shared<TemporalDescribeCollectionTool>(),

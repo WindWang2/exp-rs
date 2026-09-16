@@ -2,6 +2,10 @@
 #include "agent/tools/geometric_tool.h"
 
 #include "processing/algorithms/feature_matcher.h"
+#include "processing/algorithms/registration/multimodal_matcher.h"
+#include "processing/algorithms/registration/model_selector.h"
+#include "processing/algorithms/registration/registration_quality.h"
+#include "processing/algorithms/registration/stack_registrator.h"
 
 #include <gdal_priv.h>
 
@@ -30,13 +34,40 @@ QJsonObject envelope(bool success, const QString& action, const QString& message
 
 } // namespace
 
+namespace {
+
+// Shared bounded raster reader (F13): decimates to at most 512 px on the
+// long side via GDAL read-time resampling so agent-supplied rasters cannot
+// blow the memory budget. Returns false when the band cannot be read.
+bool readBand1Bounded(GDALDataset* dataset, int& width, int& height, std::vector<float>& buffer)
+{
+    const int rawW = dataset->GetRasterXSize();
+    const int rawH = dataset->GetRasterYSize();
+    const int longest = std::max(rawW, rawH);
+    width = longest > 512 ? rawW * 512 / longest : rawW;
+    height = longest > 512 ? rawH * 512 / longest : rawH;
+    width = std::clamp(width, 1, rawW);
+    height = std::clamp(height, 1, rawH);
+    buffer.assign(static_cast<size_t>(width) * height, 0.0f);
+    return dataset->GetRasterBand(1)->RasterIO(GF_Read, 0, 0, rawW, rawH, buffer.data(), width,
+                                               height, GDT_Float32, 0, 0)
+           == CE_None;
+}
+
+} // namespace
+
 QString GeometricTool::toolDescription() const
 {
     return QStringLiteral(
         "Spatial geometric registration: audits GCP residuals (3-sigma gross "
         "blunders), recommends the optimal transform model from point count / "
-        "terrain roughness / spatial coverage, and pre-checks misalignment "
-        "between a source and a reference raster via robust feature matching.");
+        "terrain roughness / spatial coverage, pre-checks misalignment "
+        "between a source and a reference raster via robust feature matching, "
+        "runs cross-modal (optical-SAR) tie-point matching with explicit "
+        "refusal semantics and CE90/residual-field quality, performs "
+        "evidence-driven transform model selection (k-fold held-out gate), "
+        "and solves multi-scene stack registration with loop-closure drift "
+        "metrics.");
 }
 
 QJsonObject GeometricTool::parameterSchema() const
@@ -52,11 +83,16 @@ QJsonObject GeometricTool::parameterSchema() const
     action.insert("description", QStringLiteral("Operation to run."));
     action.insert("enum", QJsonArray{QStringLiteral("audit_residuals"),
                                      QStringLiteral("recommend_model"),
-                                     QStringLiteral("inspect_misalignment")});
+                                     QStringLiteral("inspect_misalignment"),
+                                     QStringLiteral("multimodal_register"),
+                                     QStringLiteral("select_model"),
+                                     QStringLiteral("stack_register")});
 
     QJsonObject gcps;
     gcps.insert("type", QStringLiteral("array"));
-    gcps.insert("description", QStringLiteral("GCP objects with id, residual_x, residual_y."));
+    gcps.insert("description", QStringLiteral(
+        "audit_residuals: {id, residual_x, residual_y[, residual_total]}. "
+        "select_model: {source_x, source_y, target_x, target_y}."));
     QJsonObject gcpItem;
     gcpItem.insert("type", QStringLiteral("object"));
     QJsonObject gcpProps;
@@ -93,6 +129,53 @@ QJsonObject GeometricTool::parameterSchema() const
     QJsonObject refPath;
     refPath.insert("type", QStringLiteral("string"));
 
+    QJsonObject metricProp;
+    metricProp.insert("type", QStringLiteral("string"));
+    metricProp.insert("description",
+                      QStringLiteral("multimodal_register similarity metric."));
+    metricProp.insert("enum", QJsonArray{QStringLiteral("auto"),
+                                         QStringLiteral("phase_correlation"),
+                                         QStringLiteral("mutual_information"),
+                                         QStringLiteral("ncc")});
+    QJsonObject windowProp;
+    windowProp.insert("type", QStringLiteral("integer"));
+    windowProp.insert("description", QStringLiteral("Window side in px (16..256)."));
+    QJsonObject radiusProp;
+    radiusProp.insert("type", QStringLiteral("integer"));
+    radiusProp.insert("description", QStringLiteral("Fine-level search radius in px."));
+    QJsonObject foldsProp;
+    foldsProp.insert("type", QStringLiteral("integer"));
+    foldsProp.insert("description", QStringLiteral("select_model k-fold count (>= 2)."));
+    foldsProp.insert("minimum", 2.0);
+    QJsonObject improvementProp;
+    improvementProp.insert("type", QStringLiteral("number"));
+    improvementProp.insert("description",
+                           QStringLiteral("select_model relative held-out improvement gate."));
+    improvementProp.insert("minimum", 0.0);
+    QJsonObject sceneIdsProp;
+    sceneIdsProp.insert("type", QStringLiteral("array"));
+    sceneIdsProp.insert("description", QStringLiteral("stack_register scene id array."));
+    sceneIdsProp.insert("items", [] {
+        QJsonObject s;
+        s.insert("type", QStringLiteral("string"));
+        return s;
+    }());
+    QJsonObject observationsProp;
+    observationsProp.insert("type", QStringLiteral("array"));
+    observationsProp.insert(
+        "description",
+        QStringLiteral("stack_register pairwise translations {from_id, to_id, tx, ty, "
+                       "confidence, inlier_count}."));
+    observationsProp.insert("items", [] {
+        QJsonObject s;
+        s.insert("type", QStringLiteral("object"));
+        return s;
+    }());
+    QJsonObject referenceProp;
+    referenceProp.insert("type", QStringLiteral("string"));
+    referenceProp.insert("description",
+                         QStringLiteral("stack_register reference scene id (optional)."));
+
     QJsonObject properties;
     properties.insert("action", action);
     properties.insert("gcps", gcps);
@@ -102,6 +185,14 @@ QJsonObject GeometricTool::parameterSchema() const
     properties.insert("coverage_ratio", coverage);
     properties.insert("source_image_path", sourcePath);
     properties.insert("reference_image_path", refPath);
+    properties.insert("metric", metricProp);
+    properties.insert("window_size", windowProp);
+    properties.insert("search_radius", radiusProp);
+    properties.insert("folds", foldsProp);
+    properties.insert("min_improvement", improvementProp);
+    properties.insert("scene_ids", sceneIdsProp);
+    properties.insert("observations", observationsProp);
+    properties.insert("reference_id", referenceProp);
     schema.insert("properties", properties);
 
     QJsonArray required{QStringLiteral("action")};
@@ -262,26 +353,15 @@ QJsonObject GeometricTool::inspectMisalignment(const QString& sourceImagePath,
                         QStringLiteral("Failed to open one of the rasters with GDAL."));
     }
 
-    // Agent-supplied rasters can be arbitrarily large: decimate to at most
-    // 512 px on the long side through GDAL's read-time resampling so the
-    // in-memory footprint stays bounded (alignment diagnosis needs no full
-    // resolution).
-    auto readBand1 = [](GDALDataset* dataset, int& width, int& height) -> std::vector<float> {
-        const int rawW = dataset->GetRasterXSize();
-        const int rawH = dataset->GetRasterYSize();
-        const int longest = std::max(rawW, rawH);
-        width = longest > 512 ? rawW * 512 / longest : rawW;
-        height = longest > 512 ? rawH * 512 / longest : rawH;
-        width = std::clamp(width, 1, rawW);
-        height = std::clamp(height, 1, rawH);
-        std::vector<float> buffer(static_cast<size_t>(width) * height, 0.0f);
-        dataset->GetRasterBand(1)->RasterIO(GF_Read, 0, 0, rawW, rawH, buffer.data(),
-                                            width, height, GDT_Float32, 0, 0);
-        return buffer;
-    };
+    // Agent-supplied rasters can be arbitrarily large: read through the
+    // shared bounded reader (512 px long-side cap).
     int srcW = 0, srcH = 0, refW = 0, refH = 0;
-    const std::vector<float> srcData = readBand1(src.get(), srcW, srcH);
-    const std::vector<float> refData = readBand1(ref.get(), refW, refH);
+    std::vector<float> srcData, refData;
+    if (!readBand1Bounded(src.get(), srcW, srcH, srcData)
+        || !readBand1Bounded(ref.get(), refW, refH, refData)) {
+        return envelope(false, QStringLiteral("inspect_misalignment"),
+                        QStringLiteral("Failed to read band 1 of one of the rasters."));
+    }
     src.reset();
     ref.reset();
 
@@ -312,6 +392,265 @@ QJsonObject GeometricTool::inspectMisalignment(const QString& sourceImagePath,
     return envelope(true, QStringLiteral("inspect_misalignment"), message, data);
 }
 
+QJsonObject GeometricTool::multimodalRegister(const QString& sourceImagePath,
+                                              const QString& refImagePath, const QString& metric,
+                                              int windowSize, int searchRadius)
+{
+    const QString action = QStringLiteral("multimodal_register");
+    if (sourceImagePath.isEmpty() || refImagePath.isEmpty())
+        return envelope(false, action,
+                        QStringLiteral("Both source and reference image paths are required."));
+    if (!QFile::exists(sourceImagePath) || !QFile::exists(refImagePath))
+        return envelope(false, action,
+                        QStringLiteral("Source or reference raster does not exist."));
+
+    GDALAllRegister();
+    struct DatasetCloser {
+        void operator()(GDALDataset* dataset) const
+        {
+            if (dataset)
+                GDALClose(dataset);
+        }
+    };
+    std::unique_ptr<GDALDataset, DatasetCloser> src(
+        static_cast<GDALDataset*>(GDALOpen(sourceImagePath.toUtf8().constData(), GA_ReadOnly)));
+    std::unique_ptr<GDALDataset, DatasetCloser> ref(
+        static_cast<GDALDataset*>(GDALOpen(refImagePath.toUtf8().constData(), GA_ReadOnly)));
+    if (!src || !ref)
+        return envelope(false, action,
+                        QStringLiteral("Failed to open one of the rasters with GDAL."));
+    int srcW = 0, srcH = 0, refW = 0, refH = 0;
+    std::vector<float> srcData, refData;
+    if (!readBand1Bounded(src.get(), srcW, srcH, srcData)
+        || !readBand1Bounded(ref.get(), refW, refH, refData))
+        return envelope(false, action,
+                        QStringLiteral("Failed to read band 1 of one of the rasters."));
+    src.reset();
+    ref.reset();
+
+    sicnu::registration::MultimodalMatchOptions options;
+    if (metric == QLatin1String("phase_correlation"))
+        options.metric = sicnu::registration::MatchMetric::PhaseCorrelation;
+    else if (metric == QLatin1String("ncc"))
+        options.metric = sicnu::registration::MatchMetric::NormalizedCrossCorrelation;
+    else if (metric == QLatin1String("mutual_information"))
+        options.metric = sicnu::registration::MatchMetric::MutualInformation;
+    // "auto" (default) stays Auto.
+    if (windowSize > 0)
+        options.windowSize = windowSize;
+    if (searchRadius > 0)
+        options.searchRadius = searchRadius;
+
+    const auto report = sicnu::registration::MultimodalMatcher::matchImages(
+        srcData.data(), srcW, srcH, refData.data(), refW, refH, options);
+
+    QJsonObject data;
+    data.insert("status", sicnu::registration::statusToString(report.status));
+    data.insert("reason", report.reason);
+    data.insert("inlier_count", report.inlierCount);
+    data.insert("inlier_ratio", report.inlierRatio);
+    data.insert("inlier_rmse_px", report.inlierRmse);
+    data.insert("coverage_ratio", report.coverageRatio);
+    data.insert("rejected_flat_windows", report.rejectedFlatWindows);
+    data.insert("rejected_low_snr_windows", report.rejectedLowSnrWindows);
+    QJsonArray homography;
+    for (const double value : report.consensusHomography)
+        homography.append(value);
+    data.insert("consensus_homography", homography);
+
+    // Stage evidence: the coarse-to-fine trace (explain surface).
+    QJsonArray stages;
+    for (const auto& stage : report.stages) {
+        QJsonObject s;
+        s.insert("level", stage.level);
+        s.insert("source_width", stage.sourceWidth);
+        s.insert("source_height", stage.sourceHeight);
+        s.insert("accepted", stage.accepted);
+        s.insert("median_score", stage.medianScore);
+        stages.append(s);
+    }
+    data.insert("pyramid_stages", stages);
+
+    // Up to 12 tie points inline (bounded payload; the caller gets the
+    // summary plus a reviewer-visible sample, not the full set).
+    QJsonArray ties;
+    int shown = 0;
+    for (const auto& p : report.points) {
+        if (!p.inlier || shown >= 12)
+            continue;
+        QJsonObject t;
+        t.insert("src_x", p.srcX);
+        t.insert("src_y", p.srcY);
+        t.insert("dst_x", p.dstX);
+        t.insert("dst_y", p.dstY);
+        t.insert("score", p.score);
+        t.insert("residual_px", p.residual);
+        ties.append(t);
+        ++shown;
+    }
+    data.insert("tie_points_sample", ties);
+
+    // Quality block (CE90 / residual field / confidence) over inliers.
+    const double imgW = srcW;
+    const double imgH = srcH;
+    const auto quality = sicnu::registration::RegistrationQuality::evaluate(
+        report.points, imgW, imgH, report.coverageRatio);
+    const auto field = sicnu::registration::RegistrationQuality::residualField(
+        report.points, imgW, imgH, 8);
+    data.insert("quality", sicnu::registration::RegistrationQuality::toJson(
+                               quality, field, sicnu::registration::statusToString(report.status),
+                               report.reason));
+
+    const bool trustworthy = report.status == sicnu::registration::RegistrationStatus::Success;
+    const QString message =
+        trustworthy
+            ? QStringLiteral("Cross-modal registration succeeded: %1 inliers, RMSE %2 px.")
+                  .arg(report.inlierCount)
+                  .arg(report.inlierRmse)
+            : QStringLiteral("Registration not trustworthy (status %1, reason %2). Treat the "
+                             "geometry as unverified.")
+                  .arg(sicnu::registration::statusToString(report.status), report.reason);
+    return envelope(true, action, message, data);
+}
+
+QJsonObject GeometricTool::selectModel(const QJsonArray& gcpArray, int folds,
+                                       double minImprovement)
+{
+    const QString action = QStringLiteral("select_model");
+    std::vector<std::pair<double, double>> srcPts, dstPts;
+    for (const auto& item : gcpArray) {
+        if (!item.isObject())
+            continue;
+        const QJsonObject obj = item.toObject();
+        const double sx = obj.value("source_x").toDouble();
+        const double sy = obj.value("source_y").toDouble();
+        const double tx = obj.value("target_x").toDouble();
+        const double ty = obj.value("target_y").toDouble();
+        if (!std::isfinite(sx) || !std::isfinite(sy) || !std::isfinite(tx) || !std::isfinite(ty))
+            continue;
+        srcPts.emplace_back(sx, sy);
+        dstPts.emplace_back(tx, ty);
+    }
+    if (srcPts.size() < 2)
+        return envelope(false, action,
+                        QStringLiteral(
+                            "Need at least two valid correspondences (source_x/source_y/"
+                            "target_x/target_y per point)."));
+
+    sicnu::registration::ModelSelectionOptions options;
+    if (folds >= 2)
+        options.folds = folds;
+    if (minImprovement >= 0.0)
+        options.minImprovement = minImprovement;
+    const auto report = sicnu::registration::ModelSelector::select(srcPts, dstPts, options);
+
+    QJsonObject data;
+    data.insert("status", sicnu::registration::statusToString(report.status));
+    data.insert("reason", report.reason);
+    data.insert("selected_model", sicnu::registration::candidateModelName(report.selected));
+    QJsonArray evidence;
+    for (const auto& ev : report.evidence) {
+        QJsonObject e;
+        e.insert("model", sicnu::registration::candidateModelName(ev.model));
+        e.insert("feasible", ev.feasible);
+        e.insert("fit_rmse_px", ev.fitRmse);
+        e.insert("heldout_rmse_px", ev.cvRmse);
+        e.insert("condition_number", ev.conditionNumber);
+        e.insert("bending_energy", ev.bendingEnergy);
+        e.insert("rejected_reason", ev.rejectedReason);
+        evidence.append(e);
+    }
+    data.insert("candidate_evidence", evidence);
+    if (report.transform.success) {
+        QJsonArray coeffs;
+        for (const double c : report.transform.forwardCoeffs)
+            coeffs.append(c);
+        data.insert("forward_coeffs", coeffs);
+        data.insert("rmse_forward_px", report.transform.rmseForward);
+        data.insert("condition_number", report.transform.conditionNumber);
+    }
+    if (report.tpsFit.isFitted())
+        data.insert("tps_bending_energy", report.tpsFit.computeBendingEnergy());
+
+    const QString message =
+        report.status == sicnu::registration::RegistrationStatus::Success
+            ? QStringLiteral("Selected model: %1 (held-out evidence gate).")
+                  .arg(sicnu::registration::candidateModelName(report.selected))
+            : QStringLiteral("Model selection refused: %1.").arg(report.reason);
+    return envelope(report.status == sicnu::registration::RegistrationStatus::Success, action,
+                    message, data);
+}
+
+QJsonObject GeometricTool::stackRegister(const QJsonArray& sceneIds,
+                                         const QJsonArray& observations,
+                                         const QString& referenceId)
+{
+    const QString action = QStringLiteral("stack_register");
+    std::vector<QString> ids;
+    for (const auto& item : sceneIds) {
+        const QString id = item.toString();
+        if (!id.isEmpty())
+            ids.push_back(id);
+    }
+    std::vector<sicnu::registration::StackPairObservation> obs;
+    for (const auto& item : observations) {
+        if (!item.isObject())
+            continue;
+        const QJsonObject obj = item.toObject();
+        sicnu::registration::StackPairObservation o;
+        o.fromId = obj.value("from_id").toString();
+        o.toId = obj.value("to_id").toString();
+        o.tx = obj.value("tx").toDouble();
+        o.ty = obj.value("ty").toDouble();
+        o.confidence = obj.value("confidence").toDouble(1.0);
+        o.inlierCount = obj.value("inlier_count").toInt(1);
+        if (o.fromId.isEmpty() || o.toId.isEmpty())
+            continue;
+        obs.push_back(o);
+    }
+    if (ids.empty())
+        return envelope(false, action, QStringLiteral("scene_ids must be a non-empty array."));
+
+    try {
+        sicnu::registration::StackOptions options;
+        if (!referenceId.isEmpty())
+            options.referenceId = referenceId;
+        const auto sol = sicnu::registration::StackRegistrator::solveTranslations(ids, obs, options);
+
+        QJsonObject data;
+        data.insert("status", sicnu::registration::statusToString(sol.status));
+        data.insert("reason", sol.reason);
+        data.insert("reference_id", sol.referenceId);
+        data.insert("max_edge_residual_px", sol.maxEdgeResidual);
+        data.insert("rms_edge_residual_px", sol.rmsEdgeResidual);
+        data.insert("disconnected_scenes", sol.disconnectedScenes);
+        QJsonArray scenes;
+        for (const auto& s : sol.scenes) {
+            QJsonObject sc;
+            sc.insert("scene_id", s.sceneId);
+            sc.insert("offset_x", s.offsetX);
+            sc.insert("offset_y", s.offsetY);
+            sc.insert("hop_count", s.hopCount);
+            sc.insert("max_edge_residual_px", s.maxEdgeResidual);
+            sc.insert("connected", s.connected);
+            scenes.append(sc);
+        }
+        data.insert("scenes", scenes);
+        const QString message =
+            sol.status == sicnu::registration::RegistrationStatus::Success
+                ? QStringLiteral(
+                      "Stack adjustment solved on reference %1 (max edge residual %2 px).")
+                      .arg(sol.referenceId)
+                      .arg(sol.maxEdgeResidual)
+                : QStringLiteral("Stack adjustment refused: %1.").arg(sol.reason);
+        return envelope(sol.status == sicnu::registration::RegistrationStatus::Success, action,
+                        message, data);
+    } catch (const std::exception& e) {
+        return envelope(false, action,
+                        QStringLiteral("Stack adjustment failed: %1").arg(e.what()));
+    }
+}
+
 QJsonObject GeometricTool::execute(const QJsonObject& params)
 {
     const QString action = params.value("action").toString();
@@ -328,13 +667,31 @@ QJsonObject GeometricTool::execute(const QJsonObject& params)
         return inspectMisalignment(params.value("source_image_path").toString(),
                                    params.value("reference_image_path").toString());
     }
+    if (action == QLatin1String("multimodal_register")) {
+        return multimodalRegister(params.value("source_image_path").toString(),
+                                  params.value("reference_image_path").toString(),
+                                  params.value("metric").toString(QStringLiteral("auto")),
+                                  params.value("window_size").toInt(0),
+                                  params.value("search_radius").toInt(0));
+    }
+    if (action == QLatin1String("select_model")) {
+        return selectModel(params.value("gcps").toArray(),
+                           params.value("folds").toInt(0),
+                           params.value("min_improvement").toDouble(-1.0));
+    }
+    if (action == QLatin1String("stack_register")) {
+        return stackRegister(params.value("scene_ids").toArray(),
+                             params.value("observations").toArray(),
+                             params.value("reference_id").toString());
+    }
     if (action.isEmpty()) {
         return envelope(false, QString(),
                         QStringLiteral("Missing required parameter: action."));
     }
     return envelope(false, action,
                     QStringLiteral("Unknown action: supported actions are audit_residuals, "
-                                   "recommend_model, inspect_misalignment."));
+                                   "recommend_model, inspect_misalignment, multimodal_register, "
+                                   "select_model, stack_register."));
 }
 
 } // namespace rs::agent

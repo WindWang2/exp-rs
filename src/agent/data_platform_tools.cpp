@@ -52,6 +52,10 @@ using namespace sicnu::experiment;
 using sicnu::experiment::BenchmarkService;
 using sicnu::experiment::benchmarkRunStatusToString;
 using namespace sicnu::experiment;
+// Pre-existing master break (D19): BenchmarkService is used unqualified below
+// but sicnu::experiment was never imported — the file never compiled on this
+// host since the D19 merge. Minimal unblocking fix (F13 track).
+using sicnu::experiment::BenchmarkService;
 
 namespace
 {

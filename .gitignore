@@ -299,3 +299,7 @@ data/labs/_tmp/
 !.planning/temporal-intelligence-11/
 .planning/temporal-intelligence-11/*
 !.planning/temporal-intelligence-11/*.md
+# multimodal-registration-11 (F13): track planning notes (markdown only; logs stay local).
+!.planning/multimodal-registration-11/
+.planning/multimodal-registration-11/*
+!.planning/multimodal-registration-11/*.md
