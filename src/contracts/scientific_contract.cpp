@@ -30,6 +30,8 @@ const std::vector<std::string> kNumericDomains = {
     "sigma0",      // SAR linear-power backscatter coefficient
     "gamma0",      // SAR linear-power gamma coefficient
     "beta0",       // SAR linear-power beta coefficient
+    "phase",       // SAR interferometric phase (radians; unwrapped unless declared)
+    "displacement",// line-of-sight ground displacement (meters; + toward sensor)
     "db",          // decibel-scaled (any of the above)
     "index",       // normalized spectral index (typically [-1,1])
     "probability", // score in [0,1]
@@ -227,6 +229,44 @@ ScientificContract fusionFamily()
     c.inputDomain = "reflectance";
     c.outputDomain = "reflectance";
     c.evidence = "family:fusion + schema read";
+    return c;
+}
+
+/// I/O foundation family (Platform 11.0 census 2.0): thin JSON adapters over
+/// the Qt-free sicnu_geospatial core whose kernels publish through
+/// atomic_fs::writeFileAtomic ("validated and published atomically",
+/// io_operators.cpp/io_fabric_operators.cpp). Scientific semantics: domains
+/// pass through unchanged; NoData follows band metadata; conversion kernels
+/// are deterministic copies (resampling seams declare tolerance).
+ScientificContract ioFamily( const std::string &input = "any",
+                             const std::string &output = "any" )
+{
+    ScientificContract c = baseRecord();
+    c.inputDomain = input;
+    c.outputDomain = output;
+    c.noDataPolicy = "read_metadata";
+    c.atomicPublication = "staged_rename";
+    c.provenance = "output_metadata";
+    c.refusalCodes = { "InvalidParameter", "MissingRequiredParameter", "FileNotFound",
+                       "FileNotReadable", "FileNotWritable", "InvalidInputData",
+                       "GdalError", "Cancelled" };
+    c.evidence = "family:io + schema read (io_operators.h/io_fabric_operators.h)";
+    return c;
+}
+
+/// Map-cartography agent family (Platform 11.0 census 2.0): MapSpec-driven
+/// GUI-cartography agents. compose/validate/preflight/repair return JSON
+/// verdicts and never write rasters; export publishes temp → verify →
+/// sha256 → rename (cartography_operators.cpp export operator).
+ScientificContract cartographyFamily( const std::string &publication )
+{
+    ScientificContract c = baseRecord();
+    c.inputDomain = "any";
+    c.outputDomain = "none";
+    c.atomicPublication = publication;
+    c.refusalCodes = { "InvalidParameter", "MissingRequiredParameter",
+                       "InvalidInputData", "NotInitialized", "Cancelled" };
+    c.evidence = "family:cartography + schema read (cartography_operators.cpp)";
     return c;
 }
 
@@ -857,6 +897,254 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             rows.push_back( c );
         }
 
+        // --- InSAR displacement (Advanced SAR 10.0 package C, D-009) --------
+        // Registered but never given its record — caught by the 11.0 census
+        // coverage gate (contract-or-exemption over every live id).
+        {
+            ScientificContract c = sarFamily();
+            c.operatorId = "rs:sar_displacement";
+            c.inputDomain = "phase";
+            c.outputDomain = "displacement";
+            c.noDataPolicy = "propagate";
+            c.evidence = "family:sar + schema read (rs_sar_displacement_operator.h: "
+                         "d_los = -lambda*phi/(4pi), typed refusal on missing "
+                         "wavelength, honest Itoh-discontinuity warning gate)";
+            c.note = "consumes UNWRAPPED phase; wrapped input is warnable, not "
+                     "detectable (D-009 honesty gate)";
+            rows.push_back( c );
+        }
+
+        // --- Census coverage sweep (Platform 11.0): 17 registered rs:
+        // operators that predate their records — each caught live by the
+        // census contract-or-exemption gate, each declared from a schema
+        // read of its own header. ------------------------------------------------
+        {
+            // Model-task operators (rs_model_task_operators.h, D19 family):
+            // each runs a single forward pass over ONE scene window and
+            // publishes a TYPED JSON artifact (exp-rs-classification/1 etc.),
+            // not a raster — review F-03 corrected the first-draft record.
+            for ( const char *id : { "rs:classify", "rs:regress", "rs:change" } )
+            {
+                ScientificContract c = baseRecord();
+                c.operatorId = id;
+                c.inputDomain = "features";
+                c.outputDomain = "none";
+                c.cancellationGranularity = "operator_level";
+                c.atomicPublication = "staged_rename";
+                c.provenance = "output_metadata";
+                c.evidence = "family:model-runtime + schema read "
+                             "(rs_model_task_operators.h: single-pass, typed JSON "
+                             "artifact exp-rs-classification/1 family)";
+                c.note = "product is a typed JSON artifact, not a categorical raster";
+                rows.push_back( c );
+            }
+            {
+                ScientificContract c = importFamily();
+                c.operatorId = "rs:cn_product_import";
+                c.evidence = "family:import + schema read (rs_cn_product_import_operator.h)";
+                rows.push_back( c );
+            }
+            {
+                ScientificContract c = baseRecord();
+                c.operatorId = "rs:library_select";
+                c.inputDomain = "none";
+                c.outputDomain = "table"; // subset library artifact (JSON)
+                c.atomicPublication = "direct_write"; // subset.save; atomicity unverified
+                c.evidence = "family:spectral-tools + schema read "
+                             "(rs_library_select_operator.h: requires output, "
+                             "persists the subset library via subset.save)";
+                rows.push_back( c );
+            }
+            {
+                ScientificContract c = indexFamily();
+                c.operatorId = "rs:mnf_inverse";
+                c.inputDomain = "features";
+                c.outputDomain = "reflectance";
+                c.evidence = "family:spectral-transform + schema read "
+                             "(rs_mnf_inverse_operator.h: inverse MNF back-projection)";
+                rows.push_back( c );
+            }
+            {
+                ScientificContract c = indexFamily();
+                c.operatorId = "rs:spectral_band_select";
+                c.outputDomain = "any"; // subset COPY — input domain passes through
+                c.wavelengthPolicy = "srf_or_center";
+                c.evidence = "family:spectral-tools + schema read "
+                             "(rs_spectral_band_select_operator.h: select/exclude "
+                             "bands producing the same bands; wavelength-metadata mode "
+                             "requires srf_or_center)";
+                rows.push_back( c );
+            }
+            // SAR / InSAR family (Advanced SAR 10.0 package C headers):
+            {
+                ScientificContract c = sarFamily();
+                c.operatorId = "rs:sar_coregister";
+                c.inputDomain = "amplitude";
+                c.outputDomain = "amplitude"; // resampled complex slave (CFloat32)
+                c.evidence = "family:sar + schema read (rs_sar_coregister_operator.h: "
+                             "residual global-shift estimate + resampled slave raster; "
+                             "reportOnly=1 limits the run to the shift JSON)";
+                c.note = "writes the resampled complex slave unless reportOnly=1; "
+                         "streaming output stages before publish";
+                rows.push_back( c );
+            }
+            for ( const char *id : { "rs:sar_interferogram", "rs:sar_phase_filter",
+                                     "rs:sar_unwrap" } )
+            {
+                ScientificContract c = sarFamily();
+                c.operatorId = id;
+                c.inputDomain = "phase";
+                c.outputDomain = "phase";
+                c.timeAlignment = "stack_dates";
+                c.evidence = "family:sar + schema read (InSAR chain: interferogram "
+                             "s1*conj(s2) + coherence, Goldstein-Werner filtering, "
+                             "quality-guided flood-fill unwrap)";
+                rows.push_back( c );
+            }
+            {
+                ScientificContract c = sarFamily();
+                c.operatorId = "rs:sar_polsar_decompose";
+                c.inputDomain = "amplitude";
+                c.outputDomain = "features";
+                c.evidence = "family:sar + schema read (rs_sar_polsar_decompose_operator.h: "
+                             "Pauli / H-A-alpha / Freeman-Durden components)";
+                rows.push_back( c );
+            }
+            {
+                ScientificContract c = sarFamily();
+                c.operatorId = "rs:sar_temporal_events";
+                c.inputDomain = "amplitude";
+                c.outputDomain = "features";
+                c.timeAlignment = "stack_dates";
+                c.evidence = "family:sar + schema read (rs_sar_temporal_events_operator.h: "
+                             "per-pixel change-event dating across N co-registered scenes)";
+                rows.push_back( c );
+            }
+            // Temporal family (Temporal Platform 10.0 operators):
+            for ( const char *id : { "rs:temporal_extract_regions",
+                                     "rs:temporal_harmonic_breaks",
+                                     "rs:temporal_region_features",
+                                     "rs:temporal_regularize" } )
+            {
+                ScientificContract c = temporalFamily();
+                c.operatorId = id;
+                c.outputDomain = id == std::string( "rs:temporal_extract_regions" )
+                                       || id == std::string( "rs:temporal_region_features" )
+                                     ? "table"
+                                     : "features";
+                if ( id == std::string( "rs:temporal_regularize" ) )
+                    c.provenance = "output_metadata"; // valid_count + filled_count bands
+                c.evidence = "family:temporal + schema read (Temporal Platform 10.0: "
+                             "CHANGELOG [Unreleased] operators; headers read)";
+                rows.push_back( c );
+            }
+        }
+
+        // --- I/O foundation (census 2.0: first-party io: operators) ---------
+        for ( const char *id : { "io:translate", "io:convert_format" } )
+        {
+            ScientificContract c = ioFamily();
+            c.operatorId = id;
+            c.evidence = "family:io + schema read (io_operators.h: deterministic "
+                         "conversion kernels through the geospatial core)";
+            rows.push_back( c );
+        }
+        for ( const char *id : { "io:warp", "io:reproject" } )
+        {
+            ScientificContract c = ioFamily();
+            c.operatorId = id;
+            c.evidence = "family:io + schema read (io_operators.h: float resampling "
+                         "through GDAL warp kernels)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = ioFamily();
+            c.operatorId = "io:clip";
+            c.evidence = "family:io + schema read (io_operators.h: source-CRS crop; "
+                         "refuses CRS-less datasets without a declared fallback)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = ioFamily();
+            c.operatorId = "io:build_overviews";
+            c.atomicPublication = "direct_write"; // gdaladdo semantics: in-place derived data
+            c.note = "in-place overview building is the documented gdaladdo contract";
+            c.evidence = "family:io + schema read (io_operators.h: in-place derived data)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = ioFamily();
+            c.operatorId = "io:make_cog";
+            c.evidence = "family:io + schema read (io_operators.h: COG driver + safe "
+                         "preset + pre-publish validation)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = ioFamily( "vector", "vector" );
+            c.operatorId = "io:vector_convert";
+            c.evidence = "family:io + schema read (io_operators.h: streaming "
+                         "reader→writer vector contract)";
+            rows.push_back( c );
+        }
+        for ( const char *id : { "io:inspect", "io:doctor" } )
+        {
+            ScientificContract c = ioFamily( "any", "none" );
+            c.operatorId = id;
+            c.atomicPublication = "json_result_only"; // read-only diagnostics
+            c.provenance = "none";
+            c.evidence = "family:io + schema read (io_operators.h: read-only, no full scan)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = ioFamily( "none", "table" );
+            c.operatorId = "io:catalog_search";
+            c.atomicPublication = "json_result_only";
+            c.evidence = "family:io + schema read (io_fabric_operators.h: STAC/catalog "
+                         "query behind one CatalogQuery vocabulary)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = ioFamily( "none", "table" );
+            c.operatorId = "io:cube_plan";
+            c.atomicPublication = "json_result_only";
+            c.evidence = "family:io + schema read (io_fabric_operators.h: named-dimension "
+                         "chunk plan, windowed materialization only)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = ioFamily();
+            c.operatorId = "io:cube_window";
+            c.evidence = "family:io + schema read (io_fabric_operators.cpp: FirstWins "
+                         "overlap, atomic writeFileAtomic publication)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = ioFamily( "none", "none" );
+            c.operatorId = "io:cache_prefetch";
+            c.atomicPublication = "json_result_only"; // warms caches, no science product
+            c.provenance = "none";
+            c.evidence = "family:io + schema read (io_fabric_operators.h)";
+            rows.push_back( c );
+        }
+
+        // --- Cartography agents (census 2.0: first-party cartography:) ------
+        for ( const char *id : { "cartography:compose", "cartography:validate",
+                                 "cartography:preflight", "cartography:repair" } )
+        {
+            ScientificContract c = cartographyFamily( "json_result_only" );
+            c.operatorId = id;
+            c.evidence = "family:cartography + schema read (cartography_operators.cpp: "
+                         "MapSpec verdict JSON, no raster output)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = cartographyFamily( "staged_rename" );
+            c.operatorId = "cartography:export";
+            c.evidence = "family:cartography + schema read (cartography_operators.cpp: "
+                         "writes temp → verifies → sha256 → renames)";
+            rows.push_back( c );
+        }
+
         // Assemble the sorted map; duplicate ids are an authoring bug.
         std::map<std::string, ScientificContract> table;
         for ( ScientificContract &row : rows )
@@ -886,8 +1174,19 @@ std::vector<std::string> validateScientificContract( const ScientificContract &c
             issues.push_back( contract.operatorId + ": " + field + " value '" + value
                               + "' is outside the closed vocabulary" );
     };
-    if ( contract.operatorId.rfind( "rs:", 0 ) != 0 )
-        issues.push_back( contract.operatorId + ": operator id must carry the rs: prefix" );
+    // Census 2.0: every FIRST-PARTY registration prefix may carry a record.
+    // otb:/opencv: are deliberate exemptions (see
+    // data/contracts/contract_exemptions.json) and must NOT appear here.
+    static const char *kFirstPartyPrefixes[] = { "rs:", "gdal:", "io:", "cartography:" };
+    const bool firstParty = std::any_of( std::begin( kFirstPartyPrefixes ),
+                                         std::end( kFirstPartyPrefixes ),
+                                         [ & ]( const char *prefix ) {
+                                             return contract.operatorId.rfind( prefix, 0 ) == 0;
+                                         } );
+    if ( !firstParty )
+        issues.push_back( contract.operatorId
+                          + ": operator id must carry a first-party prefix "
+                            "(rs:/gdal:/io:/cartography:)" );
     check( "inputDomain", contract.inputDomain, kNumericDomains );
     check( "outputDomain", contract.outputDomain, kNumericDomains );
     check( "scaleOffset", contract.scaleOffset, kScaleOffsetPolicies );

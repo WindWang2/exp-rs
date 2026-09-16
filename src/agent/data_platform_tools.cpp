@@ -69,6 +69,10 @@ using sicnu::experiment::BenchmarkService;
 // names but D19 landed no using-directive for them (same local fix as the
 // execution-runtime track; out-of-scope, recorded in track EVIDENCE).
 using namespace sicnu::experiment;
+// P0 host-portability unblock (Platform 11.0): the D19 benchmark tools use
+// BenchmarkService unqualified, which MSVC rejects (undeclared identifier);
+// ExperimentStore is already reached through its experiment/ includes.
+using sicnu::experiment::BenchmarkService;
 
 namespace
 {

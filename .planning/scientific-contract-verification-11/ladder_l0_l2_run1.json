@@ -1,0 +1,303 @@
+{
+ "schema": "exp.verification.ladder.v1",
+ "started_utc": "2026-09-16T06:16:42.736831+00:00",
+ "build_dir": "C:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\build-dev",
+ "host": {
+  "platform": "win32",
+  "os_name": "nt",
+  "cpus": 16,
+  "posix": false,
+  "exe_suffix": ".exe"
+ },
+ "lanes": {
+  "L0": {
+   "title": "compile-guards",
+   "items": [
+    {
+     "lane": "L0",
+     "label": "header_probes",
+     "name": "sicnu_header_probes",
+     "kind": "target",
+     "timeout_s": 600.0,
+     "status": "passed",
+     "detail": ""
+    }
+   ],
+   "status": "passed"
+  },
+  "L1": {
+   "title": "unit-core",
+   "items": [
+    {
+     "lane": "L1",
+     "label": "trace_contract",
+     "name": "test_trace_contract",
+     "kind": "test",
+     "timeout_s": 120.0,
+     "status": "passed",
+     "elapsed_s": 0.7,
+     "detail": ""
+    },
+    {
+     "lane": "L1",
+     "label": "fault_registry",
+     "name": "test_fault_registry",
+     "kind": "test",
+     "timeout_s": 120.0,
+     "status": "passed",
+     "elapsed_s": 0.0,
+     "detail": ""
+    },
+    {
+     "lane": "L1",
+     "label": "diagnostic_report",
+     "name": "test_diagnostic_report",
+     "kind": "test",
+     "timeout_s": 60.0,
+     "status": "passed",
+     "elapsed_s": 0.0,
+     "detail": ""
+    },
+    {
+     "lane": "L1",
+     "label": "trace_chain_8",
+     "name": "test_trace_chain_8",
+     "kind": "test",
+     "timeout_s": 300.0,
+     "status": "passed",
+     "elapsed_s": 0.5,
+     "detail": ""
+    }
+   ],
+   "status": "passed"
+  },
+  "L2": {
+   "title": "contract-known",
+   "items": [
+    {
+     "lane": "L2",
+     "label": "fuzz_io",
+     "name": "test_contract_fuzz_io",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "passed",
+     "elapsed_s": 0.4,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "fuzz_lang",
+     "name": "test_contract_fuzz_lang",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "passed",
+     "elapsed_s": 0.2,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "fuzz_data",
+     "name": "test_contract_fuzz_data",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "passed",
+     "elapsed_s": 0.0,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "known_answer_corpus",
+     "name": "test_known_answer_corpus",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "passed",
+     "elapsed_s": 0.2,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "portability_contract",
+     "name": "test_portability_contract",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "passed",
+     "elapsed_s": 0.1,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "fuzz_ipc",
+     "name": "test_contract_fuzz_ipc",
+     "kind": "test",
+     "timeout_s": 420.0,
+     "status": "timeout",
+     "elapsed_s": 420.0,
+     "detail": "exceeded 420s budget"
+    },
+    {
+     "lane": "L2",
+     "label": "known_answer_corpus_8",
+     "name": "test_known_answer_corpus_8",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "passed",
+     "elapsed_s": 0.1,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "contract_platform_9",
+     "name": "test_contract_platform_9",
+     "kind": "test",
+     "timeout_s": 900.0,
+     "status": "failed",
+     "elapsed_s": 743.3,
+     "detail": "Randomness seeded to: 947058757\n\n~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\ntest_contract_platform_9.exe is a Catch2 v3.7.1 host application.\nRun with -? for options\n\n-------------------------------------------------------------------------------\nContract graph: no duplicate nodes, no dangling references (allow-listed)\n-------------------------------------------------------------------------------\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_contract_platform_9.cpp(88)\n...............................................................................\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_contract_platform_9.cpp(107): FAILED:\n  CHECK( known )\nwith expansion:\n  false\nwith message:\n  finding: duplicate_node capability_entry:rs:gaofen_import \u2014 registered more\n  than once\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_contract_platform_9.cpp(107): FAILED:\n  CHECK( known )\nwith expansion:\n  false\nwith message:\n  finding: duplicate_node capability_entry:rs:hj_import \u2014 registered more\n  than once\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_contract_platform_9.cpp(107): FAILED:\n  CHECK( known )\nwith expansion:\n  false\nwith message:\n  finding: duplicate_node capability_entry:rs:zy3_import \u2014 registered more\n  than once\n\n===============================================================================\ntest cases:  4 |  3 passed | 1 failed\nassertions: 18 | 15 passed | 3 failed\n\n\n"
+    },
+    {
+     "lane": "L2",
+     "label": "contract_projection_9",
+     "name": "test_contract_projection_9",
+     "kind": "test",
+     "timeout_s": 900.0,
+     "status": "failed",
+     "elapsed_s": 458.4,
+     "detail": "cation-11\\src\\operators\\rs\\rs_operators_init.cpp)\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_contract_projection_9.cpp(520): FAILED:\n  CHECK( ( r.unresolved.empty() || allowed( kAllowedUnresolved, r.operatorId, \"*\" ) ) )\nwith expansion:\n  false\nwith message:\n  operator: rs:matched_filter (C:/Users/wangj.KEVIN/projects/exp-rs-scientific-\n  contract-verification-11\\src\\operators\\rs\\rs_operators_init.cpp)\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_contract_projection_9.cpp(520): FAILED:\n  CHECK( ( r.unresolved.empty() || allowed( kAllowedUnresolved, r.operatorId, \"*\" ) ) )\nwith expansion:\n  false\nwith message:\n  operator: rs:ace (C:/Users/wangj.KEVIN/projects/exp-rs-scientific-contract-\n  verification-11\\src\\operators\\rs\\rs_operators_init.cpp)\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_contract_projection_9.cpp(520): FAILED:\n  CHECK( ( r.unresolved.empty() || allowed( kAllowedUnresolved, r.operatorId, \"*\" ) ) )\nwith expansion:\n  false\nwith message:\n  operator: rs:change (C:/Users/wangj.KEVIN/projects/exp-rs-scientific-\n  contract-verification-11\\src\\operators\\rs\\rs_operators_init.cpp)\n\n-------------------------------------------------------------------------------\nCanonical descriptor: projection, round-trip and single source\n-------------------------------------------------------------------------------\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_contract_projection_9.cpp(526)\n...............................................................................\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_contract_projection_9.cpp(589): FAILED:\n  CHECK( projectionFailures.empty() )\nwith expansion:\n  false\n\n===============================================================================\ntest cases:    9 |    4 passed |  5 failed\nassertions: 2823 | 2794 passed | 29 failed\n\n\n"
+    },
+    {
+     "lane": "L2",
+     "label": "command_contract_9",
+     "name": "test_command_contract_9",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "failed",
+     "elapsed_s": 44.6,
+     "detail": "ansion:\n  false\nwith message:\n  command without help: cartography.repair\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_command_contract_9.cpp(280): FAILED:\n  CHECK( ( helpIds.count( id ) == 1 || allowed( kAllowedCommandsWithoutHelp, id ) ) )\nwith expansion:\n  false\nwith message:\n  command without help: workbench.cartography\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_command_contract_9.cpp(280): FAILED:\n  CHECK( ( helpIds.count( id ) == 1 || allowed( kAllowedCommandsWithoutHelp, id ) ) )\nwith expansion:\n  false\nwith message:\n  command without help: workbench.classifyStudio\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_command_contract_9.cpp(280): FAILED:\n  CHECK( ( helpIds.count( id ) == 1 || allowed( kAllowedCommandsWithoutHelp, id ) ) )\nwith expansion:\n  false\nwith message:\n  command without help: workbench.georefDual\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_command_contract_9.cpp(280): FAILED:\n  CHECK( ( helpIds.count( id ) == 1 || allowed( kAllowedCommandsWithoutHelp, id ) ) )\nwith expansion:\n  false\nwith message:\n  command without help: workbench.ir2Pipeline\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_command_contract_9.cpp(280): FAILED:\n  CHECK( ( helpIds.count( id ) == 1 || allowed( kAllowedCommandsWithoutHelp, id ) ) )\nwith expansion:\n  false\nwith message:\n  command without help: workbench.operatorCatalog\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_command_contract_9.cpp(280): FAILED:\n  CHECK( ( helpIds.count( id ) == 1 || allowed( kAllowedCommandsWithoutHelp, id ) ) )\nwith expansion:\n  false\nwith message:\n  command without help: workbench.visualAnalytics\n\n===============================================================================\ntest cases:   6 |   5 passed |  1 failed\nassertions: 180 | 170 passed | 10 failed\n\n\n"
+    },
+    {
+     "lane": "L2",
+     "label": "diagnostics_contract_9",
+     "name": "test_diagnostics_contract_9",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "failed",
+     "elapsed_s": 0.6,
+     "detail": "lowed( kAllowedHarnessCodesWithoutPage, code ) )\nwith expansion:\n  false\nwith message:\n  harness code without curated page: CATEGORICAL_MISMATCH\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_diagnostics_contract_9.cpp(200): FAILED:\n  CHECK( allowed( kAllowedHarnessCodesWithoutPage, code ) )\nwith expansion:\n  false\nwith message:\n  harness code without curated page: FACT_CONFLICT\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_diagnostics_contract_9.cpp(200): FAILED:\n  CHECK( allowed( kAllowedHarnessCodesWithoutPage, code ) )\nwith expansion:\n  false\nwith message:\n  harness code without curated page: NONDETERMINISTIC_CHAIN\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_diagnostics_contract_9.cpp(200): FAILED:\n  CHECK( allowed( kAllowedHarnessCodesWithoutPage, code ) )\nwith expansion:\n  false\nwith message:\n  harness code without curated page: OUTPUT_PATH_COLLISION\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_diagnostics_contract_9.cpp(200): FAILED:\n  CHECK( allowed( kAllowedHarnessCodesWithoutPage, code ) )\nwith expansion:\n  false\nwith message:\n  harness code without curated page: RESOURCE_OVER_BUDGET\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_diagnostics_contract_9.cpp(200): FAILED:\n  CHECK( allowed( kAllowedHarnessCodesWithoutPage, code ) )\nwith expansion:\n  false\nwith message:\n  harness code without curated page: TEMPORAL_MISALIGNMENT\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_diagnostics_contract_9.cpp(200): FAILED:\n  CHECK( allowed( kAllowedHarnessCodesWithoutPage, code ) )\nwith expansion:\n  false\nwith message:\n  harness code without curated page: WAVELENGTH_INCOMPATIBLE\n\n===============================================================================\ntest cases:   6 |   5 passed | 1 failed\nassertions: 176 | 169 passed | 7 failed\n\n\n"
+    },
+    {
+     "lane": "L2",
+     "label": "capability_contract_9",
+     "name": "test_capability_contract_9",
+     "kind": "test",
+     "timeout_s": 180.0,
+     "status": "passed",
+     "elapsed_s": 4.6,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "scientific_contract_10",
+     "name": "test_scientific_contract_10",
+     "kind": "test",
+     "timeout_s": 300.0,
+     "status": "passed",
+     "elapsed_s": 0.2,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "drift_projection_10",
+     "name": "test_drift_projection_10",
+     "kind": "test",
+     "timeout_s": 300.0,
+     "status": "failed",
+     "elapsed_s": 0.4,
+     "detail": "ific-contract-verification-11\\tests\\test_drift_projection_10.cpp(200): FAILED:\n  CHECK( sidecarParams.count( param ) == 1 )\nwith expansion:\n  0 == 1\nwith messages:\n  operator: rs:spectral_unmixing\n  sidecar for rs:spectral_unmixing lacks schema parameter 'method'\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_drift_projection_10.cpp(200): FAILED:\n  CHECK( sidecarParams.count( param ) == 1 )\nwith expansion:\n  0 == 1\nwith messages:\n  operator: rs:temporal_monitor\n  sidecar for rs:temporal_monitor lacks schema parameter 'scenes'\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_drift_projection_10.cpp(200): FAILED:\n  CHECK( sidecarParams.count( param ) == 1 )\nwith expansion:\n  0 == 1\nwith messages:\n  operator: rs:temporal_phenology\n  sidecar for rs:temporal_phenology lacks schema parameter 'cycles'\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_drift_projection_10.cpp(200): FAILED:\n  CHECK( sidecarParams.count( param ) == 1 )\nwith expansion:\n  0 == 1\nwith messages:\n  operator: rs:temporal_phenology\n  sidecar for rs:temporal_phenology lacks schema parameter 'season2EndDoy'\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_drift_projection_10.cpp(200): FAILED:\n  CHECK( sidecarParams.count( param ) == 1 )\nwith expansion:\n  0 == 1\nwith messages:\n  operator: rs:temporal_phenology\n  sidecar for rs:temporal_phenology lacks schema parameter 'season2StartDoy'\n\nC:\\Users\\wangj.KEVIN\\projects\\exp-rs-scientific-contract-verification-11\\tests\\test_drift_projection_10.cpp(200): FAILED:\n  CHECK( sidecarParams.count( param ) == 1 )\nwith expansion:\n  0 == 1\nwith messages:\n  operator: rs:temporal_smooth\n  sidecar for rs:temporal_smooth lacks schema parameter 'robust_iterations'\n\n===============================================================================\ntest cases:    3 |    2 passed |  1 failed\nassertions: 2093 | 2072 passed | 21 failed\n\n\n"
+    },
+    {
+     "lane": "L2",
+     "label": "science_verification_10",
+     "name": "test_science_verification_10",
+     "kind": "test",
+     "timeout_s": 300.0,
+     "status": "passed",
+     "elapsed_s": 9.7,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "contract_census_11",
+     "name": "test_contract_census_11",
+     "kind": "test",
+     "timeout_s": 1200.0,
+     "status": "passed",
+     "elapsed_s": 771.8,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "contract_determinism_11",
+     "name": "test_contract_determinism_11",
+     "kind": "test",
+     "timeout_s": 600.0,
+     "status": "passed",
+     "elapsed_s": 196.5,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "metamorphic_11",
+     "name": "test_verification_metamorphic_11",
+     "kind": "test",
+     "timeout_s": 300.0,
+     "status": "passed",
+     "elapsed_s": 0.5,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "numeric_reference_11",
+     "name": "test_verification_numeric_reference_11",
+     "kind": "test",
+     "timeout_s": 300.0,
+     "status": "passed",
+     "elapsed_s": 0.4,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "mutation_kill_11",
+     "name": "test_mutation_kill_11",
+     "kind": "test",
+     "timeout_s": 300.0,
+     "status": "passed",
+     "elapsed_s": 0.4,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "failure_11",
+     "name": "test_verification_failure_11",
+     "kind": "test",
+     "timeout_s": 300.0,
+     "status": "passed",
+     "elapsed_s": 0.4,
+     "detail": ""
+    },
+    {
+     "lane": "L2",
+     "label": "cross_surface_11",
+     "name": "test_contract_cross_surface_11",
+     "kind": "test",
+     "timeout_s": 300.0,
+     "status": "passed",
+     "elapsed_s": 1.7,
+     "detail": ""
+    }
+   ],
+   "status": "attention"
+  }
+ },
+ "finished_utc": "2026-09-16T07:00:59.196754+00:00",
+ "overall": "attention"
+}

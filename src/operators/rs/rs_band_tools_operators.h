@@ -22,6 +22,10 @@ public:
     std::string description() const override {
         return "Band ratio (numerator/denominator) or RGB-to-IHS color transform.";
     }
+    /// Published with the Platform 11.0 determinism census: pure per-pixel
+    /// band math, replay byte-identical (test_contract_determinism_11,
+    /// test_science_verification_10 replay lane).
+    std::string determinismGrade() const override { return "bit-exact"; }
 
     Json::Value schema() const override;
     Json::Value metadata() const override;

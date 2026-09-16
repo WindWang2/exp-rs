@@ -23,6 +23,7 @@
  ***************************************************************************/
 #include "contracts/scientific_contract.h"
 
+#include "agent/cartography/cartography_operators.h"
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/rs/rs_operators_init.h"
@@ -41,9 +42,15 @@ namespace
 std::set<std::string> liveRsOperatorIds()
 {
     sicnu::operators::rs::initBuiltinRsOperators();
+    // Census 2.0 (Platform 11.0): the record-carrying prefixes are the
+    // first-party rs:/io:/cartography: families; gdal:/otb:/opencv: carry
+    // reviewed exemptions instead (data/contracts/contract_exemptions.json)
+    // and stay outside this completeness set.
+    sicnu::agent::cartography::initCartographyOperators();
     std::set<std::string> ids;
     for ( const std::string &id : sicnu::operators::RSOperatorRegistry::instance().operatorNames() )
-        if ( id.rfind( "rs:", 0 ) == 0 )
+        if ( id.rfind( "rs:", 0 ) == 0 || id.rfind( "io:", 0 ) == 0
+             || id.rfind( "cartography:", 0 ) == 0 )
             ids.insert( id );
     return ids;
 }

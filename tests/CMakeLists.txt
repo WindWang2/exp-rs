@@ -9144,6 +9144,14 @@ sicnu_add_test(test_science_verification_10)
 target_link_libraries(test_science_verification_10 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_science_verification_10)
 
+# Verification Platform 11.0 (F09 census 2.0): determinism & contract
+# coverage census bound to the live registry; scanner honesty via a
+# synthetic registration tree; committed census snapshot byte gate
+# (append-only block).
+sicnu_add_test(test_contract_census_11)
+target_link_libraries(test_contract_census_11 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_contract_census_11)
+
 # Contract Platform 9.0: contract generation cost baseline (M8). Evidence
 # artifact via `benchmark_contract9 --out <json>`.
 # Temporal Platform 10.0 scale evidence (regularize / harmonic-breaks /
@@ -10922,3 +10930,34 @@ sicnu_add_io_test(test_env_doctor)
 target_compile_definitions(test_env_doctor PRIVATE
   CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
 )
+# Verification Platform 11.0 (F09 determinism truth): cross-family replay
+# corpus — identical input twice must be byte-identical; corpus claims must
+# be triple-published (class scan / schema stamp / sidecar), never
+# self-certified (append-only block).
+sicnu_add_test(test_contract_determinism_11)
+target_link_libraries(test_contract_determinism_11 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_contract_determinism_11)
+
+# Verification Platform 11.0 (F09 packages C/D/E): metamorphic oracle
+# relations with sensitivity controls, independent numeric references,
+# oracle mutation-kill discrimination, and the failure/cancel/atomic lane
+# (append-only block).
+sicnu_add_test(test_verification_metamorphic_11)
+target_link_libraries(test_verification_metamorphic_11 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_verification_metamorphic_11)
+
+sicnu_add_test(test_verification_numeric_reference_11)
+target_link_libraries(test_verification_numeric_reference_11 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_verification_numeric_reference_11)
+
+sicnu_add_test(test_mutation_kill_11)
+target_link_libraries(test_mutation_kill_11 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_mutation_kill_11)
+
+sicnu_add_test(test_verification_failure_11)
+target_link_libraries(test_verification_failure_11 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_verification_failure_11)
+
+sicnu_add_test(test_contract_cross_surface_11)
+target_link_libraries(test_contract_cross_surface_11 PRIVATE sicnu_contracts)
+sicnu_link_jsoncpp(test_contract_cross_surface_11)

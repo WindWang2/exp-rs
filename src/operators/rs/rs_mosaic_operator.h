@@ -29,6 +29,11 @@ public:
     std::string description() const override {
         return "Mosaic multiple rasters (band 1) into a single GeoTIFF covering their union extent.";
     }
+    /// Published with the Platform 11.0 determinism census: FirstWins overlap
+    /// is deterministic in the declared input order; replay byte-identical
+    /// (test_contract_determinism_11, disjoint-tile order invariance in
+    /// test_verification_metamorphic_11).
+    std::string determinismGrade() const override { return "bit-exact"; }
 
     Json::Value schema() const override;
     Json::Value metadata() const override;

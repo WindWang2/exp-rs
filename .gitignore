@@ -339,3 +339,8 @@ data/labs/_tmp/
 !.planning/cartography-production-11/
 .planning/cartography-production-11/*
 !.planning/cartography-production-11/*.md
+
+# scientific-contract-verification-11: track planning notes (markdown only; logs stay local).
+!.planning/scientific-contract-verification-11/
+.planning/scientific-contract-verification-11/*
+!.planning/scientific-contract-verification-11/*.md

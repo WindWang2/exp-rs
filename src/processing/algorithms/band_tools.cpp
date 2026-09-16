@@ -48,6 +48,12 @@ bool BandTools::processBandRatioFile( const QString &sourcePath, const QString &
          || denominatorBand < 1 || denominatorBand > bandCount )
         return fail( errorMessage, QStringLiteral( "波段序号超出范围（1–%1）。" ).arg( bandCount ) );
 
+    // Resolve the two bands' declared sentinels so the ratio masks real
+    // NoData (Platform 11.0 M4: propagate semantics; same discipline as the
+    // IHS #380 masking) instead of silently emitting ratio 1.0 in holes.
+    const float ndNumerator = bandNodata( src, numeratorBand );
+    const float ndDenominator = bandNodata( src, denominatorBand );
+
     // Stream only the involved band pair (BIP tiles) — O(tile) memory, so the
     // legacy dialog's 2 GiB soft cap (silent rejection of large scenes) is gone.
     const std::vector<int> pair = { numeratorBand, denominatorBand };
@@ -55,6 +61,10 @@ bool BandTools::processBandRatioFile( const QString &sourcePath, const QString &
                              src.geoTransform(), src.projection() );
     if ( !dst.isOpen() )
         return fail( errorMessage, QStringLiteral( "无法创建输出栅格。" ) );
+    // Publish the masked-hole semantics (Platform 11.0 M4/F-18): masked
+    // pixels are NaN AND the band declares it, so metadata-driven consumers
+    // see the hole instead of an undeclared gap.
+    dst.setBandNoDataValue( 1, std::numeric_limits<float>::quiet_NaN() );
 
     GdalMultibandBlockStream stream( src, pair, kTileDim, kTileDim );
     std::vector<float> numerator( static_cast<size_t>( kTileDim ) * kTileDim );
@@ -71,7 +81,8 @@ bool BandTools::processBandRatioFile( const QString &sourcePath, const QString &
             denominator[i] = bip[i * 2 + 1];
         }
         ImageEnhancementStreaming::bandRatioTile( numerator.data(), denominator.data(),
-                                                  out.data(), n );
+                                                  out.data(), n, ndNumerator,
+                                                  ndDenominator );
         return dst.writeTile( 1, tile, out.data() );
     } );
     if ( !ok && cancelled( isCancelled ) )

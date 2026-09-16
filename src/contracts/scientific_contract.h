@@ -1,8 +1,14 @@
 /***************************************************************************
- * scientific_contract.h — Scientific Contract Registry (Platform 10.0)
+ * scientific_contract.h — Scientific Contract Registry (Platform 10.0,
+ * census 2.0 in Platform 11.0)
  *
  * Machine-readable SCIENTIFIC semantic contract for every first-party
- * `rs:` operator. One authority per dimension:
+ * registered operator. Since census 2.0 the record-carrying prefixes are
+ * rs:/io:/gdal:/cartography: (io: and cartography: declared in Platform
+ * 11.0); gdal:/otb:/opencv: adapter operators are covered by reviewed
+ * EXEMPTIONS (data/contracts/contract_exemptions.json) instead of records,
+ * and completeness is gated over the whole live registry by
+ * tests/test_contract_census_11.cpp. One authority per dimension:
  *
  *   - Dimensions with NO existing authority anywhere (numeric domain,
  *     scale/offset policy, NoData semantics, categorical encoding, class-id

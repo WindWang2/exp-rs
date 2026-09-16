@@ -765,6 +765,26 @@ void bandRatioTile( const float *band1, const float *band2, float *out, size_t c
         out[i] = MathUtils::safeDiv( band1[i], band2[i] );
 }
 
+void bandRatioTile( const float *band1, const float *band2, float *out,
+                    size_t count, float nodata1, float nodata2 )
+{
+    for ( size_t i = 0; i < count; ++i )
+    {
+        const float n = band1[i];
+        const float d = band2[i];
+        // Mask invalid / NoData pixels (IHS #380 semantics, applied to the
+        // ratio path): non-finite or declared-sentinel inputs never produce
+        // a finite, trusted ratio.
+        if ( !std::isfinite( n ) || !std::isfinite( d ) || n == nodata1
+             || d == nodata2 )
+        {
+            out[i] = quietNan();
+            continue;
+        }
+        out[i] = MathUtils::safeDiv( n, d );
+    }
+}
+
 void ihsTransformTile( const float *bip3, const float nodataR, const float nodataG,
                        const float nodataB, float *outI, float *outH, float *outS,
                        size_t n )

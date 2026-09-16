@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -79,6 +80,15 @@ CAPABILITIES = {
     "scientific-contract-10": ("test_scientific_contract_10", "L2:scientific_contract_10"),
     "drift-projection-10": ("test_drift_projection_10", "L2:drift_projection_10"),
     "science-verification-10": ("test_science_verification_10", "L2:science_verification_10"),
+    # Verification Platform 11.0 (F09): census 2.0 + determinism truth +
+    # metamorphic/reference/failure lanes.
+    "contract-census-11": ("test_contract_census_11", "L2:contract_census_11"),
+    "contract-determinism-11": ("test_contract_determinism_11", "L2:contract_determinism_11"),
+    "metamorphic-11": ("test_verification_metamorphic_11", "L2:metamorphic_11"),
+    "numeric-reference-11": ("test_verification_numeric_reference_11", "L2:numeric_reference_11"),
+    "mutation-kill-11": ("test_mutation_kill_11", "L2:mutation_kill_11"),
+    "failure-contract-11": ("test_verification_failure_11", "L2:failure_11"),
+    "cross-surface-11": ("test_contract_cross_surface_11", "L2:cross_surface_11"),
 }
 
 # Documented, honest compatibility caveats — copied into every report so the
@@ -101,13 +111,18 @@ def binary_path(build_dir: Path, name: str) -> Path | None:
     if name == "sicnu_header_probes":
         probes = sorted(build_dir.glob("tests/CMakeFiles/header_probe_*.dir/*/*.o"))
         return probes[0] if probes else None
-    for candidate in (build_dir / "tests" / name, build_dir / name,
-                      build_dir / "tests" / "Release" / name,
-                      build_dir / "tests" / "Debug" / name,
-                      build_dir / "Release" / name,
-                      build_dir / "Debug" / name):
-        if candidate.is_file() and candidate.exists():
-            return candidate
+    # Capability-aware (Platform 11.0): Windows executables carry .exe.
+    stems = [name]
+    if os.name == "nt" and not name.endswith(".exe"):
+        stems.append(name + ".exe")
+    for stem in stems:
+        for candidate in (build_dir / "tests" / stem, build_dir / stem,
+                          build_dir / "tests" / "Release" / stem,
+                          build_dir / "tests" / "Debug" / stem,
+                          build_dir / "Release" / stem,
+                          build_dir / "Debug" / stem):
+            if candidate.is_file() and candidate.exists():
+                return candidate
     return None
 
 

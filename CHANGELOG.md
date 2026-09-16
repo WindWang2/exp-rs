@@ -561,6 +561,39 @@ All notable changes to the `exp-rs` project will be documented in this file.
   prompt regression for the teaching copilot — teacher-surface attacks must
   produce the typed TEACHING_REFUSAL; leak attempts must never expose fixture
   solution values.
+## [Unreleased] - Scientific Contract & Verification Platform 11.0 (zcode/scientific-contract-verification-11)
+
+- **Determinism census 2.0** (`src/contracts/determinism_census.*`): a
+  source-grounded projection of every registered operator's determinism facts
+  (class override literal, direct schema stamp, capability-sidecar claim,
+  runtime grade) plus contract coverage; canonical JSON
+  (`exp.determinism_census.v1`) snapshotted and byte-gated.
+- **Contract-or-exemption over the whole live registry**: first-party
+  prefixes (rs:/gdal:/io:/cartography:), 14 io: + 5 cartography: contract
+  records, 17 previously-unrecorded rs: operators declared (caught live by
+  the census gate), and reviewed exemptions for the gdal:/otb:/opencv:
+  adapter families (`data/contracts/contract_exemptions.json`).
+  Vocabulary: `phase`, `displacement`.
+- **Determinism truth lane**: cross-family replay corpus with
+  triple-publication binding (class scan ≡ schema stamp ≡ sidecar); first
+  execution-evidenced stamps on rs:band_ratio, rs:threshold_raster,
+  rs:mosaic.
+- **band_ratio NoData fix**: the ratio path masked declared sentinels only in
+  IHS mode; a NoData hole silently produced ratio 1.0. `bandRatioTile` gains
+  a sentinel/NaN masking overload (IHS #380 semantics) wired into the ratio
+  operator path (found by the new metamorphic M4 lane).
+- **Verification lanes 11.0**: six metamorphic relations with sensitivity
+  controls, long-double numeric references, a mutation-kill oracle
+  discrimination suite (10 mutants, all caught), and a failure/cancel/atomic
+  lane with zero-partial-artifact assertions.
+- **Cross-surface welding**: help↔registry and agent-knowledge↔surface
+  anti-phantom gates, monotone help-coverage baseline, contract-graph
+  snapshot welding, and P0 host-portability fixes (MSVC `<fcntl.h>` include,
+  `BenchmarkService` using-declaration) that unblock Windows builds.
+- **Capability-aware ladder**: Windows `.exe` resolution, host capability
+  declarations with per-item `requires` → explicit `skipped(reason)`,
+  measured L2 timeouts, seven 11.0 suites in L2, and READINESS rows for the
+  11.0 capabilities.
 
 ## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)
 

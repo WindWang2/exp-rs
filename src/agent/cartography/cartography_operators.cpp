@@ -88,7 +88,7 @@ class ComposeOperator final : public sicnu::operators::RSOperator
                "report. Follow with cartography:repair until quality passes, then "
                "cartography:export.";
     }
-    std::string determinismGrade() const override { return "bit_exact"; }
+    std::string determinismGrade() const override { return "bit-exact"; }
     RSOperatorMemoryPolicy memoryPolicy() const override
     {
         return RSOperatorMemoryPolicy::UnsupportedForLargeRaster;
@@ -156,7 +156,7 @@ class PreflightOperator final : public sicnu::operators::RSOperator
         return "Deterministic preflight of a MapSpec document (layout rules, text fit, "
                "overlaps, safe areas). Qt-free: runs headless. Returns the quality report.";
     }
-    std::string determinismGrade() const override { return "bit_exact"; }
+    std::string determinismGrade() const override { return "bit-exact"; }
     RSOperatorMemoryPolicy memoryPolicy() const override
     {
         return RSOperatorMemoryPolicy::Streaming;
@@ -202,7 +202,7 @@ class ValidateOperator final : public sicnu::operators::RSOperator
         return "Structural MapSpec validation without compiling: envelope, ids, geometry, "
                "references, collection rules. Empty problems list means valid.";
     }
-    std::string determinismGrade() const override { return "bit_exact"; }
+    std::string determinismGrade() const override { return "bit-exact"; }
     RSOperatorMemoryPolicy memoryPolicy() const override
     {
         return RSOperatorMemoryPolicy::Streaming;
@@ -249,7 +249,7 @@ class RepairOperator final : public sicnu::operators::RSOperator
                "returns the repaired document with an applied/still_reported ledger. "
                "Qt-free: runs headless.";
     }
-    std::string determinismGrade() const override { return "bit_exact"; }
+    std::string determinismGrade() const override { return "bit-exact"; }
     RSOperatorMemoryPolicy memoryPolicy() const override
     {
         return RSOperatorMemoryPolicy::Streaming;
@@ -330,7 +330,7 @@ class ExportOperator final : public sicnu::operators::RSOperator
                "declared page selection. Writes temp → verifies → sha256 → renames. Result "
                "\"output\" is the delivered file path (workflow-chainable).";
     }
-    std::string determinismGrade() const override { return "bit_exact"; }
+    std::string determinismGrade() const override { return "bit-exact"; }
     RSOperatorMemoryPolicy memoryPolicy() const override
     {
         return RSOperatorMemoryPolicy::UnsupportedForLargeRaster;

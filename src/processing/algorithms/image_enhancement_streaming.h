@@ -285,6 +285,14 @@ void histogramEqualizeApplyTile( const float *in, float *out, size_t n,
 /// Tile-formula replica of ImageEnhancement::bandRatio.
 void bandRatioTile( const float *band1, const float *band2, float *out, size_t count );
 
+/// NoData-aware band ratio (Platform 11.0, census M4): a pixel whose value
+/// in EITHER input band is non-finite or equals that band's declared
+/// sentinel yields NaN — the scientific contract's `propagate` semantics,
+/// mirroring the IHS #380 masking. Without this, a sentinel hole silently
+/// produces ratio 1.0 (trusted data where nothing was measured).
+void bandRatioTile( const float *band1, const float *band2, float *out,
+                    size_t count, float nodata1, float nodata2 );
+
 /**
  * Tile-formula replica of the image enhancement panel's per-pixel IHS
  * decomposition: a NaN in any band or a band value equal to its declared
