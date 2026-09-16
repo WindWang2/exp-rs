@@ -72,18 +72,23 @@ AlgorithmDescriptor），且：
   错误码行为不变。无 token 的 tools/call 与 master 行为逐字段一致。
 - CLI 新增 `tools`/`batch` 子命令，不改既有命令；legacy flag 模式未触碰。
 
-## Local tests（本机 Linux/Make dev-default，QT_QPA_PLATFORM=offscreen，ctest -j1）
+## Local tests（本机 Linux/Make dev-default，QT_QPA_PLATFORM=offscreen，逐二进制直跑）
 
-（结果在 Phase 8 双验证后回填；每条映射 命令→exit→TEST_MATRIX 行。）
+Phase 8 双验证（原样连续两遍，两遍结果完全一致）：
 
-| 套件 | 覆盖 | exit |
-|---|---|---|
-| test_surface_parity | 9 cases（投影/三方 parity/Pi gate/scale） | 待回填 |
-| test_surface_protocol | 11 cases（progress relay/artifact/redaction/协议负路径） | 待回填 |
-| test_cli_batch_manifest | 10 cases | 待回填 |
-| test_surface_e2e | 真 stdio ×2 | 待回填 |
-| test_mcp_server（回归） | master 基线 | 待回填 |
-| test_agent_tool_catalog / test_cli_commands_json / test_help_coverage（回归） | master 基线 | 待回填 |
+| 套件 | 覆盖 | Pass 1 | Pass 2 |
+|---|---|---|---|
+| test_surface_parity | 8 cases / 4248 assertions（投影不变式、MCP==投影、dispatch 漂移 gate、Pi stale-category、CLI 真二进制三方 parity、2000 工具规模+分页） | PASS | PASS |
+| test_surface_protocol | 10 cases / 70 assertions（RateLimiter、progress relay、artifact_read 全契约、redaction、initialize 负路径） | PASS | PASS |
+| test_cli_batch_manifest | 10 cases / 99 assertions（解析负样本×15、插值、fail-fast/continue、取消、原子索引、redaction oracle） | PASS | PASS |
+| test_surface_e2e | 真 stdio 子进程，整场景×2 / 4640 assertions | PASS | PASS |
+| test_agent_tool_catalog（回归） | 9/9 | PASS | PASS |
+| test_cli_commands_json（回归） | 9/9 | PASS | PASS |
+| test_mcp_server（回归） | 4348/4349 — 1 个 pre-existing 失败（run_workflow "Invalid pipeline" 文案；该路径本 diff 零改动，master 本机即失败，EVIDENCE 有对照证明） | 同一失败 | 同一失败 |
+| test_help_coverage（回归） | 6/8 — workbench.* knowledge 缺失（PR #1009 已列为 master 既有失败；本 diff 不触碰 help 数据） | 同一失败 | 同一失败 |
+
+构建证据：configure exit 0；全目标链 `-j2` 构建 exit 0（离线 FetchContent 以本地缓存源 +
+SICNU_LAB_SKIP_PYTHON_BINDINGS=ON 完成，零 CMakeLists 篡改）；监控采样见 EVIDENCE。
 
 ## Known limitations / follow-ups
 

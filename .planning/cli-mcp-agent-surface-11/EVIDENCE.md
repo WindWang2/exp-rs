@@ -110,3 +110,14 @@ test_surface_protocol test_cli_batch_manifest surface_mcp_host test_surface_e2e`
   证明 custom tools 现在被保留。
 - 测试 oracle 修正 4 处（CLI snake_case 键、QJsonValue::toVariant、noop 终态进度=冻结值、
   切片 "llo su"）——oracle 对齐真实契约，非放宽。
+
+## Phase 7/8
+
+- 独立对抗 review（子代理 #2，全 diff 只读）：P0=0 P1=5 → 全部修复 + P2×2 修复 +
+  P3 修复 6/disposition 5。逐条见 REVIEW_LOG.md。修复后四个新套件全量重跑全绿。
+- 补充提交：initializeDefaults 移除（P2）在修复轮已测试但遗漏 commit，Phase 8 清点
+  `git status` 时发现并补交（内容与已验证树一致）。
+- Oracle-6 双验证（Phase 8）：4 个新套件 + 4 个回归套件原样连跑两遍 —— 新套件两遍全绿；
+  回归两遍结果逐一致（仅 2 个已证明的 pre-existing master 失败，且两遍完全相同）。
+- `git diff --check origin/master...HEAD` → exit 0；冲突标记扫描 0；secret 形状扫描 0。
+- 目标状态：PR 已创建；不 merge；不等待在线 CI。
