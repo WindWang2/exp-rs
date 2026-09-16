@@ -1,0 +1,25 @@
+{
+  "image_base": "CBERS4_MUX_20230415_0364_075_L1",
+  "tiff_bands": 4,
+  "kind_name": "cbers_product",
+  "identity": { "satellite": "CBERS4", "sensor_mode": "MUX", "sensor_key": "cbers4_mux" },
+  "metadata": {
+    "product_id": "CBERS4_MUX_20230415_0364_075_L1",
+    "platform": "CBERS4",
+    "sensor": "MUX",
+    "sensor_mode": "MUX",
+    "radiometric_state": "digital_number",
+    "acquisition_time": "2023-04-15T13:45:30",
+    "resolution_meters": 20.0,
+    "sun_elevation_deg": 57.5,
+    "sun_elevation_source": "derived as 90 - declared solar zenith",
+    "sun_azimuth_deg": 154.2,
+    "orbit_id": "1234",
+    "crs_hint": "UTM zone 22",
+    "path_row": "364/75",
+    "declared_band_ids": ["B1", "B2", "B3", "B4"],
+    "sidecar_generation": "cbers_inpe_metadata",
+    "sidecar_root": "metadata"
+  },
+  "band_roles": { "B1": "blue", "B2": "green", "B3": "red", "B4": "nir" }
+}

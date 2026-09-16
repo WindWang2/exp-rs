@@ -239,13 +239,15 @@ TEST_CASE("cn_products: Unsupported Chinese satellite families are refused diagn
         REQUIRE(threw);
     };
 
-    checkRefused("/data/GF3_KS_E117.0_N40.0_20240415_L1A_HH_HV.tiff");
+    // ADR 0159 moved GF-3 SAR, GF-4 PMI, GF-5 AHSI, ZY-1 02B/02D/02E and
+    // CBERS-4 MUX/WFI/PAN10 into the supported set (covered by
+    // test_cn_product_families11); their still-refused neighbours stay here.
     checkRefused("/data/GF4_PMS_E117.0_N40.0_20240415_L1A.tiff");
-    checkRefused("/data/GF5_AHSI_E117.0_N40.0_20240415_L1A.tiff");
-    checkRefused("/data/ZY1_02D_AHSI_E117.0_N40.0_20240415_L1A0001.tiff");
+    checkRefused("/data/GF4_IRC_E117.0_N40.0_20240415_L1A.tiff");
+    checkRefused("/data/GF5_VIMS_E117.0_N40.0_20240415_L1A.tiff");
     checkRefused("/data/HJ2A-HSI-1-450-20240415-L1A-12345-1.tiff");
     checkRefused("/data/HJ1A-IRS-1-450-20240415-L1A-12345-1.tiff");
-    checkRefused("/data/CBERS4_MUX_20240415.tiff");
+    checkRefused("/data/CBERS4_ERM_20240415.tiff");
     checkRefused("/data/ZY5_PMS_E117.0_N40.0_20240415_L1A.tiff");
 
     // Unrecognized names are NOT claimed as CN at all.
@@ -1164,8 +1166,10 @@ TEST_CASE("cn_products: New families are supported — GF-7, ZY-1 02C, HJ-2 CCD"
     REQUIRE(hj2.sensorKey == "hj2_ccd");
 
     // The closest refused names stay refused (sensor tokens are required).
+    // ZY-1 02D AHSI moved into the supported set (ADR 0159); the 02D IRS
+    // payload stays recognized-but-refused.
     checkUnsupportedRefusal("/data/HJ2A-HSI-1-450-20240415-L1A-1234567-MSS1.tiff");
-    checkUnsupportedRefusal("/data/ZY1_02D_AHSI_E117.0_N40.0_20240415_L1A0001-MSS1.tiff");
+    checkUnsupportedRefusal("/data/ZY1_02D_IRS_E117.0_N40.0_20240415_L1A0001-MSS1.tiff");
 }
 
 TEST_CASE("cn_products: Sidecar generation detection and unknown-element diagnostics",

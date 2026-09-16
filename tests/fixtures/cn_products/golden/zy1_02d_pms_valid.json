@@ -1,0 +1,24 @@
+{
+  "image_base": "ZY1_02D_PMS_E113.0_N23.0_20210501_L1A0000003-MSS",
+  "tiff_bands": 4,
+  "kind_name": "zy1_product",
+  "identity": { "satellite": "ZY1_02D", "sensor_mode": "PMS", "sensor_key": "zy1_02d_pms" },
+  "metadata": {
+    "product_id": "21230",
+    "platform": "ZY1_02D",
+    "sensor": "PMS",
+    "sensor_mode": "PMS",
+    "processing_level": "L1A",
+    "radiometric_state": "digital_number",
+    "acquisition_time": "2021-05-01T04:22:10",
+    "resolution_meters": 10.0,
+    "sun_elevation_deg": 61.6,
+    "sun_elevation_source": "derived as 90 - declared solar zenith",
+    "sun_azimuth_deg": 143.9,
+    "orbit_id": "00417",
+    "declared_band_ids": ["B1", "B2", "B3", "B4"],
+    "sidecar_generation": "cresda_legacy_metainfo",
+    "sidecar_root": "metainfo"
+  },
+  "band_roles": { "B1": "blue", "B2": "green", "B3": "red", "B4": "nir" }
+}

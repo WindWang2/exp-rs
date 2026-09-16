@@ -285,3 +285,8 @@ data/labs/_tmp/
 !.planning/classification-intelligence-11/
 .planning/classification-intelligence-11/*
 !.planning/classification-intelligence-11/*.md
+
+# cn-eo-product-physics-11: track planning notes (markdown only; logs stay local).
+!.planning/cn-eo-product-physics-11/
+.planning/cn-eo-product-physics-11/*
+!.planning/cn-eo-product-physics-11/*.md

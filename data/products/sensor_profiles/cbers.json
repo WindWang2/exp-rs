@@ -1,0 +1,117 @@
+{
+  "version": 2,
+  "source": "CBERS-4 published payload specifications (INPE distribution). Band roles follow each camera's own layout; per-batch calibration tables are published INPE-side and are never defaulted here.",
+  "sensors": {
+    "cbers4_mux": {
+      "satellite": "CBERS4",
+      "instrument": "MUX",
+      "sensor_mode": "MUX",
+      "modality": "optical",
+      "gsd_m": 20.0,
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff"
+      ],
+      "calibration_rule": "declared coefficients are transported verbatim (INPE-side calibration tables published per batch); nothing is defaulted",
+      "qa_vocabulary": [],
+      "bands": [
+        {
+          "band": "B1",
+          "role": "blue",
+          "wavelength_nm": 485.0,
+          "spectral_range_um": "0.45-0.52",
+          "gsd_m": 20.0,
+          "note": "MUX multispectral 20 m"
+        },
+        {
+          "band": "B2",
+          "role": "green",
+          "wavelength_nm": 555.0,
+          "spectral_range_um": "0.52-0.59",
+          "gsd_m": 20.0
+        },
+        {
+          "band": "B3",
+          "role": "red",
+          "wavelength_nm": 660.0,
+          "spectral_range_um": "0.63-0.69",
+          "gsd_m": 20.0
+        },
+        {
+          "band": "B4",
+          "role": "nir",
+          "wavelength_nm": 830.0,
+          "spectral_range_um": "0.77-0.89",
+          "gsd_m": 20.0
+        }
+      ]
+    },
+    "cbers4_wfi": {
+      "satellite": "CBERS4",
+      "instrument": "WFI",
+      "sensor_mode": "WFI",
+      "modality": "optical",
+      "gsd_m": 64.0,
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff"
+      ],
+      "calibration_rule": "declared coefficients are transported verbatim (INPE-side calibration tables published per batch); nothing is defaulted",
+      "qa_vocabulary": [],
+      "bands": [
+        {
+          "band": "B1",
+          "role": "blue",
+          "wavelength_nm": 485.0,
+          "spectral_range_um": "0.45-0.52",
+          "gsd_m": 64.0,
+          "note": "WFI wide-field 64 m; product files may number WFI bands differently and unresolved ids degrade to reported 'unknown' notes, never guesses"
+        },
+        {
+          "band": "B2",
+          "role": "green",
+          "wavelength_nm": 555.0,
+          "spectral_range_um": "0.52-0.59",
+          "gsd_m": 64.0
+        },
+        {
+          "band": "B3",
+          "role": "red",
+          "wavelength_nm": 660.0,
+          "spectral_range_um": "0.63-0.69",
+          "gsd_m": 64.0
+        },
+        {
+          "band": "B4",
+          "role": "nir",
+          "wavelength_nm": 830.0,
+          "spectral_range_um": "0.77-0.89",
+          "gsd_m": 64.0
+        }
+      ]
+    },
+    "cbers4_pan10": {
+      "satellite": "CBERS4",
+      "instrument": "PAN10",
+      "sensor_mode": "PAN10",
+      "modality": "optical",
+      "gsd_m": 10.0,
+      "constituents": [
+        "sidecar_xml",
+        "image_tiff"
+      ],
+      "calibration_rule": "declared coefficients are transported verbatim (INPE-side calibration tables published per batch); nothing is defaulted",
+      "qa_vocabulary": [],
+      "bands": [
+        {
+          "band": "B1",
+          "role": "panchromatic",
+          "wavelength_nm": 680.0,
+          "spectral_range_um": "0.51-0.85",
+          "gsd_m": 10.0,
+          "note": "panchromatic 10 m (published CBERS-4 PAN10M range 510-850 nm)"
+        }
+      ]
+    }
+  }
+}

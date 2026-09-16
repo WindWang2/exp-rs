@@ -1811,7 +1811,7 @@ int commandData( QStringList args, const CliIO &io )
     const QString sub = args.isEmpty() ? "inspect" : args.takeFirst();
     if ( args.isEmpty() )
         return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
-                          {}, "usage: data inspect|doctor|probe|capabilities|product describe|stac <dataset>|identity <url>|cache status|clear|<url> [--bytes N]" );
+                          {}, "usage: data inspect|doctor|probe|capabilities|product describe|plan|stac <dataset>|identity <url>|cache status|clear|<url> [--bytes N]" );
     // Fabric 8.0 (D8): `data cache status|clear`. Claimed ONLY in the exact
     // single-argument form — `status`/`clear` must be the first token after
     // `cache` and the only one. Any other shape (a URL, or `status <url>`)
@@ -1903,6 +1903,37 @@ int commandData( QStringList args, const CliIO &io )
             {
                 const sicnu::geo::ProductAssets assets = sicnu::geo::ProductAdapterRegistry::instance().describe( stdPath );
                 return io.finish( true, "data", assets.toJson(), 0 );
+            }
+            if ( sub2 == "plan" )
+            {
+                // ADR 0159 dry-run: constituent graph + budget-capped sha256,
+                // purely read-only over the source product.
+                qint64 hashBudget = 268435456;
+                bool budgetInvalid = false;
+                for ( int i = 0; i + 1 < args.size(); ++i )
+                {
+                    if ( args[i] == "--hash-budget" )
+                    {
+                        bool parsedOk = false;
+                        hashBudget = args[i + 1].toLongLong( &parsedOk );
+                        budgetInvalid |= !parsedOk || hashBudget <= 0;
+                    }
+                }
+                if ( budgetInvalid )
+                    return io.finish( false, "data", {},
+                                      exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                      {}, "--hash-budget must be a positive integer" );
+                try
+                {
+                    const auto dryRun = operators::rs::dryRunCnProductImport( stdPath, nullptr, hashBudget );
+                    return io.finish( true, "data", dryRun.toJson(), 0 );
+                }
+                catch ( const sicnu::operators::RSOperatorError &error )
+                {
+                    return io.finish( false, "data", {},
+                                      exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
+                                      {}, error.what() );
+                }
             }
             return io.finish( false, "data", {}, exprs_ns::exitCodeValue( exprs_ns::ExitCode::InvalidInput ),
                               {}, "unknown data product subcommand: " + sub2.toStdString() );

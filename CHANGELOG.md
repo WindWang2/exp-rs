@@ -50,6 +50,51 @@ All notable changes to the `exp-rs` project will be documented in this file.
   materialization), seeded cancel storms, intermittent crash-resets to
   exactly-once completion, opt-in 100k-tile journal round-trip
   (SICNU_SCALE_11=1).
+## [Unreleased] - Chinese EO Product Physics & Import Platform 11.0 (zcode/cn-eo-product-physics-11)
+
+- **Sensor registry schema 2.0 (ADR 0159)**: strict per-field validation for
+  `data/products/sensor_profiles/*.json` — required identity fields, closed
+  modality/ADR-0065-role vocabularies, finite positive physical quantities,
+  case-insensitive band-id uniqueness, wavelength-agreement rule
+  (`wavelength_nm` pinned to the declared spectral range: published centre
+  when present, range midpoint otherwise), hyperspectral `band_axis` block
+  (extent + ordering + bad-band ids; bands are always written out, never
+  generated). v1 files stay readable under their historical rules.
+  Registry-wide `validateSensorProfiles()` reports dangling pan/ms links,
+  duplicate keys and per-entry violations; `tests/test_sensor_schema.cpp`
+  pins the committed registry to zero findings (drift gate). Field contract:
+  `docs/products/SENSOR_SCHEMA.md`.
+- **New CN product families (ADR 0159)**: GF-3 SAR (`gaofen3_sar_product`,
+  declared-metadata level: identity/mode/HH-HV-VH-VV polarizations/orbit/
+  level/incidence; unknown polarization tokens reported, unknown generations
+  refused; SAR stamps `SICNU_POLARIZATIONS`/`SICNU_ORBIT_DIRECTION`; no σ⁰
+  kernel claimed), GF-4 PMI (`gaofen4_product`, pan/MS via the registry
+  pan_variant link), GF-5 AHSI (`gaofen5_product`, 330-band axis aggregated
+  into one measurement asset; per-band wavelengths transported from declared
+  metadata only — never fabricated), ZY-1 02B CCD/HR, 02D/02E PMS/AHSI
+  (166-band axis) and CBERS-4 MUX/WFI/PAN10 via a third, separate INPE
+  sidecar generation (`cbers_inpe_metadata`) with typed unknown-root refusal.
+  Refusals for the remaining payloads stay concrete (GF-4 infrared, GF-5
+  VIMS/GMI/EMI/SATS, ZY-1 IRS, other CBERS missions/cameras).
+- **ImportPlan dry run (ADR 0159)**: `dryRunCnProductImport` — read-only
+  plan plus constituent graph (sidecar/image/RPC/PMS sibling) with
+  byte sizes and sha256 checksums; files above the declared per-file budget
+  get an explicitly labelled prefix digest. Surfaces: CLI
+  `data product plan [--hash-budget N]`, agent tool `io:product_plan`, and a
+  CN preflight summary in the product import dialog.
+- **Zero-half-product cancellation**: a cancel raised through the stack
+  progress bridge now removes the partial output before the typed
+  `Cancelled` error propagates (previously the exception unwound past the
+  stack's IO-failure cleanup and left a half-stacked GeoTIFF); a failed
+  metadata stamp likewise removes the unstamped output. Covered by
+  `tests/test_product_import_plan11.cpp` together with read-only-source and
+  Chinese-path end-to-end cases.
+- **Fixture corpus**: `tests/fixtures/cn_products/` — legal, corrupt,
+  missing-identity and multi-generation sidecar XMLs with hand-written
+  golden metadata and a manifest drift gate
+  (`tests/test_cn_product_fixtures.cpp`); TIFFs are synthesized at runtime,
+  no real imagery is committed.
+
 ## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)
 
 ## [Unreleased] - F15 Mosaic, Fusion & Quality Composite 11.0 (zcode/mosaic-fusion-11)

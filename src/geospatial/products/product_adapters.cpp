@@ -603,6 +603,14 @@ ProductKind detectProductKind( const std::string &path )
   {
     if ( identity.kindName == "gaofen_product" )
       return ProductKind::GaofenProduct;
+    if ( identity.kindName == "gaofen3_sar_product" )
+      return ProductKind::Gaofen3SarProduct;
+    if ( identity.kindName == "gaofen4_product" )
+      return ProductKind::Gaofen4Product;
+    if ( identity.kindName == "gaofen5_product" )
+      return ProductKind::Gaofen5Product;
+    if ( identity.kindName == "cbers_product" )
+      return ProductKind::CbersProduct;
     if ( identity.kindName == "zy3_product" )
       return ProductKind::Zy3Product;
     if ( identity.kindName == "zy1_product" )
@@ -627,6 +635,10 @@ const char *productKindName( ProductKind kind )
     case ProductKind::Sentinel1Safe: return "sentinel1_safe";
     case ProductKind::ModisContainer: return "modis_container";
     case ProductKind::GaofenProduct: return "gaofen_product";
+    case ProductKind::Gaofen3SarProduct: return "gaofen3_sar_product";
+    case ProductKind::Gaofen4Product: return "gaofen4_product";
+    case ProductKind::Gaofen5Product: return "gaofen5_product";
+    case ProductKind::CbersProduct: return "cbers_product";
     case ProductKind::Zy3Product: return "zy3_product";
     case ProductKind::Zy1Product: return "zy1_product";
     case ProductKind::HjCcdProduct: return "hj_ccd_product";
@@ -645,6 +657,10 @@ std::string productKindDisplayName( ProductKind kind )
     case ProductKind::Sentinel1Safe: return "Sentinel-1 SAFE product";
     case ProductKind::ModisContainer: return "MODIS HDF container";
     case ProductKind::GaofenProduct: return "Gaofen (GF-1/2/6, GF-7) L1A product";
+    case ProductKind::Gaofen3SarProduct: return "Gaofen-3 (GF-3) SAR L1A product";
+    case ProductKind::Gaofen4Product: return "Gaofen-4 (GF-4 PMI) geostationary L1A product";
+    case ProductKind::Gaofen5Product: return "Gaofen-5 (GF-5 AHSI) hyperspectral L1A product";
+    case ProductKind::CbersProduct: return "CBERS-4 L1A product (INPE sidecar generation)";
     case ProductKind::Zy3Product: return "Ziyuan-3 (ZY-3) L1A product";
     case ProductKind::Zy1Product: return "Ziyuan-1 02C (ZY-1 02C) L1A product";
     case ProductKind::HjCcdProduct: return "Huanjing (HJ-1A/1B, HJ-2A/B) CCD product";
@@ -667,9 +683,13 @@ ProductMetadata readProductMetadata( const std::string &path, ProductKind kind )
     case ProductKind::ModisContainer:
       return readModis( path );
     case ProductKind::GaofenProduct:
+    case ProductKind::Gaofen3SarProduct:
+    case ProductKind::Gaofen4Product:
+    case ProductKind::Gaofen5Product:
     case ProductKind::Zy3Product:
     case ProductKind::Zy1Product:
     case ProductKind::HjCcdProduct:
+    case ProductKind::CbersProduct:
     {
       const CnProductIdentity identity = cnIdentifyProduct( path );
       if ( identity.supported && identity.kindName == productKindName( kind ) )

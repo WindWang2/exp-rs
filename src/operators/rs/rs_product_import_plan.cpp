@@ -5,6 +5,7 @@
 #include "rs_product_import_plan.h"
 
 #include "rs_cn_import_operator.h"
+#include "geospatial/util/sha256.h"
 #include "processing/algorithms/satellite_products.h"
 
 #include <QDir>
@@ -258,6 +259,126 @@ ProductImportPlan planCnProductImport( const std::string &input, const char *fam
     return plan;
 }
 
+namespace {
+
+/// Streams @p path read-only through SHA-256 up to @p budgetBytes. Returns
+/// false when the file cannot be opened (note carries the reason); the
+/// report says explicitly whether the digest covers the whole file.
+bool hashConstituent( const QString &path, qint64 budgetBytes, ConstituentReport *report )
+{
+    QFileInfo info( path );
+    report->exists = info.exists();
+    report->bytes = info.size();
+    if ( !report->exists )
+    {
+        report->note = QStringLiteral( "file does not exist" );
+        return false;
+    }
+    QFile file( path );
+    if ( !file.open( QIODevice::ReadOnly ) )
+    {
+        report->note = file.errorString();
+        return false;
+    }
+    sicnu::geo::Sha256 sha;
+    qint64 hashed = 0;
+    bool readFailed = false;
+    constexpr qint64 kBlock = 65536;
+    std::vector<char> block( static_cast<std::size_t>( kBlock ) );
+    while ( hashed < budgetBytes )
+    {
+        const qint64 want = std::min( kBlock, budgetBytes - hashed );
+        const qint64 got = file.read( block.data(), want );
+        if ( got < 0 )
+        {
+            readFailed = true;
+            report->note = file.errorString();
+            break;
+        }
+        if ( got == 0 )
+            break;
+        sha.update( block.data(), static_cast<std::size_t>( got ) );
+        hashed += got;
+    }
+    if ( readFailed )
+        return false;
+    report->readable = true;
+    report->hashedBytes = hashed;
+    report->hashComplete = hashed >= report->bytes;
+    report->sha256Hex = sicnu::geo::toHex( sha.finalize() );
+    report->digestScope = report->hashComplete
+                            ? QStringLiteral( "file" )
+                            : QStringLiteral( "first %1 bytes (declared budget cap)" ).arg( hashed );
+    return true;
+}
+
+} // namespace
+
+Json::Value ProductImportDryRun::toJson() const
+{
+    Json::Value dryRun( Json::objectValue );
+    dryRun["plan"] = plan.toJson();
+    dryRun["read_only"] = true;
+    Json::Value checksum( Json::objectValue );
+    checksum["algorithm"] = checksumAlgorithm.toStdString();
+    checksum["budget_bytes"] = static_cast<Json::Int64>( hashBudgetBytes );
+    dryRun["checksum"] = checksum;
+    Json::Value nodes( Json::arrayValue );
+    for ( const ConstituentReport &constituent : constituents )
+    {
+        Json::Value node( Json::objectValue );
+        node["role"] = constituent.role.toStdString();
+        node["path"] = constituent.path.toStdString();
+        node["exists"] = constituent.exists;
+        node["readable"] = constituent.readable;
+        node["bytes"] = static_cast<Json::Int64>( constituent.bytes );
+        if ( constituent.readable )
+        {
+            node["sha256"] = constituent.sha256Hex;
+            node["hash_complete"] = constituent.hashComplete;
+            node["hashed_bytes"] = static_cast<Json::Int64>( constituent.hashedBytes );
+            node["digest_scope"] = constituent.digestScope.toStdString();
+        }
+        if ( !constituent.note.isEmpty() )
+            node["note"] = constituent.note.toStdString();
+        nodes.append( node );
+    }
+    dryRun["constituents"] = nodes;
+    return dryRun;
+}
+
+ProductImportDryRun dryRunCnProductImport( const std::string &input, const char *familyFilter,
+                                           qint64 hashBudgetBytes, RSOperatorContext *context )
+{
+    ProductImportDryRun dryRun;
+    dryRun.hashBudgetBytes = hashBudgetBytes > 0 ? hashBudgetBytes : 0;
+    dryRun.plan = planCnProductImport( input, familyFilter );
+
+    auto run = [ & ] ( const QString &role, const QString &path ) {
+        if ( context )
+        {
+            context->reportProgress( 0.0, ( "Inspecting " + role ).toStdString() );
+            context->throwIfCancelled();
+        }
+        ConstituentReport report;
+        report.role = role;
+        report.path = path;
+        if ( !path.isEmpty() )
+            hashConstituent( path, dryRun.hashBudgetBytes, &report );
+        else
+            report.note = QStringLiteral( "not resolved by the plan" );
+        dryRun.constituents.push_back( std::move( report ) );
+    };
+
+    run( QStringLiteral( "sidecar" ), dryRun.plan.sidecarPath );
+    run( QStringLiteral( "image" ), dryRun.plan.imagePath );
+    if ( !dryRun.plan.rpcPath.isEmpty() )
+        run( QStringLiteral( "rpc" ), dryRun.plan.rpcPath );
+    if ( !dryRun.plan.siblingImagePath.isEmpty() )
+        run( QStringLiteral( "sibling_image" ), dryRun.plan.siblingImagePath );
+    return dryRun;
+}
+
 CalibrationDecision evaluateCalibration( const ProductImportPlan &plan,
                                          bool applyCalibration,
                                          const QStringList &requestedBands )
@@ -368,12 +489,25 @@ Json::Value executeCnProductImport( const ProductImportPlan &plan,
 
     context.reportProgress( 0.15, "Stacking bands to GeoTIFF" );
     QString err;
-    const bool ok = SatelliteProducts::stackToGeoTiff(
-        info, requestedBands, QString::fromStdString( outputPath ), &err,
-        [&]( double fraction, const QString &message ) {
-            context.reportProgress( 0.15 + 0.7 * fraction, message.toStdString() );
-            context.throwIfCancelled();
-        } );
+    bool ok = false;
+    try
+    {
+        ok = SatelliteProducts::stackToGeoTiff(
+            info, requestedBands, QString::fromStdString( outputPath ), &err,
+            [&]( double fraction, const QString &message ) {
+                context.reportProgress( 0.15 + 0.7 * fraction, message.toStdString() );
+                context.throwIfCancelled();
+            } );
+    }
+    catch ( ... )
+    {
+        // stackToGeoTiff removes its partial output on IO-failure RETURNS,
+        // but an exception from the progress bridge (cancellation) unwinds
+        // past every cleanup path — a half-stacked GeoTIFF must never
+        // survive a cancel (ADR 0159 zero-half-product contract).
+        QFile::remove( QString::fromStdString( outputPath ) );
+        throw;
+    }
     if ( !ok )
     {
         throw RSOperatorError( ErrorCode::ComputationError,
@@ -388,6 +522,9 @@ Json::Value executeCnProductImport( const ProductImportPlan &plan,
                                  QString::fromStdString( plan.identity.kindName ), &err,
                                  /*bandOrderUnverified=*/!plan.bandOrderDeclared ) )
     {
+        // An unstamped stack is not a finished import: remove it instead of
+        // handing callers a file that claims nothing about what it is.
+        QFile::remove( QString::fromStdString( outputPath ) );
         throw RSOperatorError( ErrorCode::ComputationError,
                                err.isEmpty() ? "Failed to write CN import metadata"
                                              : err.toStdString() );
@@ -406,10 +543,16 @@ Json::Value executeCnProductImport( const ProductImportPlan &plan,
             throw RSOperatorError( ErrorCode::ComputationError,
                                    "Cannot reopen stacked GeoTIFF to apply declared calibration" );
         }
+        // Zero-half-product (ADR 0159): a cancel thrown mid-calibration must
+        // not leave a file that mixes DN and radiance rows (nor leak the
+        // GA_Update handle, which would lock the partial output on Windows).
+        bool calibrationClosed = false;
+        bool transformFailed = false;
+        try
+        {
         const int bandCount = GDALGetRasterCount( dataset );
         constexpr int kChunk = 4096;
         std::vector<double> chunk( static_cast<std::size_t>( kChunk ), 0.0 );
-        bool transformFailed = false;
         for ( int index = 1; index <= bandCount && index <= requestedBands.size() && !transformFailed;
               ++index )
         {
@@ -454,6 +597,15 @@ Json::Value executeCnProductImport( const ProductImportPlan &plan,
             }
         }
         GDALClose( dataset );
+        calibrationClosed = true;
+        }
+        catch ( ... )
+        {
+            if ( !calibrationClosed )
+                GDALClose( dataset );
+            QFile::remove( QString::fromStdString( outputPath ) );
+            throw;
+        }
         if ( transformFailed )
         {
             // Never leave a half-scaled stack behind: the file now mixes DN

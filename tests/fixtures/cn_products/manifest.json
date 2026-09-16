@@ -1,0 +1,15 @@
+{
+  "comment": "ADR 0159 CN product fixture corpus — small sidecar XML fixtures + golden metadata. Measurement TIFFs are synthesized at runtime next to a copied fixture (no real imagery is committed). This manifest is a drift gate: the test asserts the directory contains exactly this file set.",
+  "golden": [
+    "gf1_pms_valid.xml",
+    "gf3_sar_valid.xml",
+    "gf5_ahsi_valid.xml",
+    "zy1_02d_pms_valid.xml",
+    "cbers4_mux_inpe.xml"
+  ],
+  "corrupt": [
+    "corrupt/malformed.xml",
+    "corrupt/no_identity.xml",
+    "corrupt/cbers_unknown_root.xml"
+  ]
+}

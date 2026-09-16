@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MetaInfo>
+  <ProductID>31887</ProductID>
+  <SatelliteID>GF3</SatelliteID>
+  <SensorID>SAR</SensorID>
+  <ModeID>QPS</ModeID>
+  <ProductLevel>L1A</ProductLevel>
+  <ReceiveDate>2022-11-21</ReceiveDate>
+  <ReceiveTime>10:23:45</ReceiveTime>
+  <OrbitID>08871</OrbitID>
+  <PixelSizeX>3.0</PixelSizeX>
+  <PolarizationMode>HH/HV</PolarizationMode>
+  <OrbitDirection>DESCENDING</OrbitDirection>
+  <IncidenceAngle>31.47</IncidenceAngle>
+  <BeamMode>QPS1</BeamMode>
+</MetaInfo>
