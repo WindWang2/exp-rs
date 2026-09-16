@@ -261,10 +261,13 @@ TEST_CASE( "VaSelectionHub restores outer dispatch context after nested relay",
                       } );
 
     hub.publish( subject, QStringLiteral( "map.main" ) );
-    // map.main → relay (fresh, 1) → relay echo (dropped); map.main echo
-    // (dropped AFTER the nested unwind — this is the regression).
+    // map.main → relay (fresh, new generation) → the two subscribers inside
+    // the relay dispatch both echo "relay" (dropped ×2); back in the OUTER
+    // dispatch, the map.main echo is STILL dropped (context restored — this
+    // is the regression). Two events broadcast, three echoes absorbed,
+    // and the cascade stops at one level: no A↔B relay loop.
     CHECK( publishedSpy.count() == 2 );
-    CHECK( hub.stats().suppressedEchoes == 2 );
+    CHECK( hub.stats().suppressedEchoes == 3 );
 }
 
 TEST_CASE( "VaSelectionHub rejects invalid subjects and clamps text",

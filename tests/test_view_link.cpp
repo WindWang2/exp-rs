@@ -16,9 +16,7 @@
 #include <QApplication>
 #include <QEvent>
 #include <QMetaObject>
-#include <QSignalSpy>
 #include <QTemporaryDir>
-#include <QTest>
 #include <QThread>
 
 #include <qgsapplication.h>
@@ -37,9 +35,11 @@
 
 #include <gdal.h>
 
+#include <functional>
+
 using sicnu::app::ViewLinkController;
-using sicnu::app::VaCursorProbe;
 using sicnu::app::VaLayerLinkController;
+using sicnu::app::va::VaCursorProbe;
 using sicnu::display::DisplayLayerId;
 using sicnu::display::DisplayViewId;
 using sicnu::display::DisplayViewSpec;
@@ -221,15 +221,15 @@ sicnu::data::AssetId registerRasterAsset( sicnu::data::DataManager &data,
     return registered.assetId;
 }
 
-/// Waits (bounded, event-loop friendly) until @p spy records one emission.
-bool waitForSignal( QSignalSpy &spy, int cycles = 500 )
+/// Waits (bounded, event-loop friendly) until @p done turns true.
+bool waitFor( const std::function<bool()> &done, int cycles = 500 )
 {
-    for ( int i = 0; i < cycles && spy.isEmpty(); ++i )
+    for ( int i = 0; i < cycles && !done(); ++i )
     {
         QApplication::processEvents();
         QThread::msleep( 10 );
     }
-    return !spy.isEmpty();
+    return done();
 }
 
 } // namespace
@@ -356,17 +356,28 @@ TEST_CASE( "cursor link projects cross-CRS with a known answer",
     controller.setLinkGroup( viewP, QStringLiteral( "g" ) );
     controller.setCursorMarkersVisible( false ); // headless: geometry only
 
-    QSignalSpy movedSpy( &controller, &ViewLinkController::cursorMoved );
+    Qt::ConnectionType direct =
+      Qt::DirectConnection; // we are on the emitting (GUI) thread
+    QgsPointXY receivedPoint;
+    QString receivedWkt;
+    int movedCount = 0;
+    QObject::connect( &controller, &ViewLinkController::cursorMoved, &controller,
+                      [&]( sicnu::display::DisplayViewId, const QgsPointXY &point,
+                           const QString &wkt ) {
+                          ++movedCount;
+                          receivedPoint = point;
+                          receivedWkt = wkt;
+                      },
+                      direct );
 
     // Emit the canvas signal the way the canvas itself would on mouse move.
     QMetaObject::invokeMethod( &source, "xyCoordinates",
                                Q_ARG( QgsPointXY, geographic ) );
     QApplication::processEvents();
 
-    REQUIRE( movedSpy.count() == 1 );
-    CHECK( movedSpy.first().at( 1 ).value<QgsPointXY>() == geographic );
-    const QString wkt = movedSpy.first().at( 2 ).toString();
-    CHECK( QgsCoordinateReferenceSystem( wkt ).isValid() );
+    REQUIRE( movedCount == 1 );
+    CHECK( receivedPoint == geographic );
+    CHECK( QgsCoordinateReferenceSystem( receivedWkt ).isValid() );
     CHECK( controller.stats().cursorProjections == 1 );
     CHECK( controller.stats().transformFailures == 0 );
 }
@@ -390,7 +401,9 @@ TEST_CASE( "cursor link suppresses crosshair state when the pointer leaves",
     controller.setLinked( viewB, true );
     controller.setCursorMarkersVisible( false );
 
-    QSignalSpy leftSpy( &controller, &ViewLinkController::cursorLeft );
+    int leftCount = 0;
+    QObject::connect( &controller, &ViewLinkController::cursorLeft, &controller,
+                      [&]( sicnu::display::DisplayViewId ) { ++leftCount; } );
 
     const QgsPointXY p( 5.0, 5.0 );
     QMetaObject::invokeMethod( &a, "xyCoordinates", Q_ARG( QgsPointXY, p ) );
@@ -400,7 +413,7 @@ TEST_CASE( "cursor link suppresses crosshair state when the pointer leaves",
     QApplication::sendEvent( &a, &leave );
     QApplication::processEvents();
 
-    CHECK( leftSpy.count() == 1 );
+    CHECK( leftCount == 1 );
     CHECK( controller.cursorSyncEnabled() );
 }
 
@@ -512,29 +525,44 @@ TEST_CASE( "cursor probe samples the known-answer pixel and drops stale work",
 
     VaCursorProbe probe( [ &layer ]() -> QgsRasterLayer * { return &layer; } );
 
+    struct SampleRecord
+    {
+        bool ok = false;
+        double value = 0;
+        int band = 0;
+        bool noData = false;
+    };
+    QVector<SampleRecord> samples;
+    QObject::connect( &probe, &VaCursorProbe::sampled, &probe,
+                      [&]( bool ok, double value, int band, bool noData,
+                           const QString & ) {
+                          samples.append( SampleRecord{ ok, value, band, noData } );
+                      } );
+
     // value(col,row) = row*16 + col; map (3,12) in the raster's own CRS is
     // pixel col 3, row 4 → value 67.
-    QSignalSpy sampledSpy( &probe, &VaCursorProbe::sampled );
     probe.request( QgsPointXY( 3.0, 12.0 ), layer.crs().toWkt(), 1 );
-    REQUIRE( waitForSignal( sampledSpy ) );
-    CHECK( sampledSpy.first().at( 0 ).toBool() );
-    CHECK( sampledSpy.first().at( 1 ).toDouble() == 67.0 );
-    CHECK( sampledSpy.first().at( 2 ).toInt() == 1 );
+    REQUIRE( waitFor( [&] { return !samples.isEmpty(); } ) );
+    CHECK( samples.first().ok );
+    CHECK( samples.first().value == 67.0 );
+    CHECK( samples.first().band == 1 );
     CHECK( probe.stats().delivered == 1 );
 
     // A point outside the raster is an honest "outside", not a wrong value.
-    QSignalSpy outsideSpy( &probe, &VaCursorProbe::sampled );
     probe.request( QgsPointXY( -500.0, 12.0 ), layer.crs().toWkt(), 1 );
-    REQUIRE( waitForSignal( outsideSpy ) );
-    CHECK_FALSE( outsideSpy.first().at( 0 ).toBool() );
-    CHECK( outsideSpy.first().at( 3 ).toBool() ); // noData flag = outside
+    REQUIRE( waitFor( [&] { return samples.size() >= 2; } ) );
+    CHECK_FALSE( samples.at( 1 ).ok );
+    CHECK( samples.at( 1 ).noData ); // noData flag = outside
     CHECK( probe.stats().delivered == 2 );
 
     // Cancel: an in-flight generation never delivers.
     probe.request( QgsPointXY( 1.0, 1.0 ), layer.crs().toWkt(), 1 );
     probe.cancel();
-    QTest::qWait( 300 );
-    QApplication::processEvents();
+    for ( int i = 0; i < 30; ++i )
+    {
+        QApplication::processEvents();
+        QThread::msleep( 10 );
+    }
     CHECK_FALSE( probe.isBusy() );
     CHECK( probe.stats().delivered == 2 ); // nothing new after the cancel
 }

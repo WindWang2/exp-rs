@@ -113,7 +113,10 @@ class VaWorkbenchPanel : public QgsDockWidget
     bool m_hasFilter = false;
 
     QPointer<QgsMapCanvas> m_markerCanvas;
-    QPointer<QgsVertexMarker> m_pickMarker;
+    /// Marker is a canvas CHILD (QGraphicsItem, not a QObject) — raw
+    /// pointer, recreated whenever the provider returns a different canvas;
+    /// only used behind a live provider() lookup.
+    QgsVertexMarker *m_pickMarker = nullptr;
 };
 
 } // namespace sicnu::app::va
