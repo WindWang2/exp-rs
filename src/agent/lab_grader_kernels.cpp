@@ -262,12 +262,39 @@ bool validateLabKernelParams( const QString &kind, const Json::Value &params, QS
             if ( !params.isMember( "references" ) || !params["references"].isArray()
                  || params["references"].empty() )
                 return fail( QStringLiteral( "spectral_signature requires a non-empty references array" ) );
-            for ( const Json::Value &ref : params["references"] )
+            if ( params.isMember( "bands" ) && params["bands"].isArray() )
             {
-                if ( !ref.isObject() || !ref.isMember( "spectrum" ) || !ref["spectrum"].isArray()
-                     || ref["spectrum"].empty() )
-                    return fail( QStringLiteral(
-                      "spectral_signature references entries need a non-empty spectrum array" ) );
+                const Json::ArrayIndex bandCount = params["bands"].size();
+                for ( const Json::Value &ref : params["references"] )
+                {
+                    if ( !ref.isObject() || !ref.isMember( "spectrum" )
+                         || !ref["spectrum"].isArray() || ref["spectrum"].empty() )
+                        return fail( QStringLiteral(
+                          "spectral_signature references entries need a non-empty spectrum array" ) );
+                    if ( ref["spectrum"].size() != bandCount )
+                        return fail( QStringLiteral(
+                          "spectral_signature: every reference spectrum must have exactly one "
+                          "value per declared band" ) );
+                }
+            }
+            if ( params.isMember( "zone_reference" ) )
+            {
+                if ( !params["zone_reference"].isArray() )
+                    return fail( QStringLiteral( "zone_reference must be an array" ) );
+                const Json::ArrayIndex referenceCount = params["references"].size();
+                for ( const Json::Value &entry : params["zone_reference"] )
+                {
+                    if ( !entry.isObject() || !entry.isMember( "zone" )
+                         || !entry["zone"].isIntegral() )
+                        return fail( QStringLiteral(
+                          "zone_reference entries need an integer zone" ) );
+                    if ( entry.isMember( "reference" )
+                         && ( !entry["reference"].isIntegral()
+                              || entry["reference"].asInt() < 0
+                              || entry["reference"].asInt() >= static_cast<int>( referenceCount ) ) )
+                        return fail( QStringLiteral(
+                          "zone_reference reference index out of range" ) );
+                }
             }
             return true;
         }
@@ -281,16 +308,64 @@ bool validateLabKernelParams( const QString &kind, const Json::Value &params, QS
             if ( stat != QLatin1String( "mean" ) && stat != QLatin1String( "enl" )
                  && stat != QLatin1String( "fisher" ) )
                 return fail( QStringLiteral( "zone_stats stat must be mean|enl|fisher" ) );
-            if ( stat == QLatin1String( "mean" ) && !params.isMember( "bounds" ) )
-                return fail( QStringLiteral( "zone_stats stat=mean requires bounds" ) );
+            if ( stat == QLatin1String( "mean" )
+                 && ( !params.isMember( "bounds" ) || !params["bounds"].isArray() ) )
+                return fail( QStringLiteral( "zone_stats stat=mean requires a bounds array" ) );
+            if ( params.isMember( "bounds" ) )
+            {
+                for ( const Json::Value &bound : params["bounds"] )
+                {
+                    if ( !bound.isObject() || !bound.isMember( "zone" )
+                         || !bound["zone"].isIntegral() )
+                        return fail( QStringLiteral(
+                          "zone_stats bounds entries need an integer zone" ) );
+                    if ( bound.isMember( "band" ) && !bound["band"].isIntegral() )
+                        return fail( QStringLiteral(
+                          "zone_stats bounds entry band must be an integer" ) );
+                    if ( bound.isMember( "min" ) && !bound["min"].isNumeric() )
+                        return fail( QStringLiteral(
+                          "zone_stats bounds entry min must be a number" ) );
+                    if ( bound.isMember( "max" ) && !bound["max"].isNumeric() )
+                        return fail( QStringLiteral(
+                          "zone_stats bounds entry max must be a number" ) );
+                }
+            }
+            if ( params.isMember( "zone_deltas" ) || params.isMember( "separations" ) )
+            {
+                const Json::Value &list = params.isMember( "separations" )
+                                            ? params["separations"]
+                                            : params["zone_deltas"];
+                if ( !list.isArray() )
+                    return fail( QStringLiteral( "zone_deltas/separations must be an array" ) );
+                for ( const Json::Value &item : list )
+                {
+                    if ( !item.isObject() || !item.isMember( "zone" ) || !item["zone"].isIntegral()
+                         || !item.isMember( "below_zone" ) || !item["below_zone"].isIntegral()
+                         || !item.isMember( "min_delta" ) || !item["min_delta"].isNumeric() )
+                        return fail( QStringLiteral(
+                          "separation entries need integer zone/below_zone and numeric "
+                          "min_delta" ) );
+                }
+            }
+            if ( params.isMember( "zones_nodata" ) && !params["zones_nodata"].isNumeric() )
+                return fail( QStringLiteral( "zones_nodata must be a number" ) );
+            if ( params.isMember( "band" ) && !params["band"].isIntegral() )
+                return fail( QStringLiteral( "band must be an integer" ) );
+            if ( params.isMember( "zone" ) && !params["zone"].isIntegral() )
+                return fail( QStringLiteral( "zone must be an integer" ) );
             if ( stat == QLatin1String( "fisher" )
-                 && ( !params.isMember( "compare_zone" ) || !params.isMember( "min_fisher" ) ) )
-                return fail( QStringLiteral( "zone_stats stat=fisher requires compare_zone and min_fisher" ) );
+                 && ( !params.isMember( "zone" ) || !params.isMember( "compare_zone" )
+                      || !params.isMember( "min_fisher" ) ) )
+                return fail( QStringLiteral(
+                  "zone_stats stat=fisher requires zone, compare_zone and min_fisher" ) );
         }
         if ( kind == QLatin1String( "series_separation" ) )
         {
             if ( !params.isMember( "x" ) || !params["x"].isArray() || params["x"].size() < 2 )
                 return fail( QStringLiteral( "series_separation requires x (>= 2 axis values)" ) );
+            for ( const Json::Value &v : params["x"] )
+                if ( !v.isNumeric() )
+                    return fail( QStringLiteral( "series_separation x entries must be numbers" ) );
             if ( !params.isMember( "bounds" ) && !params.isMember( "separations" ) )
                 return fail( QStringLiteral(
                   "series_separation requires bounds and/or separations" ) );
@@ -311,6 +386,20 @@ bool validateLabKernelParams( const QString &kind, const Json::Value &params, QS
     {
         if ( !params.isMember( "truth" ) || !params["truth"].isMember( "path" ) )
             return fail( QStringLiteral( "spatial_agreement requires truth.path" ) );
+        if ( params.isMember( "zone_expected" ) && !params["zone_expected"].isArray() )
+            return fail( QStringLiteral( "zone_expected must be an array" ) );
+        if ( params.isMember( "zone_expected" ) )
+        {
+            for ( const Json::Value &entry : params["zone_expected"] )
+            {
+                if ( !entry.isObject() || !entry.isMember( "zone" ) || !entry["zone"].isIntegral()
+                     || !entry.isMember( "label" ) || !entry["label"].isNumeric() )
+                    return fail( QStringLiteral(
+                      "zone_expected entries need integer zone and numeric label" ) );
+            }
+        }
+        if ( params.isMember( "band" ) && !params["band"].isIntegral() )
+            return fail( QStringLiteral( "band must be an integer" ) );
         const bool zone = params.isMember( "zone_expected" );
         const bool binary = params.isMember( "min_hit_rate" ) || params.isMember( "max_false_alarm_rate" );
         const bool continuous = params.isMember( "tolerance" ) || params.isMember( "max_exceed_fraction" );
@@ -342,6 +431,8 @@ bool validateLabKernelParams( const QString &kind, const Json::Value &params, QS
              && !params.isMember( "preflight" ) )
             return fail( QStringLiteral(
               "file_check requires exists, min_bytes, png, mapspec or preflight" ) );
+        if ( params.isMember( "path" ) && !params["path"].isString() )
+            return fail( QStringLiteral( "file_check path must be a string" ) );
         return true;
     }
 
@@ -537,6 +628,12 @@ static bool runZoneStats( const RasterReader &reader, const LabKernelSpec &spec,
     // read error.
     for ( const int band : bands )
     {
+        if ( band < 1 )
+        {
+            usageError = QStringLiteral( "Assertion \"%1\": band index must be >= 1" )
+                           .arg( spec.id );
+            return false;
+        }
         if ( band > meta.bandCount )
         {
             outcome.passed = false;
@@ -901,39 +998,48 @@ static bool runSeriesSeparation( const RasterReader &reader, const LabKernelSpec
                          artifactError ) )
         return false;
 
-    // Per-zone slope via least squares over the declared x axis.
-    const double xMean = [&xAxis]
-    {
-        double s = 0.0;
-        for ( const double v : xAxis )
-            s += v;
-        return s / static_cast<double>( xAxis.size() );
-    }();
-    double sxx = 0.0;
-    for ( const double v : xAxis )
-        sxx += ( v - xMean ) * ( v - xMean );
-
+    // Per-zone pooled least-squares slope over the declared x axis. The
+    // per-band zone means are weighted by their pixel counts, exactly as if
+    // every contributing pixel had been regressed individually:
+    //   slope = sum_b n_b (x_b - xw)(y_b - yw) / sum_b n_b (x_b - xw)^2
+    // with the weighted axis mean xw = sum_b n_b x_b / sum_b n_b.
     auto slopeOf = [&]( int zone, bool *found ) -> double
     {
         *found = false;
-        double sxy = 0.0;
-        qint64 total = 0;
+        double nSum = 0.0, xwNum = 0.0;
         for ( int band : bands )
         {
             const auto bandIt = perBand.find( band );
             if ( bandIt == perBand.end() )
                 continue;
             const auto zoneIt = bandIt->second.find( zone );
-            if ( zoneIt == bandIt->second.end() || zoneIt->second.n == 0 )
+            if ( zoneIt == bandIt->second.end() )
                 continue;
-            sxy += ( xAxis[static_cast<std::size_t>( band - 1 )] - xMean )
-                   * zoneIt->second.mean * static_cast<double>( zoneIt->second.n );
-            total += zoneIt->second.n;
+            const double n = static_cast<double>( zoneIt->second.n );
+            nSum += n;
+            xwNum += n * xAxis[static_cast<std::size_t>( band - 1 )];
         }
-        if ( total == 0 || sxx == 0.0 )
+        if ( nSum == 0.0 )
+            return 0.0;
+        const double xMean = xwNum / nSum;
+        double sxy = 0.0, sxx = 0.0;
+        for ( int band : bands )
+        {
+            const auto bandIt = perBand.find( band );
+            if ( bandIt == perBand.end() )
+                continue;
+            const auto zoneIt = bandIt->second.find( zone );
+            if ( zoneIt == bandIt->second.end() )
+                continue;
+            const double n = static_cast<double>( zoneIt->second.n );
+            const double dx = xAxis[static_cast<std::size_t>( band - 1 )] - xMean;
+            sxx += n * dx * dx;
+            sxy += n * dx * zoneIt->second.mean;
+        }
+        if ( sxx == 0.0 )
             return 0.0;
         *found = true;
-        return sxy / ( static_cast<double>( total ) * sxx );
+        return sxy / sxx;
     };
 
     Json::Value slopes( Json::objectValue );
@@ -1681,6 +1787,19 @@ static bool runFileCheck( const QString &artifactPath, const LabKernelSpec &spec
         path = QFileInfo( ref ).isAbsolute()
                  ? ref
                  : QDir( QFileInfo( artifactPath ).absolutePath() ).filePath( ref );
+        // Sibling resolution stays INSIDE the artifact directory: a rules file
+        // must not probe unrelated files through the graded transcript.
+        const QString probe = QFileInfo( path ).absolutePath();
+        const QString bound = QFileInfo( artifactPath ).absolutePath();
+        if ( !probe.startsWith( bound ) )
+        {
+            outcome.passed = false;
+            outcome.message =
+              QStringLiteral( "file_check path escapes the submission directory" );
+            outcome.observed["path"] = path.toStdString();
+            outcome.expected["within"] = bound.toStdString();
+            return true;
+        }
     }
 
     bool passed = true;

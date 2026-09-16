@@ -101,9 +101,10 @@ LabDataPackResult LabDataPack::load( const QString &path )
                          QStringLiteral( "%1: %2" ).arg( errorsContext,
                                                          QString::fromStdString( parseErrors ) ) );
 
-  if ( !root.isObject() || root["schema_version"].asString() != kSchemaId )
+  if ( !root.isObject() || !root["schema_version"].isString()
+       || root["schema_version"].asString() != kSchemaId )
     return LabDataPackResult::fail( QStringLiteral( "lab.pack_schema" ),
-                         QStringLiteral( "%1: schema_version must be \"%2\"" )
+                         QStringLiteral( "%1: schema_version must be the string \"%2\"" )
                            .arg( errorsContext, QString::fromLatin1( kSchemaId ) ) );
 
   LabDataPack pack;
@@ -122,9 +123,19 @@ LabDataPackResult LabDataPack::load( const QString &path )
                          QStringLiteral( "%1: %2" ).arg( errorsContext, error ) );
 
   if ( root.isMember( "generator" ) )
+  {
+    if ( !root["generator"].isString() )
+      return LabDataPackResult::fail( QStringLiteral( "lab.pack_field" ),
+                           QStringLiteral( "%1: generator must be a string" ).arg( errorsContext ) );
     pack.generator = QString::fromStdString( root["generator"].asString() );
+  }
   if ( root.isMember( "notes" ) )
+  {
+    if ( !root["notes"].isString() )
+      return LabDataPackResult::fail( QStringLiteral( "lab.pack_field" ),
+                           QStringLiteral( "%1: notes must be a string" ).arg( errorsContext ) );
     pack.notes = QString::fromStdString( root["notes"].asString() );
+  }
   if ( root.isMember( "declared_offline_bytes" ) && root["declared_offline_bytes"].isInt64() )
     pack.declaredOfflineBytes = root["declared_offline_bytes"].asInt64();
 
@@ -162,6 +173,10 @@ LabDataPackResult LabDataPack::load( const QString &path )
       return LabDataPackResult::fail( QStringLiteral( "lab.pack_input" ),
                            QStringLiteral( "%1: %2" ).arg( errorsContext, error ) );
 
+    if ( !entry["provenance"].isString() )
+      return LabDataPackResult::fail( QStringLiteral( "lab.pack_input" ),
+                           QStringLiteral( "%1: provenance must be a string (%2)" )
+                             .arg( errorsContext, input.path ) );
     const QString provenance = QString::fromStdString( entry["provenance"].asString() );
     input.provenance = labPackProvenanceFromString( provenance );
     if ( labPackProvenanceToString( input.provenance ) != provenance )

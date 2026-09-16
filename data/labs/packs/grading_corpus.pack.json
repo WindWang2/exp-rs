@@ -3,7 +3,7 @@
   "lab_id": "grading_corpus",
   "pack_version": "1.0.0",
   "license": "generated-in-repo (synthetic teaching data, no third-party rights)",
-  "declared_offline_bytes": 1541755,
+  "declared_offline_bytes": 1541867,
   "notes": "fixtures regenerate via tests/fixtures/lab/generate_fixtures.py (osgeo host)",
   "inputs": [
     {
@@ -370,8 +370,8 @@
       "path": "tests/fixtures/lab/wrong_answer_corpus.json",
       "role": "aux",
       "provenance": "committed-fixture",
-      "sha256": "85e728c7d3f86fff06da1c10a19e7e4553eb70e9310409fec86d1406804dfc72",
-      "bytes": 9191,
+      "sha256": "efad2b51ac1017f71f6a8e9000c80a967c7ac9531a74e606f7367bab68c7e282",
+      "bytes": 9303,
       "sensor_truth": "corpus manifest (declared expected scores)"
     }
   ]

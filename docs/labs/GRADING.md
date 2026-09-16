@@ -8,7 +8,7 @@ explainable 100-point transcript instead of a binary verdict.
 ```
 sicnu_geo_rs_cli lab --lab <id|.rules.json> --grade <artifact> [--out report.json] [--max-bytes <n>]
 sicnu_geo_rs_cli lab --lab <id> --batch <dir> [--csv g.csv] [--roster r.csv] [--json s.json] [--html s.html] [--max-submissions <n>]
-sicnu_geo_rs_cli lab --report --experiment-db <db> --experiment <id> --report-out <base> [--grade transcript.json]
+sicnu_geo_rs_cli lab --report --experiment-db <db> --experiment <id> --report-out <base> [--grade-transcript transcript.json]
 sicnu_geo_rs_cli lab --self-check [--pack-root <root>] [--lab-id <id>]
 ```
 
@@ -82,7 +82,7 @@ rules file — the same policy as the classification truth walk.
 
 | kind | params (required **bold**) | fails when |
 |---|---|---|
-| `zone_stats` | **band**, **zones**:{path}, **stat** (`mean`\|`enl`\|`fisher`); mean: **bounds**:[{zone, band?, min?, max?}], zone_deltas?:[{zone, below_zone, min_delta}]; enl: **reference**:{path}, **enl_min_ratio**, max_relative_mean_shift?; fisher: **compare_zone**, **min_fisher**, zones_nodata? | any declared (band, zone) mean outside its bounds, a delta below its floor, the ENL ratio under the floor, or Fisher separability under the floor |
+| `zone_stats` | **band**, **zones**:{path}, **stat** (`mean`\|`enl`\|`fisher`); mean: **bounds**:[{zone, band?, min?, max?}], zone_deltas?:[{zone, below_zone, min_delta}]; enl: **reference**:{path}, **enl_min_ratio**, max_relative_mean_shift?; fisher: **zone**, **compare_zone**, **min_fisher**, zones_nodata? | any declared (band, zone) mean outside its bounds, a delta below its floor, the ENL ratio under the floor, or Fisher separability under the floor |
 | `band_layout` | band_count? \| **min_valid_fraction**? \| expected_valid_pixels?:{band:n}; bands? | band count, per-band valid fraction or exact valid-pixel count violated (stack integrity, NoData holes) |
 | `spatial_agreement` | **band**, **truth**:{path}, truth_nodata?, and EXACTLY ONE mode: zone_expected:[{zone,label}]+**min_accuracy** \| truth_positive+artifact_positive+**min_hit_rate**(+max_false_alarm_rate) \| **tolerance**+**max_exceed_fraction** | POSITION-SENSITIVE: per-zone label accuracy, binary hit / false-alarm rates, or the fraction of |artifact−truth|>tolerance pixels outside its bound — right-area-wrong-place finally scores below the pass line |
 | `series_separation` | **zones**:{path}, **x**:[≥2 axis values], bounds?/separations?:[{zone, below_zone, min_delta}] | per-zone least-squares slope over the declared axis outside bounds, or slope separation below the floor |

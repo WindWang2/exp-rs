@@ -50,7 +50,7 @@ std::vector<IntentSignals> signalTable()
                        // English execute verbs (teaching-lab-platform-11):
                        // an explicit execution request must route to the
                        // teacher surface even without the Chinese markers.
-                       "execute", "run the lab", "run every step" } } );
+                       "execute step", "execute the lab", "run every step" } } );
   for ( auto &entry : table )
     for ( auto &signal : entry.signals )
       signal = lowered( signal );

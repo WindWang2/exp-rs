@@ -115,7 +115,10 @@ Check checkLabPacks( const QString &packRoot, const QString &labId, bool packsOn
     bool degraded = false;
     for ( const auto &problem : problems )
     {
-        packStates[QStringLiteral( "<load-error>" ).toStdString()] =
+        // Key by file name so several unloadable packs stay visible.
+        const QString file = problem.errorMessage().section( QLatin1Char( ':' ), 0, 0 );
+        packStates[file.isEmpty() ? std::string( "<load-error>" )
+                                  : file.toStdString()] =
           problem.errorCode().toStdString();
         check.detail += problem.errorMessage() + QStringLiteral( "; " );
     }

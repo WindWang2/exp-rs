@@ -313,9 +313,57 @@ TEST_CASE( "zone_stats: ENL ratio against a reference raster",
     REQUIRE( result.ok );
     const LabKernelOutcome &outcome = result.outcomes.at( "z.enl" );
     REQUIRE( outcome.passed );
-    // ENL(raw) is exactly mean^2/var = 0.25^2/0.0025 = 25 in double arithmetic
-    // on alternating 0.2/0.3 — the evidence must reflect the closed form.
-    REQUIRE( outcome.observed["enl_per_zone"].isObject() );
+    // ENL(raw) is exactly mean^2/var = 0.25^2/0.0025 = 25 on alternating
+    // 0.2/0.3; the filtered raster is constant, so ENL(filtered) hits the
+    // variance floor -> ratio is huge. The evidence must carry the closed
+    // forms, not just a boolean.
+    const Json::Value &cell = outcome.observed["enl_per_zone"]["2"];
+    REQUIRE( cell.isObject() );
+    REQUIRE( std::fabs( cell["enl_raw"].asDouble() - 25.0 ) < 1e-6 );
+    REQUIRE( cell["ratio"].asDouble() >= params["enl_min_ratio"].asDouble() );
+    REQUIRE( std::fabs( cell["mean_shift"].asDouble() ) < 1e-9 );
+}
+
+TEST_CASE( "series_separation: pooled slope equals the per-pixel regression",
+           "[lab_grader_kernels][series_separation]" )
+{
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    // 4 bands, zone 2 = rows 10..19; pixel value = 2 * x_band (x = band index)
+    // so the exact least-squares slope of every pixel's series is 2.0 — the
+    // pooled per-zone slope must reproduce it (regression: an unweighted
+    // variant was low by the band count).
+    std::vector<std::vector<float>> bands;
+    for ( int b = 1; b <= 4; ++b )
+        bands.emplace_back( static_cast<size_t>( kSize ) * kSize,
+                            static_cast<float>( 2.0 * b ) );
+    const QString artifact = dir.filePath( "series.tif" );
+    writeFloatRaster( artifact, bands );
+    const QString zonesPath = dir.filePath( "zones.tif" );
+    writeByteRaster( zonesPath, threeStripeZones() );
+
+    Json::Value params;
+    params["zones"]["path"] = zonesPath.toStdString();
+    Json::Value x;
+    for ( int b = 1; b <= 4; ++b )
+        x.append( b );
+    params["x"] = x;
+    Json::Value bounds;
+    Json::Value bound;
+    bound["zone"] = 2;
+    bound["min"] = 1.999;
+    bound["max"] = 2.001;
+    bounds.append( bound );
+    params["bounds"] = bounds;
+
+    const WalkResult ok = walk(
+      artifact, { LabKernelSpec{ "ss.slope", "series_separation", params } }, dir.path() );
+    REQUIRE( ok.ok );
+    const LabKernelOutcome &outcome = ok.outcomes.at( "ss.slope" );
+    INFO( outcome.message.toStdString() );
+    REQUIRE( outcome.passed );
+    REQUIRE( std::fabs( outcome.observed["slopes"]["2"]["slope"].asDouble() - 2.0 ) < 1e-9 );
 }
 
 TEST_CASE( "band_layout: count, valid fractions and exact valid-pixel counts",
@@ -536,16 +584,32 @@ TEST_CASE( "spectral_signature: SAM angle of identical spectra is zero",
     const LabKernelOutcome &outcome = ok.outcomes.at( "sp.sam" );
     REQUIRE( outcome.passed );
 
-    // A rotated reference must break the zero-degree bound.
+    // The measured mean SAM angle must be exactly 0 for identical direction.
+    REQUIRE( std::fabs( ok.outcomes.at( "sp.sam" )
+                          .observed["sam_per_zone_reference"]["1:0"]["sam_mean_degrees"]
+                          .asDouble() )
+             < 1e-9 );
+
+    // A rotated reference must break the zero-degree bound: (1,2,2) vs
+    // (1,0.5,0.5) -> cos = 2 / (3 * 1.2247) -> 56.9 degrees.
+    const double expectedAngle =
+      std::acos( 2.0 / ( std::sqrt( 9.0 ) * std::sqrt( 1.0 + 0.25 + 0.25 ) ) ) * 180.0
+      / 3.14159265358979323846;
     Json::Value rotated = params;
     rotated["references"] = references;
     rotated["references"][0]["spectrum"][0] = 1.0;
     rotated["references"][0]["spectrum"][1] = 0.5;
     rotated["references"][0]["spectrum"][2] = 0.5;
+    rotated["sam_max_mean_degrees"] = expectedAngle - 1e-6;
     const WalkResult failing = walk(
       artifact, { LabKernelSpec{ "sp.sam", "spectral_signature", rotated } }, dir.path() );
     REQUIRE( failing.ok );
     REQUIRE( !failing.outcomes.at( "sp.sam" ).passed );
+    REQUIRE( std::fabs( failing.outcomes.at( "sp.sam" )
+                          .observed["sam_per_zone_reference"]["1:0"]["sam_mean_degrees"]
+                          .asDouble()
+                        - expectedAngle )
+             < 1e-6 );
 }
 
 TEST_CASE( "kernels honour the byte budget (tiles) and type budget errors",

@@ -43,7 +43,10 @@ QStringList discoverSubmissions( const QDir &dir, const QStringList &excludedAbs
         {
             if ( name.startsWith( QLatin1Char( '.' ) ) )
                 return true;
-            const QString absolute = dir.absoluteFilePath( name );
+            QString absolute = dir.absoluteFilePath( name );
+#ifdef Q_OS_WIN
+            absolute = absolute.toLower();
+#endif
             return excludedAbsolute.contains( absolute );
         } ),
       names.end() );
@@ -304,6 +307,14 @@ LabBatchSummary LabBatchRunner::run( const QString &submissionsDir, const QStrin
         excluded << QFileInfo( options.jsonPath ).absoluteFilePath();
     if ( !options.htmlPath.isEmpty() )
         excluded << QFileInfo( options.htmlPath ).absoluteFilePath();
+#ifdef Q_OS_WIN
+    // Windows paths are case-insensitive: "Grades.CSV" must still be excluded
+    // when the CSV was requested as "grades.csv".
+    for ( QString &entry : excluded )
+        entry = entry.toLower();
+    QStringList lowered;
+    lowered.reserve( excluded.size() );
+#endif
 
     QStringList submissions = discoverSubmissions( dir, excluded );
     summary.total = submissions.size();

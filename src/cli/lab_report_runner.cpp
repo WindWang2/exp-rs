@@ -89,7 +89,7 @@ int runLabReport( const LabReportOptions &options, std::string *errorOut )
     if ( options.experimentDb.isEmpty() || options.experimentId.isEmpty()
          || options.outBase.isEmpty() )
         return fail( QStringLiteral(
-          "lab --report requires --experiment-db, --experiment and --out <base>" ) );
+          "lab --report requires --experiment-db, --experiment and --report-out <base>" ) );
 
     sicnu::experiment::ExperimentStore store;
     QString storeError;
