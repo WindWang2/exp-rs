@@ -39,6 +39,52 @@ elseif(JSONCPP_LIBRARIES)
     target_link_libraries(sicnu_lab_batch PUBLIC ${JSONCPP_LIBRARIES})
 endif()
 
+# teaching-lab-platform-11: headless sicnu.labreport.v1 export (`lab --report`)
+# — a static lib so tests drive the runner without linking the whole CLI.
+add_library(sicnu_lab_report STATIC
+    lab_report_runner.cpp
+    lab_report_runner.h
+)
+target_include_directories(sicnu_lab_report PUBLIC
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+)
+target_link_libraries(sicnu_lab_report PUBLIC
+    Qt6::Core
+    sicnu_sdk
+    Sicnu::experiment
+    Sicnu::experiment_bridge
+)
+if(TARGET jsoncpp)
+    target_link_libraries(sicnu_lab_report PUBLIC jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+    target_link_libraries(sicnu_lab_report PUBLIC ${JSONCPP_LIBRARIES})
+endif()
+
+# teaching-lab-platform-11: `lab --self-check` environment diagnostics.
+add_library(sicnu_lab_self_check STATIC
+    lab_self_check.cpp
+    lab_self_check.h
+)
+target_include_directories(sicnu_lab_self_check PUBLIC
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(sicnu_lab_self_check PUBLIC
+    SICNU_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+target_link_libraries(sicnu_lab_self_check PUBLIC
+    Qt6::Core
+    Sicnu::data
+    sicnu_agent
+    GDAL::GDAL
+)
+if(TARGET jsoncpp)
+    target_link_libraries(sicnu_lab_self_check PUBLIC jsoncpp)
+elseif(JSONCPP_LIBRARIES)
+    target_link_libraries(sicnu_lab_self_check PUBLIC ${JSONCPP_LIBRARIES})
+endif()
+
 # Headless CLI embeds no QML; skip Qt's configure-time qmlimportscanner pass
 # (unreliable on Windows hosts — see the tail of tests/CMakeLists.txt).
 set_target_properties(sicnu_geo_rs_cli PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN TRUE)
@@ -85,6 +131,8 @@ target_link_libraries(sicnu_geo_rs_cli PRIVATE
     Qt6::Core
     Sicnu::data
     sicnu_lab_batch
+    sicnu_lab_report
+    sicnu_lab_self_check
     Sicnu::dataset
     Sicnu::experiment
     Sicnu::experiment_bridge
