@@ -8,19 +8,23 @@
 namespace sicnu::operators::rs {
 
 /**
- * rs:terrain_flow — hydrology foundation products over a DEM (Milestone F).
+ * rs:terrain_flow — hydrology products over a DEM (Foundation 5.0 F +
+ * terrain-hydrology-11).
  *
- * Products (see processing/algorithms/terrain_flow.h):
+ * Products (see processing/algorithms/terrain_flow.h and terrain_hydrology.h):
  *   fill               priority-flood depression filling (NoData = barrier)
  *   flow_direction     D8 steepest-descent codes (ESRI powers of two, 0 = sink)
- *   flow_accumulation  self-inclusive drainage counts (requires the filled
- *                      surface; computed from the directions of this run)
+ *   flow_accumulation  self-inclusive drainage counts
+ *   watershed          pour-point basin labels
+ *   flat_resolve       epsilon-gradient flat resolution (fills and drains)
+ *   flow_direction_inf D∞ angles, degrees clockwise from north (-1 undecided)
+ *   stream_network     threshold extraction + Strahler orders (result JSON
+ *                      carries connectivity stats and optional link polylines)
+ *   outlets            D8 direction-0 cells (sinks/rim outflows) as a mask
  *
  * Full-frame kernel contract (O(N log N) fill, O(N) routing) — the terrain
- * family's documented memory model; the schema estimate states the bound.
- *
- * Parameters: input (DEM), output, product, cell_size (optional, metres per
- * cell for documentation purposes; routing itself is cell-based).
+ * family's documented memory model; the schema estimate states the bound and
+ * SICNU_TERRAIN_MAX_CELLS caps the cell count fail-closed.
  */
 class RsTerrainFlowOperator : public RSOperator {
 public:
