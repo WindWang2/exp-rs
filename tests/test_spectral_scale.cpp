@@ -181,6 +181,10 @@ TEST_CASE( "Diagonal local RX at 1024 bands matches the reference and is determi
     config.innerWindow = 3;
     config.covarianceMode = CovarianceMode::Diagonal;
     config.loading = 1e-3;
+    // The window provides 16 background samples; the high-band default
+    // minimum (bands+1) would leave everything unscored. The explicit
+    // override is the documented knob for small-window high-band scoring.
+    config.minBackgroundSamples = 8;
 
     Result result;
     QString err;

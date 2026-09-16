@@ -52,6 +52,19 @@ namespace SpectralLocalRx
     const char *covarianceModeText( CovarianceMode mode );
     bool covarianceModeFromText( const std::string &text, CovarianceMode *out );
 
+    /// Outcome of a single-pixel scoring attempt. Exposed so drivers can
+    /// distinguish expected per-window degeneracy from real errors without
+    /// matching error-message text.
+    enum class PixelScoreStatus
+    {
+        Scored,                 ///< @a score carries the RX value
+        InvalidCenter,          ///< center spectrum is non-finite / NoData
+        InsufficientBackground, ///< fewer valid samples than the minimum
+        SingularBackground,     ///< loaded covariance not invertible
+        NonFiniteScore,         ///< arithmetic did not produce a finite score
+        InvalidArguments,       ///< structurally invalid call
+    };
+
     struct Config
     {
         int outerWindow = 5;  ///< odd side length >= 3 of the background window
@@ -67,6 +80,7 @@ namespace SpectralLocalRx
         std::vector<float> scores;          ///< RX score; NaN = unscored
         std::vector<uint8_t> scored;        ///< 1 when the pixel has a score
         std::vector<int32_t> backgroundSamples; ///< valid background count per pixel
+        std::vector<uint8_t> centerValid;   ///< 1 when the center pixel itself is valid
         CovarianceMode covarianceMode = CovarianceMode::Full;
     };
 
@@ -99,10 +113,10 @@ namespace SpectralLocalRx
      * Single-pixel score against an explicit background set (pixels not
      * including the center). Exposed for the streaming operator (tile-local
      * enumeration) and for independent verification; same validity and
-     * loading rules as dualWindowRx. Returns false with an error message
-     * when the background is structurally insufficient (count below the
-     * minimum or a singular loaded covariance) — the caller decides whether
-     * that means "leave unscored".
+     * loading rules as dualWindowRx. Returns true only when @a score holds
+     * a value; the reason for an unscored pixel is reported via @a status
+     * (never via message text). Bool false + status is reserved for
+     * structurally invalid calls.
      */
     bool scorePixel( const float *spectrum,
                      const float *background, size_t backgroundCount, int bands,
@@ -110,6 +124,7 @@ namespace SpectralLocalRx
                      const float *noDataBands,
                      const uint8_t *hasNoDataBands,
                      float *score,
+                     PixelScoreStatus *status = nullptr,
                      QString *errorMessage = nullptr );
 
 } // namespace SpectralLocalRx

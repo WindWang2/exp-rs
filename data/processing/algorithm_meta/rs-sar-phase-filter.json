@@ -1,0 +1,12 @@
+{
+  "gpu" : false,
+  "id" : "rs:sar_phase_filter",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "sar",
+    "insar"
+  ],
+  "task" : "sar-insar"
+}

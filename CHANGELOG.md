@@ -16,8 +16,9 @@ All notable changes to the `exp-rs` project will be documented in this file.
   (`src/processing/algorithms/spectral_sparse_unmixing.*`).
 - **SID-SAM hybrid similarity (C)**: `rs:spectral_similarity` — bounded
   `product_normalized` (sam′·sid′ ∈ [0,1]) and classic `SID·tanθ` forms over the
-  master SAM/SID kernels, with a wavelength-comparability guard (disjoint grids
-  refuse) (`src/processing/algorithms/spectral_hybrid_similarity.*`).
+  master SAM/SID kernels (kernel-level wavelength-comparability guard: disjoint
+  grids refuse; the operator resolves references through the shared
+  resampling seam) (`src/processing/algorithms/spectral_hybrid_similarity.*`).
 - **Endmember analysis (D)**: `rs:endmember_analysis` — average-link spectral-angle
   clustering with PPI-ranked representatives, pairwise SAM matrix, Gaussian-SRF
   sensor projection with mandatory wavelength metadata and coverage flags; output is

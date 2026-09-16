@@ -131,12 +131,14 @@ namespace
             double trace = 0.0;
             for ( int i = 0; i < kBands; ++i )
             {
-                trace += cov[i * kBands + i];
                 for ( int j = i; j < kBands; ++j )
                 {
                     cov[i * kBands + j] /= denom;
                     cov[j * kBands + i] = cov[i * kBands + j];
                 }
+                // Trace of the ESTIMATED covariance (normalized first — the
+                // loading contract is alpha * tr(Sigma)/B).
+                trace += cov[i * kBands + i];
             }
             const double load = config.loading * ( trace / kBands );
             for ( int i = 0; i < kBands; ++i )
@@ -159,9 +161,13 @@ namespace
                     if ( std::abs( aug[r * ( kBands + 1 ) + col] )
                          > std::abs( aug[pivot * ( kBands + 1 ) + col] ) )
                         pivot = r;
-                std::swap_ranges( aug.begin() + pivot * ( kBands + 1 ),
-                                  aug.begin() + ( pivot + 1 ) * ( kBands + 1 ),
-                                  aug.begin() + col * ( kBands + 1 ) );
+                if ( pivot != col )
+                {
+                    // Manual row exchange: swap_ranges on identical ranges is UB.
+                    for ( int j = col; j <= kBands; ++j )
+                        std::swap( aug[pivot * ( kBands + 1 ) + j],
+                                   aug[col * ( kBands + 1 ) + j] );
+                }
                 const double diag = aug[col * ( kBands + 1 ) + col];
                 for ( int j = col; j <= kBands; ++j )
                     aug[col * ( kBands + 1 ) + j] /= diag;
@@ -286,18 +292,22 @@ TEST_CASE( "Injected anomaly dominates and its guard window protects the score",
         }
     CHECK( result.scores[anomalyScoreIdx] > 5.0f * bestClean );
 
-    // Guard semantics: with the default 3x3 guard the center (8,8) has a
-    // clean background (anomaly excluded). Shrinking the guard to 1x1 pulls
-    // the anomaly INTO the center's background, inflating the local band-0
-    // variance and dragging the center's own score down.
+    // Guard semantics, canonical property: the ANOMALY's own score is
+    // highest when its guard window removes it (and its neighbours) from
+    // its background. With a 1x1 guard the anomaly stays in its own
+    // background: its band-0 deviation now sits on top of a polluted mean
+    // and a ~20x inflated variance, so its score drops sharply.
     Config tightGuard;
     tightGuard.outerWindow = 5;
     tightGuard.innerWindow = 1;
     Result tightResult;
     REQUIRE( dualWindowRx( pixels.data(), kWidth, kHeight, kBands, tightGuard,
                            nullptr, nullptr, &tightResult, &err ) );
-    const size_t centerIdx = static_cast<size_t>( 8 ) * kWidth + 8;
-    CHECK( tightResult.scores[centerIdx] < result.scores[centerIdx] );
+    CHECK( result.scores[anomalyScoreIdx] > tightResult.scores[anomalyScoreIdx] );
+    // And even the polluted variant still flags the anomaly above the clean
+    // pixel population (the anomaly is detectable either way — the guard
+    // just recovers the full contrast).
+    CHECK( tightResult.scores[anomalyScoreIdx] > 5.0f * bestClean );
 }
 
 TEST_CASE( "NoData pixels are excluded and never scored", "[localrx][kernel]" )
@@ -393,18 +403,21 @@ TEST_CASE( "scorePixel agrees with the grid driver", "[localrx][kernel]" )
     float score = 0.0f;
     QString err;
     REQUIRE( scorePixel( center, background.data(), background.size() / kBands,
-                         kBands, config, nullptr, nullptr, &score, &err ) );
+                         kBands, config, nullptr, nullptr, &score,
+                         nullptr, &err ) );
 
     Result result;
     REQUIRE( dualWindowRx( pixels.data(), kWidth, kHeight, kBands, config,
                            nullptr, nullptr, &result, &err ) );
     CHECK( score == Approx( result.scores[static_cast<size_t>( py ) * kWidth + px] ).margin( 1e-5 ) );
 
-    // A too-small background refuses (structurally insufficient).
+    // A too-small background refuses with the typed status (never message
+    // text matching).
     float small = 0.0f;
+    PixelScoreStatus status = PixelScoreStatus::InvalidArguments;
     CHECK_FALSE( scorePixel( center, background.data(), 4, kBands, config,
-                             nullptr, nullptr, &small, &err ) );
-    CHECK( err.contains( "below the minimum" ) );
+                             nullptr, nullptr, &small, &status, &err ) );
+    CHECK( status == PixelScoreStatus::InsufficientBackground );
 }
 
 TEST_CASE( "Dual-window RX validation refusals", "[localrx][kernel]" )

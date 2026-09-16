@@ -174,36 +174,29 @@ bool buildDictionary( const float *endmembers, int bands, int nEndmembers,
     for ( int e = 0; e < nEndmembers; ++e )
         out->etUnit[static_cast<size_t>( e )] = 1.0; // E^T 1 for the penalty RHS
 
-    // Lipschitz estimate: bounded deterministic power iteration on G.
-    // Start vector = 1/sqrt(n); a fixed sweep count keeps the estimate
-    // reproducible across runs and platforms (no adaptive early exit that
-    // could diverge on rounding).
-    std::vector<double> v( n, 1.0 / std::sqrt( static_cast<double>( n ) ) );
-    double lambdaMax = 0.0;
-    const int kPowerSweeps = 64;
-    for ( int sweep = 0; sweep < kPowerSweeps; ++sweep )
+    // Lipschitz bound for FISTA: the maximum absolute row sum of G (the
+    // operator infinity norm). For symmetric PSD G, lambda_max(G) <= ||G||
+    // (inf) always — a deterministic, data-independent upper bound with no
+    // convergence risk (a power-iteration estimate can undershoot when its
+    // start vector is weakly overlapping the dominant eigenvector, e.g.
+    // anti-symmetric atom pairs, and then the FISTA step leaves the
+    // stability region). The bound is slightly loose for correlated
+    // dictionaries; the iteration budget absorbs that.
+    double normInf = 0.0;
+    for ( int i = 0; i < nEndmembers; ++i )
     {
-        std::vector<double> w( n, 0.0 );
-        for ( int i = 0; i < nEndmembers; ++i )
-        {
-            double sum = 0.0;
-            for ( int j = 0; j < nEndmembers; ++j )
-                sum += out->gram[static_cast<size_t>( i ) * n + j] * v[static_cast<size_t>( j )];
-            w[static_cast<size_t>( i )] = sum;
-        }
-        double norm = 0.0;
-        for ( int i = 0; i < nEndmembers; ++i )
-            norm += w[static_cast<size_t>( i )] * w[static_cast<size_t>( i )];
-        norm = std::sqrt( norm );
-        if ( !( norm > 0.0 ) || !std::isfinite( norm ) )
-            break;
-        lambdaMax = norm;
-        for ( int i = 0; i < nEndmembers; ++i )
-            v[static_cast<size_t>( i )] = w[static_cast<size_t>( i )] / norm;
+        double rowSum = 0.0;
+        for ( int j = 0; j < nEndmembers; ++j )
+            rowSum += std::abs( out->gram[static_cast<size_t>( i ) * n + j] );
+        normInf = std::max( normInf, rowSum );
     }
-    // The estimate may undershoot lambda_max by up to (1 - (r2/r1)^2K); a
-    // 5% inflation keeps the FISTA step safely below the stability bound.
-    out->lipschitz = lambdaMax * 1.05;
+    if ( !( normInf > 0.0 ) || !std::isfinite( normInf ) )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "Dictionary Gram matrix is degenerate" );
+        return false;
+    }
+    out->lipschitz = normInf;
 
     return true;
 }

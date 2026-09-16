@@ -75,10 +75,15 @@ TEST_CASE("Workbench panel loads a validated table and links selection", "[spect
     CHECK( selections.front().first == QStringLiteral( "green" ) );
     CHECK( selections.front().second == 1 );
 
-    // Out-of-range selection clamps instead of crashing.
-    panel.selectSpectrum( 99 );
+    // Out-of-range selection clamps: -5 clamps to row 0 (a real row change,
+    // so the signal fires with the clamped index).
+    panel.selectSpectrum( -5 );
     REQUIRE( selections.size() == 2 );
-    CHECK( selections.back().second == 1 );
+    CHECK( selections.back().second == 0 );
+    CHECK( selections.back().first == QStringLiteral( "red" ) );
+    // Re-selecting the current row is a no-op (no duplicate emission).
+    panel.selectSpectrum( 0 );
+    CHECK( selections.size() == 2 );
 }
 
 TEST_CASE("Workbench panel refuses broken artifacts fail-closed", "[spectral11][widget]")

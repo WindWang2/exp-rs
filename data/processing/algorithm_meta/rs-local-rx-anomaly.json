@@ -1,0 +1,13 @@
+{
+  "id" : "rs:local_rx_anomaly",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "rx",
+    "anomaly",
+    "hyperspectral",
+    "local"
+  ],
+  "task" : "anomaly-detection"
+}

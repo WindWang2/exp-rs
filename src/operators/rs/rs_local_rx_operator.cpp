@@ -266,9 +266,15 @@ Json::Value RsLocalRxOperator::run(const Json::Value& params,
                         } else {
                             ++unscoredPixels;
                         }
-                        if (!qualityPath.empty())
-                            tileQuality[dstIdx] = static_cast<float>(
-                                result.backgroundSamples[srcIdx]);
+                        if (!qualityPath.empty()) {
+                            // Quality plane: background sample count for valid
+                            // centers; NaN marks an invalid (NoData/non-finite)
+                            // center so it cannot be read as "0 samples".
+                            tileQuality[dstIdx] =
+                                result.centerValid[srcIdx]
+                                    ? static_cast<float>(result.backgroundSamples[srcIdx])
+                                    : std::numeric_limits<float>::quiet_NaN();
+                        }
                     }
                 }
 

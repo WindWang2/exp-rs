@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:sar_polsar_decompose",
+  "input" : "raster",
+  "notes" : "Model conventions (volume/helix matrices, branch rules) are defined in sar_polsar.h and pinned by known-answer tests (test_sar_polsar.cpp). The refined (2012) orientation-adapted Yamaguchi volume is NOT implemented.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "sar",
+    "polsar",
+    "polarimetry"
+  ],
+  "task" : "sar-polarimetry"
+}

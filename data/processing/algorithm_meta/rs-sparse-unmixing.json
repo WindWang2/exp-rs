@@ -1,0 +1,13 @@
+{
+  "id" : "rs:sparse_unmixing",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "spectral",
+    "hyperspectral",
+    "unmixing",
+    "sparse"
+  ],
+  "task" : "unmixing"
+}

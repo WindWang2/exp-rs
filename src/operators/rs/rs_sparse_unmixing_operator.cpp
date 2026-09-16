@@ -13,6 +13,7 @@
 
 #include <gdal.h>
 
+#include <QFile>
 #include <QString>
 
 #include <cmath>
@@ -262,6 +263,13 @@ Json::Value RsSparseUnmixingOperator::run(const Json::Value& params,
                                    "Sparse unmixing tile rows");
         }
     } catch (...) {
+        // Atomicity: a cancelled or failed run must not leave partial rasters.
+        outDataset.close();
+        if (!errorPath.empty())
+            errorDataset.close();
+        QFile::remove(QString::fromStdString(outputPath));
+        if (!errorPath.empty())
+            QFile::remove(QString::fromStdString(errorPath));
         throw;
     }
 

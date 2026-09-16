@@ -167,12 +167,13 @@ Json::Value RsSpectralSimilarityOperator::run(const Json::Value& params,
                     tileScores.assign(tilePixels, std::numeric_limits<float>::quiet_NaN());
 
                 std::vector<int> labels(tilePixels, -1);
+                // Scores are always computed so the meanScore QA is real
+                // even when no score raster is requested.
                 std::vector<float> scores(tilePixels, 0.0f);
                 QString kernelError;
                 if (!SpectralHybridSimilarity::classify(
                         bip, tilePixels, nBands, refs.data(), refCount,
-                        labels.data(),
-                        scorePath.empty() ? nullptr : scores.data(),
+                        labels.data(), scores.data(),
                         form, -9999.0f, &kernelError))
                     throw RSOperatorError(ErrorCode::ComputationError,
                                           kernelError.isEmpty()

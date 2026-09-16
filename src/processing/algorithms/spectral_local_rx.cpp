@@ -73,20 +73,23 @@ bool scorePixel( const float *spectrum,
                  const float *noDataBands,
                  const uint8_t *hasNoDataBands,
                  float *score,
+                 PixelScoreStatus *status,
                  QString *errorMessage )
 {
+    const auto finish = [&]( bool ok, PixelScoreStatus outcome )
+    {
+        if ( status )
+            *status = outcome;
+        return ok;
+    };
     if ( !spectrum || !background || !score || bands <= 0 || backgroundCount == 0 )
     {
         if ( errorMessage )
             *errorMessage = QStringLiteral( "Invalid local RX scorePixel arguments" );
-        return false;
+        return finish( false, PixelScoreStatus::InvalidArguments );
     }
     if ( !pixelValid( spectrum, bands, noDataBands, hasNoDataBands ) )
-    {
-        if ( errorMessage )
-            *errorMessage = QStringLiteral( "Center pixel is not a valid (finite, non-NoData) spectrum" );
-        return false;
-    }
+        return finish( false, PixelScoreStatus::InvalidCenter );
 
     size_t validCount = 0;
     for ( size_t p = 0; p < backgroundCount; ++p )
@@ -101,13 +104,7 @@ bool scorePixel( const float *spectrum,
                                        ? 2 * bands + 2
                                        : bands + 1 );
     if ( static_cast<int>( validCount ) < minSamples )
-    {
-        if ( errorMessage )
-            *errorMessage = QStringLiteral( "Background sample count %1 is below the minimum %2" )
-                                .arg( static_cast<qulonglong>( validCount ) )
-                                .arg( minSamples );
-        return false;
-    }
+        return finish( false, PixelScoreStatus::InsufficientBackground );
 
     // Mean over valid background pixels.
     std::vector<double> mu( static_cast<size_t>( bands ), 0.0 );
@@ -126,11 +123,7 @@ bool scorePixel( const float *spectrum,
     // the RX detector is defined on, matching SpectralAnomaly::finalizeCovariance).
     const double denom = static_cast<double>( validCount - 1 );
     if ( denom <= 0.0 )
-    {
-        if ( errorMessage )
-            *errorMessage = QStringLiteral( "Background covariance is undefined for a single sample" );
-        return false;
-    }
+        return finish( false, PixelScoreStatus::InsufficientBackground );
     if ( config.covarianceMode == CovarianceMode::Full )
     {
         std::vector<double> cov( static_cast<size_t>( bands ) * bands, 0.0 );
@@ -150,10 +143,12 @@ bool scorePixel( const float *spectrum,
                 }
             }
         }
-        double trace = 0.0;
+        // Normalize to the sample covariance FIRST, then accumulate the
+        // trace — the loading must be alpha * tr(Sigma)/B of the ESTIMATED
+        // covariance, not of the raw scatter (an (N-1)-fold overshoot would
+        // make scores depend on window sample counts).
         for ( int i = 0; i < bands; ++i )
         {
-            trace += cov[static_cast<size_t>( i ) * bands + i];
             for ( int j = i; j < bands; ++j )
             {
                 const double v = cov[static_cast<size_t>( i ) * bands + j] / denom;
@@ -161,16 +156,15 @@ bool scorePixel( const float *spectrum,
                 cov[static_cast<size_t>( j ) * bands + i] = v;
             }
         }
+        double trace = 0.0;
+        for ( int i = 0; i < bands; ++i )
+            trace += cov[static_cast<size_t>( i ) * bands + i];
         const double load = loadingValue( trace, bands, std::max( 0.0, config.loading ) );
         for ( int i = 0; i < bands; ++i )
             cov[static_cast<size_t>( i ) * bands + i] += load;
         std::vector<double> invCov;
         if ( !sicnu::primitives::invertDenseMatrix( cov, bands, &invCov ) )
-        {
-            if ( errorMessage )
-                *errorMessage = QStringLiteral( "Loaded local covariance is singular" );
-            return false;
-        }
+            return finish( false, PixelScoreStatus::SingularBackground );
         double rx = 0.0;
         for ( int i = 0; i < bands; ++i )
         {
@@ -182,13 +176,9 @@ bool scorePixel( const float *spectrum,
             rx += ( static_cast<double>( spectrum[i] ) - mu[static_cast<size_t>( i )] ) * row;
         }
         if ( !std::isfinite( rx ) )
-        {
-            if ( errorMessage )
-                *errorMessage = QStringLiteral( "RX score is not finite" );
-            return false;
-        }
+            return finish( false, PixelScoreStatus::NonFiniteScore );
         *score = static_cast<float>( std::max( 0.0, rx ) );
-        return true;
+        return finish( true, PixelScoreStatus::Scored );
     }
 
     // Diagonal mode: per-band variances + the same scaled loading on each.
@@ -218,13 +208,9 @@ bool scorePixel( const float *spectrum,
         rx += d * d / ( var[static_cast<size_t>( b )] + load );
     }
     if ( !std::isfinite( rx ) )
-    {
-        if ( errorMessage )
-            *errorMessage = QStringLiteral( "RX score is not finite" );
-        return false;
-    }
+        return finish( false, PixelScoreStatus::NonFiniteScore );
     *score = static_cast<float>( std::max( 0.0, rx ) );
-    return true;
+    return finish( true, PixelScoreStatus::Scored );
 }
 
 bool dualWindowRx( const float *pixels, int width, int height, int bands,
@@ -282,12 +268,14 @@ bool dualWindowRx( const float *pixels, int width, int height, int bands,
     result->scores.assign( count, std::numeric_limits<float>::quiet_NaN() );
     result->scored.assign( count, 0 );
     result->backgroundSamples.assign( count, 0 );
+    result->centerValid.assign( count, 0 );
     result->covarianceMode = config.covarianceMode;
 
     // Working buffer for the per-pixel background gather (window minus guard).
     std::vector<float> background;
-    background.reserve( static_cast<size_t>( config.outerWindow * config.outerWindow )
-                        * bands );
+    background.reserve( static_cast<size_t>( config.outerWindow )
+                            * static_cast<size_t>( config.outerWindow )
+                        * static_cast<size_t>( bands ) );
 
     for ( int y = 0; y < height; ++y )
     {
@@ -296,7 +284,8 @@ bool dualWindowRx( const float *pixels, int width, int height, int bands,
             const size_t idx = static_cast<size_t>( y ) * width + x;
             const float *center = pixels + idx * bands;
             if ( !pixelValid( center, bands, noDataBands, hasNoDataBands ) )
-                continue; // stays NaN / unscored / 0 samples
+                continue; // stays NaN / unscored / 0 samples / centerValid=0
+            result->centerValid[idx] = 1;
 
             // Clamp the outer window to the raster and cut the guard hole.
             // Clamping (not replication) keeps border statistics unbiased.
@@ -328,19 +317,19 @@ bool dualWindowRx( const float *pixels, int width, int height, int bands,
                 continue; // honest unscored: NaN + scored=0, count recorded
 
             float score = 0.0f;
-            QString pixelError;
+            PixelScoreStatus pixelStatus = PixelScoreStatus::InvalidArguments;
             if ( !scorePixel( center, background.data(), background.size() / bands, bands,
-                              config, noDataBands, hasNoDataBands, &score, &pixelError ) )
+                              config, noDataBands, hasNoDataBands, &score, &pixelStatus ) )
             {
-                // Structurally insufficient or singular window: leave unscored
-                // (the caller sees scored=0 and the sample shortfall), not an
-                // error — degenerate windows are expected at NoData holes.
-                if ( pixelError.contains( QStringLiteral( "singular" ) ) )
-                    continue;
-                if ( pixelError.contains( QStringLiteral( "below the minimum" ) ) )
+                // Expected per-window degeneracy: leave unscored (the caller
+                // sees scored=0 and the sample shortfall), not an error.
+                if ( pixelStatus == PixelScoreStatus::InsufficientBackground
+                     || pixelStatus == PixelScoreStatus::SingularBackground )
                     continue;
                 if ( errorMessage )
-                    *errorMessage = pixelError;
+                    *errorMessage = QStringLiteral(
+                        "Local RX scoring failed unexpectedly (status %1)" )
+                                        .arg( static_cast<int>( pixelStatus ) );
                 return false;
             }
             result->scores[idx] = score;

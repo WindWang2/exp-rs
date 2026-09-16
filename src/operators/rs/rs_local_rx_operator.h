@@ -43,15 +43,10 @@ public:
 
     RSOperatorMemoryPolicy memoryPolicy() const override {
         // The kernel enumerates window-minus-guard pixels per pixel over a
-        // resident tile; the operator streams the raster in tiles (with an
-        // outer-window halo so interior scores are tile-agnostic).
+        // resident tile; the operator streams the raster in tiles and
+        // manages its own outer-window halo via padded reads
+        // (readWindowBip), so the framework-level halo stays 0.
         return RSOperatorMemoryPolicy::Streaming;
-    }
-
-    int streamingHaloPixels() const override {
-        // Outer-window radius: a tile needs its neighbours' rows within the
-        // outer radius to reproduce whole-raster scores exactly.
-        return 16; // defensive upper bound; the schema documents the default
     }
 
     Json::Value schema() const override;

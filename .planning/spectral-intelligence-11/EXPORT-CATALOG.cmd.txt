@@ -1,0 +1,8 @@
+@echo off
+setlocal enabledelayedexpansion
+call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
+set PATH=C:\deps\qca-install\bin;C:\deps\kc-install\bin;C:\deps\Qt\6.8.0\msvc2022_64\bin;%PATH%
+set QT_QPA_PLATFORM=offscreen
+cd /d C:\Users\wangj.KEVIN\projects\exp-rs-spectral-intelligence-11\build-dev
+sicnu_geo_rs_cli.exe --export-catalog data/processing/algorithm_meta
+echo RC=!errorlevel!

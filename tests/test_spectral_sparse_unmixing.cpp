@@ -199,6 +199,7 @@ TEST_CASE( "Batch driver matches the per-pixel path", "[sparse][kernel]" )
     const std::vector<float> endmembers = { 1.0f, 0.0f, 0.0f, 1.0f };
     const std::vector<float> pixels = { 0.8f, 0.3f, 0.1f, 0.7f };
     Config config;
+    config.lambda = 0.0; // identity dictionary, no threshold: a == max(x, 0) == x
     SparseUnmixResult result;
     QString err;
     REQUIRE( unmixSparse( pixels.data(), 2, 2, endmembers.data(), 2, config, &result, &err ) );

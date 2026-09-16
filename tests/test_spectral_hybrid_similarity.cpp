@@ -26,9 +26,10 @@ TEST_CASE( "Hybrid similarity of identical and scaled spectra", "[hybrid][kernel
     REQUIRE( similarity( r.data(), r.data(), r.size(), -9999.0f,
                          Form::ProductNormalized, &same ) );
     REQUIRE( same.defined );
-    CHECK( same.samRadians == Approx( 0.0 ).margin( 1e-12 ) );
+    // SAM of float-identical spectra carries acos rounding (~1e-8), not 0.
+    CHECK( same.samRadians == Approx( 0.0 ).margin( 1e-6 ) );
     CHECK( same.sidNats == Approx( 0.0 ).margin( 1e-12 ) );
-    CHECK( same.hybrid == Approx( 1.0 ).margin( 1e-12 ) );
+    CHECK( same.hybrid == Approx( 1.0 ).margin( 1e-6 ) );
 
     // Brightness invariance: scaling one spectrum must not change any measure.
     std::vector<float> scaled( r.size() );
@@ -164,10 +165,10 @@ TEST_CASE( "Hybrid classification labels pixels to the most similar reference", 
     CHECK( labels[2] == 1 );
     CHECK( labels[3] == -1 );
     CHECK( std::isnan( scores[3] ) );
-    // An exact match scores strictly higher than a scaled one.
-    CHECK( scores[0] > scores[1] );
-    // Both exact matches reach the same maximal score.
+    // The hybrid is brightness-invariant by construction: an exact match and
+    // a positively-scaled copy of the reference both reach the maximal score.
     CHECK( scores[0] == Approx( scores[2] ).margin( 1e-6 ) );
+    CHECK( scores[0] > 0.999f );
 
     // Invalid arguments refuse.
     CHECK_FALSE( classify( pixels.data(), 0, 3, refs.data(), 2, labels.data(),

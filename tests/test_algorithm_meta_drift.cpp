@@ -49,8 +49,8 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
     // over the model execution seam).
     // Spectral Intelligence 11.0 added rs:local_rx_anomaly (anomaly-detection),
     // rs:sparse_unmixing (unmixing), rs:spectral_similarity (classification),
-    // rs:endmember_analysis (endmember-analysis).
-    REQUIRE( expectedCatalog.size() == 36 );
+    // rs:endmember_analysis (endmember-analysis); also reconciles upstream drift (D14 SAR operators rs:sar_coregister/displacement/interferogram/phase_filter had no sidecars; D16 temporal sidecars for operators that no longer declare task families removed).
+    REQUIRE( expectedCatalog.size() == 43 );
 
     const QString metaDir =
         sicnu::processing::resolveRuntimeDataPath( QStringLiteral( "data/processing/algorithm_meta" ) );
@@ -127,7 +127,7 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
         std::string exportErr;
         const int written = sicnu::processing::AlgorithmMetaStore::exportCatalog(
             tempDir.path().toStdString(), descriptors, &exportErr );
-        REQUIRE( written == 36 );
+        REQUIRE( written == 43 );
         REQUIRE( exportErr.empty() );
 
         const QDir tempQDir( tempDir.path() );

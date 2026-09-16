@@ -107,10 +107,18 @@ Json::Value RsEndmemberAnalysisOperator::run(const Json::Value& params,
     const std::string inputPath = requireString(params, "endmembersRef");
     const std::string outputPath = requireString(params, "output");
     const double mergeAngleDegrees = getDouble(params, "mergeAngleDegrees", 2.0);
+    // Fail-closed optional params: present-but-wrong-typed values refuse
+    // instead of silently behaving as absent.
+    if (params.isMember("angleMatrix") && !params["angleMatrix"].isBool())
+        throw RSOperatorError(ErrorCode::InvalidParameter, "angleMatrix must be a boolean");
     const bool wantMatrix = params.isMember("angleMatrix") && params["angleMatrix"].asBool();
     const std::string sensorId = getString(params, "sensor", "");
+    if (params.isMember("requireFullCoverage") && !params["requireFullCoverage"].isBool())
+        throw RSOperatorError(ErrorCode::InvalidParameter, "requireFullCoverage must be a boolean");
     const bool requireFullCoverage =
         params.isMember("requireFullCoverage") && params["requireFullCoverage"].asBool();
+    if (params.isMember("ppiCounts") && !params["ppiCounts"].isArray())
+        throw RSOperatorError(ErrorCode::InvalidParameter, "ppiCounts must be an integer array");
     if (!fileExists(inputPath))
         throw RSOperatorError(ErrorCode::FileNotFound,
                               "Input endmember table not found: " + inputPath);
@@ -281,6 +289,10 @@ Json::Value RsEndmemberAnalysisOperator::run(const Json::Value& params,
     }
     out.license = table.license;
     out.citation = table.citation;
+    // Compute and stamp the digest BEFORE validation so the result payload
+    // echoes the true artifact identity (save() would recompute internally
+    // but never writes it back into the table object).
+    out.digestHex = SpectralTable::digestHex( out.spectra, out.bandCount );
 
     QStringList tableErrors;
     if (!SpectralTable::validate(out, &tableErrors))

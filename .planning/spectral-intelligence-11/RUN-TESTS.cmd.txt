@@ -1,0 +1,25 @@
+@echo off
+rem Spectral Intelligence 11 targeted test runner (v3, full DLL search path)
+setlocal enabledelayedexpansion
+call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat" >nul 2>&1
+if errorlevel 1 exit /b 1
+set PATH=C:\deps\qca-install\bin;C:\deps\kc-install\bin;C:\deps\Qt\6.8.0\msvc2022_64\bin;C:\Qt\Tools\Ninja;%PATH%
+set QT_QPA_PLATFORM=offscreen
+set QT_IM_MODULE=compose
+set CTEST_PARALLEL_LEVEL=1
+cd /d C:\Users\wangj.KEVIN\projects\exp-rs-spectral-intelligence-11\build-dev
+set EXITCODE=0
+for %%T in (%*) do (
+  echo === %%T ===
+  %%T.exe > %%T.log 2>&1
+  set RC=!errorlevel!
+  if !RC! NEQ 0 (
+    echo FAIL rc=!RC! - see build-dev\%%T.log
+    type %%T.log 2>nul | findstr /C:"FAILED:" /C:"assertions" /C:"tests passed"
+    set EXITCODE=1
+  ) else (
+    echo PASS rc=0
+    type %%T.log 2>nul | findstr /C:"tests passed" /C:"assertions"
+  )
+)
+exit /b !EXITCODE!

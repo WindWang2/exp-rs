@@ -14,7 +14,7 @@
 |---|---|---|---|
 | Local RX Full | O(w²·B²)（w=外窗像素数） | O(w·B) gather + O(B²) 瞬态 | B > 8192 → typed refusal（防御性，防 B² doubles 爆内存） |
 | Local RX Diagonal | O(w²·B) | O(w·B) + O(B) | 1024 band 实测通过（test_spectral_scale::Diagonal） |
-| Sparse unmixing build | O(n²·B) Gram + 64 次幂迭代 O(64·n²) | O(n²) Gram + O(n·B) E | n > 2048 atoms → typed refusal（32 MB Gram 上限） |
+| Sparse unmixing build | O(n²·B) Gram + O(n²) ∞-norm | O(n²) Gram + O(n·B) E | n > 2048 atoms → typed refusal（32 MB Gram 上限）；Lipschitz = ‖G‖∞（PSD 上界，无欠估风险，确定性） |
 | Sparse per-pixel FISTA | O(iter·n²)；收敛后停止 | O(n) 向量若干 | maxIterations 显式；未收敛 honest flag（converged/iterations per-pixel） |
 | Hybrid similarity | O(B) per pair | O(B) | — |
 | Angle matrix | O(n²·B) | O(n²) doubles | reduce 上限 512；算子 matrix embed 上限 64 行 |

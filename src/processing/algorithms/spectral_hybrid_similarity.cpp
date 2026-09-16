@@ -145,14 +145,21 @@ bool similarity( const float *t, const float *r, size_t bands, float nodata,
             break;
         }
         case Form::ClassicTan:
-            result->hybrid = sid * std::tan( sam );
+            // Orthogonal directions (theta = pi/2): tan explodes while the
+            // SID convention can still yield exactly 0 for disjoint support
+            // (master skips zero-probability terms), so the raw product is
+            // a rounding artifact. Semantics: zero cosine similarity means
+            // "no directional match" — report maximal dissimilarity.
+            if ( sam >= kPi / 2.0 - 1e-12 )
+                result->hybrid = std::numeric_limits<double>::infinity();
+            else
+                result->hybrid = sid * std::tan( sam );
             break;
     }
-    if ( !std::isfinite( result->hybrid ) )
+    if ( !std::isfinite( result->hybrid ) && result->hybrid > 0 )
     {
-        // ClassicTan at exactly theta = pi/2 (orthogonal spectra) diverges.
-        // That is a property of the form, not an error: report it as +inf
-        // so ordering still works (ClassicTan: lower = more similar).
+        // ClassicTan can still overflow for huge SID near orthogonality;
+        // report it as +inf so ordering still works (lower = more similar).
         result->hybrid = std::numeric_limits<double>::infinity();
     }
     result->defined = true;
