@@ -45,9 +45,12 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
     // tasks without shipped sidecars at the Foundation 5.0 baseline and are
     // now exported like the rest; Scientific Processing 8.0 added
     // rs:sar_geocode, rs:sar_temporal_stats, rs:rasterize, rs:zonal_stats).
+    // Advanced InSAR 11.0 added rs:sar_remove_topographic_phase,
+    // rs:sar_coregister_local, rs:sar_pair_network, rs:sar_network_inversion.
     // Platform 10.0 added rs:classify, rs:change, rs:regress (task adapters
     // over the model execution seam).
-    REQUIRE( expectedCatalog.size() == 32 );
+    REQUIRE( expectedCatalog.size() == 43 ); // 39 at the a5b11b7f baseline + 4 Advanced InSAR 11.0
+    // rs:sar_coregister_local, rs:sar_pair_network, rs:sar_network_inversion)
 
     const QString metaDir =
         sicnu::processing::resolveRuntimeDataPath( QStringLiteral( "data/processing/algorithm_meta" ) );
@@ -124,7 +127,7 @@ TEST_CASE( "Shipped algorithm_meta sidecars agree with the registry descriptors 
         std::string exportErr;
         const int written = sicnu::processing::AlgorithmMetaStore::exportCatalog(
             tempDir.path().toStdString(), descriptors, &exportErr );
-        REQUIRE( written == 32 );
+        REQUIRE( written == 43 );
         REQUIRE( exportErr.empty() );
 
         const QDir tempQDir( tempDir.path() );

@@ -145,5 +145,23 @@
     "intents": ["temporal", "phenology"],
     "verification": { "expected_kind": "collection", "checks": ["existence", "opens"] },
     "limitations": ["Series regularity depends on acquisition-time metadata quality"]
+  },
+  {
+    "id": "rs:mnf_inverse",
+    "family": "spectral_index",
+    "extends": "family:spectral_index",
+    "intents": ["preprocess"]
+  },
+  {
+    "id": "rs:spectral_band_select",
+    "family": "spectral_index",
+    "extends": "family:spectral_index",
+    "intents": ["preprocess"]
+  },
+  {
+    "id": "rs:library_select",
+    "family": "spectral_index",
+    "extends": "family:spectral_index",
+    "intents": ["preprocess"]
   }
 ]
