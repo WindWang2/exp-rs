@@ -1,0 +1,43 @@
+{
+  "schema_version": "sicnu.lab-pack/1",
+  "lab_id": "sar_processing",
+  "pack_version": "1.0.0",
+  "license": "generated-in-repo (synthetic teaching data, no third-party rights)",
+  "inputs": [
+    {
+      "path": "data/labs/_tmp/sar/sar_before_dn.tif",
+      "role": "sample",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py sar --out data/labs/_tmp --seed 42",
+      "sensor_truth": "C-bandlike sigma0 DN scenes 256x256; before/after pair plus 6-scene stack; DEM in metres; change_groundtruth codes 0=no 1=change"
+    },
+    {
+      "path": "data/labs/_tmp/sar/sar_after_dn.tif",
+      "role": "sample",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py sar --out data/labs/_tmp --seed 42",
+      "sensor_truth": "C-bandlike sigma0 DN scenes 256x256; before/after pair plus 6-scene stack; DEM in metres; change_groundtruth codes 0=no 1=change"
+    },
+    {
+      "path": "data/labs/_tmp/sar/sar_stack_dn.tif",
+      "role": "sample",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py sar --out data/labs/_tmp --seed 42",
+      "sensor_truth": "C-bandlike sigma0 DN scenes 256x256; before/after pair plus 6-scene stack; DEM in metres; change_groundtruth codes 0=no 1=change"
+    },
+    {
+      "path": "data/labs/_tmp/sar/change_groundtruth.tif",
+      "role": "truth",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py sar --out data/labs/_tmp --seed 42",
+      "sensor_truth": "C-bandlike sigma0 DN scenes 256x256; before/after pair plus 6-scene stack; DEM in metres; change_groundtruth codes 0=no 1=change"
+    },
+    {
+      "path": "data/labs/_tmp/sar/dem.tif",
+      "role": "aux",
+      "provenance": "generated-tmp",
+      "generator": "python3 scripts/gen_lab_fixtures.py sar --out data/labs/_tmp --seed 42",
+      "sensor_truth": "synthetic DEM 256x256, float32, metres, EPSG:4326-like grid"
+    }
+  ]
+}
