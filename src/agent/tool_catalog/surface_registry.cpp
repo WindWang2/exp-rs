@@ -74,10 +74,9 @@ std::vector<SurfaceTool> collectSurfaceTools( const SurfaceQuery &query )
         tools.push_back( std::move( tool ) );
     }
 
-    // Idempotent: no-op when providers are already registered (desktop app
-    // startup) and registers the default providers when the projection is the
-    // first consumer (headless CLI, tests).
-    AgentToolCatalog::instance().initializeDefaults();
+    // NOTE: the catalog singleton self-initializes in its constructor —
+    // deliberately NOT re-initialized here: initializeDefaults() wipes
+    // runtime custom tools, and the projection must be a read-only view.
 
     const bool hideGui = !query.includeGuiOnly && headlessHidesGuiTools();
     for ( const auto &catalogTool : AgentToolCatalog::instance().listTools() )
