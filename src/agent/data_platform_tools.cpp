@@ -41,6 +41,9 @@ namespace sicnu::agent
 {
 
 using namespace sicnu::dataset;
+// Master build repair (pre-existing, D19 merge): unqualified names below
+// resolve into sicnu::experiment only with this using-directive restored.
+using namespace sicnu::experiment;
 
 namespace
 {
