@@ -2,9 +2,19 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 
+#include "processing/algorithms/fusion_quality_report.h"
 #include "processing/algorithms/image_fusion.h"
+#include "processing/gdal/gdal_dataset_wrapper.h"
 
+#include <json/json.h>
+
+#include <QFile>
+#include <QTemporaryDir>
+
+#include <array>
 #include <cmath>
+#include <gdal.h>
+#include <sstream>
 #include <vector>
 
 using Catch::Approx;
@@ -726,4 +736,126 @@ TEST_CASE( "Streaming brovey invalidates partially-NoData pixels like the kernel
     // Pixel 1 fuses normally: (4/6)*10, (2/6)*10.
     CHECK( out1[1] == Approx( ( 4.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
     CHECK( out2[1] == Approx( ( 2.0f / 6.0f ) * 10.0f ).margin( 1e-3 ) );
+}
+
+// ===========================================================================
+// F15 (ADR 0163): HPF method + fusion quality report
+// ===========================================================================
+
+namespace
+{
+// Creates a 2x2 pan/MS fixture pair and returns true on success.
+bool writeHpfFixture( const QString &panPath, const QString &msPath,
+                      const std::vector<float> &pan, const std::vector<float> &ms )
+{
+    ensureGdalInit();
+    std::array<double, 6> gt = { 0.0, 1.0, 0.0, 0.0, 0.0, -1.0 };
+    GDALDatasetH panDs = createOutputTiff( panPath, 2, 2, 1, GDT_Float32, gt, QString() );
+    GDALDatasetH msDs = createOutputTiff( msPath, 2, 2, 1, GDT_Float32, gt, QString() );
+    if ( !panDs || !msDs )
+        return false;
+    bool ok = GDALRasterIO( GDALGetRasterBand( panDs, 1 ), GF_Write, 0, 0, 2, 2,
+                            const_cast<float *>( pan.data() ), 2, 2, GDT_Float32, 0, 0 ) == CE_None &&
+              GDALRasterIO( GDALGetRasterBand( msDs, 1 ), GF_Write, 0, 0, 2, 2,
+                            const_cast<float *>( ms.data() ), 2, 2, GDT_Float32, 0, 0 ) == CE_None;
+    GDALClose( panDs );
+    GDALClose( msDs );
+    return ok;
+}
+} // namespace
+
+TEST_CASE( "ImageFusion processNativeFusion hpf has a known closed-form answer", "[fusion][gdal][f15]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+    const QString panPath = dir.filePath( QStringLiteral( "pan.tif" ) );
+    const QString msPath = dir.filePath( QStringLiteral( "ms.tif" ) );
+    const QString outputPath = dir.filePath( QStringLiteral( "fused_hpf.tif" ) );
+
+    // pan = [0,100;100,200]: every pixel's clipped 3x3 mean is exactly 100.
+    const std::vector<float> pan = { 0.f, 100.f, 100.f, 200.f };
+    const std::vector<float> ms( 4, 300.0f );
+    REQUIRE( writeHpfFixture( panPath, msPath, pan, ms ) );
+
+    ImageFusion::NativeFusionParams params;
+    params.method = QStringLiteral( "hpf" );
+    QString error;
+    REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params, &error ) );
+    REQUIRE( error.isEmpty() );
+
+    GdalDatasetWrapper out;
+    REQUIRE( out.open( outputPath ) );
+    std::vector<float> fused( 4 );
+    REQUIRE( out.readBandWindow( 1, 0, 0, 2, 2, fused.data() ) );
+    // fused = MS + (pan - 100): hand-computed per pixel.
+    CHECK( fused[0] == Approx( 300.f + ( 0.f - 100.f ) ).margin( 0.01f ) );
+    CHECK( fused[1] == Approx( 300.f + ( 100.f - 100.f ) ).margin( 0.01f ) );
+    CHECK( fused[2] == Approx( 300.f + ( 100.f - 100.f ) ).margin( 0.01f ) );
+    CHECK( fused[3] == Approx( 300.f + ( 200.f - 100.f ) ).margin( 0.01f ) );
+}
+
+TEST_CASE( "ImageFusion processNativeFusion qualityReport verdicts are honest", "[fusion][gdal][f15]" )
+{
+    ensureGdalInit();
+
+    QTemporaryDir dir;
+    REQUIRE( dir.isValid() );
+
+    // Case 1: identical pan/MS radiometry -> fused == MS -> report passes.
+    {
+        const QString panPath = dir.filePath( QStringLiteral( "eq_pan.tif" ) );
+        const QString msPath = dir.filePath( QStringLiteral( "eq_ms.tif" ) );
+        const QString outputPath = dir.filePath( QStringLiteral( "eq_fused.tif" ) );
+        const QString reportPath = dir.filePath( QStringLiteral( "eq_report.json" ) );
+        const std::vector<float> v( 4, 300.0f );
+        REQUIRE( writeHpfFixture( panPath, msPath, v, v ) );
+
+        ImageFusion::NativeFusionParams params;
+        params.method = QStringLiteral( "hpf" );
+        params.qualityReportPath = reportPath;
+        rs::fusion::FusionQualityReport report;
+        QString error;
+        REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params,
+                                                   &error, &report ) );
+        REQUIRE( QFile::exists( reportPath ) );
+        CHECK( report.passed );
+        CHECK( report.qIndex == Approx( 1.0 ).margin( 1e-6 ) );
+        CHECK( report.ergas == Approx( 0.0 ).margin( 1e-4 ) );
+
+        // The written artifact parses and carries the fixed schema.
+        QFile f( reportPath );
+        REQUIRE( f.open( QIODevice::ReadOnly ) );
+        const QByteArray bytes = f.readAll();
+        Json::Value root;
+        Json::CharReaderBuilder rb;
+        std::istringstream in( bytes.toStdString() );
+        std::string errs;
+        REQUIRE( Json::parseFromStream( rb, in, &root, &errs ) );
+        CHECK( root["schema"].asString() == "exp-rs/fusion-quality-report@1" );
+        CHECK( root["verdict"]["passed"].asBool() );
+    }
+
+    // Case 2: strong pan contrast -> high-pass injection -> distortion flagged.
+    {
+        const QString panPath = dir.filePath( QStringLiteral( "bad_pan.tif" ) );
+        const QString msPath = dir.filePath( QStringLiteral( "bad_ms.tif" ) );
+        const QString outputPath = dir.filePath( QStringLiteral( "bad_fused.tif" ) );
+        const QString reportPath = dir.filePath( QStringLiteral( "bad_report.json" ) );
+        const std::vector<float> pan = { 0.f, 100.f, 100.f, 200.f };
+        const std::vector<float> ms( 4, 300.0f );
+        REQUIRE( writeHpfFixture( panPath, msPath, pan, ms ) );
+
+        ImageFusion::NativeFusionParams params;
+        params.method = QStringLiteral( "hpf" );
+        params.qualityReportPath = reportPath;
+        rs::fusion::FusionQualityReport report;
+        QString error;
+        REQUIRE( ImageFusion::processNativeFusion( panPath, msPath, outputPath, params,
+                                                   &error, &report ) );
+        REQUIRE( QFile::exists( reportPath ) );
+        CHECK_FALSE( report.passed );
+        CHECK_FALSE( report.violations.empty() );
+    }
 }

@@ -9413,3 +9413,89 @@ sicnu_add_test(test_chunk_adoption_11 TIMEOUT 300)
 target_link_libraries(test_chunk_adoption_11 PRIVATE sicnu_runtime)
 sicnu_add_test(test_execution_scale_fault_11 TIMEOUT 600)
 target_link_libraries(test_execution_scale_fault_11 PRIVATE sicnu_runtime)
+# ---- F15: large-scale mosaic, fusion & quality composite (mosaic-fusion-11) ----
+# Algorithm-layer tests: link sicnu_processing (+GDAL for fixture rasters and
+# OGR CRS oracles) without the full operator/agent chain.
+add_executable(test_mosaic_plan test_mosaic_plan.cpp)
+target_link_libraries(test_mosaic_plan PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  GDAL::GDAL
+)
+target_include_directories(test_mosaic_plan PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_mosaic_plan TEST_PREFIX "test_mosaic_plan::")
+
+# F15: mosaic/fusion algorithm kernels — balancing, seamline, blend, quality,
+# fusion quality report.
+foreach(_f15_test
+    test_mosaic_balancing
+    test_mosaic_seamline
+    test_mosaic_blend
+    test_mosaic_quality
+    test_fusion_quality_report
+    test_mosaic_scale)
+  add_executable(${_f15_test} ${_f15_test}.cpp)
+  target_link_libraries(${_f15_test} PRIVATE
+    Catch2::Catch2WithMain
+    Qt6::Core
+    qgis_core
+    sicnu_processing
+    GDAL::GDAL
+  )
+  if(TARGET jsoncpp)
+    target_link_libraries(${_f15_test} PRIVATE jsoncpp)
+  endif()
+  target_include_directories(${_f15_test} PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/tests
+    ${CMAKE_BINARY_DIR}
+  )
+  sicnu_discover_tests(${_f15_test} TEST_PREFIX "${_f15_test}::")
+endforeach()
+
+# F15: rs:quality_mosaic registry-path wiring test.
+add_executable(test_quality_mosaic_registration test_quality_mosaic_registration.cpp)
+target_link_libraries(test_quality_mosaic_registration PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_quality_mosaic_registration PRIVATE jsoncpp)
+endif()
+target_include_directories(test_quality_mosaic_registration PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_quality_mosaic_registration TEST_PREFIX "test_quality_mosaic_registration::")
+
+# F15: rs:quality_mosaic operator E2E (GDAL fixtures, provenance, report).
+add_executable(test_quality_mosaic_operator test_quality_mosaic_operator.cpp)
+target_link_libraries(test_quality_mosaic_operator PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+  GDAL::GDAL
+)
+if(TARGET jsoncpp)
+  target_link_libraries(test_quality_mosaic_operator PRIVATE jsoncpp)
+endif()
+target_include_directories(test_quality_mosaic_operator PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/tests
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_quality_mosaic_operator PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_quality_mosaic_operator TIMEOUT 300 TEST_PREFIX "test_quality_mosaic_operator::")

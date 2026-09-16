@@ -60,6 +60,13 @@ add_library(sicnu_processing SHARED
     algorithms/math_utils.cpp
     algorithms/nodata_utils.cpp
     algorithms/mosaic.cpp
+    # F15 mosaic-fusion-11 (ADR 0163): quality-mosaic algorithm layer.
+    algorithms/mosaic_plan.cpp
+    algorithms/mosaic_balancing.cpp
+    algorithms/mosaic_seamline.cpp
+    algorithms/mosaic_blend.cpp
+    algorithms/mosaic_quality.cpp
+    algorithms/fusion_quality_report.cpp
     algorithms/image_enhancement.cpp
     algorithms/image_enhancement_streaming.cpp
     algorithms/chunked_processor.cpp

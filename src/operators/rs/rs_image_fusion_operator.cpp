@@ -8,6 +8,7 @@
 #include "operators/framework/rs_operator_error.h"
 #include "operators/framework/rs_schema.h"
 #include "processing/algorithms/image_fusion.h"
+#include "processing/algorithms/fusion_quality_report.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <QString>
@@ -21,7 +22,7 @@ using namespace params;
 namespace {
 
 const std::vector<std::string> s_methods = {
-    "linear", "brovey", "pca", "ihs", "gram_schmidt"
+    "linear", "brovey", "pca", "ihs", "gram_schmidt", "hpf"
 };
 
 } // anonymous namespace
@@ -51,8 +52,18 @@ Json::Value RsImageFusionOperator::schema() const {
 
     Json::Value outputs(Json::objectValue);
     outputs["output"] = makeRasterParam("output", "Output raster path");
+    props["qualityReport"] = makeStringParam("qualityReport",
+                                             "Optional path for a fusion-quality JSON report "
+                                             "(ERGAS/CC/SSIM/Q/RASE + spectral-distortion guard)",
+                                             "");
     outputs["method"] = makeStringParam("method", "Applied method", "");
     outputs["bands"] = makeIntegerParam("bands", "Number of output bands", 0);
+    outputs["qualityReport"] = makeStringParam("qualityReport", "Written quality report path", "");
+    {
+        Json::Value qp = makeStringParam("qualityPassed", "Distortion-guard verdict", "");
+        qp["type"] = "boolean";
+        outputs["qualityPassed"] = qp;
+    }
 
     Json::Value root = makeRootSchema(displayName(), description(), props, outputs);
     root["required"] = makeRequired({"pan", "ms", "output"});
@@ -155,12 +166,20 @@ Json::Value RsImageFusionOperator::run(const Json::Value& params,
         }
     }
 
+    if (params.isMember("qualityReport") && params["qualityReport"].isString()) {
+        fusionParams.qualityReportPath =
+            QString::fromStdString(params["qualityReport"].asString());
+    }
+
     QString errorMessage;
+    ::rs::fusion::FusionQualityReport qualityReport;
+    const bool wantQuality = !fusionParams.qualityReportPath.isEmpty();
     if (!ImageFusion::processNativeFusion(QString::fromStdString(panPath),
                                           QString::fromStdString(msPath),
                                           QString::fromStdString(outputPath),
                                           fusionParams,
-                                          &errorMessage)) {
+                                          &errorMessage,
+                                          wantQuality ? &qualityReport : nullptr)) {
         throw RSOperatorError(ErrorCode::ComputationError,
                               "Image fusion failed: " + errorMessage.toStdString());
     }
@@ -177,6 +196,16 @@ Json::Value RsImageFusionOperator::run(const Json::Value& params,
         result["bands"] = outDs.bandCount();
     } else {
         result["bands"] = 0;
+    }
+    if (wantQuality) {
+        result["qualityReport"] = fusionParams.qualityReportPath.toStdString();
+        result["qualityPassed"] = qualityReport.passed;
+        if (!qualityReport.passed) {
+            context.logWarning("Fusion quality guard flagged spectral distortion: " +
+                               (qualityReport.violations.empty()
+                                    ? std::string("unknown")
+                                    : qualityReport.violations.front()));
+        }
     }
     return result;
 }

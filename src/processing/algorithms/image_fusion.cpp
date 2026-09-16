@@ -1,5 +1,6 @@
 // image_fusion.cpp — Phase 11.1
 #include "image_fusion.h"
+#include "fusion_quality_report.h"
 #include "image_enhancement.h"
 #include "math_utils.h"
 #include "core/sicnu_logging.h"
@@ -659,10 +660,10 @@ struct StatsAccumulator {
 
 } // anonymous namespace
 
-bool ImageFusion::processNativeFusion( const QString &panPath, const QString &msPath,
-                                       const QString &outputPath,
-                                       const NativeFusionParams &params,
-                                       QString *errorMessage )
+bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString &msPath,
+                                           const QString &outputPath,
+                                           const NativeFusionParams &params,
+                                           QString *errorMessage )
 {
     GdalDatasetWrapper panDataset;
     if ( !panDataset.open( panPath ) )
@@ -1470,8 +1471,206 @@ bool ImageFusion::processNativeFusion( const QString &panPath, const QString &ms
     return true;
     }
 
+    else if ( params.method == QStringLiteral( "hpf" ) )
+    {
+        // F15 (ADR 0163): high-pass-filter addition, streaming-consistent.
+        // fused = MS + (pan - lowpass(pan)); lowpass = 3x3 box mean with
+        // raster-edge normalization. Each tile is read with a 1-px halo so
+        // the mean at a pixel never depends on the tile partitioning.
+        for ( int r = 0; r < rows; ++r )
+        {
+            const int yOff = r * tileH;
+            const int th = std::min( tileH, h - yOff );
+            for ( int c = 0; c < cols; ++c )
+            {
+                const int xOff = c * tileW;
+                const int tw = std::min( tileW, w - xOff );
+                const size_t tileSize = static_cast<size_t>( tw ) * th;
+
+                const int hx0 = std::max( 0, xOff - 1 );
+                const int hy0 = std::max( 0, yOff - 1 );
+                const int hx1 = std::min( w, xOff + tw + 1 );
+                const int hy1 = std::min( h, yOff + th + 1 );
+                const int hw = hx1 - hx0;
+                const int hh = hy1 - hy0;
+                std::vector<float> halo( static_cast<size_t>( hw ) * hh );
+                if ( !panDataset.readBandWindow( 1, hx0, hy0, hw, hh, halo.data() ) )
+                    return false;
+                for ( int b = 0; b < nMsBands; ++b )
+                {
+                    if ( !readMsWindow( b + 1, xOff, yOff, tw, th, msBuf[b].data() ) )
+                        return false;
+                }
+
+                for ( int rr = 0; rr < th; ++rr )
+                {
+                    for ( int cc = 0; cc < tw; ++cc )
+                    {
+                        const size_t i = static_cast<size_t>( rr ) * tw + cc;
+                        // Center sample comes from the halo (this branch never
+                        // fills panBuf — the halo already covers every pixel).
+                        const int bx = xOff + cc - hx0;
+                        const int by = yOff + rr - hy0;
+                        const float center = halo[static_cast<size_t>( by ) * hw + bx];
+                        if ( center == nodata || std::isnan( center ) )
+                        {
+                            for ( int b = 0; b < nMsBands; ++b )
+                                outBuf[b][i] = nodata;
+                            continue;
+                        }
+                        // 3x3 box mean from the halo with edge normalization.
+                        double sum = 0.0;
+                        int cnt = 0;
+                        for ( int dy = -1; dy <= 1; ++dy )
+                        {
+                            for ( int dx = -1; dx <= 1; ++dx )
+                            {
+                                const int hxp = bx + dx;
+                                const int hyp = by + dy;
+                                if ( hxp < 0 || hyp < 0 || hxp >= hw || hyp >= hh )
+                                    continue;
+                                const float v = halo[static_cast<size_t>( hyp ) * hw + hxp];
+                                if ( std::isnan( v ) || v == nodata )
+                                    continue;
+                                sum += v;
+                                ++cnt;
+                            }
+                        }
+                        if ( cnt == 0 )
+                        {
+                            for ( int b = 0; b < nMsBands; ++b )
+                                outBuf[b][i] = nodata;
+                            continue;
+                        }
+                        const float highPass =
+                            center - static_cast<float>( sum / cnt );
+
+                        for ( int b = 0; b < nMsBands; ++b )
+                        {
+                            const float msV = msBuf[b][i];
+                            if ( msV == nodata || std::isnan( msV ) )
+                                outBuf[b][i] = nodata;
+                            else
+                                outBuf[b][i] = msV + highPass;
+                        }
+                    }
+                }
+
+                for ( int b = 0; b < nMsBands; ++b )
+                {
+                    if ( !outDataset.writeBandWindow( b + 1, xOff, yOff, tw, th, outBuf[b].data() ) )
+                        return false;
+                }
+            }
+        }
+        outputGuard.keep = true;
+        return true;
+    }
+
     if ( errorMessage )
         *errorMessage = QStringLiteral( "Unsupported native fusion method" );
     return false;
+}
+
+bool ImageFusion::processNativeFusion( const QString &panPath, const QString &msPath,
+                                       const QString &outputPath,
+                                       const NativeFusionParams &params,
+                                       QString *errorMessage,
+                                       rs::fusion::FusionQualityReport *qualityReport )
+{
+    if ( !processNativeFusionImpl( panPath, msPath, outputPath, params, errorMessage ) )
+        return false;
+    if ( params.qualityReportPath.isEmpty() )
+        return true;
+
+    // Fidelity report: fused output vs the MS reference resampled onto the
+    // fused (pan) grid. This is the full-resolution fidelity form — the
+    // Wald degraded pass stays available through the kernel-level
+    // evaluateFusionQuality (documented in docs/processing/mosaic_fusion.md).
+    GdalDatasetWrapper outDs;
+    if ( !outDs.open( outputPath ) )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "quality report: cannot reopen fused output" );
+        return false;
+    }
+    GdalDatasetWrapper msDs;
+    if ( !msDs.open( msPath ) )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "quality report: cannot reopen MS raster" );
+        return false;
+    }
+
+    const auto outGt = outDs.geoTransform();
+    const auto msGt = msDs.geoTransform();
+    const double outResX = std::abs( outGt[1] );
+    const double msResX = std::abs( msGt[1] );
+    const double outResY = std::abs( outGt[5] );
+    const double msResY = std::abs( msGt[5] );
+    const double scaleX = ( msResX > 1e-12 ) ? ( outResX / msResX ) : 1.0;
+    const double scaleY = ( msResY > 1e-12 ) ? ( outResY / msResY ) : 1.0;
+    const double scaleRatio =
+        ( msResX > 1e-12 ) ? ( outResX / msResX ) : 1.0;
+
+    const int w = outDs.width();
+    const int h = outDs.height();
+    const int bands = outDs.bandCount();
+    if ( bands != msDs.bandCount() )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "quality report: band count mismatch between fused output and MS" );
+        return false;
+    }
+
+    rs::fusion::FusionQualityAccumulator acc;
+    const int tileW = std::max( 16, params.tileWidth <= 0 ? 512 : params.tileWidth );
+    const int tileH = std::max( 16, params.tileHeight <= 0 ? 512 : params.tileHeight );
+    std::vector<float> fusedBuf, refBuf;
+    for ( int b = 1; b <= bands; ++b )
+    {
+        acc.beginBand();
+        for ( int y = 0; y < h; y += tileH )
+        {
+            const int th = std::min( tileH, h - y );
+            for ( int x = 0; x < w; x += tileW )
+            {
+                const int tw = std::min( tileW, w - x );
+                fusedBuf.assign( static_cast<size_t>( tw ) * th, 0.0f );
+                if ( !outDs.readBandWindow( b, x, y, tw, th, fusedBuf.data() ) )
+                {
+                    if ( errorMessage )
+                        *errorMessage = QStringLiteral( "quality report: fused read failed" );
+                    return false;
+                }
+                const int mx0 = static_cast<int>( std::floor( x * scaleX ) );
+                const int my0 = static_cast<int>( std::floor( y * scaleY ) );
+                const int mw = static_cast<int>( std::ceil( ( x + tw ) * scaleX ) ) - mx0;
+                const int mh = static_cast<int>( std::ceil( ( y + th ) * scaleY ) ) - my0;
+                refBuf.assign( static_cast<size_t>( tw ) * th, 0.0f );
+                if ( !msDs.readBandWindowScaled( b, mx0, my0, mw, mh, refBuf.data(), tw, th,
+                                                 std::numeric_limits<float>::quiet_NaN() ) )
+                {
+                    if ( errorMessage )
+                        *errorMessage = QStringLiteral( "quality report: MS reference read failed" );
+                    return false;
+                }
+                acc.addWindow( fusedBuf.data(), refBuf.data(), tw, th );
+            }
+        }
+        acc.endBand();
+    }
+
+    const rs::fusion::FusionQualityReport rep = acc.finalize( bands, w, h, scaleRatio );
+    if ( qualityReport )
+        *qualityReport = rep;
+    if ( !rs::fusion::writeTextFileAtomic( params.qualityReportPath.toStdString(),
+                                           rep.toJson() ) )
+    {
+        if ( errorMessage )
+            *errorMessage = QStringLiteral( "quality report: write failed" );
+        return false;
+    }
+    return true;
 }
 
