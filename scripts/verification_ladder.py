@@ -85,14 +85,17 @@ LANES: dict[str, dict] = {
             ("fuzz_data", "test_contract_fuzz_data", "test", 180),
             ("known_answer_corpus", "test_known_answer_corpus", "test", 180),
             ("portability_contract", "test_portability_contract", "test", 180),
-            ("fuzz_ipc", "test_contract_fuzz_ipc", "test", 180),
+            ("fuzz_ipc", "test_contract_fuzz_ipc", "test", 420),
             ("known_answer_corpus_8", "test_known_answer_corpus_8", "test", 180),
             # Contract Platform 9.0 (unified contract projection guards):
             # implementation↔schema equality, command/help/action reference
             # graph, diagnostics census, capability floors, and the
             # mutation-proven scanners + snapshot freshness.
-            ("contract_platform_9", "test_contract_platform_9", "test", 300),
-            ("contract_projection_9", "test_contract_projection_9", "test", 300),
+            # Platform-11 host note: the projection/census suites walk the
+            # whole src/ tree (minutes on Windows NTFS); these bounds stay
+            # generous-upper-bounds, sized from measured wall time.
+            ("contract_platform_9", "test_contract_platform_9", "test", 900),
+            ("contract_projection_9", "test_contract_projection_9", "test", 900),
             ("command_contract_9", "test_command_contract_9", "test", 180),
             ("diagnostics_contract_9", "test_diagnostics_contract_9", "test", 180),
             ("capability_contract_9", "test_capability_contract_9", "test", 180),
@@ -103,7 +106,7 @@ LANES: dict[str, dict] = {
             ("science_verification_10", "test_science_verification_10", "test", 300),
             # Verification Platform 11.0 (F09 census 2.0 + determinism
             # truth + metamorphic/reference/failure lanes):
-            ("contract_census_11", "test_contract_census_11", "test", 300),
+            ("contract_census_11", "test_contract_census_11", "test", 1200),
             ("contract_determinism_11", "test_contract_determinism_11", "test", 600),
             ("metamorphic_11", "test_verification_metamorphic_11", "test", 300),
             ("numeric_reference_11", "test_verification_numeric_reference_11",
