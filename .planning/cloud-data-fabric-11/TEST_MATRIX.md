@@ -46,3 +46,21 @@
 ## Phase gate
 
 - [ ] 全部 fabric 套件连续两遍全绿（Oracle 4/6，Phase 8 复验）
+
+## WP F — access-pattern prefetch（tests/test_io_fabric_locality_11.cpp，2026-09-16）
+
+| 能力 | 独立 oracle | 命令 | exit | evidence |
+|---|---|---|---|---|
+| 窗口序列合并（4 重叠窗 → 1 读） | report.mergedReads==1 | `test_io_fabric_locality_11.exe` | 0 | 两遍 × exit 0 |
+| 预热 + 二遍缓存命中（零数据拉取） | 二遍 cacheHits==1/warmed==0/bytesPulled==0（遥测真值） | 同上 | 0 | 同上 |
+| 预算饥饿（读前估计门槛） | maxBytes=1 → skippedBudget==1 + budgetExhausted | 同上 | 0 | 同上 |
+| 镜像协调（mirror-hit 零请求零拉取） | token 取自离线索引（免探针）；requestCount 不变 | 同上 case 2 | 0 | 同上 |
+
+## 最终 gate（Phase 8 复验）
+
+- 9 个 fabric 套件 × 2 连续全绿（object_store/catalog/cube/plan/scale/range_cache/io_identity/
+  identity_11/replay_11/locality_11/multidim_11 中除 operators 外全部）。
+- test_io_fabric_operators：exit 42，**pre-existing Windows 布局缺陷**（sicnu_operators 为 SHARED
+  而 sicnu_geospatial 为 STATIC → exe 与 DLL 各持 range-cache 静态状态；Linux ELF 单实例故 10.0
+  跑绿）。disposition：P2 pre-existing，不属本 track 回归，不在本 track 修（build 布局变更影响
+  全部消费者）。
