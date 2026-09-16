@@ -2,6 +2,35 @@
 
 All notable changes to the `exp-rs` project will be documented in this file.
 
+## [Unreleased] - Cloud Data Fabric 11.0 (zcode/cloud-data-fabric-11)
+
+- **Unified object identity (WP A)**: canonical object keys converge every
+  object-store spelling (s3/s3a/s3c//vsis3/ and gs/az families) onto one
+  credential-free identity; `fabricAssetIdentity` becomes the fabric's ONE
+  identity entry point (strong-ETag fail-closed tokens over the VSI-stack
+  HEAD, proven against a real loopback S3 endpoint).
+- **Object-path range cache (WP B)**: /vsirangecache/ now wraps
+  /vsis3//vsigs//vsiaz/ payloads — fetches and fallbacks go through the
+  signed VSI stack, and cache entries are keyed per credential context
+  (non-secret principal fingerprint), so blocks never cross accounts.
+- **Offline mirror replay (WP C)**: mirror manifest v2 records an offline
+  index (asset key → token + grid facts); VirtualCube builds from recorded
+  facts and readWindow consults the mirror BEFORE any network open — a
+  forced-offline replay resolves mirrored windows with zero requests
+  (byte-equal, request-count-proven). Integrity (size + sha256) and expiry
+  (writtenUtc + maxAge) are typed misses, never guesses.
+- **Multidim slicing + execution (WP D/E)**: CubeSlice.dimensionRanges and
+  CubeChunkShape.perDimension bring real slicing to multidim plans; the
+  trailing-time silent-zero plan is a typed refusal; FabricIntent.multidim
+  plans/executeChunks run multidim stores through the single readSliceWindow
+  path. Million-chunk plans stay bounded (u64, windowed enumeration).
+- **CLI/operator parity (WP G)**: data mirror materialize|stats, data cache
+  prefetch (D-1012 delivered), multidim intent vocabulary in the one shared
+  parser, and data cube window output parity with io:cube_window (NoData /
+  Float64 band, guarded CRS).
+- **Mirror/report hardening**: bounded MirrorReport outcomes, unified budget
+  basis, manifest throttling with unconditional final flush, per-chunk sha256.
+
 ## [Unreleased] - Temporal Platform 10.0 (zcode/temporal-eo-phenology-change-10)
 
 - **Regular-calendar normalization (T-2)**: `rs:temporal_regularize` re-casts irregular
