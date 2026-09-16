@@ -33,6 +33,10 @@
 #include "rs_sar_displacement_operator.h"
 #include "rs_sar_coregister_operator.h"
 #include "rs_sar_temporal_events_operator.h"
+#include "rs_sar_remove_topographic_phase_operator.h"
+#include "rs_sar_coregister_local_operator.h"
+#include "rs_sar_pair_network_operator.h"
+#include "rs_sar_network_inversion_operator.h"
 #include "rs_post_classification_change_operator.h"
 #include "rs_qa_mask_operator.h"
 #include "rs_apply_mask_operator.h"
@@ -178,6 +182,10 @@ REGISTER_RS_OPERATOR(RsSarUnwrapOperator, "rs:sar_unwrap")
 REGISTER_RS_OPERATOR(RsSarDisplacementOperator, "rs:sar_displacement")
 REGISTER_RS_OPERATOR(RsSarCoregisterOperator, "rs:sar_coregister")
 REGISTER_RS_OPERATOR(RsSarTemporalEventsOperator, "rs:sar_temporal_events")
+REGISTER_RS_OPERATOR(RsSarRemoveTopographicPhaseOperator, "rs:sar_remove_topographic_phase")
+REGISTER_RS_OPERATOR(RsSarCoregisterLocalOperator, "rs:sar_coregister_local")
+REGISTER_RS_OPERATOR(RsSarPairNetworkOperator, "rs:sar_pair_network")
+REGISTER_RS_OPERATOR(RsSarNetworkInversionOperator, "rs:sar_network_inversion")
 REGISTER_RS_OPERATOR(RsZonalStatsOperator, "rs:zonal_stats")
 REGISTER_RS_OPERATOR(RsTemporalMonitorOperator, "rs:temporal_monitor")
 REGISTER_RS_OPERATOR(RsTerrainFlowOperator, "rs:terrain_flow")
