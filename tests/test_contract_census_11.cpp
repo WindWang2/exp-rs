@@ -146,7 +146,7 @@ TEST_CASE( "every live operator has a contract or an exemption, never both",
         if ( !hasContract && !exempt )
             FAIL( "operator '" + id
                   + "' has neither a scientific contract nor a recorded exemption" );
-        CHECK_FALSE( hasContract && exempt );
+        CHECK_FALSE( ( hasContract && exempt ) );
     }
 }
 

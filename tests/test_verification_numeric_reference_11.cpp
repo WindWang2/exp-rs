@@ -279,7 +279,6 @@ TEST_CASE( "manual threshold is the closed-form strict comparison",
     const int at = static_cast<int>( out.values[1] );
     const int above = static_cast<int>( out.values[2] );
     CHECK( ( ( at == below ) || ( at == above ) ) );
-    CHECK( at != below || below != above );
     CHECK( below != above ); // the crafted set must straddle the threshold
     // Sensitivity: 0.7 is on the same side as 0.5001, never its own class.
     CHECK( static_cast<int>( out.values[3] ) == above );
