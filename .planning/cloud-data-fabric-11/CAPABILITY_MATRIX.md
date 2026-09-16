@@ -86,3 +86,31 @@
 | corruption 注入→自愈 | gap | new-11 |
 | 100k records 计划 | exists（EO 侧 test_io_fabric_scale） | 扩展到新路径 |
 | million chunks 枚举 | exists（EO 侧） | 扩展 multidim 侧 |
+
+
+---
+
+# 最终状态（Phase 6 后，review 前）
+
+各 WP 交付即上表"11.0 目标"列的实现结果，逐项对照：
+
+- **WP A**：canonical key + VSI HEAD 探针 + 跨拼写 token 收敛 + credential-context 指纹 —
+  全部落地（test_io_fabric_identity_11，loopback S3 真实验证）。http(s) URL 身份与对象拼写
+  身份**不跨通道合并**（D-1101 诚实边界）。
+- **WP B**：/vsirangecache/ 包装对象路径、签名 VSI 取数/fallback、凭据分离键、逐块校验
+  （disk 层既有 + mirror 层新增 sha256 记录）— 落地（同上 + test_io_range_cache 回归绿）。
+  memory 层默认不加逐块校验（disk 层已校验；insert 端有代际/覆盖守卫）— 文档诚实声明。
+- **WP C**：manifest v2 离线索引、mirror-first 零网络重放（Oracle 1 请求计数证明）、
+  size 完整性、writtenUtc+maxAge 过期 — 落地（test_io_fabric_replay_11）。
+  sha256 在重放默认不验（size 快路径），验证策略留给 read options — 已在文档声明。
+- **WP D/E**：dimensionRanges/perDimension 切片、尾轴 typed 拒绝、multidimSelection 映射、
+  executeChunks 多维分支、million-chunk 有界枚举 — 落地（test_io_fabric_multidim_11，
+  authored-formula + GDAL 直读双 oracle）。dtype 仍经 double 承载（接受集不变，声明诚实）。
+- **WP F**：prefetchAccessPattern（访问模式 → 合并 → locality 排序 → mirror/index 协调 →
+  预算/取消预热）、单开走查 — 落地（test_io_fabric_locality_11）。
+- **WP G**：data mirror materialize|stats、data cache prefetch（D-1012）、multidim 词汇、
+  data cube window 对齐 — 落地（CLI 编入 sicnu_cli；帮助目录数据文件未新增条目 —
+  capability index 的 CLI 帮助同步为 follow-up，见 REVIEW_LOG）。
+- **WP H**：三套新 loopback 套件（identity/replay/locality）+ multidim 套件 + 10.0 套件
+  两遍回归 — 落地。gs/az loopback 未做（az 端点仍 typed Unsupported；gs 仅 profile 归一
+  覆盖）— follow-up。

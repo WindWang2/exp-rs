@@ -2,10 +2,10 @@
 
 /goal  target-agent=zcode  model=GLM-5.3-flash  budget=500000000  subagents<=2  ci=none  autonomy=full  defaults=best
 
-> **Mission:** 对象存储缓存、离线镜像、GDAL多维数组与云原生查询升级  
-> **Target model:** GLM-5.3-flash（长跑大预算；以严格 Oracle/ledger 防止低质量漂移）  
-> **Branch:** `zcode/cloud-data-fabric-11`  
-> **Worktree:** `../exp-rs-cloud-data-fabric-11`  
+> **Mission:** 对象存储缓存、离线镜像、GDAL多维数组与云原生查询升级
+> **Target model:** GLM-5.3-flash（长跑大预算；以严格 Oracle/ledger 防止低质量漂移）
+> **Branch:** `zcode/cloud-data-fabric-11`
+> **Worktree:** `../exp-rs-cloud-data-fabric-11`
 > **Terminal state:** 独立 PR 已创建；不 merge；不等待在线 CI。
 
 ## Prompt-generation snapshot（只用于启动审计，不是固定基线）
@@ -156,14 +156,14 @@ sed -n '1,320p' docs/agents/goal-template.md
 
 ## Autonomy defaults
 
-1. **格式/权威来源**：优先使用 master 已有 registry/schema/domain authority；禁止建立第二份真值数据库/第二 scheduler/第二 model catalog。  
-2. **失败项**：先根因分析；环境缺失才标 not-executed。单测真实失败不得跳过或删 test 换绿。  
-3. **命名/编号**：沿用现有 namespace/operator/error/ADR 规则；冲突时选最小 additive 命名并记录。  
-4. **资源/超时**：build `-j2`→压力高降 `-j1`；test `-j1`；单个 scale 测试必须可通过 env/label opt-in，日常 gate 用 bounded logical scale。  
-5. **对外动作**：允许 `git fetch`、读取 GitHub PR/issue/review、push 自己分支、创建自己 PR；禁止 merge/close/修改他人 PR/issue，除非本 track 明确产生并拥有的新 issue（默认不创建 issue）。  
-6. **范围外发现**：写 EVIDENCE `OUT_OF_SCOPE`；P0 同时写 PR_BODY 顶部；不要跨到其他并行 track 大修。  
-7. **新依赖**：默认不用；优先现有 C++/Qt/GDAL/QGIS 实现或 optional provider seam，确保离线/Windows/Linux degradation。  
-8. **并发冲突**：业务代码冲突优先 rebase + 重新审计；不得为了避免冲突复制一套实现。  
+1. **格式/权威来源**：优先使用 master 已有 registry/schema/domain authority；禁止建立第二份真值数据库/第二 scheduler/第二 model catalog。
+2. **失败项**：先根因分析；环境缺失才标 not-executed。单测真实失败不得跳过或删 test 换绿。
+3. **命名/编号**：沿用现有 namespace/operator/error/ADR 规则；冲突时选最小 additive 命名并记录。
+4. **资源/超时**：build `-j2`→压力高降 `-j1`；test `-j1`；单个 scale 测试必须可通过 env/label opt-in，日常 gate 用 bounded logical scale。
+5. **对外动作**：允许 `git fetch`、读取 GitHub PR/issue/review、push 自己分支、创建自己 PR；禁止 merge/close/修改他人 PR/issue，除非本 track 明确产生并拥有的新 issue（默认不创建 issue）。
+6. **范围外发现**：写 EVIDENCE `OUT_OF_SCOPE`；P0 同时写 PR_BODY 顶部；不要跨到其他并行 track 大修。
+7. **新依赖**：默认不用；优先现有 C++/Qt/GDAL/QGIS 实现或 optional provider seam，确保离线/Windows/Linux degradation。
+8. **并发冲突**：业务代码冲突优先 rebase + 重新审计；不得为了避免冲突复制一套实现。
 9. **文档与旧 backlog**：`ISSUES.md`/CHANGELOG/历史 GOAL 只做线索，所有缺口必须对当前 code 重新验证。
 
 ## GOAL Loop Oracle（未满足不得结束）
@@ -172,8 +172,8 @@ sed -n '1,320p' docs/agents/goal-template.md
 2. 跨协议相同对象 identity 规则不把凭据写入 cache key/log
 3. multidim slice known-answer 与 GDAL reference 一致
 4. fabric suites 连续两次通过
-5. `git diff --check origin/master...HEAD` clean；无冲突标记/secret；所有新增生成物/manifest drift gate clean。  
-6. Phase 8 完成后把关键 targeted validation **原样连续运行两遍**，两次都通过（或同一明确、与本 diff 无关的 pre-existing/host limitation 被对照证明）。  
+5. `git diff --check origin/master...HEAD` clean；无冲突标记/secret；所有新增生成物/manifest drift gate clean。
+6. Phase 8 完成后把关键 targeted validation **原样连续运行两遍**，两次都通过（或同一明确、与本 diff 无关的 pre-existing/host limitation 被对照证明）。
 7. 独立 review 完成：P0=0、P1=0；所有 finding 有 disposition；PR 已创建且未 merge。
 
 `.goal-loop-ledger.md` 每轮格式：
