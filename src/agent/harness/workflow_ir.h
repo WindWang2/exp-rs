@@ -175,6 +175,7 @@ struct IrRepairRecord
     std::string insertedNode;
     std::string risk;              ///< "shape_preserving" | "radiometric"
     Json::Value factsUsed{Json::objectValue};
+    Json::Value params{Json::objectValue}; ///< parameters the inserted node carries (11.0)
     Json::Value toJson() const;
 };
 

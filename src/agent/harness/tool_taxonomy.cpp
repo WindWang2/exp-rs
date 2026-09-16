@@ -28,13 +28,15 @@ struct Override {
 
 /// Explicit classifications for tools whose name alone does not determine the
 /// taxonomy. Prefix rules handle the rest (see classifyByPrefix).
-constexpr std::array<Override, 84> kOverrides = { {
+constexpr std::array<Override, 86> kOverrides = { {
   // data:
   { "data:list_layers", "data", "inspect" },
   { "data:describe_dataset", "data", "inspect" },
   { "data:get_lineage", "provenance", "inspect" },
   // spatial: inspection & sampling
   { "spatial:understand", "data", "inspect" },
+  { "harness:probe_facts", "data", "inspect" },
+  { "harness:probe_model", "model", "inspect" },
   { "spatial:raster_inspect", "raster", "inspect" },
   { "spatial:vector_inspect", "data", "inspect" },
   { "spatial:sample_pixels", "raster", "sample" },

@@ -20,4 +20,9 @@ std::string inferModality( const Json::Value &rasterInspect );
 /// to stay cheap.
 Json::Value cachedUnderstandingFor( const QString &path, long long revision );
 
+/// The ONE understanding-cache key: (path, revision) for registered assets,
+/// (path, size, mtime) for unregistered ones. Public so the grounding probes
+/// reuse the same cache — a second key derivation would fork the cache.
+QString understandingCacheKeyFor( const QString &path, long long revision );
+
 } // namespace sicnu::agent::harness

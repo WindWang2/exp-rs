@@ -74,6 +74,10 @@ const FactKeySpec kFactKeys[] = {
   { "product_id", "string" },
   { "product_metadata", "object" },
   { "temporal_facts", "object" },
+  // Compiler & grounding 11.0: folded collection acquisition dates (the
+  // planner grounds temporal collection descriptors into a `dates` array) —
+  // kept in the closed set so cadence facts reach the temporal checks.
+  { "dates", "array" },
   { "feature_count", "number" },
   { "geometry_type", "string" },
 };
@@ -172,6 +176,7 @@ Json::Value IrRepairRecord::toJson() const
   doc["inserted_node"] = insertedNode;
   doc["risk"] = risk;
   doc["facts_used"] = factsUsed;
+  doc["params"] = params;
   return doc;
 }
 
