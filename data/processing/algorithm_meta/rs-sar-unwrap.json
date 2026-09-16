@@ -1,0 +1,13 @@
+{
+  "gpu" : false,
+  "id" : "rs:sar_unwrap",
+  "input" : "raster",
+  "notes" : "Reference implementation: deterministic quality-guided flood fill. Not residue-aware, not a global optimum; external tools slot in through the provider seam (typed refusal when unregistered).",
+  "output" : "raster",
+  "tags" : 
+  [
+    "sar",
+    "insar"
+  ],
+  "task" : "sar-insar"
+}

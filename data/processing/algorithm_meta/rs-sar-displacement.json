@@ -1,0 +1,13 @@
+{
+  "gpu" : false,
+  "id" : "rs:sar_displacement",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "sar",
+    "insar",
+    "deformation"
+  ],
+  "task" : "sar-insar"
+}

@@ -1,0 +1,12 @@
+{
+  "gpu" : false,
+  "id" : "rs:sar_remove_topographic_phase",
+  "input" : "raster",
+  "output" : "raster",
+  "tags" : 
+  [
+    "sar",
+    "insar"
+  ],
+  "task" : "sar-insar"
+}
