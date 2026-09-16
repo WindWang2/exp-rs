@@ -234,7 +234,7 @@ std::map<std::string, ClassSlice> scanClassSlices(
                 // Trailing `final`: the real name is the last prefix token
                 // ("class Foo final : ...").
                 const std::string prefix = ( *mit )[1].str();
-                const auto last = prefix.rfind_last_of( " \t" );
+                const auto last = prefix.find_last_of( " \t" );
                 name = prefix.substr(
                     last == std::string::npos ? 0 : last + 1 );
                 while ( !name.empty() && ( name.back() == ' ' || name.back() == '\t' ) )
