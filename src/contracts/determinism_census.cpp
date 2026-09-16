@@ -618,15 +618,16 @@ DeterminismCensus buildDeterminismCensus( const std::string &sourceRoot )
         // otherwise a DIRECT schema stamp (`stampDeterminismGrade( root,
         // "..." )` inside the class's schema()) explains the published
         // value. Neither present → the schema publishes nothing (unproven).
-        e.schemaGrade = info.gradeOverride
-                          ? info.gradeLiteral
-                          : ( info.classFound
-                                  ? ( [&] -> std::string {
-                                        const auto it = directStamps.find( info.operatorClass );
-                                        return it == directStamps.end() ? std::string()
-                                                                        : it->second;
-                                    }() )
-                                  : std::string() );
+        if ( info.gradeOverride )
+            e.schemaGrade = info.gradeLiteral;
+        else if ( info.classFound )
+        {
+            const auto stampIt = directStamps.find( info.operatorClass );
+            e.schemaGrade = stampIt == directStamps.end() ? std::string()
+                                                          : stampIt->second;
+        }
+        else
+            e.schemaGrade.clear();
         // Runtime grade: the scanned literal, or the framework default
         // (RSOperator::determinism() == BitExact, rs_operator.h L170).
         if ( info.runtimeOverride )
