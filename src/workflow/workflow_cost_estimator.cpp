@@ -28,7 +28,7 @@ QSize rasterSizeFor( const QString &nodeId, const QMap<QString, QSize> &dimensio
     return it != dimensions.cend() ? it.value() : WorkflowCostEstimator::kFallbackRasterSize;
 }
 
-qint64 tierWorkingSetBytes( const QVector<ConcurrencyTier> &tiers, const WorkflowDefinition &def,
+qint64 tierWorkingSetBytes( const QVector<ConcurrencyTier> &tiers, const WorkflowDocument &def,
                             const QMap<QString, QSize> &dimensions )
 {
     qint64 peak = 0;
@@ -78,13 +78,13 @@ double WorkflowCostEstimator::operatorComplexity( const QString &operatorId )
     return 1.0;
 }
 
-CostEstimate WorkflowCostEstimator::estimatePipelineCost( const WorkflowDefinition &def,
+CostEstimate WorkflowCostEstimator::estimatePipelineCost( const WorkflowDocument &def,
                                                           const QMap<QString, QSize> &rasterDimensions )
 {
     return estimatePipelineCostWithHostRam( def, rasterDimensions, hostTotalRamBytes() );
 }
 
-CostEstimate WorkflowCostEstimator::estimatePipelineCostWithHostRam( const WorkflowDefinition &def,
+CostEstimate WorkflowCostEstimator::estimatePipelineCostWithHostRam( const WorkflowDocument &def,
                                                                      const QMap<QString, QSize> &rasterDimensions,
                                                                      qint64 hostRamBytes )
 {

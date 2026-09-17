@@ -38,9 +38,9 @@ EdgeFact edge( const QString &from, const QString &to, const QString &id = QStri
 /// input -> {filter_a, filter_b (identical twins)} -> sink, plus two dead
 /// branch nodes hanging off the input. Hand-counted: DNE prunes 2, CSE
 /// merges 1, optimized node count = original - 3.
-WorkflowDefinition redundantWorkflow()
+WorkflowDocument redundantWorkflow()
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.nodes = {
         node( "input_raster", "rs:import_raster" ),
         node( "filter_a", "rs:spatial_filter", QJsonObject{ { "kernel", QStringLiteral( "gaussian" ) } } ),
@@ -106,7 +106,7 @@ TEST_CASE( "Signatures are deterministic, parameter-sensitive and parent-order-i
 
 TEST_CASE( "Identical twins share one lineage signature through the parent", "[d17][workflow][optimizer]" )
 {
-    const WorkflowDefinition def = redundantWorkflow();
+    const WorkflowDocument def = redundantWorkflow();
     const QMap<QString, QString> signatures = WorkflowPlanOptimizer::computeLineageSignatures( def );
     REQUIRE( signatures.size() == def.nodes.size() );
     REQUIRE( signatures.value( QStringLiteral( "filter_a" ) )
@@ -118,9 +118,9 @@ TEST_CASE( "Identical twins share one lineage signature through the parent", "[d
 
 TEST_CASE( "Dead node elimination and CSE on the redundant fixture", "[d17][workflow][optimizer]" )
 {
-    const WorkflowDefinition unoptimized = redundantWorkflow();
+    const WorkflowDocument unoptimized = redundantWorkflow();
     OptimizationReport report;
-    const WorkflowDefinition optimized = WorkflowPlanOptimizer::optimizePlan(
+    const WorkflowDocument optimized = WorkflowPlanOptimizer::optimizePlan(
         unoptimized, QSet<QString>{ QStringLiteral( "sink_ndvi" ) }, &report );
 
     REQUIRE( report.deadNodesPruned == 2 );
@@ -145,19 +145,19 @@ TEST_CASE( "Dead node elimination and CSE on the redundant fixture", "[d17][work
     INFO( error.toStdString() );
 
     // Deterministic: optimize twice, identical graphs.
-    const WorkflowDefinition again = WorkflowPlanOptimizer::optimizePlan(
+    const WorkflowDocument again = WorkflowPlanOptimizer::optimizePlan(
         unoptimized, QSet<QString>{ QStringLiteral( "sink_ndvi" ) } );
     REQUIRE( again == optimized );
 }
 
 TEST_CASE( "Optimize is a no-op when every node feeds the sink", "[d17][workflow][optimizer]" )
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.nodes = { node( "a", "rs:import_raster" ), node( "b", "rs:threshold" ) };
     def.edges = { edge( "a", "b" ) };
 
     OptimizationReport report;
-    const WorkflowDefinition optimized = WorkflowPlanOptimizer::optimizePlan(
+    const WorkflowDocument optimized = WorkflowPlanOptimizer::optimizePlan(
         def, QSet<QString>{ QStringLiteral( "b" ) }, &report );
     REQUIRE( report.deadNodesPruned == 0 );
     REQUIRE( report.commonSubexpressionsMerged == 0 );
@@ -168,7 +168,7 @@ TEST_CASE( "Legal distinct-port parallel edges survive optimization untouched", 
 {
     // src -> sink.input AND src -> sink.aux: both legal (per-port in-degree
     // <= 1), neither produced by a merge. The optimizer must preserve both.
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.nodes = {
         node( "src", "rs:import_raster" ),
         node( "sink", "rs:stack_bands" ),
@@ -183,7 +183,7 @@ TEST_CASE( "Legal distinct-port parallel edges survive optimization untouched", 
     };
 
     OptimizationReport report;
-    const WorkflowDefinition optimized = WorkflowPlanOptimizer::optimizePlan(
+    const WorkflowDocument optimized = WorkflowPlanOptimizer::optimizePlan(
         def, QSet<QString>{ QStringLiteral( "sink" ) }, &report );
     REQUIRE( report.deadNodesPruned == 0 );
     REQUIRE( report.commonSubexpressionsMerged == 0 );
@@ -200,11 +200,11 @@ TEST_CASE( "Legal distinct-port parallel edges survive optimization untouched", 
 
 TEST_CASE( "Cache hits are reported and keep the node unmerged", "[d17][workflow][optimizer]" )
 {
-    const WorkflowDefinition def = redundantWorkflow();
+    const WorkflowDocument def = redundantWorkflow();
     const QMap<QString, QString> signatures = WorkflowPlanOptimizer::computeLineageSignatures( def );
 
     OptimizationReport report;
-    const WorkflowDefinition optimized = WorkflowPlanOptimizer::optimizePlan(
+    const WorkflowDocument optimized = WorkflowPlanOptimizer::optimizePlan(
         def, QSet<QString>{ QStringLiteral( "sink_ndvi" ) }, &report,
         QSet<QString>{ signatures.value( QStringLiteral( "filter_a" ) ) } );
 
@@ -222,7 +222,7 @@ TEST_CASE( "Flops and peak RSS on the 1000x1000x4 analytic pipeline", "[d17][wor
     // input -> calibration -> index. Hand arithmetic:
     //   working set per node = 1000*1000*4 px * 4 B = 16 MiB
     //   widest tier = 1 -> PeakRSS = 16 MiB + 64 MiB overhead = 80 MiB
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.nodes = {
         node( "input_raster", "rs:import_raster" ),
         node( "calib", "rs:radiometric_calibration" ),
@@ -262,7 +262,7 @@ TEST_CASE( "Oversized working sets degrade recommended parallelism to 1", "[d17]
     // with a 4-band output, so the tier working set (2 x 40000*40000*4b*4B
     // = 47.8 GiB) crosses the 70 % waterline of this 62 GB host. Pure
     // arithmetic: nothing is allocated.
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.nodes = {
         node( "input_raster", "rs:import_raster" ),
         node( "branch_a", "rs:spatial_filter" ),

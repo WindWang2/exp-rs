@@ -2,7 +2,7 @@
 #pragma once
 
 //
-// Compiles a WorkflowDefinition down to the nodes that actually contribute
+// Compiles a WorkflowDocument down to the nodes that actually contribute
 // to the requested sinks:
 //
 //   - computeNodeSignature: H(v) = SHA-256( opId ‖ canonical(params) ‖
@@ -56,13 +56,13 @@ class WorkflowPlanOptimizer
 
     /// Full lineage signatures for the whole graph: parents-first (the map
     /// value is the node's signature; input is the accumulated map).
-    static QMap<QString, QString> computeLineageSignatures( const WorkflowDefinition &def );
+    static QMap<QString, QString> computeLineageSignatures( const WorkflowDocument &def );
 
     /// DNE + CSE. @p targetSinkNodeIds must resolve to existing nodes.
     /// @p cachedSignatures (optional, e.g. from a previous run's checkpoint)
     /// marks nodes whose artifact can be reused; they are kept and annotated
     /// in the report. Deterministic: same inputs -> identical output graph.
-    static WorkflowDefinition optimizePlan( const WorkflowDefinition &def,
+    static WorkflowDocument optimizePlan( const WorkflowDocument &def,
                                             const QSet<QString> &targetSinkNodeIds,
                                             OptimizationReport *outReport = nullptr,
                                             const QSet<QString> &cachedSignatures = QSet<QString>() );

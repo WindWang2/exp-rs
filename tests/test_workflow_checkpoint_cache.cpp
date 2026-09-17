@@ -56,9 +56,9 @@ NodeFact chainNode( const QString &id, const QString &op )
     return n;
 }
 
-WorkflowDefinition chain( int steps )
+WorkflowDocument chain( int steps )
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.workflowId = QStringLiteral( "wf-chain-%1" ).arg( steps );
     for ( int i = 1; i <= steps; ++i )
     {
@@ -254,7 +254,7 @@ TEST_CASE( "Resume works when the checkpoint document order is NOT topological",
     // Document order: the CONSUMER first, the PRODUCER second, wired
     // consumer <- producer. Both succeed; the checkpoint records them in
     // this non-topological order (creation order, not tier order).
-    WorkflowDefinition def;
+    WorkflowDocument def;
     auto makeNode = []( const QString &id, bool withInput ) {
         NodeFact n;
         n.nodeId = id;
@@ -344,7 +344,7 @@ TEST_CASE( "Diamond workflow executes the converging node once", "[d17][workflow
     coordinator.setExecutor( makeSyntheticNodeExecutor() );
     const QString dir = scratchDir( QStringLiteral( "diamond" ) );
 
-    WorkflowDefinition def;
+    WorkflowDocument def;
     auto node = []( const QString &id, bool withInput ) {
         NodeFact n;
         n.nodeId = id;
@@ -394,7 +394,7 @@ TEST_CASE( "startRun rejects cyclic documents and rejects double starts", "[d17]
     PipelineRunCoordinator coordinator;
     const QString dir = scratchDir( QStringLiteral( "cyclic" ) );
 
-    WorkflowDefinition def;
+    WorkflowDocument def;
     auto node = []( const QString &id ) {
         NodeFact n;
         n.nodeId = id;

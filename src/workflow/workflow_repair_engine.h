@@ -42,7 +42,7 @@ struct RepairPlan
     bool requiresRepair = false;
     QVector<ContractViolation> violations;
     QVector<RepairAction> suggestedActions;
-    WorkflowDefinition repairedWorkflow; // populated by applyRepairPlan
+    WorkflowDocument repairedWorkflow; // populated by applyRepairPlan
 };
 
 class WorkflowRepairEngine
@@ -51,15 +51,15 @@ class WorkflowRepairEngine
     WorkflowRepairEngine() = delete;
 
     /// Same as the free function (single implementation, two spellings).
-    static QVector<ContractViolation> inspectContracts( const WorkflowDefinition &def );
+    static QVector<ContractViolation> inspectContracts( const WorkflowDocument &def );
 
     /// Maps every violation onto its closed-form repair actions, in
     /// application order (calibration before atmospheric correction, etc.).
-    static RepairPlan inferRepairs( const WorkflowDefinition &def );
+    static RepairPlan inferRepairs( const WorkflowDocument &def );
 
     /// Rewires the workflow: each action chain replaces its violated edge
     /// with adapter nodes source -> a1 -> ... -> target. Deterministic ids.
-    static WorkflowDefinition applyRepairPlan( const WorkflowDefinition &def, const RepairPlan &plan );
+    static WorkflowDocument applyRepairPlan( const WorkflowDocument &def, const RepairPlan &plan );
 };
 
 } // namespace sicnu::workflow

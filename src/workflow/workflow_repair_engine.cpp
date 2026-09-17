@@ -7,7 +7,7 @@
 
 namespace sicnu::workflow {
 
-QVector<ContractViolation> WorkflowRepairEngine::inspectContracts( const WorkflowDefinition &def )
+QVector<ContractViolation> WorkflowRepairEngine::inspectContracts( const WorkflowDocument &def )
 {
     return sicnu::workflow::inspectContracts( def );
 }
@@ -77,7 +77,7 @@ void pushDataTypeAction( QVector<RepairAction> &actions, const ContractViolation
 
 } // namespace
 
-RepairPlan WorkflowRepairEngine::inferRepairs( const WorkflowDefinition &def )
+RepairPlan WorkflowRepairEngine::inferRepairs( const WorkflowDocument &def )
 {
     RepairPlan plan;
     plan.violations = inspectContracts( def );
@@ -116,9 +116,9 @@ RepairPlan WorkflowRepairEngine::inferRepairs( const WorkflowDefinition &def )
     return plan;
 }
 
-WorkflowDefinition WorkflowRepairEngine::applyRepairPlan( const WorkflowDefinition &def, const RepairPlan &plan )
+WorkflowDocument WorkflowRepairEngine::applyRepairPlan( const WorkflowDocument &def, const RepairPlan &plan )
 {
-    WorkflowDefinition repaired = def;
+    WorkflowDocument repaired = def;
 
     // Group actions per violated edge, preserving plan order (calibration
     // before atmospheric correction, ...).

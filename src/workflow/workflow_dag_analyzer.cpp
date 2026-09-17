@@ -10,7 +10,7 @@
 namespace sicnu::workflow {
 namespace {
 
-QHash<QString, QVector<QString>> adjacency( const WorkflowDefinition &def )
+QHash<QString, QVector<QString>> adjacency( const WorkflowDocument &def )
 {
     QHash<QString, QVector<QString>> successors;
     for ( const NodeFact &node : def.nodes )
@@ -31,7 +31,7 @@ QHash<QString, QVector<QString>> adjacency( const WorkflowDefinition &def )
 
 } // namespace
 
-bool WorkflowDagAnalyzer::detectCycleDFS( const WorkflowDefinition &def, QVector<QString> &outCyclePath )
+bool WorkflowDagAnalyzer::detectCycleDFS( const WorkflowDocument &def, QVector<QString> &outCyclePath )
 {
     outCyclePath.clear();
     const QHash<QString, QVector<QString>> successors = adjacency( def );
@@ -103,7 +103,7 @@ bool WorkflowDagAnalyzer::detectCycleDFS( const WorkflowDefinition &def, QVector
     return true;
 }
 
-QVector<ConcurrencyTier> WorkflowDagAnalyzer::computeConcurrencyTiers( const WorkflowDefinition &def )
+QVector<ConcurrencyTier> WorkflowDagAnalyzer::computeConcurrencyTiers( const WorkflowDocument &def )
 {
     const QHash<QString, QVector<QString>> successors = adjacency( def );
 
@@ -154,7 +154,7 @@ int WorkflowDagAnalyzer::calculateMaxParallelism( const QVector<ConcurrencyTier>
     return static_cast<int>( widest );
 }
 
-DagAnalysisResult WorkflowDagAnalyzer::analyzeDag( const WorkflowDefinition &def )
+DagAnalysisResult WorkflowDagAnalyzer::analyzeDag( const WorkflowDocument &def )
 {
     DagAnalysisResult result;
 

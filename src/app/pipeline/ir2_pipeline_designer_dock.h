@@ -2,7 +2,7 @@
  * ir2_pipeline_designer_dock.h — D18 production mount for D17 IR 2.0 canvas
  *
  * Hosts PipelineCanvasWidget (Workflow IR 2.0) without including Engine 2.0
- * WorkflowDefinition headers in the same TU (D-W1 name clash). Emits an
+ * WorkflowDocument headers in the same TU (D-W1 name clash). Emits an
  * ActiveWorkflowRef so MissionContext / Agent share one document identity.
  *
  * D18: starts PipelineRunCoordinator against the shared document and can

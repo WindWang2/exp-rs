@@ -35,6 +35,8 @@ namespace sicnu::app::va
 
 class VaChartWidget;
 class VaSelectionHub;
+struct VaSelectionSubject;
+struct VaSelectionEvent;
 
 class VaWorkbenchPanel : public QgsDockWidget
 {

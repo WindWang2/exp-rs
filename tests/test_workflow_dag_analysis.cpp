@@ -16,7 +16,7 @@ using sicnu::workflow::EdgeFact;
 using sicnu::workflow::NodeFact;
 using sicnu::workflow::PortFact;
 using sicnu::workflow::WorkflowDagAnalyzer;
-using sicnu::workflow::WorkflowDefinition;
+using sicnu::workflow::WorkflowDocument;
 
 namespace {
 
@@ -34,10 +34,10 @@ PortFact inPort( const QString &name )
 
 /// Builds a graph from (nodes, edges) given as id pairs — the test-side
 /// hand model; nothing in the analyzer is reused to build it.
-WorkflowDefinition graph( const QStringList &nodeIds, const QList<QPair<QString, QString>> &edges,
+WorkflowDocument graph( const QStringList &nodeIds, const QList<QPair<QString, QString>> &edges,
                           const QStringList &extraPorts = {} )
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     int index = 0;
     for ( const QString &id : nodeIds )
     {
@@ -67,7 +67,7 @@ WorkflowDefinition graph( const QStringList &nodeIds, const QList<QPair<QString,
 TEST_CASE( "Kahn tiers on the hand-analyzed diamond DAG", "[d17][workflow][dag]" )
 {
     // S -> A, S -> B, A -> M, B -> M: T0={node_src}, T1={node_a,node_b}, T2={node_sink}.
-    const WorkflowDefinition def = graph(
+    const WorkflowDocument def = graph(
         { QStringLiteral( "node_src" ), QStringLiteral( "node_a" ), QStringLiteral( "node_b" ), QStringLiteral( "node_sink" ) },
         { { "node_src", "node_a" }, { "node_src", "node_b" }, { "node_a", "node_sink" }, { "node_b", "node_sink" } } );
 
@@ -92,7 +92,7 @@ TEST_CASE( "Kahn tiers on the hand-analyzed diamond DAG", "[d17][workflow][dag]"
 
 TEST_CASE( "Linear chain yields one node per tier in chain order", "[d17][workflow][dag]" )
 {
-    const WorkflowDefinition def = graph(
+    const WorkflowDocument def = graph(
         { "n1", "n2", "n3", "n4" },
         { { "n1", "n2" }, { "n2", "n3" }, { "n3", "n4" } } );
 
@@ -106,7 +106,7 @@ TEST_CASE( "Linear chain yields one node per tier in chain order", "[d17][workfl
 TEST_CASE( "DFS cycle diagnosis closes the hand-traced 3-node loop", "[d17][workflow][dag]" )
 {
     // N1 -> N2 -> N3 -> N1, plus downstream N3 -> N4 (outside the loop).
-    const WorkflowDefinition def = graph(
+    const WorkflowDocument def = graph(
         { "N1", "N2", "N3", "N4" },
         { { "N1", "N2" }, { "N2", "N3" }, { "N3", "N1" }, { "N3", "N4" } } );
 
@@ -134,7 +134,7 @@ TEST_CASE( "Reported cycle path is a real closed walk of the graph", "[d17][work
     // Diamond pushes + a cycle: a->b, a->c, c->d, d->b, b->a. The 3-color
     // DFS may gray b via a and re-reach it via d; the extracted path must
     // still be a walk whose every consecutive pair is an edge (P1 pin).
-    const WorkflowDefinition def = graph(
+    const WorkflowDocument def = graph(
         { "a", "b", "c", "d" },
         { { "a", "b" }, { "a", "c" }, { "c", "d" }, { "d", "b" }, { "b", "a" } } );
 
@@ -154,7 +154,7 @@ TEST_CASE( "Reported cycle path is a real closed walk of the graph", "[d17][work
 
 TEST_CASE( "Self-loop is diagnosed as a one-node cycle", "[d17][workflow][dag]" )
 {
-    WorkflowDefinition def = graph( { "solo" }, {} );
+    WorkflowDocument def = graph( { "solo" }, {} );
     // Manual self edge solo -> solo (graph() only emits distinct pairs).
     def.edges.append( EdgeFact{ QStringLiteral( "self" ), QStringLiteral( "solo" ),
                                 QStringLiteral( "output" ), QStringLiteral( "solo" ),
@@ -167,7 +167,7 @@ TEST_CASE( "Self-loop is diagnosed as a one-node cycle", "[d17][workflow][dag]" 
 TEST_CASE( "Disconnected components partition independently", "[d17][workflow][dag]" )
 {
     // a1 -> a2 and b1 -> b2: two independent chains, same tier pairs.
-    const WorkflowDefinition def = graph(
+    const WorkflowDocument def = graph(
         { "a1", "a2", "b1", "b2" },
         { { "a1", "a2" }, { "b1", "b2" } } );
 
@@ -197,7 +197,7 @@ TEST_CASE( "Deep 100-node chain: C_max = 1, 100 tiers, acyclic", "[d17][workflow
 
 TEST_CASE( "Empty graph analyses to zero tiers and zero parallelism", "[d17][workflow][dag]" )
 {
-    const WorkflowDefinition def;
+    const WorkflowDocument def;
     const DagAnalysisResult result = WorkflowDagAnalyzer::analyzeDag( def );
     REQUIRE( result.isAcyclic );
     REQUIRE( result.executionTiers.isEmpty() );

@@ -19,7 +19,7 @@ QString canonicalJson( const QJsonObject &object )
     return QString::fromUtf8( QJsonDocument( object ).toJson( QJsonDocument::Compact ) );
 }
 
-QVector<QString> parentsOf( const WorkflowDefinition &def, const QString &nodeId )
+QVector<QString> parentsOf( const WorkflowDocument &def, const QString &nodeId )
 {
     QVector<QString> parents;
     for ( const EdgeFact &edge : def.edges )
@@ -29,7 +29,7 @@ QVector<QString> parentsOf( const WorkflowDefinition &def, const QString &nodeId
     return parents;
 }
 
-QVector<QString> childrenOf( const WorkflowDefinition &def, const QString &nodeId )
+QVector<QString> childrenOf( const WorkflowDocument &def, const QString &nodeId )
 {
     QVector<QString> children;
     for ( const EdgeFact &edge : def.edges )
@@ -62,7 +62,7 @@ QString WorkflowPlanOptimizer::computeNodeSignature( const NodeFact &node,
     return QString::fromLatin1( digest.toHex() );
 }
 
-QMap<QString, QString> WorkflowPlanOptimizer::computeLineageSignatures( const WorkflowDefinition &def )
+QMap<QString, QString> WorkflowPlanOptimizer::computeLineageSignatures( const WorkflowDocument &def )
 {
     QMap<QString, QString> signatures;
     // Parents-first memoized fill: parent ids always sort before children
@@ -97,7 +97,7 @@ QMap<QString, QString> WorkflowPlanOptimizer::computeLineageSignatures( const Wo
     return signatures;
 }
 
-WorkflowDefinition WorkflowPlanOptimizer::optimizePlan( const WorkflowDefinition &def,
+WorkflowDocument WorkflowPlanOptimizer::optimizePlan( const WorkflowDocument &def,
                                                         const QSet<QString> &targetSinkNodeIds,
                                                         OptimizationReport *outReport,
                                                         const QSet<QString> &cachedSignatures )
@@ -137,7 +137,7 @@ WorkflowDefinition WorkflowPlanOptimizer::optimizePlan( const WorkflowDefinition
     report.deadNodesPruned = def.nodes.size() - keptNodes.size();
 
     // ---- Common Subexpression Elimination over lineage signatures.
-    WorkflowDefinition working = def;
+    WorkflowDocument working = def;
     working.nodes = keptNodes;
     working.edges.clear();
     for ( const EdgeFact &edge : def.edges )
@@ -210,7 +210,7 @@ WorkflowDefinition WorkflowPlanOptimizer::optimizePlan( const WorkflowDefinition
         finalEdges.append( redirected );
     }
 
-    WorkflowDefinition optimized = def;
+    WorkflowDocument optimized = def;
     optimized.nodes = uniqueNodes;
     optimized.edges = finalEdges;
 

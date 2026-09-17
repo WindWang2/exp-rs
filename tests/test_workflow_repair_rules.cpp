@@ -35,9 +35,9 @@ PortFact port( const QString &name, const QString &dtype, const QString &crs, co
 
 /// The brief's broken pipeline: EPSG:4326 DN source wired straight into an
 /// EPSG:32649 BOA slope operator — a CRS and a radiometric break at once.
-WorkflowDefinition crsMismatchWorkflow()
+WorkflowDocument crsMismatchWorkflow()
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.nodes = {
         makeNode( QStringLiteral( "node_src" ),
                   {},
@@ -60,7 +60,7 @@ WorkflowDefinition crsMismatchWorkflow()
 TEST_CASE( "CRS mismatch alone injects exactly one reproject adapter", "[d17][workflow][repair]" )
 {
     // Same resolution and state; only CRS differs.
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.nodes = {
         makeNode( QStringLiteral( "src" ), {},
                   { port( QStringLiteral( "output" ), QStringLiteral( "Raster" ), QStringLiteral( "EPSG:4326" ),
@@ -87,7 +87,7 @@ TEST_CASE( "CRS mismatch alone injects exactly one reproject adapter", "[d17][wo
     REQUIRE( plan.suggestedActions[0].adapterParameters["target_crs"].toString() == QStringLiteral( "EPSG:32649" ) );
     REQUIRE( plan.suggestedActions[0].adapterParameters["resampling"].toString() == QStringLiteral( "bilinear" ) );
 
-    const WorkflowDefinition healed = WorkflowRepairEngine::applyRepairPlan( def, plan );
+    const WorkflowDocument healed = WorkflowRepairEngine::applyRepairPlan( def, plan );
     REQUIRE( healed.nodes.size() == def.nodes.size() + 1 );
 
     // The old edge is gone; source -> adapter -> target chain took its place.
@@ -101,7 +101,7 @@ TEST_CASE( "CRS mismatch alone injects exactly one reproject adapter", "[d17][wo
 
 TEST_CASE( "DN into a BOA input injects the calibration + atmospheric chain", "[d17][workflow][repair]" )
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.nodes = {
         makeNode( QStringLiteral( "dn_src" ), {},
                   { port( QStringLiteral( "output" ), QStringLiteral( "Raster" ), QStringLiteral( "*" ),
@@ -126,7 +126,7 @@ TEST_CASE( "DN into a BOA input injects the calibration + atmospheric chain", "[
     REQUIRE( plan.suggestedActions[0].insertOperatorId == QStringLiteral( "rs:radiometric_calibration" ) );
     REQUIRE( plan.suggestedActions[1].insertOperatorId == QStringLiteral( "rs:atmospheric_correction" ) );
 
-    const WorkflowDefinition healed = WorkflowRepairEngine::applyRepairPlan( def, plan );
+    const WorkflowDocument healed = WorkflowRepairEngine::applyRepairPlan( def, plan );
     REQUIRE( healed.nodes.size() == def.nodes.size() + 2 );
     REQUIRE( WorkflowIR::validateSemantics( healed ) );
 
@@ -141,7 +141,7 @@ TEST_CASE( "DN into a BOA input injects the calibration + atmospheric chain", "[
 
 TEST_CASE( "Radiance into TOA needs only the atmospheric adapter", "[d17][workflow][repair]" )
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.nodes = {
         makeNode( QStringLiteral( "rad_src" ), {},
                   { port( QStringLiteral( "output" ), QStringLiteral( "Raster" ), QStringLiteral( "*" ),
@@ -163,7 +163,7 @@ TEST_CASE( "Radiance into TOA needs only the atmospheric adapter", "[d17][workfl
 
 TEST_CASE( "Resolution gap injects a resample adapter with target cell size", "[d17][workflow][repair]" )
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.nodes = {
         makeNode( QStringLiteral( "coarse" ), {},
                   { port( QStringLiteral( "output" ), QStringLiteral( "Raster" ), QStringLiteral( "*" ),
@@ -192,7 +192,7 @@ TEST_CASE( "Resolution gap injects a resample adapter with target cell size", "[
 TEST_CASE( "Wildcard facts and clean pipelines produce no violations", "[d17][workflow][repair]" )
 {
     // "*" CRS / state / dtype on the consumer side accepts anything.
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.nodes = {
         makeNode( QStringLiteral( "any_src" ), {},
                   { port( QStringLiteral( "output" ), QStringLiteral( "Table" ), QStringLiteral( "EPSG:9999" ),
@@ -213,7 +213,7 @@ TEST_CASE( "Wildcard facts and clean pipelines produce no violations", "[d17][wo
 
 TEST_CASE( "Compound break (CRS + resolution + radiometric) cascades in rule order", "[d17][workflow][repair]" )
 {
-    const WorkflowDefinition broken = crsMismatchWorkflow(); // 4326/DN/30m into 32649/BOA/10m
+    const WorkflowDocument broken = crsMismatchWorkflow(); // 4326/DN/30m into 32649/BOA/10m
 
     auto violations = WorkflowRepairEngine::inspectContracts( broken );
     REQUIRE( violations.size() == 3 );
@@ -229,7 +229,7 @@ TEST_CASE( "Compound break (CRS + resolution + radiometric) cascades in rule ord
     REQUIRE( plan.suggestedActions[2].insertOperatorId == QStringLiteral( "rs:radiometric_calibration" ) );
     REQUIRE( plan.suggestedActions[3].insertOperatorId == QStringLiteral( "rs:atmospheric_correction" ) );
 
-    const WorkflowDefinition healed = WorkflowRepairEngine::applyRepairPlan( broken, plan );
+    const WorkflowDocument healed = WorkflowRepairEngine::applyRepairPlan( broken, plan );
     REQUIRE( healed.nodes.size() == broken.nodes.size() + 4 );
     REQUIRE( WorkflowIR::validateSemantics( healed ) );
     REQUIRE( WorkflowRepairEngine::inspectContracts( healed ).isEmpty() ); // the invariant, compound case
@@ -243,7 +243,7 @@ TEST_CASE( "Two identical breaks on different edges get collision-free adapter i
                                  QStringLiteral( "BOA" ), 10.0, 10.0, 1, true ) },
                          {} );
     };
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.nodes = {
         makeNode( QStringLiteral( "wgs_src" ), {},
                   { port( QStringLiteral( "output" ), QStringLiteral( "Raster" ), QStringLiteral( "EPSG:4326" ),
@@ -261,7 +261,7 @@ TEST_CASE( "Two identical breaks on different edges get collision-free adapter i
     const RepairPlan plan = WorkflowRepairEngine::inferRepairs( def );
     REQUIRE( plan.suggestedActions.size() == 2 );
 
-    const WorkflowDefinition healed = WorkflowRepairEngine::applyRepairPlan( def, plan );
+    const WorkflowDocument healed = WorkflowRepairEngine::applyRepairPlan( def, plan );
     REQUIRE( healed.nodes.size() == def.nodes.size() + 2 );
     // Distinct adapter node ids (per-edge naming, not a shared counter).
     QSet<QString> ids;
@@ -276,7 +276,7 @@ TEST_CASE( "Two identical breaks on different edges get collision-free adapter i
 
 TEST_CASE( "Repair is deterministic: same workflow, byte-identical healed document", "[d17][workflow][repair]" )
 {
-    const WorkflowDefinition broken = crsMismatchWorkflow();
+    const WorkflowDocument broken = crsMismatchWorkflow();
     const RepairPlan planA = WorkflowRepairEngine::inferRepairs( broken );
     const RepairPlan planB = WorkflowRepairEngine::inferRepairs( broken );
 

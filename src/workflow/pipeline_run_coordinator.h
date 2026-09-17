@@ -31,6 +31,7 @@
 #include <functional>
 
 #include "workflow/workflow_ir_v2.h"
+#include "workflow/sicnu_workflow_export.h"
 
 namespace sicnu::workflow {
 
@@ -81,7 +82,7 @@ using NodeExecutor = std::function<NodeExecutionResult(
 /// synthesizing success).
 NodeExecutor makeSyntheticNodeExecutor();
 
-class PipelineRunCoordinator : public QObject
+class SICNU_WORKFLOW_EXPORT PipelineRunCoordinator : public QObject
 {
     Q_OBJECT
 

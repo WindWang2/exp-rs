@@ -10350,6 +10350,18 @@ sicnu_add_d17_test(test_d17_workflow_pipeline_e2e
     ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp
   LIBS Qt6::Widgets Qt6::Test jsoncpp
 )
+
+# Targets that compile pipeline_run_coordinator.cpp directly (instead of
+# linking sicnu_workflow) must define the library's EXPORTS macro so
+# SICNU_WORKFLOW_EXPORT resolves to dllexport -- otherwise the local moc
+# output defines PipelineRunCoordinator::staticMetaObject as a dllimport
+# data member, which MSVC rejects (C2491).
+foreach(_d17_embeds_coordinator
+    test_ir2_port_param_mapping
+    test_workflow_checkpoint_cache
+    test_d17_workflow_pipeline_e2e)
+  target_compile_definitions(${_d17_embeds_coordinator} PRIVATE sicnu_workflow_EXPORTS)
+endforeach()
 # ---------------------------------------------------------------------------
 # D15 classification-change-studio track (Packages A-I).
 # ---------------------------------------------------------------------------

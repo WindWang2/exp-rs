@@ -90,7 +90,7 @@ VaWorkbenchPanel::VaWorkbenchPanel( RasterPathProvider provider,
     , m_canvasProvider( std::move( canvasProvider ) )
     , m_rasterLayerProvider( std::move( rasterLayerProvider ) )
     , m_hub( hub )
-    , m_origin( QStringLiteral( kOrigin )
+    , m_origin( QString::fromUtf8( kOrigin )
                 + QString::number( s_instanceCounter.fetch_add( 1 ) + 1 ) )
     , m_probe( [this]() -> QgsRasterLayer * {
         return m_rasterLayerProvider ? m_rasterLayerProvider() : nullptr;

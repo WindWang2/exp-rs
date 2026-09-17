@@ -237,9 +237,9 @@ bool waitForCompleted( PipelineRunCoordinator &coordinator, int timeoutMs = 3000
     return spy.count() >= 1 || coordinator.hasCompleted();
 }
 
-WorkflowDefinition singleNodeDef( const QString &operatorId )
+WorkflowDocument singleNodeDef( const QString &operatorId )
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.workflowId = QStringLiteral( "wf-ir2-executor" );
     NodeFact n;
     n.nodeId = QStringLiteral( "n1" );

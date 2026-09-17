@@ -106,7 +106,7 @@ TEST_CASE( "loadWorkflow projects nodes and edges; export reads positions back",
     ensureApp();
     PipelineCanvasWidget canvas;
 
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.workflowId = QStringLiteral( "wf-canvas-1" );
     def.nodes = { canvasNode( "a", 0, 0 ), canvasNode( "b", 260, 0 ), canvasNode( "c", 520, 120 ) };
     def.edges = { canvasEdge( "e1", "a", "b" ), canvasEdge( "e2", "b", "c" ) };
@@ -117,14 +117,14 @@ TEST_CASE( "loadWorkflow projects nodes and edges; export reads positions back",
     REQUIRE( canvas.scene()->nodeItem( "b" ) != nullptr );
     REQUIRE( canvas.scene()->nodeItem( "ghost" ) == nullptr );
 
-    const WorkflowDefinition exported = canvas.exportWorkflow();
+    const WorkflowDocument exported = canvas.exportWorkflow();
     REQUIRE( exported.nodes.size() == 3 );
     REQUIRE( exported.edges.size() == 2 );
     REQUIRE( exported.nodes == def.nodes ); // untouched positions round-trip
 
     // Moving an item updates the exported geometry, and nothing else.
     canvas.scene()->nodeItem( "b" )->setPos( 300.0, 90.0 );
-    const WorkflowDefinition moved = canvas.exportWorkflow();
+    const WorkflowDocument moved = canvas.exportWorkflow();
     REQUIRE( moved.findNode( "b" )->canvasPosition == QPointF( 300.0, 90.0 ) );
     REQUIRE( moved.findNode( "a" )->canvasPosition == QPointF( 0.0, 0.0 ) );
     REQUIRE( moved.edges == def.edges );
@@ -199,7 +199,7 @@ TEST_CASE( "Interactive wiring created after load survives exportWorkflow", "[d1
     ensureApp();
     PipelineCanvasWidget canvas;
 
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.workflowId = QStringLiteral( "wf-grow" );
     def.nodes = { canvasNode( "a", 0, 0 ), canvasNode( "b", 260, 0 ) };
     canvas.loadWorkflow( def ); // no edges yet
@@ -212,7 +212,7 @@ TEST_CASE( "Interactive wiring created after load survives exportWorkflow", "[d1
     REQUIRE( target != nullptr );
     REQUIRE( canvas.scene()->finishPendingConnection( target ) );
 
-    const WorkflowDefinition exported = canvas.exportWorkflow();
+    const WorkflowDocument exported = canvas.exportWorkflow();
     REQUIRE( exported.edges.size() == 1 );
     REQUIRE( exported.edges[0].sourceNodeId == QStringLiteral( "a" ) );
     REQUIRE( exported.edges[0].targetNodeId == QStringLiteral( "b" ) );
@@ -227,7 +227,7 @@ TEST_CASE( "100-node load completes within the 50 ms budget offscreen", "[d17][w
     PipelineCanvasWidget canvas;
 
     // 10 columns x 10 rows; chained column-wise like the E2E scale fixture.
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.workflowId = QStringLiteral( "wf-scale-canvas" );
     for ( int i = 0; i < 100; ++i )
         def.nodes.append( canvasNode( QStringLiteral( "scale_%1" ).arg( i, 3, 10, QLatin1Char( '0' ) ),
@@ -244,7 +244,7 @@ TEST_CASE( "100-node load completes within the 50 ms budget offscreen", "[d17][w
                                .count();
 
     REQUIRE( elapsedMs < 50 );
-    const WorkflowDefinition exported = canvas.exportWorkflow();
+    const WorkflowDocument exported = canvas.exportWorkflow();
     REQUIRE( exported.nodes.size() == 100 );
     REQUIRE( exported.edges.size() == 99 );
 }

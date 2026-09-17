@@ -17,7 +17,7 @@ using sicnu::workflow::EdgeFact;
 using sicnu::workflow::NodeFact;
 using sicnu::workflow::PortFact;
 using sicnu::workflow::Result;
-using sicnu::workflow::WorkflowDefinition;
+using sicnu::workflow::WorkflowDocument;
 using sicnu::workflow::WorkflowIR;
 
 namespace {
@@ -46,7 +46,7 @@ TEST_CASE( "Golden linear pipeline parses and round-trips byte-identically", "[d
     auto parseResult = WorkflowIR::fromJson( inDoc );
     REQUIRE( parseResult.isSuccess() );
 
-    const WorkflowDefinition &def = parseResult.value();
+    const WorkflowDocument &def = parseResult.value();
     REQUIRE( def.version == QStringLiteral( "2.0" ) );
     REQUIRE( def.nodes.size() == 5 );
     REQUIRE( def.edges.size() == 4 );
@@ -88,7 +88,7 @@ TEST_CASE( "All golden fixtures survive parse -> serialize -> parse unchanged", 
 
 TEST_CASE( "fromDocument round trip of in-memory AST equals AST (D(S(A)) == A)", "[d17][workflow][ir]" )
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.workflowId = QStringLiteral( "wf-mem-1" );
     def.name = QStringLiteral( "In-memory" );
     NodeFact node;
@@ -180,7 +180,7 @@ TEST_CASE( "fromJson fails closed on a port with a missing resolution field", "[
 
 TEST_CASE( "Semantic validation rejects dangling edges naming the offender", "[d17][workflow][ir]" )
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.version = QStringLiteral( "2.0" );
     def.nodes = { NodeFact{ QStringLiteral( "node_b" ), QStringLiteral( "rs:threshold" ), QStringLiteral( "B" ), {},
                             { PortFact{ QStringLiteral( "in" ), QStringLiteral( "Raster" ), QStringLiteral( "*" ), QStringLiteral( "None" ), 0, 0, 0, true } },
@@ -201,7 +201,7 @@ TEST_CASE( "Semantic validation enforces the single-source in-degree invariant",
     NodeFact src1{ QStringLiteral( "src1" ), QStringLiteral( "rs:import_raster" ), {}, {}, {}, { outPort }, QPointF() };
     NodeFact src2{ QStringLiteral( "src2" ), QStringLiteral( "rs:import_raster" ), {}, {}, {}, { outPort }, QPointF() };
     NodeFact sink{ QStringLiteral( "sink" ), QStringLiteral( "rs:spatial_filter" ), {}, {}, { inPort }, {}, QPointF() };
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.nodes = { src1, src2, sink };
     def.edges = { EdgeFact{ QStringLiteral( "e1" ), QStringLiteral( "src1" ), QStringLiteral( "output" ), QStringLiteral( "sink" ), QStringLiteral( "in" ) },
                   EdgeFact{ QStringLiteral( "e2" ), QStringLiteral( "src2" ), QStringLiteral( "output" ), QStringLiteral( "sink" ), QStringLiteral( "in" ) } };
@@ -222,7 +222,7 @@ TEST_CASE( "Semantic validation rejects edges onto missing ports", "[d17][workfl
 {
     NodeFact src{ QStringLiteral( "src" ), QStringLiteral( "rs:import_raster" ), {}, {}, {}, { PortFact{ QStringLiteral( "output" ), QStringLiteral( "Raster" ), QStringLiteral( "*" ), QStringLiteral( "None" ), 0, 0, 0, false } }, QPointF() };
     NodeFact dst{ QStringLiteral( "dst" ), QStringLiteral( "rs:spatial_filter" ), {}, {}, { PortFact{ QStringLiteral( "in" ), QStringLiteral( "Raster" ), QStringLiteral( "*" ), QStringLiteral( "None" ), 0, 0, 0, true } }, {}, QPointF() };
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.nodes = { src, dst };
     def.edges = { EdgeFact{ QStringLiteral( "e1" ), QStringLiteral( "src" ), QStringLiteral( "no_such_port" ), QStringLiteral( "dst" ), QStringLiteral( "in" ) } };
     QString error;
@@ -235,7 +235,7 @@ TEST_CASE( "Semantic validation rejects edges onto missing ports", "[d17][workfl
 
 TEST_CASE( "isValid reflects version, id and operator completeness", "[d17][workflow][ir]" )
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     REQUIRE( def.isValid() ); // empty document with default version is structurally valid
 
     def.version = QStringLiteral( "1.0" );
@@ -254,7 +254,7 @@ TEST_CASE( "isValid reflects version, id and operator completeness", "[d17][work
 
 TEST_CASE( "findNode and findEdge resolve by id and return nullptr when absent", "[d17][workflow][ir]" )
 {
-    const WorkflowDefinition def = WorkflowIR::fromJson(
+    const WorkflowDocument def = WorkflowIR::fromJson(
         loadGoldenJson( QStringLiteral( "diamond_branch_merge_v2.json" ) ) ).value();
 
     REQUIRE( def.findNode( "node_a" ) != nullptr );
@@ -270,7 +270,7 @@ TEST_CASE( "migrateFromV1 lifts the ADR 0149 document with defaulted facts", "[d
     auto result = WorkflowIR::migrateFromV1( v1 );
     REQUIRE( result.isSuccess() );
 
-    const WorkflowDefinition &def = result.value();
+    const WorkflowDocument &def = result.value();
     REQUIRE( def.version == QStringLiteral( "2.0" ) );
     REQUIRE( def.nodes.size() == 2 );
     REQUIRE( def.edges.size() == 1 );
