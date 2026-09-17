@@ -8,8 +8,22 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QStyle>
 #include <QToolButton>
 #include <QVBoxLayout>
+
+namespace
+{
+  // Dynamic QSS properties only re-resolve after a repolish.
+  void setFlowProp( QWidget *w, const char *prop, const QString &value )
+  {
+    if ( w->property( prop ).toString() == value )
+      return;
+    w->setProperty( prop, value );
+    w->style()->unpolish( w );
+    w->style()->polish( w );
+  }
+}
 
 RsClassifyFlowchartWidget::RsClassifyFlowchartWidget( QWidget *parent )
   : QWidget( parent )
@@ -56,19 +70,11 @@ void RsClassifyFlowchartWidget::setupUi()
   headerLayout->addWidget( m_progressLabel );
 
   m_progressBar = new QProgressBar( headerFrame );
+  m_progressBar->setObjectName( QStringLiteral( "rsFlowProgress" ) );
   m_progressBar->setRange( 0, static_cast<int>( FlowStep::Count ) );
   m_progressBar->setValue( 0 );
   m_progressBar->setTextVisible( false );
   m_progressBar->setFixedHeight( 6 );
-  m_progressBar->setStyleSheet(
-    QStringLiteral( "QProgressBar { "
-                    "  background-color: palette(midlight); "
-                    "  border-radius: 3px; "
-                    "} "
-                    "QProgressBar::chunk { "
-                    "  background-color: #2e7d32; "
-                    "  border-radius: 3px; "
-                    "}" ) );
   headerLayout->addWidget( m_progressBar );
 
   rootLayout->addWidget( headerFrame );
@@ -157,12 +163,7 @@ QFrame *RsClassifyFlowchartWidget::createStepCard( FlowStep step, const QString 
   auto *numBadge = new QLabel( num, card );
   numBadge->setFixedSize( 20, 20 );
   numBadge->setAlignment( Qt::AlignCenter );
-  numBadge->setStyleSheet(
-    QStringLiteral( "background-color: palette(midlight); "
-                    "color: palette(text); "
-                    "border-radius: 10px; "
-                    "font-weight: bold; "
-                    "font-size: 11px;" ) );
+  numBadge->setProperty( "flowNum", QStringLiteral( "idle" ) );
   topRow->addWidget( numBadge );
 
   auto *titleLbl = new QLabel( title, card );
@@ -172,12 +173,7 @@ QFrame *RsClassifyFlowchartWidget::createStepCard( FlowStep step, const QString 
   topRow->addWidget( titleLbl, 1 );
 
   auto *statusBadge = new QLabel( tr( "Not started" ), card );
-  statusBadge->setStyleSheet(
-    QStringLiteral( "background: palette(midlight); "
-                    "color: palette(placeholder-text); "
-                    "border-radius: 4px; "
-                    "padding: 1px 6px; "
-                    "font-size: 10px;" ) );
+  statusBadge->setProperty( "flowBadge", QStringLiteral( "idle" ) );
   topRow->addWidget( statusBadge );
 
   cardLay->addLayout( topRow );
@@ -193,7 +189,8 @@ QFrame *RsClassifyFlowchartWidget::createStepCard( FlowStep step, const QString 
   bottomRow->setSpacing( 4 );
 
   auto *metricLbl = new QLabel( card );
-  metricLbl->setStyleSheet( QStringLiteral( "color: #1976d2; font-weight: 500; font-size: 11px;" ) );
+  metricLbl->setProperty( "rsTone", QStringLiteral( "info" ) );
+  metricLbl->setStyleSheet( QStringLiteral( "font-weight: 500; font-size: 11px;" ) );
   bottomRow->addWidget( metricLbl, 1 );
 
   auto *actBtn = new QPushButton( actionText, card );
@@ -433,40 +430,28 @@ void RsClassifyFlowchartWidget::updateCardStyle( StepCard &card )
   if ( !card.cardFrame )
     return;
 
-  QString borderStyle;
+  QString state;
   QString statusText;
-  QString statusStyle;
-  QString badgeStyle;
-
   if ( card.isComplete )
   {
-    borderStyle = QStringLiteral( "border: 1px solid #4caf50; background: palette(window);" );
+    state = QStringLiteral( "done" );
     statusText = tr( "✓ Done" );
-    statusStyle = QStringLiteral( "background: #e8f5e9; color: #2e7d32; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: bold;" );
-    badgeStyle = QStringLiteral( "background: #4caf50; color: white; border-radius: 10px; font-weight: bold; font-size: 11px;" );
   }
   else if ( card.isActive )
   {
-    borderStyle = QStringLiteral( "border: 2px solid #1976d2; background: palette(window);" );
+    state = QStringLiteral( "active" );
     statusText = tr( "● Current step" );
-    statusStyle = QStringLiteral( "background: #e3f2fd; color: #1565c0; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: bold;" );
-    badgeStyle = QStringLiteral( "background: #1976d2; color: white; border-radius: 10px; font-weight: bold; font-size: 11px;" );
   }
   else
   {
-    borderStyle = QStringLiteral( "border: 1px solid palette(midlight); background: palette(window);" );
+    state = QStringLiteral( "idle" );
     statusText = tr( "Not started" );
-    statusStyle = QStringLiteral( "background: palette(midlight); color: palette(placeholder-text); border-radius: 4px; padding: 1px 6px; font-size: 10px;" );
-    badgeStyle = QStringLiteral( "background: palette(midlight); color: palette(text); border-radius: 10px; font-weight: bold; font-size: 11px;" );
   }
 
-  card.cardFrame->setStyleSheet(
-    QStringLiteral( "QFrame#%1 { %2 border-radius: 6px; }" )
-      .arg( card.cardFrame->objectName() )
-      .arg( borderStyle ) );
+  setFlowProp( card.cardFrame, "flowState", state );
+  setFlowProp( card.statusBadge, "flowBadge", state );
+  setFlowProp( card.numberLabel, "flowNum", state );
   card.statusBadge->setText( statusText );
-  card.statusBadge->setStyleSheet( statusStyle );
-  card.numberLabel->setStyleSheet( badgeStyle );
 }
 
 void RsClassifyFlowchartWidget::updateOverallProgress()

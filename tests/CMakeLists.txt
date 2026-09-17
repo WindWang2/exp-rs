@@ -7909,6 +7909,32 @@ target_compile_definitions(test_shortcut_conflicts PRIVATE
 )
 sicnu_discover_tests(test_shortcut_conflicts)
 
+# Behavior-level shortcut host guardrail (UI review C1): real key events
+# against the hidden-menubar vs window-hosted action contract.
+add_executable(test_shortcut_hosting
+  test_shortcut_hosting.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_shortcut_hosting PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_shortcut_hosting PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_shortcut_hosting PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_shortcut_hosting)
+
 # ── Workbench 6.0 Milestone C: bounded UI scan pool (#797) ──────────────────
 add_executable(test_scan_pool
   test_scan_pool.cpp

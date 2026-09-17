@@ -42,12 +42,6 @@ RsGeorefModeToggle::RsGeorefModeToggle( QWidget *parent )
     lay->addWidget( btn );
   }
 
-  setStyleSheet( QStringLiteral(
-    "#rsModeToggle { background: #f3f5f7; border: 1px solid #d9dee3; border-radius: 4px; padding: 2px; }"
-    "QPushButton#rsModeBtn { padding: 2px 12px; font-size: 11px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: #5f6b7a; }"
-    "QPushButton#rsModeBtn:checked { background: #ffffff; color: #208830; border: 1px solid #99c2a2; font-weight: 600; }"
-  ) );
-
   connect( mGroup, QOverload<int>::of( &QButtonGroup::idClicked ),
            this, [this]( int id ) {
              const Mode newMode = static_cast<Mode>( id );

@@ -5,6 +5,7 @@
 #include <QFont>
 #include <QHBoxLayout>
 #include <QSignalBlocker>
+#include <QStyle>
 #include <QToolButton>
 
 namespace
@@ -128,13 +129,9 @@ void RsClassifyStepperBar::rebuildStyle( int index )
 
   // Soft green tint when complete so progress is visible at a glance.
   if ( mComplete.value( index ) )
-  {
-    btn->setStyleSheet(
-      QStringLiteral( "QToolButton { color: #1a7f37; }"
-                      "QToolButton:checked { background: #dafbe1; }" ) );
-  }
+    btn->setProperty( "rsTone", QStringLiteral( "ok" ) );
   else
-  {
-    btn->setStyleSheet( QString() );
-  }
+    btn->setProperty( "rsTone", QVariant() );
+  btn->style()->unpolish( btn );
+  btn->style()->polish( btn );
 }

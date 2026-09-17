@@ -573,6 +573,14 @@ void QgisDesktopWindow::showDataManagerPanel()
     m_dataManagerPanel->raise();
 }
 
+void QgisDesktopWindow::showAgentCopilot()
+{
+    if ( !m_agentCopilotDock )
+        return;
+    m_agentCopilotDock->show();
+    m_agentCopilotDock->raise();
+}
+
 void QgisDesktopWindow::setupRibbonAndTaskPanel()
 {
     // Right-side task panel for atomic workflow tools (primary RS tool surface).
@@ -615,6 +623,7 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
     m_pipelineDock->hide();
 
     auto *agentCopilotDock = new sicnu::agent::AgentCopilotDockWidget( this );
+    m_agentCopilotDock = agentCopilotDock;
     addDockWidget( Qt::RightDockWidgetArea, agentCopilotDock );
     if ( m_projectContext )
     {
@@ -626,6 +635,11 @@ void QgisDesktopWindow::setupRibbonAndTaskPanel()
             &m_projectContext->workspaceService() );
     }
     agentCopilotDock->hide();
+    // First-class surface: the copilot must be discoverable from the 窗口
+    // menu like every other panel (it is a QDockWidget, so it also joins the
+    // chrome right-click popup via createPopupMenu automatically).
+    if ( m_windowMenu )
+        m_windowMenu->addAction( agentCopilotDock->toggleViewAction() );
 
     // Committed tool-call outputs are loaded by QgisDisplayManager auto-display
     // on DataManager::assetAdded (the dispatcher commits via the injected

@@ -26,6 +26,7 @@
     <file alias="closest_f_cility">icons/Closest_F_cility.svg</file>
     <file alias="cloud_m_sk">icons/Cloud_M_sk.svg</file>
     <file alias="cloud_sync">icons/Cloud_Sync.svg</file>
+    <file alias="copy">icons/Copy.svg</file>
     <file alias="color_r_">icons/Color_R_.svg</file>
     <file alias="connectivity">icons/Connectivity.svg</file>
     <file alias="contour">icons/Contour.svg</file>
@@ -49,6 +50,8 @@
     <file alias="extr_ct_by_m_sk">icons/Extr_ct_by_M_sk.svg</file>
     <file alias="fe_ture_extr_ct">icons/Fe_ture_Extr_ct.svg</file>
     <file alias="field_c_lc">icons/Field_C_lc.svg</file>
+    <file alias="file_new">icons/Workflow.svg</file>
+    <file alias="file_open">icons/O_en.svg</file>
     <file alias="fill_nod_t_">icons/Fill_NoD_t_.svg</file>
     <file alias="fill_sinks">icons/Fill_Sinks.svg</file>
     <file alias="fishnet">icons/Fishnet.svg</file>
@@ -91,6 +94,8 @@
     <file alias="north_arrow">icons/North_Arrow.svg</file>
     <file alias="o_en">icons/O_en.svg</file>
     <file alias="object_detect">icons/Object_Detect.svg</file>
+    <file alias="paste">icons/Paste.svg</file>
+    <file alias="qa_mask">icons/Cloud_M_sk.svg</file>
     <file alias="observer_point">icons/Observer_Point.svg</file>
     <file alias="overl_y">icons/Overl_y.svg</file>
     <file alias="pca">icons/PCA.svg</file>
@@ -113,6 +118,7 @@
     <file alias="re_roject">icons/Re_roject.svg</file>
     <file alias="recl_ssify">icons/Recl_ssify.svg</file>
     <file alias="recl_ssify_1">icons/Recl_ssify_1.svg</file>
+    <file alias="redo">icons/Redo.svg</file>
     <file alias="refresh_view">icons/Refresh_View.svg</file>
     <file alias="res_le">icons/Res_le.svg</file>
     <file alias="roughness">icons/Roughness.svg</file>
@@ -129,6 +135,7 @@
     <file alias="sc_le_b_r">icons/Sc_le_B_r.svg</file>
     <file alias="scheduler">icons/Scheduler.svg</file>
     <file alias="seg_ent_tion">icons/Seg_ent_tion.svg</file>
+    <file alias="sel_tool">icons/Select.svg</file>
     <file alias="select">icons/Select.svg</file>
     <file alias="select_by_attr">icons/Select_by_Attr.svg</file>
     <file alias="select_by_loc">icons/Select_by_Loc.svg</file>
@@ -144,6 +151,8 @@
     <file alias="subset_cli_">icons/Subset_Cli_.svg</file>
     <file alias="tin_model">icons/TIN_Model.svg</file>
     <file alias="t_ble">icons/T_ble.svg</file>
+    <file alias="task_cancel">icons/Stop.svg</file>
+    <file alias="task_run">icons/Quick_Run.svg</file>
     <file alias="terr_in_profile">icons/Terr_in_Profile.svg</file>
     <file alias="ther_l">icons/Ther_l.svg</file>
     <file alias="ti_e_co_osite">icons/Ti_e_Co_osite.svg</file>
@@ -156,6 +165,7 @@
     <file alias="tr_nsfor_crs">icons/Tr_nsfor_CRS.svg</file>
     <file alias="tr_vel_ti_e">icons/Tr_vel_Ti_e.svg</file>
     <file alias="unique_v_lues">icons/Unique_V_lues.svg</file>
+    <file alias="undo">icons/Undo.svg</file>
     <file alias="unsu_ervised">icons/Unsu_ervised.svg</file>
     <file alias="user">icons/User.svg</file>
     <file alias="v_lid_tion_ok">icons/V_lid_tion_OK.svg</file>

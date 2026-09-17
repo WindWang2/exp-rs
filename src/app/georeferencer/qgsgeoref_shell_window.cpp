@@ -396,14 +396,7 @@ QWidget *QgsGeorefShellWindow::makeCanvasPanel( QgsMapCanvas *canvas,
   f.setBold( true );
   f.setPointSize( (std::max)( 9, f.pointSize() ) );
   caption->setFont( f );
-  caption->setStyleSheet(
-    QStringLiteral(
-      "QLabel {"
-      "  background-color: #f0f3f6;"
-      "  color: #24292f;"
-      "  border-bottom: 1px solid #d0d7de;"
-      "  padding: 4px 8px;"
-      "}" ) );
+  caption->setProperty( "rsSurface", QStringLiteral( "caption" ) );
   tipWidget( caption, tr(
     "Layer / file name of the current canvas. Hover to see the full path.")  );
 

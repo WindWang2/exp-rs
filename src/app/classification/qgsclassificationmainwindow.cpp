@@ -110,6 +110,7 @@
 #include <QSizePolicy>
 #include <QSpinBox>
 #include <QStatusBar>
+#include <QStyle>
 #include <QTableWidget>
 #include <QTimer>
 #include <QToolBar>
@@ -1622,7 +1623,7 @@ void QgsClassificationMainWindow::populateStepPanels()
           "Select a class in the class quick list before digitizing." ),
       body );
     note->setWordWrap( true );
-    note->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+    note->setProperty( "rsTone", QStringLiteral( "muted" ) );
     lay->addWidget( note );
     lay->addStretch( 1 );
   }
@@ -1701,7 +1702,7 @@ void QgsClassificationMainWindow::populateStepPanels()
     auto *hint = new QLabel(
       tr( "After checking JM and spectral separability, press 'Mark as Reviewed' to finish this step." ), body );
     hint->setWordWrap( true );
-    hint->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+    hint->setProperty( "rsTone", QStringLiteral( "muted" ) );
     lay->addWidget( hint );
     lay->addStretch( 1 );
   }
@@ -1720,7 +1721,7 @@ void QgsClassificationMainWindow::populateStepPanels()
     auto *note = new QLabel(
       tr( "Classifier type, bands and training ratio are set in the Classifier toolbar at the bottom." ), body );
     note->setWordWrap( true );
-    note->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+    note->setProperty( "rsTone", QStringLiteral( "muted" ) );
     lay->addWidget( note );
 
     m_stepCvBtn = new QPushButton( tr( "Cross-Validation (CV)" ), body );
@@ -1748,7 +1749,7 @@ void QgsClassificationMainWindow::populateStepPanels()
       tr( "The preview covers the current viewport only and does not count as step completion; accuracy assessment follows the full-image Apply." ),
       body );
     tip->setWordWrap( true );
-    tip->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+    tip->setProperty( "rsTone", QStringLiteral( "muted" ) );
     lay->addWidget( tip );
     lay->addStretch( 1 );
   }
@@ -1785,7 +1786,7 @@ void QgsClassificationMainWindow::populateStepPanels()
       tr( "Accuracy comes from the holdout / validation split of the full-image Apply; export as CSV or open the enlarged view." ),
       body );
     hint->setWordWrap( true );
-    hint->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+    hint->setProperty( "rsTone", QStringLiteral( "muted" ) );
     lay->addWidget( hint );
   }
 
@@ -1805,7 +1806,7 @@ void QgsClassificationMainWindow::populateStepPanels()
           "By default results load into this window's layer management on the left; you can also skip this step and go to output." ),
       body );
     hint->setWordWrap( true );
-    hint->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+    hint->setProperty( "rsTone", QStringLiteral( "muted" ) );
     lay->addWidget( hint );
 
     auto addAlgoBtn = [this, body, lay]( RsPostProcessDialog::Algorithm a ) {
@@ -1895,7 +1896,7 @@ void QgsClassificationMainWindow::populateStepPanels()
           "Any successful export or load completes this step." ),
       body );
     hint->setWordWrap( true );
-    hint->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+    hint->setProperty( "rsTone", QStringLiteral( "muted" ) );
     lay->addWidget( hint );
     lay->addStretch( 1 );
   }
@@ -2032,12 +2033,16 @@ void QgsClassificationMainWindow::refreshWorkflowUi()
             gate->setText( tr( "Finished" ) );
           else
             gate->setText( tr( "Main Operation Available" ) );
-          gate->setStyleSheet( QStringLiteral( "color: #1a7f37;" ) );
+          gate->setProperty( "rsTone", QStringLiteral( "ok" ) );
+          gate->style()->unpolish( gate );
+          gate->style()->polish( gate );
         }
         else
         {
           gate->setText( tr( "Still needed: %1" ).arg( miss.join( QStringLiteral( "; " ) ) ) );
-          gate->setStyleSheet( QStringLiteral( "color: #9a6700;" ) );
+          gate->setProperty( "rsTone", QStringLiteral( "warn" ) );
+          gate->style()->unpolish( gate );
+          gate->style()->polish( gate );
         }
       }
     }

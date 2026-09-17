@@ -183,6 +183,16 @@ public:
     QMenuBar *appMenuBar();
 
     /**
+     * Re-host every shortcut-bearing QAction of the window's subtree onto the
+     * window itself. A QAction shortcut only fires while at least one of its
+     * associated widgets is visible; the detached menubar stays hidden, so
+     * without this every menu shortcut (Ctrl+N/O/S, Undo/Redo, Ctrl+Shift+P)
+     * is dead. Actions keep their menu membership — this only adds the
+     * window as a second host. Idempotent; call after menu/plugin changes.
+     */
+    void forwardActionShortcutsToWindow();
+
+    /**
      * QGIS-style panel/toolbar visibility menu (checkable toggles).
      * Used by ribbon right-click and QMainWindow empty-area popup.
      * Caller owns the returned menu (prefer WA_DeleteOnClose + popup).
@@ -364,6 +374,8 @@ public:
                                                                  const QString &displayName = {} );
     /** Show / raise the Data Manager catalog dock (left, tabified with Layers). */
     void showDataManagerPanel();
+    /** Show / raise the AI Copilot dock (right). */
+    void showAgentCopilot();
 
     // Classification (Phase 10A Task 10.2)
     void openClassificationWindow();
@@ -545,6 +557,7 @@ private:
     RsJobPanel *m_jobPanel = nullptr;
     QgsDockWidget *m_workflowDock = nullptr;
     QgsDockWidget *m_taskPanelDock = nullptr;
+    QDockWidget *m_agentCopilotDock = nullptr;
 
     sicnu::DataManagerPanel *m_dataManagerPanel = nullptr;
     QDockWidget *m_workspaceBrowserDock = nullptr;
