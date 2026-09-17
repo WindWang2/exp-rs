@@ -170,6 +170,7 @@ TEST_CASE( "Mini E2E: 3-node pipeline through IR, analyzer, optimizer and execut
 
     // 4. Execute; every artifact lands on disk.
     PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( makeSyntheticNodeExecutor() ); // #1006: explicit binding, no implicit default
     const QString dir = scratchDir( QStringLiteral( "mini" ) );
     REQUIRE( coordinator.startRun( optimized, dir ) );
     REQUIRE( waitForCompleted( coordinator ) );
@@ -193,6 +194,7 @@ TEST_CASE( "Crash consistency: abort at ~50%, resume reuses the prefix", "[d17][
     // simulation: the coordinator object is destroyed without completion).
     {
         PipelineRunCoordinator coordinator;
+        coordinator.setExecutor( makeSyntheticNodeExecutor() );
         REQUIRE( coordinator.startRun( chainDef( 10 ), dir ) );
         QSignalSpy finishedSpy( &coordinator, &PipelineRunCoordinator::nodeFinished );
         QEventLoop loop;
@@ -218,6 +220,7 @@ TEST_CASE( "Crash consistency: abort at ~50%, resume reuses the prefix", "[d17][
     // Succeeded with intact artifacts and matching signatures -> CacheHit;
     // 6..10 recompute and finish.
     PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( makeSyntheticNodeExecutor() );
     QString error;
     REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpointFile, &error ) );
     REQUIRE( waitForCompleted( resumeCoordinator ) );
@@ -260,6 +263,7 @@ TEST_CASE( "Full 100-node scale run under the 1.5 GiB RSS budget", "[d17][workfl
     const qint64 rssBefore = peakRssBytes();
 
     PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( makeSyntheticNodeExecutor() );
     coordinator.setMaxParallelism( 4 );
     const QString dir = scratchDir( QStringLiteral( "scale" ) );
     const auto started = std::chrono::steady_clock::now();
@@ -289,8 +293,13 @@ TEST_CASE( "All 11 shipped lab templates execute green through the full stack",
 {
     ensureApp();
     const QDir labsDir( QString( "%1/data/labs" ).arg( CMAKE_SOURCE_DIR ) );
-    const QStringList labFiles = labsDir.entryList( { "*.lab.json" }, QDir::Files, QDir::Name );
-    REQUIRE( labFiles.size() == 11 ); // the shipped teaching corpus
+    QStringList labFiles = labsDir.entryList( { "*.lab.json" }, QDir::Files, QDir::Name );
+    // D-160-7: the D16 temporal courseware pair ships a teaching-only
+    // lab8_temporal_analysis.lab.json (id temporal_phenology_timeline) that
+    // intentionally does not conform to the strict LabSpec-1.0 corpus loader;
+    // its grading runs headless in test_d16_temporal_phenology_e2e instead.
+    labFiles.removeAll( QStringLiteral( "lab8_temporal_analysis.lab.json" ) );
+    REQUIRE( labFiles.size() == 11 ); // the strict LabSpec-1.0 teaching corpus
 
     // Corpus aggregate truth (hand-counted on master: 3+2+1+1+2+0+2+1+1+1+2):
     // 16 operator-bound steps lift into runnable nodes across the 11 labs;
@@ -314,6 +323,7 @@ TEST_CASE( "All 11 shipped lab templates execute green through the full stack",
 
             UNSCOPED_INFO( "running " << labFile.toStdString() << " (" << def.nodes.size() << " nodes)" );
             PipelineRunCoordinator coordinator;
+            coordinator.setExecutor( makeSyntheticNodeExecutor() );
             const QString dir = scratchDir( spec.id );
             REQUIRE( coordinator.startRun( def, dir ) );
             REQUIRE( waitForCompleted( coordinator ) );

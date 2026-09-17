@@ -25,6 +25,7 @@
 #include "../harness/lab_tools.h"
 #include "../harness/capability_graph.h"
 #include "../harness/grounding_tools.h"
+#include "../harness/grounding_probes.h"
 #include "../harness/plan_tools.h"
 #include "../harness/recipe_tools.h"
 #include "../harness/run_loop.h"

@@ -10,7 +10,9 @@
 //   • Unbound: empty or unknown operatorId → typed refusal
 //     (error prefix ir2.operator_unbound:…); never silent synthetic success.
 //     Refusal is evaluated before port→param mapping.
-// Synthetic remains available for hermetic D17 tests via makeSyntheticNodeExecutor.
+// Synthetic stays available for hermetic D17 tests via
+// makeSyntheticNodeExecutor() in pipeline_run_coordinator.h (explicit
+// binding only — the coordinator has no implicit fallback, #1006).
 //
 
 #include "workflow/pipeline_run_coordinator.h"
@@ -56,9 +58,5 @@ bool isIr2OperatorBound( const QString &operatorId );
 /// Registry-backed executor for the IR2 designer dock / production path.
 /// Uses applyIr2InputPortMapping (see ir2_port_param_mapping.h) for multi-input.
 NodeExecutor makeRegistryNodeExecutor();
-
-/// Deterministic D17 synthetic executor (artifact bytes from node + inputs).
-/// Used by PipelineRunCoordinator when no executor is set, and by hermetic tests.
-NodeExecutor makeSyntheticNodeExecutor();
 
 } // namespace sicnu::workflow

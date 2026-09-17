@@ -68,17 +68,19 @@ Json::Value compilerProjection( const WorkflowIr &ir, const IrAnalysis &analysis
   // Facts echo: per input slot, the merged facts digest + fact_status —
   // enough to audit every verdict without duplicating the understanding
   // documents.
-  Json::Value slots( Json::objectValue );
+  // Named slotsEcho, not slots: `slots` collides with Qt's qobjectdefs
+  // macro of the same name when a Qt header reaches this TU.
+  Json::Value slotsEcho( Json::objectValue );
   for ( const std::string &slotName : analysis.facts.getMemberNames() )
   {
     Json::Value entry( Json::objectValue );
     entry["facts_digest"] = wfacts::workflowFactsDigest( analysis.facts[ slotName ] );
     if ( analysis.factStatus.isMember( slotName ) )
       entry["fact_status"] = analysis.factStatus[ slotName ];
-    slots[ slotName ] = entry;
+    slotsEcho[ slotName ] = entry;
   }
-  if ( !slots.empty() )
-    block["input_facts"] = slots;
+  if ( !slotsEcho.empty() )
+    block["input_facts"] = slotsEcho;
   block["analysis_verdict"] = analysis.verdict;
   block["ir_fingerprint_analyzed"] = clamp( analysis.irFingerprint );
 

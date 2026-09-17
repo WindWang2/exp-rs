@@ -10,6 +10,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QIODevice>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -71,37 +72,6 @@ bool isIr2OperatorBound( const QString &operatorId )
     return classifyIr2OperatorBinding( operatorId ) == Ir2OperatorBinding::Bound;
 }
 
-NodeExecutor makeSyntheticNodeExecutor()
-{
-    return []( const NodeFact &node, const QHash<QString, QString> &inputArtifacts,
-               const QString &runDirectory ) -> NodeExecutionResult {
-        NodeExecutionResult result;
-        QDir().mkpath( runDirectory );
-        const QString artifact =
-            QDir( runDirectory ).filePath( QStringLiteral( "%1.artifact" ).arg( node.nodeId ) );
-        QFile file( artifact );
-        if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
-        {
-            result.errorMessage = QStringLiteral( "cannot write artifact for '%1'" ).arg( node.nodeId );
-            return result;
-        }
-        QByteArray payload;
-        payload += QStringLiteral( "d17-node %1 op %2\n" ).arg( node.nodeId, node.operatorId ).toUtf8();
-        // Keys are IR2 target port names (D-W6); sorted for determinism.
-        QStringList ports = inputArtifacts.keys();
-        std::sort( ports.begin(), ports.end() );
-        for ( const QString &port : ports )
-            payload += QStringLiteral( "in %1=%2\n" )
-                           .arg( port, inputArtifacts.value( port ) )
-                           .toUtf8();
-        file.write( payload );
-        file.close();
-        result.success = true;
-        result.artifactPath = artifact;
-        return result;
-    };
-}
-
 NodeExecutor makeRegistryNodeExecutor()
 {
     return []( const NodeFact &node, const QHash<QString, QString> &inputArtifacts,
@@ -135,13 +105,21 @@ NodeExecutor makeRegistryNodeExecutor()
         {
             const Json::Value resultJson = op->execute( params, context );
             NodeExecutionResult result;
-            result.success = true;
             result.artifactPath = extractOutputPath( resultJson, defaultOutput );
-            // If the operator reported success but produced no file, still record the
-            // declared output path so checkpoints stay path-shaped (fail-open on
-            // existence — operator already returned).
             if ( result.artifactPath.isEmpty() )
                 result.artifactPath = defaultOutput;
+            // #1002 fail-closed: operator success must be backed by an
+            // artifact on disk. Publishing a path that does not exist would
+            // let checkpoints and downstream nodes consume a phantom file.
+            if ( !QFileInfo::exists( result.artifactPath ) )
+            {
+                NodeExecutionResult missing;
+                missing.errorMessage =
+                    QStringLiteral( "ir2.operator_failed: missing artifact '%1' (%2) node '%3'" )
+                        .arg( result.artifactPath, node.operatorId, node.nodeId );
+                return missing;
+            }
+            result.success = true;
             return result;
         }
         catch ( const sicnu::operators::RSOperatorError &e )
