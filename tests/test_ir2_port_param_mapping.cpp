@@ -1,13 +1,25 @@
 // tests/test_ir2_port_param_mapping.cpp — D18 D-W6 multi-input port→param + unbound refuse
 #include <catch2/catch_test_macros.hpp>
 
+#include "operators/framework/rs_operator.h"
+#include "operators/framework/rs_operator_context.h"
+#include "operators/framework/rs_operator_error.h"
+#include "operators/framework/rs_operator_registry.h"
 #include "workflow/ir2_port_param_mapping.h"
 #include "workflow/ir2_registry_node_executor.h"
+#include "workflow/pipeline_run_coordinator.h"
 
+#include <QApplication>
+#include <QEventLoop>
+#include <QFile>
 #include <QHash>
-#include <QString>
+#include <QSignalSpy>
+#include <QTemporaryDir>
+#include <QTimer>
 
 #include <json/json.h>
+
+#include <memory>
 
 using namespace sicnu::workflow;
 
@@ -153,4 +165,165 @@ TEST_CASE( "Unbound empty and unknown still refuse with stable prefix", "[d18][i
     REQUIRE( params["input"].asString() == "/tmp/should_not_matter.tif" );
     // Refusal result remains failed regardless of mapped params.
     REQUIRE_FALSE( emptyRefusal.success );
+}
+
+namespace
+{
+
+// Returns the declared output path WITHOUT writing any file — models a
+// metadata-only success or a swallowed write failure (#1002).
+class GhostArtifactOperator : public sicnu::operators::RSOperator
+{
+  public:
+    std::string name() const override { return "test:ir2_ghost_artifact"; }
+    std::string group() const override { return "test"; }
+    std::string description() const override { return "declares an output without writing it"; }
+    Json::Value schema() const override { return Json::Value( Json::objectValue ); }
+    Json::Value run( const Json::Value &params, sicnu::operators::RSOperatorContext & ) override
+    {
+        Json::Value result( Json::objectValue );
+        result["output"] = params.get( "output", "" ).asString();
+        return result;
+    }
+};
+
+// Writes the declared output file — the honest bound-operator contract.
+class WritingOperator : public sicnu::operators::RSOperator
+{
+  public:
+    std::string name() const override { return "test:ir2_writes_artifact"; }
+    std::string group() const override { return "test"; }
+    std::string description() const override { return "writes the declared output file"; }
+    Json::Value schema() const override { return Json::Value( Json::objectValue ); }
+    Json::Value run( const Json::Value &params, sicnu::operators::RSOperatorContext & ) override
+    {
+        const std::string output = params.get( "output", "" ).asString();
+        QFile file( QString::fromStdString( output ) );
+        if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+            throw sicnu::operators::RSOperatorError(
+                sicnu::operators::ErrorCode::ComputationError,
+                "cannot write output: " + output );
+        file.write( "artifact" );
+        file.close();
+        Json::Value result( Json::objectValue );
+        result["output"] = output;
+        return result;
+    }
+};
+
+QApplication *ensureApp()
+{
+    static QApplication *app = nullptr;
+    if ( !app )
+    {
+        static int fakeArgc = 1;
+        static char fakeArgv[] = "test_ir2_port_param_mapping";
+        static char *fakeArgvPtr[] = { fakeArgv };
+        app = new QApplication( fakeArgc, fakeArgvPtr );
+    }
+    return app;
+}
+
+bool waitForCompleted( PipelineRunCoordinator &coordinator, int timeoutMs = 30000 )
+{
+    if ( coordinator.hasCompleted() )
+        return true;
+    QSignalSpy spy( &coordinator, &PipelineRunCoordinator::pipelineCompleted );
+    QEventLoop loop;
+    QObject::connect( &coordinator, &PipelineRunCoordinator::pipelineCompleted, &loop,
+                      &QEventLoop::quit, Qt::QueuedConnection );
+    QTimer::singleShot( timeoutMs, &loop, &QEventLoop::quit );
+    loop.exec();
+    return spy.count() >= 1 || coordinator.hasCompleted();
+}
+
+WorkflowDefinition singleNodeDef( const QString &operatorId )
+{
+    WorkflowDefinition def;
+    def.workflowId = QStringLiteral( "wf-ir2-executor" );
+    NodeFact n;
+    n.nodeId = QStringLiteral( "n1" );
+    n.operatorId = operatorId;
+    n.displayName = n.nodeId;
+    n.outputPorts = { makePort( QStringLiteral( "output" ), false ) };
+    def.nodes.append( n );
+    return def;
+}
+
+} // namespace
+
+TEST_CASE( "Registry executor fails closed when the declared artifact is absent",
+           "[d18][ir2][executor][1002]" )
+{
+    auto &registry = sicnu::operators::RSOperatorRegistry::instance();
+    if ( !registry.hasOperator( "test:ir2_ghost_artifact" ) )
+        registry.registerOperator(
+            "test:ir2_ghost_artifact", [] { return std::make_unique<GhostArtifactOperator>(); } );
+    if ( !registry.hasOperator( "test:ir2_writes_artifact" ) )
+        registry.registerOperator(
+            "test:ir2_writes_artifact", [] { return std::make_unique<WritingOperator>(); } );
+
+    const NodeExecutor executor = makeRegistryNodeExecutor();
+    QTemporaryDir runDir;
+    REQUIRE( runDir.isValid() );
+
+    // Bound operator that returns success JSON without the file → refusal,
+    // not a Succeeded node publishing a phantom path (#1002).
+    NodeFact ghost = makeNode( QStringLiteral( "ghost" ), { makePort( QStringLiteral( "input" ) ) } );
+    ghost.operatorId = QStringLiteral( "test:ir2_ghost_artifact" );
+    const NodeExecutionResult ghostResult = executor( ghost, {}, runDir.path() );
+    REQUIRE_FALSE( ghostResult.success );
+    REQUIRE( ghostResult.artifactPath.isEmpty() );
+    REQUIRE( ghostResult.errorMessage.startsWith(
+        QLatin1String( "ir2.operator_failed: missing artifact" ) ) );
+    REQUIRE( ghostResult.errorMessage.contains( QStringLiteral( "ghost" ) ) );
+
+    // Bound operator whose artifact exists → success.
+    NodeFact real = makeNode( QStringLiteral( "real" ), { makePort( QStringLiteral( "input" ) ) } );
+    real.operatorId = QStringLiteral( "test:ir2_writes_artifact" );
+    const NodeExecutionResult realResult = executor( real, {}, runDir.path() );
+    REQUIRE( realResult.success );
+    REQUIRE( QFile::exists( realResult.artifactPath ) );
+
+    registry.unregisterOperator( "test:ir2_ghost_artifact" );
+    registry.unregisterOperator( "test:ir2_writes_artifact" );
+}
+
+TEST_CASE( "Coordinator without a bound executor fails nodes instead of synthesizing",
+           "[d18][ir2][executor][1006]" )
+{
+    ensureApp();
+    PipelineRunCoordinator coordinator; // deliberately no setExecutor
+    QTemporaryDir runDir;
+    REQUIRE( runDir.isValid() );
+    REQUIRE( coordinator.startRun( singleNodeDef( QStringLiteral( "rs:step" ) ), runDir.path() ) );
+    REQUIRE( waitForCompleted( coordinator ) );
+
+    const auto statuses = coordinator.getAllStatuses();
+    REQUIRE( statuses.size() == 1 );
+    const NodeStatusSnapshot snapshot = statuses.value( QStringLiteral( "n1" ) );
+    REQUIRE( snapshot.state == ExecutionState::Failed );
+    REQUIRE( snapshot.errorMessage.startsWith( QLatin1String( "ir2.executor_missing:" ) ) );
+    REQUIRE( snapshot.outputArtifactPath.isEmpty() );
+}
+
+TEST_CASE( "Registry executor end-to-end: unbound node fails the run",
+           "[d18][ir2][executor][1006]" )
+{
+    ensureApp();
+    PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( makeRegistryNodeExecutor() );
+    QTemporaryDir runDir;
+    REQUIRE( runDir.isValid() );
+    REQUIRE( coordinator.startRun(
+        singleNodeDef( QStringLiteral( "rs:definitely_not_registered_d18_e2e" ) ),
+        runDir.path() ) );
+    REQUIRE( waitForCompleted( coordinator ) );
+
+    const auto statuses = coordinator.getAllStatuses();
+    REQUIRE( statuses.size() == 1 );
+    const NodeStatusSnapshot snapshot = statuses.value( QStringLiteral( "n1" ) );
+    REQUIRE( snapshot.state == ExecutionState::Failed );
+    REQUIRE( snapshot.errorMessage.startsWith( QLatin1String( kIr2OperatorUnboundPrefix ) ) );
+    REQUIRE( snapshot.outputArtifactPath.isEmpty() );
 }

@@ -35,6 +35,7 @@ struct SampleCatalogRow
     AnnotationSourceType labelSource = AnnotationSourceType::Human;
     bool hasPseudoLabel = false;
     QString groupId;
+    QString crs; ///< per-sample CRS authority string ("" = unspecified; #1007 QA evidence)
 };
 
 struct SampleCatalogFilter

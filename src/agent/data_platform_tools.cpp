@@ -32,6 +32,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 
 #include <algorithm>
 #include <memory>
@@ -1067,6 +1068,7 @@ QVector<SampleCatalogRow> loadCatalogRows( DatasetStore &store, const DatasetVer
                     tips.first().sourceType() == AnnotationSourceType::ModelAssisted;
                 row.classCode = tips.first().classCode();
             }
+            row.crs = sample.crs();
             rows.append( row );
             if ( static_cast<qint64>( rows.size() ) >= maxRows )
                 break;
@@ -1075,6 +1077,7 @@ QVector<SampleCatalogRow> loadCatalogRows( DatasetStore &store, const DatasetVer
     }
     return rows;
 }
+
 
 QVariantMap datasetQa( const QVariantMap &args )
 {
@@ -1095,6 +1098,27 @@ QVariantMap datasetQa( const QVariantMap &args )
 
     const QVector<SampleCatalogRow> catalogRows = loadCatalogRows( *store, versionId );
     inputs.catalogSummary = foundry.summarizeSamples( catalogRows );
+
+    // #1004: the scan window bounds the uniqueness evidence — report it so
+    // identity never claims Pass beyond what was scanned.
+    inputs.scannedSamples = static_cast<qint64>( catalogRows.size() );
+    inputs.totalSamples = store->sampleCount( versionId );
+    inputs.scanCapped = inputs.scannedSamples >= kMaxCatalogScan;
+
+    // #1007: schema CRS from the manifest + distinct sample CRS in evidence.
+    {
+        const QJsonObject manifestJson =
+            QJsonDocument::fromJson( record->manifestJson().toUtf8() ).object();
+        const auto manifest = sicnu::dataset::DatasetManifest::fromJson( manifestJson );
+        if ( manifest.has_value() )
+            inputs.schemaCrs = manifest.value().schema().crs;
+        QSet<QString> distinct;
+        for ( const SampleCatalogRow &row : catalogRows )
+            if ( !row.crs.isEmpty() )
+                distinct.insert( row.crs );
+        inputs.distinctSampleCrs = distinct.values();
+        std::sort( inputs.distinctSampleCrs.begin(), inputs.distinctSampleCrs.end() );
+    }
 
     // Identity uniqueness over the scanned evidence (honest for the scan window).
     {
@@ -1136,11 +1160,9 @@ QVariantMap datasetQa( const QVariantMap &args )
 
     const DatasetQaReport report = foundry.runQa( inputs );
     QJsonObject json = report.toJson();
-    const qint64 scanned = static_cast<qint64>( catalogRows.size() );
-    const qint64 sampleCount = store->sampleCount( versionId );
-    json.insert( QStringLiteral( "scanned" ), scanned );
-    json.insert( QStringLiteral( "scan_capped" ), scanned >= kMaxCatalogScan );
-    json.insert( QStringLiteral( "sample_count" ), sampleCount );
+    json.insert( QStringLiteral( "scanned" ), inputs.scannedSamples );
+    json.insert( QStringLiteral( "scan_capped" ), inputs.scanCapped );
+    json.insert( QStringLiteral( "sample_count" ), inputs.totalSamples );
     return toVariant( json );
 }
 

@@ -127,10 +127,58 @@ DatasetQaReport buildDatasetQaReport( const DatasetQaInputs &inputs )
             category.evidence.insert( QStringLiteral( "duplicate_sample_ids" ),
                                       inputs.duplicateSampleIds );
         }
+        else if ( inputs.scanCapped || inputs.totalSamples > inputs.scannedSamples )
+        {
+            // #1004: uniqueness was computed over a bounded scan window —
+            // duplicates may exist beyond it; never claim Pass on partial
+            // evidence.
+            category.verdict = AuditVerdict::Unknown;
+            category.summary = QStringLiteral( "uniqueness evidence incomplete: scanned %1 of %2 sample(s)" )
+                                   .arg( inputs.scannedSamples )
+                                   .arg( inputs.totalSamples );
+            category.evidence.insert( QStringLiteral( "scanned" ), inputs.scannedSamples );
+            category.evidence.insert( QStringLiteral( "sample_count" ), inputs.totalSamples );
+            category.evidence.insert( QStringLiteral( "scan_capped" ), inputs.scanCapped );
+        }
         else
         {
             category.verdict = AuditVerdict::Pass;
             category.summary = QStringLiteral( "version frozen; sample ids unique in evidence" );
+        }
+        report.categories().append( category );
+    }
+
+    // crs (#1007): silent CRS gaps misplace downstream patch/geometry work.
+    {
+        DatasetQaCategory category;
+        category.name = QStringLiteral( "crs" );
+        if ( inputs.schemaCrs.isEmpty() )
+        {
+            category.verdict = AuditVerdict::Unknown;
+            category.summary =
+                QStringLiteral( "schema CRS empty (mixed/unspecified)" );
+        }
+        else
+        {
+            category.evidence.insert( QStringLiteral( "schema_crs" ), inputs.schemaCrs );
+            QStringList conflicts;
+            for ( const QString &crs : inputs.distinctSampleCrs )
+                if ( crs != inputs.schemaCrs )
+                    conflicts.append( crs );
+            if ( !conflicts.isEmpty() )
+            {
+                category.verdict = AuditVerdict::Warn;
+                category.summary = QStringLiteral( "%1 sample CRS string(s) disagree with schema CRS" )
+                                       .arg( conflicts.size() );
+                category.evidence.insert( QStringLiteral( "conflicting_sample_crs" ),
+                                          QJsonArray::fromStringList( conflicts ) );
+            }
+            else
+            {
+                category.verdict = AuditVerdict::Pass;
+                category.summary =
+                    QStringLiteral( "schema CRS declared; scanned sample CRS agrees or is unspecified" );
+            }
         }
         report.categories().append( category );
     }

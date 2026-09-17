@@ -45,6 +45,11 @@ void setCanvasExtentReprojected( QgsMapCanvas *canvas, QgsMapLayer *layer )
         }
         catch ( ... )
         {
+            // #1005: extent stays in the layer CRS — say so instead of
+            // silently setting a wrong-canvas extent.
+            qWarning().noquote() << "canvas extent: CRS transform from"
+                                 << layer->crs().authid() << "to" << canvasCrs.authid()
+                                 << "failed; using the untransformed layer extent";
         }
     }
     canvas->setExtent( extent );
