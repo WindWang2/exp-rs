@@ -23,6 +23,18 @@ namespace {
 
 Json::Value emptyObject() { return Json::Value( Json::objectValue ); }
 
+// Same local schema helper every sibling harness TU carries (each defines its
+// own in an anonymous namespace; grounding_tools.cpp:32 is the canonical body).
+Json::Value objectSchema( Json::Value properties, Json::Value required )
+{
+  Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
+  schema["properties"] = std::move( properties );
+  if ( required.isArray() && !required.empty() )
+    schema["required"] = std::move( required );
+  return schema;
+}
+
 /// One scope's projection out of an understanding BODY. Every projection
 /// copies only keys the scope owns; absent keys are absent from the
 /// projection and their fact_status stays "unknown" (the body's own

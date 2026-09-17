@@ -486,6 +486,7 @@ void QgisDesktopWindow::zoomToLayer()
         QgsMapLayer *target = selected.first();
         QgsRectangle extent = target->extent();
         const QgsCoordinateReferenceSystem canvasCrs = m_mapCanvas->mapSettings().destinationCrs();
+        bool transformFailed = false;
         if ( target->crs().isValid() && canvasCrs.isValid() && target->crs() != canvasCrs )
         {
             try
@@ -495,11 +496,20 @@ void QgisDesktopWindow::zoomToLayer()
             }
             catch ( ... )
             {
+                // #1005: surface the degraded zoom instead of silently
+                // applying the extent in the wrong CRS.
+                transformFailed = true;
+                qWarning().noquote() << "zoomToLayer: CRS transform from"
+                                     << target->crs().authid() << "to" << canvasCrs.authid()
+                                     << "failed; zooming to the untransformed layer extent";
             }
         }
         m_mapCanvas->setExtent(extent);
         m_mapCanvas->refresh();
-        statusBar()->showMessage(tr("Zoom to Layer"), 2000);
+        statusBar()->showMessage( transformFailed
+                                      ? tr( "Zoom to Layer (CRS transform failed — extent in layer CRS)" )
+                                      : tr( "Zoom to Layer" ),
+                                  2000 );
     }
 }
 

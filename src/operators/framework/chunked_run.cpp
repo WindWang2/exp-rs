@@ -79,9 +79,11 @@ ChunkedRunResult runResumable( const TileRunSpec &spec, RSOperatorContext &conte
                                const std::function<void( const TilePayload & )> &sink,
                                const ChunkedRunOptions &options )
 {
+    // GCC 16 rejects a ?: mixing filesystem::path and std::string operands —
+    // type both arms explicitly.
     std::filesystem::path workDir = std::filesystem::path( context.workDir().empty()
                                                                ? std::filesystem::temp_directory_path()
-                                                               : context.workDir() );
+                                                               : std::filesystem::path( context.workDir() ) );
     const std::string scratchRoot =
         options.scratchRoot.empty() ? workDir.generic_string() : options.scratchRoot;
     const std::string stateBase =

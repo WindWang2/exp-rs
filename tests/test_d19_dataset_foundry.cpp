@@ -153,6 +153,20 @@ TEST_CASE( "D19 FeatureSet MissingRequiredColumn yields Fail not Unknown",
     CHECK( join.verdict == AuditVerdict::Fail );
     REQUIRE( !join.findings.isEmpty() );
     CHECK( join.findings.first().status == FeatureJoinStatus::MissingRequiredColumn );
+
+    // #1003 residual: a present-but-null required value is as absent as a
+    // missing key — external FeatureSets commonly encode missing as JSON null.
+    FeatureRow nullRow;
+    nullRow.sampleId = QStringLiteral( "s1" );
+    nullRow.values.insert( QStringLiteral( "ndvi_mean" ), QJsonValue() ); // JSON null
+    const auto nullJoin = joinFeaturesBySampleId( set, QVector<FeatureRow>{ nullRow },
+                                                  QStringList{ QStringLiteral( "s1" ) },
+                                                  QStringLiteral( "version-a" ) );
+    CHECK( nullJoin.matched == 0 );
+    CHECK( nullJoin.missingRequiredColumns == 1 );
+    CHECK( nullJoin.verdict == AuditVerdict::Fail );
+    REQUIRE( !nullJoin.findings.isEmpty() );
+    CHECK( nullJoin.findings.first().status == FeatureJoinStatus::MissingRequiredColumn );
 }
 
 TEST_CASE( "D19 sample catalog pages and summaries stay bounded", "[d19][foundry][catalog]" )
@@ -218,6 +232,75 @@ TEST_CASE( "D19 QA labels stay Unknown unless labelsAudited",
             labels = category.verdict;
     }
     CHECK( labels == AuditVerdict::Pass );
+}
+
+TEST_CASE( "D19 QA identity stays Unknown when uniqueness evidence is incomplete",
+           "[d19][foundry][qa][1004]" )
+{
+    auto identityVerdict = []( const DatasetQaInputs &inputs ) {
+        const DatasetQaReport report = buildDatasetQaReport( inputs );
+        for ( const DatasetQaCategory &category : report.categories() )
+            if ( category.name == QLatin1String( "identity" ) )
+                return category.verdict;
+        return AuditVerdict::Unknown;
+    };
+
+    DatasetQaInputs inputs;
+    inputs.datasetVersionId = QStringLiteral( "v-cap" );
+    inputs.versionFrozen = true;
+    inputs.duplicateSampleIds = 0;
+
+    // Complete evidence: uniqueness over the full version claims Pass.
+    inputs.scannedSamples = 10;
+    inputs.totalSamples = 10;
+    inputs.scanCapped = false;
+    CHECK( identityVerdict( inputs ) == AuditVerdict::Pass );
+
+    // #1004: scan window capped — duplicates may live beyond it, never Pass.
+    inputs.scannedSamples = 10000;
+    inputs.totalSamples = 25000;
+    inputs.scanCapped = true;
+    CHECK( identityVerdict( inputs ) == AuditVerdict::Unknown );
+
+    // Uncapped, but the version holds more samples than were scanned.
+    inputs.scannedSamples = 100;
+    inputs.totalSamples = 150;
+    inputs.scanCapped = false;
+    CHECK( identityVerdict( inputs ) == AuditVerdict::Unknown );
+}
+
+TEST_CASE( "D19 QA carries a CRS category for schema/sample CRS honesty",
+           "[d19][foundry][qa][1007]" )
+{
+    auto crsCategory = []( const DatasetQaInputs &inputs ) {
+        const DatasetQaReport report = buildDatasetQaReport( inputs );
+        for ( const DatasetQaCategory &category : report.categories() )
+            if ( category.name == QLatin1String( "crs" ) )
+                return category;
+        return DatasetQaCategory{};
+    };
+
+    DatasetQaInputs inputs;
+    inputs.datasetVersionId = QStringLiteral( "v-crs" );
+    inputs.versionFrozen = true;
+
+    // Empty schema CRS means mixed/unspecified — must surface, not stay silent.
+    inputs.schemaCrs = QString();
+    CHECK( crsCategory( inputs ).verdict == AuditVerdict::Unknown );
+
+    inputs.schemaCrs = QStringLiteral( "EPSG:32650" );
+    inputs.distinctSampleCrs = { QStringLiteral( "EPSG:32650" ) };
+    CHECK( crsCategory( inputs ).verdict == AuditVerdict::Pass );
+
+    // Sample CRS unspecified under a declared schema stays Pass.
+    inputs.distinctSampleCrs.clear();
+    CHECK( crsCategory( inputs ).verdict == AuditVerdict::Pass );
+
+    inputs.distinctSampleCrs = { QStringLiteral( "EPSG:4326" ) };
+    const DatasetQaCategory conflict = crsCategory( inputs );
+    CHECK( conflict.verdict == AuditVerdict::Warn );
+    CHECK( conflict.evidence.value( QStringLiteral( "conflicting_sample_crs" ) ).toArray().size()
+           == 1 );
 }
 
 TEST_CASE( "D19 QA report uses PASS/WARN/FAIL/UNKNOWN categories", "[d19][foundry][qa]" )

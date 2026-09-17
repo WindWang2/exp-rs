@@ -264,7 +264,11 @@ FeatureJoinResult joinFeaturesBySampleId( const FeatureSet &featureSet,
         bool missingRequired = false;
         for ( const QString &name : required )
         {
-            if ( !row.values.contains( name ) )
+            // #1003: external tables encode absent required fields as JSON
+            // null — a present key with a Null/Undefined value must not count
+            // as a filled column (QJsonObject::contains passes it through).
+            const QJsonValue value = row.values.value( name );
+            if ( value.isUndefined() || value.isNull() )
             {
                 missingRequired = true;
                 FeatureJoinFinding finding;

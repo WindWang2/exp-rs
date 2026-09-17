@@ -95,6 +95,7 @@ TEST_CASE( "Single-node run succeeds and writes a parseable checkpoint", "[d17][
 {
     ensureApp();
     PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( makeSyntheticNodeExecutor() ); // #1006: explicit binding, no implicit default
     const QString dir = scratchDir( QStringLiteral( "single" ) );
 
     REQUIRE( coordinator.startRun( chain( 1 ), dir ) );
@@ -133,7 +134,8 @@ TEST_CASE( "Failure at node 5 skips the downstream cascade", "[d17][workflow][en
     };
 
     QString error;
-    REQUIRE( coordinator.startRun( chain( 10 ), dir, &error ) );
+    // Bind BEFORE startRun: the coordinator has no implicit synthetic default
+    // (#1006) — a post-startRun bind raced the first dispatched node.
     coordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &, const QString &dir ) {
         NodeExecutionResult result;
         if ( node.nodeId == QLatin1String( "node_5" ) )
@@ -155,6 +157,7 @@ TEST_CASE( "Failure at node 5 skips the downstream cascade", "[d17][workflow][en
         result.artifactPath = artifact;
         return result;
     } );
+    REQUIRE( coordinator.startRun( chain( 10 ), dir, &error ) );
     Q_UNUSED( error );
 
     REQUIRE( waitForCompleted( coordinator ) );
@@ -178,7 +181,7 @@ TEST_CASE( "Resume from checkpoint reuses exactly the succeeded prefix", "[d17][
     // Run 1: node 5 fails.
     {
         PipelineRunCoordinator coordinator;
-        REQUIRE( coordinator.startRun( chain( 10 ), dir ) );
+        // Bind BEFORE startRun (#1006: no implicit synthetic default).
         coordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &, const QString &dir ) {
             NodeExecutionResult result;
             if ( node.nodeId == QLatin1String( "node_5" ) )
@@ -194,6 +197,7 @@ TEST_CASE( "Resume from checkpoint reuses exactly the succeeded prefix", "[d17][
             result.artifactPath = artifact;
             return result;
         } );
+        REQUIRE( coordinator.startRun( chain( 10 ), dir ) );
         REQUIRE( waitForCompleted( coordinator ) );
         checkpointFile = coordinator.checkpointPath();
         REQUIRE( QFile::exists( checkpointFile ) );
@@ -202,7 +206,6 @@ TEST_CASE( "Resume from checkpoint reuses exactly the succeeded prefix", "[d17][
     // Run 2: fresh coordinator, "environment fixed" (no failing node), resume.
     PipelineRunCoordinator resumeCoordinator;
     QString error;
-    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpointFile, &error ) );
     resumeCoordinator.setExecutor( []( const NodeFact &node, const QHash<QString, QString> &, const QString &dir ) {
         NodeExecutionResult result;
         const QString artifact = QDir( dir ).filePath( node.nodeId + QStringLiteral( ".artifact" ) );
@@ -220,6 +223,7 @@ TEST_CASE( "Resume from checkpoint reuses exactly the succeeded prefix", "[d17][
         return result;
     } );
 
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpointFile, &error ) );
     REQUIRE( waitForCompleted( resumeCoordinator ) );
 
     const auto postStatuses = resumeCoordinator.getAllStatuses();
@@ -269,6 +273,7 @@ TEST_CASE( "Resume works when the checkpoint document order is NOT topological",
 
     {
         PipelineRunCoordinator coordinator;
+        coordinator.setExecutor( makeSyntheticNodeExecutor() );
         REQUIRE( coordinator.startRun( def, dir ) );
         REQUIRE( waitForCompleted( coordinator ) );
         checkpointFile = coordinator.checkpointPath();
@@ -276,6 +281,7 @@ TEST_CASE( "Resume works when the checkpoint document order is NOT topological",
     }
 
     PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( makeSyntheticNodeExecutor() );
     QString error;
     REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpointFile, &error ) );
     REQUIRE( waitForCompleted( resumeCoordinator ) );
@@ -311,6 +317,7 @@ TEST_CASE( "Cancel before dispatch marks everything Cancelled", "[d17][workflow]
 {
     ensureApp();
     PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( makeSyntheticNodeExecutor() );
     const QString dir = scratchDir( QStringLiteral( "cancel" ) );
 
     // Cancel from inside the event loop: requestCancel() emits
@@ -334,6 +341,7 @@ TEST_CASE( "Diamond workflow executes the converging node once", "[d17][workflow
 {
     ensureApp();
     PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( makeSyntheticNodeExecutor() );
     const QString dir = scratchDir( QStringLiteral( "diamond" ) );
 
     WorkflowDefinition def;

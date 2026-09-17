@@ -162,9 +162,11 @@ TEST_CASE( "scenario3b_pipeline_run_coordinator_identity", "[d18][mission][e2e]"
 TEST_CASE( "scenario3c_ir2_registry_bind_policy", "[d18][mission][e2e]" )
 {
   // Contract (D-W5): production IR2 dock installs makeRegistryNodeExecutor.
-  // Unbound nodes fail with a stable prefix; they must not silently succeed
-  // via the D17 synthetic default. Exercise the header-inline refusal helper
-  // (same path makeRegistryNodeExecutor uses before port→param mapping).
+  // Unbound nodes fail with a stable prefix; since #1006 the coordinator has
+  // NO implicit synthetic default — an unset executor is a typed node failure
+  // (ir2.executor_missing). Both default paths are locked end-to-end in
+  // test_ir2_port_param_mapping.cpp ([1002]/[1006] cases); this case pins
+  // the refusal helper contract makeRegistryNodeExecutor shares.
   using sicnu::workflow::Ir2OperatorBinding;
   using sicnu::workflow::NodeExecutionResult;
   using sicnu::workflow::NodeFact;

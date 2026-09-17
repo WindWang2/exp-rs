@@ -74,6 +74,13 @@ struct NodeExecutionResult
 using NodeExecutor = std::function<NodeExecutionResult(
     const NodeFact &node, const QHash<QString, QString> &inputArtifacts, const QString &runDirectory )>;
 
+/// Deterministic synthetic executor (D17 hermetic tests): artifact bytes are
+/// a function of the node signature. Bind it explicitly via setExecutor —
+/// the coordinator never falls back to it (#1006: a run without a bound
+/// executor fails its nodes with ir2.executor_missing instead of silently
+/// synthesizing success).
+NodeExecutor makeSyntheticNodeExecutor();
+
 class PipelineRunCoordinator : public QObject
 {
     Q_OBJECT
@@ -104,6 +111,10 @@ class PipelineRunCoordinator : public QObject
     /// documents, which complete synchronously inside startRun/resume).
     bool hasCompleted() const;
 
+    /// Binds the node executor (production: makeRegistryNodeExecutor from
+    /// ir2_registry_node_executor.h; hermetic tests: makeSyntheticNodeExecutor).
+    /// A run started without a bound executor fails every node — there is no
+    /// implicit synthetic fallback (#1006).
     void setExecutor( NodeExecutor executor );
     void setMaxParallelism( int workers );
 

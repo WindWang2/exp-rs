@@ -137,38 +137,38 @@ QString atomicWriteJson( const QString &path, const QJsonObject &document )
     return path;
 }
 
-/// Deterministic default executor (D17 hermetic tests): artifact bytes are a
-/// function of the node signature. Production IR2 dock installs
-/// makeRegistryNodeExecutor() instead — see ir2_registry_node_executor.h.
-NodeExecutionResult syntheticExecute( const NodeFact &node, const QHash<QString, QString> &inputArtifacts,
-                                      const QString &runDirectory )
-{
-    NodeExecutionResult result;
-    QDir().mkpath( runDirectory );
-    const QString artifact = QDir( runDirectory )
-                                 .filePath( QStringLiteral( "%1.artifact" ).arg( node.nodeId ) );
-    QFile file( artifact );
-    if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
-    {
-        result.errorMessage = QStringLiteral( "cannot write artifact for '%1'" ).arg( node.nodeId );
-        return result;
-    }
-    QByteArray payload;
-    payload += QStringLiteral( "d17-node %1 op %2\n" ).arg( node.nodeId, node.operatorId ).toUtf8();
-    QStringList ports = inputArtifacts.keys();
-    std::sort( ports.begin(), ports.end() );
-    for ( const QString &port : ports )
-        payload += QStringLiteral( "in %1=%2\n" )
-                       .arg( port, inputArtifacts.value( port ) )
-                       .toUtf8();
-    file.write( payload );
-    file.close();
-    result.success = true;
-    result.artifactPath = artifact;
-    return result;
-}
-
 } // namespace
+
+NodeExecutor makeSyntheticNodeExecutor()
+{
+    return []( const NodeFact &node, const QHash<QString, QString> &inputArtifacts,
+               const QString &runDirectory ) -> NodeExecutionResult {
+        NodeExecutionResult result;
+        QDir().mkpath( runDirectory );
+        const QString artifact =
+            QDir( runDirectory ).filePath( QStringLiteral( "%1.artifact" ).arg( node.nodeId ) );
+        QFile file( artifact );
+        if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
+        {
+            result.errorMessage = QStringLiteral( "cannot write artifact for '%1'" ).arg( node.nodeId );
+            return result;
+        }
+        QByteArray payload;
+        payload += QStringLiteral( "d17-node %1 op %2\n" ).arg( node.nodeId, node.operatorId ).toUtf8();
+        // Keys are IR2 target port names (D-W6); sorted for determinism.
+        QStringList ports = inputArtifacts.keys();
+        std::sort( ports.begin(), ports.end() );
+        for ( const QString &port : ports )
+            payload += QStringLiteral( "in %1=%2\n" )
+                           .arg( port, inputArtifacts.value( port ) )
+                           .toUtf8();
+        file.write( payload );
+        file.close();
+        result.success = true;
+        result.artifactPath = artifact;
+        return result;
+    };
+}
 
 QString executionStateString( ExecutionState state )
 {
@@ -421,9 +421,18 @@ void PipelineRunCoordinator::dispatchReadyNodes()
         const qint64 startedAt = QDateTime::currentMSecsSinceEpoch();
         m_state->pool.start( [self, node, inputArtifacts, runDirectory, startedAt,
                               executor = std::move( executor )]() {
-            NodeExecutionResult result = executor
-                ? executor( node, inputArtifacts, runDirectory )
-                : syntheticExecute( node, inputArtifacts, runDirectory );
+            NodeExecutionResult result;
+            if ( executor )
+                result = executor( node, inputArtifacts, runDirectory );
+            else
+            {
+                // #1006 fail-closed: no bound executor means no silent
+                // synthetic success — production binds
+                // makeRegistryNodeExecutor(), tests bind makeSyntheticNodeExecutor().
+                result.errorMessage =
+                    QStringLiteral( "ir2.executor_missing: no NodeExecutor bound (node '%1')" )
+                        .arg( node.nodeId );
+            }
             const qint64 elapsed = QDateTime::currentMSecsSinceEpoch() - startedAt;
             if ( self )
                 QMetaObject::invokeMethod( self, [self, node, result, elapsed]() {

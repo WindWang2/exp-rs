@@ -12,6 +12,7 @@
 
 #include <QJsonObject>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 #include <optional>
@@ -23,7 +24,7 @@ inline constexpr int kDatasetQaReportSerializationVersion = 1;
 
 struct DatasetQaCategory
 {
-    QString name; ///< "composition"|"labels"|"leakage"|"pseudo_labels"|"provenance"|"identity"
+    QString name; ///< "identity"|"composition"|"labels"|"leakage"|"pseudo_labels"|"provenance"|"crs"
     AuditVerdict verdict = AuditVerdict::Unknown;
     QString summary;
     QJsonObject evidence;
@@ -69,6 +70,17 @@ struct DatasetQaInputs
     /// When false, labels category stays Unknown even if composition is non-empty
     /// (empty findings must not imply "label QA clean").
     bool labelsAudited = false;
+    /// Uniqueness evidence window (#1004): identity stays Unknown when the
+    /// catalog scan was capped or the version holds more samples than were
+    /// scanned — never Pass on partial evidence. Defaults keep the legacy
+    /// verdicts for callers that do not report counts.
+    qint64 scannedSamples = 0;
+    qint64 totalSamples = 0;
+    bool scanCapped = false;
+    /// CRS evidence (#1007): manifest schema CRS ("" = mixed/unspecified)
+    /// plus the distinct non-empty per-sample CRS strings seen in evidence.
+    QString schemaCrs;
+    QStringList distinctSampleCrs;
 };
 
 /// Build a structured QA report from caller-assembled evidence. Does not I/O.

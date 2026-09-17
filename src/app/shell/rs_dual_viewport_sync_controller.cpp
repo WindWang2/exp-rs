@@ -161,7 +161,13 @@ void RsDualViewportSyncController::applySync( QgsMapCanvas *source, QgsMapCanvas
                 QgsCoordinateTransform ct( source->mapSettings().destinationCrs(), target->mapSettings().destinationCrs(), QgsProject::instance() );
                 sourceExtent = ct.transformBoundingBox( sourceExtent );
             }
-            catch ( ... ) {}
+            catch ( ... )
+            {
+                // #1005: extent stays in the source canvas CRS — say so
+                // instead of silently syncing wrong coordinates.
+                qWarning().noquote() << "dual viewport extent sync: CRS transform failed;"
+                                     << "applying the source-canvas extent untransformed";
+            }
         }
         if ( target->extent() != sourceExtent )
         {
@@ -196,7 +202,13 @@ void RsDualViewportSyncController::applySync( QgsMapCanvas *source, QgsMapCanvas
                 QgsCoordinateTransform ct( source->mapSettings().destinationCrs(), target->mapSettings().destinationCrs(), QgsProject::instance() );
                 sourceCenter = ct.transform( sourceCenter );
             }
-            catch ( ... ) {}
+            catch ( ... )
+            {
+                // #1005: center stays in the source canvas CRS — say so
+                // instead of silently panning to wrong coordinates.
+                qWarning().noquote() << "dual viewport center sync: CRS transform failed;"
+                                     << "applying the source-canvas center untransformed";
+            }
         }
         const QgsRectangle currentTargetExtent = target->extent();
         const QgsPointXY currentTargetCenter = currentTargetExtent.center();
