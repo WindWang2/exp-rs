@@ -223,7 +223,19 @@ bool SpatialToolRegistry::registerTool( SpatialToolPtr tool )
   return mTools.emplace( name, metered ).second;
 }
 
-void SpatialToolRegistry::registerBuiltinTools()
+namespace {
+
+/// The actual registration pass. Split from registerBuiltinTools() (#1056):
+/// the dispatch layer consults the registry on EVERY tools/call (via
+/// registryHandlesTool), and constructing the ~130 built-in tools per call
+/// would put schema building on the hottest path. registerBuiltinTools()
+/// runs this once per process; reset() calls it directly so the families
+/// registered HERE are re-populated after a clear. Note (pre-existing):
+/// helper families that carry their own process-lifetime registration
+/// guards (io:, workspace/sample/terrain/capability, cartography, symbology,
+/// commands, ...) do not re-register after reset() — reset() is test-only
+/// today; a production caller would need those guards lifted first.
+void registerBuiltinToolsImpl()
 {
   static const std::vector<SpatialToolPtr> kBuiltinTools = {
     std::make_shared<RasterInspectTool>(),
@@ -245,7 +257,7 @@ void SpatialToolRegistry::registerBuiltinTools()
     std::make_shared<TemporalIngestStacTool>(),
   };
   for ( const auto &tool : kBuiltinTools )
-    registerTool( tool );
+    SpatialToolRegistry::instance().registerTool( tool );
   // Cartographic layout tools (Cartographic Layout Studio); layout:* tools
   // mutate layout state and must register alongside the spatial tool surface.
   layout_tools::registerBuiltinLayoutTools();
@@ -293,14 +305,29 @@ void SpatialToolRegistry::registerBuiltinTools()
   harness::registerToolShortlistTools();
 }
 
+} // namespace
+
+void SpatialToolRegistry::registerBuiltinTools()
+{
+  // Once per process — see registerBuiltinToolsImpl() for why. reset()
+  // bypasses this guard (it must re-populate after clearing).
+  static const bool registered = [] {
+    registerBuiltinToolsImpl();
+    return true;
+  }();
+  Q_UNUSED( registered );
+}
+
 void SpatialToolRegistry::reset()
 {
   {
     std::lock_guard<std::mutex> lock( mMutex );
     mTools.clear();
   }
-  // registerBuiltinTools() locks mMutex itself — call it after releasing.
-  registerBuiltinTools();
+  // The impl locks mMutex itself — call it after releasing. Deliberately
+  // NOT registerBuiltinTools(): its once-per-process guard must not leave a
+  // cleared registry empty.
+  registerBuiltinToolsImpl();
 }
 
 std::optional<SpatialToolPtr> SpatialToolRegistry::find( const std::string &name ) const
@@ -326,6 +353,16 @@ size_t SpatialToolRegistry::size() const
 {
   std::lock_guard<std::mutex> lock( mMutex );
   return mTools.size();
+}
+
+bool registryHandlesTool( const std::string &name )
+{
+  if ( name.empty() )
+    return false;
+  // Idempotent: a tools/call may arrive before anything constructed the
+  // AgentToolCatalog (which is what normally registers the built-ins).
+  SpatialToolRegistry::instance().registerBuiltinTools();
+  return SpatialToolRegistry::instance().find( name ).has_value();
 }
 
 } // namespace sicnu::agent::spatial_tools

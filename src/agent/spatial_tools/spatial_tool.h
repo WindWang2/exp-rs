@@ -125,6 +125,17 @@ using SpatialToolPtr = std::shared_ptr<SpatialTool>;
 std::string validateAgainstRequired( const Json::Value &input, const Json::Value &schema );
 
 /**
+ * True when the SpatialToolRegistry owns @p name (after the idempotent
+ * builtin registration). This is the single source of truth for what the
+ * spatial tool surface serves (#1056): the MCP tools/call layer routes any
+ * such name to the spatial handler BEFORE the operator/algorithm
+ * registries, so a registered — and therefore advertised — tool can never
+ * fall through to "Algorithm not found". Names outside the registry (the
+ * io:translate-style RS operators) keep flowing to their own dispatch.
+ */
+bool registryHandlesTool( const std::string &name );
+
+/**
  * Process-wide registry of SpatialTool instances (ADR 0122). Mirrors the
  * AgentToolCatalog/InteractionToolRegistry singleton idiom.
  */

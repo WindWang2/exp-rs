@@ -36,8 +36,22 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
     const bool isHarness = ( spatial->name().rfind( "harness:", 0 ) == 0 );
     // Editing platform 11.0: read-only editing facts join the catalog (F11).
     const bool isEditing = ( spatial->name().rfind( "editing:", 0 ) == 0 );
+    // Foundation 5.0 read-only io: probe family joins the catalog (#1056):
+    // registration in SpatialToolRegistry routes them (mcp_server consults
+    // registryHandlesTool), so they must be listed too — advertising without
+    // reachability, or reachability without listing, is the drift this
+    // provider is the listing half of.
+    const bool isIo = ( spatial->name().rfind( "io:", 0 ) == 0 );
+    // Platform 5.0 solution knowledge and the cartography template/style
+    // governance namespaces: registered agent surfaces that were silently
+    // invisible from every catalog and unreachable through tools/call —
+    // same defect class as the io: family (#1056).
+    const bool isSolution = ( spatial->name().rfind( "solution:", 0 ) == 0 );
+    const bool isTemplate = ( spatial->name().rfind( "template:", 0 ) == 0 );
+    const bool isStyle = ( spatial->name().rfind( "style:", 0 ) == 0 );
     if ( !isSpatial && !isTemporal && !isCartography && !isSymbology && !isWorkflow &&
-         !isWorkspaceCommand && !isGovernance && !isHarness && !isEditing )
+         !isWorkspaceCommand && !isGovernance && !isHarness && !isEditing && !isIo &&
+         !isSolution && !isTemplate && !isStyle )
       continue;
 
     AgentTool tool;
@@ -52,7 +66,11 @@ std::vector<AgentTool> SpatialToolProvider::provideTools() const
                  : isGovernance      ? "governance"
                  : isHarness         ? "harness"
                  : isEditing         ? "editing"
-                                      : "spatial";
+                 : isIo              ? "io"
+                 : isSolution        ? "solution"
+                 : isTemplate        ? "template"
+                 : isStyle           ? "style"
+                                     : "spatial";
     tool.description = spatial->description();
     tool.tags = spatial->tags();
     tool.inputSchema = spatial->inputSchema();

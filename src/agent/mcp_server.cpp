@@ -914,12 +914,17 @@ void McpServer::handleRequest(const QVariantMap &request)
                      toolName.startsWith(QStringLiteral("lineage:")) ||
                      toolName.startsWith(QStringLiteral("result:")) ||
                      toolName.startsWith(QStringLiteral("harness:")) ||
-                     toolName.startsWith(QStringLiteral("run:")))
+                     toolName.startsWith(QStringLiteral("run:")) ||
+                     toolName.startsWith(QStringLiteral("temporal:")) ||
+                     sicnu::agent::spatial_tools::registryHandlesTool(toolName.toStdString()))
             {
-                resultData = handleSpatialToolCall(toolName, arguments);
-            }
-            else if (toolName.startsWith(QStringLiteral("temporal:")))
-            {
+                // The prefix table covers the namespaces whose tools are not
+                // re-projected by another provider; registryHandlesTool (#1056)
+                // is the single source of truth for the rest — a registered
+                // (and therefore advertised) tool outside the prefix table,
+                // like the io: probe family, must reach this SAME handler
+                // instead of falling through to the operator registries and
+                // answering "Algorithm not found".
                 resultData = handleSpatialToolCall(toolName, arguments);
             }
             else if (toolName.startsWith(QStringLiteral("view:")) ||

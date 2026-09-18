@@ -171,6 +171,9 @@ bool surfaceIdAllowed( const QString &id, bool *isCustomTools )
         QStringLiteral( "result:" ),      // governed result records (Platform 3.0)
         QStringLiteral( "run:" ),         // workflow run comparison (Platform 3.0)
         QStringLiteral( "harness:" ),     // Harness 4.0: taxonomy/manifest/preflight/plan/verify/recipe
+        QStringLiteral( "solution:" ),    // Platform 5.0 solution knowledge: search/describe/validate/instantiate
+        QStringLiteral( "template:" ),    // cartography template search/validate/preview
+        QStringLiteral( "style:" ),       // cartography style list/describe/apply governance
     };
     for ( const QString &prefix : kAllowed )
     {
