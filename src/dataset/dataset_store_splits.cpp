@@ -4,10 +4,14 @@
 //
 // Mutability contract: a split manifest id is written once — re-saving the
 // same id with different content is a `dataset.conflict` (ids are never
-// re-pointed). Leakage reports are an append-only audit history keyed by
-// content digest; identical content re-runs are idempotent. Split manifests
-// may attach to any version status (they are derived evidence ABOUT a
-// version, not mutations of it).
+// re-pointed). Content is the content fingerprint (#1056): presentation
+// fields (note, leakage summary, summary, identity, creation stamp) do not
+// move it, so an annotated re-save is the idempotent no-op — the annotation
+// itself is not persisted (write-once semantics; attach annotations before
+// the first save or ride a new manifest id). Leakage reports are an
+// append-only audit history keyed by content digest; identical content
+// re-runs are idempotent. Split manifests may attach to any version status
+// (they are derived evidence ABOUT a version, not mutations of it).
 #include "dataset_store_impl.h"
 #include <QJsonArray>
 
