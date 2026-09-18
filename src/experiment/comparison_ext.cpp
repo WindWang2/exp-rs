@@ -4,7 +4,7 @@
 
 #include "../dataset/label_schema.h"
 
-#include <QSet>
+#include <algorithm>
 
 namespace sicnu::experiment
 {
@@ -166,10 +166,15 @@ namespace
 {
 
 /// Recursively flattens numeric leaves; per-class objects keyed by class code
-/// stay nested as "name::code" pairs with an optional support sibling.
+/// stay nested as structured (class code, metric) pairs (#1056) — class codes
+/// may contain "::" (LabelSchema::validate only requires non-empty), so the
+/// previous "code::metric" string encoding was ambiguous (right-splitting
+/// cannot disambiguate codes vs metric names either) and colliding keys
+/// silently overwrote each other. The "family::code::metric" strings that
+/// reach PairedMetricDelta::metric are presentation only.
 void flattenMetrics( const QJsonObject &object, const QString &prefix,
                      QHash<QString, double> &scalars,
-                     QHash<QString, QHash<QString, double>> &perClass,
+                     QHash<QString, QHash<QPair<QString, QString>, double>> &perClass,
                      QHash<QString, QHash<QString, qint64>> &perClassSupport )
 {
     for ( auto it = object.constBegin(); it != object.constEnd(); ++it )
@@ -205,7 +210,7 @@ void flattenMetrics( const QJsonObject &object, const QString &prefix,
                             if ( mit.key() == QLatin1String( "support" ) )
                                 perClassSupport[key][cit.key()] = qint64( mit.value().toDouble() );
                             else
-                                perClass[key][cit.key() + QLatin1String( "::" ) + mit.key()] =
+                                perClass[key][qMakePair( cit.key(), mit.key() )] =
                                     mit.value().toDouble();
                         }
                     }
@@ -238,8 +243,8 @@ PairedRunSummary pairedRunComparison( const MetricRecord &a, const MetricRecord 
 
     QHash<QString, double> scalarsA;
     QHash<QString, double> scalarsB;
-    QHash<QString, QHash<QString, double>> perClassA;
-    QHash<QString, QHash<QString, double>> perClassB;
+    QHash<QString, QHash<QPair<QString, QString>, double>> perClassA;
+    QHash<QString, QHash<QPair<QString, QString>, double>> perClassB;
     QHash<QString, QHash<QString, qint64>> supportA;
     QHash<QString, QHash<QString, qint64>> supportB;
     flattenMetrics( a.metrics, QString(), scalarsA, perClassA, supportA );
@@ -262,35 +267,36 @@ PairedRunSummary pairedRunComparison( const MetricRecord &a, const MetricRecord 
     }
 
     // Per-class leaves: matched by (family, class code), with support gates.
-    QSet<QString> matchedFamilies;
+    // Families are iterated in sorted order so the summary layout is
+    // deterministic across processes (QHash iteration order is seeded).
+    QStringList matchedFamilies;
     for ( auto it = perClassA.constBegin(); it != perClassA.constEnd(); ++it )
+        if ( perClassB.contains( it.key() ) )
+            matchedFamilies.append( it.key() );
+    matchedFamilies.sort();
+    for ( const QString &family : matchedFamilies )
     {
-        if ( !perClassB.contains( it.key() ) )
-            continue;
-        matchedFamilies.insert( it.key() );
-        const auto &classMetricsA = it.value();
-        const auto &classMetricsB = perClassB.value( it.key() );
-        QStringList metricNames;
+        const auto &classMetricsA = perClassA.value( family );
+        const auto &classMetricsB = perClassB.value( family );
+        QList<QPair<QString, QString>> metricNames;
         for ( auto mit = classMetricsA.constBegin(); mit != classMetricsA.constEnd(); ++mit )
             if ( classMetricsB.contains( mit.key() ) )
                 metricNames.append( mit.key() );
-        metricNames.sort();
-        for ( const QString &name : metricNames )
+        std::sort( metricNames.begin(), metricNames.end() );
+        for ( const auto &classMetric : metricNames )
         {
+            const QString &code = classMetric.first;
+            const QString &metric = classMetric.second;
             PairedMetricDelta delta;
-            delta.metric = it.key() + QLatin1String( "::" ) + name;
-            delta.valueA = classMetricsA.value( name );
-            delta.valueB = classMetricsB.value( name );
+            delta.metric = family + QLatin1String( "::" ) + code +
+                           QLatin1String( "::" ) + metric;
+            delta.valueA = classMetricsA.value( classMetric );
+            delta.valueB = classMetricsB.value( classMetric );
             delta.delta = delta.valueB - delta.valueA;
-            // "classCode::metric" — support lookup drops the "::metric"
-            // suffix. Class codes may themselves contain "::" (the schema
-            // validator allows any non-empty code), so the split has to
-            // come from the RIGHT: section("::",0,0) would truncate
-            // "agri::crop::iou" to "agri" and silently drop the support
-            // gate (and the metric's insufficientSupport verdict).
-            const QString code = name.section( QLatin1String( "::" ), -2, -2 );
-            const qint64 familySupportA = supportA.value( it.key() ).value( code, -1 );
-            const qint64 familySupportB = supportB.value( it.key() ).value( code, -1 );
+            // Support is keyed by the exact class code: a code containing
+            // "::" resolves here without any string splitting.
+            const qint64 familySupportA = supportA.value( family ).value( code, -1 );
+            const qint64 familySupportB = supportB.value( family ).value( code, -1 );
             delta.supportA = familySupportA;
             delta.supportB = familySupportB;
             if ( familySupportA >= 0 && familySupportA < minTestClassSupport )

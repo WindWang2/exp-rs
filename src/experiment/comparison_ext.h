@@ -65,7 +65,10 @@ struct PairedMetricDelta
 /// Paired summary of two metric records under compatible protocols. Metrics
 /// are matched by name over the two documents; scalar numeric leaves are
 /// differenced, per-class entries (class code keys) are differenced per code
-/// with their supports. Runs whose class supports sum below @p
+/// with their supports. Per-class identity is the structured (class code,
+/// metric) pair — class codes containing "::" (e.g. "agri::crop") are first
+/// class citizens; the dotted "family::code::metric" delta names are a
+/// rendering of that triple. Runs whose class supports sum below @p
 /// minTestClassSupport get "insufficient_support" on the affected metrics —
 /// the summary never invents a significance verdict.
 struct PairedRunSummary
