@@ -289,14 +289,44 @@ TEST_CASE( "D19 QA carries a CRS category for schema/sample CRS honesty",
     CHECK( crsCategory( inputs ).verdict == AuditVerdict::Unknown );
 
     inputs.schemaCrs = QStringLiteral( "EPSG:32650" );
+    inputs.scannedSamples = 10;
+    inputs.totalSamples = 10;
+    inputs.scanCapped = false;
+
+    // Observed sample CRS agrees over a complete scan window — Pass.
     inputs.distinctSampleCrs = { QStringLiteral( "EPSG:32650" ) };
     CHECK( crsCategory( inputs ).verdict == AuditVerdict::Pass );
 
-    // #1030: unspecified sample CRS under a declared schema is Unknown —
-    // there is no evidence that the samples agree with the schema.
+    // #1037 F-1030-P2-crs-pass: NO sample CRS evidence (nothing scanned, or
+    // every scanned sample carries no CRS) must NOT read as verified
+    // agreement — the verdict says Unknown.
     inputs.distinctSampleCrs.clear();
-    CHECK( crsCategory( inputs ).verdict == AuditVerdict::Unknown );
+    const DatasetQaCategory noEvidence = crsCategory( inputs );
+    CHECK( noEvidence.verdict == AuditVerdict::Unknown );
+    CHECK( noEvidence.evidence.value( QStringLiteral( "scanned" ) ).toInteger() == 10 );
+    CHECK( noEvidence.evidence.value( QStringLiteral( "sample_count" ) ).toInteger() == 10 );
 
+    // Agreements seen only inside a capped/partial scan window are not a
+    // verified dataset property either.
+    inputs.distinctSampleCrs = { QStringLiteral( "EPSG:32650" ) };
+    inputs.scannedSamples = 10;
+    inputs.totalSamples = 400;
+    CHECK( crsCategory( inputs ).verdict == AuditVerdict::Unknown );
+    inputs.scannedSamples = 400;
+    inputs.totalSamples = 400;
+    inputs.scanCapped = true;
+    CHECK( crsCategory( inputs ).verdict == AuditVerdict::Unknown );
+    inputs.scanCapped = false;
+
+    // A caller that reports observed CRS but no scan counts gets Unknown,
+    // never Pass (the completeness gate needs the counts).
+    inputs.scannedSamples = 0;
+    inputs.totalSamples = 0;
+    CHECK( crsCategory( inputs ).verdict == AuditVerdict::Unknown );
+    inputs.scannedSamples = 400;
+    inputs.totalSamples = 400;
+
+    // A conflicting observed CRS still warns.
     inputs.distinctSampleCrs = { QStringLiteral( "EPSG:4326" ) };
     const DatasetQaCategory conflict = crsCategory( inputs );
     CHECK( conflict.verdict == AuditVerdict::Warn );

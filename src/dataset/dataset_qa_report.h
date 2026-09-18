@@ -79,6 +79,9 @@ struct DatasetQaInputs
     bool scanCapped = false;
     /// CRS evidence (#1007): manifest schema CRS ("" = mixed/unspecified)
     /// plus the distinct non-empty per-sample CRS strings seen in evidence.
+    /// The crs category Passes only when this set is NON-empty over a
+    /// complete scan window and nothing disagrees (#1037); an empty
+    /// observation set or a capped/partial scan is Unknown, never Pass.
     QString schemaCrs;
     QStringList distinctSampleCrs;
 };
