@@ -10357,6 +10357,31 @@ sicnu_add_d17_test(test_workflow_checkpoint_cache
   LIBS Qt6::Widgets Qt6::Test
 )
 
+# --- #1056: foreign-thread access to the run state API is marshaled onto the
+#     coordinator's affinity thread (requestCancel/status/query never race
+#     node completion).
+sicnu_add_d17_test(test_pipeline_run_state_sync
+  SOURCES ${D17_ENGINE_SOURCES}
+    ${CMAKE_SOURCE_DIR}/src/workflow/plan_optimizer.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_cost_estimator.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/pipeline_run_coordinator.cpp
+  LIBS Qt6::Test
+)
+
+# --- #1038/#1056: checkpoint read caps, per-file recovery isolation and
+#     typed wrong-JSON failures. Compiles the workflow core sources directly
+#     (workflow_run_lock pulls Qt6::Network via QHostInfo; fault points live
+#     in sicnu_runtime).
+sicnu_add_d17_test(test_workflow_checkpoint_integrity
+  SOURCES
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_definition.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/placeholder_grammar.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_checkpoint.cpp
+    ${CMAKE_SOURCE_DIR}/src/workflow/workflow_run_lock.cpp
+  LIBS Qt6::Network jsoncpp sicnu_runtime
+)
+
 # --- Package F: canvas
 sicnu_add_d17_test(test_pipeline_canvas_widget
   SOURCES ${D17_CANVAS_SOURCES}
@@ -10402,6 +10427,7 @@ sicnu_add_d17_test(test_d17_workflow_pipeline_e2e
 foreach(_d17_embeds_coordinator
     test_ir2_port_param_mapping
     test_workflow_checkpoint_cache
+    test_pipeline_run_state_sync
     test_d17_workflow_pipeline_e2e)
   target_compile_definitions(${_d17_embeds_coordinator} PRIVATE sicnu_workflow_EXPORTS)
 endforeach()

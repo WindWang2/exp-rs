@@ -9,14 +9,21 @@
 #include <QEventLoop>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QSignalSpy>
+#include <QTemporaryDir>
 #include <QTimer>
 
 #include <algorithm>
+#include <functional>
+#include <utility>
 
 #include "workflow/pipeline_run_coordinator.h"
 #include "workflow/workflow_dag_analyzer.h"
+#include "workflow/workflow_limits.h"
 
 using namespace sicnu::workflow;
 
@@ -311,6 +318,161 @@ TEST_CASE( "Resume rejects a corrupted checkpoint fail-closed", "[d17][workflow]
     QString error;
     REQUIRE_FALSE( coordinator.resumeFromCheckpoint( path, &error ) );
     REQUIRE_FALSE( error.isEmpty() );
+}
+
+namespace {
+
+/// Loads a checkpoint document, lets @p mutate edit it, writes it back.
+void editCheckpoint( const QString &path, const std::function<void( QJsonObject & )> &mutate )
+{
+    QFile file( path );
+    REQUIRE( file.open( QIODevice::ReadOnly ) );
+    const QJsonDocument doc = QJsonDocument::fromJson( file.readAll() );
+    REQUIRE( !doc.isNull() );
+    file.close();
+    QJsonObject object = doc.object();
+    mutate( object );
+    const QByteArray bytes = QJsonDocument( object ).toJson( QJsonDocument::Indented );
+    REQUIRE( file.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+    REQUIRE( file.write( bytes ) == bytes.size() );
+}
+
+/// Runs a chain to completion, returns (runDirectory, checkpointPath).
+std::pair<QString, QString> runToCheckpoint( int steps, const QString &tag )
+{
+    const QString dir = scratchDir( tag );
+    PipelineRunCoordinator coordinator;
+    coordinator.setExecutor( makeSyntheticNodeExecutor() );
+    REQUIRE( coordinator.startRun( chain( steps ), dir ) );
+    REQUIRE( waitForCompleted( coordinator ) );
+    const QString checkpointFile = coordinator.checkpointPath();
+    REQUIRE( QFile::exists( checkpointFile ) );
+    return { dir, checkpointFile };
+}
+
+} // namespace
+
+TEST_CASE( "Resume recomputes a node whose recorded artifact was tampered with",
+           "[d17][workflow][engine][1056]" )
+{
+    ensureApp();
+    auto [dir, checkpointFile] = runToCheckpoint( 4, QStringLiteral( "stamp-tamper" ) );
+
+    // Mutate node_4's artifact AFTER the checkpoint recorded its stamp: the
+    // file at the recorded path is no longer the artifact the run produced,
+    // so node_4 must recompute instead of cache-hitting on a stale file.
+    const QString tampered = QDir( dir ).filePath( QStringLiteral( "node_4.artifact" ) );
+    {
+        QFile f( tampered );
+        REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        f.write( QByteArrayLiteral( "tampered-after-the-fact" ) );
+    }
+
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( makeSyntheticNodeExecutor() );
+    QString error;
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpointFile, &error ) );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+
+    const auto statuses = resumeCoordinator.getAllStatuses();
+    REQUIRE( statuses.size() == 4 );
+    for ( int i = 1; i <= 3; ++i )
+        REQUIRE( statuses.value( QStringLiteral( "node_%1" ).arg( i ) ).isCacheHit );
+    REQUIRE_FALSE( statuses.value( QStringLiteral( "node_4" ) ).isCacheHit );
+    REQUIRE( statuses.value( QStringLiteral( "node_4" ) ).state == ExecutionState::Succeeded );
+}
+
+TEST_CASE( "Resume distrusts recorded artifacts outside the run directory",
+           "[d17][workflow][engine][1056]" )
+{
+    ensureApp();
+    QTemporaryDir outsideDir;
+    REQUIRE( outsideDir.isValid() );
+    const QString outsideArtifact = QDir( outsideDir.path() ).filePath( QStringLiteral( "foreign.artifact" ) );
+    {
+        QFile f( outsideArtifact );
+        REQUIRE( f.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        f.write( QByteArrayLiteral( "not this run's product" ) );
+    }
+
+    auto [dir, checkpointFile] = runToCheckpoint( 3, QStringLiteral( "stamp-outside" ) );
+
+    // Rewrite node_3's recorded artifact path to the existing OUTSIDE file.
+    editCheckpoint( checkpointFile, [&]( QJsonObject &object ) {
+        QJsonArray nodes = object.value( QLatin1String( "nodes" ) ).toArray();
+        REQUIRE( nodes.size() == 3 );
+        QJsonObject entry = nodes.at( 2 ).toObject();
+        REQUIRE( entry.value( QLatin1String( "nodeId" ) ).toString() == QLatin1String( "node_3" ) );
+        entry.insert( QLatin1String( "artifact" ), outsideArtifact );
+        nodes.replace( 2, entry );
+        object.insert( QLatin1String( "nodes" ), nodes );
+    } );
+
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( makeSyntheticNodeExecutor() );
+    QString error;
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpointFile, &error ) );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+
+    const auto statuses = resumeCoordinator.getAllStatuses();
+    REQUIRE( statuses.size() == 3 );
+    REQUIRE( statuses.value( QStringLiteral( "node_1" ) ).isCacheHit );
+    REQUIRE( statuses.value( QStringLiteral( "node_2" ) ).isCacheHit );
+    REQUIRE_FALSE( statuses.value( QStringLiteral( "node_3" ) ).isCacheHit );
+    REQUIRE( statuses.value( QStringLiteral( "node_3" ) ).state == ExecutionState::Succeeded );
+}
+
+TEST_CASE( "Legacy checkpoints without authorship stamps still resume by containment",
+           "[d17][workflow][engine][1056]" )
+{
+    ensureApp();
+    auto [dir, checkpointFile] = runToCheckpoint( 3, QStringLiteral( "stamp-legacy" ) );
+
+    // Strip the stamps: simulates a checkpoint written before the fields
+    // existed — trust falls back to containment + lineage signature.
+    editCheckpoint( checkpointFile, [&]( QJsonObject &object ) {
+        QJsonArray nodes = object.value( QLatin1String( "nodes" ) ).toArray();
+        for ( int i = 0; i < nodes.size(); ++i )
+        {
+            QJsonObject entry = nodes.at( i ).toObject();
+            entry.remove( QLatin1String( "artifactSizeBytes" ) );
+            entry.remove( QLatin1String( "artifactMtimeMs" ) );
+            nodes.replace( i, entry );
+        }
+        object.insert( QLatin1String( "nodes" ), nodes );
+    } );
+
+    PipelineRunCoordinator resumeCoordinator;
+    resumeCoordinator.setExecutor( makeSyntheticNodeExecutor() );
+    QString error;
+    REQUIRE( resumeCoordinator.resumeFromCheckpoint( checkpointFile, &error ) );
+    REQUIRE( waitForCompleted( resumeCoordinator ) );
+
+    const auto statuses = resumeCoordinator.getAllStatuses();
+    REQUIRE( statuses.size() == 3 );
+    for ( int i = 1; i <= 3; ++i )
+        REQUIRE( statuses.value( QStringLiteral( "node_%1" ).arg( i ) ).isCacheHit );
+}
+
+TEST_CASE( "Resume rejects a checkpoint beyond the read cap fail-closed",
+           "[d17][workflow][engine][1056]" )
+{
+    ensureApp();
+    const QString dir = scratchDir( QStringLiteral( "oversize-resume" ) );
+    const QString path = QDir( dir ).filePath( QStringLiteral( "checkpoint_big.json" ) );
+    {
+        QFile blob( path );
+        REQUIRE( blob.open( QIODevice::WriteOnly | QIODevice::Truncate ) );
+        const QByteArray chunk( 1024 * 1024, 'x' );
+        for ( int i = 0; i <= kMaxCheckpointReadBytes / ( 1024 * 1024 ); ++i )
+            REQUIRE( blob.write( chunk ) == chunk.size() );
+    }
+    REQUIRE( QFileInfo( path ).size() > kMaxCheckpointReadBytes );
+
+    PipelineRunCoordinator coordinator;
+    QString error;
+    REQUIRE_FALSE( coordinator.resumeFromCheckpoint( path, &error ) );
+    REQUIRE( error.contains( QStringLiteral( "read cap" ) ) );
 }
 
 TEST_CASE( "Cancel before dispatch marks everything Cancelled", "[d17][workflow][engine]" )
