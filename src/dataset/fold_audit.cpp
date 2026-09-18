@@ -18,19 +18,6 @@ QJsonObject hashToJson( const QHash<QString, qint64> &counts )
     return json;
 }
 
-/// Fingerprint of a manifest with presentation-only fields cleared so a
-/// regenerated manifest compares on CONTENT (assignments/config).
-QString contentFingerprint( const SplitManifest &manifest )
-{
-    SplitManifest copy = manifest;
-    copy.setFingerprint( QString() );
-    copy.setManifestId( QString() );
-    copy.setCreatedAtUtc( QDateTime() );
-    copy.setNote( QString() );
-    copy.setLeakageSummary( QJsonObject() );
-    return splitManifestFingerprint( copy );
-}
-
 } // namespace
 
 QJsonObject FoldAuditItem::toJson() const
@@ -158,7 +145,9 @@ sicnu::data::Result<FoldComparabilitySummary> FoldAuditor::auditFolds(
     if ( replay )
     {
         summary.replayMatches = replay.value();
-        summary.replayFingerprint = contentFingerprint( manifest );
+        // Content-only fingerprint: presentation fields (id, stamp, note,
+        // summaries) are cleared inside splitManifestFingerprint (#1056).
+        summary.replayFingerprint = splitManifestFingerprint( manifest );
     }
     else
     {
@@ -184,7 +173,7 @@ sicnu::data::Result<bool> FoldAuditor::verifyDeterministicReplay(
     if ( !regenerated )
         return Result::failure( regenerated.diagnostics() );
     const bool matches =
-        contentFingerprint( regenerated.value() ) == contentFingerprint( manifest );
+        splitManifestFingerprint( regenerated.value() ) == splitManifestFingerprint( manifest );
     return Result::success( matches );
 }
 

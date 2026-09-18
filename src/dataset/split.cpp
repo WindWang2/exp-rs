@@ -734,17 +734,18 @@ sicnu::data::Result<SplitManifest> SplitManifest::fromJson( const QJsonObject &j
 
 QString splitManifestFingerprint( const SplitManifest &manifest )
 {
-    // Content identity only: the logical id and the creation stamp are
-    // deliberately excluded, so two runs over the same (config, seed,
-    // inputs) share one fingerprint while keeping distinct identities.
-    // The generation summary is excluded as DERIVED content (it is a pure
-    // projection of config+assignments) — recomputing a fingerprint over a
-    // reloaded manifest must yield the same value as at generation time,
-    // including for manifests stored before summaries existed. The note and
-    // the leakage summary are annotation/report fields, not content: leaving
-    // them in made the same content fingerprint differently depending on who
-    // persisted it (fold audits clear them, the store recomputes over the
-    // stored manifest), so identical content was rejected as a conflict.
+    // Content identity only: the logical id, the creation stamp, and every
+    // presentation/annotation field (generation summary, free-form note,
+    // attached leakage summary) are cleared before hashing, so two runs over
+    // the same (config, seed, inputs) share one fingerprint while keeping
+    // distinct identities — and annotating a manifest (note, leakage audit
+    // summary) never changes its content fingerprint. The generation summary
+    // is excluded as DERIVED content (it is a pure projection of
+    // config+assignments) — recomputing a fingerprint over a reloaded
+    // manifest must yield the same value as at generation time, including
+    // for manifests stored before summaries existed. Callers must not
+    // pre-clear these fields themselves (#1056): the contract lives here so
+    // fold-audit replay checks and store conflict detection cannot drift.
     SplitManifest copy = manifest;
     copy.setFingerprint( QString() );
     copy.setManifestId( QString() );
