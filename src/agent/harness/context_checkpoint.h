@@ -50,6 +50,13 @@ inline constexpr const char *kDone = "done";
 
 bool isKnownSessionStage( const std::string &stage );
 
+/// True when @p sessionId is filename-safe: 1..128 characters drawn from
+/// [A-Za-z0-9_.-]. Enforced uniformly on EVERY operation that derives a
+/// filesystem path from the id (#1056) — save validated it, load/delete/
+/// resume/staleness did not, so a crafted id could read or unlink outside
+/// the store directory.
+bool isFilenameSafeSessionId( const std::string &sessionId );
+
 /// One harness session: the resumable compiler context.
 struct HarnessSessionState
 {
@@ -100,7 +107,9 @@ class HarnessSessionStore
     /// approx_tokens, bytes}] oldest first.
     Json::Value listSessions() const;
 
-    bool deleteSession( const std::string &sessionId );
+    /// Deletes the session checkpoint. False (with a typed @p error when
+    /// provided) for an invalid session id or when no such session exists.
+    bool deleteSession( const std::string &sessionId, HarnessError *error = nullptr );
 
     /// Per-slot staleness of the SAVED fact identities against the current
     /// files: {slot: {stale, reason, saved {..}, current {..}}}. Slots with

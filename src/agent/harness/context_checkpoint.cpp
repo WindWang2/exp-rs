@@ -104,6 +104,25 @@ bool isKnownSessionStage( const std::string &stage )
   return false;
 }
 
+bool isFilenameSafeSessionId( const std::string &sessionId )
+{
+  if ( sessionId.empty() || sessionId.size() > 128 )
+    return false;
+  // The charset below cannot form a separator, but "." and ".." are pure
+  // dot ids — reject them explicitly (same posture as resume_workflow's
+  // run-id gate) so a future path-construction change cannot turn them
+  // into a parent-directory reference.
+  if ( sessionId == "." || sessionId == ".." )
+    return false;
+  for ( char c : sessionId )
+  {
+    if ( !( ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) ||
+            c == '_' || c == '-' || c == '.' ) )
+      return false;
+  }
+  return true;
+}
+
 Json::Value HarnessSessionState::toJson() const
 {
   Json::Value doc( Json::objectValue );
@@ -145,6 +164,11 @@ std::optional<HarnessSessionState> HarnessSessionState::fromJson( const Json::Va
   const std::string id = doc.get( "session_id", "" ).asString();
   if ( id.empty() )
     return fail( "session_id missing" );
+  // Defense in depth: a document carrying an id that could never have been
+  // saved through the filename-safety gate is treated as corrupt, so a
+  // hand-written file can never smuggle a path-bearing id into the state.
+  if ( !isFilenameSafeSessionId( id ) )
+    return fail( "session_id is not filename-safe" );
   HarnessSessionState state;
   state.sessionId = id;
   state.savedAt = doc.get( "saved_at", "" ).asString();
@@ -219,15 +243,14 @@ QString HarnessSessionStore::saveSession( const HarnessSessionState &state, Harn
                                 "session_id must be 1..128 characters" );
     return {};
   }
-  for ( char c : state.sessionId )
+  if ( !isFilenameSafeSessionId( state.sessionId ) )
   {
-    if ( !( ( c >= 'a' && c <= 'z' ) || ( c >= 'A' && c <= 'Z' ) || ( c >= '0' && c <= '9' ) ||
-            c == '_' || c == '-' || c == '.' ) )
-    {
-      error = HarnessError::make( error_codes::kInvalidParameter,
-                                  "session_id must stay filename-safe" );
-      return {};
-    }
+    // Same stable wording as the load/delete gate: one rejection vocabulary
+    // for the one filename-safety rule.
+    error = HarnessError::make( error_codes::kInvalidParameter,
+                                "session_id is invalid (allowed: 1..128 characters, "
+                                "letters, digits, '_', '-', '.')" );
+    return {};
   }
 
   HarnessSessionState toWrite = state;
@@ -296,6 +319,17 @@ QString HarnessSessionStore::saveSession( const HarnessSessionState &state, Harn
 std::optional<HarnessSessionState> HarnessSessionStore::loadSession( const std::string &sessionId,
                                                                      HarnessError &error ) const
 {
+  // #1056: the id is interpolated into the checkpoint path, so the same
+  // filename-safety gate as saveSession applies on EVERY read — a crafted
+  // "x/../../../y" must not load (or, for delete, unlink) outside the store
+  // directory. The error is stable and echoes nothing from the id.
+  if ( !isFilenameSafeSessionId( sessionId ) )
+  {
+    error = HarnessError::make( error_codes::kInvalidParameter,
+                                "session_id is invalid (allowed: 1..128 characters, "
+                                "letters, digits, '_', '-', '.')" );
+    return std::nullopt;
+  }
   QMutexLocker locker( &gStoreMutex );
   const QString path = sessionPathLocked( sessionId );
   QFile file( path );
@@ -365,8 +399,19 @@ Json::Value HarnessSessionStore::listSessions() const
   return list;
 }
 
-bool HarnessSessionStore::deleteSession( const std::string &sessionId )
+bool HarnessSessionStore::deleteSession( const std::string &sessionId, HarnessError *error )
 {
+  // Same gate as loadSession (#1056): the id reaches QFile::remove via
+  // sessionPathLocked, so an unvalidated traversal id would delete outside
+  // the store directory. Invalid ids fail typed before any path is built.
+  if ( !isFilenameSafeSessionId( sessionId ) )
+  {
+    if ( error )
+      *error = HarnessError::make( error_codes::kInvalidParameter,
+                                   "session_id is invalid (allowed: 1..128 characters, "
+                                   "letters, digits, '_', '-', '.')" );
+    return false;
+  }
   QMutexLocker locker( &gStoreMutex );
   return QFile::exists( sessionPathLocked( sessionId ) ) &&
          QFile::remove( sessionPathLocked( sessionId ) );
@@ -561,8 +606,16 @@ class WorkflowSessionTool final : public SpatialTool
 
       if ( action == "delete" )
       {
+        HarnessError error;
         Json::Value out( Json::objectValue );
-        out["ok"] = store.deleteSession( sessionId );
+        out["ok"] = store.deleteSession( sessionId, &error );
+        if ( !out["ok"].asBool() && error.code == error_codes::kInvalidParameter )
+        {
+          // An invalid id is a typed validation failure, not a plain
+          // ok:false (which means "no such session") — same contract as
+          // staleness/resume (#1056).
+          return SpatialToolResult::failure( error.summary, error.code, "validation" );
+        }
         return SpatialToolResult::ok( std::move( out ) );
       }
 

@@ -11,6 +11,7 @@
 #include <QFileInfo>
 
 #include <string>
+#include <vector>
 
 #include "agent/harness/context_checkpoint.h"
 
@@ -263,4 +264,99 @@ TEST_CASE( "Stage vocabulary is closed", "[context_checkpoint]" )
   CHECK( isKnownSessionStage( session_stages::kGrounding ) );
   CHECK( isKnownSessionStage( session_stages::kDone ) );
   CHECK( !isKnownSessionStage( "vibes" ) );
+}
+
+TEST_CASE( "session_id filename safety is enforced on every store operation",
+           "[context_checkpoint]" )
+{
+  // #1056: save validated the id charset, load/delete/resume/staleness did
+  // not — a crafted id reached sessionPathLocked() and could read (delete:
+  // unlink) outside the store directory. Every path-deriving operation now
+  // runs the identical gate, BEFORE any path is constructed.
+  cleanStore();
+  HarnessSessionStore &store = HarnessSessionStore::instance();
+  store.setDirectory( kStoreDir );
+  REQUIRE( QDir().mkpath( kStoreDir ) );
+
+  HarnessError error;
+  REQUIRE( !store.saveSession( sampleState( "sess-gate" ), error ).isEmpty() );
+
+  // A decoy file OUTSIDE the store directory: a traversal id must not be
+  // able to reach (let alone delete) it through the store.
+  const QString decoy = QDir( kStoreDir ).filePath( "decoy.json" );
+  {
+    QFile file( decoy );
+    REQUIRE( file.open( QIODevice::WriteOnly ) );
+    file.write( "{}" );
+  }
+
+  const std::vector<std::string> invalidIds = {
+    "",                      // empty
+    "..",                    // parent
+    "../escape",             // save already rejected this; load/delete did not
+    "a/b",                   // separator
+    "a\\b",                  // windows separator
+    "id with spaces",
+    "id;rm -rf",             // shell-shaped
+    std::string( 129, 'x' ), // over the 128-char bound
+    "\xC3\xA9",              // non-ASCII
+  };
+  for ( const std::string &id : invalidIds )
+  {
+    INFO( "invalid id: " << id );
+    error = HarnessError{};
+    CHECK_FALSE( store.loadSession( id, error ).has_value() );
+    CHECK( error.code == "INVALID_PARAMETER" );
+
+    error = HarnessError{};
+    CHECK_FALSE( store.resumeSession( id, error ).has_value() );
+    CHECK( error.code == "INVALID_PARAMETER" );
+
+    error = HarnessError{};
+    CHECK_FALSE( store.deleteSession( id, &error ) );
+    CHECK( error.code == "INVALID_PARAMETER" );
+
+    HarnessSessionState state = sampleState( id );
+    error = HarnessError{};
+    CHECK( store.saveSession( state, error ).isEmpty() );
+    CHECK( error.code == "INVALID_PARAMETER" );
+  }
+
+  // The decoy survived every invalid-id operation.
+  CHECK( QFile::exists( decoy ) );
+  // The legitimate session still loads, resumes and deletes.
+  CHECK( store.loadSession( "sess-gate", error ).has_value() );
+  CHECK( store.resumeSession( "sess-gate", error ).has_value() );
+  error = HarnessError{};
+  CHECK( store.deleteSession( "sess-gate", &error ) );
+  CHECK( error.code.empty() );
+  // Deleting again is a plain "no such session" (not a validation failure).
+  error = HarnessError{};
+  CHECK_FALSE( store.deleteSession( "sess-gate", &error ) );
+  CHECK( error.code.empty() );
+
+  cleanStore();
+}
+
+TEST_CASE( "A stored document carrying a non-filename-safe session_id is corrupt",
+           "[context_checkpoint]" )
+{
+  // Defense in depth (#1056): a hand-written checkpoint file can never
+  // smuggle a path-bearing id through fromJson into the session state.
+  Json::Value doc = sampleState( "whatever" ).toJson();
+  doc["session_id"] = "../escape";
+  std::string error;
+  CHECK_FALSE( HarnessSessionState::fromJson( doc, &error ).has_value() );
+  CHECK( error == "session_id is not filename-safe" );
+}
+
+TEST_CASE( "isFilenameSafeSessionId matches the save-side charset", "[context_checkpoint]" )
+{
+  CHECK( isFilenameSafeSessionId( "sess-1" ) );
+  CHECK( isFilenameSafeSessionId( "A_b.9" ) );
+  CHECK_FALSE( isFilenameSafeSessionId( "" ) );
+  CHECK_FALSE( isFilenameSafeSessionId( std::string( 129, 'x' ) ) );
+  CHECK( isFilenameSafeSessionId( std::string( 128, 'x' ) ) );
+  CHECK_FALSE( isFilenameSafeSessionId( "a/b" ) );
+  CHECK_FALSE( isFilenameSafeSessionId( ".." ) );
 }
