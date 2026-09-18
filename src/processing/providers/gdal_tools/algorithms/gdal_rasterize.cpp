@@ -40,9 +40,7 @@ QStringList GdalRasterizeAlgorithm::buildArgs(const QVariantMap &parameters,
                                                 QgsProcessingFeedback *feedback)
 {
     Q_UNUSED(context);
-    Q_UNUSED(feedback);
-
-    QStringList args;
+     QStringList args;
 
     // Burn value: either from field or fixed value
     if (parameters.contains("FIELD") && !parameters.value("FIELD").toString().isEmpty()) {
@@ -56,7 +54,15 @@ QStringList GdalRasterizeAlgorithm::buildArgs(const QVariantMap &parameters,
     if (parameters.contains("RASTER_TEMPLATE") && !parameters.value("RASTER_TEMPLATE").toString().isEmpty()) {
         QString tmplSource = rasterLayerSource(parameters.value("RASTER_TEMPLATE"));
         GDALDatasetH hTmpl = GDALOpen(tmplSource.toUtf8().constData(), GA_ReadOnly);
-        if (hTmpl) {
+        if (!hTmpl) {
+            // An unreadable template silently produced wrong -te/-ts arguments
+            // and a confusing downstream tool failure — fail loudly instead.
+            if (feedback) {
+                feedback->reportError(QObject::tr("Cannot open raster template: %1").arg(tmplSource));
+            }
+            return {};
+        }
+        {
             int tw = GDALGetRasterXSize(hTmpl);
             int th = GDALGetRasterYSize(hTmpl);
             double gt[6];

@@ -43,6 +43,12 @@ public:
     QString commandLinePreview( const QVariantMap &parameters,
                                 QgsProcessingContext &context ) const;
 
+    /// Watchdog timeout for the tool process in milliseconds: the default
+    /// unless a valid positive integer "timeout_seconds" config entry widens
+    /// it, always clamped to [1 s, 24 h] so absurd values can neither kill the
+    /// tool instantly (the 32-bit overflow in #1043) nor disable the watchdog.
+    static qint64 toolTimeoutMs( const QJsonObject &config );
+
 protected:
     void initAlgorithm(const QVariantMap &configuration) override;
     QVariantMap processAlgorithm(const QVariantMap &parameters,

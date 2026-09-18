@@ -285,6 +285,29 @@ QString GenericCliAlgorithm::commandLinePreview( const QVariantMap &parameters,
     return parts.join( QLatin1Char( ' ' ) );
 }
 
+qint64 GenericCliAlgorithm::toolTimeoutMs( const QJsonObject &config )
+{
+    // 64-bit math with a sanity clamp (#1043): the old toInt()*1000 wrapped
+    // negative past ~24.8 days and killed healthy tools instantly with a
+    // misleading "timed out".
+    static constexpr qint64 kDefaultToolTimeoutMs = 30 * 60 * 1000;
+    static constexpr qint64 kMaxToolTimeoutMs = 24 * 60 * 60 * 1000;
+    if ( !config.contains( QStringLiteral( "timeout_seconds" ) ) )
+        return kDefaultToolTimeoutMs;
+
+    const QJsonValue configured = config.value( QStringLiteral( "timeout_seconds" ) );
+    bool ok = false;
+    const qint64 seconds = configured.toVariant().toLongLong( &ok );
+    if ( !ok || seconds <= 0 )
+    {
+        const QString warn = QStringLiteral( "Ignoring invalid timeout_seconds value '%1'; using default %2 s." )
+                                 .arg( configured.toVariant().toString() ).arg( kDefaultToolTimeoutMs / 1000 );
+        QgsMessageLog::logMessage( warn, QStringLiteral( "generic_cli" ), Qgis::MessageLevel::Warning );
+        return kDefaultToolTimeoutMs;
+    }
+    return qBound<qint64>( 1000, seconds * 1000, kMaxToolTimeoutMs );
+}
+
 QVariantMap GenericCliAlgorithm::processAlgorithm(const QVariantMap &parameters,
                                                    QgsProcessingContext &context,
                                                    QgsProcessingFeedback *feedback)
@@ -382,9 +405,7 @@ QVariantMap GenericCliAlgorithm::processAlgorithm(const QVariantMap &parameters,
 
     // Watchdog (#618): an external tool that hangs must not block its worker
     // thread forever. Default 30 minutes; tools may declare timeout_seconds.
-    qint64 timeoutMs = 30 * 60 * 1000;
-    if (m_config.contains(QStringLiteral("timeout_seconds")))
-        timeoutMs = m_config.value(QStringLiteral("timeout_seconds")).toInt() * 1000;
+    const qint64 timeoutMs = toolTimeoutMs( m_config );
     QElapsedTimer watchdog;
     watchdog.start();
 

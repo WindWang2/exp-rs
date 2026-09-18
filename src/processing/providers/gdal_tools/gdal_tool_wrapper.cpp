@@ -124,7 +124,27 @@ QVariantMap GdalToolWrapper::processAlgorithm(const QVariantMap &parameters,
                     {
                         QTextStream stream( &file );
                         stream << QString::fromUtf8( capturedStdout );
+                        stream.flush();
                         file.close();
+                        // A short write leaves an empty/partial file that would
+                        // pass the exists-check below as a fake success (#1043).
+                        if ( stream.status() == QTextStream::WriteFailed || file.error() != QFileDevice::NoError )
+                        {
+                            file.remove();
+                            const QString err = QObject::tr(
+                                                  "Failed to write captured tool output to: %1" )
+                                                  .arg( outPath );
+                            SICNU_LOG_ERROR( SicnuLogTags::GDAL, err );
+                            throw QgsProcessingException( err );
+                        }
+                    }
+                    else
+                    {
+                        const QString err = QObject::tr(
+                                              "Cannot open output file for captured tool output: %1" )
+                                              .arg( outPath );
+                        SICNU_LOG_ERROR( SicnuLogTags::GDAL, err );
+                        throw QgsProcessingException( err );
                     }
                 }
             }

@@ -6,6 +6,7 @@
 #include <processing/qgsprocessingparameters.h>
 #include <qgsrasterlayer.h>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFileInfo>
 #include <QProcess>
@@ -134,11 +135,33 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
     proc.write(stdinLine.toUtf8());
     proc.closeWriteChannel();
 
+    // Watchdog (#618/#1056): gdaltransform answers per coordinate and should
+    // finish in seconds; a hung process must not block its worker forever.
+    // Same 30-minute bound as the sibling gdal_tool_wrapper.
+    QElapsedTimer watchdog;
+    watchdog.start();
+    const qint64 timeoutMs = 30 * 60 * 1000;
     while (proc.state() == QProcess::Running) {
         if (feedback && feedback->isCanceled()) {
             proc.kill();
-            feedback->reportError(QObject::tr("Tool execution canceled by user."));
-            return {};
+            if (!proc.waitForFinished(5000))
+                SICNU_LOG_WARN(SicnuLogTags::GDAL, QStringLiteral("gdaltransform did not exit after kill"));
+            const QString err = QObject::tr("Tool execution canceled by user.");
+            feedback->reportError(err);
+            // A canceled run must not masquerade as a successful empty result (#1043).
+            throw QgsProcessingException(err);
+        }
+        if (watchdog.elapsed() > timeoutMs) {
+            proc.terminate();
+            if (!proc.waitForFinished(5000))
+                proc.kill();
+            const QString err = QObject::tr("Tool timed out after %1 s and was terminated.")
+                                    .arg(timeoutMs / 1000);
+            if (feedback) {
+                feedback->reportError(err);
+            }
+            SICNU_LOG_ERROR(SicnuLogTags::GDAL, err);
+            throw QgsProcessingException(err);
         }
         proc.waitForReadyRead(100);
         const QByteArray output = proc.readAllStandardOutput();
@@ -147,7 +170,10 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
         }
     }
 
-    proc.waitForFinished();
+    if (!proc.waitForFinished(5000)) {
+        proc.kill();
+        proc.waitForFinished(5000);
+    }
     const QByteArray stdoutData = proc.readAllStandardOutput();
     const QByteArray stderrData = proc.readAllStandardError();
 
@@ -178,7 +204,19 @@ QVariantMap GdalTransformAlgorithm::processAlgorithm(const QVariantMap &paramete
         }
         QTextStream stream(&file);
         stream << QString::fromUtf8(stdoutData);
+        stream.flush();
         file.close();
+        // A short write or failed close must fail the run, not report success
+        // with a truncated OUTPUT file (#1043).
+        if (stream.status() == QTextStream::WriteFailed || file.error() != QFileDevice::NoError) {
+            const QString err = QObject::tr("Failed to write transform result to output file: %1").arg(outputPath);
+            file.remove();
+            if (feedback) {
+                feedback->reportError(err);
+            }
+            SICNU_LOG_ERROR(SicnuLogTags::GDAL, err);
+            throw QgsProcessingException(err);
+        }
     }
 
     SICNU_LOG_SUCCESS(SicnuLogTags::GDAL,
