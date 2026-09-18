@@ -23,16 +23,28 @@ bool reportProgress( const RsTrainingDataExtraction::Progress &progress,
   return !progress || progress( fraction, message );
 }
 
+/// Outcome of the geometry → pixel-index collection pass.
+enum class CollectStatus
+{
+  Ok,
+  Cancelled,
+  RasterizeFailed,
+};
+
 /**
  * Dedup geometries into a pixel → class map (last class wins), using each
  * entry's pixel-index cache when present and the windowed rasterizer
- * otherwise. Returns false when cancelled via the progress sink.
+ * otherwise. Returns Cancelled when cancelled via the progress sink and
+ * RasterizeFailed when the rasterizer reports an infrastructure failure —
+ * a failed geometry must never silently drop out of the training set
+ * (#1056), so there is no "skip and continue" path here.
  */
-bool collectPixels( const QVector<RsTrainingGeometry> &geometries,
-                    const double gt[6], int W, int H,
-                    QHash<quint64, int> &pixelClass,
-                    QHash<quint64, int> &pixelGroup,
-                    const RsTrainingDataExtraction::Progress &progress )
+CollectStatus collectPixels( const QVector<RsTrainingGeometry> &geometries,
+                             const double gt[6], int W, int H,
+                             QHash<quint64, int> &pixelClass,
+                             QHash<quint64, int> &pixelGroup,
+                             const RsTrainingDataExtraction::Progress &progress,
+                             int &failedGeometryIndex )
 {
   const quint64 nPix = static_cast<quint64>( W ) * static_cast<quint64>( H );
   for ( int i = 0; i < geometries.size(); ++i )
@@ -40,7 +52,7 @@ bool collectPixels( const QVector<RsTrainingGeometry> &geometries,
     if ( !reportProgress( progress,
                           0.4 * static_cast<double>( i ) / geometries.size(),
                           QStringLiteral( "Rasterizing training geometries" ) ) )
-      return false;
+      return CollectStatus::Cancelled;
 
     const RsTrainingGeometry &tg = geometries[i];
     if ( tg.classId <= 0 )
@@ -48,7 +60,13 @@ bool collectPixels( const QVector<RsTrainingGeometry> &geometries,
     QVector<quint64> idx = tg.pixelIndices;
     if ( idx.isEmpty() )
     {
-      const QSet<quint64> px = RsPixelRasterizer::rasterize( tg.geometry, gt, W, H );
+      bool rasterizeOk = false;
+      const QSet<quint64> px = RsPixelRasterizer::rasterize( tg.geometry, gt, W, H, &rasterizeOk );
+      if ( !rasterizeOk )
+      {
+        failedGeometryIndex = i;
+        return CollectStatus::RasterizeFailed;
+      }
       idx = QVector<quint64>( px.begin(), px.end() );
     }
     for ( quint64 p : idx )
@@ -60,7 +78,7 @@ bool collectPixels( const QVector<RsTrainingGeometry> &geometries,
       }
     }
   }
-  return true;
+  return CollectStatus::Ok;
 }
 
 /**
@@ -329,11 +347,25 @@ RsTrainingDataResult RsTrainingDataExtraction::extract(
 
   QHash<quint64, int> pixelClass;
   QHash<quint64, int> pixelGroup;
-  if ( !collectPixels( geometries, gt, W, H, pixelClass, pixelGroup, progress ) )
+  int failedGeometryIndex = -1;
+  const CollectStatus collected = collectPixels( geometries, gt, W, H,
+                                                 pixelClass, pixelGroup,
+                                                 progress, failedGeometryIndex );
+  if ( collected != CollectStatus::Ok )
   {
-    out.error = RsTrainingDataResult::Error::Cancelled;
-    out.errorMessage = QStringLiteral( "Cancelled" );
     GDALClose( ds );
+    if ( collected == CollectStatus::RasterizeFailed )
+    {
+      out.error = RsTrainingDataResult::Error::RasterizeFailed;
+      out.errorMessage =
+        QStringLiteral( "Failed to rasterize training geometry %1" )
+          .arg( failedGeometryIndex );
+    }
+    else
+    {
+      out.error = RsTrainingDataResult::Error::Cancelled;
+      out.errorMessage = QStringLiteral( "Cancelled" );
+    }
     return out;
   }
 
@@ -508,11 +540,25 @@ RsTrainingDataResult RsTrainingDataExtraction::extractFromVector(
 
   QHash<quint64, int> pixelClass;
   QHash<quint64, int> pixelGroup;
-  if ( !collectPixels( geometries, gt, W, H, pixelClass, pixelGroup, progress ) )
+  int failedGeometryIndex = -1;
+  const CollectStatus collected = collectPixels( geometries, gt, W, H,
+                                                 pixelClass, pixelGroup,
+                                                 progress, failedGeometryIndex );
+  if ( collected != CollectStatus::Ok )
   {
-    out.error = RsTrainingDataResult::Error::Cancelled;
-    out.errorMessage = QStringLiteral( "Cancelled" );
     GDALClose( ds );
+    if ( collected == CollectStatus::RasterizeFailed )
+    {
+      out.error = RsTrainingDataResult::Error::RasterizeFailed;
+      out.errorMessage =
+        QStringLiteral( "Failed to rasterize training geometry %1" )
+          .arg( failedGeometryIndex );
+    }
+    else
+    {
+      out.error = RsTrainingDataResult::Error::Cancelled;
+      out.errorMessage = QStringLiteral( "Cancelled" );
+    }
     return out;
   }
 
