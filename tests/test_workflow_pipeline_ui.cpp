@@ -3,6 +3,10 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QApplication>
+#include <QCoreApplication>
+#include <QGraphicsSceneMouseEvent>
+#include <QKeyEvent>
+#include <QPointer>
 #include "app/workflow/pipeline_canvas_widget.h"
 #include "app/workflow/pipeline_scene.h"
 #include "app/workflow/pipeline_node_item.h"
@@ -584,4 +588,303 @@ TEST_CASE( "PipelineNodeItem bounding rect padding and port shape precision", "[
   QPainterPath inShape = inPort->shape();
   REQUIRE( !inShape.isEmpty() );
   REQUIRE( inShape.boundingRect().width() < 30.0 );
+}
+
+namespace
+{
+
+/// Exposes the protected scene event handlers so drag interactions can be
+/// driven without a real QGraphicsView / user input.
+class TestablePipelineScene : public PipelineScene
+{
+public:
+  using PipelineScene::mouseMoveEvent;
+  using PipelineScene::mouseReleaseEvent;
+};
+
+int connectionItemCount( const QGraphicsScene &scene )
+{
+  int count = 0;
+  for ( QGraphicsItem *item : scene.items() )
+  {
+    if ( dynamic_cast<PipelineConnectionItem *>( item ) )
+      ++count;
+  }
+  return count;
+}
+
+PipelineConnectionItem *findTempConnection( const QGraphicsScene &scene )
+{
+  for ( QGraphicsItem *item : scene.items() )
+  {
+    auto *conn = dynamic_cast<PipelineConnectionItem *>( item );
+    if ( conn && conn->targetPort() == nullptr )
+      return conn;
+  }
+  return nullptr;
+}
+
+PipelineNodeItem *addDragNode( PipelineScene &scene, const QString &id )
+{
+  StepDef step;
+  step.id = id.toStdString();
+  step.title = id.toStdString();
+  step.artifactOnSuccess = "out";
+  return scene.addNode( step );
+}
+
+} // namespace
+
+// Issue #1049: the temp wire lives only on its source port, so deleting the
+// owning node used to leave both the wire and the scene's drag source dangling.
+TEST_CASE( "PipelineScene drops an in-flight temp connection when its source node is deleted", "[workflow][drag][lifetime]" )
+{
+  ensureApp();
+
+  TestablePipelineScene scene;
+
+  auto *srcNode = addDragNode( scene, "drag_source" );
+  StepDef targetStep;
+  targetStep.id = "drag_target";
+  targetStep.title = "Drag Target";
+  REQUIRE( scene.addNode( targetStep ) != nullptr );
+
+  auto *outPort = srcNode->findOutputPort( "out" );
+  REQUIRE( outPort != nullptr );
+  QPointer<PipelinePortItem> sourceGuard( outPort );
+
+  emit outPort->connectionDragStarted( outPort, QPointF( 140.0, 90.0 ) );
+  REQUIRE( findTempConnection( scene ) != nullptr );
+  REQUIRE( scene.connections().empty() );
+
+  REQUIRE( scene.removeNode( "drag_source" ) == true );
+  REQUIRE( sourceGuard.isNull() ); // port really was destroyed
+  REQUIRE( findTempConnection( scene ) == nullptr );
+  REQUIRE( connectionItemCount( scene ) == 0 );
+
+  // The next mouse move / repaint must be a no-op, not a dereference of the
+  // freed drag source.
+  QGraphicsSceneMouseEvent moveEvent( QEvent::GraphicsSceneMouseMove );
+  moveEvent.setScenePos( QPointF( 300.0, 200.0 ) );
+  scene.mouseMoveEvent( &moveEvent );
+  REQUIRE( findTempConnection( scene ) == nullptr );
+  REQUIRE( connectionItemCount( scene ) == 0 );
+}
+
+TEST_CASE( "PipelineScene drops an in-flight temp connection on clearWorkflow", "[workflow][drag][lifetime]" )
+{
+  ensureApp();
+
+  TestablePipelineScene scene;
+  auto *srcNode = addDragNode( scene, "clear_source" );
+  auto *outPort = srcNode->findOutputPort( "out" );
+  QPointer<PipelinePortItem> sourceGuard( outPort );
+
+  emit outPort->connectionDragStarted( outPort, QPointF( 80.0, 40.0 ) );
+  REQUIRE( findTempConnection( scene ) != nullptr );
+
+  scene.clearWorkflow();
+  REQUIRE( sourceGuard.isNull() );
+  REQUIRE( findTempConnection( scene ) == nullptr );
+  REQUIRE( scene.nodes().empty() );
+  REQUIRE( scene.connections().empty() );
+
+  QGraphicsSceneMouseEvent moveEvent( QEvent::GraphicsSceneMouseMove );
+  moveEvent.setScenePos( QPointF( 50.0, 50.0 ) );
+  scene.mouseMoveEvent( &moveEvent );
+  REQUIRE( connectionItemCount( scene ) == 0 );
+}
+
+TEST_CASE( "PipelineScene drops an in-flight temp connection on loadWorkflowDefinition", "[workflow][drag][lifetime]" )
+{
+  ensureApp();
+
+  TestablePipelineScene scene;
+  auto *srcNode = addDragNode( scene, "reload_source" );
+  auto *outPort = srcNode->findOutputPort( "out" );
+  QPointer<PipelinePortItem> sourceGuard( outPort );
+
+  emit outPort->connectionDragStarted( outPort, QPointF( 10.0, 10.0 ) );
+  REQUIRE( findTempConnection( scene ) != nullptr );
+
+  WorkflowDefinition reloaded;
+  reloaded.id = "reloaded";
+  StepDef stepA;
+  stepA.id = "r_a";
+  stepA.artifactOnSuccess = "out";
+  StepDef stepB;
+  stepB.id = "r_b";
+  StepConnection link;
+  link.fromStepId = "r_a";
+  link.fromPort = "out";
+  link.toPort = "input";
+  stepB.inputs.push_back( link );
+  reloaded.steps.push_back( stepA );
+  reloaded.steps.push_back( stepB );
+
+  scene.loadWorkflowDefinition( reloaded );
+  REQUIRE( sourceGuard.isNull() );
+  REQUIRE( findTempConnection( scene ) == nullptr );
+  REQUIRE( scene.nodes().size() == 2 );
+  REQUIRE( scene.connections().size() == 1 );
+}
+
+// Delete during an active drag: removeNode is handed the temp conn through no
+// port list, so removeConnection itself must treat it as a cancel.
+TEST_CASE( "PipelineScene removeConnection cancels a live temp wire", "[workflow][drag][lifetime]" )
+{
+  ensureApp();
+
+  TestablePipelineScene scene;
+  auto *srcNode = addDragNode( scene, "remove_conn_source" );
+  auto *outPort = srcNode->findOutputPort( "out" );
+  QPointer<PipelinePortItem> sourceGuard( outPort );
+
+  emit outPort->connectionDragStarted( outPort, QPointF( 30.0, 30.0 ) );
+  auto *temp = findTempConnection( scene );
+  REQUIRE( temp != nullptr );
+
+  REQUIRE( scene.removeConnection( temp ) == true );
+  REQUIRE( sourceGuard == outPort ); // source port untouched
+  REQUIRE( outPort->connections().empty() );
+  REQUIRE( findTempConnection( scene ) == nullptr );
+}
+
+TEST_CASE( "PipelineScene commits a temp connection dropped on an input port", "[workflow][drag][lifetime]" )
+{
+  ensureApp();
+
+  TestablePipelineScene scene;
+  auto *srcNode = addDragNode( scene, "commit_source" );
+  StepDef targetStep;
+  targetStep.id = "commit_target";
+  targetStep.title = "Commit Target";
+  auto *dstNode = scene.addNode( targetStep );
+
+  auto *outPort = srcNode->findOutputPort( "out" );
+  auto *inPort = dstNode->findInputPort( "input" );
+  REQUIRE( outPort != nullptr );
+  REQUIRE( inPort != nullptr );
+
+  emit outPort->connectionDragStarted( outPort, outPort->sceneAnchorPos() );
+
+  QGraphicsSceneMouseEvent moveEvent( QEvent::GraphicsSceneMouseMove );
+  moveEvent.setScenePos( inPort->sceneAnchorPos() );
+  scene.mouseMoveEvent( &moveEvent );
+  REQUIRE( findTempConnection( scene ) != nullptr );
+
+  QGraphicsSceneMouseEvent releaseEvent( QEvent::GraphicsSceneMouseRelease );
+  releaseEvent.setScenePos( inPort->sceneAnchorPos() );
+  releaseEvent.setButton( Qt::LeftButton );
+  releaseEvent.setButtons( Qt::LeftButton );
+  scene.mouseReleaseEvent( &releaseEvent );
+
+  REQUIRE( findTempConnection( scene ) == nullptr );
+  REQUIRE( scene.connections().size() == 1 );
+  auto *conn = *scene.connections().begin();
+  REQUIRE( conn->sourcePort() == outPort );
+  REQUIRE( conn->targetPort() == inPort );
+  REQUIRE( inPort->connections().size() == 1 );
+}
+
+TEST_CASE( "PipelineCanvasWidget select-all delete cancels an in-flight connection drag", "[workflow][canvas][drag]" )
+{
+  ensureApp();
+
+  PipelineCanvasWidget canvas;
+  auto *scene = canvas.pipelineScene();
+
+  auto *srcNode = addDragNode( *scene, "select_all_source" );
+  StepDef targetStep;
+  targetStep.id = "select_all_target";
+  scene->addNode( targetStep );
+
+  auto *outPort = srcNode->findOutputPort( "out" );
+  QPointer<PipelinePortItem> sourceGuard( outPort );
+  emit outPort->connectionDragStarted( outPort, QPointF( 20.0, 20.0 ) );
+  REQUIRE( findTempConnection( *scene ) != nullptr );
+
+  QKeyEvent selectAllEvent( QEvent::KeyPress, Qt::Key_A, Qt::ControlModifier );
+  QCoreApplication::sendEvent( &canvas, &selectAllEvent );
+  REQUIRE( scene->selectedItems().size() >= 2 );
+
+  QKeyEvent deleteEvent( QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier );
+  QCoreApplication::sendEvent( &canvas, &deleteEvent );
+
+  REQUIRE( sourceGuard.isNull() );
+  REQUIRE( findTempConnection( *scene ) == nullptr );
+  REQUIRE( connectionItemCount( *scene ) == 0 );
+  REQUIRE( scene->nodes().empty() );
+}
+
+TEST_CASE( "PipelineCanvasWidget Esc cancels an in-flight connection drag", "[workflow][canvas][drag]" )
+{
+  ensureApp();
+
+  PipelineCanvasWidget canvas;
+  auto *scene = canvas.pipelineScene();
+
+  auto *srcNode = addDragNode( *scene, "esc_source" );
+  auto *outPort = srcNode->findOutputPort( "out" );
+  QPointer<PipelinePortItem> sourceGuard( outPort );
+
+  emit outPort->connectionDragStarted( outPort, QPointF( 5.0, 5.0 ) );
+  REQUIRE( findTempConnection( *scene ) != nullptr );
+
+  QKeyEvent escapeEvent( QEvent::KeyPress, Qt::Key_Escape, Qt::NoModifier );
+  QCoreApplication::sendEvent( &canvas, &escapeEvent );
+
+  REQUIRE( sourceGuard == outPort ); // source survives an Esc cancel
+  REQUIRE( findTempConnection( *scene ) == nullptr );
+  REQUIRE( connectionItemCount( *scene ) == 0 );
+}
+
+TEST_CASE( "PipelineCanvasWidget Delete on the drag source node cancels the drag", "[workflow][canvas][drag]" )
+{
+  ensureApp();
+
+  PipelineCanvasWidget canvas;
+  auto *scene = canvas.pipelineScene();
+
+  auto *srcNode = addDragNode( *scene, "delete_key_source" );
+  StepDef targetStep;
+  targetStep.id = "delete_key_target";
+  scene->addNode( targetStep );
+
+  auto *outPort = srcNode->findOutputPort( "out" );
+  QPointer<PipelinePortItem> sourceGuard( outPort );
+  emit outPort->connectionDragStarted( outPort, QPointF( 15.0, 15.0 ) );
+  REQUIRE( findTempConnection( *scene ) != nullptr );
+
+  srcNode->setSelected( true );
+  QKeyEvent deleteEvent( QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier );
+  QCoreApplication::sendEvent( &canvas, &deleteEvent );
+
+  REQUIRE( sourceGuard.isNull() );
+  REQUIRE( findTempConnection( *scene ) == nullptr );
+  REQUIRE( connectionItemCount( *scene ) == 0 );
+  REQUIRE( scene->findNode( "delete_key_source" ) == nullptr );
+}
+
+TEST_CASE( "PipelineScene cancels the temp connection dropped in empty space", "[workflow][drag][lifetime]" )
+{
+  ensureApp();
+
+  TestablePipelineScene scene;
+  auto *srcNode = addDragNode( scene, "empty_drop_source" );
+  auto *outPort = srcNode->findOutputPort( "out" );
+  QPointer<PipelinePortItem> sourceGuard( outPort );
+
+  emit outPort->connectionDragStarted( outPort, QPointF( 40.0, 40.0 ) );
+  REQUIRE( findTempConnection( scene ) != nullptr );
+
+  QGraphicsSceneMouseEvent releaseEvent( QEvent::GraphicsSceneMouseRelease );
+  releaseEvent.setScenePos( QPointF( 1200.0, 900.0 ) );
+  releaseEvent.setButton( Qt::LeftButton );
+  releaseEvent.setButtons( Qt::LeftButton );
+  scene.mouseReleaseEvent( &releaseEvent );
+
+  REQUIRE( sourceGuard == outPort );
+  REQUIRE( findTempConnection( scene ) == nullptr );
+  REQUIRE( connectionItemCount( scene ) == 0 );
 }
