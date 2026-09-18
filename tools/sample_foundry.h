@@ -112,7 +112,12 @@ struct GenerateResult
 };
 
 /// Generate the selected products + companions into out_dir and write
-/// manifest.json. Overwrites foundry-owned outputs; never touches anything else.
+/// manifest.json. The foundry manages exactly its own artifacts: every
+/// foundry-owned basename is overwritten, and owned basenames left by a
+/// previous selection that this selection does not emit are removed before
+/// emission. No other file in out_dir is touched; the emit path additionally
+/// pins the GDAL environment knobs it depends on (PAM, thread count,
+/// shapefile encoding) and restores them afterwards.
 Outcome generate( const Options &options, GenerateResult *result );
 
 struct VerifyReport

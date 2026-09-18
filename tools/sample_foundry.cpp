@@ -39,6 +39,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <random>
 #include <sstream>
 #include <string>
@@ -263,6 +264,55 @@ bool contains( const std::vector<T> &v, T value )
   return std::find( v.begin(), v.end(), value ) != v.end();
 }
 
+/// Pins the GDAL configuration knobs that could otherwise let the host process
+/// environment reach the emitted bytes (F-1032-P1-gdalenv), and restores the
+/// previous values on destruction so embedding the foundry library never leaks
+/// configuration into the host:
+///   * GDAL_PAM_ENABLED=NO — .aux.xml sidecars would break byte-determinism
+///     (D-012); the config option also overrides a host-exported PAM setting.
+///   * GDAL_NUM_THREADS=1 — the GTiff driver falls back to it when the
+///     NUM_THREADS creation option is absent; the emit path is contractually
+///     single-threaded (ADR 0164). writeRaster also passes NUM_THREADS=1
+///     explicitly; the two pins are belt and braces.
+///   * SHAPE_ENCODING="" — the Shapefile driver derives .cpg emission and DBF
+///     encoding from it; the empty value selects the default LDID path, which
+///     never writes a .cpg. writeTrainingShapefile still records a .cpg if one
+///     somehow appears, but under this pin it cannot.
+/// Not reentrant across threads (CPLSetConfigOption is process-global), like
+/// every other GDAL global in this file; generate() is a single-threaded CLI
+/// path by contract.
+class ScopedDeterministicGdalConfig
+{
+  public:
+    ScopedDeterministicGdalConfig()
+    {
+      pin( "GDAL_PAM_ENABLED", "NO" );
+      pin( "GDAL_NUM_THREADS", "1" );
+      pin( "SHAPE_ENCODING", "" );
+    }
+    ScopedDeterministicGdalConfig( const ScopedDeterministicGdalConfig & ) = delete;
+    ScopedDeterministicGdalConfig &operator=( const ScopedDeterministicGdalConfig & ) = delete;
+    ~ScopedDeterministicGdalConfig()
+    {
+      // Restore in reverse pin order; CPLSetConfigOption( key, nullptr ) unsets.
+      for ( auto it = saved_.rbegin(); it != saved_.rend(); ++it )
+        CPLSetConfigOption( it->first.c_str(),
+                            it->second ? it->second->c_str() : nullptr );
+    }
+
+  private:
+    void pin( const char *key, const char *value )
+    {
+      const char *previous = CPLGetConfigOption( key, nullptr );
+      saved_.emplace_back( key,
+                           previous != nullptr ? std::optional<std::string>( previous )
+                                               : std::nullopt );
+      CPLSetConfigOption( key, value );
+    }
+
+    std::vector<std::pair<std::string, std::optional<std::string>>> saved_;
+};
+
 // ---------------------------------------------------------------------------
 // 3. GDAL raster emission
 // ---------------------------------------------------------------------------
@@ -299,9 +349,13 @@ Outcome writeRaster( const GridSpec &grid, const std::string &out_dir,
   options = CSLSetNameValue( options, "BLOCKXSIZE", "256" );
   options = CSLSetNameValue( options, "BLOCKYSIZE", "256" );
   // COG-friendly layout (epic default #3); PREDICTOR 2 for Byte, 3 for
-  // Float32. NUM_THREADS stays unset: single-threaded DEFLATE keeps bytes
-  // stable, and GDAL_PAM_ENABLED=NO (set in generate) keeps .aux.xml away.
+  // Float32. NUM_THREADS=1 is pinned explicitly (mirroring the deterministic
+  // COG preset in src/geospatial/io/cog_options.cpp): left unset, the driver
+  // would fall back to the host's GDAL_NUM_THREADS and the emit path would no
+  // longer be thread-independent. GDAL_PAM_ENABLED=NO (pinned in generate)
+  // keeps .aux.xml away.
   options = CSLSetNameValue( options, "PREDICTOR", spec.byte_type ? "2" : "3" );
+  options = CSLSetNameValue( options, "NUM_THREADS", "1" );
 
   const std::string path = ( fs::path( out_dir ) / product ).string() + ".tif";
   GDALDataset *ds = driver->Create( path.c_str(), grid.width, grid.height, spec.bands,
@@ -392,6 +446,35 @@ Outcome writeRaster( const GridSpec &grid, const std::string &out_dir,
 // 4. ROI derivation + shapefile
 // ---------------------------------------------------------------------------
 
+/// The exact base names a catalog product may own inside out_dir. Rasters own
+/// "<product>.tif"; the training shapefile owns its sidecar set (.cpg is
+/// conditional but reserved). This is the authority for both the pre-create
+/// replacement and the stale-selection prune: nothing outside this set is
+/// ever removed (ADR 0164: the foundry manages exactly its own artifacts).
+std::vector<std::string> ownedBasenames( Product product )
+{
+  if ( product == Product::TrainingSamples )
+  {
+    return { "training_samples.shp", "training_samples.shx",
+             "training_samples.dbf", "training_samples.prj",
+             "training_samples.cpg" };
+  }
+  return { std::string( productName( product ) ) + ".tif" };
+}
+
+/// Remove one foundry-owned file before it is rewritten. Missing is the
+/// normal first-run case; any other removal failure (permissions, a directory
+/// squatting on the name) is surfaced now with a typed message instead of
+/// letting the subsequent Create fail more opaquely.
+Outcome removeOwnedFile( const fs::path &out_dir, const std::string &name )
+{
+  std::error_code ec;
+  fs::remove( out_dir / name, ec );
+  if ( ec )
+    return fail( "io", "cannot replace foundry-owned " + name + ": " + ec.message() );
+  return okOut();
+}
+
 struct RoiRect
 {
   int x0 = 0, y0 = 0, x1 = 0, y1 = 0; // inclusive pixel bounds
@@ -479,10 +562,18 @@ Outcome writeTrainingShapefile( const std::vector<uint8_t> &cls, const GridSpec 
   }
 
   const std::string shp_path = ( fs::path( out_dir ) / "training_samples.shp" ).string();
-  // A stale .cpg from a prior run (created when SHAPE_ENCODING is set in the
-  // environment) must not survive into this run's directory listing.
-  std::error_code rm_ec;
-  fs::remove( fs::path( out_dir ) / "training_samples.cpg", rm_ec );
+  // Replace the whole foundry-owned sidecar set before Create (F-1032-P1-shp):
+  // the Shapefile driver's behavior on pre-existing files is version-dependent
+  // (some builds refuse the create, some leave stale sidecars), so the re-run
+  // contract must not rely on it. Exactly these five names are removed —
+  // including a stale .cpg from a prior run created when SHAPE_ENCODING was
+  // set in the environment. Nothing else in the directory is touched.
+  for ( const std::string &name : ownedBasenames( Product::TrainingSamples ) )
+  {
+    Outcome removed = removeOwnedFile( fs::path( out_dir ), name );
+    if ( !removed.ok )
+      return removed;
+  }
   GDALDriver *driver = GetGDALDriverManager()->GetDriverByName( "ESRI Shapefile" );
   if ( !driver )
     return fail( "gdal", "ESRI Shapefile driver unavailable" );
@@ -580,9 +671,10 @@ Outcome writeTrainingShapefile( const std::vector<uint8_t> &cls, const GridSpec 
       return fail( "io", "shapefile sidecar missing after write: " + name );
     emitted->push_back( name );
   }
-  // The driver writes .cpg only when an encoding is in effect (host-dependent,
-  // e.g. SHAPE_ENCODING); record it when present so --verify never sees an
-  // unlisted data file.
+  // SHAPE_ENCODING is pinned empty for the emit path, so the driver should
+  // never write a .cpg here; recording it when present is a fail-safe so
+  // --verify would still see a consistent listing if a GDAL build ever
+  // produced one anyway.
   if ( fs::exists( fs::path( out_dir ) / "training_samples.cpg" ) )
     emitted->push_back( "training_samples.cpg" );
   return okOut();
@@ -1181,8 +1273,27 @@ Outcome generate( const Options &options, GenerateResult *result )
     return fail( "io", "cannot create output directory " + options.out_dir +
                              ( ec ? ( ": " + ec.message() ) : std::string() ) );
 
-  // No .aux.xml sidecars: PAM would break byte-determinism (D-012).
-  CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  // Re-run hygiene (F-1032-P1-stale): a previous generate with a different
+  // selection may have left owned files behind that this selection does not
+  // emit, and verifyDirectory treats any unlisted data file as drift. Prune
+  // exactly the catalog-owned basenames that are absent from the current
+  // selection — never scan the directory, never touch anything else (ADR 0164
+  // ownership boundary). manifest.json is rewritten below either way.
+  for ( Product product : productCatalog() )
+  {
+    if ( contains( selection, product ) )
+      continue;
+    for ( const std::string &name : ownedBasenames( product ) )
+    {
+      Outcome removed = removeOwnedFile( fs::path( options.out_dir ), name );
+      if ( !removed.ok )
+        return removed;
+    }
+  }
+
+  // Pin the environment-sensitive GDAL knobs for the whole emit path and
+  // restore them afterwards (scoped; no leak into the host process).
+  const ScopedDeterministicGdalConfig gdal_config;
   GDALAllRegister();
 
   const GridSpec grid = gridForProfile( options.profile );
