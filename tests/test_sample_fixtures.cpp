@@ -14,7 +14,13 @@
 //   * manifest + --verify (clean pass, drift detection, self-fingerprint)
 //   * CLI: byte-identical determinism, seed behavior (truth content is
 //     seed-independent; provenance stamps are not), typed exit codes
-//     (2 usage / 3 spec refusal / 4 verify drift), spec-directory intake
+//     (2 usage / 3 spec refusal / 4 verify drift), spec-directory intake,
+//     typed spec-refusal prefix on stderr
+//   * re-run contract: generate twice into one directory (byte-identical,
+//     shapefile sidecars replaced), full<->subset switching (stale owned
+//     artifacts pruned, user files untouched, --verify 0 problem),
+//     path-with-spaces output, host GDAL env perturbation (PAM / thread
+//     count / SHAPE_ENCODING) leaving the bytes and manifest identical
 //   * stress profile smoke (2048x2048 grid + closed-form spot checks)
 
 #include "sample_foundry.h"
@@ -35,6 +41,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -66,25 +73,69 @@ constexpr long kGoldenLabClassCount[7] = {
 };
 constexpr long kGoldenLabTotalChanged = 6180;
 
+/// Unique temp path prefix/suffix shared by TempDir and the stderr-capture
+/// helper (ASCII, shell-safe: digits and dashes only).
+fs::path uniqueTempPath( const char *prefix )
+{
+    static std::atomic<int> counter{ 0 };
+    const int n = counter.fetch_add( 1 );
+#ifdef _WIN32
+    const int pid = _getpid();
+#else
+    const int pid = static_cast<int>( getpid() );
+#endif
+    return fs::temp_directory_path() /
+           ( std::string( prefix ) + std::to_string( pid ) + "-" + std::to_string( n ) );
+}
+
 struct TempDir
 {
     fs::path path;
     TempDir()
     {
-        static std::atomic<int> counter{ 0 };
-        const int n = counter.fetch_add( 1 );
-#ifdef _WIN32
-        const int pid = _getpid();
-#else
-        const int pid = static_cast<int>( getpid() );
-#endif
-        path = fs::temp_directory_path() / ( "sicnu-foundry-test-" + std::to_string( pid ) +
-                                             "-" + std::to_string( n ) );
+        path = uniqueTempPath( "sicnu-foundry-test-" );
         fs::remove_all( path );
         fs::create_directories( path );
     }
     ~TempDir() { std::error_code ec; fs::remove_all( path, ec ); }
     std::string str() const { return path.string(); }
+};
+
+/// Set an environment variable for the current process (the CLI children
+/// spawned via std::system inherit it) and restore the previous state on
+/// destruction, so the perturbation cannot leak into other test cases.
+class ScopedEnv
+{
+  public:
+    ScopedEnv( const char *key, const char *value ) : key_( key )
+    {
+        const char *previous = std::getenv( key );
+        if ( previous )
+            previous_.emplace( previous );
+#ifdef _WIN32
+        _putenv( ( key_ + "=" + value ).c_str() );
+#else
+        ::setenv( key_.c_str(), value, 1 );
+#endif
+    }
+    ScopedEnv( const ScopedEnv & ) = delete;
+    ScopedEnv &operator=( const ScopedEnv & ) = delete;
+    ~ScopedEnv()
+    {
+#ifdef _WIN32
+        // An empty value removes the variable from the environment.
+        _putenv( ( key_ + "=" + previous_.value_or( "" ) ).c_str() );
+#else
+        if ( previous_ )
+            ::setenv( key_.c_str(), previous_->c_str(), 1 );
+        else
+            ::unsetenv( key_.c_str() );
+#endif
+    }
+
+  private:
+    std::string key_;
+    std::optional<std::string> previous_;
 };
 
 std::string readBinary( const fs::path &path )
@@ -134,6 +185,31 @@ int runCli( const std::vector<std::string> &args )
     const int status = std::system( cmd.c_str() );
 #ifdef _WIN32
     return status; // std::system via cmd.exe returns the exit code directly
+#else
+    return WIFEXITED( status ) ? WEXITSTATUS( status ) : status;
+#endif
+}
+
+/// runCli plus stderr capture (shell redirection into a temp file), so the
+/// typed refusal prefixes on stderr are assertable, not just the exit code.
+int runCliCaptureStderr( const std::vector<std::string> &args, std::string *stderr_out )
+{
+    const fs::path err_path = uniqueTempPath( "sicnu-foundry-stderr-" );
+    std::string cmd = shellQuote( SICNU_GENERATE_SAMPLES_BIN );
+    for ( const std::string &arg : args )
+        cmd += " " + shellQuote( arg );
+#ifdef _WIN32
+    cmd += " 2> \"" + err_path.string() + "\"";
+#else
+    cmd += " 2> '" + err_path.string() + "'";
+#endif
+    const int status = std::system( cmd.c_str() );
+    if ( stderr_out )
+        *stderr_out = readBinary( err_path );
+    std::error_code ec;
+    fs::remove( err_path, ec );
+#ifdef _WIN32
+    return status;
 #else
     return WIFEXITED( status ) ? WEXITSTATUS( status ) : status;
 #endif
@@ -778,6 +854,172 @@ TEST_CASE( "CLI: --verify detects drift", "[foundry][cli]" )
     // Remove a file -> missing.
     fs::remove( dir.path / "dem_sample.tif" );
     CHECK( runCli( { "--verify", "--out=" + dir.str() } ) == 4 );
+}
+
+TEST_CASE( "CLI: regenerating twice into the same directory succeeds byte-identical",
+           "[foundry][cli][determinism][regenerate]" )
+{
+    // F-1032-P1-shp regression lock: the second pass must replace the whole
+    // foundry-owned set (shapefile sidecars included) without relying on the
+    // Shapefile driver's version-dependent behavior on pre-existing files.
+    TempDir dir;
+    REQUIRE( runCli( { "--out=" + dir.str(), "--seed=42" } ) == 0 );
+
+    std::map<std::string, std::string> first_pass;
+    for ( const auto &entry : fs::directory_iterator( dir.path ) )
+        first_pass[entry.path().filename().string()] = readBinary( entry.path() );
+    REQUIRE( first_pass.size() == 13 ); // 12 emitted files + manifest.json
+
+    REQUIRE( runCli( { "--out=" + dir.str(), "--seed=42" } ) == 0 );
+
+    std::map<std::string, std::string> second_pass;
+    for ( const auto &entry : fs::directory_iterator( dir.path ) )
+        second_pass[entry.path().filename().string()] = readBinary( entry.path() );
+    CHECK( second_pass == first_pass );
+
+    CHECK( runCli( { "--verify", "--out=" + dir.str() } ) == 0 );
+}
+
+TEST_CASE( "CLI: full<->subset switching keeps the tree verify-clean and never deletes user files",
+           "[foundry][cli][regenerate]" )
+{
+    // F-1032-P1-stale regression lock: after a selection switch, generate must
+    // prune exactly the catalog-owned basenames the new selection does not
+    // emit, so the wrapper's forced --verify passes — while any non-foundry
+    // file survives untouched. Non-data extensions (.txt/.gpkg) are also not
+    // flagged by --verify, so the directory stays 0-problem throughout.
+    TempDir dir;
+    {
+        std::ofstream notes( dir.path / "field_notes.txt" );
+        notes << "made by a human";
+        std::ofstream boundary( dir.path / "boundary.gpkg" );
+        boundary << "also made by a human";
+    }
+
+    REQUIRE( runCli( { "--out=" + dir.str(), "--seed=42" } ) == 0 );
+    const std::string full_manifest = readBinary( dir.path / "manifest.json" );
+
+    TempDir spec_dir;
+    const std::string spec = ( spec_dir.path / "subset.json" ).string();
+    {
+        std::ofstream out( spec );
+        out << "{\"experiment\":\"switch\",\"products\":[\"dem_sample\",\"training_samples\"]}";
+    }
+    REQUIRE( runCli( { "--out=" + dir.str(), "--seed=42", "--spec=" + spec } ) == 0 );
+    CHECK( runCli( { "--verify", "--out=" + dir.str() } ) == 0 );
+
+    // Products outside the selection: every owned basename gone. The subset
+    // keeps training_samples, so its sidecars must all still exist.
+    for ( const char *name :
+          { "landsat_sample.tif", "change_before.tif", "change_after.tif",
+            "landsat_truth.tif", "change_truth.tif", "dem_slope_truth.tif",
+            "dem_aspect_truth.tif" } )
+    {
+        INFO( "stale artifact still present: " << name );
+        CHECK_FALSE( fs::exists( dir.path / name ) );
+    }
+    // Selected products: present, with the full owned sidecar set.
+    CHECK( fs::exists( dir.path / "dem_sample.tif" ) );
+    for ( const char *name : { "training_samples.shp", "training_samples.shx",
+                               "training_samples.dbf", "training_samples.prj" } )
+    {
+        INFO( "selected sidecar missing: " << name );
+        CHECK( fs::exists( dir.path / name ) );
+    }
+    CHECK_FALSE( fs::exists( dir.path / "training_samples.cpg" ) );
+    const Json::Value subset_manifest =
+      parseJsonBytes( readBinary( dir.path / "manifest.json" ) );
+    REQUIRE( subset_manifest["products"].size() == 2 );
+    CHECK( subset_manifest["products"][0].asString() == "dem_sample" );
+    CHECK( subset_manifest["products"][1].asString() == "training_samples" );
+
+    // Unknown user files survived both the pruning and the overwrite.
+    CHECK( readBinary( dir.path / "field_notes.txt" ) == "made by a human" );
+    CHECK( readBinary( dir.path / "boundary.gpkg" ) == "also made by a human" );
+
+    // subset -> full: the full set comes back byte-identical to the first run.
+    REQUIRE( runCli( { "--out=" + dir.str(), "--seed=42" } ) == 0 );
+    CHECK( readBinary( dir.path / "manifest.json" ) == full_manifest );
+    CHECK( runCli( { "--verify", "--out=" + dir.str() } ) == 0 );
+    CHECK( readBinary( dir.path / "field_notes.txt" ) == "made by a human" );
+    CHECK( readBinary( dir.path / "boundary.gpkg" ) == "also made by a human" );
+}
+
+TEST_CASE( "CLI: host GDAL environment cannot perturb the emitted bytes",
+           "[foundry][cli][determinism][regenerate]" )
+{
+    // F-1032-P1-gdalenv regression lock: the emit path pins PAM, thread count
+    // and shapefile encoding, so a host-exported GDAL environment cannot add
+    // sidecars or change any byte — manifest included (an extra .cpg would
+    // otherwise surface as an extra manifest entry).
+    TempDir clean_dir;
+    REQUIRE( runCli( { "--out=" + clean_dir.str(), "--seed=42" } ) == 0 );
+
+    TempDir noisy_dir;
+    int noisy_exit = -1;
+    {
+        const ScopedEnv threads( "GDAL_NUM_THREADS", "8" );
+        const ScopedEnv pam( "GDAL_PAM_ENABLED", "YES" );
+        const ScopedEnv shape( "SHAPE_ENCODING", "CP936" );
+        noisy_exit = runCli( { "--out=" + noisy_dir.str(), "--seed=42" } );
+    }
+    REQUIRE( noisy_exit == 0 );
+
+    CHECK( readBinary( noisy_dir.path / "manifest.json" ) ==
+           readBinary( clean_dir.path / "manifest.json" ) );
+    const Json::Value manifest =
+      parseJsonBytes( readBinary( noisy_dir.path / "manifest.json" ) );
+    for ( const Json::Value &entry : manifest["files"] )
+    {
+        const std::string name = entry["name"].asString();
+        INFO( "byte drift under perturbed env: " << name );
+        CHECK( readBinary( noisy_dir.path / name ) == readBinary( clean_dir.path / name ) );
+    }
+    // The pinned knobs must not materialize sidecars either.
+    CHECK_FALSE( fs::exists( noisy_dir.path / "training_samples.cpg" ) );
+    CHECK_FALSE( fs::exists( noisy_dir.path / "landsat_sample.tif.aux.xml" ) );
+
+    // ScopedEnv actually restored the process environment.
+    CHECK( std::getenv( "GDAL_NUM_THREADS" ) == nullptr );
+    CHECK( std::getenv( "SHAPE_ENCODING" ) == nullptr );
+}
+
+TEST_CASE( "CLI: --out= with spaces in the path generates and verifies",
+           "[foundry][cli]" )
+{
+    TempDir base;
+    const fs::path spaced = base.path / "out put with spaces" / "deep er";
+    REQUIRE( runCli( { "--out=" + spaced.string(), "--seed=42" } ) == 0 );
+    CHECK( fs::exists( spaced / "manifest.json" ) );
+    CHECK( runCli( { "--verify", "--out=" + spaced.string() } ) == 0 );
+}
+
+TEST_CASE( "CLI: spec refusals carry the typed prefix on stderr and cover the empty list",
+           "[foundry][cli][spec]" )
+{
+    // Review test-hole closure: exit 3 alone does not pin the contract; the
+    // documented "spec-refusal: [spec]" stderr prefix and the empty-products
+    // refusal get dedicated cases here.
+    TempDir dir;
+    TempDir spec_dir;
+    const std::string spec = ( spec_dir.path / "refusal.json" ).string();
+
+    {
+        std::ofstream out( spec );
+        out << "{\"experiment\":\"x\",\"products\":[]}";
+    }
+    std::string err;
+    CHECK( runCliCaptureStderr( { "--out=" + dir.str(), "--spec=" + spec }, &err ) == 3 );
+    CHECK( err.rfind( "spec-refusal: [spec]", 0 ) == 0 );
+    CHECK( err.find( "non-empty array" ) != std::string::npos );
+
+    {
+        std::ofstream out( spec );
+        out << "{\"experiment\":\"x\",\"products\":[\"not_a_product\"]}";
+    }
+    CHECK( runCliCaptureStderr( { "--out=" + dir.str(), "--spec=" + spec }, &err ) == 3 );
+    CHECK( err.rfind( "spec-refusal: [spec]", 0 ) == 0 );
+    CHECK( err.find( "not_a_product" ) != std::string::npos );
 }
 
 TEST_CASE( "verifyDirectory flags a manifest edited after generation",
