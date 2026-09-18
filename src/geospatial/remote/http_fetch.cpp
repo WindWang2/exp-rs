@@ -278,7 +278,6 @@ HttpFetchResult fetchImpl( const std::string &url, const HttpFetchOptions &optio
   if ( timedOut )
     throw GeoError( ErrorCode::Timeout, "httpFetch: request exceeded its time budget: " + uri.display() );
 
-  if ( fetch.httpStatus == 404 )
   if ( throwHttpErrors )
   {
     if ( fetch.httpStatus == 404 || fetch.httpStatus == 410 )
