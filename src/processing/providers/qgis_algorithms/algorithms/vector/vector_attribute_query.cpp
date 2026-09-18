@@ -1,6 +1,8 @@
 // src/processing/providers/qgis_algorithms/algorithms/vector/vector_attribute_query.cpp
 #include "vector_attribute_query.h"
 
+#include "../../algorithm_write_guards.h"
+
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsvectorlayer.h>
@@ -41,11 +43,13 @@ QVariantMap VectorAttributeQueryAlgorithm::processAlgorithm( const QVariantMap &
     if ( expression.hasParserError() )
         throw QgsProcessingException( QObject::tr( "Expression error: %1" ).arg( expression.parserErrorString() ) );
 
+    sicnu::qgis_algorithms::PartialOutputGuard destGuard;
     QString dest;
     std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
         source->fields(), source->wkbType(), source->sourceCrs() ) );
     if ( !sink )
         throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
+    destGuard.arm( dest );
 
     QgsExpressionContext exprContext;
     exprContext.appendScope( QgsExpressionContextUtils::globalScope() );
@@ -59,8 +63,7 @@ QVariantMap VectorAttributeQueryAlgorithm::processAlgorithm( const QVariantMap &
 
     while ( it.nextFeature( feat ) )
     {
-        if ( feedback->isCanceled() )
-            break;
+        sicnu::qgis_algorithms::checkCanceled( feedback );
 
         current++;
         if ( total > 0 )
@@ -70,8 +73,11 @@ QVariantMap VectorAttributeQueryAlgorithm::processAlgorithm( const QVariantMap &
 
         QVariant result = expression.evaluate( &exprContext );
         if ( !expression.hasEvalError() && result.toBool() )
-            sink->addFeature( feat, QgsFeatureSink::FastInsert );
+            sicnu::qgis_algorithms::addFeatureChecked( sink.get(), feat, feedback );
     }
+
+    sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+    destGuard.disarm();
 
     return QVariantMap{{OUTPUT, dest}};
 }

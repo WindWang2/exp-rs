@@ -3,6 +3,7 @@
 
 #include <processing/qgsprocessingalgorithm.h>
 #include "processing/algorithm_help_catalog.h"
+#include "../../algorithm_write_guards.h"
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsfeature.h>
@@ -66,11 +67,13 @@ protected:
         int op = parameterAsEnum( parameters, QStringLiteral( "OPERATOR" ), context );
         QString value = parameterAsString( parameters, QStringLiteral( "VALUE" ), context );
 
+        sicnu::qgis_algorithms::PartialOutputGuard destGuard;
         QString dest;
         std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, QStringLiteral( "OUTPUT" ), context, dest,
             source->fields(), source->wkbType(), source->sourceCrs() ) );
         if ( !sink )
             throw QgsProcessingException( invalidSinkError( parameters, QStringLiteral( "OUTPUT" ) ) );
+        destGuard.arm( dest );
 
         int fieldIdx = source->fields().indexOf( fieldName );
         if ( fieldIdx < 0 )
@@ -137,13 +140,16 @@ protected:
 
         while ( it.nextFeature( feat ) )
         {
-            if ( feedback && feedback->isCanceled() ) break;
+            sicnu::qgis_algorithms::checkCanceled( feedback );
             current++;
             if ( total > 0 && feedback ) feedback->setProgress( 100.0 * current / total );
 
             if ( matches( feat.attribute( fieldIdx ) ) )
-                sink->addFeature( feat, QgsFeatureSink::FastInsert );
+                sicnu::qgis_algorithms::addFeatureChecked( sink.get(), feat, feedback );
         }
+
+        sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+        destGuard.disarm();
 
         return QVariantMap{{QStringLiteral( "OUTPUT" ), dest}};
     }

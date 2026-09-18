@@ -1,6 +1,8 @@
 // src/processing/providers/qgis_algorithms/algorithms/vector/vector_symmetrical_difference.cpp
 #include "vector_symmetrical_difference.h"
 
+#include "../../algorithm_write_guards.h"
+
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsvectorlayer.h>
@@ -50,11 +52,13 @@ QVariantMap VectorSymmetricalDifferenceAlgorithm::processAlgorithm( const QVaria
         overlayFieldMap.append( outFields.count() - 1 );
     }
 
+    sicnu::qgis_algorithms::PartialOutputGuard destGuard;
     QString dest;
     std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
         outFields, source->wkbType(), source->sourceCrs() ) );
     if ( !sink )
         throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
+    destGuard.arm( dest );
 
     // Combine all overlay geometries and store features
     QgsGeometry overlayCombined;
@@ -71,8 +75,7 @@ QVariantMap VectorSymmetricalDifferenceAlgorithm::processAlgorithm( const QVaria
 
     while ( overlayIt.nextFeature( overlayFeat ) )
     {
-        if ( feedback && feedback->isCanceled() )
-            break;
+        sicnu::qgis_algorithms::checkCanceled( feedback );
         if ( overlayFeat.hasGeometry() )
         {
             if ( needsTransform )
@@ -83,7 +86,11 @@ QVariantMap VectorSymmetricalDifferenceAlgorithm::processAlgorithm( const QVaria
                     g.transform( ct );
                     overlayFeat.setGeometry( g );
                 }
-                catch ( const QgsCsException & ) {}
+                catch ( const QgsCsException &e )
+                {
+                    feedback->reportError( QObject::tr( "Could not transform feature to the target CRS: %1 — skipping" ).arg( e.what() ) );
+                    continue;
+                }
             }
             overlayFeatures.append( overlayFeat );
             if ( overlayCombined.isNull() )
@@ -100,8 +107,7 @@ QVariantMap VectorSymmetricalDifferenceAlgorithm::processAlgorithm( const QVaria
     QgsFeature inputFeat;
     while ( inputIt.nextFeature( inputFeat ) )
     {
-        if ( feedback && feedback->isCanceled() )
-            break;
+        sicnu::qgis_algorithms::checkCanceled( feedback );
         if ( inputFeat.hasGeometry() )
         {
             inputFeatures.append( inputFeat );
@@ -115,8 +121,7 @@ QVariantMap VectorSymmetricalDifferenceAlgorithm::processAlgorithm( const QVaria
     // Part A: features from input that don't intersect overlay
     for ( const QgsFeature &inFeat : inputFeatures )
     {
-        if ( feedback && feedback->isCanceled() )
-            break;
+        sicnu::qgis_algorithms::checkCanceled( feedback );
 
         QgsGeometry geomA;
         if ( overlayCombined.isNull() )
@@ -130,15 +135,14 @@ QVariantMap VectorSymmetricalDifferenceAlgorithm::processAlgorithm( const QVaria
             outFeat.setGeometry( geomA );
             for ( int i = 0; i < source->fields().count(); ++i )
                 outFeat.setAttribute( i, inFeat.attribute( i ) );
-            sink->addFeature( outFeat, QgsFeatureSink::FastInsert );
+            sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outFeat, feedback );
         }
     }
 
     // Part B: features from overlay that don't intersect input
     for ( const QgsFeature &ovFeat : overlayFeatures )
     {
-        if ( feedback && feedback->isCanceled() )
-            break;
+        sicnu::qgis_algorithms::checkCanceled( feedback );
 
         QgsGeometry geomB;
         if ( inputCombined.isNull() )
@@ -152,9 +156,12 @@ QVariantMap VectorSymmetricalDifferenceAlgorithm::processAlgorithm( const QVaria
             outFeat.setGeometry( geomB );
             for ( int i = 0; i < overlayFields.count(); ++i )
                 outFeat.setAttribute( overlayFieldMap[i], ovFeat.attribute( i ) );
-            sink->addFeature( outFeat, QgsFeatureSink::FastInsert );
+            sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outFeat, feedback );
         }
     }
+
+    sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+    destGuard.disarm();
 
     if ( feedback )
         feedback->setProgress( 100 );

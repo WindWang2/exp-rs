@@ -1,6 +1,8 @@
 // src/processing/providers/qgis_algorithms/algorithms/raster/raster_statistics.cpp
 #include "raster_statistics.h"
 
+#include "../../algorithm_write_guards.h"
+
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <processing/qgsprocessingcontext.h>
@@ -41,8 +43,9 @@ QVariantMap RasterStatisticsAlgorithm::processAlgorithm( const QVariantMap &para
 
     for ( int band = 1; band <= bandCount; ++band )
     {
-        if ( feedback->isCanceled() )
-            break;
+        // Cancellation must abort the run, not report statistics computed from
+        // a subset of bands (#1043).
+        sicnu::qgis_algorithms::checkCanceled( feedback );
 
         feedback->setProgress( 100.0 * ( band - 1 ) / bandCount );
 
@@ -72,7 +75,14 @@ QVariantMap RasterStatisticsAlgorithm::processAlgorithm( const QVariantMap &para
         QTextStream ts( &file );
         for ( const QString &line : lines )
             ts << line << "\n";
+        ts.flush();
         file.close();
+        // A short write must fail the run, not publish a truncated report (#1043).
+        if ( ts.status() == QTextStream::WriteFailed || file.error() != QFileDevice::NoError )
+        {
+            file.remove();
+            throw QgsProcessingException( QObject::tr( "Failed to write statistics output file: %1" ).arg( output ) );
+        }
         results[QStringLiteral( "OUTPUT" )] = output;
     }
 

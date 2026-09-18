@@ -3,6 +3,7 @@
 
 #include <processing/qgsprocessingalgorithm.h>
 #include "processing/algorithm_help_catalog.h"
+#include "../../algorithm_write_guards.h"
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsfeature.h>
@@ -54,11 +55,13 @@ protected:
         QgsCoordinateReferenceSystem targetCrs = parameterAsCrs( parameters, QStringLiteral( "TARGET_CRS" ), context );
         QgsCoordinateTransform transform( source->sourceCrs(), targetCrs, context.transformContext() );
 
+        sicnu::qgis_algorithms::PartialOutputGuard destGuard;
         QString dest;
         std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, QStringLiteral( "OUTPUT" ), context, dest,
             source->fields(), source->wkbType(), targetCrs ) );
         if ( !sink )
             throw QgsProcessingException( invalidSinkError( parameters, QStringLiteral( "OUTPUT" ) ) );
+        destGuard.arm( dest );
 
         QgsFeatureIterator it = source->getFeatures();
         QgsFeature feat;
@@ -67,7 +70,7 @@ protected:
 
         while ( it.nextFeature( feat ) )
         {
-            if ( feedback->isCanceled() ) break;
+            sicnu::qgis_algorithms::checkCanceled( feedback );
             current++;
             if ( total > 0 ) feedback->setProgress( 100.0 * current / total );
 
@@ -86,13 +89,16 @@ protected:
                     continue;
                 }
                 outputFeat.setGeometry( geom );
-                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outputFeat, feedback );
             }
             else
             {
-                sink->addFeature( feat, QgsFeatureSink::FastInsert );
+                sicnu::qgis_algorithms::addFeatureChecked( sink.get(), feat, feedback );
             }
         }
+
+        sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+        destGuard.disarm();
 
         return QVariantMap{{QStringLiteral( "OUTPUT" ), dest}};
     }

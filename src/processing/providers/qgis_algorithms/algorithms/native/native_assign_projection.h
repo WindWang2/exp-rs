@@ -3,6 +3,7 @@
 
 #include <processing/qgsprocessingalgorithm.h>
 #include "processing/algorithm_help_catalog.h"
+#include "../../algorithm_write_guards.h"
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsfeature.h>
@@ -52,20 +53,25 @@ protected:
 
         QgsCoordinateReferenceSystem crs = parameterAsCrs( parameters, QStringLiteral( "CRS" ), context );
 
+        sicnu::qgis_algorithms::PartialOutputGuard destGuard;
         QString dest;
         std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, QStringLiteral( "OUTPUT" ), context, dest,
             source->fields(), source->wkbType(), crs ) );
         if ( !sink )
             throw QgsProcessingException( invalidSinkError( parameters, QStringLiteral( "OUTPUT" ) ) );
+        destGuard.arm( dest );
 
         QgsFeatureIterator it = source->getFeatures();
         QgsFeature feat;
 
         while ( it.nextFeature( feat ) )
         {
-            if ( feedback->isCanceled() ) break;
-            sink->addFeature( feat, QgsFeatureSink::FastInsert );
+            sicnu::qgis_algorithms::checkCanceled( feedback );
+            sicnu::qgis_algorithms::addFeatureChecked( sink.get(), feat, feedback );
         }
+
+        sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+        destGuard.disarm();
 
         feedback->setProgress( 100 );
         return QVariantMap{{QStringLiteral( "OUTPUT" ), dest}};

@@ -1,6 +1,8 @@
 // src/processing/providers/qgis_algorithms/algorithms/vector/vector_distance_matrix.cpp
 #include "vector_distance_matrix.h"
 
+#include "../../algorithm_write_guards.h"
+
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsvectorlayer.h>
@@ -78,8 +80,7 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
 
     while ( targetIt.nextFeature( targetFeat ) )
     {
-        if ( feedback->isCanceled() )
-            break;
+        sicnu::qgis_algorithms::checkCanceled( feedback );
         if ( targetFeat.hasGeometry() )
         {
             if ( needsTransform )
@@ -90,7 +91,11 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
                     g.transform( ct );
                     targetFeat.setGeometry( g );
                 }
-                catch ( const QgsCsException & ) {}
+                catch ( const QgsCsException &e )
+                {
+                    feedback->reportError( QObject::tr( "Could not transform feature to the target CRS: %1 — skipping" ).arg( e.what() ) );
+                    continue;
+                }
             }
             targetIndex.addFeature( targetFeat );
             targetFeatures[targetFeat.id()] = targetFeat;
@@ -133,11 +138,13 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
         }
     }
 
+    sicnu::qgis_algorithms::PartialOutputGuard destGuard;
     QString dest;
     std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
         outputFields, Qgis::WkbType::NoGeometry, source->sourceCrs() ) );
     if ( !sink )
         throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
+    destGuard.arm( dest );
 
     QgsFeatureIterator it = source->getFeatures();
     QgsFeature feat;
@@ -146,8 +153,7 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
 
     while ( it.nextFeature( feat ) )
     {
-        if ( feedback->isCanceled() )
-            break;
+        sicnu::qgis_algorithms::checkCanceled( feedback );
 
         current++;
         if ( total > 0 )
@@ -172,18 +178,18 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
                 double dist = std::sqrt( dx * dx + dy * dy );
 
                 QgsFeature outputFeat;
-                outputFeat.setFields( outputFields );
+                outputFeat.setFields( outputFields, true );
                 outputFeat.setAttribute( QStringLiteral( "InputID" ), inputId );
                 outputFeat.setAttribute( QStringLiteral( "TargetID" ), nearest.attribute( targetFieldName ).toString() );
                 outputFeat.setAttribute( QStringLiteral( "Distance" ), dist );
-                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outputFeat, feedback );
             }
         }
         else if ( outputType == 1 )
         {
             // Standard N x M matrix: one row per input feature with columns for every target feature
             QgsFeature outputFeat;
-            outputFeat.setFields( outputFields );
+            outputFeat.setFields( outputFields, true );
             outputFeat.setAttribute( QStringLiteral( "InputID" ), inputId );
             for ( const auto &[targetId, colName] : targetColumns )
             {
@@ -196,7 +202,7 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
                 double dist = std::sqrt( dx * dx + dy * dy );
                 outputFeat.setAttribute( colName, dist );
             }
-            sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+            sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outputFeat, feedback );
         }
         else
         {
@@ -225,17 +231,20 @@ QVariantMap VectorDistanceMatrixAlgorithm::processAlgorithm( const QVariantMap &
             for ( const auto &de : distances )
             {
                 QgsFeature outputFeat;
-                outputFeat.setFields( outputFields );
+                outputFeat.setFields( outputFields, true );
                 outputFeat.setAttribute( QStringLiteral( "InputID" ), inputId );
                 outputFeat.setAttribute( QStringLiteral( "TargetID" ), de.targetId );
                 outputFeat.setAttribute( QStringLiteral( "Distance" ), de.distance );
                 if ( outputType == 0 )
                     outputFeat.setAttribute( QStringLiteral( "Rank" ), rank );
-                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outputFeat, feedback );
                 rank++;
             }
         }
     }
+
+    sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+    destGuard.disarm();
 
     return QVariantMap{{OUTPUT, dest}};
 }

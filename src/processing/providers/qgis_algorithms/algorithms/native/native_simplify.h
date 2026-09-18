@@ -3,6 +3,7 @@
 
 #include <processing/qgsprocessingalgorithm.h>
 #include "processing/algorithm_help_catalog.h"
+#include "../../algorithm_write_guards.h"
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsfeature.h>
@@ -51,11 +52,13 @@ protected:
 
         double tolerance = parameterAsDouble( parameters, QStringLiteral( "TOLERANCE" ), context );
 
+        sicnu::qgis_algorithms::PartialOutputGuard destGuard;
         QString dest;
         std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, QStringLiteral( "OUTPUT" ), context, dest,
             source->fields(), source->wkbType(), source->sourceCrs() ) );
         if ( !sink )
             throw QgsProcessingException( invalidSinkError( parameters, QStringLiteral( "OUTPUT" ) ) );
+        destGuard.arm( dest );
 
         QgsFeatureIterator it = source->getFeatures();
         QgsFeature feat;
@@ -64,7 +67,7 @@ protected:
 
         while ( it.nextFeature( feat ) )
         {
-            if ( feedback->isCanceled() ) break;
+            sicnu::qgis_algorithms::checkCanceled( feedback );
             current++;
             if ( total > 0 ) feedback->setProgress( 100.0 * current / total );
 
@@ -72,9 +75,12 @@ protected:
             {
                 QgsFeature outputFeat = feat;
                 outputFeat.setGeometry( feat.geometry().simplify( tolerance ) );
-                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outputFeat, feedback );
             }
         }
+
+        sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+        destGuard.disarm();
 
         return QVariantMap{{QStringLiteral( "OUTPUT" ), dest}};
     }

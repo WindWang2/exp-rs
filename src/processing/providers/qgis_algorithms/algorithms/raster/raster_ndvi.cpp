@@ -15,6 +15,7 @@
 
 #include "processing/algorithms/spectral_indices.h"
 #include "processing/providers/qgis_algorithms/algorithms/toolbox_raster_preflight.h"
+#include "processing/providers/qgis_algorithms/algorithm_write_guards.h"
 
 #include <gdal.h>
 #include <cpl_conv.h>
@@ -111,7 +112,9 @@ QVariantMap RasterNdviAlgorithm::processAlgorithm( const QVariantMap &parameters
 
     feedback->setProgress( 70 );
 
-    // Write the block to the output file
+    // Write the block to the output file. The guard is armed only once GDAL
+    // has taken over the destination, so a failed run removes the truncated
+    // file it created but never a previously valid user file (#1043).
     GDALDriverH driver = GDALGetDriverByName( "GTiff" );
     if ( !driver )
         throw QgsProcessingException( QObject::tr( "GTiff driver not available" ) );
@@ -119,12 +122,22 @@ QVariantMap RasterNdviAlgorithm::processAlgorithm( const QVariantMap &parameters
     GDALDatasetH dataset = GDALCreate( driver, dest.toUtf8().constData(), nCols, nRows, 1, GDT_Float32, nullptr );
     if ( !dataset )
         throw QgsProcessingException( QObject::tr( "Could not create output file: %1" ).arg( dest ) );
+    sicnu::qgis_algorithms::PartialOutputGuard destGuard( dest );
 
-    // Set projection and geotransform
+    // Set projection and geotransform — rejected georeference must fail the
+    // run rather than write an unpositioned raster that reports success (#1043).
     double geoTransform[6] = { extent.xMinimum(), extent.width() / nCols, 0,
                                extent.yMaximum(), 0, -extent.height() / nRows };
-    GDALSetGeoTransform( dataset, geoTransform );
-    GDALSetProjection( dataset, crs.toWkt().toUtf8().constData() );
+    if ( GDALSetGeoTransform( dataset, geoTransform ) != CE_None )
+    {
+        GDALClose( dataset );
+        throw QgsProcessingException( QObject::tr( "Failed to set geotransform on NDVI output" ) );
+    }
+    if ( GDALSetProjection( dataset, crs.toWkt().toUtf8().constData() ) != CE_None )
+    {
+        GDALClose( dataset );
+        throw QgsProcessingException( QObject::tr( "Failed to set projection on NDVI output" ) );
+    }
 
     // Write NDVI data
     GDALRasterBandH band = GDALGetRasterBand( dataset, 1 );
@@ -148,6 +161,7 @@ QVariantMap RasterNdviAlgorithm::processAlgorithm( const QVariantMap &parameters
     }
 
     GDALClose( dataset );
+    destGuard.disarm();
 
     feedback->setProgress( 100 );
 

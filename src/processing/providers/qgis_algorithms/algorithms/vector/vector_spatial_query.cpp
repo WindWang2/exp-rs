@@ -1,6 +1,8 @@
 // src/processing/providers/qgis_algorithms/algorithms/vector/vector_spatial_query.cpp
 #include "vector_spatial_query.h"
 
+#include "../../algorithm_write_guards.h"
+
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsvectorlayer.h>
@@ -47,11 +49,13 @@ QVariantMap VectorSpatialQueryAlgorithm::processAlgorithm( const QVariantMap &pa
 
     int predicateIdx = parameterAsEnum( parameters, PREDICATE, context );
 
+    sicnu::qgis_algorithms::PartialOutputGuard destGuard;
     QString dest;
     std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
         source->fields(), source->wkbType(), source->sourceCrs() ) );
     if ( !sink )
         throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
+    destGuard.arm( dest );
 
     // Build spatial index and geometry map on intersect layer
     QgsSpatialIndex spatialIndex;
@@ -68,8 +72,7 @@ QVariantMap VectorSpatialQueryAlgorithm::processAlgorithm( const QVariantMap &pa
 
     while ( intersectIt.nextFeature( intersectFeat ) )
     {
-        if ( feedback->isCanceled() )
-            break;
+        sicnu::qgis_algorithms::checkCanceled( feedback );
         if ( intersectFeat.hasGeometry() )
         {
             QgsGeometry g = intersectFeat.geometry();
@@ -80,7 +83,11 @@ QVariantMap VectorSpatialQueryAlgorithm::processAlgorithm( const QVariantMap &pa
                     g.transform( ct );
                     intersectFeat.setGeometry( g );
                 }
-                catch ( const QgsCsException & ) {}
+                catch ( const QgsCsException &e )
+                {
+                    feedback->reportError( QObject::tr( "Could not transform feature to the target CRS: %1 — skipping" ).arg( e.what() ) );
+                    continue;
+                }
             }
             spatialIndex.addFeature( intersectFeat );
             intersectGeometries[intersectFeat.id()] = g;
@@ -95,8 +102,7 @@ QVariantMap VectorSpatialQueryAlgorithm::processAlgorithm( const QVariantMap &pa
 
     while ( it.nextFeature( feat ) )
     {
-        if ( feedback->isCanceled() )
-            break;
+        sicnu::qgis_algorithms::checkCanceled( feedback );
 
         current++;
         if ( total > 0 )
@@ -145,8 +151,11 @@ QVariantMap VectorSpatialQueryAlgorithm::processAlgorithm( const QVariantMap &pa
         }
 
         if ( match )
-            sink->addFeature( feat, QgsFeatureSink::FastInsert );
+            sicnu::qgis_algorithms::addFeatureChecked( sink.get(), feat, feedback );
     }
+
+    sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+    destGuard.disarm();
 
     return QVariantMap{{OUTPUT, dest}};
 }

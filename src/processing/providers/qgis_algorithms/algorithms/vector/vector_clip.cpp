@@ -1,6 +1,8 @@
 // src/processing/providers/qgis_algorithms/algorithms/vector/vector_clip.cpp
 #include "vector_clip.h"
 
+#include "../../algorithm_write_guards.h"
+
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsvectorlayer.h>
@@ -35,11 +37,13 @@ QVariantMap VectorClipAlgorithm::processAlgorithm( const QVariantMap &parameters
     if ( !overlay )
         throw QgsProcessingException( invalidSourceError( parameters, OVERLAY ) );
 
+    sicnu::qgis_algorithms::PartialOutputGuard destGuard;
     QString dest;
     std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
         source->fields(), Qgis::WkbType::Unknown, source->sourceCrs() ) );
     if ( !sink )
         throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
+    destGuard.arm( dest );
 
     // Combine overlay geometries into a single clip geometry
     QgsGeometry clipGeom;
@@ -55,8 +59,7 @@ QVariantMap VectorClipAlgorithm::processAlgorithm( const QVariantMap &parameters
 
     while ( overlayIt.nextFeature( overlayFeat ) )
     {
-        if ( feedback->isCanceled() )
-            break;
+        sicnu::qgis_algorithms::checkCanceled( feedback );
         if ( overlayFeat.hasGeometry() )
         {
             QgsGeometry g = overlayFeat.geometry();
@@ -66,7 +69,11 @@ QVariantMap VectorClipAlgorithm::processAlgorithm( const QVariantMap &parameters
                 {
                     g.transform( ct );
                 }
-                catch ( const QgsCsException & ) {}
+                catch ( const QgsCsException &e )
+                {
+                    feedback->reportError( QObject::tr( "Could not transform feature to the target CRS: %1 — skipping" ).arg( e.what() ) );
+                    continue;
+                }
             }
             if ( clipGeom.isNull() )
                 clipGeom = g;
@@ -76,7 +83,11 @@ QVariantMap VectorClipAlgorithm::processAlgorithm( const QVariantMap &parameters
     }
 
     if ( clipGeom.isNull() )
+    {
+        sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+        destGuard.disarm();
         return QVariantMap{{OUTPUT, dest}};
+    }
 
     QgsFeatureIterator it = source->getFeatures();
     QgsFeature feat;
@@ -85,8 +96,7 @@ QVariantMap VectorClipAlgorithm::processAlgorithm( const QVariantMap &parameters
 
     while ( it.nextFeature( feat ) )
     {
-        if ( feedback->isCanceled() )
-            break;
+        sicnu::qgis_algorithms::checkCanceled( feedback );
 
         current++;
         if ( total > 0 )
@@ -99,10 +109,13 @@ QVariantMap VectorClipAlgorithm::processAlgorithm( const QVariantMap &parameters
             {
                 QgsFeature outputFeat = feat;
                 outputFeat.setGeometry( clipped );
-                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outputFeat, feedback );
             }
         }
     }
+
+    sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+    destGuard.disarm();
 
     return QVariantMap{{OUTPUT, dest}};
 }

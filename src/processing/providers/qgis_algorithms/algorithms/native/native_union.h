@@ -3,6 +3,7 @@
 
 #include <processing/qgsprocessingalgorithm.h>
 #include "processing/algorithm_help_catalog.h"
+#include "../../algorithm_write_guards.h"
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsfeature.h>
@@ -66,11 +67,13 @@ protected:
             overlayFieldMap.append( outFields.count() - 1 );
         }
 
+        sicnu::qgis_algorithms::PartialOutputGuard destGuard;
         QString dest;
         std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, QStringLiteral( "OUTPUT" ), context, dest,
             outFields, source->wkbType(), source->sourceCrs() ) );
         if ( !sink )
             throw QgsProcessingException( invalidSinkError( parameters, QStringLiteral( "OUTPUT" ) ) );
+        destGuard.arm( dest );
 
         // Collect overlay features
         QVector<QgsFeature> overlayFeatures;
@@ -95,7 +98,11 @@ protected:
                     g.transform( ct );
                     overlayFeat.setGeometry( g );
                 }
-                catch ( const QgsCsException & ) {}
+                catch ( const QgsCsException &e )
+                {
+                    feedback->reportError( QObject::tr( "Could not transform feature to the target CRS: %1 — skipping" ).arg( e.what() ) );
+                    continue;
+                }
             }
             overlayFeatures.append( overlayFeat );
         }
@@ -133,7 +140,7 @@ protected:
 
         while ( it.nextFeature( feat ) )
         {
-            if ( feedback->isCanceled() ) break;
+            sicnu::qgis_algorithms::checkCanceled( feedback );
             current++;
             if ( total > 0 ) feedback->setProgress( 100.0 * current / total );
 
@@ -142,7 +149,7 @@ protected:
                 QgsFeature outFeat( outFields );
                 for ( int i = 0; i < source->fields().count(); ++i )
                     outFeat.setAttribute( i, feat.attribute( i ) );
-                sink->addFeature( outFeat, QgsFeatureSink::FastInsert );
+                sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outFeat, feedback );
                 continue;
             }
 
@@ -165,7 +172,7 @@ protected:
                     if ( !inter.isEmpty() )
                     {
                         QgsFeature outF = makeIntersectionFeature( feat, ovFeat, inter );
-                        sink->addFeature( outF, QgsFeatureSink::FastInsert );
+                        sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outF, feedback );
                         inputRemainder = inputRemainder.difference( inter );
                     }
                 }
@@ -174,14 +181,14 @@ protected:
             if ( !inputRemainder.isEmpty() )
             {
                 QgsFeature outF = makeInputRemainderFeature( feat, inputRemainder );
-                sink->addFeature( outF, QgsFeatureSink::FastInsert );
+                sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outF, feedback );
             }
         }
 
         // Add residual overlay geometries
         for ( const QgsFeature &ovFeat : overlayFeatures )
         {
-            if ( feedback->isCanceled() ) break;
+            sicnu::qgis_algorithms::checkCanceled( feedback );
             current++;
             if ( total > 0 ) feedback->setProgress( 100.0 * current / total );
 
@@ -190,7 +197,7 @@ protected:
                 QgsFeature outFeat( outFields );
                 for ( int i = 0; i < overlayFields.count(); ++i )
                     outFeat.setAttribute( overlayFieldMap[i], ovFeat.attribute( i ) );
-                sink->addFeature( outFeat, QgsFeatureSink::FastInsert );
+                sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outFeat, feedback );
                 continue;
             }
 
@@ -203,9 +210,12 @@ protected:
             if ( !ovRemainder.isEmpty() )
             {
                 QgsFeature outF = makeOverlayRemainderFeature( ovFeat, ovRemainder );
-                sink->addFeature( outF, QgsFeatureSink::FastInsert );
+                sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outF, feedback );
             }
         }
+
+        sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+        destGuard.disarm();
 
         return QVariantMap{{QStringLiteral( "OUTPUT" ), dest}};
     }

@@ -1,6 +1,8 @@
 // src/processing/providers/qgis_algorithms/algorithms/vector/vector_buffer.cpp
 #include "vector_buffer.h"
 
+#include "../../algorithm_write_guards.h"
+
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsvectorlayer.h>
@@ -47,11 +49,13 @@ QVariantMap VectorBufferAlgorithm::processAlgorithm( const QVariantMap &paramete
     int capStyle = parameterAsEnum( parameters, CAP_STYLE, context );
     int segments = parameterAsInt( parameters, SEGMENTS, context );
 
+    sicnu::qgis_algorithms::PartialOutputGuard destGuard;
     QString dest;
     std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
         source->fields(), Qgis::WkbType::MultiPolygon, source->sourceCrs() ) );
     if ( !sink )
         throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
+    destGuard.arm( dest );
 
     QgsFeatureIterator it = source->getFeatures();
     QgsFeature feat;
@@ -60,8 +64,7 @@ QVariantMap VectorBufferAlgorithm::processAlgorithm( const QVariantMap &paramete
 
     while ( it.nextFeature( feat ) )
     {
-        if ( feedback->isCanceled() )
-            break;
+        sicnu::qgis_algorithms::checkCanceled( feedback );
 
         current++;
         if ( total > 0 )
@@ -77,9 +80,12 @@ QVariantMap VectorBufferAlgorithm::processAlgorithm( const QVariantMap &paramete
 
             QgsFeature outputFeat = feat;
             outputFeat.setGeometry( feat.geometry().buffer( distance, segments, endCap, Qgis::JoinStyle::Round, 2.0 ) );
-            sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+            sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outputFeat, feedback );
         }
     }
+
+    sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+    destGuard.disarm();
 
     return QVariantMap{{OUTPUT, dest}};
 }

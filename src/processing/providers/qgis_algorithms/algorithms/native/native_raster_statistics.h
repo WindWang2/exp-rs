@@ -73,7 +73,14 @@ protected:
             }
             QTextStream ts( &file );
             ts << html;
+            ts.flush();
             file.close();
+            // A short write must fail the run, not publish a truncated report (#1043).
+            if ( ts.status() == QTextStream::WriteFailed || file.error() != QFileDevice::NoError )
+            {
+                file.remove();
+                throw QgsProcessingException( QObject::tr( "Failed to write statistics output file: %1" ).arg( dest ) );
+            }
             results[QStringLiteral( "OUTPUT_HTML" )] = dest;
         }
 

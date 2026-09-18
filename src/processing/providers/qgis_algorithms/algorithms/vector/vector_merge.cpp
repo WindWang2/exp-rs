@@ -1,6 +1,8 @@
 // src/processing/providers/qgis_algorithms/algorithms/vector/vector_merge.cpp
 #include "vector_merge.h"
 
+#include "../../algorithm_write_guards.h"
+
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsmaplayer.h>
@@ -46,13 +48,16 @@ QVariantMap VectorMergeAlgorithm::processAlgorithm( const QVariantMap &parameter
     if ( layers.isEmpty() )
         throw QgsProcessingException( QObject::tr( "No valid input layers found" ) );
 
-    // Use the first layer to set up the sink
+    // Use the first layer to set up the sink. Declared before the sink so the
+    // guard's destructor runs after the sink has flushed and closed the file.
+    sicnu::qgis_algorithms::PartialOutputGuard destGuard;
     QString dest;
     QgsFields outputFields = layers.first()->fields();
     std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
         outputFields, layers.first()->wkbType(), layers.first()->crs() ) );
     if ( !sink )
         throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
+    destGuard.arm( dest );
 
     // Copy features from all input layers
     long long totalFeatures = 0;
@@ -63,8 +68,8 @@ QVariantMap VectorMergeAlgorithm::processAlgorithm( const QVariantMap &parameter
     const QgsCoordinateReferenceSystem targetCrs = layers.first()->crs();
     for ( QgsVectorLayer *vl : layers )
     {
-        if ( feedback->isCanceled() )
-            break;
+        // Cancellation must abort the run, not return a partial merge (#1043).
+        sicnu::qgis_algorithms::checkCanceled( feedback );
 
         const bool needsTransform = vl->crs().isValid() && targetCrs.isValid() &&
                                     vl->crs() != targetCrs;
@@ -79,8 +84,7 @@ QVariantMap VectorMergeAlgorithm::processAlgorithm( const QVariantMap &parameter
         const QgsFields inFields = vl->fields();
         while ( it.nextFeature( feat ) )
         {
-            if ( feedback->isCanceled() )
-                break;
+            sicnu::qgis_algorithms::checkCanceled( feedback );
 
             current++;
             if ( totalFeatures > 0 )
@@ -104,9 +108,15 @@ QVariantMap VectorMergeAlgorithm::processAlgorithm( const QVariantMap &parameter
                 if ( outIdx >= 0 )
                     outFeat.setAttribute( outIdx, inAttrs.at( i ) );
             }
-            sink->addFeature( outFeat, QgsFeatureSink::FastInsert );
+            // A rejected feature must fail the run: the sink is typed from the
+            // first layer, so merging e.g. points into a polygon sink cannot
+            // silently drop the mismatching layer (#1043).
+            sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outFeat, feedback );
         }
     }
+
+    sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+    destGuard.disarm();
 
     feedback->setProgress( 100 );
     return QVariantMap{{OUTPUT, dest}};

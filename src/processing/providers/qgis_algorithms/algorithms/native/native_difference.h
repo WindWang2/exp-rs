@@ -3,6 +3,7 @@
 
 #include <processing/qgsprocessingalgorithm.h>
 #include "processing/algorithm_help_catalog.h"
+#include "../../algorithm_write_guards.h"
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsfeature.h>
@@ -53,11 +54,13 @@ protected:
         if ( !overlay )
             throw QgsProcessingException( invalidSourceError( parameters, QStringLiteral( "OVERLAY" ) ) );
 
+        sicnu::qgis_algorithms::PartialOutputGuard destGuard;
         QString dest;
         std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, QStringLiteral( "OUTPUT" ), context, dest,
             source->fields(), source->wkbType(), source->sourceCrs() ) );
         if ( !sink )
             throw QgsProcessingException( invalidSinkError( parameters, QStringLiteral( "OUTPUT" ) ) );
+        destGuard.arm( dest );
 
         QgsGeometry overlayCombined;
         QgsFeatureIterator overlayIt = overlay->getFeatures();
@@ -81,7 +84,11 @@ protected:
                     {
                         g.transform( ct );
                     }
-                    catch ( const QgsCsException & ) {}
+                    catch ( const QgsCsException &e )
+                    {
+                        feedback->reportError( QObject::tr( "Could not transform feature to the target CRS: %1 — skipping" ).arg( e.what() ) );
+                        continue;
+                    }
                 }
                 if ( overlayCombined.isNull() )
                     overlayCombined = g;
@@ -97,7 +104,7 @@ protected:
 
         while ( it.nextFeature( feat ) )
         {
-            if ( feedback->isCanceled() ) break;
+            sicnu::qgis_algorithms::checkCanceled( feedback );
             current++;
             if ( total > 0 ) feedback->setProgress( 100.0 * current / total );
 
@@ -106,9 +113,12 @@ protected:
                 QgsFeature outputFeat = feat;
                 if ( !overlayCombined.isNull() )
                     outputFeat.setGeometry( feat.geometry().difference( overlayCombined ) );
-                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outputFeat, feedback );
             }
         }
+
+        sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+        destGuard.disarm();
 
         return QVariantMap{{QStringLiteral( "OUTPUT" ), dest}};
     }

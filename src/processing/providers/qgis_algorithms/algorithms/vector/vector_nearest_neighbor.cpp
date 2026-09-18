@@ -1,6 +1,8 @@
 // src/processing/providers/qgis_algorithms/algorithms/vector/vector_nearest_neighbor.cpp
 #include "vector_nearest_neighbor.h"
 
+#include "../../algorithm_write_guards.h"
+
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsvectorlayer.h>
@@ -58,11 +60,13 @@ QVariantMap VectorNearestNeighborAlgorithm::processAlgorithm( const QVariantMap 
     outputFields.append( QgsField( QStringLiteral( "distance" ), QVariant::Double ) );
     outputFields.append( QgsField( QStringLiteral( "neighbor_id" ), QVariant::LongLong ) );
 
+    sicnu::qgis_algorithms::PartialOutputGuard destGuard;
     QString dest;
     std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
         outputFields, Qgis::WkbType::Point, source->sourceCrs() ) );
     if ( !sink )
         throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
+    destGuard.arm( dest );
 
     // Build spatial index and store geometries of reference layer
     QgsSpatialIndex refIndex;
@@ -79,8 +83,7 @@ QVariantMap VectorNearestNeighborAlgorithm::processAlgorithm( const QVariantMap 
 
     while ( refIt.nextFeature( refFeat ) )
     {
-        if ( feedback->isCanceled() )
-            break;
+        sicnu::qgis_algorithms::checkCanceled( feedback );
         if ( refFeat.hasGeometry() )
         {
             if ( needsTransform )
@@ -91,7 +94,11 @@ QVariantMap VectorNearestNeighborAlgorithm::processAlgorithm( const QVariantMap 
                     g.transform( ct );
                     refFeat.setGeometry( g );
                 }
-                catch ( const QgsCsException & ) {}
+                catch ( const QgsCsException &e )
+                {
+                    feedback->reportError( QObject::tr( "Could not transform feature to the target CRS: %1 — skipping" ).arg( e.what() ) );
+                    continue;
+                }
             }
             refIndex.addFeature( refFeat );
             refGeometries[refFeat.id()] = refFeat.geometry();
@@ -105,8 +112,7 @@ QVariantMap VectorNearestNeighborAlgorithm::processAlgorithm( const QVariantMap 
 
     while ( it.nextFeature( feat ) )
     {
-        if ( feedback->isCanceled() )
-            break;
+        sicnu::qgis_algorithms::checkCanceled( feedback );
 
         current++;
         if ( total > 0 )
@@ -167,7 +173,7 @@ QVariantMap VectorNearestNeighborAlgorithm::processAlgorithm( const QVariantMap 
                 break;
 
             QgsFeature outputFeat;
-            outputFeat.setFields( outputFields );
+            outputFeat.setFields( outputFields, true );
             outputFeat.setGeometry( refGeometries[nd.id] );
             outputFeat.setAttribute( QStringLiteral( "distance" ), nd.distance );
             outputFeat.setAttribute( QStringLiteral( "neighbor_id" ), static_cast<qlonglong>( nd.id ) );
@@ -178,10 +184,13 @@ QVariantMap VectorNearestNeighborAlgorithm::processAlgorithm( const QVariantMap 
                 outputFeat.setAttribute( source->fields().at( i ).name(), feat.attribute( i ) );
             }
 
-            sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+            sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outputFeat, feedback );
             count++;
         }
     }
+
+    sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+    destGuard.disarm();
 
     return QVariantMap{{OUTPUT, dest}};
 }

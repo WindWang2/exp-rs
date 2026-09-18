@@ -1,6 +1,8 @@
 // src/processing/providers/qgis_algorithms/algorithms/vector/vector_select_by_location.cpp
 #include "vector_select_by_location.h"
 
+#include "../../algorithm_write_guards.h"
+
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsvectorlayer.h>
@@ -53,11 +55,13 @@ QVariantMap VectorSelectByLocationAlgorithm::processAlgorithm( const QVariantMap
 
     int predicateIdx = parameterAsEnum( parameters, PREDICATE, context );
 
+    sicnu::qgis_algorithms::PartialOutputGuard destGuard;
     QString dest;
     std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
         source->fields(), source->wkbType(), source->sourceCrs() ) );
     if ( !sink )
         throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
+    destGuard.arm( dest );
 
     // Build spatial index on intersect layer for efficiency
     QgsSpatialIndex spatialIndex;
@@ -74,8 +78,7 @@ QVariantMap VectorSelectByLocationAlgorithm::processAlgorithm( const QVariantMap
 
     while ( intersectIt.nextFeature( intersectFeat ) )
     {
-        if ( feedback->isCanceled() )
-            break;
+        sicnu::qgis_algorithms::checkCanceled( feedback );
         if ( intersectFeat.hasGeometry() )
         {
             QgsGeometry g = intersectFeat.geometry();
@@ -86,7 +89,11 @@ QVariantMap VectorSelectByLocationAlgorithm::processAlgorithm( const QVariantMap
                     g.transform( ct );
                     intersectFeat.setGeometry( g );
                 }
-                catch ( const QgsCsException & ) {}
+                catch ( const QgsCsException &e )
+                {
+                    feedback->reportError( QObject::tr( "Could not transform feature to the target CRS: %1 — skipping" ).arg( e.what() ) );
+                    continue;
+                }
             }
             spatialIndex.addFeature( intersectFeat );
             intersectGeometries[intersectFeat.id()] = g;
@@ -100,8 +107,7 @@ QVariantMap VectorSelectByLocationAlgorithm::processAlgorithm( const QVariantMap
 
     while ( it.nextFeature( feat ) )
     {
-        if ( feedback->isCanceled() )
-            break;
+        sicnu::qgis_algorithms::checkCanceled( feedback );
 
         current++;
         if ( total > 0 )
@@ -148,8 +154,11 @@ QVariantMap VectorSelectByLocationAlgorithm::processAlgorithm( const QVariantMap
         }
 
         if ( match )
-            sink->addFeature( feat, QgsFeatureSink::FastInsert );
+            sicnu::qgis_algorithms::addFeatureChecked( sink.get(), feat, feedback );
     }
+
+    sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+    destGuard.disarm();
 
     return QVariantMap{{OUTPUT, dest}};
 }

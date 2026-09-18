@@ -14,6 +14,8 @@
 
 #include <processing/algorithms/band_math.h>
 
+#include "processing/providers/qgis_algorithms/algorithm_write_guards.h"
+
 #include <gdal.h>
 #include <cpl_conv.h>
 
@@ -107,7 +109,7 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
                 continue;
 
             if ( feedback->isCanceled() )
-                return {};
+                throw QgsProcessingException( QObject::tr( "Processing canceled" ) );
 
             std::unique_ptr<QgsRasterBlock> block( provider->block( band, extent, nCols, nRows ) );
             if ( !block || !block->isValid() )
@@ -134,7 +136,9 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
 
     feedback->setProgress( 70 );
 
-    // Write output as single-band GeoTIFF
+    // Write output as single-band GeoTIFF. The guard is armed only once GDAL
+    // has taken over the destination, so a failed or canceled run removes the
+    // truncated file it created but never a previously valid user file (#1043).
     GDALDriverH driver = GDALGetDriverByName( "GTiff" );
     if ( !driver )
         throw QgsProcessingException( QObject::tr( "GTiff driver not available" ) );
@@ -142,15 +146,24 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
     GDALDatasetH outDs = GDALCreate( driver, dest.toUtf8().constData(), nCols, nRows, 1, GDT_Float32, nullptr );
     if ( !outDs )
         throw QgsProcessingException( QObject::tr( "Could not create output file: %1" ).arg( dest ) );
+    sicnu::qgis_algorithms::PartialOutputGuard destGuard( dest );
 
-    // Set GeoTransform
+    // Set GeoTransform and CRS — a rejected georeference must fail the run
+    // rather than write an unpositioned raster that reports success (#1043).
     double geoTransform[6] = { extent.xMinimum(), extent.width() / nCols, 0,
                                extent.yMaximum(), 0, -extent.height() / nRows };
-    GDALSetGeoTransform( outDs, geoTransform );
+    if ( GDALSetGeoTransform( outDs, geoTransform ) != CE_None )
+    {
+        GDALClose( outDs );
+        throw QgsProcessingException( QObject::tr( "Failed to set geotransform on output raster" ) );
+    }
 
-    // Set CRS
     std::string wkt = crs.toWkt().toStdString();
-    GDALSetProjection( outDs, wkt.c_str() );
+    if ( GDALSetProjection( outDs, wkt.c_str() ) != CE_None )
+    {
+        GDALClose( outDs );
+        throw QgsProcessingException( QObject::tr( "Failed to set projection on output raster" ) );
+    }
 
     // Write data
     GDALRasterBandH outBand = GDALGetRasterBand( outDs, 1 );
@@ -171,11 +184,12 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
         if ( feedback->isCanceled() )
         {
             GDALClose( outDs );
-            return {};
+            throw QgsProcessingException( QObject::tr( "Processing canceled" ) );
         }
     }
 
     GDALClose( outDs );
+    destGuard.disarm();
 
     feedback->setProgress( 100 );
 

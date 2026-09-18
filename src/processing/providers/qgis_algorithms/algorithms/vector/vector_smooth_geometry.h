@@ -3,6 +3,7 @@
 
 #include <processing/qgsprocessingalgorithm.h>
 #include "processing/algorithm_help_catalog.h"
+#include "../../algorithm_write_guards.h"
 
 class VectorSmoothGeometryAlgorithm : public QgsProcessingAlgorithm
 {
@@ -45,11 +46,13 @@ protected:
         int iterations = parameterAsInt(parameters, QStringLiteral("ITERATIONS"), context);
         double offset = parameterAsDouble(parameters, QStringLiteral("OFFSET"), context);
 
+        sicnu::qgis_algorithms::PartialOutputGuard destGuard;
         QString dest;
         std::unique_ptr<QgsFeatureSink> sink(parameterAsSink(parameters, QStringLiteral("OUTPUT"), context, dest,
             source->fields(), source->wkbType(), source->sourceCrs()));
         if (!sink)
             throw QgsProcessingException(invalidSinkError(parameters, QStringLiteral("OUTPUT")));
+        destGuard.arm( dest );
 
         QgsFeatureIterator it = source->getFeatures();
         QgsFeature feat;
@@ -57,7 +60,7 @@ protected:
         long long current = 0;
 
         while (it.nextFeature(feat)) {
-            if (feedback->isCanceled()) break;
+            sicnu::qgis_algorithms::checkCanceled( feedback );
             current++;
             if (total > 0) feedback->setProgress(100.0 * current / total);
 
@@ -65,8 +68,11 @@ protected:
                 QgsGeometry smoothed = feat.geometry().smooth(iterations, offset);
                 feat.setGeometry(smoothed);
             }
-            sink->addFeature(feat, QgsFeatureSink::FastInsert);
+            sicnu::qgis_algorithms::addFeatureChecked( sink.get(), feat, feedback );
         }
+
+        sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+        destGuard.disarm();
 
         QVariantMap results;
         results[QStringLiteral("OUTPUT")] = dest;

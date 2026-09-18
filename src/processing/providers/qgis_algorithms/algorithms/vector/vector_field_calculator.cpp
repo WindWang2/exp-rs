@@ -1,6 +1,8 @@
 // src/processing/providers/qgis_algorithms/algorithms/vector/vector_field_calculator.cpp
 #include "vector_field_calculator.h"
 
+#include "../../algorithm_write_guards.h"
+
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsvectorlayer.h>
@@ -89,11 +91,13 @@ QVariantMap VectorFieldCalculatorAlgorithm::processAlgorithm( const QVariantMap 
     else
         outputFields.append( QgsField( fieldName, metaType, QString(), fieldLength, fieldPrecision ) );
 
+    sicnu::qgis_algorithms::PartialOutputGuard destGuard;
     QString dest;
     std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, OUTPUT, context, dest,
         outputFields, source->wkbType(), source->sourceCrs() ) );
     if ( !sink )
         throw QgsProcessingException( invalidSinkError( parameters, OUTPUT ) );
+    destGuard.arm( dest );
 
     // Prepare expression context
     QgsExpressionContext evalContext = context.expressionContext();
@@ -111,8 +115,7 @@ QVariantMap VectorFieldCalculatorAlgorithm::processAlgorithm( const QVariantMap 
 
     while ( it.nextFeature( feat ) )
     {
-        if ( feedback->isCanceled() )
-            break;
+        sicnu::qgis_algorithms::checkCanceled( feedback );
 
         current++;
         if ( total > 0 )
@@ -123,11 +126,14 @@ QVariantMap VectorFieldCalculatorAlgorithm::processAlgorithm( const QVariantMap 
         QVariant value = expr.evaluate( &evalContext );
 
         QgsFeature outputFeat = feat;
-        outputFeat.setFields( outputFields );
+        outputFeat.setFields( outputFields, true );
         outputFeat.setAttribute( fieldName, value );
 
-        sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+        sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outputFeat, feedback );
     }
+
+    sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+    destGuard.disarm();
 
     return QVariantMap{{OUTPUT, dest}};
 }

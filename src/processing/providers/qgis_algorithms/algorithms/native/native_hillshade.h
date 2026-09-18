@@ -14,10 +14,13 @@
 #include <qgsprocessingcontext.h>
 #include <qgsprocessingfeedback.h>
 
+#include "../../algorithm_write_guards.h"
+
 #include "algorithms/terrain_analysis.h"
 
 #include <cmath>
 #include <algorithm>
+#include <memory>
 
 class QgsHillshadeAlgorithm : public QgsProcessingAlgorithm
 {
@@ -84,8 +87,7 @@ protected:
         {
             for ( int col = 0; col < nCols; col += blockSize )
             {
-                if ( feedback->isCanceled() )
-                    return {};
+                sicnu::qgis_algorithms::checkCanceled( feedback );
 
                 const int bw = std::min( blockSize, nCols - col );
                 const int bh = std::min( blockSize, nRows - row );
@@ -130,32 +132,32 @@ protected:
             throw QgsProcessingException( QObject::tr( "Hillshade computation failed" ) );
         }
 
-        if ( feedback->isCanceled() )
-            return {};
+        sicnu::qgis_algorithms::checkCanceled( feedback );
 
         feedback->setProgress( 60 );
 
-        // Write output raster
+        // Write output raster. The guard is declared before the provider so
+        // the file is closed before a failed run unlinks it, and armed only
+        // once the writer has actually taken over the destination file.
+        sicnu::qgis_algorithms::PartialOutputGuard destGuard;
         QgsRasterFileWriter writer( dest );
         writer.setOutputFormat( "GTiff" );
 
-        QgsRasterDataProvider *outDp = writer.createOneBandRaster(
-            Qgis::DataType::Float32, nCols, nRows, layer->extent(), layer->crs() );
+        std::unique_ptr<QgsRasterDataProvider> outDp( writer.createOneBandRaster(
+            Qgis::DataType::Float32, nCols, nRows, layer->extent(), layer->crs() ) );
         if ( !outDp )
         {
             throw QgsProcessingException( QObject::tr( "Could not create output raster" ) );
         }
+        destGuard.arm( dest );
 
         // Write hillshade data block-by-block
         for ( int row = 0; row < nRows; row += blockSize )
         {
             for ( int col = 0; col < nCols; col += blockSize )
             {
-                if ( feedback->isCanceled() )
-                {
-                    delete outDp;
-                    return {};
-                }
+                sicnu::qgis_algorithms::checkCanceled( feedback );
+
                 const int bw = std::min( blockSize, nCols - col );
                 const int bh = std::min( blockSize, nRows - row );
 
@@ -167,13 +169,19 @@ protected:
                         outBlock.setValue( r, c, static_cast<double>( hsData[static_cast<size_t>( row + r ) * nCols + ( col + c )] ) );
                     }
                 }
-                outDp->writeBlock( &outBlock, 1, col, row );
+                // An unchecked writeBlock left a truncated-but-valid raster
+                // behind while the run reported success (#1043).
+                if ( !outDp->writeBlock( &outBlock, 1, col, row ) )
+                {
+                    throw QgsProcessingException( QObject::tr( "Failed to write hillshade block at row %1, column %2" ).arg( row ).arg( col ) );
+                }
             }
             feedback->setProgress( 60 + 40.0 * row / nRows );
         }
-        delete outDp;
+        outDp.reset();
 
         feedback->setProgress( 100 );
+        destGuard.disarm();
         return QVariantMap{{QStringLiteral( "OUTPUT" ), dest}};
     }
 };

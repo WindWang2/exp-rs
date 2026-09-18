@@ -3,6 +3,7 @@
 
 #include <processing/qgsprocessingalgorithm.h>
 #include "processing/algorithm_help_catalog.h"
+#include "../../algorithm_write_guards.h"
 #include <processing/qgsprocessingparameters.h>
 #include <processing/qgsprocessingoutputs.h>
 #include <qgsfeature.h>
@@ -66,11 +67,13 @@ protected:
             overlayFieldMap.append( outFields.count() - 1 );
         }
 
+        sicnu::qgis_algorithms::PartialOutputGuard destGuard;
         QString dest;
         std::unique_ptr<QgsFeatureSink> sink( parameterAsSink( parameters, QStringLiteral( "OUTPUT" ), context, dest,
             outFields, source->wkbType(), source->sourceCrs() ) );
         if ( !sink )
             throw QgsProcessingException( invalidSinkError( parameters, QStringLiteral( "OUTPUT" ) ) );
+        destGuard.arm( dest );
 
         QVector<QgsFeature> overlayFeatures;
         QgsFeatureIterator overlayIt = overlay->getFeatures();
@@ -95,14 +98,22 @@ protected:
                         g.transform( ct );
                         overlayFeat.setGeometry( g );
                     }
-                    catch ( const QgsCsException & ) {}
+                    catch ( const QgsCsException &e )
+                    {
+                        feedback->reportError( QObject::tr( "Could not transform feature to the target CRS: %1 — skipping" ).arg( e.what() ) );
+                        continue;
+                    }
                 }
                 overlayFeatures.append( overlayFeat );
             }
         }
 
         if ( overlayFeatures.isEmpty() )
+        {
+            sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+            destGuard.disarm();
             return QVariantMap{{QStringLiteral( "OUTPUT" ), dest}};
+        }
 
         QgsFeatureIterator it = source->getFeatures();
         QgsFeature feat;
@@ -111,7 +122,7 @@ protected:
 
         while ( it.nextFeature( feat ) )
         {
-            if ( feedback && feedback->isCanceled() ) break;
+            sicnu::qgis_algorithms::checkCanceled( feedback );
             current++;
             if ( total > 0 && feedback ) feedback->setProgress( 100.0 * current / total );
 
@@ -131,10 +142,13 @@ protected:
                         outputFeat.setAttribute( i, feat.attribute( i ) );
                     for ( int i = 0; i < overlayFields.count(); ++i )
                         outputFeat.setAttribute( overlayFieldMap[i], ovFeat.attribute( i ) );
-                    sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                    sicnu::qgis_algorithms::addFeatureChecked( sink.get(), outputFeat, feedback );
                 }
             }
         }
+
+        sicnu::qgis_algorithms::flushSinkChecked( sink.get() );
+        destGuard.disarm();
 
         return QVariantMap{{QStringLiteral( "OUTPUT" ), dest}};
     }
