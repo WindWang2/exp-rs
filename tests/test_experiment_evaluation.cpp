@@ -434,93 +434,115 @@ TEST_CASE( "experiment store enforces transitions, identity and conflicts",
     CHECK( !store.deleteExperiment( experiment.experimentId() ).has_value() );
 }
 
-TEST_CASE( "execution ref lookup matches JSON-escaped refs exactly",
+TEST_CASE( "corrupt stored run is preserved, not overwritten (#1056)",
            "[experiment][store]" )
 {
-    // The ref lives inside the run JSON: a ref containing a quote or a
-    // backslash is stored escaped, so a lookup built from the raw text used
-    // to never match — one execution then resolved to a second run.
     QTemporaryDir dir;
     ExperimentStore store;
     REQUIRE( store.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
 
-    const QString escapedRef = QStringLiteral( "exec-\"quoted\"\\run" );
-    const QString plainRef = QStringLiteral( "exec-plain" );
-    ExperimentRun run = makeRun( QStringLiteral( "run-escaped" ), QStringLiteral( "e1" ) );
-    run.setExecutionRef( escapedRef );
+    Experiment experiment;
+    experiment.setExperimentId( ExperimentId::generate().toString() );
+    experiment.setName( QStringLiteral( "corrupt-row forensics" ) );
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
+
+    ExperimentRun run = makeRun( QStringLiteral( "run-corrupt" ), experiment.experimentId() );
+    run.setStatus( RunStatus::Created );
     REQUIRE( store.upsertRun( run ).has_value() );
 
-    ExperimentRun other = makeRun( QStringLiteral( "run-plain" ), QStringLiteral( "e1" ) );
-    other.setExecutionRef( plainRef );
-    REQUIRE( store.upsertRun( other ).has_value() );
+    // Corrupt the stored record out-of-band: the row now exists but its
+    // JSON cannot be parsed.
+    const QString corruptPayload = QStringLiteral( "{not-json-evidence" );
+    {
+        sqlite3 *raw = nullptr;
+        REQUIRE( sqlite3_open_v2( dir.filePath( QStringLiteral( "experiments.db" ) )
+                                      .toUtf8()
+                                      .constData(),
+                                  &raw, SQLITE_OPEN_READWRITE, nullptr ) == SQLITE_OK );
+        sqlite3_stmt *update = nullptr;
+        REQUIRE( sqlite3_prepare_v2( raw, "UPDATE experiment_runs SET json=? WHERE run_id=?",
+                                     -1, &update, nullptr ) == SQLITE_OK );
+        sqlite3_bind_text( update, 1, corruptPayload.toUtf8().constData(), -1,
+                           SQLITE_TRANSIENT );
+        sqlite3_bind_text( update, 2, run.runId().toUtf8().constData(), -1,
+                           SQLITE_TRANSIENT );
+        REQUIRE( sqlite3_step( update ) == SQLITE_DONE );
+        sqlite3_finalize( update );
+        sqlite3_close( raw );
+    }
 
-    const auto byEscaped = store.runIdsByExecutionRef( escapedRef );
-    REQUIRE( byEscaped.size() == 1 );
-    CHECK( byEscaped.first() == QStringLiteral( "run-escaped" ) );
+    // The read path stays fail-conservative (row reads as absent).
+    CHECK( !store.runById( run.runId() ).has_value() );
 
-    const auto byPlain = store.runIdsByExecutionRef( plainRef );
-    REQUIRE( byPlain.size() == 1 );
-    CHECK( byPlain.first() == QStringLiteral( "run-plain" ) );
+    // The write path must NOT treat the corrupt row as "no existing run":
+    // fail closed with a typed diagnostic, transition/identity checks
+    // cannot run on evidence that cannot be parsed.
+    const auto overwritten = store.upsertRun( run );
+    REQUIRE( !overwritten.has_value() );
+    REQUIRE( overwritten.diagnostics().first().code ==
+             QStringLiteral( "experiment.corrupt_record" ) );
 
-    // A prefix of a stored ref is not a match.
-    CHECK( store.runIdsByExecutionRef( QStringLiteral( "exec-plai" ) ).isEmpty() );
+    // Evidence survives: the corrupt payload is still exactly in place.
+    {
+        sqlite3 *raw = nullptr;
+        REQUIRE( sqlite3_open_v2( dir.filePath( QStringLiteral( "experiments.db" ) )
+                                      .toUtf8()
+                                      .constData(),
+                                  &raw, SQLITE_OPEN_READONLY, nullptr ) == SQLITE_OK );
+        sqlite3_stmt *probe = nullptr;
+        REQUIRE( sqlite3_prepare_v2( raw, "SELECT json FROM experiment_runs WHERE run_id=?",
+                                     -1, &probe, nullptr ) == SQLITE_OK );
+        sqlite3_bind_text( probe, 1, run.runId().toUtf8().constData(), -1,
+                           SQLITE_TRANSIENT );
+        REQUIRE( sqlite3_step( probe ) == SQLITE_ROW );
+        const QString stored = QString::fromUtf8(
+            reinterpret_cast<const char *>( sqlite3_column_text( probe, 0 ) ) );
+        CHECK( stored == corruptPayload );
+        sqlite3_finalize( probe );
+        sqlite3_close( raw );
+    }
 }
 
-TEST_CASE( "upsertRun refuses to overwrite a corrupt stored run", "[experiment][store]" )
+TEST_CASE( "execution ref lookup matches JSON-escaped refs (#1056)",
+           "[experiment][store]" )
 {
-    // A row that no longer parses is not "no row": overwriting it would drop
-    // the recorded history and skip the transition/identity checks silently.
     QTemporaryDir dir;
-    const QString dbPath = dir.filePath( QStringLiteral( "experiments.db" ) );
-    ExperimentRun run = makeRun( QStringLiteral( "run-corrupt" ), QStringLiteral( "e1" ) );
-    run.setStatus( RunStatus::Running );
-    {
-        ExperimentStore store;
-        REQUIRE( store.open( dbPath ) );
-        REQUIRE( store.upsertRun( run ).has_value() );
-    }
-    // Direct DB surgery: the run row becomes unparseable JSON.
-    {
-        sqlite3 *raw = nullptr;
-        REQUIRE( sqlite3_open_v2( dbPath.toUtf8().constData(), &raw, SQLITE_OPEN_READWRITE,
-                                  nullptr ) == SQLITE_OK );
-        char *err = nullptr;
-        REQUIRE( sqlite3_exec( raw, "UPDATE experiment_runs SET json='{\"run_id\":' WHERE"
-                                    " run_id='run-corrupt'", nullptr, nullptr, &err )
-                 == SQLITE_OK );
-        sqlite3_free( err );
-        sqlite3_close( raw );
-    }
-
     ExperimentStore store;
-    REQUIRE( store.open( dbPath ) );
-    REQUIRE_FALSE( store.runById( QStringLiteral( "run-corrupt" ) ).has_value() );
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "experiments.db" ) ) ) );
 
-    ExperimentRun replacement = run;
-    replacement.setStatus( RunStatus::Completed );
-    const auto refused = store.upsertRun( replacement );
-    CHECK( !refused.has_value() );
-    bool sawCorrupt = false;
-    for ( const Diagnostic &d : refused.diagnostics() )
-        sawCorrupt |= d.code == QStringLiteral( "experiment.run_corrupt" );
-    CHECK( sawCorrupt );
+    Experiment experiment;
+    experiment.setExperimentId( ExperimentId::generate().toString() );
+    experiment.setName( QStringLiteral( "escaped refs" ) );
+    REQUIRE( store.upsertExperiment( experiment ).has_value() );
 
-    // The corrupt row is still there: nothing was written over it.
-    {
-        sqlite3 *raw = nullptr;
-        REQUIRE( sqlite3_open_v2( dbPath.toUtf8().constData(), &raw, SQLITE_OPEN_READONLY,
-                                  nullptr ) == SQLITE_OK );
-        sqlite3_stmt *stmt = nullptr;
-        REQUIRE( sqlite3_prepare_v2( raw, "SELECT json FROM experiment_runs WHERE run_id=?",
-                                     -1, &stmt, nullptr ) == SQLITE_OK );
-        sqlite3_bind_text( stmt, 1, "run-corrupt", -1, SQLITE_TRANSIENT );
-        REQUIRE( sqlite3_step( stmt ) == SQLITE_ROW );
-        const QString stored = QString::fromUtf8(
-            reinterpret_cast<const char *>( sqlite3_column_text( stmt, 0 ) ) );
-        sqlite3_finalize( stmt );
-        sqlite3_close( raw );
-        CHECK( stored == QStringLiteral( "{\"run_id\":" ) );
-    }
+    // The ref carries characters the JSON serializer escapes (quote,
+    // backslash, control char): the old raw-substring needle could never
+    // match the stored escaped form, so restart reconciliation saw no run
+    // and re-recorded a duplicate.
+    const QString escapedRef = QStringLiteral( "job\\42\"batch\u0001x" );
+    ExperimentRun matched = makeRun( QStringLiteral( "run-ref" ), experiment.experimentId() );
+    matched.setExecutionRef( escapedRef );
+    matched.setStatus( RunStatus::Created );
+    REQUIRE( store.upsertRun( matched ).has_value() );
+
+    ExperimentRun other = makeRun( QStringLiteral( "run-other" ), experiment.experimentId() );
+    other.setExecutionRef( QStringLiteral( "job\\42\"batch\u0002x" ) );
+    other.setStatus( RunStatus::Created );
+    REQUIRE( store.upsertRun( other ).has_value() );
+
+    ExperimentRun plain = makeRun( QStringLiteral( "run-plain" ), experiment.experimentId() );
+    plain.setStatus( RunStatus::Created );
+    REQUIRE( store.upsertRun( plain ).has_value() );
+
+    const auto ids = store.runIdsByExecutionRef( escapedRef );
+    REQUIRE( ids.size() == 1 );
+    CHECK( ids.first() == QStringLiteral( "run-ref" ) );
+
+    const auto otherIds = store.runIdsByExecutionRef( QStringLiteral( "job\\42\"batch\u0002x" ) );
+    REQUIRE( otherIds.size() == 1 );
+    CHECK( otherIds.first() == QStringLiteral( "run-other" ) );
+
+    CHECK( store.runIdsByExecutionRef( QStringLiteral( "absent-ref" ) ).isEmpty() );
 }
 
 TEST_CASE( "lineage traverses ancestors/descendants, cuts cycles, flags tombs",
