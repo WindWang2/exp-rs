@@ -202,12 +202,14 @@ class RsGeoreferencingSession : public QObject
 
     long mPendingWarpTaskId = -1;
     RsWarpTask *mPendingWarpTask = nullptr; // deleteLater on terminal
-    /// True while the JobEngine worker is inside mPendingWarpTask->run();
-    /// the destructor bounded-waits on it instead of hard-deleting (#626).
-    std::atomic<bool> mWarpExecutorActive{ false };
-    /// Released when the executor leaves the warp job (#650): the destructor
-    /// blocks on this instead of a 500x10 ms GUI-thread spin.
-    QSemaphore mWarpExecutorDone{ 0 };
+    /// Heap-stable so a JobEngine worker that outlives this session cannot
+    /// write through a destroyed this (#1050).
+    struct WarpExecutorLifetime
+    {
+      std::atomic<bool> active{ false };
+      QSemaphore done{ 0 };
+    };
+    std::shared_ptr<WarpExecutorLifetime> mWarpLife = std::make_shared<WarpExecutorLifetime>();
     RsGeorefWarpSnapshot mPendingSnap;
 
     // WorkflowRuntime mirror (ADR 0028)

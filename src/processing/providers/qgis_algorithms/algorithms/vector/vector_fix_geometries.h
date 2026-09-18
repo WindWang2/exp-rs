@@ -65,7 +65,8 @@ protected:
                     }
                 }
             }
-            sink->addFeature(feat, QgsFeatureSink::FastInsert);
+            if ( !sink->addFeature( feat, QgsFeatureSink::FastInsert ) )
+                throw QgsProcessingException( QObject::tr( "Could not write feature" ) );
         }
 
         feedback->pushInfo(QObject::tr("Fixed %1 geometries").arg(fixedCount));

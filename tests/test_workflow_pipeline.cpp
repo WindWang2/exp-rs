@@ -65,6 +65,58 @@ TEST_CASE( "WorkflowDefinition spatial UI metadata serialization", "[workflow][d
   CHECK( restored.steps[1].inputs[0].fromStepId == "step1" );
 }
 
+TEST_CASE( "workflowDefinitionFromJson rejects mistyped meta.ui without throwing",
+           "[workflow][definition][1038]" )
+{
+  auto oneStep = []() {
+    Json::Value json( Json::objectValue );
+    json["id"] = "wf:bad_ui";
+    Json::Value step( Json::objectValue );
+    step["id"] = "s1";
+    step["operatorId"] = "opencv:sobel";
+    Json::Value steps( Json::arrayValue );
+    steps.append( step );
+    json["steps"] = steps;
+    return json;
+  };
+
+  {
+    Json::Value json = oneStep();
+    json["steps"][0]["meta"]["ui"]["x"] = 150;
+    json["steps"][0]["meta"]["ui"]["y"] = 200;
+    sicnu::workflow::WorkflowDefinition def;
+    std::string error;
+    bool ok = false;
+    REQUIRE_NOTHROW( ok = sicnu::workflow::workflowDefinitionFromJson( json, def, error ) );
+    REQUIRE( ok );
+    REQUIRE( def.steps.size() == 1 );
+    CHECK( def.steps[0].uiMeta.x == 150.0 );
+    CHECK( def.steps[0].uiMeta.y == 200.0 );
+  }
+
+  {
+    Json::Value json = oneStep();
+    json["steps"][0]["meta"]["ui"]["x"] = "oops";
+    sicnu::workflow::WorkflowDefinition def;
+    std::string error;
+    bool ok = true;
+    REQUIRE_NOTHROW( ok = sicnu::workflow::workflowDefinitionFromJson( json, def, error ) );
+    REQUIRE_FALSE( ok );
+    REQUIRE( error.find( "meta.ui.x" ) != std::string::npos );
+  }
+
+  {
+    Json::Value json = oneStep();
+    json["steps"][0]["meta"]["ui"]["portAddToMap"]["output"] = "yes";
+    sicnu::workflow::WorkflowDefinition def;
+    std::string error;
+    bool ok = true;
+    REQUIRE_NOTHROW( ok = sicnu::workflow::workflowDefinitionFromJson( json, def, error ) );
+    REQUIRE_FALSE( ok );
+    REQUIRE( error.find( "portAddToMap" ) != std::string::npos );
+  }
+}
+
 TEST_CASE( "Topological sorting and DAG cycle detection", "[workflow][dag]" )
 {
   sicnu::workflow::WorkflowDefinition def;

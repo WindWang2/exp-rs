@@ -16,6 +16,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "app/workbench/command_registry.h"
+#include "app/shortcut_hosting.h"
 
 #include <QAction>
 #include <QApplication>
@@ -158,17 +159,7 @@ TEST_CASE( "Shortcuts: forwarding pass re-hosts menubar actions on the window",
                                   [&hits] { ++hits; } );
   act->setShortcut( QKeySequence::Undo );
 
-  // Mirror of QgisDesktopWindow::forwardActionShortcutsToWindow().
-  const QList<QAction *> acts = window.findChildren<QAction *>();
-  for ( QAction *a : acts )
-  {
-    if ( !a || a->shortcuts().isEmpty() )
-      continue;
-    if ( a->shortcutContext() == Qt::WidgetShortcut ||
-         a->shortcutContext() == Qt::WidgetWithChildrenShortcut )
-      continue;
-    window.addAction( a );
-  }
+  rsForwardActionShortcutsToWidget( &window );
 
   window.show();
   QTest::qWaitForWindowExposed( &window );
@@ -186,4 +177,17 @@ TEST_CASE( "Shortcuts: shell invokes the forwarding pass after menus/plugins",
   const QString cpp = readSource( QStringLiteral( "src/app/main_window.cpp" ) );
   REQUIRE_FALSE( cpp.isEmpty() );
   CHECK( cpp.contains( QStringLiteral( "forwardActionShortcutsToWindow()" ) ) );
+}
+
+TEST_CASE( "Shortcuts: unmodified letter keys are not window-hosted",
+           "[shortcuts][letterkey][c1]" )
+{
+  ensureApp();
+  QAction letter( QStringLiteral( "Pan" ) );
+  letter.setShortcut( QKeySequence( QStringLiteral( "H" ) ) );
+  CHECK_FALSE( rsShouldWindowHostAction( &letter ) );
+
+  QAction save( QStringLiteral( "Save" ) );
+  save.setShortcut( QKeySequence::Save );
+  CHECK( rsShouldWindowHostAction( &save ) );
 }

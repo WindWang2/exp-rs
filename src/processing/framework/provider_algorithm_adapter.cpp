@@ -457,6 +457,11 @@ Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, Progre
     try { algorithm->postProcess( context, &feedback, false ); } catch ( ... ) {}
     throw std::runtime_error( e.what().toStdString() );
   }
+  catch ( const std::exception & )
+  {
+    try { algorithm->postProcess( context, &feedback, false ); } catch ( ... ) {}
+    throw;
+  }
 
   checkCancelled();
   if ( feedback.isCanceled() )

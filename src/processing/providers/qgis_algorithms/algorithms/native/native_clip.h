@@ -111,7 +111,8 @@ protected:
                 {
                     QgsFeature outputFeat = feat;
                     outputFeat.setGeometry( clipped );
-                    sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                    if ( !sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ) )
+                        throw QgsProcessingException( QObject::tr( "Could not write feature" ) );
                 }
             }
         }

@@ -130,7 +130,8 @@ private:
     void deliveryLoop();
     void applyState( RenderedRecord &record, const Json::Value &state );
     void buildControls( QWidget *parent, const Json::Value &controls, const QString &contributionId,
-                        const QString &pluginId, RenderedRecord &record );
+                        const QString &pluginId, RenderedRecord &record, int depth,
+                        int &controlCount );
 
     UiShellSink *mShellSink = nullptr;
     std::vector<std::shared_ptr<RenderedRecord>> mRecords;

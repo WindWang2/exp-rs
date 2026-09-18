@@ -39,8 +39,19 @@ RsRoiSpectrumTool::RsRoiSpectrumTool( QgsMapCanvas *canvas, QgsRasterLayer *rast
 
 RsRoiSpectrumTool::~RsRoiSpectrumTool()
 {
-  delete m_rubberBand;
+  if ( canvas() )
+    delete m_rubberBand;
   m_rubberBand = nullptr;
+}
+
+void RsRoiSpectrumTool::deactivate()
+{
+  if ( m_rubberBand )
+  {
+    m_rubberBand->reset( Qgis::GeometryType::Polygon );
+    m_rubberBand->hide();
+  }
+  QgsMapTool::deactivate();
 }
 
 void RsRoiSpectrumTool::canvasPressEvent( QgsMapMouseEvent *e )

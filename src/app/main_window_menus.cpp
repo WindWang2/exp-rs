@@ -1,6 +1,7 @@
 // main_window_menus.cpp — Menu bar, toolbars, and status bar setup
 // Extracted from main_window.cpp for maintainability
 #include "main_window.h"
+#include "shortcut_hosting.h"
 #include "workbench/command_registry.h"
 
 #include "app/help/help_system_controller.h"
@@ -120,6 +121,8 @@ void QgisDesktopWindow::setupMenu()
     // owner made the registry's canonical-shortcut record a lie and any
     // second installShortcut an ambiguous-shortcut trap).
     auto addCmd = [this]( QMenu *menu, const char *commandId ) -> QAction * {
+        if ( !m_commandRegistry )
+            return nullptr;
         QAction *act = m_commandRegistry->action( QString::fromLatin1( commandId ),
                                                   /*installShortcut=*/true );
         if ( act )
@@ -671,19 +674,11 @@ void QgisDesktopWindow::forwardActionShortcutsToWindow()
     // at least one of its associated widgets is visible — a hidden menubar
     // host makes every menu shortcut dead (verified on Qt 6.8: Shortcut
     // events never reach actions hosted solely on a hidden menubar).
-    // Re-host every shortcut-bearing action on the window itself; actions
+    // Re-host eligible shortcut-bearing actions on the window itself; actions
     // keep their menu membership so the app-menu projection stays intact.
+    // Unmodified letter/number keys are not window-hosted (F-1031-P1-letterkey).
     // QWidget::addAction() de-duplicates, so repeated calls are safe.
-    const QList<QAction *> acts = findChildren<QAction *>();
-    for ( QAction *action : acts )
-    {
-        if ( !action || action->shortcuts().isEmpty() )
-            continue;
-        if ( action->shortcutContext() == Qt::WidgetShortcut ||
-             action->shortcutContext() == Qt::WidgetWithChildrenShortcut )
-            continue; // deliberately widget-scoped bindings keep their scope
-        addAction( action );
-    }
+    rsForwardActionShortcutsToWidget( this );
 }
 
 void QgisDesktopWindow::setupToolbars()

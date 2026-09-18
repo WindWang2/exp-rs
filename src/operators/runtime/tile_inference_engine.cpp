@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <stdexcept>
 
@@ -2809,14 +2810,22 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
       throw RSOperatorError( ErrorCode::InvalidParameter,
                              "feed '" + feeds[f].name + "' provides no raster paths" );
     // Resource bound (WP-D): a feed materializes ALL its frames in memory —
-    // an unbounded time axis is an unbounded allocation. 1024 frames is far
-    // above any real EO series and keeps blob memory bounded per tile.
-    constexpr std::size_t kMaxTemporalFrames = 1024;
-    if ( feeds[f].paths.size() > kMaxTemporalFrames )
+    // an unbounded time axis is an unbounded allocation. kMaxTemporalFrames is
+    // far above any real EO series and keeps blob memory bounded per tile.
+    // Bound BOTH the provided paths AND the declared T: missing_timestep=zero
+    // would otherwise allocate `bands × temporal_length` from an unbounded
+    // manifest integer (int truncation → heap OOB in the scatter loop).
+    if ( feeds[f].paths.size() > static_cast<std::size_t>( kMaxTemporalFrames ) )
       throw RSOperatorError( ErrorCode::InvalidParameter,
                              "feed '" + feeds[f].name + "' provides "
                                + std::to_string( feeds[f].paths.size() ) + " frames; the "
                                "temporal lane is bounded at " + std::to_string( kMaxTemporalFrames )
+                               + " (split the series or coarsen it)" );
+    if ( declaredFrames > static_cast<std::size_t>( kMaxTemporalFrames ) )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "feed '" + feeds[f].name + "' declares temporal_length "
+                               + std::to_string( declaredFrames ) + "; the temporal lane is bounded at "
+                               + std::to_string( kMaxTemporalFrames )
                                + " (split the series or coarsen it)" );
     if ( dynamicT )
     {
@@ -2988,7 +2997,16 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                                  + " bands are fed" );
     }
     reader.bands = bandList;
-    reader.channels = static_cast<int>( bandList.size() * declaredFrames );
+    {
+      const std::int64_t channelCount = static_cast<std::int64_t>( bandList.size() )
+                                        * static_cast<std::int64_t>( declaredFrames );
+      if ( channelCount <= 0 || channelCount > std::numeric_limits<int>::max() )
+        throw RSOperatorError( ErrorCode::InvalidParameter,
+                               "feed '" + feeds[f].name + "': bands×temporal_length overflows int ("
+                                 + std::to_string( bandList.size() ) + "×"
+                                 + std::to_string( declaredFrames ) + ")" );
+      reader.channels = static_cast<int>( channelCount );
+    }
 
     // Open all provided frames.
     reader.frames.resize( declaredFrames );
@@ -3108,6 +3126,16 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   const int tileSize = std::min( effectiveTileSize( m_model ), std::max( rasterW, rasterH ) );
   const int halo = std::max( 0, effectiveHalo( m_model ) );
   const int pad = std::max( 0, pre.pad );
+  if ( pad > kMaxPreprocessPad )
+    throw RSOperatorError( ErrorCode::InvalidParameter,
+                           "preprocess.pad " + std::to_string( pad ) + " exceeds "
+                             + std::to_string( kMaxPreprocessPad )
+                             + " (the inference window would be memory-unbounded)" );
+  if ( m_model.tiling.tileSize > 0 && pad > m_model.tiling.tileSize / 2 )
+    throw RSOperatorError( ErrorCode::InvalidParameter,
+                           "preprocess.pad " + std::to_string( pad )
+                             + " exceeds tile_size/2 - the inference window would be "
+                               "memory-unbounded" );
   // Budget on the LARGEST feed: with per-feed temporal lengths the "others
   // scale linearly" assumption does not hold (a dynamic-T feed can dwarf the
   // primary), so admit on the worst case.
@@ -3119,7 +3147,13 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   if ( options.batchSizeOverride > 0 )
     batchSize = std::min( batchSize, options.batchSizeOverride );
   batchSize = std::max( 1, batchSize );
-  const int maxWin = tileSize + 2 * halo + 2 * pad;
+  const std::int64_t maxWin64 = static_cast<std::int64_t>( tileSize )
+                                + 2 * static_cast<std::int64_t>( halo )
+                                + 2 * static_cast<std::int64_t>( pad );
+  if ( maxWin64 <= 0 || maxWin64 > std::numeric_limits<int>::max() )
+    throw RSOperatorError( ErrorCode::InvalidParameter,
+                           "tileSize + 2*halo + 2*pad overflows int" );
+  const int maxWin = static_cast<int>( maxWin64 );
 
   std::vector<CoreTile> core;
   for ( int y = 0; y < rasterH; y += tileSize )

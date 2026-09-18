@@ -32,17 +32,39 @@ if not defined bin (
 
 rem Verify the directory that was actually written: the user's --out when
 rem given, otherwise the default data\samples (the CLI's own default).
-set "out_dir="
-for %%A in (%*) do (
-  echo %%A | findstr /b /c:"--out=" >nul && set "out_dir=%%A"
-)
-if defined out_dir set "out_dir=%out_dir:~6%"
-if not defined out_dir set "out_dir=%repo_root%\data\samples"
+rem Quote each forwarded argument. Parse --out= without `for %*` so paths
+rem with spaces stay intact. Skip the forced verify pass for --help / -h
+rem and when the caller already passed --verify.
+set "out_dir=%repo_root%\data\samples"
+set "skip_verify="
+set "args="
 
+:parse_args
+if "%~1"=="" goto args_done
+set "arg=%~1"
+
+if /I "%arg%"=="--help" set "skip_verify=1"
+if /I "%arg%"=="-h" set "skip_verify=1"
+if /I "%arg%"=="--verify" set "skip_verify=1"
+
+if /I "%arg:~0,6%"=="--out=" set "out_dir=%arg:~6%"
+
+set args=%args% "%~1"
+shift
+goto parse_args
+
+:args_done
 pushd "%repo_root%"
-"%bin%" %*
+"%bin%" %args%
 set "rc=%errorlevel%"
-if not "%rc%"=="0" ( popd & exit /b %rc% )
+if not "%rc%"=="0" (
+  popd
+  exit /b %rc%
+)
+if defined skip_verify (
+  popd
+  exit /b 0
+)
 "%bin%" --verify "--out=%out_dir%"
 set "vrc=%errorlevel%"
 popd

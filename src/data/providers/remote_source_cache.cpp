@@ -65,7 +65,21 @@ struct RemoteDatasetPool::Impl
 RemoteDatasetPool &RemoteDatasetPool::instance()
 {
     static RemoteDatasetPool pool;
+    pool.ensureImpl();
     return pool;
+}
+
+void RemoteDatasetPool::ensureImpl()
+{
+    std::call_once( m_initOnce, [this] {
+        m_impl = new Impl;
+        if ( const char *env = std::getenv( "SICNU_REMOTE_POOL_HANDLES" ) )
+        {
+            const long parsed = std::strtol( env, nullptr, 10 );
+            m_impl->handlesPerUrl =
+                static_cast<size_t>( std::clamp<long>( parsed, 1, 8 ) );
+        }
+    } );
 }
 
 RemoteDatasetLease::RemoteDatasetLease( std::shared_ptr<PooledRemoteHandle> handle,
@@ -104,16 +118,7 @@ RemoteDatasetLease RemoteDatasetPool::acquire( const QString &url, unsigned int 
         return RemoteDatasetLease{};
 
     configureRemoteCachingDefaults();
-    if ( !m_impl )
-    {
-        m_impl = new Impl;
-        if ( const char *env = std::getenv( "SICNU_REMOTE_POOL_HANDLES" ) )
-        {
-            const long parsed = std::strtol( env, nullptr, 10 );
-            m_impl->handlesPerUrl =
-                static_cast<size_t>( std::clamp<long>( parsed, 1, 8 ) );
-        }
-    }
+    ensureImpl();
 
     std::unique_lock<std::mutex> lock( m_impl->mutex );
     while ( true )
@@ -156,8 +161,7 @@ RemoteDatasetLease RemoteDatasetPool::acquire( const QString &url, unsigned int 
 
 void RemoteDatasetPool::clear()
 {
-    if ( !m_impl )
-        return;
+    ensureImpl();
     std::unique_lock<std::mutex> lock( m_impl->mutex );
     // Wait for all leases to return (every handle must be lockable), then
     // close. Retry loop keeps it simple and bounded by lease lifetimes.

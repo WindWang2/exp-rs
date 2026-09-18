@@ -4,9 +4,11 @@
     Dual 1x2 viewport pan/zoom/rotation synchronization controller.
  ***************************************************************************/
 #include "rs_dual_viewport_sync_controller.h"
+#include "crs_transform_failclosed.h"
 
 #include "qgis.h"
 #include "qgsmapcanvas.h"
+#include "qgsproject.h"
 #include "qgsrectangle.h"
 
 namespace
@@ -154,22 +156,27 @@ void RsDualViewportSyncController::applySync( QgsMapCanvas *source, QgsMapCanvas
     {
         // Full extent sync
         QgsRectangle sourceExtent = source->extent();
+        bool extentReady = true;
         if ( source->mapSettings().destinationCrs() != target->mapSettings().destinationCrs() && source->mapSettings().destinationCrs().isValid() && target->mapSettings().destinationCrs().isValid() )
         {
-            try
+            const QgsCoordinateTransformContext ctx =
+                QgsProject::instance() ? QgsProject::instance()->transformContext()
+                                       : QgsCoordinateTransformContext();
+            const auto transformed = rsTransformBoundingBoxFailClosed(
+                source->mapSettings().destinationCrs(),
+                target->mapSettings().destinationCrs(), ctx, sourceExtent );
+            if ( !transformed )
             {
-                QgsCoordinateTransform ct( source->mapSettings().destinationCrs(), target->mapSettings().destinationCrs(), QgsProject::instance() );
-                sourceExtent = ct.transformBoundingBox( sourceExtent );
-            }
-            catch ( ... )
-            {
-                // #1005: extent stays in the source canvas CRS — say so
-                // instead of silently syncing wrong coordinates.
                 qWarning().noquote() << "dual viewport extent sync: CRS transform failed;"
-                                     << "applying the source-canvas extent untransformed";
+                                     << "leaving the target canvas extent unchanged";
+                extentReady = false;
+            }
+            else
+            {
+                sourceExtent = *transformed;
             }
         }
-        if ( target->extent() != sourceExtent )
+        if ( extentReady && target->extent() != sourceExtent )
         {
             target->setExtent( sourceExtent );
             targetModified = true;
@@ -195,36 +202,44 @@ void RsDualViewportSyncController::applySync( QgsMapCanvas *source, QgsMapCanvas
     {
         // Pan-center only sync: preserve target canvas's independent zoom scale / dimensions
         QgsPointXY sourceCenter = source->extent().center();
+        bool centerReady = true;
         if ( source->mapSettings().destinationCrs() != target->mapSettings().destinationCrs() && source->mapSettings().destinationCrs().isValid() && target->mapSettings().destinationCrs().isValid() )
         {
-            try
+            const QgsCoordinateTransformContext ctx =
+                QgsProject::instance() ? QgsProject::instance()->transformContext()
+                                       : QgsCoordinateTransformContext();
+            const auto transformed = rsTransformPointFailClosed(
+                source->mapSettings().destinationCrs(),
+                target->mapSettings().destinationCrs(), ctx, sourceCenter );
+            if ( !transformed )
             {
-                QgsCoordinateTransform ct( source->mapSettings().destinationCrs(), target->mapSettings().destinationCrs(), QgsProject::instance() );
-                sourceCenter = ct.transform( sourceCenter );
-            }
-            catch ( ... )
-            {
-                // #1005: center stays in the source canvas CRS — say so
-                // instead of silently panning to wrong coordinates.
                 qWarning().noquote() << "dual viewport center sync: CRS transform failed;"
-                                     << "applying the source-canvas center untransformed";
+                                     << "leaving the target canvas pan unchanged";
+                centerReady = false;
+            }
+            else
+            {
+                sourceCenter = *transformed;
             }
         }
-        const QgsRectangle currentTargetExtent = target->extent();
-        const QgsPointXY currentTargetCenter = currentTargetExtent.center();
-        const double dx = sourceCenter.x() - currentTargetCenter.x();
-        const double dy = sourceCenter.y() - currentTargetCenter.y();
-        if ( !qgsDoubleNear( dx, 0.0, kCoordEpsilon ) ||
-             !qgsDoubleNear( dy, 0.0, kCoordEpsilon ) )
+        if ( centerReady )
         {
-            const QgsRectangle shiftedExtent(
-                currentTargetExtent.xMinimum() + dx,
-                currentTargetExtent.yMinimum() + dy,
-                currentTargetExtent.xMaximum() + dx,
-                currentTargetExtent.yMaximum() + dy
-            );
-            target->setExtent( shiftedExtent, true );
-            targetModified = true;
+            const QgsRectangle currentTargetExtent = target->extent();
+            const QgsPointXY currentTargetCenter = currentTargetExtent.center();
+            const double dx = sourceCenter.x() - currentTargetCenter.x();
+            const double dy = sourceCenter.y() - currentTargetCenter.y();
+            if ( !qgsDoubleNear( dx, 0.0, kCoordEpsilon ) ||
+                 !qgsDoubleNear( dy, 0.0, kCoordEpsilon ) )
+            {
+                const QgsRectangle shiftedExtent(
+                    currentTargetExtent.xMinimum() + dx,
+                    currentTargetExtent.yMinimum() + dy,
+                    currentTargetExtent.xMaximum() + dx,
+                    currentTargetExtent.yMaximum() + dy
+                );
+                target->setExtent( shiftedExtent, true );
+                targetModified = true;
+            }
         }
     }
 

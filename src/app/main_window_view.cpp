@@ -1,6 +1,7 @@
 // main_window_view.cpp — Map view and navigation actions
 #include "main_window.h"
 #include "active_view_host.h"
+#include "crs_transform_failclosed.h"
 #include "project_context.h"
 #include "shell/view_link_controller.h"
 #include "visualanalytics/va_layer_link_controller.h"
@@ -486,30 +487,28 @@ void QgisDesktopWindow::zoomToLayer()
         QgsMapLayer *target = selected.first();
         QgsRectangle extent = target->extent();
         const QgsCoordinateReferenceSystem canvasCrs = m_mapCanvas->mapSettings().destinationCrs();
-        bool transformFailed = false;
         if ( target->crs().isValid() && canvasCrs.isValid() && target->crs() != canvasCrs )
         {
-            try
+            const QgsCoordinateTransformContext ctx =
+                QgsProject::instance() ? QgsProject::instance()->transformContext()
+                                       : QgsCoordinateTransformContext();
+            const auto transformed = rsTransformBoundingBoxFailClosed(
+                target->crs(), canvasCrs, ctx, extent );
+            if ( !transformed )
             {
-                const QgsCoordinateTransform ct( target->crs(), canvasCrs, QgsProject::instance() );
-                extent = ct.transformBoundingBox( extent );
-            }
-            catch ( ... )
-            {
-                // #1005: surface the degraded zoom instead of silently
-                // applying the extent in the wrong CRS.
-                transformFailed = true;
                 qWarning().noquote() << "zoomToLayer: CRS transform from"
                                      << target->crs().authid() << "to" << canvasCrs.authid()
-                                     << "failed; zooming to the untransformed layer extent";
+                                     << "failed; leaving the canvas extent unchanged";
+                statusBar()->showMessage(
+                    tr( "Zoom to Layer failed: cannot transform the layer extent to the canvas CRS" ),
+                    4000 );
+                return;
             }
+            extent = *transformed;
         }
         m_mapCanvas->setExtent(extent);
         m_mapCanvas->refresh();
-        statusBar()->showMessage( transformFailed
-                                      ? tr( "Zoom to Layer (CRS transform failed — extent in layer CRS)" )
-                                      : tr( "Zoom to Layer" ),
-                                  2000 );
+        statusBar()->showMessage( tr( "Zoom to Layer" ), 2000 );
     }
 }
 

@@ -86,11 +86,13 @@ protected:
                     continue;
                 }
                 outputFeat.setGeometry( geom );
-                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                if ( !sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ) )
+                    throw QgsProcessingException( QObject::tr( "Could not write feature" ) );
             }
             else
             {
-                sink->addFeature( feat, QgsFeatureSink::FastInsert );
+                if ( !sink->addFeature( feat, QgsFeatureSink::FastInsert ) )
+                    throw QgsProcessingException( QObject::tr( "Could not write feature" ) );
             }
         }
 

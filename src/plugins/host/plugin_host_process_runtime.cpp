@@ -13,6 +13,7 @@
 #include "exprs/plugin_ui_schema.h"
 
 #include <cstring>
+#include <exception>
 #include <filesystem>
 
 #ifdef _WIN32
@@ -476,8 +477,37 @@ Json::Value PluginHostProcessRuntime::describeUiSchema( const std::string &plugi
                  "ui.describe failed: " + outcome.error.message, pluginId );
         return result;
     }
+    // Host-side re-validation: the worker already ran validatePluginUiSchema,
+    // but that check lives inside the untrusted process. A hostile or buggy
+    // worker must fail typed here, never reach attachPluginSchema.
+    exprs::PluginUiSchemaParseResult validated;
+    try
+    {
+        validated = exprs::validatePluginUiSchema( outcome.result["schema"] );
+    }
+    catch ( const std::exception &exception )
+    {
+        result["ok"] = false;
+        result["code"] = "E5005";
+        result["error"] = std::string( "plugin UI schema validation threw: " ) + exception.what();
+        log.add( PluginDiagnosticCode::IpcProtocolError, PluginDiagnosticSeverity::Warning,
+                 result["error"].asString(), pluginId );
+        return result;
+    }
+    if ( !validated.ok() )
+    {
+        std::string detail;
+        for ( const std::string &item : validated.errors )
+            detail += ( detail.empty() ? "" : "; " ) + item;
+        result["ok"] = false;
+        result["code"] = "E5005";
+        result["error"] = "plugin UI schema failed host-side validation: " + detail;
+        log.add( PluginDiagnosticCode::IpcProtocolError, PluginDiagnosticSeverity::Warning,
+                 result["error"].asString(), pluginId );
+        return result;
+    }
     result["ok"] = true;
-    result["schema"] = outcome.result["schema"];
+    result["schema"] = validated.normalized;
     return result;
 }
 

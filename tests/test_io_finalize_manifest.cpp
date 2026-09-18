@@ -200,6 +200,46 @@ TEST_CASE( "verifyDataset fails closed on tampering and missing manifests", "[io
       invalidIssue |= issue.code == "manifest_invalid";
     CHECK( invalidIssue );
   }
+
+  SECTION( "foreign-typed dataset_sha256 never throws" )
+  {
+    FinalizeManifestFields fields;
+    fields.producer = "test-harness";
+    fields.driver = "GTiff";
+    fields.width = 6;
+    fields.height = 7;
+    fields.bandCount = 2;
+    Json::Value manifest = buildFinalizeManifest( tif, fields );
+    manifest["dataset_sha256"] = Json::Value( Json::arrayValue );
+    writeFinalizeManifest( tif, manifest );
+    ManifestVerifyReport report;
+    CHECK_NOTHROW( report = verifyDataset( tif ) );
+    CHECK( !report.verified );
+    bool invalidIssue = false;
+    for ( const ManifestIssue &issue : report.issues )
+      invalidIssue |= issue.code == "manifest_invalid";
+    CHECK( invalidIssue );
+  }
+
+  SECTION( "foreign-typed shape.width never throws" )
+  {
+    FinalizeManifestFields fields;
+    fields.producer = "test-harness";
+    fields.driver = "GTiff";
+    fields.width = 6;
+    fields.height = 7;
+    fields.bandCount = 2;
+    Json::Value manifest = buildFinalizeManifest( tif, fields );
+    manifest["shape"]["width"] = "w";
+    writeFinalizeManifest( tif, manifest );
+    ManifestVerifyReport report;
+    CHECK_NOTHROW( report = verifyDataset( tif ) );
+    CHECK( !report.verified );
+    bool invalidIssue = false;
+    for ( const ManifestIssue &issue : report.issues )
+      invalidIssue |= issue.code == "manifest_invalid";
+    CHECK( invalidIssue );
+  }
 }
 
 TEST_CASE( "manifests survive Unicode directory names", "[io][manifest][unicode]" )

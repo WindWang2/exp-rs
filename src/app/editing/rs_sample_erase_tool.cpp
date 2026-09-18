@@ -21,6 +21,13 @@ RsSampleEraseTool::RsSampleEraseTool( QgsMapCanvas *canvas )
     mRubber->hide();
 }
 
+RsSampleEraseTool::~RsSampleEraseTool()
+{
+    if ( canvas() )
+        delete mRubber;
+    mRubber = nullptr;
+}
+
 void RsSampleEraseTool::setTargetLayer( QgsVectorLayer *layer )
 {
     mLayer = layer;

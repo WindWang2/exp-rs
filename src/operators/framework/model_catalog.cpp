@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <mutex>
 
@@ -103,8 +104,13 @@ ModelPreprocessContract parsePreprocessContract( const QJsonObject &preObj )
   const QJsonValue clampMaxVal = preObj.value( QStringLiteral( "clamp_max" ) );
   if ( clampMaxVal.isDouble() )
     pre.clampMax = clampMaxVal.toDouble();
-  const int padPx = preObj.value( QStringLiteral( "pad" ) ).toInt( 0 );
-  pre.pad = padPx > 0 ? padPx : 0;
+  const qint64 padPx = preObj.value( QStringLiteral( "pad" ) ).toInteger( 0 );
+  if ( padPx < 0 )
+    pre.pad = 0;
+  else if ( padPx > std::numeric_limits<int>::max() )
+    pre.pad = std::numeric_limits<int>::max();
+  else
+    pre.pad = static_cast<int>( padPx );
   return pre;
 }
 
@@ -127,7 +133,13 @@ ModelInputContract parseModelInputContract( const QJsonObject &inputObj )
   const int inH = inputObj.value( QStringLiteral( "height" ) ).toInt( 0 );
   input.width = inW > 0 ? inW : 0;
   input.height = inH > 0 ? inH : 0;
-  input.temporalLength = inputObj.value( QStringLiteral( "temporal_length" ) ).toInt( 0 );
+  {
+    const qint64 n = inputObj.value( QStringLiteral( "temporal_length" ) ).toInteger( 0 );
+    if ( n < std::numeric_limits<int>::min() || n > std::numeric_limits<int>::max() )
+      input.temporalLength = n < 0 ? -1 : std::numeric_limits<int>::max();
+    else
+      input.temporalLength = static_cast<int>( n );
+  }
   input.temporalCollapse = inputObj.value( QStringLiteral( "temporal_collapse" ) ).toString().toStdString();
   if ( input.temporalCollapse.empty() )
     input.temporalCollapse = "channels"; // documented default
@@ -335,9 +347,16 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   info.polarizations = domainObj.contains( QStringLiteral( "polarizations" ) )
                          ? parseStringArray( domainObj, QStringLiteral( "polarizations" ) )
                          : parseStringArray( obj, QStringLiteral( "polarizations" ) );
-  info.temporalLength = domainObj.contains( QStringLiteral( "temporal_length" ) )
-                          ? domainObj.value( QStringLiteral( "temporal_length" ) ).toInt()
-                          : obj.value( QStringLiteral( "temporal_length" ) ).toInt();
+  {
+    const QJsonValue temporalVal = domainObj.contains( QStringLiteral( "temporal_length" ) )
+                                     ? domainObj.value( QStringLiteral( "temporal_length" ) )
+                                     : obj.value( QStringLiteral( "temporal_length" ) );
+    const qint64 n = temporalVal.toInteger( 0 );
+    if ( n < std::numeric_limits<int>::min() || n > std::numeric_limits<int>::max() )
+      info.temporalLength = n < 0 ? -1 : std::numeric_limits<int>::max();
+    else
+      info.temporalLength = static_cast<int>( n );
+  }
   {
     const QString radiometric = domainObj.contains( QStringLiteral( "radiometric_state" ) )
                                   ? domainObj.value( QStringLiteral( "radiometric_state" ) ).toString()
@@ -840,11 +859,23 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
     if ( info.tiling.overlap > info.tiling.tileSize / 2 )
       markInvalid( "tiling.overlap " + std::to_string( info.tiling.overlap )
                    + " exceeds tile_size/2" );
+    if ( info.preprocess.pad > info.tiling.tileSize / 2 )
+      markInvalid( "preprocess.pad " + std::to_string( info.preprocess.pad )
+                   + " exceeds tile_size/2 - the inference window would be memory-unbounded" );
   }
   else if ( info.tiling.halo > 0 || info.tiling.overlap > 0 )
   {
     markInvalid( "tiling.halo/overlap declared but tiling.tile_size is not" );
   }
+  if ( info.preprocess.pad > kMaxPreprocessPad )
+    markInvalid( "preprocess.pad " + std::to_string( info.preprocess.pad )
+                 + " is absurdly large (max " + std::to_string( kMaxPreprocessPad ) + ")" );
+  if ( info.temporalLength < 0 )
+    markInvalid( "temporal_length must be >= 0 (got " + std::to_string( info.temporalLength ) + ")" );
+  else if ( info.temporalLength > kMaxTemporalFrames )
+    markInvalid( "temporal_length " + std::to_string( info.temporalLength )
+                 + " exceeds " + std::to_string( kMaxTemporalFrames )
+                 + " (the temporal lane is bounded)" );
   // Platform 4.0 follow-up vocabulary is NOT implemented yet; declaring it
   // must fail loudly instead of being silently ignored (#646 discipline).
   // Platform 7.0: preprocess.pad / clamp_min / clamp_max are IMPLEMENTED by
@@ -986,6 +1017,10 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   {
     if ( in.temporalLength < 0 )
       markInvalid( "input.temporal_length must be >= 0 (got " + std::to_string( in.temporalLength ) + ")" );
+    if ( in.temporalLength > kMaxTemporalFrames )
+      markInvalid( "input.temporal_length " + std::to_string( in.temporalLength )
+                   + " exceeds " + std::to_string( kMaxTemporalFrames )
+                   + " (the temporal lane is bounded)" );
     if ( in.temporalCollapse != "channels" && in.temporalCollapse != "sequence" )
       markInvalid( "unsupported input.temporal_collapse '" + in.temporalCollapse
                    + "' (supported: 'channels', 'sequence')" );
@@ -1050,6 +1085,12 @@ std::string canonicalEoTask( const std::string &task )
 
 std::string ModelInputContract::validate() const
 {
+  if ( temporalLength < 0 )
+    return "temporal_length must be >= 0 (got " + std::to_string( temporalLength ) + ")";
+  if ( temporalLength > kMaxTemporalFrames )
+    return "temporal_length " + std::to_string( temporalLength )
+             + " exceeds " + std::to_string( kMaxTemporalFrames )
+             + " (the temporal lane is bounded)";
   if ( !modality.empty() && modality != "optical" && modality != "sar" && modality != "dem"
        && modality != "mask" && modality != "aux" )
     return "modality '" + modality + "' is unsupported (supported: optical, sar, dem, mask, aux)";

@@ -77,7 +77,8 @@ QVariantMap VectorBufferAlgorithm::processAlgorithm( const QVariantMap &paramete
 
             QgsFeature outputFeat = feat;
             outputFeat.setGeometry( feat.geometry().buffer( distance, segments, endCap, Qgis::JoinStyle::Round, 2.0 ) );
-            sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+            if ( !sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ) )
+                throw QgsProcessingException( QObject::tr( "Could not write feature" ) );
         }
     }
 

@@ -171,19 +171,56 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
       else if ( stepVal.isMember( "verification" ) && stepVal["verification"].isString() )
         step.verificationPolicy = stepVal["verification"].asString();
 
-      if ( stepVal.isMember( "meta" ) && stepVal["meta"].isMember( "ui" ) )
+      if ( stepVal.isMember( "meta" ) )
       {
-        const auto &uiObj = stepVal["meta"]["ui"];
-        if ( uiObj.isMember( "x" ) )
-          step.uiMeta.x = uiObj["x"].asDouble();
-        if ( uiObj.isMember( "y" ) )
-          step.uiMeta.y = uiObj["y"].asDouble();
-        if ( uiObj.isMember( "portAddToMap" ) && uiObj["portAddToMap"].isObject() )
+        if ( !stepVal["meta"].isObject() )
         {
-          const auto &mapObj = uiObj["portAddToMap"];
-          for ( const auto &pName : mapObj.getMemberNames() )
+          error = "Invalid JSON: step meta must be an object";
+          return false;
+        }
+        if ( stepVal["meta"].isMember( "ui" ) )
+        {
+          const auto &uiObj = stepVal["meta"]["ui"];
+          if ( !uiObj.isObject() )
           {
-            step.uiMeta.portAddToMap[pName] = mapObj[pName].asBool();
+            error = "Invalid JSON: step meta.ui must be an object";
+            return false;
+          }
+          if ( uiObj.isMember( "x" ) )
+          {
+            if ( !uiObj["x"].isNumeric() )
+            {
+              error = "Invalid JSON: step meta.ui.x must be a number";
+              return false;
+            }
+            step.uiMeta.x = uiObj["x"].asDouble();
+          }
+          if ( uiObj.isMember( "y" ) )
+          {
+            if ( !uiObj["y"].isNumeric() )
+            {
+              error = "Invalid JSON: step meta.ui.y must be a number";
+              return false;
+            }
+            step.uiMeta.y = uiObj["y"].asDouble();
+          }
+          if ( uiObj.isMember( "portAddToMap" ) )
+          {
+            if ( !uiObj["portAddToMap"].isObject() )
+            {
+              error = "Invalid JSON: step meta.ui.portAddToMap must be an object";
+              return false;
+            }
+            const auto &mapObj = uiObj["portAddToMap"];
+            for ( const auto &pName : mapObj.getMemberNames() )
+            {
+              if ( !mapObj[pName].isBool() )
+              {
+                error = "Invalid JSON: step meta.ui.portAddToMap values must be boolean";
+                return false;
+              }
+              step.uiMeta.portAddToMap[pName] = mapObj[pName].asBool();
+            }
           }
         }
       }

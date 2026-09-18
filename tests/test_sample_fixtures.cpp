@@ -850,6 +850,81 @@ TEST_CASE( "verifyDirectory detects in-place corruption and unlisted data files"
 }
 
 // ---------------------------------------------------------------------------
+// 4b. overwrite / leftover catalog files / GDAL env pin
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "generate() overwrites foundry shapefile sidecars in a non-empty out_dir",
+           "[foundry][overwrite]" )
+{
+    GDALAllRegister();
+    TempDir dir;
+    Options options;
+    options.out_dir = dir.str();
+    GenerateResult first;
+    REQUIRE( generate( options, &first ).ok );
+    REQUIRE( fs::exists( dir.path / "training_samples.shp" ) );
+    GenerateResult second;
+    REQUIRE( generate( options, &second ).ok );
+    REQUIRE( second.files.size() == first.files.size() );
+    VerifyReport report;
+    REQUIRE( verifyDirectory( dir.str(), &report ).ok );
+    CHECK( report.problems.empty() );
+}
+
+TEST_CASE( "generate() drops unselected catalog files so a subset verify is clean",
+           "[foundry][overwrite][stale]" )
+{
+    GDALAllRegister();
+    TempDir dir;
+    Options full;
+    full.out_dir = dir.str();
+    REQUIRE( generate( full, nullptr ).ok );
+    REQUIRE( fs::exists( dir.path / "dem_sample.tif" ) );
+    REQUIRE( fs::exists( dir.path / "training_samples.shp" ) );
+
+    {
+        std::ofstream notes( dir.path / "notes.txt" );
+        notes << "keep me\n";
+    }
+
+    Options subset;
+    subset.out_dir = dir.str();
+    subset.products = { Product::LandsatSample, Product::LandsatTruth };
+    REQUIRE( generate( subset, nullptr ).ok );
+
+    CHECK( fs::exists( dir.path / "landsat_sample.tif" ) );
+    CHECK( fs::exists( dir.path / "landsat_truth.tif" ) );
+    CHECK( fs::exists( dir.path / "notes.txt" ) );
+    CHECK_FALSE( fs::exists( dir.path / "dem_sample.tif" ) );
+    CHECK_FALSE( fs::exists( dir.path / "training_samples.shp" ) );
+    CHECK_FALSE( fs::exists( dir.path / "training_samples.dbf" ) );
+    CHECK_FALSE( fs::exists( dir.path / "change_before.tif" ) );
+
+    VerifyReport report;
+    REQUIRE( verifyDirectory( dir.str(), &report ).ok );
+    CHECK( report.problems.empty() );
+}
+
+TEST_CASE( "generate() pins GDAL threads and does not emit a .cpg",
+           "[foundry][gdalenv]" )
+{
+    GDALAllRegister();
+    CPLSetConfigOption( "SHAPE_ENCODING", "UTF-8" );
+    CPLSetConfigOption( "GDAL_NUM_THREADS", "ALL_CPUS" );
+    TempDir dir;
+    Options options;
+    options.out_dir = dir.str();
+    options.products = { Product::TrainingSamples };
+    REQUIRE( generate( options, nullptr ).ok );
+    CHECK_FALSE( fs::exists( dir.path / "training_samples.cpg" ) );
+    for ( const char *ext : { ".shp", ".shx", ".dbf", ".prj" } )
+        CHECK( fs::exists( dir.path / ( std::string( "training_samples" ) + ext ) ) );
+    VerifyReport report;
+    REQUIRE( verifyDirectory( dir.str(), &report ).ok );
+    CHECK( report.problems.empty() );
+}
+
+// ---------------------------------------------------------------------------
 // 5. stress profile smoke
 // ---------------------------------------------------------------------------
 

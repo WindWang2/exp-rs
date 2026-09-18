@@ -29,6 +29,14 @@ QgsGeorefToolMovePoint::QgsGeorefToolMovePoint( QgsMapCanvas *canvas )
   mSnapIndicator = std::make_unique<QgsSnapIndicator>( canvas );
 }
 
+QgsGeorefToolMovePoint::~QgsGeorefToolMovePoint()
+{
+  // Canvas teardown already deleted scene items; do not let unique_ptr
+  // double-free the snap marker.
+  if ( !canvas() )
+    mSnapIndicator.release();
+}
+
 bool QgsGeorefToolMovePoint::isCanvas( QgsMapCanvas *canvas ) const
 {
   return ( mCanvas == canvas );

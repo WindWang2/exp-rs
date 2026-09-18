@@ -292,9 +292,9 @@ TEST_CASE( "D19 QA carries a CRS category for schema/sample CRS honesty",
     inputs.distinctSampleCrs = { QStringLiteral( "EPSG:32650" ) };
     CHECK( crsCategory( inputs ).verdict == AuditVerdict::Pass );
 
-    // Sample CRS unspecified under a declared schema stays Pass.
+    // Sample CRS unspecified under a declared schema is Unknown (no evidence).
     inputs.distinctSampleCrs.clear();
-    CHECK( crsCategory( inputs ).verdict == AuditVerdict::Pass );
+    CHECK( crsCategory( inputs ).verdict == AuditVerdict::Unknown );
 
     inputs.distinctSampleCrs = { QStringLiteral( "EPSG:4326" ) };
     const DatasetQaCategory conflict = crsCategory( inputs );

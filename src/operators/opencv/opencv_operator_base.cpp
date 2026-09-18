@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <vector>
 
@@ -61,6 +62,14 @@ Json::Value OpenCvOperatorBase::run(const Json::Value& params, RSOperatorContext
 
     const int halo = neighborhoodRadius(params);
     if (halo >= 0) {
+        constexpr int kMaxStreamHalo = kMaxFilterKernelSize / 2;
+        if (halo > kMaxStreamHalo) {
+            throw RSOperatorError(ErrorCode::InvalidParameter,
+                                  "filter neighborhood radius " + std::to_string(halo)
+                                    + " exceeds max " + std::to_string(kMaxStreamHalo)
+                                    + " (kernelSize must be an odd integer in [1, "
+                                    + std::to_string(kMaxFilterKernelSize) + "])");
+        }
         return runStreaming(inputPath, outputPath, halo, params, context);
     }
 
@@ -151,8 +160,9 @@ Json::Value OpenCvOperatorBase::runStreaming(const std::string& inputPath,
         }
 
         GdalBlockStream stream(ds, band, kStreamTileDim, kStreamTileDim, halo);
-        std::vector<float> buf(static_cast<size_t>(kStreamTileDim + 2 * halo) *
-                               static_cast<size_t>(kStreamTileDim + 2 * halo));
+        const std::int64_t bufDim = static_cast<std::int64_t>(kStreamTileDim)
+                                    + 2 * static_cast<std::int64_t>(std::max(0, halo));
+        std::vector<float> buf(static_cast<size_t>(bufDim) * static_cast<size_t>(bufDim));
 
         bool complete = false;
         try {

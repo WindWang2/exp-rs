@@ -367,8 +367,13 @@ void RangeDiskBlockStore::putBlock( const std::string &basis, std::uint64_t bloc
     const std::string basisHash = sha256Hex( basis );
     const std::string finalName = blockFileName( basisHash, blockIndex );
     const fs::path directory = fs::u8path( state.directory );
+#ifdef _WIN32
+    const std::string unique = std::to_string( static_cast<long long>( GetCurrentProcessId() ) ) + "." +
+                               std::to_string( state.tempCounter.fetch_add( 1 ) );
+#else
     const std::string unique = std::to_string( ::getpid() ) + "." +
                                std::to_string( state.tempCounter.fetch_add( 1 ) );
+#endif
     tempPath = ( directory / ( finalName + "." + unique + ".tmp" ) ).string();
     finalPath = ( directory / finalName ).string();
   }

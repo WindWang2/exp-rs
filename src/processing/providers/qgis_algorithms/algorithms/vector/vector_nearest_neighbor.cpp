@@ -178,7 +178,8 @@ QVariantMap VectorNearestNeighborAlgorithm::processAlgorithm( const QVariantMap 
                 outputFeat.setAttribute( source->fields().at( i ).name(), feat.attribute( i ) );
             }
 
-            sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+            if ( !sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ) )
+                throw QgsProcessingException( QObject::tr( "Could not write feature" ) );
             count++;
         }
     }

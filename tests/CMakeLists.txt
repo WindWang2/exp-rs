@@ -308,7 +308,7 @@ endif()
 # 7.0 remote source identity & validators (shared HTTP fixture).
 # ADR 0146: exit 77 = skipped (matches the ladder's verdict mapping).
 sicnu_add_io_test(test_io_remote_validator SKIP_RETURN_CODE 77)
-target_sources(test_io_remote_validator PRIVATE support/http_range_server.cpp)
+target_sources(test_io_remote_validator PRIVATE support/http_range_server.cpp support/http_stac_server.cpp)
 if(WIN32)
   target_link_libraries(test_io_remote_validator PRIVATE ws2_32)
 endif()

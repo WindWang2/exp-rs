@@ -12,6 +12,7 @@
 #include "geospatial/remote/http_fetch.h"
 #include "geospatial/remote/remote_source_validator.h"
 #include "support/http_range_server.h"
+#include "support/http_stac_server.h"
 #include "support/offline_probe.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -295,6 +296,59 @@ TEST_CASE( "httpFetch honors ranges, byte budgets and typed truncation",
 
   // Transport errors stay typed.
   CHECK_THROWS_AS( httpFetch( "C:/local/file.tif" ), GeoError );
+}
+
+TEST_CASE( "httpFetch strict mode maps 410 to NotFound and 500 to NetworkError",
+           "[io][remote][http_fetch]" )
+{
+  testsupport::HttpStacServer server;
+  REQUIRE( server.port() > 0 );
+  server.setRoute( "/gone", { 410, "text/plain", "gone" } );
+  server.setRoute( "/boom", { 500, "text/plain", "error" } );
+
+  try
+  {
+    ( void ) httpFetch( server.url() + "/gone" );
+    FAIL( "410 must throw" );
+  }
+  catch ( const GeoError &error )
+  {
+    CHECK( error.code() == ErrorCode::NotFound );
+  }
+
+  try
+  {
+    ( void ) httpFetch( server.url() + "/boom" );
+    FAIL( "500 must throw" );
+  }
+  catch ( const GeoError &error )
+  {
+    CHECK( error.code() == ErrorCode::NetworkError );
+  }
+
+  const HttpFetchResult gone = httpFetchStatus( server.url() + "/gone" );
+  CHECK( gone.httpStatus == 410 );
+  const HttpFetchResult boom = httpFetchStatus( server.url() + "/boom" );
+  CHECK( boom.httpStatus == 500 );
+}
+
+TEST_CASE( "identity fromJson refuses non-numeric size_bytes as InvalidMetadata",
+           "[io][remote][validator]" )
+{
+  Json::Value json;
+  json["url"] = "https://example.com/x.tif";
+  json["state"] = "fresh";
+  json["size_bytes"] = "huge";
+  json["accepts_ranges"] = false;
+  try
+  {
+    ( void ) RemoteSourceIdentity::fromJson( json );
+    FAIL( "must throw GeoError" );
+  }
+  catch ( const GeoError &error )
+  {
+    CHECK( error.code() == ErrorCode::InvalidMetadata );
+  }
 }
 
 

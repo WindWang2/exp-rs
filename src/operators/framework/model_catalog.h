@@ -13,6 +13,16 @@
 
 namespace sicnu::operators {
 
+/// Manifest / engine bound on `temporal_length` (and a feed's materialized
+/// frames). The tile engine allocates bands×T per window; an unbounded T is
+/// an unbounded allocation (and `bands * T` can truncate through `int`).
+inline constexpr int kMaxTemporalFrames = 1024;
+
+/// Manifest / engine bound on `preprocess.pad` (px). Same order as
+/// `tiling.tile_size` max so `tileSize + 2*halo + 2*pad` cannot overflow
+/// `int` or request an unbounded per-tile window.
+inline constexpr int kMaxPreprocessPad = 32768;
+
 // --- Platform 10.0: EO task vocabulary ---------------------------------------
 
 /// Canonical EO task vocabulary (Platform 10.0). The manifest `task` string

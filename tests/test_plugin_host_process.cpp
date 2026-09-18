@@ -5,6 +5,7 @@
 // recovery, hang → kill ladder, flood → frame cap, unload round-trip.
 #include <catch2/catch_test_macros.hpp>
 
+#include "exprs/ipc_stream.h"
 #include "exprs/plugin_host_runtime.h"
 #include "exprs/plugin_interface.h"
 #include "exprs/plugin_registry.h"
@@ -23,6 +24,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <cerrno>
 #include <signal.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -730,6 +732,12 @@ TEST_CASE( "declarative UI schema round-trips through the worker", "[hostprocess
     Json::Value invoked = stack.runtime->invokeUi( kPluginId, event, 5000, uiLog );
     INFO( "invoke: " << Json::writeString( Json::StreamWriterBuilder(), invoked ) );
     REQUIRE( invoked["ok"].asBool() );
+    // Production envelope is one level nested: {ok, response:{state}}.
+    // PluginUiSchemaRenderer::deliveryLoop unwraps this; it must NOT look
+    // for a top-level "state" key (that path is the test-fake shape only).
+    REQUIRE( invoked.isMember( "response" ) );
+    REQUIRE( invoked["response"].isObject() );
+    REQUIRE_FALSE( invoked.isMember( "state" ) );
     REQUIRE( invoked["response"]["state"]["status"].asString() == "pinged" );
 
     // The worker itself refuses an INVALID schema (fail closed): point a
@@ -1160,4 +1168,82 @@ TEST_CASE( "model framework outside the declared access model fails the load typ
     REQUIRE( sawTypedRefusal );
     REQUIRE( stack.sink.modelFactories.empty() ); // nothing half-registered
     REQUIRE_FALSE( stack.runtime->isWorkerAlive( kPluginId ) );
+}
+
+TEST_CASE( "ipc handle stream close owns both ends and is idempotent", "[ipc][stream]" )
+{
+#ifdef _WIN32
+    HANDLE readEnd = nullptr;
+    HANDLE writeEnd = nullptr;
+    SECURITY_ATTRIBUTES inherit;
+    ZeroMemory( &inherit, sizeof( inherit ) );
+    inherit.nLength = sizeof( inherit );
+    REQUIRE( ::CreatePipe( &readEnd, &writeEnd, &inherit, 0 ) );
+    auto stream = makeIpcHandleStream( readEnd, writeEnd );
+    REQUIRE( stream );
+    stream->close();
+    stream->close();
+    DWORD flags = 0;
+    REQUIRE_FALSE( ::GetHandleInformation( readEnd, &flags ) );
+    REQUIRE_FALSE( ::GetHandleInformation( writeEnd, &flags ) );
+#else
+    int fds[2] = { -1, -1 };
+    REQUIRE( ::pipe( fds ) == 0 );
+    auto stream = makeIpcHandleStream(
+        reinterpret_cast<void *>( static_cast<intptr_t>( fds[0] ) ),
+        reinterpret_cast<void *>( static_cast<intptr_t>( fds[1] ) ) );
+    REQUIRE( stream );
+    stream->close();
+    stream->close();
+    char buf = 0;
+    errno = 0;
+    REQUIRE( ::read( fds[0], &buf, 1 ) < 0 );
+    REQUIRE( errno == EBADF );
+    errno = 0;
+    REQUIRE( ::write( fds[1], "x", 1 ) < 0 );
+    REQUIRE( errno == EBADF );
+#endif
+}
+
+TEST_CASE( "ui.invoke production envelope unwraps nested state for the renderer",
+           "[hostprocess][uischema]" )
+{
+    // Mirrors PluginUiSchemaRenderer::deliveryLoop: production invokeUi
+    // returns {ok, response:{state}}, test fakes return {state} directly.
+    auto unwrap = []( const Json::Value &response ) {
+        if ( !response.isObject() )
+            return Json::Value();
+        const Json::Value &inner =
+            response.isMember( "response" ) && response["response"].isObject()
+                ? response["response"]
+                : response;
+        const Json::Value &state = inner["state"];
+        return state.isObject() ? state : Json::Value();
+    };
+
+    Json::Value state( Json::objectValue );
+    state["status"] = "pinged";
+    Json::Value inner( Json::objectValue );
+    inner["state"] = state;
+    Json::Value production( Json::objectValue );
+    production["ok"] = true;
+    production["response"] = inner;
+    REQUIRE_FALSE( production.isMember( "state" ) );
+    REQUIRE( unwrap( production )["status"].asString() == "pinged" );
+
+    Json::Value fake( Json::objectValue );
+    fake["state"] = state;
+    REQUIRE( unwrap( fake )["status"].asString() == "pinged" );
+
+    Json::Value comboCrash( Json::objectValue );
+    comboCrash["a-combo"] = Json::Value( Json::arrayValue );
+    Json::Value hostile( Json::objectValue );
+    hostile["ok"] = true;
+    Json::Value hostileInner( Json::objectValue );
+    hostileInner["state"] = comboCrash;
+    hostile["response"] = hostileInner;
+    const Json::Value extracted = unwrap( hostile );
+    REQUIRE( extracted.isObject() );
+    REQUIRE( extracted["a-combo"].isArray() );
+    REQUIRE_FALSE( extracted["a-combo"].isString() );
 }

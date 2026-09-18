@@ -57,14 +57,12 @@ ToolCallDispatcher::ToolCallDispatcher()
       // builders reuse the cached payload instead of racing the commit.
       ExecutionPlane::instance().watch(
         taskId,
-        [bridge, cb = std::move( onComplete ), committerHandler = std::move( committerHandler ),
-         verificationHandler = std::move( verificationHandler )]( const sicnu::AlgorithmTaskInfo &info ) mutable {
+        [this, bridge, cb = std::move( onComplete )]( const sicnu::AlgorithmTaskInfo &info ) mutable {
           ExecutionPlane::deliverOnAffinity(
             bridge.get(),
-            [info, cb = std::move( cb ), committerHandler = std::move( committerHandler ),
-             verificationHandler = std::move( verificationHandler )]() mutable {
-              const Json::Value payload =
-                ExecutionPlane::instance().buildCommittedResultPayload( info, committerHandler, verificationHandler );
+            [this, info, cb = std::move( cb )]() mutable {
+              // Member builder applies rollbackVerificationFailure (#1042).
+              const Json::Value payload = buildCommittedResultPayload( info );
               if ( cb )
                 cb( payload );
             } );
@@ -78,9 +76,11 @@ ToolCallDispatcher::ToolCallDispatcher()
     // The handler is read at await time (setDataManager may run after the
     // constructor); the commit then runs on the calling thread — the Data
     // Manager's owning thread for every production caller of the sync path.
-    return ExecutionPlane::instance().awaitResult( taskId, timeout, mOutputCommitterHandler,
-                                                   bridge.get(), /*cancelOnTimeout=*/true,
-                                                   mOutputVerificationHandler );
+    Json::Value payload = ExecutionPlane::instance().awaitResult(
+      taskId, timeout, mOutputCommitterHandler, bridge.get(), /*cancelOnTimeout=*/true,
+      mOutputVerificationHandler );
+    rollbackVerificationFailure( payload );
+    return payload;
   };
 }
 

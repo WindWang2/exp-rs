@@ -1112,6 +1112,8 @@ QVariantMap datasetQa( const QVariantMap &args )
         const auto manifest = sicnu::dataset::DatasetManifest::fromJson( manifestJson );
         if ( manifest.has_value() )
             inputs.schemaCrs = manifest.value().schema().crs;
+        // Empty CRS strings are omitted so an empty distinct list is "no
+        // evidence" (QA Unknown under a declared schema, not Pass).
         QSet<QString> distinct;
         for ( const SampleCatalogRow &row : catalogRows )
             if ( !row.crs.isEmpty() )

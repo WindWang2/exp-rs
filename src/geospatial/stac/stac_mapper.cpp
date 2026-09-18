@@ -73,10 +73,13 @@ StacItem StacItem::parse( const Json::Value &item )
 {
   if ( !item.isObject() )
     throw GeoError( ErrorCode::InvalidArgument, "STAC item must be a JSON object" );
-  if ( item.get( "type", "" ).asString() != "Feature" )
+  if ( !item["type"].isString() || item["type"].asString() != "Feature" )
   {
     Json::Value details;
-    details["type"] = item.get( "type", "" ).asString();
+    if ( item["type"].isString() )
+      details["type"] = item["type"].asString();
+    else
+      details["type_kind"] = "non-string";
     throw GeoError( ErrorCode::InvalidArgument, "STAC item requires type=Feature", details );
   }
 
@@ -140,7 +143,10 @@ StacItem StacItem::parse( const Json::Value &item )
   if ( properties.isMember( "sar:polarizations" ) && properties["sar:polarizations"].isArray() )
   {
     for ( const Json::Value &pol : properties["sar:polarizations"] )
-      parsed.polarizations.push_back( pol.asString() );
+    {
+      if ( pol.isString() )
+        parsed.polarizations.push_back( pol.asString() );
+    }
   }
   if ( properties.isMember( "proj:epsg" ) && properties["proj:epsg"].isIntegral() )
     parsed.epsg = "EPSG:" + std::to_string( properties["proj:epsg"].asInt() );
@@ -149,13 +155,19 @@ StacItem StacItem::parse( const Json::Value &item )
   if ( properties.isMember( "instruments" ) && properties["instruments"].isArray() )
   {
     for ( const Json::Value &instrument : properties["instruments"] )
-      parsed.instruments.push_back( instrument.asString() );
+    {
+      if ( instrument.isString() )
+        parsed.instruments.push_back( instrument.asString() );
+    }
   }
 
   if ( item.isMember( "bbox" ) && item["bbox"].isArray() )
   {
     for ( const Json::Value &value : item["bbox"] )
-      parsed.bbox.push_back( value.asDouble() );
+    {
+      if ( value.isNumeric() )
+        parsed.bbox.push_back( value.asDouble() );
+    }
   }
   parsed.geometry = item.get( "geometry", Json::Value() );
 
@@ -173,7 +185,10 @@ StacItem StacItem::parse( const Json::Value &item )
       if ( assetJson.isMember( "roles" ) && assetJson["roles"].isArray() )
       {
         for ( const Json::Value &role : assetJson["roles"] )
-          asset.roles.push_back( role.asString() );
+        {
+          if ( role.isString() )
+            asset.roles.push_back( role.asString() );
+        }
       }
       parsed.assets[key] = asset;
     }

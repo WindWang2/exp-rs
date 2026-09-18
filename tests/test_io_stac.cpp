@@ -87,6 +87,34 @@ TEST_CASE( "canonical → STAC requires the fields STAC mandates", "[io][stac][g
   CHECK( item["assets"]["data"]["roles"][0].asString() == "data" );
 }
 
+TEST_CASE( "STAC wrong-typed fields are GeoError, never Json::LogicError", "[io][stac][types]" )
+{
+  CHECK_THROWS_AS( sicnu::geo::StacItem::parseText( R"({
+    "type": {}, "id": "x",
+    "properties": { "datetime": "2026-01-01T00:00:00Z" },
+    "assets": { "data": { "href": "a.tif" } }
+  })" ), sicnu::geo::GeoError );
+
+  const sicnu::geo::StacItem item = sicnu::geo::StacItem::parseText( R"({
+    "type": "Feature", "id": "typed-mix",
+    "bbox": [1, "nope", 3, 4],
+    "properties": {
+      "datetime": "2026-01-01T00:00:00Z",
+      "sar:polarizations": ["VV", {}],
+      "instruments": ["MSI", 1]
+    },
+    "assets": { "data": { "href": "a.tif", "roles": ["data", {}] } }
+  })" );
+  REQUIRE( item.polarizations.size() == 1 );
+  CHECK( item.polarizations[0] == "VV" );
+  REQUIRE( item.instruments.size() == 1 );
+  CHECK( item.instruments[0] == "MSI" );
+  CHECK( item.bbox.size() == 3 );
+  REQUIRE( item.assets.count( "data" ) == 1 );
+  REQUIRE( item.assets.at( "data" ).roles.size() == 1 );
+  CHECK( item.assets.at( "data" ).roles[0] == "data" );
+}
+
 TEST_CASE( "start/end datetime range satisfies the STAC time contract", "[io][stac][time]" )
 {
   const sicnu::geo::StacItem item = sicnu::geo::StacItem::parseText( R"({

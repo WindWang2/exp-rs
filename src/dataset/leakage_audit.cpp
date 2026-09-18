@@ -483,15 +483,17 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
     if ( overlapCheck || distanceCheck || bufferCheck )
     {
         // 2-D grid with a 3x3 neighborhood. For distance/buffer the cell must
-        // cover the configured radius; for patch overlap the cell must cover
-        // HALF the largest window extent (two windows overlap only if their
-        // centers are within half a window of each other), otherwise large
-        // overlapping windows land in far-apart cells and are never compared.
+        // cover the configured radius. For patch overlap two windows meet when
+        // |cA − cB| < hA + hB ≤ the largest full window extent (2 × max
+        // half-extent). Cell size must be at least that full extent so
+        // overlapping centers land in the same or an adjacent cell; a
+        // half-extent cell let pairs whose centers sit 2 cells apart slip
+        // the ±1 neighborhood (issue #1046).
         double overlapCell = 1.0;
         for ( const AuditSample &sample : samples )
         {
-            overlapCell = qMax( overlapCell, sample.windowWidth / 2.0 );
-            overlapCell = qMax( overlapCell, sample.windowHeight / 2.0 );
+            overlapCell = qMax( overlapCell, sample.windowWidth );
+            overlapCell = qMax( overlapCell, sample.windowHeight );
         }
         const double cell = qMax( qMax( 1.0, qMax( config.distanceThreshold,
                                                    config.bufferDistance ) ),

@@ -59,8 +59,14 @@ bool writeMatsToRaster(const std::string& outputPath,
  */
 int rasterBandCount(const std::string& inputPath);
 
+/// Windowed-filter kernel ceiling (matches `rs:` spatial window ∈ [3, 101]).
+/// Streaming halo buffers are `(tile + 2*(k/2))²`; without a cap, a huge
+/// `kernelSize` from `toInt()` overflows `int` and requests tens of GB.
+inline constexpr int kMaxFilterKernelSize = 101;
+
 /**
- * Validates that a kernel size is a positive odd integer.
+ * Validates that a kernel size is a positive odd integer in
+ * [1, kMaxFilterKernelSize].
  */
 bool isValidKernelSize(int kernelSize);
 

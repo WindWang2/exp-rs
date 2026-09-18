@@ -78,7 +78,8 @@ QVariantMap VectorDissolveAlgorithm::processAlgorithm( const QVariantMap &parame
         outputFeat.setFields( source->fields() );
         outputFeat.setAttribute( fieldIdx, it2.key() );
         outputFeat.setGeometry( it2.value() );
-        sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+        if ( !sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ) )
+            throw QgsProcessingException( QObject::tr( "Could not write feature" ) );
     }
 
     return QVariantMap{{OUTPUT, dest}};

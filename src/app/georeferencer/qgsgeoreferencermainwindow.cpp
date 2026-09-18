@@ -264,6 +264,12 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
     [task]() { task->cancel(); },
     /*autoLoad=*/false );
 
+  if ( taskId < 0 )
+  {
+    delete task;
+    return;
+  }
+
   auto *conn = new QMetaObject::Connection;
   *conn = connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, this,
                    [this, task, taskId, conn]( const sicnu::AlgorithmTaskInfo &info ) {
@@ -474,6 +480,13 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
     },
     [fb]() { fb->cancel(); },
     /*autoLoad=*/false );
+
+  if ( taskId < 0 )
+  {
+    delete resultHolder;
+    delete fb;
+    return;
+  }
 
   auto *conn = new QMetaObject::Connection;
   *conn = connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, this,

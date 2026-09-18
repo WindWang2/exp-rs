@@ -13,6 +13,7 @@
 #include <qgsrectangle.h>
 #include <qgsprocessingcontext.h>
 #include <qgsprocessingfeedback.h>
+#include <qgsexception.h>
 
 #include "algorithms/terrain_analysis.h"
 
@@ -167,7 +168,11 @@ protected:
                         outBlock.setValue( r, c, static_cast<double>( hsData[static_cast<size_t>( row + r ) * nCols + ( col + c )] ) );
                     }
                 }
-                outDp->writeBlock( &outBlock, 1, col, row );
+                if ( !outDp->writeBlock( &outBlock, 1, col, row ) )
+                {
+                    delete outDp;
+                    throw QgsProcessingException( QObject::tr( "Could not write hillshade block" ) );
+                }
             }
             feedback->setProgress( 60 + 40.0 * row / nRows );
         }

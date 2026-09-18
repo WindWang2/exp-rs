@@ -2,6 +2,8 @@
 // bookkeeping. See artifact_store.h for the contract.
 #include "artifact_store.h"
 
+#include "runtime/observability/fault_point.h"
+
 #include <QCryptographicHash>
 #include <QFile>
 #include <QFileInfo>
@@ -149,6 +151,29 @@ struct ArtifactStore::Impl
             if ( errorOut )
                 *errorOut = err ? QString::fromUtf8( err ) : lastError( db );
             sqlite3_free( err );
+            return false;
+        }
+        return true;
+    }
+
+    bool beginImmediate( QString *errorOut ) const
+    {
+        if ( SICNU_FAULT_POINT( "artifact_store.begin" ) )
+        {
+            if ( errorOut )
+                *errorOut = QStringLiteral( "cannot begin transaction" );
+            return false;
+        }
+        return exec( "BEGIN IMMEDIATE", errorOut );
+    }
+
+    bool commit( QString *errorOut ) const
+    {
+        if ( SICNU_FAULT_POINT( "artifact_store.commit" ) || !exec( "COMMIT", errorOut ) )
+        {
+            exec( "ROLLBACK", nullptr );
+            if ( errorOut && errorOut->isEmpty() )
+                *errorOut = QStringLiteral( "commit failed" );
             return false;
         }
         return true;
@@ -326,7 +351,11 @@ Result<ArtifactRecord> ArtifactStore::registerArtifact( const ArtifactRegistrati
     if ( artifactId.isEmpty() )
         artifactId = QUuid::createUuid().toString( QUuid::WithoutBraces );
 
-    m_impl->exec( "BEGIN IMMEDIATE", nullptr );
+    QString txError;
+    if ( !m_impl->beginImmediate( &txError ) )
+        return Result<ArtifactRecord>::failure( diag( QStringLiteral( "artifact.db" ),
+                                                      txError.isEmpty() ? QStringLiteral( "cannot begin transaction" )
+                                                                        : txError ) );
     {
         Stmt s( m_impl->db,
                 "INSERT INTO artifacts(artifact_id, logical_key, version, producer_fingerprint,"
@@ -361,7 +390,10 @@ Result<ArtifactRecord> ArtifactStore::registerArtifact( const ArtifactRegistrati
             return Result<ArtifactRecord>::failure( diag( QStringLiteral( "artifact.db" ), err ) );
         }
     }
-    m_impl->exec( "COMMIT", nullptr );
+    if ( !m_impl->commit( &txError ) )
+        return Result<ArtifactRecord>::failure( diag( QStringLiteral( "artifact.db" ),
+                                                      txError.isEmpty() ? QStringLiteral( "commit failed" )
+                                                                        : txError ) );
 
     // Fetch exactly the version just inserted — artifact_id is shared across
     // versions, so an id-only lookup may return an older row.
@@ -650,25 +682,34 @@ Result<void> ArtifactStore::forget( const QString &artifactId )
     if ( !isOpen() || artifactId.isEmpty() )
         return Result<void>::failure( diag( QStringLiteral( "artifact.invalid" ), QStringLiteral( "missing id" ) ) );
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE", nullptr );
+    QString txError;
+    if ( !m_impl->beginImmediate( &txError ) )
+        return Result<void>::failure( diag( QStringLiteral( "artifact.db" ),
+                                            txError.isEmpty() ? QStringLiteral( "cannot begin transaction" )
+                                                              : txError ) );
     {
         Stmt d( m_impl->db, "DELETE FROM artifact_refs WHERE artifact_id=?", nullptr );
         Stmt a( m_impl->db, "DELETE FROM artifacts WHERE artifact_id=?", nullptr );
-        if ( d && a )
+        if ( !d || !a )
         {
-            d.bind( 1, artifactId );
-            a.bind( 1, artifactId );
-            const bool ok = d.step() && a.step() && sqlite3_changes( m_impl->db ) > 0;
-            if ( ok )
-            {
-                m_impl->exec( "COMMIT", nullptr );
-                return Result<void>::success();
-            }
+            m_impl->exec( "ROLLBACK", nullptr );
+            return Result<void>::failure( diag( QStringLiteral( "artifact.forget" ),
+                                                QStringLiteral( "artifact %1 not removed" ).arg( artifactId ) ) );
+        }
+        d.bind( 1, artifactId );
+        a.bind( 1, artifactId );
+        if ( !d.step() || !a.step() || sqlite3_changes( m_impl->db ) <= 0 )
+        {
+            m_impl->exec( "ROLLBACK", nullptr );
+            return Result<void>::failure( diag( QStringLiteral( "artifact.forget" ),
+                                                QStringLiteral( "artifact %1 not removed" ).arg( artifactId ) ) );
         }
     }
-    m_impl->exec( "ROLLBACK", nullptr );
-    return Result<void>::failure( diag( QStringLiteral( "artifact.forget" ),
-                                        QStringLiteral( "artifact %1 not removed" ).arg( artifactId ) ) );
+    if ( !m_impl->commit( &txError ) )
+        return Result<void>::failure( diag( QStringLiteral( "artifact.db" ),
+                                            txError.isEmpty() ? QStringLiteral( "commit failed" )
+                                                              : txError ) );
+    return Result<void>::success();
 }
 
 qint64 ArtifactStore::count() const

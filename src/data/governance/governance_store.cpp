@@ -1,6 +1,8 @@
 // governance_store.cpp — see governance_store.h for the contract.
 #include "governance_store.h"
 
+#include "runtime/observability/fault_point.h"
+
 #include <QDateTime>
 #include <QDir>
 #include <QJsonArray>
@@ -166,6 +168,12 @@ struct GovernanceStore::Impl
     // rolls back and reports failure.
     bool commit() const
     {
+        if ( SICNU_FAULT_POINT( "governance_store.commit" ) )
+        {
+            lastError = QStringLiteral( "commit failed" );
+            exec( "ROLLBACK" );
+            return false;
+        }
         if ( exec( "COMMIT" ) )
             return true;
         exec( "ROLLBACK" );
@@ -860,14 +868,34 @@ Result<void> GovernanceStore::removeAsset( const QString &assetId )
             return Result<void>::failure( govDiag( QStringLiteral( "store.prepare" ), QStringLiteral( "remove prepare failed" ) ) );
         }
         a.bind( 1, assetId );
-        a.step();
+        if ( !a.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.remove_asset" ),
+                                                   QStringLiteral( "asset %1 delete failed" ).arg( assetId ) ) );
+        }
         const bool removed = sqlite3_changes( m_impl->db ) > 0;
         al.bind( 1, assetId );
-        al.step();
+        if ( !al.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.remove_asset" ),
+                                                   QStringLiteral( "asset %1 alias delete failed" ).arg( assetId ) ) );
+        }
         t.bind( 1, assetId );
-        t.step();
+        if ( !t.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.remove_asset" ),
+                                                   QStringLiteral( "asset %1 tag delete failed" ).arg( assetId ) ) );
+        }
         lo.bind( 1, assetId );
-        lo.step();
+        if ( !lo.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.remove_asset" ),
+                                                   QStringLiteral( "asset %1 lineage delete failed" ).arg( assetId ) ) );
+        }
         if ( !m_impl->commit() )
             return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
                                                    m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
@@ -1187,9 +1215,19 @@ Result<void> GovernanceStore::upsertDataset( const DatasetRecord &dataset )
         }
         fix.bind( 1, now );
         fix.bind( 2, idText );
-        fix.step();
+        if ( !fix.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_dataset" ),
+                                                   QStringLiteral( "dataset created_ms fix failed" ) ) );
+        }
         clear.bind( 1, idText );
-        clear.step();
+        if ( !clear.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_dataset" ),
+                                                   QStringLiteral( "dataset member clear failed" ) ) );
+        }
         int position = 0;
         for ( const QString &member : dataset.memberAssetIds )
         {
@@ -1197,7 +1235,12 @@ Result<void> GovernanceStore::upsertDataset( const DatasetRecord &dataset )
             ins.bind( 1, idText );
             ins.bind( 2, member );
             ins.bind( 3, position++ );
-            ins.step();
+            if ( SICNU_FAULT_POINT( "governance_store.dataset_member_step" ) || !ins.step() )
+            {
+                m_impl->exec( "ROLLBACK" );
+                return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_dataset" ),
+                                                       QStringLiteral( "dataset member insert failed" ) ) );
+            }
         }
     }
     if ( !m_impl->commit() )
@@ -1217,11 +1260,26 @@ Result<void> GovernanceStore::removeDataset( const QString &datasetId )
     {
         Stmt d( m_impl->db, "DELETE FROM datasets WHERE dataset_id=?" );
         Stmt m( m_impl->db, "DELETE FROM dataset_members WHERE dataset_id=?" );
+        if ( !d || !m )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.prepare" ), QStringLiteral( "dataset remove prepare failed" ) ) );
+        }
         d.bind( 1, datasetId );
-        d.step();
+        if ( !d.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.remove_dataset" ),
+                                                   QStringLiteral( "dataset %1 delete failed" ).arg( datasetId ) ) );
+        }
         const bool removed = sqlite3_changes( m_impl->db ) > 0;
         m.bind( 1, datasetId );
-        m.step();
+        if ( !m.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.remove_dataset" ),
+                                                   QStringLiteral( "dataset %1 member delete failed" ).arg( datasetId ) ) );
+        }
         if ( !m_impl->commit() )
             return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
                                                    m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
@@ -1324,9 +1382,19 @@ Result<void> GovernanceStore::upsertResult( const ResultRecord &result )
         }
         fix.bind( 1, now );
         fix.bind( 2, idText );
-        fix.step();
+        if ( !fix.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_result" ),
+                                                   QStringLiteral( "result created_ms fix failed" ) ) );
+        }
         clearIn.bind( 1, idText );
-        clearIn.step();
+        if ( !clearIn.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_result" ),
+                                                   QStringLiteral( "result input clear failed" ) ) );
+        }
         for ( const ResultInput &in : result.inputs )
         {
             insIn.reset();
@@ -1334,10 +1402,20 @@ Result<void> GovernanceStore::upsertResult( const ResultRecord &result )
             insIn.bind( 2, in.assetId );
             insIn.bind( 3, static_cast<qint64>( in.revision ) );
             insIn.bind( 4, in.role );
-            insIn.step();
+            if ( !insIn.step() )
+            {
+                m_impl->exec( "ROLLBACK" );
+                return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_result" ),
+                                                       QStringLiteral( "result input insert failed" ) ) );
+            }
         }
         clearArt.bind( 1, idText );
-        clearArt.step();
+        if ( !clearArt.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_result" ),
+                                                   QStringLiteral( "result artifact clear failed" ) ) );
+        }
         for ( const ResultArtifact &art : result.artifacts )
         {
             insArt.reset();
@@ -1346,7 +1424,12 @@ Result<void> GovernanceStore::upsertResult( const ResultRecord &result )
             insArt.bind( 3, art.role );
             insArt.bind( 4, art.contentDigest );
             insArt.bind( 5, art.sizeBytes );
-            insArt.step();
+            if ( !insArt.step() )
+            {
+                m_impl->exec( "ROLLBACK" );
+                return Result<void>::failure( govDiag( QStringLiteral( "store.upsert_result" ),
+                                                       QStringLiteral( "result artifact insert failed" ) ) );
+            }
         }
     }
     if ( !m_impl->commit() )
@@ -1367,13 +1450,33 @@ Result<void> GovernanceStore::removeResult( const QString &resultId )
         Stmt r( m_impl->db, "DELETE FROM results WHERE result_id=?" );
         Stmt i( m_impl->db, "DELETE FROM result_inputs WHERE result_id=?" );
         Stmt a( m_impl->db, "DELETE FROM result_artifacts WHERE result_id=?" );
+        if ( !r || !i || !a )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.prepare" ), QStringLiteral( "result remove prepare failed" ) ) );
+        }
         r.bind( 1, resultId );
-        r.step();
+        if ( !r.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.remove_result" ),
+                                                   QStringLiteral( "result %1 delete failed" ).arg( resultId ) ) );
+        }
         const bool removed = sqlite3_changes( m_impl->db ) > 0;
         i.bind( 1, resultId );
-        i.step();
+        if ( !i.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.remove_result" ),
+                                                   QStringLiteral( "result %1 input delete failed" ).arg( resultId ) ) );
+        }
         a.bind( 1, resultId );
-        a.step();
+        if ( !a.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( govDiag( QStringLiteral( "store.remove_result" ),
+                                                   QStringLiteral( "result %1 artifact delete failed" ).arg( resultId ) ) );
+        }
         if ( !m_impl->commit() )
             return Result<void>::failure( govDiag( QStringLiteral( "store.commit" ),
                                                    m_impl->lastError.isEmpty() ? QStringLiteral( "transaction commit failed" )
@@ -1787,11 +1890,21 @@ Result<void> GovernanceStore::addLineageEdges( const QVector<LineageEdge> &edges
             for ( const LineageEdge &edge : edges )
                 outputs.insert( edge.outputAssetId );
             Stmt del( m_impl->db, "DELETE FROM lineage_edges WHERE output_asset_id=?" );
+            if ( !del )
+            {
+                m_impl->exec( "ROLLBACK" );
+                return Result<void>::failure( govDiag( QStringLiteral( "store.prepare" ), QStringLiteral( "lineage prepare failed" ) ) );
+            }
             for ( const QString &output : outputs )
             {
                 del.reset();
                 del.bind( 1, output );
-                del.step();
+                if ( !del.step() )
+                {
+                    m_impl->exec( "ROLLBACK" );
+                    return Result<void>::failure( govDiag( QStringLiteral( "store.lineage" ),
+                                                           QStringLiteral( "failed to replace outgoing edges for %1" ).arg( output ) ) );
+                }
             }
         }
         Stmt ins( m_impl->db,
@@ -1812,7 +1925,12 @@ Result<void> GovernanceStore::addLineageEdges( const QVector<LineageEdge> &edges
             ins.bind( 5, edge.runId );
             ins.bind( 6, edge.stepId );
             ins.bind( 7, edge.fingerprint );
-            ins.step();
+            if ( SICNU_FAULT_POINT( "governance_store.lineage_step" ) || !ins.step() )
+            {
+                m_impl->exec( "ROLLBACK" );
+                return Result<void>::failure( govDiag( QStringLiteral( "store.lineage" ),
+                                                       QStringLiteral( "lineage edge insert failed" ) ) );
+            }
         }
     }
     if ( !m_impl->commit() )

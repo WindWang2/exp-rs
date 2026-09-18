@@ -20,7 +20,8 @@ RsRoiToolPolygon::RsRoiToolPolygon( QgsMapCanvas *canvas )
 
 RsRoiToolPolygon::~RsRoiToolPolygon()
 {
-  delete mRubber;
+  if ( canvas() )
+    delete mRubber;
   mRubber = nullptr;
 }
 

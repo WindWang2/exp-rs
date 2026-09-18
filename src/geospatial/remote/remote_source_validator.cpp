@@ -284,10 +284,25 @@ RemoteSourceIdentity RemoteSourceIdentity::fromJson( const Json::Value &json )
                      ? remoteSourceStateFromName( json["state"].asString() )
                      : RemoteSourceState::Unknown;
   identity.validator = RemoteValidatorSet::fromJson( json["validator"] );
-  if ( json.isMember( "size_bytes" ) )
+  if ( json.isMember( "size_bytes" ) && !json["size_bytes"].isNull() )
   {
-    identity.hasSize = true;
-    identity.sizeBytes = json["size_bytes"].asUInt64();
+    if ( !json["size_bytes"].isNumeric() )
+    {
+      Json::Value details;
+      details["reason"] = "size_bytes is not numeric";
+      throw GeoError( ErrorCode::InvalidMetadata, "RemoteSourceIdentity::fromJson: invalid document", details );
+    }
+    try
+    {
+      identity.hasSize = true;
+      identity.sizeBytes = json["size_bytes"].asUInt64();
+    }
+    catch ( const Json::Exception & )
+    {
+      Json::Value details;
+      details["reason"] = "size_bytes is not numeric";
+      throw GeoError( ErrorCode::InvalidMetadata, "RemoteSourceIdentity::fromJson: invalid document", details );
+    }
   }
   identity.acceptsRanges = json["accepts_ranges"].isBool() && json["accepts_ranges"].asBool();
   identity.contentType = json["content_type"].isString() ? json["content_type"].asString() : std::string();

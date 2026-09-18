@@ -20,7 +20,8 @@ RsRoiToolFreehand::RsRoiToolFreehand( QgsMapCanvas *canvas )
 
 RsRoiToolFreehand::~RsRoiToolFreehand()
 {
-  delete mRubber;
+  if ( canvas() )
+    delete mRubber;
   mRubber = nullptr;
 }
 

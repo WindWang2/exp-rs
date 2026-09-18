@@ -70,7 +70,8 @@ QVariantMap VectorAttributeQueryAlgorithm::processAlgorithm( const QVariantMap &
 
         QVariant result = expression.evaluate( &exprContext );
         if ( !expression.hasEvalError() && result.toBool() )
-            sink->addFeature( feat, QgsFeatureSink::FastInsert );
+            if ( !sink->addFeature( feat, QgsFeatureSink::FastInsert ) )
+                throw QgsProcessingException( QObject::tr( "Could not write feature" ) );
     }
 
     return QVariantMap{{OUTPUT, dest}};

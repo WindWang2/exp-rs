@@ -1,4 +1,5 @@
 #include "active_view_host.h"
+#include "crs_transform_failclosed.h"
 
 #include <utility>
 
@@ -38,19 +39,19 @@ void setCanvasExtentReprojected( QgsMapCanvas *canvas, QgsMapLayer *layer )
     const QgsCoordinateReferenceSystem canvasCrs = canvas->mapSettings().destinationCrs();
     if ( layer->crs().isValid() && canvasCrs.isValid() && layer->crs() != canvasCrs )
     {
-        try
+        const QgsCoordinateTransformContext ctx =
+            QgsProject::instance() ? QgsProject::instance()->transformContext()
+                                   : QgsCoordinateTransformContext();
+        const auto transformed = rsTransformBoundingBoxFailClosed(
+            layer->crs(), canvasCrs, ctx, extent );
+        if ( !transformed )
         {
-            const QgsCoordinateTransform ct( layer->crs(), canvasCrs, QgsProject::instance() );
-            extent = ct.transformBoundingBox( extent );
-        }
-        catch ( ... )
-        {
-            // #1005: extent stays in the layer CRS — say so instead of
-            // silently setting a wrong-canvas extent.
             qWarning().noquote() << "canvas extent: CRS transform from"
                                  << layer->crs().authid() << "to" << canvasCrs.authid()
-                                 << "failed; using the untransformed layer extent";
+                                 << "failed; leaving the canvas extent unchanged";
+            return;
         }
+        extent = *transformed;
     }
     canvas->setExtent( extent );
 }

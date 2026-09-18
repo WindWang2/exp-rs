@@ -16,7 +16,8 @@ RsSegmentSelectTool::RsSegmentSelectTool( QgsMapCanvas *canvas )
 
 RsSegmentSelectTool::~RsSegmentSelectTool()
 {
-    delete mRubberBand;
+    if ( canvas() )
+        delete mRubberBand;
     mRubberBand = nullptr;
 }
 

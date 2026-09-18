@@ -114,6 +114,10 @@ Json::Value RsImageEnhancementOperator::run(const Json::Value& params,
     double stddevMult = getDouble(params, "stddevK", 2.0);
     int filterType = 0;
     int kernelSize = getInt(params, "kernelSize", 3);
+    if (kernelSize < 3 || kernelSize > 15 || kernelSize % 2 == 0) {
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "kernelSize must be an odd integer in [3, 15]");
+    }
     double sigma = getDouble(params, "sigma", 1.0);
     int ratioType = 0;
     int band1 = getInt(params, "band1", 1);

@@ -2,7 +2,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "exprs/plugin_diagnostics.h"
+#include "exprs/plugin_discovery.h"
 #include "exprs/plugin_manifest.h"
+#include "exprs/plugin_package.h"
 #include "exprs/plugin_permissions.h"
 #include "exprs/plugin_validator.h"
 #include "exprs/version.h"
@@ -304,6 +306,84 @@ TEST_CASE( "manifest load from file reports structured errors", "[plugin][manife
         REQUIRE_FALSE( loadManifestFromFile( path, manifest, error ) );
         REQUIRE( error.code == PluginDiagnosticCode::ManifestUnknownVersion );
     }
+    SECTION( "string manifest_version is a typed field error, not a throw" )
+    {
+        const std::string path = writeTemp( "vstr.json", R"({"manifest_version":"1"})" );
+        REQUIRE_FALSE( loadManifestFromFile( path, manifest, error ) );
+        REQUIRE( error.code == PluginDiagnosticCode::ManifestInvalidField );
+    }
+}
+
+TEST_CASE( "manifest fromJson refuses mistyped fields without throwing", "[plugin][manifest]" )
+{
+    auto parseFail = []( const std::string &jsonText ) {
+        Json::Value root;
+        Json::Reader reader;
+        REQUIRE( reader.parse( jsonText, root, false ) );
+        PluginManifest manifest;
+        PluginDiagnostic error;
+        bool ok = true;
+        REQUIRE_NOTHROW( ok = PluginManifest::fromJson( root, manifest, error ) );
+        return std::make_tuple( ok, error );
+    };
+
+    SECTION( "string manifest_version" )
+    {
+        auto [ok, error] = parseFail(
+            R"({"manifest_version":"1","id":"org.example.x","name":"X","version":"1.0.0"})" );
+        REQUIRE_FALSE( ok );
+        REQUIRE( error.code == PluginDiagnosticCode::ManifestInvalidField );
+        REQUIRE( error.field == "manifest_version" );
+    }
+    SECTION( "array id" )
+    {
+        auto [ok, error] = parseFail(
+            R"({"manifest_version":1,"id":["org.example.x"],"name":"X","version":"1.0.0"})" );
+        REQUIRE_FALSE( ok );
+        REQUIRE( error.code == PluginDiagnosticCode::ManifestInvalidField );
+        REQUIRE( error.field == "id" );
+    }
+}
+
+TEST_CASE( "plugin package install refuses a non-object sbom without throwing",
+           "[plugin][package]" )
+{
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "exprs_test_sbom_shape";
+    const fs::path source = root / "org.test.sbom-shape";
+    const fs::path userRoot = fs::temp_directory_path() / "exprs_test_sbom_userroot";
+    fs::remove_all( root );
+    fs::remove_all( userRoot );
+    fs::create_directories( source );
+#ifdef _WIN32
+    _putenv_s( "SICNU_PLUGIN_USER_ROOT", userRoot.string().c_str() );
+#else
+    ::setenv( "SICNU_PLUGIN_USER_ROOT", userRoot.string().c_str(), 1 );
+#endif
+    {
+        std::ofstream output( ( source / "plugin.json" ).string(), std::ios::trunc );
+        output << replaceApi( R"({
+            "manifest_version": 1,
+            "id": "org.test.sbom-shape",
+            "name": "Sbom",
+            "version": "1.0.0",
+            "api_version": PLACEHOLDER,
+            "abi_version": 1,
+            "entrypoint_kind": "manifest",
+            "capabilities": ["operator"],
+            "operators": [{ "id": "demo:x", "display_name": "X",
+                            "external": { "argv": ["/bin/echo"] } }],
+            "package": { "sbom": "cyclonedx" }
+        })" );
+    }
+    std::string installed;
+    PluginDiagnosticLog log;
+    bool ok = true;
+    REQUIRE_NOTHROW( ok = PluginPackage::install( source.string(), installed, log ) );
+    REQUIRE_FALSE( ok );
+    REQUIRE( log.hasErrors() );
+    fs::remove_all( root );
+    fs::remove_all( userRoot );
 }
 
 TEST_CASE( "validator enforces the manifest contract", "[plugin][validator]" )

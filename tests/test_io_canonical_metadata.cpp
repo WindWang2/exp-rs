@@ -256,6 +256,29 @@ TEST_CASE( "inspectVector describes GeoJSON layers cheaply", "[io][metadata]" )
   CHECK( layer.minX == Approx( 117.2 ).margin( 1e-6 ) );
 }
 
+TEST_CASE( "BandInfo is resolved by .index, never by vector position", "[io][metadata][bands]" )
+{
+  sicnu::geo::RasterMetadata meta;
+  meta.bandCount = 3;
+  sicnu::geo::BandInfo first;
+  first.index = 1;
+  first.role = "Red";
+  sicnu::geo::BandInfo third;
+  third.index = 3;
+  third.role = "NIR";
+  meta.bands = { first, third };
+
+  REQUIRE( meta.bandByIndex( 1 ) != nullptr );
+  CHECK( meta.bandByIndex( 1 )->role == "Red" );
+  CHECK( meta.bandByIndex( 2 ) == nullptr );
+  REQUIRE( meta.bandByIndex( 3 ) != nullptr );
+  CHECK( meta.bandByIndex( 3 )->role == "NIR" );
+  CHECK( meta.bandByIndex( 0 ) == nullptr );
+  CHECK( meta.bands.empty() == false );
+  sicnu::geo::RasterMetadata empty;
+  CHECK( empty.bandByIndex( 1 ) == nullptr );
+}
+
 TEST_CASE( "inspection failures are structured, not silent", "[io][metadata]" )
 {
   CHECK_THROWS_AS( sicnu::geo::inspectRaster( "" ), sicnu::geo::GeoError );

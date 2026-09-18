@@ -86,7 +86,8 @@ QVariantMap VectorDifferenceAlgorithm::processAlgorithm( const QVariantMap &para
         {
             if ( feedback->isCanceled() )
                 break;
-            sink->addFeature( feat, QgsFeatureSink::FastInsert );
+            if ( !sink->addFeature( feat, QgsFeatureSink::FastInsert ) )
+                throw QgsProcessingException( QObject::tr( "Could not write feature" ) );
         }
         return QVariantMap{{OUTPUT, dest}};
     }
@@ -112,7 +113,8 @@ QVariantMap VectorDifferenceAlgorithm::processAlgorithm( const QVariantMap &para
             {
                 QgsFeature outputFeat = feat;
                 outputFeat.setGeometry( diff );
-                sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+                if ( !sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ) )
+                    throw QgsProcessingException( QObject::tr( "Could not write feature" ) );
             }
         }
     }

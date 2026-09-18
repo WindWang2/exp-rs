@@ -191,11 +191,25 @@ public:
 
     void close() override
     {
-        // Break the pipe from the write side so a blocked peer read fails;
-        // handles themselves are owned by the session (not closed here).
-        mClosed = true;
-        if ( mWrite != INVALID_HANDLE_VALUE )
-            CancelIoEx( mWrite, nullptr );
+        if ( mClosed.exchange( true ) )
+            return;
+        // Cancel in-flight I/O, then close both ends. The session no longer
+        // owns these handles — a second close (channel dtor / killProcess)
+        // must be a no-op so we never CloseHandle a recycled value.
+        const HANDLE writeHandle = mWrite;
+        const HANDLE readHandle = mRead;
+        mWrite = INVALID_HANDLE_VALUE;
+        mRead = INVALID_HANDLE_VALUE;
+        if ( writeHandle != INVALID_HANDLE_VALUE )
+        {
+            CancelIoEx( writeHandle, nullptr );
+            CloseHandle( writeHandle );
+        }
+        if ( readHandle != INVALID_HANDLE_VALUE && readHandle != writeHandle )
+        {
+            CancelIoEx( readHandle, nullptr );
+            CloseHandle( readHandle );
+        }
     }
 
     std::string lastError() const override { return mError; }
@@ -281,7 +295,19 @@ public:
         return true;
     }
 
-    void close() override { mClosed = true; }
+    void close() override
+    {
+        if ( mClosed.exchange( true ) )
+            return;
+        const int readFd = mRead;
+        const int writeFd = mWrite;
+        mRead = -1;
+        mWrite = -1;
+        if ( readFd >= 0 )
+            ::close( readFd );
+        if ( writeFd >= 0 && writeFd != readFd )
+            ::close( writeFd );
+    }
     std::string lastError() const override { return mError; }
 
 private:

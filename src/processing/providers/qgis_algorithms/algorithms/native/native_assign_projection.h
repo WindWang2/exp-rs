@@ -64,7 +64,8 @@ protected:
         while ( it.nextFeature( feat ) )
         {
             if ( feedback->isCanceled() ) break;
-            sink->addFeature( feat, QgsFeatureSink::FastInsert );
+            if ( !sink->addFeature( feat, QgsFeatureSink::FastInsert ) )
+                throw QgsProcessingException( QObject::tr( "Could not write feature" ) );
         }
 
         feedback->setProgress( 100 );

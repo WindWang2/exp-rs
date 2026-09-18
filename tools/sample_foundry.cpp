@@ -299,9 +299,11 @@ Outcome writeRaster( const GridSpec &grid, const std::string &out_dir,
   options = CSLSetNameValue( options, "BLOCKXSIZE", "256" );
   options = CSLSetNameValue( options, "BLOCKYSIZE", "256" );
   // COG-friendly layout (epic default #3); PREDICTOR 2 for Byte, 3 for
-  // Float32. NUM_THREADS stays unset: single-threaded DEFLATE keeps bytes
-  // stable, and GDAL_PAM_ENABLED=NO (set in generate) keeps .aux.xml away.
+  // Float32. NUM_THREADS=1 (and GDAL_NUM_THREADS=1 in generate): leaving the
+  // creation option unset still honors a host GDAL_NUM_THREADS and changes
+  // DEFLATE bytes. GDAL_PAM_ENABLED=NO keeps .aux.xml away.
   options = CSLSetNameValue( options, "PREDICTOR", spec.byte_type ? "2" : "3" );
+  options = CSLSetNameValue( options, "NUM_THREADS", "1" );
 
   const std::string path = ( fs::path( out_dir ) / product ).string() + ".tif";
   GDALDataset *ds = driver->Create( path.c_str(), grid.width, grid.height, spec.bands,
@@ -479,13 +481,15 @@ Outcome writeTrainingShapefile( const std::vector<uint8_t> &cls, const GridSpec 
   }
 
   const std::string shp_path = ( fs::path( out_dir ) / "training_samples.shp" ).string();
-  // A stale .cpg from a prior run (created when SHAPE_ENCODING is set in the
-  // environment) must not survive into this run's directory listing.
-  std::error_code rm_ec;
-  fs::remove( fs::path( out_dir ) / "training_samples.cpg", rm_ec );
   GDALDriver *driver = GetGDALDriverManager()->GetDriverByName( "ESRI Shapefile" );
   if ( !driver )
     return fail( "gdal", "ESRI Shapefile driver unavailable" );
+  // Create refuses an existing shapefile. Delete only foundry-owned sidecars
+  // so a second generate() into the same out_dir can replace them.
+  std::error_code rm_ec;
+  for ( const char *ext : { ".shp", ".shx", ".dbf", ".prj", ".cpg" } )
+    fs::remove( fs::path( out_dir ) / ( std::string( "training_samples" ) + ext ), rm_ec );
+  driver->QuietDelete( shp_path.c_str() );
   GDALDataset *ds = driver->Create( shp_path.c_str(), 0, 0, 0, GDT_Unknown, nullptr );
   if ( !ds )
     return gdalFail( "cannot create " + shp_path );
@@ -493,8 +497,11 @@ Outcome writeTrainingShapefile( const std::vector<uint8_t> &cls, const GridSpec 
   OGRSpatialReference srs;
   srs.importFromEPSG( 32648 );
   // The Shapefile driver derives the layer name from the file base name; the
-  // argument below is ignored but kept consistent with it.
-  OGRLayer *layer = ds->CreateLayer( "training_samples", &srs, wkbPolygon, nullptr );
+  // argument below is ignored but kept consistent with it. ENCODING=""
+  // suppresses the host-dependent .cpg sidecar.
+  char **layer_options = CSLSetNameValue( nullptr, "ENCODING", "" );
+  OGRLayer *layer = ds->CreateLayer( "training_samples", &srs, wkbPolygon, layer_options );
+  CSLDestroy( layer_options );
   if ( !layer )
   {
     GDALClose( ds );
@@ -580,11 +587,9 @@ Outcome writeTrainingShapefile( const std::vector<uint8_t> &cls, const GridSpec 
       return fail( "io", "shapefile sidecar missing after write: " + name );
     emitted->push_back( name );
   }
-  // The driver writes .cpg only when an encoding is in effect (host-dependent,
-  // e.g. SHAPE_ENCODING); record it when present so --verify never sees an
-  // unlisted data file.
-  if ( fs::exists( fs::path( out_dir ) / "training_samples.cpg" ) )
-    emitted->push_back( "training_samples.cpg" );
+  // SHAPE_ENCODING is pinned empty in generate() so the driver must not emit
+  // a .cpg; drop a leftover rather than listing a host-dependent sidecar.
+  fs::remove( fs::path( out_dir ) / "training_samples.cpg", rm_ec );
   return okOut();
 }
 
@@ -1181,8 +1186,35 @@ Outcome generate( const Options &options, GenerateResult *result )
     return fail( "io", "cannot create output directory " + options.out_dir +
                              ( ec ? ( ": " + ec.message() ) : std::string() ) );
 
+  // Overwrite contract: drop known catalog basenames that are not in this
+  // selection so a leftover from a prior full generate cannot fail --verify.
+  // Never touch any other name in out_dir.
+  {
+    std::error_code rm_ec;
+    for ( Product product : productCatalog() )
+    {
+      if ( contains( selection, product ) )
+        continue;
+      if ( product == Product::TrainingSamples )
+      {
+        for ( const char *ext : { ".shp", ".shx", ".dbf", ".prj", ".cpg" } )
+          fs::remove( fs::path( options.out_dir ) / ( std::string( "training_samples" ) + ext ),
+                      rm_ec );
+      }
+      else
+      {
+        fs::remove( fs::path( options.out_dir ) / ( std::string( productName( product ) ) + ".tif" ),
+                    rm_ec );
+      }
+    }
+  }
+
   // No .aux.xml sidecars: PAM would break byte-determinism (D-012).
+  // Pin thread count and shapefile encoding so host GDAL env cannot change
+  // DEFLATE bytes or emit a .cpg (ADR 0164).
   CPLSetConfigOption( "GDAL_PAM_ENABLED", "NO" );
+  CPLSetConfigOption( "GDAL_NUM_THREADS", "1" );
+  CPLSetConfigOption( "SHAPE_ENCODING", "" );
   GDALAllRegister();
 
   const GridSpec grid = gridForProfile( options.profile );

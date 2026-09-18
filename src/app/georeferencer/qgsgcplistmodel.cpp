@@ -71,7 +71,7 @@ void QgsGCPListModel::setTargetCrs( const QgsCoordinateReferenceSystem &targetCr
   if ( rowCount() > 0 )
   {
     emit dataChanged( index( 0, static_cast<int>( Column::DestMapX ) ),
-                      index( rowCount() - 1, static_cast<int>( Column::DestMapY ) ) );
+                      index( rowCount() - 1, static_cast<int>( Column::DestRow ) ) );
   }
   emit headerDataChanged( Qt::Horizontal, 0, columnCount() - 1 );
 }

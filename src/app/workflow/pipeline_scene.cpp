@@ -112,6 +112,8 @@ bool PipelineScene::removeNode( const QString &stepId )
   if ( !node )
     return false;
 
+  cancelTempConnection();
+
   // Delete only connections incident to this node directly from its ports (O(deg(v)))
   std::vector<PipelineConnectionItem *> toDelete;
   for ( auto *inPort : node->inputPorts() )
@@ -221,6 +223,8 @@ bool PipelineScene::removeConnection( PipelineConnectionItem *conn )
 
 void PipelineScene::clearWorkflow()
 {
+  cancelTempConnection();
+
   for ( auto *conn : mConnections )
   {
     removeItem( conn );

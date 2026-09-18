@@ -36,6 +36,7 @@ class RsSampleBrushTool : public QgsMapTool
     static constexpr int kMaxStampsPerStroke = 2048;
 
     explicit RsSampleBrushTool( QgsMapCanvas *canvas );
+    ~RsSampleBrushTool() override;
 
     /// Target sample layer (must be a polygon layer). Null clears the target.
     void setTargetLayer( QgsVectorLayer *layer );

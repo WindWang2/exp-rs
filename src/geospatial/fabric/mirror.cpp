@@ -19,6 +19,7 @@
 #include <cpl_vsi.h>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <fcntl.h>
 #include <ctime>
@@ -140,6 +141,77 @@ std::string fileSha256Hex( const std::string &path )
       break;
   }
   return toHex( hash.finalize() );
+}
+
+/// Manifest `file` must be a plain basename: no separators, `..`, or drive letters.
+bool isPlainChunkBasename( const std::string &file )
+{
+  if ( file.empty() || file == "." || file == ".." )
+    return false;
+  if ( file.find_first_of( "/\\" ) != std::string::npos )
+    return false;
+  if ( file.find( ".." ) != std::string::npos )
+    return false;
+  if ( file.size() >= 2 && file[1] == ':' &&
+       std::isalpha( static_cast<unsigned char>( file[0] ) ) )
+    return false;
+  return true;
+}
+
+/// Size + sha256 proof for a resolved chunk path. New-format manifests (those
+/// carrying an `index` object) fail closed when sha256 is absent.
+bool verifyMirroredChunk( const Json::Value &manifest, const Json::Value &chunk,
+                          const std::string &fullPath, std::string *skippedCorrupt )
+{
+  VSIStatBufL statBuffer;
+  if ( VSIStatL( fullPath.c_str(), &statBuffer ) != 0 )
+  {
+    if ( skippedCorrupt )
+      *skippedCorrupt = "chunk file missing: " + fullPath;
+    return false;
+  }
+  const bool newFormat = manifest.isMember( "index" );
+  try
+  {
+    if ( chunk.isObject() && chunk.isMember( "bytes" ) && !chunk["bytes"].isNull() )
+    {
+      if ( !chunk["bytes"].isNumeric() )
+      {
+        if ( skippedCorrupt )
+          *skippedCorrupt = "chunk bytes has a foreign type";
+        return false;
+      }
+      if ( chunk["bytes"].asUInt64() != static_cast<Json::UInt64>( statBuffer.st_size ) )
+      {
+        if ( skippedCorrupt )
+          *skippedCorrupt = "chunk size mismatch: " + fullPath;
+        return false;
+      }
+    }
+    if ( chunk.isObject() && chunk["sha256"].isString() )
+    {
+      const std::string digest = fileSha256Hex( fullPath );
+      if ( digest.empty() || digest != chunk["sha256"].asString() )
+      {
+        if ( skippedCorrupt )
+          *skippedCorrupt = "chunk sha256 mismatch: " + fullPath;
+        return false;
+      }
+    }
+    else if ( newFormat )
+    {
+      if ( skippedCorrupt )
+        *skippedCorrupt = "chunk missing sha256 (new-format manifest)";
+      return false;
+    }
+  }
+  catch ( const Json::Exception & )
+  {
+    if ( skippedCorrupt )
+      *skippedCorrupt = "chunk integrity fields have foreign types";
+    return false;
+  }
+  return true;
 }
 
 /// Single-writer guard for one mirror directory (O_EXCL create; a crashed
@@ -268,14 +340,15 @@ std::string resolveMirrorHit( const std::string &mirrorDirectory, const std::str
       *skippedCorrupt = "entry without file: token " + token.substr( 0, 8 );
     return {};
   }
-  const std::string fullPath = mirrorDirectory + "/" + kMirrorChunkDir + "/" + file;
-  VSIStatBufL statBuffer;
-  if ( VSIStatL( fullPath.c_str(), &statBuffer ) != 0 )
+  if ( !isPlainChunkBasename( file ) )
   {
     if ( skippedCorrupt )
-      *skippedCorrupt = "chunk file missing: " + file;
+      *skippedCorrupt = "chunk file is not a basename: " + file;
     return {};
   }
+  const std::string fullPath = mirrorDirectory + "/" + kMirrorChunkDir + "/" + file;
+  if ( !verifyMirroredChunk( manifest, chunk, fullPath, skippedCorrupt ) )
+    return {};
   return fullPath;
 }
 
@@ -319,16 +392,28 @@ bool lookupMirrorAsset( const std::string &mirrorDirectory, const std::string &a
   if ( grid.isObject() && grid["width"].isInt() && grid["height"].isInt() &&
        grid["geotransform"].isArray() && grid["geotransform"].size() == 6 )
   {
-    facts.hasGrid = true;
-    facts.rasterWidth = grid["width"].asInt();
-    facts.rasterHeight = grid["height"].asInt();
-    facts.resX = grid["geotransform"][1].asDouble();
-    facts.resY = grid["geotransform"][5].asDouble();
-    facts.assetMinX = grid["geotransform"][0].asDouble();
-    facts.assetMaxY = grid["geotransform"][3].asDouble();
-    facts.assetMaxX = facts.assetMinX + facts.resX * facts.rasterWidth;
-    facts.assetMinY = facts.assetMaxY + facts.resY * facts.rasterHeight;
-    facts.epsgAuthid = grid["epsg"].isString() ? grid["epsg"].asString() : std::string();
+    const Json::Value &gt = grid["geotransform"];
+    bool numeric = true;
+    for ( Json::ArrayIndex i = 0; i < 6; ++i )
+    {
+      if ( !gt[i].isNumeric() )
+        numeric = false;
+    }
+    if ( numeric )
+    {
+      facts.hasGrid = true;
+      facts.rasterWidth = grid["width"].asInt();
+      facts.rasterHeight = grid["height"].asInt();
+      facts.resX = gt[1].asDouble();
+      facts.resY = gt[5].asDouble();
+      facts.assetMinX = gt[0].asDouble();
+      facts.assetMaxY = gt[3].asDouble();
+      facts.assetMaxX = facts.assetMinX + facts.resX * facts.rasterWidth;
+      facts.assetMinY = facts.assetMaxY + facts.resY * facts.rasterHeight;
+      facts.epsgAuthid = grid["epsg"].isString() ? grid["epsg"].asString() : std::string();
+    }
+    else if ( skippedCorrupt )
+      *skippedCorrupt = "index grid geotransform has foreign types";
   }
   return true;
 }
@@ -391,32 +476,9 @@ MirrorArtifactHit resolveMirrorArtifact( const std::string &mirrorDirectory,
     return result;
   }
 
-  // Integrity: the file must carry the manifest's declared size (a
-  // truncated/tampered chunk is a miss — the caller falls back to the
-  // origin path and the corruption stays visible in skippedCorrupt). When
-  // the manifest records a sha256 (11.0 writes), the payload must PROVE
-  // itself — chunks are bounded (chunk plan windows), so the full hash per
-  // hit is the honest cost of offline replay.
   VSIStatBufL statBuffer;
   if ( VSIStatL( file.c_str(), &statBuffer ) != 0 )
     return result;
-  const Json::Value manifest = manifestSnapshot( mirrorDirectory );
-  const Json::Value &chunk = manifest[facts.token][key];
-  if ( chunk.isObject() && chunk["bytes"].isUInt64() &&
-       chunk["bytes"].asUInt64() != static_cast<Json::UInt64>( statBuffer.st_size ) )
-  {
-    result.skippedCorrupt = "chunk size mismatch: " + file;
-    return result;
-  }
-  if ( chunk.isObject() && chunk["sha256"].isString() )
-  {
-    const std::string digest = fileSha256Hex( file );
-    if ( digest.empty() || digest != chunk["sha256"].asString() )
-    {
-      result.skippedCorrupt = "chunk sha256 mismatch: " + file;
-      return result;
-    }
-  }
 
   result.hit = true;
   result.chunkKey = key;
@@ -446,7 +508,10 @@ Json::Value mirrorStatsJson( const std::string &mirrorDirectory )
         continue;
       entries += chunks.size();
       for ( const auto &key : chunks.getMemberNames() )
-        bytes += chunks[key]["bytes"].asUInt64();
+      {
+        if ( chunks[key]["bytes"].isNumeric() )
+          bytes += chunks[key]["bytes"].asUInt64();
+      }
     }
   }
   stats["indexedAssets"] = static_cast<Json::UInt64>( indexedAssets );
@@ -612,6 +677,8 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
         pushOutcome( std::move( outcome ) );
         continue;
       }
+      try
+      {
       RasterReader reader = RasterReader::open( fabricCachedPath( asset->record.path ) );
       const RasterMetadata &metadata = reader.metadata();
       // THE shared mapping rule (sign-safe, clamped) — no inline re-derivation.
@@ -663,11 +730,15 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
         if ( tokenEntry.isObject() && tokenEntry[key].isObject() &&
              tokenEntry[key]["file"].isString() )
         {
-          const std::string candidate =
-            mirrorDirectory + "/" + kMirrorChunkDir + "/" + tokenEntry[key]["file"].asString();
-          VSIStatBufL existingStat;
-          if ( VSIStatL( candidate.c_str(), &existingStat ) == 0 )
-            existing = candidate;
+          const std::string fileName = tokenEntry[key]["file"].asString();
+          if ( isPlainChunkBasename( fileName ) )
+          {
+            const std::string candidate =
+              mirrorDirectory + "/" + kMirrorChunkDir + "/" + fileName;
+            VSIStatBufL existingStat;
+            if ( VSIStatL( candidate.c_str(), &existingStat ) == 0 )
+              existing = candidate;
+          }
         }
       }
       if ( !existing.empty() )
@@ -703,12 +774,17 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
         // R13): offline replay's NoData semantics then match the online
         // read exactly — declared-NoData source pixels lose FirstWins the
         // same way they do online.
+        const BandInfo *srcBand = metadata.bandByIndex( 1 );
+        if ( !srcBand && !metadata.bands.empty() )
+          srcBand = &metadata.bands.front();
+        if ( !srcBand )
+          throw GeoError( ErrorCode::InvalidMetadata, "mirror: source raster carries no band metadata" );
         RasterBandSpec chunkBand;
-        chunkBand.dtype = metadata.bands[0].dtype;
-        chunkBand.description = metadata.bands[0].description;
-        chunkBand.hasNoData = metadata.bands[0].hasNoData;
-        chunkBand.noDataValue = metadata.bands[0].noDataValue;
-        chunkBand.noDataIsNaN = metadata.bands[0].noDataIsNaN;
+        chunkBand.dtype = srcBand->dtype;
+        chunkBand.description = srcBand->description;
+        chunkBand.hasNoData = srcBand->hasNoData;
+        chunkBand.noDataValue = srcBand->noDataValue;
+        chunkBand.noDataIsNaN = srcBand->noDataIsNaN;
         RasterWriter writer = RasterWriter::create(
           stagedPath, sourceWindow.width, sourceWindow.height, { chunkBand },
           { "GTiff", { "TILED=YES", "BLOCKXSIZE=64", "BLOCKYSIZE=64" }, true } );
@@ -755,6 +831,14 @@ MirrorReport mirrorChunksImpl( const VirtualCube &cube, const CubeChunkPlan &pla
       ++report.mirrored;
       report.bytesWritten += written;
       pushOutcome( std::move( outcome ) );
+      }
+      catch ( const GeoError &error )
+      {
+        outcome.status = "failed";
+        outcome.errorText = error.what();
+        ++report.failed;
+        pushOutcome( std::move( outcome ) );
+      }
     }
   }
   report.cancelled = cancel.cancelled();

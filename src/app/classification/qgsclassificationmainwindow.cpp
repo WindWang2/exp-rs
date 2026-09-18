@@ -1,4 +1,5 @@
 #include "qgsclassificationmainwindow.h"
+#include "map_tool_lifetime.h"
 #include "dialogs/dialog_help_catalog.h"
 
 #include "processing/algorithms/math_utils.h"
@@ -339,6 +340,10 @@ QgsClassificationMainWindow::~QgsClassificationMainWindow()
   {
     if ( QgsMapTool *tool = m_canvas->mapTool() )
       m_canvas->unsetMapTool( tool );
+    rsDestroyMapTool( m_toolPan, m_canvas );
+    rsDestroyMapTool( m_toolSelect, m_canvas );
+    rsDestroyMapTool( m_toolAddPolygon, m_canvas );
+    rsDestroyMapTool( m_toolMagicWand, m_canvas );
     m_canvas->setLayers( QList<QgsMapLayer *>() );
     m_canvas->setCurrentLayer( nullptr );
   }

@@ -37,6 +37,7 @@ class RsRoiSpectrumTool : public QgsMapTool
     RsRoiSpectrumTool( QgsMapCanvas *canvas, QgsRasterLayer *rasterLayer,
                        ResultCallback onResult );
     ~RsRoiSpectrumTool() override;
+    void deactivate() override;
 
   protected:
     void canvasPressEvent( QgsMapMouseEvent *e ) override;

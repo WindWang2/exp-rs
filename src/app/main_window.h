@@ -422,6 +422,8 @@ private:
     void setupDockWidgets();
     /// Create Data Manager dock after ProjectContext exists (needs DataManager*).
     void setupDataManagerPanel();
+    /// Allocate CommandRegistry and register shell commands (must run before setupMenu).
+    void ensureCommandRegistry();
     /** WorkbenchHost / SelectionContext / CommandRegistry wiring (5.0). */
     void setupWorkbenchInfrastructure();
     void setupRibbonAndTaskPanel();

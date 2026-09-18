@@ -404,7 +404,8 @@ Json::Value readJsonFile( const std::string &path )
 
 bool isItemShape( const Json::Value &json )
 {
-  return json["type"].asString() == "Feature" && json["assets"].isObject();
+  return json.isObject() && json["type"].isString() && json["type"].asString() == "Feature"
+         && json["assets"].isObject();
 }
 
 // --- VSI path helpers (portable; std::filesystem is off the table here —
@@ -589,6 +590,8 @@ CatalogService openCatalogService( const std::string &root, const CatalogService
             continue;
           for ( const Json::Value &link : links )
           {
+            if ( !link.isObject() || !link["rel"].isString() || !link["href"].isString() )
+              continue;
             const std::string rel = link["rel"].asString();
             const std::string href = link["href"].asString();
             if ( href.empty() )
@@ -598,6 +601,11 @@ CatalogService openCatalogService( const std::string &root, const CatalogService
           }
         }
         catch ( const GeoError & )
+        {
+          ++service.mLocal->unreadableFiles;
+          continue;
+        }
+        catch ( const Json::Exception & )
         {
           ++service.mLocal->unreadableFiles;
           continue;

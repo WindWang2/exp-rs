@@ -142,6 +142,18 @@ struct RasterMetadata
     static RasterMetadata fromJson( const Json::Value &json );
 
     bool isNull() const { return driver.empty() && width == 0 && height == 0; }
+
+    /// Lookup by GDAL 1-based `.index`, never by vector position. `bands` can
+    /// be shorter than `bandCount` with holes when a GDAL band handle was null.
+    const BandInfo *bandByIndex( int bandIndex ) const
+    {
+      for ( const BandInfo &band : bands )
+      {
+        if ( band.index == bandIndex )
+          return &band;
+      }
+      return nullptr;
+    }
 };
 
 struct FieldInfo

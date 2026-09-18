@@ -1349,7 +1349,15 @@ RsClassificationPipelineResult RsClassificationPipeline::run(
   if ( writeProb )
   {
     QFile::remove( config.probabilityOutput );
-    QFile::rename( tempProbPath, config.probabilityOutput );
+    if ( !QFile::rename( tempProbPath, config.probabilityOutput ) )
+    {
+      QFile::remove( tempProbPath );
+      result.error = RsClassificationPipelineResult::Error::OutputCreateFailed;
+      result.errorMessage =
+        QStringLiteral( "Failed to finalize probability raster: %1" )
+          .arg( config.probabilityOutput );
+      return result;
+    }
   }
   if ( writeUnc )
   {

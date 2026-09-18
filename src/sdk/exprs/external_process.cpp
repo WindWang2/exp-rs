@@ -918,6 +918,10 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     bool reaped = false;
     const int timeoutSeconds = request.timeoutSeconds > 0 ? request.timeoutSeconds : 3600;
     const auto deadline = startTime + std::chrono::seconds( timeoutSeconds );
+    // A descendant that inherited stdout/stderr keeps the pipes open after
+    // the child exits; bound the post-exit drain so run() cannot stall to
+    // the full timeout (Windows has the same kPostExitDrainGraceMs).
+    std::chrono::steady_clock::time_point postExitDrainDeadline{};
 
     auto reapStatus = [&]( int status ) {
         result.exitCode = WIFEXITED( status ) ? WEXITSTATUS( status ) : -1;
@@ -983,15 +987,32 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         if ( request.onOutput )
             request.onOutput( stdoutSink.total(), stderrSink.total() );
 
+        if ( !reaped )
+        {
+            int status = 0;
+            const pid_t done = ::waitpid( pid, &status, WNOHANG );
+            if ( done == pid )
+            {
+                reapStatus( status );
+                postExitDrainDeadline = std::chrono::steady_clock::now()
+                                        + std::chrono::milliseconds( kPostExitDrainGraceMs );
+            }
+        }
+
         if ( readFds[0] < 0 && readFds[1] < 0 && readFds[2] < 0 )
             break;
+        if ( reaped && std::chrono::steady_clock::now() >= postExitDrainDeadline )
+            break;
 
-        if ( !cancelled && request.isCancelled && request.isCancelled() )
-            cancelled = true;
-        if ( !timedOut && std::chrono::steady_clock::now() >= deadline )
-            timedOut = true;
+        if ( !reaped )
+        {
+            if ( !cancelled && request.isCancelled && request.isCancelled() )
+                cancelled = true;
+            if ( !timedOut && std::chrono::steady_clock::now() >= deadline )
+                timedOut = true;
+        }
 
-        if ( cancelled || timedOut )
+        if ( !reaped && ( cancelled || timedOut ) )
         {
             killProcessGroup( pid, SIGTERM );
             const auto graceDeadline =
@@ -1038,8 +1059,9 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         }
         if ( count == 0 )
             break;
+        const auto now = std::chrono::steady_clock::now();
         const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-            deadline - std::chrono::steady_clock::now() );
+            reaped ? ( postExitDrainDeadline - now ) : ( deadline - now ) );
         const int pollTimeout = static_cast<int>(
             std::min<long long>( 200, std::max<long long>( 1, remaining.count() ) ) );
         const int ready = ::poll( fds, static_cast<nfds_t>( count ), pollTimeout );

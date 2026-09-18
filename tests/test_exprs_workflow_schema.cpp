@@ -69,6 +69,16 @@ TEST_CASE( "structural problems are diagnosed", "[workflow][schema]" )
         })" );
         REQUIRE_FALSE( validateWorkflowDocument( document, log ) );
     }
+    SECTION( "object step id returns false instead of throwing" )
+    {
+        const auto document = parse( R"({
+            "schema_version":1,"id":"x","steps":[{"id":{},"operator":"rs:ndvi"}]
+        })" );
+        bool ok = true;
+        REQUIRE_NOTHROW( ok = validateWorkflowDocument( document, log ) );
+        REQUIRE_FALSE( ok );
+        REQUIRE( log.hasErrors() );
+    }
 }
 
 TEST_CASE( "builder produces valid public documents", "[workflow][builder]" )

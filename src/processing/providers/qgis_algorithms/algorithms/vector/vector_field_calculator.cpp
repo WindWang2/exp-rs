@@ -126,7 +126,8 @@ QVariantMap VectorFieldCalculatorAlgorithm::processAlgorithm( const QVariantMap 
         outputFeat.setFields( outputFields );
         outputFeat.setAttribute( fieldName, value );
 
-        sink->addFeature( outputFeat, QgsFeatureSink::FastInsert );
+        if ( !sink->addFeature( outputFeat, QgsFeatureSink::FastInsert ) )
+            throw QgsProcessingException( QObject::tr( "Could not write feature" ) );
     }
 
     return QVariantMap{{OUTPUT, dest}};

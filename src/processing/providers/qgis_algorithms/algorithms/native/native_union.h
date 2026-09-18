@@ -142,7 +142,8 @@ protected:
                 QgsFeature outFeat( outFields );
                 for ( int i = 0; i < source->fields().count(); ++i )
                     outFeat.setAttribute( i, feat.attribute( i ) );
-                sink->addFeature( outFeat, QgsFeatureSink::FastInsert );
+                if ( !sink->addFeature( outFeat, QgsFeatureSink::FastInsert ) )
+                    throw QgsProcessingException( QObject::tr( "Could not write feature" ) );
                 continue;
             }
 
@@ -165,7 +166,8 @@ protected:
                     if ( !inter.isEmpty() )
                     {
                         QgsFeature outF = makeIntersectionFeature( feat, ovFeat, inter );
-                        sink->addFeature( outF, QgsFeatureSink::FastInsert );
+                        if ( !sink->addFeature( outF, QgsFeatureSink::FastInsert ) )
+                            throw QgsProcessingException( QObject::tr( "Could not write feature" ) );
                         inputRemainder = inputRemainder.difference( inter );
                     }
                 }
@@ -174,7 +176,8 @@ protected:
             if ( !inputRemainder.isEmpty() )
             {
                 QgsFeature outF = makeInputRemainderFeature( feat, inputRemainder );
-                sink->addFeature( outF, QgsFeatureSink::FastInsert );
+                if ( !sink->addFeature( outF, QgsFeatureSink::FastInsert ) )
+                    throw QgsProcessingException( QObject::tr( "Could not write feature" ) );
             }
         }
 
@@ -190,7 +193,8 @@ protected:
                 QgsFeature outFeat( outFields );
                 for ( int i = 0; i < overlayFields.count(); ++i )
                     outFeat.setAttribute( overlayFieldMap[i], ovFeat.attribute( i ) );
-                sink->addFeature( outFeat, QgsFeatureSink::FastInsert );
+                if ( !sink->addFeature( outFeat, QgsFeatureSink::FastInsert ) )
+                    throw QgsProcessingException( QObject::tr( "Could not write feature" ) );
                 continue;
             }
 
@@ -203,7 +207,8 @@ protected:
             if ( !ovRemainder.isEmpty() )
             {
                 QgsFeature outF = makeOverlayRemainderFeature( ovFeat, ovRemainder );
-                sink->addFeature( outF, QgsFeatureSink::FastInsert );
+                if ( !sink->addFeature( outF, QgsFeatureSink::FastInsert ) )
+                    throw QgsProcessingException( QObject::tr( "Could not write feature" ) );
             }
         }
 

@@ -32,6 +32,8 @@
 #include "processing/providers/otb_tools/provider.h"
 #include <QCoreApplication>
 #include <QTemporaryDir>
+#include <QDir>
+#include <QFileInfo>
 #include "dataset/dataset_types.h"
 #include "experiment/experiment_store.h"
 #include <QThread>
@@ -159,6 +161,32 @@ public:
         return handleSearchAlgorithms(query, group, inputType, outputType, largeRasterSafeOnly);
     }
     QVariantMap testGetToolSchema(const QString &id) { return handleGetToolSchema(id); }
+
+    /// JSON-RPC tools/call after initialize — the production gate for
+    /// data-platform tools (they have no McpServer handler of their own).
+    QVariantMap testToolsCall(const QString &name, const QVariantMap &args)
+    {
+        QVariantMap initReq;
+        initReq[QStringLiteral("id")] = 1;
+        initReq[QStringLiteral("method")] = QStringLiteral("initialize");
+        handleRequest(initReq);
+
+        lastErrorId = QVariant();
+        lastErrorCode = 0;
+        lastErrorMessage.clear();
+        lastResponseId = QVariant();
+        lastResponseResult.clear();
+
+        QVariantMap callReq;
+        callReq[QStringLiteral("id")] = 2;
+        callReq[QStringLiteral("method")] = QStringLiteral("tools/call");
+        QVariantMap callParams;
+        callParams[QStringLiteral("name")] = name;
+        callParams[QStringLiteral("arguments")] = args;
+        callReq[QStringLiteral("params")] = callParams;
+        handleRequest(callReq);
+        return lastResponseResult;
+    }
 };
 
 namespace {
@@ -192,6 +220,24 @@ void registerNoopOperator()
         if (op)
             registry.registerAdapter(std::make_shared<sicnu::processing::RsOperatorAdapter>(std::move(op)));
     }
+}
+
+QVariantMap inWorkspaceNoopPipelineArgs(const QString &workspacePath)
+{
+    QVariantList steps;
+    QVariantMap step;
+    step[QStringLiteral("id")] = QStringLiteral("s1");
+    step[QStringLiteral("operator")] = QStringLiteral("rs:mcp_noop");
+    QVariantMap params;
+    params[QStringLiteral("output")] = QDir(workspacePath).filePath(QStringLiteral("out.tif"));
+    step[QStringLiteral("params")] = params;
+    steps.append(step);
+    QVariantMap pipeline;
+    pipeline[QStringLiteral("id")] = QStringLiteral("p1");
+    pipeline[QStringLiteral("steps")] = steps;
+    QVariantMap args;
+    args[QStringLiteral("pipeline")] = pipeline;
+    return args;
 }
 
 QString waitForTerminal(TestMcpServer &server, const QString &execId)
@@ -1273,6 +1319,87 @@ TEST_CASE( "McpServer enforces the SICNU_MCP_WORKSPACE sandbox on every executio
             REQUIRE( QString::fromStdString( e.what() )
                          .contains( QStringLiteral( "Path outside SICNU_MCP_WORKSPACE" ) ) );
         }
+    }
+
+    SECTION( "data-platform tools reject dataset_db outside the workspace" )
+    {
+        const QString escapeDb = outside.filePath( QStringLiteral( "escape_dataset.sqlite" ) );
+        const QVariantMap result = server.testToolsCall(
+            QStringLiteral( "dataset:list" ),
+            { { QStringLiteral( "dataset_db" ), escapeDb } } );
+        CHECK( server.lastErrorId.isNull() );
+        REQUIRE( result.value( QStringLiteral( "isError" ) ).toBool() );
+        REQUIRE( result.value( QStringLiteral( "errorCode" ) ).toString()
+                 == QStringLiteral( "PATH_OUTSIDE_WORKSPACE" ) );
+        const auto content = result.value( QStringLiteral( "content" ) ).toList();
+        REQUIRE( content.size() == 1 );
+        REQUIRE( content.first().toMap().value( QStringLiteral( "text" ) ).toString()
+                     .contains( QStringLiteral( "Path outside SICNU_MCP_WORKSPACE" ) ) );
+        CHECK_FALSE( QFileInfo::exists( escapeDb ) );
+    }
+
+    SECTION( "data-platform tools still accept in-workspace dataset_db" )
+    {
+        const QString dbPath = workspace.filePath( QStringLiteral( "ok_dataset.sqlite" ) );
+        const QVariantMap result = server.testToolsCall(
+            QStringLiteral( "dataset:list" ),
+            { { QStringLiteral( "dataset_db" ), dbPath } } );
+        CHECK( server.lastErrorId.isNull() );
+        REQUIRE_FALSE( result.value( QStringLiteral( "isError" ) ).toBool() );
+        const auto content = result.value( QStringLiteral( "content" ) ).toList();
+        REQUIRE( content.size() == 1 );
+        CHECK( content.first().toMap().value( QStringLiteral( "text" ) ).toString()
+                   .contains( QStringLiteral( "datasets" ) ) );
+    }
+
+    SECTION( "run_workflow rejects experiment_db outside the workspace before enable" )
+    {
+        const QString escapeDb = outside.filePath( QStringLiteral( "escape_exp.sqlite" ) );
+        QVariantMap args = inWorkspaceNoopPipelineArgs( workspace.path() );
+        args[QStringLiteral( "experiment_db" )] = escapeDb;
+        args[QStringLiteral( "experiment_id" )] = QStringLiteral( "exp-sandbox" );
+        try
+        {
+            server.testRunWorkflow( args );
+            FAIL( "expected PATH_OUTSIDE_WORKSPACE rejection" );
+        }
+        catch ( const std::runtime_error &e )
+        {
+            REQUIRE( QString::fromStdString( e.what() )
+                         .contains( QStringLiteral( "Path outside SICNU_MCP_WORKSPACE" ) ) );
+        }
+        CHECK_FALSE( QFileInfo::exists( escapeDb ) );
+    }
+
+    SECTION( "run_workflow rejects dataset_db outside the workspace before enable" )
+    {
+        const QString escapeDb = outside.filePath( QStringLiteral( "escape_run_dataset.sqlite" ) );
+        QVariantMap args = inWorkspaceNoopPipelineArgs( workspace.path() );
+        args[QStringLiteral( "experiment_db" )] = workspace.filePath( QStringLiteral( "ok_exp.sqlite" ) );
+        args[QStringLiteral( "experiment_id" )] = QStringLiteral( "exp-sandbox" );
+        args[QStringLiteral( "dataset_db" )] = escapeDb;
+        try
+        {
+            server.testRunWorkflow( args );
+            FAIL( "expected PATH_OUTSIDE_WORKSPACE rejection" );
+        }
+        catch ( const std::runtime_error &e )
+        {
+            REQUIRE( QString::fromStdString( e.what() )
+                         .contains( QStringLiteral( "Path outside SICNU_MCP_WORKSPACE" ) ) );
+        }
+        CHECK_FALSE( QFileInfo::exists( escapeDb ) );
+    }
+
+    SECTION( "run_workflow still accepts in-workspace experiment_db and dataset_db" )
+    {
+        QVariantMap args = inWorkspaceNoopPipelineArgs( workspace.path() );
+        args[QStringLiteral( "experiment_db" )] = workspace.filePath( QStringLiteral( "record_exp.sqlite" ) );
+        args[QStringLiteral( "experiment_id" )] = QStringLiteral( "exp-sandbox" );
+        args[QStringLiteral( "dataset_db" )] = workspace.filePath( QStringLiteral( "record_dataset.sqlite" ) );
+        const QVariantMap submitted = server.testRunWorkflow( args );
+        REQUIRE( submitted.value( QStringLiteral( "pipeline_id" ) ).toLongLong() >= 0 );
+        CHECK_FALSE( submitted.value( QStringLiteral( "experiment_run_id" ) ).toString().isEmpty() );
     }
 }
 

@@ -3,11 +3,14 @@
 
 #include "exprs/external_process.h"
 
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #ifdef _WIN32
 #include <cstdlib> // _exit
 #else
+#include <csignal>
 #include <unistd.h>
 #endif
 
@@ -217,4 +220,31 @@ TEST_CASE( "workspace effect policy contains resolved execution effects (issue #
 
     fs::remove_all( root );
     fs::remove_all( outside );
+}
+
+TEST_CASE( "POSIX run does not stall on descendant-held pipes", "[sdk][external]" )
+{
+    ExternalProcessRequest request;
+    // Child exits 0 after forking a grandchild that inherits stdout. Without
+    // a waitpid(WNOHANG) poll the drain loop would wait until timeout.
+    request.argv = { "/bin/sh", "-c", "sleep 30 & echo PID:$!; echo done; exit 0" };
+    request.timeoutSeconds = 15;
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = ExternalProcess::run( request );
+    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now() - started )
+                               .count();
+    REQUIRE( result.started );
+    REQUIRE_FALSE( result.timedOut );
+    REQUIRE( result.exitCode == 0 );
+    REQUIRE( result.stdOut.find( "done" ) != std::string::npos );
+    REQUIRE( elapsedMs < 8000 );
+
+    const auto pidPos = result.stdOut.find( "PID:" );
+    if ( pidPos != std::string::npos )
+    {
+        const int leftover = std::atoi( result.stdOut.c_str() + pidPos + 4 );
+        if ( leftover > 1 )
+            ::kill( static_cast<pid_t>( leftover ), SIGKILL );
+    }
 }

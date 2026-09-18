@@ -458,13 +458,27 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
     }
     if ( packageJson.isObject() && packageJson.isMember( "sbom" ) )
     {
+        const Json::Value &sbom = packageJson[ "sbom" ];
+        if ( !sbom.isObject() )
+        {
+            PluginDiagnostic failure;
+            failure.code = PluginDiagnosticCode::ManifestInvalidField;
+            failure.pluginId = manifest.id;
+            failure.field = "package.sbom";
+            failure.message = "package.sbom must be an object";
+            log.add( failure );
+            removeTree( stagingDir );
+            return false;
+        }
+        const Json::Value &format = sbom[ "format" ];
+        const Json::Value &path = sbom[ "path" ];
         PluginDiagnostic note;
         note.code = PluginDiagnosticCode::None;
         note.severity = PluginDiagnosticSeverity::Info;
         note.pluginId = manifest.id;
         note.message = "package carries SBOM metadata (format "
-                           + packageJson[ "sbom" ].get( "format", "" ).asString() + ", path "
-                           + packageJson[ "sbom" ].get( "path", "" ).asString()
+                           + ( format.isString() ? format.asString() : std::string() ) + ", path "
+                           + ( path.isString() ? path.asString() : std::string() )
                            + "); carried as metadata, integrity-only contract";
         log.add( note );
     }

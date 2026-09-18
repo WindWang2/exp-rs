@@ -44,6 +44,8 @@ int workflowSchemaVersion( const Json::Value &document, PluginDiagnosticLog &dia
 
 bool validateWorkflowDocument( const Json::Value &document, PluginDiagnosticLog &diagnostics )
 {
+    try
+    {
     if ( !document.isObject() )
     {
         addError( diagnostics, PluginDiagnosticCode::ManifestInvalidJson,
@@ -86,7 +88,23 @@ bool validateWorkflowDocument( const Json::Value &document, PluginDiagnosticLog 
             ok = false;
             continue;
         }
-        const std::string stepId = step.get( "id", "" ).asString();
+        if ( !step.isMember( "id" ) || step["id"].isNull() )
+        {
+            addError( diagnostics, PluginDiagnosticCode::ManifestMissingField,
+                      "step at index " + std::to_string( index ) + " is missing 'id'",
+                      "steps[].id" );
+            ok = false;
+            continue;
+        }
+        if ( !step["id"].isString() )
+        {
+            addError( diagnostics, PluginDiagnosticCode::ManifestInvalidField,
+                      "step at index " + std::to_string( index ) + " 'id' must be a string",
+                      "steps[].id" );
+            ok = false;
+            continue;
+        }
+        const std::string stepId = step["id"].asString();
         if ( stepId.empty() )
         {
             addError( diagnostics, PluginDiagnosticCode::ManifestMissingField,
@@ -146,6 +164,14 @@ bool validateWorkflowDocument( const Json::Value &document, PluginDiagnosticLog 
         }
     }
     return ok;
+    }
+    catch ( const Json::Exception &exception )
+    {
+        addError( diagnostics, PluginDiagnosticCode::ManifestInvalidField,
+                  std::string( "workflow JSON has a mistyped field: " ) + exception.what(),
+                  "" );
+        return false;
+    }
 }
 
 Json::Value migrateWorkflowDocument( const Json::Value &document, int targetVersion,

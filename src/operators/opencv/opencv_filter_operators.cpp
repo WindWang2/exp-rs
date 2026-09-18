@@ -10,6 +10,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include <algorithm>
+#include <limits>
 
 namespace sicnu::operators::opencv {
 
@@ -18,9 +19,17 @@ namespace {
 
 // Windowed filters stream per tile with a kernel-radius halo; a 1-pixel
 // minimum keeps kSize==1 kernels (identity Gaussian/median, thin Sobel)
-// inside the haloed stream path where the math is identical.
+// inside the haloed stream path where the math is identical. Cap at
+// kMaxFilterKernelSize so neighborhoodRadius cannot feed an unbounded halo
+// into the streaming allocator before applyFilter validates.
 int oddKernelRadius(const Json::Value& params, const char* key, int defaultSize) {
-    return std::max(1, getInt(params, key, defaultSize) / 2);
+    const int kernelSize = getInt(params, key, defaultSize);
+    if (!isValidKernelSize(kernelSize)) {
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "kernelSize must be a positive odd integer in [1, "
+                                + std::to_string(kMaxFilterKernelSize) + "]");
+    }
+    return std::max(1, kernelSize / 2);
 }
 
 void applyNormalizedFilter(cv::Mat& srcDst, const std::function<void(const cv::Mat&, cv::Mat&)>& filterFn) {
@@ -72,6 +81,7 @@ Json::Value OpenCvGaussianBlurOperator::metadata() const {
 Json::Value OpenCvGaussianBlurOperator::operatorSchemaProperties() const {
     Json::Value props(Json::objectValue);
     props["kernelSize"] = makeIntegerParam("kernelSize", "Gaussian kernel size (odd)", 5);
+    setRange(props["kernelSize"], 1, kMaxFilterKernelSize);
     props["sigma"] = makeNumberParam("sigma", "Gaussian sigma", 1.0);
     return props;
 }
@@ -90,7 +100,8 @@ void OpenCvGaussianBlurOperator::applyFilter(cv::Mat& srcDst, const Json::Value&
     const double sigma = getDouble(params, "sigma", 1.0);
     if (!isValidKernelSize(kernelSize)) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
-                              "kernelSize must be a positive odd integer");
+                              "kernelSize must be a positive odd integer in [1, "
+                                + std::to_string(kMaxFilterKernelSize) + "]");
     }
     applyNormalizedFilter(srcDst, [&](const cv::Mat& in, cv::Mat& out) {
         cv::GaussianBlur(in, out, cv::Size(kernelSize, kernelSize), sigma);
@@ -117,6 +128,7 @@ Json::Value OpenCvMeanBlurOperator::metadata() const {
 Json::Value OpenCvMeanBlurOperator::operatorSchemaProperties() const {
     Json::Value props(Json::objectValue);
     props["kernelSize"] = makeIntegerParam("kernelSize", "Box kernel size (odd positive integer)", 3);
+    setRange(props["kernelSize"], 1, kMaxFilterKernelSize);
     return props;
 }
 
@@ -131,7 +143,8 @@ void OpenCvMeanBlurOperator::applyFilter(cv::Mat& srcDst, const Json::Value& par
     const int kernelSize = getInt(params, "kernelSize", 3);
     if (!isValidKernelSize(kernelSize)) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
-                              "kernelSize must be a positive odd integer");
+                              "kernelSize must be a positive odd integer in [1, "
+                                + std::to_string(kMaxFilterKernelSize) + "]");
     }
     applyNormalizedFilter(srcDst, [&](const cv::Mat& in, cv::Mat& out) {
         cv::blur(in, out, cv::Size(kernelSize, kernelSize));
@@ -156,6 +169,7 @@ Json::Value OpenCvMedianBlurOperator::metadata() const {
 Json::Value OpenCvMedianBlurOperator::operatorSchemaProperties() const {
     Json::Value props(Json::objectValue);
     props["kernelSize"] = makeIntegerParam("kernelSize", "Median kernel size (odd)", 3);
+    setRange(props["kernelSize"], 1, kMaxFilterKernelSize);
     return props;
 }
 
@@ -172,7 +186,8 @@ void OpenCvMedianBlurOperator::applyFilter(cv::Mat& srcDst, const Json::Value& p
     const int kernelSize = getInt(params, "kernelSize", 3);
     if (!isValidKernelSize(kernelSize)) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
-                              "kernelSize must be a positive odd integer");
+                              "kernelSize must be a positive odd integer in [1, "
+                                + std::to_string(kMaxFilterKernelSize) + "]");
     }
     cv::Mat mask;
     cv::compare(srcDst, srcDst, mask, cv::CMP_EQ);
@@ -210,8 +225,14 @@ Json::Value OpenCvSobelOperator::operatorSchemaProperties() const {
 }
 
 int OpenCvSobelOperator::neighborhoodRadius(const Json::Value& params) const {
-    // kSize==1 uses a 1x3/3x1 kernel: radius 1.
-    return oddKernelRadius(params, "kernelSize", 3);
+    // kSize==1 uses a 1x3/3x1 kernel: radius 1. Validate before the
+    // streaming path trusts this as a halo (applyFilter runs later).
+    const int kernelSize = getInt(params, "kernelSize", 3);
+    if (kernelSize != 1 && kernelSize != 3 && kernelSize != 5 && kernelSize != 7) {
+        throw RSOperatorError(ErrorCode::InvalidParameter,
+                              "Sobel kernelSize must be 1, 3, 5, or 7");
+    }
+    return std::max(1, kernelSize / 2);
 }
 
 void OpenCvSobelOperator::applyFilter(cv::Mat& srcDst, const Json::Value& params) const {
@@ -261,6 +282,7 @@ Json::Value OpenCvLaplacianOperator::metadata() const {
 Json::Value OpenCvLaplacianOperator::operatorSchemaProperties() const {
     Json::Value props(Json::objectValue);
     props["kernelSize"] = makeIntegerParam("kernelSize", "Laplacian kernel size (odd)", 3);
+    setRange(props["kernelSize"], 1, kMaxFilterKernelSize);
     return props;
 }
 
@@ -273,7 +295,8 @@ void OpenCvLaplacianOperator::applyFilter(cv::Mat& srcDst, const Json::Value& pa
     const int kernelSize = getInt(params, "kernelSize", 3);
     if (!isValidKernelSize(kernelSize)) {
         throw RSOperatorError(ErrorCode::InvalidParameter,
-                              "kernelSize must be a positive odd integer");
+                              "kernelSize must be a positive odd integer in [1, "
+                                + std::to_string(kMaxFilterKernelSize) + "]");
     }
     cv::Mat mask;
     cv::compare(srcDst, srcDst, mask, cv::CMP_EQ);

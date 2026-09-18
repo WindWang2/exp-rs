@@ -93,8 +93,10 @@ class RemoteDatasetPool
 
   private:
     RemoteDatasetPool() = default;
+    void ensureImpl();
     struct Impl;
     Impl *m_impl = nullptr;
+    std::once_flag m_initOnce;
     std::atomic<qint64> m_openCount{ 0 };
 };
 

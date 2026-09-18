@@ -8,6 +8,7 @@
 // RsSimpleSegmenter / RsSegmentFeatures / RsObjectClassify / RsClassRaster
 // calls under pseudo algorithm ids) are gone — see ADR 0126.
 #include "rs_obia_main_window.h"
+#include "map_tool_lifetime.h"
 #include "dialogs/dialog_help_catalog.h"
 #include "sicnu_logging.h"
 
@@ -132,6 +133,7 @@ RsObiaMainWindow::~RsObiaMainWindow()
   // task silently ran to completion. cancelActiveTask() cancels the task and
   // restores the cursor before member teardown destroys the progress dialog.
   cancelActiveTask();
+  rsDestroyMapTool( mSelectTool, mCanvas );
 }
 
 // ---------------------------------------------------------------------------

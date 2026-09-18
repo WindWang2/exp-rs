@@ -131,6 +131,7 @@ void GeorefDualWindow::loadSourceImage(const QString& filePath)
     }
     layer->setParent(this); // window object tree owns the layer
     if (mSourceCanvas) {
+        mSourceCanvas->stopRenderingAndSettle();
         mSourceCanvas->setLayers({layer});
         mSourceCanvas->zoomToFullExtent();
     }
@@ -150,6 +151,7 @@ void GeorefDualWindow::loadReferenceImage(const QString& filePath)
     }
     layer->setParent(this); // window object tree owns the layer
     if (mReferenceCanvas) {
+        mReferenceCanvas->stopRenderingAndSettle();
         mReferenceCanvas->setLayers({layer});
         mReferenceCanvas->zoomToFullExtent();
     }

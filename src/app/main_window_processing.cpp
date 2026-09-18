@@ -329,6 +329,14 @@ void QgisDesktopWindow::activateRoiSpectrumTool()
     if (!m_mapCanvas || !m_identifyTool)
         return;
 
+    if ( m_roiSpectrumTool )
+    {
+        if ( m_mapCanvas->mapTool() == m_roiSpectrumTool )
+            m_mapCanvas->unsetMapTool( m_roiSpectrumTool );
+        m_roiSpectrumTool->deleteLater();
+        m_roiSpectrumTool = nullptr;
+    }
+
     // The tool computes the ROI mean spectrum and reports it into the Spectral
     // Profile dock; afterwards the canvas returns to the identify tool. The
     // callback is the tool's sole owner — it always restores the tool and

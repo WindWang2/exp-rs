@@ -146,11 +146,19 @@ void openComparisonForPaths( QgisDesktopWindow *window, const QString &pathA,
 
 } // namespace
 
+void QgisDesktopWindow::ensureCommandRegistry()
+{
+    if ( m_commandRegistry )
+        return;
+    m_commandRegistry = new sicnu::app::CommandRegistry( this );
+    registerShellCommands( m_commandRegistry, this );
+}
+
 void QgisDesktopWindow::setupWorkbenchInfrastructure()
 {
     m_workbenchHost = new sicnu::app::WorkbenchHost( this );
     m_selectionContext = new sicnu::app::SelectionContext( this );
-    m_commandRegistry = new sicnu::app::CommandRegistry( this );
+    ensureCommandRegistry();
 
     // Workbench 8.0: in-flight fact for ContextFacts / suggestedNextAction.
     // The predicate reads TaskCenter's authoritative task set on the GUI
@@ -352,8 +360,9 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     }
 
     // ── Command registry ─────────────────────────────────────────────
+    // Shell commands are registered in ensureCommandRegistry() (before
+    // setupMenu). Snapshot provider needs SelectionContext, which exists now.
     m_commandRegistry->setSnapshotProvider( [this] { return m_selectionContext->snapshot(); } );
-    registerShellCommands( m_commandRegistry, this );
     connect( m_selectionContext, &sicnu::app::SelectionContext::changed, this,
              [this]( const sicnu::app::SelectionContextSnapshot & ) {
                  m_commandRegistry->refreshAll();

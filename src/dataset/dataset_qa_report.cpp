@@ -173,11 +173,19 @@ DatasetQaReport buildDatasetQaReport( const DatasetQaInputs &inputs )
                 category.evidence.insert( QStringLiteral( "conflicting_sample_crs" ),
                                           QJsonArray::fromStringList( conflicts ) );
             }
+            else if ( inputs.distinctSampleCrs.isEmpty() )
+            {
+                // Declared schema CRS with no sample CRS in evidence (empty
+                // scan window, cap, or unspecified per-sample CRS) is not Pass.
+                category.verdict = AuditVerdict::Unknown;
+                category.summary =
+                    QStringLiteral( "schema CRS declared; no sample CRS in evidence" );
+            }
             else
             {
                 category.verdict = AuditVerdict::Pass;
                 category.summary =
-                    QStringLiteral( "schema CRS declared; scanned sample CRS agrees or is unspecified" );
+                    QStringLiteral( "schema CRS declared; scanned sample CRS agrees" );
             }
         }
         report.categories().append( category );

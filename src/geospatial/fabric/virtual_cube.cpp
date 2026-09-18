@@ -119,7 +119,7 @@ int resolveBandIndex( const RasterMetadata &metadata, const VirtualCubeReadOptio
         return band.index;
       }
   }
-  if ( options.bandIndex >= 1 && options.bandIndex <= static_cast<int>( metadata.bands.size() ) )
+  if ( options.bandIndex >= 1 && metadata.bandByIndex( options.bandIndex ) )
   {
     how = "index";
     return options.bandIndex;
@@ -636,13 +636,22 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
             const std::vector<double> chunkValues =
               mirrored.readWindow( { 1 }, { 0, 0, chunkWidth, chunkHeight },
                                    options.maxWindowBytes );
-            const BandInfo &bandInfo = mirroredMeta.bands[0];
+            const BandInfo *bandInfo = mirroredMeta.bandByIndex( 1 );
+            if ( !bandInfo && !mirroredMeta.bands.empty() )
+              bandInfo = &mirroredMeta.bands.front();
+            if ( !bandInfo )
+            {
+              provenance.failed = true;
+              provenance.errorText = "mirrored chunk carries no band metadata";
+              result.provenance.push_back( std::move( provenance ) );
+              continue;
+            }
             provenance.mirrorHit = hit.file;
             provenance.sourceWindow = mapped.window;
             provenance.contributed = scatterInto(
               chunkValues,
               RasterWindow { mapped.window.xOff, mapped.window.yOff, chunkWidth, chunkHeight },
-              bandInfo, facts.geotransform );
+              *bandInfo, facts.geotransform );
             result.provenance.push_back( std::move( provenance ) );
             continue;
           }
@@ -778,10 +787,17 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
       if ( mirrorHitPath.empty() )
       {
         values = reader.readWindow( { band }, readWindow, options.maxWindowBytes );
-        const BandInfo &bandInfo = metadata.bands[static_cast<std::size_t>( band - 1 )];
-        sourceHasNoData = bandInfo.hasNoData;
-        sourceNoDataIsNaN = bandInfo.noDataIsNaN;
-        sourceNoDataValue = bandInfo.noDataValue;
+        const BandInfo *bandInfo = metadata.bandByIndex( band );
+        if ( !bandInfo )
+        {
+          provenance.failed = true;
+          provenance.errorText = "band metadata missing for index " + std::to_string( band );
+          result.provenance.push_back( std::move( provenance ) );
+          continue;
+        }
+        sourceHasNoData = bandInfo->hasNoData;
+        sourceNoDataIsNaN = bandInfo->noDataIsNaN;
+        sourceNoDataValue = bandInfo->noDataValue;
       }
       else
       {
@@ -789,10 +805,19 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
         readWindow = RasterWindow { 0, 0, std::min( sourceWindow.width, mirroredReader.metadata().width ),
                                     std::min( sourceWindow.height, mirroredReader.metadata().height ) };
         values = mirroredReader.readWindow( { 1 }, readWindow, options.maxWindowBytes );
-        const BandInfo &bandInfo = mirroredReader.metadata().bands[0];
-        sourceHasNoData = bandInfo.hasNoData;
-        sourceNoDataIsNaN = bandInfo.noDataIsNaN;
-        sourceNoDataValue = bandInfo.noDataValue;
+        const BandInfo *bandInfo = mirroredReader.metadata().bandByIndex( 1 );
+        if ( !bandInfo && !mirroredReader.metadata().bands.empty() )
+          bandInfo = &mirroredReader.metadata().bands.front();
+        if ( !bandInfo )
+        {
+          provenance.failed = true;
+          provenance.errorText = "mirrored chunk carries no band metadata";
+          result.provenance.push_back( std::move( provenance ) );
+          continue;
+        }
+        sourceHasNoData = bandInfo->hasNoData;
+        sourceNoDataIsNaN = bandInfo->noDataIsNaN;
+        sourceNoDataValue = bandInfo->noDataValue;
         // The scatter maps world → ASSET pixels; the chunk buffer is
         // chunk-local. Bound the scatter by the chunk's ASSET-pixel window
         // (review R13): origin-only chunks worked by accident before.

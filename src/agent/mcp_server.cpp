@@ -717,6 +717,17 @@ void McpServer::handleRequest(const QVariantMap &request)
             QVariantMap resultData;
             if (sicnu::agent::isDataPlatformTool(toolName))
             {
+                // dataset_db / experiment_db / out / bundle are caller-chosen
+                // filesystem paths opened CREATE or stat()'d; they must honour
+                // SICNU_MCP_WORKSPACE like dispatchToolCall (#1033).
+                QString denyReason;
+                if (!validateWorkspacePaths(arguments, &denyReason))
+                {
+                    SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
+                    throw McpToolError(toolName + QStringLiteral(": ") + denyReason,
+                                       QStringLiteral("PATH_OUTSIDE_WORKSPACE"),
+                                       QStringLiteral("validation"));
+                }
                 resultData = sicnu::agent::handleDataPlatformTool(toolName, arguments);
             }
             else if (toolName == QStringLiteral("list_algorithms"))
@@ -2489,6 +2500,12 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
         }
         QVariantMap containmentArgs;
         containmentArgs.insert(QStringLiteral("pipeline"), pipelineValue);
+        // Recording args open SQLite with CREATE; include them before
+        // enable() binds the monitor to the first path seen (#1033).
+        containmentArgs.insert(QStringLiteral("experiment_db"),
+                               arguments.value(QStringLiteral("experiment_db")));
+        containmentArgs.insert(QStringLiteral("dataset_db"),
+                               arguments.value(QStringLiteral("dataset_db")));
         QString denyReason;
         if (!validateWorkspacePaths(containmentArgs, &denyReason))
         {

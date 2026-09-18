@@ -26,8 +26,9 @@ void makeIpcMemoryPipePair( std::unique_ptr<IIpcStream> &a, std::unique_ptr<IIpc
 ///   @p readHandle  — data written by the peer arrives here
 ///   @p writeHandle — data written here reaches the peer
 /// On POSIX these are file descriptors (int); on Windows, HANDLEs
-/// (passed as void*). Ownership stays with the caller: the stream uses the
-/// handles but never closes them at destruction — close() is explicit.
+/// (passed as void*). The stream TAKES OWNERSHIP of both ends: close()
+/// (and the destructor) close them idempotently. Callers must not close
+/// the handles themselves after handing them over.
 std::unique_ptr<IIpcStream> makeIpcHandleStream( void *readHandle, void *writeHandle );
 
 /// true when the platform stream was opened on a valid handle pair.

@@ -35,14 +35,20 @@ if [ -z "$bin" ]; then
 fi
 
 # Verify the directory that was actually written: the user's --out when given,
-# otherwise the default data/samples.
+# otherwise the default data/samples. Skip the forced verify pass for --help
+# / -h and when the caller already passed --verify.
 out_dir="$repo_root/data/samples"
+skip_verify=0
 for arg in "$@"; do
   case "$arg" in
     --out=*) out_dir=${arg#--out=} ;;
+    --help|-h) skip_verify=1 ;;
+    --verify) skip_verify=1 ;;
   esac
 done
 
 cd "$repo_root"
 "$bin" "$@"
-"$bin" --verify "--out=$out_dir"
+if [ "$skip_verify" -eq 0 ]; then
+  "$bin" --verify "--out=$out_dir"
+fi

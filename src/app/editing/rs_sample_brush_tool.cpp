@@ -43,6 +43,13 @@ RsSampleBrushTool::RsSampleBrushTool( QgsMapCanvas *canvas )
     mRubber->hide();
 }
 
+RsSampleBrushTool::~RsSampleBrushTool()
+{
+    if ( canvas() )
+        delete mRubber;
+    mRubber = nullptr;
+}
+
 void RsSampleBrushTool::setTargetLayer( QgsVectorLayer *layer )
 {
     mLayer = layer;

@@ -8,6 +8,7 @@
 #include "qgsmaptoolzoom.h"
 #include "qgsmapcanvas.h"
 #include "qgsrectangle.h"
+#include "qgsexception.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -1805,10 +1806,11 @@ void QgsGeorefShellWindow::commitGcpPair( const QgsPointXY &sourceMap, const Qgs
       QgsCoordinateTransform ct( mDstRaster->crs(), destCrs, ctx );
       dstForStore = ct.transform( dst );
     }
-    catch ( ... )
+    catch ( const QgsCsException & )
     {
-      // Keep original dst — fit path will report via collectOk; do not silently
-      // store a mismatched CRS label.
+      if ( statusBar() )
+        statusBar()->showMessage( tr( "GCP not added: destination CRS transform failed" ), 8000 );
+      return;
     }
   }
   mGeorefSession.addGcp( QgsGcpPoint( src, dstForStore, destCrs, true ) );

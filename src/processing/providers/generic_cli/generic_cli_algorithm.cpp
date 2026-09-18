@@ -6,6 +6,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QElapsedTimer>
+#include <QtGlobal>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QFileInfo>
@@ -384,7 +385,14 @@ QVariantMap GenericCliAlgorithm::processAlgorithm(const QVariantMap &parameters,
     // thread forever. Default 30 minutes; tools may declare timeout_seconds.
     qint64 timeoutMs = 30 * 60 * 1000;
     if (m_config.contains(QStringLiteral("timeout_seconds")))
-        timeoutMs = m_config.value(QStringLiteral("timeout_seconds")).toInt() * 1000;
+    {
+        qint64 seconds = m_config.value( QStringLiteral( "timeout_seconds" ) ).toInteger( 1800 );
+        if ( seconds < 1 )
+            seconds = 1;
+        if ( seconds > 24 * 3600 )
+            seconds = 24 * 3600;
+        timeoutMs = seconds * 1000;
+    }
     QElapsedTimer watchdog;
     watchdog.start();
 

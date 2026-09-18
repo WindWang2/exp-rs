@@ -16,6 +16,7 @@
 
 #include <gdal.h>
 #include <cpl_conv.h>
+#include <QFile>
 
 #include <cmath>
 
@@ -165,12 +166,14 @@ QVariantMap RasterCalculatorAlgorithm::processAlgorithm( const QVariantMap &para
         if ( GDALRasterIO( outBand, GF_Write, 0, row, nCols, 1, rowBuf.data(), nCols, 1, GDT_Float32, 0, 0 ) != CE_None )
         {
             GDALClose( outDs );
+            QFile::remove( dest );
             throw QgsProcessingException( QObject::tr( "Failed to write output raster at row %1" ).arg( row ) );
         }
 
         if ( feedback->isCanceled() )
         {
             GDALClose( outDs );
+            QFile::remove( dest );
             return {};
         }
     }

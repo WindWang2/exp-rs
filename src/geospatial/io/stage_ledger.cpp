@@ -105,6 +105,26 @@ AttachCheck attachCheckFrom( const StageRecord &record, const std::vector<Attach
   return check;
 }
 
+std::string jsonStringField( const Json::Value &json, const char *key )
+{
+  if ( !json.isMember( key ) || json[key].isNull() )
+    return {};
+  if ( !json[key].isString() )
+    throw GeoError( ErrorCode::InvalidMetadata,
+                    std::string( "stage ledger " ) + key + " has a foreign type" );
+  return json[key].asString();
+}
+
+int jsonShapeInt( const Json::Value &shape, const char *key )
+{
+  if ( !shape.isObject() || !shape.isMember( key ) || shape[key].isNull() )
+    return 0;
+  if ( !shape[key].isNumeric() )
+    throw GeoError( ErrorCode::InvalidMetadata,
+                    std::string( "stage ledger declared_shape." ) + key + " has a foreign type" );
+  return shape[key].asInt();
+}
+
 } // namespace
 
 Json::Value stageRecordToJson( const StageRecord &record )
@@ -143,15 +163,15 @@ StageRecord stageRecordFromJson( const Json::Value &json )
   }
   StageRecord record;
   record.runId = json["run_id"].asString();
-  record.producer = json["producer"].asString();
+  record.producer = jsonStringField( json, "producer" );
   record.finalPath = json["final_path"].asString();
   record.stagedPath = json["staged_path"].asString();
-  record.driver = json["driver"].asString();
-  record.width = json["declared_shape"]["width"].asInt();
-  record.height = json["declared_shape"]["height"].asInt();
-  record.bandCount = json["declared_shape"]["band_count"].asInt();
-  record.state = json["state"].asString();
-  record.updatedAtUtc = json["updated_utc"].asString();
+  record.driver = jsonStringField( json, "driver" );
+  record.width = jsonShapeInt( json["declared_shape"], "width" );
+  record.height = jsonShapeInt( json["declared_shape"], "height" );
+  record.bandCount = jsonShapeInt( json["declared_shape"], "band_count" );
+  record.state = jsonStringField( json, "state" );
+  record.updatedAtUtc = jsonStringField( json, "updated_utc" );
   static const char *kKnownStates[] = { "staged", "finalized", "discarded" };
   const bool stateKnown = std::any_of( std::begin( kKnownStates ), std::end( kKnownStates ),
                                        [ & ]( const char *state ) { return record.state == state; } );
@@ -359,6 +379,10 @@ void discardAttached( const std::string &finalPath )
   {
     return; // nothing journaled → nothing to discard
   }
+  catch ( const std::exception & )
+  {
+    return; // foreign JSON types are an unreadable ledger, not a crash
+  }
   if ( record.state != "staged" )
   {
     Json::Value details;
@@ -476,6 +500,10 @@ std::vector<StrayStaging> sweepOrphans( const std::string &directory, bool remov
       catch ( const GeoError & )
       {
         stray.kind = "stale_ledger"; // unreadable ledger protects nothing
+      }
+      catch ( const std::exception & )
+      {
+        stray.kind = "stale_ledger";
       }
       strays.push_back( stray );
       break;

@@ -3,6 +3,7 @@
 #include "active_view_host.h"
 #include "plugin_ui_invoke_delegate.h"
 #include "plugins/framework/plugin_ui_schema_host.h"
+#include "workbench/command_defs.h"
 #include "workbench/command_registry.h"
 #include "workbench/plugin_command_defs.h"
 #include <QPointer>
@@ -110,6 +111,10 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     setupUi();
     qDebug() << "Setting up map canvas...";
     setupMapCanvas();
+
+    // CommandRegistry must exist before setupMenu(): addCmd dereferences it
+    // (F-1031-P0-registry). Workbench docks/selection still initialize later.
+    ensureCommandRegistry();
 
     qDebug() << "Setting up menu...";
     setupMenu(); // builds detached QMenuBar (action host only — not shown)
@@ -352,6 +357,12 @@ QgisDesktopWindow::~QgisDesktopWindow()
         if (QgsMapTool *tool = m_mapCanvas->mapTool())
             m_mapCanvas->unsetMapTool(tool);
         m_mapCanvas->setLayers({});
+    }
+    if ( m_roiSpectrumTool )
+    {
+        m_roiSpectrumTool->setParent( nullptr );
+        delete m_roiSpectrumTool.data();
+        m_roiSpectrumTool = nullptr;
     }
 
     // Detach the layer tree view from its model before m_activeViewHost (the

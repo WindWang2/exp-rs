@@ -20,7 +20,8 @@ RsRoiToolRectangle::RsRoiToolRectangle( QgsMapCanvas *canvas )
 
 RsRoiToolRectangle::~RsRoiToolRectangle()
 {
-  delete mRubber;
+  if ( canvas() )
+    delete mRubber;
   mRubber = nullptr;
 }
 

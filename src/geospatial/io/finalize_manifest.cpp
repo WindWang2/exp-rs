@@ -217,43 +217,74 @@ ManifestVerifyReport verifyDataset( const std::string &mainPath, bool allowMissi
     addIssue( "manifest_invalid", "finalize manifest is malformed (foreign JSON types)" );
   }
 
-  const std::string declaredDigest = manifest["dataset_sha256"].asString();
-  if ( report.manifestPresent && declaredDigest.empty() )
-    addIssue( "manifest_invalid", "manifest carries no dataset_sha256; integrity is unverifiable" );
-  if ( !declaredDigest.empty() )
+  try
   {
-    try
+    std::string declaredDigest;
+    if ( manifest["dataset_sha256"].isString() )
+      declaredDigest = manifest["dataset_sha256"].asString();
+    else if ( report.manifestPresent && manifest.isMember( "dataset_sha256" )
+              && !manifest["dataset_sha256"].isNull() )
+      addIssue( "manifest_invalid", "manifest dataset_sha256 has a foreign type" );
+    if ( report.manifestPresent && declaredDigest.empty()
+         && !( manifest.isMember( "dataset_sha256" ) && !manifest["dataset_sha256"].isNull()
+               && !manifest["dataset_sha256"].isString() ) )
+      addIssue( "manifest_invalid", "manifest carries no dataset_sha256; integrity is unverifiable" );
+    if ( !declaredDigest.empty() )
     {
-      report.datasetSha256 = datasetSha256Hex( mainPath );
-      report.digestMatched = report.datasetSha256 == declaredDigest;
-      if ( !report.digestMatched )
-        addIssue( "digest_mismatch", "recomputed digest differs from the manifest declaration" );
+      try
+      {
+        report.datasetSha256 = datasetSha256Hex( mainPath );
+        report.digestMatched = report.datasetSha256 == declaredDigest;
+        if ( !report.digestMatched )
+          addIssue( "digest_mismatch", "recomputed digest differs from the manifest declaration" );
+      }
+      catch ( const GeoError &error )
+      {
+        addIssue( "digest_mismatch", error.what() );
+      }
     }
-    catch ( const GeoError &error )
+
+    // Shape re-check: only when the manifest declares a raster shape AND the
+    // file still inspects as a raster. Vector/other kinds skip (declared 0s).
+    int declaredWidth = 0, declaredHeight = 0, declaredBands = 0;
+    const Json::Value &shape = manifest["shape"];
+    if ( shape.isObject() )
     {
-      addIssue( "digest_mismatch", error.what() );
+      auto takeInt = [ & ]( const char *key, int &out ) {
+        if ( !shape.isMember( key ) || shape[key].isNull() )
+          return;
+        if ( !shape[key].isNumeric() )
+        {
+          addIssue( "manifest_invalid", std::string( "manifest shape." ) + key + " has a foreign type" );
+          return;
+        }
+        out = shape[key].asInt();
+      };
+      takeInt( "width", declaredWidth );
+      takeInt( "height", declaredHeight );
+      takeInt( "band_count", declaredBands );
+    }
+    else if ( report.manifestPresent && manifest.isMember( "shape" ) && !shape.isNull() )
+      addIssue( "manifest_invalid", "manifest shape has a foreign type" );
+    if ( declaredWidth > 0 && declaredHeight > 0 )
+    {
+      try
+      {
+        const RasterMetadata meta = inspectRaster( mainPath );
+        if ( meta.width != declaredWidth || meta.height != declaredHeight || meta.bandCount != declaredBands )
+          addIssue( "shape_mismatch", "dataset shape differs from the manifest declaration" );
+      }
+      catch ( const GeoError & )
+      {
+        // Not raster-inspectable (vector/multidim/etc.): digest remains the
+        // integrity gate; the shape verdict is advisory-only by design.
+        addIssue( "inspect_unavailable", "dataset not raster-inspectable; shape re-check skipped" );
+      }
     }
   }
-
-  // Shape re-check: only when the manifest declares a raster shape AND the
-  // file still inspects as a raster. Vector/other kinds skip (declared 0s).
-  const int declaredWidth = manifest["shape"]["width"].asInt();
-  const int declaredHeight = manifest["shape"]["height"].asInt();
-  const int declaredBands = manifest["shape"]["band_count"].asInt();
-  if ( declaredWidth > 0 && declaredHeight > 0 )
+  catch ( const std::exception & )
   {
-    try
-    {
-      const RasterMetadata meta = inspectRaster( mainPath );
-      if ( meta.width != declaredWidth || meta.height != declaredHeight || meta.bandCount != declaredBands )
-        addIssue( "shape_mismatch", "dataset shape differs from the manifest declaration" );
-    }
-    catch ( const GeoError & )
-    {
-      // Not raster-inspectable (vector/multidim/etc.): digest remains the
-      // integrity gate; the shape verdict is advisory-only by design.
-      addIssue( "inspect_unavailable", "dataset not raster-inspectable; shape re-check skipped" );
-    }
+    addIssue( "manifest_invalid", "finalize manifest is malformed (foreign JSON types)" );
   }
 
   report.verified = report.issues.empty();

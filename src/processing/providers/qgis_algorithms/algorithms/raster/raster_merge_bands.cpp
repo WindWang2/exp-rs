@@ -14,6 +14,7 @@
 #include <qgsrectangle.h>
 #include <qgscoordinatereferencesystem.h>
 #include <gdal.h>
+#include <QFile>
 
 void RasterMergeBandsAlgorithm::initAlgorithm( const QVariantMap & )
 {
@@ -97,6 +98,27 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
     if ( feedback->isCanceled() || static_cast<int>( blocks.size() ) < totalBands )
         return QVariantMap();
 
+    auto gdalTypeFromQgis = []( Qgis::DataType dt ) -> GDALDataType {
+        switch ( dt )
+        {
+            case Qgis::DataType::Byte:
+                return GDT_Byte;
+            case Qgis::DataType::UInt16:
+                return GDT_UInt16;
+            case Qgis::DataType::Int16:
+                return GDT_Int16;
+            case Qgis::DataType::UInt32:
+                return GDT_UInt32;
+            case Qgis::DataType::Int32:
+                return GDT_Int32;
+            case Qgis::DataType::Float64:
+                return GDT_Float64;
+            case Qgis::DataType::Float32:
+            default:
+                return GDT_Float32;
+        }
+    };
+
     // Write multi-band output using GDAL
     GDALDriverH hDriver = GDALGetDriverByName( "GTiff" );
     if ( !hDriver )
@@ -104,22 +126,16 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
 
     GDALDataType gdalType = GDT_Float32;
     if ( !blocks.empty() )
-    {
-        const Qgis::DataType dt = blocks[0]->dataType();
-        if ( dt == Qgis::DataType::Byte || dt == Qgis::DataType::UInt16 || dt == Qgis::DataType::Int16 || dt == Qgis::DataType::UInt32 || dt == Qgis::DataType::Int32 || dt == Qgis::DataType::Float32 || dt == Qgis::DataType::Float64 )
-        {
-            gdalType = ( dt == Qgis::DataType::Byte ) ? GDT_Byte :
-                       ( dt == Qgis::DataType::UInt16 ) ? GDT_UInt16 :
-                       ( dt == Qgis::DataType::Int16 ) ? GDT_Int16 :
-                       ( dt == Qgis::DataType::UInt32 ) ? GDT_UInt32 :
-                       ( dt == Qgis::DataType::Int32 ) ? GDT_Int32 :
-                       ( dt == Qgis::DataType::Float64 ) ? GDT_Float64 : GDT_Float32;
-        }
-    }
+        gdalType = gdalTypeFromQgis( blocks[0]->dataType() );
 
     GDALDatasetH hOutDs = GDALCreate( hDriver, dest.toUtf8().constData(), nCols, nRows, totalBands, gdalType, nullptr );
     if ( !hOutDs )
         throw QgsProcessingException( QObject::tr( "Could not create output file %1" ).arg( dest ) );
+
+    auto abortPartial = [&]() {
+        GDALClose( hOutDs );
+        QFile::remove( dest );
+    };
 
     double geoTransform[6] = { extent.xMinimum(), extent.width() / nCols, 0,
                                extent.yMaximum(), 0, -extent.height() / nRows };
@@ -134,7 +150,7 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
     {
         if ( feedback->isCanceled() )
         {
-            GDALClose( hOutDs );
+            abortPartial();
             return QVariantMap();
         }
         GDALRasterBandH hBand = GDALGetRasterBand( hOutDs, b + 1 );
@@ -143,12 +159,13 @@ QVariantMap RasterMergeBandsAlgorithm::processAlgorithm( const QVariantMap &para
             GDALSetRasterNoDataValue( hBand, blocks[b]->noDataValue() );
         }
         const void *data = blocks[b]->bits();
+        const GDALDataType bufType = gdalTypeFromQgis( blocks[b]->dataType() );
         CPLErr cplErr = GDALRasterIO( hBand, GF_Write, 0, 0, nCols, nRows,
                                      const_cast<void *>( data ), nCols, nRows,
-                                     gdalType, 0, 0 );
+                                     bufType, 0, 0 );
         if ( cplErr != CE_None )
         {
-            GDALClose( hOutDs );
+            abortPartial();
             throw QgsProcessingException( QObject::tr( "Error writing band %1" ).arg( b + 1 ) );
         }
         feedback->setProgress( 50.0 + 50.0 * ( b + 1 ) / totalBands );
