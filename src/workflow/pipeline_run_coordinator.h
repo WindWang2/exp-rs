@@ -58,6 +58,12 @@ struct NodeStatusSnapshot
     QString outputArtifactPath;
     bool isCacheHit = false;
     QString lineageSignature;
+    // Authorship fingerprint recorded when the artifact was published
+    // (#1056 stale-artifact honesty): resumeFromCheckpoint trusts a cached
+    // artifact only while size + mtime still match. Negative = unknown
+    // (absent artifact, or a checkpoint written before this field existed).
+    qint64 artifactSizeBytes = -1;
+    qint64 artifactMtimeMs = -1;
 };
 
 /// Result of executing one node. @p artifactPath is the produced file
@@ -86,6 +92,19 @@ class SICNU_WORKFLOW_EXPORT PipelineRunCoordinator : public QObject
 {
     Q_OBJECT
 
+    //
+    // Threading model (#1056): all run state lives on the coordinator's
+    // AFFINITY thread — the thread the object was created in. Node
+    // completion is event-driven back to that thread, and every public
+    // method marshals onto it (same-thread callers run inline; foreign
+    // threads block until the affinity thread executes the call), so
+    // requestCancel / getAllStatuses / isRunning / hasCompleted can never
+    // race onNodeFinished. The affinity thread must run an event loop for
+    // the duration of a run (the queued completion path already required
+    // this). No method may be called concurrently with ~PipelineRunCoordinator
+    // from another thread (standard QObject destruction rule).
+    //
+
   public:
     explicit PipelineRunCoordinator( QObject *parent = nullptr );
     ~PipelineRunCoordinator() override;
@@ -106,6 +125,8 @@ class SICNU_WORKFLOW_EXPORT PipelineRunCoordinator : public QObject
     /// the remaining topology resumes. Emits pipelineCompleted at the end.
     bool resumeFromCheckpoint( const QString &checkpointFilePath, QString *outError = nullptr );
 
+    /// Snapshot of every node's status (thread-safe: marshaled onto the
+    /// affinity thread, #1056).
     QMap<QString, NodeStatusSnapshot> getAllStatuses() const;
     bool isRunning() const;
     /// True once the current run reached a terminal state (also for empty
@@ -136,6 +157,17 @@ class SICNU_WORKFLOW_EXPORT PipelineRunCoordinator : public QObject
     void finalizeIfDone();
     void persistCheckpoint();
     void markRemaining( ExecutionState state );
+    /// Records the authorship stamp (size/mtime) of a just-published
+    /// artifact so a later resume can verify it (#1056).
+    void recordArtifactStamp( NodeStatusSnapshot &snapshot );
+
+    // Affinity-thread implementations of the marshaled public methods.
+    void requestCancelOnAffinity();
+    bool startRunOnAffinity( const WorkflowDocument &def, const QString &runDirectory,
+                             QString *outError );
+    bool resumeFromCheckpointOnAffinity( const QString &checkpointFilePath, QString *outError );
+    void setExecutorOnAffinity( NodeExecutor executor );
+    void setMaxParallelismOnAffinity( int workers );
 
     std::unique_ptr<RunState> m_state;
 };

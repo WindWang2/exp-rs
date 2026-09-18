@@ -1,8 +1,10 @@
 // src/workflow/pipeline_run_coordinator.cpp — checkpointed frontier scheduler (D17)
 #include "workflow/pipeline_run_coordinator.h"
 
+#include "workflow/path_containment.h"
 #include "workflow/plan_optimizer.h"
 #include "workflow/workflow_dag_analyzer.h"
+#include "workflow/workflow_limits.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -11,7 +13,9 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QCoreApplication>
 #include <QMetaObject>
+#include <QThread>
 
 #ifdef Q_OS_WIN
 #include <fcntl.h>
@@ -22,6 +26,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <type_traits>
 
 #include <fcntl.h>
 #ifdef Q_OS_WIN
@@ -139,6 +144,43 @@ QString atomicWriteJson( const QString &path, const QJsonObject &document )
 
 } // namespace
 
+/// #1056: run state (statuses, finished, executor…) is mutated on the
+/// coordinator's affinity thread by the queued node-completion path. Public
+/// accessors and mutators run through this marshal so foreign-thread callers
+/// are serialized with node completion instead of racing it. Same-thread
+/// callers run inline (no queue round-trip, no behavior change for the
+/// designer dock and the hermetic tests, which all live on the creating
+/// thread). Requires the affinity thread to run an event loop for
+/// foreign-thread calls — the queued completion path already requires it.
+template <typename F>
+auto marshalBlocking( const PipelineRunCoordinator *self, F &&fn ) -> decltype( fn() )
+{
+    if ( QThread::currentThread() == self->thread() )
+        return fn();
+    // A foreign-thread call blocks until the affinity thread's event loop
+    // delivers it — without a running loop (or without a QCoreApplication
+    // instance, which Qt's queued-invocation machinery requires) this cannot
+    // complete, so say so.
+    if ( !self->thread()->isRunning() || QCoreApplication::instance() == nullptr )
+        qWarning( "PipelineRunCoordinator: affinity thread not running or no QCoreApplication; foreign-thread marshal cannot complete" );
+    // The invoked lambda only touches run state — no writes through this
+    // pointer that the const-ness of a snapshot getter would forbid.
+    auto *mutableSelf = const_cast<PipelineRunCoordinator *>( self );
+    using R = decltype( fn() );
+    if constexpr ( std::is_void_v<R> )
+    {
+        QMetaObject::invokeMethod( mutableSelf, std::forward<F>( fn ), Qt::BlockingQueuedConnection );
+    }
+    else
+    {
+        R out{};
+        QMetaObject::invokeMethod(
+            mutableSelf, [ &out, fn = std::forward<F>( fn ) ]() mutable { out = fn(); },
+            Qt::BlockingQueuedConnection );
+        return out;
+    }
+}
+
 NodeExecutor makeSyntheticNodeExecutor()
 {
     return []( const NodeFact &node, const QHash<QString, QString> &inputArtifacts,
@@ -223,10 +265,22 @@ PipelineRunCoordinator::~PipelineRunCoordinator() = default;
 
 void PipelineRunCoordinator::setExecutor( NodeExecutor executor )
 {
+    marshalBlocking( this, [ this, executor = std::move( executor ) ]() mutable {
+        setExecutorOnAffinity( std::move( executor ) );
+    } );
+}
+
+void PipelineRunCoordinator::setExecutorOnAffinity( NodeExecutor executor )
+{
     m_state->executor = std::move( executor );
 }
 
 void PipelineRunCoordinator::setMaxParallelism( int workers )
+{
+    marshalBlocking( this, [ this, workers ] { setMaxParallelismOnAffinity( workers ); } );
+}
+
+void PipelineRunCoordinator::setMaxParallelismOnAffinity( int workers )
 {
     m_state->maxParallelism = std::clamp( workers, 1, kMaxPoolWorkers );
     m_state->pool.setMaxThreadCount( m_state->maxParallelism );
@@ -234,28 +288,40 @@ void PipelineRunCoordinator::setMaxParallelism( int workers )
 
 QString PipelineRunCoordinator::checkpointPath() const
 {
-    return m_state->checkpointPath;
+    return marshalBlocking( this, [this] { return m_state->checkpointPath; } );
 }
 
 bool PipelineRunCoordinator::isRunning() const
 {
-    return !m_state->finished && !m_state->def.nodes.isEmpty();
+    return marshalBlocking( this, [this] {
+        return !m_state->finished && !m_state->def.nodes.isEmpty();
+    } );
 }
 
 bool PipelineRunCoordinator::hasCompleted() const
 {
-    return m_state->finished;
+    return marshalBlocking( this, [this] { return m_state->finished; } );
 }
 
 QMap<QString, NodeStatusSnapshot> PipelineRunCoordinator::getAllStatuses() const
 {
-    QMap<QString, NodeStatusSnapshot> map;
-    for ( auto it = m_state->statuses.cbegin(); it != m_state->statuses.cend(); ++it )
-        map.insert( it.key(), it.value() );
-    return map;
+    return marshalBlocking( this, [this] {
+        QMap<QString, NodeStatusSnapshot> map;
+        for ( auto it = m_state->statuses.cbegin(); it != m_state->statuses.cend(); ++it )
+            map.insert( it.key(), it.value() );
+        return map;
+    } );
 }
 
 bool PipelineRunCoordinator::startRun( const WorkflowDocument &def, const QString &runDirectory, QString *outError )
+{
+    return marshalBlocking(
+        this, [this, &def, &runDirectory, outError] {
+            return startRunOnAffinity( def, runDirectory, outError );
+        } );
+}
+
+bool PipelineRunCoordinator::startRunOnAffinity( const WorkflowDocument &def, const QString &runDirectory, QString *outError )
 {
     auto fail = [outError]( const QString &message ) {
         if ( outError )
@@ -306,6 +372,13 @@ bool PipelineRunCoordinator::startRun( const WorkflowDocument &def, const QStrin
 }
 
 void PipelineRunCoordinator::requestCancel()
+{
+    // Serialize with the affinity thread's node-completion events: a cancel
+    // racing onNodeFinished used to mutate statuses from a foreign thread.
+    marshalBlocking( this, [this] { requestCancelOnAffinity(); } );
+}
+
+void PipelineRunCoordinator::requestCancelOnAffinity()
 {
     m_state->cancelRequested = true;
     markRemaining( ExecutionState::Cancelled );
@@ -465,6 +538,7 @@ void PipelineRunCoordinator::onNodeFinished( const QString &nodeId, NodeExecutio
         snapshot.state = ExecutionState::Succeeded;
         snapshot.outputArtifactPath = result.artifactPath;
         snapshot.progress = 1.0f;
+        recordArtifactStamp( snapshot );
     }
     else
     {
@@ -537,6 +611,21 @@ void PipelineRunCoordinator::finalizeIfDone()
             .arg( cancelled ) );
 }
 
+void PipelineRunCoordinator::recordArtifactStamp( NodeStatusSnapshot &snapshot )
+{
+    const QFileInfo info( snapshot.outputArtifactPath );
+    if ( info.exists() )
+    {
+        snapshot.artifactSizeBytes = info.size();
+        snapshot.artifactMtimeMs = info.lastModified().toMSecsSinceEpoch();
+    }
+    else
+    {
+        snapshot.artifactSizeBytes = -1;
+        snapshot.artifactMtimeMs = -1;
+    }
+}
+
 void PipelineRunCoordinator::persistCheckpoint()
 {
     if ( m_state->def.nodes.isEmpty() )
@@ -564,6 +653,8 @@ void PipelineRunCoordinator::persistCheckpoint()
         entry.insert( QLatin1String( "errorMessage" ), snapshot.errorMessage );
         entry.insert( QLatin1String( "elapsedMs" ), snapshot.elapsedMs );
         entry.insert( QLatin1String( "artifact" ), snapshot.outputArtifactPath );
+        entry.insert( QLatin1String( "artifactSizeBytes" ), snapshot.artifactSizeBytes );
+        entry.insert( QLatin1String( "artifactMtimeMs" ), snapshot.artifactMtimeMs );
         entry.insert( QLatin1String( "isCacheHit" ), snapshot.isCacheHit );
         entry.insert( QLatin1String( "signature" ), snapshot.lineageSignature );
         nodes.append( entry );
@@ -576,6 +667,14 @@ void PipelineRunCoordinator::persistCheckpoint()
 }
 
 bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFilePath, QString *outError )
+{
+    return marshalBlocking(
+        this, [this, &checkpointFilePath, outError] {
+            return resumeFromCheckpointOnAffinity( checkpointFilePath, outError );
+        } );
+}
+
+bool PipelineRunCoordinator::resumeFromCheckpointOnAffinity( const QString &checkpointFilePath, QString *outError )
 {
     auto fail = [outError]( const QString &message ) {
         if ( outError )
@@ -591,6 +690,12 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
     QFile file( checkpointFilePath );
     if ( !file.open( QIODevice::ReadOnly ) )
         return fail( QStringLiteral( "cannot open checkpoint '%1'" ).arg( checkpointFilePath ) );
+    // #1056: whole-file reads are bounded, same as WorkflowCheckpointManager.
+    if ( file.size() > kMaxCheckpointReadBytes )
+        return fail( QStringLiteral( "checkpoint '%1' exceeds the %2 MiB read cap (%3 bytes)" )
+                         .arg( checkpointFilePath )
+                         .arg( kMaxCheckpointReadBytes / ( 1024 * 1024 ) )
+                         .arg( file.size() ) );
     const QJsonDocument doc = QJsonDocument::fromJson( file.readAll() );
     if ( doc.isNull() || !doc.object().value( QLatin1String( "workflow" ) ).isObject() )
         return fail( QStringLiteral( "checkpoint '%1' is not a valid document" ).arg( checkpointFilePath ) );
@@ -629,14 +734,38 @@ bool PipelineRunCoordinator::resumeFromCheckpoint( const QString &checkpointFile
         snapshot.elapsedMs = entry.value( QLatin1String( "elapsedMs" ) ).toInteger();
         snapshot.outputArtifactPath = entry.value( QLatin1String( "artifact" ) ).toString();
         snapshot.progress = static_cast<float>( entry.value( QLatin1String( "progress" ) ).toDouble() );
+        snapshot.artifactSizeBytes = entry.value( QLatin1String( "artifactSizeBytes" ) ).toInteger( -1 );
+        snapshot.artifactMtimeMs = entry.value( QLatin1String( "artifactMtimeMs" ) ).toInteger( -1 );
 
         const ExecutionState recorded = stateFromKey( entry.value( QLatin1String( "state" ) ).toString() );
         const QString recordedSignature = entry.value( QLatin1String( "signature" ) ).toString();
         const bool artifactExists = !snapshot.outputArtifactPath.isEmpty()
-            && QFileInfo::exists( snapshot.outputArtifactPath );
+            && QFileInfo( snapshot.outputArtifactPath ).exists();
         const bool signatureMatches = recordedSignature == recomputed.value( nodeId );
 
-        if ( recorded == ExecutionState::Succeeded && artifactExists && signatureMatches )
+        // CacheHit requires BOTH a matching recomputed lineage signature and
+        // an artifact this run can still trust (#1056 stale-artifact
+        // honesty):
+        //  * the path must reside inside the checkpoint's run directory — a
+        //    path outside it was never this run's product;
+        //  * when the checkpoint recorded an authorship stamp, the file on
+        //    disk must still match it — a stale file that merely happens to
+        //    sit at the recorded path is not the recorded artifact.
+        // A distrustful node is not an error: it is scheduled for recompute.
+        bool artifactTrusted = artifactExists;
+        if ( artifactTrusted && !m_state->runDirectory.isEmpty() )
+        {
+            artifactTrusted = path_containment::resolvedInsideDirectory(
+                snapshot.outputArtifactPath, QDir( m_state->runDirectory ) );
+        }
+        if ( artifactTrusted && snapshot.artifactSizeBytes >= 0 && snapshot.artifactMtimeMs >= 0 )
+        {
+            const QFileInfo info( snapshot.outputArtifactPath );
+            artifactTrusted = info.size() == snapshot.artifactSizeBytes
+                && info.lastModified().toMSecsSinceEpoch() == snapshot.artifactMtimeMs;
+        }
+
+        if ( recorded == ExecutionState::Succeeded && artifactTrusted && signatureMatches )
         {
             snapshot.state = ExecutionState::Succeeded;
             snapshot.isCacheHit = true;
