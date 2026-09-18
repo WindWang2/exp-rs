@@ -3,10 +3,11 @@
 
 #include <QGraphicsPathItem>
 #include <QPointF>
+#include <QPointer>
+
+#include "pipeline_port_item.h"
 
 namespace sicnu::workflow::gui {
-
-class PipelinePortItem;
 
 class PipelineConnectionItem : public QGraphicsPathItem
 {
@@ -32,8 +33,12 @@ public:
   QPainterPath shape() const override;
 
 private:
-  PipelinePortItem *mSourcePort = nullptr;
-  PipelinePortItem *mTargetPort = nullptr;
+  // QPointer: scene mutation deletes ports while an edge may still be alive
+  // (most notably the in-flight temp connection). A destroyed port nulls these
+  // automatically, so paint()/updatePosition()/the destructor can never touch
+  // freed memory even if a future code path forgets to unregister first.
+  QPointer<PipelinePortItem> mSourcePort;
+  QPointer<PipelinePortItem> mTargetPort;
   QPointF mTempEndPoint;
   bool mIsTemp = false;
 

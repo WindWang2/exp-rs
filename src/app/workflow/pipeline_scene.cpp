@@ -24,11 +24,7 @@ PipelineScene::~PipelineScene()
   for ( PipelineConnectionItem *conn : mConnections )
     delete conn;
   mConnections.clear();
-  if ( mTempConnection )
-  {
-    delete mTempConnection;
-    mTempConnection = nullptr;
-  }
+  cancelTempConnection();
 }
 
 void PipelineScene::notifyWorkflowChanged()
@@ -46,8 +42,10 @@ void PipelineScene::cancelTempConnection()
     removeItem( mTempConnection );
     delete mTempConnection;
     mTempConnection = nullptr;
-    mDragSourcePort = nullptr;
   }
+  // Always drop the drag source, even when a temp item was never created
+  // (or was somehow already gone), so no event handler keeps a stale port.
+  mDragSourcePort = nullptr;
 }
 
 PipelineNodeItem *PipelineScene::addNode( const StepDef &stepDef )
@@ -111,6 +109,11 @@ bool PipelineScene::removeNode( const QString &stepId )
   auto *node = findNode( stepId );
   if ( !node )
     return false;
+
+  // The temp connection is registered on its source port but not in
+  // mConnections, so the incident-edge cleanup below would neither delete nor
+  // unregister it. Drop the in-flight drag before the ports are freed.
+  cancelTempConnection();
 
   // Delete only connections incident to this node directly from its ports (O(deg(v)))
   std::vector<PipelineConnectionItem *> toDelete;
@@ -201,6 +204,14 @@ bool PipelineScene::removeConnection( PipelineConnectionItem *conn )
   if ( !conn )
     return false;
 
+  // The in-flight temp wire is only registered on its source port; it is not
+  // a member of mConnections. Deleting it means cancelling the drag.
+  if ( conn == mTempConnection )
+  {
+    cancelTempConnection();
+    return true;
+  }
+
   auto it = mConnections.find( conn );
   if ( it == mConnections.end() )
     return false;
@@ -221,6 +232,10 @@ bool PipelineScene::removeConnection( PipelineConnectionItem *conn )
 
 void PipelineScene::clearWorkflow()
 {
+  // Nodes (and their ports) are about to be destroyed; the temp connection of
+  // an active drag references one of those ports and must be released first.
+  cancelTempConnection();
+
   for ( auto *conn : mConnections )
   {
     removeItem( conn );
@@ -240,6 +255,10 @@ void PipelineScene::clearWorkflow()
 
 void PipelineScene::loadWorkflowDefinition( const WorkflowDefinition &def )
 {
+  // A programmatic reload replaces the whole graph; abandon any in-flight
+  // drag before the old ports disappear.
+  cancelTempConnection();
+
   mBulkUpdating = true;
   clearWorkflow();
 
@@ -335,6 +354,10 @@ void PipelineScene::onPortDragStarted( PipelinePortItem *port, const QPointF &sc
   if ( !port || !port->isOutput() )
     return;
 
+  // A second press before the previous wire was committed or cancelled must
+  // not leak the old temp item.
+  cancelTempConnection();
+
   mDragSourcePort = port;
   mTempConnection = new PipelineConnectionItem( port );
   mTempConnection->setTempEndPoint( scenePos );
@@ -351,19 +374,34 @@ void PipelineScene::onNodePositionChanged( PipelineNodeItem *node, const QPointF
 
 void PipelineScene::mouseMoveEvent( QGraphicsSceneMouseEvent *event )
 {
-  if ( mTempConnection && mDragSourcePort )
+  if ( mTempConnection )
   {
-    mTempConnection->setTempEndPoint( event->scenePos() );
-    event->accept();
-    return;
+    if ( mDragSourcePort )
+    {
+      mTempConnection->setTempEndPoint( event->scenePos() );
+      event->accept();
+      return;
+    }
+    // The source port disappeared through a path that bypassed the graph
+    // mutation boundaries: release the orphaned wire instead of dereferencing
+    // the (auto-nulled) drag source.
+    cancelTempConnection();
   }
   QGraphicsScene::mouseMoveEvent( event );
 }
 
 void PipelineScene::mouseReleaseEvent( QGraphicsSceneMouseEvent *event )
 {
-  if ( mTempConnection && mDragSourcePort )
+  if ( mTempConnection )
   {
+    if ( !mDragSourcePort )
+    {
+      // Drag source vanished mid-drag (see mouseMoveEvent): drop the orphan.
+      cancelTempConnection();
+      event->accept();
+      return;
+    }
+
     QGraphicsItem *targetItem = itemAt( event->scenePos(), QTransform() );
     PipelinePortItem *targetPort = dynamic_cast<PipelinePortItem *>( targetItem );
 
@@ -384,17 +422,24 @@ void PipelineScene::mouseReleaseEvent( QGraphicsSceneMouseEvent *event )
 
       if ( !alreadyConnected && validatePortConnection( srcType, dstType ) )
       {
-        mTempConnection->setTargetPort( targetPort );
-        mConnections.insert( mTempConnection );
+        // Promote the temp wire to a regular connection *before* emitting:
+        // a synchronous listener on connectionCreated / workflowChanged could
+        // otherwise observe the aliased temp pointer and delete the very item
+        // that is being committed (or cancel it twice).
+        PipelineConnectionItem *committed = mTempConnection;
+        PipelinePortItem *sourcePort = mDragSourcePort;
+        mTempConnection = nullptr;
+        mDragSourcePort = nullptr;
 
-        emit connectionCreated( mDragSourcePort->nodeItem()->stepId(),
-                                mDragSourcePort->portName(),
+        committed->setTargetPort( targetPort );
+        mConnections.insert( committed );
+
+        emit connectionCreated( sourcePort->nodeItem()->stepId(),
+                                sourcePort->portName(),
                                 targetPort->nodeItem()->stepId(),
                                 targetPort->portName() );
         notifyWorkflowChanged();
 
-        mTempConnection = nullptr;
-        mDragSourcePort = nullptr;
         event->accept();
         return;
       }

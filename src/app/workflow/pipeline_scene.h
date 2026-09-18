@@ -2,6 +2,7 @@
 #pragma once
 
 #include <QGraphicsScene>
+#include <QPointer>
 #include <unordered_map>
 #include <unordered_set>
 #include <memory>
@@ -64,7 +65,10 @@ private:
   std::unordered_set<PipelineConnectionItem *> mConnections;
 
   bool mBulkUpdating = false;
-  PipelinePortItem *mDragSourcePort = nullptr;
+  // QPointer: the drag source is owned by a node that any graph mutation may
+  // destroy. A dangling drag source must never be dereferenced — see
+  // cancelTempConnection() for the authoritative cleanup.
+  QPointer<PipelinePortItem> mDragSourcePort;
   PipelineConnectionItem *mTempConnection = nullptr;
 };
 
