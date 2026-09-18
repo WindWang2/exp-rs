@@ -39,10 +39,18 @@ semantic band-role vocabulary (ADR 0065).
    draw order (row-major pixels, bands innermost, before-noise then
    after-noise); no wall clock, locale, unordered-container or thread
    dependence in the emit path; the shapefile DBF creation date is pinned to
-   2000-01-01. Same host+GDAL+profile+seed ⇒ byte-identical outputs and
-   manifest. The only transcendentals are `atan`/`atan2` in the slope/aspect
-   truth layers, which are host-stable but not guaranteed bit-identical across
-   libm implementations — the one documented crack in cross-host bit-identity.
+   2000-01-01. The emit path additionally pins the GDAL configuration it
+   depends on — `GDAL_PAM_ENABLED=NO` (no `.aux.xml`), `GDAL_NUM_THREADS=1`
+   plus the `NUM_THREADS=1` GTiff creation option (mirroring the deterministic
+   COG preset in `src/geospatial/io/cog_options.cpp`), and `SHAPE_ENCODING=""`
+   (the Shapefile driver then never writes a `.cpg`) — through a scoped guard
+   that restores the previous values on scope exit, so a host-exported GDAL
+   environment can neither perturb the emitted bytes nor leak configuration
+   between the foundry and its embedder. Same host+GDAL+profile+seed ⇒
+   byte-identical outputs and manifest. The only transcendentals are
+   `atan`/`atan2` in the slope/aspect truth layers, which are host-stable but
+   not guaranteed bit-identical across libm implementations — the one
+   documented crack in cross-host bit-identity.
 
 4. **Ground truth is mandatory**: every product has a companion
    (`landsat_truth.tif` class mask ids 1–6, `change_truth.tif` change mask,
@@ -61,7 +69,19 @@ semantic band-role vocabulary (ADR 0065).
    `data/samples/manifest.json` itself is un-ignored so a release manager MAY
    commit a blessed reference manifest.
 
-6. **Spec intake for D3**: `--spec=<file-or-dir>` where each `*.json` is
+6. **Re-run ownership boundary**: the foundry manages exactly its own
+   artifacts, derived from the fixed catalog — `<product>.tif` per raster
+   product and the `training_samples.{shp,shx,dbf,prj,cpg}` sidecar set — and
+   nothing else. Regenerating into a non-empty directory (same or different
+   selection) overwrites every owned basename the selection emits (the
+   shapefile set is removed before create, never relying on the Shapefile
+   driver's version-dependent handling of pre-existing files) and prunes owned
+   basenames left by a *previous* selection that the current selection does
+   not emit, so a full↔subset switch always leaves a `--verify`-clean tree.
+   The directory is never scanned and no non-foundry file is ever removed or
+   modified. Locked by the regenerate-twice and full↔subset fixtures.
+
+7. **Spec intake for D3**: `--spec=<file-or-dir>` where each `*.json` is
    `{"experiment": "<non-empty>", "products": [<catalog id>…]}` — unknown
    top-level keys are refused along with everything else. The catalog is
    the fixed nine-product id set. Unknown ids, missing paths, parse errors,
@@ -71,10 +91,10 @@ semantic band-role vocabulary (ADR 0065).
    order is normalized to catalog order. Without `--spec`, the full set is
    generated.
 
-7. **CLI exit codes are contract**: 0 ok · 1 generation/I/O · 2 usage ·
+8. **CLI exit codes are contract**: 0 ok · 1 generation/I/O · 2 usage ·
    3 spec refusal · 4 verify drift.
 
-8. **Bundle seam only (D7)**: `docs/datasets/BUNDLE.md` specifies the directory
+9. **Bundle seam only (D7)**: `docs/datasets/BUNDLE.md` specifies the directory
    layout D7 zips; no zip logic in this track, and no first-run auto-generation
    inside `src/`.
 

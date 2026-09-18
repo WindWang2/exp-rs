@@ -107,6 +107,10 @@ files and manifest. The contract (enforced in `tools/sample_foundry.h/.cpp`):
   across seeds because every file carries the `SICNU_SEED` provenance stamp.
 * The shapefile DBF creation date is pinned to 2000-01-01 so vector output has
   no wall-clock dependence.
+* The emit path pins the GDAL settings it depends on (`GDAL_PAM_ENABLED=NO`,
+  `NUM_THREADS=1`/`GDAL_NUM_THREADS=1`, `SHAPE_ENCODING=""`), so a
+  host-exported GDAL environment cannot change the bytes or add `.cpg` /
+  `.aux.xml` sidecars; the previous values are restored afterwards.
 
 `manifest.json` (schema: [manifest.template.json](../../data/samples/manifest.template.json))
 records seed, profile, grid, GDAL version, and per-file SHA-256 + size, plus a
@@ -116,6 +120,16 @@ semantics). Re-check a directory against its manifest with:
 ```sh
 sicnu_generate_samples --out=data/samples --verify   # exit 0 = intact, 4 = drift
 ```
+
+### Regenerating into an existing directory
+
+The foundry manages exactly its own artifacts — `<product>.tif` per raster
+product and the `training_samples.shp/shx/dbf/prj/cpg` sidecar set — and
+nothing else. Re-running the same command over a previous run is safe
+(byte-identical). After a selection switch (full set ↔ a `--spec` subset) the
+generator prunes the owned files the new selection does not include, so the
+directory stays `--verify`-clean; any other file in the directory (your notes,
+scripts, exports) is never touched.
 
 ## Generating subsets for new experiments
 
