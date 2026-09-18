@@ -210,6 +210,45 @@ bool processingRegistryReadable()
   return QgsApplication::processingRegistry() != nullptr;
 }
 
+/**
+ * Exactly-once postProcess contract (#1043): the base algorithm asserts that
+ * postProcess() is called at most once and only after runPrepared() was
+ * entered, yet every failure path after a successful run — external cancel,
+ * QgsProcessingException, plain std::exception — must still run
+ * postProcess(false) so the algorithm can clean up partial work. The guard
+ * invokes it exactly once, from the destructor if an exception unwinds past
+ * this scope, and never after a successful postProcess(true).
+ */
+struct PostProcessOnce
+{
+  QgsProcessingAlgorithm *algorithm = nullptr;
+  QgsProcessingContext *context = nullptr;
+  QgsProcessingFeedback *feedback = nullptr;
+  bool invoked = false;
+
+  QVariantMap finalizeSuccess()
+  {
+    invoked = true; // the base marks itself as post-processed before user code runs
+    return algorithm->postProcess( *context, feedback, true );
+  }
+
+  ~PostProcessOnce()
+  {
+    if ( invoked )
+      return;
+
+    try
+    {
+      algorithm->postProcess( *context, feedback, false );
+    }
+    catch ( ... )
+    {
+      // best-effort cleanup of an already-failing run; the original error
+      // must keep propagating
+    }
+  }
+};
+
 } // anonymous namespace
 
 ProviderAlgorithmAdapter::ProviderAlgorithmAdapter( const QgsProcessingAlgorithm &alg )
@@ -447,41 +486,61 @@ Json::Value ProviderAlgorithmAdapter::execute( const Json::Value &params, Progre
     }
   } watcherJoiner{ runDone, watcher };
 
+  // Any cancellation observed after the run must cancel the feedback too, so
+  // postProcess(false) below sees the final state.
+  auto cancelledAfterRun = [&]() {
+    if ( isCancelledFn && isCancelledFn() )
+      feedback.cancel();
+    return feedback.isCanceled();
+  };
+
   QVariantMap runResults;
-  try
-  {
-    runResults = algorithm->runPrepared( parameters, context, &feedback );
-  }
-  catch ( const QgsProcessingException &e )
-  {
-    try { algorithm->postProcess( context, &feedback, false ); } catch ( ... ) {}
-    throw std::runtime_error( e.what().toStdString() );
-  }
-
-  checkCancelled();
-  if ( feedback.isCanceled() )
-  {
-    try { algorithm->postProcess( context, &feedback, false ); } catch ( ... ) {}
-    throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
-                                             "Processing algorithm cancelled during run: " + mDesc.id );
-  }
-
-  QVariantMap results;
-  try
-  {
-    results = algorithm->postProcess( context, &feedback, true );
-  }
-  catch ( const QgsProcessingException &e )
-  {
-    throw std::runtime_error( e.what().toStdString() );
-  }
-  if ( results.isEmpty() )
-    results = runResults;
-
   Json::Value result( Json::objectValue );
-  for ( auto it = results.constBegin(); it != results.constEnd(); ++it )
+
+  // Guard scope: covers runPrepared, the cancel re-check and postProcess(true).
+  // On every exit that is not a completed postProcess(true), the destructor
+  // runs postProcess(false) exactly once (#1043).
   {
-    result[it.key().toStdString()] = variantToJsonValue( it.value() );
+    PostProcessOnce postGuard{ algorithm.get(), &context, &feedback };
+    try
+    {
+      runResults = algorithm->runPrepared( parameters, context, &feedback );
+    }
+    catch ( const QgsProcessingException &e )
+    {
+      if ( cancelledAfterRun() )
+        throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
+                                                 "Processing algorithm cancelled during run: " + mDesc.id );
+      throw std::runtime_error( e.what().toStdString() );
+    }
+    catch ( const std::exception & )
+    {
+      if ( cancelledAfterRun() )
+        throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
+                                                 "Processing algorithm cancelled during run: " + mDesc.id );
+      throw;
+    }
+
+    if ( cancelledAfterRun() )
+      throw sicnu::operators::RSOperatorError( sicnu::operators::ErrorCode::Cancelled,
+                                               "Processing algorithm cancelled during run: " + mDesc.id );
+
+    QVariantMap results;
+    try
+    {
+      results = postGuard.finalizeSuccess();
+    }
+    catch ( const QgsProcessingException &e )
+    {
+      throw std::runtime_error( e.what().toStdString() );
+    }
+    if ( results.isEmpty() )
+      results = runResults;
+
+    for ( auto it = results.constBegin(); it != results.constEnd(); ++it )
+    {
+      result[it.key().toStdString()] = variantToJsonValue( it.value() );
+    }
   }
   return result;
 }
