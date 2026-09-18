@@ -35,6 +35,7 @@
 #include "agent/tool_catalog/surface_redaction.h"
 #include "agent/spatial_tools/spatial_tool.h"
 #include "agent/data_platform_tools.h"
+#include "agent/mcp_workspace_policy.h"
 
 #include <optional>
 #include <iostream>
@@ -127,134 +128,6 @@ bool idHasAllowedPrefix(const QString &id, bool *isCustomTools = nullptr)
     // Policy moved verbatim to tool_catalog/surface_registry.cpp so the CLI
     // and the surface projection enforce the SAME allow-prefix set.
     return sicnu::agent::tool_catalog::surfaceIdAllowed(id, isCustomTools);
-}
-
-/// Resolve a path for workspace checks. Relative paths are allowed without check.
-/// Absolute paths must canonicalize under workspace root.
-bool absolutePathOutsideWorkspace(const QString &pathValue, const QString &workspaceRoot, QString *detail)
-{
-    if (pathValue.isEmpty())
-        return false;
-
-    // URL / VSI virtual-path awareness (#722-era remote policy): a network
-    // data reference is NOT a filesystem path — treating one as relative
-    // (QFileInfo::isAbsolute() == false for "https://host/x.tif") wrongly
-    // ALLOWED any URL, while on Linux "/vsicurl/https://..." canonicalized
-    // outside the workspace and was wrongly REJECTED. Policy: remote
-    // http(s) data references (optionally /vsicurl/-prefixed) are allowed
-    // read-only data inputs (bounded by GDAL HTTP timeouts); file:// maps to
-    // its local path and falls through to the workspace check; every other
-    // scheme is rejected. SICNU_MCP_ALLOW_REMOTE=0 restores strict local-only.
-    {
-        const QString trimmed = pathValue.trimmed();
-        const QString lowered = trimmed.toLower();
-        const bool vsiPrefixed = lowered.startsWith(QStringLiteral("/vsicurl/"));
-        const bool vsiOther = lowered.startsWith(QStringLiteral("/vsi")) && !vsiPrefixed;
-        const bool httpUrl = lowered.startsWith(QStringLiteral("http://")) ||
-                             lowered.startsWith(QStringLiteral("https://"));
-        const bool fileUrl = lowered.startsWith(QStringLiteral("file://"));
-        if (vsiOther && !vsiPrefixed) {
-            if (detail)
-                *detail = QStringLiteral("Only /vsicurl/ remote sources are supported: %1").arg(pathValue);
-            return true;
-        }
-        if (httpUrl || vsiPrefixed) {
-            if (!envFlagEnabled("SICNU_MCP_ALLOW_REMOTE")) {
-                if (detail)
-                    *detail = QStringLiteral("Remote data references are disabled "
-                                             "(set SICNU_MCP_ALLOW_REMOTE=1): %1").arg(pathValue);
-                return true;
-            }
-            return false; // scheme-validated remote reference, not a workspace path
-        }
-        if (fileUrl) {
-            const QUrl url(trimmed);
-            // file:///abs/path -> local path; falls through to the workspace check.
-            QString local = url.toLocalFile();
-            if (local.isEmpty())
-                local = trimmed.mid(7);
-            if (!absolutePathOutsideWorkspace(local, workspaceRoot, detail))
-                return false;
-            if (detail && detail->isEmpty())
-                *detail = QStringLiteral("Path outside SICNU_MCP_WORKSPACE: %1").arg(pathValue);
-            return true;
-        }
-    }
-
-    QString path = pathValue;
-    if (path.startsWith(QLatin1Char('~'))) {
-        path = QDir::homePath() + path.mid(1);
-    }
-
-    QString workspaceCanon = QDir(workspaceRoot).canonicalPath();
-    if (workspaceCanon.isEmpty())
-        workspaceCanon = QFileInfo(workspaceRoot).absoluteFilePath();
-    if (workspaceCanon.isEmpty())
-        return false;
-
-    const QFileInfo fi(path);
-    QString resolved;
-    if (fi.isAbsolute()) {
-        if (fi.exists()) {
-            resolved = fi.canonicalFilePath();
-        } else {
-            // Non-existent output path: resolve parent dir + filename
-            QDir parent = fi.dir();
-            QString parentCanon = parent.canonicalPath();
-            if (parentCanon.isEmpty())
-                parentCanon = parent.absolutePath();
-            resolved = QDir(parentCanon).filePath(fi.fileName());
-        }
-    } else {
-        const QString joined = QDir(workspaceCanon).filePath(path);
-        const QFileInfo fiJoined(joined);
-        if (fiJoined.exists()) {
-            resolved = fiJoined.canonicalFilePath();
-        } else {
-            QDir parent = fiJoined.dir();
-            QString parentCanon = parent.canonicalPath();
-            if (parentCanon.isEmpty())
-                parentCanon = parent.absolutePath();
-            resolved = QDir(parentCanon).filePath(fiJoined.fileName());
-        }
-    }
-
-    const QString normResolved = QDir::cleanPath(resolved);
-    const QString normWorkspace = QDir::cleanPath(workspaceCanon);
-
-    if (normResolved == normWorkspace)
-        return false;
-    if (normResolved.startsWith(normWorkspace + QLatin1Char('/')))
-        return false;
-
-    if (detail) {
-        *detail = QStringLiteral("Path outside SICNU_MCP_WORKSPACE: %1").arg(pathValue);
-    }
-    return true;
-}
-
-bool collectOutsideWorkspace(const QVariant &value, const QString &workspaceRoot, QString *detail)
-{
-    if (value.userType() == QMetaType::QString) {
-        return absolutePathOutsideWorkspace(value.toString(), workspaceRoot, detail);
-    }
-    if (value.userType() == QMetaType::QVariantList) {
-        const QVariantList list = value.toList();
-        for (const QVariant &item : list) {
-            if (collectOutsideWorkspace(item, workspaceRoot, detail))
-                return true;
-        }
-        return false;
-    }
-    if (value.userType() == QMetaType::QVariantMap) {
-        const QVariantMap map = value.toMap();
-        for (auto it = map.constBegin(); it != map.constEnd(); ++it) {
-            if (collectOutsideWorkspace(it.value(), workspaceRoot, detail))
-                return true;
-        }
-        return false;
-    }
-    return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -717,6 +590,24 @@ void McpServer::handleRequest(const QVariantMap &request)
             QVariantMap resultData;
             if (sicnu::agent::isDataPlatformTool(toolName))
             {
+                // #1033: every data-platform tool takes caller-controlled
+                // store paths (dataset_db/experiment_db, opened with CREATE
+                // semantics) or filesystem targets (out/bundle). Containment
+                // must hold BEFORE the first open — the same typed gate as
+                // the sibling branches — otherwise a single call could
+                // create/mutate a SQLite database at any writable path.
+                // Like the sibling branches this scans the WHOLE argument
+                // tree, so a free-text field (note, experiment_name, ...)
+                // carrying an absolute path is refused too — the same
+                // fail-closed posture, not a per-key allow-list.
+                QString denyReason;
+                if (!validateWorkspacePaths(arguments, &denyReason))
+                {
+                    SICNU_LOG_ERROR(SicnuLogTags::MCP, denyReason);
+                    throw McpToolError(toolName + QStringLiteral(": ") + denyReason,
+                                       QStringLiteral("PATH_OUTSIDE_WORKSPACE"),
+                                       QStringLiteral("validation"));
+                }
                 resultData = sicnu::agent::handleDataPlatformTool(toolName, arguments);
             }
             else if (toolName == QStringLiteral("list_algorithms"))
@@ -1208,8 +1099,8 @@ QVariantMap McpServer::handleArtifactRead(const QVariantMap &arguments)
 
     // Resolve relative arguments against the workspace root FIRST, then run
     // the containment check on the resolved path: canonicalization inside
-    // absolutePathOutsideWorkspace must see the joined path or a crafted
-    // "../" segment would escape the sandbox.
+    // mcpPathOutsideWorkspace must see the joined path or a crafted "../"
+    // segment would escape the sandbox.
     const QString workspace = QProcessEnvironment::systemEnvironment().value(
         QStringLiteral("SICNU_MCP_WORKSPACE"));
     QString resolved = rawPath;
@@ -1218,9 +1109,10 @@ QVariantMap McpServer::handleArtifactRead(const QVariantMap &arguments)
 
     // With no sandbox configured (env unset) every path is allowed — the
     // same policy as validateWorkspacePaths, which returns early instead of
-    // letting absolutePathOutsideWorkspace treat an empty root as the cwd.
+    // letting mcpPathOutsideWorkspace treat an empty root as the cwd.
     QString detail;
-    if (!workspace.isEmpty() && absolutePathOutsideWorkspace(resolved, workspace, &detail))
+    if (!workspace.isEmpty()
+        && sicnu::agent::mcpPathOutsideWorkspace(resolved, workspace, &detail))
         throw McpToolError(
             QStringLiteral("artifact_read path rejected: %1").arg(detail));
 
@@ -1649,7 +1541,7 @@ bool McpServer::validateWorkspacePaths(const QVariantMap &parameters, QString *r
         return true;
 
     QString detail;
-    if (collectOutsideWorkspace(parameters, workspace, &detail)) {
+    if (sicnu::agent::mcpCollectOutsideWorkspace(parameters, workspace, &detail)) {
         if (reason)
             *reason = detail;
         return false;
@@ -2494,6 +2386,16 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
         }
         QVariantMap containmentArgs;
         containmentArgs.insert(QStringLiteral("pipeline"), pipelineValue);
+        // #1033: the opt-in recording arguments open (and create) SQLite
+        // stores, so they must satisfy the same containment as the pipeline —
+        // validated here BEFORE the first enable(), which binds the monitor
+        // to the first store path it sees. Absent keys are inert. The values
+        // are trimmed here exactly like the readers below trim them, so the
+        // gate and the open always see the same string.
+        containmentArgs.insert(QStringLiteral("experiment_db"),
+                               arguments.value(QStringLiteral("experiment_db")).toString().trimmed());
+        containmentArgs.insert(QStringLiteral("dataset_db"),
+                               arguments.value(QStringLiteral("dataset_db")).toString().trimmed());
         QString denyReason;
         if (!validateWorkspacePaths(containmentArgs, &denyReason))
         {
@@ -2512,8 +2414,11 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
     // Absent arguments leave behavior identical to a build without recording.
     // Recording binds to the SUBMISSION (recordSubmission right after the
     // tracked submit), never to the process: other runs are not recorded.
-    const QString experimentDb =
-        arguments.value(QStringLiteral("experiment_db")).toString().trimmed();
+    // #1033: resolve the recording paths through the same workspace policy
+    // the gate above validated with, so the store open below touches exactly
+    // the validated file (relative arguments anchor at the sandbox root).
+    const QString experimentDb = sicnu::agent::mcpResolveWorkspacePath(
+        arguments.value(QStringLiteral("experiment_db")).toString().trimmed());
     sicnu::experiment::RunPins pins;
     bool recordingRequested = false;
     QString recordedExperimentRunId;
@@ -2556,7 +2461,9 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
                 arguments.value(QStringLiteral("experiment_id")).toString().trimmed(),
                 arguments.value(QStringLiteral("experiment_name")).toString(),
                 arguments.value(QStringLiteral("experiment_objective")).toString(),
-                arguments.value(QStringLiteral("dataset_db")).toString().trimmed(), &recordError)) {
+                sicnu::agent::mcpResolveWorkspacePath(
+                    arguments.value(QStringLiteral("dataset_db")).toString().trimmed()),
+                &recordError)) {
             SICNU_LOG_ERROR(SicnuLogTags::MCP,
                             QStringLiteral("run_workflow recording refused: %1").arg(recordError));
             throw McpToolError(QStringLiteral("run_workflow: experiment recording refused: ")
@@ -2578,7 +2485,7 @@ QVariantMap McpServer::handleRunWorkflow(const QVariantMap &arguments)
     if (pipelineId < 0)
         throw McpToolError(
             QStringLiteral("run_workflow: pipeline rejected; nothing submitted or recorded — "
-                           "invalid pipeline definition, expected {id, steps: [{id, operator, params, inputs}]}"),
+                           "Invalid pipeline definition, expected {id, steps: [{id, operator, params, inputs}]}"),
             QStringLiteral("INVALID_PIPELINE"), QStringLiteral("validation"));
 
     if (recordingRequested) {

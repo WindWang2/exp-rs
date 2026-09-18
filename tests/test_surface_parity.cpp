@@ -15,7 +15,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QCoreApplication>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QProcess>
 #include <QRegularExpression>
@@ -24,6 +26,7 @@
 #include <QVariantMap>
 
 #include <algorithm>
+#include <iterator>
 #include <map>
 #include <string>
 #include <vector>
@@ -33,6 +36,7 @@
 #include "agent/tool_catalog/meta_protocol_tools.h"
 #include "agent/tool_catalog/agent_tool_catalog.h"
 #include "agent/data_platform_tools.h"
+#include "agent/spatial_tools/spatial_tool.h"
 
 #ifndef SICNU_SOURCE_DIR
 #error "SICNU_SOURCE_DIR must point at the repo source tree"
@@ -499,4 +503,256 @@ TEST_CASE("Dispatch-visible spatial families are listing-visible", "[surface_par
         INFO("family: " << family);
         REQUIRE(surfaceIdAllowed(QStringLiteral("%1:__probe__").arg(family)));
     }
+}
+
+TEST_CASE("Every registered spatial tool routes to the spatial handler (#1056)",
+          "[surface_parity][io_routing]")
+{
+    // #1056: io:probe/capabilities/product/product_plan were registered in
+    // SpatialToolRegistry but absent from BOTH the catalog projection and
+    // the tools/call spatial dispatch — a call fell through to the operator
+    // registries and answered "Algorithm not found" for a tool an agent
+    // could enumerate. Registry membership is the single source of truth
+    // now: every registered tool must reach the spatial handler, whatever
+    // its namespace prefix.
+    SurfaceProbeServer &s = server();
+    auto &registry = sicnu::agent::spatial_tools::SpatialToolRegistry::instance();
+    registry.registerBuiltinTools();
+    REQUIRE(registry.tools().size() > 10);
+
+    for (const auto &tool : registry.tools())
+    {
+        const QString id = QString::fromStdString(tool->name());
+        INFO("spatial tool: " << id.toStdString());
+        int rpc = 0;
+        // Empty arguments fail the handler's own validation (read-only
+        // list-style tools may answer with their result); the call must
+        // NEVER surface the operator-dispatch rejections.
+        const QString error = s.callTool(id, {}, &rpc);
+        REQUIRE(rpc != -32602);
+        REQUIRE_FALSE(error.contains(QStringLiteral("Algorithm not found")));
+        REQUIRE_FALSE(error.contains(QStringLiteral("Unknown tool")));
+    }
+
+    // The io: probe family specifically: listed in the projection AND
+    // routed to the handler whose validation runs before any I/O.
+    for (const char *name : { "io:probe", "io:capabilities", "io:product", "io:product_plan" })
+    {
+        INFO("io tool: " << name);
+        REQUIRE(findSurfaceTool(name).has_value());
+        REQUIRE(sicnu::agent::spatial_tools::registryHandlesTool(name));
+        int rpc = 0;
+        const QString error = s.callTool(QString::fromLatin1(name), {}, &rpc);
+        REQUIRE(rpc == 0);
+        // Missing required 'path' is the io wrapper's own typed validation.
+        REQUIRE(error.contains(QStringLiteral("path")));
+    }
+
+    // Unknown names still stably reject: an unregistered spatial-namespace
+    // id answers the typed UNKNOWN_TOOL handler error, and an unregistered
+    // io: id falls to the operator layer's established rejection — never a
+    // crash, never a silent success.
+    int rpc = 0;
+    const QString unknownSpatial =
+        s.callTool(QStringLiteral("spatial:__no_such_tool__"), {}, &rpc);
+    REQUIRE(rpc == 0);
+    REQUIRE(unknownSpatial.contains(QStringLiteral("Unknown spatial tool")));
+
+    const QString unknownIo = s.callTool(QStringLiteral("io:__no_such_tool__"), {}, &rpc);
+    REQUIRE(rpc == 0);
+    REQUIRE(unknownIo.contains(QStringLiteral("Algorithm not found")));
+
+    // RS operators sharing the io: prefix keep their own dispatch.
+    REQUIRE_FALSE(sicnu::agent::spatial_tools::registryHandlesTool("io:translate"));
+    REQUIRE(sicnu::agent::tool_catalog::surfaceIdAllowed(QStringLiteral("io:translate")));
+}
+
+namespace
+{
+
+struct WorkspaceEnvGuard
+{
+    const bool had;
+    const QString previous;
+    explicit WorkspaceEnvGuard(const QString &root)
+        : had(qEnvironmentVariableIsSet("SICNU_MCP_WORKSPACE"))
+        , previous(qEnvironmentVariable("SICNU_MCP_WORKSPACE"))
+    {
+        qputenv("SICNU_MCP_WORKSPACE", root.toUtf8());
+    }
+    ~WorkspaceEnvGuard()
+    {
+        if (had)
+            qputenv("SICNU_MCP_WORKSPACE", previous.toUtf8());
+        else
+            qunsetenv("SICNU_MCP_WORKSPACE");
+    }
+};
+
+QString freshSandboxDir(const QString &name)
+{
+    const QString root = QDir::tempPath() + QStringLiteral("/sicnu_mcp_parity_%1").arg(name);
+    QDir(root).removeRecursively();
+    REQUIRE(QDir().mkpath(root));
+    return root;
+}
+
+} // namespace
+
+TEST_CASE("Every projected catalog tool is structurally routable", "[surface_parity][io_routing]")
+{
+    // The inverse drift (#1056): a tool that tools/list advertises must be
+    // reachable through tools/call. Catalog projection membership is prefix-
+    // driven (surfaceIdAllowed); tools/call routing is branch-driven. This
+    // pins the family-level contract: every projected CATALOG tool's prefix
+    // must land in a dispatch branch — spatial registry membership, the
+    // spatial-prefix table, the interaction families (Task Center), the
+    // data: exact branches, or the operator/algorithm allow-prefixes.
+    static const char *kOperatorPrefixes[] = {
+        "rs:", "gdal:", "gdal_tools:", "otb:", "otb_tools:", "qgis:",
+        "qgis_algorithms:", "opencv:", "processing:",
+        // io: is shared with the spatial probe family: RS operators
+        // (io:translate...) route through the operator/algorithm layer, the
+        // registered spatial io: tools through registryHandlesTool — both
+        // branches are covered by the two predicates below.
+        "io:",
+    };
+    static const char *kInteractionPrefixes[] = {
+        "view:", "roi:", "canvas:", "layer:", "raster:",
+    };
+    static const char *kSpatialPrefixes[] = {
+        "spatial:", "layout:", "cartography:", "workbench:", "symbology:",
+        "workflow:", "workspace:", "project:", "asset:", "collection:",
+        "lineage:", "result:", "harness:", "run:", "temporal:",
+    };
+    auto hasPrefix = [](const std::string &name, const char **prefixes, size_t n) {
+        for (size_t i = 0; i < n; ++i)
+            if (name.rfind(prefixes[i], 0) == 0)
+                return true;
+        return false;
+    };
+
+    for (const SurfaceTool &tool : collectSurfaceTools())
+    {
+        if (tool.source != SurfaceToolSource::Catalog)
+            continue;
+        INFO("catalog tool: " << tool.name);
+        const bool routable =
+            sicnu::agent::spatial_tools::registryHandlesTool(tool.name)
+            || hasPrefix(tool.name, kSpatialPrefixes, std::size(kSpatialPrefixes))
+            || hasPrefix(tool.name, kInteractionPrefixes, std::size(kInteractionPrefixes))
+            || hasPrefix(tool.name, kOperatorPrefixes, std::size(kOperatorPrefixes))
+            || tool.name.rfind("data:", 0) == 0;
+        REQUIRE(routable);
+    }
+
+    // Advertisement side of the same contract: every registry tool in a
+    // provider-published namespace must be visible in the projection —
+    // reachability without listing starves discovery (#1056's listing half).
+    auto &registry = sicnu::agent::spatial_tools::SpatialToolRegistry::instance();
+    registry.registerBuiltinTools();
+    for (const auto &tool : registry.tools())
+    {
+        const std::string &name = tool->name();
+        static const char *kPublished[] = {
+            "spatial:", "temporal:", "cartography:", "symbology:", "workflow:",
+            "workspace:", "project:", "asset:", "collection:", "lineage:",
+            "result:", "run:", "harness:", "io:", "solution:", "template:", "style:",
+            "layout:",
+        };
+        if (!hasPrefix(name, kPublished, std::size(kPublished)))
+            continue;
+        INFO("registry tool: " << name);
+        REQUIRE(findSurfaceTool(name).has_value());
+    }
+}
+
+TEST_CASE("data-platform and run_workflow path arguments stay inside the sandbox (#1033)",
+          "[surface_parity][containment]")
+{
+    SurfaceProbeServer &s = server();
+
+    // The store path an attacker points at, OUTSIDE the sandbox root: the
+    // call must fail before SQLite ever creates the file.
+    const QString sandbox = freshSandboxDir(QStringLiteral("ws"));
+    const QString victim = freshSandboxDir(QStringLiteral("outside"));
+    WorkspaceEnvGuard guard(sandbox);
+
+    const QString outsideDb = victim + QStringLiteral("/planted.db");
+    REQUIRE_FALSE(QFile::exists(outsideDb));
+
+    // data-platform branch: the typed gate fires before the module opens.
+    QVariantMap args;
+    args.insert(QStringLiteral("dataset_db"), outsideDb);
+    s.request(QVariantMap{
+        { QStringLiteral("jsonrpc"), QStringLiteral("2.0") },
+        { QStringLiteral("id"), 11 },
+        { QStringLiteral("method"), QStringLiteral("tools/call") },
+        { QStringLiteral("params"),
+          QVariantMap{ { QStringLiteral("name"), QStringLiteral("dataset:list") },
+                       { QStringLiteral("arguments"), args } } } });
+    REQUIRE(s.lastErrorCode == 0); // tool failure, not a protocol fault
+    REQUIRE(s.lastResponseResult.value(QStringLiteral("isError")).toBool());
+    REQUIRE(s.lastResponseResult.value(QStringLiteral("errorCode")).toString()
+            == QStringLiteral("PATH_OUTSIDE_WORKSPACE"));
+    REQUIRE(s.lastResponseResult.value(QStringLiteral("errorCategory")).toString()
+            == QStringLiteral("validation"));
+    // No database was created, no schema written, no enumeration happened.
+    REQUIRE_FALSE(QFile::exists(outsideDb));
+    // The stable message is policy-scoped: it names the caller's own path,
+    // never any filesystem state beyond it.
+    const QString text = s.lastResponseResult.value(QStringLiteral("content")).toList()
+                             .value(0).toMap().value(QStringLiteral("text")).toString();
+    REQUIRE(text.contains(QStringLiteral("SICNU_MCP_WORKSPACE")));
+
+    // Same for the experiment store path.
+    QVariantMap benchmarkArgs;
+    benchmarkArgs.insert(QStringLiteral("experiment_db"), outsideDb);
+    const QString errorText = s.callTool(QStringLiteral("benchmark:list"), benchmarkArgs);
+    REQUIRE( ( errorText.contains(QStringLiteral("PATH_OUTSIDE_WORKSPACE"))
+               || errorText.contains(QStringLiteral("outside SICNU_MCP_WORKSPACE")) ) );
+    REQUIRE_FALSE(QFile::exists(outsideDb));
+
+    // run_workflow: the opt-in recording args reach the same gate BEFORE
+    // the monitor binds the first store path.
+    QVariantMap runArgs;
+    runArgs.insert(QStringLiteral("pipeline"),
+                   QStringLiteral("{\"id\":\"p\",\"steps\":[]}"));
+    runArgs.insert(QStringLiteral("experiment_db"), outsideDb);
+    runArgs.insert(QStringLiteral("experiment_id"), QStringLiteral("exp-1"));
+    const QString runError = s.callTool(QStringLiteral("run_workflow"), runArgs);
+    REQUIRE( ( runError.contains(QStringLiteral("PATH_OUTSIDE_WORKSPACE"))
+               || runError.contains(QStringLiteral("outside SICNU_MCP_WORKSPACE")) ) );
+    REQUIRE_FALSE(QFile::exists(outsideDb));
+
+    // dataset_db on run_workflow is contained by the same gate.
+    QVariantMap runArgs2;
+    runArgs2.insert(QStringLiteral("pipeline"),
+                    QStringLiteral("{\"id\":\"p\",\"steps\":[]}"));
+    runArgs2.insert(QStringLiteral("experiment_db"), sandbox + QStringLiteral("/exp.db"));
+    runArgs2.insert(QStringLiteral("experiment_id"), QStringLiteral("exp-1"));
+    runArgs2.insert(QStringLiteral("dataset_db"), outsideDb);
+    const QString runError2 = s.callTool(QStringLiteral("run_workflow"), runArgs2);
+    REQUIRE( ( runError2.contains(QStringLiteral("PATH_OUTSIDE_WORKSPACE"))
+               || runError2.contains(QStringLiteral("outside SICNU_MCP_WORKSPACE")) ) );
+    REQUIRE_FALSE(QFile::exists(outsideDb));
+
+    // Traversal through a relative argument is resolved under the root and
+    // then contained: "…" may not escape via ../ segments.
+    QVariantMap relArgs;
+    relArgs.insert(QStringLiteral("dataset_db"),
+                   QStringLiteral("../../") + QFileInfo(outsideDb).fileName());
+    const QString relError = s.callTool(QStringLiteral("dataset:list"), relArgs);
+    REQUIRE_FALSE(relError.isEmpty()); // refused or store-open failure — never a successful outside open
+    REQUIRE_FALSE(QFile::exists(outsideDb));
+
+    // A sandbox-relative store path still works: containment is not a denial
+    // of legitimate use. (The store then reports its own absence/creation.)
+    QVariantMap insideArgs;
+    insideArgs.insert(QStringLiteral("dataset_db"), QStringLiteral("inside.db"));
+    const QString insideError = s.callTool(QStringLiteral("dataset:list"), insideArgs);
+    REQUIRE_FALSE(insideError.contains(QStringLiteral("SICNU_MCP_WORKSPACE")));
+
+    QDir(victim).removeRecursively();
+    QDir(sandbox).removeRecursively();
 }

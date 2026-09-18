@@ -2,6 +2,8 @@
 // reproducibility: MCP surface. See data_platform_tools.h for the contract.
 #include "data_platform_tools.h"
 
+#include "mcp_workspace_policy.h"
+
 #include "dataset/annotation.h"
 #include "dataset/dataset_qa_report.h"
 #include "dataset/dataset_quality.h"
@@ -106,9 +108,31 @@ qint64 pageCursor( const QVariant &value )
 
 [[noreturn]] void fail( const QString &message ) { throw std::runtime_error( message.toStdString() ); }
 
+// #1033 defense in depth: the MCP dispatch layer validates every argument
+// before this module runs, but THIS module owns the opens (SQLite
+// READWRITE|CREATE) and the bundle writes. containedWorkspacePath() both
+// enforces the SICNU_MCP_WORKSPACE containment and anchors relative paths
+// at the workspace root — the returned path is what the handlers open, so
+// the path that was validated and the path that is used are the same file.
+// The message is stable and policy-scoped (no filesystem-state leakage).
+QString containedWorkspacePath( const QString &key, const QString &path )
+{
+    if ( path.isEmpty() )
+        return path;
+    const QString workspace = sicnu::agent::mcpWorkspaceRoot();
+    if ( workspace.isEmpty() )
+        return path;
+    const QString resolved = sicnu::agent::mcpResolveWorkspacePath( path );
+    QString detail;
+    if ( sicnu::agent::mcpPathOutsideWorkspace( resolved, workspace, &detail ) )
+        fail( QStringLiteral( "%1: %2" ).arg( key, detail ) );
+    return resolved;
+}
+
 std::unique_ptr<DatasetStore> openDatasetStore( const QVariantMap &args )
 {
-    const QString dbPath = args.value( QStringLiteral( "dataset_db" ) ).toString();
+    const QString dbPath = containedWorkspacePath(
+        QStringLiteral( "dataset_db" ), args.value( QStringLiteral( "dataset_db" ) ).toString() );
     if ( dbPath.isEmpty() )
         fail( QStringLiteral( "dataset_db is required" ) );
     auto store = std::make_unique<DatasetStore>();
@@ -121,7 +145,9 @@ std::unique_ptr<DatasetStore> openDatasetStore( const QVariantMap &args )
 
 std::unique_ptr<sicnu::experiment::ExperimentStore> openExperimentStore( const QVariantMap &args )
 {
-    const QString dbPath = args.value( QStringLiteral( "experiment_db" ) ).toString();
+    const QString dbPath = containedWorkspacePath(
+        QStringLiteral( "experiment_db" ),
+        args.value( QStringLiteral( "experiment_db" ) ).toString() );
     if ( dbPath.isEmpty() )
         fail( QStringLiteral( "experiment_db is required" ) );
     auto store = std::make_unique<sicnu::experiment::ExperimentStore>();
@@ -952,7 +978,15 @@ QVariantMap reproducibilityInspect( const QVariantMap &args )
         fail( QStringLiteral( "run not found: %1" ).arg( runId ) );
 
     sicnu::experiment::ReproductionHooks hooks;
-    hooks.artifactAvailable = []( const QString &path, qint64 sizeBytes ) {
+    // Same containment as reproducibility:validate's hook (#1033): recorded
+    // artifact paths outside the sandbox answer "unavailable" without any
+    // stat, so replay assessment cannot probe the filesystem across the
+    // containment boundary.
+    const QString inspectWorkspace = sicnu::agent::mcpWorkspaceRoot();
+    hooks.artifactAvailable = [ inspectWorkspace ]( const QString &path, qint64 sizeBytes ) {
+        if ( !inspectWorkspace.isEmpty()
+             && sicnu::agent::mcpPathOutsideWorkspace( path, inspectWorkspace ) )
+            return false;
         const QFileInfo info( path );
         return info.exists() && ( sizeBytes <= 0 || info.size() == sizeBytes );
     };
@@ -980,9 +1014,11 @@ QVariantMap reproducibilityExport( const QVariantMap &args )
     const QString outputDir = args.value( QStringLiteral( "out" ) ).toString();
     if ( runId.isEmpty() || outputDir.isEmpty() )
         fail( QStringLiteral( "run and out are required" ) );
+    // #1033: the bundle tree is written into this caller-chosen directory —
+    // contain it before the first create, like the store paths above.
     sicnu::experiment::ReproductionBundleExporter exporter( *experimentStore, *datasetStore );
     sicnu::experiment::ReproductionBundleOptions options;
-    options.outputDir = outputDir;
+    options.outputDir = containedWorkspacePath( QStringLiteral( "out" ), outputDir );
     const QString portable = args.value( QStringLiteral( "mode" ) ).toString();
     if ( portable == QLatin1String( "portable" ) )
         options.mode = sicnu::experiment::ReproductionBundleOptions::Mode::Portable;
@@ -1002,6 +1038,11 @@ QVariantMap reproducibilityValidate( const QVariantMap &args )
     const QString bundleDir = args.value( QStringLiteral( "bundle" ) ).toString();
     if ( bundleDir.isEmpty() )
         fail( QStringLiteral( "bundle is required" ) );
+    // #1033: the bundle manifest drives path stat()ing below — an outside
+    // bundle would turn validation into a file-existence/size oracle outside
+    // the workspace, so the bundle root is contained before any read.
+    const QString resolvedBundle = containedWorkspacePath( QStringLiteral( "bundle" ), bundleDir );
+    const QString workspaceRoot = sicnu::agent::mcpWorkspaceRoot();
     sicnu::experiment::ReproductionBundleExporter exporter( *experimentStore, *datasetStore );
     sicnu::experiment::ReproductionHooks hooks;
     // Explicit caller-declared availability (headless MCP has no registries).
@@ -1017,11 +1058,19 @@ QVariantMap reproducibilityValidate( const QVariantMap &args )
         const bool available = args.value( QStringLiteral( "algorithm_available" ) ).toBool();
         hooks.algorithmAvailable = [ available ]( const QString & ) { return available; };
     }
-    hooks.artifactAvailable = []( const QString &path, qint64 sizeBytes ) {
+    hooks.artifactAvailable = [ workspaceRoot ]( const QString &path, qint64 sizeBytes ) {
+        // A crafted manifest may list paths outside the bundle; stat()ing
+        // them would leak existence/size across the containment boundary.
+        // Under an active sandbox such entries answer "unavailable" — the
+        // truthful verdict for an artifact the caller must not probe —
+        // without any filesystem access.
+        if ( !workspaceRoot.isEmpty()
+             && sicnu::agent::mcpPathOutsideWorkspace( path, workspaceRoot ) )
+            return false;
         const QFileInfo info( path );
         return info.exists() && ( sizeBytes <= 0 || info.size() == sizeBytes );
     };
-    const auto validation = exporter.validateBundle( bundleDir, hooks );
+    const auto validation = exporter.validateBundle( resolvedBundle, hooks );
     QJsonObject data;
     data.insert( QStringLiteral( "level" ),
                  reproductionLevelToString( validation.level ) );

@@ -16,6 +16,8 @@
 #include "experiment/experiment_store.h"
 #include "experiment/experiment_types.h"
 
+#include <QDir>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QTemporaryDir>
@@ -407,4 +409,138 @@ TEST_CASE( "reproducibility:inspect degrades honestly", "[agent][mcp][data_platf
         if ( check.toMap().value( QStringLiteral( "status" ) ).toString() == QStringLiteral( "missing" ) )
             sawMissing = true;
     CHECK( sawMissing );
+}
+
+namespace
+{
+
+// Sandbox env guard: containment only applies while SICNU_MCP_WORKSPACE is
+// set, and other suites in this binary must not observe the sandbox.
+struct WorkspaceGuard
+{
+    const bool had;
+    const QString previous;
+    explicit WorkspaceGuard( const QString &root )
+        : had( qEnvironmentVariableIsSet( "SICNU_MCP_WORKSPACE" ) )
+        , previous( qEnvironmentVariable( "SICNU_MCP_WORKSPACE" ) )
+    {
+        qputenv( "SICNU_MCP_WORKSPACE", root.toUtf8() );
+    }
+    ~WorkspaceGuard()
+    {
+        if ( had )
+            qputenv( "SICNU_MCP_WORKSPACE", previous.toUtf8() );
+        else
+            qunsetenv( "SICNU_MCP_WORKSPACE" );
+    }
+};
+
+} // namespace
+
+TEST_CASE( "data-platform store and bundle paths stay inside SICNU_MCP_WORKSPACE (#1033)",
+           "[agent][mcp][data_platform][containment]" )
+{
+    using sicnu::agent::handleDataPlatformTool;
+    // The victim directory is OUTSIDE the sandbox root: every call below
+    // must be refused before SQLite creates or mutates anything there.
+    QTemporaryDir victimDir;
+    REQUIRE( victimDir.isValid() );
+    const QString outsideDb = victimDir.filePath( QStringLiteral( "planted.db" ) );
+
+    QTemporaryDir sandboxDir;
+    REQUIRE( sandboxDir.isValid() );
+    WorkspaceGuard guard( sandboxDir.path() );
+
+    // Module-level gate (defense in depth behind the MCP dispatch gate):
+    // the refusal is a typed, stable runtime_error naming the policy.
+    bool threw = false;
+    try
+    {
+        handleDataPlatformTool( QStringLiteral( "dataset:list" ), baseArgs( outsideDb ) );
+    }
+    catch ( const std::runtime_error &e )
+    {
+        threw = true;
+        const QString message = QString::fromUtf8( e.what() );
+        REQUIRE( message.contains( QStringLiteral( "dataset_db" ) ) );
+        REQUIRE( message.contains( QStringLiteral( "SICNU_MCP_WORKSPACE" ) ) );
+    }
+    REQUIRE( threw );
+    // Nothing was created at the caller-chosen path: no SQLite header, no
+    // WAL/SHM sidecar files, no schema writes.
+    REQUIRE( !QFileInfo::exists( outsideDb ) );
+
+    threw = false;
+    try
+    {
+        handleDataPlatformTool( QStringLiteral( "experiment:list" ), variantArgs( outsideDb ) );
+    }
+    catch ( const std::runtime_error &e )
+    {
+        threw = true;
+        REQUIRE( QString::fromUtf8( e.what() ).contains( QStringLiteral( "experiment_db" ) ) );
+    }
+    REQUIRE( threw );
+    REQUIRE( !QFileInfo::exists( outsideDb ) );
+
+    // reproducibility:validate stats manifest-listed paths — an outside
+    // bundle root is refused before any read (existence oracle closed).
+    threw = false;
+    QVariantMap validateArgs;
+    validateArgs.insert( QStringLiteral( "dataset_db" ), sandboxDir.filePath( QStringLiteral( "ds.db" ) ) );
+    validateArgs.insert( QStringLiteral( "experiment_db" ), sandboxDir.filePath( QStringLiteral( "ex.db" ) ) );
+    validateArgs.insert( QStringLiteral( "bundle" ), outsideDb );
+    try
+    {
+        handleDataPlatformTool( QStringLiteral( "reproducibility:validate" ), validateArgs );
+    }
+    catch ( const std::runtime_error &e )
+    {
+        threw = true;
+        REQUIRE( QString::fromUtf8( e.what() ).contains( QStringLiteral( "bundle" ) ) );
+    }
+    REQUIRE( threw );
+
+    // Relative store arguments anchor at the sandbox root — the file lands
+    // in the workspace, never in the process CWD (validated path == opened
+    // path, #1033).
+    QVariantMap relArgs;
+    relArgs.insert( QStringLiteral( "dataset_db" ), QStringLiteral( "relative.db" ) );
+    const auto page = handleDataPlatformTool( QStringLiteral( "dataset:list" ), relArgs );
+    REQUIRE( page.value( QStringLiteral( "total" ) ).toLongLong() == 0 );
+    REQUIRE( QFileInfo::exists( sandboxDir.filePath( QStringLiteral( "relative.db" ) ) ) );
+    REQUIRE( !QFileInfo::exists( QDir::current().filePath( QStringLiteral( "relative.db" ) ) ) );
+}
+
+TEST_CASE( "reproducibility:export refuses an output directory outside the sandbox (#1033)",
+           "[agent][mcp][data_platform][containment][repro]" )
+{
+    using sicnu::agent::handleDataPlatformTool;
+    // Seeded stores live INSIDE the sandbox so only `out` violates policy —
+    // the refusal must fire before the bundle tree is written.
+    SeededStore seeded;
+    QTemporaryDir victimDir;
+    REQUIRE( victimDir.isValid() );
+    WorkspaceGuard guard( seeded.fixture.dir.path() );
+
+    const QString outsideOut = victimDir.filePath( QStringLiteral( "bundle" ) );
+    QVariantMap args = baseArgs( seeded.fixture.datasetDb );
+    args.insert( QStringLiteral( "experiment_db" ), seeded.fixture.experimentDb );
+    args.insert( QStringLiteral( "run" ), QStringLiteral( "no-such-run" ) );
+    args.insert( QStringLiteral( "out" ), outsideOut );
+
+    bool threw = false;
+    try
+    {
+        handleDataPlatformTool( QStringLiteral( "reproducibility:export" ), args );
+    }
+    catch ( const std::runtime_error &e )
+    {
+        threw = true;
+        const QString message = QString::fromUtf8( e.what() );
+        REQUIRE( message.contains( QStringLiteral( "out" ) ) );
+        REQUIRE( message.contains( QStringLiteral( "SICNU_MCP_WORKSPACE" ) ) );
+    }
+    REQUIRE( threw );
+    REQUIRE( !QFileInfo::exists( outsideOut ) );
 }

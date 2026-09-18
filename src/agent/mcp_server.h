@@ -184,6 +184,9 @@ private:
     /// Allow-list: rs:, gdal:, gdal_tools:, otb:, qgis:, qgis_algorithms:, opencv:; custom_tools: only with SICNU_MCP_TRUST_CUSTOM_TOOLS=1
     static bool isToolIdAllowed(const QString &toolId, QString *reason = nullptr);
     /// When SICNU_MCP_WORKSPACE is set, reject absolute string params outside that root.
+    /// Delegates to agent/mcp_workspace_policy — the canonical containment
+    /// implementation shared with the data-platform branch and run_workflow's
+    /// recording arguments (#1033).
     static bool validateWorkspacePaths(const QVariantMap &parameters, QString *reason = nullptr);
 
     StdinReader *mReader = nullptr;

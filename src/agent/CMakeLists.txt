@@ -13,6 +13,10 @@ add_library(sicnu_agent SHARED
   tools/classification_tool.h
   data_platform_tools.cpp
   data_platform_tools.h
+  # 1033: canonical SICNU_MCP_WORKSPACE containment shared by every
+  # path-consuming MCP branch (mcp_server, data_platform_tools).
+  mcp_workspace_policy.cpp
+  mcp_workspace_policy.h
   workspace_snapshot.cpp
   workspace_snapshot.h
   workspace_state.cpp

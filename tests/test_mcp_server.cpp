@@ -3,6 +3,7 @@
 #include <QJsonObject>
 #include <QJsonDocument>
 #include <QVariantMap>
+#include <QFileInfo>
 
 #include <chrono>
 #include <thread>
@@ -1256,6 +1257,79 @@ TEST_CASE( "McpServer enforces the SICNU_MCP_WORKSPACE sandbox on every executio
         args[QStringLiteral( "pipeline" )] = pipeline;
         const QVariantMap submitted = server.testRunWorkflow( args );
         REQUIRE( submitted.value( QStringLiteral( "pipeline_id" ) ).toLongLong() >= 0 );
+    }
+
+    SECTION( "run_workflow rejects an out-of-workspace experiment_db before recording binds" )
+    {
+        QVariantMap args;
+        args[QStringLiteral( "pipeline" )] = QStringLiteral( "{\"id\":\"p1\",\"steps\":[]}" );
+        args[QStringLiteral( "experiment_db" )] = outside.filePath( QStringLiteral( "exp.db" ) );
+        args[QStringLiteral( "experiment_id" )] = QStringLiteral( "exp-1" );
+        try
+        {
+            server.testRunWorkflow( args );
+            FAIL( "expected PATH_OUTSIDE_WORKSPACE rejection" );
+        }
+        catch ( const std::runtime_error &e )
+        {
+            REQUIRE( QString::fromStdString( e.what() )
+                         .contains( QStringLiteral( "Path outside SICNU_MCP_WORKSPACE" ) ) );
+        }
+        // #1033: the refusal precedes the first store open — no SQLite file,
+        // no experiment row.
+        REQUIRE( !QFileInfo::exists( outside.filePath( QStringLiteral( "exp.db" ) ) ) );
+    }
+
+    SECTION( "run_workflow rejects an out-of-workspace dataset_db alongside an inside experiment_db" )
+    {
+        QVariantMap args;
+        args[QStringLiteral( "pipeline" )] = QStringLiteral( "{\"id\":\"p1\",\"steps\":[]}" );
+        args[QStringLiteral( "experiment_db" )] = workspace.filePath( QStringLiteral( "exp.db" ) );
+        args[QStringLiteral( "experiment_id" )] = QStringLiteral( "exp-1" );
+        args[QStringLiteral( "dataset_db" )] = outside.filePath( QStringLiteral( "ds.db" ) );
+        try
+        {
+            server.testRunWorkflow( args );
+            FAIL( "expected PATH_OUTSIDE_WORKSPACE rejection" );
+        }
+        catch ( const std::runtime_error &e )
+        {
+            REQUIRE( QString::fromStdString( e.what() )
+                         .contains( QStringLiteral( "Path outside SICNU_MCP_WORKSPACE" ) ) );
+        }
+        REQUIRE( !QFileInfo::exists( outside.filePath( QStringLiteral( "ds.db" ) ) ) );
+    }
+
+    SECTION( "data-platform tool rejects an out-of-workspace dataset_db at the dispatch gate" )
+    {
+        // The tools/call gate runs after the initialize handshake.
+        QVariantMap initReq;
+        initReq[QStringLiteral( "id" )] = 0;
+        initReq[QStringLiteral( "method" )] = QStringLiteral( "initialize" );
+        initReq[QStringLiteral( "params" )] =
+            QVariantMap{ { QStringLiteral( "protocolVersion" ), QStringLiteral( "2024-11-05" ) } };
+        server.testHandleRequest( initReq );
+
+        QVariantMap callReq;
+        callReq[QStringLiteral( "id" )] = 77;
+        callReq[QStringLiteral( "method" )] = QStringLiteral( "tools/call" );
+        QVariantMap callParams;
+        callParams[QStringLiteral( "name" )] = QStringLiteral( "dataset:list" );
+        QVariantMap toolArgs;
+        toolArgs[QStringLiteral( "dataset_db" )] = outside.filePath( QStringLiteral( "planted.db" ) );
+        callParams[QStringLiteral( "arguments" )] = toolArgs;
+        callReq[QStringLiteral( "params" )] = callParams;
+        server.testHandleRequest( callReq );
+        // Typed tool failure carrying the structured containment code.
+        // (Catch2 forbids a top-level || inside REQUIRE — parenthesize.)
+        REQUIRE( ( server.lastErrorId.isNull() || server.lastErrorId == QVariant( 77 ) ) );
+        REQUIRE( server.lastResponseId == QVariant( 77 ) );
+        REQUIRE( server.lastResponseResult.value( QStringLiteral( "isError" ) ).toBool() );
+        REQUIRE( server.lastResponseResult.value( QStringLiteral( "errorCode" ) ).toString()
+                 == QStringLiteral( "PATH_OUTSIDE_WORKSPACE" ) );
+        REQUIRE( server.lastResponseResult.value( QStringLiteral( "errorCategory" ) ).toString()
+                 == QStringLiteral( "validation" ) );
+        REQUIRE( !QFileInfo::exists( outside.filePath( QStringLiteral( "planted.db" ) ) ) );
     }
 
     SECTION( "preflight_algorithm rejects paths outside before algorithm resolution" )
