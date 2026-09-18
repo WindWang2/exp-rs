@@ -553,6 +553,11 @@ bool processFileMultiBand(const QString &sourcePath, const QString &outputPath,
 
     if (progress)
         progress(1.0, QStringLiteral("QUAC complete"));
+    // Close-time flush failures (e.g. ENOSPC) must fail the run (#1043).
+    if (!outDataset.closeWithError(errorMessage)) {
+        QFile::remove(outputPath);
+        return false;
+    }
     return true;
 }
 
@@ -679,6 +684,11 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
         return false;
     }
 
+    // Close-time flush failures (e.g. ENOSPC) must fail the run (#1043).
+    if (!outDataset.closeWithError(errorMessage)) {
+        QFile::remove(outputPath);
+        return false;
+    }
     return true;
 }
 
@@ -812,6 +822,11 @@ bool processFileDos(const QString &sourcePath, const QString &outputPath,
             *errorMessage = tileError.isEmpty()
                                 ? QStringLiteral("Failed to stream band %1").arg(bandNum)
                                 : tileError;
+        QFile::remove(outputPath);
+        return false;
+    }
+    // Close-time flush failures (e.g. ENOSPC) must fail the run (#1043).
+    if (!outDataset.closeWithError(errorMessage)) {
         QFile::remove(outputPath);
         return false;
     }

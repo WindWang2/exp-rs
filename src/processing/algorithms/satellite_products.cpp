@@ -452,6 +452,9 @@ bool warpToCrs(const QString& inputPath, const QString& outputPath, const QStrin
         }
         if (dst)
             GDALClose(dst);
+        // GDALWarp may leave a partial file at the destination on failure —
+        // remove it so the aborted warp is never mistaken for a valid product.
+        QFile::remove(outputPath);
         return false;
     }
     GDALClose(dst);
@@ -741,6 +744,9 @@ bool assignModisSinusoidalGeoref(const QString& inputPath,
     if (!copyRasterPixels(src, dst, errorMessage)) {
         GDALClose(src);
         GDALClose(dst);
+        // Partial georeferenced output must not survive as a plausible result
+        // (same discipline as stackToGeoTiff's failRemovingPartial).
+        QFile::remove(outputPath);
         return false;
     }
 

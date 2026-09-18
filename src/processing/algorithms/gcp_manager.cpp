@@ -413,7 +413,11 @@ bool GcpManager::saveToCsv(const QString& filePath) const
                << ',' << numberToString(pt.residualX) << ',' << numberToString(pt.residualY)
                << ',' << numberToString(pt.residualTotal) << ',' << (pt.enabled ? "1" : "0") << '\n';
     }
-    return true;
+    // A short write must not pass as a saved CSV on disk-full (#1043).
+    stream.flush();
+    file.close();
+    return stream.status() != QTextStream::WriteFailed
+           && file.error() == QFileDevice::NoError;
 }
 
 bool GcpManager::loadFromCsv(const QString& filePath)

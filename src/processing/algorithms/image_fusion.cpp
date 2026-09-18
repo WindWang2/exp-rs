@@ -907,6 +907,11 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 }
             }
         }
+        // Flush failures at close time (e.g. ENOSPC while the GTiff driver
+        // flushes edge tiles) must fail the run, not report success with a
+        // truncated file (#1043).
+        if ( !outDataset.closeWithError( errorMessage ) )
+            return false;
         outputGuard.keep = true;
     return true;
     }
@@ -972,6 +977,11 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 }
             }
         }
+        // Flush failures at close time (e.g. ENOSPC while the GTiff driver
+        // flushes edge tiles) must fail the run, not report success with a
+        // truncated file (#1043).
+        if ( !outDataset.closeWithError( errorMessage ) )
+            return false;
         outputGuard.keep = true;
     return true;
     }
@@ -1073,6 +1083,11 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 }
             }
         }
+        // Flush failures at close time (e.g. ENOSPC while the GTiff driver
+        // flushes edge tiles) must fail the run, not report success with a
+        // truncated file (#1043).
+        if ( !outDataset.closeWithError( errorMessage ) )
+            return false;
         outputGuard.keep = true;
     return true;
     }
@@ -1310,6 +1325,11 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 }
             }
         }
+        // Flush failures at close time (e.g. ENOSPC while the GTiff driver
+        // flushes edge tiles) must fail the run, not report success with a
+        // truncated file (#1043).
+        if ( !outDataset.closeWithError( errorMessage ) )
+            return false;
         outputGuard.keep = true;
     return true;
     }
@@ -1467,6 +1487,11 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 }
             }
         }
+        // Flush failures at close time (e.g. ENOSPC while the GTiff driver
+        // flushes edge tiles) must fail the run, not report success with a
+        // truncated file (#1043).
+        if ( !outDataset.closeWithError( errorMessage ) )
+            return false;
         outputGuard.keep = true;
     return true;
     }
@@ -1563,6 +1588,11 @@ bool ImageFusion::processNativeFusionImpl( const QString &panPath, const QString
                 }
             }
         }
+        // Flush failures at close time (e.g. ENOSPC while the GTiff driver
+        // flushes edge tiles) must fail the run, not report success with a
+        // truncated file (#1043).
+        if ( !outDataset.closeWithError( errorMessage ) )
+            return false;
         outputGuard.keep = true;
         return true;
     }

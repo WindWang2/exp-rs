@@ -849,6 +849,11 @@ bool processFile(const QString &sourcePath, const QString &outputPath,
 
     if (progress)
         progress(1.0, QStringLiteral("Radiometric calibration complete"));
+    // Close-time flush failures (e.g. ENOSPC) must fail the run (#1043).
+    if (!outDataset.closeWithError(errorMessage)) {
+        QFile::remove(outputPath);
+        return false;
+    }
     return true;
 }
 

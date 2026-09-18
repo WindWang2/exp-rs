@@ -275,14 +275,32 @@ int AlgorithmMetaStore::exportCatalog( const std::string &outDir,
     const auto catalog = generateCatalog( descriptors );
     for ( const auto &[filename, content] : catalog )
     {
-        QFile file( dir.filePath( QString::fromStdString( filename ) ) );
+        const QString filePath = dir.filePath( QString::fromStdString( filename ) );
+        QFile file( filePath );
         if ( !file.open( QIODevice::WriteOnly | QIODevice::Truncate ) )
         {
             if ( error )
                 *error = "Cannot write " + file.fileName().toStdString();
             return -1;
         }
-        file.write( content.c_str(), static_cast<qint64>( content.size() ) );
+        // A short write (disk full) must fail the export, not silently
+        // truncate a catalog entry (#1056).
+        const qint64 expected = static_cast<qint64>( content.size() );
+        const qint64 written = file.write( content.c_str(), expected );
+        file.flush();
+        file.close();
+        const bool writeFailed = ( written != expected ) || file.error() != QFileDevice::NoError;
+        if ( writeFailed )
+        {
+            if ( error )
+            {
+                *error = "Short write on " + filePath.toStdString() + " (wrote "
+                  + std::to_string( written > 0 ? written : 0 ) + " of "
+                  + std::to_string( expected ) + " bytes)";
+            }
+            file.remove();
+            return -1;
+        }
     }
     return static_cast<int>( catalog.size() );
 }
