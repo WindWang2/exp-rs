@@ -61,7 +61,7 @@ bool OpenCvDnnRuntime::load( std::string *errorMessage )
     m_deviceName = "cpu";
   }
 
-  m_loaded = true;
+  m_loaded.store( true, std::memory_order_release );
   return true;
 }
 
@@ -72,7 +72,7 @@ cv::Mat OpenCvDnnRuntime::infer( const cv::Mat &nchwBlob )
 
 cv::Mat OpenCvDnnRuntime::infer( const cv::Mat &nchwBlob, const std::string &outputName )
 {
-  if ( !m_loaded )
+  if ( !m_loaded.load( std::memory_order_acquire ) )
     throw std::runtime_error( "runtime session is not loaded" );
   if ( nchwBlob.empty() || nchwBlob.dims != 4 )
     throw std::runtime_error( "inference input must be a 4-D NCHW blob" );
@@ -128,7 +128,7 @@ cv::Mat OpenCvDnnRuntime::infer( const cv::Mat &nchwBlob, const std::string &out
 
 std::vector<cv::Mat> OpenCvDnnRuntime::inferMulti( const std::vector<NamedBlob> &namedBlobs )
 {
-  if ( !m_loaded )
+  if ( !m_loaded.load( std::memory_order_acquire ) )
     throw std::runtime_error( "runtime session is not loaded" );
   if ( namedBlobs.empty() )
     throw std::runtime_error( "multi-input inference needs at least one input blob" );
@@ -172,7 +172,7 @@ std::vector<std::string> OpenCvDnnRuntime::outputTensorNames() const
   // passes on the shared cached session.
   std::lock_guard<std::mutex> lock( *const_cast<std::mutex *>( &m_inferMutex ) );
   std::vector<std::string> names;
-  if ( !m_loaded )
+  if ( !m_loaded.load( std::memory_order_acquire ) )
     return names;
   try
   {
@@ -188,7 +188,7 @@ std::vector<std::string> OpenCvDnnRuntime::outputTensorNames() const
 
 void OpenCvDnnRuntime::warmup()
 {
-  if ( !m_loaded )
+  if ( !m_loaded.load( std::memory_order_acquire ) )
     return;
   // Throwaway probe input. Graphs with a fixed input shape may reject it —
   // that is recorded, never fatal: warmup is an optimization, and correctness
@@ -210,7 +210,8 @@ void OpenCvDnnRuntime::warmup()
 SessionHealth OpenCvDnnRuntime::health() const
 {
   SessionHealth health;
-  health.ok = m_loaded && !m_cancelRequested.load( std::memory_order_relaxed );
+  health.ok = m_loaded.load( std::memory_order_acquire )
+                    && !m_cancelRequested.load( std::memory_order_relaxed );
   health.forwardsCompleted = m_forwards.load( std::memory_order_relaxed );
   health.failures = m_failures.load( std::memory_order_relaxed );
   std::lock_guard<std::mutex> healthLock( m_healthMutex );

@@ -77,32 +77,42 @@ class HttpRuntimeSession final : public IModelRuntime
       timeout.setSingleShot( true );
       QObject::connect( &timeout, &QTimer::timeout, &loop, &QEventLoop::quit );
       QNetworkReply *reply = manager.post( httpRequest, payload );
-      QObject::connect( reply, &QNetworkReply::finished, &loop, &QEventLoop::quit );
-      // Incremental body read (#1056): the max_body_mb guard must bound memory
-      // DURING the transfer, not after `readAll()` has already buffered an
-      // unbounded response. Oversize aborts the transfer immediately.
+
+      // #1056: enforce max_body_mb DURING the transfer, not after
+      // readAll() has already buffered the full body — a hostile or broken
+      // provider must hit a typed refusal at the threshold and have its
+      // connection aborted, never balloon host memory while the timeout
+      // runs. readyRead delivers only the bytes that arrived, so each
+      // append is bounded; the guard fires as soon as the accumulated body
+      // crosses the cap.
       QByteArray body;
-      qint64 receivedBytes = 0;
-      bool bodyTooLarge = false;
-      QObject::connect( reply, &QNetworkReply::readyRead, &loop, [&]() {
-        const QByteArray chunk = reply->readAll();
-        if ( bodyTooLarge || chunk.isEmpty() )
-          return;
-        if ( chunk.size() > m_maxBodyBytes - receivedBytes )
-        {
-          bodyTooLarge = true;
-          reply->abort();
-          loop.quit();
-          return;
-        }
-        receivedBytes += chunk.size();
-        body.append( chunk );
+      bool oversized = false;
+      QObject::connect(
+        reply, &QNetworkReply::readyRead, &loop, [ & ] {
+          body += reply->readAll();
+          if ( static_cast<qint64>( body.size() ) > m_maxBodyBytes )
+          {
+            oversized = true;
+            reply->abort(); // finished fires with OperationCanceledError
+            loop.quit();
+          }
+        } );
+      QObject::connect( reply, &QNetworkReply::finished, &loop, [ & ] {
+        // Drain whatever arrived between the last readyRead and finished —
+        // still capped (the guard below re-fires if it crosses).
+        body += reply->readAll();
+        if ( static_cast<qint64>( body.size() ) > m_maxBodyBytes )
+          oversized = true;
+        loop.quit();
       } );
       timeout.start( m_timeoutMs );
       loop.exec();
       timeout.stop();
-      if ( bodyTooLarge )
+
+      if ( oversized )
       {
+        if ( !reply->isFinished() )
+          reply->abort();
         recordFailure( "provider response exceeds the runtime.provider.max_body_mb guard" );
         reply->deleteLater();
         throw std::runtime_error( "provider response exceeds the runtime.provider.max_body_mb "
@@ -115,9 +125,6 @@ class HttpRuntimeSession final : public IModelRuntime
         reply->deleteLater();
         throw std::runtime_error( "no response from provider: request timed out" );
       }
-      // Drain any bytes delivered between the last readyRead and finished, and
-      // re-check: the incremental guard above trusted the chunk sizes.
-      body.append( reply->readAll() );
 
       const QNetworkReply::NetworkError transportError = reply->error();
       const int statusCode =
