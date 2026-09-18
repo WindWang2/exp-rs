@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -32,6 +33,19 @@ std::atomic<unsigned> &stagingCounter()
 {
   static std::atomic<unsigned> counter{ 0 };
   return counter;
+}
+
+/// The staged name's digit groups must stay process-unique (#1056): rand()
+/// is unseeded (identical sequence per process) and the counter restarts at
+/// 0, so two processes staging next to the same target could generate the
+/// SAME staged path and race the existence check. The pid breaks the tie.
+std::uint64_t processUniqueId()
+{
+#ifdef _WIN32
+  return static_cast<std::uint64_t>( GetCurrentProcessId() );
+#else
+  return static_cast<std::uint64_t>( ::getpid() );
+#endif
 }
 
 #ifdef _WIN32
@@ -89,8 +103,11 @@ std::string stagedPathFor( const std::string &targetPath )
   static const int kMaxAttempts = 64;
   for ( int attempt = 0; attempt < kMaxAttempts; ++attempt )
   {
+    // pid-mixed digit group keeps the staged shape
+    // "<stem>.<digits>.<digits>.tmp<ext>" (isStagedShapedName contract)
+    // while making the name process-unique (#1056).
     const std::string staged = u8( directory ) + "/" + stem + "." + std::to_string( stagingCounter()++ )
-                                 + "." + std::to_string( ::rand() ) + ".tmp" + extension;
+                                 + "." + std::to_string( processUniqueId() ) + ".tmp" + extension;
     if ( !fileExists( staged ) )
       return staged;
   }

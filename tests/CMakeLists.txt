@@ -389,6 +389,9 @@ target_include_directories(test_io_fabric_replay_11 PRIVATE ${CMAKE_CURRENT_SOUR
 if(WIN32)
   target_link_libraries(test_io_fabric_replay_11 PRIVATE ws2_32)
 endif()
+# fabric integrity: fail-closed mirror/replay/metadata regression suite
+# (issues #1053/#1054/#1038/#1056 geospatial items) — local fixtures only.
+sicnu_add_io_test(test_io_fabric_integrity)
 # 11.0 multidim planning/execution (netCDF-authored oracle, driver-gated).
 sicnu_add_io_test(test_io_fabric_multidim_11)
 target_include_directories(test_io_fabric_multidim_11 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
