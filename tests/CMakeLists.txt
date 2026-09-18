@@ -3239,6 +3239,24 @@ target_include_directories(test_processing PRIVATE
 )
 sicnu_discover_tests(test_processing)
 
+# Error-path hardening (#1043/#1056): sink/write failures, cancel semantics,
+# partial-output cleanup, dissolve union complexity.
+add_executable(test_processing_error_paths test_processing_error_paths.cpp)
+target_link_libraries(test_processing_error_paths PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  qgis_core
+  sicnu_processing
+  sicnu_operators
+)
+sicnu_link_jsoncpp(test_processing_error_paths)
+target_include_directories(test_processing_error_paths PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+sicnu_discover_tests(test_processing_error_paths)
+
 # Algorithm organization tests — verify metadata quality
 add_executable(test_algorithm_organization test_algorithm_organization.cpp)
 target_link_libraries(test_algorithm_organization PRIVATE
