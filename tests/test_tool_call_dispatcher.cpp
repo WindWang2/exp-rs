@@ -1199,8 +1199,6 @@ TEST_CASE( "plane commit-cache hit re-applies the rollback supplied by a later b
   // supplies the rollback and the cache hit must repair the state instead of
   // republishing the committed-but-unverified asset.
   sicnu::data::DataManager manager;
-  ToolCallDispatcher dispatcher;
-  dispatcher.setDataManager( &manager );
 
   QTemporaryDir tmp;
   REQUIRE( tmp.isValid() );
@@ -1273,8 +1271,6 @@ TEST_CASE( "commit refusal downgrades without touching the rollback path",
   // rollback handler, but without assetId/verified:false in the payload it
   // must be a no-op — nothing existing is deleted.
   sicnu::data::DataManager manager;
-  ToolCallDispatcher dispatcher;
-  dispatcher.setDataManager( &manager );
 
   QTemporaryDir tmp;
   REQUIRE( tmp.isValid() );
@@ -1282,7 +1278,9 @@ TEST_CASE( "commit refusal downgrades without touching the rollback path",
   GDALAllRegister();
   {
     GDALDriverH driver = GDALGetDriverByName( "GTiff" );
+    REQUIRE( driver != nullptr );
     GDALDatasetH ds = GDALCreate( driver, outPath.toUtf8().constData(), 4, 4, 1, GDT_Byte, nullptr );
+    REQUIRE( ds != nullptr );
     GDALClose( ds );
   }
   sicnu::data::SourceDescriptor src;

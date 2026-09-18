@@ -25,11 +25,13 @@
 //     thread in every production caller — so a sync wait can never wedge a
 //     queued delivery, and the commit happens exactly once.
 #include "tool_call_dispatcher.h"
+#include "data/data_manager.h"
 #include "execution_plane.h"
 #include "task_center.h"
 
 #include <QCoreApplication>
 #include <QObject>
+#include <QPointer>
 
 namespace sicnu::processing {
 
@@ -51,9 +53,11 @@ ToolCallDispatcher::ToolCallDispatcher()
       // the queued delivery survives the dispatcher being destroyed mid-flight;
       // the plane builder applies the verification rollback (#1042) inside its
       // publication gate, before the payload is cached or handed to the callback.
+      // The manager rides a QPointer: like the committer handler below, the
+      // rollback must never touch a DataManager that died after the commit.
       OutputCommitterHandler committerHandler = mOutputCommitterHandler;
       OutputVerificationHandler verificationHandler = mOutputVerificationHandler;
-      sicnu::data::DataManager *rollbackManager = mDataManager;
+      QPointer<sicnu::data::DataManager> rollbackManager = mDataManager;
       std::shared_ptr<QObject> bridge = m_commitBridge;
       // deliver runs on the bridge (Data Manager owner) thread whenever
       // needed; buildCommittedResultPayload applies the transactional commit

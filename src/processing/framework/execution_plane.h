@@ -229,11 +229,13 @@ class ExecutionPlane
     /// "verified": false): reap the committed asset so no unverified payload
     /// survives as a stable catalog entry / file (#1042). Must be IDEMPOTENT
     /// (keyed off the payload's "assetId"; re-running on an already-reaped
-    /// asset is a no-op) and must NOT call back into
-    /// buildCommittedResultPayload/awaitResult (it runs under the commit
-    /// mutex). Production wiring: ToolCallDispatcher supplies
-    /// rollbackVerificationFailure here for every completion path, which makes
-    /// the plane's builder the single non-bypassable publication gate.
+    /// asset is a no-op), MUST NOT THROW (a throw inside the commit critical
+    /// section discards the built payload, so a retry would re-commit), and
+    /// must NOT call back into buildCommittedResultPayload/awaitResult (it
+    /// runs under the commit mutex). Production wiring: ToolCallDispatcher
+    /// supplies rollbackVerificationFailure here for every completion path,
+    /// which makes the plane's builder the single non-bypassable publication
+    /// gate.
     using VerificationRollbackHandler = std::function<void( Json::Value &payload )>;
 
     /// Build the standardized result payload for a terminal task, applying
