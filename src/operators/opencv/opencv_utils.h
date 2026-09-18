@@ -3,6 +3,8 @@
  ***************************************************************************/
 #pragma once
 
+#include "operators/framework/bounded_math.h"
+
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
 #include <opencv2/core.hpp>
@@ -60,8 +62,12 @@ bool writeMatsToRaster(const std::string& outputPath,
 int rasterBandCount(const std::string& inputPath);
 
 /**
- * Validates that a kernel size is a positive odd integer.
+ * Validates that a kernel size is a positive odd integer within the
+ * documented window-filter ceiling. #1044: the kernel radius becomes the
+ * streaming halo and sizes the halo buffer, so a kernel above kMaxKernelPx
+ * is refused before any allocation (the ceiling mirrors the repository's own
+ * [3, 101] spatial-window clamp — no scientific use beyond it).
  */
-bool isValidKernelSize(int kernelSize);
+bool isValidKernelSize(int kernelSize, std::int64_t maxPx = kMaxKernelPx);
 
 } // namespace sicnu::operators::opencv

@@ -2,6 +2,7 @@
 #include "model_catalog.h"
 
 #include "artifact_digest.h"
+#include "bounded_math.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -851,6 +852,14 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   {
     markInvalid( "tiling.halo/overlap declared but tiling.tile_size is not" );
   }
+  // #1044: preprocess.pad grows EVERY tile window on all four sides
+  // (tileSize + 2*halo + 2*pad feeds the window allocation), so an unbounded
+  // pad is exactly the "memory-unbounded inference window" the tiling
+  // ceilings above exist to prevent.
+  if ( info.preprocess.pad > kMaxPreprocessPadPx )
+    markInvalid( "preprocess.pad " + std::to_string( info.preprocess.pad )
+                 + " is absurdly large (max " + std::to_string( kMaxPreprocessPadPx )
+                 + ") - the inference window would be memory-unbounded" );
   // Platform 4.0 follow-up vocabulary is NOT implemented yet; declaring it
   // must fail loudly instead of being silently ignored (#646 discipline).
   // Platform 7.0: preprocess.pad / clamp_min / clamp_max are IMPLEMENTED by
@@ -992,6 +1001,23 @@ ModelInfo parseManifest( const QJsonObject &obj, const std::string &source )
   {
     if ( in.temporalLength < 0 )
       markInvalid( "input.temporal_length must be >= 0 (got " + std::to_string( in.temporalLength ) + ")" );
+    // #1044: with missing_timestep=zero the DECLARED axis materializes in
+    // memory frame by frame exactly like the provided axis — bound it with
+    // the same ceiling the engine enforces for fed frame counts.
+    if ( in.temporalLength > kMaxTemporalFrames )
+      markInvalid( "input.temporal_length " + std::to_string( in.temporalLength )
+                   + " exceeds the temporal lane bound of " + std::to_string( kMaxTemporalFrames )
+                   + " (the declared time axis is materialized in memory; split the series "
+                     "or coarsen it)" );
+    // #1044: a fixed input extent sizes the resize target of
+    // preprocess.resize=to_input per tile — inherit the tiling.tile_size
+    // "absurdly large" bound so the resize cannot be driven to a
+    // multi-terabyte allocation by a single manifest integer.
+    if ( in.width > kMaxDeclaredInputPx || in.height > kMaxDeclaredInputPx )
+      markInvalid( "input.width/height " + std::to_string( in.width ) + "x"
+                     + std::to_string( in.height )
+                     + " is absurdly large (max " + std::to_string( kMaxDeclaredInputPx )
+                     + " per side) - the to_input resize target would be memory-unbounded" );
     if ( in.temporalCollapse != "channels" && in.temporalCollapse != "sequence" )
       markInvalid( "unsupported input.temporal_collapse '" + in.temporalCollapse
                    + "' (supported: 'channels', 'sequence')" );

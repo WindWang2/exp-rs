@@ -3,7 +3,7 @@
 
 #include "operators/runtime/eo_preflight.h"
 #include "operators/framework/artifact_digest.h"
-#include "operators/framework/model_catalog.h"
+#include "operators/framework/bounded_math.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 #include "processing/gdal/gdal_multiband_block_stream.h"
 
@@ -41,17 +41,52 @@ namespace {
 constexpr int kMinTileSize = 16;
 constexpr int kDefaultTileSize = 512;
 
-/// Documented ceiling for one fed inference window side (px): tile_size is
-/// capped at 32768, halo at tile_size/2 and pad at kMaxPreprocessPad by the
-/// manifest contract (#1044). This engine-level guard keeps programmatically
-/// constructed ModelInfo values from overflowing the int arithmetic that sizes
-/// the window allocations.
-constexpr int kMaxInferenceWindowSide = 65536;
+/// #1044: window-side bound shared by both engines. tileSize/halo/pad all
+/// enter the per-tile window allocation, so the side is computed in int64
+/// and typed-refused BEFORE any buffer is sized — an assert cannot protect a
+/// release build, and a hand-built ModelInfo bypasses the catalog ceilings.
+std::int64_t checkedWindowSide( int tileSize, int halo, int pad,
+                                const std::string &feedName = std::string() )
+{
+  const std::int64_t side = static_cast<std::int64_t>( tileSize )
+                              + 2 * static_cast<std::int64_t>( halo )
+                              + 2 * static_cast<std::int64_t>( pad );
+  if ( side > kMaxWindowPx )
+    throw RSOperatorError(
+      ErrorCode::InvalidParameter,
+      ( feedName.empty() ? std::string() : "feed '" + feedName + "': " )
+        + "the inference window side tile+2*halo+2*pad = " + std::to_string( tileSize ) + "+2*"
+        + std::to_string( halo ) + "+2*" + std::to_string( pad ) + " = "
+        + std::to_string( side ) + " px exceeds the window bound of "
+        + std::to_string( kMaxWindowPx )
+        + " px — the window buffer would be memory-unbounded (reduce tile_size, halo or "
+          "preprocess.pad)" );
+  return side;
+}
 
-/// Documented ceiling for a feed's channel lane (`bands × T`) — 1024 frames ×
-/// 16 bands, far above any real EO model. The scatter/stacked buffers are sized
-/// by this number, so it must never wrap.
-constexpr int kMaxFeedChannels = 16384;
+/// #1044: window-buffer budget — side² × channels float elements, computed
+/// in 64-bit and refused above kMaxWindowFloats before the allocation. The
+/// window is materialized outside the OOM ladder, so an oversized request
+/// must be a typed refusal, not a std::bad_alloc.
+std::size_t checkedWindowFloats( std::int64_t side, std::int64_t channels,
+                                 const std::string &feedName = std::string() )
+{
+  const std::optional<std::int64_t> side64 = checkedMul( side, side );
+  const std::optional<std::int64_t> floats = side64 ? checkedMul( *side64, channels )
+                                                    : std::nullopt;
+  if ( !floats || *floats > static_cast<std::int64_t>( kMaxWindowFloats ) )
+    throw RSOperatorError(
+      ErrorCode::InvalidParameter,
+      ( feedName.empty() ? std::string() : "feed '" + feedName + "': " )
+        + "the inference window needs " + ( floats ? std::to_string( *floats )
+                                                   : std::string( "more than 2^63" ) )
+        + " float elements (side " + std::to_string( side ) + " × channels "
+        + std::to_string( channels ) + "), above the "
+        + std::to_string( kMaxWindowFloats )
+        + "-element window budget — reduce tile_size, halo, preprocess.pad or the fed "
+          "channel count" );
+  return static_cast<std::size_t>( *floats );
+}
 
 struct CoreTile
 {
@@ -1234,18 +1269,9 @@ TileInferenceStats TileInferenceEngine::run( const std::string &inputPath,
     stats.inputGrids.push_back( std::move( grid ) );
   }
 
-  // Reusable read buffer: one halo-extended window at a time. #1044: checked
-  // 64-bit math — a programmatic ModelInfo can bypass the manifest halo bound,
-  // and `tileSize + 2*halo` must never overflow int before it sizes the buffer.
-  const std::int64_t maxWin64 = static_cast<std::int64_t>( tileSize ) + 2LL * halo;
-  if ( maxWin64 <= 0 || maxWin64 > kMaxInferenceWindowSide )
-    throw RSOperatorError( ErrorCode::InvalidParameter,
-                           "inference window side " + std::to_string( maxWin64 )
-                             + " px is out of range (tile " + std::to_string( tileSize )
-                             + ", halo " + std::to_string( halo ) + "); the engine bounds the fed "
-                             "window at " + std::to_string( kMaxInferenceWindowSide ) + " px per side" );
-  const int maxWin = static_cast<int>( maxWin64 );
-  std::vector<float> windowBuffer( static_cast<std::size_t>( maxWin ) * maxWin * bandCount );
+  // Reusable read buffer: one halo-extended window at a time.
+  const int maxWin = static_cast<int>( checkedWindowSide( tileSize, halo, 0 ) );
+  std::vector<float> windowBuffer( checkedWindowFloats( maxWin, bandCount ) );
   // Per-band declared NoData sentinels (the BIP read yields raw values; the
   // shared NaN convention is applied here, matching opencv_utils semantics).
   std::vector<float> bandSentinel( static_cast<std::size_t>( bandCount ), 0.0f );
@@ -2825,16 +2851,27 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
       dynamicT ? feeds[f].paths.size()
                : ( contract.temporalLength > 0 ? static_cast<std::size_t>( contract.temporalLength )
                                                : 1u );
+    // #1044: with missing_timestep=zero the DECLARED axis materializes frame
+    // by frame exactly like the provided axis, so it inherits the same
+    // ceiling before reader.frames is resized below (the catalog rejects
+    // oversized temporal_length values; this guards hand-built ModelInfo).
+    if ( declaredFrames > static_cast<std::size_t>( kMaxTemporalFrames ) )
+      throw RSOperatorError( ErrorCode::InvalidParameter,
+                             "feed '" + feeds[f].name + "' declares "
+                               + std::to_string( declaredFrames )
+                               + " temporal frames; the temporal lane is bounded at "
+                               + std::to_string( kMaxTemporalFrames )
+                               + " (split the series or coarsen it)" );
     const std::string missingPolicy =
       contract.missingTimestep.empty() ? "refuse" : contract.missingTimestep;
     if ( feeds[f].paths.empty() )
       throw RSOperatorError( ErrorCode::InvalidParameter,
                              "feed '" + feeds[f].name + "' provides no raster paths" );
     // Resource bound (WP-D): a feed materializes ALL its frames in memory —
-    // an unbounded time axis is an unbounded allocation. 1024 frames is far
-    // above any real EO series and keeps blob memory bounded per tile.
-    constexpr std::size_t kMaxTemporalFrames = 1024;
-    if ( feeds[f].paths.size() > kMaxTemporalFrames )
+    // an unbounded time axis is an unbounded allocation. The ceiling is the
+    // shared kMaxTemporalFrames (bounded_math.h) — the same bound the
+    // declared axis is held to above, so the two can never diverge.
+    if ( feeds[f].paths.size() > static_cast<std::size_t>( kMaxTemporalFrames ) )
       throw RSOperatorError( ErrorCode::InvalidParameter,
                              "feed '" + feeds[f].name + "' provides "
                                + std::to_string( feeds[f].paths.size() ) + " frames; the "
@@ -3010,22 +3047,22 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
                                  + " bands are fed" );
     }
     reader.bands = bandList;
-    // #1044: `bands × T` must not truncate to a smaller positive int — the
-    // scatter (see the stacked-buffer fill below) writes bandCount floats per
-    // pixel into a `channels`-wide lane, so a wrapped product is a heap OOB.
-    // Checked 64-bit product with a documented channel-lane ceiling.
-    const std::uint64_t feedChannels =
-      static_cast<std::uint64_t>( bandList.size() ) * static_cast<std::uint64_t>( declaredFrames );
-    if ( bandList.empty() || declaredFrames > static_cast<std::size_t>( kMaxModelTemporalFrames )
-         || feedChannels > static_cast<std::uint64_t>( kMaxFeedChannels ) )
+    // #1044 (defense in depth): bands × declaredFrames feeds `channels` —
+    // the stacked window's index math. The declaredFrames ceiling above is
+    // the primary guard; this 64-bit re-check keeps the multiply honest even
+    // if a future change widens the frame bound, and refuses anything above
+    // the int channel budget before the resize instead of truncating.
+    const std::optional<std::int64_t> channels64 =
+      checkedMul( static_cast<std::int64_t>( bandList.size() ),
+                  static_cast<std::int64_t>( declaredFrames ) );
+    if ( !channels64 || *channels64 > std::numeric_limits<int>::max() )
       throw RSOperatorError( ErrorCode::InvalidParameter,
-                             "feed '" + feeds[f].name + "' combines "
-                               + std::to_string( bandList.size() ) + " bands with "
+                             "feed '" + feeds[f].name + "': bands × temporal_length = "
+                               + std::to_string( bandList.size() ) + "×"
                                + std::to_string( declaredFrames )
-                               + " temporal frames into an unusable channel lane (temporal bound "
-                               + std::to_string( kMaxModelTemporalFrames ) + " frames, channel "
-                               "bound " + std::to_string( kMaxFeedChannels ) + ")" );
-    reader.channels = static_cast<int>( feedChannels );
+                               + " exceeds the fed channel budget — the stacked per-tile "
+                                 "window would overflow its index math" );
+    reader.channels = static_cast<int>( *channels64 );
 
     // Open all provided frames.
     reader.frames.resize( declaredFrames );
@@ -3156,19 +3193,7 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   if ( options.batchSizeOverride > 0 )
     batchSize = std::min( batchSize, options.batchSizeOverride );
   batchSize = std::max( 1, batchSize );
-  // #1044: checked 64-bit window math. A programmatic ModelInfo can bypass the
-  // manifest ceilings (tile_size <= 32768, halo <= tile_size/2, pad <=
-  // kMaxPreprocessPad), so `tileSize + 2*halo + 2*pad` is computed wide and
-  // bounded before it sizes any allocation.
-  const std::int64_t maxWin64 = static_cast<std::int64_t>( tileSize ) + 2LL * halo + 2LL * pad;
-  if ( maxWin64 <= 0 || maxWin64 > kMaxInferenceWindowSide )
-    throw RSOperatorError( ErrorCode::InvalidParameter,
-                           "inference window side " + std::to_string( maxWin64 )
-                             + " px is out of range (tile " + std::to_string( tileSize )
-                             + ", halo " + std::to_string( halo ) + ", pad " + std::to_string( pad )
-                             + "); the engine bounds the fed window at "
-                             + std::to_string( kMaxInferenceWindowSide ) + " px per side" );
-  const int maxWin = static_cast<int>( maxWin64 );
+  const int maxWin = static_cast<int>( checkedWindowSide( tileSize, halo, pad ) );
 
   std::vector<CoreTile> core;
   for ( int y = 0; y < rasterH; y += tileSize )
@@ -3187,7 +3212,21 @@ TileInferenceStats TileInferenceEngine::runMultiInput( const std::vector<NamedRa
   // Reused per-feed window buffers (fed size incl. halo; pad applied after
   // preprocessing so the zero pad cannot be normalized over).
   for ( auto &reader : readers )
-    reader.window.assign( static_cast<std::size_t>( maxWin ) * maxWin * reader.bands.size(), 0.0f );
+  {
+    const std::string feedName =
+      reader.contract && !reader.contract->name.empty() ? reader.contract->name : std::string();
+    // The reused raw-feed window is bands wide; the DOMINANT per-tile
+    // buffer is the stacked one — winH*winW*channels with
+    // channels = bands × declared frames — so the temporal axis must
+    // participate in the same window budget (review P1: a catalog-legal
+    // bands × 1024-frame contract previously reached a multi-GB
+    // std::vector with no typed gate). Both are refused in 64-bit here,
+    // before the tile loop runs.
+    const std::size_t windowFloats =
+      checkedWindowFloats( maxWin, static_cast<std::int64_t>( reader.bands.size() ), feedName );
+    checkedWindowFloats( maxWin, reader.channels, feedName );
+    reader.window.assign( windowFloats, 0.0f );
+  }
 
   // Pending batch across ALL feeds.
   std::vector<std::vector<cv::Mat>> batchByFeed( feeds.size() );

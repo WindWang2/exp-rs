@@ -258,8 +258,8 @@ int rasterBandCount(const std::string& inputPath) {
     return ds.bandCount();
 }
 
-bool isValidKernelSize(int kernelSize) {
-    return kernelSize > 0 && (kernelSize % 2) == 1;
+bool isValidKernelSize(int kernelSize, std::int64_t maxPx) {
+    return kernelSize > 0 && (kernelSize % 2) == 1 && kernelSize <= maxPx;
 }
 
 } // namespace sicnu::operators::opencv
