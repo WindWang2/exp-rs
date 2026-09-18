@@ -463,9 +463,10 @@ std::vector<std::string> ownedBasenames( Product product )
 }
 
 /// Remove one foundry-owned file before it is rewritten. Missing is the
-/// normal first-run case; any other removal failure (permissions, a directory
-/// squatting on the name) is surfaced now with a typed message instead of
-/// letting the subsequent Create fail more opaquely.
+/// normal first-run case; any other removal failure (permissions, or a
+/// non-empty directory squatting on the name — an empty one would be removed
+/// like a file) is surfaced now with a typed message instead of letting the
+/// subsequent Create fail more opaquely.
 Outcome removeOwnedFile( const fs::path &out_dir, const std::string &name )
 {
   std::error_code ec;

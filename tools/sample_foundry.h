@@ -117,7 +117,10 @@ struct GenerateResult
 /// previous selection that this selection does not emit are removed before
 /// emission. No other file in out_dir is touched; the emit path additionally
 /// pins the GDAL environment knobs it depends on (PAM, thread count,
-/// shapefile encoding) and restores them afterwards.
+/// shapefile encoding) and restores them afterwards. Like GDAL's global state
+/// at large, the pin is process-global for the duration of the call:
+/// generate() is not reentrant against concurrent GDAL use in the same
+/// process.
 Outcome generate( const Options &options, GenerateResult *result );
 
 struct VerifyReport

@@ -37,6 +37,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -945,6 +946,33 @@ TEST_CASE( "CLI: full<->subset switching keeps the tree verify-clean and never d
     CHECK( readBinary( dir.path / "boundary.gpkg" ) == "also made by a human" );
 }
 
+TEST_CASE( "CLI: dropping the vector product prunes the whole shapefile sidecar set",
+           "[foundry][cli][regenerate]" )
+{
+    // The full↔subset case above keeps training_samples selected; this one
+    // exercises the prune branch for every existing sidecar of a dropped
+    // product, including the reserved .cpg name.
+    TempDir dir;
+    REQUIRE( runCli( { "--out=" + dir.str(), "--seed=42" } ) == 0 );
+
+    TempDir spec_dir;
+    const std::string spec = ( spec_dir.path / "no_vector.json" ).string();
+    {
+        std::ofstream out( spec );
+        out << "{\"experiment\":\"no-vector\",\"products\":[\"dem_sample\"]}";
+    }
+    REQUIRE( runCli( { "--out=" + dir.str(), "--seed=42", "--spec=" + spec } ) == 0 );
+
+    for ( const char *name : { "training_samples.shp", "training_samples.shx",
+                               "training_samples.dbf", "training_samples.prj",
+                               "training_samples.cpg" } )
+    {
+        INFO( "dropped-product sidecar still present: " << name );
+        CHECK_FALSE( fs::exists( dir.path / name ) );
+    }
+    CHECK( runCli( { "--verify", "--out=" + dir.str() } ) == 0 );
+}
+
 TEST_CASE( "CLI: host GDAL environment cannot perturb the emitted bytes",
            "[foundry][cli][determinism][regenerate]" )
 {
@@ -954,6 +982,12 @@ TEST_CASE( "CLI: host GDAL environment cannot perturb the emitted bytes",
     // otherwise surface as an extra manifest entry).
     TempDir clean_dir;
     REQUIRE( runCli( { "--out=" + clean_dir.str(), "--seed=42" } ) == 0 );
+
+    // Capture the pre-test state: the host may legitimately export these
+    // variables, and restoration must be judged against that state.
+    const char *prev_threads = std::getenv( "GDAL_NUM_THREADS" );
+    const char *prev_pam = std::getenv( "GDAL_PAM_ENABLED" );
+    const char *prev_shape = std::getenv( "SHAPE_ENCODING" );
 
     TempDir noisy_dir;
     int noisy_exit = -1;
@@ -979,9 +1013,16 @@ TEST_CASE( "CLI: host GDAL environment cannot perturb the emitted bytes",
     CHECK_FALSE( fs::exists( noisy_dir.path / "training_samples.cpg" ) );
     CHECK_FALSE( fs::exists( noisy_dir.path / "landsat_sample.tif.aux.xml" ) );
 
-    // ScopedEnv actually restored the process environment.
-    CHECK( std::getenv( "GDAL_NUM_THREADS" ) == nullptr );
-    CHECK( std::getenv( "SHAPE_ENCODING" ) == nullptr );
+    // The environment really was restored to its pre-test state (nullptr-safe
+    // comparison: a host that exports these variables gets its values back).
+    const auto restored = []( const char *current, const char *previous ) {
+        if ( ( current == nullptr ) != ( previous == nullptr ) )
+            return false;
+        return current == nullptr || std::string( current ) == previous;
+    };
+    CHECK( restored( std::getenv( "GDAL_NUM_THREADS" ), prev_threads ) );
+    CHECK( restored( std::getenv( "GDAL_PAM_ENABLED" ), prev_pam ) );
+    CHECK( restored( std::getenv( "SHAPE_ENCODING" ), prev_shape ) );
 }
 
 TEST_CASE( "CLI: --out= with spaces in the path generates and verifies",
