@@ -23,7 +23,6 @@
 #include "experiment/run_recorder.h"
 
 #include <QFileInfo>
-#include <QHash>
 #include <algorithm>
 #include <cmath>
 #include <QJsonDocument>
@@ -663,9 +662,16 @@ TEST_CASE( "facet distributions are bounded and honest about the tail",
         fx.store.facetCrossCounts( fx.versionId, QStringLiteral( "region" ), QStringLiteral( "content_digest" ) );
     REQUIRE( cross.has_value() );
     qint64 cellTotal = 0;
+    bool sawNorthCell = false;
     for ( const auto &cell : cross.value() )
+    {
         cellTotal += cell.second;
+        // Structured (valueA, valueB) cell keys (#1056).
+        if ( cell.first.first == QStringLiteral( "north" ) )
+            sawNorthCell = true;
+    }
     CHECK( cellTotal == 12 );
+    CHECK( sawNorthCell );
 
     // Committed versions refuse facet writes (frozen content).
     REQUIRE( fx.store.stageVersion( fx.versionId ).has_value() );
@@ -678,57 +684,42 @@ TEST_CASE( "facet distributions are bounded and honest about the tail",
     CHECK( frozen.diagnostics().first().code == QStringLiteral( "dataset.not_draft" ) );
 }
 
-TEST_CASE( "cross-facet cells stay distinct when a value carries the separator",
+TEST_CASE( "facet cross counts keep cells whose values contain U+001F distinct (#1056)",
            "[facets][cross]" )
 {
-    // Cell keys are joined with U+001F. A facet value that contains U+001F
-    // must not forge another pair's key, or two cells collapse into one and
-    // their counts merge silently.
-    DraftFixture fx( 4 );
-    const QChar separator( 0x001F );
-    // ("a<US>b","c") and ("a","b<US>c") would join to the SAME naive key.
-    const QString trickyA = QStringLiteral( "a" ) + separator + QStringLiteral( "b" );
-    const QString trickyB = QStringLiteral( "b" ) + separator + QStringLiteral( "c" );
-    auto escaped = [ &separator ]( const QString &value ) {
-        QString out;
-        for ( const QChar &ch : value )
-        {
-            if ( ch == separator )
-                out.append( separator );
-            out.append( ch );
-        }
-        return out;
-    };
-    const QStringList facetA{ QStringLiteral( "c" ), trickyA, QStringLiteral( "a" ),
-                              QStringLiteral( "z" ) };
-    const QStringList facetB{ QStringLiteral( "b" ), QStringLiteral( "c" ), trickyB,
-                              QStringLiteral( "y" ) };
-    for ( int i = 0; i < 4; ++i )
-    {
-        QVector<DatasetStore::FacetEntry> entries;
-        entries.append( qMakePair( QStringLiteral( "fa" ), facetA.at( i ) ) );
-        entries.append( qMakePair( QStringLiteral( "fb" ), facetB.at( i ) ) );
-        REQUIRE( fx.store.setSampleFacets(
-                     fx.versionId, SampleId::fromString( fx.samples.at( i ).sampleId() ).value(),
-                     entries )
-                     .has_value() );
-    }
+    // The old "valueA\u001FvalueB" string encoding merged the cell
+    // ( "a\u001Fb", "c" ) with ( "a", "b\u001Fc" ): two different facts
+    // reported as one count. Structured (valueA, valueB) keys cannot merge.
+    DraftFixture fx( 2 );
+    const auto id0 = SampleId::fromString( fx.samples.at( 0 ).sampleId() ).value();
+    const auto id1 = SampleId::fromString( fx.samples.at( 1 ).sampleId() ).value();
 
-    const auto cross = fx.store.facetCrossCounts( fx.versionId, QStringLiteral( "fa" ),
-                                                 QStringLiteral( "fb" ) );
+    QVector<DatasetStore::FacetEntry> entries0;
+    entries0.append( qMakePair( QStringLiteral( "k" ), QStringLiteral( "a\001b" ) ) );
+    entries0.append( qMakePair( QStringLiteral( "m" ), QStringLiteral( "c" ) ) );
+    REQUIRE( fx.store.setSampleFacets( fx.versionId, id0, entries0 ).has_value() );
+
+    QVector<DatasetStore::FacetEntry> entries1;
+    entries1.append( qMakePair( QStringLiteral( "k" ), QStringLiteral( "a" ) ) );
+    entries1.append( qMakePair( QStringLiteral( "m" ), QStringLiteral( "b\001c" ) ) );
+    REQUIRE( fx.store.setSampleFacets( fx.versionId, id1, entries1 ).has_value() );
+
+    const auto cross =
+        fx.store.facetCrossCounts( fx.versionId, QStringLiteral( "k" ), QStringLiteral( "m" ) );
     REQUIRE( cross.has_value() );
-    // Four real cells of one sample each — never three merged ones.
-    CHECK( cross.value().size() == 4 );
-    QHash<QString, qint64> byKey;
+    REQUIRE( cross.value().size() == 2 );
+    bool sawMergedLeft = false;  // ( "a\001b", "c" )
+    bool sawMergedRight = false; // ( "a", "b\001c" )
     for ( const auto &cell : cross.value() )
     {
-        CHECK( cell.second == 1 );
-        byKey.insert( cell.first, cell.second );
+        if ( cell.first == qMakePair( QStringLiteral( "a\001b" ), QStringLiteral( "c" ) ) )
+            sawMergedLeft = true;
+        if ( cell.first == qMakePair( QStringLiteral( "a" ), QStringLiteral( "b\001c" ) ) )
+            sawMergedRight = true;
+        CHECK( cell.second == 1 ); // not a merged count of 2
     }
-    // Values without the separator keep the documented "valueA\u001FvalueB" key.
-    CHECK( byKey.contains( QStringLiteral( "c" ) + separator + QStringLiteral( "b" ) ) );
-    CHECK( byKey.contains( escaped( trickyA ) + separator + escaped( QStringLiteral( "c" ) ) ) );
-    CHECK( byKey.contains( escaped( QStringLiteral( "a" ) ) + separator + escaped( trickyB ) ) );
+    CHECK( sawMergedLeft );
+    CHECK( sawMergedRight );
 }
 
 TEST_CASE( "duplicate summary counts exact digest buckets", "[facets][duplicates]" )
@@ -994,36 +985,42 @@ TEST_CASE( "paired comparison flags insufficient support instead of faking it",
     CHECK( sawRare );
 }
 
-TEST_CASE( "paired comparison keeps class codes that contain ::", "[comparison][paired]" )
+TEST_CASE( "paired comparison support gate survives class codes containing '::' (#1056)",
+           "[comparison][paired]" )
 {
-    // LabelSchema::validate allows any non-empty code, so "agri::crop" is a
-    // legal class. The support lookup used to split the metric key from the
-    // LEFT, truncating such a code to "agri": the lookup missed, and the
-    // low-support delta was reported as if it were well supported.
+    // "agri::crop" is ONE class code (LabelSchema::validate only requires a
+    // non-empty code). The old "code::metric" string encoding left-split it
+    // at the first "::" into "agri", so the support lookup missed and
+    // insufficient_support could never fire for such classes. Structured
+    // (class code, metric) keys resolve the exact code.
     MetricRecord a;
     a.protocol.setDatasetVersionId( QStringLiteral( "v" ) );
     a.metrics = QJsonObject{
         { QStringLiteral( "per_class" ),
-          QJsonObject{ { QStringLiteral( "agri::crop" ),
-                         QJsonObject{ { QStringLiteral( "f1" ), 0.5 },
-                                      { QStringLiteral( "support" ), 2 } } } } } };
+          QJsonObject{
+              { QStringLiteral( "agri::crop" ),
+                QJsonObject{ { QStringLiteral( "f1" ), 0.6 },
+                             { QStringLiteral( "support" ), 5 } } } } } };
     MetricRecord b = a;
     b.metrics = QJsonObject{
         { QStringLiteral( "per_class" ),
-          QJsonObject{ { QStringLiteral( "agri::crop" ),
-                         QJsonObject{ { QStringLiteral( "f1" ), 0.6 },
-                                      { QStringLiteral( "support" ), 3 } } } } } };
+          QJsonObject{
+              { QStringLiteral( "agri::crop" ),
+                QJsonObject{ { QStringLiteral( "f1" ), 0.9 },
+                             { QStringLiteral( "support" ), 400 } } } } } };
 
     const auto summary = pairedRunComparison( a, b, nullptr, 30 );
-    int matched = 0;
-    for ( const PairedMetricDelta &delta : summary.deltas )
+    bool sawCrop = false;
+    for ( const auto &delta : summary.deltas )
     {
-        if ( !delta.metric.endsWith( QLatin1String( "agri::crop::f1" ) ) )
-            continue;
-        ++matched;
-        CHECK( delta.supportA == 2 );
-        CHECK( delta.supportB == 3 );
-        CHECK( delta.insufficientSupport );
+        if ( delta.metric == QLatin1String( "per_class::agri::crop::f1" ) )
+        {
+            sawCrop = true;
+            CHECK( delta.insufficientSupport ); // support 5 < 30 — flagged (was never set before)
+            CHECK( delta.supportA == 5 );
+            CHECK( delta.supportB == 400 );
+            CHECK( std::abs( delta.delta - 0.3 ) < 1e-12 );
+        }
     }
-    CHECK( matched == 1 );
+    CHECK( sawCrop );
 }
