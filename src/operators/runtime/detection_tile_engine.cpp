@@ -1,6 +1,7 @@
 // src/operators/runtime/detection_tile_engine.cpp
 #include "operators/runtime/detection_tile_engine.h"
 
+#include "operators/framework/bounded_math.h"
 #include "operators/framework/rs_operator_error.h"
 #include "processing/gdal/gdal_dataset_wrapper.h"
 
@@ -28,6 +29,42 @@ namespace {
 
 constexpr int kMinTileSize = 16;
 constexpr int kDefaultTileSize = 512;
+
+/// #1044: same window-side bound as the tile engines — tileSize/halo enter
+/// the window allocation, so the side is computed in int64 and typed-refused
+/// before the buffer is sized (catalog ceilings do not cover hand-built
+/// ModelInfo).
+std::int64_t checkedWindowSide( int tileSize, int halo )
+{
+  const std::int64_t side = static_cast<std::int64_t>( tileSize )
+                              + 2 * static_cast<std::int64_t>( halo );
+  if ( side > kMaxWindowPx )
+    throw RSOperatorError(
+      ErrorCode::InvalidParameter,
+      "the inference window side tile+2*halo = " + std::to_string( tileSize ) + "+2*"
+        + std::to_string( halo ) + " = " + std::to_string( side )
+        + " px exceeds the window bound of " + std::to_string( kMaxWindowPx )
+        + " px — the window buffer would be memory-unbounded (reduce tile_size or halo)" );
+  return side;
+}
+
+/// #1044: window-buffer budget in float elements, refused in 64-bit above
+/// the shared window budget before the allocation.
+std::size_t checkedWindowFloats( std::int64_t side, std::int64_t channels )
+{
+  const std::optional<std::int64_t> side64 = checkedMul( side, side );
+  const std::optional<std::int64_t> floats = side64 ? checkedMul( *side64, channels )
+                                                    : std::nullopt;
+  if ( !floats || *floats > static_cast<std::int64_t>( kMaxWindowFloats ) )
+    throw RSOperatorError(
+      ErrorCode::InvalidParameter,
+      "the inference window needs "
+        + ( floats ? std::to_string( *floats ) : std::string( "more than 2^63" ) )
+        + " float elements (side " + std::to_string( side ) + " × channels "
+        + std::to_string( channels ) + "), above the " + std::to_string( kMaxWindowFloats )
+        + "-element window budget — reduce tile_size, halo or the fed band count" );
+  return static_cast<std::size_t>( *floats );
+}
 
 struct CoreTile
 {
@@ -170,8 +207,8 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
   std::vector<DetectionBox> detections;
   const std::array<double, 6> geoTransform = ds.geoTransform();
 
-  const int maxWin = tileSize + 2 * halo;
-  std::vector<float> windowBuffer( static_cast<std::size_t>( maxWin ) * maxWin * bandCount );
+  const int maxWin = static_cast<int>( checkedWindowSide( tileSize, halo ) );
+  std::vector<float> windowBuffer( checkedWindowFloats( maxWin, bandCount ) );
   std::vector<cv::Mat> batchMats;
   std::vector<std::array<int, 4>> batchWindows; // winX, winY, winW, winH per pending tile
   std::vector<CoreTile> batchCores;
@@ -235,10 +272,10 @@ DetectionTileStats DetectionTileEngine::run( const std::string &inputPath,
                                + " samples for a batch of " + std::to_string( B )
                                + " — the export fixes the batch dimension; use batch_size=1" );
 
-    // #1056: the per-sample slice below builds a header onto `output.ptr(bi)`
-    // and passes it to decodeDetections, which addresses the plane as tightly
-    // packed. A non-continuous provider output (strided ROI view) would make
-    // those addresses wrong — clone into a continuous buffer instead.
+    // #1056: the per-sample slice below builds a header onto output.ptr(bi)
+    // with DEFAULT (continuous) strides — on a strided provider output that
+    // header misreads memory. Normalize once per batch: a clone is one
+    // tile-sized copy, negligible next to the forward pass.
     if ( !output.isContinuous() )
       output = output.clone();
 

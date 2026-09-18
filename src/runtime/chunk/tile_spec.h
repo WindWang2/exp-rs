@@ -6,11 +6,11 @@
 #pragma once
 
 #include <algorithm>
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace sicnu::runtime::chunk
@@ -57,36 +57,66 @@ struct TileSpec
 };
 
 /// Row-major tile grid for a raster with optional halo.
+///
+/// Overflow contract (#1056): the grid arithmetic previously relied on
+/// assert-only preconditions — compiled out of release builds, so dims near
+/// INT_MAX (e.g. GDAL-reported sizes flowing through the fused-chain seam)
+/// wrapped `rasterWidth + tileWidth - 1` and `cols * rows` into negative
+/// ints. All grid math is now computed in int64 and typed-thrown when the
+/// result cannot be represented. The typed checks fully supersede the old
+/// asserts (they run in EVERY build type and throw instead of aborting — an
+/// assert here would preempt the typed path in debug builds).
 inline std::vector<TileSpec> buildTileGrid( int rasterWidth, int rasterHeight,
                                             int tileWidth, int tileHeight,
                                             int halo, int bands )
 {
-    assert( rasterWidth > 0 && rasterHeight > 0 );
-    assert( tileWidth > 0 && tileHeight > 0 );
-    assert( halo >= 0 );
-    assert( bands > 0 );
-    // Release-build guards: GDAL-reported dimensions near INT_MAX make the
-    // historical `rasterWidth + tileWidth - 1` / `cols * rows` int arithmetic
-    // overflow (#1056). A negative or absurd grid is refused loudly instead of
-    // becoming UB or an OOB reserve.
-    if ( rasterWidth <= 0 || rasterHeight <= 0 || tileWidth <= 0 || tileHeight <= 0
-         || halo < 0 || bands <= 0 )
-        throw std::invalid_argument( "buildTileGrid: width/height/tile/halo/bands must be positive" );
+    if ( rasterWidth <= 0 || rasterHeight <= 0 )
+        throw std::invalid_argument( "buildTileGrid: raster dimensions must be positive (" +
+                                     std::to_string( rasterWidth ) + "x" +
+                                     std::to_string( rasterHeight ) + ")" );
+    if ( tileWidth <= 0 || tileHeight <= 0 )
+        throw std::invalid_argument( "buildTileGrid: tile dimensions must be positive (" +
+                                     std::to_string( tileWidth ) + "x" +
+                                     std::to_string( tileHeight ) + ")" );
+    if ( halo < 0 )
+        throw std::invalid_argument( "buildTileGrid: halo must be >= 0 (got " +
+                                     std::to_string( halo ) + ")" );
+    if ( bands <= 0 )
+        throw std::invalid_argument( "buildTileGrid: bands must be positive (got " +
+                                     std::to_string( bands ) + ")" );
+
     const std::int64_t cols64 =
         ( static_cast<std::int64_t>( rasterWidth ) + tileWidth - 1 ) / tileWidth;
     const std::int64_t rows64 =
         ( static_cast<std::int64_t>( rasterHeight ) + tileHeight - 1 ) / tileHeight;
     const std::int64_t total64 = cols64 * rows64;
-    const std::int64_t maxBufferSide =
-        static_cast<std::int64_t>( std::max( tileWidth, tileHeight ) ) + 2LL * halo;
-    if ( total64 > std::numeric_limits<int>::max()
-         || maxBufferSide > std::numeric_limits<int>::max() )
-        throw std::length_error( "buildTileGrid: tile grid exceeds the supported integer range" );
-    std::vector<TileSpec> tiles;
-    tiles.reserve( static_cast<std::size_t>( total64 ) );
+    if ( cols64 > std::numeric_limits<int>::max() || rows64 > std::numeric_limits<int>::max() ||
+         total64 > std::numeric_limits<int>::max() )
+        throw std::overflow_error( "buildTileGrid: tile grid " + std::to_string( cols64 ) + "x" +
+                                   std::to_string( rows64 ) + " (" + std::to_string( total64 ) +
+                                   " tiles) overflows the int tile index domain — shrink the "
+                                   "tile size or bound the raster extent first" );
     const int cols = static_cast<int>( cols64 );
     const int rows = static_cast<int>( rows64 );
     const int total = static_cast<int>( total64 );
+    // Both buffer spans are computed in int64: the widest/tallest tile plus
+    // the halo must stay inside int, or TileSpec::bufferWidth/bufferHeight
+    // would wrap negative for downstream buffer sizing.
+    if ( const std::int64_t bufferSpanW =
+             static_cast<std::int64_t>( std::min( tileWidth, rasterWidth ) ) +
+             2 * static_cast<std::int64_t>( halo );
+         bufferSpanW > std::numeric_limits<int>::max() )
+        throw std::overflow_error( "buildTileGrid: tile buffer width + 2*halo = " +
+                                   std::to_string( bufferSpanW ) + " overflows int — reduce the halo" );
+    if ( const std::int64_t bufferSpanH =
+             static_cast<std::int64_t>( std::min( tileHeight, rasterHeight ) ) +
+             2 * static_cast<std::int64_t>( halo );
+         bufferSpanH > std::numeric_limits<int>::max() )
+        throw std::overflow_error( "buildTileGrid: tile buffer height + 2*halo = " +
+                                   std::to_string( bufferSpanH ) + " overflows int — reduce the halo" );
+
+    std::vector<TileSpec> tiles;
+    tiles.reserve( static_cast<size_t>( total ) );
     int index = 0;
     for ( int row = 0; row < rows; ++row )
     {

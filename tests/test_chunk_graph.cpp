@@ -12,6 +12,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
@@ -74,6 +75,46 @@ TEST_CASE( "buildTileGrid covers the raster exactly with edge clamping", "[chunk
     // Edge tiles clamped: right column width 1000-768=232.
     REQUIRE( tiles[3].width == 232 );
     REQUIRE( tiles[11].height == 700 - 512 );
+}
+
+TEST_CASE( "buildTileGrid typed-refuses int overflow instead of wrapping (#1056)",
+           "[chunk][grid]" )
+{
+    // Dims near INT_MAX (e.g. GDAL-reported sizes) previously wrapped
+    // rasterWidth + tileWidth - 1 and cols * rows into negative ints in
+    // RELEASE builds (asserts are compiled out). The grid math is now 64-bit
+    // with typed failures at the int domain edges: INT_MAX per side with
+    // 1px tiles yields cols*rows ~ 4.6e18, far past the int tile count.
+    REQUIRE_THROWS_AS(
+        ( buildTileGrid(
+            std::numeric_limits<int>::max(), std::numeric_limits<int>::max(), 1, 1, 0, 1 ) ),
+        std::overflow_error );
+    // A legal-but-huge extent with a small tile overflows the tile COUNT too.
+    REQUIRE_THROWS_AS(
+        ( buildTileGrid( 2000000000, 2000000000, 16, 16, 0, 1 ) ), std::overflow_error );
+    // Halo that pushes the buffer span past int is refused before any
+    // bufferWidth wraps negative.
+    REQUIRE_THROWS_AS( ( buildTileGrid( 1000, 700, 256, 256,
+                                        std::numeric_limits<int>::max() / 2, 1 ) ),
+                       std::overflow_error );
+    // The HEIGHT span is guarded independently (review P1): this shape's
+    // width span and tile count stay in-domain while height + 2*halo
+    // overflows — previously the bufferHeight int math wrapped negative.
+    REQUIRE_THROWS_AS(
+        ( buildTileGrid( 1000, 2000000000, 512, 2000000000, 1000000000, 1 ) ),
+        std::overflow_error );
+    // Non-positive geometry is typed (was assert-only).
+    REQUIRE_THROWS_AS( ( buildTileGrid( 0, 700, 256, 256, 0, 1 ) ), std::invalid_argument );
+    REQUIRE_THROWS_AS( ( buildTileGrid( 1000, 700, 0, 256, 0, 1 ) ), std::invalid_argument );
+    REQUIRE_THROWS_AS( ( buildTileGrid( 1000, 700, 256, 256, -1, 1 ) ), std::invalid_argument );
+    REQUIRE_THROWS_AS( ( buildTileGrid( 1000, 700, 256, 256, 0, 0 ) ), std::invalid_argument );
+
+    // The largest in-domain grid still works: 1px tiles over a 65535px raster
+    // (cols*rows = 65535^0 ... keep it int-safe) — sanity: boundary values.
+    const auto tiles = buildTileGrid( 65535, 1, 1, 1, 0, 1 );
+    REQUIRE( tiles.size() == 65535 );
+    REQUIRE( tiles.back().totalTiles == 65535 );
+    REQUIRE( tiles.back().xOffset == 65534 );
 }
 
 TEST_CASE( "BoundedChunkQueue enforces capacity (backpressure)", "[chunk][queue]" )

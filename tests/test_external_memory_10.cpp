@@ -71,6 +71,46 @@ TEST_CASE( "ScratchRegistry enforces the byte budget with typed refusal", "[scra
     }
 }
 
+TEST_CASE( "ScratchRegistry rejects path-injecting run ids and stems at the boundary (#1056)",
+           "[scratch][lsee10][injection]" )
+{
+    // runId/stem become path components: separators, dot-dot elements and
+    // absolute paths must never reach the filesystem, even though today's
+    // production callers are trusted — the registry is the last line of
+    // defense (std::invalid_argument, before any directory is created).
+    ScratchRegistry registry( { tempRoot( "injection" ), 0 } );
+
+    REQUIRE_THROWS_AS( registry.acquire( "../escape", "tile", 8 ), std::invalid_argument );
+    REQUIRE_THROWS_AS( registry.acquire( "run-1", "../../etc/passwd", 8 ),
+                       std::invalid_argument );
+    REQUIRE_THROWS_AS( registry.acquire( "run/evil", "tile", 8 ), std::invalid_argument );
+    REQUIRE_THROWS_AS( registry.acquire( "run-1", "tile\\evil", 8 ), std::invalid_argument );
+    REQUIRE_THROWS_AS( registry.acquire( "..", "tile", 8 ), std::invalid_argument );
+    REQUIRE_THROWS_AS( registry.acquire( ".", "tile", 8 ), std::invalid_argument );
+    REQUIRE_THROWS_AS( registry.acquire( "", "tile", 8 ), std::invalid_argument );
+    REQUIRE_THROWS_AS( registry.acquire( "run-1", "", 8 ), std::invalid_argument );
+    // Absolute-path escape attempts carry separators → refused by the same
+    // allowlist.
+    REQUIRE_THROWS_AS( registry.acquire( "/etc", "passwd", 8 ), std::invalid_argument );
+
+    const std::string oversize( 201, 'a' );
+    REQUIRE_THROWS_AS( registry.acquire( oversize, "tile", 8 ), std::invalid_argument );
+
+    // Nothing escaped the root: the rejected acquisitions must not have
+    // created directories outside (or inside) it.
+    std::error_code ec;
+    const auto entries = static_cast<std::size_t>(
+        std::distance( std::filesystem::directory_iterator( tempRoot( "injection" ), ec ),
+                       std::filesystem::directory_iterator() ) );
+    REQUIRE( entries == 0 );
+
+    // The legal charset still acquires normally (identifiers with dots,
+    // dashes, underscores, alphanumerics).
+    auto lease = registry.acquire( "run.2026-09_18", "tile.01", 16 );
+    REQUIRE( lease.isValid() );
+    REQUIRE( lease.path().find( "run.2026-09_18" ) != std::string::npos );
+}
+
 TEST_CASE( "ScratchLease RAII releases bytes and unlinks provisional files", "[scratch][lsee10]" )
 {
     ScratchRegistry registry( { tempRoot( "raii" ), 0 } );

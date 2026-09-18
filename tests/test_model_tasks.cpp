@@ -323,6 +323,69 @@ TEST_CASE( "detection decode maps v5 and v8 layouts to raster boxes", "[models][
   CHECK( boxes.empty() );
 }
 
+TEST_CASE( "detection decode accepts a strided (non-contiguous) head output (#1056)",
+           "[models][detect]" )
+{
+  using sicnu::operators::runtime::decodeDetections;
+  sicnu::operators::ModelDetectionContract contract;
+  contract.classes = { "ship" };
+  contract.layout = "xywh_objectness";
+  contract.tensorLayout = "channels_first";
+
+  // Reference: one candidate per 4 candidates, values on a contiguous
+  // (1, 6, N) tensor.
+  constexpr int kC = 6;
+  constexpr int kN = 4;
+  std::vector<float> values( static_cast<std::size_t>( kC ) * kN );
+  for ( int n = 0; n < kN; ++n )
+  {
+    values[static_cast<std::size_t>( 0 ) * kN + n] = 16.0f + 8.0f * n; // x center
+    values[static_cast<std::size_t>( 1 ) * kN + n] = 16.0f;            // y center
+    values[static_cast<std::size_t>( 2 ) * kN + n] = 8.0f;             // w
+    values[static_cast<std::size_t>( 3 ) * kN + n] = 4.0f;             // h
+    values[static_cast<std::size_t>( 4 ) * kN + n] = 0.9f;             // objectness
+    values[static_cast<std::size_t>( 5 ) * kN + n] = 1.0f;             // class score
+  }
+  const cv::Mat continuous( 3, std::vector<int>{ 1, kC, kN }.data(), CV_32F,
+                            values.data() );
+
+  // Fixture: the SAME values on a strided view — a (1, 6, 8) buffer sliced
+  // to the last 4 candidate columns, exactly the padded/strided header a
+  // provider may hand back. Pre-#1056 the decode read it with continuous
+  // strides and produced garbage boxes.
+  std::vector<float> padded( static_cast<std::size_t>( kC ) * 8, -7.0f );
+  for ( int c = 0; c < kC; ++c )
+    for ( int n = 0; n < kN; ++n )
+      padded[static_cast<std::size_t>( c ) * 8 + n] =
+        values[static_cast<std::size_t>( c ) * kN + n];
+  cv::Mat paddedMat( 3, std::vector<int>{ 1, kC, 8 }.data(), CV_32F, padded.data() );
+  const cv::Mat strided =
+    paddedMat( { cv::Range::all(), cv::Range::all(), cv::Range( 0, kN ) } ).clone();
+  REQUIRE_FALSE( paddedMat( { cv::Range::all(), cv::Range::all(), cv::Range( 0, kN ) } )
+                   .isContinuous() );
+
+  std::vector<DetectionBox> fromContinuous;
+  REQUIRE( decodeDetections( continuous, contract, 0, 0, 1.0, 1.0, 64, 32, fromContinuous )
+             .empty() );
+  REQUIRE( fromContinuous.size() == kN );
+
+  std::vector<DetectionBox> fromStrided;
+  REQUIRE( decodeDetections( paddedMat( { cv::Range::all(), cv::Range::all(),
+                                          cv::Range( 0, kN ) } ),
+                             contract, 0, 0, 1.0, 1.0, 64, 32, fromStrided )
+             .empty() );
+  REQUIRE( fromStrided.size() == fromContinuous.size() );
+  for ( std::size_t i = 0; i < fromContinuous.size(); ++i )
+  {
+    CHECK( fromStrided[i].x == Catch::Approx( fromContinuous[i].x ) );
+    CHECK( fromStrided[i].y == Catch::Approx( fromContinuous[i].y ) );
+    CHECK( fromStrided[i].w == Catch::Approx( fromContinuous[i].w ) );
+    CHECK( fromStrided[i].h == Catch::Approx( fromContinuous[i].h ) );
+    CHECK( fromStrided[i].confidence == Catch::Approx( fromContinuous[i].confidence ) );
+    CHECK( fromStrided[i].classId == fromContinuous[i].classId );
+  }
+}
+
 TEST_CASE( "NMS is deterministic and resolves tile-overlap duplicates", "[models][detect]" )
 {
   using sicnu::operators::runtime::nonMaxSuppression;

@@ -115,6 +115,11 @@ class ScratchRegistry
     /// (`<counter>-<stem>.part`). Refuses (ScratchBudgetExceeded) when the
     /// budget can't cover outstanding + bytes. The file is created empty;
     /// writers open `lease.path()` themselves.
+    /// Path-component contract (#1056): @p runId and @p stem become path
+    /// elements, so they are validated at this boundary — non-empty, ≤ 200
+    /// bytes, restricted to [A-Za-z0-9._-], never a dot element — and any
+    /// violation throws std::invalid_argument instead of escaping the
+    /// per-run directory.
     ScratchLease acquire( const std::string &runId, const std::string &stem,
                           std::uint64_t bytes );
 
