@@ -10,6 +10,8 @@
 #include <QStandardPaths>
 #include <QtGlobal>
 
+#include <json/json.h>
+
 #include <atomic>
 #include <cstdio>
 #include <filesystem>
@@ -23,6 +25,12 @@
 namespace sicnu::workflow {
 
 namespace {
+
+// Whole-file checkpoint reads are bounded: a corrupt or hostile checkpoint
+// must fail typed, never allocate without limit (#1056). Same cap as the
+// manifest / stage-ledger whole-file reads (finalize_manifest.cpp,
+// stage_ledger.cpp).
+constexpr qint64 kMaxCheckpointBytes = kMaxCheckpointReadBytes;
 
 void fsyncDirectory( const QString &dirPath )
 {
@@ -129,6 +137,16 @@ std::unique_ptr<WorkflowRun> WorkflowCheckpointManager::loadCheckpoint( const QS
   {
     if ( error )
       *error = QStringLiteral( "Failed to open checkpoint file: %1" ).arg( filePath );
+    return nullptr;
+  }
+
+  if ( file.size() > kMaxCheckpointBytes )
+  {
+    if ( error )
+      *error = QStringLiteral( "Checkpoint file exceeds the %1 MiB read cap: %2 (%3 bytes)" )
+                   .arg( kMaxCheckpointBytes / ( 1024 * 1024 ) )
+                   .arg( filePath )
+                   .arg( file.size() );
     return nullptr;
   }
 
@@ -306,7 +324,23 @@ std::vector<std::shared_ptr<WorkflowRun>> WorkflowCheckpointManager::recoverInte
   for ( const QString &cpFile : checkpointFiles )
   {
     QString err;
-    auto run = loadCheckpoint( cpFile, &err );
+    std::unique_ptr<WorkflowRun> run;
+    // One malformed checkpoint must quarantine itself, not kill the whole
+    // recovery sweep (#1038/#1056): typed parse failures come back as
+    // nullptr with an error string; an unexpected escaping exception is
+    // caught per file so the remaining checkpoints still recover.
+    try
+    {
+      run = loadCheckpoint( cpFile, &err );
+    }
+    catch ( const Json::Exception &e )
+    {
+      err = QStringLiteral( "checkpoint JSON exception: %1" ).arg( QString::fromUtf8( e.what() ) );
+    }
+    catch ( const std::exception &e )
+    {
+      err = QStringLiteral( "unexpected exception: %1" ).arg( QString::fromUtf8( e.what() ) );
+    }
     if ( !run )
     {
       qWarning( "WorkflowCheckpointManager: skipping corrupt checkpoint %s: %s",

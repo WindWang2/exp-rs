@@ -5,9 +5,13 @@
 #include <memory>
 #include <vector>
 
+#include "workflow_limits.h"
 #include "workflow_run.h"
 
 namespace sicnu::workflow {
+
+// kMaxCheckpointReadBytes (the whole-file checkpoint read cap, #1056) lives
+// in workflow_limits.h, re-exported here for checkpoint users.
 
 class WorkflowCheckpointManager {
 public:
