@@ -65,6 +65,9 @@ namespace {
             throw RSOperatorError(ErrorCode::GdalError, "GTiff driver not available");
         case E::OutputCreateFailed:
             throw RSOperatorError(ErrorCode::GdalError, "Failed to create output");
+        case E::RasterTooLarge:
+            // Input-validation, not a computation failure (#1056).
+            throw RSOperatorError(ErrorCode::InvalidInputData, msg);
         case E::PredictionFailed:
         case E::PredictionSizeMismatch:
             throw RSOperatorError(ErrorCode::OpenCvError, msg);
