@@ -319,6 +319,17 @@ sicnu_add_io_test(test_io_range_cache SKIP_RETURN_CODE 77)
 target_sources(test_io_range_cache PRIVATE support/http_range_server.cpp)
 if(WIN32)
   target_link_libraries(test_io_range_cache PRIVATE ws2_32)
+
+  # #1055 compile-time portability guard: the Windows branch of the disk block
+  # store must not fall back to the deprecated POSIX ::getpid() alias (only
+  # visible on MSVC when <process.h> arrives transitively). Suppressing UCRT
+  # non-STDC names turns any such use into a hard error; the object is built as
+  # a dependency of the test target and never linked.
+  add_library(sicnu_range_cache_disk_pid_guard OBJECT
+    ${CMAKE_SOURCE_DIR}/src/geospatial/remote/range_cache_disk.cpp)
+  target_compile_definitions(sicnu_range_cache_disk_pid_guard PRIVATE _CRT_DECLARE_NONSTDC_NAMES=0)
+  target_link_libraries(sicnu_range_cache_disk_pid_guard PRIVATE Sicnu::Geospatial)
+  add_dependencies(test_io_range_cache sicnu_range_cache_disk_pid_guard)
 endif()
 
 # 7.0 STAC API client (loopback JSON fixture).
