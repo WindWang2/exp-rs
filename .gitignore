@@ -82,6 +82,14 @@ resources/translations/*.qm
 !data/spectral/
 !data/spectral/**
 
+# Lab Sample Data Foundry (D1): generated rasters/vectors stay local-only.
+# The manifest schema template is tracked config; a blessed generated
+# manifest.json MAY be committed by a release manager (see docs/adr/0164).
+!data/samples/
+data/samples/*
+!data/samples/manifest.json
+!data/samples/manifest.template.json
+
 # Test golden data always tracked
 !tests/data/
 !tests/data/**

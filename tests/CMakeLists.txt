@@ -222,6 +222,49 @@ endfunction()
 # Core and domain tests
 sicnu_add_test(test_crs)
 
+# Lab Sample Data Foundry (D1): light fixture suite — links only Catch2 + the
+# foundry (GDAL + jsoncpp transitively), no Qt/QGIS. Fixtures are generated at
+# runtime into temp dirs (repo convention: no tracked rasters). The CLI
+# subprocess path is pinned via the generator target's file location.
+add_executable(test_sample_fixtures test_sample_fixtures.cpp)
+target_link_libraries(test_sample_fixtures PRIVATE
+  Catch2::Catch2WithMain
+  sicnu_sample_foundry
+)
+target_include_directories(test_sample_fixtures PRIVATE
+  ${CMAKE_SOURCE_DIR}/tools
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_sample_fixtures PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+  SICNU_GENERATE_SAMPLES_BIN="$<TARGET_FILE:sicnu_generate_samples>"
+)
+# The genex above carries no build dependency; make the subprocess binary
+# rebuild whenever the suite is built.
+add_dependencies(test_sample_fixtures sicnu_generate_samples)
+set_target_properties(test_sample_fixtures PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+# Discover through the same properties sicnu_discover_tests applies (GDAL
+# needs DL_PATHS in conda lanes, #730; sanitizer lanes need LSAN leak
+# suppression), plus a TEST_PREFIX so `ctest -R sample_fixtures` selects the
+# suite: Catch discovery names entries after the English TEST_CASE titles.
+set(_sf_discovery_props "")
+if(ENABLE_SANITIZERS)
+  list(APPEND _sf_discovery_props "ENVIRONMENT_MODIFICATION" "LSAN_OPTIONS=set:detect_leaks=0")
+endif()
+set(_sf_dl_paths "")
+if(SICNU_TEST_DL_PATHS)
+  set(_sf_dl_paths DL_PATHS ${SICNU_TEST_DL_PATHS})
+endif()
+catch_discover_tests(test_sample_fixtures
+  DISCOVERY_MODE PRE_TEST
+  TEST_PREFIX "sample_fixtures: "
+  ${_sf_dl_paths}
+  PROPERTIES ${_sf_discovery_props}
+)
+
+
 # Geospatial I/O Foundation 4.0 (light targets — see sicnu_add_io_test above).
 sicnu_add_io_test(test_io_canonical_metadata)
 sicnu_add_io_test(test_io_crs_policy)
