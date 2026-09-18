@@ -174,6 +174,20 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
       if ( stepVal.isMember( "meta" ) && stepVal["meta"].isMember( "ui" ) )
       {
         const auto &uiObj = stepVal["meta"]["ui"];
+        // #1038: wrong-typed UI metadata used to throw Json::LogicError out
+        // of the deserializer — one malformed checkpoint aborted the whole
+        // recovery sweep / crashed startup. Fail typed instead, like the
+        // host/kind enums above.
+        if ( uiObj.isMember( "x" ) && !uiObj["x"].isDouble() )
+        {
+          error = "Invalid meta.ui.x: expected a number";
+          return false;
+        }
+        if ( uiObj.isMember( "y" ) && !uiObj["y"].isDouble() )
+        {
+          error = "Invalid meta.ui.y: expected a number";
+          return false;
+        }
         if ( uiObj.isMember( "x" ) )
           step.uiMeta.x = uiObj["x"].asDouble();
         if ( uiObj.isMember( "y" ) )
@@ -183,6 +197,11 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
           const auto &mapObj = uiObj["portAddToMap"];
           for ( const auto &pName : mapObj.getMemberNames() )
           {
+            if ( !mapObj[pName].isBool() )
+            {
+              error = "Invalid meta.ui.portAddToMap['" + pName + "']: expected a boolean";
+              return false;
+            }
             step.uiMeta.portAddToMap[pName] = mapObj[pName].asBool();
           }
         }
