@@ -22,6 +22,7 @@
 #include <QFileInfo>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QThread>
 #include <QTimer>
 
 #include <atomic>
@@ -224,6 +225,49 @@ void writeSmallGeoTiff( const QString &path )
                              tile, 8, 8, GDT_Float32, 0, 0 );
   REQUIRE( err == CE_None );
   GDALClose( ds );
+}
+
+/// Verification handler that always downgrades the payload (the "all pixels
+/// are NoData" shape the copilot verification produces on failure).
+Json::Value verifyFailHandler( const QString &, const QString & )
+{
+  Json::Value v( Json::objectValue );
+  v["ok"] = false;
+  v["kind"] = "raster";
+  v["summary"] = Json::Value( Json::objectValue );
+  Json::Value issues( Json::arrayValue );
+  issues.append( "all pixels are NoData" );
+  v["issues"] = issues;
+  v["warnings"] = Json::Value( Json::arrayValue );
+  return v;
+}
+
+/// Verification handler that accepts the payload.
+Json::Value verifyOkHandler( const QString &, const QString & )
+{
+  Json::Value v( Json::objectValue );
+  v["ok"] = true;
+  v["kind"] = "raster";
+  v["summary"] = Json::Value( Json::objectValue );
+  v["issues"] = Json::Value( Json::arrayValue );
+  v["warnings"] = Json::Value( Json::arrayValue );
+  return v;
+}
+
+/// Registers a TaskTemporary + DeletableSource asset over @a path — the shape
+/// a production output commit produces (and the only shape the rollback's reap
+/// is allowed to delete).
+sicnu::data::AssetId registerCommittedAsset( sicnu::data::DataManager &manager, const QString &path )
+{
+  sicnu::data::SourceDescriptor src;
+  src.canonicalSource = path;
+  src.providerKey = QStringLiteral( "gdal" );
+  sicnu::data::RegisterRequest req{ src };
+  req.persistence = sicnu::data::PersistencePolicy::TaskTemporary;
+  req.additionalCapabilities = sicnu::data::AssetCapability::DeletableSource;
+  const auto reg = manager.registerSource( req );
+  REQUIRE( !reg.assetId.isNull() );
+  return reg.assetId;
 }
 
 } // namespace
@@ -688,76 +732,315 @@ TEST_CASE( "watch token can be removed before the terminal transition (#702)",
 }
 
 // ---------------------------------------------------------------------------
-// #1056 regression: when the affinity thread is starved and the commit cannot
-// run, awaitResult must NOT return the task's raw temporary output path
-// (TaskCenter reaps scratch outputs — the caller would hold a dangling path
-// and no committed asset). A completed run with an output becomes a typed
-// error; output-less / non-completed tasks keep their standard payload.
+// 10. Verification-failure rollback contract matrix (#1042) and the affinity
+//     starvation payload contract (#1056): every completion path that
+//     publishes a committed payload runs the rollback inside the plane's
+//     publication gate, and an affinity-starved await never publishes the
+//     uncommitted temporary output.
 // ---------------------------------------------------------------------------
-TEST_CASE( "awaitResult never returns the raw temp output path when the commit cannot run (#1056)",
-           "[processing][execution_plane][commit][starved]" )
+TEST_CASE( "verification downgrade rolls back the committed asset at the plane publication gate (#1042)",
+           "[processing][execution_plane][verification][rollback]" )
+{
+  ensureCoreApp();
+  sicnu::data::DataManager manager;
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString committedPath = dir.path() + QStringLiteral( "/roll_me_committed.tif" );
+  writeSmallGeoTiff( committedPath );
+  const sicnu::data::AssetId assetId = registerCommittedAsset( manager, committedPath );
+
+  std::atomic<int> rollbackCalls{ 0 };
+  auto rollback = [&, managerPtr = &manager]( Json::Value &payload ) {
+    ++rollbackCalls;
+    ToolCallDispatcher::rollbackVerificationFailure( payload, managerPtr );
+  };
+  std::atomic<int> commits{ 0 };
+  auto committer = [&commits, assetIdStr = assetId.toString().toStdString(),
+                    pathStd = committedPath.toStdString()](
+                       const sicnu::AlgorithmTaskInfo &, std::string &outCommittedPath,
+                       std::string &, std::string &outAssetId ) -> bool {
+    ++commits;
+    outCommittedPath = pathStd;
+    outAssetId = assetIdStr;
+    return true;
+  };
+
+  sicnu::AlgorithmTaskInfo info;
+  info.taskId = 9104201; // unique in this binary: the commit cache is keyed by task id
+  info.algorithmId = QStringLiteral( "rs:ndvi" );
+  info.status = sicnu::TaskStatus::Completed;
+  info.outputLayerPath = committedPath;
+
+  // First builder: commit + verification downgrade + rollback in one gate.
+  const Json::Value payload = ExecutionPlane::instance().buildCommittedResultPayload(
+    info, committer, verifyFailHandler, rollback );
+  REQUIRE( payload["status"].asString() == "error" );
+  REQUIRE( payload["verified"].asBool() == false );
+  REQUIRE( commits.load() == 1 );
+  REQUIRE( rollbackCalls.load() == 1 );
+  // Insulator: the committed asset is gone from the catalog AND from disk.
+  CHECK_FALSE( manager.asset( assetId ).has_value() );
+  CHECK_FALSE( QFileInfo::exists( committedPath ) );
+
+  // Second builder (copilot-style duplicate): the cache hit re-applies the
+  // rollback (idempotent no-op) and publishes the same downgraded payload —
+  // never a cached "success".
+  const Json::Value cached = ExecutionPlane::instance().buildCommittedResultPayload(
+    info, committer, verifyFailHandler, rollback );
+  REQUIRE( cached["status"].asString() == "error" );
+  REQUIRE( cached["verified"].asBool() == false );
+  REQUIRE( commits.load() == 1 ); // the commit stayed exactly-once
+  CHECK_FALSE( manager.asset( assetId ).has_value() );
+  CHECK_FALSE( cached.isMember( "rollbackErrors" ) ); // repeat reap is a clean no-op
+}
+
+TEST_CASE( "verified commits keep the asset — no rollback without a downgrade",
+           "[processing][execution_plane][verification][success]" )
+{
+  ensureCoreApp();
+  sicnu::data::DataManager manager;
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString committedPath = dir.path() + QStringLiteral( "/keep_me_committed.tif" );
+  writeSmallGeoTiff( committedPath );
+  const sicnu::data::AssetId assetId = registerCommittedAsset( manager, committedPath );
+
+  std::atomic<int> rollbackCalls{ 0 };
+  auto rollback = [&, managerPtr = &manager]( Json::Value &payload ) {
+    ++rollbackCalls;
+    ToolCallDispatcher::rollbackVerificationFailure( payload, managerPtr );
+  };
+  auto committer = [assetIdStr = assetId.toString().toStdString(),
+                    pathStd = committedPath.toStdString()](
+                       const sicnu::AlgorithmTaskInfo &, std::string &outCommittedPath,
+                       std::string &, std::string &outAssetId ) -> bool {
+    outCommittedPath = pathStd;
+    outAssetId = assetIdStr;
+    return true;
+  };
+
+  sicnu::AlgorithmTaskInfo info;
+  info.taskId = 9104202;
+  info.algorithmId = QStringLiteral( "rs:ndvi" );
+  info.status = sicnu::TaskStatus::Completed;
+  info.outputLayerPath = committedPath;
+
+  const Json::Value payload = ExecutionPlane::instance().buildCommittedResultPayload(
+    info, committer, verifyOkHandler, rollback );
+  REQUIRE( payload["status"].asString() == "success" );
+  REQUIRE( payload["verified"].asBool() == true );
+  REQUIRE( rollbackCalls.load() == 1 ); // the gate ran, the rollback was a no-op
+  CHECK( manager.asset( assetId ).has_value() );
+  CHECK( QFileInfo::exists( committedPath ) );
+}
+
+TEST_CASE( "awaitResult applies the verification rollback on the sync commit path (#1042)",
+           "[processing][execution_plane][await][rollback]" )
+{
+  ensureCoreApp();
+  sicnu::data::DataManager manager;
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString tempPath = dir.path() + QStringLiteral( "/sync_roll.tif" );
+  const QString committedPath = dir.path() + QStringLiteral( "/sync_roll_committed.tif" );
+  writeSmallGeoTiff( tempPath );
+  writeSmallGeoTiff( committedPath );
+  const sicnu::data::AssetId assetId = registerCommittedAsset( manager, committedPath );
+
+  registerStub( "stub:sync_rollback", BehavioralStubAdapter::Mode::WriteOutput, 0, tempPath );
+  ExecutionRequest request;
+  request.algorithmId = QStringLiteral( "stub:sync_rollback" );
+  const ExecutionHandle handle = ExecutionPlane::instance().submit( request );
+  REQUIRE( handle.taskId() > 0 );
+  REQUIRE( handle.await( std::chrono::seconds( 8 ) ) );
+
+  std::atomic<int> rollbackCalls{ 0 };
+  auto rollback = [&, managerPtr = &manager]( Json::Value &payload ) {
+    ++rollbackCalls;
+    ToolCallDispatcher::rollbackVerificationFailure( payload, managerPtr );
+  };
+  std::atomic<int> commits{ 0 };
+  auto committer = [&commits, assetIdStr = assetId.toString().toStdString(),
+                    pathStd = committedPath.toStdString()](
+                       const sicnu::AlgorithmTaskInfo &, std::string &outCommittedPath,
+                       std::string &, std::string &outAssetId ) -> bool {
+    ++commits;
+    outCommittedPath = pathStd;
+    outAssetId = assetIdStr;
+    return true;
+  };
+
+  const Json::Value payload = ExecutionPlane::instance().awaitResult(
+    handle.taskId(), std::chrono::seconds( 8 ), committer, /*affinityContext=*/nullptr,
+    /*cancelOnTimeout=*/false, verifyFailHandler, rollback );
+
+  REQUIRE( payload["status"].asString() == "error" );
+  REQUIRE( payload["verified"].asBool() == false );
+  REQUIRE( commits.load() == 1 );
+  REQUIRE( rollbackCalls.load() == 1 );
+  CHECK_FALSE( manager.asset( assetId ).has_value() );
+  CHECK_FALSE( QFileInfo::exists( committedPath ) );
+}
+
+TEST_CASE( "awaitResult affinity starvation returns a structured error, never the temp output (#1056)",
+           "[processing][execution_plane][affinity][timeout]" )
 {
   ensureCoreApp();
 
-  // A completed task that reports an output.
-  registerStub( "stub:await_output", BehavioralStubAdapter::Mode::WriteOutput, /*sleepMs=*/50,
-                QStringLiteral( "/tmp/stub-await-output.tif" ) );
+  // A worker thread that never pumps an event loop: queued deliveries to a
+  // QObject moved here can never run, which is exactly the starvation the
+  // 5 s affinity window guards against.
+  class NonPumpingThread : public QThread
+  {
+    public:
+      using QThread::QThread;
+      void run() override
+      {
+        while ( !mStop.load() )
+          std::this_thread::sleep_for( std::chrono::milliseconds( 25 ) );
+      }
+      void requestStop() { mStop.store( true ); }
+      std::atomic<bool> mStop{ false };
+  };
+
+  sicnu::data::DataManager manager;
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString tempPath = dir.path() + QStringLiteral( "/starved_output.tif" );
+  writeSmallGeoTiff( tempPath );
+
+  registerStub( "stub:affinity_starve", BehavioralStubAdapter::Mode::WriteOutput, 0, tempPath );
   ExecutionRequest request;
-  request.algorithmId = QStringLiteral( "stub:await_output" );
+  request.algorithmId = QStringLiteral( "stub:affinity_starve" );
   const ExecutionHandle handle = ExecutionPlane::instance().submit( request );
   REQUIRE( handle.taskId() > 0 );
-  REQUIRE( eventually( [&] {
-    return TaskCenter::instance().getTaskInfo( handle.taskId() ).status == TaskStatus::Completed;
-  } ) );
+  REQUIRE( handle.await( std::chrono::seconds( 8 ) ) );
+
+  NonPumpingThread worker;
+  worker.start();
+  QObject bridge;
+  bridge.moveToThread( &worker );
 
   std::atomic<int> commits{ 0 };
-  auto countingCommitter = []( std::atomic<int> *counter ) {
-    return [counter]( const sicnu::AlgorithmTaskInfo &, std::string &path, std::string &,
-                      std::string & ) {
-      ++( *counter );
-      path = "/tmp/committed-from-starved.tif";
-      return true;
-    };
-  }( &commits );
+  auto committer = [&commits]( const sicnu::AlgorithmTaskInfo &, std::string &path,
+                               std::string &, std::string & ) -> bool {
+    ++commits;
+    path = "/tmp/should_never_commit.tif";
+    return true;
+  };
+  std::atomic<int> rollbackCalls{ 0 };
+  auto rollback = [&, managerPtr = &manager]( Json::Value &payload ) {
+    ++rollbackCalls;
+    ToolCallDispatcher::rollbackVerificationFailure( payload, managerPtr );
+  };
 
-  // The affinity context lives on the main thread while awaitResult runs on a
-  // worker thread; the main thread never pumps its event loop (blocked in
-  // join), so the queued commit cannot be delivered — the starved branch.
-  QObject affinity;
-  Json::Value payload;
-  auto awaiter = std::thread( [&] {
-    payload = ExecutionPlane::instance().awaitResult(
-      handle.taskId(), std::chrono::seconds( 10 ), countingCommitter, &affinity,
-      /*cancelOnTimeout=*/false );
+  const auto start = std::chrono::steady_clock::now();
+  const Json::Value payload = ExecutionPlane::instance().awaitResult(
+    handle.taskId(), std::chrono::seconds( 8 ), committer, &bridge,
+    /*cancelOnTimeout=*/false, verifyOkHandler, rollback );
+  const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                           std::chrono::steady_clock::now() - start )
+                           .count();
+
+  worker.requestStop();
+  worker.wait();
+
+  INFO( "elapsed ms: " << elapsedMs << ", status: " << payload["status"].asString() );
+  REQUIRE( payload["status"].asString() == "error" );
+  REQUIRE( payload["errorKind"].asString() == "commit_delivery_timeout" );
+  REQUIRE( payload["taskId"].asInt64() == handle.taskId() );
+  REQUIRE( payload["algorithmId"].asString() == "stub:affinity_starve" );
+  // The uncommitted temporary output path must NOT be published: TaskCenter
+  // may reap it, so the result would dangle.
+  CHECK_FALSE( payload.isMember( "output" ) );
+  REQUIRE( commits.load() == 0 );
+  REQUIRE( rollbackCalls.load() == 0 );
+  REQUIRE( elapsedMs < 8000 );
+}
+
+TEST_CASE( "async watcher delivery rolls back on verification failure (#1042)",
+           "[processing][execution_plane][watcher][rollback]" )
+{
+  ensureCoreApp();
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString tempPath = dir.path() + QStringLiteral( "/watch_roll.tif" );
+  writeSmallGeoTiff( tempPath );
+  REQUIRE( QFileInfo::exists( tempPath ) );
+
+  registerStub( "stub:watch_rollback", BehavioralStubAdapter::Mode::WriteOutput, 0, tempPath );
+
+  sicnu::data::DataManager dataManager;
+  ToolCallDispatcher dispatcher; // production wiring: watcher commits through the plane
+  dispatcher.setSourceTag( QStringLiteral( "agent" ) );
+  dispatcher.setDataManager( &dataManager );
+  dispatcher.setOutputVerificationHandler( verifyFailHandler );
+
+  std::atomic<int> delivered{ 0 };
+  Json::Value deliveredPayload;
+  QString submitError;
+  REQUIRE( dispatcher.submit( envelopeFor( "stub:watch_rollback" ),
+                              [&]( const Json::Value &payload ) {
+                                deliveredPayload = payload;
+                                ++delivered;
+                              },
+                              &submitError, nullptr ) );
+  REQUIRE( submitError.isEmpty() );
+
+  // Pump the test thread's loop (the bridge lives here) until the queued
+  // delivery lands; the commit and rollback then run inline on this thread —
+  // the DataManager's owning thread — so assertions are deterministic.
+  QEventLoop loop;
+  QTimer poller;
+  poller.setInterval( 25 );
+  QObject::connect( &poller, &QTimer::timeout, [&] {
+    if ( delivered.load() >= 1 )
+      loop.quit();
   } );
-  awaiter.join();
+  QTimer::singleShot( 8000, &loop, &QEventLoop::quit );
+  poller.start();
+  loop.exec();
+  poller.stop();
 
-  REQUIRE( payload.isObject() );
-  CHECK( payload["status"].asString() == "error" );
-  const std::string message = payload["errorMessage"].asString();
-  CHECK( message.find( "commit" ) != std::string::npos );
-  CHECK( !payload.isMember( "output" ) );
-  CHECK( commits.load() == 0 );
+  REQUIRE( delivered.load() == 1 );
+  REQUIRE( deliveredPayload["status"].asString() == "error" );
+  REQUIRE( deliveredPayload["verified"].asBool() == false );
+  // The real production commit produced exactly one asset; the rollback reaped
+  // it (catalog entry + stable file).
+  CHECK( dataManager.assets().isEmpty() );
+  const QString committed = tempPath.left( tempPath.length() - 4 ) + QStringLiteral( "_committed.tif" );
+  CHECK_FALSE( QFileInfo::exists( committed ) );
+}
 
-  // A task WITHOUT an output keeps its standard payload (nothing to commit).
-  registerStub( "stub:await_noout", BehavioralStubAdapter::Mode::Immediate );
-  ExecutionRequest request2;
-  request2.algorithmId = QStringLiteral( "stub:await_noout" );
-  const ExecutionHandle handle2 = ExecutionPlane::instance().submit( request2 );
-  REQUIRE( handle2.taskId() > 0 );
-  REQUIRE( eventually( [&] {
-    return TaskCenter::instance().getTaskInfo( handle2.taskId() ).status == TaskStatus::Completed;
-  } ) );
+TEST_CASE( "dispatchAndAwait sync path rolls back on verification failure (#1042)",
+           "[processing][execution_plane][dispatch_and_await][rollback]" )
+{
+  ensureCoreApp();
+  QTemporaryDir dir;
+  REQUIRE( dir.isValid() );
+  const QString tempPath = dir.path() + QStringLiteral( "/await_roll.tif" );
+  writeSmallGeoTiff( tempPath );
+  REQUIRE( QFileInfo::exists( tempPath ) );
 
-  Json::Value payload2;
-  auto awaiter2 = std::thread( [&] {
-    payload2 = ExecutionPlane::instance().awaitResult(
-      handle2.taskId(), std::chrono::seconds( 10 ), countingCommitter, &affinity,
-      /*cancelOnTimeout=*/false );
-  } );
-  awaiter2.join();
-  REQUIRE( payload2.isObject() );
-  CHECK( payload2["status"].asString() == "success" );
+  registerStub( "stub:await_rollback", BehavioralStubAdapter::Mode::WriteOutput, 0, tempPath );
+
+  sicnu::data::DataManager dataManager;
+  ToolCallDispatcher dispatcher;
+  dispatcher.setSourceTag( QStringLiteral( "agent" ) );
+  dispatcher.setDataManager( &dataManager );
+  dispatcher.setOutputVerificationHandler( verifyFailHandler );
+
+  const Json::Value result =
+    dispatcher.dispatchAndAwait( envelopeFor( "stub:await_rollback" ), std::chrono::seconds( 8 ) );
+
+  REQUIRE( result["status"].asString() == "error" );
+  REQUIRE( result["verified"].asBool() == false );
+  CHECK( dataManager.assets().isEmpty() );
+  const QString committed = tempPath.left( tempPath.length() - 4 ) + QStringLiteral( "_committed.tif" );
+  CHECK_FALSE( QFileInfo::exists( committed ) );
+  // The temporary output was consumed by the commit and then reaped with the
+  // asset — neither path may survive as a published result.
+  CHECK_FALSE( QFileInfo::exists( tempPath ) );
 }
 
 // ---------------------------------------------------------------------------
