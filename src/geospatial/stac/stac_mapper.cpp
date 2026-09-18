@@ -49,6 +49,18 @@ double optionalDouble( const Json::Value &object, const char *key, bool &present
   return present ? object[key].asDouble() : 0.0;
 }
 
+/// A wrong-typed array element in an externally-supplied item is a hostile
+/// document: fail typed (GeoError), never an escaping Json::LogicError
+/// through the remote search path (#1038).
+void throwGeoForeignElement( const char *field )
+{
+  Json::Value details;
+  details["field"] = field;
+  throw GeoError( ErrorCode::InvalidArgument,
+                  std::string( "STAC item field carries a foreign-typed element: " ) + field,
+                  details );
+}
+
 } // namespace
 
 Json::Value StacAsset::toJson() const
@@ -73,10 +85,13 @@ StacItem StacItem::parse( const Json::Value &item )
 {
   if ( !item.isObject() )
     throw GeoError( ErrorCode::InvalidArgument, "STAC item must be a JSON object" );
-  if ( item.get( "type", "" ).asString() != "Feature" )
+  // Foreign-typed values (a {"type":{}} item) are a typed refusal, never an
+  // escaping Json::LogicError through the remote search path (#1038).
+  const Json::Value &typeValue = item["type"];
+  if ( !typeValue.isString() || typeValue.asString() != "Feature" )
   {
     Json::Value details;
-    details["type"] = item.get( "type", "" ).asString();
+    details["type"] = typeValue;
     throw GeoError( ErrorCode::InvalidArgument, "STAC item requires type=Feature", details );
   }
 
@@ -140,7 +155,11 @@ StacItem StacItem::parse( const Json::Value &item )
   if ( properties.isMember( "sar:polarizations" ) && properties["sar:polarizations"].isArray() )
   {
     for ( const Json::Value &pol : properties["sar:polarizations"] )
+    {
+      if ( !pol.isString() )
+        throwGeoForeignElement( "sar:polarizations" );
       parsed.polarizations.push_back( pol.asString() );
+    }
   }
   if ( properties.isMember( "proj:epsg" ) && properties["proj:epsg"].isIntegral() )
     parsed.epsg = "EPSG:" + std::to_string( properties["proj:epsg"].asInt() );
@@ -149,13 +168,21 @@ StacItem StacItem::parse( const Json::Value &item )
   if ( properties.isMember( "instruments" ) && properties["instruments"].isArray() )
   {
     for ( const Json::Value &instrument : properties["instruments"] )
+    {
+      if ( !instrument.isString() )
+        throwGeoForeignElement( "instruments" );
       parsed.instruments.push_back( instrument.asString() );
+    }
   }
 
   if ( item.isMember( "bbox" ) && item["bbox"].isArray() )
   {
     for ( const Json::Value &value : item["bbox"] )
+    {
+      if ( !value.isNumeric() )
+        throwGeoForeignElement( "bbox" );
       parsed.bbox.push_back( value.asDouble() );
+    }
   }
   parsed.geometry = item.get( "geometry", Json::Value() );
 
@@ -173,7 +200,11 @@ StacItem StacItem::parse( const Json::Value &item )
       if ( assetJson.isMember( "roles" ) && assetJson["roles"].isArray() )
       {
         for ( const Json::Value &role : assetJson["roles"] )
+        {
+          if ( !role.isString() )
+            throwGeoForeignElement( "assets.roles" );
           asset.roles.push_back( role.asString() );
+        }
       }
       parsed.assets[key] = asset;
     }

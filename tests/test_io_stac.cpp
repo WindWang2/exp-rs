@@ -29,6 +29,47 @@ TEST_CASE( "STAC structural violations are structured errors", "[io][stac]" )
   CHECK_THROWS_AS( sicnu::geo::StacItem::parseText( noAssets ), sicnu::geo::GeoError );
 }
 
+TEST_CASE( "foreign-typed STAC fields fail typed, never Json::LogicError (#1038)",
+           "[io][stac][hostile-json]" )
+{
+  // A remote item with an object "type" must be a typed refusal, not an
+  // escaping Json::LogicError through the search path.
+  CHECK_THROWS_AS( sicnu::geo::StacItem::parseText( R"({
+    "type": {}, "id": "x",
+    "properties": { "datetime": "2026-01-01T00:00:00Z" },
+    "assets": { "data": { "href": "a.tif" } }
+  })" ), sicnu::geo::GeoError );
+
+  // Foreign-typed array ELEMENTS are typed refusals too.
+  CHECK_THROWS_AS( sicnu::geo::StacItem::parseText( R"({
+    "type": "Feature", "id": "x",
+    "bbox": [1.0, "south", 3.0, 4.0],
+    "properties": { "datetime": "2026-01-01T00:00:00Z" },
+    "assets": { "data": { "href": "a.tif" } }
+  })" ), sicnu::geo::GeoError );
+
+  CHECK_THROWS_AS( sicnu::geo::StacItem::parseText( R"({
+    "type": "Feature", "id": "x",
+    "bbox": [1.0, 2.0, 3.0, 4.0],
+    "properties": { "datetime": "2026-01-01T00:00:00Z",
+                    "sar:polarizations": [ {}, "VH" ] },
+    "assets": { "data": { "href": "a.tif" } }
+  })" ), sicnu::geo::GeoError );
+
+  CHECK_THROWS_AS( sicnu::geo::StacItem::parseText( R"({
+    "type": "Feature", "id": "x",
+    "properties": { "datetime": "2026-01-01T00:00:00Z",
+                    "instruments": [ 42 ] },
+    "assets": { "data": { "href": "a.tif" } }
+  })" ), sicnu::geo::GeoError );
+
+  CHECK_THROWS_AS( sicnu::geo::StacItem::parseText( R"({
+    "type": "Feature", "id": "x",
+    "properties": { "datetime": "2026-01-01T00:00:00Z" },
+    "assets": { "data": { "href": "a.tif", "roles": [ {} ] } }
+  })" ), sicnu::geo::GeoError );
+}
+
 TEST_CASE( "STAC projection, EO and SAR extensions map into canonical metadata", "[io][stac][extensions]" )
 {
   const sicnu::geo::StacItem item = sicnu::geo::StacItem::parseText( R"({

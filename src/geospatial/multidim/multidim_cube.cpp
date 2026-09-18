@@ -188,30 +188,38 @@ Json::Value MultidimCubeAxis::toJson() const
 
 MultidimCubeAxis MultidimCubeAxis::fromJson( const Json::Value &json )
 {
+  // Foreign-typed members are a typed refusal (InvalidMetadata), never an
+  // escaping Json::LogicError (#1038).
+  if ( !json.isObject() || !json["name"].isString() || !json["type"].isString() ||
+       !json["size"].isInt64() )
+    throw GeoError( ErrorCode::InvalidMetadata, "cube axis is missing or mistypes name/type/size" );
   MultidimCubeAxis axis;
   axis.name = json["name"].asString();
   axis.type = json["type"].asString();
-  axis.unit = json["unit"].asString();
+  axis.unit = json["unit"].isString() ? json["unit"].asString() : std::string();
   axis.size = json["size"].asInt64();
-  axis.hasNumericValues = json["has_numeric_values"].asBool();
-  axis.valuesBounded = json["values_bounded"].asBool();
-  if ( axis.hasNumericValues )
+  axis.hasNumericValues = json["has_numeric_values"].isBool() && json["has_numeric_values"].asBool();
+  axis.valuesBounded = json["values_bounded"].isBool() && json["values_bounded"].asBool();
+  if ( axis.hasNumericValues && json["numeric_values"].isArray() )
   {
     for ( const Json::Value &value : json["numeric_values"] )
-      axis.numericValues.push_back( value.asDouble() );
+      if ( value.isNumeric() )
+        axis.numericValues.push_back( value.asDouble() );
   }
-  axis.hasStringLabels = json["has_string_labels"].asBool();
-  axis.stringValuesBounded = json["string_values_bounded"].asBool();
-  if ( axis.hasStringLabels )
+  axis.hasStringLabels = json["has_string_labels"].isBool() && json["has_string_labels"].asBool();
+  axis.stringValuesBounded = json["string_values_bounded"].isBool() && json["string_values_bounded"].asBool();
+  if ( axis.hasStringLabels && json["string_labels"].isArray() )
   {
     for ( const Json::Value &label : json["string_labels"] )
-      axis.stringLabels.push_back( label.asString() );
+      if ( label.isString() )
+        axis.stringLabels.push_back( label.asString() );
   }
-  axis.instantsResolved = json["instants_resolved"].asBool();
-  if ( axis.instantsResolved )
+  axis.instantsResolved = json["instants_resolved"].isBool() && json["instants_resolved"].asBool();
+  if ( axis.instantsResolved && json["instants_utc"].isArray() )
   {
     for ( const Json::Value &instant : json["instants_utc"] )
-      axis.instantsUtc.push_back( instant.asString() );
+      if ( instant.isString() )
+        axis.instantsUtc.push_back( instant.asString() );
   }
   return axis;
 }
@@ -264,13 +272,15 @@ MultidimCubeDescriptor MultidimCubeDescriptor::fromJson( const Json::Value &json
 {
   if ( !json.isObject() )
     throw GeoError( ErrorCode::InvalidMetadata, "cube descriptor is not an object" );
+  if ( !json["path"].isString() || !json["variable"].isString() || !json["dtype"].isString() )
+    throw GeoError( ErrorCode::InvalidMetadata, "cube descriptor identity fields have foreign types" );
   MultidimCubeDescriptor cube;
   cube.path = json["path"].asString();
-  cube.driver = json["driver"].asString();
+  cube.driver = json["driver"].isString() ? json["driver"].asString() : std::string();
   cube.variable = json["variable"].asString();
   cube.dtype = json["dtype"].asString();
-  cube.unit = json["unit"].asString();
-  cube.hasNoData = json["has_no_data"].asBool();
+  cube.unit = json["unit"].isString() ? json["unit"].asString() : std::string();
+  cube.hasNoData = json["has_no_data"].isBool() && json["has_no_data"].asBool();
   if ( cube.hasNoData )
   {
     const Json::Value &noData = json["no_data"];
@@ -279,15 +289,19 @@ MultidimCubeDescriptor MultidimCubeDescriptor::fromJson( const Json::Value &json
     else
       cube.noDataValue = noData.asDouble();
   }
-  cube.hasScale = json["has_scale"].asBool();
+  cube.hasScale = json["has_scale"].isBool() && json["has_scale"].asBool();
   if ( cube.hasScale )
-    cube.scale = json["scale"].asDouble();
-  cube.hasOffset = json["has_offset"].asBool();
+    cube.scale = json["scale"].isNumeric() ? json["scale"].asDouble() : 0.0;
+  cube.hasOffset = json["has_offset"].isBool() && json["has_offset"].asBool();
   if ( cube.hasOffset )
-    cube.offset = json["offset"].asDouble();
-  cube.bandRole = json["band_role"].asString();
-  for ( const Json::Value &name : json["dimension_names"] )
-    cube.dimensionNames.push_back( name.asString() );
+    cube.offset = json["offset"].isNumeric() ? json["offset"].asDouble() : 0.0;
+  cube.bandRole = json["band_role"].isString() ? json["band_role"].asString() : std::string();
+  if ( json["dimension_names"].isArray() )
+  {
+    for ( const Json::Value &name : json["dimension_names"] )
+      if ( name.isString() )
+        cube.dimensionNames.push_back( name.asString() );
+  }
   if ( cube.dimensionNames.empty() )
     throw GeoError( ErrorCode::InvalidMetadata, "cube descriptor carries no dimensions" );
   if ( cube.variable.empty() )
@@ -301,17 +315,23 @@ MultidimCubeDescriptor MultidimCubeDescriptor::fromJson( const Json::Value &json
     if ( cube.axes[i].name != cube.dimensionNames[i] )
       throw GeoError( ErrorCode::InvalidMetadata, "cube descriptor axis order does not match dimensions" );
   }
-  cube.crs = CrsInfo::fromJson( json["crs"] );
-  cube.hasGeoTransform = json["has_geotransform"].asBool();
-  if ( cube.hasGeoTransform )
+  if ( json["crs"].isObject() )
+    cube.crs = CrsInfo::fromJson( json["crs"] );
+  cube.hasGeoTransform = json["has_geotransform"].isBool() && json["has_geotransform"].asBool();
+  if ( cube.hasGeoTransform && json["geotransform"].isArray() )
   {
     for ( const Json::Value &value : json["geotransform"] )
-      cube.geotransform.push_back( value.asDouble() );
+      if ( value.isNumeric() )
+        cube.geotransform.push_back( value.asDouble() );
     if ( cube.geotransform.size() != 6 )
       throw GeoError( ErrorCode::InvalidMetadata, "cube geotransform must carry 6 values" );
   }
-  for ( const Json::Value &value : json["block_shape"] )
-    cube.blockShape.push_back( value.asInt64() );
+  if ( json["block_shape"].isArray() )
+  {
+    for ( const Json::Value &value : json["block_shape"] )
+      if ( value.isInt64() )
+        cube.blockShape.push_back( value.asInt64() );
+  }
   return cube;
 }
 

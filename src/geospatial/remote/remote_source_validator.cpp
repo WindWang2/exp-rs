@@ -286,6 +286,16 @@ RemoteSourceIdentity RemoteSourceIdentity::fromJson( const Json::Value &json )
   identity.validator = RemoteValidatorSet::fromJson( json["validator"] );
   if ( json.isMember( "size_bytes" ) )
   {
+    // A foreign-typed size is a corrupt identity document: typed refusal,
+    // never an escaping Json::LogicError (and never hasSize=true with a
+    // garbage value, #1038).
+    if ( !json["size_bytes"].isUInt64() )
+    {
+      Json::Value details;
+      details["field"] = "size_bytes";
+      throw GeoError( ErrorCode::InvalidMetadata,
+                      "RemoteSourceIdentity::fromJson: size_bytes has a foreign type", details );
+    }
     identity.hasSize = true;
     identity.sizeBytes = json["size_bytes"].asUInt64();
   }

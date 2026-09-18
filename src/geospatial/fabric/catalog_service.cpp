@@ -384,11 +384,20 @@ namespace
 {
 
 /// Bounded generic JSON file reader (shape sniffing for local candidates).
-/// Throws GeoError(OpenFailed/InvalidMetadata).
+/// Throws GeoError(OpenFailed/InvalidMetadata). A whole-file read is capped:
+/// an oversized "candidate" is a planted file, not a catalog document
+/// (memory-DoS guard, #1056).
+constexpr std::uintmax_t kMaxCatalogJsonBytes = 16ull * 1024ull * 1024ull;
+
 Json::Value readJsonFile( const std::string &path )
 {
   if ( path.empty() )
     throw GeoError( ErrorCode::InvalidArgument, "readJsonFile: empty path" );
+  VSIStatBufL statBuffer;
+  if ( VSIStatL( path.c_str(), &statBuffer ) != 0 )
+    throw GeoError( ErrorCode::OpenFailed, "readJsonFile: cannot open " + path );
+  if ( static_cast<std::uintmax_t>( statBuffer.st_size ) > kMaxCatalogJsonBytes )
+    throw GeoError( ErrorCode::InvalidMetadata, "readJsonFile: JSON exceeds the size cap: " + path );
   std::ifstream in( path, std::ios::binary );
   if ( !in )
     throw GeoError( ErrorCode::OpenFailed, "readJsonFile: cannot open " + path );
@@ -402,9 +411,13 @@ Json::Value readJsonFile( const std::string &path )
   return parsed;
 }
 
+/// Item-shape sniffing is type-guarded: a foreign-typed "type" is simply
+/// not an item shape (counted as a skipped candidate), never an escaping
+/// Json::LogicError through the walk (#1038).
 bool isItemShape( const Json::Value &json )
 {
-  return json["type"].asString() == "Feature" && json["assets"].isObject();
+  return json.isObject() && json["type"].isString() && json["type"].asString() == "Feature" &&
+         json["assets"].isObject();
 }
 
 // --- VSI path helpers (portable; std::filesystem is off the table here —
@@ -589,6 +602,11 @@ CatalogService openCatalogService( const std::string &root, const CatalogService
             continue;
           for ( const Json::Value &link : links )
           {
+            // A foreign-typed link is skipped (it can never classify as
+            // child/item); indexing a non-object link would throw
+            // Json::LogicError through the GeoError-only catch (#1038).
+            if ( !link.isObject() || !link["rel"].isString() || !link["href"].isString() )
+              continue;
             const std::string rel = link["rel"].asString();
             const std::string href = link["href"].asString();
             if ( href.empty() )

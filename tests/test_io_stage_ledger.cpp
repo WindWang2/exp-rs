@@ -366,3 +366,84 @@ TEST_CASE( "staging ledger tolerates Unicode target names", "[io][ledger][unicod
   discardAttached( record.finalPath );
   CHECK( !atomic_fs::fileExists( staged ) );
 }
+
+// #1038: a foreign-typed ledger field is a typed refusal, and one planted
+// ledger must not abort the whole orphan sweep.
+TEST_CASE( "hostile ledger documents fail typed without aborting sweeps",
+           "[io][ledger][hostile-json]" )
+{
+  const std::string dir = scratch( "hostile-ledger" );
+
+  SECTION( "readStageLedger refuses foreign-typed text fields with GeoError" )
+  {
+    const std::string staged = makeStagedRaster( dir, "out.1.2.tmp.tif" );
+    (void)staged;
+    const std::string ledgerPath = dir + "/out.tif" + kStageLedgerSuffix;
+    { std::ofstream out( ledgerPath, std::ios::binary );
+      out << R"({"schema_version": 1, "run_id": "r", "producer": {}, "final_path": ")"
+          << dir << R"(/out.tif", "staged_path": ")" << dir
+          << R"(/out.1.2.tmp.tif", "driver": "GTiff", "declared_shape": {"width": 8, "height": 8, "band_count": 1}, "state": "staged", "updated_utc": "2026-01-01T00:00:00Z"})"; }
+    bool typed = false;
+    try
+    {
+      readStageLedger( dir + "/out.tif" );
+    }
+    catch ( const GeoError &error )
+    {
+      typed = error.code() == ErrorCode::InvalidMetadata;
+    }
+    CHECK( typed );
+  }
+
+  SECTION( "readStageLedger refuses a foreign-typed declared_shape" )
+  {
+    const std::string staged = makeStagedRaster( dir, "out.1.2.tmp.tif" );
+    (void)staged;
+    const std::string ledgerPath = dir + "/out.tif" + kStageLedgerSuffix;
+    { std::ofstream out( ledgerPath, std::ios::binary );
+      out << R"({"schema_version": 1, "run_id": "r", "producer": "p", "final_path": ")"
+          << dir << R"(/out.tif", "staged_path": ")" << dir
+          << R"(/out.1.2.tmp.tif", "driver": "GTiff", "declared_shape": "8x8x1", "state": "staged", "updated_utc": "2026-01-01T00:00:00Z"})"; }
+    bool typed = false;
+    try
+    {
+      readStageLedger( dir + "/out.tif" );
+    }
+    catch ( const GeoError &error )
+    {
+      typed = error.code() == ErrorCode::InvalidMetadata;
+    }
+    CHECK( typed );
+  }
+
+  SECTION( "sweepOrphans survives a planted ledger" )
+  {
+    // A planted foreign-typed ledger (a known "state" with a mistyped
+    // "producer" — the old code escaped Json::LogicError through the
+    // GeoError-only sweep catch) plus a minimal hostile doc and an
+    // unrelated healthy staged group: the sweep must classify and
+    // complete, never abort.
+    const std::string plantedLedger = dir + "/planted.tif" + kStageLedgerSuffix;
+    { std::ofstream out( plantedLedger, std::ios::binary );
+      out << R"({"schema_version": 1, "producer": {}, "state": "staged"})"; }
+    const std::string minimalLedger = dir + "/minimal.tif" + kStageLedgerSuffix;
+    { std::ofstream out( minimalLedger, std::ios::binary ); out << R"({"schema_version": 1})"; }
+    const std::string staged = makeStagedRaster( dir, "orphan.7.8.tmp.tif" );
+    (void)staged;
+
+    std::vector<StrayStaging> strays;
+    CHECK_NOTHROW( strays = sweepOrphans( dir, false ) );
+    bool sawPlanted = false;
+    bool sawMinimal = false;
+    bool sawOrphan = false;
+    for ( const StrayStaging &stray : strays )
+    {
+      sawPlanted |= stray.path == plantedLedger;
+      sawMinimal |= stray.path == minimalLedger;
+      sawOrphan |= stray.path.find( "orphan.7.8.tmp.tif" ) != std::string::npos;
+    }
+    CHECK( sawPlanted );    // the hostile ledger is reported (stale)…
+    CHECK( sawMinimal );    // …so is the minimal one…
+    CHECK( sawOrphan );     // …and the healthy leftover group still is.
+  }
+}

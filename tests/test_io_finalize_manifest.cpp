@@ -200,6 +200,35 @@ TEST_CASE( "verifyDataset fails closed on tampering and missing manifests", "[io
       invalidIssue |= issue.code == "manifest_invalid";
     CHECK( invalidIssue );
   }
+
+  // #1038: foreign-typed manifest values must land in the report as
+  // manifest_invalid issues, never as an escaping Json::LogicError (the
+  // conversions happen OUTSIDE the read guard's try).
+  SECTION( "foreign-typed digest field is a typed issue" )
+  {
+    { std::ofstream out( tif + ".sicnu-manifest.json", std::ios::binary );
+      out << "{\"schema_version\": 1, \"dataset_sha256\": []}"; }
+    const ManifestVerifyReport report = verifyDataset( tif );
+    CHECK( !report.verified );
+    bool invalidIssue = false;
+    for ( const ManifestIssue &issue : report.issues )
+      invalidIssue |= issue.code == "manifest_invalid" &&
+                      issue.message.find( "foreign type" ) != std::string::npos;
+    CHECK( invalidIssue );
+  }
+
+  SECTION( "foreign-typed shape field is a typed issue" )
+  {
+    { std::ofstream out( tif + ".sicnu-manifest.json", std::ios::binary );
+      out << "{\"schema_version\": 1, \"dataset_sha256\": \"abc\", \"shape\": {\"width\": \"w\"}}"; }
+    const ManifestVerifyReport report = verifyDataset( tif );
+    CHECK( !report.verified );
+    bool invalidIssue = false;
+    for ( const ManifestIssue &issue : report.issues )
+      invalidIssue |= issue.code == "manifest_invalid" &&
+                      issue.message.find( "declared_shape" ) != std::string::npos;
+    CHECK( invalidIssue );
+  }
 }
 
 TEST_CASE( "manifests survive Unicode directory names", "[io][manifest][unicode]" )

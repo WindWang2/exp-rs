@@ -140,30 +140,47 @@ AssetRecord AssetRecord::fromJson( const Json::Value &json )
 {
   if ( !json.isObject() )
     throw GeoError( ErrorCode::InvalidMetadata, "asset record is not an object" );
+  if ( !json["id"].isString() || !json["path"].isString() )
+    throw GeoError( ErrorCode::InvalidMetadata, "asset record identity fields have foreign types" );
+  // Foreign-typed optional fields degrade to the absent reading — never an
+  // escaping Json::LogicError through the record-sweep boundaries (#1038).
   AssetRecord record;
   record.id = json["id"].asString();
-  record.collection = json["collection"].asString();
+  record.collection = json["collection"].isString() ? json["collection"].asString() : std::string();
   record.path = json["path"].asString();
-  record.mediaType = json["media_type"].asString();
-  for ( const Json::Value &role : json["roles"] )
-    record.roles.push_back( role.asString() );
-  record.datetime = json["datetime"].asString();
-  record.datetimeUtc = json["datetime_utc"].asString();
-  record.startUtc = json["start_utc"].asString();
-  record.endUtc = json["end_utc"].asString();
-  record.hasBbox = json["has_bbox"].asBool();
-  if ( record.hasBbox && json["bbox"].isArray() && json["bbox"].size() == 4 )
+  record.mediaType = json["media_type"].isString() ? json["media_type"].asString() : std::string();
+  if ( json["roles"].isArray() )
+  {
+    for ( const Json::Value &role : json["roles"] )
+      if ( role.isString() )
+        record.roles.push_back( role.asString() );
+  }
+  record.datetime = json["datetime"].isString() ? json["datetime"].asString() : std::string();
+  record.datetimeUtc = json["datetime_utc"].isString() ? json["datetime_utc"].asString() : std::string();
+  record.startUtc = json["start_utc"].isString() ? json["start_utc"].asString() : std::string();
+  record.endUtc = json["end_utc"].isString() ? json["end_utc"].asString() : std::string();
+  record.hasBbox = json["has_bbox"].isBool() && json["has_bbox"].asBool();
+  if ( record.hasBbox && json["bbox"].isArray() && json["bbox"].size() == 4 &&
+       json["bbox"][0].isNumeric() && json["bbox"][1].isNumeric() &&
+       json["bbox"][2].isNumeric() && json["bbox"][3].isNumeric() )
   {
     record.minX = json["bbox"][0].asDouble();
     record.minY = json["bbox"][1].asDouble();
     record.maxX = json["bbox"][2].asDouble();
     record.maxY = json["bbox"][3].asDouble();
   }
-  record.hasCloudCover = json["has_cloud_cover"].asBool();
-  if ( record.hasCloudCover )
+  record.hasCloudCover = json["has_cloud_cover"].isBool() && json["has_cloud_cover"].asBool();
+  if ( record.hasCloudCover && json["cloud_cover"].isNumeric() )
     record.cloudCover = json["cloud_cover"].asDouble();
-  for ( const std::string &key : json["metadata"].getMemberNames() )
-    record.metadata[key] = json["metadata"][key].asString();
+  if ( json["metadata"].isObject() )
+  {
+    for ( const std::string &key : json["metadata"].getMemberNames() )
+    {
+      const Json::Value &item = json["metadata"][key];
+      if ( item.isString() )
+        record.metadata[key] = item.asString();
+    }
+  }
   if ( record.id.empty() )
     throw GeoError( ErrorCode::InvalidMetadata, "asset record carries no id" );
   return record;

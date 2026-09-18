@@ -217,8 +217,18 @@ ManifestVerifyReport verifyDataset( const std::string &mainPath, bool allowMissi
     addIssue( "manifest_invalid", "finalize manifest is malformed (foreign JSON types)" );
   }
 
-  const std::string declaredDigest = manifest["dataset_sha256"].asString();
-  if ( report.manifestPresent && declaredDigest.empty() )
+  // Digest/shape reads are type-guarded (a foreign-typed field is a
+  // malformed manifest issue, never an escaping Json::LogicError — the
+  // function's contract promises "never an escaping throw", #1038).
+  const Json::Value &declaredDigestValue = manifest["dataset_sha256"];
+  const std::string declaredDigest =
+    declaredDigestValue.isString() ? declaredDigestValue.asString() : std::string();
+  if ( report.manifestPresent && !declaredDigestValue.isString() )
+    addIssue( "manifest_invalid",
+              declaredDigestValue.isNull()
+                ? "manifest carries no dataset_sha256; integrity is unverifiable"
+                : "manifest dataset_sha256 has a foreign type; integrity is unverifiable" );
+  if ( report.manifestPresent && declaredDigestValue.isString() && declaredDigest.empty() )
     addIssue( "manifest_invalid", "manifest carries no dataset_sha256; integrity is unverifiable" );
   if ( !declaredDigest.empty() )
   {
@@ -237,9 +247,15 @@ ManifestVerifyReport verifyDataset( const std::string &mainPath, bool allowMissi
 
   // Shape re-check: only when the manifest declares a raster shape AND the
   // file still inspects as a raster. Vector/other kinds skip (declared 0s).
-  const int declaredWidth = manifest["shape"]["width"].asInt();
-  const int declaredHeight = manifest["shape"]["height"].asInt();
-  const int declaredBands = manifest["shape"]["band_count"].asInt();
+  const Json::Value &declaredShape = manifest["shape"];
+  const bool shapeDeclared =
+    declaredShape.isObject() && declaredShape["width"].isInt() &&
+    declaredShape["height"].isInt() && declaredShape["band_count"].isInt();
+  if ( report.manifestPresent && !declaredShape.isNull() && !shapeDeclared )
+    addIssue( "manifest_invalid", "manifest declared_shape has foreign-typed fields; shape re-check skipped" );
+  const int declaredWidth = shapeDeclared ? declaredShape["width"].asInt() : 0;
+  const int declaredHeight = shapeDeclared ? declaredShape["height"].asInt() : 0;
+  const int declaredBands = shapeDeclared ? declaredShape["band_count"].asInt() : 0;
   if ( declaredWidth > 0 && declaredHeight > 0 )
   {
     try

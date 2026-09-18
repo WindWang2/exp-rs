@@ -141,6 +141,16 @@ StageRecord stageRecordFromJson( const Json::Value &json )
     details["expected_version"] = kLedgerSchemaVersion;
     throw GeoError( ErrorCode::InvalidMetadata, "stage ledger schema version mismatch", details );
   }
+  // Foreign-typed text/shape fields are a typed refusal, never an escaping
+  // Json::LogicError — one planted ledger must not abort sweepOrphans or
+  // the recovery paths (#1038).
+  if ( !json["producer"].isString() || !json["driver"].isString() ||
+       !json["state"].isString() || !json["updated_utc"].isString() )
+    throw GeoError( ErrorCode::InvalidMetadata, "stage ledger text fields have foreign types" );
+  const Json::Value &shape = json["declared_shape"];
+  if ( !shape.isObject() || !shape["width"].isInt() || !shape["height"].isInt() ||
+       !shape["band_count"].isInt() )
+    throw GeoError( ErrorCode::InvalidMetadata, "stage ledger declared_shape has foreign types" );
   StageRecord record;
   record.runId = json["run_id"].asString();
   record.producer = json["producer"].asString();
