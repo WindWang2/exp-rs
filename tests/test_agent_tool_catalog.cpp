@@ -8,6 +8,7 @@
 #include "processing/framework/atomic_algorithm_registry.h"
 #include "operators/framework/rs_operator_registry.h"
 #include "operators/rs/rs_spectral_index_operator.h"
+#include <algorithm>
 #include <atomic>
 #include <thread>
 
@@ -531,4 +532,90 @@ TEST_CASE( "AgentTool: Schema Normalization and Fail-Fast Validation", "[agent][
     CHECK_THROWS_AS( tool.toOpenAiToolDefinition(), std::invalid_argument );
     CHECK_THROWS_AS( tool.toMcpToolDefinition(), std::invalid_argument );
   }
+}
+
+TEST_CASE( "InteractionToolProvider ownership is instance-local and merge-proof (#1056)",
+           "[agent][tool_catalog][interaction]" )
+{
+  // Two defects, one contract: (a) the merged-vs-explicit bookkeeping was a
+  // function-static set shared by EVERY provider instance, so instance B's
+  // rebuild mutated instance A's removal history; (b) — the sharper half —
+  // an explicit registerTool() override of a name the merge had adopted was
+  // ERASED and re-added from the registry on the next merge, silently
+  // reverting the override. Ownership is instance state, registerTool()
+  // transfers the name out of the registry-sourced set, and the merge only
+  // touches names it adopted itself.
+  auto &registry = sicnu::agent::InteractionToolRegistry::instance();
+
+  sicnu::agent::InteractionToolDefinition def;
+  def.name = "canvas:probe_override";
+  def.displayName = "Registry Definition";
+  def.category = "canvas";
+  def.description = "Registry-derived definition";
+  Json::Value schema( Json::objectValue );
+  schema["type"] = "object";
+  def.inputSchema = schema;
+  registry.registerTool( def );
+
+  InteractionToolProvider providerA;
+  InteractionToolProvider providerB;
+
+  // Seed both instances: the merge adopts the registry tool into each.
+  auto mergedA = providerA.provideTools();
+  auto adoptedA = std::find_if( mergedA.begin(), mergedA.end(),
+                                []( const AgentTool &t ) { return t.name == "canvas:probe_override"; } );
+  REQUIRE( adoptedA != mergedA.end() );
+  CHECK( adoptedA->displayName == "Registry Definition" );
+  const auto mergedB = providerB.provideTools();
+  REQUIRE( std::any_of( mergedB.begin(), mergedB.end(), []( const AgentTool &t ) {
+             return t.name == "canvas:probe_override";
+           } ) );
+
+  // Explicit override on A of the ADOPTED name — the exact revert scenario.
+  AgentTool overrideTool;
+  overrideTool.name = "canvas:probe_override";
+  overrideTool.displayName = "Explicit Override";
+  overrideTool.category = ToolCategory::Interaction;
+  overrideTool.description = "Explicit override survives registry merges";
+  providerA.registerTool( overrideTool );
+
+  // Repeated rebuilds on A (and B's rebuilds, and findTool's rebuild) must
+  // never restore the registry definition over the explicit override.
+  for ( int round = 0; round < 3; ++round )
+  {
+    const auto tools = providerA.provideTools();
+    const auto it = std::find_if( tools.begin(), tools.end(),
+                                  []( const AgentTool &t ) { return t.name == "canvas:probe_override"; } );
+    REQUIRE( it != tools.end() );
+    INFO( "merge round " << round );
+    CHECK( it->displayName == "Explicit Override" );
+    ( void )providerB.provideTools();
+  }
+  const auto found = providerA.findTool( "canvas:probe_override" );
+  REQUIRE( found.has_value() );
+  CHECK( found->displayName == "Explicit Override" );
+
+  // B never saw the override: its own merge keeps the registry definition.
+  const auto toolsB = providerB.provideTools();
+  const auto itB = std::find_if( toolsB.begin(), toolsB.end(),
+                                 []( const AgentTool &t ) { return t.name == "canvas:probe_override"; } );
+  REQUIRE( itB != toolsB.end() );
+  CHECK( itB->displayName == "Registry Definition" );
+
+  // Removal-awareness still propagates for registry-owned names: drop the
+  // registry entry and the next rebuild removes it from B (which never
+  // overrode it) — while A keeps its explicitly owned override.
+  REQUIRE( registry.unregisterTool( "canvas:probe_override" ) );
+  const auto toolsB2 = providerB.provideTools();
+  REQUIRE( std::none_of( toolsB2.begin(), toolsB2.end(), []( const AgentTool &t ) {
+             return t.name == "canvas:probe_override";
+           } ) );
+  const auto toolsA2 = providerA.provideTools();
+  const auto itA2 = std::find_if( toolsA2.begin(), toolsA2.end(),
+                                  []( const AgentTool &t ) { return t.name == "canvas:probe_override"; } );
+  REQUIRE( itA2 != toolsA2.end() );
+  CHECK( itA2->displayName == "Explicit Override" );
+
+  providerA.unregisterTool( "canvas:probe_override" );
+  REQUIRE_FALSE( providerA.findTool( "canvas:probe_override" ).has_value() );
 }

@@ -4,6 +4,7 @@
 #include "tool_provider.h"
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace sicnu::agent::tool_catalog {
 
@@ -32,11 +33,24 @@ public:
   void resetDefaults();
 
 private:
+  /// Live re-sync from the InteractionToolRegistry: removal-aware against
+  /// mRegistrySourcedNames only. const: the state it mutates is mutable by
+  /// design (live-sync from the const provideTools()/findTool()). Callers
+  /// hold mMutex.
+  void mergeRegistryTools() const;
+
   mutable std::mutex mMutex;
   // mutable so the const provideTools()/findTool() can live-sync from the
   // InteractionToolRegistry (#701) — every mutation still happens under
   // mMutex.
   mutable std::unordered_map<std::string, AgentTool> mTools;
+  /// Names present in mTools because the registry merge added them (#1056).
+  /// INSTANCE-local: a function-static set was shared by every provider
+  /// instance, so one instance's rebuild erased an explicit registerTool()
+  /// override recorded as registry-sourced by an earlier merge — the
+  /// override silently reverted to the registry definition on the next
+  /// merge. The merge is removal-aware against this set only.
+  mutable std::unordered_set<std::string> mRegistrySourcedNames;
 };
 
 } // namespace sicnu::agent::tool_catalog

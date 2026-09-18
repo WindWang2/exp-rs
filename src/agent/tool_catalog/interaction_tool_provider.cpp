@@ -1,7 +1,6 @@
 // src/agent/tool_catalog/interaction_tool_provider.cpp
 #include "interaction_tool_provider.h"
 #include <algorithm>
-#include <unordered_set>
 #include <vector>
 
 #include "agent/interaction_tool_registry.h"
@@ -27,52 +26,6 @@ Json::Value makeBandChannelProp( const char *description )
   prop["anyOf"] = anyOf;
   prop["description"] = description;
   return prop;
-}
-
-// Derive pass shared by resetDefaults()/provideTools()/findTool() (#701):
-// adds every dispatchable InteractionToolRegistry tool that is not already
-// described here, so tools registered into the registry AFTER the provider
-// (or the catalog) was first constructed still appear. The old behavior
-// froze the snapshot at construction and made post-registration tools
-// undiscoverable until an explicit resetDefaults(). Registry-derived entries
-// never overwrite an existing entry: the static factories keep their richer
-// output ports, and explicit registerTool() customizations are preserved.
-// Rebuilds are also REMOVAL-aware: names previously merged from the registry
-// but no longer listed are dropped, so unregisterTool() propagates on the
-// next rebuild instead of serving a stale tool forever (live-sync review
-// tail). Only touched during catalog rebuilds, which AgentToolCatalog
-// serializes under its mutex — no separate guard needed.
-void mergeRegistryToolsInto( std::unordered_map<std::string, AgentTool> &tools )
-{
-  static std::unordered_set<std::string> sRegistrySourcedNames;
-  try
-  {
-    const std::vector<sicnu::agent::InteractionToolDefinition> defs =
-      sicnu::agent::InteractionToolRegistry::instance().listTools();
-    for ( const auto &name : sRegistrySourcedNames )
-      tools.erase( name );
-    sRegistrySourcedNames.clear();
-    for ( const auto &def : defs )
-    {
-      if ( def.name.rfind( "data:", 0 ) == 0 )
-        continue;
-      if ( tools.find( def.name ) != tools.end() )
-        continue;
-      AgentTool tool;
-      tool.name = def.name;
-      tool.displayName = def.displayName;
-      tool.category = ToolCategory::Interaction;
-      tool.group = def.category;
-      tool.description = def.description;
-      tool.inputSchema = def.inputSchema;
-      tools[def.name] = std::move( tool );
-      sRegistrySourcedNames.insert( def.name );
-    }
-  }
-  catch ( ... )
-  {
-    // Registry unavailable (early static init): the static set stands.
-  }
 }
 
 AgentTool makeDrawRoiTool()
@@ -348,6 +301,58 @@ AgentTool makeZoomToExtentTool()
 
 } // namespace
 
+// Derive pass shared by resetDefaults()/provideTools()/findTool() (#701):
+// adds every dispatchable InteractionToolRegistry tool that is not already
+// described here, so tools registered into the registry AFTER the provider
+// (or the catalog) was first constructed still appear. The old behavior
+// froze the snapshot at construction and made post-registration tools
+// undiscoverable until an explicit resetDefaults(). Registry-derived entries
+// never overwrite an existing entry: the static factories keep their richer
+// output ports, and explicit registerTool() customizations are preserved.
+// Rebuilds are also REMOVAL-aware: names previously merged from the registry
+// but no longer listed are dropped, so unregisterTool() propagates on the
+// next rebuild instead of serving a stale tool forever (live-sync review
+// tail). Only touched during catalog rebuilds, which AgentToolCatalog
+// serializes under its mutex; instance state is additionally guarded by
+// mMutex.
+//
+// The merged-vs-explicit ownership set is INSTANCE state (#1056): the
+// historical function-static set was shared by every provider instance, so
+// an explicit registerTool() override of a previously-merged name was
+// silently reverted by the next merge (of this or another instance) that
+// erased the name and re-added the registry definition.
+void InteractionToolProvider::mergeRegistryTools() const
+{
+  try
+  {
+    const std::vector<sicnu::agent::InteractionToolDefinition> defs =
+      sicnu::agent::InteractionToolRegistry::instance().listTools();
+    for ( const auto &name : mRegistrySourcedNames )
+      mTools.erase( name );
+    mRegistrySourcedNames.clear();
+    for ( const auto &def : defs )
+    {
+      if ( def.name.rfind( "data:", 0 ) == 0 )
+        continue;
+      if ( mTools.find( def.name ) != mTools.end() )
+        continue;
+      AgentTool tool;
+      tool.name = def.name;
+      tool.displayName = def.displayName;
+      tool.category = ToolCategory::Interaction;
+      tool.group = def.category;
+      tool.description = def.description;
+      tool.inputSchema = def.inputSchema;
+      mTools[def.name] = std::move( tool );
+      mRegistrySourcedNames.insert( def.name );
+    }
+  }
+  catch ( ... )
+  {
+    // Registry unavailable (early static init): the instance set stands.
+  }
+}
+
 InteractionToolProvider::InteractionToolProvider()
 {
   resetDefaults();
@@ -380,7 +385,7 @@ void InteractionToolProvider::resetDefaults()
   // data:* is excluded: those tools are owned by DataToolProvider, and the
   // registry unconditionally registers them too — deriving them here listed
   // every data:* tool twice in the catalog (#641).
-  mergeRegistryToolsInto( mTools );
+  mergeRegistryTools();
 }
 
 std::vector<AgentTool> InteractionToolProvider::provideTools() const
@@ -388,7 +393,7 @@ std::vector<AgentTool> InteractionToolProvider::provideTools() const
   std::lock_guard<std::mutex> lock( mMutex );
   // Live re-sync (#701): pick up interaction tools registered after the
   // provider was constructed instead of serving the construction snapshot.
-  mergeRegistryToolsInto( mTools );
+  mergeRegistryTools();
   std::vector<AgentTool> result;
   result.reserve( mTools.size() );
   for ( const auto &pair : mTools )
@@ -406,7 +411,7 @@ std::optional<AgentTool> InteractionToolProvider::findTool( const std::string &n
   std::lock_guard<std::mutex> lock( mMutex );
   // Same live re-sync as provideTools(): a tool registered after construction
   // must be findable by name too.
-  mergeRegistryToolsInto( mTools );
+  mergeRegistryTools();
   auto it = mTools.find( name );
   if ( it != mTools.end() )
     return it->second;
@@ -429,6 +434,11 @@ std::optional<AgentTool> InteractionToolProvider::findTool( const std::string &n
 void InteractionToolProvider::registerTool( const AgentTool &tool )
 {
   std::lock_guard<std::mutex> lock( mMutex );
+  // Ownership transfer (#1056): from this moment the name is EXPLICITLY
+  // owned. Dropping it from the registry-sourced set is what makes the
+  // override survive the next merge — the merge only erases names it
+  // adopted itself, and re-adds nothing the map already holds.
+  mRegistrySourcedNames.erase( tool.name );
   mTools[tool.name] = tool;
 }
 
