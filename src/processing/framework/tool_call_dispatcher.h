@@ -200,11 +200,13 @@ public:
   /// logged there.
   void rollbackVerificationFailure( Json::Value &payload ) const;
 
-  /// Static form of the insulator: the production watcher/sync wiring carries
-  /// a guarded DataManager pointer instead of a dispatcher reference (the
-  /// dispatcher may be gone when a task reaches terminal), yet shares the
-  /// exact rollback semantics (#1042). No-op for a null manager.
-  static void rollbackVerificationFailure( sicnu::data::DataManager *manager, Json::Value &payload );
+  /// Manager-explicit core of the insulator rollback. Same contract as the
+  /// member overload; @a manager may be null (no-op). Exists so the
+  /// ExecutionPlane completion paths can capture the rollback behavior as a
+  /// plain handler (DataManager pointer + this static) that survives the
+  /// dispatcher being destroyed mid-flight, without reaching into dispatcher
+  /// instance state (#1042).
+  static void rollbackVerificationFailure( Json::Value &payload, sicnu::data::DataManager *manager );
 
 private:
   struct ParsedEnvelope {
