@@ -117,7 +117,10 @@ function(sicnu_add_io_test NAME)
   set_target_properties(${NAME} PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
   )
-  sicnu_discover_tests(${NAME})
+  # Extra args (SKIP_RETURN_CODE 77, ...) forward to sicnu_discover_tests as
+  # test properties — previously dropped, which silently disabled the
+  # ADR 0146 skip contract on the io suites that declare it.
+  sicnu_discover_tests(${NAME} ${ARGN})
 endfunction()
 
 # Isolation runtime 5.0: light SDK test executables. Links only Catch2 +
@@ -319,6 +322,15 @@ sicnu_add_io_test(test_io_range_cache SKIP_RETURN_CODE 77)
 target_sources(test_io_range_cache PRIVATE support/http_range_server.cpp)
 if(WIN32)
   target_link_libraries(test_io_range_cache PRIVATE ws2_32)
+endif()
+
+# httpFetch strict-mode contract (issue #1034): HTTP >=400 surfaces a
+# typed GeoError; httpFetchStatus keeps raw statuses for revalidation.
+# ADR 0146: exit 77 = skipped (matches the ladder's verdict mapping).
+sicnu_add_io_test(test_io_http_fetch SKIP_RETURN_CODE 77)
+target_sources(test_io_http_fetch PRIVATE support/http_stac_server.cpp support/http_range_server.cpp)
+if(WIN32)
+  target_link_libraries(test_io_http_fetch PRIVATE ws2_32)
 endif()
 
 # 7.0 STAC API client (loopback JSON fixture).
