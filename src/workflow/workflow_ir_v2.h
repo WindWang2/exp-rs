@@ -94,7 +94,10 @@ struct EdgeFact
 
 /// The versioned workflow document — single source of truth for the canvas,
 /// the guided workbench, the optimizer and the run coordinator.
-struct WorkflowDefinition
+/// Named `WorkflowDocument`, not `WorkflowDefinition`: Engine 2.0 already owns
+/// `sicnu::workflow::WorkflowDefinition` (`workflow_types.h`, std::string
+/// based) and the two collide in any TU that includes both headers.
+struct WorkflowDocument
 {
     QString version = QStringLiteral( "2.0" );
     QString workflowId;
@@ -108,14 +111,8 @@ struct WorkflowDefinition
     const NodeFact *findNode( const QString &id ) const;
     const EdgeFact *findEdge( const QString &id ) const;
 
-    bool operator==( const WorkflowDefinition & ) const = default;
+    bool operator==( const WorkflowDocument & ) const = default;
 };
-
-/// D-W3 / D-W3b / D18: preferred alias for the IR 2.0 document. Engine 2.0 also
-/// defines `WorkflowDefinition` in the same namespace (`workflow_types.h`,
-/// std::string based). IR2 app call sites use this alias; the IR2 struct name
-/// and Engine 2.0 type remain unchanged (full rename / namespace split deferred).
-using WorkflowDocument = WorkflowDefinition;
 
 /// The IR 2.0 seam: parsing, serialization, semantic validation, V1 lift.
 class WorkflowIR
@@ -125,22 +122,22 @@ class WorkflowIR
 
     /// Parses a canonical 2.0 document. Fails closed: wrong version,
     /// malformed node/edge fields, non-object parameters.
-    static Result<WorkflowDefinition> fromJson( const QJsonObject &doc );
+    static Result<WorkflowDocument> fromJson( const QJsonObject &doc );
 
     /// Emits the canonical document (all fields materialized, sorted keys).
-    static QJsonObject toJson( const WorkflowDefinition &def );
+    static QJsonObject toJson( const WorkflowDocument &def );
 
     /// Structural semantics: unique non-empty ids, edges resolve to existing
     /// nodes and ports, input-port in-degree <= 1. On failure and when
     /// @p outError is non-null, sets a human-readable reason naming the
     /// offender.
-    static bool validateSemantics( const WorkflowDefinition &def, QString *outError = nullptr );
+    static bool validateSemantics( const WorkflowDocument &def, QString *outError = nullptr );
 
     /// Lifts an ADR 0149 WorkflowIR 1.0 document (kind "workflow_ir",
     /// schema_version "1.0") into 2.0. Defaults: radiometricState from the
     /// artifact numeric-domain facts (dn -> "DN", surface_reflectance -> "BOA",
     /// toa -> "TOA", else "None"); canvasPosition on a 4-per-row grid.
-    static Result<WorkflowDefinition> migrateFromV1( const QJsonObject &v1Doc );
+    static Result<WorkflowDocument> migrateFromV1( const QJsonObject &v1Doc );
 };
 
 } // namespace sicnu::workflow

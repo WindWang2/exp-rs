@@ -14,6 +14,7 @@
 #include <QPushButton>
 #include <QSettings>
 #include <QSpinBox>
+#include <QStyle>
 #include <QVBoxLayout>
 
 #include "dialogs/dialog_help_catalog.h"
@@ -82,9 +83,6 @@ RsGeorefParamsPanel::RsGeorefParamsPanel( QWidget *parent )
     auto *banner = new QFrame( this );
     banner->setObjectName( QStringLiteral( "rsGeorefParamsHelpBanner" ) );
     banner->setFrameShape( QFrame::StyledPanel );
-    banner->setStyleSheet(
-      QStringLiteral( "QFrame#rsGeorefParamsHelpBanner {"
-                      "  background:#f6f8fa; border:1px solid #d0d7de; border-radius:4px; }" ) );
     auto *bl = new QHBoxLayout( banner );
     bl->setContentsMargins( 8, 6, 8, 6 );
     auto *sum = new QLabel(
@@ -680,9 +678,11 @@ void RsGeorefParamsPanel::setRefinementRms( double before, double after )
   if ( mRmsAfter )
   {
     mRmsAfter->setText( tr( "RMS after refinement: %1 px" ).arg( after, 0, 'f', 3 ) );
-    mRmsAfter->setStyleSheet( after < before
-                                ? QStringLiteral( "color: #208830;" )
-                                : QStringLiteral( "color: #5f6b7a;" ) );
+    mRmsAfter->setProperty( "rsTone", after < before
+                                      ? QStringLiteral( "ok" )
+                                      : QStringLiteral( "muted" ) );
+    mRmsAfter->style()->unpolish( mRmsAfter );
+    mRmsAfter->style()->polish( mRmsAfter );
   }
 }
 
@@ -693,7 +693,9 @@ void RsGeorefParamsPanel::clearRefinementRms()
   if ( mRmsAfter )
   {
     mRmsAfter->setText( tr( "RMS after refinement: —" ) );
-    mRmsAfter->setStyleSheet( QString() );
+    mRmsAfter->setProperty( "rsTone", QVariant() );
+    mRmsAfter->style()->unpolish( mRmsAfter );
+    mRmsAfter->style()->polish( mRmsAfter );
   }
 }
 

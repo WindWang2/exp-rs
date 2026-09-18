@@ -38,9 +38,9 @@ PortFact port( const QString &name, const QString &dtype, const QString &crs, co
 /// The brief's broken fixture: a WGS84 BOA raster (same resolution and
 /// radiometry) wired into a UTM slope op — a SINGLE CRS break, so the heal
 /// injects exactly one adapter (+1 node) as the brief specifies.
-WorkflowDefinition crsMismatchWorkflow()
+WorkflowDocument crsMismatchWorkflow()
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.nodes = {
         node( QStringLiteral( "node_src" ), QStringLiteral( "rs:import_raster" ), {},
               { port( QStringLiteral( "output" ), QStringLiteral( "Raster" ), QStringLiteral( "EPSG:4326" ),
@@ -159,7 +159,7 @@ TEST_CASE( "Same request compiles to an identical document (determinism)", "[d17
 
 TEST_CASE( "Agent self-heals a CRS mismatch from a PROJ error log", "[d17][workflow][agent]" )
 {
-    const WorkflowDefinition broken = crsMismatchWorkflow();
+    const WorkflowDocument broken = crsMismatchWorkflow();
     const QString errorLog =
         QStringLiteral( "ERROR 1: PROJ: proj_create: Different spatial reference system EPSG:4326 and EPSG:32649" );
 
@@ -183,7 +183,7 @@ TEST_CASE( "A matched CRS log with no offending wiring is a typed failure, not a
 {
     // A contract-CLEAN workflow whose ports never carry the log's source
     // CRS: the pattern matches, but there is nothing to heal.
-    WorkflowDefinition clean;
+    WorkflowDocument clean;
     clean.nodes = {
         node( QStringLiteral( "src" ), QStringLiteral( "rs:import_raster" ), {},
               { port( QStringLiteral( "output" ), QStringLiteral( "Raster" ), QStringLiteral( "EPSG:32649" ),
@@ -205,7 +205,7 @@ TEST_CASE( "A matched CRS log with no offending wiring is a typed failure, not a
 
 TEST_CASE( "Unknown error logs produce a typed no-op heal", "[d17][workflow][agent]" )
 {
-    const WorkflowDefinition broken = crsMismatchWorkflow();
+    const WorkflowDocument broken = crsMismatchWorkflow();
     const AutonomousCompileResult result = WorkflowOrchestratorTool::healWorkflow(
         broken, QStringLiteral( "ERROR 1303: out of memory allocating 4 GiB window" ) );
     REQUIRE_FALSE( result.isSuccess );

@@ -19,6 +19,7 @@
 #include <QSettings>
 #include <QLabel>
 #include <QMenu>
+#include <QMenuBar>
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSignalBlocker>
@@ -252,10 +253,12 @@ QToolButton *RibbonController::addToolButton( GroupHost &group,
     polishSmallButton( btn );
   btn->setText( text );
   btn->setIcon( ribbonIcon( iconAlias ) );
+  btn->setAccessibleName( text );
   if ( !tooltip.isEmpty() )
   {
     btn->setToolTip( tooltip );
     btn->setStatusTip( tooltip );
+    btn->setAccessibleDescription( tooltip );
   }
   group.toolsLayout->insertWidget( group.toolsLayout->count() - 1, btn );
   return btn;
@@ -496,7 +499,24 @@ void RibbonController::syncBandCombos()
   if ( m_grayBandCombo )
     m_grayBandCombo->setEnabled( n > 0 && !rgbMode );
 
+  syncDisplayAdjustSliders( layer );
+
   m_bandComboUpdating = false;
+}
+
+void RibbonController::syncDisplayAdjustSliders( QgsRasterLayer *layer )
+{
+  const bool ok = layer && layer->isValid() && layer->brightnessFilter();
+  if ( m_brightnessSlider )
+  {
+    m_brightnessSlider->setEnabled( ok );
+    m_brightnessSlider->setValue( ok ? layer->brightnessFilter()->brightness() : 0 );
+  }
+  if ( m_contrastSlider )
+  {
+    m_contrastSlider->setEnabled( ok );
+    m_contrastSlider->setValue( ok ? layer->brightnessFilter()->contrast() : 0 );
+  }
 }
 
 void RibbonController::applyRenderModeFromCombo()
@@ -650,12 +670,64 @@ QWidget *RibbonController::createRibbonBar()
   tabLay->setContentsMargins( 6, 0, 6, 0 );
   tabLay->setSpacing( 2 );
 
+  // Application menu — leftmost chrome button (ArcGIS Pro "Project" / Office
+  // "File" position). The menubar stays hidden in ribbon-only chrome, so the
+  // full menu tree is projected here as submenus; this keeps every menu-only
+  // capability (product import, CRS presets, batch, help, window toggles)
+  // reachable and gives the command palette a mouse path.
+  auto *appMenuBtn = new QToolButton( tabRow );
+  polishSmallButton( appMenuBtn ); // before objectName — polish sets its own
+  appMenuBtn->setObjectName( QStringLiteral( "rsRibbonSystemMenu" ) );
+  appMenuBtn->setText( tr( "Menu" ) );
+  appMenuBtn->setToolButtonStyle( Qt::ToolButtonTextOnly );
+  appMenuBtn->setPopupMode( QToolButton::InstantPopup );
+  appMenuBtn->setToolTip( tr( "Application menu — all menus, panels and commands" ) );
+  appMenuBtn->setStatusTip( appMenuBtn->toolTip() );
+  appMenuBtn->setAccessibleName( tr( "Application Menu" ) );
+  {
+    auto *appMenu = new QMenu( appMenuBtn );
+    appMenu->setToolTipsVisible( true );
+    appMenuBtn->setMenu( appMenu );
+    // Rebuild on every open: late-registered menus (Plugins, plugin schema
+    // surfaces) join the projection without a second wiring pass.
+    connect( appMenu, &QMenu::aboutToShow, this, [this, appMenu]() {
+      appMenu->clear();
+      if ( !m_window )
+        return;
+      // Command palette first — the keyboard-first surface also gets a
+      // discoverable mouse path here.
+      QAction *paletteAction =
+          m_window->commandRegistry()
+              ? m_window->commandRegistry()->action( QStringLiteral( "app.commandPalette" ) )
+              : nullptr;
+      if ( paletteAction )
+      {
+        appMenu->addAction( paletteAction );
+        appMenu->addSeparator();
+      }
+      for ( QAction *a : m_window->appMenuBar()->actions() )
+      {
+        if ( a == paletteAction )
+          continue; // already pinned at the top
+        if ( a->isSeparator() )
+          appMenu->addSeparator();
+        else if ( a->menu() )
+          appMenu->addMenu( a->menu() );
+        else
+          appMenu->addAction( a );
+      }
+    } );
+  }
+  tabLay->addWidget( appMenuBtn );
+
   // Quick Access buttons (新建, 打开, 保存, 偏好设置) on the left
   auto addQatBtn = [&]( const char *icon, const QString &tip, auto slot ) {
     auto *btn = new QToolButton( tabRow );
     polishSmallButton( btn );
     btn->setIcon( ribbonIcon( icon ) );
     btn->setToolTip( tip );
+    btn->setStatusTip( tip );
+    btn->setAccessibleName( tip );
     connect( btn, &QToolButton::clicked, m_window, slot );
     tabLay->addWidget( btn );
     return btn;
@@ -735,10 +807,10 @@ QWidget *RibbonController::createRibbonBar()
     QHBoxLayout *pl = pageLayoutOf( pageW );
 
     auto history = addGroup( pl, tr( "History" ) );
-    if ( auto *btn = addToolButton( history, tr( "Undo" ), "mActionToggleEditing",
+    if ( auto *btn = addToolButton( history, tr( "Undo" ), "undo",
                                     tr( "Undo (Ctrl+Z)" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::undo );
-    if ( auto *btn = addToolButton( history, tr( "Redo" ), "mActionSaveEdits",
+    if ( auto *btn = addToolButton( history, tr( "Redo" ), "redo",
                                     tr( "Redo (Ctrl+Y)" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::redo );
 
@@ -746,9 +818,9 @@ QWidget *RibbonController::createRibbonBar()
     auto clip = addGroup( pl, tr( "Clipboard" ) );
     if ( auto *btn = addToolButton( clip, tr( "Cut" ), "cut_fill", tr( "Cut Selected Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::cutFeatures );
-    if ( auto *btn = addToolButton( clip, tr( "Copy" ), "l_yer_st_ck", tr( "Copy Selected Features" ) ) )
+    if ( auto *btn = addToolButton( clip, tr( "Copy" ), "copy", tr( "Copy Selected Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::copyFeatures );
-    if ( auto *btn = addToolButton( clip, tr( "Paste" ), "i_ort", tr( "Paste Features" ) ) )
+    if ( auto *btn = addToolButton( clip, tr( "Paste" ), "paste", tr( "Paste Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::pasteFeatures );
 
     addGroupSeparator( pl );
@@ -803,7 +875,7 @@ QWidget *RibbonController::createRibbonBar()
     if ( auto *btn = addToolButton( reshape, tr( "Reshape" ), "mActionReshape",
                                     tr( "Reshape" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::reshapeGeometry );
-    if ( auto *btn = addToolButton( reshape, tr( "Segmentation" ), "mActionSplitFeatures",
+    if ( auto *btn = addToolButton( reshape, tr( "Split Features" ), "mActionSplitFeatures",
                                     tr( "Split Features" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::splitFeatures );
 
@@ -927,28 +999,36 @@ QWidget *RibbonController::createRibbonBar()
     QHBoxLayout *pl = pageLayoutOf( pageW );
     auto adj = addGroup( pl, tr( "Display Adjustment" ) );
     if ( QSlider *brightness = addSlider( adj, tr( "Brightness" ), -100, 100, 0,
-                                          tr( "Current raster display brightness" ) ) )
+                                          tr( "Current raster display brightness (double-click to reset)" ) ) )
     {
+      m_brightnessSlider = brightness;
+      brightness->installEventFilter( this );
       connect( brightness, &QSlider::valueChanged, m_window, [this]( int v ) {
         if ( auto *layer = currentRasterLayer() )
         {
-          if ( layer->brightnessFilter() )
+          if ( auto *filter = layer->brightnessFilter() )
           {
-            layer->brightnessFilter()->setBrightness( v );
+            if ( filter->brightness() == v )
+              return;
+            filter->setBrightness( v );
             layer->triggerRepaint();
           }
         }
       } );
     }
     if ( QSlider *contrast = addSlider( adj, tr( "Contrast" ), -100, 100, 0,
-                                        tr( "Current raster display contrast" ) ) )
+                                        tr( "Current raster display contrast (double-click to reset)" ) ) )
     {
+      m_contrastSlider = contrast;
+      contrast->installEventFilter( this );
       connect( contrast, &QSlider::valueChanged, m_window, [this]( int v ) {
         if ( auto *layer = currentRasterLayer() )
         {
-          if ( layer->brightnessFilter() )
+          if ( auto *filter = layer->brightnessFilter() )
           {
-            layer->brightnessFilter()->setContrast( v );
+            if ( filter->contrast() == v )
+              return;
+            filter->setContrast( v );
             layer->triggerRepaint();
           }
         }
@@ -1045,6 +1125,11 @@ QWidget *RibbonController::createRibbonBar()
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::showProcessingHistory );
     if ( auto *btn = addToolButton( jobs, tr( "Toolbox" ), "model_builder", tr( "Processing Toolbox" ) ) )
       connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::showProcessingToolbox );
+    addGroupSeparator( pl );
+    auto assist = addGroup( pl, tr( "Assistant" ) );
+    if ( auto *btn = addToolButton( assist, tr( "AI Copilot" ), "dee_le_rning",
+                                    tr( "AI Copilot — describe a remote-sensing task in natural language" ) ) )
+      connect( btn, &QToolButton::clicked, m_window, &QgisDesktopWindow::showAgentCopilot );
     addTab( tr( "Tasks" ), pageW, tr( "Tasks - Task Center, Processing History and Batch" ) );
   }
 
@@ -1211,6 +1296,11 @@ bool RibbonController::eventFilter( QObject *watched, QEvent *event )
 {
   if ( event && event->type() == QEvent::MouseButtonDblClick )
   {
+    if ( watched == m_brightnessSlider || watched == m_contrastSlider )
+    {
+      static_cast<QSlider *>( watched )->setValue( 0 );
+      return true;
+    }
     if ( qobject_cast<QPushButton *>( watched ) )
     {
       toggleRibbonCollapse();

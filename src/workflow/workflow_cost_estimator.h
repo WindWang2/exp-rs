@@ -29,12 +29,12 @@ class WorkflowCostEstimator
     /// Per-operator complexity coefficient (closed table, deterministic).
     static double operatorComplexity( const QString &operatorId );
 
-    static CostEstimate estimatePipelineCost( const WorkflowDefinition &def,
+    static CostEstimate estimatePipelineCost( const WorkflowDocument &def,
                                               const QMap<QString, QSize> &rasterDimensions );
 
     /// Test seam: same model against an EXPLICIT host RAM budget, so the
     /// waterline behavior is pinned without depending on the live host.
-    static CostEstimate estimatePipelineCostWithHostRam( const WorkflowDefinition &def,
+    static CostEstimate estimatePipelineCostWithHostRam( const WorkflowDocument &def,
                                                          const QMap<QString, QSize> &rasterDimensions,
                                                          qint64 hostTotalRamBytes );
 

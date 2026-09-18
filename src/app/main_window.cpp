@@ -277,6 +277,10 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
         } );
     }
 
+    // The detached menubar is hidden, so actions hosted only on it never see
+    // Shortcut events — re-host every shortcut-bearing action on the window.
+    forwardActionShortcutsToWindow();
+
     // Re-assert top chrome after any code path that might have touched menuBar().
     applyProductShellLayout();
 
@@ -389,6 +393,9 @@ void QgisDesktopWindow::registerPluginCommands( const QString &pluginId )
     sicnu::app::registerPluginMenuCommands(
         m_commandRegistry, m_exprsShellUi->menuActionsFor( pluginId ), pluginId,
         tr( "Plugins" ) );
+    // Plugin-attached actions may carry shortcuts created after the initial
+    // forward pass — re-run so their bindings also fire on the window.
+    forwardActionShortcutsToWindow();
 }
 
 void QgisDesktopWindow::setupUi()

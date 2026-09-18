@@ -16,7 +16,13 @@
 #include <QSignalSpy>
 #include <QTimer>
 
+#if defined( Q_OS_WIN )
+#include <windows.h>
+#include <psapi.h>
+#pragma comment( lib, "psapi.lib" )
+#else
 #include <sys/resource.h>
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -73,9 +79,9 @@ EdgeFact edge( const QString &from, const QString &to, const QString &id = QStri
 }
 
 /// Chain document with fresh node objects — the test's own fixture builder.
-WorkflowDefinition chainDef( int steps )
+WorkflowDocument chainDef( int steps )
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.workflowId = QStringLiteral( "wf-chain-%1" ).arg( steps );
     for ( int i = 1; i <= steps; ++i )
     {
@@ -104,9 +110,9 @@ bool waitForCompleted( PipelineRunCoordinator &coordinator, int timeoutMs = 6000
 
 /// 10 layers x 10 nodes; every node >= 1 reads 2 predecessors from the
 /// previous layer. Tier sizes 10 across the board — hand-verified shape.
-WorkflowDefinition layerCake100()
+WorkflowDocument layerCake100()
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.workflowId = QStringLiteral( "wf-scale-100" );
     auto id = []( int layer, int k ) {
         return QStringLiteral( "L%1_%2" ).arg( layer ).arg( k );
@@ -134,9 +140,16 @@ WorkflowDefinition layerCake100()
 
 qint64 peakRssBytes()
 {
+#if defined( Q_OS_WIN )
+    PROCESS_MEMORY_COUNTERS counters;
+    if ( ::GetProcessMemoryInfo( ::GetCurrentProcess(), &counters, sizeof( counters ) ) )
+        return qint64( counters.PeakWorkingSetSize );
+    return 0;
+#else
     rusage usage;
     ::getrusage( RUSAGE_SELF, &usage );
     return qint64( usage.ru_maxrss ) * 1024; // Linux reports KiB
+#endif
 }
 
 } // namespace
@@ -162,7 +175,7 @@ TEST_CASE( "Mini E2E: 3-node pipeline through IR, analyzer, optimizer and execut
     // 3. Optimization toward the final node is a no-op on a linear chain.
     const QString terminal = parsed.value().nodes.last().nodeId;
     OptimizationReport report;
-    const WorkflowDefinition optimized = WorkflowPlanOptimizer::optimizePlan(
+    const WorkflowDocument optimized = WorkflowPlanOptimizer::optimizePlan(
         parsed.value(), QSet<QString>{ terminal }, &report );
     REQUIRE( report.deadNodesPruned == 0 );
     REQUIRE( report.commonSubexpressionsMerged == 0 );
@@ -250,7 +263,7 @@ TEST_CASE( "Crash consistency: abort at ~50%, resume reuses the prefix", "[d17][
 TEST_CASE( "Full 100-node scale run under the 1.5 GiB RSS budget", "[d17][workflow][e2e][scale]" )
 {
     ensureApp();
-    const WorkflowDefinition def = layerCake100();
+    const WorkflowDocument def = layerCake100();
     REQUIRE( def.nodes.size() == 100 );
 
     // Structural truth of the fixture: 10 tiers x width 10.
@@ -311,13 +324,13 @@ TEST_CASE( "All 11 shipped lab templates execute green through the full stack",
     for ( const QString &labFile : labFiles )
     {
         {
-            // LabSpec 1.0 -> WorkflowDefinition 2.0 via the shared lift.
+            // LabSpec 1.0 -> WorkflowDocument 2.0 via the shared lift.
             lab::LabSpecError loadError;
             const lab::LabSpec spec = lab::loadLabSpecFile( labsDir.filePath( labFile ), &loadError );
             REQUIRE( loadError.reason.isEmpty() );
             corpusOperatorSteps += static_cast<int>( std::count_if(
                 spec.steps.cbegin(), spec.steps.cend(), []( const lab::LabStep &step ) { return step.hasOperator(); } ) );
-            const WorkflowDefinition def = sicnu::app::pipeline::liftLabSpecToWorkflow( spec );
+            const WorkflowDocument def = sicnu::app::pipeline::liftLabSpecToWorkflow( spec );
             REQUIRE( WorkflowIR::validateSemantics( def ) );
             REQUIRE( WorkflowDagAnalyzer::analyzeDag( def ).isAcyclic );
 

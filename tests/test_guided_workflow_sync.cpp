@@ -154,7 +154,7 @@ TEST_CASE( "Adopting a pre-built document works and validates fail-closed", "[d1
     ensureApp();
     GuidedWorkflowWidget widget;
 
-    sicnu::workflow::WorkflowDefinition def;
+    sicnu::workflow::WorkflowDocument def;
     def.workflowId = QStringLiteral( "wf-manual" );
     sicnu::workflow::NodeFact node;
     node.nodeId = QStringLiteral( "only" );
@@ -166,7 +166,7 @@ TEST_CASE( "Adopting a pre-built document works and validates fail-closed", "[d1
     REQUIRE( widget.setUnderlyingWorkflow( def ) );
     REQUIRE( widget.cards().isEmpty() ); // no lab flags -> no cards
 
-    sicnu::workflow::WorkflowDefinition broken = def;
+    sicnu::workflow::WorkflowDocument broken = def;
     broken.nodes.append( sicnu::workflow::NodeFact{} ); // empty nodeId/operatorId
     REQUIRE_FALSE( widget.setUnderlyingWorkflow( broken ) );
     REQUIRE_FALSE( widget.loadError().isEmpty() );

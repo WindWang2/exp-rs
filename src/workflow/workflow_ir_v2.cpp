@@ -138,7 +138,7 @@ PortFact v1Port( const QString &name, const QJsonObject &artifact )
 
 } // namespace
 
-bool WorkflowDefinition::isValid() const
+bool WorkflowDocument::isValid() const
 {
     if ( version != QLatin1String( kVersion ) )
         return false;
@@ -154,7 +154,7 @@ bool WorkflowDefinition::isValid() const
     return true;
 }
 
-const NodeFact *WorkflowDefinition::findNode( const QString &id ) const
+const NodeFact *WorkflowDocument::findNode( const QString &id ) const
 {
     for ( const NodeFact &node : nodes )
         if ( node.nodeId == id )
@@ -162,7 +162,7 @@ const NodeFact *WorkflowDefinition::findNode( const QString &id ) const
     return nullptr;
 }
 
-const EdgeFact *WorkflowDefinition::findEdge( const QString &id ) const
+const EdgeFact *WorkflowDocument::findEdge( const QString &id ) const
 {
     for ( const EdgeFact &edge : edges )
         if ( edge.edgeId == id )
@@ -170,13 +170,13 @@ const EdgeFact *WorkflowDefinition::findEdge( const QString &id ) const
     return nullptr;
 }
 
-Result<WorkflowDefinition> WorkflowIR::fromJson( const QJsonObject &doc )
+Result<WorkflowDocument> WorkflowIR::fromJson( const QJsonObject &doc )
 {
     if ( doc.value( QLatin1String( "version" ) ).toString() != QLatin1String( kVersion ) )
-        return Result<WorkflowDefinition>::error(
+        return Result<WorkflowDocument>::error(
             QStringLiteral( "unsupported or missing 'version' (expected \"%1\")" ).arg( QLatin1String( kVersion ) ) );
 
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.version = QLatin1String( kVersion );
     def.workflowId = doc.value( QLatin1String( "workflowId" ) ).toString();
     def.name = doc.value( QLatin1String( "name" ) ).toString();
@@ -188,7 +188,7 @@ Result<WorkflowDefinition> WorkflowIR::fromJson( const QJsonObject &doc )
     for ( const QJsonValue &nodeValue : nodes )
     {
         if ( !nodeValue.isObject() )
-            return Result<WorkflowDefinition>::error( QStringLiteral( "node entry is not an object" ) );
+            return Result<WorkflowDocument>::error( QStringLiteral( "node entry is not an object" ) );
         const QJsonObject nodeObj = nodeValue.toObject();
 
         NodeFact node;
@@ -196,26 +196,26 @@ Result<WorkflowDefinition> WorkflowIR::fromJson( const QJsonObject &doc )
         node.operatorId = nodeObj.value( QLatin1String( "operatorId" ) ).toString();
         node.displayName = nodeObj.value( QLatin1String( "displayName" ) ).toString();
         if ( node.nodeId.isEmpty() )
-            return Result<WorkflowDefinition>::error( QStringLiteral( "node: missing 'nodeId'" ) );
+            return Result<WorkflowDocument>::error( QStringLiteral( "node: missing 'nodeId'" ) );
         if ( node.operatorId.isEmpty() )
-            return Result<WorkflowDefinition>::error(
+            return Result<WorkflowDocument>::error(
                 QStringLiteral( "node '%1': missing 'operatorId'" ).arg( node.nodeId ) );
 
         const QJsonValue params = nodeObj.value( QLatin1String( "parameters" ) );
         if ( !params.isObject() )
-            return Result<WorkflowDefinition>::error(
+            return Result<WorkflowDocument>::error(
                 QStringLiteral( "node '%1': missing or non-object 'parameters'" ).arg( node.nodeId ) );
         node.parameters = params.toObject();
 
         const QJsonValue position = nodeObj.value( QLatin1String( "canvasPosition" ) );
         if ( !position.isObject() )
-            return Result<WorkflowDefinition>::error(
+            return Result<WorkflowDocument>::error(
                 QStringLiteral( "node '%1': missing or non-object 'canvasPosition'" ).arg( node.nodeId ) );
         const QJsonObject positionObj = position.toObject();
         const QJsonValue x = positionObj.value( QLatin1String( "x" ) );
         const QJsonValue y = positionObj.value( QLatin1String( "y" ) );
         if ( !x.isDouble() || !y.isDouble() )
-            return Result<WorkflowDefinition>::error(
+            return Result<WorkflowDocument>::error(
                 QStringLiteral( "node '%1': canvasPosition needs numeric 'x' and 'y'" ).arg( node.nodeId ) );
         node.canvasPosition = QPointF( x.toDouble(), y.toDouble() );
 
@@ -228,7 +228,7 @@ Result<WorkflowDefinition> WorkflowIR::fromJson( const QJsonObject &doc )
             {
                 auto port = parsePort( portValue, node.nodeId );
                 if ( !port.isSuccess() )
-                    return Result<WorkflowDefinition>::error(
+                    return Result<WorkflowDocument>::error(
                         QStringLiteral( "node '%1': %2" ).arg( node.nodeId, port.error() ) );
                 target.append( port.value() );
             }
@@ -241,7 +241,7 @@ Result<WorkflowDefinition> WorkflowIR::fromJson( const QJsonObject &doc )
     for ( const QJsonValue &edgeValue : edges )
     {
         if ( !edgeValue.isObject() )
-            return Result<WorkflowDefinition>::error( QStringLiteral( "edge entry is not an object" ) );
+            return Result<WorkflowDocument>::error( QStringLiteral( "edge entry is not an object" ) );
         const QJsonObject edgeObj = edgeValue.toObject();
         EdgeFact edge;
         edge.edgeId = edgeObj.value( QLatin1String( "edgeId" ) ).toString();
@@ -251,15 +251,15 @@ Result<WorkflowDefinition> WorkflowIR::fromJson( const QJsonObject &doc )
         edge.targetPortName = edgeObj.value( QLatin1String( "targetPortName" ) ).toString();
         if ( edge.edgeId.isEmpty() || edge.sourceNodeId.isEmpty() || edge.targetNodeId.isEmpty()
              || edge.sourcePortName.isEmpty() || edge.targetPortName.isEmpty() )
-            return Result<WorkflowDefinition>::error(
+            return Result<WorkflowDocument>::error(
                 QStringLiteral( "edge '%1': all five fields are required" ).arg( edge.edgeId ) );
         def.edges.append( edge );
     }
 
-    return Result<WorkflowDefinition>::ok( def );
+    return Result<WorkflowDocument>::ok( def );
 }
 
-QJsonObject WorkflowIR::toJson( const WorkflowDefinition &def )
+QJsonObject WorkflowIR::toJson( const WorkflowDocument &def )
 {
     QJsonObject doc;
     doc.insert( QLatin1String( "description" ), def.description );
@@ -299,7 +299,7 @@ QJsonObject WorkflowIR::toJson( const WorkflowDefinition &def )
     return doc;
 }
 
-bool WorkflowIR::validateSemantics( const WorkflowDefinition &def, QString *outError )
+bool WorkflowIR::validateSemantics( const WorkflowDocument &def, QString *outError )
 {
     auto fail = [outError]( const QString &message ) {
         if ( outError )
@@ -357,14 +357,14 @@ bool WorkflowIR::validateSemantics( const WorkflowDefinition &def, QString *outE
     return true;
 }
 
-Result<WorkflowDefinition> WorkflowIR::migrateFromV1( const QJsonObject &v1Doc )
+Result<WorkflowDocument> WorkflowIR::migrateFromV1( const QJsonObject &v1Doc )
 {
     if ( v1Doc.value( QLatin1String( "kind" ) ).toString() != QLatin1String( kV1Kind ) )
-        return Result<WorkflowDefinition>::error( QStringLiteral( "V1 migration: missing kind \"workflow_ir\"" ) );
+        return Result<WorkflowDocument>::error( QStringLiteral( "V1 migration: missing kind \"workflow_ir\"" ) );
     if ( v1Doc.value( QLatin1String( "schema_version" ) ).toString() != QLatin1String( kV1SchemaVersion ) )
-        return Result<WorkflowDefinition>::error( QStringLiteral( "V1 migration: unsupported schema_version" ) );
+        return Result<WorkflowDocument>::error( QStringLiteral( "V1 migration: unsupported schema_version" ) );
 
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.version = QLatin1String( kVersion );
     def.workflowId = v1Doc.value( QLatin1String( "ir_id" ) ).toString();
     def.name = v1Doc.value( QLatin1String( "goal" ) ).toString();
@@ -386,7 +386,7 @@ Result<WorkflowDefinition> WorkflowIR::migrateFromV1( const QJsonObject &v1Doc )
         node.nodeId = nodeObj.value( QLatin1String( "id" ) ).toString();
         node.operatorId = nodeObj.value( QLatin1String( "operator" ) ).toString();
         if ( node.nodeId.isEmpty() || node.operatorId.isEmpty() )
-            return Result<WorkflowDefinition>::error( QStringLiteral( "V1 migration: node missing id/operator" ) );
+            return Result<WorkflowDocument>::error( QStringLiteral( "V1 migration: node missing id/operator" ) );
         node.displayName = node.operatorId;
         node.parameters = nodeObj.value( QLatin1String( "params" ) ).toObject();
         node.canvasPosition = QPointF( ( index % kGridColumns ) * kGridCellWidth,
@@ -444,7 +444,7 @@ Result<WorkflowDefinition> WorkflowIR::migrateFromV1( const QJsonObject &v1Doc )
             const QString upstreamPort = inObj.value( QLatin1String( "output" ) ).toString();
             const NodeFact *upstream = def.findNode( upstreamId );
             if ( !upstream )
-                return Result<WorkflowDefinition>::error(
+                return Result<WorkflowDocument>::error(
                     QStringLiteral( "V1 migration: node '%1' wires ghost upstream '%2'" ).arg( nodeId, upstreamId ) );
 
             QString resolvedState = QStringLiteral( "None" );
@@ -480,8 +480,8 @@ Result<WorkflowDefinition> WorkflowIR::migrateFromV1( const QJsonObject &v1Doc )
     }
 
     if ( !validateSemantics( def ) )
-        return Result<WorkflowDefinition>::error( QStringLiteral( "V1 migration produced an invalid document" ) );
-    return Result<WorkflowDefinition>::ok( def );
+        return Result<WorkflowDocument>::error( QStringLiteral( "V1 migration produced an invalid document" ) );
+    return Result<WorkflowDocument>::ok( def );
 }
 
 } // namespace sicnu::workflow

@@ -2,7 +2,7 @@
 #pragma once
 
 //
-// Static analysis of a WorkflowDefinition 2.0 as a directed graph.
+// Static analysis of a WorkflowDocument 2.0 as a directed graph.
 //
 //   - analyzeDag: one entry point — acyclicity verdict, Kahn in-degree
 //     concurrency tiers, a linear schedule (tiers in order, ids sorted
@@ -46,14 +46,14 @@ class WorkflowDagAnalyzer
   public:
     WorkflowDagAnalyzer() = delete;
 
-    static DagAnalysisResult analyzeDag( const WorkflowDefinition &def );
+    static DagAnalysisResult analyzeDag( const WorkflowDocument &def );
 
     /// True when acyclic; when false, @p outCyclePath receives the closed
     /// loop [v, w1, ..., v] (empty when acyclic).
-    static bool detectCycleDFS( const WorkflowDefinition &def, QVector<QString> &outCyclePath );
+    static bool detectCycleDFS( const WorkflowDocument &def, QVector<QString> &outCyclePath );
 
     /// Kahn in-degree tier partition; empty when the graph is cyclic.
-    static QVector<ConcurrencyTier> computeConcurrencyTiers( const WorkflowDefinition &def );
+    static QVector<ConcurrencyTier> computeConcurrencyTiers( const WorkflowDocument &def );
 
     static int calculateMaxParallelism( const QVector<ConcurrencyTier> &tiers );
 };

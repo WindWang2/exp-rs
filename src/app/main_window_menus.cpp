@@ -189,10 +189,10 @@ void QgisDesktopWindow::setupMenu()
     tip( editMenu->addAction( ic( "cut_fill" ), tr( "Cut Features" ),
                               QKeySequence::Cut, this, &QgisDesktopWindow::cutFeatures ),
          tr( "Cuts the selected features." ) );
-    tip( editMenu->addAction( ic( "l_yer_st_ck" ), tr( "Copy Features" ),
+    tip( editMenu->addAction( ic( "copy" ), tr( "Copy Features" ),
                               QKeySequence::Copy, this, &QgisDesktopWindow::copyFeatures ),
          tr( "Copies the selected features." ) );
-    tip( editMenu->addAction( ic( "i_ort" ), tr( "Paste Features" ),
+    tip( editMenu->addAction( ic( "paste" ), tr( "Paste Features" ),
                               QKeySequence::Paste, this, &QgisDesktopWindow::pasteFeatures ),
          tr( "Pastes features." ) );
     editMenu->addSeparator();
@@ -665,6 +665,27 @@ void QgisDesktopWindow::setupMenu()
          tr( "About this software." ) );
 }
 
+void QgisDesktopWindow::forwardActionShortcutsToWindow()
+{
+    // The detached menubar stays hidden; a QAction shortcut only fires while
+    // at least one of its associated widgets is visible — a hidden menubar
+    // host makes every menu shortcut dead (verified on Qt 6.8: Shortcut
+    // events never reach actions hosted solely on a hidden menubar).
+    // Re-host every shortcut-bearing action on the window itself; actions
+    // keep their menu membership so the app-menu projection stays intact.
+    // QWidget::addAction() de-duplicates, so repeated calls are safe.
+    const QList<QAction *> acts = findChildren<QAction *>();
+    for ( QAction *action : acts )
+    {
+        if ( !action || action->shortcuts().isEmpty() )
+            continue;
+        if ( action->shortcutContext() == Qt::WidgetShortcut ||
+             action->shortcutContext() == Qt::WidgetWithChildrenShortcut )
+            continue; // deliberately widget-scoped bindings keep their scope
+        addAction( action );
+    }
+}
+
 void QgisDesktopWindow::setupToolbars()
 {
     // Optional classic toolbars sit under the Ribbon (max 2 rows). Toggle via
@@ -774,7 +795,7 @@ void QgisDesktopWindow::setupToolbars()
                      &QgisDesktopWindow::rotateFeature ),
         makeEditAct( "mActionReshape", tr( "Reshape" ), tr( "Reshape Geometry: modify feature boundaries" ),
                      &QgisDesktopWindow::reshapeGeometry ),
-        makeEditAct( "mActionSplitFeatures", tr( "Segmentation" ), tr( "Split Features" ),
+        makeEditAct( "mActionSplitFeatures", tr( "Split Features" ), tr( "Split features into separate parts" ),
                      &QgisDesktopWindow::splitFeatures ),
         makeEditAct( "mActionOffsetCurve", tr( "Offset" ), tr( "Offset Line (parallel line)" ),
                      &QgisDesktopWindow::offsetCurve ),

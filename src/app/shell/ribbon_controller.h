@@ -99,6 +99,9 @@ class RibbonController : public QObject
     void applyBandCompositionFromCombos();
     void applyRenderModeFromCombo();
     void wireBandComboSignals();
+    /** Read the active layer's brightness/contrast filter back into the
+     *  增强 tab sliders (called from syncBandCombos). */
+    void syncDisplayAdjustSliders( QgsRasterLayer *layer );
     /** Right-click on ribbon chrome → panels/toolbars toggle menu (QGIS-style). */
     void installChromeContextMenu( QWidget *widget );
 
@@ -111,6 +114,10 @@ class RibbonController : public QObject
     QComboBox *m_blueBandCombo = nullptr;
     QComboBox *m_grayBandCombo = nullptr;
     bool m_bandComboUpdating = false;
+
+    // 增强 → 显示调节
+    QSlider *m_brightnessSlider = nullptr;
+    QSlider *m_contrastSlider = nullptr;
 
     // Ribbon 收起/展开状态
     QWidget *m_ribbonBar = nullptr;

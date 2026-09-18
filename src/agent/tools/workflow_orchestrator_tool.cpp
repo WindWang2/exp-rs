@@ -12,7 +12,7 @@ namespace sicnu::agent::tools {
 using sicnu::workflow::EdgeFact;
 using sicnu::workflow::NodeFact;
 using sicnu::workflow::PortFact;
-using sicnu::workflow::WorkflowDefinition;
+using sicnu::workflow::WorkflowDocument;
 
 namespace {
 
@@ -42,10 +42,10 @@ struct NodeSpec
     bool hasIn = true;
 };
 
-WorkflowDefinition chain( const QString &workflowId, const QString &goal, const QString &sensor,
+WorkflowDocument chain( const QString &workflowId, const QString &goal, const QString &sensor,
                           const QVector<NodeSpec> &specs, const QJsonObject &extraMeta = {} )
 {
-    WorkflowDefinition def;
+    WorkflowDocument def;
     def.workflowId = workflowId;
     def.name = goal;
     def.description = QStringLiteral( "Compiled by WorkflowOrchestratorTool (sensor %1)" ).arg( sensor );
@@ -251,7 +251,7 @@ AutonomousCompileResult WorkflowOrchestratorTool::compileGoalToWorkflow( const A
     return result;
 }
 
-AutonomousCompileResult WorkflowOrchestratorTool::healWorkflow( const WorkflowDefinition &brokenWorkflow,
+AutonomousCompileResult WorkflowOrchestratorTool::healWorkflow( const WorkflowDocument &brokenWorkflow,
                                                                 const QString &executionErrorLog )
 {
     AutonomousCompileResult result;
@@ -272,7 +272,7 @@ AutonomousCompileResult WorkflowOrchestratorTool::healWorkflow( const WorkflowDe
         // Align the log with the document: find the violating edges via the
         // contract checker; heal them toward the LOG's target CRS by
         // rewriting the consumer requirement when it matches the log source.
-        WorkflowDefinition working = brokenWorkflow;
+        WorkflowDocument working = brokenWorkflow;
         const auto violations = sicnu::workflow::inspectContracts( working );
         bool adopted = false;
         if ( violations.isEmpty() )

@@ -50,7 +50,7 @@ QString contractMismatchTypeString( ContractMismatchType type )
     return QStringLiteral( "Unknown" );
 }
 
-QVector<ContractViolation> inspectContracts( const WorkflowDefinition &def )
+QVector<ContractViolation> inspectContracts( const WorkflowDocument &def )
 {
     QVector<ContractViolation> violations;
 

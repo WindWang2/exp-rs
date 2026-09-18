@@ -53,6 +53,6 @@ struct ContractViolation
 };
 
 /// Inspects every edge; empty result = all contracts satisfied.
-QVector<ContractViolation> inspectContracts( const WorkflowDefinition &def );
+QVector<ContractViolation> inspectContracts( const WorkflowDocument &def );
 
 } // namespace sicnu::workflow

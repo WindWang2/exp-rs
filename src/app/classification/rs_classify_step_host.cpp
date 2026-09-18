@@ -73,13 +73,13 @@ QWidget *RsClassifyStepHost::buildPanel( RsClassifyStep s )
   auto *tip = new QLabel(  kMeta[idx].tip , panel );
   tip->setObjectName( QStringLiteral( "classifyStepTip" ) );
   tip->setWordWrap( true );
-  tip->setStyleSheet( QStringLiteral( "color: #656d76;" ) );
+  tip->setProperty( "rsTone", QStringLiteral( "muted" ) );
   layout->addWidget( tip );
 
   auto *gate = new QLabel( panel );
   gate->setObjectName( QStringLiteral( "classifyStepGate" ) );
   gate->setWordWrap( true );
-  gate->setStyleSheet( QStringLiteral( "color: #9a6700;" ) );
+  gate->setProperty( "rsTone", QStringLiteral( "warn" ) );
   layout->addWidget( gate );
 
   // Empty body for mainwindow to parent step-specific controls into.

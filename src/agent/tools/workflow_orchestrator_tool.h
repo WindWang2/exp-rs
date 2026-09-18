@@ -7,7 +7,7 @@
 //   - getToolJsonSchema(): the Draft-07 tool description (goal, sensor,
 //     region, inputs) for the agent tool catalog.
 //   - compileGoalToWorkflow(): production rules over (goal keywords ×
-//     sensor) produce a WorkflowDefinition 2.0 — the classic intents
+//     sensor) produce a WorkflowDocument 2.0 — the classic intents
 //     (calibrate+index, water extraction, change detection, fusion,
 //     classification) map to fixed operator chains with contract-correct
 //     port facts. Deterministic: same request -> identical document.
@@ -35,7 +35,7 @@ struct AutonomousCompileRequest
 struct AutonomousCompileResult
 {
     bool isSuccess = false;
-    sicnu::workflow::WorkflowDefinition workflow;
+    sicnu::workflow::WorkflowDocument workflow;
     QVector<QString> injectedRepairRules; // from healWorkflow; empty on compile
     QString textualExplanation;
 };
@@ -49,7 +49,7 @@ class WorkflowOrchestratorTool
 
     static AutonomousCompileResult compileGoalToWorkflow( const AutonomousCompileRequest &request );
 
-    static AutonomousCompileResult healWorkflow( const sicnu::workflow::WorkflowDefinition &brokenWorkflow,
+    static AutonomousCompileResult healWorkflow( const sicnu::workflow::WorkflowDocument &brokenWorkflow,
                                                  const QString &executionErrorLog );
 };
 

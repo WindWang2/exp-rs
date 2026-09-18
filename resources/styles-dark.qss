@@ -548,7 +548,6 @@ QToolButton#rsToolBtn:checked {
 }
 QLabel#rsSegOk { color: #3DCF6A; }
 QLabel#rsSegMuted { color: #A8B0BC; }
-QLabel#rsReadyLabel { color: #2BB673; font-weight: 600; }
 QLabel#rsReadyBusy { color: #E0A82E; font-weight: 600; }
 
 /* ============ RsSearchInput ============ */
@@ -658,16 +657,20 @@ QLabel#typingIndicator {
 }
 
 QFrame#userBubble {
-    background-color: #252A33;
-    border: 1px solid #343B46;
+    background-color: #1B382B;
+    color: #E8ECF1;
+    border: 1px solid #2BB673;
     border-radius: 8px;
+    padding: 6px;
     margin-left: 50px;
 }
 
 QFrame#agentBubble {
     background-color: #1E2229;
+    color: #E8ECF1;
     border: 1.5px solid #A48AFB; /* ai */
     border-radius: 8px;
+    padding: 6px;
     margin-right: 50px;
 }
 
@@ -1102,26 +1105,15 @@ QLabel#rsEmptyHint {
     padding: 24px;
 }
 
-/* Map selection accent (distinct from interactive green) */
-QTreeView::item:selected, QTreeWidget::item:selected, QListView::item:selected {
-    background-color: rgba(43, 182, 115, 0.10);
-    color: #2BB673;
-    border-left: 2px solid #2BB673;
-}
-
+/* Top chrome height is owned by code (setFixedHeight) — no min/max clamps. */
 #rsTopChrome {
     background: #1E2229;
     border: none;
-    /* Base 154 (ribbon only) + up to 2×32 toolbar rows */
-    min-height: 154px;
-    max-height: 218px;
 }
 #rsRibbonDock {
     border: none;
     padding: 0;
     margin: 0;
-    min-height: 154px;
-    max-height: 218px;
 }
 #rsRibbonDock > QWidget {
     border: none;
@@ -1515,20 +1507,6 @@ sicnu--RsEmptyStateWidget, #RsEmptyStateWidget {
     border-radius: 6px;
     padding: 4px;
 }
-#userBubble {
-    background-color: #1B382B;
-    color: #E8ECF1;
-    border: 1px solid #2BB673;
-    border-radius: 6px;
-    padding: 6px;
-}
-#agentBubble {
-    background-color: #22262E;
-    color: #E8ECF1;
-    border: 1px solid #343B46;
-    border-radius: 6px;
-    padding: 6px;
-}
 #agentReasoning {
     color: #A8B0BC;
     font-style: italic;
@@ -1554,5 +1532,86 @@ sicnu--RsEmptyStateWidget, #RsEmptyStateWidget {
 #rsSecondaryMapViewHeader[active="true"] {
     background: #1B382B;
     border-bottom: 1px solid #2BB673;
+}
+
+/* ============ Semantic tones & workflow chrome ============
+   Shared by the classification and georeferencing shells — replaces
+   per-widget inline colors so both themes stay readable. */
+QLabel[rsTone="muted"], QToolButton[rsTone="muted"] { color: #A8B0BC; }
+QLabel[rsTone="ok"], QToolButton[rsTone="ok"] { color: #3DCF6A; }
+QLabel[rsTone="warn"], QToolButton[rsTone="warn"] { color: #E0A458; }
+QLabel[rsTone="info"], QToolButton[rsTone="info"] { color: #4DA3E0; }
+QToolButton[rsTone="ok"]:checked { background: rgba(61, 207, 106, 0.18); }
+
+QLabel[rsSurface="caption"] {
+    background-color: #252A33;
+    color: #E8ECF1;
+    border-bottom: 1px solid #4A5260;
+    padding: 4px 8px;
+}
+
+#rsModeToggle {
+    background: #1A1D23;
+    border: 1px solid #343B46;
+    border-radius: 4px;
+    padding: 2px;
+}
+QPushButton#rsModeBtn {
+    padding: 2px 12px;
+    font-size: 11px;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: transparent;
+    color: #A8B0BC;
+}
+QPushButton#rsModeBtn:checked {
+    background: #1E2229;
+    color: #3DCF6A;
+    border: 1px solid rgba(61, 207, 106, 0.45);
+    font-weight: 600;
+}
+
+/* Flowchart step cards (classification / georeferencing pipelines) */
+QFrame[flowState] {
+    border-radius: 6px;
+    background: #1E2229;
+}
+QFrame[flowState="idle"] { border: 1px solid #343B46; }
+QFrame[flowState="done"] { border: 1px solid #3DCF6A; }
+QFrame[flowState="active"] { border: 2px solid #4DA3E0; }
+
+QLabel[flowBadge] {
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-size: 10px;
+}
+QLabel[flowBadge="idle"] { background: #252A33; color: #A8B0BC; }
+QLabel[flowBadge="done"] {
+    background: rgba(61, 207, 106, 0.16);
+    color: #3DCF6A;
+    font-weight: bold;
+}
+QLabel[flowBadge="active"] {
+    background: rgba(77, 163, 224, 0.16);
+    color: #4DA3E0;
+    font-weight: bold;
+}
+
+QLabel[flowNum] {
+    border-radius: 10px;
+    font-weight: bold;
+    font-size: 11px;
+}
+QLabel[flowNum="idle"] { background: #252A33; color: #E8ECF1; }
+QLabel[flowNum="done"] { background: #3DCF6A; color: #10151B; }
+QLabel[flowNum="active"] { background: #4DA3E0; color: #10151B; }
+
+QProgressBar#rsFlowProgress {
+    background-color: #252A33;
+    border-radius: 3px;
+}
+QProgressBar#rsFlowProgress::chunk {
+    background-color: #3DCF6A;
+    border-radius: 3px;
 }
 

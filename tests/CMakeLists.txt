@@ -7909,6 +7909,32 @@ target_compile_definitions(test_shortcut_conflicts PRIVATE
 )
 sicnu_discover_tests(test_shortcut_conflicts)
 
+# Behavior-level shortcut host guardrail (UI review C1): real key events
+# against the hidden-menubar vs window-hosted action contract.
+add_executable(test_shortcut_hosting
+  test_shortcut_hosting.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/command_registry.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/selection_context.cpp
+  ${CMAKE_SOURCE_DIR}/src/app/workbench/workbench_host.cpp
+)
+target_link_libraries(test_shortcut_hosting PRIVATE
+  Catch2::Catch2WithMain
+  Qt6::Core
+  Qt6::Gui
+  Qt6::Widgets
+  Qt6::Test
+  qgis_core
+  qgis_gui
+)
+target_include_directories(test_shortcut_hosting PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(test_shortcut_hosting PRIVATE
+  CMAKE_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+)
+sicnu_discover_tests(test_shortcut_hosting)
+
 # ── Workbench 6.0 Milestone C: bounded UI scan pool (#797) ──────────────────
 add_executable(test_scan_pool
   test_scan_pool.cpp
@@ -10324,6 +10350,18 @@ sicnu_add_d17_test(test_d17_workflow_pipeline_e2e
     ${CMAKE_SOURCE_DIR}/src/app/widgets/lab_spec_loader.cpp
   LIBS Qt6::Widgets Qt6::Test jsoncpp
 )
+
+# Targets that compile pipeline_run_coordinator.cpp directly (instead of
+# linking sicnu_workflow) must define the library's EXPORTS macro so
+# SICNU_WORKFLOW_EXPORT resolves to dllexport -- otherwise the local moc
+# output defines PipelineRunCoordinator::staticMetaObject as a dllimport
+# data member, which MSVC rejects (C2491).
+foreach(_d17_embeds_coordinator
+    test_ir2_port_param_mapping
+    test_workflow_checkpoint_cache
+    test_d17_workflow_pipeline_e2e)
+  target_compile_definitions(${_d17_embeds_coordinator} PRIVATE sicnu_workflow_EXPORTS)
+endforeach()
 # ---------------------------------------------------------------------------
 # D15 classification-change-studio track (Packages A-I).
 # ---------------------------------------------------------------------------
