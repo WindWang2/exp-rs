@@ -288,6 +288,14 @@ Json::Value inspectAny( const std::string &path, const InspectOptions &options =
 /// model. Used by round-trip tests; not intended for external input.
 RasterMetadata rasterMetadataFromJsonText( const std::string &jsonText, Json::Value *errors = nullptr );
 
+/// The BandInfo for a 1-based GDAL band number, found by `.index` — NEVER
+/// by vector position. `bands` is index-keyed (BandInfo.index carries the
+/// GDAL band number) and can be shorter than bandCount with non-contiguous
+/// indexes when inspectRaster skips a null interior band handle; indexing
+/// `bands[band - 1]` on such a vector is out-of-bounds (#1054). Returns
+/// nullptr when the band has no recorded facts.
+const BandInfo *findBandInfo( const RasterMetadata &metadata, int bandNumber );
+
 } // namespace sicnu::geo
 
 #endif // SICNU_GEOSPATIAL_CANONICAL_METADATA_H

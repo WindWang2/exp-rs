@@ -135,6 +135,63 @@ CrsInfo readCrsInfo( OGRSpatialReferenceH srs )
 
 } // namespace
 
+// ─── JSON field guards (#1038) ───────────────────────────────────────────────
+// The fromJson family reads documents that may be externally supplied: a
+// wrong-typed member degrades to the absent/default reading (the family's
+// recovery contract — see rasterMetadataFromJsonText's reported errors),
+// never an escaping Json::LogicError. The key-based helpers only touch
+// members when the parent IS an object (indexing a scalar/array parent
+// throws in jsoncpp).
+namespace
+{
+
+std::string jsonStringOr( const Json::Value &json, const char *key, const char *fallback = "" )
+{
+  if ( !json.isObject() )
+    return fallback;
+  const Json::Value &value = json[key];
+  return value.isString() ? value.asString() : std::string( fallback );
+}
+
+double jsonDoubleOr( const Json::Value &json, const char *key, double fallback = 0.0 )
+{
+  if ( !json.isObject() )
+    return fallback;
+  const Json::Value &value = json[key];
+  return value.isNumeric() ? value.asDouble() : fallback;
+}
+
+int jsonIntOr( const Json::Value &json, const char *key, int fallback = 0 )
+{
+  if ( !json.isObject() )
+    return fallback;
+  const Json::Value &value = json[key];
+  return value.isInt() ? value.asInt() : fallback;
+}
+
+Json::Int64 jsonInt64Or( const Json::Value &json, const char *key, Json::Int64 fallback = 0 )
+{
+  if ( !json.isObject() )
+    return fallback;
+  const Json::Value &value = json[key];
+  return value.isInt64() ? value.asInt64() : fallback;
+}
+
+bool jsonBoolOr( const Json::Value &json, const char *key, bool fallback = false )
+{
+  if ( !json.isObject() )
+    return fallback;
+  const Json::Value &value = json[key];
+  return value.isBool() ? value.asBool() : fallback;
+}
+
+std::string jsonTextOr( const Json::Value &value )
+{
+  return value.isString() ? value.asString() : std::string();
+}
+
+} // namespace
+
 // ─── CrsInfo ─────────────────────────────────────────────────────────────────
 
 Json::Value CrsInfo::toJson() const
@@ -154,14 +211,14 @@ Json::Value CrsInfo::toJson() const
 CrsInfo CrsInfo::fromJson( const Json::Value &json )
 {
   CrsInfo info;
-  info.valid = json.get( "valid", false ).asBool();
-  info.wkt = json.get( "wkt", "" ).asString();
-  info.authid = json.get( "authid", "" ).asString();
-  info.isGeographic = json.get( "is_geographic", false ).asBool();
-  info.isProjected = json.get( "is_projected", false ).asBool();
-  info.hasCoordinateEpoch = json.get( "has_coordinate_epoch", false ).asBool();
-  if ( info.hasCoordinateEpoch && json.isMember( "coordinate_epoch" ) )
-    info.coordinateEpoch = json["coordinate_epoch"].asDouble();
+  info.valid = jsonBoolOr( json, "valid" );
+  info.wkt = jsonStringOr( json, "wkt" );
+  info.authid = jsonStringOr( json, "authid" );
+  info.isGeographic = jsonBoolOr( json, "is_geographic" );
+  info.isProjected = jsonBoolOr( json, "is_projected" );
+  info.hasCoordinateEpoch = jsonBoolOr( json, "has_coordinate_epoch" );
+  if ( info.hasCoordinateEpoch )
+    info.coordinateEpoch = jsonDoubleOr( json, "coordinate_epoch" );
   return info;
 }
 
@@ -213,10 +270,10 @@ Json::Value BandInfo::toJson() const
 BandInfo BandInfo::fromJson( const Json::Value &json )
 {
   BandInfo band;
-  band.index = json.get( "index", 0 ).asInt();
-  band.dtype = json.get( "dtype", "" ).asString();
-  band.description = json.get( "description", "" ).asString();
-  band.hasNoData = json.get( "has_nodata", false ).asBool();
+  band.index = jsonIntOr( json, "index" );
+  band.dtype = jsonStringOr( json, "dtype" );
+  band.description = jsonStringOr( json, "description" );
+  band.hasNoData = jsonBoolOr( json, "has_nodata" );
   if ( band.hasNoData && json.isMember( "nodata" ) )
   {
     const Json::Value nodata = json["nodata"];
@@ -230,29 +287,33 @@ BandInfo BandInfo::fromJson( const Json::Value &json )
       band.noDataValue = nodata.asDouble();
     }
   }
-  band.hasScale = json.get( "has_scale", false ).asBool();
-  if ( band.hasScale && json.isMember( "scale" ) )
-    band.scale = json["scale"].asDouble();
-  band.hasOffset = json.get( "has_offset", false ).asBool();
-  if ( band.hasOffset && json.isMember( "offset" ) )
-    band.offset = json["offset"].asDouble();
-  band.unit = json.get( "unit", "" ).asString();
-  band.role = json.get( "role", "" ).asString();
-  band.hasWavelength = json.get( "has_wavelength", false ).asBool();
-  if ( band.hasWavelength && json.isMember( "wavelength_nm" ) )
-    band.wavelengthNm = json["wavelength_nm"].asDouble();
-  band.hasFwhm = json.get( "has_fwhm", false ).asBool();
-  if ( band.hasFwhm && json.isMember( "fwhm_nm" ) )
-    band.fwhmNm = json["fwhm_nm"].asDouble();
-  band.colorInterpretation = json.get( "color_interpretation", "" ).asString();
-  band.hasColorTable = json.get( "has_color_table", false ).asBool();
-  if ( band.hasColorTable && json.isMember( "color_table_entries" ) )
-    band.colorTableEntryCount = json["color_table_entries"].asInt();
-  band.isMaskBand = json.get( "is_mask_band", false ).asBool();
-  if ( json.isMember( "metadata" ) )
+  band.hasScale = jsonBoolOr( json, "has_scale" );
+  if ( band.hasScale )
+    band.scale = jsonDoubleOr( json, "scale" );
+  band.hasOffset = jsonBoolOr( json, "has_offset" );
+  if ( band.hasOffset )
+    band.offset = jsonDoubleOr( json, "offset" );
+  band.unit = jsonStringOr( json, "unit" );
+  band.role = jsonStringOr( json, "role" );
+  band.hasWavelength = jsonBoolOr( json, "has_wavelength" );
+  if ( band.hasWavelength )
+    band.wavelengthNm = jsonDoubleOr( json, "wavelength_nm" );
+  band.hasFwhm = jsonBoolOr( json, "has_fwhm" );
+  if ( band.hasFwhm )
+    band.fwhmNm = jsonDoubleOr( json, "fwhm_nm" );
+  band.colorInterpretation = jsonStringOr( json, "color_interpretation" );
+  band.hasColorTable = jsonBoolOr( json, "has_color_table" );
+  if ( band.hasColorTable )
+    band.colorTableEntryCount = jsonIntOr( json, "color_table_entries" );
+  band.isMaskBand = jsonBoolOr( json, "is_mask_band" );
+  if ( json.isObject() && json["metadata"].isObject() )
   {
     for ( const auto &key : json["metadata"].getMemberNames() )
-      band.metadata[key] = json["metadata"][key].asString();
+    {
+      const std::string item = jsonTextOr( json["metadata"][key] );
+      if ( !item.empty() )
+        band.metadata[key] = item;
+    }
   }
   return band;
 }
@@ -336,68 +397,75 @@ Json::Value RasterMetadata::toJson() const
 RasterMetadata RasterMetadata::fromJson( const Json::Value &json )
 {
   RasterMetadata meta;
-  meta.path = json.get( "path", "" ).asString();
-  meta.driver = json.get( "driver", "" ).asString();
-  meta.driverLongName = json.get( "driver_long_name", "" ).asString();
-  meta.width = json.get( "width", 0 ).asInt();
-  meta.height = json.get( "height", 0 ).asInt();
-  meta.bandCount = json.get( "band_count", 0 ).asInt();
-  if ( json.isMember( "crs" ) )
+  meta.path = jsonStringOr( json, "path" );
+  meta.driver = jsonStringOr( json, "driver" );
+  meta.driverLongName = jsonStringOr( json, "driver_long_name" );
+  meta.width = jsonIntOr( json, "width" );
+  meta.height = jsonIntOr( json, "height" );
+  meta.bandCount = jsonIntOr( json, "band_count" );
+  if ( json.isObject() && json["crs"].isObject() )
     meta.crs = CrsInfo::fromJson( json["crs"] );
-  meta.hasGeotransform = json.get( "has_geotransform", false ).asBool();
-  if ( meta.hasGeotransform && json.isMember( "geotransform" ) )
+  meta.hasGeotransform = jsonBoolOr( json, "has_geotransform" );
+  if ( meta.hasGeotransform && json.isObject() && json["geotransform"].isArray() )
   {
     const Json::Value &gt = json["geotransform"];
     for ( Json::ArrayIndex i = 0; i < gt.size() && i < 6; ++i )
-      meta.geotransform[i] = gt[i].asDouble();
+      meta.geotransform[i] = gt[i].isNumeric() ? gt[i].asDouble() : meta.geotransform[i];
   }
-  meta.hasExtent = json.get( "has_extent", false ).asBool();
-  if ( meta.hasExtent && json.isMember( "extent" ) && json["extent"].size() == 4 )
+  meta.hasExtent = jsonBoolOr( json, "has_extent" );
+  if ( meta.hasExtent && json.isObject() && json["extent"].isArray() && json["extent"].size() == 4 &&
+       json["extent"][0].isNumeric() && json["extent"][1].isNumeric() &&
+       json["extent"][2].isNumeric() && json["extent"][3].isNumeric() )
   {
     meta.minX = json["extent"][0].asDouble();
     meta.minY = json["extent"][1].asDouble();
     meta.maxX = json["extent"][2].asDouble();
     meta.maxY = json["extent"][3].asDouble();
   }
-  if ( json.isMember( "resolution_x" ) )
-    meta.resolutionX = json.get( "resolution_x", 0.0 ).asDouble();
-  if ( json.isMember( "resolution_y" ) )
-    meta.resolutionY = json.get( "resolution_y", 0.0 ).asDouble();
-  if ( json.isMember( "bands" ) )
+  meta.resolutionX = jsonDoubleOr( json, "resolution_x", meta.resolutionX );
+  meta.resolutionY = jsonDoubleOr( json, "resolution_y", meta.resolutionY );
+  if ( json.isObject() && json["bands"].isArray() )
   {
     for ( const Json::Value &bandJson : json["bands"] )
       meta.bands.push_back( BandInfo::fromJson( bandJson ) );
   }
-  meta.overviewCount = json.get( "overview_count", -1 ).asInt();
-  meta.compression = json.get( "compression", "" ).asString();
-  meta.interleave = json.get( "interleave", "" ).asString();
-  if ( json.isMember( "subdatasets" ) )
+  meta.overviewCount = jsonIntOr( json, "overview_count", -1 );
+  meta.compression = jsonStringOr( json, "compression" );
+  meta.interleave = jsonStringOr( json, "interleave" );
+  if ( json.isObject() && json["subdatasets"].isArray() )
   {
     for ( const Json::Value &sub : json["subdatasets"] )
-      meta.subdatasets.push_back( sub.asString() );
+    {
+      const std::string name = jsonTextOr( sub );
+      if ( !name.empty() )
+        meta.subdatasets.push_back( name );
+    }
   }
-  meta.hasGcps = json.get( "has_gcps", false ).asBool();
-  if ( meta.hasGcps && json.isMember( "gcp_count" ) )
-    meta.gcpCount = json["gcp_count"].asInt();
-  meta.hasRpc = json.get( "has_rpc", false ).asBool();
-  meta.sensor = json.get( "sensor", "" ).asString();
-  meta.platform = json.get( "platform", "" ).asString();
-  meta.productId = json.get( "product_id", "" ).asString();
-  meta.processingLevel = json.get( "processing_level", "" ).asString();
-  meta.acquisitionTime = json.get( "acquisition_time", "" ).asString();
-  meta.radiometricState = json.get( "radiometric_state", "" ).asString();
-  if ( json.isMember( "numeric_scale" ) )
-    meta.numericScale = json["numeric_scale"].asDouble();
-  meta.hasCloudCover = json.get( "has_cloud_cover", false ).asBool();
-  if ( meta.hasCloudCover && json.isMember( "cloud_cover" ) )
-    meta.cloudCover = json["cloud_cover"].asDouble();
-  meta.hasGsd = json.get( "has_gsd", false ).asBool();
-  if ( meta.hasGsd && json.isMember( "gsd" ) )
-    meta.gsd = json["gsd"].asDouble();
-  if ( json.isMember( "metadata" ) )
+  meta.hasGcps = jsonBoolOr( json, "has_gcps" );
+  if ( meta.hasGcps )
+    meta.gcpCount = jsonIntOr( json, "gcp_count" );
+  meta.hasRpc = jsonBoolOr( json, "has_rpc" );
+  meta.sensor = jsonStringOr( json, "sensor" );
+  meta.platform = jsonStringOr( json, "platform" );
+  meta.productId = jsonStringOr( json, "product_id" );
+  meta.processingLevel = jsonStringOr( json, "processing_level" );
+  meta.acquisitionTime = jsonStringOr( json, "acquisition_time" );
+  meta.radiometricState = jsonStringOr( json, "radiometric_state" );
+  meta.numericScale = jsonDoubleOr( json, "numeric_scale", meta.numericScale );
+  meta.hasCloudCover = jsonBoolOr( json, "has_cloud_cover" );
+  if ( meta.hasCloudCover )
+    meta.cloudCover = jsonDoubleOr( json, "cloud_cover" );
+  meta.hasGsd = jsonBoolOr( json, "has_gsd" );
+  if ( meta.hasGsd )
+    meta.gsd = jsonDoubleOr( json, "gsd" );
+  if ( json.isObject() && json["metadata"].isObject() )
   {
     for ( const auto &key : json["metadata"].getMemberNames() )
-      meta.metadata[key] = json["metadata"][key].asString();
+    {
+      const std::string item = jsonTextOr( json["metadata"][key] );
+      if ( !item.empty() )
+        meta.metadata[key] = item;
+    }
   }
   return meta;
 }
@@ -434,10 +502,10 @@ Json::Value FieldInfo::toJson() const
 FieldInfo FieldInfo::fromJson( const Json::Value &json )
 {
   FieldInfo field;
-  field.name = json.get( "name", "" ).asString();
-  field.typeName = json.get( "type", "" ).asString();
-  field.width = json.get( "width", 0 ).asInt();
-  field.precision = json.get( "precision", 0 ).asInt();
+  field.name = jsonStringOr( json, "name" );
+  field.typeName = jsonStringOr( json, "type" );
+  field.width = jsonIntOr( json, "width" );
+  field.precision = jsonIntOr( json, "precision" );
   return field;
 }
 
@@ -474,30 +542,32 @@ Json::Value VectorLayerInfo::toJson() const
 VectorLayerInfo VectorLayerInfo::fromJson( const Json::Value &json )
 {
   VectorLayerInfo layer;
-  layer.name = json.get( "name", "" ).asString();
-  layer.geometryTypeName = json.get( "geometry_type", "" ).asString();
-  layer.featureCount = json.get( "feature_count", static_cast<Json::Int64>( -1 ) ).asInt64();
-  layer.featureCountExact = json.get( "feature_count_exact", false ).asBool();
-  if ( json.isMember( "crs" ) )
+  layer.name = jsonStringOr( json, "name" );
+  layer.geometryTypeName = jsonStringOr( json, "geometry_type" );
+  layer.featureCount = jsonInt64Or( json, "feature_count", -1 );
+  layer.featureCountExact = jsonBoolOr( json, "feature_count_exact" );
+  if ( json.isObject() && json["crs"].isObject() )
     layer.crs = CrsInfo::fromJson( json["crs"] );
-  if ( json.isMember( "fields" ) )
+  if ( json.isObject() && json["fields"].isArray() )
   {
     for ( const Json::Value &fieldJson : json["fields"] )
       layer.fields.push_back( FieldInfo::fromJson( fieldJson ) );
   }
-  layer.hasExtent = json.get( "has_extent", false ).asBool();
-  layer.extentExact = json.get( "extent_exact", false ).asBool();
-  if ( layer.hasExtent && json.isMember( "extent" ) && json["extent"].size() == 4 )
+  layer.hasExtent = jsonBoolOr( json, "has_extent" );
+  layer.extentExact = jsonBoolOr( json, "extent_exact" );
+  if ( layer.hasExtent && json.isObject() && json["extent"].isArray() && json["extent"].size() == 4 &&
+       json["extent"][0].isNumeric() && json["extent"][1].isNumeric() &&
+       json["extent"][2].isNumeric() && json["extent"][3].isNumeric() )
   {
     layer.minX = json["extent"][0].asDouble();
     layer.minY = json["extent"][1].asDouble();
     layer.maxX = json["extent"][2].asDouble();
     layer.maxY = json["extent"][3].asDouble();
   }
-  layer.encoding = json.get( "encoding", "" ).asString();
-  layer.supportsFastSpatialFilter = json.get( "supports_fast_spatial_filter", false ).asBool();
-  layer.supportsSequentialWrite = json.get( "supports_sequential_write", false ).asBool();
-  layer.supportsRandomWrite = json.get( "supports_random_write", false ).asBool();
+  layer.encoding = jsonStringOr( json, "encoding" );
+  layer.supportsFastSpatialFilter = jsonBoolOr( json, "supports_fast_spatial_filter" );
+  layer.supportsSequentialWrite = jsonBoolOr( json, "supports_sequential_write" );
+  layer.supportsRandomWrite = jsonBoolOr( json, "supports_random_write" );
   return layer;
 }
 
@@ -519,10 +589,10 @@ Json::Value VectorMetadata::toJson() const
 VectorMetadata VectorMetadata::fromJson( const Json::Value &json )
 {
   VectorMetadata meta;
-  meta.path = json.get( "path", "" ).asString();
-  meta.driver = json.get( "driver", "" ).asString();
-  meta.driverLongName = json.get( "driver_long_name", "" ).asString();
-  if ( json.isMember( "layers" ) )
+  meta.path = jsonStringOr( json, "path" );
+  meta.driver = jsonStringOr( json, "driver" );
+  meta.driverLongName = jsonStringOr( json, "driver_long_name" );
+  if ( json.isObject() && json["layers"].isArray() )
   {
     for ( const Json::Value &layerJson : json["layers"] )
       meta.layers.push_back( VectorLayerInfo::fromJson( layerJson ) );
@@ -564,24 +634,29 @@ Json::Value DimensionInfo::toJson() const
 DimensionInfo DimensionInfo::fromJson( const Json::Value &json )
 {
   DimensionInfo dim;
-  dim.name = json.get( "name", "" ).asString();
-  dim.size = json.get( "size", static_cast<Json::Int64>( 0 ) ).asInt64();
-  dim.type = json.get( "type", "" ).asString();
-  dim.direction = json.get( "direction", "" ).asString();
-  dim.unit = json.get( "unit", "" ).asString();
-  dim.hasValues = json.get( "has_values", false ).asBool();
-  dim.valuesBounded = json.get( "values_bounded", false ).asBool();
-  if ( dim.hasValues && json["values"].isArray() )
+  dim.name = jsonStringOr( json, "name" );
+  dim.size = jsonInt64Or( json, "size" );
+  dim.type = jsonStringOr( json, "type" );
+  dim.direction = jsonStringOr( json, "direction" );
+  dim.unit = jsonStringOr( json, "unit" );
+  dim.hasValues = jsonBoolOr( json, "has_values" );
+  dim.valuesBounded = jsonBoolOr( json, "values_bounded" );
+  if ( dim.hasValues && json.isObject() && json["values"].isArray() )
   {
     for ( const Json::Value &value : json["values"] )
-      dim.values.push_back( value.asDouble() );
+      if ( value.isNumeric() )
+        dim.values.push_back( value.asDouble() );
   }
-  dim.hasStringValues = json.get( "has_string_values", false ).asBool();
-  dim.stringValuesBounded = json.get( "string_values_bounded", false ).asBool();
-  if ( dim.hasStringValues && json["string_values"].isArray() )
+  dim.hasStringValues = jsonBoolOr( json, "has_string_values" );
+  dim.stringValuesBounded = jsonBoolOr( json, "string_values_bounded" );
+  if ( dim.hasStringValues && json.isObject() && json["string_values"].isArray() )
   {
     for ( const Json::Value &value : json["string_values"] )
-      dim.stringValues.push_back( value.asString() );
+    {
+      const std::string label = jsonTextOr( value );
+      if ( !label.empty() )
+        dim.stringValues.push_back( label );
+    }
   }
   return dim;
 }
@@ -627,15 +702,19 @@ Json::Value VariableInfo::toJson() const
 VariableInfo VariableInfo::fromJson( const Json::Value &json )
 {
   VariableInfo variable;
-  variable.name = json.get( "name", "" ).asString();
-  variable.dtype = json.get( "dtype", "" ).asString();
-  if ( json.isMember( "dimensions" ) )
+  variable.name = jsonStringOr( json, "name" );
+  variable.dtype = jsonStringOr( json, "dtype" );
+  if ( json.isObject() && json["dimensions"].isArray() )
   {
     for ( const Json::Value &dim : json["dimensions"] )
-      variable.dimensionNames.push_back( dim.asString() );
+    {
+      const std::string name = jsonTextOr( dim );
+      if ( !name.empty() )
+        variable.dimensionNames.push_back( name );
+    }
   }
-  variable.unit = json.get( "unit", "" ).asString();
-  variable.hasNoData = json.get( "has_nodata", false ).asBool();
+  variable.unit = jsonStringOr( json, "unit" );
+  variable.hasNoData = jsonBoolOr( json, "has_nodata" );
   if ( variable.hasNoData && json.isMember( "nodata" ) )
   {
     const Json::Value nodata = json["nodata"];
@@ -649,21 +728,26 @@ VariableInfo VariableInfo::fromJson( const Json::Value &json )
       variable.noDataValue = nodata.asDouble();
     }
   }
-  variable.hasScale = json.get( "has_scale", false ).asBool();
-  if ( variable.hasScale && json.isMember( "scale" ) )
-    variable.scale = json["scale"].asDouble();
-  variable.hasOffset = json.get( "has_offset", false ).asBool();
-  if ( variable.hasOffset && json.isMember( "offset" ) )
-    variable.offset = json["offset"].asDouble();
-  if ( json.isMember( "attributes" ) )
+  variable.hasScale = jsonBoolOr( json, "has_scale" );
+  if ( variable.hasScale )
+    variable.scale = jsonDoubleOr( json, "scale" );
+  variable.hasOffset = jsonBoolOr( json, "has_offset" );
+  if ( variable.hasOffset )
+    variable.offset = jsonDoubleOr( json, "offset" );
+  if ( json.isObject() && json["attributes"].isObject() )
   {
     for ( const auto &key : json["attributes"].getMemberNames() )
-      variable.attributes[key] = json["attributes"][key].asString();
+    {
+      const std::string item = jsonTextOr( json["attributes"][key] );
+      if ( !item.empty() )
+        variable.attributes[key] = item;
+    }
   }
-  if ( json.isMember( "block_shape" ) && json["block_shape"].isArray() )
+  if ( json.isObject() && json["block_shape"].isArray() )
   {
     for ( const Json::Value &b : json["block_shape"] )
-      variable.blockShape.push_back( b.asInt64() );
+      if ( b.isInt64() )
+        variable.blockShape.push_back( b.asInt64() );
   }
   return variable;
 }
@@ -690,16 +774,16 @@ Json::Value MultidimMetadata::toJson() const
 MultidimMetadata MultidimMetadata::fromJson( const Json::Value &json )
 {
   MultidimMetadata meta;
-  meta.path = json.get( "path", "" ).asString();
-  meta.driver = json.get( "driver", "" ).asString();
-  if ( json.isMember( "crs" ) )
+  meta.path = jsonStringOr( json, "path" );
+  meta.driver = jsonStringOr( json, "driver" );
+  if ( json.isObject() && json["crs"].isObject() )
     meta.crs = CrsInfo::fromJson( json["crs"] );
-  if ( json.isMember( "dimensions" ) )
+  if ( json.isObject() && json["dimensions"].isArray() )
   {
     for ( const Json::Value &dimJson : json["dimensions"] )
       meta.dimensions.push_back( DimensionInfo::fromJson( dimJson ) );
   }
-  if ( json.isMember( "variables" ) )
+  if ( json.isObject() && json["variables"].isArray() )
   {
     for ( const Json::Value &variableJson : json["variables"] )
       meta.variables.push_back( VariableInfo::fromJson( variableJson ) );
@@ -867,6 +951,19 @@ RasterMetadata inspectRaster( const std::string &path, const InspectOptions &opt
   }
 
   return meta;
+}
+
+const BandInfo *findBandInfo( const RasterMetadata &metadata, int bandNumber )
+{
+  // The bands vector is INDEX-keyed (BandInfo.index = GDAL band number)
+  // and can carry holes — inspectRaster skips null interior band handles,
+  // so `bands` may be shorter than bandCount with non-contiguous indexes.
+  // Consumers resolve a band by its recorded `.index`, never by position
+  // (the RasterReader readMask/readBlock pattern; #1054).
+  for ( const BandInfo &band : metadata.bands )
+    if ( band.index == bandNumber )
+      return &band;
+  return nullptr;
 }
 
 VectorMetadata inspectVector( const std::string &path, const InspectOptions &options )

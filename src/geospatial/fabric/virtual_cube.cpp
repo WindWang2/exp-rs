@@ -107,6 +107,10 @@ std::vector<std::size_t> selectionOrder( const std::vector<AssetRecord> &assets,
 
 /// The canonical band role resolver: a role match wins, the fixed index
 /// falls back. Returns 0 when neither resolves (caller records failure).
+/// The index fallback bounds by bandCount (the GDAL-reported band numbers)
+/// — `bands` is index-keyed, NOT positional, so bands.size() is not a band
+/// bound (#1054); a declared number whose interior handle was null simply
+/// has no recorded facts and fails typed at the consumer lookup.
 int resolveBandIndex( const RasterMetadata &metadata, const VirtualCubeReadOptions &options,
                       std::string &how )
 {
@@ -119,7 +123,7 @@ int resolveBandIndex( const RasterMetadata &metadata, const VirtualCubeReadOptio
         return band.index;
       }
   }
-  if ( options.bandIndex >= 1 && options.bandIndex <= static_cast<int>( metadata.bands.size() ) )
+  if ( options.bandIndex >= 1 && options.bandIndex <= metadata.bandCount )
   {
     how = "index";
     return options.bandIndex;
@@ -168,6 +172,12 @@ Json::Value VirtualCubeGrid::toJson() const
 
 VirtualCubeGrid VirtualCubeGrid::fromJson( const Json::Value &json )
 {
+  // Foreign-typed fields are a typed failure, never an escaping
+  // Json::LogicError (a hostile grid document must fail closed, #1038).
+  if ( !json.isObject() || !json["crs"].isString() ||
+       !json["scaleX"].isNumeric() || !json["scaleY"].isNumeric() )
+    throw GeoError( ErrorCode::InvalidArgument,
+                    "virtual cube grid JSON is missing or mistypes crs/scaleX/scaleY" );
   VirtualCubeGrid grid;
   grid.explicitGrid = true;
   grid.crs.valid = !json["crs"].asString().empty();
@@ -175,7 +185,8 @@ VirtualCubeGrid VirtualCubeGrid::fromJson( const Json::Value &json )
   grid.scaleX = json["scaleX"].asDouble();
   grid.scaleY = json["scaleY"].asDouble();
   const Json::Value &extent = json["extent"];
-  if ( extent.isArray() && extent.size() == 4 )
+  if ( extent.isArray() && extent.size() == 4 && extent[0].isNumeric() && extent[1].isNumeric() &&
+       extent[2].isNumeric() && extent[3].isNumeric() )
   {
     grid.minX = extent[0].asDouble();
     grid.minY = extent[1].asDouble();
@@ -636,13 +647,19 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
             const std::vector<double> chunkValues =
               mirrored.readWindow( { 1 }, { 0, 0, chunkWidth, chunkHeight },
                                    options.maxWindowBytes );
-            const BandInfo &bandInfo = mirroredMeta.bands[0];
+            // Band facts by GDAL number, never by position (#1054); a
+            // chunk without recorded band-1 facts fails this asset typed
+            // (provenance.failed) instead of reading out of bounds.
+            const BandInfo *mirroredBand = findBandInfo( mirroredMeta, 1 );
+            if ( mirroredBand == nullptr )
+              throw GeoError( ErrorCode::InvalidMetadata,
+                              "mirrored chunk carries no band 1 facts: " + hit.file );
             provenance.mirrorHit = hit.file;
             provenance.sourceWindow = mapped.window;
             provenance.contributed = scatterInto(
               chunkValues,
               RasterWindow { mapped.window.xOff, mapped.window.yOff, chunkWidth, chunkHeight },
-              bandInfo, facts.geotransform );
+              *mirroredBand, facts.geotransform );
             result.provenance.push_back( std::move( provenance ) );
             continue;
           }
@@ -778,10 +795,16 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
       if ( mirrorHitPath.empty() )
       {
         values = reader.readWindow( { band }, readWindow, options.maxWindowBytes );
-        const BandInfo &bandInfo = metadata.bands[static_cast<std::size_t>( band - 1 )];
-        sourceHasNoData = bandInfo.hasNoData;
-        sourceNoDataIsNaN = bandInfo.noDataIsNaN;
-        sourceNoDataValue = bandInfo.noDataValue;
+        // Band facts by GDAL number (.index), never by position (#1054):
+        // `bands` can be shorter than bandCount with holes for null
+        // interior handles — `bands[band - 1]` on such a shape is OOB.
+        const BandInfo *sourceBand = findBandInfo( metadata, band );
+        if ( sourceBand == nullptr )
+          throw GeoError( ErrorCode::InvalidMetadata,
+                          "asset carries no facts for band " + std::to_string( band ) );
+        sourceHasNoData = sourceBand->hasNoData;
+        sourceNoDataIsNaN = sourceBand->noDataIsNaN;
+        sourceNoDataValue = sourceBand->noDataValue;
       }
       else
       {
@@ -789,10 +812,13 @@ VirtualCubeWindowResult VirtualCube::readWindow( int xOff, int yOff, int width, 
         readWindow = RasterWindow { 0, 0, std::min( sourceWindow.width, mirroredReader.metadata().width ),
                                     std::min( sourceWindow.height, mirroredReader.metadata().height ) };
         values = mirroredReader.readWindow( { 1 }, readWindow, options.maxWindowBytes );
-        const BandInfo &bandInfo = mirroredReader.metadata().bands[0];
-        sourceHasNoData = bandInfo.hasNoData;
-        sourceNoDataIsNaN = bandInfo.noDataIsNaN;
-        sourceNoDataValue = bandInfo.noDataValue;
+        const BandInfo *mirroredBand = findBandInfo( mirroredReader.metadata(), 1 );
+        if ( mirroredBand == nullptr )
+          throw GeoError( ErrorCode::InvalidMetadata,
+                          "mirrored chunk carries no band 1 facts: " + mirrorHitPath );
+        sourceHasNoData = mirroredBand->hasNoData;
+        sourceNoDataIsNaN = mirroredBand->noDataIsNaN;
+        sourceNoDataValue = mirroredBand->noDataValue;
         // The scatter maps world → ASSET pixels; the chunk buffer is
         // chunk-local. Bound the scatter by the chunk's ASSET-pixel window
         // (review R13): origin-only chunks worked by accident before.
