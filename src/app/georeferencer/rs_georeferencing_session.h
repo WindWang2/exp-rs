@@ -202,12 +202,27 @@ class RsGeoreferencingSession : public QObject
 
     long mPendingWarpTaskId = -1;
     RsWarpTask *mPendingWarpTask = nullptr; // deleteLater on terminal
-    /// True while the JobEngine worker is inside mPendingWarpTask->run();
-    /// the destructor bounded-waits on it instead of hard-deleting (#626).
-    std::atomic<bool> mWarpExecutorActive{ false };
-    /// Released when the executor leaves the warp job (#650): the destructor
-    /// blocks on this instead of a 500x10 ms GUI-thread spin.
-    QSemaphore mWarpExecutorDone{ 0 };
+    /**
+     * Bookkeeping shared with the warp executor lambda (#626 / #1050).
+     *
+     * The executor runs on a JobEngine worker thread. When the session is
+     * destroyed mid-warp the destructor bounded-waits on @c done; on a
+     * pathological timeout the session object (and its members) is freed while
+     * the worker is still unwinding ActiveGuard. Keeping the flag + semaphore
+     * in heap state owned by a shared_ptr copied into the lambda means the
+     * guard always writes to live memory, and the destructor can still decide
+     * whether the task object may be deleted.
+     */
+    struct WarpExecutorState
+    {
+      std::atomic<bool> active{ false };
+      /// Set after active clears, immediately before the semaphore release.
+      /// Only a finished executor provably cannot touch the task again.
+      std::atomic<bool> finished{ false };
+      QSemaphore done{ 0 };
+    };
+    std::shared_ptr<WarpExecutorState> mWarpExecutorState =
+      std::make_shared<WarpExecutorState>();
     RsGeorefWarpSnapshot mPendingSnap;
 
     // WorkflowRuntime mirror (ADR 0028)

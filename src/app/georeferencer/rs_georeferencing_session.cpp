@@ -53,17 +53,26 @@ RsGeoreferencingSession::~RsGeoreferencingSession()
     // (reachable by closing the georeferencer mid-warp). Bounded-wait for
     // the executor to observe the cancellation; on pathological timeout
     // prefer a leak over a crash.
-    if ( mWarpExecutorActive.load() )
+    // #1050: the wait/flag live in shared state, so even a timed-out worker's
+    // ActiveGuard unwinds into live memory instead of the freed session.
+    if ( mWarpExecutorState->active.load() )
     {
       // #650: wait on the executor's completion semaphore instead of spinning
       // the GUI thread with 500x10 ms sleeps. The semaphore is released when
       // the job's ActiveGuard unwinds; a pathological timeout still prefers a
       // leak over a crash (#626).
-      if ( !mWarpExecutorDone.tryAcquire( 1, 5000 ) )
+      if ( !mWarpExecutorState->done.tryAcquire( 1, 5000 ) )
         QgsLogger::warning( "Georeferencing warp did not stop within 5s of close; "
                             "deferring its cleanup" );
     }
-    if ( !mWarpExecutorActive.load( std::memory_order_acquire ) )
+    // The task may only be freed when the executor provably finished: the
+    // shared `finished` flag is set by the ActiveGuard, after the last task
+    // access. TaskCenter status is NOT a proof — a task can be finalized as
+    // Canceled while its submit is still in flight, and the worker then runs
+    // the task anyway (round-2 review). A submitted task whose worker never
+    // provably finished is therefore leaked: prefer a bounded leak over
+    // deleting under a worker (#626, #1050).
+    if ( mWarpExecutorState->finished.load( std::memory_order_acquire ) )
     {
       delete mPendingWarpTask;
       mPendingWarpTask = nullptr;
@@ -168,6 +177,11 @@ void RsGeoreferencingSession::syncWorkflowGcps()
 
 void RsGeoreferencingSession::setSourceRasterPath( const QString &path )
 {
+  // #1052: only a real value change is a modification. refreshFit() pushes the
+  // panel config on every refit (init, destCrsChanged, demZOffsetChanged), so
+  // unconditional markDirty() made every window dirty from birth.
+  if ( mSourcePath == path )
+    return;
   mSourcePath = path;
   markDirty();
   if ( isWorkflowMirrorActive() && !path.isEmpty() )
@@ -181,6 +195,8 @@ void RsGeoreferencingSession::setSourceRasterPath( const QString &path )
 void RsGeoreferencingSession::setTransformMethod(
   QgsGcpTransformerInterface::TransformMethod method )
 {
+  if ( mMethod == method )
+    return;
   mMethod = method;
   markDirty();
 }
@@ -424,24 +440,31 @@ long RsGeoreferencingSession::startWarpTask( const RsGeorefWarpSnapshot &snap )
   mPendingSnap = snap;
   mPendingWarpTask = task;
 
-  auto jobExec = [task, this]( const sicnu::jobs::JobRequest &request,
+  // #1050: capture the shared bookkeeping, not the session. The JobEngine
+  // worker may outlive the session after the destructor's bounded wait.
+  // A fresh state per submission keeps the entered/finished flags meaningful
+  // for a retry in the same session.
+  mWarpExecutorState = std::make_shared<WarpExecutorState>();
+  const std::shared_ptr<WarpExecutorState> executorState = mWarpExecutorState;
+  auto jobExec = [task, executorState]( const sicnu::jobs::JobRequest &request,
                         sicnu::operators::RSOperatorContext &ctx ) {
     struct ActiveGuard
     {
-      std::atomic<bool> &flag;
-      QSemaphore &done;
+      std::shared_ptr<WarpExecutorState> state;
       ~ActiveGuard()
       {
-        flag.store( false, std::memory_order_release );
-        done.release();
+        state->active.store( false, std::memory_order_release );
+        state->finished.store( true, std::memory_order_release );
+        state->done.release();
       }
-    } activeGuard{ mWarpExecutorActive, mWarpExecutorDone };
+    } activeGuard{ executorState };
     // Drain stale counts so a retry's completion signal cannot be satisfied
     // by a previous run's release.
-    while ( mWarpExecutorDone.tryAcquire() )
+    while ( executorState->done.tryAcquire() )
     {
     }
-    mWarpExecutorActive.store( true, std::memory_order_release );
+    executorState->finished.store( false, std::memory_order_release );
+    executorState->active.store( true, std::memory_order_release );
     ctx.logInfo( "Georef warp" );
     ctx.reportProgress( 0.0, "Warping" );
     const bool ok = task->run();

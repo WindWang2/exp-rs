@@ -96,3 +96,41 @@ TEST_CASE( "GCP table: residual warn foreground on total residual column", "[geo
   const int rmsCol = static_cast<int>( QgsGCPListModel::Column::TotalResidual );
   REQUIRE( rmsCol >= 0 );
 }
+
+TEST_CASE( "GCP table: setTargetCrs invalidates every CRS-dependent column (#1052)",
+           "[georef][table][1052]" )
+{
+  ensureApp();
+  RsGeoreferencingSession session;
+  session.setGcps( { QgsGcpPoint( QgsPointXY( 0, 0 ), QgsPointXY( 100, 200 ),
+                                  QgsCoordinateReferenceSystem( QStringLiteral( "EPSG:4326" ) ),
+                                  true ) } );
+
+  QgsGCPListWidget w;
+  w.setGcpsSource( &session );
+  QgsGCPListModel *model = qobject_cast<QgsGCPListModel *>( w.model() );
+  REQUIRE( model != nullptr );
+  REQUIRE( model->rowCount() == 1 );
+
+  QModelIndex changedTop;
+  QModelIndex changedBottom;
+  QObject::connect( model, &QAbstractItemModel::dataChanged, model,
+                    [&changedTop, &changedBottom]( const QModelIndex &topLeft,
+                                                   const QModelIndex &bottomRight,
+                                                   const QList<int> & ) {
+                      changedTop = topLeft;
+                      changedBottom = bottomRight;
+                    } );
+
+  model->setTargetCrs( QgsCoordinateReferenceSystem( QStringLiteral( "EPSG:32633" ) ),
+                       QgsCoordinateTransformContext() );
+
+  // DestCol/DestRow derive from the same target-CRS transform as DestMapX/Y —
+  // the invalidation must span them or the pixel columns keep stale values.
+  const int destMapX = static_cast<int>( QgsGCPListModel::Column::DestMapX );
+  const int destRow = static_cast<int>( QgsGCPListModel::Column::DestRow );
+  REQUIRE( changedTop.isValid() );
+  REQUIRE( changedBottom.isValid() );
+  CHECK( changedTop.column() <= destMapX );
+  CHECK( changedBottom.column() >= destRow );
+}

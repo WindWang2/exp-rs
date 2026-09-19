@@ -264,6 +264,16 @@ void QgsGeoreferencerMainWindow::runSiftMatch()
     [task]() { task->cancel(); },
     /*autoLoad=*/false );
 
+  if ( taskId < 0 )
+  {
+    // #1051: submitJob refused (shutdown / enqueue failure) — no terminal
+    // update will ever arrive, so free the task here and install no
+    // connection for a task id that can never match.
+    delete task;
+    statusBar()->showMessage( tr( "SIFT matching could not be submitted" ), 5000 );
+    return;
+  }
+
   auto *conn = new QMetaObject::Connection;
   *conn = connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, this,
                    [this, task, taskId, conn]( const sicnu::AlgorithmTaskInfo &info ) {
@@ -474,6 +484,16 @@ void QgsGeoreferencerMainWindow::runTemplateMatch()
     },
     [fb]() { fb->cancel(); },
     /*autoLoad=*/false );
+
+  if ( taskId < 0 )
+  {
+    // #1051: refused submission has no terminal update — free the holder,
+    // the feedback object and skip the impossible connection.
+    delete resultHolder;
+    delete fb;
+    statusBar()->showMessage( tr( "Template matching could not be submitted" ), 5000 );
+    return;
+  }
 
   auto *conn = new QMetaObject::Connection;
   *conn = connect( &sicnu::TaskCenter::instance(), &sicnu::TaskCenter::taskUpdated, this,

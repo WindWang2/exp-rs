@@ -15,10 +15,14 @@
 #include "warper_test_helpers.h"
 
 #include <QCoreApplication>
+#include <QSemaphore>
 #include <QTemporaryDir>
 
+#include <atomic>
 #include <cstdlib>
 #include <cmath>
+#include <memory>
+#include <thread>
 
 using Catch::Approx;
 
@@ -831,6 +835,140 @@ TEST_CASE( "Georeferencer/Session: Destructor cancels running warp and cleans up
   }
 
   REQUIRE( fake.cancelCalls.size() == 1 );
+}
+
+TEST_CASE( "GeoreferencingSession: dirty follows real value changes only (#1052)",
+           "[georef][session][dirty][1052]" )
+{
+  RsGeoreferencingSession session;
+  REQUIRE_FALSE( session.isDirty() );
+
+  // Constructor-time / refreshFit config sync with unchanged values must not
+  // dirty the session (a fresh window was born dirty before the fix).
+  session.setTransformMethod( QgsGcpTransformerInterface::TransformMethod::Linear );
+  REQUIRE_FALSE( session.isDirty() );
+  session.setSourceRasterPath( QString() );
+  REQUIRE_FALSE( session.isDirty() );
+
+  // First real value change is a modification.
+  session.setSourceRasterPath( QStringLiteral( "/tmp/src.tif" ) );
+  REQUIRE( session.isDirty() );
+  session.clearDirty();
+
+  // Idempotent setters (refreshFit re-pushes the same values) stay clean.
+  session.setSourceRasterPath( QStringLiteral( "/tmp/src.tif" ) );
+  REQUIRE_FALSE( session.isDirty() );
+  session.setTransformMethod( QgsGcpTransformerInterface::TransformMethod::Linear );
+  REQUIRE_FALSE( session.isDirty() );
+
+  // A different transform method is a real change.
+  session.setTransformMethod( QgsGcpTransformerInterface::TransformMethod::PolynomialOrder1 );
+  REQUIRE( session.isDirty() );
+  session.clearDirty();
+  session.setTransformMethod( QgsGcpTransformerInterface::TransformMethod::PolynomialOrder1 );
+  REQUIRE_FALSE( session.isDirty() );
+
+  // GCP edits always dirty (real user edits — saved via .points).
+  session.addGcp( mkGcp( QgsPointXY( 0, 0 ), QgsPointXY( 1, 1 ) ) );
+  REQUIRE( session.isDirty() );
+}
+
+TEST_CASE( "GeoreferencingSession: a worker outliving the session writes live shared state (#1050)",
+           "[georef][session][lifetime][1050]" )
+{
+  ensureApp();
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+  const QString srcPath = makeSynthetic64Raster( tmp.path() );
+  REQUIRE_FALSE( srcPath.isEmpty() );
+  const QString outPath = tmp.filePath( QStringLiteral( "warped.tif" ) );
+
+  // Deferred executor: records the job closure/cancel hook but never runs or
+  // completes the task. The test drives the worker thread by hand.
+  struct DeferredExecutor
+  {
+    sicnu::jobs::JobRequest request;
+    sicnu::TaskCenter::JobExecutor executor;
+    sicnu::TaskCenter::CancelHook cancelHook;
+    QVector<long> cancelCalls;
+
+    long submit( const sicnu::jobs::JobRequest &req,
+                 const sicnu::TaskCenter::JobExecutor &exec,
+                 const sicnu::TaskCenter::CancelHook &hook )
+    {
+      request = req;
+      executor = exec;
+      cancelHook = hook;
+      return 77;
+    }
+  } deferred;
+
+  CustomWarpExecutor custom;
+  custom.submit = [&deferred]( const sicnu::jobs::JobRequest &req,
+                               const sicnu::TaskCenter::JobExecutor &exec,
+                               const sicnu::TaskCenter::CancelHook &hook ) {
+    return deferred.submit( req, exec, hook );
+  };
+  custom.cancel = [&deferred]( long taskId ) {
+    deferred.cancelCalls.append( taskId );
+    return true; // no terminal update: the worker still owns the task
+  };
+
+  auto session = std::make_unique<RsGeoreferencingSession>( custom );
+  session->setSourceRasterPath( srcPath );
+  session->setTransformMethod( QgsGcpTransformerInterface::TransformMethod::Linear );
+  session->setGcps( linearGcps() );
+  REQUIRE( session->refit().ready );
+
+  const auto snap = session->createWarpSnapshot(
+    outPath, QgsImageWarper::ResamplingMethod::NearestNeighbour,
+    QgsCoordinateReferenceSystem(), 0.0 );
+  REQUIRE( snap.has_value() );
+  REQUIRE( session->startWarpTask( *snap ) == 77 );
+  REQUIRE( deferred.executor );
+
+  QSemaphore entered;
+  QSemaphore release;
+  std::atomic<bool> finished{ false };
+  std::thread worker( [&deferred, &entered, &release, &finished]() {
+    // Block inside the executor's first progress report so the session is
+    // destroyed while ActiveGuard is still armed. The acquire is BOUNDED: if
+    // the test aborts before releasing, the worker still exits so
+    // std::thread::join() cannot terminate the whole test binary.
+    sicnu::operators::RSOperatorContext ctx;
+    ctx.setProgressCallback( [&entered, &release]( double, const std::string & ) {
+      entered.release();
+      release.tryAcquire( 1, 15000 );
+    } );
+    try
+    {
+      deferred.executor( deferred.request, ctx );
+    }
+    catch ( ... )
+    {
+      // The (leaked) warp task runs against real files after the release;
+      // a thrown operator error is an expected outcome here.
+    }
+    finished.store( true );
+  } );
+
+  const bool workerEntered = entered.tryAcquire( 1, 5000 );
+
+  // Destroy the session while the worker is inside the job. The bounded wait
+  // (5 s) expires with the task intentionally leaked (#626); the worker's
+  // ActiveGuard must then unwind into LIVE shared state, not freed session
+  // members (#1050).
+  // NOTE: the pre-fix use-after-free is heap UB, so a plain MSVC Debug run
+  // fails only by luck (debug heap fill/verify) — the deterministic oracle
+  // for this case is an ASan/UBSan lane; the case still pins the contract
+  // and guards against crash regressions on every lane.
+  session.reset();
+  CHECK( deferred.cancelCalls == QVector<long> { 77 } );
+
+  release.release( 1 );
+  worker.join();
+  REQUIRE( workerEntered );
+  CHECK( finished.load() );
 }
 
 #include "test_georeferencing_session.moc"

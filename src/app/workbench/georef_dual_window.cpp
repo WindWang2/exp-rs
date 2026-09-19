@@ -131,6 +131,12 @@ void GeorefDualWindow::loadSourceImage(const QString& filePath)
     }
     layer->setParent(this); // window object tree owns the layer
     if (mSourceCanvas) {
+        // #1050: an in-flight render job holds a raw-pointer snapshot of the
+        // old layer list; stopRendering() only asks for a cooperative cancel.
+        // Settle first — the documented precondition for destroying a layer
+        // that the canvas is displaying (ActiveViewHost uses the same idiom).
+        if (mSourceLayer)
+            mSourceCanvas->stopRenderingAndSettle();
         mSourceCanvas->setLayers({layer});
         mSourceCanvas->zoomToFullExtent();
     }
@@ -150,6 +156,10 @@ void GeorefDualWindow::loadReferenceImage(const QString& filePath)
     }
     layer->setParent(this); // window object tree owns the layer
     if (mReferenceCanvas) {
+        // #1050: see loadSourceImage — settle the old render before its layer
+        // leaves the display list and is released.
+        if (mReferenceLayer)
+            mReferenceCanvas->stopRenderingAndSettle();
         mReferenceCanvas->setLayers({layer});
         mReferenceCanvas->zoomToFullExtent();
     }
