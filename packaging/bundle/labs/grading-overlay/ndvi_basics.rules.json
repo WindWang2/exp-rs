@@ -1,8 +1,10 @@
 {
   "schema_version": "sicnu.lab.rules/1",
   "lab_id": "ndvi_basics",
-  "title": "NDVI basics — single-band NDVI product (D7 bundle scene: water / vegetation / urban / soil)",
-  "artifact": { "kind": "raster" },
+  "title": "NDVI basics \u2014 single-band NDVI product (D7 foundry scene: water / vegetation / urban / soil / forest / shadow)",
+  "artifact": {
+    "kind": "raster"
+  },
   "passing_score": 60,
   "assertions": [
     {
@@ -10,16 +12,28 @@
       "kind": "crs_grid",
       "weight": 10,
       "severity": "blocking",
-      "params": { "epsg": 4326, "width": 256, "height": 256, "band_count": 1,
-                  "pixel_size_x": 0.001, "pixel_size_y": 0.001, "pixel_size_tolerance": 1e-9 },
-      "derivation": "D7 bundle grid contract: the bundle's deterministic seed-42 scene (bin/sicnu_generate_samples) is 256x256 at 0.001 deg in EPSG:4326; a submission on another grid is not comparable to the known answer. (Calibrated to the shipped scene; the repo copy tracks the D4/D1 fixture.)"
+      "params": {
+        "epsg": 32648,
+        "width": 256,
+        "height": 256,
+        "band_count": 1,
+        "pixel_size_x": 30.0,
+        "pixel_size_y": 30.0,
+        "pixel_size_tolerance": 1e-06
+      },
+      "derivation": "D7 bundle grid contract: sicnu_generate_samples (tools/sample_foundry) emits the Lab profile as 256x256 at 30 m in EPSG:32648 (UTM 48N); a submission on another grid is not comparable to the known answer. (Calibrated to the foundry scene; the repo data/labs/grading copy tracks the D4/D1 fixture.)"
     },
     {
       "id": "range.ndvi",
       "kind": "range",
       "weight": 15,
       "severity": "normal",
-      "params": { "band": 1, "min": -1.0, "max": 1.0, "max_violation_ratio": 0.0 },
+      "params": {
+        "band": 1,
+        "min": -1.0,
+        "max": 1.0,
+        "max_violation_ratio": 0.0
+      },
       "derivation": "NDVI=(N-R)/(N+R) is bounded by [-1,1] for non-negative reflectance (KNOWN_ANSWER_MATRIX spectral family). Catches display stretches (x100+50) and unit slips."
     },
     {
@@ -27,26 +41,42 @@
       "kind": "mean_sigma",
       "weight": 30,
       "severity": "blocking",
-      "params": { "band": 1, "mean": 0.4574287, "mean_tolerance": 0.01,
-                  "sigma_min": 0.50, "sigma_max": 0.55, "sigma_tolerance": 0.0 },
-      "derivation": "Measured closed form over the D7 bundle's seed-42 scene (generator reflectance table: water / vegetation / urban / bare soil / forest / shadow with per-band noise): full-scene NDVI mean=0.45742872549, sigma=0.52521106966 with 259 declared-nodata pixels. Mean tolerance 0.01; sigma window [0.50, 0.55] absorbs the generator's fixed noise pattern across compilers. (Calibrated to the shipped scene; the repo copy tracks the D4/D1 fixture.)"
+      "params": {
+        "band": 1,
+        "mean": 0.4521261,
+        "mean_tolerance": 0.01,
+        "sigma_min": 0.48,
+        "sigma_max": 0.54,
+        "sigma_tolerance": 0.0
+      },
+      "derivation": "Measured over the foundry seed-42 Lab scene (class map + reflectance table water/vegetation/urban/bare soil/forest/shadow with \u00b10.02 portable noise, NDVI via safeDiv on float32 red/nir): full-scene mean\u22480.4521261, population sigma\u22480.5084647 with 131 denom-zero NaN pixels (131/65536\u22480.200%). Mean tolerance 0.01; sigma window [0.48, 0.54] absorbs float32 rounding across compilers. (Calibrated to the foundry scene; the repo copy tracks the D4/D1 fixture.)"
     },
     {
       "id": "mask.nodata_ratio",
       "kind": "nodata_ratio",
       "weight": 15,
       "severity": "blocking",
-      "params": { "min_ratio": 0.002, "max_ratio": 0.05 },
-      "derivation": "The bundle scene declares 259/65536=0.40% invalid pixels; a correct product masks them (observed ratio 0.0040). Ratio 0 = forgot to mask; ratio > 0.05 = masked usable data. Both directions are wrong."
+      "params": {
+        "min_ratio": 0.001,
+        "max_ratio": 0.05
+      },
+      "derivation": "The foundry landsat_sample declares no band NoData; rs:spectral_index writes NaN (declared NoData) where red+nir==0 after float32 noise \u2014 observed 131/65536\u22480.200%. min_ratio 0.001 catches a product that forgot to mask those pixels (ratio 0); max_ratio 0.05 catches over-masking."
     },
     {
       "id": "hist.bimodal",
       "kind": "histogram_shape",
       "weight": 30,
       "severity": "normal",
-      "params": { "band": 1, "bins": 64, "min": -1.0, "max": 1.0, "shape": "bimodal",
-                  "min_mode_fraction": 0.05, "min_separation": 0.5 },
-      "derivation": "The scene's dominant states (water/urban vs vegetation/forest) put the NDVI histogram in two separated lobes (observed mode centers ~0.08 and ~0.83); bimodality catches stretches that smear the classes."
+      "params": {
+        "band": 1,
+        "bins": 64,
+        "min": -1.0,
+        "max": 1.0,
+        "shape": "bimodal",
+        "min_mode_fraction": 0.05,
+        "min_separation": 0.5
+      },
+      "derivation": "The scene's dominant states (water/urban/soil vs vegetation/forest) put the NDVI histogram in two separated lobes; bimodality catches stretches that smear the classes."
     }
   ]
 }
