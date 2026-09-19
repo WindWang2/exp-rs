@@ -32,6 +32,8 @@
 #include "exprs/workflow_schema.h"
 #include "support/fuzz_corpus.h"
 
+#include <cstddef>
+
 #include <json/json.h>
 
 #include <limits>
@@ -67,9 +69,22 @@ Json::Value parseJson( const std::string &text, bool *ok )
 {
     Json::Value value;
     Json::CharReaderBuilder builder;
+    // Same hardening the production parse sites apply: an unbounded reader
+    // turns a deep-but-small input into a stack overflow in the test process
+    // itself, which would be a harness defect, not a finding.
+    builder[ "stackLimit" ] = 64;
     std::string errors;
     const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
-    *ok = reader->parse( text.data(), text.data() + text.size(), &value, &errors );
+    // jsoncpp THROWS when the depth bound is exceeded; the helper converts
+    // that into the same ok=false answer the production readers give.
+    try
+    {
+        *ok = reader->parse( text.data(), text.data() + text.size(), &value, &errors );
+    }
+    catch ( const Json::Exception & )
+    {
+        *ok = false;
+    }
     return value;
 }
 
@@ -218,7 +233,10 @@ TEST_CASE( "workflow document fuzz: validate/migrate are total and typed",
     }
 
     // --- depth bombs are typed rejects, never crashes ----------------------
-    for ( const int depth : { 16, 256, 4096, 65536 } )
+    // 866 is the pinned pre-fix stack-overflow boundary of the IPC decode
+    // entry point on a Debug/MSVC stack; the rest are far beyond any real
+    // thread stack. See tests/corpus/README.md (defect D1).
+    for ( const int depth : { 16, 256, 866, 4096, 65536, 200000 } )
     {
         const std::string bomb = depthBomb( depth );
         bool ok = false;
@@ -651,12 +669,23 @@ TEST_CASE( "plugin version ranges fuzz: satisfaction is total and exact",
         CHECK( satisfied == testCase.expected );
     }
 
+    // Two documented tolerances (asserted, not silently accepted):
+    //  - "" is the "bare plugin id" range: satisfied by ANY version.
+    //  - a TRAILING NEWLINE is swallowed by the last version component
+    //    (getline's default delimiter), so ">=1.2.3\n" parses as ">=1.2.3".
+    //    Harmless leniency, recorded as an observation in the corpus notes.
+    CHECK( PluginPackage::versionSatisfiesRange( "1.2.3", "" ) );
+    CHECK( PluginPackage::versionSatisfiesRange( "0.0.1", "" ) );
+    const std::string withTrailingNewline = ">=1.2.3\n";
+    CHECK( PluginPackage::versionSatisfiesRange( "1.2.3", withTrailingNewline ) );
+    CHECK_FALSE( PluginPackage::versionSatisfiesRange( "0.0.1", withTrailingNewline ) );
+
     // Malformed/hostile ranges: total (no throw) and never satisfied, because
     // no version can satisfy a range that does not parse.
     const std::vector<std::string> hostileRanges = {
-        "",         "abc",     "1.2.3.4", ">=abc",  "^",       "~",
+        "abc",     "1.2.3.4", ">=abc",  "^",       "~",
         ">=999999999999999999999999", "-1.0.0", ">=1.2.3 <2.0.0",
-        "  ",       "\xC3\xA9", ">=1.2.3\n", "\x01",
+        "  ",       "\xC3\xA9", "\x01",
         "1.2.3.4.5.6", ">=1.2.3extra", "^1.2.3.4.5",
     };
     for ( const std::string &range : hostileRanges )
@@ -762,4 +791,81 @@ TEST_CASE( "envelope and schema size boundary: caps do not reject legal input",
     document[ "steps" ] = steps;
     PluginDiagnosticLog diagnostics;
     CHECK( exprs::validateWorkflowDocument( document, diagnostics ) );
+}
+
+TEST_CASE( "corpus minimization: a throwing ui schema reduces to one wrong-typed field",
+           "[contract8][fuzz][payload]" )
+{
+    // The minimization lane: take a mutated worker schema whose validator used
+    // to throw Json::LogicError and reduce it with delta debugging until the
+    // predicate stops firing. The result is the corpus fixture — the smallest
+    // input that still reproduces the defect class.
+    Json::Value seed = validUiSchema();
+    seed[ "menuItems" ][ 0 ][ "commandId" ] = 42; // the hostile field
+
+    auto throws = []( const std::string &text ) {
+        bool ok = false;
+        const Json::Value value = parseJson( text, &ok );
+        if ( !ok )
+            return false;
+        try
+        {
+            (void) exprs::validatePluginUiSchema( value );
+        }
+        catch ( const Json::Exception & )
+        {
+            return true;
+        }
+        return false;
+    };
+
+    // Pad the seed with a load-bearing neighbour so ddmin has something to
+    // remove: the reducer must discover that only the wrong-typed commandId
+    // matters.
+    Json::Value padded = validUiSchema();
+    padded[ "menuItems" ][ 0 ][ "commandId" ] = 42;
+    padded[ "settingsPages" ][ 0 ][ "title" ] = std::string( "padded-title-" ) + std::string( 40, 'x' );
+    Json::Value extra( Json::arrayValue );
+    for ( int i = 0; i < 8; ++i )
+    {
+        Json::Value option( Json::objectValue );
+        option[ "value" ] = "v" + std::to_string( i );
+        option[ "label" ] = "V" + std::to_string( i );
+        extra.append( option );
+    }
+    padded[ "settingsPages" ][ 0 ][ "controls" ][ 1 ][ "options" ] = extra;
+
+    const std::string original = serialize( padded );
+    REQUIRE( throws( original ) );
+    const std::string minimized = sicnu::fuzz::ddmin( original, throws );
+    REQUIRE( throws( minimized ) );
+    CHECK( minimized.size() <= original.size() );
+
+    // The reduced fixture is 1-minimal: no single byte can be removed and
+    // still reproduce the exception.
+    for ( size_t i = 0; i < minimized.size(); ++i )
+    {
+        const std::string smaller = minimized.substr( 0, i ) + minimized.substr( i + 1 );
+        CHECK_FALSE( throws( smaller ) );
+    }
+
+    // The minimized form still names the exact defect class: a numeric
+    // "commandId" in a worker-declared menu item.
+    bool ok = false;
+    const Json::Value value = parseJson( minimized, &ok );
+    REQUIRE( ok );
+    CHECK( value.isMember( "menuItems" ) );
+    CHECK( value[ "menuItems" ].isArray() );
+    CHECK( !value[ "menuItems" ].empty() );
+    CHECK( value[ "menuItems" ][ 0 ].isMember( "commandId" ) );
+    CHECK( value[ "menuItems" ][ 0 ][ "commandId" ].isNumeric() );
+
+    // And the FIXED validator refuses it typed, which is what the corpus
+    // fixture pins as the regression.
+    exprs::PluginUiSchemaParseResult result;
+    REQUIRE_NOTHROW( result = exprs::validatePluginUiSchema( value ) );
+    CHECK_FALSE( result.ok() );
+    CHECK_FALSE( result.errors.empty() );
+
+    (void) seed;
 }

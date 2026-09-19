@@ -11118,3 +11118,37 @@ sicnu_link_jsoncpp(test_verification_failure_11)
 sicnu_add_test(test_contract_cross_surface_11)
 target_link_libraries(test_contract_cross_surface_11 PRIVATE sicnu_contracts)
 sicnu_link_jsoncpp(test_contract_cross_surface_11)
+
+# =============================================================================
+# Track ds41-fuzz-boundaries — boundary fuzz/property lanes (append-only).
+#
+# Follows the 7.0/8.0 "bounded contract fuzz" convention: deterministic seeds,
+# hard input caps (≤512 B, ≤300 iterations/seed), CI-safe total-function
+# oracles. Mutators, the ddmin minimizer and the optional corpus recorder live
+# in support/fuzz_corpus.h (this track adds them; support/bounded_fuzz.h stays
+# untouched because it is shared with other tracks).
+#
+#   test_contract_fuzz_frame   — exprs::IpcFrame framing + exprs::Ipc envelope
+#                                (known-answer legs: test_exprs_ipc.cpp)
+#   test_contract_fuzz_payload — workflow schema, plugin UI schema + ui events,
+#                                manifest ports, diagnostics, dependency version
+#                                ranges, plugin index pins
+#                                (known-answer legs: test_exprs_workflow_schema,
+#                                test_plugin_ui_schema, test_exprs_plugin_system)
+#   test_contract_fuzz_paths   — exprs::PathPolicy lexical/containment cage,
+#                                asserted against an INDEPENDENT resolution
+#
+# All three link only Catch2 + sicnu_sdk (jsoncpp-only static library) — no Qt,
+# no QGIS, no GDAL — so they build in seconds and run in well under a minute.
+# The path lane creates its fixtures under std::filesystem::temp_directory_path.
+sicnu_add_sdk_test(test_contract_fuzz_frame)
+sicnu_link_jsoncpp(test_contract_fuzz_frame)
+target_include_directories(test_contract_fuzz_frame PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+sicnu_add_sdk_test(test_contract_fuzz_payload)
+sicnu_link_jsoncpp(test_contract_fuzz_payload)
+target_include_directories(test_contract_fuzz_payload PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+sicnu_add_sdk_test(test_contract_fuzz_paths)
+sicnu_link_jsoncpp(test_contract_fuzz_paths)
+target_include_directories(test_contract_fuzz_paths PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

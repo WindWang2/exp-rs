@@ -62,27 +62,38 @@ struct TempRoot
 /// Independent containment oracle: resolves @p candidate under @p root with
 /// the test's own weakly_canonical walk and reports whether the result is a
 /// regular file at/under the canonical root. Deliberately does NOT call the
-/// implementation under test.
-bool independentlyContained( const fs::path &root, const fs::path &candidate )
+/// implementation under test. A path that the platform encoding cannot even
+/// represent (invalid UTF-8 byte soup) resolves nowhere: false.
+bool independentlyContained( const fs::path &root, const std::string &candidateText )
 {
-    std::error_code ec;
-    const fs::path canonicalRoot = fs::weakly_canonical( root, ec );
-    if ( ec )
-        return false;
-    const fs::path resolved = fs::weakly_canonical( canonicalRoot / candidate, ec );
-    if ( ec )
-        return false;
-    if ( !fs::is_regular_file( resolved, ec ) || ec )
-        return false;
-    const std::string rootText = canonicalRoot.generic_string();
-    const std::string resolvedText = resolved.generic_string();
-    if ( resolvedText == rootText )
-        return true;
-    if ( resolvedText.size() <= rootText.size() )
-        return false;
-    if ( resolvedText.compare( 0, rootText.size(), rootText ) != 0 )
-        return false;
-    return rootText.empty() || rootText.back() == '/' || resolvedText[rootText.size()] == '/';
+    try
+    {
+        const fs::path candidate( std::u8string(
+            reinterpret_cast<const char8_t *>( candidateText.data() ),
+            candidateText.size() ) );
+        std::error_code ec;
+        const fs::path canonicalRoot = fs::weakly_canonical( root, ec );
+        if ( ec )
+            return false;
+        const fs::path resolved = fs::weakly_canonical( canonicalRoot / candidate, ec );
+        if ( ec )
+            return false;
+        if ( !fs::is_regular_file( resolved, ec ) || ec )
+            return false;
+        const std::string rootText = canonicalRoot.generic_string();
+        const std::string resolvedText = resolved.generic_string();
+        if ( resolvedText == rootText )
+            return true;
+        if ( resolvedText.size() <= rootText.size() )
+            return false;
+        if ( resolvedText.compare( 0, rootText.size(), rootText ) != 0 )
+            return false;
+        return rootText.empty() || rootText.back() == '/' || resolvedText[rootText.size()] == '/';
+    }
+    catch ( const std::exception & )
+    {
+        return false; // not representable in the platform encoding
+    }
 }
 
 void writeFile( const fs::path &path, const std::string &content = "payload" )
@@ -173,7 +184,7 @@ TEST_CASE( "path policy fuzz: payload containment cage holds for every corpus na
             REQUIRE( rejection == PathPolicyRejection::Accepted );
             CHECK( !resolved.empty() );
             // Independent oracle agrees on the containment verdict.
-            CHECK( independentlyContained( root.path, fs::path( relative ) ) );
+            CHECK( independentlyContained( root.path, relative ) );
             CHECK( fs::exists( fs::path( resolved ) ) );
         }
 
@@ -217,7 +228,7 @@ TEST_CASE( "path policy fuzz: payload containment cage holds for every corpus na
                 if ( rejection == PathPolicyRejection::Accepted )
                 {
                     CHECK( !resolved.empty() );
-                    CHECK( independentlyContained( root.path, fs::path( candidate ) ) );
+                    CHECK( independentlyContained( root.path, candidate ) );
                 }
                 else
                 {
@@ -253,7 +264,7 @@ TEST_CASE( "path policy fuzz: resolvesInsideRoot agrees with the independent cag
         REQUIRE_NOTHROW( inside = PathPolicy::resolvesInsideRoot( root.path.string(),
                                                                   escape ) );
         CHECK_FALSE( inside );
-        CHECK_FALSE( independentlyContained( root.path, fs::path( escape ) ) );
+        CHECK_FALSE( independentlyContained( root.path, escape ) );
     }
 
     // The mutation corpus never reports containment for a candidate that the
@@ -274,9 +285,9 @@ TEST_CASE( "path policy fuzz: resolvesInsideRoot agrees with the independent cag
             if ( inside )
             {
                 // The one accepted direction: an existing regular file inside.
-                CHECK( independentlyContained( root.path, fs::path( candidate ) ) );
+                CHECK( independentlyContained( root.path, candidate ) );
             }
-            else if ( independentlyContained( root.path, fs::path( candidate ) ) )
+            else if ( independentlyContained( root.path, candidate ) )
             {
                 // resolvesInsideRoot resolves LEXICALLY for targets that do not
                 // exist yet, so containment can legitimately be reported for a

@@ -154,9 +154,22 @@ Json::Value parseJson( const std::string &text, bool *ok )
 {
     Json::Value value;
     Json::CharReaderBuilder builder;
+    // Same hardening the production parse sites apply: an unbounded reader
+    // turns a deep-but-small input into a stack overflow in the test process
+    // itself, which would be a harness defect, not a finding.
+    builder[ "stackLimit" ] = 64;
     std::string errors;
     const std::unique_ptr<Json::CharReader> reader( builder.newCharReader() );
-    *ok = reader->parse( text.data(), text.data() + text.size(), &value, &errors );
+    // jsoncpp THROWS when the depth bound is exceeded; the helper converts
+    // that into the same ok=false answer the production readers give.
+    try
+    {
+        *ok = reader->parse( text.data(), text.data() + text.size(), &value, &errors );
+    }
+    catch ( const Json::Exception & )
+    {
+        *ok = false;
+    }
     return value;
 }
 
@@ -433,7 +446,9 @@ TEST_CASE( "ipc envelope fuzz: decode is total on mutated and hostile payloads",
 TEST_CASE( "ipc envelope fuzz: depth and size bombs are typed refusals",
            "[contract8][fuzz][ipc][envelope]" )
 {
-    for ( const int depth : { 16, 64, 256, 1024, 8192, 65536 } )
+    // 866 is the pinned pre-fix stack-overflow boundary of this entry point
+    // on a Debug/MSVC thread stack; the rest are beyond any real stack.
+    for ( const int depth : { 16, 64, 256, 866, 4096, 65536, 200000 } )
     {
         const std::string bomb = depthBomb( depth );
         Ipc::Envelope envelope;
@@ -484,11 +499,22 @@ TEST_CASE( "ipc envelope fuzz: builder round-trips hostile field values",
             const Json::Value encoded = Ipc::encodeEnvelope( request );
             Ipc::Envelope decoded;
             std::string error;
-            REQUIRE( Ipc::decodeEnvelope( encoded, decoded, error ) );
-            CHECK( decoded.type == Ipc::MessageType::Request );
-            CHECK( decoded.id == id );
-            CHECK( decoded.method == method );
-            CHECK( decoded.deadlineMs == 5 );
+            if ( method.empty() )
+            {
+                // "request envelope without method" is a documented typed
+                // refusal: the builder must not be able to produce a frame its
+                // own decoder accepts.
+                REQUIRE_FALSE( Ipc::decodeEnvelope( encoded, decoded, error ) );
+                CHECK_FALSE( error.empty() );
+            }
+            else
+            {
+                REQUIRE( Ipc::decodeEnvelope( encoded, decoded, error ) );
+                CHECK( decoded.type == Ipc::MessageType::Request );
+                CHECK( decoded.id == id );
+                CHECK( decoded.method == method );
+                CHECK( decoded.deadlineMs == 5 );
+            }
 
             Ipc::Envelope progress;
             progress.type = Ipc::MessageType::Progress;
