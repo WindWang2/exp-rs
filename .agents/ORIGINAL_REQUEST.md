@@ -38,6 +38,48 @@ Integrity mode: development
 - [ ] The 4 worktree directories are completely cleaned up.
 - [ ] Corresponding local feature branches and remote feature branches are deleted.
 
+## 2026-09-08T07:20:53Z
+
+Conduct a comprehensive multi-perspective architectural, scientific, and code quality review of the exp-rs remote sensing platform codebase at master (covering the newly merged Platform 5.0 foundations across cartography, scientific algorithms, dataset & reproducibility, geospatial I/O, and professional workbench UI).
+
+Working directory: c:\Users\wangj.KEVIN\projects\exp-rs
+Integrity mode: development
+
+## Requirements
+
+### R1. Multi-Dimensional Layer Review
+Perform an in-depth audit across the five core platform subsystems:
+1. **Cartography & Knowledge Platform**: Verify MapSpec 3.0 expression grammar bounds, constraint solver determinism, token resolution integrity, recipe compilation, and style application.
+2. **Scientific Algorithm Foundation**: Audit `rs:` operator implementations, numerical stability (NaN/NoData handling, division by zero, float precision), streaming window boundaries, and SAR/terrain/optical algorithm contracts.
+3. **Dataset, Experiment & Lineage Foundation**: Audit deterministic split algorithms, sample ontology, leakage auditor checks, transaction rollback/WAL safety, and reproduction bundle security (credential denylist).
+4. **Geospatial I/O & Interoperability**: Audit `RasterReader`/`RasterWriter` tile/block iteration bounds, memory budgets, credential redaction in `ResourceUri`, remote probe timeout bounds, and atomic file publication.
+5. **Workbench UI & Application Architecture**: Audit `SelectionContext` debounce lifecycle, `CommandRegistry` conflict checks, `InspectorHost` section lifecycle, and layer sync contracts.
+
+### R2. Defect & Risk Classification with Concrete Evidence
+Classify all identified defects and architectural risks using the standard severity rubric:
+- **P0 (Critical)**: Crash risk, memory corruption/UAF, scientific calculation falsity, data corruption, or credential leak.
+- **P1 (Major)**: Unhandled boundary conditions, concurrency races, resource leaks, or contract violations.
+- **P2 (Moderate)**: Performance bottlenecks, non-deterministic logic, inconsistent error types, or missing defensive checks.
+- **P3 (Minor)**: Code debt, documentation discrepancy, or style alignment issues.
+Each finding must document exact file paths, line ranges, root cause analysis, and failure impact.
+
+### R3. Test Suite & Verification Cross-Check
+Cross-reference findings with existing CMake/CTest test targets (e.g., `test_platform5`, `test_io_*`, `test_dataset_*`, `test_primitives5`, `test_workbench_host`), identifying untested execution paths, weak assertions, or test suite gaps.
+
+### R4. Consolidated Audit Dossier
+Produce a comprehensive, structured markdown audit report (`PROJECT_REVIEW_DOSSIER_5.0.md`) in the repository root containing an executive summary, module-by-module breakdown, prioritized findings matrix, and actionable remediation roadmap.
+
+## Acceptance Criteria
+
+### Coverage & Completeness
+- [ ] Audit covers all 5 core subsystems without omitting any newly merged 5.0 layer.
+- [ ] Each finding has a clear severity rating (P0/P1/P2/P3), exact file path, line numbers, and technical explanation.
+- [ ] Concurrency, memory safety, numerical edge cases, and credential handling are explicitly reviewed across subsystems.
+
+### Verification & Deliverable
+- [ ] Existing test suites are cross-checked and test gaps are explicitly documented.
+- [ ] Final markdown dossier `PROJECT_REVIEW_DOSSIER_5.0.md` is generated with an executive summary and prioritized remediation plan.
+
 ## 2026-09-08T14:46:58Z
 
 Resolve all 45 open issues (#773 - #817) across the scientific algorithms, workbench UI, dataset splitting, geospatial I/O, concurrency, cartography, and test suites in `exp-rs` concurrently, verifying purely through local builds and Catch2 test suites without triggering remote CI.
@@ -188,5 +230,38 @@ Integrity mode: development
 - [ ] 全量 Catch2 测试套件 100% 通过（离线无 GUI 窗口弹出）。
 - [ ] 全部 35 个 GitHub Issues 均已成功更新为 Closed 状态。
 
+## 2026-09-14T10:12:16Z
 
+为 `exp-rs` 遥感导论教学与遥感 Agent 平台全方位深化 5 个 10 亿 Tokens 级并行开发 Prompt（D13～D17），每个 Prompt 强制要求独立新建 Git Worktree 开发（隔离 `master`），深度融入 Matt Pocock 的 TDD 技能规范（纵向切片 Tracer Bullet、显式公共 Seams、防同义反复断言、防实现耦合），为每个 Prompt 扩充详尽的算法数学闭式解、底层数据结构契约与 Qt 6 视窗交互规范。
 
+Working directory: c:\Users\wangj.KEVIN\projects\exp-rs
+Integrity mode: development
+
+## Requirements
+
+### R1. 深度融合 Matt Pocock TDD 技能契约
+每个 Prompt 必须显式引入 `.agents/skills/tdd` 与 `.agents/skills/implement` 的核心方法论：
+- 严禁横向切片（禁止一次性写完所有测试再写代码），必须强制采用**纵向切片（Vertical Slices）与 Tracer Bullet** 模式；
+- 每个开发子包（Package A～I）必须显式定义**公共测试接缝（Pre-agreed Public Seams）**与断言接口，绝不对私有细节进行脆弱测试；
+- 严密防范三种 TDD 反模式：实现耦合（Implementation-coupled）、同义反复（Tautological assertions，期望值必须来自独立物理参考或解析解）、横向大步切片（Horizontal slicing）；
+- 重构阶段必须独立于红绿循环，移至最后的 `.agents/skills/code-review` 阶段。
+
+### R2. 5 个 Prompt 的细粒度超详尽扩充
+对 `prompts/13_radiometric_spectral_workbench.md` 到 `prompts/17_workflow_pipeline_designer.md` 的每一个 Work Package（共 45 个子项）：
+- 明确指出具体的 C++ 类名、方法签名、输入参数形状、数学物理推演公式（如 6S 查表方程、SVD 几何解算、GLCM 步长方向、Whittaker 惩罚目标函数、DAG Kahn 拓扑排序）；
+- 明确给出 Catch2 对应的独立测试文件名、测试接缝（Seam）以及正向/反向/边界容差条件；
+- 界面部分明确 Qt 6 信号槽连接、多线程 Worker 交互机制与渲染帧率要求。
+
+### R3. 编译资源与长程运行硬门禁
+- 保持硬性约束：每个 Prompt 明确限定最多使用 3 个只读 subagents（`subagents <= 3`），严禁递归派生；
+- 锁定构建配置：`CMAKE_BUILD_PARALLEL_LEVEL=2`，`CTEST_PARALLEL_LEVEL=1`，`ninja -j2`（RSS > 70% 时 `-j1`）；
+- 运行跨度确保支持 $\ge 9$ 小时连续自动化迭代（`duration=9h+`，`budget=1000000000`）。
+
+## Acceptance Criteria
+
+### 规范性与细节深度
+- [x] 5 个 Prompt 均包含完整的 `/goal` 与 `/loop` 前置调用指令，可直接整篇复制粘贴运行。
+- [x] 每个 Prompt 的 9 个 Work Package 均包含明确的【Public Seams】、【数学物理公式/状态模型】与【Catch2 验证断言】。
+- [x] 每个 Prompt 均显式引用 Matt Pocock 的 `.agents/skills/tdd`、`.agents/skills/implement` 与 `.agents/skills/code-review` 技能。
+- [x] 严格遵循“先生成文档 $\to$ TDD 驱动纵向切片 $\to$ 深度 Review”的三阶段闭环。
+- [x] 5 个 Prompt 文件均在 `prompts/` 目录下完成落盘。
