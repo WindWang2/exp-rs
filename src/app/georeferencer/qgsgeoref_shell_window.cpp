@@ -123,6 +123,14 @@ QgsGeorefShellWindow::QgsGeorefShellWindow( QgisInterface *iface, QWidget *paren
 
 QgsGeorefShellWindow::~QgsGeorefShellWindow()
 {
+  // #1093a: map-coords dialogs own a QgsGeorefDataPoint whose SRC marker lives
+  // in mSrcCanvas's scene. QObject tears down children in creation order, so
+  // canvases die first and free the marker; the dialog then deletes the data
+  // point and double-frees. Close those dialogs here while canvases still live.
+  const auto coordDialogs = findChildren<QgsMapCoordsDialog *>();
+  for ( QgsMapCoordsDialog *dlg : coordDialogs )
+    delete dlg;
+
   // #650: releases the raw, unparented mPendingGcpPick point object - the
   // destructor used to leak it whenever the window closed while a GCP pick
   // was armed.
@@ -2292,13 +2300,79 @@ void QgsGeorefShellWindow::releasePoint( const QgsPointXY &p )
   if ( mMovingPoint )
   {
     // Push the dragged row's new coordinates back to the session (owner).
+    // #1093c: mirror commitGcpPair — canvas picks must be mapped into the
+    // layer CRS and (for destinations) the panel target CRS before storage.
     const int row = mDataPoints.indexOf( mMovingPoint );
     if ( row >= 0 && row < mGcpViewPoints.size() )
     {
+      bool accepted = true;
       if ( type == QgsGcpPoint::PointType::Source )
-        mGeorefSession.setGcpSource( row, mGcpViewPoints.at( row )->sourcePoint() );
+      {
+        QgsPointXY srcPick = mGcpViewPoints.at( row )->sourcePoint();
+        if ( mSrcRaster )
+        {
+          const std::optional<QgsPointXY> layerPt =
+            mapPickToLayerCrs( mSrcCanvas, mSrcRaster, srcPick );
+          if ( !layerPt.has_value() )
+          {
+            accepted = false;
+            if ( statusBar() )
+              statusBar()->showMessage(
+                tr( "Cannot map the dragged source point into the layer CRS — move discarded" ), 6000 );
+          }
+          else
+          {
+            srcPick = *layerPt;
+          }
+        }
+        if ( accepted )
+          mGeorefSession.setGcpSource( row, srcPick );
+      }
       else
-        mGeorefSession.setGcpDestination( row, mGcpViewPoints.at( row )->destinationPoint() );
+      {
+        QgsPointXY destPick = mGcpViewPoints.at( row )->destinationPoint();
+        if ( mDstRaster )
+        {
+          const std::optional<QgsPointXY> layerPt =
+            mapPickToLayerCrs( mDstCanvas, mDstRaster, destPick );
+          if ( !layerPt.has_value() )
+          {
+            accepted = false;
+            if ( statusBar() )
+              statusBar()->showMessage(
+                tr( "Cannot map the dragged target point into the layer CRS — move discarded" ), 6000 );
+          }
+          else
+          {
+            destPick = *layerPt;
+          }
+        }
+        if ( accepted )
+        {
+          const QgsCoordinateReferenceSystem destCrs =
+            mParamsPanel ? mParamsPanel->destCrs() : QgsCoordinateReferenceSystem();
+          const RsGeorefGcpDestination normalized =
+            rsGeorefNormalizeGcpDestination(
+              destPick,
+              mDstRaster ? mDstRaster->crs() : QgsCoordinateReferenceSystem(),
+              destCrs,
+              QgsProject::instance() ? QgsProject::instance()->transformContext()
+                                     : QgsCoordinateTransformContext() );
+          if ( normalized.refuse )
+          {
+            accepted = false;
+            if ( statusBar() )
+              statusBar()->showMessage(
+                tr( "Cannot transform the dragged target point into the destination CRS — move discarded" ), 6000 );
+          }
+          else
+          {
+            mGeorefSession.setGcpDestination( row, normalized.point );
+          }
+        }
+      }
+      if ( !accepted )
+        mMovingPoint->moveTo( mMoveOrigin, type );
     }
     mMovingPoint = nullptr;
   }

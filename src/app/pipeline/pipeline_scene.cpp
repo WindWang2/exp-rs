@@ -6,6 +6,61 @@
 #include <cmath>
 
 namespace sicnu::app::pipeline {
+namespace {
+
+QPointF outputPortPosByName( PipelineNodeItem *node, const QString &portName )
+{
+    if ( !node )
+        return {};
+    for ( int i = 0; i < node->outputPortCount(); ++i )
+    {
+        if ( node->outputPortName( i ) == portName )
+            return node->outputPortScenePos( i );
+    }
+    return node->outputPortScenePos( 0 );
+}
+
+QPointF inputPortPosByName( PipelineNodeItem *node, const QString &portName )
+{
+    if ( !node )
+        return {};
+    for ( int i = 0; i < node->inputPortCount(); ++i )
+    {
+        if ( node->inputPortName( i ) == portName )
+            return node->inputPortScenePos( i );
+    }
+    return node->inputPortScenePos( 0 );
+}
+
+/// Keep a wire glued to named ports as endpoints move (#1085).
+void attachConnectionMoveTracking( PipelineConnectionItem *connection,
+                                   PipelineNodeItem *source, PipelineNodeItem *target,
+                                   const QString &sourcePort, const QString &targetPort )
+{
+    if ( !connection || !source || !target )
+        return;
+    QPointer<PipelineConnectionItem> connectionRef( connection );
+    QPointer<PipelineNodeItem> sourceRef( source );
+    QPointer<PipelineNodeItem> targetRef( target );
+    const QString srcPort = sourcePort;
+    const QString dstPort = targetPort;
+    QObject::connect( source, &PipelineNodeItem::nodeMoved, connection,
+                      [connectionRef, sourceRef, srcPort]() {
+                          if ( connectionRef && sourceRef )
+                              connectionRef->updateEndpoints(
+                                  outputPortPosByName( sourceRef.data(), srcPort ),
+                                  connectionRef->path().pointAtPercent( 1 ) );
+                      } );
+    QObject::connect( target, &PipelineNodeItem::nodeMoved, connection,
+                      [connectionRef, targetRef, dstPort]() {
+                          if ( connectionRef && targetRef )
+                              connectionRef->updateEndpoints(
+                                  connectionRef->path().pointAtPercent( 0 ),
+                                  inputPortPosByName( targetRef.data(), dstPort ) );
+                      } );
+}
+
+} // namespace
 
 PipelineScene::PipelineScene( QObject *parent )
     : QGraphicsScene( parent )
@@ -140,6 +195,14 @@ bool PipelineScene::finishPendingConnection( PipelinePortItem *target )
     const QString sourcePort = m_pendingSourcePort;
     const QString targetNode = m_pendingConnection->targetNodeId;
     const QString targetPort = target->portName;
+
+    // #1085: interactive wires used to skip move-tracking, so dragging either
+    // endpoint left the wire frozen at drop-time geometry.
+    PipelineNodeItem *sourceItem = m_nodes.value( source ).data();
+    PipelineNodeItem *targetItem = target->ownerNode;
+    attachConnectionMoveTracking( m_pendingConnection.data(), sourceItem, targetItem,
+                                  sourcePort, targetPort );
+
     m_pendingConnection.clear(); // ownership stays with the scene
 
     emit connectionCreated( source, sourcePort, targetNode, targetPort );
@@ -164,17 +227,9 @@ PipelineConnectionItem *PipelineScene::addConnection( const QString &sourceNodeI
     if ( !source || !target )
         return nullptr;
 
-    // Anchor on the ports when present; otherwise the node edges.
-    QPointF start = source->outputPortScenePos( 0 );
-    QPointF end = target->inputPortScenePos( 0 );
-    for ( QGraphicsItem *child : source->childItems() )
-        if ( auto *port = qgraphicsitem_cast<PipelinePortItem *>( child ) )
-            if ( port->direction == PortDirection::Output && port->portName == sourcePort )
-                start = port->sceneCenter();
-    for ( QGraphicsItem *child : target->childItems() )
-        if ( auto *port = qgraphicsitem_cast<PipelinePortItem *>( child ) )
-            if ( port->direction == PortDirection::Input && port->portName == targetPort )
-                end = port->sceneCenter();
+    // Anchor on the named ports when present; otherwise fall back to index 0.
+    const QPointF start = outputPortPosByName( source, sourcePort );
+    const QPointF end = inputPortPosByName( target, targetPort );
 
     auto *connection = new PipelineConnectionItem( start, end );
     connection->sourceNodeId = sourceNodeId;
@@ -183,20 +238,9 @@ PipelineConnectionItem *PipelineScene::addConnection( const QString &sourceNodeI
     connection->targetPortName = targetPort;
     addItem( connection );
 
-    // Keep the wire glued to both endpoints as nodes move.
-    QPointer<PipelineConnectionItem> connectionRef( connection );
-    QPointer<PipelineNodeItem> sourceRef( source );
-    QPointer<PipelineNodeItem> targetRef( target );
-    QObject::connect( source, &PipelineNodeItem::nodeMoved, connection, [connectionRef, sourceRef]() {
-        if ( connectionRef && sourceRef )
-            connectionRef->updateEndpoints( sourceRef->outputPortScenePos( 0 ),
-                                            connectionRef->path().pointAtPercent( 1 ) );
-    } );
-    QObject::connect( target, &PipelineNodeItem::nodeMoved, connection, [connectionRef, targetRef]() {
-        if ( connectionRef && targetRef )
-            connectionRef->updateEndpoints( connectionRef->path().pointAtPercent( 0 ),
-                                            targetRef->inputPortScenePos( 0 ) );
-    } );
+    // #1085: track by port *name*, not index 0 — multi-port nodes otherwise
+    // jump their wires to the first port on the first drag after load.
+    attachConnectionMoveTracking( connection, source, target, sourcePort, targetPort );
     return connection;
 }
 
