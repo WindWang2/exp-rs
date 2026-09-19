@@ -1,6 +1,6 @@
 // tests/test_capability_knowledge.cpp
 //
-// D8 capability knowledge layer guard (ADR 0146). Deterministic, no CI, no
+// D8 capability knowledge layer guard (ADR 0154). Deterministic, no CI, no
 // model calls. Asserts the completion contract:
 //   1. coverage: EVERY registered rs: operator carries a v2 capability
 //      sidecar (registry set == catalog set; the floor below only catches
