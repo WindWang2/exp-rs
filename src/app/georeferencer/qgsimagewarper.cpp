@@ -465,18 +465,36 @@ QgsImageWarper::WarpResult QgsImageWarper::warpFile(
   if ( result.status == WarpStatus::Ok )
   {
     // Rename temp to final output atomically.
+    // #1093b: never delete the previous good output before the new file is in
+    // place — stage it aside as .old~, restore on rename failure, and only
+    // remove the backup after the new output lands.
     if ( !tmpOutput.isEmpty() && tmpOutput != output )
     {
+      const QString backup = output + QStringLiteral( ".old~" );
       if ( QFile::exists( output ) )
-        QFile::remove( output );
+      {
+        QFile::remove( backup );
+        if ( !QFile::rename( output, backup ) )
+        {
+          result.status = WarpStatus::GdalError;
+          result.errorMessage = QStringLiteral( "Failed to stage previous output aside for atomic replace" );
+          QFile::remove( tmpOutput );
+          result.durationMs = static_cast<int>( timer.elapsed() );
+          return result;
+        }
+      }
       if ( !QFile::rename( tmpOutput, output ) )
       {
+        // Put the previous output back if we moved it; drop the failed temp.
+        if ( QFile::exists( backup ) )
+          QFile::rename( backup, output );
         result.status = WarpStatus::GdalError;
         result.errorMessage = QStringLiteral( "Failed to rename temp output to final path" );
         QFile::remove( tmpOutput );
         result.durationMs = static_cast<int>( timer.elapsed() );
         return result;
       }
+      QFile::remove( backup );
     }
     QFileInfo fi( output );
     result.outputBytes = fi.size();

@@ -57,13 +57,22 @@ bool QgisDesktopWindow::checkUnsavedChanges()
                 return false;
             if (res == QMessageBox::SaveAll)
             {
-                // Save all modified vector layers
+                // Save all modified vector layers — fail closed on commit
+                // errors (#1084): a dropped return used to discard edits silently.
                 for (QgsMapLayer *l : layers)
                 {
                     QgsVectorLayer *v = qobject_cast<QgsVectorLayer *>(l);
                     if (v && v->isEditable() && v->isModified())
                     {
-                        v->commitChanges();
+                        if ( !v->commitChanges() )
+                        {
+                            QMessageBox::warning(
+                                this, tr( "Save Edits" ),
+                                tr( "Failed to save edits on layer '%1':\n%2" )
+                                    .arg( v->name(),
+                                          v->commitErrors().join( QLatin1Char( '\n' ) ) ) );
+                            return false;
+                        }
                     }
                 }
             }
@@ -223,7 +232,19 @@ bool QgisDesktopWindow::confirmSaveEdits(QgsVectorLayer *vl)
         if (res == QMessageBox::Cancel)
             return false;
         if (res == QMessageBox::Save)
-            vl->commitChanges();
+        {
+            // #1084: match toggleEditing()/saveEdits() — surface commitErrors
+            // and abort the switch instead of pretending the save succeeded.
+            if ( !vl->commitChanges() )
+            {
+                QMessageBox::warning(
+                    this, tr( "Save Edits" ),
+                    tr( "Failed to save edits on layer '%1':\n%2" )
+                        .arg( vl->name(),
+                              vl->commitErrors().join( QLatin1Char( '\n' ) ) ) );
+                return false;
+            }
+        }
         else
             vl->rollBack();
     } else {

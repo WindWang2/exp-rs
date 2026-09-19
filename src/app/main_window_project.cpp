@@ -238,6 +238,20 @@ void QgisDesktopWindow::openProject()
             return;
         }
 
+        // #1083: probe-read into a throwaway project before destroying the live
+        // session. A corrupt/unreadable .qgs must not wipe layers, re-bind the
+        // governance store, or leave the lab recorder on the previous project.
+        {
+            QgsProject probe;
+            if ( !probe.read( filePath, Qgis::ProjectReadFlag::DontResolveLayers ) )
+            {
+                QMessageBox::warning(
+                    this, tr( "Open Project" ),
+                    tr( "Failed to open project:\n%1" ).arg( filePath ) );
+                return;
+            }
+        }
+
         if ( m_mapCanvas )
             m_mapCanvas->stopRenderingAndSettle();
 
@@ -257,6 +271,10 @@ void QgisDesktopWindow::openProject()
             return;
         }
 
+        // Session is empty now: stop lab recording so runs cannot land in the
+        // previous project's experiments.db while we finish (or fail) the load.
+        stopLabRecording();
+
         // Workspace Governance 3.0: the store must be open BEFORE the read so
         // the serializer can restore governed state from a v3 document (or run
         // the in-memory v1 migration into it).
@@ -268,6 +286,7 @@ void QgisDesktopWindow::openProject()
             QMessageBox::warning(
                 this, tr( "Open Project" ),
                 tr( "Failed to open project:\n%1" ).arg( filePath ) );
+            // Lab already stopped above; leave it disabled on the empty session.
             return;
         }
         refreshCanvasLayers();
