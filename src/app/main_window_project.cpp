@@ -327,18 +327,22 @@ void QgisDesktopWindow::saveProjectAs()
         tr("QGIS Project Files (*.qgs);;All Files (*)")
     );
     if (!filePath.isEmpty()) {
-        // Reopen the governance store against the new project file so governed
-        // state follows Save As instead of bleeding across projects.
-        if ( m_projectContext )
-            m_projectContext->reopenWorkspaceStore( filePath );
+        // #1097: QgsProject::write(filename) sets mFile BEFORE the write. Hold
+        // prior identity/governance until the write succeeds so a failure does
+        // not leave title/store pointing at a file that was never saved.
+        const QString previousPath = QgsProject::instance()->fileName();
         if ( QgsProject::instance()->write(filePath) )
         {
+            if ( m_projectContext )
+                m_projectContext->reopenWorkspaceStore( filePath );
             updateWindowTitle();
             refreshWorkspaceBrowser();
             statusBar()->showMessage(tr("Project saved to: %1").arg(filePath), 3000);
         }
         else
         {
+            QgsProject::instance()->setFileName( previousPath );
+            updateWindowTitle();
             QMessageBox::warning(
                 this, tr("Save Project"),
                 tr("Failed to save project to:\n%1").arg(filePath) );

@@ -60,6 +60,7 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDockWidget>
+#include <QMenu>
 #include <QMenuBar>
 #include <QSettings>
 #include <QSplitter>
@@ -202,9 +203,30 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
             dock->setWidget(widget);
             addDockWidget(Qt::RightDockWidgetArea, dock);
         }
-        // Plugin menus go on the detached bar (never QMainWindow::menuBar()).
-        for (QAction *action : plugin->menuActions()) {
-            appMenuBar()->addAction(action);
+        // Plugin menus go inside the Plugins QMenu (never as flat menubar
+        // actions: #1097 — flat top-level actions on the hidden menubar are
+        // invisible to the ribbon app-menu projection).
+        {
+            QMenu *pluginsMenu = nullptr;
+#ifdef SICNU_EMBED_PYTHON
+            if ( m_appInterface )
+                pluginsMenu = m_appInterface->pluginMenu();
+#endif
+            if ( !pluginsMenu )
+            {
+                for ( QAction *menuAction : appMenuBar()->actions() )
+                {
+                    if ( menuAction->menu() && menuAction->menu()->title() == tr( "Plugins" ) )
+                    {
+                        pluginsMenu = menuAction->menu();
+                        break;
+                    }
+                }
+            }
+            if ( !pluginsMenu )
+                pluginsMenu = appMenuBar()->addMenu( tr( "Plugins" ) );
+            for ( QAction *action : plugin->menuActions() )
+                pluginsMenu->addAction( action );
         }
         // Add plugin toolbar actions
         for (QAction *action : plugin->toolbarActions()) {

@@ -331,39 +331,56 @@ void QgisDesktopWindow::setupDockWidgets()
         m_windowMenu->addSeparator();
 
 #ifdef SICNU_EMBED_PYTHON
-        // Python Console (lazy-loaded)
-        QAction *pythonAction = m_windowMenu->addAction(tr("Python Console"));
-        pythonAction->setCheckable(true);
-        connect(pythonAction, &QAction::triggered, this, [this]() {
-            if (!m_pythonConsole) {
-                statusBar()->showMessage(tr("Initializing Python..."));
-                m_pythonConsole = new SicnuPythonConsole(m_pythonDock);
-                m_pythonDock->setWidget(m_pythonConsole.data());
-                statusBar()->showMessage(tr("Python ready"), 3000);
-            }
-            m_pythonDock->show();
-            m_pythonDock->raise();
-        });
+        // Python Console (lazy-loaded) — use the dock's own toggleViewAction so
+        // the Window menu stays in sync with the panel popup (#1097).
+        {
+            QAction *pythonAction = m_pythonDock->toggleViewAction();
+            pythonAction->setText( tr( "Python Console" ) );
+            m_windowMenu->addAction( pythonAction );
+            connect( pythonAction, &QAction::toggled, this, [this]( bool visible ) {
+                if ( !visible )
+                    return;
+                if ( !m_pythonConsole )
+                {
+                    statusBar()->showMessage( tr( "Initializing Python..." ) );
+                    QWidget *placeholder = m_pythonDock->widget();
+                    m_pythonConsole = new SicnuPythonConsole( m_pythonDock );
+                    m_pythonDock->setWidget( m_pythonConsole.data() );
+                    if ( placeholder && placeholder != m_pythonConsole.data() )
+                        placeholder->deleteLater();
+                    statusBar()->showMessage( tr( "Python ready" ), 3000 );
+                }
+                m_pythonDock->raise();
+            } );
+        }
 
         // Python Script Editor (lazy-loaded)
-        QAction *scriptEditorAction = m_windowMenu->addAction(tr("Python Script Editor"));
-        scriptEditorAction->setCheckable(true);
-        connect(scriptEditorAction, &QAction::triggered, this, [this]() {
-            if (!m_pythonScriptEditor) {
-                statusBar()->showMessage(tr("Initializing Python script editor..."));
-                m_pythonScriptEditor = new Sicnu::PythonScriptEditor(m_pythonScriptEditorDock);
-                connect(m_pythonScriptEditor.data(), &Sicnu::PythonScriptEditor::statusMessage,
-                        this, [this](const QString &message) {
-                            statusBar()->showMessage(message, 3000);
-                        });
-                m_pythonScriptEditorDock->setWidget(m_pythonScriptEditor.data());
-                statusBar()->showMessage(tr("Python script editor ready"), 3000);
-            }
-            m_pythonScriptEditorDock->show();
-            m_pythonScriptEditorDock->raise();
-        });
+        {
+            QAction *scriptEditorAction = m_pythonScriptEditorDock->toggleViewAction();
+            scriptEditorAction->setText( tr( "Python Script Editor" ) );
+            m_windowMenu->addAction( scriptEditorAction );
+            connect( scriptEditorAction, &QAction::toggled, this, [this]( bool visible ) {
+                if ( !visible )
+                    return;
+                if ( !m_pythonScriptEditor )
+                {
+                    statusBar()->showMessage( tr( "Initializing Python script editor..." ) );
+                    QWidget *placeholder = m_pythonScriptEditorDock->widget();
+                    m_pythonScriptEditor = new Sicnu::PythonScriptEditor( m_pythonScriptEditorDock );
+                    connect( m_pythonScriptEditor.data(), &Sicnu::PythonScriptEditor::statusMessage,
+                             this, [this]( const QString &message ) {
+                                 statusBar()->showMessage( message, 3000 );
+                             } );
+                    m_pythonScriptEditorDock->setWidget( m_pythonScriptEditor.data() );
+                    if ( placeholder && placeholder != m_pythonScriptEditor.data() )
+                        placeholder->deleteLater();
+                    statusBar()->showMessage( tr( "Python script editor ready" ), 3000 );
+                }
+                m_pythonScriptEditorDock->raise();
+            } );
+        }
 
-        m_windowMenu->addSeparator();
+m_windowMenu->addSeparator();
 #endif
         QAction *resetLayoutAction = m_windowMenu->addAction(tr("Reset Layout"));
         connect(resetLayoutAction, &QAction::triggered, this, &QgisDesktopWindow::resetPanelLayout);

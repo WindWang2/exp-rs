@@ -48,23 +48,31 @@ QDate parseIsoDate( const QString &text )
         if ( d.isValid() )
             return d;
     }
+    // Try every 8-digit run (not only the first) so a leading non-date digit
+    // blob does not hide a later yyyyMMdd token (#1097).
     static const QRegularExpression compact( QStringLiteral( "\\d{8}" ) );
-    match = compact.match( text );
-    if ( match.hasMatch() )
+    auto it = compact.globalMatch( text );
+    while ( it.hasNext() )
     {
+        match = it.next();
         const QDate d = QDate::fromString( match.captured( 0 ), QStringLiteral( "yyyyMMdd" ) );
         if ( d.isValid() )
             return d;
     }
-    static const QRegularExpression ordinal( QStringLiteral( "\\d{7}" ) );
+    // #1097: ordinal YYYYDDD must be a standalone 7-digit token — never a
+    // prefix/infix of a longer digit run (e.g. t12345678_....tif).
+    static const QRegularExpression ordinal( QStringLiteral( "(?<!\\d)\\d{7}(?!\\d)" ) );
     match = ordinal.match( text );
     if ( match.hasMatch() )
     {
         const int year = match.captured( 0 ).left( 4 ).toInt();
         const int doy = match.captured( 0 ).mid( 4 ).toInt();
-        const QDate candidate = QDate( year, 1, 1 ).addDays( doy - 1 );
-        if ( candidate.isValid() && candidate.year() == year )
-            return candidate;
+        if ( doy >= 1 && doy <= 366 )
+        {
+            const QDate candidate = QDate( year, 1, 1 ).addDays( doy - 1 );
+            if ( candidate.isValid() && candidate.year() == year )
+                return candidate;
+        }
     }
     return QDate();
 }

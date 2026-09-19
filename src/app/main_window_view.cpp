@@ -200,17 +200,21 @@ void QgisDesktopWindow::openClassificationWindow()
                  } );
 
         // Wave E: register session map as secondary Display View (DM owns bridge).
-        if ( m_projectContext
-             && !bindSessionSecondaryView( m_projectContext.get(),
-                                           m_classifyWindow->sessionMap(),
-                                           m_classifyViewId ) )
+        // #1097: null context must NOT fall into the success branch (would
+        // registerLinkedVisualView with a null id).
+        if ( m_projectContext )
         {
-            statusBar()->showMessage(
-                tr( "Classification session not registered as a display view (using session-local layer stack)" ), 4000 );
-        }
-        else
-        {
-            registerLinkedVisualView( m_classifyViewId );
+            if ( !bindSessionSecondaryView( m_projectContext.get(),
+                                            m_classifyWindow->sessionMap(),
+                                            m_classifyViewId ) )
+            {
+                statusBar()->showMessage(
+                    tr( "Classification session not registered as a display view (using session-local layer stack)" ), 4000 );
+            }
+            else
+            {
+                registerLinkedVisualView( m_classifyViewId );
+            }
         }
     }
     m_classifyWindow->show();
@@ -252,17 +256,20 @@ void QgisDesktopWindow::openObiaWindow()
                  } );
 
         // Wave E: register OBIA session map as secondary Display View.
-        if ( m_projectContext
-             && !bindSessionSecondaryView( m_projectContext.get(),
-                                           obia->sessionMap(),
-                                           m_obiaViewId ) )
+        // #1097: null context must NOT fall into the success branch.
+        if ( m_projectContext )
         {
-            statusBar()->showMessage(
-                tr( "OBIA session not registered as a display view (using session-local layer stack)" ), 4000 );
-        }
-        else
-        {
-            registerLinkedVisualView( m_obiaViewId );
+            if ( !bindSessionSecondaryView( m_projectContext.get(),
+                                            obia->sessionMap(),
+                                            m_obiaViewId ) )
+            {
+                statusBar()->showMessage(
+                    tr( "OBIA session not registered as a display view (using session-local layer stack)" ), 4000 );
+            }
+            else
+            {
+                registerLinkedVisualView( m_obiaViewId );
+            }
         }
         m_obiaWindow = obia;
     }

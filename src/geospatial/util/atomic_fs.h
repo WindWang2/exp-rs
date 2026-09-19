@@ -35,7 +35,7 @@ std::vector<std::string> sidecarsFor( const std::string &mainPath );
 bool fileExists( const std::string &path );
 
 /// Generates a unique staging path in the same directory as target:
-/// "<name>.<pid>.<counter>.tmp".
+/// "<name>.<pid>.<counter>.<rand>.tmp<ext>", claimed with O_EXCL / CREATE_NEW.
 std::string stagedPathFor( const std::string &targetPath );
 
 /// Flushes file contents + metadata to stable storage. Throws GeoError(IoError)
