@@ -1163,6 +1163,9 @@ QVariantMap datasetQa( const QVariantMap &args )
     json.insert( QStringLiteral( "scanned" ), inputs.scannedSamples );
     json.insert( QStringLiteral( "scan_capped" ), inputs.scanCapped );
     json.insert( QStringLiteral( "sample_count" ), inputs.totalSamples );
+    // #1030: a declared schema CRS with zero sample CRS in evidence is Unknown
+    // (not Pass) — surface the evidence count so the verdict is auditable.
+    json.insert( QStringLiteral( "distinct_sample_crs" ), int( inputs.distinctSampleCrs.size() ) );
     return toVariant( json );
 }
 

@@ -417,6 +417,14 @@ private slots:
     void setProjectCrs();
 
 private:
+    /**
+     * Allocate the CommandRegistry and register the shell commands.
+     * MUST run before setupMenu(): the menu builds registry-backed items
+     * (project.new, map.pan, ...) through addCmd (#1031 F-1031-P0-registry —
+     * the registry used to be created after the menus, null-dereferencing
+     * on the first addCmd). Idempotent.
+     */
+    void setupCommandRegistry();
     void setupMenu();
     void setupToolbars();
     void setupDockWidgets();

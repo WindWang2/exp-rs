@@ -222,7 +222,9 @@ void registerShellCommands( sicnu::app::CommandRegistry *registry, QgisDesktopWi
     {
         RS_CMD( d, "map.pan", QObject::tr( "Pan" ), QObject::tr( "Pans the map." ),
                 "p_n", QObject::tr( "Map" ) );
-        d.shortcut = QKeySequence( QStringLiteral( "H" ) );
+        // #1031 F-1031-P1-letterkey: "H" was a bare letter hosted on the
+        // window, so typing in the Copilot triggered a pan. Modified keys only.
+        d.shortcut = QKeySequence( QStringLiteral( "Ctrl+P" ) );
         d.handler = [window] { window->panMap(); };
         registry->registerCommand( d );
     }

@@ -146,11 +146,21 @@ void openComparisonForPaths( QgisDesktopWindow *window, const QString &pathA,
 
 } // namespace
 
+void QgisDesktopWindow::setupCommandRegistry()
+{
+    if ( m_commandRegistry )
+        return; // idempotent: menus may request it before the workbench setup
+    m_commandRegistry = new sicnu::app::CommandRegistry( this );
+    registerShellCommands( m_commandRegistry, this );
+}
+
 void QgisDesktopWindow::setupWorkbenchInfrastructure()
 {
     m_workbenchHost = new sicnu::app::WorkbenchHost( this );
     m_selectionContext = new sicnu::app::SelectionContext( this );
-    m_commandRegistry = new sicnu::app::CommandRegistry( this );
+    // Already created for setupMenu() — keep the same instance and its
+    // registered commands (#1031 F-1031-P0-registry).
+    setupCommandRegistry();
 
     // Workbench 8.0: in-flight fact for ContextFacts / suggestedNextAction.
     // The predicate reads TaskCenter's authoritative task set on the GUI
@@ -352,8 +362,11 @@ void QgisDesktopWindow::setupWorkbenchInfrastructure()
     }
 
     // ── Command registry ─────────────────────────────────────────────
+    // (the registry itself and the shell commands were created by
+    //  setupCommandRegistry() before setupMenu(); only the context binding,
+    //  help composition and palette happen here, once the selection context
+    //  exists.)
     m_commandRegistry->setSnapshotProvider( [this] { return m_selectionContext->snapshot(); } );
-    registerShellCommands( m_commandRegistry, this );
     connect( m_selectionContext, &sicnu::app::SelectionContext::changed, this,
              [this]( const sicnu::app::SelectionContextSnapshot & ) {
                  m_commandRegistry->refreshAll();

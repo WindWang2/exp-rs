@@ -288,10 +288,16 @@ void QgisDesktopWindow::saveProject()
 {
     if (QgsProject::instance()->fileName().isEmpty()) {
         saveProjectAs();
-    } else {
-        QgsProject::instance()->write();
+    } else if (QgsProject::instance()->write()) {
         updateWindowTitle();
         statusBar()->showMessage(tr("Project saved"), 3000);
+    } else {
+        // #1052: a failed write must never be reported as success — the user
+        // would exit believing the work persisted.
+        QMessageBox::warning(
+            this, tr("Save Project"),
+            tr("Failed to save project:\n%1").arg(QgsProject::instance()->fileName()) );
+        updateWindowTitle();
     }
 }
 
@@ -306,10 +312,18 @@ void QgisDesktopWindow::saveProjectAs()
         // state follows Save As instead of bleeding across projects.
         if ( m_projectContext )
             m_projectContext->reopenWorkspaceStore( filePath );
-        QgsProject::instance()->write(filePath);
-        updateWindowTitle();
-        refreshWorkspaceBrowser();
-        statusBar()->showMessage(tr("Project saved to: %1").arg(filePath), 3000);
+        if ( QgsProject::instance()->write(filePath) )
+        {
+            updateWindowTitle();
+            refreshWorkspaceBrowser();
+            statusBar()->showMessage(tr("Project saved to: %1").arg(filePath), 3000);
+        }
+        else
+        {
+            QMessageBox::warning(
+                this, tr("Save Project"),
+                tr("Failed to save project to:\n%1").arg(filePath) );
+        }
     }
 }
 

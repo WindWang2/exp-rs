@@ -7,6 +7,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <QColor>
+#include <QDir>
 #include <QFile>
 #include <QTemporaryDir>
 
@@ -861,4 +862,39 @@ TEST_CASE(
   REQUIRE( resKm.errorMessage.isEmpty() );
   CHECK( resKm.foldAccuracies.size() > 0 );
   CHECK( resKm.meanAccuracy > 0.8 );
+}
+
+TEST_CASE(
+  "Classification pipeline: probability finalize failure is never reported as success",
+  "[classify][pipeline][probability][1052]" )
+{
+  QTemporaryDir tmp;
+  REQUIRE( tmp.isValid() );
+
+  const QString srcPath = tmp.path() + "/src.tif";
+  createThreeRegionRaster( srcPath, 32, 32 );
+
+  cv::Mat X, y;
+  makeTraining( X, y );
+
+  RsClassificationPipeline::Config cfg = baseConfig( srcPath, tmp.path() + "/out.tif" );
+  cfg.backend.reset( new RsClassifierNormalBayes );
+  cfg.trainX = X;
+  cfg.trainY = y;
+
+  // Occupy the probability output path with a directory: the final rename
+  // cannot succeed, which used to be swallowed and reported as success.
+  const QString probPath = tmp.path() + "/prob.tif";
+  REQUIRE( QDir().mkpath( probPath ) );
+  cfg.probabilityOutput = probPath;
+
+  const RsClassificationPipelineResult res = RsClassificationPipeline::run( std::move( cfg ) );
+  INFO( res.errorMessage.toStdString() );
+  REQUIRE_FALSE( res.ok );
+  REQUIRE( res.error == RsClassificationPipelineResult::Error::OutputCreateFailed );
+  REQUIRE_FALSE( res.errorMessage.isEmpty() );
+  // No stale temp raster is left behind as if it were the product.
+  const QStringList leftovers =
+    QDir( tmp.path() ).entryList( QStringList() << QStringLiteral( "prob.tif.tmp*" ), QDir::Files );
+  CHECK( leftovers.isEmpty() );
 }

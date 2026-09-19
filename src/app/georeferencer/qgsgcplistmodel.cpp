@@ -70,8 +70,11 @@ void QgsGCPListModel::setTargetCrs( const QgsCoordinateReferenceSystem &targetCr
   mTransformContext = context;
   if ( rowCount() > 0 )
   {
+    // #1052: DestCol/DestRow are derived from mTargetCrs as well (they go
+    // through mDestToPixel), so the whole destination half of the table is
+    // stale after a CRS change — not just the map-coordinate columns.
     emit dataChanged( index( 0, static_cast<int>( Column::DestMapX ) ),
-                      index( rowCount() - 1, static_cast<int>( Column::DestMapY ) ) );
+                      index( rowCount() - 1, static_cast<int>( Column::DestRow ) ) );
   }
   emit headerDataChanged( Qt::Horizontal, 0, columnCount() - 1 );
 }

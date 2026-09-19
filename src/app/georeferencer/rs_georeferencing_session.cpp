@@ -53,17 +53,19 @@ RsGeoreferencingSession::~RsGeoreferencingSession()
     // (reachable by closing the georeferencer mid-warp). Bounded-wait for
     // the executor to observe the cancellation; on pathological timeout
     // prefer a leak over a crash.
-    if ( mWarpExecutorActive.load() )
+    if ( mWarpExecutorState->active.load() )
     {
       // #650: wait on the executor's completion semaphore instead of spinning
       // the GUI thread with 500x10 ms sleeps. The semaphore is released when
       // the job's ActiveGuard unwinds; a pathological timeout still prefers a
       // leak over a crash (#626).
-      if ( !mWarpExecutorDone.tryAcquire( 1, 5000 ) )
+      if ( !mWarpExecutorState->done.tryAcquire( 1, 5000 ) )
         QgsLogger::warning( "Georeferencing warp did not stop within 5s of close; "
                             "deferring its cleanup" );
     }
-    if ( !mWarpExecutorActive.load( std::memory_order_acquire ) )
+    // #1050: the liveness pair is shared with the worker's ActiveGuard, so a
+    // timeout leak keeps it valid even though this session is being destroyed.
+    if ( !mWarpExecutorState->active.load( std::memory_order_acquire ) )
     {
       delete mPendingWarpTask;
       mPendingWarpTask = nullptr;
@@ -168,8 +170,10 @@ void RsGeoreferencingSession::syncWorkflowGcps()
 
 void RsGeoreferencingSession::setSourceRasterPath( const QString &path )
 {
+  const bool changed = mSourcePath != path;
   mSourcePath = path;
-  markDirty();
+  if ( changed )
+    markDirty();
   if ( isWorkflowMirrorActive() && !path.isEmpty() )
   {
     mWorkflowRuntime.setArtifact( mWorkflowSessionId, "source_raster", path.toStdString() );
@@ -181,8 +185,10 @@ void RsGeoreferencingSession::setSourceRasterPath( const QString &path )
 void RsGeoreferencingSession::setTransformMethod(
   QgsGcpTransformerInterface::TransformMethod method )
 {
+  const bool changed = mMethod != method;
   mMethod = method;
-  markDirty();
+  if ( changed )
+    markDirty();
 }
 
 void RsGeoreferencingSession::setDemPath( const QString &path )
@@ -424,24 +430,26 @@ long RsGeoreferencingSession::startWarpTask( const RsGeorefWarpSnapshot &snap )
   mPendingSnap = snap;
   mPendingWarpTask = task;
 
-  auto jobExec = [task, this]( const sicnu::jobs::JobRequest &request,
-                        sicnu::operators::RSOperatorContext &ctx ) {
+  // #1050: capture the shared liveness state, not the session itself — the
+  // worker can outlive the session (bounded-wait timeout leak, #626).
+  auto jobExec = [task, state = mWarpExecutorState](
+                   const sicnu::jobs::JobRequest &request,
+                   sicnu::operators::RSOperatorContext &ctx ) {
     struct ActiveGuard
     {
-      std::atomic<bool> &flag;
-      QSemaphore &done;
+      std::shared_ptr<WarpExecutorState> state;
       ~ActiveGuard()
       {
-        flag.store( false, std::memory_order_release );
-        done.release();
+        state->active.store( false, std::memory_order_release );
+        state->done.release();
       }
-    } activeGuard{ mWarpExecutorActive, mWarpExecutorDone };
+    } activeGuard{ state };
     // Drain stale counts so a retry's completion signal cannot be satisfied
     // by a previous run's release.
-    while ( mWarpExecutorDone.tryAcquire() )
+    while ( state->done.tryAcquire() )
     {
     }
-    mWarpExecutorActive.store( true, std::memory_order_release );
+    state->active.store( true, std::memory_order_release );
     ctx.logInfo( "Georef warp" );
     ctx.reportProgress( 0.0, "Warping" );
     const bool ok = task->run();

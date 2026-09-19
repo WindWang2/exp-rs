@@ -112,6 +112,10 @@ QgisDesktopWindow::QgisDesktopWindow(QWidget *parent)
     setupMapCanvas();
 
     qDebug() << "Setting up menu...";
+    // The registry is the menu's action authority (setupMenu's addCmd), so it
+    // has to exist first (#1031 F-1031-P0-registry: it used to be allocated in
+    // setupWorkbenchInfrastructure, long after the menus were built).
+    setupCommandRegistry();
     setupMenu(); // builds detached QMenuBar (action host only — not shown)
     qDebug() << "Setting up toolbars...";
     setupToolbars();

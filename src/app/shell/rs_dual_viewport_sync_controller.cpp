@@ -6,6 +6,7 @@
 #include "rs_dual_viewport_sync_controller.h"
 
 #include "qgis.h"
+#include "qgscoordinatetransform.h"
 #include "qgsmapcanvas.h"
 #include "qgsrectangle.h"
 
@@ -161,12 +162,16 @@ void RsDualViewportSyncController::applySync( QgsMapCanvas *source, QgsMapCanvas
                 QgsCoordinateTransform ct( source->mapSettings().destinationCrs(), target->mapSettings().destinationCrs(), QgsProject::instance() );
                 sourceExtent = ct.transformBoundingBox( sourceExtent );
             }
-            catch ( ... )
+            catch ( const QgsCsException & )
             {
-                // #1005: extent stays in the source canvas CRS — say so
-                // instead of silently syncing wrong coordinates.
+                // #1030: fail closed. Applying a source-CRS extent on a
+                // destination-CRS canvas is the silent-wrong-spatial-product
+                // class #1005 was about; leave this view alone instead.
+                ++mStats.transformFailures;
                 qWarning().noquote() << "dual viewport extent sync: CRS transform failed;"
-                                     << "applying the source-canvas extent untransformed";
+                                     << "leaving the target view untouched";
+                mApplying = false;
+                return;
             }
         }
         if ( target->extent() != sourceExtent )
@@ -202,12 +207,14 @@ void RsDualViewportSyncController::applySync( QgsMapCanvas *source, QgsMapCanvas
                 QgsCoordinateTransform ct( source->mapSettings().destinationCrs(), target->mapSettings().destinationCrs(), QgsProject::instance() );
                 sourceCenter = ct.transform( sourceCenter );
             }
-            catch ( ... )
+            catch ( const QgsCsException & )
             {
-                // #1005: center stays in the source canvas CRS — say so
-                // instead of silently panning to wrong coordinates.
+                // #1030: fail closed — never pan a target by source-CRS deltas.
+                ++mStats.transformFailures;
                 qWarning().noquote() << "dual viewport center sync: CRS transform failed;"
-                                     << "applying the source-canvas center untransformed";
+                                     << "leaving the target view untouched";
+                mApplying = false;
+                return;
             }
         }
         const QgsRectangle currentTargetExtent = target->extent();
