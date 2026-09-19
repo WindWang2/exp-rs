@@ -172,24 +172,68 @@ bool PluginHostProcessRuntime::loadPlugin( const PluginRecord &record, HostServi
     // host cap its own channel per direction (a cap applied earlier could
     // have stranded a large plugin.load frame below the worker's knowledge).
     session->applyQuotaFrameCaps();
-    const Json::Value &registered = outcome.result["registered"];
+
+    // The registration report is WORKER-CONTROLLED JSON (#1038 pattern at
+    // the host boundary): a compromised/buggy worker can send any shape.
+    // Every array and every entry is type-checked before use; a malformed
+    // report is a typed load failure (worker torn down), never a
+    // Json::LogicError/assert escaping into the host's load path.
+    const Json::Value emptyReport( Json::objectValue );
+    const Json::Value &registered =
+        outcome.result.isObject() ? outcome.result.get( "registered", emptyReport )
+                                  : emptyReport;
+    const auto refuseMalformedReport = [&]() {
+        log.add( PluginDiagnosticCode::IpcProtocolError, PluginDiagnosticSeverity::Error,
+                 "worker registration report is malformed (non-object result, non-string ids "
+                 "or non-array sections); plugin.load refused",
+                 pluginId );
+        session->shutdown( 5000, log );
+        return false;
+    };
+    if ( !outcome.result.isObject()
+         || ( outcome.result.isMember( "registered" ) && !registered.isObject() ) )
+        return refuseMalformedReport();
+    const auto stringArray = [&]( const char *key, std::vector<std::string> &out ) -> bool {
+        if ( !registered.isObject() )
+            return false;
+        const Json::Value &entries = registered.get( key, Json::Value( Json::arrayValue ) );
+        if ( !entries.isArray() )
+            return false;
+        for ( const Json::Value &entry : entries )
+        {
+            if ( !entry.isString() )
+                return false;
+            out.push_back( entry.asString() );
+        }
+        return true;
+    };
+    std::vector<std::string> operatorIds;
+    std::vector<std::string> providerIds;
+    std::vector<std::string> frameworkNames;
+    std::vector<std::string> toolIds;
+    if ( !stringArray( "operators", operatorIds )
+         || !stringArray( "dataProviders", providerIds )
+         || !stringArray( "modelRuntimes", frameworkNames )
+         || !stringArray( "agentTools", toolIds ) )
+        return refuseMalformedReport();
+
     bool registrationsOk = true;
-    for ( const Json::Value &operatorId : registered["operators"] )
+    for ( const std::string &operatorId : operatorIds )
     {
-        auto factory = [entry, id = operatorId.asString()]()
+        auto factory = [entry, id = operatorId]()
             -> std::unique_ptr<sicnu::operators::RSOperator> {
             return makeHostProcessOperatorProxy( entry, entry->pluginId, id );
         };
-        if ( !sink.registerOperatorFactory( pluginId, operatorId.asString(), factory ) )
+        if ( !sink.registerOperatorFactory( pluginId, operatorId, factory ) )
             registrationsOk = false;
     }
-    for ( const Json::Value &providerId : registered["dataProviders"] )
+    for ( const std::string &providerId : providerIds )
     {
-        auto provider = makeHostProcessDataProviderProxy( entry, pluginId, providerId.asString() );
-        if ( !sink.registerDataProvider( pluginId, providerId.asString(), provider ) )
+        auto provider = makeHostProcessDataProviderProxy( entry, pluginId, providerId );
+        if ( !sink.registerDataProvider( pluginId, providerId, provider ) )
             registrationsOk = false;
     }
-    for ( const Json::Value &framework : registered["modelRuntimes"] )
+    for ( const std::string &framework : frameworkNames )
     {
         // Capability gate (9.0): the worker reports frameworks the plugin
         // REGISTERED; the host refuses (typed E5005) any framework the
@@ -200,28 +244,28 @@ bool PluginHostProcessRuntime::loadPlugin( const PluginRecord &record, HostServi
         // record pointer would dangle across a concurrent refresh.
         const Json::Value access =
             exprs::PluginRegistry::instance().accessDeclarationFor( pluginId );
-        if ( !exprs::modelFrameworkAllowed( access, framework.asString() ) )
+        if ( !exprs::modelFrameworkAllowed( access, framework ) )
         {
             log.add( PluginDiagnosticCode::PermissionDenied, PluginDiagnosticSeverity::Error,
-                     "model framework '" + framework.asString()
+                     "model framework '" + framework
                          + "' is outside the declared access model (E5005)",
                      pluginId );
             session->shutdown( 5000, log );
             return false;
         }
-        auto factory = [entry, frameworkName = framework.asString()](
+        auto factory = [entry, frameworkName = framework](
                            const PluginModelRequestV1 &request,
                            std::string &error ) -> PluginModelRuntimePtrV1 {
             return makeHostProcessModelRuntimeProxy( entry, entry->pluginId, frameworkName,
                                                      request, error );
         };
-        if ( !sink.registerModelRuntime( pluginId, framework.asString(), factory ) )
+        if ( !sink.registerModelRuntime( pluginId, framework, factory ) )
             registrationsOk = false;
     }
-    for ( const Json::Value &toolId : registered["agentTools"] )
+    for ( const std::string &toolId : toolIds )
     {
-        auto tool = makeHostProcessAgentToolProxy( entry, pluginId, toolId.asString() );
-        if ( !sink.registerAgentTool( pluginId, toolId.asString(), tool ) )
+        auto tool = makeHostProcessAgentToolProxy( entry, pluginId, toolId );
+        if ( !sink.registerAgentTool( pluginId, toolId, tool ) )
             registrationsOk = false;
     }
     if ( !registrationsOk )
@@ -328,16 +372,25 @@ bool PluginHostProcessRuntime::unloadPlugin( const std::string &pluginId,
                                              PluginDiagnosticLog &log )
 {
     std::shared_ptr<PluginHostProcessSession> session;
+    // Own the ENTRY across the lock: erasing the map can drop the last
+    // reference, and a lock_guard destructing after its mutex was destroyed
+    // is UB (the Debug CRT aborts with "mutex destroyed while busy"). Copying
+    // the shared_ptr first keeps the mutex alive exactly as long as it is
+    // locked, and lets the lock scope end BEFORE the erase.
+    std::shared_ptr<PluginHostSessionEntry> entry;
     {
         std::lock_guard<std::mutex> lock( mMutex );
         auto iterator = mSessions.find( pluginId );
         if ( iterator == mSessions.end() )
             return true; // nothing hosted (failed load) — nothing to tear down
+        entry = iterator->second;
+        mSessions.erase( iterator );
+    }
+    {
         // respawn() publishes entry->session under entry.mutex; read it under
         // the SAME mutex (a concurrent shared_ptr copy vs store is UB).
-        std::lock_guard<std::mutex> entryLock( iterator->second->mutex );
-        session = iterator->second->session;
-        mSessions.erase( iterator );
+        std::lock_guard<std::mutex> entryLock( entry->mutex );
+        session = entry->session;
     }
     const bool shutdownOk = session->shutdown( 10000, log );
     // M3 evidence trail: keep the post-shutdown process-group probe result
@@ -476,9 +529,53 @@ Json::Value PluginHostProcessRuntime::describeUiSchema( const std::string &plugi
                  "ui.describe failed: " + outcome.error.message, pluginId );
         return result;
     }
-    result["ok"] = true;
-    result["schema"] = outcome.result["schema"];
-    return result;
+    // HOST-SIDE REVALIDATION (#1039): the worker validated the schema before
+    // answering, but the worker is UNTRUSTED — everything crossing the
+    // process boundary gets validated again HERE, where the trust boundary
+    // actually is. A hostile or buggy schema that skipped the worker's check
+    // (compromised worker, protocol bug, future worker revision) becomes a
+    // typed E5005 refusal; the GUI-thread renderer is never handed an
+    // unvalidated tree. The refusal also bounds recursion depth, control
+    // count and field types before any widget is built.
+    {
+        Json::Value rawSchema;
+        if ( outcome.result.isObject() )
+            rawSchema = outcome.result[ "schema" ];
+        exprs::PluginUiSchemaParseResult validated;
+        bool validationThrew = false;
+        std::string throwMessage;
+        try
+        {
+            validated = exprs::validatePluginUiSchema( rawSchema );
+        }
+        catch ( const std::exception &exception )
+        {
+            validationThrew = true;
+            throwMessage = exception.what();
+        }
+        if ( validationThrew || !validated.ok() )
+        {
+            result["ok"] = false;
+            result["code"] = "E5005";
+            result["error"] = validationThrew
+                                  ? "worker UI schema validation threw: " + throwMessage
+                                  : "worker UI schema failed host-side validation";
+            if ( !validationThrew )
+            {
+                Json::Value details( Json::arrayValue );
+                for ( const std::string &error : validated.errors )
+                    details.append( error );
+                result["details"] = details;
+            }
+            log.add( PluginDiagnosticCode::TrustRejected, PluginDiagnosticSeverity::Error,
+                     result["error"].asString(), pluginId );
+            return result;
+        }
+        result["ok"] = true;
+        // Render the VALIDATED copy, never the raw worker bytes.
+        result["schema"] = validated.normalized;
+        return result;
+    }
 }
 
 Json::Value PluginHostProcessRuntime::invokeUi( const std::string &pluginId,
@@ -550,8 +647,12 @@ Json::Value PluginHostProcessRuntime::invokeUi( const std::string &pluginId,
             result["code"] = outcome.error.code;
         return result;
     }
+    // The worker is untrusted: the envelope's own fields are read with
+    // guards (a non-object result or a wrong-typed response degrades to a
+    // typed no-op instead of asserting/throwing).
     result["ok"] = true;
-    result["response"] = outcome.result["response"];
+    result["response"] = outcome.result.isObject() ? outcome.result.get( "response", Json::Value() )
+                                                   : Json::Value();
     return result;
 }
 

@@ -9021,11 +9021,25 @@ set_target_properties(isolation_plugin PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/plugin_fixtures/isolation_plugin
 )
 
+# #1039/#1040 adversarial worker: speaks the protocol without validating, so
+# the HOST-side trust boundary (schema revalidation, bounded rendering,
+# response-contract extraction) has a real hostile peer to defend against.
+add_executable(exprs_hostile_ui_worker fixtures/hostile_ui_worker/hostile_ui_worker.cpp)
+target_include_directories(exprs_hostile_ui_worker PRIVATE
+  ${CMAKE_SOURCE_DIR}/src
+  ${CMAKE_SOURCE_DIR}/src/sdk
+)
+target_link_libraries(exprs_hostile_ui_worker PRIVATE sicnu_sdk)
+set_target_properties(exprs_hostile_ui_worker PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 sicnu_add_sdk_test(test_plugin_host_process)
 target_link_libraries(test_plugin_host_process PRIVATE sicnu_plugins_hostprocess sicnu_operators_core)
 target_compile_definitions(test_plugin_host_process PRIVATE
   SICNU_TEST_ISOLATION_PLUGIN_DIR="${CMAKE_BINARY_DIR}/plugin_fixtures/isolation_plugin"
   SICNU_TEST_PLUGIN_HOST_WORKER="$<TARGET_FILE:exprs_plugin_host_worker>"
+  SICNU_TEST_HOSTILE_UI_WORKER="$<TARGET_FILE:exprs_hostile_ui_worker>"
 )
 
 sicnu_add_test(test_plugin_manifest)

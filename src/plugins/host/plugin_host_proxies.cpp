@@ -146,13 +146,20 @@ public:
         // Exactly ONE bounded recovery per call, whether the worker was
         // already dead on entry or died mid-execution (the restart
         // policy inside the runtime bounds total respawns per window).
+        // The ladder is counted by PHASE, not by loop iteration: a stale
+        // liveness observation (death not yet confirmed when the request
+        // failed) must not consume the retry, otherwise recovery can land on
+        // the last iteration and exit without ever executing against the
+        // fresh worker — leaving a live worker behind a "crashed" error.
+        // Ladder: execute -> (channel closed) -> [blind retries until death
+        // is confirmed] -> recover ONCE -> execute -> typed E6005.
         // Locking note: entry.mutex only guards the session SNAPSHOT (respawn
         // swaps it in place); the request itself runs UNLOCKED so protocol
         // 1.1 concurrency is real — the session is refcounted, so a respawn
         // can never invalidate the shared_ptr we are using (its channel
         // simply fails typed when the old worker dies).
         bool recovered = false;
-        for ( int attempt = 0; attempt < 2; ++attempt )
+        for ( int guard = 0; guard < 8; ++guard )
         {
             std::shared_ptr<PluginHostProcessSession> session;
             {
@@ -164,7 +171,7 @@ public:
                 if ( recovered || !tryRecovery( *mEntry ) )
                     throwUnavailable( "crashed or exited (E6005); restart policy exhausted" );
                 recovered = true;
-                continue;
+                continue; // the recovered session is executed on the next lap
             }
 
             Json::Value requestParams( Json::objectValue );
@@ -186,7 +193,16 @@ public:
             switch ( outcome.status )
             {
             case IpcChannel::Outcome::Status::Ok:
-                return outcome.result["result"];
+                // Worker-controlled result: a non-object envelope result is a
+                // typed protocol failure, never an asserting operator[] on
+                // remote JSON (#1038 class).
+                if ( !outcome.result.isObject() )
+                {
+                    throw sicnu::operators::RSOperatorError(
+                        sicnu::operators::ErrorCode::ComputationError,
+                        "worker returned a non-object operator result" );
+                }
+                return outcome.result.get( "result", Json::Value() );
             case IpcChannel::Outcome::Status::Error:
             {
                 if ( outcome.error.code == "E6009" )
@@ -220,9 +236,12 @@ public:
                     "worker protocol violation (E6002/E6003): " + outcome.error.message );
             case IpcChannel::Outcome::Status::ChannelClosed:
             default:
-                // Worker died mid-execution: the next loop iteration
-                // applies ONE bounded recovery (or refuses typed if the
-                // restart policy is exhausted).
+                // Worker died mid-execution. Once the RECOVERED generation
+                // dies there is nothing left to try: fail typed immediately
+                // (a further lap could otherwise observe the death late and
+                // respawn again behind the caller's back).
+                if ( recovered )
+                    throwUnavailable( "crashed again after recovery (E6005)" );
                 continue;
             }
         }
@@ -262,7 +281,11 @@ public:
         auto outcome = session->request( kExecuteAgentTool, requestParams,
                                          effectiveDeadline( mEntry->quota, 0 ) );
         if ( outcome.status == IpcChannel::Outcome::Status::Ok )
+        {
+            if ( !outcome.result.isObject() )
+                return typedFailure( "E6002", "worker returned a non-object tool envelope" );
             return outcome.result;
+        }
         Json::Value envelope( Json::objectValue );
         envelope["success"] = false;
         Json::Value error( Json::objectValue );
@@ -308,7 +331,11 @@ public:
         auto outcome = session->request( method, params,
                                          effectiveDeadline( mEntry->quota, 0 ) );
         if ( outcome.status == IpcChannel::Outcome::Status::Ok )
+        {
+            if ( !outcome.result.isObject() )
+                return typedFailure( "E6002", "worker returned a non-object provider result" );
             return outcome.result;
+        }
         return typedFailure( outcome.statusCode().c_str(), outcome.error.message );
     }
 
@@ -378,6 +405,12 @@ public:
         {
             error = outcome.error.message.empty() ? "worker model load failed"
                                                   : outcome.error.message;
+            mLoaded = false;
+            return;
+        }
+        if ( !outcome.result.isObject() )
+        {
+            error = "worker sent a malformed model-load result (E6002)";
             mLoaded = false;
             return;
         }

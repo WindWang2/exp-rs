@@ -8,6 +8,7 @@
 #include "exprs/plugin_host_runtime.h"
 #include "exprs/plugin_interface.h"
 #include "exprs/plugin_registry.h"
+#include "exprs/plugin_ui_schema.h"
 
 #include "operators/framework/rs_operator_context.h"
 #include "operators/framework/rs_operator_error.h"
@@ -39,7 +40,84 @@ namespace {
 
 const char *kFixtureDir = SICNU_TEST_ISOLATION_PLUGIN_DIR;
 const char *kWorkerPath = SICNU_TEST_PLUGIN_HOST_WORKER;
+const char *kHostileWorkerPath = SICNU_TEST_HOSTILE_UI_WORKER;
 const char *kPluginId = "org.exprs.test.isolation-plugin";
+
+/// Open descriptor / handle count of THIS process (#1036 regression
+/// evidence). -1 when the platform cannot report it (the case then only
+/// WARNs, it never produces a false green).
+long long processHandleCount()
+{
+#ifdef _WIN32
+    DWORD count = 0;
+    return ::GetProcessHandleCount( ::GetCurrentProcess(), &count )
+               ? static_cast<long long>( count )
+               : -1;
+#elif defined( __linux__ )
+    std::error_code error;
+    std::filesystem::directory_iterator iterator( "/proc/self/fd", error );
+    if ( error )
+        return -1;
+    long long count = 0;
+    for ( const std::filesystem::directory_entry &entry : iterator )
+    {
+        (void)entry;
+        ++count;
+    }
+    return count;
+#else
+    return -1; // no /proc on macOS/BSD: handle accounting is Linux/Windows only
+#endif
+}
+
+/// Out-of-band worker kill (crash simulation) by pid.
+bool killWorkerByPid( long long pid )
+{
+    if ( pid <= 0 )
+        return false;
+#ifdef _WIN32
+    HANDLE process = ::OpenProcess( PROCESS_TERMINATE, FALSE, static_cast<DWORD>( pid ) );
+    if ( !process )
+        return false;
+    const bool killed = ::TerminateProcess( process, 9 ) != 0;
+    ::CloseHandle( process );
+    return killed;
+#else
+    return ::kill( static_cast<pid_t>( pid ), SIGKILL ) == 0;
+#endif
+}
+
+/// Environment override for the worker spawn (the child inherits it at
+/// CreateProcess/fork); restores the previous value at scope exit.
+class ScopedEnvVariable
+{
+public:
+    ScopedEnvVariable( const char *name, const char *value ) : mName( name )
+    {
+        const char *saved = std::getenv( name );
+        mSaved = saved ? saved : "";
+        apply( value );
+    }
+    ~ScopedEnvVariable() { apply( mSaved.empty() ? nullptr : mSaved.c_str() ); }
+    ScopedEnvVariable( const ScopedEnvVariable & ) = delete;
+    ScopedEnvVariable &operator=( const ScopedEnvVariable & ) = delete;
+
+private:
+    void apply( const char *value )
+    {
+#ifdef _WIN32
+        // Empty value removes the variable (documented CRT behavior).
+        ::_putenv_s( mName.c_str(), value ? value : "" );
+#else
+        if ( value )
+            ::setenv( mName.c_str(), value, 1 );
+        else
+            ::unsetenv( mName.c_str() );
+#endif
+    }
+    std::string mName;
+    std::string mSaved;
+};
 
 #ifdef _WIN32
 const char *kEntrypoint = "libisolation_plugin.dll";
@@ -182,7 +260,7 @@ struct Stack
     std::string tempDir;
 
     explicit Stack( int deadlineCeilingMs = 6000, int killGraceMs = 3000,
-                    bool declareTempWriteRoot = false )
+                    bool declareTempWriteRoot = false, const char *workerPath = kWorkerPath )
     {
         const int pid =
 #ifdef _WIN32
@@ -205,7 +283,7 @@ struct Stack
         writeManifest( access );
 
         sicnu::plugins::PluginHostProcessRuntime::Options options;
-        options.workerPath = kWorkerPath;
+        options.workerPath = workerPath;
         options.handshakeTimeoutMs = 15000;
         options.quotaCeilings = PluginQuota::fromEnvironment();
         options.quotaCeilings.requestDeadlineMs = deadlineCeilingMs;
@@ -216,7 +294,7 @@ struct Stack
         PluginRegistryOptions registryOptions;
         registryOptions.roots = { std::filesystem::path( kFixtureDir ).parent_path().generic_string() };
         registryOptions.tempDirectory = tempDir;
-        registryOptions.hostProcessWorkerPath = kWorkerPath;
+        registryOptions.hostProcessWorkerPath = workerPath;
         registry.setContributionSink( &sink );
         registry.setHostProcessRuntime( runtime.get() );
         registry.configure( registryOptions );
@@ -760,6 +838,7 @@ TEST_CASE( "declarative UI survives the crash-recovery sequence", "[hostprocess]
     // session is dead afterwards. A describe on the dead session answers
     // typed E6005 — it never resurrects plugins on its own.
     Json::Value crash = runOperator( stack, "test:iso-crash", Json::Value() );
+    INFO( "crash: " << Json::writeString( Json::StreamWriterBuilder(), crash ) );
     REQUIRE( crash["__operatorError"].asBool() );
     described = stack.runtime->describeUiSchema( kPluginId, uiLog );
     INFO( "post-crash describe: "
@@ -776,6 +855,205 @@ TEST_CASE( "declarative UI survives the crash-recovery sequence", "[hostprocess]
     REQUIRE( described["schema"]["version"].asInt() == 1 );
 
     REQUIRE( registry.unload( kPluginId ) );
+}
+
+// -- #1040: the production ui.invoke response shape, end to end ---------------
+
+TEST_CASE( "ui.invoke production envelope yields the worker state patch (#1040)",
+           "[hostprocess][uischema][contract]" )
+{
+    Stack stack;
+    auto &registry = PluginRegistry::instance();
+    REQUIRE( loadOrExplain( kPluginId ) );
+
+    Json::Value event( Json::objectValue );
+    event["contributionId"] = "dock.status";
+    event["controlId"] = "ping";
+    event["eventType"] = "clicked";
+    exprs::PluginDiagnosticLog uiLog;
+    const Json::Value invoked = stack.runtime->invokeUi( kPluginId, event, 5000, uiLog );
+    INFO( "invoke: " << Json::writeString( Json::StreamWriterBuilder(), invoked ) );
+    REQUIRE( invoked["ok"].asBool() );
+
+    // The REAL host-runtime envelope nests the plugin response one level:
+    // { ok, response: { state: {...} } }. The canonical extraction reads
+    // exactly that level; the pre-#1040 read (envelope["state"]) finds
+    // nothing, which is why every plugin state update was discarded.
+    REQUIRE( invoked.isMember( "response" ) );
+    REQUIRE( invoked["response"].isMember( "state" ) );
+    REQUIRE_FALSE( invoked.isMember( "state" ) );
+    const Json::Value state = exprs::uiStateFromInvokeResponse( invoked );
+    REQUIRE( state.isObject() );
+    REQUIRE( state["status"].asString() == "pinged" );
+
+    // Typed no-ops for every non-canonical shape (never throws):
+    REQUIRE( exprs::uiStateFromInvokeResponse( Json::Value() ).isNull() );
+    REQUIRE( exprs::uiStateFromInvokeResponse( Json::objectValue ).isNull() );
+    Json::Value failed( Json::objectValue );
+    failed["ok"] = false;
+    failed["response"]["state"]["status"] = "must-not-apply";
+    REQUIRE( exprs::uiStateFromInvokeResponse( failed ).isNull() );
+    Json::Value wrongState( Json::objectValue );
+    wrongState["ok"] = true;
+    wrongState["response"]["state"] = Json::Value( Json::arrayValue );
+    REQUIRE( exprs::uiStateFromInvokeResponse( wrongState ).isNull() );
+    Json::Value wrongType( Json::objectValue );
+    wrongType["ok"] = "true"; // hostile non-bool ok
+    wrongType["response"]["state"]["status"] = "must-not-apply";
+    REQUIRE( exprs::uiStateFromInvokeResponse( wrongType ).isNull() );
+
+    REQUIRE( registry.unload( kPluginId ) );
+}
+
+// -- #1039: a hostile worker schema must fail typed on the HOST side ----------
+
+TEST_CASE( "host refuses hostile worker UI schemas typed, never crashes (#1039)",
+           "[hostprocess][uischema][hostile]" )
+{
+    const char *kKinds[] = { "deep", "tree", "flood", "types" };
+    for ( const char *kind : kKinds )
+    {
+        DYNAMIC_SECTION( "hostile kind: " << kind )
+        {
+            ScopedEnvVariable kindOverride( "EXPRS_HOSTILE_UI_KIND", kind );
+            Stack stack( 6000, 3000, false, kHostileWorkerPath );
+            auto &registry = PluginRegistry::instance();
+            REQUIRE( loadOrExplain( kPluginId ) );
+
+            exprs::PluginDiagnosticLog uiLog;
+            const auto start = std::chrono::steady_clock::now();
+            Json::Value described = stack.runtime->describeUiSchema( kPluginId, uiLog );
+            const auto elapsed = std::chrono::steady_clock::now() - start;
+            INFO( "kind=" << kind << " describe: "
+                  << Json::writeString( Json::StreamWriterBuilder(), described ) );
+
+            // Typed refusal at the HOST boundary, bounded time, worker alive.
+            REQUIRE_FALSE( described["ok"].asBool() );
+            REQUIRE( described["code"].asString() == "E5005" );
+            REQUIRE( described["error"].asString().find( "host-side validation" )
+                     != std::string::npos );
+            REQUIRE( described.isMember( "details" ) );
+            REQUIRE( elapsed < std::chrono::seconds( 20 ) );
+
+            // The session survives the refusal: a second describe is refused
+            // identically and the worker is still there (no kill ladder fired).
+            Json::Value again = stack.runtime->describeUiSchema( kPluginId, uiLog );
+            REQUIRE_FALSE( again["ok"].asBool() );
+            REQUIRE( again["code"].asString() == "E5005" );
+            REQUIRE( stack.runtime->isWorkerAlive( kPluginId ) );
+
+            // ui.invoke through the hostile worker still round-trips the
+            // canonical envelope (the schema refusal did not poison the
+            // channel).
+            Json::Value event( Json::objectValue );
+            event["contributionId"] = "page.hostile";
+            event["controlId"] = "hostile.text";
+            event["eventType"] = "changed";
+            Json::Value invoked = stack.runtime->invokeUi( kPluginId, event, 5000, uiLog );
+            REQUIRE( invoked["ok"].asBool() );
+            const Json::Value state = exprs::uiStateFromInvokeResponse( invoked );
+            REQUIRE( state.isObject() );
+            REQUIRE( state["status"].asString() == "hostile-pong" );
+
+            REQUIRE( registry.unload( kPluginId ) );
+        }
+    }
+}
+
+// -- #1036: descriptor/handle lifetime regression -----------------------------
+
+TEST_CASE( "host session releases pipe handles across shutdown/kill cycles (#1036)",
+           "[hostprocess][lifetime]" )
+{
+    const long long before = processHandleCount();
+    if ( before < 0 )
+    {
+        WARN( "handle/fd accounting unavailable on this platform; skipped" );
+        return;
+    }
+
+    const auto spawnCycle = []( bool killOutOfBand ) {
+        sicnu::plugins::PluginHostProcessSession::SpawnOptions options;
+        options.workerPath = kWorkerPath;
+        options.pluginId = kPluginId;
+        options.pluginDirectory = kFixtureDir;
+        options.handshakeTimeoutMs = 15000;
+        exprs::PluginDiagnosticLog log;
+        auto session = sicnu::plugins::PluginHostProcessSession::spawn( options, log );
+        REQUIRE( session != nullptr );
+        if ( killOutOfBand )
+        {
+            REQUIRE( killWorkerByPid( session->workerPid() ) );
+            // Destroy while the OS/CRT observes the death: the destructor's
+            // killProcess confirms death and owns the pipe release.
+        }
+        else
+        {
+            REQUIRE( session->shutdown( 10000, log ) );
+        }
+    };
+    // 3 graceful + 3 crash cycles: before the fix each cycle leaked the two
+    // parent-side pipe ends (+12 total); after it the count returns to base.
+    for ( int round = 0; round < 3; ++round )
+    {
+        spawnCycle( false );
+        spawnCycle( true );
+    }
+
+    // Registry-level cycles (spawn -> plugin.load -> crash -> respawn ->
+    // unload) exercise the same descriptors through the production path.
+    {
+        Stack stack;
+        auto &registry = PluginRegistry::instance();
+        for ( int round = 0; round < 2; ++round )
+        {
+            REQUIRE( loadOrExplain( kPluginId ) );
+            Json::Value crash = runOperator( stack, "test:iso-crash", Json::Value() );
+            REQUIRE( crash["__operatorError"].asBool() );
+            REQUIRE( registry.unload( kPluginId ) );
+        }
+    }
+
+    const long long after = processHandleCount();
+    INFO( "handles before=" << before << " after=" << after );
+    REQUIRE( after >= 0 );
+    // A single leak per cycle would be +12; allow a small transient slack for
+    // CRT/OS bookkeeping while still failing the pre-fix behavior.
+    REQUIRE( after - before <= 6 );
+}
+
+// -- #1038 at the host boundary: worker registration reports ----------------
+
+TEST_CASE( "malformed worker registration reports refuse plugin.load typed (#1038)",
+           "[hostprocess][hardening]" )
+{
+    ScopedEnvVariable registrationOverride( "EXPRS_HOSTILE_REGISTRATION", "malformed" );
+    Stack stack( 6000, 3000, false, kHostileWorkerPath );
+    auto &registry = PluginRegistry::instance();
+
+    // The hostile worker answers plugin.load with non-string operator ids
+    // and a non-array dataProviders section. Before the guard this reached
+    // Json::Value::asString()/array iteration on untrusted JSON; now the
+    // load fails typed and no session is published.
+    const auto start = std::chrono::steady_clock::now();
+    const bool loaded = registry.load( kPluginId );
+    const auto elapsed = std::chrono::steady_clock::now() - start;
+    REQUIRE_FALSE( loaded );
+    REQUIRE( elapsed < std::chrono::seconds( 30 ) );
+
+    bool sawTyped = false;
+    for ( const PluginDiagnostic &diagnostic : registry.diagnostics().items() )
+    {
+        if ( diagnostic.pluginId == kPluginId
+             && diagnostic.message.find( "registration report is malformed" )
+                    != std::string::npos )
+            sawTyped = true;
+    }
+    REQUIRE( sawTyped );
+
+    // The worker was torn down; nothing stays half-registered.
+    REQUIRE_FALSE( stack.runtime->isWorkerAlive( kPluginId ) );
+    REQUIRE( stack.sink.operators.empty() );
 }
 
 // -- plugin-platform 9.0: M2 concurrency stress --------------------------------
