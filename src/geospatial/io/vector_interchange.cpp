@@ -114,7 +114,8 @@ VectorTargetCheck checkVectorWriteTarget( const std::string &driver )
 bool inputOpensAsRaster( const std::string &source )
 {
   ensureGdalRegistered();
-  CPLErrorStateBackuper errorBackuper( CPLQuietErrorHandler );
+  CPLErrorStateBackuper errorState;
+  CPLErrorHandlerPusher quietErrors( CPLQuietErrorHandler );
   GDALDatasetH probe = GDALOpenEx( source.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER, nullptr, nullptr, nullptr );
   if ( !probe )
     return false;
