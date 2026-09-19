@@ -5,7 +5,14 @@
 # usage:
 #   scripts/build_offline_bundle.sh --build-dir <dir> [--out <dir>] [--version <v>]
 #                                   [--max-mb <n>] [--schema {1,2}] [--skip-samples]
-#                                   [--verify <bundle>]
+#                                   [--incremental] [--verify <bundle>]
+#
+# --incremental (12.0): assemble over an existing bundle instead of rm -rf,
+# reusing data/samples when it still verifies against its foundry manifest
+# (seed-42 output is byte-identical by the ADR 0164 determinism contract).
+# A stale file from a previous layout fails the final verify — fail-closed,
+# rerun without the flag for a guaranteed-clean assembly. The Windows twin
+# always performs a full clean assembly.
 #
 # Assembles packaging/OFFLINE_BUNDLE.md's layout from a built tree, writes
 # manifest.json (per-file sha256; schema /2 by default with components,
@@ -25,6 +32,7 @@ version=""
 max_mb=250
 schema=2
 skip_samples=0
+incremental=0
 verify_path=""
 
 usage() { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
@@ -38,6 +46,7 @@ while [ $# -gt 0 ]; do
     --max-mb)    [ $# -ge 2 ] || usage; max_mb=$2; shift 2 ;;
     --schema)    [ $# -ge 2 ] || usage; schema=$2; shift 2 ;;
     --skip-samples) skip_samples=1; shift ;;
+    --incremental) incremental=1; shift ;;
     --verify)    [ $# -ge 2 ] || usage; verify_path=$2; shift 2 ;;
     -h|--help)   usage ;;
     *) die "unknown option: $1 (see --help)" ;;
@@ -74,7 +83,13 @@ done
 [ -n "$version" ] || version="dev"
 [ -n "$out_dir" ] || out_dir="$repo_root/dist"
 bundle="$out_dir/sicnu-lab-$version"
-rm -rf "$bundle"
+if [ "$incremental" -eq 1 ] && [ -d "$bundle" ]; then
+  echo "== incremental: assembling over the existing bundle =="
+  echo "   (a stale file from a previous layout fails the final verify — rerun"
+  echo "    without --incremental for a guaranteed-clean assembly)"
+else
+  rm -rf "$bundle"
+fi
 mkdir -p "$bundle/bin" "$bundle/data" "$bundle/labs"
 
 echo "== copying binaries =="
@@ -84,7 +99,15 @@ cp "$gen_bin" "$bundle/bin/"
 echo "== generating sample data (deterministic, offline) =="
 mkdir -p "$bundle/data/samples"
 if [ "$skip_samples" -eq 0 ]; then
-  "$gen_bin" --out="$bundle/data/samples"
+  # Incremental reuse: when the existing sample set still verifies against its
+  # foundry manifest, the seed-42 output is byte-identical by contract
+  # (ADR 0164) and regeneration is pure wasted I/O.
+  if [ "$incremental" -eq 1 ] && [ -f "$bundle/data/samples/manifest.json" ] \
+      && "$gen_bin" --verify "--out=$bundle/data/samples" >/dev/null 2>&1; then
+    echo "   existing data/samples verified against its manifest - reusing"
+  else
+    "$gen_bin" --out="$bundle/data/samples"
+  fi
 fi
 
 echo "== copying data tree =="
@@ -107,7 +130,7 @@ cp "$repo_root/packaging/bundle/labs/lab1/lab1_ndvi.pipeline.json" "$bundle/labs
 cp "$repo_root/packaging/bundle/labs/lab1/INSTRUCTIONS-zh.md" "$bundle/labs/lab1/"
 
 echo "== copying one-click scripts and docs =="
-for f in RUN.cmd GENERATE_SAMPLES.cmd GRADE_ALL.cmd VERIFY.cmd VERIFY.ps1 VERIFY.sh README-zh.md; do
+for f in RUN.cmd GENERATE_SAMPLES.cmd GRADE_ALL.cmd GRADE_ALL.sh VERIFY.cmd VERIFY.ps1 VERIFY.sh README-zh.md; do
   [ -f "$repo_root/packaging/bundle/$f" ] || die "bundle template missing: $f"
   cp "$repo_root/packaging/bundle/$f" "$bundle/"
 done
