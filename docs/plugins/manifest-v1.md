@@ -4,6 +4,15 @@ Every plugin is a directory containing `plugin.json` (UTF-8 JSON). Unknown
 optional fields are ignored; unknown major versions are rejected with
 `E1005 ManifestUnknownVersion`.
 
+TYPE STRICTNESS (#1038): fields that ARE known are type-checked exactly. A
+known field carrying the wrong JSON type (for example `"min": "0"`,
+`"required": {}`, `"manifest_version": "1"`, `"timeout_seconds": 30.5`,
+`"access": []`) fails the manifest with a typed `ManifestInvalidField`
+diagnostic instead of being coerced or silently ignored. This is deliberate:
+previously a wrong-typed value reached jsoncpp's `as*()` and escaped the
+loader as `Json::LogicError` (crash-at-startup). Write numbers as JSON
+numbers and booleans as JSON booleans.
+
 ## Example
 
 ```json
