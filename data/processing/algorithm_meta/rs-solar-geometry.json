@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:solar_geometry",
+  "input" : "raster",
+  "notes" : "Spencer (1971) Fourier series + NOAA general form; ~0.05 deg accuracy, no atmospheric refraction (calibration geometry uses the true position).",
+  "output" : "",
+  "tags" : 
+  [
+    "optical",
+    "solar-geometry",
+    "calibration"
+  ],
+  "task" : "radiometric-normalization"
+}

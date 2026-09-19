@@ -1,0 +1,14 @@
+{
+  "gpu" : false,
+  "id" : "rs:spectral_spatial_fuse",
+  "input" : "raster",
+  "notes" : "Pure window function of the score plane: tile-agnostic, deterministic; invalid (NoData / non-finite) pixels are never fused and never enter a neighbor's mean (renormalized, no zero-fill bias). Bit-exact grade.",
+  "output" : "raster",
+  "tags" : 
+  [
+    "spectral",
+    "detection",
+    "fusion"
+  ],
+  "task" : "target-detection"
+}

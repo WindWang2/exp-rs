@@ -330,7 +330,7 @@ const std::map<std::string, ScientificContract> &scientificContracts()
         {
             // Matched filter / ACE write ONE continuous detection-score band
             // (Float32, NaN NoData) — a probability-like surface, not classes.
-            for ( const char *id : { "rs:matched_filter", "rs:ace" } )
+            for ( const char *id : { "rs:matched_filter", "rs:ace", "rs:cem_detection" } )
             {
                 ScientificContract c = baseRecord();
                 c.operatorId = id;
@@ -340,6 +340,19 @@ const std::map<std::string, ScientificContract> &scientificContracts()
                 c.wavelengthPolicy = "srf_or_center";
                 c.evidence = "review:spectral detection writer reads (Float32 scores)";
                 rows.push_back( c );
+            }
+            {
+                // Score fusion consumes detection-score planes
+                // (probability-like, NaN NoData) and writes the same kind of
+                // surface (Spectral Intelligence 12.0).
+                ScientificContract fuse = baseRecord();
+                fuse.operatorId = "rs:spectral_spatial_fuse";
+                fuse.inputDomain = "probability";
+                fuse.outputDomain = "probability";
+                fuse.noDataPolicy = "internal_sentinel";
+                fuse.evidence = "review:spectral-spatial fusion reads and writes Float32 "
+                                "score planes with NaN NoData";
+                rows.push_back( fuse );
             }
             // SAM classifies in Float32 label space with -9999 NoData.
             ScientificContract sam = baseRecord();
@@ -816,6 +829,23 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             rows.push_back( c );
         }
         {
+            // Model selection over time series (master drift at adf8f989: the
+            // census gate listed this id with no contract row).
+            ScientificContract c = temporalFamily( "increasing_dates" );
+            c.operatorId = "rs:temporal_model_select";
+            c.outputDomain = "features";
+            rows.push_back( c );
+        }
+        {
+            // Phenology 2.0 (automatic cycles, cross-year, quality flags) —
+            // same feature family as rs:temporal_phenology; the contract row
+            // was missing at the adf8f989 baseline (census gate red).
+            ScientificContract c = temporalFamily( "increasing_dates" );
+            c.operatorId = "rs:temporal_phenology_multi";
+            c.outputDomain = "features";
+            rows.push_back( c );
+        }
+        {
             ScientificContract c = temporalFamily( "increasing_dates" );
             c.operatorId = "rs:temporal_gap_fill";
             c.outputDomain = "features";
@@ -1135,6 +1165,14 @@ const std::map<std::string, ScientificContract> &scientificContracts()
             c.operatorId = id;
             c.evidence = "family:cartography + schema read (cartography_operators.cpp: "
                          "MapSpec verdict JSON, no raster output)";
+            rows.push_back( c );
+        }
+        {
+            ScientificContract c = cartographyFamily( "staged_rename" );
+            c.operatorId = "cartography:produce";
+            c.evidence = "family:cartography + schema read (cartography_tools.cpp: "
+                         "one-call governed production chain, atomic publish with "
+                         "manifest sidecar) — master drift at adf8f989";
             rows.push_back( c );
         }
         {
