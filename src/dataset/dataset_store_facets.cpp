@@ -30,6 +30,23 @@ Diagnostic notDraft( const QString &versionId )
                           .arg( versionId ) );
 }
 
+/// U+001F is the cell-key separator; a facet value carrying it is doubled so
+/// the joined key stays injective (otherwise "a<US>b" × "c" and "a" × "<US>b" × "c"
+/// collapse into one key and two cells merge).
+QString escapeCellValue( const QString &value )
+{
+    const QChar separator( 0x001F );
+    QString escaped;
+    escaped.reserve( value.size() );
+    for ( const QChar &ch : value )
+    {
+        if ( ch == separator )
+            escaped.append( separator );
+        escaped.append( ch );
+    }
+    return escaped;
+}
+
 } // namespace
 
 sicnu::data::Result<void> DatasetStore::setSampleFacets( const DatasetVersionId &versionId,
@@ -219,7 +236,8 @@ sicnu::data::Result<QVector<QPair<QString, qint64>>> DatasetStore::facetCrossCou
     cells.bind( 4, qMax( 1, maxCells ) );
     QVector<QPair<QString, qint64>> out;
     while ( cells.stepRow() )
-        out.append( qMakePair( cells.text( 0 ) + QChar( 0x001F ) + cells.text( 1 ),
+        out.append( qMakePair( escapeCellValue( cells.text( 0 ) ) + QChar( 0x001F ) +
+                                   escapeCellValue( cells.text( 1 ) ),
                                cells.i64( 2 ) ) );
     return Result::success( out );
 }

@@ -9,6 +9,8 @@
 #include <QTemporaryDir>
 #include <QVariantMap>
 
+#include <sqlite3.h>
+
 using namespace sicnu::workspace;
 
 namespace
@@ -30,6 +32,27 @@ GovernedAsset makeAsset( const QString &id, const QString &name, const QString &
     a.modality = modality;
     a.availability = QStringLiteral( "unverified" );
     return a;
+}
+
+/// Plants a RAISE(ABORT) guard on the store DB (direct DB surgery while the
+/// store handle is idle) to make a statement inside an open transaction fail.
+void plantTrigger( const QString &dbPath, const QString &sql )
+{
+    sqlite3 *raw = nullptr;
+    REQUIRE( sqlite3_open_v2( dbPath.toUtf8().constData(), &raw, SQLITE_OPEN_READWRITE,
+                              nullptr ) == SQLITE_OK );
+    char *err = nullptr;
+    const int rc = sqlite3_exec( raw, sql.toUtf8().constData(), nullptr, nullptr, &err );
+    if ( rc != SQLITE_OK )
+        INFO( QString::fromUtf8( err ).toStdString() );
+    sqlite3_free( err );
+    sqlite3_close( raw );
+    REQUIRE( rc == SQLITE_OK );
+}
+
+QString dropTrigger( const QString &name )
+{
+    return QStringLiteral( "DROP TRIGGER %1" ).arg( name );
 }
 
 } // namespace
@@ -396,4 +419,110 @@ TEST_CASE( "GovernanceStore smart collections, exports, mappings, audit, integri
     REQUIRE( store.clearAll().operator bool() );
     REQUIRE( store.assetCount() == 0 );
     REQUIRE( store.exports().isEmpty() );
+}
+
+TEST_CASE( "GovernanceStore removeAsset leaves no phantom references",
+           "[governance][store][remove]" )
+{
+    // The schema has no foreign keys, so relationship rows survive an asset
+    // removal unless they are deleted in the same transaction — readers would
+    // then return ids that no longer resolve.
+    QTemporaryDir dir;
+    GovernanceStore store;
+    REQUIRE( store.open( dir.filePath( QStringLiteral( "gov.db" ) ) ) );
+    REQUIRE( store.upsertAsset( makeAsset( "a", "asset-a" ) ).operator bool() );
+
+    DatasetRecord ds;
+    ds.id = DatasetId::generate();
+    ds.kind = DatasetKind::Training;
+    ds.header.name = QStringLiteral( "water-training" );
+    ds.memberAssetIds = QStringList{ QStringLiteral( "a" ) };
+    REQUIRE( store.upsertDataset( ds ).operator bool() );
+    REQUIRE( store.datasetById( ds.id.toString() )->memberAssetIds.size() == 1 );
+
+    ResultRecord r;
+    r.id = ResultId::generate();
+    r.semanticType = ResultSemanticType::Classification;
+    r.header.name = QStringLiteral( "rf-water" );
+    ResultInput in;
+    in.assetId = QStringLiteral( "a" );
+    in.revision = 1;
+    r.inputs.append( in );
+    REQUIRE( store.upsertResult( r ).operator bool() );
+    REQUIRE( store.resultById( r.id.toString() )->inputs.size() == 1 );
+
+    RunRecord run;
+    run.id = QStringLiteral( "run-1" );
+    run.workflowId = QStringLiteral( "wf" );
+    run.outputAssetIds.append( QStringLiteral( "a" ) );
+    REQUIRE( store.upsertRun( run ).operator bool() );
+    REQUIRE( store.linkRunOutput( QStringLiteral( "run-1" ), QStringLiteral( "a" ) ).operator bool() );
+    REQUIRE( store.runById( QStringLiteral( "run-1" ) )->outputAssetIds.size() == 1 );
+
+    REQUIRE( store.removeAsset( QStringLiteral( "a" ) ).operator bool() );
+
+    // No reader reports the removed id any more.
+    CHECK( store.datasetById( ds.id.toString() )->memberAssetIds.isEmpty() );
+    CHECK( store.resultById( r.id.toString() )->inputs.isEmpty() );
+    CHECK( store.runById( QStringLiteral( "run-1" ) )->outputAssetIds.isEmpty() );
+    CHECK( store.resultsDependingOnAsset( QStringLiteral( "a" ) ).isEmpty() );
+}
+
+TEST_CASE( "GovernanceStore relationship writes roll back when a step fails",
+           "[governance][store][transaction]" )
+{
+    QTemporaryDir dir;
+    const QString dbPath = dir.filePath( QStringLiteral( "gov.db" ) );
+    GovernanceStore store;
+    REQUIRE( store.open( dbPath ) );
+
+    // Dataset: a failing member insert must not leave the dataset row behind.
+    plantTrigger( dbPath, QStringLiteral( "CREATE TRIGGER fail_member BEFORE INSERT ON"
+                                         " dataset_members BEGIN SELECT RAISE(ABORT,'planted'); END" ) );
+    DatasetRecord ds;
+    ds.id = DatasetId::generate();
+    ds.kind = DatasetKind::Training;
+    ds.header.name = QStringLiteral( "water" );
+    ds.memberAssetIds = QStringList{ QStringLiteral( "asset-x" ) };
+    CHECK_FALSE( store.upsertDataset( ds ).operator bool() );
+    CHECK_FALSE( store.datasetById( ds.id.toString() ).has_value() );
+    plantTrigger( dbPath, dropTrigger( QStringLiteral( "fail_member" ) ) );
+    REQUIRE( store.upsertDataset( ds ).operator bool() );
+    REQUIRE( store.datasetById( ds.id.toString() )->memberAssetIds.size() == 1 );
+
+    // Result: a failing input insert must not leave the result row behind.
+    plantTrigger( dbPath, QStringLiteral( "CREATE TRIGGER fail_input BEFORE INSERT ON"
+                                         " result_inputs BEGIN SELECT RAISE(ABORT,'planted'); END" ) );
+    ResultRecord r;
+    r.id = ResultId::generate();
+    r.semanticType = ResultSemanticType::Classification;
+    r.header.name = QStringLiteral( "rf" );
+    ResultInput in;
+    in.assetId = QStringLiteral( "asset-x" );
+    r.inputs.append( in );
+    CHECK_FALSE( store.upsertResult( r ).operator bool() );
+    CHECK_FALSE( store.resultById( r.id.toString() ).has_value() );
+    plantTrigger( dbPath, dropTrigger( QStringLiteral( "fail_input" ) ) );
+    REQUIRE( store.upsertResult( r ).operator bool() );
+
+    // Lineage: a failing edge insert must not leave partial provenance.
+    GovernanceStore::LineageEdge edge;
+    edge.outputAssetId = QStringLiteral( "out" );
+    edge.inputAssetId = QStringLiteral( "asset-x" );
+    edge.operatorId = QStringLiteral( "rs:test" );
+    plantTrigger( dbPath, QStringLiteral( "CREATE TRIGGER fail_edge BEFORE INSERT ON lineage_edges"
+                                         " BEGIN SELECT RAISE(ABORT,'planted'); END" ) );
+    CHECK_FALSE( store.addLineageEdges( { edge } ).operator bool() );
+    CHECK( store.lineageUpstream( QStringLiteral( "out" ) ).isEmpty() );
+    plantTrigger( dbPath, dropTrigger( QStringLiteral( "fail_edge" ) ) );
+    REQUIRE( store.addLineageEdges( { edge } ).operator bool() );
+    REQUIRE( store.lineageUpstream( QStringLiteral( "out" ) ).size() == 1 );
+
+    // Removal: a failing member delete must not strip the asset row either.
+    plantTrigger( dbPath, QStringLiteral( "CREATE TRIGGER fail_member_del BEFORE DELETE ON"
+                                         " dataset_members BEGIN SELECT RAISE(ABORT,'planted'); END" ) );
+    CHECK_FALSE( store.removeDataset( ds.id.toString() ).operator bool() );
+    REQUIRE( store.datasetById( ds.id.toString() ).has_value() );
+    plantTrigger( dbPath, dropTrigger( QStringLiteral( "fail_member_del" ) ) );
+    REQUIRE( store.removeDataset( ds.id.toString() ).operator bool() );
 }

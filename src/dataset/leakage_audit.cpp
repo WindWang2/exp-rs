@@ -30,7 +30,10 @@ bool checkEnabled( const LeakageAuditConfig &config, const QString &name,
     return audited.contains( name );
 }
 
-/// x-grid bucketing for spatial pair checks: cell size = max(threshold, 1.0).
+/// x/y-grid bucketing for spatial pair checks: cell size >= the per-axis
+/// reach of the enabled checks (configured radius, or the full window
+/// extent for patch overlap) so any pair worth reporting is at most one
+/// cell away on each axis.
 qint64 bucketOf( double x, double cell )
 {
     return qint64( std::floor( x / cell ) );
@@ -482,20 +485,22 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
         enabled( QStringLiteral( "buffer_overlap" ) );
     if ( overlapCheck || distanceCheck || bufferCheck )
     {
-        // 2-D grid with a 3x3 neighborhood. For distance/buffer the cell must
-        // cover the configured radius; for patch overlap the cell must cover
-        // HALF the largest window extent (two windows overlap only if their
-        // centers are within half a window of each other), otherwise large
-        // overlapping windows land in far-apart cells and are never compared.
-        double overlapCell = 1.0;
+        // Per-axis 2-D grid with a 3x3 neighborhood. For distance/buffer the
+        // cell must cover the configured radius. For patch overlap the cell
+        // must cover the FULL window extent: two windows overlap only when
+        // their centers are closer than one window extent, so a cell sized
+        // to the half extent left centers two cells apart (#1046) — never
+        // compared, and every overlapping pair silently unreported.
+        double maxWindowWidth = 1.0;
+        double maxWindowHeight = 1.0;
         for ( const AuditSample &sample : samples )
         {
-            overlapCell = qMax( overlapCell, sample.windowWidth / 2.0 );
-            overlapCell = qMax( overlapCell, sample.windowHeight / 2.0 );
+            maxWindowWidth = qMax( maxWindowWidth, sample.windowWidth );
+            maxWindowHeight = qMax( maxWindowHeight, sample.windowHeight );
         }
-        const double cell = qMax( qMax( 1.0, qMax( config.distanceThreshold,
-                                                   config.bufferDistance ) ),
-                                  overlapCheck ? overlapCell : 1.0 );
+        const double reach = qMax( config.distanceThreshold, config.bufferDistance );
+        const double cellX = qMax( qMax( 1.0, reach ), overlapCheck ? maxWindowWidth : 1.0 );
+        const double cellY = qMax( qMax( 1.0, reach ), overlapCheck ? maxWindowHeight : 1.0 );
         // Injective (cellX, cellY) keys (#787): the previous combined key
         // `cy * xSpan + cx` collided for negative cells (e.g. xSpan=10:
         // (9,-1) ≡ (-1,0)), merging unrelated cells — duplicated pair
@@ -508,8 +513,8 @@ sicnu::data::Result<LeakageReport> LeakageAuditor::audit( const QString &dataset
             const AuditSample &sample = samples.at( i );
             if ( sample.input.validBounds )
             {
-                const qint64 cx = bucketOf( ( sample.input.minX + sample.input.maxX ) / 2.0, cell );
-                const qint64 cy = bucketOf( ( sample.input.minY + sample.input.maxY ) / 2.0, cell );
+                const qint64 cx = bucketOf( ( sample.input.minX + sample.input.maxX ) / 2.0, cellX );
+                const qint64 cy = bucketOf( ( sample.input.minY + sample.input.maxY ) / 2.0, cellY );
                 buckets[qMakePair( cx, cy )].append( i );
             }
         }

@@ -253,6 +253,72 @@ TEST_CASE( "ArtifactStore refuses a newer-schema database", "[artifact_store][mi
     REQUIRE( err.contains( QStringLiteral( "newer" ) ) );
 }
 
+namespace
+{
+
+/// Plants a RAISE(ABORT) guard on the store DB (direct DB surgery while the
+/// store handle is idle) to make a statement inside an open transaction fail.
+void plantTrigger( const QString &dbPath, const QString &sql )
+{
+    sqlite3 *raw = nullptr;
+    REQUIRE( sqlite3_open_v2( dbPath.toUtf8().constData(), &raw, SQLITE_OPEN_READWRITE,
+                              nullptr ) == SQLITE_OK );
+    char *err = nullptr;
+    const int rc = sqlite3_exec( raw, sql.toUtf8().constData(), nullptr, nullptr, &err );
+    if ( rc != SQLITE_OK )
+        INFO( QString::fromUtf8( err ).toStdString() );
+    sqlite3_free( err );
+    sqlite3_close( raw );
+    REQUIRE( rc == SQLITE_OK );
+}
+
+} // namespace
+
+TEST_CASE( "ArtifactStore register/forget transactions are checked and atomic",
+           "[artifact_store][transaction]" )
+{
+    QTemporaryDir dir;
+    const QString dbPath = dir.filePath( QStringLiteral( "artifacts.sqlite" ) );
+    const QString payload = dir.filePath( QStringLiteral( "a.tif" ) );
+    writePayload( payload, "payload" );
+
+    ArtifactStore store;
+    QString err;
+    REQUIRE( store.open( dbPath, &err ) );
+    const auto registered = store.registerArtifact(
+        makeRegistration( QStringLiteral( "k" ), payload ) );
+    REQUIRE( registered );
+    const QString id = registered.value().artifactId;
+
+    // A failing INSERT must not be reported as success, and must not leave a
+    // half-written row (nor a transaction the next call inherits).
+    plantTrigger( dbPath, QStringLiteral( "CREATE TRIGGER fail_insert BEFORE INSERT ON artifacts"
+                                          " BEGIN SELECT RAISE(ABORT,'planted'); END" ) );
+    const auto refused = store.registerArtifact(
+        makeRegistration( QStringLiteral( "blocked" ), payload ) );
+    CHECK_FALSE( refused );
+    bool sawDiagnostic = false;
+    for ( const Diagnostic &d : refused.diagnostics() )
+        sawDiagnostic |= !d.code.isEmpty();
+    CHECK( sawDiagnostic );
+    REQUIRE( store.count() == 1 );
+
+    // A failing DELETE must not be reported as success either.
+    plantTrigger( dbPath, QStringLiteral( "DROP TRIGGER fail_insert" ) );
+    plantTrigger( dbPath, QStringLiteral( "CREATE TRIGGER fail_delete BEFORE DELETE ON artifacts"
+                                          " BEGIN SELECT RAISE(ABORT,'planted'); END" ) );
+    CHECK_FALSE( store.forget( id ) );
+    REQUIRE( store.count() == 1 );
+
+    // With the obstacles gone both paths commit for real.
+    plantTrigger( dbPath, QStringLiteral( "DROP TRIGGER fail_delete" ) );
+    REQUIRE( store.registerArtifact( makeRegistration( QStringLiteral( "late" ), payload ) ) );
+    REQUIRE( store.count() == 2 );
+    REQUIRE( store.forget( id ) );
+    REQUIRE( store.count() == 1 );
+    CHECK_FALSE( store.forget( id ) );
+}
+
 TEST_CASE( "ArtifactStore survives concurrent store handles (WAL)", "[artifact_store][crash]" )
 {
     QTemporaryDir dir;

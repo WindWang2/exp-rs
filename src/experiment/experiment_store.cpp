@@ -421,15 +421,22 @@ namespace
 {
 
 /// Loads the stored run JSON (status included) while the caller holds the
-/// mutex; nullopt when absent or corrupt.
-std::optional<ExperimentRun> loadRunLocked( sqlite3 *db, const QString &runId )
+/// mutex. @p present distinguishes "no such row" from "row exists but does
+/// not parse": a corrupt row must never be mistaken for an absent one, or an
+/// upsert silently overwrites it and skips the transition/identity checks.
+std::optional<ExperimentRun> loadRunLocked( sqlite3 *db, const QString &runId,
+                                            bool *present = nullptr )
 {
+    if ( present )
+        *present = false;
     Stmt stmt( db, QStringLiteral( "SELECT json FROM experiment_runs WHERE run_id=?" ) );
     if ( !stmt )
         return std::nullopt;
     stmt.bind( 1, runId );
     if ( !stmt.stepRow() )
         return std::nullopt;
+    if ( present )
+        *present = true;
     const auto parsed = ExperimentRun::fromJson( textToJson( stmt.text( 0 ) ) );
     return parsed ? std::optional<ExperimentRun>( parsed.value() ) : std::nullopt;
 }
@@ -482,7 +489,19 @@ sicnu::data::Result<void> ExperimentStore::upsertRunImpl( const ExperimentRun &r
         return ResultT::failure( storeDiag( QStringLiteral( "experiment.store_write_failed" ),
                                             QStringLiteral( "cannot begin transaction" ) ) );
 
-    const auto existing = loadRunLocked( m_impl->db, run.runId() );
+    bool runPresent = false;
+    const auto existing = loadRunLocked( m_impl->db, run.runId(), &runPresent );
+    if ( !existing && runPresent )
+    {
+        // The row exists but no longer parses: overwriting it would drop the
+        // recorded history without any transition/identity check, so refuse
+        // and let the operator repair the store.
+        m_impl->rollback();
+        return ResultT::failure( storeDiag(
+            QStringLiteral( "experiment.run_corrupt" ),
+            QStringLiteral( "stored run %1 is corrupt; refusing to overwrite it" )
+                .arg( run.runId() ) ) );
+    }
     if ( existing && !isValidRunTransition( existing->status(), run.status() ) )
     {
         m_impl->rollback();
@@ -691,14 +710,16 @@ QStringList ExperimentStore::runIdsByExecutionRef( const QString &executionRef,
         stmt.bind( 1, kPage );
         stmt.bind( 2, offset );
         bool pageEmpty = true;
-        const QString needle = QStringLiteral( "\"execution_ref\":\"%1\"" ).arg( executionRef );
         while ( stmt.stepRow() )
         {
             pageEmpty = false;
             const QString json = stmt.text( 1 );
-            // The JSON serializer emits no spaces between members; matching
-            // the exact member token avoids accidental substring collisions.
-            if ( json.contains( needle ) )
+            // Match the parsed member, never a raw needle built from the
+            // caller's ref: the serializer escapes `"`, `\` and control
+            // characters, so a needle containing any of them would never
+            // match and one execution would resolve to a second run.
+            if ( textToJson( json ).value( QStringLiteral( "execution_ref" ) ).toString()
+                 == executionRef )
                 ids.append( stmt.text( 0 ) );
         }
         if ( pageEmpty )

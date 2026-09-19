@@ -208,7 +208,9 @@ Result<void> WorkspaceCatalog::upsertAssets( const QVector<CatalogAsset> &assets
         return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.closed" ),
                                                    QStringLiteral( "catalog not open" ) ) );
     std::lock_guard<std::mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE" );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+        return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.transaction" ),
+                                                   QStringLiteral( "cannot begin transaction" ) ) );
     {
         Stmt up( m_impl->db,
             "INSERT INTO assets(asset_id, source_key, canonical_source, kind, state,"
@@ -255,11 +257,21 @@ Result<void> WorkspaceCatalog::upsertAssets( const QVector<CatalogAsset> &assets
             }
             delAlias.reset();
             delAlias.bind( 1, asset.assetId );
-            delAlias.step();
+            if ( !delAlias.step() )
+            {
+                m_impl->exec( "ROLLBACK" );
+                return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.upsert" ),
+                                                           QStringLiteral( "alias delete failed for asset %1" ).arg( asset.assetId ) ) );
+            }
             insAlias.reset();
             insAlias.bind( 1, asset.canonicalSource );
             insAlias.bind( 2, asset.assetId );
-            insAlias.step();
+            if ( !insAlias.step() )
+            {
+                m_impl->exec( "ROLLBACK" );
+                return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.upsert" ),
+                                                           QStringLiteral( "alias insert failed for asset %1" ).arg( asset.assetId ) ) );
+            }
             for ( const QString &alias : asset.aliases )
             {
                 if ( alias == asset.canonicalSource )
@@ -267,21 +279,43 @@ Result<void> WorkspaceCatalog::upsertAssets( const QVector<CatalogAsset> &assets
                 insAlias.reset();
                 insAlias.bind( 1, alias );
                 insAlias.bind( 2, asset.assetId );
-                insAlias.step();
+                if ( !insAlias.step() )
+                {
+                    m_impl->exec( "ROLLBACK" );
+                    return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.upsert" ),
+                                                               QStringLiteral( "alias insert failed for asset %1" ).arg( asset.assetId ) ) );
+                }
             }
             delTag.reset();
             delTag.bind( 1, asset.assetId );
-            delTag.step();
+            if ( !delTag.step() )
+            {
+                m_impl->exec( "ROLLBACK" );
+                return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.upsert" ),
+                                                           QStringLiteral( "tag delete failed for asset %1" ).arg( asset.assetId ) ) );
+            }
             for ( const QString &tag : asset.tags )
             {
                 insTag.reset();
                 insTag.bind( 1, asset.assetId );
                 insTag.bind( 2, tag );
-                insTag.step();
+                if ( !insTag.step() )
+                {
+                    m_impl->exec( "ROLLBACK" );
+                    return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.upsert" ),
+                                                               QStringLiteral( "tag insert failed for asset %1" ).arg( asset.assetId ) ) );
+                }
             }
         }
     }
-    m_impl->exec( "COMMIT" );
+    if ( !m_impl->exec( "COMMIT" ) )
+    {
+        // A failed COMMIT can leave the transaction active (e.g. SQLITE_BUSY):
+        // roll back so the connection never leaks its write lock.
+        m_impl->exec( "ROLLBACK" );
+        return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.commit" ),
+                                                   QStringLiteral( "commit failed" ) ) );
+    }
     return Result<void>::success();
 }
 
@@ -298,12 +332,37 @@ Result<void> WorkspaceCatalog::removeAsset( const QString &assetId )
         if ( !a || !al || !t )
             return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.prepare" ),
                                                        QStringLiteral( "prepare failed" ) ) );
-        m_impl->exec( "BEGIN IMMEDIATE" );
-        a.bind( 1, assetId ); a.step();
+        if ( !m_impl->exec( "BEGIN IMMEDIATE" ) )
+            return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.transaction" ),
+                                                       QStringLiteral( "cannot begin transaction" ) ) );
+        a.bind( 1, assetId );
+        if ( !a.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.remove" ),
+                                                       QStringLiteral( "asset delete failed for %1" ).arg( assetId ) ) );
+        }
         const bool removed = sqlite3_changes( m_impl->db ) > 0;
-        al.bind( 1, assetId ); al.step();
-        t.bind( 1, assetId ); t.step();
-        m_impl->exec( "COMMIT" );
+        al.bind( 1, assetId );
+        if ( !al.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.remove" ),
+                                                       QStringLiteral( "alias delete failed for %1" ).arg( assetId ) ) );
+        }
+        t.bind( 1, assetId );
+        if ( !t.step() )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.remove" ),
+                                                       QStringLiteral( "tag delete failed for %1" ).arg( assetId ) ) );
+        }
+        if ( !m_impl->exec( "COMMIT" ) )
+        {
+            m_impl->exec( "ROLLBACK" );
+            return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.commit" ),
+                                                       QStringLiteral( "commit failed" ) ) );
+        }
         if ( !removed )
             return Result<void>::failure( catalogDiag( QStringLiteral( "catalog.unknown" ),
                                                        QStringLiteral( "no asset %1" ).arg( assetId ) ) );

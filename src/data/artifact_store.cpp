@@ -326,7 +326,12 @@ Result<ArtifactRecord> ArtifactStore::registerArtifact( const ArtifactRegistrati
     if ( artifactId.isEmpty() )
         artifactId = QUuid::createUuid().toString( QUuid::WithoutBraces );
 
-    m_impl->exec( "BEGIN IMMEDIATE", nullptr );
+    // The mutex is recursive: a caller may already hold an open transaction
+    // (nested register). A failed BEGIN here means we must not run the INSERT
+    // (it would join the caller's transaction) nor COMMIT it away.
+    if ( !m_impl->exec( "BEGIN IMMEDIATE", nullptr ) )
+        return Result<ArtifactRecord>::failure(
+            diag( QStringLiteral( "artifact.transaction" ), lastError( m_impl->db ) ) );
     {
         Stmt s( m_impl->db,
                 "INSERT INTO artifacts(artifact_id, logical_key, version, producer_fingerprint,"
@@ -361,7 +366,14 @@ Result<ArtifactRecord> ArtifactStore::registerArtifact( const ArtifactRegistrati
             return Result<ArtifactRecord>::failure( diag( QStringLiteral( "artifact.db" ), err ) );
         }
     }
-    m_impl->exec( "COMMIT", nullptr );
+    if ( !m_impl->exec( "COMMIT", nullptr ) )
+    {
+        // A failed COMMIT can leave the transaction active (e.g. SQLITE_BUSY):
+        // roll back so the connection never leaks its write lock.
+        m_impl->exec( "ROLLBACK", nullptr );
+        return Result<ArtifactRecord>::failure( diag( QStringLiteral( "artifact.commit" ),
+                                                      lastError( m_impl->db ) ) );
+    }
 
     // Fetch exactly the version just inserted — artifact_id is shared across
     // versions, so an id-only lookup may return an older row.
@@ -650,7 +662,9 @@ Result<void> ArtifactStore::forget( const QString &artifactId )
     if ( !isOpen() || artifactId.isEmpty() )
         return Result<void>::failure( diag( QStringLiteral( "artifact.invalid" ), QStringLiteral( "missing id" ) ) );
     std::lock_guard<std::recursive_mutex> lock( m_impl->mutex );
-    m_impl->exec( "BEGIN IMMEDIATE", nullptr );
+    if ( !m_impl->exec( "BEGIN IMMEDIATE", nullptr ) )
+        return Result<void>::failure( diag( QStringLiteral( "artifact.transaction" ),
+                                            lastError( m_impl->db ) ) );
     {
         Stmt d( m_impl->db, "DELETE FROM artifact_refs WHERE artifact_id=?", nullptr );
         Stmt a( m_impl->db, "DELETE FROM artifacts WHERE artifact_id=?", nullptr );
@@ -658,11 +672,14 @@ Result<void> ArtifactStore::forget( const QString &artifactId )
         {
             d.bind( 1, artifactId );
             a.bind( 1, artifactId );
-            const bool ok = d.step() && a.step() && sqlite3_changes( m_impl->db ) > 0;
-            if ( ok )
+            const bool ok = d.step() && a.step();
+            if ( ok && sqlite3_changes( m_impl->db ) > 0 )
             {
-                m_impl->exec( "COMMIT", nullptr );
-                return Result<void>::success();
+                if ( m_impl->exec( "COMMIT", nullptr ) )
+                    return Result<void>::success();
+                m_impl->exec( "ROLLBACK", nullptr );
+                return Result<void>::failure( diag( QStringLiteral( "artifact.commit" ),
+                                                    lastError( m_impl->db ) ) );
             }
         }
     }

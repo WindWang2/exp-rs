@@ -92,9 +92,14 @@ class RemoteDatasetPool
     qint64 openCount() const { return m_openCount.load(); }
 
   private:
-    RemoteDatasetPool() = default;
+    RemoteDatasetPool();
     struct Impl;
     Impl *m_impl = nullptr;
+    /// Allocated exactly once, in the constructor: the class is reachable
+    /// only through instance() (a magic static), so acquisition is fully
+    /// constructed before any thread can obtain it — no unsynchronized
+    /// lazy-init read of m_impl anywhere.
+    void allocateImpl();
     std::atomic<qint64> m_openCount{ 0 };
 };
 

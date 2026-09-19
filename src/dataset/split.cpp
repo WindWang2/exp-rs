@@ -740,12 +740,18 @@ QString splitManifestFingerprint( const SplitManifest &manifest )
     // The generation summary is excluded as DERIVED content (it is a pure
     // projection of config+assignments) — recomputing a fingerprint over a
     // reloaded manifest must yield the same value as at generation time,
-    // including for manifests stored before summaries existed.
+    // including for manifests stored before summaries existed. The note and
+    // the leakage summary are annotation/report fields, not content: leaving
+    // them in made the same content fingerprint differently depending on who
+    // persisted it (fold audits clear them, the store recomputes over the
+    // stored manifest), so identical content was rejected as a conflict.
     SplitManifest copy = manifest;
     copy.setFingerprint( QString() );
     copy.setManifestId( QString() );
     copy.setCreatedAtUtc( QDateTime() );
     copy.setSummary( QJsonObject() );
+    copy.setNote( QString() );
+    copy.setLeakageSummary( QJsonObject() );
     return makeDatasetFingerprint( copy.toJson() ).toHex();
 }
 

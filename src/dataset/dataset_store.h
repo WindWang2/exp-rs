@@ -252,7 +252,9 @@ class DatasetStore
                                                               int maxValues = 100 ) const;
 
     /// Cross-facet cells (e.g. class × region), SQL-side, bounded by
-    /// @p maxCells. Cells are "valueA\u001FvalueB" keys with counts.
+    /// @p maxCells. Cells are "valueA\u001FvalueB" keys with counts; a U+001F
+    /// inside a value is doubled so the separator stays unambiguous and two
+    /// distinct cells can never produce the same key.
     sicnu::data::Result<QVector<QPair<QString, qint64>>> facetCrossCounts(
         const DatasetVersionId &versionId, const QString &facetA, const QString &facetB,
         int maxCells = 1000 ) const;
