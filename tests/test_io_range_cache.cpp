@@ -11,6 +11,7 @@
  ***************************************************************************/
 
 #include "geospatial/remote/range_cache.h"
+#include "geospatial/remote/range_cache_disk.h"
 #include "geospatial/raster/raster_reader.h"
 #include "geospatial/raster/raster_writer.h"
 #include "geospatial/convert/raster_convert.h"
@@ -105,6 +106,19 @@ struct InstalledCache
   ~InstalledCache() { RemoteRangeCache::uninstall(); }
   InstalledCache( const InstalledCache & ) = delete;
   InstalledCache &operator=( const InstalledCache & ) = delete;
+};
+
+/// Same RAII contract for the process-wide disk store singleton: a failing
+/// REQUIRE in a case that configured it must not leave the store enabled.
+struct InstalledDiskStore
+{
+  InstalledDiskStore( const std::string &directory, std::uint64_t maxBytes )
+  {
+    RangeDiskBlockStore::configure( directory, maxBytes );
+  }
+  ~InstalledDiskStore() { RangeDiskBlockStore::configure( std::string(), 0 ); }
+  InstalledDiskStore( const InstalledDiskStore & ) = delete;
+  InstalledDiskStore &operator=( const InstalledDiskStore & ) = delete;
 };
 
 } // namespace
@@ -984,6 +998,65 @@ TEST_CASE( "the disk layer byte cap evicts LRU blocks without breaking reads",
     CHECK( reader.readWindow( { 1 }, { 0, 0, 256, 256 } ) == expectedTop );
     CHECK( reader.readWindow( { 1 }, { 512, 512, 256, 256 } ) == expectedFar );
   }
+}
+
+// ---------------------------------------------------------------------------
+// 9.0 M3 staging: concurrent publishers must all land under their final
+// "<block>.blk" names, byte-verifiable, with no ".tmp" residue — the first
+// direct concurrent exercise of RangeDiskBlockStore::putBlock. The Windows
+// branch of the temp-name PID source is guarded at COMPILE time by the
+// `sicnu_range_cache_disk_pid_guard` object target in tests/CMakeLists.txt
+// (#1055): it recompiles this TU with UCRT non-STDC names suppressed, so an
+// unguarded ::getpid() on the MSVC path fails the test build, not this case.
+// ---------------------------------------------------------------------------
+
+TEST_CASE( "concurrent disk publishes all land with no temp residue",
+           "[io][remote][range_cache][fabric9][disk][staging]" )
+{
+  const std::string dir = scratch( "disk_staging" );
+  const std::string diskDir = dir + "/blocks";
+  const std::string basis = "etag\nhttps://example.com/range-cache-staging\n\"stage-1\"";
+
+  constexpr int kPublishers = 24;
+  std::vector<std::vector<unsigned char>> payloads( kPublishers );
+  for ( int i = 0; i < kPublishers; ++i )
+    payloads[i].assign( 4096, static_cast<unsigned char>( i + 1 ) );
+
+  InstalledDiskStore store( diskDir, 16ull * 1024 * 1024 );
+  REQUIRE( RangeDiskBlockStore::enabled() );
+
+  std::vector<std::thread> publishers;
+  for ( int i = 0; i < kPublishers; ++i )
+  {
+    publishers.emplace_back( [ &, i ] {
+      RangeDiskBlockStore::putBlock( basis, static_cast<std::uint64_t>( i ),
+                                     payloads[i].data(), payloads[i].size() );
+    } );
+  }
+  for ( std::thread &publisher : publishers )
+    publisher.join();
+
+  CHECK( RangeDiskBlockStore::stats().puts == static_cast<std::uint64_t>( kPublishers ) );
+  for ( int i = 0; i < kPublishers; ++i )
+  {
+    std::vector<unsigned char> got;
+    REQUIRE( RangeDiskBlockStore::readBlock( basis, static_cast<std::uint64_t>( i ), got ) );
+    CHECK( got == payloads[i] );
+  }
+
+  int blocks = 0;
+  int temps = 0;
+  for ( const std::filesystem::directory_entry &entry :
+        std::filesystem::directory_iterator( diskDir ) )
+  {
+    const std::string name = entry.path().filename().string();
+    if ( name.size() >= 6 && name.substr( name.size() - 4 ) == ".blk" )
+      ++blocks;
+    if ( name.size() > 4 && name.substr( name.size() - 4 ) == ".tmp" )
+      ++temps;
+  }
+  CHECK( blocks == kPublishers );
+  CHECK( temps == 0 );
 }
 
 // ---------------------------------------------------------------------------

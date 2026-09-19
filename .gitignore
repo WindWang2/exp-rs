@@ -360,3 +360,7 @@ data/labs/_tmp/
 !.planning/scientific-workflow-compiler-11/
 .planning/scientific-workflow-compiler-11/*
 !.planning/scientific-workflow-compiler-11/*.md
+# ds41-range-cache-msvc (Track 15, #1055): track planning notes (markdown only; logs stay local).
+!.planning/ds41-range-cache-msvc/
+.planning/ds41-range-cache-msvc/*
+!.planning/ds41-range-cache-msvc/*.md
