@@ -293,7 +293,14 @@ TEST_CASE( "GovernanceStore asset removal keeps downstream lineage edges",
     // Unload the intermediate: its own provenance goes with it, but the
     // SURVIVING consumer (final) keeps the edge that explains its input
     // (issue #758-6: both-direction deletion truncated downstream provenance).
-    REQUIRE( store.removeAsset( QStringLiteral( "inter" ) ).operator bool() );
+    // Cascade is EXPLICIT here (12.0 removeAsset guard): the asset is still
+    // referenced by the downstream lineage edge, so the default policy now
+    // refuses — this test exercises the cascade path on purpose.
+    CHECK_FALSE( store.removeAsset( QStringLiteral( "inter" ) ).operator bool() );
+    REQUIRE( store
+                 .removeAsset( QStringLiteral( "inter" ),
+                               GovernanceStore::RemoveAssetPolicy::Cascade )
+                 .operator bool() );
 
     // "final" still explains where it came from: the edge (final ← inter)
     // survives even though the inter row is gone (upstream traversal returns
@@ -459,13 +466,36 @@ TEST_CASE( "GovernanceStore removeAsset leaves no phantom references",
     REQUIRE( store.linkRunOutput( QStringLiteral( "run-1" ), QStringLiteral( "a" ) ).operator bool() );
     REQUIRE( store.runById( QStringLiteral( "run-1" ) )->outputAssetIds.size() == 1 );
 
-    REQUIRE( store.removeAsset( QStringLiteral( "a" ) ).operator bool() );
+    // 12.0 removeAsset guard: the asset IS referenced (dataset member,
+    // result input, run output) — the default policy refuses and names the
+    // reference kind; the row survives untouched.
+    const auto refused = store.removeAsset( QStringLiteral( "a" ) );
+    CHECK_FALSE( refused.has_value() );
+    CHECK( refused.diagnostics().first().code == QLatin1String( "store.asset_referenced" ) );
+    REQUIRE( store.assetById( QStringLiteral( "a" ) ).has_value() );
+    CHECK( store.datasetById( ds.id.toString() )->memberAssetIds.size() == 1 );
+    CHECK( store.resultById( r.id.toString() )->inputs.size() == 1 );
+    CHECK( store.runById( QStringLiteral( "run-1" ) )->outputAssetIds.size() == 1 );
+    const QVector<GovernanceStore::AssetReference> references =
+        store.collectAssetReferences( QStringLiteral( "a" ) );
+    QStringList referenceKinds;
+    for ( const GovernanceStore::AssetReference &reference : references )
+        referenceKinds.append( reference.kind );
+    CHECK( referenceKinds.contains( QLatin1String( "dataset_member" ) ) );
+    CHECK( referenceKinds.contains( QLatin1String( "result_input" ) ) );
+    CHECK( referenceKinds.contains( QLatin1String( "run_output" ) ) );
 
-    // No reader reports the removed id any more.
+    // The explicit cascade (the documented escape hatch) still cleans up in
+    // one transaction: no reader reports the removed id any more.
+    REQUIRE( store
+                 .removeAsset( QStringLiteral( "a" ),
+                               GovernanceStore::RemoveAssetPolicy::Cascade )
+                 .operator bool() );
     CHECK( store.datasetById( ds.id.toString() )->memberAssetIds.isEmpty() );
     CHECK( store.resultById( r.id.toString() )->inputs.isEmpty() );
     CHECK( store.runById( QStringLiteral( "run-1" ) )->outputAssetIds.isEmpty() );
     CHECK( store.resultsDependingOnAsset( QStringLiteral( "a" ) ).isEmpty() );
+    CHECK( store.collectAssetReferences( QStringLiteral( "a" ) ).isEmpty() );
 }
 
 TEST_CASE( "GovernanceStore relationship writes roll back when a step fails",
