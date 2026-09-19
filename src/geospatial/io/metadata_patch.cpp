@@ -249,7 +249,8 @@ MetadataPatchReport applyMetadataPatch( const std::string &path, const std::vect
   }
 
   // ---- Phase 2: open for update (capability gate) and apply ---------------
-  CPLErrorStateBackuper errorBackuper( CPLQuietErrorHandler );
+  CPLErrorStateBackuper errorState;
+  CPLErrorHandlerPusher quietErrors( CPLQuietErrorHandler );
   GDALDataset *dataset = GDALDataset::Open( path.c_str(), GDAL_OF_UPDATE | GDAL_OF_RASTER );
   if ( !dataset )
   {
@@ -298,7 +299,8 @@ MetadataPatchReport applyMetadataPatch( const std::string &path, const std::vect
     expected.push_back( patch.value );
   GDALClose( dataset );
 
-  CPLErrorStateBackuper verifyBackuper( CPLQuietErrorHandler );
+  CPLErrorStateBackuper verifyState;
+  CPLErrorHandlerPusher verifyQuiet( CPLQuietErrorHandler );
   GDALDataset *verify = GDALDataset::Open( path.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER );
   if ( !verify )
     throw GeoError( ErrorCode::OpenFailed, "patch: verification open failed" );
