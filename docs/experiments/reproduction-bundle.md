@@ -12,3 +12,23 @@ BestEffort | Impossible with per-check reasons (see reproducibility.md).
 Validation reads the STORE side live: a dataset version that has vanished
 since export makes the replay Impossible - the bundle never vouches for
 what it cannot see.
+
+## Offline import (12.0)
+
+`ReproductionBundleImporter::importRun(options, hooks)` installs an exported
+bundle into an `ExperimentStore`:
+
+- Integrity FIRST: `checksums.txt` is verified against the bundle contents
+  before any document is trusted; the schema version is a hard gate.
+- Identity self-consistency: the recorded pins must reproduce the recorded
+  execution fingerprint.
+- The run is installed with status **Created** — the importing store never
+  observed the execution, so it never fabricates a terminal lifecycle.
+  `metrics.json` is installed beside it as evidence; the original run id is
+  preserved in the report (and as the run's `bundle:<id>` execution ref).
+- Duplicate ingest: a store that already holds a run with the same execution
+  fingerprint answers `alreadyPresent` and changes nothing.
+- `keepOriginalRunId` refuses (`run id already exists with a different
+  identity`) instead of overwriting an unrelated Created run.
+- Availability hooks are best-effort notes; an offline import is never
+  blocked by an unavailable model or algorithm.
