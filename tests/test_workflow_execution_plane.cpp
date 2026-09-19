@@ -406,3 +406,49 @@ TEST_CASE("workflowDefinitionFromJson rejects out-of-range enums (#614)", "[work
   REQUIRE_FALSE(workflowDefinitionFromJson(defJson, def, err));
   REQUIRE((err.find("host") != std::string::npos || err.find("kind") != std::string::npos));
 }
+
+TEST_CASE("workflowDefinitionFromJson survives wrong-typed meta.ui (issue #1038)",
+          "[workflow][definition]")
+{
+  // "meta":{"ui":{"x":"oops"}} and non-bool portAddToMap used to throw
+  // Json::LogicError out of the checkpoint recovery sweep (isMember asserts
+  // on non-objects, asDouble()/asBool() throw on wrong-typed leaves).
+  Json::Value defJson(Json::objectValue);
+  defJson["id"] = "wf:hostile_meta";
+  Json::Value steps(Json::arrayValue);
+  Json::Value s(Json::objectValue);
+  s["id"] = "s1";
+  s["operatorId"] = "test:fast_add_plane";
+  Json::Value meta(Json::objectValue);
+  Json::Value ui(Json::objectValue);
+  ui["x"] = "oops";                 // string, not a number
+  ui["y"] = Json::Value(Json::arrayValue);
+  Json::Value portAddToMap(Json::objectValue);
+  portAddToMap["out"] = Json::Value(Json::arrayValue); // not a bool
+  ui["portAddToMap"] = portAddToMap;
+  meta["ui"] = ui;
+  s["meta"] = meta;
+  steps.append(s);
+  defJson["steps"] = steps;
+
+  WorkflowDefinition def;
+  std::string err;
+  bool parsed = false;
+  REQUIRE_NOTHROW(parsed = workflowDefinitionFromJson(defJson, def, err));
+  REQUIRE(parsed);
+  REQUIRE(def.steps.size() == 1);
+
+  // Scalar meta (isMember on a non-object used to assert) and scalar ui.
+  Json::Value scalarMeta(Json::objectValue);
+  scalarMeta["id"] = "wf:scalar_meta";
+  Json::Value s2(Json::objectValue);
+  s2["id"] = "s2";
+  s2["operatorId"] = "test:fast_add_plane";
+  s2["meta"] = Json::Value(7);
+  steps.clear();
+  steps.append(s2);
+  scalarMeta["steps"] = steps;
+  WorkflowDefinition def2;
+  REQUIRE_NOTHROW(parsed = workflowDefinitionFromJson(scalarMeta, def2, err));
+  REQUIRE(parsed);
+}

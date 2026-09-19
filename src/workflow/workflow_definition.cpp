@@ -171,19 +171,26 @@ bool workflowDefinitionFromJson( const Json::Value &json, WorkflowDefinition &de
       else if ( stepVal.isMember( "verification" ) && stepVal["verification"].isString() )
         step.verificationPolicy = stepVal["verification"].asString();
 
-      if ( stepVal.isMember( "meta" ) && stepVal["meta"].isMember( "ui" ) )
+      // Type-checked before every cast (issue #1038): isMember() itself
+      // asserts on non-objects, and asDouble()/asBool() throw on wrong-typed
+      // leaves — one malformed checkpoint must not abort recovery/startup.
+      if ( stepVal.isMember( "meta" ) && stepVal["meta"].isObject() )
       {
         const auto &uiObj = stepVal["meta"]["ui"];
-        if ( uiObj.isMember( "x" ) )
-          step.uiMeta.x = uiObj["x"].asDouble();
-        if ( uiObj.isMember( "y" ) )
-          step.uiMeta.y = uiObj["y"].asDouble();
-        if ( uiObj.isMember( "portAddToMap" ) && uiObj["portAddToMap"].isObject() )
+        if ( uiObj.isObject() )
         {
-          const auto &mapObj = uiObj["portAddToMap"];
-          for ( const auto &pName : mapObj.getMemberNames() )
+          if ( uiObj.isMember( "x" ) && uiObj["x"].isNumeric() )
+            step.uiMeta.x = uiObj["x"].asDouble();
+          if ( uiObj.isMember( "y" ) && uiObj["y"].isNumeric() )
+            step.uiMeta.y = uiObj["y"].asDouble();
+          if ( uiObj.isMember( "portAddToMap" ) && uiObj["portAddToMap"].isObject() )
           {
-            step.uiMeta.portAddToMap[pName] = mapObj[pName].asBool();
+            const auto &mapObj = uiObj["portAddToMap"];
+            for ( const auto &pName : mapObj.getMemberNames() )
+            {
+              if ( mapObj[pName].isBool() )
+                step.uiMeta.portAddToMap[pName] = mapObj[pName].asBool();
+            }
           }
         }
       }

@@ -57,6 +57,27 @@ TEST_CASE( "external process enforces the timeout kill ladder", "[sdk][external]
     REQUIRE( result.durationMs < 30000 );
 }
 
+TEST_CASE( "exited child with a pipe-holding descendant is not a timeout (issue #1041)",
+           "[sdk][external]" )
+{
+    // The shell exits immediately; the backgrounded sleep inherits the
+    // stdout/stderr write ends and keeps the pipes open past the exit. The
+    // pre-fix loop broke only on pipe EOF, spun to the deadline and reported
+    // timedOut for a child that had completed successfully.
+    ExternalProcessRequest request;
+    request.argv = { "/bin/sh", "-c", "echo tail-output; sleep 5 & exit 0" };
+    request.timeoutSeconds = 1;
+    const auto result = ExternalProcess::run( request );
+    REQUIRE( result.started );
+    REQUIRE_FALSE( result.timedOut );
+    REQUIRE_FALSE( result.cancelled );
+    REQUIRE( result.exitCode == 0 );
+    // Bounded post-exit drain: the tail is collected, and the descendant
+    // cannot stall run() past the grace window.
+    REQUIRE( result.stdOut.find( "tail-output" ) != std::string::npos );
+    REQUIRE( result.durationMs < 10000 );
+}
+
 TEST_CASE( "external process honours cooperative cancellation", "[sdk][external]" )
 {
     ExternalProcessRequest request;

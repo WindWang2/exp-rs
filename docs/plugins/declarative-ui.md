@@ -76,6 +76,18 @@ serialized-value cap (`maxEventValueBytes`, 4096 by default). Refusals are
 typed E6010 and never touch the channel — the rendered surface stays
 healthy.
 
+The `ui.describe` answer is re-validated HOST-SIDE as well (the worker is
+untrusted): `PluginHostProcessRuntime::describeUiSchema` refuses a schema
+that fails `validatePluginUiSchema` with a typed E5005 before it can reach
+widget construction, and `PluginUiSchemaRenderer::attachPluginSchema`
+re-validates at its own boundary. The renderer additionally bounds group
+recursion depth and total rendered controls, and every state value applied
+to a host-owned widget is type-guarded.
+
+`ui.invoke` results follow the runtime envelope
+(`{ok, response:{state?...}}`); the renderer unwraps `response` before
+applying `state` to the widgets.
+
 ## Accessibility metadata
 
 Controls accept optional `description` and `accessibilityLabel` bounded

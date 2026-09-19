@@ -47,6 +47,9 @@ Json::Value event( const char *contributionId, const char *controlId, const char
 }
 
 /// Fake plugin: records delivered events, answers clicks with a state patch.
+/// It answers with the PRODUCTION envelope shape ({ok, response:{...}}), the
+/// same object PluginHostProcessRuntime::invokeUi returns — the renderer must
+/// unwrap one level (#1040; a bare {state} fake masked the bug).
 class FakeDelegate : public UiInvokeDelegate
 {
 public:
@@ -58,12 +61,39 @@ public:
         lastEvent = event;
         delivered.fetch_add( 1 );
         Json::Value response( Json::objectValue );
+        response["ok"] = true;
         if ( event.get( "eventType", "" ).asString() == "clicked" )
         {
+            Json::Value providerResponse( Json::objectValue );
             Json::Value state( Json::objectValue );
             state["name"] = "clicked-response";
-            response["state"] = state;
+            providerResponse["state"] = state;
+            response["response"] = providerResponse;
         }
+        return response;
+    }
+};
+
+/// Hostile plugin: every answer carries a wrong-typed state value. Pre-fix
+/// the combo applyValue called asString() on it from the queued GUI lambda
+/// (uncaught Json::LogicError -> terminate, issue #1039).
+class HostileStateDelegate : public UiInvokeDelegate
+{
+public:
+    std::atomic<int> delivered{ 0 };
+
+    Json::Value invoke( const Json::Value &event ) override
+    {
+        (void)event;
+        delivered.fetch_add( 1 );
+        Json::Value state( Json::objectValue );
+        state["mode"] = Json::Value( Json::arrayValue );
+        state["name"] = Json::Value( Json::objectValue );
+        Json::Value providerResponse( Json::objectValue );
+        providerResponse["state"] = state;
+        Json::Value response( Json::objectValue );
+        response["ok"] = true;
+        response["response"] = providerResponse;
         return response;
     }
 };
@@ -223,5 +253,141 @@ TEST_CASE( "renderer refuses a schema with no attachable surface", "[uischemahos
     QString error;
     REQUIRE_FALSE( renderer.attachPluginSchema( "org.test.empty", schema,
                                                 std::make_unique<FakeDelegate>(), error ) );
+    renderer.setShellSink( nullptr );
+}
+
+TEST_CASE( "renderer refuses unvalidated hostile schemas host-side (issue #1039)",
+           "[uischemahost]" )
+{
+    AppFixture fixture;
+    auto &renderer = *PluginUiSchemaRenderer::instance();
+    TestShellSink sink;
+    renderer.setShellSink( &sink );
+
+    SECTION( "wrong-typed control fields never reach buildControls" )
+    {
+        // Pre-fix: control.get("multiline", false).asBool() on an object and
+        // .asDouble() on a string threw Json::LogicError through the GUI
+        // thread. The host-side re-validation must refuse the whole schema.
+        Json::Value schema( Json::objectValue );
+        schema["version"] = 1;
+        Json::Value page( Json::objectValue );
+        page["id"] = "page.hostile";
+        page["title"] = "Hostile";
+        Json::Value controls( Json::arrayValue );
+        Json::Value text( Json::objectValue );
+        text["id"] = "name";
+        text["type"] = "text";
+        text["multiline"] = Json::Value( Json::objectValue );
+        controls.append( text );
+        Json::Value number( Json::objectValue );
+        number["id"] = "level";
+        number["type"] = "number";
+        number["minimum"] = "oops";
+        controls.append( number );
+        page["controls"] = controls;
+        Json::Value pages( Json::arrayValue );
+        pages.append( page );
+        schema["settingsPages"] = pages;
+
+        QString error;
+        REQUIRE_FALSE( renderer.attachPluginSchema( "org.test.hostile", schema,
+                                                    std::make_unique<FakeDelegate>(), error ) );
+        REQUIRE_FALSE( error.isEmpty() );
+        REQUIRE_FALSE( renderer.hasPluginUi( "org.test.hostile" ) );
+        REQUIRE( sink.settingsPage == nullptr );
+    }
+
+    SECTION( "unbounded group nesting is refused, not recursed" )
+    {
+        // Pre-fix: buildControls recursed once per group level with no bound
+        // (~30 B/level inside the frame cap -> stack exhaustion).
+        Json::Value control( Json::objectValue );
+        control["id"] = "leaf";
+        control["type"] = "label";
+        control["label"] = "Leaf";
+        for ( int depth = 0; depth < 64; ++depth )
+        {
+            Json::Value group( Json::objectValue );
+            group["id"] = "g" + std::to_string( depth );
+            group["type"] = "group";
+            Json::Value children( Json::arrayValue );
+            children.append( control );
+            group["controls"] = children;
+            control = group;
+        }
+        Json::Value page( Json::objectValue );
+        page["id"] = "page.deep";
+        page["title"] = "Deep";
+        Json::Value controls( Json::arrayValue );
+        controls.append( control );
+        page["controls"] = controls;
+        Json::Value pages( Json::arrayValue );
+        pages.append( page );
+        Json::Value schema( Json::objectValue );
+        schema["version"] = 1;
+        schema["settingsPages"] = pages;
+
+        QString error;
+        REQUIRE_FALSE( renderer.attachPluginSchema( "org.test.deep", schema,
+                                                    std::make_unique<FakeDelegate>(), error ) );
+        REQUIRE_FALSE( error.isEmpty() );
+        REQUIRE_FALSE( renderer.hasPluginUi( "org.test.deep" ) );
+    }
+
+    renderer.setShellSink( nullptr );
+}
+
+TEST_CASE( "wrong-typed state values are ignored, never thrown (issue #1039)",
+           "[uischemahost]" )
+{
+    AppFixture fixture;
+    auto &renderer = *PluginUiSchemaRenderer::instance();
+    TestShellSink sink;
+    renderer.setShellSink( &sink );
+
+    // Valid schema plus a combo, so the hostile state has real targets.
+    Json::Value schema = buildSchema();
+    Json::Value combo( Json::objectValue );
+    combo["id"] = "mode";
+    combo["type"] = "combo";
+    combo["label"] = "Mode";
+    Json::Value option( Json::objectValue );
+    option["value"] = "a";
+    option["label"] = "A";
+    Json::Value options( Json::arrayValue );
+    options.append( option );
+    combo["options"] = options;
+    schema["settingsPages"][0]["controls"].append( combo );
+
+    auto delegate = std::make_unique<HostileStateDelegate>();
+    HostileStateDelegate *delegatePtr = delegate.get();
+    QString error;
+    REQUIRE( renderer.attachPluginSchema( "org.test.hostile-state", schema, std::move( delegate ),
+                                          error ) );
+
+    auto *page = sink.settingsPage;
+    REQUIRE( page != nullptr );
+    auto *button = page->findChild<QPushButton *>();
+    REQUIRE( button != nullptr );
+    button->click();
+    for ( int i = 0; i < 100 && delegatePtr->delivered.load() < 1; ++i )
+    {
+        QApplication::processEvents();
+        std::this_thread::sleep_for( std::chrono::milliseconds( 10 ) );
+    }
+    REQUIRE( delegatePtr->delivered.load() >= 1 );
+    // Pre-fix the queued applyState lambda called asString() on the array and
+    // terminated the process here; the guards must simply ignore the value.
+    for ( int i = 0; i < 10; ++i )
+    {
+        QApplication::processEvents();
+        std::this_thread::sleep_for( std::chrono::milliseconds( 5 ) );
+    }
+    auto *comboWidget = page->findChild<QComboBox *>();
+    REQUIRE( comboWidget != nullptr );
+    REQUIRE( comboWidget->currentIndex() == 0 );
+
+    renderer.releasePluginUi( "org.test.hostile-state" );
     renderer.setShellSink( nullptr );
 }

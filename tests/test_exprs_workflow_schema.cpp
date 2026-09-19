@@ -69,6 +69,16 @@ TEST_CASE( "structural problems are diagnosed", "[workflow][schema]" )
         })" );
         REQUIRE_FALSE( validateWorkflowDocument( document, log ) );
     }
+    SECTION( "wrong-typed step id fails typed instead of throwing (issue #1038)" )
+    {
+        const auto document = parse( R"({
+            "schema_version":1,"id":"x","steps":[{"id":{},"operator":"rs:ndvi"}]
+        })" );
+        bool valid = true;
+        REQUIRE_NOTHROW( valid = validateWorkflowDocument( document, log ) );
+        REQUIRE_FALSE( valid );
+        REQUIRE( log.hasErrors() );
+    }
 }
 
 TEST_CASE( "builder produces valid public documents", "[workflow][builder]" )

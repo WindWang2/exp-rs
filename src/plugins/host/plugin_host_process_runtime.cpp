@@ -476,8 +476,41 @@ Json::Value PluginHostProcessRuntime::describeUiSchema( const std::string &plugi
                  "ui.describe failed: " + outcome.error.message, pluginId );
         return result;
     }
+    // Host-side re-validation (issue #1039): the schema comes from the
+    // UNTRUSTED worker process, so the host never trusts the worker's own
+    // validation. A hostile or buggy schema must fail typed here — an
+    // unguarded asBool()/asDouble() on the GUI thread would otherwise
+    // terminate the application, and unbounded group nesting would exhaust
+    // the stack.
+    exprs::PluginUiSchemaParseResult validated;
+    try
+    {
+        validated = exprs::validatePluginUiSchema( outcome.result["schema"] );
+    }
+    catch ( const std::exception &exception )
+    {
+        result["ok"] = false;
+        result["code"] = "E5005";
+        result["error"] = std::string( "worker UI schema validation threw: " )
+                          + exception.what();
+        log.add( PluginDiagnosticCode::IpcProtocolError, PluginDiagnosticSeverity::Warning,
+                 result["error"].asString(), pluginId );
+        return result;
+    }
+    if ( !validated.ok() )
+    {
+        std::string detail;
+        for ( const std::string &error : validated.errors )
+            detail += ( detail.empty() ? "" : "; " ) + error;
+        result["ok"] = false;
+        result["code"] = "E5005";
+        result["error"] = "worker UI schema failed host-side validation: " + detail;
+        log.add( PluginDiagnosticCode::IpcProtocolError, PluginDiagnosticSeverity::Warning,
+                 result["error"].asString(), pluginId );
+        return result;
+    }
     result["ok"] = true;
-    result["schema"] = outcome.result["schema"];
+    result["schema"] = validated.normalized;
     return result;
 }
 

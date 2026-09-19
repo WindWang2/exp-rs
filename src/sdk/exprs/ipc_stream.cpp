@@ -145,6 +145,11 @@ public:
             }
             if ( available > 0 )
             {
+                // close() may have released mRead while this thread was in
+                // PeekNamedPipe: never issue ReadFile on a possibly recycled
+                // handle (issue #1036 — the stream now owns the handles).
+                if ( mClosed )
+                    return -1;
                 DWORD chunk = available;
                 if ( chunk > static_cast<DWORD>( cap ) )
                     chunk = static_cast<DWORD>( cap );
@@ -172,6 +177,13 @@ public:
         size_t written = 0;
         while ( written < len )
         {
+            // Re-checked per chunk: close() releases mWrite, and a write on a
+            // possibly recycled handle must not be attempted (issue #1036).
+            if ( mClosed )
+            {
+                error = "handle stream closed";
+                return false;
+            }
             DWORD chunk = static_cast<DWORD>( len - written );
             DWORD wrote = 0;
             if ( !WriteFile( mWrite, data + written, chunk, &wrote, nullptr ) )
@@ -191,11 +203,24 @@ public:
 
     void close() override
     {
-        // Break the pipe from the write side so a blocked peer read fails;
-        // handles themselves are owned by the session (not closed here).
-        mClosed = true;
+        // The stream OWNS both pipe ends (issue #1036): every session
+        // lifecycle (close / kill / destruction) must release them or the
+        // host descriptor table drains across worker respawns. The exchange
+        // elects exactly one closer, so a concurrent close() cannot
+        // double-CloseHandle a recycled value.
+        if ( mClosed.exchange( true ) )
+            return;
+        // Members are deliberately NOT reset: readSome/writeAll may run on
+        // peer threads and read them concurrently; the exchange above already
+        // guarantees each OS handle is closed exactly once.
         if ( mWrite != INVALID_HANDLE_VALUE )
-            CancelIoEx( mWrite, nullptr );
+        {
+            // Break the pipe from the write side so a blocked peer read fails.
+            ::CancelIoEx( mWrite, nullptr );
+            ::CloseHandle( mWrite );
+        }
+        if ( mRead != INVALID_HANDLE_VALUE )
+            ::CloseHandle( mRead );
     }
 
     std::string lastError() const override { return mError; }
@@ -236,6 +261,11 @@ public:
             mError = std::string( "poll failed: " ) + std::strerror( errno );
             return -1;
         }
+        // close() may have released (and another thread may have RECYCLED)
+        // mRead while this thread was in poll(): never read a descriptor the
+        // stream no longer owns (issue #1036 — the stream now owns the fds).
+        if ( mClosed )
+            return -1;
         const ssize_t n = ::read( mRead, data, cap );
         if ( n > 0 )
             return static_cast<int>( n );
@@ -260,6 +290,14 @@ public:
         size_t written = 0;
         while ( written < len )
         {
+            // Re-checked per chunk: close() releases mWrite, and a write on a
+            // possibly recycled descriptor must not be attempted (issue
+            // #1036).
+            if ( mClosed )
+            {
+                error = "handle stream closed";
+                return false;
+            }
             const ssize_t n = ::write( mWrite, data + written, len - written );
             if ( n > 0 )
             {
@@ -281,7 +319,22 @@ public:
         return true;
     }
 
-    void close() override { mClosed = true; }
+    void close() override
+    {
+        // The stream OWNS both pipe ends (issue #1036): every session
+        // lifecycle (close / kill / destruction) must release them or the
+        // host descriptor table drains across worker respawns. The exchange
+        // elects exactly one closer, so a concurrent close() cannot
+        // double-close a recycled descriptor. Members are deliberately NOT
+        // reset: readSome/writeAll run on peer threads and read them
+        // concurrently.
+        if ( mClosed.exchange( true ) )
+            return;
+        if ( mRead >= 0 )
+            ::close( mRead );
+        if ( mWrite >= 0 )
+            ::close( mWrite );
+    }
     std::string lastError() const override { return mError; }
 
 private:

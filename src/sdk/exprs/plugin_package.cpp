@@ -458,15 +458,26 @@ bool PluginPackage::install( const std::string &sourceDir, std::string &installe
     }
     if ( packageJson.isObject() && packageJson.isMember( "sbom" ) )
     {
-        PluginDiagnostic note;
-        note.code = PluginDiagnosticCode::None;
-        note.severity = PluginDiagnosticSeverity::Info;
-        note.pluginId = manifest.id;
-        note.message = "package carries SBOM metadata (format "
-                           + packageJson[ "sbom" ].get( "format", "" ).asString() + ", path "
-                           + packageJson[ "sbom" ].get( "path", "" ).asString()
-                           + "); carried as metadata, integrity-only contract";
-        log.add( note );
+        // Type-checked before any cast (issue #1038): Json::Value::get() on a
+        // non-object sbom aborted (JSON_ASSERT) / read wild memory in NDEBUG,
+        // crashing `plugin install` mid-transaction. A malformed informational
+        // section must not abort the transaction.
+        const Json::Value &sbom = packageJson[ "sbom" ];
+        const auto sbomString = [&sbom]( const char *key ) -> std::string {
+            return sbom.isMember( key ) && sbom[ key ].isString() ? sbom[ key ].asString()
+                                                                  : std::string();
+        };
+        if ( sbom.isObject() )
+        {
+            PluginDiagnostic note;
+            note.code = PluginDiagnosticCode::None;
+            note.severity = PluginDiagnosticSeverity::Info;
+            note.pluginId = manifest.id;
+            note.message = "package carries SBOM metadata (format "
+                               + sbomString( "format" ) + ", path " + sbomString( "path" )
+                               + "); carried as metadata, integrity-only contract";
+            log.add( note );
+        }
     }
 
     // Atomic swap with rollback: previous install moves aside, staging

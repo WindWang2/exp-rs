@@ -916,6 +916,13 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
     bool cancelled = false;
     bool timedOut = false;
     bool reaped = false;
+    bool exited = false;
+    // A grandchild holding inherited write ends can keep the pipes open
+    // forever after the child exited (daemonize/double-fork tools); bound the
+    // post-exit drain so run() always returns and a completed child is never
+    // misreported as timedOut (issue #1041, mirrors the Windows
+    // kPostExitDrainGraceMs).
+    std::chrono::steady_clock::time_point postExitDrainDeadline{};
     const int timeoutSeconds = request.timeoutSeconds > 0 ? request.timeoutSeconds : 3600;
     const auto deadline = startTime + std::chrono::seconds( timeoutSeconds );
 
@@ -986,10 +993,42 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         if ( readFds[0] < 0 && readFds[1] < 0 && readFds[2] < 0 )
             break;
 
-        if ( !cancelled && request.isCancelled && request.isCancelled() )
-            cancelled = true;
-        if ( !timedOut && std::chrono::steady_clock::now() >= deadline )
-            timedOut = true;
+        // Child liveness (WNOHANG): the normal loop must notice the child's
+        // exit even while a descendant keeps the pipes open — pipe EOF alone
+        // is NOT an exit signal (issue #1041).
+        if ( !exited )
+        {
+            int status = 0;
+            const pid_t done = ::waitpid( pid, &status, WNOHANG );
+            if ( done == pid )
+            {
+                reapStatus( status );
+                exited = true;
+                postExitDrainDeadline = std::chrono::steady_clock::now()
+                                        + std::chrono::milliseconds( kPostExitDrainGraceMs );
+            }
+            else if ( done < 0 && errno == ECHILD )
+            {
+                // Auto-reaped (SIGCHLD ignored by the embedding process): the
+                // child is gone and no status can be collected — report the
+                // unknown status honestly (exitCode stays -1) instead of
+                // inventing one from an uninitialized waitpid buffer.
+                reaped = true;
+                exited = true;
+                postExitDrainDeadline = std::chrono::steady_clock::now()
+                                        + std::chrono::milliseconds( kPostExitDrainGraceMs );
+            }
+        }
+
+        // Timeout/cancel only govern a LIVE child; once it exited, the
+        // bounded drain below decides when to stop (mirrors Windows).
+        if ( !exited )
+        {
+            if ( !cancelled && request.isCancelled && request.isCancelled() )
+                cancelled = true;
+            if ( !timedOut && std::chrono::steady_clock::now() >= deadline )
+                timedOut = true;
+        }
 
         if ( cancelled || timedOut )
         {
@@ -1025,6 +1064,12 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
             break;
         }
 
+        // Child exited but a descendant still holds the write ends: drain
+        // buffered tail output for a bounded grace, then stop — never spin
+        // to the (possibly hour-long) timeout (issue #1041).
+        if ( exited && std::chrono::steady_clock::now() >= postExitDrainDeadline )
+            break;
+
         struct pollfd fds[3];
         int count = 0;
         for ( int candidate : readFds )
@@ -1038,8 +1083,12 @@ ExternalProcessResult ExternalProcess::run( const ExternalProcessRequest &reques
         }
         if ( count == 0 )
             break;
+        // After the child exited the drain grace (not the request deadline)
+        // bounds the wait; using the deadline could busy-poll at 1 ms once it
+        // has passed.
+        const auto until = exited ? postExitDrainDeadline : deadline;
         const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-            deadline - std::chrono::steady_clock::now() );
+            until - std::chrono::steady_clock::now() );
         const int pollTimeout = static_cast<int>(
             std::min<long long>( 200, std::max<long long>( 1, remaining.count() ) ) );
         const int ready = ::poll( fds, static_cast<nfds_t>( count ), pollTimeout );

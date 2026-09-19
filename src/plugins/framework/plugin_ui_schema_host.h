@@ -129,8 +129,12 @@ private:
     void enqueueEvent( const QString &pluginId, const Json::Value &event );
     void deliveryLoop();
     void applyState( RenderedRecord &record, const Json::Value &state );
+    /// @p depth and @p renderedControls are the host-side render bounds: the
+    /// schema is validated before it reaches here, but a caller that bypasses
+    /// validation must still not exhaust the GUI thread (issue #1039).
     void buildControls( QWidget *parent, const Json::Value &controls, const QString &contributionId,
-                        const QString &pluginId, RenderedRecord &record );
+                        const QString &pluginId, RenderedRecord &record, int depth,
+                        size_t &renderedControls );
 
     UiShellSink *mShellSink = nullptr;
     std::vector<std::shared_ptr<RenderedRecord>> mRecords;

@@ -304,6 +304,78 @@ TEST_CASE( "manifest load from file reports structured errors", "[plugin][manife
         REQUIRE_FALSE( loadManifestFromFile( path, manifest, error ) );
         REQUIRE( error.code == PluginDiagnosticCode::ManifestUnknownVersion );
     }
+    SECTION( "wrong-typed manifest version is a typed field error (issue #1038)" )
+    {
+        const std::string path = writeTemp( "bad-version.json", R"({"manifest_version":"1"})" );
+        REQUIRE_FALSE( loadManifestFromFile( path, manifest, error ) );
+        REQUIRE( error.code == PluginDiagnosticCode::ManifestInvalidField );
+        REQUIRE( error.field == "manifest_version" );
+    }
+}
+
+TEST_CASE( "wrong-typed manifest fields fail typed, never throw (issue #1038)",
+           "[plugin][manifest]" )
+{
+    // A malformed plugin.json used to throw Json::LogicError out of
+    // PluginManifest::fromJson -> PluginDiscovery::scan -> application death
+    // at startup/refresh. Every listed conversion is type-guarded and the
+    // whole parse sits behind a totality boundary.
+    auto parse = []( const std::string &jsonText ) {
+        Json::Value root;
+        Json::Reader reader;
+        REQUIRE( reader.parse( jsonText, root, false ) );
+        PluginManifest manifest;
+        PluginDiagnostic error;
+        bool ok = false;
+        REQUIRE_NOTHROW( ok = PluginManifest::fromJson( root, manifest, error ) );
+        return std::make_tuple( ok, error );
+    };
+
+    SECTION( "manifest_version as a string" )
+    {
+        auto [ok, error] = parse( R"({"manifest_version":"1"})" );
+        REQUIRE_FALSE( ok );
+        REQUIRE( error.code == PluginDiagnosticCode::ManifestInvalidField );
+        REQUIRE( error.field == "manifest_version" );
+        REQUIRE_FALSE( error.message.empty() );
+    }
+    SECTION( "id as an array" )
+    {
+        auto [ok, error] = parse( R"({"id":[]})" );
+        REQUIRE_FALSE( ok );
+        REQUIRE( error.code == PluginDiagnosticCode::ManifestInvalidField );
+        REQUIRE( error.field == "id" );
+    }
+    SECTION( "abi_version as a string" )
+    {
+        auto [ok, error] = parse( R"({"abi_version":"1"})" );
+        REQUIRE_FALSE( ok );
+        REQUIRE( error.field == "abi_version" );
+    }
+    SECTION( "entrypoint_kind as an object" )
+    {
+        auto [ok, error] = parse( R"({"entrypoint_kind":{}})" );
+        REQUIRE_FALSE( ok );
+        REQUIRE( error.field == "entrypoint_kind" );
+    }
+    SECTION( "runtime as an array" )
+    {
+        auto [ok, error] = parse( R"({"runtime":[]})" );
+        REQUIRE_FALSE( ok );
+        REQUIRE( error.field == "runtime" );
+    }
+    SECTION( "residual sub-parser type error is converted, not thrown" )
+    {
+        // supports_cancel: [] throws inside ManifestOperator::fromJson; the
+        // fromJson totality boundary must answer false with a diagnostic.
+        auto [ok, error] = parse( R"({
+            "id": "org.example.bad",
+            "operators": [{ "id": "bad:op", "display_name": "Bad",
+                            "supports_cancel": [] }]
+        })" );
+        REQUIRE_FALSE( ok );
+        REQUIRE_FALSE( error.message.empty() );
+    }
 }
 
 TEST_CASE( "validator enforces the manifest contract", "[plugin][validator]" )

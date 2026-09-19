@@ -307,6 +307,28 @@ TEST_CASE( "staged install verifies declared checksums with rollback", "[plugin]
     exprs::PluginManifest survivor;
     REQUIRE( exprs::loadManifestFromFile( installed + "/plugin.json", survivor, parseError ) );
     REQUIRE( survivor.version == "2.0.0" );
+
+    // A WRONG-TYPED sbom (string, not object) is informational metadata: it
+    // must not abort the install transaction (issue #1038 — Json::Value::get
+    // on a non-object aborted/UB'd mid-install).
+    {
+        std::ofstream manifest( source + "/plugin.json", std::ios::trunc );
+        manifest << R"({
+            "manifest_version": 1,
+            "id": "org.test.ck",
+            "name": "CK",
+            "version": "4.0.0",
+            "api_version": ")" << EXP_RS_PLUGIN_API_VERSION << R"(",
+            "abi_version": 1,
+            "entrypoint_kind": "manifest",
+            "operators": [],
+            "package": { "sbom": "cyclonedx" }
+        })";
+    }
+    log = PluginDiagnosticLog();
+    REQUIRE( PluginPackage::install( source, installed, log ) );
+    REQUIRE( std::filesystem::exists( installed + "/plugin.json" ) );
+
     // No staging leftovers.
     REQUIRE( !std::filesystem::exists(
         exprs::PluginDiscovery::userPluginRoot() + "/.staging/org.test.ck" ) );

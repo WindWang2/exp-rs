@@ -20,6 +20,27 @@ std::string requireString( const Json::Value &object, const char *key, std::stri
     }
     return value.asString();
 }
+
+/// Reads an optional top-level string field with a TYPE-CHECKED cast (issue
+/// #1038): JsonCpp asString() throws LogicError on wrong-typed values, and
+/// that exception used to escape discovery/startup instead of producing a
+/// typed diagnostic. Absent fields leave @p target untouched.
+bool readOptionalString( const Json::Value &object, const char *field, std::string &target,
+                         PluginDiagnostic &error )
+{
+    if ( !object.isMember( field ) )
+        return true;
+    const Json::Value &value = object[ field ];
+    if ( !value.isString() )
+    {
+        error.code = PluginDiagnosticCode::ManifestInvalidField;
+        error.field = field;
+        error.message = std::string( "field '" ) + field + "' must be a string";
+        return false;
+    }
+    target = value.asString();
+    return true;
+}
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -599,8 +620,12 @@ Json::Value PluginManifest::toJson() const
     return json;
 }
 
-bool PluginManifest::fromJson( const Json::Value &json, PluginManifest &out,
-                               PluginDiagnostic &error )
+namespace {
+/// Body of PluginManifest::fromJson, split out so the public entry point can
+/// convert any residual JsonCpp type error into a typed diagnostic (issue
+/// #1038: a malformed manifest must never throw through discovery/startup).
+bool parsePluginManifestObject( const Json::Value &json, PluginManifest &out,
+                                PluginDiagnostic &error )
 {
     if ( !json.isObject() )
     {
@@ -609,23 +634,42 @@ bool PluginManifest::fromJson( const Json::Value &json, PluginManifest &out,
         return false;
     }
     out = PluginManifest();
+    // Every top-level field is TYPE-CHECKED before its cast (issue #1038):
+    // `"manifest_version": "1"` or `"id": [...]` used to throw out of
+    // PluginDiscovery::scan() and kill the application at startup/refresh.
+    if ( json.isMember( "manifest_version" ) && !json["manifest_version"].isIntegral() )
+    {
+        error.code = PluginDiagnosticCode::ManifestInvalidField;
+        error.field = "manifest_version";
+        error.message = "manifest_version must be an integer";
+        return false;
+    }
+    if ( json.isMember( "abi_version" ) && !json["abi_version"].isIntegral() )
+    {
+        error.code = PluginDiagnosticCode::ManifestInvalidField;
+        error.field = "abi_version";
+        error.message = "abi_version must be an integer";
+        return false;
+    }
     out.manifestVersion = json.get( "manifest_version", 0 ).asInt();
-    out.id = json.get( "id", "" ).asString();
-    out.name = json.get( "name", "" ).asString();
-    out.version = json.get( "version", "" ).asString();
-    out.apiVersion = json.get( "api_version", "" ).asString();
     out.abiVersion = json.get( "abi_version", 0 ).asInt();
-    out.description = json.get( "description", "" ).asString();
-    out.vendor = json.get( "vendor", "" ).asString();
-    out.license = json.get( "license", "" ).asString();
+    if ( !readOptionalString( json, "id", out.id, error )
+         || !readOptionalString( json, "name", out.name, error )
+         || !readOptionalString( json, "version", out.version, error )
+         || !readOptionalString( json, "api_version", out.apiVersion, error )
+         || !readOptionalString( json, "description", out.description, error )
+         || !readOptionalString( json, "vendor", out.vendor, error )
+         || !readOptionalString( json, "license", out.license, error )
+         || !readOptionalString( json, "entrypoint", out.entrypoint, error ) )
+        return false;
     for ( const Json::Value &platform : json["platforms"] )
     {
         if ( platform.isString() )
             out.platforms.push_back( platform.asString() );
     }
-    out.entrypoint = json.get( "entrypoint", "" ).asString();
-    std::string kindError;
-    const std::string kindName = json.get( "entrypoint_kind", "native" ).asString();
+    std::string kindName = "native";
+    if ( !readOptionalString( json, "entrypoint_kind", kindName, error ) )
+        return false;
     if ( !entrypointKindFromName( kindName, out.entrypointKind ) )
     {
         error.code = PluginDiagnosticCode::ManifestInvalidField;
@@ -649,7 +693,9 @@ bool PluginManifest::fromJson( const Json::Value &json, PluginManifest &out,
         if ( capability.isString() )
             out.capabilities.push_back( capability.asString() );
     }
-    const std::string runtimeName = json.get( "runtime", "in-process" ).asString();
+    std::string runtimeName = "in-process";
+    if ( !readOptionalString( json, "runtime", runtimeName, error ) )
+        return false;
     if ( !pluginRuntimeKindFromName( runtimeName, out.runtime ) )
     {
         // Lenient here (forward compatibility); the validator refuses unknown
@@ -750,6 +796,27 @@ bool PluginManifest::fromJson( const Json::Value &json, PluginManifest &out,
     }
     return true;
 }
+} // namespace
+
+bool PluginManifest::fromJson( const Json::Value &json, PluginManifest &out,
+                               PluginDiagnostic &error )
+{
+    // Totality boundary (issue #1038): every explicitly type-checked field
+    // fails typed above; this catch converts any residual JsonCpp type error
+    // (a sub-parser slipping on hostile input) into a typed diagnostic
+    // instead of an exception escaping into discovery/startup.
+    try
+    {
+        return parsePluginManifestObject( json, out, error );
+    }
+    catch ( const Json::Exception &exception )
+    {
+        error.code = PluginDiagnosticCode::ManifestInvalidJson;
+        error.message = std::string( "manifest value has the wrong type: " )
+                        + exception.what();
+        return false;
+    }
+}
 
 bool loadManifestFromFile( const std::string &manifestPath, PluginManifest &out,
                            PluginDiagnostic &error )
@@ -772,6 +839,15 @@ bool loadManifestFromFile( const std::string &manifestPath, PluginManifest &out,
     {
         error.code = PluginDiagnosticCode::ManifestInvalidJson;
         error.message = "invalid JSON: " + reader.getFormattedErrorMessages();
+        return false;
+    }
+    // Type-checked BEFORE the cast (issue #1038): a wrong-typed version must
+    // be a typed field error, not an exception out of discovery.
+    if ( root.isMember( "manifest_version" ) && !root["manifest_version"].isIntegral() )
+    {
+        error.code = PluginDiagnosticCode::ManifestInvalidField;
+        error.field = "manifest_version";
+        error.message = "manifest_version must be an integer";
         return false;
     }
     if ( root.isMember( "manifest_version" ) && root["manifest_version"].asInt() != 1 )
