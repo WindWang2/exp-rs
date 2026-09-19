@@ -272,7 +272,8 @@ AttachCheck attachExisting( const std::string &finalPath )
   // The staged dataset must still open, and what opens must be what was
   // declared. A renamed/truncated/spoofed staged file fails here, which is
   // the point: attach is a trust boundary for the resume path.
-  CPLErrorStateBackuper errorBackuper( CPLQuietErrorHandler );
+  CPLErrorStateBackuper errorState;
+  CPLErrorHandlerPusher quietErrors( CPLQuietErrorHandler );
   GDALDataset *dataset =
     GDALDataset::Open( record.stagedPath.c_str(), GDAL_OF_READONLY | GDAL_OF_RASTER | GDAL_OF_VECTOR );
   if ( !dataset )
